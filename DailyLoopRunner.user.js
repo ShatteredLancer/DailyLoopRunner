@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.4
+// @version      0.2.7
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -102,6 +102,30 @@
       clubFallbackPiles: ['unassigned', 'storage', 'transfer', 'club'],
       maxCompletions: 7,
     },
+    {
+      id: 'provision-crafting',
+      name: 'Provision Crafting Loop',
+      strategy: 'provisionPackDualCrafting',
+      sourcePackIds: [20643],
+      sourcePackNames: ['Provision Pack', 'Provisions Pack'],
+      rounds: 1,
+      commonUpgrade: {
+        name: 'FOF Glory Hunters Crafting Upgrade',
+        sbcNames: ['FOF Glory Hunters Crafting Upgrade'],
+        requirements: [
+          { tier: 'gold', rarity: 'common', count: 9, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        ],
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      },
+      rareUpgrade: {
+        name: '2x 84+ Upgrade',
+        sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
+        requirements: [
+          { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        ],
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      },
+    },
   ];
 
   const state = {
@@ -119,7 +143,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.4',
+    version: '0.2.7',
     destroy: destroyRunner,
   };
 
@@ -190,7 +214,7 @@
     const roundsLabel = document.querySelector('#bronze-loop-rounds-label');
     const roundsInput = document.querySelector('#bronze-loop-rounds');
     if (!roundsLabel || !roundsInput) return;
-    const showRounds = getEditorLoopStrategy() === 'validationBronzeUpgrade';
+    const showRounds = ['validationBronzeUpgrade', 'provisionPackDualCrafting'].includes(getEditorLoopStrategy());
     roundsLabel.style.display = showRounds ? '' : 'none';
     roundsInput.style.display = showRounds ? '' : 'none';
   }
@@ -394,6 +418,10 @@
     return Number(item?.rating || 0) >= 75;
   }
 
+  function isProtectedHighGold(item) {
+    return isGold(item) && Number(item?.rating || 0) >= 82;
+  }
+
   function isRare(item) {
     try { return !!item?.isRare?.(); } catch { }
     return Number(item?.rareflag || item?.rareFlag || 0) > 0;
@@ -501,6 +529,7 @@
 
   function isSbcUsablePlayer(item) {
     if (!isPlayer(item)) return false;
+    if (isProtectedHighGold(item)) return false;
     if (Number(item?.loans) !== -1) return false;
     try { if (item?.isLimitedUse?.()) return false; } catch { }
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
@@ -840,7 +869,7 @@
     return Number(a?.definitionId || 0) === Number(b?.definitionId || -1);
   }
 
-  function findSubmissionItemForTransferSignal(signal, usedIds, spec = {}) {
+  function findSubmissionItemForDuplicateSignal(signal, usedIds, spec = {}) {
     const duplicateId = Number(signal?.duplicateId || 0);
     const cacheItems = getSubmissionCacheItems().filter((item) =>
       isSbcUsablePlayer(item) &&
@@ -856,13 +885,17 @@
     return sortSbcFodder(cacheItems).find((item) => isSameDefinition(item, signal)) || null;
   }
 
+  function pileNeedsDuplicateSignalResolution(pileName) {
+    return pileName === 'transfer' || pileName === 'unassigned';
+  }
+
   function selectInventoryPlayers(requirements, priorityPiles = ['storage', 'transfer', 'club']) {
     const selected = [];
     const selectedIds = new Set();
     const selectedDefinitionIds = new Set();
     const submissionIds = new Set();
     const stats = {};
-    let transferResolved = 0;
+    const resolvedSignals = {};
 
     for (const requirement of requirements || []) {
       let need = Number(requirement.count || 0);
@@ -878,10 +911,11 @@
           );
         let picked = [];
 
-        if (pileName === 'transfer') {
+        if (pileNeedsDuplicateSignalResolution(pileName)) {
           for (const signal of candidates) {
             if (picked.length >= need) break;
-            const resolved = findSubmissionItemForTransferSignal(signal, submissionIds, requirement);
+            if (!isDuplicate(signal)) continue;
+            const resolved = findSubmissionItemForDuplicateSignal(signal, submissionIds, requirement);
             if (!resolved) continue;
             if (selectedDefinitionIds.has(Number(resolved?.definitionId || 0))) continue;
             picked.push({ signal, item: resolved });
@@ -904,7 +938,9 @@
 
         for (const pickedItem of picked) {
           selected.push(pickedItem.item);
-          if (pileName === 'transfer') transferResolved++;
+          if (pileNeedsDuplicateSignalResolution(pileName)) {
+            resolvedSignals[pileName] = (resolvedSignals[pileName] || 0) + 1;
+          }
           stats[pileName] = (stats[pileName] || 0) + 1;
         }
         need -= picked.length;
@@ -915,12 +951,12 @@
           selected,
           stats,
           missing: { ...requirement, count: need },
-          transferResolved,
+          resolvedSignals,
         };
       }
     }
 
-    return { ok: true, selected, stats, missing: null, transferResolved };
+    return { ok: true, selected, stats, missing: null, resolvedSignals };
   }
 
   function selectedItemsFromPile(selection, pileName) {
@@ -931,8 +967,9 @@
   async function prepareInventorySelection(loopDef, selection) {
     const transferItems = selectedItemsFromPile(selection, 'transfer');
     if (!transferItems.length) {
-      if (selection?.transferResolved) {
-        log(`${loopDef.name}: resolved ${selection.transferResolved} transfer item(s) during inventory selection`);
+      const resolvedSignals = selection?.resolvedSignals || {};
+      for (const [pileName, count] of Object.entries(resolvedSignals)) {
+        if (count) log(`${loopDef.name}: resolved ${count} ${pileName} duplicate signal(s) during inventory selection`);
       }
       return selection;
     }
@@ -949,7 +986,7 @@
       const itemId = Number(item?.id || 0);
       if (!transferIds.has(itemId)) return item;
 
-      const resolved = findSubmissionItemForTransferSignal(item, usedIds);
+      const resolved = findSubmissionItemForDuplicateSignal(item, usedIds);
       if (!resolved) {
         const name = item?.name || item?.lastName || item?.definitionId || itemId || 'unknown';
         fail(`${loopDef.name}: transfer item ${name} cannot be resolved to a club/storage duplicate for SBC submit`);
@@ -961,7 +998,7 @@
     });
 
     log(`${loopDef.name}: resolved ${resolvedCount} transfer item(s) through duplicateId to club/storage submit item(s)`);
-    return { ...selection, selected, transferResolved: resolvedCount };
+    return { ...selection, selected, resolvedSignals: { ...(selection.resolvedSignals || {}), transfer: resolvedCount } };
   }
 
   function buildSquadPlayerList(challenge, players) {
@@ -1330,11 +1367,23 @@
   }
 
   function isCommonGoldPlayer(item) {
-    return itemMatchesSpec(item, { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false });
+    return !isProtectedHighGold(item) && itemMatchesSpec(item, { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false });
   }
 
   function isCommonGoldDuplicate(item) {
     return isDuplicate(item) && isCommonGoldPlayer(item);
+  }
+
+  function isRareGoldPlayer(item) {
+    return !isProtectedHighGold(item) && itemMatchesSpec(item, { tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false });
+  }
+
+  function isRareGoldDuplicate(item) {
+    return isDuplicate(item) && isRareGoldPlayer(item);
+  }
+
+  function isProvisionCraftingDuplicate(item) {
+    return isCommonGoldDuplicate(item) || isRareGoldDuplicate(item);
   }
 
   async function handleRareSourcePackItems(items, loopDef) {
@@ -1458,6 +1507,114 @@
     log(`${loopDef.name}: submitted ${completions} SBC(s) in this run`);
   }
 
+  function getUpgradeRequirementCount(upgradeDef) {
+    return Number(upgradeDef?.requirements?.[0]?.count || 0);
+  }
+
+  function countUnassignedMatching(predicate) {
+    return getUnassignedItems().filter(predicate).length;
+  }
+
+  async function handleProvisionPackItems(items, loopDef) {
+    const reservedIds = new Set((items || [])
+      .filter(isProvisionCraftingDuplicate)
+      .map((item) => Number(item?.id || 0)));
+    const directClub = (items || []).filter((item) =>
+      !reservedIds.has(Number(item?.id || 0)) &&
+      !isDuplicate(item)
+    );
+
+    if (directClub.length) {
+      log(`${loopDef.name}: moving ${directClub.length} non-duplicate provision item(s) to club`);
+      await moveItems(directClub, W.ItemPile.CLUB, true);
+    }
+
+    await clearUnassigned(`${loopDef.name} provision pack handling`, {
+      reserveItem: isProvisionCraftingDuplicate,
+    });
+
+    await refreshUnassigned();
+    const common = countUnassignedMatching(isCommonGoldDuplicate);
+    const rare = countUnassignedMatching(isRareGoldDuplicate);
+    log(`${loopDef.name}: reserved common duplicates:${common}, rare duplicates:${rare}`);
+    return { common, rare };
+  }
+
+  async function submitReservedDuplicateUpgrade(loopDef, upgradeDef, duplicatePredicate, label) {
+    let completions = 0;
+    const countNeeded = getUpgradeRequirementCount(upgradeDef);
+
+    while (countNeeded > 0) {
+      stopPoint();
+      await refreshUnassigned();
+      const duplicateCount = countUnassignedMatching(duplicatePredicate);
+      if (!duplicateCount) break;
+
+      const piles = duplicateCount >= countNeeded
+        ? ['unassigned']
+        : ['unassigned', 'storage', 'transfer', 'club'];
+      const selection = selectLoopInventoryPlayers(upgradeDef, piles);
+      log(`${loopDef.name}: ${label} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
+
+      if (!selection.ok) {
+        const missing = selection.missing;
+        log(`${loopDef.name}: ${label} missing ${missing.count} player(s) after fallback; stopping ${label}`);
+        break;
+      }
+
+      const result = await submitInventorySelection(upgradeDef, selection);
+      if (!result) break;
+      completions++;
+      await sleep(CFG.pauseMs);
+    }
+
+    log(`${loopDef.name}: ${label} submitted ${completions} SBC(s)`);
+    return completions;
+  }
+
+  async function runProvisionPackDualCrafting(loopDef) {
+    await waitAppReady();
+    const rounds = Math.max(1, Math.min(50, Number(loopDef.rounds || loopDef.maxRounds || 1) || 1));
+    let packsOpened = 0;
+    let commonCompletions = 0;
+    let rareCompletions = 0;
+
+    for (let round = 1; round <= rounds; round++) {
+      stopPoint();
+      await clearUnassigned(`${loopDef.name} round ${round} pre-open cleanup`);
+
+      const pack = await findSourcePack(loopDef);
+      if (!pack) {
+        log(`${loopDef.name}: Provision Pack not found; stopping at round ${round}/${rounds}`);
+        break;
+      }
+
+      log(`${loopDef.name}: round ${round}/${rounds} opening ${packName(pack)} (#${pack.id})`);
+      const items = await openPack(pack, `${loopDef.name} round ${round}`);
+      packsOpened++;
+      await handleProvisionPackItems(items, loopDef);
+
+      commonCompletions += await submitReservedDuplicateUpgrade(
+        loopDef,
+        loopDef.commonUpgrade,
+        isCommonGoldDuplicate,
+        'FOF common gold',
+      );
+      rareCompletions += await submitReservedDuplicateUpgrade(
+        loopDef,
+        loopDef.rareUpgrade,
+        isRareGoldDuplicate,
+        '84+ rare gold',
+      );
+
+      await clearUnassigned(`${loopDef.name} round ${round} cleanup`);
+      await sleep(CFG.pauseMs);
+    }
+
+    await clearUnassigned(`${loopDef.name} final cleanup`);
+    log(`${loopDef.name}: opened ${packsOpened} Provision Pack(s), submitted common:${commonCompletions}, rare:${rareCompletions}`);
+  }
+
   async function runRound(roundNo) {
     log(`Round ${roundNo} start`);
     await waitAppReady();
@@ -1501,6 +1658,12 @@
       return;
     }
 
+    if (loopDef.strategy === 'provisionPackDualCrafting') {
+      await runProvisionPackDualCrafting(loopDef);
+      await showUnassignedIfAny(`${loopDef.name} end`);
+      return;
+    }
+
     fail(`Unsupported loop strategy: ${loopDef.strategy}`);
   }
 
@@ -1512,7 +1675,8 @@
     try {
       const loopDef = getSelectedLoopDef();
       const input = document.querySelector('#bronze-loop-rounds');
-      const rounds = Math.max(1, Math.min(20, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
+      const rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
+      if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
       if (loopDef.strategy !== 'validationBronzeUpgrade') {
         stopPoint();
         await runConfiguredLoop(loopDef, 1);
@@ -1695,7 +1859,7 @@
         </div>
         <div class="row" id="bronze-loop-rounds-row">
           <span id="bronze-loop-rounds-label">rounds</span>
-          <input id="bronze-loop-rounds" type="number" min="1" max="20" value="${CFG.maxRounds}">
+          <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${CFG.maxRounds}">
           <button id="bronze-loop-start">Start</button>
           <button id="bronze-loop-stop" disabled>Stop</button>
         </div>

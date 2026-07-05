@@ -68,8 +68,18 @@ Chrome 中需要启用：
 - `Daily Rare Loop`
   - 做 `Daily Rare Gold Upgrade`。
   - 需要 5 张普通金卡。
-  - 优先使用 `unassigned -> SBC storage -> transfer list -> club`。
-  - 会开 `Gold Players Pack`，保留普通金重复作为 SBC 材料，稀有金重复和其他重复按清理规则处理。
+  - 优先使用 `unassigned -> SBC storage -> transfer list`。
+  - 这三处不足时先开 `11x Gold Players Pack`。
+  - `11x Gold Players Pack` 也没有时，最后才使用 club。
+  - 开包后保留普通金重复作为 SBC 材料，稀有金重复和其他重复按清理规则处理。
+
+- `Provision Crafting Loop`
+  - 每个 round 开 1 个 `Provision Pack` / `Provisions Pack`。
+  - 非重复物品放入 club。
+  - 普通金重复用于 `FOF Glory Hunters Crafting Upgrade`，每次 9 张。
+  - 稀有金重复用于 `2x 84+ Upgrade`，每次 6 张。
+  - 每类卡最后不足一组时，从 `SBC storage -> transfer list -> club` 补齐。
+  - 面板中的 `rounds` 控制开多少个 Provision Pack。
 
 ## 4. Unassigned 清理规则
 
@@ -86,6 +96,7 @@ Chrome 中需要启用：
 
 - Daily Bronze/Silver 会保留目标重复卡用于对应 SBC。
 - Daily Rare 会保留普通金重复卡用于 `Daily Rare Gold Upgrade`。
+- 82+ 金卡不会被自动用于任何 SBC。重复 82+ 金卡会按通用清理规则进入 transfer list 或 SBC storage。
 
 ## 5. 热加载使用
 
@@ -229,6 +240,10 @@ const LOOP_DEFS = [
 - `dailySingleCardRecycle`
   - 开奖励包，保留目标重复卡，循环做单卡 SBC。
   - 适合 Daily Bronze / Daily Silver。
+
+- `provisionPackDualCrafting`
+  - 每轮开一个源包，同时处理两类重复卡到两个不同 SBC。
+  - 适合 Provision Pack 这类“普金/稀有金分流消耗”的活动包。
 
 不建议只靠 JSON 解决的场景：
 
@@ -414,4 +429,3 @@ Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunne
 - transfer list 的旧缓存可能导致候选失效，当前已在选择阶段尽量跳过，但仍可能需要刷新页面或重新进入相关页面刷新缓存。
 - SBC 的服务端校验比 UI 更严格，UI 显示可提交不代表 `saveChallenge` 一定成功。
 - 中文名称在脚本中可能出现编码显示异常，所以匹配时建议同时保留英文名称和包 ID。
-
