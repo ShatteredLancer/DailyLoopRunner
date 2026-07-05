@@ -1,0 +1,417 @@
+# FC26 Daily Loop Runner 使用与开发说明
+
+本文档对应脚本版本：
+
+- `DailyLoopRunner.user.js`: `0.2.3`
+- `DailyLoopRunnerHotReload.user.js`: `0.1.0`
+
+## 1. 文件说明
+
+主要文件都在：
+
+```powershell
+C:\Users\Administrator\Desktop\FC Plugins
+```
+
+核心文件：
+
+- `DailyLoopRunner.user.js`: 主脚本，包含界面、默认 loop、SBC/开包/清理逻辑。
+- `BronzeUpgradeLoop.user.js`: 旧文件名兼容副本，目前内容应与 `DailyLoopRunner.user.js` 保持一致。
+- `DailyLoopRunnerHotReload.user.js`: 热加载辅助脚本，给页面加 `Reload Loop` 按钮。
+- `StartLoopRunnerDevServer.ps1`: 本地静态文件服务，用于不刷新页面热加载主脚本。
+- `FSU\【FSU】EAFC FUT WEB 增强器-26.09.user.js`: 参考插件，尤其是 SBC 填充、storage、transfer duplicate 处理逻辑。
+
+## 2. 使用前提
+
+Chrome 中需要启用：
+
+- Tampermonkey
+- FSU
+- FC26 Enhancer
+- `DailyLoopRunner.user.js`
+
+如果要使用热加载，还需要启用：
+
+- `DailyLoopRunnerHotReload.user.js`
+
+进入 EA FC Web App 后，等待 FSU 加载完成，再使用右侧或悬浮的 Loop Runner 面板。
+
+## 3. 日常使用流程
+
+1. 打开 Web App 并手动登录。
+2. 等待页面和 FSU 完全加载。
+3. 在 Loop Runner 面板选择 loop。
+4. 点击 `Start`。
+5. 出错时优先点击 `Save Log` 或复制日志内容，查看最后几行。
+
+当前默认 loop：
+
+- `Bronze Upgrade Validation`
+  - POC 验证用。
+  - 开高级青铜球员包，消耗青铜重复做 `Bronze Upgrade`，再开银卡奖励包。
+
+- `Daily Bronze Loop`
+  - 做 `Daily Bronze Upgrade`。
+  - 每次消耗青铜重复或库存青铜。
+  - 最后一包奖励会保留不打开。
+
+- `Daily Silver Loop`
+  - 做 `Daily Silver Upgrade`。
+  - 逻辑同 Daily Bronze，只是目标换成银卡。
+
+- `Daily Common Loop`
+  - 做 `Daily Common Gold Upgrade`。
+  - 需要 5 银 + 5 铜。
+  - 优先使用 `SBC storage -> transfer list -> club`。
+  - transfer list 里的卡不会移动回 club，而是用 `duplicateId` 找 club/storage 中可提交实体。
+
+- `Daily Rare Loop`
+  - 做 `Daily Rare Gold Upgrade`。
+  - 需要 5 张普通金卡。
+  - 优先使用 `unassigned -> SBC storage -> transfer list -> club`。
+  - 会开 `Gold Players Pack`，保留普通金重复作为 SBC 材料，稀有金重复和其他重复按清理规则处理。
+
+## 4. Unassigned 清理规则
+
+通用清理策略：
+
+1. 非重复物品放入 club。
+2. 可交易重复物品放入 transfer list。
+3. 不可交易重复物品：
+   - 如果 club 中同卡是可交易版本，则先 swap，再把可交易版本放入 transfer list。
+   - 否则放入 SBC storage。
+4. transfer list 或 SBC storage 空间不足时停止。
+
+特殊保留规则：
+
+- Daily Bronze/Silver 会保留目标重复卡用于对应 SBC。
+- Daily Rare 会保留普通金重复卡用于 `Daily Rare Gold Upgrade`。
+
+## 5. 热加载使用
+
+热加载用于修改 `DailyLoopRunner.user.js` 后，不刷新 Web App 页面直接重载脚本。
+
+启动本地服务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Users\Administrator\Desktop\FC Plugins\StartLoopRunnerDevServer.ps1"
+```
+
+保持这个 PowerShell 窗口打开。
+
+然后在 Web App 页面点击 `Reload Loop`。
+
+注意：
+
+- 如果本地服务没启动，主脚本仍然能用，但修改后需要刷新页面才能生效。
+- 刷新页面可能导致重新登录和 FSU 重新 loading，所以开发时建议使用热加载。
+- 热加载只加载 `DailyLoopRunner.user.js`，因此开发时优先改这个文件，再同步到 `BronzeUpgradeLoop.user.js`。
+
+## 6. 修改默认 loop
+
+默认 loop 定义在 `DailyLoopRunner.user.js` 顶部：
+
+```javascript
+const LOOP_DEFS = [
+  ...
+];
+```
+
+每个 loop 常用字段：
+
+```javascript
+{
+  id: 'daily-common',
+  name: 'Daily Common Loop',
+  strategy: 'inventoryMixedUpgrade',
+  sbcNames: ['Daily Common Gold Upgrade'],
+  sourcePackIds: [304],
+  sourcePackNames: ['Gold Players Pack'],
+  rewardPackIds: [304],
+  rewardPackNames: ['Gold Players Pack'],
+  requirements: [
+    {
+      tier: 'silver',
+      rarity: 'common',
+      count: 5,
+      playerOnly: true,
+      allowSpecial: false,
+      priorityPiles: ['storage', 'transfer', 'club']
+    }
+  ],
+  priorityPiles: ['storage', 'transfer', 'club'],
+  maxCompletions: 7
+}
+```
+
+字段含义：
+
+- `id`: 唯一 ID。
+- `name`: 面板显示名称。
+- `strategy`: 执行策略，对应代码里的 runner。
+- `sbcNames`: SBC 名称匹配列表，中英文都可以加。
+- `sourcePackIds`: 源包 ID。
+- `sourcePackNames`: 源包名称匹配列表。
+- `rewardPackIds`: 奖励包 ID。
+- `rewardPackNames`: 奖励包名称匹配列表。
+- `requirements`: SBC 材料要求。
+- `priorityPiles`: 默认取卡优先级。
+- `maxCompletions`: 最多完成次数。
+
+## 7. requirements 写法
+
+材料规则示例：
+
+```javascript
+{ tier: 'bronze', count: 1, playerOnly: true, allowSpecial: false }
+```
+
+```javascript
+{ tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false }
+```
+
+支持字段：
+
+- `tier`: `bronze` / `silver` / `gold`
+- `rarity`: `common` / `rare`
+- `count`: 需要数量
+- `playerOnly`: 是否只允许球员
+- `allowSpecial`: 是否允许特殊卡
+- `special`: `true` 表示只要特殊卡，`false` 表示排除特殊卡
+- `priorityPiles`: 当前 requirement 单独的取卡优先级
+
+可用 pile：
+
+- `unassigned`
+- `storage`
+- `transfer`
+- `club`
+
+注意：
+
+- 普通铜/银/金可以安全从 transfer list 选择。
+- transfer list 物品不会被直接提交；脚本会用它的 `duplicateId` 找 club/storage 中可提交的实体。
+- 特殊卡默认不使用，除非 JSON 中显式允许。
+
+## 8. 自定义 loop
+
+面板里可以编辑自定义 JSON。推荐先复制现有 loop，改名称、SBC、包名和 requirements。
+
+示例：只用 storage 和 club 做一个普通金升级：
+
+```json
+{
+  "id": "my-common-gold",
+  "name": "My Common Gold Loop",
+  "strategy": "inventoryMixedUpgrade",
+  "sbcNames": ["Daily Rare Gold Upgrade"],
+  "requirements": [
+    {
+      "tier": "gold",
+      "rarity": "common",
+      "count": 5,
+      "playerOnly": true,
+      "allowSpecial": false,
+      "priorityPiles": ["storage", "club"]
+    }
+  ],
+  "priorityPiles": ["storage", "club"],
+  "maxCompletions": 7
+}
+```
+
+适合直接自定义的策略：
+
+- `inventoryMixedUpgrade`
+  - 固定从库存来源选材料，然后提交 SBC。
+  - 适合“消耗 N 张某类卡做 SBC”。
+
+- `dailySingleCardRecycle`
+  - 开奖励包，保留目标重复卡，循环做单卡 SBC。
+  - 适合 Daily Bronze / Daily Silver。
+
+不建议只靠 JSON 解决的场景：
+
+- 需要根据开包结果动态决定下一步。
+- 需要同时管理多个源包和多个材料池。
+- 需要根据 SBC 剩余次数、unassigned 状态、transfer/storage 容量做复杂分支。
+
+这种情况应新增 strategy。
+
+## 9. 添加新 strategy
+
+新增 strategy 的步骤：
+
+1. 在 `LOOP_DEFS` 增加配置。
+2. 写一个 runner 函数，例如：
+
+```javascript
+async function runMyNewLoop(loopDef) {
+  await waitAppReady();
+  ...
+}
+```
+
+3. 在 `runConfiguredLoop` 中接入：
+
+```javascript
+if (loopDef.strategy === 'myNewStrategy') {
+  await runMyNewLoop(loopDef);
+  await showUnassignedIfAny(`${loopDef.name} end`);
+  return;
+}
+```
+
+4. 运行语法检查：
+
+```powershell
+node --check "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js"
+```
+
+5. 同步旧文件名副本：
+
+```powershell
+Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js" -Destination "C:\Users\Administrator\Desktop\FC Plugins\BronzeUpgradeLoop.user.js" -Force
+```
+
+6. 热加载或刷新页面测试。
+
+## 10. 关键函数索引
+
+脚本里的重要函数：
+
+- `waitAppReady()`
+  - 等待 FUT services/repositories 可用。
+
+- `refreshStorePacks()`
+  - 刷新可用包列表。
+
+- `refreshUnassigned()`
+  - 刷新 unassigned items。
+
+- `clearUnassigned(reason, options)`
+  - 清理 unassigned。
+  - `options.reserveItem` 可保留某些卡不清理。
+
+- `openPack(pack, purpose)`
+  - 开包并返回 items。
+
+- `findSbcSet(names, label)`
+  - 按名称找 SBC set。
+
+- `openSbcSet(set, options)`
+  - 打开 SBC 挑战页面。
+
+- `selectInventoryPlayers(requirements, priorityPiles)`
+  - 按规则从 pile 选材料。
+  - 已处理 transfer duplicateId 解析。
+
+- `prepareInventorySelection(loopDef, selection)`
+  - 提交前二次准备。
+
+- `saveChallengeSquad(challenge, players, label)`
+  - 保存 SBC 阵容。
+
+- `submitSbcAndGetAwardPackId(set)`
+  - 点击提交并尝试识别奖励包。
+
+- `runDailySingleCardRecycle(loopDef)`
+  - Daily Bronze/Silver 的策略。
+
+- `runInventoryMixedUpgrade(loopDef)`
+  - Daily Common 的策略。
+
+- `runCommonGoldToRareUpgrade(loopDef)`
+  - Daily Rare 的策略。
+
+## 11. 调试方法
+
+常规调试：
+
+1. 面板点击 `Clear Log` 清空旧日志。
+2. 跑一次 loop。
+3. 出错后点击 `Save Log`。
+4. 查看：
+
+```powershell
+C:\Users\Administrator\Desktop\log.txt
+```
+
+常见错误：
+
+- `Source pack not found`
+  - 当前没有目标源包。
+  - 检查 `sourcePackIds/sourcePackNames`。
+
+- `SBC not found`
+  - SBC 名称匹配失败。
+  - 在日志中的 loaded SBC 列表里找真实名称，补进 `sbcNames`。
+
+- `saveChallenge failed: 475`
+  - 通常是材料实体不可提交，或阵容不满足服务端要求。
+  - 优先检查 transfer duplicateId 解析、unassigned 重复卡、同 definitionId 重复选择。
+
+- `selected inventory players did not satisfy SBC requirements`
+  - UI 提交按钮不可用。
+  - 可能是材料数量、稀有度、特殊卡、同卡重复、阵型槽位映射问题。
+
+- `Transfer list has only ... slot(s)`
+  - transfer list 满或空间不足。
+
+- `SBC storage has only ... slot(s)`
+  - SBC storage 满或空间不足。
+
+## 12. 开发约定
+
+建议保持以下约定：
+
+- 先改 `DailyLoopRunner.user.js`。
+- 每次修改后跑：
+
+```powershell
+node --check "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js"
+```
+
+- 通过后同步：
+
+```powershell
+Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js" -Destination "C:\Users\Administrator\Desktop\FC Plugins\BronzeUpgradeLoop.user.js" -Force
+```
+
+- 使用热加载测试。
+- 日志要写清楚当前动作、选中数量、来源 pile、失败原因。
+- 新增复杂策略时，不要把所有逻辑塞进 JSON；JSON 负责规则，strategy 负责流程。
+
+## 13. 后续开发建议
+
+优先级较高：
+
+1. 把 `Daily Rare Loop` 跑稳定。
+2. 增加 item cache 刷新能力，减少 stale transfer/storage 缓存。
+3. 把 loop 定义从脚本内常量拆成外部 JSON。
+4. 给自定义 JSON 增加校验和错误提示。
+5. 增加 dry-run 模式：只列出会选哪些卡，不提交。
+6. 给每个 loop 增加更细的开关，例如是否允许使用 club、是否允许使用 transfer。
+
+中期可以做：
+
+1. 做一个规则编辑器，避免直接写 JSON。
+2. 保存多套用户自定义 loop。
+3. 增加“每步确认”模式。
+4. 增加容量预检查：transfer/storage 空间不足时提前停止。
+5. 增加更完整的 pack ID/name 映射表。
+
+不建议短期做：
+
+- 自动登录。
+- 高频交易市场扫卡。
+- 绕过 EA 的每日次数和购买限制。
+
+## 14. 当前已知限制
+
+- 脚本依赖 Web App 内部对象，EA 更新后可能失效。
+- FSU 加载慢或未加载完成时，部分按钮/状态可能不可用。
+- transfer list 的旧缓存可能导致候选失效，当前已在选择阶段尽量跳过，但仍可能需要刷新页面或重新进入相关页面刷新缓存。
+- SBC 的服务端校验比 UI 更严格，UI 显示可提交不代表 `saveChallenge` 一定成功。
+- 中文名称在脚本中可能出现编码显示异常，所以匹配时建议同时保留英文名称和包 ID。
+
