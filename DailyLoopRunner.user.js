@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.17
+// @version      0.2.18
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -162,6 +162,13 @@
       openRewardPacks: true,
     },
     {
+      id: 'one-click-daily',
+      name: 'One-click Daily Loop (max 7 each)',
+      strategy: 'dailyRoutine',
+      steps: ['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare'],
+      openRewardPacks: true,
+    },
+    {
       id: '84x100-mvp',
       name: '84x100 MVP (1 run)',
       strategy: 'fillAndVerifySbc',
@@ -230,7 +237,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.17',
+    version: '0.2.18',
     destroy: destroyRunner,
   };
 
@@ -2301,10 +2308,29 @@
     });
   }
 
+  function summarizeRoutineStepLimits(steps) {
+    const limits = steps.map((step) => {
+      const rawLimit = getLiveRunLimit(step, 1);
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.floor(rawLimit)) : 1;
+      return {
+        name: step.name || step.id || step.strategy || 'step',
+        limit,
+      };
+    });
+    return {
+      limits,
+      max: limits.reduce((maxLimit, step) => Math.max(maxLimit, step.limit), 1),
+      total: limits.reduce((sum, step) => sum + step.limit, 0),
+      text: limits.map((step) => `${step.name} max ${step.limit}`).join('; '),
+    };
+  }
+
   async function runDailyRoutine(loopDef) {
     await waitAppReady();
     const steps = getRoutineStepLoopDefs(loopDef);
+    const limitSummary = summarizeRoutineStepLimits(steps);
     log(`${loopDef.name}: running ${steps.length} step(s): ${steps.map((step) => step.name).join(' -> ')}`);
+    log(`${loopDef.name}: step limits: ${limitSummary.text}`);
 
     for (let index = 0; index < steps.length; index++) {
       stopPoint();
@@ -2746,12 +2772,17 @@
     if (loopDef.strategy === 'validationBronzeUpgrade') return Number(rounds || loopDef.maxRounds || 1);
     if (loopDef.strategy === 'fillAndVerifySbc') return Number(loopDef.maxCompletions || 1);
     if (loopDef.strategy === 'dailyRoutine') {
-      return getRoutineStepLoopDefs(loopDef).reduce((maxLimit, step) => {
-        const stepLimit = getLiveRunLimit(step, 1);
-        return Math.max(maxLimit, Number.isFinite(stepLimit) ? stepLimit : 1);
-      }, 1);
+      return summarizeRoutineStepLimits(getRoutineStepLoopDefs(loopDef)).max;
     }
     return Number(loopDef.maxCompletions || loopDef.rounds || loopDef.maxRounds || 1);
+  }
+
+  function getLiveRunScopeMessage(loopDef, rounds, limit) {
+    if (loopDef.strategy === 'dailyRoutine') {
+      const summary = summarizeRoutineStepLimits(getRoutineStepLoopDefs(loopDef));
+      return `may submit up to ${summary.total} SBC(s) total (${summary.text})`;
+    }
+    return `may submit up to ${limit} SBC(s)`;
   }
 
   function confirmLiveRunIfNeeded(loopDef, rounds) {
@@ -2766,16 +2797,17 @@
       return true;
     }
 
-    const key = `${loopDef.id || loopDef.name}:${loopDef.strategy}:${limit}`;
+    const scopeMessage = getLiveRunScopeMessage(loopDef, rounds, limit);
+    const key = `${loopDef.id || loopDef.name}:${loopDef.strategy}:${scopeMessage}`;
     const nowMs = Date.now();
     if (state.pendingLiveConfirm?.key === key && state.pendingLiveConfirm.expiresAt > nowMs) {
       state.pendingLiveConfirm = null;
-      log(`Live guard confirmed: ${loopDef.name} may submit up to ${limit} SBC(s)`);
+      log(`Live guard confirmed: ${loopDef.name} ${scopeMessage}`);
       return true;
     }
 
     state.pendingLiveConfirm = { key, expiresAt: nowMs + 15000 };
-    log(`Live guard: ${loopDef.name} may submit up to ${limit} SBC(s). Click Start again within 15s to confirm, or choose an MVP (1 run) loop.`);
+    log(`Live guard: ${loopDef.name} ${scopeMessage}. Click Start again within 15s to confirm, or choose an MVP (1 run) loop.`);
     return false;
   }
 
