@@ -204,6 +204,7 @@
           "count": 5,
           "playerOnly": true,
           "allowSpecial": false,
+          "protectHighGold": true,
           "priorityPiles": ["unassigned", "storage", "transfer"]
         }
       ],
@@ -235,6 +236,7 @@
           "count": 5,
           "playerOnly": true,
           "allowSpecial": false,
+          "protectHighGold": true,
           "priorityPiles": ["unassigned", "storage", "transfer"]
         }
       ],
@@ -267,8 +269,8 @@
       "openRewardPacks": true
     },
     {
-      "id": "84x100-mvp",
-      "name": "84x100 MVP (1 run)",
+      "id": "84x10-mvp",
+      "name": "84x10 MVP (1 run)",
       "strategy": "fillAndVerifySbc",
       "sbcNames": [
         "84x100",

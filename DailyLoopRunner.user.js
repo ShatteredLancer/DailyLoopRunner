@@ -134,7 +134,7 @@
       sourcePackNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
       rewardPackNames: ['Max. 78 Rare Gold Players Pack', 'Max 78 Rare Gold Players Pack'],
       requirements: [
-        { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer'] },
+        { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer'] },
       ],
       priorityPiles: ['unassigned', 'storage', 'transfer'],
       clubFallbackPiles: ['unassigned', 'storage', 'transfer', 'club'],
@@ -148,7 +148,7 @@
       sourcePackNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
       rewardPackNames: ['Max. 78 Rare Gold Players Pack', 'Max 78 Rare Gold Players Pack'],
       requirements: [
-        { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer'] },
+        { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer'] },
       ],
       priorityPiles: ['unassigned', 'storage', 'transfer'],
       clubFallbackPiles: ['unassigned', 'storage', 'transfer', 'club'],
@@ -169,8 +169,8 @@
       openRewardPacks: true,
     },
     {
-      id: '84x100-mvp',
-      name: '84x100 MVP (1 run)',
+      id: '84x10-mvp',
+      name: '84x10 MVP (1 run)',
       strategy: 'fillAndVerifySbc',
       sbcNames: [
         '84x100',
@@ -352,7 +352,7 @@
     if (spec.rarity !== undefined && !['common', 'rare'].includes(spec.rarity)) {
       errors.push(`${path}.rarity must be common or rare`);
     }
-    ['playerOnly', 'allowSpecial', 'special'].forEach((field) => {
+    ['playerOnly', 'allowSpecial', 'special', 'protectHighGold'].forEach((field) => {
       if (spec[field] !== undefined && typeof spec[field] !== 'boolean') {
         errors.push(`${path}.${field} must be boolean`);
       }
@@ -1087,9 +1087,9 @@
     }
   }
 
-  function isSbcUsablePlayer(item) {
+  function isSbcUsablePlayer(item, options = {}) {
     if (!isPlayer(item)) return false;
-    if (isProtectedHighGold(item)) return false;
+    if (options.protectHighGold && isProtectedHighGold(item)) return false;
     if (Number(item?.loans) !== -1) return false;
     try { if (item?.isLimitedUse?.()) return false; } catch { }
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
@@ -1565,10 +1565,10 @@
     ].filter(Boolean).join(' ');
   }
 
-  function getUsabilityRejectReasons(item) {
+  function getUsabilityRejectReasons(item, options = {}) {
     const reasons = [];
     if (!isPlayer(item)) reasons.push('not-player');
-    if (isProtectedHighGold(item)) reasons.push('protected-82-plus');
+    if (options.protectHighGold && isProtectedHighGold(item)) reasons.push('protected-82-plus');
     if (Number(item?.loans) !== -1) reasons.push('loan-or-limited');
     try { if (item?.isLimitedUse?.()) reasons.push('limited-use'); } catch { }
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
@@ -1605,7 +1605,7 @@
     const matchingDefinitions = new Set();
 
     for (const item of items) {
-      const usabilityRejects = getUsabilityRejectReasons(item);
+      const usabilityRejects = getUsabilityRejectReasons(item, requirement);
       const specRejects = getSpecRejectReasons(item, requirement);
       const rejects = [...new Set(usabilityRejects.concat(specRejects))];
       if (rejects.length) {
@@ -1667,7 +1667,7 @@
   function findSubmissionItemForDuplicateSignal(signal, usedIds, spec = {}) {
     const duplicateId = Number(signal?.duplicateId || 0);
     const cacheItems = getSubmissionCacheItems().filter((item) =>
-      isSbcUsablePlayer(item) &&
+      isSbcUsablePlayer(item, spec) &&
       itemMatchesSpec(item, spec) &&
       !usedIds.has(Number(item?.id || 0))
     );
@@ -1702,7 +1702,7 @@
           .filter((item) =>
             !selectedIds.has(Number(item?.id || 0)) &&
             !selectedDefinitionIds.has(Number(item?.definitionId || 0)) &&
-            isSbcUsablePlayer(item) &&
+            isSbcUsablePlayer(item, requirement) &&
             itemMatchesSpec(item, requirement)
           );
         let picked = [];
@@ -2660,20 +2660,22 @@
     log(`${loopDef.name}: submitted ${completions} SBC(s) in this run`);
   }
 
-  function isCommonGoldPlayer(item) {
-    return !isProtectedHighGold(item) && itemMatchesSpec(item, { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false });
+  function isCommonGoldPlayer(item, options = {}) {
+    return !(options.protectHighGold && isProtectedHighGold(item)) &&
+      itemMatchesSpec(item, { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false });
   }
 
-  function isCommonGoldDuplicate(item) {
-    return isDuplicate(item) && isCommonGoldPlayer(item);
+  function isCommonGoldDuplicate(item, options = {}) {
+    return isDuplicate(item) && isCommonGoldPlayer(item, options);
   }
 
-  function isRareGoldPlayer(item) {
-    return !isProtectedHighGold(item) && itemMatchesSpec(item, { tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false });
+  function isRareGoldPlayer(item, options = {}) {
+    return !(options.protectHighGold && isProtectedHighGold(item)) &&
+      itemMatchesSpec(item, { tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false });
   }
 
-  function isRareGoldDuplicate(item) {
-    return isDuplicate(item) && isRareGoldPlayer(item);
+  function isRareGoldDuplicate(item, options = {}) {
+    return isDuplicate(item) && isRareGoldPlayer(item, options);
   }
 
   function isProvisionCraftingDuplicate(item) {
@@ -2681,7 +2683,8 @@
   }
 
   async function handleRareSourcePackItems(items, loopDef) {
-    const reservedIds = new Set((items || []).filter(isCommonGoldDuplicate).map((item) => Number(item?.id || 0)));
+    const reserveCommonGold = (item) => isCommonGoldDuplicate(item, { protectHighGold: true });
+    const reservedIds = new Set((items || []).filter(reserveCommonGold).map((item) => Number(item?.id || 0)));
     const directClub = (items || []).filter((item) =>
       !reservedIds.has(Number(item?.id || 0)) &&
       !isDuplicate(item)
@@ -2693,11 +2696,11 @@
     }
 
     await clearUnassigned(`${loopDef.name} source pack handling`, {
-      reserveItem: isCommonGoldDuplicate,
+      reserveItem: reserveCommonGold,
     });
 
     await refreshUnassigned();
-    const reserved = getUnassignedItems().filter(isCommonGoldDuplicate);
+    const reserved = getUnassignedItems().filter(reserveCommonGold);
     log(`${loopDef.name}: reserved ${reserved.length} common gold duplicate(s) for SBC`);
     return reserved;
   }
