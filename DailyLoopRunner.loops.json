@@ -255,6 +255,18 @@
       "openRewardPacks": true
     },
     {
+      "id": "one-click-daily",
+      "name": "One-click Daily Loop (max 7 each)",
+      "strategy": "dailyRoutine",
+      "steps": [
+        "daily-bronze",
+        "daily-silver",
+        "daily-common",
+        "daily-rare"
+      ],
+      "openRewardPacks": true
+    },
+    {
       "id": "84x100-mvp",
       "name": "84x100 MVP (1 run)",
       "strategy": "fillAndVerifySbc",
