@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.32
+// @version      0.2.33
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -271,7 +271,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.32',
+    version: '0.2.33',
     destroy: destroyRunner,
   };
 
@@ -1441,6 +1441,23 @@
     return simulateClick(btn);
   }
 
+  function closeFsuStuckOverlay(label = 'FSU stuck overlay') {
+    const patterns = [
+      'If you encounter stuck',
+      'click here to close',
+      'encounter stuck',
+    ];
+    const candidates = Array.from(document.querySelectorAll('div, span, p, section'))
+      .filter((el) => isClickableElement(el) && matchesAny(compactText(el), patterns))
+      .sort((a, b) => compactText(a).length - compactText(b).length);
+    const target = candidates[0];
+    if (!target) return false;
+    const clickTarget = target.closest?.('button,[role="button"],a') || target;
+    log(`Closing ${label}`);
+    simulateClick(clickTarget);
+    return true;
+  }
+
   function compactText(el) {
     return String(el?.textContent || '').replace(/\s+/g, ' ').trim();
   }
@@ -1935,9 +1952,10 @@
     return items;
   }
 
-  async function waitAfterSbcFillAction(label, squad, timeoutMs = 45000) {
+  async function waitAfterSbcFillAction(label, squad, timeoutMs = 10000) {
     const start = Date.now();
     const initialFilled = getFilledSquadSlots(squad);
+    let closedStuckOverlay = false;
     while (Date.now() - start < timeoutMs) {
       stopPoint();
       const filled = getFilledSquadSlots(squad);
@@ -1946,17 +1964,22 @@
         log(`${label}: submit button detected after fill action`);
         return true;
       }
+      if (!closedStuckOverlay && closeFsuStuckOverlay(`${label} stuck overlay`)) {
+        closedStuckOverlay = true;
+        await sleep(1000);
+        continue;
+      }
       const shieldShowing = (() => {
         try { return !!W.gClickShield?.isShowing?.(); } catch { return false; }
       })();
-      if (!shieldShowing && (filled > initialFilled || Date.now() - start > 2500)) {
+      if (!shieldShowing && filled > initialFilled) {
         await sleep(700);
         log(`${label}: fill action settled; slots ${initialFilled} -> ${filled}`);
         return true;
       }
       await sleep(250);
     }
-    log(`${label}: fill action wait timed out; slots ${initialFilled} -> ${getFilledSquadSlots(squad)}, submit ${findSubmitButton() ? 'ready' : 'not ready'}; continuing`);
+    log(`${label}: no fill progress after wait; slots ${initialFilled} -> ${getFilledSquadSlots(squad)}, submit ${findSubmitButton() ? 'ready' : 'not ready'}`);
     return false;
   }
 
@@ -1995,6 +2018,12 @@
       await sleep(CFG.pauseMs);
       clickButtonByText(['确定', '確定', 'Ok']);
       await waitLoadingEnd();
+    }
+
+    if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && clickButtonByText(['One-click fill'])) {
+      log('Retrying FSU one-click fill after no progress');
+      await waitAfterSbcFillAction(`${label} FSU one-click retry`, squad);
+      await sleep(CFG.pauseMs);
     }
 
     const filled = getFilledSquadSlots(squad);
