@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.14`
+- `DailyLoopRunner.user.js`: `0.2.15`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -65,6 +65,12 @@ Chrome 中需要启用：
 - `Daily Silver Loop`
   - 做 `Daily Silver Upgrade`。
   - 逻辑同 Daily Bronze，只是目标换成银卡。
+
+- `Daily Silver MVP (1 run)`
+  - WK 第一次 live test 用这个。
+  - 逻辑同 `Daily Silver Loop`，但 `maxCompletions` 固定为 1。
+  - 真跑时最多提交 1 次 `Daily Silver Upgrade`，拿到的最后一包会保留不打开。
+  - 建议流程：先勾 `Dry run` 确认 seed SBC available，再关 `Dry run` 真跑一次。
 
 - `Daily Common Loop`
   - 做 `Daily Common Gold Upgrade`。

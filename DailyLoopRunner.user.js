@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.14
+// @version      0.2.15
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -79,6 +79,16 @@
       maxCompletions: 7,
     },
     {
+      id: 'daily-silver-mvp',
+      name: 'Daily Silver MVP (1 run)',
+      strategy: 'dailySingleCardRecycle',
+      sbcNames: ['Daily Silver Upgrade', '每日白银升级', '每日白銀升級'],
+      rewardPackIds: [205],
+      rewardPackNames: ['Silver Players Premium', 'SILVER PLAYERS PREMIUM'],
+      targetDuplicate: { tier: 'silver', playerOnly: true, allowSpecial: false },
+      maxCompletions: 1,
+    },
+    {
       id: 'daily-common',
       name: 'Daily Common Loop',
       strategy: 'inventoryMixedUpgrade',
@@ -151,7 +161,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.14',
+    version: '0.2.15',
     destroy: destroyRunner,
   };
 
