@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.21
+// @version      0.2.22
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -226,6 +226,7 @@
     loopConfigSource: 'built-in',
     pendingLiveConfirm: null,
     stalePackRefs: new WeakSet(),
+    stalePackIds: new Set(),
     logLines: [],
     bootTimer: null,
   };
@@ -238,7 +239,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.21',
+    version: '0.2.22',
     destroy: destroyRunner,
   };
 
@@ -875,14 +876,32 @@
     return [];
   }
 
+  function packIdKey(packOrId) {
+    const id = typeof packOrId === 'object' ? packOrId?.id : packOrId;
+    const numeric = Number(id);
+    return Number.isFinite(numeric) && numeric > 0 ? String(numeric) : '';
+  }
+
   function isStalePack(pack) {
-    try { return !!pack && state.stalePackRefs.has(pack); } catch { return false; }
+    try {
+      const key = packIdKey(pack);
+      return !!pack && (state.stalePackRefs.has(pack) || (key && state.stalePackIds.has(key)));
+    } catch {
+      return false;
+    }
   }
 
   function markStalePack(pack) {
     try {
       if (pack && typeof pack === 'object') state.stalePackRefs.add(pack);
+      const key = packIdKey(pack);
+      if (key) state.stalePackIds.add(key);
     } catch { }
+  }
+
+  function clearStalePackId(packId) {
+    const key = packIdKey(packId);
+    if (key) state.stalePackIds.delete(key);
   }
 
   function getAvailableMyPacks() {
@@ -1972,10 +1991,15 @@
     await refreshStorePacks().catch(() => null);
 
     const awardId = Number(set?.awards?.[0]?.value) || null;
-    if (awardId) return awardId;
+    if (awardId) {
+      clearStalePackId(awardId);
+      return awardId;
+    }
 
     const newPack = getMyPacks().find((p) => !beforePackIds.has(String(p.id)) && matchesAny(packName(p), CFG.silverRewardNames));
-    return newPack?.id || null;
+    const newPackId = newPack?.id || null;
+    if (newPackId) clearStalePackId(newPackId);
+    return newPackId;
   }
 
   async function openRewardSilverPack(packId) {
@@ -2562,6 +2586,25 @@
     const primaryPiles = loopDef.priorityPiles || ['unassigned', 'storage', 'transfer'];
     const clubFallbackPiles = loopDef.clubFallbackPiles || [...primaryPiles, 'club'];
 
+    const submitClubFallback = async (reason) => {
+      log(`${loopDef.name}: ${reason}; using club as final fallback`);
+      const fallbackSelection = selectLoopInventoryPlayers(loopDef, clubFallbackPiles);
+      log(`${loopDef.name}: club fallback selected ${fallbackSelection.selected.length} common gold player(s) (${formatSelectionStats(fallbackSelection.stats)})`);
+      if (!fallbackSelection.ok) {
+        const fallbackMissing = fallbackSelection.missing;
+        log(`${loopDef.name}: still missing ${fallbackMissing.count} common gold player(s) after club fallback; stopping`);
+        logSelectionDiagnostics(`${loopDef.name} club fallback`, fallbackSelection, clubFallbackPiles);
+        await clearUnassigned(`${loopDef.name} no source pack cleanup`);
+        return false;
+      }
+
+      const result = await submitInventorySelection(loopDef, fallbackSelection);
+      if (!result) return false;
+      completions++;
+      await sleep(CFG.pauseMs);
+      return true;
+    };
+
     while (completions < Number(loopDef.maxCompletions || 7)) {
       stopPoint();
       await refreshInventoryCaches(`${loopDef.name} pre-selection`, { includePacks: false, quiet: true });
@@ -2583,21 +2626,7 @@
 
       const pack = await findSourcePack(loopDef);
       if (!pack) {
-        log(`${loopDef.name}: no 11x Gold Players Pack available; using club as final fallback`);
-        selection = selectLoopInventoryPlayers(loopDef, clubFallbackPiles);
-        log(`${loopDef.name}: club fallback selected ${selection.selected.length} common gold player(s) (${formatSelectionStats(selection.stats)})`);
-        if (!selection.ok) {
-          const fallbackMissing = selection.missing;
-          log(`${loopDef.name}: still missing ${fallbackMissing.count} common gold player(s) after club fallback; stopping`);
-          logSelectionDiagnostics(`${loopDef.name} club fallback`, selection, clubFallbackPiles);
-          await clearUnassigned(`${loopDef.name} no source pack cleanup`);
-          break;
-        }
-
-        const result = await submitInventorySelection(loopDef, selection);
-        if (!result) break;
-        completions++;
-        await sleep(CFG.pauseMs);
+        if (!(await submitClubFallback('no 11x Gold Players Pack available'))) break;
         continue;
       }
 
@@ -2608,7 +2637,7 @@
 
       const items = await openPack(pack, loopDef.name, { allowGone: true });
       if (!items) {
-        await sleep(CFG.pauseMs);
+        if (!(await submitClubFallback('source pack stale or unavailable after 404'))) break;
         continue;
       }
       await handleRareSourcePackItems(items, loopDef);
