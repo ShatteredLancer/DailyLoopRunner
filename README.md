@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.10`
+- `DailyLoopRunner.user.js`: `0.2.11`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.0`
 
 ## 1. 文件说明
@@ -45,6 +45,8 @@ Chrome 中需要启用：
 `Dry run` 模式只刷新只读缓存并打印计划动作，不会移动物品、开包、保存阵容或提交 SBC。库存型 loop 会列出选中的卡、来源 pile、rating、稀有度、交易状态、item id 和 definition id。
 
 `Refresh caches` 会优先刷新 packs 和 unassigned；club/storage/transfer 会用当前 Web App 暴露的可用方法刷新。如果某个 pile 没有可用刷新方法，脚本会保留现有缓存并写日志。
+
+选卡不够时，日志会追加 diagnostics：每个 pile 的总数、匹配数量、unique definition 数、duplicate signal 解析数量，以及主要过滤原因。
 
 当前默认 loop：
 
@@ -338,6 +340,9 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
   - 按规则从 pile 选材料。
   - 已处理 transfer duplicateId 解析。
 
+- `logSelectionDiagnostics(label, selection, fallbackPriorityPiles)`
+  - 选卡不够时输出每个 pile 的候选统计和过滤原因。
+
 - `validateLoopDef(loopDef)`
   - 校验默认或自定义 loop 配置。
   - 在开包或提交 SBC 前拦截明显错误。
@@ -392,6 +397,10 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
 - `selected inventory players did not satisfy SBC requirements`
   - UI 提交按钮不可用。
   - 可能是材料数量、稀有度、特殊卡、同卡重复、阵型槽位映射问题。
+
+- `diagnostics for ...`
+  - 选卡不够时的候选诊断。
+  - 常见过滤原因包括 `protected-82-plus`、`special-blocked`、`rarity-not-common`、`duplicate-signal-unresolved`、`active-trade`。
 
 - `Transfer list has only ... slot(s)`
   - transfer list 满或空间不足。

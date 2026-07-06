@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.10
+// @version      0.2.11
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -144,7 +144,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.10',
+    version: '0.2.11',
     destroy: destroyRunner,
   };
 
@@ -1161,7 +1161,121 @@
     if (!selection?.ok && selection?.missing) {
       const missing = selection.missing;
       log(`${label}: dry-run missing ${missing.count} ${missing.tier || 'any'} ${missing.rarity || ''} item(s)`);
+      logSelectionDiagnostics(label, selection, options.priorityPiles);
     }
+  }
+
+  function addCount(counts, key) {
+    counts[key] = (counts[key] || 0) + 1;
+  }
+
+  function formatCounts(counts, limit = 5) {
+    const entries = Object.entries(counts || {})
+      .filter(([, count]) => count > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, limit);
+    return entries.map(([key, count]) => `${key}:${count}`).join(', ');
+  }
+
+  function describeRequirement(requirement = {}) {
+    return [
+      requirement.count ? `${requirement.count}x` : '',
+      requirement.tier || 'any-tier',
+      requirement.rarity || '',
+      requirement.playerOnly ? 'player' : '',
+      requirement.allowSpecial ? 'special-ok' : 'no-special',
+    ].filter(Boolean).join(' ');
+  }
+
+  function getUsabilityRejectReasons(item) {
+    const reasons = [];
+    if (!isPlayer(item)) reasons.push('not-player');
+    if (isProtectedHighGold(item)) reasons.push('protected-82-plus');
+    if (Number(item?.loans) !== -1) reasons.push('loan-or-limited');
+    try { if (item?.isLimitedUse?.()) reasons.push('limited-use'); } catch { }
+    try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
+    if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
+    if (!isInactiveTrade(item)) reasons.push('active-trade');
+    return reasons;
+  }
+
+  function getSpecRejectReasons(item, spec = {}) {
+    const reasons = [];
+    if (spec.playerOnly && !isPlayer(item)) reasons.push('not-player');
+    if (spec.special === true && !isSpecial(item)) reasons.push('not-special');
+    if (spec.special === false && isSpecial(item)) reasons.push('special-blocked');
+    if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) reasons.push('special-blocked');
+    if (spec.tier === 'bronze' && !isBronze(item)) reasons.push('tier-not-bronze');
+    if (spec.tier === 'silver' && !isSilver(item)) reasons.push('tier-not-silver');
+    if (spec.tier === 'gold' && !isGold(item)) reasons.push('tier-not-gold');
+    if (spec.rarity === 'rare' && !isRare(item)) reasons.push('rarity-not-rare');
+    if (spec.rarity === 'common' && isRare(item)) reasons.push('rarity-not-common');
+    return reasons;
+  }
+
+  function diagnosePileForRequirement(pileName, requirement) {
+    const items = getPileItemsByName(pileName);
+    const result = {
+      total: items.length,
+      usable: 0,
+      matching: 0,
+      uniqueDefinitions: 0,
+      duplicateSignals: 0,
+      resolvedSignals: 0,
+      reasons: {},
+    };
+    const matchingDefinitions = new Set();
+
+    for (const item of items) {
+      const usabilityRejects = getUsabilityRejectReasons(item);
+      const specRejects = getSpecRejectReasons(item, requirement);
+      const rejects = [...new Set(usabilityRejects.concat(specRejects))];
+      if (rejects.length) {
+        rejects.forEach((reason) => addCount(result.reasons, reason));
+        continue;
+      }
+
+      result.usable++;
+      result.matching++;
+      matchingDefinitions.add(Number(item?.definitionId || 0));
+
+      if (pileNeedsDuplicateSignalResolution(pileName)) {
+        if (!isDuplicate(item)) {
+          addCount(result.reasons, 'duplicate-signal-required');
+          continue;
+        }
+        result.duplicateSignals++;
+        const resolved = findSubmissionItemForDuplicateSignal(item, new Set(), requirement);
+        if (resolved) {
+          result.resolvedSignals++;
+        } else {
+          addCount(result.reasons, 'duplicate-signal-unresolved');
+        }
+      }
+    }
+
+    result.uniqueDefinitions = Array.from(matchingDefinitions).filter(Boolean).length;
+    return result;
+  }
+
+  function logRequirementDiagnostics(label, requirement, fallbackPriorityPiles) {
+    const piles = requirement?.priorityPiles || fallbackPriorityPiles || ['storage', 'transfer', 'club'];
+    log(`${label}: diagnostics for ${describeRequirement(requirement)} across ${piles.join(' > ')}`);
+
+    for (const pileName of piles) {
+      const diag = diagnosePileForRequirement(pileName, requirement);
+      const signalText = pileNeedsDuplicateSignalResolution(pileName)
+        ? `, duplicate signals:${diag.duplicateSignals}, resolved:${diag.resolvedSignals}`
+        : '';
+      log(`${label}: ${pileName} total:${diag.total}, matching:${diag.matching}, unique defs:${diag.uniqueDefinitions}${signalText}`);
+      const rejectText = formatCounts(diag.reasons);
+      if (rejectText) log(`${label}: ${pileName} rejects ${rejectText}`);
+    }
+  }
+
+  function logSelectionDiagnostics(label, selection, fallbackPriorityPiles) {
+    if (!selection?.missing) return;
+    logRequirementDiagnostics(label, selection.missing, fallbackPriorityPiles);
   }
 
   function getSubmissionCacheItems() {
@@ -1796,6 +1910,7 @@
       if (!selection.ok) {
         const missing = selection.missing;
         log(`${loopDef.name}: missing ${missing.count} ${missing.tier || 'any'} ${missing.rarity || ''} player(s); stopping before submit`);
+        logSelectionDiagnostics(loopDef.name, selection, loopDef.priorityPiles);
         break;
       }
 
@@ -1803,6 +1918,7 @@
       if (!selection.ok) {
         const missing = selection.missing;
         log(`${loopDef.name}: missing ${missing.count} ${missing.tier || 'any'} ${missing.rarity || ''} player(s) after inventory preparation; stopping before submit`);
+        logSelectionDiagnostics(loopDef.name, selection, loopDef.priorityPiles);
         break;
       }
 
@@ -1876,6 +1992,7 @@
     if (!prepared.ok) {
       const missing = prepared.missing;
       log(`${loopDef.name}: missing ${missing.count} ${missing.tier || 'any'} ${missing.rarity || ''} player(s) after inventory preparation; stopping before submit`);
+      logSelectionDiagnostics(loopDef.name, prepared, loopDef.priorityPiles);
       return null;
     }
 
@@ -1914,6 +2031,7 @@
 
       const missing = selection.missing;
       log(`${loopDef.name}: missing ${missing.count} common gold player(s) from unassigned/storage/transfer; trying 11x Gold Players Pack before club`);
+      logSelectionDiagnostics(`${loopDef.name} primary`, selection, primaryPiles);
 
       const pack = await findSourcePack(loopDef);
       if (!pack) {
@@ -1923,6 +2041,7 @@
         if (!selection.ok) {
           const fallbackMissing = selection.missing;
           log(`${loopDef.name}: still missing ${fallbackMissing.count} common gold player(s) after club fallback; stopping`);
+          logSelectionDiagnostics(`${loopDef.name} club fallback`, selection, clubFallbackPiles);
           await clearUnassigned(`${loopDef.name} no source pack cleanup`);
           break;
         }
@@ -1948,6 +2067,7 @@
       if (!selection.ok) {
         const afterMissing = selection.missing;
         log(`${loopDef.name}: still missing ${afterMissing.count} common gold player(s); stashing unassigned and continuing`);
+        logSelectionDiagnostics(`${loopDef.name} after source pack`, selection, primaryPiles);
         await clearUnassigned(`${loopDef.name} partial common gold stash`);
         await sleep(CFG.pauseMs);
         continue;
@@ -2015,6 +2135,7 @@
       if (!selection.ok) {
         const missing = selection.missing;
         log(`${loopDef.name}: ${label} missing ${missing.count} player(s) after fallback; stopping ${label}`);
+        logSelectionDiagnostics(`${loopDef.name} ${label}`, selection, piles);
         break;
       }
 
