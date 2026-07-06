@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.13
+// @version      0.2.15
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -79,6 +79,16 @@
       maxCompletions: 7,
     },
     {
+      id: 'daily-silver-mvp',
+      name: 'Daily Silver MVP (1 run)',
+      strategy: 'dailySingleCardRecycle',
+      sbcNames: ['Daily Silver Upgrade', '每日白银升级', '每日白銀升級'],
+      rewardPackIds: [205],
+      rewardPackNames: ['Silver Players Premium', 'SILVER PLAYERS PREMIUM'],
+      targetDuplicate: { tier: 'silver', playerOnly: true, allowSpecial: false },
+      maxCompletions: 1,
+    },
+    {
       id: 'daily-common',
       name: 'Daily Common Loop',
       strategy: 'inventoryMixedUpgrade',
@@ -151,7 +161,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.13',
+    version: '0.2.15',
     destroy: destroyRunner,
   };
 
@@ -1128,19 +1138,27 @@
     return status === 'COMPLETED' || status === 'COMPLETE' || challenge?.completed === true;
   }
 
-  async function openSbcSet(set, options = {}) {
+  async function requestSbcChallenges(set, label = set?.name || 'SBC') {
     const controller = ctrl();
     const result = await observeOnce(
       W.services.SBC.requestChallengesForSet(set),
       controller,
       30000,
-      `requestChallengesForSet ${set.name}`,
+      `requestChallengesForSet ${label}`,
     );
     if (!result?.success || !result?.data?.challenges?.length) {
-      fail(`No challenge loaded for ${set.name}`);
+      fail(`No challenge loaded for ${label}`);
     }
+    return result.data.challenges;
+  }
 
-    const challenge = result.data.challenges.find((c) => !isCompletedChallenge(c));
+  async function findAvailableSbcChallenge(set, label = set?.name || 'SBC') {
+    const challenges = await requestSbcChallenges(set, label);
+    return challenges.find((c) => !isCompletedChallenge(c)) || null;
+  }
+
+  async function openSbcSet(set, options = {}) {
+    const challenge = await findAvailableSbcChallenge(set, set.name);
     if (!challenge) {
       if (options.returnNullIfComplete) return null;
       fail(`No available challenge for ${set.name}`);
@@ -1924,7 +1942,14 @@
     if (pack) {
       log(`${loopDef.name}: dry-run would open reward pack ${packName(pack)} (#${pack.id})`);
     } else {
-      log(`${loopDef.name}: dry-run found no target duplicate or reward pack; live run would try seed SBC via FSU fill`);
+      const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+      const challenge = await findAvailableSbcChallenge(set, loopDef.name);
+      if (challenge) {
+        log(`${loopDef.name}: dry-run found no target duplicate or reward pack; seed SBC available ${set.name} (#${set.id || '?'}) challenge #${challenge.id || '?'}`);
+        log(`${loopDef.name}: live run would try seed SBC via FSU fill`);
+      } else {
+        log(`${loopDef.name}: dry-run found no target duplicate or reward pack; no available seed SBC challenge remains`);
+      }
     }
     log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
   }

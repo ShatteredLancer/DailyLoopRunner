@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.13`
+- `DailyLoopRunner.user.js`: `0.2.15`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -43,7 +43,7 @@ Chrome 中需要启用：
 6. 点击 `Start`。
 7. 出错时优先点击 `Save Log` 或复制日志内容，查看最后几行。
 
-`Dry run` 模式只刷新只读缓存并打印计划动作，不会移动物品、开包、保存阵容或提交 SBC。库存型 loop 会列出选中的卡、来源 pile、rating、稀有度、交易状态、item id 和 definition id。
+`Dry run` 模式只刷新只读缓存并打印计划动作，不会移动物品、开包、保存阵容或提交 SBC。库存型 loop 会列出选中的卡、来源 pile、rating、稀有度、交易状态、item id 和 definition id。Daily Bronze/Silver 这类日常 seed loop 在没有目标重复卡或奖励包时，会只检查 seed SBC challenge 是否仍可用，方便判断每日次数是否可能已经用完。
 
 `Refresh caches` 会优先刷新 packs 和 unassigned；club/storage/transfer 会用当前 Web App 暴露的可用方法刷新。如果某个 pile 没有可用刷新方法，脚本会保留现有缓存并写日志。
 
@@ -65,6 +65,12 @@ Chrome 中需要启用：
 - `Daily Silver Loop`
   - 做 `Daily Silver Upgrade`。
   - 逻辑同 Daily Bronze，只是目标换成银卡。
+
+- `Daily Silver MVP (1 run)`
+  - WK 第一次 live test 用这个。
+  - 逻辑同 `Daily Silver Loop`，但 `maxCompletions` 固定为 1。
+  - 真跑时最多提交 1 次 `Daily Silver Upgrade`，拿到的最后一包会保留不打开。
+  - 建议流程：先勾 `Dry run` 确认 seed SBC available，再关 `Dry run` 真跑一次。
 
 - `Daily Common Loop`
   - 做 `Daily Common Gold Upgrade`。
