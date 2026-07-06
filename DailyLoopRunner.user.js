@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.20
+// @version      0.2.21
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -225,6 +225,7 @@
     loopDefs: null,
     loopConfigSource: 'built-in',
     pendingLiveConfirm: null,
+    stalePackRefs: new WeakSet(),
     logLines: [],
     bootTimer: null,
   };
@@ -237,7 +238,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.20',
+    version: '0.2.21',
     destroy: destroyRunner,
   };
 
@@ -874,17 +875,31 @@
     return [];
   }
 
+  function isStalePack(pack) {
+    try { return !!pack && state.stalePackRefs.has(pack); } catch { return false; }
+  }
+
+  function markStalePack(pack) {
+    try {
+      if (pack && typeof pack === 'object') state.stalePackRefs.add(pack);
+    } catch { }
+  }
+
+  function getAvailableMyPacks() {
+    return getMyPacks().filter((pack) => !isStalePack(pack));
+  }
+
   function findPackByName(patterns) {
-    const packs = getMyPacks();
+    const packs = getAvailableMyPacks();
     return packs.find((p) => matchesAny(packName(p), patterns));
   }
 
   function findPackById(packId) {
     if (!packId) return null;
-    return getMyPacks().find((p) => Number(p?.id) === Number(packId));
+    return getAvailableMyPacks().find((p) => Number(p?.id) === Number(packId));
   }
 
-  function summarizePacks(packs = getMyPacks()) {
+  function summarizePacks(packs = getAvailableMyPacks()) {
     const counts = new Map();
     for (const pack of packs) {
       const key = `${packName(pack)} (#${pack.id})`;
@@ -1169,14 +1184,22 @@
     await clearUnassigned('reward item handling');
   }
 
-  async function openPack(pack, purpose) {
+  async function openPack(pack, purpose, options = {}) {
     if (!pack) fail(`Pack not found for ${purpose}`);
     await clearUnassigned(`opening ${purpose}`);
     const name = packName(pack);
     log(`Opening pack: ${name} (#${pack.id})`);
     const result = await observeOnce(pack.open(), ctrl(), 30000, `open ${name}`);
     if (!result?.success || !result?.response?.items) {
-      fail(`Open pack failed: ${result?.error?.code || result?.status || 'unknown'}`);
+      const code = result?.error?.code || result?.status || 'unknown';
+      if (options.allowGone && String(code) === '404') {
+        markStalePack(pack);
+        log(`Skipping stale pack for ${purpose}: ${name} (#${pack.id}) returned 404`);
+        await waitLoadingEnd().catch(() => null);
+        await refreshStorePacks().catch(() => null);
+        return null;
+      }
+      fail(`Open pack failed: ${code}`);
     }
     await waitLoadingEnd();
     return result.response.items || [];
@@ -2015,7 +2038,8 @@
       return false;
     }
 
-    const items = await openPack(pack, `${loopDef.name} ${reason}`);
+    const items = await openPack(pack, `${loopDef.name} ${reason}`, { allowGone: true });
+    if (!items) return false;
     log(`${loopDef.name}: auto-opened reward pack ${packName(pack)} (#${pack.id}); ${items.length || 0} item(s)`);
     await clearUnassigned(`${loopDef.name} ${reason} handling`);
     return true;
@@ -2090,7 +2114,12 @@
 
       const pack = await findLoopPack(loopDef, lastRewardPackId);
       if (pack) {
-        const items = await openPack(pack, loopDef.name);
+        const items = await openPack(pack, loopDef.name, { allowGone: true });
+        if (!items) {
+          lastRewardPackId = null;
+          await sleep(CFG.pauseMs);
+          continue;
+        }
         await handleRecyclePackItems(items, loopDef);
         lastRewardPackId = null;
         await sleep(CFG.pauseMs);
@@ -2577,7 +2606,11 @@
         await clearUnassigned(`${loopDef.name} before opening source pack`);
       }
 
-      const items = await openPack(pack, loopDef.name);
+      const items = await openPack(pack, loopDef.name, { allowGone: true });
+      if (!items) {
+        await sleep(CFG.pauseMs);
+        continue;
+      }
       await handleRareSourcePackItems(items, loopDef);
 
       selection = selectLoopInventoryPlayers(loopDef, primaryPiles);
@@ -2687,7 +2720,11 @@
       }
 
       log(`${loopDef.name}: round ${round}/${rounds} opening ${packName(pack)} (#${pack.id})`);
-      const items = await openPack(pack, `${loopDef.name} round ${round}`);
+      const items = await openPack(pack, `${loopDef.name} round ${round}`, { allowGone: true });
+      if (!items) {
+        await sleep(CFG.pauseMs);
+        continue;
+      }
       packsOpened++;
       await handleProvisionPackItems(items, loopDef);
 
