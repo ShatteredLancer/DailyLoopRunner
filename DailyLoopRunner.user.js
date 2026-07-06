@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.25
+// @version      0.2.27
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -247,7 +247,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.25',
+    version: '0.2.27',
     destroy: destroyRunner,
   };
 
@@ -431,6 +431,7 @@
     validateNumberArray(loopDef.sourcePackIds, 'sourcePackIds', errors);
     validateNumberArray(loopDef.rewardPackIds, 'rewardPackIds', errors);
     validateNumberArray(loopDef.protectedItemIds, 'protectedItemIds', errors);
+    validateNumberArray(loopDef.protectedDefinitionIds, 'protectedDefinitionIds', errors);
     validateStringArray(loopDef.sourcePackNames, 'sourcePackNames', errors);
     validateStringArray(loopDef.rewardPackNames, 'rewardPackNames', errors);
     validatePileList(loopDef.priorityPiles, 'priorityPiles', errors);
@@ -1975,12 +1976,14 @@
     const rating = Number(item?.rating || 0);
     const maxRating = Number(loopDef.maxSubmittedRating || 0);
     const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
+    const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number));
     const allowedSpecialCount = Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
     const specialIndex = Number(context.specialIndex || 0) || 0;
 
     if (Number(item?.loans ?? -1) !== -1) reasons.push('loan');
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (protectedIds.has(Number(item?.id || 0))) reasons.push('protected-id');
+    if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) reasons.push('protected-def');
     if (loopDef.blockSpecial !== false && isSbcSpecialItem(item) && (!allowedSpecialCount || specialIndex > allowedSpecialCount)) {
       reasons.push('special-blocked');
     }
@@ -2026,13 +2029,65 @@
     });
   }
 
+  function getManualSbcFixHints(loopDef, inspection) {
+    const hints = [];
+    const maxRating = Number(loopDef.maxSubmittedRating || 0);
+    const allowedSpecialCount = Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
+    const requiredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
+
+    for (const { item, index, reasons } of inspection.blocked || []) {
+      const name = itemDisplayName(item);
+      const rating = Number(item?.rating || 0) || '?';
+      const itemId = Number(item?.id || 0) || '?';
+      const definitionId = Number(item?.definitionId || 0) || '?';
+      const prefix = `slot ${index + 1} ${name} rating:${rating} id:${itemId} def:${definitionId}`;
+      if (reasons.some((reason) => reason.startsWith('rating-over-'))) {
+        hints.push(`${prefix}: replace with rating <= ${maxRating || 'limit'} untradeable card`);
+      }
+      if (reasons.includes('special-blocked')) {
+        hints.push(`${prefix}: replace extra special card with a normal/rare gold card`);
+      }
+      if (reasons.includes('tradeable-blocked')) {
+        hints.push(`${prefix}: replace tradeable card with an untradeable card`);
+      }
+      if (reasons.includes('loan')) {
+        hints.push(`${prefix}: replace loan card`);
+      }
+      if (reasons.includes('active-trade')) {
+        hints.push(`${prefix}: remove active transfer/listed card`);
+      }
+      if (reasons.includes('protected-id') || reasons.includes('protected-def')) {
+        hints.push(`${prefix}: protected by custom config; replace it before live submit`);
+      }
+    }
+
+    if (requiredSpecialCount && (inspection.specialCount || 0) < requiredSpecialCount) {
+      hints.push(`add ${requiredSpecialCount - (inspection.specialCount || 0)} untradeable TOTW/TOTS/FOF card(s) rating <= ${maxRating || 'limit'}`);
+    }
+    if (allowedSpecialCount && (inspection.specialCount || 0) > allowedSpecialCount) {
+      hints.push(`keep only ${allowedSpecialCount} special card(s); replace the remaining special card(s) with normal/rare gold`);
+    }
+
+    return [...new Set(hints)];
+  }
+
+  function logManualSbcFixHints(loopDef, inspection) {
+    const hints = getManualSbcFixHints(loopDef, inspection);
+    if (!hints.length) return;
+    log(`${loopDef.name}: manual fix needed before live submit:`);
+    hints.slice(0, 12).forEach((hint) => log(`${loopDef.name}: manual fix - ${hint}`));
+    if (hints.length > 12) log(`${loopDef.name}: manual fix list truncated: ${hints.length - 12} more`);
+  }
+
   function assertSbcSquadSafe(loopDef, inspection) {
     if (!inspection.items.length) fail(`${loopDef.name}: no squad items detected after fill`);
     if (inspection.missingRequirements?.length) {
+      logManualSbcFixHints(loopDef, inspection);
       fail(`${loopDef.name}: missing squad requirement(s): ${inspection.missingRequirements.join(', ')}`);
     }
     if (!inspection.blocked.length) return;
 
+    logManualSbcFixHints(loopDef, inspection);
     const summary = inspection.blocked
       .slice(0, 10)
       .map(({ item, index, reasons }) => `${index + 1}. ${itemDisplayName(item)} rating:${Number(item?.rating || 0) || '?'} (${reasons.join(',')})`)
@@ -2525,6 +2580,7 @@
       if (loopDef.dryRun) {
         if (inspection.blocked.length || inspection.missingRequirements?.length) {
           log(`${loopDef.name}: dry-run blocked by protected or missing squad requirement(s); live run would stop before submit`);
+          logManualSbcFixHints(loopDef, inspection);
         } else if (!fillResult.submitReady) {
           log(`${loopDef.name}: dry-run squad passed protection, but submit is not ready; live run would stop before submit`);
         } else {
