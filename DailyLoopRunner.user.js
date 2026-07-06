@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.15
+// @version      0.2.16
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -69,6 +69,16 @@
       maxCompletions: 7,
     },
     {
+      id: 'daily-bronze-mvp',
+      name: 'Daily Bronze MVP (1 run)',
+      strategy: 'dailySingleCardRecycle',
+      sbcNames: ['Daily Bronze Upgrade', '每日青铜升级', '每日青銅升級'],
+      rewardPackIds: [105],
+      rewardPackNames: ['Bronze Players Premium', 'Premium Bronze Players', 'BRONZE PLAYERS PREMIUM'],
+      targetDuplicate: { tier: 'bronze', playerOnly: true, allowSpecial: false },
+      maxCompletions: 1,
+    },
+    {
       id: 'daily-silver',
       name: 'Daily Silver Loop',
       strategy: 'dailySingleCardRecycle',
@@ -103,6 +113,20 @@
       maxCompletions: 7,
     },
     {
+      id: 'daily-common-mvp',
+      name: 'Daily Common MVP (1 run)',
+      strategy: 'inventoryMixedUpgrade',
+      sbcNames: ['Daily Common Gold Upgrade', '每日普通金牌升级', '每日普通金牌升級'],
+      rewardPackIds: [304],
+      rewardPackNames: ['Gold Players Pack'],
+      requirements: [
+        { tier: 'silver', count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'transfer', 'club'] },
+        { tier: 'bronze', count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'transfer', 'club'] },
+      ],
+      priorityPiles: ['storage', 'transfer', 'club'],
+      maxCompletions: 1,
+    },
+    {
       id: 'daily-rare',
       name: 'Daily Rare Loop',
       strategy: 'commonGoldToRareUpgrade',
@@ -115,6 +139,26 @@
       priorityPiles: ['unassigned', 'storage', 'transfer'],
       clubFallbackPiles: ['unassigned', 'storage', 'transfer', 'club'],
       maxCompletions: 7,
+    },
+    {
+      id: 'daily-rare-mvp',
+      name: 'Daily Rare MVP (1 run)',
+      strategy: 'commonGoldToRareUpgrade',
+      sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
+      sourcePackNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
+      rewardPackNames: ['Max. 78 Rare Gold Players Pack', 'Max 78 Rare Gold Players Pack'],
+      requirements: [
+        { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer'] },
+      ],
+      priorityPiles: ['unassigned', 'storage', 'transfer'],
+      clubFallbackPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      maxCompletions: 1,
+    },
+    {
+      id: 'one-click-daily-mvp',
+      name: 'One-click Daily MVP (1 each)',
+      strategy: 'dailyRoutine',
+      steps: ['daily-bronze-mvp', 'daily-silver-mvp', 'daily-common-mvp', 'daily-rare-mvp'],
     },
     {
       id: 'provision-crafting',
@@ -149,6 +193,7 @@
     loadingLoops: false,
     loopDefs: null,
     loopConfigSource: 'built-in',
+    pendingLiveConfirm: null,
     logLines: [],
     bootTimer: null,
   };
@@ -161,7 +206,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.15',
+    version: '0.2.16',
     destroy: destroyRunner,
   };
 
@@ -196,9 +241,13 @@
     return state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
   }
 
-  function getLoopDefById(id) {
+  function findLoopDefById(id) {
     const loopDefs = getLoopDefs();
-    return loopDefs.find((def) => def.id === id) || loopDefs[0] || LOOP_DEFS[0];
+    return loopDefs.find((def) => def.id === id) || null;
+  }
+
+  function getLoopDefById(id) {
+    return findLoopDefById(id) || getLoopDefs()[0] || LOOP_DEFS[0];
   }
 
   function isPlainObject(value) {
@@ -311,6 +360,7 @@
       'inventoryMixedUpgrade',
       'commonGoldToRareUpgrade',
       'provisionPackDualCrafting',
+      'dailyRoutine',
     ];
 
     if (typeof loopDef.name !== 'string' || !loopDef.name.trim()) {
@@ -341,6 +391,10 @@
     if (loopDef.strategy === 'dailySingleCardRecycle') {
       validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
       validateCardSpec(loopDef.targetDuplicate, 'targetDuplicate', errors);
+    }
+
+    if (loopDef.strategy === 'dailyRoutine') {
+      validateStringArray(loopDef.steps, 'steps', errors, true);
     }
 
     if (loopDef.strategy === 'inventoryMixedUpgrade' || loopDef.strategy === 'commonGoldToRareUpgrade') {
@@ -2038,6 +2092,10 @@
   async function runDryRunLoop(loopDef, roundNo = 1) {
     log(`Dry run active: no items will be moved, no packs opened, no squads saved, no SBCs submitted`);
 
+    if (loopDef.strategy === 'dailyRoutine') {
+      await runDailyRoutine(loopDef);
+      return;
+    }
     if (loopDef.strategy === 'validationBronzeUpgrade') {
       await runValidationBronzeUpgradeDryRun(loopDef, roundNo);
       return;
@@ -2060,6 +2118,37 @@
     }
 
     fail(`Unsupported loop strategy: ${loopDef.strategy}`);
+  }
+
+  function getRoutineStepLoopDefs(loopDef) {
+    return (loopDef.steps || []).map((stepId, index) => {
+      if (stepId === loopDef.id) fail(`${loopDef.name}: step ${index + 1} cannot reference itself`);
+      const baseDef = findLoopDefById(stepId);
+      if (!baseDef) fail(`${loopDef.name}: step ${index + 1} loop not found: ${stepId}`);
+
+      const childDef = cloneLoopDef(baseDef);
+      if (childDef.strategy === 'dailyRoutine') fail(`${loopDef.name}: nested dailyRoutine steps are not supported`);
+      if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
+        childDef.disabledPiles = [...loopDef.disabledPiles];
+      }
+      childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
+      assertValidLoopDef(childDef, childDef.name || stepId);
+      return applyDisabledPiles(childDef);
+    });
+  }
+
+  async function runDailyRoutine(loopDef) {
+    await waitAppReady();
+    const steps = getRoutineStepLoopDefs(loopDef);
+    log(`${loopDef.name}: running ${steps.length} step(s): ${steps.map((step) => step.name).join(' -> ')}`);
+
+    for (let index = 0; index < steps.length; index++) {
+      stopPoint();
+      const step = steps[index];
+      log(`${loopDef.name}: step ${index + 1}/${steps.length} ${step.name}`);
+      await runConfiguredLoop(step, 1);
+      await sleep(CFG.pauseMs);
+    }
   }
 
   async function runInventoryMixedUpgrade(loopDef) {
@@ -2393,6 +2482,12 @@
       return;
     }
 
+    if (loopDef.strategy === 'dailyRoutine') {
+      await runDailyRoutine(loopDef);
+      await showUnassignedIfAny(`${loopDef.name} end`);
+      return;
+    }
+
     if (loopDef.strategy === 'validationBronzeUpgrade') {
       await runRound(roundNo);
       return;
@@ -2425,17 +2520,69 @@
     fail(`Unsupported loop strategy: ${loopDef.strategy}`);
   }
 
+  function getLiveRunLimit(loopDef, rounds) {
+    if (loopDef.strategy === 'validationBronzeUpgrade') return Number(rounds || loopDef.maxRounds || 1);
+    if (loopDef.strategy === 'dailyRoutine') {
+      return getRoutineStepLoopDefs(loopDef).reduce((maxLimit, step) => {
+        const stepLimit = getLiveRunLimit(step, 1);
+        return Math.max(maxLimit, Number.isFinite(stepLimit) ? stepLimit : 1);
+      }, 1);
+    }
+    return Number(loopDef.maxCompletions || loopDef.rounds || loopDef.maxRounds || 1);
+  }
+
+  function confirmLiveRunIfNeeded(loopDef, rounds) {
+    if (loopDef.dryRun) {
+      state.pendingLiveConfirm = null;
+      return true;
+    }
+
+    const limit = getLiveRunLimit(loopDef, rounds);
+    if (!Number.isFinite(limit) || limit <= 1) {
+      state.pendingLiveConfirm = null;
+      return true;
+    }
+
+    const key = `${loopDef.id || loopDef.name}:${loopDef.strategy}:${limit}`;
+    const nowMs = Date.now();
+    if (state.pendingLiveConfirm?.key === key && state.pendingLiveConfirm.expiresAt > nowMs) {
+      state.pendingLiveConfirm = null;
+      log(`Live guard confirmed: ${loopDef.name} may submit up to ${limit} SBC(s)`);
+      return true;
+    }
+
+    state.pendingLiveConfirm = { key, expiresAt: nowMs + 15000 };
+    log(`Live guard: ${loopDef.name} may submit up to ${limit} SBC(s). Click Start again within 15s to confirm, or choose an MVP (1 run) loop.`);
+    return false;
+  }
+
+  function clearPendingLiveConfirm() {
+    state.pendingLiveConfirm = null;
+  }
+
+
   async function startLoop() {
     if (state.running) return;
+    let loopDef = null;
+    let rounds = CFG.maxRounds;
+
+    try {
+      loopDef = getSelectedLoopDef();
+      const input = document.querySelector('#bronze-loop-rounds');
+      rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
+      loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
+      if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
+      if (!confirmLiveRunIfNeeded(loopDef, rounds)) return;
+    } catch (e) {
+      log(`Stopped: ${e.message || e}`);
+      console.error('[BronzeLoop]', e);
+      return;
+    }
+
     state.running = true;
     state.stopping = false;
     setPanelState();
     try {
-      const loopDef = getSelectedLoopDef();
-      const input = document.querySelector('#bronze-loop-rounds');
-      const rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
-      loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
-      if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
       if (loopDef.dryRun || loopDef.strategy !== 'validationBronzeUpgrade') {
         stopPoint();
         await runConfiguredLoop(loopDef, 1);
@@ -2667,6 +2814,7 @@
       savePanelPos(panel);
     });
     document.querySelector('#bronze-loop-select').addEventListener('change', (event) => {
+      clearPendingLiveConfirm();
       const selectedId = event.target.value;
       if (selectedId !== 'custom') setLoopJson(getLoopDefById(selectedId));
       updateLoopControls();
@@ -2679,7 +2827,11 @@
       }
       updateLoopControls();
     });
-    document.querySelector('#bronze-loop-json').addEventListener('input', updateLoopControls);
+    document.querySelector('#bronze-loop-json').addEventListener('input', () => {
+      clearPendingLiveConfirm();
+      updateLoopControls();
+    });
+    document.querySelector('#bronze-loop-dry-run').addEventListener('change', clearPendingLiveConfirm);
     document.querySelector('#bronze-loop-start').addEventListener('click', startLoop);
     document.querySelector('#bronze-loop-refresh').addEventListener('click', async () => {
       if (state.running || state.refreshing) return;
@@ -2696,6 +2848,7 @@
     });
     document.querySelector('#bronze-loop-load-json').addEventListener('click', async () => {
       if (state.running || state.loadingLoops) return;
+      clearPendingLiveConfirm();
       state.loadingLoops = true;
       setPanelState();
       try {
@@ -2710,6 +2863,7 @@
     });
     document.querySelector('#bronze-loop-built-in').addEventListener('click', () => {
       if (state.running || state.loadingLoops) return;
+      clearPendingLiveConfirm();
       resetLoopDefs();
       setPanelState();
     });

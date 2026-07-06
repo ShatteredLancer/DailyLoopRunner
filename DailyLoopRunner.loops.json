@@ -53,6 +53,28 @@
       "maxCompletions": 7
     },
     {
+      "id": "daily-bronze-mvp",
+      "name": "Daily Bronze MVP (1 run)",
+      "strategy": "dailySingleCardRecycle",
+      "sbcNames": [
+        "Daily Bronze Upgrade",
+        "每日青铜升级",
+        "每日青銅升級"
+      ],
+      "rewardPackIds": [105],
+      "rewardPackNames": [
+        "Bronze Players Premium",
+        "Premium Bronze Players",
+        "BRONZE PLAYERS PREMIUM"
+      ],
+      "targetDuplicate": {
+        "tier": "bronze",
+        "playerOnly": true,
+        "allowSpecial": false
+      },
+      "maxCompletions": 1
+    },
+    {
       "id": "daily-silver",
       "name": "Daily Silver Loop",
       "strategy": "dailySingleCardRecycle",
@@ -127,6 +149,38 @@
       "maxCompletions": 7
     },
     {
+      "id": "daily-common-mvp",
+      "name": "Daily Common MVP (1 run)",
+      "strategy": "inventoryMixedUpgrade",
+      "sbcNames": [
+        "Daily Common Gold Upgrade",
+        "每日普通金牌升级",
+        "每日普通金牌升級"
+      ],
+      "rewardPackIds": [304],
+      "rewardPackNames": [
+        "Gold Players Pack"
+      ],
+      "requirements": [
+        {
+          "tier": "silver",
+          "count": 5,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": ["storage", "transfer", "club"]
+        },
+        {
+          "tier": "bronze",
+          "count": 5,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": ["storage", "transfer", "club"]
+        }
+      ],
+      "priorityPiles": ["storage", "transfer", "club"],
+      "maxCompletions": 1
+    },
+    {
       "id": "daily-rare",
       "name": "Daily Rare Loop",
       "strategy": "commonGoldToRareUpgrade",
@@ -156,6 +210,48 @@
       "priorityPiles": ["unassigned", "storage", "transfer"],
       "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
       "maxCompletions": 7
+    },
+    {
+      "id": "daily-rare-mvp",
+      "name": "Daily Rare MVP (1 run)",
+      "strategy": "commonGoldToRareUpgrade",
+      "sbcNames": [
+        "Daily Rare Gold Upgrade",
+        "每日稀有金牌升级",
+        "每日稀有金牌升級"
+      ],
+      "sourcePackNames": [
+        "11x Gold Players Pack",
+        "11 x Gold Players Pack"
+      ],
+      "rewardPackNames": [
+        "Max. 78 Rare Gold Players Pack",
+        "Max 78 Rare Gold Players Pack"
+      ],
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "common",
+          "count": 5,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": ["unassigned", "storage", "transfer"]
+        }
+      ],
+      "priorityPiles": ["unassigned", "storage", "transfer"],
+      "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxCompletions": 1
+    },
+    {
+      "id": "one-click-daily-mvp",
+      "name": "One-click Daily MVP (1 each)",
+      "strategy": "dailyRoutine",
+      "steps": [
+        "daily-bronze-mvp",
+        "daily-silver-mvp",
+        "daily-common-mvp",
+        "daily-rare-mvp"
+      ]
     },
     {
       "id": "provision-crafting",
