@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.23
+// @version      0.2.24
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -241,7 +241,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.23',
+    version: '0.2.24',
     destroy: destroyRunner,
   };
 
@@ -1834,7 +1834,8 @@
     return items;
   }
 
-  async function fillSbcSquad(label = 'SBC') {
+  async function fillSbcSquad(label = 'SBC', options = {}) {
+    const requireSubmitReady = options.requireSubmitReady !== false;
     const squad = await waitFor(() => ctrl()?._squad, 15000, 'SBC squad object');
     try { squad.removeAllItems?.(); } catch { }
     await sleep(500);
@@ -1868,7 +1869,8 @@
     const filled = getFilledSquadSlots(squad);
     const submitReady = !!findSubmitButton();
     log(`${label} squad filled slots detected: ${filled}; submit ${submitReady ? 'ready' : 'not ready'}`);
-    if (!submitReady) fail(`${label} squad is not complete`);
+    if (!submitReady && requireSubmitReady) fail(`${label} squad is not complete`);
+    return { squad, filled, submitReady };
   }
 
   function unwrapSquadSlot(slot) {
@@ -2424,14 +2426,20 @@
         break;
       }
 
-      await fillSbcSquad(loopDef.name);
-      const squad = ctrl()?._squad || opened.challenge?.squad;
+      const fillResult = await fillSbcSquad(loopDef.name, { requireSubmitReady: false });
+      const squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
       const inspection = inspectSbcSquad(loopDef, squad);
       logSbcSquadInspection(loopDef, inspection);
+      if (!fillResult.submitReady) {
+        const required = getRequiredPlayerCount(opened.challenge);
+        log(`${loopDef.name}: submit not ready after FSU fill (${fillResult.filled}/${required} slots filled); likely SBC requirements are still unmet or FSU completion picked an invalid squad`);
+      }
 
       if (loopDef.dryRun) {
         if (inspection.blocked.length) {
           log(`${loopDef.name}: dry-run blocked by protected squad item(s); live run would stop before submit`);
+        } else if (!fillResult.submitReady) {
+          log(`${loopDef.name}: dry-run squad passed protection, but submit is not ready; live run would stop before submit`);
         } else {
           log(`${loopDef.name}: dry-run squad passed protection; live run would submit once`);
         }
@@ -2440,6 +2448,7 @@
         return;
       }
 
+      if (!fillResult.submitReady) fail(`${loopDef.name}: submit is not ready after protection inspection`);
       assertSbcSquadSafe(loopDef, inspection);
       const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
       if (rewardPackId && loopDef.openRewardPacks) {
