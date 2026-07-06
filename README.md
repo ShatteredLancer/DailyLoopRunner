@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.20`
+- `DailyLoopRunner.user.js`: `0.2.21`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -397,8 +397,9 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
   - 清理 unassigned。
   - `options.reserveItem` 可保留某些卡不清理。
 
-- `openPack(pack, purpose)`
+- `openPack(pack, purpose, options)`
   - 开包并返回 items。
+  - `options.allowGone` 为 true 时，遇到 EA 返回 404 的 stale pack 会标记并跳过。
 
 - `findSbcSet(names, label)`
   - 按名称找 SBC set。
