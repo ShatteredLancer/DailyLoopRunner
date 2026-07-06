@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.12
+// @version      0.2.13
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
+// @connect      localhost
 // @run-at       document-end
 // ==/UserScript==
 
@@ -15,6 +18,7 @@
 
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
   const APP_KEY = '__FCLoopRunner';
+  const LOOP_CONFIG_URL = 'http://127.0.0.1:8765/DailyLoopRunner.loops.json';
   try { W[APP_KEY]?.destroy?.(); } catch { }
 
   const CFG = {
@@ -132,6 +136,9 @@
     running: false,
     stopping: false,
     refreshing: false,
+    loadingLoops: false,
+    loopDefs: null,
+    loopConfigSource: 'built-in',
     logLines: [],
     bootTimer: null,
   };
@@ -144,7 +151,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.12',
+    version: '0.2.13',
     destroy: destroyRunner,
   };
 
@@ -175,8 +182,13 @@
     return JSON.parse(JSON.stringify(def));
   }
 
+  function getLoopDefs() {
+    return state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
+  }
+
   function getLoopDefById(id) {
-    return LOOP_DEFS.find((def) => def.id === id) || LOOP_DEFS[0];
+    const loopDefs = getLoopDefs();
+    return loopDefs.find((def) => def.id === id) || loopDefs[0] || LOOP_DEFS[0];
   }
 
   function isPlainObject(value) {
@@ -342,6 +354,80 @@
     if (errors.length) fail(`${label} validation failed:\n- ${errors.join('\n- ')}`);
   }
 
+  function validateLoopDefList(loopDefs, label = 'Loop config') {
+    if (!Array.isArray(loopDefs) || !loopDefs.length) {
+      fail(`${label} must be a non-empty array or an object with a loops array`);
+    }
+    const seen = new Set();
+    loopDefs.forEach((loopDef, index) => {
+      assertValidLoopDef(loopDef, `${label}[${index}]`);
+      if (typeof loopDef.id !== 'string' || !loopDef.id.trim()) {
+        fail(`${label}[${index}].id is required`);
+      }
+      if (loopDef.id) {
+        if (seen.has(loopDef.id)) fail(`${label} has duplicate id: ${loopDef.id}`);
+        seen.add(loopDef.id);
+      }
+    });
+  }
+
+  function setLoopDefs(loopDefs, source = 'custom') {
+    validateLoopDefList(loopDefs, source);
+    state.loopDefs = cloneLoopDef(loopDefs);
+    state.loopConfigSource = source;
+    renderLoopSelect(state.loopDefs[0]?.id);
+    log(`Loaded ${state.loopDefs.length} loop definition(s) from ${source}`);
+  }
+
+  function resetLoopDefs() {
+    state.loopDefs = null;
+    state.loopConfigSource = 'built-in';
+    renderLoopSelect(LOOP_DEFS[0]?.id);
+    log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
+  }
+
+  function parseLoopConfig(text) {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed?.loops)) return parsed.loops;
+    fail('Loop config JSON must be an array or an object with a loops array');
+  }
+
+  function requestText(url) {
+    if (typeof GM_xmlhttpRequest === 'function') {
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          nocache: true,
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve(response.responseText);
+            } else {
+              reject(new Error(`HTTP ${response.status}`));
+            }
+          },
+          onerror: () => reject(new Error('request failed')),
+          ontimeout: () => reject(new Error('request timed out')),
+          timeout: 10000,
+        });
+      });
+    }
+    if (typeof W.__FCLoopRunnerRequestText === 'function') {
+      return W.__FCLoopRunnerRequestText(url);
+    }
+    return fetch(url, { cache: 'no-store' }).then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.text();
+    });
+  }
+
+  async function loadLoopConfig(url = LOOP_CONFIG_URL) {
+    const text = await requestText(`${url}?t=${Date.now()}`);
+    const loopDefs = parseLoopConfig(text);
+    setLoopDefs(loopDefs, url);
+  }
+
   function applyDisabledPilesToList(piles, disabledPiles, path) {
     if (!Array.isArray(piles) || !piles.length || !disabledPiles?.size) return piles;
     const filtered = piles.filter((pile) => !disabledPiles.has(pile));
@@ -380,7 +466,7 @@
 
   function getSelectedLoopDef() {
     const select = document.querySelector('#bronze-loop-select');
-    const selectedId = select?.value || LOOP_DEFS[0].id;
+    const selectedId = select?.value || getLoopDefs()[0]?.id || LOOP_DEFS[0].id;
     if (selectedId === 'custom') {
       const text = document.querySelector('#bronze-loop-json')?.value || '';
       try {
@@ -402,8 +488,34 @@
     if (editor) editor.value = JSON.stringify(def, null, 2);
   }
 
+  function renderLoopSelect(selectedId = null) {
+    const select = document.querySelector('#bronze-loop-select');
+    if (!select) return;
+    const previous = selectedId || select.value;
+    select.textContent = '';
+
+    for (const def of getLoopDefs()) {
+      const option = document.createElement('option');
+      option.value = def.id;
+      option.textContent = def.name;
+      select.appendChild(option);
+    }
+
+    const custom = document.createElement('option');
+    custom.value = 'custom';
+    custom.textContent = 'Custom JSON';
+    select.appendChild(custom);
+
+    const nextValue = Array.from(select.options).some((option) => option.value === previous)
+      ? previous
+      : getLoopDefs()[0]?.id;
+    if (nextValue) select.value = nextValue;
+    if (select.value !== 'custom') setLoopJson(getLoopDefById(select.value));
+    updateLoopControls();
+  }
+
   function getEditorLoopStrategy() {
-    const selectedId = document.querySelector('#bronze-loop-select')?.value || LOOP_DEFS[0].id;
+    const selectedId = document.querySelector('#bronze-loop-select')?.value || getLoopDefs()[0]?.id || LOOP_DEFS[0].id;
     if (selectedId !== 'custom') return getLoopDefById(selectedId).strategy;
     try {
       const parsed = JSON.parse(document.querySelector('#bronze-loop-json')?.value || '{}');
@@ -2326,12 +2438,16 @@
     const select = document.querySelector('#bronze-loop-select');
     const edit = document.querySelector('#bronze-loop-edit');
     const refresh = document.querySelector('#bronze-loop-refresh');
+    const loadJson = document.querySelector('#bronze-loop-load-json');
+    const builtIn = document.querySelector('#bronze-loop-built-in');
     const dryRun = document.querySelector('#bronze-loop-dry-run');
     if (start) start.disabled = state.running;
     if (stop) stop.disabled = !state.running;
     if (select) select.disabled = state.running;
     if (edit) edit.disabled = state.running;
     if (refresh) refresh.disabled = state.running || state.refreshing;
+    if (loadJson) loadJson.disabled = state.running || state.loadingLoops;
+    if (builtIn) builtIn.disabled = state.running || state.loadingLoops || state.loopConfigSource === 'built-in';
     if (dryRun) dryRun.disabled = state.running;
     updateLoopControls();
   }
@@ -2433,7 +2549,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      #bronze-loop-panel .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+      #bronze-loop-panel .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
       #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; }
       #bronze-loop-collapse { min-width: 28px !important; width: 28px; padding: 0; }
       #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; }
@@ -2480,10 +2596,7 @@
       </div>
       <div class="panel-body">
         <div class="row">
-          <select id="bronze-loop-select">
-            ${LOOP_DEFS.map((def) => `<option value="${def.id}">${def.name}</option>`).join('')}
-            <option value="custom">Custom JSON</option>
-          </select>
+          <select id="bronze-loop-select"></select>
         </div>
         <div class="row" id="bronze-loop-rounds-row">
           <span id="bronze-loop-rounds-label">rounds</span>
@@ -2499,6 +2612,10 @@
         <div class="row">
           <button id="bronze-loop-edit">Edit JSON</button>
           <button id="bronze-loop-refresh">Refresh caches</button>
+        </div>
+        <div class="row">
+          <button id="bronze-loop-load-json">Load loops JSON</button>
+          <button id="bronze-loop-built-in" disabled>Built-in loops</button>
         </div>
         <div class="row">
           <button id="bronze-loop-copy">Copy log</button>
@@ -2518,7 +2635,7 @@
       panel.style.bottom = 'auto';
     }
     makePanelDraggable(panel);
-    setLoopJson(LOOP_DEFS[0]);
+    renderLoopSelect();
     document.querySelector('#bronze-loop-collapse').addEventListener('click', () => {
       panel.classList.toggle('collapsed');
       document.querySelector('#bronze-loop-collapse').textContent = panel.classList.contains('collapsed') ? '+' : '-';
@@ -2551,6 +2668,25 @@
         state.refreshing = false;
         setPanelState();
       }
+    });
+    document.querySelector('#bronze-loop-load-json').addEventListener('click', async () => {
+      if (state.running || state.loadingLoops) return;
+      state.loadingLoops = true;
+      setPanelState();
+      try {
+        log(`Loading loop definitions from ${LOOP_CONFIG_URL}`);
+        await loadLoopConfig(LOOP_CONFIG_URL);
+      } catch (e) {
+        log(`Loop JSON load failed: ${e.message || e}`);
+      } finally {
+        state.loadingLoops = false;
+        setPanelState();
+      }
+    });
+    document.querySelector('#bronze-loop-built-in').addEventListener('click', () => {
+      if (state.running || state.loadingLoops) return;
+      resetLoopDefs();
+      setPanelState();
     });
     document.querySelector('#bronze-loop-stop').addEventListener('click', () => {
       state.stopping = true;

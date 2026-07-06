@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Hot Reload
 // @namespace    local.fc26.validation
-// @version      0.1.0
+// @version      0.1.1
 // @description  Reloads the local Daily Loop Runner userscript without refreshing the Web App page.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -44,6 +44,8 @@
       });
     });
   }
+
+  W.__FCLoopRunnerRequestText = requestText;
 
   async function reloadLoopRunner() {
     try {

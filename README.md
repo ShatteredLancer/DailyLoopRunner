@@ -2,8 +2,8 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.12`
-- `DailyLoopRunnerHotReload.user.js`: `0.1.0`
+- `DailyLoopRunner.user.js`: `0.2.13`
+- `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
 
@@ -12,6 +12,7 @@
 核心文件：
 
 - `DailyLoopRunner.user.js`: 主脚本，包含界面、默认 loop、SBC/开包/清理逻辑。
+- `DailyLoopRunner.loops.json`: 可选外部 loop 配置。开发时可通过面板加载，普通使用不依赖它。
 - `BronzeUpgradeLoop.user.js`: 旧文件名兼容副本，目前内容应与 `DailyLoopRunner.user.js` 保持一致。
 - `DailyLoopRunnerHotReload.user.js`: 热加载辅助脚本，给页面加 `Reload Loop` 按钮。
 - `StartLoopRunnerDevServer.ps1`: 本地静态文件服务，用于不刷新页面热加载主脚本。
@@ -47,6 +48,8 @@ Chrome 中需要启用：
 `Refresh caches` 会优先刷新 packs 和 unassigned；club/storage/transfer 会用当前 Web App 暴露的可用方法刷新。如果某个 pile 没有可用刷新方法，脚本会保留现有缓存并写日志。
 
 选卡不够时，日志会追加 diagnostics：每个 pile 的总数、匹配数量、unique definition 数、duplicate signal 解析数量，以及主要过滤原因。
+
+普通使用只需要启用 `DailyLoopRunner.user.js`。开发时如果启动了本地服务，可以点击 `Load loops JSON` 从 `http://127.0.0.1:8765/DailyLoopRunner.loops.json` 加载外部 loop 配置；点击 `Built-in loops` 可切回脚本内置配置。
 
 当前默认 loop：
 
@@ -121,6 +124,7 @@ powershell -ExecutionPolicy Bypass -File ".\StartLoopRunnerDevServer.ps1"
 - 如果本地服务没启动，主脚本仍然能用，但修改后需要刷新页面才能生效。
 - 刷新页面可能导致重新登录和 FSU 重新 loading，所以开发时建议使用热加载。
 - 热加载只加载 `DailyLoopRunner.user.js`，因此开发时优先改这个文件，再同步到 `BronzeUpgradeLoop.user.js`。
+- `Load loops JSON` 读取同一服务下的 `DailyLoopRunner.loops.json`，适合只改 loop 配置时使用。
 
 ## 6. 修改默认 loop
 
@@ -131,6 +135,8 @@ const LOOP_DEFS = [
   ...
 ];
 ```
+
+也可以修改仓库里的 `DailyLoopRunner.loops.json`，启动本地服务后在面板点击 `Load loops JSON`。外部 JSON 可以是 loop 数组，也可以是 `{ "loops": [...] }`。
 
 每个 loop 常用字段：
 
@@ -327,6 +333,10 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
   - 刷新 packs、unassigned 以及可用的 club/storage/transfer 缓存。
   - 在库存选卡前会静默尝试刷新，以减少 stale cache。
 
+- `loadLoopConfig(url)`
+  - 从本地 JSON 加载 loop 定义并重绘面板下拉框。
+  - 加载失败时保留当前 loop 定义。
+
 - `clearUnassigned(reason, options)`
   - 清理 unassigned。
   - `options.reserveItem` 可保留某些卡不清理。
@@ -438,7 +448,6 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
 优先级较高：
 
 1. 把 `Daily Rare Loop` 跑稳定。
-2. 把 loop 定义从脚本内常量拆成外部 JSON。
 
 中期可以做：
 
