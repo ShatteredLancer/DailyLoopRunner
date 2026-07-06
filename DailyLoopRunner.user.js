@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.22
+// @version      0.2.23
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -182,6 +182,8 @@
         '100 x 84+',
         '84+ x10',
         '84+ x 10',
+        '10x 84+ Upgrade',
+        '10 x 84+ Upgrade',
         '10 名 84+ 升级',
         '10名84+升级',
       ],
@@ -239,7 +241,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.22',
+    version: '0.2.23',
     destroy: destroyRunner,
   };
 
