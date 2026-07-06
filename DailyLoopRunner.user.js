@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.16
+// @version      0.2.17
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -159,6 +159,30 @@
       name: 'One-click Daily MVP (1 each)',
       strategy: 'dailyRoutine',
       steps: ['daily-bronze-mvp', 'daily-silver-mvp', 'daily-common-mvp', 'daily-rare-mvp'],
+      openRewardPacks: true,
+    },
+    {
+      id: '84x100-mvp',
+      name: '84x100 MVP (1 run)',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: [
+        '84x100',
+        '84 x100',
+        '84 x 100',
+        '84+ x100',
+        '84+ x 100',
+        '100x 84+',
+        '100 x 84+',
+        '84+ x10',
+        '84+ x 10',
+        '10 名 84+ 升级',
+        '10名84+升级',
+      ],
+      maxCompletions: 1,
+      maxSubmittedRating: 88,
+      blockSpecial: true,
+      blockTradeable: true,
+      openRewardPacks: false,
     },
     {
       id: 'provision-crafting',
@@ -206,7 +230,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.16',
+    version: '0.2.17',
     destroy: destroyRunner,
   };
 
@@ -361,6 +385,7 @@
       'commonGoldToRareUpgrade',
       'provisionPackDualCrafting',
       'dailyRoutine',
+      'fillAndVerifySbc',
     ];
 
     if (typeof loopDef.name !== 'string' || !loopDef.name.trim()) {
@@ -374,9 +399,21 @@
     if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
       errors.push('dryRun must be boolean');
     }
+    ['openRewardPacks', 'blockSpecial', 'blockTradeable'].forEach((field) => {
+      if (loopDef[field] !== undefined && typeof loopDef[field] !== 'boolean') {
+        errors.push(`${field} must be boolean`);
+      }
+    });
+    if (loopDef.maxSubmittedRating !== undefined) {
+      const maxRating = Number(loopDef.maxSubmittedRating);
+      if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
+        errors.push('maxSubmittedRating must be a number between 1 and 99');
+      }
+    }
 
     validateNumberArray(loopDef.sourcePackIds, 'sourcePackIds', errors);
     validateNumberArray(loopDef.rewardPackIds, 'rewardPackIds', errors);
+    validateNumberArray(loopDef.protectedItemIds, 'protectedItemIds', errors);
     validateStringArray(loopDef.sourcePackNames, 'sourcePackNames', errors);
     validateStringArray(loopDef.rewardPackNames, 'rewardPackNames', errors);
     validatePileList(loopDef.priorityPiles, 'priorityPiles', errors);
@@ -395,6 +432,10 @@
 
     if (loopDef.strategy === 'dailyRoutine') {
       validateStringArray(loopDef.steps, 'steps', errors, true);
+    }
+
+    if (loopDef.strategy === 'fillAndVerifySbc') {
+      validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
     }
 
     if (loopDef.strategy === 'inventoryMixedUpgrade' || loopDef.strategy === 'commonGoldToRareUpgrade') {
@@ -918,7 +959,13 @@
   }
 
   function isTradeable(item) {
-    return Number(item?.untradeableCount || 0) === 0;
+    try {
+      if (typeof item?.isUntradeable === 'function') return !item.isUntradeable();
+    } catch { }
+    if (item?.untradeable === true) return false;
+    if (item?.untradeable === false) return true;
+    if (item?.untradeableCount !== undefined) return Number(item.untradeableCount || 0) === 0;
+    return false;
   }
 
   function collectionValues(collection) {
@@ -1772,6 +1819,89 @@
     if (!submitReady) fail(`${label} squad is not complete`);
   }
 
+  function unwrapSquadSlot(slot) {
+    return slot?._item || slot?.item || slot?.player || slot || null;
+  }
+
+  function getSquadItems(squad = ctrl()?._squad) {
+    const slots = squad?.getPlayers?.() || squad?._players || [];
+    return slots.map(unwrapSquadSlot).filter((item) =>
+      item && (Number(item?.definitionId || 0) || Number(item?.rating || 0) || item?.id)
+    );
+  }
+
+  function itemGroups(item) {
+    if (Array.isArray(item?.groups)) return item.groups;
+    if (Array.isArray(item?._data?.groups)) return item._data.groups;
+    return [];
+  }
+
+  function formatSquadItem(item, index) {
+    const groups = itemGroups(item);
+    const parts = [
+      `${index + 1}. ${itemDisplayName(item)}`,
+      `rating:${Number(item?.rating || 0) || '?'}`,
+      isSpecial(item) ? 'special' : (isRare(item) ? 'rare' : 'common'),
+      isTradeable(item) ? 'tradeable' : 'untradeable',
+      `id:${Number(item?.id || 0) || '?'}`,
+      `def:${Number(item?.definitionId || 0) || '?'}`,
+    ];
+    if (groups.length) parts.push(`groups:${groups.join('/')}`);
+    return parts.join(' | ');
+  }
+
+  function getSbcProtectionReasons(item, loopDef = {}) {
+    const reasons = [];
+    const rating = Number(item?.rating || 0);
+    const maxRating = Number(loopDef.maxSubmittedRating || 0);
+    const groups = itemGroups(item).map(Number);
+    const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
+
+    if (Number(item?.loans ?? -1) !== -1) reasons.push('loan');
+    if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
+    if (protectedIds.has(Number(item?.id || 0))) reasons.push('protected-id');
+    if (loopDef.blockSpecial !== false && (isSpecial(item) || groups.includes(23))) reasons.push('special-blocked');
+    if (loopDef.blockTradeable !== false && isTradeable(item)) reasons.push('tradeable-blocked');
+    if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
+
+    return reasons;
+  }
+
+  function inspectSbcSquad(loopDef, squad = ctrl()?._squad) {
+    const items = getSquadItems(squad);
+    const blocked = [];
+
+    items.forEach((item, index) => {
+      const reasons = getSbcProtectionReasons(item, loopDef);
+      if (reasons.length) blocked.push({ item, index, reasons });
+    });
+
+    return { items, blocked };
+  }
+
+  function logSbcSquadInspection(loopDef, inspection, options = {}) {
+    const maxItems = Number(options.maxItems || 20);
+    log(`${loopDef.name}: squad inspection ${inspection.items.length} item(s), blocked ${inspection.blocked.length}`);
+    inspection.items.slice(0, maxItems).forEach((item, index) => {
+      const reasons = getSbcProtectionReasons(item, loopDef);
+      log(`${loopDef.name}: squad ${formatSquadItem(item, index)}${reasons.length ? ` | BLOCK ${reasons.join(',')}` : ''}`);
+    });
+    if (inspection.items.length > maxItems) {
+      log(`${loopDef.name}: squad list truncated: ${inspection.items.length - maxItems} more item(s)`);
+    }
+  }
+
+  function assertSbcSquadSafe(loopDef, inspection) {
+    if (!inspection.items.length) fail(`${loopDef.name}: no squad items detected after fill`);
+    if (!inspection.blocked.length) return;
+
+    const summary = inspection.blocked
+      .slice(0, 10)
+      .map(({ item, index, reasons }) => `${index + 1}. ${itemDisplayName(item)} rating:${Number(item?.rating || 0) || '?'} (${reasons.join(',')})`)
+      .join('; ');
+    fail(`${loopDef.name}: protected squad item(s) detected; stop before submit: ${summary}`);
+  }
+
   async function fillBronzeUpgradeSquad() {
     await fillSbcSquad('Bronze Upgrade');
   }
@@ -1844,6 +1974,30 @@
     if (!pack && loopDef.rewardPackNames?.length) pack = findPackByName(loopDef.rewardPackNames);
     if (!pack && loopDef.sourcePackNames?.length) pack = findPackByName(loopDef.sourcePackNames);
     return pack || null;
+  }
+
+  async function findRewardPack(loopDef, explicitPackId = null) {
+    await refreshStorePacks();
+    let pack = explicitPackId ? findPackById(explicitPackId) : null;
+    if (!pack && loopDef.rewardPackIds?.length) {
+      pack = loopDef.rewardPackIds.map((id) => findPackById(id)).find(Boolean);
+    }
+    if (!pack && loopDef.rewardPackNames?.length) pack = findPackByName(loopDef.rewardPackNames);
+    return pack || null;
+  }
+
+  async function openRewardPackAndCleanup(loopDef, rewardPackId, reason = 'reward pack') {
+    const pack = await findRewardPack(loopDef, rewardPackId);
+    if (!pack) {
+      const packs = summarizePacks();
+      log(`${loopDef.name}: reward pack not found for auto-open${rewardPackId ? ` (#${rewardPackId})` : ''}; current packs: ${packs || 'none'}`);
+      return false;
+    }
+
+    const items = await openPack(pack, `${loopDef.name} ${reason}`);
+    log(`${loopDef.name}: auto-opened reward pack ${packName(pack)} (#${pack.id}); ${items.length || 0} item(s)`);
+    await clearUnassigned(`${loopDef.name} ${reason} handling`);
+    return true;
   }
 
   async function findSourcePack(loopDef) {
@@ -1930,7 +2084,10 @@
       await sleep(CFG.pauseMs);
     }
 
-    if (lastRewardPackId) {
+    if (lastRewardPackId && loopDef.openRewardPacks) {
+      const opened = await openRewardPackAndCleanup(loopDef, lastRewardPackId, 'final reward pack');
+      if (!opened) log(`${loopDef.name}: final reward pack #${lastRewardPackId} left unopened`);
+    } else if (lastRewardPackId) {
       log(`${loopDef.name}: final reward pack #${lastRewardPackId} left unopened`);
     }
 
@@ -2116,6 +2273,10 @@
       await runProvisionPackDualCraftingDryRun(loopDef);
       return;
     }
+    if (loopDef.strategy === 'fillAndVerifySbc') {
+      await runFillAndVerifySbc(loopDef);
+      return;
+    }
 
     fail(`Unsupported loop strategy: ${loopDef.strategy}`);
   }
@@ -2130,6 +2291,9 @@
       if (childDef.strategy === 'dailyRoutine') fail(`${loopDef.name}: nested dailyRoutine steps are not supported`);
       if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
         childDef.disabledPiles = [...loopDef.disabledPiles];
+      }
+      if (loopDef.openRewardPacks !== undefined && childDef.openRewardPacks === undefined) {
+        childDef.openRewardPacks = loopDef.openRewardPacks;
       }
       childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
       assertValidLoopDef(childDef, childDef.name || stepId);
@@ -2149,6 +2313,50 @@
       await runConfiguredLoop(step, 1);
       await sleep(CFG.pauseMs);
     }
+  }
+
+  async function runFillAndVerifySbc(loopDef) {
+    await waitAppReady();
+    const maxCompletions = Math.max(1, Math.min(1, Number(loopDef.maxCompletions || 1) || 1));
+    let completions = 0;
+
+    while (completions < maxCompletions) {
+      stopPoint();
+      const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+      const opened = await openSbcSet(set, { returnNullIfComplete: true });
+      if (!opened) {
+        log(`${loopDef.name}: no available SBC challenge remains`);
+        break;
+      }
+
+      await fillSbcSquad(loopDef.name);
+      const squad = ctrl()?._squad || opened.challenge?.squad;
+      const inspection = inspectSbcSquad(loopDef, squad);
+      logSbcSquadInspection(loopDef, inspection);
+
+      if (loopDef.dryRun) {
+        if (inspection.blocked.length) {
+          log(`${loopDef.name}: dry-run blocked by protected squad item(s); live run would stop before submit`);
+        } else {
+          log(`${loopDef.name}: dry-run squad passed protection; live run would submit once`);
+        }
+        try { ctrl()?._squad?.removeAllItems?.(); } catch { }
+        log(`${loopDef.name}: dry run stops before SBC submit`);
+        return;
+      }
+
+      assertSbcSquadSafe(loopDef, inspection);
+      const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
+      if (rewardPackId && loopDef.openRewardPacks) {
+        await openRewardPackAndCleanup(loopDef, rewardPackId);
+      } else if (rewardPackId) {
+        log(`${loopDef.name}: reward pack #${rewardPackId} left unopened`);
+      }
+      completions++;
+      await sleep(CFG.pauseMs);
+    }
+
+    log(`${loopDef.name}: submitted ${completions} SBC(s) in this run`);
   }
 
   async function runInventoryMixedUpgrade(loopDef) {
@@ -2192,7 +2400,11 @@
       if (!submitReady) fail(`${loopDef.name}: selected inventory players did not satisfy SBC requirements`);
 
       const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
-      if (rewardPackId) log(`${loopDef.name}: reward pack #${rewardPackId} left unopened`);
+      if (rewardPackId && loopDef.openRewardPacks) {
+        await openRewardPackAndCleanup(loopDef, rewardPackId);
+      } else if (rewardPackId) {
+        log(`${loopDef.name}: reward pack #${rewardPackId} left unopened`);
+      }
       completions++;
       await sleep(CFG.pauseMs);
     }
@@ -2266,7 +2478,11 @@
     if (!submitReady) fail(`${loopDef.name}: selected inventory players did not satisfy SBC requirements`);
 
     const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
-    if (rewardPackId) log(`${loopDef.name}: reward pack #${rewardPackId} left unopened`);
+    if (rewardPackId && loopDef.openRewardPacks) {
+      await openRewardPackAndCleanup(loopDef, rewardPackId);
+    } else if (rewardPackId) {
+      log(`${loopDef.name}: reward pack #${rewardPackId} left unopened`);
+    }
     await refreshUnassigned().catch(() => null);
     return { submitted: true, rewardPackId };
   }
@@ -2517,11 +2733,18 @@
       return;
     }
 
+    if (loopDef.strategy === 'fillAndVerifySbc') {
+      await runFillAndVerifySbc(loopDef);
+      await showUnassignedIfAny(`${loopDef.name} end`);
+      return;
+    }
+
     fail(`Unsupported loop strategy: ${loopDef.strategy}`);
   }
 
   function getLiveRunLimit(loopDef, rounds) {
     if (loopDef.strategy === 'validationBronzeUpgrade') return Number(rounds || loopDef.maxRounds || 1);
+    if (loopDef.strategy === 'fillAndVerifySbc') return Number(loopDef.maxCompletions || 1);
     if (loopDef.strategy === 'dailyRoutine') {
       return getRoutineStepLoopDefs(loopDef).reduce((maxLimit, step) => {
         const stepLimit = getLiveRunLimit(step, 1);
