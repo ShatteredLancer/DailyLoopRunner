@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.19
+// @version      0.2.20
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -237,7 +237,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.19',
+    version: '0.2.20',
     destroy: destroyRunner,
   };
 
@@ -1984,8 +1984,7 @@
     return pack || null;
   }
 
-  async function findRewardPack(loopDef, explicitPackId = null) {
-    await refreshStorePacks();
+  function findRewardPackInCache(loopDef, explicitPackId = null) {
     let pack = explicitPackId ? findPackById(explicitPackId) : null;
     if (!pack && loopDef.rewardPackIds?.length) {
       pack = loopDef.rewardPackIds.map((id) => findPackById(id)).find(Boolean);
@@ -1994,8 +1993,22 @@
     return pack || null;
   }
 
+  async function findRewardPack(loopDef, explicitPackId = null, options = {}) {
+    const attempts = Math.max(1, Number(options.attempts || 1) || 1);
+    const delayMs = Math.max(0, Number(options.delayMs || 0) || 0);
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      await refreshStorePacks().catch((e) => {
+        if (attempt === attempts) log(`Reward pack refresh failed: ${e.message || e}`);
+      });
+      const pack = findRewardPackInCache(loopDef, explicitPackId);
+      if (pack) return pack;
+      if (attempt < attempts && delayMs) await sleep(delayMs);
+    }
+    return null;
+  }
+
   async function openRewardPackAndCleanup(loopDef, rewardPackId, reason = 'reward pack') {
-    const pack = await findRewardPack(loopDef, rewardPackId);
+    const pack = await findRewardPack(loopDef, rewardPackId, { attempts: 6, delayMs: 1800 });
     if (!pack) {
       const packs = summarizePacks();
       log(`${loopDef.name}: reward pack not found for auto-open${rewardPackId ? ` (#${rewardPackId})` : ''}; current packs: ${packs || 'none'}`);
