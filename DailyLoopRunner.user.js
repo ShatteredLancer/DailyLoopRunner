@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.31
+// @version      0.2.32
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -271,7 +271,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.31',
+    version: '0.2.32',
     destroy: destroyRunner,
   };
 
@@ -1935,6 +1935,31 @@
     return items;
   }
 
+  async function waitAfterSbcFillAction(label, squad, timeoutMs = 45000) {
+    const start = Date.now();
+    const initialFilled = getFilledSquadSlots(squad);
+    while (Date.now() - start < timeoutMs) {
+      stopPoint();
+      const filled = getFilledSquadSlots(squad);
+      if (findSubmitButton()) {
+        await sleep(700);
+        log(`${label}: submit button detected after fill action`);
+        return true;
+      }
+      const shieldShowing = (() => {
+        try { return !!W.gClickShield?.isShowing?.(); } catch { return false; }
+      })();
+      if (!shieldShowing && (filled > initialFilled || Date.now() - start > 2500)) {
+        await sleep(700);
+        log(`${label}: fill action settled; slots ${initialFilled} -> ${filled}`);
+        return true;
+      }
+      await sleep(250);
+    }
+    log(`${label}: fill action wait timed out; slots ${initialFilled} -> ${getFilledSquadSlots(squad)}, submit ${findSubmitButton() ? 'ready' : 'not ready'}; continuing`);
+    return false;
+  }
+
   async function fillSbcSquad(label = 'SBC', options = {}) {
     const requireSubmitReady = options.requireSubmitReady !== false;
     const squad = await waitFor(() => ctrl()?._squad, 15000, 'SBC squad object');
@@ -1954,13 +1979,13 @@
 
     if (clickButtonByText(['一键完成', '一鍵完成', '一键填充', '一鍵填充', 'One-click fill'])) {
       log('Clicked FSU one-click fill/complete');
-      await waitLoadingEnd();
+      await waitAfterSbcFillAction(`${label} FSU one-click`, squad);
       await sleep(CFG.pauseMs);
     }
 
     if (!findSubmitButton() && clickButtonByText(['Completion', '完成', '補全', '补全'])) {
       log('Clicked FSU completion');
-      await waitLoadingEnd();
+      await waitAfterSbcFillAction(`${label} FSU completion`, squad);
       await sleep(CFG.pauseMs);
     }
 
