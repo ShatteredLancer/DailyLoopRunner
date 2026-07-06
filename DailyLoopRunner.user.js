@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.7
+// @version      0.2.8
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -143,7 +143,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.7',
+    version: '0.2.8',
     destroy: destroyRunner,
   };
 
@@ -178,6 +178,165 @@
     return LOOP_DEFS.find((def) => def.id === id) || LOOP_DEFS[0];
   }
 
+  function isPlainObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function validateStringArray(value, path, errors, required = false) {
+    if (value === undefined || value === null) {
+      if (required) errors.push(`${path} is required`);
+      return;
+    }
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((entry, index) => {
+      if (typeof entry !== 'string' || !entry.trim()) {
+        errors.push(`${path}[${index}] must be a non-empty string`);
+      }
+    });
+  }
+
+  function validateNumberArray(value, path, errors) {
+    if (value === undefined || value === null) return;
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((entry, index) => {
+      if (!Number.isFinite(Number(entry))) {
+        errors.push(`${path}[${index}] must be a number`);
+      }
+    });
+  }
+
+  function validatePileList(value, path, errors, required = false) {
+    const allowed = ['unassigned', 'storage', 'transfer', 'club'];
+    if (value === undefined || value === null) {
+      if (required) errors.push(`${path} is required`);
+      return;
+    }
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((pile, index) => {
+      if (!allowed.includes(pile)) {
+        errors.push(`${path}[${index}] must be one of: ${allowed.join(', ')}`);
+      }
+    });
+  }
+
+  function validateCardSpec(spec, path, errors) {
+    if (!isPlainObject(spec)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (spec.tier !== undefined && !['bronze', 'silver', 'gold'].includes(spec.tier)) {
+      errors.push(`${path}.tier must be bronze, silver, or gold`);
+    }
+    if (spec.rarity !== undefined && !['common', 'rare'].includes(spec.rarity)) {
+      errors.push(`${path}.rarity must be common or rare`);
+    }
+    ['playerOnly', 'allowSpecial', 'special'].forEach((field) => {
+      if (spec[field] !== undefined && typeof spec[field] !== 'boolean') {
+        errors.push(`${path}.${field} must be boolean`);
+      }
+    });
+  }
+
+  function validateRequirements(requirements, path, errors, required = false) {
+    if (requirements === undefined || requirements === null) {
+      if (required) errors.push(`${path} is required`);
+      return;
+    }
+    if (!Array.isArray(requirements) || !requirements.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    requirements.forEach((requirement, index) => {
+      const reqPath = `${path}[${index}]`;
+      validateCardSpec(requirement, reqPath, errors);
+      if (!Number.isFinite(Number(requirement?.count)) || Number(requirement.count) <= 0) {
+        errors.push(`${reqPath}.count must be a positive number`);
+      }
+      validatePileList(requirement?.priorityPiles, `${reqPath}.priorityPiles`, errors);
+    });
+  }
+
+  function validateUpgradeDef(upgradeDef, path, errors) {
+    if (!isPlainObject(upgradeDef)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (typeof upgradeDef.name !== 'string' || !upgradeDef.name.trim()) {
+      errors.push(`${path}.name is required`);
+    }
+    validateStringArray(upgradeDef.sbcNames, `${path}.sbcNames`, errors, true);
+    validateRequirements(upgradeDef.requirements, `${path}.requirements`, errors, true);
+    validatePileList(upgradeDef.priorityPiles, `${path}.priorityPiles`, errors);
+  }
+
+  function validateLoopDef(loopDef, label = 'loop') {
+    const errors = [];
+    if (!isPlainObject(loopDef)) return [`${label} must be an object`];
+
+    const strategies = [
+      'validationBronzeUpgrade',
+      'dailySingleCardRecycle',
+      'inventoryMixedUpgrade',
+      'commonGoldToRareUpgrade',
+      'provisionPackDualCrafting',
+    ];
+
+    if (typeof loopDef.name !== 'string' || !loopDef.name.trim()) {
+      errors.push('name is required');
+    }
+    if (typeof loopDef.strategy !== 'string' || !loopDef.strategy.trim()) {
+      errors.push('strategy is required');
+    } else if (!strategies.includes(loopDef.strategy)) {
+      errors.push(`strategy must be one of: ${strategies.join(', ')}`);
+    }
+
+    validateNumberArray(loopDef.sourcePackIds, 'sourcePackIds', errors);
+    validateNumberArray(loopDef.rewardPackIds, 'rewardPackIds', errors);
+    validateStringArray(loopDef.sourcePackNames, 'sourcePackNames', errors);
+    validateStringArray(loopDef.rewardPackNames, 'rewardPackNames', errors);
+    validatePileList(loopDef.priorityPiles, 'priorityPiles', errors);
+    validatePileList(loopDef.clubFallbackPiles, 'clubFallbackPiles', errors);
+
+    if (loopDef.strategy === 'validationBronzeUpgrade') {
+      validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
+      validateCardSpec(loopDef.targetDuplicate, 'targetDuplicate', errors);
+    }
+
+    if (loopDef.strategy === 'dailySingleCardRecycle') {
+      validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
+      validateCardSpec(loopDef.targetDuplicate, 'targetDuplicate', errors);
+    }
+
+    if (loopDef.strategy === 'inventoryMixedUpgrade' || loopDef.strategy === 'commonGoldToRareUpgrade') {
+      validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
+      validateRequirements(loopDef.requirements, 'requirements', errors, true);
+    }
+
+    if (loopDef.strategy === 'provisionPackDualCrafting') {
+      if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
+        errors.push('sourcePackIds or sourcePackNames is required');
+      }
+      validateUpgradeDef(loopDef.commonUpgrade, 'commonUpgrade', errors);
+      validateUpgradeDef(loopDef.rareUpgrade, 'rareUpgrade', errors);
+    }
+
+    return errors;
+  }
+
+  function assertValidLoopDef(loopDef, label = 'Loop JSON') {
+    const errors = validateLoopDef(loopDef, label);
+    if (errors.length) fail(`${label} validation failed:\n- ${errors.join('\n- ')}`);
+  }
+
   function getSelectedLoopDef() {
     const select = document.querySelector('#bronze-loop-select');
     const selectedId = select?.value || LOOP_DEFS[0].id;
@@ -185,13 +344,16 @@
       const text = document.querySelector('#bronze-loop-json')?.value || '';
       try {
         const parsed = JSON.parse(text);
-        if (!parsed.name || !parsed.strategy) fail('Custom loop JSON must include name and strategy');
+        assertValidLoopDef(parsed, 'Custom loop JSON');
         return parsed;
       } catch (e) {
-        fail(`Invalid custom loop JSON: ${e.message || e}`);
+        if (e instanceof SyntaxError) fail(`Invalid custom loop JSON: ${e.message || e}`);
+        throw e;
       }
     }
-    return cloneLoopDef(getLoopDefById(selectedId));
+    const loopDef = cloneLoopDef(getLoopDefById(selectedId));
+    assertValidLoopDef(loopDef, loopDef.name || selectedId);
+    return loopDef;
   }
 
   function setLoopJson(def) {

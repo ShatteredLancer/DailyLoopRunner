@@ -2,16 +2,12 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.3`
+- `DailyLoopRunner.user.js`: `0.2.8`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.0`
 
 ## 1. 文件说明
 
-主要文件都在：
-
-```powershell
-C:\Users\Administrator\Desktop\FC Plugins
-```
+主要文件都在本仓库目录。
 
 核心文件：
 
@@ -105,7 +101,7 @@ Chrome 中需要启用：
 启动本地服务：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "C:\Users\Administrator\Desktop\FC Plugins\StartLoopRunnerDevServer.ps1"
+powershell -ExecutionPolicy Bypass -File ".\StartLoopRunnerDevServer.ps1"
 ```
 
 保持这个 PowerShell 窗口打开。
@@ -208,6 +204,17 @@ const LOOP_DEFS = [
 
 面板里可以编辑自定义 JSON。推荐先复制现有 loop，改名称、SBC、包名和 requirements。
 
+点击 `Start` 前脚本会校验自定义 JSON。校验失败时不会开包或提交 SBC，而是直接在日志里列出配置错误。
+
+会拦截的常见错误：
+
+- 缺少 `name` 或 `strategy`。
+- `strategy` 不是脚本支持的策略。
+- `sbcNames`、`requirements`、`priorityPiles` 类型不对。
+- `requirements[].count` 不是正数。
+- `tier` / `rarity` / `priorityPiles` 写了不支持的值。
+- `provisionPackDualCrafting` 缺少源包配置、`commonUpgrade` 或 `rareUpgrade`。
+
 示例：只用 storage 和 club 做一个普通金升级：
 
 ```json
@@ -280,13 +287,13 @@ if (loopDef.strategy === 'myNewStrategy') {
 4. 运行语法检查：
 
 ```powershell
-node --check "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js"
+node --check ".\DailyLoopRunner.user.js"
 ```
 
-5. 同步旧文件名副本：
+5. 如果你仍在维护旧文件名副本，语法检查通过后同步：
 
 ```powershell
-Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js" -Destination "C:\Users\Administrator\Desktop\FC Plugins\BronzeUpgradeLoop.user.js" -Force
+Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgradeLoop.user.js" -Force
 ```
 
 6. 热加载或刷新页面测试。
@@ -321,6 +328,10 @@ Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunne
   - 按规则从 pile 选材料。
   - 已处理 transfer duplicateId 解析。
 
+- `validateLoopDef(loopDef)`
+  - 校验默认或自定义 loop 配置。
+  - 在开包或提交 SBC 前拦截明显错误。
+
 - `prepareInventorySelection(loopDef, selection)`
   - 提交前二次准备。
 
@@ -348,9 +359,7 @@ Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunne
 3. 出错后点击 `Save Log`。
 4. 查看：
 
-```powershell
-C:\Users\Administrator\Desktop\log.txt
-```
+保存路径由浏览器下载设置决定，文件名形如 `bronze-loop-*.log`。
 
 常见错误：
 
@@ -384,13 +393,13 @@ C:\Users\Administrator\Desktop\log.txt
 - 每次修改后跑：
 
 ```powershell
-node --check "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js"
+node --check ".\DailyLoopRunner.user.js"
 ```
 
-- 通过后同步：
+- 如果你仍在维护旧文件名副本，通过后同步：
 
 ```powershell
-Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js" -Destination "C:\Users\Administrator\Desktop\FC Plugins\BronzeUpgradeLoop.user.js" -Force
+Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgradeLoop.user.js" -Force
 ```
 
 - 使用热加载测试。
@@ -404,9 +413,8 @@ Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunne
 1. 把 `Daily Rare Loop` 跑稳定。
 2. 增加 item cache 刷新能力，减少 stale transfer/storage 缓存。
 3. 把 loop 定义从脚本内常量拆成外部 JSON。
-4. 给自定义 JSON 增加校验和错误提示。
-5. 增加 dry-run 模式：只列出会选哪些卡，不提交。
-6. 给每个 loop 增加更细的开关，例如是否允许使用 club、是否允许使用 transfer。
+4. 增加 dry-run 模式：只列出会选哪些卡，不提交。
+5. 给每个 loop 增加更细的开关，例如是否允许使用 club、是否允许使用 transfer。
 
 中期可以做：
 
