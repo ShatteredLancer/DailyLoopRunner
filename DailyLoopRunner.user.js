@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.18
+// @version      0.2.19
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -237,7 +237,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.18',
+    version: '0.2.19',
     destroy: destroyRunner,
   };
 
@@ -1272,6 +1272,7 @@
       fail(`No available challenge for ${set.name}`);
     }
 
+    const controller = ctrl();
     const load = await observeOnce(
       W.services.SBC.loadChallenge(challenge),
       controller,
