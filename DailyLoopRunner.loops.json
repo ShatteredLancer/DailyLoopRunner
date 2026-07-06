@@ -245,6 +245,41 @@
       "maxCompletions": 1
     },
     {
+      "id": "daily-rare-pack-84",
+      "name": "Daily Rare Pack to 2x84+ Loop",
+      "strategy": "rarePackTo84Upgrade",
+      "sourcePackNames": [
+        "5x Max.78 Rare Gold Players Pack",
+        "5x Max. 78 Rare Gold Players Pack",
+        "5x Max 78 Rare Gold Players Pack",
+        "5 x Max.78 Rare Gold Players Pack",
+        "5 x Max. 78 Rare Gold Players Pack",
+        "5 x Max 78 Rare Gold Players Pack",
+        "5x 80+ Rare Gold Players Pack",
+        "5 x 80+ Rare Gold Players Pack"
+      ],
+      "rareUpgrade": {
+        "name": "2x 84+ Upgrade",
+        "sbcNames": [
+          "2x 84+ Upgrade",
+          "2 x 84+ Upgrade"
+        ],
+        "requirements": [
+          {
+            "tier": "gold",
+            "rarity": "rare",
+            "count": 6,
+            "playerOnly": true,
+            "allowSpecial": false,
+            "protectHighGold": true,
+            "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+          }
+        ],
+        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+      },
+      "maxPacks": 100
+    },
+    {
       "id": "one-click-daily-mvp",
       "name": "One-click Daily MVP (1 each)",
       "strategy": "dailyRoutine",
@@ -254,7 +289,7 @@
         "daily-common-mvp",
         "daily-rare-mvp"
       ],
-      "openRewardPacks": true
+      "openRewardPacks": false
     },
     {
       "id": "one-click-daily",
@@ -264,9 +299,10 @@
         "daily-bronze",
         "daily-silver",
         "daily-common",
-        "daily-rare"
+        "daily-rare",
+        "daily-rare-pack-84"
       ],
-      "openRewardPacks": true
+      "openRewardPacks": false
     },
     {
       "id": "84x10-mvp",

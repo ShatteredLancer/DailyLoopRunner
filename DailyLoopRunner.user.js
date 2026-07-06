@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.27
+// @version      0.2.31
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -155,18 +155,42 @@
       maxCompletions: 1,
     },
     {
+      id: 'daily-rare-pack-84',
+      name: 'Daily Rare Pack to 2x84+ Loop',
+      strategy: 'rarePackTo84Upgrade',
+      sourcePackNames: [
+        '5x Max.78 Rare Gold Players Pack',
+        '5x Max. 78 Rare Gold Players Pack',
+        '5x Max 78 Rare Gold Players Pack',
+        '5 x Max.78 Rare Gold Players Pack',
+        '5 x Max. 78 Rare Gold Players Pack',
+        '5 x Max 78 Rare Gold Players Pack',
+        '5x 80+ Rare Gold Players Pack',
+        '5 x 80+ Rare Gold Players Pack',
+      ],
+      rareUpgrade: {
+        name: '2x 84+ Upgrade',
+        sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
+        requirements: [
+          { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        ],
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      },
+      maxPacks: 100,
+    },
+    {
       id: 'one-click-daily-mvp',
       name: 'One-click Daily MVP (1 each)',
       strategy: 'dailyRoutine',
       steps: ['daily-bronze-mvp', 'daily-silver-mvp', 'daily-common-mvp', 'daily-rare-mvp'],
-      openRewardPacks: true,
+      openRewardPacks: false,
     },
     {
       id: 'one-click-daily',
       name: 'One-click Daily Loop (max 7 each)',
       strategy: 'dailyRoutine',
-      steps: ['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare'],
-      openRewardPacks: true,
+      steps: ['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare', 'daily-rare-pack-84'],
+      openRewardPacks: false,
     },
     {
       id: '84x10-mvp',
@@ -247,7 +271,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.27',
+    version: '0.2.31',
     destroy: destroyRunner,
   };
 
@@ -263,8 +287,11 @@
   }
 
   function renderLog() {
-    const box = document.querySelector('#bronze-loop-log');
-    if (box) box.textContent = state.logLines.join('\n');
+    const latest = state.logLines[state.logLines.length - 1] || 'Ready.';
+    const latestBox = document.querySelector('#bronze-loop-latest');
+    const fullBox = document.querySelector('#bronze-loop-log');
+    if (latestBox) latestBox.textContent = latest;
+    if (fullBox) fullBox.textContent = state.logLines.join('\n');
   }
 
   function clearLog() {
@@ -401,6 +428,7 @@
       'inventoryMixedUpgrade',
       'commonGoldToRareUpgrade',
       'provisionPackDualCrafting',
+      'rarePackTo84Upgrade',
       'dailyRoutine',
       'fillAndVerifySbc',
     ];
@@ -467,6 +495,19 @@
       }
       validateUpgradeDef(loopDef.commonUpgrade, 'commonUpgrade', errors);
       validateUpgradeDef(loopDef.rareUpgrade, 'rareUpgrade', errors);
+    }
+
+    if (loopDef.strategy === 'rarePackTo84Upgrade') {
+      if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
+        errors.push('sourcePackIds or sourcePackNames is required');
+      }
+      validateUpgradeDef(loopDef.rareUpgrade, 'rareUpgrade', errors);
+      if (loopDef.maxPacks !== undefined) {
+        const maxPacks = Number(loopDef.maxPacks);
+        if (!Number.isFinite(maxPacks) || maxPacks <= 0) {
+          errors.push('maxPacks must be a positive number');
+        }
+      }
     }
 
     return errors;
@@ -649,10 +690,12 @@
   }
 
   function updateLoopControls() {
+    const roundsRow = document.querySelector('#bronze-loop-rounds-row');
     const roundsLabel = document.querySelector('#bronze-loop-rounds-label');
     const roundsInput = document.querySelector('#bronze-loop-rounds');
     if (!roundsLabel || !roundsInput) return;
     const showRounds = ['validationBronzeUpgrade', 'provisionPackDualCrafting'].includes(getEditorLoopStrategy());
+    if (roundsRow) roundsRow.style.display = showRounds ? '' : 'none';
     roundsLabel.style.display = showRounds ? '' : 'none';
     roundsInput.style.display = showRounds ? '' : 'none';
   }
@@ -2338,6 +2381,10 @@
     return document.querySelector('#bronze-loop-dry-run')?.checked === true;
   }
 
+  function isOpenRewardPacksEnabled() {
+    return document.querySelector('#bronze-loop-open-rewards')?.checked === true;
+  }
+
   async function runValidationBronzeUpgradeDryRun(loopDef) {
     await waitAppReady();
     await refreshStorePacks();
@@ -2463,6 +2510,21 @@
     log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
   }
 
+  async function runRarePackTo84UpgradeDryRun(loopDef) {
+    await waitAppReady();
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
+    const pack = await findSourcePack(loopDef);
+    log(`${loopDef.name}: dry-run source pack ${pack ? `${packName(pack)} (#${pack.id})` : 'not found'}`);
+    log(`${loopDef.name}: dry-run would open matching rare gold pack(s) one by one`);
+    await runReservedDuplicateUpgradeDryRun(
+      loopDef,
+      loopDef.rareUpgrade,
+      (item) => isRareGoldDuplicate(item, { protectHighGold: true }),
+      '2x84+ low rare gold',
+    );
+    log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
+  }
+
   async function runDryRunLoop(loopDef, roundNo = 1) {
     log(`Dry run active: no items will be moved, no packs opened, no squads saved, no SBCs submitted`);
 
@@ -2488,6 +2550,10 @@
     }
     if (loopDef.strategy === 'provisionPackDualCrafting') {
       await runProvisionPackDualCraftingDryRun(loopDef);
+      return;
+    }
+    if (loopDef.strategy === 'rarePackTo84Upgrade') {
+      await runRarePackTo84UpgradeDryRun(loopDef);
       return;
     }
     if (loopDef.strategy === 'fillAndVerifySbc') {
@@ -2522,16 +2588,18 @@
     const limits = steps.map((step) => {
       const rawLimit = getLiveRunLimit(step, 1);
       const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.floor(rawLimit)) : 1;
+      const unit = step.strategy === 'rarePackTo84Upgrade' ? 'pack(s)' : 'SBC(s)';
       return {
         name: step.name || step.id || step.strategy || 'step',
         limit,
+        unit,
       };
     });
     return {
       limits,
       max: limits.reduce((maxLimit, step) => Math.max(maxLimit, step.limit), 1),
       total: limits.reduce((sum, step) => sum + step.limit, 0),
-      text: limits.map((step) => `${step.name} max ${step.limit}`).join('; '),
+      text: limits.map((step) => `${step.name} max ${step.limit} ${step.unit}`).join('; '),
     };
   }
 
@@ -2680,6 +2748,10 @@
 
   function isProvisionCraftingDuplicate(item) {
     return isCommonGoldDuplicate(item) || isRareGoldDuplicate(item);
+  }
+
+  function isLowRareGoldDuplicate(item) {
+    return isRareGoldDuplicate(item, { protectHighGold: true });
   }
 
   async function handleRareSourcePackItems(items, loopDef) {
@@ -2854,6 +2926,30 @@
     return { common, rare };
   }
 
+  async function handleRarePackTo84Items(items, loopDef) {
+    const reservedIds = new Set((items || [])
+      .filter(isLowRareGoldDuplicate)
+      .map((item) => Number(item?.id || 0)));
+    const directClub = (items || []).filter((item) =>
+      !reservedIds.has(Number(item?.id || 0)) &&
+      !isDuplicate(item)
+    );
+
+    if (directClub.length) {
+      log(`${loopDef.name}: moving ${directClub.length} non-duplicate rare pack item(s) to club`);
+      await moveItems(directClub, W.ItemPile.CLUB, true);
+    }
+
+    await clearUnassigned(`${loopDef.name} rare pack handling`, {
+      reserveItem: isLowRareGoldDuplicate,
+    });
+
+    await refreshUnassigned();
+    const lowRare = countUnassignedMatching(isLowRareGoldDuplicate);
+    log(`${loopDef.name}: reserved low rare gold duplicate(s):${lowRare}`);
+    return { lowRare };
+  }
+
   async function submitReservedDuplicateUpgrade(loopDef, upgradeDef, duplicatePredicate, label) {
     let completions = 0;
     const countNeeded = getUpgradeRequirementCount(upgradeDef);
@@ -2935,6 +3031,45 @@
     log(`${loopDef.name}: opened ${packsOpened} Provision Pack(s), submitted common:${commonCompletions}, rare:${rareCompletions}`);
   }
 
+  async function runRarePackTo84Upgrade(loopDef) {
+    await waitAppReady();
+    const maxPacks = Math.max(1, Math.min(100, Number(loopDef.maxPacks || 100) || 100));
+    let packsOpened = 0;
+    let rareCompletions = 0;
+
+    while (packsOpened < maxPacks) {
+      stopPoint();
+      await clearUnassigned(`${loopDef.name} pre-open cleanup`);
+
+      const pack = await findSourcePack(loopDef);
+      if (!pack) {
+        log(`${loopDef.name}: no matching rare gold source pack remains`);
+        break;
+      }
+
+      log(`${loopDef.name}: opening ${packName(pack)} (#${pack.id}) ${packsOpened + 1}/${maxPacks}`);
+      const items = await openPack(pack, `${loopDef.name} source pack`, { allowGone: true });
+      if (!items) {
+        await sleep(CFG.pauseMs);
+        continue;
+      }
+
+      packsOpened++;
+      await handleRarePackTo84Items(items, loopDef);
+      rareCompletions += await submitReservedDuplicateUpgrade(
+        loopDef,
+        loopDef.rareUpgrade,
+        isLowRareGoldDuplicate,
+        '2x84+ low rare gold',
+      );
+      await clearUnassigned(`${loopDef.name} post-pack cleanup`);
+      await sleep(CFG.pauseMs);
+    }
+
+    await clearUnassigned(`${loopDef.name} final cleanup`);
+    log(`${loopDef.name}: opened ${packsOpened} rare gold pack(s), submitted 2x84+:${rareCompletions}`);
+  }
+
   async function runRound(roundNo) {
     log(`Round ${roundNo} start`);
     await waitAppReady();
@@ -2996,6 +3131,12 @@
       return;
     }
 
+    if (loopDef.strategy === 'rarePackTo84Upgrade') {
+      await runRarePackTo84Upgrade(loopDef);
+      await showUnassignedIfAny(`${loopDef.name} end`);
+      return;
+    }
+
     if (loopDef.strategy === 'fillAndVerifySbc') {
       await runFillAndVerifySbc(loopDef);
       await showUnassignedIfAny(`${loopDef.name} end`);
@@ -3008,6 +3149,7 @@
   function getLiveRunLimit(loopDef, rounds) {
     if (loopDef.strategy === 'validationBronzeUpgrade') return Number(rounds || loopDef.maxRounds || 1);
     if (loopDef.strategy === 'fillAndVerifySbc') return Number(loopDef.maxCompletions || 1);
+    if (loopDef.strategy === 'rarePackTo84Upgrade') return Number(loopDef.maxPacks || 100);
     if (loopDef.strategy === 'dailyRoutine') {
       return summarizeRoutineStepLimits(getRoutineStepLoopDefs(loopDef)).max;
     }
@@ -3017,7 +3159,10 @@
   function getLiveRunScopeMessage(loopDef, rounds, limit) {
     if (loopDef.strategy === 'dailyRoutine') {
       const summary = summarizeRoutineStepLimits(getRoutineStepLoopDefs(loopDef));
-      return `may submit up to ${summary.total} SBC(s) total (${summary.text})`;
+      return `may run ${summary.limits.length} step(s) (${summary.text})`;
+    }
+    if (loopDef.strategy === 'rarePackTo84Upgrade') {
+      return `may open up to ${limit} pack(s) and submit matching 2x84+ SBC(s)`;
     }
     return `may submit up to ${limit} SBC(s)`;
   }
@@ -3063,6 +3208,7 @@
       const input = document.querySelector('#bronze-loop-rounds');
       rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
       loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
+      loopDef.openRewardPacks = isOpenRewardPacksEnabled();
       if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
       if (!confirmLiveRunIfNeeded(loopDef, rounds)) return;
     } catch (e) {
@@ -3105,6 +3251,9 @@
     const loadJson = document.querySelector('#bronze-loop-load-json');
     const builtIn = document.querySelector('#bronze-loop-built-in');
     const dryRun = document.querySelector('#bronze-loop-dry-run');
+    const openRewards = document.querySelector('#bronze-loop-open-rewards');
+    const rounds = document.querySelector('#bronze-loop-rounds');
+    const json = document.querySelector('#bronze-loop-json');
     if (start) start.disabled = state.running;
     if (stop) stop.disabled = !state.running;
     if (select) select.disabled = state.running;
@@ -3113,6 +3262,9 @@
     if (loadJson) loadJson.disabled = state.running || state.loadingLoops;
     if (builtIn) builtIn.disabled = state.running || state.loadingLoops || state.loopConfigSource === 'built-in';
     if (dryRun) dryRun.disabled = state.running;
+    if (openRewards) openRewards.disabled = state.running;
+    if (rounds) rounds.disabled = state.running;
+    if (json) json.disabled = state.running;
     updateLoopControls();
   }
 
@@ -3142,10 +3294,12 @@
     let startY = 0;
     let startLeft = 0;
     let startTop = 0;
+    let moved = false;
 
     handle.addEventListener('pointerdown', (event) => {
-      if (event.target.closest('button,select,input,textarea')) return;
+      if (!panel.classList.contains('icon-only') && event.target.closest('button,select,input,textarea')) return;
       dragging = true;
+      moved = false;
       const rect = panel.getBoundingClientRect();
       startX = event.clientX;
       startY = event.clientY;
@@ -3161,8 +3315,11 @@
 
     handle.addEventListener('pointermove', (event) => {
       if (!dragging) return;
-      const nextLeft = Math.max(0, Math.min(window.innerWidth - 80, startLeft + event.clientX - startX));
-      const nextTop = Math.max(0, Math.min(window.innerHeight - 40, startTop + event.clientY - startY));
+      const deltaX = event.clientX - startX;
+      const deltaY = event.clientY - startY;
+      if (Math.abs(deltaX) + Math.abs(deltaY) > 3) moved = true;
+      const nextLeft = Math.max(0, Math.min(window.innerWidth - 36, startLeft + deltaX));
+      const nextTop = Math.max(0, Math.min(window.innerHeight - 36, startTop + deltaY));
       panel.style.left = `${nextLeft}px`;
       panel.style.top = `${nextTop}px`;
       event.preventDefault();
@@ -3171,6 +3328,23 @@
     const stopDrag = () => {
       if (!dragging) return;
       dragging = false;
+      if (panel.classList.contains('icon-only') && !moved) {
+        panel.dataset.dragJustEnded = '1';
+        panel.classList.remove('icon-only');
+        const optionsToggle = document.querySelector('#bronze-loop-options-toggle');
+        if (optionsToggle) optionsToggle.textContent = 'Options';
+        setTimeout(() => {
+          delete panel.dataset.dragJustEnded;
+        }, 150);
+        savePanelPos(panel);
+        return;
+      }
+      if (moved) {
+        panel.dataset.dragJustEnded = '1';
+        setTimeout(() => {
+          delete panel.dataset.dragJustEnded;
+        }, 150);
+      }
       savePanelPos(panel);
     };
     handle.addEventListener('pointerup', stopDrag);
@@ -3188,19 +3362,34 @@
         right: 10px;
         bottom: 10px;
         z-index: 999999;
-        width: 320px;
+        width: 300px;
         background: #15181d;
         border: 1px solid #5b6f8f;
         color: #f4f6f8;
         font: 12px Arial, sans-serif;
         padding: 8px;
         box-shadow: 0 8px 30px rgba(0,0,0,.35);
+        box-sizing: border-box;
       }
-      #bronze-loop-panel.collapsed {
-        width: 220px;
+      #bronze-loop-panel.icon-only {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        background: rgba(12,15,19,.72);
+        border: 1px solid #78a6ff;
+        overflow: hidden;
+        box-shadow: 0 4px 16px rgba(0,0,0,.28);
       }
-      #bronze-loop-panel.collapsed .panel-body {
+      #bronze-loop-panel.icon-only .panel-body,
+      #bronze-loop-panel.icon-only #bronze-loop-title,
+      #bronze-loop-panel.icon-only #bronze-loop-options-toggle {
         display: none;
+      }
+      #bronze-loop-panel.icon-only #bronze-loop-drag {
+        width: 34px;
+        height: 34px;
+        margin: 0;
+        justify-content: center;
       }
       #bronze-loop-drag {
         cursor: move;
@@ -3214,11 +3403,22 @@
         white-space: nowrap;
       }
       #bronze-loop-panel .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-      #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; }
+      #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; background: #222832; color: #fff; border: 1px solid #607089; }
+      #bronze-loop-panel button:disabled { opacity: .45; cursor: default; }
       #bronze-loop-collapse { min-width: 28px !important; width: 28px; padding: 0; }
-      #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; }
+      #bronze-loop-panel.icon-only #bronze-loop-collapse {
+        min-width: 34px !important;
+        width: 34px;
+        height: 34px;
+        border: 0;
+        background: transparent;
+        color: #78a6ff;
+        font-weight: 700;
+      }
+      #bronze-loop-options-toggle { min-width: 58px; }
+      #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; box-sizing: border-box; }
       #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
-      #bronze-loop-dry-run-label { cursor: pointer; user-select: none; }
+      #bronze-loop-panel label { cursor: pointer; user-select: none; }
       #bronze-loop-panel select {
         flex: 1;
         min-width: 0;
@@ -3226,6 +3426,29 @@
         background: #222832;
         color: #fff;
         border: 1px solid #607089;
+      }
+      #bronze-loop-latest {
+        min-height: 28px;
+        max-height: 44px;
+        overflow: hidden;
+        background: #0c0f13;
+        border: 1px solid #303946;
+        padding: 6px;
+        line-height: 16px;
+        color: #d7e2f0;
+        word-break: break-word;
+      }
+      #bronze-loop-options {
+        display: none;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid #303946;
+      }
+      #bronze-loop-panel.options-open #bronze-loop-options { display: block; }
+      .bronze-loop-section {
+        color: #9fb2c9;
+        font-size: 11px;
+        margin: 8px 0 6px;
       }
       #bronze-loop-json {
         display: none;
@@ -3247,6 +3470,7 @@
         background: #0c0f13;
         border: 1px solid #303946;
         padding: 8px;
+        box-sizing: border-box;
       }
     `;
     document.head.appendChild(style);
@@ -3256,38 +3480,50 @@
     panel.innerHTML = `
       <div class="row" id="bronze-loop-drag">
         <span id="bronze-loop-title">Loop Runner</span>
-        <button id="bronze-loop-collapse" title="Collapse">-</button>
+        <button id="bronze-loop-options-toggle" title="Options">Options</button>
+        <button id="bronze-loop-collapse" title="Compact">L</button>
       </div>
       <div class="panel-body">
         <div class="row">
           <select id="bronze-loop-select"></select>
         </div>
-        <div class="row" id="bronze-loop-rounds-row">
-          <span id="bronze-loop-rounds-label">rounds</span>
-          <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${CFG.maxRounds}">
-        </div>
         <div class="row">
-          <label id="bronze-loop-dry-run-label" title="Log planned selections without moving items, opening packs, or submitting SBCs">
-            <input id="bronze-loop-dry-run" type="checkbox"> Dry run
-          </label>
           <button id="bronze-loop-start">Start</button>
           <button id="bronze-loop-stop" disabled>Stop</button>
         </div>
-        <div class="row">
-          <button id="bronze-loop-edit">Edit JSON</button>
-          <button id="bronze-loop-refresh">Refresh caches</button>
+        <div id="bronze-loop-latest">Ready.</div>
+        <div id="bronze-loop-options">
+          <div class="bronze-loop-section">Run options</div>
+          <div class="row">
+            <label id="bronze-loop-dry-run-label" title="Log planned selections without moving items, opening packs, or submitting SBCs">
+              <input id="bronze-loop-dry-run" type="checkbox"> Dry run
+            </label>
+            <label title="Open reward packs automatically when a loop supports it">
+              <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
+            </label>
+          </div>
+          <div class="row" id="bronze-loop-rounds-row">
+            <span id="bronze-loop-rounds-label">rounds</span>
+            <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${CFG.maxRounds}">
+          </div>
+          <div class="bronze-loop-section">Config</div>
+          <div class="row">
+            <button id="bronze-loop-refresh">Refresh caches</button>
+            <button id="bronze-loop-load-json">Load loops JSON</button>
+          </div>
+          <div class="row">
+            <button id="bronze-loop-built-in" disabled>Built-in loops</button>
+            <button id="bronze-loop-edit">Edit JSON</button>
+          </div>
+          <textarea id="bronze-loop-json" spellcheck="false"></textarea>
+          <div class="bronze-loop-section">Log</div>
+          <div class="row">
+            <button id="bronze-loop-copy">Copy log</button>
+            <button id="bronze-loop-clear">Clear log</button>
+            <button id="bronze-loop-download">Save log</button>
+          </div>
+          <div id="bronze-loop-log"></div>
         </div>
-        <div class="row">
-          <button id="bronze-loop-load-json">Load loops JSON</button>
-          <button id="bronze-loop-built-in" disabled>Built-in loops</button>
-        </div>
-        <div class="row">
-          <button id="bronze-loop-copy">Copy log</button>
-          <button id="bronze-loop-clear">Clear log</button>
-          <button id="bronze-loop-download">Save log</button>
-        </div>
-        <textarea id="bronze-loop-json" spellcheck="false"></textarea>
-        <div id="bronze-loop-log"></div>
       </div>
     `;
     document.body.appendChild(panel);
@@ -3300,9 +3536,24 @@
     }
     makePanelDraggable(panel);
     renderLoopSelect();
-    document.querySelector('#bronze-loop-collapse').addEventListener('click', () => {
-      panel.classList.toggle('collapsed');
-      document.querySelector('#bronze-loop-collapse').textContent = panel.classList.contains('collapsed') ? '+' : '-';
+    renderLog();
+    document.querySelector('#bronze-loop-collapse').addEventListener('click', (event) => {
+      if (panel.dataset.dragJustEnded === '1') {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      panel.classList.toggle('icon-only');
+      if (panel.classList.contains('icon-only')) {
+        panel.classList.remove('options-open');
+        document.querySelector('#bronze-loop-options-toggle').textContent = 'Options';
+      }
+      document.querySelector('#bronze-loop-collapse').textContent = panel.classList.contains('icon-only') ? 'L' : 'L';
+      savePanelPos(panel);
+    });
+    document.querySelector('#bronze-loop-options-toggle').addEventListener('click', () => {
+      panel.classList.toggle('options-open');
+      document.querySelector('#bronze-loop-options-toggle').textContent = panel.classList.contains('options-open') ? 'Close' : 'Options';
       savePanelPos(panel);
     });
     document.querySelector('#bronze-loop-select').addEventListener('change', (event) => {
@@ -3324,6 +3575,7 @@
       updateLoopControls();
     });
     document.querySelector('#bronze-loop-dry-run').addEventListener('change', clearPendingLiveConfirm);
+    document.querySelector('#bronze-loop-open-rewards').addEventListener('change', clearPendingLiveConfirm);
     document.querySelector('#bronze-loop-start').addEventListener('click', startLoop);
     document.querySelector('#bronze-loop-refresh').addEventListener('click', async () => {
       if (state.running || state.refreshing) return;
