@@ -251,7 +251,31 @@
         "daily-silver-mvp",
         "daily-common-mvp",
         "daily-rare-mvp"
-      ]
+      ],
+      "openRewardPacks": true
+    },
+    {
+      "id": "84x100-mvp",
+      "name": "84x100 MVP (1 run)",
+      "strategy": "fillAndVerifySbc",
+      "sbcNames": [
+        "84x100",
+        "84 x100",
+        "84 x 100",
+        "84+ x100",
+        "84+ x 100",
+        "100x 84+",
+        "100 x 84+",
+        "84+ x10",
+        "84+ x 10",
+        "10 名 84+ 升级",
+        "10名84+升级"
+      ],
+      "maxCompletions": 1,
+      "maxSubmittedRating": 88,
+      "blockSpecial": true,
+      "blockTradeable": true,
+      "openRewardPacks": false
     },
     {
       "id": "provision-crafting",
