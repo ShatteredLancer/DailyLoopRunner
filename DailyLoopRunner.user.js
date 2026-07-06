@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.9
+// @version      0.2.10
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -131,6 +131,7 @@
   const state = {
     running: false,
     stopping: false,
+    refreshing: false,
     logLines: [],
     bootTimer: null,
   };
@@ -143,7 +144,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.9',
+    version: '0.2.10',
     destroy: destroyRunner,
   };
 
@@ -509,6 +510,90 @@
     );
     if (!result?.success) fail(`Unassigned refresh failed: ${result?.error?.code || result?.status || 'unknown'}`);
     return result;
+  }
+
+  function cacheSummary() {
+    return [
+      `packs:${getMyPacks().length}`,
+      `unassigned:${getUnassignedItems().length}`,
+      `storage:${getStorageItems().length}`,
+      `transfer:${getTransferItems().length}`,
+      `club:${getClubItems().length}`,
+    ].join(', ');
+  }
+
+  async function awaitMaybeObservable(value, label, timeoutMs = 20000) {
+    if (!value) return { success: true, skipped: true };
+    if (typeof value.observe === 'function') {
+      return observeOnce(value, ctrl(), timeoutMs, label);
+    }
+    if (typeof value.then === 'function') {
+      return value;
+    }
+    return value;
+  }
+
+  async function tryOptionalRefresh(label, action, options = {}) {
+    const quiet = options.quiet === true;
+    try {
+      const result = await awaitMaybeObservable(action(), label, options.timeoutMs || 20000);
+      if (result?.success === false) {
+        const code = result?.error?.code || result?.status || 'unknown';
+        if (!quiet) log(`${label} refresh failed: ${code}`);
+        return false;
+      }
+      if (!quiet) log(`${label} refreshed`);
+      return true;
+    } catch (e) {
+      if (!quiet) log(`${label} refresh skipped: ${e.message || e}`);
+      return false;
+    }
+  }
+
+  async function refreshPileCacheByCandidates(pileName, pile, specificNames, options = {}) {
+    const itemService = W.services?.Item || {};
+    for (const methodName of specificNames) {
+      if (typeof itemService[methodName] !== 'function') continue;
+      const ok = await tryOptionalRefresh(`Item.${methodName}`, () => itemService[methodName](), options);
+      if (ok) return true;
+    }
+
+    const genericNames = [
+      'requestItems',
+      'requestPileItems',
+      'requestItemsForPile',
+      'requestItemsByPile',
+    ];
+    for (const methodName of genericNames) {
+      if (typeof itemService[methodName] !== 'function') continue;
+      const ok = await tryOptionalRefresh(`${pileName} via Item.${methodName}`, () => itemService[methodName](pile), options);
+      if (ok) return true;
+    }
+
+    if (!options.quiet) log(`${pileName} cache refresh method not available; using existing cache`);
+    return false;
+  }
+
+  async function refreshInventoryCaches(reason = 'manual refresh', options = {}) {
+    await waitAppReady();
+    const quiet = options.quiet === true;
+    if (!quiet) log(`Refreshing caches: ${reason}`);
+
+    if (options.includePacks !== false) {
+      await refreshStorePacks().catch((e) => {
+        if (!quiet) log(`Store pack refresh skipped: ${e.message || e}`);
+      });
+    }
+
+    await refreshUnassigned().catch((e) => {
+      if (!quiet) log(`Unassigned refresh skipped: ${e.message || e}`);
+    });
+
+    await refreshPileCacheByCandidates('club', W.ItemPile.CLUB, ['requestClubItems'], options);
+    await refreshPileCacheByCandidates('storage', W.ItemPile.STORAGE, ['requestStorageItems', 'requestSBCStorageItems'], options);
+    await refreshPileCacheByCandidates('transfer', W.ItemPile.TRANSFER, ['requestTransferItems'], options);
+
+    if (!quiet) log(`Cache summary: ${cacheSummary()}`);
   }
 
   function getUnassignedItems() {
@@ -1558,7 +1643,7 @@
 
   async function runDailySingleCardRecycleDryRun(loopDef) {
     await waitAppReady();
-    await refreshUnassigned();
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
     const targetDuplicates = getUnassignedTargetDuplicates(loopDef);
     if (targetDuplicates.length) {
       log(`${loopDef.name}: dry-run would consume ${targetDuplicates.length} target duplicate(s) before opening another pack`);
@@ -1583,7 +1668,7 @@
 
   async function runInventoryMixedUpgradeDryRun(loopDef) {
     await waitAppReady();
-    await refreshUnassigned().catch((e) => log(`${loopDef.name}: dry-run unassigned refresh skipped: ${e.message || e}`));
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { includePacks: false, quiet: true });
     const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
     log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
 
@@ -1597,7 +1682,7 @@
 
   async function runCommonGoldToRareUpgradeDryRun(loopDef) {
     await waitAppReady();
-    await refreshUnassigned();
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
     const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
     log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
 
@@ -1651,7 +1736,7 @@
 
   async function runProvisionPackDualCraftingDryRun(loopDef) {
     await waitAppReady();
-    await refreshUnassigned();
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
     const rounds = Math.max(1, Math.min(50, Number(loopDef.rounds || loopDef.maxRounds || 1) || 1));
     const pack = await findSourcePack(loopDef);
     log(`${loopDef.name}: dry-run would open ${rounds} provision pack round(s); source pack ${pack ? `${packName(pack)} (#${pack.id})` : 'not found'}`);
@@ -1704,6 +1789,7 @@
         break;
       }
 
+      await refreshInventoryCaches(`${loopDef.name} pre-selection`, { includePacks: false, quiet: true });
       let selection = selectInventoryPlayers(loopDef.requirements, loopDef.priorityPiles);
       log(`${loopDef.name}: selected ${selection.selected.length} player(s) (${formatSelectionStats(selection.stats)})`);
 
@@ -1813,7 +1899,7 @@
 
     while (completions < Number(loopDef.maxCompletions || 7)) {
       stopPoint();
-      await refreshUnassigned();
+      await refreshInventoryCaches(`${loopDef.name} pre-selection`, { includePacks: false, quiet: true });
 
       let selection = selectLoopInventoryPlayers(loopDef, primaryPiles);
       log(`${loopDef.name}: selected ${selection.selected.length} common gold player(s) (${formatSelectionStats(selection.stats)})`);
@@ -1916,7 +2002,7 @@
 
     while (countNeeded > 0) {
       stopPoint();
-      await refreshUnassigned();
+      await refreshInventoryCaches(`${loopDef.name} ${label} pre-selection`, { includePacks: false, quiet: true });
       const duplicateCount = countUnassignedMatching(duplicatePredicate);
       if (!duplicateCount) break;
 
@@ -2079,11 +2165,13 @@
     const stop = document.querySelector('#bronze-loop-stop');
     const select = document.querySelector('#bronze-loop-select');
     const edit = document.querySelector('#bronze-loop-edit');
+    const refresh = document.querySelector('#bronze-loop-refresh');
     const dryRun = document.querySelector('#bronze-loop-dry-run');
     if (start) start.disabled = state.running;
     if (stop) stop.disabled = !state.running;
     if (select) select.disabled = state.running;
     if (edit) edit.disabled = state.running;
+    if (refresh) refresh.disabled = state.running || state.refreshing;
     if (dryRun) dryRun.disabled = state.running;
     updateLoopControls();
   }
@@ -2250,6 +2338,9 @@
         </div>
         <div class="row">
           <button id="bronze-loop-edit">Edit JSON</button>
+          <button id="bronze-loop-refresh">Refresh caches</button>
+        </div>
+        <div class="row">
           <button id="bronze-loop-copy">Copy log</button>
           <button id="bronze-loop-clear">Clear log</button>
           <button id="bronze-loop-download">Save log</button>
@@ -2288,6 +2379,19 @@
     });
     document.querySelector('#bronze-loop-json').addEventListener('input', updateLoopControls);
     document.querySelector('#bronze-loop-start').addEventListener('click', startLoop);
+    document.querySelector('#bronze-loop-refresh').addEventListener('click', async () => {
+      if (state.running || state.refreshing) return;
+      state.refreshing = true;
+      setPanelState();
+      try {
+        await refreshInventoryCaches('manual button');
+      } catch (e) {
+        log(`Cache refresh failed: ${e.message || e}`);
+      } finally {
+        state.refreshing = false;
+        setPanelState();
+      }
+    });
     document.querySelector('#bronze-loop-stop').addEventListener('click', () => {
       state.stopping = true;
       log('Stop requested; waiting for current safe point');

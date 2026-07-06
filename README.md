@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.9`
+- `DailyLoopRunner.user.js`: `0.2.10`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.0`
 
 ## 1. 文件说明
@@ -37,11 +37,14 @@ Chrome 中需要启用：
 1. 打开 Web App 并手动登录。
 2. 等待页面和 FSU 完全加载。
 3. 在 Loop Runner 面板选择 loop。
-4. 如需先检查材料选择，勾选 `Dry run`。
-5. 点击 `Start`。
-6. 出错时优先点击 `Save Log` 或复制日志内容，查看最后几行。
+4. 如需刷新 packs/unassigned/storage/transfer/club 缓存，点击 `Refresh caches`。
+5. 如需先检查材料选择，勾选 `Dry run`。
+6. 点击 `Start`。
+7. 出错时优先点击 `Save Log` 或复制日志内容，查看最后几行。
 
 `Dry run` 模式只刷新只读缓存并打印计划动作，不会移动物品、开包、保存阵容或提交 SBC。库存型 loop 会列出选中的卡、来源 pile、rating、稀有度、交易状态、item id 和 definition id。
+
+`Refresh caches` 会优先刷新 packs 和 unassigned；club/storage/transfer 会用当前 Web App 暴露的可用方法刷新。如果某个 pile 没有可用刷新方法，脚本会保留现有缓存并写日志。
 
 当前默认 loop：
 
@@ -314,6 +317,10 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
 - `refreshUnassigned()`
   - 刷新 unassigned items。
 
+- `refreshInventoryCaches(reason, options)`
+  - 刷新 packs、unassigned 以及可用的 club/storage/transfer 缓存。
+  - 在库存选卡前会静默尝试刷新，以减少 stale cache。
+
 - `clearUnassigned(reason, options)`
   - 清理 unassigned。
   - `options.reserveItem` 可保留某些卡不清理。
@@ -418,9 +425,8 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
 优先级较高：
 
 1. 把 `Daily Rare Loop` 跑稳定。
-2. 增加 item cache 刷新能力，减少 stale transfer/storage 缓存。
-3. 把 loop 定义从脚本内常量拆成外部 JSON。
-4. 给每个 loop 增加更细的开关，例如是否允许使用 club、是否允许使用 transfer。
+2. 把 loop 定义从脚本内常量拆成外部 JSON。
+3. 给每个 loop 增加更细的开关，例如是否允许使用 club、是否允许使用 transfer。
 
 中期可以做：
 
