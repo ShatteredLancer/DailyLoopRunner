@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.7
+// @version      0.2.13
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
+// @connect      127.0.0.1
+// @connect      localhost
 // @run-at       document-end
 // ==/UserScript==
 
@@ -15,6 +18,7 @@
 
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
   const APP_KEY = '__FCLoopRunner';
+  const LOOP_CONFIG_URL = 'http://127.0.0.1:8765/DailyLoopRunner.loops.json';
   try { W[APP_KEY]?.destroy?.(); } catch { }
 
   const CFG = {
@@ -131,6 +135,10 @@
   const state = {
     running: false,
     stopping: false,
+    refreshing: false,
+    loadingLoops: false,
+    loopDefs: null,
+    loopConfigSource: 'built-in',
     logLines: [],
     bootTimer: null,
   };
@@ -143,7 +151,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.7',
+    version: '0.2.13',
     destroy: destroyRunner,
   };
 
@@ -174,24 +182,305 @@
     return JSON.parse(JSON.stringify(def));
   }
 
+  function getLoopDefs() {
+    return state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
+  }
+
   function getLoopDefById(id) {
-    return LOOP_DEFS.find((def) => def.id === id) || LOOP_DEFS[0];
+    const loopDefs = getLoopDefs();
+    return loopDefs.find((def) => def.id === id) || loopDefs[0] || LOOP_DEFS[0];
+  }
+
+  function isPlainObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function validateStringArray(value, path, errors, required = false) {
+    if (value === undefined || value === null) {
+      if (required) errors.push(`${path} is required`);
+      return;
+    }
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((entry, index) => {
+      if (typeof entry !== 'string' || !entry.trim()) {
+        errors.push(`${path}[${index}] must be a non-empty string`);
+      }
+    });
+  }
+
+  function validateNumberArray(value, path, errors) {
+    if (value === undefined || value === null) return;
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((entry, index) => {
+      if (!Number.isFinite(Number(entry))) {
+        errors.push(`${path}[${index}] must be a number`);
+      }
+    });
+  }
+
+  function validatePileList(value, path, errors, required = false) {
+    const allowed = ['unassigned', 'storage', 'transfer', 'club'];
+    if (value === undefined || value === null) {
+      if (required) errors.push(`${path} is required`);
+      return;
+    }
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((pile, index) => {
+      if (!allowed.includes(pile)) {
+        errors.push(`${path}[${index}] must be one of: ${allowed.join(', ')}`);
+      }
+    });
+  }
+
+  function validateCardSpec(spec, path, errors) {
+    if (!isPlainObject(spec)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (spec.tier !== undefined && !['bronze', 'silver', 'gold'].includes(spec.tier)) {
+      errors.push(`${path}.tier must be bronze, silver, or gold`);
+    }
+    if (spec.rarity !== undefined && !['common', 'rare'].includes(spec.rarity)) {
+      errors.push(`${path}.rarity must be common or rare`);
+    }
+    ['playerOnly', 'allowSpecial', 'special'].forEach((field) => {
+      if (spec[field] !== undefined && typeof spec[field] !== 'boolean') {
+        errors.push(`${path}.${field} must be boolean`);
+      }
+    });
+  }
+
+  function validateRequirements(requirements, path, errors, required = false) {
+    if (requirements === undefined || requirements === null) {
+      if (required) errors.push(`${path} is required`);
+      return;
+    }
+    if (!Array.isArray(requirements) || !requirements.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    requirements.forEach((requirement, index) => {
+      const reqPath = `${path}[${index}]`;
+      validateCardSpec(requirement, reqPath, errors);
+      if (!Number.isFinite(Number(requirement?.count)) || Number(requirement.count) <= 0) {
+        errors.push(`${reqPath}.count must be a positive number`);
+      }
+      validatePileList(requirement?.priorityPiles, `${reqPath}.priorityPiles`, errors);
+    });
+  }
+
+  function validateUpgradeDef(upgradeDef, path, errors) {
+    if (!isPlainObject(upgradeDef)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (typeof upgradeDef.name !== 'string' || !upgradeDef.name.trim()) {
+      errors.push(`${path}.name is required`);
+    }
+    validateStringArray(upgradeDef.sbcNames, `${path}.sbcNames`, errors, true);
+    validateRequirements(upgradeDef.requirements, `${path}.requirements`, errors, true);
+    validatePileList(upgradeDef.priorityPiles, `${path}.priorityPiles`, errors);
+  }
+
+  function validateLoopDef(loopDef, label = 'loop') {
+    const errors = [];
+    if (!isPlainObject(loopDef)) return [`${label} must be an object`];
+
+    const strategies = [
+      'validationBronzeUpgrade',
+      'dailySingleCardRecycle',
+      'inventoryMixedUpgrade',
+      'commonGoldToRareUpgrade',
+      'provisionPackDualCrafting',
+    ];
+
+    if (typeof loopDef.name !== 'string' || !loopDef.name.trim()) {
+      errors.push('name is required');
+    }
+    if (typeof loopDef.strategy !== 'string' || !loopDef.strategy.trim()) {
+      errors.push('strategy is required');
+    } else if (!strategies.includes(loopDef.strategy)) {
+      errors.push(`strategy must be one of: ${strategies.join(', ')}`);
+    }
+    if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
+      errors.push('dryRun must be boolean');
+    }
+
+    validateNumberArray(loopDef.sourcePackIds, 'sourcePackIds', errors);
+    validateNumberArray(loopDef.rewardPackIds, 'rewardPackIds', errors);
+    validateStringArray(loopDef.sourcePackNames, 'sourcePackNames', errors);
+    validateStringArray(loopDef.rewardPackNames, 'rewardPackNames', errors);
+    validatePileList(loopDef.priorityPiles, 'priorityPiles', errors);
+    validatePileList(loopDef.clubFallbackPiles, 'clubFallbackPiles', errors);
+    validatePileList(loopDef.disabledPiles, 'disabledPiles', errors);
+
+    if (loopDef.strategy === 'validationBronzeUpgrade') {
+      validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
+      validateCardSpec(loopDef.targetDuplicate, 'targetDuplicate', errors);
+    }
+
+    if (loopDef.strategy === 'dailySingleCardRecycle') {
+      validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
+      validateCardSpec(loopDef.targetDuplicate, 'targetDuplicate', errors);
+    }
+
+    if (loopDef.strategy === 'inventoryMixedUpgrade' || loopDef.strategy === 'commonGoldToRareUpgrade') {
+      validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
+      validateRequirements(loopDef.requirements, 'requirements', errors, true);
+    }
+
+    if (loopDef.strategy === 'provisionPackDualCrafting') {
+      if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
+        errors.push('sourcePackIds or sourcePackNames is required');
+      }
+      validateUpgradeDef(loopDef.commonUpgrade, 'commonUpgrade', errors);
+      validateUpgradeDef(loopDef.rareUpgrade, 'rareUpgrade', errors);
+    }
+
+    return errors;
+  }
+
+  function assertValidLoopDef(loopDef, label = 'Loop JSON') {
+    const errors = validateLoopDef(loopDef, label);
+    if (errors.length) fail(`${label} validation failed:\n- ${errors.join('\n- ')}`);
+  }
+
+  function validateLoopDefList(loopDefs, label = 'Loop config') {
+    if (!Array.isArray(loopDefs) || !loopDefs.length) {
+      fail(`${label} must be a non-empty array or an object with a loops array`);
+    }
+    const seen = new Set();
+    loopDefs.forEach((loopDef, index) => {
+      assertValidLoopDef(loopDef, `${label}[${index}]`);
+      if (typeof loopDef.id !== 'string' || !loopDef.id.trim()) {
+        fail(`${label}[${index}].id is required`);
+      }
+      if (loopDef.id) {
+        if (seen.has(loopDef.id)) fail(`${label} has duplicate id: ${loopDef.id}`);
+        seen.add(loopDef.id);
+      }
+    });
+  }
+
+  function setLoopDefs(loopDefs, source = 'custom') {
+    validateLoopDefList(loopDefs, source);
+    state.loopDefs = cloneLoopDef(loopDefs);
+    state.loopConfigSource = source;
+    renderLoopSelect(state.loopDefs[0]?.id);
+    log(`Loaded ${state.loopDefs.length} loop definition(s) from ${source}`);
+  }
+
+  function resetLoopDefs() {
+    state.loopDefs = null;
+    state.loopConfigSource = 'built-in';
+    renderLoopSelect(LOOP_DEFS[0]?.id);
+    log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
+  }
+
+  function parseLoopConfig(text) {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed?.loops)) return parsed.loops;
+    fail('Loop config JSON must be an array or an object with a loops array');
+  }
+
+  function requestText(url) {
+    if (typeof GM_xmlhttpRequest === 'function') {
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          nocache: true,
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve(response.responseText);
+            } else {
+              reject(new Error(`HTTP ${response.status}`));
+            }
+          },
+          onerror: () => reject(new Error('request failed')),
+          ontimeout: () => reject(new Error('request timed out')),
+          timeout: 10000,
+        });
+      });
+    }
+    if (typeof W.__FCLoopRunnerRequestText === 'function') {
+      return W.__FCLoopRunnerRequestText(url);
+    }
+    return fetch(url, { cache: 'no-store' }).then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.text();
+    });
+  }
+
+  async function loadLoopConfig(url = LOOP_CONFIG_URL) {
+    const text = await requestText(`${url}?t=${Date.now()}`);
+    const loopDefs = parseLoopConfig(text);
+    setLoopDefs(loopDefs, url);
+  }
+
+  function applyDisabledPilesToList(piles, disabledPiles, path) {
+    if (!Array.isArray(piles) || !piles.length || !disabledPiles?.size) return piles;
+    const filtered = piles.filter((pile) => !disabledPiles.has(pile));
+    if (!filtered.length) fail(`${path} has no enabled piles after disabledPiles`);
+    return filtered;
+  }
+
+  function applyDisabledPilesToRequirements(requirements, disabledPiles, path) {
+    if (!Array.isArray(requirements)) return;
+    requirements.forEach((requirement, index) => {
+      requirement.priorityPiles = applyDisabledPilesToList(
+        requirement.priorityPiles,
+        disabledPiles,
+        `${path}[${index}].priorityPiles`,
+      );
+    });
+  }
+
+  function applyDisabledPiles(loopDef) {
+    const disabledPiles = new Set(loopDef.disabledPiles || []);
+    if (!disabledPiles.size) return loopDef;
+
+    loopDef.priorityPiles = applyDisabledPilesToList(loopDef.priorityPiles, disabledPiles, 'priorityPiles');
+    loopDef.clubFallbackPiles = applyDisabledPilesToList(loopDef.clubFallbackPiles, disabledPiles, 'clubFallbackPiles');
+    applyDisabledPilesToRequirements(loopDef.requirements, disabledPiles, 'requirements');
+
+    for (const upgradeName of ['commonUpgrade', 'rareUpgrade']) {
+      const upgradeDef = loopDef[upgradeName];
+      if (!isPlainObject(upgradeDef)) continue;
+      upgradeDef.priorityPiles = applyDisabledPilesToList(upgradeDef.priorityPiles, disabledPiles, `${upgradeName}.priorityPiles`);
+      applyDisabledPilesToRequirements(upgradeDef.requirements, disabledPiles, `${upgradeName}.requirements`);
+    }
+
+    return loopDef;
   }
 
   function getSelectedLoopDef() {
     const select = document.querySelector('#bronze-loop-select');
-    const selectedId = select?.value || LOOP_DEFS[0].id;
+    const selectedId = select?.value || getLoopDefs()[0]?.id || LOOP_DEFS[0].id;
     if (selectedId === 'custom') {
       const text = document.querySelector('#bronze-loop-json')?.value || '';
       try {
         const parsed = JSON.parse(text);
-        if (!parsed.name || !parsed.strategy) fail('Custom loop JSON must include name and strategy');
-        return parsed;
+        assertValidLoopDef(parsed, 'Custom loop JSON');
+        return applyDisabledPiles(parsed);
       } catch (e) {
-        fail(`Invalid custom loop JSON: ${e.message || e}`);
+        if (e instanceof SyntaxError) fail(`Invalid custom loop JSON: ${e.message || e}`);
+        throw e;
       }
     }
-    return cloneLoopDef(getLoopDefById(selectedId));
+    const loopDef = cloneLoopDef(getLoopDefById(selectedId));
+    assertValidLoopDef(loopDef, loopDef.name || selectedId);
+    return applyDisabledPiles(loopDef);
   }
 
   function setLoopJson(def) {
@@ -199,8 +488,34 @@
     if (editor) editor.value = JSON.stringify(def, null, 2);
   }
 
+  function renderLoopSelect(selectedId = null) {
+    const select = document.querySelector('#bronze-loop-select');
+    if (!select) return;
+    const previous = selectedId || select.value;
+    select.textContent = '';
+
+    for (const def of getLoopDefs()) {
+      const option = document.createElement('option');
+      option.value = def.id;
+      option.textContent = def.name;
+      select.appendChild(option);
+    }
+
+    const custom = document.createElement('option');
+    custom.value = 'custom';
+    custom.textContent = 'Custom JSON';
+    select.appendChild(custom);
+
+    const nextValue = Array.from(select.options).some((option) => option.value === previous)
+      ? previous
+      : getLoopDefs()[0]?.id;
+    if (nextValue) select.value = nextValue;
+    if (select.value !== 'custom') setLoopJson(getLoopDefById(select.value));
+    updateLoopControls();
+  }
+
   function getEditorLoopStrategy() {
-    const selectedId = document.querySelector('#bronze-loop-select')?.value || LOOP_DEFS[0].id;
+    const selectedId = document.querySelector('#bronze-loop-select')?.value || getLoopDefs()[0]?.id || LOOP_DEFS[0].id;
     if (selectedId !== 'custom') return getLoopDefById(selectedId).strategy;
     try {
       const parsed = JSON.parse(document.querySelector('#bronze-loop-json')?.value || '{}');
@@ -344,6 +659,90 @@
     );
     if (!result?.success) fail(`Unassigned refresh failed: ${result?.error?.code || result?.status || 'unknown'}`);
     return result;
+  }
+
+  function cacheSummary() {
+    return [
+      `packs:${getMyPacks().length}`,
+      `unassigned:${getUnassignedItems().length}`,
+      `storage:${getStorageItems().length}`,
+      `transfer:${getTransferItems().length}`,
+      `club:${getClubItems().length}`,
+    ].join(', ');
+  }
+
+  async function awaitMaybeObservable(value, label, timeoutMs = 20000) {
+    if (!value) return { success: true, skipped: true };
+    if (typeof value.observe === 'function') {
+      return observeOnce(value, ctrl(), timeoutMs, label);
+    }
+    if (typeof value.then === 'function') {
+      return value;
+    }
+    return value;
+  }
+
+  async function tryOptionalRefresh(label, action, options = {}) {
+    const quiet = options.quiet === true;
+    try {
+      const result = await awaitMaybeObservable(action(), label, options.timeoutMs || 20000);
+      if (result?.success === false) {
+        const code = result?.error?.code || result?.status || 'unknown';
+        if (!quiet) log(`${label} refresh failed: ${code}`);
+        return false;
+      }
+      if (!quiet) log(`${label} refreshed`);
+      return true;
+    } catch (e) {
+      if (!quiet) log(`${label} refresh skipped: ${e.message || e}`);
+      return false;
+    }
+  }
+
+  async function refreshPileCacheByCandidates(pileName, pile, specificNames, options = {}) {
+    const itemService = W.services?.Item || {};
+    for (const methodName of specificNames) {
+      if (typeof itemService[methodName] !== 'function') continue;
+      const ok = await tryOptionalRefresh(`Item.${methodName}`, () => itemService[methodName](), options);
+      if (ok) return true;
+    }
+
+    const genericNames = [
+      'requestItems',
+      'requestPileItems',
+      'requestItemsForPile',
+      'requestItemsByPile',
+    ];
+    for (const methodName of genericNames) {
+      if (typeof itemService[methodName] !== 'function') continue;
+      const ok = await tryOptionalRefresh(`${pileName} via Item.${methodName}`, () => itemService[methodName](pile), options);
+      if (ok) return true;
+    }
+
+    if (!options.quiet) log(`${pileName} cache refresh method not available; using existing cache`);
+    return false;
+  }
+
+  async function refreshInventoryCaches(reason = 'manual refresh', options = {}) {
+    await waitAppReady();
+    const quiet = options.quiet === true;
+    if (!quiet) log(`Refreshing caches: ${reason}`);
+
+    if (options.includePacks !== false) {
+      await refreshStorePacks().catch((e) => {
+        if (!quiet) log(`Store pack refresh skipped: ${e.message || e}`);
+      });
+    }
+
+    await refreshUnassigned().catch((e) => {
+      if (!quiet) log(`Unassigned refresh skipped: ${e.message || e}`);
+    });
+
+    await refreshPileCacheByCandidates('club', W.ItemPile.CLUB, ['requestClubItems'], options);
+    await refreshPileCacheByCandidates('storage', W.ItemPile.STORAGE, ['requestStorageItems', 'requestSBCStorageItems'], options);
+    await refreshPileCacheByCandidates('transfer', W.ItemPile.TRANSFER, ['requestTransferItems'], options);
+
+    if (!quiet) log(`Cache summary: ${cacheSummary()}`);
   }
 
   function getUnassignedItems() {
@@ -861,6 +1260,173 @@
     );
   }
 
+  function itemDisplayName(item) {
+    const names = [
+      [item?.firstName, item?.lastName].filter(Boolean).join(' '),
+      item?.name,
+      item?.commonName,
+      item?.lastName,
+      item?._staticData?.name,
+      item?._staticData?.commonName,
+      item?._staticData?.lastName,
+      item?.definitionId,
+      item?.id,
+    ];
+    return String(names.find((value) => value !== undefined && value !== null && String(value).trim()) || 'unknown');
+  }
+
+  function itemTierLabel(item) {
+    if (isBronze(item)) return 'bronze';
+    if (isSilver(item)) return 'silver';
+    if (isGold(item)) return 'gold';
+    return 'unknown';
+  }
+
+  function formatDryRunItem(entry, index) {
+    const item = entry?.item || entry;
+    const signal = entry?.signal || null;
+    const parts = [
+      `${index + 1}. ${itemDisplayName(item)}`,
+      `rating:${Number(item?.rating || 0) || '?'}`,
+      itemTierLabel(item),
+      isRare(item) ? 'rare' : 'common',
+      isTradeable(item) ? 'tradeable' : 'untradeable',
+      `from:${entry?.pileName || 'unknown'}`,
+      `id:${Number(item?.id || 0) || '?'}`,
+      `def:${Number(item?.definitionId || 0) || '?'}`,
+    ];
+    if (signal && Number(signal?.id || 0) !== Number(item?.id || 0)) {
+      parts.push(`signal:${Number(signal.id || 0) || '?'}`);
+    }
+    return parts.join(' | ');
+  }
+
+  function logDryRunSelection(label, selection, options = {}) {
+    const maxItems = Number(options.maxItems || 30);
+    log(`${label}: dry-run selected ${selection?.selected?.length || 0} item(s) (${formatSelectionStats(selection?.stats)})`);
+    const entries = selection?.entries || (selection?.selected || []).map((item) => ({ item, pileName: 'unknown' }));
+    entries.slice(0, maxItems).forEach((entry, index) => log(`dry-run pick ${formatDryRunItem(entry, index)}`));
+    if (entries.length > maxItems) log(`dry-run pick list truncated: ${entries.length - maxItems} more item(s)`);
+    if (!selection?.ok && selection?.missing) {
+      const missing = selection.missing;
+      log(`${label}: dry-run missing ${missing.count} ${missing.tier || 'any'} ${missing.rarity || ''} item(s)`);
+      logSelectionDiagnostics(label, selection, options.priorityPiles);
+    }
+  }
+
+  function addCount(counts, key) {
+    counts[key] = (counts[key] || 0) + 1;
+  }
+
+  function formatCounts(counts, limit = 5) {
+    const entries = Object.entries(counts || {})
+      .filter(([, count]) => count > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, limit);
+    return entries.map(([key, count]) => `${key}:${count}`).join(', ');
+  }
+
+  function describeRequirement(requirement = {}) {
+    return [
+      requirement.count ? `${requirement.count}x` : '',
+      requirement.tier || 'any-tier',
+      requirement.rarity || '',
+      requirement.playerOnly ? 'player' : '',
+      requirement.allowSpecial ? 'special-ok' : 'no-special',
+    ].filter(Boolean).join(' ');
+  }
+
+  function getUsabilityRejectReasons(item) {
+    const reasons = [];
+    if (!isPlayer(item)) reasons.push('not-player');
+    if (isProtectedHighGold(item)) reasons.push('protected-82-plus');
+    if (Number(item?.loans) !== -1) reasons.push('loan-or-limited');
+    try { if (item?.isLimitedUse?.()) reasons.push('limited-use'); } catch { }
+    try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
+    if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
+    if (!isInactiveTrade(item)) reasons.push('active-trade');
+    return reasons;
+  }
+
+  function getSpecRejectReasons(item, spec = {}) {
+    const reasons = [];
+    if (spec.playerOnly && !isPlayer(item)) reasons.push('not-player');
+    if (spec.special === true && !isSpecial(item)) reasons.push('not-special');
+    if (spec.special === false && isSpecial(item)) reasons.push('special-blocked');
+    if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) reasons.push('special-blocked');
+    if (spec.tier === 'bronze' && !isBronze(item)) reasons.push('tier-not-bronze');
+    if (spec.tier === 'silver' && !isSilver(item)) reasons.push('tier-not-silver');
+    if (spec.tier === 'gold' && !isGold(item)) reasons.push('tier-not-gold');
+    if (spec.rarity === 'rare' && !isRare(item)) reasons.push('rarity-not-rare');
+    if (spec.rarity === 'common' && isRare(item)) reasons.push('rarity-not-common');
+    return reasons;
+  }
+
+  function diagnosePileForRequirement(pileName, requirement) {
+    const items = getPileItemsByName(pileName);
+    const result = {
+      total: items.length,
+      usable: 0,
+      matching: 0,
+      uniqueDefinitions: 0,
+      duplicateSignals: 0,
+      resolvedSignals: 0,
+      reasons: {},
+    };
+    const matchingDefinitions = new Set();
+
+    for (const item of items) {
+      const usabilityRejects = getUsabilityRejectReasons(item);
+      const specRejects = getSpecRejectReasons(item, requirement);
+      const rejects = [...new Set(usabilityRejects.concat(specRejects))];
+      if (rejects.length) {
+        rejects.forEach((reason) => addCount(result.reasons, reason));
+        continue;
+      }
+
+      result.usable++;
+      result.matching++;
+      matchingDefinitions.add(Number(item?.definitionId || 0));
+
+      if (pileNeedsDuplicateSignalResolution(pileName)) {
+        if (!isDuplicate(item)) {
+          addCount(result.reasons, 'duplicate-signal-required');
+          continue;
+        }
+        result.duplicateSignals++;
+        const resolved = findSubmissionItemForDuplicateSignal(item, new Set(), requirement);
+        if (resolved) {
+          result.resolvedSignals++;
+        } else {
+          addCount(result.reasons, 'duplicate-signal-unresolved');
+        }
+      }
+    }
+
+    result.uniqueDefinitions = Array.from(matchingDefinitions).filter(Boolean).length;
+    return result;
+  }
+
+  function logRequirementDiagnostics(label, requirement, fallbackPriorityPiles) {
+    const piles = requirement?.priorityPiles || fallbackPriorityPiles || ['storage', 'transfer', 'club'];
+    log(`${label}: diagnostics for ${describeRequirement(requirement)} across ${piles.join(' > ')}`);
+
+    for (const pileName of piles) {
+      const diag = diagnosePileForRequirement(pileName, requirement);
+      const signalText = pileNeedsDuplicateSignalResolution(pileName)
+        ? `, duplicate signals:${diag.duplicateSignals}, resolved:${diag.resolvedSignals}`
+        : '';
+      log(`${label}: ${pileName} total:${diag.total}, matching:${diag.matching}, unique defs:${diag.uniqueDefinitions}${signalText}`);
+      const rejectText = formatCounts(diag.reasons);
+      if (rejectText) log(`${label}: ${pileName} rejects ${rejectText}`);
+    }
+  }
+
+  function logSelectionDiagnostics(label, selection, fallbackPriorityPiles) {
+    if (!selection?.missing) return;
+    logRequirementDiagnostics(label, selection.missing, fallbackPriorityPiles);
+  }
+
   function getSubmissionCacheItems() {
     return uniqueItems(getStorageItems().concat(getClubItems()));
   }
@@ -896,6 +1462,7 @@
     const submissionIds = new Set();
     const stats = {};
     const resolvedSignals = {};
+    const entries = [];
 
     for (const requirement of requirements || []) {
       let need = Number(requirement.count || 0);
@@ -938,6 +1505,7 @@
 
         for (const pickedItem of picked) {
           selected.push(pickedItem.item);
+          entries.push({ ...pickedItem, pileName });
           if (pileNeedsDuplicateSignalResolution(pileName)) {
             resolvedSignals[pileName] = (resolvedSignals[pileName] || 0) + 1;
           }
@@ -949,6 +1517,7 @@
         return {
           ok: false,
           selected,
+          entries,
           stats,
           missing: { ...requirement, count: need },
           resolvedSignals,
@@ -956,7 +1525,7 @@
       }
     }
 
-    return { ok: true, selected, stats, missing: null, resolvedSignals };
+    return { ok: true, selected, entries, stats, missing: null, resolvedSignals };
   }
 
   function selectedItemsFromPile(selection, pileName) {
@@ -1319,6 +1888,155 @@
     return selectInventoryPlayers(scopedLoopDef.requirements, scopedLoopDef.priorityPiles);
   }
 
+  function isDryRunEnabled() {
+    return document.querySelector('#bronze-loop-dry-run')?.checked === true;
+  }
+
+  async function runValidationBronzeUpgradeDryRun(loopDef) {
+    await waitAppReady();
+    await refreshStorePacks();
+    const pack =
+      (loopDef.sourcePackIds || CFG.sourcePackIds).map((id) => findPackById(id)).find(Boolean) ||
+      findPackByName(loopDef.sourcePackNames || CFG.sourcePackNames);
+    const set = await findSbcSet(loopDef.sbcNames || CFG.bronzeUpgradeNames, loopDef.name);
+    log(`${loopDef.name}: dry-run source pack ${pack ? `${packName(pack)} (#${pack.id})` : 'not found'}`);
+    log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
+    log(`${loopDef.name}: dry run stops before opening packs, filling squads, or submitting SBCs`);
+  }
+
+  async function runDailySingleCardRecycleDryRun(loopDef) {
+    await waitAppReady();
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
+    const targetDuplicates = getUnassignedTargetDuplicates(loopDef);
+    if (targetDuplicates.length) {
+      log(`${loopDef.name}: dry-run would consume ${targetDuplicates.length} target duplicate(s) before opening another pack`);
+      logDryRunSelection(`${loopDef.name} target duplicates`, {
+        ok: true,
+        selected: targetDuplicates,
+        entries: targetDuplicates.map((item) => ({ item, pileName: 'unassigned' })),
+        stats: { unassigned: targetDuplicates.length },
+      });
+      log(`${loopDef.name}: dry run stops before FSU fill or SBC submit`);
+      return;
+    }
+
+    const pack = await findLoopPack(loopDef);
+    if (pack) {
+      log(`${loopDef.name}: dry-run would open reward pack ${packName(pack)} (#${pack.id})`);
+    } else {
+      log(`${loopDef.name}: dry-run found no target duplicate or reward pack; live run would try seed SBC via FSU fill`);
+    }
+    log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
+  }
+
+  async function runInventoryMixedUpgradeDryRun(loopDef) {
+    await waitAppReady();
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { includePacks: false, quiet: true });
+    const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+    log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
+
+    const selection = selectInventoryPlayers(loopDef.requirements, loopDef.priorityPiles);
+    logDryRunSelection(loopDef.name, selection);
+    if (selection.ok) {
+      log(`${loopDef.name}: dry-run would submit this inventory selection`);
+    }
+    log(`${loopDef.name}: dry run stops before cleanup, squad save, or SBC submit`);
+  }
+
+  async function runCommonGoldToRareUpgradeDryRun(loopDef) {
+    await waitAppReady();
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
+    const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+    log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
+
+    const primaryPiles = loopDef.priorityPiles || ['unassigned', 'storage', 'transfer'];
+    const clubFallbackPiles = loopDef.clubFallbackPiles || [...primaryPiles, 'club'];
+    let selection = selectLoopInventoryPlayers(loopDef, primaryPiles);
+    logDryRunSelection(`${loopDef.name} primary`, selection);
+    if (selection.ok) {
+      log(`${loopDef.name}: dry-run would submit primary common gold selection`);
+      log(`${loopDef.name}: dry run stops before squad save or SBC submit`);
+      return;
+    }
+
+    const pack = await findSourcePack(loopDef);
+    if (pack) {
+      log(`${loopDef.name}: dry-run would open source pack before club fallback: ${packName(pack)} (#${pack.id})`);
+      log(`${loopDef.name}: dry run stops before opening source pack or moving unassigned items`);
+      return;
+    }
+
+    log(`${loopDef.name}: dry-run found no source pack; checking club fallback`);
+    selection = selectLoopInventoryPlayers(loopDef, clubFallbackPiles);
+    logDryRunSelection(`${loopDef.name} club fallback`, selection);
+    if (selection.ok) {
+      log(`${loopDef.name}: dry-run would submit club fallback common gold selection`);
+    }
+    log(`${loopDef.name}: dry run stops before cleanup, squad save, or SBC submit`);
+  }
+
+  async function runReservedDuplicateUpgradeDryRun(loopDef, upgradeDef, duplicatePredicate, label) {
+    const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name || label);
+    const countNeeded = getUpgradeRequirementCount(upgradeDef);
+    const duplicateCount = countUnassignedMatching(duplicatePredicate);
+    log(`${loopDef.name}: dry-run ${label} SBC found ${set.name} (#${set.id || '?'})`);
+
+    if (!duplicateCount) {
+      log(`${loopDef.name}: dry-run ${label} has no reserved duplicate(s); live run would not submit this upgrade yet`);
+      return;
+    }
+
+    const piles = duplicateCount >= countNeeded
+      ? ['unassigned']
+      : ['unassigned', 'storage', 'transfer', 'club'];
+    const selection = selectLoopInventoryPlayers(upgradeDef, piles);
+    log(`${loopDef.name}: dry-run ${label} reserved duplicates:${duplicateCount}, required:${countNeeded}`);
+    logDryRunSelection(`${loopDef.name} ${label}`, selection);
+    if (selection.ok) {
+      log(`${loopDef.name}: dry-run would submit ${label} selection`);
+    }
+  }
+
+  async function runProvisionPackDualCraftingDryRun(loopDef) {
+    await waitAppReady();
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
+    const rounds = Math.max(1, Math.min(50, Number(loopDef.rounds || loopDef.maxRounds || 1) || 1));
+    const pack = await findSourcePack(loopDef);
+    log(`${loopDef.name}: dry-run would open ${rounds} provision pack round(s); source pack ${pack ? `${packName(pack)} (#${pack.id})` : 'not found'}`);
+    log(`${loopDef.name}: dry-run only inspects current reserved duplicates; it does not open Provision Packs`);
+
+    await runReservedDuplicateUpgradeDryRun(loopDef, loopDef.commonUpgrade, isCommonGoldDuplicate, 'FOF common gold');
+    await runReservedDuplicateUpgradeDryRun(loopDef, loopDef.rareUpgrade, isRareGoldDuplicate, '84+ rare gold');
+    log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
+  }
+
+  async function runDryRunLoop(loopDef, roundNo = 1) {
+    log(`Dry run active: no items will be moved, no packs opened, no squads saved, no SBCs submitted`);
+
+    if (loopDef.strategy === 'validationBronzeUpgrade') {
+      await runValidationBronzeUpgradeDryRun(loopDef, roundNo);
+      return;
+    }
+    if (loopDef.strategy === 'dailySingleCardRecycle') {
+      await runDailySingleCardRecycleDryRun(loopDef);
+      return;
+    }
+    if (loopDef.strategy === 'inventoryMixedUpgrade') {
+      await runInventoryMixedUpgradeDryRun(loopDef);
+      return;
+    }
+    if (loopDef.strategy === 'commonGoldToRareUpgrade') {
+      await runCommonGoldToRareUpgradeDryRun(loopDef);
+      return;
+    }
+    if (loopDef.strategy === 'provisionPackDualCrafting') {
+      await runProvisionPackDualCraftingDryRun(loopDef);
+      return;
+    }
+
+    fail(`Unsupported loop strategy: ${loopDef.strategy}`);
+  }
+
   async function runInventoryMixedUpgrade(loopDef) {
     await waitAppReady();
     let completions = 0;
@@ -1334,12 +2052,14 @@
         break;
       }
 
+      await refreshInventoryCaches(`${loopDef.name} pre-selection`, { includePacks: false, quiet: true });
       let selection = selectInventoryPlayers(loopDef.requirements, loopDef.priorityPiles);
       log(`${loopDef.name}: selected ${selection.selected.length} player(s) (${formatSelectionStats(selection.stats)})`);
 
       if (!selection.ok) {
         const missing = selection.missing;
         log(`${loopDef.name}: missing ${missing.count} ${missing.tier || 'any'} ${missing.rarity || ''} player(s); stopping before submit`);
+        logSelectionDiagnostics(loopDef.name, selection, loopDef.priorityPiles);
         break;
       }
 
@@ -1347,6 +2067,7 @@
       if (!selection.ok) {
         const missing = selection.missing;
         log(`${loopDef.name}: missing ${missing.count} ${missing.tier || 'any'} ${missing.rarity || ''} player(s) after inventory preparation; stopping before submit`);
+        logSelectionDiagnostics(loopDef.name, selection, loopDef.priorityPiles);
         break;
       }
 
@@ -1420,6 +2141,7 @@
     if (!prepared.ok) {
       const missing = prepared.missing;
       log(`${loopDef.name}: missing ${missing.count} ${missing.tier || 'any'} ${missing.rarity || ''} player(s) after inventory preparation; stopping before submit`);
+      logSelectionDiagnostics(loopDef.name, prepared, loopDef.priorityPiles);
       return null;
     }
 
@@ -1443,7 +2165,7 @@
 
     while (completions < Number(loopDef.maxCompletions || 7)) {
       stopPoint();
-      await refreshUnassigned();
+      await refreshInventoryCaches(`${loopDef.name} pre-selection`, { includePacks: false, quiet: true });
 
       let selection = selectLoopInventoryPlayers(loopDef, primaryPiles);
       log(`${loopDef.name}: selected ${selection.selected.length} common gold player(s) (${formatSelectionStats(selection.stats)})`);
@@ -1458,6 +2180,7 @@
 
       const missing = selection.missing;
       log(`${loopDef.name}: missing ${missing.count} common gold player(s) from unassigned/storage/transfer; trying 11x Gold Players Pack before club`);
+      logSelectionDiagnostics(`${loopDef.name} primary`, selection, primaryPiles);
 
       const pack = await findSourcePack(loopDef);
       if (!pack) {
@@ -1467,6 +2190,7 @@
         if (!selection.ok) {
           const fallbackMissing = selection.missing;
           log(`${loopDef.name}: still missing ${fallbackMissing.count} common gold player(s) after club fallback; stopping`);
+          logSelectionDiagnostics(`${loopDef.name} club fallback`, selection, clubFallbackPiles);
           await clearUnassigned(`${loopDef.name} no source pack cleanup`);
           break;
         }
@@ -1492,6 +2216,7 @@
       if (!selection.ok) {
         const afterMissing = selection.missing;
         log(`${loopDef.name}: still missing ${afterMissing.count} common gold player(s); stashing unassigned and continuing`);
+        logSelectionDiagnostics(`${loopDef.name} after source pack`, selection, primaryPiles);
         await clearUnassigned(`${loopDef.name} partial common gold stash`);
         await sleep(CFG.pauseMs);
         continue;
@@ -1546,19 +2271,21 @@
 
     while (countNeeded > 0) {
       stopPoint();
-      await refreshUnassigned();
+      await refreshInventoryCaches(`${loopDef.name} ${label} pre-selection`, { includePacks: false, quiet: true });
       const duplicateCount = countUnassignedMatching(duplicatePredicate);
       if (!duplicateCount) break;
 
-      const piles = duplicateCount >= countNeeded
+      const fallbackPiles = upgradeDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'];
+      const piles = duplicateCount >= countNeeded && fallbackPiles.includes('unassigned')
         ? ['unassigned']
-        : ['unassigned', 'storage', 'transfer', 'club'];
+        : fallbackPiles;
       const selection = selectLoopInventoryPlayers(upgradeDef, piles);
       log(`${loopDef.name}: ${label} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
 
       if (!selection.ok) {
         const missing = selection.missing;
         log(`${loopDef.name}: ${label} missing ${missing.count} player(s) after fallback; stopping ${label}`);
+        logSelectionDiagnostics(`${loopDef.name} ${label}`, selection, piles);
         break;
       }
 
@@ -1634,6 +2361,12 @@
 
   async function runConfiguredLoop(loopDef, roundNo = 1) {
     log(`Loop selected: ${loopDef.name} (${loopDef.strategy})`);
+    if (loopDef.disabledPiles?.length) log(`Disabled piles: ${loopDef.disabledPiles.join(', ')}`);
+
+    if (loopDef.dryRun) {
+      await runDryRunLoop(loopDef, roundNo);
+      return;
+    }
 
     if (loopDef.strategy === 'validationBronzeUpgrade') {
       await runRound(roundNo);
@@ -1676,8 +2409,9 @@
       const loopDef = getSelectedLoopDef();
       const input = document.querySelector('#bronze-loop-rounds');
       const rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
+      loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
       if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
-      if (loopDef.strategy !== 'validationBronzeUpgrade') {
+      if (loopDef.dryRun || loopDef.strategy !== 'validationBronzeUpgrade') {
         stopPoint();
         await runConfiguredLoop(loopDef, 1);
       } else {
@@ -1703,10 +2437,18 @@
     const stop = document.querySelector('#bronze-loop-stop');
     const select = document.querySelector('#bronze-loop-select');
     const edit = document.querySelector('#bronze-loop-edit');
+    const refresh = document.querySelector('#bronze-loop-refresh');
+    const loadJson = document.querySelector('#bronze-loop-load-json');
+    const builtIn = document.querySelector('#bronze-loop-built-in');
+    const dryRun = document.querySelector('#bronze-loop-dry-run');
     if (start) start.disabled = state.running;
     if (stop) stop.disabled = !state.running;
     if (select) select.disabled = state.running;
     if (edit) edit.disabled = state.running;
+    if (refresh) refresh.disabled = state.running || state.refreshing;
+    if (loadJson) loadJson.disabled = state.running || state.loadingLoops;
+    if (builtIn) builtIn.disabled = state.running || state.loadingLoops || state.loopConfigSource === 'built-in';
+    if (dryRun) dryRun.disabled = state.running;
     updateLoopControls();
   }
 
@@ -1807,10 +2549,12 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      #bronze-loop-panel .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+      #bronze-loop-panel .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
       #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; }
       #bronze-loop-collapse { min-width: 28px !important; width: 28px; padding: 0; }
       #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; }
+      #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
+      #bronze-loop-dry-run-label { cursor: pointer; user-select: none; }
       #bronze-loop-panel select {
         flex: 1;
         min-width: 0;
@@ -1852,19 +2596,28 @@
       </div>
       <div class="panel-body">
         <div class="row">
-          <select id="bronze-loop-select">
-            ${LOOP_DEFS.map((def) => `<option value="${def.id}">${def.name}</option>`).join('')}
-            <option value="custom">Custom JSON</option>
-          </select>
+          <select id="bronze-loop-select"></select>
         </div>
         <div class="row" id="bronze-loop-rounds-row">
           <span id="bronze-loop-rounds-label">rounds</span>
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${CFG.maxRounds}">
+        </div>
+        <div class="row">
+          <label id="bronze-loop-dry-run-label" title="Log planned selections without moving items, opening packs, or submitting SBCs">
+            <input id="bronze-loop-dry-run" type="checkbox"> Dry run
+          </label>
           <button id="bronze-loop-start">Start</button>
           <button id="bronze-loop-stop" disabled>Stop</button>
         </div>
         <div class="row">
           <button id="bronze-loop-edit">Edit JSON</button>
+          <button id="bronze-loop-refresh">Refresh caches</button>
+        </div>
+        <div class="row">
+          <button id="bronze-loop-load-json">Load loops JSON</button>
+          <button id="bronze-loop-built-in" disabled>Built-in loops</button>
+        </div>
+        <div class="row">
           <button id="bronze-loop-copy">Copy log</button>
           <button id="bronze-loop-clear">Clear log</button>
           <button id="bronze-loop-download">Save log</button>
@@ -1882,7 +2635,7 @@
       panel.style.bottom = 'auto';
     }
     makePanelDraggable(panel);
-    setLoopJson(LOOP_DEFS[0]);
+    renderLoopSelect();
     document.querySelector('#bronze-loop-collapse').addEventListener('click', () => {
       panel.classList.toggle('collapsed');
       document.querySelector('#bronze-loop-collapse').textContent = panel.classList.contains('collapsed') ? '+' : '-';
@@ -1903,6 +2656,38 @@
     });
     document.querySelector('#bronze-loop-json').addEventListener('input', updateLoopControls);
     document.querySelector('#bronze-loop-start').addEventListener('click', startLoop);
+    document.querySelector('#bronze-loop-refresh').addEventListener('click', async () => {
+      if (state.running || state.refreshing) return;
+      state.refreshing = true;
+      setPanelState();
+      try {
+        await refreshInventoryCaches('manual button');
+      } catch (e) {
+        log(`Cache refresh failed: ${e.message || e}`);
+      } finally {
+        state.refreshing = false;
+        setPanelState();
+      }
+    });
+    document.querySelector('#bronze-loop-load-json').addEventListener('click', async () => {
+      if (state.running || state.loadingLoops) return;
+      state.loadingLoops = true;
+      setPanelState();
+      try {
+        log(`Loading loop definitions from ${LOOP_CONFIG_URL}`);
+        await loadLoopConfig(LOOP_CONFIG_URL);
+      } catch (e) {
+        log(`Loop JSON load failed: ${e.message || e}`);
+      } finally {
+        state.loadingLoops = false;
+        setPanelState();
+      }
+    });
+    document.querySelector('#bronze-loop-built-in').addEventListener('click', () => {
+      if (state.running || state.loadingLoops) return;
+      resetLoopDefs();
+      setPanelState();
+    });
     document.querySelector('#bronze-loop-stop').addEventListener('click', () => {
       state.stopping = true;
       log('Stop requested; waiting for current safe point');

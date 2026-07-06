@@ -1,0 +1,186 @@
+{
+  "loops": [
+    {
+      "id": "bronze-upgrade-validation",
+      "name": "Bronze Upgrade Validation",
+      "strategy": "validationBronzeUpgrade",
+      "sourcePackIds": [105],
+      "sourcePackNames": [
+        "高级青铜球员",
+        "高級青銅球員",
+        "Premium Bronze Players",
+        "Bronze Players Premium",
+        "BRONZE PLAYERS PREMIUM"
+      ],
+      "sbcNames": [
+        "青铜升级",
+        "青銅升級",
+        "Bronze Upgrade"
+      ],
+      "rewardPackNames": [
+        "2名白银球员",
+        "2 名白银球员",
+        "2名白銀球員",
+        "2 Silver Players"
+      ],
+      "targetDuplicate": {
+        "tier": "bronze",
+        "playerOnly": true,
+        "allowSpecial": false
+      },
+      "maxRounds": 3
+    },
+    {
+      "id": "daily-bronze",
+      "name": "Daily Bronze Loop",
+      "strategy": "dailySingleCardRecycle",
+      "sbcNames": [
+        "Daily Bronze Upgrade",
+        "每日青铜升级",
+        "每日青銅升級"
+      ],
+      "rewardPackIds": [105],
+      "rewardPackNames": [
+        "Bronze Players Premium",
+        "Premium Bronze Players",
+        "BRONZE PLAYERS PREMIUM"
+      ],
+      "targetDuplicate": {
+        "tier": "bronze",
+        "playerOnly": true,
+        "allowSpecial": false
+      },
+      "maxCompletions": 7
+    },
+    {
+      "id": "daily-silver",
+      "name": "Daily Silver Loop",
+      "strategy": "dailySingleCardRecycle",
+      "sbcNames": [
+        "Daily Silver Upgrade",
+        "每日白银升级",
+        "每日白銀升級"
+      ],
+      "rewardPackIds": [205],
+      "rewardPackNames": [
+        "Silver Players Premium",
+        "SILVER PLAYERS PREMIUM"
+      ],
+      "targetDuplicate": {
+        "tier": "silver",
+        "playerOnly": true,
+        "allowSpecial": false
+      },
+      "maxCompletions": 7
+    },
+    {
+      "id": "daily-common",
+      "name": "Daily Common Loop",
+      "strategy": "inventoryMixedUpgrade",
+      "sbcNames": [
+        "Daily Common Gold Upgrade",
+        "每日普通金牌升级",
+        "每日普通金牌升級"
+      ],
+      "rewardPackIds": [304],
+      "rewardPackNames": [
+        "Gold Players Pack"
+      ],
+      "requirements": [
+        {
+          "tier": "silver",
+          "count": 5,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": ["storage", "transfer", "club"]
+        },
+        {
+          "tier": "bronze",
+          "count": 5,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": ["storage", "transfer", "club"]
+        }
+      ],
+      "priorityPiles": ["storage", "transfer", "club"],
+      "maxCompletions": 7
+    },
+    {
+      "id": "daily-rare",
+      "name": "Daily Rare Loop",
+      "strategy": "commonGoldToRareUpgrade",
+      "sbcNames": [
+        "Daily Rare Gold Upgrade",
+        "每日稀有金牌升级",
+        "每日稀有金牌升級"
+      ],
+      "sourcePackNames": [
+        "11x Gold Players Pack",
+        "11 x Gold Players Pack"
+      ],
+      "rewardPackNames": [
+        "Max. 78 Rare Gold Players Pack",
+        "Max 78 Rare Gold Players Pack"
+      ],
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "common",
+          "count": 5,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": ["unassigned", "storage", "transfer"]
+        }
+      ],
+      "priorityPiles": ["unassigned", "storage", "transfer"],
+      "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxCompletions": 7
+    },
+    {
+      "id": "provision-crafting",
+      "name": "Provision Crafting Loop",
+      "strategy": "provisionPackDualCrafting",
+      "sourcePackIds": [20643],
+      "sourcePackNames": [
+        "Provision Pack",
+        "Provisions Pack"
+      ],
+      "rounds": 1,
+      "commonUpgrade": {
+        "name": "FOF Glory Hunters Crafting Upgrade",
+        "sbcNames": [
+          "FOF Glory Hunters Crafting Upgrade"
+        ],
+        "requirements": [
+          {
+            "tier": "gold",
+            "rarity": "common",
+            "count": 9,
+            "playerOnly": true,
+            "allowSpecial": false,
+            "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+          }
+        ],
+        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+      },
+      "rareUpgrade": {
+        "name": "2x 84+ Upgrade",
+        "sbcNames": [
+          "2x 84+ Upgrade",
+          "2 x 84+ Upgrade"
+        ],
+        "requirements": [
+          {
+            "tier": "gold",
+            "rarity": "rare",
+            "count": 6,
+            "playerOnly": true,
+            "allowSpecial": false,
+            "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+          }
+        ],
+        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+      }
+    }
+  ]
+}

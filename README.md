@@ -2,20 +2,17 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.3`
-- `DailyLoopRunnerHotReload.user.js`: `0.1.0`
+- `DailyLoopRunner.user.js`: `0.2.13`
+- `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
 
-主要文件都在：
-
-```powershell
-C:\Users\Administrator\Desktop\FC Plugins
-```
+主要文件都在本仓库目录。
 
 核心文件：
 
 - `DailyLoopRunner.user.js`: 主脚本，包含界面、默认 loop、SBC/开包/清理逻辑。
+- `DailyLoopRunner.loops.json`: 可选外部 loop 配置。开发时可通过面板加载，普通使用不依赖它。
 - `BronzeUpgradeLoop.user.js`: 旧文件名兼容副本，目前内容应与 `DailyLoopRunner.user.js` 保持一致。
 - `DailyLoopRunnerHotReload.user.js`: 热加载辅助脚本，给页面加 `Reload Loop` 按钮。
 - `StartLoopRunnerDevServer.ps1`: 本地静态文件服务，用于不刷新页面热加载主脚本。
@@ -41,8 +38,18 @@ Chrome 中需要启用：
 1. 打开 Web App 并手动登录。
 2. 等待页面和 FSU 完全加载。
 3. 在 Loop Runner 面板选择 loop。
-4. 点击 `Start`。
-5. 出错时优先点击 `Save Log` 或复制日志内容，查看最后几行。
+4. 如需刷新 packs/unassigned/storage/transfer/club 缓存，点击 `Refresh caches`。
+5. 如需先检查材料选择，勾选 `Dry run`。
+6. 点击 `Start`。
+7. 出错时优先点击 `Save Log` 或复制日志内容，查看最后几行。
+
+`Dry run` 模式只刷新只读缓存并打印计划动作，不会移动物品、开包、保存阵容或提交 SBC。库存型 loop 会列出选中的卡、来源 pile、rating、稀有度、交易状态、item id 和 definition id。
+
+`Refresh caches` 会优先刷新 packs 和 unassigned；club/storage/transfer 会用当前 Web App 暴露的可用方法刷新。如果某个 pile 没有可用刷新方法，脚本会保留现有缓存并写日志。
+
+选卡不够时，日志会追加 diagnostics：每个 pile 的总数、匹配数量、unique definition 数、duplicate signal 解析数量，以及主要过滤原因。
+
+普通使用只需要启用 `DailyLoopRunner.user.js`。开发时如果启动了本地服务，可以点击 `Load loops JSON` 从 `http://127.0.0.1:8765/DailyLoopRunner.loops.json` 加载外部 loop 配置；点击 `Built-in loops` 可切回脚本内置配置。
 
 当前默认 loop：
 
@@ -105,7 +112,7 @@ Chrome 中需要启用：
 启动本地服务：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "C:\Users\Administrator\Desktop\FC Plugins\StartLoopRunnerDevServer.ps1"
+powershell -ExecutionPolicy Bypass -File ".\StartLoopRunnerDevServer.ps1"
 ```
 
 保持这个 PowerShell 窗口打开。
@@ -117,6 +124,7 @@ powershell -ExecutionPolicy Bypass -File "C:\Users\Administrator\Desktop\FC Plug
 - 如果本地服务没启动，主脚本仍然能用，但修改后需要刷新页面才能生效。
 - 刷新页面可能导致重新登录和 FSU 重新 loading，所以开发时建议使用热加载。
 - 热加载只加载 `DailyLoopRunner.user.js`，因此开发时优先改这个文件，再同步到 `BronzeUpgradeLoop.user.js`。
+- `Load loops JSON` 读取同一服务下的 `DailyLoopRunner.loops.json`，适合只改 loop 配置时使用。
 
 ## 6. 修改默认 loop
 
@@ -127,6 +135,8 @@ const LOOP_DEFS = [
   ...
 ];
 ```
+
+也可以修改仓库里的 `DailyLoopRunner.loops.json`，启动本地服务后在面板点击 `Load loops JSON`。外部 JSON 可以是 loop 数组，也可以是 `{ "loops": [...] }`。
 
 每个 loop 常用字段：
 
@@ -151,6 +161,7 @@ const LOOP_DEFS = [
     }
   ],
   priorityPiles: ['storage', 'transfer', 'club'],
+  disabledPiles: ['club'],
   maxCompletions: 7
 }
 ```
@@ -167,6 +178,7 @@ const LOOP_DEFS = [
 - `rewardPackNames`: 奖励包名称匹配列表。
 - `requirements`: SBC 材料要求。
 - `priorityPiles`: 默认取卡优先级。
+- `disabledPiles`: 可选，禁用某些 pile。会应用到 `priorityPiles`、`clubFallbackPiles` 和 nested upgrade 的 requirements。
 - `maxCompletions`: 最多完成次数。
 
 ## 7. requirements 写法
@@ -208,6 +220,18 @@ const LOOP_DEFS = [
 
 面板里可以编辑自定义 JSON。推荐先复制现有 loop，改名称、SBC、包名和 requirements。
 
+点击 `Start` 前脚本会校验自定义 JSON。校验失败时不会开包或提交 SBC，而是直接在日志里列出配置错误。
+
+会拦截的常见错误：
+
+- 缺少 `name` 或 `strategy`。
+- `strategy` 不是脚本支持的策略。
+- `sbcNames`、`requirements`、`priorityPiles` 类型不对。
+- `requirements[].count` 不是正数。
+- `tier` / `rarity` / `priorityPiles` 写了不支持的值。
+- `disabledPiles` 把某个 requirement 的可用 pile 全部禁掉。
+- `provisionPackDualCrafting` 缺少源包配置、`commonUpgrade` 或 `rareUpgrade`。
+
 示例：只用 storage 和 club 做一个普通金升级：
 
 ```json
@@ -227,6 +251,7 @@ const LOOP_DEFS = [
     }
   ],
   "priorityPiles": ["storage", "club"],
+  "disabledPiles": ["transfer"],
   "maxCompletions": 7
 }
 ```
@@ -280,13 +305,13 @@ if (loopDef.strategy === 'myNewStrategy') {
 4. 运行语法检查：
 
 ```powershell
-node --check "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js"
+node --check ".\DailyLoopRunner.user.js"
 ```
 
-5. 同步旧文件名副本：
+5. 如果你仍在维护旧文件名副本，语法检查通过后同步：
 
 ```powershell
-Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js" -Destination "C:\Users\Administrator\Desktop\FC Plugins\BronzeUpgradeLoop.user.js" -Force
+Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgradeLoop.user.js" -Force
 ```
 
 6. 热加载或刷新页面测试。
@@ -304,6 +329,14 @@ Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunne
 - `refreshUnassigned()`
   - 刷新 unassigned items。
 
+- `refreshInventoryCaches(reason, options)`
+  - 刷新 packs、unassigned 以及可用的 club/storage/transfer 缓存。
+  - 在库存选卡前会静默尝试刷新，以减少 stale cache。
+
+- `loadLoopConfig(url)`
+  - 从本地 JSON 加载 loop 定义并重绘面板下拉框。
+  - 加载失败时保留当前 loop 定义。
+
 - `clearUnassigned(reason, options)`
   - 清理 unassigned。
   - `options.reserveItem` 可保留某些卡不清理。
@@ -320,6 +353,17 @@ Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunne
 - `selectInventoryPlayers(requirements, priorityPiles)`
   - 按规则从 pile 选材料。
   - 已处理 transfer duplicateId 解析。
+
+- `logSelectionDiagnostics(label, selection, fallbackPriorityPiles)`
+  - 选卡不够时输出每个 pile 的候选统计和过滤原因。
+
+- `validateLoopDef(loopDef)`
+  - 校验默认或自定义 loop 配置。
+  - 在开包或提交 SBC 前拦截明显错误。
+
+- `runDryRunLoop(loopDef)`
+  - 只读检查 loop 会做什么。
+  - 不移动物品、不开包、不保存阵容、不提交 SBC。
 
 - `prepareInventorySelection(loopDef, selection)`
   - 提交前二次准备。
@@ -348,9 +392,7 @@ Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunne
 3. 出错后点击 `Save Log`。
 4. 查看：
 
-```powershell
-C:\Users\Administrator\Desktop\log.txt
-```
+保存路径由浏览器下载设置决定，文件名形如 `bronze-loop-*.log`。
 
 常见错误：
 
@@ -370,6 +412,10 @@ C:\Users\Administrator\Desktop\log.txt
   - UI 提交按钮不可用。
   - 可能是材料数量、稀有度、特殊卡、同卡重复、阵型槽位映射问题。
 
+- `diagnostics for ...`
+  - 选卡不够时的候选诊断。
+  - 常见过滤原因包括 `protected-82-plus`、`special-blocked`、`rarity-not-common`、`duplicate-signal-unresolved`、`active-trade`。
+
 - `Transfer list has only ... slot(s)`
   - transfer list 满或空间不足。
 
@@ -384,13 +430,13 @@ C:\Users\Administrator\Desktop\log.txt
 - 每次修改后跑：
 
 ```powershell
-node --check "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js"
+node --check ".\DailyLoopRunner.user.js"
 ```
 
-- 通过后同步：
+- 如果你仍在维护旧文件名副本，通过后同步：
 
 ```powershell
-Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunner.user.js" -Destination "C:\Users\Administrator\Desktop\FC Plugins\BronzeUpgradeLoop.user.js" -Force
+Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgradeLoop.user.js" -Force
 ```
 
 - 使用热加载测试。
@@ -402,11 +448,6 @@ Copy-Item -LiteralPath "C:\Users\Administrator\Desktop\FC Plugins\DailyLoopRunne
 优先级较高：
 
 1. 把 `Daily Rare Loop` 跑稳定。
-2. 增加 item cache 刷新能力，减少 stale transfer/storage 缓存。
-3. 把 loop 定义从脚本内常量拆成外部 JSON。
-4. 给自定义 JSON 增加校验和错误提示。
-5. 增加 dry-run 模式：只列出会选哪些卡，不提交。
-6. 给每个 loop 增加更细的开关，例如是否允许使用 club、是否允许使用 transfer。
 
 中期可以做：
 
