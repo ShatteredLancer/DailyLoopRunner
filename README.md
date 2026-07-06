@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.15`
+- `DailyLoopRunner.user.js`: `0.2.16`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -45,6 +45,10 @@ Chrome 中需要启用：
 
 `Dry run` 模式只刷新只读缓存并打印计划动作，不会移动物品、开包、保存阵容或提交 SBC。库存型 loop 会列出选中的卡、来源 pile、rating、稀有度、交易状态、item id 和 definition id。Daily Bronze/Silver 这类日常 seed loop 在没有目标重复卡或奖励包时，会只检查 seed SBC challenge 是否仍可用，方便判断每日次数是否可能已经用完。
 
+WK 的 MVP live test 推荐选择 `One-click Daily MVP (1 each)`。它会按顺序跑 Bronze / Silver / Common / Rare 的 1-run MVP loop，每个日常最多提交 1 次。测试流程：先勾 `Dry run` 跑一遍，日志看起来正常后取消 `Dry run` 再跑一次，然后立刻停下来保存日志。
+
+普通 `Daily Bronze Loop` / `Daily Silver Loop` / `Daily Common Loop` / `Daily Rare Loop` 仍保留完整 `maxCompletions: 7`。这些多次 live loop 在未勾 `Dry run` 时会触发二次确认：第一次点击 `Start` 只写 `Live guard` 日志，15 秒内第二次点击 `Start` 才会真正开始。
+
 `Refresh caches` 会优先刷新 packs 和 unassigned；club/storage/transfer 会用当前 Web App 暴露的可用方法刷新。如果某个 pile 没有可用刷新方法，脚本会保留现有缓存并写日志。
 
 选卡不够时，日志会追加 diagnostics：每个 pile 的总数、匹配数量、unique definition 数、duplicate signal 解析数量，以及主要过滤原因。
@@ -62,6 +66,10 @@ Chrome 中需要启用：
   - 每次消耗青铜重复或库存青铜。
   - 最后一包奖励会保留不打开。
 
+- `Daily Bronze MVP (1 run)`
+  - 逻辑同 `Daily Bronze Loop`，但 `maxCompletions` 固定为 1。
+  - WK 单项测试或 one-click daily 会使用这个。
+
 - `Daily Silver Loop`
   - 做 `Daily Silver Upgrade`。
   - 逻辑同 Daily Bronze，只是目标换成银卡。
@@ -78,6 +86,9 @@ Chrome 中需要启用：
   - 优先使用 `SBC storage -> transfer list -> club`。
   - transfer list 里的卡不会移动回 club，而是用 `duplicateId` 找 club/storage 中可提交实体。
 
+- `Daily Common MVP (1 run)`
+  - 逻辑同 `Daily Common Loop`，但 `maxCompletions` 固定为 1。
+
 - `Daily Rare Loop`
   - 做 `Daily Rare Gold Upgrade`。
   - 需要 5 张普通金卡。
@@ -85,6 +96,14 @@ Chrome 中需要启用：
   - 这三处不足时先开 `11x Gold Players Pack`。
   - `11x Gold Players Pack` 也没有时，最后才使用 club。
   - 开包后保留普通金重复作为 SBC 材料，稀有金重复和其他重复按清理规则处理。
+
+- `Daily Rare MVP (1 run)`
+  - 逻辑同 `Daily Rare Loop`，但 `maxCompletions` 固定为 1。
+
+- `One-click Daily MVP (1 each)`
+  - 顺序执行 `Daily Bronze MVP (1 run)`、`Daily Silver MVP (1 run)`、`Daily Common MVP (1 run)`、`Daily Rare MVP (1 run)`。
+  - 适合 WK 的第一版 live MVP，不会一口气跑完整 7 次日常。
+  - 暂不包含 84x10 这类会消耗特殊卡或高评分卡的 SBC。
 
 - `Provision Crafting Loop`
   - 每个 round 开 1 个 `Provision Pack` / `Provisions Pack`。
@@ -186,6 +205,7 @@ const LOOP_DEFS = [
 - `priorityPiles`: 默认取卡优先级。
 - `disabledPiles`: 可选，禁用某些 pile。会应用到 `priorityPiles`、`clubFallbackPiles` 和 nested upgrade 的 requirements。
 - `maxCompletions`: 最多完成次数。
+- `steps`: `dailyRoutine` 使用的 loop id 列表。
 
 ## 7. requirements 写法
 
@@ -271,6 +291,10 @@ const LOOP_DEFS = [
 - `dailySingleCardRecycle`
   - 开奖励包，保留目标重复卡，循环做单卡 SBC。
   - 适合 Daily Bronze / Daily Silver。
+
+- `dailyRoutine`
+  - 按 `steps` 指定的 loop id 顺序执行多个已有 loop。
+  - 适合“一键日常”这种组合流程。
 
 - `provisionPackDualCrafting`
   - 每轮开一个源包，同时处理两类重复卡到两个不同 SBC。
