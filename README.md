@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.11`
+- `DailyLoopRunner.user.js`: `0.2.12`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.0`
 
 ## 1. 文件说明
@@ -155,6 +155,7 @@ const LOOP_DEFS = [
     }
   ],
   priorityPiles: ['storage', 'transfer', 'club'],
+  disabledPiles: ['club'],
   maxCompletions: 7
 }
 ```
@@ -171,6 +172,7 @@ const LOOP_DEFS = [
 - `rewardPackNames`: 奖励包名称匹配列表。
 - `requirements`: SBC 材料要求。
 - `priorityPiles`: 默认取卡优先级。
+- `disabledPiles`: 可选，禁用某些 pile。会应用到 `priorityPiles`、`clubFallbackPiles` 和 nested upgrade 的 requirements。
 - `maxCompletions`: 最多完成次数。
 
 ## 7. requirements 写法
@@ -221,6 +223,7 @@ const LOOP_DEFS = [
 - `sbcNames`、`requirements`、`priorityPiles` 类型不对。
 - `requirements[].count` 不是正数。
 - `tier` / `rarity` / `priorityPiles` 写了不支持的值。
+- `disabledPiles` 把某个 requirement 的可用 pile 全部禁掉。
 - `provisionPackDualCrafting` 缺少源包配置、`commonUpgrade` 或 `rareUpgrade`。
 
 示例：只用 storage 和 club 做一个普通金升级：
@@ -242,6 +245,7 @@ const LOOP_DEFS = [
     }
   ],
   "priorityPiles": ["storage", "club"],
+  "disabledPiles": ["transfer"],
   "maxCompletions": 7
 }
 ```
@@ -435,7 +439,6 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
 
 1. 把 `Daily Rare Loop` 跑稳定。
 2. 把 loop 定义从脚本内常量拆成外部 JSON。
-3. 给每个 loop 增加更细的开关，例如是否允许使用 club、是否允许使用 transfer。
 
 中期可以做：
 

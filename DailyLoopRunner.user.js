@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.11
+// @version      0.2.12
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -144,7 +144,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.11',
+    version: '0.2.12',
     destroy: destroyRunner,
   };
 
@@ -309,6 +309,7 @@
     validateStringArray(loopDef.rewardPackNames, 'rewardPackNames', errors);
     validatePileList(loopDef.priorityPiles, 'priorityPiles', errors);
     validatePileList(loopDef.clubFallbackPiles, 'clubFallbackPiles', errors);
+    validatePileList(loopDef.disabledPiles, 'disabledPiles', errors);
 
     if (loopDef.strategy === 'validationBronzeUpgrade') {
       validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
@@ -341,6 +342,42 @@
     if (errors.length) fail(`${label} validation failed:\n- ${errors.join('\n- ')}`);
   }
 
+  function applyDisabledPilesToList(piles, disabledPiles, path) {
+    if (!Array.isArray(piles) || !piles.length || !disabledPiles?.size) return piles;
+    const filtered = piles.filter((pile) => !disabledPiles.has(pile));
+    if (!filtered.length) fail(`${path} has no enabled piles after disabledPiles`);
+    return filtered;
+  }
+
+  function applyDisabledPilesToRequirements(requirements, disabledPiles, path) {
+    if (!Array.isArray(requirements)) return;
+    requirements.forEach((requirement, index) => {
+      requirement.priorityPiles = applyDisabledPilesToList(
+        requirement.priorityPiles,
+        disabledPiles,
+        `${path}[${index}].priorityPiles`,
+      );
+    });
+  }
+
+  function applyDisabledPiles(loopDef) {
+    const disabledPiles = new Set(loopDef.disabledPiles || []);
+    if (!disabledPiles.size) return loopDef;
+
+    loopDef.priorityPiles = applyDisabledPilesToList(loopDef.priorityPiles, disabledPiles, 'priorityPiles');
+    loopDef.clubFallbackPiles = applyDisabledPilesToList(loopDef.clubFallbackPiles, disabledPiles, 'clubFallbackPiles');
+    applyDisabledPilesToRequirements(loopDef.requirements, disabledPiles, 'requirements');
+
+    for (const upgradeName of ['commonUpgrade', 'rareUpgrade']) {
+      const upgradeDef = loopDef[upgradeName];
+      if (!isPlainObject(upgradeDef)) continue;
+      upgradeDef.priorityPiles = applyDisabledPilesToList(upgradeDef.priorityPiles, disabledPiles, `${upgradeName}.priorityPiles`);
+      applyDisabledPilesToRequirements(upgradeDef.requirements, disabledPiles, `${upgradeName}.requirements`);
+    }
+
+    return loopDef;
+  }
+
   function getSelectedLoopDef() {
     const select = document.querySelector('#bronze-loop-select');
     const selectedId = select?.value || LOOP_DEFS[0].id;
@@ -349,7 +386,7 @@
       try {
         const parsed = JSON.parse(text);
         assertValidLoopDef(parsed, 'Custom loop JSON');
-        return parsed;
+        return applyDisabledPiles(parsed);
       } catch (e) {
         if (e instanceof SyntaxError) fail(`Invalid custom loop JSON: ${e.message || e}`);
         throw e;
@@ -357,7 +394,7 @@
     }
     const loopDef = cloneLoopDef(getLoopDefById(selectedId));
     assertValidLoopDef(loopDef, loopDef.name || selectedId);
-    return loopDef;
+    return applyDisabledPiles(loopDef);
   }
 
   function setLoopJson(def) {
@@ -2126,9 +2163,10 @@
       const duplicateCount = countUnassignedMatching(duplicatePredicate);
       if (!duplicateCount) break;
 
-      const piles = duplicateCount >= countNeeded
+      const fallbackPiles = upgradeDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'];
+      const piles = duplicateCount >= countNeeded && fallbackPiles.includes('unassigned')
         ? ['unassigned']
-        : ['unassigned', 'storage', 'transfer', 'club'];
+        : fallbackPiles;
       const selection = selectLoopInventoryPlayers(upgradeDef, piles);
       log(`${loopDef.name}: ${label} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
 
@@ -2211,6 +2249,7 @@
 
   async function runConfiguredLoop(loopDef, roundNo = 1) {
     log(`Loop selected: ${loopDef.name} (${loopDef.strategy})`);
+    if (loopDef.disabledPiles?.length) log(`Disabled piles: ${loopDef.disabledPiles.join(', ')}`);
 
     if (loopDef.dryRun) {
       await runDryRunLoop(loopDef, roundNo);
