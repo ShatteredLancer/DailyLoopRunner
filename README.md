@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.8`
+- `DailyLoopRunner.user.js`: `0.2.9`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.0`
 
 ## 1. 文件说明
@@ -37,8 +37,11 @@ Chrome 中需要启用：
 1. 打开 Web App 并手动登录。
 2. 等待页面和 FSU 完全加载。
 3. 在 Loop Runner 面板选择 loop。
-4. 点击 `Start`。
-5. 出错时优先点击 `Save Log` 或复制日志内容，查看最后几行。
+4. 如需先检查材料选择，勾选 `Dry run`。
+5. 点击 `Start`。
+6. 出错时优先点击 `Save Log` 或复制日志内容，查看最后几行。
+
+`Dry run` 模式只刷新只读缓存并打印计划动作，不会移动物品、开包、保存阵容或提交 SBC。库存型 loop 会列出选中的卡、来源 pile、rating、稀有度、交易状态、item id 和 definition id。
 
 当前默认 loop：
 
@@ -332,6 +335,10 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
   - 校验默认或自定义 loop 配置。
   - 在开包或提交 SBC 前拦截明显错误。
 
+- `runDryRunLoop(loopDef)`
+  - 只读检查 loop 会做什么。
+  - 不移动物品、不开包、不保存阵容、不提交 SBC。
+
 - `prepareInventorySelection(loopDef, selection)`
   - 提交前二次准备。
 
@@ -413,8 +420,7 @@ Copy-Item -LiteralPath ".\DailyLoopRunner.user.js" -Destination ".\BronzeUpgrade
 1. 把 `Daily Rare Loop` 跑稳定。
 2. 增加 item cache 刷新能力，减少 stale transfer/storage 缓存。
 3. 把 loop 定义从脚本内常量拆成外部 JSON。
-4. 增加 dry-run 模式：只列出会选哪些卡，不提交。
-5. 给每个 loop 增加更细的开关，例如是否允许使用 club、是否允许使用 transfer。
+4. 给每个 loop 增加更细的开关，例如是否允许使用 club、是否允许使用 transfer。
 
 中期可以做：
 

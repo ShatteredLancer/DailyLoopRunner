@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.8
+// @version      0.2.9
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -143,7 +143,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.8',
+    version: '0.2.9',
     destroy: destroyRunner,
   };
 
@@ -297,6 +297,9 @@
       errors.push('strategy is required');
     } else if (!strategies.includes(loopDef.strategy)) {
       errors.push(`strategy must be one of: ${strategies.join(', ')}`);
+    }
+    if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
+      errors.push('dryRun must be boolean');
     }
 
     validateNumberArray(loopDef.sourcePackIds, 'sourcePackIds', errors);
@@ -1023,6 +1026,59 @@
     );
   }
 
+  function itemDisplayName(item) {
+    const names = [
+      [item?.firstName, item?.lastName].filter(Boolean).join(' '),
+      item?.name,
+      item?.commonName,
+      item?.lastName,
+      item?._staticData?.name,
+      item?._staticData?.commonName,
+      item?._staticData?.lastName,
+      item?.definitionId,
+      item?.id,
+    ];
+    return String(names.find((value) => value !== undefined && value !== null && String(value).trim()) || 'unknown');
+  }
+
+  function itemTierLabel(item) {
+    if (isBronze(item)) return 'bronze';
+    if (isSilver(item)) return 'silver';
+    if (isGold(item)) return 'gold';
+    return 'unknown';
+  }
+
+  function formatDryRunItem(entry, index) {
+    const item = entry?.item || entry;
+    const signal = entry?.signal || null;
+    const parts = [
+      `${index + 1}. ${itemDisplayName(item)}`,
+      `rating:${Number(item?.rating || 0) || '?'}`,
+      itemTierLabel(item),
+      isRare(item) ? 'rare' : 'common',
+      isTradeable(item) ? 'tradeable' : 'untradeable',
+      `from:${entry?.pileName || 'unknown'}`,
+      `id:${Number(item?.id || 0) || '?'}`,
+      `def:${Number(item?.definitionId || 0) || '?'}`,
+    ];
+    if (signal && Number(signal?.id || 0) !== Number(item?.id || 0)) {
+      parts.push(`signal:${Number(signal.id || 0) || '?'}`);
+    }
+    return parts.join(' | ');
+  }
+
+  function logDryRunSelection(label, selection, options = {}) {
+    const maxItems = Number(options.maxItems || 30);
+    log(`${label}: dry-run selected ${selection?.selected?.length || 0} item(s) (${formatSelectionStats(selection?.stats)})`);
+    const entries = selection?.entries || (selection?.selected || []).map((item) => ({ item, pileName: 'unknown' }));
+    entries.slice(0, maxItems).forEach((entry, index) => log(`dry-run pick ${formatDryRunItem(entry, index)}`));
+    if (entries.length > maxItems) log(`dry-run pick list truncated: ${entries.length - maxItems} more item(s)`);
+    if (!selection?.ok && selection?.missing) {
+      const missing = selection.missing;
+      log(`${label}: dry-run missing ${missing.count} ${missing.tier || 'any'} ${missing.rarity || ''} item(s)`);
+    }
+  }
+
   function getSubmissionCacheItems() {
     return uniqueItems(getStorageItems().concat(getClubItems()));
   }
@@ -1058,6 +1114,7 @@
     const submissionIds = new Set();
     const stats = {};
     const resolvedSignals = {};
+    const entries = [];
 
     for (const requirement of requirements || []) {
       let need = Number(requirement.count || 0);
@@ -1100,6 +1157,7 @@
 
         for (const pickedItem of picked) {
           selected.push(pickedItem.item);
+          entries.push({ ...pickedItem, pileName });
           if (pileNeedsDuplicateSignalResolution(pileName)) {
             resolvedSignals[pileName] = (resolvedSignals[pileName] || 0) + 1;
           }
@@ -1111,6 +1169,7 @@
         return {
           ok: false,
           selected,
+          entries,
           stats,
           missing: { ...requirement, count: need },
           resolvedSignals,
@@ -1118,7 +1177,7 @@
       }
     }
 
-    return { ok: true, selected, stats, missing: null, resolvedSignals };
+    return { ok: true, selected, entries, stats, missing: null, resolvedSignals };
   }
 
   function selectedItemsFromPile(selection, pileName) {
@@ -1481,6 +1540,155 @@
     return selectInventoryPlayers(scopedLoopDef.requirements, scopedLoopDef.priorityPiles);
   }
 
+  function isDryRunEnabled() {
+    return document.querySelector('#bronze-loop-dry-run')?.checked === true;
+  }
+
+  async function runValidationBronzeUpgradeDryRun(loopDef) {
+    await waitAppReady();
+    await refreshStorePacks();
+    const pack =
+      (loopDef.sourcePackIds || CFG.sourcePackIds).map((id) => findPackById(id)).find(Boolean) ||
+      findPackByName(loopDef.sourcePackNames || CFG.sourcePackNames);
+    const set = await findSbcSet(loopDef.sbcNames || CFG.bronzeUpgradeNames, loopDef.name);
+    log(`${loopDef.name}: dry-run source pack ${pack ? `${packName(pack)} (#${pack.id})` : 'not found'}`);
+    log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
+    log(`${loopDef.name}: dry run stops before opening packs, filling squads, or submitting SBCs`);
+  }
+
+  async function runDailySingleCardRecycleDryRun(loopDef) {
+    await waitAppReady();
+    await refreshUnassigned();
+    const targetDuplicates = getUnassignedTargetDuplicates(loopDef);
+    if (targetDuplicates.length) {
+      log(`${loopDef.name}: dry-run would consume ${targetDuplicates.length} target duplicate(s) before opening another pack`);
+      logDryRunSelection(`${loopDef.name} target duplicates`, {
+        ok: true,
+        selected: targetDuplicates,
+        entries: targetDuplicates.map((item) => ({ item, pileName: 'unassigned' })),
+        stats: { unassigned: targetDuplicates.length },
+      });
+      log(`${loopDef.name}: dry run stops before FSU fill or SBC submit`);
+      return;
+    }
+
+    const pack = await findLoopPack(loopDef);
+    if (pack) {
+      log(`${loopDef.name}: dry-run would open reward pack ${packName(pack)} (#${pack.id})`);
+    } else {
+      log(`${loopDef.name}: dry-run found no target duplicate or reward pack; live run would try seed SBC via FSU fill`);
+    }
+    log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
+  }
+
+  async function runInventoryMixedUpgradeDryRun(loopDef) {
+    await waitAppReady();
+    await refreshUnassigned().catch((e) => log(`${loopDef.name}: dry-run unassigned refresh skipped: ${e.message || e}`));
+    const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+    log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
+
+    const selection = selectInventoryPlayers(loopDef.requirements, loopDef.priorityPiles);
+    logDryRunSelection(loopDef.name, selection);
+    if (selection.ok) {
+      log(`${loopDef.name}: dry-run would submit this inventory selection`);
+    }
+    log(`${loopDef.name}: dry run stops before cleanup, squad save, or SBC submit`);
+  }
+
+  async function runCommonGoldToRareUpgradeDryRun(loopDef) {
+    await waitAppReady();
+    await refreshUnassigned();
+    const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+    log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
+
+    const primaryPiles = loopDef.priorityPiles || ['unassigned', 'storage', 'transfer'];
+    const clubFallbackPiles = loopDef.clubFallbackPiles || [...primaryPiles, 'club'];
+    let selection = selectLoopInventoryPlayers(loopDef, primaryPiles);
+    logDryRunSelection(`${loopDef.name} primary`, selection);
+    if (selection.ok) {
+      log(`${loopDef.name}: dry-run would submit primary common gold selection`);
+      log(`${loopDef.name}: dry run stops before squad save or SBC submit`);
+      return;
+    }
+
+    const pack = await findSourcePack(loopDef);
+    if (pack) {
+      log(`${loopDef.name}: dry-run would open source pack before club fallback: ${packName(pack)} (#${pack.id})`);
+      log(`${loopDef.name}: dry run stops before opening source pack or moving unassigned items`);
+      return;
+    }
+
+    log(`${loopDef.name}: dry-run found no source pack; checking club fallback`);
+    selection = selectLoopInventoryPlayers(loopDef, clubFallbackPiles);
+    logDryRunSelection(`${loopDef.name} club fallback`, selection);
+    if (selection.ok) {
+      log(`${loopDef.name}: dry-run would submit club fallback common gold selection`);
+    }
+    log(`${loopDef.name}: dry run stops before cleanup, squad save, or SBC submit`);
+  }
+
+  async function runReservedDuplicateUpgradeDryRun(loopDef, upgradeDef, duplicatePredicate, label) {
+    const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name || label);
+    const countNeeded = getUpgradeRequirementCount(upgradeDef);
+    const duplicateCount = countUnassignedMatching(duplicatePredicate);
+    log(`${loopDef.name}: dry-run ${label} SBC found ${set.name} (#${set.id || '?'})`);
+
+    if (!duplicateCount) {
+      log(`${loopDef.name}: dry-run ${label} has no reserved duplicate(s); live run would not submit this upgrade yet`);
+      return;
+    }
+
+    const piles = duplicateCount >= countNeeded
+      ? ['unassigned']
+      : ['unassigned', 'storage', 'transfer', 'club'];
+    const selection = selectLoopInventoryPlayers(upgradeDef, piles);
+    log(`${loopDef.name}: dry-run ${label} reserved duplicates:${duplicateCount}, required:${countNeeded}`);
+    logDryRunSelection(`${loopDef.name} ${label}`, selection);
+    if (selection.ok) {
+      log(`${loopDef.name}: dry-run would submit ${label} selection`);
+    }
+  }
+
+  async function runProvisionPackDualCraftingDryRun(loopDef) {
+    await waitAppReady();
+    await refreshUnassigned();
+    const rounds = Math.max(1, Math.min(50, Number(loopDef.rounds || loopDef.maxRounds || 1) || 1));
+    const pack = await findSourcePack(loopDef);
+    log(`${loopDef.name}: dry-run would open ${rounds} provision pack round(s); source pack ${pack ? `${packName(pack)} (#${pack.id})` : 'not found'}`);
+    log(`${loopDef.name}: dry-run only inspects current reserved duplicates; it does not open Provision Packs`);
+
+    await runReservedDuplicateUpgradeDryRun(loopDef, loopDef.commonUpgrade, isCommonGoldDuplicate, 'FOF common gold');
+    await runReservedDuplicateUpgradeDryRun(loopDef, loopDef.rareUpgrade, isRareGoldDuplicate, '84+ rare gold');
+    log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
+  }
+
+  async function runDryRunLoop(loopDef, roundNo = 1) {
+    log(`Dry run active: no items will be moved, no packs opened, no squads saved, no SBCs submitted`);
+
+    if (loopDef.strategy === 'validationBronzeUpgrade') {
+      await runValidationBronzeUpgradeDryRun(loopDef, roundNo);
+      return;
+    }
+    if (loopDef.strategy === 'dailySingleCardRecycle') {
+      await runDailySingleCardRecycleDryRun(loopDef);
+      return;
+    }
+    if (loopDef.strategy === 'inventoryMixedUpgrade') {
+      await runInventoryMixedUpgradeDryRun(loopDef);
+      return;
+    }
+    if (loopDef.strategy === 'commonGoldToRareUpgrade') {
+      await runCommonGoldToRareUpgradeDryRun(loopDef);
+      return;
+    }
+    if (loopDef.strategy === 'provisionPackDualCrafting') {
+      await runProvisionPackDualCraftingDryRun(loopDef);
+      return;
+    }
+
+    fail(`Unsupported loop strategy: ${loopDef.strategy}`);
+  }
+
   async function runInventoryMixedUpgrade(loopDef) {
     await waitAppReady();
     let completions = 0;
@@ -1797,6 +2005,11 @@
   async function runConfiguredLoop(loopDef, roundNo = 1) {
     log(`Loop selected: ${loopDef.name} (${loopDef.strategy})`);
 
+    if (loopDef.dryRun) {
+      await runDryRunLoop(loopDef, roundNo);
+      return;
+    }
+
     if (loopDef.strategy === 'validationBronzeUpgrade') {
       await runRound(roundNo);
       return;
@@ -1838,8 +2051,9 @@
       const loopDef = getSelectedLoopDef();
       const input = document.querySelector('#bronze-loop-rounds');
       const rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
+      loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
       if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
-      if (loopDef.strategy !== 'validationBronzeUpgrade') {
+      if (loopDef.dryRun || loopDef.strategy !== 'validationBronzeUpgrade') {
         stopPoint();
         await runConfiguredLoop(loopDef, 1);
       } else {
@@ -1865,10 +2079,12 @@
     const stop = document.querySelector('#bronze-loop-stop');
     const select = document.querySelector('#bronze-loop-select');
     const edit = document.querySelector('#bronze-loop-edit');
+    const dryRun = document.querySelector('#bronze-loop-dry-run');
     if (start) start.disabled = state.running;
     if (stop) stop.disabled = !state.running;
     if (select) select.disabled = state.running;
     if (edit) edit.disabled = state.running;
+    if (dryRun) dryRun.disabled = state.running;
     updateLoopControls();
   }
 
@@ -1973,6 +2189,8 @@
       #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; }
       #bronze-loop-collapse { min-width: 28px !important; width: 28px; padding: 0; }
       #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; }
+      #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
+      #bronze-loop-dry-run-label { cursor: pointer; user-select: none; }
       #bronze-loop-panel select {
         flex: 1;
         min-width: 0;
@@ -2022,6 +2240,11 @@
         <div class="row" id="bronze-loop-rounds-row">
           <span id="bronze-loop-rounds-label">rounds</span>
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${CFG.maxRounds}">
+        </div>
+        <div class="row">
+          <label id="bronze-loop-dry-run-label" title="Log planned selections without moving items, opening packs, or submitting SBCs">
+            <input id="bronze-loop-dry-run" type="checkbox"> Dry run
+          </label>
           <button id="bronze-loop-start">Start</button>
           <button id="bronze-loop-stop" disabled>Stop</button>
         </div>
