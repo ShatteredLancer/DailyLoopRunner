@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.23
+// @version      0.2.25
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -189,6 +189,12 @@
       ],
       maxCompletions: 1,
       maxSubmittedRating: 88,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      specialRequirementAdd: {
+        patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
+        buttonTexts: ['Add', '添加', '加入', '新增'],
+      },
       blockSpecial: true,
       blockTradeable: true,
       openRewardPacks: false,
@@ -241,7 +247,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.23',
+    version: '0.2.25',
     destroy: destroyRunner,
   };
 
@@ -1391,6 +1397,57 @@
     return simulateClick(btn);
   }
 
+  function compactText(el) {
+    return String(el?.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function isClickableElement(el) {
+    if (!el) return false;
+    if (el.disabled || el.classList?.contains('disabled')) return false;
+    const rect = el.getBoundingClientRect?.();
+    if (rect && (!rect.width || !rect.height)) return false;
+    return true;
+  }
+
+  function findRequirementAddControl(requirementPatterns = [], buttonTexts = ['Add']) {
+    const rows = Array.from(document.querySelectorAll('li, section, div'))
+      .filter((el) => {
+        const text = compactText(el);
+        return text && text.length < 500 && matchesAny(text, requirementPatterns);
+      })
+      .sort((a, b) => compactText(a).length - compactText(b).length);
+
+    for (const row of rows) {
+      const controls = Array.from(row.querySelectorAll('button, [role="button"], a, span, div'))
+        .filter(isClickableElement);
+      const addControl = controls.find((el) => {
+        const text = compactText(el);
+        const label = String(el.getAttribute?.('aria-label') || el.getAttribute?.('title') || '');
+        const classes = String(el.className || '');
+        return matchesAny(text, buttonTexts) ||
+          matchesAny(label, buttonTexts) ||
+          /\badd\b/i.test(classes);
+      });
+      if (addControl) {
+        return addControl.closest?.('button,[role="button"],a') || addControl;
+      }
+    }
+
+    return null;
+  }
+
+  async function clickRequirementAddControl(config = {}, label = 'SBC requirement') {
+    const patterns = config.patterns || [];
+    if (!patterns.length) return false;
+    const btn = findRequirementAddControl(patterns, config.buttonTexts || ['Add']);
+    if (!btn) return false;
+    log(`Clicked requirement Add for ${label}`);
+    simulateClick(btn);
+    await waitLoadingEnd();
+    await sleep(CFG.pauseMs);
+    return true;
+  }
+
   function findSubmitButton() {
     return (
       document.querySelector('button.ut-squad-tab-button-control.actionTab.right.call-to-action:not(.disabled)') ||
@@ -1834,10 +1891,16 @@
     return items;
   }
 
-  async function fillSbcSquad(label = 'SBC') {
+  async function fillSbcSquad(label = 'SBC', options = {}) {
+    const requireSubmitReady = options.requireSubmitReady !== false;
     const squad = await waitFor(() => ctrl()?._squad, 15000, 'SBC squad object');
     try { squad.removeAllItems?.(); } catch { }
     await sleep(500);
+
+    if (options.specialRequirementAdd) {
+      const clicked = await clickRequirementAddControl(options.specialRequirementAdd, `${label} special requirement`);
+      if (!clicked) log(`${label}: special requirement Add button not found; continuing with FSU fill`);
+    }
 
     if (clickButtonByText(['重复球员填充阵容', '重複球員填充陣容', 'Repeat player fill squad'])) {
       log('Clicked duplicate fill');
@@ -1868,7 +1931,8 @@
     const filled = getFilledSquadSlots(squad);
     const submitReady = !!findSubmitButton();
     log(`${label} squad filled slots detected: ${filled}; submit ${submitReady ? 'ready' : 'not ready'}`);
-    if (!submitReady) fail(`${label} squad is not complete`);
+    if (!submitReady && requireSubmitReady) fail(`${label} squad is not complete`);
+    return { squad, filled, submitReady };
   }
 
   function unwrapSquadSlot(slot) {
@@ -1902,17 +1966,24 @@
     return parts.join(' | ');
   }
 
-  function getSbcProtectionReasons(item, loopDef = {}) {
+  function isSbcSpecialItem(item) {
+    return isSpecial(item) || itemGroups(item).map(Number).includes(23);
+  }
+
+  function getSbcProtectionReasons(item, loopDef = {}, context = {}) {
     const reasons = [];
     const rating = Number(item?.rating || 0);
     const maxRating = Number(loopDef.maxSubmittedRating || 0);
-    const groups = itemGroups(item).map(Number);
     const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
+    const allowedSpecialCount = Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
+    const specialIndex = Number(context.specialIndex || 0) || 0;
 
     if (Number(item?.loans ?? -1) !== -1) reasons.push('loan');
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (protectedIds.has(Number(item?.id || 0))) reasons.push('protected-id');
-    if (loopDef.blockSpecial !== false && (isSpecial(item) || groups.includes(23))) reasons.push('special-blocked');
+    if (loopDef.blockSpecial !== false && isSbcSpecialItem(item) && (!allowedSpecialCount || specialIndex > allowedSpecialCount)) {
+      reasons.push('special-blocked');
+    }
     if (loopDef.blockTradeable !== false && isTradeable(item)) reasons.push('tradeable-blocked');
     if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
 
@@ -1922,29 +1993,44 @@
   function inspectSbcSquad(loopDef, squad = ctrl()?._squad) {
     const items = getSquadItems(squad);
     const blocked = [];
+    const entries = [];
+    let specialCount = 0;
+    const requiredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
 
     items.forEach((item, index) => {
-      const reasons = getSbcProtectionReasons(item, loopDef);
+      if (isSbcSpecialItem(item)) specialCount++;
+      const reasons = getSbcProtectionReasons(item, loopDef, { specialIndex: specialCount });
+      entries.push({ item, index, reasons });
       if (reasons.length) blocked.push({ item, index, reasons });
     });
 
-    return { items, blocked };
+    const missingRequirements = [];
+    if (requiredSpecialCount && specialCount < requiredSpecialCount) {
+      missingRequirements.push(`special-count ${specialCount}/${requiredSpecialCount}`);
+    }
+
+    return { items, entries, blocked, specialCount, missingRequirements };
   }
 
   function logSbcSquadInspection(loopDef, inspection, options = {}) {
     const maxItems = Number(options.maxItems || 20);
-    log(`${loopDef.name}: squad inspection ${inspection.items.length} item(s), blocked ${inspection.blocked.length}`);
-    inspection.items.slice(0, maxItems).forEach((item, index) => {
-      const reasons = getSbcProtectionReasons(item, loopDef);
+    log(`${loopDef.name}: squad inspection ${inspection.items.length} item(s), special ${inspection.specialCount || 0}, blocked ${inspection.blocked.length}`);
+    (inspection.entries || []).slice(0, maxItems).forEach(({ item, index, reasons }) => {
       log(`${loopDef.name}: squad ${formatSquadItem(item, index)}${reasons.length ? ` | BLOCK ${reasons.join(',')}` : ''}`);
     });
     if (inspection.items.length > maxItems) {
       log(`${loopDef.name}: squad list truncated: ${inspection.items.length - maxItems} more item(s)`);
     }
+    (inspection.missingRequirements || []).forEach((message) => {
+      log(`${loopDef.name}: missing requirement ${message}`);
+    });
   }
 
   function assertSbcSquadSafe(loopDef, inspection) {
     if (!inspection.items.length) fail(`${loopDef.name}: no squad items detected after fill`);
+    if (inspection.missingRequirements?.length) {
+      fail(`${loopDef.name}: missing squad requirement(s): ${inspection.missingRequirements.join(', ')}`);
+    }
     if (!inspection.blocked.length) return;
 
     const summary = inspection.blocked
@@ -2424,14 +2510,23 @@
         break;
       }
 
-      await fillSbcSquad(loopDef.name);
-      const squad = ctrl()?._squad || opened.challenge?.squad;
+      const fillResult = await fillSbcSquad(loopDef.name, {
+        requireSubmitReady: false,
+        specialRequirementAdd: loopDef.specialRequirementAdd,
+      });
+      const squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
       const inspection = inspectSbcSquad(loopDef, squad);
       logSbcSquadInspection(loopDef, inspection);
+      if (!fillResult.submitReady) {
+        const required = getRequiredPlayerCount(opened.challenge);
+        log(`${loopDef.name}: submit not ready after FSU fill (${fillResult.filled}/${required} slots filled); likely SBC requirements are still unmet or FSU completion picked an invalid squad`);
+      }
 
       if (loopDef.dryRun) {
-        if (inspection.blocked.length) {
-          log(`${loopDef.name}: dry-run blocked by protected squad item(s); live run would stop before submit`);
+        if (inspection.blocked.length || inspection.missingRequirements?.length) {
+          log(`${loopDef.name}: dry-run blocked by protected or missing squad requirement(s); live run would stop before submit`);
+        } else if (!fillResult.submitReady) {
+          log(`${loopDef.name}: dry-run squad passed protection, but submit is not ready; live run would stop before submit`);
         } else {
           log(`${loopDef.name}: dry-run squad passed protection; live run would submit once`);
         }
@@ -2440,6 +2535,7 @@
         return;
       }
 
+      if (!fillResult.submitReady) fail(`${loopDef.name}: submit is not ready after protection inspection`);
       assertSbcSquadSafe(loopDef, inspection);
       const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
       if (rewardPackId && loopDef.openRewardPacks) {

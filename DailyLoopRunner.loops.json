@@ -287,6 +287,23 @@
       ],
       "maxCompletions": 1,
       "maxSubmittedRating": 88,
+      "requiredSpecialCount": 1,
+      "allowedSpecialCount": 1,
+      "specialRequirementAdd": {
+        "patterns": [
+          "Any TOTW/TOTS/FOF",
+          "TOTW/TOTS/FOF",
+          "TOTW",
+          "TOTS",
+          "FOF"
+        ],
+        "buttonTexts": [
+          "Add",
+          "添加",
+          "加入",
+          "新增"
+        ]
+      },
       "blockSpecial": true,
       "blockTradeable": true,
       "openRewardPacks": false
