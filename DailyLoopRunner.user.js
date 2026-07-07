@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.39
+// @version      0.2.40
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -271,7 +271,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.39',
+    version: '0.2.40',
     destroy: destroyRunner,
   };
 
@@ -783,7 +783,7 @@
     await waitFor(
       () => isFutAppReady(),
       30000,
-      'FUT services',
+      'FUT main UI',
     );
   }
 
@@ -802,7 +802,7 @@
     return false;
   }
 
-  function isFutAppReady() {
+  function areFutServicesReady() {
     return !!(
       W.services?.Store &&
       W.services?.SBC &&
@@ -810,6 +810,39 @@
       W.repositories?.Store &&
       W.repositories?.Item
     );
+  }
+
+  function hasFutMainDom() {
+    return [
+      '.ut-tab-bar-item.icon-home',
+      '.ut-navigation-container-view--content',
+      '.ut-navigation-container-view',
+      '.ut-navigation-bar-view',
+      '.ut-tab-bar',
+      '.ut-home-hub-view',
+      '.ut-store-hub-view',
+      '.ut-sbc-hub-view',
+      '.ut-sbc-set-view',
+      '.ut-sbc-challenges-view',
+      '.ut-squad-hub-view',
+      '.ut-club-view',
+      '.ut-transfer-list-view',
+      '.ut-unassigned-items-view',
+    ].some((selector) => document.querySelector(selector));
+  }
+
+  function currentControllerName() {
+    const controller = ctrl();
+    return String(controller?.className || controller?.constructor?.name || '');
+  }
+
+  function isMainFutControllerName(name) {
+    return /^UT(Home|Store|SBC|Squad|Club|Transfer|Unassigned|Evolutions|Objectives|Market|Pack)/.test(name) &&
+      !/Loading|Splash|Login|Preload|Startup/i.test(name);
+  }
+
+  function isFutAppReady() {
+    return areFutServicesReady() && (hasFutMainDom() || isMainFutControllerName(currentControllerName()));
   }
 
   async function refreshStorePacks() {
