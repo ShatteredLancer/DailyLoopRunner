@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.47
+// @version      0.2.48
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -301,7 +301,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.47',
+    version: '0.2.48',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2552,7 +2552,6 @@
   }
 
   function isTotwItem(item) {
-    if (itemGroups(item).map(Number).includes(23)) return true;
     try { if (item?.isTOTW?.() || item?.isTotw?.()) return true; } catch { }
     const text = itemSearchText(item);
     return /\bTOTW\b|Team of the Week|本周最佳|週最佳/i.test(text);
@@ -2621,7 +2620,7 @@
 
   function summarizeRequiredSpecialEntries(entries, limit = 3) {
     return entries.slice(0, limit).map(({ item, pileName }) =>
-      `${itemDisplayName(item)} rating:${Number(item?.rating || 0) || '?'} from:${pileName} id:${Number(item?.id || 0) || '?'}`
+      `${itemDisplayName(item)} rating:${Number(item?.rating || 0) || '?'} ${requiredSpecialTypeLabel(item)} from:${pileName} id:${Number(item?.id || 0) || '?'}`
     ).join('; ');
   }
 
@@ -2640,6 +2639,14 @@
 
   function sortTotwEntriesForSubmit(entries) {
     return sortRequiredSpecialEntriesForSubmit(entries);
+  }
+
+  function requiredSpecialTypeLabel(item) {
+    const labels = [];
+    if (isTotwItem(item)) labels.push('TOTW');
+    if (isTotsItem(item)) labels.push('TOTS');
+    if (isFofItem(item)) labels.push('FOF');
+    return labels.length ? `[${labels.join('/')}]` : '[unknown-special]';
   }
 
   function needsRequiredTotwInjection(loopDef, inspection) {
