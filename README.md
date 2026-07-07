@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.40`
+- `DailyLoopRunner.user.js`: `0.2.41`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -32,6 +32,8 @@ Chrome 中需要启用：
 - `DailyLoopRunnerHotReload.user.js`
 
 进入 EA FC Web App 后，等待 FSU 加载完成，再使用右侧或悬浮的 Loop Runner 面板。
+
+Runner 会尽量读取并跟随 FSU 的 SBC ignore player configuration，例如 Only Untradeable、Exclude Evolution、排除指定联赛、storage 优先、普通/稀有优先级等；84x10 等 FSU 自动填阵容的 loop 仍会在提交前执行 Runner 自己的硬保护检查。
 
 ## 3. 日常使用流程
 

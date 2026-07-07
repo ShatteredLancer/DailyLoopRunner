@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.40
+// @version      0.2.41
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -45,6 +45,23 @@
     pauseMs: 1800,
     storageMax: 100,
   };
+
+  const FSU_COMPAT_DEFAULTS = Object.freeze({
+    ignorePlayerPosition: true,
+    onlyUntradeable: false,
+    excludeDesignatedLeagues: true,
+    excludedLeagueIds: [],
+    useRarityPlayer: false,
+    excludeEvolution: true,
+    playerPickStrictCommonRare: true,
+    priorityRareWithinGoldRange: true,
+    priorityNonSpecialPlayers: true,
+    priorityStoragePlayers: true,
+    silverBronzePrioritizeNormal: true,
+    goldRange: [75, 83],
+    detected: false,
+    source: 'compat-defaults',
+  });
 
   const LOOP_DEFS = [
     {
@@ -261,6 +278,8 @@
     stalePackIds: new Set(),
     logLines: [],
     bootTimer: null,
+    fsuSettingsOverride: null,
+    fsuSettingsCache: { at: 0, settings: null },
   };
 
   function destroyRunner() {
@@ -271,8 +290,11 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.40',
+    version: '0.2.41',
     destroy: destroyRunner,
+    getFsuSettings: () => getFsuSettings({ force: true }),
+    setFsuSettingsOverride,
+    clearFsuSettingsOverride,
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1073,11 +1095,12 @@
     return rareflag > 1;
   }
 
-  function itemMatchesSpec(item, spec = {}) {
+  function itemMatchesSpec(item, spec = {}, settings = getFsuSettings()) {
     if (spec.playerOnly && !isPlayer(item)) return false;
     if (spec.special === true && !isSpecial(item)) return false;
     if (spec.special === false && isSpecial(item)) return false;
     if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
+    if (settings.useRarityPlayer === false && spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
     if (spec.tier === 'bronze' && !isBronze(item)) return false;
     if (spec.tier === 'silver' && !isSilver(item)) return false;
     if (spec.tier === 'gold' && !isGold(item)) return false;
@@ -1087,7 +1110,8 @@
   }
 
   function isTargetDuplicate(item, loopDef) {
-    return isDuplicate(item) && itemMatchesSpec(item, loopDef?.targetDuplicate || {});
+    const spec = loopDef?.targetDuplicate || {};
+    return isDuplicate(item) && isSbcUsablePlayer(item, spec) && itemMatchesSpec(item, spec);
   }
 
   function isDuplicate(item) {
@@ -1102,6 +1126,352 @@
     if (item?.untradeable === false) return true;
     if (item?.untradeableCount !== undefined) return Number(item.untradeableCount || 0) === 0;
     return false;
+  }
+
+  function boolFromAny(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
+    if (typeof value === 'string') {
+      const text = value.trim().toLowerCase();
+      if (['true', '1', 'yes', 'on', 'enabled', 'enable'].includes(text)) return true;
+      if (['false', '0', 'no', 'off', 'disabled', 'disable'].includes(text)) return false;
+    }
+    return null;
+  }
+
+  const FSU_SETTING_ALIASES = {
+    ignorePlayerPosition: [/ignore.*player.*position/i, /ignore.*position/i, /忽略.*位置/],
+    onlyUntradeable: [/only.*untrad/i, /untrad.*only/i, /仅.*不可交易/, /只.*不可交易/],
+    excludeDesignatedLeagues: [/exclude.*designated.*league/i, /exclude.*league/i, /排除.*联赛/, /排除.*聯賽/],
+    useRarityPlayer: [/use.*rarity.*player/i, /rarity.*player/i, /使用.*稀有/, /使用.*特殊/],
+    excludeEvolution: [/exclude.*evo/i, /exclude.*evolution/i, /排除.*进化/, /排除.*進化/],
+    playerPickStrictCommonRare: [/player.*pick.*strict/i, /strictly.*common.*rare/i, /球员选择.*严格/, /球員選擇.*嚴格/],
+    priorityRareWithinGoldRange: [/priority.*rare.*gold.*range/i, /rare.*within.*gold.*range/i, /golden.*player.*range/i, /稀有.*金/],
+    priorityNonSpecialPlayers: [/priority.*non.*special/i, /non.*special.*player/i, /优先.*非.*特殊/, /優先.*非.*特殊/],
+    priorityStoragePlayers: [/priority.*storage/i, /storage.*player/i, /优先.*仓库/, /優先.*倉庫/, /storage.*priority/i],
+    silverBronzePrioritizeNormal: [/silver.*bronze.*normal/i, /quality.*prioritize.*normal/i, /银.*铜.*普通/, /銀.*銅.*普通/],
+  };
+
+  function aliasMatches(path, aliases) {
+    return aliases.some((pattern) => pattern.test(path));
+  }
+
+  function isInspectableObject(value) {
+    if (!value || typeof value !== 'object') return false;
+    if (value === W || value === document || value === document.body) return false;
+    const tag = Object.prototype.toString.call(value);
+    return tag === '[object Object]' || tag === '[object Array]';
+  }
+
+  function flattenConfigValues(value, path = '', rows = [], depth = 0, seen = new WeakSet()) {
+    if (value === null || value === undefined || depth > 5) return rows;
+    if (typeof value !== 'object') {
+      rows.push({ path, value });
+      return rows;
+    }
+    if (!isInspectableObject(value) || seen.has(value)) return rows;
+    seen.add(value);
+
+    const keys = Array.isArray(value) ? value.map((_, index) => String(index)) : Object.keys(value);
+    for (const key of keys.slice(0, 250)) {
+      let child;
+      try { child = value[key]; } catch { continue; }
+      const nextPath = path ? `${path}.${key}` : key;
+      if (isInspectableObject(child)) {
+        flattenConfigValues(child, nextPath, rows, depth + 1, seen);
+      } else {
+        rows.push({ path: nextPath, value: child });
+      }
+    }
+    return rows;
+  }
+
+  function parseJsonMaybe(value) {
+    if (typeof value !== 'string') return null;
+    const text = value.trim();
+    if (!text || !['{', '['].includes(text[0])) return null;
+    try { return JSON.parse(text); } catch { return null; }
+  }
+
+  function numberListFromAny(value) {
+    if (Array.isArray(value)) {
+      return value
+        .flatMap((entry) => numberListFromAny(entry))
+        .filter((entry, index, arr) => Number.isFinite(entry) && arr.indexOf(entry) === index);
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) return [Number(value)];
+    if (typeof value === 'string') {
+      return (value.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
+    }
+    if (isInspectableObject(value)) {
+      return flattenConfigValues(value)
+        .flatMap((row) => numberListFromAny(row.value))
+        .filter((entry, index, arr) => Number.isFinite(entry) && arr.indexOf(entry) === index);
+    }
+    return [];
+  }
+
+  function normalizeGoldRange(settings, rows) {
+    const direct = numberListFromAny(settings.goldRange || settings.goldenRange || settings.goldRatingRange).slice(0, 2);
+    if (direct.length === 2) return direct.sort((a, b) => a - b);
+
+    let min = null;
+    let max = null;
+    for (const row of rows) {
+      const path = row.path.toLowerCase();
+      const value = Number(row.value);
+      if (!Number.isFinite(value)) continue;
+      if (/gold.*(min|from|start)|golden.*(min|from|start)/i.test(path)) min = value;
+      if (/gold.*(max|to|end)|golden.*(max|to|end)/i.test(path)) max = value;
+    }
+    if (Number.isFinite(min) && Number.isFinite(max)) return [min, max].sort((a, b) => a - b);
+    return FSU_COMPAT_DEFAULTS.goldRange;
+  }
+
+  function normalizeFsuSettings(raw = {}, source = 'manual') {
+    const rows = flattenConfigValues(raw);
+    const settings = { ...FSU_COMPAT_DEFAULTS, detected: true, source };
+    let matched = false;
+
+    for (const [field, aliases] of Object.entries(FSU_SETTING_ALIASES)) {
+      const row = rows.find((entry) => aliasMatches(entry.path, aliases) && boolFromAny(entry.value) !== null);
+      if (row) {
+        settings[field] = boolFromAny(row.value);
+        matched = true;
+      }
+    }
+
+    const excludedLeagueRows = rows.filter((entry) =>
+      /exclude|ignore|black|ban|designated|league|联赛|聯賽/i.test(entry.path) &&
+      /league|联赛|聯賽/i.test(entry.path)
+    );
+    const excludedLeagueIds = excludedLeagueRows
+      .flatMap((entry) => numberListFromAny(entry.value))
+      .filter((entry, index, arr) => Number.isFinite(entry) && arr.indexOf(entry) === index);
+    if (excludedLeagueIds.length) {
+      settings.excludedLeagueIds = excludedLeagueIds;
+      settings.excludeDesignatedLeagues = true;
+      matched = true;
+    }
+
+    settings.goldRange = normalizeGoldRange(raw, rows);
+    if (!matched && !rows.some((entry) => /fsu|enhancer|sbc|ignore|rarity|untrad|league|evo|storage/i.test(entry.path))) {
+      return null;
+    }
+    return settings;
+  }
+
+  function likelyFsuStorageKey(key, value) {
+    const text = `${key} ${typeof value === 'string' ? value.slice(0, 400) : ''}`;
+    return /fsu|enhancer|sbc|ignore|rarity|untrad|league|evo|evolution|storage|golden|player.*range/i.test(text);
+  }
+
+  function readFsuSettingsFromStorage(storage, label) {
+    if (!storage) return null;
+    const exactKeys = [
+      'sbcIgnorePlayerConfiguration',
+      'sbcIgnorePlayerConfig',
+      'sbc_ignore_player_configuration',
+      'sbcIgnorePlayers',
+      'sbcSettings',
+      'fsuSbcSettings',
+      'fsuSettings',
+      'enhancerSettings',
+      'fcEnhancerSettings',
+    ];
+
+    for (const key of exactKeys) {
+      let value = null;
+      try { value = storage.getItem(key); } catch { }
+      if (value === null || value === undefined) continue;
+      const parsed = parseJsonMaybe(value);
+      const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label}:${key}`);
+      if (settings) return settings;
+    }
+
+    let length = 0;
+    try { length = Number(storage.length || 0); } catch { }
+    for (let index = 0; index < Math.min(length, 250); index++) {
+      let key = '';
+      let value = null;
+      try {
+        key = storage.key(index);
+        value = storage.getItem(key);
+      } catch { continue; }
+      if (!key || !likelyFsuStorageKey(key, value)) continue;
+      const parsed = parseJsonMaybe(value);
+      const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label}:${key}`);
+      if (settings) return settings;
+    }
+    return null;
+  }
+
+  function readFsuSettingsFromWindow() {
+    const roots = [];
+    const rootNames = [
+      'FSU',
+      'fsu',
+      'FUTEnhancer',
+      'FCEnhancer',
+      'Enhancer',
+      'enhancer',
+      '__FSU',
+      '__FUTEnhancer',
+      '__FCEnhancer',
+    ];
+    for (const name of rootNames) {
+      try {
+        if (isInspectableObject(W[name])) roots.push([name, W[name]]);
+      } catch { }
+    }
+    try {
+      Object.keys(W)
+        .filter((key) => /fsu|enhancer/i.test(key))
+        .slice(0, 40)
+        .forEach((key) => {
+          try {
+            if (isInspectableObject(W[key])) roots.push([key, W[key]]);
+          } catch { }
+        });
+    } catch { }
+
+    const seen = new WeakSet();
+    for (const [name, root] of roots) {
+      if (seen.has(root)) continue;
+      seen.add(root);
+      const settings = normalizeFsuSettings(root, `window.${name}`);
+      if (settings) return settings;
+    }
+    return null;
+  }
+
+  function detectFsuSettings() {
+    return state.fsuSettingsOverride ||
+      readFsuSettingsFromWindow() ||
+      readFsuSettingsFromStorage(window.localStorage, 'localStorage') ||
+      readFsuSettingsFromStorage(window.sessionStorage, 'sessionStorage') ||
+      { ...FSU_COMPAT_DEFAULTS, excludedLeagueIds: [...FSU_COMPAT_DEFAULTS.excludedLeagueIds], goldRange: [...FSU_COMPAT_DEFAULTS.goldRange] };
+  }
+
+  function getFsuSettings(options = {}) {
+    const nowMs = Date.now();
+    if (!options.force && state.fsuSettingsCache.settings && nowMs - state.fsuSettingsCache.at < 2000) {
+      return state.fsuSettingsCache.settings;
+    }
+    const settings = detectFsuSettings();
+    state.fsuSettingsCache = { at: nowMs, settings };
+    return settings;
+  }
+
+  function setFsuSettingsOverride(settings) {
+    state.fsuSettingsOverride = settings ? normalizeFsuSettings(settings, 'manual-override') : null;
+    state.fsuSettingsCache = { at: 0, settings: null };
+    return getFsuSettings({ force: true });
+  }
+
+  function clearFsuSettingsOverride() {
+    state.fsuSettingsOverride = null;
+    state.fsuSettingsCache = { at: 0, settings: null };
+    return getFsuSettings({ force: true });
+  }
+
+  function onOff(value) {
+    return value ? 'on' : 'off';
+  }
+
+  function formatFsuSettings(settings = getFsuSettings()) {
+    const leagueText = settings.excludedLeagueIds?.length ? settings.excludedLeagueIds.join('/') : 'none';
+    const range = settings.goldRange || FSU_COMPAT_DEFAULTS.goldRange;
+    return [
+      `source:${settings.source}${settings.detected ? '' : ' (compat defaults)'}`,
+      `onlyUntradeable:${onOff(settings.onlyUntradeable)}`,
+      `excludeLeagues:${onOff(settings.excludeDesignatedLeagues)} ids:${leagueText}`,
+      `useRarity:${onOff(settings.useRarityPlayer)}`,
+      `excludeEvo:${onOff(settings.excludeEvolution)}`,
+      `rareGoldRange:${onOff(settings.priorityRareWithinGoldRange)} ${range[0]}-${range[1]}`,
+      `nonSpecialFirst:${onOff(settings.priorityNonSpecialPlayers)}`,
+      `storageFirst:${onOff(settings.priorityStoragePlayers)}`,
+      `silverBronzeNormal:${onOff(settings.silverBronzePrioritizeNormal)}`,
+    ].join('; ');
+  }
+
+  function logFsuSettingsForRun() {
+    log(`FSU settings sync: ${formatFsuSettings(getFsuSettings({ force: true }))}`);
+  }
+
+  function itemLeagueId(item) {
+    const values = [
+      item?.leagueId,
+      item?.league,
+      item?._leagueId,
+      item?._data?.leagueId,
+      item?._staticData?.leagueId,
+      item?.assetData?.leagueId,
+    ];
+    for (const value of values) {
+      const num = Number(value);
+      if (Number.isFinite(num) && num > 0) return num;
+    }
+    return 0;
+  }
+
+  function isEvolutionItem(item) {
+    try { if (item?.isEvolution?.()) return true; } catch { }
+    try { if (item?.isEvo?.()) return true; } catch { }
+    const values = [
+      item?.isEvolution,
+      item?.isEvo,
+      item?.evolutionId,
+      item?.evoId,
+      item?.evolutionLevel,
+      item?.evolutionStatus,
+      item?._data?.evolutionId,
+      item?._staticData?.evolutionId,
+    ];
+    return values.some((value) => {
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+      if (typeof value === 'string') return value.trim() && value !== '0' && value !== '-1' && value.toLowerCase() !== 'false';
+      if (isInspectableObject(value)) return Object.keys(value).length > 0;
+      return false;
+    });
+  }
+
+  function getFsuRejectReasons(item, spec = {}, settings = getFsuSettings()) {
+    const reasons = [];
+    if (!isPlayer(item)) return reasons;
+    if (settings.onlyUntradeable && isTradeable(item)) reasons.push('fsu-only-untradeable');
+    if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push('fsu-exclude-evolution');
+    const leagueId = itemLeagueId(item);
+    if (
+      settings.excludeDesignatedLeagues &&
+      leagueId &&
+      (settings.excludedLeagueIds || []).map(Number).includes(leagueId)
+    ) {
+      reasons.push(`fsu-excluded-league-${leagueId}`);
+    }
+    if (
+      settings.useRarityPlayer === false &&
+      spec.special !== true &&
+      spec.allowSpecial !== true &&
+      isSpecial(item)
+    ) {
+      reasons.push('fsu-rarity-player-off');
+    }
+    return reasons;
+  }
+
+  function applyFsuPilePriority(piles = [], settings = getFsuSettings()) {
+    if (!settings.priorityStoragePlayers || !Array.isArray(piles) || !piles.includes('storage')) return piles;
+    const pinned = piles[0] === 'unassigned' ? ['unassigned'] : [];
+    const rest = piles.filter((pile) => !pinned.includes(pile) && pile !== 'storage');
+    return [...pinned, 'storage', ...rest];
+  }
+
+  function isInGoldPriorityRange(item, settings = getFsuSettings()) {
+    const range = settings.goldRange || FSU_COMPAT_DEFAULTS.goldRange;
+    const rating = Number(item?.rating || 0);
+    return isGold(item) && rating >= Number(range[0] || 75) && rating <= Number(range[1] || 83);
   }
 
   function collectionValues(collection) {
@@ -1181,6 +1551,7 @@
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
+    if (getFsuRejectReasons(item, options).length) return false;
     return true;
   }
 
@@ -1584,12 +1955,28 @@
     return 11;
   }
 
-  function sortSbcFodder(items) {
-    return [...items].sort((a, b) =>
-      Number(a?.rating || 0) - Number(b?.rating || 0) ||
-      Number(isRare(a)) - Number(isRare(b)) ||
-      Number(a?.id || 0) - Number(b?.id || 0)
-    );
+  function sortSbcFodder(items, spec = {}, settings = getFsuSettings()) {
+    return [...items].sort((a, b) => {
+      if (settings.priorityNonSpecialPlayers && isSpecial(a) !== isSpecial(b)) {
+        return Number(isSpecial(a)) - Number(isSpecial(b));
+      }
+
+      const aGoldRange = isInGoldPriorityRange(a, settings);
+      const bGoldRange = isInGoldPriorityRange(b, settings);
+      if (settings.priorityRareWithinGoldRange && spec.rarity === undefined && aGoldRange && bGoldRange && isRare(a) !== isRare(b)) {
+        return Number(isRare(b)) - Number(isRare(a));
+      }
+
+      const aSilverBronze = isBronze(a) || isSilver(a);
+      const bSilverBronze = isBronze(b) || isSilver(b);
+      if (settings.silverBronzePrioritizeNormal && aSilverBronze && bSilverBronze && isRare(a) !== isRare(b)) {
+        return Number(isRare(a)) - Number(isRare(b));
+      }
+
+      return Number(a?.rating || 0) - Number(b?.rating || 0) ||
+        Number(isRare(a)) - Number(isRare(b)) ||
+        Number(a?.id || 0) - Number(b?.id || 0);
+    });
   }
 
   function itemDisplayName(item) {
@@ -1677,6 +2064,7 @@
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) reasons.push('active-trade');
+    getFsuRejectReasons(item, options).forEach((reason) => reasons.push(reason));
     return reasons;
   }
 
@@ -1694,7 +2082,7 @@
     return reasons;
   }
 
-  function diagnosePileForRequirement(pileName, requirement) {
+  function diagnosePileForRequirement(pileName, requirement, settings = getFsuSettings()) {
     const items = getPileItemsByName(pileName);
     const result = {
       total: items.length,
@@ -1726,7 +2114,7 @@
           continue;
         }
         result.duplicateSignals++;
-        const resolved = findSubmissionItemForDuplicateSignal(item, new Set(), requirement);
+        const resolved = findSubmissionItemForDuplicateSignal(item, new Set(), requirement, settings);
         if (resolved) {
           result.resolvedSignals++;
         } else {
@@ -1740,11 +2128,12 @@
   }
 
   function logRequirementDiagnostics(label, requirement, fallbackPriorityPiles) {
-    const piles = requirement?.priorityPiles || fallbackPriorityPiles || ['storage', 'transfer', 'club'];
+    const settings = getFsuSettings();
+    const piles = applyFsuPilePriority(requirement?.priorityPiles || fallbackPriorityPiles || ['storage', 'transfer', 'club'], settings);
     log(`${label}: diagnostics for ${describeRequirement(requirement)} across ${piles.join(' > ')}`);
 
     for (const pileName of piles) {
-      const diag = diagnosePileForRequirement(pileName, requirement);
+      const diag = diagnosePileForRequirement(pileName, requirement, settings);
       const signalText = pileNeedsDuplicateSignalResolution(pileName)
         ? `, duplicate signals:${diag.duplicateSignals}, resolved:${diag.resolvedSignals}`
         : '';
@@ -1767,11 +2156,11 @@
     return Number(a?.definitionId || 0) === Number(b?.definitionId || -1);
   }
 
-  function findSubmissionItemForDuplicateSignal(signal, usedIds, spec = {}) {
+  function findSubmissionItemForDuplicateSignal(signal, usedIds, spec = {}, settings = getFsuSettings()) {
     const duplicateId = Number(signal?.duplicateId || 0);
     const cacheItems = getSubmissionCacheItems().filter((item) =>
       isSbcUsablePlayer(item, spec) &&
-      itemMatchesSpec(item, spec) &&
+      itemMatchesSpec(item, spec, settings) &&
       !usedIds.has(Number(item?.id || 0))
     );
 
@@ -1780,7 +2169,7 @@
       if (direct) return direct;
     }
 
-    return sortSbcFodder(cacheItems).find((item) => isSameDefinition(item, signal)) || null;
+    return sortSbcFodder(cacheItems, spec, settings).find((item) => isSameDefinition(item, signal)) || null;
   }
 
   function pileNeedsDuplicateSignalResolution(pileName) {
@@ -1788,6 +2177,7 @@
   }
 
   function selectInventoryPlayers(requirements, priorityPiles = ['storage', 'transfer', 'club']) {
+    const settings = getFsuSettings();
     const selected = [];
     const selectedIds = new Set();
     const selectedDefinitionIds = new Set();
@@ -1798,15 +2188,15 @@
 
     for (const requirement of requirements || []) {
       let need = Number(requirement.count || 0);
-      const piles = requirement.priorityPiles || priorityPiles;
+      const piles = applyFsuPilePriority(requirement.priorityPiles || priorityPiles, settings);
       for (const pileName of piles) {
         if (need <= 0) break;
-        const candidates = sortSbcFodder(getPileItemsByName(pileName))
+        const candidates = sortSbcFodder(getPileItemsByName(pileName), requirement, settings)
           .filter((item) =>
             !selectedIds.has(Number(item?.id || 0)) &&
             !selectedDefinitionIds.has(Number(item?.definitionId || 0)) &&
             isSbcUsablePlayer(item, requirement) &&
-            itemMatchesSpec(item, requirement)
+            itemMatchesSpec(item, requirement, settings)
           );
         let picked = [];
 
@@ -1814,7 +2204,7 @@
           for (const signal of candidates) {
             if (picked.length >= need) break;
             if (!isDuplicate(signal)) continue;
-            const resolved = findSubmissionItemForDuplicateSignal(signal, submissionIds, requirement);
+            const resolved = findSubmissionItemForDuplicateSignal(signal, submissionIds, requirement, settings);
             if (!resolved) continue;
             if (selectedDefinitionIds.has(Number(resolved?.definitionId || 0))) continue;
             picked.push({ signal, item: resolved });
@@ -2118,7 +2508,12 @@
     const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
     const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number));
     const allowedSpecialCount = Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
+    const requiredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
     const specialIndex = Number(context.specialIndex || 0) || 0;
+    const fsuSpec = {
+      playerOnly: true,
+      allowSpecial: requiredSpecialCount > 0 && specialIndex <= requiredSpecialCount,
+    };
 
     if (Number(item?.loans ?? -1) !== -1) reasons.push('loan');
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
@@ -2129,6 +2524,9 @@
     }
     if (loopDef.blockTradeable !== false && isTradeable(item)) reasons.push('tradeable-blocked');
     if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
+    getFsuRejectReasons(item, fsuSpec).forEach((reason) => {
+      if (!reasons.includes(reason)) reasons.push(reason);
+    });
 
     return reasons;
   }
@@ -2189,6 +2587,19 @@
       }
       if (reasons.includes('tradeable-blocked')) {
         hints.push(`${prefix}: replace tradeable card with an untradeable card`);
+      }
+      if (reasons.includes('fsu-only-untradeable')) {
+        hints.push(`${prefix}: FSU Only Untradeable is enabled; replace with an untradeable card`);
+      }
+      if (reasons.includes('fsu-exclude-evolution')) {
+        hints.push(`${prefix}: FSU Exclude Evolution is enabled; replace this Evolution card`);
+      }
+      const leagueReason = reasons.find((reason) => reason.startsWith('fsu-excluded-league-'));
+      if (leagueReason) {
+        hints.push(`${prefix}: FSU excluded league ${leagueReason.replace('fsu-excluded-league-', '')}; replace with another league`);
+      }
+      if (reasons.includes('fsu-rarity-player-off')) {
+        hints.push(`${prefix}: FSU Use Rarity Player is off; replace this special/rarity card`);
       }
       if (reasons.includes('loan')) {
         hints.push(`${prefix}: replace loan card`);
@@ -2826,8 +3237,10 @@
   }
 
   function isCommonGoldPlayer(item, options = {}) {
+    const spec = { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false, protectHighGold: options.protectHighGold === true };
     return !(options.protectHighGold && isProtectedHighGold(item)) &&
-      itemMatchesSpec(item, { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false });
+      isSbcUsablePlayer(item, spec) &&
+      itemMatchesSpec(item, spec);
   }
 
   function isCommonGoldDuplicate(item, options = {}) {
@@ -2835,8 +3248,10 @@
   }
 
   function isRareGoldPlayer(item, options = {}) {
+    const spec = { tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false, protectHighGold: options.protectHighGold === true };
     return !(options.protectHighGold && isProtectedHighGold(item)) &&
-      itemMatchesSpec(item, { tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false });
+      isSbcUsablePlayer(item, spec) &&
+      itemMatchesSpec(item, spec);
   }
 
   function isRareGoldDuplicate(item, options = {}) {
@@ -3307,6 +3722,7 @@
       loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
       loopDef.openRewardPacks = isOpenRewardPacksEnabled();
       if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
+      logFsuSettingsForRun();
       if (!confirmLiveRunIfNeeded(loopDef, rounds)) return;
     } catch (e) {
       log(`Stopped: ${e.message || e}`);
