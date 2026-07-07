@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.33
+// @version      0.2.38
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -3336,6 +3336,8 @@
       localStorage.setItem('fc-loop-panel-pos', JSON.stringify({
         left: Math.round(rect.left),
         top: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
       }));
     } catch { }
   }
@@ -3405,6 +3407,89 @@
     handle.addEventListener('pointercancel', stopDrag);
   }
 
+  function makePanelResizable(panel) {
+    const MIN_W = 220;
+    const MIN_H = 180;
+    const EDGE_PAD = 20;
+    const DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
+    let resizing = null;
+
+    const onMove = (event) => {
+      if (!resizing) return;
+      const dx = event.clientX - resizing.startX;
+      const dy = event.clientY - resizing.startY;
+      const dir = resizing.dir;
+      let newLeft = resizing.startLeft;
+      let newTop = resizing.startTop;
+      let newWidth = resizing.startWidth;
+      let newHeight = resizing.startHeight;
+      if (dir.includes('e')) newWidth = Math.max(MIN_W, resizing.startWidth + dx);
+      if (dir.includes('s')) newHeight = Math.max(MIN_H, resizing.startHeight + dy);
+      if (dir.includes('w')) {
+        newWidth = Math.max(MIN_W, resizing.startWidth - dx);
+        if (newWidth > MIN_W) newLeft = resizing.startLeft + (resizing.startWidth - newWidth);
+      }
+      if (dir.includes('n')) {
+        newHeight = Math.max(MIN_H, resizing.startHeight - dy);
+        if (newHeight > MIN_H) newTop = resizing.startTop + (resizing.startHeight - newHeight);
+      }
+      const maxW = window.innerWidth - EDGE_PAD;
+      const maxH = window.innerHeight - EDGE_PAD;
+      if (newWidth > maxW) {
+        const overflow = newWidth - maxW;
+        newWidth = maxW;
+        if (dir.includes('w')) newLeft += overflow;
+      }
+      if (newHeight > maxH) {
+        const overflow = newHeight - maxH;
+        newHeight = maxH;
+        if (dir.includes('n')) newTop += overflow;
+      }
+      newLeft = Math.max(0, Math.min(window.innerWidth - newWidth, newLeft));
+      newTop = Math.max(0, Math.min(window.innerHeight - newHeight, newTop));
+      panel.style.left = `${newLeft}px`;
+      panel.style.top = `${newTop}px`;
+      panel.style.width = `${newWidth}px`;
+      panel.style.height = `${newHeight}px`;
+      event.preventDefault();
+    };
+
+    const onUp = () => {
+      if (!resizing) return;
+      resizing = null;
+      savePanelPos(panel);
+    };
+
+    DIRS.forEach((dir) => {
+      const el = panel.querySelector(`#bronze-loop-resize-${dir}`);
+      if (!el) return;
+      el.addEventListener('pointerdown', (event) => {
+        if (panel.classList.contains('icon-only')) return;
+        const rect = panel.getBoundingClientRect();
+        panel.style.left = `${rect.left}px`;
+        panel.style.top = `${rect.top}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.width = `${rect.width}px`;
+        panel.style.height = `${rect.height}px`;
+        resizing = {
+          dir,
+          startX: event.clientX,
+          startY: event.clientY,
+          startLeft: rect.left,
+          startTop: rect.top,
+          startWidth: rect.width,
+          startHeight: rect.height,
+        };
+        el.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+      });
+      el.addEventListener('pointermove', onMove);
+      el.addEventListener('pointerup', onUp);
+      el.addEventListener('pointercancel', onUp);
+    });
+  }
+
   function installPanel() {
     if (document.querySelector('#bronze-loop-panel')) return;
     document.querySelector('#bronze-loop-style')?.remove();
@@ -3417,6 +3502,10 @@
         bottom: 10px;
         z-index: 999999;
         width: 300px;
+        min-width: 220px;
+        min-height: 180px;
+        display: flex;
+        flex-direction: column;
         background: #15181d;
         border: 1px solid #5b6f8f;
         color: #f4f6f8;
@@ -3425,9 +3514,26 @@
         box-shadow: 0 8px 30px rgba(0,0,0,.35);
         box-sizing: border-box;
       }
+      #bronze-loop-panel .panel-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+      .bronze-loop-resize {
+        position: absolute;
+        z-index: 2;
+        touch-action: none;
+      }
+      #bronze-loop-resize-n { top: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+      #bronze-loop-resize-s { bottom: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+      #bronze-loop-resize-e { top: 12px; bottom: 12px; right: -3px; width: 6px; cursor: ew-resize; }
+      #bronze-loop-resize-w { top: 12px; bottom: 12px; left: -3px; width: 6px; cursor: ew-resize; }
+      #bronze-loop-resize-ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+      #bronze-loop-resize-nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+      #bronze-loop-resize-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+      #bronze-loop-resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+      #bronze-loop-panel.icon-only .bronze-loop-resize { display: none; }
       #bronze-loop-panel.icon-only {
         width: 36px;
         height: 36px;
+        min-width: 0;
+        min-height: 0;
         padding: 0;
         background: rgba(12,15,19,.72);
         border: 1px solid #78a6ff;
@@ -3491,6 +3597,9 @@
         line-height: 16px;
         color: #d7e2f0;
         word-break: break-word;
+        user-select: text;
+        -webkit-user-select: text;
+        cursor: text;
       }
       #bronze-loop-options {
         display: none;
@@ -3498,7 +3607,13 @@
         padding-top: 8px;
         border-top: 1px solid #303946;
       }
-      #bronze-loop-panel.options-open #bronze-loop-options { display: block; }
+      #bronze-loop-panel.options-open #bronze-loop-options {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+      }
       .bronze-loop-section {
         color: #9fb2c9;
         font-size: 11px;
@@ -3508,6 +3623,8 @@
         display: none;
         width: 100%;
         height: 170px;
+        min-height: 60px;
+        flex-shrink: 1;
         box-sizing: border-box;
         margin-bottom: 8px;
         background: #0c0f13;
@@ -3518,13 +3635,17 @@
       }
       #bronze-loop-json.show { display: block; }
       #bronze-loop-log {
-        height: 120px;
+        flex: 1 1 0;
+        min-height: 100px;
         overflow: auto;
         white-space: pre-wrap;
         background: #0c0f13;
         border: 1px solid #303946;
         padding: 8px;
         box-sizing: border-box;
+        user-select: text;
+        -webkit-user-select: text;
+        cursor: text;
       }
     `;
     document.head.appendChild(style);
@@ -3579,6 +3700,14 @@
           <div id="bronze-loop-log"></div>
         </div>
       </div>
+      <div class="bronze-loop-resize" id="bronze-loop-resize-n"></div>
+      <div class="bronze-loop-resize" id="bronze-loop-resize-s"></div>
+      <div class="bronze-loop-resize" id="bronze-loop-resize-e"></div>
+      <div class="bronze-loop-resize" id="bronze-loop-resize-w"></div>
+      <div class="bronze-loop-resize" id="bronze-loop-resize-ne"></div>
+      <div class="bronze-loop-resize" id="bronze-loop-resize-nw"></div>
+      <div class="bronze-loop-resize" id="bronze-loop-resize-se"></div>
+      <div class="bronze-loop-resize" id="bronze-loop-resize-sw"></div>
     `;
     document.body.appendChild(panel);
     const savedPos = getSavedPanelPos();
@@ -3588,7 +3717,14 @@
       panel.style.right = 'auto';
       panel.style.bottom = 'auto';
     }
+    if (savedPos && Number.isFinite(savedPos.width) && savedPos.width >= 220) {
+      panel.style.width = `${Math.min(window.innerWidth - 20, savedPos.width)}px`;
+    }
+    if (savedPos && Number.isFinite(savedPos.height) && savedPos.height >= 180) {
+      panel.style.height = `${Math.min(window.innerHeight - 20, savedPos.height)}px`;
+    }
     makePanelDraggable(panel);
+    makePanelResizable(panel);
     renderLoopSelect();
     renderLog();
     document.querySelector('#bronze-loop-collapse').addEventListener('click', (event) => {
@@ -3601,6 +3737,16 @@
       if (panel.classList.contains('icon-only')) {
         panel.classList.remove('options-open');
         document.querySelector('#bronze-loop-options-toggle').textContent = 'Options';
+        panel.style.width = '';
+        panel.style.height = '';
+      } else {
+        const saved = getSavedPanelPos();
+        if (saved && Number.isFinite(saved.width) && saved.width >= 220) {
+          panel.style.width = `${Math.min(window.innerWidth - 20, saved.width)}px`;
+        }
+        if (saved && Number.isFinite(saved.height) && saved.height >= 180) {
+          panel.style.height = `${Math.min(window.innerHeight - 20, saved.height)}px`;
+        }
       }
       document.querySelector('#bronze-loop-collapse').textContent = panel.classList.contains('icon-only') ? 'L' : 'L';
       savePanelPos(panel);
