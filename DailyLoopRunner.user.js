@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.50
+// @version      0.2.51
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -303,7 +303,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.50',
+    version: '0.2.51',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1569,6 +1569,72 @@
     return [];
   }
 
+  function makeLengthSafeMetadataValue(value) {
+    if (value === undefined || value === null) return [];
+    if (Array.isArray(value) || typeof value === 'function') return value;
+    if (typeof value === 'string') return value.trim() ? [value] : [];
+    if (typeof value === 'number' || typeof value === 'boolean') return [value];
+    if (typeof value === 'object' && value.length === undefined) return Object.keys(value).length ? [value] : [];
+    return value;
+  }
+
+  function patchLengthSafeMetadataField(holder, key) {
+    if (!holder || typeof holder !== 'object') return false;
+    let current;
+    try {
+      current = holder[key];
+    } catch {
+      return false;
+    }
+    const next = makeLengthSafeMetadataValue(current);
+    if (next === current) return false;
+    try {
+      holder[key] = next;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function patchFsuLengthSafePlayerMetadata(reason = 'before FSU player scan') {
+    const targetIds = new Set([
+      ...Array.from(state.assumedTotwItemIds || []),
+      ...(state.recentRewardItems || []).map((item) => Number(item?.id || 0)),
+    ].filter(Boolean));
+    if (!targetIds.size) return;
+
+    const items = uniqueItems([
+      ...(state.recentRewardItems || []),
+      ...getPileItemsByName('unassigned'),
+      ...getPileItemsByName('storage'),
+      ...getPileItemsByName('transfer'),
+      ...getPileItemsByName('club'),
+    ]);
+    const keys = ['league', 'leagues', 'leagueIds', 'club', 'clubs', 'clubIds', 'nation', 'nations', 'nationIds'];
+    let patchedItems = 0;
+    let patchedFields = 0;
+
+    for (const item of items) {
+      if (!isPlayer(item)) continue;
+      if (!targetIds.has(Number(item?.id || 0))) continue;
+      let itemPatched = false;
+      const holders = [item, item?._data, item?._staticData, item?.assetData, item?._assetData];
+      for (const holder of holders) {
+        for (const key of keys) {
+          if (patchLengthSafeMetadataField(holder, key)) {
+            itemPatched = true;
+            patchedFields++;
+          }
+        }
+      }
+      if (itemPatched) patchedItems++;
+    }
+
+    if (patchedItems) {
+      log(`FSU metadata compatibility patch (${reason}): ${patchedItems} player item(s), ${patchedFields} field(s)`);
+    }
+  }
+
   function isInactiveTrade(item) {
     try {
       const auction = item?.getAuctionData?.() || item?._auction;
@@ -2457,6 +2523,7 @@
   async function fillSbcSquad(label = 'SBC', options = {}) {
     const requireSubmitReady = options.requireSubmitReady !== false;
     const squad = await waitFor(() => ctrl()?._squad, 15000, 'SBC squad object');
+    patchFsuLengthSafePlayerMetadata(`${label} before FSU fill`);
     try { squad.removeAllItems?.(); } catch { }
     await sleep(500);
 
@@ -3865,6 +3932,7 @@
     while (completions < maxCompletions) {
       stopPoint();
       await ensureTotwForFillAndVerify(loopDef);
+      patchFsuLengthSafePlayerMetadata(`${loopDef.name} before opening SBC`);
 
       const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
       const opened = await openSbcSet(set, { returnNullIfComplete: true });
