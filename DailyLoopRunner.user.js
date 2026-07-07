@@ -271,7 +271,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.33',
+    version: '0.2.38',
     destroy: destroyRunner,
   };
 
