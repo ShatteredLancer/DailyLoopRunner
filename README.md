@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.39`
+- `DailyLoopRunner.user.js`: `0.2.40`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
