@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.45
+// @version      0.2.46
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -232,7 +232,7 @@
       maxSubmittedRating: 88,
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
-      requiredSpecialKind: 'totw',
+      requiredSpecialKind: 'totw-tots-fof',
       requiredSpecialMinRating: 84,
       specialRequirementAdd: {
         patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
@@ -301,7 +301,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.45',
+    version: '0.2.46',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -494,8 +494,8 @@
         errors.push('requiredSpecialMinRating must be a number between 1 and 99');
       }
     }
-    if (loopDef.requiredSpecialKind !== undefined && !['totw'].includes(String(loopDef.requiredSpecialKind).toLowerCase())) {
-      errors.push('requiredSpecialKind must be totw when provided');
+    if (loopDef.requiredSpecialKind !== undefined && !['totw', 'totw-tots-fof'].includes(String(loopDef.requiredSpecialKind).toLowerCase())) {
+      errors.push('requiredSpecialKind must be totw or totw-tots-fof when provided');
     }
     if (
       loopDef.autoTotwUpgrade !== undefined &&
@@ -2525,13 +2525,11 @@
   }
 
   function isSbcSpecialItem(item) {
-    return isSpecial(item) || itemGroups(item).map(Number).includes(23);
+    return isSpecial(item) || isTotwItem(item) || isTotsItem(item) || isFofItem(item);
   }
 
-  function isTotwItem(item) {
-    if (itemGroups(item).map(Number).includes(23)) return true;
-    try { if (item?.isTOTW?.() || item?.isTotw?.()) return true; } catch { }
-    const text = [
+  function itemSearchText(item) {
+    return [
       item?.name,
       item?.commonName,
       item?.lastName,
@@ -2539,29 +2537,62 @@
       item?._staticData?.commonName,
       item?.rareName,
       item?.rarityName,
+      item?._staticData?.rareName,
+      item?._staticData?.rarityName,
     ].filter(Boolean).join(' ');
+  }
+
+  function isTotwItem(item) {
+    if (itemGroups(item).map(Number).includes(23)) return true;
+    try { if (item?.isTOTW?.() || item?.isTotw?.()) return true; } catch { }
+    const text = itemSearchText(item);
     return /\bTOTW\b|Team of the Week|本周最佳|週最佳/i.test(text);
+  }
+
+  function isTotsItem(item) {
+    try { if (item?.isTOTS?.() || item?.isTots?.()) return true; } catch { }
+    return /\bTOTS\b|Team of the Season|赛季最佳|賽季最佳/i.test(itemSearchText(item));
+  }
+
+  function isFofItem(item) {
+    try { if (item?.isFOF?.() || item?.isFof?.()) return true; } catch { }
+    return /\bFOF\b|Festival of Football|Glory Hunters|荣耀猎手|榮耀獵手/i.test(itemSearchText(item));
   }
 
   function requiredSpecialKind(loopDef = {}) {
     return String(loopDef.requiredSpecialKind || '').trim().toLowerCase();
   }
 
+  function requiredSpecialLabel(loopDef = {}) {
+    return requiredSpecialKind(loopDef) === 'totw-tots-fof' ? 'TOTW/TOTS/FOF' : 'TOTW';
+  }
+
+  function isRequiredSpecialItem(item, loopDef = {}) {
+    const kind = requiredSpecialKind(loopDef);
+    if (kind === 'totw-tots-fof') return isTotwItem(item) || isTotsItem(item) || isFofItem(item);
+    return isTotwItem(item);
+  }
+
   function needsAutoTotwPreflight(loopDef = {}) {
-    return requiredSpecialKind(loopDef) === 'totw' &&
+    return ['totw', 'totw-tots-fof'].includes(requiredSpecialKind(loopDef)) &&
       Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0) > 0 &&
       loopDef.autoTotwUpgrade !== false;
   }
 
-  function isEligibleTotwForLoop(item, loopDef = {}) {
-    if (!isTotwItem(item)) return false;
+  function isEligibleRequiredSpecialForLoop(item, loopDef = {}) {
+    if (!isRequiredSpecialItem(item, loopDef)) return false;
     const minRating = Number(loopDef.requiredSpecialMinRating || 0);
     if (minRating && Number(item?.rating || 0) < minRating) return false;
     const reasons = getSbcProtectionReasons(item, loopDef, { specialIndex: 1 });
     return reasons.length === 0;
   }
 
-  function getEligibleTotwEntries(loopDef = {}) {
+  function isEligibleTotwForLoop(item, loopDef = {}) {
+    if (!isTotwItem(item)) return false;
+    return isEligibleRequiredSpecialForLoop(item, loopDef);
+  }
+
+  function getEligibleRequiredSpecialEntries(loopDef = {}) {
     const entries = [];
     const seen = new Set();
     for (const pileName of ['unassigned', 'storage', 'club']) {
@@ -2569,25 +2600,37 @@
         const id = Number(item?.id || 0);
         if (!id || seen.has(id)) continue;
         seen.add(id);
-        if (isEligibleTotwForLoop(item, loopDef)) entries.push({ item, pileName });
+        if (isEligibleRequiredSpecialForLoop(item, loopDef)) entries.push({ item, pileName });
       }
     }
     return entries;
   }
 
-  function summarizeTotwEntries(entries, limit = 3) {
+  function getEligibleTotwEntries(loopDef = {}) {
+    return getEligibleRequiredSpecialEntries(loopDef).filter(({ item }) => isTotwItem(item));
+  }
+
+  function summarizeRequiredSpecialEntries(entries, limit = 3) {
     return entries.slice(0, limit).map(({ item, pileName }) =>
       `${itemDisplayName(item)} rating:${Number(item?.rating || 0) || '?'} from:${pileName} id:${Number(item?.id || 0) || '?'}`
     ).join('; ');
   }
 
-  function sortTotwEntriesForSubmit(entries) {
+  function summarizeTotwEntries(entries, limit = 3) {
+    return summarizeRequiredSpecialEntries(entries, limit);
+  }
+
+  function sortRequiredSpecialEntriesForSubmit(entries) {
     const pileRank = { storage: 0, club: 1, unassigned: 2 };
     return [...(entries || [])].sort((a, b) =>
-      Number(a?.item?.rating || 0) - Number(b?.item?.rating || 0) ||
+      Number(b?.item?.rating || 0) - Number(a?.item?.rating || 0) ||
       (pileRank[a?.pileName] ?? 9) - (pileRank[b?.pileName] ?? 9) ||
       Number(a?.item?.id || 0) - Number(b?.item?.id || 0)
     );
+  }
+
+  function sortTotwEntriesForSubmit(entries) {
+    return sortRequiredSpecialEntriesForSubmit(entries);
   }
 
   function needsRequiredTotwInjection(loopDef, inspection) {
@@ -2605,7 +2648,7 @@
     const candidates = entries.filter(({ item }) =>
       item &&
       Number(item?.id || 0) !== totwId &&
-      !(isTotwItem(item) && isEligibleTotwForLoop(item, loopDef))
+      !(isRequiredSpecialItem(item, loopDef) && isEligibleRequiredSpecialForLoop(item, loopDef))
     );
     if (!candidates.length) return null;
 
@@ -2728,14 +2771,14 @@
     let keepTotwMessage = '';
 
     const currentTotw = sortCurrentTotwEntriesForKeep(
-      (inspection.entries || []).filter(({ item }) => isEligibleTotwForLoop(item, loopDef))
+      (inspection.entries || []).filter(({ item }) => isEligibleRequiredSpecialForLoop(item, loopDef))
     )[0] || null;
 
     if (currentTotw) {
       keepTotwId = Number(currentTotw.item?.id || 0);
       keepTotwMessage = `keep ${itemDisplayName(currentTotw.item)} rating:${Number(currentTotw.item?.rating || 0) || '?'} at slot ${currentTotw.index + 1}`;
     } else {
-      const externalTotw = sortTotwEntriesForSubmit(getEligibleTotwEntries(loopDef))
+      const externalTotw = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef))
         .filter(({ item }) => !usedIds.has(Number(item?.id || 0)))[0] || null;
       if (!externalTotw) return null;
 
@@ -2751,7 +2794,7 @@
         from: replacement.item,
         to: externalTotw.item,
         pileName: externalTotw.pileName,
-        reason: 'required TOTW',
+        reason: `required ${requiredSpecialLabel(loopDef)}`,
       });
     }
 
@@ -2801,6 +2844,88 @@
     return `slot ${change.index + 1}: ${itemDisplayName(change.from)} rating:${Number(change.from?.rating || 0) || '?'} -> ${itemDisplayName(change.to)} rating:${Number(change.to?.rating || 0) || '?'} from:${change.pileName} (${change.reason})`;
   }
 
+  function buildSubmitReadyNormalUpgradePlan(loopDef, inspection) {
+    if (!inspection?.items?.length || inspection.blocked?.length || inspection.missingRequirements?.length) return null;
+    const usedIds = new Set((inspection.items || []).map((item) => Number(item?.id || 0)).filter(Boolean));
+    const targets = [...(inspection.entries || [])]
+      .filter(({ item, reasons }) => item && !isSbcSpecialItem(item) && !(reasons || []).length)
+      .sort((a, b) =>
+        Number(a?.item?.rating || 0) - Number(b?.item?.rating || 0) ||
+        Number(b?.index || 0) - Number(a?.index || 0)
+      );
+    if (!targets.length) return null;
+
+    const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds));
+    for (const target of targets) {
+      const targetRating = Number(target.item?.rating || 0) || 0;
+      const filler = fillers.find(({ item }) => Number(item?.rating || 0) > targetRating);
+      if (!filler) continue;
+      const players = [...inspection.items];
+      players[target.index] = filler.item;
+      return {
+        players,
+        change: {
+          index: target.index,
+          from: target.item,
+          to: filler.item,
+          pileName: filler.pileName,
+          reason: 'submit-ready rating repair',
+        },
+      };
+    }
+    return null;
+  }
+
+  async function repairSubmitReadinessIfNeeded(loopDef, opened, fillResult, inspection) {
+    if (fillResult.submitReady || inspection.blocked?.length || inspection.missingRequirements?.length) {
+      return { fillResult, inspection, planned: false, repaired: false };
+    }
+
+    const maxAttempts = Math.max(0, Math.min(3, Number(loopDef.submitReadyRepairMaxAttempts ?? 2) || 0));
+    if (!maxAttempts) return { fillResult, inspection, planned: false, repaired: false };
+
+    let nextFillResult = fillResult;
+    let nextInspection = inspection;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const plan = buildSubmitReadyNormalUpgradePlan(loopDef, nextInspection);
+      if (!plan) {
+        log(`${loopDef.name}: submit-ready repair found no eligible normal gold upgrade candidate`);
+        return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: false };
+      }
+
+      log(`${loopDef.name}: submit-ready repair ${attempt}/${maxAttempts} - ${formatRepairChange(plan.change)}`);
+      if (loopDef.dryRun) {
+        log(`${loopDef.name}: dry-run would save submit-ready repair and re-check before submit`);
+        return {
+          fillResult: nextFillResult,
+          inspection: inspectSbcItems(loopDef, plan.players),
+          planned: true,
+          repaired: false,
+        };
+      }
+
+      await saveChallengeSquad(opened.challenge, plan.players, `${loopDef.name} submit-ready repair`);
+      await waitLoadingEnd();
+      await sleep(900);
+
+      const squad = ctrl()?._squad || opened.challenge?.squad || nextFillResult?.squad;
+      nextFillResult = {
+        ...nextFillResult,
+        squad,
+        filled: getFilledSquadSlots(squad),
+        submitReady: !!findSubmitButton(),
+      };
+      nextInspection = inspectSbcSquad(loopDef, squad);
+      logSbcSquadInspection(loopDef, nextInspection);
+      log(`${loopDef.name}: after submit-ready repair submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
+      if (nextFillResult.submitReady || nextInspection.blocked.length || nextInspection.missingRequirements?.length) {
+        return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: true };
+      }
+    }
+
+    return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: true };
+  }
+
   function getDryRunInjectableIssues(loopDef, inspection) {
     if (!needsAutoTotwPreflight(loopDef)) return {
       blocked: inspection?.blocked || [],
@@ -2823,26 +2948,26 @@
 
     const plan = buildRequiredTotwRepairPlan(loopDef, inspection);
     if (!plan) {
-      log(`${loopDef.name}: no complete required TOTW repair plan could be built`);
+      log(`${loopDef.name}: no complete required ${requiredSpecialLabel(loopDef)} repair plan could be built`);
       return { fillResult, inspection, planned: false, injected: false };
     }
 
-    if (plan.keepTotwMessage) log(`${loopDef.name}: required TOTW repair plan: ${plan.keepTotwMessage}`);
+    if (plan.keepTotwMessage) log(`${loopDef.name}: required ${requiredSpecialLabel(loopDef)} repair plan: ${plan.keepTotwMessage}`);
     (plan.changes || []).forEach((change) => {
-      log(`${loopDef.name}: required TOTW repair - ${formatRepairChange(change)}`);
+      log(`${loopDef.name}: required ${requiredSpecialLabel(loopDef)} repair - ${formatRepairChange(change)}`);
     });
     if (!plan.ok) {
-      log(`${loopDef.name}: required TOTW repair plan incomplete: ${plan.reason || 'unknown'}`);
+      log(`${loopDef.name}: required ${requiredSpecialLabel(loopDef)} repair plan incomplete: ${plan.reason || 'unknown'}`);
       return { fillResult, inspection: plan.inspection || inspection, planned: false, injected: false };
     }
 
     if (loopDef.dryRun) {
-      log(`${loopDef.name}: dry-run would save required TOTW repair plan and re-check before submit`);
+      log(`${loopDef.name}: dry-run would save required ${requiredSpecialLabel(loopDef)} repair plan and re-check before submit`);
       return { fillResult, inspection: plan.inspection, planned: true, injected: false };
     }
 
-    log(`${loopDef.name}: saving required TOTW repair plan`);
-    await saveChallengeSquad(opened.challenge, plan.players, `${loopDef.name} TOTW repair`);
+    log(`${loopDef.name}: saving required ${requiredSpecialLabel(loopDef)} repair plan`);
+    await saveChallengeSquad(opened.challenge, plan.players, `${loopDef.name} required special repair`);
     await waitLoadingEnd();
     await sleep(900);
 
@@ -2855,7 +2980,7 @@
     };
     const nextInspection = inspectSbcSquad(loopDef, squad);
     logSbcSquadInspection(loopDef, nextInspection);
-    log(`${loopDef.name}: after required TOTW repair submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
+    log(`${loopDef.name}: after required ${requiredSpecialLabel(loopDef)} repair submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
     return { fillResult: nextFillResult, inspection: nextInspection, planned: false, injected: true };
   }
 
@@ -2880,7 +3005,7 @@
 
   async function craftAutoTotwUpgrade(loopDef) {
     const upgradeDef = getAutoTotwUpgradeDef(loopDef);
-    log(`${loopDef.name}: no eligible TOTW found; submitting ${upgradeDef.name} first`);
+    log(`${loopDef.name}: no eligible ${requiredSpecialLabel(loopDef)} found; submitting ${upgradeDef.name} first`);
 
     const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
     const opened = await openSbcSet(set, { returnNullIfComplete: true });
@@ -2910,11 +3035,11 @@
   async function ensureTotwForFillAndVerify(loopDef) {
     if (!needsAutoTotwPreflight(loopDef)) return;
     const required = Math.max(1, Number(loopDef.requiredSpecialCount || 1) || 1);
-    await refreshInventoryCaches(`${loopDef.name} TOTW preflight`, { includePacks: false, quiet: true });
+    await refreshInventoryCaches(`${loopDef.name} ${requiredSpecialLabel(loopDef)} preflight`, { includePacks: false, quiet: true });
 
-    let entries = getEligibleTotwEntries(loopDef);
+    let entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
     if (entries.length >= required) {
-      log(`${loopDef.name}: TOTW preflight found ${entries.length} eligible TOTW card(s): ${summarizeTotwEntries(entries)}`);
+      log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} preflight found ${entries.length} eligible ${requiredSpecialLabel(loopDef)} card(s): ${summarizeRequiredSpecialEntries(entries)}`);
       return;
     }
 
@@ -2923,20 +3048,20 @@
       const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
       const challenge = await findAvailableSbcChallenge(set, upgradeDef.name);
       if (challenge) {
-        log(`${loopDef.name}: dry-run found no eligible TOTW; live run would submit ${upgradeDef.name} (#${set.id || '?'}) first`);
+        log(`${loopDef.name}: dry-run found no eligible ${requiredSpecialLabel(loopDef)}; live run would submit ${upgradeDef.name} (#${set.id || '?'}) first`);
       } else {
-        log(`${loopDef.name}: dry-run found no eligible TOTW and no available ${upgradeDef.name} challenge remains`);
+        log(`${loopDef.name}: dry-run found no eligible ${requiredSpecialLabel(loopDef)} and no available ${upgradeDef.name} challenge remains`);
       }
       return;
     }
 
     await craftAutoTotwUpgrade(loopDef);
     await refreshInventoryCaches(`${loopDef.name} post-TOTW craft`, { includePacks: false, quiet: true });
-    entries = getEligibleTotwEntries(loopDef);
+    entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
     if (entries.length < required) {
-      fail(`${loopDef.name}: ${upgradeDef.name} completed but no eligible TOTW card is available for 84x10`);
+      fail(`${loopDef.name}: ${upgradeDef.name} completed but no eligible ${requiredSpecialLabel(loopDef)} card is available for 84x10`);
     }
-    log(`${loopDef.name}: auto TOTW ready: ${summarizeTotwEntries(entries)}`);
+    log(`${loopDef.name}: auto ${requiredSpecialLabel(loopDef)} ready: ${summarizeRequiredSpecialEntries(entries)}`);
   }
 
   function getSbcProtectionReasons(item, loopDef = {}, context = {}) {
@@ -2958,18 +3083,18 @@
     if (protectedIds.has(Number(item?.id || 0))) reasons.push('protected-id');
     if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) reasons.push('protected-def');
     if (
-      requiredSpecialKind(loopDef) === 'totw' &&
+      ['totw', 'totw-tots-fof'].includes(requiredSpecialKind(loopDef)) &&
       requiredSpecialCount > 0 &&
       isSbcSpecialItem(item) &&
       specialIndex <= requiredSpecialCount &&
-      !isTotwItem(item)
+      !isRequiredSpecialItem(item, loopDef)
     ) {
       reasons.push('required-totw');
     }
     if (
-      requiredSpecialKind(loopDef) === 'totw' &&
+      ['totw', 'totw-tots-fof'].includes(requiredSpecialKind(loopDef)) &&
       requiredSpecialCount > 0 &&
-      isTotwItem(item) &&
+      isRequiredSpecialItem(item, loopDef) &&
       specialIndex <= requiredSpecialCount &&
       Number(loopDef.requiredSpecialMinRating || 0) &&
       rating < Number(loopDef.requiredSpecialMinRating || 0)
@@ -3001,12 +3126,20 @@
       if (reasons.length) blocked.push({ item, index, reasons });
     });
 
+    const requiredSpecialMetCount = entries.filter(({ item, reasons }) =>
+      isRequiredSpecialItem(item, loopDef) &&
+      !(reasons || []).some((reason) =>
+        String(reason).startsWith('required-totw') ||
+        String(reason).startsWith('rating-over-') ||
+        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'loan', 'active-trade'].includes(String(reason))
+      )
+    ).length;
     const missingRequirements = [];
-    if (requiredSpecialCount && specialCount < requiredSpecialCount) {
-      missingRequirements.push(`special-count ${specialCount}/${requiredSpecialCount}`);
+    if (requiredSpecialCount && requiredSpecialMetCount < requiredSpecialCount) {
+      missingRequirements.push(`special-count ${requiredSpecialMetCount}/${requiredSpecialCount}`);
     }
 
-    return { items, entries, blocked, specialCount, missingRequirements };
+    return { items, entries, blocked, specialCount, requiredSpecialMetCount, missingRequirements };
   }
 
   function inspectSbcSquad(loopDef, squad = ctrl()?._squad) {
@@ -3015,7 +3148,10 @@
 
   function logSbcSquadInspection(loopDef, inspection, options = {}) {
     const maxItems = Number(options.maxItems || 20);
-    log(`${loopDef.name}: squad inspection ${inspection.items.length} item(s), special ${inspection.specialCount || 0}, blocked ${inspection.blocked.length}`);
+    const requiredPart = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0)
+      ? `, ${requiredSpecialLabel(loopDef)} ${inspection.requiredSpecialMetCount || 0}/${Number(loopDef.requiredSpecialCount || 0)}`
+      : '';
+    log(`${loopDef.name}: squad inspection ${inspection.items.length} item(s), special ${inspection.specialCount || 0}${requiredPart}, blocked ${inspection.blocked.length}`);
     (inspection.entries || []).slice(0, maxItems).forEach(({ item, index, reasons }) => {
       log(`${loopDef.name}: squad ${formatSquadItem(item, index)}${reasons.length ? ` | BLOCK ${reasons.join(',')}` : ''}`);
     });
@@ -3046,12 +3182,12 @@
         hints.push(`${prefix}: replace extra special card with a normal/rare gold card`);
       }
       if (reasons.includes('required-totw')) {
-        hints.push(`${prefix}: replace this special card with a TOTW card`);
+        hints.push(`${prefix}: replace this special card with a ${requiredSpecialLabel(loopDef)} card`);
       }
       const requiredTotwMinReason = reasons.find((reason) => String(reason).startsWith('required-totw-min-'));
       if (requiredTotwMinReason) {
         const minRating = requiredTotwMinReason.replace('required-totw-min-', '') || Number(loopDef.requiredSpecialMinRating || 0) || '?';
-        hints.push(`${prefix}: replace with a TOTW card rating >= ${minRating}`);
+        hints.push(`${prefix}: replace with a ${requiredSpecialLabel(loopDef)} card rating >= ${minRating}`);
       }
       if (reasons.includes('tradeable-blocked')) {
         hints.push(`${prefix}: replace tradeable card with an untradeable card`);
@@ -3080,9 +3216,8 @@
       }
     }
 
-    if (requiredSpecialCount && (inspection.specialCount || 0) < requiredSpecialCount) {
-      const kind = requiredSpecialKind(loopDef) === 'totw' ? 'TOTW' : 'TOTW/TOTS/FOF';
-      hints.push(`add ${requiredSpecialCount - (inspection.specialCount || 0)} untradeable ${kind} card(s) rating <= ${maxRating || 'limit'}`);
+    if (requiredSpecialCount && (inspection.requiredSpecialMetCount || 0) < requiredSpecialCount) {
+      hints.push(`add ${requiredSpecialCount - (inspection.requiredSpecialMetCount || 0)} untradeable ${requiredSpecialLabel(loopDef)} card(s) rating <= ${maxRating || 'limit'}`);
     }
     if (allowedSpecialCount && (inspection.specialCount || 0) > allowedSpecialCount) {
       hints.push(`keep only ${allowedSpecialCount} special card(s); replace the remaining special card(s) with normal/rare gold`);
@@ -3629,10 +3764,19 @@
       inspection = totwInjection.inspection;
       squad = fillResult.squad || squad;
 
+      const submitReadyRepair = (!loopDef.dryRun || !totwInjection.planned)
+        ? await repairSubmitReadinessIfNeeded(loopDef, opened, fillResult, inspection)
+        : { fillResult, inspection, planned: false, repaired: false };
+      fillResult = submitReadyRepair.fillResult;
+      inspection = submitReadyRepair.inspection;
+      squad = fillResult.squad || squad;
+
       if (loopDef.dryRun) {
         const injectableIssues = getDryRunInjectableIssues(loopDef, inspection);
         if (totwInjection.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
-          log(`${loopDef.name}: dry-run squad needs required TOTW repair; live run would save the repair plan and re-check before submit`);
+          log(`${loopDef.name}: dry-run squad needs required ${requiredSpecialLabel(loopDef)} repair; live run would save the repair plan and re-check before submit`);
+        } else if (submitReadyRepair.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
+          log(`${loopDef.name}: dry-run squad may need submit-ready rating repair; live run would save the repair plan and re-check before submit`);
         } else if (inspection.blocked.length || inspection.missingRequirements?.length) {
           log(`${loopDef.name}: dry-run blocked by protected or missing squad requirement(s); live run would stop before submit`);
           logManualSbcFixHints(loopDef, inspection);
@@ -4158,7 +4302,7 @@
       return `may open up to ${limit} pack(s) and submit matching 2x84+ SBC(s)`;
     }
     if (loopDef.strategy === 'fillAndVerifySbc' && needsAutoTotwPreflight(loopDef)) {
-      return `may submit up to ${limit} SBC(s), including one auto ${getAutoTotwUpgradeDef(loopDef).name} if no eligible TOTW exists`;
+      return `may submit up to ${limit} SBC(s), including one auto ${getAutoTotwUpgradeDef(loopDef).name} if no eligible ${requiredSpecialLabel(loopDef)} exists`;
     }
     return `may submit up to ${limit} SBC(s)`;
   }
