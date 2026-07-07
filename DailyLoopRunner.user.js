@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.54
+// @version      0.2.55
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -241,7 +241,8 @@
       autoTotwUpgrade: {
         name: '84+ TOTW Upgrade',
         sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
-        rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack'],
+        rewardPackIds: [20707, 20441],
+        rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
         maxSubmittedRating: 85,
         blockSpecial: true,
         blockTradeable: true,
@@ -305,7 +306,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.54',
+    version: '0.2.55',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -3320,7 +3321,8 @@
       name: '84+ TOTW Upgrade',
       strategy: 'fillAndVerifySbc',
       sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
-      rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack'],
+      rewardPackIds: [20707, 20441],
+      rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
       maxCompletions: 1,
       maxSubmittedRating: 85,
       requiredSpecialCount: 0,
