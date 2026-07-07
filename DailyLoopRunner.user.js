@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.42
+// @version      0.2.43
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -300,7 +300,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.42',
+    version: '0.2.43',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2572,6 +2572,115 @@
     ).join('; ');
   }
 
+  function sortTotwEntriesForSubmit(entries) {
+    const pileRank = { storage: 0, club: 1, unassigned: 2 };
+    return [...(entries || [])].sort((a, b) =>
+      Number(a?.item?.rating || 0) - Number(b?.item?.rating || 0) ||
+      (pileRank[a?.pileName] ?? 9) - (pileRank[b?.pileName] ?? 9) ||
+      Number(a?.item?.id || 0) - Number(b?.item?.id || 0)
+    );
+  }
+
+  function needsRequiredTotwInjection(loopDef, inspection) {
+    if (!needsAutoTotwPreflight(loopDef)) return false;
+    return (inspection?.missingRequirements || []).some((message) => String(message).startsWith('special-count')) ||
+      (inspection?.blocked || []).some(({ reasons }) => (reasons || []).includes('required-totw'));
+  }
+
+  function chooseTotwReplacementEntry(loopDef, inspection, totwItem) {
+    const entries = inspection?.entries || [];
+    const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
+    const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number));
+    const totwId = Number(totwItem?.id || 0);
+
+    const candidates = entries.filter(({ item }) =>
+      item &&
+      Number(item?.id || 0) !== totwId &&
+      !isTotwItem(item)
+    );
+    if (!candidates.length) return null;
+
+    const score = ({ item, reasons }) => {
+      const reasonList = reasons || [];
+      let value = Number(item?.rating || 0) || 0;
+      if (reasonList.includes('required-totw')) value -= 1000;
+      if (reasonList.includes('special-blocked')) value -= 800;
+      if (reasonList.includes('tradeable-blocked')) value -= 700;
+      if (reasonList.some((reason) => reason.startsWith('rating-over-'))) value -= 600;
+      if (isSbcSpecialItem(item)) value -= 300;
+      if (protectedIds.has(Number(item?.id || 0))) value -= 900;
+      if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) value -= 900;
+      return value;
+    };
+
+    return [...candidates].sort((a, b) =>
+      score(a) - score(b) ||
+      Number(a?.item?.rating || 0) - Number(b?.item?.rating || 0) ||
+      Number(a?.index || 0) - Number(b?.index || 0)
+    )[0] || null;
+  }
+
+  function getDryRunInjectableIssues(loopDef, inspection) {
+    if (!needsAutoTotwPreflight(loopDef)) return {
+      blocked: inspection?.blocked || [],
+      missingRequirements: inspection?.missingRequirements || [],
+    };
+    return {
+      blocked: (inspection?.blocked || []).filter(({ reasons }) =>
+        !(reasons || []).every((reason) => reason === 'required-totw')
+      ),
+      missingRequirements: (inspection?.missingRequirements || []).filter((message) =>
+        !String(message).startsWith('special-count')
+      ),
+    };
+  }
+
+  async function injectRequiredTotwIfNeeded(loopDef, opened, fillResult, inspection) {
+    if (!needsRequiredTotwInjection(loopDef, inspection)) {
+      return { fillResult, inspection, planned: false, injected: false };
+    }
+
+    const currentIds = new Set((inspection.items || []).map((item) => Number(item?.id || 0)));
+    const entries = sortTotwEntriesForSubmit(getEligibleTotwEntries(loopDef))
+      .filter(({ item }) => !currentIds.has(Number(item?.id || 0)));
+    const totwEntry = entries[0] || null;
+    if (!totwEntry) {
+      log(`${loopDef.name}: no unused eligible TOTW available for squad injection`);
+      return { fillResult, inspection, planned: false, injected: false };
+    }
+
+    const replacement = chooseTotwReplacementEntry(loopDef, inspection, totwEntry.item);
+    if (!replacement) {
+      log(`${loopDef.name}: no replaceable squad slot found for TOTW injection`);
+      return { fillResult, inspection, planned: false, injected: false };
+    }
+
+    const message = `${itemDisplayName(totwEntry.item)} rating:${Number(totwEntry.item?.rating || 0) || '?'} from:${totwEntry.pileName} -> slot ${replacement.index + 1}, replacing ${itemDisplayName(replacement.item)} rating:${Number(replacement.item?.rating || 0) || '?'}`;
+    if (loopDef.dryRun) {
+      log(`${loopDef.name}: dry-run would inject required TOTW: ${message}`);
+      return { fillResult, inspection, planned: true, injected: false };
+    }
+
+    log(`${loopDef.name}: injecting required TOTW: ${message}`);
+    const players = [...(inspection.items || [])];
+    players[replacement.index] = totwEntry.item;
+    await saveChallengeSquad(opened.challenge, players, `${loopDef.name} TOTW injection`);
+    await waitLoadingEnd();
+    await sleep(900);
+
+    const squad = ctrl()?._squad || opened.challenge?.squad || fillResult?.squad;
+    const nextFillResult = {
+      ...fillResult,
+      squad,
+      filled: getFilledSquadSlots(squad),
+      submitReady: !!findSubmitButton(),
+    };
+    const nextInspection = inspectSbcSquad(loopDef, squad);
+    logSbcSquadInspection(loopDef, nextInspection);
+    log(`${loopDef.name}: after TOTW injection submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
+    return { fillResult: nextFillResult, inspection: nextInspection, planned: false, injected: true };
+  }
+
   function getAutoTotwUpgradeDef(loopDef = {}) {
     const override = isPlainObject(loopDef.autoTotwUpgrade) ? loopDef.autoTotwUpgrade : {};
     return {
@@ -3307,20 +3416,28 @@
         break;
       }
 
-      const fillResult = await fillSbcSquad(loopDef.name, {
+      let fillResult = await fillSbcSquad(loopDef.name, {
         requireSubmitReady: false,
         specialRequirementAdd: loopDef.specialRequirementAdd,
       });
-      const squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
-      const inspection = inspectSbcSquad(loopDef, squad);
+      let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
+      let inspection = inspectSbcSquad(loopDef, squad);
       logSbcSquadInspection(loopDef, inspection);
       if (!fillResult.submitReady) {
         const required = getRequiredPlayerCount(opened.challenge);
         log(`${loopDef.name}: submit not ready after FSU fill (${fillResult.filled}/${required} slots filled); likely SBC requirements are still unmet or FSU completion picked an invalid squad`);
       }
 
+      const totwInjection = await injectRequiredTotwIfNeeded(loopDef, opened, fillResult, inspection);
+      fillResult = totwInjection.fillResult;
+      inspection = totwInjection.inspection;
+      squad = fillResult.squad || squad;
+
       if (loopDef.dryRun) {
-        if (inspection.blocked.length || inspection.missingRequirements?.length) {
+        const injectableIssues = getDryRunInjectableIssues(loopDef, inspection);
+        if (totwInjection.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
+          log(`${loopDef.name}: dry-run squad needs TOTW injection; live run would inject it and re-check before submit`);
+        } else if (inspection.blocked.length || inspection.missingRequirements?.length) {
           log(`${loopDef.name}: dry-run blocked by protected or missing squad requirement(s); live run would stop before submit`);
           logManualSbcFixHints(loopDef, inspection);
         } else if (!fillResult.submitReady) {
