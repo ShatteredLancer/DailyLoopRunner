@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.48
+// @version      0.2.49
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -301,7 +301,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.48',
+    version: '0.2.49',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -3270,6 +3270,37 @@
     await fillSbcSquad('Bronze Upgrade');
   }
 
+  function findClaimRewardsButton() {
+    return findButtonByText([
+      'Claim Rewards',
+      'Claim Reward',
+      'Collect Rewards',
+      'Collect Reward',
+      '领取奖励',
+      '領取獎勵',
+      '领取',
+      '領取',
+    ]);
+  }
+
+  async function claimSbcRewardsIfPresent(label = 'SBC submit') {
+    const start = Date.now();
+    while (Date.now() - start < 20000) {
+      stopPoint();
+      const btn = findClaimRewardsButton();
+      if (btn) {
+        log(`${label}: claiming rewards`);
+        simulateClick(btn);
+        await waitLoadingEnd(900, 45000);
+        await sleep(1200);
+        return true;
+      }
+      await sleep(500);
+    }
+    log(`${label}: Claim Rewards button not detected; continuing`);
+    return false;
+  }
+
   async function submitSbcAndGetAwardPackId(set) {
     const beforePackIds = new Set(getMyPacks().map((p) => String(p.id)));
     const submitBtn = await waitFor(() => findSubmitButton(), 10000, 'submit button');
@@ -3301,6 +3332,7 @@
       simulateClick(confirm);
     }
 
+    await claimSbcRewardsIfPresent(set.name);
     await waitLoadingEnd(900, 45000);
     await refreshStorePacks().catch(() => null);
 
