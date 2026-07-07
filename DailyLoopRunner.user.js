@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.52
+// @version      0.2.53
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -288,6 +288,7 @@
     stalePackRefs: new WeakSet(),
     stalePackIds: new Set(),
     lastStorePacks: [],
+    consumedItemIds: new Set(),
     assumedTotwItemIds: new Set(),
     recentRewardItems: [],
     logLines: [],
@@ -304,7 +305,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.52',
+    version: '0.2.53',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1656,7 +1657,7 @@
     const targetIds = new Set([
       ...Array.from(state.assumedTotwItemIds || []),
       ...(state.recentRewardItems || []).map((item) => Number(item?.id || 0)),
-    ].filter(Boolean));
+    ].filter((id) => id && !state.consumedItemIds.has(id)));
     if (!targetIds.size) return;
 
     const items = uniqueItems([
@@ -2678,6 +2679,7 @@
 
   function isTotwItem(item) {
     const id = Number(item?.id || 0);
+    if (id && state.consumedItemIds.has(id)) return false;
     if (id && state.assumedTotwItemIds.has(id)) return true;
     try { if (item?.isTOTW?.() || item?.isTotw?.()) return true; } catch { }
     const text = itemSearchText(item);
@@ -2740,6 +2742,7 @@
       for (const item of (items || [])) {
         const id = Number(item?.id || 0);
         if (!id || seen.has(id)) continue;
+        if (state.consumedItemIds.has(id)) continue;
         seen.add(id);
         if (isEligibleRequiredSpecialForLoop(item, loopDef)) entries.push({ item, pileName });
       }
@@ -2800,6 +2803,7 @@
     for (const item of (items || [])) {
       if (!item || !isPlayer(item)) continue;
       const id = Number(item?.id || 0);
+      if (id && state.consumedItemIds.has(id)) continue;
       if (id) state.assumedTotwItemIds.add(id);
       marked.push(item);
     }
@@ -2820,6 +2824,26 @@
       log(`${label}: marked assumed TOTW reward item: ${rewardItemSummary(item)}`);
     });
     if (marked.length > 5) log(`${label}: marked ${marked.length - 5} more assumed TOTW reward item(s)`);
+  }
+
+  function markSbcItemsConsumed(items = [], label = 'SBC submit') {
+    const ids = [...new Set((items || [])
+      .map((item) => Number(item?.id || 0))
+      .filter(Boolean))];
+    if (!ids.length) return;
+
+    for (const id of ids) {
+      state.consumedItemIds.add(id);
+      state.assumedTotwItemIds.delete(id);
+    }
+
+    const beforeRecent = (state.recentRewardItems || []).length;
+    state.recentRewardItems = (state.recentRewardItems || [])
+      .filter((item) => !state.consumedItemIds.has(Number(item?.id || 0)));
+    const removedRecent = beforeRecent - state.recentRewardItems.length;
+    if (removedRecent) {
+      log(`${label}: cleared ${removedRecent} consumed recent reward item reference(s)`);
+    }
   }
 
   function needsRequiredTotwInjection(loopDef, inspection) {
@@ -3223,6 +3247,7 @@
     assertSbcSquadSafe(upgradeDef, inspection);
 
     const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
+    markSbcItemsConsumed(inspection.items, upgradeDef.name);
     if (!rewardPackId) {
       log(`${loopDef.name}: ${upgradeDef.name} submitted but reward pack id was not detected`);
     }
@@ -4055,6 +4080,7 @@
       if (!fillResult.submitReady) fail(`${loopDef.name}: submit is not ready after protection inspection`);
       assertSbcSquadSafe(loopDef, inspection);
       const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
+      markSbcItemsConsumed(inspection.items, loopDef.name);
       if (rewardPackId && loopDef.openRewardPacks) {
         await openRewardPackAndCleanup(loopDef, rewardPackId);
       } else if (rewardPackId) {

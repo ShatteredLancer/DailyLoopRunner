@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.52`
+- `DailyLoopRunner.user.js`: `0.2.53`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -238,6 +238,7 @@ const LOOP_DEFS = [
 - `requiredSpecialMinRating`: 可选，要求特殊卡的最低 rating；84x10 默认用 `84`，避免把低评分 TOTW/TOTS/FOF 当成可提交材料。
 - `autoTotwUpgrade`: 可选，对象或 `false`。当要求 TOTW/TOTS/FOF 但库存没有可用 requirement special 时，live run 会先打开已有的 84+ TOTW 奖励包；如果仍没有可用卡，再执行该 TOTW 前置 SBC、领取奖励、开包，并把开出的球员临时按 TOTW reward item 处理。设为 `false` 可关闭自动补 TOTW。
 - 自动 TOTW 开包会合并 Store service 返回和本地 repository 的 pack cache；领奖后 pack 入库较慢时，会等待更久再尝试开包。
+- 连续运行时，提交成功后会把本次 11 张材料标记为已消耗，并从临时 TOTW/recent 缓存中移除，避免第二轮重复引用已经提交掉的 reward item。
 - FSU 兼容：开出 TOTW 包后，Runner 会在调用 FSU 前补齐当前缓存球员上缺失的 league/club/nation 数组字段，避免 FSU 对新 reward item 读取 `undefined.length` 中断。
 - `blockSpecial`: 可选，`fillAndVerifySbc` 是否阻止特殊卡/TOTW。
 - `blockTradeable`: 可选，`fillAndVerifySbc` 是否阻止可交易卡。
