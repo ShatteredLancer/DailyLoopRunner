@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.53
+// @version      0.2.54
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -305,7 +305,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.53',
+    version: '0.2.54',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -3057,6 +3057,122 @@
     return `slot ${change.index + 1}: ${itemDisplayName(change.from)} rating:${Number(change.from?.rating || 0) || '?'} -> ${itemDisplayName(change.to)} rating:${Number(change.to?.rating || 0) || '?'} from:${change.pileName} (${change.reason})`;
   }
 
+  function buildProtectedSquadRepairPlan(loopDef, inspection) {
+    if (!inspection?.items?.length || !inspection.blocked?.length) return null;
+
+    const players = [...inspection.items];
+    const targets = sortRepairTargets((inspection.blocked || []).filter(({ item, reasons }) =>
+      item && (reasons || []).length
+    ));
+    if (!targets.length) return null;
+
+    const targetIndexes = new Set(targets.map(({ index }) => Number(index)));
+    const usedIds = new Set(players.map((item) => Number(item?.id || 0)).filter(Boolean));
+    const usedDefinitionIds = new Set(players
+      .filter((item, index) => !targetIndexes.has(index))
+      .map((item) => Number(item?.definitionId || 0))
+      .filter(Boolean));
+    const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds));
+    const changes = [];
+
+    for (const target of targets) {
+      const fillerIndex = fillers.findIndex(({ item }) => {
+        const definitionId = Number(item?.definitionId || 0);
+        return !definitionId || !usedDefinitionIds.has(definitionId);
+      });
+      if (fillerIndex === -1) {
+        return {
+          ok: false,
+          reason: `missing normal replacement for slot ${target.index + 1}`,
+          players,
+          changes,
+          inspection: inspectSbcItems(loopDef, players),
+        };
+      }
+
+      const [filler] = fillers.splice(fillerIndex, 1);
+      players[target.index] = filler.item;
+      const fillerDefinitionId = Number(filler.item?.definitionId || 0);
+      if (fillerDefinitionId) usedDefinitionIds.add(fillerDefinitionId);
+      changes.push({
+        index: target.index,
+        from: target.item,
+        to: filler.item,
+        pileName: filler.pileName,
+        reason: 'replace protected squad item',
+      });
+    }
+
+    const plannedInspection = inspectSbcItems(loopDef, players);
+    return {
+      ok: !plannedInspection.blocked.length && !(plannedInspection.missingRequirements || []).length,
+      players,
+      changes,
+      inspection: plannedInspection,
+      reason: plannedInspection.blocked.length || plannedInspection.missingRequirements?.length
+        ? 'repair plan still has protected or missing requirements'
+        : '',
+    };
+  }
+
+  async function repairProtectedSquadItemsIfNeeded(loopDef, opened, fillResult, inspection) {
+    if (!inspection?.blocked?.length) {
+      return { fillResult, inspection, planned: false, repaired: false };
+    }
+
+    const maxAttempts = Math.max(0, Math.min(3, Number(loopDef.protectedRepairMaxAttempts ?? 1) || 0));
+    if (!maxAttempts) return { fillResult, inspection, planned: false, repaired: false };
+
+    let nextFillResult = fillResult;
+    let nextInspection = inspection;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const plan = buildProtectedSquadRepairPlan(loopDef, nextInspection);
+      if (!plan) {
+        log(`${loopDef.name}: protected squad repair found no eligible normal replacement`);
+        return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: false };
+      }
+
+      (plan.changes || []).forEach((change) => {
+        log(`${loopDef.name}: protected squad repair ${attempt}/${maxAttempts} - ${formatRepairChange(change)}`);
+      });
+      if (!plan.ok) {
+        log(`${loopDef.name}: protected squad repair plan incomplete: ${plan.reason || 'unknown'}`);
+        return { fillResult: nextFillResult, inspection: plan.inspection || nextInspection, planned: false, repaired: false };
+      }
+
+      if (loopDef.dryRun) {
+        log(`${loopDef.name}: dry-run would save protected squad repair and re-check before submit`);
+        return {
+          fillResult: nextFillResult,
+          inspection: plan.inspection,
+          planned: true,
+          repaired: false,
+        };
+      }
+
+      log(`${loopDef.name}: saving protected squad repair plan`);
+      await saveChallengeSquad(opened.challenge, plan.players, `${loopDef.name} protected squad repair`);
+      await waitLoadingEnd();
+      await sleep(900);
+
+      const squad = ctrl()?._squad || opened.challenge?.squad || nextFillResult?.squad;
+      nextFillResult = {
+        ...nextFillResult,
+        squad,
+        filled: getFilledSquadSlots(squad),
+        submitReady: !!findSubmitButton(),
+      };
+      nextInspection = inspectSbcSquad(loopDef, squad);
+      logSbcSquadInspection(loopDef, nextInspection);
+      log(`${loopDef.name}: after protected squad repair submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
+      if (!nextInspection.blocked.length) {
+        return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: true };
+      }
+    }
+
+    return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: true };
+  }
+
   function buildSubmitReadyNormalUpgradePlan(loopDef, inspection) {
     if (!inspection?.items?.length || inspection.blocked?.length || inspection.missingRequirements?.length) return null;
     const usedIds = new Set((inspection.items || []).map((item) => Number(item?.id || 0)).filter(Boolean));
@@ -3235,13 +3351,23 @@
     const opened = await openSbcSet(set, { returnNullIfComplete: true });
     if (!opened) fail(`${loopDef.name}: no available ${upgradeDef.name} challenge remains; cannot auto-craft TOTW`);
 
-    const fillResult = await fillSbcSquad(upgradeDef.name, {
+    let fillResult = await fillSbcSquad(upgradeDef.name, {
       requireSubmitReady: false,
       specialRequirementAdd: upgradeDef.specialRequirementAdd,
     });
-    const squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
-    const inspection = inspectSbcSquad(upgradeDef, squad);
+    let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
+    let inspection = inspectSbcSquad(upgradeDef, squad);
     logSbcSquadInspection(upgradeDef, inspection);
+
+    const protectedRepair = await repairProtectedSquadItemsIfNeeded(upgradeDef, opened, fillResult, inspection);
+    fillResult = protectedRepair.fillResult;
+    inspection = protectedRepair.inspection;
+    squad = fillResult.squad || squad;
+
+    const submitReadyRepair = await repairSubmitReadinessIfNeeded(upgradeDef, opened, fillResult, inspection);
+    fillResult = submitReadyRepair.fillResult;
+    inspection = submitReadyRepair.inspection;
+    squad = fillResult.squad || squad;
 
     if (!fillResult.submitReady) fail(`${upgradeDef.name}: submit is not ready after FSU fill`);
     assertSbcSquadSafe(upgradeDef, inspection);
@@ -4051,7 +4177,14 @@
       inspection = totwInjection.inspection;
       squad = fillResult.squad || squad;
 
-      const submitReadyRepair = (!loopDef.dryRun || !totwInjection.planned)
+      const protectedRepair = (!loopDef.dryRun || !totwInjection.planned)
+        ? await repairProtectedSquadItemsIfNeeded(loopDef, opened, fillResult, inspection)
+        : { fillResult, inspection, planned: false, repaired: false };
+      fillResult = protectedRepair.fillResult;
+      inspection = protectedRepair.inspection;
+      squad = fillResult.squad || squad;
+
+      const submitReadyRepair = (!loopDef.dryRun || (!totwInjection.planned && !protectedRepair.planned))
         ? await repairSubmitReadinessIfNeeded(loopDef, opened, fillResult, inspection)
         : { fillResult, inspection, planned: false, repaired: false };
       fillResult = submitReadyRepair.fillResult;
@@ -4062,6 +4195,8 @@
         const injectableIssues = getDryRunInjectableIssues(loopDef, inspection);
         if (totwInjection.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
           log(`${loopDef.name}: dry-run squad needs required ${requiredSpecialLabel(loopDef)} repair; live run would save the repair plan and re-check before submit`);
+        } else if (protectedRepair.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
+          log(`${loopDef.name}: dry-run squad needs protected item repair; live run would save the repair plan and re-check before submit`);
         } else if (submitReadyRepair.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
           log(`${loopDef.name}: dry-run squad may need submit-ready rating repair; live run would save the repair plan and re-check before submit`);
         } else if (inspection.blocked.length || inspection.missingRequirements?.length) {
