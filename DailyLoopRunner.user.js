@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.38
+// @version      0.2.39
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -271,7 +271,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.38',
+    version: '0.2.39',
     destroy: destroyRunner,
   };
 
@@ -781,7 +781,7 @@
 
   async function waitAppReady() {
     await waitFor(
-      () => W.services?.Store && W.services?.SBC && W.services?.Item && W.repositories?.Store && W.repositories?.Item,
+      () => isFutAppReady(),
       30000,
       'FUT services',
     );
@@ -800,6 +800,16 @@
     }
     log('Loading shield wait timed out; continuing');
     return false;
+  }
+
+  function isFutAppReady() {
+    return !!(
+      W.services?.Store &&
+      W.services?.SBC &&
+      W.services?.Item &&
+      W.repositories?.Store &&
+      W.repositories?.Item
+    );
   }
 
   async function refreshStorePacks() {
@@ -3850,7 +3860,7 @@
   }
 
   state.bootTimer = setInterval(() => {
-    if (document.body) {
+    if (document.body && isFutAppReady()) {
       clearInterval(state.bootTimer);
       state.bootTimer = null;
       installPanel();
