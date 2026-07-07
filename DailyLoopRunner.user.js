@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.43
+// @version      0.2.44
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -300,7 +300,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.43',
+    version: '0.2.44',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2620,6 +2620,175 @@
     )[0] || null;
   }
 
+  function isEligibleNormalRepairFiller(item, loopDef = {}) {
+    if (!isPlayer(item)) return false;
+    if (isSbcSpecialItem(item)) return false;
+    if (Number(item?.loans ?? -1) !== -1) return false;
+    try { if (item?.isLimitedUse?.()) return false; } catch { }
+    try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
+    if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
+    if (!isInactiveTrade(item)) return false;
+    if (loopDef.blockTradeable !== false && isTradeable(item)) return false;
+    const maxRating = Number(loopDef.maxSubmittedRating || 0);
+    if (maxRating && Number(item?.rating || 0) > maxRating) return false;
+    const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
+    const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number));
+    if (protectedIds.has(Number(item?.id || 0))) return false;
+    if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) return false;
+    if (getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }).length) return false;
+    return true;
+  }
+
+  function getEligibleNormalRepairEntries(loopDef = {}, usedIds = new Set()) {
+    const entries = [];
+    const seen = new Set();
+    for (const pileName of ['storage', 'club', 'unassigned']) {
+      for (const item of getPileItemsByName(pileName)) {
+        const id = Number(item?.id || 0);
+        if (!id || seen.has(id) || usedIds.has(id)) continue;
+        seen.add(id);
+        if (isEligibleNormalRepairFiller(item, loopDef)) entries.push({ item, pileName });
+      }
+    }
+    return entries;
+  }
+
+  function sortNormalRepairEntries(entries) {
+    const pileRank = { storage: 0, club: 1, unassigned: 2 };
+    return [...(entries || [])].sort((a, b) =>
+      Number(b?.item?.rating || 0) - Number(a?.item?.rating || 0) ||
+      (pileRank[a?.pileName] ?? 9) - (pileRank[b?.pileName] ?? 9) ||
+      Number(isRare(a?.item)) - Number(isRare(b?.item)) ||
+      Number(a?.item?.id || 0) - Number(b?.item?.id || 0)
+    );
+  }
+
+  function sortCurrentTotwEntriesForKeep(entries) {
+    return [...(entries || [])].sort((a, b) =>
+      Number(a?.item?.rating || 0) - Number(b?.item?.rating || 0) ||
+      Number(a?.index || 0) - Number(b?.index || 0)
+    );
+  }
+
+  function isRequiredTotwRepairTarget(loopDef, entry, keepTotwId) {
+    const item = entry?.item;
+    if (!item) return false;
+    const itemId = Number(item?.id || 0);
+    if (itemId && itemId === keepTotwId) return false;
+    const reasons = entry?.reasons || [];
+    return isSbcSpecialItem(item) ||
+      reasons.includes('required-totw') ||
+      reasons.includes('special-blocked') ||
+      reasons.includes('tradeable-blocked') ||
+      reasons.includes('protected-id') ||
+      reasons.includes('protected-def') ||
+      reasons.some((reason) => reason.startsWith('rating-over-')) ||
+      getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }).length > 0;
+  }
+
+  function sortRepairTargets(entries) {
+    const score = ({ item, reasons }) => {
+      const reasonList = reasons || [];
+      let value = 0;
+      if (reasonList.includes('required-totw')) value -= 1000;
+      if (reasonList.includes('special-blocked')) value -= 900;
+      if (reasonList.some((reason) => reason.startsWith('rating-over-'))) value -= 800;
+      if (reasonList.includes('tradeable-blocked')) value -= 700;
+      if (reasonList.includes('protected-id') || reasonList.includes('protected-def')) value -= 650;
+      if (isSbcSpecialItem(item)) value -= 500;
+      return value;
+    };
+    return [...(entries || [])].sort((a, b) =>
+      score(a) - score(b) ||
+      Number(b?.item?.rating || 0) - Number(a?.item?.rating || 0) ||
+      Number(a?.index || 0) - Number(b?.index || 0)
+    );
+  }
+
+  function buildRequiredTotwRepairPlan(loopDef, inspection) {
+    if (!needsAutoTotwPreflight(loopDef)) return null;
+    const players = [...(inspection?.items || [])];
+    if (!players.length) return null;
+
+    const changes = [];
+    const usedIds = new Set(players.map((item) => Number(item?.id || 0)).filter(Boolean));
+    let keepTotwId = 0;
+    let keepTotwMessage = '';
+
+    const currentTotw = sortCurrentTotwEntriesForKeep(
+      (inspection.entries || []).filter(({ item }) => isEligibleTotwForLoop(item, loopDef))
+    )[0] || null;
+
+    if (currentTotw) {
+      keepTotwId = Number(currentTotw.item?.id || 0);
+      keepTotwMessage = `keep ${itemDisplayName(currentTotw.item)} rating:${Number(currentTotw.item?.rating || 0) || '?'} at slot ${currentTotw.index + 1}`;
+    } else {
+      const externalTotw = sortTotwEntriesForSubmit(getEligibleTotwEntries(loopDef))
+        .filter(({ item }) => !usedIds.has(Number(item?.id || 0)))[0] || null;
+      if (!externalTotw) return null;
+
+      const replacement = chooseTotwReplacementEntry(loopDef, inspection, externalTotw.item);
+      if (!replacement) return null;
+
+      players[replacement.index] = externalTotw.item;
+      keepTotwId = Number(externalTotw.item?.id || 0);
+      usedIds.add(keepTotwId);
+      keepTotwMessage = `inject ${itemDisplayName(externalTotw.item)} rating:${Number(externalTotw.item?.rating || 0) || '?'} from:${externalTotw.pileName} into slot ${replacement.index + 1}`;
+      changes.push({
+        index: replacement.index,
+        from: replacement.item,
+        to: externalTotw.item,
+        pileName: externalTotw.pileName,
+        reason: 'required TOTW',
+      });
+    }
+
+    let plannedInspection = inspectSbcItems(loopDef, players);
+    const targets = sortRepairTargets(
+      plannedInspection.entries.filter((entry) => isRequiredTotwRepairTarget(loopDef, entry, keepTotwId))
+    );
+
+    const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds));
+    for (const target of targets) {
+      const filler = fillers.shift();
+      if (!filler) {
+        return {
+          ok: false,
+          reason: `missing normal replacement for slot ${target.index + 1}`,
+          players,
+          changes,
+          keepTotwMessage,
+          inspection: plannedInspection,
+        };
+      }
+      players[target.index] = filler.item;
+      usedIds.add(Number(filler.item?.id || 0));
+      changes.push({
+        index: target.index,
+        from: target.item,
+        to: filler.item,
+        pileName: filler.pileName,
+        reason: 'replace invalid/extra special',
+      });
+    }
+
+    plannedInspection = inspectSbcItems(loopDef, players);
+    return {
+      ok: !plannedInspection.blocked.length && !(plannedInspection.missingRequirements || []).length,
+      players,
+      changes,
+      keepTotwMessage,
+      inspection: plannedInspection,
+      reason: plannedInspection.blocked.length || plannedInspection.missingRequirements?.length
+        ? 'repair plan still has protected or missing requirements'
+        : '',
+    };
+  }
+
+  function formatRepairChange(change) {
+    return `slot ${change.index + 1}: ${itemDisplayName(change.from)} rating:${Number(change.from?.rating || 0) || '?'} -> ${itemDisplayName(change.to)} rating:${Number(change.to?.rating || 0) || '?'} from:${change.pileName} (${change.reason})`;
+  }
+
   function getDryRunInjectableIssues(loopDef, inspection) {
     if (!needsAutoTotwPreflight(loopDef)) return {
       blocked: inspection?.blocked || [],
@@ -2640,31 +2809,28 @@
       return { fillResult, inspection, planned: false, injected: false };
     }
 
-    const currentIds = new Set((inspection.items || []).map((item) => Number(item?.id || 0)));
-    const entries = sortTotwEntriesForSubmit(getEligibleTotwEntries(loopDef))
-      .filter(({ item }) => !currentIds.has(Number(item?.id || 0)));
-    const totwEntry = entries[0] || null;
-    if (!totwEntry) {
-      log(`${loopDef.name}: no unused eligible TOTW available for squad injection`);
+    const plan = buildRequiredTotwRepairPlan(loopDef, inspection);
+    if (!plan) {
+      log(`${loopDef.name}: no complete required TOTW repair plan could be built`);
       return { fillResult, inspection, planned: false, injected: false };
     }
 
-    const replacement = chooseTotwReplacementEntry(loopDef, inspection, totwEntry.item);
-    if (!replacement) {
-      log(`${loopDef.name}: no replaceable squad slot found for TOTW injection`);
-      return { fillResult, inspection, planned: false, injected: false };
+    if (plan.keepTotwMessage) log(`${loopDef.name}: required TOTW repair plan: ${plan.keepTotwMessage}`);
+    (plan.changes || []).forEach((change) => {
+      log(`${loopDef.name}: required TOTW repair - ${formatRepairChange(change)}`);
+    });
+    if (!plan.ok) {
+      log(`${loopDef.name}: required TOTW repair plan incomplete: ${plan.reason || 'unknown'}`);
+      return { fillResult, inspection: plan.inspection || inspection, planned: false, injected: false };
     }
 
-    const message = `${itemDisplayName(totwEntry.item)} rating:${Number(totwEntry.item?.rating || 0) || '?'} from:${totwEntry.pileName} -> slot ${replacement.index + 1}, replacing ${itemDisplayName(replacement.item)} rating:${Number(replacement.item?.rating || 0) || '?'}`;
     if (loopDef.dryRun) {
-      log(`${loopDef.name}: dry-run would inject required TOTW: ${message}`);
-      return { fillResult, inspection, planned: true, injected: false };
+      log(`${loopDef.name}: dry-run would save required TOTW repair plan and re-check before submit`);
+      return { fillResult, inspection: plan.inspection, planned: true, injected: false };
     }
 
-    log(`${loopDef.name}: injecting required TOTW: ${message}`);
-    const players = [...(inspection.items || [])];
-    players[replacement.index] = totwEntry.item;
-    await saveChallengeSquad(opened.challenge, players, `${loopDef.name} TOTW injection`);
+    log(`${loopDef.name}: saving required TOTW repair plan`);
+    await saveChallengeSquad(opened.challenge, plan.players, `${loopDef.name} TOTW repair`);
     await waitLoadingEnd();
     await sleep(900);
 
@@ -2677,7 +2843,7 @@
     };
     const nextInspection = inspectSbcSquad(loopDef, squad);
     logSbcSquadInspection(loopDef, nextInspection);
-    log(`${loopDef.name}: after TOTW injection submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
+    log(`${loopDef.name}: after required TOTW repair submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
     return { fillResult: nextFillResult, inspection: nextInspection, planned: false, injected: true };
   }
 
@@ -2800,8 +2966,7 @@
     return reasons;
   }
 
-  function inspectSbcSquad(loopDef, squad = ctrl()?._squad) {
-    const items = getSquadItems(squad);
+  function inspectSbcItems(loopDef, items = []) {
     const blocked = [];
     const entries = [];
     let specialCount = 0;
@@ -2820,6 +2985,10 @@
     }
 
     return { items, entries, blocked, specialCount, missingRequirements };
+  }
+
+  function inspectSbcSquad(loopDef, squad = ctrl()?._squad) {
+    return inspectSbcItems(loopDef, getSquadItems(squad));
   }
 
   function logSbcSquadInspection(loopDef, inspection, options = {}) {
@@ -3436,7 +3605,7 @@
       if (loopDef.dryRun) {
         const injectableIssues = getDryRunInjectableIssues(loopDef, inspection);
         if (totwInjection.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
-          log(`${loopDef.name}: dry-run squad needs TOTW injection; live run would inject it and re-check before submit`);
+          log(`${loopDef.name}: dry-run squad needs required TOTW repair; live run would save the repair plan and re-check before submit`);
         } else if (inspection.blocked.length || inspection.missingRequirements?.length) {
           log(`${loopDef.name}: dry-run blocked by protected or missing squad requirement(s); live run would stop before submit`);
           logManualSbcFixHints(loopDef, inspection);
