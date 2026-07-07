@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.41
+// @version      0.2.42
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -232,9 +232,19 @@
       maxSubmittedRating: 88,
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
+      requiredSpecialKind: 'totw',
       specialRequirementAdd: {
         patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
         buttonTexts: ['Add', '添加', '加入', '新增'],
+      },
+      autoTotwUpgrade: {
+        name: '84+ TOTW Upgrade',
+        sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
+        rewardPackNames: ['84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack'],
+        maxSubmittedRating: 85,
+        blockSpecial: true,
+        blockTradeable: true,
+        openRewardPacks: true,
       },
       blockSpecial: true,
       blockTradeable: true,
@@ -290,7 +300,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.41',
+    version: '0.2.42',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -476,6 +486,16 @@
       if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
         errors.push('maxSubmittedRating must be a number between 1 and 99');
       }
+    }
+    if (loopDef.requiredSpecialKind !== undefined && !['totw'].includes(String(loopDef.requiredSpecialKind).toLowerCase())) {
+      errors.push('requiredSpecialKind must be totw when provided');
+    }
+    if (
+      loopDef.autoTotwUpgrade !== undefined &&
+      loopDef.autoTotwUpgrade !== false &&
+      !isPlainObject(loopDef.autoTotwUpgrade)
+    ) {
+      errors.push('autoTotwUpgrade must be an object or false');
     }
 
     validateNumberArray(loopDef.sourcePackIds, 'sourcePackIds', errors);
@@ -2501,6 +2521,137 @@
     return isSpecial(item) || itemGroups(item).map(Number).includes(23);
   }
 
+  function isTotwItem(item) {
+    if (itemGroups(item).map(Number).includes(23)) return true;
+    try { if (item?.isTOTW?.() || item?.isTotw?.()) return true; } catch { }
+    const text = [
+      item?.name,
+      item?.commonName,
+      item?.lastName,
+      item?._staticData?.name,
+      item?._staticData?.commonName,
+      item?.rareName,
+      item?.rarityName,
+    ].filter(Boolean).join(' ');
+    return /\bTOTW\b|Team of the Week|本周最佳|週最佳/i.test(text);
+  }
+
+  function requiredSpecialKind(loopDef = {}) {
+    return String(loopDef.requiredSpecialKind || '').trim().toLowerCase();
+  }
+
+  function needsAutoTotwPreflight(loopDef = {}) {
+    return requiredSpecialKind(loopDef) === 'totw' &&
+      Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0) > 0 &&
+      loopDef.autoTotwUpgrade !== false;
+  }
+
+  function isEligibleTotwForLoop(item, loopDef = {}) {
+    if (!isTotwItem(item)) return false;
+    const reasons = getSbcProtectionReasons(item, loopDef, { specialIndex: 1 });
+    return reasons.length === 0;
+  }
+
+  function getEligibleTotwEntries(loopDef = {}) {
+    const entries = [];
+    const seen = new Set();
+    for (const pileName of ['unassigned', 'storage', 'club']) {
+      for (const item of getPileItemsByName(pileName)) {
+        const id = Number(item?.id || 0);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        if (isEligibleTotwForLoop(item, loopDef)) entries.push({ item, pileName });
+      }
+    }
+    return entries;
+  }
+
+  function summarizeTotwEntries(entries, limit = 3) {
+    return entries.slice(0, limit).map(({ item, pileName }) =>
+      `${itemDisplayName(item)} rating:${Number(item?.rating || 0) || '?'} from:${pileName} id:${Number(item?.id || 0) || '?'}`
+    ).join('; ');
+  }
+
+  function getAutoTotwUpgradeDef(loopDef = {}) {
+    const override = isPlainObject(loopDef.autoTotwUpgrade) ? loopDef.autoTotwUpgrade : {};
+    return {
+      id: `${loopDef.id || 'fill-and-verify'}-auto-totw-upgrade`,
+      name: '84+ TOTW Upgrade',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
+      rewardPackNames: ['84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack'],
+      maxCompletions: 1,
+      maxSubmittedRating: 85,
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      blockSpecial: true,
+      blockTradeable: true,
+      openRewardPacks: true,
+      ...override,
+    };
+  }
+
+  async function craftAutoTotwUpgrade(loopDef) {
+    const upgradeDef = getAutoTotwUpgradeDef(loopDef);
+    log(`${loopDef.name}: no eligible TOTW found; submitting ${upgradeDef.name} first`);
+
+    const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
+    const opened = await openSbcSet(set, { returnNullIfComplete: true });
+    if (!opened) fail(`${loopDef.name}: no available ${upgradeDef.name} challenge remains; cannot auto-craft TOTW`);
+
+    const fillResult = await fillSbcSquad(upgradeDef.name, {
+      requireSubmitReady: false,
+      specialRequirementAdd: upgradeDef.specialRequirementAdd,
+    });
+    const squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
+    const inspection = inspectSbcSquad(upgradeDef, squad);
+    logSbcSquadInspection(upgradeDef, inspection);
+
+    if (!fillResult.submitReady) fail(`${upgradeDef.name}: submit is not ready after FSU fill`);
+    assertSbcSquadSafe(upgradeDef, inspection);
+
+    const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
+    if (!rewardPackId) {
+      log(`${loopDef.name}: ${upgradeDef.name} submitted but reward pack id was not detected`);
+    }
+    const openedReward = await openRewardPackAndCleanup(upgradeDef, rewardPackId, 'auto TOTW reward pack');
+    if (!openedReward) {
+      log(`${loopDef.name}: ${upgradeDef.name} reward pack could not be auto-opened; checking inventory anyway`);
+    }
+  }
+
+  async function ensureTotwForFillAndVerify(loopDef) {
+    if (!needsAutoTotwPreflight(loopDef)) return;
+    const required = Math.max(1, Number(loopDef.requiredSpecialCount || 1) || 1);
+    await refreshInventoryCaches(`${loopDef.name} TOTW preflight`, { includePacks: false, quiet: true });
+
+    let entries = getEligibleTotwEntries(loopDef);
+    if (entries.length >= required) {
+      log(`${loopDef.name}: TOTW preflight found ${entries.length} eligible TOTW card(s): ${summarizeTotwEntries(entries)}`);
+      return;
+    }
+
+    const upgradeDef = getAutoTotwUpgradeDef(loopDef);
+    if (loopDef.dryRun) {
+      const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
+      const challenge = await findAvailableSbcChallenge(set, upgradeDef.name);
+      if (challenge) {
+        log(`${loopDef.name}: dry-run found no eligible TOTW; live run would submit ${upgradeDef.name} (#${set.id || '?'}) first`);
+      } else {
+        log(`${loopDef.name}: dry-run found no eligible TOTW and no available ${upgradeDef.name} challenge remains`);
+      }
+      return;
+    }
+
+    await craftAutoTotwUpgrade(loopDef);
+    await refreshInventoryCaches(`${loopDef.name} post-TOTW craft`, { includePacks: false, quiet: true });
+    entries = getEligibleTotwEntries(loopDef);
+    if (entries.length < required) {
+      fail(`${loopDef.name}: ${upgradeDef.name} completed but no eligible TOTW card is available for 84x10`);
+    }
+    log(`${loopDef.name}: auto TOTW ready: ${summarizeTotwEntries(entries)}`);
+  }
+
   function getSbcProtectionReasons(item, loopDef = {}, context = {}) {
     const reasons = [];
     const rating = Number(item?.rating || 0);
@@ -2519,6 +2670,15 @@
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (protectedIds.has(Number(item?.id || 0))) reasons.push('protected-id');
     if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) reasons.push('protected-def');
+    if (
+      requiredSpecialKind(loopDef) === 'totw' &&
+      requiredSpecialCount > 0 &&
+      isSbcSpecialItem(item) &&
+      specialIndex <= requiredSpecialCount &&
+      !isTotwItem(item)
+    ) {
+      reasons.push('required-totw');
+    }
     if (loopDef.blockSpecial !== false && isSbcSpecialItem(item) && (!allowedSpecialCount || specialIndex > allowedSpecialCount)) {
       reasons.push('special-blocked');
     }
@@ -2585,6 +2745,9 @@
       if (reasons.includes('special-blocked')) {
         hints.push(`${prefix}: replace extra special card with a normal/rare gold card`);
       }
+      if (reasons.includes('required-totw')) {
+        hints.push(`${prefix}: replace this special card with a TOTW card`);
+      }
       if (reasons.includes('tradeable-blocked')) {
         hints.push(`${prefix}: replace tradeable card with an untradeable card`);
       }
@@ -2613,7 +2776,8 @@
     }
 
     if (requiredSpecialCount && (inspection.specialCount || 0) < requiredSpecialCount) {
-      hints.push(`add ${requiredSpecialCount - (inspection.specialCount || 0)} untradeable TOTW/TOTS/FOF card(s) rating <= ${maxRating || 'limit'}`);
+      const kind = requiredSpecialKind(loopDef) === 'totw' ? 'TOTW' : 'TOTW/TOTS/FOF';
+      hints.push(`add ${requiredSpecialCount - (inspection.specialCount || 0)} untradeable ${kind} card(s) rating <= ${maxRating || 'limit'}`);
     }
     if (allowedSpecialCount && (inspection.specialCount || 0) > allowedSpecialCount) {
       hints.push(`keep only ${allowedSpecialCount} special card(s); replace the remaining special card(s) with normal/rare gold`);
@@ -3134,6 +3298,8 @@
 
     while (completions < maxCompletions) {
       stopPoint();
+      await ensureTotwForFillAndVerify(loopDef);
+
       const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
       const opened = await openSbcSet(set, { returnNullIfComplete: true });
       if (!opened) {
@@ -3660,7 +3826,9 @@
 
   function getLiveRunLimit(loopDef, rounds) {
     if (loopDef.strategy === 'validationBronzeUpgrade') return Number(rounds || loopDef.maxRounds || 1);
-    if (loopDef.strategy === 'fillAndVerifySbc') return Number(loopDef.maxCompletions || 1);
+    if (loopDef.strategy === 'fillAndVerifySbc') {
+      return Number(loopDef.maxCompletions || 1) + (needsAutoTotwPreflight(loopDef) ? 1 : 0);
+    }
     if (loopDef.strategy === 'rarePackTo84Upgrade') return Number(loopDef.maxPacks || 100);
     if (loopDef.strategy === 'dailyRoutine') {
       return summarizeRoutineStepLimits(getRoutineStepLoopDefs(loopDef)).max;
@@ -3675,6 +3843,9 @@
     }
     if (loopDef.strategy === 'rarePackTo84Upgrade') {
       return `may open up to ${limit} pack(s) and submit matching 2x84+ SBC(s)`;
+    }
+    if (loopDef.strategy === 'fillAndVerifySbc' && needsAutoTotwPreflight(loopDef)) {
+      return `may submit up to ${limit} SBC(s), including one auto ${getAutoTotwUpgradeDef(loopDef).name} if no eligible TOTW exists`;
     }
     return `may submit up to ${limit} SBC(s)`;
   }
