@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.46
+// @version      0.2.47
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -301,7 +301,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.46',
+    version: '0.2.47',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -758,8 +758,17 @@
   }
 
   function matchesAny(text, patterns) {
+    const list = Array.isArray(patterns)
+      ? patterns
+      : (patterns === undefined || patterns === null ? [] : [patterns]);
+    if (!list.length) return false;
     const safeText = String(text || '').toLowerCase();
-    return patterns.some((p) => safeText.includes(String(p).toLowerCase()));
+    return list.some((p) => safeText.includes(String(p).toLowerCase()));
+  }
+
+  function errorStackLines(error, limit = 4) {
+    const stack = String(error?.stack || '').split('\n').map((line) => line.trim()).filter(Boolean);
+    return stack.slice(1, Math.max(1, limit + 1));
   }
 
   function localize(value) {
@@ -2515,7 +2524,7 @@
     const parts = [
       `${index + 1}. ${itemDisplayName(item)}`,
       `rating:${Number(item?.rating || 0) || '?'}`,
-      isSpecial(item) ? 'special' : (isRare(item) ? 'rare' : 'common'),
+      isSbcSpecialItem(item) ? 'special' : (isRare(item) ? 'rare' : 'common'),
       isTradeable(item) ? 'tradeable' : 'untradeable',
       `id:${Number(item?.id || 0) || '?'}`,
       `def:${Number(item?.definitionId || 0) || '?'}`,
@@ -4354,6 +4363,7 @@
       if (!confirmLiveRunIfNeeded(loopDef, rounds)) return;
     } catch (e) {
       log(`Stopped: ${e.message || e}`);
+      errorStackLines(e).forEach((line) => log(`Error stack: ${line}`));
       console.error('[BronzeLoop]', e);
       return;
     }
@@ -4375,6 +4385,7 @@
       log('All requested rounds completed');
     } catch (e) {
       log(`Stopped: ${e.message || e}`);
+      errorStackLines(e).forEach((line) => log(`Error stack: ${line}`));
       console.error('[BronzeLoop]', e);
     } finally {
       state.running = false;
