@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.51
+// @version      0.2.52
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -287,6 +287,7 @@
     pendingLiveConfirm: null,
     stalePackRefs: new WeakSet(),
     stalePackIds: new Set(),
+    lastStorePacks: [],
     assumedTotwItemIds: new Set(),
     recentRewardItems: [],
     logLines: [],
@@ -303,7 +304,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.51',
+    version: '0.2.52',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -790,6 +791,47 @@
     );
   }
 
+  function uniquePacks(packs) {
+    const byId = new Map();
+    for (const pack of packs || []) {
+      const key = packIdKey(pack);
+      if (!key) continue;
+      const existing = byId.get(key);
+      if (!existing || (typeof pack?.open === 'function' && typeof existing?.open !== 'function')) {
+        byId.set(key, pack);
+      }
+    }
+    return Array.from(byId.values());
+  }
+
+  function collectPackLikeObjects(value, out = [], depth = 0, seen = new WeakSet()) {
+    if (!value || depth > 5) return out;
+    if (typeof value !== 'object') return out;
+    if (seen.has(value)) return out;
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      value.slice(0, 200).forEach((entry) => collectPackLikeObjects(entry, out, depth + 1, seen));
+      return out;
+    }
+
+    const id = packIdKey(value);
+    const hasPackShape = id && (
+      typeof value.open === 'function' ||
+      value.packName !== undefined ||
+      value.packId !== undefined ||
+      value.packType !== undefined ||
+      value.packDefinitionId !== undefined ||
+      value.packAssetId !== undefined
+    );
+    if (hasPackShape) out.push(value);
+
+    for (const child of Object.values(value).slice(0, 80)) {
+      collectPackLikeObjects(child, out, depth + 1, seen);
+    }
+    return out;
+  }
+
   function observeOnce(observable, controller, timeoutMs = 20000, label = 'observable') {
     return new Promise((resolve, reject) => {
       let done = false;
@@ -914,6 +956,11 @@
       'Store.getPacks',
     );
     if (!result?.success) fail(`Store pack refresh failed: ${result?.error?.code || result?.status || 'unknown'}`);
+    state.lastStorePacks = uniquePacks([
+      ...getRepositoryMyPacks(),
+      ...collectPackLikeObjects(result),
+      ...(state.lastStorePacks || []),
+    ]).slice(0, 200);
     return result;
   }
 
@@ -1022,7 +1069,7 @@
     }
   }
 
-  function getMyPacks() {
+  function getRepositoryMyPacks() {
     const repo = W.repositories?.Store?.myPacks || W.services?.Store?.storeDao?.storeRepo?.myPacks;
     if (!repo) return [];
     if (typeof repo.values === 'function') return Array.from(repo.values());
@@ -1031,8 +1078,17 @@
     return [];
   }
 
+  function getMyPacks() {
+    return uniquePacks([
+      ...getRepositoryMyPacks(),
+      ...(state.lastStorePacks || []),
+    ]);
+  }
+
   function packIdKey(packOrId) {
-    const id = typeof packOrId === 'object' ? packOrId?.id : packOrId;
+    const id = typeof packOrId === 'object'
+      ? (packOrId?.id ?? packOrId?.packId ?? packOrId?.packDefinitionId ?? packOrId?.packAssetId)
+      : packOrId;
     const numeric = Number(id);
     return Number.isFinite(numeric) && numeric > 0 ? String(numeric) : '';
   }
@@ -1070,13 +1126,13 @@
 
   function findPackById(packId) {
     if (!packId) return null;
-    return getAvailableMyPacks().find((p) => Number(p?.id) === Number(packId));
+    return getAvailableMyPacks().find((p) => packIdKey(p) === packIdKey(packId));
   }
 
   function summarizePacks(packs = getAvailableMyPacks()) {
     const counts = new Map();
     for (const pack of packs) {
-      const key = `${packName(pack)} (#${pack.id})`;
+      const key = `${packName(pack)} (#${packIdKey(pack) || pack.id || '?'})`;
       counts.set(key, (counts.get(key) || 0) + 1);
     }
     return Array.from(counts.entries())
@@ -3170,7 +3226,12 @@
     if (!rewardPackId) {
       log(`${loopDef.name}: ${upgradeDef.name} submitted but reward pack id was not detected`);
     }
-    const openedReward = await openRewardPackAndCleanup(upgradeDef, rewardPackId, 'auto TOTW reward pack', { assumeTotwReward: true });
+    const openedReward = await openRewardPackAndCleanup(upgradeDef, rewardPackId, 'auto TOTW reward pack', {
+      assumeTotwReward: true,
+      findAttempts: 18,
+      findDelayMs: 2500,
+      logWait: true,
+    });
     if (!openedReward) {
       log(`${loopDef.name}: ${upgradeDef.name} reward pack could not be auto-opened; checking inventory anyway`);
     }
@@ -3539,13 +3600,20 @@
       });
       const pack = findRewardPackInCache(loopDef, explicitPackId);
       if (pack) return pack;
+      if (options.logWait && (attempt === 1 || attempt === attempts || attempt % 4 === 0)) {
+        log(`${loopDef.name}: waiting for reward pack${explicitPackId ? ` #${explicitPackId}` : ''} (${attempt}/${attempts}); current packs: ${summarizePacks() || 'none'}`);
+      }
       if (attempt < attempts && delayMs) await sleep(delayMs);
     }
     return null;
   }
 
   async function openRewardPackAndCleanup(loopDef, rewardPackId, reason = 'reward pack', options = {}) {
-    const pack = await findRewardPack(loopDef, rewardPackId, { attempts: 6, delayMs: 1800 });
+    const pack = await findRewardPack(loopDef, rewardPackId, {
+      attempts: options.findAttempts || 6,
+      delayMs: options.findDelayMs || 1800,
+      logWait: options.logWait,
+    });
     if (!pack) {
       const packs = summarizePacks();
       log(`${loopDef.name}: reward pack not found for auto-open${rewardPackId ? ` (#${rewardPackId})` : ''}; current packs: ${packs || 'none'}`);
