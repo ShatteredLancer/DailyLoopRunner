@@ -327,7 +327,7 @@
       "maxSubmittedRating": 88,
       "requiredSpecialCount": 1,
       "allowedSpecialCount": 1,
-      "requiredSpecialKind": "totw",
+      "requiredSpecialKind": "totw-tots-fof",
       "requiredSpecialMinRating": 84,
       "specialRequirementAdd": {
         "patterns": [
