@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.49
+// @version      0.2.50
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -241,7 +241,7 @@
       autoTotwUpgrade: {
         name: '84+ TOTW Upgrade',
         sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
-        rewardPackNames: ['84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack'],
+        rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack'],
         maxSubmittedRating: 85,
         blockSpecial: true,
         blockTradeable: true,
@@ -287,6 +287,8 @@
     pendingLiveConfirm: null,
     stalePackRefs: new WeakSet(),
     stalePackIds: new Set(),
+    assumedTotwItemIds: new Set(),
+    recentRewardItems: [],
     logLines: [],
     bootTimer: null,
     fsuSettingsOverride: null,
@@ -301,7 +303,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.49',
+    version: '0.2.50',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2552,6 +2554,8 @@
   }
 
   function isTotwItem(item) {
+    const id = Number(item?.id || 0);
+    if (id && state.assumedTotwItemIds.has(id)) return true;
     try { if (item?.isTOTW?.() || item?.isTotw?.()) return true; } catch { }
     const text = itemSearchText(item);
     return /\bTOTW\b|Team of the Week|本周最佳|週最佳/i.test(text);
@@ -2603,8 +2607,14 @@
   function getEligibleRequiredSpecialEntries(loopDef = {}) {
     const entries = [];
     const seen = new Set();
-    for (const pileName of ['unassigned', 'storage', 'club']) {
-      for (const item of getPileItemsByName(pileName)) {
+    const piles = [
+      { pileName: 'recent', items: state.recentRewardItems || [] },
+      { pileName: 'unassigned', items: getPileItemsByName('unassigned') },
+      { pileName: 'storage', items: getPileItemsByName('storage') },
+      { pileName: 'club', items: getPileItemsByName('club') },
+    ];
+    for (const { pileName, items } of piles) {
+      for (const item of (items || [])) {
         const id = Number(item?.id || 0);
         if (!id || seen.has(id)) continue;
         seen.add(id);
@@ -2647,6 +2657,46 @@
     if (isTotsItem(item)) labels.push('TOTS');
     if (isFofItem(item)) labels.push('FOF');
     return labels.length ? `[${labels.join('/')}]` : '[unknown-special]';
+  }
+
+  function rewardItemSummary(item) {
+    const groups = itemGroups(item);
+    const parts = [
+      itemDisplayName(item),
+      `rating:${Number(item?.rating || 0) || '?'}`,
+      requiredSpecialTypeLabel(item),
+      `id:${Number(item?.id || 0) || '?'}`,
+      `def:${Number(item?.definitionId || 0) || '?'}`,
+    ];
+    if (groups.length) parts.push(`groups:${groups.join('/')}`);
+    return parts.join(' ');
+  }
+
+  function markAssumedTotwRewardItems(items = [], label = 'TOTW reward pack') {
+    const marked = [];
+    for (const item of (items || [])) {
+      if (!item || !isPlayer(item)) continue;
+      const id = Number(item?.id || 0);
+      if (id) state.assumedTotwItemIds.add(id);
+      marked.push(item);
+    }
+
+    if (!marked.length) return;
+
+    const seen = new Set((state.recentRewardItems || [])
+      .map((item) => Number(item?.id || 0))
+      .filter(Boolean));
+    for (const item of marked) {
+      const id = Number(item?.id || 0);
+      if (!id || seen.has(id)) continue;
+      state.recentRewardItems.unshift(item);
+      seen.add(id);
+    }
+    state.recentRewardItems = state.recentRewardItems.slice(0, 20);
+    marked.slice(0, 5).forEach((item) => {
+      log(`${label}: marked assumed TOTW reward item: ${rewardItemSummary(item)}`);
+    });
+    if (marked.length > 5) log(`${label}: marked ${marked.length - 5} more assumed TOTW reward item(s)`);
   }
 
   function needsRequiredTotwInjection(loopDef, inspection) {
@@ -3007,7 +3057,7 @@
       name: '84+ TOTW Upgrade',
       strategy: 'fillAndVerifySbc',
       sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
-      rewardPackNames: ['84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack'],
+      rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack'],
       maxCompletions: 1,
       maxSubmittedRating: 85,
       requiredSpecialCount: 0,
@@ -3017,6 +3067,17 @@
       openRewardPacks: true,
       ...override,
     };
+  }
+
+  async function openExistingAutoTotwPackIfAvailable(loopDef, upgradeDef) {
+    const pack = await findRewardPack(upgradeDef, null, { attempts: 2, delayMs: 1000 });
+    if (!pack) return false;
+    log(`${loopDef.name}: opening existing ${upgradeDef.name} reward pack before crafting another ${requiredSpecialLabel(loopDef)}: ${packName(pack)} (#${pack.id})`);
+    const opened = await openRewardPackAndCleanup(upgradeDef, pack.id, 'existing auto TOTW reward pack', { assumeTotwReward: true });
+    if (opened) {
+      await refreshInventoryCaches(`${loopDef.name} post-existing TOTW pack`, { includePacks: false, quiet: true });
+    }
+    return opened;
   }
 
   async function craftAutoTotwUpgrade(loopDef) {
@@ -3042,7 +3103,7 @@
     if (!rewardPackId) {
       log(`${loopDef.name}: ${upgradeDef.name} submitted but reward pack id was not detected`);
     }
-    const openedReward = await openRewardPackAndCleanup(upgradeDef, rewardPackId, 'auto TOTW reward pack');
+    const openedReward = await openRewardPackAndCleanup(upgradeDef, rewardPackId, 'auto TOTW reward pack', { assumeTotwReward: true });
     if (!openedReward) {
       log(`${loopDef.name}: ${upgradeDef.name} reward pack could not be auto-opened; checking inventory anyway`);
     }
@@ -3061,6 +3122,12 @@
 
     const upgradeDef = getAutoTotwUpgradeDef(loopDef);
     if (loopDef.dryRun) {
+      await refreshStorePacks().catch(() => null);
+      const existingPack = findRewardPackInCache(upgradeDef, null);
+      if (existingPack) {
+        log(`${loopDef.name}: dry-run found unopened ${upgradeDef.name} reward pack ${packName(existingPack)} (#${existingPack.id}); live run would open it before crafting another ${requiredSpecialLabel(loopDef)}`);
+        return;
+      }
       const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
       const challenge = await findAvailableSbcChallenge(set, upgradeDef.name);
       if (challenge) {
@@ -3071,11 +3138,21 @@
       return;
     }
 
+    const openedExistingPack = await openExistingAutoTotwPackIfAvailable(loopDef, upgradeDef);
+    if (openedExistingPack) {
+      entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
+      if (entries.length >= required) {
+        log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} ready after opening existing pack: ${summarizeRequiredSpecialEntries(entries)}`);
+        return;
+      }
+      log(`${loopDef.name}: existing ${upgradeDef.name} reward pack opened but no eligible ${requiredSpecialLabel(loopDef)} was detected; trying ${upgradeDef.name} SBC if available`);
+    }
+
     await craftAutoTotwUpgrade(loopDef);
     await refreshInventoryCaches(`${loopDef.name} post-TOTW craft`, { includePacks: false, quiet: true });
     entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
     if (entries.length < required) {
-      fail(`${loopDef.name}: ${upgradeDef.name} completed but no eligible ${requiredSpecialLabel(loopDef)} card is available for 84x10`);
+      fail(`${loopDef.name}: ${upgradeDef.name} completed/opened but no eligible ${requiredSpecialLabel(loopDef)} card was detected for 84x10; check the reward item log and inventory state`);
     }
     log(`${loopDef.name}: auto ${requiredSpecialLabel(loopDef)} ready: ${summarizeRequiredSpecialEntries(entries)}`);
   }
@@ -3400,7 +3477,7 @@
     return null;
   }
 
-  async function openRewardPackAndCleanup(loopDef, rewardPackId, reason = 'reward pack') {
+  async function openRewardPackAndCleanup(loopDef, rewardPackId, reason = 'reward pack', options = {}) {
     const pack = await findRewardPack(loopDef, rewardPackId, { attempts: 6, delayMs: 1800 });
     if (!pack) {
       const packs = summarizePacks();
@@ -3411,6 +3488,7 @@
     const items = await openPack(pack, `${loopDef.name} ${reason}`, { allowGone: true });
     if (!items) return false;
     log(`${loopDef.name}: auto-opened reward pack ${packName(pack)} (#${pack.id}); ${items.length || 0} item(s)`);
+    if (options.assumeTotwReward) markAssumedTotwRewardItems(items, `${loopDef.name} ${reason}`);
     await clearUnassigned(`${loopDef.name} ${reason} handling`);
     return true;
   }
