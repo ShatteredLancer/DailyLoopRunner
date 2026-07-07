@@ -328,6 +328,7 @@
       "requiredSpecialCount": 1,
       "allowedSpecialCount": 1,
       "requiredSpecialKind": "totw",
+      "requiredSpecialMinRating": 84,
       "specialRequirementAdd": {
         "patterns": [
           "Any TOTW/TOTS/FOF",

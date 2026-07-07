@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.44
+// @version      0.2.45
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -233,6 +233,7 @@
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw',
+      requiredSpecialMinRating: 84,
       specialRequirementAdd: {
         patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
         buttonTexts: ['Add', '添加', '加入', '新增'],
@@ -300,7 +301,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.44',
+    version: '0.2.45',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -485,6 +486,12 @@
       const maxRating = Number(loopDef.maxSubmittedRating);
       if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
         errors.push('maxSubmittedRating must be a number between 1 and 99');
+      }
+    }
+    if (loopDef.requiredSpecialMinRating !== undefined) {
+      const minRating = Number(loopDef.requiredSpecialMinRating);
+      if (!Number.isFinite(minRating) || minRating < 1 || minRating > 99) {
+        errors.push('requiredSpecialMinRating must be a number between 1 and 99');
       }
     }
     if (loopDef.requiredSpecialKind !== undefined && !['totw'].includes(String(loopDef.requiredSpecialKind).toLowerCase())) {
@@ -2548,6 +2555,8 @@
 
   function isEligibleTotwForLoop(item, loopDef = {}) {
     if (!isTotwItem(item)) return false;
+    const minRating = Number(loopDef.requiredSpecialMinRating || 0);
+    if (minRating && Number(item?.rating || 0) < minRating) return false;
     const reasons = getSbcProtectionReasons(item, loopDef, { specialIndex: 1 });
     return reasons.length === 0;
   }
@@ -2584,7 +2593,7 @@
   function needsRequiredTotwInjection(loopDef, inspection) {
     if (!needsAutoTotwPreflight(loopDef)) return false;
     return (inspection?.missingRequirements || []).some((message) => String(message).startsWith('special-count')) ||
-      (inspection?.blocked || []).some(({ reasons }) => (reasons || []).includes('required-totw'));
+      (inspection?.blocked || []).some(({ reasons }) => (reasons || []).some((reason) => String(reason).startsWith('required-totw')));
   }
 
   function chooseTotwReplacementEntry(loopDef, inspection, totwItem) {
@@ -2596,7 +2605,7 @@
     const candidates = entries.filter(({ item }) =>
       item &&
       Number(item?.id || 0) !== totwId &&
-      !isTotwItem(item)
+      !(isTotwItem(item) && isEligibleTotwForLoop(item, loopDef))
     );
     if (!candidates.length) return null;
 
@@ -2604,6 +2613,7 @@
       const reasonList = reasons || [];
       let value = Number(item?.rating || 0) || 0;
       if (reasonList.includes('required-totw')) value -= 1000;
+      if (reasonList.some((reason) => String(reason).startsWith('required-totw-min-'))) value -= 950;
       if (reasonList.includes('special-blocked')) value -= 800;
       if (reasonList.includes('tradeable-blocked')) value -= 700;
       if (reasonList.some((reason) => reason.startsWith('rating-over-'))) value -= 600;
@@ -2678,6 +2688,7 @@
     const reasons = entry?.reasons || [];
     return isSbcSpecialItem(item) ||
       reasons.includes('required-totw') ||
+      reasons.some((reason) => String(reason).startsWith('required-totw-min-')) ||
       reasons.includes('special-blocked') ||
       reasons.includes('tradeable-blocked') ||
       reasons.includes('protected-id') ||
@@ -2691,6 +2702,7 @@
       const reasonList = reasons || [];
       let value = 0;
       if (reasonList.includes('required-totw')) value -= 1000;
+      if (reasonList.some((reason) => String(reason).startsWith('required-totw-min-'))) value -= 950;
       if (reasonList.includes('special-blocked')) value -= 900;
       if (reasonList.some((reason) => reason.startsWith('rating-over-'))) value -= 800;
       if (reasonList.includes('tradeable-blocked')) value -= 700;
@@ -2796,7 +2808,7 @@
     };
     return {
       blocked: (inspection?.blocked || []).filter(({ reasons }) =>
-        !(reasons || []).every((reason) => reason === 'required-totw')
+        !(reasons || []).every((reason) => String(reason).startsWith('required-totw'))
       ),
       missingRequirements: (inspection?.missingRequirements || []).filter((message) =>
         !String(message).startsWith('special-count')
@@ -2954,6 +2966,16 @@
     ) {
       reasons.push('required-totw');
     }
+    if (
+      requiredSpecialKind(loopDef) === 'totw' &&
+      requiredSpecialCount > 0 &&
+      isTotwItem(item) &&
+      specialIndex <= requiredSpecialCount &&
+      Number(loopDef.requiredSpecialMinRating || 0) &&
+      rating < Number(loopDef.requiredSpecialMinRating || 0)
+    ) {
+      reasons.push(`required-totw-min-${Number(loopDef.requiredSpecialMinRating || 0)}`);
+    }
     if (loopDef.blockSpecial !== false && isSbcSpecialItem(item) && (!allowedSpecialCount || specialIndex > allowedSpecialCount)) {
       reasons.push('special-blocked');
     }
@@ -3025,6 +3047,11 @@
       }
       if (reasons.includes('required-totw')) {
         hints.push(`${prefix}: replace this special card with a TOTW card`);
+      }
+      const requiredTotwMinReason = reasons.find((reason) => String(reason).startsWith('required-totw-min-'));
+      if (requiredTotwMinReason) {
+        const minRating = requiredTotwMinReason.replace('required-totw-min-', '') || Number(loopDef.requiredSpecialMinRating || 0) || '?';
+        hints.push(`${prefix}: replace with a TOTW card rating >= ${minRating}`);
       }
       if (reasons.includes('tradeable-blocked')) {
         hints.push(`${prefix}: replace tradeable card with an untradeable card`);
