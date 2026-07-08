@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.61
+// @version      0.2.62
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -332,7 +332,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.61',
+    version: '0.2.62',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1291,11 +1291,17 @@
   }
 
   function itemFieldValues(item, keys = []) {
-    const holders = [item, item?._data, item?._staticData, item?.assetData, item?._assetData];
+    const holders = [
+      item,
+      safeReadField(item, '_data'),
+      safeReadField(item, '_staticData'),
+      safeReadField(item, 'assetData'),
+      safeReadField(item, '_assetData'),
+    ];
     const values = [];
     for (const holder of holders) {
       if (!holder || typeof holder !== 'object') continue;
-      for (const key of keys) values.push(holder[key]);
+      for (const key of keys) values.push(safeReadField(holder, key));
     }
     return values;
   }
@@ -1627,14 +1633,25 @@
     log(`FSU settings sync: ${formatFsuSettings(getFsuSettings({ force: true }))}`);
   }
 
+  function safeReadField(holder, key) {
+    try {
+      return holder?.[key];
+    } catch {
+      return undefined;
+    }
+  }
+
   function itemLeagueId(item) {
+    const data = safeReadField(item, '_data');
+    const staticData = safeReadField(item, '_staticData');
+    const assetData = safeReadField(item, 'assetData');
     const values = [
-      item?.leagueId,
-      item?.league,
-      item?._leagueId,
-      item?._data?.leagueId,
-      item?._staticData?.leagueId,
-      item?.assetData?.leagueId,
+      safeReadField(item, 'leagueId'),
+      safeReadField(item, 'league'),
+      safeReadField(item, '_leagueId'),
+      safeReadField(data, 'leagueId'),
+      safeReadField(staticData, 'leagueId'),
+      safeReadField(assetData, 'leagueId'),
     ];
     for (const value of values) {
       const num = Number(value);
@@ -1670,13 +1687,12 @@
     if (!isPlayer(item)) return reasons;
     if (settings.onlyUntradeable && isTradeable(item)) reasons.push('fsu-only-untradeable');
     if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push('fsu-exclude-evolution');
-    const leagueId = itemLeagueId(item);
-    if (
-      settings.excludeDesignatedLeagues &&
-      leagueId &&
-      (settings.excludedLeagueIds || []).map(Number).includes(leagueId)
-    ) {
-      reasons.push(`fsu-excluded-league-${leagueId}`);
+    const excludedLeagueIds = (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0);
+    if (settings.excludeDesignatedLeagues && excludedLeagueIds.length) {
+      const leagueId = itemLeagueId(item);
+      if (leagueId && excludedLeagueIds.includes(leagueId)) {
+        reasons.push(`fsu-excluded-league-${leagueId}`);
+      }
     }
     if (
       settings.useRarityPlayer === false &&
