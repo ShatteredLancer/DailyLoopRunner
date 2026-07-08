@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.66`
+- `DailyLoopRunner.user.js`: `0.2.67`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -36,6 +36,8 @@ Chrome 中需要启用：
 Runner 会尽量读取并跟随 FSU 的 SBC ignore player configuration，例如 Only Untradeable、Exclude Evolution、排除指定联赛、storage 优先、普通/稀有优先级、Lock player 等；84x10 等 FSU 自动填阵容的 loop 仍会在提交前执行 Runner 自己的硬保护检查。
 
 Inventory-first SBC 会在选人阶段按 `definitionId` 去重，避免同一球员的两张重复卡被选入同一套 SBC 后保存时只剩 10/11 人；同时会继承 loop 级 `blockTradeable`，例如 84+ TOTW loop 不会为了补阵容而选入可交易卡。
+
+多轮 inventory-first loop 如果中途材料不足，会记录缺少的 requirement diagnostics，并正常结束本次 run，保留已经成功提交的次数。
 
 ## 3. 日常使用流程
 

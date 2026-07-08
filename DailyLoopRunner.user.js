@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.66
+// @version      0.2.67
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -334,7 +334,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.66',
+    version: '0.2.67',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -4760,8 +4760,9 @@
 
     if (!selection.ok) {
       logSelectionDiagnostics(`${loopDef.name} inventory-first`, selection, loopDef.priorityPiles);
-      if (options.dryRun) return { ok: false, selection };
-      fail(`${loopDef.name}: inventory-first fill missing ${selection.missing?.count || '?'} ${describeRequirement(selection.missing || {})}`);
+      const reason = `inventory-first fill missing ${selection.missing?.count || '?'} ${describeRequirement(selection.missing || {})}`;
+      if (options.dryRun || options.stopOnMissingSelection) return { ok: false, selection, reason };
+      fail(`${loopDef.name}: ${reason}`);
     }
 
     const prepared = await prepareInventorySelection(loopDef, selection);
@@ -4820,10 +4821,17 @@
       let inspection;
       const expectedPlayerCount = expectedSbcPlayerCount(loopDef, opened.challenge);
       if (shouldUseInventoryFirstFill(loopDef)) {
-        const inventoryFill = await fillSbcSquadInventoryFirst(loopDef, opened, { dryRun: loopDef.dryRun });
+        const inventoryFill = await fillSbcSquadInventoryFirst(loopDef, opened, {
+          dryRun: loopDef.dryRun,
+          stopOnMissingSelection: true,
+        });
         if (loopDef.dryRun) {
           log(`${loopDef.name}: dry run stops before squad save or SBC submit`);
           return;
+        }
+        if (!inventoryFill.ok) {
+          log(`${loopDef.name}: stopping because ${inventoryFill.reason || 'inventory-first fill is missing required items'}`);
+          break;
         }
         fillResult = inventoryFill.fillResult;
         inspection = inventoryFill.inspection;
