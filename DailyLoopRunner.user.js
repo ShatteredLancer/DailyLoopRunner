@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.63
+// @version      0.2.64
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -334,7 +334,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.63',
+    version: '0.2.64',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2471,6 +2471,29 @@
     return 11;
   }
 
+  function sumRequirementPlayerCount(loopDef = {}) {
+    if (!Array.isArray(loopDef.requirements)) return 0;
+    return loopDef.requirements.reduce((sum, requirement) => {
+      const count = Number(requirement?.count || 0);
+      return Number.isFinite(count) && count > 0 ? sum + count : sum;
+    }, 0);
+  }
+
+  function expectedSbcPlayerCount(loopDef = {}, challenge = null) {
+    const values = [];
+    const explicit = Number(loopDef.expectedPlayerCount || 0);
+    if (Number.isFinite(explicit) && explicit > 0) values.push(explicit);
+    if (loopDef.inventoryFillFirst === true) {
+      const requirementCount = sumRequirementPlayerCount(loopDef);
+      if (requirementCount > 0) values.push(requirementCount);
+    }
+    if (challenge) {
+      const required = getRequiredPlayerCount(challenge);
+      if (Number.isFinite(required) && required > 0) values.push(required);
+    }
+    return values.length ? Math.max(...values) : 0;
+  }
+
   function sortSbcFodder(items, spec = {}, settings = getFsuSettings()) {
     return [...items].sort((a, b) => {
       if (settings.priorityNonSpecialPlayers && isSpecial(a) !== isSpecial(b)) {
@@ -3380,7 +3403,7 @@
       });
     }
 
-    let plannedInspection = inspectSbcItems(loopDef, players);
+    let plannedInspection = inspectSbcItems(loopDef, players, { expectedPlayerCount: inspection.expectedPlayerCount });
     const targets = sortRepairTargets(
       plannedInspection.entries.filter((entry) => isRequiredTotwRepairTarget(loopDef, entry, keepTotwId))
     );
@@ -3416,7 +3439,7 @@
       });
     }
 
-    plannedInspection = inspectSbcItems(loopDef, players);
+    plannedInspection = inspectSbcItems(loopDef, players, { expectedPlayerCount: inspection.expectedPlayerCount });
     return {
       ok: !plannedInspection.blocked.length && !(plannedInspection.missingRequirements || []).length,
       players,
@@ -3430,7 +3453,9 @@
   }
 
   function formatRepairChange(change) {
-    return `slot ${change.index + 1}: ${itemDisplayName(change.from)} rating:${Number(change.from?.rating || 0) || '?'} -> ${itemDisplayName(change.to)} rating:${Number(change.to?.rating || 0) || '?'} from:${change.pileName} (${change.reason})`;
+    const fromLabel = change.from ? `${itemDisplayName(change.from)} rating:${Number(change.from?.rating || 0) || '?'}` : 'empty';
+    const toLabel = change.to ? `${itemDisplayName(change.to)} rating:${Number(change.to?.rating || 0) || '?'}` : 'empty';
+    return `slot ${change.index + 1}: ${fromLabel} -> ${toLabel} from:${change.pileName} (${change.reason})`;
   }
 
   function buildProtectedSquadRepairPlan(loopDef, inspection) {
@@ -3462,7 +3487,7 @@
           reason: `missing normal replacement for slot ${target.index + 1}`,
           players,
           changes,
-          inspection: inspectSbcItems(loopDef, players),
+          inspection: inspectSbcItems(loopDef, players, { expectedPlayerCount: inspection.expectedPlayerCount }),
         };
       }
 
@@ -3479,7 +3504,7 @@
       });
     }
 
-    const plannedInspection = inspectSbcItems(loopDef, players);
+    const plannedInspection = inspectSbcItems(loopDef, players, { expectedPlayerCount: inspection.expectedPlayerCount });
     return {
       ok: !plannedInspection.blocked.length && !(plannedInspection.missingRequirements || []).length,
       players,
@@ -3538,7 +3563,7 @@
         filled: getFilledSquadSlots(squad),
         submitReady: !!findSubmitButton(),
       };
-      nextInspection = inspectSbcSquad(loopDef, squad);
+      nextInspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount: nextInspection.expectedPlayerCount });
       logSbcSquadInspection(loopDef, nextInspection);
       log(`${loopDef.name}: after protected squad repair submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
       if (!nextInspection.blocked.length) {
@@ -3549,8 +3574,62 @@
     return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: true };
   }
 
+  function parseMissingPlayerCount(inspection = {}) {
+    const message = (inspection.missingRequirements || []).find((entry) => String(entry).startsWith('player-count '));
+    if (!message) return null;
+    const match = String(message).match(/player-count\s+(\d+)\/(\d+)/);
+    if (!match) return null;
+    const current = Number(match[1]);
+    const expected = Number(match[2]);
+    if (!Number.isFinite(current) || !Number.isFinite(expected) || expected <= current) return null;
+    return { current, expected, missing: expected - current };
+  }
+
+  function buildMissingPlayerFillPlan(loopDef, inspection) {
+    const missing = parseMissingPlayerCount(inspection);
+    if (!missing) return null;
+    const players = [...(inspection.items || [])];
+    const usedIds = new Set(players.map((item) => Number(item?.id || 0)).filter(Boolean));
+    const usedDefinitionIds = new Set(players.map((item) => Number(item?.definitionId || 0)).filter(Boolean));
+    const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds, { usedDefinitionIds }));
+    const changes = [];
+
+    for (let offset = 0; offset < missing.missing; offset++) {
+      const filler = fillers.find(({ item }) => {
+        const definitionId = Number(item?.definitionId || 0);
+        return !definitionId || !usedDefinitionIds.has(definitionId);
+      });
+      if (!filler) return null;
+      const fillerIndex = fillers.indexOf(filler);
+      if (fillerIndex >= 0) fillers.splice(fillerIndex, 1);
+      players.push(filler.item);
+      usedIds.add(Number(filler.item?.id || 0));
+      const definitionId = Number(filler.item?.definitionId || 0);
+      if (definitionId) usedDefinitionIds.add(definitionId);
+      changes.push({
+        index: missing.current + offset,
+        from: null,
+        to: filler.item,
+        pileName: filler.pileName,
+        reason: 'submit-ready missing player fill',
+      });
+    }
+
+    const plannedInspection = inspectSbcItems(loopDef, players, { expectedPlayerCount: inspection.expectedPlayerCount });
+    return {
+      players,
+      changes,
+      inspection: plannedInspection,
+    };
+  }
+
   function buildSubmitReadyNormalUpgradePlan(loopDef, inspection) {
-    if (!inspection?.items?.length || inspection.blocked?.length || inspection.missingRequirements?.length) return null;
+    if (!inspection?.items?.length || inspection.blocked?.length) return null;
+    const missingNonPlayerCount = (inspection.missingRequirements || []).filter((message) => !String(message).startsWith('player-count '));
+    if (missingNonPlayerCount.length) return null;
+    if (parseMissingPlayerCount(inspection)) {
+      return buildMissingPlayerFillPlan(loopDef, inspection);
+    }
     const usedIds = new Set((inspection.items || []).map((item) => Number(item?.id || 0)).filter(Boolean));
     const targets = [...(inspection.entries || [])]
       .filter(({ item, reasons }) => item && !isSbcSpecialItem(item) && !(reasons || []).length)
@@ -3573,13 +3652,13 @@
       players[target.index] = filler.item;
       return {
         players,
-        change: {
+        changes: [{
           index: target.index,
           from: target.item,
           to: filler.item,
           pileName: filler.pileName,
           reason: 'submit-ready rating repair',
-        },
+        }],
       };
     }
     return null;
@@ -3598,16 +3677,24 @@
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const plan = buildSubmitReadyNormalUpgradePlan(loopDef, nextInspection);
       if (!plan) {
-        log(`${loopDef.name}: submit-ready repair found no eligible normal gold upgrade candidate`);
+        const missingPlayers = parseMissingPlayerCount(nextInspection);
+        if (missingPlayers) {
+          log(`${loopDef.name}: submit-ready repair found no eligible normal gold player to fill ${missingPlayers.current}/${missingPlayers.expected} squad slots`);
+        } else {
+          log(`${loopDef.name}: submit-ready repair found no eligible normal gold upgrade candidate`);
+        }
         return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: false };
       }
 
-      log(`${loopDef.name}: submit-ready repair ${attempt}/${maxAttempts} - ${formatRepairChange(plan.change)}`);
+      const changes = plan.changes || (plan.change ? [plan.change] : []);
+      changes.forEach((change) => {
+        log(`${loopDef.name}: submit-ready repair ${attempt}/${maxAttempts} - ${formatRepairChange(change)}`);
+      });
       if (loopDef.dryRun) {
         log(`${loopDef.name}: dry-run would save submit-ready repair and re-check before submit`);
         return {
           fillResult: nextFillResult,
-          inspection: inspectSbcItems(loopDef, plan.players),
+          inspection: inspectSbcItems(loopDef, plan.players, { expectedPlayerCount: nextInspection.expectedPlayerCount }),
           planned: true,
           repaired: false,
         };
@@ -3624,7 +3711,7 @@
         filled: getFilledSquadSlots(squad),
         submitReady: !!findSubmitButton(),
       };
-      nextInspection = inspectSbcSquad(loopDef, squad);
+      nextInspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount: nextInspection.expectedPlayerCount });
       logSbcSquadInspection(loopDef, nextInspection);
       log(`${loopDef.name}: after submit-ready repair submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
       if (nextFillResult.submitReady || nextInspection.blocked.length || nextInspection.missingRequirements?.length) {
@@ -3687,7 +3774,7 @@
       filled: getFilledSquadSlots(squad),
       submitReady: !!findSubmitButton(),
     };
-    const nextInspection = inspectSbcSquad(loopDef, squad);
+    const nextInspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount: inspection.expectedPlayerCount });
     logSbcSquadInspection(loopDef, nextInspection);
     log(`${loopDef.name}: after required ${requiredSpecialLabel(loopDef)} repair submit ${nextFillResult.submitReady ? 'ready' : 'not ready'}`);
     return { fillResult: nextFillResult, inspection: nextInspection, planned: false, injected: true };
@@ -3896,11 +3983,18 @@
     return reasons;
   }
 
-  function inspectSbcItems(loopDef, items = []) {
+  function inspectSbcItems(loopDef, items = [], options = {}) {
     const blocked = [];
     const entries = [];
     let specialCount = 0;
     const requiredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
+    const expectedPlayerCount = Math.max(
+      0,
+      Number(options.expectedPlayerCount || 0) ||
+      Number(loopDef.expectedPlayerCount || 0) ||
+      (loopDef.inventoryFillFirst === true ? sumRequirementPlayerCount(loopDef) : 0) ||
+      0
+    );
 
     items.forEach((item, index) => {
       if (isSbcSpecialItem(item)) specialCount++;
@@ -3919,15 +4013,18 @@
       )
     ).length;
     const missingRequirements = [];
+    if (expectedPlayerCount && items.length < expectedPlayerCount) {
+      missingRequirements.push(`player-count ${items.length}/${expectedPlayerCount}`);
+    }
     if (requiredSpecialCount && requiredSpecialMetCount < requiredSpecialCount) {
       missingRequirements.push(`special-count ${requiredSpecialMetCount}/${requiredSpecialCount}`);
     }
 
-    return { items, entries, blocked, specialCount, requiredSpecialMetCount, missingRequirements };
+    return { items, entries, blocked, specialCount, requiredSpecialMetCount, expectedPlayerCount, missingRequirements };
   }
 
-  function inspectSbcSquad(loopDef, squad = ctrl()?._squad) {
-    return inspectSbcItems(loopDef, getSquadItems(squad));
+  function inspectSbcSquad(loopDef, squad = ctrl()?._squad, options = {}) {
+    return inspectSbcItems(loopDef, getSquadItems(squad), options);
   }
 
   function logSbcSquadInspection(loopDef, inspection, options = {}) {
@@ -3935,7 +4032,10 @@
     const requiredPart = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0)
       ? `, ${requiredSpecialLabel(loopDef)} ${inspection.requiredSpecialMetCount || 0}/${Number(loopDef.requiredSpecialCount || 0)}`
       : '';
-    log(`${loopDef.name}: squad inspection ${inspection.items.length} item(s), special ${inspection.specialCount || 0}${requiredPart}, blocked ${inspection.blocked.length}`);
+    const playerCountPart = inspection.expectedPlayerCount
+      ? `${inspection.items.length}/${inspection.expectedPlayerCount}`
+      : String(inspection.items.length);
+    log(`${loopDef.name}: squad inspection ${playerCountPart} item(s), special ${inspection.specialCount || 0}${requiredPart}, blocked ${inspection.blocked.length}`);
     (inspection.entries || []).slice(0, maxItems).forEach(({ item, index, reasons }) => {
       log(`${loopDef.name}: squad ${formatSquadItem(item, index)}${reasons.length ? ` | BLOCK ${reasons.join(',')}` : ''}`);
     });
@@ -4008,6 +4108,10 @@
 
     if (requiredSpecialCount && (inspection.requiredSpecialMetCount || 0) < requiredSpecialCount) {
       hints.push(`add ${requiredSpecialCount - (inspection.requiredSpecialMetCount || 0)} untradeable ${requiredSpecialLabel(loopDef)} card(s) rating <= ${maxRating || 'limit'}`);
+    }
+    const missingPlayers = parseMissingPlayerCount(inspection);
+    if (missingPlayers) {
+      hints.push(`add ${missingPlayers.missing} eligible normal gold player(s) to fill ${missingPlayers.current}/${missingPlayers.expected} squad slots`);
     }
     if (allowedSpecialCount && (inspection.specialCount || 0) > allowedSpecialCount) {
       hints.push(`keep only ${allowedSpecialCount} special card(s); replace the remaining special card(s) with normal/rare gold`);
@@ -4638,6 +4742,7 @@
 
   async function fillSbcSquadInventoryFirst(loopDef, opened, options = {}) {
     await refreshInventoryCaches(`${loopDef.name} inventory-first fill`, { includePacks: false, quiet: true });
+    const expectedPlayerCount = expectedSbcPlayerCount(loopDef, opened.challenge);
     const selection = selectInventoryPlayers(loopDef.requirements, loopDef.priorityPiles);
     if (options.dryRun) {
       logDryRunSelection(`${loopDef.name} inventory-first`, selection, { maxItems: 20, priorityPiles: loopDef.priorityPiles });
@@ -4652,7 +4757,7 @@
     }
 
     const prepared = await prepareInventorySelection(loopDef, selection);
-    const plannedInspection = inspectSbcItems(loopDef, prepared.selected || []);
+    const plannedInspection = inspectSbcItems(loopDef, prepared.selected || [], { expectedPlayerCount });
     logSbcSquadInspection(loopDef, plannedInspection);
 
     if (options.dryRun) {
@@ -4679,9 +4784,9 @@
       filled: getFilledSquadSlots(squad),
       submitReady: !!findSubmitButton(),
     };
-    const inspection = inspectSbcSquad(loopDef, squad);
+    const inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount });
     logSbcSquadInspection(loopDef, inspection);
-    log(`${loopDef.name}: inventory-first fill submit ${fillResult.submitReady ? 'ready' : 'not ready'}`);
+    log(`${loopDef.name}: inventory-first fill submit ${fillResult.submitReady ? 'ready' : 'not ready'} (${inspection.items.length}/${expectedPlayerCount || '?'} players)`);
     return { ok: true, selection: prepared, fillResult, inspection };
   }
 
@@ -4705,6 +4810,7 @@
 
       let fillResult;
       let inspection;
+      const expectedPlayerCount = expectedSbcPlayerCount(loopDef, opened.challenge);
       if (shouldUseInventoryFirstFill(loopDef)) {
         const inventoryFill = await fillSbcSquadInventoryFirst(loopDef, opened, { dryRun: loopDef.dryRun });
         if (loopDef.dryRun) {
@@ -4719,11 +4825,10 @@
           specialRequirementAdd: loopDef.specialRequirementAdd,
         });
         const squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
-        inspection = inspectSbcSquad(loopDef, squad);
+        inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount });
         logSbcSquadInspection(loopDef, inspection);
         if (!fillResult.submitReady) {
-          const required = getRequiredPlayerCount(opened.challenge);
-          log(`${loopDef.name}: submit not ready after FSU fill (${fillResult.filled}/${required} slots filled); likely SBC requirements are still unmet or FSU completion picked an invalid squad`);
+          log(`${loopDef.name}: submit not ready after FSU fill (${fillResult.filled}/${expectedPlayerCount || '?'} slots filled); likely SBC requirements are still unmet or FSU completion picked an invalid squad`);
         }
       }
       let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
