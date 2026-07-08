@@ -305,6 +305,42 @@
       "openRewardPacks": false
     },
     {
+      "id": "auto-totw-upgrade",
+      "name": "84+ TOTW Upgrade Loop",
+      "strategy": "fillAndVerifySbc",
+      "sbcNames": [
+        "84+ TOTW Upgrade",
+        "84+ TOTW",
+        "TOTW Upgrade",
+        "84+ TOTW 升级",
+        "84+ TOTW 升級"
+      ],
+      "rewardPackIds": [20707, 20441],
+      "rewardPackNames": [
+        "84+ TOTW 1-30 Player Pack",
+        "TOTW 1-30 Player Pack",
+        "84+ TOTW 1-30",
+        "TOTW 1-30",
+        "84+ TOTW Player Pack",
+        "TOTW Player Pack",
+        "84+ TOTW Pack",
+        "TOTW Pack",
+        "TOTW Provision Refresh",
+        "TOTW Provision Refresh Pack"
+      ],
+      "maxCompletions": 1,
+      "useRoundsAsCompletions": true,
+      "allowMultipleCompletions": true,
+      "maxSubmittedRating": 85,
+      "requiredSpecialCount": 0,
+      "allowedSpecialCount": 0,
+      "blockSpecial": true,
+      "blockTradeable": true,
+      "openRewardPacks": true,
+      "forceOpenRewardPacks": true,
+      "assumeTotwRewardPack": true
+    },
+    {
       "id": "84x10-mvp",
       "name": "84x10 MVP (1 run)",
       "strategy": "fillAndVerifySbc",
@@ -353,6 +389,7 @@
           "84+ TOTW 升级",
           "84+ TOTW 升級"
         ],
+        "rewardPackIds": [20707, 20441],
         "rewardPackNames": [
           "84+ TOTW 1-30 Player Pack",
           "TOTW 1-30 Player Pack",
@@ -361,7 +398,9 @@
           "84+ TOTW Player Pack",
           "TOTW Player Pack",
           "84+ TOTW Pack",
-          "TOTW Pack"
+          "TOTW Pack",
+          "TOTW Provision Refresh",
+          "TOTW Provision Refresh Pack"
         ],
         "maxSubmittedRating": 85,
         "blockSpecial": true,
