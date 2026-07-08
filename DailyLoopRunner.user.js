@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.57
+// @version      0.2.58
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -220,10 +220,17 @@
       useRoundsAsCompletions: true,
       allowMultipleCompletions: true,
       maxSubmittedRating: 85,
+      inventoryFillFirst: true,
+      requirements: [
+        { tier: 'gold', rarity: 'rare', count: 6, minRating: 85, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+      ],
+      priorityPiles: ['storage', 'club'],
       requiredSpecialCount: 0,
       allowedSpecialCount: 0,
       blockSpecial: true,
       blockTradeable: true,
+      submitReadyRepairMaxAttempts: 8,
       openRewardPacks: true,
       forceOpenRewardPacks: true,
       assumeTotwRewardPack: true,
@@ -325,7 +332,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.57',
+    version: '0.2.58',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -436,6 +443,13 @@
     if (spec.rarity !== undefined && !['common', 'rare'].includes(spec.rarity)) {
       errors.push(`${path}.rarity must be common or rare`);
     }
+    ['minRating', 'maxRating'].forEach((field) => {
+      if (spec[field] === undefined) return;
+      const rating = Number(spec[field]);
+      if (!Number.isFinite(rating) || rating < 1 || rating > 99) {
+        errors.push(`${path}.${field} must be a number between 1 and 99`);
+      }
+    });
     ['playerOnly', 'allowSpecial', 'special', 'protectHighGold'].forEach((field) => {
       if (spec[field] !== undefined && typeof spec[field] !== 'boolean') {
         errors.push(`${path}.${field} must be boolean`);
@@ -501,7 +515,7 @@
     if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
       errors.push('dryRun must be boolean');
     }
-    ['openRewardPacks', 'blockSpecial', 'blockTradeable'].forEach((field) => {
+    ['openRewardPacks', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst'].forEach((field) => {
       if (loopDef[field] !== undefined && typeof loopDef[field] !== 'boolean') {
         errors.push(`${field} must be boolean`);
       }
@@ -555,6 +569,7 @@
 
     if (loopDef.strategy === 'fillAndVerifySbc') {
       validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
+      if (loopDef.requirements !== undefined) validateRequirements(loopDef.requirements, 'requirements', errors, false);
     }
 
     if (loopDef.strategy === 'inventoryMixedUpgrade' || loopDef.strategy === 'commonGoldToRareUpgrade') {
@@ -1232,6 +1247,9 @@
 
   function itemMatchesSpec(item, spec = {}, settings = getFsuSettings()) {
     if (spec.playerOnly && !isPlayer(item)) return false;
+    const rating = Number(item?.rating || 0);
+    if (spec.minRating !== undefined && rating < Number(spec.minRating)) return false;
+    if (spec.maxRating !== undefined && rating > Number(spec.maxRating)) return false;
     if (spec.special === true && !isSpecial(item)) return false;
     if (spec.special === false && isSpecial(item)) return false;
     if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
@@ -2322,6 +2340,8 @@
       requirement.count ? `${requirement.count}x` : '',
       requirement.tier || 'any-tier',
       requirement.rarity || '',
+      requirement.minRating ? `min${requirement.minRating}` : '',
+      requirement.maxRating ? `max${requirement.maxRating}` : '',
       requirement.playerOnly ? 'player' : '',
       requirement.allowSpecial ? 'special-ok' : 'no-special',
     ].filter(Boolean).join(' ');
@@ -2343,7 +2363,10 @@
 
   function getSpecRejectReasons(item, spec = {}) {
     const reasons = [];
+    const rating = Number(item?.rating || 0);
     if (spec.playerOnly && !isPlayer(item)) reasons.push('not-player');
+    if (spec.minRating !== undefined && rating < Number(spec.minRating)) reasons.push(`rating-under-${Number(spec.minRating)}`);
+    if (spec.maxRating !== undefined && rating > Number(spec.maxRating)) reasons.push(`rating-over-${Number(spec.maxRating)}`);
     if (spec.special === true && !isSpecial(item)) reasons.push('not-special');
     if (spec.special === false && isSpecial(item)) reasons.push('special-blocked');
     if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) reasons.push('special-blocked');
@@ -3346,7 +3369,7 @@
       return { fillResult, inspection, planned: false, repaired: false };
     }
 
-    const maxAttempts = Math.max(0, Math.min(3, Number(loopDef.submitReadyRepairMaxAttempts ?? 2) || 0));
+    const maxAttempts = Math.max(0, Math.min(10, Number(loopDef.submitReadyRepairMaxAttempts ?? 2) || 0));
     if (!maxAttempts) return { fillResult, inspection, planned: false, repaired: false };
 
     let nextFillResult = fillResult;
@@ -3460,10 +3483,17 @@
       rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
       maxCompletions: 1,
       maxSubmittedRating: 85,
+      inventoryFillFirst: true,
+      requirements: [
+        { tier: 'gold', rarity: 'rare', count: 6, minRating: 85, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+      ],
+      priorityPiles: ['storage', 'club'],
       requiredSpecialCount: 0,
       allowedSpecialCount: 0,
       blockSpecial: true,
       blockTradeable: true,
+      submitReadyRepairMaxAttempts: 8,
       openRewardPacks: true,
       ...override,
     };
@@ -3496,13 +3526,22 @@
     const opened = await openSbcSet(set, { returnNullIfComplete: true });
     if (!opened) fail(`${loopDef.name}: no available ${upgradeDef.name} challenge remains; cannot auto-craft TOTW`);
 
-    let fillResult = await fillSbcSquad(upgradeDef.name, {
-      requireSubmitReady: false,
-      specialRequirementAdd: upgradeDef.specialRequirementAdd,
-    });
+    let fillResult;
+    let inspection;
+    if (shouldUseInventoryFirstFill(upgradeDef)) {
+      const inventoryFill = await fillSbcSquadInventoryFirst(upgradeDef, opened);
+      fillResult = inventoryFill.fillResult;
+      inspection = inventoryFill.inspection;
+    } else {
+      fillResult = await fillSbcSquad(upgradeDef.name, {
+        requireSubmitReady: false,
+        specialRequirementAdd: upgradeDef.specialRequirementAdd,
+      });
+      const filledSquad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
+      inspection = inspectSbcSquad(upgradeDef, filledSquad);
+      logSbcSquadInspection(upgradeDef, inspection);
+    }
     let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
-    let inspection = inspectSbcSquad(upgradeDef, squad);
-    logSbcSquadInspection(upgradeDef, inspection);
 
     const protectedRepair = await repairProtectedSquadItemsIfNeeded(upgradeDef, opened, fillResult, inspection);
     fillResult = protectedRepair.fillResult;
@@ -3514,7 +3553,7 @@
     inspection = submitReadyRepair.inspection;
     squad = fillResult.squad || squad;
 
-    if (!fillResult.submitReady) fail(`${upgradeDef.name}: submit is not ready after FSU fill`);
+    if (!fillResult.submitReady) fail(`${upgradeDef.name}: submit is not ready after fill`);
     assertSbcSquadSafe(upgradeDef, inspection);
 
     const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
@@ -4368,6 +4407,67 @@
     }
   }
 
+  function shouldUseInventoryFirstFill(loopDef = {}) {
+    return loopDef.inventoryFillFirst === true && Array.isArray(loopDef.requirements) && loopDef.requirements.length > 0;
+  }
+
+  function logInventorySelection(label, selection, options = {}) {
+    const maxItems = Number(options.maxItems || 20);
+    log(`${label}: inventory selected ${selection?.selected?.length || 0} item(s) (${formatSelectionStats(selection?.stats)})`);
+    const entries = selection?.entries || (selection?.selected || []).map((item) => ({ item, pileName: 'unknown' }));
+    entries.slice(0, maxItems).forEach((entry, index) => log(`inventory pick ${formatDryRunItem(entry, index)}`));
+    if (entries.length > maxItems) log(`${label}: inventory pick list truncated: ${entries.length - maxItems} more item(s)`);
+  }
+
+  async function fillSbcSquadInventoryFirst(loopDef, opened, options = {}) {
+    await refreshInventoryCaches(`${loopDef.name} inventory-first fill`, { includePacks: false, quiet: true });
+    const selection = selectInventoryPlayers(loopDef.requirements, loopDef.priorityPiles);
+    if (options.dryRun) {
+      logDryRunSelection(`${loopDef.name} inventory-first`, selection, { maxItems: 20, priorityPiles: loopDef.priorityPiles });
+    } else {
+      logInventorySelection(`${loopDef.name} inventory-first`, selection);
+    }
+
+    if (!selection.ok) {
+      logSelectionDiagnostics(`${loopDef.name} inventory-first`, selection, loopDef.priorityPiles);
+      if (options.dryRun) return { ok: false, selection };
+      fail(`${loopDef.name}: inventory-first fill missing ${selection.missing?.count || '?'} ${describeRequirement(selection.missing || {})}`);
+    }
+
+    const prepared = await prepareInventorySelection(loopDef, selection);
+    const plannedInspection = inspectSbcItems(loopDef, prepared.selected || []);
+    logSbcSquadInspection(loopDef, plannedInspection);
+
+    if (options.dryRun) {
+      if (plannedInspection.blocked.length || plannedInspection.missingRequirements?.length) {
+        log(`${loopDef.name}: dry-run inventory-first selection has protected or missing squad requirement(s)`);
+        logManualSbcFixHints(loopDef, plannedInspection);
+      } else {
+        log(`${loopDef.name}: dry-run inventory-first selection passed protection; live run would save this squad before submit`);
+      }
+      return { ok: true, selection: prepared, inspection: plannedInspection };
+    }
+
+    if (plannedInspection.blocked.length || plannedInspection.missingRequirements?.length) {
+      assertSbcSquadSafe(loopDef, plannedInspection);
+    }
+
+    await saveChallengeSquad(opened.challenge, prepared.selected, `${loopDef.name} inventory-first fill`);
+    await waitLoadingEnd();
+    await sleep(900);
+
+    const squad = ctrl()?._squad || opened.challenge?.squad;
+    const fillResult = {
+      squad,
+      filled: getFilledSquadSlots(squad),
+      submitReady: !!findSubmitButton(),
+    };
+    const inspection = inspectSbcSquad(loopDef, squad);
+    logSbcSquadInspection(loopDef, inspection);
+    log(`${loopDef.name}: inventory-first fill submit ${fillResult.submitReady ? 'ready' : 'not ready'}`);
+    return { ok: true, selection: prepared, fillResult, inspection };
+  }
+
   async function runFillAndVerifySbc(loopDef) {
     await waitAppReady();
     const completionLimit = loopDef.allowMultipleCompletions === true ? 50 : 1;
@@ -4386,17 +4486,30 @@
         break;
       }
 
-      let fillResult = await fillSbcSquad(loopDef.name, {
-        requireSubmitReady: false,
-        specialRequirementAdd: loopDef.specialRequirementAdd,
-      });
-      let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
-      let inspection = inspectSbcSquad(loopDef, squad);
-      logSbcSquadInspection(loopDef, inspection);
-      if (!fillResult.submitReady) {
-        const required = getRequiredPlayerCount(opened.challenge);
-        log(`${loopDef.name}: submit not ready after FSU fill (${fillResult.filled}/${required} slots filled); likely SBC requirements are still unmet or FSU completion picked an invalid squad`);
+      let fillResult;
+      let inspection;
+      if (shouldUseInventoryFirstFill(loopDef)) {
+        const inventoryFill = await fillSbcSquadInventoryFirst(loopDef, opened, { dryRun: loopDef.dryRun });
+        if (loopDef.dryRun) {
+          log(`${loopDef.name}: dry run stops before squad save or SBC submit`);
+          return;
+        }
+        fillResult = inventoryFill.fillResult;
+        inspection = inventoryFill.inspection;
+      } else {
+        fillResult = await fillSbcSquad(loopDef.name, {
+          requireSubmitReady: false,
+          specialRequirementAdd: loopDef.specialRequirementAdd,
+        });
+        const squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
+        inspection = inspectSbcSquad(loopDef, squad);
+        logSbcSquadInspection(loopDef, inspection);
+        if (!fillResult.submitReady) {
+          const required = getRequiredPlayerCount(opened.challenge);
+          log(`${loopDef.name}: submit not ready after FSU fill (${fillResult.filled}/${required} slots filled); likely SBC requirements are still unmet or FSU completion picked an invalid squad`);
+        }
       }
+      let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
 
       const totwInjection = await injectRequiredTotwIfNeeded(loopDef, opened, fillResult, inspection);
       fillResult = totwInjection.fillResult;
