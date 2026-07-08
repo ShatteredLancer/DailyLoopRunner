@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.59
+// @version      0.2.60
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -332,7 +332,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.59',
+    version: '0.2.60',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1302,14 +1302,19 @@
 
   function isLoanItem(item) {
     if (callItemBooleanMethod(item, ['isLoan', 'isLoanItem', 'isLoanPlayer'])) return true;
-    for (const value of itemFieldValues(item, ['loans', 'loan', 'loanCount', 'loanContracts', 'remainingLoans', 'isLoan'])) {
+    const explicitLoanFlags = itemFieldValues(item, ['isLoan', 'isLoanItem', 'isLoanPlayer']);
+    for (const value of explicitLoanFlags) {
+      if (typeof value === 'function' || value === undefined || value === null || value === '') continue;
+      const bool = boolFromAny(value);
+      if (bool === true) return true;
+    }
+    for (const value of itemFieldValues(item, ['loans'])) {
       if (typeof value === 'function' || value === undefined || value === null || value === '') continue;
       const bool = boolFromAny(value);
       if (bool === true) return true;
       if (bool === false) continue;
       const num = Number(value);
       if (Number.isFinite(num) && num > 0) return true;
-      if (typeof value === 'string' && /\bloan\b/i.test(value)) return true;
     }
     return false;
   }
@@ -5702,7 +5707,7 @@
       URL.revokeObjectURL(url);
       log('Log download created');
     });
-    log('Ready. Keep FSU/Enhancer enabled before starting.');
+    log(`Ready v${W[APP_KEY]?.version || 'unknown'}. Keep FSU/Enhancer enabled before starting.`);
   }
 
   state.bootTimer = setInterval(() => {
