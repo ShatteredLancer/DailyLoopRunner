@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.65
+// @version      0.2.66
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -334,7 +334,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.65',
+    version: '0.2.66',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1252,6 +1252,7 @@
     const rating = Number(item?.rating || 0);
     if (spec.minRating !== undefined && rating < Number(spec.minRating)) return false;
     if (spec.maxRating !== undefined && rating > Number(spec.maxRating)) return false;
+    if (spec.blockTradeable === true && isTradeable(item)) return false;
     if (spec.special === true && !isSpecial(item)) return false;
     if (spec.special === false && isSpecial(item)) return false;
     if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
@@ -2614,6 +2615,7 @@
     if (spec.playerOnly && !isPlayer(item)) reasons.push('not-player');
     if (spec.minRating !== undefined && rating < Number(spec.minRating)) reasons.push(`rating-under-${Number(spec.minRating)}`);
     if (spec.maxRating !== undefined && rating > Number(spec.maxRating)) reasons.push(`rating-over-${Number(spec.maxRating)}`);
+    if (spec.blockTradeable === true && isTradeable(item)) reasons.push('tradeable-blocked');
     if (spec.special === true && !isSpecial(item)) reasons.push('not-special');
     if (spec.special === false && isSpecial(item)) reasons.push('special-blocked');
     if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) reasons.push('special-blocked');
@@ -4481,6 +4483,7 @@
       priorityPiles,
       requirements: (loopDef.requirements || []).map((requirement) => ({
         ...requirement,
+        blockTradeable: requirement.blockTradeable !== undefined ? requirement.blockTradeable : loopDef.blockTradeable,
         priorityPiles,
       })),
     };
@@ -4748,7 +4751,7 @@
   async function fillSbcSquadInventoryFirst(loopDef, opened, options = {}) {
     await refreshInventoryCaches(`${loopDef.name} inventory-first fill`, { includePacks: false, quiet: true });
     const expectedPlayerCount = expectedSbcPlayerCount(loopDef, opened.challenge);
-    const selection = selectInventoryPlayers(loopDef.requirements, loopDef.priorityPiles);
+    const selection = selectLoopInventoryPlayers(loopDef);
     if (options.dryRun) {
       logDryRunSelection(`${loopDef.name} inventory-first`, selection, { maxItems: 20, priorityPiles: loopDef.priorityPiles });
     } else {
