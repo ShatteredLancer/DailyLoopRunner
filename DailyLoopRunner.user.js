@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.62
+// @version      0.2.63
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -59,6 +59,8 @@
     priorityStoragePlayers: true,
     silverBronzePrioritizeNormal: true,
     goldRange: [75, 83],
+    lockedItemIds: [],
+    lockedDefinitionIds: [],
     detected: false,
     source: 'compat-defaults',
   });
@@ -332,7 +334,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.62',
+    version: '0.2.63',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1445,6 +1447,89 @@
     return [];
   }
 
+  function uniqueNumberList(values = []) {
+    return values
+      .map(Number)
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .filter((value, index, arr) => arr.indexOf(value) === index);
+  }
+
+  function isLikelyLockedPlayerPath(path = '') {
+    const text = String(path || '');
+    if (!text || /unlock/i.test(text)) return false;
+    const compact = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (/((lock|locked)players?|players?(lock|locked)|(lock|locked)cards?|cards?(lock|locked)|(lock|locked)items?|items?(lock|locked)|protectedplayers?|protectedcards?|protecteditems?)/i.test(compact)) {
+      return true;
+    }
+    if (/(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)/i.test(text)) {
+      return /player|card|item|resource|definition|asset|info[._\-\s]*lock|(^|[._\-\s])lock([._\-\s]|$)/i.test(text);
+    }
+    return false;
+  }
+
+  function isLikelyLockedIdValuePath(path = '', key = '') {
+    if (/^\d+$/.test(String(key || ''))) return true;
+    if (/^(id|itemId|itemid|resourceId|resourceid|cardId|cardid|playerId|playerid|definitionId|definitionid|defId|defid|assetId|assetid|baseId|baseid)$/i.test(String(key || ''))) {
+      return true;
+    }
+    return /(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)$/i.test(String(path || ''));
+  }
+
+  function addLockedPlayerValue(result, value, path = '', key = '') {
+    const nums = numberListFromAny(value);
+    if (!nums.length) return;
+    const target = /definition|defid|asset|base/i.test(key || path)
+      ? result.definitionIds
+      : result.itemIds;
+    nums.forEach((num) => target.push(num));
+  }
+
+  function collectLockedPlayerIds(value, path = '', result = { itemIds: [], definitionIds: [], sources: [] }, depth = 0, seen = new WeakSet(), inLockContext = false) {
+    if (value === null || value === undefined || depth > 6) return result;
+    const lockContext = inLockContext || isLikelyLockedPlayerPath(path);
+    if (!isInspectableObject(value)) {
+      if (lockContext && isLikelyLockedIdValuePath(path)) {
+        addLockedPlayerValue(result, value, path);
+        if (!result.sources.includes(path)) result.sources.push(path);
+      }
+      return result;
+    }
+    if (seen.has(value)) return result;
+    seen.add(value);
+
+    const keys = Array.isArray(value) ? value.map((_, index) => String(index)) : Object.keys(value);
+    for (const key of keys.slice(0, 250)) {
+      let child;
+      try { child = value[key]; } catch { continue; }
+      const nextPath = path ? `${path}.${key}` : key;
+      const childLockContext = lockContext || isLikelyLockedPlayerPath(nextPath);
+      if (childLockContext && !isInspectableObject(child) && isLikelyLockedIdValuePath(nextPath, key)) {
+        addLockedPlayerValue(result, child, nextPath, key);
+        if (!result.sources.includes(nextPath)) result.sources.push(nextPath);
+      } else if (childLockContext && isInspectableObject(child)) {
+        ['id', 'itemId', 'itemid', 'resourceId', 'resourceid', 'cardId', 'cardid', 'playerId', 'playerid'].forEach((field) => {
+          addLockedPlayerValue(result, safeReadField(child, field), nextPath, field);
+        });
+        ['definitionId', 'definitionid', 'defId', 'defid', 'assetId', 'assetid', 'baseId', 'baseid'].forEach((field) => {
+          addLockedPlayerValue(result, safeReadField(child, field), nextPath, field);
+        });
+      }
+      if (isInspectableObject(child)) {
+        collectLockedPlayerIds(child, nextPath, result, depth + 1, seen, childLockContext);
+      }
+    }
+    return result;
+  }
+
+  function normalizeLockedPlayerIds(raw, source = '') {
+    const result = collectLockedPlayerIds(raw, source || 'lock');
+    return {
+      itemIds: uniqueNumberList(result.itemIds),
+      definitionIds: uniqueNumberList(result.definitionIds),
+      sources: [...new Set(result.sources || [])],
+    };
+  }
+
   function normalizeGoldRange(settings, rows) {
     const direct = numberListFromAny(settings.goldRange || settings.goldenRange || settings.goldRatingRange).slice(0, 2);
     if (direct.length === 2) return direct.sort((a, b) => a - b);
@@ -1488,6 +1573,13 @@
       matched = true;
     }
 
+    const lockedPlayers = normalizeLockedPlayerIds(raw, source);
+    if (lockedPlayers.itemIds.length || lockedPlayers.definitionIds.length) {
+      settings.lockedItemIds = lockedPlayers.itemIds;
+      settings.lockedDefinitionIds = lockedPlayers.definitionIds;
+      matched = true;
+    }
+
     settings.goldRange = normalizeGoldRange(raw, rows);
     if (!matched && !rows.some((entry) => /fsu|enhancer|sbc|ignore|rarity|untrad|league|evo|storage/i.test(entry.path))) {
       return null;
@@ -1498,6 +1590,24 @@
   function likelyFsuStorageKey(key, value) {
     const text = `${key} ${typeof value === 'string' ? value.slice(0, 400) : ''}`;
     return /fsu|enhancer|sbc|ignore|rarity|untrad|league|evo|evolution|storage|golden|player.*range/i.test(text);
+  }
+
+  function mergeLockedPlayersIntoSettings(settings, locked, sourceLabel = '') {
+    const base = settings || {
+      ...FSU_COMPAT_DEFAULTS,
+      excludedLeagueIds: [...FSU_COMPAT_DEFAULTS.excludedLeagueIds],
+      goldRange: [...FSU_COMPAT_DEFAULTS.goldRange],
+      lockedItemIds: [],
+      lockedDefinitionIds: [],
+    };
+    if (!locked || (!locked.itemIds?.length && !locked.definitionIds?.length)) return base;
+    base.lockedItemIds = uniqueNumberList([...(base.lockedItemIds || []), ...(locked.itemIds || [])]);
+    base.lockedDefinitionIds = uniqueNumberList([...(base.lockedDefinitionIds || []), ...(locked.definitionIds || [])]);
+    base.detected = true;
+    if (sourceLabel) {
+      base.source = base.source && base.source !== 'compat-defaults' ? `${base.source}+${sourceLabel}` : sourceLabel;
+    }
+    return base;
   }
 
   function readFsuSettingsFromStorage(storage, label) {
@@ -1579,12 +1689,88 @@
     return null;
   }
 
+  function readFsuLockedPlayersFromWindow() {
+    const known = [
+      ['window.info.lock', () => W.info?.lock],
+      ['window.info.lockedPlayers', () => W.info?.lockedPlayers],
+      ['window.info.lockPlayers', () => W.info?.lockPlayers],
+      ['window.info.playerLock', () => W.info?.playerLock],
+      ['window.info.protectedPlayers', () => W.info?.protectedPlayers],
+      ['window.state.page.info.lock', () => W.state?.page?.info?.lock],
+    ];
+    const combined = { itemIds: [], definitionIds: [], sources: [] };
+    for (const [path, getter] of known) {
+      let value;
+      try { value = getter(); } catch { value = null; }
+      const locked = normalizeLockedPlayerIds(value, path);
+      combined.itemIds.push(...locked.itemIds);
+      combined.definitionIds.push(...locked.definitionIds);
+      combined.sources.push(...locked.sources);
+    }
+
+    const rootNames = ['FSU', 'fsu', 'FUTEnhancer', 'FCEnhancer', 'Enhancer', 'enhancer', '__FSU', '__FUTEnhancer', '__FCEnhancer'];
+    for (const name of rootNames) {
+      try {
+        if (!isInspectableObject(W[name])) continue;
+        const locked = normalizeLockedPlayerIds(W[name], `window.${name}`);
+        combined.itemIds.push(...locked.itemIds);
+        combined.definitionIds.push(...locked.definitionIds);
+        combined.sources.push(...locked.sources);
+      } catch { }
+    }
+
+    return {
+      itemIds: uniqueNumberList(combined.itemIds),
+      definitionIds: uniqueNumberList(combined.definitionIds),
+      sources: [...new Set(combined.sources)].slice(0, 8),
+    };
+  }
+
+  function readFsuLockedPlayersFromStorage(storage, label) {
+    const combined = { itemIds: [], definitionIds: [], sources: [] };
+    if (!storage) return combined;
+    let length = 0;
+    try { length = Number(storage.length || 0); } catch { }
+    for (let index = 0; index < Math.min(length, 250); index++) {
+      let key = '';
+      let value = null;
+      try {
+        key = storage.key(index);
+        value = storage.getItem(key);
+      } catch { continue; }
+      if (!key || !isLikelyLockedPlayerPath(key)) continue;
+      const parsed = parseJsonMaybe(value);
+      const locked = normalizeLockedPlayerIds(parsed || { [key]: value }, `${label}:${key}`);
+      combined.itemIds.push(...locked.itemIds);
+      combined.definitionIds.push(...locked.definitionIds);
+      combined.sources.push(...locked.sources);
+    }
+    return {
+      itemIds: uniqueNumberList(combined.itemIds),
+      definitionIds: uniqueNumberList(combined.definitionIds),
+      sources: [...new Set(combined.sources)].slice(0, 8),
+    };
+  }
+
+  function readFsuLockedPlayers() {
+    const windowLocked = readFsuLockedPlayersFromWindow();
+    const localLocked = readFsuLockedPlayersFromStorage(window.localStorage, 'localStorage');
+    const sessionLocked = readFsuLockedPlayersFromStorage(window.sessionStorage, 'sessionStorage');
+    return {
+      itemIds: uniqueNumberList([...(windowLocked.itemIds || []), ...(localLocked.itemIds || []), ...(sessionLocked.itemIds || [])]),
+      definitionIds: uniqueNumberList([...(windowLocked.definitionIds || []), ...(localLocked.definitionIds || []), ...(sessionLocked.definitionIds || [])]),
+      sources: [...new Set([...(windowLocked.sources || []), ...(localLocked.sources || []), ...(sessionLocked.sources || [])])].slice(0, 8),
+    };
+  }
+
   function detectFsuSettings() {
-    return state.fsuSettingsOverride ||
+    const settings = state.fsuSettingsOverride ||
       readFsuSettingsFromWindow() ||
       readFsuSettingsFromStorage(window.localStorage, 'localStorage') ||
       readFsuSettingsFromStorage(window.sessionStorage, 'sessionStorage') ||
       { ...FSU_COMPAT_DEFAULTS, excludedLeagueIds: [...FSU_COMPAT_DEFAULTS.excludedLeagueIds], goldRange: [...FSU_COMPAT_DEFAULTS.goldRange] };
+    const locked = readFsuLockedPlayers();
+    return mergeLockedPlayersIntoSettings(settings, locked, locked.itemIds.length || locked.definitionIds.length ? 'locked-players' : '');
   }
 
   function getFsuSettings(options = {}) {
@@ -1616,6 +1802,7 @@
   function formatFsuSettings(settings = getFsuSettings()) {
     const leagueText = settings.excludedLeagueIds?.length ? settings.excludedLeagueIds.join('/') : 'none';
     const range = settings.goldRange || FSU_COMPAT_DEFAULTS.goldRange;
+    const lockedCount = uniqueNumberList([...(settings.lockedItemIds || []), ...(settings.lockedDefinitionIds || [])]).length;
     return [
       `source:${settings.source}${settings.detected ? '' : ' (compat defaults)'}`,
       `onlyUntradeable:${onOff(settings.onlyUntradeable)}`,
@@ -1626,6 +1813,7 @@
       `nonSpecialFirst:${onOff(settings.priorityNonSpecialPlayers)}`,
       `storageFirst:${onOff(settings.priorityStoragePlayers)}`,
       `silverBronzeNormal:${onOff(settings.silverBronzePrioritizeNormal)}`,
+      `locked:${lockedCount}`,
     ].join('; ');
   }
 
@@ -1660,6 +1848,24 @@
     return 0;
   }
 
+  function itemIdentifierNumbers(item, keys = []) {
+    return uniqueNumberList(itemFieldValues(item, keys));
+  }
+
+  function isFsuLockedItem(item, settings = getFsuSettings()) {
+    const lockedItemIds = new Set((settings.lockedItemIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
+    const lockedDefinitionIds = new Set((settings.lockedDefinitionIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
+    if (!lockedItemIds.size && !lockedDefinitionIds.size) return false;
+
+    const itemIds = itemIdentifierNumbers(item, ['id', 'itemId', 'resourceId', 'cardId', 'playerId']);
+    const definitionIds = itemIdentifierNumbers(item, ['definitionId', 'defId', 'assetId', 'baseId']);
+    if (itemIds.some((id) => lockedItemIds.has(id))) return true;
+    if (definitionIds.some((id) => lockedDefinitionIds.has(id))) return true;
+
+    const allIds = uniqueNumberList([...itemIds, ...definitionIds]);
+    return allIds.some((id) => lockedItemIds.has(id) || lockedDefinitionIds.has(id));
+  }
+
   function isEvolutionItem(item) {
     try { if (item?.isEvolution?.()) return true; } catch { }
     try { if (item?.isEvo?.()) return true; } catch { }
@@ -1685,6 +1891,7 @@
   function getFsuRejectReasons(item, spec = {}, settings = getFsuSettings()) {
     const reasons = [];
     if (!isPlayer(item)) return reasons;
+    if (isFsuLockedItem(item, settings)) reasons.push('fsu-locked-player');
     if (settings.onlyUntradeable && isTradeable(item)) reasons.push('fsu-only-untradeable');
     if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push('fsu-exclude-evolution');
     const excludedLeagueIds = (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0);
@@ -3025,6 +3232,7 @@
       if (reasonList.some((reason) => String(reason).startsWith('required-totw-min-'))) value -= 950;
       if (reasonList.includes('special-blocked')) value -= 800;
       if (reasonList.includes('tradeable-blocked')) value -= 700;
+      if (reasonList.includes('fsu-locked-player')) value -= 680;
       if (reasonList.some((reason) => reason.startsWith('rating-over-'))) value -= 600;
       if (isSbcSpecialItem(item)) value -= 300;
       if (protectedIds.has(Number(item?.id || 0))) value -= 900;
@@ -3102,6 +3310,7 @@
       reasons.some((reason) => String(reason).startsWith('required-totw-min-')) ||
       reasons.includes('special-blocked') ||
       reasons.includes('tradeable-blocked') ||
+      reasons.includes('fsu-locked-player') ||
       reasons.includes('protected-id') ||
       reasons.includes('protected-def') ||
       reasons.includes('concept') ||
@@ -3119,6 +3328,7 @@
       if (reasonList.includes('special-blocked')) value -= 900;
       if (reasonList.some((reason) => reason.startsWith('rating-over-'))) value -= 800;
       if (reasonList.includes('tradeable-blocked')) value -= 700;
+      if (reasonList.includes('fsu-locked-player')) value -= 690;
       if (reasonList.includes('protected-id') || reasonList.includes('protected-def')) value -= 650;
       if (reasonList.includes('concept')) value -= 640;
       if (reasonList.includes('academy')) value -= 630;
@@ -3704,6 +3914,7 @@
       !(reasons || []).some((reason) =>
         String(reason).startsWith('required-totw') ||
         String(reason).startsWith('rating-over-') ||
+        String(reason).startsWith('fsu-') ||
         ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'academy', 'active-trade'].includes(String(reason))
       )
     ).length;
@@ -3777,6 +3988,9 @@
       }
       if (reasons.includes('fsu-rarity-player-off')) {
         hints.push(`${prefix}: FSU Use Rarity Player is off; replace this special/rarity card`);
+      }
+      if (reasons.includes('fsu-locked-player')) {
+        hints.push(`${prefix}: locked in FSU Lock player; unlock it or replace this card`);
       }
       if (reasons.includes('concept')) {
         hints.push(`${prefix}: replace concept card`);
