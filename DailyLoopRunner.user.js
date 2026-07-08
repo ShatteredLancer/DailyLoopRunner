@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.64
+// @version      0.2.65
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -334,7 +334,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.64',
+    version: '0.2.65',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2757,14 +2757,19 @@
             submissionIds.add(Number(resolved.id));
           }
         } else {
-          picked = candidates
-            .filter((item) => !submissionIds.has(Number(item?.id || 0)))
-            .slice(0, need)
-            .map((item) => ({ signal: null, item }));
-          for (const pickedItem of picked) {
-            selectedIds.add(Number(pickedItem.item.id));
-            selectedDefinitionIds.add(Number(pickedItem.item.definitionId || 0));
-            submissionIds.add(Number(pickedItem.item.id));
+          for (const item of candidates) {
+            if (picked.length >= need) break;
+            const id = Number(item?.id || 0);
+            const definitionId = Number(item?.definitionId || 0);
+            if (id && submissionIds.has(id)) continue;
+            if (id && selectedIds.has(id)) continue;
+            if (definitionId && selectedDefinitionIds.has(definitionId)) continue;
+            picked.push({ signal: null, item });
+            if (id) {
+              selectedIds.add(id);
+              submissionIds.add(id);
+            }
+            if (definitionId) selectedDefinitionIds.add(definitionId);
           }
         }
 
