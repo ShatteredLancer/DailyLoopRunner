@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.56
+// @version      0.2.57
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -325,7 +325,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.56',
+    version: '0.2.57',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1263,6 +1263,76 @@
     return false;
   }
 
+  function callItemBooleanMethod(item, methodNames = []) {
+    for (const name of methodNames) {
+      try {
+        if (typeof item?.[name] === 'function' && item[name]()) return true;
+      } catch { }
+    }
+    return false;
+  }
+
+  function itemFieldValues(item, keys = []) {
+    const holders = [item, item?._data, item?._staticData, item?.assetData, item?._assetData];
+    const values = [];
+    for (const holder of holders) {
+      if (!holder || typeof holder !== 'object') continue;
+      for (const key of keys) values.push(holder[key]);
+    }
+    return values;
+  }
+
+  function isLoanItem(item) {
+    if (callItemBooleanMethod(item, ['isLoan', 'isLoanItem', 'isLoanPlayer'])) return true;
+    for (const value of itemFieldValues(item, ['loans', 'loan', 'loanCount', 'loanContracts', 'remainingLoans', 'isLoan'])) {
+      if (typeof value === 'function' || value === undefined || value === null || value === '') continue;
+      const bool = boolFromAny(value);
+      if (bool === true) return true;
+      if (bool === false) continue;
+      const num = Number(value);
+      if (Number.isFinite(num) && num !== -1) return true;
+      if (typeof value === 'string' && /\bloan\b/i.test(value)) return true;
+    }
+    return false;
+  }
+
+  function isLimitedUseItem(item) {
+    if (isLoanItem(item)) return true;
+    if (callItemBooleanMethod(item, ['isLimitedUse'])) return true;
+    for (const value of itemFieldValues(item, ['limitedUse', 'isLimitedUse', 'limitedUses'])) {
+      if (typeof value === 'function' || value === undefined || value === null || value === '') continue;
+      const bool = boolFromAny(value);
+      if (bool === true) return true;
+      if (bool === false) continue;
+      const num = Number(value);
+      if (Number.isFinite(num) && num > 0) return true;
+    }
+    return false;
+  }
+
+  function isConceptItem(item) {
+    if (callItemBooleanMethod(item, ['isConcept', 'isConceptItem', 'isConceptPlayer'])) return true;
+    for (const value of itemFieldValues(item, [
+      'concept',
+      'isConcept',
+      'conceptItem',
+      'conceptPlayer',
+      'isConceptItem',
+      'isConceptPlayer',
+      'itemState',
+      'state',
+      'status',
+      'cardType',
+    ])) {
+      if (typeof value === 'function' || value === undefined || value === null || value === '') continue;
+      const bool = boolFromAny(value);
+      if (bool === true) return true;
+      if (bool === false) continue;
+      if (typeof value === 'string' && /\bconcept\b/i.test(value)) return true;
+    }
+    return false;
+  }
+
   function boolFromAny(value) {
     if (typeof value === 'boolean') return value;
     if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
@@ -1747,8 +1817,9 @@
   function isSbcUsablePlayer(item, options = {}) {
     if (!isPlayer(item)) return false;
     if (options.protectHighGold && isProtectedHighGold(item)) return false;
-    if (Number(item?.loans) !== -1) return false;
-    try { if (item?.isLimitedUse?.()) return false; } catch { }
+    if (isConceptItem(item)) return false;
+    if (isLoanItem(item)) return false;
+    if (isLimitedUseItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
@@ -2260,8 +2331,9 @@
     const reasons = [];
     if (!isPlayer(item)) reasons.push('not-player');
     if (options.protectHighGold && isProtectedHighGold(item)) reasons.push('protected-82-plus');
-    if (Number(item?.loans) !== -1) reasons.push('loan-or-limited');
-    try { if (item?.isLimitedUse?.()) reasons.push('limited-use'); } catch { }
+    if (isConceptItem(item)) reasons.push('concept');
+    if (isLoanItem(item)) reasons.push('loan-or-limited');
+    if (isLimitedUseItem(item)) reasons.push('limited-use');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) reasons.push('active-trade');
@@ -2695,6 +2767,9 @@
       `id:${Number(item?.id || 0) || '?'}`,
       `def:${Number(item?.definitionId || 0) || '?'}`,
     ];
+    if (isConceptItem(item)) parts.push('concept');
+    if (isLoanItem(item)) parts.push('loan');
+    if (isLimitedUseItem(item)) parts.push('limited');
     if (groups.length) parts.push(`groups:${groups.join('/')}`);
     return parts.join(' | ');
   }
@@ -2929,8 +3004,9 @@
   function isEligibleNormalRepairFiller(item, loopDef = {}) {
     if (!isPlayer(item)) return false;
     if (isSbcSpecialItem(item)) return false;
-    if (Number(item?.loans ?? -1) !== -1) return false;
-    try { if (item?.isLimitedUse?.()) return false; } catch { }
+    if (isConceptItem(item)) return false;
+    if (isLoanItem(item)) return false;
+    if (isLimitedUseItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
@@ -2945,13 +3021,16 @@
     return true;
   }
 
-  function getEligibleNormalRepairEntries(loopDef = {}, usedIds = new Set()) {
+  function getEligibleNormalRepairEntries(loopDef = {}, usedIds = new Set(), options = {}) {
     const entries = [];
     const seen = new Set();
+    const usedDefinitionIds = options.usedDefinitionIds || new Set();
     for (const pileName of ['storage', 'club', 'unassigned']) {
       for (const item of getPileItemsByName(pileName)) {
         const id = Number(item?.id || 0);
         if (!id || seen.has(id) || usedIds.has(id)) continue;
+        const definitionId = Number(item?.definitionId || 0);
+        if (definitionId && usedDefinitionIds.has(definitionId)) continue;
         seen.add(id);
         if (isEligibleNormalRepairFiller(item, loopDef)) entries.push({ item, pileName });
       }
@@ -2989,6 +3068,10 @@
       reasons.includes('tradeable-blocked') ||
       reasons.includes('protected-id') ||
       reasons.includes('protected-def') ||
+      reasons.includes('concept') ||
+      reasons.includes('loan') ||
+      reasons.includes('limited-use') ||
+      reasons.includes('academy') ||
       reasons.some((reason) => reason.startsWith('rating-over-')) ||
       getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }).length > 0;
   }
@@ -3003,6 +3086,8 @@
       if (reasonList.some((reason) => reason.startsWith('rating-over-'))) value -= 800;
       if (reasonList.includes('tradeable-blocked')) value -= 700;
       if (reasonList.includes('protected-id') || reasonList.includes('protected-def')) value -= 650;
+      if (reasonList.includes('concept') || reasonList.includes('loan') || reasonList.includes('limited-use')) value -= 640;
+      if (reasonList.includes('academy')) value -= 630;
       if (isSbcSpecialItem(item)) value -= 500;
       return value;
     };
@@ -3056,7 +3141,12 @@
       plannedInspection.entries.filter((entry) => isRequiredTotwRepairTarget(loopDef, entry, keepTotwId))
     );
 
-    const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds));
+    const targetIndexes = new Set(targets.map(({ index }) => Number(index)));
+    const usedDefinitionIds = new Set(players
+      .filter((item, index) => !targetIndexes.has(index))
+      .map((item) => Number(item?.definitionId || 0))
+      .filter(Boolean));
+    const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds, { usedDefinitionIds }));
     for (const target of targets) {
       const filler = fillers.shift();
       if (!filler) {
@@ -3071,6 +3161,8 @@
       }
       players[target.index] = filler.item;
       usedIds.add(Number(filler.item?.id || 0));
+      const fillerDefinitionId = Number(filler.item?.definitionId || 0);
+      if (fillerDefinitionId) usedDefinitionIds.add(fillerDefinitionId);
       changes.push({
         index: target.index,
         from: target.item,
@@ -3112,7 +3204,7 @@
       .filter((item, index) => !targetIndexes.has(index))
       .map((item) => Number(item?.definitionId || 0))
       .filter(Boolean));
-    const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds));
+    const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds, { usedDefinitionIds }));
     const changes = [];
 
     for (const target of targets) {
@@ -3221,12 +3313,16 @@
       .sort((a, b) =>
         Number(a?.item?.rating || 0) - Number(b?.item?.rating || 0) ||
         Number(b?.index || 0) - Number(a?.index || 0)
-      );
+    );
     if (!targets.length) return null;
 
-    const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds));
     for (const target of targets) {
       const targetRating = Number(target.item?.rating || 0) || 0;
+      const usedDefinitionIds = new Set((inspection.items || [])
+        .filter((item, index) => index !== target.index)
+        .map((item) => Number(item?.definitionId || 0))
+        .filter(Boolean));
+      const fillers = sortNormalRepairEntries(getEligibleNormalRepairEntries(loopDef, usedIds, { usedDefinitionIds }));
       const filler = fillers.find(({ item }) => Number(item?.rating || 0) > targetRating);
       if (!filler) continue;
       const players = [...inspection.items];
@@ -3501,8 +3597,14 @@
       allowSpecial: requiredSpecialCount > 0 && specialIndex <= requiredSpecialCount,
     };
 
-    if (Number(item?.loans ?? -1) !== -1) reasons.push('loan');
+    if (isConceptItem(item)) reasons.push('concept');
+    if (isLoanItem(item)) reasons.push('loan');
+    if (isLimitedUseItem(item)) reasons.push('limited-use');
+    try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
+    if (!isInactiveTrade(item)) {
+      if (!reasons.includes('active-trade')) reasons.push('active-trade');
+    }
     if (protectedIds.has(Number(item?.id || 0))) reasons.push('protected-id');
     if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) reasons.push('protected-def');
     if (
@@ -3554,7 +3656,7 @@
       !(reasons || []).some((reason) =>
         String(reason).startsWith('required-totw') ||
         String(reason).startsWith('rating-over-') ||
-        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'loan', 'active-trade'].includes(String(reason))
+        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'loan', 'limited-use', 'academy', 'active-trade'].includes(String(reason))
       )
     ).length;
     const missingRequirements = [];
@@ -3631,6 +3733,15 @@
       if (reasons.includes('loan')) {
         hints.push(`${prefix}: replace loan card`);
       }
+      if (reasons.includes('concept')) {
+        hints.push(`${prefix}: replace concept card`);
+      }
+      if (reasons.includes('limited-use')) {
+        hints.push(`${prefix}: replace limited-use card`);
+      }
+      if (reasons.includes('academy')) {
+        hints.push(`${prefix}: replace academy/evolution locked card`);
+      }
       if (reasons.includes('active-trade')) {
         hints.push(`${prefix}: remove active transfer/listed card`);
       }
@@ -3673,6 +3784,51 @@
     fail(`${loopDef.name}: protected squad item(s) detected; stop before submit: ${summary}`);
   }
 
+  function compactModalText(text = '') {
+    return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+  }
+
+  function findSbcSubmitErrorModal() {
+    const modals = Array.from(document.querySelectorAll([
+      '.view-modal-container',
+      '.ut-modal-view',
+      '.ea-dialog',
+      '.modal-content',
+      '.ut-dialog',
+    ].join(',')));
+    for (const modal of modals) {
+      const text = compactModalText(modal.textContent || '');
+      if (!text) continue;
+      if (
+        /Ineligible Squad/i.test(text) ||
+        /Concept or Loan Players/i.test(text) ||
+        /cannot be submitted in Squad Building Challenges/i.test(text) ||
+        /Squads containing .*Loan/i.test(text)
+      ) {
+        return { modal, text };
+      }
+    }
+    return null;
+  }
+
+  function dismissSubmitErrorModal(error) {
+    const modal = error?.modal;
+    if (!modal) return false;
+    const buttons = Array.from(modal.querySelectorAll('button'));
+    const button = buttons.find((btn) => /^(ok|okay|确定|確定)$/i.test(String(btn.textContent || '').trim())) ||
+      buttons.find((btn) => !btn.disabled);
+    if (!button) return false;
+    simulateClick(button);
+    return true;
+  }
+
+  function failIfSbcSubmitError(label = 'SBC submit') {
+    const error = findSbcSubmitErrorModal();
+    if (!error) return false;
+    dismissSubmitErrorModal(error);
+    fail(`${label}: submit blocked by EA modal: ${error.text}`);
+  }
+
   async function fillBronzeUpgradeSquad() {
     await fillSbcSquad('Bronze Upgrade');
   }
@@ -3694,6 +3850,7 @@
     const start = Date.now();
     while (Date.now() - start < 20000) {
       stopPoint();
+      failIfSbcSubmitError(label);
       const btn = findClaimRewardsButton();
       if (btn) {
         log(`${label}: claiming rewards`);
@@ -3715,6 +3872,7 @@
     log(`Submitting SBC: ${set.name}`);
     simulateClick(submitBtn);
     await sleep(900);
+    failIfSbcSubmitError(set.name);
 
     const confirm =
       document.querySelector('.view-modal-container button.call-to-action:not(.disabled)') ||
@@ -3737,6 +3895,8 @@
     if (confirm && confirm !== submitBtn) {
       log(`Confirming SBC submit: ${confirm.textContent.trim() || confirm.className}`);
       simulateClick(confirm);
+      await sleep(900);
+      failIfSbcSubmitError(set.name);
     }
 
     await claimSbcRewardsIfPresent(set.name);
