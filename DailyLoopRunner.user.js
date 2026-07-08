@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.60
+// @version      0.2.61
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -332,7 +332,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.60',
+    version: '0.2.61',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1841,8 +1841,6 @@
     if (!isPlayer(item)) return false;
     if (options.protectHighGold && isProtectedHighGold(item)) return false;
     if (isConceptItem(item)) return false;
-    if (isLoanItem(item)) return false;
-    if (isLimitedUseItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
@@ -2357,8 +2355,6 @@
     if (!isPlayer(item)) reasons.push('not-player');
     if (options.protectHighGold && isProtectedHighGold(item)) reasons.push('protected-82-plus');
     if (isConceptItem(item)) reasons.push('concept');
-    if (isLoanItem(item)) reasons.push('loan-or-limited');
-    if (isLimitedUseItem(item)) reasons.push('limited-use');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) reasons.push('active-trade');
@@ -2796,8 +2792,6 @@
       `def:${Number(item?.definitionId || 0) || '?'}`,
     ];
     if (isConceptItem(item)) parts.push('concept');
-    if (isLoanItem(item)) parts.push('loan');
-    if (isLimitedUseItem(item)) parts.push('limited');
     if (groups.length) parts.push(`groups:${groups.join('/')}`);
     return parts.join(' | ');
   }
@@ -3033,8 +3027,6 @@
     if (!isPlayer(item)) return false;
     if (isSbcSpecialItem(item)) return false;
     if (isConceptItem(item)) return false;
-    if (isLoanItem(item)) return false;
-    if (isLimitedUseItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
@@ -3097,8 +3089,6 @@
       reasons.includes('protected-id') ||
       reasons.includes('protected-def') ||
       reasons.includes('concept') ||
-      reasons.includes('loan') ||
-      reasons.includes('limited-use') ||
       reasons.includes('academy') ||
       reasons.some((reason) => reason.startsWith('rating-over-')) ||
       getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }).length > 0;
@@ -3114,7 +3104,7 @@
       if (reasonList.some((reason) => reason.startsWith('rating-over-'))) value -= 800;
       if (reasonList.includes('tradeable-blocked')) value -= 700;
       if (reasonList.includes('protected-id') || reasonList.includes('protected-def')) value -= 650;
-      if (reasonList.includes('concept') || reasonList.includes('loan') || reasonList.includes('limited-use')) value -= 640;
+      if (reasonList.includes('concept')) value -= 640;
       if (reasonList.includes('academy')) value -= 630;
       if (isSbcSpecialItem(item)) value -= 500;
       return value;
@@ -3642,8 +3632,6 @@
     };
 
     if (isConceptItem(item)) reasons.push('concept');
-    if (isLoanItem(item)) reasons.push('loan');
-    if (isLimitedUseItem(item)) reasons.push('limited-use');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) {
@@ -3700,7 +3688,7 @@
       !(reasons || []).some((reason) =>
         String(reason).startsWith('required-totw') ||
         String(reason).startsWith('rating-over-') ||
-        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'loan', 'limited-use', 'academy', 'active-trade'].includes(String(reason))
+        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'academy', 'active-trade'].includes(String(reason))
       )
     ).length;
     const missingRequirements = [];
@@ -3774,14 +3762,8 @@
       if (reasons.includes('fsu-rarity-player-off')) {
         hints.push(`${prefix}: FSU Use Rarity Player is off; replace this special/rarity card`);
       }
-      if (reasons.includes('loan')) {
-        hints.push(`${prefix}: replace loan card`);
-      }
       if (reasons.includes('concept')) {
         hints.push(`${prefix}: replace concept card`);
-      }
-      if (reasons.includes('limited-use')) {
-        hints.push(`${prefix}: replace limited-use card`);
       }
       if (reasons.includes('academy')) {
         hints.push(`${prefix}: replace academy/evolution locked card`);
