@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.55
+// @version      0.2.56
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -210,6 +210,25 @@
       openRewardPacks: false,
     },
     {
+      id: 'auto-totw-upgrade',
+      name: '84+ TOTW Upgrade Loop',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
+      rewardPackIds: [20707, 20441],
+      rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      allowMultipleCompletions: true,
+      maxSubmittedRating: 85,
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      blockSpecial: true,
+      blockTradeable: true,
+      openRewardPacks: true,
+      forceOpenRewardPacks: true,
+      assumeTotwRewardPack: true,
+    },
+    {
       id: '84x10-mvp',
       name: '84x10 MVP (1 run)',
       strategy: 'fillAndVerifySbc',
@@ -306,7 +325,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.55',
+    version: '0.2.56',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -732,15 +751,18 @@
     updateLoopControls();
   }
 
-  function getEditorLoopStrategy() {
+  function getEditorLoopDef() {
     const selectedId = document.querySelector('#bronze-loop-select')?.value || getLoopDefs()[0]?.id || LOOP_DEFS[0].id;
-    if (selectedId !== 'custom') return getLoopDefById(selectedId).strategy;
+    if (selectedId !== 'custom') return getLoopDefById(selectedId);
     try {
-      const parsed = JSON.parse(document.querySelector('#bronze-loop-json')?.value || '{}');
-      return parsed.strategy || '';
+      return JSON.parse(document.querySelector('#bronze-loop-json')?.value || '{}');
     } catch {
-      return '';
+      return {};
     }
+  }
+
+  function getEditorLoopStrategy() {
+    return getEditorLoopDef()?.strategy || '';
   }
 
   function updateLoopControls() {
@@ -748,7 +770,9 @@
     const roundsLabel = document.querySelector('#bronze-loop-rounds-label');
     const roundsInput = document.querySelector('#bronze-loop-rounds');
     if (!roundsLabel || !roundsInput) return;
-    const showRounds = ['validationBronzeUpgrade', 'provisionPackDualCrafting'].includes(getEditorLoopStrategy());
+    const editorLoop = getEditorLoopDef();
+    const showRounds = editorLoop.useRoundsAsCompletions === true ||
+      ['validationBronzeUpgrade', 'provisionPackDualCrafting'].includes(editorLoop.strategy);
     if (roundsRow) roundsRow.style.display = showRounds ? '' : 'none';
     roundsLabel.style.display = showRounds ? '' : 'none';
     roundsInput.style.display = showRounds ? '' : 'none';
@@ -1129,6 +1153,21 @@
   function findPackById(packId) {
     if (!packId) return null;
     return getAvailableMyPacks().find((p) => packIdKey(p) === packIdKey(packId));
+  }
+
+  function isLikelyTotwRewardPack(pack) {
+    const id = Number(packIdKey(pack) || 0);
+    if ([20707, 20441].includes(id)) return true;
+    const name = packName(pack);
+    return /\bTOTW\b/i.test(name) &&
+      /(84\+|1-30|player|pack|provision|refresh)/i.test(name);
+  }
+
+  function findPackByPredicate(predicate) {
+    if (typeof predicate !== 'function') return null;
+    return getAvailableMyPacks().find((pack) => {
+      try { return !!predicate(pack); } catch { return false; }
+    }) || null;
   }
 
   function summarizePacks(packs = getAvailableMyPacks()) {
@@ -3335,10 +3374,18 @@
   }
 
   async function openExistingAutoTotwPackIfAvailable(loopDef, upgradeDef) {
-    const pack = await findRewardPack(upgradeDef, null, { attempts: 2, delayMs: 1000 });
+    const pack = await findRewardPack(upgradeDef, null, {
+      attempts: 2,
+      delayMs: 1000,
+      fallbackPackMatcher: isLikelyTotwRewardPack,
+    });
     if (!pack) return false;
     log(`${loopDef.name}: opening existing ${upgradeDef.name} reward pack before crafting another ${requiredSpecialLabel(loopDef)}: ${packName(pack)} (#${pack.id})`);
-    const opened = await openRewardPackAndCleanup(upgradeDef, pack.id, 'existing auto TOTW reward pack', { assumeTotwReward: true });
+    const opened = await openRewardPackAndCleanup(upgradeDef, pack.id, 'existing auto TOTW reward pack', {
+      assumeTotwReward: true,
+      fallbackPackMatcher: isLikelyTotwRewardPack,
+      openAttempts: 3,
+    });
     if (opened) {
       await refreshInventoryCaches(`${loopDef.name} post-existing TOTW pack`, { includePacks: false, quiet: true });
     }
@@ -3381,6 +3428,8 @@
     }
     const openedReward = await openRewardPackAndCleanup(upgradeDef, rewardPackId, 'auto TOTW reward pack', {
       assumeTotwReward: true,
+      fallbackPackMatcher: isLikelyTotwRewardPack,
+      openAttempts: 3,
       findAttempts: 18,
       findDelayMs: 2500,
       logWait: true,
@@ -3735,12 +3784,13 @@
     return pack || null;
   }
 
-  function findRewardPackInCache(loopDef, explicitPackId = null) {
+  function findRewardPackInCache(loopDef, explicitPackId = null, options = {}) {
     let pack = explicitPackId ? findPackById(explicitPackId) : null;
     if (!pack && loopDef.rewardPackIds?.length) {
       pack = loopDef.rewardPackIds.map((id) => findPackById(id)).find(Boolean);
     }
     if (!pack && loopDef.rewardPackNames?.length) pack = findPackByName(loopDef.rewardPackNames);
+    if (!pack && options.fallbackPackMatcher) pack = findPackByPredicate(options.fallbackPackMatcher);
     return pack || null;
   }
 
@@ -3751,7 +3801,7 @@
       await refreshStorePacks().catch((e) => {
         if (attempt === attempts) log(`Reward pack refresh failed: ${e.message || e}`);
       });
-      const pack = findRewardPackInCache(loopDef, explicitPackId);
+      const pack = findRewardPackInCache(loopDef, explicitPackId, options);
       if (pack) return pack;
       if (options.logWait && (attempt === 1 || attempt === attempts || attempt % 4 === 0)) {
         log(`${loopDef.name}: waiting for reward pack${explicitPackId ? ` #${explicitPackId}` : ''} (${attempt}/${attempts}); current packs: ${summarizePacks() || 'none'}`);
@@ -3762,23 +3812,36 @@
   }
 
   async function openRewardPackAndCleanup(loopDef, rewardPackId, reason = 'reward pack', options = {}) {
-    const pack = await findRewardPack(loopDef, rewardPackId, {
-      attempts: options.findAttempts || 6,
-      delayMs: options.findDelayMs || 1800,
-      logWait: options.logWait,
-    });
-    if (!pack) {
-      const packs = summarizePacks();
-      log(`${loopDef.name}: reward pack not found for auto-open${rewardPackId ? ` (#${rewardPackId})` : ''}; current packs: ${packs || 'none'}`);
-      return false;
+    const openAttempts = Math.max(1, Math.min(5, Number(options.openAttempts || 1) || 1));
+    for (let openAttempt = 1; openAttempt <= openAttempts; openAttempt++) {
+      const pack = await findRewardPack(loopDef, rewardPackId, {
+        attempts: options.findAttempts || 6,
+        delayMs: options.findDelayMs || 1800,
+        logWait: options.logWait,
+        fallbackPackMatcher: options.fallbackPackMatcher,
+      });
+      if (!pack) {
+        const packs = summarizePacks();
+        log(`${loopDef.name}: reward pack not found for auto-open${rewardPackId ? ` (#${rewardPackId})` : ''}; current packs: ${packs || 'none'}`);
+        return false;
+      }
+
+      const items = await openPack(pack, `${loopDef.name} ${reason}`, { allowGone: true });
+      if (!items) {
+        if (openAttempt < openAttempts) {
+          log(`${loopDef.name}: retrying reward pack lookup after stale pack (${openAttempt}/${openAttempts})`);
+          await sleep(900);
+          continue;
+        }
+        return false;
+      }
+      log(`${loopDef.name}: auto-opened reward pack ${packName(pack)} (#${pack.id}); ${items.length || 0} item(s)`);
+      if (options.assumeTotwReward) markAssumedTotwRewardItems(items, `${loopDef.name} ${reason}`);
+      await clearUnassigned(`${loopDef.name} ${reason} handling`);
+      return true;
     }
 
-    const items = await openPack(pack, `${loopDef.name} ${reason}`, { allowGone: true });
-    if (!items) return false;
-    log(`${loopDef.name}: auto-opened reward pack ${packName(pack)} (#${pack.id}); ${items.length || 0} item(s)`);
-    if (options.assumeTotwReward) markAssumedTotwRewardItems(items, `${loopDef.name} ${reason}`);
-    await clearUnassigned(`${loopDef.name} ${reason} handling`);
-    return true;
+    return false;
   }
 
   async function findSourcePack(loopDef) {
@@ -4147,7 +4210,8 @@
 
   async function runFillAndVerifySbc(loopDef) {
     await waitAppReady();
-    const maxCompletions = Math.max(1, Math.min(1, Number(loopDef.maxCompletions || 1) || 1));
+    const completionLimit = loopDef.allowMultipleCompletions === true ? 50 : 1;
+    const maxCompletions = Math.max(1, Math.min(completionLimit, Number(loopDef.maxCompletions || 1) || 1));
     let completions = 0;
 
     while (completions < maxCompletions) {
@@ -4219,7 +4283,11 @@
       const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
       markSbcItemsConsumed(inspection.items, loopDef.name);
       if (rewardPackId && loopDef.openRewardPacks) {
-        await openRewardPackAndCleanup(loopDef, rewardPackId);
+        await openRewardPackAndCleanup(loopDef, rewardPackId, 'reward pack', {
+          assumeTotwReward: loopDef.assumeTotwRewardPack === true,
+          fallbackPackMatcher: loopDef.assumeTotwRewardPack === true ? isLikelyTotwRewardPack : null,
+          openAttempts: loopDef.assumeTotwRewardPack === true ? 3 : 1,
+        });
       } else if (rewardPackId) {
         log(`${loopDef.name}: reward pack #${rewardPackId} left unopened`);
       }
@@ -4773,8 +4841,9 @@
       const input = document.querySelector('#bronze-loop-rounds');
       rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
       loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
-      loopDef.openRewardPacks = isOpenRewardPacksEnabled();
+      loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || isOpenRewardPacksEnabled();
       if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
+      if (loopDef.useRoundsAsCompletions === true) loopDef.maxCompletions = rounds;
       logFsuSettingsForRun();
       if (!confirmLiveRunIfNeeded(loopDef, rounds)) return;
     } catch (e) {
