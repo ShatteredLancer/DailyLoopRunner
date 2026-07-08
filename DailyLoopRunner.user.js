@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.67
+// @version      0.2.68
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -334,7 +334,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.67',
+    version: '0.2.68',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -3034,6 +3034,17 @@
     return [];
   }
 
+  const TOTW_GROUP_IDS = [23, 44];
+
+  function itemGroupNumbers(item) {
+    return itemGroups(item).map((group) => Number(group)).filter((group) => Number.isFinite(group));
+  }
+
+  function itemHasAnyGroup(item, groupIds = []) {
+    const groups = itemGroupNumbers(item);
+    return groupIds.some((groupId) => groups.includes(Number(groupId)));
+  }
+
   function formatSquadItem(item, index) {
     const groups = itemGroups(item);
     const parts = [
@@ -3072,6 +3083,7 @@
     if (id && state.consumedItemIds.has(id)) return false;
     if (id && state.assumedTotwItemIds.has(id)) return true;
     try { if (item?.isTOTW?.() || item?.isTotw?.()) return true; } catch { }
+    if (itemHasAnyGroup(item, TOTW_GROUP_IDS)) return true;
     const text = itemSearchText(item);
     return /\bTOTW\b|Team of the Week|本周最佳|週最佳/i.test(text);
   }
@@ -3155,12 +3167,63 @@
   }
 
   function sortRequiredSpecialEntriesForSubmit(entries) {
-    const pileRank = { storage: 0, club: 1, unassigned: 2 };
+    const pileRank = { storage: 0, recent: 1, club: 2, unassigned: 3 };
     return [...(entries || [])].sort((a, b) =>
       Number(b?.item?.rating || 0) - Number(a?.item?.rating || 0) ||
       (pileRank[a?.pileName] ?? 9) - (pileRank[b?.pileName] ?? 9) ||
       Number(a?.item?.id || 0) - Number(b?.item?.id || 0)
     );
+  }
+
+  function requiredSpecialRejectReasons(item, loopDef = {}) {
+    const reasons = [];
+    const id = Number(item?.id || 0);
+    if (!isPlayer(item)) reasons.push('not-player');
+    if (id && state.consumedItemIds.has(id)) reasons.push('consumed-this-run');
+    if (!isRequiredSpecialItem(item, loopDef)) reasons.push(`not-${requiredSpecialLabel(loopDef)}`);
+    const minRating = Number(loopDef.requiredSpecialMinRating || 0);
+    if (minRating && Number(item?.rating || 0) < minRating) reasons.push(`rating-under-${minRating}`);
+    getSbcProtectionReasons(item, loopDef, { specialIndex: 1 }).forEach((reason) => {
+      if (!reasons.includes(reason)) reasons.push(reason);
+    });
+    return reasons;
+  }
+
+  function logRequiredSpecialPreflightDiagnostics(loopDef = {}) {
+    const piles = [
+      { pileName: 'recent', items: state.recentRewardItems || [] },
+      { pileName: 'unassigned', items: getPileItemsByName('unassigned') },
+      { pileName: 'storage', items: getPileItemsByName('storage') },
+      { pileName: 'club', items: getPileItemsByName('club') },
+    ];
+    const seen = new Set();
+    const candidates = [];
+    const reasonCounts = {};
+
+    for (const { pileName, items } of piles) {
+      for (const item of (items || [])) {
+        const id = Number(item?.id || 0);
+        if (!id || seen.has(id) || !isPlayer(item)) continue;
+        seen.add(id);
+        if (!isSbcSpecialItem(item) && !isSpecial(item)) continue;
+        const reasons = requiredSpecialRejectReasons(item, loopDef);
+        reasons.forEach((reason) => addCount(reasonCounts, reason));
+        if (reasons.length) candidates.push({ item, pileName, reasons });
+      }
+    }
+
+    if (!candidates.length) {
+      log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} preflight diagnostics: no special candidates detected in recent/unassigned/storage/club caches`);
+      return;
+    }
+
+    log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} preflight diagnostics: ${candidates.length} special candidate(s), rejects ${formatCounts(reasonCounts, 8) || 'none'}`);
+    candidates.slice(0, 8).forEach(({ item, pileName, reasons }, index) => {
+      log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} candidate ${index + 1}. ${rewardItemSummary(item)} from:${pileName} reject:${reasons.join(',') || 'none'}`);
+    });
+    if (candidates.length > 8) {
+      log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} candidate diagnostics truncated: ${candidates.length - 8} more`);
+    }
   }
 
   function sortTotwEntriesForSubmit(entries) {
@@ -3839,12 +3902,21 @@
 
     const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
     const opened = await openSbcSet(set, { returnNullIfComplete: true });
-    if (!opened) fail(`${loopDef.name}: no available ${upgradeDef.name} challenge remains; cannot auto-craft TOTW`);
+    if (!opened) {
+      const reason = `no available ${upgradeDef.name} challenge remains; cannot auto-craft ${requiredSpecialLabel(loopDef)}`;
+      log(`${loopDef.name}: ${reason}`);
+      return { ok: false, reason };
+    }
 
     let fillResult;
     let inspection;
     if (shouldUseInventoryFirstFill(upgradeDef)) {
-      const inventoryFill = await fillSbcSquadInventoryFirst(upgradeDef, opened);
+      const inventoryFill = await fillSbcSquadInventoryFirst(upgradeDef, opened, { stopOnMissingSelection: true });
+      if (!inventoryFill.ok) {
+        const reason = `${upgradeDef.name} ${inventoryFill.reason || 'inventory-first fill is missing required items'}`;
+        log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${reason}`);
+        return { ok: false, reason };
+      }
       fillResult = inventoryFill.fillResult;
       inspection = inventoryFill.inspection;
     } else {
@@ -3887,18 +3959,20 @@
     if (!openedReward) {
       log(`${loopDef.name}: ${upgradeDef.name} reward pack could not be auto-opened; checking inventory anyway`);
     }
+    return { ok: true };
   }
 
   async function ensureTotwForFillAndVerify(loopDef) {
-    if (!needsAutoTotwPreflight(loopDef)) return;
+    if (!needsAutoTotwPreflight(loopDef)) return true;
     const required = Math.max(1, Number(loopDef.requiredSpecialCount || 1) || 1);
     await refreshInventoryCaches(`${loopDef.name} ${requiredSpecialLabel(loopDef)} preflight`, { includePacks: false, quiet: true });
 
     let entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
     if (entries.length >= required) {
       log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} preflight found ${entries.length} eligible ${requiredSpecialLabel(loopDef)} card(s): ${summarizeRequiredSpecialEntries(entries)}`);
-      return;
+      return true;
     }
+    logRequiredSpecialPreflightDiagnostics(loopDef);
 
     const upgradeDef = getAutoTotwUpgradeDef(loopDef);
     if (loopDef.dryRun) {
@@ -3906,7 +3980,7 @@
       const existingPack = findRewardPackInCache(upgradeDef, null);
       if (existingPack) {
         log(`${loopDef.name}: dry-run found unopened ${upgradeDef.name} reward pack ${packName(existingPack)} (#${existingPack.id}); live run would open it before crafting another ${requiredSpecialLabel(loopDef)}`);
-        return;
+        return true;
       }
       const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
       const challenge = await findAvailableSbcChallenge(set, upgradeDef.name);
@@ -3915,7 +3989,7 @@
       } else {
         log(`${loopDef.name}: dry-run found no eligible ${requiredSpecialLabel(loopDef)} and no available ${upgradeDef.name} challenge remains`);
       }
-      return;
+      return true;
     }
 
     const openedExistingPack = await openExistingAutoTotwPackIfAvailable(loopDef, upgradeDef);
@@ -3923,18 +3997,23 @@
       entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
       if (entries.length >= required) {
         log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} ready after opening existing pack: ${summarizeRequiredSpecialEntries(entries)}`);
-        return;
+        return true;
       }
       log(`${loopDef.name}: existing ${upgradeDef.name} reward pack opened but no eligible ${requiredSpecialLabel(loopDef)} was detected; trying ${upgradeDef.name} SBC if available`);
     }
 
-    await craftAutoTotwUpgrade(loopDef);
+    const crafted = await craftAutoTotwUpgrade(loopDef);
+    if (!crafted?.ok) {
+      log(`${loopDef.name}: stopping before SBC fill because required ${requiredSpecialLabel(loopDef)} is unavailable (${crafted?.reason || 'auto craft failed'})`);
+      return false;
+    }
     await refreshInventoryCaches(`${loopDef.name} post-TOTW craft`, { includePacks: false, quiet: true });
     entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
     if (entries.length < required) {
       fail(`${loopDef.name}: ${upgradeDef.name} completed/opened but no eligible ${requiredSpecialLabel(loopDef)} card was detected for 84x10; check the reward item log and inventory state`);
     }
     log(`${loopDef.name}: auto ${requiredSpecialLabel(loopDef)} ready: ${summarizeRequiredSpecialEntries(entries)}`);
+    return true;
   }
 
   function getSbcProtectionReasons(item, loopDef = {}, context = {}) {
@@ -4807,7 +4886,8 @@
 
     while (completions < maxCompletions) {
       stopPoint();
-      await ensureTotwForFillAndVerify(loopDef);
+      const preflightReady = await ensureTotwForFillAndVerify(loopDef);
+      if (preflightReady === false) break;
       patchFsuLengthSafePlayerMetadata(`${loopDef.name} before opening SBC`);
 
       const set = await findSbcSet(loopDef.sbcNames, loopDef.name);

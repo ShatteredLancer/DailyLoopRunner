@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.67`
+- `DailyLoopRunner.user.js`: `0.2.68`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -38,6 +38,8 @@ Runner 会尽量读取并跟随 FSU 的 SBC ignore player configuration，例如
 Inventory-first SBC 会在选人阶段按 `definitionId` 去重，避免同一球员的两张重复卡被选入同一套 SBC 后保存时只剩 10/11 人；同时会继承 loop 级 `blockTradeable`，例如 84+ TOTW loop 不会为了补阵容而选入可交易卡。
 
 多轮 inventory-first loop 如果中途材料不足，会记录缺少的 requirement diagnostics，并正常结束本次 run，保留已经成功提交的次数。
+
+84x10 的 TOTW/TOTS/FOF preflight 会识别 TOTW groups 标记，并在找不到 eligible 特卡时打印候选特卡被排除的原因，例如评分超过提交上限、可交易、不是指定特卡类型或本轮已被消耗。
 
 ## 3. 日常使用流程
 
