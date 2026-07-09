@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.68
+// @version      0.2.69
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -334,7 +334,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.68',
+    version: '0.2.69',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1389,6 +1389,73 @@
     silverBronzePrioritizeNormal: [/silver.*bronze.*normal/i, /quality.*prioritize.*normal/i, /银.*铜.*普通/, /銀.*銅.*普通/],
   };
 
+  const ITEM_ID_FIELD_ALIASES = Object.freeze([
+    'id',
+    'itemId',
+    'itemid',
+    'itemID',
+    'instanceId',
+    'instanceid',
+    'resourceId',
+    'resourceid',
+    'resourceID',
+    'cardId',
+    'cardid',
+    'cardID',
+    'playerId',
+    'playerid',
+    'playerID',
+    'guidAssetId',
+    'guidassetid',
+    'guidAssetID',
+  ]);
+
+  const DEFINITION_ID_FIELD_ALIASES = Object.freeze([
+    'definitionId',
+    'definitionid',
+    'definitionID',
+    'defId',
+    'defid',
+    'defID',
+    'assetId',
+    'assetid',
+    'assetID',
+    '_assetId',
+    '_assetid',
+    '_assetID',
+    'baseId',
+    'baseid',
+    'baseID',
+    'baseResourceId',
+    'baseResourceID',
+    'resourceId',
+    'resourceid',
+    'resourceID',
+    'guidAssetId',
+    'guidassetid',
+    'guidAssetID',
+  ]);
+
+  const ITEM_IDENTITY_FIELD_ALIASES = Object.freeze(
+    [...new Set([...ITEM_ID_FIELD_ALIASES, ...DEFINITION_ID_FIELD_ALIASES])]
+  );
+
+  const ITEM_IDENTITY_HOLDER_FIELDS = Object.freeze([
+    '_data',
+    'data',
+    '_staticData',
+    'staticData',
+    'assetData',
+    '_assetData',
+    '_item',
+    'item',
+    '_player',
+    'player',
+    'raw',
+    'rawData',
+    '_rawData',
+  ]);
+
   function aliasMatches(path, aliases) {
     return aliases.some((pattern) => pattern.test(path));
   }
@@ -1469,8 +1536,9 @@
   }
 
   function isLikelyLockedIdValuePath(path = '', key = '') {
-    if (/^\d+$/.test(String(key || ''))) return true;
-    if (/^(id|itemId|itemid|resourceId|resourceid|cardId|cardid|playerId|playerid|definitionId|definitionid|defId|defid|assetId|assetid|baseId|baseid)$/i.test(String(key || ''))) {
+    const field = String(key || '').replace(/^_+/, '');
+    if (/^\d+$/.test(field)) return true;
+    if (/^(id|itemid|instanceid|resourceid|cardid|playerid|definitionid|defid|assetid|baseid|baseresourceid|guidassetid)$/i.test(field)) {
       return true;
     }
     return /(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)$/i.test(String(path || ''));
@@ -1479,10 +1547,11 @@
   function addLockedPlayerValue(result, value, path = '', key = '') {
     const nums = numberListFromAny(value);
     if (!nums.length) return;
-    const target = /definition|defid|asset|base/i.test(key || path)
-      ? result.definitionIds
-      : result.itemIds;
-    nums.forEach((num) => target.push(num));
+    const text = `${key || ''} ${path || ''}`;
+    const definitionLike = /definition|defid|asset|base|resource|guid/i.test(text);
+    const itemLike = !definitionLike || /(^|[^a-z])(id|item|instance|card|player)([^a-z]|$)/i.test(text);
+    if (definitionLike) nums.forEach((num) => result.definitionIds.push(num));
+    if (itemLike || /resource|guid/i.test(text)) nums.forEach((num) => result.itemIds.push(num));
   }
 
   function collectLockedPlayerIds(value, path = '', result = { itemIds: [], definitionIds: [], sources: [] }, depth = 0, seen = new WeakSet(), inLockContext = false) {
@@ -1508,10 +1577,10 @@
         addLockedPlayerValue(result, child, nextPath, key);
         if (!result.sources.includes(nextPath)) result.sources.push(nextPath);
       } else if (childLockContext && isInspectableObject(child)) {
-        ['id', 'itemId', 'itemid', 'resourceId', 'resourceid', 'cardId', 'cardid', 'playerId', 'playerid'].forEach((field) => {
+        ITEM_ID_FIELD_ALIASES.forEach((field) => {
           addLockedPlayerValue(result, safeReadField(child, field), nextPath, field);
         });
-        ['definitionId', 'definitionid', 'defId', 'defid', 'assetId', 'assetid', 'baseId', 'baseid'].forEach((field) => {
+        DEFINITION_ID_FIELD_ALIASES.forEach((field) => {
           addLockedPlayerValue(result, safeReadField(child, field), nextPath, field);
         });
       }
@@ -1830,6 +1899,19 @@
     }
   }
 
+  function itemIdentityHolders(item) {
+    const holders = [
+      item,
+      ...ITEM_IDENTITY_HOLDER_FIELDS.map((field) => safeReadField(item, field)),
+    ];
+    const seen = new Set();
+    return holders.filter((holder) => {
+      if (!holder || typeof holder !== 'object' || seen.has(holder)) return false;
+      seen.add(holder);
+      return true;
+    });
+  }
+
   function itemLeagueId(item) {
     const data = safeReadField(item, '_data');
     const staticData = safeReadField(item, '_staticData');
@@ -1850,7 +1932,10 @@
   }
 
   function itemIdentifierNumbers(item, keys = []) {
-    return uniqueNumberList(itemFieldValues(item, keys));
+    const fields = Array.isArray(keys) && keys.length ? keys : ITEM_IDENTITY_FIELD_ALIASES;
+    return uniqueNumberList(itemIdentityHolders(item).flatMap((holder) =>
+      fields.flatMap((field) => numberListFromAny(safeReadField(holder, field)))
+    ));
   }
 
   function isFsuLockedItem(item, settings = getFsuSettings()) {
@@ -1858,12 +1943,16 @@
     const lockedDefinitionIds = new Set((settings.lockedDefinitionIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
     if (!lockedItemIds.size && !lockedDefinitionIds.size) return false;
 
-    const itemIds = itemIdentifierNumbers(item, ['id', 'itemId', 'resourceId', 'cardId', 'playerId']);
-    const definitionIds = itemIdentifierNumbers(item, ['definitionId', 'defId', 'assetId', 'baseId']);
+    const itemIds = itemIdentifierNumbers(item, ITEM_ID_FIELD_ALIASES);
+    const definitionIds = itemIdentifierNumbers(item, DEFINITION_ID_FIELD_ALIASES);
     if (itemIds.some((id) => lockedItemIds.has(id))) return true;
     if (definitionIds.some((id) => lockedDefinitionIds.has(id))) return true;
 
-    const allIds = uniqueNumberList([...itemIds, ...definitionIds]);
+    const allIds = uniqueNumberList([
+      ...itemIds,
+      ...definitionIds,
+      ...itemIdentifierNumbers(item, ITEM_IDENTITY_FIELD_ALIASES),
+    ]);
     return allIds.some((id) => lockedItemIds.has(id) || lockedDefinitionIds.has(id));
   }
 
