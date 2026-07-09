@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.78
+// @version      0.2.79
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -358,7 +358,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.78',
+    version: '0.2.79',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2182,6 +2182,36 @@
     return [];
   }
 
+  function findCachedItemById(itemId, pileNames = ['storage', 'club', 'unassigned', 'transfer']) {
+    const targetId = Number(itemId || 0);
+    if (!targetId) return null;
+    for (const pileName of pileNames) {
+      const item = getPileItemsByName(pileName).find((entry) => Number(entry?.id || 0) === targetId);
+      if (item) return { item, pileName };
+    }
+    return null;
+  }
+
+  function resolveRecentRewardItems(label = 'recent reward item resolution') {
+    if (!state.recentRewardItems?.length) return 0;
+
+    let resolved = 0;
+    const seen = new Set();
+    state.recentRewardItems = state.recentRewardItems.map((item) => {
+      const id = Number(item?.id || 0);
+      if (!id) return item;
+      const live = findCachedItemById(id);
+      if (!live || live.item === item) return item;
+      resolved++;
+      if (!seen.has(id)) {
+        log(`${label}: resolved recent reward item ${itemDisplayName(item)} rating:${Number(item?.rating || 0) || '?'} id:${id} to ${live.pileName}`);
+        seen.add(id);
+      }
+      return live.item;
+    });
+    return resolved;
+  }
+
   function makeLengthSafeMetadataValue(value) {
     if (value === undefined || value === null) return [];
     if (Array.isArray(value) || typeof value === 'function') return value;
@@ -3132,7 +3162,10 @@
     if (!save?.success) {
       const code = save?.error?.code || save?.status || 'unknown';
       const msg = save?.error?.message || save?.message || '';
-      fail(`${label}: saveChallenge failed: ${code}${msg ? ` ${msg}` : ''}`);
+      const playerSummary = (players || []).slice(0, 11).map((item, index) =>
+        `${index + 1}.${itemDisplayName(item)} r:${Number(item?.rating || 0) || '?'} id:${Number(item?.id || 0) || '?'} def:${Number(item?.definitionId || 0) || '?'}`
+      ).join('; ');
+      fail(`${label}: saveChallenge failed: ${code}${msg ? ` ${msg}` : ''}${playerSummary ? `; players ${playerSummary}` : ''}`);
     }
 
     if (typeof W.services.SBC.loadChallengeData === 'function') {
@@ -3386,14 +3419,14 @@
     return isEligibleRequiredSpecialForLoop(item, loopDef);
   }
 
-  function getEligibleRequiredSpecialEntries(loopDef = {}) {
+  function getEligibleRequiredSpecialEntries(loopDef = {}, options = {}) {
     const entries = [];
     const seen = new Set();
     const piles = [
-      { pileName: 'recent', items: state.recentRewardItems || [] },
       { pileName: 'storage', items: getPileItemsByName('storage') },
       { pileName: 'club', items: getPileItemsByName('club') },
     ];
+    if (options.includeRecent !== false) piles.push({ pileName: 'recent', items: state.recentRewardItems || [] });
     for (const { pileName, items } of piles) {
       for (const item of (items || [])) {
         const id = Number(item?.id || 0);
@@ -3406,8 +3439,12 @@
     return entries;
   }
 
+  function getSubmittableRequiredSpecialEntries(loopDef = {}) {
+    return getEligibleRequiredSpecialEntries(loopDef, { includeRecent: false });
+  }
+
   function getEligibleTotwEntries(loopDef = {}) {
-    return getEligibleRequiredSpecialEntries(loopDef).filter(({ item }) => isTotwItem(item));
+    return getSubmittableRequiredSpecialEntries(loopDef).filter(({ item }) => isTotwItem(item));
   }
 
   function summarizeRequiredSpecialEntries(entries, limit = 3) {
@@ -3421,7 +3458,7 @@
   }
 
   function sortRequiredSpecialEntriesForSubmit(entries) {
-    const pileRank = { storage: 0, recent: 1, club: 2, unassigned: 3 };
+    const pileRank = { storage: 0, club: 1, recent: 2, unassigned: 3 };
     return [...(entries || [])].sort((a, b) =>
       Number(a?.item?.rating || 0) - Number(b?.item?.rating || 0) ||
       (pileRank[a?.pileName] ?? 9) - (pileRank[b?.pileName] ?? 9) ||
@@ -3694,6 +3731,7 @@
 
   function buildRequiredTotwRepairPlan(loopDef, inspection) {
     if (!needsAutoTotwPreflight(loopDef)) return null;
+    resolveRecentRewardItems(`${loopDef.name} required ${requiredSpecialLabel(loopDef)} repair`);
     const players = [...(inspection?.items || [])];
     if (!players.length) return null;
 
@@ -3710,7 +3748,7 @@
       keepTotwId = Number(currentTotw.item?.id || 0);
       keepTotwMessage = `keep ${itemDisplayName(currentTotw.item)} rating:${Number(currentTotw.item?.rating || 0) || '?'} at slot ${currentTotw.index + 1}`;
     } else {
-      const externalTotw = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef))
+      const externalTotw = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef))
         .filter(({ item }) => !usedIds.has(Number(item?.id || 0)))[0] || null;
       if (!externalTotw) return null;
 
@@ -4151,6 +4189,7 @@
     });
     if (opened) {
       await refreshInventoryCaches(`${loopDef.name} post-existing TOTW pack`, { includePacks: false, quiet: true });
+      resolveRecentRewardItems(`${loopDef.name} post-existing TOTW pack`);
     }
     return opened;
   }
@@ -4225,8 +4264,9 @@
     if (!needsAutoTotwPreflight(loopDef)) return true;
     const required = Math.max(1, Number(loopDef.requiredSpecialCount || 1) || 1);
     await refreshInventoryCaches(`${loopDef.name} ${requiredSpecialLabel(loopDef)} preflight`, { includePacks: false, quiet: true });
+    resolveRecentRewardItems(`${loopDef.name} ${requiredSpecialLabel(loopDef)} preflight`);
 
-    let entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
+    let entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
     if (entries.length >= required) {
       log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} preflight found ${entries.length} eligible ${requiredSpecialLabel(loopDef)} card(s): ${summarizeRequiredSpecialEntries(entries)}`);
       return true;
@@ -4253,7 +4293,7 @@
 
     const openedExistingPack = await openExistingAutoTotwPackIfAvailable(loopDef, upgradeDef);
     if (openedExistingPack) {
-      entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
+      entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
       if (entries.length >= required) {
         log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} ready after opening existing pack: ${summarizeRequiredSpecialEntries(entries)}`);
         return true;
@@ -4267,7 +4307,8 @@
       return false;
     }
     await refreshInventoryCaches(`${loopDef.name} post-TOTW craft`, { includePacks: false, quiet: true });
-    entries = sortRequiredSpecialEntriesForSubmit(getEligibleRequiredSpecialEntries(loopDef));
+    resolveRecentRewardItems(`${loopDef.name} post-TOTW craft`);
+    entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
     if (entries.length < required) {
       fail(`${loopDef.name}: ${upgradeDef.name} completed/opened but no eligible ${requiredSpecialLabel(loopDef)} card was detected for 84x10; check the reward item log and inventory state`);
     }
@@ -4758,6 +4799,7 @@
       log(`${loopDef.name}: auto-opened reward pack ${packName(pack)} (#${pack.id}); ${items.length || 0} item(s)`);
       if (options.assumeTotwReward) markAssumedTotwRewardItems(items, `${loopDef.name} ${reason}`);
       await clearUnassigned(`${loopDef.name} ${reason} handling`);
+      resolveRecentRewardItems(`${loopDef.name} ${reason}`);
       return true;
     }
 
