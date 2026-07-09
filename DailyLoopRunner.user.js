@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.72
+// @version      0.2.73
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -364,7 +364,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.72',
+    version: '0.2.73',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -3288,7 +3288,6 @@
     const seen = new Set();
     const piles = [
       { pileName: 'recent', items: state.recentRewardItems || [] },
-      { pileName: 'unassigned', items: getPileItemsByName('unassigned') },
       { pileName: 'storage', items: getPileItemsByName('storage') },
       { pileName: 'club', items: getPileItemsByName('club') },
     ];
@@ -3514,7 +3513,8 @@
     const entries = [];
     const seen = new Set();
     const usedDefinitionIds = options.usedDefinitionIds || new Set();
-    for (const pileName of ['storage', 'club', 'unassigned']) {
+    const piles = Array.isArray(options.piles) && options.piles.length ? options.piles : ['storage', 'club'];
+    for (const pileName of piles) {
       for (const item of getPileItemsByName(pileName)) {
         const id = Number(item?.id || 0);
         if (!id || seen.has(id) || usedIds.has(id)) continue;
@@ -5040,6 +5040,7 @@
 
     while (completions < maxCompletions) {
       stopPoint();
+      await clearUnassigned(`${loopDef.name} pre-submit cleanup`);
       const preflightReady = await ensureTotwForFillAndVerify(loopDef);
       if (preflightReady === false) break;
       patchFsuLengthSafePlayerMetadata(`${loopDef.name} before opening SBC`);
