@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.73
+// @version      0.2.74
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -255,10 +255,7 @@
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
       requiredSpecialMinRating: 84,
-      specialRequirementAdd: {
-        patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
-        buttonTexts: ['Add', '添加', '加入', '新增'],
-      },
+      submitReadyRepairMaxAttempts: 8,
       autoTotwUpgrade: {
         name: '84+ TOTW Upgrade',
         sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
@@ -292,10 +289,7 @@
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
       requiredSpecialMinRating: 84,
-      specialRequirementAdd: {
-        patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
-        buttonTexts: ['Add', '添加', '加入', '新增'],
-      },
+      submitReadyRepairMaxAttempts: 8,
       autoTotwUpgrade: {
         name: '84+ TOTW Upgrade',
         sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
@@ -364,7 +358,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.73',
+    version: '0.2.74',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2215,6 +2209,8 @@
 
   function isSbcUsablePlayer(item, options = {}) {
     if (!isPlayer(item)) return false;
+    const id = Number(item?.id || 0);
+    if (id && state.consumedItemIds.has(id)) return false;
     if (options.protectHighGold && isProtectedHighGold(item)) return false;
     if (isConceptItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
@@ -2751,7 +2747,9 @@
 
   function getUsabilityRejectReasons(item, options = {}) {
     const reasons = [];
+    const id = Number(item?.id || 0);
     if (!isPlayer(item)) reasons.push('not-player');
+    if (id && state.consumedItemIds.has(id)) reasons.push('consumed-this-run');
     if (options.protectHighGold && isProtectedHighGold(item)) reasons.push('protected-82-plus');
     if (isConceptItem(item)) reasons.push('concept');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
@@ -3320,7 +3318,7 @@
   function sortRequiredSpecialEntriesForSubmit(entries) {
     const pileRank = { storage: 0, recent: 1, club: 2, unassigned: 3 };
     return [...(entries || [])].sort((a, b) =>
-      Number(b?.item?.rating || 0) - Number(a?.item?.rating || 0) ||
+      Number(a?.item?.rating || 0) - Number(b?.item?.rating || 0) ||
       (pileRank[a?.pileName] ?? 9) - (pileRank[b?.pileName] ?? 9) ||
       Number(a?.item?.id || 0) - Number(b?.item?.id || 0)
     );
@@ -3493,6 +3491,8 @@
 
   function isEligibleNormalRepairFiller(item, loopDef = {}) {
     if (!isPlayer(item)) return false;
+    const id = Number(item?.id || 0);
+    if (id && state.consumedItemIds.has(id)) return false;
     if (isSbcSpecialItem(item)) return false;
     if (isConceptItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
@@ -4173,6 +4173,7 @@
   function getSbcProtectionReasons(item, loopDef = {}, context = {}) {
     const reasons = [];
     const rating = Number(item?.rating || 0);
+    const itemId = Number(item?.id || 0);
     const maxRating = Number(loopDef.maxSubmittedRating || 0);
     const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
     const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number));
@@ -4184,13 +4185,14 @@
       allowSpecial: requiredSpecialCount > 0 && specialIndex <= requiredSpecialCount,
     };
 
+    if (itemId && state.consumedItemIds.has(itemId)) reasons.push('consumed-this-run');
     if (isConceptItem(item)) reasons.push('concept');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) {
       if (!reasons.includes('active-trade')) reasons.push('active-trade');
     }
-    if (protectedIds.has(Number(item?.id || 0))) reasons.push('protected-id');
+    if (protectedIds.has(itemId)) reasons.push('protected-id');
     if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) reasons.push('protected-def');
     if (
       ['totw', 'totw-tots-fof'].includes(requiredSpecialKind(loopDef)) &&
@@ -4249,7 +4251,7 @@
         String(reason).startsWith('required-totw') ||
         String(reason).startsWith('rating-over-') ||
         String(reason).startsWith('fsu-') ||
-        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'academy', 'active-trade'].includes(String(reason))
+        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'academy', 'active-trade', 'consumed-this-run'].includes(String(reason))
       )
     ).length;
     const missingRequirements = [];
@@ -4315,6 +4317,9 @@
       }
       if (reasons.includes('tradeable-blocked')) {
         hints.push(`${prefix}: replace tradeable card with an untradeable card`);
+      }
+      if (reasons.includes('consumed-this-run')) {
+        hints.push(`${prefix}: stale cache item was already submitted in this run; refresh/retry or replace it`);
       }
       if (reasons.includes('fsu-only-untradeable')) {
         hints.push(`${prefix}: FSU Only Untradeable is enabled; replace with an untradeable card`);

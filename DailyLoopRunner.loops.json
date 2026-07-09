@@ -383,21 +383,7 @@
       "allowedSpecialCount": 1,
       "requiredSpecialKind": "totw-tots-fof",
       "requiredSpecialMinRating": 84,
-      "specialRequirementAdd": {
-        "patterns": [
-          "Any TOTW/TOTS/FOF",
-          "TOTW/TOTS/FOF",
-          "TOTW",
-          "TOTS",
-          "FOF"
-        ],
-        "buttonTexts": [
-          "Add",
-          "添加",
-          "加入",
-          "新增"
-        ]
-      },
+      "submitReadyRepairMaxAttempts": 8,
       "autoTotwUpgrade": {
         "name": "84+ TOTW Upgrade",
         "sbcNames": [
@@ -473,21 +459,7 @@
       "allowedSpecialCount": 1,
       "requiredSpecialKind": "totw-tots-fof",
       "requiredSpecialMinRating": 84,
-      "specialRequirementAdd": {
-        "patterns": [
-          "Any TOTW/TOTS/FOF",
-          "TOTW/TOTS/FOF",
-          "TOTW",
-          "TOTS",
-          "FOF"
-        ],
-        "buttonTexts": [
-          "Add",
-          "添加",
-          "加入",
-          "新增"
-        ]
-      },
+      "submitReadyRepairMaxAttempts": 8,
       "autoTotwUpgrade": {
         "name": "84+ TOTW Upgrade",
         "sbcNames": [
