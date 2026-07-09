@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.74
+// @version      0.2.75
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -358,7 +358,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.74',
+    version: '0.2.75',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -3184,7 +3184,8 @@
     return [];
   }
 
-  const TOTW_GROUP_IDS = [23, 44];
+  // FC25 scripts treated group 23 as TOTW, but FC26 logs show group 23 on non-TOTW specials.
+  const TOTW_GROUP_IDS = [44];
 
   function itemGroupNumbers(item) {
     return itemGroups(item).map((group) => Number(group)).filter((group) => Number.isFinite(group));
