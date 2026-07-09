@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.75
+// @version      0.2.76
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -224,7 +224,7 @@
       maxSubmittedRating: 85,
       inventoryFillFirst: true,
       requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, minRating: 85, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
         { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
       ],
       priorityPiles: ['storage', 'club'],
@@ -358,7 +358,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.75',
+    version: '0.2.76',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -4018,7 +4018,7 @@
       maxSubmittedRating: 85,
       inventoryFillFirst: true,
       requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, minRating: 85, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
         { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
       ],
       priorityPiles: ['storage', 'club'],
