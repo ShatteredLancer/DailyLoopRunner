@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.79
+// @version      0.2.80
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -358,7 +358,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.79',
+    version: '0.2.80',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2412,6 +2412,80 @@
     fail(`Unassigned cleanup did not converge; ${remaining} item(s) remain`);
   }
 
+  async function tryMoveOpenedRewardItems(items, pile, allowStorage, label, description) {
+    if (!items?.length) return 0;
+    try {
+      log(`${label}: moving ${items.length} ${description} opened reward item(s)`);
+      await moveItems(items, pile, allowStorage);
+      return items.length;
+    } catch (e) {
+      log(`${label}: direct ${description} reward move skipped: ${e.message || e}`);
+      return 0;
+    }
+  }
+
+  async function materializeOpenedPlayerRewards(items, label = 'opened reward pack') {
+    const players = uniqueItems((items || []).filter((item) => isPlayer(item)));
+    if (!players.length) return 0;
+
+    let moved = 0;
+    const movedIds = new Set();
+    const markMoved = (list) => list.forEach((item) => movedIds.add(Number(item?.id || 0)));
+
+    const nonDuplicates = players.filter((item) => !isDuplicate(item));
+    const movedNonDuplicates = await tryMoveOpenedRewardItems(nonDuplicates, W.ItemPile.CLUB, true, label, 'non-duplicate');
+    if (movedNonDuplicates) {
+      moved += movedNonDuplicates;
+      markMoved(nonDuplicates);
+    }
+
+    const remainingDuplicates = players.filter((item) => !movedIds.has(Number(item?.id || 0)) && isDuplicate(item));
+    const tradeableDuplicates = remainingDuplicates.filter((item) => isTradeable(item));
+    if (tradeableDuplicates.length) {
+      try {
+        assertPileSpace('Transfer list', transferSpaceLeft(), tradeableDuplicates.length);
+        const count = await tryMoveOpenedRewardItems(tradeableDuplicates, W.ItemPile.TRANSFER, false, label, 'tradeable duplicate');
+        if (count) {
+          moved += count;
+          markMoved(tradeableDuplicates);
+        }
+      } catch (e) {
+        log(`${label}: direct tradeable duplicate reward move skipped: ${e.message || e}`);
+      }
+    }
+
+    const untradeableDuplicates = players.filter((item) =>
+      !movedIds.has(Number(item?.id || 0)) && isDuplicate(item) && !isTradeable(item)
+    );
+    const swappable = untradeableDuplicates.filter((item) => {
+      const clubDuplicate = findClubDuplicate(item);
+      return clubDuplicate && isTradeable(clubDuplicate);
+    });
+    const storageDuplicates = untradeableDuplicates.filter((item) => !swappable.includes(item));
+
+    const swappedCount = await tryMoveOpenedRewardItems(swappable, W.ItemPile.CLUB, true, label, 'swappable duplicate');
+    if (swappedCount) {
+      moved += swappedCount;
+      markMoved(swappable);
+    }
+
+    if (storageDuplicates.length) {
+      try {
+        assertPileSpace('SBC storage', storageSpaceLeft(), storageDuplicates.length);
+        const count = await tryMoveOpenedRewardItems(storageDuplicates, W.ItemPile.STORAGE, true, label, 'untradeable duplicate');
+        if (count) moved += count;
+      } catch (e) {
+        log(`${label}: direct untradeable duplicate reward move skipped: ${e.message || e}`);
+      }
+    }
+
+    if (moved) {
+      await refreshInventoryCaches(`${label} direct reward move`, { includePacks: false, quiet: true });
+      resolveRecentRewardItems(`${label} direct reward move`);
+    }
+    return moved;
+  }
+
   async function handleSilverRewardItems(items) {
     log(`Handling ${items?.length || 0} reward item(s) with unassigned cleanup strategy`);
     await clearUnassigned('reward item handling');
@@ -3457,6 +3531,28 @@
     return summarizeRequiredSpecialEntries(entries, limit);
   }
 
+  async function waitForSubmittableRequiredSpecialEntries(loopDef = {}, required = 1, label = 'required special cache sync') {
+    const attempts = 4;
+    let entries = [];
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      if (attempt > 1) {
+        await sleep(900 * attempt);
+        await refreshInventoryCaches(`${loopDef.name} ${label} ${attempt}/${attempts}`, { includePacks: false, quiet: true });
+      }
+      resolveRecentRewardItems(`${loopDef.name} ${label} ${attempt}/${attempts}`);
+      entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
+      if (entries.length >= required) return entries;
+
+      const recentEntries = sortRequiredSpecialEntriesForSubmit(
+        getEligibleRequiredSpecialEntries(loopDef).filter(({ pileName }) => pileName === 'recent')
+      );
+      if (recentEntries.length && attempt < attempts) {
+        log(`${loopDef.name}: waiting for opened ${requiredSpecialLabel(loopDef)} to enter submit cache (${attempt}/${attempts}); recent ${summarizeRequiredSpecialEntries(recentEntries)}`);
+      }
+    }
+    return entries;
+  }
+
   function sortRequiredSpecialEntriesForSubmit(entries) {
     const pileRank = { storage: 0, club: 1, recent: 2, unassigned: 3 };
     return [...(entries || [])].sort((a, b) =>
@@ -4293,7 +4389,7 @@
 
     const openedExistingPack = await openExistingAutoTotwPackIfAvailable(loopDef, upgradeDef);
     if (openedExistingPack) {
-      entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
+      entries = await waitForSubmittableRequiredSpecialEntries(loopDef, required, 'post-existing TOTW pack');
       if (entries.length >= required) {
         log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} ready after opening existing pack: ${summarizeRequiredSpecialEntries(entries)}`);
         return true;
@@ -4308,7 +4404,7 @@
     }
     await refreshInventoryCaches(`${loopDef.name} post-TOTW craft`, { includePacks: false, quiet: true });
     resolveRecentRewardItems(`${loopDef.name} post-TOTW craft`);
-    entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
+    entries = await waitForSubmittableRequiredSpecialEntries(loopDef, required, 'post-TOTW craft');
     if (entries.length < required) {
       fail(`${loopDef.name}: ${upgradeDef.name} completed/opened but no eligible ${requiredSpecialLabel(loopDef)} card was detected for 84x10; check the reward item log and inventory state`);
     }
@@ -4797,7 +4893,10 @@
         return false;
       }
       log(`${loopDef.name}: auto-opened reward pack ${packName(pack)} (#${pack.id}); ${items.length || 0} item(s)`);
-      if (options.assumeTotwReward) markAssumedTotwRewardItems(items, `${loopDef.name} ${reason}`);
+      if (options.assumeTotwReward) {
+        markAssumedTotwRewardItems(items, `${loopDef.name} ${reason}`);
+        await materializeOpenedPlayerRewards(items, `${loopDef.name} ${reason}`);
+      }
       await clearUnassigned(`${loopDef.name} ${reason} handling`);
       resolveRecentRewardItems(`${loopDef.name} ${reason}`);
       return true;
