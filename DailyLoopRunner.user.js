@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.71
+// @version      0.2.72
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -242,13 +242,6 @@
       name: '84x10 MVP (1 run)',
       strategy: 'fillAndVerifySbc',
       sbcNames: [
-        '84x100',
-        '84 x100',
-        '84 x 100',
-        '84+ x100',
-        '84+ x 100',
-        '100x 84+',
-        '100 x 84+',
         '84+ x10',
         '84+ x 10',
         '10x 84+ Upgrade',
@@ -257,6 +250,43 @@
         '10名84+升级',
       ],
       maxCompletions: 1,
+      maxSubmittedRating: 88,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      requiredSpecialKind: 'totw-tots-fof',
+      requiredSpecialMinRating: 84,
+      specialRequirementAdd: {
+        patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
+        buttonTexts: ['Add', '添加', '加入', '新增'],
+      },
+      autoTotwUpgrade: {
+        name: '84+ TOTW Upgrade',
+        sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
+        rewardPackIds: [20707, 20441],
+        rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
+        maxSubmittedRating: 85,
+        blockSpecial: true,
+        blockTradeable: true,
+        openRewardPacks: true,
+      },
+      blockSpecial: true,
+      blockTradeable: true,
+      openRewardPacks: false,
+    },
+    {
+      id: '84x10',
+      name: '84x10 Loop (max 7)',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: [
+        '84+ x10',
+        '84+ x 10',
+        '10x 84+ Upgrade',
+        '10 x 84+ Upgrade',
+        '10 名 84+ 升级',
+        '10名84+升级',
+      ],
+      maxCompletions: 7,
+      allowMultipleCompletions: true,
       maxSubmittedRating: 88,
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
@@ -334,7 +364,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.71',
+    version: '0.2.72',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -5592,7 +5622,8 @@
   function getLiveRunLimit(loopDef, rounds) {
     if (loopDef.strategy === 'validationBronzeUpgrade') return Number(rounds || loopDef.maxRounds || 1);
     if (loopDef.strategy === 'fillAndVerifySbc') {
-      return Number(loopDef.maxCompletions || 1) + (needsAutoTotwPreflight(loopDef) ? 1 : 0);
+      const completions = Number(loopDef.maxCompletions || 1);
+      return completions + (needsAutoTotwPreflight(loopDef) ? completions : 0);
     }
     if (loopDef.strategy === 'rarePackTo84Upgrade') return Number(loopDef.maxPacks || 100);
     if (loopDef.strategy === 'dailyRoutine') {
@@ -5610,7 +5641,8 @@
       return `may open up to ${limit} pack(s) and submit matching 2x84+ SBC(s)`;
     }
     if (loopDef.strategy === 'fillAndVerifySbc' && needsAutoTotwPreflight(loopDef)) {
-      return `may submit up to ${limit} SBC(s), including one auto ${getAutoTotwUpgradeDef(loopDef).name} if no eligible ${requiredSpecialLabel(loopDef)} exists`;
+      const completions = Number(loopDef.maxCompletions || 1);
+      return `may submit up to ${limit} SBC(s) (${completions} target SBC(s) plus up to ${completions} auto ${getAutoTotwUpgradeDef(loopDef).name} if ${requiredSpecialLabel(loopDef)} is missing)`;
     }
     return `may submit up to ${limit} SBC(s)`;
   }
