@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.70
+// @version      0.2.71
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -334,7 +334,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.70',
+    version: '0.2.71',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -3857,7 +3857,9 @@
   }
 
   async function repairSubmitReadinessIfNeeded(loopDef, opened, fillResult, inspection) {
-    if (fillResult.submitReady || inspection.blocked?.length || inspection.missingRequirements?.length) {
+    const missingRequirements = inspection.missingRequirements || [];
+    const hasNonPlayerCountMissing = missingRequirements.some((message) => !String(message).startsWith('player-count '));
+    if (fillResult.submitReady || inspection.blocked?.length || hasNonPlayerCountMissing) {
       return { fillResult, inspection, planned: false, repaired: false };
     }
 
