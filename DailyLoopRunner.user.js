@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.69
+// @version      0.2.70
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -334,7 +334,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.69',
+    version: '0.2.70',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1007,17 +1007,50 @@
     return result;
   }
 
-  async function refreshUnassigned() {
-    const controller = ctrl();
-    try { W.repositories.Item.unassigned.reset(); } catch { }
-    const result = await observeOnce(
-      W.services.Item.requestUnassignedItems(),
-      controller,
-      20000,
-      'requestUnassignedItems',
-    );
-    if (!result?.success) fail(`Unassigned refresh failed: ${result?.error?.code || result?.status || 'unknown'}`);
-    return result;
+  function serviceResultErrorText(result, fallback = 'unknown') {
+    return result?.error?.code ||
+      result?.error?.message ||
+      result?.message ||
+      result?.status ||
+      fallback;
+  }
+
+  async function refreshUnassigned(options = {}) {
+    const attempts = Math.max(1, Math.min(5, Number(options.attempts ?? 3) || 3));
+    const allowCacheFallback = options.allowCacheFallback !== false;
+    const quiet = options.quiet === true;
+    let lastError = '';
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      stopPoint();
+      await waitLoadingEnd(250, attempt === 1 ? 6000 : 12000).catch(() => null);
+      const controller = ctrl();
+      try {
+        const result = await observeOnce(
+          W.services.Item.requestUnassignedItems(),
+          controller,
+          20000,
+          'requestUnassignedItems',
+        );
+        if (result?.success) return result;
+        lastError = serviceResultErrorText(result);
+      } catch (e) {
+        lastError = e?.message || String(e || 'unknown');
+      }
+
+      if (attempt < attempts) {
+        if (!quiet) log(`Unassigned refresh failed (${lastError || 'unknown'}); retrying ${attempt + 1}/${attempts}`);
+        await sleep(700 * attempt);
+      }
+    }
+
+    if (allowCacheFallback) {
+      const cachedCount = getUnassignedItems().length;
+      if (!quiet) log(`Unassigned refresh failed after ${attempts} attempt(s): ${lastError || 'unknown'}; using existing cache (${cachedCount} item(s))`);
+      return { success: false, cachedFallback: true, cachedCount, error: { message: lastError || 'unknown' } };
+    }
+
+    fail(`Unassigned refresh failed: ${lastError || 'unknown'}`);
   }
 
   function cacheSummary() {
@@ -1093,7 +1126,7 @@
       });
     }
 
-    await refreshUnassigned().catch((e) => {
+    await refreshUnassigned({ quiet }).catch((e) => {
       if (!quiet) log(`Unassigned refresh skipped: ${e.message || e}`);
     });
 
