@@ -370,13 +370,6 @@
       "name": "84x10 MVP (1 run)",
       "strategy": "fillAndVerifySbc",
       "sbcNames": [
-        "84x100",
-        "84 x100",
-        "84 x 100",
-        "84+ x100",
-        "84+ x 100",
-        "100x 84+",
-        "100 x 84+",
         "84+ x10",
         "84+ x 10",
         "10x 84+ Upgrade",
@@ -385,6 +378,96 @@
         "10名84+升级"
       ],
       "maxCompletions": 1,
+      "maxSubmittedRating": 88,
+      "requiredSpecialCount": 1,
+      "allowedSpecialCount": 1,
+      "requiredSpecialKind": "totw-tots-fof",
+      "requiredSpecialMinRating": 84,
+      "specialRequirementAdd": {
+        "patterns": [
+          "Any TOTW/TOTS/FOF",
+          "TOTW/TOTS/FOF",
+          "TOTW",
+          "TOTS",
+          "FOF"
+        ],
+        "buttonTexts": [
+          "Add",
+          "添加",
+          "加入",
+          "新增"
+        ]
+      },
+      "autoTotwUpgrade": {
+        "name": "84+ TOTW Upgrade",
+        "sbcNames": [
+          "84+ TOTW Upgrade",
+          "84+ TOTW",
+          "TOTW Upgrade",
+          "84+ TOTW 升级",
+          "84+ TOTW 升級"
+        ],
+        "rewardPackIds": [20707, 20441],
+        "rewardPackNames": [
+          "84+ TOTW 1-30 Player Pack",
+          "TOTW 1-30 Player Pack",
+          "84+ TOTW 1-30",
+          "TOTW 1-30",
+          "84+ TOTW Player Pack",
+          "TOTW Player Pack",
+          "84+ TOTW Pack",
+          "TOTW Pack",
+          "TOTW Provision Refresh",
+          "TOTW Provision Refresh Pack"
+        ],
+        "maxSubmittedRating": 85,
+        "inventoryFillFirst": true,
+        "requirements": [
+          {
+            "tier": "gold",
+            "rarity": "rare",
+            "count": 6,
+            "minRating": 85,
+            "maxRating": 85,
+            "playerOnly": true,
+            "allowSpecial": false,
+            "priorityPiles": ["storage", "club"]
+          },
+          {
+            "tier": "gold",
+            "rarity": "rare",
+            "count": 5,
+            "minRating": 82,
+            "maxRating": 85,
+            "playerOnly": true,
+            "allowSpecial": false,
+            "priorityPiles": ["storage", "club"]
+          }
+        ],
+        "priorityPiles": ["storage", "club"],
+        "blockSpecial": true,
+        "blockTradeable": true,
+        "submitReadyRepairMaxAttempts": 8,
+        "openRewardPacks": true
+      },
+      "blockSpecial": true,
+      "blockTradeable": true,
+      "openRewardPacks": false
+    },
+    {
+      "id": "84x10",
+      "name": "84x10 Loop (max 7)",
+      "strategy": "fillAndVerifySbc",
+      "sbcNames": [
+        "84+ x10",
+        "84+ x 10",
+        "10x 84+ Upgrade",
+        "10 x 84+ Upgrade",
+        "10 名 84+ 升级",
+        "10名84+升级"
+      ],
+      "maxCompletions": 7,
+      "allowMultipleCompletions": true,
       "maxSubmittedRating": 88,
       "requiredSpecialCount": 1,
       "allowedSpecialCount": 1,
