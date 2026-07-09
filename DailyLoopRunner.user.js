@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.76
+// @version      0.2.78
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -358,7 +358,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.76',
+    version: '0.2.78',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1029,6 +1029,59 @@
       ...(state.lastStorePacks || []),
     ]).slice(0, 200);
     return result;
+  }
+
+  function mergeStorePacksFromController(controller = ctrl()) {
+    const packs = uniquePacks([
+      ...collectPackLikeObjects(controller),
+      ...getRepositoryMyPacks(),
+      ...(state.lastStorePacks || []),
+    ]).slice(0, 300);
+    if (packs.length) state.lastStorePacks = packs;
+    return packs.length;
+  }
+
+  async function openStorePacksViewForRefresh(label = 'reward pack lookup') {
+    const before = currentControllerName();
+    if (before !== 'UTStorePackViewController') {
+      const storeTab = document.querySelector('.ut-tab-bar-item.icon-store');
+      if (!storeTab) return false;
+      log(`${label}: opening Store to refresh visible packs`);
+      simulateClick(storeTab);
+      await waitLoadingEnd(700, 15000);
+      await sleep(800);
+    }
+
+    if (currentControllerName() !== 'UTStorePackViewController') {
+      const packTile = Array.from(document.querySelectorAll('.packs-tile, .ut-store-pack-tile-view, .tile.packs, .tile, .ut-store-tile-view, .store-tile, .tile-container'))
+        .filter(isClickableElement)
+        .find((el) => {
+          const text = compactText(el);
+          const classes = String(el.className || '');
+          return /packs-tile|store-pack|tile\.packs/i.test(classes) ||
+            matchesAny(text, ['Packs', 'My Packs', '包']);
+        });
+      if (packTile) {
+        log(`${label}: opening Store Packs view`);
+        simulateClick(packTile);
+        await waitLoadingEnd(700, 15000);
+        await sleep(900);
+      }
+    }
+
+    const controller = ctrl();
+    if (currentControllerName() === 'UTStorePackViewController') {
+      try {
+        const result = controller?.getStorePacks?.(true);
+        await awaitMaybeObservable(result, 'UTStorePackViewController.getStorePacks', 15000).catch(() => null);
+      } catch { }
+      await refreshStorePacks().catch(() => null);
+      const count = mergeStorePacksFromController(controller);
+      log(`${label}: Store Packs view refreshed; visible pack cache ${count || getMyPacks().length}`);
+      return true;
+    }
+
+    return false;
   }
 
   function serviceResultErrorText(result, fallback = 'unknown') {
@@ -2518,6 +2571,57 @@
     const btn = findButtonByText(patterns);
     if (!btn) return false;
     return simulateClick(btn);
+  }
+
+  function elementSearchText(el) {
+    return [
+      compactText(el),
+      el?.getAttribute?.('aria-label'),
+      el?.getAttribute?.('title'),
+      el?.getAttribute?.('data-id'),
+      el?.value,
+    ].filter(Boolean).join(' ');
+  }
+
+  function findClickableByText(patterns, root = document) {
+    const selectors = [
+      'button',
+      '[role="button"]',
+      'a',
+      'input[type="button"]',
+      'input[type="submit"]',
+      '.call-to-action',
+      '[class*="call-to-action"]',
+      '[class*="btn"]',
+      '[class*="Button"]',
+    ].join(',');
+    return Array.from(root.querySelectorAll(selectors))
+      .filter(isClickableElement)
+      .sort((a, b) => elementSearchText(a).length - elementSearchText(b).length)
+      .find((el) => matchesAny(elementSearchText(el), patterns)) || null;
+  }
+
+  function simulateKeyStroke(key = 'Alt', code = 'AltRight', options = {}) {
+    const init = {
+      key,
+      code,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      location: code === 'AltRight' ? 2 : 0,
+      altKey: code === 'AltRight',
+      ...options,
+    };
+    const targets = [
+      document.activeElement,
+      document.body,
+      document,
+      W,
+    ].filter(Boolean);
+    for (const target of targets) {
+      try { target.dispatchEvent(new KeyboardEvent('keydown', init)); } catch { }
+      try { target.dispatchEvent(new KeyboardEvent('keyup', init)); } catch { }
+    }
   }
 
   function closeFsuStuckOverlay(label = 'FSU stuck overlay') {
@@ -4440,7 +4544,7 @@
   }
 
   function findClaimRewardsButton() {
-    return findButtonByText([
+    const patterns = [
       'Claim Rewards',
       'Claim Reward',
       'Collect Rewards',
@@ -4449,12 +4553,32 @@
       '領取獎勵',
       '领取',
       '領取',
-    ]);
+    ];
+    return findButtonByText(patterns) || findClickableByText(patterns);
+  }
+
+  function findClaimRewardsContext() {
+    const selectors = [
+      '.view-modal-container',
+      '.ut-modal',
+      '.modal',
+      '[class*="modal"]',
+      '[class*="Modal"]',
+    ].join(',');
+    const contexts = Array.from(document.querySelectorAll(selectors))
+      .filter(isClickableElement)
+      .map((el) => ({ el, text: compactText(el) }))
+      .filter(({ text }) => text && text.length < 2000);
+    return contexts.find(({ text }) =>
+      matchesAny(text, ['Claim Rewards', 'Claim Reward', 'Collect Rewards', 'Collect Reward', '领取奖励', '領取獎勵']) ||
+      (matchesAny(text, ['Reward', 'Rewards', '奖励', '獎勵']) && matchesAny(text, ['Pack', 'Player', 'Claim', 'Collect', '包', '球员', '球員', '领取', '領取']))
+    ) || null;
   }
 
   async function claimSbcRewardsIfPresent(label = 'SBC submit') {
     const start = Date.now();
-    while (Date.now() - start < 20000) {
+    let lastHotkeyAt = 0;
+    while (Date.now() - start < 25000) {
       stopPoint();
       failIfSbcSubmitError(label);
       const btn = findClaimRewardsButton();
@@ -4465,9 +4589,23 @@
         await sleep(1200);
         return true;
       }
+
+      const context = findClaimRewardsContext();
+      const now = Date.now();
+      if (context && now - lastHotkeyAt > 2500) {
+        lastHotkeyAt = now;
+        log(`${label}: Claim Rewards button not clickable; trying AltRight reward hotkey`);
+        simulateKeyStroke('Alt', 'AltRight', { altKey: true, location: 2 });
+        simulateKeyStroke('AltRight', 'AltRight', { altKey: true, location: 2 });
+        await waitLoadingEnd(500, 12000);
+        await sleep(1200);
+        return true;
+      }
       await sleep(500);
     }
-    log(`${label}: Claim Rewards button not detected; continuing`);
+    const context = findClaimRewardsContext();
+    const contextText = context?.text ? `; modal text: ${context.text.slice(0, 180)}` : '';
+    log(`${label}: Claim Rewards button not detected${contextText}; continuing`);
     return false;
   }
 
@@ -4563,12 +4701,28 @@
   async function findRewardPack(loopDef, explicitPackId = null, options = {}) {
     const attempts = Math.max(1, Number(options.attempts || 1) || 1);
     const delayMs = Math.max(0, Number(options.delayMs || 0) || 0);
+    let storeFallbackTried = false;
     for (let attempt = 1; attempt <= attempts; attempt++) {
       await refreshStorePacks().catch((e) => {
         if (attempt === attempts) log(`Reward pack refresh failed: ${e.message || e}`);
       });
       const pack = findRewardPackInCache(loopDef, explicitPackId, options);
       if (pack) return pack;
+      if (
+        options.openStoreFallback !== false &&
+        !storeFallbackTried &&
+        (attempt === attempts || attempt >= Math.max(2, Math.ceil(attempts / 2)))
+      ) {
+        storeFallbackTried = true;
+        const openedStore = await openStorePacksViewForRefresh(`${loopDef.name}: reward pack lookup`).catch((e) => {
+          log(`${loopDef.name}: Store Packs fallback skipped: ${e.message || e}`);
+          return false;
+        });
+        if (openedStore) {
+          const visiblePack = findRewardPackInCache(loopDef, explicitPackId, options);
+          if (visiblePack) return visiblePack;
+        }
+      }
       if (options.logWait && (attempt === 1 || attempt === attempts || attempt % 4 === 0)) {
         log(`${loopDef.name}: waiting for reward pack${explicitPackId ? ` #${explicitPackId}` : ''} (${attempt}/${attempts}); current packs: ${summarizePacks() || 'none'}`);
       }
