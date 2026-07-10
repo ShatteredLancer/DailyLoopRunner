@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.2.83`
+- `DailyLoopRunner.user.js`: `0.2.84`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -33,9 +33,11 @@ Chrome 中需要启用：
 
 进入 EA FC Web App 后，等待 FSU 加载完成，再使用右侧或悬浮的 Loop Runner 面板。
 
-Runner 会尽量读取并跟随 FSU 的 SBC ignore player configuration，例如 Only Untradeable、Exclude Evolution、排除指定联赛、storage 优先、普通/稀有优先级、Lock player 等；84x10 等 FSU 自动填阵容的 loop 仍会在提交前执行 Runner 自己的硬保护检查。
+Runner 会尽量读取并跟随 FSU 的 SBC ignore player configuration，例如 Only Untradeable、Exclude Evolution、排除指定联赛、storage 优先、普通/稀有优先级、Lock player 等；84x10 等 FSU 自动填阵容的 loop 仍会在提交前执行 Runner 自己的硬保护检查。`0.2.84` 起普通金卡材料不再套用 FSU 的通用过滤，但 FSU Lock player 始终保留。
 
 `0.2.83` 起直接读取 FSU 26.09 暴露的 `window.info.build`、`window.info.set` 和 `window.info.lock`，对应 Tampermonkey GM storage 的 `build`、`set`、`lock_26`。日志的 source 应显示 `window.info.build/set`，不再把 EA 的 `LocalStorageVersion` 误判为 FSU 设置。
+
+`0.2.84` 起普通金卡材料不再受 FSU 的 `Only Untradeable`、`Exclude designated league`、`Exclude Evolution` 或 rarity-player 开关限制，避免便宜金卡因通用保护被排除。FSU Lock player、Runner 的评分上限、特殊卡类型/数量保护、概念卡检查及各 loop 自己的可交易硬保护不变。其它类型材料不足且确实受到 FSU 过滤时，日志会汇总生效的 FSU guard，并明确提示 Runner 没有绕过这些设置。
 
 Inventory-first SBC 会在选人阶段按 `definitionId` 去重，避免同一球员的两张重复卡被选入同一套 SBC 后保存时只剩 10/11 人；同时会继承 loop 级 `blockTradeable`，例如 84+ TOTW loop 不会为了补阵容而选入可交易卡。
 
