@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.80
+// @version      0.2.81
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -358,7 +358,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.80',
+    version: '0.2.81',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2623,7 +2623,16 @@
     vc.initWithSBCSet?.(set, challenge.id);
     nav.pushViewController?.(vc, true);
     await waitLoadingEnd();
-    await waitFor(() => ctrl()?.constructor?.name === 'UTSBCSquadSplitViewController', 15000, 'SBC squad screen');
+    const activeController = await waitFor(() => {
+      const current = ctrl();
+      if (!current || current?.constructor?.name !== 'UTSBCSquadSplitViewController') return null;
+      return current === vc || current !== controller ? current : null;
+    }, 15000, `${set.name} target SBC squad screen`);
+    await waitFor(() => {
+      const current = ctrl();
+      if (current !== vc && current !== activeController) return null;
+      return current?._squad || null;
+    }, 15000, `${set.name} target SBC squad object`);
     return { set, challenge };
   }
 
