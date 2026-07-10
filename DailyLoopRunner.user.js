@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.85
+// @version      0.2.86
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -363,7 +363,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.85',
+    version: '0.2.86',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1368,7 +1368,7 @@
     return rareflag > 1;
   }
 
-  function isUnprotectedNormalGoldFodder(item) {
+  function isNormalGoldFodder(item) {
     return isGold(item) && !isSbcSpecialItem(item);
   }
 
@@ -1377,7 +1377,7 @@
     const rating = Number(item?.rating || 0);
     if (spec.minRating !== undefined && rating < Number(spec.minRating)) return false;
     if (spec.maxRating !== undefined && rating > Number(spec.maxRating)) return false;
-    if (spec.blockTradeable === true && isTradeable(item) && !isUnprotectedNormalGoldFodder(item)) return false;
+    if (spec.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) return false;
     if (spec.special === true && !isSpecial(item)) return false;
     if (spec.special === false && isSpecial(item)) return false;
     if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
@@ -2062,7 +2062,7 @@
       `nonSpecialFirst:${onOff(settings.priorityNonSpecialPlayers)}`,
       `storageFirst:${onOff(settings.priorityStoragePlayers)}`,
       `silverBronzeNormal:${onOff(settings.silverBronzePrioritizeNormal)}`,
-      'normalGoldFodder:unrestricted-except-lock',
+      'normalGoldPolicy:follow-fsu',
       `locked:${lockedCount}`,
     ].join('; ');
   }
@@ -2162,25 +2162,31 @@
     const reasons = [];
     if (!isPlayer(item)) return reasons;
     if (isFsuLockedItem(item, settings)) reasons.push('fsu-locked-player');
-    const relaxedNormalGold = isUnprotectedNormalGoldFodder(item);
-    if (!relaxedNormalGold) {
-      if (settings.onlyUntradeable && isTradeable(item)) reasons.push('fsu-only-untradeable');
-      if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push('fsu-exclude-evolution');
-      const excludedLeagueIds = (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0);
-      if (settings.excludeDesignatedLeagues && excludedLeagueIds.length) {
-        const leagueId = itemLeagueId(item);
-        if (leagueId && excludedLeagueIds.includes(leagueId)) {
-          reasons.push(`fsu-excluded-league-${leagueId}`);
-        }
+    if (settings.onlyUntradeable && isTradeable(item)) reasons.push('fsu-only-untradeable');
+    if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push('fsu-exclude-evolution');
+    const excludedLeagueIds = (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0);
+    if (settings.excludeDesignatedLeagues && excludedLeagueIds.length) {
+      const leagueId = itemLeagueId(item);
+      if (leagueId && excludedLeagueIds.includes(leagueId)) {
+        reasons.push(`fsu-excluded-league-${leagueId}`);
       }
-      if (
-        settings.useRarityPlayer === false &&
-        spec.special !== true &&
-        spec.allowSpecial !== true &&
-        isSpecial(item)
-      ) {
-        reasons.push('fsu-rarity-player-off');
+    }
+    if (isNormalGoldFodder(item)) {
+      const range = settings.goldRange || FSU_COMPAT_DEFAULTS.goldRange;
+      const minRating = Number(range[0] || 75);
+      const maxRating = Number(range[1] || 83);
+      const rating = Number(item?.rating || 0);
+      if (rating < minRating || rating > maxRating) {
+        reasons.push(`fsu-gold-range-${minRating}-${maxRating}`);
       }
+    }
+    if (
+      settings.useRarityPlayer === false &&
+      spec.special !== true &&
+      spec.allowSpecial !== true &&
+      isSpecial(item)
+    ) {
+      reasons.push('fsu-rarity-player-off');
     }
     return reasons;
   }
@@ -3055,7 +3061,7 @@
     if (spec.playerOnly && !isPlayer(item)) reasons.push('not-player');
     if (spec.minRating !== undefined && rating < Number(spec.minRating)) reasons.push(`rating-under-${Number(spec.minRating)}`);
     if (spec.maxRating !== undefined && rating > Number(spec.maxRating)) reasons.push(`rating-over-${Number(spec.maxRating)}`);
-    if (spec.blockTradeable === true && isTradeable(item) && !isUnprotectedNormalGoldFodder(item)) reasons.push('tradeable-blocked');
+    if (spec.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) reasons.push('tradeable-blocked');
     if (spec.special === true && !isSpecial(item)) reasons.push('not-special');
     if (spec.special === false && isSpecial(item)) reasons.push('special-blocked');
     if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) reasons.push('special-blocked');
@@ -3150,6 +3156,10 @@
     }
     if (settings.excludeEvolution) active.push('Exclude Evolution');
     if (settings.useRarityPlayer === false) active.push('Use Rarity Player off');
+    if (Object.keys(fsuRejects).some((reason) => reason.startsWith('fsu-gold-range-'))) {
+      const range = settings.goldRange || FSU_COMPAT_DEFAULTS.goldRange;
+      active.push(`Golden Player Range (${range[0]}-${range[1]})`);
+    }
     const lockedCount = uniqueNumberList([
       ...(settings.lockedItemIds || []),
       ...(settings.lockedDefinitionIds || []),
@@ -3846,7 +3856,12 @@
 
   function getSubmittedRatingLimit(item, loopDef = {}) {
     const normalGoldLimit = Number(loopDef.maxNormalGoldSubmittedRating || 0);
-    if (normalGoldLimit && isGold(item) && !isSbcSpecialItem(item)) return normalGoldLimit;
+    if (isNormalGoldFodder(item)) {
+      const fsuRange = getFsuSettings().goldRange || FSU_COMPAT_DEFAULTS.goldRange;
+      const fsuGoldLimit = Number(fsuRange[1] || 0);
+      const limits = [normalGoldLimit, fsuGoldLimit].filter((limit) => Number.isFinite(limit) && limit > 0);
+      if (limits.length) return Math.min(...limits);
+    }
     return Number(loopDef.maxSubmittedRating || 0);
   }
 
@@ -3859,7 +3874,7 @@
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
-    if (loopDef.blockTradeable !== false && isTradeable(item) && !isUnprotectedNormalGoldFodder(item)) return false;
+    if (loopDef.blockTradeable !== false && isTradeable(item) && !isNormalGoldFodder(item)) return false;
     const maxRating = getSubmittedRatingLimit(item, loopDef);
     if (maxRating && Number(item?.rating || 0) > maxRating) return false;
     const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
@@ -4602,7 +4617,7 @@
     if (loopDef.blockSpecial !== false && isSbcSpecialItem(item) && (!allowedSpecialCount || specialIndex > allowedSpecialCount)) {
       reasons.push('special-blocked');
     }
-    if (loopDef.blockTradeable !== false && isTradeable(item) && !isUnprotectedNormalGoldFodder(item)) reasons.push('tradeable-blocked');
+    if (loopDef.blockTradeable !== false && isTradeable(item) && !isNormalGoldFodder(item)) reasons.push('tradeable-blocked');
     if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
     getFsuRejectReasons(item, fsuSpec).forEach((reason) => {
       if (!reasons.includes(reason)) reasons.push(reason);
@@ -4688,7 +4703,8 @@
       const ratingLimit = getSubmittedRatingLimit(item, loopDef);
       const prefix = `slot ${index + 1} ${name} rating:${rating} id:${itemId} def:${definitionId}`;
       if (reasons.some((reason) => reason.startsWith('rating-over-'))) {
-        hints.push(`${prefix}: replace with rating <= ${ratingLimit || 'limit'} untradeable card`);
+        const replacement = isNormalGoldFodder(item) ? 'normal gold card' : 'untradeable card';
+        hints.push(`${prefix}: replace with rating <= ${ratingLimit || 'limit'} ${replacement}`);
       }
       if (reasons.includes('special-blocked')) {
         hints.push(`${prefix}: replace extra special card with a normal/rare gold card`);
@@ -4716,6 +4732,10 @@
       const leagueReason = reasons.find((reason) => reason.startsWith('fsu-excluded-league-'));
       if (leagueReason) {
         hints.push(`${prefix}: FSU excluded league ${leagueReason.replace('fsu-excluded-league-', '')}; replace with another league`);
+      }
+      const goldRangeReason = reasons.find((reason) => reason.startsWith('fsu-gold-range-'));
+      if (goldRangeReason) {
+        hints.push(`${prefix}: outside FSU Golden Player Range ${goldRangeReason.replace('fsu-gold-range-', '')}; replace it or change FSU settings`);
       }
       if (reasons.includes('fsu-rarity-player-off')) {
         hints.push(`${prefix}: FSU Use Rarity Player is off; replace this special/rarity card`);
