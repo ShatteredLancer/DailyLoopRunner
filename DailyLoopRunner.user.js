@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.82
+// @version      0.2.83
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -360,7 +360,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.82',
+    version: '0.2.83',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1721,6 +1721,7 @@
   function normalizeGoldRange(settings, rows) {
     const direct = numberListFromAny(settings.goldRange || settings.goldenRange || settings.goldRatingRange).slice(0, 2);
     if (direct.length === 2) return direct.sort((a, b) => a - b);
+    if (direct.length === 1 && direct[0] >= 75 && direct[0] <= 99) return [75, direct[0]];
 
     let min = null;
     let max = null;
@@ -1768,16 +1769,16 @@
       matched = true;
     }
 
+    const explicitGoldRange = numberListFromAny(raw.goldRange || raw.goldenRange || raw.goldRatingRange);
     settings.goldRange = normalizeGoldRange(raw, rows);
-    if (!matched && !rows.some((entry) => /fsu|enhancer|sbc|ignore|rarity|untrad|league|evo|storage/i.test(entry.path))) {
-      return null;
-    }
+    if (explicitGoldRange.length) matched = true;
+    if (!matched) return null;
     return settings;
   }
 
   function likelyFsuStorageKey(key, value) {
-    const text = `${key} ${typeof value === 'string' ? value.slice(0, 400) : ''}`;
-    return /fsu|enhancer|sbc|ignore|rarity|untrad|league|evo|evolution|storage|golden|player.*range/i.test(text);
+    const text = String(key || '');
+    return /fsu|enhancer|sbc.*(?:ignore|setting)|(?:ignore|rarity|untrad|league|evo|evolution|golden|player.*range).*settings?/i.test(text);
   }
 
   function mergeLockedPlayersIntoSettings(settings, locked, sourceLabel = '') {
@@ -1838,7 +1839,60 @@
     return null;
   }
 
+  function fsuInfoBoolean(build, key, fallback) {
+    const value = boolFromAny(safeReadField(build, key));
+    return value === null ? fallback : value;
+  }
+
+  function readFsuSettingsFromInfo() {
+    let info;
+    try { info = W.info; } catch { info = null; }
+    const build = info?.build;
+    if (!isInspectableObject(build)) return null;
+
+    const knownBuildKeys = [
+      'ignorepos',
+      'untradeable',
+      'league',
+      'flag',
+      'academy',
+      'strictlypcik',
+      'comprange',
+      'comprare',
+      'firststorage',
+      'sbfirstcommon',
+    ];
+    if (!knownBuildKeys.some((key) => safeReadField(build, key) !== undefined)) return null;
+
+    const set = isInspectableObject(info?.set) ? info.set : {};
+    const rawGoldenMax = Number(safeReadField(set, 'goldenrange'));
+    const goldenMax = Number.isFinite(rawGoldenMax) && rawGoldenMax >= 75 && rawGoldenMax <= 99
+      ? rawGoldenMax
+      : FSU_COMPAT_DEFAULTS.goldRange[1];
+
+    return {
+      ...FSU_COMPAT_DEFAULTS,
+      ignorePlayerPosition: fsuInfoBoolean(build, 'ignorepos', FSU_COMPAT_DEFAULTS.ignorePlayerPosition),
+      onlyUntradeable: fsuInfoBoolean(build, 'untradeable', FSU_COMPAT_DEFAULTS.onlyUntradeable),
+      excludeDesignatedLeagues: fsuInfoBoolean(build, 'league', FSU_COMPAT_DEFAULTS.excludeDesignatedLeagues),
+      excludedLeagueIds: uniqueNumberList(numberListFromAny(safeReadField(set, 'shield_league'))),
+      useRarityPlayer: fsuInfoBoolean(build, 'flag', FSU_COMPAT_DEFAULTS.useRarityPlayer),
+      excludeEvolution: fsuInfoBoolean(build, 'academy', FSU_COMPAT_DEFAULTS.excludeEvolution),
+      playerPickStrictCommonRare: fsuInfoBoolean(build, 'strictlypcik', FSU_COMPAT_DEFAULTS.playerPickStrictCommonRare),
+      priorityRareWithinGoldRange: fsuInfoBoolean(build, 'comprange', FSU_COMPAT_DEFAULTS.priorityRareWithinGoldRange),
+      priorityNonSpecialPlayers: fsuInfoBoolean(build, 'comprare', FSU_COMPAT_DEFAULTS.priorityNonSpecialPlayers),
+      priorityStoragePlayers: fsuInfoBoolean(build, 'firststorage', FSU_COMPAT_DEFAULTS.priorityStoragePlayers),
+      silverBronzePrioritizeNormal: fsuInfoBoolean(build, 'sbfirstcommon', FSU_COMPAT_DEFAULTS.silverBronzePrioritizeNormal),
+      goldRange: [75, goldenMax],
+      detected: true,
+      source: 'window.info.build/set',
+    };
+  }
+
   function readFsuSettingsFromWindow() {
+    const infoSettings = readFsuSettingsFromInfo();
+    if (infoSettings) return infoSettings;
+
     const roots = [];
     const rootNames = [
       'FSU',
