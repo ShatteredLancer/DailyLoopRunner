@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.81
+// @version      0.2.82
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -221,11 +221,11 @@
       maxCompletions: 1,
       useRoundsAsCompletions: true,
       allowMultipleCompletions: true,
-      maxSubmittedRating: 85,
+      maxSubmittedRating: 88,
       inventoryFillFirst: true,
       requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
-        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 88, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 88, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
       ],
       priorityPiles: ['storage', 'club'],
       requiredSpecialCount: 0,
@@ -251,6 +251,7 @@
       ],
       maxCompletions: 1,
       maxSubmittedRating: 88,
+      maxNormalGoldSubmittedRating: 89,
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
@@ -261,7 +262,7 @@
         sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
         rewardPackIds: [20707, 20441],
         rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
-        maxSubmittedRating: 85,
+        maxSubmittedRating: 88,
         blockSpecial: true,
         blockTradeable: true,
         openRewardPacks: true,
@@ -285,6 +286,7 @@
       maxCompletions: 7,
       allowMultipleCompletions: true,
       maxSubmittedRating: 88,
+      maxNormalGoldSubmittedRating: 89,
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
@@ -295,7 +297,7 @@
         sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
         rewardPackIds: [20707, 20441],
         rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
-        maxSubmittedRating: 85,
+        maxSubmittedRating: 88,
         blockSpecial: true,
         blockTradeable: true,
         openRewardPacks: true,
@@ -358,7 +360,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.81',
+    version: '0.2.82',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -550,6 +552,12 @@
       const maxRating = Number(loopDef.maxSubmittedRating);
       if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
         errors.push('maxSubmittedRating must be a number between 1 and 99');
+      }
+    }
+    if (loopDef.maxNormalGoldSubmittedRating !== undefined) {
+      const maxRating = Number(loopDef.maxNormalGoldSubmittedRating);
+      if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
+        errors.push('maxNormalGoldSubmittedRating must be a number between 1 and 99');
       }
     }
     if (loopDef.requiredSpecialMinRating !== undefined) {
@@ -3736,6 +3744,12 @@
     )[0] || null;
   }
 
+  function getSubmittedRatingLimit(item, loopDef = {}) {
+    const normalGoldLimit = Number(loopDef.maxNormalGoldSubmittedRating || 0);
+    if (normalGoldLimit && isGold(item) && !isSbcSpecialItem(item)) return normalGoldLimit;
+    return Number(loopDef.maxSubmittedRating || 0);
+  }
+
   function isEligibleNormalRepairFiller(item, loopDef = {}) {
     if (!isPlayer(item)) return false;
     const id = Number(item?.id || 0);
@@ -3746,7 +3760,7 @@
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
     if (loopDef.blockTradeable !== false && isTradeable(item)) return false;
-    const maxRating = Number(loopDef.maxSubmittedRating || 0);
+    const maxRating = getSubmittedRatingLimit(item, loopDef);
     if (maxRating && Number(item?.rating || 0) > maxRating) return false;
     const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
     const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number));
@@ -4134,6 +4148,19 @@
     return null;
   }
 
+  function summarizeSquadRatings(items = []) {
+    const counts = new Map();
+    for (const item of items || []) {
+      const rating = Number(item?.rating || 0);
+      if (!rating) continue;
+      counts.set(rating, (counts.get(rating) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([rating, count]) => `${rating}x${count}`)
+      .join(', ') || 'none';
+  }
+
   async function repairSubmitReadinessIfNeeded(loopDef, opened, fillResult, inspection) {
     const missingRequirements = inspection.missingRequirements || [];
     const hasNonPlayerCountMissing = missingRequirements.some((message) => !String(message).startsWith('player-count '));
@@ -4155,6 +4182,8 @@
         } else {
           log(`${loopDef.name}: submit-ready repair found no eligible normal gold upgrade candidate`);
         }
+        const maxRating = Number(loopDef.maxNormalGoldSubmittedRating || loopDef.maxSubmittedRating || 0);
+        log(`${loopDef.name}: safe fodder exhausted at squad ratings ${summarizeSquadRatings(nextInspection.items)}; no unused eligible normal gold card can raise another slot${maxRating ? ` within rating <= ${maxRating}` : ''}; tradeable, special, FSU-locked, and over-cap cards remain protected`);
         return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: false };
       }
 
@@ -4262,11 +4291,11 @@
       rewardPackIds: [20707, 20441],
       rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
       maxCompletions: 1,
-      maxSubmittedRating: 85,
+      maxSubmittedRating: 88,
       inventoryFillFirst: true,
       requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
-        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 85, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 88, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 88, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
       ],
       priorityPiles: ['storage', 'club'],
       requiredSpecialCount: 0,
@@ -4343,7 +4372,11 @@
     inspection = submitReadyRepair.inspection;
     squad = fillResult.squad || squad;
 
-    if (!fillResult.submitReady) fail(`${upgradeDef.name}: submit is not ready after fill`);
+    if (!fillResult.submitReady) {
+      const reason = `safe normal-gold fodder exhausted before submit became ready (squad ratings ${summarizeSquadRatings(inspection.items)}; max allowed ${upgradeDef.maxSubmittedRating || 'none'})`;
+      log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${upgradeDef.name} ${reason}`);
+      return { ok: false, reason };
+    }
     assertSbcSquadSafe(upgradeDef, inspection);
 
     const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
@@ -4425,7 +4458,7 @@
     const reasons = [];
     const rating = Number(item?.rating || 0);
     const itemId = Number(item?.id || 0);
-    const maxRating = Number(loopDef.maxSubmittedRating || 0);
+    const maxRating = getSubmittedRatingLimit(item, loopDef);
     const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
     const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number));
     const allowedSpecialCount = Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
@@ -4542,7 +4575,6 @@
 
   function getManualSbcFixHints(loopDef, inspection) {
     const hints = [];
-    const maxRating = Number(loopDef.maxSubmittedRating || 0);
     const allowedSpecialCount = Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
     const requiredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
 
@@ -4551,9 +4583,10 @@
       const rating = Number(item?.rating || 0) || '?';
       const itemId = Number(item?.id || 0) || '?';
       const definitionId = Number(item?.definitionId || 0) || '?';
+      const ratingLimit = getSubmittedRatingLimit(item, loopDef);
       const prefix = `slot ${index + 1} ${name} rating:${rating} id:${itemId} def:${definitionId}`;
       if (reasons.some((reason) => reason.startsWith('rating-over-'))) {
-        hints.push(`${prefix}: replace with rating <= ${maxRating || 'limit'} untradeable card`);
+        hints.push(`${prefix}: replace with rating <= ${ratingLimit || 'limit'} untradeable card`);
       }
       if (reasons.includes('special-blocked')) {
         hints.push(`${prefix}: replace extra special card with a normal/rare gold card`);
@@ -4603,7 +4636,8 @@
     }
 
     if (requiredSpecialCount && (inspection.requiredSpecialMetCount || 0) < requiredSpecialCount) {
-      hints.push(`add ${requiredSpecialCount - (inspection.requiredSpecialMetCount || 0)} untradeable ${requiredSpecialLabel(loopDef)} card(s) rating <= ${maxRating || 'limit'}`);
+      const requiredSpecialMaxRating = Number(loopDef.maxSubmittedRating || 0);
+      hints.push(`add ${requiredSpecialCount - (inspection.requiredSpecialMetCount || 0)} untradeable ${requiredSpecialLabel(loopDef)} card(s) rating <= ${requiredSpecialMaxRating || 'limit'}`);
     }
     const missingPlayers = parseMissingPlayerCount(inspection);
     if (missingPlayers) {
