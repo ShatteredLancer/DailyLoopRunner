@@ -332,6 +332,7 @@
       "useRoundsAsCompletions": true,
       "allowMultipleCompletions": true,
       "maxSubmittedRating": 88,
+      "maxNormalGoldSubmittedRating": 99,
       "inventoryFillFirst": true,
       "requirements": [
         {
@@ -339,7 +340,7 @@
           "rarity": "rare",
           "count": 6,
           "minRating": 84,
-          "maxRating": 88,
+          "maxRating": 99,
           "playerOnly": true,
           "allowSpecial": false,
           "priorityPiles": ["storage", "club"]
@@ -349,7 +350,7 @@
           "rarity": "rare",
           "count": 5,
           "minRating": 82,
-          "maxRating": 88,
+          "maxRating": 99,
           "playerOnly": true,
           "allowSpecial": false,
           "priorityPiles": ["storage", "club"]
@@ -379,7 +380,7 @@
       ],
       "maxCompletions": 1,
       "maxSubmittedRating": 88,
-      "maxNormalGoldSubmittedRating": 89,
+      "maxNormalGoldSubmittedRating": 99,
       "requiredSpecialCount": 1,
       "allowedSpecialCount": 1,
       "requiredSpecialKind": "totw-tots-fof",
@@ -408,6 +409,7 @@
           "TOTW Provision Refresh Pack"
         ],
         "maxSubmittedRating": 88,
+        "maxNormalGoldSubmittedRating": 99,
         "inventoryFillFirst": true,
         "requirements": [
           {
@@ -415,7 +417,7 @@
             "rarity": "rare",
             "count": 6,
             "minRating": 84,
-            "maxRating": 88,
+            "maxRating": 99,
             "playerOnly": true,
             "allowSpecial": false,
             "priorityPiles": ["storage", "club"]
@@ -425,7 +427,7 @@
             "rarity": "rare",
             "count": 5,
             "minRating": 82,
-            "maxRating": 88,
+            "maxRating": 99,
             "playerOnly": true,
             "allowSpecial": false,
             "priorityPiles": ["storage", "club"]
@@ -456,7 +458,7 @@
       "maxCompletions": 7,
       "allowMultipleCompletions": true,
       "maxSubmittedRating": 88,
-      "maxNormalGoldSubmittedRating": 89,
+      "maxNormalGoldSubmittedRating": 99,
       "requiredSpecialCount": 1,
       "allowedSpecialCount": 1,
       "requiredSpecialKind": "totw-tots-fof",
@@ -485,6 +487,7 @@
           "TOTW Provision Refresh Pack"
         ],
         "maxSubmittedRating": 88,
+        "maxNormalGoldSubmittedRating": 99,
         "inventoryFillFirst": true,
         "requirements": [
           {
@@ -492,7 +495,7 @@
             "rarity": "rare",
             "count": 6,
             "minRating": 84,
-            "maxRating": 88,
+            "maxRating": 99,
             "playerOnly": true,
             "allowSpecial": false,
             "priorityPiles": ["storage", "club"]
@@ -502,7 +505,7 @@
             "rarity": "rare",
             "count": 5,
             "minRating": 82,
-            "maxRating": 88,
+            "maxRating": 99,
             "playerOnly": true,
             "allowSpecial": false,
             "priorityPiles": ["storage", "club"]

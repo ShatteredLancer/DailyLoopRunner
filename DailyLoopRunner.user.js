@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.84
+// @version      0.2.85
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -222,10 +222,11 @@
       useRoundsAsCompletions: true,
       allowMultipleCompletions: true,
       maxSubmittedRating: 88,
+      maxNormalGoldSubmittedRating: 99,
       inventoryFillFirst: true,
       requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 88, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
-        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 88, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 99, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 99, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
       ],
       priorityPiles: ['storage', 'club'],
       requiredSpecialCount: 0,
@@ -251,7 +252,7 @@
       ],
       maxCompletions: 1,
       maxSubmittedRating: 88,
-      maxNormalGoldSubmittedRating: 89,
+      maxNormalGoldSubmittedRating: 99,
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
@@ -263,6 +264,7 @@
         rewardPackIds: [20707, 20441],
         rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
         maxSubmittedRating: 88,
+        maxNormalGoldSubmittedRating: 99,
         blockSpecial: true,
         blockTradeable: true,
         openRewardPacks: true,
@@ -286,7 +288,7 @@
       maxCompletions: 7,
       allowMultipleCompletions: true,
       maxSubmittedRating: 88,
-      maxNormalGoldSubmittedRating: 89,
+      maxNormalGoldSubmittedRating: 99,
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
@@ -298,6 +300,7 @@
         rewardPackIds: [20707, 20441],
         rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
         maxSubmittedRating: 88,
+        maxNormalGoldSubmittedRating: 99,
         blockSpecial: true,
         blockTradeable: true,
         openRewardPacks: true,
@@ -360,7 +363,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.84',
+    version: '0.2.85',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -1365,12 +1368,16 @@
     return rareflag > 1;
   }
 
+  function isUnprotectedNormalGoldFodder(item) {
+    return isGold(item) && !isSbcSpecialItem(item);
+  }
+
   function itemMatchesSpec(item, spec = {}, settings = getFsuSettings()) {
     if (spec.playerOnly && !isPlayer(item)) return false;
     const rating = Number(item?.rating || 0);
     if (spec.minRating !== undefined && rating < Number(spec.minRating)) return false;
     if (spec.maxRating !== undefined && rating > Number(spec.maxRating)) return false;
-    if (spec.blockTradeable === true && isTradeable(item)) return false;
+    if (spec.blockTradeable === true && isTradeable(item) && !isUnprotectedNormalGoldFodder(item)) return false;
     if (spec.special === true && !isSpecial(item)) return false;
     if (spec.special === false && isSpecial(item)) return false;
     if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
@@ -2055,7 +2062,7 @@
       `nonSpecialFirst:${onOff(settings.priorityNonSpecialPlayers)}`,
       `storageFirst:${onOff(settings.priorityStoragePlayers)}`,
       `silverBronzeNormal:${onOff(settings.silverBronzePrioritizeNormal)}`,
-      'normalGoldFodder:relaxed',
+      'normalGoldFodder:unrestricted-except-lock',
       `locked:${lockedCount}`,
     ].join('; ');
   }
@@ -2155,7 +2162,7 @@
     const reasons = [];
     if (!isPlayer(item)) return reasons;
     if (isFsuLockedItem(item, settings)) reasons.push('fsu-locked-player');
-    const relaxedNormalGold = isGold(item) && !isSpecial(item);
+    const relaxedNormalGold = isUnprotectedNormalGoldFodder(item);
     if (!relaxedNormalGold) {
       if (settings.onlyUntradeable && isTradeable(item)) reasons.push('fsu-only-untradeable');
       if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push('fsu-exclude-evolution');
@@ -3048,7 +3055,7 @@
     if (spec.playerOnly && !isPlayer(item)) reasons.push('not-player');
     if (spec.minRating !== undefined && rating < Number(spec.minRating)) reasons.push(`rating-under-${Number(spec.minRating)}`);
     if (spec.maxRating !== undefined && rating > Number(spec.maxRating)) reasons.push(`rating-over-${Number(spec.maxRating)}`);
-    if (spec.blockTradeable === true && isTradeable(item)) reasons.push('tradeable-blocked');
+    if (spec.blockTradeable === true && isTradeable(item) && !isUnprotectedNormalGoldFodder(item)) reasons.push('tradeable-blocked');
     if (spec.special === true && !isSpecial(item)) reasons.push('not-special');
     if (spec.special === false && isSpecial(item)) reasons.push('special-blocked');
     if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) reasons.push('special-blocked');
@@ -3852,7 +3859,7 @@
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
-    if (loopDef.blockTradeable !== false && isTradeable(item)) return false;
+    if (loopDef.blockTradeable !== false && isTradeable(item) && !isUnprotectedNormalGoldFodder(item)) return false;
     const maxRating = getSubmittedRatingLimit(item, loopDef);
     if (maxRating && Number(item?.rating || 0) > maxRating) return false;
     const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
@@ -4276,7 +4283,7 @@
           log(`${loopDef.name}: submit-ready repair found no eligible normal gold upgrade candidate`);
         }
         const maxRating = Number(loopDef.maxNormalGoldSubmittedRating || loopDef.maxSubmittedRating || 0);
-        log(`${loopDef.name}: safe fodder exhausted at squad ratings ${summarizeSquadRatings(nextInspection.items)}; no unused eligible normal gold card can raise another slot${maxRating ? ` within rating <= ${maxRating}` : ''}; tradeable, special, FSU-locked, and over-cap cards remain protected`);
+        log(`${loopDef.name}: safe fodder exhausted at squad ratings ${summarizeSquadRatings(nextInspection.items)}; no unused eligible normal gold card can raise another slot${maxRating ? ` within rating <= ${maxRating}` : ''}; special, FSU-locked, and over-cap cards remain protected`);
         return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: false };
       }
 
@@ -4385,10 +4392,11 @@
       rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
       maxCompletions: 1,
       maxSubmittedRating: 88,
+      maxNormalGoldSubmittedRating: 99,
       inventoryFillFirst: true,
       requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 88, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
-        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 88, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 99, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 99, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
       ],
       priorityPiles: ['storage', 'club'],
       requiredSpecialCount: 0,
@@ -4466,7 +4474,8 @@
     squad = fillResult.squad || squad;
 
     if (!fillResult.submitReady) {
-      const reason = `safe normal-gold fodder exhausted before submit became ready (squad ratings ${summarizeSquadRatings(inspection.items)}; max allowed ${upgradeDef.maxSubmittedRating || 'none'})`;
+      const normalGoldLimit = upgradeDef.maxNormalGoldSubmittedRating || upgradeDef.maxSubmittedRating || 'none';
+      const reason = `safe normal-gold fodder exhausted before submit became ready (squad ratings ${summarizeSquadRatings(inspection.items)}; max allowed ${normalGoldLimit})`;
       log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${upgradeDef.name} ${reason}`);
       return { ok: false, reason };
     }
@@ -4593,7 +4602,7 @@
     if (loopDef.blockSpecial !== false && isSbcSpecialItem(item) && (!allowedSpecialCount || specialIndex > allowedSpecialCount)) {
       reasons.push('special-blocked');
     }
-    if (loopDef.blockTradeable !== false && isTradeable(item)) reasons.push('tradeable-blocked');
+    if (loopDef.blockTradeable !== false && isTradeable(item) && !isUnprotectedNormalGoldFodder(item)) reasons.push('tradeable-blocked');
     if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
     getFsuRejectReasons(item, fsuSpec).forEach((reason) => {
       if (!reasons.includes(reason)) reasons.push(reason);
