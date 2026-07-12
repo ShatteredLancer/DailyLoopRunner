@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.97
+// @version      0.2.98
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -382,7 +382,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.97',
+    version: '0.2.98',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -2692,10 +2692,29 @@
     if (!pack) fail(`Pack not found for ${purpose}`);
     await clearUnassigned(`opening ${purpose}`);
     const name = packName(pack);
-    log(`Opening pack: ${name} (#${pack.id})`);
-    const result = await observeOnce(pack.open(), ctrl(), 30000, `open ${name}`);
-    if (!result?.success || !result?.response?.items) {
+    const attempts = options.retryOn471 === true ? 2 : 1;
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      if (attempt > 1) {
+        log(`${purpose}: retrying pack open after pending unassigned cleanup`);
+        await sleep(CFG.pauseMs);
+        await clearUnassigned(`${purpose} 471 recovery cleanup`);
+        await refreshInventoryCaches(`${purpose} 471 recovery`, { quiet: true });
+      }
+
+      log(`Opening pack: ${name} (#${pack.id})${attempt > 1 ? ` retry ${attempt}/${attempts}` : ''}`);
+      const result = await observeOnce(pack.open(), ctrl(), 30000, `open ${name}`);
+      if (result?.success && result?.response?.items) {
+        markStalePack(pack);
+        await waitLoadingEnd();
+        return result.response.items || [];
+      }
+
       const code = result?.error?.code || result?.status || 'unknown';
+      if (options.retryOn471 === true && String(code) === '471' && attempt < attempts) {
+        log(`${purpose}: pack open returned 471; waiting for pending unassigned items before retry`);
+        continue;
+      }
       if (options.allowGone && String(code) === '404') {
         markStalePack(pack);
         log(`Skipping stale pack for ${purpose}: ${name} (#${pack.id}) returned 404`);
@@ -2705,9 +2724,8 @@
       }
       fail(`Open pack failed: ${code}`);
     }
-    markStalePack(pack);
-    await waitLoadingEnd();
-    return result.response.items || [];
+
+    fail(`Open pack failed after ${attempts} attempt(s): ${name}`);
   }
 
   async function openSourceBronzePack() {
@@ -6330,7 +6348,7 @@
       }
 
       log(`${loopDef.name}: opening ${packName(pack)} (#${pack.id}) ${packsOpened + 1}/${maxPacks}`);
-      const items = await openPack(pack, `${loopDef.name} source pack`, { allowGone: true });
+      const items = await openPack(pack, `${loopDef.name} source pack`, { allowGone: true, retryOn471: true });
       if (!items) {
         await sleep(CFG.pauseMs);
         continue;
