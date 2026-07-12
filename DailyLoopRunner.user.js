@@ -2375,6 +2375,7 @@
     if (id && state.consumedItemIds.has(id)) return false;
     if (options.protectHighGold && isProtectedHighGold(item)) return false;
     if (isConceptItem(item)) return false;
+    if (isLimitedUseItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
@@ -3048,6 +3049,7 @@
     if (id && state.consumedItemIds.has(id)) reasons.push('consumed-this-run');
     if (options.protectHighGold && isProtectedHighGold(item)) reasons.push('protected-82-plus');
     if (isConceptItem(item)) reasons.push('concept');
+    if (isLimitedUseItem(item)) reasons.push(isLoanItem(item) ? 'loan' : 'limited-use');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) reasons.push('active-trade');
@@ -3871,6 +3873,7 @@
     if (id && state.consumedItemIds.has(id)) return false;
     if (isSbcSpecialItem(item)) return false;
     if (isConceptItem(item)) return false;
+    if (isLimitedUseItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
@@ -3935,6 +3938,8 @@
       reasons.includes('protected-id') ||
       reasons.includes('protected-def') ||
       reasons.includes('concept') ||
+      reasons.includes('loan') ||
+      reasons.includes('limited-use') ||
       reasons.includes('academy') ||
       reasons.some((reason) => reason.startsWith('rating-over-')) ||
       getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }).length > 0;
@@ -4588,6 +4593,7 @@
 
     if (itemId && state.consumedItemIds.has(itemId)) reasons.push('consumed-this-run');
     if (isConceptItem(item)) reasons.push('concept');
+    if (isLimitedUseItem(item)) reasons.push(isLoanItem(item) ? 'loan' : 'limited-use');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) {
@@ -4652,7 +4658,7 @@
         String(reason).startsWith('required-totw') ||
         String(reason).startsWith('rating-over-') ||
         String(reason).startsWith('fsu-') ||
-        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'academy', 'active-trade', 'consumed-this-run'].includes(String(reason))
+        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'loan', 'limited-use', 'academy', 'active-trade', 'consumed-this-run'].includes(String(reason))
       )
     ).length;
     const missingRequirements = [];
@@ -4745,6 +4751,9 @@
       }
       if (reasons.includes('concept')) {
         hints.push(`${prefix}: replace concept card`);
+      }
+      if (reasons.includes('loan') || reasons.includes('limited-use')) {
+        hints.push(`${prefix}: replace loan/limited-use card`);
       }
       if (reasons.includes('academy')) {
         hints.push(`${prefix}: replace academy/evolution locked card`);
@@ -5088,6 +5097,10 @@
       return null;
     }
     await fillSbcSquad(loopDef.name);
+    const squad = ctrl()?._squad || opened.challenge?.squad;
+    const inspection = inspectSbcSquad(loopDef, squad);
+    logSbcSquadInspection(loopDef, inspection);
+    assertSbcSquadSafe(loopDef, inspection);
     const rewardPackId = await submitSbcAndGetAwardPackId(set);
     log(`${loopDef.name} reward pack id: ${rewardPackId || 'unknown'}`);
     return { submitted: true, rewardPackId };
@@ -5506,7 +5519,11 @@
 
     while (completions < maxCompletions) {
       stopPoint();
-      await clearUnassigned(`${loopDef.name} pre-submit cleanup`);
+      if (!loopDef.dryRun) {
+        await clearUnassigned(`${loopDef.name} pre-submit cleanup`);
+      } else {
+        log(`${loopDef.name}: dry-run skips unassigned cleanup (no item moves)`);
+      }
       const preflightReady = await ensureTotwForFillAndVerify(loopDef);
       if (preflightReady === false) break;
       patchFsuLengthSafePlayerMetadata(`${loopDef.name} before opening SBC`);
@@ -5536,6 +5553,16 @@
         }
         fillResult = inventoryFill.fillResult;
         inspection = inventoryFill.inspection;
+      } else if (loopDef.dryRun) {
+        const squad = ctrl()?._squad || opened.challenge?.squad;
+        fillResult = {
+          squad,
+          filled: getFilledSquadSlots(squad),
+          submitReady: !!findSubmitButton(),
+        };
+        inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount });
+        logSbcSquadInspection(loopDef, inspection);
+        log(`${loopDef.name}: dry-run inspects current squad only; does not click FSU fill or save`);
       } else {
         fillResult = await fillSbcSquad(loopDef.name, {
           requireSubmitReady: false,
@@ -5585,7 +5612,6 @@
         } else {
           log(`${loopDef.name}: dry-run squad passed protection; live run would submit once`);
         }
-        try { ctrl()?._squad?.removeAllItems?.(); } catch { }
         log(`${loopDef.name}: dry run stops before SBC submit`);
         return;
       }
