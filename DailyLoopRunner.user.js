@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.3.0
+// @version      0.3.1
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -257,6 +257,10 @@
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
       requiredSpecialMinRating: 84,
+      specialRequirementAdd: {
+        patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
+        buttonTexts: ['Add', '添加', '加入', '新增'],
+      },
       submitReadyRepairMaxAttempts: 8,
       autoTotwUpgrade: {
         name: '84+ TOTW Upgrade',
@@ -293,6 +297,10 @@
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
       requiredSpecialMinRating: 84,
+      specialRequirementAdd: {
+        patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
+        buttonTexts: ['Add', '添加', '加入', '新增'],
+      },
       submitReadyRepairMaxAttempts: 8,
       autoTotwUpgrade: {
         name: '84+ TOTW Upgrade',
@@ -363,7 +371,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.3.0',
+    version: '0.3.1',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
