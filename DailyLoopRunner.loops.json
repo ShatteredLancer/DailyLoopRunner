@@ -280,6 +280,78 @@
       "maxPacks": 100
     },
     {
+      "id": "83-plus-player-pick",
+      "name": "1 of 3 83+ Player Pick",
+      "strategy": "playerPickSbc",
+      "sbcNames": [
+        "1 of 3 83+ Player Pick",
+        "1 of 3 83+ Player Picks"
+      ],
+      "pickItemNames": [
+        "1 of 3 83+ Player Pick",
+        "83+ Player Pick"
+      ],
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "rare",
+          "count": 3,
+          "maxRating": 81,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "protectHighGold": true,
+          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        },
+        {
+          "tier": "gold",
+          "rarity": "common",
+          "count": 1,
+          "maxRating": 81,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "protectHighGold": true,
+          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        }
+      ],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "challengesPerPick": 1,
+      "pickCount": 1,
+      "maxCompletions": 1,
+      "useRoundsAsCompletions": true,
+      "pricePlatform": "pc"
+    },
+    {
+      "id": "82-plus-player-pick",
+      "name": "4 of 10 82+ Player Pick",
+      "strategy": "playerPickSbc",
+      "sbcNames": [
+        "4 of 10 82+ Player Pick",
+        "4 of 10 82+ Player Picks"
+      ],
+      "pickItemNames": [
+        "4 of 10 82+ Player Pick",
+        "82+ Player Pick"
+      ],
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "common",
+          "count": 9,
+          "maxRating": 81,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "protectHighGold": true,
+          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        }
+      ],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "challengesPerPick": 2,
+      "pickCount": 4,
+      "maxCompletions": 1,
+      "useRoundsAsCompletions": true,
+      "pricePlatform": "pc"
+    },
+    {
       "id": "one-click-daily-mvp",
       "name": "One-click Daily MVP (1 each)",
       "strategy": "dailyRoutine",
