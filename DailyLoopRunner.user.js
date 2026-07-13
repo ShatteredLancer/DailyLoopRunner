@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.98
+// @version      0.3.3
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -382,7 +382,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.98',
+    version: '0.3.3',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1489,7 +1489,10 @@
   }
 
   function isDuplicate(item) {
-    try { return !!item?.isDuplicate?.(); } catch { return !!item?.duplicateId; }
+    try {
+      if (item?.isDuplicate?.()) return true;
+    } catch { }
+    return Number(item?.duplicateId || 0) > 0;
   }
 
   function isTradeable(item) {
@@ -2698,6 +2701,8 @@
       if (attempt > 1) {
         log(`${purpose}: retrying pack open after pending unassigned cleanup`);
         await sleep(CFG.pauseMs);
+        await showUnassignedIfAny(`${purpose} 471 recovery sync`);
+        await sleep(700);
         await clearUnassigned(`${purpose} 471 recovery cleanup`);
         await refreshInventoryCaches(`${purpose} 471 recovery`, { quiet: true });
       }
@@ -6227,43 +6232,65 @@
   }
 
   async function handleRarePackTo84Items(items, loopDef) {
-    const reservedIds = new Set((items || [])
-      .filter(isLowRareGoldDuplicate)
-      .map((item) => Number(item?.id || 0)));
-    const directClub = (items || []).filter((item) =>
-      !reservedIds.has(Number(item?.id || 0)) &&
-      !isDuplicate(item)
-    );
+    const responseCount = items?.length || 0;
+    await refreshInventoryCaches(`${loopDef.name} rare pack response classification`, { includePacks: false, quiet: true });
+    const responseDuplicates = [];
+    for (const item of items || []) {
+      const clubDuplicate = findClubDuplicate(item);
+      if (!isDuplicate(item) && !clubDuplicate) continue;
+
+      // Pack response items are not yet materialized in the Purchased cache. EA's
+      // move endpoint requires the same duplicate metadata that FSU applies.
+      if (clubDuplicate && !Number(item?.duplicateId || 0)) item.duplicateId = clubDuplicate.id;
+      item.pile = W.ItemPile.PURCHASED;
+      item.injuryType = W.PlayerInjury?.NONE ?? 0;
+      responseDuplicates.push(item);
+    }
+    const duplicateIds = new Set(responseDuplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
+    const directClub = (items || []).filter((item) => !duplicateIds.has(Number(item?.id || 0)));
+    const tradeableDuplicates = responseDuplicates.filter(isTradeable);
+    const untradeableDuplicates = responseDuplicates.filter((item) => !isTradeable(item));
+    const lowRare = responseDuplicates.filter((item) =>
+      isPlayer(item) && isGold(item) && isRare(item) && !isSpecial(item) && !isProtectedHighGold(item)
+    ).length;
 
     if (directClub.length) {
-      log(`${loopDef.name}: moving ${directClub.length} non-duplicate rare pack item(s) to club`);
+      log(`${loopDef.name}: moving ${directClub.length} response-classified non-duplicate item(s) to club`);
       await moveItems(directClub, W.ItemPile.CLUB, true);
     }
+    if (tradeableDuplicates.length) {
+      assertPileSpace('Transfer list', transferSpaceLeft(), tradeableDuplicates.length);
+      log(`${loopDef.name}: moving ${tradeableDuplicates.length} response-classified tradeable duplicate(s) to transfer list`);
+      await moveItems(tradeableDuplicates, W.ItemPile.TRANSFER, false);
+    }
+    if (untradeableDuplicates.length) {
+      assertPileSpace('SBC storage', storageSpaceLeft(), untradeableDuplicates.length);
+      log(`${loopDef.name}: moving ${untradeableDuplicates.length} response-classified untradeable duplicate(s) to SBC storage`);
+      await moveItems(untradeableDuplicates, W.ItemPile.STORAGE, true);
+    }
 
-    await clearUnassigned(`${loopDef.name} rare pack handling`, {
-      reserveItem: isLowRareGoldDuplicate,
-    });
-
-    await refreshUnassigned();
-    const lowRare = countUnassignedMatching(isLowRareGoldDuplicate);
-    log(`${loopDef.name}: reserved low rare gold duplicate(s):${lowRare}`);
+    await sleep(CFG.pauseMs);
+    await refreshInventoryCaches(`${loopDef.name} rare pack response routing`, { includePacks: false, quiet: true });
+    log(`${loopDef.name}: routed rare pack response ${responseCount} item(s) (club:${directClub.length}, transfer:${tradeableDuplicates.length}, storage:${untradeableDuplicates.length}); low rare duplicates:${lowRare}`);
     return { lowRare };
   }
 
-  async function submitReservedDuplicateUpgrade(loopDef, upgradeDef, duplicatePredicate, label) {
+  async function submitReservedDuplicateUpgrade(loopDef, upgradeDef, duplicatePredicate, label, options = {}) {
     let completions = 0;
     const countNeeded = getUpgradeRequirementCount(upgradeDef);
+    let forcedAttempts = Math.max(0, Number(options.forceAttempts || 0));
 
     while (countNeeded > 0) {
       stopPoint();
       await refreshInventoryCaches(`${loopDef.name} ${label} pre-selection`, { includePacks: false, quiet: true });
       const duplicateCount = countUnassignedMatching(duplicatePredicate);
-      if (!duplicateCount) break;
-
       const fallbackPiles = upgradeDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'];
+      if (!duplicateCount && forcedAttempts <= 0) break;
+
       const piles = duplicateCount >= countNeeded && fallbackPiles.includes('unassigned')
         ? ['unassigned']
         : fallbackPiles;
+      if (forcedAttempts > 0) forcedAttempts--;
       const selection = selectLoopInventoryPlayers(upgradeDef, piles);
       log(`${loopDef.name}: ${label} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
 
@@ -6337,6 +6364,19 @@
     let packsOpened = 0;
     let rareCompletions = 0;
 
+    const resumedUnassigned = await showUnassignedIfAny(`${loopDef.name} resume sync`);
+    if (resumedUnassigned.length) {
+      const resumedDuplicates = resumedUnassigned.filter(isLowRareGoldDuplicate).length;
+      log(`${loopDef.name}: resume found ${resumedUnassigned.length} unassigned item(s), ${resumedDuplicates} usable low rare duplicate(s)`);
+      rareCompletions += await submitReservedDuplicateUpgrade(
+        loopDef,
+        loopDef.rareUpgrade,
+        isLowRareGoldDuplicate,
+        '2x84+ resumed low rare gold',
+      );
+      await clearUnassigned(`${loopDef.name} resume cleanup`);
+    }
+
     while (packsOpened < maxPacks) {
       stopPoint();
       await clearUnassigned(`${loopDef.name} pre-open cleanup`);
@@ -6355,12 +6395,13 @@
       }
 
       packsOpened++;
-      await handleRarePackTo84Items(items, loopDef);
+      const handled = await handleRarePackTo84Items(items, loopDef);
       rareCompletions += await submitReservedDuplicateUpgrade(
         loopDef,
         loopDef.rareUpgrade,
         isLowRareGoldDuplicate,
         '2x84+ low rare gold',
+        { forceAttempts: handled.lowRare > 0 ? 1 : 0 },
       );
       await clearUnassigned(`${loopDef.name} post-pack cleanup`);
       await sleep(CFG.pauseMs);
