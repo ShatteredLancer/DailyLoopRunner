@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.3.2
+// @version      0.4.3
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -10,6 +10,7 @@
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // @connect      localhost
+// @connect      www.fut.gg
 // @run-at       document-end
 // ==/UserScript==
 
@@ -198,6 +199,39 @@
       maxPacks: 100,
     },
     {
+      id: '83-plus-player-pick',
+      name: '1 of 3 83+ Player Pick',
+      strategy: 'playerPickSbc',
+      sbcNames: ['1 of 3 83+ Player Pick', '1 of 3 83+ Player Picks'],
+      pickItemNames: ['1 of 3 83+ Player Pick', '83+ Player Pick'],
+      requirements: [
+        { tier: 'gold', rarity: 'rare', count: 3, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        { tier: 'gold', rarity: 'common', count: 1, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+      ],
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      challengesPerPick: 1,
+      pickCount: 1,
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      pricePlatform: 'pc',
+    },
+    {
+      id: '82-plus-player-pick',
+      name: '4 of 10 82+ Player Pick',
+      strategy: 'playerPickSbc',
+      sbcNames: ['4 of 10 82+ Player Pick', '4 of 10 82+ Player Picks'],
+      pickItemNames: ['4 of 10 82+ Player Pick', '82+ Player Pick'],
+      requirements: [
+        { tier: 'gold', rarity: 'common', count: 9, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+      ],
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      challengesPerPick: 2,
+      pickCount: 4,
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      pricePlatform: 'pc',
+    },
+    {
       id: 'one-click-daily-mvp',
       name: 'One-click Daily MVP (1 each)',
       strategy: 'dailyRoutine',
@@ -371,7 +405,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.3.2',
+    version: '0.4.3',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -539,6 +573,7 @@
       'commonGoldToRareUpgrade',
       'provisionPackDualCrafting',
       'rarePackTo84Upgrade',
+      'playerPickSbc',
       'dailyRoutine',
       'fillAndVerifySbc',
     ];
@@ -640,6 +675,23 @@
         if (!Number.isFinite(maxPacks) || maxPacks <= 0) {
           errors.push('maxPacks must be a positive number');
         }
+      }
+    }
+
+    if (loopDef.strategy === 'playerPickSbc') {
+      validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
+      validateStringArray(loopDef.pickItemNames, 'pickItemNames', errors, true);
+      validateRequirements(loopDef.requirements, 'requirements', errors, true);
+      const challengesPerPick = Number(loopDef.challengesPerPick || 1);
+      const pickCount = Number(loopDef.pickCount || 1);
+      if (!Number.isInteger(challengesPerPick) || challengesPerPick < 1 || challengesPerPick > 10) {
+        errors.push('challengesPerPick must be an integer between 1 and 10');
+      }
+      if (!Number.isInteger(pickCount) || pickCount < 1 || pickCount > 10) {
+        errors.push('pickCount must be an integer between 1 and 10');
+      }
+      if (loopDef.pricePlatform !== undefined && !['pc', 'ps', 'xbox'].includes(String(loopDef.pricePlatform).toLowerCase())) {
+        errors.push('pricePlatform must be pc, ps, or xbox when provided');
       }
     }
 
@@ -832,7 +884,7 @@
     if (!roundsLabel || !roundsInput) return;
     const editorLoop = getEditorLoopDef();
     const showRounds = editorLoop.useRoundsAsCompletions === true ||
-      ['validationBronzeUpgrade', 'provisionPackDualCrafting'].includes(editorLoop.strategy);
+      ['validationBronzeUpgrade', 'provisionPackDualCrafting', 'playerPickSbc'].includes(editorLoop.strategy);
     if (roundsRow) roundsRow.style.display = showRounds ? '' : 'none';
     roundsLabel.style.display = showRounds ? '' : 'none';
     roundsInput.style.display = showRounds ? '' : 'none';
@@ -5384,6 +5436,10 @@
       await runRarePackTo84UpgradeDryRun(loopDef);
       return;
     }
+    if (loopDef.strategy === 'playerPickSbc') {
+      await runPlayerPickSbcDryRun(loopDef);
+      return;
+    }
     if (loopDef.strategy === 'fillAndVerifySbc') {
       await runFillAndVerifySbc(loopDef);
       return;
@@ -6035,6 +6091,329 @@
     log(`${loopDef.name}: opened ${packsOpened} rare gold pack(s), submitted 2x84+:${rareCompletions}`);
   }
 
+  function isPlayerPickItem(item) {
+    try { if (item?.isPlayerPickItem?.()) return true; } catch { }
+    return /player\s*pick/i.test(String(item?.name || item?.description || item?._staticData?.name || ''));
+  }
+
+  function pickItemName(item) {
+    return String(item?._staticData?.name || item?.name || item?.description || `Player Pick #${item?.id || '?'}`);
+  }
+
+  function sameLimitedUseType(a, b) {
+    const left = a?.limitedUseType ?? a?._limitedUseType ?? null;
+    const right = b?.limitedUseType ?? b?._limitedUseType ?? null;
+    return left === null || right === null || String(left) === String(right);
+  }
+
+  function playerPickMatchesLoop(item, loopDef) {
+    return isPlayerPickItem(item) && matchesAny(pickItemName(item), loopDef.pickItemNames || []);
+  }
+
+  function getPlayerPickOwnedItems() {
+    const seen = new Set();
+    return [
+      ...getUnassignedItems(),
+      ...getStorageItems(),
+      ...getTransferItems(),
+      ...getClubItems(),
+    ].filter((item) => {
+      const id = Number(item?.id || 0);
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
+
+  function isPlayerPickDuplicate(item) {
+    const itemId = Number(item?.id || 0);
+    return getPlayerPickOwnedItems().some((ownedItem) =>
+      Number(ownedItem?.id || 0) !== itemId &&
+      Number(ownedItem?.definitionId || 0) === Number(item?.definitionId || -1) &&
+      sameLimitedUseType(ownedItem, item)
+    );
+  }
+
+  async function getPlayerPickPrices(items, loopDef) {
+    const prices = new Map();
+    const ids = [...new Set((items || []).map((item) => Number(item?.definitionId || 0)).filter(Boolean))];
+    if (!ids.length) return prices;
+
+    const platform = String(loopDef.pricePlatform || 'pc').toLowerCase();
+    const url = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(','))}&platform=${encodeURIComponent(platform)}`;
+    try {
+      const response = JSON.parse(await requestText(url));
+      for (const entry of response?.data || []) {
+        const definitionId = Number(entry?.eaId || entry?.definitionId || 0);
+        const price = Number(entry?.price);
+        if (definitionId && Number.isFinite(price) && price > 0) prices.set(definitionId, price);
+      }
+    } catch (error) {
+      log(`${loopDef.name}: FUT.GG price lookup unavailable (${error?.message || error}); price ties require manual selection`);
+    }
+    return prices;
+  }
+
+  function describePlayerPickCandidate(candidate) {
+    const tags = [
+      candidate.special ? 'special' : 'normal',
+      candidate.duplicate ? 'duplicate' : 'new',
+      candidate.price === null ? 'price:?' : `price:${candidate.price}`,
+    ];
+    return `${itemDisplayName(candidate.item)} rating:${candidate.rating} ${tags.join(',')}`;
+  }
+
+  function rankPlayerPickCandidates(items, prices) {
+    return (items || []).map((item, index) => ({
+      item,
+      index,
+      rating: Number(item?.rating || 0),
+      special: isSpecial(item),
+      duplicate: isPlayerPickDuplicate(item),
+      price: prices.has(Number(item?.definitionId || 0)) ? prices.get(Number(item.definitionId)) : null,
+    })).sort((a, b) =>
+      b.rating - a.rating ||
+      Number(b.special) - Number(a.special) ||
+      Number(a.duplicate) - Number(b.duplicate) ||
+      (b.price ?? -1) - (a.price ?? -1) ||
+      a.index - b.index
+    );
+  }
+
+  function getManualPickReason(ranked, pickCount) {
+    const topRating = ranked[0]?.rating;
+    const topSpecials = ranked.filter((candidate) => candidate.rating === topRating && candidate.special);
+    if (topSpecials.length > 1) {
+      return `${topSpecials.length} special card(s) share the highest rating ${topRating}`;
+    }
+
+    const groups = new Map();
+    ranked.forEach((candidate, index) => {
+      const key = `${candidate.rating}:${candidate.special ? 1 : 0}:${candidate.duplicate ? 1 : 0}`;
+      const group = groups.get(key) || { candidates: [], firstIndex: index };
+      group.candidates.push(candidate);
+      groups.set(key, group);
+    });
+    for (const group of groups.values()) {
+      if (group.firstIndex >= pickCount || group.candidates.length < 2) continue;
+      if (group.candidates.some((candidate) => candidate.price === null)) {
+        return 'price data is missing for a tie that affects the selected card(s)';
+      }
+    }
+    return '';
+  }
+
+  function waitForManualPlayerPick(ranked, pickCount, reason) {
+    return new Promise((resolve, reject) => {
+      let stopTimer = null;
+      const finish = (callback, value) => {
+        if (stopTimer) clearInterval(stopTimer);
+        overlay.remove();
+        callback(value);
+      };
+      const overlay = document.createElement('div');
+      overlay.id = 'bronze-loop-pick-modal';
+      Object.assign(overlay.style, {
+        position: 'fixed', inset: '0', zIndex: '100000', background: 'rgba(0, 0, 0, 0.78)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', boxSizing: 'border-box',
+      });
+      const dialog = document.createElement('div');
+      Object.assign(dialog.style, {
+        width: 'min(780px, 100%)', maxHeight: '90vh', overflow: 'auto', background: '#171b21', color: '#f3f5f7',
+        border: '1px solid #65758a', padding: '16px', boxSizing: 'border-box', fontFamily: 'Arial, sans-serif',
+      });
+      const title = document.createElement('div');
+      title.textContent = `Manual Player Pick: ${reason}`;
+      Object.assign(title.style, { fontWeight: '700', marginBottom: '8px' });
+      const hint = document.createElement('div');
+      hint.textContent = `Select exactly ${pickCount} player(s), then confirm.`;
+      Object.assign(hint.style, { color: '#b7c2d0', marginBottom: '12px' });
+      const list = document.createElement('div');
+      Object.assign(list.style, { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' });
+      const selected = new Set();
+      const cards = [];
+      const confirm = document.createElement('button');
+      confirm.textContent = 'Confirm selection';
+      confirm.disabled = true;
+      Object.assign(confirm.style, { marginTop: '14px', minHeight: '34px', padding: '0 14px' });
+      const refresh = () => {
+        cards.forEach(({ card, candidate }) => {
+          card.style.borderColor = selected.has(candidate) ? '#64d77a' : '#536171';
+          card.style.background = selected.has(candidate) ? '#243c2b' : '#202731';
+        });
+        confirm.disabled = selected.size !== pickCount;
+      };
+      ranked.forEach((candidate) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.textContent = describePlayerPickCandidate(candidate);
+        Object.assign(card.style, {
+          minHeight: '68px', textAlign: 'left', color: '#f3f5f7', background: '#202731', border: '1px solid #536171',
+          padding: '9px', cursor: 'pointer', lineHeight: '1.35',
+        });
+        card.addEventListener('click', () => {
+          if (selected.has(candidate)) selected.delete(candidate);
+          else if (selected.size < pickCount) selected.add(candidate);
+          refresh();
+        });
+        cards.push({ card, candidate });
+        list.appendChild(card);
+      });
+      confirm.addEventListener('click', () => {
+        if (selected.size !== pickCount) return;
+        finish(resolve, [...selected].map((candidate) => candidate.item));
+      });
+      dialog.append(title, hint, list, confirm);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      refresh();
+      stopTimer = setInterval(() => {
+        if (!state.stopping) return;
+        finish(reject, new Error('Stopped by user while a Player Pick selection was pending'));
+      }, 250);
+    });
+  }
+
+  async function redeemAndSelectPlayerPick(pickItem, loopDef) {
+    log(`${loopDef.name}: redeeming ${pickItemName(pickItem)}`);
+    const redeemed = await observeOnce(W.services.Item.redeem(pickItem), ctrl(), 30000, 'redeem Player Pick');
+    if (!redeemed?.success) fail(`${loopDef.name}: Player Pick redeem failed: ${serviceResultErrorText(redeemed)}`);
+    const data = redeemed.data || redeemed.response || {};
+    const choices = (data.playerPicks || data.items || []).filter(isPlayer);
+    const pickCount = Math.max(1, Number(data.availablePicks || loopDef.pickCount || 1) || 1);
+    if (choices.length < pickCount) fail(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
+
+    await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
+    const prices = await getPlayerPickPrices(choices, loopDef);
+    const ranked = rankPlayerPickCandidates(choices, prices);
+    ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
+
+    const manualReason = getManualPickReason(ranked, pickCount);
+    const selected = manualReason
+      ? await waitForManualPlayerPick(ranked, pickCount, manualReason)
+      : ranked.slice(0, pickCount).map((candidate) => candidate.item);
+    if (manualReason) log(`${loopDef.name}: manual Player Pick confirmed`);
+    else log(`${loopDef.name}: auto-selected ${selected.map((item) => itemDisplayName(item)).join(', ')}`);
+
+    const confirmed = await observeOnce(
+      W.services.Item.confirmPlayerPickItemSelection(selected),
+      ctrl(),
+      30000,
+      'confirm Player Pick selection',
+    );
+    if (!confirmed?.success) fail(`${loopDef.name}: Player Pick confirmation failed: ${serviceResultErrorText(confirmed)}`);
+    await sleep(CFG.pauseMs);
+    await refreshUnassigned({ quiet: true });
+    await clearUnassigned(`${loopDef.name} Player Pick result`);
+    return selected.length;
+  }
+
+  async function findUnassignedPlayerPick(loopDef, attempts = 10, options = {}) {
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      await refreshUnassigned({ quiet: true, attempts: 1 });
+      const picks = getUnassignedItems().filter(isPlayerPickItem);
+      const unexpectedPick = picks.find((item) => !playerPickMatchesLoop(item, loopDef));
+      if (unexpectedPick && options.failOnUnexpected) {
+        fail(`${loopDef.name}: unrelated unassigned Player Pick detected (${pickItemName(unexpectedPick)}); stop without redeeming it`);
+      }
+      const pickItem = picks.find((item) => playerPickMatchesLoop(item, loopDef));
+      if (pickItem) return pickItem;
+      if (attempt < attempts) await sleep(900);
+    }
+    if (!options.quietMissing) log(`${loopDef.name}: Player Pick reward was not found in unassigned items`);
+    return null;
+  }
+
+  function assertPlayerPickFodderProtection(loopDef, players) {
+    const inspection = inspectSbcItems(loopDef, players, {
+      expectedPlayerCount: sumRequirementPlayerCount(loopDef),
+    });
+    assertSbcSquadSafe(loopDef, inspection);
+    const protectedPlayers = (players || []).filter((item) =>
+      isGold(item) && !isSpecial(item) && Number(item?.rating || 0) >= 82
+    );
+    if (!protectedPlayers.length) return;
+    const details = protectedPlayers
+      .map((item) => `${itemDisplayName(item)} rating:${Number(item?.rating || 0)}`)
+      .join(', ');
+    fail(`${loopDef.name}: 82+ normal gold protection blocked SBC submission: ${details}`);
+  }
+
+  async function submitPlayerPickChallenge(loopDef, challengeNo, challengeTotal) {
+    await refreshInventoryCaches(`${loopDef.name} challenge ${challengeNo}/${challengeTotal} pre-selection`, { includePacks: false, quiet: true });
+    const selection = selectLoopInventoryPlayers(loopDef, loopDef.priorityPiles);
+    log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} selected ${selection.selected.length}/${sumRequirementPlayerCount(loopDef)} player(s) (${formatSelectionStats(selection.stats)})`);
+    if (!selection.ok) {
+      log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} missing ${selection.missing.count} ${selection.missing.rarity || selection.missing.tier || 'player'}(s); stopping`);
+      logSelectionDiagnostics(`${loopDef.name} challenge ${challengeNo}/${challengeTotal}`, selection, loopDef.priorityPiles);
+      return false;
+    }
+
+    const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+    const opened = await openSbcSet(set, { returnNullIfComplete: true });
+    if (!opened) {
+      log(`${loopDef.name}: no available SBC challenge remains`);
+      return false;
+    }
+    const prepared = await prepareInventorySelection(loopDef, selection);
+    if (!prepared.ok) return false;
+    assertPlayerPickFodderProtection(loopDef, prepared.selected);
+    await saveChallengeSquad(opened.challenge, prepared.selected, `${loopDef.name} challenge ${challengeNo}/${challengeTotal}`);
+    if (!findSubmitButton()) fail(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} squad is not submit ready`);
+    await submitSbcAndGetAwardPackId(opened.set);
+    markSbcItemsConsumed(prepared.selected, `${loopDef.name} challenge ${challengeNo}/${challengeTotal}`);
+    return true;
+  }
+
+  async function runPlayerPickSbc(loopDef) {
+    await waitAppReady();
+    const maxPicks = Math.max(1, Math.min(50, Number(loopDef.maxCompletions || 1) || 1));
+    const challengesPerPick = Math.max(1, Number(loopDef.challengesPerPick || 1) || 1);
+    let picksCompleted = 0;
+
+    // A stopped manual selection can leave an already-redeemed pick in Unassigned.
+    while (true) {
+      const pendingPick = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true, failOnUnexpected: true });
+      if (!pendingPick) break;
+      log(`${loopDef.name}: resuming pending ${pickItemName(pendingPick)}`);
+      await redeemAndSelectPlayerPick(pendingPick, loopDef);
+    }
+
+    while (picksCompleted < maxPicks) {
+      stopPoint();
+      await clearUnassigned(`${loopDef.name} pick ${picksCompleted + 1} pre-submit cleanup`);
+      let submittedAllChallenges = true;
+      for (let challengeNo = 1; challengeNo <= challengesPerPick; challengeNo++) {
+        if (!(await submitPlayerPickChallenge(loopDef, challengeNo, challengesPerPick))) {
+          submittedAllChallenges = false;
+          break;
+        }
+        await sleep(CFG.pauseMs);
+      }
+      if (!submittedAllChallenges) break;
+
+      const pickItem = await findUnassignedPlayerPick(loopDef, 10, { failOnUnexpected: true });
+      if (!pickItem) break;
+      await redeemAndSelectPlayerPick(pickItem, loopDef);
+      picksCompleted++;
+      await sleep(CFG.pauseMs);
+    }
+    log(`${loopDef.name}: completed ${picksCompleted}/${maxPicks} Player Pick(s)`);
+  }
+
+  async function runPlayerPickSbcDryRun(loopDef) {
+    await waitAppReady();
+    await refreshInventoryCaches(`${loopDef.name} dry-run`, { includePacks: false, quiet: true });
+    const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+    const selection = selectLoopInventoryPlayers(loopDef, loopDef.priorityPiles);
+    log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
+    log(`${loopDef.name}: dry-run requires ${loopDef.challengesPerPick || 1} challenge(s) per Pick and selects ${loopDef.pickCount || 1} player(s) from each reward`);
+    logDryRunSelection(`${loopDef.name} strict card ratio`, selection);
+    const pendingPick = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true, failOnUnexpected: true });
+    if (pendingPick) log(`${loopDef.name}: dry-run found pending ${pickItemName(pendingPick)}; live run would resolve it before submitting another SBC`);
+    log(`${loopDef.name}: dry run stops before submitting SBCs, redeeming Picks, or moving items`);
+  }
+
   async function runRound(roundNo) {
     log(`Round ${roundNo} start`);
     await waitAppReady();
@@ -6102,6 +6481,12 @@
       return;
     }
 
+    if (loopDef.strategy === 'playerPickSbc') {
+      await runPlayerPickSbc(loopDef);
+      await showUnassignedIfAny(`${loopDef.name} end`);
+      return;
+    }
+
     if (loopDef.strategy === 'fillAndVerifySbc') {
       await runFillAndVerifySbc(loopDef);
       await showUnassignedIfAny(`${loopDef.name} end`);
@@ -6118,6 +6503,9 @@
       return completions + (needsAutoTotwPreflight(loopDef) ? completions : 0);
     }
     if (loopDef.strategy === 'rarePackTo84Upgrade') return Number(loopDef.maxPacks || 100);
+    if (loopDef.strategy === 'playerPickSbc') {
+      return Number(loopDef.maxCompletions || 1) * Number(loopDef.challengesPerPick || 1);
+    }
     if (loopDef.strategy === 'dailyRoutine') {
       return summarizeRoutineStepLimits(getRoutineStepLoopDefs(loopDef)).max;
     }
@@ -6131,6 +6519,9 @@
     }
     if (loopDef.strategy === 'rarePackTo84Upgrade') {
       return `may open up to ${limit} pack(s) and submit matching 2x84+ SBC(s)`;
+    }
+    if (loopDef.strategy === 'playerPickSbc') {
+      return `may submit up to ${limit} SBC challenge(s) and resolve up to ${Number(loopDef.maxCompletions || 1)} Player Pick(s)`;
     }
     if (loopDef.strategy === 'fillAndVerifySbc' && needsAutoTotwPreflight(loopDef)) {
       const completions = Number(loopDef.maxCompletions || 1);
@@ -6146,7 +6537,8 @@
     }
 
     const limit = getLiveRunLimit(loopDef, rounds);
-    if (!Number.isFinite(limit) || limit <= 1) {
+    const requiresExplicitPickConfirmation = loopDef.strategy === 'playerPickSbc';
+    if (!Number.isFinite(limit) || (limit <= 1 && !requiresExplicitPickConfirmation)) {
       state.pendingLiveConfirm = null;
       return true;
     }
@@ -6204,8 +6596,9 @@
           stopPoint();
           await runConfiguredLoop(loopDef, i);
           await sleep(CFG.pauseMs);
-        }
       }
+    }
+
       log('All requested rounds completed');
     } catch (e) {
       log(`Stopped: ${e.message || e}`);
