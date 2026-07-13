@@ -360,7 +360,7 @@
       "requiredSpecialCount": 0,
       "allowedSpecialCount": 0,
       "blockSpecial": true,
-      "blockTradeable": true,
+      "blockTradeable": false,
       "submitReadyRepairMaxAttempts": 8,
       "openRewardPacks": true,
       "forceOpenRewardPacks": true,
@@ -439,12 +439,12 @@
         ],
         "priorityPiles": ["storage", "club"],
         "blockSpecial": true,
-        "blockTradeable": true,
+        "blockTradeable": false,
         "submitReadyRepairMaxAttempts": 8,
         "openRewardPacks": true
       },
       "blockSpecial": true,
-      "blockTradeable": true,
+      "blockTradeable": false,
       "openRewardPacks": false
     },
     {
@@ -521,12 +521,12 @@
         ],
         "priorityPiles": ["storage", "club"],
         "blockSpecial": true,
-        "blockTradeable": true,
+        "blockTradeable": false,
         "submitReadyRepairMaxAttempts": 8,
         "openRewardPacks": true
       },
       "blockSpecial": true,
-      "blockTradeable": true,
+      "blockTradeable": false,
       "openRewardPacks": false
     },
     {

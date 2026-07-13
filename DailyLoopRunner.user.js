@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.3.1
+// @version      0.3.2
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -232,7 +232,7 @@
       requiredSpecialCount: 0,
       allowedSpecialCount: 0,
       blockSpecial: true,
-      blockTradeable: true,
+      blockTradeable: false,
       submitReadyRepairMaxAttempts: 8,
       openRewardPacks: true,
       forceOpenRewardPacks: true,
@@ -270,11 +270,11 @@
         maxSubmittedRating: 88,
         maxNormalGoldSubmittedRating: 99,
         blockSpecial: true,
-        blockTradeable: true,
+        blockTradeable: false,
         openRewardPacks: true,
       },
       blockSpecial: true,
-      blockTradeable: true,
+      blockTradeable: false,
       openRewardPacks: false,
     },
     {
@@ -310,11 +310,11 @@
         maxSubmittedRating: 88,
         maxNormalGoldSubmittedRating: 99,
         blockSpecial: true,
-        blockTradeable: true,
+        blockTradeable: false,
         openRewardPacks: true,
       },
       blockSpecial: true,
-      blockTradeable: true,
+      blockTradeable: false,
       openRewardPacks: false,
     },
     {
@@ -371,7 +371,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.3.1',
+    version: '0.3.2',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -3882,7 +3882,7 @@
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
-    if (loopDef.blockTradeable !== false && isTradeable(item) && !isNormalGoldFodder(item)) return false;
+    if (loopDef.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) return false;
     const maxRating = getSubmittedRatingLimit(item, loopDef);
     if (maxRating && Number(item?.rating || 0) > maxRating) return false;
     const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
@@ -4425,7 +4425,7 @@
       requiredSpecialCount: 0,
       allowedSpecialCount: 0,
       blockSpecial: true,
-      blockTradeable: true,
+      blockTradeable: false,
       submitReadyRepairMaxAttempts: 8,
       openRewardPacks: true,
       ...override,
@@ -4625,7 +4625,7 @@
     if (loopDef.blockSpecial !== false && isSbcSpecialItem(item) && (!allowedSpecialCount || specialIndex > allowedSpecialCount)) {
       reasons.push('special-blocked');
     }
-    if (loopDef.blockTradeable !== false && isTradeable(item) && !isNormalGoldFodder(item)) reasons.push('tradeable-blocked');
+    if (loopDef.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) reasons.push('tradeable-blocked');
     if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
     getFsuRejectReasons(item, fsuSpec).forEach((reason) => {
       if (!reasons.includes(reason)) reasons.push(reason);
