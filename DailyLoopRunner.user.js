@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.2.99
+// @version      0.3.0
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -363,7 +363,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.2.99',
+    version: '0.3.0',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -2375,7 +2375,6 @@
     if (id && state.consumedItemIds.has(id)) return false;
     if (options.protectHighGold && isProtectedHighGold(item)) return false;
     if (isConceptItem(item)) return false;
-    if (isLimitedUseItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
@@ -3049,7 +3048,6 @@
     if (id && state.consumedItemIds.has(id)) reasons.push('consumed-this-run');
     if (options.protectHighGold && isProtectedHighGold(item)) reasons.push('protected-82-plus');
     if (isConceptItem(item)) reasons.push('concept');
-    if (isLimitedUseItem(item)) reasons.push(isLoanItem(item) ? 'loan' : 'limited-use');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) reasons.push('active-trade');
@@ -3873,7 +3871,6 @@
     if (id && state.consumedItemIds.has(id)) return false;
     if (isSbcSpecialItem(item)) return false;
     if (isConceptItem(item)) return false;
-    if (isLimitedUseItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
@@ -3938,8 +3935,6 @@
       reasons.includes('protected-id') ||
       reasons.includes('protected-def') ||
       reasons.includes('concept') ||
-      reasons.includes('loan') ||
-      reasons.includes('limited-use') ||
       reasons.includes('academy') ||
       reasons.some((reason) => reason.startsWith('rating-over-')) ||
       getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }).length > 0;
@@ -4593,7 +4588,6 @@
 
     if (itemId && state.consumedItemIds.has(itemId)) reasons.push('consumed-this-run');
     if (isConceptItem(item)) reasons.push('concept');
-    if (isLimitedUseItem(item)) reasons.push(isLoanItem(item) ? 'loan' : 'limited-use');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) {
@@ -4658,7 +4652,7 @@
         String(reason).startsWith('required-totw') ||
         String(reason).startsWith('rating-over-') ||
         String(reason).startsWith('fsu-') ||
-        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'loan', 'limited-use', 'academy', 'active-trade', 'consumed-this-run'].includes(String(reason))
+        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'academy', 'active-trade', 'consumed-this-run'].includes(String(reason))
       )
     ).length;
     const missingRequirements = [];
@@ -4751,9 +4745,6 @@
       }
       if (reasons.includes('concept')) {
         hints.push(`${prefix}: replace concept card`);
-      }
-      if (reasons.includes('loan') || reasons.includes('limited-use')) {
-        hints.push(`${prefix}: replace loan/limited-use card`);
       }
       if (reasons.includes('academy')) {
         hints.push(`${prefix}: replace academy/evolution locked card`);
