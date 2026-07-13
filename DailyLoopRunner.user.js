@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.3
+// @version      0.4.4
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -405,7 +405,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.3',
+    version: '0.4.4',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -6537,8 +6537,7 @@
     }
 
     const limit = getLiveRunLimit(loopDef, rounds);
-    const requiresExplicitPickConfirmation = loopDef.strategy === 'playerPickSbc';
-    if (!Number.isFinite(limit) || (limit <= 1 && !requiresExplicitPickConfirmation)) {
+    if (!Number.isFinite(limit) || limit <= 1) {
       state.pendingLiveConfirm = null;
       return true;
     }
