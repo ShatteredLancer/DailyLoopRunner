@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.5
+// @version      0.4.6
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -383,7 +383,6 @@
     loadingLoops: false,
     loopDefs: null,
     loopConfigSource: 'built-in',
-    pendingLiveConfirm: null,
     stalePackRefs: new WeakSet(),
     stalePackIds: new Set(),
     lastStorePacks: [],
@@ -400,11 +399,13 @@
     state.stopping = true;
     if (state.bootTimer) clearInterval(state.bootTimer);
     document.querySelector('#bronze-loop-panel')?.remove();
+    document.querySelector('#bronze-loop-pick-modal')?.remove();
+    document.querySelector('#bronze-loop-recap-modal')?.remove();
     document.querySelector('#bronze-loop-style')?.remove();
   }
 
   W[APP_KEY] = {
-    version: '0.4.5',
+    version: '0.4.6',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -6179,6 +6180,18 @@
     );
   }
 
+  function capturePlayerPickSelections(selected, ranked) {
+    return (selected || []).map((item) => {
+      const candidate = ranked.find((entry) => entry.item === item);
+      return {
+        item,
+        rating: candidate?.rating ?? Number(item?.rating || 0),
+        special: candidate?.special ?? isSpecial(item),
+        duplicate: candidate?.duplicate ?? isPlayerPickDuplicate(item),
+      };
+    });
+  }
+
   function getManualPickReason(ranked, pickCount) {
     const topRating = ranked[0]?.rating;
     const topSpecials = ranked.filter((candidate) => candidate.rating === topRating && candidate.special);
@@ -6282,15 +6295,22 @@
     const pickCount = Math.max(1, Number(data.availablePicks || loopDef.pickCount || 1) || 1);
     if (choices.length < pickCount) fail(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
 
+    const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
+    const skipPriceLookup = maxRating < 90;
+    if (skipPriceLookup) {
+      log(`${loopDef.name}: all candidates rated below 90 (max ${maxRating}); skipping FUT.GG price lookup and manual selection`);
+    }
+
     await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
-    const prices = await getPlayerPickPrices(choices, loopDef);
+    const prices = skipPriceLookup ? new Map() : await getPlayerPickPrices(choices, loopDef);
     const ranked = rankPlayerPickCandidates(choices, prices);
     ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
 
-    const manualReason = getManualPickReason(ranked, pickCount);
+    const manualReason = skipPriceLookup ? '' : getManualPickReason(ranked, pickCount);
     const selected = manualReason
       ? await waitForManualPlayerPick(ranked, pickCount, manualReason)
       : ranked.slice(0, pickCount).map((candidate) => candidate.item);
+    const selectedCards = capturePlayerPickSelections(selected, ranked);
     if (manualReason) log(`${loopDef.name}: manual Player Pick confirmed`);
     else log(`${loopDef.name}: auto-selected ${selected.map((item) => itemDisplayName(item)).join(', ')}`);
 
@@ -6304,7 +6324,7 @@
     await sleep(CFG.pauseMs);
     await refreshUnassigned({ quiet: true });
     await clearUnassigned(`${loopDef.name} Player Pick result`);
-    return selected.length;
+    return selectedCards;
   }
 
   async function findUnassignedPlayerPick(loopDef, attempts = 10, options = {}) {
@@ -6369,13 +6389,15 @@
     const maxPicks = Math.max(1, Math.min(50, Number(loopDef.maxCompletions || 1) || 1));
     const challengesPerPick = Math.max(1, Number(loopDef.challengesPerPick || 1) || 1);
     let picksCompleted = 0;
+    const pickResults = [];
 
     // A stopped manual selection can leave an already-redeemed pick in Unassigned.
     while (true) {
       const pendingPick = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true, failOnUnexpected: true });
       if (!pendingPick) break;
       log(`${loopDef.name}: resuming pending ${pickItemName(pendingPick)}`);
-      await redeemAndSelectPlayerPick(pendingPick, loopDef);
+      const pickedCards = await redeemAndSelectPlayerPick(pendingPick, loopDef);
+      pickResults.push({ resumed: true, pickedCards: pickedCards || [] });
     }
 
     while (picksCompleted < maxPicks) {
@@ -6393,11 +6415,97 @@
 
       const pickItem = await findUnassignedPlayerPick(loopDef, 10, { failOnUnexpected: true });
       if (!pickItem) break;
-      await redeemAndSelectPlayerPick(pickItem, loopDef);
+      const pickedCards = await redeemAndSelectPlayerPick(pickItem, loopDef);
+      pickResults.push({ resumed: false, pickedCards: pickedCards || [] });
       picksCompleted++;
       await sleep(CFG.pauseMs);
     }
     log(`${loopDef.name}: completed ${picksCompleted}/${maxPicks} Player Pick(s)`);
+    return pickResults;
+  }
+
+  async function showPickRecapModal(loopDef, pickResults) {
+    const entries = Array.isArray(pickResults) ? pickResults : [];
+    const flatCards = entries.flatMap((entry) => entry?.pickedCards || []);
+    if (!flatCards.length) return;
+
+    return new Promise((resolve) => {
+      let stopTimer = null;
+      const overlay = document.createElement('div');
+      overlay.id = 'bronze-loop-recap-modal';
+      Object.assign(overlay.style, {
+        position: 'fixed', inset: '0', zIndex: '100000', background: 'rgba(0, 0, 0, 0.78)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', boxSizing: 'border-box',
+      });
+      const dialog = document.createElement('div');
+      Object.assign(dialog.style, {
+        width: 'min(560px, 100%)', maxHeight: '90vh', overflow: 'auto', background: '#171b21', color: '#f3f5f7',
+        border: '1px solid #65758a', padding: '12px 14px', boxSizing: 'border-box', fontFamily: 'Arial, sans-serif',
+      });
+      const title = document.createElement('div');
+      title.textContent = `Player Pick Recap: ${loopDef.name}`;
+      Object.assign(title.style, { fontWeight: '700', marginBottom: '4px', fontSize: '14px' });
+
+      const ratings = flatCards.map((card) => Number(card.rating || 0));
+      const maxRating = Math.max(...ratings);
+      const minRating = Math.min(...ratings);
+      const specialCount = flatCards.filter((card) => card.special).length;
+      const duplicateCount = flatCards.filter((card) => card.duplicate).length;
+      const highRatedCount = flatCards.filter((card) => Number(card.rating || 0) >= 91).length;
+      const resumedCount = entries.filter((entry) => entry?.resumed).length;
+      const summary = document.createElement('div');
+      summary.textContent = `${entries.length} pick(s), ${flatCards.length} card(s), rating ${minRating}-${maxRating}, ${specialCount} special, ${duplicateCount} duplicate, ${highRatedCount} rated 91+${resumedCount ? `, ${resumedCount} resumed` : ''}`;
+      Object.assign(summary.style, { color: '#9aa6b8', marginBottom: '8px', fontSize: '11px' });
+
+      const list = document.createElement('div');
+      Object.assign(list.style, { display: 'flex', flexDirection: 'column', gap: '6px' });
+      entries.forEach((entry, index) => {
+        const pickRow = document.createElement('div');
+        const header = document.createElement('div');
+        header.textContent = `Pick ${index + 1}${entry?.resumed ? ' (resumed)' : ''}`;
+        Object.assign(header.style, { color: '#7d8898', fontSize: '10px', marginBottom: '2px' });
+        pickRow.appendChild(header);
+        (entry?.pickedCards || []).forEach((card) => {
+          const rating = Number(card.rating || 0);
+          const highRated = rating >= 91;
+          const row = document.createElement('div');
+          Object.assign(row.style, {
+            padding: '4px 6px', fontSize: '12px', color: '#f3f5f7',
+            background: highRated ? '#3a2f15' : card.special ? '#26223a' : '#1d2229',
+            borderLeft: `3px solid ${highRated ? '#ffd54a' : card.special ? '#7a5cff' : card.duplicate ? '#5c8aff' : '#3a4757'}`,
+            display: 'flex', gap: '8px', alignItems: 'baseline',
+          });
+          const name = document.createElement('span');
+          name.textContent = itemDisplayName(card.item);
+          Object.assign(name.style, { fontWeight: '600', flex: '1 1 auto' });
+          const tags = document.createElement('span');
+          tags.textContent = `rating:${rating}, ${card.special ? 'special' : 'normal'}${card.duplicate ? ', duplicate' : ''}`;
+          Object.assign(tags.style, { color: highRated ? '#ffd54a' : '#9aa6b8', fontSize: '10px', flex: '0 0 auto' });
+          row.append(name, tags);
+          pickRow.appendChild(row);
+        });
+        list.appendChild(pickRow);
+      });
+
+      const closeButton = document.createElement('button');
+      closeButton.type = 'button';
+      closeButton.textContent = 'Close';
+      Object.assign(closeButton.style, {
+        marginTop: '10px', minHeight: '28px', padding: '0 12px', background: '#2f6fde', color: '#fff',
+        border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '12px',
+      });
+      const finish = () => {
+        if (stopTimer) clearInterval(stopTimer);
+        overlay.remove();
+        resolve();
+      };
+      closeButton.addEventListener('click', finish);
+      overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
+      dialog.append(title, summary, list, closeButton);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      stopTimer = setInterval(() => { if (state.stopping) finish(); }, 250);
+    });
   }
 
   async function runPlayerPickSbcDryRun(loopDef) {
@@ -6481,7 +6589,8 @@
     }
 
     if (loopDef.strategy === 'playerPickSbc') {
-      await runPlayerPickSbc(loopDef);
+      const pickResults = await runPlayerPickSbc(loopDef);
+      await showPickRecapModal(loopDef, pickResults);
       await showUnassignedIfAny(`${loopDef.name} end`);
       return;
     }
@@ -6511,55 +6620,6 @@
     return Number(loopDef.maxCompletions || loopDef.rounds || loopDef.maxRounds || 1);
   }
 
-  function getLiveRunScopeMessage(loopDef, rounds, limit) {
-    if (loopDef.strategy === 'dailyRoutine') {
-      const summary = summarizeRoutineStepLimits(getRoutineStepLoopDefs(loopDef));
-      return `may run ${summary.limits.length} step(s) (${summary.text})`;
-    }
-    if (loopDef.strategy === 'rarePackTo84Upgrade') {
-      return `may open up to ${limit} pack(s) and submit matching 2x84+ SBC(s)`;
-    }
-    if (loopDef.strategy === 'playerPickSbc') {
-      return `may submit up to ${limit} SBC challenge(s) and resolve up to ${Number(loopDef.maxCompletions || 1)} Player Pick(s)`;
-    }
-    if (loopDef.strategy === 'fillAndVerifySbc' && needsAutoTotwPreflight(loopDef)) {
-      const completions = Number(loopDef.maxCompletions || 1);
-      return `may submit up to ${limit} SBC(s) (${completions} target SBC(s) plus up to ${completions} auto ${getAutoTotwUpgradeDef(loopDef).name} if ${requiredSpecialLabel(loopDef)} is missing)`;
-    }
-    return `may submit up to ${limit} SBC(s)`;
-  }
-
-  function confirmLiveRunIfNeeded(loopDef, rounds) {
-    if (loopDef.dryRun) {
-      state.pendingLiveConfirm = null;
-      return true;
-    }
-
-    const limit = getLiveRunLimit(loopDef, rounds);
-    if (!Number.isFinite(limit) || limit <= 1) {
-      state.pendingLiveConfirm = null;
-      return true;
-    }
-
-    const scopeMessage = getLiveRunScopeMessage(loopDef, rounds, limit);
-    const key = `${loopDef.id || loopDef.name}:${loopDef.strategy}:${scopeMessage}`;
-    const nowMs = Date.now();
-    if (state.pendingLiveConfirm?.key === key && state.pendingLiveConfirm.expiresAt > nowMs) {
-      state.pendingLiveConfirm = null;
-      log(`Live guard confirmed: ${loopDef.name} ${scopeMessage}`);
-      return true;
-    }
-
-    state.pendingLiveConfirm = { key, expiresAt: nowMs + 15000 };
-    log(`Live guard: ${loopDef.name} ${scopeMessage}. Click Start again within 15s to confirm, or choose an MVP (1 run) loop.`);
-    return false;
-  }
-
-  function clearPendingLiveConfirm() {
-    state.pendingLiveConfirm = null;
-  }
-
-
   async function startLoop() {
     if (state.running) return;
     let loopDef = null;
@@ -6574,7 +6634,6 @@
       if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
       if (loopDef.useRoundsAsCompletions === true) loopDef.maxCompletions = rounds;
       logFsuSettingsForRun();
-      if (!confirmLiveRunIfNeeded(loopDef, rounds)) return;
     } catch (e) {
       log(`Stopped: ${e.message || e}`);
       errorStackLines(e).forEach((line) => log(`Error stack: ${line}`));
@@ -7070,7 +7129,6 @@
       savePanelPos(panel);
     });
     document.querySelector('#bronze-loop-select').addEventListener('change', (event) => {
-      clearPendingLiveConfirm();
       const selectedId = event.target.value;
       if (selectedId !== 'custom') setLoopJson(getLoopDefById(selectedId));
       updateLoopControls();
@@ -7084,11 +7142,8 @@
       updateLoopControls();
     });
     document.querySelector('#bronze-loop-json').addEventListener('input', () => {
-      clearPendingLiveConfirm();
       updateLoopControls();
     });
-    document.querySelector('#bronze-loop-dry-run').addEventListener('change', clearPendingLiveConfirm);
-    document.querySelector('#bronze-loop-open-rewards').addEventListener('change', clearPendingLiveConfirm);
     document.querySelector('#bronze-loop-start').addEventListener('click', startLoop);
     document.querySelector('#bronze-loop-refresh').addEventListener('click', async () => {
       if (state.running || state.refreshing) return;
@@ -7105,7 +7160,6 @@
     });
     document.querySelector('#bronze-loop-load-json').addEventListener('click', async () => {
       if (state.running || state.loadingLoops) return;
-      clearPendingLiveConfirm();
       state.loadingLoops = true;
       setPanelState();
       try {
@@ -7120,7 +7174,6 @@
     });
     document.querySelector('#bronze-loop-built-in').addEventListener('click', () => {
       if (state.running || state.loadingLoops) return;
-      clearPendingLiveConfirm();
       resetLoopDefs();
       setPanelState();
     });
