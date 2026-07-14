@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.4
+// @version      0.4.5
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -199,14 +199,13 @@
       maxPacks: 100,
     },
     {
-      id: '83-plus-player-pick',
-      name: '1 of 3 83+ Player Pick',
+      id: '83-plus-player-pick-1of5',
+      name: '1 of 5 83+ Player Pick',
       strategy: 'playerPickSbc',
-      sbcNames: ['1 of 3 83+ Player Pick', '1 of 3 83+ Player Picks'],
-      pickItemNames: ['1 of 3 83+ Player Pick', '83+ Player Pick'],
+      sbcNames: ['1 of 5 83+ Player Pick', '1 of 5 83+ Player Picks'],
+      pickItemNames: ['1 of 5 83+ Player Pick', '83+ Player Pick'],
       requirements: [
-        { tier: 'gold', rarity: 'rare', count: 3, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
-        { tier: 'gold', rarity: 'common', count: 1, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 4, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
       ],
       priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       challengesPerPick: 1,
@@ -216,17 +215,17 @@
       pricePlatform: 'pc',
     },
     {
-      id: '82-plus-player-pick',
-      name: '4 of 10 82+ Player Pick',
+      id: '82-plus-player-pick-5of10',
+      name: '5 of 10 82+ Player Pick',
       strategy: 'playerPickSbc',
-      sbcNames: ['4 of 10 82+ Player Pick', '4 of 10 82+ Player Picks'],
-      pickItemNames: ['4 of 10 82+ Player Pick', '82+ Player Pick'],
+      sbcNames: ['5 of 10 82+ Player Pick', '5 of 10 82+ Player Picks'],
+      pickItemNames: ['5 of 10 82+ Player Pick', '82+ Player Pick'],
       requirements: [
-        { tier: 'gold', rarity: 'common', count: 9, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        { tier: 'gold', rarity: 'common', count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
       ],
       priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       challengesPerPick: 2,
-      pickCount: 4,
+      pickCount: 5,
       maxCompletions: 1,
       useRoundsAsCompletions: true,
       pricePlatform: 'pc',
@@ -405,7 +404,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.4',
+    version: '0.4.5',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
