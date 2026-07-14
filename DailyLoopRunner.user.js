@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.6
+// @version      0.4.7
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -203,7 +203,7 @@
       name: '1 of 5 83+ Player Pick',
       strategy: 'playerPickSbc',
       sbcNames: ['1 of 5 83+ Player Pick', '1 of 5 83+ Player Picks'],
-      pickItemNames: ['1 of 5 83+ Player Pick', '83+ Player Pick'],
+      pickItemNames: ['1 of 5 83+ Player Pick', '83+ Player Pick', 'PlayerPickItemName25_4164'],
       requirements: [
         { tier: 'gold', rarity: 'rare', count: 4, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
       ],
@@ -405,7 +405,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.6',
+    version: '0.4.7',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -423,12 +423,22 @@
     renderLog();
   }
 
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch]));
+  }
+
   function renderLog() {
     const latest = state.logLines[state.logLines.length - 1] || 'Ready.';
     const latestBox = document.querySelector('#bronze-loop-latest');
     const fullBox = document.querySelector('#bronze-loop-log');
     if (latestBox) latestBox.textContent = latest;
-    if (fullBox) fullBox.textContent = state.logLines.join('\n');
+    if (fullBox) {
+      fullBox.innerHTML = state.logLines
+        .map((line) => escapeHtml(line).replace(/(rating:(?:9[1-9]|[1-9]\d{2,}))/g, '<span class="bronze-loop-log-high-rated">$1</span>'))
+        .join('\n');
+    }
   }
 
   function clearLog() {
@@ -2453,6 +2463,19 @@
       Number(clubItem?.definitionId || 0) === Number(item?.definitionId || -1) &&
       Number(clubItem?.id || 0) !== Number(item?.id || 0)
     );
+  }
+
+  function predictUnassignedDestination(item) {
+    if (!item) return 'unknown';
+    try {
+      if (!isDuplicate(item)) return 'club';
+      if (isTradeable(item)) return 'transfer';
+      const swapTarget = findClubDuplicate(item);
+      if (swapTarget && isTradeable(swapTarget)) return 'club';
+      return 'storage';
+    } catch {
+      return 'unknown';
+    }
   }
 
   function pileSpaceLeft(pile, fallbackMax = null) {
@@ -6323,6 +6346,7 @@
     if (!confirmed?.success) fail(`${loopDef.name}: Player Pick confirmation failed: ${serviceResultErrorText(confirmed)}`);
     await sleep(CFG.pauseMs);
     await refreshUnassigned({ quiet: true });
+    selectedCards.forEach((card) => { card.destination = predictUnassignedDestination(card.item); });
     await clearUnassigned(`${loopDef.name} Player Pick result`);
     return selectedCards;
   }
@@ -6429,6 +6453,9 @@
     const flatCards = entries.flatMap((entry) => entry?.pickedCards || []);
     if (!flatCards.length) return;
 
+    const destinationColors = { club: '#5cffa0', transfer: '#5c8aff', storage: '#ff9d4a', unknown: '#536171' };
+    const destinationLabels = { club: '->CLUB', transfer: '->TRANSFER', storage: '->STORAGE', unknown: '->?' };
+
     return new Promise((resolve) => {
       let stopTimer = null;
       const overlay = document.createElement('div');
@@ -6439,7 +6466,7 @@
       });
       const dialog = document.createElement('div');
       Object.assign(dialog.style, {
-        width: 'min(560px, 100%)', maxHeight: '90vh', overflow: 'auto', background: '#171b21', color: '#f3f5f7',
+        width: 'min(620px, 100%)', maxHeight: '90vh', overflow: 'auto', background: '#171b21', color: '#f3f5f7',
         border: '1px solid #65758a', padding: '12px 14px', boxSizing: 'border-box', fontFamily: 'Arial, sans-serif',
       });
       const title = document.createElement('div');
@@ -6453,8 +6480,16 @@
       const duplicateCount = flatCards.filter((card) => card.duplicate).length;
       const highRatedCount = flatCards.filter((card) => Number(card.rating || 0) >= 91).length;
       const resumedCount = entries.filter((entry) => entry?.resumed).length;
+      const destinations = flatCards.reduce((counts, card) => {
+        const destination = card.destination || 'unknown';
+        counts[destination] = (counts[destination] || 0) + 1;
+        return counts;
+      }, {});
       const summary = document.createElement('div');
-      summary.textContent = `${entries.length} pick(s), ${flatCards.length} card(s), rating ${minRating}-${maxRating}, ${specialCount} special, ${duplicateCount} duplicate, ${highRatedCount} rated 91+${resumedCount ? `, ${resumedCount} resumed` : ''}`;
+      const destinationSummary = Object.entries(destinations)
+        .map(([destination, count]) => `${count} ${destinationLabels[destination] || destination}`)
+        .join(', ');
+      summary.textContent = `${entries.length} pick(s), ${flatCards.length} card(s), rating ${minRating}-${maxRating}, ${specialCount} special, ${duplicateCount} duplicate, ${highRatedCount} rated 91+${destinationSummary ? `, ${destinationSummary}` : ''}${resumedCount ? `, ${resumedCount} resumed` : ''}`;
       Object.assign(summary.style, { color: '#9aa6b8', marginBottom: '8px', fontSize: '11px' });
 
       const list = document.createElement('div');
@@ -6468,20 +6503,24 @@
         (entry?.pickedCards || []).forEach((card) => {
           const rating = Number(card.rating || 0);
           const highRated = rating >= 91;
+          const destination = card.destination || 'unknown';
           const row = document.createElement('div');
           Object.assign(row.style, {
             padding: '4px 6px', fontSize: '12px', color: '#f3f5f7',
             background: highRated ? '#3a2f15' : card.special ? '#26223a' : '#1d2229',
-            borderLeft: `3px solid ${highRated ? '#ffd54a' : card.special ? '#7a5cff' : card.duplicate ? '#5c8aff' : '#3a4757'}`,
+            borderLeft: `3px solid ${highRated ? '#ffd54a' : card.special ? '#7a5cff' : destinationColors[destination] || destinationColors.unknown}`,
             display: 'flex', gap: '8px', alignItems: 'baseline',
           });
           const name = document.createElement('span');
           name.textContent = itemDisplayName(card.item);
           Object.assign(name.style, { fontWeight: '600', flex: '1 1 auto' });
+          const destinationTag = document.createElement('span');
+          destinationTag.textContent = destinationLabels[destination] || destination;
+          Object.assign(destinationTag.style, { color: destinationColors[destination] || destinationColors.unknown, fontSize: '10px', fontWeight: '600', flex: '0 0 auto' });
           const tags = document.createElement('span');
           tags.textContent = `rating:${rating}, ${card.special ? 'special' : 'normal'}${card.duplicate ? ', duplicate' : ''}`;
-          Object.assign(tags.style, { color: highRated ? '#ffd54a' : '#9aa6b8', fontSize: '10px', flex: '0 0 auto' });
-          row.append(name, tags);
+          Object.assign(tags.style, { color: '#9aa6b8', fontSize: '10px', flex: '0 0 auto' });
+          row.append(name, destinationTag, tags);
           pickRow.appendChild(row);
         });
         list.appendChild(pickRow);
@@ -7018,6 +7057,10 @@
         user-select: text;
         -webkit-user-select: text;
         cursor: text;
+      }
+      #bronze-loop-log .bronze-loop-log-high-rated {
+        color: #ffd54a;
+        font-weight: 700;
       }
     `;
     document.head.appendChild(style);
