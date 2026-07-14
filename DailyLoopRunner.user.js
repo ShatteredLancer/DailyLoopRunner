@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.5
+// @version      0.4.7
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -444,7 +444,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.5',
+    version: '0.4.7',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -463,12 +463,26 @@
     renderLog();
   }
 
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch]));
+  }
+
   function renderLog() {
     const latest = state.logLines[state.logLines.length - 1] || 'Ready.';
     const latestBox = document.querySelector('#bronze-loop-latest');
     const fullBox = document.querySelector('#bronze-loop-log');
     if (latestBox) latestBox.textContent = latest;
-    if (fullBox) fullBox.textContent = state.logLines.join('\n');
+    if (fullBox) {
+      const html = state.logLines
+        .map((line) => escapeHtml(line).replace(
+          /(rating:(?:9[1-9]|[1-9]\d{2,}))/g,
+          '<span class="bronze-loop-log-high-rated">$1</span>'
+        ))
+        .join('\n');
+      fullBox.innerHTML = html;
+    }
   }
 
   function clearLog() {
@@ -2568,6 +2582,20 @@
       Number(clubItem?.definitionId || 0) === Number(item?.definitionId || -1) &&
       Number(clubItem?.id || 0) !== Number(item?.id || 0)
     );
+  }
+
+  function predictUnassignedDestination(item) {
+    if (!item) return 'unknown';
+    try {
+      if (!isDuplicate(item)) return 'club';
+      if (isTradeable(item)) return 'transfer';
+      let swapTarget = null;
+      try { swapTarget = findClubDuplicate(item); } catch { /* ignore */ }
+      if (swapTarget && isTradeable(swapTarget)) return 'club';
+      return 'storage';
+    } catch {
+      return 'unknown';
+    }
   }
 
   function pileSpaceLeft(pile, fallbackMax = null) {
@@ -6681,7 +6709,7 @@ const data = redeemed.data || redeemed.response || {};
       ? await waitForManualPlayerPick(ranked, pickCount, manualReason)
       : ranked.slice(0, pickCount).map((candidate) => candidate.item);
     if (manualReason) log(`${loopDef.name}: manual Player Pick confirmed`);
-    else log(`${loopDef.name}: auto-selected ${selected.map((item) => itemDisplayName(item)).join(', ')}`);
+    else log(`${loopDef.name}: auto-selected ${selected.map((item) => `${itemDisplayName(item)} rating:${Number(item?.rating || 0)}`).join(', ')}`);
 
     const confirmed = await observeOnce(
       W.services.Item.confirmPlayerPickItemSelection(selected),
@@ -6693,7 +6721,7 @@ const data = redeemed.data || redeemed.response || {};
     await sleep(CFG.pauseMs);
     await refreshUnassigned({ quiet: true });
 await clearUnassigned(`${loopDef.name} Player Pick result`);
-    return selected;
+    return selected.map((item) => ({ item, destination: predictUnassignedDestination(item) }));
   }
 
   async function findUnassignedPlayerPick(loopDef, attempts = 10, options = {}) {
@@ -6798,11 +6826,37 @@ async function runPlayerPickSbcDryRun(loopDef) {
 
   async function showPickRecapModal(loopDef, pickResults) {
     const entries = Array.isArray(pickResults) ? pickResults : [];
-    const flatCards = entries.flatMap((entry) => entry?.pickedItems || []);
+    const destColor = { club: '#5cffa0', transfer: '#5c8aff', storage: '#ff9d4a', unknown: '#536171' };
+    const destLabel = { club: '→CLUB', transfer: '→TRANSFER', storage: '→STORAGE', unknown: '→?' };
+    const normalize = (picked) => {
+      if (!picked) return null;
+      if (picked?.item && typeof picked === 'object') {
+        return { item: picked.item, destination: picked.destination || 'unknown' };
+      }
+      return { item: picked, destination: 'unknown' };
+    };
+    const flatCards = entries
+      .flatMap((entry) => entry?.pickedItems || [])
+      .map(normalize)
+      .filter(Boolean);
     if (!flatCards.length) {
       log(`${loopDef.name}: no Player Pick results to recap`);
       return;
     }
+    const safeIsSpecial = (card) => { try { return isSpecial(card?.item); } catch { return false; } };
+    const safeIsDuplicate = (card) => { try { return isPlayerPickDuplicate(card?.item); } catch { return false; } };
+    const ratings = flatCards.map((card) => Number(card?.item?.rating || 0));
+    const maxRating = ratings.length ? Math.max(...ratings) : 0;
+    const minRating = ratings.length ? Math.min(...ratings) : 0;
+    const specialCount = flatCards.filter(safeIsSpecial).length;
+    const duplicateCount = flatCards.filter(safeIsDuplicate).length;
+    const highRatedCount = flatCards.filter((card) => Number(card?.item?.rating || 0) >= 91).length;
+    const destCounts = flatCards.reduce((acc, card) => {
+      acc[card.destination] = (acc[card.destination] || 0) + 1;
+      return acc;
+    }, {});
+    const resumedCount = entries.filter((entry) => entry?.resumed).length;
+
     return new Promise((resolve) => {
       const overlay = document.createElement('div');
       overlay.id = 'bronze-loop-recap-modal';
@@ -6812,46 +6866,40 @@ async function runPlayerPickSbcDryRun(loopDef) {
       });
       const dialog = document.createElement('div');
       Object.assign(dialog.style, {
-        width: 'min(560px, 100%)', maxHeight: '90vh', overflow: 'auto', background: '#171b21', color: '#f3f5f7',
+        width: 'min(620px, 100%)', maxHeight: '90vh', overflow: 'auto', background: '#171b21', color: '#f3f5f7',
         border: '1px solid #65758a', padding: '12px 14px', boxSizing: 'border-box', fontFamily: 'Arial, sans-serif',
       });
       const title = document.createElement('div');
       title.textContent = `Player Pick Recap — ${loopDef.name}`;
       Object.assign(title.style, { fontWeight: '700', marginBottom: '4px', fontSize: '14px' });
 
-      const ratings = flatCards.map((item) => Number(item?.rating || 0));
-      const maxRating = ratings.length ? Math.max(...ratings) : 0;
-      const minRating = ratings.length ? Math.min(...ratings) : 0;
-      const safeIsSpecial = (item) => { try { return isSpecial(item); } catch { return false; } };
-      const safeIsDuplicate = (item) => { try { return isPlayerPickDuplicate(item); } catch { return false; } };
-      const specialCount = flatCards.filter(safeIsSpecial).length;
-      const duplicateCount = flatCards.filter(safeIsDuplicate).length;
-      const highRatedCount = flatCards.filter((item) => Number(item?.rating || 0) >= 91).length;
-      const resumedCount = entries.filter((entry) => entry?.resumed).length;
-
       const summary = document.createElement('div');
-      summary.textContent = `${entries.length} pick(s) (${resumedCount} resumed) • ${flatCards.length} card(s) • rating ${minRating}-${maxRating} • ${specialCount} special • ${duplicateCount} duplicate • ${highRatedCount} 91+`;
+      const destSummary = Object.entries(destCounts).map(([key, count]) => `${count} ${destLabel[key] || key}`).join(' · ');
+      summary.textContent = `${entries.length} pick(s) (${resumedCount} resumed) • ${flatCards.length} card(s) • rating ${minRating}-${maxRating} • ${specialCount} special • ${duplicateCount} duplicate • ${highRatedCount} 91+${destSummary ? ` • ${destSummary}` : ''}`;
       Object.assign(summary.style, { color: '#9aa6b8', marginBottom: '8px', fontSize: '11px' });
 
       const list = document.createElement('div');
       Object.assign(list.style, { display: 'flex', flexDirection: 'column', gap: '4px' });
 
       entries.forEach((entry, index) => {
+        const cards = (entry?.pickedItems || []).map(normalize).filter(Boolean);
         const pickRow = document.createElement('div');
-        const cards = entry?.pickedItems || [];
         const headerLine = document.createElement('div');
         headerLine.textContent = `Pick ${index + 1}${entry?.resumed ? ' (resumed)' : ''} — ${cards.length} card(s)`;
         Object.assign(headerLine.style, { fontSize: '10px', color: '#7d8898', marginBottom: '2px' });
         pickRow.appendChild(headerLine);
 
-        cards.forEach((item) => {
-          const special = safeIsSpecial(item);
-          const duplicate = safeIsDuplicate(item);
+        cards.forEach((card) => {
+          const item = card?.item;
+          const special = safeIsSpecial(card);
+          const duplicate = safeIsDuplicate(card);
           const rating = Number(item?.rating || 0);
           const highRated = rating >= 91;
-          const borderColor = highRated ? '#ffd54a' : special ? '#7a5cff' : duplicate ? '#5c8aff' : '#3a4757';
+          const destination = card?.destination || 'unknown';
+          const destBorder = destColor[destination] || destColor.unknown;
+          const borderColor = highRated ? '#ffd54a' : special ? '#7a5cff' : destBorder;
           const bgColor = highRated ? '#3a2f15' : special ? '#26223a' : '#1d2229';
-          const tagColor = highRated ? '#ffd54a' : '#9aa6b8';
+          const destTagColor = destColor[destination] || destColor.unknown;
           const row = document.createElement('div');
           Object.assign(row.style, {
             padding: '3px 6px',
@@ -6865,10 +6913,13 @@ async function runPlayerPickSbcDryRun(loopDef) {
           const name = document.createElement('span');
           name.textContent = itemDisplayName(item);
           Object.assign(name.style, { fontWeight: '600', flex: '1 1 auto' });
+          const destSpan = document.createElement('span');
+          destSpan.textContent = destLabel[destination] || destination;
+          Object.assign(destSpan.style, { color: destTagColor, fontSize: '10px', fontWeight: '600', flex: '0 0 auto' });
           const tags = document.createElement('span');
           tags.textContent = `rating:${rating} · ${special ? 'special' : 'normal'}${duplicate ? ' · duplicate' : ''}`;
-          Object.assign(tags.style, { color: tagColor, fontSize: '10px', flex: '0 0 auto' });
-          row.append(name, tags);
+          Object.assign(tags.style, { color: '#9aa6b8', fontSize: '10px', flex: '0 0 auto' });
+          row.append(name, destSpan, tags);
           pickRow.appendChild(row);
         });
 
@@ -7467,6 +7518,10 @@ await showUnassignedIfAny(`${loopDef.name} end`);
         user-select: text;
         -webkit-user-select: text;
         cursor: text;
+      }
+      #bronze-loop-log .bronze-loop-log-high-rated {
+        color: #ffd54a;
+        font-weight: 700;
       }
     `;
     document.head.appendChild(style);
