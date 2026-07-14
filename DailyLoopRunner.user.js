@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.7
+// @version      0.4.8
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -405,7 +405,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.7',
+    version: '0.4.8',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -6422,6 +6422,9 @@
       log(`${loopDef.name}: resuming pending ${pickItemName(pendingPick)}`);
       const pickedCards = await redeemAndSelectPlayerPick(pendingPick, loopDef);
       pickResults.push({ resumed: true, pickedCards: pickedCards || [] });
+      picksCompleted++;
+      log(`${loopDef.name}: resumed Player Pick counts as ${picksCompleted}/${maxPicks} requested completion(s)`);
+      if (picksCompleted >= maxPicks) break;
     }
 
     while (picksCompleted < maxPicks) {
