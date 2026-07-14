@@ -21,6 +21,7 @@
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
   const APP_KEY = '__FCLoopRunner';
   const LOOP_CONFIG_URL = 'http://127.0.0.1:8765/DailyLoopRunner.loops.json';
+  const PICK_OPTIONS_KEY = 'fc-loop-runner-pick-options';
   try { W[APP_KEY]?.destroy?.(); } catch { }
 
   const CFG = {
@@ -5318,6 +5319,55 @@
     return document.querySelector('#bronze-loop-open-rewards')?.checked === true;
   }
 
+  function getPickRuntimeOptions() {
+    const highGoldThreshold = Math.max(2, Math.min(99, Number(document.querySelector('#bronze-loop-pick-high-gold-threshold')?.value || 82) || 82));
+    const autoPickThreshold = Math.max(1, Math.min(99, Number(document.querySelector('#bronze-loop-pick-auto-threshold')?.value || 90) || 90));
+    return {
+      protectHighGold: document.querySelector('#bronze-loop-pick-protect-high-gold')?.checked !== false,
+      autoSelectBelow90: document.querySelector('#bronze-loop-pick-auto-below-90')?.checked !== false,
+      highGoldThreshold,
+      autoPickThreshold,
+    };
+  }
+
+  function loadPickRuntimeOptions() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PICK_OPTIONS_KEY) || '{}');
+      return {
+        protectHighGold: saved.protectHighGold !== false,
+        autoSelectBelow90: saved.autoSelectBelow90 !== false,
+        highGoldThreshold: Math.max(2, Math.min(99, Number(saved.highGoldThreshold || 82) || 82)),
+        autoPickThreshold: Math.max(1, Math.min(99, Number(saved.autoPickThreshold || 90) || 90)),
+      };
+    } catch {
+      return { protectHighGold: true, autoSelectBelow90: true, highGoldThreshold: 82, autoPickThreshold: 90 };
+    }
+  }
+
+  function savePickRuntimeOptions() {
+    try {
+      localStorage.setItem(PICK_OPTIONS_KEY, JSON.stringify(getPickRuntimeOptions()));
+    } catch { }
+  }
+
+  function applyPickRuntimeOptions(loopDef) {
+    if (loopDef.strategy !== 'playerPickSbc') return;
+    const options = getPickRuntimeOptions();
+    loopDef.protectHighGold = options.protectHighGold;
+    loopDef.autoSelectBelow90 = options.autoSelectBelow90;
+    loopDef.pickHighGoldThreshold = options.highGoldThreshold;
+    loopDef.autoPickRatingThreshold = options.autoPickThreshold;
+    (loopDef.requirements || []).forEach((requirement) => {
+      requirement.protectHighGold = options.protectHighGold;
+      // Pick fodder cap follows the user-selected high-gold protection threshold.
+      if (options.protectHighGold) {
+        requirement.maxRating = options.highGoldThreshold - 1;
+      } else if (Number(requirement.maxRating) <= 81) {
+        delete requirement.maxRating;
+      }
+    });
+  }
+
   async function runValidationBronzeUpgradeDryRun(loopDef) {
     await waitAppReady();
     await refreshStorePacks();
@@ -6385,9 +6435,10 @@
     if (choices.length < pickCount) fail(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
 
     const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
-    const autoSelectBelow90 = maxRating < 90;
+    const autoPickThreshold = Math.max(1, Math.min(99, Number(loopDef.autoPickRatingThreshold || 90) || 90));
+    const autoSelectBelow90 = loopDef.autoSelectBelow90 !== false && maxRating < autoPickThreshold;
     if (autoSelectBelow90) {
-      log(`${loopDef.name}: all candidates rated below 90 (max ${maxRating}); keeping automatic selection while loading prices for the recap`);
+      log(`${loopDef.name}: all candidates rated below ${autoPickThreshold} (max ${maxRating}); keeping automatic selection while loading prices for the recap`);
     }
 
     await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
@@ -6438,14 +6489,16 @@
       expectedPlayerCount: sumRequirementPlayerCount(loopDef),
     });
     assertSbcSquadSafe(loopDef, inspection);
+    if (loopDef.protectHighGold === false) return;
+    const highGoldThreshold = Math.max(2, Math.min(99, Number(loopDef.pickHighGoldThreshold || 82) || 82));
     const protectedPlayers = (players || []).filter((item) =>
-      isGold(item) && !isSpecial(item) && Number(item?.rating || 0) >= 82
+      isGold(item) && !isSpecial(item) && Number(item?.rating || 0) >= highGoldThreshold
     );
     if (!protectedPlayers.length) return;
     const details = protectedPlayers
       .map((item) => `${itemDisplayName(item)} rating:${Number(item?.rating || 0)}`)
       .join(', ');
-    fail(`${loopDef.name}: 82+ normal gold protection blocked SBC submission: ${details}`);
+    fail(`${loopDef.name}: ${highGoldThreshold}+ normal gold protection blocked SBC submission: ${details}`);
   }
 
   function assertSavedPlayerPickFodderProtection(loopDef, squad) {
@@ -6751,6 +6804,7 @@
       rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
       loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
       loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || isOpenRewardPacksEnabled();
+      applyPickRuntimeOptions(loopDef);
       if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
       if (loopDef.useRoundsAsCompletions === true) loopDef.maxCompletions = rounds;
       logFsuSettingsForRun();
@@ -6798,6 +6852,10 @@
     const builtIn = document.querySelector('#bronze-loop-built-in');
     const dryRun = document.querySelector('#bronze-loop-dry-run');
     const openRewards = document.querySelector('#bronze-loop-open-rewards');
+    const pickProtectHighGold = document.querySelector('#bronze-loop-pick-protect-high-gold');
+    const pickAutoBelow90 = document.querySelector('#bronze-loop-pick-auto-below-90');
+    const pickHighGoldThreshold = document.querySelector('#bronze-loop-pick-high-gold-threshold');
+    const pickAutoThreshold = document.querySelector('#bronze-loop-pick-auto-threshold');
     const rounds = document.querySelector('#bronze-loop-rounds');
     const json = document.querySelector('#bronze-loop-json');
     if (start) start.disabled = state.running;
@@ -6809,6 +6867,10 @@
     if (builtIn) builtIn.disabled = state.running || state.loadingLoops || state.loopConfigSource === 'built-in';
     if (dryRun) dryRun.disabled = state.running;
     if (openRewards) openRewards.disabled = state.running;
+    if (pickProtectHighGold) pickProtectHighGold.disabled = state.running;
+    if (pickAutoBelow90) pickAutoBelow90.disabled = state.running;
+    if (pickHighGoldThreshold) pickHighGoldThreshold.disabled = state.running;
+    if (pickAutoThreshold) pickAutoThreshold.disabled = state.running;
     if (rounds) rounds.disabled = state.running;
     if (json) json.disabled = state.running;
     updateLoopControls();
@@ -7197,6 +7259,16 @@
               <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
             </label>
           </div>
+          <div class="row">
+            <label title="Player Pick SBCs will not submit normal gold players at or above this rating">
+              <input id="bronze-loop-pick-protect-high-gold" type="checkbox"> Protect Pick fodder >=
+              <input id="bronze-loop-pick-high-gold-threshold" type="number" min="2" max="99" value="82">
+            </label>
+            <label title="Player Picks whose candidates are all below this rating will be selected automatically">
+              <input id="bronze-loop-pick-auto-below-90" type="checkbox"> Auto-pick below
+              <input id="bronze-loop-pick-auto-threshold" type="number" min="1" max="99" value="90">
+            </label>
+          </div>
           <div class="row" id="bronze-loop-rounds-row">
             <span id="bronze-loop-rounds-label">rounds</span>
             <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${CFG.maxRounds}">
@@ -7230,6 +7302,11 @@
       <div class="bronze-loop-resize" id="bronze-loop-resize-sw"></div>
     `;
     document.body.appendChild(panel);
+    const savedPickOptions = loadPickRuntimeOptions();
+    document.querySelector('#bronze-loop-pick-protect-high-gold').checked = savedPickOptions.protectHighGold;
+    document.querySelector('#bronze-loop-pick-auto-below-90').checked = savedPickOptions.autoSelectBelow90;
+    document.querySelector('#bronze-loop-pick-high-gold-threshold').value = savedPickOptions.highGoldThreshold;
+    document.querySelector('#bronze-loop-pick-auto-threshold').value = savedPickOptions.autoPickThreshold;
     const savedPos = getSavedPanelPos();
     if (savedPos && Number.isFinite(savedPos.left) && Number.isFinite(savedPos.top)) {
       panel.style.left = `${Math.max(0, Math.min(window.innerWidth - 80, savedPos.left))}px`;
@@ -7289,6 +7366,10 @@
     document.querySelector('#bronze-loop-json').addEventListener('input', () => {
       updateLoopControls();
     });
+    document.querySelector('#bronze-loop-pick-protect-high-gold').addEventListener('change', savePickRuntimeOptions);
+    document.querySelector('#bronze-loop-pick-auto-below-90').addEventListener('change', savePickRuntimeOptions);
+    document.querySelector('#bronze-loop-pick-high-gold-threshold').addEventListener('change', savePickRuntimeOptions);
+    document.querySelector('#bronze-loop-pick-auto-threshold').addEventListener('change', savePickRuntimeOptions);
     document.querySelector('#bronze-loop-start').addEventListener('click', startLoop);
     document.querySelector('#bronze-loop-refresh').addEventListener('click', async () => {
       if (state.running || state.refreshing) return;
