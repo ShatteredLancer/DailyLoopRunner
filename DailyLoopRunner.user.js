@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.3
+// @version      0.4.4
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -444,7 +444,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.3',
+    version: '0.4.4',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -6660,17 +6660,23 @@
     log(`${loopDef.name}: redeeming ${pickItemName(pickItem)}`);
     const redeemed = await observeOnce(W.services.Item.redeem(pickItem), ctrl(), 30000, 'redeem Player Pick');
     if (!redeemed?.success) fail(`${loopDef.name}: Player Pick redeem failed: ${serviceResultErrorText(redeemed)}`);
-    const data = redeemed.data || redeemed.response || {};
+const data = redeemed.data || redeemed.response || {};
     const choices = (data.playerPicks || data.items || []).filter(isPlayer);
     const pickCount = Math.max(1, Number(data.availablePicks || loopDef.pickCount || 1) || 1);
     if (choices.length < pickCount) fail(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
 
+    const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
+    const skipPriceLookup = maxRating < 90;
+    if (skipPriceLookup) {
+      log(`${loopDef.name}: all candidates rated below 90 (max ${maxRating}); skipping FUT.GG price lookup and manual selection`);
+    }
+
     await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
-    const prices = await getPlayerPickPrices(choices, loopDef);
+    const prices = skipPriceLookup ? new Map() : await getPlayerPickPrices(choices, loopDef);
     const ranked = rankPlayerPickCandidates(choices, prices);
     ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
 
-    const manualReason = getManualPickReason(ranked, pickCount);
+    const manualReason = skipPriceLookup ? '' : getManualPickReason(ranked, pickCount);
     const selected = manualReason
       ? await waitForManualPlayerPick(ranked, pickCount, manualReason)
       : ranked.slice(0, pickCount).map((candidate) => candidate.item);
