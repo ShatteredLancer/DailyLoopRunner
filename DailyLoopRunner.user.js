@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.9
+// @version      0.4.11
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -11,6 +11,7 @@
 // @connect      127.0.0.1
 // @connect      localhost
 // @connect      www.fut.gg
+// @connect      enhancer-api.futnext.com
 // @run-at       document-end
 // ==/UserScript==
 
@@ -405,7 +406,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.9',
+    version: '0.4.11',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -776,6 +777,35 @@
       return W.__FCLoopRunnerRequestText(url);
     }
     return fetch(url, { cache: 'no-store' }).then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.text();
+    });
+  }
+
+  function requestPriceText(url, options = {}) {
+    const headers = {
+      Accept: 'application/json, text/plain, */*',
+      ...(options.headers || {}),
+    };
+    if (typeof GM_xmlhttpRequest === 'function') {
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          headers,
+          anonymous: options.sendCookies === true ? false : true,
+          nocache: true,
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) resolve(response.responseText);
+            else reject(new Error(`HTTP ${response.status}`));
+          },
+          onerror: () => reject(new Error('request failed')),
+          ontimeout: () => reject(new Error('request timed out')),
+          timeout: 10000,
+        });
+      });
+    }
+    return fetch(url, { cache: 'no-store', headers, credentials: options.sendCookies ? 'include' : 'omit' }).then((response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.text();
     });
@@ -6163,16 +6193,43 @@
     if (!ids.length) return prices;
 
     const platform = String(loopDef.pricePlatform || 'pc').toLowerCase();
-    const url = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(','))}&platform=${encodeURIComponent(platform)}`;
     try {
-      const response = JSON.parse(await requestText(url));
+      const url = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(','))}&platform=${encodeURIComponent(platform)}`;
+      const response = JSON.parse(await requestPriceText(url, {
+        // Mirrors FSU's probe: FUT.GG accepts authenticated browser requests more
+        // reliably when the site's existing cookies and browser context are present.
+        sendCookies: true,
+        headers: {
+          Referer: W.location?.origin || location.origin,
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      }));
       for (const entry of response?.data || []) {
         const definitionId = Number(entry?.eaId || entry?.definitionId || 0);
         const price = Number(entry?.price);
         if (definitionId && Number.isFinite(price) && price > 0) prices.set(definitionId, price);
       }
+      if (prices.size) {
+        log(`${loopDef.name}: FUT.GG prices loaded for ${prices.size}/${ids.length} Pick candidate(s)`);
+        return prices;
+      }
+      log(`${loopDef.name}: FUT.GG returned no usable Pick prices; trying FUTNext`);
     } catch (error) {
-      log(`${loopDef.name}: FUT.GG price lookup unavailable (${error?.message || error}); price ties require manual selection`);
+      log(`${loopDef.name}: FUT.GG price lookup unavailable (${error?.message || error}); trying FUTNext`);
+    }
+
+    try {
+      const url = `https://enhancer-api.futnext.com/players/prices?ids=${encodeURIComponent(ids.join('_'))}&platform=${encodeURIComponent(platform)}`;
+      const response = JSON.parse(await requestPriceText(url));
+      for (const entry of Array.isArray(response) ? response : []) {
+        const definitionId = Number(entry?.definitionId || entry?.eaId || 0);
+        const price = Number(entry?.prices?.[0]);
+        if (definitionId && Number.isFinite(price) && price > 0) prices.set(definitionId, price);
+      }
+      if (prices.size) log(`${loopDef.name}: FUTNext prices loaded for ${prices.size}/${ids.length} Pick candidate(s)`);
+      else log(`${loopDef.name}: FUTNext returned no usable Pick prices; price ties require manual selection`);
+    } catch (error) {
+      log(`${loopDef.name}: FUTNext price lookup unavailable (${error?.message || error}); price ties require manual selection`);
     }
     return prices;
   }
@@ -6211,8 +6268,17 @@
         rating: candidate?.rating ?? Number(item?.rating || 0),
         special: candidate?.special ?? isSpecial(item),
         duplicate: candidate?.duplicate ?? isPlayerPickDuplicate(item),
+        price: candidate?.price ?? null,
       };
     });
+  }
+
+  function formatCompactPrice(price) {
+    const value = Number(price);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    if (value >= 1000000) return `${(value / 1000000).toFixed(value >= 10000000 ? 0 : 1)}m`;
+    if (value >= 1000) return `${(value / 1000).toFixed(value >= 100000 ? 0 : 1)}k`;
+    return String(Math.round(value));
   }
 
   function getManualPickReason(ranked, pickCount) {
@@ -6319,17 +6385,17 @@
     if (choices.length < pickCount) fail(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
 
     const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
-    const skipPriceLookup = maxRating < 90;
-    if (skipPriceLookup) {
-      log(`${loopDef.name}: all candidates rated below 90 (max ${maxRating}); skipping FUT.GG price lookup and manual selection`);
+    const autoSelectBelow90 = maxRating < 90;
+    if (autoSelectBelow90) {
+      log(`${loopDef.name}: all candidates rated below 90 (max ${maxRating}); keeping automatic selection while loading prices for the recap`);
     }
 
     await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
-    const prices = skipPriceLookup ? new Map() : await getPlayerPickPrices(choices, loopDef);
+    const prices = await getPlayerPickPrices(choices, loopDef);
     const ranked = rankPlayerPickCandidates(choices, prices);
     ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
 
-    const manualReason = skipPriceLookup ? '' : getManualPickReason(ranked, pickCount);
+    const manualReason = autoSelectBelow90 ? '' : getManualPickReason(ranked, pickCount);
     const selected = manualReason
       ? await waitForManualPlayerPick(ranked, pickCount, manualReason)
       : ranked.slice(0, pickCount).map((candidate) => candidate.item);
@@ -6382,6 +6448,14 @@
     fail(`${loopDef.name}: 82+ normal gold protection blocked SBC submission: ${details}`);
   }
 
+  function assertSavedPlayerPickFodderProtection(loopDef, squad) {
+    const savedPlayers = getSquadItems(squad);
+    if (!savedPlayers.length) {
+      fail(`${loopDef.name}: cannot inspect the saved squad; stop before Player Pick submission`);
+    }
+    assertPlayerPickFodderProtection(loopDef, savedPlayers);
+  }
+
   async function submitPlayerPickChallenge(loopDef, challengeNo, challengeTotal) {
     await refreshInventoryCaches(`${loopDef.name} challenge ${challengeNo}/${challengeTotal} pre-selection`, { includePacks: false, quiet: true });
     const selection = selectLoopInventoryPlayers(loopDef, loopDef.priorityPiles);
@@ -6402,6 +6476,9 @@
     if (!prepared.ok) return false;
     assertPlayerPickFodderProtection(loopDef, prepared.selected);
     await saveChallengeSquad(opened.challenge, prepared.selected, `${loopDef.name} challenge ${challengeNo}/${challengeTotal}`);
+    // saveChallenge/loadChallengeData can resolve duplicate signals to a different live item.
+    // Validate the actual saved squad so no protected 82+ normal gold card reaches submit.
+    assertSavedPlayerPickFodderProtection(loopDef, opened.challenge?.squad || ctrl()?._squad);
     if (!findSubmitButton()) fail(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} squad is not submit ready`);
     await submitSbcAndGetAwardPackId(opened.set);
     markSbcItemsConsumed(prepared.selected, `${loopDef.name} challenge ${challengeNo}/${challengeTotal}`);
@@ -6516,13 +6593,14 @@
           });
           const name = document.createElement('span');
           name.textContent = itemDisplayName(card.item);
-          Object.assign(name.style, { fontWeight: '600', flex: '1 1 auto' });
+          Object.assign(name.style, { fontWeight: '600', flex: '1 1 auto', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
           const destinationTag = document.createElement('span');
           destinationTag.textContent = destinationLabels[destination] || destination;
           Object.assign(destinationTag.style, { color: destinationColors[destination] || destinationColors.unknown, fontSize: '10px', fontWeight: '600', flex: '0 0 auto' });
           const tags = document.createElement('span');
-          tags.textContent = `rating:${rating}, ${card.special ? 'special' : 'normal'}${card.duplicate ? ', duplicate' : ''}`;
-          Object.assign(tags.style, { color: '#9aa6b8', fontSize: '10px', flex: '0 0 auto' });
+          const compactPrice = formatCompactPrice(card.price);
+          tags.textContent = `rating:${rating}, ${card.special ? 'special' : 'normal'}${card.duplicate ? ', duplicate' : ''}${compactPrice ? `, price:${compactPrice}` : ''}`;
+          Object.assign(tags.style, { color: '#9aa6b8', fontSize: '10px', flex: '0 0 auto', whiteSpace: 'nowrap' });
           row.append(name, destinationTag, tags);
           pickRow.appendChild(row);
         });
@@ -6756,6 +6834,22 @@
     } catch { }
   }
 
+  function getPanelDefaultSize(panel) {
+    return panel.classList.contains('options-open')
+      ? { width: 360, height: 620 }
+      : { width: 300, height: 178 };
+  }
+
+  function resetPanelSize(panel) {
+    const size = getPanelDefaultSize(panel);
+    const width = Math.min(size.width, Math.max(220, window.innerWidth - 20));
+    const height = Math.min(size.height, Math.max(180, window.innerHeight - 20));
+    panel.dataset.minWidth = String(width);
+    panel.dataset.minHeight = String(height);
+    panel.style.width = `${width}px`;
+    panel.style.height = `${height}px`;
+  }
+
   function makePanelDraggable(panel) {
     const handle = panel.querySelector('#bronze-loop-drag');
     if (!handle) return;
@@ -6802,7 +6896,11 @@
         panel.dataset.dragJustEnded = '1';
         panel.classList.remove('icon-only');
         const optionsToggle = document.querySelector('#bronze-loop-options-toggle');
-        if (optionsToggle) optionsToggle.textContent = 'Options';
+        if (optionsToggle) {
+          optionsToggle.textContent = 'Options';
+          optionsToggle.title = 'Show advanced options';
+        }
+        resetPanelSize(panel);
         setTimeout(() => {
           delete panel.dataset.dragJustEnded;
         }, 150);
@@ -6822,8 +6920,6 @@
   }
 
   function makePanelResizable(panel) {
-    const MIN_W = 220;
-    const MIN_H = 180;
     const EDGE_PAD = 20;
     const DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
     let resizing = null;
@@ -6837,15 +6933,17 @@
       let newTop = resizing.startTop;
       let newWidth = resizing.startWidth;
       let newHeight = resizing.startHeight;
-      if (dir.includes('e')) newWidth = Math.max(MIN_W, resizing.startWidth + dx);
-      if (dir.includes('s')) newHeight = Math.max(MIN_H, resizing.startHeight + dy);
+      const minWidth = Number(panel.dataset.minWidth || 300);
+      const minHeight = Number(panel.dataset.minHeight || 178);
+      if (dir.includes('e')) newWidth = Math.max(minWidth, resizing.startWidth + dx);
+      if (dir.includes('s')) newHeight = Math.max(minHeight, resizing.startHeight + dy);
       if (dir.includes('w')) {
-        newWidth = Math.max(MIN_W, resizing.startWidth - dx);
-        if (newWidth > MIN_W) newLeft = resizing.startLeft + (resizing.startWidth - newWidth);
+        newWidth = Math.max(minWidth, resizing.startWidth - dx);
+        if (newWidth > minWidth) newLeft = resizing.startLeft + (resizing.startWidth - newWidth);
       }
       if (dir.includes('n')) {
-        newHeight = Math.max(MIN_H, resizing.startHeight - dy);
-        if (newHeight > MIN_H) newTop = resizing.startTop + (resizing.startHeight - newHeight);
+        newHeight = Math.max(minHeight, resizing.startHeight - dy);
+        if (newHeight > minHeight) newTop = resizing.startTop + (resizing.startHeight - newHeight);
       }
       const maxW = window.innerWidth - EDGE_PAD;
       const maxH = window.innerHeight - EDGE_PAD;
@@ -6916,8 +7014,9 @@
         bottom: 10px;
         z-index: 999999;
         width: 300px;
-        min-width: 220px;
-        min-height: 180px;
+        height: 178px;
+        min-width: 300px;
+        min-height: 178px;
         display: flex;
         flex-direction: column;
         background: #15181d;
@@ -7028,6 +7127,9 @@
         min-height: 0;
         overflow: hidden;
       }
+      #bronze-loop-panel.options-open #bronze-loop-latest {
+        display: none;
+      }
       .bronze-loop-section {
         color: #9fb2c9;
         font-size: 11px;
@@ -7135,12 +7237,7 @@
       panel.style.right = 'auto';
       panel.style.bottom = 'auto';
     }
-    if (savedPos && Number.isFinite(savedPos.width) && savedPos.width >= 220) {
-      panel.style.width = `${Math.min(window.innerWidth - 20, savedPos.width)}px`;
-    }
-    if (savedPos && Number.isFinite(savedPos.height) && savedPos.height >= 180) {
-      panel.style.height = `${Math.min(window.innerHeight - 20, savedPos.height)}px`;
-    }
+    resetPanelSize(panel);
     makePanelDraggable(panel);
     makePanelResizable(panel);
     renderLoopSelect();
@@ -7154,24 +7251,26 @@
       panel.classList.toggle('icon-only');
       if (panel.classList.contains('icon-only')) {
         panel.classList.remove('options-open');
-        document.querySelector('#bronze-loop-options-toggle').textContent = 'Options';
+        const optionsToggle = document.querySelector('#bronze-loop-options-toggle');
+        optionsToggle.textContent = 'Options';
+        optionsToggle.title = 'Show advanced options';
         panel.style.width = '';
         panel.style.height = '';
       } else {
-        const saved = getSavedPanelPos();
-        if (saved && Number.isFinite(saved.width) && saved.width >= 220) {
-          panel.style.width = `${Math.min(window.innerWidth - 20, saved.width)}px`;
-        }
-        if (saved && Number.isFinite(saved.height) && saved.height >= 180) {
-          panel.style.height = `${Math.min(window.innerHeight - 20, saved.height)}px`;
-        }
+        resetPanelSize(panel);
       }
-      document.querySelector('#bronze-loop-collapse').textContent = panel.classList.contains('icon-only') ? 'L' : 'L';
+      const collapseButton = document.querySelector('#bronze-loop-collapse');
+      collapseButton.textContent = 'L';
+      collapseButton.title = panel.classList.contains('icon-only') ? 'Restore panel' : 'Collapse to icon';
       savePanelPos(panel);
     });
     document.querySelector('#bronze-loop-options-toggle').addEventListener('click', () => {
       panel.classList.toggle('options-open');
-      document.querySelector('#bronze-loop-options-toggle').textContent = panel.classList.contains('options-open') ? 'Close' : 'Options';
+      const optionsToggle = document.querySelector('#bronze-loop-options-toggle');
+      const optionsOpen = panel.classList.contains('options-open');
+      optionsToggle.textContent = optionsOpen ? 'Hide' : 'Options';
+      optionsToggle.title = optionsOpen ? 'Hide advanced options' : 'Show advanced options';
+      resetPanelSize(panel);
       savePanelPos(panel);
     });
     document.querySelector('#bronze-loop-select').addEventListener('change', (event) => {
