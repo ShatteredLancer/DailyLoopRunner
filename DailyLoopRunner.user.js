@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.4
+// @version      0.4.5
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -444,7 +444,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.4',
+    version: '0.4.5',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -6692,8 +6692,8 @@ const data = redeemed.data || redeemed.response || {};
     if (!confirmed?.success) fail(`${loopDef.name}: Player Pick confirmation failed: ${serviceResultErrorText(confirmed)}`);
     await sleep(CFG.pauseMs);
     await refreshUnassigned({ quiet: true });
-    await clearUnassigned(`${loopDef.name} Player Pick result`);
-    return selected.length;
+await clearUnassigned(`${loopDef.name} Player Pick result`);
+    return selected;
   }
 
   async function findUnassignedPlayerPick(loopDef, attempts = 10, options = {}) {
@@ -6743,18 +6743,20 @@ const data = redeemed.data || redeemed.response || {};
     return true;
   }
 
-  async function runPlayerPickSbc(loopDef) {
+async function runPlayerPickSbc(loopDef) {
     await waitAppReady();
     const maxPicks = Math.max(1, Math.min(50, Number(loopDef.maxCompletions || 1) || 1));
     const challengesPerPick = Math.max(1, Number(loopDef.challengesPerPick || 1) || 1);
     let picksCompleted = 0;
+    const pickResults = [];
 
     // A stopped manual selection can leave an already-redeemed pick in Unassigned.
     while (true) {
       const pendingPick = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true });
       if (!pendingPick) break;
       log(`${loopDef.name}: resuming pending ${pickItemName(pendingPick)}`);
-      await redeemAndSelectPlayerPick(pendingPick, loopDef);
+      const pickedItems = await redeemAndSelectPlayerPick(pendingPick, loopDef);
+      pickResults.push({ resumed: true, pickedItems: pickedItems || [] });
     }
 
     while (picksCompleted < maxPicks) {
@@ -6772,14 +6774,16 @@ const data = redeemed.data || redeemed.response || {};
 
       const pickItem = await findUnassignedPlayerPick(loopDef);
       if (!pickItem) break;
-      await redeemAndSelectPlayerPick(pickItem, loopDef);
+      const pickedItems = await redeemAndSelectPlayerPick(pickItem, loopDef);
+      pickResults.push({ resumed: false, pickedItems: pickedItems || [] });
       picksCompleted++;
       await sleep(CFG.pauseMs);
     }
     log(`${loopDef.name}: completed ${picksCompleted}/${maxPicks} Player Pick(s)`);
+    return pickResults;
   }
 
-  async function runPlayerPickSbcDryRun(loopDef) {
+async function runPlayerPickSbcDryRun(loopDef) {
     await waitAppReady();
     await refreshInventoryCaches(`${loopDef.name} dry-run`, { includePacks: false, quiet: true });
     const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
@@ -6790,6 +6794,106 @@ const data = redeemed.data || redeemed.response || {};
     const pendingPick = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true });
     if (pendingPick) log(`${loopDef.name}: dry-run found pending ${pickItemName(pendingPick)}; live run would resolve it before submitting another SBC`);
     log(`${loopDef.name}: dry run stops before submitting SBCs, redeeming Picks, or moving items`);
+  }
+
+  async function showPickRecapModal(loopDef, pickResults) {
+    const entries = Array.isArray(pickResults) ? pickResults : [];
+    const flatCards = entries.flatMap((entry) => entry?.pickedItems || []);
+    if (!flatCards.length) {
+      log(`${loopDef.name}: no Player Pick results to recap`);
+      return;
+    }
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.id = 'bronze-loop-recap-modal';
+      Object.assign(overlay.style, {
+        position: 'fixed', inset: '0', zIndex: '100000', background: 'rgba(0, 0, 0, 0.78)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', boxSizing: 'border-box',
+      });
+      const dialog = document.createElement('div');
+      Object.assign(dialog.style, {
+        width: 'min(560px, 100%)', maxHeight: '90vh', overflow: 'auto', background: '#171b21', color: '#f3f5f7',
+        border: '1px solid #65758a', padding: '12px 14px', boxSizing: 'border-box', fontFamily: 'Arial, sans-serif',
+      });
+      const title = document.createElement('div');
+      title.textContent = `Player Pick Recap — ${loopDef.name}`;
+      Object.assign(title.style, { fontWeight: '700', marginBottom: '4px', fontSize: '14px' });
+
+      const ratings = flatCards.map((item) => Number(item?.rating || 0));
+      const maxRating = ratings.length ? Math.max(...ratings) : 0;
+      const minRating = ratings.length ? Math.min(...ratings) : 0;
+      const safeIsSpecial = (item) => { try { return isSpecial(item); } catch { return false; } };
+      const safeIsDuplicate = (item) => { try { return isPlayerPickDuplicate(item); } catch { return false; } };
+      const specialCount = flatCards.filter(safeIsSpecial).length;
+      const duplicateCount = flatCards.filter(safeIsDuplicate).length;
+      const highRatedCount = flatCards.filter((item) => Number(item?.rating || 0) >= 91).length;
+      const resumedCount = entries.filter((entry) => entry?.resumed).length;
+
+      const summary = document.createElement('div');
+      summary.textContent = `${entries.length} pick(s) (${resumedCount} resumed) • ${flatCards.length} card(s) • rating ${minRating}-${maxRating} • ${specialCount} special • ${duplicateCount} duplicate • ${highRatedCount} 91+`;
+      Object.assign(summary.style, { color: '#9aa6b8', marginBottom: '8px', fontSize: '11px' });
+
+      const list = document.createElement('div');
+      Object.assign(list.style, { display: 'flex', flexDirection: 'column', gap: '4px' });
+
+      entries.forEach((entry, index) => {
+        const pickRow = document.createElement('div');
+        const cards = entry?.pickedItems || [];
+        const headerLine = document.createElement('div');
+        headerLine.textContent = `Pick ${index + 1}${entry?.resumed ? ' (resumed)' : ''} — ${cards.length} card(s)`;
+        Object.assign(headerLine.style, { fontSize: '10px', color: '#7d8898', marginBottom: '2px' });
+        pickRow.appendChild(headerLine);
+
+        cards.forEach((item) => {
+          const special = safeIsSpecial(item);
+          const duplicate = safeIsDuplicate(item);
+          const rating = Number(item?.rating || 0);
+          const highRated = rating >= 91;
+          const borderColor = highRated ? '#ffd54a' : special ? '#7a5cff' : duplicate ? '#5c8aff' : '#3a4757';
+          const bgColor = highRated ? '#3a2f15' : special ? '#26223a' : '#1d2229';
+          const tagColor = highRated ? '#ffd54a' : '#9aa6b8';
+          const row = document.createElement('div');
+          Object.assign(row.style, {
+            padding: '3px 6px',
+            fontSize: '12px',
+            color: '#f3f5f7',
+            background: bgColor,
+            borderLeft: `3px solid ${borderColor}`,
+            borderRadius: '2px',
+            display: 'flex', gap: '8px', alignItems: 'baseline',
+          });
+          const name = document.createElement('span');
+          name.textContent = itemDisplayName(item);
+          Object.assign(name.style, { fontWeight: '600', flex: '1 1 auto' });
+          const tags = document.createElement('span');
+          tags.textContent = `rating:${rating} · ${special ? 'special' : 'normal'}${duplicate ? ' · duplicate' : ''}`;
+          Object.assign(tags.style, { color: tagColor, fontSize: '10px', flex: '0 0 auto' });
+          row.append(name, tags);
+          pickRow.appendChild(row);
+        });
+
+        list.appendChild(pickRow);
+      });
+
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.textContent = 'Close';
+      Object.assign(closeBtn.style, {
+        marginTop: '10px', minHeight: '28px', padding: '0 12px',
+        background: '#2f6fde', color: '#fff', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '12px',
+      });
+
+      const finish = () => {
+        overlay.remove();
+        resolve();
+      };
+      closeBtn.addEventListener('click', finish);
+      overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
+
+      dialog.append(title, summary, list, closeBtn);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+    });
   }
 
   async function runRound(roundNo) {
@@ -6855,12 +6959,13 @@ const data = redeemed.data || redeemed.response || {};
 
     if (loopDef.strategy === 'rarePackTo84Upgrade') {
       await runRarePackTo84Upgrade(loopDef);
-      await showUnassignedIfAny(`${loopDef.name} end`);
+await showUnassignedIfAny(`${loopDef.name} end`);
       return;
     }
 
     if (loopDef.strategy === 'playerPickSbc') {
-      await runPlayerPickSbc(loopDef);
+      const pickResults = await runPlayerPickSbc(loopDef);
+      await showPickRecapModal(loopDef, pickResults);
       await showUnassignedIfAny(`${loopDef.name} end`);
       return;
     }
