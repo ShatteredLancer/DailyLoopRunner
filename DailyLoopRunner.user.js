@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.8
+// @version      0.4.9
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -219,7 +219,7 @@
       name: '5 of 10 82+ Player Pick',
       strategy: 'playerPickSbc',
       sbcNames: ['5 of 10 82+ Player Pick', '5 of 10 82+ Player Picks'],
-      pickItemNames: ['5 of 10 82+ Player Pick', '82+ Player Pick'],
+      pickItemNames: ['5 of 10 82+ Player Pick', '5 of 10 82+ Rare Gold Player Pick', '82+ Player Pick'],
       requirements: [
         { tier: 'gold', rarity: 'common', count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
       ],
@@ -405,7 +405,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.8',
+    version: '0.4.9',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
