@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.16
+// @version      0.4.18
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -416,7 +416,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.16',
+    version: '0.4.18',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -6694,10 +6694,10 @@ Object.assign(row.style, {
           fontWeight: '700',
           flex: '0 0 auto',
         });
-        nameRating.append(nameSpan, ratingSpan);
         const pickTag = document.createElement('span');
         pickTag.textContent = `P${pickIndex}${resumed ? 'r' : ''}`;
         Object.assign(pickTag.style, { color: '#7d8898', fontSize: '11px', fontWeight: '600', flex: '0 0 auto' });
+        nameRating.append(nameSpan, ratingSpan, pickTag);
         const destinationTag = document.createElement('span');
         destinationTag.textContent = destinationLabels[destination] || destination;
         Object.assign(destinationTag.style, { color: destinationColors[destination] || destinationColors.unknown, fontSize: '11px', fontWeight: '600', flex: '0 0 auto' });
@@ -6705,7 +6705,7 @@ Object.assign(row.style, {
         const compactPrice = formatCompactPrice(card.price);
         tags.textContent = `${card.special ? 'special' : 'normal'}${card.duplicate ? ', duplicate' : ''}${compactPrice ? `, price:${compactPrice}` : ''}`;
         Object.assign(tags.style, { color: '#9aa6b8', fontSize: '11px', flex: '0 0 auto', whiteSpace: 'nowrap' });
-        row.append(nameRating, pickTag, destinationTag, tags);
+        row.append(nameRating, destinationTag, tags);
         list.appendChild(row);
       });
 
@@ -6740,51 +6740,92 @@ function triggerRecapFireworks(dialog, specialCount) {
       position: 'absolute', top: '0', left: '0', right: '0', bottom: '0',
       pointerEvents: 'none', overflow: 'hidden', zIndex: '2',
     });
+
     const palette = ['#ffd54a', '#ff5c5c', '#5c8aff', '#5cffa0', '#7a5cff', '#ff9d4a', '#ff5cb1', '#5ce0ff'];
     const intensity = Math.max(1, Math.min(6, Number(specialCount) || 1));
-    const particleCount = 40 + intensity * 10;
+    const bursts = 3;
+    const particlesPerBurst = 55 + intensity * 12;
+
     const styleId = `bronze-loop-fireworks-${Date.now()}`;
     const styleEl = document.createElement('style');
     styleEl.id = styleId;
     styleEl.textContent = `
-      @keyframes bronze-loop-firework-fall {
-        0%   { transform: translate(0, -20px) rotate(0deg) scale(0.6); opacity: 1; }
-        70%  { opacity: 1; }
-        100% { transform: translate(var(--drift), 100%) rotate(var(--spin)) scale(0.2); opacity: 0; }
+      @property --tx { syntax: '<length>'; inherits: false; initial-value: 0px; }
+      @property --ty { syntax: '<length>'; inherits: false; initial-value: 0px; }
+      @keyframes bronze-loop-firework-burst {
+        0%   { transform: translate(0,0) scale(1);   opacity: 1; }
+        30%  { opacity: 1; }
+        75%  { opacity: 0.6; }
+        100% { transform: translate(var(--tx), var(--ty)) scale(0.15); opacity: 0; }
+      }
+      @keyframes bronze-loop-firework-flash {
+        0%   { transform: translate(-50%,-50%) scale(0); opacity: 0.95; }
+        60%  { opacity: 0.6; }
+        100% { transform: translate(-50%,-50%) scale(1.6); opacity: 0; }
       }
     `;
     layer.appendChild(styleEl);
+
     const rect = dialog.getBoundingClientRect();
-    const widthPx = Math.max(120, rect.width);
-    const heightPx = Math.max(120, rect.height);
-    for (let i = 0; i < particleCount; i++) {
-      const p = document.createElement('span');
-      const size = 4 + Math.random() * 6;
-      const drift = (Math.random() - 0.5) * 80;
-      const spin = (Math.random() < 0.5 ? -1 : 1) * (180 + Math.random() * 540);
-      const duration = 1800 + Math.random() * 1600;
-      const delay = Math.random() * 600;
-      const color = palette[Math.floor(Math.random() * palette.length)];
-      const startX = Math.random() * Math.max(0, widthPx - 20);
-      const startY = Math.random() * Math.max(0, heightPx * 0.6 - 20);
-      Object.assign(p.style, {
+    const widthPx = Math.max(280, rect.width);
+    const heightPx = Math.max(220, rect.height);
+    const burstColumns = [0.22, 0.5, 0.78];
+
+    for (let b = 0; b < bursts; b++) {
+      const colX = burstColumns[b % burstColumns.length];
+      const originX = widthPx * (colX + (Math.random() - 0.5) * 0.05);
+      const originY = heightPx * (0.12 + Math.random() * 0.16);
+      const burstStart = b * 650;
+
+      const flash = document.createElement('span');
+      Object.assign(flash.style, {
         position: 'absolute',
-        left: `${startX}px`,
-        top: `${startY}px`,
-        width: `${size}px`,
-        height: `${size * (0.4 + Math.random() * 0.6)}px`,
-        background: color,
-        borderRadius: Math.random() < 0.5 ? '50%' : '1px',
-        boxShadow: `0 0 ${size * 2}px ${color}`,
-        '--drift': `${drift}px`,
-        '--spin': `${spin}deg`,
-        animation: `bronze-loop-firework-fall ${duration}ms ease-in ${delay}ms forwards`,
+        left: `${originX}px`,
+        top: `${originY}px`,
+        width: '36px',
+        height: '36px',
+        background: '#fff',
+        borderRadius: '50%',
+        boxShadow: '0 0 40px 18px #fff7c2, 0 0 90px 36px #ffd54a',
+        animation: `bronze-loop-firework-flash 380ms ease-out ${burstStart}ms forwards`,
         pointerEvents: 'none',
       });
-      layer.appendChild(p);
+      layer.appendChild(flash);
+
+      for (let i = 0; i < particlesPerBurst; i++) {
+        const baseAngle = (i / particlesPerBurst) * Math.PI * 2;
+        const angleJitter = (Math.random() - 0.5) * 0.45;
+        const angle = baseAngle + angleJitter;
+        const distance = 90 + Math.random() * Math.min(220, Math.max(100, Math.min(widthPx, heightPx) * 0.45));
+        const gravity = 80 + distance * 0.4;
+        const tx = Math.cos(angle) * distance;
+        const ty = Math.sin(angle) * distance + gravity;
+        const size = 3 + Math.random() * 5;
+        const duration = 1300 + Math.random() * 800;
+        const color = palette[Math.floor(Math.random() * palette.length)];
+        const delay = burstStart + 90 + Math.random() * 180;
+
+        const p = document.createElement('span');
+        Object.assign(p.style, {
+          position: 'absolute',
+          left: `${originX}px`,
+          top: `${originY}px`,
+          width: `${size}px`,
+          height: `${size}px`,
+          background: color,
+          borderRadius: '50%',
+          boxShadow: `0 0 ${size * 5}px ${color}, 0 0 ${size * 10}px ${color}`,
+          '--tx': `${tx}px`,
+          '--ty': `${ty}px`,
+          animation: `bronze-loop-firework-burst ${duration}ms cubic-bezier(0.15, 0.55, 0.3, 1) ${delay}ms forwards`,
+          pointerEvents: 'none',
+        });
+        layer.appendChild(p);
+      }
     }
+
     dialog.appendChild(layer);
-    setTimeout(() => { layer.remove(); styleEl.remove(); }, 4500);
+    setTimeout(() => { layer.remove(); styleEl.remove(); }, 3200);
   }
 
   async function runPlayerPickSbcDryRun(loopDef) {
