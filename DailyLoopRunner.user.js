@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.15
+// @version      0.4.16
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -416,7 +416,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.15',
+    version: '0.4.16',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -6641,8 +6641,8 @@ function updateLoopControls() {
         border: '1px solid #65758a', padding: '12px 14px', boxSizing: 'border-box', fontFamily: 'Arial, sans-serif',
       });
       const title = document.createElement('div');
-      title.textContent = `Player Pick Recap: ${loopDef.name}`;
-      Object.assign(title.style, { fontWeight: '700', marginBottom: '4px', fontSize: '14px' });
+title.textContent = `Player Pick Recap: ${loopDef.name}`;
+      Object.assign(title.style, { fontWeight: '700', marginBottom: '4px', fontSize: '16px' });
 
       const ratings = flatCards.map((card) => Number(card.rating || 0));
       const maxRating = Math.max(...ratings);
@@ -6661,10 +6661,10 @@ function updateLoopControls() {
         .map(([destination, count]) => `${count} ${destinationLabels[destination] || destination}`)
         .join(', ');
       summary.textContent = `${entries.length} pick(s), ${flatCards.length} card(s), rating ${minRating}-${maxRating}, ${specialCount} special, ${duplicateCount} duplicate, ${highRatedCount} rated 91+${destinationSummary ? `, ${destinationSummary}` : ''}${resumedCount ? `, ${resumedCount} resumed` : ''}`;
-      Object.assign(summary.style, { color: '#9aa6b8', marginBottom: '8px', fontSize: '11px' });
+Object.assign(summary.style, { color: '#9aa6b8', marginBottom: '8px', fontSize: '12px' });
 
-const list = document.createElement('div');
-      Object.assign(list.style, { display: 'flex', flexDirection: 'column', gap: '3px' });
+      const list = document.createElement('div');
+      Object.assign(list.style, { display: 'flex', flexDirection: 'column', gap: '6px' });
       const sortedRows = entries
         .flatMap((entry, pickIndex) => (entry?.pickedCards || []).map((card) => ({
           card, pickIndex: pickIndex + 1, resumed: !!entry?.resumed,
@@ -6676,12 +6676,12 @@ const list = document.createElement('div');
         const highRated = rating >= 91;
         const destination = card.destination || 'unknown';
         const row = document.createElement('div');
-        Object.assign(row.style, {
-          padding: '4px 6px', fontSize: '12px', color: '#f3f5f7',
-          background: highRated ? '#3a2f15' : card.special ? '#26223a' : '#1d2229',
-          borderLeft: `3px solid ${highRated ? '#ffd54a' : card.special ? '#7a5cff' : destinationColors[destination] || destinationColors.unknown}`,
-          display: 'flex', gap: '8px', alignItems: 'baseline',
-        });
+Object.assign(row.style, {
+            padding: '6px 8px', fontSize: '13px', color: '#f3f5f7',
+            background: highRated ? '#3a2f15' : card.special ? '#26223a' : '#1d2229',
+            borderLeft: `3px solid ${highRated ? '#ffd54a' : card.special ? '#7a5cff' : destinationColors[destination] || destinationColors.unknown}`,
+            display: 'flex', gap: '8px', alignItems: 'baseline',
+          });
         const nameRating = document.createElement('span');
         Object.assign(nameRating.style, { flex: '1 1 auto', minWidth: '0', display: 'flex', gap: '6px', alignItems: 'baseline', overflow: 'hidden' });
         const nameSpan = document.createElement('span');
@@ -6697,14 +6697,14 @@ const list = document.createElement('div');
         nameRating.append(nameSpan, ratingSpan);
         const pickTag = document.createElement('span');
         pickTag.textContent = `P${pickIndex}${resumed ? 'r' : ''}`;
-        Object.assign(pickTag.style, { color: '#7d8898', fontSize: '10px', fontWeight: '600', flex: '0 0 auto' });
+        Object.assign(pickTag.style, { color: '#7d8898', fontSize: '11px', fontWeight: '600', flex: '0 0 auto' });
         const destinationTag = document.createElement('span');
         destinationTag.textContent = destinationLabels[destination] || destination;
-        Object.assign(destinationTag.style, { color: destinationColors[destination] || destinationColors.unknown, fontSize: '10px', fontWeight: '600', flex: '0 0 auto' });
+        Object.assign(destinationTag.style, { color: destinationColors[destination] || destinationColors.unknown, fontSize: '11px', fontWeight: '600', flex: '0 0 auto' });
         const tags = document.createElement('span');
         const compactPrice = formatCompactPrice(card.price);
         tags.textContent = `${card.special ? 'special' : 'normal'}${card.duplicate ? ', duplicate' : ''}${compactPrice ? `, price:${compactPrice}` : ''}`;
-        Object.assign(tags.style, { color: '#9aa6b8', fontSize: '10px', flex: '0 0 auto', whiteSpace: 'nowrap' });
+        Object.assign(tags.style, { color: '#9aa6b8', fontSize: '11px', flex: '0 0 auto', whiteSpace: 'nowrap' });
         row.append(nameRating, pickTag, destinationTag, tags);
         list.appendChild(row);
       });
@@ -6712,9 +6712,9 @@ const list = document.createElement('div');
       const closeButton = document.createElement('button');
       closeButton.type = 'button';
       closeButton.textContent = 'Close';
-      Object.assign(closeButton.style, {
-        marginTop: '10px', minHeight: '28px', padding: '0 12px', background: '#2f6fde', color: '#fff',
-        border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '12px',
+Object.assign(closeButton.style, {
+        marginTop: '10px', minHeight: '30px', padding: '0 14px', background: '#2f6fde', color: '#fff',
+        border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '13px',
       });
       const finish = () => {
         if (stopTimer) clearInterval(stopTimer);
@@ -6723,11 +6723,68 @@ const list = document.createElement('div');
       };
       closeButton.addEventListener('click', finish);
       overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
-      dialog.append(title, summary, list, closeButton);
+dialog.append(title, summary, list, closeButton);
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
+      if (specialCount > 0) triggerRecapFireworks(dialog, specialCount);
       stopTimer = setInterval(() => { if (state.stopping) finish(); }, 250);
     });
+  }
+
+function triggerRecapFireworks(dialog, specialCount) {
+    if (!dialog) return;
+    if (getComputedStyle(dialog).position === 'static') dialog.style.position = 'relative';
+    const layer = document.createElement('div');
+    layer.id = 'bronze-loop-recap-fireworks';
+    Object.assign(layer.style, {
+      position: 'absolute', top: '0', left: '0', right: '0', bottom: '0',
+      pointerEvents: 'none', overflow: 'hidden', zIndex: '2',
+    });
+    const palette = ['#ffd54a', '#ff5c5c', '#5c8aff', '#5cffa0', '#7a5cff', '#ff9d4a', '#ff5cb1', '#5ce0ff'];
+    const intensity = Math.max(1, Math.min(6, Number(specialCount) || 1));
+    const particleCount = 40 + intensity * 10;
+    const styleId = `bronze-loop-fireworks-${Date.now()}`;
+    const styleEl = document.createElement('style');
+    styleEl.id = styleId;
+    styleEl.textContent = `
+      @keyframes bronze-loop-firework-fall {
+        0%   { transform: translate(0, -20px) rotate(0deg) scale(0.6); opacity: 1; }
+        70%  { opacity: 1; }
+        100% { transform: translate(var(--drift), 100%) rotate(var(--spin)) scale(0.2); opacity: 0; }
+      }
+    `;
+    layer.appendChild(styleEl);
+    const rect = dialog.getBoundingClientRect();
+    const widthPx = Math.max(120, rect.width);
+    const heightPx = Math.max(120, rect.height);
+    for (let i = 0; i < particleCount; i++) {
+      const p = document.createElement('span');
+      const size = 4 + Math.random() * 6;
+      const drift = (Math.random() - 0.5) * 80;
+      const spin = (Math.random() < 0.5 ? -1 : 1) * (180 + Math.random() * 540);
+      const duration = 1800 + Math.random() * 1600;
+      const delay = Math.random() * 600;
+      const color = palette[Math.floor(Math.random() * palette.length)];
+      const startX = Math.random() * Math.max(0, widthPx - 20);
+      const startY = Math.random() * Math.max(0, heightPx * 0.6 - 20);
+      Object.assign(p.style, {
+        position: 'absolute',
+        left: `${startX}px`,
+        top: `${startY}px`,
+        width: `${size}px`,
+        height: `${size * (0.4 + Math.random() * 0.6)}px`,
+        background: color,
+        borderRadius: Math.random() < 0.5 ? '50%' : '1px',
+        boxShadow: `0 0 ${size * 2}px ${color}`,
+        '--drift': `${drift}px`,
+        '--spin': `${spin}deg`,
+        animation: `bronze-loop-firework-fall ${duration}ms ease-in ${delay}ms forwards`,
+        pointerEvents: 'none',
+      });
+      layer.appendChild(p);
+    }
+    dialog.appendChild(layer);
+    setTimeout(() => { layer.remove(); styleEl.remove(); }, 4500);
   }
 
   async function runPlayerPickSbcDryRun(loopDef) {
