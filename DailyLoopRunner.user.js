@@ -6726,7 +6726,7 @@ Object.assign(closeButton.style, {
 dialog.append(title, summary, list, closeButton);
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
-      if (true) triggerRecapFireworks(dialog, Math.max(1, specialCount));
+      if (specialCount > 0) triggerRecapFireworks(dialog, specialCount);
       stopTimer = setInterval(() => { if (state.stopping) finish(); }, 250);
     });
   }
@@ -6734,6 +6734,7 @@ dialog.append(title, summary, list, closeButton);
 function triggerRecapFireworks(dialog, specialCount) {
     if (!dialog) return;
     if (getComputedStyle(dialog).position === 'static') dialog.style.position = 'relative';
+    dialog.style.isolation = 'isolate';
 
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:-1;';
