@@ -50,6 +50,7 @@
         "playerOnly": true,
         "allowSpecial": false
       },
+      "dailyCompletionLimit": 7,
       "maxCompletions": 7
     },
     {
@@ -72,6 +73,7 @@
         "playerOnly": true,
         "allowSpecial": false
       },
+      "dailyCompletionLimit": 7,
       "maxCompletions": 1
     },
     {
@@ -93,6 +95,7 @@
         "playerOnly": true,
         "allowSpecial": false
       },
+      "dailyCompletionLimit": 7,
       "maxCompletions": 7
     },
     {
@@ -114,6 +117,7 @@
         "playerOnly": true,
         "allowSpecial": false
       },
+      "dailyCompletionLimit": 7,
       "maxCompletions": 1
     },
     {
@@ -146,6 +150,23 @@
         }
       ],
       "priorityPiles": ["storage", "transfer", "club"],
+      "primaryPiles": ["unassigned", "storage", "transfer"],
+      "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "shortagePacks": [
+        {
+          "requirement": { "tier": "bronze" },
+          "packIds": [105],
+          "packNames": ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
+          "maxOpensPerAttempt": 1
+        },
+        {
+          "requirement": { "tier": "silver" },
+          "packIds": [205],
+          "packNames": ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
+          "maxOpensPerAttempt": 1
+        }
+      ],
+      "dailyCompletionLimit": 7,
       "maxCompletions": 7
     },
     {
@@ -178,6 +199,23 @@
         }
       ],
       "priorityPiles": ["storage", "transfer", "club"],
+      "primaryPiles": ["unassigned", "storage", "transfer"],
+      "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "shortagePacks": [
+        {
+          "requirement": { "tier": "bronze" },
+          "packIds": [105],
+          "packNames": ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
+          "maxOpensPerAttempt": 1
+        },
+        {
+          "requirement": { "tier": "silver" },
+          "packIds": [205],
+          "packNames": ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
+          "maxOpensPerAttempt": 1
+        }
+      ],
+      "dailyCompletionLimit": 7,
       "maxCompletions": 1
     },
     {
@@ -210,6 +248,7 @@
       ],
       "priorityPiles": ["unassigned", "storage", "transfer"],
       "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "dailyCompletionLimit": 7,
       "maxCompletions": 7
     },
     {
@@ -242,6 +281,7 @@
       ],
       "priorityPiles": ["unassigned", "storage", "transfer"],
       "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "dailyCompletionLimit": 7,
       "maxCompletions": 1
     },
     {
@@ -615,6 +655,7 @@
             "count": 9,
             "playerOnly": true,
             "allowSpecial": false,
+            "protectHighGold": true,
             "priorityPiles": ["unassigned", "storage", "transfer", "club"]
           }
         ],
@@ -633,6 +674,7 @@
             "count": 6,
             "playerOnly": true,
             "allowSpecial": false,
+            "protectHighGold": true,
             "priorityPiles": ["unassigned", "storage", "transfer", "club"]
           }
         ],
