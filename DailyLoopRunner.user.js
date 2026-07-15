@@ -6726,19 +6726,20 @@ Object.assign(closeButton.style, {
 dialog.append(title, summary, list, closeButton);
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
-      if (specialCount > 0) triggerRecapFireworks(overlay, specialCount);
+      if (specialCount > 0) triggerRecapFireworks(dialog, specialCount);
       stopTimer = setInterval(() => { if (state.stopping) finish(); }, 250);
     });
   }
 
-function triggerRecapFireworks(overlay, specialCount) {
-    if (!overlay) return;
+function triggerRecapFireworks(dialog, specialCount) {
+    if (!dialog) return;
+    if (getComputedStyle(dialog).position === 'static') dialog.style.position = 'relative';
     const layer = document.createElement('div');
     layer.id = 'bronze-loop-recap-fireworks';
     Object.assign(layer.style, {
-      position: 'absolute', inset: '0', pointerEvents: 'none', overflow: 'hidden', zIndex: '1',
+      position: 'absolute', top: '0', left: '0', right: '0', bottom: '0',
+      pointerEvents: 'none', overflow: 'hidden', zIndex: '2',
     });
-    const dialog = overlay.querySelector('div');
     const palette = ['#ffd54a', '#ff5c5c', '#5c8aff', '#5cffa0', '#7a5cff', '#ff9d4a', '#ff5cb1', '#5ce0ff'];
     const intensity = Math.max(1, Math.min(6, Number(specialCount) || 1));
     const particleCount = 40 + intensity * 10;
@@ -6749,24 +6750,23 @@ function triggerRecapFireworks(overlay, specialCount) {
       @keyframes bronze-loop-firework-fall {
         0%   { transform: translate(0, -20px) rotate(0deg) scale(0.6); opacity: 1; }
         70%  { opacity: 1; }
-        100% { transform: translate(var(--drift), 100vh) rotate(var(--spin)) scale(0.2); opacity: 0; }
+        100% { transform: translate(var(--drift), 100%) rotate(var(--spin)) scale(0.2); opacity: 0; }
       }
     `;
     layer.appendChild(styleEl);
-    const dialogRect = dialog?.getBoundingClientRect?.();
-    const overlayRect = overlay.getBoundingClientRect();
-    const widthPx = (dialogRect?.width || overlayRect.width || 600) - 20;
-    const heightPx = (dialogRect?.height || overlayRect.height || 400);
+    const rect = dialog.getBoundingClientRect();
+    const widthPx = Math.max(120, rect.width);
+    const heightPx = Math.max(120, rect.height);
     for (let i = 0; i < particleCount; i++) {
       const p = document.createElement('span');
       const size = 4 + Math.random() * 6;
-      const drift = (Math.random() - 0.5) * 120;
+      const drift = (Math.random() - 0.5) * 80;
       const spin = (Math.random() < 0.5 ? -1 : 1) * (180 + Math.random() * 540);
       const duration = 1800 + Math.random() * 1600;
       const delay = Math.random() * 600;
       const color = palette[Math.floor(Math.random() * palette.length)];
-      const startX = Math.random() * widthPx;
-      const startY = Math.random() * heightPx * 0.6;
+      const startX = Math.random() * Math.max(0, widthPx - 20);
+      const startY = Math.random() * Math.max(0, heightPx * 0.6 - 20);
       Object.assign(p.style, {
         position: 'absolute',
         left: `${startX}px`,
@@ -6783,8 +6783,7 @@ function triggerRecapFireworks(overlay, specialCount) {
       });
       layer.appendChild(p);
     }
-    if (dialog) dialog.appendChild(layer);
-    else overlay.appendChild(layer);
+    dialog.appendChild(layer);
     setTimeout(() => { layer.remove(); styleEl.remove(); }, 4500);
   }
 
