@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.11
+// @version      0.4.12
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -82,6 +82,7 @@
     },
     {
       id: 'daily-bronze',
+      hidden: true,
       name: 'Daily Bronze Loop',
       strategy: 'dailySingleCardRecycle',
       sbcNames: ['Daily Bronze Upgrade', '每日青铜升级', '每日青銅升級'],
@@ -92,6 +93,7 @@
     },
     {
       id: 'daily-bronze-mvp',
+      hidden: true,
       name: 'Daily Bronze MVP (1 run)',
       strategy: 'dailySingleCardRecycle',
       sbcNames: ['Daily Bronze Upgrade', '每日青铜升级', '每日青銅升級'],
@@ -102,6 +104,7 @@
     },
     {
       id: 'daily-silver',
+      hidden: true,
       name: 'Daily Silver Loop',
       strategy: 'dailySingleCardRecycle',
       sbcNames: ['Daily Silver Upgrade', '每日白银升级', '每日白銀升級'],
@@ -112,6 +115,7 @@
     },
     {
       id: 'daily-silver-mvp',
+      hidden: true,
       name: 'Daily Silver MVP (1 run)',
       strategy: 'dailySingleCardRecycle',
       sbcNames: ['Daily Silver Upgrade', '每日白银升级', '每日白銀升級'],
@@ -122,6 +126,7 @@
     },
     {
       id: 'daily-common',
+      hidden: true,
       name: 'Daily Common Loop',
       strategy: 'inventoryMixedUpgrade',
       sbcNames: ['Daily Common Gold Upgrade', '每日普通金牌升级', '每日普通金牌升級'],
@@ -136,6 +141,7 @@
     },
     {
       id: 'daily-common-mvp',
+      hidden: true,
       name: 'Daily Common MVP (1 run)',
       strategy: 'inventoryMixedUpgrade',
       sbcNames: ['Daily Common Gold Upgrade', '每日普通金牌升级', '每日普通金牌升級'],
@@ -150,6 +156,7 @@
     },
     {
       id: 'daily-rare',
+      hidden: true,
       name: 'Daily Rare Loop',
       strategy: 'commonGoldToRareUpgrade',
       sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
@@ -164,6 +171,7 @@
     },
     {
       id: 'daily-rare-mvp',
+      hidden: true,
       name: 'Daily Rare MVP (1 run)',
       strategy: 'commonGoldToRareUpgrade',
       sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
@@ -407,7 +415,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.11',
+    version: '0.4.12',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -456,6 +464,12 @@
 
   function getLoopDefs() {
     return state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
+  }
+
+  function getVisibleLoopDefs() {
+    const loopDefs = getLoopDefs();
+    const visibleLoopDefs = loopDefs.filter((def) => def.hidden !== true);
+    return visibleLoopDefs.length ? visibleLoopDefs : loopDefs;
   }
 
   function findLoopDefById(id) {
@@ -601,7 +615,7 @@
     if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
       errors.push('dryRun must be boolean');
     }
-    ['openRewardPacks', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst'].forEach((field) => {
+    ['hidden', 'openRewardPacks', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst'].forEach((field) => {
       if (loopDef[field] !== undefined && typeof loopDef[field] !== 'boolean') {
         errors.push(`${field} must be boolean`);
       }
@@ -856,7 +870,7 @@
 
   function getSelectedLoopDef() {
     const select = document.querySelector('#bronze-loop-select');
-    const selectedId = select?.value || getLoopDefs()[0]?.id || LOOP_DEFS[0].id;
+    const selectedId = select?.value || getVisibleLoopDefs()[0]?.id || LOOP_DEFS[0].id;
     if (selectedId === 'custom') {
       const text = document.querySelector('#bronze-loop-json')?.value || '';
       try {
@@ -884,7 +898,7 @@
     const previous = selectedId || select.value;
     select.textContent = '';
 
-    for (const def of getLoopDefs()) {
+    for (const def of getVisibleLoopDefs()) {
       const option = document.createElement('option');
       option.value = def.id;
       option.textContent = def.name;
@@ -898,14 +912,14 @@
 
     const nextValue = Array.from(select.options).some((option) => option.value === previous)
       ? previous
-      : getLoopDefs()[0]?.id;
+      : getVisibleLoopDefs()[0]?.id;
     if (nextValue) select.value = nextValue;
     if (select.value !== 'custom') setLoopJson(getLoopDefById(select.value));
     updateLoopControls();
   }
 
   function getEditorLoopDef() {
-    const selectedId = document.querySelector('#bronze-loop-select')?.value || getLoopDefs()[0]?.id || LOOP_DEFS[0].id;
+    const selectedId = document.querySelector('#bronze-loop-select')?.value || getVisibleLoopDefs()[0]?.id || LOOP_DEFS[0].id;
     if (selectedId !== 'custom') return getLoopDefById(selectedId);
     try {
       return JSON.parse(document.querySelector('#bronze-loop-json')?.value || '{}');
