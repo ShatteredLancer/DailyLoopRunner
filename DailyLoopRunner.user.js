@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.12
+// @version      0.4.13
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -386,7 +386,7 @@
     },
   ];
 
-  const state = {
+const state = {
     running: false,
     stopping: false,
     refreshing: false,
@@ -403,6 +403,7 @@
     bootTimer: null,
     fsuSettingsOverride: null,
     fsuSettingsCache: { at: 0, settings: null },
+    lastPickRecap: null,
   };
 
   function destroyRunner() {
@@ -415,7 +416,7 @@
   }
 
   W[APP_KEY] = {
-    version: '0.4.12',
+    version: '0.4.13',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -932,7 +933,7 @@
     return getEditorLoopDef()?.strategy || '';
   }
 
-  function updateLoopControls() {
+function updateLoopControls() {
     const roundsRow = document.querySelector('#bronze-loop-rounds-row');
     const roundsLabel = document.querySelector('#bronze-loop-rounds-label');
     const roundsInput = document.querySelector('#bronze-loop-rounds');
@@ -943,6 +944,29 @@
     if (roundsRow) roundsRow.style.display = showRounds ? '' : 'none';
     roundsLabel.style.display = showRounds ? '' : 'none';
     roundsInput.style.display = showRounds ? '' : 'none';
+  }
+
+  function updateRecapButton() {
+    const btn = document.querySelector('#bronze-loop-recap-reopen');
+    if (!btn) return;
+    const recap = state.lastPickRecap;
+    btn.style.display = recap ? '' : 'none';
+    if (recap) {
+      const totalCards = (recap.pickResults || []).reduce(
+        (sum, entry) => sum + ((entry?.pickedCards || entry?.pickedItems || []).length),
+        0
+      );
+      btn.title = `Last Player Pick recap: ${recap.name} (${totalCards} card(s))`;
+    }
+  }
+
+  async function reopenLastPickRecap() {
+    const recap = state.lastPickRecap;
+    if (!recap) {
+      log('No previous Player Pick recap available');
+      return;
+    }
+    await showPickRecapModal({ name: recap.name }, recap.pickResults);
   }
 
   function fail(message) {
@@ -6775,8 +6799,14 @@
       return;
     }
 
-    if (loopDef.strategy === 'playerPickSbc') {
+if (loopDef.strategy === 'playerPickSbc') {
       const pickResults = await runPlayerPickSbc(loopDef);
+      state.lastPickRecap = {
+        name: loopDef.name,
+        pickResults,
+        completedAt: Date.now(),
+      };
+      updateRecapButton();
       await showPickRecapModal(loopDef, pickResults);
       await showUnassignedIfAny(`${loopDef.name} end`);
       return;
@@ -7261,6 +7291,7 @@
         <div class="row">
           <button id="bronze-loop-start">Start</button>
           <button id="bronze-loop-stop" disabled>Stop</button>
+          <button id="bronze-loop-recap-reopen" style="display:none" title="View last Player Pick recap">View recap</button>
         </div>
         <div id="bronze-loop-latest">Ready.</div>
         <div id="bronze-loop-options">
@@ -7385,6 +7416,8 @@
     document.querySelector('#bronze-loop-pick-high-gold-threshold').addEventListener('change', savePickRuntimeOptions);
     document.querySelector('#bronze-loop-pick-auto-threshold').addEventListener('change', savePickRuntimeOptions);
     document.querySelector('#bronze-loop-start').addEventListener('click', startLoop);
+    document.querySelector('#bronze-loop-recap-reopen').addEventListener('click', reopenLastPickRecap);
+    updateRecapButton();
     document.querySelector('#bronze-loop-refresh').addEventListener('click', async () => {
       if (state.running || state.refreshing) return;
       state.refreshing = true;
