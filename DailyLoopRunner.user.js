@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.18
+// @version      0.4.19
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -416,7 +416,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.18',
+    version: '0.4.19',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -6647,7 +6647,7 @@ title.textContent = `Player Pick Recap: ${loopDef.name}`;
       const ratings = flatCards.map((card) => Number(card.rating || 0));
       const maxRating = Math.max(...ratings);
       const minRating = Math.min(...ratings);
-      const specialCount = flatCards.filter((card) => card.special).length;
+const specialCount = flatCards.filter((card) => card.special).length;
       const duplicateCount = flatCards.filter((card) => card.duplicate).length;
       const highRatedCount = flatCards.filter((card) => Number(card.rating || 0) >= 91).length;
       const resumedCount = entries.filter((entry) => entry?.resumed).length;
@@ -6734,98 +6734,106 @@ dialog.append(title, summary, list, closeButton);
 function triggerRecapFireworks(dialog, specialCount) {
     if (!dialog) return;
     if (getComputedStyle(dialog).position === 'static') dialog.style.position = 'relative';
-    const layer = document.createElement('div');
-    layer.id = 'bronze-loop-recap-fireworks';
-    Object.assign(layer.style, {
-      position: 'absolute', top: '0', left: '0', right: '0', bottom: '0',
-      pointerEvents: 'none', overflow: 'hidden', zIndex: '2',
-    });
+
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
+    dialog.insertBefore(canvas, dialog.firstChild);
+
+    const W = Math.max(220, canvas.clientWidth);
+    const H = Math.max(180, canvas.clientHeight);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { canvas.remove(); return; }
+    ctx.scale(dpr, dpr);
 
     const palette = ['#ffd54a', '#ff5c5c', '#5c8aff', '#5cffa0', '#7a5cff', '#ff9d4a', '#ff5cb1', '#5ce0ff'];
     const intensity = Math.max(1, Math.min(6, Number(specialCount) || 1));
     const bursts = 3;
-    const particlesPerBurst = 55 + intensity * 12;
+    const particlesPerBurst = 70 + intensity * 14;
+    const totalDuration = 3000;
 
-    const styleId = `bronze-loop-fireworks-${Date.now()}`;
-    const styleEl = document.createElement('style');
-    styleEl.id = styleId;
-    styleEl.textContent = `
-      @property --tx { syntax: '<length>'; inherits: false; initial-value: 0px; }
-      @property --ty { syntax: '<length>'; inherits: false; initial-value: 0px; }
-      @keyframes bronze-loop-firework-burst {
-        0%   { transform: translate(0,0) scale(1);   opacity: 1; }
-        30%  { opacity: 1; }
-        75%  { opacity: 0.6; }
-        100% { transform: translate(var(--tx), var(--ty)) scale(0.15); opacity: 0; }
-      }
-      @keyframes bronze-loop-firework-flash {
-        0%   { transform: translate(-50%,-50%) scale(0); opacity: 0.95; }
-        60%  { opacity: 0.6; }
-        100% { transform: translate(-50%,-50%) scale(1.6); opacity: 0; }
-      }
-    `;
-    layer.appendChild(styleEl);
+    const particles = [];
+    const burstSchedule = [80, 700, 1400];
 
-    const rect = dialog.getBoundingClientRect();
-    const widthPx = Math.max(280, rect.width);
-    const heightPx = Math.max(220, rect.height);
-    const burstColumns = [0.22, 0.5, 0.78];
-
-    for (let b = 0; b < bursts; b++) {
-      const colX = burstColumns[b % burstColumns.length];
-      const originX = widthPx * (colX + (Math.random() - 0.5) * 0.05);
-      const originY = heightPx * (0.12 + Math.random() * 0.16);
-      const burstStart = b * 650;
-
-      const flash = document.createElement('span');
-      Object.assign(flash.style, {
-        position: 'absolute',
-        left: `${originX}px`,
-        top: `${originY}px`,
-        width: '36px',
-        height: '36px',
-        background: '#fff',
-        borderRadius: '50%',
-        boxShadow: '0 0 40px 18px #fff7c2, 0 0 90px 36px #ffd54a',
-        animation: `bronze-loop-firework-flash 380ms ease-out ${burstStart}ms forwards`,
-        pointerEvents: 'none',
-      });
-      layer.appendChild(flash);
-
+    function spawnBurst(x, y) {
+      const flash = {
+        x, y, life: 1, decay: 0.05,
+        color: '#fff', size: 14 + Math.random() * 6, isFlash: true,
+      };
+      particles.push(flash);
       for (let i = 0; i < particlesPerBurst; i++) {
         const baseAngle = (i / particlesPerBurst) * Math.PI * 2;
-        const angleJitter = (Math.random() - 0.5) * 0.45;
+        const angleJitter = (Math.random() - 0.5) * 0.5;
         const angle = baseAngle + angleJitter;
-        const distance = 90 + Math.random() * Math.min(220, Math.max(100, Math.min(widthPx, heightPx) * 0.45));
-        const gravity = 80 + distance * 0.4;
-        const tx = Math.cos(angle) * distance;
-        const ty = Math.sin(angle) * distance + gravity;
-        const size = 3 + Math.random() * 5;
-        const duration = 1300 + Math.random() * 800;
+        const speed = 1.5 + Math.random() * 3.5;
         const color = palette[Math.floor(Math.random() * palette.length)];
-        const delay = burstStart + 90 + Math.random() * 180;
-
-        const p = document.createElement('span');
-        Object.assign(p.style, {
-          position: 'absolute',
-          left: `${originX}px`,
-          top: `${originY}px`,
-          width: `${size}px`,
-          height: `${size}px`,
-          background: color,
-          borderRadius: '50%',
-          boxShadow: `0 0 ${size * 5}px ${color}, 0 0 ${size * 10}px ${color}`,
-          '--tx': `${tx}px`,
-          '--ty': `${ty}px`,
-          animation: `bronze-loop-firework-burst ${duration}ms cubic-bezier(0.15, 0.55, 0.3, 1) ${delay}ms forwards`,
-          pointerEvents: 'none',
+        particles.push({
+          x, y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1.8,
+          color,
+          life: 1,
+          decay: 0.006 + Math.random() * 0.012,
+          size: 0.9 + Math.random() * 1.4,
         });
-        layer.appendChild(p);
       }
     }
 
-    dialog.appendChild(layer);
-    setTimeout(() => { layer.remove(); styleEl.remove(); }, 3200);
+    const startMs = performance.now();
+    const cols = [0.22, 0.5, 0.78];
+    let lastBurstIdx = -1;
+
+    function tick(now) {
+      const elapsed = now - startMs;
+      if (elapsed > totalDuration || !canvas.isConnected) {
+        canvas.remove();
+        return;
+      }
+
+      for (let b = lastBurstIdx + 1; b < bursts; b++) {
+        if (elapsed >= burstSchedule[b]) {
+          const ox = widthPx * cols[b] + (Math.random() - 0.5) * 30;
+          const oy = heightPx * (0.18 + Math.random() * 0.12);
+          spawnBurst(ox, oy);
+          lastBurstIdx = b;
+        }
+      }
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+      ctx.fillRect(0, 0, widthPx, heightPx);
+
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.vy += 0.06;
+        p.vx *= 0.985;
+        p.vy *= 0.985;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= p.decay;
+
+        if (p.life <= 0 || p.y > heightPx + 30 || p.x < -30 || p.x > widthPx + 30) {
+          particles.splice(i, 1);
+          continue;
+        }
+
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = p.isFlash ? 18 : 9;
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.isFlash ? p.size * (1 + (1 - p.life) * 0.6) : p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
   }
 
   async function runPlayerPickSbcDryRun(loopDef) {
