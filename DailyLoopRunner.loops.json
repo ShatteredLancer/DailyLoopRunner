@@ -353,13 +353,15 @@
     },
     {
       "id": "82-plus-player-pick-5of10",
-      "name": "5 of 10 82+ Player Pick",
+      "name": "5 of 10 82+ Players Pick",
       "strategy": "playerPickSbc",
       "sbcNames": [
+        "5 of 10 82+ Players Pick",
         "5 of 10 82+ Player Pick",
         "5 of 10 82+ Player Picks"
       ],
       "pickItemNames": [
+        "5 of 10 82+ Players Pick",
         "5 of 10 82+ Player Pick",
         "5 of 10 82+ Rare Gold Player Pick",
         "82+ Player Pick"
@@ -642,6 +644,7 @@
         "Provision Pack",
         "Provisions Pack"
       ],
+      "preCraftPlayerPickLoopId": "82-plus-player-pick-5of10",
       "rounds": 1,
       "commonUpgrade": {
         "name": "FOF Glory Hunters Crafting Upgrade",
