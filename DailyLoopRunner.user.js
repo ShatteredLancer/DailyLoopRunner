@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.19
+// @version      0.4.20
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -416,7 +416,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.19',
+    version: '0.4.20',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     setFsuSettingsOverride,
@@ -6726,7 +6726,7 @@ Object.assign(closeButton.style, {
 dialog.append(title, summary, list, closeButton);
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
-      if (specialCount > 0) triggerRecapFireworks(dialog, specialCount);
+      if (true) triggerRecapFireworks(dialog, Math.max(1, specialCount));
       stopTimer = setInterval(() => { if (state.stopping) finish(); }, 250);
     });
   }
@@ -6736,7 +6736,7 @@ function triggerRecapFireworks(dialog, specialCount) {
     if (getComputedStyle(dialog).position === 'static') dialog.style.position = 'relative';
 
     const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;';
+    canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:-1;';
     dialog.insertBefore(canvas, dialog.firstChild);
 
     const W = Math.max(220, canvas.clientWidth);
@@ -6794,15 +6794,15 @@ function triggerRecapFireworks(dialog, specialCount) {
 
       for (let b = lastBurstIdx + 1; b < bursts; b++) {
         if (elapsed >= burstSchedule[b]) {
-          const ox = widthPx * cols[b] + (Math.random() - 0.5) * 30;
-          const oy = heightPx * (0.18 + Math.random() * 0.12);
+          const ox = W * cols[b] + (Math.random() - 0.5) * 30;
+          const oy = H * (0.18 + Math.random() * 0.12);
           spawnBurst(ox, oy);
           lastBurstIdx = b;
         }
       }
 
       ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
-      ctx.fillRect(0, 0, widthPx, heightPx);
+      ctx.fillRect(0, 0, W, H);
 
       ctx.globalCompositeOperation = 'lighter';
       for (let i = particles.length - 1; i >= 0; i--) {
@@ -6814,7 +6814,7 @@ function triggerRecapFireworks(dialog, specialCount) {
         p.y += p.vy;
         p.life -= p.decay;
 
-        if (p.life <= 0 || p.y > heightPx + 30 || p.x < -30 || p.x > widthPx + 30) {
+        if (p.life <= 0 || p.y > H + 30 || p.x < -30 || p.x > W + 30) {
           particles.splice(i, 1);
           continue;
         }
