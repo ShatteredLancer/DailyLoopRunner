@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.24
+// @version      0.4.25
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -436,7 +436,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.24',
+    version: '0.4.25',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -7336,11 +7336,11 @@ function triggerRecapFireworks(dialog, specialCount) {
     dialog.style.isolation = 'isolate';
 
     const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:-1;';
+    canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:35%;pointer-events:none;z-index:-1;overflow:hidden;';
     dialog.insertBefore(canvas, dialog.firstChild);
 
     const W = Math.max(220, canvas.clientWidth);
-    const H = Math.max(180, canvas.clientHeight);
+    const H = Math.max(120, canvas.clientHeight);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
