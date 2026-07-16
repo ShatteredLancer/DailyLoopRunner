@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.23
+// @version      0.4.24
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -436,7 +436,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.23',
+    version: '0.4.24',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -2854,35 +2854,53 @@ function updateLoopControls() {
   async function openPack(pack, purpose, options = {}) {
     if (!pack) fail(`Pack not found for ${purpose}`);
     await clearUnassigned(`opening ${purpose}`);
-    const name = packName(pack);
-    const attempts = options.retryOn471 === true ? 2 : 1;
+    let currentPack = pack;
+    let name = packName(currentPack);
+    const retryCodes = new Set((options.retryCodes || (options.retryOn471 === true ? ['471'] : [])).map(String));
+    const attempts = retryCodes.size ? 2 : 1;
 
     for (let attempt = 1; attempt <= attempts; attempt++) {
       if (attempt > 1) {
-        log(`${purpose}: retrying pack open after pending unassigned cleanup`);
+        log(`${purpose}: retrying pack open after navigation and unassigned recovery`);
         await sleep(CFG.pauseMs);
-        await showUnassignedIfAny(`${purpose} 471 recovery sync`);
+        await unwindSbcSquadControllers(`${purpose} pack-open recovery`);
+        await showUnassignedIfAny(`${purpose} pack-open recovery sync`);
+        if (isSbcControllerActive()) {
+          await openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`).catch((error) => {
+            log(`${purpose}: pack-open Store recovery skipped: ${error?.message || error}`);
+            return false;
+          });
+        }
         await sleep(700);
-        await clearUnassigned(`${purpose} 471 recovery cleanup`);
-        await refreshInventoryCaches(`${purpose} 471 recovery`, { quiet: true });
+        await clearUnassigned(`${purpose} pack-open recovery cleanup`);
+        await refreshInventoryCaches(`${purpose} pack-open recovery`, { quiet: true });
+        if (typeof options.resolveRetryPack === 'function') {
+          const refreshedPack = await options.resolveRetryPack();
+          if (!refreshedPack) {
+            log(`${purpose}: no matching pack remains after recovery`);
+            return null;
+          }
+          currentPack = refreshedPack;
+          name = packName(currentPack);
+        }
       }
 
-      log(`Opening pack: ${name} (#${pack.id})${attempt > 1 ? ` retry ${attempt}/${attempts}` : ''}`);
-      const result = await observeOnce(pack.open(), ctrl(), 30000, `open ${name}`);
+      log(`Opening pack: ${name} (#${currentPack.id})${attempt > 1 ? ` retry ${attempt}/${attempts}` : ''}`);
+      const result = await observeOnce(currentPack.open(), ctrl(), 30000, `open ${name}`);
       if (result?.success && result?.response?.items) {
-        markStalePack(pack);
+        markStalePack(currentPack);
         await waitLoadingEnd();
         return result.response.items || [];
       }
 
       const code = result?.error?.code || result?.status || 'unknown';
-      if (options.retryOn471 === true && String(code) === '471' && attempt < attempts) {
-        log(`${purpose}: pack open returned 471; waiting for pending unassigned items before retry`);
+      if (retryCodes.has(String(code)) && attempt < attempts) {
+        log(`${purpose}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
         continue;
       }
       if (options.allowGone && String(code) === '404') {
-        markStalePack(pack);
-        log(`Skipping stale pack for ${purpose}: ${name} (#${pack.id}) returned 404`);
+        markStalePack(currentPack);
+        log(`Skipping stale pack for ${purpose}: ${name} (#${currentPack.id}) returned 404`);
         await waitLoadingEnd().catch(() => null);
         await refreshStorePacks().catch(() => null);
         return null;
@@ -3742,6 +3760,63 @@ function updateLoopControls() {
 
     log(`Unassigned confirmation (${reason}): ${items.length} item(s) still present`);
     return items;
+  }
+
+  function isSbcSquadControllerActive() {
+    return /UTSBCSquadSplitViewController/i.test(currentControllerName());
+  }
+
+  function isSbcControllerActive() {
+    return /^UTSBC/i.test(currentControllerName());
+  }
+
+  async function unwindSbcSquadControllers(label, maxPops = 20) {
+    let popped = 0;
+    while (isSbcSquadControllerActive() && popped < maxPops) {
+      const controller = ctrl();
+      const nav = navController();
+      if (typeof nav?.popViewController !== 'function') {
+        log(`${label}: cannot exit ${currentControllerName() || 'SBC squad'}; navigation pop method is unavailable`);
+        break;
+      }
+
+      nav.popViewController(true);
+      popped++;
+      await waitLoadingEnd(350, 10000).catch(() => null);
+      for (let wait = 0; wait < 12 && ctrl() === controller; wait++) await sleep(250);
+      if (ctrl() === controller) {
+        log(`${label}: SBC squad controller did not change after navigation pop ${popped}`);
+        break;
+      }
+    }
+
+    if (popped) {
+      log(`${label}: removed ${popped} stale SBC squad view(s); current controller ${currentControllerName() || 'unknown'}`);
+    }
+    return popped;
+  }
+
+  async function syncAfterInventorySbcSubmit(label) {
+    const before = currentControllerName() || 'unknown';
+    await unwindSbcSquadControllers(`${label} post-submit`);
+    await showUnassignedIfAny(`${label} post-submit navigation sync`);
+    let after = currentControllerName() || 'unknown';
+
+    if (isSbcSquadControllerActive()) {
+      await unwindSbcSquadControllers(`${label} post-unassigned`);
+      after = currentControllerName() || 'unknown';
+    }
+
+    if (isSbcControllerActive()) {
+      log(`${label}: controller is still ${after} in the SBC area after navigation cleanup; opening Store Packs as a final fallback`);
+      await openStorePacksViewForRefresh(`${label} post-submit Store sync`).catch((error) => {
+        log(`${label}: post-submit Store sync skipped: ${error?.message || error}`);
+        return false;
+      });
+      after = currentControllerName() || 'unknown';
+    }
+
+    log(`${label}: post-submit controller ${before} -> ${after}`);
   }
 
   async function waitAfterSbcFillAction(label, squad, timeoutMs = 10000) {
@@ -6348,7 +6423,7 @@ function updateLoopControls() {
     } else if (rewardPackId) {
       log(`${loopDef.name}: reward pack #${rewardPackId} left unopened`);
     }
-    await refreshUnassigned().catch(() => null);
+    await syncAfterInventorySbcSubmit(loopDef.name);
     return { submitted: true, rewardPackId };
   }
 
@@ -6620,6 +6695,7 @@ function updateLoopControls() {
     let packsOpened = 0;
     let rareCompletions = 0;
 
+    await unwindSbcSquadControllers(`${loopDef.name} resume`);
     const resumedUnassigned = await showUnassignedIfAny(`${loopDef.name} resume sync`);
     if (resumedUnassigned.length) {
       const resumedDuplicates = resumedUnassigned.filter(isLowRareGoldDuplicate).length;
@@ -6644,7 +6720,11 @@ function updateLoopControls() {
       }
 
       log(`${loopDef.name}: opening ${packName(pack)} (#${pack.id}) ${packsOpened + 1}/${maxPacks}`);
-      const items = await openPack(pack, `${loopDef.name} source pack`, { allowGone: true, retryOn471: true });
+      const items = await openPack(pack, `${loopDef.name} source pack`, {
+        allowGone: true,
+        retryCodes: ['471', '500'],
+        resolveRetryPack: () => findSourcePack(loopDef),
+      });
       if (!items) {
         await sleep(CFG.pauseMs);
         continue;
