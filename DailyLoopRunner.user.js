@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.28
+// @version      0.4.29
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -465,7 +465,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.28',
+    version: '0.4.29',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1705,10 +1705,16 @@ function updateLoopControls() {
   function callItemBooleanMethod(item, methodNames = []) {
     for (const name of methodNames) {
       try {
-        if (typeof item?.[name] === 'function' && item[name]()) return true;
+        if (typeof item?.[name] === 'function' && isExplicitTrue(item[name]())) return true;
       } catch { }
     }
     return false;
+  }
+
+  function isExplicitTrue(value) {
+    if (value === true || value === 1) return true;
+    if (typeof value !== 'string') return false;
+    return ['true', '1', 'yes', 'on', 'enabled', 'enable'].includes(value.trim().toLowerCase());
   }
 
   function itemFieldValues(item, keys = []) {
@@ -1732,16 +1738,17 @@ function updateLoopControls() {
     const explicitLoanFlags = itemFieldValues(item, ['isLoan', 'isLoanItem', 'isLoanPlayer']);
     for (const value of explicitLoanFlags) {
       if (typeof value === 'function' || value === undefined || value === null || value === '') continue;
-      const bool = boolFromAny(value);
-      if (bool === true) return true;
+      if (isExplicitTrue(value)) return true;
     }
     for (const value of itemFieldValues(item, ['loans'])) {
       if (typeof value === 'function' || value === undefined || value === null || value === '') continue;
-      const bool = boolFromAny(value);
-      if (bool === true) return true;
-      if (bool === false) continue;
+      if (typeof value === 'boolean') {
+        if (value) return true;
+        continue;
+      }
       const num = Number(value);
-      if (Number.isFinite(num) && num > 0) return true;
+      // EA/FSU uses -1 for unlimited normal cards; 0+ means limited-use/loan.
+      if (Number.isFinite(num) && num >= 0) return true;
     }
     return false;
   }
@@ -1751,9 +1758,7 @@ function updateLoopControls() {
     if (callItemBooleanMethod(item, ['isLimitedUse'])) return true;
     for (const value of itemFieldValues(item, ['limitedUse', 'isLimitedUse', 'limitedUses'])) {
       if (typeof value === 'function' || value === undefined || value === null || value === '') continue;
-      const bool = boolFromAny(value);
-      if (bool === true) return true;
-      if (bool === false) continue;
+      if (isExplicitTrue(value)) return true;
       const num = Number(value);
       if (Number.isFinite(num) && num > 0) return true;
     }
