@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.25
+// @version      0.4.26
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -436,7 +436,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.25',
+    version: '0.4.26',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1029,12 +1029,23 @@ function updateLoopControls() {
   }
 
   async function reopenLastPickRecap() {
+    const btn = document.querySelector('#bronze-loop-recap-reopen');
+    const existing = document.querySelector('#bronze-loop-recap-modal');
+    if (existing) {
+      existing.remove();
+      if (btn) { btn.textContent = 'View recap'; btn.style.background = ''; }
+      return;
+    }
     const recap = state.lastPickRecap;
     if (!recap) {
       log('No previous Player Pick recap available');
       return;
     }
     await showPickRecapModal({ name: recap.name }, recap.pickResults);
+    if (btn && document.querySelector('#bronze-loop-recap-modal')) {
+      btn.textContent = 'Hide recap';
+      btn.style.background = '#b13b3b';
+    }
   }
 
   function fail(message) {
@@ -7315,9 +7326,11 @@ Object.assign(closeButton.style, {
         marginTop: '10px', minHeight: '30px', padding: '0 14px', background: '#2f6fde', color: '#fff',
         border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '13px',
       });
-      const finish = () => {
+const finish = () => {
         if (stopTimer) clearInterval(stopTimer);
         overlay.remove();
+        const recapBtn = document.querySelector('#bronze-loop-recap-reopen');
+        if (recapBtn) { recapBtn.textContent = 'View recap'; recapBtn.style.background = ''; }
         resolve();
       };
       closeButton.addEventListener('click', finish);
