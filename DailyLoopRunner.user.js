@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.27
+// @version      0.4.28
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -275,6 +275,29 @@
       openRewardPacks: false,
     },
     {
+      id: '2x84-fodder',
+      name: '2x84+ Fodder Loop',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
+      rewardPackNames: ['2x 84+ Rare Gold Players Pack', '2 x 84+ Rare Gold Players Pack'],
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      allowMultipleCompletions: true,
+      inventoryFillFirst: true,
+      requirements: [
+        { tier: 'gold', rarity: 'rare', count: 6, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['storage', 'club'] },
+      ],
+      priorityPiles: ['storage', 'club'],
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      maxSubmittedRating: 81,
+      maxNormalGoldSubmittedRating: 81,
+      blockSpecial: true,
+      blockTradeable: false,
+      openRewardPacks: true,
+      forceOpenRewardPacks: true,
+    },
+    {
       id: 'auto-totw-upgrade',
       name: '84+ TOTW Upgrade Loop',
       strategy: 'fillAndVerifySbc',
@@ -336,6 +359,9 @@
         blockTradeable: false,
         openRewardPacks: true,
       },
+      autoFodderUpgrade: {
+        maxAttemptsPerCompletion: 3,
+      },
       blockSpecial: true,
       blockTradeable: false,
       openRewardPacks: false,
@@ -375,6 +401,9 @@
         blockSpecial: true,
         blockTradeable: false,
         openRewardPacks: true,
+      },
+      autoFodderUpgrade: {
+        maxAttemptsPerCompletion: 3,
       },
       blockSpecial: true,
       blockTradeable: false,
@@ -436,7 +465,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.26',
+    version: '0.4.28',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -705,6 +734,19 @@ const state = {
       !isPlainObject(loopDef.autoTotwUpgrade)
     ) {
       errors.push('autoTotwUpgrade must be an object or false');
+    }
+    if (
+      loopDef.autoFodderUpgrade !== undefined &&
+      loopDef.autoFodderUpgrade !== false &&
+      !isPlainObject(loopDef.autoFodderUpgrade)
+    ) {
+      errors.push('autoFodderUpgrade must be an object or false');
+    }
+    if (isPlainObject(loopDef.autoFodderUpgrade) && loopDef.autoFodderUpgrade.maxAttemptsPerCompletion !== undefined) {
+      const attempts = Number(loopDef.autoFodderUpgrade.maxAttemptsPerCompletion);
+      if (!Number.isFinite(attempts) || attempts < 1 || attempts > 10) {
+        errors.push('autoFodderUpgrade.maxAttemptsPerCompletion must be a number between 1 and 10');
+      }
     }
 
     validateNumberArray(loopDef.sourcePackIds, 'sourcePackIds', errors);
@@ -2628,6 +2670,7 @@ function updateLoopControls() {
     if (id && options.protectedItemIds?.some((value) => Number(value) === id)) return false;
     if (definitionId && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId)) return false;
     if (options.protectHighGold && isProtectedHighGold(item)) return false;
+    if (isLimitedUseItem(item)) return false;
     if (isConceptItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
@@ -3397,6 +3440,8 @@ function updateLoopControls() {
     if (id && options.protectedItemIds?.some((value) => Number(value) === id)) reasons.push('protected-id');
     if (definitionId && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId)) reasons.push('protected-def');
     if (options.protectHighGold && isProtectedHighGold(item)) reasons.push('protected-82-plus');
+    if (isLoanItem(item)) reasons.push('loan');
+    else if (isLimitedUseItem(item)) reasons.push('limited-use');
     if (isConceptItem(item)) reasons.push('concept');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
@@ -4293,6 +4338,7 @@ function updateLoopControls() {
     const id = Number(item?.id || 0);
     if (id && state.consumedItemIds.has(id)) return false;
     if (isSbcSpecialItem(item)) return false;
+    if (isLimitedUseItem(item)) return false;
     if (isConceptItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
@@ -4357,6 +4403,8 @@ function updateLoopControls() {
       reasons.includes('fsu-locked-player') ||
       reasons.includes('protected-id') ||
       reasons.includes('protected-def') ||
+      reasons.includes('loan') ||
+      reasons.includes('limited-use') ||
       reasons.includes('concept') ||
       reasons.includes('academy') ||
       reasons.some((reason) => reason.startsWith('rating-over-')) ||
@@ -4847,6 +4895,65 @@ function updateLoopControls() {
     };
   }
 
+  function getAutoFodderUpgradeDef(loopDef = {}) {
+    const override = isPlainObject(loopDef.autoFodderUpgrade) ? loopDef.autoFodderUpgrade : {};
+    return {
+      id: `${loopDef.id || 'fill-and-verify'}-auto-2x84-fodder`,
+      name: '2x84+ Fodder Recovery',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
+      rewardPackNames: ['2x 84+ Rare Gold Players Pack', '2 x 84+ Rare Gold Players Pack'],
+      maxCompletions: 1,
+      inventoryFillFirst: true,
+      requirements: [
+        { tier: 'gold', rarity: 'rare', count: 6, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['storage', 'club'] },
+      ],
+      priorityPiles: ['storage', 'club'],
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      maxSubmittedRating: 81,
+      maxNormalGoldSubmittedRating: 81,
+      blockSpecial: true,
+      blockTradeable: false,
+      openRewardPacks: true,
+      forceOpenRewardPacks: true,
+      ...override,
+    };
+  }
+
+  function getAutoFodderUpgradeAttemptLimit(loopDef = {}) {
+    if (loopDef.autoFodderUpgrade === undefined || loopDef.autoFodderUpgrade === false) return 0;
+    const override = isPlainObject(loopDef.autoFodderUpgrade) ? loopDef.autoFodderUpgrade : {};
+    return Math.max(1, Math.min(10, Number(override.maxAttemptsPerCompletion || 3) || 3));
+  }
+
+  async function craftAutoFodderUpgrade(loopDef, attempt, maxAttempts) {
+    const upgradeDef = getAutoFodderUpgradeDef(loopDef);
+    await refreshInventoryCaches(`${loopDef.name} ${upgradeDef.name} preflight`, { includePacks: false, quiet: true });
+    const selection = selectLoopInventoryPlayers(upgradeDef);
+    log(`${loopDef.name}: ${upgradeDef.name} attempt ${attempt}/${maxAttempts} selected ${selection.selected.length}/6 low rare gold player(s) (${formatSelectionStats(selection.stats)})`);
+    if (!selection.ok) {
+      logSelectionDiagnostics(`${loopDef.name} ${upgradeDef.name}`, selection, upgradeDef.priorityPiles);
+      log(`${loopDef.name}: ${upgradeDef.name} recovery is unavailable; keeping the current 84x10 unsubmitted`);
+      return { ok: false, reason: 'not enough eligible low rare gold fodder' };
+    }
+
+    await unwindSbcSquadControllers(`${loopDef.name} before ${upgradeDef.name}`);
+    log(`${loopDef.name}: safe rating fodder exhausted; submitting ${upgradeDef.name} ${attempt}/${maxAttempts} before retrying 84x10`);
+    const result = await runFillAndVerifySbc(upgradeDef);
+    await unwindSbcSquadControllers(`${loopDef.name} after ${upgradeDef.name}`);
+    await refreshInventoryCaches(`${loopDef.name} after ${upgradeDef.name}`, { includePacks: false, quiet: true });
+
+    if (Number(result?.completions || 0) < 1) {
+      return { ok: false, reason: `${upgradeDef.name} was not submitted` };
+    }
+    if (Number(result?.rewardPacksOpened || 0) < 1) {
+      log(`${loopDef.name}: ${upgradeDef.name} was submitted but its reward pack was not opened; stop before consuming another six cards`);
+      return { ok: false, reason: `${upgradeDef.name} reward pack was not opened` };
+    }
+    return { ok: true };
+  }
+
   async function openExistingAutoTotwPackIfAvailable(loopDef, upgradeDef) {
     const pack = await findRewardPack(upgradeDef, null, {
       attempts: 2,
@@ -5010,6 +5117,8 @@ function updateLoopControls() {
     };
 
     if (itemId && state.consumedItemIds.has(itemId)) reasons.push('consumed-this-run');
+    if (isLoanItem(item)) reasons.push('loan');
+    else if (isLimitedUseItem(item)) reasons.push('limited-use');
     if (isConceptItem(item)) reasons.push('concept');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
@@ -5075,7 +5184,7 @@ function updateLoopControls() {
         String(reason).startsWith('required-totw') ||
         String(reason).startsWith('rating-over-') ||
         String(reason).startsWith('fsu-') ||
-        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'concept', 'academy', 'active-trade', 'consumed-this-run'].includes(String(reason))
+        ['special-blocked', 'tradeable-blocked', 'protected-id', 'protected-def', 'loan', 'limited-use', 'concept', 'academy', 'active-trade', 'consumed-this-run'].includes(String(reason))
       )
     ).length;
     const missingRequirements = [];
@@ -5165,6 +5274,9 @@ function updateLoopControls() {
       }
       if (reasons.includes('fsu-locked-player')) {
         hints.push(`${prefix}: locked in FSU Lock player; unlock it or replace this card`);
+      }
+      if (reasons.includes('loan') || reasons.includes('limited-use')) {
+        hints.push(`${prefix}: replace loan/limited-use card with an owned card`);
       }
       if (reasons.includes('concept')) {
         hints.push(`${prefix}: replace concept card`);
@@ -6077,6 +6189,9 @@ function updateLoopControls() {
     const completionLimit = loopDef.allowMultipleCompletions === true ? 50 : 1;
     const maxCompletions = Math.max(1, Math.min(completionLimit, Number(loopDef.maxCompletions || 1) || 1));
     let completions = 0;
+    let rewardPacksOpened = 0;
+    let rewardPacksPending = 0;
+    let autoFodderAttempts = 0;
 
     while (completions < maxCompletions) {
       stopPoint();
@@ -6106,7 +6221,7 @@ function updateLoopControls() {
         });
         if (loopDef.dryRun) {
           log(`${loopDef.name}: dry run stops before squad save or SBC submit`);
-          return;
+          return { completions, rewardPacksOpened, rewardPacksPending, dryRun: true };
         }
         if (!inventoryFill.ok) {
           log(`${loopDef.name}: stopping because ${inventoryFill.reason || 'inventory-first fill is missing required items'}`);
@@ -6174,27 +6289,66 @@ function updateLoopControls() {
           log(`${loopDef.name}: dry-run squad passed protection; live run would submit once`);
         }
         log(`${loopDef.name}: dry run stops before SBC submit`);
-        return;
+        return { completions, rewardPacksOpened, rewardPacksPending, dryRun: true };
+      }
+
+      const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(loopDef);
+      if (
+        !fillResult.submitReady &&
+        !inspection.blocked.length &&
+        !inspection.missingRequirements?.length &&
+        autoFodderAttempts < autoFodderLimit
+      ) {
+        const nextAttempt = autoFodderAttempts + 1;
+        const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit);
+        if (recovery.ok) {
+          autoFodderAttempts = nextAttempt;
+          log(`${loopDef.name}: ${getAutoFodderUpgradeDef(loopDef).name} opened successfully; retrying the same 84x10 completion with refreshed inventory`);
+          continue;
+        }
+        log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || 'unknown reason'}`);
+        break;
+      } else if (
+        !fillResult.submitReady &&
+        !inspection.blocked.length &&
+        !inspection.missingRequirements?.length &&
+        autoFodderLimit > 0 &&
+        autoFodderAttempts >= autoFodderLimit
+      ) {
+        log(`${loopDef.name}: automatic 2x84+ recovery reached its ${autoFodderLimit} attempt limit for this completion`);
+        break;
       }
 
       if (!fillResult.submitReady) fail(`${loopDef.name}: submit is not ready after protection inspection`);
       assertSbcSquadSafe(loopDef, inspection);
       const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
       markSbcItemsConsumed(inspection.items, loopDef.name);
-      if (rewardPackId && loopDef.openRewardPacks) {
-        await openRewardPackAndCleanup(loopDef, rewardPackId, 'reward pack', {
+      let stopAfterRewardFailure = false;
+      if (loopDef.openRewardPacks) {
+        const openedReward = await openRewardPackAndCleanup(loopDef, rewardPackId, 'reward pack', {
           assumeTotwReward: loopDef.assumeTotwRewardPack === true,
           fallbackPackMatcher: loopDef.assumeTotwRewardPack === true ? isLikelyTotwRewardPack : null,
           openAttempts: loopDef.assumeTotwRewardPack === true ? 3 : 1,
         });
+        if (openedReward) rewardPacksOpened++;
+        else {
+          rewardPacksPending++;
+          if (loopDef.forceOpenRewardPacks === true) {
+            stopAfterRewardFailure = true;
+            log(`${loopDef.name}: required reward pack could not be opened; stopping before another SBC submission`);
+          }
+        }
       } else if (rewardPackId) {
         log(`${loopDef.name}: reward pack #${rewardPackId} left unopened`);
       }
       completions++;
+      autoFodderAttempts = 0;
+      if (stopAfterRewardFailure) break;
       await sleep(CFG.pauseMs);
     }
 
     log(`${loopDef.name}: submitted ${completions} SBC(s) in this run`);
+    return { completions, rewardPacksOpened, rewardPacksPending };
   }
 
   function shortageSourceMatchesRequirement(source, requirement) {

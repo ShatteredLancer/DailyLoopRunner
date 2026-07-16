@@ -411,6 +411,38 @@
       "openRewardPacks": false
     },
     {
+      "id": "2x84-fodder",
+      "name": "2x84+ Fodder Loop",
+      "strategy": "fillAndVerifySbc",
+      "sbcNames": ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
+      "rewardPackNames": ["2x 84+ Rare Gold Players Pack", "2 x 84+ Rare Gold Players Pack"],
+      "maxCompletions": 1,
+      "useRoundsAsCompletions": true,
+      "allowMultipleCompletions": true,
+      "inventoryFillFirst": true,
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "rare",
+          "count": 6,
+          "maxRating": 81,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "protectHighGold": true,
+          "priorityPiles": ["storage", "club"]
+        }
+      ],
+      "priorityPiles": ["storage", "club"],
+      "requiredSpecialCount": 0,
+      "allowedSpecialCount": 0,
+      "maxSubmittedRating": 81,
+      "maxNormalGoldSubmittedRating": 81,
+      "blockSpecial": true,
+      "blockTradeable": false,
+      "openRewardPacks": true,
+      "forceOpenRewardPacks": true
+    },
+    {
       "id": "auto-totw-upgrade",
       "name": "84+ TOTW Upgrade Loop",
       "strategy": "fillAndVerifySbc",
@@ -549,6 +581,9 @@
         "submitReadyRepairMaxAttempts": 8,
         "openRewardPacks": true
       },
+      "autoFodderUpgrade": {
+        "maxAttemptsPerCompletion": 3
+      },
       "blockSpecial": true,
       "blockTradeable": false,
       "openRewardPacks": false
@@ -630,6 +665,9 @@
         "blockTradeable": false,
         "submitReadyRepairMaxAttempts": 8,
         "openRewardPacks": true
+      },
+      "autoFodderUpgrade": {
+        "maxAttemptsPerCompletion": 3
       },
       "blockSpecial": true,
       "blockTradeable": false,
