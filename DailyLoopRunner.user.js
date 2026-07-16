@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.29
+// @version      0.4.30
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -465,7 +465,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.29',
+    version: '0.4.30',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -5600,8 +5600,10 @@ function updateLoopControls() {
       log(`${loopDef.name}: auto-opened reward pack ${packName(pack)} (#${pack.id}); ${items.length || 0} item(s)`);
       if (options.assumeTotwReward) {
         markAssumedTotwRewardItems(items, `${loopDef.name} ${reason}`);
-        await materializeOpenedPlayerRewards(items, `${loopDef.name} ${reason}`);
       }
+      // Pack responses arrive before EA consistently refreshes Unassigned. Materialize the
+      // returned items first so the next SBC can immediately see them in club/storage.
+      await materializeOpenedPlayerRewards(items, `${loopDef.name} ${reason}`);
       await clearUnassigned(`${loopDef.name} ${reason} handling`);
       resolveRecentRewardItems(`${loopDef.name} ${reason}`);
       return true;
