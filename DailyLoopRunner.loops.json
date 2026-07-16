@@ -32,6 +32,7 @@
     },
     {
       "id": "daily-bronze",
+      "hidden": true,
       "name": "Daily Bronze Loop",
       "strategy": "dailySingleCardRecycle",
       "sbcNames": [
@@ -55,6 +56,8 @@
     },
     {
       "id": "daily-bronze-mvp",
+      "hidden": true,
+      "mvp": true,
       "name": "Daily Bronze MVP (1 run)",
       "strategy": "dailySingleCardRecycle",
       "sbcNames": [
@@ -78,6 +81,7 @@
     },
     {
       "id": "daily-silver",
+      "hidden": true,
       "name": "Daily Silver Loop",
       "strategy": "dailySingleCardRecycle",
       "sbcNames": [
@@ -100,6 +104,8 @@
     },
     {
       "id": "daily-silver-mvp",
+      "hidden": true,
+      "mvp": true,
       "name": "Daily Silver MVP (1 run)",
       "strategy": "dailySingleCardRecycle",
       "sbcNames": [
@@ -122,6 +128,7 @@
     },
     {
       "id": "daily-common",
+      "hidden": true,
       "name": "Daily Common Loop",
       "strategy": "inventoryMixedUpgrade",
       "sbcNames": [
@@ -171,6 +178,8 @@
     },
     {
       "id": "daily-common-mvp",
+      "hidden": true,
+      "mvp": true,
       "name": "Daily Common MVP (1 run)",
       "strategy": "inventoryMixedUpgrade",
       "sbcNames": [
@@ -220,6 +229,7 @@
     },
     {
       "id": "daily-rare",
+      "hidden": true,
       "name": "Daily Rare Loop",
       "strategy": "commonGoldToRareUpgrade",
       "sbcNames": [
@@ -253,6 +263,8 @@
     },
     {
       "id": "daily-rare-mvp",
+      "hidden": true,
+      "mvp": true,
       "name": "Daily Rare MVP (1 run)",
       "strategy": "commonGoldToRareUpgrade",
       "sbcNames": [
@@ -387,6 +399,8 @@
     },
     {
       "id": "one-click-daily-mvp",
+      "hidden": true,
+      "mvp": true,
       "name": "One-click Daily MVP (1 each)",
       "strategy": "dailyRoutine",
       "steps": [
@@ -471,41 +485,21 @@
       "allowMultipleCompletions": true,
       "maxSubmittedRating": 88,
       "maxNormalGoldSubmittedRating": 99,
-      "inventoryFillFirst": true,
-      "requirements": [
-        {
-          "tier": "gold",
-          "rarity": "rare",
-          "count": 6,
-          "minRating": 84,
-          "maxRating": 99,
-          "playerOnly": true,
-          "allowSpecial": false,
-          "priorityPiles": ["storage", "club"]
-        },
-        {
-          "tier": "gold",
-          "rarity": "rare",
-          "count": 5,
-          "minRating": 82,
-          "maxRating": 99,
-          "playerOnly": true,
-          "allowSpecial": false,
-          "priorityPiles": ["storage", "club"]
-        }
-      ],
-      "priorityPiles": ["storage", "club"],
+      "ratingSbcFill": {
+        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+      },
       "requiredSpecialCount": 0,
       "allowedSpecialCount": 0,
       "blockSpecial": true,
       "blockTradeable": false,
-      "submitReadyRepairMaxAttempts": 8,
       "openRewardPacks": true,
       "forceOpenRewardPacks": true,
       "assumeTotwRewardPack": true
     },
     {
       "id": "84x10-mvp",
+      "hidden": true,
+      "mvp": true,
       "name": "84x10 MVP (1 run)",
       "strategy": "fillAndVerifySbc",
       "sbcNames": [
@@ -519,6 +513,9 @@
       "maxCompletions": 1,
       "maxSubmittedRating": 88,
       "maxNormalGoldSubmittedRating": 99,
+      "ratingSbcFill": {
+        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+      },
       "requiredSpecialCount": 1,
       "allowedSpecialCount": 1,
       "requiredSpecialKind": "totw-tots-fof",
@@ -527,7 +524,6 @@
         "patterns": ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
         "buttonTexts": ["Add", "添加", "加入", "新增"]
       },
-      "submitReadyRepairMaxAttempts": 8,
       "autoTotwUpgrade": {
         "name": "84+ TOTW Upgrade",
         "sbcNames": [
@@ -552,33 +548,11 @@
         ],
         "maxSubmittedRating": 88,
         "maxNormalGoldSubmittedRating": 99,
-        "inventoryFillFirst": true,
-        "requirements": [
-          {
-            "tier": "gold",
-            "rarity": "rare",
-            "count": 6,
-            "minRating": 84,
-            "maxRating": 99,
-            "playerOnly": true,
-            "allowSpecial": false,
-            "priorityPiles": ["storage", "club"]
-          },
-          {
-            "tier": "gold",
-            "rarity": "rare",
-            "count": 5,
-            "minRating": 82,
-            "maxRating": 99,
-            "playerOnly": true,
-            "allowSpecial": false,
-            "priorityPiles": ["storage", "club"]
-          }
-        ],
-        "priorityPiles": ["storage", "club"],
+        "ratingSbcFill": {
+          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        },
         "blockSpecial": true,
         "blockTradeable": false,
-        "submitReadyRepairMaxAttempts": 8,
         "openRewardPacks": true
       },
       "autoFodderUpgrade": {
@@ -604,6 +578,9 @@
       "allowMultipleCompletions": true,
       "maxSubmittedRating": 88,
       "maxNormalGoldSubmittedRating": 99,
+      "ratingSbcFill": {
+        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+      },
       "requiredSpecialCount": 1,
       "allowedSpecialCount": 1,
       "requiredSpecialKind": "totw-tots-fof",
@@ -612,7 +589,6 @@
         "patterns": ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
         "buttonTexts": ["Add", "添加", "加入", "新增"]
       },
-      "submitReadyRepairMaxAttempts": 8,
       "autoTotwUpgrade": {
         "name": "84+ TOTW Upgrade",
         "sbcNames": [
@@ -637,33 +613,11 @@
         ],
         "maxSubmittedRating": 88,
         "maxNormalGoldSubmittedRating": 99,
-        "inventoryFillFirst": true,
-        "requirements": [
-          {
-            "tier": "gold",
-            "rarity": "rare",
-            "count": 6,
-            "minRating": 84,
-            "maxRating": 99,
-            "playerOnly": true,
-            "allowSpecial": false,
-            "priorityPiles": ["storage", "club"]
-          },
-          {
-            "tier": "gold",
-            "rarity": "rare",
-            "count": 5,
-            "minRating": 82,
-            "maxRating": 99,
-            "playerOnly": true,
-            "allowSpecial": false,
-            "priorityPiles": ["storage", "club"]
-          }
-        ],
-        "priorityPiles": ["storage", "club"],
+        "ratingSbcFill": {
+          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        },
         "blockSpecial": true,
         "blockTradeable": false,
-        "submitReadyRepairMaxAttempts": 8,
         "openRewardPacks": true
       },
       "autoFodderUpgrade": {
@@ -676,7 +630,7 @@
     {
       "id": "provision-crafting",
       "name": "Provision Crafting Loop",
-      "strategy": "provisionPackDualCrafting",
+      "strategy": "provisionPackCrafting",
       "sourcePackIds": [20643],
       "sourcePackNames": [
         "Provision Pack",
@@ -684,43 +638,45 @@
       ],
       "preCraftPlayerPickLoopId": "82-plus-player-pick-5of10",
       "rounds": 1,
-      "commonUpgrade": {
-        "name": "FOF Glory Hunters Crafting Upgrade",
-        "sbcNames": [
-          "FOF Glory Hunters Crafting Upgrade"
-        ],
-        "requirements": [
-          {
-            "tier": "gold",
-            "rarity": "common",
-            "count": 9,
-            "playerOnly": true,
-            "allowSpecial": false,
-            "protectHighGold": true,
-            "priorityPiles": ["unassigned", "storage", "transfer", "club"]
-          }
-        ],
-        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
-      },
-      "rareUpgrade": {
-        "name": "2x 84+ Upgrade",
-        "sbcNames": [
-          "2x 84+ Upgrade",
-          "2 x 84+ Upgrade"
-        ],
-        "requirements": [
-          {
-            "tier": "gold",
-            "rarity": "rare",
-            "count": 6,
-            "playerOnly": true,
-            "allowSpecial": false,
-            "protectHighGold": true,
-            "priorityPiles": ["unassigned", "storage", "transfer", "club"]
-          }
-        ],
-        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
-      }
+      "craftingUpgrades": [
+        {
+          "name": "FOF Glory Hunters Crafting Upgrade",
+          "sbcNames": [
+            "FOF Glory Hunters Crafting Upgrade"
+          ],
+          "requirements": [
+            {
+              "tier": "gold",
+              "rarity": "common",
+              "count": 9,
+              "playerOnly": true,
+              "allowSpecial": false,
+              "protectHighGold": true,
+              "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+            }
+          ],
+          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        },
+        {
+          "name": "2x 84+ Upgrade",
+          "sbcNames": [
+            "2x 84+ Upgrade",
+            "2 x 84+ Upgrade"
+          ],
+          "requirements": [
+            {
+              "tier": "gold",
+              "rarity": "rare",
+              "count": 6,
+              "playerOnly": true,
+              "allowSpecial": false,
+              "protectHighGold": true,
+              "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+            }
+          ],
+          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        }
+      ]
     }
   ]
 }

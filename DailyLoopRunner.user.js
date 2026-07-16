@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.30
+// @version      0.4.37
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -22,6 +22,7 @@
   const APP_KEY = '__FCLoopRunner';
   const LOOP_CONFIG_URL = 'http://127.0.0.1:8765/DailyLoopRunner.loops.json';
   const PICK_OPTIONS_KEY = 'fc-loop-runner-pick-options';
+  const LOOP_UI_OPTIONS_KEY = 'fc-loop-runner-ui-options';
   try { W[APP_KEY]?.destroy?.(); } catch { }
 
   const CFG = {
@@ -95,6 +96,7 @@
     {
       id: 'daily-bronze-mvp',
       hidden: true,
+      mvp: true,
       name: 'Daily Bronze MVP (1 run)',
       strategy: 'dailySingleCardRecycle',
       sbcNames: ['Daily Bronze Upgrade', '每日青铜升级', '每日青銅升級'],
@@ -119,6 +121,7 @@
     {
       id: 'daily-silver-mvp',
       hidden: true,
+      mvp: true,
       name: 'Daily Silver MVP (1 run)',
       strategy: 'dailySingleCardRecycle',
       sbcNames: ['Daily Silver Upgrade', '每日白银升级', '每日白銀升級'],
@@ -153,6 +156,7 @@
     {
       id: 'daily-common-mvp',
       hidden: true,
+      mvp: true,
       name: 'Daily Common MVP (1 run)',
       strategy: 'inventoryMixedUpgrade',
       sbcNames: ['Daily Common Gold Upgrade', '每日普通金牌升级', '每日普通金牌升級'],
@@ -191,6 +195,7 @@
     {
       id: 'daily-rare-mvp',
       hidden: true,
+      mvp: true,
       name: 'Daily Rare MVP (1 run)',
       strategy: 'commonGoldToRareUpgrade',
       sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
@@ -262,6 +267,8 @@
     },
     {
       id: 'one-click-daily-mvp',
+      hidden: true,
+      mvp: true,
       name: 'One-click Daily MVP (1 each)',
       strategy: 'dailyRoutine',
       steps: ['daily-bronze-mvp', 'daily-silver-mvp', 'daily-common-mvp', 'daily-rare-mvp'],
@@ -309,23 +316,21 @@
       allowMultipleCompletions: true,
       maxSubmittedRating: 88,
       maxNormalGoldSubmittedRating: 99,
-      inventoryFillFirst: true,
-      requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 99, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
-        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 99, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
-      ],
-      priorityPiles: ['storage', 'club'],
+      ratingSbcFill: {
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      },
       requiredSpecialCount: 0,
       allowedSpecialCount: 0,
       blockSpecial: true,
       blockTradeable: false,
-      submitReadyRepairMaxAttempts: 8,
       openRewardPacks: true,
       forceOpenRewardPacks: true,
       assumeTotwRewardPack: true,
     },
     {
       id: '84x10-mvp',
+      hidden: true,
+      mvp: true,
       name: '84x10 MVP (1 run)',
       strategy: 'fillAndVerifySbc',
       sbcNames: [
@@ -339,6 +344,9 @@
       maxCompletions: 1,
       maxSubmittedRating: 88,
       maxNormalGoldSubmittedRating: 99,
+      ratingSbcFill: {
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      },
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
@@ -347,7 +355,6 @@
         patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
         buttonTexts: ['Add', '添加', '加入', '新增'],
       },
-      submitReadyRepairMaxAttempts: 8,
       autoTotwUpgrade: {
         name: '84+ TOTW Upgrade',
         sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
@@ -382,6 +389,9 @@
       allowMultipleCompletions: true,
       maxSubmittedRating: 88,
       maxNormalGoldSubmittedRating: 99,
+      ratingSbcFill: {
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      },
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
@@ -390,7 +400,6 @@
         patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
         buttonTexts: ['Add', '添加', '加入', '新增'],
       },
-      submitReadyRepairMaxAttempts: 8,
       autoTotwUpgrade: {
         name: '84+ TOTW Upgrade',
         sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
@@ -412,27 +421,29 @@
     {
       id: 'provision-crafting',
       name: 'Provision Crafting Loop',
-      strategy: 'provisionPackDualCrafting',
+      strategy: 'provisionPackCrafting',
       sourcePackIds: [20643],
       sourcePackNames: ['Provision Pack', 'Provisions Pack'],
       preCraftPlayerPickLoopId: '82-plus-player-pick-5of10',
       rounds: 1,
-      commonUpgrade: {
-        name: 'FOF Glory Hunters Crafting Upgrade',
-        sbcNames: ['FOF Glory Hunters Crafting Upgrade'],
-        requirements: [
-          { tier: 'gold', rarity: 'common', count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
-        ],
-        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
-      },
-      rareUpgrade: {
-        name: '2x 84+ Upgrade',
-        sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
-        requirements: [
-          { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
-        ],
-        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
-      },
+      craftingUpgrades: [
+        {
+          name: 'FOF Glory Hunters Crafting Upgrade',
+          sbcNames: ['FOF Glory Hunters Crafting Upgrade'],
+          requirements: [
+            { tier: 'gold', rarity: 'common', count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+          ],
+          priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        },
+        {
+          name: '2x 84+ Upgrade',
+          sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
+          requirements: [
+            { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+          ],
+          priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        },
+      ],
     },
   ];
 
@@ -453,6 +464,7 @@ const state = {
     fsuSettingsOverride: null,
     fsuSettingsCache: { at: 0, settings: null },
     lastPickRecap: null,
+    showMvpLoops: false,
   };
 
   function destroyRunner() {
@@ -465,12 +477,14 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.30',
+    version: '0.4.37',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
     setFsuSettingsOverride,
     clearFsuSettingsOverride,
+    calculateSquadRating: calculateEaSquadRating,
+    solveRatingSbcCandidates: findOptimalRatingSbcSelection,
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -517,10 +531,16 @@ const state = {
     return state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
   }
 
+  function isMvpLoopDef(def = {}) {
+    return def.mvp === true || /(?:^|-)mvp(?:-|$)/i.test(String(def.id || ''));
+  }
+
   function getVisibleLoopDefs() {
     const loopDefs = getLoopDefs();
-    const visibleLoopDefs = loopDefs.filter((def) => def.hidden !== true);
-    return visibleLoopDefs.length ? visibleLoopDefs : loopDefs;
+    return loopDefs.filter((def) => {
+      if (isMvpLoopDef(def)) return state.showMvpLoops;
+      return def.hidden !== true;
+    });
   }
 
   function findLoopDefById(id) {
@@ -635,7 +655,17 @@ const state = {
       errors.push(`${path}.name is required`);
     }
     validateStringArray(upgradeDef.sbcNames, `${path}.sbcNames`, errors, true);
-    validateRequirements(upgradeDef.requirements, `${path}.requirements`, errors, true);
+    const hasChallengeRequirements = upgradeDef.challengeRequirements !== undefined;
+    validateRequirements(upgradeDef.requirements, `${path}.requirements`, errors, !hasChallengeRequirements);
+    if (hasChallengeRequirements) {
+      if (!Array.isArray(upgradeDef.challengeRequirements) || !upgradeDef.challengeRequirements.length) {
+        errors.push(`${path}.challengeRequirements must be a non-empty array`);
+      } else {
+        upgradeDef.challengeRequirements.forEach((requirements, index) => {
+          validateRequirements(requirements, `${path}.challengeRequirements[${index}]`, errors, true);
+        });
+      }
+    }
     validatePileList(upgradeDef.priorityPiles, `${path}.priorityPiles`, errors);
   }
 
@@ -675,6 +705,7 @@ const state = {
       'dailySingleCardRecycle',
       'inventoryMixedUpgrade',
       'commonGoldToRareUpgrade',
+      'provisionPackCrafting',
       'provisionPackDualCrafting',
       'rarePackTo84Upgrade',
       'playerPickSbc',
@@ -693,7 +724,7 @@ const state = {
     if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
       errors.push('dryRun must be boolean');
     }
-    ['hidden', 'openRewardPacks', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst'].forEach((field) => {
+    ['hidden', 'mvp', 'openRewardPacks', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst'].forEach((field) => {
       if (loopDef[field] !== undefined && typeof loopDef[field] !== 'boolean') {
         errors.push(`${field} must be boolean`);
       }
@@ -748,6 +779,19 @@ const state = {
         errors.push('autoFodderUpgrade.maxAttemptsPerCompletion must be a number between 1 and 10');
       }
     }
+    if (loopDef.ratingSbcFill !== undefined) {
+      if (!isPlainObject(loopDef.ratingSbcFill)) {
+        errors.push('ratingSbcFill must be an object');
+      } else {
+        validatePileList(loopDef.ratingSbcFill.priorityPiles, 'ratingSbcFill.priorityPiles', errors, true);
+        if (loopDef.ratingSbcFill.targetRating !== undefined) {
+          const targetRating = Number(loopDef.ratingSbcFill.targetRating);
+          if (!Number.isFinite(targetRating) || targetRating < 1 || targetRating > 99) {
+            errors.push('ratingSbcFill.targetRating must be a number between 1 and 99');
+          }
+        }
+      }
+    }
 
     validateNumberArray(loopDef.sourcePackIds, 'sourcePackIds', errors);
     validateNumberArray(loopDef.rewardPackIds, 'rewardPackIds', errors);
@@ -785,12 +829,24 @@ const state = {
       if (loopDef.strategy === 'inventoryMixedUpgrade') validateShortagePacks(loopDef.shortagePacks, 'shortagePacks', errors);
     }
 
-    if (loopDef.strategy === 'provisionPackDualCrafting') {
+    if (loopDef.strategy === 'provisionPackCrafting' || loopDef.strategy === 'provisionPackDualCrafting') {
       if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
         errors.push('sourcePackIds or sourcePackNames is required');
       }
-      validateUpgradeDef(loopDef.commonUpgrade, 'commonUpgrade', errors);
-      validateUpgradeDef(loopDef.rareUpgrade, 'rareUpgrade', errors);
+      if (loopDef.craftingUpgrades !== undefined) {
+        if (!Array.isArray(loopDef.craftingUpgrades) || !loopDef.craftingUpgrades.length) {
+          errors.push('craftingUpgrades must be a non-empty array');
+        } else {
+          loopDef.craftingUpgrades.forEach((upgradeDef, index) => {
+            validateUpgradeDef(upgradeDef, `craftingUpgrades[${index}]`, errors);
+          });
+        }
+      } else {
+        const legacyUpgrades = [loopDef.commonUpgrade, loopDef.rareUpgrade].filter((upgradeDef) => upgradeDef !== undefined);
+        if (!legacyUpgrades.length) errors.push('craftingUpgrades or a legacy commonUpgrade/rareUpgrade is required');
+        if (loopDef.commonUpgrade !== undefined) validateUpgradeDef(loopDef.commonUpgrade, 'commonUpgrade', errors);
+        if (loopDef.rareUpgrade !== undefined) validateUpgradeDef(loopDef.rareUpgrade, 'rareUpgrade', errors);
+      }
     }
 
     if (loopDef.strategy === 'rarePackTo84Upgrade') {
@@ -809,11 +865,28 @@ const state = {
     if (loopDef.strategy === 'playerPickSbc') {
       validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
       validateStringArray(loopDef.pickItemNames, 'pickItemNames', errors, true);
-      validateRequirements(loopDef.requirements, 'requirements', errors, true);
-      const challengesPerPick = Number(loopDef.challengesPerPick || 1);
+      const hasChallengeRequirements = loopDef.challengeRequirements !== undefined;
+      validateRequirements(loopDef.requirements, 'requirements', errors, !hasChallengeRequirements);
+      if (hasChallengeRequirements) {
+        if (!Array.isArray(loopDef.challengeRequirements) || !loopDef.challengeRequirements.length) {
+          errors.push('challengeRequirements must be a non-empty array');
+        } else {
+          loopDef.challengeRequirements.forEach((requirements, index) => {
+            validateRequirements(requirements, `challengeRequirements[${index}]`, errors, true);
+          });
+        }
+      }
+      const challengesPerPick = Number(loopDef.challengesPerPick || loopDef.challengeRequirements?.length || 1);
       const pickCount = Number(loopDef.pickCount || 1);
       if (!Number.isInteger(challengesPerPick) || challengesPerPick < 1 || challengesPerPick > 10) {
         errors.push('challengesPerPick must be an integer between 1 and 10');
+      }
+      if (
+        loopDef.challengesPerPick !== undefined &&
+        Array.isArray(loopDef.challengeRequirements) &&
+        loopDef.challengeRequirements.length !== challengesPerPick
+      ) {
+        errors.push('challengesPerPick must match challengeRequirements.length when both are provided');
       }
       if (!Number.isInteger(pickCount) || pickCount < 1 || pickCount > 10) {
         errors.push('pickCount must be an integer between 1 and 10');
@@ -967,14 +1040,35 @@ const state = {
     loopDef.priorityPiles = applyDisabledPilesToList(loopDef.priorityPiles, disabledPiles, 'priorityPiles');
     loopDef.primaryPiles = applyDisabledPilesToList(loopDef.primaryPiles, disabledPiles, 'primaryPiles');
     loopDef.clubFallbackPiles = applyDisabledPilesToList(loopDef.clubFallbackPiles, disabledPiles, 'clubFallbackPiles');
+    if (isPlainObject(loopDef.ratingSbcFill)) {
+      loopDef.ratingSbcFill.priorityPiles = applyDisabledPilesToList(
+        loopDef.ratingSbcFill.priorityPiles,
+        disabledPiles,
+        'ratingSbcFill.priorityPiles',
+      );
+    }
     applyDisabledPilesToRequirements(loopDef.requirements, disabledPiles, 'requirements');
+    (loopDef.challengeRequirements || []).forEach((requirements, index) => {
+      applyDisabledPilesToRequirements(requirements, disabledPiles, `challengeRequirements[${index}]`);
+    });
 
     for (const upgradeName of ['commonUpgrade', 'rareUpgrade']) {
       const upgradeDef = loopDef[upgradeName];
       if (!isPlainObject(upgradeDef)) continue;
       upgradeDef.priorityPiles = applyDisabledPilesToList(upgradeDef.priorityPiles, disabledPiles, `${upgradeName}.priorityPiles`);
       applyDisabledPilesToRequirements(upgradeDef.requirements, disabledPiles, `${upgradeName}.requirements`);
+      (upgradeDef.challengeRequirements || []).forEach((requirements, index) => {
+        applyDisabledPilesToRequirements(requirements, disabledPiles, `${upgradeName}.challengeRequirements[${index}]`);
+      });
     }
+    (loopDef.craftingUpgrades || []).forEach((upgradeDef, index) => {
+      if (!isPlainObject(upgradeDef)) return;
+      upgradeDef.priorityPiles = applyDisabledPilesToList(upgradeDef.priorityPiles, disabledPiles, `craftingUpgrades[${index}].priorityPiles`);
+      applyDisabledPilesToRequirements(upgradeDef.requirements, disabledPiles, `craftingUpgrades[${index}].requirements`);
+      (upgradeDef.challengeRequirements || []).forEach((requirements, challengeIndex) => {
+        applyDisabledPilesToRequirements(requirements, disabledPiles, `craftingUpgrades[${index}].challengeRequirements[${challengeIndex}]`);
+      });
+    });
 
     return loopDef;
   }
@@ -1050,7 +1144,7 @@ function updateLoopControls() {
     if (!roundsLabel || !roundsInput) return;
     const editorLoop = getEditorLoopDef();
     const showRounds = editorLoop.useRoundsAsCompletions === true ||
-      ['validationBronzeUpgrade', 'provisionPackDualCrafting', 'playerPickSbc'].includes(editorLoop.strategy);
+      ['validationBronzeUpgrade', 'provisionPackCrafting', 'provisionPackDualCrafting', 'playerPickSbc'].includes(editorLoop.strategy);
     if (roundsRow) roundsRow.style.display = showRounds ? '' : 'none';
     roundsLabel.style.display = showRounds ? '' : 'none';
     roundsInput.style.display = showRounds ? '' : 'none';
@@ -2416,9 +2510,9 @@ function updateLoopControls() {
     ));
   }
 
-  function isFsuLockedItem(item, settings = getFsuSettings()) {
-    const lockedItemIds = new Set((settings.lockedItemIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
-    const lockedDefinitionIds = new Set((settings.lockedDefinitionIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
+  function isFsuLockedItem(item, settings = getFsuSettings(), lockContext = null) {
+    const lockedItemIds = lockContext?.lockedItemIds || new Set((settings.lockedItemIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
+    const lockedDefinitionIds = lockContext?.lockedDefinitionIds || new Set((settings.lockedDefinitionIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
     if (!lockedItemIds.size && !lockedDefinitionIds.size) return false;
 
     const itemIds = itemIdentifierNumbers(item, ITEM_ID_FIELD_ALIASES);
@@ -2456,13 +2550,13 @@ function updateLoopControls() {
     });
   }
 
-  function getFsuRejectReasons(item, spec = {}, settings = getFsuSettings()) {
+  function getFsuRejectReasons(item, spec = {}, settings = getFsuSettings(), context = null) {
     const reasons = [];
     if (!isPlayer(item)) return reasons;
-    if (isFsuLockedItem(item, settings)) reasons.push('fsu-locked-player');
+    if (isFsuLockedItem(item, settings, context)) reasons.push('fsu-locked-player');
     if (settings.onlyUntradeable && isTradeable(item)) reasons.push('fsu-only-untradeable');
     if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push('fsu-exclude-evolution');
-    const excludedLeagueIds = (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0);
+    const excludedLeagueIds = context?.excludedLeagueIds || (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0);
     if (settings.excludeDesignatedLeagues && excludedLeagueIds.length) {
       const leagueId = itemLeagueId(item);
       if (leagueId && excludedLeagueIds.includes(leagueId)) {
@@ -2667,20 +2761,20 @@ function updateLoopControls() {
     }
   }
 
-  function isSbcUsablePlayer(item, options = {}) {
+  function isSbcUsablePlayer(item, options = {}, context = null) {
     if (!isPlayer(item)) return false;
     const id = Number(item?.id || 0);
     const definitionId = Number(item?.definitionId || 0);
     if (id && state.consumedItemIds.has(id)) return false;
-    if (id && options.protectedItemIds?.some((value) => Number(value) === id)) return false;
-    if (definitionId && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId)) return false;
+    if (id && (context?.protectedItemIds?.has(id) || options.protectedItemIds?.some((value) => Number(value) === id))) return false;
+    if (definitionId && (context?.protectedDefinitionIds?.has(definitionId) || options.protectedDefinitionIds?.some((value) => Number(value) === definitionId))) return false;
     if (options.protectHighGold && isProtectedHighGold(item)) return false;
     if (isLimitedUseItem(item)) return false;
     if (isConceptItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
-    if (getFsuRejectReasons(item, options).length) return false;
+    if (getFsuRejectReasons(item, options, context?.settings, context).length) return false;
     return true;
   }
 
@@ -3319,6 +3413,10 @@ function updateLoopControls() {
     }, 0);
   }
 
+  function getPlayerPickChallengeCount(loopDef = {}) {
+    return Math.max(1, Number(loopDef.challengeRequirements?.length || loopDef.challengesPerPick || 1) || 1);
+  }
+
   function expectedSbcPlayerCount(loopDef = {}, challenge = null) {
     const values = [];
     const explicit = Number(loopDef.expectedPlayerCount || 0);
@@ -3685,6 +3783,582 @@ function updateLoopControls() {
     return { ok: true, selected, entries, stats, missing: null, resolvedSignals };
   }
 
+  function calculateEaSquadRating(ratings = [], requiredPlayerCount = ratings.length) {
+    const count = Number(requiredPlayerCount || ratings.length || 0);
+    const values = (ratings || []).map(Number).filter((rating) => Number.isFinite(rating) && rating > 0);
+    if (!count || values.length !== count) return 0;
+    let adjustedTotal = values.reduce((sum, rating) => sum + rating, 0);
+    const average = adjustedTotal / count;
+    values.forEach((rating) => {
+      if (rating > average) adjustedTotal += rating - average;
+    });
+    return Math.floor(Math.round(adjustedTotal) / count);
+  }
+
+  function eligibilityKeyName(key) {
+    const keyText = String(key ?? '').trim();
+    const known = Object.entries(W.SBCEligibilityKey || {}).find(([, value]) => String(value) === keyText);
+    if (known) return known[0];
+    if (/^[A-Z][A-Z0-9_]+$/.test(keyText)) return keyText;
+    return `UNKNOWN_${keyText || '?'}`;
+  }
+
+  function requirementFirstKey(requirement) {
+    try {
+      const key = requirement?.getFirstKey?.();
+      if (key !== undefined && key !== null) return key;
+    } catch { }
+    const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+    return Object.keys(collection)[0];
+  }
+
+  function flattenRequirementValues(value) {
+    if (Array.isArray(value)) return value.flat(Infinity).filter((entry) => entry !== undefined && entry !== null);
+    if (value === undefined || value === null) return [];
+    return [value];
+  }
+
+  function requirementValues(requirement, key) {
+    try {
+      const values = requirement?.getValue?.(key);
+      const flattened = flattenRequirementValues(values);
+      if (flattened.length) return flattened;
+    } catch { }
+    const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+    const direct = flattenRequirementValues(collection?.[key]);
+    if (direct.length) return direct;
+    try {
+      return flattenRequirementValues(requirement?.getFirstValue?.(key));
+    } catch {
+      return [];
+    }
+  }
+
+  function requirementCount(requirement, requiredPlayerCount) {
+    const count = Number(requirement?.count);
+    if (count === -1 || !Number.isFinite(count)) return requiredPlayerCount;
+    return Math.max(0, Math.min(requiredPlayerCount, count));
+  }
+
+  function itemRareFlag(item) {
+    return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+  }
+
+  function itemMatchesDynamicRequirement(item, requirement, keyName, rawValues) {
+    try {
+      if (typeof requirement?.meetsRequirements === 'function') {
+        const result = requirement.meetsRequirements(item);
+        if (typeof result === 'boolean') return result;
+      }
+    } catch { }
+
+    const values = rawValues.map(Number).filter(Number.isFinite);
+    const rating = Number(item?.rating || 0);
+    switch (keyName) {
+      case 'PLAYER_QUALITY':
+      case 'PLAYER_LEVEL':
+        return values.some((value) =>
+          (value === 1 && isBronze(item)) ||
+          (value === 2 && isSilver(item)) ||
+          (value === 3 && isGold(item)) ||
+          (value === 4 && isSbcSpecialItem(item))
+        );
+      case 'PLAYER_RARITY':
+        return values.includes(itemRareFlag(item));
+      case 'PLAYER_RARITY_GROUP':
+        return values.some((value) => itemGroupNumbers(item).includes(value));
+      case 'PLAYER_MIN_OVR':
+        return values.length > 0 && rating >= Math.min(...values);
+      case 'PLAYER_EXACT_OVR':
+        return values.includes(rating);
+      case 'CLUB_ID':
+        return values.includes(Number(item?.teamId ?? item?.clubId ?? item?._staticData?.teamId ?? 0));
+      case 'LEAGUE_ID':
+        return values.includes(itemLeagueId(item));
+      case 'NATION_ID':
+        return values.includes(Number(item?.nationId ?? item?._staticData?.nationId ?? 0));
+      default:
+        return false;
+    }
+  }
+
+  const RATING_SBC_PLAYER_REQUIREMENT_KEYS = new Set([
+    'PLAYER_QUALITY',
+    'PLAYER_LEVEL',
+    'PLAYER_RARITY',
+    'PLAYER_RARITY_GROUP',
+    'PLAYER_MIN_OVR',
+    'PLAYER_EXACT_OVR',
+    'CLUB_ID',
+    'LEAGUE_ID',
+    'NATION_ID',
+  ]);
+
+  function parseRatingSbcChallenge(loopDef, challenge) {
+    const requiredPlayerCount = expectedSbcPlayerCount(loopDef, challenge) || getRequiredPlayerCount(challenge);
+    const constraints = [];
+    const unsupported = [];
+    let targetRating = Number(loopDef.ratingSbcFill?.targetRating || 0) || 0;
+
+    for (const requirement of challenge?.eligibilityRequirements || []) {
+      const key = requirementFirstKey(requirement);
+      const keyName = eligibilityKeyName(key);
+      const values = requirementValues(requirement, key);
+      if (keyName === 'TEAM_RATING') {
+        const ratings = values.map(Number).filter(Number.isFinite);
+        if (ratings.length) targetRating = Math.max(targetRating, ...ratings);
+        continue;
+      }
+      if (keyName === 'CHEMISTRY_POINTS' || keyName === 'ALL_PLAYERS_CHEMISTRY_POINTS') {
+        unsupported.push(keyName);
+        continue;
+      }
+      if (!RATING_SBC_PLAYER_REQUIREMENT_KEYS.has(keyName)) {
+        unsupported.push(keyName);
+        continue;
+      }
+      const count = requirementCount(requirement, requiredPlayerCount);
+      if (!count || !values.length) {
+        unsupported.push(`${keyName}(count:${requirement?.count ?? '?'}, values:${values.join('/') || '?'})`);
+        continue;
+      }
+      constraints.push({
+        id: `challenge-${constraints.length}`,
+        label: `${keyName} ${values.join('/')} x${count}`,
+        count,
+        matches: (item) => itemMatchesDynamicRequirement(item, requirement, keyName, values),
+      });
+    }
+
+    const configuredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
+    if (configuredSpecialCount) {
+      constraints.push({
+        id: 'runner-required-special',
+        label: `${requiredSpecialLabel(loopDef)} rating >= ${Number(loopDef.requiredSpecialMinRating || 0) || 0} x${configuredSpecialCount}`,
+        count: configuredSpecialCount,
+        matches: (item) => isRequiredSpecialItem(item, loopDef) &&
+          Number(item?.rating || 0) >= Math.max(0, Number(loopDef.requiredSpecialMinRating || 0) || 0),
+      });
+    }
+
+    const configuredAllowedSpecial = loopDef.allowedSpecialCount !== undefined
+      ? Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0)
+      : null;
+    return {
+      requiredPlayerCount,
+      targetRating,
+      constraints,
+      unsupported: [...new Set(unsupported)],
+      maxSpecialCount: configuredAllowedSpecial === null
+        ? (loopDef.blockSpecial === false ? requiredPlayerCount : 0)
+        : configuredAllowedSpecial,
+    };
+  }
+
+  function validateRatingSbcModelAgainstItems(model, items = [], challenge = null) {
+    const players = (items || []).filter(Boolean);
+    const errors = [];
+    const requiredPlayerCount = Math.max(0, Number(model?.requiredPlayerCount || 0) || 0);
+    const ratings = players.map((item) => Number(item?.rating || 0));
+    const rating = players.length === requiredPlayerCount
+      ? calculateEaSquadRating(ratings, requiredPlayerCount)
+      : 0;
+    const definitionIds = players.map((item) => Number(item?.definitionId || 0)).filter(Boolean);
+    const uniqueDefinitionCount = new Set(definitionIds).size;
+
+    if (players.length !== requiredPlayerCount) {
+      errors.push(`player-count ${players.length}/${requiredPlayerCount}`);
+    }
+    if (definitionIds.length !== players.length || uniqueDefinitionCount !== players.length) {
+      errors.push(`unique-definitions ${uniqueDefinitionCount}/${players.length}`);
+    }
+    if (players.length === requiredPlayerCount && rating < Number(model?.targetRating || 0)) {
+      errors.push(`team-rating ${rating}/${Number(model?.targetRating || 0)}`);
+    }
+
+    const constraintResults = (model?.constraints || []).map((constraint) => {
+      const matched = players.filter((item) => {
+        try { return constraint.matches(item); } catch { return false; }
+      }).length;
+      const required = Math.max(0, Number(constraint.count || 0) || 0);
+      if (matched < required) errors.push(`${constraint.label} ${matched}/${required}`);
+      return { constraint, matched, required };
+    });
+    const specialCount = players.filter(isSbcSpecialItem).length;
+    if (specialCount > Number(model?.maxSpecialCount || 0)) {
+      errors.push(`special-count ${specialCount}/${Number(model?.maxSpecialCount || 0)}`);
+    }
+
+    let challengeReady = null;
+    if (challenge && typeof challenge.meetsRequirements === 'function') {
+      try {
+        challengeReady = !!challenge.meetsRequirements();
+        if (!challengeReady) errors.push('challenge.meetsRequirements() returned false');
+      } catch (error) {
+        errors.push(`challenge.meetsRequirements() failed: ${error?.message || error}`);
+      }
+    }
+
+    return {
+      ok: errors.length === 0,
+      errors,
+      players,
+      ratings,
+      rating,
+      specialCount,
+      uniqueDefinitionCount,
+      constraintResults,
+      challengeReady,
+    };
+  }
+
+  function logRatingSbcValidation(loopDef, label, validation, model) {
+    log(`${loopDef.name}: ${label} rating ${validation.rating}/${model.targetRating}, players ${validation.players.length}/${model.requiredPlayerCount}, special ${validation.specialCount}/${model.maxSpecialCount}, unique definitions ${validation.uniqueDefinitionCount}/${validation.players.length}`);
+    validation.constraintResults.forEach(({ constraint, matched, required }) => {
+      log(`${loopDef.name}: ${label} constraint ${constraint.label}: ${matched}/${required}`);
+    });
+    if (validation.challengeReady !== null) {
+      log(`${loopDef.name}: ${label} local challenge.meetsRequirements(): ${validation.challengeReady ? 'true' : 'false'}`);
+    }
+    validation.errors.forEach((error) => log(`${loopDef.name}: ${label} validation failed: ${error}`));
+  }
+
+  function isRatingSbcCandidateSafe(item, loopDef, model = null, context = null) {
+    const allowedSpecialCount = model
+      ? model.maxSpecialCount
+      : Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
+    if (!isPlayer(item)) return false;
+    if (isSbcSpecialItem(item)) {
+      if (!allowedSpecialCount) return false;
+      if (requiredSpecialKind(loopDef) && !isRequiredSpecialItem(item, loopDef)) return false;
+    }
+    return getSbcProtectionReasons(item, loopDef, {
+      ...(context || {}),
+      allowedSpecialCount,
+      specialIndex: isSbcSpecialItem(item) ? 1 : 0,
+    }).length === 0;
+  }
+
+  function isResolvableRatingSbcUnassignedDuplicate(item, loopDef) {
+    if (!isDuplicate(item) || !isPlayer(item)) return false;
+    const resolved = findSubmissionItemForDuplicateSignal(item, new Set(), {
+      playerOnly: true,
+      allowSpecial: true,
+      protectedItemIds: loopDef.protectedItemIds,
+      protectedDefinitionIds: loopDef.protectedDefinitionIds,
+    });
+    if (!resolved) return false;
+    return isRatingSbcCandidateSafe(resolved, loopDef);
+  }
+
+  function buildRatingSbcCandidateEntries(loopDef, model) {
+    const startedAt = Date.now();
+    const settings = getFsuSettings();
+    const piles = applyFsuPilePriority(
+      loopDef.ratingSbcFill?.priorityPiles || loopDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'],
+      settings,
+    );
+    const byItemId = new Map();
+    const resolvedSignals = {};
+    const protectedItemIds = new Set((loopDef.protectedItemIds || []).map(Number).filter(Boolean));
+    const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number).filter(Boolean));
+    const context = {
+      settings,
+      protectedItemIds,
+      protectedDefinitionIds,
+      lockedItemIds: new Set((settings.lockedItemIds || []).map(Number).filter(Boolean)),
+      lockedDefinitionIds: new Set((settings.lockedDefinitionIds || []).map(Number).filter(Boolean)),
+      excludedLeagueIds: (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0),
+    };
+    const broadSpec = {
+      playerOnly: true,
+      allowSpecial: true,
+      protectedItemIds: loopDef.protectedItemIds,
+      protectedDefinitionIds: loopDef.protectedDefinitionIds,
+    };
+    const safetyCache = new Map();
+    const isSafe = (item) => {
+      const itemId = Number(item?.id || 0);
+      if (!itemId) return false;
+      if (!safetyCache.has(itemId)) safetyCache.set(itemId, isRatingSbcCandidateSafe(item, loopDef, model, context));
+      return safetyCache.get(itemId);
+    };
+    const submissionItems = getSubmissionCacheItems().filter(isSafe);
+    const submissionById = new Map();
+    const submissionByDefinition = new Map();
+    for (const item of submissionItems) {
+      const itemId = Number(item?.id || 0);
+      const definitionId = Number(item?.definitionId || 0);
+      if (itemId) submissionById.set(itemId, item);
+      if (!definitionId) continue;
+      const entries = submissionByDefinition.get(definitionId) || [];
+      entries.push(item);
+      submissionByDefinition.set(definitionId, entries);
+    }
+    for (const entries of submissionByDefinition.values()) {
+      const sorted = sortSbcFodder(entries, broadSpec, settings);
+      entries.splice(0, entries.length, ...sorted);
+    }
+
+    function resolveSignal(sourceItem) {
+      const duplicateId = Number(sourceItem?.duplicateId || 0);
+      if (duplicateId && submissionById.has(duplicateId)) return submissionById.get(duplicateId);
+      const definitionId = Number(sourceItem?.definitionId || 0);
+      return submissionByDefinition.get(definitionId)?.[0] || null;
+    }
+
+    const requirementCache = new Map();
+    let scannedItems = 0;
+
+    for (const pileName of piles) {
+      for (const sourceItem of getPileItemsByName(pileName)) {
+        scannedItems++;
+        let item = sourceItem;
+        let signal = null;
+        if (pileNeedsDuplicateSignalResolution(pileName)) {
+          if (!isDuplicate(sourceItem)) continue;
+          item = resolveSignal(sourceItem);
+          if (!item) continue;
+          signal = sourceItem;
+        }
+        const itemId = Number(item?.id || 0);
+        const definitionId = Number(item?.definitionId || 0);
+        if (!itemId || !definitionId || byItemId.has(itemId)) continue;
+        if (!isSafe(item)) continue;
+        if (!requirementCache.has(itemId)) {
+          requirementCache.set(itemId, model.constraints.map((constraint) => constraint.matches(item)));
+        }
+        const requirementMatches = requirementCache.get(itemId);
+        byItemId.set(itemId, {
+          item,
+          signal,
+          pileName,
+          pileRank: piles.indexOf(pileName),
+          requirementMatches,
+          special: isSbcSpecialItem(item),
+        });
+        if (signal) resolvedSignals[pileName] = (resolvedSignals[pileName] || 0) + 1;
+      }
+    }
+
+    const byDefinition = new Map();
+    for (const entry of byItemId.values()) {
+      const definitionId = Number(entry.item?.definitionId || 0);
+      const existing = byDefinition.get(definitionId);
+      if (!existing || entry.pileRank < existing.pileRank ||
+        (entry.pileRank === existing.pileRank && Number(entry.item?.id || 0) < Number(existing.item?.id || 0))) {
+        byDefinition.set(definitionId, entry);
+      }
+    }
+    return {
+      entries: [...byDefinition.values()],
+      piles,
+      resolvedSignals,
+      buildMs: Date.now() - startedAt,
+      scannedItems,
+    };
+  }
+
+  function comparePileSelections(a, b, piles) {
+    for (const pile of piles) {
+      const aCount = Number(a?.pileCounts?.[pile] || 0);
+      const bCount = Number(b?.pileCounts?.[pile] || 0);
+      if (aCount !== bCount) return bCount - aCount;
+    }
+    const aIds = (a?.entries || []).map((entry) => Number(entry.item?.id || 0)).sort((x, y) => x - y);
+    const bIds = (b?.entries || []).map((entry) => Number(entry.item?.id || 0)).sort((x, y) => x - y);
+    for (let index = 0; index < Math.max(aIds.length, bIds.length); index++) {
+      if ((aIds[index] || 0) !== (bIds[index] || 0)) return (aIds[index] || 0) - (bIds[index] || 0);
+    }
+    return 0;
+  }
+
+  function mergePileCounts(a = {}, b = {}) {
+    const result = { ...a };
+    Object.entries(b).forEach(([pile, count]) => {
+      result[pile] = Number(result[pile] || 0) + Number(count || 0);
+    });
+    return result;
+  }
+
+  function ratingGroupSelectionOptions(entries, count, model, piles) {
+    if (!count) return [{ entries: [], progress: model.constraints.map(() => 0), specialCount: 0, pileCounts: {} }];
+    const signatureCounts = new Map();
+    const compactEntries = entries.filter((entry) => {
+      const signature = `${entry.requirementMatches.map(Number).join('')}:${Number(entry.special)}:${entry.pileName}`;
+      const seen = Number(signatureCounts.get(signature) || 0);
+      if (seen >= count) return false;
+      signatureCounts.set(signature, seen + 1);
+      return true;
+    });
+    let states = new Map();
+    states.set(`0|0|${model.constraints.map(() => 0).join('.')}`, {
+      entries: [],
+      progress: model.constraints.map(() => 0),
+      specialCount: 0,
+      pileCounts: {},
+    });
+
+    for (const entry of compactEntries) {
+      const next = new Map(states);
+      for (const state of states.values()) {
+        if (state.entries.length >= count) continue;
+        const specialCount = state.specialCount + Number(entry.special);
+        if (specialCount > model.maxSpecialCount) continue;
+        const progress = state.progress.map((value, index) => Math.min(
+          model.constraints[index].count,
+          value + Number(entry.requirementMatches[index]),
+        ));
+        const candidate = {
+          entries: [...state.entries, entry],
+          progress,
+          specialCount,
+          pileCounts: mergePileCounts(state.pileCounts, { [entry.pileName]: 1 }),
+        };
+        const key = `${candidate.entries.length}|${specialCount}|${progress.join('.')}`;
+        const existing = next.get(key);
+        if (!existing || comparePileSelections(candidate, existing, piles) < 0) next.set(key, candidate);
+      }
+      states = next;
+    }
+    return [...states.values()].filter((state) => state.entries.length === count);
+  }
+
+  function materializeRatingVector(entries, descendingRatings, model, piles) {
+    const counts = new Map();
+    descendingRatings.forEach((rating) => counts.set(rating, (counts.get(rating) || 0) + 1));
+    let combined = new Map();
+    combined.set(`0|${model.constraints.map(() => 0).join('.')}`, {
+      entries: [],
+      progress: model.constraints.map(() => 0),
+      specialCount: 0,
+      pileCounts: {},
+    });
+
+    for (const [rating, count] of [...counts.entries()].sort((a, b) => b[0] - a[0])) {
+      const groupEntries = entries
+        .filter((entry) => Number(entry.item?.rating || 0) === Number(rating))
+        .sort((a, b) => a.pileRank - b.pileRank || Number(a.item?.id || 0) - Number(b.item?.id || 0));
+      const options = ratingGroupSelectionOptions(groupEntries, count, model, piles);
+      if (!options.length) return null;
+      const next = new Map();
+      for (const base of combined.values()) {
+        for (const option of options) {
+          const specialCount = base.specialCount + option.specialCount;
+          if (specialCount > model.maxSpecialCount) continue;
+          const progress = base.progress.map((value, index) => Math.min(
+            model.constraints[index].count,
+            value + option.progress[index],
+          ));
+          const candidate = {
+            entries: [...base.entries, ...option.entries],
+            progress,
+            specialCount,
+            pileCounts: mergePileCounts(base.pileCounts, option.pileCounts),
+          };
+          const key = `${specialCount}|${progress.join('.')}`;
+          const existing = next.get(key);
+          if (!existing || comparePileSelections(candidate, existing, piles) < 0) next.set(key, candidate);
+        }
+      }
+      combined = next;
+      if (!combined.size) return null;
+    }
+
+    return [...combined.values()]
+      .filter((state) => state.progress.every((value, index) => value >= model.constraints[index].count))
+      .sort((a, b) => comparePileSelections(a, b, piles))[0] || null;
+  }
+
+  function findOptimalRatingSbcSelection(candidateEntries, model, piles, options = {}) {
+    const requiredCount = model.requiredPlayerCount;
+    if (candidateEntries.length < requiredCount) {
+      return { ok: false, reason: `only ${candidateEntries.length}/${requiredCount} safe unique player definitions are available` };
+    }
+    const ratingCounts = new Map();
+    candidateEntries.forEach((entry) => {
+      const rating = Number(entry.item?.rating || 0);
+      ratingCounts.set(rating, (ratingCounts.get(rating) || 0) + 1);
+    });
+    const levels = [...ratingCounts.keys()].filter(Boolean).sort((a, b) => a - b);
+    const usedCounts = new Map();
+    const descendingRatings = [];
+    const maxNodes = Math.max(10000, Math.min(2000000, Number(options.maxSearchNodes || 500000) || 500000));
+    let nodes = 0;
+    let exhausted = false;
+
+    function highestAvailableCompletion(remaining, maxRating) {
+      const completion = [];
+      for (let index = levels.length - 1; index >= 0 && completion.length < remaining; index--) {
+        const rating = levels[index];
+        if (rating > maxRating) continue;
+        const available = Number(ratingCounts.get(rating) || 0) - Number(usedCounts.get(rating) || 0);
+        for (let count = 0; count < available && completion.length < remaining; count++) completion.push(rating);
+      }
+      return completion;
+    }
+
+    function search(maxLevelIndex) {
+      nodes++;
+      if (nodes > maxNodes) {
+        exhausted = true;
+        return null;
+      }
+      const remaining = requiredCount - descendingRatings.length;
+      if (!remaining) {
+        if (calculateEaSquadRating(descendingRatings, requiredCount) < model.targetRating) return null;
+        const materialized = materializeRatingVector(candidateEntries, descendingRatings, model, piles);
+        if (!materialized) return null;
+        return {
+          ok: true,
+          entries: materialized.entries,
+          selected: materialized.entries.map((entry) => entry.item),
+          rating: calculateEaSquadRating(descendingRatings, requiredCount),
+          ratings: [...descendingRatings],
+          pileCounts: materialized.pileCounts,
+          nodes,
+        };
+      }
+
+      const maxRating = levels[maxLevelIndex];
+      const optimistic = highestAvailableCompletion(remaining, maxRating);
+      if (optimistic.length < remaining) return null;
+      if (calculateEaSquadRating([...descendingRatings, ...optimistic], requiredCount) < model.targetRating) return null;
+
+      for (let levelIndex = 0; levelIndex <= maxLevelIndex; levelIndex++) {
+        const rating = levels[levelIndex];
+        const used = Number(usedCounts.get(rating) || 0);
+        if (used >= Number(ratingCounts.get(rating) || 0)) continue;
+        usedCounts.set(rating, used + 1);
+        descendingRatings.push(rating);
+        const result = search(levelIndex);
+        descendingRatings.pop();
+        if (used) usedCounts.set(rating, used); else usedCounts.delete(rating);
+        if (result) return result;
+        if (exhausted) return null;
+      }
+      return null;
+    }
+
+    for (let maxLevelIndex = 0; maxLevelIndex < levels.length; maxLevelIndex++) {
+      const rating = levels[maxLevelIndex];
+      usedCounts.set(rating, 1);
+      descendingRatings.push(rating);
+      const result = search(maxLevelIndex);
+      descendingRatings.pop();
+      usedCounts.delete(rating);
+      if (result) return result;
+      if (exhausted) break;
+    }
+    return {
+      ok: false,
+      reason: exhausted
+        ? `rating search exceeded ${maxNodes} states`
+        : `no safe ${requiredCount}-player combination reaches squad rating ${model.targetRating} and all challenge constraints`,
+      nodes,
+    };
+  }
+
   function selectedItemsFromPile(selection, pileName) {
     const pileIds = new Set(getPileItemsByName(pileName).map((item) => Number(item?.id || 0)));
     return (selection?.selected || []).filter((item) => pileIds.has(Number(item?.id || 0)));
@@ -3857,7 +4531,7 @@ function updateLoopControls() {
     return popped;
   }
 
-  async function syncAfterInventorySbcSubmit(label) {
+  async function syncAfterSbcSubmit(label) {
     const before = currentControllerName() || 'unknown';
     await unwindSbcSquadControllers(`${label} post-submit`);
     await showUnassignedIfAny(`${label} post-submit navigation sync`);
@@ -4327,10 +5001,10 @@ function updateLoopControls() {
     )[0] || null;
   }
 
-  function getSubmittedRatingLimit(item, loopDef = {}) {
+  function getSubmittedRatingLimit(item, loopDef = {}, settings = getFsuSettings()) {
     const normalGoldLimit = Number(loopDef.maxNormalGoldSubmittedRating || 0);
     if (isNormalGoldFodder(item)) {
-      const fsuRange = getFsuSettings().goldRange || FSU_COMPAT_DEFAULTS.goldRange;
+      const fsuRange = settings.goldRange || FSU_COMPAT_DEFAULTS.goldRange;
       const fsuGoldLimit = Number(fsuRange[1] || 0);
       const limits = [normalGoldLimit, fsuGoldLimit].filter((limit) => Number.isFinite(limit) && limit > 0);
       if (limits.length) return Math.min(...limits);
@@ -4884,17 +5558,13 @@ function updateLoopControls() {
       maxCompletions: 1,
       maxSubmittedRating: 88,
       maxNormalGoldSubmittedRating: 99,
-      inventoryFillFirst: true,
-      requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, minRating: 84, maxRating: 99, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
-        { tier: 'gold', rarity: 'rare', count: 5, minRating: 82, maxRating: 99, playerOnly: true, allowSpecial: false, priorityPiles: ['storage', 'club'] },
-      ],
-      priorityPiles: ['storage', 'club'],
+      ratingSbcFill: {
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      },
       requiredSpecialCount: 0,
       allowedSpecialCount: 0,
       blockSpecial: true,
       blockTradeable: false,
-      submitReadyRepairMaxAttempts: 8,
       openRewardPacks: true,
       ...override,
     };
@@ -4991,37 +5661,27 @@ function updateLoopControls() {
       return { ok: false, reason };
     }
 
-    let fillResult;
-    let inspection;
-    if (shouldUseInventoryFirstFill(upgradeDef)) {
-      const inventoryFill = await fillSbcSquadInventoryFirst(upgradeDef, opened, { stopOnMissingSelection: true });
-      if (!inventoryFill.ok) {
-        const reason = `${upgradeDef.name} ${inventoryFill.reason || 'inventory-first fill is missing required items'}`;
-        log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${reason}`);
-        return { ok: false, reason };
-      }
-      fillResult = inventoryFill.fillResult;
-      inspection = inventoryFill.inspection;
-    } else {
-      fillResult = await fillSbcSquad(upgradeDef.name, {
-        requireSubmitReady: false,
-        specialRequirementAdd: upgradeDef.specialRequirementAdd,
-      });
-      const filledSquad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
-      inspection = inspectSbcSquad(upgradeDef, filledSquad);
-      logSbcSquadInspection(upgradeDef, inspection);
+    const configuredFill = await fillConfiguredSbcSquad(upgradeDef, opened, { stopOnMissingSelection: true });
+    if (!configuredFill.ok) {
+      const reason = `${upgradeDef.name} ${configuredFill.reason || 'configured fill is missing required items'}`;
+      log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${reason}`);
+      return { ok: false, reason };
     }
+    let fillResult = configuredFill.fillResult;
+    let inspection = configuredFill.inspection;
     let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
 
-    const protectedRepair = await repairProtectedSquadItemsIfNeeded(upgradeDef, opened, fillResult, inspection);
-    fillResult = protectedRepair.fillResult;
-    inspection = protectedRepair.inspection;
-    squad = fillResult.squad || squad;
+    if (!shouldUseRatingSbcFill(upgradeDef)) {
+      const protectedRepair = await repairProtectedSquadItemsIfNeeded(upgradeDef, opened, fillResult, inspection);
+      fillResult = protectedRepair.fillResult;
+      inspection = protectedRepair.inspection;
+      squad = fillResult.squad || squad;
 
-    const submitReadyRepair = await repairSubmitReadinessIfNeeded(upgradeDef, opened, fillResult, inspection);
-    fillResult = submitReadyRepair.fillResult;
-    inspection = submitReadyRepair.inspection;
-    squad = fillResult.squad || squad;
+      const submitReadyRepair = await repairSubmitReadinessIfNeeded(upgradeDef, opened, fillResult, inspection);
+      fillResult = submitReadyRepair.fillResult;
+      inspection = submitReadyRepair.inspection;
+      squad = fillResult.squad || squad;
+    }
 
     if (!fillResult.submitReady) {
       const normalGoldLimit = upgradeDef.maxNormalGoldSubmittedRating || upgradeDef.maxSubmittedRating || 'none';
@@ -5030,6 +5690,15 @@ function updateLoopControls() {
       return { ok: false, reason };
     }
     assertSbcSquadSafe(upgradeDef, inspection);
+    if (shouldUseRatingSbcFill(upgradeDef)) {
+      const finalModelValidation = validateRatingSbcModelAgainstItems(configuredFill.model, inspection.items, opened.challenge);
+      logRatingSbcValidation(upgradeDef, 'final rating squad', finalModelValidation, configuredFill.model);
+      if (!finalModelValidation.ok) {
+        const reason = `final rating squad failed dynamic requirement validation: ${finalModelValidation.errors.join(', ')}`;
+        log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${upgradeDef.name} ${reason}`);
+        return { ok: false, reason };
+      }
+    }
 
     const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
     markSbcItemsConsumed(inspection.items, upgradeDef.name);
@@ -5110,10 +5779,13 @@ function updateLoopControls() {
     const reasons = [];
     const rating = Number(item?.rating || 0);
     const itemId = Number(item?.id || 0);
-    const maxRating = getSubmittedRatingLimit(item, loopDef);
-    const protectedIds = new Set((loopDef.protectedItemIds || []).map(Number));
-    const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number));
-    const allowedSpecialCount = Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
+    const settings = context.settings || getFsuSettings();
+    const maxRating = getSubmittedRatingLimit(item, loopDef, settings);
+    const protectedIds = context.protectedItemIds || new Set((loopDef.protectedItemIds || []).map(Number));
+    const protectedDefinitionIds = context.protectedDefinitionIds || new Set((loopDef.protectedDefinitionIds || []).map(Number));
+    const allowedSpecialCount = context.allowedSpecialCount !== undefined
+      ? Math.max(0, Number(context.allowedSpecialCount || 0) || 0)
+      : Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
     const requiredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
     const specialIndex = Number(context.specialIndex || 0) || 0;
     const fsuSpec = {
@@ -5156,7 +5828,7 @@ function updateLoopControls() {
     }
     if (loopDef.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) reasons.push('tradeable-blocked');
     if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
-    getFsuRejectReasons(item, fsuSpec).forEach((reason) => {
+    getFsuRejectReasons(item, fsuSpec, settings, context).forEach((reason) => {
       if (!reasons.includes(reason)) reasons.push(reason);
     });
 
@@ -5490,15 +6162,21 @@ function updateLoopControls() {
     await refreshStorePacks().catch(() => null);
 
     const awardId = Number(set?.awards?.[0]?.value) || null;
-    if (awardId) return awardId;
+    let rewardPackId = awardId;
+    if (!rewardPackId) {
+      const afterPacks = getAvailableRepositoryMyPacks();
+      const afterPackCounts = getPackCountsById(afterPacks);
+      const newPack = afterPacks.find((pack) => {
+        const id = packIdKey(pack);
+        return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
+      });
+      rewardPackId = Number(packIdKey(newPack)) || null;
+    }
 
-    const afterPacks = getAvailableRepositoryMyPacks();
-    const afterPackCounts = getPackCountsById(afterPacks);
-    const newPack = afterPacks.find((pack) => {
-      const id = packIdKey(pack);
-      return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
-    });
-    return Number(packIdKey(newPack)) || null;
+    // Capture the reward before leaving the submitted squad, then unwind every SBC
+    // submission path before a reward pack is opened or another challenge is loaded.
+    await syncAfterSbcSubmit(set?.name || 'SBC submit');
+    return rewardPackId;
   }
 
   async function openRewardSilverPack(packId) {
@@ -5588,7 +6266,15 @@ function updateLoopControls() {
         return false;
       }
 
-      const items = await openPack(pack, `${loopDef.name} ${reason}`, { allowGone: true });
+      const items = await openPack(pack, `${loopDef.name} ${reason}`, {
+        allowGone: true,
+        retryCodes: ['471', '500'],
+        resolveRetryPack: () => findRewardPack(loopDef, rewardPackId, {
+          attempts: 2,
+          delayMs: options.findDelayMs || 1800,
+          fallbackPackMatcher: options.fallbackPackMatcher,
+        }),
+      });
       if (!items) {
         if (openAttempt < openAttempts) {
           log(`${loopDef.name}: retrying reward pack lookup after stale pack (${openAttempt}/${openAttempts})`);
@@ -5755,6 +6441,23 @@ function updateLoopControls() {
     return document.querySelector('#bronze-loop-open-rewards')?.checked === true;
   }
 
+  function loadLoopUiOptions() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LOOP_UI_OPTIONS_KEY) || '{}');
+      return { showMvpLoops: saved.showMvpLoops === true };
+    } catch {
+      return { showMvpLoops: false };
+    }
+  }
+
+  function saveLoopUiOptions() {
+    state.showMvpLoops = document.querySelector('#bronze-loop-show-mvp')?.checked === true;
+    try {
+      localStorage.setItem(LOOP_UI_OPTIONS_KEY, JSON.stringify({ showMvpLoops: state.showMvpLoops }));
+    } catch { }
+    renderLoopSelect();
+  }
+
   function getPickRuntimeOptions() {
     const highGoldThreshold = Math.max(2, Math.min(99, Number(document.querySelector('#bronze-loop-pick-high-gold-threshold')?.value || 82) || 82));
     const autoPickThreshold = Math.max(1, Math.min(99, Number(document.querySelector('#bronze-loop-pick-auto-threshold')?.value || 90) || 90));
@@ -5793,7 +6496,8 @@ function updateLoopControls() {
     loopDef.autoSelectBelow90 = options.autoSelectBelow90;
     loopDef.pickHighGoldThreshold = options.highGoldThreshold;
     loopDef.autoPickRatingThreshold = options.autoPickThreshold;
-    (loopDef.requirements || []).forEach((requirement) => {
+    const requirementGroups = [loopDef.requirements, ...(loopDef.challengeRequirements || [])];
+    requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
       requirement.protectHighGold = options.protectHighGold;
       // Pick fodder cap follows the user-selected high-gold protection threshold.
       if (options.protectHighGold) {
@@ -5801,7 +6505,7 @@ function updateLoopControls() {
       } else if (Number(requirement.maxRating) <= 81) {
         delete requirement.maxRating;
       }
-    });
+    }));
   }
 
   async function runValidationBronzeUpgradeDryRun(loopDef) {
@@ -5896,7 +6600,6 @@ function updateLoopControls() {
 
   async function runReservedDuplicateUpgradeDryRun(loopDef, upgradeDef, duplicatePredicate, label) {
     const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name || label);
-    const countNeeded = getUpgradeRequirementCount(upgradeDef);
     const duplicateCount = countUnassignedMatching(duplicatePredicate);
     log(`${loopDef.name}: dry-run ${label} SBC found ${set.name} (#${set.id || '?'})`);
 
@@ -5905,18 +6608,19 @@ function updateLoopControls() {
       return;
     }
 
-    const piles = duplicateCount >= countNeeded
+    const duplicateOnlySelection = selectLoopInventoryPlayers(upgradeDef, ['unassigned']);
+    const piles = duplicateOnlySelection.ok
       ? ['unassigned']
-      : ['unassigned', 'storage', 'transfer', 'club'];
+      : (upgradeDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club']);
     const selection = selectLoopInventoryPlayers(upgradeDef, piles);
-    log(`${loopDef.name}: dry-run ${label} reserved duplicates:${duplicateCount}, required:${countNeeded}`);
+    log(`${loopDef.name}: dry-run ${label} reserved matching duplicates:${duplicateCount}, required players:${sumRequirementPlayerCount(upgradeDef)}, duplicate-only complete:${duplicateOnlySelection.ok ? 'yes' : 'no'}`);
     logDryRunSelection(`${loopDef.name} ${label}`, selection);
     if (selection.ok) {
       log(`${loopDef.name}: dry-run would submit ${label} selection`);
     }
   }
 
-  async function runProvisionPackDualCraftingDryRun(loopDef) {
+  async function runProvisionPackCraftingDryRun(loopDef) {
     await waitAppReady();
     await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
     const rounds = Math.max(1, Math.min(50, Number(loopDef.rounds || loopDef.maxRounds || 1) || 1));
@@ -5925,11 +6629,19 @@ function updateLoopControls() {
     log(`${loopDef.name}: dry-run only inspects current reserved duplicates; it does not open Provision Packs`);
     if (loopDef.preCraftPlayerPickLoopId) {
       const pickDef = findLoopDefById(loopDef.preCraftPlayerPickLoopId);
-      log(`${loopDef.name}: after each opened Provision Pack, live run checks and completes ${pickDef?.name || loopDef.preCraftPlayerPickLoopId} only when an unassigned common-gold duplicate remains`);
+      log(`${loopDef.name}: after each opened Provision Pack, live run checks ${pickDef?.name || loopDef.preCraftPlayerPickLoopId} only when an unassigned duplicate matches that Pick's configured requirements`);
     }
 
-    await runReservedDuplicateUpgradeDryRun(loopDef, loopDef.commonUpgrade, isLowCommonGoldDuplicate, 'FOF low common gold');
-    await runReservedDuplicateUpgradeDryRun(loopDef, loopDef.rareUpgrade, isLowRareGoldDuplicate, '2x84+ low rare gold');
+    for (const upgradeDef of getProvisionCraftingUpgrades(loopDef)) {
+      for (const challengeDef of getChallengeMaterialDefs(upgradeDef)) {
+        await runReservedDuplicateUpgradeDryRun(
+          loopDef,
+          challengeDef,
+          (item) => isDuplicateForLoopRequirements(item, challengeDef),
+          challengeDef.name,
+        );
+      }
+    }
     log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
   }
 
@@ -5971,8 +6683,8 @@ function updateLoopControls() {
       await runCommonGoldToRareUpgradeDryRun(loopDef);
       return;
     }
-    if (loopDef.strategy === 'provisionPackDualCrafting') {
-      await runProvisionPackDualCraftingDryRun(loopDef);
+    if (loopDef.strategy === 'provisionPackCrafting' || loopDef.strategy === 'provisionPackDualCrafting') {
+      await runProvisionPackCraftingDryRun(loopDef);
       return;
     }
     if (loopDef.strategy === 'rarePackTo84Upgrade') {
@@ -6132,12 +6844,164 @@ function updateLoopControls() {
     return loopDef.inventoryFillFirst === true && Array.isArray(loopDef.requirements) && loopDef.requirements.length > 0;
   }
 
+  function shouldUseRatingSbcFill(loopDef = {}) {
+    return isPlainObject(loopDef.ratingSbcFill);
+  }
+
   function logInventorySelection(label, selection, options = {}) {
     const maxItems = Number(options.maxItems || 20);
     log(`${label}: inventory selected ${selection?.selected?.length || 0} item(s) (${formatSelectionStats(selection?.stats)})`);
     const entries = selection?.entries || (selection?.selected || []).map((item) => ({ item, pileName: 'unknown' }));
     entries.slice(0, maxItems).forEach((entry, index) => log(`inventory pick ${formatDryRunItem(entry, index)}`));
     if (entries.length > maxItems) log(`${label}: inventory pick list truncated: ${entries.length - maxItems} more item(s)`);
+  }
+
+  function logRatingSbcModel(loopDef, model) {
+    log(`${loopDef.name}: rating SBC model players:${model.requiredPlayerCount}, target:${model.targetRating}, max special:${model.maxSpecialCount}`);
+    model.constraints.forEach((constraint) => {
+      log(`${loopDef.name}: rating SBC constraint ${constraint.label}`);
+    });
+  }
+
+  async function fillSbcSquadRatingOptimized(loopDef, opened, options = {}) {
+    await refreshInventoryCaches(`${loopDef.name} rating SBC fill`, { includePacks: false, quiet: true });
+    const model = parseRatingSbcChallenge(loopDef, opened.challenge);
+    logRatingSbcModel(loopDef, model);
+    if (model.unsupported.length) {
+      return {
+        ok: false,
+        reason: `unsupported dynamic SBC requirement(s): ${model.unsupported.join(', ')}`,
+        unsupportedRequirements: model.unsupported,
+      };
+    }
+    if (!model.targetRating) {
+      return { ok: false, reason: 'dynamic SBC challenge has no TEAM_RATING requirement and no ratingSbcFill.targetRating fallback' };
+    }
+    if (!model.requiredPlayerCount) {
+      return { ok: false, reason: 'dynamic SBC challenge player count is unavailable' };
+    }
+
+    const candidates = buildRatingSbcCandidateEntries(loopDef, model);
+    log(`${loopDef.name}: rating SBC candidates ${candidates.entries.length} unique definition(s) across ${candidates.piles.join(' > ')}; scanned ${candidates.scannedItems} item(s), built in ${candidates.buildMs}ms`);
+    const selection = findOptimalRatingSbcSelection(candidates.entries, model, candidates.piles, loopDef.ratingSbcFill);
+    if (!selection.ok) {
+      return {
+        ok: false,
+        reason: selection.reason,
+        ratingShortage: true,
+        model,
+        candidates,
+      };
+    }
+
+    selection.stats = selection.pileCounts;
+    selection.resolvedSignals = candidates.resolvedSignals;
+    log(`${loopDef.name}: optimal rating squad ${selection.rating}/${model.targetRating}; ratings ${selection.ratings.join(', ')}; search states:${selection.nodes}`);
+    if (options.dryRun) {
+      logDryRunSelection(`${loopDef.name} rating SBC`, selection, {
+        maxItems: 30,
+        priorityPiles: candidates.piles,
+      });
+    } else {
+      logInventorySelection(`${loopDef.name} rating SBC`, selection, { maxItems: 30 });
+    }
+
+    const prepared = await prepareInventorySelection(loopDef, selection);
+    const plannedModelValidation = validateRatingSbcModelAgainstItems(model, prepared.selected || []);
+    logRatingSbcValidation(loopDef, 'planned rating squad', plannedModelValidation, model);
+    if (!plannedModelValidation.ok) {
+      return {
+        ok: false,
+        reason: `optimized rating selection failed dynamic requirement validation: ${plannedModelValidation.errors.join(', ')}`,
+        selection: prepared,
+        model,
+        modelValidation: plannedModelValidation,
+      };
+    }
+    const plannedInspection = inspectSbcItems(loopDef, prepared.selected || [], {
+      expectedPlayerCount: model.requiredPlayerCount,
+    });
+    logSbcSquadInspection(loopDef, plannedInspection);
+    if (plannedInspection.blocked.length || plannedInspection.missingRequirements?.length) {
+      if (options.dryRun) {
+        return { ok: false, reason: 'rating SBC optimized selection failed Runner protection inspection', selection: prepared, inspection: plannedInspection };
+      }
+      assertSbcSquadSafe(loopDef, plannedInspection);
+    }
+
+    if (options.dryRun) {
+      return { ok: true, selection: prepared, inspection: plannedInspection, model, optimizedRating: selection.rating };
+    }
+
+    await saveChallengeSquad(opened.challenge, prepared.selected, `${loopDef.name} optimized rating fill`);
+    await waitLoadingEnd();
+    await sleep(900);
+    const squad = ctrl()?._squad || opened.challenge?.squad;
+    const fillResult = {
+      squad,
+      filled: getFilledSquadSlots(squad),
+      submitReady: !!findSubmitButton(),
+    };
+    const inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount: model.requiredPlayerCount });
+    logSbcSquadInspection(loopDef, inspection);
+    const savedModelValidation = validateRatingSbcModelAgainstItems(model, inspection.items, opened.challenge);
+    logRatingSbcValidation(loopDef, 'saved rating squad', savedModelValidation, model);
+    if (!savedModelValidation.ok) {
+      return {
+        ok: false,
+        reason: `saved rating squad failed dynamic requirement validation: ${savedModelValidation.errors.join(', ')}`,
+        selection: prepared,
+        fillResult,
+        inspection,
+        model,
+        modelValidation: savedModelValidation,
+      };
+    }
+    log(`${loopDef.name}: optimized rating fill submit ${fillResult.submitReady ? 'ready' : 'not ready'} (${inspection.items.length}/${model.requiredPlayerCount} players)`);
+    return {
+      ok: true,
+      selection: prepared,
+      fillResult,
+      inspection,
+      model,
+      modelValidation: savedModelValidation,
+      optimizedRating: selection.rating,
+    };
+  }
+
+  async function fillConfiguredSbcSquad(loopDef, opened, options = {}) {
+    if (shouldUseRatingSbcFill(loopDef)) {
+      return fillSbcSquadRatingOptimized(loopDef, opened, options);
+    }
+    if (shouldUseInventoryFirstFill(loopDef)) {
+      return fillSbcSquadInventoryFirst(loopDef, opened, options);
+    }
+    if (options.dryRun) {
+      const expectedPlayerCount = expectedSbcPlayerCount(loopDef, opened.challenge);
+      const squad = ctrl()?._squad || opened.challenge?.squad;
+      const fillResult = {
+        squad,
+        filled: getFilledSquadSlots(squad),
+        submitReady: !!findSubmitButton(),
+      };
+      const inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount });
+      logSbcSquadInspection(loopDef, inspection);
+      log(`${loopDef.name}: dry-run inspects current squad only; does not click FSU fill or save`);
+      return { ok: true, fillResult, inspection };
+    }
+
+    const fillResult = await fillSbcSquad(loopDef.name, {
+      requireSubmitReady: false,
+      specialRequirementAdd: loopDef.specialRequirementAdd,
+    });
+    const expectedPlayerCount = expectedSbcPlayerCount(loopDef, opened.challenge);
+    const squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
+    const inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount });
+    logSbcSquadInspection(loopDef, inspection);
+    if (!fillResult.submitReady) {
+      log(`${loopDef.name}: submit not ready after FSU fill (${fillResult.filled}/${expectedPlayerCount || '?'} slots filled); likely SBC requirements are still unmet or FSU completion picked an invalid squad`);
+    }
+    return { ok: true, fillResult, inspection };
   }
 
   async function fillSbcSquadInventoryFirst(loopDef, opened, options = {}) {
@@ -6203,7 +7067,9 @@ function updateLoopControls() {
     while (completions < maxCompletions) {
       stopPoint();
       if (!loopDef.dryRun) {
-        await clearUnassigned(`${loopDef.name} pre-submit cleanup`);
+        await clearUnassigned(`${loopDef.name} pre-submit cleanup`, shouldUseRatingSbcFill(loopDef) ? {
+          reserveItem: (item) => isResolvableRatingSbcUnassignedDuplicate(item, loopDef),
+        } : {});
       } else {
         log(`${loopDef.name}: dry-run skips unassigned cleanup (no item moves)`);
       }
@@ -6218,61 +7084,61 @@ function updateLoopControls() {
         break;
       }
 
-      let fillResult;
-      let inspection;
       const expectedPlayerCount = expectedSbcPlayerCount(loopDef, opened.challenge);
-      if (shouldUseInventoryFirstFill(loopDef)) {
-        const inventoryFill = await fillSbcSquadInventoryFirst(loopDef, opened, {
-          dryRun: loopDef.dryRun,
-          stopOnMissingSelection: true,
-        });
-        if (loopDef.dryRun) {
-          log(`${loopDef.name}: dry run stops before squad save or SBC submit`);
-          return { completions, rewardPacksOpened, rewardPacksPending, dryRun: true };
+      const configuredFill = await fillConfiguredSbcSquad(loopDef, opened, {
+        dryRun: loopDef.dryRun,
+        stopOnMissingSelection: true,
+      });
+      if (loopDef.dryRun) {
+        if (!configuredFill.ok) {
+          log(`${loopDef.name}: dry-run rating/inventory fill failed: ${configuredFill.reason || 'configured SBC fill failed'}`);
         }
-        if (!inventoryFill.ok) {
-          log(`${loopDef.name}: stopping because ${inventoryFill.reason || 'inventory-first fill is missing required items'}`);
-          break;
-        }
-        fillResult = inventoryFill.fillResult;
-        inspection = inventoryFill.inspection;
-      } else if (loopDef.dryRun) {
-        const squad = ctrl()?._squad || opened.challenge?.squad;
-        fillResult = {
-          squad,
-          filled: getFilledSquadSlots(squad),
-          submitReady: !!findSubmitButton(),
+        log(`${loopDef.name}: dry run stops before squad save or SBC submit`);
+        return {
+          completions,
+          rewardPacksOpened,
+          rewardPacksPending,
+          dryRun: true,
+          ok: configuredFill.ok,
+          reason: configuredFill.reason || null,
         };
-        inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount });
-        logSbcSquadInspection(loopDef, inspection);
-        log(`${loopDef.name}: dry-run inspects current squad only; does not click FSU fill or save`);
-      } else {
-        fillResult = await fillSbcSquad(loopDef.name, {
-          requireSubmitReady: false,
-          specialRequirementAdd: loopDef.specialRequirementAdd,
-        });
-        const squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
-        inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount });
-        logSbcSquadInspection(loopDef, inspection);
-        if (!fillResult.submitReady) {
-          log(`${loopDef.name}: submit not ready after FSU fill (${fillResult.filled}/${expectedPlayerCount || '?'} slots filled); likely SBC requirements are still unmet or FSU completion picked an invalid squad`);
-        }
       }
+      if (!configuredFill.ok) {
+        const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(loopDef);
+        if (configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit) {
+          const nextAttempt = autoFodderAttempts + 1;
+          const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit);
+          if (recovery.ok) {
+            autoFodderAttempts = nextAttempt;
+            log(`${loopDef.name}: ${getAutoFodderUpgradeDef(loopDef).name} opened successfully; retrying optimized rating fill`);
+            continue;
+          }
+          log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || 'unknown reason'}`);
+        } else {
+          log(`${loopDef.name}: stopping because ${configuredFill.reason || 'configured SBC fill failed'}`);
+        }
+        break;
+      }
+      let fillResult = configuredFill.fillResult;
+      let inspection = configuredFill.inspection;
       let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
 
-      const totwInjection = await injectRequiredTotwIfNeeded(loopDef, opened, fillResult, inspection);
+      const ratingSbcFill = shouldUseRatingSbcFill(loopDef);
+      const totwInjection = ratingSbcFill
+        ? { fillResult, inspection, planned: false, injected: false }
+        : await injectRequiredTotwIfNeeded(loopDef, opened, fillResult, inspection);
       fillResult = totwInjection.fillResult;
       inspection = totwInjection.inspection;
       squad = fillResult.squad || squad;
 
-      const protectedRepair = (!loopDef.dryRun || !totwInjection.planned)
+      const protectedRepair = !ratingSbcFill && (!loopDef.dryRun || !totwInjection.planned)
         ? await repairProtectedSquadItemsIfNeeded(loopDef, opened, fillResult, inspection)
         : { fillResult, inspection, planned: false, repaired: false };
       fillResult = protectedRepair.fillResult;
       inspection = protectedRepair.inspection;
       squad = fillResult.squad || squad;
 
-      const submitReadyRepair = (!loopDef.dryRun || (!totwInjection.planned && !protectedRepair.planned))
+      const submitReadyRepair = !ratingSbcFill && (!loopDef.dryRun || (!totwInjection.planned && !protectedRepair.planned))
         ? await repairSubmitReadinessIfNeeded(loopDef, opened, fillResult, inspection)
         : { fillResult, inspection, planned: false, repaired: false };
       fillResult = submitReadyRepair.fillResult;
@@ -6328,6 +7194,13 @@ function updateLoopControls() {
 
       if (!fillResult.submitReady) fail(`${loopDef.name}: submit is not ready after protection inspection`);
       assertSbcSquadSafe(loopDef, inspection);
+      if (shouldUseRatingSbcFill(loopDef)) {
+        const finalModelValidation = validateRatingSbcModelAgainstItems(configuredFill.model, inspection.items, opened.challenge);
+        logRatingSbcValidation(loopDef, 'final rating squad', finalModelValidation, configuredFill.model);
+        if (!finalModelValidation.ok) {
+          fail(`${loopDef.name}: final rating squad failed dynamic requirement validation: ${finalModelValidation.errors.join(', ')}`);
+        }
+      }
       const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
       markSbcItemsConsumed(inspection.items, loopDef.name);
       let stopAfterRewardFailure = false;
@@ -6552,10 +7425,6 @@ function updateLoopControls() {
     return isDuplicate(item) && isRareGoldPlayer(item, options);
   }
 
-  function isProvisionCraftingDuplicate(item) {
-    return isLowCommonGoldDuplicate(item) || isLowRareGoldDuplicate(item);
-  }
-
   function isLowRareGoldDuplicate(item) {
     return isRareGoldDuplicate(item, { protectHighGold: true });
   }
@@ -6611,7 +7480,6 @@ function updateLoopControls() {
     } else if (rewardPackId) {
       log(`${loopDef.name}: reward pack #${rewardPackId} left unopened`);
     }
-    await syncAfterInventorySbcSubmit(loopDef.name);
     return { submitted: true, rewardPackId };
   }
 
@@ -6699,22 +7567,106 @@ function updateLoopControls() {
     log(`${loopDef.name}: submitted ${completions} SBC(s) in this run`);
   }
 
-  function getUpgradeRequirementCount(upgradeDef) {
-    return Number(upgradeDef?.requirements?.[0]?.count || 0);
-  }
-
   function countUnassignedMatching(predicate) {
     return getUnassignedItems().filter(predicate).length;
   }
 
-  async function handleProvisionPackItems(items, loopDef) {
-    const reservedIds = new Set((items || [])
-      .filter(isProvisionCraftingDuplicate)
-      .map((item) => Number(item?.id || 0)));
-    const directClub = (items || []).filter((item) =>
-      !reservedIds.has(Number(item?.id || 0)) &&
-      !isDuplicate(item)
+  function getProvisionPreCraftPickDef(loopDef) {
+    const pickLoopId = String(loopDef.preCraftPlayerPickLoopId || '').trim();
+    if (!pickLoopId) return null;
+    const basePickDef = findLoopDefById(pickLoopId);
+    if (!basePickDef || basePickDef.strategy !== 'playerPickSbc') {
+      fail(`${loopDef.name}: pre-craft Player Pick loop not found or invalid: ${pickLoopId}`);
+    }
+    const pickDef = cloneLoopDef(basePickDef);
+    if (loopDef.disabledPiles?.length && !pickDef.disabledPiles?.length) {
+      pickDef.disabledPiles = [...loopDef.disabledPiles];
+    }
+    applyDisabledPiles(pickDef);
+    applyPickRuntimeOptions(pickDef);
+    pickDef.maxCompletions = 1;
+    return pickDef;
+  }
+
+  function getProvisionCraftingUpgrades(loopDef) {
+    const configured = Array.isArray(loopDef.craftingUpgrades) && loopDef.craftingUpgrades.length
+      ? loopDef.craftingUpgrades
+      : [loopDef.commonUpgrade, loopDef.rareUpgrade].filter(isPlainObject);
+    return configured.map((upgradeDef) => ({
+      ...upgradeDef,
+      openRewardPacks: loopDef.openRewardPacks === true || upgradeDef.openRewardPacks === true,
+    }));
+  }
+
+  function getChallengeMaterialDefs(loopDef) {
+    if (!loopDef) return [];
+    if (!Array.isArray(loopDef.challengeRequirements) || !loopDef.challengeRequirements.length) return [loopDef];
+    return loopDef.challengeRequirements.map((requirements, index) => ({
+      ...loopDef,
+      name: `${loopDef.name} challenge ${index + 1}`,
+      requirements,
+    }));
+  }
+
+  function itemMatchesLoopRequirements(item, loopDef) {
+    const requirements = loopDefWithPriorityPiles(
+      loopDef,
+      loopDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'],
+    ).requirements;
+    return requirements.some((requirement) =>
+      isSbcUsablePlayer(item, requirement) && itemMatchesSpec(item, requirement)
     );
+  }
+
+  function isDuplicateForLoopRequirements(item, loopDef) {
+    return isDuplicate(item) && itemMatchesLoopRequirements(item, loopDef);
+  }
+
+  function getProvisionMaterialDefs(loopDef) {
+    return [
+      ...getChallengeMaterialDefs(getProvisionPreCraftPickDef(loopDef)),
+      ...getProvisionCraftingUpgrades(loopDef).flatMap(getChallengeMaterialDefs),
+    ];
+  }
+
+  function provisionMaterialLabel(loopDef) {
+    return getProvisionMaterialDefs(loopDef).map((def) => def.name).join(' -> ') || 'none';
+  }
+
+  async function handleProvisionPackItems(items, loopDef) {
+    const materialDefs = getProvisionMaterialDefs(loopDef);
+    const isReservedDuplicate = (item) => materialDefs.some((def) => isDuplicateForLoopRequirements(item, def));
+    await refreshInventoryCaches(`${loopDef.name} provision response classification`, { includePacks: false, quiet: true });
+    const responseDuplicates = [];
+    for (const item of items || []) {
+      const clubDuplicate = findClubDuplicate(item);
+      if (!isDuplicate(item) && !clubDuplicate) continue;
+
+      // The pack response can arrive before EA sets duplicateId/Purchased cache state.
+      if (clubDuplicate && !Number(item?.duplicateId || 0)) item.duplicateId = clubDuplicate.id;
+      item.pile = W.ItemPile.PURCHASED;
+      item.injuryType = W.PlayerInjury?.NONE ?? 0;
+      responseDuplicates.push(item);
+    }
+    const responseDuplicateIds = new Set(responseDuplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
+    const responseReservedIds = new Set(responseDuplicates
+      .filter(isReservedDuplicate)
+      .map((item) => Number(item?.id || 0))
+      .filter(Boolean));
+    const directClub = (items || []).filter((item) => !responseDuplicateIds.has(Number(item?.id || 0)));
+
+    const responseDuplicateById = new Map(responseDuplicates
+      .map((item) => [Number(item?.id || 0), item])
+      .filter(([id]) => id));
+    for (const item of getUnassignedItems()) {
+      const responseItem = responseDuplicateById.get(Number(item?.id || 0));
+      if (!responseItem) continue;
+      const clubDuplicate = findClubDuplicate(item) || findClubDuplicate(responseItem);
+      const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
+      if (duplicateId && !Number(item?.duplicateId || 0)) item.duplicateId = duplicateId;
+      item.pile = W.ItemPile.PURCHASED;
+      item.injuryType = W.PlayerInjury?.NONE ?? 0;
+    }
 
     if (directClub.length) {
       log(`${loopDef.name}: moving ${directClub.length} non-duplicate provision item(s) to club`);
@@ -6722,17 +7674,31 @@ function updateLoopControls() {
     }
 
     await clearUnassigned(`${loopDef.name} provision pack handling`, {
-      reserveItem: isProvisionCraftingDuplicate,
+      reserveItem: (item) =>
+        responseReservedIds.has(Number(item?.id || 0)) ||
+        isReservedDuplicate(item),
     });
 
     await refreshUnassigned();
-    const reservedItems = getUnassignedItems().filter(isProvisionCraftingDuplicate);
-    const common = reservedItems.filter(isLowCommonGoldDuplicate).length;
-    const rare = reservedItems.filter(isLowRareGoldDuplicate).length;
-    log(`${loopDef.name}: reserved common duplicates:${common}, rare duplicates:${rare}`);
+    for (const item of getUnassignedItems()) {
+      const responseItem = responseDuplicateById.get(Number(item?.id || 0));
+      if (!responseItem) continue;
+      const clubDuplicate = findClubDuplicate(item) || findClubDuplicate(responseItem);
+      const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
+      if (duplicateId && !Number(item?.duplicateId || 0)) item.duplicateId = duplicateId;
+      item.pile = W.ItemPile.PURCHASED;
+      item.injuryType = W.PlayerInjury?.NONE ?? 0;
+    }
+    const reservedItems = getUnassignedItems().filter((item) =>
+      responseReservedIds.has(Number(item?.id || 0)) ||
+      isReservedDuplicate(item)
+    );
+    const stageCounts = materialDefs.map((def) =>
+      `${def.name}:${reservedItems.filter((item) => isDuplicateForLoopRequirements(item, def)).length}`
+    ).join(', ');
+    log(`${loopDef.name}: classified ${responseDuplicates.length} provision duplicate(s); reserved by configured stage: ${stageCounts || 'none'}`);
     return {
-      common,
-      rare,
+      reservedCount: reservedItems.length,
       reservedItemIds: reservedItems.map((item) => Number(item?.id || 0)).filter(Boolean),
       reservedDefinitionIds: reservedItems.map((item) => Number(item?.definitionId || 0)).filter(Boolean),
     };
@@ -6783,20 +7749,36 @@ function updateLoopControls() {
 
   async function submitReservedDuplicateUpgrade(loopDef, upgradeDef, duplicatePredicate, label, options = {}) {
     let completions = 0;
-    const countNeeded = getUpgradeRequirementCount(upgradeDef);
     let forcedAttempts = Math.max(0, Number(options.forceAttempts || 0));
+    const broadDuplicatePredicate = options.dynamicPredicate === false
+      ? duplicatePredicate
+      : (item) => getChallengeMaterialDefs(upgradeDef)
+        .some((challengeDef) => isDuplicateForLoopRequirements(item, challengeDef));
 
-    while (countNeeded > 0) {
+    while (true) {
       stopPoint();
       await refreshInventoryCaches(`${loopDef.name} ${label} pre-selection`, { includePacks: false, quiet: true });
-      const duplicateCount = countUnassignedMatching(duplicatePredicate);
-      const fallbackPiles = upgradeDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'];
+      const broadDuplicateCount = countUnassignedMatching(broadDuplicatePredicate);
+      if (!broadDuplicateCount && forcedAttempts <= 0) break;
+      const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name || label);
+      const challenges = await requestSbcChallenges(set, upgradeDef.name || label, { attempts: 3, allowEmpty: true });
+      const challengeIndex = challenges.findIndex((challenge) => !isCompletedChallenge(challenge));
+      if (challengeIndex < 0) break;
+      const challengeDef = loopChallengeDef(upgradeDef, challengeIndex + 1);
+      const countNeeded = sumRequirementPlayerCount(challengeDef);
+      if (countNeeded <= 0) break;
+      const activeDuplicatePredicate = options.dynamicPredicate === false
+        ? duplicatePredicate
+        : (item) => isDuplicateForLoopRequirements(item, challengeDef);
+      const duplicateCount = countUnassignedMatching(activeDuplicatePredicate);
+      const fallbackPiles = challengeDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'];
       if (!duplicateCount && forcedAttempts <= 0) break;
-      const piles = duplicateCount >= countNeeded && fallbackPiles.includes('unassigned')
-        ? ['unassigned']
-        : fallbackPiles;
+      const duplicateOnlySelection = fallbackPiles.includes('unassigned')
+        ? selectLoopInventoryPlayers(challengeDef, ['unassigned'])
+        : { ok: false };
+      const piles = duplicateOnlySelection.ok ? ['unassigned'] : fallbackPiles;
       if (forcedAttempts > 0) forcedAttempts--;
-      const selection = selectLoopInventoryPlayers(upgradeDef, piles);
+      const selection = selectLoopInventoryPlayers(challengeDef, piles);
       log(`${loopDef.name}: ${label} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
 
       if (!selection.ok) {
@@ -6806,7 +7788,7 @@ function updateLoopControls() {
         break;
       }
 
-      const result = await submitInventorySelection(upgradeDef, selection);
+      const result = await submitInventorySelection(challengeDef, selection);
       if (!result) break;
       completions++;
       await sleep(CFG.pauseMs);
@@ -6816,13 +7798,51 @@ function updateLoopControls() {
     return completions;
   }
 
-  async function runProvisionPackDualCrafting(loopDef) {
+  async function runProvisionPackCrafting(loopDef) {
     await waitAppReady();
     const rounds = Math.max(1, Math.min(50, Number(loopDef.rounds || loopDef.maxRounds || 1) || 1));
+    const craftingUpgrades = getProvisionCraftingUpgrades(loopDef);
+    const materialDefs = getProvisionMaterialDefs(loopDef);
+    const isReservedDuplicate = (item) => materialDefs.some((def) => isDuplicateForLoopRequirements(item, def));
+    const completionCounts = craftingUpgrades.map(() => 0);
     let packsOpened = 0;
-    let commonCompletions = 0;
-    let rareCompletions = 0;
     const preCraftPickResults = [];
+
+    const runCraftingStages = async (prefix = '') => {
+      for (let index = 0; index < craftingUpgrades.length; index++) {
+        const upgradeDef = craftingUpgrades[index];
+        const label = `${prefix}${upgradeDef.name}`;
+        const completions = await submitReservedDuplicateUpgrade(
+          loopDef,
+          upgradeDef,
+          (item) => isDuplicateForLoopRequirements(item, upgradeDef),
+          label,
+        );
+        completionCounts[index] += completions;
+      }
+    };
+
+    await unwindSbcSquadControllers(`${loopDef.name} resume`);
+    const resumedUnassigned = await showUnassignedIfAny(`${loopDef.name} resume sync`);
+    if (resumedUnassigned.length) {
+      await refreshInventoryCaches(`${loopDef.name} resume duplicate validation`, { includePacks: false, quiet: true });
+      for (const item of resumedUnassigned) {
+        if (!isReservedDuplicate(item) || findClubDuplicate(item)) continue;
+        item.duplicateId = 0;
+        if (item._duplicateId !== undefined) item._duplicateId = 0;
+      }
+      const resumedReserved = resumedUnassigned.filter((item) => findClubDuplicate(item) && isReservedDuplicate(item));
+      const resumedHandling = {
+        reservedCount: resumedReserved.length,
+        reservedItemIds: resumedReserved.map((item) => Number(item?.id || 0)).filter(Boolean),
+        reservedDefinitionIds: resumedReserved.map((item) => Number(item?.definitionId || 0)).filter(Boolean),
+      };
+      log(`${loopDef.name}: resume found ${resumedUnassigned.length} unassigned item(s), ${resumedReserved.length} duplicate(s) matching configured stages (${provisionMaterialLabel(loopDef)})`);
+      const resumedPickResults = await runProvisionPreCraftPlayerPick(loopDef, resumedHandling);
+      preCraftPickResults.push(...resumedPickResults);
+      await runCraftingStages('resumed ');
+      await clearUnassigned(`${loopDef.name} resume cleanup`);
+    }
 
     for (let round = 1; round <= rounds; round++) {
       stopPoint();
@@ -6830,12 +7850,16 @@ function updateLoopControls() {
 
       const pack = await findSourcePack(loopDef);
       if (!pack) {
-        log(`${loopDef.name}: Provision Pack not found; stopping at round ${round}/${rounds}`);
+        log(`${loopDef.name}: configured source pack not found; stopping at round ${round}/${rounds}`);
         break;
       }
 
       log(`${loopDef.name}: round ${round}/${rounds} opening ${packName(pack)} (#${pack.id})`);
-      const items = await openPack(pack, `${loopDef.name} round ${round}`, { allowGone: true });
+      const items = await openPack(pack, `${loopDef.name} round ${round}`, {
+        allowGone: true,
+        retryCodes: ['471', '500'],
+        resolveRetryPack: () => findSourcePack(loopDef),
+      });
       if (!items) {
         await sleep(CFG.pauseMs);
         continue;
@@ -6846,18 +7870,7 @@ function updateLoopControls() {
       const roundPickResults = await runProvisionPreCraftPlayerPick(loopDef, provisionHandling);
       preCraftPickResults.push(...roundPickResults);
 
-      commonCompletions += await submitReservedDuplicateUpgrade(
-        loopDef,
-        loopDef.commonUpgrade,
-        isLowCommonGoldDuplicate,
-        'FOF low common gold',
-      );
-      rareCompletions += await submitReservedDuplicateUpgrade(
-        loopDef,
-        loopDef.rareUpgrade,
-        isLowRareGoldDuplicate,
-        '2x84+ low rare gold',
-      );
+      await runCraftingStages();
 
       await clearUnassigned(`${loopDef.name} round ${round} cleanup`);
       await sleep(CFG.pauseMs);
@@ -6874,7 +7887,10 @@ function updateLoopControls() {
       updateRecapButton();
       await showPickRecapModal(pickDef, preCraftPickResults);
     }
-    log(`${loopDef.name}: opened ${packsOpened} Provision Pack(s), submitted common:${commonCompletions}, rare:${rareCompletions}`);
+    const completionSummary = craftingUpgrades
+      .map((upgradeDef, index) => `${upgradeDef.name}:${completionCounts[index] || 0}`)
+      .join(', ');
+    log(`${loopDef.name}: opened ${packsOpened} source pack(s), submitted ${completionSummary || 'no crafting stages'}`);
   }
 
   async function runRarePackTo84Upgrade(loopDef) {
@@ -7250,13 +8266,24 @@ function updateLoopControls() {
     assertPlayerPickFodderProtection(loopDef, savedPlayers);
   }
 
+  function loopChallengeDef(loopDef, challengeNo) {
+    const challengeRequirements = loopDef.challengeRequirements?.[Math.max(0, Number(challengeNo || 1) - 1)];
+    if (!Array.isArray(challengeRequirements) || !challengeRequirements.length) return loopDef;
+    return { ...loopDef, requirements: challengeRequirements };
+  }
+
+  function playerPickChallengeDef(loopDef, challengeNo) {
+    return loopChallengeDef(loopDef, challengeNo);
+  }
+
   async function submitPlayerPickChallenge(loopDef, challengeNo, challengeTotal) {
+    const challengeDef = playerPickChallengeDef(loopDef, challengeNo);
     await refreshInventoryCaches(`${loopDef.name} challenge ${challengeNo}/${challengeTotal} pre-selection`, { includePacks: false, quiet: true });
-    const selection = selectLoopInventoryPlayers(loopDef, loopDef.priorityPiles);
-    log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} selected ${selection.selected.length}/${sumRequirementPlayerCount(loopDef)} player(s) (${formatSelectionStats(selection.stats)})`);
+    const selection = selectLoopInventoryPlayers(challengeDef, challengeDef.priorityPiles);
+    log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} selected ${selection.selected.length}/${sumRequirementPlayerCount(challengeDef)} player(s) (${formatSelectionStats(selection.stats)})`);
     if (!selection.ok) {
       log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} missing ${selection.missing.count} ${selection.missing.rarity || selection.missing.tier || 'player'}(s); stopping`);
-      logSelectionDiagnostics(`${loopDef.name} challenge ${challengeNo}/${challengeTotal}`, selection, loopDef.priorityPiles);
+      logSelectionDiagnostics(`${loopDef.name} challenge ${challengeNo}/${challengeTotal}`, selection, challengeDef.priorityPiles);
       return false;
     }
 
@@ -7266,13 +8293,13 @@ function updateLoopControls() {
       log(`${loopDef.name}: no available SBC challenge remains`);
       return false;
     }
-    const prepared = await prepareInventorySelection(loopDef, selection);
+    const prepared = await prepareInventorySelection(challengeDef, selection);
     if (!prepared.ok) return false;
-    assertPlayerPickFodderProtection(loopDef, prepared.selected);
+    assertPlayerPickFodderProtection(challengeDef, prepared.selected);
     await saveChallengeSquad(opened.challenge, prepared.selected, `${loopDef.name} challenge ${challengeNo}/${challengeTotal}`);
     // saveChallenge/loadChallengeData can resolve duplicate signals to a different live item.
     // Validate the actual saved squad so no protected 82+ normal gold card reaches submit.
-    assertSavedPlayerPickFodderProtection(loopDef, opened.challenge?.squad || ctrl()?._squad);
+    assertSavedPlayerPickFodderProtection(challengeDef, opened.challenge?.squad || ctrl()?._squad);
     if (!findSubmitButton()) fail(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} squad is not submit ready`);
     await submitSbcAndGetAwardPackId(opened.set);
     markSbcItemsConsumed(prepared.selected, `${loopDef.name} challenge ${challengeNo}/${challengeTotal}`);
@@ -7280,43 +8307,25 @@ function updateLoopControls() {
   }
 
   async function runProvisionPreCraftPlayerPick(loopDef, provisionHandling = {}) {
-    const pickLoopId = String(loopDef.preCraftPlayerPickLoopId || '').trim();
-    if (!pickLoopId) return [];
-
-    const commonDuplicateCount = Math.max(0, Number(provisionHandling.common || 0) || 0);
-    if (!commonDuplicateCount) {
-      log(`${loopDef.name}: no unassigned common-gold duplicate after the Provision Pack; skipping the pre-craft Player Pick and continuing original crafting flow`);
-      return [];
-    }
-
-    const basePickDef = findLoopDefById(pickLoopId);
-    if (!basePickDef || basePickDef.strategy !== 'playerPickSbc') {
-      fail(`${loopDef.name}: pre-craft Player Pick loop not found or invalid: ${pickLoopId}`);
-    }
-    const pickDef = cloneLoopDef(basePickDef);
-    if (loopDef.disabledPiles?.length && !pickDef.disabledPiles?.length) {
-      pickDef.disabledPiles = [...loopDef.disabledPiles];
-    }
-    applyDisabledPiles(pickDef);
-    applyPickRuntimeOptions(pickDef);
-    pickDef.maxCompletions = 1;
-    const reservedIds = new Set((provisionHandling.reservedItemIds || []).map(Number).filter(Boolean));
-    const reservedDefinitionIds = new Set((provisionHandling.reservedDefinitionIds || []).map(Number).filter(Boolean));
-    pickDef.protectedItemIds = uniqueNumberList([
-      ...(pickDef.protectedItemIds || []),
-      ...reservedIds,
-    ]);
-    pickDef.protectedDefinitionIds = uniqueNumberList([
-      ...(pickDef.protectedDefinitionIds || []),
-      ...reservedDefinitionIds,
-    ]);
-    const cleanupOptions = reservedIds.size
-      ? { reserveItem: (item) => reservedIds.has(Number(item?.id || 0)) }
-      : {};
-    if (reservedIds.size || reservedDefinitionIds.size) {
-      log(`${loopDef.name}: protecting ${reservedIds.size} provision duplicate item(s) across ${reservedDefinitionIds.size} definition(s) from the pre-craft Pick`);
-    }
-    log(`${loopDef.name}: ${commonDuplicateCount} unassigned common-gold duplicate(s) triggered the pre-craft ${pickDef.name} check`);
+    const pickDef = getProvisionPreCraftPickDef(loopDef);
+    if (!pickDef) return [];
+    const materialDefs = [
+      ...getChallengeMaterialDefs(pickDef),
+      ...getProvisionCraftingUpgrades(loopDef).flatMap(getChallengeMaterialDefs),
+    ];
+    const isReservedDuplicate = (item) => materialDefs.some((def) => isDuplicateForLoopRequirements(item, def));
+    const cleanupOptions = {
+      reserveItem: (item) => {
+        if (!isReservedDuplicate(item)) return false;
+        const clubDuplicate = findClubDuplicate(item);
+        if (!clubDuplicate || state.consumedItemIds.has(Number(clubDuplicate?.id || 0))) {
+          item.duplicateId = 0;
+          if (item._duplicateId !== undefined) item._duplicateId = 0;
+          return false;
+        }
+        return true;
+      },
+    };
 
     const pendingPick = await findUnassignedPlayerPick(pickDef, 1, { quietMissing: true, failOnUnexpected: true });
     if (pendingPick) {
@@ -7341,17 +8350,60 @@ function updateLoopControls() {
     }
 
     const challengeTotal = challenges.length || pickDef.challengesPerPick || incompleteChallenges.length;
-    const incompleteChallengeNumbers = incompleteChallenges.map((challenge) => {
+    const incompleteChallengeEntries = incompleteChallenges.map((challenge) => {
       const index = challenges.findIndex((candidate) => Number(candidate?.id || 0) === Number(challenge?.id || 0));
-      return index >= 0 ? index + 1 : '?';
+      return { challenge, challengeNo: index >= 0 ? index + 1 : null };
     });
-    log(`${loopDef.name}: ${pickDef.name} has ${incompleteChallenges.length}/${challengeTotal} incomplete challenge(s) (${incompleteChallengeNumbers.join(', ')}); completing it before crafting upgrades`);
-    for (let index = 0; index < incompleteChallenges.length; index++) {
-      const challengeNo = incompleteChallengeNumbers[index] === '?' ? index + 1 : incompleteChallengeNumbers[index];
+    const firstEntry = incompleteChallengeEntries[0];
+    const firstChallengeNo = firstEntry.challengeNo || 1;
+    const firstChallengeDef = playerPickChallengeDef(pickDef, firstChallengeNo);
+    const reservedIds = new Set((provisionHandling.reservedItemIds || []).map(Number).filter(Boolean));
+    const matchingDuplicates = getUnassignedItems().filter((item) =>
+      (!reservedIds.size || reservedIds.has(Number(item?.id || 0))) &&
+      isDuplicateForLoopRequirements(item, firstChallengeDef)
+    );
+    if (!matchingDuplicates.length) {
+      log(`${loopDef.name}: no unassigned duplicate matches ${pickDef.name} challenge ${firstChallengeNo} requirements; skipping the pre-craft Pick and continuing configured crafting stages`);
+      return [];
+    }
+
+    const duplicateOnlySelection = selectLoopInventoryPlayers(firstChallengeDef, ['unassigned']);
+    const challengesToSubmit = incompleteChallengeEntries.length > 1 && !duplicateOnlySelection.ok
+      ? incompleteChallengeEntries.slice(0, 1)
+      : incompleteChallengeEntries;
+    const requirementCount = sumRequirementPlayerCount(firstChallengeDef);
+    log(`${loopDef.name}: ${matchingDuplicates.length} matching unassigned duplicate(s) triggered ${pickDef.name}; challenge ${firstChallengeNo} requires ${requirementCount} configured player(s), duplicate-only complete:${duplicateOnlySelection.ok ? 'yes' : 'no'}, incomplete challenges:${incompleteChallengeEntries.length}/${challengeTotal}`);
+    if (challengesToSubmit.length < incompleteChallengeEntries.length) {
+      log(`${loopDef.name}: current duplicates do not independently satisfy challenge ${firstChallengeNo}; completing only this challenge with duplicate -> storage -> transfer -> club and leaving later challenge(s) for another source pack`);
+    } else if (incompleteChallengeEntries.length > 1) {
+      log(`${loopDef.name}: current duplicates independently satisfy challenge ${firstChallengeNo}; completing all remaining challenges in order, with shortages filled by storage -> transfer -> club`);
+    }
+
+    let submittedChallenges = 0;
+    for (let index = 0; index < challengesToSubmit.length; index++) {
+      const challengeNo = challengesToSubmit[index].challengeNo || index + 1;
       if (!(await submitPlayerPickChallenge(pickDef, challengeNo, challenges.length || pickDef.challengesPerPick || incompleteChallenges.length))) {
-        fail(`${loopDef.name}: could not complete ${pickDef.name} before crafting upgrades`);
+        log(`${loopDef.name}: could not complete ${pickDef.name} challenge ${challengeNo}; leaving it pending and continuing original crafting flow`);
+        break;
       }
+      submittedChallenges++;
       await sleep(CFG.pauseMs);
+    }
+
+    if (submittedChallenges < incompleteChallenges.length) {
+      const remainingChallenges = incompleteChallenges.length - submittedChallenges;
+      await refreshInventoryCaches(`${loopDef.name} partial ${pickDef.name} duplicate sync`, { includePacks: false, quiet: true });
+      for (const item of getUnassignedItems()) {
+        const matchesPickRequirement = [pickDef.requirements, ...(pickDef.challengeRequirements || [])]
+          .some((requirements) => itemMatchesLoopRequirements(item, { ...pickDef, requirements }));
+        if (!matchesPickRequirement) continue;
+        const clubDuplicate = findClubDuplicate(item);
+        if (clubDuplicate && !state.consumedItemIds.has(Number(clubDuplicate?.id || 0))) continue;
+        item.duplicateId = 0;
+        if (item._duplicateId !== undefined) item._duplicateId = 0;
+      }
+      log(`${loopDef.name}: ${pickDef.name} remains partial with ${remainingChallenges} challenge(s) pending; a later source pack with a matching duplicate can resume it`);
+      return [];
     }
 
     const pickItem = await findUnassignedPlayerPick(pickDef, 10, { failOnUnexpected: true });
@@ -7366,7 +8418,7 @@ function updateLoopControls() {
   async function runPlayerPickSbc(loopDef) {
     await waitAppReady();
     const maxPicks = Math.max(1, Math.min(50, Number(loopDef.maxCompletions || 1) || 1));
-    const challengesPerPick = Math.max(1, Number(loopDef.challengesPerPick || 1) || 1);
+    const challengesPerPick = getPlayerPickChallengeCount(loopDef);
     let picksCompleted = 0;
     const pickResults = [];
 
@@ -7385,8 +8437,13 @@ function updateLoopControls() {
     while (picksCompleted < maxPicks) {
       stopPoint();
       await clearUnassigned(`${loopDef.name} pick ${picksCompleted + 1} pre-submit cleanup`);
+      const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+      const challenges = await requestSbcChallenges(set, loopDef.name, { attempts: 3 });
+      const incompleteEntries = challenges
+        .map((challenge, index) => ({ challenge, challengeNo: index + 1 }))
+        .filter(({ challenge }) => !isCompletedChallenge(challenge));
       let submittedAllChallenges = true;
-      for (let challengeNo = 1; challengeNo <= challengesPerPick; challengeNo++) {
+      for (const { challengeNo } of incompleteEntries) {
         if (!(await submitPlayerPickChallenge(loopDef, challengeNo, challengesPerPick))) {
           submittedAllChallenges = false;
           break;
@@ -7630,10 +8687,14 @@ function triggerRecapFireworks(dialog, specialCount) {
     await waitAppReady();
     await refreshInventoryCaches(`${loopDef.name} dry-run`, { includePacks: false, quiet: true });
     const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
-    const selection = selectLoopInventoryPlayers(loopDef, loopDef.priorityPiles);
     log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'})`);
-    log(`${loopDef.name}: dry-run requires ${loopDef.challengesPerPick || 1} challenge(s) per Pick and selects ${loopDef.pickCount || 1} player(s) from each reward`);
-    logDryRunSelection(`${loopDef.name} strict card ratio`, selection);
+    const challengeCount = getPlayerPickChallengeCount(loopDef);
+    log(`${loopDef.name}: dry-run requires ${challengeCount} challenge(s) per Pick and selects ${loopDef.pickCount || 1} player(s) from each reward`);
+    for (let challengeNo = 1; challengeNo <= challengeCount; challengeNo++) {
+      const challengeDef = playerPickChallengeDef(loopDef, challengeNo);
+      const selection = selectLoopInventoryPlayers(challengeDef, challengeDef.priorityPiles);
+      logDryRunSelection(`${loopDef.name} challenge ${challengeNo} strict card ratio`, selection);
+    }
     const pendingPick = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true, failOnUnexpected: true });
     if (pendingPick) log(`${loopDef.name}: dry-run found pending ${pickItemName(pendingPick)}; live run would resolve it before submitting another SBC`);
     log(`${loopDef.name}: dry run stops before submitting SBCs, redeeming Picks, or moving items`);
@@ -7694,8 +8755,8 @@ function triggerRecapFireworks(dialog, specialCount) {
       return;
     }
 
-    if (loopDef.strategy === 'provisionPackDualCrafting') {
-      await runProvisionPackDualCrafting(loopDef);
+    if (loopDef.strategy === 'provisionPackCrafting' || loopDef.strategy === 'provisionPackDualCrafting') {
+      await runProvisionPackCrafting(loopDef);
       await showUnassignedIfAny(`${loopDef.name} end`);
       return;
     }
@@ -7736,7 +8797,7 @@ if (loopDef.strategy === 'playerPickSbc') {
     }
     if (loopDef.strategy === 'rarePackTo84Upgrade') return Number(loopDef.maxPacks || 100);
     if (loopDef.strategy === 'playerPickSbc') {
-      return Number(loopDef.maxCompletions || 1) * Number(loopDef.challengesPerPick || 1);
+      return Number(loopDef.maxCompletions || 1) * getPlayerPickChallengeCount(loopDef);
     }
     if (loopDef.strategy === 'dailyRoutine') {
       return summarizeRoutineStepLimits(getRoutineStepLoopDefs(loopDef)).max;
@@ -7756,7 +8817,7 @@ if (loopDef.strategy === 'playerPickSbc') {
       loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
       loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || isOpenRewardPacksEnabled();
       applyPickRuntimeOptions(loopDef);
-      if (loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
+      if (loopDef.strategy === 'provisionPackCrafting' || loopDef.strategy === 'provisionPackDualCrafting') loopDef.rounds = rounds;
       if (loopDef.useRoundsAsCompletions === true) loopDef.maxCompletions = rounds;
       logFsuSettingsForRun();
     } catch (e) {
@@ -7807,6 +8868,7 @@ if (loopDef.strategy === 'playerPickSbc') {
     const pickAutoBelow90 = document.querySelector('#bronze-loop-pick-auto-below-90');
     const pickHighGoldThreshold = document.querySelector('#bronze-loop-pick-high-gold-threshold');
     const pickAutoThreshold = document.querySelector('#bronze-loop-pick-auto-threshold');
+    const showMvp = document.querySelector('#bronze-loop-show-mvp');
     const rounds = document.querySelector('#bronze-loop-rounds');
     const json = document.querySelector('#bronze-loop-json');
     if (start) start.disabled = state.running;
@@ -7822,6 +8884,7 @@ if (loopDef.strategy === 'playerPickSbc') {
     if (pickAutoBelow90) pickAutoBelow90.disabled = state.running;
     if (pickHighGoldThreshold) pickHighGoldThreshold.disabled = state.running;
     if (pickAutoThreshold) pickAutoThreshold.disabled = state.running;
+    if (showMvp) showMvp.disabled = state.running;
     if (rounds) rounds.disabled = state.running;
     if (json) json.disabled = state.running;
     updateLoopControls();
@@ -8212,6 +9275,11 @@ if (loopDef.strategy === 'playerPickSbc') {
             </label>
           </div>
           <div class="row">
+            <label title="Show MVP and one-run validation loops in the main selector">
+              <input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops
+            </label>
+          </div>
+          <div class="row">
             <label title="Player Pick SBCs will not submit normal gold players at or above this rating">
               <input id="bronze-loop-pick-protect-high-gold" type="checkbox"> Protect Pick fodder >=
               <input id="bronze-loop-pick-high-gold-threshold" type="number" min="2" max="99" value="82">
@@ -8254,6 +9322,9 @@ if (loopDef.strategy === 'playerPickSbc') {
       <div class="bronze-loop-resize" id="bronze-loop-resize-sw"></div>
     `;
     document.body.appendChild(panel);
+    const savedLoopUiOptions = loadLoopUiOptions();
+    state.showMvpLoops = savedLoopUiOptions.showMvpLoops;
+    document.querySelector('#bronze-loop-show-mvp').checked = state.showMvpLoops;
     const savedPickOptions = loadPickRuntimeOptions();
     document.querySelector('#bronze-loop-pick-protect-high-gold').checked = savedPickOptions.protectHighGold;
     document.querySelector('#bronze-loop-pick-auto-below-90').checked = savedPickOptions.autoSelectBelow90;
@@ -8322,6 +9393,7 @@ if (loopDef.strategy === 'playerPickSbc') {
     document.querySelector('#bronze-loop-pick-auto-below-90').addEventListener('change', savePickRuntimeOptions);
     document.querySelector('#bronze-loop-pick-high-gold-threshold').addEventListener('change', savePickRuntimeOptions);
     document.querySelector('#bronze-loop-pick-auto-threshold').addEventListener('change', savePickRuntimeOptions);
+    document.querySelector('#bronze-loop-show-mvp').addEventListener('change', saveLoopUiOptions);
     document.querySelector('#bronze-loop-start').addEventListener('click', startLoop);
     document.querySelector('#bronze-loop-recap-reopen').addEventListener('click', reopenLastPickRecap);
     updateRecapButton();
