@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.26
+// @version      0.4.27
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -3865,6 +3865,9 @@ function updateLoopControls() {
     const requireSubmitReady = options.requireSubmitReady !== false;
     const squad = await waitFor(() => ctrl()?._squad, 15000, 'SBC squad object');
     patchFsuLengthSafePlayerMetadata(`${label} before FSU fill`);
+    // FSU can occasionally fail to fill after we clear the squad. Keep a local
+    // snapshot so the existing safe-repair flow still has a squad to work with.
+    const existingItems = getSquadItems(squad);
     try { squad.removeAllItems?.(); } catch { }
     await sleep(500);
 
@@ -3903,6 +3906,19 @@ function updateLoopControls() {
       log('Retrying FSU one-click fill after no progress');
       await waitAfterSbcFillAction(`${label} FSU one-click retry`, squad);
       await sleep(CFG.pauseMs);
+    }
+
+    if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && existingItems.length) {
+      try {
+        squad.setPlayers?.(existingItems, true);
+        await sleep(350);
+        const restored = getFilledSquadSlots(squad);
+        if (restored) {
+          log(`${label}: FSU made no fill progress; restored ${restored} existing squad item(s) for safe repair`);
+        }
+      } catch (error) {
+        log(`${label}: could not restore existing squad after FSU made no fill progress: ${error?.message || error}`);
+      }
     }
 
     const filled = getFilledSquadSlots(squad);
