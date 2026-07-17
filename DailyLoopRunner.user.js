@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.4.37
+// @version      0.4.43
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -477,7 +477,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.4.37',
+    version: '0.4.43',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -788,6 +788,24 @@ const state = {
           const targetRating = Number(loopDef.ratingSbcFill.targetRating);
           if (!Number.isFinite(targetRating) || targetRating < 1 || targetRating > 99) {
             errors.push('ratingSbcFill.targetRating must be a number between 1 and 99');
+          }
+        }
+        if (loopDef.ratingSbcFill.maxSearchNodes !== undefined) {
+          const maxSearchNodes = Number(loopDef.ratingSbcFill.maxSearchNodes);
+          if (!Number.isInteger(maxSearchNodes) || maxSearchNodes < 10000 || maxSearchNodes > 2000000) {
+            errors.push('ratingSbcFill.maxSearchNodes must be an integer between 10000 and 2000000');
+          }
+        }
+        if (loopDef.ratingSbcFill.maxSearchMs !== undefined) {
+          const maxSearchMs = Number(loopDef.ratingSbcFill.maxSearchMs);
+          if (!Number.isInteger(maxSearchMs) || maxSearchMs < 1000 || maxSearchMs > 60000) {
+            errors.push('ratingSbcFill.maxSearchMs must be an integer between 1000 and 60000');
+          }
+        }
+        if (loopDef.ratingSbcFill.yieldEveryNodes !== undefined) {
+          const yieldEveryNodes = Number(loopDef.ratingSbcFill.yieldEveryNodes);
+          if (!Number.isInteger(yieldEveryNodes) || yieldEveryNodes < 50 || yieldEveryNodes > 5000) {
+            errors.push('ratingSbcFill.yieldEveryNodes must be an integer between 50 and 5000');
           }
         }
       }
@@ -3128,6 +3146,88 @@ function updateLoopControls() {
     return status === 'COMPLETED' || status === 'COMPLETE' || challenge?.completed === true;
   }
 
+  function getCachedSbcChallenges(set) {
+    const sources = [];
+    sources.push(...collectionValues(set?.challenges));
+    sources.push(...collectionValues(set?._challenges));
+
+    const byId = new Map();
+    for (const challenge of sources) {
+      const id = Number(challenge?.id || 0);
+      if (!id || byId.has(id)) continue;
+      byId.set(id, challenge);
+    }
+    return [...byId.values()];
+  }
+
+  function hasRatingSbcChallengeRequirements(challenge) {
+    return Array.isArray(challenge?.eligibilityRequirements) && challenge.eligibilityRequirements.length > 0;
+  }
+
+  async function requestRatingSbcChallenges(set, label = set?.name || 'rating SBC') {
+    const cached = getCachedSbcChallenges(set);
+    const cachedAvailable = cached.find((challenge) =>
+      !isCompletedChallenge(challenge) && hasRatingSbcChallengeRequirements(challenge)
+    );
+    if (cachedAvailable || (cached.length && isSbcSetComplete(set))) {
+      log(`${label}: using ${cached.length} cached challenge(s); bypassed requestChallengesForSet`);
+      return cached;
+    }
+
+    const dao = W.services?.SBC?.sbcDAO;
+    if (typeof dao?.getChallengesForSet !== 'function') {
+      fail(`${label}: direct SBC challenge DAO is unavailable`);
+    }
+
+    log(`${label}: loading challenges directly through sbcDAO; bypassing requestChallengesForSet`);
+    const result = await observeOnce(
+      dao.getChallengesForSet(Number(set?.id || 0)),
+      ctrl(),
+      20000,
+      `sbcDAO.getChallengesForSet ${label}`,
+    );
+    if (!result?.success || !Array.isArray(result?.response?.challenges)) {
+      const detail = serviceResultErrorText(result) || 'no challenge data returned';
+      fail(`${label}: direct SBC challenge load failed: ${detail}`);
+    }
+
+    const received = result.response.challenges;
+    log(`${label}: direct SBC challenge load returned ${received.length} challenge(s)`);
+    return received;
+  }
+
+  async function findAvailableRatingSbcChallenge(set, label = set?.name || 'rating SBC') {
+    const challenges = await requestRatingSbcChallenges(set, label);
+    return challenges.find((challenge) => !isCompletedChallenge(challenge)) || null;
+  }
+
+  async function loadRatingSbcChallenge(challenge, label = 'rating SBC') {
+    if (!challenge) return null;
+    if (challenge.squad) return challenge;
+
+    const dao = W.services?.SBC?.sbcDAO;
+    if (typeof dao?.loadChallenge !== 'function') {
+      fail(`${label}: direct SBC challenge loader is unavailable`);
+    }
+    let inProgress = false;
+    try { inProgress = challenge.isInProgress?.() === true; } catch { }
+    log(`${label}: loading challenge squad directly through sbcDAO`);
+    const result = await observeOnce(
+      dao.loadChallenge(Number(challenge.id || 0), inProgress),
+      ctrl(),
+      20000,
+      `sbcDAO.loadChallenge ${label}`,
+    );
+    const squad = result?.response?.squad;
+    if (!result?.success || !squad) {
+      const detail = serviceResultErrorText(result) || 'no squad data returned';
+      fail(`${label}: direct challenge squad load failed: ${detail}`);
+    }
+    challenge.squad = squad;
+    log(`${label}: direct challenge squad loaded`);
+    return challenge;
+  }
+
   async function requestSbcChallenges(set, label = set?.name || 'SBC', options = {}) {
     const attempts = Math.max(1, Math.min(3, Number(options.attempts || 3)));
     let lastResult = null;
@@ -3164,7 +3264,7 @@ function updateLoopControls() {
   }
 
   async function openSbcSet(set, options = {}) {
-    const challenge = await findAvailableSbcChallenge(set, set.name);
+    const challenge = options.challenge || await findAvailableSbcChallenge(set, set.name);
     if (!challenge) {
       if (options.returnNullIfComplete) return null;
       fail(`No available challenge for ${set.name}`);
@@ -3190,7 +3290,6 @@ function updateLoopControls() {
     const vc = new W.UTSBCSquadSplitViewController();
     vc.initWithSBCSet?.(set, challenge.id);
     nav.pushViewController?.(vc, true);
-    await waitLoadingEnd();
     const activeController = await waitFor(() => {
       const current = ctrl();
       if (!current || current?.constructor?.name !== 'UTSBCSquadSplitViewController') return null;
@@ -3201,6 +3300,9 @@ function updateLoopControls() {
       if (current !== vc && current !== activeController) return null;
       return current?._squad || null;
     }, 15000, `${set.name} target SBC squad object`);
+    // FSU can leave its global loading shield active after the target squad is
+    // already usable. Do not block the loop for the full generic 30s timeout.
+    await waitLoadingEnd(250, 2500);
     return { set, challenge };
   }
 
@@ -4224,7 +4326,23 @@ function updateLoopControls() {
     return [...states.values()].filter((state) => state.entries.length === count);
   }
 
-  function materializeRatingVector(entries, descendingRatings, model, piles) {
+  function buildRatingMaterializationContext(entries, model, piles) {
+    const entriesByRating = new Map();
+    for (const entry of entries) {
+      const rating = Number(entry.item?.rating || 0);
+      if (!rating) continue;
+      const group = entriesByRating.get(rating) || [];
+      group.push(entry);
+      entriesByRating.set(rating, group);
+    }
+    for (const group of entriesByRating.values()) {
+      group.sort((a, b) => a.pileRank - b.pileRank || Number(a.item?.id || 0) - Number(b.item?.id || 0));
+    }
+    return { entriesByRating, optionCache: new Map(), model, piles };
+  }
+
+  function materializeRatingVector(context, descendingRatings) {
+    const { entriesByRating, optionCache, model, piles } = context;
     const counts = new Map();
     descendingRatings.forEach((rating) => counts.set(rating, (counts.get(rating) || 0) + 1));
     let combined = new Map();
@@ -4236,10 +4354,12 @@ function updateLoopControls() {
     });
 
     for (const [rating, count] of [...counts.entries()].sort((a, b) => b[0] - a[0])) {
-      const groupEntries = entries
-        .filter((entry) => Number(entry.item?.rating || 0) === Number(rating))
-        .sort((a, b) => a.pileRank - b.pileRank || Number(a.item?.id || 0) - Number(b.item?.id || 0));
-      const options = ratingGroupSelectionOptions(groupEntries, count, model, piles);
+      const cacheKey = `${rating}:${count}`;
+      let options = optionCache.get(cacheKey);
+      if (!options) {
+        options = ratingGroupSelectionOptions(entriesByRating.get(Number(rating)) || [], count, model, piles);
+        optionCache.set(cacheKey, options);
+      }
       if (!options.length) return null;
       const next = new Map();
       for (const base of combined.values()) {
@@ -4270,10 +4390,17 @@ function updateLoopControls() {
       .sort((a, b) => comparePileSelections(a, b, piles))[0] || null;
   }
 
-  function findOptimalRatingSbcSelection(candidateEntries, model, piles, options = {}) {
+  async function findOptimalRatingSbcSelection(candidateEntries, model, piles, options = {}) {
     const requiredCount = model.requiredPlayerCount;
     if (candidateEntries.length < requiredCount) {
       return { ok: false, reason: `only ${candidateEntries.length}/${requiredCount} safe unique player definitions are available` };
+    }
+    for (let index = 0; index < model.constraints.length; index++) {
+      const constraint = model.constraints[index];
+      const available = candidateEntries.reduce((count, entry) => count + Number(entry.requirementMatches[index]), 0);
+      if (available < Number(constraint.count || 0)) {
+        return { ok: false, reason: `${constraint.label} has only ${available}/${constraint.count} safe candidate(s)`, nodes: 0 };
+      }
     }
     const ratingCounts = new Map();
     candidateEntries.forEach((entry) => {
@@ -4284,8 +4411,13 @@ function updateLoopControls() {
     const usedCounts = new Map();
     const descendingRatings = [];
     const maxNodes = Math.max(10000, Math.min(2000000, Number(options.maxSearchNodes || 500000) || 500000));
+    const maxSearchMs = Math.max(1000, Math.min(60000, Number(options.maxSearchMs || 15000) || 15000));
+    const yieldEveryNodes = Math.max(50, Math.min(5000, Number(options.yieldEveryNodes || 500) || 500));
+    const deadline = Date.now() + maxSearchMs;
+    const materializationContext = buildRatingMaterializationContext(candidateEntries, model, piles);
     let nodes = 0;
     let exhausted = false;
+    let timedOut = false;
 
     function highestAvailableCompletion(remaining, maxRating) {
       const completion = [];
@@ -4298,32 +4430,29 @@ function updateLoopControls() {
       return completion;
     }
 
-    function search(maxLevelIndex) {
+    function* search(maxLevelIndex) {
       nodes++;
       if (nodes > maxNodes) {
         exhausted = true;
-        return null;
+        return;
       }
+      if ((nodes & 255) === 0 && Date.now() > deadline) {
+        timedOut = true;
+        return;
+      }
+      if (nodes % yieldEveryNodes === 0) yield { control: true };
       const remaining = requiredCount - descendingRatings.length;
       if (!remaining) {
-        if (calculateEaSquadRating(descendingRatings, requiredCount) < model.targetRating) return null;
-        const materialized = materializeRatingVector(candidateEntries, descendingRatings, model, piles);
-        if (!materialized) return null;
-        return {
-          ok: true,
-          entries: materialized.entries,
-          selected: materialized.entries.map((entry) => entry.item),
-          rating: calculateEaSquadRating(descendingRatings, requiredCount),
-          ratings: [...descendingRatings],
-          pileCounts: materialized.pileCounts,
-          nodes,
-        };
+        if (calculateEaSquadRating(descendingRatings, requiredCount) >= model.targetRating) {
+          yield { ratings: [...descendingRatings] };
+        }
+        return;
       }
 
       const maxRating = levels[maxLevelIndex];
       const optimistic = highestAvailableCompletion(remaining, maxRating);
-      if (optimistic.length < remaining) return null;
-      if (calculateEaSquadRating([...descendingRatings, ...optimistic], requiredCount) < model.targetRating) return null;
+      if (optimistic.length < remaining) return;
+      if (calculateEaSquadRating([...descendingRatings, ...optimistic], requiredCount) < model.targetRating) return;
 
       for (let levelIndex = 0; levelIndex <= maxLevelIndex; levelIndex++) {
         const rating = levels[levelIndex];
@@ -4331,30 +4460,53 @@ function updateLoopControls() {
         if (used >= Number(ratingCounts.get(rating) || 0)) continue;
         usedCounts.set(rating, used + 1);
         descendingRatings.push(rating);
-        const result = search(levelIndex);
+        yield* search(levelIndex);
         descendingRatings.pop();
         if (used) usedCounts.set(rating, used); else usedCounts.delete(rating);
-        if (result) return result;
-        if (exhausted) return null;
+        if (exhausted || timedOut) return;
       }
-      return null;
     }
 
     for (let maxLevelIndex = 0; maxLevelIndex < levels.length; maxLevelIndex++) {
       const rating = levels[maxLevelIndex];
       usedCounts.set(rating, 1);
       descendingRatings.push(rating);
-      const result = search(maxLevelIndex);
+      for (const step of search(maxLevelIndex)) {
+        if (step.control) {
+          stopPoint();
+          await sleep(0);
+          stopPoint();
+          continue;
+        }
+        const materialized = materializeRatingVector(materializationContext, step.ratings);
+        if (!materialized) continue;
+        const result = {
+          ok: true,
+          entries: materialized.entries,
+          selected: materialized.entries.map((entry) => entry.item),
+          rating: calculateEaSquadRating(step.ratings, requiredCount),
+          ratings: step.ratings,
+          pileCounts: materialized.pileCounts,
+          nodes,
+        };
+        descendingRatings.pop();
+        usedCounts.delete(rating);
+        return result;
+      }
       descendingRatings.pop();
       usedCounts.delete(rating);
-      if (result) return result;
-      if (exhausted) break;
+      if (exhausted || timedOut) break;
+      stopPoint();
+      await sleep(0);
+      stopPoint();
     }
     return {
       ok: false,
-      reason: exhausted
-        ? `rating search exceeded ${maxNodes} states`
-        : `no safe ${requiredCount}-player combination reaches squad rating ${model.targetRating} and all challenge constraints`,
+      reason: timedOut
+        ? `rating search exceeded ${maxSearchMs}ms`
+        : exhausted
+          ? `rating search exceeded ${maxNodes} states`
+          : `no safe ${requiredCount}-player combination reaches squad rating ${model.targetRating} and all challenge constraints`,
       nodes,
     };
   }
@@ -4421,7 +4573,7 @@ function updateLoopControls() {
     return result;
   }
 
-  async function saveChallengeSquad(challenge, players, label = 'SBC') {
+  async function saveChallengeSquad(challenge, players, label = 'SBC', options = {}) {
     const squad = challenge?.squad || ctrl()?._squad;
     if (!squad) fail(`${label}: squad object not found`);
     const playerList = buildSquadPlayerList(challenge, players);
@@ -4459,7 +4611,7 @@ function updateLoopControls() {
       }
     }
 
-    await waitLoadingEnd();
+    await waitLoadingEnd(250, Math.max(1000, Number(options.loadingTimeoutMs || 30000) || 30000));
     await sleep(700);
   }
 
@@ -5652,69 +5804,16 @@ function updateLoopControls() {
   async function craftAutoTotwUpgrade(loopDef) {
     const upgradeDef = getAutoTotwUpgradeDef(loopDef);
     log(`${loopDef.name}: no eligible ${requiredSpecialLabel(loopDef)} found; submitting ${upgradeDef.name} first`);
-
-    const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
-    const opened = await openSbcSet(set, { returnNullIfComplete: true });
-    if (!opened) {
-      const reason = `no available ${upgradeDef.name} challenge remains; cannot auto-craft ${requiredSpecialLabel(loopDef)}`;
-      log(`${loopDef.name}: ${reason}`);
-      return { ok: false, reason };
-    }
-
-    const configuredFill = await fillConfiguredSbcSquad(upgradeDef, opened, { stopOnMissingSelection: true });
-    if (!configuredFill.ok) {
-      const reason = `${upgradeDef.name} ${configuredFill.reason || 'configured fill is missing required items'}`;
+    const result = await runFillAndVerifySbc(upgradeDef);
+    if (Number(result?.completions || 0) < 1) {
+      const reason = `${upgradeDef.name} was not submitted`;
       log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${reason}`);
       return { ok: false, reason };
     }
-    let fillResult = configuredFill.fillResult;
-    let inspection = configuredFill.inspection;
-    let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
-
-    if (!shouldUseRatingSbcFill(upgradeDef)) {
-      const protectedRepair = await repairProtectedSquadItemsIfNeeded(upgradeDef, opened, fillResult, inspection);
-      fillResult = protectedRepair.fillResult;
-      inspection = protectedRepair.inspection;
-      squad = fillResult.squad || squad;
-
-      const submitReadyRepair = await repairSubmitReadinessIfNeeded(upgradeDef, opened, fillResult, inspection);
-      fillResult = submitReadyRepair.fillResult;
-      inspection = submitReadyRepair.inspection;
-      squad = fillResult.squad || squad;
-    }
-
-    if (!fillResult.submitReady) {
-      const normalGoldLimit = upgradeDef.maxNormalGoldSubmittedRating || upgradeDef.maxSubmittedRating || 'none';
-      const reason = `safe normal-gold fodder exhausted before submit became ready (squad ratings ${summarizeSquadRatings(inspection.items)}; max allowed ${normalGoldLimit})`;
-      log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${upgradeDef.name} ${reason}`);
+    if (Number(result?.rewardPacksOpened || 0) < 1) {
+      const reason = `${upgradeDef.name} reward pack was not opened`;
+      log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${reason}`);
       return { ok: false, reason };
-    }
-    assertSbcSquadSafe(upgradeDef, inspection);
-    if (shouldUseRatingSbcFill(upgradeDef)) {
-      const finalModelValidation = validateRatingSbcModelAgainstItems(configuredFill.model, inspection.items, opened.challenge);
-      logRatingSbcValidation(upgradeDef, 'final rating squad', finalModelValidation, configuredFill.model);
-      if (!finalModelValidation.ok) {
-        const reason = `final rating squad failed dynamic requirement validation: ${finalModelValidation.errors.join(', ')}`;
-        log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${upgradeDef.name} ${reason}`);
-        return { ok: false, reason };
-      }
-    }
-
-    const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
-    markSbcItemsConsumed(inspection.items, upgradeDef.name);
-    if (!rewardPackId) {
-      log(`${loopDef.name}: ${upgradeDef.name} submitted but reward pack id was not detected`);
-    }
-    const openedReward = await openRewardPackAndCleanup(upgradeDef, rewardPackId, 'auto TOTW reward pack', {
-      assumeTotwReward: true,
-      fallbackPackMatcher: isLikelyTotwRewardPack,
-      openAttempts: 3,
-      findAttempts: 18,
-      findDelayMs: 2500,
-      logWait: true,
-    });
-    if (!openedReward) {
-      log(`${loopDef.name}: ${upgradeDef.name} reward pack could not be auto-opened; checking inventory anyway`);
     }
     return { ok: true };
   }
@@ -5741,7 +5840,9 @@ function updateLoopControls() {
         return true;
       }
       const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
-      const challenge = await findAvailableSbcChallenge(set, upgradeDef.name);
+      const challenge = shouldUseRatingSbcFill(upgradeDef)
+        ? await findAvailableRatingSbcChallenge(set, upgradeDef.name)
+        : await findAvailableSbcChallenge(set, upgradeDef.name);
       if (challenge) {
         log(`${loopDef.name}: dry-run found no eligible ${requiredSpecialLabel(loopDef)}; live run would submit ${upgradeDef.name} (#${set.id || '?'}) first`);
       } else {
@@ -6176,6 +6277,58 @@ function updateLoopControls() {
     // Capture the reward before leaving the submitted squad, then unwind every SBC
     // submission path before a reward pack is opened or another challenge is loaded.
     await syncAfterSbcSubmit(set?.name || 'SBC submit');
+    return rewardPackId;
+  }
+
+  function rewardPackIdFromSubmitResult(result, set) {
+    const awards = result?.data?.grantedChallengeAwards || result?.response?.grantedChallengeAwards || [];
+    for (const award of awards) {
+      const values = [
+        award?.value,
+        award?.id,
+        award?.packId,
+        award?.packDefinitionId,
+        award?.item?.id,
+        award?.item?.resourceId,
+      ];
+      const id = values.map(Number).find((value) => Number.isFinite(value) && value > 0);
+      if (id) return id;
+    }
+    return Number(set?.awards?.[0]?.value) || null;
+  }
+
+  async function submitRatingSbcInBackground(set, challenge, label = set?.name || 'rating SBC') {
+    const beforePackCounts = getPackCountsById();
+    let canSubmit = true;
+    try { canSubmit = challenge?.canSubmit?.() !== false; } catch { }
+    if (!canSubmit) fail(`${label}: challenge model rejected the background squad before submit`);
+
+    const skipValidation = W.services?.UserSettings?.getSBCValidationSkip?.() || false;
+    const chemistryEnabled = W.services?.Chemistry?.isFeatureEnabled?.() || false;
+    log(`Submitting SBC in background: ${set.name}`);
+    const result = await observeOnce(
+      W.services.SBC.submitChallenge(challenge, set, skipValidation, chemistryEnabled),
+      ctrl(),
+      45000,
+      `submitChallenge ${label}`,
+    );
+    if (!result?.success) {
+      const detail = serviceResultErrorText(result) || result?.status || 'unknown';
+      fail(`${label}: background submit failed: ${detail}`);
+    }
+
+    await refreshStorePacks().catch(() => null);
+    let rewardPackId = rewardPackIdFromSubmitResult(result, set);
+    if (!rewardPackId) {
+      const afterPacks = getAvailableRepositoryMyPacks();
+      const afterPackCounts = getPackCountsById(afterPacks);
+      const newPack = afterPacks.find((pack) => {
+        const id = packIdKey(pack);
+        return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
+      });
+      rewardPackId = Number(packIdKey(newPack)) || null;
+    }
+    log(`${label}: background submit complete; reward pack ${rewardPackId || 'unknown'}`);
     return rewardPackId;
   }
 
@@ -6864,7 +7017,14 @@ function updateLoopControls() {
   }
 
   async function fillSbcSquadRatingOptimized(loopDef, opened, options = {}) {
-    await refreshInventoryCaches(`${loopDef.name} rating SBC fill`, { includePacks: false, quiet: true });
+    const startedAt = Date.now();
+    if (options.skipInventoryRefresh) {
+      log(`${loopDef.name}: reusing inventory cache refreshed by the preceding special-card preflight`);
+    } else {
+      log(`${loopDef.name}: refreshing inventory before rating candidate construction`);
+      await refreshInventoryCaches(`${loopDef.name} rating SBC fill`, { includePacks: false, quiet: true });
+      log(`${loopDef.name}: rating inventory refresh complete in ${Date.now() - startedAt}ms`);
+    }
     const model = parseRatingSbcChallenge(loopDef, opened.challenge);
     logRatingSbcModel(loopDef, model);
     if (model.unsupported.length) {
@@ -6883,11 +7043,17 @@ function updateLoopControls() {
 
     const candidates = buildRatingSbcCandidateEntries(loopDef, model);
     log(`${loopDef.name}: rating SBC candidates ${candidates.entries.length} unique definition(s) across ${candidates.piles.join(' > ')}; scanned ${candidates.scannedItems} item(s), built in ${candidates.buildMs}ms`);
-    const selection = findOptimalRatingSbcSelection(candidates.entries, model, candidates.piles, loopDef.ratingSbcFill);
+    const searchStartedAt = Date.now();
+    const searchMaxNodes = Math.max(10000, Math.min(2000000, Number(loopDef.ratingSbcFill?.maxSearchNodes || 500000) || 500000));
+    const searchMaxMs = Math.max(1000, Math.min(60000, Number(loopDef.ratingSbcFill?.maxSearchMs || 15000) || 15000));
+    const searchYieldNodes = Math.max(50, Math.min(5000, Number(loopDef.ratingSbcFill?.yieldEveryNodes || 500) || 500));
+    log(`${loopDef.name}: rating search started; max states:${searchMaxNodes}, max time:${searchMaxMs}ms, UI yield every:${searchYieldNodes} states`);
+    const selection = await findOptimalRatingSbcSelection(candidates.entries, model, candidates.piles, loopDef.ratingSbcFill);
+    const searchMs = Date.now() - searchStartedAt;
     if (!selection.ok) {
       return {
         ok: false,
-        reason: selection.reason,
+        reason: `${selection.reason} (searched ${selection.nodes || 0} states in ${searchMs}ms)`,
         ratingShortage: true,
         model,
         candidates,
@@ -6896,7 +7062,7 @@ function updateLoopControls() {
 
     selection.stats = selection.pileCounts;
     selection.resolvedSignals = candidates.resolvedSignals;
-    log(`${loopDef.name}: optimal rating squad ${selection.rating}/${model.targetRating}; ratings ${selection.ratings.join(', ')}; search states:${selection.nodes}`);
+    log(`${loopDef.name}: optimal rating squad ${selection.rating}/${model.targetRating}; ratings ${selection.ratings.join(', ')}; search states:${selection.nodes}, search:${searchMs}ms, total:${Date.now() - startedAt}ms`);
     if (options.dryRun) {
       logDryRunSelection(`${loopDef.name} rating SBC`, selection, {
         maxItems: 30,
@@ -6933,14 +7099,18 @@ function updateLoopControls() {
       return { ok: true, selection: prepared, inspection: plannedInspection, model, optimizedRating: selection.rating };
     }
 
-    await saveChallengeSquad(opened.challenge, prepared.selected, `${loopDef.name} optimized rating fill`);
-    await waitLoadingEnd();
-    await sleep(900);
-    const squad = ctrl()?._squad || opened.challenge?.squad;
+    const playerList = buildSquadPlayerList(opened.challenge, prepared.selected);
+    const squad = opened.challenge?.squad;
+    if (!squad) {
+      return { ok: false, reason: 'direct rating SBC challenge has no squad model', selection: prepared, inspection: plannedInspection, model };
+    }
+    try { squad.removeAllItems?.(); } catch { }
+    squad.setPlayers(playerList, true);
     const fillResult = {
       squad,
       filled: getFilledSquadSlots(squad),
-      submitReady: !!findSubmitButton(),
+      submitReady: false,
+      background: true,
     };
     const inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount: model.requiredPlayerCount });
     logSbcSquadInspection(loopDef, inspection);
@@ -6957,7 +7127,10 @@ function updateLoopControls() {
         modelValidation: savedModelValidation,
       };
     }
-    log(`${loopDef.name}: optimized rating fill submit ${fillResult.submitReady ? 'ready' : 'not ready'} (${inspection.items.length}/${model.requiredPlayerCount} players)`);
+    let challengeCanSubmit = true;
+    try { challengeCanSubmit = opened.challenge?.canSubmit?.() !== false; } catch { }
+    fillResult.submitReady = challengeCanSubmit;
+    log(`${loopDef.name}: optimized background rating fill submit ${fillResult.submitReady ? 'ready' : 'not ready'} (${inspection.items.length}/${model.requiredPlayerCount} players)`);
     return {
       ok: true,
       selection: prepared,
@@ -7078,7 +7251,20 @@ function updateLoopControls() {
       patchFsuLengthSafePlayerMetadata(`${loopDef.name} before opening SBC`);
 
       const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
-      const opened = await openSbcSet(set, { returnNullIfComplete: true });
+      let opened;
+      if (shouldUseRatingSbcFill(loopDef)) {
+        log(`${loopDef.name}: reading dynamic challenge requirements through the direct rating SBC path`);
+        const challenge = await findAvailableRatingSbcChallenge(set, loopDef.name);
+        const loadedChallenge = challenge && !loopDef.dryRun
+          ? await loadRatingSbcChallenge(challenge, loopDef.name)
+          : challenge;
+        opened = loadedChallenge ? { set, challenge: loadedChallenge, background: true } : null;
+      } else {
+        const openStartedAt = Date.now();
+        log(`${loopDef.name}: opening SBC challenge screen`);
+        opened = await openSbcSet(set, { returnNullIfComplete: true });
+        log(`${loopDef.name}: SBC challenge screen ready in ${Date.now() - openStartedAt}ms`);
+      }
       if (!opened) {
         log(`${loopDef.name}: no available SBC challenge remains`);
         break;
@@ -7088,6 +7274,7 @@ function updateLoopControls() {
       const configuredFill = await fillConfiguredSbcSquad(loopDef, opened, {
         dryRun: loopDef.dryRun,
         stopOnMissingSelection: true,
+        skipInventoryRefresh: needsAutoTotwPreflight(loopDef),
       });
       if (loopDef.dryRun) {
         if (!configuredFill.ok) {
@@ -7201,7 +7388,9 @@ function updateLoopControls() {
           fail(`${loopDef.name}: final rating squad failed dynamic requirement validation: ${finalModelValidation.errors.join(', ')}`);
         }
       }
-      const rewardPackId = await submitSbcAndGetAwardPackId(opened.set);
+      const rewardPackId = ratingSbcFill
+        ? await submitRatingSbcInBackground(opened.set, opened.challenge, loopDef.name)
+        : await submitSbcAndGetAwardPackId(opened.set);
       markSbcItemsConsumed(inspection.items, loopDef.name);
       let stopAfterRewardFailure = false;
       if (loopDef.openRewardPacks) {
