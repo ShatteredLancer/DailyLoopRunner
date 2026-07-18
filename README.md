@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.01`
+当前版本：`0.5.02`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -21,7 +21,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 完成加载。面板出现 `Ready v0.5.01` 后再开始运行。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 完成加载。面板出现 `Ready v0.5.02` 后再开始运行。
 
 ## 基本操作
 
@@ -56,7 +56,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 ### One-click Daily Loop
 
-`One-click Daily Loop (max 7 each)` 按以下顺序运行：
+`One-click Daily Loop` 按以下顺序运行：
 
 1. Daily Bronze
 2. Daily Silver
@@ -68,6 +68,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 - 已完成的阶段直接跳过。
 - 部分完成的阶段只运行剩余次数。
+- Daily 阶段不按固定 7 次重新执行，而是以 EA 返回的当日剩余次数为准。
 - 某阶段安全停止后，可以处理问题并重新点击同一个 One-click 继续。
 - `openRewardPacks` 默认关闭，避免一次性扩大 Unassigned 压力。
 
@@ -125,16 +126,19 @@ FUT.GG 返回 403 或无有效价格时会自动回退 FUTNext。价格会显示
 
 84x10 默认要求恰好一张符合条件的 TOTW/TOTS/FOF，并可按配置自动完成 TOTW 或 2x84+ 前置补料。84x10 奖励默认保留，不自动打开。
 
+`84x10 Loop` 会持续处理当前仍可用的 Challenge，直到 SBC 已完成或材料、保护规则、运行状态使流程安全停止；内部保留 50 次安全上限，避免异常状态导致无限循环。
+
 ### MVP 和验证 Loop
 
 开启 `Show MVP loops` 后可见：
 
 - `One-click Daily MVP (1 each)`
 - 四个单项 Daily MVP
+- `Bronze Upgrade Validation`
 - `2x84+ Fodder Loop`
 - `84x10 MVP (1 run)`
 
-`Bronze Upgrade Validation` 是早期验证入口，普通日常使用不需要选择它。
+`Bronze Upgrade Validation` 是早期验证入口，普通日常使用不需要选择它，因此默认隐藏在 MVP 列表中。
 
 ## 安全规则
 

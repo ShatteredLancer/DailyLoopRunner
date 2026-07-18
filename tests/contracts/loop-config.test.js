@@ -37,8 +37,12 @@ describe('loop configuration contracts', () => {
   });
 
   it('locks the One-click Daily stage order', async () => {
-    const { builtIn } = await loadDefinitions();
-    expect(byId(builtIn, 'one-click-daily').steps).toEqual([
+    const { builtIn, external } = await loadDefinitions();
+    const builtInLoop = byId(builtIn, 'one-click-daily');
+    const externalLoop = byId(external, 'one-click-daily');
+    expect(builtInLoop.name).toBe('One-click Daily Loop');
+    expect(externalLoop.name).toBe('One-click Daily Loop');
+    expect(builtInLoop.steps).toEqual([
       'daily-bronze',
       'daily-silver',
       'daily-common',
@@ -65,6 +69,20 @@ describe('loop configuration contracts', () => {
     });
     expect([bronze, silver, byId(builtIn, 'daily-bronze-mvp'), byId(builtIn, 'daily-silver-mvp')])
       .toEqual(expect.not.arrayContaining([expect.objectContaining({ overflowRecovery: expect.anything() })]));
+  });
+
+  it('keeps Bronze Upgrade Validation in the hidden MVP list', async () => {
+    const { builtIn, external } = await loadDefinitions();
+    expect(byId(builtIn, 'bronze-upgrade-validation')).toMatchObject({
+      hidden: true,
+      mvp: true,
+      strategy: 'validationBronzeUpgrade',
+    });
+    expect(byId(external, 'bronze-upgrade-validation')).toMatchObject({
+      hidden: true,
+      mvp: true,
+      strategy: 'validationBronzeUpgrade',
+    });
   });
 
   it('locks configurable Unassigned recovery routes and low-gold protection', async () => {
@@ -225,15 +243,24 @@ describe('loop configuration contracts', () => {
     const externalFodder = byId(external, '2x84-fodder');
     const totw = byId(builtIn, 'auto-totw-upgrade');
     const x10 = byId(builtIn, '84x10');
+    const externalX10 = byId(external, '84x10');
     expect(fodder).toMatchObject({ hidden: true, mvp: true });
     expect(externalFodder).toMatchObject({ hidden: true, mvp: true });
     expect(totw.ratingSbcFill.priorityPiles).toEqual(['unassigned', 'storage', 'transfer', 'club']);
     expect(totw.blockSpecial).toBe(true);
     expect(x10).toMatchObject({
+      name: '84x10 Loop',
+      maxCompletions: 50,
+      allowMultipleCompletions: true,
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
       requiredSpecialMinRating: 84,
+    });
+    expect(externalX10).toMatchObject({
+      name: '84x10 Loop',
+      maxCompletions: 50,
+      allowMultipleCompletions: true,
     });
   });
 });

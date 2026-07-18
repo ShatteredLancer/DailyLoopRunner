@@ -155,6 +155,8 @@
   "loops": [
     {
       "id": "bronze-upgrade-validation",
+      "hidden": true,
+      "mvp": true,
       "name": "Bronze Upgrade Validation",
       "strategy": "validationBronzeUpgrade",
       "sourcePackIds": [105],
@@ -623,7 +625,7 @@
     },
     {
       "id": "one-click-daily",
-      "name": "One-click Daily Loop (max 7 each)",
+      "name": "One-click Daily Loop",
       "strategy": "dailyRoutine",
       "steps": [
         "daily-bronze",
@@ -776,7 +778,7 @@
     },
     {
       "id": "84x10",
-      "name": "84x10 Loop (max 7)",
+      "name": "84x10 Loop",
       "strategy": "fillAndVerifySbc",
       "sbcNames": [
         "84+ x10",
@@ -786,7 +788,7 @@
         "10 名 84+ 升级",
         "10名84+升级"
       ],
-      "maxCompletions": 7,
+      "maxCompletions": 50,
       "allowMultipleCompletions": true,
       "maxSubmittedRating": 88,
       "maxNormalGoldSubmittedRating": 99,

@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.5.01`
+- Userscript 版本：`0.5.02`
 - Git 基线：`0fd267b`
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`

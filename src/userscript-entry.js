@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.01
+// @version      0.5.02
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -71,6 +71,8 @@ import { createLogRenderer, formatLogHtml } from './ui/log-renderer.js';
   const LOOP_DEFS = [
     {
       id: 'bronze-upgrade-validation',
+      hidden: true,
+      mvp: true,
       name: 'Bronze Upgrade Validation',
       strategy: 'validationBronzeUpgrade',
       sourcePackIds: [105],
@@ -323,7 +325,7 @@ import { createLogRenderer, formatLogHtml } from './ui/log-renderer.js';
     },
     {
       id: 'one-click-daily',
-      name: 'One-click Daily Loop (max 7 each)',
+      name: 'One-click Daily Loop',
       strategy: 'dailyRoutine',
       steps: ['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare', 'daily-rare-pack-84'],
       openRewardPacks: false,
@@ -424,7 +426,7 @@ import { createLogRenderer, formatLogHtml } from './ui/log-renderer.js';
     },
     {
       id: '84x10',
-      name: '84x10 Loop (max 7)',
+      name: '84x10 Loop',
       strategy: 'fillAndVerifySbc',
       sbcNames: [
         '84+ x10',
@@ -434,7 +436,7 @@ import { createLogRenderer, formatLogHtml } from './ui/log-renderer.js';
         '10 名 84+ 升级',
         '10名84+升级',
       ],
-      maxCompletions: 7,
+      maxCompletions: 50,
       allowMultipleCompletions: true,
       maxSubmittedRating: 88,
       maxNormalGoldSubmittedRating: 99,
@@ -534,7 +536,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.01',
+    version: '0.5.02',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
