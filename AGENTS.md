@@ -726,6 +726,7 @@ Dry run 必须在副作用前停止：
 - `SBC storage has only ...`：根因可能是前一步不该清空 Unassigned，而不是容量检查本身。
 - `selected M/N`：先看 diagnostics 和 FSU settings，再判断库存不足。
 - `Open pack failed: 471/500`：检查是否残留 SBC 页面、stale pack 或 Unassigned 未同步。
+- `rating shortage before automatic 2x84+ recovery: ...`：84x10/评分 SBC 主求解失败原因；出现在自动 2x84+ 恢复之前。先读这行区分“评分无解/超时/约束不满足”与后面的 fodder 不足。
 - `rating search exceeded ...`：候选池或组合复杂度达到有界限制；优化候选或配置，不要简单把搜索上限改成无界。
 - `unknown eligibility key` 或 chemistry：当前动态条件无法安全解释，应记录 Challenge 模型并停止，不得忽略条件提交。
 - `reward pack not found`：先确认 SBC 进度和奖励是否已经发放，再刷新 Packs；不要盲目重复提交同一个 Challenge。

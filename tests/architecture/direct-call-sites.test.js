@@ -46,6 +46,24 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toMatch(/function\s+runDailySequence\s*\(/);
   });
 
+  it('logs rating shortage or submit-not-ready reasons before automatic 2x84+ recovery', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const shortageIdx = source.indexOf("configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit");
+    const shortageCraftIdx = source.indexOf('craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit)', shortageIdx);
+    expect(shortageIdx).toBeGreaterThan(-1);
+    expect(shortageCraftIdx).toBeGreaterThan(shortageIdx);
+    const shortageWindow = source.slice(shortageIdx, shortageCraftIdx);
+    expect(shortageWindow).toContain('rating shortage before automatic 2x84+ recovery');
+    expect(shortageWindow).toContain('configuredFill.reason');
+
+    const submitIdx = source.indexOf('!fillResult.submitReady &&');
+    const submitCraftIdx = source.indexOf('craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit)', submitIdx);
+    expect(submitIdx).toBeGreaterThan(-1);
+    expect(submitCraftIdx).toBeGreaterThan(submitIdx);
+    const submitWindow = source.slice(submitIdx, submitCraftIdx);
+    expect(submitWindow).toContain('submit not ready before automatic 2x84+ recovery');
+  });
+
   it('requires every userscript pack call to provide an opened-item policy', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     expect(source).not.toMatch(/const\s+items\s*=\s*await\s+openPack\s*\(/);

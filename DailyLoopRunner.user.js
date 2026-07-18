@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.02
+// @version      0.5.03
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -2663,7 +2663,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.02",
+      version: "0.5.03",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -9161,6 +9161,7 @@
           if (!configuredFill.ok) {
             const autoFodderLimit2 = getAutoFodderUpgradeAttemptLimit(loopDef);
             if (configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit2) {
+              log(`${loopDef.name}: rating shortage before automatic 2x84+ recovery: ${configuredFill.reason || "unknown reason"}`);
               const nextAttempt = autoFodderAttempts + 1;
               const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit2);
               if (recovery.ok) {
@@ -9211,6 +9212,7 @@
           }
           const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(loopDef);
           if (!fillResult.submitReady && !inspection.blocked.length && !inspection.missingRequirements?.length && autoFodderAttempts < autoFodderLimit) {
+            log(`${loopDef.name}: submit not ready before automatic 2x84+ recovery (${inspection.items?.length || fillResult.filled || 0} filled)`);
             const nextAttempt = autoFodderAttempts + 1;
             const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit);
             if (recovery.ok) {
