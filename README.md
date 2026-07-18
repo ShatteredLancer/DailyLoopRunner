@@ -2,7 +2,7 @@
 
 本文档对应脚本版本：
 
-- `DailyLoopRunner.user.js`: `0.4.34`
+- `DailyLoopRunner.user.js`: `0.4.43`
 - `DailyLoopRunnerHotReload.user.js`: `0.1.1`
 
 ## 1. 文件说明
@@ -17,6 +17,7 @@
 - `DailyLoopRunnerHotReload.user.js`: 热加载辅助脚本，给页面加 `Reload Loop` 按钮。
 - `StartLoopRunnerDevServer.ps1`: 本地静态文件服务，用于不刷新页面热加载主脚本。
 - `FSU\【FSU】EAFC FUT WEB 增强器-26.09.user.js`: 参考插件，尤其是 SBC 填充、storage、transfer duplicate 处理逻辑。
+- [MAINTENANCE_NOTES.md](MAINTENANCE_NOTES.md): 维护约束、历史兼容点、故障判断和发布前回归清单。
 
 ## 2. 使用前提
 
