@@ -1,0 +1,787 @@
+# Daily Loop Runner AI Agent Engineering Guide
+
+本文件是 AI agent 和维护者处理本仓库任务时的首要工程说明。它描述当前真实实现，而不是最终理想状态。
+
+开始任何代码任务前，先读取：
+
+1. 本文件。
+2. 用户提供的完整日志和截图。
+3. [REFACTORING_MILESTONES.md](REFACTORING_MILESTONES.md) 中相关 Milestone 和已知缺口。
+4. `git status --short`、最近提交和当前 diff，避免覆盖未提交的正确行为。
+
+## 1. 项目目标与安全原则
+
+Daily Loop Runner 是 EA FC Web App 的 Tampermonkey 自动化脚本，运行时依赖 EA 页面模型、FSU 和 FC26 Enhancer。它处理高价值账号库存，因此正确性优先于继续运行。
+
+必须遵守：
+
+- 无法确认 SBC、Challenge、奖励或材料身份时停止。
+- 不得为了让流程通过而放宽高分卡、特殊卡、FSU Lock、Only Untradeable、联赛或 Evolution 保护。
+- 不得把 Transfer/Unassigned duplicate signal 当成可以直接提交的实体；必须解析到 Club/Storage 中真实可提交的对应卡。
+- 开下一包、提交下一阵或进入下一阶段前，必须确认当前 Unassigned 和页面状态已经取得进展。
+- 修复当前状态时，优先保证用户更新脚本后可以重新点击同一个 Loop 继续，而不是要求清空状态重来。
+- 共享底层改动必须评估全部调用方；越靠近 Adapter、Selection、Pack、Unassigned、SBC Transaction，修改越慎重。
+- 没有测试覆盖的线上 Bug，应先添加最小 fixture 或失败测试，再修实现。
+- Node 自动测试不能替代真实 Web App 验证。
+
+## 2. 运行环境与依赖
+
+### 2.1 浏览器运行时
+
+- Tampermonkey userscript。
+- EA FC Web App 页面及其 `unsafeWindow` 中的 repositories、services、controller 和模型对象。
+- FSU，用于材料过滤、Lock player、Golden Player Range、Storage 等兼容行为。
+- FC26 Enhancer，部分页面和运行环境会与其共同存在。
+- Tampermonkey API：`unsafeWindow`、`GM_xmlhttpRequest`。
+- 外部价格服务：FUT.GG，失败时回退 FUTNext。
+
+Userscript metadata 位于 `src/userscript-entry.js` 文件开头。新增远程请求域名时必须同步检查 `@connect`。
+
+### 2.2 开发工具
+
+- Node.js 22：本地建议与 CI 保持一致。
+- npm：使用 Node 自带版本即可。
+- esbuild：将多文件源码打包为单个 IIFE userscript。
+- Vitest：Node 环境下的 unit、workflow、contract 和 architecture tests。
+- PowerShell：Windows 开发和启动本地服务。
+- Python `http.server`：仅用于本地热加载静态文件服务。
+
+### 2.3 环境搭建
+
+仓库的直接 npm 开发依赖只有：
+
+```json
+{
+  "esbuild": "^0.25.6",
+  "vitest": "^3.2.4"
+}
+```
+
+所有间接依赖已经锁定在 `package-lock.json`。不需要全局安装 esbuild、Vitest 或其它 npm 包，也不要手工选择间接依赖版本。
+
+推荐从干净环境执行：
+
+```powershell
+node --version
+npm --version
+npm ci
+npm run verify
+```
+
+要求：
+
+- Node 22，至少应使用与当前依赖兼容的现代 Node 版本。
+- `npm ci` 必须基于已提交的 `package-lock.json` 安装精确依赖。
+- 如果修改 `package.json` 依赖，必须同步更新并提交 `package-lock.json`。
+- Python 不是 npm 依赖，也不是构建和测试必需项；只有运行 `StartLoopRunnerDevServer.ps1` 热加载时才需要 `python -m http.server`。
+- Tampermonkey、FSU 和 FC26 Enhancer 是浏览器运行时依赖，不由 npm 安装。
+
+主要 npm 命令：
+
+```powershell
+npm ci
+npm test
+npm run test:contracts
+npm run test:architecture
+npm run build
+npm run verify
+```
+
+`npm run verify` 是提交或交付前的最低完整验证。
+
+## 3. 源码、配置与发布产物
+
+### 3.1 真正的源码
+
+```text
+src/userscript-entry.js
+src/**
+```
+
+`src/userscript-entry.js` 包含 userscript metadata、内置 `LOOP_DEFS`、运行时桥接、EA/FSU/UI 集成和仍未完全拆出的 helper。其它 `src` 目录包含已经模块化、可独立测试的领域逻辑和事务。
+
+不要假设入口已经完全薄化。当前它仍约数千行，是主要集成层，修改前必须搜索调用方和架构测试基线。
+
+### 3.2 外部配置
+
+`DailyLoopRunner.loops.json` 是可选外部配置，包含：
+
+- `loops`
+- `recoveryRecipes`
+- `unassignedRecoveryPolicies`
+- `defaultUnassignedRecoveryPolicyIds`
+
+内置配置和外部 JSON 的 Loop id 与顺序必须一致。新增或修改内置 Loop 时通常需要同步修改外部 JSON，并更新 `tests/contracts/loop-config.test.js` 或 fixture coverage。
+
+### 3.3 生成文件
+
+以下文件由构建生成：
+
+```text
+DailyLoopRunner.user.js
+dist/DailyLoopRunner.user.js
+```
+
+禁止手工编辑生成文件。构建链路：
+
+```text
+src/userscript-entry.js metadata
+        +
+src/userscript-entry.js body and imported src modules
+        |
+        v
+scripts/build-userscript.mjs
+        |
+        v
+esbuild, bundle=true, format=iife, target=chrome120
+        |
+        +--> DailyLoopRunner.user.js
+        +--> dist/DailyLoopRunner.user.js
+```
+
+`scripts/check-dist.mjs` 验证：
+
+- metadata 与源码一致。
+- 版本一致。
+- 根目录和 `dist` 产物字节一致。
+
+源码行为变更发布时，同步更新：
+
+- userscript `@version`
+- `W[APP_KEY].version`
+- `package.json`
+- `package-lock.json` 根版本
+- README 当前版本
+- 必要的 Milestone 版本记录
+
+## 4. 架构和依赖方向
+
+期望依赖方向：
+
+```text
+Loop configuration
+        |
+        v
+Workflow orchestration
+        |
+        v
+Selection / Pack / Unassigned / SBC / Reward services
+        |
+        v
+Adapters
+        |
+        v
+EA / FSU / DOM / Tampermonkey runtime
+```
+
+稳定数据流：
+
+```text
+EA objects
+-> Adapter
+-> serializable Snapshot / Ref
+-> pure Planner or Workflow
+-> Plan / Result
+-> entry integration
+-> Adapter side effect
+-> refreshed Snapshot
+-> progress validation
+```
+
+边界规则：
+
+- `domain`、`selection` 和 `workflows` 不得访问 `window`、`document`、`unsafeWindow`、`W`、EA repositories 或 services。
+- `config`、`pack`、`sbc`、`unassigned` 和 `ui` 共享模块也不得直接访问运行时全局。
+- 低层 EA 调用应集中在 `src/adapters/ea`。
+- Workflow 通过回调编排行为，不直接 import EA Adapter 实现。
+- Selection 只决定材料计划，不打开页面、保存或提交 SBC。
+- Submission 可以拒绝实际保存后发生变化的阵容，但不能静默重新选择另一套材料。
+
+`tests/architecture/module-boundaries.test.js` 和 `tests/architecture/direct-call-sites.test.js` 锁定这些规则。
+
+## 5. 模块职责与影响面
+
+### 5.1 `src/config`
+
+文件：
+
+- `runtime.js`：应用 key、本地配置 URL、UI storage key、运行默认值和 FSU fallback。
+- `selection.js`：把 Loop 与 requirement 级别的保护字段规范化为选材输入。
+- `recovery.js`：默认 Unassigned 恢复配方和按卡种匹配的恢复策略。
+
+风险：中等。恢复配置会影响所有发生容量溢出的 Loop；运行默认值会影响 UI 或全局行为。
+
+修改要求：
+
+- 配置仍需在 `src/userscript-entry.js` 内置定义或外部 JSON 中正确引用。
+- recovery recipe 必须消费当前 blocked duplicate，不能只是提交无关 SBC。
+- 修改恢复顺序时更新 contract tests，并列出需要真实页面验证的容量场景。
+
+### 5.2 `src/domain`
+
+文件：
+
+- `contracts.js`：`ItemRef`、`ItemSnapshot`、`InventorySnapshot`、`SelectionPlan`、`SquadPlan`、`SubmissionResult`、`OpenPackReceipt`。
+- `objects.js`：Loop 配置克隆和 plain object 判断。
+- `rating.js`：EA squad rating 公式。
+
+风险：很高。Contract 字段或评分公式影响多个模块和 fixture。
+
+修改要求：
+
+- 数据结构保持可序列化和不可变语义。
+- 新字段需更新 Adapter、fake、tests 和可能的 fixture。
+- 评分公式变更必须有 characterization 和 differential tests。
+
+### 5.3 `src/adapters`
+
+文件：
+
+- `ea/inventory.js`：把 EA Item Repository 转换为库存快照，并提供实时对象查找。
+- `ea/pack.js`：唯一允许直接调用 pack model `open()` 的位置。
+- `ea/sbc.js`：底层 save/submit Adapter。
+- `ea/fsu.js`：读取 FSU 策略和锁卡信息。
+- `browser/dom.js`、`browser/storage.js`：浏览器接口适配。
+- `fake/*`：Node 测试中的副作用替身。
+- `index.js`：Adapter 集合工厂。
+
+风险：最高。EA 模型字段变化、ID 解析、容量或 duplicate 状态错误会影响所有 Loop。
+
+修改前必须：
+
+1. 保存真实 EA 对象字段或日志证据。
+2. 检查 fake adapter 和 contract tests。
+3. 列出依赖该 Adapter 的所有共享事务和 Loop。
+4. 不在 Adapter 中加入具体 Loop 名称或业务策略。
+
+### 5.4 `src/selection`
+
+文件：
+
+- `index.js`：统一入口 `selectInventoryPlayers()`；根据 `mode` 分发 requirements 或 rating。
+- `inventory.js`：按 requirements、pile、FSU 和保护策略选择普通库存材料。
+- `rating.js`：评分型 SBC 最低可行评分向量和同向量来源选择。
+- `transient-signals.js`：合并开包响应中尚未稳定出现在 Repository 的 Unassigned signal。
+
+风险：最高。
+
+影响范围：
+
+- requirements 模式：Daily Common/Rare、Player Pick、Provision stages、Rare Pack 2x84+、Unassigned recovery、普通 fill-and-verify。
+- rating 模式：84+ TOTW、84x10、自动 TOTW、未来评分 SBC。
+- transient signal：Rare Pack、Provision 和任何开包响应早于 UI/Repository 的流程。
+
+核心不变量：
+
+- 同一阵容不能重复使用相同 `definitionId`。
+- consumed、protected、loan、limited-use、concept、academy、active trade 和 FSU Lock 必须排除。
+- Unassigned/Transfer 只作为 duplicate signal，最终必须解析到真实 submission item。
+- requirements 模式严格保持 count、tier、rarity、special 和评分上限。
+- rating 模式先最小化评分向量，再比较 pile；不能因 Storage 优先而选择不必要的高分卡。
+
+修改后至少运行 selection unit、characterization、differential tests 和所有相关 workflow tests。
+
+### 5.5 `src/pack`
+
+文件：
+
+- `open-transaction.js`：统一开包事务、重试、响应标准化和 receipt。
+- `opened-item-policy.js`：把已开物品分为 reserved、routed、pending。
+- `upgrade-duplicate-routing.js`：升级包重复卡分类。
+
+风险：最高。
+
+影响范围：Daily Bronze/Silver、Daily Common shortage pack、Daily Rare source pack、Rare Pack、Provision、TOTW reward、自动 fodder reward 等所有开包路径。
+
+核心不变量：
+
+- 开包前先处理或明确保留已有 Unassigned。
+- 每个开包调用必须提供 opened-item policy。
+- response item 与 Repository 延迟必须被 receipt/transient signal 覆盖。
+- 471、500、404 和 stale pack 的重试必须有界。
+- 开第二包前必须重新检查 Unassigned 和容量。
+
+任何共享事务改动都需要 pack unit tests、受影响 workflow tests，并在真实页面验证多包流程。
+
+### 5.6 `src/unassigned`
+
+文件：
+
+- `plan.js`：纯规划，按非重复、可交易重复、可 Swap、Storage 的顺序返回动作或 blocked。
+- `resolve.js`：执行规划、检查指纹进展、调用 overflow resolver、限制迭代和递归。
+- `recovery.js`：把 blocked item 与恢复策略、Selection 和 SBC recipe 连接。
+
+风险：最高。几乎所有 Loop 的开始、开包后、提交后和最终收尾都会经过 Unassigned。
+
+核心不变量：
+
+- `plan` 不写具体 SBC 或 Loop 名称。
+- Loop 专属保留通过 `reserveItem` 回调注入。
+- 容量 fail-safe 通过配置化 overflow resolver 注入。
+- action 或 resolver 报告 progress 后，Unassigned fingerprint 必须变化。
+- 必须有最大迭代和递归保护。
+- 无进展时安全停止，不能继续开包扩大阻塞。
+
+修改时必须覆盖空、非重复、可交易重复、不可交易重复、Swap、Storage 满、Transfer 满、两者满和 recovery 无进展。
+
+### 5.7 `src/sbc`
+
+文件：
+
+- `submit-attempt.js`：统一 Challenge 获取、Squad Provider、保存前/后 validator、保存、提交和结果。
+- `reward-claim.js`：通过 Pack 计数或 SBC 进度判断奖励是否已经发放。
+
+风险：最高。
+
+`submitSbcAttempt()` 被 Inventory、Rating、FSU fill 和 Existing Squad Provider 复用。修改会影响 Daily、Player Pick、Provision、Rare Pack、84+ TOTW、84x10 和恢复 SBC。
+
+核心不变量：
+
+- Challenge 不可用返回 `unavailable`，不提交旧 Challenge。
+- Squad Provider 只提供计划，不绕过 validator。
+- Dry run 返回 `planned`，不保存或提交。
+- 保存后重新读取实际阵容并运行 post-save validator。
+- Submit 不 ready 时停止。
+- 成功提交后才标记 consumed 和处理奖励。
+
+### 5.8 `src/workflows`
+
+Workflow 是无 EA/DOM 依赖的状态机：
+
+- `recycle.js`：重复卡、奖励包和 seed SBC 循环。
+- `supply-and-craft.js`：库存选择、补货包、fallback 和重复提交。
+- `pack-and-craft.js`：源包、恢复状态和有序 crafting stages。
+- `player-pick.js`：pending Pick 优先、Challenge 提交、领取和计数。
+- `repeated-submission.js`：重复提交型流程。
+- `sequence.js`：One-click 等有序子流程。
+
+风险：中高。通常影响同一 strategy 的全部 Loop，但不应直接影响其它 strategy。
+
+Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insufficient` 或 `blocked`。不要用异常代替正常的材料不足和活动已完成；不可恢复的运行时错误才抛异常。
+
+### 5.9 `src/ui`
+
+当前只有 `log-renderer.js` 已模块化。面板 DOM、拖动、resize、Options、Pick modal 和 recap 仍主要在 `src/userscript-entry.js`。
+
+风险：
+
+- `log-renderer.js`：中等，影响日志刷新性能和简洁/完整日志显示。
+- entry 中面板布局：中等，容易产生简洁模式回归、重复日志栏、尺寸无法恢复等问题。
+
+UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文本、日志高频更新和 Pick recap。
+
+### 5.10 `src/userscript-entry.js`
+
+入口当前负责：
+
+- Userscript metadata 和版本。
+- 内置 `LOOP_DEFS` 及配置校验。
+- Runtime state、日志和 UI。
+- EA Controller/Repository/Service 适配桥。
+- FSU 同步和部分兼容逻辑。
+- shared module 到真实页面副作用的连接。
+- 高层 strategy 到 Workflow 的分发。
+- 尚未完全迁出的 rating model、Player Pick 价格/选择和部分 helper。
+
+风险取决于修改位置。任何看似局部的 helper 都必须先搜索全部调用点。
+
+## 6. Strategy 与 Workflow 映射
+
+当前 strategy 分发位于 `runConfiguredLoop()`：
+
+| Strategy | Entry runner | Shared workflow / scope |
+| --- | --- | --- |
+| `validationBronzeUpgrade` | `runRound` / validation dry run | 早期验证专用 |
+| `dailySingleCardRecycle` | `runRecycleLoop` | `runRecycleWorkflow` |
+| `supplyAndCraft` | `runSupplyAndCraftLoop` | `runSupplyAndCraftWorkflow` |
+| `inventoryMixedUpgrade` | compatibility mapping | `runSupplyAndCraftLoop` |
+| `commonGoldToRareUpgrade` | compatibility mapping | `runSupplyAndCraftLoop` |
+| `provisionPackCrafting` | `runProvisionCraftLoop` | `runPackAndCraftWorkflow` plus configured stages |
+| `provisionPackDualCrafting` | compatibility mapping | same Provision flow |
+| `rarePackTo84Upgrade` | `runRarePackCraftLoop` | `runPackAndCraftWorkflow` |
+| `playerPickSbc` | `runPlayerPickLoop` | `runPlayerPickWorkflow` |
+| `dailyRoutine` | `runDailySequence` | `runSequenceWorkflow` |
+| `fillAndVerifySbc` | `runFillAndVerifyLoop` | shared selection and submission transactions |
+
+旧 strategy 名仍用于外部配置兼容。不要新建更多兼容 strategy，优先用现有通用 Workflow 和参数表达需求。
+
+### 6.1 现象到代码定位表
+
+| 现象 | 首先检查 | 关键符号 |
+| --- | --- | --- |
+| Loop 不显示、MVP 可见性错误 | `src/userscript-entry.js` 配置/UI | `LOOP_DEFS`、`getVisibleLoopDefs()`、`renderLoopSelect()` |
+| 外部 JSON 加载失败或行为不同 | 配置校验和 contract | `normalizeLoopConfig()`、`validateLoopConfig()`、`scripts/check-loop-config.mjs` |
+| SBC 名称找不到 | entry 的 SBC Set 查找和 Loop aliases | `findSbcSet()`、`sbcNames` |
+| Daily 完成次数判断错误 | Daily sequence/preflight | `runDailySequence()`、daily progress helpers |
+| 选材数量、稀有度或来源错误 | Selection input 与纯 selector | entry `selectInventoryPlayers()` bridge、`src/selection/inventory.js` |
+| 评分 SBC 选择高分卡或卡死 | Rating model/candidates/solver | `runFillAndVerifyLoop()`、`src/selection/rating.js`、`src/domain/rating.js` |
+| Unassigned/Transfer duplicate 无法提交 | signal materialization | `prepareInventorySelection()`、`src/selection/transient-signals.js` |
+| Storage/Transfer 满时失败 | Unassigned plan/recovery | `resolveRuntimeUnassigned()`、`src/unassigned/*`、`src/config/recovery.js` |
+| 开包 471/500 或打开下一包过早 | Pack integration/transaction/policy | entry `openPack()`、`src/pack/open-transaction.js`、opened-item policy |
+| SBC 保存后人数不对或重复提交 | Submission transaction/EA Adapter | `submitInventorySbcAttempt()`、`src/sbc/submit-attempt.js`、`src/adapters/ea/sbc.js` |
+| Claim Rewards 空等或奖励判断错误 | reward claim and navigation sync | `src/sbc/reward-claim.js`、entry reward/navigation helpers |
+| Player Pick 已生成但不能领取 | pending Pick identification | `findUnassignedPlayerPick()`、`playerPickMatchesLoop()`、`pickItemNames` |
+| Pick 选择或价格不符合预期 | Pick ranking/price/manual UI | `redeemAndSelectPlayerPick()`、`rankPlayerPickCandidates()`、price helpers |
+| Provision stage 顺序或 partial Pick 错误 | Provision orchestration/config | `runProvisionCraftLoop()`、`runProvisionPreCraftPlayerPick()`、`craftingUpgrades` |
+| One-click 阶段跳过或恢复错误 | Sequence Workflow | `runDailySequence()`、`src/workflows/sequence.js` |
+| 日志卡顿、重复日志栏 | UI renderer/entry panel | `src/ui/log-renderer.js`、`installPanel()` |
+| 热加载使用旧代码 | 构建和本地服务 | `scripts/build-userscript.mjs`、`StartLoopRunnerDevServer.ps1`、Hot Reload userscript |
+
+## 7. Loop 配置规则
+
+每个 Loop 至少包含：
+
+```json
+{
+  "id": "stable-id",
+  "name": "Display Name",
+  "strategy": "playerPickSbc"
+}
+```
+
+常用字段：
+
+- `hidden`、`mvp`：默认可见性。
+- `sbcNames`：SBC Set 名称别名；运行时动态取得 Set/Challenge id。
+- `requirements`：材料条件数组。
+- `challengeRequirements`：多 Challenge 各自不同的材料条件。
+- `priorityPiles`、`primaryPiles`、`clubFallbackPiles`：来源顺序。
+- `shortagePacks`：Supply and Craft 的补货来源。
+- `sourcePackIds`、`sourcePackNames`：Pack and Craft 源包。
+- `craftingUpgrades`：Provision 的有序后续 SBC stages。
+- `pickItemNames`：Player Pick 奖励精确别名。
+- `challengesPerPick`、`pickCount`：Pick 子阵数和最终选择数。
+- `maxCompletions`、`maxPacks`、`useRoundsAsCompletions`：运行限制。
+- `openRewardPacks`：奖励包策略。
+- `protectHighGold`、`maxRating`、`allowSpecial`：普通材料保护。
+- `ratingSbcFill`、`requiredSpecialCount`、`requiredSpecialKind`：评分 SBC 参数。
+- `preCraftPlayerPickLoopId`：Provision 前置 Pick 引用。
+- `unassignedRecoveryPolicyIds`：当前 Loop 允许的恢复策略。
+
+新增静态 Player Pick 时：
+
+1. 使用完整活动名称匹配 `sbcNames`，不写死 SBC id。
+2. 材料比例写入 requirements，并由 contract test 锁定。
+3. `pickItemNames` 使用实际 Unassigned 奖励名或稳定 localization key。
+4. 不使用过宽别名，例如只有 `84+ Player Pick`；否则可能误领其它 Pick。
+5. `pickCount` 是最终选择数量，不是候选数量。候选由 EA redeem response 返回。
+6. 更新内置配置、外部 JSON、fixture coverage、contract test 和 README。
+
+自动扫描当前可用 Pick SBC 的后续设计记录在 M9。
+
+## 8. Agent 接到任务后的标准流程
+
+### 8.1 先确认事实，不先改代码
+
+1. 读取用户最新指令，确认是分析、计划还是要求直接实现。
+2. 检查工作目录和 Git 状态。
+3. 读取完整日志，不只看最后一行。
+4. 标记版本、Loop、Dry run/Live、FSU settings、SBC/Pack/Unassigned 状态。
+5. 找到第一处偏离预期的日志，而不是最后抛错的位置。
+6. 对照最近提交，若用户怀疑回归，使用 `git log`、`git show` 和 `git blame` 找到引入点及原提交目的。
+
+### 8.2 将问题归类到正确层
+
+优先判断：
+
+- 名称、数量、顺序、保护阈值变化：配置层。
+- 单个 strategy 的循环、partial 状态或阶段顺序：Workflow。
+- 选错卡、比例不对、signal 解析不全：Selection。
+- 开包 471/500、response/UI 延迟、第二包决策：Pack transaction/policy。
+- Storage/Transfer 满、保留或恢复路径：Unassigned。
+- 保存后阵容变化、重复提交、Challenge 状态：SBC transaction/Adapter。
+- EA 字段读取错误、缓存缺失：Adapter 或 entry integration。
+- 面板、日志、recap：UI/entry。
+
+先尝试用配置或现有 callback 表达需求。不要为了一个 Loop 复制共享底层函数，也不要为了避免局部参数而修改所有 Loop 的共享行为。
+
+### 8.3 做影响面分析
+
+修改前回答：
+
+- 这个函数/字段被谁调用？
+- 是一个 Loop、一个 strategy，还是全部 Loop 共用？
+- Dry run 和 Live 是否共用路径？
+- 是否影响 pending 状态恢复？
+- 是否影响 Unassigned、容量或下一包决策？
+- 是否会改变 FSU/高分/特殊卡保护？
+- 是否修改 Adapter、Contract 或生成文件？
+- 需要哪些 Node tests 和真实页面验证？
+
+使用 `rg` 搜索符号、strategy、配置 id、日志文案和底层调用。不要只根据函数名推测影响范围。
+
+### 8.4 定义不变量和恢复要求
+
+实现前写下：
+
+- 正常路径。
+- 边界条件。
+- 必须停止的条件。
+- 当前失败状态更新脚本后如何继续。
+- 不允许改变的保护规则。
+- 预期新增日志。
+
+例如修 Player Pick 名称时，不修改材料选择和提交；只补实际观测到的限定别名，并保证 pending Pick 在新提交前被领取。
+
+### 8.5 先补测试，再最小修改
+
+优先测试层级：
+
+- 纯函数 Bug：`tests/unit`。
+- 状态机顺序或恢复：`tests/workflows`。
+- 配置、Adapter 或 userscript 集成契约：`tests/contracts`。
+- 运行时全局或直接调用点变化：`tests/architecture`。
+- 真实 EA/FSU/Pack 数据：`tests/fixtures` 中新增脱敏 fixture。
+
+Bug 回归测试应描述原始失败场景，不要只把旧断言改成新结果。
+
+### 8.6 实现和验证
+
+实现顺序：
+
+1. 修改源码和配置。
+2. 运行最小相关测试。
+3. 运行 `npm run verify`。
+4. 运行 `git diff --check`。
+5. 检查生成的 userscript 版本和目标配置是否存在。
+6. 根据影响面列出建议用户执行的真实页面验证场景。
+
+不要在必要测试仍失败时只交付“理论上可行”。
+
+## 9. 测试框架
+
+Vitest 运行在 Node 环境，配置见 `vitest.config.js`。
+
+### 9.1 Unit tests
+
+目录：`tests/unit`
+
+覆盖：
+
+- Domain contracts 和评分公式。
+- requirements/rating selection。
+- FSU、保护和 duplicate signal characterization/differential。
+- Pack transaction 和 opened item policy。
+- Unassigned plan、resolver 和 recovery。
+- Submission transaction 和 reward claim。
+- Log renderer。
+
+Characterization test 锁定当前已验证行为；differential test 对比重构前后或两种实现的结果。修改它们时要确认是修 Bug 还是改变规则。
+
+### 9.2 Workflow tests
+
+目录：`tests/workflows`
+
+使用回调和 fake result 测试状态机，不启动 EA 页面。覆盖 recycle、supply-and-craft、pack-and-craft、Player Pick、repeated submission 和 sequence。
+
+Workflow 测试应检查调用次数、顺序、结构化状态和恢复，不测试 DOM。
+
+### 9.3 Contract tests
+
+目录：`tests/contracts`
+
+- `loop-config.test.js`：配置合法性、内置/外部关键行为和安全上限。
+- `fixture-coverage.test.js`：每个内置 Loop 都有 normal/recovery 场景说明。
+- `inventory-adapter.test.js`：EA Item 到 Snapshot 的转换。
+- `effect-adapters.test.js`：fake/EA 副作用契约。
+
+新增 Loop 后必须更新 `tests/fixtures/workflow-scenarios.json`，否则 fixture coverage 会失败。
+
+### 9.4 Architecture tests
+
+目录：`tests/architecture`
+
+- 禁止共享模块访问 runtime globals。
+- 禁止 Workflow import Adapter 实现。
+- 锁定 pack.open、SBC save/submit 的直接调用点。
+- 锁定已删除的旧专用 runner 不重新出现。
+
+架构 baseline 变化不能机械更新数字；必须解释为什么新增直接调用是合理的。一般应修改实现保持 baseline，而不是放宽测试。
+
+### 9.5 Userscript integration harness
+
+`tests/helpers/load-userscript.js` 使用 esbuild 打包源码，在 Node `vm` 中安装 fake window、repositories、services 和 test exports。它用于测试仍位于 entry 的配置校验、选择桥和 runtime helper。
+
+如需测试新的 entry helper，可谨慎加入 `W.__FCLoopRunnerTest` export；不要将测试专用逻辑带入正常运行路径。
+
+### 9.6 Fixtures
+
+目录：`tests/fixtures`
+
+保存脱敏、可重复输入：
+
+- Challenge 进度和评分要求。
+- FSU selection policy。
+- Inventory/Storage overflow。
+- My Packs 实例。
+- 每个 Loop 的 normal/recovery 行为描述。
+
+真实 Bug 的 fixture 应保留决定性字段，例如 item id、definition id、duplicateId、rating、rareflag、tradeable、pile、capacity 和 Challenge 状态。
+
+## 10. 按改动类型选择验证范围
+
+### 配置或名称别名
+
+- `npm run check:config`
+- `tests/contracts/loop-config.test.js`
+- `tests/contracts/fixture-coverage.test.js`
+- 目标 Loop 真实页面验证
+- 最终仍运行 `npm run verify`
+
+### 单个 Workflow
+
+- 对应 workflow tests
+- 该 strategy 的所有配置 contract
+- 目标 Loop 和同 strategy Loop 的真实页面验证
+- `npm run verify`
+
+### Selection
+
+- selection unit、characterization、differential
+- Player Pick、Provision、Daily、Rare Pack 或 Rating 等全部相关 workflow tests
+- 视修改范围至少验证一个 requirements Loop 和一个 rating Loop 的真实页面流程
+- `npm run verify`
+
+### Pack
+
+- open-pack transaction、opened policy、transient signal tests
+- 所有受影响 pack workflows
+- 真实页面验证正常包、stale/471/500、response 早于 UI 和容量边界
+- `npm run verify`
+
+### Unassigned
+
+- plan、resolve、recovery tests
+- Daily、Rare Pack、Provision、Player Pick 收尾场景
+- 真实页面验证 Storage/Transfer 满和当前状态恢复
+- `npm run verify`
+
+### SBC Submission 或 EA Adapter
+
+- submit-attempt、reward-claim、adapter contracts、architecture tests
+- Inventory SBC、Player Pick、Rating SBC 各至少一个相关测试
+- 真实页面提交、奖励、重复点击和恢复验证
+- `npm run verify`
+
+### UI
+
+- log renderer tests
+- 简洁/Options/`L`/resize/drag/recap 人工检查
+- 高频日志刷新检查
+- `npm run verify`
+
+## 11. Dry run 与 Live
+
+Dry run 和 Live 应尽量共享：
+
+- Challenge 定位和要求解析。
+- Inventory snapshot。
+- Selection 和 rating solver。
+- validator 和 diagnostics。
+- Workflow planning。
+
+Dry run 必须在副作用前停止：
+
+- 不移动物品。
+- 不清理真实 Unassigned。
+- 不开包。
+- 不保存阵容。
+- 不提交 SBC。
+- 不兑换 Pick。
+
+不能简单运行完整 Live 然后跳过最后提交，因为前面的开包、移动、保存和恢复 SBC 本身已经改变账号状态。
+
+## 12. 日志分析方法
+
+分析日志时按时间线分层：
+
+1. `Ready v...`：确认运行版本。
+2. `FSU settings sync`：确认实际保护策略。
+3. `Loop selected`：确认 strategy。
+4. Challenge/Pack preflight：确认目标和剩余次数。
+5. Selection：确认数量、pile 和 diagnostics。
+6. 保存与 `submit ready`：确认实际阵容状态。
+7. 提交与 reward claim：确认是否已经成功。
+8. Unassigned confirmation：确认奖励和重复卡状态。
+9. 第一条偏离预期的日志。
+10. 最终异常堆栈只用于定位调用链，不一定是根因。
+
+常见例子：
+
+- `unrelated unassigned Player Pick`：通常是奖励别名不匹配，不代表 SBC 提交失败。
+- `SBC storage has only ...`：根因可能是前一步不该清空 Unassigned，而不是容量检查本身。
+- `selected M/N`：先看 diagnostics 和 FSU settings，再判断库存不足。
+- `Open pack failed: 471/500`：检查是否残留 SBC 页面、stale pack 或 Unassigned 未同步。
+- 长时间无日志：区分 EA 请求等待、页面 loading、同步计算或日志 renderer 阻塞。
+
+## 13. Git、远程更新与冲突
+
+仓库可能存在未提交改动。Agent 必须：
+
+- 不还原不属于当前任务的改动。
+- 不使用 `git reset --hard` 或类似破坏命令。
+- 远程更新后先检查 diff、最近提交目的和行为覆盖范围。
+- 冲突不能只按文本解决；必须确认双方行为意图。
+- 特别检查内置配置、外部 JSON、README、tests 和生成产物是否被旧版本覆盖。
+- 合并后运行 `npm run verify`，并验证受影响的真实页面流程。
+
+怀疑回归时：
+
+1. 找到最后正常版本和首次失败版本。
+2. 用 `git log --oneline`、`git show`、`git diff old..new`。
+3. 确认引入提交的原始目的。
+4. 恢复旧的正确行为，同时保留该提交真正需要的修复。
+5. 添加同时覆盖“旧正确行为”和“新修复目的”的测试。
+
+## 14. 本地热加载与发布
+
+启动服务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\StartLoopRunnerDevServer.ps1"
+```
+
+开发循环：
+
+```powershell
+npm run build
+# Web App 中点击 Reload Loop
+```
+
+发布前：
+
+```powershell
+npm run verify
+git diff --check
+```
+
+共享底层修改不得仅凭 Node tests 宣布完成；Agent 应根据影响面列出真实页面验证场景，由能够访问账号和 Web App 的用户执行。
+
+CI 位于 `.github/workflows`，Windows + Node 22 执行 `npm ci` 和 `npm run verify`，并检查生成的根目录 userscript 已提交。
+
+## 15. 交付报告要求
+
+Agent 完成任务时应说明：
+
+- 根因。
+- 修改了哪一层和哪些文件。
+- 为什么没有扩大到其它层，或共享改动影响哪些 Loop。
+- 新增/修改了哪些测试。
+- `npm run verify` 结果。
+- 是否执行真实页面验证；没有执行时明确列出待验证场景。
+- 当前失败状态是否可以直接重新运行恢复。
+- 版本和生成产物是否同步。
+
+不要只说“已修复”。对于高风险共享修改，必须给出影响面和剩余风险。
+
+## 16. 当前架构缺口
+
+以下内容仍在重构中，不能假装已完成：
+
+- `src/userscript-entry.js` 仍包含较多 EA/UI 集成和 helper。
+- DOM/Storage Adapter 已存在，但并非所有 entry 路径都通过统一 Adapter 集合调用。
+- 部分验证和 reserved duplicate helper 仍在 entry。
+- 旧 strategy 名仍保留外部配置兼容。
+- Player Pick SBC 自动扫描和动态配置生成尚未实现，见 M9。
+
+是否删除旧路径或继续物理拆分，以 [REFACTORING_MILESTONES.md](REFACTORING_MILESTONES.md) 为准，不因单个功能任务顺带扩大重构范围。

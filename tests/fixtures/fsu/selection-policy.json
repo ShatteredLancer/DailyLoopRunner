@@ -1,0 +1,16 @@
+{
+  "ignorePlayerPosition": true,
+  "onlyUntradeable": false,
+  "excludeDesignatedLeagues": true,
+  "excludedLeagueIds": [31, 16, 13, 19, 53],
+  "useRarityPlayer": true,
+  "excludeEvolution": true,
+  "playerPickStrictCommonRare": true,
+  "priorityRareWithinGoldRange": false,
+  "priorityNonSpecialPlayers": true,
+  "priorityStoragePlayers": false,
+  "silverBronzePrioritizeNormal": true,
+  "goldRange": [75, 81],
+  "lockedItemIds": [99001],
+  "lockedDefinitionIds": [88001]
+}

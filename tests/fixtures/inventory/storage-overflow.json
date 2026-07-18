@@ -1,0 +1,25 @@
+{
+  "pileSizes": { "storage": 100, "transfer": 100 },
+  "pileCounts": { "storage": 97, "transfer": 44 },
+  "unassigned": [
+    { "id": 501, "definitionId": 701, "rating": 64, "duplicateId": 901, "duplicate": true, "untradeable": true },
+    { "id": 502, "definitionId": 702, "rating": 64, "duplicateId": 902, "duplicate": true, "untradeable": true },
+    { "id": 503, "definitionId": 703, "rating": 64, "duplicateId": 903, "duplicate": true, "untradeable": true },
+    { "id": 504, "definitionId": 704, "rating": 64, "duplicateId": 904, "duplicate": true, "untradeable": true },
+    { "id": 505, "definitionId": 705, "rating": 64, "duplicateId": 905, "duplicate": true, "untradeable": true },
+    { "id": 506, "definitionId": 706, "rating": 64, "duplicateId": 906, "duplicate": true, "untradeable": true },
+    { "id": 507, "definitionId": 707, "rating": 64, "duplicateId": 907, "duplicate": true, "untradeable": true },
+    { "id": 508, "definitionId": 708, "rating": 64, "duplicateId": 908, "duplicate": true, "untradeable": true }
+  ],
+  "club": [
+    { "id": 901, "definitionId": 701, "rating": 64, "untradeable": true },
+    { "id": 902, "definitionId": 702, "rating": 64, "untradeable": true },
+    { "id": 903, "definitionId": 703, "rating": 64, "untradeable": true },
+    { "id": 904, "definitionId": 704, "rating": 64, "untradeable": true },
+    { "id": 905, "definitionId": 705, "rating": 64, "untradeable": true },
+    { "id": 906, "definitionId": 706, "rating": 64, "untradeable": true },
+    { "id": 907, "definitionId": 707, "rating": 64, "untradeable": true },
+    { "id": 908, "definitionId": 708, "rating": 64, "untradeable": true }
+  ],
+  "expected": { "count": 8, "space": 3, "blocked": true }
+}

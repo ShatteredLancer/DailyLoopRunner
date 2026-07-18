@@ -1,0 +1,22 @@
+{
+  "model": {
+    "requiredPlayerCount": 11,
+    "targetRating": 84,
+    "maxSpecialCount": 1,
+    "requiredGroupId": 44,
+    "requiredGroupCount": 1
+  },
+  "players": [
+    { "id": 1001, "definitionId": 2001, "rating": 84, "rareflag": 2, "groups": [44], "name": "TOTW Test" },
+    { "id": 1002, "definitionId": 2002, "rating": 84, "rareflag": 0 },
+    { "id": 1003, "definitionId": 2003, "rating": 84, "rareflag": 0 },
+    { "id": 1004, "definitionId": 2004, "rating": 84, "rareflag": 0 },
+    { "id": 1005, "definitionId": 2005, "rating": 84, "rareflag": 0 },
+    { "id": 1006, "definitionId": 2006, "rating": 84, "rareflag": 0 },
+    { "id": 1007, "definitionId": 2007, "rating": 84, "rareflag": 0 },
+    { "id": 1008, "definitionId": 2008, "rating": 84, "rareflag": 0 },
+    { "id": 1009, "definitionId": 2009, "rating": 84, "rareflag": 0 },
+    { "id": 1010, "definitionId": 2010, "rating": 84, "rareflag": 0 },
+    { "id": 1011, "definitionId": 2011, "rating": 84, "rareflag": 0 }
+  ]
+}

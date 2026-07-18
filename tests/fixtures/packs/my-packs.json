@@ -1,0 +1,12 @@
+{
+  "packs": [
+    { "id": 105, "name": "BRONZE PLAYERS PREMIUM" },
+    { "id": 105, "name": "BRONZE PLAYERS PREMIUM" },
+    { "id": 205, "name": "SILVER PLAYERS PREMIUM" },
+    { "id": 20643, "name": "Provisions Pack" }
+  ],
+  "expected": {
+    "total": 4,
+    "countsById": { "105": 2, "205": 1, "20643": 1 }
+  }
+}

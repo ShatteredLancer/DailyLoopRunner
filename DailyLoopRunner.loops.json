@@ -1,4 +1,157 @@
 {
+  "recoveryRecipes": [
+    {
+      "id": "daily-bronze-upgrade",
+      "name": "Daily Bronze Upgrade",
+      "sbcNames": ["Daily Bronze Upgrade", "每日青铜升级", "每日青銅升級"],
+      "requirements": [{ "tier": "bronze", "count": 1, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    },
+    {
+      "id": "daily-silver-upgrade",
+      "name": "Daily Silver Upgrade",
+      "sbcNames": ["Daily Silver Upgrade", "每日白银升级", "每日白銀升級"],
+      "requirements": [{ "tier": "silver", "count": 1, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    },
+    {
+      "id": "daily-common-gold-upgrade",
+      "name": "Daily Common Gold Upgrade",
+      "sbcNames": ["Daily Common Gold Upgrade", "每日普通金牌升级", "每日普通金牌升級"],
+      "requirements": [
+        { "tier": "silver", "count": 5, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] },
+        { "tier": "bronze", "count": 5, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }
+      ],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    },
+    {
+      "id": "bronze-upgrade",
+      "name": "Bronze Upgrade",
+      "sbcNames": ["Bronze Upgrade", "青铜升级", "青銅升級"],
+      "requirements": [{ "tier": "bronze", "count": 11, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    },
+    {
+      "id": "silver-upgrade",
+      "name": "Silver Upgrade",
+      "sbcNames": ["Silver Upgrade", "白银升级", "白銀升級"],
+      "requirements": [{ "tier": "silver", "count": 11, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    },
+    {
+      "id": "daily-rare-gold-upgrade",
+      "name": "Daily Rare Gold Upgrade",
+      "sbcNames": ["Daily Rare Gold Upgrade", "每日稀有金牌升级", "每日稀有金牌升級"],
+      "requirements": [{ "tier": "gold", "rarity": "common", "count": 5, "maxRating": 81, "playerOnly": true, "allowSpecial": false, "protectHighGold": true, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    },
+    {
+      "id": "fof-glory-hunters-crafting-upgrade",
+      "name": "FOF Glory Hunters Crafting Upgrade",
+      "sbcNames": ["FOF Glory Hunters Crafting Upgrade"],
+      "requirements": [{ "tier": "gold", "rarity": "common", "count": 9, "maxRating": 81, "playerOnly": true, "allowSpecial": false, "protectHighGold": true, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    },
+    {
+      "id": "gold-upgrade",
+      "name": "Gold Upgrade",
+      "sbcNames": ["Gold Upgrade", "黄金升级", "黃金升級"],
+      "requirements": [{ "tier": "gold", "rarity": "common", "count": 11, "maxRating": 81, "playerOnly": true, "allowSpecial": false, "protectHighGold": true, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    },
+    {
+      "id": "2x84-upgrade",
+      "name": "2x 84+ Upgrade",
+      "sbcNames": ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
+      "requirements": [{ "tier": "gold", "rarity": "rare", "count": 6, "maxRating": 81, "playerOnly": true, "allowSpecial": false, "protectHighGold": true, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "maxSubmissions": 1,
+      "mustConsumeTrigger": true,
+      "onUnavailable": "continue",
+      "onInsufficient": "continue",
+      "onBlocked": "stop"
+    }
+  ],
+  "unassignedRecoveryPolicies": [
+    {
+      "id": "bronze-duplicate-overflow",
+      "match": { "tier": "bronze", "playerOnly": true, "allowSpecial": false },
+      "steps": [
+        { "recipeId": "daily-bronze-upgrade" },
+        { "recipeId": "daily-common-gold-upgrade" },
+        { "recipeId": "bronze-upgrade" }
+      ]
+    },
+    {
+      "id": "silver-duplicate-overflow",
+      "match": { "tier": "silver", "playerOnly": true, "allowSpecial": false },
+      "steps": [
+        { "recipeId": "daily-silver-upgrade" },
+        { "recipeId": "daily-common-gold-upgrade" },
+        { "recipeId": "silver-upgrade" }
+      ]
+    },
+    {
+      "id": "common-gold-duplicate-overflow",
+      "match": { "tier": "gold", "rarity": "common", "playerOnly": true, "allowSpecial": false, "maxRating": 81 },
+      "steps": [
+        { "recipeId": "daily-rare-gold-upgrade" },
+        { "recipeId": "fof-glory-hunters-crafting-upgrade" },
+        { "recipeId": "gold-upgrade" }
+      ]
+    },
+    {
+      "id": "rare-gold-duplicate-overflow",
+      "match": { "tier": "gold", "rarity": "rare", "playerOnly": true, "allowSpecial": false, "maxRating": 81 },
+      "steps": [{ "recipeId": "2x84-upgrade" }]
+    }
+  ],
+  "defaultUnassignedRecoveryPolicyIds": [
+    "bronze-duplicate-overflow",
+    "silver-duplicate-overflow",
+    "common-gold-duplicate-overflow",
+    "rare-gold-duplicate-overflow"
+  ],
   "loops": [
     {
       "id": "bronze-upgrade-validation",
@@ -130,7 +283,7 @@
       "id": "daily-common",
       "hidden": true,
       "name": "Daily Common Loop",
-      "strategy": "inventoryMixedUpgrade",
+      "strategy": "supplyAndCraft",
       "sbcNames": [
         "Daily Common Gold Upgrade",
         "每日普通金牌升级",
@@ -181,7 +334,7 @@
       "hidden": true,
       "mvp": true,
       "name": "Daily Common MVP (1 run)",
-      "strategy": "inventoryMixedUpgrade",
+      "strategy": "supplyAndCraft",
       "sbcNames": [
         "Daily Common Gold Upgrade",
         "每日普通金牌升级",
@@ -231,7 +384,7 @@
       "id": "daily-rare",
       "hidden": true,
       "name": "Daily Rare Loop",
-      "strategy": "commonGoldToRareUpgrade",
+      "strategy": "supplyAndCraft",
       "sbcNames": [
         "Daily Rare Gold Upgrade",
         "每日稀有金牌升级",
@@ -258,6 +411,18 @@
       ],
       "priorityPiles": ["unassigned", "storage", "transfer"],
       "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "deferChallengeLoad": true,
+      "preSelectionCleanup": false,
+      "shortagePacks": [
+        {
+          "requirement": { "tier": "gold", "rarity": "common", "playerOnly": true, "allowSpecial": false, "protectHighGold": true },
+          "packNames": ["11x Gold Players Pack", "11 x Gold Players Pack"],
+          "maxOpensPerAttempt": 1,
+          "repeatUntilSatisfied": true,
+          "maxRuns": 100,
+          "routingPolicy": "reserveMatchingDuplicates"
+        }
+      ],
       "dailyCompletionLimit": 7,
       "maxCompletions": 7
     },
@@ -266,7 +431,7 @@
       "hidden": true,
       "mvp": true,
       "name": "Daily Rare MVP (1 run)",
-      "strategy": "commonGoldToRareUpgrade",
+      "strategy": "supplyAndCraft",
       "sbcNames": [
         "Daily Rare Gold Upgrade",
         "每日稀有金牌升级",
@@ -293,6 +458,18 @@
       ],
       "priorityPiles": ["unassigned", "storage", "transfer"],
       "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "deferChallengeLoad": true,
+      "preSelectionCleanup": false,
+      "shortagePacks": [
+        {
+          "requirement": { "tier": "gold", "rarity": "common", "playerOnly": true, "allowSpecial": false, "protectHighGold": true },
+          "packNames": ["11x Gold Players Pack", "11 x Gold Players Pack"],
+          "maxOpensPerAttempt": 1,
+          "repeatUntilSatisfied": true,
+          "maxRuns": 100,
+          "routingPolicy": "reserveMatchingDuplicates"
+        }
+      ],
       "dailyCompletionLimit": 7,
       "maxCompletions": 1
     },
@@ -343,6 +520,39 @@
         "1 of 5 83+ Player Pick",
         "83+ Player Pick",
         "PlayerPickItemName25_4164"
+      ],
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "rare",
+          "count": 4,
+          "maxRating": 81,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "protectHighGold": true,
+          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        }
+      ],
+      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "challengesPerPick": 1,
+      "pickCount": 1,
+      "maxCompletions": 1,
+      "useRoundsAsCompletions": true,
+      "pricePlatform": "pc"
+    },
+    {
+      "id": "84-plus-summer-tournament-nations-pick-1of3",
+      "name": "1 of 3 84+ Summer Tournament Nations Player Pick",
+      "strategy": "playerPickSbc",
+      "sbcNames": [
+        "1 of 3 84+ Summer Tournament Nations Player Pick",
+        "1 of 3 84+ Summer Tournament Nations Players Pick"
+      ],
+      "pickItemNames": [
+        "1 of 3 84+ Summer Tournament Nations Player Pick",
+        "1 of 3 84+ Summer Tournament Nations Pick",
+        "84+ Summer Tournament Nations Player Pick",
+        "Summer Tournament Nations Player Pick"
       ],
       "requirements": [
         {
@@ -426,6 +636,8 @@
     },
     {
       "id": "2x84-fodder",
+      "hidden": true,
+      "mvp": true,
       "name": "2x84+ Fodder Loop",
       "strategy": "fillAndVerifySbc",
       "sbcNames": ["2x 84+ Upgrade", "2 x 84+ Upgrade"],

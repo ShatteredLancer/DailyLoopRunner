@@ -1,0 +1,85 @@
+{
+  "baselineVersion": "0.4.43",
+  "loops": {
+    "bronze-upgrade-validation": {
+      "normal": "Open one configured bronze source pack, submit Bronze Upgrade, and open the silver reward.",
+      "recovery": "Stop without submission when the source pack or SBC challenge is unavailable."
+    },
+    "daily-bronze": {
+      "normal": "Consume bronze duplicates before opening another Bronze Players Premium reward pack.",
+      "recovery": "Resume existing Unassigned bronze duplicates and stop safely when the daily SBC is complete."
+    },
+    "daily-bronze-mvp": {
+      "normal": "Run at most one Daily Bronze completion with the normal recycle rules.",
+      "recovery": "Do not open another pack after the single completion or when no challenge remains."
+    },
+    "daily-silver": {
+      "normal": "Consume silver duplicates before opening another Silver Players Premium reward pack.",
+      "recovery": "Resume existing Unassigned silver duplicates and stop safely when the daily SBC is complete."
+    },
+    "daily-silver-mvp": {
+      "normal": "Run at most one Daily Silver completion with the normal recycle rules.",
+      "recovery": "Do not open another pack after the single completion or when no challenge remains."
+    },
+    "daily-common": {
+      "normal": "Submit exactly five silver and five bronze players using Unassigned, Storage, Transfer, then Club fallback.",
+      "recovery": "Open at most one relevant shortage pack at a time and stop opening packs when Unassigned cannot be routed safely."
+    },
+    "daily-common-mvp": {
+      "normal": "Run at most one five-silver/five-bronze completion.",
+      "recovery": "Preserve usable Unassigned materials and stop safely on capacity or material shortage."
+    },
+    "daily-rare": {
+      "normal": "Use common gold from Unassigned, Storage, Transfer, then an 11x Gold Players Pack before Club fallback.",
+      "recovery": "Resume common gold duplicates and stop when no pack or safe Club fallback can complete the challenge."
+    },
+    "daily-rare-mvp": {
+      "normal": "Run at most one Daily Rare completion while preserving the common-gold ratio.",
+      "recovery": "Stop safely when the challenge or source pack is unavailable."
+    },
+    "daily-rare-pack-84": {
+      "normal": "Open matching five-player rare gold packs and use low rare duplicates for 2x84+.",
+      "recovery": "Resume response-only duplicates even when the Unassigned UI cache is delayed and protect 82+ cards."
+    },
+    "83-plus-player-pick-1of5": {
+      "normal": "Submit exactly four low rare gold players and select one of five results.",
+      "recovery": "Resume an already generated Pick and stop for manual selection when the configured threshold requires it."
+    },
+    "84-plus-summer-tournament-nations-pick-1of3": {
+      "normal": "Submit exactly four low rare gold players and select one of three Summer Tournament Nations results.",
+      "recovery": "Resume only the matching Summer Tournament Nations Pick and stop without redeeming an unrelated Player Pick."
+    },
+    "82-plus-player-pick-5of10": {
+      "normal": "Submit two challenges of eleven low common gold players and select five of ten results.",
+      "recovery": "Resume a partial multi-challenge Pick without replacing common requirements with rare cards."
+    },
+    "one-click-daily-mvp": {
+      "normal": "Run one completion for each configured MVP Daily stage.",
+      "recovery": "Skip completed stages and continue from the first remaining or recoverable stage."
+    },
+    "one-click-daily": {
+      "normal": "Run Daily Bronze, Silver, Common, Rare, then Rare Pack in the configured order using actual remaining counts.",
+      "recovery": "Restart from existing Unassigned state, skip completed stages, and continue after a prior safe stop."
+    },
+    "2x84-fodder": {
+      "normal": "Submit six low rare gold players and open the required reward pack.",
+      "recovery": "Stop before submission when fewer than six safe low rare gold players are available."
+    },
+    "auto-totw-upgrade": {
+      "normal": "Build the lowest safe dynamic-rating squad and open the resulting TOTW reward pack.",
+      "recovery": "Stop on unsupported dynamic requirements, rating shortage, or reward-pack failure."
+    },
+    "84x10-mvp": {
+      "normal": "Submit one lowest safe dynamic-rating squad with exactly one eligible TOTW, TOTS, or FOF card.",
+      "recovery": "Use configured TOTW and 2x84+ prerequisites, then stop if a safe squad still cannot be built."
+    },
+    "84x10": {
+      "normal": "Repeat the shared rating workflow up to seven times while preserving reward packs by default.",
+      "recovery": "Resume after prerequisite crafting and stop without submission when dynamic validation fails."
+    },
+    "provision-crafting": {
+      "normal": "Open one Provision pack per round, conditionally complete the configured Pick, then run configured crafting stages.",
+      "recovery": "Resume pending Pick or reserved duplicates, preserve partial challenges, and continue on a later round."
+    }
+  }
+}

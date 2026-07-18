@@ -1,0 +1,22 @@
+{
+  "name": "fc26-daily-loop-runner",
+  "version": "0.5.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-userscript.mjs",
+    "check:dist": "node --check dist/DailyLoopRunner.user.js && node scripts/check-dist.mjs",
+    "check:config": "node scripts/check-loop-config.mjs",
+    "check:architecture": "node scripts/audit-architecture.mjs --check",
+    "lint:syntax": "node scripts/check-syntax.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:contracts": "vitest run tests/contracts",
+    "test:architecture": "vitest run tests/architecture",
+    "verify": "npm run lint:syntax && npm run check:config && npm run check:architecture && npm test && npm run build && npm run check:dist"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.6",
+    "vitest": "^3.2.4"
+  }
+}

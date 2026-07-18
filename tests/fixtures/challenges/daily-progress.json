@@ -1,0 +1,16 @@
+{
+  "set": {
+    "id": 1037,
+    "name": "Daily Common Gold Upgrade",
+    "timesCompleted": 3,
+    "repeats": 7
+  },
+  "challenge": {
+    "id": 3070,
+    "timesCompleted": 255
+  },
+  "expected": {
+    "setRemaining": 4,
+    "challengeRemaining": null
+  }
+}
