@@ -24,6 +24,14 @@ Daily Loop Runner 是 EA FC Web App 的 Tampermonkey 自动化脚本，运行时
 - 没有测试覆盖的线上 Bug，应先添加最小 fixture 或失败测试，再修实现。
 - Node 自动测试不能替代真实 Web App 验证。
 
+已经在真实页面确认、不得回退的运行时事实：
+
+- FSU 是普通金材料策略的权威来源。Only Untradeable、排除联赛、Exclude Evolution、Golden Player Range、Storage 优先和 Lock player 必须跟随；Runner 不得为了凑够材料绕过这些过滤。评分型 SBC 可以不使用 FSU 页面一键填充，但候选仍必须经过 FSU 过滤和锁卡检查。
+- EA/FSU 的 `loans === -1` 表示无限使用的普通卡，不是 loan。`loans === 0` 或正数才表示受限使用；真实 loan、limited-use、concept、academy enrolled 和 active trade item 都不能提交。
+- FSU Lock 不能只匹配单一 `item.id`。身份匹配必须覆盖 item、resource、definition、asset 和 guid 类字段，以及 EA 对象常见的嵌套数据容器。
+- 同一 SBC squad 的 `definitionId` 必须唯一；Unassigned/Transfer duplicate signal 只能解析到 Club/Storage 中真实可提交的对应卡。
+- 84x10 只能使用 Challenge 要求数量和类型的 requirement special。额外特殊卡、错误特殊卡、超出提交上限的卡和 protected id 必须在保存前、保存后和提交前拦截。
+
 ## 2. 运行环境与依赖
 
 ### 2.1 浏览器运行时
@@ -278,6 +286,9 @@ EA objects
 - Unassigned/Transfer 只作为 duplicate signal，最终必须解析到真实 submission item。
 - requirements 模式严格保持 count、tier、rarity、special 和评分上限。
 - rating 模式先最小化评分向量，再比较 pile；不能因 Storage 优先而选择不必要的高分卡。
+- rating 模式必须从当前 Challenge 读取人数、TEAM_RATING 和可识别的球员条件；遇到 chemistry 或未知 eligibility key 时停止。
+- rating 搜索必须保留 `maxSearchNodes`、`maxSearchMs` 和 `yieldEveryNodes` 等有界限制。大库存下宁可输出诊断并停止，也不能改成无界同步搜索阻塞浏览器。
+- 评分型 Live 使用 EA SBC DAO 的后台 Challenge/Squad/submit 集成路径，避免创建可视 squad controller 触发 FSU/Enhancer 页面增强；这不允许绕过 FSU 候选过滤。
 
 修改后至少运行 selection unit、characterization、differential tests 和所有相关 workflow tests。
 
@@ -298,6 +309,8 @@ EA objects
 - 开包前先处理或明确保留已有 Unassigned。
 - 每个开包调用必须提供 opened-item policy。
 - response item 与 Repository 延迟必须被 receipt/transient signal 覆盖。
+- EA pack response 经常早于 Unassigned cache。成功开包后必须先标准化并处理 response items：按 policy 将非重复、可交易重复、不可交易重复或当前 stage 保留材料分类和路由；然后再处理残留 Unassigned，最后刷新 recent reward/Repository 状态，才允许下一次选材或开下一包。
+- 不得把“先清理旧 Unassigned”和“开包成功后的 response materialization”混为同一步。开包后的 response 处理必须先于该奖励产生的残留 Unassigned cleanup，否则下一轮会误报缺料或遗留重复卡。
 - 471、500、404 和 stale pack 的重试必须有界。
 - 开第二包前必须重新检查 Unassigned 和容量。
 
@@ -453,6 +466,7 @@ UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文
 - `challengesPerPick`、`pickCount`：Pick 子阵数和最终选择数。
 - `maxCompletions`、`maxPacks`、`useRoundsAsCompletions`：运行限制。
 - `openRewardPacks`：奖励包策略。
+- `forceOpenRewardPacks`：子流程后续逻辑必须依赖奖励物时强制开包，例如自动 2x84+ fodder 或 TOTW 前置；不能被普通 UI 开关错误覆盖。
 - `protectHighGold`、`maxRating`、`allowSpecial`：普通材料保护。
 - `ratingSbcFill`、`requiredSpecialCount`、`requiredSpecialKind`：评分 SBC 参数。
 - `preCraftPlayerPickLoopId`：Provision 前置 Pick 引用。
@@ -712,6 +726,10 @@ Dry run 必须在副作用前停止：
 - `SBC storage has only ...`：根因可能是前一步不该清空 Unassigned，而不是容量检查本身。
 - `selected M/N`：先看 diagnostics 和 FSU settings，再判断库存不足。
 - `Open pack failed: 471/500`：检查是否残留 SBC 页面、stale pack 或 Unassigned 未同步。
+- `rating search exceeded ...`：候选池或组合复杂度达到有界限制；优化候选或配置，不要简单把搜索上限改成无界。
+- `unknown eligibility key` 或 chemistry：当前动态条件无法安全解释，应记录 Challenge 模型并停止，不得忽略条件提交。
+- `reward pack not found`：先确认 SBC 进度和奖励是否已经发放，再刷新 Packs；不要盲目重复提交同一个 Challenge。
+- 材料已经开出却立即报缺料：优先检查是否先处理 pack response、再清理残留 Unassigned 和刷新 recent reward；不要直接放宽材料保护。
 - 长时间无日志：区分 EA 请求等待、页面 loading、同步计算或日志 renderer 阻塞。
 
 ## 13. Git、远程更新与冲突
