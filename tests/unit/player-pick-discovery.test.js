@@ -98,11 +98,75 @@ describe('dynamic Player Pick SBC discovery', () => {
     ]);
   });
 
-  it('marks completed Sets without generating a runnable loop', async () => {
+  it('keeps a reported-completed Pick runnable when its Challenge metadata is complete', async () => {
+    const fixture = await loadFixture('challenges/player-pick-discovery.json');
+    const result = parsePlayerPickSbcSnapshot({
+      set: {
+        ...fixture.singleChallenge.set,
+        complete: true,
+        timesCompleted: 1,
+        repeats: 1,
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'supported',
+      setId: 4101,
+      reportedCompleted: true,
+      remainingCompletions: 0,
+      loop: {
+        maxCompletions: 1,
+        useRoundsAsCompletions: false,
+        discoveryReportedCompleted: true,
+      },
+    });
+  });
+
+  it('adds a fully described reported-completed Pick to the session Loop list', async () => {
+    const fixture = await loadFixture('challenges/player-pick-discovery.json');
+    const completedSet = {
+      ...fixture.singleChallenge.set,
+      complete: true,
+      timesCompleted: 1,
+      repeats: 1,
+    };
+    const session = buildPlayerPickDiscoverySession({
+      sets: [completedSet],
+      configuredLoops: [{ id: 'daily', name: 'Daily' }],
+    });
+
+    expect(session.discoveredLoops).toEqual([
+      expect.objectContaining({
+        sbcSetIds: [4101],
+        discoveryReportedCompleted: true,
+        maxCompletions: 1,
+      }),
+    ]);
+  });
+
+  it('does not add a reported-completed Pick when Challenge metadata is unavailable', async () => {
     const fixture = await loadFixture('challenges/player-pick-discovery.json');
     const result = parsePlayerPickSbcSnapshot(fixture.completed);
-    expect(result).toMatchObject({ status: 'completed', setId: 4104 });
+    expect(result).toMatchObject({ status: 'unsupported', setId: 4104 });
+    expect(result.diagnostics).toContain('SBC Set challenge list is missing');
     expect(result.loop).toBeUndefined();
+  });
+
+  it('does not treat missing repeat counters as a completed Set', async () => {
+    const fixture = await loadFixture('challenges/player-pick-discovery.json');
+    const result = parsePlayerPickSbcSnapshot({
+      set: {
+        ...fixture.singleChallenge.set,
+        timesCompleted: null,
+        repeats: null,
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'supported',
+      reportedCompleted: false,
+      remainingCompletions: null,
+    });
   });
 
   it('rejects missing reward identity and unsupported eligibility conditions', async () => {
@@ -302,7 +366,7 @@ describe('dynamic Player Pick SBC discovery', () => {
     });
 
     expect(rescanned.discoveredLoops).toEqual([]);
-    expect(rescanned.results.map(({ status }) => status)).toEqual(['completed', 'unsupported']);
+    expect(rescanned.results.map(({ status }) => status)).toEqual(['unsupported', 'unsupported']);
     expect(rescanned.selectedId).toBe('daily');
   });
 

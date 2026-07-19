@@ -217,6 +217,23 @@ describe('effect adapter contracts', () => {
     });
   });
 
+  it('preserves missing discovery repeat counters as null instead of coercing them to zero', () => {
+    const set = { id: 4101, name: 'Unknown progress Pick', timesCompleted: null, repeats: undefined };
+    const ea = createEaSbcAdapter({
+      services: { SBC: {
+        repository: { sets: { _collection: { 4101: set } } },
+        requestSets() {}, requestChallengesForSet() {}, loadChallenge() {}, saveChallenge() {}, submitChallenge() {},
+      } },
+      repositories: { Squad: { getFormation: () => null } },
+      UTSBCSquadSplitViewController: class {},
+    });
+
+    expect(ea.snapshotDiscoverySet(set)).toMatchObject({
+      timesCompleted: null,
+      repeats: null,
+    });
+  });
+
   it('does not infer Pick player count from an unloaded 11-slot formation', () => {
     const challenge = { id: 5101, formation: 4, eligibilityRequirements: [] };
     const set = { id: 4101, name: 'Four-player Pick', challenges: [challenge] };

@@ -99,10 +99,16 @@ export function createEaSbcAdapter(runtime) {
     try { return flattenValues(requirement?.getFirstValue?.(key)); } catch { return []; }
   }
 
-  function positiveInteger(value) {
-    const number = Number(value);
-    return Number.isInteger(number) && number > 0 ? number : null;
-  }
+function positiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function finiteNumberOrNull(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
 
   function firstPositiveInteger(values = []) {
     for (const value of values) {
@@ -252,8 +258,8 @@ export function createEaSbcAdapter(runtime) {
       complete: (() => {
         try { return set?.isComplete?.() === true || set?.complete === true || set?.completed === true; } catch { return false; }
       })(),
-      timesCompleted: Number.isFinite(Number(set?.timesCompleted)) ? Number(set.timesCompleted) : null,
-      repeats: Number.isFinite(Number(set?.repeats)) ? Number(set.repeats) : null,
+      timesCompleted: finiteNumberOrNull(set?.timesCompleted),
+      repeats: finiteNumberOrNull(set?.repeats),
       rewards: rawAwards.map(normalizeDiscoveryReward).filter(Boolean),
       challenges: rawChallenges.map(normalizeDiscoveryChallenge),
     };

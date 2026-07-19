@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.23
+// @version      0.5.24
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -225,7 +225,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.23',
+    version: '0.5.24',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -2166,7 +2166,13 @@ function updateLoopControls() {
       }),
       onResult: async ({ snapshot, parsed, loadError }) => {
         const reward = snapshot.rewards?.[0] || {};
-        log(`Player Pick scan: set #${snapshot.id || '?'} ${snapshot.name || '?'}; reward ${describePlayerPickDiscoveryReward(reward, parsed)}; challenges:${snapshot.challenges?.length || 0}; status:${parsed.status}`);
+        const remaining = parsed.remainingCompletions ?? (() => {
+          const completed = snapshot.timesCompleted;
+          const repeats = snapshot.repeats;
+          if (completed === null || completed === undefined || repeats === null || repeats === undefined) return null;
+          return Math.max(0, Number(repeats) - Number(completed));
+        })();
+        log(`Player Pick scan: set #${snapshot.id || '?'} ${snapshot.name || '?'}; reward ${describePlayerPickDiscoveryReward(reward, parsed)}; challenges:${snapshot.challenges?.length || 0}; set complete:${snapshot.complete ? 'yes' : 'no'}, state:${snapshot.status || '?'}, completed:${snapshot.timesCompleted ?? '?'}, repeats:${snapshot.repeats ?? '?'}, remaining:${remaining ?? '?'}; status:${parsed.status}${parsed.reportedCompleted ? ' (reported completed; runtime probe enabled)' : ''}`);
         if (!parsed.pickCandidateCount || !parsed.pickCount) logPlayerPickDiscoveryMetadataHints(reward);
         for (const [index, challenge] of (snapshot.challenges || []).entries()) {
           const requirements = (challenge.eligibilityRequirements || [])
@@ -2201,7 +2207,7 @@ function updateLoopControls() {
       const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []])
         .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}`).join(' + ')}`)
         .join('; ');
-      log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
+      log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? '; reported completed, one runtime probe' : ''})`);
     }
     log(`Player Pick scan complete: ${summary.pickSets} Pick Set(s) found among ${summary.setsScanned} SBC Set(s); ${state.discoveredLoopDefs.length} supported session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) using scanned metadata, ${duplicateCount} static/discovered duplicate(s) skipped`);
     return summary;
@@ -7345,9 +7351,14 @@ function updateLoopControls() {
     if (dryRun) {
       log(`${loopDef.name}: dry-run planned ${result.challengesPlanned} challenge(s)`);
       log(`${loopDef.name}: dry run stops before submitting SBCs, redeeming Picks, or moving items`);
+    } else if (result.status !== 'completed') {
+      log(`${loopDef.name}: failed (${result.status}): ${result.reason || 'unknown Player Pick failure'}`);
     } else {
       const targetLabel = loopDef.exhaustSbcSet === true ? 'available' : 'requested';
       log(`${loopDef.name}: completed ${result.picksCompleted}/${maxPicks} ${targetLabel} Player Pick(s)${openPicksAtEnd ? `; queued ${result.picksQueued}` : ''}`);
+    }
+    if (!dryRun && loopDef.discoveryReportedCompleted === true && result.status !== 'completed') {
+      fail(`${loopDef.name}: completed-status runtime probe failed (${result.status}): ${result.reason || 'SBC Set or Challenge is unavailable'}`);
     }
     return result;
   }
@@ -7632,6 +7643,10 @@ function updateLoopControls() {
         },
         afterPlayerPickRun: async (definition, result) => {
           const pickResults = result.pickResults || [];
+          if (!pickResults.length) {
+            await showUnassignedIfAny(`${definition.name} end`);
+            return;
+          }
           state.lastPickRecap = {
             name: definition.name,
             pickResults,

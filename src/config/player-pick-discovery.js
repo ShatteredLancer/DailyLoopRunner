@@ -194,6 +194,8 @@ function parseChallengeRequirements(challenge, challengeIndex, options = {}) {
 }
 
 function remainingCompletions(set) {
+  if (set?.timesCompleted === undefined || set?.timesCompleted === null
+    || set?.repeats === undefined || set?.repeats === null) return null;
   const completed = Number(set?.timesCompleted);
   const repeats = Number(set?.repeats);
   if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats < completed) return null;
@@ -236,9 +238,8 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     diagnostics.push('Player Pick selection count exceeds candidate count');
   }
 
-  if (isCompleted(set) || remainingCompletions(set) === 0) {
-    return { status: 'completed', setId, identity, pickCandidateCount: candidateCount, pickCount: selectionCount, diagnostics };
-  }
+  const setRemaining = remainingCompletions(set);
+  const reportedCompleted = isCompleted(set) || setRemaining === 0;
 
   const challenges = Array.isArray(set.challenges) ? set.challenges : [];
   if (!challenges.length) diagnostics.push('SBC Set challenge list is missing');
@@ -274,9 +275,10 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     challengesPerPick: challenges.length,
     pickCandidateCount: candidateCount,
     pickCount: selectionCount,
-    remainingCompletions: remainingCompletions(set),
+    remainingCompletions: setRemaining,
     maxCompletions: 1,
-    useRoundsAsCompletions: true,
+    useRoundsAsCompletions: !reportedCompleted,
+    discoveryReportedCompleted: reportedCompleted,
     pricePlatform: normalizedText(input.pricePlatform || 'pc').toLowerCase(),
     discoveryIdentity: identity,
   };
@@ -284,7 +286,17 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     loop.requirements = challengeRequirements[0];
     delete loop.challengeRequirements;
   }
-  return { status: 'supported', setId, identity, loop, pickCandidateCount: candidateCount, pickCount: selectionCount, diagnostics: [] };
+  return {
+    status: 'supported',
+    setId,
+    identity,
+    loop,
+    pickCandidateCount: candidateCount,
+    pickCount: selectionCount,
+    reportedCompleted,
+    remainingCompletions: setRemaining,
+    diagnostics: [],
+  };
 }
 
 function loopSetIds(loop) {
