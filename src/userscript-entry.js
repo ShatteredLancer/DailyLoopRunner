@@ -5534,6 +5534,7 @@ function updateLoopControls() {
       if (!configuredFill.ok) {
         const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(loopDef);
         if (configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit) {
+          log(`${loopDef.name}: rating shortage before automatic 2x84+ recovery: ${configuredFill.reason || 'unknown reason'}`);
           const nextAttempt = autoFodderAttempts + 1;
           const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit);
           if (recovery.ok) {
@@ -5600,6 +5601,7 @@ function updateLoopControls() {
         !inspection.missingRequirements?.length &&
         autoFodderAttempts < autoFodderLimit
       ) {
+        log(`${loopDef.name}: submit not ready before automatic 2x84+ recovery (${inspection.items?.length || fillResult.filled || 0} filled)`);
         const nextAttempt = autoFodderAttempts + 1;
         const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit);
         if (recovery.ok) {
