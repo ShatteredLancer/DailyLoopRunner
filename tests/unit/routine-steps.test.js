@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveRoutineStepLoopDefs } from '../../src/config/routine-steps.js';
+import {
+  configureRoutineStepForAvailability,
+  resolveRoutineStepLoopDefs,
+} from '../../src/config/routine-steps.js';
 
 function dailyLoop(overrides = {}) {
   return {
@@ -42,7 +45,7 @@ describe('daily routine step projection', () => {
     expect(child.priorityPiles).toEqual(['unassigned', 'storage', 'transfer', 'club']);
   });
 
-  it('preserves child-specific reward and disabled-pile settings', () => {
+  it('lets the current routine reward option override child defaults while preserving forced rewards', () => {
     const resolved = resolveRoutineStepLoopDefs(dailyLoop({
       openRewardPacks: false,
       disabledPiles: ['club'],
@@ -52,10 +55,69 @@ describe('daily routine step projection', () => {
     })]);
 
     expect(resolved[0]).toMatchObject({
-      openRewardPacks: true,
+      openRewardPacks: false,
       disabledPiles: ['transfer'],
       priorityPiles: ['unassigned', 'storage', 'club'],
     });
+
+    const forced = resolveRoutineStepLoopDefs(dailyLoop({ openRewardPacks: false }), [childLoop({
+      forceOpenRewardPacks: true,
+    })]);
+    expect(forced[0].openRewardPacks).toBe(true);
+  });
+
+  it('applies a One-click-only Rare Pack override without mutating the standalone loop', () => {
+    const standalone = childLoop({
+      id: 'daily-rare-pack-84',
+      strategy: 'rarePackTo84Upgrade',
+      sourcePackNames: ['Rare Pack'],
+      rareUpgrade: { name: '2x84+', sbcNames: ['2x84+'], requirements: [{ count: 6 }] },
+      useRoundsAsCompletions: true,
+      maxCompletions: 3,
+      consumeAllSourcePacks: true,
+    });
+    const [resolved] = resolveRoutineStepLoopDefs(dailyLoop({
+      steps: ['daily-rare-pack-84'],
+      stepOverrides: {
+        'daily-rare-pack-84': {
+          useRoundsAsCompletions: false,
+          sourceExhaustedFallbackMaxCompletions: 1,
+        },
+      },
+    }), [standalone]);
+
+    expect(resolved).toMatchObject({
+      id: 'daily-rare-pack-84',
+      strategy: 'rarePackTo84Upgrade',
+      useRoundsAsCompletions: false,
+      sourceExhaustedFallbackMaxCompletions: 1,
+    });
+    expect(standalone.useRoundsAsCompletions).toBe(true);
+    expect(standalone).not.toHaveProperty('sourceExhaustedFallbackMaxCompletions');
+  });
+
+  it('uses the current EA remaining count instead of capping it with stale local limits', () => {
+    const configured = configureRoutineStepForAvailability(
+      childLoop({ maxCompletions: 7 }),
+      { remaining: 12 },
+    );
+    expect(configured.maxCompletions).toBe(12);
+  });
+
+  it('preserves the intentional single-completion cap for MVP Daily validation steps', () => {
+    const configured = configureRoutineStepForAvailability(
+      childLoop({ mvp: true, maxCompletions: 1 }),
+      { remaining: 6 },
+    );
+    expect(configured.maxCompletions).toBe(1);
+  });
+
+  it('uses an internal safety cap instead of the stale Daily count when EA progress is unavailable', () => {
+    const configured = configureRoutineStepForAvailability(
+      childLoop({ maxCompletions: 7 }),
+      { available: true, remaining: null, safetyLimit: 100 },
+    );
+    expect(configured.maxCompletions).toBe(100);
   });
 
   it('rejects self references, missing steps, and nested routines with the existing messages', () => {

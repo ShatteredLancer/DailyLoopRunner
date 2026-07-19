@@ -508,7 +508,11 @@
         ],
         "priorityPiles": ["unassigned", "storage", "transfer", "club"]
       },
-      "maxPacks": 100
+      "maxPacks": 100,
+      "maxCompletions": 1,
+      "useRoundsAsCompletions": true,
+      "consumeAllSourcePacks": true,
+      "sourceExhaustedFallbackLoopId": "2x84-fodder"
     },
     {
       "id": "82-plus-player-pick-5of10",
@@ -543,8 +547,8 @@
       "challengesPerPick": 2,
       "pickCandidateCount": 10,
       "pickCount": 5,
-      "maxCompletions": 1,
-      "useRoundsAsCompletions": true,
+      "exhaustSbcSet": true,
+      "setCompletionSafetyLimit": 100,
       "pricePlatform": "pc"
     },
     {
@@ -572,6 +576,12 @@
         "daily-rare",
         "daily-rare-pack-84"
       ],
+      "stepOverrides": {
+        "daily-rare-pack-84": {
+          "useRoundsAsCompletions": false,
+          "sourceExhaustedFallbackMaxCompletions": 1
+        }
+      },
       "openRewardPacks": false
     },
     {
@@ -605,8 +615,7 @@
       "maxNormalGoldSubmittedRating": 81,
       "blockSpecial": true,
       "blockTradeable": false,
-      "openRewardPacks": true,
-      "forceOpenRewardPacks": true
+      "openRewardPacks": true
     },
     {
       "id": "auto-totw-upgrade",

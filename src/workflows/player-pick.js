@@ -1,6 +1,6 @@
 function pickLimit(value) {
   const number = Number(value);
-  return Math.max(1, Math.min(100, Number.isFinite(number) ? Math.floor(number) : 1));
+  return Math.max(1, Math.min(200, Number.isFinite(number) ? Math.floor(number) : 1));
 }
 
 function outcome(value) {
@@ -100,10 +100,14 @@ async function runDeferredPlayerPicks(options, result, maxPicks) {
     });
     pending = Array.isArray(pending) ? pending : [];
     if (pending.length <= queuedCount) {
-      result.status = 'unavailable';
-      result.reason = noIncompleteChallenge
-        ? 'No incomplete Player Pick challenge remains'
-        : 'Player Pick reward was not found';
+      if (noIncompleteChallenge && options.completeWhenNoChallengeRemains === true) {
+        result.reason = null;
+      } else {
+        result.status = 'unavailable';
+        result.reason = noIncompleteChallenge
+          ? 'No incomplete Player Pick challenge remains'
+          : 'Player Pick reward was not found';
+      }
       break;
     }
     const previousCount = queuedCount;
@@ -187,6 +191,15 @@ export async function runPlayerPickWorkflow(options = {}) {
     if (submission.status !== 'submitted') {
       result.status = submission.status;
       result.reason = submission.reason;
+      break;
+    }
+    if (!submission.submittedCount && !submission.challengeContext?.incomplete?.length) {
+      if (options.completeWhenNoChallengeRemains === true) {
+        result.reason = null;
+        break;
+      }
+      result.status = 'unavailable';
+      result.reason = 'No incomplete Player Pick challenge remains';
       break;
     }
 

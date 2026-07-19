@@ -18,6 +18,10 @@ export const MAIN_PANEL_STYLE = `
     box-shadow: 0 8px 30px rgba(0,0,0,.35);
     box-sizing: border-box;
   }
+  #bronze-loop-panel.startup-hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
   #bronze-loop-panel .panel-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .bronze-loop-resize { position: absolute; z-index: 2; touch-action: none; }
   #bronze-loop-resize-n { top: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
@@ -65,12 +69,16 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
   #bronze-loop-latest {
+    flex: 1 1 auto;
     min-height: 28px;
-    max-height: 44px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     background: #0c0f13;
     border: 1px solid #303946;
     padding: 6px;
+    box-sizing: border-box;
     line-height: 16px;
     color: #d7e2f0;
     word-break: break-word;
@@ -192,7 +200,15 @@ export function mountMainPanel(options = {}) {
   dom.appendToHead(style);
   const panel = dom.create('div');
   panel.id = 'bronze-loop-panel';
+  if (options.startupHidden === true) panel.classList?.add?.('startup-hidden');
   panel.innerHTML = mainPanelHtml(options.maxRounds);
   dom.appendToBody(panel);
   return { panel, style, created: true };
+}
+
+export function setMainPanelStartupHidden(panel, hidden) {
+  if (!panel?.classList) return;
+  panel.classList.toggle('startup-hidden', hidden === true);
+  if (hidden === true) panel.setAttribute?.('aria-hidden', 'true');
+  else panel.removeAttribute?.('aria-hidden');
 }

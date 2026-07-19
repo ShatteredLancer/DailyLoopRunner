@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { MAIN_PANEL_STYLE, mainPanelHtml, mountMainPanel } from '../../src/ui/main-panel-view.js';
+import {
+  MAIN_PANEL_STYLE,
+  mainPanelHtml,
+  mountMainPanel,
+  setMainPanelStartupHidden,
+} from '../../src/ui/main-panel-view.js';
 
 describe('main panel view template', () => {
   it('contains the compact controls, one latest log, and one full log', () => {
@@ -58,6 +63,12 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.options-open #bronze-loop-options { display: flex;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.options-open #bronze-loop-latest { display: none; }');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.icon-only .panel-body,');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.startup-hidden {');
+    expect(MAIN_PANEL_STYLE).toContain('visibility: hidden;');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-latest {');
+    expect(MAIN_PANEL_STYLE).toContain('white-space: pre-wrap;');
+    expect(MAIN_PANEL_STYLE).toContain('overflow-wrap: anywhere;');
+    expect(MAIN_PANEL_STYLE).toContain('overflow-y: auto;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-log {');
     expect(MAIN_PANEL_STYLE).toContain('overflow: auto;');
   });
@@ -68,16 +79,32 @@ describe('main panel view template', () => {
     const existing = new Map();
     const dom = {
       query: (selector) => existing.get(selector) || null,
-      create: (tagName) => ({ tagName, remove() {} }),
+      create: (tagName) => ({
+        tagName,
+        classList: {
+          values: new Set(),
+          add(value) { this.values.add(value); },
+          contains(value) { return this.values.has(value); },
+          toggle(value, force) {
+            if (force === true) this.values.add(value);
+            else if (force === false) this.values.delete(value);
+          },
+        },
+        remove() {},
+      }),
       appendToHead: (element) => { head.push(element); existing.set(`#${element.id}`, element); },
       appendToBody: (element) => { body.push(element); existing.set(`#${element.id}`, element); },
     };
-    const first = mountMainPanel({ dom, maxRounds: 7 });
+    const first = mountMainPanel({ dom, maxRounds: 7, startupHidden: true });
     expect(first.created).toBe(true);
     expect(head).toHaveLength(1);
     expect(body).toHaveLength(1);
     expect(head[0].textContent).toBe(MAIN_PANEL_STYLE);
     expect(body[0].innerHTML).toContain('id="bronze-loop-rounds" type="number" min="1" max="50" value="7"');
+    expect(first.panel.classList.contains('startup-hidden')).toBe(true);
+
+    setMainPanelStartupHidden(first.panel, false);
+    expect(first.panel.classList.contains('startup-hidden')).toBe(false);
 
     const second = mountMainPanel({ dom, maxRounds: 3 });
     expect(second).toEqual({ panel: first.panel, created: false });

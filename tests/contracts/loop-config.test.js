@@ -49,6 +49,13 @@ describe('loop configuration contracts', () => {
       'daily-rare',
       'daily-rare-pack-84',
     ]);
+    expect(builtInLoop.stepOverrides).toEqual({
+      'daily-rare-pack-84': {
+        useRoundsAsCompletions: false,
+        sourceExhaustedFallbackMaxCompletions: 1,
+      },
+    });
+    expect(externalLoop.stepOverrides).toEqual(builtInLoop.stepOverrides);
   });
 
   it('locks Daily Bronze and Silver recycle contracts', async () => {
@@ -200,6 +207,14 @@ describe('loop configuration contracts', () => {
     expect(rarePack.rareUpgrade.requirements[0]).toMatchObject({
       tier: 'gold', rarity: 'rare', count: 6, protectHighGold: true,
     });
+    expect(rarePack).toMatchObject({
+      maxPacks: 100,
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      consumeAllSourcePacks: true,
+      sourceExhaustedFallbackLoopId: '2x84-fodder',
+    });
+    expect(rarePack.sourceExhaustedFallbackMaxCompletions).toBeUndefined();
     expect(provision.preCraftPlayerPickLoopId).toBe('82-plus-player-pick-5of10');
     expect(provision.craftingUpgrades.map((upgrade) => upgrade.requirements[0].protectHighGold))
       .toEqual([true, true]);
@@ -214,8 +229,16 @@ describe('loop configuration contracts', () => {
     expect(external.some((loop) => loop.id === '83-plus-player-pick-1of5')).toBe(false);
     expect(external.some((loop) => loop.id === '84-plus-summer-tournament-nations-pick-1of3')).toBe(false);
     expect(pick82).toMatchObject({
-      sbcSetIds: [1202], pickItemResourceIds: [5005706], challengesPerPick: 2, pickCandidateCount: 10, pickCount: 5,
+      sbcSetIds: [1202],
+      pickItemResourceIds: [5005706],
+      challengesPerPick: 2,
+      pickCandidateCount: 10,
+      pickCount: 5,
+      exhaustSbcSet: true,
+      setCompletionSafetyLimit: 100,
     });
+    expect(pick82.useRoundsAsCompletions).toBeUndefined();
+    expect(pick82.maxCompletions).toBeUndefined();
     expect(pick82.requirements).toEqual([
       expect.objectContaining({ rarity: 'common', count: 11, maxRating: 81, protectHighGold: true }),
     ]);
@@ -229,7 +252,9 @@ describe('loop configuration contracts', () => {
     const x10 = byId(builtIn, '84x10');
     const externalX10 = byId(external, '84x10');
     expect(fodder).toMatchObject({ hidden: true, mvp: true });
+    expect(fodder.forceOpenRewardPacks).toBeUndefined();
     expect(externalFodder).toMatchObject({ hidden: true, mvp: true });
+    expect(externalFodder.forceOpenRewardPacks).toBeUndefined();
     expect(totw.ratingSbcFill.priorityPiles).toEqual(['unassigned', 'storage', 'transfer', 'club']);
     expect(totw.blockSpecial).toBe(true);
     expect(x10).toMatchObject({

@@ -103,12 +103,13 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain("from './ui/main-panel-bindings.js'");
     expect(source).toContain("from './ui/main-panel-commands.js'");
     expect(source).toContain("from './ui/main-panel-state.js'");
-    expect(source).toContain('mountMainPanel({ dom: adapters.dom, maxRounds: CFG.maxRounds })');
+    expect(source).toContain('startupHidden: true,');
+    expect(source).toContain('setMainPanelStartupHidden(panel, false);');
     expect(source).toContain('hydrateMainPanelOptions({');
     expect(source).toContain('const panelCommands = createMainPanelCommands({');
     expect(source).toContain('bindMainPanelCommands({');
     expect(source).toContain('commands: panelCommands,');
-    expect(source).toContain('panelCommands.scanPicks();');
+    expect(source).toContain('await panelCommands.scanPicks();');
     expect(source).toContain('renderMainPanelRuntimeState({');
     expect(source).not.toContain('style.textContent = `');
     expect(source).not.toContain('panel.innerHTML = `');

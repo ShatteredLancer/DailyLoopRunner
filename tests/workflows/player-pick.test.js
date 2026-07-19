@@ -137,4 +137,25 @@ describe('runPlayerPickWorkflow', () => {
     });
     expect(options.redeemPick).not.toHaveBeenCalled();
   });
+
+  it('finishes normally when a limited Pick Set has no incomplete challenge left', async () => {
+    const immediate = baseOptions({
+      maxPicks: 5,
+      completeWhenNoChallengeRemains: true,
+      loadChallenges: vi.fn(async () => ({ incomplete: [] })),
+    });
+    const immediateResult = await runPlayerPickWorkflow(immediate);
+    expect(immediateResult).toMatchObject({ status: 'completed', picksCompleted: 0, reason: null });
+    expect(immediate.findRewardPick).not.toHaveBeenCalled();
+
+    const deferred = baseOptions({
+      maxPicks: 5,
+      openPicksAtEnd: true,
+      completeWhenNoChallengeRemains: true,
+      listPendingPicks: vi.fn(async () => []),
+      loadChallenges: vi.fn(async () => ({ incomplete: [] })),
+    });
+    const deferredResult = await runPlayerPickWorkflow(deferred);
+    expect(deferredResult).toMatchObject({ status: 'completed', picksCompleted: 0, reason: null });
+  });
 });

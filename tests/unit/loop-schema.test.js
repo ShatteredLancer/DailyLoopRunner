@@ -58,6 +58,12 @@ describe('loop configuration schema', () => {
     expect(() => validateLoopDefList([validLoop({
       preCraftPlayerPickLoopId: 'missing-pick',
     })], 'loops')).toThrow('loops[0].preCraftPlayerPickLoopId not found: missing-pick');
+    expect(() => validateLoopDefList([validLoop({
+      stepOverrides: { missing: { maxCompletions: 1 } },
+    })], 'loops')).toThrow('loops[0].stepOverrides references a non-step loop: missing');
+    expect(() => validateLoopDefList([validLoop({
+      sourceExhaustedFallbackLoopId: 'missing-fallback',
+    })], 'loops')).toThrow('loops[0].sourceExhaustedFallbackLoopId not found: missing-fallback');
   });
 
   it('preserves recovery recipe, policy, and per-loop policy validation', () => {
@@ -128,5 +134,14 @@ describe('loop configuration schema', () => {
     expect(validateLoopDef({ ...base, pickCandidateCount: 1, pickCount: 2 })).toContain(
       'pickCandidateCount must be greater than or equal to pickCount',
     );
+    expect(validateLoopDef({
+      ...base,
+      exhaustSbcSet: true,
+      useRoundsAsCompletions: true,
+      setCompletionSafetyLimit: 101,
+    })).toEqual(expect.arrayContaining([
+      'setCompletionSafetyLimit must be an integer between 1 and 100',
+      'exhaustSbcSet cannot be combined with useRoundsAsCompletions',
+    ]));
   });
 });

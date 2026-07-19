@@ -179,7 +179,7 @@ export function validateLoopDef(loopDef, label = 'loop') {
   if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
     errors.push('dryRun must be boolean');
   }
-  ['hidden', 'mvp', 'openRewardPacks', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst'].forEach((field) => {
+  ['hidden', 'mvp', 'openRewardPacks', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst', 'consumeAllSourcePacks', 'exhaustSbcSet'].forEach((field) => {
     if (loopDef[field] !== undefined && typeof loopDef[field] !== 'boolean') {
       errors.push(`${field} must be boolean`);
     }
@@ -200,6 +200,12 @@ export function validateLoopDef(loopDef, label = 'loop') {
     const dailyLimit = Number(loopDef.dailyCompletionLimit);
     if (!Number.isFinite(dailyLimit) || dailyLimit < 1 || dailyLimit > 100) {
       errors.push('dailyCompletionLimit must be a number between 1 and 100');
+    }
+  }
+  if (loopDef.setCompletionSafetyLimit !== undefined) {
+    const safetyLimit = Number(loopDef.setCompletionSafetyLimit);
+    if (!Number.isInteger(safetyLimit) || safetyLimit < 1 || safetyLimit > 100) {
+      errors.push('setCompletionSafetyLimit must be an integer between 1 and 100');
     }
   }
   if (loopDef.requiredSpecialMinRating !== undefined) {
@@ -301,6 +307,15 @@ export function validateLoopDef(loopDef, label = 'loop') {
 
   if (loopDef.strategy === 'dailyRoutine') {
     validateStringArray(loopDef.steps, 'steps', errors, true);
+    if (loopDef.stepOverrides !== undefined) {
+      if (!isPlainObject(loopDef.stepOverrides)) {
+        errors.push('stepOverrides must be an object');
+      } else {
+        Object.entries(loopDef.stepOverrides).forEach(([stepId, override]) => {
+          if (!isPlainObject(override)) errors.push(`stepOverrides.${stepId} must be an object`);
+        });
+      }
+    }
   }
 
   if (loopDef.strategy === 'fillAndVerifySbc') {
@@ -341,6 +356,15 @@ export function validateLoopDef(loopDef, label = 'loop') {
       errors.push('sourcePackIds or sourcePackNames is required');
     }
     validateUpgradeDef(loopDef.rareUpgrade, 'rareUpgrade', errors);
+    if (loopDef.sourceExhaustedFallbackLoopId !== undefined && (typeof loopDef.sourceExhaustedFallbackLoopId !== 'string' || !loopDef.sourceExhaustedFallbackLoopId.trim())) {
+      errors.push('sourceExhaustedFallbackLoopId must be a non-empty string');
+    }
+    if (loopDef.sourceExhaustedFallbackMaxCompletions !== undefined) {
+      const fallbackLimit = Number(loopDef.sourceExhaustedFallbackMaxCompletions);
+      if (!Number.isFinite(fallbackLimit) || fallbackLimit <= 0) {
+        errors.push('sourceExhaustedFallbackMaxCompletions must be a positive number');
+      }
+    }
     if (loopDef.maxPacks !== undefined) {
       const maxPacks = Number(loopDef.maxPacks);
       if (!Number.isFinite(maxPacks) || maxPacks <= 0) {
@@ -391,6 +415,9 @@ export function validateLoopDef(loopDef, label = 'loop') {
     if (loopDef.pricePlatform !== undefined && !['pc', 'ps', 'xbox'].includes(String(loopDef.pricePlatform).toLowerCase())) {
       errors.push('pricePlatform must be pc, ps, or xbox when provided');
     }
+    if (loopDef.exhaustSbcSet === true && loopDef.useRoundsAsCompletions === true) {
+      errors.push('exhaustSbcSet cannot be combined with useRoundsAsCompletions');
+    }
   }
 
   return errors;
@@ -422,6 +449,20 @@ export function validateLoopDefList(loopDefs, label = 'Loop config') {
     if (!target) fail(`${label}[${index}].preCraftPlayerPickLoopId not found: ${loopDef.preCraftPlayerPickLoopId}`);
     if (target.strategy !== 'playerPickSbc') {
       fail(`${label}[${index}].preCraftPlayerPickLoopId must reference a playerPickSbc loop`);
+    }
+  });
+  loopDefs.forEach((loopDef, index) => {
+    if (loopDef.strategy === 'dailyRoutine' && isPlainObject(loopDef.stepOverrides)) {
+      const stepIds = new Set(loopDef.steps || []);
+      Object.keys(loopDef.stepOverrides).forEach((stepId) => {
+        if (!stepIds.has(stepId)) fail(`${label}[${index}].stepOverrides references a non-step loop: ${stepId}`);
+      });
+    }
+    if (!loopDef.sourceExhaustedFallbackLoopId) return;
+    const target = loopDefs.find((candidate) => candidate.id === loopDef.sourceExhaustedFallbackLoopId);
+    if (!target) fail(`${label}[${index}].sourceExhaustedFallbackLoopId not found: ${loopDef.sourceExhaustedFallbackLoopId}`);
+    if (target.strategy !== 'fillAndVerifySbc') {
+      fail(`${label}[${index}].sourceExhaustedFallbackLoopId must reference a fillAndVerifySbc loop`);
     }
   });
 }

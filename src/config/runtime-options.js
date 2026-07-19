@@ -29,6 +29,12 @@ export function applyPickRuntimeOptions(loopDef, input = {}) {
   return loopDef;
 }
 
+export function loopUsesRounds(loopDef = {}) {
+  return loopDef.useRoundsAsCompletions === true
+    || ['validationBronzeUpgrade', 'provisionPackCrafting', 'provisionPackDualCrafting']
+      .includes(loopDef.strategy);
+}
+
 export function applyLoopRuntimeOptions(loopDef, options = {}) {
   const rounds = Math.max(1, Math.min(50, Number(options.rounds || 1) || 1));
   loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;

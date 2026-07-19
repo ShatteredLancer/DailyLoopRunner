@@ -39,7 +39,11 @@ export function createLogRenderer(options = {}) {
     const panel = getPanel();
     const latestBox = getLatestBox();
     if (latestBox && !panel?.classList?.contains('options-open') && !panel?.classList?.contains('icon-only')) {
-      if (latestBox.textContent !== latest) latestBox.textContent = latest;
+      if (latestBox.textContent !== latest) {
+        latestBox.textContent = latest;
+        latestBox.scrollTop = 0;
+      }
+      if (latestBox.title !== latest) latestBox.title = latest;
     }
 
     if (!fullLogVisible(panel)) return;

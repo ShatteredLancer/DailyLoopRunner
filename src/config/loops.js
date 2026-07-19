@@ -189,6 +189,10 @@ export const LOOP_DEFS = [
       priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
     },
     maxPacks: 100,
+    maxCompletions: 1,
+    useRoundsAsCompletions: true,
+    consumeAllSourcePacks: true,
+    sourceExhaustedFallbackLoopId: '2x84-fodder',
   },
   {
     id: '82-plus-player-pick-5of10',
@@ -205,8 +209,8 @@ export const LOOP_DEFS = [
     challengesPerPick: 2,
     pickCandidateCount: 10,
     pickCount: 5,
-    maxCompletions: 1,
-    useRoundsAsCompletions: true,
+    exhaustSbcSet: true,
+    setCompletionSafetyLimit: 100,
     pricePlatform: 'pc',
   },
   {
@@ -223,6 +227,12 @@ export const LOOP_DEFS = [
     name: 'One-click Daily Loop',
     strategy: 'dailyRoutine',
     steps: ['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare', 'daily-rare-pack-84'],
+    stepOverrides: {
+      'daily-rare-pack-84': {
+        useRoundsAsCompletions: false,
+        sourceExhaustedFallbackMaxCompletions: 1,
+      },
+    },
     openRewardPacks: false,
   },
   {
@@ -248,7 +258,6 @@ export const LOOP_DEFS = [
     blockSpecial: true,
     blockTradeable: false,
     openRewardPacks: true,
-    forceOpenRewardPacks: true,
   },
   {
     id: 'auto-totw-upgrade',

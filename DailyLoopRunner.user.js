@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.13
+// @version      0.5.15
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -253,7 +253,11 @@
         ],
         priorityPiles: ["unassigned", "storage", "transfer", "club"]
       },
-      maxPacks: 100
+      maxPacks: 100,
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      consumeAllSourcePacks: true,
+      sourceExhaustedFallbackLoopId: "2x84-fodder"
     },
     {
       id: "82-plus-player-pick-5of10",
@@ -270,8 +274,8 @@
       challengesPerPick: 2,
       pickCandidateCount: 10,
       pickCount: 5,
-      maxCompletions: 1,
-      useRoundsAsCompletions: true,
+      exhaustSbcSet: true,
+      setCompletionSafetyLimit: 100,
       pricePlatform: "pc"
     },
     {
@@ -288,6 +292,12 @@
       name: "One-click Daily Loop",
       strategy: "dailyRoutine",
       steps: ["daily-bronze", "daily-silver", "daily-common", "daily-rare", "daily-rare-pack-84"],
+      stepOverrides: {
+        "daily-rare-pack-84": {
+          useRoundsAsCompletions: false,
+          sourceExhaustedFallbackMaxCompletions: 1
+        }
+      },
       openRewardPacks: false
     },
     {
@@ -312,8 +322,7 @@
       maxNormalGoldSubmittedRating: 81,
       blockSpecial: true,
       blockTradeable: false,
-      openRewardPacks: true,
-      forceOpenRewardPacks: true
+      openRewardPacks: true
     },
     {
       id: "auto-totw-upgrade",
@@ -550,6 +559,30 @@
   function getPlayerPickChallengeCount(loopDef = {}) {
     return Math.max(1, Number(loopDef.challengeRequirements?.length || loopDef.challengesPerPick || 1) || 1);
   }
+  function resolvePlayerPickRunTarget(loopDef = {}, options = {}) {
+    if (loopDef.exhaustSbcSet !== true) {
+      return {
+        maxPicks: Math.max(1, Math.min(50, Math.floor(Number(loopDef.maxCompletions) || 1))),
+        pendingCount: 0,
+        remainingCompletions: null,
+        usedSafetyLimit: false
+      };
+    }
+    const pendingCount = Math.max(0, Math.floor(Number(options.pendingCount) || 0));
+    const rawRemaining = options.remainingCompletions;
+    const hasKnownRemaining = rawRemaining !== null && rawRemaining !== void 0 && Number.isFinite(Number(rawRemaining));
+    const safetyLimit = Math.max(
+      1,
+      Math.min(100, Math.floor(Number(loopDef.setCompletionSafetyLimit) || 100))
+    );
+    const remainingCompletions2 = hasKnownRemaining ? Math.max(0, Math.floor(Number(rawRemaining))) : safetyLimit;
+    return {
+      maxPicks: Math.min(200, pendingCount + remainingCompletions2),
+      pendingCount,
+      remainingCompletions: remainingCompletions2,
+      usedSafetyLimit: !hasKnownRemaining
+    };
+  }
   function getLiveRunLimit(loopDef = {}, rounds = 1, options = {}) {
     if (loopDef.strategy === "validationBronzeUpgrade") {
       return Number(rounds || loopDef.maxRounds || 1);
@@ -559,10 +592,11 @@
       return completions + (options.needsAutoTotwPreflight?.(loopDef) ? completions : 0);
     }
     if (loopDef.strategy === "rarePackTo84Upgrade") {
-      return Number(loopDef.maxPacks || 100);
+      return loopDef.useRoundsAsCompletions === true ? Number(loopDef.maxCompletions || 1) : Number(loopDef.maxPacks || 100);
     }
     if (loopDef.strategy === "playerPickSbc") {
-      return Number(loopDef.maxCompletions || 1) * getPlayerPickChallengeCount(loopDef);
+      const completions = loopDef.exhaustSbcSet === true ? Number(loopDef.remainingCompletions ?? loopDef.setCompletionSafetyLimit ?? 100) : Number(loopDef.maxCompletions || 1);
+      return completions * getPlayerPickChallengeCount(loopDef);
     }
     if (loopDef.strategy === "dailyRoutine") {
       return summarizeRoutineStepLimits(options.getRoutineSteps?.(loopDef) || [], options).max;
@@ -573,18 +607,20 @@
     const limits = steps.map((step) => {
       const rawLimit = getLiveRunLimit(step, 1, options);
       const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.floor(rawLimit)) : 1;
-      const unit = step.strategy === "rarePackTo84Upgrade" ? "pack(s)" : "SBC(s)";
+      const unit = "SBC(s)";
+      const policy = step.consumeAllSourcePacks === true ? "all matching source packs" : Number(step.dailyCompletionLimit) > 0 ? "current EA daily remaining" : `up to ${limit} ${unit}`;
       return {
         name: step.name || step.id || step.strategy || "step",
         limit,
-        unit
+        unit,
+        policy
       };
     });
     return {
       limits,
       max: limits.reduce((maxLimit, step) => Math.max(maxLimit, step.limit), 1),
       total: limits.reduce((sum, step) => sum + step.limit, 0),
-      text: limits.map((step) => `${step.name} max ${step.limit} ${step.unit}`).join("; ")
+      text: limits.map((step) => `${step.name}: ${step.policy}`).join("; ")
     };
   }
 
@@ -875,7 +911,7 @@
     if (loopDef.dryRun !== void 0 && typeof loopDef.dryRun !== "boolean") {
       errors.push("dryRun must be boolean");
     }
-    ["hidden", "mvp", "openRewardPacks", "blockSpecial", "blockTradeable", "inventoryFillFirst"].forEach((field) => {
+    ["hidden", "mvp", "openRewardPacks", "blockSpecial", "blockTradeable", "inventoryFillFirst", "consumeAllSourcePacks", "exhaustSbcSet"].forEach((field) => {
       if (loopDef[field] !== void 0 && typeof loopDef[field] !== "boolean") {
         errors.push(`${field} must be boolean`);
       }
@@ -896,6 +932,12 @@
       const dailyLimit = Number(loopDef.dailyCompletionLimit);
       if (!Number.isFinite(dailyLimit) || dailyLimit < 1 || dailyLimit > 100) {
         errors.push("dailyCompletionLimit must be a number between 1 and 100");
+      }
+    }
+    if (loopDef.setCompletionSafetyLimit !== void 0) {
+      const safetyLimit = Number(loopDef.setCompletionSafetyLimit);
+      if (!Number.isInteger(safetyLimit) || safetyLimit < 1 || safetyLimit > 100) {
+        errors.push("setCompletionSafetyLimit must be an integer between 1 and 100");
       }
     }
     if (loopDef.requiredSpecialMinRating !== void 0) {
@@ -985,6 +1027,15 @@
     }
     if (loopDef.strategy === "dailyRoutine") {
       validateStringArray(loopDef.steps, "steps", errors, true);
+      if (loopDef.stepOverrides !== void 0) {
+        if (!isPlainObject(loopDef.stepOverrides)) {
+          errors.push("stepOverrides must be an object");
+        } else {
+          Object.entries(loopDef.stepOverrides).forEach(([stepId, override]) => {
+            if (!isPlainObject(override)) errors.push(`stepOverrides.${stepId} must be an object`);
+          });
+        }
+      }
     }
     if (loopDef.strategy === "fillAndVerifySbc") {
       validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
@@ -1021,6 +1072,15 @@
         errors.push("sourcePackIds or sourcePackNames is required");
       }
       validateUpgradeDef(loopDef.rareUpgrade, "rareUpgrade", errors);
+      if (loopDef.sourceExhaustedFallbackLoopId !== void 0 && (typeof loopDef.sourceExhaustedFallbackLoopId !== "string" || !loopDef.sourceExhaustedFallbackLoopId.trim())) {
+        errors.push("sourceExhaustedFallbackLoopId must be a non-empty string");
+      }
+      if (loopDef.sourceExhaustedFallbackMaxCompletions !== void 0) {
+        const fallbackLimit = Number(loopDef.sourceExhaustedFallbackMaxCompletions);
+        if (!Number.isFinite(fallbackLimit) || fallbackLimit <= 0) {
+          errors.push("sourceExhaustedFallbackMaxCompletions must be a positive number");
+        }
+      }
       if (loopDef.maxPacks !== void 0) {
         const maxPacks = Number(loopDef.maxPacks);
         if (!Number.isFinite(maxPacks) || maxPacks <= 0) {
@@ -1064,6 +1124,9 @@
       if (loopDef.pricePlatform !== void 0 && !["pc", "ps", "xbox"].includes(String(loopDef.pricePlatform).toLowerCase())) {
         errors.push("pricePlatform must be pc, ps, or xbox when provided");
       }
+      if (loopDef.exhaustSbcSet === true && loopDef.useRoundsAsCompletions === true) {
+        errors.push("exhaustSbcSet cannot be combined with useRoundsAsCompletions");
+      }
     }
     return errors;
   }
@@ -1093,6 +1156,20 @@
       if (!target) fail(`${label}[${index}].preCraftPlayerPickLoopId not found: ${loopDef.preCraftPlayerPickLoopId}`);
       if (target.strategy !== "playerPickSbc") {
         fail(`${label}[${index}].preCraftPlayerPickLoopId must reference a playerPickSbc loop`);
+      }
+    });
+    loopDefs.forEach((loopDef, index) => {
+      if (loopDef.strategy === "dailyRoutine" && isPlainObject(loopDef.stepOverrides)) {
+        const stepIds = new Set(loopDef.steps || []);
+        Object.keys(loopDef.stepOverrides).forEach((stepId) => {
+          if (!stepIds.has(stepId)) fail(`${label}[${index}].stepOverrides references a non-step loop: ${stepId}`);
+        });
+      }
+      if (!loopDef.sourceExhaustedFallbackLoopId) return;
+      const target = loopDefs.find((candidate) => candidate.id === loopDef.sourceExhaustedFallbackLoopId);
+      if (!target) fail(`${label}[${index}].sourceExhaustedFallbackLoopId not found: ${loopDef.sourceExhaustedFallbackLoopId}`);
+      if (target.strategy !== "fillAndVerifySbc") {
+        fail(`${label}[${index}].sourceExhaustedFallbackLoopId must reference a fillAndVerifySbc loop`);
       }
     });
   }
@@ -1221,19 +1298,35 @@
         throw new Error(`${loopDef.name}: step ${index + 1} loop not found: ${stepId}`);
       }
       const childDef = cloneLoopDef(baseDef);
+      const stepOverride = loopDef.stepOverrides?.[stepId];
+      if (stepOverride && typeof stepOverride === "object" && !Array.isArray(stepOverride)) {
+        Object.assign(childDef, cloneLoopDef(stepOverride));
+        childDef.id = baseDef.id;
+        childDef.strategy = baseDef.strategy;
+      }
       if (childDef.strategy === "dailyRoutine") {
         throw new Error(`${loopDef.name}: nested dailyRoutine steps are not supported`);
       }
       if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
         childDef.disabledPiles = [...loopDef.disabledPiles];
       }
-      if (loopDef.openRewardPacks !== void 0 && childDef.openRewardPacks === void 0) {
-        childDef.openRewardPacks = loopDef.openRewardPacks;
+      if (loopDef.openRewardPacks !== void 0) {
+        childDef.openRewardPacks = childDef.forceOpenRewardPacks === true || loopDef.openRewardPacks === true;
       }
       childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
       assertValidLoopDef(childDef, childDef.name || stepId);
       return applyDisabledPiles(childDef);
     });
+  }
+  function configureRoutineStepForAvailability(step = {}, availability = null) {
+    const configured = cloneLoopDef(step);
+    if (availability && availability.remaining !== null && availability.remaining !== void 0) {
+      const remaining = Math.max(1, Math.floor(Number(availability.remaining) || 1));
+      configured.maxCompletions = configured.mvp === true ? Math.min(remaining, Math.max(1, Math.floor(Number(configured.maxCompletions) || 1))) : remaining;
+    } else if (availability?.available === true && configured.mvp !== true) {
+      configured.maxCompletions = Math.max(1, Math.floor(Number(availability.safetyLimit) || 100));
+    }
+    return configured;
   }
 
   // src/config/runtime-options.js
@@ -1265,6 +1358,9 @@
       }
     }));
     return loopDef;
+  }
+  function loopUsesRounds(loopDef = {}) {
+    return loopDef.useRoundsAsCompletions === true || ["validationBronzeUpgrade", "provisionPackCrafting", "provisionPackDualCrafting"].includes(loopDef.strategy);
   }
   function applyLoopRuntimeOptions(loopDef, options = {}) {
     const rounds = Math.max(1, Math.min(50, Number(options.rounds || 1) || 1));
@@ -5511,11 +5607,18 @@
       reason: null
     };
     const maxPacks = boundedCount(options.maxPacks, 1);
+    const completionTarget = options.completionTarget?.id ? {
+      id: String(options.completionTarget.id),
+      max: boundedCount(options.completionTarget.max, 1)
+    } : null;
     const recordStages = (stageResult = {}) => {
       for (const [id, count] of Object.entries(stageResult.completions || {})) {
         result.stageCompletions[id] = Number(result.stageCompletions[id] || 0) + Number(count || 0);
       }
     };
+    const targetCompleted = () => completionTarget ? Number(result.stageCompletions[completionTarget.id] || 0) : 0;
+    const targetRemaining = () => completionTarget ? Math.max(0, completionTarget.max - targetCompleted()) : null;
+    const targetReached = () => completionTarget !== null && targetRemaining() === 0;
     const resumed = await options.resume?.({ result });
     if (resumed?.status === "blocked") {
       result.status = "blocked";
@@ -5533,7 +5636,7 @@
       }
       await options.afterStages?.({ result, phase: "resume", stageResult, context: resumed });
     }
-    while (result.status === "completed" && result.packsOpened < maxPacks) {
+    while (result.status === "completed" && result.packsOpened < maxPacks && (!targetReached() || options.requireSourceExhaustion === true)) {
       await options.stopPoint?.();
       result.iterations++;
       const before = await options.beforePack?.({ result });
@@ -5544,9 +5647,29 @@
       }
       const pack = await options.findPack({ result });
       if (!pack) {
-        result.status = "unavailable";
-        result.reason = "no matching pack remains";
         await emit3(options, "pack-unavailable", { result });
+        if (targetReached()) {
+          result.reason = null;
+        } else if (typeof options.onSourceExhausted === "function") {
+          const fallbackResult = await options.onSourceExhausted({
+            result,
+            completionTarget,
+            remainingCompletions: targetRemaining()
+          }) || { status: "unavailable", reason: "source-exhausted fallback returned no result" };
+          recordStages(fallbackResult);
+          await emit3(options, "source-exhausted", { result, fallbackResult, completionTarget });
+          if (fallbackResult.status === "blocked" || fallbackResult.status === "planned") {
+            result.status = fallbackResult.status;
+          } else if (fallbackResult.status === "unavailable" && !targetReached()) {
+            result.status = "unavailable";
+          } else if (completionTarget && !targetReached()) {
+            result.status = "unavailable";
+          }
+          result.reason = targetReached() ? null : fallbackResult.reason || (!completionTarget ? null : "source-exhausted fallback did not reach the completion target");
+        } else {
+          result.status = "unavailable";
+          result.reason = "no matching pack remains";
+        }
         break;
       }
       const receipt = await options.openPack({ result, pack });
@@ -5576,6 +5699,13 @@
       }
       await options.afterStages?.({ result, phase: "pack", pack, receipt, stageResult });
     }
+    if (result.status === "completed" && completionTarget && !targetReached() && result.packsOpened >= maxPacks) {
+      result.status = "unavailable";
+      result.reason = `source pack limit ${maxPacks} reached before the completion target`;
+    } else if (result.status === "completed" && options.requireSourceExhaustion === true && result.packsOpened >= maxPacks) {
+      result.status = "unavailable";
+      result.reason = `source pack safety limit ${maxPacks} reached before source exhaustion`;
+    }
     await options.finalize?.(result);
     return result;
   }
@@ -5583,7 +5713,7 @@
   // src/workflows/player-pick.js
   function pickLimit(value) {
     const number = Number(value);
-    return Math.max(1, Math.min(100, Number.isFinite(number) ? Math.floor(number) : 1));
+    return Math.max(1, Math.min(200, Number.isFinite(number) ? Math.floor(number) : 1));
   }
   function outcome(value) {
     if (value?.status === "selected") return "selected";
@@ -5675,8 +5805,12 @@
       });
       pending = Array.isArray(pending) ? pending : [];
       if (pending.length <= queuedCount) {
-        result.status = "unavailable";
-        result.reason = noIncompleteChallenge ? "No incomplete Player Pick challenge remains" : "Player Pick reward was not found";
+        if (noIncompleteChallenge && options.completeWhenNoChallengeRemains === true) {
+          result.reason = null;
+        } else {
+          result.status = "unavailable";
+          result.reason = noIncompleteChallenge ? "No incomplete Player Pick challenge remains" : "Player Pick reward was not found";
+        }
         break;
       }
       const previousCount = queuedCount;
@@ -5752,6 +5886,15 @@
       if (submission.status !== "submitted") {
         result.status = submission.status;
         result.reason = submission.reason;
+        break;
+      }
+      if (!submission.submittedCount && !submission.challengeContext?.incomplete?.length) {
+        if (options.completeWhenNoChallengeRemains === true) {
+          result.reason = null;
+          break;
+        }
+        result.status = "unavailable";
+        result.reason = "No incomplete Player Pick challenge remains";
         break;
       }
       const rewardPick = await options.findRewardPick({ result, challengeContext: submission.challengeContext });
@@ -6104,7 +6247,11 @@
       const panel = getPanel();
       const latestBox = getLatestBox();
       if (latestBox && !panel?.classList?.contains("options-open") && !panel?.classList?.contains("icon-only")) {
-        if (latestBox.textContent !== latest) latestBox.textContent = latest;
+        if (latestBox.textContent !== latest) {
+          latestBox.textContent = latest;
+          latestBox.scrollTop = 0;
+        }
+        if (latestBox.title !== latest) latestBox.title = latest;
       }
       if (!fullLogVisible(panel)) return;
       const fullBox = getFullBox();
@@ -6640,6 +6787,10 @@
     box-shadow: 0 8px 30px rgba(0,0,0,.35);
     box-sizing: border-box;
   }
+  #bronze-loop-panel.startup-hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
   #bronze-loop-panel .panel-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .bronze-loop-resize { position: absolute; z-index: 2; touch-action: none; }
   #bronze-loop-resize-n { top: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
@@ -6687,12 +6838,16 @@
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
   #bronze-loop-latest {
+    flex: 1 1 auto;
     min-height: 28px;
-    max-height: 44px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     background: #0c0f13;
     border: 1px solid #303946;
     padding: 6px;
+    box-sizing: border-box;
     line-height: 16px;
     color: #d7e2f0;
     word-break: break-word;
@@ -6810,9 +6965,16 @@
     dom.appendToHead(style);
     const panel = dom.create("div");
     panel.id = "bronze-loop-panel";
+    if (options.startupHidden === true) panel.classList?.add?.("startup-hidden");
     panel.innerHTML = mainPanelHtml(options.maxRounds);
     dom.appendToBody(panel);
     return { panel, style, created: true };
+  }
+  function setMainPanelStartupHidden(panel, hidden) {
+    if (!panel?.classList) return;
+    panel.classList.toggle("startup-hidden", hidden === true);
+    if (hidden === true) panel.setAttribute?.("aria-hidden", "true");
+    else panel.removeAttribute?.("aria-hidden");
   }
 
   // src/ui/player-pick-modal.js
@@ -7336,7 +7498,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.13",
+      version: "0.5.15",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -7503,8 +7665,10 @@
     }
     function updateLoopControls() {
       const editorLoop = getEditorLoopDef();
-      const showRounds = editorLoop.useRoundsAsCompletions === true || ["validationBronzeUpgrade", "provisionPackCrafting", "provisionPackDualCrafting", "playerPickSbc"].includes(editorLoop.strategy);
-      renderMainPanelRounds({ panel: document.querySelector("#bronze-loop-panel"), show: showRounds });
+      renderMainPanelRounds({
+        panel: document.querySelector("#bronze-loop-panel"),
+        show: loopUsesRounds(editorLoop)
+      });
     }
     function updateRecapButton() {
       const recap = state.lastPickRecap;
@@ -11746,12 +11910,14 @@
       }).join(", ");
     }
     async function getDailyRoutineStepAvailability(step) {
-      const dailyLimit = Number(step?.dailyCompletionLimit || 0);
-      if (!Number.isFinite(dailyLimit) || dailyLimit <= 0 || !step?.sbcNames?.length) return null;
+      const configuredDailyLimit = Number(step?.dailyCompletionLimit || 0);
+      if (!Number.isFinite(configuredDailyLimit) || configuredDailyLimit <= 0 || !step?.sbcNames?.length) return null;
       const set = await findSbcSet(step.sbcNames, step.name);
       const challenges = await requestSbcChallenges(set, step.name, { allowEmpty: true, attempts: 3 });
       const setComplete = isSbcSetComplete(set);
       const setRemaining = getDailySetRemaining(set);
+      const setRepeats = Number(set?.repeats);
+      const dailyLimit = Number.isFinite(setRepeats) && setRepeats > 0 ? Math.floor(setRepeats) : Math.floor(configuredDailyLimit);
       log(`${step.name}: daily preflight set #${set?.id ?? "?"} (${set?.name || "?"}) complete=${setComplete}, completed=${Number.isFinite(Number(set?.timesCompleted)) ? set.timesCompleted : "?"}, repeats=${Number.isFinite(Number(set?.repeats)) ? set.repeats : "?"}, remaining=${setRemaining === null ? "?" : setRemaining}${challenges.length ? `; challenges: ${describeDailyChallengeCounts(challenges)}` : ""}`);
       if (setComplete) {
         return { available: false, remaining: 0, completed: dailyLimit, dailyLimit, reason: "complete" };
@@ -11760,7 +11926,14 @@
         return { available: false, remaining: null, completed: null, dailyLimit, reason: "unavailable" };
       }
       if (setRemaining === null) {
-        return { available: true, remaining: null, completed: null, dailyLimit, reason: "unknown-count" };
+        return {
+          available: true,
+          remaining: null,
+          completed: null,
+          dailyLimit,
+          safetyLimit: 100,
+          reason: "unknown-count"
+        };
       }
       const remaining = Math.min(dailyLimit, setRemaining);
       return {
@@ -11776,7 +11949,7 @@
       const steps = getRoutineStepLoopDefs(loopDef);
       const limitSummary = summarizeRoutineStepLimits2(steps);
       log(`${loopDef.name}: running ${steps.length} step(s): ${steps.map((step) => step.name).join(" -> ")}`);
-      log(`${loopDef.name}: step limits: ${limitSummary.text}`);
+      log(`${loopDef.name}: step policy: ${limitSummary.text}`);
       return runSequenceWorkflow({
         steps,
         stopPoint: () => stopPoint(),
@@ -11792,13 +11965,11 @@
         },
         getAvailability: async ({ step }) => getDailyRoutineStepAvailability(step),
         configureStep: async ({ step, availability }) => {
-          const configured = cloneLoopDef(step);
+          const configured = configureRoutineStepForAvailability(step, availability);
           if (availability && availability.remaining !== null) {
-            const configuredLimit = Math.max(1, Number(configured.maxCompletions || 1) || 1);
-            configured.maxCompletions = Math.min(configuredLimit, availability.remaining);
             log(`${loopDef.name}: ${configured.name} daily progress ${availability.completed}/${availability.dailyLimit}; running up to ${configured.maxCompletions}`);
           } else if (availability) {
-            log(`${loopDef.name}: ${configured.name} is available; completion count unavailable, using configured limit ${configured.maxCompletions || 1}`);
+            log(`${loopDef.name}: ${configured.name} is available; completion count unavailable, running until the challenge is unavailable (safety cap ${configured.maxCompletions || 100})`);
           }
           return configured;
         },
@@ -12924,9 +13095,18 @@
     async function runRarePackCraftLoop(loopDef) {
       await waitAppReady();
       const dryRun = loopDef.dryRun === true;
+      const consumeAllSourcePacks = loopDef.consumeAllSourcePacks === true;
+      const fillRemainingRoundsFromInventory = consumeAllSourcePacks && loopDef.useRoundsAsCompletions === true;
       const maxPacks = Math.max(1, Math.min(100, Number(loopDef.maxPacks || 100) || 100));
+      const maxCompletions = Math.max(1, Math.min(100, Number(loopDef.maxCompletions || 1) || 1));
+      const rareUpgradeDef = {
+        ...loopDef.rareUpgrade,
+        openRewardPacks: loopDef.openRewardPacks === true
+      };
       const result = await runPackAndCraftWorkflow({
         maxPacks,
+        completionTarget: fillRemainingRoundsFromInventory || !consumeAllSourcePacks ? { id: "rare", max: maxCompletions } : null,
+        requireSourceExhaustion: consumeAllSourcePacks,
         stopPoint: () => stopPoint(),
         resume: async () => {
           if (dryRun) {
@@ -12948,7 +13128,8 @@
         },
         findPack: async () => findSourcePack(loopDef),
         openPack: async ({ result: current, pack }) => {
-          log(`${loopDef.name}: ${dryRun ? "dry-run would open" : "opening"} ${packName(pack)} (#${pack.id}) ${current.packsOpened + 1}/${maxPacks}`);
+          const packProgress = consumeAllSourcePacks ? `source pack ${current.packsOpened + 1}` : `${current.packsOpened + 1}/${maxPacks}`;
+          log(`${loopDef.name}: ${dryRun ? "dry-run would open" : "opening"} ${packName(pack)} (#${pack.id}) ${packProgress}`);
           if (dryRun) return { status: "planned", reason: `would open ${packName(pack)}` };
           const receipt = await openPack(pack, `${loopDef.name} source pack`, {
             allowGone: true,
@@ -12958,11 +13139,15 @@
           });
           return receipt || { status: "stale", reason: "source pack stale or unavailable" };
         },
-        runStages: async ({ phase, context }) => {
+        runStages: async ({ result: current, phase, context }) => {
+          const remainingCompletions2 = consumeAllSourcePacks ? null : Math.max(0, maxCompletions - Number(current.stageCompletions.rare || 0));
+          if (remainingCompletions2 === 0) {
+            return { status: "completed", completions: { rare: 0 }, reason: "completion target reached" };
+          }
           if (dryRun) {
             await runReservedDuplicateCraftingStage(
               loopDef,
-              loopDef.rareUpgrade,
+              rareUpgradeDef,
               isLowRareGoldDuplicate,
               `2x84+ ${phase === "resume" ? "resumed " : ""}low rare gold`,
               { maxCompletions: 1 }
@@ -12971,10 +13156,11 @@
           }
           const stageResult = await runReservedDuplicateCraftingStage(
             loopDef,
-            loopDef.rareUpgrade,
+            rareUpgradeDef,
             isLowRareGoldDuplicate,
             `2x84+ ${phase === "resume" ? "resumed " : ""}low rare gold`,
             {
+              maxCompletions: remainingCompletions2 ?? 100,
               forceAttempts: phase === "pack" && Number(context?.lowRare || 0) > 0 ? 1 : 0,
               transientUnassignedSignals: phase === "pack" ? context?.transientUnassignedSignals || [] : []
             }
@@ -12989,6 +13175,41 @@
         afterStalePack: async () => {
           if (!dryRun) await sleep(CFG.pauseMs);
         },
+        onSourceExhausted: async ({ remainingCompletions: remainingCompletions2 }) => {
+          const fallbackLoopId = String(loopDef.sourceExhaustedFallbackLoopId || "").trim();
+          const requestedFallbackCompletions = fillRemainingRoundsFromInventory ? Number(remainingCompletions2 || 0) : consumeAllSourcePacks ? Number(loopDef.sourceExhaustedFallbackMaxCompletions || 1) : Number(remainingCompletions2 || 0);
+          if (fillRemainingRoundsFromInventory && requestedFallbackCompletions === 0) {
+            log(`${loopDef.name}: source packs completed the requested ${maxCompletions} round(s); no inventory fallback needed`);
+            return { status: "completed", completions: { rare: 0 }, reason: null };
+          }
+          if (!fallbackLoopId || requestedFallbackCompletions <= 0) {
+            return { status: "unavailable", completions: { rare: 0 }, reason: "no source-exhausted fallback configured" };
+          }
+          const baseFallbackDef = findLoopDefById(fallbackLoopId);
+          if (!baseFallbackDef || baseFallbackDef.strategy !== "fillAndVerifySbc") {
+            fail2(`${loopDef.name}: source-exhausted fallback loop not found or invalid: ${fallbackLoopId}`);
+          }
+          const configuredFallbackLimit = Number(loopDef.sourceExhaustedFallbackMaxCompletions || requestedFallbackCompletions);
+          const fallbackCompletions = Math.max(1, Math.min(requestedFallbackCompletions, configuredFallbackLimit));
+          const fallbackDef = cloneLoopDef(baseFallbackDef);
+          if (loopDef.disabledPiles?.length && !fallbackDef.disabledPiles?.length) {
+            fallbackDef.disabledPiles = [...loopDef.disabledPiles];
+          }
+          fallbackDef.dryRun = dryRun;
+          fallbackDef.maxCompletions = fallbackCompletions;
+          fallbackDef.allowMultipleCompletions = fallbackCompletions > 1 || fallbackDef.allowMultipleCompletions === true;
+          fallbackDef.openRewardPacks = loopDef.openRewardPacks === true;
+          fallbackDef.forceOpenRewardPacks = false;
+          applyDisabledPiles(fallbackDef);
+          log(`${loopDef.name}: no matching source pack remains; running ${fallbackDef.name} for up to ${fallbackCompletions} remaining 2x84+ completion(s)`);
+          const fallbackResult = await runFillAndVerifyLoop(fallbackDef);
+          const fallbackUnavailableIsExhausted = consumeAllSourcePacks && !fillRemainingRoundsFromInventory && fallbackResult.status === "unavailable";
+          return {
+            status: fallbackUnavailableIsExhausted ? "completed" : fallbackResult.status,
+            completions: { rare: Number(fallbackResult.completions || 0) },
+            reason: fallbackUnavailableIsExhausted ? null : fallbackResult.reason || null
+          };
+        },
         finalize: async () => {
           if (!dryRun) await resolveRuntimeUnassigned(`${loopDef.name} final cleanup`);
         },
@@ -13001,7 +13222,8 @@
         log(`${loopDef.name}: dry-run result ${result.status}`);
         log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
       } else {
-        log(`${loopDef.name}: opened ${result.packsOpened} rare gold pack(s), submitted 2x84+:${rareCompletions}`);
+        const completionSummary = fillRemainingRoundsFromInventory || !consumeAllSourcePacks ? `${rareCompletions}/${maxCompletions}` : `${rareCompletions}`;
+        log(`${loopDef.name}: opened ${result.packsOpened} rare gold pack(s), submitted 2x84+:${completionSummary}`);
       }
       return result;
     }
@@ -13332,15 +13554,49 @@
     async function runPlayerPickLoop(loopDef) {
       await waitAppReady();
       const dryRun = loopDef.dryRun === true;
-      const maxPicks = Math.max(1, Math.min(50, Number(loopDef.maxCompletions || 1) || 1));
+      let pickTarget = resolvePlayerPickRunTarget(loopDef);
+      if (loopDef.exhaustSbcSet === true) {
+        const pending = await listUnassignedPlayerPicksForLoop(loopDef, 1, {
+          minimumCount: 0,
+          quietMissing: true,
+          failOnUnexpected: true
+        });
+        const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
+        const remainingCompletions2 = getDailySetRemaining(set);
+        pickTarget = resolvePlayerPickRunTarget(loopDef, {
+          pendingCount: pending.length,
+          remainingCompletions: remainingCompletions2
+        });
+        const remainingLabel = pickTarget.usedSafetyLimit ? `unknown; running until unavailable (safety cap ${pickTarget.remainingCompletions})` : `${pickTarget.remainingCompletions}`;
+        log(`${loopDef.name}: limited Set progress completed:${Number.isFinite(Number(set?.timesCompleted)) ? set.timesCompleted : "?"}, repeats:${Number.isFinite(Number(set?.repeats)) ? set.repeats : "?"}, remaining:${remainingLabel}; pending Pick(s):${pickTarget.pendingCount}`);
+      }
+      const maxPicks = dryRun && loopDef.exhaustSbcSet === true ? pickTarget.remainingCompletions : pickTarget.maxPicks;
       const challengesPerPick = getPlayerPickChallengeCount(loopDef);
       const openPicksAtEnd = !dryRun && loopDef.openPicksAtEnd === true;
+      if (!maxPicks) {
+        if (dryRun && pickTarget.pendingCount) {
+          log(`${loopDef.name}: dry-run found ${pickTarget.pendingCount} pending Pick(s), but the SBC Set has no remaining completion`);
+        } else {
+          log(`${loopDef.name}: no pending Pick and the SBC Set is complete`);
+        }
+        return {
+          status: "completed",
+          picksCompleted: 0,
+          challengesSubmitted: 0,
+          challengesPlanned: 0,
+          picksQueued: 0,
+          pickResults: [],
+          reason: null
+        };
+      }
       if (openPicksAtEnd) {
-        log(`${loopDef.name}: batch Pick mode enabled; complete up to ${maxPicks} Pick(s), then open matching rewards together`);
+        const targetLabel = loopDef.exhaustSbcSet === true ? "all available" : `up to ${maxPicks}`;
+        log(`${loopDef.name}: batch Pick mode enabled; complete ${targetLabel} Pick(s), then open matching rewards together`);
       }
       const result = await runPlayerPickWorkflow({
         maxPicks,
         openPicksAtEnd,
+        completeWhenNoChallengeRemains: loopDef.exhaustSbcSet === true,
         stopPoint: () => stopPoint(),
         findPendingPick: async () => {
           const pending = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true, failOnUnexpected: true });
@@ -13414,7 +13670,10 @@
           }
         },
         afterPick: async ({ result: current, resumed }) => {
-          if (resumed) log(`${loopDef.name}: resumed Player Pick counts as ${current.picksCompleted}/${maxPicks} requested completion(s)`);
+          if (resumed) {
+            const targetLabel = loopDef.exhaustSbcSet === true ? "available Pick(s)" : `${maxPicks} requested completion(s)`;
+            log(`${loopDef.name}: resumed Player Pick ${current.picksCompleted}/${maxPicks} ${targetLabel}`);
+          }
           if (!dryRun) await sleep(CFG.pauseMs);
         }
       });
@@ -13422,7 +13681,8 @@
         log(`${loopDef.name}: dry-run planned ${result.challengesPlanned} challenge(s)`);
         log(`${loopDef.name}: dry run stops before submitting SBCs, redeeming Picks, or moving items`);
       } else {
-        log(`${loopDef.name}: completed ${result.picksCompleted}/${maxPicks} Player Pick(s)${openPicksAtEnd ? `; queued ${result.picksQueued}` : ""}`);
+        const targetLabel = loopDef.exhaustSbcSet === true ? "available" : "requested";
+        log(`${loopDef.name}: completed ${result.picksCompleted}/${maxPicks} ${targetLabel} Player Pick(s)${openPicksAtEnd ? `; queued ${result.picksQueued}` : ""}`);
       }
       return result;
     }
@@ -13603,7 +13863,11 @@
       updateLoopControls();
     }
     function installPanel() {
-      const mounted = mountMainPanel({ dom: adapters.dom, maxRounds: CFG.maxRounds });
+      const mounted = mountMainPanel({
+        dom: adapters.dom,
+        maxRounds: CFG.maxRounds,
+        startupHidden: true
+      });
       if (!mounted.created) return;
       const { panel } = mounted;
       state.logRenderer = createLogRenderer({
@@ -13668,8 +13932,12 @@
       });
       updateRecapButton();
       log(`Ready v${W[APP_KEY]?.version || "unknown"}. Keep FSU/Enhancer enabled before starting.`);
-      setTimeout(() => {
-        panelCommands.scanPicks();
+      setTimeout(async () => {
+        try {
+          await panelCommands.scanPicks();
+        } finally {
+          setMainPanelStartupHidden(panel, false);
+        }
       }, 900);
     }
     state.bootTimer = setInterval(() => {

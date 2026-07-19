@@ -217,9 +217,9 @@ EA objects
 - `loops.js`：内置 `LOOP_DEFS`；顺序、id 和关键行为必须与外部 JSON 保持一致。
 - `loop-schema.js`：Loop、recovery recipe/policy 的归一化、引用检查和错误信息。
 - `loop-presentation.js`：MVP/hidden 可见性和 `disabledPiles` 投影。
-- `run-limits.js`：Live guard、One-click 阶段上限和 pack/SBC 单位摘要的纯计算。
-- `routine-steps.js`：One-click 子 Loop 查找、继承、校验和 disabled pile 投影。
-- `runtime-options.js`：Dry Run、奖励开包、rounds、Pick 82/90 阈值和延迟集中开启 Pick 的运行时配置投影。
+- `run-limits.js`：Live guard、One-click 阶段执行策略和安全上限摘要的纯计算；安全上限不得伪装成业务 rounds。
+- `routine-steps.js`：One-click 子 Loop 查找、继承、校验、disabled pile 投影，以及 EA 实时剩余次数到子步骤完成数的投影。
+- `runtime-options.js`：Dry Run、奖励开包、rounds、Pick 82/90 阈值、是否显示 rounds 和延迟集中开启 Pick 的运行时配置投影。
 - `player-pick-discovery.js`：从标准 SBC Set/Challenge/Reward 快照保守生成临时 `playerPickSbc` 配置；条件不完整时只返回诊断，不从名称猜测。
 - `fsu-compat.js`：FSU/Enhancer 嵌套设置、Storage 配置和锁卡身份的纯兼容解析。
 - `selection.js`：把 Loop 与 requirement 级别的保护字段规范化为选材输入。
@@ -505,13 +505,28 @@ UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文
 - `craftingUpgrades`：Provision 的有序后续 SBC stages。
 - `pickItemNames`：Player Pick 奖励精确别名。
 - `challengesPerPick`、`pickCount`：Pick 子阵数和最终选择数。
-- `maxCompletions`、`maxPacks`、`useRoundsAsCompletions`：运行限制。
+- `maxCompletions`：单次调用的完成上限；对 Daily Routine，EA 返回明确剩余次数时必须由实时值覆盖本地旧值。
+- `maxPacks`：来源包异常保护上限，不等于用户 rounds，也不应作为 Daily 业务目标展示。
+- `useRoundsAsCompletions`：仅用于明确由用户指定本次完成数的独立可重复 Loop。
+- `consumeAllSourcePacks`：要求有限来源工作流先处理完所有匹配来源包；它可以与独立 Loop 的 `rounds` 完成目标并存，两个终止维度不得互相替代。
+- `sourceExhaustedFallbackLoopId`、`sourceExhaustedFallbackMaxCompletions`：来源耗尽后的可配置库存兜底及其边界。
+- `exhaustSbcSet`、`setCompletionSafetyLimit`：限次 Pick 使用 EA Set 当前剩余次数执行到耗尽；元数据不可读时只使用内部安全上限，不读取 UI `rounds`。
 - `openRewardPacks`：奖励包策略。
-- `forceOpenRewardPacks`：子流程后续逻辑必须依赖奖励物时强制开包，例如自动 2x84+ fodder 或 TOTW 前置；不能被普通 UI 开关错误覆盖。
+- `forceOpenRewardPacks`：仅当同一流程的后续步骤必须立即消费该奖励时才可强制开包，例如 84x10 的 TOTW 前置；普通独立/兜底 2x84+ 奖励必须服从 UI `Open reward packs`。
 - `protectHighGold`、`maxRating`、`allowSpecial`：普通材料保护。
 - `ratingSbcFill`、`requiredSpecialCount`、`requiredSpecialKind`：评分 SBC 参数。
 - `preCraftPlayerPickLoopId`：Provision 前置 Pick 引用。
 - `unassignedRecoveryPolicyIds`：当前 Loop 允许的恢复策略。
+
+`rounds` 契约：
+
+1. `dailyRoutine` 和正式 Daily SBC 子步骤不得读取 UI `rounds`；EA 能提供 Daily 剩余次数时直接执行该剩余次数，进度暂不可用时运行到 Challenge 不可用并受内部安全上限保护。
+2. `mvp: true` 的 Daily 验证步骤可以保留明确的单次上限，这是测试入口，不代表正式 Daily 业务上限。
+3. 独立可重复 SBC/Player Pick 只有配置 `useRoundsAsCompletions: true` 时才把 UI `rounds` 投影到 `maxCompletions`。
+4. Provision 的 `rounds` 表示本次打开的来源包数；Validation 的 `rounds` 只表示测试轮数。
+5. `maxPacks` 等内部安全上限用于防止异常无限循环，达到时应安全停止并记录原因，不能在 UI/日志中描述成已完成的业务 rounds。
+6. 同时配置 `consumeAllSourcePacks` 与 `useRoundsAsCompletions` 时，必须先处理完所有来源包，再用库存补足 `rounds - 已完成数`；来源包重复卡清理允许完成数超过目标，库存兜底不得超额。Daily Routine 可通过 `stepOverrides` 关闭子步骤的 rounds 投影并配置有限兜底。
+7. 限次 Player Pick 配置 `exhaustSbcSet: true`，不得同时配置 `useRoundsAsCompletions`。运行目标是“已有同类型 pending Pick 数 + EA Set 剩余完成次数”；pending Pick 必须先处理，但不能消耗 Set 的剩余次数预算。
 
 新增静态 Player Pick 时：
 

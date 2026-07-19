@@ -13,17 +13,36 @@ export function resolveRoutineStepLoopDefs(loopDef = {}, loopDefs = []) {
     }
 
     const childDef = cloneLoopDef(baseDef);
+    const stepOverride = loopDef.stepOverrides?.[stepId];
+    if (stepOverride && typeof stepOverride === 'object' && !Array.isArray(stepOverride)) {
+      Object.assign(childDef, cloneLoopDef(stepOverride));
+      childDef.id = baseDef.id;
+      childDef.strategy = baseDef.strategy;
+    }
     if (childDef.strategy === 'dailyRoutine') {
       throw new Error(`${loopDef.name}: nested dailyRoutine steps are not supported`);
     }
     if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
       childDef.disabledPiles = [...loopDef.disabledPiles];
     }
-    if (loopDef.openRewardPacks !== undefined && childDef.openRewardPacks === undefined) {
-      childDef.openRewardPacks = loopDef.openRewardPacks;
+    if (loopDef.openRewardPacks !== undefined) {
+      childDef.openRewardPacks = childDef.forceOpenRewardPacks === true || loopDef.openRewardPacks === true;
     }
     childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
     assertValidLoopDef(childDef, childDef.name || stepId);
     return applyDisabledPiles(childDef);
   });
+}
+
+export function configureRoutineStepForAvailability(step = {}, availability = null) {
+  const configured = cloneLoopDef(step);
+  if (availability && availability.remaining !== null && availability.remaining !== undefined) {
+    const remaining = Math.max(1, Math.floor(Number(availability.remaining) || 1));
+    configured.maxCompletions = configured.mvp === true
+      ? Math.min(remaining, Math.max(1, Math.floor(Number(configured.maxCompletions) || 1)))
+      : remaining;
+  } else if (availability?.available === true && configured.mvp !== true) {
+    configured.maxCompletions = Math.max(1, Math.floor(Number(availability.safetyLimit) || 100));
+  }
+  return configured;
 }

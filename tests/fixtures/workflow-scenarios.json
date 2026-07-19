@@ -38,11 +38,11 @@
       "recovery": "Stop safely when the challenge or source pack is unavailable."
     },
     "daily-rare-pack-84": {
-      "normal": "Open matching five-player rare gold packs and use low rare duplicates for 2x84+.",
-      "recovery": "Resume response-only duplicates even when the Unassigned UI cache is delayed and protect 82+ cards."
+      "normal": "Standalone mode opens all matching Daily rare gold packs, counts duplicate-driven 2x84+ submissions toward rounds, then fills the remaining target from inventory; One-click mode limits the final inventory fallback to one completion.",
+      "recovery": "Resume response-only duplicates even when the Unassigned UI cache is delayed, protect 82+ cards, and let the current Open reward packs option control every 2x84+ reward."
     },
     "82-plus-player-pick-5of10": {
-      "normal": "Submit two challenges of eleven low common gold players and select five of ten results.",
+      "normal": "Use EA Set progress to exhaust all remaining completions, submitting two challenges of eleven low common gold players and selecting five of ten results each time.",
       "recovery": "Resume a partial multi-challenge Pick without replacing common requirements with rare cards."
     },
     "one-click-daily-mvp": {
@@ -50,11 +50,11 @@
       "recovery": "Skip completed stages and continue from the first remaining or recoverable stage."
     },
     "one-click-daily": {
-      "normal": "Run Daily Bronze, Silver, Common, Rare, then Rare Pack in the configured order using actual remaining counts.",
-      "recovery": "Restart from existing Unassigned state, skip completed stages, and continue after a prior safe stop."
+      "normal": "Run Daily Bronze, Silver, Common, Rare, then consume all matching Rare Packs before allowing one inventory 2x84+ fallback.",
+      "recovery": "Restart from existing Unassigned state, skip completed stages, and continue after a prior safe stop without unbounded inventory fallback."
     },
     "2x84-fodder": {
-      "normal": "Submit six low rare gold players and open the required reward pack.",
+      "normal": "Submit six low rare gold players and let the current Open reward packs option decide whether to open the reward.",
       "recovery": "Stop before submission when fewer than six safe low rare gold players are available."
     },
     "auto-totw-upgrade": {
@@ -66,7 +66,7 @@
       "recovery": "Use configured TOTW and 2x84+ prerequisites, then stop if a safe squad still cannot be built."
     },
     "84x10": {
-      "normal": "Repeat the shared rating workflow up to seven times while preserving reward packs by default.",
+      "normal": "Repeat the shared rating workflow until the SBC is unavailable, bounded only by the configured safety cap while preserving reward packs by default.",
       "recovery": "Resume after prerequisite crafting and stop without submission when dynamic validation fails."
     },
     "provision-crafting": {

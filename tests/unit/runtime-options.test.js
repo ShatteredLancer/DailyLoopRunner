@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyLoopRuntimeOptions,
   applyPickRuntimeOptions,
+  loopUsesRounds,
   normalizePickRuntimeOptions,
 } from '../../src/config/runtime-options.js';
 
@@ -88,5 +89,25 @@ describe('loop runtime option projection', () => {
     const provision = { strategy: 'provisionPackCrafting' };
     applyLoopRuntimeOptions(provision, { rounds: 60 });
     expect(provision.rounds).toBe(50);
+
+    const rarePack = {
+      strategy: 'rarePackTo84Upgrade',
+      useRoundsAsCompletions: true,
+      consumeAllSourcePacks: true,
+      openRewardPacks: true,
+    };
+    applyLoopRuntimeOptions(rarePack, { rounds: 3, openRewardPacks: false });
+    expect(rarePack).toMatchObject({
+      consumeAllSourcePacks: true,
+      maxCompletions: 3,
+      openRewardPacks: false,
+    });
+  });
+
+  it('shows rounds only for explicit repeat-count loops', () => {
+    expect(loopUsesRounds({ strategy: 'playerPickSbc', exhaustSbcSet: true })).toBe(false);
+    expect(loopUsesRounds({ strategy: 'playerPickSbc', useRoundsAsCompletions: true })).toBe(true);
+    expect(loopUsesRounds({ strategy: 'provisionPackCrafting' })).toBe(true);
+    expect(loopUsesRounds({ strategy: 'dailyRoutine' })).toBe(false);
   });
 });
