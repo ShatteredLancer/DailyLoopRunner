@@ -8,7 +8,17 @@ function defaultCancel(handle) {
   else clearTimeout(handle);
 }
 
-export function formatLogHtml(lines = [], escapeHtml = String) {
+export function escapeLogHtml(text) {
+  return String(text).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
+
+export function formatLogHtml(lines = [], escapeHtml = escapeLogHtml) {
   return lines
     .map((line) => escapeHtml(line).replace(
       /(rating:(?:9[1-9]|[1-9]\d{2,}))/g,
@@ -24,7 +34,7 @@ export function createLogRenderer(options = {}) {
   const getPanel = options.getPanel || (() => null);
   const getLatestBox = options.getLatestBox || (() => null);
   const getFullBox = options.getFullBox || (() => null);
-  const formatFullLog = options.formatFullLog || ((lines) => lines.join('\n'));
+  const formatFullLog = options.formatFullLog || ((lines) => formatLogHtml(lines));
   let pendingHandle = null;
   let fullLogDirty = true;
 

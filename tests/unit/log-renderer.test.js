@@ -83,4 +83,22 @@ describe('log renderer', () => {
     expect(html).toContain('&lt;tag&gt; rating:90');
     expect(html).toContain('<span class="bronze-loop-log-high-rated">rating:91</span>');
   });
+
+  it('escapes by default when no formatter is provided', () => {
+    const panel = { classList: classList(['options-open']) };
+    const fullBox = { innerHTML: '', scrollHeight: 100, scrollTop: 100, clientHeight: 50 };
+    const renderer = createLogRenderer({
+      schedule: (callback) => { callback(); return 1; },
+      cancel: vi.fn(),
+      getLines: () => ['<img src=x onerror=alert(1)> rating:92'],
+      getPanel: () => panel,
+      getLatestBox: () => null,
+      getFullBox: () => fullBox,
+    });
+    renderer.flushNow();
+    expect(fullBox.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(fullBox.innerHTML).not.toContain('<img');
+    expect(fullBox.innerHTML).toContain('<span class="bronze-loop-log-high-rated">rating:92</span>');
+    expect(formatLogHtml(['<b>hi</b>'])).toBe('&lt;b&gt;hi&lt;/b&gt;');
+  });
 });

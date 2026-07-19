@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.21
+// @version      0.5.22
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -12,8 +12,6 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
-// @connect      127.0.0.1
-// @connect      localhost
 // @connect      www.fut.gg
 // @connect      enhancer-api.futnext.com
 // @connect      ntfy.sh
@@ -476,19 +474,27 @@
 
   // src/config/selection.js
   function selectionRequirements(loopDef = {}, priorityPiles = loopDef.priorityPiles) {
-    return (loopDef.requirements || []).map((requirement) => ({
-      ...requirement,
-      blockTradeable: requirement.blockTradeable !== void 0 ? requirement.blockTradeable : loopDef.blockTradeable,
-      protectedItemIds: [...new Set([
-        ...loopDef.protectedItemIds || [],
-        ...requirement.protectedItemIds || []
-      ].map(Number).filter(Boolean))],
-      protectedDefinitionIds: [...new Set([
-        ...loopDef.protectedDefinitionIds || [],
-        ...requirement.protectedDefinitionIds || []
-      ].map(Number).filter(Boolean))],
-      priorityPiles
-    }));
+    return (loopDef.requirements || []).map((requirement) => {
+      const protectHighGold = requirement.protectHighGold === true || loopDef.protectHighGold === true;
+      const highGoldThreshold = Number(
+        requirement.highGoldThreshold ?? requirement.protectHighGoldMinRating ?? loopDef.pickHighGoldThreshold ?? 82
+      );
+      return {
+        ...requirement,
+        protectHighGold: requirement.protectHighGold !== void 0 ? requirement.protectHighGold : loopDef.protectHighGold,
+        highGoldThreshold: protectHighGold ? Math.max(2, Math.min(99, Number.isFinite(highGoldThreshold) && highGoldThreshold > 0 ? highGoldThreshold : 82)) : requirement.highGoldThreshold,
+        blockTradeable: requirement.blockTradeable !== void 0 ? requirement.blockTradeable : loopDef.blockTradeable,
+        protectedItemIds: [...new Set([
+          ...loopDef.protectedItemIds || [],
+          ...requirement.protectedItemIds || []
+        ].map(Number).filter(Boolean))],
+        protectedDefinitionIds: [...new Set([
+          ...loopDef.protectedDefinitionIds || [],
+          ...requirement.protectedDefinitionIds || []
+        ].map(Number).filter(Boolean))],
+        priorityPiles
+      };
+    });
   }
 
   // src/domain/objects.js
@@ -1359,9 +1365,13 @@
     requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
       requirement.protectHighGold = options.protectHighGold;
       if (options.protectHighGold) {
+        requirement.highGoldThreshold = options.highGoldThreshold;
         requirement.maxRating = options.highGoldThreshold - 1;
-      } else if (Number(requirement.maxRating) <= 81) {
-        delete requirement.maxRating;
+      } else {
+        delete requirement.highGoldThreshold;
+        if (Number(requirement.maxRating) <= 81) {
+          delete requirement.maxRating;
+        }
       }
     }));
     return loopDef;
@@ -4003,6 +4013,11 @@
   function isNormalGold(item) {
     return item.tier === "gold" && !item.special;
   }
+  function resolveHighGoldThreshold(requirement = {}) {
+    const raw = requirement.highGoldThreshold ?? requirement.protectHighGoldMinRating ?? 82;
+    const value = Number(raw);
+    return Math.max(2, Math.min(99, Number.isFinite(value) && value > 0 ? value : 82));
+  }
   function itemMatchesRequirement(item, requirement = {}) {
     if (requirement.playerOnly && item.type !== "player") return false;
     if (requirement.minRating !== void 0 && item.rating < Number(requirement.minRating)) return false;
@@ -4022,7 +4037,9 @@
     if (protection.consumedItemIds.has(item.id)) reasons.push("consumed-item");
     if (protection.protectedItemIds.has(item.id)) reasons.push("protected-item");
     if (protection.protectedDefinitionIds.has(item.definitionId)) reasons.push("protected-definition");
-    if (requirement.protectHighGold && item.tier === "gold" && item.rating >= 82) reasons.push("protected-high-gold");
+    if (requirement.protectHighGold && item.tier === "gold" && item.rating >= resolveHighGoldThreshold(requirement)) {
+      reasons.push("protected-high-gold");
+    }
     if (item.limitedUse) reasons.push("limited-use");
     if (item.concept) reasons.push("concept");
     if (item.academyEnrolled) reasons.push("academy-enrolled");
@@ -6734,7 +6751,16 @@
     if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(handle);
     else clearTimeout(handle);
   }
-  function formatLogHtml(lines = [], escapeHtml = String) {
+  function escapeLogHtml(text) {
+    return String(text).replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[ch]);
+  }
+  function formatLogHtml(lines = [], escapeHtml = escapeLogHtml) {
     return lines.map((line) => escapeHtml(line).replace(
       /(rating:(?:9[1-9]|[1-9]\d{2,}))/g,
       '<span class="bronze-loop-log-high-rated">$1</span>'
@@ -6747,7 +6773,7 @@
     const getPanel = options.getPanel || (() => null);
     const getLatestBox = options.getLatestBox || (() => null);
     const getFullBox = options.getFullBox || (() => null);
-    const formatFullLog = options.formatFullLog || ((lines) => lines.join("\n"));
+    const formatFullLog = options.formatFullLog || ((lines) => formatLogHtml(lines));
     let pendingHandle = null;
     let fullLogDirty = true;
     function fullLogVisible(panel) {
@@ -8752,7 +8778,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.21",
+      version: "0.5.22",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -9342,8 +9368,14 @@
       }
       return Number(item?.rating || 0) >= 75;
     }
-    function isProtectedHighGold(item) {
-      return isGold(item) && Number(item?.rating || 0) >= 82;
+    function isProtectedHighGold(item, threshold = 82) {
+      const minRating = Math.max(2, Math.min(99, Number(threshold) || 82));
+      return isGold(item) && Number(item?.rating || 0) >= minRating;
+    }
+    function resolveProtectHighGoldThreshold(options = {}) {
+      const raw = options.highGoldThreshold ?? options.pickHighGoldThreshold ?? options.protectHighGoldMinRating ?? 82;
+      const value = Number(raw);
+      return Math.max(2, Math.min(99, Number.isFinite(value) && value > 0 ? value : 82));
     }
     function isRare(item) {
       try {
@@ -9920,7 +9952,7 @@
       if (id && state.consumedItemIds.has(id)) return false;
       if (id && (context?.protectedItemIds?.has(id) || options.protectedItemIds?.some((value) => Number(value) === id))) return false;
       if (definitionId && (context?.protectedDefinitionIds?.has(definitionId) || options.protectedDefinitionIds?.some((value) => Number(value) === definitionId))) return false;
-      if (options.protectHighGold && isProtectedHighGold(item)) return false;
+      if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) return false;
       if (isLimitedUseItem(item)) return false;
       if (isConceptItem(item)) return false;
       try {
@@ -10776,7 +10808,9 @@
       if (id && state.consumedItemIds.has(id)) reasons.push("consumed-this-run");
       if (id && options.protectedItemIds?.some((value) => Number(value) === id)) reasons.push("protected-id");
       if (definitionId && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId)) reasons.push("protected-def");
-      if (options.protectHighGold && isProtectedHighGold(item)) reasons.push("protected-82-plus");
+      if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) {
+        reasons.push("protected-high-gold");
+      }
       if (isLoanItem(item)) reasons.push("loan");
       else if (isLimitedUseItem(item)) reasons.push("limited-use");
       if (isConceptItem(item)) reasons.push("concept");
@@ -13896,8 +13930,16 @@
       return result;
     }
     function isRareGoldPlayer(item, options = {}) {
-      const spec = { tier: "gold", rarity: "rare", playerOnly: true, allowSpecial: false, protectHighGold: options.protectHighGold === true };
-      return !(options.protectHighGold && isProtectedHighGold(item)) && isSbcUsablePlayer(item, spec) && itemMatchesSpec(item, spec);
+      const highGoldThreshold = resolveProtectHighGoldThreshold(options);
+      const spec = {
+        tier: "gold",
+        rarity: "rare",
+        playerOnly: true,
+        allowSpecial: false,
+        protectHighGold: options.protectHighGold === true,
+        highGoldThreshold
+      };
+      return !(options.protectHighGold && isProtectedHighGold(item, highGoldThreshold)) && isSbcUsablePlayer(item, spec) && itemMatchesSpec(item, spec);
     }
     function isRareGoldDuplicate(item, options = {}) {
       return isDuplicate(item) && isRareGoldPlayer(item, options);

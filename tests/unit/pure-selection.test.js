@@ -40,6 +40,29 @@ describe('pure inventory selector', () => {
     expect(plan.selected.map((item) => item.id)).toEqual([1, 2, 3, 4]);
   });
 
+  it('honors a custom highGoldThreshold when protectHighGold is enabled', () => {
+    const adapter = createFakeInventoryAdapter({ storage: [
+      makePlayer({ id: 1, rating: 84, rareflag: 0 }),
+      makePlayer({ id: 2, rating: 85, rareflag: 0 }),
+    ] });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        rarity: 'common',
+        count: 1,
+        playerOnly: true,
+        allowSpecial: false,
+        protectHighGold: true,
+        highGoldThreshold: 85,
+      }],
+      priorityPiles: ['storage'],
+      fsuPolicy,
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.selected[0].id).toBe(1);
+  });
+
   it('resolves Unassigned duplicate signals to Storage or Club item refs', () => {
     const adapter = createFakeInventoryAdapter({
       unassigned: [makePlayer({ id: 10, definitionId: 100, duplicate: true, duplicateId: 20, rating: 80 })],

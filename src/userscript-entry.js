@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.21
+// @version      0.5.22
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -12,8 +12,6 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
-// @connect      127.0.0.1
-// @connect      localhost
 // @connect      www.fut.gg
 // @connect      enhancer-api.futnext.com
 // @connect      ntfy.sh
@@ -225,7 +223,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.21',
+    version: '0.5.22',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -916,8 +914,15 @@ function updateLoopControls() {
     return Number(item?.rating || 0) >= 75;
   }
 
-  function isProtectedHighGold(item) {
-    return isGold(item) && Number(item?.rating || 0) >= 82;
+  function isProtectedHighGold(item, threshold = 82) {
+    const minRating = Math.max(2, Math.min(99, Number(threshold) || 82));
+    return isGold(item) && Number(item?.rating || 0) >= minRating;
+  }
+
+  function resolveProtectHighGoldThreshold(options = {}) {
+    const raw = options.highGoldThreshold ?? options.pickHighGoldThreshold ?? options.protectHighGoldMinRating ?? 82;
+    const value = Number(raw);
+    return Math.max(2, Math.min(99, Number.isFinite(value) && value > 0 ? value : 82));
   }
 
   function isRare(item) {
@@ -1541,7 +1546,7 @@ function updateLoopControls() {
     if (id && state.consumedItemIds.has(id)) return false;
     if (id && (context?.protectedItemIds?.has(id) || options.protectedItemIds?.some((value) => Number(value) === id))) return false;
     if (definitionId && (context?.protectedDefinitionIds?.has(definitionId) || options.protectedDefinitionIds?.some((value) => Number(value) === definitionId))) return false;
-    if (options.protectHighGold && isProtectedHighGold(item)) return false;
+    if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) return false;
     if (isLimitedUseItem(item)) return false;
     if (isConceptItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
@@ -2499,7 +2504,9 @@ function updateLoopControls() {
     if (id && state.consumedItemIds.has(id)) reasons.push('consumed-this-run');
     if (id && options.protectedItemIds?.some((value) => Number(value) === id)) reasons.push('protected-id');
     if (definitionId && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId)) reasons.push('protected-def');
-    if (options.protectHighGold && isProtectedHighGold(item)) reasons.push('protected-82-plus');
+    if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) {
+      reasons.push('protected-high-gold');
+    }
     if (isLoanItem(item)) reasons.push('loan');
     else if (isLimitedUseItem(item)) reasons.push('limited-use');
     if (isConceptItem(item)) reasons.push('concept');
@@ -6027,8 +6034,16 @@ function updateLoopControls() {
   }
 
   function isRareGoldPlayer(item, options = {}) {
-    const spec = { tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false, protectHighGold: options.protectHighGold === true };
-    return !(options.protectHighGold && isProtectedHighGold(item)) &&
+    const highGoldThreshold = resolveProtectHighGoldThreshold(options);
+    const spec = {
+      tier: 'gold',
+      rarity: 'rare',
+      playerOnly: true,
+      allowSpecial: false,
+      protectHighGold: options.protectHighGold === true,
+      highGoldThreshold,
+    };
+    return !(options.protectHighGold && isProtectedHighGold(item, highGoldThreshold)) &&
       isSbcUsablePlayer(item, spec) &&
       itemMatchesSpec(item, spec);
   }

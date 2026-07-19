@@ -52,10 +52,10 @@ describe('loop runtime option projection', () => {
       openPicksAtEnd: true,
       pickHighGoldThreshold: 84,
       autoPickRatingThreshold: 91,
-      requirements: [{ maxRating: 83, protectHighGold: true }],
+      requirements: [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84 }],
       challengeRequirements: [
-        [{ maxRating: 83, protectHighGold: true }],
-        [{ maxRating: 83, protectHighGold: true }],
+        [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84 }],
+        [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84 }],
       ],
     });
   });
@@ -63,7 +63,7 @@ describe('loop runtime option projection', () => {
   it('removes only the legacy low-gold cap when Pick protection is disabled', () => {
     const loopDef = {
       strategy: 'playerPickSbc',
-      requirements: [{ maxRating: 81 }, { maxRating: 85 }],
+      requirements: [{ maxRating: 81, highGoldThreshold: 82 }, { maxRating: 85, highGoldThreshold: 82 }],
     };
     applyPickRuntimeOptions(loopDef, { protectHighGold: false });
     expect(loopDef.requirements).toEqual([
