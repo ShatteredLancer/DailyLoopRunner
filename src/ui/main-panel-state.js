@@ -40,7 +40,10 @@ export function renderMainPanelRecap(options = {}) {
   if (!button) return;
   const recap = options.recap;
   button.style.display = recap ? '' : 'none';
-  if (recap) button.title = `Last Player Pick recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
+  if (recap) {
+    const label = recap.type === 'batch' ? 'Batch Open' : 'Player Pick';
+    button.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
+  }
 }
 
 export function renderRewardAlertSummary(options = {}) {
@@ -70,6 +73,7 @@ export function renderMainPanelRuntimeState(options = {}) {
     || state.loadingLoops === true;
   const disabled = {
     'bronze-loop-start': busy,
+    'bronze-loop-batch-open': busy,
     'bronze-loop-stop': state.running !== true,
     'bronze-loop-select': state.running === true || state.scanningPicks === true || state.loadingLoops === true,
     'bronze-loop-edit': state.running === true || state.scanningPicks === true || state.loadingLoops === true,

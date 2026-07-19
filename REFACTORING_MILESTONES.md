@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.5.16`
+- Userscript 版本：`0.5.20`
 - Git 基线：`2ddf933`
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
@@ -560,6 +560,10 @@ Status: In Progress
 - `0.5.14` 明确区分业务终止条件与 UI `rounds`：One-click/正式 Daily 使用 EA 实时剩余次数；One-click 内部的 Daily Rare Pack 开完全部匹配来源包后最多运行一次 2x84+ 库存兜底，不读取 UI `rounds`。独立 Daily Rare Pack 则以 `rounds` 为 2x84+ 最低目标，先开完全部来源包并累计其提交数，再从库存补足差额；清理来源包重复卡允许超过目标，库存兜底不得超额。Daily MVP 继续保留单次验证上限，独立 Player Pick、2x84+ Fodder、84+ TOTW 等可重复 Loop 仍可用 `rounds` 控制本次完成数，Provision 用它控制来源包数。`Open reward packs` 统一控制 Rare Pack 与独立 2x84+ 奖励。
 - `0.5.14` 将静态 `5 of 10 82+ Players Pick` 标记为限次 Set：运行前读取 EA `timesCompleted/repeats`，按“pending Pick + Set 剩余次数”执行到耗尽，移除 `rounds` 与 `maxCompletions` 配置并隐藏 UI 输入。其它显式 `useRoundsAsCompletions` 的不限次/用户限量 Pick 保持原行为。
 - `0.5.16` 为所有 Runner 开包路径增加统一 Reward Highlight 事件：默认识别 `94+` 特殊卡，立即显示非阻塞 Toast/烟花，并可选通过 `GM_notification` 或 ntfy 批量通知。通知配置位于独立 Settings 弹窗，凭证使用 Tampermonkey 隔离存储；提示和网络失败不会阻断 opened-item policy 或 Unassigned 清理。Player Pick recap 继续保留，并与开包 Highlight 共用通用烟花模块。
+- `0.5.17` 增加独立 Batch Open Packs 工具：扫描 `My Packs`、持久化用户选择的包类型与数量、逐次重新解析 live pack instance，并统一调用现有 `openPack()`、Reward Alerts 和 `createMaterializeAndResolvePolicy()`。结束 recap 逐张列出特殊卡、按评分聚合其它普通金卡并整体降序；Preview 不产生 EA、Desktop 或 ntfy 副作用。配置、Workflow、recap 模型、弹窗、主面板命令和架构调用点均有自动化测试。
+- `0.5.18` 修正 Batch Open 在 Storage 满时丢失已开包回执并重复执行 final cleanup 的问题。单包 opened-item policy 会先尝试现有通用恢复配方，仍失败时安全保留无法移动的 Unassigned，高分/FSU 保护不变；已打开包进入 recap，剩余包停止。启动前也会以相同模式检查已有 Unassigned，阻塞未解除时不会打开新包。
+- `0.5.19` 将 Batch Open 的 My Packs `Add` 改为单按钮下拉菜单，支持 `Add 1` 和 `Add all (N)`；已加入项可用 `Added v` 快速重设为 1 或当前全部数量，并保持原有 Batch list 顺序和即时持久化。
+- `0.5.20` 扩展 Batch Open recap：特殊卡逐张查询并显示 FUT.GG/FUTNext 实时价格；非特殊 Gold、Silver、Bronze 球员按评分、Rare/Common 和卡色分别聚合，同评分不混合。价格失败显示 `price:?`，不影响已完成开包结果或 recap。
 
 Live validation: `1 of 5 83+ Player Pick` 和 `1 of 3 84+ Summer Tournament Nations Player Pick` 的静态 Workflow 与 `0.5.11` 扫描覆盖模式均已真实提交并领取通过，因此 `0.5.12` 删除两者静态配置。`5 of 10 82+ Players Pick` 当前已全部完成，暂时无法复验动态多 Challenge/Provision 引用，不记为失败并继续保留静态配置。
 

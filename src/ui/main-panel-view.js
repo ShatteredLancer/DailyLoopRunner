@@ -138,6 +138,7 @@ export function mainPanelHtml(maxRounds = 3) {
       <div class="row">
         <button id="bronze-loop-start">Start</button>
         <button id="bronze-loop-stop" disabled>Stop</button>
+        <button id="bronze-loop-batch-open" title="Scan My Packs and open a saved batch">Batch Open</button>
         <button id="bronze-loop-recap-reopen" style="display:none" title="View last Player Pick recap">View recap</button>
       </div>
       <div id="bronze-loop-latest">Ready.</div>

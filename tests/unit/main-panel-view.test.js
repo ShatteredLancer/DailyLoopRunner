@@ -13,6 +13,7 @@ describe('main panel view template', () => {
       'bronze-loop-select',
       'bronze-loop-start',
       'bronze-loop-stop',
+      'bronze-loop-batch-open',
       'bronze-loop-options-toggle',
       'bronze-loop-collapse',
       'bronze-loop-latest',

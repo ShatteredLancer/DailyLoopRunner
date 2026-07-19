@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.16
+// @version      0.5.20
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -27,6 +27,7 @@
   var PICK_OPTIONS_KEY = "fc-loop-runner-pick-options";
   var LOOP_UI_OPTIONS_KEY = "fc-loop-runner-ui-options";
   var REWARD_ALERT_SETTINGS_KEY = "fc-loop-runner-reward-alert-settings";
+  var BATCH_OPEN_PLAN_KEY = "fc-loop-runner-batch-open-plan";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -1670,6 +1671,65 @@
     };
   }
 
+  // src/config/batch-open.js
+  var MAX_BATCH_QUANTITY = 999;
+  function normalizedText(value) {
+    return String(value || "").trim();
+  }
+  function normalizedPackId(value) {
+    const id = Number(value);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  }
+  function normalizedQuantity(value) {
+    return Math.max(1, Math.min(MAX_BATCH_QUANTITY, Math.floor(Number(value) || 1)));
+  }
+  function batchOpenEntryKey(entry = {}) {
+    const packId2 = normalizedPackId(entry.packId ?? entry.id);
+    if (packId2) return `id:${packId2}`;
+    const packName = normalizedText(entry.packName ?? entry.name).toLowerCase();
+    return packName ? `name:${packName}` : "";
+  }
+  function normalizeBatchOpenEntry(entry = {}) {
+    const packId2 = normalizedPackId(entry.packId ?? entry.id);
+    const packName = normalizedText(entry.packName ?? entry.name);
+    if (!packId2 && !packName) return null;
+    return Object.freeze({
+      packId: packId2,
+      packName,
+      quantity: normalizedQuantity(entry.quantity)
+    });
+  }
+  function normalizeBatchOpenPlan(input = {}) {
+    const entries = [];
+    const indexes = /* @__PURE__ */ new Map();
+    for (const rawEntry of input?.entries || []) {
+      const entry = normalizeBatchOpenEntry(rawEntry);
+      if (!entry) continue;
+      const key = batchOpenEntryKey(entry);
+      if (!key) continue;
+      if (indexes.has(key)) {
+        entries[indexes.get(key)] = entry;
+      } else {
+        indexes.set(key, entries.length);
+        entries.push(entry);
+      }
+    }
+    return Object.freeze({ version: 1, entries: Object.freeze(entries) });
+  }
+  function createBatchOpenAvailability(planInput = {}, snapshot = {}) {
+    const plan = normalizeBatchOpenPlan(planInput);
+    const groups = (snapshot?.groups || []).map((group) => ({
+      packId: normalizedPackId(group.id ?? group.packId),
+      packName: normalizedText(group.name ?? group.packName),
+      available: Math.max(0, Math.floor(Number(group.count) || 0))
+    }));
+    const byKey = new Map(groups.map((group) => [batchOpenEntryKey(group), group]));
+    return plan.entries.map((entry) => Object.freeze({
+      ...entry,
+      available: byKey.get(batchOpenEntryKey(entry))?.available || 0
+    }));
+  }
+
   // src/domain/rating.js
   function calculateEaSquadRating(ratings = [], requiredPlayerCount = ratings.length) {
     const count = Number(requiredPlayerCount || ratings.length || 0);
@@ -1910,18 +1970,18 @@
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
-  function normalizedText(value) {
+  function normalizedText2(value) {
     return String(value ?? "").trim();
   }
   function unique(values = []) {
     return [...new Set(values.filter((value) => value !== void 0 && value !== null && value !== ""))];
   }
   function isCompleted(value) {
-    const status = normalizedText(value?.status || value?.state).toUpperCase();
+    const status = normalizedText2(value?.status || value?.state).toUpperCase();
     return value?.complete === true || value?.completed === true || status === "COMPLETE" || status === "COMPLETED";
   }
   function rewardType(reward) {
-    return normalizedText(reward?.type || reward?.rewardType || reward?.kind).toUpperCase().replaceAll(/[^A-Z0-9]+/g, "_");
+    return normalizedText2(reward?.type || reward?.rewardType || reward?.kind).toUpperCase().replaceAll(/[^A-Z0-9]+/g, "_");
   }
   function isPlayerPickReward(reward) {
     return reward?.playerPick === true || ["PLAYER_PICK", "PLAYERPICK"].includes(rewardType(reward));
@@ -1932,7 +1992,7 @@
       reward?.itemResourceId,
       reward?.definitionId,
       reward?.itemDefinitionId
-    ].map(normalizedText));
+    ].map(normalizedText2));
   }
   function rewardIdentityKey(reward) {
     const values = rewardIdentityValues(reward);
@@ -1944,7 +2004,7 @@
     if (explicitCandidateCount && explicitSelectionCount) {
       return { candidateCount: explicitCandidateCount, selectionCount: explicitSelectionCount, source: "fields" };
     }
-    const description = normalizedText(reward.description);
+    const description = normalizedText2(reward.description);
     const match = /^(\d+)\s+of\s+(\d+)(?:\s|$)/i.exec(description);
     if (!match) {
       return {
@@ -1960,23 +2020,23 @@
     };
   }
   function canonicalQuality(value, options = {}) {
-    const text = normalizedText(value).toUpperCase();
+    const text = normalizedText2(value).toUpperCase();
     if (["GOLD", "QUALITY_GOLD", "LEVEL_GOLD"].includes(text)) return "gold";
-    const goldValues = new Set((options.goldQualityValues || [3]).map((entry) => normalizedText(entry)));
-    return goldValues.has(normalizedText(value)) ? "gold" : null;
+    const goldValues = new Set((options.goldQualityValues || [3]).map((entry) => normalizedText2(entry)));
+    return goldValues.has(normalizedText2(value)) ? "gold" : null;
   }
   function canonicalRarity(value, options = {}, keyName = "PLAYER_RARITY") {
     if (keyName === "PLAYER_RARITY_GROUP") {
-      const rareGroupValues = new Set((options.rareRarityGroupValues || [4]).map((entry) => normalizedText(entry)));
-      return rareGroupValues.has(normalizedText(value)) ? "rare" : null;
+      const rareGroupValues = new Set((options.rareRarityGroupValues || [4]).map((entry) => normalizedText2(entry)));
+      return rareGroupValues.has(normalizedText2(value)) ? "rare" : null;
     }
-    const text = normalizedText(value).toUpperCase();
+    const text = normalizedText2(value).toUpperCase();
     if (["COMMON", "NORMAL", "NON_RARE", "NONRARE"].includes(text)) return "common";
     if (["RARE"].includes(text)) return "rare";
-    const commonValues = new Set((options.commonRarityValues || [0]).map((entry) => normalizedText(entry)));
-    const rareValues = new Set((options.rareRarityValues || [1]).map((entry) => normalizedText(entry)));
-    if (commonValues.has(normalizedText(value))) return "common";
-    if (rareValues.has(normalizedText(value))) return "rare";
+    const commonValues = new Set((options.commonRarityValues || [0]).map((entry) => normalizedText2(entry)));
+    const rareValues = new Set((options.rareRarityValues || [1]).map((entry) => normalizedText2(entry)));
+    if (commonValues.has(normalizedText2(value))) return "common";
+    if (rareValues.has(normalizedText2(value))) return "rare";
     return null;
   }
   function requirementSummary(entry) {
@@ -2025,7 +2085,7 @@
       }
       const rarity = canonicalRarity(entry.values[0], options, entry.keyName);
       if (!rarity) {
-        diagnostics.push(`${challengeLabel}: unknown ${entry.keyName} encoding ${normalizedText(entry.values[0]) || "?"}`);
+        diagnostics.push(`${challengeLabel}: unknown ${entry.keyName} encoding ${normalizedText2(entry.values[0]) || "?"}`);
         continue;
       }
       if (rarityCounts[rarity] !== null) {
@@ -2081,7 +2141,7 @@
   function parsePlayerPickSbcSnapshot(input = {}) {
     const set = input.set || {};
     const setId = positiveInteger(set.id);
-    const setName = normalizedText(set.name);
+    const setName = normalizedText2(set.name);
     const diagnostics = [];
     if (!setId) diagnostics.push("stable SBC Set id is missing");
     if (!setName) diagnostics.push("SBC Set display name is missing");
@@ -2093,7 +2153,7 @@
     const reward = playerPickRewards[0] || {};
     const identity = discoveryIdentity(set, reward);
     if (!identity.rewardKey) diagnostics.push("stable Player Pick reward identity is missing");
-    const rewardName = normalizedText(reward.name || reward.displayName);
+    const rewardName = normalizedText2(reward.name || reward.displayName);
     if (!rewardName) diagnostics.push("Player Pick reward display name is missing");
     const rewardCounts = readPlayerPickRewardCounts(reward);
     const candidateCount = rewardCounts.candidateCount;
@@ -2142,7 +2202,7 @@
       remainingCompletions: remainingCompletions(set),
       maxCompletions: 1,
       useRoundsAsCompletions: true,
-      pricePlatform: normalizedText(input.pricePlatform || "pc").toLowerCase(),
+      pricePlatform: normalizedText2(input.pricePlatform || "pc").toLowerCase(),
       discoveryIdentity: identity
     };
     if (challengeRequirements.length === 1) {
@@ -2155,7 +2215,7 @@
     return new Set((loop?.sbcSetIds || []).map(positiveInteger).filter(Boolean));
   }
   function loopRewardIds(loop) {
-    return new Set((loop?.pickItemResourceIds || []).map(normalizedText).filter(Boolean));
+    return new Set((loop?.pickItemResourceIds || []).map(normalizedText2).filter(Boolean));
   }
   function matchingPlayerPickLoops(loop, existingLoops = []) {
     const setIds = loopSetIds(loop);
@@ -2180,7 +2240,7 @@
           status: "duplicate",
           loop: null,
           discoveredLoop: result.loop,
-          matchingLoopIds: matches.map((loop) => normalizedText(loop?.id)).filter(Boolean),
+          matchingLoopIds: matches.map((loop) => normalizedText2(loop?.id)).filter(Boolean),
           diagnostics: ["matching static or discovered Player Pick already exists"]
         });
         continue;
@@ -2246,7 +2306,7 @@
     const configuredSessionLoops = configuredLoops.map((loop) => loopOverrides[loop?.id] || loop);
     const discoveredLoops = [...discovery.loops];
     const loopDefs = [...configuredSessionLoops, ...discoveredLoops];
-    const requestedSelection = normalizedText(input.selectedId);
+    const requestedSelection = normalizedText2(input.selectedId);
     const selectedId = requestedSelection === "custom" || loopDefs.some((loop) => loop?.id === requestedSelection) ? requestedSelection : loopDefs[0]?.id || null;
     return {
       ...discovery,
@@ -2352,7 +2412,7 @@
     }
     function findButtonByText(patterns, matches) {
       return queryAll("button").find(
-        (button) => matches(compactText(button), patterns) && isClickable(button)
+        (button2) => matches(compactText(button2), patterns) && isClickable(button2)
       ) || null;
     }
     function findClickableByText(patterns, matches, root = documentObject) {
@@ -4838,10 +4898,10 @@
       stopPoint();
       failIfSubmitError(label);
       if (await overlay.dismiss(label)) continue;
-      const button = overlay.findClaimButton();
-      if (button) {
+      const button2 = overlay.findClaimButton();
+      if (button2) {
         log(`${label}: claiming rewards`);
-        click(button);
+        click(button2);
         await waitLoadingEnd(900, 45e3);
         await sleep(1200);
         return true;
@@ -4920,13 +4980,13 @@
     };
   }
   function rankPlayerPickCandidates(items, prices = /* @__PURE__ */ new Map(), options = {}) {
-    const isSpecial = options.isSpecial || (() => false);
+    const isSpecial2 = options.isSpecial || (() => false);
     const isDuplicate = options.isDuplicate || (() => false);
     return (items || []).map((item, index) => ({
       item,
       index,
       rating: Number(item?.rating || 0),
-      special: isSpecial(item) === true,
+      special: isSpecial2(item) === true,
       duplicate: isDuplicate(item) === true,
       price: prices.has(itemDefinitionId(item)) ? prices.get(itemDefinitionId(item)) : null
     })).sort(
@@ -4934,14 +4994,14 @@
     );
   }
   function capturePlayerPickSelections(selected, ranked, options = {}) {
-    const isSpecial = options.isSpecial || (() => false);
+    const isSpecial2 = options.isSpecial || (() => false);
     const isDuplicate = options.isDuplicate || (() => false);
     return (selected || []).map((item) => {
       const candidate = ranked.find((entry) => entry.item === item);
       return {
         item,
         rating: candidate?.rating ?? Number(item?.rating || 0),
-        special: candidate?.special ?? isSpecial(item) === true,
+        special: candidate?.special ?? isSpecial2(item) === true,
         duplicate: candidate?.duplicate ?? isDuplicate(item) === true,
         price: candidate?.price ?? null
       };
@@ -5060,7 +5120,7 @@
     const rating = Number(value);
     return Number.isFinite(rating) ? Math.max(1, Math.min(99, Math.floor(rating))) : fallback;
   }
-  function normalizedText2(value) {
+  function normalizedText3(value) {
     return String(value || "").trim();
   }
   function normalizeRewardAlertSettings(input = {}) {
@@ -5070,13 +5130,13 @@
       highlightEnabled: input.highlightEnabled !== false,
       desktopEnabled: input.desktopEnabled === true,
       ntfyEnabled: input.ntfyEnabled === true,
-      ntfyServer: normalizedText2(input.ntfyServer) || DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
-      ntfyTopic: normalizedText2(input.ntfyTopic),
-      ntfyToken: normalizedText2(input.ntfyToken)
+      ntfyServer: normalizedText3(input.ntfyServer) || DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
+      ntfyTopic: normalizedText3(input.ntfyTopic),
+      ntfyToken: normalizedText3(input.ntfyToken)
     });
   }
   function displayName(item = {}) {
-    return normalizedText2(item.name || item.commonName || item.lastName || item.definitionId || item.id) || "Unknown player";
+    return normalizedText3(item.name || item.commonName || item.lastName || item.definitionId || item.id) || "Unknown player";
   }
   function createPackHighlightModel(receipt = {}, settingsInput = {}, context = {}) {
     const settings = normalizeRewardAlertSettings(settingsInput);
@@ -5095,9 +5155,9 @@
     return Object.freeze({
       pack: Object.freeze({
         id: Number(receipt.packRef?.id || 0),
-        name: normalizedText2(receipt.packRef?.name) || normalizedText2(context.purpose) || "Opened pack"
+        name: normalizedText3(receipt.packRef?.name) || normalizedText3(context.purpose) || "Opened pack"
       }),
-      purpose: normalizedText2(context.purpose),
+      purpose: normalizedText3(context.purpose),
       threshold: settings.minimumRating,
       cards: Object.freeze(cards.map((card) => Object.freeze(card))),
       maxRating: Math.max(...cards.map((card) => card.rating))
@@ -5113,6 +5173,125 @@
     }
     if (cards.length > 8) lines.push(`+${cards.length - 8} more`);
     return Object.freeze({ title, body: lines.join("\n") });
+  }
+
+  // src/reward/batch-open-recap.js
+  function itemName(item = {}) {
+    return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || "Unknown player");
+  }
+  function isPlayer(item = {}) {
+    return String(item.type || "").toLowerCase() === "player";
+  }
+  function isSpecial(item = {}) {
+    return item.special === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 1;
+  }
+  function playerTier(item = {}) {
+    const explicit = String(item.tier || "").toLowerCase();
+    if (["gold", "silver", "bronze"].includes(explicit)) return explicit;
+    const rating = Number(item.rating || 0);
+    if (rating >= 75) return "gold";
+    if (rating >= 65) return "silver";
+    if (rating > 0) return "bronze";
+    return null;
+  }
+  function playerRarity(item = {}) {
+    return item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0 ? "rare" : "common";
+  }
+  function titleCase(value) {
+    const text = String(value || "");
+    return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "";
+  }
+  function createBatchOpenRecapModel(input = {}) {
+    const receipts = input.receipts || [];
+    const items = input.openedItems || receipts.flatMap((receipt) => receipt?.openedItems || []);
+    const rows = [];
+    const groupedPlayers = /* @__PURE__ */ new Map();
+    const prices = input.prices instanceof Map ? input.prices : new Map(Object.entries(input.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
+    let playerCount = 0;
+    let specialCount = 0;
+    let normalGoldCount = 0;
+    let normalSilverCount = 0;
+    let normalBronzeCount = 0;
+    let groupedPlayerCount = 0;
+    for (const item of items) {
+      if (!isPlayer(item)) continue;
+      playerCount++;
+      const rating = Number(item.rating || 0);
+      if (isSpecial(item)) {
+        specialCount++;
+        rows.push(Object.freeze({
+          kind: "special",
+          rating,
+          name: itemName(item),
+          duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
+          tradeable: item.tradeable === true,
+          price: prices.get(Number(item.definitionId || 0)) || null,
+          item
+        }));
+      } else {
+        const tier = playerTier(item);
+        if (!tier) continue;
+        const rarity = playerRarity(item);
+        groupedPlayerCount++;
+        if (tier === "gold") normalGoldCount++;
+        else if (tier === "silver") normalSilverCount++;
+        else normalBronzeCount++;
+        const key = `${rating}:${rarity}:${tier}`;
+        const group = groupedPlayers.get(key) || { rating, rarity, tier, count: 0 };
+        group.count++;
+        groupedPlayers.set(key, group);
+      }
+    }
+    for (const group of groupedPlayers.values()) {
+      rows.push(Object.freeze({
+        kind: "group",
+        rating: group.rating,
+        rarity: group.rarity,
+        tier: group.tier,
+        label: `${titleCase(group.rarity)} ${titleCase(group.tier)}`,
+        count: group.count
+      }));
+    }
+    rows.sort((a, b) => {
+      const ratingOrder = b.rating - a.rating;
+      if (ratingOrder) return ratingOrder;
+      if (a.kind !== b.kind) return a.kind === "special" ? -1 : 1;
+      if (a.kind === "group" && a.rarity !== b.rarity) return a.rarity === "rare" ? -1 : 1;
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    });
+    return Object.freeze({
+      status: String(input.status || "completed"),
+      reason: input.reason ? String(input.reason) : null,
+      requestedPacks: Number(input.requestedPacks || receipts.length),
+      packsOpened: Number(input.packsOpened ?? receipts.length),
+      skippedPacks: Number(input.skippedPacks || 0),
+      itemCount: items.length,
+      playerCount,
+      specialCount,
+      normalGoldCount,
+      normalSilverCount,
+      normalBronzeCount,
+      groupedPlayerCount,
+      omittedCount: Math.max(0, items.length - specialCount - groupedPlayerCount),
+      rows: Object.freeze(rows)
+    });
+  }
+  function createBatchOpenRecapPreviewModel() {
+    return createBatchOpenRecapModel({
+      status: "preview",
+      requestedPacks: 3,
+      packsOpened: 3,
+      openedItems: [
+        { id: 1, definitionId: 101, type: "player", name: "Preview Special A", rating: 97, special: true, duplicate: false },
+        { id: 2, definitionId: 102, type: "player", name: "Preview Special B", rating: 95, special: true, duplicate: true },
+        { id: 3, type: "player", name: "Preview Gold", rating: 89, tier: "gold", rare: true },
+        { id: 4, type: "player", name: "Preview Gold", rating: 89, tier: "gold", rare: true },
+        { id: 5, type: "player", name: "Preview Gold", rating: 84, tier: "gold", rare: false },
+        { id: 6, type: "player", name: "Preview Silver", rating: 74, tier: "silver", rare: true },
+        { id: 7, type: "player", name: "Preview Bronze", rating: 63, tier: "bronze", rare: false }
+      ],
+      prices: /* @__PURE__ */ new Map([[101, 125e4], [102, 48e4]])
+    });
   }
 
   // src/unassigned/plan.js
@@ -6337,6 +6516,149 @@
     return result;
   }
 
+  // src/workflows/batch-open.js
+  function createResult(input = {}) {
+    return Object.freeze({
+      status: String(input.status || "completed"),
+      reason: input.reason ? String(input.reason) : null,
+      requestedPacks: Number(input.requestedPacks || 0),
+      packsOpened: Number(input.packsOpened || 0),
+      skippedPacks: Number(input.skippedPacks || 0),
+      openedItems: Object.freeze([...input.openedItems || []]),
+      receipts: Object.freeze([...input.receipts || []]),
+      entries: Object.freeze((input.entries || []).map((entry) => Object.freeze({ ...entry })))
+    });
+  }
+  async function runBatchOpenWorkflow(options = {}) {
+    if (typeof options.resolvePack !== "function") throw new TypeError("resolvePack is required");
+    if (typeof options.openPack !== "function") throw new TypeError("openPack is required");
+    const plan = normalizeBatchOpenPlan(options.plan);
+    const requestedPacks = plan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
+    const receipts = [];
+    const openedItems = [];
+    const entries = [];
+    let packsOpened = 0;
+    let skippedPacks = 0;
+    const skipFollowingEntries = (startIndex, reason) => {
+      for (let index = startIndex; index < plan.entries.length; index++) {
+        const pending = plan.entries[index];
+        entries.push({
+          packId: pending.packId,
+          packName: pending.packName,
+          requested: pending.quantity,
+          opened: 0,
+          skipped: pending.quantity,
+          reason
+        });
+        skippedPacks += pending.quantity;
+      }
+    };
+    const finish = (status = "completed", reason = null) => createResult({
+      status,
+      reason,
+      requestedPacks,
+      packsOpened,
+      skippedPacks,
+      openedItems,
+      receipts,
+      entries
+    });
+    if (typeof options.beforeStart === "function") {
+      const preflight = await options.beforeStart();
+      if (preflight?.status === "preserved" || preflight?.status === "blocked") {
+        skipFollowingEntries(0, preflight.reason || "Unassigned items must be resolved before opening packs");
+        await options.onEvent?.("preflight-preserved", { preflight, requestedPacks });
+        return finish("preserved", preflight.reason || "Unassigned items must be resolved before opening packs");
+      }
+    }
+    for (let entryIndex = 0; entryIndex < plan.entries.length; entryIndex++) {
+      const entry = plan.entries[entryIndex];
+      const entryResult = {
+        packId: entry.packId,
+        packName: entry.packName,
+        requested: entry.quantity,
+        opened: 0,
+        skipped: 0,
+        reason: null
+      };
+      entries.push(entryResult);
+      for (let openIndex = 0; openIndex < entry.quantity; openIndex++) {
+        if (options.shouldStop?.() === true) {
+          const remaining = entry.quantity - openIndex;
+          entryResult.skipped += remaining;
+          entryResult.reason = "stopped by user";
+          skippedPacks += remaining;
+          skipFollowingEntries(entryIndex + 1, "stopped by user");
+          return finish("stopped", "stopped by user");
+        }
+        let receipt = null;
+        let foundPack = false;
+        try {
+          for (let resolveAttempt = 1; resolveAttempt <= 2 && !receipt; resolveAttempt++) {
+            const pack = await options.resolvePack(entry, { entryIndex, openIndex, resolveAttempt });
+            if (!pack) break;
+            foundPack = true;
+            receipt = await options.openPack({
+              entry,
+              entryIndex,
+              openIndex,
+              resolveAttempt,
+              pack
+            });
+          }
+        } catch (error) {
+          const remaining = entry.quantity - openIndex;
+          entryResult.skipped += remaining;
+          entryResult.reason = error?.message || String(error || "open failed");
+          skippedPacks += remaining;
+          if (options.shouldStop?.() === true || /stopped by user/i.test(entryResult.reason)) {
+            skipFollowingEntries(entryIndex + 1, "stopped by user");
+            return finish("stopped", "stopped by user");
+          }
+          await options.onEvent?.("blocked", { entry, entryResult, error });
+          skipFollowingEntries(entryIndex + 1, "not attempted after blocked pack");
+          return finish("blocked", entryResult.reason);
+        }
+        if (!receipt || receipt.status !== "opened") {
+          const remaining = entry.quantity - openIndex;
+          entryResult.skipped += remaining;
+          entryResult.reason = foundPack ? "matching pack became unavailable" : "matching pack is unavailable";
+          skippedPacks += remaining;
+          await options.onEvent?.("unavailable", { entry, entryResult, remaining });
+          break;
+        }
+        receipts.push(receipt);
+        openedItems.push(...receipt.openedItems || []);
+        packsOpened++;
+        entryResult.opened++;
+        await options.onEvent?.("opened", {
+          entry,
+          entryResult,
+          receipt,
+          packsOpened,
+          requestedPacks
+        });
+        if (receipt.details?.cleanupStatus === "preserved") {
+          const remaining = entry.quantity - openIndex - 1;
+          entryResult.skipped += remaining;
+          entryResult.reason = receipt.details.cleanupReason || "Unassigned items were preserved";
+          skippedPacks += remaining;
+          skipFollowingEntries(entryIndex + 1, "not attempted while Unassigned is preserved");
+          await options.onEvent?.("preserved", {
+            entry,
+            entryResult,
+            receipt,
+            remaining,
+            packsOpened,
+            requestedPacks
+          });
+          return finish("preserved", entryResult.reason);
+        }
+      }
+    }
+    return finish("completed");
+  }
+
   // src/workflows/dispatch.js
   var STANDARD_FINALIZATION_STRATEGIES = /* @__PURE__ */ new Set([
     "dailyRoutine",
@@ -6495,6 +6817,7 @@
     required(panel, "#bronze-loop-reward-alert-enabled").addEventListener("change", (event) => commands.saveRewardAlertEnabled?.(event));
     required(panel, "#bronze-loop-reward-alert-settings").addEventListener("click", (event) => commands.openRewardAlertSettings?.(event));
     required(panel, "#bronze-loop-start").addEventListener("click", (event) => commands.start?.(event));
+    required(panel, "#bronze-loop-batch-open").addEventListener("click", (event) => commands.openBatch?.(event));
     required(panel, "#bronze-loop-recap-reopen").addEventListener("click", (event) => commands.reopenRecap?.(event));
     required(panel, "#bronze-loop-refresh").addEventListener("click", (event) => commands.refresh?.(event));
     required(panel, "#bronze-loop-scan-picks").addEventListener("click", (event) => commands.scanPicks?.(event));
@@ -6547,6 +6870,11 @@
       start() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
         options.start?.();
+        return true;
+      },
+      openBatch() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        options.openBatch?.();
         return true;
       },
       reopenRecap: options.reopenRecap,
@@ -6674,17 +7002,17 @@
       return clamped;
     }
     function updateOptionsButton() {
-      const button = panel.querySelector("#bronze-loop-options-toggle");
-      if (!button) return;
+      const button2 = panel.querySelector("#bronze-loop-options-toggle");
+      if (!button2) return;
       const open = panel.classList.contains("options-open");
-      button.textContent = open ? "Hide" : "Options";
-      button.title = open ? "Hide advanced options" : "Show advanced options";
+      button2.textContent = open ? "Hide" : "Options";
+      button2.title = open ? "Hide advanced options" : "Show advanced options";
     }
     function updateCollapseButton() {
-      const button = panel.querySelector("#bronze-loop-collapse");
-      if (!button) return;
-      button.textContent = "L";
-      button.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
+      const button2 = panel.querySelector("#bronze-loop-collapse");
+      if (!button2) return;
+      button2.textContent = "L";
+      button2.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
     }
     function notifyModeChange() {
       updateOptionsButton();
@@ -6915,11 +7243,14 @@
     }
   }
   function renderMainPanelRecap(options = {}) {
-    const button = query(options.panel, "#bronze-loop-recap-reopen");
-    if (!button) return;
+    const button2 = query(options.panel, "#bronze-loop-recap-reopen");
+    if (!button2) return;
     const recap = options.recap;
-    button.style.display = recap ? "" : "none";
-    if (recap) button.title = `Last Player Pick recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
+    button2.style.display = recap ? "" : "none";
+    if (recap) {
+      const label = recap.type === "batch" ? "Batch Open" : "Player Pick";
+      button2.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
+    }
   }
   function renderRewardAlertSummary(options = {}) {
     const panel = options.panel;
@@ -6944,6 +7275,7 @@
     const busy = state.running === true || state.refreshing === true || state.scanningPicks === true || state.loadingLoops === true;
     const disabled = {
       "bronze-loop-start": busy,
+      "bronze-loop-batch-open": busy,
       "bronze-loop-stop": state.running !== true,
       "bronze-loop-select": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
       "bronze-loop-edit": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
@@ -7108,6 +7440,7 @@
       <div class="row">
         <button id="bronze-loop-start">Start</button>
         <button id="bronze-loop-stop" disabled>Stop</button>
+        <button id="bronze-loop-batch-open" title="Scan My Packs and open a saved batch">Batch Open</button>
         <button id="bronze-loop-recap-reopen" style="display:none" title="View last Player Pick recap">View recap</button>
       </div>
       <div id="bronze-loop-latest">Ready.</div>
@@ -7593,9 +7926,9 @@
       const modal = error?.modal;
       if (!modal) return false;
       const buttons = Array.from(modal.querySelectorAll?.("button") || []);
-      const button = buttons.find((candidate) => /^(ok|okay|确定|確定)$/i.test(String(candidate?.textContent || "").trim())) || buttons.find((candidate) => !candidate?.disabled);
-      if (!button) return false;
-      click(button);
+      const button2 = buttons.find((candidate) => /^(ok|okay|确定|確定)$/i.test(String(candidate?.textContent || "").trim())) || buttons.find((candidate) => !candidate?.disabled);
+      if (!button2) return false;
+      click(button2);
       return true;
     }
     function findClaimContext() {
@@ -7887,7 +8220,7 @@
     applyStyles4(tests, { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" });
     const actions = dom.create("div");
     applyStyles4(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
-    const button = (id, text, primary = false) => {
+    const button2 = (id, text, primary = false) => {
       const value = dom.create("button");
       value.id = id;
       value.type = "button";
@@ -7902,11 +8235,11 @@
       });
       return value;
     };
-    const preview = button("bronze-loop-alert-preview", "Preview highlight");
-    const desktopTest = button("bronze-loop-alert-test-desktop", "Send desktop test");
-    const ntfyTest = button("bronze-loop-alert-test-ntfy", "Send ntfy test");
-    const cancel = button("bronze-loop-alert-cancel", "Cancel");
-    const save = button("bronze-loop-alert-save", "Save", true);
+    const preview = button2("bronze-loop-alert-preview", "Preview highlight");
+    const desktopTest = button2("bronze-loop-alert-test-desktop", "Send desktop test");
+    const ntfyTest = button2("bronze-loop-alert-test-ntfy", "Send ntfy test");
+    const cancel = button2("bronze-loop-alert-cancel", "Cancel");
+    const save = button2("bronze-loop-alert-save", "Save", true);
     tests.append(preview, desktopTest, ntfyTest);
     actions.append(cancel, save);
     const updateNtfyTestState = () => {
@@ -7961,6 +8294,378 @@
     return overlay;
   }
 
+  // src/ui/batch-open-dialog.js
+  function applyStyles5(element, styles) {
+    Object.assign(element.style, styles);
+  }
+  function button(dom, text, primary = false) {
+    const value = dom.create("button");
+    value.type = "button";
+    value.textContent = text;
+    applyStyles5(value, {
+      minHeight: "30px",
+      padding: "0 12px",
+      cursor: "pointer",
+      color: "#fff",
+      background: primary ? "#2f6fde" : "#222832",
+      border: `1px solid ${primary ? "#4f8cff" : "#607089"}`
+    });
+    return value;
+  }
+  function quantityInput(dom, quantity) {
+    const input = dom.create("input");
+    input.type = "number";
+    input.min = "1";
+    input.max = "999";
+    input.value = String(quantity);
+    applyStyles5(input, {
+      width: "70px",
+      height: "30px",
+      boxSizing: "border-box",
+      background: "#222832",
+      color: "#fff",
+      border: "1px solid #607089",
+      padding: "0 6px"
+    });
+    return input;
+  }
+  function showBatchOpenDialog(options = {}) {
+    const dom = options.dom;
+    if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
+    dom.query?.("#bronze-loop-batch-open-modal")?.remove?.();
+    const overlay = dom.create("div");
+    overlay.id = "bronze-loop-batch-open-modal";
+    applyStyles5(overlay, {
+      position: "fixed",
+      inset: "0",
+      zIndex: "1000001",
+      background: "rgba(0,0,0,.72)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "20px",
+      boxSizing: "border-box"
+    });
+    const dialog = dom.create("div");
+    applyStyles5(dialog, {
+      width: "min(700px, 100%)",
+      maxHeight: "90vh",
+      overflow: "auto",
+      background: "#171b21",
+      color: "#f4f6f8",
+      border: "1px solid #65758a",
+      padding: "14px",
+      boxSizing: "border-box",
+      fontFamily: "Arial, sans-serif"
+    });
+    const title = dom.create("div");
+    title.textContent = "Batch Open Packs";
+    applyStyles5(title, { fontSize: "16px", fontWeight: "700" });
+    const note = dom.create("div");
+    note.textContent = "Choose pack types and quantities. The saved list is reused next time; unavailable remembered types are skipped.";
+    applyStyles5(note, { color: "#9aa6b8", fontSize: "11px", margin: "6px 0 10px" });
+    const status = dom.create("div");
+    applyStyles5(status, { minHeight: "16px", color: "#9fb2c9", fontSize: "11px", marginTop: "8px" });
+    const availableTitle = dom.create("div");
+    availableTitle.textContent = "My Packs";
+    applyStyles5(availableTitle, { color: "#b8c3d2", fontSize: "12px", fontWeight: "700", marginBottom: "6px" });
+    const availableList = dom.create("div");
+    applyStyles5(availableList, { display: "flex", flexDirection: "column", gap: "5px", marginBottom: "12px" });
+    const planTitle = dom.create("div");
+    planTitle.textContent = "Batch list";
+    applyStyles5(planTitle, { color: "#b8c3d2", fontSize: "12px", fontWeight: "700", marginBottom: "6px" });
+    const planList = dom.create("div");
+    applyStyles5(planList, { display: "flex", flexDirection: "column", gap: "5px" });
+    let snapshot = options.snapshot || { total: 0, groups: [] };
+    let plan = normalizeBatchOpenPlan(options.plan);
+    const notifyPlanChange = () => options.onPlanChange?.(plan);
+    const currentPlan = () => normalizeBatchOpenPlan({
+      entries: Array.from(planList.children || []).map((row) => ({
+        packId: row.dataset?.packId || null,
+        packName: row.dataset?.packName || "",
+        quantity: row.querySelector?.("input")?.value || 1
+      }))
+    });
+    const render = () => {
+      availableList.textContent = "";
+      const selectedKeys = new Set(plan.entries.map(batchOpenEntryKey));
+      for (const group of snapshot.groups || []) {
+        const row = dom.create("div");
+        applyStyles5(row, { position: "relative", display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
+        const label = dom.create("span");
+        label.textContent = `${group.name} (#${group.id || "?"}) x${group.count}`;
+        applyStyles5(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        const selected = selectedKeys.has(batchOpenEntryKey({ packId: group.id, packName: group.name }));
+        const addMenu = dom.create("div");
+        applyStyles5(addMenu, { position: "relative", flex: "0 0 auto" });
+        const add = button(dom, selected ? "Added v" : "Add v");
+        add.setAttribute?.("aria-label", `Add ${group.name} to batch`);
+        add.setAttribute?.("aria-expanded", "false");
+        const menu = dom.create("div");
+        applyStyles5(menu, {
+          display: "none",
+          position: "absolute",
+          right: "0",
+          top: "34px",
+          zIndex: "4",
+          minWidth: "130px",
+          padding: "4px",
+          background: "#171b21",
+          border: "1px solid #607089",
+          boxShadow: "0 6px 18px rgba(0,0,0,.35)"
+        });
+        const setQuantity = (quantity) => {
+          plan = currentPlan();
+          const key = batchOpenEntryKey({ packId: group.id, packName: group.name });
+          const exists = plan.entries.some((entry) => batchOpenEntryKey(entry) === key);
+          const entries = exists ? plan.entries.map((entry) => batchOpenEntryKey(entry) === key ? { packId: group.id, packName: group.name, quantity } : entry) : [...plan.entries, { packId: group.id, packName: group.name, quantity }];
+          plan = normalizeBatchOpenPlan({ entries });
+          notifyPlanChange();
+          render();
+        };
+        const addOne = button(dom, selected ? "Set to 1" : "Add 1");
+        const addAll = button(dom, `${selected ? "Set to all" : "Add all"} (${group.count})`);
+        for (const option of [addOne, addAll]) {
+          applyStyles5(option, { display: "block", width: "100%", minWidth: "0", textAlign: "left", border: "0" });
+        }
+        addOne.addEventListener("click", () => setQuantity(1));
+        addAll.addEventListener("click", () => setQuantity(Math.max(1, Number(group.count) || 1)));
+        add.addEventListener("click", () => {
+          const open = menu.style.display === "none";
+          menu.style.display = open ? "block" : "none";
+          add.setAttribute?.("aria-expanded", open ? "true" : "false");
+        });
+        menu.append(addOne, addAll);
+        addMenu.append(add, menu);
+        row.append(label, addMenu);
+        availableList.appendChild(row);
+      }
+      if (!(snapshot.groups || []).length) {
+        const empty = dom.create("div");
+        empty.textContent = "No packs found. Use Scan My Packs to refresh.";
+        applyStyles5(empty, { color: "#9aa6b8", padding: "8px" });
+        availableList.appendChild(empty);
+      }
+      planList.textContent = "";
+      const rows = createBatchOpenAvailability(plan, snapshot);
+      for (const entry of rows) {
+        const row = dom.create("div");
+        row.dataset.packId = entry.packId ? String(entry.packId) : "";
+        row.dataset.packName = entry.packName;
+        applyStyles5(row, { display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
+        const label = dom.create("span");
+        label.textContent = `${entry.packName || `Pack #${entry.packId}`} (#${entry.packId || "?"})`;
+        applyStyles5(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        const availability = dom.create("span");
+        availability.textContent = entry.available ? `${entry.available} available` : "unavailable";
+        applyStyles5(availability, { color: entry.available ? "#8fd19e" : "#e3a7a7", fontSize: "11px", flex: "0 0 auto" });
+        const quantity = quantityInput(dom, entry.quantity);
+        quantity.setAttribute?.("aria-label", `Quantity for ${entry.packName}`);
+        quantity.addEventListener("change", () => {
+          plan = currentPlan();
+          notifyPlanChange();
+        });
+        const remove = button(dom, "Remove");
+        remove.addEventListener("click", () => {
+          const key = batchOpenEntryKey(entry);
+          plan = normalizeBatchOpenPlan({ entries: currentPlan().entries.filter((candidate) => batchOpenEntryKey(candidate) !== key) });
+          notifyPlanChange();
+          render();
+        });
+        row.append(label, availability, quantity, remove);
+        planList.appendChild(row);
+      }
+      if (!rows.length) {
+        const empty = dom.create("div");
+        empty.textContent = "No pack types in the batch list.";
+        applyStyles5(empty, { color: "#9aa6b8", padding: "8px" });
+        planList.appendChild(empty);
+      }
+    };
+    const toolbar = dom.create("div");
+    applyStyles5(toolbar, { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
+    const scan = button(dom, "Scan My Packs");
+    const preview = button(dom, "Preview recap");
+    toolbar.append(scan, preview);
+    const actions = dom.create("div");
+    applyStyles5(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
+    const cancel = button(dom, "Cancel");
+    const start = button(dom, "Start batch", true);
+    actions.append(cancel, start);
+    const setPending = (pending) => {
+      scan.disabled = pending;
+      preview.disabled = pending;
+      start.disabled = pending;
+    };
+    scan.addEventListener("click", async () => {
+      setPending(true);
+      status.textContent = "Scanning My Packs...";
+      try {
+        plan = currentPlan();
+        snapshot = await options.onScan?.() || snapshot;
+        status.textContent = `${Number(snapshot.total || 0)} pack(s) found`;
+        render();
+      } catch (error) {
+        status.textContent = `Scan failed: ${error?.message || error}`;
+      } finally {
+        setPending(false);
+      }
+    });
+    preview.addEventListener("click", () => options.onPreview?.());
+    const close = () => overlay.remove?.();
+    cancel.addEventListener("click", close);
+    start.addEventListener("click", async () => {
+      const selected = currentPlan();
+      if (!selected.entries.length) {
+        status.textContent = "Add at least one pack type first";
+        return;
+      }
+      setPending(true);
+      status.textContent = "Starting batch...";
+      try {
+        await options.onStart?.(selected);
+        close();
+      } catch (error) {
+        status.textContent = `Start failed: ${error?.message || error}`;
+        setPending(false);
+      }
+    });
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close();
+    });
+    dialog.append(title, note, toolbar, availableTitle, availableList, planTitle, planList, status, actions);
+    overlay.appendChild(dialog);
+    dom.appendToBody(overlay);
+    render();
+    return overlay;
+  }
+
+  // src/ui/batch-open-recap.js
+  function applyStyles6(element, styles) {
+    Object.assign(element.style, styles);
+  }
+  function showBatchOpenRecap(options = {}) {
+    const dom = options.dom;
+    const model = options.model;
+    if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
+    if (!model) return Promise.resolve(false);
+    dom.query?.("#bronze-loop-batch-recap-modal")?.remove?.();
+    return new Promise((resolve) => {
+      const overlay = dom.create("div");
+      overlay.id = "bronze-loop-batch-recap-modal";
+      applyStyles6(overlay, {
+        position: "fixed",
+        inset: "0",
+        zIndex: "1000001",
+        background: "rgba(0,0,0,.72)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+        boxSizing: "border-box"
+      });
+      const dialog = dom.create("div");
+      applyStyles6(dialog, {
+        width: "min(620px, 100%)",
+        maxHeight: "88vh",
+        overflow: "auto",
+        background: "#171b21",
+        color: "#f4f6f8",
+        border: "1px solid #65758a",
+        padding: "14px",
+        boxSizing: "border-box",
+        fontFamily: "Arial, sans-serif"
+      });
+      const title = dom.create("div");
+      title.textContent = model.status === "preview" ? "Batch Open Recap Preview" : "Batch Open Recap";
+      applyStyles6(title, { fontSize: "16px", fontWeight: "700", marginBottom: "8px" });
+      const summary = dom.create("div");
+      summary.textContent = `${model.packsOpened}/${model.requestedPacks} pack(s) opened, ${model.itemCount} item(s), ${model.specialCount} special, ${model.normalGoldCount} gold, ${model.normalSilverCount} silver, ${model.normalBronzeCount} bronze${model.skippedPacks ? `, ${model.skippedPacks} skipped` : ""}${model.omittedCount ? `, ${model.omittedCount} other item(s)` : ""}`;
+      applyStyles6(summary, { color: "#9aa6b8", marginBottom: "10px", fontSize: "12px" });
+      const reason = model.reason ? dom.create("div") : null;
+      if (reason) {
+        reason.textContent = `${model.status}: ${model.reason}`;
+        applyStyles6(reason, {
+          color: model.status === "preserved" ? "#ffd27a" : "#e3a7a7",
+          marginBottom: "10px",
+          fontSize: "12px",
+          padding: "7px 8px",
+          background: "#241f1a",
+          borderLeft: "3px solid #c48a3a",
+          overflowWrap: "anywhere"
+        });
+      }
+      const list = dom.create("div");
+      applyStyles6(list, { display: "flex", flexDirection: "column", gap: "6px" });
+      if (!model.rows.length) {
+        const empty = dom.create("div");
+        empty.textContent = "No player rows to display.";
+        applyStyles6(empty, { padding: "10px", color: "#9aa6b8", background: "#1d2229" });
+        list.appendChild(empty);
+      }
+      for (const rowModel of model.rows) {
+        const row = dom.create("div");
+        applyStyles6(row, {
+          minHeight: "34px",
+          padding: "6px 8px",
+          boxSizing: "border-box",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          background: rowModel.kind === "special" ? "#30263d" : "#1d2229",
+          borderLeft: `3px solid ${rowModel.kind === "special" ? "#c48cff" : "#64748b"}`
+        });
+        const rating = dom.create("span");
+        rating.textContent = String(rowModel.rating);
+        applyStyles6(rating, { minWidth: "28px", color: rowModel.kind === "special" ? "#ffd54a" : "#f3f5f7", fontWeight: "700" });
+        const label = dom.create("span");
+        label.textContent = rowModel.kind === "special" ? rowModel.name : `${rowModel.label} x${rowModel.count}`;
+        applyStyles6(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        row.append(rating, label);
+        if (rowModel.kind === "special") {
+          const tags = dom.create("span");
+          const price = options.formatPrice?.(rowModel.price) || "";
+          tags.textContent = [rowModel.duplicate ? "duplicate" : null, rowModel.tradeable ? "tradeable" : "untradeable", `price:${price || "?"}`].filter(Boolean).join(", ");
+          applyStyles6(tags, { color: "#9aa6b8", fontSize: "11px", flex: "0 0 auto" });
+          row.appendChild(tags);
+        }
+        list.appendChild(row);
+      }
+      const closeButton = dom.create("button");
+      closeButton.type = "button";
+      closeButton.textContent = "Close";
+      applyStyles6(closeButton, {
+        marginTop: "12px",
+        minHeight: "30px",
+        padding: "0 14px",
+        background: "#2f6fde",
+        color: "#fff",
+        border: "none",
+        borderRadius: "3px",
+        cursor: "pointer",
+        fontSize: "13px"
+      });
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        overlay.remove?.();
+        options.onClose?.();
+        resolve(true);
+      };
+      closeButton.addEventListener("click", finish);
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) finish();
+      });
+      dialog.append(title, summary);
+      if (reason) dialog.appendChild(reason);
+      dialog.append(list, closeButton);
+      overlay.appendChild(dialog);
+      dom.appendToBody(overlay);
+      if (model.specialCount > 0) options.celebrate?.(dialog, model.specialCount);
+    });
+  }
+
   // src/userscript-entry.js
   (function() {
     "use strict";
@@ -8010,6 +8715,8 @@
       fsuSettingsCache: { at: 0, settings: null },
       lastOpenPackReceipt: null,
       lastPickRecap: null,
+      lastBatchRecap: null,
+      lastRecapType: null,
       showMvpLoops: false,
       loopStack: [],
       logRenderer: null,
@@ -8023,11 +8730,13 @@
       document.querySelector("#bronze-loop-pick-modal")?.remove();
       document.querySelector("#bronze-loop-recap-modal")?.remove();
       document.querySelector("#bronze-loop-reward-alert-modal")?.remove();
+      document.querySelector("#bronze-loop-batch-open-modal")?.remove();
+      document.querySelector("#bronze-loop-batch-recap-modal")?.remove();
       document.querySelector("#bronze-loop-reward-highlight-stack")?.remove();
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.16",
+      version: "0.5.20",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -8036,7 +8745,8 @@
       calculateSquadRating: calculateEaSquadRating,
       solveRatingSbcCandidates: findOptimalRatingSbcSelection,
       scanPlayerPicks: () => scanAvailablePlayerPickSbcs(),
-      previewPackHighlight: (input = {}) => previewPackHighlight(input)
+      previewPackHighlight: (input = {}) => previewPackHighlight(input),
+      previewBatchOpenRecap: () => previewBatchOpenRecap()
     };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const now = () => (/* @__PURE__ */ new Date()).toLocaleTimeString();
@@ -8201,19 +8911,20 @@
       });
     }
     function updateRecapButton() {
-      const recap = state.lastPickRecap;
-      const totalCards = recap ? (recap.pickResults || []).reduce(
+      const batch = state.lastRecapType === "batch" ? state.lastBatchRecap : null;
+      const pick = state.lastRecapType === "pick" ? state.lastPickRecap : null;
+      const totalCards = batch?.model?.itemCount || (pick ? (pick.pickResults || []).reduce(
         (sum, entry) => sum + (entry?.pickedCards || entry?.pickedItems || []).length,
         0
-      ) : 0;
+      ) : 0);
       renderMainPanelRecap({
         panel: document.querySelector("#bronze-loop-panel"),
-        recap: recap ? { name: recap.name, totalCards } : null
+        recap: batch ? { type: "batch", name: "Batch Open", totalCards } : pick ? { type: "pick", name: pick.name, totalCards } : null
       });
     }
-    async function reopenLastPickRecap() {
+    async function reopenLastRecap() {
       const btn = document.querySelector("#bronze-loop-recap-reopen");
-      const existing = document.querySelector("#bronze-loop-recap-modal");
+      const existing = document.querySelector("#bronze-loop-recap-modal") || document.querySelector("#bronze-loop-batch-recap-modal");
       if (existing) {
         existing.remove();
         if (btn) {
@@ -8222,9 +8933,13 @@
         }
         return;
       }
-      const recap = state.lastPickRecap;
+      if (state.lastRecapType === "batch" && state.lastBatchRecap?.model) {
+        await showBatchRecapModal(state.lastBatchRecap.model);
+        return;
+      }
+      const recap = state.lastRecapType === "pick" ? state.lastPickRecap : null;
       if (!recap) {
-        log("No previous Player Pick recap available");
+        log("No previous recap available");
         return;
       }
       await showPickRecapModal({ name: recap.name }, recap.pickResults);
@@ -8586,7 +9301,7 @@
       await waitLoadingEnd();
       return result;
     }
-    function isPlayer(item) {
+    function isPlayer2(item) {
       return item?.type === "player" || item?.isPlayer?.();
     }
     function isBronze(item) {
@@ -8624,7 +9339,7 @@
     function itemRareFlag(item) {
       return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
     }
-    function isSpecial(item) {
+    function isSpecial2(item) {
       try {
         return !!item?.isSpecial?.();
       } catch {
@@ -8636,15 +9351,15 @@
       return isGold(item) && !isSbcSpecialItem(item);
     }
     function itemMatchesSpec(item, spec = {}, settings = getFsuSettings()) {
-      if (spec.playerOnly && !isPlayer(item)) return false;
+      if (spec.playerOnly && !isPlayer2(item)) return false;
       const rating = Number(item?.rating || 0);
       if (spec.minRating !== void 0 && rating < Number(spec.minRating)) return false;
       if (spec.maxRating !== void 0 && rating > Number(spec.maxRating)) return false;
       if (spec.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) return false;
-      if (spec.special === true && !isSpecial(item)) return false;
-      if (spec.special === false && isSpecial(item)) return false;
-      if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
-      if (settings.useRarityPlayer === false && spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
+      if (spec.special === true && !isSpecial2(item)) return false;
+      if (spec.special === false && isSpecial2(item)) return false;
+      if (spec.special !== true && spec.allowSpecial !== true && isSpecial2(item)) return false;
+      if (settings.useRarityPlayer === false && spec.special !== true && spec.allowSpecial !== true && isSpecial2(item)) return false;
       if (spec.tier === "bronze" && !isBronze(item)) return false;
       if (spec.tier === "silver" && !isSilver(item)) return false;
       if (spec.tier === "gold" && !isGold(item)) return false;
@@ -9006,7 +9721,7 @@
     }
     function getFsuRejectReasons(item, spec = {}, settings = getFsuSettings(), context = null) {
       const reasons = [];
-      if (!isPlayer(item)) return reasons;
+      if (!isPlayer2(item)) return reasons;
       if (isFsuLockedItem(item, settings, context)) reasons.push("fsu-locked-player");
       if (settings.onlyUntradeable && isTradeable(item)) reasons.push("fsu-only-untradeable");
       if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push("fsu-exclude-evolution");
@@ -9026,7 +9741,7 @@
           reasons.push(`fsu-gold-range-${minRating}-${maxRating}`);
         }
       }
-      if (settings.useRarityPlayer === false && spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) {
+      if (settings.useRarityPlayer === false && spec.special !== true && spec.allowSpecial !== true && isSpecial2(item)) {
         reasons.push("fsu-rarity-player-off");
       }
       return reasons;
@@ -9153,7 +9868,7 @@
       let patchedItems = 0;
       let patchedFields = 0;
       for (const item of items) {
-        if (!isPlayer(item)) continue;
+        if (!isPlayer2(item)) continue;
         if (!targetIds.has(Number(item?.id || 0))) continue;
         let itemPatched = false;
         const holders = [item, item?._data, item?._staticData, item?.assetData, item?._assetData];
@@ -9183,7 +9898,7 @@
       }
     }
     function isSbcUsablePlayer(item, options = {}, context = null) {
-      if (!isPlayer(item)) return false;
+      if (!isPlayer2(item)) return false;
       const id = Number(item?.id || 0);
       const definitionId = Number(item?.definitionId || 0);
       if (id && state.consumedItemIds.has(id)) return false;
@@ -9263,7 +9978,7 @@
       };
       const activeLoopDef = options.loopDef || state.loopStack[state.loopStack.length - 1] || null;
       const recoveryPolicyIds = options.recoveryPolicyIds !== void 0 ? options.recoveryPolicyIds : activeLoopDef && Object.prototype.hasOwnProperty.call(activeLoopDef, "unassignedRecoveryPolicyIds") ? activeLoopDef.unassignedRecoveryPolicyIds : getDefaultUnassignedRecoveryPolicyIds();
-      const configuredResolvers = options.blockedPolicy === "preserve" || options.enableRecovery === false ? [] : buildUnassignedRecoveryResolvers({
+      const configuredResolvers = options.blockedPolicy === "preserve" && options.enableRecovery !== true || options.enableRecovery === false ? [] : buildUnassignedRecoveryResolvers({
         loopDef: activeLoopDef,
         policyIds: recoveryPolicyIds
       });
@@ -9364,7 +10079,7 @@
       }
     }
     async function materializeOpenedPlayerRewards(items, label = "opened reward pack") {
-      const players = uniqueItems((items || []).filter((item) => isPlayer(item)));
+      const players = uniqueItems((items || []).filter((item) => isPlayer2(item)));
       if (!players.length) return 0;
       let moved = 0;
       const movedIds = /* @__PURE__ */ new Set();
@@ -9515,10 +10230,10 @@
       }
       const receipt = await openPack(pack, "source bronze pack", {
         openedItemPolicy: createOpenedItemPolicy(async (openedItems) => {
-          const bronzeDuplicates = openedItems.filter((item) => isPlayer(item) && isBronze(item) && isDuplicate(item));
+          const bronzeDuplicates = openedItems.filter((item) => isPlayer2(item) && isBronze(item) && isDuplicate(item));
           const duplicateIds = new Set(bronzeDuplicates.map((item) => Number(item?.id || 0)));
           const directClub = openedItems.filter(
-            (item) => !duplicateIds.has(Number(item?.id || 0)) && (!isPlayer(item) || !isDuplicate(item))
+            (item) => !duplicateIds.has(Number(item?.id || 0)) && (!isPlayer2(item) || !isDuplicate(item))
           );
           if (directClub.length) {
             log(`Moving ${directClub.length} non-duplicate source item(s) to club`);
@@ -9953,8 +10668,8 @@
     }
     function sortSbcFodder(items, spec = {}, settings = getFsuSettings()) {
       return [...items].sort((a, b) => {
-        if (settings.priorityNonSpecialPlayers && isSpecial(a) !== isSpecial(b)) {
-          return Number(isSpecial(a)) - Number(isSpecial(b));
+        if (settings.priorityNonSpecialPlayers && isSpecial2(a) !== isSpecial2(b)) {
+          return Number(isSpecial2(a)) - Number(isSpecial2(b));
         }
         const aGoldRange = isInGoldPriorityRange(a, settings);
         const bGoldRange = isInGoldPriorityRange(b, settings);
@@ -10041,7 +10756,7 @@
       const reasons = [];
       const id = Number(item?.id || 0);
       const definitionId = Number(item?.definitionId || 0);
-      if (!isPlayer(item)) reasons.push("not-player");
+      if (!isPlayer2(item)) reasons.push("not-player");
       if (id && state.consumedItemIds.has(id)) reasons.push("consumed-this-run");
       if (id && options.protectedItemIds?.some((value) => Number(value) === id)) reasons.push("protected-id");
       if (definitionId && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId)) reasons.push("protected-def");
@@ -10061,13 +10776,13 @@
     function getSpecRejectReasons(item, spec = {}) {
       const reasons = [];
       const rating = Number(item?.rating || 0);
-      if (spec.playerOnly && !isPlayer(item)) reasons.push("not-player");
+      if (spec.playerOnly && !isPlayer2(item)) reasons.push("not-player");
       if (spec.minRating !== void 0 && rating < Number(spec.minRating)) reasons.push(`rating-under-${Number(spec.minRating)}`);
       if (spec.maxRating !== void 0 && rating > Number(spec.maxRating)) reasons.push(`rating-over-${Number(spec.maxRating)}`);
       if (spec.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) reasons.push("tradeable-blocked");
-      if (spec.special === true && !isSpecial(item)) reasons.push("not-special");
-      if (spec.special === false && isSpecial(item)) reasons.push("special-blocked");
-      if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) reasons.push("special-blocked");
+      if (spec.special === true && !isSpecial2(item)) reasons.push("not-special");
+      if (spec.special === false && isSpecial2(item)) reasons.push("special-blocked");
+      if (spec.special !== true && spec.allowSpecial !== true && isSpecial2(item)) reasons.push("special-blocked");
       if (spec.tier === "bronze" && !isBronze(item)) reasons.push("tier-not-bronze");
       if (spec.tier === "silver" && !isSilver(item)) reasons.push("tier-not-silver");
       if (spec.tier === "gold" && !isGold(item)) reasons.push("tier-not-gold");
@@ -10346,7 +11061,7 @@
     }
     function isRatingSbcCandidateSafe(item, loopDef, model = null, context = null) {
       const allowedSpecialCount = model ? model.maxSpecialCount : Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
-      if (!isPlayer(item)) return false;
+      if (!isPlayer2(item)) return false;
       if (isSbcSpecialItem(item)) {
         if (!allowedSpecialCount) return false;
         if (requiredSpecialKind(loopDef) && !isRequiredSpecialItem(item, loopDef)) return false;
@@ -10358,7 +11073,7 @@
       }).length === 0;
     }
     function isResolvableRatingSbcUnassignedDuplicate(item, loopDef) {
-      if (!isDuplicate(item) || !isPlayer(item)) return false;
+      if (!isDuplicate(item) || !isPlayer2(item)) return false;
       const resolved = findSubmissionItemForDuplicateSignal(item, /* @__PURE__ */ new Set(), {
         playerOnly: true,
         allowSpecial: true,
@@ -10408,7 +11123,7 @@
       return createItemSnapshot({
         id: item?.id,
         definitionId: item?.definitionId,
-        type: isPlayer(item) ? "player" : item?.type,
+        type: isPlayer2(item) ? "player" : item?.type,
         name: itemDisplayName(item),
         rating: item?.rating,
         rareflag: itemRareFlag(item),
@@ -10731,7 +11446,7 @@
       return parts.join(" | ");
     }
     function isSbcSpecialItem(item) {
-      return isSpecial(item) || isTotwItem(item) || isTotsItem(item) || isFofItem(item);
+      return isSpecial2(item) || isTotwItem(item) || isTotsItem(item) || isFofItem(item);
     }
     function itemSearchText(item) {
       return [
@@ -10849,7 +11564,7 @@
     function requiredSpecialRejectReasons(item, loopDef = {}) {
       const reasons = [];
       const id = Number(item?.id || 0);
-      if (!isPlayer(item)) reasons.push("not-player");
+      if (!isPlayer2(item)) reasons.push("not-player");
       if (id && state.consumedItemIds.has(id)) reasons.push("consumed-this-run");
       if (!isRequiredSpecialItem(item, loopDef)) reasons.push(`not-${requiredSpecialLabel(loopDef)}`);
       const minRating = Number(loopDef.requiredSpecialMinRating || 0);
@@ -10872,9 +11587,9 @@
       for (const { pileName, items } of piles) {
         for (const item of items || []) {
           const id = Number(item?.id || 0);
-          if (!id || seen.has(id) || !isPlayer(item)) continue;
+          if (!id || seen.has(id) || !isPlayer2(item)) continue;
           seen.add(id);
-          if (!isSbcSpecialItem(item) && !isSpecial(item)) continue;
+          if (!isSbcSpecialItem(item) && !isSpecial2(item)) continue;
           const reasons = requiredSpecialRejectReasons(item, loopDef);
           reasons.forEach((reason) => addCount(reasonCounts, reason));
           if (reasons.length) candidates.push({ item, pileName, reasons });
@@ -10914,7 +11629,7 @@
     function markAssumedTotwRewardItems(items = [], label = "TOTW reward pack") {
       const marked = [];
       for (const item of items || []) {
-        if (!item || !isPlayer(item)) continue;
+        if (!item || !isPlayer2(item)) continue;
         const id = Number(item?.id || 0);
         if (id && state.consumedItemIds.has(id)) continue;
         if (id) state.assumedTotwItemIds.add(id);
@@ -10990,7 +11705,7 @@
       return Number(loopDef.maxSubmittedRating || 0);
     }
     function isEligibleNormalRepairFiller(item, loopDef = {}) {
-      if (!isPlayer(item)) return false;
+      if (!isPlayer2(item)) return false;
       const id = Number(item?.id || 0);
       if (id && state.consumedItemIds.has(id)) return false;
       if (isSbcSpecialItem(item)) return false;
@@ -11936,7 +12651,7 @@
       }
       await openPack(pack, "Bronze Upgrade reward", {
         openedItemPolicy: createOpenedItemPolicy(async (openedItems) => {
-          const silverCount = openedItems.filter((item) => isPlayer(item) && isSilver(item)).length;
+          const silverCount = openedItems.filter((item) => isPlayer2(item) && isSilver(item)).length;
           log(`Reward opened; detected ${silverCount} silver player(s)`);
           log(`Handling ${openedItems.length} reward item(s) with unassigned cleanup strategy`);
           await resolveRuntimeUnassigned("reward item handling");
@@ -12971,7 +13686,13 @@
         const cleanup = await resolveRuntimeUnassigned(cleanupReason, cleanupOptions);
         await refreshInventoryCaches(`${label} resolved`, { quiet: true });
         await refreshUnassigned();
-        return openedItemRoutingResult(openedItems, null, { cleanupStatus: cleanup.status });
+        return openedItemRoutingResult(openedItems, null, {
+          cleanupStatus: cleanup.status,
+          cleanupReason: cleanup.reason || null,
+          blockedDestination: cleanup.plan?.blocked?.destination || null,
+          blockedFree: cleanup.plan?.blocked?.free ?? null,
+          blockedRequired: cleanup.plan?.blocked?.required ?? null
+        });
       });
     }
     function createReserveMatchingDuplicatePackPolicy(loopDef, source) {
@@ -13617,6 +14338,7 @@
           pickResults: preCraftPickResults,
           completedAt: Date.now()
         };
+        state.lastRecapType = "pick";
         updateRecapButton();
         await showPickRecapModal(pickDef, preCraftPickResults);
       }
@@ -13811,7 +14533,7 @@
       const redeemed = await observeOnce(eaPlayerPickAdapter().redeem(pickItem), ctrl(), 3e4, "redeem Player Pick");
       if (!redeemed?.success) fail2(`${loopDef.name}: Player Pick redeem failed: ${serviceResultErrorText(redeemed)}`);
       const data = redeemed.data || redeemed.response || {};
-      const choices = (data.playerPicks || data.items || []).filter(isPlayer);
+      const choices = (data.playerPicks || data.items || []).filter(isPlayer2);
       const pickCount = Math.max(1, Number(data.availablePicks || loopDef.pickCount || 1) || 1);
       if (choices.length < pickCount) fail2(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
       const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
@@ -13823,7 +14545,7 @@
       await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
       const prices = await getPlayerPickPrices(choices, loopDef);
       const pickRewardOptions = {
-        isSpecial,
+        isSpecial: isSpecial2,
         isDuplicate: isPlayerPickDuplicate
       };
       const ranked = rankPlayerPickCandidates(choices, prices, pickRewardOptions);
@@ -14042,7 +14764,7 @@
       if (loopDef.protectHighGold === false) return;
       const highGoldThreshold = Math.max(2, Math.min(99, Number(loopDef.pickHighGoldThreshold || 82) || 82));
       const protectedPlayers = (players || []).filter(
-        (item) => isGold(item) && !isSpecial(item) && Number(item?.rating || 0) >= highGoldThreshold
+        (item) => isGold(item) && !isSpecial2(item) && Number(item?.rating || 0) >= highGoldThreshold
       );
       if (!protectedPlayers.length) return;
       const details = protectedPlayers.map((item) => `${itemDisplayName(item)} rating:${Number(item?.rating || 0)}`).join(", ");
@@ -14366,6 +15088,176 @@
         })
       });
     }
+    function showBatchRecapModal(model) {
+      return showBatchOpenRecap({
+        dom: adapters.dom,
+        model,
+        formatPrice: formatCompactPrice,
+        onClose: () => {
+          const recapButton = document.querySelector("#bronze-loop-recap-reopen");
+          if (recapButton) {
+            recapButton.textContent = "View recap";
+            recapButton.style.background = "";
+          }
+        },
+        celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
+          dom: adapters.dom,
+          getComputedStyle: (element) => getComputedStyle(element),
+          devicePixelRatio: () => window.devicePixelRatio || 1,
+          now: () => performance.now(),
+          requestFrame: (callback) => requestAnimationFrame(callback)
+        })
+      });
+    }
+    function previewBatchOpenRecap() {
+      return showBatchRecapModal(createBatchOpenRecapPreviewModel());
+    }
+    async function getBatchOpenSpecialPrices(items) {
+      const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
+      if (!specialItems.length) return /* @__PURE__ */ new Map();
+      let result;
+      try {
+        result = await loadPlayerPickPrices({
+          items: specialItems,
+          platform: "pc",
+          referer: pageRuntime.origin(),
+          requestText: adapters.http.getText
+        });
+      } catch (error) {
+        log(`Batch Open: special card price lookup failed (${error?.message || error}); recap will show price:?`);
+        return /* @__PURE__ */ new Map();
+      }
+      for (const attempt of result.attempts) {
+        if (attempt.status === "loaded") {
+          log(`Batch Open: ${attempt.source} prices loaded for ${result.prices.size}/${result.ids.length} special card(s)`);
+        } else if (attempt.source === "FUT.GG") {
+          log(`Batch Open: FUT.GG price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; trying FUTNext`);
+        } else {
+          log(`Batch Open: FUTNext price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; unavailable prices will show as ?`);
+        }
+      }
+      return result.prices;
+    }
+    function loadBatchOpenPlan() {
+      try {
+        return normalizeBatchOpenPlan(adapters.localStorage.getJson(BATCH_OPEN_PLAN_KEY, {}));
+      } catch {
+        return normalizeBatchOpenPlan();
+      }
+    }
+    function persistBatchOpenPlan(plan) {
+      const normalized = normalizeBatchOpenPlan(plan);
+      adapters.localStorage.setJson(BATCH_OPEN_PLAN_KEY, normalized);
+      return normalized;
+    }
+    async function executeBatchOpen(planInput) {
+      if (state.running) return null;
+      const plan = persistBatchOpenPlan(planInput);
+      state.running = true;
+      state.stopping = false;
+      setPanelState();
+      let result = null;
+      let recapModel = null;
+      try {
+        const requested = plan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
+        log(`Batch Open: starting ${requested} requested pack(s) across ${plan.entries.length} pack type(s)`);
+        result = await runBatchOpenWorkflow({
+          plan,
+          shouldStop: () => state.stopping,
+          beforeStart: async () => resolveRuntimeUnassigned("Batch Open preflight", {
+            blockedPolicy: "preserve",
+            enableRecovery: true
+          }),
+          resolvePack: async (entry) => {
+            const pack = entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
+            if (pack) return pack;
+            await refreshStorePacks().catch(() => null);
+            return entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
+          },
+          openPack: async ({ entry, pack, openIndex }) => await openPack(
+            pack,
+            `Batch Open ${entry.packName || `#${entry.packId}`} ${openIndex + 1}/${entry.quantity}`,
+            {
+              allowGone: true,
+              retryCodes: ["471", "500"],
+              resolveRetryPack: async () => {
+                await refreshStorePacks().catch(() => null);
+                return entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
+              },
+              openedItemPolicy: createMaterializeAndResolvePolicy(
+                `Batch Open ${entry.packName || `#${entry.packId}`}`,
+                `Batch Open ${entry.packName || `#${entry.packId}`} cleanup`,
+                { blockedPolicy: "preserve", enableRecovery: true }
+              )
+            }
+          ),
+          onEvent: async (event, payload) => {
+            if (event === "opened") {
+              log(`Batch Open: ${payload.packsOpened}/${payload.requestedPacks} pack(s) opened`);
+            } else if (event === "unavailable") {
+              log(`Batch Open: ${payload.entry.packName || `#${payload.entry.packId}`} unavailable; skipped ${payload.remaining} requested pack(s)`);
+            } else if (event === "preserved") {
+              log(`Batch Open: Unassigned items were preserved after ${payload.entry.packName || `#${payload.entry.packId}`}; stopping before ${payload.remaining} remaining pack(s) in this type`);
+            } else if (event === "preflight-preserved") {
+              log(`Batch Open: existing Unassigned items cannot be safely resolved (${payload.preflight.reason || "capacity blocked"}); no pack will be opened`);
+            }
+          }
+        });
+        const prices = await getBatchOpenSpecialPrices(result.openedItems);
+        recapModel = createBatchOpenRecapModel({ ...result, prices });
+        state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+        state.lastRecapType = "batch";
+        log(`Batch Open: ${result.status}; opened ${result.packsOpened}/${result.requestedPacks}, skipped ${result.skippedPacks}`);
+        updateRecapButton();
+        return recapModel;
+      } catch (error) {
+        log(`Batch Open stopped: ${error?.message || error}`);
+        errorStackLines(error).forEach((line) => log(`Error stack: ${line}`));
+        console.error("[BronzeLoop]", error);
+        if (result) {
+          recapModel = createBatchOpenRecapModel({ ...result, status: "blocked", reason: error?.message || error });
+          state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+          state.lastRecapType = "batch";
+          updateRecapButton();
+        }
+        return null;
+      } finally {
+        state.running = false;
+        state.stopping = false;
+        setPanelState();
+        if (recapModel) void showBatchRecapModal(recapModel);
+      }
+    }
+    async function openBatchOpenDialogModal() {
+      if (state.running || state.refreshing) return false;
+      state.refreshing = true;
+      setPanelState();
+      log("Batch Open: scanning My Packs");
+      try {
+        await refreshStorePacks();
+      } catch (error) {
+        log(`Batch Open: pack scan refresh failed; using current cache (${error?.message || error})`);
+      } finally {
+        state.refreshing = false;
+        setPanelState();
+      }
+      showBatchOpenDialog({
+        dom: adapters.dom,
+        plan: loadBatchOpenPlan(),
+        snapshot: getPackInventorySnapshot(),
+        onScan: async () => {
+          await refreshStorePacks();
+          return getPackInventorySnapshot();
+        },
+        onPreview: () => previewBatchOpenRecap(),
+        onPlanChange: (plan) => persistBatchOpenPlan(plan),
+        onStart: (plan) => {
+          persistBatchOpenPlan(plan);
+          void executeBatchOpen(plan);
+        }
+      });
+      return true;
+    }
     async function runValidationBronzeUpgrade(loopDef, roundNo) {
       const dryRun = loopDef.dryRun === true;
       log(`Round ${roundNo} ${dryRun ? "dry-run " : ""}start`);
@@ -14442,6 +15334,7 @@
               pickResults,
               completedAt: Date.now()
             };
+            state.lastRecapType = "pick";
             updateRecapButton();
             await showPickRecapModal(definition, pickResults);
             await showUnassignedIfAny(`${definition.name} end`);
@@ -14574,7 +15467,8 @@
         saveRewardAlertEnabled,
         openRewardAlertSettings: openRewardAlertSettingsModal,
         start: startLoop,
-        reopenRecap: reopenLastPickRecap,
+        openBatch: openBatchOpenDialogModal,
+        reopenRecap: reopenLastRecap,
         refreshInventoryCaches,
         scanPlayerPicks: scanAvailablePlayerPickSbcs,
         loopConfigUrl: LOOP_CONFIG_URL,

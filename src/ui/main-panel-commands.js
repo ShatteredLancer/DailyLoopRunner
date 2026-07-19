@@ -24,6 +24,11 @@ export function createMainPanelCommands(options = {}) {
       options.start?.();
       return true;
     },
+    openBatch() {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+      options.openBatch?.();
+      return true;
+    },
     reopenRecap: options.reopenRecap,
     async refresh() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;

@@ -15,6 +15,7 @@ const IDS = [
   'bronze-loop-reward-alert-enabled',
   'bronze-loop-reward-alert-settings',
   'bronze-loop-start',
+  'bronze-loop-batch-open',
   'bronze-loop-recap-reopen',
   'bronze-loop-refresh',
   'bronze-loop-scan-picks',
@@ -77,7 +78,7 @@ describe('main panel bindings', () => {
   it('binds every command control and forwards the selected loop id', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
-      'selectLoop', 'editJson', 'jsonInput', 'savePickOptions', 'saveLoopOptions', 'start', 'reopenRecap',
+      'selectLoop', 'editJson', 'jsonInput', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
       'refresh', 'scanPicks', 'loadJson', 'useBuiltIn', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
@@ -93,6 +94,7 @@ describe('main panel bindings', () => {
       ['bronze-loop-reward-alert-enabled', 'change', 'saveRewardAlertEnabled'],
       ['bronze-loop-reward-alert-settings', 'click', 'openRewardAlertSettings'],
       ['bronze-loop-start', 'click', 'start'],
+      ['bronze-loop-batch-open', 'click', 'openBatch'],
       ['bronze-loop-recap-reopen', 'click', 'reopenRecap'],
       ['bronze-loop-refresh', 'click', 'refresh'],
       ['bronze-loop-scan-picks', 'click', 'scanPicks'],

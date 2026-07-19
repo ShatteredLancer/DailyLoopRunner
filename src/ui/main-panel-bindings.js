@@ -35,6 +35,7 @@ export function bindMainPanelCommands(options = {}) {
   required(panel, '#bronze-loop-reward-alert-enabled').addEventListener('change', (event) => commands.saveRewardAlertEnabled?.(event));
   required(panel, '#bronze-loop-reward-alert-settings').addEventListener('click', (event) => commands.openRewardAlertSettings?.(event));
   required(panel, '#bronze-loop-start').addEventListener('click', (event) => commands.start?.(event));
+  required(panel, '#bronze-loop-batch-open').addEventListener('click', (event) => commands.openBatch?.(event));
   required(panel, '#bronze-loop-recap-reopen').addEventListener('click', (event) => commands.reopenRecap?.(event));
   required(panel, '#bronze-loop-refresh').addEventListener('click', (event) => commands.refresh?.(event));
   required(panel, '#bronze-loop-scan-picks').addEventListener('click', (event) => commands.scanPicks?.(event));

@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.16
+// @version      0.5.20
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -22,6 +22,7 @@
 
 import {
   APP_KEY,
+  BATCH_OPEN_PLAN_KEY,
   CFG,
   FSU_COMPAT_DEFAULTS,
   LOOP_CONFIG_URL,
@@ -56,6 +57,7 @@ import {
   validateLoopDefList as validateLoopDefListPure,
 } from './config/loop-schema.js';
 import { normalizeFsuSettings } from './config/fsu-compat.js';
+import { normalizeBatchOpenPlan } from './config/batch-open.js';
 import {
   buildPlayerPickDiscoverySession,
   parsePlayerPickSbcSnapshot,
@@ -110,6 +112,10 @@ import {
   formatPackHighlightNotification,
   normalizeRewardAlertSettings,
 } from './reward/pack-highlight.js';
+import {
+  createBatchOpenRecapModel,
+  createBatchOpenRecapPreviewModel,
+} from './reward/batch-open-recap.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
 import { createRecoveryOverflowResolvers, selectionConsumesSignalRefs } from './unassigned/recovery.js';
@@ -124,6 +130,7 @@ import { runRepeatedSubmissionWorkflow } from './workflows/repeated-submission.j
 import { runReservedDuplicateCraftingWorkflow } from './workflows/reserved-duplicate-crafting.js';
 import { runSequenceWorkflow } from './workflows/sequence.js';
 import { runValidationRoundWorkflow } from './workflows/validation-round.js';
+import { runBatchOpenWorkflow } from './workflows/batch-open.js';
 import { dispatchConfiguredWorkflow } from './workflows/dispatch.js';
 import { createLogRenderer, formatLogHtml } from './ui/log-renderer.js';
 import { bindMainPanelCommands, hydrateMainPanelOptions } from './ui/main-panel-bindings.js';
@@ -143,6 +150,8 @@ import { triggerRewardFireworks } from './ui/reward-celebration.js';
 import { createSbcRewardOverlay } from './ui/sbc-reward-overlay.js';
 import { showPackHighlightToast } from './ui/reward-highlight.js';
 import { showRewardAlertSettings } from './ui/reward-alert-settings.js';
+import { showBatchOpenDialog } from './ui/batch-open-dialog.js';
+import { showBatchOpenRecap } from './ui/batch-open-recap.js';
 
 (function () {
   'use strict';
@@ -193,6 +202,8 @@ const state = {
     fsuSettingsCache: { at: 0, settings: null },
     lastOpenPackReceipt: null,
     lastPickRecap: null,
+    lastBatchRecap: null,
+    lastRecapType: null,
     showMvpLoops: false,
     loopStack: [],
     logRenderer: null,
@@ -207,12 +218,14 @@ const state = {
     document.querySelector('#bronze-loop-pick-modal')?.remove();
     document.querySelector('#bronze-loop-recap-modal')?.remove();
     document.querySelector('#bronze-loop-reward-alert-modal')?.remove();
+    document.querySelector('#bronze-loop-batch-open-modal')?.remove();
+    document.querySelector('#bronze-loop-batch-recap-modal')?.remove();
     document.querySelector('#bronze-loop-reward-highlight-stack')?.remove();
     document.querySelector('#bronze-loop-style')?.remove();
   }
 
   W[APP_KEY] = {
-    version: '0.5.16',
+    version: '0.5.20',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -222,6 +235,7 @@ const state = {
     solveRatingSbcCandidates: findOptimalRatingSbcSelection,
     scanPlayerPicks: () => scanAvailablePlayerPickSbcs(),
     previewPackHighlight: (input = {}) => previewPackHighlight(input),
+    previewBatchOpenRecap: () => previewBatchOpenRecap(),
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -411,28 +425,34 @@ function updateLoopControls() {
   }
 
   function updateRecapButton() {
-    const recap = state.lastPickRecap;
-    const totalCards = recap ? (recap.pickResults || []).reduce(
-      (sum, entry) => sum + ((entry?.pickedCards || entry?.pickedItems || []).length),
-      0
-    ) : 0;
+    const batch = state.lastRecapType === 'batch' ? state.lastBatchRecap : null;
+    const pick = state.lastRecapType === 'pick' ? state.lastPickRecap : null;
+    const totalCards = batch?.model?.itemCount || (pick ? (pick.pickResults || []).reduce(
+      (sum, entry) => sum + ((entry?.pickedCards || entry?.pickedItems || []).length), 0
+    ) : 0);
     renderMainPanelRecap({
       panel: document.querySelector('#bronze-loop-panel'),
-      recap: recap ? { name: recap.name, totalCards } : null,
+      recap: batch
+        ? { type: 'batch', name: 'Batch Open', totalCards }
+        : pick ? { type: 'pick', name: pick.name, totalCards } : null,
     });
   }
 
-  async function reopenLastPickRecap() {
+  async function reopenLastRecap() {
     const btn = document.querySelector('#bronze-loop-recap-reopen');
-    const existing = document.querySelector('#bronze-loop-recap-modal');
+    const existing = document.querySelector('#bronze-loop-recap-modal') || document.querySelector('#bronze-loop-batch-recap-modal');
     if (existing) {
       existing.remove();
       if (btn) { btn.textContent = 'View recap'; btn.style.background = ''; }
       return;
     }
-    const recap = state.lastPickRecap;
+    if (state.lastRecapType === 'batch' && state.lastBatchRecap?.model) {
+      await showBatchRecapModal(state.lastBatchRecap.model);
+      return;
+    }
+    const recap = state.lastRecapType === 'pick' ? state.lastPickRecap : null;
     if (!recap) {
-      log('No previous Player Pick recap available');
+      log('No previous recap available');
       return;
     }
     await showPickRecapModal({ name: recap.name }, recap.pickResults);
@@ -1603,7 +1623,7 @@ function updateLoopControls() {
       : activeLoopDef && Object.prototype.hasOwnProperty.call(activeLoopDef, 'unassignedRecoveryPolicyIds')
         ? activeLoopDef.unassignedRecoveryPolicyIds
         : getDefaultUnassignedRecoveryPolicyIds();
-    const configuredResolvers = options.blockedPolicy === 'preserve' || options.enableRecovery === false
+    const configuredResolvers = (options.blockedPolicy === 'preserve' && options.enableRecovery !== true) || options.enableRecovery === false
       ? []
       : buildUnassignedRecoveryResolvers({
           loopDef: activeLoopDef,
@@ -5786,7 +5806,13 @@ function updateLoopControls() {
       const cleanup = await resolveRuntimeUnassigned(cleanupReason, cleanupOptions);
       await refreshInventoryCaches(`${label} resolved`, { quiet: true });
       await refreshUnassigned();
-      return openedItemRoutingResult(openedItems, null, { cleanupStatus: cleanup.status });
+      return openedItemRoutingResult(openedItems, null, {
+        cleanupStatus: cleanup.status,
+        cleanupReason: cleanup.reason || null,
+        blockedDestination: cleanup.plan?.blocked?.destination || null,
+        blockedFree: cleanup.plan?.blocked?.free ?? null,
+        blockedRequired: cleanup.plan?.blocked?.required ?? null,
+      });
     });
   }
 
@@ -6517,6 +6543,7 @@ function updateLoopControls() {
         pickResults: preCraftPickResults,
         completedAt: Date.now(),
       };
+      state.lastRecapType = 'pick';
       updateRecapButton();
       await showPickRecapModal(pickDef, preCraftPickResults);
     }
@@ -7335,6 +7362,183 @@ function updateLoopControls() {
     });
   }
 
+  function showBatchRecapModal(model) {
+    return showBatchOpenRecap({
+      dom: adapters.dom,
+      model,
+      formatPrice: formatCompactPrice,
+      onClose: () => {
+        const recapButton = document.querySelector('#bronze-loop-recap-reopen');
+        if (recapButton) {
+          recapButton.textContent = 'View recap';
+          recapButton.style.background = '';
+        }
+      },
+      celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
+        dom: adapters.dom,
+        getComputedStyle: (element) => getComputedStyle(element),
+        devicePixelRatio: () => window.devicePixelRatio || 1,
+        now: () => performance.now(),
+        requestFrame: (callback) => requestAnimationFrame(callback),
+      }),
+    });
+  }
+
+  function previewBatchOpenRecap() {
+    return showBatchRecapModal(createBatchOpenRecapPreviewModel());
+  }
+
+  async function getBatchOpenSpecialPrices(items) {
+    const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
+    if (!specialItems.length) return new Map();
+    let result;
+    try {
+      result = await loadPlayerPickPrices({
+        items: specialItems,
+        platform: 'pc',
+        referer: pageRuntime.origin(),
+        requestText: adapters.http.getText,
+      });
+    } catch (error) {
+      log(`Batch Open: special card price lookup failed (${error?.message || error}); recap will show price:?`);
+      return new Map();
+    }
+    for (const attempt of result.attempts) {
+      if (attempt.status === 'loaded') {
+        log(`Batch Open: ${attempt.source} prices loaded for ${result.prices.size}/${result.ids.length} special card(s)`);
+      } else if (attempt.source === 'FUT.GG') {
+        log(`Batch Open: FUT.GG price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ''}; trying FUTNext`);
+      } else {
+        log(`Batch Open: FUTNext price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ''}; unavailable prices will show as ?`);
+      }
+    }
+    return result.prices;
+  }
+
+  function loadBatchOpenPlan() {
+    try {
+      return normalizeBatchOpenPlan(adapters.localStorage.getJson(BATCH_OPEN_PLAN_KEY, {}));
+    } catch {
+      return normalizeBatchOpenPlan();
+    }
+  }
+
+  function persistBatchOpenPlan(plan) {
+    const normalized = normalizeBatchOpenPlan(plan);
+    adapters.localStorage.setJson(BATCH_OPEN_PLAN_KEY, normalized);
+    return normalized;
+  }
+
+  async function executeBatchOpen(planInput) {
+    if (state.running) return null;
+    const plan = persistBatchOpenPlan(planInput);
+    state.running = true;
+    state.stopping = false;
+    setPanelState();
+    let result = null;
+    let recapModel = null;
+    try {
+      const requested = plan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
+      log(`Batch Open: starting ${requested} requested pack(s) across ${plan.entries.length} pack type(s)`);
+      result = await runBatchOpenWorkflow({
+        plan,
+        shouldStop: () => state.stopping,
+        beforeStart: async () => resolveRuntimeUnassigned('Batch Open preflight', {
+          blockedPolicy: 'preserve',
+          enableRecovery: true,
+        }),
+        resolvePack: async (entry) => {
+          const pack = entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
+          if (pack) return pack;
+          await refreshStorePacks().catch(() => null);
+          return entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
+        },
+        openPack: async ({ entry, pack, openIndex }) => await openPack(
+          pack,
+          `Batch Open ${entry.packName || `#${entry.packId}`} ${openIndex + 1}/${entry.quantity}`,
+          {
+            allowGone: true,
+            retryCodes: ['471', '500'],
+            resolveRetryPack: async () => {
+              await refreshStorePacks().catch(() => null);
+              return entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
+            },
+            openedItemPolicy: createMaterializeAndResolvePolicy(
+              `Batch Open ${entry.packName || `#${entry.packId}`}`,
+              `Batch Open ${entry.packName || `#${entry.packId}`} cleanup`,
+              { blockedPolicy: 'preserve', enableRecovery: true },
+            ),
+          },
+        ),
+        onEvent: async (event, payload) => {
+          if (event === 'opened') {
+            log(`Batch Open: ${payload.packsOpened}/${payload.requestedPacks} pack(s) opened`);
+          } else if (event === 'unavailable') {
+            log(`Batch Open: ${payload.entry.packName || `#${payload.entry.packId}`} unavailable; skipped ${payload.remaining} requested pack(s)`);
+          } else if (event === 'preserved') {
+            log(`Batch Open: Unassigned items were preserved after ${payload.entry.packName || `#${payload.entry.packId}`}; stopping before ${payload.remaining} remaining pack(s) in this type`);
+          } else if (event === 'preflight-preserved') {
+            log(`Batch Open: existing Unassigned items cannot be safely resolved (${payload.preflight.reason || 'capacity blocked'}); no pack will be opened`);
+          }
+        },
+      });
+      const prices = await getBatchOpenSpecialPrices(result.openedItems);
+      recapModel = createBatchOpenRecapModel({ ...result, prices });
+      state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+      state.lastRecapType = 'batch';
+      log(`Batch Open: ${result.status}; opened ${result.packsOpened}/${result.requestedPacks}, skipped ${result.skippedPacks}`);
+      updateRecapButton();
+      return recapModel;
+    } catch (error) {
+      log(`Batch Open stopped: ${error?.message || error}`);
+      errorStackLines(error).forEach((line) => log(`Error stack: ${line}`));
+      console.error('[BronzeLoop]', error);
+      if (result) {
+        recapModel = createBatchOpenRecapModel({ ...result, status: 'blocked', reason: error?.message || error });
+        state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+        state.lastRecapType = 'batch';
+        updateRecapButton();
+      }
+      return null;
+    } finally {
+      state.running = false;
+      state.stopping = false;
+      setPanelState();
+      if (recapModel) void showBatchRecapModal(recapModel);
+    }
+  }
+
+  async function openBatchOpenDialogModal() {
+    if (state.running || state.refreshing) return false;
+    state.refreshing = true;
+    setPanelState();
+    log('Batch Open: scanning My Packs');
+    try {
+      await refreshStorePacks();
+    } catch (error) {
+      log(`Batch Open: pack scan refresh failed; using current cache (${error?.message || error})`);
+    } finally {
+      state.refreshing = false;
+      setPanelState();
+    }
+    showBatchOpenDialog({
+      dom: adapters.dom,
+      plan: loadBatchOpenPlan(),
+      snapshot: getPackInventorySnapshot(),
+      onScan: async () => {
+        await refreshStorePacks();
+        return getPackInventorySnapshot();
+      },
+      onPreview: () => previewBatchOpenRecap(),
+      onPlanChange: (plan) => persistBatchOpenPlan(plan),
+      onStart: (plan) => {
+        persistBatchOpenPlan(plan);
+        void executeBatchOpen(plan);
+      },
+    });
+    return true;
+  }
+
   async function runValidationBronzeUpgrade(loopDef, roundNo) {
     const dryRun = loopDef.dryRun === true;
     log(`Round ${roundNo} ${dryRun ? 'dry-run ' : ''}start`);
@@ -7412,6 +7616,7 @@ function updateLoopControls() {
             pickResults,
             completedAt: Date.now(),
           };
+          state.lastRecapType = 'pick';
           updateRecapButton();
           await showPickRecapModal(definition, pickResults);
           await showUnassignedIfAny(`${definition.name} end`);
@@ -7544,7 +7749,8 @@ function updateLoopControls() {
       saveRewardAlertEnabled,
       openRewardAlertSettings: openRewardAlertSettingsModal,
       start: startLoop,
-      reopenRecap: reopenLastPickRecap,
+      openBatch: openBatchOpenDialogModal,
+      reopenRecap: reopenLastRecap,
       refreshInventoryCaches,
       scanPlayerPicks: scanAvailablePlayerPickSbcs,
       loopConfigUrl: LOOP_CONFIG_URL,

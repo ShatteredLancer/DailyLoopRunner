@@ -220,6 +220,7 @@ EA objects
 - `run-limits.js`：Live guard、One-click 阶段执行策略和安全上限摘要的纯计算；安全上限不得伪装成业务 rounds。
 - `routine-steps.js`：One-click 子 Loop 查找、继承、校验、disabled pile 投影，以及 EA 实时剩余次数到子步骤完成数的投影。
 - `runtime-options.js`：Dry Run、奖励开包、rounds、Pick 82/90 阈值、是否显示 rounds 和延迟集中开启 Pick 的运行时配置投影。
+- `batch-open.js`：Batch Open 持久化计划规范化、稳定包类型 identity 和当前可用数量投影。
 - `player-pick-discovery.js`：从标准 SBC Set/Challenge/Reward 快照保守生成临时 `playerPickSbc` 配置；条件不完整时只返回诊断，不从名称猜测。
 - `fsu-compat.js`：FSU/Enhancer 嵌套设置、Storage 配置和锁卡身份的纯兼容解析。
 - `selection.js`：把 Loop 与 requirement 级别的保护字段规范化为选材输入。
@@ -378,6 +379,7 @@ EA objects
 
 - `sbc-claim.js`：编排有限 Claim Rewards 等待，并通过 Pack 计数或 SBC 进度判断奖励是否已经发放。
 - `player-pick.js`：Player Pick 候选排序、人工介入原因和 recap 数据生成。
+- `batch-open-recap.js`：Batch Open 的纯 recap 模型；特殊球员逐张展示并接收价格映射，非特殊球员按评分、Rare/Common 和 Gold/Silver/Bronze 聚合并统一降序排序。
 - `player-prices.js`：FUT.GG 价格解析、FUTNext fallback 和结构化诊断。
 - `pack-highlight.js`：从通用 Pack receipt 识别达到阈值的特殊卡，并生成本地/远程通知模型；不执行 DOM 或网络副作用。
 
@@ -395,6 +397,7 @@ Workflow 是无 EA/DOM 依赖的状态机：
 - `reserved-duplicate-crafting.js`：Provision/Rare Pack 共用的重复材料 crafting 迭代、Dry Run 和停止状态。
 - `sequence.js`：One-click 等有序子流程。
 - `validation-round.js`：Bronze Upgrade Validation 的 Dry/Live 共用编排。
+- `batch-open.js`：独立批量开包状态机；按配置顺序执行，每次打开前重新解析实时 pack 实例，记录 opened/skipped/blocked/stopped 和回执。
 - `dispatch.js`：strategy 到 runner 的统一分发，以及标准/Player Pick 收尾回调顺序。
 
 风险：中高。通常影响同一 strategy 的全部 Loop，但不应直接影响其它 strategy。
@@ -416,6 +419,8 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `reward-celebration.js`：Pick recap 与 Pack Highlight 共用的烟花动画。
 - `reward-highlight.js`：靠近主面板显示的非阻塞 Pack Highlight Toast。
 - `reward-alert-settings.js`：Reward Alerts 独立设置弹窗及 Preview/Desktop/ntfy 测试入口。
+- `batch-open-dialog.js`：My Packs 扫描、Add 1/Add all 下拉菜单、记忆列表、数量编辑、Preview 和 Start 命令弹窗。
+- `batch-open-recap.js`：批量开包汇总弹窗；不负责开包、通知或库存处理。
 - `sbc-reward-overlay.js`：Claim Rewards 控件、奖励 Controller/DOM 覆盖层识别和关闭。
 
 风险：
@@ -428,6 +433,10 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文本、日志高频更新和 Pick recap。
 
 Reward Alerts 的三个测试入口必须保持解耦：Preview 只展示本地 Toast/烟花，不调用 `GM_notification` 或网络；Desktop test 实际调用本机系统通知；ntfy test 实际发送远程测试消息。不要为了减少按钮数量把真实通知副作用合并进 Preview。
+
+Batch Open 是独立 operational tool，不是 Loop strategy。主面板只保留一个入口，详细配置在独立弹窗中。运行时必须调用共享 entry `openPack()`，每次打开前重新按 `packId + packName` 解析新的 live pack instance，并提供 `createMaterializeAndResolvePolicy()`；禁止直接调用 Adapter `open()`、复制 Unassigned 清理路径或为 Batch Open 生造专用物品路由。Preview 只显示本地 recap，不得发布 Reward Highlight、Desktop 或 ntfy 副作用。
+
+Batch Open 的 Unassigned 容量阻塞使用 `blockedPolicy: 'preserve'` 和显式 `enableRecovery: true`：先尝试现有通用恢复配方，仍无法处理时保留 Unassigned。已经成功打开的包必须保留 receipt 并进入 recap，后续包停止，不能再调用一次通用 final cleanup 覆盖结果。下一次 Batch 启动前也必须先执行同样的 preserve preflight；现有 Unassigned 未解除时不得打开新包。不要通过放宽高分、特殊卡、FSU 或 Lock 规则来强制腾出 Storage。
 
 ### 5.11 `src/userscript-entry.js`
 

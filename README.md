@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.16`
+当前版本：`0.5.20`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -21,7 +21,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 完成加载。面板出现 `Ready v0.5.16` 后再开始运行。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 完成加载。面板出现 `Ready v0.5.20` 后再开始运行。
 
 ## 基本操作
 
@@ -37,7 +37,22 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 - `Options`：展开运行选项、配置按钮和完整日志。
 - `Hide`：收起 Options。
 - `L`：缩成可拖动的小图标，再次点击恢复。
-- `View recap`：重新查看最近一次 Player Pick 汇总。
+- `Batch Open`：扫描 `My Packs`，编辑并执行记忆的批量开包列表。
+- `View recap`：重新查看最近一次 Player Pick 或 Batch Open 汇总。
+
+### Batch Open
+
+`Batch Open` 是独立工具，不加入 Loop 下拉列表，也不读取 `rounds`：
+
+1. 点击主面板的 `Batch Open`，Runner 会刷新并扫描当前 `My Packs`。
+2. 在 `My Packs` 区域点击 `Add v`：选择 `Add 1` 加入一包，或选择 `Add all (N)` 直接加入该类型当前全部包，不需要输入数量。已加入的类型可通过 `Added v` 重设为 1 或当前全部数量。
+3. 列表和数量保存在浏览器本地存储中；下次打开弹窗会直接恢复。已经不在 `My Packs` 的记忆项仍会保留并显示 `unavailable`，执行时安全跳过。
+4. 点击 `Start batch` 后按列表顺序逐包打开。每包都走 Runner 的通用开包、Reward Alerts 和 Unassigned 处理流程；可用主面板 `Stop` 在下一个安全点停止。
+5. 结束后显示 Batch Open recap：特殊球员逐张列出并查询实时价格；其它非特殊球员按“评分 + Rare/Common + Gold/Silver/Bronze”聚合，例如 `89 Rare Gold x2`、`74 Common Silver x4`；整个列表按评分降序排列。价格查询失败只显示 `price:?`，不会阻断 recap。
+
+如果某包开出不可交易重复卡而 Storage/恢复 SBC 无法安全容纳，当前包仍计入已打开并进入 recap，重复卡保留在 Unassigned，后续包停止且显示容量原因。再次运行时会先检查现有 Unassigned；阻塞未解除前不会继续开包。
+
+`Preview recap` 使用固定模拟数据，只预览 recap 和烟花，不开包、不访问 EA，也不会发送 Desktop 或 ntfy 通知。
 
 ## Options
 

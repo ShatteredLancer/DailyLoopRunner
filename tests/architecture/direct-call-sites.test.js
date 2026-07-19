@@ -107,6 +107,8 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('setMainPanelStartupHidden(panel, false);');
     expect(source).toContain('hydrateMainPanelOptions({');
     expect(source).toContain('const panelCommands = createMainPanelCommands({');
+    expect(source).toContain('openBatch: openBatchOpenDialogModal,');
+    expect(source).toContain('reopenRecap: reopenLastRecap,');
     expect(source).toContain('bindMainPanelCommands({');
     expect(source).toContain('commands: panelCommands,');
     expect(source).toContain('await panelCommands.scanPicks();');
@@ -184,7 +186,13 @@ describe('current direct side-effect call baseline', () => {
     const explicitPolicies = source.split(/\r?\n/).filter((line) =>
       line.includes('openedItemPolicy:') && !line.includes('options.openedItemPolicy')
     );
-    expect(packCalls).toHaveLength(7);
+    expect(packCalls).toHaveLength(8);
     expect(explicitPolicies).toHaveLength(packCalls.length);
+    expect(source).toContain('runBatchOpenWorkflow({');
+    expect(source).toMatch(/runBatchOpenWorkflow\(\{[\s\S]*?openPack:\s*async[\s\S]*?openedItemPolicy:\s*createMaterializeAndResolvePolicy/);
+    expect(source).toMatch(/Batch Open[\s\S]*?createMaterializeAndResolvePolicy\([\s\S]*?blockedPolicy:\s*['"]preserve['"]/);
+    expect(source).toMatch(/Batch Open[\s\S]*?createMaterializeAndResolvePolicy\([\s\S]*?enableRecovery:\s*true/);
+    expect(source).toMatch(/beforeStart:[\s\S]*?Batch Open preflight[\s\S]*?blockedPolicy:\s*['"]preserve['"][\s\S]*?enableRecovery:\s*true/);
+    expect(source).not.toContain("resolveRuntimeUnassigned('Batch Open final cleanup')");
   });
 });

@@ -55,6 +55,8 @@ describe('main panel state rendering', () => {
     renderMainPanelRecap({ panel, recap: { name: '84+ Pick', totalCards: 5 } });
     expect(button.style.display).toBe('');
     expect(button.title).toBe('Last Player Pick recap: 84+ Pick (5 card(s))');
+    renderMainPanelRecap({ panel, recap: { type: 'batch', name: 'Batch Open', totalCards: 20 } });
+    expect(button.title).toBe('Last Batch Open recap: Batch Open (20 card(s))');
   });
 
   it('renders the compact reward alert summary', () => {
@@ -71,7 +73,7 @@ describe('main panel state rendering', () => {
 
   it('applies the complete runtime disabled-state matrix', () => {
     const ids = [
-      'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-select', 'bronze-loop-edit',
+      'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-select', 'bronze-loop-edit',
       'bronze-loop-refresh', 'bronze-loop-scan-picks', 'bronze-loop-load-json', 'bronze-loop-built-in', 'bronze-loop-dry-run',
       'bronze-loop-open-rewards', 'bronze-loop-pick-protect-high-gold', 'bronze-loop-pick-auto-below-90',
       'bronze-loop-pick-prefer-scanned',
