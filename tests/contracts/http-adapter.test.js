@@ -49,6 +49,20 @@ describe('browser HTTP adapter', () => {
     });
   });
 
+  it('supports POST bodies through GM transport', async () => {
+    const gmRequest = vi.fn((request) => request.onload({ status: 200, responseText: 'sent' }));
+    const adapter = createHttpAdapter({ gmRequest });
+    await expect(adapter.postText('https://example.test/push', 'body', {
+      headers: { 'Content-Type': 'text/plain' },
+      sendCookies: false,
+    })).resolves.toBe('sent');
+    expect(gmRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      data: 'body',
+      anonymous: true,
+    }));
+  });
+
   it('reports transport and timeout failures consistently', async () => {
     const failed = createHttpAdapter({ gmRequest: (request) => request.onerror() });
     await expect(failed.getText('https://example.test/error')).rejects.toThrow('request failed');

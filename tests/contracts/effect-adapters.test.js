@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createStorageAdapter } from '../../src/adapters/browser/storage.js';
+import { createStorageAdapter, createUserscriptStorageAdapter } from '../../src/adapters/browser/storage.js';
 import { createFsuAdapter } from '../../src/adapters/ea/fsu.js';
 import { createEaPackAdapter } from '../../src/adapters/ea/pack.js';
 import { createEaLocalizationAdapter } from '../../src/adapters/ea/localization.js';
@@ -20,6 +20,19 @@ function storage() {
 }
 
 describe('effect adapter contracts', () => {
+  it('stores sensitive settings through the isolated userscript storage adapter', () => {
+    const values = new Map();
+    const adapter = createUserscriptStorageAdapter({
+      getValue: (key, fallback) => values.has(key) ? values.get(key) : fallback,
+      setValue: (key, value) => values.set(key, value),
+      deleteValue: (key) => values.delete(key),
+    });
+    adapter.set('alerts', { token: 'secret' });
+    expect(adapter.get('alerts')).toEqual({ token: 'secret' });
+    expect(adapter.remove('alerts')).toBe(true);
+    expect(adapter.get('alerts', null)).toBeNull();
+  });
+
   it('EA and Fake Pack adapters expose list, resolve and open', async () => {
     const calls = [];
     const model = { id: 105, name: 'Bronze', open: () => ({ success: true, response: { items: [{ id: 1 }] } }) };
@@ -307,6 +320,29 @@ describe('effect adapter contracts', () => {
     expect(adapters.localStorage.getJson('ready')).toEqual({ value: true });
     expect(() => adapters.inventory()).toThrow(/Item repository/);
     expect(() => adapters.sbc()).toThrow(/SBC service/);
+  });
+
+  it('accepts the temporary Hot Reload userscript API bridge through the runtime factory', async () => {
+    const values = new Map();
+    const notifications = [];
+    const runtime = {
+      localStorage: storage(),
+      sessionStorage: storage(),
+      document: {},
+      __FCLoopRunnerUserscriptApi: {
+        request: (request) => request.onload({ status: 200, responseText: 'sent' }),
+        notify: (details) => notifications.push(details),
+        getValue: (key, fallback) => values.has(key) ? values.get(key) : fallback,
+        setValue: (key, value) => values.set(key, value),
+        deleteValue: (key) => values.delete(key),
+      },
+    };
+    const adapters = createRuntimeAdapters(runtime);
+    adapters.userscriptStorage.set('alerts', { enabled: true });
+    expect(adapters.userscriptStorage.get('alerts')).toEqual({ enabled: true });
+    await adapters.notification.desktop({ title: 'Test', body: 'Body' });
+    await adapters.notification.ntfy({ title: 'Test', body: 'Body' }, { topic: 'private_topic' });
+    expect(notifications).toHaveLength(1);
   });
 
   it('DOM adapter exposes event constructors, text search, visibility filtering, and the legacy click sequence', () => {

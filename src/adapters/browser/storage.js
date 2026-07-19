@@ -41,3 +41,27 @@ export function createStorageAdapter(storage) {
 
   return Object.freeze({ get, set, remove, getJson, setJson, entries });
 }
+
+export function createUserscriptStorageAdapter(options = {}) {
+  const getValue = options.getValue;
+  const setValue = options.setValue;
+  const deleteValue = options.deleteValue;
+
+  function get(key, fallback = null) {
+    if (typeof getValue !== 'function') return fallback;
+    try { return getValue(String(key), fallback); } catch { return fallback; }
+  }
+
+  function set(key, value) {
+    if (typeof setValue !== 'function') throw new Error('Userscript storage is unavailable');
+    setValue(String(key), value);
+  }
+
+  function remove(key) {
+    if (typeof deleteValue !== 'function') return false;
+    deleteValue(String(key));
+    return true;
+  }
+
+  return Object.freeze({ get, set, remove });
+}

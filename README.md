@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.15`
+当前版本：`0.5.16`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -21,7 +21,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 完成加载。面板出现 `Ready v0.5.15` 后再开始运行。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 完成加载。面板出现 `Ready v0.5.16` 后再开始运行。
 
 ## 基本操作
 
@@ -44,6 +44,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 - `Dry run`：只读取和规划，不移动物品、开包、保存阵容或提交 SBC。
 - `Open reward packs`：允许支持该选项的 Loop 自动打开奖励包；默认关闭。
 - `Show MVP loops`：显示单次验证和 MVP Loop；默认关闭。
+- `Reward alerts`：开包命中配置阈值的特殊卡时触发提示。主面板只显示开关和摘要；点击 `Settings` 可设置最低评分、桌面通知和 ntfy。默认条件为特殊卡且评分不低于 `94`。
 - `Protect Pick fodder >= N`：Player Pick SBC 禁止使用评分大于等于阈值的普通金卡，默认 `82`。
 - `Auto-pick below N`：所有候选都低于阈值时自动选择，默认 `90`。
 - `Open Picks at end`：仅对直接运行的 Player Pick Loop 生效；先完成当前 Loop 的目标数量，再集中开启同类型奖励。不限次 Pick 使用 `rounds`，限次 Pick 使用 EA Set 的当前剩余次数。默认关闭。
@@ -52,6 +53,17 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 - `Load loops JSON`：从本地开发服务加载 `DailyLoopRunner.loops.json`。
 - `Built-in loops`：切回脚本内置配置。
 - `Edit JSON`：临时编辑当前 Loop 配置。
+
+### Reward Alerts
+
+Reward Alerts 只监听 Runner 自己打开的包，不监听用户手动打开的商店包。EA 成功返回开包物品后会立即识别符合条件的卡，不等待后续 Unassigned 清理完成；提示或远程发送失败不会阻断开包和清理流程。
+
+- `Preview highlight`：只使用模拟的高分特殊卡展示网页内 Toast 和烟花，不开包、不访问 EA，也不会触发 Desktop notification 或 ntfy 请求。
+- `Send desktop test`：实际调用 Tampermonkey `GM_notification`，通知显示在当前设备的系统/浏览器通知中心，不会在网页内模拟一个通知框。
+- `Send ntfy test`：使用当前 topic/token 向 `https://ntfy.sh` 实际发送一条测试通知；它不是本地模拟。Topic 无效时按钮保持禁用。
+- 三个入口彼此独立。视觉 Preview 不会自动执行 Desktop 或 ntfy 测试，避免仅查看动画时产生真实系统通知或远程推送。
+- 同一包命中的球员合并成一条桌面/ntfy 消息，避免连续逐卡推送。
+- ntfy topic 和可选 token 保存在 Tampermonkey 隔离存储中，不写入页面 localStorage 或日志。topic 应使用难以猜测的随机值。
 
 ## 主要 Loop
 

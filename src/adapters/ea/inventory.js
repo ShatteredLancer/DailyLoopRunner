@@ -78,11 +78,13 @@ function toSnapshot(item, pile) {
   const tradeable = typeof item?.isUntradeable === 'function'
     ? !callBoolean(item, 'isUntradeable', true)
     : item?.untradeable === false;
+  let fullName = '';
+  try { fullName = String(item?._staticData?.getFullName?.() || item?.getFullName?.() || '').trim(); } catch { }
   return createItemSnapshot({
     id: item?.id,
     definitionId: item?.definitionId,
     type: item?.type || (callBoolean(item, 'isPlayer') ? 'player' : 'unknown'),
-    name: item?.name || item?.commonName || item?.lastName || item?._staticData?.name,
+    name: fullName || item?.name || item?.commonName || item?.lastName || item?._staticData?.name,
     rating,
     rareflag,
     rare: callBoolean(item, 'isRare', rareflag > 0),

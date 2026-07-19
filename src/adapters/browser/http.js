@@ -7,15 +7,15 @@ export function createHttpAdapter(options = {}) {
   const fetchImpl = options.fetchImpl;
   const runtimeFallback = options.runtimeFallback;
 
-  function getText(url, requestOptions = {}) {
+  function requestText(method, url, requestOptions = {}) {
     const headers = requestOptions.headers || undefined;
     const timeout = Math.max(1, Number(requestOptions.timeout || 10000) || 10000);
     if (typeof gmRequest === 'function') {
       return new Promise((resolve, reject) => {
         const request = {
-          method: 'GET',
+          method,
           url,
-          nocache: true,
+          nocache: method === 'GET',
           onload: (response) => {
             if (response.status >= 200 && response.status < 300) resolve(response.responseText);
             else reject(responseError(response.status));
@@ -25,6 +25,7 @@ export function createHttpAdapter(options = {}) {
           timeout,
         };
         if (headers) request.headers = headers;
+        if (requestOptions.data !== undefined) request.data = requestOptions.data;
         if (requestOptions.sendCookies !== undefined) request.anonymous = requestOptions.sendCookies !== true;
         gmRequest(request);
       });
@@ -36,7 +37,9 @@ export function createHttpAdapter(options = {}) {
 
     if (typeof fetchImpl !== 'function') return Promise.reject(new Error('HTTP transport is unavailable'));
     const fetchOptions = { cache: 'no-store' };
+    if (method !== 'GET') fetchOptions.method = method;
     if (headers) fetchOptions.headers = headers;
+    if (requestOptions.data !== undefined) fetchOptions.body = requestOptions.data;
     if (requestOptions.sendCookies !== undefined) {
       fetchOptions.credentials = requestOptions.sendCookies === true ? 'include' : 'omit';
     }
@@ -46,5 +49,13 @@ export function createHttpAdapter(options = {}) {
     });
   }
 
-  return Object.freeze({ getText });
+  function getText(url, requestOptions = {}) {
+    return requestText('GET', url, requestOptions);
+  }
+
+  function postText(url, data, requestOptions = {}) {
+    return requestText('POST', url, { ...requestOptions, data });
+  }
+
+  return Object.freeze({ getText, postText, requestText });
 }

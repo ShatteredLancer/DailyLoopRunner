@@ -30,6 +30,19 @@ export async function openPackTransaction(options = {}) {
         : rawItems;
       const openedItems = Array.isArray(normalized) ? normalized : normalized?.items || rawItems;
       const receiptItems = Array.isArray(normalized) ? normalized : normalized?.receiptItems || openedItems;
+      if (typeof options.onItemsOpened === 'function') {
+        try {
+          Promise.resolve(options.onItemsOpened({
+            pack,
+            packRef,
+            attempt,
+            result,
+            openedItems: receiptItems,
+          })).catch((error) => options.onItemsOpenedError?.(error));
+        } catch (error) {
+          options.onItemsOpenedError?.(error);
+        }
+      }
       const policyResult = options.openedItemPolicy
         ? await options.openedItemPolicy(openedItems, { pack, packRef, attempt, result })
         : { pendingItemRefs: openedItems };

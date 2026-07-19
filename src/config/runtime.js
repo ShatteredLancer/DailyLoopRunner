@@ -2,6 +2,7 @@ export const APP_KEY = '__FCLoopRunner';
 export const LOOP_CONFIG_URL = 'http://127.0.0.1:8765/DailyLoopRunner.loops.json';
 export const PICK_OPTIONS_KEY = 'fc-loop-runner-pick-options';
 export const LOOP_UI_OPTIONS_KEY = 'fc-loop-runner-ui-options';
+export const REWARD_ALERT_SETTINGS_KEY = 'fc-loop-runner-reward-alert-settings';
 
 export const CFG = Object.freeze({
   sourcePackIds: [105],

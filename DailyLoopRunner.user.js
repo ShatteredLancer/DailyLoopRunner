@@ -1,17 +1,22 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.15
+// @version      0.5.16
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest
+// @grant        GM_notification
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @connect      127.0.0.1
 // @connect      localhost
 // @connect      www.fut.gg
 // @connect      enhancer-api.futnext.com
+// @connect      ntfy.sh
 // @run-at       document-end
 // ==/UserScript==
 
@@ -21,6 +26,7 @@
   var LOOP_CONFIG_URL = "http://127.0.0.1:8765/DailyLoopRunner.loops.json";
   var PICK_OPTIONS_KEY = "fc-loop-runner-pick-options";
   var LOOP_UI_OPTIONS_KEY = "fc-loop-runner-ui-options";
+  var REWARD_ALERT_SETTINGS_KEY = "fc-loop-runner-reward-alert-settings";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -818,16 +824,16 @@
     if (spec.rarity !== void 0 && !["common", "rare"].includes(spec.rarity)) {
       errors.push(`${path}.rarity must be common or rare`);
     }
-    ["minRating", "maxRating"].forEach((field) => {
-      if (spec[field] === void 0) return;
-      const rating = Number(spec[field]);
+    ["minRating", "maxRating"].forEach((field2) => {
+      if (spec[field2] === void 0) return;
+      const rating = Number(spec[field2]);
       if (!Number.isFinite(rating) || rating < 1 || rating > 99) {
-        errors.push(`${path}.${field} must be a number between 1 and 99`);
+        errors.push(`${path}.${field2} must be a number between 1 and 99`);
       }
     });
-    ["playerOnly", "allowSpecial", "special", "protectHighGold"].forEach((field) => {
-      if (spec[field] !== void 0 && typeof spec[field] !== "boolean") {
-        errors.push(`${path}.${field} must be boolean`);
+    ["playerOnly", "allowSpecial", "special", "protectHighGold"].forEach((field2) => {
+      if (spec[field2] !== void 0 && typeof spec[field2] !== "boolean") {
+        errors.push(`${path}.${field2} must be boolean`);
       }
     });
   }
@@ -911,9 +917,9 @@
     if (loopDef.dryRun !== void 0 && typeof loopDef.dryRun !== "boolean") {
       errors.push("dryRun must be boolean");
     }
-    ["hidden", "mvp", "openRewardPacks", "blockSpecial", "blockTradeable", "inventoryFillFirst", "consumeAllSourcePacks", "exhaustSbcSet"].forEach((field) => {
-      if (loopDef[field] !== void 0 && typeof loopDef[field] !== "boolean") {
-        errors.push(`${field} must be boolean`);
+    ["hidden", "mvp", "openRewardPacks", "blockSpecial", "blockTradeable", "inventoryFillFirst", "consumeAllSourcePacks", "exhaustSbcSet"].forEach((field2) => {
+      if (loopDef[field2] !== void 0 && typeof loopDef[field2] !== "boolean") {
+        errors.push(`${field2} must be boolean`);
       }
     });
     if (loopDef.maxSubmittedRating !== void 0) {
@@ -1503,9 +1509,9 @@
     return /(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)/i.test(text) && /player|card|item|resource|definition|asset|info[._\-\s]*lock|(^|[._\-\s])lock([._\-\s]|$)/i.test(text);
   }
   function isLikelyLockedIdValuePath(path = "", key = "") {
-    const field = String(key || "").replace(/^_+/, "");
-    if (/^\d+$/.test(field)) return true;
-    if (/^(id|itemid|instanceid|resourceid|cardid|playerid|definitionid|defid|assetid|baseid|baseresourceid|guidassetid)$/i.test(field)) return true;
+    const field2 = String(key || "").replace(/^_+/, "");
+    if (/^\d+$/.test(field2)) return true;
+    if (/^(id|itemid|instanceid|resourceid|cardid|playerid|definitionid|defid|assetid|baseid|baseresourceid|guidassetid)$/i.test(field2)) return true;
     return /(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)$/i.test(String(path || ""));
   }
   function addLockedPlayerValue(result, value, path = "", key = "") {
@@ -1538,8 +1544,8 @@
         addLockedPlayerValue(result, child, nextPath, key);
         if (!result.sources.includes(nextPath)) result.sources.push(nextPath);
       } else if (childLockContext && isInspectableObject(child)) {
-        ITEM_ID_FIELDS.forEach((field) => addLockedPlayerValue(result, safeRead(child, field), nextPath, field));
-        DEFINITION_ID_FIELDS.forEach((field) => addLockedPlayerValue(result, safeRead(child, field), nextPath, field));
+        ITEM_ID_FIELDS.forEach((field2) => addLockedPlayerValue(result, safeRead(child, field2), nextPath, field2));
+        DEFINITION_ID_FIELDS.forEach((field2) => addLockedPlayerValue(result, safeRead(child, field2), nextPath, field2));
       }
       if (isInspectableObject(child)) collectLockedPlayerIds(child, nextPath, result, depth + 1, seen, childLockContext);
     }
@@ -1573,10 +1579,10 @@
     const rows = flattenConfigValues(raw);
     const settings = { ...FSU_COMPAT_DEFAULTS, detected: true, source };
     let matched = false;
-    for (const [field, aliases] of Object.entries(FSU_SETTING_ALIASES)) {
+    for (const [field2, aliases] of Object.entries(FSU_SETTING_ALIASES)) {
       const row = rows.find((entry) => aliases.some((pattern) => pattern.test(entry.path)) && boolFromAny(entry.value) !== null);
       if (!row) continue;
-      settings[field] = boolFromAny(row.value);
+      settings[field2] = boolFromAny(row.value);
       matched = true;
     }
     const excludedLeagueRows = rows.filter(
@@ -2412,15 +2418,15 @@
     const gmRequest = options.gmRequest;
     const fetchImpl = options.fetchImpl;
     const runtimeFallback = options.runtimeFallback;
-    function getText(url, requestOptions = {}) {
+    function requestText(method, url, requestOptions = {}) {
       const headers = requestOptions.headers || void 0;
       const timeout = Math.max(1, Number(requestOptions.timeout || 1e4) || 1e4);
       if (typeof gmRequest === "function") {
         return new Promise((resolve, reject) => {
           const request = {
-            method: "GET",
+            method,
             url,
-            nocache: true,
+            nocache: method === "GET",
             onload: (response) => {
               if (response.status >= 200 && response.status < 300) resolve(response.responseText);
               else reject(responseError(response.status));
@@ -2430,6 +2436,7 @@
             timeout
           };
           if (headers) request.headers = headers;
+          if (requestOptions.data !== void 0) request.data = requestOptions.data;
           if (requestOptions.sendCookies !== void 0) request.anonymous = requestOptions.sendCookies !== true;
           gmRequest(request);
         });
@@ -2439,7 +2446,9 @@
       }
       if (typeof fetchImpl !== "function") return Promise.reject(new Error("HTTP transport is unavailable"));
       const fetchOptions = { cache: "no-store" };
+      if (method !== "GET") fetchOptions.method = method;
       if (headers) fetchOptions.headers = headers;
+      if (requestOptions.data !== void 0) fetchOptions.body = requestOptions.data;
       if (requestOptions.sendCookies !== void 0) {
         fetchOptions.credentials = requestOptions.sendCookies === true ? "include" : "omit";
       }
@@ -2448,7 +2457,59 @@
         return response.text();
       });
     }
-    return Object.freeze({ getText });
+    function getText(url, requestOptions = {}) {
+      return requestText("GET", url, requestOptions);
+    }
+    function postText(url, data, requestOptions = {}) {
+      return requestText("POST", url, { ...requestOptions, data });
+    }
+    return Object.freeze({ getText, postText, requestText });
+  }
+
+  // src/adapters/browser/notification.js
+  function normalizedServer(value) {
+    const url = new URL(String(value || "https://ntfy.sh"));
+    if (url.protocol !== "https:") throw new Error("ntfy server must use HTTPS");
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  }
+  function createNotificationAdapter(options = {}) {
+    const gmNotification = options.gmNotification;
+    const http = options.http;
+    async function desktop(message = {}) {
+      if (typeof gmNotification !== "function") throw new Error("GM_notification is unavailable");
+      gmNotification({
+        title: String(message.title || "Daily Loop Runner"),
+        text: String(message.body || ""),
+        timeout: Math.max(1e3, Number(message.timeout || 8e3) || 8e3),
+        silent: message.silent === true
+      });
+      return true;
+    }
+    async function ntfy(message = {}, config = {}) {
+      if (!http?.postText) throw new Error("HTTP transport is unavailable");
+      const topic = String(config.topic || "").trim();
+      if (!topic) throw new Error("ntfy topic is required");
+      if (!/^[-_A-Za-z0-9]{1,64}$/.test(topic)) throw new Error("ntfy topic contains unsupported characters");
+      const server = normalizedServer(config.server);
+      const headers = {
+        "Content-Type": "text/plain; charset=UTF-8",
+        "X-Title": String(message.title || "Daily Loop Runner"),
+        "X-Tags": "tada,soccer",
+        "X-Priority": "high"
+      };
+      const token = String(config.token || "").trim();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      await http.postText(`${server}/${encodeURIComponent(topic)}`, String(message.body || ""), {
+        headers,
+        sendCookies: false,
+        timeout: Math.max(1e3, Number(config.timeout || 15e3) || 15e3)
+      });
+      return true;
+    }
+    return Object.freeze({ desktop, ntfy });
   }
 
   // src/adapters/browser/page-runtime.js
@@ -2638,6 +2699,29 @@
       return result;
     }
     return Object.freeze({ get, set, remove, getJson, setJson, entries });
+  }
+  function createUserscriptStorageAdapter(options = {}) {
+    const getValue = options.getValue;
+    const setValue = options.setValue;
+    const deleteValue = options.deleteValue;
+    function get(key, fallback = null) {
+      if (typeof getValue !== "function") return fallback;
+      try {
+        return getValue(String(key), fallback);
+      } catch {
+        return fallback;
+      }
+    }
+    function set(key, value) {
+      if (typeof setValue !== "function") throw new Error("Userscript storage is unavailable");
+      setValue(String(key), value);
+    }
+    function remove(key) {
+      if (typeof deleteValue !== "function") return false;
+      deleteValue(String(key));
+      return true;
+    }
+    return Object.freeze({ get, set, remove });
   }
 
   // src/adapters/browser/user-effects.js
@@ -3125,9 +3209,9 @@
     "_rawData"
   ];
   function identityIds(item) {
-    const holders = [item, ...IDENTITY_HOLDERS.map((field) => item?.[field])].filter((holder) => holder && typeof holder === "object");
-    const values = holders.flatMap((holder) => IDENTITY_FIELDS.flatMap((field) => {
-      const value = holder?.[field];
+    const holders = [item, ...IDENTITY_HOLDERS.map((field2) => item?.[field2])].filter((holder) => holder && typeof holder === "object");
+    const values = holders.flatMap((holder) => IDENTITY_FIELDS.flatMap((field2) => {
+      const value = holder?.[field2];
       if (Array.isArray(value)) return value;
       if (typeof value === "string") return value.match(/\d+/g) || [];
       return [value];
@@ -3160,11 +3244,16 @@
     const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? 0);
     const duplicateId = Number(item?.duplicateId || 0);
     const tradeable = typeof item?.isUntradeable === "function" ? !callBoolean(item, "isUntradeable", true) : item?.untradeable === false;
+    let fullName = "";
+    try {
+      fullName = String(item?._staticData?.getFullName?.() || item?.getFullName?.() || "").trim();
+    } catch {
+    }
     return createItemSnapshot({
       id: item?.id,
       definitionId: item?.definitionId,
       type: item?.type || (callBoolean(item, "isPlayer") ? "player" : "unknown"),
-      name: item?.name || item?.commonName || item?.lastName || item?._staticData?.name,
+      name: fullName || item?.name || item?.commonName || item?.lastName || item?._staticData?.name,
       rating,
       rareflag,
       rare: callBoolean(item, "isRare", rareflag > 0),
@@ -3601,14 +3690,14 @@
       const values = {};
       for (const key of keys) {
         if (!/(pick|choice|select|count|amount|option|resource|definition|asset|item|name|description|id)/i.test(key)) continue;
-        let field;
+        let field2;
         try {
-          field = value[key];
+          field2 = value[key];
         } catch {
           continue;
         }
-        if (!["string", "number", "boolean"].includes(typeof field)) continue;
-        values[key] = typeof field === "string" ? field.slice(0, 160) : field;
+        if (!["string", "number", "boolean"].includes(typeof field2)) continue;
+        values[key] = typeof field2 === "string" ? field2.slice(0, 160) : field2;
       }
       return { keys, prototypeKeys, values };
     }
@@ -3786,10 +3875,16 @@
 
   // src/adapters/index.js
   function createRuntimeAdapters(runtime, documentObject = runtime?.document || globalThis.document, options = {}) {
+    const userscriptApi = options.userscriptApi || runtime?.__FCLoopRunnerUserscriptApi || {};
     const localStorage = createStorageAdapter(runtime?.localStorage);
     const sessionStorage = createStorageAdapter(runtime?.sessionStorage);
     const dom = createDomAdapter(documentObject, runtime);
     const page = createPageRuntimeAdapter(runtime, dom);
+    const http = createHttpAdapter({
+      gmRequest: options.gmRequest || userscriptApi.request,
+      fetchImpl: options.fetchImpl || runtime?.fetch,
+      runtimeFallback: runtime?.__FCLoopRunnerRequestText
+    });
     return Object.freeze({
       inventory: (options2 = {}) => createEaInventoryAdapter(runtime, options2),
       localization: createEaLocalizationAdapter(runtime),
@@ -3801,13 +3896,15 @@
       page,
       userEffects: createUserEffectsAdapter(runtime, documentObject),
       wait: (waitOptions = {}) => createWaitAdapter({ ...waitOptions, pageRuntime: page }),
-      http: createHttpAdapter({
-        gmRequest: options.gmRequest,
-        fetchImpl: options.fetchImpl || runtime?.fetch,
-        runtimeFallback: runtime?.__FCLoopRunnerRequestText
-      }),
+      http,
+      notification: createNotificationAdapter({ gmNotification: options.gmNotification || userscriptApi.notify, http }),
       localStorage,
-      sessionStorage
+      sessionStorage,
+      userscriptStorage: createUserscriptStorageAdapter({
+        getValue: options.gmGetValue || userscriptApi.getValue,
+        setValue: options.gmSetValue || userscriptApi.setValue,
+        deleteValue: options.gmDeleteValue || userscriptApi.deleteValue
+      })
     });
   }
 
@@ -4948,6 +5045,76 @@
     return result;
   }
 
+  // src/reward/pack-highlight.js
+  var DEFAULT_REWARD_ALERT_SETTINGS = Object.freeze({
+    enabled: true,
+    minimumRating: 94,
+    highlightEnabled: true,
+    desktopEnabled: false,
+    ntfyEnabled: false,
+    ntfyServer: "https://ntfy.sh",
+    ntfyTopic: "",
+    ntfyToken: ""
+  });
+  function boundedRating(value, fallback = 94) {
+    const rating = Number(value);
+    return Number.isFinite(rating) ? Math.max(1, Math.min(99, Math.floor(rating))) : fallback;
+  }
+  function normalizedText2(value) {
+    return String(value || "").trim();
+  }
+  function normalizeRewardAlertSettings(input = {}) {
+    return Object.freeze({
+      enabled: input.enabled !== false,
+      minimumRating: boundedRating(input.minimumRating, DEFAULT_REWARD_ALERT_SETTINGS.minimumRating),
+      highlightEnabled: input.highlightEnabled !== false,
+      desktopEnabled: input.desktopEnabled === true,
+      ntfyEnabled: input.ntfyEnabled === true,
+      ntfyServer: normalizedText2(input.ntfyServer) || DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
+      ntfyTopic: normalizedText2(input.ntfyTopic),
+      ntfyToken: normalizedText2(input.ntfyToken)
+    });
+  }
+  function displayName(item = {}) {
+    return normalizedText2(item.name || item.commonName || item.lastName || item.definitionId || item.id) || "Unknown player";
+  }
+  function createPackHighlightModel(receipt = {}, settingsInput = {}, context = {}) {
+    const settings = normalizeRewardAlertSettings(settingsInput);
+    if (!settings.enabled) return null;
+    const assumedSpecial = context.assumeSpecialPlayers === true || receipt.details?.assumeTotwReward === true;
+    const cards = (receipt.openedItems || []).filter((item) => String(item?.type || "").toLowerCase() === "player").map((item) => ({
+      id: Number(item.id || 0),
+      definitionId: Number(item.definitionId || 0),
+      name: displayName(item),
+      rating: Number(item.rating || 0),
+      special: item.special === true || assumedSpecial,
+      duplicate: item.duplicate === true,
+      tradeable: item.tradeable === true
+    })).filter((card) => card.special && card.rating >= settings.minimumRating).sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name));
+    if (!cards.length) return null;
+    return Object.freeze({
+      pack: Object.freeze({
+        id: Number(receipt.packRef?.id || 0),
+        name: normalizedText2(receipt.packRef?.name) || normalizedText2(context.purpose) || "Opened pack"
+      }),
+      purpose: normalizedText2(context.purpose),
+      threshold: settings.minimumRating,
+      cards: Object.freeze(cards.map((card) => Object.freeze(card))),
+      maxRating: Math.max(...cards.map((card) => card.rating))
+    });
+  }
+  function formatPackHighlightNotification(model = {}) {
+    const cards = model.cards || [];
+    const title = cards.length === 1 ? `${cards[0].rating} special card opened` : `${cards.length} high-rated special cards opened`;
+    const lines = [model.pack?.name || model.purpose || "Opened pack"];
+    for (const card of cards.slice(0, 8)) {
+      const tags = [card.duplicate ? "duplicate" : null, card.tradeable ? "tradeable" : "untradeable"].filter(Boolean).join(", ");
+      lines.push(`${card.name} - ${card.rating}${tags ? ` (${tags})` : ""}`);
+    }
+    if (cards.length > 8) lines.push(`+${cards.length - 8} more`);
+    return Object.freeze({ title, body: lines.join("\n") });
+  }
+
   // src/unassigned/plan.js
   function itemRef(item) {
     return item?.ref || { id: Number(item?.id || 0), definitionId: Number(item?.definitionId || 0), pile: "unassigned" };
@@ -5271,6 +5438,19 @@
         const normalized = options.normalizeItems ? await options.normalizeItems(rawItems, { pack, packRef, attempt, result }) : rawItems;
         const openedItems = Array.isArray(normalized) ? normalized : normalized?.items || rawItems;
         const receiptItems = Array.isArray(normalized) ? normalized : normalized?.receiptItems || openedItems;
+        if (typeof options.onItemsOpened === "function") {
+          try {
+            Promise.resolve(options.onItemsOpened({
+              pack,
+              packRef,
+              attempt,
+              result,
+              openedItems: receiptItems
+            })).catch((error) => options.onItemsOpenedError?.(error));
+          } catch (error) {
+            options.onItemsOpenedError?.(error);
+          }
+        }
         const policyResult = options.openedItemPolicy ? await options.openedItemPolicy(openedItems, { pack, packRef, attempt, result }) : { pendingItemRefs: openedItems };
         return createOpenPackReceipt({
           status: "opened",
@@ -6312,6 +6492,8 @@
       required(panel, `#${id}`).addEventListener("change", (event) => commands.savePickOptions?.(event));
     });
     required(panel, "#bronze-loop-show-mvp").addEventListener("change", (event) => commands.saveLoopOptions?.(event));
+    required(panel, "#bronze-loop-reward-alert-enabled").addEventListener("change", (event) => commands.saveRewardAlertEnabled?.(event));
+    required(panel, "#bronze-loop-reward-alert-settings").addEventListener("click", (event) => commands.openRewardAlertSettings?.(event));
     required(panel, "#bronze-loop-start").addEventListener("click", (event) => commands.start?.(event));
     required(panel, "#bronze-loop-recap-reopen").addEventListener("click", (event) => commands.reopenRecap?.(event));
     required(panel, "#bronze-loop-refresh").addEventListener("click", (event) => commands.refresh?.(event));
@@ -6328,6 +6510,7 @@
     if (!panel?.querySelector) throw new TypeError("panel element is required");
     const loopOptions = options.loopOptions || {};
     const pickOptions = options.pickOptions || {};
+    const rewardAlertSettings = options.rewardAlertSettings || {};
     required(panel, "#bronze-loop-show-mvp").checked = loopOptions.showMvpLoops === true;
     required(panel, "#bronze-loop-pick-protect-high-gold").checked = pickOptions.protectHighGold === true;
     required(panel, "#bronze-loop-pick-auto-below-90").checked = pickOptions.autoSelectBelow90 === true;
@@ -6335,6 +6518,7 @@
     required(panel, "#bronze-loop-pick-open-at-end").checked = pickOptions.openPicksAtEnd === true;
     required(panel, "#bronze-loop-pick-high-gold-threshold").value = pickOptions.highGoldThreshold;
     required(panel, "#bronze-loop-pick-auto-threshold").value = pickOptions.autoPickThreshold;
+    required(panel, "#bronze-loop-reward-alert-enabled").checked = rewardAlertSettings.enabled !== false;
   }
 
   // src/ui/main-panel-commands.js
@@ -6358,6 +6542,8 @@
         return commands.scanPicks();
       },
       saveLoopOptions: options.saveLoopOptions,
+      saveRewardAlertEnabled: options.saveRewardAlertEnabled,
+      openRewardAlertSettings: options.openRewardAlertSettings,
       start() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
         options.start?.();
@@ -6735,6 +6921,23 @@
     button.style.display = recap ? "" : "none";
     if (recap) button.title = `Last Player Pick recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
   }
+  function renderRewardAlertSummary(options = {}) {
+    const panel = options.panel;
+    const settings = options.settings || {};
+    const summary = query(panel, "#bronze-loop-reward-alert-summary");
+    const enabled = query(panel, "#bronze-loop-reward-alert-enabled");
+    if (enabled) enabled.checked = settings.enabled !== false;
+    if (!summary) return;
+    if (settings.enabled === false) {
+      summary.textContent = "Off";
+      return;
+    }
+    const channels = [];
+    if (settings.highlightEnabled !== false) channels.push("highlight");
+    if (settings.desktopEnabled === true) channels.push("desktop");
+    if (settings.ntfyEnabled === true) channels.push("ntfy");
+    summary.textContent = `${Number(settings.minimumRating || 94)}+ special${channels.length ? ` | ${channels.join(" | ")}` : ""}`;
+  }
   function renderMainPanelRuntimeState(options = {}) {
     const panel = options.panel;
     const state = options.state || {};
@@ -6757,6 +6960,7 @@
       "bronze-loop-pick-high-gold-threshold": state.running === true,
       "bronze-loop-pick-auto-threshold": state.running === true,
       "bronze-loop-show-mvp": state.running === true,
+      "bronze-loop-reward-alert-settings": state.running === true,
       "bronze-loop-rounds": state.running === true,
       "bronze-loop-json": state.running === true
     };
@@ -6836,6 +7040,7 @@
   #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; box-sizing: border-box; }
   #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
+  #bronze-loop-panel .bronze-loop-option-summary { color: #9fb2c9; font-size: 11px; flex: 1 1 auto; min-width: 100px; }
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
   #bronze-loop-latest {
     flex: 1 1 auto;
@@ -6917,6 +7122,11 @@
           </label>
         </div>
         <div class="row"><label title="Show MVP and one-run validation loops in the main selector"><input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops</label></div>
+        <div class="row" id="bronze-loop-reward-alert-row">
+          <label title="Enable high-rated special-card alerts"><input id="bronze-loop-reward-alert-enabled" type="checkbox"> Reward alerts</label>
+          <span id="bronze-loop-reward-alert-summary" class="bronze-loop-option-summary">94+ special | highlight</span>
+          <button id="bronze-loop-reward-alert-settings" title="Reward alert settings">Settings</button>
+        </div>
         <div class="row">
           <label title="Player Pick SBCs will not submit normal gold players at or above this rating">
             <input id="bronze-loop-pick-protect-high-gold" type="checkbox"> Protect Pick fodder >=
@@ -7237,13 +7447,15 @@
       }, 250);
     });
   }
-  function triggerPlayerPickRecapFireworks(dialog, specialCount, runtime = {}) {
-    if (!dialog || !runtime.dom?.create || typeof runtime.requestFrame !== "function") return;
-    if (runtime.getComputedStyle?.(dialog)?.position === "static") dialog.style.position = "relative";
-    dialog.style.isolation = "isolate";
+
+  // src/ui/reward-celebration.js
+  function triggerRewardFireworks(container, intensityValue, runtime = {}) {
+    if (!container || !runtime.dom?.create || typeof runtime.requestFrame !== "function") return;
+    if (runtime.getComputedStyle?.(container)?.position === "static") container.style.position = "relative";
+    container.style.isolation = "isolate";
     const canvas = runtime.dom.create("canvas");
     canvas.style.cssText = "position:absolute;top:0;left:0;width:100%;height:35%;pointer-events:none;z-index:-1;overflow:hidden;";
-    dialog.insertBefore(canvas, dialog.firstChild);
+    container.insertBefore(canvas, container.firstChild);
     const width = Math.max(220, canvas.clientWidth);
     const height = Math.max(120, canvas.clientHeight);
     const dpr = Math.min(2, Number(runtime.devicePixelRatio?.() || 1));
@@ -7257,7 +7469,7 @@
     context.scale(dpr, dpr);
     const palette = ["#ffd54a", "#ff5c5c", "#5c8aff", "#5cffa0", "#7a5cff", "#ff9d4a", "#ff5cb1", "#5ce0ff"];
     const random = runtime.random || Math.random;
-    const intensity = Math.max(1, Math.min(6, Number(specialCount) || 1));
+    const intensity = Math.max(1, Math.min(6, Number(intensityValue) || 1));
     const particlesPerBurst = 70 + intensity * 14;
     const particles = [];
     const burstSchedule = [80, 700, 1400];
@@ -7439,6 +7651,316 @@
     });
   }
 
+  // src/ui/reward-highlight.js
+  function applyStyles3(element, styles) {
+    Object.assign(element.style, styles);
+  }
+  function positionStack(stack, panel, viewport = {}) {
+    const rect = panel?.getBoundingClientRect?.();
+    const viewportWidth = Math.max(0, Number(viewport.width || 0));
+    const viewportHeight = Math.max(0, Number(viewport.height || 0));
+    const width = Math.max(220, Math.min(420, viewportWidth > 0 ? viewportWidth - 20 : 360));
+    stack.style.width = `${width}px`;
+    if (!rect) {
+      stack.style.right = "10px";
+      stack.style.bottom = "198px";
+      stack.style.top = "auto";
+      return;
+    }
+    stack.style.right = `${Math.max(10, viewportWidth - Number(rect.right || 0))}px`;
+    if (Number(rect.top || 0) >= 180) {
+      stack.style.top = "auto";
+      stack.style.bottom = `${Math.max(10, viewportHeight - Number(rect.top || 0) + 10)}px`;
+    } else {
+      stack.style.top = `${Math.max(10, Number(rect.bottom || 0) + 10)}px`;
+      stack.style.bottom = "auto";
+    }
+  }
+  function showPackHighlightToast(options = {}) {
+    const dom = options.dom;
+    const model = options.model;
+    if (!dom?.create || !dom?.appendToBody || !model?.cards?.length) return false;
+    let stack = dom.query?.("#bronze-loop-reward-highlight-stack");
+    if (!stack) {
+      stack = dom.create("div");
+      stack.id = "bronze-loop-reward-highlight-stack";
+      applyStyles3(stack, {
+        position: "fixed",
+        zIndex: "1000000",
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        pointerEvents: "none",
+        fontFamily: "Arial, sans-serif",
+        boxSizing: "border-box"
+      });
+      dom.appendToBody(stack);
+    }
+    positionStack(stack, options.panel, options.viewport?.() || {});
+    const toast = dom.create("div");
+    applyStyles3(toast, {
+      position: "relative",
+      overflow: "hidden",
+      isolation: "isolate",
+      pointerEvents: "auto",
+      background: "rgba(20, 24, 30, 0.97)",
+      color: "#f4f6f8",
+      border: "1px solid #d4af37",
+      borderLeft: "4px solid #ffd54a",
+      boxShadow: "0 8px 24px rgba(0,0,0,.42)",
+      padding: "10px 34px 10px 12px",
+      boxSizing: "border-box",
+      opacity: "1",
+      transition: "opacity .25s ease, transform .25s ease"
+    });
+    const title = dom.create("div");
+    title.textContent = `${model.maxRating} Special Highlight`;
+    applyStyles3(title, { color: "#ffd54a", fontSize: "14px", fontWeight: "700", marginBottom: "3px" });
+    const pack = dom.create("div");
+    pack.textContent = model.pack?.name || model.purpose || "Opened pack";
+    applyStyles3(pack, { color: "#9fb2c9", fontSize: "11px", marginBottom: "6px" });
+    const list = dom.create("div");
+    applyStyles3(list, { display: "flex", flexDirection: "column", gap: "3px" });
+    for (const card of model.cards.slice(0, 5)) {
+      const row = dom.create("div");
+      row.textContent = `${card.name} - ${card.rating}${card.duplicate ? " | duplicate" : ""}${card.tradeable ? " | tradeable" : ""}`;
+      applyStyles3(row, { fontSize: "12px", lineHeight: "16px", overflowWrap: "anywhere" });
+      list.appendChild(row);
+    }
+    if (model.cards.length > 5) {
+      const more = dom.create("div");
+      more.textContent = `+${model.cards.length - 5} more`;
+      applyStyles3(more, { color: "#9fb2c9", fontSize: "11px" });
+      list.appendChild(more);
+    }
+    const close = dom.create("button");
+    close.type = "button";
+    close.textContent = "x";
+    close.title = "Dismiss highlight";
+    applyStyles3(close, {
+      position: "absolute",
+      top: "4px",
+      right: "5px",
+      width: "24px",
+      height: "24px",
+      padding: "0",
+      border: "0",
+      background: "transparent",
+      color: "#d7e2f0",
+      cursor: "pointer",
+      fontSize: "18px"
+    });
+    let timer = null;
+    const finish = () => {
+      if (timer !== null) options.cancel?.(timer);
+      toast.style.opacity = "0";
+      toast.style.transform = "translateY(8px)";
+      (options.schedule || setTimeout)(() => {
+        toast.remove?.();
+        if (!stack.children?.length) stack.remove?.();
+      }, 260);
+    };
+    close.addEventListener("click", finish);
+    toast.append(title, pack, list, close);
+    stack.appendChild(toast);
+    while (stack.children?.length > 3) stack.firstChild?.remove?.();
+    options.celebrate?.(toast, model.cards.length);
+    timer = (options.schedule || setTimeout)(finish, Math.max(3e3, Number(options.durationMs || 7e3) || 7e3));
+    return true;
+  }
+
+  // src/ui/reward-alert-settings.js
+  function applyStyles4(element, styles) {
+    Object.assign(element.style, styles);
+  }
+  function inputStyles(input) {
+    applyStyles4(input, {
+      width: "100%",
+      minWidth: "0",
+      height: "30px",
+      boxSizing: "border-box",
+      background: "#222832",
+      color: "#f4f6f8",
+      border: "1px solid #607089",
+      padding: "0 8px"
+    });
+    return input;
+  }
+  function field(dom, labelText, input) {
+    const label = dom.create("label");
+    applyStyles4(label, { display: "grid", gridTemplateColumns: "140px minmax(0, 1fr)", alignItems: "center", gap: "10px" });
+    const text = dom.create("span");
+    text.textContent = labelText;
+    applyStyles4(text, { color: "#b8c3d2", fontSize: "12px" });
+    label.append(text, input);
+    return label;
+  }
+  function checkbox(dom, id, labelText, checked) {
+    const label = dom.create("label");
+    applyStyles4(label, { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" });
+    const input = dom.create("input");
+    input.id = id;
+    input.type = "checkbox";
+    input.checked = checked === true;
+    input.style.accentColor = "#78a6ff";
+    const text = dom.create("span");
+    text.textContent = labelText;
+    label.append(input, text);
+    return { label, input };
+  }
+  function validNtfyTopic(value) {
+    return /^[-_A-Za-z0-9]{1,64}$/.test(String(value || "").trim());
+  }
+  function showRewardAlertSettings(options = {}) {
+    const dom = options.dom;
+    if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
+    dom.query?.("#bronze-loop-reward-alert-modal")?.remove?.();
+    const initial = normalizeRewardAlertSettings(options.settings);
+    const overlay = dom.create("div");
+    overlay.id = "bronze-loop-reward-alert-modal";
+    applyStyles4(overlay, {
+      position: "fixed",
+      inset: "0",
+      zIndex: "1000001",
+      background: "rgba(0,0,0,.72)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "20px",
+      boxSizing: "border-box"
+    });
+    const dialog = dom.create("div");
+    applyStyles4(dialog, {
+      width: "min(520px, 100%)",
+      maxHeight: "90vh",
+      overflow: "auto",
+      background: "#171b21",
+      color: "#f4f6f8",
+      border: "1px solid #65758a",
+      padding: "14px",
+      boxSizing: "border-box",
+      fontFamily: "Arial, sans-serif"
+    });
+    const title = dom.create("div");
+    title.textContent = "Reward Alerts";
+    applyStyles4(title, { fontSize: "16px", fontWeight: "700", marginBottom: "12px" });
+    const form = dom.create("div");
+    applyStyles4(form, { display: "flex", flexDirection: "column", gap: "10px" });
+    const enabled = checkbox(dom, "bronze-loop-alert-enabled-modal", "Enable reward alerts", initial.enabled);
+    const highlight = checkbox(dom, "bronze-loop-alert-highlight-enabled", "Show pack highlight", initial.highlightEnabled);
+    const desktop = checkbox(dom, "bronze-loop-alert-desktop-enabled", "Desktop notification", initial.desktopEnabled);
+    const ntfy = checkbox(dom, "bronze-loop-alert-ntfy-enabled", "ntfy remote notification", initial.ntfyEnabled);
+    const threshold = inputStyles(dom.create("input"));
+    threshold.id = "bronze-loop-alert-minimum-rating";
+    threshold.type = "number";
+    threshold.min = "1";
+    threshold.max = "99";
+    threshold.value = String(initial.minimumRating);
+    const server = inputStyles(dom.create("input"));
+    server.id = "bronze-loop-alert-ntfy-server";
+    server.type = "url";
+    server.value = initial.ntfyServer;
+    server.readOnly = true;
+    const topic = inputStyles(dom.create("input"));
+    topic.id = "bronze-loop-alert-ntfy-topic";
+    topic.type = "text";
+    topic.value = initial.ntfyTopic;
+    topic.autocomplete = "off";
+    const token = inputStyles(dom.create("input"));
+    token.id = "bronze-loop-alert-ntfy-token";
+    token.type = "password";
+    token.value = initial.ntfyToken;
+    token.autocomplete = "off";
+    form.append(
+      enabled.label,
+      highlight.label,
+      field(dom, "Minimum rating", threshold),
+      desktop.label,
+      ntfy.label,
+      field(dom, "ntfy server", server),
+      field(dom, "ntfy topic", topic),
+      field(dom, "ntfy token", token)
+    );
+    const status = dom.create("div");
+    applyStyles4(status, { minHeight: "16px", marginTop: "10px", color: "#9fb2c9", fontSize: "11px" });
+    const tests = dom.create("div");
+    applyStyles4(tests, { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" });
+    const actions = dom.create("div");
+    applyStyles4(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
+    const button = (id, text, primary = false) => {
+      const value = dom.create("button");
+      value.id = id;
+      value.type = "button";
+      value.textContent = text;
+      applyStyles4(value, {
+        minHeight: "30px",
+        padding: "0 12px",
+        cursor: "pointer",
+        color: "#fff",
+        background: primary ? "#2f6fde" : "#222832",
+        border: `1px solid ${primary ? "#4f8cff" : "#607089"}`
+      });
+      return value;
+    };
+    const preview = button("bronze-loop-alert-preview", "Preview highlight");
+    const desktopTest = button("bronze-loop-alert-test-desktop", "Send desktop test");
+    const ntfyTest = button("bronze-loop-alert-test-ntfy", "Send ntfy test");
+    const cancel = button("bronze-loop-alert-cancel", "Cancel");
+    const save = button("bronze-loop-alert-save", "Save", true);
+    tests.append(preview, desktopTest, ntfyTest);
+    actions.append(cancel, save);
+    const updateNtfyTestState = () => {
+      const valid = validNtfyTopic(topic.value);
+      ntfyTest.disabled = !valid;
+      ntfyTest.title = valid ? "Send a test notification through ntfy" : "Enter a valid ntfy topic first";
+    };
+    topic.addEventListener("input", updateNtfyTestState);
+    updateNtfyTestState();
+    const draft = () => normalizeRewardAlertSettings({
+      enabled: enabled.input.checked,
+      highlightEnabled: highlight.input.checked,
+      minimumRating: threshold.value,
+      desktopEnabled: desktop.input.checked,
+      ntfyEnabled: ntfy.input.checked,
+      ntfyServer: server.value,
+      ntfyTopic: topic.value,
+      ntfyToken: token.value
+    });
+    const runTest = async (callback, pendingText, successText) => {
+      status.textContent = pendingText;
+      try {
+        await callback(draft());
+        status.textContent = successText;
+      } catch (error) {
+        status.textContent = `Failed: ${error?.message || error}`;
+      }
+    };
+    preview.addEventListener("click", () => runTest(options.onPreview || (() => true), "Showing preview...", "Preview shown"));
+    desktopTest.addEventListener("click", () => runTest(options.onTestDesktop || (() => true), "Sending desktop test...", "Desktop test sent"));
+    ntfyTest.addEventListener("click", () => runTest(options.onTestNtfy || (() => true), "Sending ntfy test...", "ntfy test sent"));
+    const close = () => overlay.remove?.();
+    cancel.addEventListener("click", close);
+    save.addEventListener("click", async () => {
+      try {
+        const settings = draft();
+        if (settings.ntfyEnabled && !validNtfyTopic(settings.ntfyTopic)) {
+          throw new Error("A valid ntfy topic is required when ntfy is enabled");
+        }
+        await options.onSave?.(settings);
+        close();
+      } catch (error) {
+        status.textContent = `Save failed: ${error?.message || error}`;
+      }
+    });
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close();
+    });
+    dialog.append(title, form, tests, status, actions);
+    overlay.appendChild(dialog);
+    dom.appendToBody(overlay);
+    return overlay;
+  }
+
   // src/userscript-entry.js
   (function() {
     "use strict";
@@ -7449,6 +7971,10 @@
     }
     const adapters = createRuntimeAdapters(W, document, {
       gmRequest: typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null,
+      gmNotification: typeof GM_notification === "function" ? GM_notification : null,
+      gmGetValue: typeof GM_getValue === "function" ? GM_getValue : null,
+      gmSetValue: typeof GM_setValue === "function" ? GM_setValue : null,
+      gmDeleteValue: typeof GM_deleteValue === "function" ? GM_deleteValue : null,
       fetchImpl: typeof fetch === "function" ? fetch.bind(globalThis) : null
     });
     const eaPackAdapter = () => adapters.pack();
@@ -7486,7 +8012,8 @@
       lastPickRecap: null,
       showMvpLoops: false,
       loopStack: [],
-      logRenderer: null
+      logRenderer: null,
+      rewardAlertSettings: normalizeRewardAlertSettings()
     };
     function destroyRunner() {
       state.stopping = true;
@@ -7495,10 +8022,12 @@
       document.querySelector("#bronze-loop-panel")?.remove();
       document.querySelector("#bronze-loop-pick-modal")?.remove();
       document.querySelector("#bronze-loop-recap-modal")?.remove();
+      document.querySelector("#bronze-loop-reward-alert-modal")?.remove();
+      document.querySelector("#bronze-loop-reward-highlight-stack")?.remove();
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.15",
+      version: "0.5.16",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -7506,7 +8035,8 @@
       clearFsuSettingsOverride,
       calculateSquadRating: calculateEaSquadRating,
       solveRatingSbcCandidates: findOptimalRatingSbcSelection,
-      scanPlayerPicks: () => scanAvailablePlayerPickSbcs()
+      scanPlayerPicks: () => scanAvailablePlayerPickSbcs(),
+      previewPackHighlight: (input = {}) => previewPackHighlight(input)
     };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const now = () => (/* @__PURE__ */ new Date()).toLocaleTimeString();
@@ -8399,7 +8929,7 @@
     function itemIdentityHolders(item) {
       const holders = [
         item,
-        ...ITEM_IDENTITY_HOLDER_FIELDS.map((field) => safeReadField(item, field))
+        ...ITEM_IDENTITY_HOLDER_FIELDS.map((field2) => safeReadField(item, field2))
       ];
       const seen = /* @__PURE__ */ new Set();
       return holders.filter((holder) => {
@@ -8429,7 +8959,7 @@
     function itemIdentifierNumbers(item, keys = []) {
       const fields = Array.isArray(keys) && keys.length ? keys : ITEM_IDENTITY_FIELD_ALIASES;
       return uniqueNumberList(itemIdentityHolders(item).flatMap(
-        (holder) => fields.flatMap((field) => numberListFromAny3(safeReadField(holder, field)))
+        (holder) => fields.flatMap((field2) => numberListFromAny3(safeReadField(holder, field2)))
       ));
     }
     function isFsuLockedItem(item, settings = getFsuSettings(), lockContext = null) {
@@ -8933,6 +9463,12 @@
             receiptItems: items.map((item) => inventoryAdapter.snapshotItem(item, "unassigned"))
           };
         },
+        onItemsOpened: ({ packRef, openedItems }) => publishPackHighlight(openedItems, {
+          packRef,
+          purpose,
+          assumeSpecialPlayers: options.assumeSpecialPlayers === true
+        }),
+        onItemsOpenedError: (error) => log(`${purpose}: reward highlight failed: ${error?.message || error}`),
         openedItemPolicy: options.openedItemPolicy,
         retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
         beforeRetry: async ({ code }) => {
@@ -11475,6 +12011,7 @@
         }
         const receipt = await openPack(pack, `${loopDef.name} ${reason}`, {
           allowGone: true,
+          assumeSpecialPlayers: options.assumeTotwReward === true,
           retryCodes: ["471", "500"],
           resolveRetryPack: () => findRewardPack(loopDef, rewardPackId, {
             attempts: 2,
@@ -12398,7 +12935,7 @@
     function shortageSourceMatchesRequirement(source, requirement) {
       const target = source?.requirement || {};
       return ["tier", "rarity", "special", "playerOnly", "allowSpecial"].every(
-        (field) => target[field] === void 0 || target[field] === requirement?.[field]
+        (field2) => target[field2] === void 0 || target[field2] === requirement?.[field2]
       );
     }
     function getShortageForSource(loopDef, source, piles) {
@@ -13338,6 +13875,123 @@
       if (!options.quietMissing) log(`${loopDef.name}: Player Pick reward was not found in unassigned items`);
       return null;
     }
+    function saveRewardAlertEnabled(event) {
+      const enabled = event?.target?.checked === true;
+      try {
+        persistRewardAlertSettings({ ...state.rewardAlertSettings, enabled });
+        log(`Reward alerts ${enabled ? "enabled" : "disabled"}`);
+      } catch (error) {
+        log(`Reward alert setting failed: ${error?.message || error}`);
+        renderRewardAlertSummary({
+          panel: document.querySelector("#bronze-loop-panel"),
+          settings: state.rewardAlertSettings
+        });
+      }
+    }
+    function loadRewardAlertSettings() {
+      return normalizeRewardAlertSettings(adapters.userscriptStorage.get(REWARD_ALERT_SETTINGS_KEY, {}));
+    }
+    function persistRewardAlertSettings(settings) {
+      state.rewardAlertSettings = normalizeRewardAlertSettings(settings);
+      adapters.userscriptStorage.set(REWARD_ALERT_SETTINGS_KEY, state.rewardAlertSettings);
+      renderRewardAlertSummary({
+        panel: document.querySelector("#bronze-loop-panel"),
+        settings: state.rewardAlertSettings
+      });
+      return state.rewardAlertSettings;
+    }
+    function previewPackHighlight(input = {}) {
+      const rating = Math.max(1, Math.min(99, Number(input.rating || input.cards?.[0]?.rating || 96) || 96));
+      const cards = input.cards || [{
+        id: 1,
+        definitionId: 1,
+        type: "player",
+        name: "Reward Alert Preview",
+        rating,
+        special: true,
+        duplicate: false,
+        tradeable: false
+      }];
+      const model = createPackHighlightModel({
+        packRef: { id: 0, name: input.packName || "Preview Pack" },
+        openedItems: cards
+      }, { ...state.rewardAlertSettings, ...input.settings, enabled: true, highlightEnabled: true });
+      if (!model) return false;
+      return showPackHighlightToast({
+        dom: adapters.dom,
+        panel: document.querySelector("#bronze-loop-panel"),
+        viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+        model,
+        durationMs: 7e3,
+        schedule: setTimeout,
+        cancel: clearTimeout,
+        celebrate: (container, count) => triggerRewardFireworks(container, count, {
+          dom: adapters.dom,
+          getComputedStyle: (element) => getComputedStyle(element),
+          devicePixelRatio: () => window.devicePixelRatio || 1,
+          now: () => performance.now(),
+          requestFrame: (callback) => requestAnimationFrame(callback)
+        })
+      });
+    }
+    function publishPackHighlight(openedItems, context = {}) {
+      const settings = state.rewardAlertSettings;
+      const model = createPackHighlightModel({
+        packRef: context.packRef,
+        openedItems,
+        details: { assumeTotwReward: context.assumeSpecialPlayers === true }
+      }, settings, {
+        purpose: context.purpose,
+        assumeSpecialPlayers: context.assumeSpecialPlayers
+      });
+      if (!model) return;
+      log(`Reward highlight: ${model.cards.map((card) => `${card.name} rating:${card.rating}${card.duplicate ? " duplicate" : ""}`).join("; ")}`);
+      if (settings.highlightEnabled) previewPackHighlight({
+        packName: model.pack.name,
+        cards: model.cards.map((card) => ({ ...card, type: "player" })),
+        settings
+      });
+      const message = formatPackHighlightNotification(model);
+      if (settings.desktopEnabled) {
+        void adapters.notification.desktop(message).catch((error) => {
+          log(`Reward desktop notification failed: ${error?.message || error}`);
+        });
+      }
+      if (settings.ntfyEnabled) {
+        void adapters.notification.ntfy(message, {
+          server: settings.ntfyServer,
+          topic: settings.ntfyTopic,
+          token: settings.ntfyToken
+        }).catch((error) => {
+          log(`Reward ntfy notification failed: ${error?.message || error}`);
+        });
+      }
+    }
+    function openRewardAlertSettingsModal() {
+      return showRewardAlertSettings({
+        dom: adapters.dom,
+        settings: state.rewardAlertSettings,
+        onPreview: async (settings) => {
+          previewPackHighlight({ rating: Math.max(96, settings.minimumRating), settings });
+        },
+        onTestDesktop: async (settings) => adapters.notification.desktop({
+          title: "Daily Loop Runner test",
+          body: `${Math.max(96, settings.minimumRating)} special card desktop notification test`
+        }),
+        onTestNtfy: async (settings) => adapters.notification.ntfy({
+          title: "Daily Loop Runner test",
+          body: `${Math.max(96, settings.minimumRating)} special card ntfy notification test`
+        }, {
+          server: settings.ntfyServer,
+          topic: settings.ntfyTopic,
+          token: settings.ntfyToken
+        }),
+        onSave: async (settings) => {
+          persistRewardAlertSettings(settings);
+          log(`Reward alerts updated: ${settings.enabled ? `${settings.minimumRating}+ special` : "off"}`);
+        }
+      });
+    }
     function pendingPlayerPickQuantity(item) {
       return Math.max(
         1,
@@ -13703,7 +14357,7 @@
             recapButton.style.background = "";
           }
         },
-        celebrate: (dialog, specialCount) => triggerPlayerPickRecapFireworks(dialog, specialCount, {
+        celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
           dom: adapters.dom,
           getComputedStyle: (element) => getComputedStyle(element),
           devicePixelRatio: () => window.devicePixelRatio || 1,
@@ -13880,11 +14534,14 @@
       const savedLoopUiOptions = loadLoopUiOptions();
       state.showMvpLoops = savedLoopUiOptions.showMvpLoops;
       const savedPickOptions = loadPickRuntimeOptions();
+      state.rewardAlertSettings = loadRewardAlertSettings();
       hydrateMainPanelOptions({
         panel,
         loopOptions: savedLoopUiOptions,
-        pickOptions: savedPickOptions
+        pickOptions: savedPickOptions,
+        rewardAlertSettings: state.rewardAlertSettings
       });
+      renderRewardAlertSummary({ panel, settings: state.rewardAlertSettings });
       createMainPanelGeometry({
         panel,
         getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
@@ -13914,6 +14571,8 @@
         updateLoopControls,
         savePickOptions: savePickRuntimeOptions,
         saveLoopOptions: saveLoopUiOptions,
+        saveRewardAlertEnabled,
+        openRewardAlertSettings: openRewardAlertSettingsModal,
         start: startLoop,
         reopenRecap: reopenLastPickRecap,
         refreshInventoryCaches,

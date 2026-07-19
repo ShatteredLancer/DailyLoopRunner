@@ -32,6 +32,8 @@ export function bindMainPanelCommands(options = {}) {
     required(panel, `#${id}`).addEventListener('change', (event) => commands.savePickOptions?.(event));
   });
   required(panel, '#bronze-loop-show-mvp').addEventListener('change', (event) => commands.saveLoopOptions?.(event));
+  required(panel, '#bronze-loop-reward-alert-enabled').addEventListener('change', (event) => commands.saveRewardAlertEnabled?.(event));
+  required(panel, '#bronze-loop-reward-alert-settings').addEventListener('click', (event) => commands.openRewardAlertSettings?.(event));
   required(panel, '#bronze-loop-start').addEventListener('click', (event) => commands.start?.(event));
   required(panel, '#bronze-loop-recap-reopen').addEventListener('click', (event) => commands.reopenRecap?.(event));
   required(panel, '#bronze-loop-refresh').addEventListener('click', (event) => commands.refresh?.(event));
@@ -49,6 +51,7 @@ export function hydrateMainPanelOptions(options = {}) {
   if (!panel?.querySelector) throw new TypeError('panel element is required');
   const loopOptions = options.loopOptions || {};
   const pickOptions = options.pickOptions || {};
+  const rewardAlertSettings = options.rewardAlertSettings || {};
   required(panel, '#bronze-loop-show-mvp').checked = loopOptions.showMvpLoops === true;
   required(panel, '#bronze-loop-pick-protect-high-gold').checked = pickOptions.protectHighGold === true;
   required(panel, '#bronze-loop-pick-auto-below-90').checked = pickOptions.autoSelectBelow90 === true;
@@ -56,4 +59,5 @@ export function hydrateMainPanelOptions(options = {}) {
   required(panel, '#bronze-loop-pick-open-at-end').checked = pickOptions.openPicksAtEnd === true;
   required(panel, '#bronze-loop-pick-high-gold-threshold').value = pickOptions.highGoldThreshold;
   required(panel, '#bronze-loop-pick-auto-threshold').value = pickOptions.autoPickThreshold;
+  required(panel, '#bronze-loop-reward-alert-enabled').checked = rewardAlertSettings.enabled !== false;
 }

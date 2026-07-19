@@ -43,6 +43,24 @@ export function renderMainPanelRecap(options = {}) {
   if (recap) button.title = `Last Player Pick recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
 }
 
+export function renderRewardAlertSummary(options = {}) {
+  const panel = options.panel;
+  const settings = options.settings || {};
+  const summary = query(panel, '#bronze-loop-reward-alert-summary');
+  const enabled = query(panel, '#bronze-loop-reward-alert-enabled');
+  if (enabled) enabled.checked = settings.enabled !== false;
+  if (!summary) return;
+  if (settings.enabled === false) {
+    summary.textContent = 'Off';
+    return;
+  }
+  const channels = [];
+  if (settings.highlightEnabled !== false) channels.push('highlight');
+  if (settings.desktopEnabled === true) channels.push('desktop');
+  if (settings.ntfyEnabled === true) channels.push('ntfy');
+  summary.textContent = `${Number(settings.minimumRating || 94)}+ special${channels.length ? ` | ${channels.join(' | ')}` : ''}`;
+}
+
 export function renderMainPanelRuntimeState(options = {}) {
   const panel = options.panel;
   const state = options.state || {};
@@ -68,6 +86,7 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-pick-high-gold-threshold': state.running === true,
     'bronze-loop-pick-auto-threshold': state.running === true,
     'bronze-loop-show-mvp': state.running === true,
+    'bronze-loop-reward-alert-settings': state.running === true,
     'bronze-loop-rounds': state.running === true,
     'bronze-loop-json': state.running === true,
   };

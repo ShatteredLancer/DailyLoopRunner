@@ -12,6 +12,8 @@ const IDS = [
   'bronze-loop-pick-high-gold-threshold',
   'bronze-loop-pick-auto-threshold',
   'bronze-loop-show-mvp',
+  'bronze-loop-reward-alert-enabled',
+  'bronze-loop-reward-alert-settings',
   'bronze-loop-start',
   'bronze-loop-recap-reopen',
   'bronze-loop-refresh',
@@ -77,6 +79,7 @@ describe('main panel bindings', () => {
     const commands = Object.fromEntries([
       'selectLoop', 'editJson', 'jsonInput', 'savePickOptions', 'saveLoopOptions', 'start', 'reopenRecap',
       'refresh', 'scanPicks', 'loadJson', 'useBuiltIn', 'stop', 'copyLog', 'clearLog', 'downloadLog',
+      'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
     bindMainPanelCommands({ panel, commands });
 
@@ -87,6 +90,8 @@ describe('main panel bindings', () => {
     for (const [id, event, command] of [
       ['bronze-loop-json', 'input', 'jsonInput'],
       ['bronze-loop-show-mvp', 'change', 'saveLoopOptions'],
+      ['bronze-loop-reward-alert-enabled', 'change', 'saveRewardAlertEnabled'],
+      ['bronze-loop-reward-alert-settings', 'click', 'openRewardAlertSettings'],
       ['bronze-loop-start', 'click', 'start'],
       ['bronze-loop-recap-reopen', 'click', 'reopenRecap'],
       ['bronze-loop-refresh', 'click', 'refresh'],
@@ -142,6 +147,7 @@ describe('main panel bindings', () => {
         highGoldThreshold: 83,
         autoPickThreshold: 91,
       },
+      rewardAlertSettings: { enabled: true },
     });
     expect(controls.get('bronze-loop-show-mvp').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-protect-high-gold').checked).toBe(true);
@@ -150,5 +156,6 @@ describe('main panel bindings', () => {
     expect(controls.get('bronze-loop-pick-open-at-end').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-high-gold-threshold').value).toBe(83);
     expect(controls.get('bronze-loop-pick-auto-threshold').value).toBe(91);
+    expect(controls.get('bronze-loop-reward-alert-enabled').checked).toBe(true);
   });
 });

@@ -67,6 +67,7 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; box-sizing: border-box; }
   #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
+  #bronze-loop-panel .bronze-loop-option-summary { color: #9fb2c9; font-size: 11px; flex: 1 1 auto; min-width: 100px; }
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
   #bronze-loop-latest {
     flex: 1 1 auto;
@@ -151,6 +152,11 @@ export function mainPanelHtml(maxRounds = 3) {
           </label>
         </div>
         <div class="row"><label title="Show MVP and one-run validation loops in the main selector"><input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops</label></div>
+        <div class="row" id="bronze-loop-reward-alert-row">
+          <label title="Enable high-rated special-card alerts"><input id="bronze-loop-reward-alert-enabled" type="checkbox"> Reward alerts</label>
+          <span id="bronze-loop-reward-alert-summary" class="bronze-loop-option-summary">94+ special | highlight</span>
+          <button id="bronze-loop-reward-alert-settings" title="Reward alert settings">Settings</button>
+        </div>
         <div class="row">
           <label title="Player Pick SBCs will not submit normal gold players at or above this rating">
             <input id="bronze-loop-pick-protect-high-gold" type="checkbox"> Protect Pick fodder >=

@@ -47,6 +47,9 @@ describe('main panel view template', () => {
       'bronze-loop-clear',
       'bronze-loop-download',
       'bronze-loop-recap-reopen',
+      'bronze-loop-reward-alert-enabled',
+      'bronze-loop-reward-alert-summary',
+      'bronze-loop-reward-alert-settings',
     ]) {
       expect(html, id).toContain(`id="${id}"`);
     }

@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.5.15`
+- Userscript 版本：`0.5.16`
 - Git 基线：`2ddf933`
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
@@ -559,6 +559,7 @@ Status: In Progress
 - `0.5.13` 为直接运行的 Player Pick Loop 增加可持久化的 `Open Picks at end` 选项。开启后，同类型的已有 pending Pick 计入 `rounds` 上限，后续提交期间通过稳定奖励身份保留，达到上限、活动完成或材料不足后集中领取；其它 pending Pick 继续安全阻断。Provision 前置 Pick 保持原有即时领取流程。
 - `0.5.14` 明确区分业务终止条件与 UI `rounds`：One-click/正式 Daily 使用 EA 实时剩余次数；One-click 内部的 Daily Rare Pack 开完全部匹配来源包后最多运行一次 2x84+ 库存兜底，不读取 UI `rounds`。独立 Daily Rare Pack 则以 `rounds` 为 2x84+ 最低目标，先开完全部来源包并累计其提交数，再从库存补足差额；清理来源包重复卡允许超过目标，库存兜底不得超额。Daily MVP 继续保留单次验证上限，独立 Player Pick、2x84+ Fodder、84+ TOTW 等可重复 Loop 仍可用 `rounds` 控制本次完成数，Provision 用它控制来源包数。`Open reward packs` 统一控制 Rare Pack 与独立 2x84+ 奖励。
 - `0.5.14` 将静态 `5 of 10 82+ Players Pick` 标记为限次 Set：运行前读取 EA `timesCompleted/repeats`，按“pending Pick + Set 剩余次数”执行到耗尽，移除 `rounds` 与 `maxCompletions` 配置并隐藏 UI 输入。其它显式 `useRoundsAsCompletions` 的不限次/用户限量 Pick 保持原行为。
+- `0.5.16` 为所有 Runner 开包路径增加统一 Reward Highlight 事件：默认识别 `94+` 特殊卡，立即显示非阻塞 Toast/烟花，并可选通过 `GM_notification` 或 ntfy 批量通知。通知配置位于独立 Settings 弹窗，凭证使用 Tampermonkey 隔离存储；提示和网络失败不会阻断 opened-item policy 或 Unassigned 清理。Player Pick recap 继续保留，并与开包 Highlight 共用通用烟花模块。
 
 Live validation: `1 of 5 83+ Player Pick` 和 `1 of 3 84+ Summer Tournament Nations Player Pick` 的静态 Workflow 与 `0.5.11` 扫描覆盖模式均已真实提交并领取通过，因此 `0.5.12` 删除两者静态配置。`5 of 10 82+ Players Pick` 当前已全部完成，暂时无法复验动态多 Challenge/Provision 引用，不记为失败并继续保留静态配置。
 

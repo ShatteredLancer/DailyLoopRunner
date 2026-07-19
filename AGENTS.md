@@ -40,7 +40,7 @@ Daily Loop Runner 是 EA FC Web App 的 Tampermonkey 自动化脚本，运行时
 - EA FC Web App 页面及其 `unsafeWindow` 中的 repositories、services、controller 和模型对象。
 - FSU，用于材料过滤、Lock player、Golden Player Range、Storage 等兼容行为。
 - FC26 Enhancer，部分页面和运行环境会与其共同存在。
-- Tampermonkey API：`unsafeWindow`、`GM_xmlhttpRequest`。
+- Tampermonkey API：`unsafeWindow`、`GM_xmlhttpRequest`、`GM_notification`、`GM_getValue/GM_setValue/GM_deleteValue`。Reward Alert 凭证使用 GM 隔离存储；本地 Hot Reload 通过受控 userscript bridge 转交这些 API，不能改回页面 localStorage。
 - 外部价格服务：FUT.GG，失败时回退 FUTNext。
 
 Userscript metadata 位于 `src/userscript-entry.js` 文件开头。新增远程请求域名时必须同步检查 `@connect`。
@@ -379,6 +379,7 @@ EA objects
 - `sbc-claim.js`：编排有限 Claim Rewards 等待，并通过 Pack 计数或 SBC 进度判断奖励是否已经发放。
 - `player-pick.js`：Player Pick 候选排序、人工介入原因和 recap 数据生成。
 - `player-prices.js`：FUT.GG 价格解析、FUTNext fallback 和结构化诊断。
+- `pack-highlight.js`：从通用 Pack receipt 识别达到阈值的特殊卡，并生成本地/远程通知模型；不执行 DOM 或网络副作用。
 
 Reward 模块不直接访问 EA Service 或 DOM。Claim Rewards 通过注入的 Overlay、Page shield、Pack/SBC 快照、Wait 和输入事件回调保持 25 秒上限及提前确认规则；价格 HTTP transport 由 Browser HTTP Adapter 注入，FUT.GG/FUTNext URL、解析和 fallback 在 Reward service 中。待领取 Pick 名称/Loop 别名分类位于 `src/reward/player-pick.js`；真实待领取物品读取、跨 pile 重复检查、领取和确认选择通过 `src/adapters/ea/player-pick.js`；人工选择弹窗位于 `src/ui/player-pick-modal.js`。
 
@@ -411,7 +412,10 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `main-panel-commands.js`：刷新、配置加载、Stop、复制和下载日志等主面板 command 编排。
 - `main-panel-state.js`：Loop 列表、rounds、recap 和 disabled 状态投影。
 - `player-pick-modal.js`：人工 Player Pick 选择。
-- `player-pick-recap.js`：Player Pick recap 汇总、卡片列表、价格展示、关闭和庆祝动画。
+- `player-pick-recap.js`：Player Pick recap 汇总、卡片列表、价格展示和关闭。
+- `reward-celebration.js`：Pick recap 与 Pack Highlight 共用的烟花动画。
+- `reward-highlight.js`：靠近主面板显示的非阻塞 Pack Highlight Toast。
+- `reward-alert-settings.js`：Reward Alerts 独立设置弹窗及 Preview/Desktop/ntfy 测试入口。
 - `sbc-reward-overlay.js`：Claim Rewards 控件、奖励 Controller/DOM 覆盖层识别和关闭。
 
 风险：
@@ -422,6 +426,8 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `sbc-reward-overlay.js`：中高，影响页面型 SBC 奖励覆盖层识别和关闭；25 秒等待、Pack 增量和 SBC 进度确认位于 `src/reward/sbc-claim.js`。
 
 UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文本、日志高频更新和 Pick recap。
+
+Reward Alerts 的三个测试入口必须保持解耦：Preview 只展示本地 Toast/烟花，不调用 `GM_notification` 或网络；Desktop test 实际调用本机系统通知；ntfy test 实际发送远程测试消息。不要为了减少按钮数量把真实通知副作用合并进 Preview。
 
 ### 5.11 `src/userscript-entry.js`
 

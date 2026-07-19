@@ -1,17 +1,22 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.15
+// @version      0.5.16
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest
+// @grant        GM_notification
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @connect      127.0.0.1
 // @connect      localhost
 // @connect      www.fut.gg
 // @connect      enhancer-api.futnext.com
+// @connect      ntfy.sh
 // @run-at       document-end
 // ==/UserScript==
 
@@ -22,6 +27,7 @@ import {
   LOOP_CONFIG_URL,
   LOOP_UI_OPTIONS_KEY,
   PICK_OPTIONS_KEY,
+  REWARD_ALERT_SETTINGS_KEY,
 } from './config/runtime.js';
 import { LOOP_DEFS } from './config/loops.js';
 import { selectionRequirements } from './config/selection.js';
@@ -99,6 +105,11 @@ import {
   rankPlayerPickCandidates,
 } from './reward/player-pick.js';
 import { loadPlayerPickPrices } from './reward/player-prices.js';
+import {
+  createPackHighlightModel,
+  formatPackHighlightNotification,
+  normalizeRewardAlertSettings,
+} from './reward/pack-highlight.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
 import { createRecoveryOverflowResolvers, selectionConsumesSignalRefs } from './unassigned/recovery.js';
@@ -123,11 +134,15 @@ import {
   renderMainPanelRecap,
   renderMainPanelRounds,
   renderMainPanelRuntimeState,
+  renderRewardAlertSummary,
 } from './ui/main-panel-state.js';
 import { mountMainPanel, setMainPanelStartupHidden } from './ui/main-panel-view.js';
 import { waitForManualPlayerPickSelection } from './ui/player-pick-modal.js';
-import { showPlayerPickRecap, triggerPlayerPickRecapFireworks } from './ui/player-pick-recap.js';
+import { showPlayerPickRecap } from './ui/player-pick-recap.js';
+import { triggerRewardFireworks } from './ui/reward-celebration.js';
 import { createSbcRewardOverlay } from './ui/sbc-reward-overlay.js';
+import { showPackHighlightToast } from './ui/reward-highlight.js';
+import { showRewardAlertSettings } from './ui/reward-alert-settings.js';
 
 (function () {
   'use strict';
@@ -137,6 +152,10 @@ import { createSbcRewardOverlay } from './ui/sbc-reward-overlay.js';
 
   const adapters = createRuntimeAdapters(W, document, {
     gmRequest: typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : null,
+    gmNotification: typeof GM_notification === 'function' ? GM_notification : null,
+    gmGetValue: typeof GM_getValue === 'function' ? GM_getValue : null,
+    gmSetValue: typeof GM_setValue === 'function' ? GM_setValue : null,
+    gmDeleteValue: typeof GM_deleteValue === 'function' ? GM_deleteValue : null,
     fetchImpl: typeof fetch === 'function' ? fetch.bind(globalThis) : null,
   });
   const eaPackAdapter = () => adapters.pack();
@@ -177,6 +196,7 @@ const state = {
     showMvpLoops: false,
     loopStack: [],
     logRenderer: null,
+    rewardAlertSettings: normalizeRewardAlertSettings(),
   };
 
   function destroyRunner() {
@@ -186,11 +206,13 @@ const state = {
     document.querySelector('#bronze-loop-panel')?.remove();
     document.querySelector('#bronze-loop-pick-modal')?.remove();
     document.querySelector('#bronze-loop-recap-modal')?.remove();
+    document.querySelector('#bronze-loop-reward-alert-modal')?.remove();
+    document.querySelector('#bronze-loop-reward-highlight-stack')?.remove();
     document.querySelector('#bronze-loop-style')?.remove();
   }
 
   W[APP_KEY] = {
-    version: '0.5.15',
+    version: '0.5.16',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -199,6 +221,7 @@ const state = {
     calculateSquadRating: calculateEaSquadRating,
     solveRatingSbcCandidates: findOptimalRatingSbcSelection,
     scanPlayerPicks: () => scanAvailablePlayerPickSbcs(),
+    previewPackHighlight: (input = {}) => previewPackHighlight(input),
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1797,6 +1820,12 @@ function updateLoopControls() {
           receiptItems: items.map((item) => inventoryAdapter.snapshotItem(item, 'unassigned')),
         };
       },
+      onItemsOpened: ({ packRef, openedItems }) => publishPackHighlight(openedItems, {
+        packRef,
+        purpose,
+        assumeSpecialPlayers: options.assumeSpecialPlayers === true,
+      }),
+      onItemsOpenedError: (error) => log(`${purpose}: reward highlight failed: ${error?.message || error}`),
       openedItemPolicy: options.openedItemPolicy,
       retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
       beforeRetry: async ({ code }) => {
@@ -4701,6 +4730,7 @@ function updateLoopControls() {
 
       const receipt = await openPack(pack, `${loopDef.name} ${reason}`, {
         allowGone: true,
+        assumeSpecialPlayers: options.assumeTotwReward === true,
         retryCodes: ['471', '500'],
         resolveRetryPack: () => findRewardPack(loopDef, rewardPackId, {
           attempts: 2,
@@ -6775,6 +6805,129 @@ function updateLoopControls() {
     return null;
   }
 
+  function saveRewardAlertEnabled(event) {
+    const enabled = event?.target?.checked === true;
+    try {
+      persistRewardAlertSettings({ ...state.rewardAlertSettings, enabled });
+      log(`Reward alerts ${enabled ? 'enabled' : 'disabled'}`);
+    } catch (error) {
+      log(`Reward alert setting failed: ${error?.message || error}`);
+      renderRewardAlertSummary({
+        panel: document.querySelector('#bronze-loop-panel'),
+        settings: state.rewardAlertSettings,
+      });
+    }
+  }
+
+  function loadRewardAlertSettings() {
+    return normalizeRewardAlertSettings(adapters.userscriptStorage.get(REWARD_ALERT_SETTINGS_KEY, {}));
+  }
+
+  function persistRewardAlertSettings(settings) {
+    state.rewardAlertSettings = normalizeRewardAlertSettings(settings);
+    adapters.userscriptStorage.set(REWARD_ALERT_SETTINGS_KEY, state.rewardAlertSettings);
+    renderRewardAlertSummary({
+      panel: document.querySelector('#bronze-loop-panel'),
+      settings: state.rewardAlertSettings,
+    });
+    return state.rewardAlertSettings;
+  }
+
+  function previewPackHighlight(input = {}) {
+    const rating = Math.max(1, Math.min(99, Number(input.rating || input.cards?.[0]?.rating || 96) || 96));
+    const cards = input.cards || [{
+      id: 1,
+      definitionId: 1,
+      type: 'player',
+      name: 'Reward Alert Preview',
+      rating,
+      special: true,
+      duplicate: false,
+      tradeable: false,
+    }];
+    const model = createPackHighlightModel({
+      packRef: { id: 0, name: input.packName || 'Preview Pack' },
+      openedItems: cards,
+    }, { ...state.rewardAlertSettings, ...input.settings, enabled: true, highlightEnabled: true });
+    if (!model) return false;
+    return showPackHighlightToast({
+      dom: adapters.dom,
+      panel: document.querySelector('#bronze-loop-panel'),
+      viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+      model,
+      durationMs: 7000,
+      schedule: setTimeout,
+      cancel: clearTimeout,
+      celebrate: (container, count) => triggerRewardFireworks(container, count, {
+        dom: adapters.dom,
+        getComputedStyle: (element) => getComputedStyle(element),
+        devicePixelRatio: () => window.devicePixelRatio || 1,
+        now: () => performance.now(),
+        requestFrame: (callback) => requestAnimationFrame(callback),
+      }),
+    });
+  }
+
+  function publishPackHighlight(openedItems, context = {}) {
+    const settings = state.rewardAlertSettings;
+    const model = createPackHighlightModel({
+      packRef: context.packRef,
+      openedItems,
+      details: { assumeTotwReward: context.assumeSpecialPlayers === true },
+    }, settings, {
+      purpose: context.purpose,
+      assumeSpecialPlayers: context.assumeSpecialPlayers,
+    });
+    if (!model) return;
+    log(`Reward highlight: ${model.cards.map((card) => `${card.name} rating:${card.rating}${card.duplicate ? ' duplicate' : ''}`).join('; ')}`);
+    if (settings.highlightEnabled) previewPackHighlight({
+      packName: model.pack.name,
+      cards: model.cards.map((card) => ({ ...card, type: 'player' })),
+      settings,
+    });
+    const message = formatPackHighlightNotification(model);
+    if (settings.desktopEnabled) {
+      void adapters.notification.desktop(message).catch((error) => {
+        log(`Reward desktop notification failed: ${error?.message || error}`);
+      });
+    }
+    if (settings.ntfyEnabled) {
+      void adapters.notification.ntfy(message, {
+        server: settings.ntfyServer,
+        topic: settings.ntfyTopic,
+        token: settings.ntfyToken,
+      }).catch((error) => {
+        log(`Reward ntfy notification failed: ${error?.message || error}`);
+      });
+    }
+  }
+
+  function openRewardAlertSettingsModal() {
+    return showRewardAlertSettings({
+      dom: adapters.dom,
+      settings: state.rewardAlertSettings,
+      onPreview: async (settings) => {
+        previewPackHighlight({ rating: Math.max(96, settings.minimumRating), settings });
+      },
+      onTestDesktop: async (settings) => adapters.notification.desktop({
+        title: 'Daily Loop Runner test',
+        body: `${Math.max(96, settings.minimumRating)} special card desktop notification test`,
+      }),
+      onTestNtfy: async (settings) => adapters.notification.ntfy({
+        title: 'Daily Loop Runner test',
+        body: `${Math.max(96, settings.minimumRating)} special card ntfy notification test`,
+      }, {
+        server: settings.ntfyServer,
+        topic: settings.ntfyTopic,
+        token: settings.ntfyToken,
+      }),
+      onSave: async (settings) => {
+        persistRewardAlertSettings(settings);
+        log(`Reward alerts updated: ${settings.enabled ? `${settings.minimumRating}+ special` : 'off'}`);
+      },
+    });
+  }
+
   function pendingPlayerPickQuantity(item) {
     return Math.max(
       1,
@@ -7172,7 +7325,7 @@ function updateLoopControls() {
           recapButton.style.background = '';
         }
       },
-      celebrate: (dialog, specialCount) => triggerPlayerPickRecapFireworks(dialog, specialCount, {
+      celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
         dom: adapters.dom,
         getComputedStyle: (element) => getComputedStyle(element),
         devicePixelRatio: () => window.devicePixelRatio || 1,
@@ -7358,11 +7511,14 @@ function updateLoopControls() {
     const savedLoopUiOptions = loadLoopUiOptions();
     state.showMvpLoops = savedLoopUiOptions.showMvpLoops;
     const savedPickOptions = loadPickRuntimeOptions();
+    state.rewardAlertSettings = loadRewardAlertSettings();
     hydrateMainPanelOptions({
       panel,
       loopOptions: savedLoopUiOptions,
       pickOptions: savedPickOptions,
+      rewardAlertSettings: state.rewardAlertSettings,
     });
+    renderRewardAlertSummary({ panel, settings: state.rewardAlertSettings });
     createMainPanelGeometry({
       panel,
       getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
@@ -7385,6 +7541,8 @@ function updateLoopControls() {
       updateLoopControls,
       savePickOptions: savePickRuntimeOptions,
       saveLoopOptions: saveLoopUiOptions,
+      saveRewardAlertEnabled,
+      openRewardAlertSettings: openRewardAlertSettingsModal,
       start: startLoop,
       reopenRecap: reopenLastPickRecap,
       refreshInventoryCaches,

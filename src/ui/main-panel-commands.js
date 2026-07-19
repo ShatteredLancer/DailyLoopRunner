@@ -17,6 +17,8 @@ export function createMainPanelCommands(options = {}) {
       return commands.scanPicks();
     },
     saveLoopOptions: options.saveLoopOptions,
+    saveRewardAlertEnabled: options.saveRewardAlertEnabled,
+    openRewardAlertSettings: options.openRewardAlertSettings,
     start() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
       options.start?.();

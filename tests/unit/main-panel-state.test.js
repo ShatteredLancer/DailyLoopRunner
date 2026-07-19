@@ -4,6 +4,7 @@ import {
   renderMainPanelRecap,
   renderMainPanelRounds,
   renderMainPanelRuntimeState,
+  renderRewardAlertSummary,
 } from '../../src/ui/main-panel-state.js';
 
 function element(id) {
@@ -56,6 +57,18 @@ describe('main panel state rendering', () => {
     expect(button.title).toBe('Last Player Pick recap: 84+ Pick (5 card(s))');
   });
 
+  it('renders the compact reward alert summary', () => {
+    const { panel, controls } = harness(['bronze-loop-reward-alert-summary', 'bronze-loop-reward-alert-enabled']);
+    renderRewardAlertSummary({
+      panel,
+      settings: { enabled: true, minimumRating: 94, highlightEnabled: true, desktopEnabled: true, ntfyEnabled: false },
+    });
+    expect(controls.get('bronze-loop-reward-alert-enabled').checked).toBe(true);
+    expect(controls.get('bronze-loop-reward-alert-summary').textContent).toBe('94+ special | highlight | desktop');
+    renderRewardAlertSummary({ panel, settings: { enabled: false } });
+    expect(controls.get('bronze-loop-reward-alert-summary').textContent).toBe('Off');
+  });
+
   it('applies the complete runtime disabled-state matrix', () => {
     const ids = [
       'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-select', 'bronze-loop-edit',
@@ -64,6 +77,7 @@ describe('main panel state rendering', () => {
       'bronze-loop-pick-prefer-scanned',
       'bronze-loop-pick-high-gold-threshold', 'bronze-loop-pick-auto-threshold', 'bronze-loop-show-mvp',
       'bronze-loop-rounds', 'bronze-loop-json',
+      'bronze-loop-reward-alert-enabled', 'bronze-loop-reward-alert-settings',
     ];
     const { panel, controls } = harness(ids);
     renderMainPanelRuntimeState({
@@ -82,7 +96,7 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-start').disabled).toBe(true);
     expect(controls.get('bronze-loop-stop').disabled).toBe(false);
     for (const id of ids.filter((id) => !['bronze-loop-stop'].includes(id))) {
-      expect(controls.get(id).disabled, id).toBe(true);
+      expect(controls.get(id).disabled, id).toBe(id !== 'bronze-loop-reward-alert-enabled');
     }
   });
 });

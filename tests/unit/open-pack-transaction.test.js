@@ -2,6 +2,34 @@ import { describe, expect, it, vi } from 'vitest';
 import { openPackTransaction } from '../../src/pack/open-transaction.js';
 
 describe('openPackTransaction', () => {
+  it('publishes normalized opened items before routing without letting observer failures block the policy', async () => {
+    const calls = [];
+    const receipt = await openPackTransaction({
+      packSelector: async () => ({ id: 105, name: 'Pack' }),
+      openTransport: async () => ({ success: true, items: [{ id: 1 }] }),
+      normalizeItems: async () => ({
+        items: [{ id: 1, raw: true }],
+        receiptItems: [{ id: 1, normalized: true }],
+      }),
+      onItemsOpened: ({ openedItems }) => {
+        calls.push(['opened', openedItems]);
+        throw new Error('preview failed');
+      },
+      onItemsOpenedError: (error) => calls.push(['observer-error', error.message]),
+      openedItemPolicy: async () => {
+        calls.push(['policy']);
+        return {};
+      },
+    });
+
+    expect(receipt.status).toBe('opened');
+    expect(calls).toEqual([
+      ['opened', [{ id: 1, normalized: true }]],
+      ['observer-error', 'preview failed'],
+      ['policy'],
+    ]);
+  });
+
   it('runs pre-open, selection, transport, normalization and policy in order', async () => {
     const calls = [];
     const receipt = await openPackTransaction({

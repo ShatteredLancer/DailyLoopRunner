@@ -1,15 +1,22 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Hot Reload
 // @namespace    local.fc26.validation
-// @version      0.1.1
+// @version      0.1.2
 // @description  Reloads the local Daily Loop Runner userscript without refreshing the Web App page.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest
+// @grant        GM_notification
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @connect      127.0.0.1
 // @connect      localhost
+// @connect      ntfy.sh
+// @connect      www.fut.gg
+// @connect      enhancer-api.futnext.com
 // @run-at       document-end
 // ==/UserScript==
 
@@ -46,13 +53,23 @@
   }
 
   W.__FCLoopRunnerRequestText = requestText;
-
   async function reloadLoopRunner() {
     try {
       log('Loading local script...');
       const code = await requestText(`${SCRIPT_URL}?t=${Date.now()}`);
       W.__FCLoopRunner?.destroy?.();
-      W.eval(`${code}\n//# sourceURL=${SCRIPT_URL}`);
+      W.__FCLoopRunnerUserscriptApi = Object.freeze({
+        request: (details) => GM_xmlhttpRequest(details),
+        notify: (details) => GM_notification(details),
+        getValue: (key, fallback) => GM_getValue(key, fallback),
+        setValue: (key, value) => GM_setValue(key, value),
+        deleteValue: (key) => GM_deleteValue(key),
+      });
+      try {
+        W.eval(`${code}\n//# sourceURL=${SCRIPT_URL}`);
+      } finally {
+        delete W.__FCLoopRunnerUserscriptApi;
+      }
       log(`Reloaded at ${new Date().toLocaleTimeString()}`);
     } catch (e) {
       log(`Reload failed: ${e.message || e}`);
