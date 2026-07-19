@@ -32,5 +32,11 @@ export function createEaPackAdapter(runtime) {
     return pack.open();
   }
 
-  return Object.freeze({ list, resolve, open });
+  function refreshAll() {
+    const service = runtime?.services?.Store;
+    if (typeof service?.getPacks !== 'function') throw new Error('EA Store pack refresh is unavailable');
+    return service.getPacks(runtime?.PurchasePackType?.ALL, true, true);
+  }
+
+  return Object.freeze({ list, resolve, open, refreshAll });
 }

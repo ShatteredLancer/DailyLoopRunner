@@ -41,14 +41,6 @@
       "normal": "Open matching five-player rare gold packs and use low rare duplicates for 2x84+.",
       "recovery": "Resume response-only duplicates even when the Unassigned UI cache is delayed and protect 82+ cards."
     },
-    "83-plus-player-pick-1of5": {
-      "normal": "Submit exactly four low rare gold players and select one of five results.",
-      "recovery": "Resume an already generated Pick and stop for manual selection when the configured threshold requires it."
-    },
-    "84-plus-summer-tournament-nations-pick-1of3": {
-      "normal": "Submit exactly four low rare gold players and select one of three Summer Tournament Nations results.",
-      "recovery": "Resume only the matching Summer Tournament Nations Pick and stop without redeeming an unrelated Player Pick."
-    },
     "82-plus-player-pick-5of10": {
       "normal": "Submit two challenges of eleven low common gold players and select five of ten results.",
       "recovery": "Resume a partial multi-challenge Pick without replacing common requirements with rare cards."

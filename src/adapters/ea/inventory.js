@@ -105,16 +105,32 @@ function toSnapshot(item, pile) {
 export function createEaInventoryAdapter(runtime, options = {}) {
   if (!runtime?.repositories?.Item) throw new Error('EA Item repository is unavailable');
   const repository = runtime.repositories.Item;
+  const service = runtime?.services?.Item;
 
   function readPile(pile) {
     if (pile === 'unassigned') {
       try { return Array.from(repository.getUnassignedItems?.() || []); } catch { return []; }
     }
     if (pile === 'storage') {
-      try { return Array.from(repository.getStorageItems?.() || []); } catch { return collectionValues(repository.storage); }
+      try {
+        if (typeof repository.getStorageItems === 'function') {
+          return Array.from(repository.getStorageItems() || []);
+        }
+      } catch { }
+      try {
+        if (typeof repository.getStorage === 'function') {
+          return collectionValues(repository.getStorage());
+        }
+      } catch { }
+      return collectionValues(repository.storage);
     }
     if (pile === 'transfer') {
-      try { return Array.from(repository.getTransferItems?.() || []); } catch { return collectionValues(repository.transfer); }
+      try {
+        if (typeof repository.getTransferItems === 'function') {
+          return Array.from(repository.getTransferItems() || []);
+        }
+      } catch { }
+      return collectionValues(repository.transfer);
     }
     if (pile === 'club') {
       return collectionValues(repository.club?.items)
@@ -123,12 +139,23 @@ export function createEaInventoryAdapter(runtime, options = {}) {
     return [];
   }
 
-  function capacity(pile, rawItems) {
-    const pileValue = runtime.ItemPile?.[pile.toUpperCase()] ?? pile;
+  function pileValue(pile) {
+    return runtime.ItemPile?.[String(pile || '').toUpperCase()] ?? pile;
+  }
+
+  function preparePurchasedItem(item) {
+    if (!item || typeof item !== 'object') return item;
+    item.pile = pileValue('purchased');
+    item.injuryType = runtime.PlayerInjury?.NONE ?? 0;
+    return item;
+  }
+
+  function capacity(pile, rawItems = readPile(pile)) {
+    const resolvedPile = pileValue(pile);
     let max = null;
     let used = rawItems.length;
     try {
-      const value = Number(repository.getPileSize?.(pileValue));
+      const value = Number(repository.getPileSize?.(resolvedPile));
       if (Number.isFinite(value)) max = value;
     } catch { }
     if (max === null) {
@@ -136,10 +163,44 @@ export function createEaInventoryAdapter(runtime, options = {}) {
       if (Number.isFinite(fallback)) max = fallback;
     }
     try {
-      const value = Number(repository.numItemsInCache?.(pileValue));
+      const value = Number(repository.numItemsInCache?.(resolvedPile));
       if (Number.isFinite(value)) used = value;
     } catch { }
-    return { max, used };
+    return { max, used, free: max === null ? null : Math.max(0, max - used) };
+  }
+
+  function requestUnassigned() {
+    if (typeof service?.requestUnassignedItems !== 'function') {
+      throw new Error('EA Unassigned refresh is unavailable');
+    }
+    return service.requestUnassignedItems();
+  }
+
+  function refreshActions(pile) {
+    const resolvedPile = pileValue(pile);
+    const specificNames = {
+      club: ['requestClubItems'],
+      storage: ['requestStorageItems', 'requestSBCStorageItems'],
+      transfer: ['requestTransferItems'],
+    }[pile] || [];
+    const genericNames = ['requestItems', 'requestPileItems', 'requestItemsForPile', 'requestItemsByPile'];
+    return [
+      ...specificNames.map((methodName) => ({
+        label: `Item.${methodName}`,
+        methodName,
+        invoke: () => service[methodName](),
+      })),
+      ...genericNames.map((methodName) => ({
+        label: `${pile} via Item.${methodName}`,
+        methodName,
+        invoke: () => service[methodName](resolvedPile),
+      })),
+    ].filter((action) => typeof service?.[action.methodName] === 'function');
+  }
+
+  function move(items, pile, allowStorage = true) {
+    if (typeof service?.move !== 'function') throw new Error('EA Item move is unavailable');
+    return service.move(items, pile, allowStorage);
   }
 
   function snapshot() {
@@ -164,5 +225,16 @@ export function createEaInventoryAdapter(runtime, options = {}) {
     return null;
   }
 
-  return Object.freeze({ snapshot, resolveItem, readPile, snapshotItem: toSnapshot });
+  return Object.freeze({
+    snapshot,
+    resolveItem,
+    readPile,
+    pileValue,
+    preparePurchasedItem,
+    capacity,
+    requestUnassigned,
+    refreshActions,
+    move,
+    snapshotItem: toSnapshot,
+  });
 }

@@ -1,0 +1,207 @@
+{
+  "singleChallenge": {
+    "set": {
+      "id": 4101,
+      "name": "1 of 3 84+ Tournament Player Pick",
+      "timesCompleted": 0,
+      "repeats": 1,
+      "rewards": [
+        {
+          "type": "PLAYER_PICK",
+          "name": "Tournament Player Pick",
+          "resourceId": 91001,
+          "candidateCount": 3,
+          "selectionCount": 1
+        }
+      ],
+      "challenges": [
+        {
+          "id": 5101,
+          "requiredPlayerCount": 4,
+          "eligibilityRequirements": [
+            { "key": "PLAYER_QUALITY", "values": [3], "count": -1 },
+            { "key": "PLAYER_RARITY", "values": [1], "count": 4 }
+          ]
+        }
+      ]
+    }
+  },
+  "multiChallenge": {
+    "set": {
+      "id": 4102,
+      "name": "4 of 10 82+ Player Pick",
+      "timesCompleted": 1,
+      "repeats": 3,
+      "rewards": [
+        {
+          "type": "PLAYER_PICK",
+          "name": "4 of 10 82+ Player Pick",
+          "definitionId": 91002,
+          "candidateCount": 10,
+          "selectionCount": 4
+        }
+      ],
+      "challenges": [
+        {
+          "id": 5102,
+          "requiredPlayerCount": 9,
+          "eligibilityRequirements": [
+            { "key": "PLAYER_LEVEL", "values": [3], "count": -1 },
+            { "key": "PLAYER_RARITY", "values": [0], "count": 9 }
+          ]
+        },
+        {
+          "id": 5103,
+          "requiredPlayerCount": 9,
+          "eligibilityRequirements": [
+            { "key": "PLAYER_LEVEL", "values": [3], "count": -1 },
+            { "key": "PLAYER_RARITY", "values": [0], "count": 9 }
+          ]
+        }
+      ]
+    }
+  },
+  "mixedRatio": {
+    "set": {
+      "id": 4103,
+      "name": "1 of 3 83+ Player Pick",
+      "rewards": [
+        {
+          "type": "PLAYER_PICK",
+          "name": "1 of 3 83+ Player Pick",
+          "resourceId": "pick-91003",
+          "candidateCount": 3,
+          "selectionCount": 1
+        }
+      ],
+      "challenges": [
+        {
+          "id": 5104,
+          "requiredPlayerCount": 4,
+          "eligibilityRequirements": [
+            { "key": "PLAYER_QUALITY", "values": ["GOLD"], "count": -1 },
+            { "key": "PLAYER_RARITY", "values": ["RARE"], "count": 3 }
+          ]
+        }
+      ]
+    }
+  },
+  "completed": {
+    "set": {
+      "id": 4104,
+      "name": "Completed Player Pick",
+      "complete": true,
+      "timesCompleted": 1,
+      "repeats": 1,
+      "rewards": [
+        {
+          "type": "PLAYER_PICK",
+          "name": "Completed Player Pick",
+          "resourceId": 91004,
+          "candidateCount": 3,
+          "selectionCount": 1
+        }
+      ],
+      "challenges": []
+    }
+  },
+  "missingRewardIdentity": {
+    "set": {
+      "id": 4105,
+      "name": "Unknown Reward Player Pick",
+      "rewards": [
+        {
+          "type": "PLAYER_PICK",
+          "name": "Unknown Reward Player Pick",
+          "candidateCount": 3,
+          "selectionCount": 1
+        }
+      ],
+      "challenges": [
+        {
+          "id": 5105,
+          "requiredPlayerCount": 4,
+          "eligibilityRequirements": [
+            { "key": "PLAYER_QUALITY", "values": [3], "count": -1 },
+            { "key": "PLAYER_RARITY", "values": [1], "count": 4 }
+          ]
+        }
+      ]
+    }
+  },
+  "unsupportedCondition": {
+    "set": {
+      "id": 4106,
+      "name": "Rated Player Pick",
+      "rewards": [
+        {
+          "type": "PLAYER_PICK",
+          "name": "Rated Player Pick",
+          "resourceId": 91006,
+          "candidateCount": 3,
+          "selectionCount": 1
+        }
+      ],
+      "challenges": [
+        {
+          "id": 5106,
+          "requiredPlayerCount": 11,
+          "eligibilityRequirements": [
+            { "key": "PLAYER_QUALITY", "values": [3], "count": -1 },
+            { "key": "PLAYER_RARITY", "values": [1], "count": 11 },
+            { "key": "TEAM_RATING", "values": [84], "count": -1 }
+          ]
+        }
+      ]
+    }
+  },
+  "unknownRarity": {
+    "set": {
+      "id": 4107,
+      "name": "Unknown Rarity Player Pick",
+      "rewards": [
+        {
+          "type": "PLAYER_PICK",
+          "name": "Unknown Rarity Player Pick",
+          "resourceId": 91007,
+          "candidateCount": 3,
+          "selectionCount": 1
+        }
+      ],
+      "challenges": [
+        {
+          "id": 5107,
+          "requiredPlayerCount": 4,
+          "eligibilityRequirements": [
+            { "key": "PLAYER_QUALITY", "values": [3], "count": -1 },
+            { "key": "PLAYER_RARITY", "values": [99], "count": 4 }
+          ]
+        }
+      ]
+    }
+  },
+  "rarityGroup": {
+    "set": {
+      "id": 1188,
+      "name": "1 of 5 83+ Player Pick",
+      "rewards": [
+        {
+          "type": "PLAYER_PICK",
+          "name": "PlayerPickItemName25_4164",
+          "resourceId": 5004333,
+          "description": "1 of 5 83+ Rare Gold Players"
+        }
+      ],
+      "challenges": [
+        {
+          "id": 3454,
+          "requiredPlayerCount": 4,
+          "eligibilityRequirements": [
+            { "key": "PLAYER_RARITY_GROUP", "values": [4], "count": 4 },
+            { "key": "PLAYER_QUALITY", "values": [3], "count": -1 }
+          ]
+        }
+      ]
+    }
+  }
+}

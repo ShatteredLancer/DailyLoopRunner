@@ -21,11 +21,14 @@ describe('M0 fixture coverage', () => {
     const overflow = await loadFixture('inventory/storage-overflow.json');
     const daily = await loadFixture('challenges/daily-progress.json');
     const rating = await loadFixture('challenges/rating-84x10.json');
+    const pickDiscovery = await loadFixture('challenges/player-pick-discovery.json');
 
     expect(fsu.goldRange).toHaveLength(2);
     expect(packs.packs).toHaveLength(packs.expected.total);
     expect(overflow.unassigned).toHaveLength(overflow.expected.count);
     expect(daily.set.repeats).toBeGreaterThan(daily.set.timesCompleted);
     expect(rating.players).toHaveLength(rating.model.requiredPlayerCount);
+    expect(pickDiscovery.singleChallenge.set.rewards[0].type).toBe('PLAYER_PICK');
+    expect(pickDiscovery.multiChallenge.set.challenges).toHaveLength(2);
   });
 });

@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.5.02`
-- Git 基线：`0fd267b`
+- Userscript 版本：`0.5.12`
+- Git 基线：`2ddf933`
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -272,9 +272,9 @@ Tampermonkey 继续只安装单个 `dist/DailyLoopRunner.user.js`。源码多文
 | M4 | 统一 SBC Submission Transaction | Complete | M3 |
 | M5 | 统一 Unassigned Resolver | Complete | M4 |
 | M6 | 统一 Pack Transaction | Complete | M5 |
-| M7 | 分批迁移全部 Workflow | In Progress | M3-M6 |
-| M8 | 删除旧路径、完整回归和正式切换 | In Progress | M7 |
-| M9 | 动态发现当前可用 Player Pick SBC | Pending | M2-M8 |
+| M7 | 分批迁移全部 Workflow | Complete | M3-M6 |
+| M8 | 删除旧路径、完整回归和正式切换 | Complete | M7 |
+| M9 | 动态发现当前可用 Player Pick SBC | In Progress | M2-M8 |
 
 状态只能使用：`Pending`、`In Progress`、`Blocked`、`Complete`。
 
@@ -465,6 +465,7 @@ Tampermonkey 继续只安装单个 `dist/DailyLoopRunner.user.js`。源码多文
 | M7.6 | Provision Crafting | Complete | 三轮、partial Pick、FOF 和 2x84+ Live 完成 |
 | M7.7 | 84+ TOTW / 84x10 / 2x84+ | Complete | 动态评分、奖励和安全 Stop Live 完成 |
 | M7.8 | One-click Daily | Complete | 完成阶段跳过、剩余次数和恢复 Live 完成 |
+| M7.9 | Shared crafting / Bronze Validation cleanup | Complete | Provision 和 Bronze Validation 共享路径已复验；Rare Pack 已有多包/恢复 Live 与自动化覆盖，当前源包耗尽仅作为非阻塞补验 |
 
 每个子阶段必须完成：
 
@@ -515,6 +516,8 @@ M7 完成后应删除或降级为声明式 Workflow 的旧函数：
 
 ### M9：动态 Player Pick SBC 发现
 
+Status: In Progress
+
 目标：插件自动扫描当前 EA 会话中可用的 Player Pick SBC，生成临时 loop 入口供用户选择，不再要求每个新 Pick 都先发布静态脚本配置。
 
 范围：
@@ -537,6 +540,28 @@ M7 完成后应删除或降级为声明式 Workflow 的旧函数：
 - 动态发现只负责生成配置，实际选材、提交、价格查询、自动/人工选择和 recap 继续复用现有 `playerPickSbc` Workflow。
 
 回滚条件：无法稳定识别奖励 Pick、动态条件转换不完整，或扫描结果可能导致错误 SBC/奖励被提交或领取。
+
+当前进度（2026-07-19）：
+
+- 新增 `src/config/player-pick-discovery.js` 纯解析层，只接受普通 Set/Challenge/Reward 快照；支持单/多 Challenge、全金卡及精确 common/rare 比例，并生成现有 `playerPickSbc` 配置契约。
+- 新增 `src/adapters/ea/sbc.js#snapshotDiscoverySet()` 只读快照转换，识别 EA `awards[].item.isPlayerPickItem()`、缓存 Challenge、formation 人数和 `eligibilityRequirements`；不请求、不提交、不操作 UI。
+- 缺少稳定 Set/奖励身份、候选数、选择数、人数、全金卡条件或精确 rarity 比例时返回 `unsupported`；评分、化学、联赛、国家、俱乐部和未知 rarity 编码当前同样拒绝，不从 SBC 名称推断。
+- fixture 和 parser unit tests 覆盖单 Challenge、多 Challenge、混合比例、已完成、奖励身份缺失、不支持条件、未知 rarity、稳定身份去重、会话列表替换、旧选择回退和 Custom JSON 选择保留；Adapter contract test 覆盖真实 EA 方法型对象归一化。
+- 扫描保持只读；完全支持且不与静态配置重复的结果会作为当前会话 Loop 接入下拉列表，成功重扫会整体替换旧会话结果，完成、过期、不支持或消失的动态入口不会残留。实际运行继续复用现有 `playerPickSbc` Workflow。
+- `0.5.08` 在 Options 增加只读 `Scan Picks`：刷新 SBC Sets，按奖励对象识别 Pick，读取 Challenge 元数据，并把稳定 ID、候选/选择数量、人数、eligibility 和 unsupported 原因写入现有日志；结果不合并到 Loop 列表，也不会提交或领取。
+- `0.5.08` 实盘扫描确认：83+ Set `#1188` / reward `5004333`，82+ Set `#1202` / reward `5005706`，84+ Summer Set `#1240` / reward `5005726`。EA 用 `PLAYER_RARITY_GROUP=4` 表达稀有组；83+ 初次显示 11 人是未加载 squad 时错误使用 formation 槽位数，不是实际材料要求；84+ 的直接 Challenge DAO 返回 `521`。
+- `0.5.09` 支持已确认的 rarity group 4，逐个只读加载 Challenge squad 后用 brick/required-player 信息计算真实人数，禁止从未加载的 11 槽 formation 猜人数；DAO Challenge 列表失败时回退标准请求，并输出奖励对象各层的受控字段摘要继续定位候选数和选择数字段。
+- `0.5.09` 实盘诊断确认 EA 奖励对象没有独立候选数/选择数字段，但 `staticData.description` 提供官方 `1 of 5`、`5 of 10`、`1 of 3` 前缀；解析层只从该官方奖励描述或显式字段读取数量，仍禁止从 SBC 名称推断。
+- `0.5.10` 在启动后自动扫描，并保留 Options 中手动 `Scan Picks`；完全支持的未知 Pick 以精确 Set/奖励 ID 生成会话 Loop，静态 83+/84+/82+ 按精确 ID 去重。扫描、刷新、加载配置和 Start 互斥，避免扫描重绘列表时启动旧选择。
+- `0.5.11` 增加默认关闭的 `Use scanned Pick metadata` 验证选项。启用后立即重扫；完整且只匹配一个静态 Pick 的结果会覆盖当前会话中的 Set/奖励身份、Challenge 数量和材料比例，同时保留静态 Loop ID、名称、运行限制和 Provision `preCraftPlayerPickLoopId`。扫描失败、活动完成、unsupported 或多重匹配时继续使用静态回退；未知支持 Pick 的会话入口逻辑不变。
+- `0.5.11` 实盘验证通过：83+ 与 84+ 均先用扫描覆盖完成 Dry Run，严格选择 4 张低分普通稀有金；随后 Live 完成精确 Set/奖励领取、FUTNext 价格、自动 Pick 和 Unassigned 清理。83+ 领取 1/5，84+ 领取 1/3，结束均为空。
+- `0.5.12` 从内置和外部 JSON 删除 83+/84+ 的静态活动配置及静态场景登记；两者只在扫描成功且条件完整时生成会话 Loop。82+ 静态配置继续保留，Provision `preCraftPlayerPickLoopId` 不变；其多 Challenge 动态覆盖等待活动重新可用后实盘验证。
+
+Live validation: `1 of 5 83+ Player Pick` 和 `1 of 3 84+ Summer Tournament Nations Player Pick` 的静态 Workflow 与 `0.5.11` 扫描覆盖模式均已真实提交并领取通过，因此 `0.5.12` 删除两者静态配置。`5 of 10 82+ Players Pick` 当前已全部完成，暂时无法复验动态多 Challenge/Provision 引用，不记为失败并继续保留静态配置。
+
+`0.5.12` 启动扫描实盘确认：83+/84+ 各输出一条 `added session Loop`，最终为 `2 supported session Loop(s) added`、`0 configured Loop(s) using scanned metadata`、`0 static/discovered duplicate(s) skipped`。两者纯动态入口不重复，静态配置删除后的会话列表行为通过。
+
+Next: M9 继续作为独立功能迭代。82+ 等多 Challenge Pick 后续重新可用时，启用 `Use scanned Pick metadata` 验证 Provision 固定 Loop ID 在扫描覆盖下仍能正确完成前置 Pick；实盘通过前不删除 82+ 静态配置。评分、化学和特殊卡等复杂 Pick 条件继续保持 unsupported，直到有明确模型与测试支持。
 
 ## 7. 全量测试矩阵
 
@@ -649,42 +674,42 @@ Next: 验证共享事务在真实页面的行为并记录结果。
 
 ### M7
 
-Status: In Progress
+Status: Complete
 
 Scope: Daily Common/Rare 迁移到 `supply-and-craft`；Bronze/Silver 迁移到 `recycle`；Rare Pack/Provision 迁移到 `pack-and-craft`；Player Pick、评分 SBC 和 One-click 分别迁移到 `player-pick`、`repeated-submission` 和 `sequence`。旧专用 runner 已删除，旧 strategy 名只保留为外部 JSON 兼容别名。
 
-Tests: 6 个 Workflow 测试文件覆盖正常、blocked、resume、stale、remaining count 和 Dry Run；完整测试当前为 29 个测试文件、134 个测试。`workflows` 无 EA/FSU/DOM 直接访问。
+Tests: 9 个 Workflow 测试文件覆盖正常、blocked、resume、stale、remaining count、transient signal、validation round、strategy dispatch 和 Dry Run；完整测试当前为 60 个测试文件、298 个测试。`workflows` 无 EA/FSU/DOM 直接访问。
 
-Live validation: 主要生产路径已完成真实页面验证：One-click Daily、Rare Pack 多包恢复、Player Pick、Provision 三轮、2x84+、84+ TOTW、84x10 和安全 Stop 均有成功日志。M7.1-M7.8 的 Live 状态已更新为 Complete。
+Live validation: 主要生产路径已完成真实页面验证：One-click Daily、Rare Pack 多包恢复、Player Pick、Provision 三轮、2x84+、84+ TOTW、84x10 和安全 Stop 均有成功日志。`0.5.07` 的 One-click Daily、Provision 和 Bronze Upgrade Validation 共享路径已再次验证通过。Daily Rare Pack to 2x84+ 已有多包、恢复和 transient signal 成功日志；当前账号源包耗尽只影响再次抽样，不否定已完成验收。M7.1-M7.9 均为 Complete。
 
-Known gaps: M7 总状态仍保持 In Progress，因为 `submitReservedDuplicateUpgrade()` / `runReservedDuplicateUpgradeDryRun()` 仍是 entry 内的共享 crafting helper，尚未完全降级为声明式 Workflow；`Bronze Upgrade Validation` 也仍保留专用 Dry Run 验证路径。历史自定义 JSON 的三个旧 strategy 名继续映射到新 Workflow。
+Known gaps: `submitReservedDuplicateUpgrade()`、`runReservedDuplicateUpgradeDryRun()` 和 `runValidationBronzeUpgradeDryRun()` 已删除；Provision/Rare Pack 共用 `runReservedDuplicateCraftingWorkflow()`，Bronze Validation 的 Dry/Live 共用 `runValidationRoundWorkflow()`。历史自定义 JSON 的三个兼容 strategy 名继续映射到新 Workflow；这是明确的兼容策略，不是未完成迁移。后续重新获得匹配源包时可补做 Daily Rare Pack 当前版本抽样，但它是维护回归项，不阻塞 M7。
 
-Next: 将 reserved-duplicate crafting helper 迁入共享 Workflow，并把 entry 中剩余的 EA/FSU/DOM 运行时桥拆入专用 adapters；迁移时保持当前 Live 行为和回归 fixture 不变。
+Next: 无阻塞工作。后续获得匹配源包时按维护回归流程补做 Daily Rare Pack 抽样，遇到新 Bug 时增加对应 fixture/test。
 
 ### M8
 
-Status: In Progress
+Status: Complete
 
-Scope: 删除旧 selector 和旧评分求解器；删除重复 Dry Run 调度器；统一 child Workflow 结构化结果；增加模块边界测试、GitHub Actions、生成产物检查、真实页面验收要求和新架构 README。
+Scope: 删除旧 selector、旧评分求解器、重复 Dry Run 调度器、旧命名兼容 helper 和无调用 entry helper；统一 child Workflow 结构化结果与 strategy dispatch；增加模块边界/死代码测试、GitHub Actions、生成产物检查、真实页面验收要求和新架构 README。内置 Loop、MVP/disabled pile 展示规则、One-click 子配置、Live/阶段运行上限、运行时选项及完整配置 schema 已迁入 `src/config` 纯模块。
 
 Tests: `npm run verify`、`npm run test:contracts`、`npm run test:architecture`、构建产物一致性和 `git diff --check` 均纳入本地/CI 流程。
 
 Live validation: 主要 MVP/完整 Loop、暂停恢复和已遇到的容量边界已完成；`v0.4.48` 还验证了页面型 SBC 奖励确认不再固定等待 25 秒。
 
-Known gaps: 兼容别名暂不删除，以免破坏用户历史 JSON；`src/userscript-entry.js` 仍直接访问 EA/FSU/DOM，已建立但未接入的 DOM/Storage Runtime Adapter 说明物理迁移尚未完成。当前架构测试锁定 `domain/selection/workflows/config/pack/sbc/unassigned/ui` 不得访问运行时全局，但尚未把同一限制扩展到 composition entry。
+Known gaps: 兼容 strategy 名暂不删除，以免破坏用户历史 JSON；Inventory/Pack/SBC/Player Pick/FSU/Localization 和 DOM/Storage/HTTP/Page Runtime/Wait/User Effects 已通过 `createRuntimeAdapters()` 接入。Inventory Adapter 负责四个 pile、容量、刷新、move、enum 和 purchased item 准备；Pack Adapter 负责 My Packs、实例解析、`Store.getPacks()` 和 `pack.open()`；SBC Adapter 负责 Set/Challenge/DAO/formation/controller/submission settings/save/submit；Page Runtime/Wait 负责 Controller 状态及 predicate/loading/observable 等待。Reward 纯逻辑及 FUT.GG/FUTNext fallback 已迁入 `src/reward`；评分 Challenge 模型、候选构建、纯搜索和计划回解位于 `src/selection`；strategy dispatch 位于 `src/workflows/dispatch.js`；Player Pick EA 操作位于 Adapter，人工 Pick、recap 和 SBC 页面覆盖层位于 `src/ui`；主面板视图、几何、绑定、command 和状态投影也已迁入 `src/ui`；FSU 纯兼容解析和 runtime discovery 已分别迁入 config/Adapter。entry 已无直接 `W.*`、EA Repository/Service/enum、Clipboard 或 download API 访问，保留 Runtime composition、缓存合并、评分候选安全策略桥和注入共享 Workflow 的真实页面副作用回调。当前架构测试锁定共享模块不得访问运行时全局、锁定所有 EA/页面 runtime 直接调用点，并拒绝无调用顶层 entry helper。
 
-Next: 在不扩大业务行为的前提下完成 entry adapter 化、移除剩余专用 helper，并在发布提交或 tag 中将 M7/M8 标记 Complete。
+Next: 无阻塞工作。不再为减少 entry 行数机械拆分有副作用的页面回调；后续只在明确职责、测试和实盘证据支持时继续提取模块。
 
-### 2026-07-18 收尾审计
+### 2026-07-19 收尾审计
 
-Status: In Progress
+Status: Complete
 
 Scope: 核对重构计划、模块依赖、共享事务调用点、Live 日志和测试框架。所有开包统一经过 `openPackTransaction()`，所有 Unassigned 处理统一经过 `resolveUnassigned()`，requirements/rating 选材统一经过 `selectInventoryPlayers()`，页面/后台/FSU/Inventory 提交统一经过 `submitSbcAttempt()`。旧的 Daily Common、Daily Rare、Daily Single Card、Rare Pack、Provision、Player Pick、Fill-and-Verify 和 Daily Routine 专用 runner 名称已删除。
 
-Tests: `npm run verify` 当前覆盖 29 个测试文件、134 个测试；新增架构边界要求，`config/pack/sbc/unassigned/ui` 与既有 `domain/selection/workflows` 一样不得访问 `window/document/unsafeWindow/W/services/repositories` 或直接导入 adapters。
+Tests: `npm run verify` 当前覆盖 60 个测试文件、298 个测试；架构边界要求 `config/pack/reward/sbc/unassigned/ui` 与既有 `domain/selection/workflows` 一样不得访问 `window/document/unsafeWindow/W/services/repositories` 或直接导入 adapters，并锁定 Pack、SBC、Player Pick、Inventory、Localization、HTTP、FSU 和 Page Runtime 调用点。新增测试锁定 Wait Adapter 的 predicate/readiness/loading/observable 语义、Clipboard/download fallback、主面板 command guard、Player Pick recap、SBC reward/error overlay、Claim/进度/Pack/AltRight/超时奖励确认、通用 DOM 点击/键盘序列、动态评分模型解析/校验、评分 duplicate signal/definition 去重/stale 回解、Live/One-click 上限摘要、One-click 子配置、运行时 Pick/rounds/openRewardPacks 投影、strategy dispatch、entry 死代码、动态 Player Pick discovery、会话列表替换、静态覆盖/回退/歧义拒绝、Provision 引用保持、扫描互斥、只读扫描编排与配置 schema 的精确错误信息和兼容容器。
 
-Live validation: One-click Daily、Rare Pack、Provision、Player Pick、2x84+、84+ TOTW、84x10、Stop 和 Claim Rewards 提前确认均已通过真实日志验证。
+Live validation: One-click Daily、Rare Pack、Provision、Player Pick、2x84+、84+ TOTW、84x10、Stop 和 Claim Rewards 提前确认均已通过真实日志验证。`0.5.12` 还确认删除 83+/84+ 静态配置后，两者分别作为唯一动态会话 Loop 加入列表，最终扫描摘要为 2 added、0 override、0 duplicate。
 
-Known gaps: 不能宣称“彻底解耦”。`src/userscript-entry.js` 仍约 9,500 行并承担 composition、EA/DOM bridge 和部分 Workflow-specific callback；`createRuntimeAdapters()` 中的 DOM/Storage adapter 尚未接入；reserved-duplicate crafting 仍保留 entry helper；场景 fixture 已登记全部 Loop，但不是每个 Loop 都有独立的浏览器级端到端自动化模拟。
+Known gaps: 不能宣称“物理上彻底拆分”。`src/userscript-entry.js` 当前约 7,202 行并承担 composition、缓存合并、评分候选安全策略桥、真实页面副作用回调和页面语义 helper；这是本轮收尾时保留的运行时组合边界。Runtime Adapter 已覆盖 Inventory/Pack/SBC/Player Pick/FSU/Localization/DOM/Storage/HTTP/Page Runtime/Wait/User Effects，entry 已无直接 `W.*`、EA Service/Repository/enum、Clipboard 或 download API 访问。场景 fixture 已登记全部静态 Loop，但不是每个 Loop 都有独立的浏览器级端到端自动化模拟；Node 自动化与真实页面抽样继续共同承担回归验证。
 
-Release conclusion: 当前版本可作为功能冻结候选，核心事务和主要 Workflow 已按计划迁移且有自动化与实盘双重保护；M7/M8 只应在上述物理迁移和最终发布记录完成后标记 Complete。
+Release conclusion: 核心架构重构在 `0.5.12` 收尾。所有开包、Unassigned、选材和提交分别统一经过公共事务；旧专用 Workflow、重复 Dry Run 和直接 EA/page global 调用已清理或收敛到 Adapter。`npm run verify` 覆盖 60 个测试文件、298 个测试，18 个内置/外部静态 Loop 配置一致，根目录与 `dist` 发布文件相同。主要生产 Loop、恢复路径和动态 83+/84+ Pick 均有真实页面验证。M7、M8 与本次收尾审计关闭；M9 保持独立 In Progress，只追踪 82+ 多 Challenge/Provision 动态覆盖和未来复杂 Pick 条件。

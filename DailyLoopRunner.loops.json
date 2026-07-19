@@ -511,74 +511,10 @@
       "maxPacks": 100
     },
     {
-      "id": "83-plus-player-pick-1of5",
-      "name": "1 of 5 83+ Player Pick",
-      "strategy": "playerPickSbc",
-      "sbcNames": [
-        "1 of 5 83+ Player Pick",
-        "1 of 5 83+ Player Picks"
-      ],
-      "pickItemNames": [
-        "1 of 5 83+ Player Pick",
-        "83+ Player Pick",
-        "PlayerPickItemName25_4164"
-      ],
-      "requirements": [
-        {
-          "tier": "gold",
-          "rarity": "rare",
-          "count": 4,
-          "maxRating": 81,
-          "playerOnly": true,
-          "allowSpecial": false,
-          "protectHighGold": true,
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
-        }
-      ],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
-      "challengesPerPick": 1,
-      "pickCount": 1,
-      "maxCompletions": 1,
-      "useRoundsAsCompletions": true,
-      "pricePlatform": "pc"
-    },
-    {
-      "id": "84-plus-summer-tournament-nations-pick-1of3",
-      "name": "1 of 3 84+ Summer Tournament Nations Player Pick",
-      "strategy": "playerPickSbc",
-      "sbcNames": [
-        "1 of 3 84+ Summer Tournament Nations Player Pick",
-        "1 of 3 84+ Summer Tournament Nations Players Pick"
-      ],
-      "pickItemNames": [
-        "1 of 3 84+ Summer Tournament Nations Player Pick",
-        "1 of 3 84+ Summer Tournament Nations Pick",
-        "84+ Summer Tournament Nations Player Pick",
-        "Summer Tournament Nations Player Pick"
-      ],
-      "requirements": [
-        {
-          "tier": "gold",
-          "rarity": "rare",
-          "count": 4,
-          "maxRating": 81,
-          "playerOnly": true,
-          "allowSpecial": false,
-          "protectHighGold": true,
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
-        }
-      ],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
-      "challengesPerPick": 1,
-      "pickCount": 1,
-      "maxCompletions": 1,
-      "useRoundsAsCompletions": true,
-      "pricePlatform": "pc"
-    },
-    {
       "id": "82-plus-player-pick-5of10",
       "name": "5 of 10 82+ Players Pick",
       "strategy": "playerPickSbc",
+      "sbcSetIds": [1202],
       "sbcNames": [
         "5 of 10 82+ Players Pick",
         "5 of 10 82+ Player Pick",
@@ -590,6 +526,7 @@
         "5 of 10 82+ Rare Gold Player Pick",
         "82+ Player Pick"
       ],
+      "pickItemResourceIds": [5005706],
       "requirements": [
         {
           "tier": "gold",
@@ -604,6 +541,7 @@
       ],
       "priorityPiles": ["unassigned", "storage", "transfer", "club"],
       "challengesPerPick": 2,
+      "pickCandidateCount": 10,
       "pickCount": 5,
       "maxCompletions": 1,
       "useRoundsAsCompletions": true,

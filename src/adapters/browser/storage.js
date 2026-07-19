@@ -24,5 +24,20 @@ export function createStorageAdapter(storage) {
     set(key, JSON.stringify(value));
   }
 
-  return Object.freeze({ get, set, remove, getJson, setJson });
+  function entries(limit = 250) {
+    const result = [];
+    const max = Math.max(0, Math.min(1000, Number(limit) || 0));
+    let length = 0;
+    try { length = Number(storage.length || 0); } catch { }
+    for (let index = 0; index < Math.min(length, max); index++) {
+      try {
+        const key = storage.key(index);
+        if (key === null || key === undefined) continue;
+        result.push([String(key), storage.getItem(key)]);
+      } catch { }
+    }
+    return result;
+  }
+
+  return Object.freeze({ get, set, remove, getJson, setJson, entries });
 }

@@ -205,33 +205,17 @@ describe('loop configuration contracts', () => {
       .toEqual([true, true]);
   });
 
-  it('locks Player Pick rarity ratios and protection caps', async () => {
+  it('keeps Provision 82+ static fallback while retired 83+/84+ activities are discovery-only', async () => {
     const { builtIn, external } = await loadDefinitions();
-    const pick83 = byId(builtIn, '83-plus-player-pick-1of5');
-    const summerPick84 = byId(builtIn, '84-plus-summer-tournament-nations-pick-1of3');
-    const externalSummerPick84 = byId(external, '84-plus-summer-tournament-nations-pick-1of3');
     const pick82 = byId(builtIn, '82-plus-player-pick-5of10');
 
-    expect(pick83.requirements).toEqual([
-      expect.objectContaining({ rarity: 'rare', count: 4, maxRating: 81, protectHighGold: true }),
-    ]);
-    expect(summerPick84).toMatchObject({
-      strategy: 'playerPickSbc',
-      challengesPerPick: 1,
-      pickCount: 1,
-      requirements: [expect.objectContaining({ rarity: 'rare', count: 4, maxRating: 81, protectHighGold: true })],
+    expect(builtIn.some((loop) => loop.id === '83-plus-player-pick-1of5')).toBe(false);
+    expect(builtIn.some((loop) => loop.id === '84-plus-summer-tournament-nations-pick-1of3')).toBe(false);
+    expect(external.some((loop) => loop.id === '83-plus-player-pick-1of5')).toBe(false);
+    expect(external.some((loop) => loop.id === '84-plus-summer-tournament-nations-pick-1of3')).toBe(false);
+    expect(pick82).toMatchObject({
+      sbcSetIds: [1202], pickItemResourceIds: [5005706], challengesPerPick: 2, pickCandidateCount: 10, pickCount: 5,
     });
-    expect(summerPick84.pickItemNames).toEqual(expect.arrayContaining([
-      'Summer Tournament Nations Player Pick',
-      '1 of 3 84+ Summer Tournament Nations Pick',
-    ]));
-    expect(summerPick84.pickItemNames.every((name) => /summer tournament nations/i.test(name))).toBe(true);
-    expect(externalSummerPick84).toMatchObject({
-      challengesPerPick: 1,
-      pickCount: 1,
-      requirements: [expect.objectContaining({ rarity: 'rare', count: 4, maxRating: 81, protectHighGold: true })],
-    });
-    expect(pick82).toMatchObject({ challengesPerPick: 2, pickCount: 5 });
     expect(pick82.requirements).toEqual([
       expect.objectContaining({ rarity: 'common', count: 11, maxRating: 81, protectHighGold: true }),
     ]);

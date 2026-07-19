@@ -67,5 +67,72 @@ describe('Inventory Adapter contract', () => {
   it('computes stable capacity values', () => {
     const ea = createEaInventoryAdapter(createRuntime(piles, capacities));
     expect(ea.snapshot().capacities.storage).toEqual({ used: 1, max: 100, free: 99 });
+    expect(ea.capacity('storage')).toEqual({ used: 1, max: 100, free: 99 });
+    const fake = createFakeInventoryAdapter({ piles, capacities });
+    expect(fake.capacity('storage')).toEqual({ used: 1, max: 100, free: 99 });
+  });
+
+  it('preserves legacy storage and transfer collection fallbacks', () => {
+    const storageItem = makePlayer({ id: 20, definitionId: 120, rating: 76 });
+    const transferItem = makePlayer({ id: 21, definitionId: 121, rating: 77 });
+    const repository = {
+      club: { items: { _collection: [] } },
+      storage: { _collection: [storageItem] },
+      transfer: { _collection: [transferItem] },
+      getUnassignedItems: () => [],
+    };
+    const ea = createEaInventoryAdapter({ repositories: { Item: repository }, services: {} });
+    expect(ea.readPile('storage')).toEqual([storageItem]);
+    expect(ea.readPile('transfer')).toEqual([transferItem]);
+
+    repository.getStorage = () => ({ _collection: [storageItem] });
+    repository.storage = { _collection: [] };
+    expect(ea.readPile('storage')).toEqual([storageItem]);
+  });
+
+  it('exposes refresh and move effects with the legacy method priority and arguments', () => {
+    const calls = [];
+    const runtime = createRuntime(piles, capacities);
+    runtime.services.Item.requestUnassignedItems = () => { calls.push(['unassigned']); return { success: true }; };
+    runtime.services.Item.requestStorageItems = () => { calls.push(['storage']); return { success: true }; };
+    runtime.services.Item.requestSBCStorageItems = () => { calls.push(['sbc-storage']); return { success: true }; };
+    runtime.services.Item.requestItems = (pile) => { calls.push(['generic', pile]); return { success: true }; };
+    runtime.services.Item.move = (items, pile, allowStorage) => {
+      calls.push(['move', items.map((item) => item.id), pile, allowStorage]);
+      return { success: true };
+    };
+    const ea = createEaInventoryAdapter(runtime);
+    expect(ea.requestUnassigned()).toMatchObject({ success: true });
+    const actions = ea.refreshActions('storage');
+    expect(actions.map((action) => action.methodName)).toEqual([
+      'requestStorageItems', 'requestSBCStorageItems', 'requestItems',
+    ]);
+    actions[0].invoke();
+    actions[2].invoke();
+    ea.move([piles.storage[0]], 'club', true);
+    expect(calls).toEqual([
+      ['unassigned'],
+      ['storage'],
+      ['generic', 'storage'],
+      ['move', [2], 'club', true],
+    ]);
+
+    const fake = createFakeInventoryAdapter({ piles, capacities });
+    fake.requestUnassigned();
+    fake.refreshActions('storage')[0].invoke();
+    fake.move([piles.storage[0]], 'club', true);
+    expect(fake.calls.map((call) => call.method)).toEqual(['requestUnassigned', 'refreshPile', 'move']);
+  });
+
+  it('resolves EA pile enums and prepares opened purchased items', () => {
+    const runtime = createRuntime(piles, capacities);
+    runtime.ItemPile.PURCHASED = 'ea-purchased';
+    runtime.PlayerInjury = { NONE: 9 };
+    const ea = createEaInventoryAdapter(runtime);
+    expect(ea.pileValue('club')).toBe('club');
+    expect(ea.pileValue('purchased')).toBe('ea-purchased');
+    const item = { id: 100 };
+    expect(ea.preparePurchasedItem(item)).toBe(item);
+    expect(item).toMatchObject({ pile: 'ea-purchased', injuryType: 9 });
   });
 });

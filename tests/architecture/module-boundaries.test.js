@@ -44,10 +44,11 @@ describe('module boundaries', () => {
     }
   });
 
-  it('keeps shared Config, Pack, SBC, Unassigned, and UI modules free of runtime globals', async () => {
+  it('keeps shared Config, Pack, Reward, SBC, Unassigned, and UI modules free of runtime globals', async () => {
     const files = [
       ...await readJavaScriptFiles('src/config'),
       ...await readJavaScriptFiles('src/pack'),
+      ...await readJavaScriptFiles('src/reward'),
       ...await readJavaScriptFiles('src/sbc'),
       ...await readJavaScriptFiles('src/unassigned'),
       ...await readJavaScriptFiles('src/ui'),

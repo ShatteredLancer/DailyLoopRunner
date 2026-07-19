@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.02
+// @version      0.5.12
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -64,6 +64,400 @@
     source: "compat-defaults"
   });
 
+  // src/config/loops.js
+  var LOOP_DEFS = [
+    {
+      id: "bronze-upgrade-validation",
+      hidden: true,
+      mvp: true,
+      name: "Bronze Upgrade Validation",
+      strategy: "validationBronzeUpgrade",
+      sourcePackIds: [105],
+      sourcePackNames: CFG.sourcePackNames,
+      sbcNames: CFG.bronzeUpgradeNames,
+      rewardPackNames: CFG.silverRewardNames,
+      targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false },
+      maxRounds: 3
+    },
+    {
+      id: "daily-bronze",
+      hidden: true,
+      name: "Daily Bronze Loop",
+      strategy: "dailySingleCardRecycle",
+      sbcNames: ["Daily Bronze Upgrade", "\u6BCF\u65E5\u9752\u94DC\u5347\u7EA7", "\u6BCF\u65E5\u9752\u9285\u5347\u7D1A"],
+      rewardPackIds: [105],
+      rewardPackNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
+      targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false },
+      dailyCompletionLimit: 7,
+      maxCompletions: 7
+    },
+    {
+      id: "daily-bronze-mvp",
+      hidden: true,
+      mvp: true,
+      name: "Daily Bronze MVP (1 run)",
+      strategy: "dailySingleCardRecycle",
+      sbcNames: ["Daily Bronze Upgrade", "\u6BCF\u65E5\u9752\u94DC\u5347\u7EA7", "\u6BCF\u65E5\u9752\u9285\u5347\u7D1A"],
+      rewardPackIds: [105],
+      rewardPackNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
+      targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false },
+      dailyCompletionLimit: 7,
+      maxCompletions: 1
+    },
+    {
+      id: "daily-silver",
+      hidden: true,
+      name: "Daily Silver Loop",
+      strategy: "dailySingleCardRecycle",
+      sbcNames: ["Daily Silver Upgrade", "\u6BCF\u65E5\u767D\u94F6\u5347\u7EA7", "\u6BCF\u65E5\u767D\u9280\u5347\u7D1A"],
+      rewardPackIds: [205],
+      rewardPackNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
+      targetDuplicate: { tier: "silver", playerOnly: true, allowSpecial: false },
+      dailyCompletionLimit: 7,
+      maxCompletions: 7
+    },
+    {
+      id: "daily-silver-mvp",
+      hidden: true,
+      mvp: true,
+      name: "Daily Silver MVP (1 run)",
+      strategy: "dailySingleCardRecycle",
+      sbcNames: ["Daily Silver Upgrade", "\u6BCF\u65E5\u767D\u94F6\u5347\u7EA7", "\u6BCF\u65E5\u767D\u9280\u5347\u7D1A"],
+      rewardPackIds: [205],
+      rewardPackNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
+      targetDuplicate: { tier: "silver", playerOnly: true, allowSpecial: false },
+      dailyCompletionLimit: 7,
+      maxCompletions: 1
+    },
+    {
+      id: "daily-common",
+      hidden: true,
+      name: "Daily Common Loop",
+      strategy: "supplyAndCraft",
+      sbcNames: ["Daily Common Gold Upgrade", "\u6BCF\u65E5\u666E\u901A\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u666E\u901A\u91D1\u724C\u5347\u7D1A"],
+      rewardPackIds: [304],
+      rewardPackNames: ["Gold Players Pack"],
+      requirements: [
+        { tier: "silver", count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ["storage", "transfer", "club"] },
+        { tier: "bronze", count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ["storage", "transfer", "club"] }
+      ],
+      priorityPiles: ["storage", "transfer", "club"],
+      primaryPiles: ["unassigned", "storage", "transfer"],
+      clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
+      shortagePacks: [
+        { requirement: { tier: "bronze" }, packIds: [105], packNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"], maxOpensPerAttempt: 1 },
+        { requirement: { tier: "silver" }, packIds: [205], packNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"], maxOpensPerAttempt: 1 }
+      ],
+      dailyCompletionLimit: 7,
+      maxCompletions: 7
+    },
+    {
+      id: "daily-common-mvp",
+      hidden: true,
+      mvp: true,
+      name: "Daily Common MVP (1 run)",
+      strategy: "supplyAndCraft",
+      sbcNames: ["Daily Common Gold Upgrade", "\u6BCF\u65E5\u666E\u901A\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u666E\u901A\u91D1\u724C\u5347\u7D1A"],
+      rewardPackIds: [304],
+      rewardPackNames: ["Gold Players Pack"],
+      requirements: [
+        { tier: "silver", count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ["storage", "transfer", "club"] },
+        { tier: "bronze", count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ["storage", "transfer", "club"] }
+      ],
+      priorityPiles: ["storage", "transfer", "club"],
+      primaryPiles: ["unassigned", "storage", "transfer"],
+      clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
+      shortagePacks: [
+        { requirement: { tier: "bronze" }, packIds: [105], packNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"], maxOpensPerAttempt: 1 },
+        { requirement: { tier: "silver" }, packIds: [205], packNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"], maxOpensPerAttempt: 1 }
+      ],
+      dailyCompletionLimit: 7,
+      maxCompletions: 1
+    },
+    {
+      id: "daily-rare",
+      hidden: true,
+      name: "Daily Rare Loop",
+      strategy: "supplyAndCraft",
+      sbcNames: ["Daily Rare Gold Upgrade", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7D1A"],
+      sourcePackNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
+      rewardPackNames: ["Max. 78 Rare Gold Players Pack", "Max 78 Rare Gold Players Pack"],
+      requirements: [
+        { tier: "gold", rarity: "common", count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer"] }
+      ],
+      priorityPiles: ["unassigned", "storage", "transfer"],
+      clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
+      deferChallengeLoad: true,
+      preSelectionCleanup: false,
+      shortagePacks: [
+        {
+          requirement: { tier: "gold", rarity: "common", playerOnly: true, allowSpecial: false, protectHighGold: true },
+          packNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
+          maxOpensPerAttempt: 1,
+          repeatUntilSatisfied: true,
+          maxRuns: 100,
+          routingPolicy: "reserveMatchingDuplicates"
+        }
+      ],
+      dailyCompletionLimit: 7,
+      maxCompletions: 7
+    },
+    {
+      id: "daily-rare-mvp",
+      hidden: true,
+      mvp: true,
+      name: "Daily Rare MVP (1 run)",
+      strategy: "supplyAndCraft",
+      sbcNames: ["Daily Rare Gold Upgrade", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7D1A"],
+      sourcePackNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
+      rewardPackNames: ["Max. 78 Rare Gold Players Pack", "Max 78 Rare Gold Players Pack"],
+      requirements: [
+        { tier: "gold", rarity: "common", count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer"] }
+      ],
+      priorityPiles: ["unassigned", "storage", "transfer"],
+      clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
+      deferChallengeLoad: true,
+      preSelectionCleanup: false,
+      shortagePacks: [
+        {
+          requirement: { tier: "gold", rarity: "common", playerOnly: true, allowSpecial: false, protectHighGold: true },
+          packNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
+          maxOpensPerAttempt: 1,
+          repeatUntilSatisfied: true,
+          maxRuns: 100,
+          routingPolicy: "reserveMatchingDuplicates"
+        }
+      ],
+      dailyCompletionLimit: 7,
+      maxCompletions: 1
+    },
+    {
+      id: "daily-rare-pack-84",
+      name: "Daily Rare Pack to 2x84+ Loop",
+      strategy: "rarePackTo84Upgrade",
+      sourcePackNames: [
+        "5x Max.78 Rare Gold Players Pack",
+        "5x Max. 78 Rare Gold Players Pack",
+        "5x Max 78 Rare Gold Players Pack",
+        "5 x Max.78 Rare Gold Players Pack",
+        "5 x Max. 78 Rare Gold Players Pack",
+        "5 x Max 78 Rare Gold Players Pack",
+        "5x 80+ Rare Gold Players Pack",
+        "5 x 80+ Rare Gold Players Pack"
+      ],
+      rareUpgrade: {
+        name: "2x 84+ Upgrade",
+        sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
+        requirements: [
+          { tier: "gold", rarity: "rare", count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
+        ],
+        priorityPiles: ["unassigned", "storage", "transfer", "club"]
+      },
+      maxPacks: 100
+    },
+    {
+      id: "82-plus-player-pick-5of10",
+      name: "5 of 10 82+ Players Pick",
+      strategy: "playerPickSbc",
+      sbcSetIds: [1202],
+      sbcNames: ["5 of 10 82+ Players Pick", "5 of 10 82+ Player Pick", "5 of 10 82+ Player Picks"],
+      pickItemResourceIds: [5005706],
+      pickItemNames: ["5 of 10 82+ Players Pick", "5 of 10 82+ Player Pick", "5 of 10 82+ Rare Gold Player Pick", "82+ Player Pick"],
+      requirements: [
+        { tier: "gold", rarity: "common", count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
+      ],
+      priorityPiles: ["unassigned", "storage", "transfer", "club"],
+      challengesPerPick: 2,
+      pickCandidateCount: 10,
+      pickCount: 5,
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      pricePlatform: "pc"
+    },
+    {
+      id: "one-click-daily-mvp",
+      hidden: true,
+      mvp: true,
+      name: "One-click Daily MVP (1 each)",
+      strategy: "dailyRoutine",
+      steps: ["daily-bronze-mvp", "daily-silver-mvp", "daily-common-mvp", "daily-rare-mvp"],
+      openRewardPacks: false
+    },
+    {
+      id: "one-click-daily",
+      name: "One-click Daily Loop",
+      strategy: "dailyRoutine",
+      steps: ["daily-bronze", "daily-silver", "daily-common", "daily-rare", "daily-rare-pack-84"],
+      openRewardPacks: false
+    },
+    {
+      id: "2x84-fodder",
+      hidden: true,
+      mvp: true,
+      name: "2x84+ Fodder Loop",
+      strategy: "fillAndVerifySbc",
+      sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
+      rewardPackNames: ["2x 84+ Rare Gold Players Pack", "2 x 84+ Rare Gold Players Pack"],
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      allowMultipleCompletions: true,
+      inventoryFillFirst: true,
+      requirements: [
+        { tier: "gold", rarity: "rare", count: 6, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["storage", "club"] }
+      ],
+      priorityPiles: ["storage", "club"],
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      maxSubmittedRating: 81,
+      maxNormalGoldSubmittedRating: 81,
+      blockSpecial: true,
+      blockTradeable: false,
+      openRewardPacks: true,
+      forceOpenRewardPacks: true
+    },
+    {
+      id: "auto-totw-upgrade",
+      name: "84+ TOTW Upgrade Loop",
+      strategy: "fillAndVerifySbc",
+      sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
+      rewardPackIds: [20707, 20441],
+      rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      allowMultipleCompletions: true,
+      maxSubmittedRating: 88,
+      maxNormalGoldSubmittedRating: 99,
+      ratingSbcFill: {
+        priorityPiles: ["unassigned", "storage", "transfer", "club"]
+      },
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      blockSpecial: true,
+      blockTradeable: false,
+      openRewardPacks: true,
+      forceOpenRewardPacks: true,
+      assumeTotwRewardPack: true
+    },
+    {
+      id: "84x10-mvp",
+      hidden: true,
+      mvp: true,
+      name: "84x10 MVP (1 run)",
+      strategy: "fillAndVerifySbc",
+      sbcNames: [
+        "84+ x10",
+        "84+ x 10",
+        "10x 84+ Upgrade",
+        "10 x 84+ Upgrade",
+        "10 \u540D 84+ \u5347\u7EA7",
+        "10\u540D84+\u5347\u7EA7"
+      ],
+      maxCompletions: 1,
+      maxSubmittedRating: 88,
+      maxNormalGoldSubmittedRating: 99,
+      ratingSbcFill: {
+        priorityPiles: ["unassigned", "storage", "transfer", "club"]
+      },
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      requiredSpecialKind: "totw-tots-fof",
+      requiredSpecialMinRating: 84,
+      specialRequirementAdd: {
+        patterns: ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
+        buttonTexts: ["Add", "\u6DFB\u52A0", "\u52A0\u5165", "\u65B0\u589E"]
+      },
+      autoTotwUpgrade: {
+        name: "84+ TOTW Upgrade",
+        sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
+        rewardPackIds: [20707, 20441],
+        rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
+        maxSubmittedRating: 88,
+        maxNormalGoldSubmittedRating: 99,
+        blockSpecial: true,
+        blockTradeable: false,
+        openRewardPacks: true
+      },
+      autoFodderUpgrade: {
+        maxAttemptsPerCompletion: 3
+      },
+      blockSpecial: true,
+      blockTradeable: false,
+      openRewardPacks: false
+    },
+    {
+      id: "84x10",
+      name: "84x10 Loop",
+      strategy: "fillAndVerifySbc",
+      sbcNames: [
+        "84+ x10",
+        "84+ x 10",
+        "10x 84+ Upgrade",
+        "10 x 84+ Upgrade",
+        "10 \u540D 84+ \u5347\u7EA7",
+        "10\u540D84+\u5347\u7EA7"
+      ],
+      maxCompletions: 50,
+      allowMultipleCompletions: true,
+      maxSubmittedRating: 88,
+      maxNormalGoldSubmittedRating: 99,
+      ratingSbcFill: {
+        priorityPiles: ["unassigned", "storage", "transfer", "club"]
+      },
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      requiredSpecialKind: "totw-tots-fof",
+      requiredSpecialMinRating: 84,
+      specialRequirementAdd: {
+        patterns: ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
+        buttonTexts: ["Add", "\u6DFB\u52A0", "\u52A0\u5165", "\u65B0\u589E"]
+      },
+      autoTotwUpgrade: {
+        name: "84+ TOTW Upgrade",
+        sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
+        rewardPackIds: [20707, 20441],
+        rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
+        maxSubmittedRating: 88,
+        maxNormalGoldSubmittedRating: 99,
+        blockSpecial: true,
+        blockTradeable: false,
+        openRewardPacks: true
+      },
+      autoFodderUpgrade: {
+        maxAttemptsPerCompletion: 3
+      },
+      blockSpecial: true,
+      blockTradeable: false,
+      openRewardPacks: false
+    },
+    {
+      id: "provision-crafting",
+      name: "Provision Crafting Loop",
+      strategy: "provisionPackCrafting",
+      sourcePackIds: [20643],
+      sourcePackNames: ["Provision Pack", "Provisions Pack"],
+      preCraftPlayerPickLoopId: "82-plus-player-pick-5of10",
+      rounds: 1,
+      craftingUpgrades: [
+        {
+          name: "FOF Glory Hunters Crafting Upgrade",
+          sbcNames: ["FOF Glory Hunters Crafting Upgrade"],
+          requirements: [
+            { tier: "gold", rarity: "common", count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
+          ],
+          priorityPiles: ["unassigned", "storage", "transfer", "club"]
+        },
+        {
+          name: "2x 84+ Upgrade",
+          sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
+          requirements: [
+            { tier: "gold", rarity: "rare", count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
+          ],
+          priorityPiles: ["unassigned", "storage", "transfer", "club"]
+        }
+      ]
+    }
+  ];
+
   // src/config/selection.js
   function selectionRequirements(loopDef = {}, priorityPiles = loopDef.priorityPiles) {
     return (loopDef.requirements || []).map((requirement) => ({
@@ -79,6 +473,119 @@
       ].map(Number).filter(Boolean))],
       priorityPiles
     }));
+  }
+
+  // src/domain/objects.js
+  function cloneLoopDef(definition) {
+    return JSON.parse(JSON.stringify(definition));
+  }
+  function isPlainObject(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+
+  // src/config/loop-presentation.js
+  function isMvpLoopDef(definition = {}) {
+    return definition.mvp === true || /(?:^|-)mvp(?:-|$)/i.test(String(definition.id || ""));
+  }
+  function visibleLoopDefs(loopDefs = [], showMvpLoops = false) {
+    return (loopDefs || []).filter((definition) => {
+      if (isMvpLoopDef(definition)) return showMvpLoops === true;
+      return definition.hidden !== true;
+    });
+  }
+  function filterPileList(piles, disabledPiles, path) {
+    if (!Array.isArray(piles) || !piles.length || !disabledPiles?.size) return piles;
+    const filtered = piles.filter((pile) => !disabledPiles.has(pile));
+    if (!filtered.length) throw new Error(`${path} has no enabled piles after disabledPiles`);
+    return filtered;
+  }
+  function filterRequirements(requirements, disabledPiles, path) {
+    if (!Array.isArray(requirements)) return;
+    requirements.forEach((requirement, index) => {
+      requirement.priorityPiles = filterPileList(
+        requirement.priorityPiles,
+        disabledPiles,
+        `${path}[${index}].priorityPiles`
+      );
+    });
+  }
+  function applyDisabledPiles(loopDef) {
+    const disabledPiles = new Set(loopDef?.disabledPiles || []);
+    if (!disabledPiles.size) return loopDef;
+    loopDef.priorityPiles = filterPileList(loopDef.priorityPiles, disabledPiles, "priorityPiles");
+    loopDef.primaryPiles = filterPileList(loopDef.primaryPiles, disabledPiles, "primaryPiles");
+    loopDef.clubFallbackPiles = filterPileList(loopDef.clubFallbackPiles, disabledPiles, "clubFallbackPiles");
+    if (isPlainObject(loopDef.ratingSbcFill)) {
+      loopDef.ratingSbcFill.priorityPiles = filterPileList(
+        loopDef.ratingSbcFill.priorityPiles,
+        disabledPiles,
+        "ratingSbcFill.priorityPiles"
+      );
+    }
+    filterRequirements(loopDef.requirements, disabledPiles, "requirements");
+    (loopDef.challengeRequirements || []).forEach((requirements, index) => {
+      filterRequirements(requirements, disabledPiles, `challengeRequirements[${index}]`);
+    });
+    for (const upgradeName of ["commonUpgrade", "rareUpgrade"]) {
+      const upgradeDef = loopDef[upgradeName];
+      if (!isPlainObject(upgradeDef)) continue;
+      upgradeDef.priorityPiles = filterPileList(upgradeDef.priorityPiles, disabledPiles, `${upgradeName}.priorityPiles`);
+      filterRequirements(upgradeDef.requirements, disabledPiles, `${upgradeName}.requirements`);
+      (upgradeDef.challengeRequirements || []).forEach((requirements, index) => {
+        filterRequirements(requirements, disabledPiles, `${upgradeName}.challengeRequirements[${index}]`);
+      });
+    }
+    (loopDef.craftingUpgrades || []).forEach((upgradeDef, index) => {
+      if (!isPlainObject(upgradeDef)) return;
+      upgradeDef.priorityPiles = filterPileList(upgradeDef.priorityPiles, disabledPiles, `craftingUpgrades[${index}].priorityPiles`);
+      filterRequirements(upgradeDef.requirements, disabledPiles, `craftingUpgrades[${index}].requirements`);
+      (upgradeDef.challengeRequirements || []).forEach((requirements, challengeIndex) => {
+        filterRequirements(requirements, disabledPiles, `craftingUpgrades[${index}].challengeRequirements[${challengeIndex}]`);
+      });
+    });
+    return loopDef;
+  }
+
+  // src/config/run-limits.js
+  function getPlayerPickChallengeCount(loopDef = {}) {
+    return Math.max(1, Number(loopDef.challengeRequirements?.length || loopDef.challengesPerPick || 1) || 1);
+  }
+  function getLiveRunLimit(loopDef = {}, rounds = 1, options = {}) {
+    if (loopDef.strategy === "validationBronzeUpgrade") {
+      return Number(rounds || loopDef.maxRounds || 1);
+    }
+    if (loopDef.strategy === "fillAndVerifySbc") {
+      const completions = Number(loopDef.maxCompletions || 1);
+      return completions + (options.needsAutoTotwPreflight?.(loopDef) ? completions : 0);
+    }
+    if (loopDef.strategy === "rarePackTo84Upgrade") {
+      return Number(loopDef.maxPacks || 100);
+    }
+    if (loopDef.strategy === "playerPickSbc") {
+      return Number(loopDef.maxCompletions || 1) * getPlayerPickChallengeCount(loopDef);
+    }
+    if (loopDef.strategy === "dailyRoutine") {
+      return summarizeRoutineStepLimits(options.getRoutineSteps?.(loopDef) || [], options).max;
+    }
+    return Number(loopDef.maxCompletions || loopDef.rounds || loopDef.maxRounds || 1);
+  }
+  function summarizeRoutineStepLimits(steps = [], options = {}) {
+    const limits = steps.map((step) => {
+      const rawLimit = getLiveRunLimit(step, 1, options);
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.floor(rawLimit)) : 1;
+      const unit = step.strategy === "rarePackTo84Upgrade" ? "pack(s)" : "SBC(s)";
+      return {
+        name: step.name || step.id || step.strategy || "step",
+        limit,
+        unit
+      };
+    });
+    return {
+      limits,
+      max: limits.reduce((maxLimit, step) => Math.max(maxLimit, step.limit), 1),
+      total: limits.reduce((sum, step) => sum + step.limit, 0),
+      text: limits.map((step) => `${step.name} max ${step.limit} ${step.unit}`).join("; ")
+    };
   }
 
   // src/config/recovery.js
@@ -204,12 +711,859 @@
     "rare-gold-duplicate-overflow"
   ]);
 
-  // src/domain/objects.js
-  function cloneLoopDef(definition) {
-    return JSON.parse(JSON.stringify(definition));
+  // src/config/loop-schema.js
+  var LOOP_STRATEGIES = Object.freeze([
+    "validationBronzeUpgrade",
+    "dailySingleCardRecycle",
+    "supplyAndCraft",
+    "inventoryMixedUpgrade",
+    "commonGoldToRareUpgrade",
+    "provisionPackCrafting",
+    "provisionPackDualCrafting",
+    "rarePackTo84Upgrade",
+    "playerPickSbc",
+    "dailyRoutine",
+    "fillAndVerifySbc"
+  ]);
+  var INVENTORY_PILES = Object.freeze(["unassigned", "storage", "transfer", "club"]);
+  function fail(message) {
+    throw new Error(message);
   }
-  function isPlainObject(value) {
-    return !!value && typeof value === "object" && !Array.isArray(value);
+  function validateStringArray(value, path, errors, required2 = false) {
+    if (value === void 0 || value === null) {
+      if (required2) errors.push(`${path} is required`);
+      return;
+    }
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((entry, index) => {
+      if (typeof entry !== "string" || !entry.trim()) {
+        errors.push(`${path}[${index}] must be a non-empty string`);
+      }
+    });
+  }
+  function validateNumberArray(value, path, errors) {
+    if (value === void 0 || value === null) return;
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((entry, index) => {
+      if (!Number.isFinite(Number(entry))) {
+        errors.push(`${path}[${index}] must be a number`);
+      }
+    });
+  }
+  function validatePileList(value, path, errors, required2 = false) {
+    if (value === void 0 || value === null) {
+      if (required2) errors.push(`${path} is required`);
+      return;
+    }
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((pile, index) => {
+      if (!INVENTORY_PILES.includes(pile)) {
+        errors.push(`${path}[${index}] must be one of: ${INVENTORY_PILES.join(", ")}`);
+      }
+    });
+  }
+  function validateCardSpec(spec, path, errors) {
+    if (!isPlainObject(spec)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (spec.tier !== void 0 && !["bronze", "silver", "gold"].includes(spec.tier)) {
+      errors.push(`${path}.tier must be bronze, silver, or gold`);
+    }
+    if (spec.rarity !== void 0 && !["common", "rare"].includes(spec.rarity)) {
+      errors.push(`${path}.rarity must be common or rare`);
+    }
+    ["minRating", "maxRating"].forEach((field) => {
+      if (spec[field] === void 0) return;
+      const rating = Number(spec[field]);
+      if (!Number.isFinite(rating) || rating < 1 || rating > 99) {
+        errors.push(`${path}.${field} must be a number between 1 and 99`);
+      }
+    });
+    ["playerOnly", "allowSpecial", "special", "protectHighGold"].forEach((field) => {
+      if (spec[field] !== void 0 && typeof spec[field] !== "boolean") {
+        errors.push(`${path}.${field} must be boolean`);
+      }
+    });
+  }
+  function validateRequirements(requirements, path, errors, required2 = false) {
+    if (requirements === void 0 || requirements === null) {
+      if (required2) errors.push(`${path} is required`);
+      return;
+    }
+    if (!Array.isArray(requirements) || !requirements.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    requirements.forEach((requirement, index) => {
+      const reqPath = `${path}[${index}]`;
+      validateCardSpec(requirement, reqPath, errors);
+      if (!Number.isFinite(Number(requirement?.count)) || Number(requirement.count) <= 0) {
+        errors.push(`${reqPath}.count must be a positive number`);
+      }
+      validatePileList(requirement?.priorityPiles, `${reqPath}.priorityPiles`, errors);
+    });
+  }
+  function validateUpgradeDef(upgradeDef, path, errors) {
+    if (!isPlainObject(upgradeDef)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (typeof upgradeDef.name !== "string" || !upgradeDef.name.trim()) {
+      errors.push(`${path}.name is required`);
+    }
+    validateStringArray(upgradeDef.sbcNames, `${path}.sbcNames`, errors, true);
+    const hasChallengeRequirements = upgradeDef.challengeRequirements !== void 0;
+    validateRequirements(upgradeDef.requirements, `${path}.requirements`, errors, !hasChallengeRequirements);
+    if (hasChallengeRequirements) {
+      if (!Array.isArray(upgradeDef.challengeRequirements) || !upgradeDef.challengeRequirements.length) {
+        errors.push(`${path}.challengeRequirements must be a non-empty array`);
+      } else {
+        upgradeDef.challengeRequirements.forEach((requirements, index) => {
+          validateRequirements(requirements, `${path}.challengeRequirements[${index}]`, errors, true);
+        });
+      }
+    }
+    validatePileList(upgradeDef.priorityPiles, `${path}.priorityPiles`, errors);
+  }
+  function validateShortagePacks(shortagePacks, path, errors) {
+    if (shortagePacks === void 0 || shortagePacks === null) return;
+    if (!Array.isArray(shortagePacks) || !shortagePacks.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    shortagePacks.forEach((source, index) => {
+      const sourcePath = `${path}[${index}]`;
+      if (!isPlainObject(source)) {
+        errors.push(`${sourcePath} must be an object`);
+        return;
+      }
+      validateCardSpec(source.requirement, `${sourcePath}.requirement`, errors);
+      validateNumberArray(source.packIds, `${sourcePath}.packIds`, errors);
+      validateStringArray(source.packNames, `${sourcePath}.packNames`, errors);
+      if (!source.packIds?.length && !source.packNames?.length) {
+        errors.push(`${sourcePath}.packIds or ${sourcePath}.packNames is required`);
+      }
+      if (source.maxOpensPerAttempt !== void 0) {
+        const maxOpens = Number(source.maxOpensPerAttempt);
+        if (!Number.isFinite(maxOpens) || maxOpens <= 0) {
+          errors.push(`${sourcePath}.maxOpensPerAttempt must be a positive number`);
+        }
+      }
+    });
+  }
+  function validateLoopDef(loopDef, label = "loop") {
+    const errors = [];
+    if (!isPlainObject(loopDef)) return [`${label} must be an object`];
+    if (typeof loopDef.name !== "string" || !loopDef.name.trim()) {
+      errors.push("name is required");
+    }
+    if (typeof loopDef.strategy !== "string" || !loopDef.strategy.trim()) {
+      errors.push("strategy is required");
+    } else if (!LOOP_STRATEGIES.includes(loopDef.strategy)) {
+      errors.push(`strategy must be one of: ${LOOP_STRATEGIES.join(", ")}`);
+    }
+    if (loopDef.dryRun !== void 0 && typeof loopDef.dryRun !== "boolean") {
+      errors.push("dryRun must be boolean");
+    }
+    ["hidden", "mvp", "openRewardPacks", "blockSpecial", "blockTradeable", "inventoryFillFirst"].forEach((field) => {
+      if (loopDef[field] !== void 0 && typeof loopDef[field] !== "boolean") {
+        errors.push(`${field} must be boolean`);
+      }
+    });
+    if (loopDef.maxSubmittedRating !== void 0) {
+      const maxRating = Number(loopDef.maxSubmittedRating);
+      if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
+        errors.push("maxSubmittedRating must be a number between 1 and 99");
+      }
+    }
+    if (loopDef.maxNormalGoldSubmittedRating !== void 0) {
+      const maxRating = Number(loopDef.maxNormalGoldSubmittedRating);
+      if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
+        errors.push("maxNormalGoldSubmittedRating must be a number between 1 and 99");
+      }
+    }
+    if (loopDef.dailyCompletionLimit !== void 0) {
+      const dailyLimit = Number(loopDef.dailyCompletionLimit);
+      if (!Number.isFinite(dailyLimit) || dailyLimit < 1 || dailyLimit > 100) {
+        errors.push("dailyCompletionLimit must be a number between 1 and 100");
+      }
+    }
+    if (loopDef.requiredSpecialMinRating !== void 0) {
+      const minRating = Number(loopDef.requiredSpecialMinRating);
+      if (!Number.isFinite(minRating) || minRating < 1 || minRating > 99) {
+        errors.push("requiredSpecialMinRating must be a number between 1 and 99");
+      }
+    }
+    if (loopDef.requiredSpecialKind !== void 0 && !["totw", "totw-tots-fof"].includes(String(loopDef.requiredSpecialKind).toLowerCase())) {
+      errors.push("requiredSpecialKind must be totw or totw-tots-fof when provided");
+    }
+    if (loopDef.preCraftPlayerPickLoopId !== void 0 && (typeof loopDef.preCraftPlayerPickLoopId !== "string" || !loopDef.preCraftPlayerPickLoopId.trim())) {
+      errors.push("preCraftPlayerPickLoopId must be a non-empty string");
+    }
+    if (loopDef.unassignedRecoveryPolicyIds !== void 0) {
+      if (!Array.isArray(loopDef.unassignedRecoveryPolicyIds)) {
+        errors.push("unassignedRecoveryPolicyIds must be an array");
+      } else {
+        loopDef.unassignedRecoveryPolicyIds.forEach((id, index) => {
+          if (typeof id !== "string" || !id.trim()) errors.push(`unassignedRecoveryPolicyIds[${index}] must be a non-empty string`);
+        });
+      }
+    }
+    if (loopDef.overflowRecovery !== void 0) {
+      errors.push("overflowRecovery is obsolete; use top-level recoveryRecipes and unassignedRecoveryPolicies");
+    }
+    if (loopDef.autoTotwUpgrade !== void 0 && loopDef.autoTotwUpgrade !== false && !isPlainObject(loopDef.autoTotwUpgrade)) {
+      errors.push("autoTotwUpgrade must be an object or false");
+    }
+    if (loopDef.autoFodderUpgrade !== void 0 && loopDef.autoFodderUpgrade !== false && !isPlainObject(loopDef.autoFodderUpgrade)) {
+      errors.push("autoFodderUpgrade must be an object or false");
+    }
+    if (isPlainObject(loopDef.autoFodderUpgrade) && loopDef.autoFodderUpgrade.maxAttemptsPerCompletion !== void 0) {
+      const attempts = Number(loopDef.autoFodderUpgrade.maxAttemptsPerCompletion);
+      if (!Number.isFinite(attempts) || attempts < 1 || attempts > 10) {
+        errors.push("autoFodderUpgrade.maxAttemptsPerCompletion must be a number between 1 and 10");
+      }
+    }
+    if (loopDef.ratingSbcFill !== void 0) {
+      if (!isPlainObject(loopDef.ratingSbcFill)) {
+        errors.push("ratingSbcFill must be an object");
+      } else {
+        validatePileList(loopDef.ratingSbcFill.priorityPiles, "ratingSbcFill.priorityPiles", errors, true);
+        if (loopDef.ratingSbcFill.targetRating !== void 0) {
+          const targetRating = Number(loopDef.ratingSbcFill.targetRating);
+          if (!Number.isFinite(targetRating) || targetRating < 1 || targetRating > 99) {
+            errors.push("ratingSbcFill.targetRating must be a number between 1 and 99");
+          }
+        }
+        if (loopDef.ratingSbcFill.maxSearchNodes !== void 0) {
+          const maxSearchNodes = Number(loopDef.ratingSbcFill.maxSearchNodes);
+          if (!Number.isInteger(maxSearchNodes) || maxSearchNodes < 1e4 || maxSearchNodes > 2e6) {
+            errors.push("ratingSbcFill.maxSearchNodes must be an integer between 10000 and 2000000");
+          }
+        }
+        if (loopDef.ratingSbcFill.maxSearchMs !== void 0) {
+          const maxSearchMs = Number(loopDef.ratingSbcFill.maxSearchMs);
+          if (!Number.isInteger(maxSearchMs) || maxSearchMs < 1e3 || maxSearchMs > 6e4) {
+            errors.push("ratingSbcFill.maxSearchMs must be an integer between 1000 and 60000");
+          }
+        }
+        if (loopDef.ratingSbcFill.yieldEveryNodes !== void 0) {
+          const yieldEveryNodes = Number(loopDef.ratingSbcFill.yieldEveryNodes);
+          if (!Number.isInteger(yieldEveryNodes) || yieldEveryNodes < 50 || yieldEveryNodes > 5e3) {
+            errors.push("ratingSbcFill.yieldEveryNodes must be an integer between 50 and 5000");
+          }
+        }
+      }
+    }
+    validateNumberArray(loopDef.sourcePackIds, "sourcePackIds", errors);
+    validateNumberArray(loopDef.rewardPackIds, "rewardPackIds", errors);
+    validateNumberArray(loopDef.protectedItemIds, "protectedItemIds", errors);
+    validateNumberArray(loopDef.protectedDefinitionIds, "protectedDefinitionIds", errors);
+    validateStringArray(loopDef.sourcePackNames, "sourcePackNames", errors);
+    validateStringArray(loopDef.rewardPackNames, "rewardPackNames", errors);
+    validatePileList(loopDef.priorityPiles, "priorityPiles", errors);
+    validatePileList(loopDef.primaryPiles, "primaryPiles", errors);
+    validatePileList(loopDef.clubFallbackPiles, "clubFallbackPiles", errors);
+    validatePileList(loopDef.disabledPiles, "disabledPiles", errors);
+    if (loopDef.strategy === "validationBronzeUpgrade") {
+      validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
+      validateCardSpec(loopDef.targetDuplicate, "targetDuplicate", errors);
+    }
+    if (loopDef.strategy === "dailySingleCardRecycle") {
+      validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
+      validateCardSpec(loopDef.targetDuplicate, "targetDuplicate", errors);
+    }
+    if (loopDef.strategy === "dailyRoutine") {
+      validateStringArray(loopDef.steps, "steps", errors, true);
+    }
+    if (loopDef.strategy === "fillAndVerifySbc") {
+      validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
+      if (loopDef.requirements !== void 0) validateRequirements(loopDef.requirements, "requirements", errors, false);
+    }
+    if (["supplyAndCraft", "inventoryMixedUpgrade", "commonGoldToRareUpgrade"].includes(loopDef.strategy)) {
+      validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
+      validateRequirements(loopDef.requirements, "requirements", errors, true);
+      if (loopDef.strategy === "supplyAndCraft" || loopDef.strategy === "inventoryMixedUpgrade") {
+        validateShortagePacks(loopDef.shortagePacks, "shortagePacks", errors);
+      }
+    }
+    if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") {
+      if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
+        errors.push("sourcePackIds or sourcePackNames is required");
+      }
+      if (loopDef.craftingUpgrades !== void 0) {
+        if (!Array.isArray(loopDef.craftingUpgrades) || !loopDef.craftingUpgrades.length) {
+          errors.push("craftingUpgrades must be a non-empty array");
+        } else {
+          loopDef.craftingUpgrades.forEach((upgradeDef, index) => {
+            validateUpgradeDef(upgradeDef, `craftingUpgrades[${index}]`, errors);
+          });
+        }
+      } else {
+        const legacyUpgrades = [loopDef.commonUpgrade, loopDef.rareUpgrade].filter((upgradeDef) => upgradeDef !== void 0);
+        if (!legacyUpgrades.length) errors.push("craftingUpgrades or a legacy commonUpgrade/rareUpgrade is required");
+        if (loopDef.commonUpgrade !== void 0) validateUpgradeDef(loopDef.commonUpgrade, "commonUpgrade", errors);
+        if (loopDef.rareUpgrade !== void 0) validateUpgradeDef(loopDef.rareUpgrade, "rareUpgrade", errors);
+      }
+    }
+    if (loopDef.strategy === "rarePackTo84Upgrade") {
+      if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
+        errors.push("sourcePackIds or sourcePackNames is required");
+      }
+      validateUpgradeDef(loopDef.rareUpgrade, "rareUpgrade", errors);
+      if (loopDef.maxPacks !== void 0) {
+        const maxPacks = Number(loopDef.maxPacks);
+        if (!Number.isFinite(maxPacks) || maxPacks <= 0) {
+          errors.push("maxPacks must be a positive number");
+        }
+      }
+    }
+    if (loopDef.strategy === "playerPickSbc") {
+      validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
+      validateStringArray(loopDef.pickItemNames, "pickItemNames", errors, true);
+      validateNumberArray(loopDef.sbcSetIds, "sbcSetIds", errors);
+      validateNumberArray(loopDef.pickItemResourceIds, "pickItemResourceIds", errors);
+      const hasChallengeRequirements = loopDef.challengeRequirements !== void 0;
+      validateRequirements(loopDef.requirements, "requirements", errors, !hasChallengeRequirements);
+      if (hasChallengeRequirements) {
+        if (!Array.isArray(loopDef.challengeRequirements) || !loopDef.challengeRequirements.length) {
+          errors.push("challengeRequirements must be a non-empty array");
+        } else {
+          loopDef.challengeRequirements.forEach((requirements, index) => {
+            validateRequirements(requirements, `challengeRequirements[${index}]`, errors, true);
+          });
+        }
+      }
+      const challengesPerPick = Number(loopDef.challengesPerPick || loopDef.challengeRequirements?.length || 1);
+      const pickCount = Number(loopDef.pickCount || 1);
+      const pickCandidateCount = loopDef.pickCandidateCount === void 0 ? null : Number(loopDef.pickCandidateCount);
+      if (!Number.isInteger(challengesPerPick) || challengesPerPick < 1 || challengesPerPick > 10) {
+        errors.push("challengesPerPick must be an integer between 1 and 10");
+      }
+      if (loopDef.challengesPerPick !== void 0 && Array.isArray(loopDef.challengeRequirements) && loopDef.challengeRequirements.length !== challengesPerPick) {
+        errors.push("challengesPerPick must match challengeRequirements.length when both are provided");
+      }
+      if (!Number.isInteger(pickCount) || pickCount < 1 || pickCount > 10) {
+        errors.push("pickCount must be an integer between 1 and 10");
+      }
+      if (pickCandidateCount !== null && (!Number.isInteger(pickCandidateCount) || pickCandidateCount < 1 || pickCandidateCount > 20)) {
+        errors.push("pickCandidateCount must be an integer between 1 and 20");
+      } else if (pickCandidateCount !== null && pickCandidateCount < pickCount) {
+        errors.push("pickCandidateCount must be greater than or equal to pickCount");
+      }
+      if (loopDef.pricePlatform !== void 0 && !["pc", "ps", "xbox"].includes(String(loopDef.pricePlatform).toLowerCase())) {
+        errors.push("pricePlatform must be pc, ps, or xbox when provided");
+      }
+    }
+    return errors;
+  }
+  function assertValidLoopDef(loopDef, label = "Loop JSON") {
+    const errors = validateLoopDef(loopDef, label);
+    if (errors.length) fail(`${label} validation failed:
+- ${errors.join("\n- ")}`);
+  }
+  function validateLoopDefList(loopDefs, label = "Loop config") {
+    if (!Array.isArray(loopDefs) || !loopDefs.length) {
+      fail(`${label} must be a non-empty array or an object with a loops array`);
+    }
+    const seen = /* @__PURE__ */ new Set();
+    loopDefs.forEach((loopDef, index) => {
+      assertValidLoopDef(loopDef, `${label}[${index}]`);
+      if (typeof loopDef.id !== "string" || !loopDef.id.trim()) {
+        fail(`${label}[${index}].id is required`);
+      }
+      if (loopDef.id) {
+        if (seen.has(loopDef.id)) fail(`${label} has duplicate id: ${loopDef.id}`);
+        seen.add(loopDef.id);
+      }
+    });
+    loopDefs.forEach((loopDef, index) => {
+      if (!loopDef.preCraftPlayerPickLoopId) return;
+      const target = loopDefs.find((candidate) => candidate.id === loopDef.preCraftPlayerPickLoopId);
+      if (!target) fail(`${label}[${index}].preCraftPlayerPickLoopId not found: ${loopDef.preCraftPlayerPickLoopId}`);
+      if (target.strategy !== "playerPickSbc") {
+        fail(`${label}[${index}].preCraftPlayerPickLoopId must reference a playerPickSbc loop`);
+      }
+    });
+  }
+  function validateRecoveryAction(value, path, errors) {
+    if (value !== void 0 && !["continue", "stop"].includes(value)) {
+      errors.push(`${path} must be continue or stop`);
+    }
+  }
+  function validateRecoveryRecipeList(recipes, label = "recoveryRecipes") {
+    if (!Array.isArray(recipes)) fail(`${label} must be an array`);
+    const seen = /* @__PURE__ */ new Set();
+    recipes.forEach((recipe2, index) => {
+      const path = `${label}[${index}]`;
+      const errors = [];
+      if (!isPlainObject(recipe2)) fail(`${path} must be an object`);
+      if (typeof recipe2.id !== "string" || !recipe2.id.trim()) errors.push(`${path}.id is required`);
+      if (seen.has(recipe2.id)) errors.push(`${label} has duplicate id: ${recipe2.id}`);
+      seen.add(recipe2.id);
+      validateUpgradeDef(recipe2, path, errors);
+      if (recipe2.maxSubmissions !== void 0 && Number(recipe2.maxSubmissions) !== 1) {
+        errors.push(`${path}.maxSubmissions must be 1`);
+      }
+      if (recipe2.mustConsumeTrigger !== true) {
+        errors.push(`${path}.mustConsumeTrigger must be true`);
+      }
+      validateRecoveryAction(recipe2.onUnavailable, `${path}.onUnavailable`, errors);
+      validateRecoveryAction(recipe2.onInsufficient, `${path}.onInsufficient`, errors);
+      if (recipe2.onBlocked !== void 0 && recipe2.onBlocked !== "stop") {
+        errors.push(`${path}.onBlocked must be stop`);
+      }
+      if (errors.length) fail(`${path} validation failed:
+- ${errors.join("\n- ")}`);
+    });
+  }
+  function validateRecoveryPolicyList(policies, recipes, label = "unassignedRecoveryPolicies") {
+    if (!Array.isArray(policies)) fail(`${label} must be an array`);
+    const recipeIds = new Set(recipes.map((recipe2) => recipe2.id));
+    const seen = /* @__PURE__ */ new Set();
+    policies.forEach((policy, index) => {
+      const path = `${label}[${index}]`;
+      const errors = [];
+      if (!isPlainObject(policy)) fail(`${path} must be an object`);
+      if (typeof policy.id !== "string" || !policy.id.trim()) errors.push(`${path}.id is required`);
+      if (seen.has(policy.id)) errors.push(`${label} has duplicate id: ${policy.id}`);
+      seen.add(policy.id);
+      validateCardSpec(policy.match, `${path}.match`, errors);
+      if (!Array.isArray(policy.steps) || !policy.steps.length) {
+        errors.push(`${path}.steps must be a non-empty array`);
+      } else {
+        policy.steps.forEach((step, stepIndex) => {
+          const stepPath = `${path}.steps[${stepIndex}]`;
+          if (!isPlainObject(step) || typeof step.recipeId !== "string" || !step.recipeId.trim()) {
+            errors.push(`${stepPath}.recipeId is required`);
+            return;
+          }
+          if (!recipeIds.has(step.recipeId)) errors.push(`${stepPath}.recipeId not found: ${step.recipeId}`);
+          validateRecoveryAction(step.onUnavailable, `${stepPath}.onUnavailable`, errors);
+          validateRecoveryAction(step.onInsufficient, `${stepPath}.onInsufficient`, errors);
+          if (step.onBlocked !== void 0 && step.onBlocked !== "stop") {
+            errors.push(`${stepPath}.onBlocked must be stop`);
+          }
+        });
+      }
+      if (errors.length) fail(`${path} validation failed:
+- ${errors.join("\n- ")}`);
+    });
+  }
+  function validateRecoveryPolicyIds(ids, policies, path, allowEmpty = true) {
+    if (!Array.isArray(ids) || !allowEmpty && !ids.length) {
+      fail(`${path} must be an array${allowEmpty ? "" : " with at least one entry"}`);
+    }
+    const policyIds = new Set(policies.map((policy) => policy.id));
+    ids.forEach((id, index) => {
+      if (typeof id !== "string" || !id.trim()) fail(`${path}[${index}] must be a non-empty string`);
+      if (!policyIds.has(id)) fail(`${path}[${index}] not found: ${id}`);
+    });
+  }
+  function normalizeLoopConfig(config) {
+    const input = Array.isArray(config) ? { loops: config } : config;
+    if (!isPlainObject(input) || !Array.isArray(input.loops)) {
+      fail("Loop config JSON must be an array or an object with a loops array");
+    }
+    return {
+      loops: input.loops,
+      recoveryRecipes: input.recoveryRecipes === void 0 ? RECOVERY_RECIPES : input.recoveryRecipes,
+      unassignedRecoveryPolicies: input.unassignedRecoveryPolicies === void 0 ? UNASSIGNED_RECOVERY_POLICIES : input.unassignedRecoveryPolicies,
+      defaultUnassignedRecoveryPolicyIds: input.defaultUnassignedRecoveryPolicyIds === void 0 ? DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS : input.defaultUnassignedRecoveryPolicyIds
+    };
+  }
+  function validateLoopConfig(config, label = "Loop config") {
+    const normalized = normalizeLoopConfig(config);
+    validateLoopDefList(normalized.loops, `${label}.loops`);
+    validateRecoveryRecipeList(normalized.recoveryRecipes, `${label}.recoveryRecipes`);
+    validateRecoveryPolicyList(
+      normalized.unassignedRecoveryPolicies,
+      normalized.recoveryRecipes,
+      `${label}.unassignedRecoveryPolicies`
+    );
+    validateRecoveryPolicyIds(
+      normalized.defaultUnassignedRecoveryPolicyIds,
+      normalized.unassignedRecoveryPolicies,
+      `${label}.defaultUnassignedRecoveryPolicyIds`
+    );
+    normalized.loops.forEach((loopDef, index) => {
+      if (loopDef.unassignedRecoveryPolicyIds === void 0) return;
+      validateRecoveryPolicyIds(
+        loopDef.unassignedRecoveryPolicyIds,
+        normalized.unassignedRecoveryPolicies,
+        `${label}.loops[${index}].unassignedRecoveryPolicyIds`
+      );
+    });
+    return normalized;
+  }
+  function parseLoopConfig(text) {
+    return normalizeLoopConfig(JSON.parse(text));
+  }
+
+  // src/config/routine-steps.js
+  function resolveRoutineStepLoopDefs(loopDef = {}, loopDefs = []) {
+    return (loopDef.steps || []).map((stepId, index) => {
+      if (stepId === loopDef.id) {
+        throw new Error(`${loopDef.name}: step ${index + 1} cannot reference itself`);
+      }
+      const baseDef = loopDefs.find((definition) => definition.id === stepId);
+      if (!baseDef) {
+        throw new Error(`${loopDef.name}: step ${index + 1} loop not found: ${stepId}`);
+      }
+      const childDef = cloneLoopDef(baseDef);
+      if (childDef.strategy === "dailyRoutine") {
+        throw new Error(`${loopDef.name}: nested dailyRoutine steps are not supported`);
+      }
+      if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
+        childDef.disabledPiles = [...loopDef.disabledPiles];
+      }
+      if (loopDef.openRewardPacks !== void 0 && childDef.openRewardPacks === void 0) {
+        childDef.openRewardPacks = loopDef.openRewardPacks;
+      }
+      childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
+      assertValidLoopDef(childDef, childDef.name || stepId);
+      return applyDisabledPiles(childDef);
+    });
+  }
+
+  // src/config/runtime-options.js
+  function normalizePickRuntimeOptions(input = {}) {
+    return {
+      protectHighGold: input.protectHighGold !== false,
+      autoSelectBelow90: input.autoSelectBelow90 !== false,
+      preferScannedMetadata: input.preferScannedMetadata === true,
+      highGoldThreshold: Math.max(2, Math.min(99, Number(input.highGoldThreshold || 82) || 82)),
+      autoPickThreshold: Math.max(1, Math.min(99, Number(input.autoPickThreshold || 90) || 90))
+    };
+  }
+  function applyPickRuntimeOptions2(loopDef, input = {}) {
+    if (loopDef.strategy !== "playerPickSbc") return loopDef;
+    const options = normalizePickRuntimeOptions(input);
+    loopDef.protectHighGold = options.protectHighGold;
+    loopDef.autoSelectBelow90 = options.autoSelectBelow90;
+    loopDef.pickHighGoldThreshold = options.highGoldThreshold;
+    loopDef.autoPickRatingThreshold = options.autoPickThreshold;
+    const requirementGroups = [loopDef.requirements, ...loopDef.challengeRequirements || []];
+    requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
+      requirement.protectHighGold = options.protectHighGold;
+      if (options.protectHighGold) {
+        requirement.maxRating = options.highGoldThreshold - 1;
+      } else if (Number(requirement.maxRating) <= 81) {
+        delete requirement.maxRating;
+      }
+    }));
+    return loopDef;
+  }
+  function applyLoopRuntimeOptions(loopDef, options = {}) {
+    const rounds = Math.max(1, Math.min(50, Number(options.rounds || 1) || 1));
+    loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;
+    loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || options.openRewardPacks === true;
+    applyPickRuntimeOptions2(loopDef, options.pickOptions);
+    if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") {
+      loopDef.rounds = rounds;
+    }
+    if (loopDef.useRoundsAsCompletions === true) loopDef.maxCompletions = rounds;
+    return loopDef;
+  }
+
+  // src/config/fsu-compat.js
+  var FSU_SETTING_ALIASES = {
+    ignorePlayerPosition: [/ignore.*player.*position/i, /ignore.*position/i, /忽略.*位置/],
+    onlyUntradeable: [/only.*untrad/i, /untrad.*only/i, /仅.*不可交易/, /只.*不可交易/],
+    excludeDesignatedLeagues: [/exclude.*designated.*league/i, /exclude.*league/i, /排除.*联赛/, /排除.*聯賽/],
+    useRarityPlayer: [/use.*rarity.*player/i, /rarity.*player/i, /使用.*稀有/, /使用.*特殊/],
+    excludeEvolution: [/exclude.*evo/i, /exclude.*evolution/i, /排除.*进化/, /排除.*進化/],
+    playerPickStrictCommonRare: [/player.*pick.*strict/i, /strictly.*common.*rare/i, /球员选择.*严格/, /球員選擇.*嚴格/],
+    priorityRareWithinGoldRange: [/priority.*rare.*gold.*range/i, /rare.*within.*gold.*range/i, /golden.*player.*range/i, /稀有.*金/],
+    priorityNonSpecialPlayers: [/priority.*non.*special/i, /non.*special.*player/i, /优先.*非.*特殊/, /優先.*非.*特殊/],
+    priorityStoragePlayers: [/priority.*storage/i, /storage.*player/i, /优先.*仓库/, /優先.*倉庫/, /storage.*priority/i],
+    silverBronzePrioritizeNormal: [/silver.*bronze.*normal/i, /quality.*prioritize.*normal/i, /银.*铜.*普通/, /銀.*銅.*普通/]
+  };
+  var ITEM_ID_FIELDS = [
+    "id",
+    "itemId",
+    "itemid",
+    "itemID",
+    "instanceId",
+    "instanceid",
+    "resourceId",
+    "resourceid",
+    "resourceID",
+    "cardId",
+    "cardid",
+    "cardID",
+    "playerId",
+    "playerid",
+    "playerID",
+    "guidAssetId",
+    "guidassetid",
+    "guidAssetID"
+  ];
+  var DEFINITION_ID_FIELDS = [
+    "definitionId",
+    "definitionid",
+    "definitionID",
+    "defId",
+    "defid",
+    "defID",
+    "assetId",
+    "assetid",
+    "assetID",
+    "_assetId",
+    "_assetid",
+    "_assetID",
+    "baseId",
+    "baseid",
+    "baseID",
+    "baseResourceId",
+    "baseResourceID",
+    "resourceId",
+    "resourceid",
+    "resourceID",
+    "guidAssetId",
+    "guidassetid",
+    "guidAssetID"
+  ];
+  function boolFromAny(value) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+    if (typeof value === "string") {
+      const text = value.trim().toLowerCase();
+      if (["true", "1", "yes", "on", "enabled", "enable"].includes(text)) return true;
+      if (["false", "0", "no", "off", "disabled", "disable"].includes(text)) return false;
+    }
+    return null;
+  }
+  function safeRead(holder, key) {
+    try {
+      return holder?.[key];
+    } catch {
+      return void 0;
+    }
+  }
+  function isInspectableObject(value) {
+    if (!value || typeof value !== "object") return false;
+    const tag = Object.prototype.toString.call(value);
+    return tag === "[object Object]" || tag === "[object Array]";
+  }
+  function flattenConfigValues(value, path = "", rows = [], depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
+    if (value === null || value === void 0 || depth > 5) return rows;
+    if (typeof value !== "object") {
+      rows.push({ path, value });
+      return rows;
+    }
+    if (!isInspectableObject(value) || seen.has(value)) return rows;
+    seen.add(value);
+    const keys = Array.isArray(value) ? value.map((_, index) => String(index)) : Object.keys(value);
+    for (const key of keys.slice(0, 250)) {
+      const child = safeRead(value, key);
+      const nextPath = path ? `${path}.${key}` : key;
+      if (isInspectableObject(child)) flattenConfigValues(child, nextPath, rows, depth + 1, seen);
+      else rows.push({ path: nextPath, value: child });
+    }
+    return rows;
+  }
+  function parseJsonMaybe(value) {
+    if (typeof value !== "string") return null;
+    const text = value.trim();
+    if (!text || !["{", "["].includes(text[0])) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  function numberListFromAny(value) {
+    if (Array.isArray(value)) {
+      return value.flatMap((entry) => numberListFromAny(entry)).filter((entry, index, list) => Number.isFinite(entry) && list.indexOf(entry) === index);
+    }
+    if (typeof value === "number" && Number.isFinite(value)) return [Number(value)];
+    if (typeof value === "string") return (value.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
+    if (isInspectableObject(value)) {
+      return flattenConfigValues(value).flatMap((row) => numberListFromAny(row.value)).filter((entry, index, list) => Number.isFinite(entry) && list.indexOf(entry) === index);
+    }
+    return [];
+  }
+  function uniquePositiveNumbers(values = []) {
+    return values.map(Number).filter((value) => Number.isFinite(value) && value > 0).filter((value, index, list) => list.indexOf(value) === index);
+  }
+  function isLikelyLockedPlayerPath(path = "") {
+    const text = String(path || "");
+    if (!text || /unlock/i.test(text)) return false;
+    const compact = text.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (/((lock|locked)players?|players?(lock|locked)|(lock|locked)cards?|cards?(lock|locked)|(lock|locked)items?|items?(lock|locked)|protectedplayers?|protectedcards?|protecteditems?)/i.test(compact)) return true;
+    return /(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)/i.test(text) && /player|card|item|resource|definition|asset|info[._\-\s]*lock|(^|[._\-\s])lock([._\-\s]|$)/i.test(text);
+  }
+  function isLikelyLockedIdValuePath(path = "", key = "") {
+    const field = String(key || "").replace(/^_+/, "");
+    if (/^\d+$/.test(field)) return true;
+    if (/^(id|itemid|instanceid|resourceid|cardid|playerid|definitionid|defid|assetid|baseid|baseresourceid|guidassetid)$/i.test(field)) return true;
+    return /(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)$/i.test(String(path || ""));
+  }
+  function addLockedPlayerValue(result, value, path = "", key = "") {
+    const numbers = numberListFromAny(value);
+    if (!numbers.length) return;
+    const text = `${key || ""} ${path || ""}`;
+    const definitionLike = /definition|defid|asset|base|resource|guid/i.test(text);
+    const itemLike = !definitionLike || /(^|[^a-z])(id|item|instance|card|player)([^a-z]|$)/i.test(text);
+    if (definitionLike) numbers.forEach((number) => result.definitionIds.push(number));
+    if (itemLike || /resource|guid/i.test(text)) numbers.forEach((number) => result.itemIds.push(number));
+  }
+  function collectLockedPlayerIds(value, path = "", result = { itemIds: [], definitionIds: [], sources: [] }, depth = 0, seen = /* @__PURE__ */ new WeakSet(), inLockContext = false) {
+    if (value === null || value === void 0 || depth > 6) return result;
+    const lockContext = inLockContext || isLikelyLockedPlayerPath(path);
+    if (!isInspectableObject(value)) {
+      if (lockContext && isLikelyLockedIdValuePath(path)) {
+        addLockedPlayerValue(result, value, path);
+        if (!result.sources.includes(path)) result.sources.push(path);
+      }
+      return result;
+    }
+    if (seen.has(value)) return result;
+    seen.add(value);
+    const keys = Array.isArray(value) ? value.map((_, index) => String(index)) : Object.keys(value);
+    for (const key of keys.slice(0, 250)) {
+      const child = safeRead(value, key);
+      const nextPath = path ? `${path}.${key}` : key;
+      const childLockContext = lockContext || isLikelyLockedPlayerPath(nextPath);
+      if (childLockContext && !isInspectableObject(child) && isLikelyLockedIdValuePath(nextPath, key)) {
+        addLockedPlayerValue(result, child, nextPath, key);
+        if (!result.sources.includes(nextPath)) result.sources.push(nextPath);
+      } else if (childLockContext && isInspectableObject(child)) {
+        ITEM_ID_FIELDS.forEach((field) => addLockedPlayerValue(result, safeRead(child, field), nextPath, field));
+        DEFINITION_ID_FIELDS.forEach((field) => addLockedPlayerValue(result, safeRead(child, field), nextPath, field));
+      }
+      if (isInspectableObject(child)) collectLockedPlayerIds(child, nextPath, result, depth + 1, seen, childLockContext);
+    }
+    return result;
+  }
+  function normalizeLockedPlayerIds(raw, source = "") {
+    const result = collectLockedPlayerIds(raw, source || "lock");
+    return {
+      itemIds: uniquePositiveNumbers(result.itemIds),
+      definitionIds: uniquePositiveNumbers(result.definitionIds),
+      sources: [...new Set(result.sources || [])]
+    };
+  }
+  function normalizeGoldRange(settings, rows) {
+    const direct = numberListFromAny(settings.goldRange || settings.goldenRange || settings.goldRatingRange).slice(0, 2);
+    if (direct.length === 2) return direct.sort((a, b) => a - b);
+    if (direct.length === 1 && direct[0] >= 75 && direct[0] <= 99) return [75, direct[0]];
+    let min = null;
+    let max = null;
+    for (const row of rows) {
+      const path = row.path.toLowerCase();
+      const value = Number(row.value);
+      if (!Number.isFinite(value)) continue;
+      if (/gold.*(min|from|start)|golden.*(min|from|start)/i.test(path)) min = value;
+      if (/gold.*(max|to|end)|golden.*(max|to|end)/i.test(path)) max = value;
+    }
+    if (Number.isFinite(min) && Number.isFinite(max)) return [min, max].sort((a, b) => a - b);
+    return [...FSU_COMPAT_DEFAULTS.goldRange];
+  }
+  function normalizeFsuSettings(raw = {}, source = "manual") {
+    const rows = flattenConfigValues(raw);
+    const settings = { ...FSU_COMPAT_DEFAULTS, detected: true, source };
+    let matched = false;
+    for (const [field, aliases] of Object.entries(FSU_SETTING_ALIASES)) {
+      const row = rows.find((entry) => aliases.some((pattern) => pattern.test(entry.path)) && boolFromAny(entry.value) !== null);
+      if (!row) continue;
+      settings[field] = boolFromAny(row.value);
+      matched = true;
+    }
+    const excludedLeagueRows = rows.filter(
+      (entry) => /exclude|ignore|black|ban|designated|league|联赛|聯賽/i.test(entry.path) && /league|联赛|聯賽/i.test(entry.path)
+    );
+    const excludedLeagueIds = excludedLeagueRows.flatMap((entry) => numberListFromAny(entry.value)).filter((entry, index, list) => Number.isFinite(entry) && list.indexOf(entry) === index);
+    if (excludedLeagueIds.length) {
+      settings.excludedLeagueIds = excludedLeagueIds;
+      settings.excludeDesignatedLeagues = true;
+      matched = true;
+    }
+    const lockedPlayers = normalizeLockedPlayerIds(raw, source);
+    if (lockedPlayers.itemIds.length || lockedPlayers.definitionIds.length) {
+      settings.lockedItemIds = lockedPlayers.itemIds;
+      settings.lockedDefinitionIds = lockedPlayers.definitionIds;
+      matched = true;
+    }
+    const explicitGoldRange = numberListFromAny(raw.goldRange || raw.goldenRange || raw.goldRatingRange);
+    settings.goldRange = normalizeGoldRange(raw, rows);
+    if (explicitGoldRange.length) matched = true;
+    return matched ? settings : null;
+  }
+  function likelyFsuStorageKey(key) {
+    const text = String(key || "");
+    return /fsu|enhancer|sbc.*(?:ignore|setting)|(?:ignore|rarity|untrad|league|evo|evolution|golden|player.*range).*settings?/i.test(text);
+  }
+  function mergeLockedPlayersIntoSettings(settings, locked, sourceLabel = "") {
+    const base = settings || {
+      ...FSU_COMPAT_DEFAULTS,
+      excludedLeagueIds: [...FSU_COMPAT_DEFAULTS.excludedLeagueIds],
+      goldRange: [...FSU_COMPAT_DEFAULTS.goldRange],
+      lockedItemIds: [],
+      lockedDefinitionIds: []
+    };
+    if (!locked || !locked.itemIds?.length && !locked.definitionIds?.length) return base;
+    base.lockedItemIds = uniquePositiveNumbers([...base.lockedItemIds || [], ...locked.itemIds || []]);
+    base.lockedDefinitionIds = uniquePositiveNumbers([...base.lockedDefinitionIds || [], ...locked.definitionIds || []]);
+    base.detected = true;
+    if (sourceLabel) base.source = base.source && base.source !== "compat-defaults" ? `${base.source}+${sourceLabel}` : sourceLabel;
+    return base;
+  }
+  function readFsuSettingsFromStorage(storage, label) {
+    if (!storage) return null;
+    const exactKeys = [
+      "sbcIgnorePlayerConfiguration",
+      "sbcIgnorePlayerConfig",
+      "sbc_ignore_player_configuration",
+      "sbcIgnorePlayers",
+      "sbcSettings",
+      "fsuSbcSettings",
+      "fsuSettings",
+      "enhancerSettings",
+      "fcEnhancerSettings"
+    ];
+    for (const key of exactKeys) {
+      const value = storage.get(key, null);
+      if (value === null || value === void 0) continue;
+      const parsed = parseJsonMaybe(value);
+      const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label}:${key}`);
+      if (settings) return settings;
+    }
+    for (const [key, value] of storage.entries(250)) {
+      if (!key || !likelyFsuStorageKey(key)) continue;
+      const parsed = parseJsonMaybe(value);
+      const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label}:${key}`);
+      if (settings) return settings;
+    }
+    return null;
+  }
+  function readFsuLockedPlayersFromStorage(storage, label) {
+    const combined = { itemIds: [], definitionIds: [], sources: [] };
+    if (!storage) return combined;
+    for (const [key, value] of storage.entries(250)) {
+      if (!key || !isLikelyLockedPlayerPath(key)) continue;
+      const parsed = parseJsonMaybe(value);
+      const locked = normalizeLockedPlayerIds(parsed || { [key]: value }, `${label}:${key}`);
+      combined.itemIds.push(...locked.itemIds);
+      combined.definitionIds.push(...locked.definitionIds);
+      combined.sources.push(...locked.sources);
+    }
+    return {
+      itemIds: uniquePositiveNumbers(combined.itemIds),
+      definitionIds: uniquePositiveNumbers(combined.definitionIds),
+      sources: [...new Set(combined.sources)].slice(0, 8)
+    };
   }
 
   // src/domain/rating.js
@@ -225,8 +1579,1290 @@
     return Math.floor(Math.round(adjustedTotal) / count);
   }
 
+  // src/selection/rating-model.js
+  var PLAYER_REQUIREMENT_KEYS = /* @__PURE__ */ new Set([
+    "PLAYER_QUALITY",
+    "PLAYER_LEVEL",
+    "PLAYER_RARITY",
+    "PLAYER_RARITY_GROUP",
+    "PLAYER_MIN_OVR",
+    "PLAYER_EXACT_OVR",
+    "CLUB_ID",
+    "LEAGUE_ID",
+    "NATION_ID"
+  ]);
+  function firstRequirementKey(requirement) {
+    if (requirement?.key !== void 0 && requirement?.key !== null) return requirement.key;
+    try {
+      const key = requirement?.getFirstKey?.();
+      if (key !== void 0 && key !== null) return key;
+    } catch {
+    }
+    const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+    return Object.keys(collection)[0];
+  }
+  function flattenValues(value) {
+    if (Array.isArray(value)) return value.flat(Infinity).filter((entry) => entry !== void 0 && entry !== null);
+    if (value === void 0 || value === null) return [];
+    return [value];
+  }
+  function requirementValues(requirement, key) {
+    const normalized = flattenValues(requirement?.values);
+    if (normalized.length) return normalized;
+    try {
+      const values = flattenValues(requirement?.getValue?.(key));
+      if (values.length) return values;
+    } catch {
+    }
+    const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+    const direct = flattenValues(collection?.[key]);
+    if (direct.length) return direct;
+    try {
+      return flattenValues(requirement?.getFirstValue?.(key));
+    } catch {
+      return [];
+    }
+  }
+  function requirementCount(requirement, requiredPlayerCount) {
+    const count = Number(requirement?.count);
+    if (count === -1 || !Number.isFinite(count)) return requiredPlayerCount;
+    return Math.max(0, Math.min(requiredPlayerCount, count));
+  }
+  function readEligibilityRequirements(challenge, options = {}) {
+    const requiredPlayerCount = Math.max(0, Number(options.requiredPlayerCount || 0) || 0);
+    const eligibilityKeyName = options.eligibilityKeyName || ((key) => String(key || ""));
+    return (challenge?.eligibilityRequirements || []).map((requirement) => {
+      const key = firstRequirementKey(requirement);
+      return {
+        requirement,
+        key,
+        keyName: eligibilityKeyName(key),
+        values: requirementValues(requirement, key),
+        count: requirementCount(requirement, requiredPlayerCount)
+      };
+    });
+  }
+  function rareFlag(item) {
+    return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+  }
+  function matchesDynamicRequirement(item, requirement, keyName, rawValues, matchers) {
+    try {
+      if (typeof requirement?.meetsRequirements === "function") {
+        const result = requirement.meetsRequirements(item);
+        if (typeof result === "boolean") return result;
+      }
+    } catch {
+    }
+    const values = rawValues.map(Number).filter(Number.isFinite);
+    const rating = Number(item?.rating || 0);
+    switch (keyName) {
+      case "PLAYER_QUALITY":
+      case "PLAYER_LEVEL":
+        return values.some(
+          (value) => value === 1 && matchers.isBronze(item) || value === 2 && matchers.isSilver(item) || value === 3 && matchers.isGold(item) || value === 4 && matchers.isSpecialItem(item)
+        );
+      case "PLAYER_RARITY":
+        return values.includes(rareFlag(item));
+      case "PLAYER_RARITY_GROUP":
+        return values.some((value) => matchers.itemGroupNumbers(item).includes(value));
+      case "PLAYER_MIN_OVR":
+        return values.length > 0 && rating >= Math.min(...values);
+      case "PLAYER_EXACT_OVR":
+        return values.includes(rating);
+      case "CLUB_ID":
+        return values.includes(Number(item?.teamId ?? item?.clubId ?? item?._staticData?.teamId ?? 0));
+      case "LEAGUE_ID":
+        return values.includes(matchers.itemLeagueId(item));
+      case "NATION_ID":
+        return values.includes(Number(item?.nationId ?? item?._staticData?.nationId ?? 0));
+      default:
+        return false;
+    }
+  }
+  function parseRatingSbcChallenge(input = {}) {
+    const loopDef = input.loopDef || {};
+    const challenge = input.challenge || null;
+    const requiredPlayerCount = Math.max(0, Number(input.requiredPlayerCount || 0) || 0);
+    const eligibilityKeyName = input.eligibilityKeyName || ((key) => String(key || ""));
+    const matchers = {
+      isBronze: input.isBronze || (() => false),
+      isSilver: input.isSilver || (() => false),
+      isGold: input.isGold || (() => false),
+      isSpecialItem: input.isSpecialItem || (() => false),
+      itemGroupNumbers: input.itemGroupNumbers || (() => []),
+      itemLeagueId: input.itemLeagueId || (() => 0)
+    };
+    const constraints = [];
+    const unsupported = [];
+    let targetRating = Number(loopDef.ratingSbcFill?.targetRating || 0) || 0;
+    for (const entry of readEligibilityRequirements(challenge, { requiredPlayerCount, eligibilityKeyName })) {
+      const { requirement, keyName, values, count } = entry;
+      if (keyName === "TEAM_RATING") {
+        const ratings = values.map(Number).filter(Number.isFinite);
+        if (ratings.length) targetRating = Math.max(targetRating, ...ratings);
+        continue;
+      }
+      if (keyName === "CHEMISTRY_POINTS" || keyName === "ALL_PLAYERS_CHEMISTRY_POINTS") {
+        unsupported.push(keyName);
+        continue;
+      }
+      if (!PLAYER_REQUIREMENT_KEYS.has(keyName)) {
+        unsupported.push(keyName);
+        continue;
+      }
+      if (!count || !values.length) {
+        unsupported.push(`${keyName}(count:${requirement?.count ?? "?"}, values:${values.join("/") || "?"})`);
+        continue;
+      }
+      constraints.push({
+        id: `challenge-${constraints.length}`,
+        label: `${keyName} ${values.join("/")} x${count}`,
+        count,
+        matches: (item) => matchesDynamicRequirement(item, requirement, keyName, values, matchers)
+      });
+    }
+    const configuredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
+    if (configuredSpecialCount) {
+      const minimumRating = Math.max(0, Number(loopDef.requiredSpecialMinRating || 0) || 0);
+      const label = input.requiredSpecialLabel?.(loopDef) || "special";
+      constraints.push({
+        id: "runner-required-special",
+        label: `${label} rating >= ${minimumRating} x${configuredSpecialCount}`,
+        count: configuredSpecialCount,
+        matches: (item) => input.isRequiredSpecialItem?.(item, loopDef) === true && Number(item?.rating || 0) >= minimumRating
+      });
+    }
+    const configuredAllowedSpecial = loopDef.allowedSpecialCount !== void 0 ? Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0) : null;
+    return {
+      requiredPlayerCount,
+      targetRating,
+      constraints,
+      unsupported: [...new Set(unsupported)],
+      maxSpecialCount: configuredAllowedSpecial === null ? loopDef.blockSpecial === false ? requiredPlayerCount : 0 : configuredAllowedSpecial
+    };
+  }
+  function validateRatingSbcModelAgainstItems(model, items = [], challenge = null, options = {}) {
+    const players = (items || []).filter(Boolean);
+    const errors = [];
+    const requiredPlayerCount = Math.max(0, Number(model?.requiredPlayerCount || 0) || 0);
+    const ratings = players.map((item) => Number(item?.rating || 0));
+    const rating = players.length === requiredPlayerCount ? (options.calculateSquadRating || calculateEaSquadRating)(ratings, requiredPlayerCount) : 0;
+    const definitionIds2 = players.map((item) => Number(item?.definitionId || 0)).filter(Boolean);
+    const uniqueDefinitionCount = new Set(definitionIds2).size;
+    if (players.length !== requiredPlayerCount) errors.push(`player-count ${players.length}/${requiredPlayerCount}`);
+    if (definitionIds2.length !== players.length || uniqueDefinitionCount !== players.length) {
+      errors.push(`unique-definitions ${uniqueDefinitionCount}/${players.length}`);
+    }
+    if (players.length === requiredPlayerCount && rating < Number(model?.targetRating || 0)) {
+      errors.push(`team-rating ${rating}/${Number(model?.targetRating || 0)}`);
+    }
+    const constraintResults = (model?.constraints || []).map((constraint) => {
+      const matched = players.filter((item) => {
+        try {
+          return constraint.matches(item);
+        } catch {
+          return false;
+        }
+      }).length;
+      const required2 = Math.max(0, Number(constraint.count || 0) || 0);
+      if (matched < required2) errors.push(`${constraint.label} ${matched}/${required2}`);
+      return { constraint, matched, required: required2 };
+    });
+    const specialCount = players.filter(options.isSpecialItem || (() => false)).length;
+    if (specialCount > Number(model?.maxSpecialCount || 0)) {
+      errors.push(`special-count ${specialCount}/${Number(model?.maxSpecialCount || 0)}`);
+    }
+    let challengeReady = null;
+    if (challenge && typeof challenge.meetsRequirements === "function") {
+      try {
+        challengeReady = challenge.meetsRequirements() === true;
+        if (!challengeReady) errors.push("challenge.meetsRequirements() returned false");
+      } catch (error) {
+        errors.push(`challenge.meetsRequirements() failed: ${error?.message || error}`);
+      }
+    }
+    return {
+      ok: errors.length === 0,
+      errors,
+      players,
+      ratings,
+      rating,
+      specialCount,
+      uniqueDefinitionCount,
+      constraintResults,
+      challengeReady
+    };
+  }
+
+  // src/config/player-pick-discovery.js
+  var DEFAULT_PRIORITY_PILES = Object.freeze(["unassigned", "storage", "transfer", "club"]);
+  var SUPPORTED_REQUIREMENT_KEYS = /* @__PURE__ */ new Set([
+    "PLAYER_QUALITY",
+    "PLAYER_LEVEL",
+    "PLAYER_RARITY",
+    "PLAYER_RARITY_GROUP"
+  ]);
+  function positiveInteger(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : null;
+  }
+  function normalizedText(value) {
+    return String(value ?? "").trim();
+  }
+  function unique(values = []) {
+    return [...new Set(values.filter((value) => value !== void 0 && value !== null && value !== ""))];
+  }
+  function isCompleted(value) {
+    const status = normalizedText(value?.status || value?.state).toUpperCase();
+    return value?.complete === true || value?.completed === true || status === "COMPLETE" || status === "COMPLETED";
+  }
+  function rewardType(reward) {
+    return normalizedText(reward?.type || reward?.rewardType || reward?.kind).toUpperCase().replaceAll(/[^A-Z0-9]+/g, "_");
+  }
+  function isPlayerPickReward(reward) {
+    return reward?.playerPick === true || ["PLAYER_PICK", "PLAYERPICK"].includes(rewardType(reward));
+  }
+  function rewardIdentityValues(reward) {
+    return unique([
+      reward?.resourceId,
+      reward?.itemResourceId,
+      reward?.definitionId,
+      reward?.itemDefinitionId
+    ].map(normalizedText));
+  }
+  function rewardIdentityKey(reward) {
+    const values = rewardIdentityValues(reward);
+    return values.length ? values.join("|") : "";
+  }
+  function readPlayerPickRewardCounts(reward = {}) {
+    const explicitCandidateCount = positiveInteger(reward.candidateCount ?? reward.totalCandidates);
+    const explicitSelectionCount = positiveInteger(reward.selectionCount ?? reward.availablePicks);
+    if (explicitCandidateCount && explicitSelectionCount) {
+      return { candidateCount: explicitCandidateCount, selectionCount: explicitSelectionCount, source: "fields" };
+    }
+    const description = normalizedText(reward.description);
+    const match = /^(\d+)\s+of\s+(\d+)(?:\s|$)/i.exec(description);
+    if (!match) {
+      return {
+        candidateCount: explicitCandidateCount,
+        selectionCount: explicitSelectionCount,
+        source: explicitCandidateCount || explicitSelectionCount ? "partial-fields" : null
+      };
+    }
+    return {
+      candidateCount: explicitCandidateCount || positiveInteger(match[2]),
+      selectionCount: explicitSelectionCount || positiveInteger(match[1]),
+      source: explicitCandidateCount || explicitSelectionCount ? "fields-and-description" : "description"
+    };
+  }
+  function canonicalQuality(value, options = {}) {
+    const text = normalizedText(value).toUpperCase();
+    if (["GOLD", "QUALITY_GOLD", "LEVEL_GOLD"].includes(text)) return "gold";
+    const goldValues = new Set((options.goldQualityValues || [3]).map((entry) => normalizedText(entry)));
+    return goldValues.has(normalizedText(value)) ? "gold" : null;
+  }
+  function canonicalRarity(value, options = {}, keyName = "PLAYER_RARITY") {
+    if (keyName === "PLAYER_RARITY_GROUP") {
+      const rareGroupValues = new Set((options.rareRarityGroupValues || [4]).map((entry) => normalizedText(entry)));
+      return rareGroupValues.has(normalizedText(value)) ? "rare" : null;
+    }
+    const text = normalizedText(value).toUpperCase();
+    if (["COMMON", "NORMAL", "NON_RARE", "NONRARE"].includes(text)) return "common";
+    if (["RARE"].includes(text)) return "rare";
+    const commonValues = new Set((options.commonRarityValues || [0]).map((entry) => normalizedText(entry)));
+    const rareValues = new Set((options.rareRarityValues || [1]).map((entry) => normalizedText(entry)));
+    if (commonValues.has(normalizedText(value))) return "common";
+    if (rareValues.has(normalizedText(value))) return "rare";
+    return null;
+  }
+  function requirementSummary(entry) {
+    return `${entry.keyName || "?"}(count:${entry.count || "?"}, values:${entry.values.join("/") || "?"})`;
+  }
+  function parseChallengeRequirements(challenge, challengeIndex, options = {}) {
+    const challengeLabel = `challenge ${challengeIndex + 1}${challenge?.id ? ` (#${challenge.id})` : ""}`;
+    const requiredPlayerCount = positiveInteger(challenge?.requiredPlayerCount);
+    if (!requiredPlayerCount) {
+      return { ok: false, diagnostics: [`${challengeLabel}: required player count is missing or invalid`] };
+    }
+    const entries = readEligibilityRequirements(challenge, {
+      requiredPlayerCount,
+      eligibilityKeyName: options.eligibilityKeyName
+    });
+    const diagnostics = [];
+    const qualityEntries = [];
+    const rarityEntries = [];
+    if (!entries.length) diagnostics.push(`${challengeLabel}: eligibility requirements are missing`);
+    for (const entry of entries) {
+      if (!SUPPORTED_REQUIREMENT_KEYS.has(entry.keyName)) {
+        diagnostics.push(`${challengeLabel}: unsupported eligibility condition ${requirementSummary(entry)}`);
+        continue;
+      }
+      if (!entry.values.length || !entry.count) {
+        diagnostics.push(`${challengeLabel}: incomplete eligibility condition ${requirementSummary(entry)}`);
+        continue;
+      }
+      if (entry.keyName === "PLAYER_RARITY" || entry.keyName === "PLAYER_RARITY_GROUP") rarityEntries.push(entry);
+      else qualityEntries.push(entry);
+    }
+    if (qualityEntries.length !== 1) {
+      diagnostics.push(`${challengeLabel}: exactly one all-player gold quality condition is required`);
+    } else {
+      const quality = qualityEntries[0];
+      const values = unique(quality.values.map((value) => canonicalQuality(value, options)));
+      if (values.length !== 1 || values[0] !== "gold" || quality.count !== requiredPlayerCount) {
+        diagnostics.push(`${challengeLabel}: quality condition does not prove that all ${requiredPlayerCount} players are gold`);
+      }
+    }
+    const rarityCounts = { common: null, rare: null };
+    for (const entry of rarityEntries) {
+      if (entry.values.length !== 1) {
+        diagnostics.push(`${challengeLabel}: rarity condition is ambiguous: ${requirementSummary(entry)}`);
+        continue;
+      }
+      const rarity = canonicalRarity(entry.values[0], options, entry.keyName);
+      if (!rarity) {
+        diagnostics.push(`${challengeLabel}: unknown ${entry.keyName} encoding ${normalizedText(entry.values[0]) || "?"}`);
+        continue;
+      }
+      if (rarityCounts[rarity] !== null) {
+        diagnostics.push(`${challengeLabel}: duplicate ${rarity} rarity conditions are unsupported`);
+        continue;
+      }
+      rarityCounts[rarity] = entry.count;
+    }
+    if (!rarityEntries.length) {
+      diagnostics.push(`${challengeLabel}: exact common/rare ratio is unavailable`);
+    } else if (rarityCounts.common !== null && rarityCounts.rare !== null) {
+      if (rarityCounts.common + rarityCounts.rare !== requiredPlayerCount) {
+        diagnostics.push(`${challengeLabel}: common/rare counts do not equal required player count`);
+      }
+    } else if (rarityCounts.common !== null) {
+      rarityCounts.rare = requiredPlayerCount - rarityCounts.common;
+    } else if (rarityCounts.rare !== null) {
+      rarityCounts.common = requiredPlayerCount - rarityCounts.rare;
+    }
+    if (rarityCounts.common < 0 || rarityCounts.rare < 0) {
+      diagnostics.push(`${challengeLabel}: rarity count exceeds required player count`);
+    }
+    if (diagnostics.length) return { ok: false, diagnostics };
+    const maxRating = Math.max(1, Math.min(99, Number(options.highGoldThreshold || 82) || 82)) - 1;
+    const requirement = (rarity, count) => ({
+      tier: "gold",
+      rarity,
+      count,
+      maxRating,
+      playerOnly: true,
+      allowSpecial: false,
+      protectHighGold: true,
+      priorityPiles: [...options.priorityPiles || DEFAULT_PRIORITY_PILES]
+    });
+    const requirements = [];
+    if (rarityCounts.rare > 0) requirements.push(requirement("rare", rarityCounts.rare));
+    if (rarityCounts.common > 0) requirements.push(requirement("common", rarityCounts.common));
+    return { ok: true, requiredPlayerCount, requirements };
+  }
+  function remainingCompletions(set) {
+    const completed = Number(set?.timesCompleted);
+    const repeats = Number(set?.repeats);
+    if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats < completed) return null;
+    return Math.max(0, Math.floor(repeats - completed));
+  }
+  function discoveryIdentity(set, reward) {
+    return Object.freeze({
+      setId: positiveInteger(set?.id),
+      rewardKey: rewardIdentityKey(reward),
+      rewardIdentityValues: Object.freeze(rewardIdentityValues(reward))
+    });
+  }
+  function parsePlayerPickSbcSnapshot(input = {}) {
+    const set = input.set || {};
+    const setId = positiveInteger(set.id);
+    const setName = normalizedText(set.name);
+    const diagnostics = [];
+    if (!setId) diagnostics.push("stable SBC Set id is missing");
+    if (!setName) diagnostics.push("SBC Set display name is missing");
+    const playerPickRewards = (set.rewards || []).filter(isPlayerPickReward);
+    if (!playerPickRewards.length) {
+      return { status: "ignored", setId, diagnostics: ["SBC Set has no Player Pick reward"] };
+    }
+    if (playerPickRewards.length !== 1) diagnostics.push(`SBC Set exposes ${playerPickRewards.length} Player Pick rewards`);
+    const reward = playerPickRewards[0] || {};
+    const identity = discoveryIdentity(set, reward);
+    if (!identity.rewardKey) diagnostics.push("stable Player Pick reward identity is missing");
+    const rewardName = normalizedText(reward.name || reward.displayName);
+    if (!rewardName) diagnostics.push("Player Pick reward display name is missing");
+    const rewardCounts = readPlayerPickRewardCounts(reward);
+    const candidateCount = rewardCounts.candidateCount;
+    const selectionCount = rewardCounts.selectionCount;
+    if (!candidateCount) diagnostics.push("Player Pick candidate count is missing or invalid");
+    if (!selectionCount) diagnostics.push("Player Pick selection count is missing or invalid");
+    if (candidateCount && selectionCount && selectionCount > candidateCount) {
+      diagnostics.push("Player Pick selection count exceeds candidate count");
+    }
+    if (isCompleted(set) || remainingCompletions(set) === 0) {
+      return { status: "completed", setId, identity, pickCandidateCount: candidateCount, pickCount: selectionCount, diagnostics };
+    }
+    const challenges = Array.isArray(set.challenges) ? set.challenges : [];
+    if (!challenges.length) diagnostics.push("SBC Set challenge list is missing");
+    const challengeRequirements = [];
+    for (let index = 0; index < challenges.length; index++) {
+      const parsed = parseChallengeRequirements(challenges[index], index, input);
+      if (parsed.ok) challengeRequirements.push(parsed.requirements);
+      else diagnostics.push(...parsed.diagnostics);
+    }
+    if (diagnostics.length) {
+      return {
+        status: "unsupported",
+        setId,
+        identity,
+        pickCandidateCount: candidateCount,
+        pickCount: selectionCount,
+        diagnostics: unique(diagnostics)
+      };
+    }
+    const priorityPiles = [...input.priorityPiles || DEFAULT_PRIORITY_PILES];
+    const loop = {
+      id: `discovered-player-pick-${setId}-${identity.rewardIdentityValues[0]}`,
+      name: setName,
+      strategy: "playerPickSbc",
+      discovered: true,
+      sbcSetIds: [setId],
+      sbcNames: [setName],
+      pickItemResourceIds: [...identity.rewardIdentityValues],
+      pickItemNames: [rewardName],
+      challengeRequirements,
+      priorityPiles,
+      challengesPerPick: challenges.length,
+      pickCandidateCount: candidateCount,
+      pickCount: selectionCount,
+      remainingCompletions: remainingCompletions(set),
+      maxCompletions: 1,
+      useRoundsAsCompletions: true,
+      pricePlatform: normalizedText(input.pricePlatform || "pc").toLowerCase(),
+      discoveryIdentity: identity
+    };
+    if (challengeRequirements.length === 1) {
+      loop.requirements = challengeRequirements[0];
+      delete loop.challengeRequirements;
+    }
+    return { status: "supported", setId, identity, loop, pickCandidateCount: candidateCount, pickCount: selectionCount, diagnostics: [] };
+  }
+  function loopSetIds(loop) {
+    return new Set((loop?.sbcSetIds || []).map(positiveInteger).filter(Boolean));
+  }
+  function loopRewardIds(loop) {
+    return new Set((loop?.pickItemResourceIds || []).map(normalizedText).filter(Boolean));
+  }
+  function matchingPlayerPickLoops(loop, existingLoops = []) {
+    const setIds = loopSetIds(loop);
+    const rewardIds = loopRewardIds(loop);
+    return (existingLoops || []).filter((existing) => {
+      if (existing === loop) return false;
+      const existingSetIds = loopSetIds(existing);
+      const existingRewardIds = loopRewardIds(existing);
+      return [...setIds].some((id) => existingSetIds.has(id)) || [...rewardIds].some((id) => existingRewardIds.has(id));
+    });
+  }
+  function discoverPlayerPickSbcLoops(input = {}) {
+    const loops = [];
+    const results = [];
+    const existingLoops = [...input.existingLoops || []];
+    for (const set of input.sets || []) {
+      const result = parsePlayerPickSbcSnapshot({ ...input, set });
+      const matches = result.status === "supported" ? matchingPlayerPickLoops(result.loop, [...existingLoops, ...loops]) : [];
+      if (matches.length) {
+        results.push({
+          ...result,
+          status: "duplicate",
+          loop: null,
+          discoveredLoop: result.loop,
+          matchingLoopIds: matches.map((loop) => normalizedText(loop?.id)).filter(Boolean),
+          diagnostics: ["matching static or discovered Player Pick already exists"]
+        });
+        continue;
+      }
+      results.push(result);
+      if (result.status === "supported") loops.push(result.loop);
+    }
+    return { loops, results };
+  }
+  function mergeScannedPlayerPickMetadata(configuredLoop, discoveredLoop) {
+    if (configuredLoop?.strategy !== "playerPickSbc" || discoveredLoop?.strategy !== "playerPickSbc") return null;
+    const merged = {
+      ...configuredLoop,
+      sbcSetIds: [...discoveredLoop.sbcSetIds || []],
+      sbcNames: unique([...discoveredLoop.sbcNames || [], ...configuredLoop.sbcNames || []]),
+      pickItemResourceIds: [...discoveredLoop.pickItemResourceIds || []],
+      pickItemNames: unique([...discoveredLoop.pickItemNames || [], ...configuredLoop.pickItemNames || []]),
+      priorityPiles: [...discoveredLoop.priorityPiles || configuredLoop.priorityPiles || DEFAULT_PRIORITY_PILES],
+      challengesPerPick: discoveredLoop.challengesPerPick,
+      pickCandidateCount: discoveredLoop.pickCandidateCount,
+      pickCount: discoveredLoop.pickCount,
+      remainingCompletions: discoveredLoop.remainingCompletions,
+      pricePlatform: discoveredLoop.pricePlatform || configuredLoop.pricePlatform,
+      discoveryIdentity: discoveredLoop.discoveryIdentity,
+      scannedMetadata: true
+    };
+    if (Array.isArray(discoveredLoop.challengeRequirements)) {
+      merged.challengeRequirements = discoveredLoop.challengeRequirements.map(
+        (requirements) => requirements.map((requirement) => ({ ...requirement, priorityPiles: [...requirement.priorityPiles || []] }))
+      );
+      delete merged.requirements;
+    } else {
+      merged.requirements = (discoveredLoop.requirements || []).map((requirement) => ({
+        ...requirement,
+        priorityPiles: [...requirement.priorityPiles || []]
+      }));
+      delete merged.challengeRequirements;
+    }
+    return merged;
+  }
+  function buildPlayerPickDiscoverySession(input = {}) {
+    const configuredLoops = [...input.configuredLoops || []];
+    const discovery = discoverPlayerPickSbcLoops({
+      ...input,
+      existingLoops: configuredLoops
+    });
+    const loopOverrides = {};
+    const overrideDiagnostics = [];
+    if (input.preferScannedMetadata === true) {
+      for (const result of discovery.results) {
+        if (result.status !== "duplicate" || !result.discoveredLoop) continue;
+        const matches = matchingPlayerPickLoops(result.discoveredLoop, configuredLoops).filter((loop) => loop?.strategy === "playerPickSbc");
+        if (matches.length !== 1) {
+          if (matches.length > 1) {
+            overrideDiagnostics.push(`scanned Pick #${result.setId || "?"} matches multiple configured loops: ${matches.map((loop) => loop.id).join(", ")}`);
+          }
+          continue;
+        }
+        const merged = mergeScannedPlayerPickMetadata(matches[0], result.discoveredLoop);
+        if (merged) loopOverrides[matches[0].id] = merged;
+      }
+    }
+    const configuredSessionLoops = configuredLoops.map((loop) => loopOverrides[loop?.id] || loop);
+    const discoveredLoops = [...discovery.loops];
+    const loopDefs = [...configuredSessionLoops, ...discoveredLoops];
+    const requestedSelection = normalizedText(input.selectedId);
+    const selectedId = requestedSelection === "custom" || loopDefs.some((loop) => loop?.id === requestedSelection) ? requestedSelection : loopDefs[0]?.id || null;
+    return {
+      ...discovery,
+      configuredSessionLoops,
+      discoveredLoops,
+      loopOverrides,
+      overrideDiagnostics,
+      loopDefs,
+      selectedId
+    };
+  }
+
+  // src/adapters/browser/dom.js
+  function createDomAdapter(documentObject = globalThis.document, runtime = globalThis) {
+    function query2(selector) {
+      return documentObject?.querySelector?.(selector) || null;
+    }
+    function queryAll(selector) {
+      return Array.from(documentObject?.querySelectorAll?.(selector) || []);
+    }
+    function create(tagName) {
+      if (!documentObject?.createElement) throw new Error("DOM createElement is unavailable");
+      return documentObject.createElement(tagName);
+    }
+    function appendToBody(element) {
+      if (!documentObject?.body?.appendChild) throw new Error("DOM body is unavailable");
+      documentObject.body.appendChild(element);
+    }
+    function appendToHead(element) {
+      if (!documentObject?.head?.appendChild) throw new Error("DOM head is unavailable");
+      documentObject.head.appendChild(element);
+    }
+    function eventConstructor(type) {
+      return type === "pointer" ? runtime?.PointerEvent || globalThis.PointerEvent : runtime?.MouseEvent || globalThis.MouseEvent;
+    }
+    function createLegacyMouseEvent(type) {
+      const event = documentObject?.createEvent?.("MouseEvents");
+      if (!event) return null;
+      event.initMouseEvent(type, true, true, runtime, 1, 0, 0, 1, 1, false, false, false, false, 0, null);
+      return event;
+    }
+    function compactText(element) {
+      return String(element?.textContent || "").replace(/\s+/g, " ").trim();
+    }
+    function isClickable(element) {
+      if (!element) return false;
+      if (element.disabled || element.classList?.contains?.("disabled")) return false;
+      const rect = element.getBoundingClientRect?.();
+      if (rect && (!rect.width || !rect.height)) return false;
+      return true;
+    }
+    function click(element) {
+      if (!element) return false;
+      try {
+        element.scrollIntoView?.({ block: "center", inline: "center" });
+      } catch {
+      }
+      try {
+        element.focus?.();
+      } catch {
+      }
+      const fire = (Constructor, type, extra = {}) => {
+        try {
+          if (typeof Constructor === "function") {
+            element.dispatchEvent(new Constructor(type, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              ...extra
+            }));
+            return true;
+          }
+        } catch {
+        }
+        try {
+          const event = createLegacyMouseEvent(type);
+          if (!event) return false;
+          element.dispatchEvent(event);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      fire(eventConstructor("pointer"), "pointerdown", { pointerId: 1, pointerType: "mouse", isPrimary: true });
+      fire(eventConstructor("mouse"), "mousedown", { button: 0, buttons: 1 });
+      fire(eventConstructor("pointer"), "pointerup", { pointerId: 1, pointerType: "mouse", isPrimary: true });
+      fire(eventConstructor("mouse"), "mouseup", { button: 0, buttons: 0 });
+      fire(eventConstructor("mouse"), "click", { button: 0, buttons: 0 });
+      try {
+        element.click?.();
+      } catch {
+      }
+      return true;
+    }
+    function searchText(element) {
+      return [
+        compactText(element),
+        element?.getAttribute?.("aria-label"),
+        element?.getAttribute?.("title"),
+        element?.getAttribute?.("data-id"),
+        element?.value
+      ].filter(Boolean).join(" ");
+    }
+    function findButtonByText(patterns, matches) {
+      return queryAll("button").find(
+        (button) => matches(compactText(button), patterns) && isClickable(button)
+      ) || null;
+    }
+    function findClickableByText(patterns, matches, root = documentObject) {
+      const selector = [
+        "button",
+        '[role="button"]',
+        "a",
+        'input[type="button"]',
+        'input[type="submit"]',
+        ".call-to-action",
+        '[class*="call-to-action"]',
+        '[class*="btn"]',
+        '[class*="Button"]'
+      ].join(",");
+      return Array.from(root?.querySelectorAll?.(selector) || []).filter(isClickable).sort((a, b) => searchText(a).length - searchText(b).length).find((element) => matches(searchText(element), patterns)) || null;
+    }
+    function keyStroke(key = "Alt", code = "AltRight", options = {}) {
+      const KeyboardEventConstructor = runtime?.KeyboardEvent || globalThis.KeyboardEvent;
+      const init = {
+        key,
+        code,
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        location: code === "AltRight" ? 2 : 0,
+        altKey: code === "AltRight",
+        ...options
+      };
+      for (const target of [documentObject?.activeElement, documentObject?.body, documentObject, runtime].filter(Boolean)) {
+        try {
+          target.dispatchEvent(new KeyboardEventConstructor("keydown", init));
+        } catch {
+        }
+        try {
+          target.dispatchEvent(new KeyboardEventConstructor("keyup", init));
+        } catch {
+        }
+      }
+    }
+    return Object.freeze({
+      appendToBody,
+      appendToHead,
+      click,
+      compactText,
+      create,
+      createLegacyMouseEvent,
+      eventConstructor,
+      findButtonByText,
+      findClickableByText,
+      isClickable,
+      keyStroke,
+      query: query2,
+      queryAll,
+      searchText
+    });
+  }
+
+  // src/adapters/browser/http.js
+  function responseError(status) {
+    return new Error(`HTTP ${status}`);
+  }
+  function createHttpAdapter(options = {}) {
+    const gmRequest = options.gmRequest;
+    const fetchImpl = options.fetchImpl;
+    const runtimeFallback = options.runtimeFallback;
+    function getText(url, requestOptions = {}) {
+      const headers = requestOptions.headers || void 0;
+      const timeout = Math.max(1, Number(requestOptions.timeout || 1e4) || 1e4);
+      if (typeof gmRequest === "function") {
+        return new Promise((resolve, reject) => {
+          const request = {
+            method: "GET",
+            url,
+            nocache: true,
+            onload: (response) => {
+              if (response.status >= 200 && response.status < 300) resolve(response.responseText);
+              else reject(responseError(response.status));
+            },
+            onerror: () => reject(new Error("request failed")),
+            ontimeout: () => reject(new Error("request timed out")),
+            timeout
+          };
+          if (headers) request.headers = headers;
+          if (requestOptions.sendCookies !== void 0) request.anonymous = requestOptions.sendCookies !== true;
+          gmRequest(request);
+        });
+      }
+      if (requestOptions.useRuntimeFallback === true && typeof runtimeFallback === "function") {
+        return Promise.resolve(runtimeFallback(url, requestOptions));
+      }
+      if (typeof fetchImpl !== "function") return Promise.reject(new Error("HTTP transport is unavailable"));
+      const fetchOptions = { cache: "no-store" };
+      if (headers) fetchOptions.headers = headers;
+      if (requestOptions.sendCookies !== void 0) {
+        fetchOptions.credentials = requestOptions.sendCookies === true ? "include" : "omit";
+      }
+      return fetchImpl(url, fetchOptions).then((response) => {
+        if (!response.ok) throw responseError(response.status);
+        return response.text();
+      });
+    }
+    return Object.freeze({ getText });
+  }
+
+  // src/adapters/browser/page-runtime.js
+  var MAIN_FUT_SELECTORS = [
+    ".ut-tab-bar-item.icon-home",
+    ".ut-navigation-container-view--content",
+    ".ut-navigation-container-view",
+    ".ut-navigation-bar-view",
+    ".ut-tab-bar",
+    ".ut-home-hub-view",
+    ".ut-store-hub-view",
+    ".ut-sbc-hub-view",
+    ".ut-sbc-set-view",
+    ".ut-sbc-challenges-view",
+    ".ut-squad-hub-view",
+    ".ut-club-view",
+    ".ut-transfer-list-view",
+    ".ut-unassigned-items-view"
+  ];
+  function controllerName(controller) {
+    return String(controller?.className || controller?.constructor?.name || "");
+  }
+  function isMainFutControllerName(name) {
+    return /^UT(Home|Store|SBC|Squad|Club|Transfer|Unassigned|Evolutions|Objectives|Market|Pack)/.test(String(name || "")) && !/Loading|Splash|Login|Preload|Startup/i.test(String(name || ""));
+  }
+  function createPageRuntimeAdapter(runtime, dom) {
+    function currentController() {
+      try {
+        return runtime.getAppMain().getRootViewController().getPresentedViewController().getCurrentViewController().getCurrentController();
+      } catch {
+        return null;
+      }
+    }
+    function currentControllerName() {
+      return controllerName(currentController());
+    }
+    function navigationController(controller = currentController()) {
+      try {
+        return controller?.getNavigationController?.() || controller?.navigationController || null;
+      } catch {
+        return null;
+      }
+    }
+    function controllerRoot(controller) {
+      try {
+        return controller?.getView?.()?.getRootElement?.() || controller?.getView?.()?.getRootElement || null;
+      } catch {
+        return null;
+      }
+    }
+    function shieldShowing(shieldName) {
+      try {
+        return runtime?.[shieldName]?.isShowing?.() === true;
+      } catch {
+        return false;
+      }
+    }
+    function loadingShieldShowing() {
+      return shieldShowing("gClickShield");
+    }
+    function popupShieldShowing() {
+      return shieldShowing("gPopupClickShield");
+    }
+    function popupControllerCandidates() {
+      const shield = runtime?.gPopupClickShield;
+      if (!shield) return [];
+      const candidates = [];
+      for (const method of ["getActivePopup", "getActivePopupController", "getPopup", "getPopupController"]) {
+        try {
+          if (typeof shield?.[method] === "function") candidates.push(shield[method]());
+        } catch {
+        }
+      }
+      for (const property of [
+        "activePopup",
+        "_activePopup",
+        "popup",
+        "_popup",
+        "popupController",
+        "_popupController",
+        "activeController",
+        "_activeController",
+        "presentedController",
+        "_presentedController"
+      ]) {
+        try {
+          candidates.push(shield?.[property]);
+        } catch {
+        }
+      }
+      try {
+        candidates.push(...Object.values(shield).slice(0, 80));
+      } catch {
+      }
+      return candidates.filter(Boolean);
+    }
+    function gotoUnassigned(controller = currentController()) {
+      if (typeof controller?.gotoUnassigned === "function") {
+        controller.gotoUnassigned();
+        return true;
+      }
+      const fallback = runtime?.UTStoreViewController?.prototype?.gotoUnassigned;
+      if (typeof fallback === "function") {
+        fallback.call(controller);
+        return true;
+      }
+      return false;
+    }
+    function popViewController(animated = true, controller = currentController()) {
+      const navigation = navigationController(controller);
+      if (typeof navigation?.popViewController !== "function") return false;
+      navigation.popViewController(animated);
+      return true;
+    }
+    function origin() {
+      return String(runtime?.location?.origin || globalThis.location?.origin || "");
+    }
+    function servicesReady() {
+      return !!(runtime?.services?.Store && runtime?.services?.SBC && runtime?.services?.Item && runtime?.repositories?.Store && runtime?.repositories?.Item);
+    }
+    function hasMainDom() {
+      return MAIN_FUT_SELECTORS.some((selector) => dom?.query?.(selector));
+    }
+    function isReady() {
+      return servicesReady() && (hasMainDom() || isMainFutControllerName(currentControllerName()));
+    }
+    return Object.freeze({
+      controllerName,
+      controllerRoot,
+      currentController,
+      currentControllerName,
+      hasMainDom,
+      isMainFutControllerName,
+      isReady,
+      loadingShieldShowing,
+      navigationController,
+      popViewController,
+      gotoUnassigned,
+      origin,
+      popupControllerCandidates,
+      popupShieldShowing,
+      servicesReady
+    });
+  }
+
+  // src/adapters/browser/storage.js
+  function createStorageAdapter(storage) {
+    if (!storage) throw new Error("Browser storage is unavailable");
+    function get(key, fallback = null) {
+      const value = storage.getItem(String(key));
+      return value === null ? fallback : value;
+    }
+    function set(key, value) {
+      storage.setItem(String(key), String(value));
+    }
+    function remove(key) {
+      storage.removeItem(String(key));
+    }
+    function getJson(key, fallback = null) {
+      const value = get(key, null);
+      if (value === null) return fallback;
+      try {
+        return JSON.parse(value);
+      } catch {
+        return fallback;
+      }
+    }
+    function setJson(key, value) {
+      set(key, JSON.stringify(value));
+    }
+    function entries(limit = 250) {
+      const result = [];
+      const max = Math.max(0, Math.min(1e3, Number(limit) || 0));
+      let length = 0;
+      try {
+        length = Number(storage.length || 0);
+      } catch {
+      }
+      for (let index = 0; index < Math.min(length, max); index++) {
+        try {
+          const key = storage.key(index);
+          if (key === null || key === void 0) continue;
+          result.push([String(key), storage.getItem(key)]);
+        } catch {
+        }
+      }
+      return result;
+    }
+    return Object.freeze({ get, set, remove, getJson, setJson, entries });
+  }
+
+  // src/adapters/browser/user-effects.js
+  function createUserEffectsAdapter(runtime = globalThis, documentObject = runtime?.document || globalThis.document) {
+    async function copyText(text) {
+      const value = String(text || "");
+      try {
+        await runtime?.navigator?.clipboard?.writeText?.(value);
+        if (typeof runtime?.navigator?.clipboard?.writeText === "function") return true;
+      } catch {
+      }
+      if (!documentObject?.createElement || !documentObject?.body?.appendChild) {
+        throw new Error("Clipboard fallback is unavailable");
+      }
+      const textarea = documentObject.createElement("textarea");
+      textarea.value = value;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      documentObject.body.appendChild(textarea);
+      textarea.select?.();
+      const copied = documentObject.execCommand?.("copy") !== false;
+      textarea.remove?.();
+      if (!copied) throw new Error("Clipboard copy failed");
+      return true;
+    }
+    function downloadText(text, filename) {
+      const BlobConstructor = runtime?.Blob || globalThis.Blob;
+      const urlApi = runtime?.URL || globalThis.URL;
+      if (!BlobConstructor || !urlApi?.createObjectURL || !documentObject?.createElement || !documentObject?.body?.appendChild) {
+        throw new Error("Download is unavailable");
+      }
+      const blob = new BlobConstructor([String(text || "")], { type: "text/plain;charset=utf-8" });
+      const url = urlApi.createObjectURL(blob);
+      const anchor = documentObject.createElement("a");
+      anchor.href = url;
+      anchor.download = String(filename || "download.txt");
+      documentObject.body.appendChild(anchor);
+      try {
+        anchor.click?.();
+      } finally {
+        anchor.remove?.();
+        urlApi.revokeObjectURL?.(url);
+      }
+      return true;
+    }
+    return Object.freeze({ copyText, downloadText });
+  }
+
+  // src/adapters/browser/wait.js
+  function createWaitAdapter(options = {}) {
+    const now = options.now || Date.now;
+    const sleep = options.sleep;
+    const stopPoint = options.stopPoint;
+    const pageRuntime = options.pageRuntime;
+    const log = options.log || (() => {
+    });
+    if (typeof sleep !== "function") throw new TypeError("sleep is required");
+    if (typeof stopPoint !== "function") throw new TypeError("stopPoint is required");
+    async function until(predicate, timeoutMs = 15e3, label = "condition") {
+      const start = now();
+      while (now() - start < timeoutMs) {
+        stopPoint();
+        try {
+          const value = predicate();
+          if (value) return value;
+        } catch {
+        }
+        await sleep(250);
+      }
+      throw new Error(`Timed out waiting for ${label}`);
+    }
+    async function appReady() {
+      return until(() => pageRuntime?.isReady?.(), 3e4, "FUT main UI");
+    }
+    async function loadingEnd(stableMs = 700, timeoutMs = 3e4) {
+      const start = now();
+      while (now() - start < timeoutMs) {
+        stopPoint();
+        if (!pageRuntime?.loadingShieldShowing?.()) {
+          await sleep(stableMs);
+          if (!pageRuntime?.loadingShieldShowing?.()) return true;
+        }
+        await sleep(250);
+      }
+      log("Loading shield wait timed out; continuing");
+      return false;
+    }
+    function observableOnce(observable, controller, timeoutMs = 2e4, label = "observable") {
+      return new Promise((resolve, reject) => {
+        let done = false;
+        const timeoutId = setTimeout(() => {
+          if (done) return;
+          done = true;
+          reject(new Error(`${label} timed out`));
+        }, timeoutMs);
+        try {
+          const observedController = controller || pageRuntime?.currentController?.();
+          observable.observe(observedController, (sender, result) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timeoutId);
+            try {
+              sender?.unobserve?.(controller || pageRuntime?.currentController?.());
+            } catch {
+            }
+            resolve(result);
+          });
+        } catch (error) {
+          clearTimeout(timeoutId);
+          reject(error);
+        }
+      });
+    }
+    return Object.freeze({ appReady, loadingEnd, observableOnce, until });
+  }
+
+  // src/adapters/ea/fsu.js
+  var ROOT_NAMES = [
+    "FSU",
+    "fsu",
+    "FUTEnhancer",
+    "FCEnhancer",
+    "Enhancer",
+    "enhancer",
+    "__FSU",
+    "__FUTEnhancer",
+    "__FCEnhancer"
+  ];
+  function safeRead2(holder, key) {
+    try {
+      return holder?.[key];
+    } catch {
+      return void 0;
+    }
+  }
+  function boolFromAny2(value) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+    if (typeof value === "string") {
+      const text = value.trim().toLowerCase();
+      if (["true", "1", "yes", "on", "enabled", "enable"].includes(text)) return true;
+      if (["false", "0", "no", "off", "disabled", "disable"].includes(text)) return false;
+    }
+    return null;
+  }
+  function numberListFromAny2(value, isInspectableObject2, depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
+    if (depth > 5) return [];
+    if (Array.isArray(value)) {
+      if (seen.has(value)) return [];
+      seen.add(value);
+      return value.flatMap((entry) => numberListFromAny2(entry, isInspectableObject2, depth + 1, seen)).filter((entry, index, list) => Number.isFinite(entry) && list.indexOf(entry) === index);
+    }
+    if (typeof value === "number" && Number.isFinite(value)) return [Number(value)];
+    if (typeof value === "string") return (value.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
+    if (!isInspectableObject2(value)) return [];
+    if (seen.has(value)) return [];
+    seen.add(value);
+    return Object.keys(value).slice(0, 250).flatMap((key) => numberListFromAny2(safeRead2(value, key), isInspectableObject2, depth + 1, seen)).filter((entry, index, list) => Number.isFinite(entry) && list.indexOf(entry) === index);
+  }
+  function uniquePositiveNumbers2(values = []) {
+    return values.map(Number).filter((value) => Number.isFinite(value) && value > 0).filter((value, index, list) => list.indexOf(value) === index);
+  }
+  function cloneDefaults() {
+    return {
+      ...FSU_COMPAT_DEFAULTS,
+      excludedLeagueIds: [...FSU_COMPAT_DEFAULTS.excludedLeagueIds],
+      goldRange: [...FSU_COMPAT_DEFAULTS.goldRange],
+      lockedItemIds: [...FSU_COMPAT_DEFAULTS.lockedItemIds],
+      lockedDefinitionIds: [...FSU_COMPAT_DEFAULTS.lockedDefinitionIds]
+    };
+  }
+  function createFsuAdapter(runtime, options = {}) {
+    const documentObject = options.documentObject || runtime?.document || globalThis.document;
+    const localStorage = options.localStorage || null;
+    const sessionStorage = options.sessionStorage || null;
+    function isInspectableObject2(value) {
+      if (!value || typeof value !== "object") return false;
+      if (value === runtime || value === documentObject || value === documentObject?.body) return false;
+      const tag = Object.prototype.toString.call(value);
+      return tag === "[object Object]" || tag === "[object Array]";
+    }
+    function readInfoSettings() {
+      const info = safeRead2(runtime, "info");
+      const build = safeRead2(info, "build");
+      if (!isInspectableObject2(build)) return null;
+      const knownBuildKeys = [
+        "ignorepos",
+        "untradeable",
+        "league",
+        "flag",
+        "academy",
+        "strictlypcik",
+        "comprange",
+        "comprare",
+        "firststorage",
+        "sbfirstcommon"
+      ];
+      if (!knownBuildKeys.some((key) => safeRead2(build, key) !== void 0)) return null;
+      const setCandidate = safeRead2(info, "set");
+      const set = isInspectableObject2(setCandidate) ? setCandidate : {};
+      const rawGoldenMax = Number(safeRead2(set, "goldenrange"));
+      const goldenMax = Number.isFinite(rawGoldenMax) && rawGoldenMax >= 75 && rawGoldenMax <= 99 ? rawGoldenMax : FSU_COMPAT_DEFAULTS.goldRange[1];
+      const readBoolean = (key, fallback) => {
+        const value = boolFromAny2(safeRead2(build, key));
+        return value === null ? fallback : value;
+      };
+      return {
+        ...cloneDefaults(),
+        ignorePlayerPosition: readBoolean("ignorepos", FSU_COMPAT_DEFAULTS.ignorePlayerPosition),
+        onlyUntradeable: readBoolean("untradeable", FSU_COMPAT_DEFAULTS.onlyUntradeable),
+        excludeDesignatedLeagues: readBoolean("league", FSU_COMPAT_DEFAULTS.excludeDesignatedLeagues),
+        excludedLeagueIds: uniquePositiveNumbers2(numberListFromAny2(safeRead2(set, "shield_league"), isInspectableObject2)),
+        useRarityPlayer: readBoolean("flag", FSU_COMPAT_DEFAULTS.useRarityPlayer),
+        excludeEvolution: readBoolean("academy", FSU_COMPAT_DEFAULTS.excludeEvolution),
+        playerPickStrictCommonRare: readBoolean("strictlypcik", FSU_COMPAT_DEFAULTS.playerPickStrictCommonRare),
+        priorityRareWithinGoldRange: readBoolean("comprange", FSU_COMPAT_DEFAULTS.priorityRareWithinGoldRange),
+        priorityNonSpecialPlayers: readBoolean("comprare", FSU_COMPAT_DEFAULTS.priorityNonSpecialPlayers),
+        priorityStoragePlayers: readBoolean("firststorage", FSU_COMPAT_DEFAULTS.priorityStoragePlayers),
+        silverBronzePrioritizeNormal: readBoolean("sbfirstcommon", FSU_COMPAT_DEFAULTS.silverBronzePrioritizeNormal),
+        goldRange: [75, goldenMax],
+        detected: true,
+        source: "window.info.build/set"
+      };
+    }
+    function namedRoots(includeDynamic = true) {
+      const roots = [];
+      for (const name of ROOT_NAMES) {
+        const value = safeRead2(runtime, name);
+        if (isInspectableObject2(value)) roots.push([name, value]);
+      }
+      if (includeDynamic) {
+        let keys = [];
+        try {
+          keys = Object.keys(runtime);
+        } catch {
+        }
+        keys.filter((key) => /fsu|enhancer/i.test(key)).slice(0, 40).forEach((key) => {
+          const value = safeRead2(runtime, key);
+          if (isInspectableObject2(value)) roots.push([key, value]);
+        });
+      }
+      return roots;
+    }
+    function readWindowSettings() {
+      const infoSettings = readInfoSettings();
+      if (infoSettings) return infoSettings;
+      const seen = /* @__PURE__ */ new WeakSet();
+      for (const [name, root] of namedRoots(true)) {
+        if (seen.has(root)) continue;
+        seen.add(root);
+        const settings = normalizeFsuSettings(root, `window.${name}`);
+        if (settings) return settings;
+      }
+      return null;
+    }
+    function readWindowLockedPlayers() {
+      const info = safeRead2(runtime, "info");
+      const state = safeRead2(runtime, "state");
+      const page = safeRead2(state, "page");
+      const pageInfo = safeRead2(page, "info");
+      const known = [
+        ["window.info.lock", safeRead2(info, "lock")],
+        ["window.info.lockedPlayers", safeRead2(info, "lockedPlayers")],
+        ["window.info.lockPlayers", safeRead2(info, "lockPlayers")],
+        ["window.info.playerLock", safeRead2(info, "playerLock")],
+        ["window.info.protectedPlayers", safeRead2(info, "protectedPlayers")],
+        ["window.state.page.info.lock", safeRead2(pageInfo, "lock")]
+      ];
+      const combined = { itemIds: [], definitionIds: [], sources: [] };
+      for (const [path, value] of known) {
+        const locked = normalizeLockedPlayerIds(value, path);
+        combined.itemIds.push(...locked.itemIds);
+        combined.definitionIds.push(...locked.definitionIds);
+        combined.sources.push(...locked.sources);
+      }
+      for (const [name, root] of namedRoots(false)) {
+        const locked = normalizeLockedPlayerIds(root, `window.${name}`);
+        combined.itemIds.push(...locked.itemIds);
+        combined.definitionIds.push(...locked.definitionIds);
+        combined.sources.push(...locked.sources);
+      }
+      return {
+        itemIds: uniquePositiveNumbers2(combined.itemIds),
+        definitionIds: uniquePositiveNumbers2(combined.definitionIds),
+        sources: [...new Set(combined.sources)].slice(0, 8)
+      };
+    }
+    function readLockedPlayers() {
+      const windowLocked = readWindowLockedPlayers();
+      const localLocked = readFsuLockedPlayersFromStorage(localStorage, "localStorage");
+      const sessionLocked = readFsuLockedPlayersFromStorage(sessionStorage, "sessionStorage");
+      return {
+        itemIds: uniquePositiveNumbers2([
+          ...windowLocked.itemIds || [],
+          ...localLocked.itemIds || [],
+          ...sessionLocked.itemIds || []
+        ]),
+        definitionIds: uniquePositiveNumbers2([
+          ...windowLocked.definitionIds || [],
+          ...localLocked.definitionIds || [],
+          ...sessionLocked.definitionIds || []
+        ]),
+        sources: [.../* @__PURE__ */ new Set([
+          ...windowLocked.sources || [],
+          ...localLocked.sources || [],
+          ...sessionLocked.sources || []
+        ])].slice(0, 8)
+      };
+    }
+    function snapshot(settingsOverride = null) {
+      const settings = settingsOverride || readWindowSettings() || readFsuSettingsFromStorage(localStorage, "localStorage") || readFsuSettingsFromStorage(sessionStorage, "sessionStorage") || cloneDefaults();
+      const locked = readLockedPlayers();
+      return mergeLockedPlayersIntoSettings(
+        settings,
+        locked,
+        locked.itemIds.length || locked.definitionIds.length ? "locked-players" : ""
+      );
+    }
+    return Object.freeze({ snapshot });
+  }
+
   // src/domain/contracts.js
-  var INVENTORY_PILES = Object.freeze(["unassigned", "storage", "transfer", "club"]);
+  var INVENTORY_PILES2 = Object.freeze(["unassigned", "storage", "transfer", "club"]);
   function finiteNumber(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
@@ -279,13 +2915,13 @@
   }
   function createInventorySnapshot(input = {}) {
     const piles = {};
-    for (const pile of INVENTORY_PILES) {
+    for (const pile of INVENTORY_PILES2) {
       piles[pile] = Object.freeze((input.piles?.[pile] || []).map(
         (item) => item?.ref ? Object.freeze({ ...cloneSerializable(item), pile, ref: createItemRef(item.ref, pile) }) : createItemSnapshot(item, pile)
       ));
     }
     const capacities = {};
-    for (const pile of INVENTORY_PILES) {
+    for (const pile of INVENTORY_PILES2) {
       const capacity = input.capacities?.[pile] || {};
       const used = finiteNumber(capacity.used, piles[pile].length);
       const max = Number.isFinite(Number(capacity.max)) ? Number(capacity.max) : null;
@@ -452,6 +3088,7 @@
   function createEaInventoryAdapter(runtime, options = {}) {
     if (!runtime?.repositories?.Item) throw new Error("EA Item repository is unavailable");
     const repository = runtime.repositories.Item;
+    const service = runtime?.services?.Item;
     function readPile(pile) {
       if (pile === "unassigned") {
         try {
@@ -462,29 +3099,48 @@
       }
       if (pile === "storage") {
         try {
-          return Array.from(repository.getStorageItems?.() || []);
+          if (typeof repository.getStorageItems === "function") {
+            return Array.from(repository.getStorageItems() || []);
+          }
         } catch {
-          return collectionValues(repository.storage);
         }
+        try {
+          if (typeof repository.getStorage === "function") {
+            return collectionValues(repository.getStorage());
+          }
+        } catch {
+        }
+        return collectionValues(repository.storage);
       }
       if (pile === "transfer") {
         try {
-          return Array.from(repository.getTransferItems?.() || []);
+          if (typeof repository.getTransferItems === "function") {
+            return Array.from(repository.getTransferItems() || []);
+          }
         } catch {
-          return collectionValues(repository.transfer);
         }
+        return collectionValues(repository.transfer);
       }
       if (pile === "club") {
         return collectionValues(repository.club?.items).concat(collectionValues(runtime.services?.Item?.itemDao?.itemRepo?.club?.items));
       }
       return [];
     }
-    function capacity(pile, rawItems) {
-      const pileValue = runtime.ItemPile?.[pile.toUpperCase()] ?? pile;
+    function pileValue(pile) {
+      return runtime.ItemPile?.[String(pile || "").toUpperCase()] ?? pile;
+    }
+    function preparePurchasedItem(item) {
+      if (!item || typeof item !== "object") return item;
+      item.pile = pileValue("purchased");
+      item.injuryType = runtime.PlayerInjury?.NONE ?? 0;
+      return item;
+    }
+    function capacity(pile, rawItems = readPile(pile)) {
+      const resolvedPile = pileValue(pile);
       let max = null;
       let used = rawItems.length;
       try {
-        const value = Number(repository.getPileSize?.(pileValue));
+        const value = Number(repository.getPileSize?.(resolvedPile));
         if (Number.isFinite(value)) max = value;
       } catch {
       }
@@ -493,23 +3149,54 @@
         if (Number.isFinite(fallback)) max = fallback;
       }
       try {
-        const value = Number(repository.numItemsInCache?.(pileValue));
+        const value = Number(repository.numItemsInCache?.(resolvedPile));
         if (Number.isFinite(value)) used = value;
       } catch {
       }
-      return { max, used };
+      return { max, used, free: max === null ? null : Math.max(0, max - used) };
+    }
+    function requestUnassigned() {
+      if (typeof service?.requestUnassignedItems !== "function") {
+        throw new Error("EA Unassigned refresh is unavailable");
+      }
+      return service.requestUnassignedItems();
+    }
+    function refreshActions(pile) {
+      const resolvedPile = pileValue(pile);
+      const specificNames = {
+        club: ["requestClubItems"],
+        storage: ["requestStorageItems", "requestSBCStorageItems"],
+        transfer: ["requestTransferItems"]
+      }[pile] || [];
+      const genericNames = ["requestItems", "requestPileItems", "requestItemsForPile", "requestItemsByPile"];
+      return [
+        ...specificNames.map((methodName) => ({
+          label: `Item.${methodName}`,
+          methodName,
+          invoke: () => service[methodName]()
+        })),
+        ...genericNames.map((methodName) => ({
+          label: `${pile} via Item.${methodName}`,
+          methodName,
+          invoke: () => service[methodName](resolvedPile)
+        }))
+      ].filter((action2) => typeof service?.[action2.methodName] === "function");
+    }
+    function move(items, pile, allowStorage = true) {
+      if (typeof service?.move !== "function") throw new Error("EA Item move is unavailable");
+      return service.move(items, pile, allowStorage);
     }
     function snapshot() {
-      const rawPiles = Object.fromEntries(INVENTORY_PILES.map((pile) => [pile, readPile(pile)]));
+      const rawPiles = Object.fromEntries(INVENTORY_PILES2.map((pile) => [pile, readPile(pile)]));
       return createInventorySnapshot({
-        piles: Object.fromEntries(INVENTORY_PILES.map((pile) => [pile, rawPiles[pile].map((item) => toSnapshot(item, pile))])),
-        capacities: Object.fromEntries(INVENTORY_PILES.map((pile) => [pile, capacity(pile, rawPiles[pile])]))
+        piles: Object.fromEntries(INVENTORY_PILES2.map((pile) => [pile, rawPiles[pile].map((item) => toSnapshot(item, pile))])),
+        capacities: Object.fromEntries(INVENTORY_PILES2.map((pile) => [pile, capacity(pile, rawPiles[pile])]))
       });
     }
-    function resolveItem(ref, preferredPiles = INVENTORY_PILES) {
+    function resolveItem(ref, preferredPiles = INVENTORY_PILES2) {
       const id = Number(ref?.id || 0);
       const definitionId = Number(ref?.definitionId || 0);
-      const piles = [...new Set([ref?.pile, ...preferredPiles || []].filter((pile) => INVENTORY_PILES.includes(pile)))];
+      const piles = [...new Set([ref?.pile, ...preferredPiles || []].filter((pile) => INVENTORY_PILES2.includes(pile)))];
       for (const pile of piles) {
         const items = readPile(pile);
         const byId = id ? items.find((item) => Number(item?.id || 0) === id) : null;
@@ -519,7 +3206,32 @@
       }
       return null;
     }
-    return Object.freeze({ snapshot, resolveItem, readPile, snapshotItem: toSnapshot });
+    return Object.freeze({
+      snapshot,
+      resolveItem,
+      readPile,
+      pileValue,
+      preparePurchasedItem,
+      capacity,
+      requestUnassigned,
+      refreshActions,
+      move,
+      snapshotItem: toSnapshot
+    });
+  }
+
+  // src/adapters/ea/localization.js
+  function createEaLocalizationAdapter(runtime) {
+    function localize(value) {
+      if (!value) return "";
+      try {
+        const service = runtime?.services?.Localization;
+        if (typeof service?.localize === "function") return service.localize(value);
+      } catch {
+      }
+      return String(value || "");
+    }
+    return Object.freeze({ localize });
   }
 
   // src/adapters/ea/pack.js
@@ -552,13 +3264,390 @@
       if (!pack || typeof pack.open !== "function") throw new Error("Pack model cannot be opened");
       return pack.open();
     }
-    return Object.freeze({ list, resolve, open });
+    function refreshAll() {
+      const service = runtime?.services?.Store;
+      if (typeof service?.getPacks !== "function") throw new Error("EA Store pack refresh is unavailable");
+      return service.getPacks(runtime?.PurchasePackType?.ALL, true, true);
+    }
+    return Object.freeze({ list, resolve, open, refreshAll });
+  }
+
+  // src/adapters/ea/player-pick.js
+  function createEaPlayerPickAdapter(runtime) {
+    const service = runtime?.services?.Item;
+    if (!service) throw new Error("EA Item service is unavailable");
+    function collectionValues3(collection) {
+      if (!collection) return [];
+      if (typeof collection.values === "function") return Array.from(collection.values());
+      if (Array.isArray(collection._collection)) return collection._collection;
+      if (collection._collection && typeof collection._collection === "object") return Object.values(collection._collection);
+      if (typeof collection === "object") return Object.values(collection);
+      return [];
+    }
+    function unassignedItems() {
+      try {
+        return Array.from(runtime?.repositories?.Item?.getUnassignedItems?.() || []);
+      } catch {
+        return [];
+      }
+    }
+    function storageItems() {
+      try {
+        if (typeof runtime?.repositories?.Item?.getStorageItems === "function") {
+          return Array.from(runtime.repositories.Item.getStorageItems() || []);
+        }
+      } catch {
+      }
+      try {
+        if (typeof runtime?.repositories?.Item?.getStorage === "function") {
+          return collectionValues3(runtime.repositories.Item.getStorage());
+        }
+      } catch {
+      }
+      return collectionValues3(runtime?.repositories?.Item?.storage);
+    }
+    function transferItems() {
+      try {
+        if (typeof runtime?.repositories?.Item?.getTransferItems === "function") {
+          return Array.from(runtime.repositories.Item.getTransferItems() || []);
+        }
+      } catch {
+      }
+      return collectionValues3(runtime?.repositories?.Item?.transfer);
+    }
+    function clubItems() {
+      return collectionValues3(runtime?.repositories?.Item?.club?.items).concat(collectionValues3(service?.itemDao?.itemRepo?.club?.items));
+    }
+    function uniqueOwnedItems() {
+      const seen = /* @__PURE__ */ new Set();
+      return [
+        ...unassignedItems(),
+        ...storageItems(),
+        ...transferItems(),
+        ...clubItems()
+      ].filter((item) => {
+        const id = Number(item?.id || 0);
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+    }
+    function isPlayerPickItem(item) {
+      try {
+        if (item?.isPlayerPickItem?.()) return true;
+      } catch {
+      }
+      return /player\s*pick/i.test(String(item?.name || item?.description || item?._staticData?.name || ""));
+    }
+    function sameLimitedUseType(left, right) {
+      const leftType = left?.limitedUseType ?? left?._limitedUseType ?? null;
+      const rightType = right?.limitedUseType ?? right?._limitedUseType ?? null;
+      return leftType === null || rightType === null || String(leftType) === String(rightType);
+    }
+    function listUnassignedPlayerPicks() {
+      return unassignedItems().filter(isPlayerPickItem);
+    }
+    function isOwnedDuplicate(item) {
+      const itemId = Number(item?.id || 0);
+      return uniqueOwnedItems().some(
+        (ownedItem) => Number(ownedItem?.id || 0) !== itemId && Number(ownedItem?.definitionId || 0) === Number(item?.definitionId || -1) && sameLimitedUseType(ownedItem, item)
+      );
+    }
+    function redeem(pickItem) {
+      if (typeof service.redeem !== "function") throw new Error("EA Player Pick redeem is unavailable");
+      return service.redeem(pickItem);
+    }
+    function confirmSelection(items) {
+      if (typeof service.confirmPlayerPickItemSelection !== "function") {
+        throw new Error("EA Player Pick confirmation is unavailable");
+      }
+      return service.confirmPlayerPickItemSelection(items);
+    }
+    return Object.freeze({ redeem, confirmSelection, listUnassignedPlayerPicks, isOwnedDuplicate });
   }
 
   // src/adapters/ea/sbc.js
   function createEaSbcAdapter(runtime) {
     const service = runtime?.services?.SBC;
     if (!service) throw new Error("EA SBC service is unavailable");
+    function collectionValues3(collection) {
+      if (!collection) return [];
+      if (typeof collection.values === "function") return Array.from(collection.values());
+      if (Array.isArray(collection._collection)) return collection._collection;
+      if (collection._collection && typeof collection._collection === "object") return Object.values(collection._collection);
+      if (Array.isArray(collection)) return collection;
+      if (typeof collection === "object") return Object.values(collection);
+      return [];
+    }
+    function listSets() {
+      return collectionValues3(service?.repository?.sets?._collection);
+    }
+    function requestSets() {
+      if (typeof service.requestSets !== "function") throw new Error("EA SBC set request is unavailable");
+      return service.requestSets();
+    }
+    function requestChallengesForSet(set) {
+      if (typeof service.requestChallengesForSet !== "function") {
+        throw new Error("EA SBC challenge request is unavailable");
+      }
+      return service.requestChallengesForSet(set);
+    }
+    function loadChallenge(challenge) {
+      if (typeof service.loadChallenge !== "function") throw new Error("EA SBC challenge load is unavailable");
+      return service.loadChallenge(challenge);
+    }
+    function hasDaoGetChallengesForSet() {
+      return typeof service?.sbcDAO?.getChallengesForSet === "function";
+    }
+    function getChallengesForSet(setId) {
+      if (!hasDaoGetChallengesForSet()) throw new Error("EA SBC challenge DAO is unavailable");
+      return service.sbcDAO.getChallengesForSet(Number(setId || 0));
+    }
+    function hasDaoLoadChallenge() {
+      return typeof service?.sbcDAO?.loadChallenge === "function";
+    }
+    function loadDaoChallenge(challengeId, inProgress = false) {
+      if (!hasDaoLoadChallenge()) throw new Error("EA SBC challenge DAO loader is unavailable");
+      return service.sbcDAO.loadChallenge(Number(challengeId || 0), inProgress === true);
+    }
+    function formation(formationId) {
+      try {
+        return runtime?.repositories?.Squad?.getFormation?.(formationId) || null;
+      } catch {
+        return null;
+      }
+    }
+    function createSquadController() {
+      if (typeof runtime?.UTSBCSquadSplitViewController !== "function") {
+        throw new Error("EA SBC squad controller is unavailable");
+      }
+      return new runtime.UTSBCSquadSplitViewController();
+    }
+    function eligibilityKeyName(key) {
+      const keyText = String(key ?? "").trim();
+      const known = Object.entries(runtime?.SBCEligibilityKey || {}).find(([, value]) => String(value) === keyText);
+      if (known) return known[0];
+      if (/^[A-Z][A-Z0-9_]+$/.test(keyText)) return keyText;
+      return `UNKNOWN_${keyText || "?"}`;
+    }
+    function firstRequirementKey2(requirement) {
+      if (requirement?.key !== void 0 && requirement?.key !== null) return requirement.key;
+      try {
+        const key = requirement?.getFirstKey?.();
+        if (key !== void 0 && key !== null) return key;
+      } catch {
+      }
+      const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+      return Object.keys(collection)[0];
+    }
+    function flattenValues2(value) {
+      if (Array.isArray(value)) return value.flat(Infinity).filter((entry) => entry !== void 0 && entry !== null);
+      if (value === void 0 || value === null) return [];
+      return [value];
+    }
+    function requirementValues2(requirement, key) {
+      const normalized = flattenValues2(requirement?.values);
+      if (normalized.length) return normalized;
+      try {
+        const values = flattenValues2(requirement?.getValue?.(key));
+        if (values.length) return values;
+      } catch {
+      }
+      const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+      const direct = flattenValues2(collection?.[key]);
+      if (direct.length) return direct;
+      try {
+        return flattenValues2(requirement?.getFirstValue?.(key));
+      } catch {
+        return [];
+      }
+    }
+    function positiveInteger3(value) {
+      const number = Number(value);
+      return Number.isInteger(number) && number > 0 ? number : null;
+    }
+    function firstPositiveInteger(values = []) {
+      for (const value of values) {
+        const number = positiveInteger3(value);
+        if (number) return number;
+      }
+      return null;
+    }
+    function staticItemData(item) {
+      try {
+        return item?.getStaticData?.() || item?._staticData || item?.staticData || {};
+      } catch {
+        return item?._staticData || {};
+      }
+    }
+    function isPlayerPickItem(item) {
+      try {
+        return item?.isPlayerPickItem?.() === true;
+      } catch {
+        return false;
+      }
+    }
+    function metadataFieldHints(value) {
+      if (!value || typeof value !== "object") return { keys: [], prototypeKeys: [], values: {} };
+      let keys = [];
+      let prototypeKeys = [];
+      try {
+        keys = Object.getOwnPropertyNames(value).sort().slice(0, 80);
+      } catch {
+      }
+      try {
+        const prototype = Object.getPrototypeOf(value);
+        prototypeKeys = Object.getOwnPropertyNames(prototype || {}).filter((key) => key !== "constructor" && /(pick|choice|select|count|amount|option|resource|definition|asset|item)/i.test(key)).sort().slice(0, 40);
+      } catch {
+      }
+      const values = {};
+      for (const key of keys) {
+        if (!/(pick|choice|select|count|amount|option|resource|definition|asset|item|name|description|id)/i.test(key)) continue;
+        let field;
+        try {
+          field = value[key];
+        } catch {
+          continue;
+        }
+        if (!["string", "number", "boolean"].includes(typeof field)) continue;
+        values[key] = typeof field === "string" ? field.slice(0, 160) : field;
+      }
+      return { keys, prototypeKeys, values };
+    }
+    function normalizeDiscoveryReward(award) {
+      const item = award?.item || award?.utItem || award?.data?.item || null;
+      if (!item || !isPlayerPickItem(item)) return null;
+      const staticData = staticItemData(item);
+      const definitionId = firstPositiveInteger([
+        item?.definitionId,
+        item?._data?.definitionId,
+        staticData?.definitionId
+      ]);
+      const itemId = positiveInteger3(item?.id);
+      return {
+        type: "PLAYER_PICK",
+        name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
+        description: String(item?.description || staticData?.description || "").trim(),
+        resourceId: firstPositiveInteger([
+          item?.resourceId,
+          item?._data?.resourceId,
+          staticData?.resourceId,
+          itemId && definitionId && itemId === definitionId ? itemId : null
+        ]),
+        definitionId,
+        candidateCount: firstPositiveInteger([
+          item?.candidateCount,
+          item?.totalCandidates,
+          item?.numberOfChoices,
+          item?.numChoices,
+          staticData?.candidateCount,
+          staticData?.totalCandidates,
+          staticData?.numberOfChoices,
+          staticData?.numChoices
+        ]),
+        selectionCount: firstPositiveInteger([
+          item?.selectionCount,
+          item?.availablePicks,
+          item?.numberToSelect,
+          staticData?.selectionCount,
+          staticData?.availablePicks,
+          staticData?.numberToSelect
+        ]),
+        metadataHints: {
+          award: metadataFieldHints(award),
+          item: metadataFieldHints(item),
+          data: metadataFieldHints(item?._data || item?.data),
+          staticData: metadataFieldHints(staticData)
+        }
+      };
+    }
+    function discoveryRequiredPlayerCount(challenge) {
+      const explicit = firstPositiveInteger([
+        challenge?.requiredPlayerCount,
+        challenge?.playerCount,
+        challenge?.numPlayers
+      ]);
+      if (explicit) return explicit;
+      try {
+        const squadCount = positiveInteger3(challenge?.squad?.getNumOfRequiredPlayers?.());
+        if (squadCount) return squadCount;
+      } catch {
+      }
+      if (!challenge?.squad) return null;
+      const challengeFormation = formation(challenge?.formation);
+      const formationCount = positiveInteger3(challengeFormation?.generalPositions?.length);
+      if (!formationCount) return null;
+      try {
+        const brickCount = challenge.squad.getAllBrickIndices?.()?.length;
+        if (Number.isInteger(brickCount) && brickCount >= 0 && brickCount < formationCount) {
+          return formationCount - brickCount;
+        }
+      } catch {
+      }
+      const simpleBrickCount = Array.isArray(challenge.squad?.simpleBrickIndices) ? challenge.squad.simpleBrickIndices.length : null;
+      if (Number.isInteger(simpleBrickCount) && simpleBrickCount >= 0 && simpleBrickCount < formationCount) {
+        return formationCount - simpleBrickCount;
+      }
+      return null;
+    }
+    function normalizeDiscoveryChallenge(challenge) {
+      return {
+        id: positiveInteger3(challenge?.id),
+        status: String(challenge?.status || challenge?.state || ""),
+        completed: challenge?.completed === true || (() => {
+          try {
+            return challenge?.isCompleted?.() === true;
+          } catch {
+            return false;
+          }
+        })(),
+        requiredPlayerCount: discoveryRequiredPlayerCount(challenge),
+        eligibilityRequirements: (challenge?.eligibilityRequirements || []).map((requirement) => {
+          const key = firstRequirementKey2(requirement);
+          return {
+            key: eligibilityKeyName(key),
+            values: requirementValues2(requirement, key),
+            count: Number.isFinite(Number(requirement?.count)) ? Number(requirement.count) : null
+          };
+        })
+      };
+    }
+    function snapshotDiscoverySet(set, challenges = null) {
+      const rawAwards = collectionValues3(set?.awards || set?.data?.awards);
+      const rawChallenges = challenges === null ? collectionValues3(set?.challenges || set?._challenges) : collectionValues3(challenges);
+      return {
+        id: positiveInteger3(set?.id),
+        name: String(set?.name || set?.data?.name || "").trim(),
+        status: String(set?.status || set?.state || ""),
+        complete: (() => {
+          try {
+            return set?.isComplete?.() === true || set?.complete === true || set?.completed === true;
+          } catch {
+            return false;
+          }
+        })(),
+        timesCompleted: Number.isFinite(Number(set?.timesCompleted)) ? Number(set.timesCompleted) : null,
+        repeats: Number.isFinite(Number(set?.repeats)) ? Number(set.repeats) : null,
+        rewards: rawAwards.map(normalizeDiscoveryReward).filter(Boolean),
+        challenges: rawChallenges.map(normalizeDiscoveryChallenge)
+      };
+    }
+    function canLoadChallengeData() {
+      return typeof service.loadChallengeData === "function";
+    }
+    function submissionOptions() {
+      let skipValidation = false;
+      let chemistryEnabled = false;
+      try {
+        skipValidation = runtime?.services?.UserSettings?.getSBCValidationSkip?.() || false;
+      } catch {
+      }
+      try {
+        chemistryEnabled = runtime?.services?.Chemistry?.isFeatureEnabled?.() || false;
+      } catch {
+      }
+      return { skipValidation: skipValidation === true, chemistryEnabled: chemistryEnabled === true };
+    }
     function saveChallenge(challenge) {
       if (typeof service.saveChallenge !== "function") throw new Error("EA saveChallenge is unavailable");
       return service.saveChallenge(challenge);
@@ -576,7 +3665,52 @@
         options.chemistryEnabled !== false
       );
     }
-    return Object.freeze({ saveChallenge, loadChallengeData, submitChallenge });
+    return Object.freeze({
+      listSets,
+      requestSets,
+      requestChallengesForSet,
+      loadChallenge,
+      hasDaoGetChallengesForSet,
+      getChallengesForSet,
+      hasDaoLoadChallenge,
+      loadDaoChallenge,
+      formation,
+      createSquadController,
+      eligibilityKeyName,
+      snapshotDiscoverySet,
+      canLoadChallengeData,
+      submissionOptions,
+      saveChallenge,
+      loadChallengeData,
+      submitChallenge
+    });
+  }
+
+  // src/adapters/index.js
+  function createRuntimeAdapters(runtime, documentObject = runtime?.document || globalThis.document, options = {}) {
+    const localStorage = createStorageAdapter(runtime?.localStorage);
+    const sessionStorage = createStorageAdapter(runtime?.sessionStorage);
+    const dom = createDomAdapter(documentObject, runtime);
+    const page = createPageRuntimeAdapter(runtime, dom);
+    return Object.freeze({
+      inventory: (options2 = {}) => createEaInventoryAdapter(runtime, options2),
+      localization: createEaLocalizationAdapter(runtime),
+      pack: () => createEaPackAdapter(runtime),
+      playerPick: () => createEaPlayerPickAdapter(runtime),
+      sbc: () => createEaSbcAdapter(runtime),
+      fsu: () => createFsuAdapter(runtime, { documentObject, localStorage, sessionStorage }),
+      dom,
+      page,
+      userEffects: createUserEffectsAdapter(runtime, documentObject),
+      wait: (waitOptions = {}) => createWaitAdapter({ ...waitOptions, pageRuntime: page }),
+      http: createHttpAdapter({
+        gmRequest: options.gmRequest,
+        fetchImpl: options.fetchImpl || runtime?.fetch,
+        runtimeFallback: runtime?.__FCLoopRunnerRequestText
+      }),
+      localStorage,
+      sessionStorage
+    });
   }
 
   // src/selection/inventory.js
@@ -694,7 +3828,7 @@
         protectedItemIds: /* @__PURE__ */ new Set([...protection.protectedItemIds, ...numberSet(requirement.protectedItemIds)]),
         protectedDefinitionIds: /* @__PURE__ */ new Set([...protection.protectedDefinitionIds, ...numberSet(requirement.protectedDefinitionIds)])
       };
-      const piles = applyPilePriority(requirement.priorityPiles || defaultPiles, fsuPolicy).filter((pile) => INVENTORY_PILES.includes(pile));
+      const piles = applyPilePriority(requirement.priorityPiles || defaultPiles, fsuPolicy).filter((pile) => INVENTORY_PILES2.includes(pile));
       for (const pileName of piles) {
         if (need <= 0) break;
         const preferredRefs = pileName === "unassigned" || pileName === "transfer" ? preferredSignalRefs : [];
@@ -1009,6 +4143,169 @@
     return selectInventoryPlayers({ ...input, mode: input.mode || "requirements" });
   }
 
+  // src/selection/rating-candidates.js
+  function buildRatingCandidateEntries(options = {}) {
+    const {
+      model,
+      settings,
+      piles = [],
+      getPileItems,
+      submissionItems = [],
+      isSafe,
+      isDuplicate,
+      pileNeedsDuplicateSignalResolution,
+      sortFodder,
+      isSpecialItem,
+      broadSpec = {},
+      now = Date.now
+    } = options;
+    const startedAt = now();
+    const byItemId = /* @__PURE__ */ new Map();
+    const resolvedSignals = {};
+    const safetyCache = /* @__PURE__ */ new Map();
+    const cachedIsSafe = (item) => {
+      const itemId = Number(item?.id || 0);
+      if (!itemId) return false;
+      if (!safetyCache.has(itemId)) safetyCache.set(itemId, isSafe(item));
+      return safetyCache.get(itemId);
+    };
+    const safeSubmissionItems = submissionItems.filter(cachedIsSafe);
+    const submissionById = /* @__PURE__ */ new Map();
+    const submissionByDefinition = /* @__PURE__ */ new Map();
+    for (const item of safeSubmissionItems) {
+      const itemId = Number(item?.id || 0);
+      const definitionId = Number(item?.definitionId || 0);
+      if (itemId) submissionById.set(itemId, item);
+      if (!definitionId) continue;
+      const entries = submissionByDefinition.get(definitionId) || [];
+      entries.push(item);
+      submissionByDefinition.set(definitionId, entries);
+    }
+    for (const entries of submissionByDefinition.values()) {
+      const sorted = sortFodder(entries, broadSpec, settings);
+      entries.splice(0, entries.length, ...sorted);
+    }
+    function resolveSignal(sourceItem) {
+      const duplicateId = Number(sourceItem?.duplicateId || 0);
+      if (duplicateId && submissionById.has(duplicateId)) return submissionById.get(duplicateId);
+      const definitionId = Number(sourceItem?.definitionId || 0);
+      return submissionByDefinition.get(definitionId)?.[0] || null;
+    }
+    const requirementCache = /* @__PURE__ */ new Map();
+    let scannedItems = 0;
+    for (const [pileRank, pileName] of piles.entries()) {
+      for (const sourceItem of getPileItems(pileName)) {
+        scannedItems++;
+        let item = sourceItem;
+        let signal = null;
+        if (pileNeedsDuplicateSignalResolution(pileName)) {
+          if (!isDuplicate(sourceItem)) continue;
+          item = resolveSignal(sourceItem);
+          if (!item) continue;
+          signal = sourceItem;
+        }
+        const itemId = Number(item?.id || 0);
+        const definitionId = Number(item?.definitionId || 0);
+        if (!itemId || !definitionId || byItemId.has(itemId)) continue;
+        if (!cachedIsSafe(item)) continue;
+        if (!requirementCache.has(itemId)) {
+          requirementCache.set(itemId, model.constraints.map((constraint) => constraint.matches(item)));
+        }
+        const requirementMatches = requirementCache.get(itemId);
+        byItemId.set(itemId, {
+          item,
+          signal,
+          pileName,
+          pileRank,
+          requirementMatches,
+          special: isSpecialItem(item)
+        });
+        if (signal) resolvedSignals[pileName] = (resolvedSignals[pileName] || 0) + 1;
+      }
+    }
+    const byDefinition = /* @__PURE__ */ new Map();
+    for (const entry of byItemId.values()) {
+      const definitionId = Number(entry.item?.definitionId || 0);
+      const existing = byDefinition.get(definitionId);
+      if (!existing || entry.pileRank < existing.pileRank || entry.pileRank === existing.pileRank && Number(entry.item?.id || 0) < Number(existing.item?.id || 0)) {
+        byDefinition.set(definitionId, entry);
+      }
+    }
+    return {
+      entries: [...byDefinition.values()],
+      piles,
+      resolvedSignals,
+      buildMs: now() - startedAt,
+      scannedItems
+    };
+  }
+  async function selectRatingCandidateEntries(options = {}) {
+    const {
+      candidateEntries = [],
+      model,
+      piles = [],
+      searchOptions = {},
+      createSnapshot,
+      selectPlayers,
+      control
+    } = options;
+    const liveById = /* @__PURE__ */ new Map();
+    const snapshotEntries = candidateEntries.map((entry) => {
+      const item = createSnapshot(entry.item, entry.pileName);
+      const signal = entry.signal ? createSnapshot(entry.signal, entry.pileName) : null;
+      liveById.set(Number(item.id), entry.item);
+      if (signal) liveById.set(Number(signal.id), entry.signal);
+      return {
+        item,
+        signal,
+        pileName: entry.pileName,
+        pileRank: entry.pileRank,
+        requirementMatches: [...entry.requirementMatches],
+        special: entry.special === true
+      };
+    });
+    const plan = await selectPlayers({
+      mode: "rating",
+      candidateEntries: snapshotEntries,
+      ratingModel: model,
+      priorityPiles: piles,
+      searchOptions,
+      control
+    });
+    if (!plan.ok) {
+      return {
+        ok: false,
+        reason: plan.details.reason || plan.missing?.reason || "rating selection failed",
+        nodes: Number(plan.details.nodes || 0)
+      };
+    }
+    const entries = plan.entries.map((entry) => ({
+      item: liveById.get(Number(entry.itemRef?.id || 0)) || null,
+      signal: entry.signalRef ? liveById.get(Number(entry.signalRef.id || 0)) || null : null,
+      pileName: entry.pileName,
+      pileRank: entry.pileRank,
+      requirementMatches: entry.requirementMatches,
+      special: entry.special
+    }));
+    if (entries.some((entry, index) => !entry.item || plan.entries[index]?.signalRef && !entry.signal)) {
+      return {
+        ok: false,
+        reason: "rating selection item became stale during plan resolution",
+        nodes: Number(plan.details.nodes || 0)
+      };
+    }
+    return {
+      ok: true,
+      entries,
+      selected: entries.map((entry) => entry.item),
+      rating: Number(plan.details.rating || 0),
+      ratings: [...plan.details.ratings || []],
+      pileCounts: { ...plan.pileCounts },
+      nodes: Number(plan.details.nodes || 0),
+      plan
+    };
+  }
+
   // src/selection/transient-signals.js
   function refKey(ref = {}) {
     const id = Number(ref?.id || 0);
@@ -1183,7 +4480,118 @@
     };
   }
 
-  // src/sbc/reward-claim.js
+  // src/sbc/navigation-sync.js
+  function isSbcSquadControllerName(name) {
+    return /UTSBCSquadSplitViewController/i.test(String(name || ""));
+  }
+  function isSbcControllerName(name) {
+    return /^UTSBC/i.test(String(name || ""));
+  }
+  async function unwindSbcSquadControllers(options = {}) {
+    const label = String(options.label || "SBC navigation");
+    const maxPops = Math.max(0, Number(options.maxPops ?? 20) || 0);
+    const currentController = options.currentController;
+    const currentControllerName = options.currentControllerName;
+    const popController = options.popController;
+    const waitLoadingEnd = options.waitLoadingEnd;
+    const sleep = options.sleep;
+    const log = options.log || (() => {
+    });
+    if (typeof currentController !== "function") throw new TypeError("currentController is required");
+    if (typeof currentControllerName !== "function") throw new TypeError("currentControllerName is required");
+    if (typeof popController !== "function") throw new TypeError("popController is required");
+    if (typeof waitLoadingEnd !== "function") throw new TypeError("waitLoadingEnd is required");
+    if (typeof sleep !== "function") throw new TypeError("sleep is required");
+    let popped = 0;
+    while (isSbcSquadControllerName(currentControllerName()) && popped < maxPops) {
+      const controller = currentController();
+      if (popController(true) !== true) {
+        log(`${label}: cannot exit ${currentControllerName() || "SBC squad"}; navigation pop method is unavailable`);
+        break;
+      }
+      popped++;
+      await waitLoadingEnd(350, 1e4).catch(() => null);
+      for (let wait = 0; wait < 12 && currentController() === controller; wait++) await sleep(250);
+      if (currentController() === controller) {
+        log(`${label}: SBC squad controller did not change after navigation pop ${popped}`);
+        break;
+      }
+    }
+    if (popped) {
+      log(`${label}: removed ${popped} stale SBC squad view(s); current controller ${currentControllerName() || "unknown"}`);
+    }
+    return popped;
+  }
+  async function synchronizeAfterSbcSubmit(options = {}) {
+    const label = String(options.label || "SBC submit");
+    const currentControllerName = options.currentControllerName;
+    const unwind = options.unwind;
+    const showUnassigned = options.showUnassigned;
+    const openStorePacks = options.openStorePacks;
+    const log = options.log || (() => {
+    });
+    if (typeof currentControllerName !== "function") throw new TypeError("currentControllerName is required");
+    if (typeof unwind !== "function") throw new TypeError("unwind is required");
+    if (typeof showUnassigned !== "function") throw new TypeError("showUnassigned is required");
+    if (typeof openStorePacks !== "function") throw new TypeError("openStorePacks is required");
+    const before = currentControllerName() || "unknown";
+    await unwind(`${label} post-submit`);
+    await showUnassigned(`${label} post-submit navigation sync`);
+    let after = currentControllerName() || "unknown";
+    if (isSbcSquadControllerName(after)) {
+      await unwind(`${label} post-unassigned`);
+      after = currentControllerName() || "unknown";
+    }
+    if (isSbcControllerName(after)) {
+      log(`${label}: controller is still ${after} in the SBC area after navigation cleanup; opening Store Packs as a final fallback`);
+      await openStorePacks(`${label} post-submit Store sync`).catch((error) => {
+        log(`${label}: post-submit Store sync skipped: ${error?.message || error}`);
+        return false;
+      });
+      after = currentControllerName() || "unknown";
+    }
+    log(`${label}: post-submit controller ${before} -> ${after}`);
+    return { before, after };
+  }
+
+  // src/sbc/player-pick-discovery-scan.js
+  async function scanPlayerPickSbcSnapshots(options = {}) {
+    if (typeof options.refreshSets !== "function") throw new TypeError("refreshSets is required");
+    if (typeof options.listSets !== "function") throw new TypeError("listSets is required");
+    if (typeof options.snapshotSet !== "function") throw new TypeError("snapshotSet is required");
+    if (typeof options.loadChallenges !== "function") throw new TypeError("loadChallenges is required");
+    if (typeof options.parseSnapshot !== "function") throw new TypeError("parseSnapshot is required");
+    await options.refreshSets();
+    const sets = options.listSets() || [];
+    const results = [];
+    for (const set of sets) {
+      const initial = options.snapshotSet(set);
+      const hasPlayerPickReward = (initial?.rewards || []).some((reward) => reward?.type === "PLAYER_PICK");
+      if (!hasPlayerPickReward) continue;
+      let challenges = initial?.challenges || [];
+      let loadError = null;
+      if (initial?.complete !== true) {
+        try {
+          challenges = await options.loadChallenges(set, initial);
+        } catch (error) {
+          loadError = error;
+        }
+      }
+      const snapshot = options.snapshotSet(set, challenges);
+      const parsed = options.parseSnapshot(snapshot);
+      const result = {
+        set,
+        snapshot,
+        parsed: loadError && parsed.status === "supported" ? { ...parsed, status: "unsupported", loop: null, diagnostics: [`challenge metadata load failed: ${loadError?.message || loadError}`] } : parsed,
+        loadError
+      };
+      results.push(result);
+      await options.onResult?.(result);
+    }
+    return { setsScanned: sets.length, pickSets: results.length, results };
+  }
+
+  // src/reward/sbc-claim.js
   function finiteNumber2(value) {
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
@@ -1208,6 +4616,230 @@
       const afterCount = finiteNumber2(challenge.timesCompleted);
       return beforeCount !== null && afterCount !== null && afterCount > beforeCount;
     });
+  }
+  async function claimSbcRewards(options = {}) {
+    const {
+      label = "SBC submit",
+      beforePackCounts,
+      beforeProgress,
+      overlay,
+      getPackCounts,
+      getProgress,
+      refreshPacks,
+      popupShieldShowing,
+      click,
+      keyStroke,
+      waitLoadingEnd,
+      sleep,
+      stopPoint,
+      failIfSubmitError,
+      log,
+      now = Date.now
+    } = options;
+    const startedAt = now();
+    let lastHotkeyAt = 0;
+    let lastPackRefreshAt = 0;
+    while (now() - startedAt < 25e3) {
+      stopPoint();
+      failIfSubmitError(label);
+      if (await overlay.dismiss(label)) continue;
+      const button = overlay.findClaimButton();
+      if (button) {
+        log(`${label}: claiming rewards`);
+        click(button);
+        await waitLoadingEnd(900, 45e3);
+        await sleep(1200);
+        return true;
+      }
+      const elapsed = now() - startedAt;
+      if (elapsed >= 1500) {
+        const progressAdvanced = beforeProgress ? hasSbcProgressAdvanced(beforeProgress, getProgress()) : false;
+        let packGranted = beforePackCounts ? hasPackCountIncrease(beforePackCounts, getPackCounts()) : false;
+        if (!packGranted && beforePackCounts && elapsed - lastPackRefreshAt >= 2500) {
+          lastPackRefreshAt = elapsed;
+          await refreshPacks().catch(() => null);
+          packGranted = hasPackCountIncrease(beforePackCounts, getPackCounts());
+        }
+        if ((progressAdvanced || packGranted) && !overlay.isVisible() && !popupShieldShowing()) {
+          log(`${label}: rewards already granted (${packGranted ? "My Packs increased" : "SBC progress advanced"}); skipping Claim Rewards wait`);
+          return true;
+        }
+      }
+      const context2 = overlay.findClaimContext();
+      const currentTime = now();
+      if (context2 && currentTime - lastHotkeyAt > 2500) {
+        lastHotkeyAt = currentTime;
+        log(`${label}: Claim Rewards button not clickable; trying AltRight reward hotkey`);
+        keyStroke("Alt", "AltRight", { altKey: true, location: 2 });
+        keyStroke("AltRight", "AltRight", { altKey: true, location: 2 });
+        await waitLoadingEnd(500, 12e3);
+        await sleep(1200);
+        return true;
+      }
+      await sleep(500);
+    }
+    const context = overlay.findClaimContext();
+    const contextText = context?.text ? `; modal text: ${context.text.slice(0, 180)}` : "";
+    log(`${label}: Claim Rewards button not detected${contextText}; continuing`);
+    return false;
+  }
+
+  // src/reward/player-pick.js
+  function itemDefinitionId(item) {
+    return Number(item?.definitionId || 0);
+  }
+  function itemIdentityIds(item) {
+    const definitionId = Number(item?.definitionId || 0);
+    const itemId = Number(item?.id || 0);
+    return [...new Set([
+      definitionId,
+      Number(item?.resourceId || 0),
+      Number(item?._data?.resourceId || 0),
+      Number(item?._staticData?.resourceId || 0),
+      itemId && definitionId && itemId === definitionId ? itemId : 0
+    ].filter((value) => Number.isFinite(value) && value > 0))];
+  }
+  function playerPickItemName(item) {
+    return String(item?._staticData?.name || item?.name || item?.description || `Player Pick #${item?.id || "?"}`);
+  }
+  function classifyPendingPlayerPicks(items, acceptedNames = [], acceptedResourceIds = []) {
+    const patterns = Array.isArray(acceptedNames) ? acceptedNames : acceptedNames === void 0 || acceptedNames === null ? [] : [acceptedNames];
+    const resourceIds = new Set((acceptedResourceIds || []).map(Number).filter((value) => Number.isFinite(value) && value > 0));
+    const matches = (item) => {
+      if (resourceIds.size) return itemIdentityIds(item).some((id) => resourceIds.has(id));
+      const name = playerPickItemName(item).toLowerCase();
+      return patterns.some((pattern) => name.includes(String(pattern).toLowerCase()));
+    };
+    const picks = items || [];
+    return {
+      matching: picks.find(matches) || null,
+      unexpected: picks.find((item) => !matches(item)) || null
+    };
+  }
+  function rankPlayerPickCandidates(items, prices = /* @__PURE__ */ new Map(), options = {}) {
+    const isSpecial = options.isSpecial || (() => false);
+    const isDuplicate = options.isDuplicate || (() => false);
+    return (items || []).map((item, index) => ({
+      item,
+      index,
+      rating: Number(item?.rating || 0),
+      special: isSpecial(item) === true,
+      duplicate: isDuplicate(item) === true,
+      price: prices.has(itemDefinitionId(item)) ? prices.get(itemDefinitionId(item)) : null
+    })).sort(
+      (a, b) => b.rating - a.rating || Number(b.special) - Number(a.special) || Number(a.duplicate) - Number(b.duplicate) || (b.price ?? -1) - (a.price ?? -1) || a.index - b.index
+    );
+  }
+  function capturePlayerPickSelections(selected, ranked, options = {}) {
+    const isSpecial = options.isSpecial || (() => false);
+    const isDuplicate = options.isDuplicate || (() => false);
+    return (selected || []).map((item) => {
+      const candidate = ranked.find((entry) => entry.item === item);
+      return {
+        item,
+        rating: candidate?.rating ?? Number(item?.rating || 0),
+        special: candidate?.special ?? isSpecial(item) === true,
+        duplicate: candidate?.duplicate ?? isDuplicate(item) === true,
+        price: candidate?.price ?? null
+      };
+    });
+  }
+  function getManualPlayerPickReason(ranked, pickCount) {
+    const topRating = ranked[0]?.rating;
+    const topSpecials = ranked.filter((candidate) => candidate.rating === topRating && candidate.special);
+    if (topSpecials.length > 1) {
+      return `${topSpecials.length} special card(s) share the highest rating ${topRating}`;
+    }
+    const groups = /* @__PURE__ */ new Map();
+    ranked.forEach((candidate, index) => {
+      const key = `${candidate.rating}:${candidate.special ? 1 : 0}:${candidate.duplicate ? 1 : 0}`;
+      const group = groups.get(key) || { candidates: [], firstIndex: index };
+      group.candidates.push(candidate);
+      groups.set(key, group);
+    });
+    for (const group of groups.values()) {
+      if (group.firstIndex >= pickCount || group.candidates.length < 2) continue;
+      if (group.candidates.some((candidate) => candidate.price === null)) {
+        return "price data is missing for a tie that affects the selected card(s)";
+      }
+    }
+    return "";
+  }
+
+  // src/reward/player-prices.js
+  function definitionIds(items) {
+    return [...new Set((items || []).map((item) => Number(item?.definitionId || 0)).filter(Boolean))];
+  }
+  function parseJson(text, source) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(`${source} returned invalid JSON`);
+    }
+  }
+  function futGgPrices(text) {
+    const prices = /* @__PURE__ */ new Map();
+    const response = parseJson(text, "FUT.GG");
+    for (const entry of response?.data || []) {
+      const definitionId = Number(entry?.eaId || entry?.definitionId || 0);
+      const price = Number(entry?.price);
+      if (definitionId && Number.isFinite(price) && price > 0) prices.set(definitionId, price);
+    }
+    return prices;
+  }
+  function futNextPrices(text) {
+    const prices = /* @__PURE__ */ new Map();
+    const response = parseJson(text, "FUTNext");
+    for (const entry of Array.isArray(response) ? response : []) {
+      const definitionId = Number(entry?.definitionId || entry?.eaId || 0);
+      const price = Number(entry?.prices?.[0]);
+      if (definitionId && Number.isFinite(price) && price > 0) prices.set(definitionId, price);
+    }
+    return prices;
+  }
+  async function loadPlayerPickPrices(options = {}) {
+    if (typeof options.requestText !== "function") throw new TypeError("requestText is required");
+    const ids = definitionIds(options.items);
+    const platform = String(options.platform || "pc").toLowerCase();
+    const result = {
+      prices: /* @__PURE__ */ new Map(),
+      ids,
+      source: null,
+      attempts: []
+    };
+    if (!ids.length) return result;
+    const futGgUrl = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(","))}&platform=${encodeURIComponent(platform)}`;
+    try {
+      const text = await options.requestText(futGgUrl, {
+        sendCookies: true,
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          Referer: options.referer || "",
+          "X-Requested-With": "XMLHttpRequest"
+        }
+      });
+      result.prices = futGgPrices(text);
+      result.attempts.push({ source: "FUT.GG", status: result.prices.size ? "loaded" : "empty" });
+      if (result.prices.size) {
+        result.source = "FUT.GG";
+        return result;
+      }
+    } catch (error) {
+      result.attempts.push({ source: "FUT.GG", status: "error", reason: error?.message || String(error) });
+    }
+    const futNextUrl = `https://enhancer-api.futnext.com/players/prices?ids=${encodeURIComponent(ids.join("_"))}&platform=${encodeURIComponent(platform)}`;
+    try {
+      const text = await options.requestText(futNextUrl, {
+        sendCookies: false,
+        headers: { Accept: "application/json, text/plain, */*" }
+      });
+      result.prices = futNextPrices(text);
+      result.attempts.push({ source: "FUTNext", status: result.prices.size ? "loaded" : "empty" });
+      if (result.prices.size) result.source = "FUTNext";
+    } catch (error) {
+      result.attempts.push({ source: "FUTNext", status: "error", reason: error?.message || String(error) });
+    }
+    return result;
   }
 
   // src/unassigned/plan.js
@@ -1385,6 +5017,33 @@
       reason: `Unassigned resolver exceeded ${maxIterations} iterations`,
       fingerprint: previousFingerprint
     };
+  }
+
+  // src/unassigned/confirmation.js
+  async function confirmUnassignedView(options = {}) {
+    const reason = String(options.reason || "final confirmation");
+    const log = options.log || (() => {
+    });
+    if (typeof options.openUnassigned !== "function") throw new TypeError("openUnassigned is required");
+    if (typeof options.clickFallback !== "function") throw new TypeError("clickFallback is required");
+    if (typeof options.waitLoadingEnd !== "function") throw new TypeError("waitLoadingEnd is required");
+    if (typeof options.refreshUnassigned !== "function") throw new TypeError("refreshUnassigned is required");
+    if (typeof options.getItems !== "function") throw new TypeError("getItems is required");
+    log(`Opening unassigned items view for confirmation: ${reason}`);
+    try {
+      if (options.openUnassigned() !== true) options.clickFallback();
+    } catch (error) {
+      log(`Could not open unassigned view automatically: ${error?.message || error}`);
+    }
+    await options.waitLoadingEnd();
+    await options.refreshUnassigned();
+    const items = options.getItems() || [];
+    if (!items.length) {
+      log(`Unassigned confirmation (${reason}): empty`);
+      return [];
+    }
+    log(`Unassigned confirmation (${reason}): ${items.length} item(s) still present`);
+    return items;
   }
 
   // src/unassigned/recovery.js
@@ -1602,7 +5261,7 @@
   }
 
   // src/workflows/supply-and-craft.js
-  function positiveInteger(value, fallback = 1, max = 1e3) {
+  function positiveInteger2(value, fallback = 1, max = 1e3) {
     const number = Number(value);
     return Math.max(1, Math.min(max, Number.isFinite(number) ? Math.floor(number) : fallback));
   }
@@ -1613,7 +5272,7 @@
     if (typeof options.challengeProvider !== "function") throw new TypeError("challengeProvider is required");
     if (typeof options.selectPrimary !== "function") throw new TypeError("selectPrimary is required");
     if (typeof options.submit !== "function") throw new TypeError("submit is required");
-    const maxCompletions = positiveInteger(options.maxCompletions, 1);
+    const maxCompletions = positiveInteger2(options.maxCompletions, 1);
     const result = {
       status: "completed",
       completions: 0,
@@ -1642,7 +5301,7 @@
       let supplied = false;
       if (!selection?.ok && !preserveSupply) {
         for (const supply of options.supplies || []) {
-          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger(supply.maxRuns, 100, 1e3) : 1;
+          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger2(supply.maxRuns, 100, 1e3) : 1;
           for (let run = 1; run <= maxRuns && !selection?.ok && !preserveSupply; run++) {
             await options.stopPoint?.();
             const supplyResult = await supply.provide({
@@ -1759,15 +5418,15 @@
       if (targets.length) {
         const submission2 = await options.consumeTarget({ result, targets, target: targets[0] });
         await emit2(options, "target-submission", { result, targets, submission: submission2 });
-        const outcome3 = submissionOutcome(submission2);
-        if (outcome3 === "submitted") {
+        const outcome4 = submissionOutcome(submission2);
+        if (outcome4 === "submitted") {
           result.completions++;
           result.lastRewardPackId = submission2.rewardPackId ?? null;
           await options.afterSubmission?.({ result, submission: submission2, source: "target" });
           continue;
         }
-        result.status = outcome3;
-        result.reason = submission2?.reason || `target submission ${outcome3}`;
+        result.status = outcome4;
+        result.reason = submission2?.reason || `target submission ${outcome4}`;
         break;
       }
       const pack = await options.findPack({ result, rewardPackId: result.lastRewardPackId });
@@ -1796,15 +5455,15 @@
       }
       const submission = await options.submitSeed({ result });
       await emit2(options, "seed-submission", { result, submission });
-      const outcome2 = submissionOutcome(submission);
-      if (outcome2 === "submitted") {
+      const outcome3 = submissionOutcome(submission);
+      if (outcome3 === "submitted") {
         result.completions++;
         result.lastRewardPackId = submission.rewardPackId ?? null;
         await options.afterSubmission?.({ result, submission, source: "seed" });
         continue;
       }
-      result.status = outcome2;
-      result.reason = submission?.reason || `seed submission ${outcome2}`;
+      result.status = outcome3;
+      result.reason = submission?.reason || `seed submission ${outcome3}`;
       break;
     }
     if (result.lastRewardPackId !== null && options.openFinalReward) {
@@ -2080,6 +5739,80 @@
     return result;
   }
 
+  // src/workflows/reserved-duplicate-crafting.js
+  function completionLimit3(value) {
+    const number = Number(value);
+    return Math.max(1, Math.min(1e3, Number.isFinite(number) ? Math.floor(number) : 100));
+  }
+  function forcedAttemptCount(value) {
+    const number = Number(value);
+    return Math.max(0, Math.min(100, Number.isFinite(number) ? Math.floor(number) : 0));
+  }
+  function outcome2(value) {
+    if (value?.submitted === true || value?.status === "submitted") return "submitted";
+    if (value?.status === "planned") return "planned";
+    if (value?.status === "blocked") return "blocked";
+    if (value?.status === "unavailable") return "unavailable";
+    if (value?.status === "done" || value?.status === "insufficient") return "done";
+    return "blocked";
+  }
+  async function runReservedDuplicateCraftingWorkflow(options = {}) {
+    if (typeof options.planAttempt !== "function") throw new TypeError("planAttempt is required");
+    if (typeof options.executeAttempt !== "function") throw new TypeError("executeAttempt is required");
+    const result = {
+      status: "completed",
+      completions: 0,
+      attempts: 0,
+      forcedAttemptsRemaining: forcedAttemptCount(options.forceAttempts),
+      transientSignals: [...options.transientSignals || []],
+      reason: null
+    };
+    const maxCompletions = completionLimit3(options.maxCompletions);
+    while (result.completions < maxCompletions) {
+      await options.stopPoint?.();
+      const forceAttempt = result.forcedAttemptsRemaining > 0;
+      const plan = await options.planAttempt({
+        result,
+        forceAttempt,
+        transientSignals: result.transientSignals
+      }) || { status: "blocked", reason: "attempt planning returned no result" };
+      const planOutcome = outcome2(plan);
+      if (planOutcome === "done") {
+        result.reason = plan.reason || null;
+        break;
+      }
+      if (planOutcome !== "submitted" && plan.status !== "ready") {
+        result.status = planOutcome;
+        result.reason = plan.reason || `attempt planning ${planOutcome}`;
+        break;
+      }
+      result.attempts++;
+      if (forceAttempt && plan.consumeForcedAttempt !== false) result.forcedAttemptsRemaining--;
+      const attempt = await options.executeAttempt({
+        result,
+        plan,
+        forceAttempt,
+        transientSignals: result.transientSignals
+      }) || { status: "blocked", reason: "attempt execution returned no result" };
+      const attemptOutcome = outcome2(attempt);
+      if (attemptOutcome === "submitted") {
+        result.completions++;
+        result.transientSignals = [...attempt.transientSignals || []];
+        await options.afterCompletion?.({ result, plan, attempt });
+        continue;
+      }
+      if (attemptOutcome === "done") {
+        result.reason = attempt.reason || null;
+        break;
+      }
+      result.status = attemptOutcome;
+      result.reason = attempt.reason || `attempt execution ${attemptOutcome}`;
+      break;
+    }
+    await options.finalize?.(result);
+    return result;
+  }
+
   // src/workflows/sequence.js
   async function emit6(options, event, payload = {}) {
     await options.onEvent?.(event, payload);
@@ -2121,6 +5854,123 @@
       await options.afterStep?.({ result, step, index, availability, stepResult });
     }
     await options.finalize?.(result);
+    return result;
+  }
+
+  // src/workflows/validation-round.js
+  function unavailableReason(value, fallback) {
+    return value?.reason || fallback;
+  }
+  async function runValidationRoundWorkflow(options = {}) {
+    for (const name of ["inspectSourcePack", "inspectSbc"]) {
+      if (typeof options[name] !== "function") throw new TypeError(`${name} is required`);
+    }
+    const result = {
+      status: "completed",
+      sourcePack: null,
+      sbc: null,
+      rewardPackId: null,
+      reason: null
+    };
+    result.sourcePack = await options.inspectSourcePack({ result });
+    result.sbc = await options.inspectSbc({ result });
+    if (!result.sourcePack) {
+      result.status = "unavailable";
+      result.reason = "source pack unavailable";
+      await options.finalize?.(result);
+      return result;
+    }
+    if (!result.sbc) {
+      result.status = "unavailable";
+      result.reason = "SBC unavailable";
+      await options.finalize?.(result);
+      return result;
+    }
+    if (options.dryRun === true) {
+      result.status = "planned";
+      result.reason = "validation round planned";
+      await options.finalize?.(result);
+      return result;
+    }
+    for (const name of ["openSourcePack", "submitSbc", "openReward"]) {
+      if (typeof options[name] !== "function") throw new TypeError(`${name} is required for live validation`);
+    }
+    const opened = await options.openSourcePack({ result, sourcePack: result.sourcePack });
+    if (opened?.status && opened.status !== "opened") {
+      result.status = opened.status === "unavailable" ? "unavailable" : "blocked";
+      result.reason = unavailableReason(opened, "source pack open failed");
+      await options.finalize?.(result);
+      return result;
+    }
+    const submission = await options.submitSbc({ result, sbc: result.sbc });
+    if (!submission?.submitted && submission?.status !== "submitted") {
+      result.status = submission?.status === "unavailable" ? "unavailable" : "blocked";
+      result.reason = unavailableReason(submission, "SBC submit failed");
+      await options.finalize?.(result);
+      return result;
+    }
+    result.rewardPackId = submission.rewardPackId ?? null;
+    const reward = await options.openReward({ result, rewardPackId: result.rewardPackId });
+    if (reward?.status && reward.status !== "opened") {
+      result.status = reward.status === "unavailable" ? "unavailable" : "blocked";
+      result.reason = unavailableReason(reward, "reward pack open failed");
+    }
+    await options.finalize?.(result);
+    return result;
+  }
+
+  // src/workflows/dispatch.js
+  var STANDARD_FINALIZATION_STRATEGIES = /* @__PURE__ */ new Set([
+    "dailyRoutine",
+    "dailySingleCardRecycle",
+    "supplyAndCraft",
+    "inventoryMixedUpgrade",
+    "commonGoldToRareUpgrade",
+    "provisionPackCrafting",
+    "provisionPackDualCrafting",
+    "rarePackTo84Upgrade",
+    "fillAndVerifySbc"
+  ]);
+  async function dispatchConfiguredWorkflow(options = {}) {
+    const {
+      loopDef,
+      roundNo = 1,
+      runners = {},
+      log,
+      afterStandardRun,
+      afterPlayerPickRun
+    } = options;
+    const strategy = loopDef.strategy;
+    const dryRun = loopDef.dryRun === true;
+    log(`Loop selected: ${loopDef.name} (${strategy})`);
+    if (loopDef.disabledPiles?.length) log(`Disabled piles: ${loopDef.disabledPiles.join(", ")}`);
+    if (dryRun) log("Dry run active: no items will be moved, no packs opened, no squads saved, no SBCs submitted");
+    let result;
+    if (strategy === "validationBronzeUpgrade") {
+      return runners.validationBronzeUpgrade(loopDef, roundNo);
+    }
+    if (strategy === "dailyRoutine") {
+      result = await runners.dailyRoutine(loopDef);
+    } else if (strategy === "dailySingleCardRecycle") {
+      result = await runners.dailySingleCardRecycle(loopDef);
+    } else if (["supplyAndCraft", "inventoryMixedUpgrade", "commonGoldToRareUpgrade"].includes(strategy)) {
+      result = await runners.supplyAndCraft(loopDef);
+    } else if (strategy === "provisionPackCrafting" || strategy === "provisionPackDualCrafting") {
+      result = await runners.provisionPackCrafting(loopDef);
+    } else if (strategy === "rarePackTo84Upgrade") {
+      result = await runners.rarePackTo84Upgrade(loopDef);
+    } else if (strategy === "playerPickSbc") {
+      result = await runners.playerPickSbc(loopDef);
+      if (!dryRun) await afterPlayerPickRun(loopDef, result);
+      return result;
+    } else if (strategy === "fillAndVerifySbc") {
+      result = await runners.fillAndVerifySbc(loopDef);
+    } else {
+      throw new Error(`Unsupported loop strategy: ${strategy}`);
+    }
+    if (!dryRun && STANDARD_FINALIZATION_STRATEGIES.has(strategy)) {
+      await afterStandardRun(loopDef, result);
+    }
     return result;
   }
 
@@ -2189,6 +6039,1143 @@
     return Object.freeze({ request, flushNow, destroy });
   }
 
+  // src/ui/main-panel-bindings.js
+  var PICK_OPTION_IDS = [
+    "bronze-loop-pick-protect-high-gold",
+    "bronze-loop-pick-auto-below-90",
+    "bronze-loop-pick-prefer-scanned",
+    "bronze-loop-pick-high-gold-threshold",
+    "bronze-loop-pick-auto-threshold"
+  ];
+  function required(panel, selector) {
+    const element = panel?.querySelector?.(selector);
+    if (!element) throw new Error(`Main panel control is missing: ${selector}`);
+    return element;
+  }
+  function bindMainPanelCommands(options = {}) {
+    const panel = options.panel;
+    const commands = options.commands || {};
+    if (!panel?.querySelector) throw new TypeError("panel element is required");
+    const select = required(panel, "#bronze-loop-select");
+    const editor = required(panel, "#bronze-loop-json");
+    select.addEventListener("change", (event) => commands.selectLoop?.(event.target?.value, event));
+    required(panel, "#bronze-loop-edit").addEventListener("click", (event) => {
+      editor.classList.toggle("show");
+      if (editor.classList.contains("show")) select.value = "custom";
+      commands.editJson?.({ visible: editor.classList.contains("show"), event });
+    });
+    editor.addEventListener("input", (event) => commands.jsonInput?.(event));
+    PICK_OPTION_IDS.forEach((id) => {
+      required(panel, `#${id}`).addEventListener("change", (event) => commands.savePickOptions?.(event));
+    });
+    required(panel, "#bronze-loop-show-mvp").addEventListener("change", (event) => commands.saveLoopOptions?.(event));
+    required(panel, "#bronze-loop-start").addEventListener("click", (event) => commands.start?.(event));
+    required(panel, "#bronze-loop-recap-reopen").addEventListener("click", (event) => commands.reopenRecap?.(event));
+    required(panel, "#bronze-loop-refresh").addEventListener("click", (event) => commands.refresh?.(event));
+    required(panel, "#bronze-loop-scan-picks").addEventListener("click", (event) => commands.scanPicks?.(event));
+    required(panel, "#bronze-loop-load-json").addEventListener("click", (event) => commands.loadJson?.(event));
+    required(panel, "#bronze-loop-built-in").addEventListener("click", (event) => commands.useBuiltIn?.(event));
+    required(panel, "#bronze-loop-stop").addEventListener("click", (event) => commands.stop?.(event));
+    required(panel, "#bronze-loop-copy").addEventListener("click", (event) => commands.copyLog?.(event));
+    required(panel, "#bronze-loop-clear").addEventListener("click", (event) => commands.clearLog?.(event));
+    required(panel, "#bronze-loop-download").addEventListener("click", (event) => commands.downloadLog?.(event));
+  }
+  function hydrateMainPanelOptions(options = {}) {
+    const panel = options.panel;
+    if (!panel?.querySelector) throw new TypeError("panel element is required");
+    const loopOptions = options.loopOptions || {};
+    const pickOptions = options.pickOptions || {};
+    required(panel, "#bronze-loop-show-mvp").checked = loopOptions.showMvpLoops === true;
+    required(panel, "#bronze-loop-pick-protect-high-gold").checked = pickOptions.protectHighGold === true;
+    required(panel, "#bronze-loop-pick-auto-below-90").checked = pickOptions.autoSelectBelow90 === true;
+    required(panel, "#bronze-loop-pick-prefer-scanned").checked = pickOptions.preferScannedMetadata === true;
+    required(panel, "#bronze-loop-pick-high-gold-threshold").value = pickOptions.highGoldThreshold;
+    required(panel, "#bronze-loop-pick-auto-threshold").value = pickOptions.autoPickThreshold;
+  }
+
+  // src/ui/main-panel-commands.js
+  function createMainPanelCommands(options = {}) {
+    const state = options.state;
+    if (!state) throw new TypeError("runtime state is required");
+    const log = options.log || (() => {
+    });
+    const setPanelState = options.setPanelState || (() => {
+    });
+    const commands = {
+      selectLoop(selectedId) {
+        if (selectedId !== "custom") options.setLoopJson?.(options.getLoopDefById?.(selectedId));
+        options.updateLoopControls?.();
+      },
+      editJson: options.updateLoopControls,
+      jsonInput: options.updateLoopControls,
+      async savePickOptions(event) {
+        options.savePickOptions?.(event);
+        if (event?.target?.id !== "bronze-loop-pick-prefer-scanned" || event.target.checked !== true) return true;
+        return commands.scanPicks();
+      },
+      saveLoopOptions: options.saveLoopOptions,
+      start() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        options.start?.();
+        return true;
+      },
+      reopenRecap: options.reopenRecap,
+      async refresh() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        state.refreshing = true;
+        setPanelState();
+        try {
+          await options.refreshInventoryCaches?.("manual button");
+          return true;
+        } catch (error) {
+          log(`Cache refresh failed: ${error?.message || error}`);
+          return false;
+        } finally {
+          state.refreshing = false;
+          setPanelState();
+        }
+      },
+      async scanPicks() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        state.scanningPicks = true;
+        setPanelState();
+        try {
+          await options.scanPlayerPicks?.();
+          return true;
+        } catch (error) {
+          log(`Player Pick scan failed: ${error?.message || error}`);
+          return false;
+        } finally {
+          state.scanningPicks = false;
+          setPanelState();
+        }
+      },
+      async loadJson() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        state.loadingLoops = true;
+        setPanelState();
+        try {
+          log(`Loading loop definitions from ${options.loopConfigUrl}`);
+          await options.loadLoopConfig?.(options.loopConfigUrl);
+          return true;
+        } catch (error) {
+          log(`Loop JSON load failed: ${error?.message || error}`);
+          return false;
+        } finally {
+          state.loadingLoops = false;
+          setPanelState();
+        }
+      },
+      useBuiltIn() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        options.resetLoopDefs?.();
+        setPanelState();
+        return true;
+      },
+      stop() {
+        state.stopping = true;
+        log("Stop requested; waiting for current safe point");
+        setPanelState();
+      },
+      async copyLog() {
+        await options.userEffects?.copyText?.(options.getLogText?.() || "");
+        log("Log copied to clipboard");
+      },
+      clearLog: options.clearLog,
+      downloadLog() {
+        const timestamp = Number(options.now?.() || Date.now());
+        options.userEffects?.downloadText?.(options.getLogText?.() || "", `bronze-loop-${timestamp}.log`);
+        log("Log download created");
+      }
+    };
+    return Object.freeze(commands);
+  }
+
+  // src/ui/main-panel-geometry.js
+  var DEFAULT_SIZES = Object.freeze({
+    compact: Object.freeze({ width: 300, height: 178 }),
+    options: Object.freeze({ width: 360, height: 620 })
+  });
+  function viewportSize(getViewport) {
+    const value = getViewport?.() || {};
+    return {
+      width: Math.max(0, Number(value.width || 0)),
+      height: Math.max(0, Number(value.height || 0))
+    };
+  }
+  function getMainPanelDefaultSize(optionsOpen = false) {
+    return optionsOpen ? { ...DEFAULT_SIZES.options } : { ...DEFAULT_SIZES.compact };
+  }
+  function clampMainPanelDefaultSize(size, viewport) {
+    return {
+      width: Math.min(Number(size.width), Math.max(220, Number(viewport.width) - 20)),
+      height: Math.min(Number(size.height), Math.max(180, Number(viewport.height) - 20))
+    };
+  }
+  function createMainPanelGeometry(options = {}) {
+    const panel = options.panel;
+    if (!panel?.querySelector || !panel?.classList) throw new TypeError("panel element is required");
+    const getViewport = options.getViewport || (() => ({ width: 0, height: 0 }));
+    const savePosition = options.savePosition || (() => {
+    });
+    const loadPosition = options.loadPosition || (() => null);
+    const onModeChange = options.onModeChange || (() => {
+    });
+    const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
+    function persistPosition() {
+      try {
+        const rect = panel.getBoundingClientRect();
+        savePosition({
+          left: Math.round(rect.left),
+          top: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        });
+      } catch {
+      }
+    }
+    function resetSize() {
+      const size = getMainPanelDefaultSize(panel.classList.contains("options-open"));
+      const clamped = clampMainPanelDefaultSize(size, viewportSize(getViewport));
+      panel.dataset.minWidth = String(clamped.width);
+      panel.dataset.minHeight = String(clamped.height);
+      panel.style.width = `${clamped.width}px`;
+      panel.style.height = `${clamped.height}px`;
+      return clamped;
+    }
+    function updateOptionsButton() {
+      const button = panel.querySelector("#bronze-loop-options-toggle");
+      if (!button) return;
+      const open = panel.classList.contains("options-open");
+      button.textContent = open ? "Hide" : "Options";
+      button.title = open ? "Hide advanced options" : "Show advanced options";
+    }
+    function updateCollapseButton() {
+      const button = panel.querySelector("#bronze-loop-collapse");
+      if (!button) return;
+      button.textContent = "L";
+      button.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
+    }
+    function notifyModeChange() {
+      updateOptionsButton();
+      updateCollapseButton();
+      onModeChange({
+        iconOnly: panel.classList.contains("icon-only"),
+        optionsOpen: panel.classList.contains("options-open")
+      });
+    }
+    function restorePanel() {
+      panel.classList.remove("icon-only");
+      resetSize();
+      notifyModeChange();
+      persistPosition();
+    }
+    function toggleIconOnly(event) {
+      if (panel.dataset.dragJustEnded === "1") {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        return;
+      }
+      panel.classList.toggle("icon-only");
+      if (panel.classList.contains("icon-only")) {
+        panel.classList.remove("options-open");
+        panel.style.width = "";
+        panel.style.height = "";
+      } else {
+        resetSize();
+      }
+      notifyModeChange();
+      persistPosition();
+    }
+    function toggleOptions() {
+      panel.classList.toggle("options-open");
+      resetSize();
+      notifyModeChange();
+      persistPosition();
+    }
+    function restoreSavedPosition() {
+      const saved = loadPosition();
+      if (!saved || !Number.isFinite(saved.left) || !Number.isFinite(saved.top)) return;
+      const viewport = viewportSize(getViewport);
+      panel.style.left = `${Math.max(0, Math.min(viewport.width - 80, saved.left))}px`;
+      panel.style.top = `${Math.max(0, Math.min(viewport.height - 40, saved.top))}px`;
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+    }
+    function makeDraggable() {
+      const handle = panel.querySelector("#bronze-loop-drag");
+      if (!handle) return;
+      let dragging = false;
+      let startX = 0;
+      let startY = 0;
+      let startLeft = 0;
+      let startTop = 0;
+      let moved = false;
+      handle.addEventListener("pointerdown", (event) => {
+        if (!panel.classList.contains("icon-only") && event.target?.closest?.("button,select,input,textarea")) return;
+        dragging = true;
+        moved = false;
+        const rect = panel.getBoundingClientRect();
+        startX = event.clientX;
+        startY = event.clientY;
+        startLeft = rect.left;
+        startTop = rect.top;
+        panel.style.left = `${rect.left}px`;
+        panel.style.top = `${rect.top}px`;
+        panel.style.right = "auto";
+        panel.style.bottom = "auto";
+        handle.setPointerCapture?.(event.pointerId);
+        event.preventDefault?.();
+      });
+      handle.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        const deltaX = event.clientX - startX;
+        const deltaY = event.clientY - startY;
+        if (Math.abs(deltaX) + Math.abs(deltaY) > 3) moved = true;
+        const viewport = viewportSize(getViewport);
+        panel.style.left = `${Math.max(0, Math.min(viewport.width - 36, startLeft + deltaX))}px`;
+        panel.style.top = `${Math.max(0, Math.min(viewport.height - 36, startTop + deltaY))}px`;
+        event.preventDefault?.();
+      });
+      const stopDrag = () => {
+        if (!dragging) return;
+        dragging = false;
+        if (panel.classList.contains("icon-only") && !moved) {
+          panel.dataset.dragJustEnded = "1";
+          restorePanel();
+          schedule(() => {
+            delete panel.dataset.dragJustEnded;
+          }, 150);
+          return;
+        }
+        if (moved) {
+          panel.dataset.dragJustEnded = "1";
+          schedule(() => {
+            delete panel.dataset.dragJustEnded;
+          }, 150);
+        }
+        persistPosition();
+      };
+      handle.addEventListener("pointerup", stopDrag);
+      handle.addEventListener("pointercancel", stopDrag);
+    }
+    function makeResizable() {
+      const edgePad = 20;
+      const directions = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+      let resizing = null;
+      const onMove = (event) => {
+        if (!resizing) return;
+        const dx = event.clientX - resizing.startX;
+        const dy = event.clientY - resizing.startY;
+        const dir = resizing.dir;
+        let newLeft = resizing.startLeft;
+        let newTop = resizing.startTop;
+        let newWidth = resizing.startWidth;
+        let newHeight = resizing.startHeight;
+        const minWidth = Number(panel.dataset.minWidth || DEFAULT_SIZES.compact.width);
+        const minHeight = Number(panel.dataset.minHeight || DEFAULT_SIZES.compact.height);
+        if (dir.includes("e")) newWidth = Math.max(minWidth, resizing.startWidth + dx);
+        if (dir.includes("s")) newHeight = Math.max(minHeight, resizing.startHeight + dy);
+        if (dir.includes("w")) {
+          newWidth = Math.max(minWidth, resizing.startWidth - dx);
+          if (newWidth > minWidth) newLeft = resizing.startLeft + (resizing.startWidth - newWidth);
+        }
+        if (dir.includes("n")) {
+          newHeight = Math.max(minHeight, resizing.startHeight - dy);
+          if (newHeight > minHeight) newTop = resizing.startTop + (resizing.startHeight - newHeight);
+        }
+        const viewport = viewportSize(getViewport);
+        const maxWidth = viewport.width - edgePad;
+        const maxHeight = viewport.height - edgePad;
+        if (newWidth > maxWidth) {
+          const overflow = newWidth - maxWidth;
+          newWidth = maxWidth;
+          if (dir.includes("w")) newLeft += overflow;
+        }
+        if (newHeight > maxHeight) {
+          const overflow = newHeight - maxHeight;
+          newHeight = maxHeight;
+          if (dir.includes("n")) newTop += overflow;
+        }
+        newLeft = Math.max(0, Math.min(viewport.width - newWidth, newLeft));
+        newTop = Math.max(0, Math.min(viewport.height - newHeight, newTop));
+        panel.style.left = `${newLeft}px`;
+        panel.style.top = `${newTop}px`;
+        panel.style.width = `${newWidth}px`;
+        panel.style.height = `${newHeight}px`;
+        event.preventDefault?.();
+      };
+      const onUp = () => {
+        if (!resizing) return;
+        resizing = null;
+        persistPosition();
+      };
+      directions.forEach((dir) => {
+        const element = panel.querySelector(`#bronze-loop-resize-${dir}`);
+        if (!element) return;
+        element.addEventListener("pointerdown", (event) => {
+          if (panel.classList.contains("icon-only")) return;
+          const rect = panel.getBoundingClientRect();
+          panel.style.left = `${rect.left}px`;
+          panel.style.top = `${rect.top}px`;
+          panel.style.right = "auto";
+          panel.style.bottom = "auto";
+          panel.style.width = `${rect.width}px`;
+          panel.style.height = `${rect.height}px`;
+          resizing = {
+            dir,
+            startX: event.clientX,
+            startY: event.clientY,
+            startLeft: rect.left,
+            startTop: rect.top,
+            startWidth: rect.width,
+            startHeight: rect.height
+          };
+          element.setPointerCapture?.(event.pointerId);
+          event.preventDefault?.();
+        });
+        element.addEventListener("pointermove", onMove);
+        element.addEventListener("pointerup", onUp);
+        element.addEventListener("pointercancel", onUp);
+      });
+    }
+    restoreSavedPosition();
+    resetSize();
+    makeDraggable();
+    makeResizable();
+    panel.querySelector("#bronze-loop-collapse")?.addEventListener("click", toggleIconOnly);
+    panel.querySelector("#bronze-loop-options-toggle")?.addEventListener("click", toggleOptions);
+    notifyModeChange();
+    return Object.freeze({ resetSize, restorePanel, toggleIconOnly, toggleOptions, persistPosition });
+  }
+
+  // src/ui/main-panel-state.js
+  function query(panel, selector) {
+    return panel?.querySelector?.(selector) || null;
+  }
+  function renderMainPanelLoopOptions(options = {}) {
+    const panel = options.panel;
+    const createOption = options.createOption;
+    const select = query(panel, "#bronze-loop-select");
+    if (!select || typeof createOption !== "function") return null;
+    const loops = options.loops || [];
+    const previous = String(options.selectedId || select.value || "");
+    select.textContent = "";
+    for (const loop of loops) {
+      const option = createOption();
+      option.value = loop.id;
+      option.textContent = loop.name;
+      select.appendChild(option);
+    }
+    const custom = createOption();
+    custom.value = "custom";
+    custom.textContent = "Custom JSON";
+    select.appendChild(custom);
+    const values = Array.from(select.options || []).map((option) => option.value);
+    const nextValue = values.includes(previous) ? previous : loops[0]?.id;
+    if (nextValue) select.value = nextValue;
+    return select.value || null;
+  }
+  function renderMainPanelRounds(options = {}) {
+    const panel = options.panel;
+    const display = options.show === true ? "" : "none";
+    for (const selector of ["#bronze-loop-rounds-row", "#bronze-loop-rounds-label", "#bronze-loop-rounds"]) {
+      const element = query(panel, selector);
+      if (element) element.style.display = display;
+    }
+  }
+  function renderMainPanelRecap(options = {}) {
+    const button = query(options.panel, "#bronze-loop-recap-reopen");
+    if (!button) return;
+    const recap = options.recap;
+    button.style.display = recap ? "" : "none";
+    if (recap) button.title = `Last Player Pick recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
+  }
+  function renderMainPanelRuntimeState(options = {}) {
+    const panel = options.panel;
+    const state = options.state || {};
+    const busy = state.running === true || state.refreshing === true || state.scanningPicks === true || state.loadingLoops === true;
+    const disabled = {
+      "bronze-loop-start": busy,
+      "bronze-loop-stop": state.running !== true,
+      "bronze-loop-select": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
+      "bronze-loop-edit": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
+      "bronze-loop-refresh": busy,
+      "bronze-loop-scan-picks": busy,
+      "bronze-loop-load-json": busy,
+      "bronze-loop-built-in": busy || state.usingBuiltIn === true,
+      "bronze-loop-dry-run": state.running === true,
+      "bronze-loop-open-rewards": state.running === true,
+      "bronze-loop-pick-protect-high-gold": state.running === true,
+      "bronze-loop-pick-auto-below-90": state.running === true,
+      "bronze-loop-pick-prefer-scanned": state.running === true || state.scanningPicks === true,
+      "bronze-loop-pick-high-gold-threshold": state.running === true,
+      "bronze-loop-pick-auto-threshold": state.running === true,
+      "bronze-loop-show-mvp": state.running === true,
+      "bronze-loop-rounds": state.running === true,
+      "bronze-loop-json": state.running === true
+    };
+    for (const [id, value] of Object.entries(disabled)) {
+      const element = query(panel, `#${id}`);
+      if (element) element.disabled = value;
+    }
+  }
+
+  // src/ui/main-panel-view.js
+  var MAIN_PANEL_STYLE = `
+  #bronze-loop-panel {
+    position: fixed;
+    right: 10px;
+    bottom: 10px;
+    z-index: 999999;
+    width: 300px;
+    height: 178px;
+    min-width: 300px;
+    min-height: 178px;
+    display: flex;
+    flex-direction: column;
+    background: #15181d;
+    border: 1px solid #5b6f8f;
+    color: #f4f6f8;
+    font: 12px Arial, sans-serif;
+    padding: 8px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.35);
+    box-sizing: border-box;
+  }
+  #bronze-loop-panel .panel-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .bronze-loop-resize { position: absolute; z-index: 2; touch-action: none; }
+  #bronze-loop-resize-n { top: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+  #bronze-loop-resize-s { bottom: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+  #bronze-loop-resize-e { top: 12px; bottom: 12px; right: -3px; width: 6px; cursor: ew-resize; }
+  #bronze-loop-resize-w { top: 12px; bottom: 12px; left: -3px; width: 6px; cursor: ew-resize; }
+  #bronze-loop-resize-ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+  #bronze-loop-resize-nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+  #bronze-loop-resize-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+  #bronze-loop-resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+  #bronze-loop-panel.icon-only .bronze-loop-resize { display: none; }
+  #bronze-loop-panel.icon-only {
+    width: 36px;
+    height: 36px;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    background: rgba(12,15,19,.72);
+    border: 1px solid #78a6ff;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,.28);
+  }
+  #bronze-loop-panel.icon-only .panel-body,
+  #bronze-loop-panel.icon-only #bronze-loop-title,
+  #bronze-loop-panel.icon-only #bronze-loop-options-toggle { display: none; }
+  #bronze-loop-panel.icon-only #bronze-loop-drag { width: 34px; height: 34px; margin: 0; justify-content: center; }
+  #bronze-loop-drag { cursor: move; user-select: none; justify-content: space-between; }
+  #bronze-loop-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bronze-loop-panel .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; background: #222832; color: #fff; border: 1px solid #607089; }
+  #bronze-loop-panel button:disabled { opacity: .45; cursor: default; }
+  #bronze-loop-collapse { min-width: 28px !important; width: 28px; padding: 0; }
+  #bronze-loop-panel.icon-only #bronze-loop-collapse {
+    min-width: 34px !important;
+    width: 34px;
+    height: 34px;
+    border: 0;
+    background: transparent;
+    color: #78a6ff;
+    font-weight: 700;
+  }
+  #bronze-loop-options-toggle { min-width: 58px; }
+  #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; box-sizing: border-box; }
+  #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
+  #bronze-loop-panel label { cursor: pointer; user-select: none; }
+  #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
+  #bronze-loop-latest {
+    min-height: 28px;
+    max-height: 44px;
+    overflow: hidden;
+    background: #0c0f13;
+    border: 1px solid #303946;
+    padding: 6px;
+    line-height: 16px;
+    color: #d7e2f0;
+    word-break: break-word;
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
+  }
+  #bronze-loop-options { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid #303946; }
+  #bronze-loop-panel.options-open #bronze-loop-options { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  #bronze-loop-panel.options-open #bronze-loop-latest { display: none; }
+  .bronze-loop-section { color: #9fb2c9; font-size: 11px; margin: 8px 0 6px; }
+  #bronze-loop-json {
+    display: none;
+    width: 100%;
+    height: 170px;
+    min-height: 60px;
+    flex-shrink: 1;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+    background: #0c0f13;
+    color: #f4f6f8;
+    border: 1px solid #303946;
+    font: 11px Consolas, monospace;
+    padding: 8px;
+  }
+  #bronze-loop-json.show { display: block; }
+  #bronze-loop-log {
+    flex: 1 1 0;
+    min-height: 100px;
+    overflow: auto;
+    white-space: pre-wrap;
+    background: #0c0f13;
+    border: 1px solid #303946;
+    padding: 8px;
+    box-sizing: border-box;
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
+  }
+  #bronze-loop-log .bronze-loop-log-high-rated { color: #ffd54a; font-weight: 700; }
+`;
+  function mainPanelHtml(maxRounds = 3) {
+    const rounds = Math.max(1, Number(maxRounds) || 3);
+    const resizeHandles = ["n", "s", "e", "w", "ne", "nw", "se", "sw"].map((dir) => `<div class="bronze-loop-resize" id="bronze-loop-resize-${dir}"></div>`).join("\n");
+    return `
+    <div class="row" id="bronze-loop-drag">
+      <span id="bronze-loop-title">Loop Runner</span>
+      <button id="bronze-loop-options-toggle" title="Options">Options</button>
+      <button id="bronze-loop-collapse" title="Compact">L</button>
+    </div>
+    <div class="panel-body">
+      <div class="row"><select id="bronze-loop-select"></select></div>
+      <div class="row">
+        <button id="bronze-loop-start">Start</button>
+        <button id="bronze-loop-stop" disabled>Stop</button>
+        <button id="bronze-loop-recap-reopen" style="display:none" title="View last Player Pick recap">View recap</button>
+      </div>
+      <div id="bronze-loop-latest">Ready.</div>
+      <div id="bronze-loop-options">
+        <div class="bronze-loop-section">Run options</div>
+        <div class="row">
+          <label id="bronze-loop-dry-run-label" title="Log planned selections without moving items, opening packs, or submitting SBCs">
+            <input id="bronze-loop-dry-run" type="checkbox"> Dry run
+          </label>
+          <label title="Open reward packs automatically when a loop supports it">
+            <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
+          </label>
+        </div>
+        <div class="row"><label title="Show MVP and one-run validation loops in the main selector"><input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops</label></div>
+        <div class="row">
+          <label title="Player Pick SBCs will not submit normal gold players at or above this rating">
+            <input id="bronze-loop-pick-protect-high-gold" type="checkbox"> Protect Pick fodder >=
+            <input id="bronze-loop-pick-high-gold-threshold" type="number" min="2" max="99" value="82">
+          </label>
+          <label title="Player Picks whose candidates are all below this rating will be selected automatically">
+            <input id="bronze-loop-pick-auto-below-90" type="checkbox"> Auto-pick below
+            <input id="bronze-loop-pick-auto-threshold" type="number" min="1" max="99" value="90">
+          </label>
+        </div>
+        <div class="row">
+          <label title="Use fully supported scanned Pick requirements and stable identities while keeping static loop IDs as fallback">
+            <input id="bronze-loop-pick-prefer-scanned" type="checkbox"> Use scanned Pick metadata
+          </label>
+        </div>
+        <div class="row" id="bronze-loop-rounds-row">
+          <span id="bronze-loop-rounds-label">rounds</span>
+          <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
+        </div>
+        <div class="bronze-loop-section">Config</div>
+        <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
+        <div class="row"><button id="bronze-loop-built-in" disabled>Built-in loops</button><button id="bronze-loop-edit">Edit JSON</button></div>
+        <textarea id="bronze-loop-json" spellcheck="false"></textarea>
+        <div class="bronze-loop-section">Log</div>
+        <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
+        <div id="bronze-loop-log"></div>
+      </div>
+    </div>
+    ${resizeHandles}
+  `;
+  }
+  function mountMainPanel(options = {}) {
+    const dom = options.dom;
+    if (!dom?.query || !dom?.create || !dom?.appendToHead || !dom?.appendToBody) {
+      throw new TypeError("dom adapter is required");
+    }
+    const existing = dom.query("#bronze-loop-panel");
+    if (existing) return { panel: existing, created: false };
+    dom.query("#bronze-loop-style")?.remove?.();
+    const style = dom.create("style");
+    style.id = "bronze-loop-style";
+    style.textContent = MAIN_PANEL_STYLE;
+    dom.appendToHead(style);
+    const panel = dom.create("div");
+    panel.id = "bronze-loop-panel";
+    panel.innerHTML = mainPanelHtml(options.maxRounds);
+    dom.appendToBody(panel);
+    return { panel, style, created: true };
+  }
+
+  // src/ui/player-pick-modal.js
+  function applyStyles(element, styles) {
+    Object.assign(element.style, styles);
+  }
+  function waitForManualPlayerPickSelection(options = {}) {
+    if (!options.dom?.create || !options.dom?.appendToBody) throw new TypeError("dom adapter is required");
+    if (typeof options.describeCandidate !== "function") throw new TypeError("describeCandidate is required");
+    if (typeof options.scheduleStopCheck !== "function") throw new TypeError("scheduleStopCheck is required");
+    if (typeof options.cancelStopCheck !== "function") throw new TypeError("cancelStopCheck is required");
+    const ranked = options.ranked || [];
+    const pickCount = Math.max(1, Number(options.pickCount || 1) || 1);
+    const reason = String(options.reason || "manual selection required");
+    return new Promise((resolve, reject) => {
+      let stopTimer = null;
+      const overlay = options.dom.create("div");
+      const finish = (callback, value) => {
+        if (stopTimer !== null) options.cancelStopCheck(stopTimer);
+        overlay.remove();
+        callback(value);
+      };
+      overlay.id = "bronze-loop-pick-modal";
+      applyStyles(overlay, {
+        position: "fixed",
+        inset: "0",
+        zIndex: "100000",
+        background: "rgba(0, 0, 0, 0.78)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+        boxSizing: "border-box"
+      });
+      const dialog = options.dom.create("div");
+      applyStyles(dialog, {
+        width: "min(780px, 100%)",
+        maxHeight: "90vh",
+        overflow: "auto",
+        background: "#171b21",
+        color: "#f3f5f7",
+        border: "1px solid #65758a",
+        padding: "16px",
+        boxSizing: "border-box",
+        fontFamily: "Arial, sans-serif"
+      });
+      const title = options.dom.create("div");
+      title.textContent = `Manual Player Pick: ${reason}`;
+      applyStyles(title, { fontWeight: "700", marginBottom: "8px" });
+      const hint = options.dom.create("div");
+      hint.textContent = `Select exactly ${pickCount} player(s), then confirm.`;
+      applyStyles(hint, { color: "#b7c2d0", marginBottom: "12px" });
+      const list = options.dom.create("div");
+      applyStyles(list, { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px" });
+      const selected = /* @__PURE__ */ new Set();
+      const cards = [];
+      const confirm = options.dom.create("button");
+      confirm.textContent = "Confirm selection";
+      confirm.disabled = true;
+      applyStyles(confirm, { marginTop: "14px", minHeight: "34px", padding: "0 14px" });
+      const refresh = () => {
+        cards.forEach(({ card, candidate }) => {
+          card.style.borderColor = selected.has(candidate) ? "#64d77a" : "#536171";
+          card.style.background = selected.has(candidate) ? "#243c2b" : "#202731";
+        });
+        confirm.disabled = selected.size !== pickCount;
+      };
+      ranked.forEach((candidate) => {
+        const card = options.dom.create("button");
+        card.type = "button";
+        card.textContent = options.describeCandidate(candidate);
+        applyStyles(card, {
+          minHeight: "68px",
+          textAlign: "left",
+          color: "#f3f5f7",
+          background: "#202731",
+          border: "1px solid #536171",
+          padding: "9px",
+          cursor: "pointer",
+          lineHeight: "1.35"
+        });
+        card.addEventListener("click", () => {
+          if (selected.has(candidate)) selected.delete(candidate);
+          else if (selected.size < pickCount) selected.add(candidate);
+          refresh();
+        });
+        cards.push({ card, candidate });
+        list.appendChild(card);
+      });
+      confirm.addEventListener("click", () => {
+        if (selected.size !== pickCount) return;
+        finish(resolve, [...selected].map((candidate) => candidate.item));
+      });
+      dialog.append(title, hint, list, confirm);
+      overlay.appendChild(dialog);
+      options.dom.appendToBody(overlay);
+      refresh();
+      stopTimer = options.scheduleStopCheck(() => {
+        if (!options.isStopping?.()) return;
+        finish(reject, new Error("Stopped by user while a Player Pick selection was pending"));
+      }, 250);
+    });
+  }
+
+  // src/ui/player-pick-recap.js
+  var DESTINATION_COLORS = Object.freeze({
+    club: "#5cffa0",
+    transfer: "#5c8aff",
+    storage: "#ff9d4a",
+    unknown: "#536171"
+  });
+  var DESTINATION_LABELS = Object.freeze({
+    club: "->CLUB",
+    transfer: "->TRANSFER",
+    storage: "->STORAGE",
+    unknown: "->?"
+  });
+  function applyStyles2(element, styles) {
+    Object.assign(element.style, styles);
+  }
+  function createPlayerPickRecapModel(pickResults = []) {
+    const entries = Array.isArray(pickResults) ? pickResults : [];
+    const cards = entries.flatMap((entry) => entry?.pickedCards || []);
+    if (!cards.length) return null;
+    const ratings = cards.map((card) => Number(card.rating || 0));
+    const destinations = cards.reduce((counts, card) => {
+      const destination = card.destination || "unknown";
+      counts[destination] = (counts[destination] || 0) + 1;
+      return counts;
+    }, {});
+    const rows = entries.flatMap((entry, pickIndex) => (entry?.pickedCards || []).map((card) => ({
+      card,
+      pickIndex: pickIndex + 1,
+      resumed: entry?.resumed === true
+    }))).sort((a, b) => Number(b.card.rating || 0) - Number(a.card.rating || 0) || a.pickIndex - b.pickIndex);
+    return Object.freeze({
+      cards,
+      entries,
+      rows,
+      minRating: Math.min(...ratings),
+      maxRating: Math.max(...ratings),
+      specialCount: cards.filter((card) => card.special).length,
+      duplicateCount: cards.filter((card) => card.duplicate).length,
+      highRatedCount: cards.filter((card) => Number(card.rating || 0) >= 91).length,
+      resumedCount: entries.filter((entry) => entry?.resumed).length,
+      destinations
+    });
+  }
+  function showPlayerPickRecap(options = {}) {
+    if (!options.dom?.create || !options.dom?.appendToBody) throw new TypeError("dom adapter is required");
+    if (typeof options.itemDisplayName !== "function") throw new TypeError("itemDisplayName is required");
+    if (typeof options.formatPrice !== "function") throw new TypeError("formatPrice is required");
+    if (typeof options.scheduleStopCheck !== "function") throw new TypeError("scheduleStopCheck is required");
+    if (typeof options.cancelStopCheck !== "function") throw new TypeError("cancelStopCheck is required");
+    const model = createPlayerPickRecapModel(options.pickResults);
+    if (!model) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let stopTimer = null;
+      const overlay = options.dom.create("div");
+      overlay.id = "bronze-loop-recap-modal";
+      applyStyles2(overlay, {
+        position: "fixed",
+        inset: "0",
+        zIndex: "100000",
+        background: "rgba(0, 0, 0, 0.78)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+        boxSizing: "border-box"
+      });
+      const dialog = options.dom.create("div");
+      applyStyles2(dialog, {
+        width: "min(620px, 100%)",
+        maxHeight: "90vh",
+        overflow: "auto",
+        background: "#171b21",
+        color: "#f3f5f7",
+        border: "1px solid #65758a",
+        padding: "12px 14px",
+        boxSizing: "border-box",
+        fontFamily: "Arial, sans-serif"
+      });
+      const title = options.dom.create("div");
+      title.textContent = `Player Pick Recap: ${String(options.name || "")}`;
+      applyStyles2(title, { fontWeight: "700", marginBottom: "4px", fontSize: "16px" });
+      const destinationSummary = Object.entries(model.destinations).map(([destination, count]) => `${count} ${DESTINATION_LABELS[destination] || destination}`).join(", ");
+      const summary = options.dom.create("div");
+      summary.textContent = `${model.entries.length} pick(s), ${model.cards.length} card(s), rating ${model.minRating}-${model.maxRating}, ${model.specialCount} special, ${model.duplicateCount} duplicate, ${model.highRatedCount} rated 91+${destinationSummary ? `, ${destinationSummary}` : ""}${model.resumedCount ? `, ${model.resumedCount} resumed` : ""}`;
+      applyStyles2(summary, { color: "#9aa6b8", marginBottom: "8px", fontSize: "12px" });
+      const list = options.dom.create("div");
+      applyStyles2(list, { display: "flex", flexDirection: "column", gap: "6px" });
+      for (const { card, pickIndex, resumed } of model.rows) {
+        const rating = Number(card.rating || 0);
+        const highRated = rating >= 91;
+        const destination = card.destination || "unknown";
+        const row = options.dom.create("div");
+        applyStyles2(row, {
+          padding: "6px 8px",
+          fontSize: "13px",
+          color: "#f3f5f7",
+          background: highRated ? "#3a2f15" : card.special ? "#26223a" : "#1d2229",
+          borderLeft: `3px solid ${highRated ? "#ffd54a" : card.special ? "#7a5cff" : DESTINATION_COLORS[destination] || DESTINATION_COLORS.unknown}`,
+          display: "flex",
+          gap: "8px",
+          alignItems: "baseline"
+        });
+        const nameRating = options.dom.create("span");
+        applyStyles2(nameRating, { flex: "1 1 auto", minWidth: "0", display: "flex", gap: "6px", alignItems: "baseline", overflow: "hidden" });
+        const name = options.dom.create("span");
+        name.textContent = options.itemDisplayName(card.item);
+        applyStyles2(name, { fontWeight: "600", flex: "0 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        const ratingText = options.dom.create("span");
+        ratingText.textContent = `- ${rating}`;
+        applyStyles2(ratingText, { color: highRated ? "#ffd54a" : "#f3f5f7", fontWeight: "700", flex: "0 0 auto" });
+        const pickTag = options.dom.create("span");
+        pickTag.textContent = `P${pickIndex}${resumed ? "r" : ""}`;
+        applyStyles2(pickTag, { color: "#7d8898", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
+        nameRating.append(name, ratingText, pickTag);
+        const destinationTag = options.dom.create("span");
+        destinationTag.textContent = DESTINATION_LABELS[destination] || destination;
+        applyStyles2(destinationTag, { color: DESTINATION_COLORS[destination] || DESTINATION_COLORS.unknown, fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
+        const tags = options.dom.create("span");
+        const price = options.formatPrice(card.price);
+        tags.textContent = `${card.special ? "special" : "normal"}${card.duplicate ? ", duplicate" : ""}${price ? `, price:${price}` : ""}`;
+        applyStyles2(tags, { color: "#9aa6b8", fontSize: "11px", flex: "0 0 auto", whiteSpace: "nowrap" });
+        row.append(nameRating, destinationTag, tags);
+        list.appendChild(row);
+      }
+      const closeButton = options.dom.create("button");
+      closeButton.type = "button";
+      closeButton.textContent = "Close";
+      applyStyles2(closeButton, {
+        marginTop: "10px",
+        minHeight: "30px",
+        padding: "0 14px",
+        background: "#2f6fde",
+        color: "#fff",
+        border: "none",
+        borderRadius: "3px",
+        cursor: "pointer",
+        fontSize: "13px"
+      });
+      const finish = () => {
+        if (stopTimer !== null) options.cancelStopCheck(stopTimer);
+        overlay.remove();
+        options.onClose?.();
+        resolve(true);
+      };
+      closeButton.addEventListener("click", finish);
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) finish();
+      });
+      dialog.append(title, summary, list, closeButton);
+      overlay.appendChild(dialog);
+      options.dom.appendToBody(overlay);
+      if (model.specialCount > 0) options.celebrate?.(dialog, model.specialCount);
+      stopTimer = options.scheduleStopCheck(() => {
+        if (options.isStopping?.()) finish();
+      }, 250);
+    });
+  }
+  function triggerPlayerPickRecapFireworks(dialog, specialCount, runtime = {}) {
+    if (!dialog || !runtime.dom?.create || typeof runtime.requestFrame !== "function") return;
+    if (runtime.getComputedStyle?.(dialog)?.position === "static") dialog.style.position = "relative";
+    dialog.style.isolation = "isolate";
+    const canvas = runtime.dom.create("canvas");
+    canvas.style.cssText = "position:absolute;top:0;left:0;width:100%;height:35%;pointer-events:none;z-index:-1;overflow:hidden;";
+    dialog.insertBefore(canvas, dialog.firstChild);
+    const width = Math.max(220, canvas.clientWidth);
+    const height = Math.max(120, canvas.clientHeight);
+    const dpr = Math.min(2, Number(runtime.devicePixelRatio?.() || 1));
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    const context = canvas.getContext?.("2d");
+    if (!context) {
+      canvas.remove();
+      return;
+    }
+    context.scale(dpr, dpr);
+    const palette = ["#ffd54a", "#ff5c5c", "#5c8aff", "#5cffa0", "#7a5cff", "#ff9d4a", "#ff5cb1", "#5ce0ff"];
+    const random = runtime.random || Math.random;
+    const intensity = Math.max(1, Math.min(6, Number(specialCount) || 1));
+    const particlesPerBurst = 70 + intensity * 14;
+    const particles = [];
+    const burstSchedule = [80, 700, 1400];
+    const columns = [0.22, 0.5, 0.78];
+    const startMs = runtime.now?.() || 0;
+    let lastBurstIndex = -1;
+    function spawnBurst(x, y) {
+      particles.push({ x, y, life: 1, decay: 0.05, color: "#fff", size: 14 + random() * 6, isFlash: true });
+      for (let index = 0; index < particlesPerBurst; index++) {
+        const angle = index / particlesPerBurst * Math.PI * 2 + (random() - 0.5) * 0.5;
+        const speed = 1.5 + random() * 3.5;
+        particles.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 1.8,
+          color: palette[Math.floor(random() * palette.length)],
+          life: 1,
+          decay: 6e-3 + random() * 0.012,
+          size: 0.9 + random() * 1.4
+        });
+      }
+    }
+    function tick(now) {
+      const elapsed = now - startMs;
+      if (elapsed > 3e3 || !canvas.isConnected) {
+        canvas.remove();
+        return;
+      }
+      for (let burst = lastBurstIndex + 1; burst < burstSchedule.length; burst++) {
+        if (elapsed < burstSchedule[burst]) break;
+        spawnBurst(width * columns[burst] + (random() - 0.5) * 30, height * (0.18 + random() * 0.12));
+        lastBurstIndex = burst;
+      }
+      context.fillStyle = "rgba(0, 0, 0, 0.18)";
+      context.fillRect(0, 0, width, height);
+      context.globalCompositeOperation = "lighter";
+      for (let index = particles.length - 1; index >= 0; index--) {
+        const particle = particles[index];
+        particle.vy = Number(particle.vy || 0) + 0.06;
+        particle.vx = Number(particle.vx || 0) * 0.985;
+        particle.vy *= 0.985;
+        particle.x += particle.vx;
+        particle.y += particle.vy;
+        particle.life -= particle.decay;
+        if (particle.life <= 0 || particle.y > height + 30 || particle.x < -30 || particle.x > width + 30) {
+          particles.splice(index, 1);
+          continue;
+        }
+        context.shadowColor = particle.color;
+        context.shadowBlur = particle.isFlash ? 18 : 9;
+        context.fillStyle = particle.color;
+        context.globalAlpha = Math.max(0, Math.min(1, particle.life));
+        context.beginPath();
+        context.arc(particle.x, particle.y, particle.isFlash ? particle.size * (1 + (1 - particle.life) * 0.6) : particle.size, 0, Math.PI * 2);
+        context.fill();
+      }
+      context.shadowBlur = 0;
+      context.globalAlpha = 1;
+      context.globalCompositeOperation = "source-over";
+      runtime.requestFrame(tick);
+    }
+    runtime.requestFrame(tick);
+  }
+
+  // src/ui/sbc-reward-overlay.js
+  var CLAIM_REWARD_PATTERNS = Object.freeze([
+    "Claim Rewards",
+    "Claim Reward",
+    "Collect Rewards",
+    "Collect Reward",
+    "\u9886\u53D6\u5956\u52B1",
+    "\u9818\u53D6\u734E\u52F5",
+    "\u9886\u53D6",
+    "\u9818\u53D6"
+  ]);
+  var REWARD_CONTEXT_SELECTOR = [
+    ".view-modal-container",
+    ".ut-modal",
+    ".modal",
+    '[class*="modal"]',
+    '[class*="Modal"]'
+  ].join(",");
+  var REWARD_CONTROLLER_MARKER_SELECTOR = '.rewards-footer, .reward, [class*="game-rewards"], [class*="GameRewards"]';
+  var REWARD_MARKER_SELECTOR = '.rewards-footer, [class*="game-rewards"], [class*="GameRewards"]';
+  var REWARD_ROOT_SELECTOR = '.view-modal-container, .ea-dialog-view, [class*="modal"], [class*="Modal"]';
+  var REWARD_ACTION_SELECTOR = "footer button.call-to-action:not(.disabled), button.call-to-action:not(.disabled), footer button:not(.disabled)";
+  var SUBMIT_ERROR_SELECTOR = [
+    ".view-modal-container",
+    ".ut-modal-view",
+    ".ea-dialog",
+    ".modal-content",
+    ".ut-dialog"
+  ].join(",");
+  function createSbcRewardOverlay({
+    dom,
+    pageRuntime,
+    findButtonByText,
+    findClickableByText,
+    isClickableElement,
+    compactText,
+    matchesAny,
+    click,
+    sleep,
+    log
+  }) {
+    function findClaimButton() {
+      return findButtonByText(CLAIM_REWARD_PATTERNS) || findClickableByText(CLAIM_REWARD_PATTERNS);
+    }
+    function findSubmitError() {
+      for (const modal of dom.queryAll(SUBMIT_ERROR_SELECTOR)) {
+        const text = String(modal?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 220);
+        if (!text) continue;
+        if (/Ineligible Squad/i.test(text) || /Concept or Loan Players/i.test(text) || /cannot be submitted in Squad Building Challenges/i.test(text) || /Squads containing .*Loan/i.test(text)) {
+          return { modal, text };
+        }
+      }
+      return null;
+    }
+    function dismissSubmitError(error) {
+      const modal = error?.modal;
+      if (!modal) return false;
+      const buttons = Array.from(modal.querySelectorAll?.("button") || []);
+      const button = buttons.find((candidate) => /^(ok|okay|确定|確定)$/i.test(String(candidate?.textContent || "").trim())) || buttons.find((candidate) => !candidate?.disabled);
+      if (!button) return false;
+      click(button);
+      return true;
+    }
+    function findClaimContext() {
+      const contexts = dom.queryAll(REWARD_CONTEXT_SELECTOR).filter(isClickableElement).map((element) => ({ element, text: compactText(element) })).filter(({ text }) => text && text.length < 2e3);
+      return contexts.find(
+        ({ text }) => matchesAny(text, ["Claim Rewards", "Claim Reward", "Collect Rewards", "Collect Reward", "\u9886\u53D6\u5956\u52B1", "\u9818\u53D6\u734E\u52F5"]) || matchesAny(text, ["Reward", "Rewards", "\u5956\u52B1", "\u734E\u52F5"]) && matchesAny(text, ["Pack", "Player", "Claim", "Collect", "\u5305", "\u7403\u5458", "\u7403\u54E1", "\u9886\u53D6", "\u9818\u53D6"])
+      ) || null;
+    }
+    function isRewardsController(controller) {
+      if (!controller) return false;
+      if (/UTGameRewardsViewController/i.test(pageRuntime.controllerName(controller))) return true;
+      const root = pageRuntime.controllerRoot(controller);
+      return !!root?.querySelector?.(REWARD_CONTROLLER_MARKER_SELECTOR);
+    }
+    function activeController() {
+      return pageRuntime.popupControllerCandidates().find(isRewardsController) || null;
+    }
+    function findDomRoot() {
+      const marker = dom.queryAll(REWARD_MARKER_SELECTOR).find(isClickableElement);
+      if (!marker) return null;
+      return marker.closest?.(REWARD_ROOT_SELECTOR) || marker.parentElement;
+    }
+    function isVisible() {
+      return !!activeController() || !!findDomRoot() || !!findClaimContext();
+    }
+    async function dismiss(label) {
+      const controller = activeController();
+      if (controller && typeof controller.onBackButton === "function") {
+        log(`${label}: closing ${pageRuntime.controllerName(controller) || "SBC reward"} overlay`);
+        controller.onBackButton();
+        await sleep(700);
+        return true;
+      }
+      const root = findDomRoot();
+      const action2 = root?.querySelector?.(REWARD_ACTION_SELECTOR);
+      if (!action2) return false;
+      const actionText = compactText(action2);
+      log(`${label}: advancing SBC reward overlay${actionText ? ` (${actionText})` : ""}`);
+      click(action2);
+      await sleep(700);
+      return true;
+    }
+    return Object.freeze({
+      activeController,
+      dismiss,
+      dismissSubmitError,
+      findClaimButton,
+      findClaimContext,
+      findDomRoot,
+      findSubmitError,
+      isRewardsController,
+      isVisible
+    });
+  }
+
   // src/userscript-entry.js
   (function() {
     "use strict";
@@ -2197,442 +7184,27 @@
       W[APP_KEY]?.destroy?.();
     } catch {
     }
-    const eaSbcAdapter = () => createEaSbcAdapter(W);
-    const LOOP_DEFS = [
-      {
-        id: "bronze-upgrade-validation",
-        hidden: true,
-        mvp: true,
-        name: "Bronze Upgrade Validation",
-        strategy: "validationBronzeUpgrade",
-        sourcePackIds: [105],
-        sourcePackNames: CFG.sourcePackNames,
-        sbcNames: CFG.bronzeUpgradeNames,
-        rewardPackNames: CFG.silverRewardNames,
-        targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false },
-        maxRounds: 3
-      },
-      {
-        id: "daily-bronze",
-        hidden: true,
-        name: "Daily Bronze Loop",
-        strategy: "dailySingleCardRecycle",
-        sbcNames: ["Daily Bronze Upgrade", "\u6BCF\u65E5\u9752\u94DC\u5347\u7EA7", "\u6BCF\u65E5\u9752\u9285\u5347\u7D1A"],
-        rewardPackIds: [105],
-        rewardPackNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
-        targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false },
-        dailyCompletionLimit: 7,
-        maxCompletions: 7
-      },
-      {
-        id: "daily-bronze-mvp",
-        hidden: true,
-        mvp: true,
-        name: "Daily Bronze MVP (1 run)",
-        strategy: "dailySingleCardRecycle",
-        sbcNames: ["Daily Bronze Upgrade", "\u6BCF\u65E5\u9752\u94DC\u5347\u7EA7", "\u6BCF\u65E5\u9752\u9285\u5347\u7D1A"],
-        rewardPackIds: [105],
-        rewardPackNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
-        targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false },
-        dailyCompletionLimit: 7,
-        maxCompletions: 1
-      },
-      {
-        id: "daily-silver",
-        hidden: true,
-        name: "Daily Silver Loop",
-        strategy: "dailySingleCardRecycle",
-        sbcNames: ["Daily Silver Upgrade", "\u6BCF\u65E5\u767D\u94F6\u5347\u7EA7", "\u6BCF\u65E5\u767D\u9280\u5347\u7D1A"],
-        rewardPackIds: [205],
-        rewardPackNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
-        targetDuplicate: { tier: "silver", playerOnly: true, allowSpecial: false },
-        dailyCompletionLimit: 7,
-        maxCompletions: 7
-      },
-      {
-        id: "daily-silver-mvp",
-        hidden: true,
-        mvp: true,
-        name: "Daily Silver MVP (1 run)",
-        strategy: "dailySingleCardRecycle",
-        sbcNames: ["Daily Silver Upgrade", "\u6BCF\u65E5\u767D\u94F6\u5347\u7EA7", "\u6BCF\u65E5\u767D\u9280\u5347\u7D1A"],
-        rewardPackIds: [205],
-        rewardPackNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
-        targetDuplicate: { tier: "silver", playerOnly: true, allowSpecial: false },
-        dailyCompletionLimit: 7,
-        maxCompletions: 1
-      },
-      {
-        id: "daily-common",
-        hidden: true,
-        name: "Daily Common Loop",
-        strategy: "supplyAndCraft",
-        sbcNames: ["Daily Common Gold Upgrade", "\u6BCF\u65E5\u666E\u901A\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u666E\u901A\u91D1\u724C\u5347\u7D1A"],
-        rewardPackIds: [304],
-        rewardPackNames: ["Gold Players Pack"],
-        requirements: [
-          { tier: "silver", count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ["storage", "transfer", "club"] },
-          { tier: "bronze", count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ["storage", "transfer", "club"] }
-        ],
-        priorityPiles: ["storage", "transfer", "club"],
-        primaryPiles: ["unassigned", "storage", "transfer"],
-        clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
-        shortagePacks: [
-          { requirement: { tier: "bronze" }, packIds: [105], packNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"], maxOpensPerAttempt: 1 },
-          { requirement: { tier: "silver" }, packIds: [205], packNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"], maxOpensPerAttempt: 1 }
-        ],
-        dailyCompletionLimit: 7,
-        maxCompletions: 7
-      },
-      {
-        id: "daily-common-mvp",
-        hidden: true,
-        mvp: true,
-        name: "Daily Common MVP (1 run)",
-        strategy: "supplyAndCraft",
-        sbcNames: ["Daily Common Gold Upgrade", "\u6BCF\u65E5\u666E\u901A\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u666E\u901A\u91D1\u724C\u5347\u7D1A"],
-        rewardPackIds: [304],
-        rewardPackNames: ["Gold Players Pack"],
-        requirements: [
-          { tier: "silver", count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ["storage", "transfer", "club"] },
-          { tier: "bronze", count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ["storage", "transfer", "club"] }
-        ],
-        priorityPiles: ["storage", "transfer", "club"],
-        primaryPiles: ["unassigned", "storage", "transfer"],
-        clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
-        shortagePacks: [
-          { requirement: { tier: "bronze" }, packIds: [105], packNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"], maxOpensPerAttempt: 1 },
-          { requirement: { tier: "silver" }, packIds: [205], packNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"], maxOpensPerAttempt: 1 }
-        ],
-        dailyCompletionLimit: 7,
-        maxCompletions: 1
-      },
-      {
-        id: "daily-rare",
-        hidden: true,
-        name: "Daily Rare Loop",
-        strategy: "supplyAndCraft",
-        sbcNames: ["Daily Rare Gold Upgrade", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7D1A"],
-        sourcePackNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
-        rewardPackNames: ["Max. 78 Rare Gold Players Pack", "Max 78 Rare Gold Players Pack"],
-        requirements: [
-          { tier: "gold", rarity: "common", count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer"] }
-        ],
-        priorityPiles: ["unassigned", "storage", "transfer"],
-        clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
-        deferChallengeLoad: true,
-        preSelectionCleanup: false,
-        shortagePacks: [
-          {
-            requirement: { tier: "gold", rarity: "common", playerOnly: true, allowSpecial: false, protectHighGold: true },
-            packNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
-            maxOpensPerAttempt: 1,
-            repeatUntilSatisfied: true,
-            maxRuns: 100,
-            routingPolicy: "reserveMatchingDuplicates"
-          }
-        ],
-        dailyCompletionLimit: 7,
-        maxCompletions: 7
-      },
-      {
-        id: "daily-rare-mvp",
-        hidden: true,
-        mvp: true,
-        name: "Daily Rare MVP (1 run)",
-        strategy: "supplyAndCraft",
-        sbcNames: ["Daily Rare Gold Upgrade", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7D1A"],
-        sourcePackNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
-        rewardPackNames: ["Max. 78 Rare Gold Players Pack", "Max 78 Rare Gold Players Pack"],
-        requirements: [
-          { tier: "gold", rarity: "common", count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer"] }
-        ],
-        priorityPiles: ["unassigned", "storage", "transfer"],
-        clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
-        deferChallengeLoad: true,
-        preSelectionCleanup: false,
-        shortagePacks: [
-          {
-            requirement: { tier: "gold", rarity: "common", playerOnly: true, allowSpecial: false, protectHighGold: true },
-            packNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
-            maxOpensPerAttempt: 1,
-            repeatUntilSatisfied: true,
-            maxRuns: 100,
-            routingPolicy: "reserveMatchingDuplicates"
-          }
-        ],
-        dailyCompletionLimit: 7,
-        maxCompletions: 1
-      },
-      {
-        id: "daily-rare-pack-84",
-        name: "Daily Rare Pack to 2x84+ Loop",
-        strategy: "rarePackTo84Upgrade",
-        sourcePackNames: [
-          "5x Max.78 Rare Gold Players Pack",
-          "5x Max. 78 Rare Gold Players Pack",
-          "5x Max 78 Rare Gold Players Pack",
-          "5 x Max.78 Rare Gold Players Pack",
-          "5 x Max. 78 Rare Gold Players Pack",
-          "5 x Max 78 Rare Gold Players Pack",
-          "5x 80+ Rare Gold Players Pack",
-          "5 x 80+ Rare Gold Players Pack"
-        ],
-        rareUpgrade: {
-          name: "2x 84+ Upgrade",
-          sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
-          requirements: [
-            { tier: "gold", rarity: "rare", count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
-          ],
-          priorityPiles: ["unassigned", "storage", "transfer", "club"]
-        },
-        maxPacks: 100
-      },
-      {
-        id: "83-plus-player-pick-1of5",
-        name: "1 of 5 83+ Player Pick",
-        strategy: "playerPickSbc",
-        sbcNames: ["1 of 5 83+ Player Pick", "1 of 5 83+ Player Picks"],
-        pickItemNames: ["1 of 5 83+ Player Pick", "83+ Player Pick", "PlayerPickItemName25_4164"],
-        requirements: [
-          { tier: "gold", rarity: "rare", count: 4, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
-        ],
-        priorityPiles: ["unassigned", "storage", "transfer", "club"],
-        challengesPerPick: 1,
-        pickCount: 1,
-        maxCompletions: 1,
-        useRoundsAsCompletions: true,
-        pricePlatform: "pc"
-      },
-      {
-        id: "84-plus-summer-tournament-nations-pick-1of3",
-        name: "1 of 3 84+ Summer Tournament Nations Player Pick",
-        strategy: "playerPickSbc",
-        sbcNames: [
-          "1 of 3 84+ Summer Tournament Nations Player Pick",
-          "1 of 3 84+ Summer Tournament Nations Players Pick"
-        ],
-        pickItemNames: [
-          "1 of 3 84+ Summer Tournament Nations Player Pick",
-          "1 of 3 84+ Summer Tournament Nations Pick",
-          "84+ Summer Tournament Nations Player Pick",
-          "Summer Tournament Nations Player Pick"
-        ],
-        requirements: [
-          { tier: "gold", rarity: "rare", count: 4, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
-        ],
-        priorityPiles: ["unassigned", "storage", "transfer", "club"],
-        challengesPerPick: 1,
-        pickCount: 1,
-        maxCompletions: 1,
-        useRoundsAsCompletions: true,
-        pricePlatform: "pc"
-      },
-      {
-        id: "82-plus-player-pick-5of10",
-        name: "5 of 10 82+ Players Pick",
-        strategy: "playerPickSbc",
-        sbcNames: ["5 of 10 82+ Players Pick", "5 of 10 82+ Player Pick", "5 of 10 82+ Player Picks"],
-        pickItemNames: ["5 of 10 82+ Players Pick", "5 of 10 82+ Player Pick", "5 of 10 82+ Rare Gold Player Pick", "82+ Player Pick"],
-        requirements: [
-          { tier: "gold", rarity: "common", count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
-        ],
-        priorityPiles: ["unassigned", "storage", "transfer", "club"],
-        challengesPerPick: 2,
-        pickCount: 5,
-        maxCompletions: 1,
-        useRoundsAsCompletions: true,
-        pricePlatform: "pc"
-      },
-      {
-        id: "one-click-daily-mvp",
-        hidden: true,
-        mvp: true,
-        name: "One-click Daily MVP (1 each)",
-        strategy: "dailyRoutine",
-        steps: ["daily-bronze-mvp", "daily-silver-mvp", "daily-common-mvp", "daily-rare-mvp"],
-        openRewardPacks: false
-      },
-      {
-        id: "one-click-daily",
-        name: "One-click Daily Loop",
-        strategy: "dailyRoutine",
-        steps: ["daily-bronze", "daily-silver", "daily-common", "daily-rare", "daily-rare-pack-84"],
-        openRewardPacks: false
-      },
-      {
-        id: "2x84-fodder",
-        hidden: true,
-        mvp: true,
-        name: "2x84+ Fodder Loop",
-        strategy: "fillAndVerifySbc",
-        sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
-        rewardPackNames: ["2x 84+ Rare Gold Players Pack", "2 x 84+ Rare Gold Players Pack"],
-        maxCompletions: 1,
-        useRoundsAsCompletions: true,
-        allowMultipleCompletions: true,
-        inventoryFillFirst: true,
-        requirements: [
-          { tier: "gold", rarity: "rare", count: 6, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["storage", "club"] }
-        ],
-        priorityPiles: ["storage", "club"],
-        requiredSpecialCount: 0,
-        allowedSpecialCount: 0,
-        maxSubmittedRating: 81,
-        maxNormalGoldSubmittedRating: 81,
-        blockSpecial: true,
-        blockTradeable: false,
-        openRewardPacks: true,
-        forceOpenRewardPacks: true
-      },
-      {
-        id: "auto-totw-upgrade",
-        name: "84+ TOTW Upgrade Loop",
-        strategy: "fillAndVerifySbc",
-        sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
-        rewardPackIds: [20707, 20441],
-        rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
-        maxCompletions: 1,
-        useRoundsAsCompletions: true,
-        allowMultipleCompletions: true,
-        maxSubmittedRating: 88,
-        maxNormalGoldSubmittedRating: 99,
-        ratingSbcFill: {
-          priorityPiles: ["unassigned", "storage", "transfer", "club"]
-        },
-        requiredSpecialCount: 0,
-        allowedSpecialCount: 0,
-        blockSpecial: true,
-        blockTradeable: false,
-        openRewardPacks: true,
-        forceOpenRewardPacks: true,
-        assumeTotwRewardPack: true
-      },
-      {
-        id: "84x10-mvp",
-        hidden: true,
-        mvp: true,
-        name: "84x10 MVP (1 run)",
-        strategy: "fillAndVerifySbc",
-        sbcNames: [
-          "84+ x10",
-          "84+ x 10",
-          "10x 84+ Upgrade",
-          "10 x 84+ Upgrade",
-          "10 \u540D 84+ \u5347\u7EA7",
-          "10\u540D84+\u5347\u7EA7"
-        ],
-        maxCompletions: 1,
-        maxSubmittedRating: 88,
-        maxNormalGoldSubmittedRating: 99,
-        ratingSbcFill: {
-          priorityPiles: ["unassigned", "storage", "transfer", "club"]
-        },
-        requiredSpecialCount: 1,
-        allowedSpecialCount: 1,
-        requiredSpecialKind: "totw-tots-fof",
-        requiredSpecialMinRating: 84,
-        specialRequirementAdd: {
-          patterns: ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
-          buttonTexts: ["Add", "\u6DFB\u52A0", "\u52A0\u5165", "\u65B0\u589E"]
-        },
-        autoTotwUpgrade: {
-          name: "84+ TOTW Upgrade",
-          sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
-          rewardPackIds: [20707, 20441],
-          rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
-          maxSubmittedRating: 88,
-          maxNormalGoldSubmittedRating: 99,
-          blockSpecial: true,
-          blockTradeable: false,
-          openRewardPacks: true
-        },
-        autoFodderUpgrade: {
-          maxAttemptsPerCompletion: 3
-        },
-        blockSpecial: true,
-        blockTradeable: false,
-        openRewardPacks: false
-      },
-      {
-        id: "84x10",
-        name: "84x10 Loop",
-        strategy: "fillAndVerifySbc",
-        sbcNames: [
-          "84+ x10",
-          "84+ x 10",
-          "10x 84+ Upgrade",
-          "10 x 84+ Upgrade",
-          "10 \u540D 84+ \u5347\u7EA7",
-          "10\u540D84+\u5347\u7EA7"
-        ],
-        maxCompletions: 50,
-        allowMultipleCompletions: true,
-        maxSubmittedRating: 88,
-        maxNormalGoldSubmittedRating: 99,
-        ratingSbcFill: {
-          priorityPiles: ["unassigned", "storage", "transfer", "club"]
-        },
-        requiredSpecialCount: 1,
-        allowedSpecialCount: 1,
-        requiredSpecialKind: "totw-tots-fof",
-        requiredSpecialMinRating: 84,
-        specialRequirementAdd: {
-          patterns: ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
-          buttonTexts: ["Add", "\u6DFB\u52A0", "\u52A0\u5165", "\u65B0\u589E"]
-        },
-        autoTotwUpgrade: {
-          name: "84+ TOTW Upgrade",
-          sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
-          rewardPackIds: [20707, 20441],
-          rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
-          maxSubmittedRating: 88,
-          maxNormalGoldSubmittedRating: 99,
-          blockSpecial: true,
-          blockTradeable: false,
-          openRewardPacks: true
-        },
-        autoFodderUpgrade: {
-          maxAttemptsPerCompletion: 3
-        },
-        blockSpecial: true,
-        blockTradeable: false,
-        openRewardPacks: false
-      },
-      {
-        id: "provision-crafting",
-        name: "Provision Crafting Loop",
-        strategy: "provisionPackCrafting",
-        sourcePackIds: [20643],
-        sourcePackNames: ["Provision Pack", "Provisions Pack"],
-        preCraftPlayerPickLoopId: "82-plus-player-pick-5of10",
-        rounds: 1,
-        craftingUpgrades: [
-          {
-            name: "FOF Glory Hunters Crafting Upgrade",
-            sbcNames: ["FOF Glory Hunters Crafting Upgrade"],
-            requirements: [
-              { tier: "gold", rarity: "common", count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
-            ],
-            priorityPiles: ["unassigned", "storage", "transfer", "club"]
-          },
-          {
-            name: "2x 84+ Upgrade",
-            sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
-            requirements: [
-              { tier: "gold", rarity: "rare", count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
-            ],
-            priorityPiles: ["unassigned", "storage", "transfer", "club"]
-          }
-        ]
-      }
-    ];
+    const adapters = createRuntimeAdapters(W, document, {
+      gmRequest: typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null,
+      fetchImpl: typeof fetch === "function" ? fetch.bind(globalThis) : null
+    });
+    const eaPackAdapter = () => adapters.pack();
+    const eaInventoryAdapter = () => adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
+    const inventoryPile = (pileName) => eaInventoryAdapter().pileValue(pileName);
+    const eaPlayerPickAdapter = () => adapters.playerPick();
+    const eaSbcAdapter = () => adapters.sbc();
+    const fsuAdapter = () => adapters.fsu();
+    const localizationAdapter = adapters.localization;
+    const pageRuntime = adapters.page;
     const state = {
       running: false,
       stopping: false,
       refreshing: false,
+      scanningPicks: false,
       loadingLoops: false,
       loopDefs: null,
+      discoveredLoopDefs: [],
+      discoveredLoopOverrides: {},
       recoveryRecipes: null,
       unassignedRecoveryPolicies: null,
       defaultUnassignedRecoveryPolicyIds: null,
@@ -2663,14 +7235,15 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.02",
+      version: "0.5.12",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
       setFsuSettingsOverride,
       clearFsuSettingsOverride,
       calculateSquadRating: calculateEaSquadRating,
-      solveRatingSbcCandidates: findOptimalRatingSbcSelection
+      solveRatingSbcCandidates: findOptimalRatingSbcSelection,
+      scanPlayerPicks: () => scanAvailablePlayerPickSbcs()
     };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const now = () => (/* @__PURE__ */ new Date()).toLocaleTimeString();
@@ -2681,6 +7254,19 @@
       state.logLines = state.logLines.slice(-1e3);
       state.logRenderer?.request?.();
     }
+    const waitAdapter = adapters.wait({ sleep, stopPoint, log });
+    const sbcRewardOverlay = createSbcRewardOverlay({
+      dom: adapters.dom,
+      pageRuntime,
+      findButtonByText,
+      findClickableByText,
+      isClickableElement,
+      compactText,
+      matchesAny,
+      click: simulateClick,
+      sleep,
+      log
+    });
     function escapeHtml(text) {
       return String(text).replace(/[&<>"']/g, (ch) => ({
         "&": "&amp;",
@@ -2700,6 +7286,11 @@
       console.log("[BronzeLoop] Log cleared");
     }
     function getLoopDefs() {
+      const configured = state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
+      const effectiveConfigured = configured.map((loopDef) => state.discoveredLoopOverrides?.[loopDef.id] || loopDef);
+      return [...effectiveConfigured, ...state.discoveredLoopDefs || []];
+    }
+    function getConfiguredLoopDefs() {
       return state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
     }
     function getRecoveryRecipes() {
@@ -2711,15 +7302,8 @@
     function getDefaultUnassignedRecoveryPolicyIds() {
       return state.defaultUnassignedRecoveryPolicyIds || DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS;
     }
-    function isMvpLoopDef(def = {}) {
-      return def.mvp === true || /(?:^|-)mvp(?:-|$)/i.test(String(def.id || ""));
-    }
     function getVisibleLoopDefs() {
-      const loopDefs = getLoopDefs();
-      return loopDefs.filter((def) => {
-        if (isMvpLoopDef(def)) return state.showMvpLoops;
-        return def.hidden !== true;
-      });
+      return visibleLoopDefs(getLoopDefs(), state.showMvpLoops);
     }
     function findLoopDefById(id) {
       const loopDefs = getLoopDefs();
@@ -2728,495 +7312,32 @@
     function getLoopDefById(id) {
       return findLoopDefById(id) || getLoopDefs()[0] || LOOP_DEFS[0];
     }
-    function validateStringArray(value, path, errors, required = false) {
-      if (value === void 0 || value === null) {
-        if (required) errors.push(`${path} is required`);
-        return;
-      }
-      if (!Array.isArray(value) || !value.length) {
-        errors.push(`${path} must be a non-empty array`);
-        return;
-      }
-      value.forEach((entry, index) => {
-        if (typeof entry !== "string" || !entry.trim()) {
-          errors.push(`${path}[${index}] must be a non-empty string`);
-        }
-      });
+    function validateLoopDef2(loopDef, label = "loop") {
+      return validateLoopDef(loopDef, label);
     }
-    function validateNumberArray(value, path, errors) {
-      if (value === void 0 || value === null) return;
-      if (!Array.isArray(value) || !value.length) {
-        errors.push(`${path} must be a non-empty array`);
-        return;
-      }
-      value.forEach((entry, index) => {
-        if (!Number.isFinite(Number(entry))) {
-          errors.push(`${path}[${index}] must be a number`);
-        }
-      });
+    function assertValidLoopDef2(loopDef, label = "Loop JSON") {
+      return assertValidLoopDef(loopDef, label);
     }
-    function validatePileList(value, path, errors, required = false) {
-      const allowed = ["unassigned", "storage", "transfer", "club"];
-      if (value === void 0 || value === null) {
-        if (required) errors.push(`${path} is required`);
-        return;
-      }
-      if (!Array.isArray(value) || !value.length) {
-        errors.push(`${path} must be a non-empty array`);
-        return;
-      }
-      value.forEach((pile, index) => {
-        if (!allowed.includes(pile)) {
-          errors.push(`${path}[${index}] must be one of: ${allowed.join(", ")}`);
-        }
-      });
+    function validateLoopDefList2(loopDefs, label = "Loop config") {
+      return validateLoopDefList(loopDefs, label);
     }
-    function validateCardSpec(spec, path, errors) {
-      if (!isPlainObject(spec)) {
-        errors.push(`${path} must be an object`);
-        return;
-      }
-      if (spec.tier !== void 0 && !["bronze", "silver", "gold"].includes(spec.tier)) {
-        errors.push(`${path}.tier must be bronze, silver, or gold`);
-      }
-      if (spec.rarity !== void 0 && !["common", "rare"].includes(spec.rarity)) {
-        errors.push(`${path}.rarity must be common or rare`);
-      }
-      ["minRating", "maxRating"].forEach((field) => {
-        if (spec[field] === void 0) return;
-        const rating = Number(spec[field]);
-        if (!Number.isFinite(rating) || rating < 1 || rating > 99) {
-          errors.push(`${path}.${field} must be a number between 1 and 99`);
-        }
-      });
-      ["playerOnly", "allowSpecial", "special", "protectHighGold"].forEach((field) => {
-        if (spec[field] !== void 0 && typeof spec[field] !== "boolean") {
-          errors.push(`${path}.${field} must be boolean`);
-        }
-      });
+    function normalizeLoopConfig2(config) {
+      return normalizeLoopConfig(config);
     }
-    function validateRequirements(requirements, path, errors, required = false) {
-      if (requirements === void 0 || requirements === null) {
-        if (required) errors.push(`${path} is required`);
-        return;
-      }
-      if (!Array.isArray(requirements) || !requirements.length) {
-        errors.push(`${path} must be a non-empty array`);
-        return;
-      }
-      requirements.forEach((requirement, index) => {
-        const reqPath = `${path}[${index}]`;
-        validateCardSpec(requirement, reqPath, errors);
-        if (!Number.isFinite(Number(requirement?.count)) || Number(requirement.count) <= 0) {
-          errors.push(`${reqPath}.count must be a positive number`);
-        }
-        validatePileList(requirement?.priorityPiles, `${reqPath}.priorityPiles`, errors);
-      });
-    }
-    function validateUpgradeDef(upgradeDef, path, errors) {
-      if (!isPlainObject(upgradeDef)) {
-        errors.push(`${path} must be an object`);
-        return;
-      }
-      if (typeof upgradeDef.name !== "string" || !upgradeDef.name.trim()) {
-        errors.push(`${path}.name is required`);
-      }
-      validateStringArray(upgradeDef.sbcNames, `${path}.sbcNames`, errors, true);
-      const hasChallengeRequirements = upgradeDef.challengeRequirements !== void 0;
-      validateRequirements(upgradeDef.requirements, `${path}.requirements`, errors, !hasChallengeRequirements);
-      if (hasChallengeRequirements) {
-        if (!Array.isArray(upgradeDef.challengeRequirements) || !upgradeDef.challengeRequirements.length) {
-          errors.push(`${path}.challengeRequirements must be a non-empty array`);
-        } else {
-          upgradeDef.challengeRequirements.forEach((requirements, index) => {
-            validateRequirements(requirements, `${path}.challengeRequirements[${index}]`, errors, true);
-          });
-        }
-      }
-      validatePileList(upgradeDef.priorityPiles, `${path}.priorityPiles`, errors);
-    }
-    function validateShortagePacks(shortagePacks, path, errors) {
-      if (shortagePacks === void 0 || shortagePacks === null) return;
-      if (!Array.isArray(shortagePacks) || !shortagePacks.length) {
-        errors.push(`${path} must be a non-empty array`);
-        return;
-      }
-      shortagePacks.forEach((source, index) => {
-        const sourcePath = `${path}[${index}]`;
-        if (!isPlainObject(source)) {
-          errors.push(`${sourcePath} must be an object`);
-          return;
-        }
-        validateCardSpec(source.requirement, `${sourcePath}.requirement`, errors);
-        validateNumberArray(source.packIds, `${sourcePath}.packIds`, errors);
-        validateStringArray(source.packNames, `${sourcePath}.packNames`, errors);
-        if (!source.packIds?.length && !source.packNames?.length) {
-          errors.push(`${sourcePath}.packIds or ${sourcePath}.packNames is required`);
-        }
-        if (source.maxOpensPerAttempt !== void 0) {
-          const maxOpens = Number(source.maxOpensPerAttempt);
-          if (!Number.isFinite(maxOpens) || maxOpens <= 0) {
-            errors.push(`${sourcePath}.maxOpensPerAttempt must be a positive number`);
-          }
-        }
-      });
-    }
-    function validateLoopDef(loopDef, label = "loop") {
-      const errors = [];
-      if (!isPlainObject(loopDef)) return [`${label} must be an object`];
-      const strategies = [
-        "validationBronzeUpgrade",
-        "dailySingleCardRecycle",
-        "supplyAndCraft",
-        "inventoryMixedUpgrade",
-        "commonGoldToRareUpgrade",
-        "provisionPackCrafting",
-        "provisionPackDualCrafting",
-        "rarePackTo84Upgrade",
-        "playerPickSbc",
-        "dailyRoutine",
-        "fillAndVerifySbc"
-      ];
-      if (typeof loopDef.name !== "string" || !loopDef.name.trim()) {
-        errors.push("name is required");
-      }
-      if (typeof loopDef.strategy !== "string" || !loopDef.strategy.trim()) {
-        errors.push("strategy is required");
-      } else if (!strategies.includes(loopDef.strategy)) {
-        errors.push(`strategy must be one of: ${strategies.join(", ")}`);
-      }
-      if (loopDef.dryRun !== void 0 && typeof loopDef.dryRun !== "boolean") {
-        errors.push("dryRun must be boolean");
-      }
-      ["hidden", "mvp", "openRewardPacks", "blockSpecial", "blockTradeable", "inventoryFillFirst"].forEach((field) => {
-        if (loopDef[field] !== void 0 && typeof loopDef[field] !== "boolean") {
-          errors.push(`${field} must be boolean`);
-        }
-      });
-      if (loopDef.maxSubmittedRating !== void 0) {
-        const maxRating = Number(loopDef.maxSubmittedRating);
-        if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
-          errors.push("maxSubmittedRating must be a number between 1 and 99");
-        }
-      }
-      if (loopDef.maxNormalGoldSubmittedRating !== void 0) {
-        const maxRating = Number(loopDef.maxNormalGoldSubmittedRating);
-        if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
-          errors.push("maxNormalGoldSubmittedRating must be a number between 1 and 99");
-        }
-      }
-      if (loopDef.dailyCompletionLimit !== void 0) {
-        const dailyLimit = Number(loopDef.dailyCompletionLimit);
-        if (!Number.isFinite(dailyLimit) || dailyLimit < 1 || dailyLimit > 100) {
-          errors.push("dailyCompletionLimit must be a number between 1 and 100");
-        }
-      }
-      if (loopDef.requiredSpecialMinRating !== void 0) {
-        const minRating = Number(loopDef.requiredSpecialMinRating);
-        if (!Number.isFinite(minRating) || minRating < 1 || minRating > 99) {
-          errors.push("requiredSpecialMinRating must be a number between 1 and 99");
-        }
-      }
-      if (loopDef.requiredSpecialKind !== void 0 && !["totw", "totw-tots-fof"].includes(String(loopDef.requiredSpecialKind).toLowerCase())) {
-        errors.push("requiredSpecialKind must be totw or totw-tots-fof when provided");
-      }
-      if (loopDef.preCraftPlayerPickLoopId !== void 0 && (typeof loopDef.preCraftPlayerPickLoopId !== "string" || !loopDef.preCraftPlayerPickLoopId.trim())) {
-        errors.push("preCraftPlayerPickLoopId must be a non-empty string");
-      }
-      if (loopDef.unassignedRecoveryPolicyIds !== void 0) {
-        if (!Array.isArray(loopDef.unassignedRecoveryPolicyIds)) {
-          errors.push("unassignedRecoveryPolicyIds must be an array");
-        } else {
-          loopDef.unassignedRecoveryPolicyIds.forEach((id, index) => {
-            if (typeof id !== "string" || !id.trim()) errors.push(`unassignedRecoveryPolicyIds[${index}] must be a non-empty string`);
-          });
-        }
-      }
-      if (loopDef.overflowRecovery !== void 0) {
-        errors.push("overflowRecovery is obsolete; use top-level recoveryRecipes and unassignedRecoveryPolicies");
-      }
-      if (loopDef.autoTotwUpgrade !== void 0 && loopDef.autoTotwUpgrade !== false && !isPlainObject(loopDef.autoTotwUpgrade)) {
-        errors.push("autoTotwUpgrade must be an object or false");
-      }
-      if (loopDef.autoFodderUpgrade !== void 0 && loopDef.autoFodderUpgrade !== false && !isPlainObject(loopDef.autoFodderUpgrade)) {
-        errors.push("autoFodderUpgrade must be an object or false");
-      }
-      if (isPlainObject(loopDef.autoFodderUpgrade) && loopDef.autoFodderUpgrade.maxAttemptsPerCompletion !== void 0) {
-        const attempts = Number(loopDef.autoFodderUpgrade.maxAttemptsPerCompletion);
-        if (!Number.isFinite(attempts) || attempts < 1 || attempts > 10) {
-          errors.push("autoFodderUpgrade.maxAttemptsPerCompletion must be a number between 1 and 10");
-        }
-      }
-      if (loopDef.ratingSbcFill !== void 0) {
-        if (!isPlainObject(loopDef.ratingSbcFill)) {
-          errors.push("ratingSbcFill must be an object");
-        } else {
-          validatePileList(loopDef.ratingSbcFill.priorityPiles, "ratingSbcFill.priorityPiles", errors, true);
-          if (loopDef.ratingSbcFill.targetRating !== void 0) {
-            const targetRating = Number(loopDef.ratingSbcFill.targetRating);
-            if (!Number.isFinite(targetRating) || targetRating < 1 || targetRating > 99) {
-              errors.push("ratingSbcFill.targetRating must be a number between 1 and 99");
-            }
-          }
-          if (loopDef.ratingSbcFill.maxSearchNodes !== void 0) {
-            const maxSearchNodes = Number(loopDef.ratingSbcFill.maxSearchNodes);
-            if (!Number.isInteger(maxSearchNodes) || maxSearchNodes < 1e4 || maxSearchNodes > 2e6) {
-              errors.push("ratingSbcFill.maxSearchNodes must be an integer between 10000 and 2000000");
-            }
-          }
-          if (loopDef.ratingSbcFill.maxSearchMs !== void 0) {
-            const maxSearchMs = Number(loopDef.ratingSbcFill.maxSearchMs);
-            if (!Number.isInteger(maxSearchMs) || maxSearchMs < 1e3 || maxSearchMs > 6e4) {
-              errors.push("ratingSbcFill.maxSearchMs must be an integer between 1000 and 60000");
-            }
-          }
-          if (loopDef.ratingSbcFill.yieldEveryNodes !== void 0) {
-            const yieldEveryNodes = Number(loopDef.ratingSbcFill.yieldEveryNodes);
-            if (!Number.isInteger(yieldEveryNodes) || yieldEveryNodes < 50 || yieldEveryNodes > 5e3) {
-              errors.push("ratingSbcFill.yieldEveryNodes must be an integer between 50 and 5000");
-            }
-          }
-        }
-      }
-      validateNumberArray(loopDef.sourcePackIds, "sourcePackIds", errors);
-      validateNumberArray(loopDef.rewardPackIds, "rewardPackIds", errors);
-      validateNumberArray(loopDef.protectedItemIds, "protectedItemIds", errors);
-      validateNumberArray(loopDef.protectedDefinitionIds, "protectedDefinitionIds", errors);
-      validateStringArray(loopDef.sourcePackNames, "sourcePackNames", errors);
-      validateStringArray(loopDef.rewardPackNames, "rewardPackNames", errors);
-      validatePileList(loopDef.priorityPiles, "priorityPiles", errors);
-      validatePileList(loopDef.primaryPiles, "primaryPiles", errors);
-      validatePileList(loopDef.clubFallbackPiles, "clubFallbackPiles", errors);
-      validatePileList(loopDef.disabledPiles, "disabledPiles", errors);
-      if (loopDef.strategy === "validationBronzeUpgrade") {
-        validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
-        validateCardSpec(loopDef.targetDuplicate, "targetDuplicate", errors);
-      }
-      if (loopDef.strategy === "dailySingleCardRecycle") {
-        validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
-        validateCardSpec(loopDef.targetDuplicate, "targetDuplicate", errors);
-      }
-      if (loopDef.strategy === "dailyRoutine") {
-        validateStringArray(loopDef.steps, "steps", errors, true);
-      }
-      if (loopDef.strategy === "fillAndVerifySbc") {
-        validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
-        if (loopDef.requirements !== void 0) validateRequirements(loopDef.requirements, "requirements", errors, false);
-      }
-      if (["supplyAndCraft", "inventoryMixedUpgrade", "commonGoldToRareUpgrade"].includes(loopDef.strategy)) {
-        validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
-        validateRequirements(loopDef.requirements, "requirements", errors, true);
-        if (loopDef.strategy === "supplyAndCraft" || loopDef.strategy === "inventoryMixedUpgrade") {
-          validateShortagePacks(loopDef.shortagePacks, "shortagePacks", errors);
-        }
-      }
-      if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") {
-        if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
-          errors.push("sourcePackIds or sourcePackNames is required");
-        }
-        if (loopDef.craftingUpgrades !== void 0) {
-          if (!Array.isArray(loopDef.craftingUpgrades) || !loopDef.craftingUpgrades.length) {
-            errors.push("craftingUpgrades must be a non-empty array");
-          } else {
-            loopDef.craftingUpgrades.forEach((upgradeDef, index) => {
-              validateUpgradeDef(upgradeDef, `craftingUpgrades[${index}]`, errors);
-            });
-          }
-        } else {
-          const legacyUpgrades = [loopDef.commonUpgrade, loopDef.rareUpgrade].filter((upgradeDef) => upgradeDef !== void 0);
-          if (!legacyUpgrades.length) errors.push("craftingUpgrades or a legacy commonUpgrade/rareUpgrade is required");
-          if (loopDef.commonUpgrade !== void 0) validateUpgradeDef(loopDef.commonUpgrade, "commonUpgrade", errors);
-          if (loopDef.rareUpgrade !== void 0) validateUpgradeDef(loopDef.rareUpgrade, "rareUpgrade", errors);
-        }
-      }
-      if (loopDef.strategy === "rarePackTo84Upgrade") {
-        if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
-          errors.push("sourcePackIds or sourcePackNames is required");
-        }
-        validateUpgradeDef(loopDef.rareUpgrade, "rareUpgrade", errors);
-        if (loopDef.maxPacks !== void 0) {
-          const maxPacks = Number(loopDef.maxPacks);
-          if (!Number.isFinite(maxPacks) || maxPacks <= 0) {
-            errors.push("maxPacks must be a positive number");
-          }
-        }
-      }
-      if (loopDef.strategy === "playerPickSbc") {
-        validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
-        validateStringArray(loopDef.pickItemNames, "pickItemNames", errors, true);
-        const hasChallengeRequirements = loopDef.challengeRequirements !== void 0;
-        validateRequirements(loopDef.requirements, "requirements", errors, !hasChallengeRequirements);
-        if (hasChallengeRequirements) {
-          if (!Array.isArray(loopDef.challengeRequirements) || !loopDef.challengeRequirements.length) {
-            errors.push("challengeRequirements must be a non-empty array");
-          } else {
-            loopDef.challengeRequirements.forEach((requirements, index) => {
-              validateRequirements(requirements, `challengeRequirements[${index}]`, errors, true);
-            });
-          }
-        }
-        const challengesPerPick = Number(loopDef.challengesPerPick || loopDef.challengeRequirements?.length || 1);
-        const pickCount = Number(loopDef.pickCount || 1);
-        if (!Number.isInteger(challengesPerPick) || challengesPerPick < 1 || challengesPerPick > 10) {
-          errors.push("challengesPerPick must be an integer between 1 and 10");
-        }
-        if (loopDef.challengesPerPick !== void 0 && Array.isArray(loopDef.challengeRequirements) && loopDef.challengeRequirements.length !== challengesPerPick) {
-          errors.push("challengesPerPick must match challengeRequirements.length when both are provided");
-        }
-        if (!Number.isInteger(pickCount) || pickCount < 1 || pickCount > 10) {
-          errors.push("pickCount must be an integer between 1 and 10");
-        }
-        if (loopDef.pricePlatform !== void 0 && !["pc", "ps", "xbox"].includes(String(loopDef.pricePlatform).toLowerCase())) {
-          errors.push("pricePlatform must be pc, ps, or xbox when provided");
-        }
-      }
-      return errors;
-    }
-    function assertValidLoopDef(loopDef, label = "Loop JSON") {
-      const errors = validateLoopDef(loopDef, label);
-      if (errors.length) fail(`${label} validation failed:
-- ${errors.join("\n- ")}`);
-    }
-    function validateLoopDefList(loopDefs, label = "Loop config") {
-      if (!Array.isArray(loopDefs) || !loopDefs.length) {
-        fail(`${label} must be a non-empty array or an object with a loops array`);
-      }
-      const seen = /* @__PURE__ */ new Set();
-      loopDefs.forEach((loopDef, index) => {
-        assertValidLoopDef(loopDef, `${label}[${index}]`);
-        if (typeof loopDef.id !== "string" || !loopDef.id.trim()) {
-          fail(`${label}[${index}].id is required`);
-        }
-        if (loopDef.id) {
-          if (seen.has(loopDef.id)) fail(`${label} has duplicate id: ${loopDef.id}`);
-          seen.add(loopDef.id);
-        }
-      });
-      loopDefs.forEach((loopDef, index) => {
-        if (!loopDef.preCraftPlayerPickLoopId) return;
-        const target = loopDefs.find((candidate) => candidate.id === loopDef.preCraftPlayerPickLoopId);
-        if (!target) fail(`${label}[${index}].preCraftPlayerPickLoopId not found: ${loopDef.preCraftPlayerPickLoopId}`);
-        if (target.strategy !== "playerPickSbc") {
-          fail(`${label}[${index}].preCraftPlayerPickLoopId must reference a playerPickSbc loop`);
-        }
-      });
-    }
-    function validateRecoveryAction(value, path, errors) {
-      if (value !== void 0 && !["continue", "stop"].includes(value)) {
-        errors.push(`${path} must be continue or stop`);
-      }
-    }
-    function validateRecoveryRecipeList(recipes, label = "recoveryRecipes") {
-      if (!Array.isArray(recipes)) fail(`${label} must be an array`);
-      const seen = /* @__PURE__ */ new Set();
-      recipes.forEach((recipe2, index) => {
-        const path = `${label}[${index}]`;
-        const errors = [];
-        if (!isPlainObject(recipe2)) fail(`${path} must be an object`);
-        if (typeof recipe2.id !== "string" || !recipe2.id.trim()) errors.push(`${path}.id is required`);
-        if (seen.has(recipe2.id)) errors.push(`${label} has duplicate id: ${recipe2.id}`);
-        seen.add(recipe2.id);
-        validateUpgradeDef(recipe2, path, errors);
-        if (recipe2.maxSubmissions !== void 0 && Number(recipe2.maxSubmissions) !== 1) {
-          errors.push(`${path}.maxSubmissions must be 1`);
-        }
-        if (recipe2.mustConsumeTrigger !== true) {
-          errors.push(`${path}.mustConsumeTrigger must be true`);
-        }
-        validateRecoveryAction(recipe2.onUnavailable, `${path}.onUnavailable`, errors);
-        validateRecoveryAction(recipe2.onInsufficient, `${path}.onInsufficient`, errors);
-        if (recipe2.onBlocked !== void 0 && recipe2.onBlocked !== "stop") {
-          errors.push(`${path}.onBlocked must be stop`);
-        }
-        if (errors.length) fail(`${path} validation failed:
-- ${errors.join("\n- ")}`);
-      });
-    }
-    function validateRecoveryPolicyList(policies, recipes, label = "unassignedRecoveryPolicies") {
-      if (!Array.isArray(policies)) fail(`${label} must be an array`);
-      const recipeIds = new Set(recipes.map((recipe2) => recipe2.id));
-      const seen = /* @__PURE__ */ new Set();
-      policies.forEach((policy, index) => {
-        const path = `${label}[${index}]`;
-        const errors = [];
-        if (!isPlainObject(policy)) fail(`${path} must be an object`);
-        if (typeof policy.id !== "string" || !policy.id.trim()) errors.push(`${path}.id is required`);
-        if (seen.has(policy.id)) errors.push(`${label} has duplicate id: ${policy.id}`);
-        seen.add(policy.id);
-        validateCardSpec(policy.match, `${path}.match`, errors);
-        if (!Array.isArray(policy.steps) || !policy.steps.length) {
-          errors.push(`${path}.steps must be a non-empty array`);
-        } else {
-          policy.steps.forEach((step, stepIndex) => {
-            const stepPath = `${path}.steps[${stepIndex}]`;
-            if (!isPlainObject(step) || typeof step.recipeId !== "string" || !step.recipeId.trim()) {
-              errors.push(`${stepPath}.recipeId is required`);
-              return;
-            }
-            if (!recipeIds.has(step.recipeId)) errors.push(`${stepPath}.recipeId not found: ${step.recipeId}`);
-            validateRecoveryAction(step.onUnavailable, `${stepPath}.onUnavailable`, errors);
-            validateRecoveryAction(step.onInsufficient, `${stepPath}.onInsufficient`, errors);
-            if (step.onBlocked !== void 0 && step.onBlocked !== "stop") {
-              errors.push(`${stepPath}.onBlocked must be stop`);
-            }
-          });
-        }
-        if (errors.length) fail(`${path} validation failed:
-- ${errors.join("\n- ")}`);
-      });
-    }
-    function validateRecoveryPolicyIds(ids, policies, path, allowEmpty = true) {
-      if (!Array.isArray(ids) || !allowEmpty && !ids.length) fail(`${path} must be an array${allowEmpty ? "" : " with at least one entry"}`);
-      const policyIds = new Set(policies.map((policy) => policy.id));
-      ids.forEach((id, index) => {
-        if (typeof id !== "string" || !id.trim()) fail(`${path}[${index}] must be a non-empty string`);
-        if (!policyIds.has(id)) fail(`${path}[${index}] not found: ${id}`);
-      });
-    }
-    function normalizeLoopConfig(config) {
-      const input = Array.isArray(config) ? { loops: config } : config;
-      if (!isPlainObject(input) || !Array.isArray(input.loops)) {
-        fail("Loop config JSON must be an array or an object with a loops array");
-      }
-      return {
-        loops: input.loops,
-        recoveryRecipes: input.recoveryRecipes === void 0 ? RECOVERY_RECIPES : input.recoveryRecipes,
-        unassignedRecoveryPolicies: input.unassignedRecoveryPolicies === void 0 ? UNASSIGNED_RECOVERY_POLICIES : input.unassignedRecoveryPolicies,
-        defaultUnassignedRecoveryPolicyIds: input.defaultUnassignedRecoveryPolicyIds === void 0 ? DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS : input.defaultUnassignedRecoveryPolicyIds
-      };
-    }
-    function validateLoopConfig(config, label = "Loop config") {
-      const normalized = normalizeLoopConfig(config);
-      validateLoopDefList(normalized.loops, `${label}.loops`);
-      validateRecoveryRecipeList(normalized.recoveryRecipes, `${label}.recoveryRecipes`);
-      validateRecoveryPolicyList(normalized.unassignedRecoveryPolicies, normalized.recoveryRecipes, `${label}.unassignedRecoveryPolicies`);
-      validateRecoveryPolicyIds(
-        normalized.defaultUnassignedRecoveryPolicyIds,
-        normalized.unassignedRecoveryPolicies,
-        `${label}.defaultUnassignedRecoveryPolicyIds`
-      );
-      normalized.loops.forEach((loopDef, index) => {
-        if (loopDef.unassignedRecoveryPolicyIds === void 0) return;
-        validateRecoveryPolicyIds(
-          loopDef.unassignedRecoveryPolicyIds,
-          normalized.unassignedRecoveryPolicies,
-          `${label}.loops[${index}].unassignedRecoveryPolicyIds`
-        );
-      });
-      return normalized;
+    function validateLoopConfig2(config, label = "Loop config") {
+      return validateLoopConfig(config, label);
     }
     function setLoopConfig(config, source = "custom") {
-      const normalized = validateLoopConfig(config, source);
+      const normalized = validateLoopConfig2(config, source);
       state.loopDefs = cloneLoopDef(normalized.loops);
       state.recoveryRecipes = cloneLoopDef(normalized.recoveryRecipes);
       state.unassignedRecoveryPolicies = cloneLoopDef(normalized.unassignedRecoveryPolicies);
       state.defaultUnassignedRecoveryPolicyIds = [...normalized.defaultUnassignedRecoveryPolicyIds];
       state.loopConfigSource = source;
+      state.discoveredLoopDefs = [];
+      state.discoveredLoopOverrides = {};
       renderLoopSelect(state.loopDefs[0]?.id);
       log(`Loaded ${state.loopDefs.length} loop definition(s), ${state.recoveryRecipes.length} recovery recipe(s), and ${state.unassignedRecoveryPolicies.length} recovery policy(s) from ${source}`);
-    }
-    function setLoopDefs(loopDefs, source = "custom") {
-      setLoopConfig({ loops: loopDefs }, source);
     }
     function resetLoopDefs() {
       state.loopDefs = null;
@@ -3224,124 +7345,18 @@
       state.unassignedRecoveryPolicies = null;
       state.defaultUnassignedRecoveryPolicyIds = null;
       state.loopConfigSource = "built-in";
+      state.discoveredLoopDefs = [];
+      state.discoveredLoopOverrides = {};
       renderLoopSelect(LOOP_DEFS[0]?.id);
       log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
     }
-    function parseLoopConfig(text) {
-      return normalizeLoopConfig(JSON.parse(text));
-    }
-    function requestText(url) {
-      if (typeof GM_xmlhttpRequest === "function") {
-        return new Promise((resolve, reject) => {
-          GM_xmlhttpRequest({
-            method: "GET",
-            url,
-            nocache: true,
-            onload: (response) => {
-              if (response.status >= 200 && response.status < 300) {
-                resolve(response.responseText);
-              } else {
-                reject(new Error(`HTTP ${response.status}`));
-              }
-            },
-            onerror: () => reject(new Error("request failed")),
-            ontimeout: () => reject(new Error("request timed out")),
-            timeout: 1e4
-          });
-        });
-      }
-      if (typeof W.__FCLoopRunnerRequestText === "function") {
-        return W.__FCLoopRunnerRequestText(url);
-      }
-      return fetch(url, { cache: "no-store" }).then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.text();
-      });
-    }
-    function requestPriceText(url, options = {}) {
-      const headers = {
-        Accept: "application/json, text/plain, */*",
-        ...options.headers || {}
-      };
-      if (typeof GM_xmlhttpRequest === "function") {
-        return new Promise((resolve, reject) => {
-          GM_xmlhttpRequest({
-            method: "GET",
-            url,
-            headers,
-            anonymous: options.sendCookies === true ? false : true,
-            nocache: true,
-            onload: (response) => {
-              if (response.status >= 200 && response.status < 300) resolve(response.responseText);
-              else reject(new Error(`HTTP ${response.status}`));
-            },
-            onerror: () => reject(new Error("request failed")),
-            ontimeout: () => reject(new Error("request timed out")),
-            timeout: 1e4
-          });
-        });
-      }
-      return fetch(url, { cache: "no-store", headers, credentials: options.sendCookies ? "include" : "omit" }).then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.text();
-      });
+    function parseLoopConfig2(text) {
+      return parseLoopConfig(text);
     }
     async function loadLoopConfig(url = LOOP_CONFIG_URL) {
-      const text = await requestText(`${url}?t=${Date.now()}`);
-      const config = parseLoopConfig(text);
+      const text = await adapters.http.getText(`${url}?t=${Date.now()}`, { useRuntimeFallback: true });
+      const config = parseLoopConfig2(text);
       setLoopConfig(config, url);
-    }
-    function applyDisabledPilesToList(piles, disabledPiles, path) {
-      if (!Array.isArray(piles) || !piles.length || !disabledPiles?.size) return piles;
-      const filtered = piles.filter((pile) => !disabledPiles.has(pile));
-      if (!filtered.length) fail(`${path} has no enabled piles after disabledPiles`);
-      return filtered;
-    }
-    function applyDisabledPilesToRequirements(requirements, disabledPiles, path) {
-      if (!Array.isArray(requirements)) return;
-      requirements.forEach((requirement, index) => {
-        requirement.priorityPiles = applyDisabledPilesToList(
-          requirement.priorityPiles,
-          disabledPiles,
-          `${path}[${index}].priorityPiles`
-        );
-      });
-    }
-    function applyDisabledPiles(loopDef) {
-      const disabledPiles = new Set(loopDef.disabledPiles || []);
-      if (!disabledPiles.size) return loopDef;
-      loopDef.priorityPiles = applyDisabledPilesToList(loopDef.priorityPiles, disabledPiles, "priorityPiles");
-      loopDef.primaryPiles = applyDisabledPilesToList(loopDef.primaryPiles, disabledPiles, "primaryPiles");
-      loopDef.clubFallbackPiles = applyDisabledPilesToList(loopDef.clubFallbackPiles, disabledPiles, "clubFallbackPiles");
-      if (isPlainObject(loopDef.ratingSbcFill)) {
-        loopDef.ratingSbcFill.priorityPiles = applyDisabledPilesToList(
-          loopDef.ratingSbcFill.priorityPiles,
-          disabledPiles,
-          "ratingSbcFill.priorityPiles"
-        );
-      }
-      applyDisabledPilesToRequirements(loopDef.requirements, disabledPiles, "requirements");
-      (loopDef.challengeRequirements || []).forEach((requirements, index) => {
-        applyDisabledPilesToRequirements(requirements, disabledPiles, `challengeRequirements[${index}]`);
-      });
-      for (const upgradeName of ["commonUpgrade", "rareUpgrade"]) {
-        const upgradeDef = loopDef[upgradeName];
-        if (!isPlainObject(upgradeDef)) continue;
-        upgradeDef.priorityPiles = applyDisabledPilesToList(upgradeDef.priorityPiles, disabledPiles, `${upgradeName}.priorityPiles`);
-        applyDisabledPilesToRequirements(upgradeDef.requirements, disabledPiles, `${upgradeName}.requirements`);
-        (upgradeDef.challengeRequirements || []).forEach((requirements, index) => {
-          applyDisabledPilesToRequirements(requirements, disabledPiles, `${upgradeName}.challengeRequirements[${index}]`);
-        });
-      }
-      (loopDef.craftingUpgrades || []).forEach((upgradeDef, index) => {
-        if (!isPlainObject(upgradeDef)) return;
-        upgradeDef.priorityPiles = applyDisabledPilesToList(upgradeDef.priorityPiles, disabledPiles, `craftingUpgrades[${index}].priorityPiles`);
-        applyDisabledPilesToRequirements(upgradeDef.requirements, disabledPiles, `craftingUpgrades[${index}].requirements`);
-        (upgradeDef.challengeRequirements || []).forEach((requirements, challengeIndex) => {
-          applyDisabledPilesToRequirements(requirements, disabledPiles, `craftingUpgrades[${index}].challengeRequirements[${challengeIndex}]`);
-        });
-      });
-      return loopDef;
     }
     function getSelectedLoopDef() {
       const select = document.querySelector("#bronze-loop-select");
@@ -3350,15 +7365,15 @@
         const text = document.querySelector("#bronze-loop-json")?.value || "";
         try {
           const parsed = JSON.parse(text);
-          assertValidLoopDef(parsed, "Custom loop JSON");
+          assertValidLoopDef2(parsed, "Custom loop JSON");
           return applyDisabledPiles(parsed);
         } catch (e) {
-          if (e instanceof SyntaxError) fail(`Invalid custom loop JSON: ${e.message || e}`);
+          if (e instanceof SyntaxError) fail2(`Invalid custom loop JSON: ${e.message || e}`);
           throw e;
         }
       }
       const loopDef = cloneLoopDef(getLoopDefById(selectedId));
-      assertValidLoopDef(loopDef, loopDef.name || selectedId);
+      assertValidLoopDef2(loopDef, loopDef.name || selectedId);
       return applyDisabledPiles(loopDef);
     }
     function setLoopJson(def) {
@@ -3366,23 +7381,14 @@
       if (editor) editor.value = JSON.stringify(def, null, 2);
     }
     function renderLoopSelect(selectedId = null) {
-      const select = document.querySelector("#bronze-loop-select");
-      if (!select) return;
-      const previous = selectedId || select.value;
-      select.textContent = "";
-      for (const def of getVisibleLoopDefs()) {
-        const option = document.createElement("option");
-        option.value = def.id;
-        option.textContent = def.name;
-        select.appendChild(option);
-      }
-      const custom = document.createElement("option");
-      custom.value = "custom";
-      custom.textContent = "Custom JSON";
-      select.appendChild(custom);
-      const nextValue = Array.from(select.options).some((option) => option.value === previous) ? previous : getVisibleLoopDefs()[0]?.id;
-      if (nextValue) select.value = nextValue;
-      if (select.value !== "custom") setLoopJson(getLoopDefById(select.value));
+      const panel = document.querySelector("#bronze-loop-panel");
+      const nextValue = renderMainPanelLoopOptions({
+        panel,
+        loops: getVisibleLoopDefs().map((def) => ({ id: def.id, name: def.name })),
+        selectedId,
+        createOption: () => document.createElement("option")
+      });
+      if (nextValue && nextValue !== "custom") setLoopJson(getLoopDefById(nextValue));
       updateLoopControls();
     }
     function getEditorLoopDef() {
@@ -3394,32 +7400,21 @@
         return {};
       }
     }
-    function getEditorLoopStrategy() {
-      return getEditorLoopDef()?.strategy || "";
-    }
     function updateLoopControls() {
-      const roundsRow = document.querySelector("#bronze-loop-rounds-row");
-      const roundsLabel = document.querySelector("#bronze-loop-rounds-label");
-      const roundsInput = document.querySelector("#bronze-loop-rounds");
-      if (!roundsLabel || !roundsInput) return;
       const editorLoop = getEditorLoopDef();
       const showRounds = editorLoop.useRoundsAsCompletions === true || ["validationBronzeUpgrade", "provisionPackCrafting", "provisionPackDualCrafting", "playerPickSbc"].includes(editorLoop.strategy);
-      if (roundsRow) roundsRow.style.display = showRounds ? "" : "none";
-      roundsLabel.style.display = showRounds ? "" : "none";
-      roundsInput.style.display = showRounds ? "" : "none";
+      renderMainPanelRounds({ panel: document.querySelector("#bronze-loop-panel"), show: showRounds });
     }
     function updateRecapButton() {
-      const btn = document.querySelector("#bronze-loop-recap-reopen");
-      if (!btn) return;
       const recap = state.lastPickRecap;
-      btn.style.display = recap ? "" : "none";
-      if (recap) {
-        const totalCards = (recap.pickResults || []).reduce(
-          (sum, entry) => sum + (entry?.pickedCards || entry?.pickedItems || []).length,
-          0
-        );
-        btn.title = `Last Player Pick recap: ${recap.name} (${totalCards} card(s))`;
-      }
+      const totalCards = recap ? (recap.pickResults || []).reduce(
+        (sum, entry) => sum + (entry?.pickedCards || entry?.pickedItems || []).length,
+        0
+      ) : 0;
+      renderMainPanelRecap({
+        panel: document.querySelector("#bronze-loop-panel"),
+        recap: recap ? { name: recap.name, totalCards } : null
+      });
     }
     async function reopenLastPickRecap() {
       const btn = document.querySelector("#bronze-loop-recap-reopen");
@@ -3443,11 +7438,11 @@
         btn.style.background = "#b13b3b";
       }
     }
-    function fail(message) {
+    function fail2(message) {
       throw new Error(message);
     }
     function stopPoint() {
-      if (state.stopping) fail("Stopped by user");
+      if (state.stopping) fail2("Stopped by user");
     }
     function matchesAny(text, patterns) {
       const list = Array.isArray(patterns) ? patterns : patterns === void 0 || patterns === null ? [] : [patterns];
@@ -3460,13 +7455,7 @@
       return stack.slice(1, Math.max(1, limit + 1));
     }
     function localize(value) {
-      try {
-        if (W.services?.Localization && value) {
-          return W.services.Localization.localize(value);
-        }
-      } catch {
-      }
-      return String(value || "");
+      return localizationAdapter.localize(value);
     }
     function packName(pack) {
       return localize(pack?.packName) || localize(pack?.name) || String(pack?.packName || pack?.name || pack?.id || "");
@@ -3501,111 +7490,35 @@
       return out;
     }
     function observeOnce(observable, controller, timeoutMs = 2e4, label = "observable") {
-      return new Promise((resolve, reject) => {
-        let done = false;
-        const tid = setTimeout(() => {
-          if (done) return;
-          done = true;
-          reject(new Error(`${label} timed out`));
-        }, timeoutMs);
-        try {
-          observable.observe(controller || ctrl(), (sender, result) => {
-            if (done) return;
-            done = true;
-            clearTimeout(tid);
-            try {
-              sender?.unobserve?.(controller || ctrl());
-            } catch {
-            }
-            resolve(result);
-          });
-        } catch (e) {
-          clearTimeout(tid);
-          reject(e);
-        }
-      });
+      return waitAdapter.observableOnce(observable, controller, timeoutMs, label);
     }
     function ctrl() {
-      try {
-        return W.getAppMain().getRootViewController().getPresentedViewController().getCurrentViewController().getCurrentController();
-      } catch {
-        return null;
-      }
+      return pageRuntime.currentController();
     }
     async function waitFor(predicate, timeoutMs = 15e3, label = "condition") {
-      const start = Date.now();
-      while (Date.now() - start < timeoutMs) {
-        stopPoint();
-        try {
-          const value = predicate();
-          if (value) return value;
-        } catch {
-        }
-        await sleep(250);
-      }
-      fail(`Timed out waiting for ${label}`);
+      return waitAdapter.until(predicate, timeoutMs, label);
     }
     async function waitAppReady() {
-      await waitFor(
-        () => isFutAppReady(),
-        3e4,
-        "FUT main UI"
-      );
+      return waitAdapter.appReady();
     }
     async function waitLoadingEnd(stableMs = 700, timeoutMs = 3e4) {
-      const start = Date.now();
-      while (Date.now() - start < timeoutMs) {
-        stopPoint();
-        const shield = W.gClickShield;
-        if (!shield || !shield.isShowing || !shield.isShowing()) {
-          await sleep(stableMs);
-          if (!shield || !shield.isShowing || !shield.isShowing()) return true;
-        }
-        await sleep(250);
-      }
-      log("Loading shield wait timed out; continuing");
-      return false;
-    }
-    function areFutServicesReady() {
-      return !!(W.services?.Store && W.services?.SBC && W.services?.Item && W.repositories?.Store && W.repositories?.Item);
-    }
-    function hasFutMainDom() {
-      return [
-        ".ut-tab-bar-item.icon-home",
-        ".ut-navigation-container-view--content",
-        ".ut-navigation-container-view",
-        ".ut-navigation-bar-view",
-        ".ut-tab-bar",
-        ".ut-home-hub-view",
-        ".ut-store-hub-view",
-        ".ut-sbc-hub-view",
-        ".ut-sbc-set-view",
-        ".ut-sbc-challenges-view",
-        ".ut-squad-hub-view",
-        ".ut-club-view",
-        ".ut-transfer-list-view",
-        ".ut-unassigned-items-view"
-      ].some((selector) => document.querySelector(selector));
+      return waitAdapter.loadingEnd(stableMs, timeoutMs);
     }
     function currentControllerName() {
-      const controller = ctrl();
-      return String(controller?.className || controller?.constructor?.name || "");
-    }
-    function isMainFutControllerName(name) {
-      return /^UT(Home|Store|SBC|Squad|Club|Transfer|Unassigned|Evolutions|Objectives|Market|Pack)/.test(name) && !/Loading|Splash|Login|Preload|Startup/i.test(name);
+      return pageRuntime.currentControllerName();
     }
     function isFutAppReady() {
-      return areFutServicesReady() && (hasFutMainDom() || isMainFutControllerName(currentControllerName()));
+      return pageRuntime.isReady();
     }
     async function refreshStorePacks() {
       const controller = ctrl();
       const result = await observeOnce(
-        W.services.Store.getPacks(W.PurchasePackType.ALL, true, true),
+        eaPackAdapter().refreshAll(),
         controller,
         3e4,
         "Store.getPacks"
       );
-      if (!result?.success) fail(`Store pack refresh failed: ${result?.error?.code || result?.status || "unknown"}`);
+      if (!result?.success) fail2(`Store pack refresh failed: ${result?.error?.code || result?.status || "unknown"}`);
       state.lastStorePacks = uniquePacks([
         ...getRepositoryMyPacks(),
         ...collectPackLikeObjects(result),
@@ -3673,7 +7586,7 @@
         const controller = ctrl();
         try {
           const result = await observeOnce(
-            W.services.Item.requestUnassignedItems(),
+            eaInventoryAdapter().requestUnassigned(),
             controller,
             2e4,
             "requestUnassignedItems"
@@ -3705,7 +7618,7 @@
         if (!quiet) log(`Unassigned refresh failed after ${attempts} attempt(s): ${lastError || "unknown"}; using existing cache (${cachedCount} item(s))`);
         return { success: false, cachedFallback: true, cachedCount, error: { message: lastError || "unknown" } };
       }
-      fail(`Unassigned refresh failed: ${lastError || "unknown"}`);
+      fail2(`Unassigned refresh failed: ${lastError || "unknown"}`);
     }
     function cacheSummary() {
       return [
@@ -3742,22 +7655,10 @@
         return false;
       }
     }
-    async function refreshPileCacheByCandidates(pileName, pile, specificNames, options = {}) {
-      const itemService = W.services?.Item || {};
-      for (const methodName of specificNames) {
-        if (typeof itemService[methodName] !== "function") continue;
-        const ok = await tryOptionalRefresh(`Item.${methodName}`, () => itemService[methodName](), options);
-        if (ok) return true;
-      }
-      const genericNames = [
-        "requestItems",
-        "requestPileItems",
-        "requestItemsForPile",
-        "requestItemsByPile"
-      ];
-      for (const methodName of genericNames) {
-        if (typeof itemService[methodName] !== "function") continue;
-        const ok = await tryOptionalRefresh(`${pileName} via Item.${methodName}`, () => itemService[methodName](pile), options);
+    async function refreshPileCacheByCandidates(pileName, options = {}) {
+      const actions = eaInventoryAdapter().refreshActions(pileName);
+      for (const action2 of actions) {
+        const ok = await tryOptionalRefresh(action2.label, action2.invoke, options);
         if (ok) return true;
       }
       if (!options.quiet) log(`${pileName} cache refresh method not available; using existing cache`);
@@ -3775,28 +7676,19 @@
       await refreshUnassigned({ quiet }).catch((e) => {
         if (!quiet) log(`Unassigned refresh skipped: ${e.message || e}`);
       });
-      await refreshPileCacheByCandidates("club", W.ItemPile.CLUB, ["requestClubItems"], options);
-      await refreshPileCacheByCandidates("storage", W.ItemPile.STORAGE, ["requestStorageItems", "requestSBCStorageItems"], options);
-      await refreshPileCacheByCandidates("transfer", W.ItemPile.TRANSFER, ["requestTransferItems"], options);
+      await refreshPileCacheByCandidates("club", options);
+      await refreshPileCacheByCandidates("storage", options);
+      await refreshPileCacheByCandidates("transfer", options);
       if (!quiet) {
         log(`Cache summary: ${cacheSummary()}`);
         log(`My Packs inventory: ${formatPackInventorySnapshot(getPackInventorySnapshot()) || "none"}`);
       }
     }
     function getUnassignedItems() {
-      try {
-        return W.repositories.Item.getUnassignedItems() || [];
-      } catch {
-        return [];
-      }
+      return readInventoryPile("unassigned");
     }
     function getRepositoryMyPacks() {
-      const repo = W.repositories?.Store?.myPacks || W.services?.Store?.storeDao?.storeRepo?.myPacks;
-      if (!repo) return [];
-      if (typeof repo.values === "function") return Array.from(repo.values());
-      if (Array.isArray(repo._collection)) return repo._collection;
-      if (repo._collection && typeof repo._collection === "object") return Object.values(repo._collection);
-      return [];
+      return eaPackAdapter().list();
     }
     function getAvailableRepositoryMyPacks() {
       return getRepositoryMyPacks().filter((pack) => !isStalePack(pack));
@@ -3890,12 +7782,12 @@
     async function moveItems(items, pile, allowStorage = true) {
       if (!items?.length) return null;
       const result = await observeOnce(
-        W.services.Item.move(items, pile, allowStorage),
+        eaInventoryAdapter().move(items, pile, allowStorage),
         ctrl(),
         25e3,
         `moveItems(${pile})`
       );
-      if (!result?.success) fail(`Move failed: ${result?.error?.code || result?.status || "unknown"}`);
+      if (!result?.success) fail2(`Move failed: ${result?.error?.code || result?.status || "unknown"}`);
       await waitLoadingEnd();
       return result;
     }
@@ -3933,6 +7825,9 @@
       } catch {
       }
       return Number(item?.rareflag || item?.rareFlag || 0) > 0;
+    }
+    function itemRareFlag(item) {
+      return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
     }
     function isSpecial(item) {
       try {
@@ -4056,14 +7951,14 @@
         "cardType"
       ])) {
         if (typeof value === "function" || value === void 0 || value === null || value === "") continue;
-        const bool = boolFromAny(value);
+        const bool = boolFromAny3(value);
         if (bool === true) return true;
         if (bool === false) continue;
         if (typeof value === "string" && /\bconcept\b/i.test(value)) return true;
       }
       return false;
     }
-    function boolFromAny(value) {
+    function boolFromAny3(value) {
       if (typeof value === "boolean") return value;
       if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
       if (typeof value === "string") {
@@ -4073,18 +7968,6 @@
       }
       return null;
     }
-    const FSU_SETTING_ALIASES = {
-      ignorePlayerPosition: [/ignore.*player.*position/i, /ignore.*position/i, /忽略.*位置/],
-      onlyUntradeable: [/only.*untrad/i, /untrad.*only/i, /仅.*不可交易/, /只.*不可交易/],
-      excludeDesignatedLeagues: [/exclude.*designated.*league/i, /exclude.*league/i, /排除.*联赛/, /排除.*聯賽/],
-      useRarityPlayer: [/use.*rarity.*player/i, /rarity.*player/i, /使用.*稀有/, /使用.*特殊/],
-      excludeEvolution: [/exclude.*evo/i, /exclude.*evolution/i, /排除.*进化/, /排除.*進化/],
-      playerPickStrictCommonRare: [/player.*pick.*strict/i, /strictly.*common.*rare/i, /球员选择.*严格/, /球員選擇.*嚴格/],
-      priorityRareWithinGoldRange: [/priority.*rare.*gold.*range/i, /rare.*within.*gold.*range/i, /golden.*player.*range/i, /稀有.*金/],
-      priorityNonSpecialPlayers: [/priority.*non.*special/i, /non.*special.*player/i, /优先.*非.*特殊/, /優先.*非.*特殊/],
-      priorityStoragePlayers: [/priority.*storage/i, /storage.*player/i, /优先.*仓库/, /優先.*倉庫/, /storage.*priority/i],
-      silverBronzePrioritizeNormal: [/silver.*bronze.*normal/i, /quality.*prioritize.*normal/i, /银.*铜.*普通/, /銀.*銅.*普通/]
-    };
     const ITEM_ID_FIELD_ALIASES = Object.freeze([
       "id",
       "itemId",
@@ -4148,22 +8031,19 @@
       "rawData",
       "_rawData"
     ]);
-    function aliasMatches(path, aliases) {
-      return aliases.some((pattern) => pattern.test(path));
-    }
-    function isInspectableObject(value) {
+    function isInspectableObject2(value) {
       if (!value || typeof value !== "object") return false;
       if (value === W || value === document || value === document.body) return false;
       const tag = Object.prototype.toString.call(value);
       return tag === "[object Object]" || tag === "[object Array]";
     }
-    function flattenConfigValues(value, path = "", rows = [], depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
+    function flattenConfigValues2(value, path = "", rows = [], depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
       if (value === null || value === void 0 || depth > 5) return rows;
       if (typeof value !== "object") {
         rows.push({ path, value });
         return rows;
       }
-      if (!isInspectableObject(value) || seen.has(value)) return rows;
+      if (!isInspectableObject2(value) || seen.has(value)) return rows;
       seen.add(value);
       const keys = Array.isArray(value) ? value.map((_, index) => String(index)) : Object.keys(value);
       for (const key of keys.slice(0, 250)) {
@@ -4174,399 +8054,32 @@
           continue;
         }
         const nextPath = path ? `${path}.${key}` : key;
-        if (isInspectableObject(child)) {
-          flattenConfigValues(child, nextPath, rows, depth + 1, seen);
+        if (isInspectableObject2(child)) {
+          flattenConfigValues2(child, nextPath, rows, depth + 1, seen);
         } else {
           rows.push({ path: nextPath, value: child });
         }
       }
       return rows;
     }
-    function parseJsonMaybe(value) {
-      if (typeof value !== "string") return null;
-      const text = value.trim();
-      if (!text || !["{", "["].includes(text[0])) return null;
-      try {
-        return JSON.parse(text);
-      } catch {
-        return null;
-      }
-    }
-    function numberListFromAny(value) {
+    function numberListFromAny3(value) {
       if (Array.isArray(value)) {
-        return value.flatMap((entry) => numberListFromAny(entry)).filter((entry, index, arr) => Number.isFinite(entry) && arr.indexOf(entry) === index);
+        return value.flatMap((entry) => numberListFromAny3(entry)).filter((entry, index, arr) => Number.isFinite(entry) && arr.indexOf(entry) === index);
       }
       if (typeof value === "number" && Number.isFinite(value)) return [Number(value)];
       if (typeof value === "string") {
         return (value.match(/\d+/g) || []).map(Number).filter(Number.isFinite);
       }
-      if (isInspectableObject(value)) {
-        return flattenConfigValues(value).flatMap((row) => numberListFromAny(row.value)).filter((entry, index, arr) => Number.isFinite(entry) && arr.indexOf(entry) === index);
+      if (isInspectableObject2(value)) {
+        return flattenConfigValues2(value).flatMap((row) => numberListFromAny3(row.value)).filter((entry, index, arr) => Number.isFinite(entry) && arr.indexOf(entry) === index);
       }
       return [];
     }
     function uniqueNumberList(values = []) {
       return values.map(Number).filter((value) => Number.isFinite(value) && value > 0).filter((value, index, arr) => arr.indexOf(value) === index);
     }
-    function isLikelyLockedPlayerPath(path = "") {
-      const text = String(path || "");
-      if (!text || /unlock/i.test(text)) return false;
-      const compact = text.toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (/((lock|locked)players?|players?(lock|locked)|(lock|locked)cards?|cards?(lock|locked)|(lock|locked)items?|items?(lock|locked)|protectedplayers?|protectedcards?|protecteditems?)/i.test(compact)) {
-        return true;
-      }
-      if (/(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)/i.test(text)) {
-        return /player|card|item|resource|definition|asset|info[._\-\s]*lock|(^|[._\-\s])lock([._\-\s]|$)/i.test(text);
-      }
-      return false;
-    }
-    function isLikelyLockedIdValuePath(path = "", key = "") {
-      const field = String(key || "").replace(/^_+/, "");
-      if (/^\d+$/.test(field)) return true;
-      if (/^(id|itemid|instanceid|resourceid|cardid|playerid|definitionid|defid|assetid|baseid|baseresourceid|guidassetid)$/i.test(field)) {
-        return true;
-      }
-      return /(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)$/i.test(String(path || ""));
-    }
-    function addLockedPlayerValue(result, value, path = "", key = "") {
-      const nums = numberListFromAny(value);
-      if (!nums.length) return;
-      const text = `${key || ""} ${path || ""}`;
-      const definitionLike = /definition|defid|asset|base|resource|guid/i.test(text);
-      const itemLike = !definitionLike || /(^|[^a-z])(id|item|instance|card|player)([^a-z]|$)/i.test(text);
-      if (definitionLike) nums.forEach((num) => result.definitionIds.push(num));
-      if (itemLike || /resource|guid/i.test(text)) nums.forEach((num) => result.itemIds.push(num));
-    }
-    function collectLockedPlayerIds(value, path = "", result = { itemIds: [], definitionIds: [], sources: [] }, depth = 0, seen = /* @__PURE__ */ new WeakSet(), inLockContext = false) {
-      if (value === null || value === void 0 || depth > 6) return result;
-      const lockContext = inLockContext || isLikelyLockedPlayerPath(path);
-      if (!isInspectableObject(value)) {
-        if (lockContext && isLikelyLockedIdValuePath(path)) {
-          addLockedPlayerValue(result, value, path);
-          if (!result.sources.includes(path)) result.sources.push(path);
-        }
-        return result;
-      }
-      if (seen.has(value)) return result;
-      seen.add(value);
-      const keys = Array.isArray(value) ? value.map((_, index) => String(index)) : Object.keys(value);
-      for (const key of keys.slice(0, 250)) {
-        let child;
-        try {
-          child = value[key];
-        } catch {
-          continue;
-        }
-        const nextPath = path ? `${path}.${key}` : key;
-        const childLockContext = lockContext || isLikelyLockedPlayerPath(nextPath);
-        if (childLockContext && !isInspectableObject(child) && isLikelyLockedIdValuePath(nextPath, key)) {
-          addLockedPlayerValue(result, child, nextPath, key);
-          if (!result.sources.includes(nextPath)) result.sources.push(nextPath);
-        } else if (childLockContext && isInspectableObject(child)) {
-          ITEM_ID_FIELD_ALIASES.forEach((field) => {
-            addLockedPlayerValue(result, safeReadField(child, field), nextPath, field);
-          });
-          DEFINITION_ID_FIELD_ALIASES.forEach((field) => {
-            addLockedPlayerValue(result, safeReadField(child, field), nextPath, field);
-          });
-        }
-        if (isInspectableObject(child)) {
-          collectLockedPlayerIds(child, nextPath, result, depth + 1, seen, childLockContext);
-        }
-      }
-      return result;
-    }
-    function normalizeLockedPlayerIds(raw, source = "") {
-      const result = collectLockedPlayerIds(raw, source || "lock");
-      return {
-        itemIds: uniqueNumberList(result.itemIds),
-        definitionIds: uniqueNumberList(result.definitionIds),
-        sources: [...new Set(result.sources || [])]
-      };
-    }
-    function normalizeGoldRange(settings, rows) {
-      const direct = numberListFromAny(settings.goldRange || settings.goldenRange || settings.goldRatingRange).slice(0, 2);
-      if (direct.length === 2) return direct.sort((a, b) => a - b);
-      if (direct.length === 1 && direct[0] >= 75 && direct[0] <= 99) return [75, direct[0]];
-      let min = null;
-      let max = null;
-      for (const row of rows) {
-        const path = row.path.toLowerCase();
-        const value = Number(row.value);
-        if (!Number.isFinite(value)) continue;
-        if (/gold.*(min|from|start)|golden.*(min|from|start)/i.test(path)) min = value;
-        if (/gold.*(max|to|end)|golden.*(max|to|end)/i.test(path)) max = value;
-      }
-      if (Number.isFinite(min) && Number.isFinite(max)) return [min, max].sort((a, b) => a - b);
-      return FSU_COMPAT_DEFAULTS.goldRange;
-    }
-    function normalizeFsuSettings(raw = {}, source = "manual") {
-      const rows = flattenConfigValues(raw);
-      const settings = { ...FSU_COMPAT_DEFAULTS, detected: true, source };
-      let matched = false;
-      for (const [field, aliases] of Object.entries(FSU_SETTING_ALIASES)) {
-        const row = rows.find((entry) => aliasMatches(entry.path, aliases) && boolFromAny(entry.value) !== null);
-        if (row) {
-          settings[field] = boolFromAny(row.value);
-          matched = true;
-        }
-      }
-      const excludedLeagueRows = rows.filter(
-        (entry) => /exclude|ignore|black|ban|designated|league|联赛|聯賽/i.test(entry.path) && /league|联赛|聯賽/i.test(entry.path)
-      );
-      const excludedLeagueIds = excludedLeagueRows.flatMap((entry) => numberListFromAny(entry.value)).filter((entry, index, arr) => Number.isFinite(entry) && arr.indexOf(entry) === index);
-      if (excludedLeagueIds.length) {
-        settings.excludedLeagueIds = excludedLeagueIds;
-        settings.excludeDesignatedLeagues = true;
-        matched = true;
-      }
-      const lockedPlayers = normalizeLockedPlayerIds(raw, source);
-      if (lockedPlayers.itemIds.length || lockedPlayers.definitionIds.length) {
-        settings.lockedItemIds = lockedPlayers.itemIds;
-        settings.lockedDefinitionIds = lockedPlayers.definitionIds;
-        matched = true;
-      }
-      const explicitGoldRange = numberListFromAny(raw.goldRange || raw.goldenRange || raw.goldRatingRange);
-      settings.goldRange = normalizeGoldRange(raw, rows);
-      if (explicitGoldRange.length) matched = true;
-      if (!matched) return null;
-      return settings;
-    }
-    function likelyFsuStorageKey(key, value) {
-      const text = String(key || "");
-      return /fsu|enhancer|sbc.*(?:ignore|setting)|(?:ignore|rarity|untrad|league|evo|evolution|golden|player.*range).*settings?/i.test(text);
-    }
-    function mergeLockedPlayersIntoSettings(settings, locked, sourceLabel = "") {
-      const base = settings || {
-        ...FSU_COMPAT_DEFAULTS,
-        excludedLeagueIds: [...FSU_COMPAT_DEFAULTS.excludedLeagueIds],
-        goldRange: [...FSU_COMPAT_DEFAULTS.goldRange],
-        lockedItemIds: [],
-        lockedDefinitionIds: []
-      };
-      if (!locked || !locked.itemIds?.length && !locked.definitionIds?.length) return base;
-      base.lockedItemIds = uniqueNumberList([...base.lockedItemIds || [], ...locked.itemIds || []]);
-      base.lockedDefinitionIds = uniqueNumberList([...base.lockedDefinitionIds || [], ...locked.definitionIds || []]);
-      base.detected = true;
-      if (sourceLabel) {
-        base.source = base.source && base.source !== "compat-defaults" ? `${base.source}+${sourceLabel}` : sourceLabel;
-      }
-      return base;
-    }
-    function readFsuSettingsFromStorage(storage, label) {
-      if (!storage) return null;
-      const exactKeys = [
-        "sbcIgnorePlayerConfiguration",
-        "sbcIgnorePlayerConfig",
-        "sbc_ignore_player_configuration",
-        "sbcIgnorePlayers",
-        "sbcSettings",
-        "fsuSbcSettings",
-        "fsuSettings",
-        "enhancerSettings",
-        "fcEnhancerSettings"
-      ];
-      for (const key of exactKeys) {
-        let value = null;
-        try {
-          value = storage.getItem(key);
-        } catch {
-        }
-        if (value === null || value === void 0) continue;
-        const parsed = parseJsonMaybe(value);
-        const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label}:${key}`);
-        if (settings) return settings;
-      }
-      let length = 0;
-      try {
-        length = Number(storage.length || 0);
-      } catch {
-      }
-      for (let index = 0; index < Math.min(length, 250); index++) {
-        let key = "";
-        let value = null;
-        try {
-          key = storage.key(index);
-          value = storage.getItem(key);
-        } catch {
-          continue;
-        }
-        if (!key || !likelyFsuStorageKey(key, value)) continue;
-        const parsed = parseJsonMaybe(value);
-        const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label}:${key}`);
-        if (settings) return settings;
-      }
-      return null;
-    }
-    function fsuInfoBoolean(build, key, fallback) {
-      const value = boolFromAny(safeReadField(build, key));
-      return value === null ? fallback : value;
-    }
-    function readFsuSettingsFromInfo() {
-      let info;
-      try {
-        info = W.info;
-      } catch {
-        info = null;
-      }
-      const build = info?.build;
-      if (!isInspectableObject(build)) return null;
-      const knownBuildKeys = [
-        "ignorepos",
-        "untradeable",
-        "league",
-        "flag",
-        "academy",
-        "strictlypcik",
-        "comprange",
-        "comprare",
-        "firststorage",
-        "sbfirstcommon"
-      ];
-      if (!knownBuildKeys.some((key) => safeReadField(build, key) !== void 0)) return null;
-      const set = isInspectableObject(info?.set) ? info.set : {};
-      const rawGoldenMax = Number(safeReadField(set, "goldenrange"));
-      const goldenMax = Number.isFinite(rawGoldenMax) && rawGoldenMax >= 75 && rawGoldenMax <= 99 ? rawGoldenMax : FSU_COMPAT_DEFAULTS.goldRange[1];
-      return {
-        ...FSU_COMPAT_DEFAULTS,
-        ignorePlayerPosition: fsuInfoBoolean(build, "ignorepos", FSU_COMPAT_DEFAULTS.ignorePlayerPosition),
-        onlyUntradeable: fsuInfoBoolean(build, "untradeable", FSU_COMPAT_DEFAULTS.onlyUntradeable),
-        excludeDesignatedLeagues: fsuInfoBoolean(build, "league", FSU_COMPAT_DEFAULTS.excludeDesignatedLeagues),
-        excludedLeagueIds: uniqueNumberList(numberListFromAny(safeReadField(set, "shield_league"))),
-        useRarityPlayer: fsuInfoBoolean(build, "flag", FSU_COMPAT_DEFAULTS.useRarityPlayer),
-        excludeEvolution: fsuInfoBoolean(build, "academy", FSU_COMPAT_DEFAULTS.excludeEvolution),
-        playerPickStrictCommonRare: fsuInfoBoolean(build, "strictlypcik", FSU_COMPAT_DEFAULTS.playerPickStrictCommonRare),
-        priorityRareWithinGoldRange: fsuInfoBoolean(build, "comprange", FSU_COMPAT_DEFAULTS.priorityRareWithinGoldRange),
-        priorityNonSpecialPlayers: fsuInfoBoolean(build, "comprare", FSU_COMPAT_DEFAULTS.priorityNonSpecialPlayers),
-        priorityStoragePlayers: fsuInfoBoolean(build, "firststorage", FSU_COMPAT_DEFAULTS.priorityStoragePlayers),
-        silverBronzePrioritizeNormal: fsuInfoBoolean(build, "sbfirstcommon", FSU_COMPAT_DEFAULTS.silverBronzePrioritizeNormal),
-        goldRange: [75, goldenMax],
-        detected: true,
-        source: "window.info.build/set"
-      };
-    }
-    function readFsuSettingsFromWindow() {
-      const infoSettings = readFsuSettingsFromInfo();
-      if (infoSettings) return infoSettings;
-      const roots = [];
-      const rootNames = [
-        "FSU",
-        "fsu",
-        "FUTEnhancer",
-        "FCEnhancer",
-        "Enhancer",
-        "enhancer",
-        "__FSU",
-        "__FUTEnhancer",
-        "__FCEnhancer"
-      ];
-      for (const name of rootNames) {
-        try {
-          if (isInspectableObject(W[name])) roots.push([name, W[name]]);
-        } catch {
-        }
-      }
-      try {
-        Object.keys(W).filter((key) => /fsu|enhancer/i.test(key)).slice(0, 40).forEach((key) => {
-          try {
-            if (isInspectableObject(W[key])) roots.push([key, W[key]]);
-          } catch {
-          }
-        });
-      } catch {
-      }
-      const seen = /* @__PURE__ */ new WeakSet();
-      for (const [name, root] of roots) {
-        if (seen.has(root)) continue;
-        seen.add(root);
-        const settings = normalizeFsuSettings(root, `window.${name}`);
-        if (settings) return settings;
-      }
-      return null;
-    }
-    function readFsuLockedPlayersFromWindow() {
-      const known = [
-        ["window.info.lock", () => W.info?.lock],
-        ["window.info.lockedPlayers", () => W.info?.lockedPlayers],
-        ["window.info.lockPlayers", () => W.info?.lockPlayers],
-        ["window.info.playerLock", () => W.info?.playerLock],
-        ["window.info.protectedPlayers", () => W.info?.protectedPlayers],
-        ["window.state.page.info.lock", () => W.state?.page?.info?.lock]
-      ];
-      const combined = { itemIds: [], definitionIds: [], sources: [] };
-      for (const [path, getter] of known) {
-        let value;
-        try {
-          value = getter();
-        } catch {
-          value = null;
-        }
-        const locked = normalizeLockedPlayerIds(value, path);
-        combined.itemIds.push(...locked.itemIds);
-        combined.definitionIds.push(...locked.definitionIds);
-        combined.sources.push(...locked.sources);
-      }
-      const rootNames = ["FSU", "fsu", "FUTEnhancer", "FCEnhancer", "Enhancer", "enhancer", "__FSU", "__FUTEnhancer", "__FCEnhancer"];
-      for (const name of rootNames) {
-        try {
-          if (!isInspectableObject(W[name])) continue;
-          const locked = normalizeLockedPlayerIds(W[name], `window.${name}`);
-          combined.itemIds.push(...locked.itemIds);
-          combined.definitionIds.push(...locked.definitionIds);
-          combined.sources.push(...locked.sources);
-        } catch {
-        }
-      }
-      return {
-        itemIds: uniqueNumberList(combined.itemIds),
-        definitionIds: uniqueNumberList(combined.definitionIds),
-        sources: [...new Set(combined.sources)].slice(0, 8)
-      };
-    }
-    function readFsuLockedPlayersFromStorage(storage, label) {
-      const combined = { itemIds: [], definitionIds: [], sources: [] };
-      if (!storage) return combined;
-      let length = 0;
-      try {
-        length = Number(storage.length || 0);
-      } catch {
-      }
-      for (let index = 0; index < Math.min(length, 250); index++) {
-        let key = "";
-        let value = null;
-        try {
-          key = storage.key(index);
-          value = storage.getItem(key);
-        } catch {
-          continue;
-        }
-        if (!key || !isLikelyLockedPlayerPath(key)) continue;
-        const parsed = parseJsonMaybe(value);
-        const locked = normalizeLockedPlayerIds(parsed || { [key]: value }, `${label}:${key}`);
-        combined.itemIds.push(...locked.itemIds);
-        combined.definitionIds.push(...locked.definitionIds);
-        combined.sources.push(...locked.sources);
-      }
-      return {
-        itemIds: uniqueNumberList(combined.itemIds),
-        definitionIds: uniqueNumberList(combined.definitionIds),
-        sources: [...new Set(combined.sources)].slice(0, 8)
-      };
-    }
-    function readFsuLockedPlayers() {
-      const windowLocked = readFsuLockedPlayersFromWindow();
-      const localLocked = readFsuLockedPlayersFromStorage(window.localStorage, "localStorage");
-      const sessionLocked = readFsuLockedPlayersFromStorage(window.sessionStorage, "sessionStorage");
-      return {
-        itemIds: uniqueNumberList([...windowLocked.itemIds || [], ...localLocked.itemIds || [], ...sessionLocked.itemIds || []]),
-        definitionIds: uniqueNumberList([...windowLocked.definitionIds || [], ...localLocked.definitionIds || [], ...sessionLocked.definitionIds || []]),
-        sources: [.../* @__PURE__ */ new Set([...windowLocked.sources || [], ...localLocked.sources || [], ...sessionLocked.sources || []])].slice(0, 8)
-      };
-    }
     function detectFsuSettings() {
-      const settings = state.fsuSettingsOverride || readFsuSettingsFromWindow() || readFsuSettingsFromStorage(window.localStorage, "localStorage") || readFsuSettingsFromStorage(window.sessionStorage, "sessionStorage") || { ...FSU_COMPAT_DEFAULTS, excludedLeagueIds: [...FSU_COMPAT_DEFAULTS.excludedLeagueIds], goldRange: [...FSU_COMPAT_DEFAULTS.goldRange] };
-      const locked = readFsuLockedPlayers();
-      return mergeLockedPlayersIntoSettings(settings, locked, locked.itemIds.length || locked.definitionIds.length ? "locked-players" : "");
+      return fsuAdapter().snapshot(state.fsuSettingsOverride);
     }
     function getFsuSettings(options = {}) {
       const nowMs = Date.now();
@@ -4651,7 +8164,7 @@
     function itemIdentifierNumbers(item, keys = []) {
       const fields = Array.isArray(keys) && keys.length ? keys : ITEM_IDENTITY_FIELD_ALIASES;
       return uniqueNumberList(itemIdentityHolders(item).flatMap(
-        (holder) => fields.flatMap((field) => numberListFromAny(safeReadField(holder, field)))
+        (holder) => fields.flatMap((field) => numberListFromAny3(safeReadField(holder, field)))
       ));
     }
     function isFsuLockedItem(item, settings = getFsuSettings(), lockContext = null) {
@@ -4659,12 +8172,12 @@
       const lockedDefinitionIds = lockContext?.lockedDefinitionIds || new Set((settings.lockedDefinitionIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
       if (!lockedItemIds.size && !lockedDefinitionIds.size) return false;
       const itemIds = itemIdentifierNumbers(item, ITEM_ID_FIELD_ALIASES);
-      const definitionIds = itemIdentifierNumbers(item, DEFINITION_ID_FIELD_ALIASES);
+      const definitionIds2 = itemIdentifierNumbers(item, DEFINITION_ID_FIELD_ALIASES);
       if (itemIds.some((id) => lockedItemIds.has(id))) return true;
-      if (definitionIds.some((id) => lockedDefinitionIds.has(id))) return true;
+      if (definitionIds2.some((id) => lockedDefinitionIds.has(id))) return true;
       const allIds = uniqueNumberList([
         ...itemIds,
-        ...definitionIds,
+        ...definitionIds2,
         ...itemIdentifierNumbers(item, ITEM_IDENTITY_FIELD_ALIASES)
       ]);
       return allIds.some((id) => lockedItemIds.has(id) || lockedDefinitionIds.has(id));
@@ -4692,7 +8205,7 @@
         if (typeof value === "boolean") return value;
         if (typeof value === "number") return Number.isFinite(value) && value > 0;
         if (typeof value === "string") return value.trim() && value !== "0" && value !== "-1" && value.toLowerCase() !== "false";
-        if (isInspectableObject(value)) return Object.keys(value).length > 0;
+        if (isInspectableObject2(value)) return Object.keys(value).length > 0;
         return false;
       });
     }
@@ -4743,7 +8256,7 @@
       return [];
     }
     function getClubItems() {
-      return collectionValues3(W.repositories?.Item?.club?.items).concat(collectionValues3(W.services?.Item?.itemDao?.itemRepo?.club?.items));
+      return readInventoryPile("club");
     }
     function uniqueItems(items) {
       const seen = /* @__PURE__ */ new Set();
@@ -4757,28 +8270,17 @@
       return result;
     }
     function getStorageItems() {
-      try {
-        if (typeof W.repositories?.Item?.getStorageItems === "function") {
-          return Array.from(W.repositories.Item.getStorageItems() || []);
-        }
-      } catch {
-      }
-      try {
-        if (typeof W.repositories?.Item?.getStorage === "function") {
-          return collectionValues3(W.repositories.Item.getStorage());
-        }
-      } catch {
-      }
-      return collectionValues3(W.repositories?.Item?.storage);
+      return readInventoryPile("storage");
     }
     function getTransferItems() {
+      return readInventoryPile("transfer");
+    }
+    function readInventoryPile(pileName) {
       try {
-        if (typeof W.repositories?.Item?.getTransferItems === "function") {
-          return Array.from(W.repositories.Item.getTransferItems() || []);
-        }
+        return eaInventoryAdapter().readPile(pileName);
       } catch {
+        return [];
       }
-      return collectionValues3(W.repositories?.Item?.transfer);
     }
     function getPileItemsByName(pileName) {
       if (pileName === "unassigned") return uniqueItems(getUnassignedItems());
@@ -4927,37 +8429,29 @@
         return "unknown";
       }
     }
-    function pileSpaceLeft(pile, fallbackMax = null) {
+    function pileSpaceLeft(pileName) {
       try {
-        const size = Number(W.repositories.Item.getPileSize(pile));
-        const used = Number(W.repositories.Item.numItemsInCache(pile));
-        if (Number.isFinite(size) && Number.isFinite(used)) return size - used;
+        return eaInventoryAdapter().capacity(pileName).free;
       } catch {
+        return null;
       }
-      if (fallbackMax !== null) {
-        try {
-          return fallbackMax - W.repositories.Item.numItemsInCache(pile);
-        } catch {
-        }
-      }
-      return null;
     }
     function storageSpaceLeft() {
-      return pileSpaceLeft(W.ItemPile.STORAGE, CFG.storageMax);
+      return pileSpaceLeft("storage");
     }
     function transferSpaceLeft() {
-      return pileSpaceLeft(W.ItemPile.TRANSFER, null);
+      return pileSpaceLeft("transfer");
     }
     function assertPileSpace(pileName, available, needed) {
       if (available !== null && needed > available) {
-        fail(`${pileName} has only ${available} slot(s), but ${needed} item(s) need moving`);
+        fail2(`${pileName} has only ${available} slot(s), but ${needed} item(s) need moving`);
       }
     }
     async function resolveRuntimeUnassigned(reason = "cleanup", options = {}) {
       await refreshUnassigned();
       let reservedIds = /* @__PURE__ */ new Set();
       let initialLogged = false;
-      const adapter = createEaInventoryAdapter(W, { capacityFallbacks: { storage: CFG.storageMax } });
+      const adapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
       const getSnapshot = async () => {
         const liveItems = getUnassignedItems();
         reservedIds = new Set(
@@ -4989,22 +8483,22 @@
           stopPoint();
           const items = action2.itemRefs.map((ref) => adapter.resolveItem(ref, ["unassigned"])?.item).filter(Boolean);
           if (items.length !== action2.itemRefs.length) {
-            fail(`Unassigned ${action2.description} action could resolve only ${items.length}/${action2.itemRefs.length} item(s)`);
+            fail2(`Unassigned ${action2.description} action could resolve only ${items.length}/${action2.itemRefs.length} item(s)`);
           }
           if (action2.type === "swap") {
             log(`Swapping ${items.length} untradeable duplicate(s) with tradeable club version(s)`);
-            await moveItems(items, W.ItemPile.CLUB, true);
+            await moveItems(items, inventoryPile("club"), true);
           } else if (action2.destination === "club") {
             log(`Moving ${items.length} non-duplicate unassigned item(s) to club`);
-            await moveItems(items, W.ItemPile.CLUB, true);
+            await moveItems(items, inventoryPile("club"), true);
           } else if (action2.destination === "transfer") {
             log(`Moving ${items.length} tradeable duplicate(s) to transfer list`);
-            await moveItems(items, W.ItemPile.TRANSFER, false);
+            await moveItems(items, inventoryPile("transfer"), false);
           } else if (action2.destination === "storage") {
             log(`Moving ${items.length} untradeable duplicate(s) to SBC storage`);
-            await moveItems(items, W.ItemPile.STORAGE, true);
+            await moveItems(items, inventoryPile("storage"), true);
           } else {
-            fail(`Unsupported Unassigned action destination: ${action2.destination}`);
+            fail2(`Unsupported Unassigned action destination: ${action2.destination}`);
           }
           await refreshUnassigned();
         }
@@ -5012,12 +8506,12 @@
       if (result.status === "blocked") {
         const blocked2 = result.plan?.blocked;
         if (blocked2?.destination === "storage") {
-          fail(`SBC storage has only ${blocked2.free} slot(s), but ${blocked2.required} item(s) need moving`);
+          fail2(`SBC storage has only ${blocked2.free} slot(s), but ${blocked2.required} item(s) need moving`);
         }
         if (blocked2?.destination === "transfer") {
-          fail(`Transfer list has only ${blocked2.free} slot(s), but ${blocked2.required} item(s) need moving`);
+          fail2(`Transfer list has only ${blocked2.free} slot(s), but ${blocked2.required} item(s) need moving`);
         }
-        fail(result.reason || "Unassigned cleanup blocked");
+        fail2(result.reason || "Unassigned cleanup blocked");
       }
       const reservedCount = result.plan?.reservedItemRefs?.length || reservedIds.size;
       if (initialLogged && (result.iterations > 1 || reservedCount || result.status === "preserved")) {
@@ -5081,7 +8575,7 @@
       const movedIds = /* @__PURE__ */ new Set();
       const markMoved = (list) => list.forEach((item) => movedIds.add(Number(item?.id || 0)));
       const nonDuplicates = players.filter((item) => !isDuplicate(item));
-      const movedNonDuplicates = await tryMoveOpenedRewardItems(nonDuplicates, W.ItemPile.CLUB, true, label, "non-duplicate");
+      const movedNonDuplicates = await tryMoveOpenedRewardItems(nonDuplicates, inventoryPile("club"), true, label, "non-duplicate");
       if (movedNonDuplicates) {
         moved += movedNonDuplicates;
         markMoved(nonDuplicates);
@@ -5091,7 +8585,7 @@
       if (tradeableDuplicates.length) {
         try {
           assertPileSpace("Transfer list", transferSpaceLeft(), tradeableDuplicates.length);
-          const count = await tryMoveOpenedRewardItems(tradeableDuplicates, W.ItemPile.TRANSFER, false, label, "tradeable duplicate");
+          const count = await tryMoveOpenedRewardItems(tradeableDuplicates, inventoryPile("transfer"), false, label, "tradeable duplicate");
           if (count) {
             moved += count;
             markMoved(tradeableDuplicates);
@@ -5108,7 +8602,7 @@
         return clubDuplicate && isTradeable(clubDuplicate);
       });
       const storageDuplicates = untradeableDuplicates.filter((item) => !swappable.includes(item));
-      const swappedCount = await tryMoveOpenedRewardItems(swappable, W.ItemPile.CLUB, true, label, "swappable duplicate");
+      const swappedCount = await tryMoveOpenedRewardItems(swappable, inventoryPile("club"), true, label, "swappable duplicate");
       if (swappedCount) {
         moved += swappedCount;
         markMoved(swappable);
@@ -5116,7 +8610,7 @@
       if (storageDuplicates.length) {
         try {
           assertPileSpace("SBC storage", storageSpaceLeft(), storageDuplicates.length);
-          const count = await tryMoveOpenedRewardItems(storageDuplicates, W.ItemPile.STORAGE, true, label, "untradeable duplicate");
+          const count = await tryMoveOpenedRewardItems(storageDuplicates, inventoryPile("storage"), true, label, "untradeable duplicate");
           if (count) moved += count;
         } catch (e) {
           log(`${label}: direct untradeable duplicate reward move skipped: ${e.message || e}`);
@@ -5142,12 +8636,12 @@
       return { reservedItems, routedItems, pendingItems, details };
     }
     async function openPack(pack, purpose, options = {}) {
-      if (!pack) fail(`Pack not found for ${purpose}`);
+      if (!pack) fail2(`Pack not found for ${purpose}`);
       if (typeof options.openedItemPolicy !== "function") {
-        fail(`Opened item policy is required for ${purpose}`);
+        fail2(`Opened item policy is required for ${purpose}`);
       }
-      const packAdapter = createEaPackAdapter(W);
-      const inventoryAdapter = createEaInventoryAdapter(W, { capacityFallbacks: { storage: CFG.storageMax } });
+      const packAdapter = adapters.pack();
+      const inventoryAdapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
       let currentPack = pack;
       const retryCodes = options.retryCodes || (options.retryOn471 === true ? ["471"] : []);
       const receipt = await openPackTransaction({
@@ -5180,7 +8674,7 @@
           log(`${purpose}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
           log(`${purpose}: retrying pack open after navigation and unassigned recovery`);
           await sleep(CFG.pauseMs);
-          await unwindSbcSquadControllers(`${purpose} pack-open recovery`);
+          await unwindSbcSquadControllers2(`${purpose} pack-open recovery`);
           await showUnassignedIfAny(`${purpose} pack-open recovery sync`);
           if (isSbcControllerActive()) {
             await openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`).catch((error) => {
@@ -5206,14 +8700,17 @@
         if (receipt.status === "unavailable") log(`${purpose}: no matching pack remains after recovery`);
         return null;
       }
-      fail(`Open pack failed: ${receipt.reason || "unknown"}`);
+      fail2(`Open pack failed: ${receipt.reason || "unknown"}`);
     }
-    async function openSourceBronzePack() {
+    async function findValidationSourcePack(loopDef) {
       await refreshStorePacks();
-      const pack = CFG.sourcePackIds.map((id) => findPackById(id)).find(Boolean) || findPackByName(CFG.sourcePackNames);
+      return (loopDef.sourcePackIds || CFG.sourcePackIds).map((id) => findPackById(id)).find(Boolean) || findPackByName(loopDef.sourcePackNames || CFG.sourcePackNames) || null;
+    }
+    async function openSourceBronzePack(loopDef, selectedPack = null) {
+      const pack = selectedPack || await findValidationSourcePack(loopDef);
       if (!pack) {
         const names = summarizePacks();
-        fail(`Source pack not found. Current my packs: ${names || "none"}`);
+        fail2(`Source pack not found. Current my packs: ${names || "none"}`);
       }
       const receipt = await openPack(pack, "source bronze pack", {
         openedItemPolicy: createOpenedItemPolicy(async (openedItems) => {
@@ -5224,7 +8721,7 @@
           );
           if (directClub.length) {
             log(`Moving ${directClub.length} non-duplicate source item(s) to club`);
-            await moveItems(directClub, W.ItemPile.CLUB, true);
+            await moveItems(directClub, inventoryPile("club"), true);
           }
           if (bronzeDuplicates.length) {
             log(`${bronzeDuplicates.length} bronze duplicate(s) left for Bronze Upgrade`);
@@ -5240,21 +8737,19 @@
       return receipt;
     }
     async function ensureSbcSetsLoaded() {
-      const sets = W.services?.SBC?.repository?.sets?._collection || {};
-      if (Object.keys(sets).length) return;
-      const result = await observeOnce(W.services.SBC.requestSets(), ctrl(), 3e4, "SBC.requestSets");
-      if (!result?.success) fail(`SBC set request failed: ${result?.error?.code || result?.status || "unknown"}`);
+      if (eaSbcAdapter().listSets().length) return;
+      const result = await observeOnce(eaSbcAdapter().requestSets(), ctrl(), 3e4, "SBC.requestSets");
+      if (!result?.success) fail2(`SBC set request failed: ${result?.error?.code || result?.status || "unknown"}`);
     }
     function getSbcSets() {
-      const coll = W.services?.SBC?.repository?.sets?._collection || {};
-      return Array.isArray(coll) ? coll : Object.values(coll);
+      return eaSbcAdapter().listSets();
     }
     async function findSbcSet(names, label = "SBC") {
       await ensureSbcSetsLoaded();
       const set = getSbcSets().find((s) => matchesAny(s?.name, names));
       if (!set) {
         const names2 = getSbcSets().map((s) => `${s?.name || "?"} (#${s?.id})`).slice(0, 80).join(", ");
-        fail(`${label} SBC not found. First loaded SBCs: ${names2}`);
+        fail2(`${label} SBC not found. First loaded SBCs: ${names2}`);
       }
       return set;
     }
@@ -5262,12 +8757,18 @@
       await ensureSbcSetsLoaded();
       return getSbcSets().find((set) => matchesAny(set?.name, names)) || null;
     }
-    async function findBronzeUpgradeSet() {
-      return findSbcSet(CFG.bronzeUpgradeNames, "Bronze Upgrade");
+    async function findSbcSetForLoopDef(loopDef, label = loopDef?.name || "SBC") {
+      await ensureSbcSetsLoaded();
+      const setIds = new Set((loopDef?.sbcSetIds || []).map(Number).filter(Boolean));
+      if (setIds.size) {
+        const byId = getSbcSets().find((set) => setIds.has(Number(set?.id || 0)));
+        if (byId) return byId;
+        fail2(`${label} SBC not found by configured Set id(s): ${[...setIds].join(", ")}`);
+      }
+      return findSbcSet(loopDef?.sbcNames, label);
     }
     function navController() {
-      const c = ctrl();
-      return c?.getNavigationController?.() || c?.navigationController || null;
+      return pageRuntime.navigationController();
     }
     function isCompletedChallenge(challenge) {
       const status = String(challenge?.status || challenge?.state || "").toUpperCase();
@@ -5297,20 +8798,19 @@
         log(`${label}: using ${cached.length} cached challenge(s); bypassed requestChallengesForSet`);
         return cached;
       }
-      const dao = W.services?.SBC?.sbcDAO;
-      if (typeof dao?.getChallengesForSet !== "function") {
-        fail(`${label}: direct SBC challenge DAO is unavailable`);
+      if (!eaSbcAdapter().hasDaoGetChallengesForSet()) {
+        fail2(`${label}: direct SBC challenge DAO is unavailable`);
       }
       log(`${label}: loading challenges directly through sbcDAO; bypassing requestChallengesForSet`);
       const result = await observeOnce(
-        dao.getChallengesForSet(Number(set?.id || 0)),
+        eaSbcAdapter().getChallengesForSet(set?.id),
         ctrl(),
         2e4,
         `sbcDAO.getChallengesForSet ${label}`
       );
       if (!result?.success || !Array.isArray(result?.response?.challenges)) {
         const detail = serviceResultErrorText(result) || "no challenge data returned";
-        fail(`${label}: direct SBC challenge load failed: ${detail}`);
+        fail2(`${label}: direct SBC challenge load failed: ${detail}`);
       }
       const received = result.response.challenges;
       log(`${label}: direct SBC challenge load returned ${received.length} challenge(s)`);
@@ -5323,9 +8823,8 @@
     async function loadRatingSbcChallenge(challenge, label = "rating SBC") {
       if (!challenge) return null;
       if (challenge.squad) return challenge;
-      const dao = W.services?.SBC?.sbcDAO;
-      if (typeof dao?.loadChallenge !== "function") {
-        fail(`${label}: direct SBC challenge loader is unavailable`);
+      if (!eaSbcAdapter().hasDaoLoadChallenge()) {
+        fail2(`${label}: direct SBC challenge loader is unavailable`);
       }
       let inProgress = false;
       try {
@@ -5334,7 +8833,7 @@
       }
       log(`${label}: loading challenge squad directly through sbcDAO`);
       const result = await observeOnce(
-        dao.loadChallenge(Number(challenge.id || 0), inProgress),
+        eaSbcAdapter().loadDaoChallenge(challenge.id, inProgress),
         ctrl(),
         2e4,
         `sbcDAO.loadChallenge ${label}`
@@ -5342,7 +8841,7 @@
       const squad = result?.response?.squad;
       if (!result?.success || !squad) {
         const detail = serviceResultErrorText(result) || "no squad data returned";
-        fail(`${label}: direct challenge squad load failed: ${detail}`);
+        fail2(`${label}: direct challenge squad load failed: ${detail}`);
       }
       challenge.squad = squad;
       log(`${label}: direct challenge squad loaded`);
@@ -5357,7 +8856,7 @@
         await waitLoadingEnd(350, attempt === 1 ? 6e3 : 12e3).catch(() => null);
         try {
           const result = await observeOnce(
-            W.services.SBC.requestChallengesForSet(set),
+            eaSbcAdapter().requestChallengesForSet(set),
             ctrl(),
             3e4,
             `requestChallengesForSet ${label}`
@@ -5375,7 +8874,124 @@
       }
       if (options.allowEmpty) return [];
       const detail = lastError?.message || lastResult?.error?.code || lastResult?.status || "unknown";
-      fail(`No challenge loaded for ${label} after ${attempts} attempt(s): ${detail}`);
+      fail2(`No challenge loaded for ${label} after ${attempts} attempt(s): ${detail}`);
+    }
+    async function loadPlayerPickDiscoveryChallenges(set) {
+      const label = `Player Pick scan ${set?.name || `#${set?.id || "?"}`}`;
+      let challenges = null;
+      if (eaSbcAdapter().hasDaoGetChallengesForSet()) {
+        const result = await observeOnce(
+          eaSbcAdapter().getChallengesForSet(set?.id),
+          ctrl(),
+          2e4,
+          `sbcDAO.getChallengesForSet ${label}`
+        );
+        if (result?.success && Array.isArray(result?.response?.challenges)) {
+          challenges = result.response.challenges;
+        } else {
+          log(`${label}: direct Challenge metadata unavailable (${serviceResultErrorText(result) || "unknown"}); trying standard request`);
+        }
+      }
+      if (!challenges) challenges = await requestSbcChallenges(set, label, { attempts: 1 });
+      const loaded = [];
+      for (const challenge of challenges) {
+        if (challenge?.squad || !eaSbcAdapter().hasDaoLoadChallenge()) {
+          loaded.push(challenge);
+          continue;
+        }
+        let inProgress = false;
+        try {
+          inProgress = challenge.isInProgress?.() === true;
+        } catch {
+        }
+        try {
+          const result = await observeOnce(
+            eaSbcAdapter().loadDaoChallenge(challenge.id, inProgress),
+            ctrl(),
+            2e4,
+            `sbcDAO.loadChallenge ${label} #${challenge.id || "?"}`
+          );
+          const squad = result?.response?.squad;
+          if (!result?.success || !squad) throw new Error(serviceResultErrorText(result) || "squad unavailable");
+          challenge.squad = squad;
+        } catch (error) {
+          log(`${label}: Challenge #${challenge?.id || "?"} squad metadata unavailable (${error?.message || error}); player count will remain unsupported`);
+        }
+        loaded.push(challenge);
+      }
+      return loaded;
+    }
+    function describePlayerPickDiscoveryReward(reward = {}, parsed = {}) {
+      return [
+        reward.name || "?",
+        `resource:${reward.resourceId || "?"}`,
+        `definition:${reward.definitionId || "?"}`,
+        `candidates:${parsed.pickCandidateCount || reward.candidateCount || "?"}`,
+        `select:${parsed.pickCount || reward.selectionCount || "?"}`
+      ].join(", ");
+    }
+    function describePlayerPickDiscoveryRequirement(requirement = {}) {
+      return `${requirement.key || "?"}=${(requirement.values || []).join("/") || "?"} x${requirement.count ?? "?"}`;
+    }
+    function logPlayerPickDiscoveryMetadataHints(reward = {}) {
+      for (const [source, hint] of Object.entries(reward.metadataHints || {})) {
+        const keys = (hint?.keys || []).join(",") || "none";
+        const prototypeKeys = (hint?.prototypeKeys || []).join(",") || "none";
+        const values = Object.keys(hint?.values || {}).length ? JSON.stringify(hint.values) : "{}";
+        log(`Player Pick scan: reward ${source} keys: ${keys}; related prototype keys: ${prototypeKeys}; related scalar values: ${values}`);
+      }
+    }
+    async function scanAvailablePlayerPickSbcs() {
+      log("Player Pick scan: refreshing SBC Sets and reading metadata; only fully supported non-duplicate Picks will be added as session Loops, nothing will be executed");
+      const pickOptions = getPickRuntimeOptions();
+      const summary = await scanPlayerPickSbcSnapshots({
+        refreshSets: async () => {
+          const result = await observeOnce(eaSbcAdapter().requestSets(), ctrl(), 3e4, "Player Pick scan SBC.requestSets");
+          if (!result?.success) throw new Error(serviceResultErrorText(result) || "SBC Set request failed");
+        },
+        listSets: getSbcSets,
+        snapshotSet: (set, challenges) => eaSbcAdapter().snapshotDiscoverySet(set, challenges),
+        loadChallenges: loadPlayerPickDiscoveryChallenges,
+        parseSnapshot: (snapshot) => parsePlayerPickSbcSnapshot({
+          set: snapshot,
+          highGoldThreshold: pickOptions.highGoldThreshold,
+          pricePlatform: "pc"
+        }),
+        onResult: async ({ snapshot, parsed, loadError }) => {
+          const reward = snapshot.rewards?.[0] || {};
+          log(`Player Pick scan: set #${snapshot.id || "?"} ${snapshot.name || "?"}; reward ${describePlayerPickDiscoveryReward(reward, parsed)}; challenges:${snapshot.challenges?.length || 0}; status:${parsed.status}`);
+          if (!parsed.pickCandidateCount || !parsed.pickCount) logPlayerPickDiscoveryMetadataHints(reward);
+          for (const [index, challenge] of (snapshot.challenges || []).entries()) {
+            const requirements = (challenge.eligibilityRequirements || []).map(describePlayerPickDiscoveryRequirement).join(", ");
+            log(`Player Pick scan: challenge ${index + 1} #${challenge.id || "?"} players:${challenge.requiredPlayerCount || "?"} completed:${challenge.completed ? "yes" : "no"}; ${requirements || "requirements unavailable"}`);
+          }
+          if (loadError) log(`Player Pick scan: challenge load warning: ${loadError?.message || loadError}`);
+          for (const diagnostic of parsed.diagnostics || []) log(`Player Pick scan: diagnostic: ${diagnostic}`);
+        }
+      });
+      const session = buildPlayerPickDiscoverySession({
+        sets: summary.results.map((result) => result.snapshot),
+        configuredLoops: getConfiguredLoopDefs(),
+        selectedId: document.querySelector("#bronze-loop-select")?.value || null,
+        preferScannedMetadata: pickOptions.preferScannedMetadata,
+        highGoldThreshold: pickOptions.highGoldThreshold,
+        pricePlatform: "pc"
+      });
+      state.discoveredLoopDefs = cloneLoopDef(session.discoveredLoops);
+      state.discoveredLoopOverrides = cloneLoopDef(session.loopOverrides);
+      renderLoopSelect(session.selectedId);
+      const duplicateCount = session.results.filter((result) => result.status === "duplicate").length;
+      for (const [loopId, loopDef] of Object.entries(state.discoveredLoopOverrides)) {
+        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}`).join(" + ")}`).join("; ");
+        log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
+      }
+      for (const diagnostic of session.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
+      for (const loopDef of state.discoveredLoopDefs) {
+        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}`).join(" + ")}`).join("; ");
+        log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
+      }
+      log(`Player Pick scan complete: ${summary.pickSets} Pick Set(s) found among ${summary.setsScanned} SBC Set(s); ${state.discoveredLoopDefs.length} supported session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) using scanned metadata, ${duplicateCount} static/discovered duplicate(s) skipped`);
+      return summary;
     }
     async function findAvailableSbcChallenge(set, label = set?.name || "SBC") {
       const challenges = await requestSbcChallenges(set, label);
@@ -5385,24 +9001,24 @@
       const challenge = options.challenge || await findAvailableSbcChallenge(set, set.name);
       if (!challenge) {
         if (options.returnNullIfComplete) return null;
-        fail(`No available challenge for ${set.name}`);
+        fail2(`No available challenge for ${set.name}`);
       }
       const controller = ctrl();
       const load = await observeOnce(
-        W.services.SBC.loadChallenge(challenge),
+        eaSbcAdapter().loadChallenge(challenge),
         controller,
         3e4,
         `loadChallenge ${challenge.id}`
       );
-      if (!load?.success) fail(`Challenge load failed for ${set.name}`);
+      if (!load?.success) fail2(`Challenge load failed for ${set.name}`);
       try {
         const localChallenge = set.getChallenge?.(challenge.id);
         if (localChallenge && !localChallenge.squad) localChallenge.update?.(challenge);
       } catch {
       }
       const nav = navController();
-      if (!nav) fail("Navigation controller not found");
-      const vc = new W.UTSBCSquadSplitViewController();
+      if (!nav) fail2("Navigation controller not found");
+      const vc = eaSbcAdapter().createSquadController();
       vc.initWithSBCSet?.(set, challenge.id);
       nav.pushViewController?.(vc, true);
       const activeController = await waitFor(() => {
@@ -5419,109 +9035,21 @@
       return { set, challenge };
     }
     function simulateClick(el) {
-      if (!el) return false;
-      try {
-        el.scrollIntoView?.({ block: "center", inline: "center" });
-      } catch {
-      }
-      try {
-        el.focus?.();
-      } catch {
-      }
-      const fire = (Ctor, type, extra = {}) => {
-        try {
-          if (typeof Ctor === "function") {
-            el.dispatchEvent(new Ctor(type, {
-              bubbles: true,
-              cancelable: true,
-              composed: true,
-              ...extra
-            }));
-            return true;
-          }
-        } catch {
-        }
-        try {
-          const event = document.createEvent("MouseEvents");
-          event.initMouseEvent(type, true, true, W, 1, 0, 0, 1, 1, false, false, false, false, 0, null);
-          el.dispatchEvent(event);
-          return true;
-        } catch {
-        }
-        return false;
-      };
-      fire(W.PointerEvent || window.PointerEvent, "pointerdown", { pointerId: 1, pointerType: "mouse", isPrimary: true });
-      fire(W.MouseEvent || window.MouseEvent, "mousedown", { button: 0, buttons: 1 });
-      fire(W.PointerEvent || window.PointerEvent, "pointerup", { pointerId: 1, pointerType: "mouse", isPrimary: true });
-      fire(W.MouseEvent || window.MouseEvent, "mouseup", { button: 0, buttons: 0 });
-      fire(W.MouseEvent || window.MouseEvent, "click", { button: 0, buttons: 0 });
-      try {
-        el.click?.();
-      } catch {
-      }
-      return true;
+      return adapters.dom.click(el);
     }
     function findButtonByText(patterns) {
-      const buttons = Array.from(document.querySelectorAll("button"));
-      return buttons.find(
-        (b) => matchesAny(b.textContent.trim(), patterns) && !b.classList.contains("disabled") && !b.disabled
-      );
+      return adapters.dom.findButtonByText(patterns, matchesAny);
     }
     function clickButtonByText(patterns) {
       const btn = findButtonByText(patterns);
       if (!btn) return false;
       return simulateClick(btn);
     }
-    function elementSearchText(el) {
-      return [
-        compactText(el),
-        el?.getAttribute?.("aria-label"),
-        el?.getAttribute?.("title"),
-        el?.getAttribute?.("data-id"),
-        el?.value
-      ].filter(Boolean).join(" ");
-    }
     function findClickableByText(patterns, root = document) {
-      const selectors = [
-        "button",
-        '[role="button"]',
-        "a",
-        'input[type="button"]',
-        'input[type="submit"]',
-        ".call-to-action",
-        '[class*="call-to-action"]',
-        '[class*="btn"]',
-        '[class*="Button"]'
-      ].join(",");
-      return Array.from(root.querySelectorAll(selectors)).filter(isClickableElement).sort((a, b) => elementSearchText(a).length - elementSearchText(b).length).find((el) => matchesAny(elementSearchText(el), patterns)) || null;
+      return adapters.dom.findClickableByText(patterns, matchesAny, root);
     }
     function simulateKeyStroke(key = "Alt", code = "AltRight", options = {}) {
-      const init = {
-        key,
-        code,
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        location: code === "AltRight" ? 2 : 0,
-        altKey: code === "AltRight",
-        ...options
-      };
-      const targets = [
-        document.activeElement,
-        document.body,
-        document,
-        W
-      ].filter(Boolean);
-      for (const target of targets) {
-        try {
-          target.dispatchEvent(new KeyboardEvent("keydown", init));
-        } catch {
-        }
-        try {
-          target.dispatchEvent(new KeyboardEvent("keyup", init));
-        } catch {
-        }
-      }
+      adapters.dom.keyStroke(key, code, options);
     }
     function closeFsuStuckOverlay(label = "FSU stuck overlay") {
       const patterns = [
@@ -5538,14 +9066,10 @@
       return true;
     }
     function compactText(el) {
-      return String(el?.textContent || "").replace(/\s+/g, " ").trim();
+      return adapters.dom.compactText(el);
     }
     function isClickableElement(el) {
-      if (!el) return false;
-      if (el.disabled || el.classList?.contains("disabled")) return false;
-      const rect = el.getBoundingClientRect?.();
-      if (rect && (!rect.width || !rect.height)) return false;
-      return true;
+      return adapters.dom.isClickable(el);
     }
     function findRequirementAddControl(requirementPatterns = [], buttonTexts = ["Add"]) {
       const rows = Array.from(document.querySelectorAll("li, section, div")).filter((el) => {
@@ -5598,7 +9122,7 @@
       } catch {
       }
       try {
-        const formation = W.repositories?.Squad?.getFormation?.(challenge?.formation);
+        const formation = eaSbcAdapter().formation(challenge?.formation);
         const count = Number(formation?.generalPositions?.length);
         if (Number.isFinite(count) && count > 0) return count;
       } catch {
@@ -5612,9 +9136,6 @@
         return Number.isFinite(count) && count > 0 ? sum + count : sum;
       }, 0);
     }
-    function getPlayerPickChallengeCount(loopDef = {}) {
-      return Math.max(1, Number(loopDef.challengeRequirements?.length || loopDef.challengesPerPick || 1) || 1);
-    }
     function expectedSbcPlayerCount(loopDef = {}, challenge = null) {
       const values = [];
       const explicit = Number(loopDef.expectedPlayerCount || 0);
@@ -5624,8 +9145,8 @@
         if (requirementCount2 > 0) values.push(requirementCount2);
       }
       if (challenge) {
-        const required = getRequiredPlayerCount(challenge);
-        if (Number.isFinite(required) && required > 0) values.push(required);
+        const required2 = getRequiredPlayerCount(challenge);
+        if (Number.isFinite(required2) && required2 > 0) values.push(required2);
       }
       return values.length ? Math.max(...values) : 0;
     }
@@ -5974,7 +9495,7 @@
     function selectInventoryPlayers3(requirementsOrLoopDef, priorityPiles = null, options = {}) {
       const effectivePriorityPiles = priorityPiles || (Array.isArray(requirementsOrLoopDef) ? ["storage", "transfer", "club"] : requirementsOrLoopDef?.priorityPiles || ["storage", "transfer", "club"]);
       const requirements = Array.isArray(requirementsOrLoopDef) ? requirementsOrLoopDef : selectionRequirements(requirementsOrLoopDef || {}, effectivePriorityPiles);
-      const inventoryAdapter = createEaInventoryAdapter(W);
+      const inventoryAdapter = adapters.inventory();
       const transientUnassignedSignals = options.transientUnassignedSignals || [];
       const inventorySnapshot = mergeTransientUnassignedSignals(
         inventoryAdapter.snapshot(),
@@ -5990,206 +9511,32 @@
       });
       return resolveSelectionPlanToRuntime(plan, inventoryAdapter, transientUnassignedSignals);
     }
-    function eligibilityKeyName(key) {
-      const keyText = String(key ?? "").trim();
-      const known = Object.entries(W.SBCEligibilityKey || {}).find(([, value]) => String(value) === keyText);
-      if (known) return known[0];
-      if (/^[A-Z][A-Z0-9_]+$/.test(keyText)) return keyText;
-      return `UNKNOWN_${keyText || "?"}`;
-    }
-    function requirementFirstKey(requirement) {
-      try {
-        const key = requirement?.getFirstKey?.();
-        if (key !== void 0 && key !== null) return key;
-      } catch {
-      }
-      const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
-      return Object.keys(collection)[0];
-    }
-    function flattenRequirementValues(value) {
-      if (Array.isArray(value)) return value.flat(Infinity).filter((entry) => entry !== void 0 && entry !== null);
-      if (value === void 0 || value === null) return [];
-      return [value];
-    }
-    function requirementValues(requirement, key) {
-      try {
-        const values = requirement?.getValue?.(key);
-        const flattened = flattenRequirementValues(values);
-        if (flattened.length) return flattened;
-      } catch {
-      }
-      const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
-      const direct = flattenRequirementValues(collection?.[key]);
-      if (direct.length) return direct;
-      try {
-        return flattenRequirementValues(requirement?.getFirstValue?.(key));
-      } catch {
-        return [];
-      }
-    }
-    function requirementCount(requirement, requiredPlayerCount) {
-      const count = Number(requirement?.count);
-      if (count === -1 || !Number.isFinite(count)) return requiredPlayerCount;
-      return Math.max(0, Math.min(requiredPlayerCount, count));
-    }
-    function itemRareFlag(item) {
-      return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
-    }
-    function itemMatchesDynamicRequirement(item, requirement, keyName, rawValues) {
-      try {
-        if (typeof requirement?.meetsRequirements === "function") {
-          const result = requirement.meetsRequirements(item);
-          if (typeof result === "boolean") return result;
-        }
-      } catch {
-      }
-      const values = rawValues.map(Number).filter(Number.isFinite);
-      const rating = Number(item?.rating || 0);
-      switch (keyName) {
-        case "PLAYER_QUALITY":
-        case "PLAYER_LEVEL":
-          return values.some(
-            (value) => value === 1 && isBronze(item) || value === 2 && isSilver(item) || value === 3 && isGold(item) || value === 4 && isSbcSpecialItem(item)
-          );
-        case "PLAYER_RARITY":
-          return values.includes(itemRareFlag(item));
-        case "PLAYER_RARITY_GROUP":
-          return values.some((value) => itemGroupNumbers(item).includes(value));
-        case "PLAYER_MIN_OVR":
-          return values.length > 0 && rating >= Math.min(...values);
-        case "PLAYER_EXACT_OVR":
-          return values.includes(rating);
-        case "CLUB_ID":
-          return values.includes(Number(item?.teamId ?? item?.clubId ?? item?._staticData?.teamId ?? 0));
-        case "LEAGUE_ID":
-          return values.includes(itemLeagueId2(item));
-        case "NATION_ID":
-          return values.includes(Number(item?.nationId ?? item?._staticData?.nationId ?? 0));
-        default:
-          return false;
-      }
-    }
-    const RATING_SBC_PLAYER_REQUIREMENT_KEYS = /* @__PURE__ */ new Set([
-      "PLAYER_QUALITY",
-      "PLAYER_LEVEL",
-      "PLAYER_RARITY",
-      "PLAYER_RARITY_GROUP",
-      "PLAYER_MIN_OVR",
-      "PLAYER_EXACT_OVR",
-      "CLUB_ID",
-      "LEAGUE_ID",
-      "NATION_ID"
-    ]);
-    function parseRatingSbcChallenge(loopDef, challenge) {
-      const requiredPlayerCount = expectedSbcPlayerCount(loopDef, challenge) || getRequiredPlayerCount(challenge);
-      const constraints = [];
-      const unsupported = [];
-      let targetRating = Number(loopDef.ratingSbcFill?.targetRating || 0) || 0;
-      for (const requirement of challenge?.eligibilityRequirements || []) {
-        const key = requirementFirstKey(requirement);
-        const keyName = eligibilityKeyName(key);
-        const values = requirementValues(requirement, key);
-        if (keyName === "TEAM_RATING") {
-          const ratings = values.map(Number).filter(Number.isFinite);
-          if (ratings.length) targetRating = Math.max(targetRating, ...ratings);
-          continue;
-        }
-        if (keyName === "CHEMISTRY_POINTS" || keyName === "ALL_PLAYERS_CHEMISTRY_POINTS") {
-          unsupported.push(keyName);
-          continue;
-        }
-        if (!RATING_SBC_PLAYER_REQUIREMENT_KEYS.has(keyName)) {
-          unsupported.push(keyName);
-          continue;
-        }
-        const count = requirementCount(requirement, requiredPlayerCount);
-        if (!count || !values.length) {
-          unsupported.push(`${keyName}(count:${requirement?.count ?? "?"}, values:${values.join("/") || "?"})`);
-          continue;
-        }
-        constraints.push({
-          id: `challenge-${constraints.length}`,
-          label: `${keyName} ${values.join("/")} x${count}`,
-          count,
-          matches: (item) => itemMatchesDynamicRequirement(item, requirement, keyName, values)
-        });
-      }
-      const configuredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
-      if (configuredSpecialCount) {
-        constraints.push({
-          id: "runner-required-special",
-          label: `${requiredSpecialLabel(loopDef)} rating >= ${Number(loopDef.requiredSpecialMinRating || 0) || 0} x${configuredSpecialCount}`,
-          count: configuredSpecialCount,
-          matches: (item) => isRequiredSpecialItem(item, loopDef) && Number(item?.rating || 0) >= Math.max(0, Number(loopDef.requiredSpecialMinRating || 0) || 0)
-        });
-      }
-      const configuredAllowedSpecial = loopDef.allowedSpecialCount !== void 0 ? Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0) : null;
-      return {
-        requiredPlayerCount,
-        targetRating,
-        constraints,
-        unsupported: [...new Set(unsupported)],
-        maxSpecialCount: configuredAllowedSpecial === null ? loopDef.blockSpecial === false ? requiredPlayerCount : 0 : configuredAllowedSpecial
-      };
-    }
-    function validateRatingSbcModelAgainstItems(model, items = [], challenge = null) {
-      const players = (items || []).filter(Boolean);
-      const errors = [];
-      const requiredPlayerCount = Math.max(0, Number(model?.requiredPlayerCount || 0) || 0);
-      const ratings = players.map((item) => Number(item?.rating || 0));
-      const rating = players.length === requiredPlayerCount ? calculateEaSquadRating(ratings, requiredPlayerCount) : 0;
-      const definitionIds = players.map((item) => Number(item?.definitionId || 0)).filter(Boolean);
-      const uniqueDefinitionCount = new Set(definitionIds).size;
-      if (players.length !== requiredPlayerCount) {
-        errors.push(`player-count ${players.length}/${requiredPlayerCount}`);
-      }
-      if (definitionIds.length !== players.length || uniqueDefinitionCount !== players.length) {
-        errors.push(`unique-definitions ${uniqueDefinitionCount}/${players.length}`);
-      }
-      if (players.length === requiredPlayerCount && rating < Number(model?.targetRating || 0)) {
-        errors.push(`team-rating ${rating}/${Number(model?.targetRating || 0)}`);
-      }
-      const constraintResults = (model?.constraints || []).map((constraint) => {
-        const matched = players.filter((item) => {
-          try {
-            return constraint.matches(item);
-          } catch {
-            return false;
-          }
-        }).length;
-        const required = Math.max(0, Number(constraint.count || 0) || 0);
-        if (matched < required) errors.push(`${constraint.label} ${matched}/${required}`);
-        return { constraint, matched, required };
+    function parseRatingSbcChallenge2(loopDef, challenge) {
+      return parseRatingSbcChallenge({
+        loopDef,
+        challenge,
+        requiredPlayerCount: expectedSbcPlayerCount(loopDef, challenge) || getRequiredPlayerCount(challenge),
+        eligibilityKeyName: (key) => eaSbcAdapter().eligibilityKeyName(key),
+        isBronze,
+        isSilver,
+        isGold,
+        isSpecialItem: isSbcSpecialItem,
+        itemGroupNumbers,
+        itemLeagueId: itemLeagueId2,
+        requiredSpecialLabel,
+        isRequiredSpecialItem
       });
-      const specialCount = players.filter(isSbcSpecialItem).length;
-      if (specialCount > Number(model?.maxSpecialCount || 0)) {
-        errors.push(`special-count ${specialCount}/${Number(model?.maxSpecialCount || 0)}`);
-      }
-      let challengeReady = null;
-      if (challenge && typeof challenge.meetsRequirements === "function") {
-        try {
-          challengeReady = !!challenge.meetsRequirements();
-          if (!challengeReady) errors.push("challenge.meetsRequirements() returned false");
-        } catch (error) {
-          errors.push(`challenge.meetsRequirements() failed: ${error?.message || error}`);
-        }
-      }
-      return {
-        ok: errors.length === 0,
-        errors,
-        players,
-        ratings,
-        rating,
-        specialCount,
-        uniqueDefinitionCount,
-        constraintResults,
-        challengeReady
-      };
+    }
+    function validateRatingSbcModelAgainstItems2(model, items = [], challenge = null) {
+      return validateRatingSbcModelAgainstItems(model, items, challenge, {
+        calculateSquadRating: calculateEaSquadRating,
+        isSpecialItem: isSbcSpecialItem
+      });
     }
     function logRatingSbcValidation(loopDef, label, validation, model) {
       log(`${loopDef.name}: ${label} rating ${validation.rating}/${model.targetRating}, players ${validation.players.length}/${model.requiredPlayerCount}, special ${validation.specialCount}/${model.maxSpecialCount}, unique definitions ${validation.uniqueDefinitionCount}/${validation.players.length}`);
-      validation.constraintResults.forEach(({ constraint, matched, required }) => {
-        log(`${loopDef.name}: ${label} constraint ${constraint.label}: ${matched}/${required}`);
+      validation.constraintResults.forEach(({ constraint, matched, required: required2 }) => {
+        log(`${loopDef.name}: ${label} constraint ${constraint.label}: ${matched}/${required2}`);
       });
       if (validation.challengeReady !== null) {
         log(`${loopDef.name}: ${label} local challenge.meetsRequirements(): ${validation.challengeReady ? "true" : "false"}`);
@@ -6221,14 +9568,11 @@
       return isRatingSbcCandidateSafe(resolved, loopDef);
     }
     function buildRatingSbcCandidateEntries(loopDef, model) {
-      const startedAt = Date.now();
       const settings = getFsuSettings();
       const piles = applyFsuPilePriority(
         loopDef.ratingSbcFill?.priorityPiles || loopDef.priorityPiles || ["unassigned", "storage", "transfer", "club"],
         settings
       );
-      const byItemId = /* @__PURE__ */ new Map();
-      const resolvedSignals = {};
       const protectedItemIds = new Set((loopDef.protectedItemIds || []).map(Number).filter(Boolean));
       const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number).filter(Boolean));
       const context = {
@@ -6245,201 +9589,19 @@
         protectedItemIds: loopDef.protectedItemIds,
         protectedDefinitionIds: loopDef.protectedDefinitionIds
       };
-      const safetyCache = /* @__PURE__ */ new Map();
-      const isSafe = (item) => {
-        const itemId = Number(item?.id || 0);
-        if (!itemId) return false;
-        if (!safetyCache.has(itemId)) safetyCache.set(itemId, isRatingSbcCandidateSafe(item, loopDef, model, context));
-        return safetyCache.get(itemId);
-      };
-      const submissionItems = getSubmissionCacheItems().filter(isSafe);
-      const submissionById = /* @__PURE__ */ new Map();
-      const submissionByDefinition = /* @__PURE__ */ new Map();
-      for (const item of submissionItems) {
-        const itemId = Number(item?.id || 0);
-        const definitionId = Number(item?.definitionId || 0);
-        if (itemId) submissionById.set(itemId, item);
-        if (!definitionId) continue;
-        const entries = submissionByDefinition.get(definitionId) || [];
-        entries.push(item);
-        submissionByDefinition.set(definitionId, entries);
-      }
-      for (const entries of submissionByDefinition.values()) {
-        const sorted = sortSbcFodder(entries, broadSpec, settings);
-        entries.splice(0, entries.length, ...sorted);
-      }
-      function resolveSignal(sourceItem) {
-        const duplicateId = Number(sourceItem?.duplicateId || 0);
-        if (duplicateId && submissionById.has(duplicateId)) return submissionById.get(duplicateId);
-        const definitionId = Number(sourceItem?.definitionId || 0);
-        return submissionByDefinition.get(definitionId)?.[0] || null;
-      }
-      const requirementCache = /* @__PURE__ */ new Map();
-      let scannedItems = 0;
-      for (const pileName of piles) {
-        for (const sourceItem of getPileItemsByName(pileName)) {
-          scannedItems++;
-          let item = sourceItem;
-          let signal = null;
-          if (pileNeedsDuplicateSignalResolution(pileName)) {
-            if (!isDuplicate(sourceItem)) continue;
-            item = resolveSignal(sourceItem);
-            if (!item) continue;
-            signal = sourceItem;
-          }
-          const itemId = Number(item?.id || 0);
-          const definitionId = Number(item?.definitionId || 0);
-          if (!itemId || !definitionId || byItemId.has(itemId)) continue;
-          if (!isSafe(item)) continue;
-          if (!requirementCache.has(itemId)) {
-            requirementCache.set(itemId, model.constraints.map((constraint) => constraint.matches(item)));
-          }
-          const requirementMatches = requirementCache.get(itemId);
-          byItemId.set(itemId, {
-            item,
-            signal,
-            pileName,
-            pileRank: piles.indexOf(pileName),
-            requirementMatches,
-            special: isSbcSpecialItem(item)
-          });
-          if (signal) resolvedSignals[pileName] = (resolvedSignals[pileName] || 0) + 1;
-        }
-      }
-      const byDefinition = /* @__PURE__ */ new Map();
-      for (const entry of byItemId.values()) {
-        const definitionId = Number(entry.item?.definitionId || 0);
-        const existing = byDefinition.get(definitionId);
-        if (!existing || entry.pileRank < existing.pileRank || entry.pileRank === existing.pileRank && Number(entry.item?.id || 0) < Number(existing.item?.id || 0)) {
-          byDefinition.set(definitionId, entry);
-        }
-      }
-      return {
-        entries: [...byDefinition.values()],
+      return buildRatingCandidateEntries({
+        model,
+        settings,
         piles,
-        resolvedSignals,
-        buildMs: Date.now() - startedAt,
-        scannedItems
-      };
-    }
-    function comparePileSelections2(a, b, piles) {
-      for (const pile of piles) {
-        const aCount = Number(a?.pileCounts?.[pile] || 0);
-        const bCount = Number(b?.pileCounts?.[pile] || 0);
-        if (aCount !== bCount) return bCount - aCount;
-      }
-      const aIds = (a?.entries || []).map((entry) => Number(entry.item?.id || 0)).sort((x, y) => x - y);
-      const bIds = (b?.entries || []).map((entry) => Number(entry.item?.id || 0)).sort((x, y) => x - y);
-      for (let index = 0; index < Math.max(aIds.length, bIds.length); index++) {
-        if ((aIds[index] || 0) !== (bIds[index] || 0)) return (aIds[index] || 0) - (bIds[index] || 0);
-      }
-      return 0;
-    }
-    function mergePileCounts2(a = {}, b = {}) {
-      const result = { ...a };
-      Object.entries(b).forEach(([pile, count]) => {
-        result[pile] = Number(result[pile] || 0) + Number(count || 0);
+        getPileItems: getPileItemsByName,
+        submissionItems: getSubmissionCacheItems(),
+        isSafe: (item) => isRatingSbcCandidateSafe(item, loopDef, model, context),
+        isDuplicate,
+        pileNeedsDuplicateSignalResolution,
+        sortFodder: sortSbcFodder,
+        isSpecialItem: isSbcSpecialItem,
+        broadSpec
       });
-      return result;
-    }
-    function ratingGroupSelectionOptions2(entries, count, model, piles) {
-      if (!count) return [{ entries: [], progress: model.constraints.map(() => 0), specialCount: 0, pileCounts: {} }];
-      const signatureCounts = /* @__PURE__ */ new Map();
-      const compactEntries = entries.filter((entry) => {
-        const signature = `${entry.requirementMatches.map(Number).join("")}:${Number(entry.special)}:${entry.pileName}`;
-        const seen = Number(signatureCounts.get(signature) || 0);
-        if (seen >= count) return false;
-        signatureCounts.set(signature, seen + 1);
-        return true;
-      });
-      let states = /* @__PURE__ */ new Map();
-      states.set(`0|0|${model.constraints.map(() => 0).join(".")}`, {
-        entries: [],
-        progress: model.constraints.map(() => 0),
-        specialCount: 0,
-        pileCounts: {}
-      });
-      for (const entry of compactEntries) {
-        const next = new Map(states);
-        for (const state2 of states.values()) {
-          if (state2.entries.length >= count) continue;
-          const specialCount = state2.specialCount + Number(entry.special);
-          if (specialCount > model.maxSpecialCount) continue;
-          const progress = state2.progress.map((value, index) => Math.min(
-            model.constraints[index].count,
-            value + Number(entry.requirementMatches[index])
-          ));
-          const candidate = {
-            entries: [...state2.entries, entry],
-            progress,
-            specialCount,
-            pileCounts: mergePileCounts2(state2.pileCounts, { [entry.pileName]: 1 })
-          };
-          const key = `${candidate.entries.length}|${specialCount}|${progress.join(".")}`;
-          const existing = next.get(key);
-          if (!existing || comparePileSelections2(candidate, existing, piles) < 0) next.set(key, candidate);
-        }
-        states = next;
-      }
-      return [...states.values()].filter((state2) => state2.entries.length === count);
-    }
-    function buildRatingMaterializationContext(entries, model, piles) {
-      const entriesByRating = /* @__PURE__ */ new Map();
-      for (const entry of entries) {
-        const rating = Number(entry.item?.rating || 0);
-        if (!rating) continue;
-        const group = entriesByRating.get(rating) || [];
-        group.push(entry);
-        entriesByRating.set(rating, group);
-      }
-      for (const group of entriesByRating.values()) {
-        group.sort((a, b) => a.pileRank - b.pileRank || Number(a.item?.id || 0) - Number(b.item?.id || 0));
-      }
-      return { entriesByRating, optionCache: /* @__PURE__ */ new Map(), model, piles };
-    }
-    function materializeRatingVector2(context, descendingRatings) {
-      const { entriesByRating, optionCache, model, piles } = context;
-      const counts = /* @__PURE__ */ new Map();
-      descendingRatings.forEach((rating) => counts.set(rating, (counts.get(rating) || 0) + 1));
-      let combined = /* @__PURE__ */ new Map();
-      combined.set(`0|${model.constraints.map(() => 0).join(".")}`, {
-        entries: [],
-        progress: model.constraints.map(() => 0),
-        specialCount: 0,
-        pileCounts: {}
-      });
-      for (const [rating, count] of [...counts.entries()].sort((a, b) => b[0] - a[0])) {
-        const cacheKey = `${rating}:${count}`;
-        let options = optionCache.get(cacheKey);
-        if (!options) {
-          options = ratingGroupSelectionOptions2(entriesByRating.get(Number(rating)) || [], count, model, piles);
-          optionCache.set(cacheKey, options);
-        }
-        if (!options.length) return null;
-        const next = /* @__PURE__ */ new Map();
-        for (const base of combined.values()) {
-          for (const option of options) {
-            const specialCount = base.specialCount + option.specialCount;
-            if (specialCount > model.maxSpecialCount) continue;
-            const progress = base.progress.map((value, index) => Math.min(
-              model.constraints[index].count,
-              value + option.progress[index]
-            ));
-            const candidate = {
-              entries: [...base.entries, ...option.entries],
-              progress,
-              specialCount,
-              pileCounts: mergePileCounts2(base.pileCounts, option.pileCounts)
-            };
-            const key = `${specialCount}|${progress.join(".")}`;
-            const existing = next.get(key);
-            if (!existing || comparePileSelections2(candidate, existing, piles) < 0) next.set(key, candidate);
-          }
-        }
-        combined = next;
-        if (!combined.size) return null;
-      }
-      return [...combined.values()].filter((state2) => state2.progress.every((value, index) => value >= model.constraints[index].count)).sort((a, b) => comparePileSelections2(a, b, piles))[0] || null;
     }
     function ratingSelectionItemSnapshot(item, pileName) {
       return createItemSnapshot({
@@ -6472,60 +9634,18 @@
       }, pileName);
     }
     async function findOptimalRatingSbcSelection(candidateEntries, model, piles, options = {}) {
-      const liveById = /* @__PURE__ */ new Map();
-      const snapshotEntries = candidateEntries.map((entry) => {
-        const item = ratingSelectionItemSnapshot(entry.item, entry.pileName);
-        const signal = entry.signal ? ratingSelectionItemSnapshot(entry.signal, entry.pileName) : null;
-        liveById.set(Number(item.id), entry.item);
-        if (signal) liveById.set(Number(signal.id), entry.signal);
-        return {
-          item,
-          signal,
-          pileName: entry.pileName,
-          pileRank: entry.pileRank,
-          requirementMatches: [...entry.requirementMatches],
-          special: entry.special === true
-        };
-      });
-      const plan = await selectInventoryPlayers2({
-        mode: "rating",
-        candidateEntries: snapshotEntries,
-        ratingModel: model,
-        priorityPiles: piles,
+      return selectRatingCandidateEntries({
+        candidateEntries,
+        model,
+        piles,
         searchOptions: options,
+        createSnapshot: ratingSelectionItemSnapshot,
+        selectPlayers: selectInventoryPlayers2,
         control: {
           shouldStop: () => state.stopping,
           yieldControl: () => sleep(0)
         }
       });
-      if (!plan.ok) {
-        return {
-          ok: false,
-          reason: plan.details.reason || plan.missing?.reason || "rating selection failed",
-          nodes: Number(plan.details.nodes || 0)
-        };
-      }
-      const entries = plan.entries.map((entry) => ({
-        item: liveById.get(Number(entry.itemRef?.id || 0)) || null,
-        signal: entry.signalRef ? liveById.get(Number(entry.signalRef.id || 0)) || null : null,
-        pileName: entry.pileName,
-        pileRank: entry.pileRank,
-        requirementMatches: entry.requirementMatches,
-        special: entry.special
-      }));
-      if (entries.some((entry, index) => !entry.item || plan.entries[index]?.signalRef && !entry.signal)) {
-        return { ok: false, reason: "rating selection item became stale during plan resolution", nodes: Number(plan.details.nodes || 0) };
-      }
-      return {
-        ok: true,
-        entries,
-        selected: entries.map((entry) => entry.item),
-        rating: Number(plan.details.rating || 0),
-        ratings: [...plan.details.ratings || []],
-        pileCounts: { ...plan.pileCounts },
-        nodes: Number(plan.details.nodes || 0),
-        plan
-      };
     }
     function selectedItemsFromPile(selection, pileName) {
       const pileIds = new Set(getPileItemsByName(pileName).map((item) => Number(item?.id || 0)));
@@ -6551,7 +9671,7 @@
         const resolved = findSubmissionItemForDuplicateSignal(item, usedIds);
         if (!resolved) {
           const name = item?.name || item?.lastName || item?.definitionId || itemId || "unknown";
-          fail(`${loopDef.name}: transfer item ${name} cannot be resolved to a club/storage duplicate for SBC submit`);
+          fail2(`${loopDef.name}: transfer item ${name} cannot be resolved to a club/storage duplicate for SBC submit`);
         }
         usedIds.add(Number(resolved.id));
         resolvedCount++;
@@ -6564,7 +9684,7 @@
       const substitute = [...players];
       let slotCount = getRequiredPlayerCount(challenge);
       try {
-        const formation = W.repositories?.Squad?.getFormation?.(challenge?.formation);
+        const formation = eaSbcAdapter().formation(challenge?.formation);
         slotCount = Math.max(slotCount, (formation?.generalPositions || []).length + 12);
       } catch {
       }
@@ -6581,7 +9701,7 @@
     }
     async function saveChallengeSquad(challenge, players, label = "SBC", options = {}) {
       const squad = challenge?.squad || ctrl()?._squad;
-      if (!squad) fail(`${label}: squad object not found`);
+      if (!squad) fail2(`${label}: squad object not found`);
       const playerList = buildSquadPlayerList(challenge, players);
       try {
         squad.removeAllItems?.();
@@ -6600,9 +9720,9 @@
         const playerSummary = (players || []).slice(0, 11).map(
           (item, index) => `${index + 1}.${itemDisplayName(item)} r:${Number(item?.rating || 0) || "?"} id:${Number(item?.id || 0) || "?"} def:${Number(item?.definitionId || 0) || "?"}`
         ).join("; ");
-        fail(`${label}: saveChallenge failed: ${code}${msg ? ` ${msg}` : ""}${playerSummary ? `; players ${playerSummary}` : ""}`);
+        fail2(`${label}: saveChallenge failed: ${code}${msg ? ` ${msg}` : ""}${playerSummary ? `; players ${playerSummary}` : ""}`);
       }
-      if (typeof W.services.SBC.loadChallengeData === "function") {
+      if (eaSbcAdapter().canLoadChallengeData()) {
         try {
           const loaded = await observeOnce(
             eaSbcAdapter().loadChallengeData(challenge),
@@ -6640,87 +9760,51 @@
         readSavedPlayers: async ({ challenge: targetChallenge }) => getSquadItems(targetChallenge?.squad || ctrl()?._squad),
         postSaveValidators: options.postSaveValidators || []
       });
-      if (result.status !== "prepared") fail(`${label}: squad preparation failed: ${result.reason || result.status}`);
+      if (result.status !== "prepared") fail2(`${label}: squad preparation failed: ${result.reason || result.status}`);
       return result;
     }
     async function showUnassignedIfAny(reason = "final confirmation") {
-      log(`Opening unassigned items view for confirmation: ${reason}`);
-      try {
-        const controller = ctrl();
-        if (typeof controller?.gotoUnassigned === "function") {
-          controller.gotoUnassigned();
-        } else if (typeof W.UTStoreViewController?.prototype?.gotoUnassigned === "function") {
-          W.UTStoreViewController.prototype.gotoUnassigned.call(controller);
-        } else {
-          clickButtonByText([
-            "Unassigned Items",
-            "Unassigned",
-            "Assign Items",
-            "\u672A\u5206\u914D",
-            "\u672A\u5206\u914D\u7269\u54C1",
-            "\u5206\u914D\u7269\u54C1"
-          ]);
-        }
-      } catch (e) {
-        log(`Could not open unassigned view automatically: ${e.message || e}`);
-      }
-      await waitLoadingEnd();
-      await refreshUnassigned();
-      const items = getUnassignedItems();
-      if (!items.length) {
-        log(`Unassigned confirmation (${reason}): empty`);
-        return [];
-      }
-      log(`Unassigned confirmation (${reason}): ${items.length} item(s) still present`);
-      return items;
-    }
-    function isSbcSquadControllerActive() {
-      return /UTSBCSquadSplitViewController/i.test(currentControllerName());
+      return confirmUnassignedView({
+        reason,
+        openUnassigned: () => pageRuntime.gotoUnassigned(ctrl()),
+        clickFallback: () => clickButtonByText([
+          "Unassigned Items",
+          "Unassigned",
+          "Assign Items",
+          "\u672A\u5206\u914D",
+          "\u672A\u5206\u914D\u7269\u54C1",
+          "\u5206\u914D\u7269\u54C1"
+        ]),
+        waitLoadingEnd,
+        refreshUnassigned,
+        getItems: getUnassignedItems,
+        log
+      });
     }
     function isSbcControllerActive() {
-      return /^UTSBC/i.test(currentControllerName());
+      return isSbcControllerName(currentControllerName());
     }
-    async function unwindSbcSquadControllers(label, maxPops = 20) {
-      let popped = 0;
-      while (isSbcSquadControllerActive() && popped < maxPops) {
-        const controller = ctrl();
-        const nav = navController();
-        if (typeof nav?.popViewController !== "function") {
-          log(`${label}: cannot exit ${currentControllerName() || "SBC squad"}; navigation pop method is unavailable`);
-          break;
-        }
-        nav.popViewController(true);
-        popped++;
-        await waitLoadingEnd(350, 1e4).catch(() => null);
-        for (let wait = 0; wait < 12 && ctrl() === controller; wait++) await sleep(250);
-        if (ctrl() === controller) {
-          log(`${label}: SBC squad controller did not change after navigation pop ${popped}`);
-          break;
-        }
-      }
-      if (popped) {
-        log(`${label}: removed ${popped} stale SBC squad view(s); current controller ${currentControllerName() || "unknown"}`);
-      }
-      return popped;
+    async function unwindSbcSquadControllers2(label, maxPops = 20) {
+      return unwindSbcSquadControllers({
+        label,
+        maxPops,
+        currentController: ctrl,
+        currentControllerName,
+        popController: (animated) => pageRuntime.popViewController(animated),
+        waitLoadingEnd,
+        sleep,
+        log
+      });
     }
     async function syncAfterSbcSubmit(label) {
-      const before = currentControllerName() || "unknown";
-      await unwindSbcSquadControllers(`${label} post-submit`);
-      await showUnassignedIfAny(`${label} post-submit navigation sync`);
-      let after = currentControllerName() || "unknown";
-      if (isSbcSquadControllerActive()) {
-        await unwindSbcSquadControllers(`${label} post-unassigned`);
-        after = currentControllerName() || "unknown";
-      }
-      if (isSbcControllerActive()) {
-        log(`${label}: controller is still ${after} in the SBC area after navigation cleanup; opening Store Packs as a final fallback`);
-        await openStorePacksViewForRefresh(`${label} post-submit Store sync`).catch((error) => {
-          log(`${label}: post-submit Store sync skipped: ${error?.message || error}`);
-          return false;
-        });
-        after = currentControllerName() || "unknown";
-      }
-      log(`${label}: post-submit controller ${before} -> ${after}`);
+      return synchronizeAfterSbcSubmit({
+        label,
+        currentControllerName,
+        unwind: unwindSbcSquadControllers2,
+        showUnassigned: showUnassignedIfAny,
+        openStorePacks: openStorePacksViewForRefresh,
+        log
+      });
     }
     async function waitAfterSbcFillAction(label, squad, timeoutMs = 1e4) {
       const start = Date.now();
@@ -6739,13 +9823,7 @@
           await sleep(1e3);
           continue;
         }
-        const shieldShowing = (() => {
-          try {
-            return !!W.gClickShield?.isShowing?.();
-          } catch {
-            return false;
-          }
-        })();
+        const shieldShowing = pageRuntime.loadingShieldShowing();
         if (!shieldShowing && filled > initialFilled) {
           await sleep(700);
           log(`${label}: fill action settled; slots ${initialFilled} -> ${filled}`);
@@ -6812,7 +9890,7 @@
       const filled = getFilledSquadSlots(squad);
       const submitReady = !!findSubmitButton();
       log(`${label} squad filled slots detected: ${filled}; submit ${submitReady ? "ready" : "not ready"}`);
-      if (!submitReady && requireSubmitReady) fail(`${label} squad is not complete`);
+      if (!submitReady && requireSubmitReady) fail2(`${label} squad is not complete`);
       return { squad, filled, submitReady };
     }
     function unwrapSquadSlot(slot) {
@@ -6914,10 +9992,6 @@
       const reasons = getSbcProtectionReasons(item, loopDef, { specialIndex: 1 });
       return reasons.length === 0;
     }
-    function isEligibleTotwForLoop(item, loopDef = {}) {
-      if (!isTotwItem(item)) return false;
-      return isEligibleRequiredSpecialForLoop(item, loopDef);
-    }
     function getEligibleRequiredSpecialEntries(loopDef = {}, options = {}) {
       const entries = [];
       const seen = /* @__PURE__ */ new Set();
@@ -6940,18 +10014,12 @@
     function getSubmittableRequiredSpecialEntries(loopDef = {}) {
       return getEligibleRequiredSpecialEntries(loopDef, { includeRecent: false });
     }
-    function getEligibleTotwEntries(loopDef = {}) {
-      return getSubmittableRequiredSpecialEntries(loopDef).filter(({ item }) => isTotwItem(item));
-    }
     function summarizeRequiredSpecialEntries(entries, limit = 3) {
       return entries.slice(0, limit).map(
         ({ item, pileName }) => `${itemDisplayName(item)} rating:${Number(item?.rating || 0) || "?"} ${requiredSpecialTypeLabel(item)} from:${pileName} id:${Number(item?.id || 0) || "?"}`
       ).join("; ");
     }
-    function summarizeTotwEntries(entries, limit = 3) {
-      return summarizeRequiredSpecialEntries(entries, limit);
-    }
-    async function waitForSubmittableRequiredSpecialEntries(loopDef = {}, required = 1, label = "required special cache sync") {
+    async function waitForSubmittableRequiredSpecialEntries(loopDef = {}, required2 = 1, label = "required special cache sync") {
       const attempts = 4;
       let entries = [];
       for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -6961,7 +10029,7 @@
         }
         resolveRecentRewardItems(`${loopDef.name} ${label} ${attempt}/${attempts}`);
         entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
-        if (entries.length >= required) return entries;
+        if (entries.length >= required2) return entries;
         const recentEntries = sortRequiredSpecialEntriesForSubmit(
           getEligibleRequiredSpecialEntries(loopDef).filter(({ pileName }) => pileName === "recent")
         );
@@ -7022,9 +10090,6 @@
       if (candidates.length > 8) {
         log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} candidate diagnostics truncated: ${candidates.length - 8} more`);
       }
-    }
-    function sortTotwEntriesForSubmit(entries) {
-      return sortRequiredSpecialEntriesForSubmit(entries);
     }
     function requiredSpecialTypeLabel(item) {
       const labels = [];
@@ -7633,10 +10698,10 @@
         log(`${loopDef.name}: ${upgradeDef.name} recovery is unavailable; keeping the current 84x10 unsubmitted`);
         return { ok: false, reason: "not enough eligible low rare gold fodder" };
       }
-      await unwindSbcSquadControllers(`${loopDef.name} before ${upgradeDef.name}`);
+      await unwindSbcSquadControllers2(`${loopDef.name} before ${upgradeDef.name}`);
       log(`${loopDef.name}: safe rating fodder exhausted; submitting ${upgradeDef.name} ${attempt}/${maxAttempts} before retrying 84x10`);
       const result = await runFillAndVerifyLoop(upgradeDef);
-      await unwindSbcSquadControllers(`${loopDef.name} after ${upgradeDef.name}`);
+      await unwindSbcSquadControllers2(`${loopDef.name} after ${upgradeDef.name}`);
       await refreshInventoryCaches(`${loopDef.name} after ${upgradeDef.name}`, { includePacks: false, quiet: true });
       if (Number(result?.completions || 0) < 1) {
         return { ok: false, reason: `${upgradeDef.name} was not submitted` };
@@ -7684,11 +10749,11 @@
     }
     async function ensureTotwForFillAndVerify(loopDef) {
       if (!needsAutoTotwPreflight(loopDef)) return true;
-      const required = Math.max(1, Number(loopDef.requiredSpecialCount || 1) || 1);
+      const required2 = Math.max(1, Number(loopDef.requiredSpecialCount || 1) || 1);
       await refreshInventoryCaches(`${loopDef.name} ${requiredSpecialLabel(loopDef)} preflight`, { includePacks: false, quiet: true });
       resolveRecentRewardItems(`${loopDef.name} ${requiredSpecialLabel(loopDef)} preflight`);
       let entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
-      if (entries.length >= required) {
+      if (entries.length >= required2) {
         log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} preflight found ${entries.length} eligible ${requiredSpecialLabel(loopDef)} card(s): ${summarizeRequiredSpecialEntries(entries)}`);
         return true;
       }
@@ -7712,8 +10777,8 @@
       }
       const openedExistingPack = await openExistingAutoTotwPackIfAvailable(loopDef, upgradeDef);
       if (openedExistingPack) {
-        entries = await waitForSubmittableRequiredSpecialEntries(loopDef, required, "post-existing TOTW pack");
-        if (entries.length >= required) {
+        entries = await waitForSubmittableRequiredSpecialEntries(loopDef, required2, "post-existing TOTW pack");
+        if (entries.length >= required2) {
           log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} ready after opening existing pack: ${summarizeRequiredSpecialEntries(entries)}`);
           return true;
         }
@@ -7726,9 +10791,9 @@
       }
       await refreshInventoryCaches(`${loopDef.name} post-TOTW craft`, { includePacks: false, quiet: true });
       resolveRecentRewardItems(`${loopDef.name} post-TOTW craft`);
-      entries = await waitForSubmittableRequiredSpecialEntries(loopDef, required, "post-TOTW craft");
-      if (entries.length < required) {
-        fail(`${loopDef.name}: ${upgradeDef.name} completed/opened but no eligible ${requiredSpecialLabel(loopDef)} card was detected for 84x10; check the reward item log and inventory state`);
+      entries = await waitForSubmittableRequiredSpecialEntries(loopDef, required2, "post-TOTW craft");
+      if (entries.length < required2) {
+        fail2(`${loopDef.name}: ${upgradeDef.name} completed/opened but no eligible ${requiredSpecialLabel(loopDef)} card was detected for 84x10; check the reward item log and inventory state`);
       }
       log(`${loopDef.name}: auto ${requiredSpecialLabel(loopDef)} ready: ${summarizeRequiredSpecialEntries(entries)}`);
       return true;
@@ -7914,159 +10979,24 @@
       if (hints.length > 12) log(`${loopDef.name}: manual fix list truncated: ${hints.length - 12} more`);
     }
     function assertSbcSquadSafe(loopDef, inspection) {
-      if (!inspection.items.length) fail(`${loopDef.name}: no squad items detected after fill`);
+      if (!inspection.items.length) fail2(`${loopDef.name}: no squad items detected after fill`);
       if (inspection.missingRequirements?.length) {
         logManualSbcFixHints(loopDef, inspection);
-        fail(`${loopDef.name}: missing squad requirement(s): ${inspection.missingRequirements.join(", ")}`);
+        fail2(`${loopDef.name}: missing squad requirement(s): ${inspection.missingRequirements.join(", ")}`);
       }
       if (!inspection.blocked.length) return;
       logManualSbcFixHints(loopDef, inspection);
       const summary = inspection.blocked.slice(0, 10).map(({ item, index, reasons }) => `${index + 1}. ${itemDisplayName(item)} rating:${Number(item?.rating || 0) || "?"} (${reasons.join(",")})`).join("; ");
-      fail(`${loopDef.name}: protected squad item(s) detected; stop before submit: ${summary}`);
-    }
-    function compactModalText(text = "") {
-      return String(text || "").replace(/\s+/g, " ").trim().slice(0, 220);
-    }
-    function findSbcSubmitErrorModal() {
-      const modals = Array.from(document.querySelectorAll([
-        ".view-modal-container",
-        ".ut-modal-view",
-        ".ea-dialog",
-        ".modal-content",
-        ".ut-dialog"
-      ].join(",")));
-      for (const modal of modals) {
-        const text = compactModalText(modal.textContent || "");
-        if (!text) continue;
-        if (/Ineligible Squad/i.test(text) || /Concept or Loan Players/i.test(text) || /cannot be submitted in Squad Building Challenges/i.test(text) || /Squads containing .*Loan/i.test(text)) {
-          return { modal, text };
-        }
-      }
-      return null;
-    }
-    function dismissSubmitErrorModal(error) {
-      const modal = error?.modal;
-      if (!modal) return false;
-      const buttons = Array.from(modal.querySelectorAll("button"));
-      const button = buttons.find((btn) => /^(ok|okay|确定|確定)$/i.test(String(btn.textContent || "").trim())) || buttons.find((btn) => !btn.disabled);
-      if (!button) return false;
-      simulateClick(button);
-      return true;
+      fail2(`${loopDef.name}: protected squad item(s) detected; stop before submit: ${summary}`);
     }
     function failIfSbcSubmitError(label = "SBC submit") {
-      const error = findSbcSubmitErrorModal();
+      const error = sbcRewardOverlay.findSubmitError();
       if (!error) return false;
-      dismissSubmitErrorModal(error);
-      fail(`${label}: submit blocked by EA modal: ${error.text}`);
+      sbcRewardOverlay.dismissSubmitError(error);
+      fail2(`${label}: submit blocked by EA modal: ${error.text}`);
     }
     async function fillBronzeUpgradeSquad() {
       await fillSbcSquad("Bronze Upgrade");
-    }
-    function findClaimRewardsButton() {
-      const patterns = [
-        "Claim Rewards",
-        "Claim Reward",
-        "Collect Rewards",
-        "Collect Reward",
-        "\u9886\u53D6\u5956\u52B1",
-        "\u9818\u53D6\u734E\u52F5",
-        "\u9886\u53D6",
-        "\u9818\u53D6"
-      ];
-      return findButtonByText(patterns) || findClickableByText(patterns);
-    }
-    function findClaimRewardsContext() {
-      const selectors = [
-        ".view-modal-container",
-        ".ut-modal",
-        ".modal",
-        '[class*="modal"]',
-        '[class*="Modal"]'
-      ].join(",");
-      const contexts = Array.from(document.querySelectorAll(selectors)).filter(isClickableElement).map((el) => ({ el, text: compactText(el) })).filter(({ text }) => text && text.length < 2e3);
-      return contexts.find(
-        ({ text }) => matchesAny(text, ["Claim Rewards", "Claim Reward", "Collect Rewards", "Collect Reward", "\u9886\u53D6\u5956\u52B1", "\u9818\u53D6\u734E\u52F5"]) || matchesAny(text, ["Reward", "Rewards", "\u5956\u52B1", "\u734E\u52F5"]) && matchesAny(text, ["Pack", "Player", "Claim", "Collect", "\u5305", "\u7403\u5458", "\u7403\u54E1", "\u9886\u53D6", "\u9818\u53D6"])
-      ) || null;
-    }
-    function controllerName(controller) {
-      return String(controller?.className || controller?.constructor?.name || "");
-    }
-    function controllerRoot(controller) {
-      try {
-        return controller?.getView?.()?.getRootElement?.() || controller?.getView?.()?.getRootElement || null;
-      } catch {
-        return null;
-      }
-    }
-    function isSbcRewardsController(controller) {
-      if (!controller) return false;
-      if (/UTGameRewardsViewController/i.test(controllerName(controller))) return true;
-      const root = controllerRoot(controller);
-      return !!root?.querySelector?.('.rewards-footer, .reward, [class*="game-rewards"], [class*="GameRewards"]');
-    }
-    function getActiveSbcRewardsController() {
-      const shield = W.gPopupClickShield;
-      if (!shield) return null;
-      const candidates = [];
-      for (const method of ["getActivePopup", "getActivePopupController", "getPopup", "getPopupController"]) {
-        try {
-          if (typeof shield?.[method] === "function") candidates.push(shield[method]());
-        } catch {
-        }
-      }
-      for (const property of [
-        "activePopup",
-        "_activePopup",
-        "popup",
-        "_popup",
-        "popupController",
-        "_popupController",
-        "activeController",
-        "_activeController",
-        "presentedController",
-        "_presentedController"
-      ]) {
-        try {
-          candidates.push(shield?.[property]);
-        } catch {
-        }
-      }
-      try {
-        candidates.push(...Object.values(shield).slice(0, 80));
-      } catch {
-      }
-      return candidates.find(isSbcRewardsController) || null;
-    }
-    function findSbcRewardsDomRoot() {
-      const marker = Array.from(document.querySelectorAll('.rewards-footer, [class*="game-rewards"], [class*="GameRewards"]')).find(isClickableElement);
-      if (!marker) return null;
-      return marker.closest?.('.view-modal-container, .ea-dialog-view, [class*="modal"], [class*="Modal"]') || marker.parentElement;
-    }
-    function isPopupShieldShowing() {
-      try {
-        return W.gPopupClickShield?.isShowing?.() === true;
-      } catch {
-        return false;
-      }
-    }
-    function hasVisibleSbcRewardsUi() {
-      return !!getActiveSbcRewardsController() || !!findSbcRewardsDomRoot() || !!findClaimRewardsContext();
-    }
-    async function dismissSbcRewardsUi(label) {
-      const controller = getActiveSbcRewardsController();
-      if (controller && typeof controller.onBackButton === "function") {
-        log(`${label}: closing ${controllerName(controller) || "SBC reward"} overlay`);
-        controller.onBackButton();
-        await sleep(700);
-        return true;
-      }
-      const root = findSbcRewardsDomRoot();
-      const action2 = root?.querySelector?.("footer button.call-to-action:not(.disabled), button.call-to-action:not(.disabled), footer button:not(.disabled)");
-      if (!action2) return false;
-      log(`${label}: advancing SBC reward overlay${compactText(action2) ? ` (${compactText(action2)})` : ""}`);
-      simulateClick(action2);
-      await sleep(700);
-      return true;
     }
     function getSbcProgressSnapshot(set) {
       return {
@@ -8080,52 +11010,23 @@
       };
     }
     async function claimSbcRewardsIfPresent(label = "SBC submit", options = {}) {
-      const start = Date.now();
-      let lastHotkeyAt = 0;
-      let lastPackRefreshAt = 0;
-      while (Date.now() - start < 25e3) {
-        stopPoint();
-        failIfSbcSubmitError(label);
-        if (await dismissSbcRewardsUi(label)) continue;
-        const btn = findClaimRewardsButton();
-        if (btn) {
-          log(`${label}: claiming rewards`);
-          simulateClick(btn);
-          await waitLoadingEnd(900, 45e3);
-          await sleep(1200);
-          return true;
-        }
-        const elapsed = Date.now() - start;
-        if (elapsed >= 1500) {
-          const progressAdvanced = options.beforeProgress ? hasSbcProgressAdvanced(options.beforeProgress, getSbcProgressSnapshot(options.set)) : false;
-          let packGranted = options.beforePackCounts ? hasPackCountIncrease(options.beforePackCounts, getPackCountsById()) : false;
-          if (!packGranted && options.beforePackCounts && elapsed - lastPackRefreshAt >= 2500) {
-            lastPackRefreshAt = elapsed;
-            await refreshStorePacks().catch(() => null);
-            packGranted = hasPackCountIncrease(options.beforePackCounts, getPackCountsById());
-          }
-          if ((progressAdvanced || packGranted) && !hasVisibleSbcRewardsUi() && !isPopupShieldShowing()) {
-            log(`${label}: rewards already granted (${packGranted ? "My Packs increased" : "SBC progress advanced"}); skipping Claim Rewards wait`);
-            return true;
-          }
-        }
-        const context2 = findClaimRewardsContext();
-        const now2 = Date.now();
-        if (context2 && now2 - lastHotkeyAt > 2500) {
-          lastHotkeyAt = now2;
-          log(`${label}: Claim Rewards button not clickable; trying AltRight reward hotkey`);
-          simulateKeyStroke("Alt", "AltRight", { altKey: true, location: 2 });
-          simulateKeyStroke("AltRight", "AltRight", { altKey: true, location: 2 });
-          await waitLoadingEnd(500, 12e3);
-          await sleep(1200);
-          return true;
-        }
-        await sleep(500);
-      }
-      const context = findClaimRewardsContext();
-      const contextText = context?.text ? `; modal text: ${context.text.slice(0, 180)}` : "";
-      log(`${label}: Claim Rewards button not detected${contextText}; continuing`);
-      return false;
+      return claimSbcRewards({
+        label,
+        beforePackCounts: options.beforePackCounts,
+        beforeProgress: options.beforeProgress,
+        overlay: sbcRewardOverlay,
+        getPackCounts: getPackCountsById,
+        getProgress: () => getSbcProgressSnapshot(options.set),
+        refreshPacks: refreshStorePacks,
+        popupShieldShowing: () => pageRuntime.popupShieldShowing(),
+        click: simulateClick,
+        keyStroke: simulateKeyStroke,
+        waitLoadingEnd,
+        sleep,
+        stopPoint,
+        failIfSubmitError: failIfSbcSubmitError,
+        log
+      });
     }
     async function submitSbcAndGetAwardPackId(set) {
       const beforePackCounts = getPackCountsById();
@@ -8197,9 +11098,8 @@
         canSubmit = challenge?.canSubmit?.() !== false;
       } catch {
       }
-      if (!canSubmit) fail(`${label}: challenge model rejected the background squad before submit`);
-      const skipValidation = W.services?.UserSettings?.getSBCValidationSkip?.() || false;
-      const chemistryEnabled = W.services?.Chemistry?.isFeatureEnabled?.() || false;
+      if (!canSubmit) fail2(`${label}: challenge model rejected the background squad before submit`);
+      const { skipValidation, chemistryEnabled } = eaSbcAdapter().submissionOptions();
       log(`Submitting SBC in background: ${set.name}`);
       const result = await observeOnce(
         eaSbcAdapter().submitChallenge(challenge, set, { skipValidation, chemistryEnabled }),
@@ -8209,7 +11109,7 @@
       );
       if (!result?.success) {
         const detail = serviceResultErrorText(result) || result?.status || "unknown";
-        fail(`${label}: background submit failed: ${detail}`);
+        fail2(`${label}: background submit failed: ${detail}`);
       }
       await refreshStorePacks().catch(() => null);
       let rewardPackId = rewardPackIdFromSubmitResult(result, set);
@@ -8231,7 +11131,7 @@
       if (!pack) pack = findPackByName(CFG.silverRewardNames);
       if (!pack) {
         const names = getMyPacks().map((p) => `${packName(p)} (#${p.id})`).join(", ");
-        fail(`Silver reward pack not found. Current my packs: ${names || "none"}`);
+        fail2(`Silver reward pack not found. Current my packs: ${names || "none"}`);
       }
       await openPack(pack, "Bronze Upgrade reward", {
         openedItemPolicy: createOpenedItemPolicy(async (openedItems) => {
@@ -8551,7 +11451,7 @@
         );
         if (directClub.length) {
           log(`Moving ${directClub.length} non-duplicate item(s) to club`);
-          await moveItems(directClub, W.ItemPile.CLUB, true);
+          await moveItems(directClub, inventoryPile("club"), true);
         }
         await resolveRuntimeUnassigned(`${loopDef.name} pack handling`, {
           reserveItem: (item) => isTargetDuplicate(item, loopDef)
@@ -8661,7 +11561,7 @@
     }
     function loadLoopUiOptions() {
       try {
-        const saved = JSON.parse(localStorage.getItem(LOOP_UI_OPTIONS_KEY) || "{}");
+        const saved = adapters.localStorage.getJson(LOOP_UI_OPTIONS_KEY, {});
         return { showMvpLoops: saved.showMvpLoops === true };
       } catch {
         return { showMvpLoops: false };
@@ -8670,118 +11570,47 @@
     function saveLoopUiOptions() {
       state.showMvpLoops = document.querySelector("#bronze-loop-show-mvp")?.checked === true;
       try {
-        localStorage.setItem(LOOP_UI_OPTIONS_KEY, JSON.stringify({ showMvpLoops: state.showMvpLoops }));
+        adapters.localStorage.setJson(LOOP_UI_OPTIONS_KEY, { showMvpLoops: state.showMvpLoops });
       } catch {
       }
       renderLoopSelect();
     }
     function getPickRuntimeOptions() {
-      const highGoldThreshold = Math.max(2, Math.min(99, Number(document.querySelector("#bronze-loop-pick-high-gold-threshold")?.value || 82) || 82));
-      const autoPickThreshold = Math.max(1, Math.min(99, Number(document.querySelector("#bronze-loop-pick-auto-threshold")?.value || 90) || 90));
-      return {
+      return normalizePickRuntimeOptions({
         protectHighGold: document.querySelector("#bronze-loop-pick-protect-high-gold")?.checked !== false,
         autoSelectBelow90: document.querySelector("#bronze-loop-pick-auto-below-90")?.checked !== false,
-        highGoldThreshold,
-        autoPickThreshold
-      };
+        preferScannedMetadata: document.querySelector("#bronze-loop-pick-prefer-scanned")?.checked === true,
+        highGoldThreshold: document.querySelector("#bronze-loop-pick-high-gold-threshold")?.value,
+        autoPickThreshold: document.querySelector("#bronze-loop-pick-auto-threshold")?.value
+      });
     }
     function loadPickRuntimeOptions() {
       try {
-        const saved = JSON.parse(localStorage.getItem(PICK_OPTIONS_KEY) || "{}");
-        return {
-          protectHighGold: saved.protectHighGold !== false,
-          autoSelectBelow90: saved.autoSelectBelow90 !== false,
-          highGoldThreshold: Math.max(2, Math.min(99, Number(saved.highGoldThreshold || 82) || 82)),
-          autoPickThreshold: Math.max(1, Math.min(99, Number(saved.autoPickThreshold || 90) || 90))
-        };
+        return normalizePickRuntimeOptions(adapters.localStorage.getJson(PICK_OPTIONS_KEY, {}));
       } catch {
-        return { protectHighGold: true, autoSelectBelow90: true, highGoldThreshold: 82, autoPickThreshold: 90 };
+        return normalizePickRuntimeOptions();
       }
     }
     function savePickRuntimeOptions() {
+      const options = getPickRuntimeOptions();
       try {
-        localStorage.setItem(PICK_OPTIONS_KEY, JSON.stringify(getPickRuntimeOptions()));
+        adapters.localStorage.setJson(PICK_OPTIONS_KEY, options);
       } catch {
       }
-    }
-    function applyPickRuntimeOptions(loopDef) {
-      if (loopDef.strategy !== "playerPickSbc") return;
-      const options = getPickRuntimeOptions();
-      loopDef.protectHighGold = options.protectHighGold;
-      loopDef.autoSelectBelow90 = options.autoSelectBelow90;
-      loopDef.pickHighGoldThreshold = options.highGoldThreshold;
-      loopDef.autoPickRatingThreshold = options.autoPickThreshold;
-      const requirementGroups = [loopDef.requirements, ...loopDef.challengeRequirements || []];
-      requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
-        requirement.protectHighGold = options.protectHighGold;
-        if (options.protectHighGold) {
-          requirement.maxRating = options.highGoldThreshold - 1;
-        } else if (Number(requirement.maxRating) <= 81) {
-          delete requirement.maxRating;
-        }
-      }));
-    }
-    async function runValidationBronzeUpgradeDryRun(loopDef) {
-      await waitAppReady();
-      await refreshStorePacks();
-      const pack = (loopDef.sourcePackIds || CFG.sourcePackIds).map((id) => findPackById(id)).find(Boolean) || findPackByName(loopDef.sourcePackNames || CFG.sourcePackNames);
-      const set = await findSbcSet(loopDef.sbcNames || CFG.bronzeUpgradeNames, loopDef.name);
-      log(`${loopDef.name}: dry-run source pack ${pack ? `${packName(pack)} (#${pack.id})` : "not found"}`);
-      log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || "?"})`);
-      log(`${loopDef.name}: dry run stops before opening packs, filling squads, or submitting SBCs`);
-    }
-    async function runReservedDuplicateUpgradeDryRun(loopDef, upgradeDef, duplicatePredicate, label) {
-      const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name || label);
-      const duplicateCount = countUnassignedMatching(duplicatePredicate);
-      log(`${loopDef.name}: dry-run ${label} SBC found ${set.name} (#${set.id || "?"})`);
-      if (!duplicateCount) {
-        log(`${loopDef.name}: dry-run ${label} has no reserved duplicate(s); live run would not submit this upgrade yet`);
-        return;
-      }
-      const duplicateOnlySelection = selectInventoryPlayers3(upgradeDef, ["unassigned"]);
-      const piles = duplicateOnlySelection.ok ? ["unassigned"] : upgradeDef.priorityPiles || ["unassigned", "storage", "transfer", "club"];
-      const selection = selectInventoryPlayers3(upgradeDef, piles);
-      log(`${loopDef.name}: dry-run ${label} reserved matching duplicates:${duplicateCount}, required players:${sumRequirementPlayerCount(upgradeDef)}, duplicate-only complete:${duplicateOnlySelection.ok ? "yes" : "no"}`);
-      logDryRunSelection(`${loopDef.name} ${label}`, selection);
-      if (selection.ok) {
-        log(`${loopDef.name}: dry-run would submit ${label} selection`);
+      if (!options.preferScannedMetadata && Object.keys(state.discoveredLoopOverrides).length) {
+        state.discoveredLoopOverrides = {};
+        renderLoopSelect(document.querySelector("#bronze-loop-select")?.value || null);
+        log("Player Pick scan: scanned metadata preference disabled; configured Pick Loops reverted to static fallback");
       }
     }
     function getRoutineStepLoopDefs(loopDef) {
-      return (loopDef.steps || []).map((stepId, index) => {
-        if (stepId === loopDef.id) fail(`${loopDef.name}: step ${index + 1} cannot reference itself`);
-        const baseDef = findLoopDefById(stepId);
-        if (!baseDef) fail(`${loopDef.name}: step ${index + 1} loop not found: ${stepId}`);
-        const childDef = cloneLoopDef(baseDef);
-        if (childDef.strategy === "dailyRoutine") fail(`${loopDef.name}: nested dailyRoutine steps are not supported`);
-        if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
-          childDef.disabledPiles = [...loopDef.disabledPiles];
-        }
-        if (loopDef.openRewardPacks !== void 0 && childDef.openRewardPacks === void 0) {
-          childDef.openRewardPacks = loopDef.openRewardPacks;
-        }
-        childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
-        assertValidLoopDef(childDef, childDef.name || stepId);
-        return applyDisabledPiles(childDef);
-      });
+      return resolveRoutineStepLoopDefs(loopDef, getLoopDefs());
     }
-    function summarizeRoutineStepLimits(steps) {
-      const limits = steps.map((step) => {
-        const rawLimit = getLiveRunLimit(step, 1);
-        const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.floor(rawLimit)) : 1;
-        const unit = step.strategy === "rarePackTo84Upgrade" ? "pack(s)" : "SBC(s)";
-        return {
-          name: step.name || step.id || step.strategy || "step",
-          limit,
-          unit
-        };
+    function summarizeRoutineStepLimits2(steps) {
+      return summarizeRoutineStepLimits(steps, {
+        needsAutoTotwPreflight,
+        getRoutineSteps: getRoutineStepLoopDefs
       });
-      return {
-        limits,
-        max: limits.reduce((maxLimit, step) => Math.max(maxLimit, step.limit), 1),
-        total: limits.reduce((sum, step) => sum + step.limit, 0),
-        text: limits.map((step) => `${step.name} max ${step.limit} ${step.unit}`).join("; ")
-      };
     }
     function readDailyChallengeTimesCompleted(challenge) {
       const count = Number(challenge?.timesCompleted);
@@ -8843,7 +11672,7 @@
     async function runDailySequence(loopDef) {
       await waitAppReady();
       const steps = getRoutineStepLoopDefs(loopDef);
-      const limitSummary = summarizeRoutineStepLimits(steps);
+      const limitSummary = summarizeRoutineStepLimits2(steps);
       log(`${loopDef.name}: running ${steps.length} step(s): ${steps.map((step) => step.name).join(" -> ")}`);
       log(`${loopDef.name}: step limits: ${limitSummary.text}`);
       return runSequenceWorkflow({
@@ -8911,7 +11740,7 @@
         await refreshInventoryCaches(`${loopDef.name} rating SBC fill`, { includePacks: false, quiet: true });
         log(`${loopDef.name}: rating inventory refresh complete in ${Date.now() - startedAt}ms`);
       }
-      const model = parseRatingSbcChallenge(loopDef, opened.challenge);
+      const model = parseRatingSbcChallenge2(loopDef, opened.challenge);
       logRatingSbcModel(loopDef, model);
       if (model.unsupported.length) {
         return {
@@ -8956,7 +11785,7 @@
         logInventorySelection(`${loopDef.name} rating SBC`, selection, { maxItems: 30 });
       }
       const prepared = await prepareInventorySelection(loopDef, selection);
-      const plannedModelValidation = validateRatingSbcModelAgainstItems(model, prepared.selected || []);
+      const plannedModelValidation = validateRatingSbcModelAgainstItems2(model, prepared.selected || []);
       logRatingSbcValidation(loopDef, "planned rating squad", plannedModelValidation, model);
       if (!plannedModelValidation.ok) {
         return {
@@ -8998,7 +11827,7 @@
       };
       const inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount: model.requiredPlayerCount });
       logSbcSquadInspection(loopDef, inspection);
-      const savedModelValidation = validateRatingSbcModelAgainstItems(model, inspection.items, opened.challenge);
+      const savedModelValidation = validateRatingSbcModelAgainstItems2(model, inspection.items, opened.challenge);
       logRatingSbcValidation(loopDef, "saved rating squad", savedModelValidation, model);
       if (!savedModelValidation.ok) {
         return {
@@ -9074,7 +11903,7 @@
         logSelectionDiagnostics(`${loopDef.name} inventory-first`, selection, loopDef.priorityPiles);
         const reason = `inventory-first fill missing ${selection.missing?.count || "?"} ${describeRequirement(selection.missing || {})}`;
         if (options.dryRun || options.stopOnMissingSelection) return { ok: false, selection, reason };
-        fail(`${loopDef.name}: ${reason}`);
+        fail2(`${loopDef.name}: ${reason}`);
       }
       const prepared = await prepareInventorySelection(loopDef, selection);
       const plannedInspection = inspectSbcItems(loopDef, prepared.selected || [], { expectedPlayerCount });
@@ -9107,8 +11936,8 @@
     }
     async function runFillAndVerifyLoop(loopDef) {
       await waitAppReady();
-      const completionLimit3 = loopDef.allowMultipleCompletions === true ? 50 : 1;
-      const maxCompletions = Math.max(1, Math.min(completionLimit3, Number(loopDef.maxCompletions || 1) || 1));
+      const completionLimit4 = loopDef.allowMultipleCompletions === true ? 50 : 1;
+      const maxCompletions = Math.max(1, Math.min(completionLimit4, Number(loopDef.maxCompletions || 1) || 1));
       let autoFodderAttempts = 0;
       const result = await runRepeatedSubmissionWorkflow({
         maxCompletions,
@@ -9224,7 +12053,7 @@
             log(`${loopDef.name}: automatic 2x84+ recovery reached its ${autoFodderLimit} attempt limit for this completion`);
             return { status: "blocked", reason: "automatic 2x84+ recovery attempt limit reached" };
           }
-          if (!fillResult.submitReady) fail(`${loopDef.name}: submit is not ready after protection inspection`);
+          if (!fillResult.submitReady) fail2(`${loopDef.name}: submit is not ready after protection inspection`);
           const submitAttempt = await submitSbcAttempt({
             label: loopDef.name,
             challengeProvider: async () => opened,
@@ -9236,10 +12065,10 @@
             preSaveValidators: [() => {
               assertSbcSquadSafe(loopDef, inspection);
               if (shouldUseRatingSbcFill(loopDef)) {
-                const finalModelValidation = validateRatingSbcModelAgainstItems(configuredFill.model, inspection.items, opened.challenge);
+                const finalModelValidation = validateRatingSbcModelAgainstItems2(configuredFill.model, inspection.items, opened.challenge);
                 logRatingSbcValidation(loopDef, "final rating squad", finalModelValidation, configuredFill.model);
                 if (!finalModelValidation.ok) {
-                  fail(`${loopDef.name}: final rating squad failed dynamic requirement validation: ${finalModelValidation.errors.join(", ")}`);
+                  fail2(`${loopDef.name}: final rating squad failed dynamic requirement validation: ${finalModelValidation.errors.join(", ")}`);
                 }
               }
               return true;
@@ -9252,7 +12081,7 @@
             afterSubmit: async ({ players }) => markSbcItemsConsumed(players, loopDef.name)
           });
           if (!submitAttempt.submitted) {
-            fail(`${loopDef.name}: submit transaction blocked: ${submitAttempt.reason || submitAttempt.status}`);
+            fail2(`${loopDef.name}: submit transaction blocked: ${submitAttempt.reason || submitAttempt.status}`);
           }
           const rewardPackId = submitAttempt.rewardPackId;
           let stopAfterRewardFailure = false;
@@ -9344,7 +12173,7 @@
         );
         if (directClub.length) {
           log(`${loopDef.name}: moving ${directClub.length} non-duplicate source item(s) to club`);
-          await moveItems(directClub, W.ItemPile.CLUB, true);
+          await moveItems(directClub, inventoryPile("club"), true);
         }
         await resolveRuntimeUnassigned(`${loopDef.name} source pack handling`, { reserveItem: reserveDuplicate });
         await refreshUnassigned();
@@ -9517,16 +12346,6 @@
       }
       return result;
     }
-    function isCommonGoldPlayer(item, options = {}) {
-      const spec = { tier: "gold", rarity: "common", playerOnly: true, allowSpecial: false, protectHighGold: options.protectHighGold === true };
-      return !(options.protectHighGold && isProtectedHighGold(item)) && isSbcUsablePlayer(item, spec) && itemMatchesSpec(item, spec);
-    }
-    function isCommonGoldDuplicate(item, options = {}) {
-      return isDuplicate(item) && isCommonGoldPlayer(item, options);
-    }
-    function isLowCommonGoldDuplicate(item) {
-      return isCommonGoldDuplicate(item, { protectHighGold: true });
-    }
     function isRareGoldPlayer(item, options = {}) {
       const spec = { tier: "gold", rarity: "rare", playerOnly: true, allowSpecial: false, protectHighGold: options.protectHighGold === true };
       return !(options.protectHighGold && isProtectedHighGold(item)) && isSbcUsablePlayer(item, spec) && itemMatchesSpec(item, spec);
@@ -9616,7 +12435,7 @@
       if (!pickLoopId) return null;
       const basePickDef = findLoopDefById(pickLoopId);
       if (!basePickDef || basePickDef.strategy !== "playerPickSbc") {
-        fail(`${loopDef.name}: pre-craft Player Pick loop not found or invalid: ${pickLoopId}`);
+        fail2(`${loopDef.name}: pre-craft Player Pick loop not found or invalid: ${pickLoopId}`);
       }
       const pickDef = cloneLoopDef(basePickDef);
       if (loopDef.disabledPiles?.length && !pickDef.disabledPiles?.length) {
@@ -9674,8 +12493,7 @@
           const clubDuplicate = findClubDuplicate2(item);
           if (!isDuplicate(item) && !clubDuplicate) continue;
           if (clubDuplicate && !Number(item?.duplicateId || 0)) item.duplicateId = clubDuplicate.id;
-          item.pile = W.ItemPile.PURCHASED;
-          item.injuryType = W.PlayerInjury?.NONE ?? 0;
+          eaInventoryAdapter().preparePurchasedItem(item);
           responseDuplicates.push(item);
         }
         const responseDuplicateIds = new Set(responseDuplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
@@ -9689,14 +12507,13 @@
             const clubDuplicate = findClubDuplicate2(item) || findClubDuplicate2(responseItem);
             const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
             if (duplicateId && !Number(item?.duplicateId || 0)) item.duplicateId = duplicateId;
-            item.pile = W.ItemPile.PURCHASED;
-            item.injuryType = W.PlayerInjury?.NONE ?? 0;
+            eaInventoryAdapter().preparePurchasedItem(item);
           }
         };
         restoreResponseDuplicateMetadata();
         if (directClub.length) {
           log(`${loopDef.name}: moving ${directClub.length} non-duplicate provision item(s) to club`);
-          await moveItems(directClub, W.ItemPile.CLUB, true);
+          await moveItems(directClub, inventoryPile("club"), true);
         }
         await resolveRuntimeUnassigned(`${loopDef.name} provision pack handling`, {
           reserveItem: (item) => responseReservedIds.has(Number(item?.id || 0)) || isReservedDuplicate(item)
@@ -9727,8 +12544,7 @@
           const clubDuplicate = findClubDuplicate2(item);
           if (!isDuplicate(item) && !clubDuplicate) continue;
           if (clubDuplicate && !Number(item?.duplicateId || 0)) item.duplicateId = clubDuplicate.id;
-          item.pile = W.ItemPile.PURCHASED;
-          item.injuryType = W.PlayerInjury?.NONE ?? 0;
+          eaInventoryAdapter().preparePurchasedItem(item);
           responseDuplicates.push(item);
         }
         const duplicateIds = new Set(responseDuplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
@@ -9739,17 +12555,17 @@
         });
         if (classified.directClub.length) {
           log(`${loopDef.name}: moving ${classified.directClub.length} response-classified non-duplicate item(s) to club`);
-          await moveItems(classified.directClub, W.ItemPile.CLUB, true);
+          await moveItems(classified.directClub, inventoryPile("club"), true);
         }
         if (classified.tradeableDuplicates.length) {
           assertPileSpace("Transfer list", transferSpaceLeft(), classified.tradeableDuplicates.length);
           log(`${loopDef.name}: moving ${classified.tradeableDuplicates.length} non-crafting tradeable duplicate(s) to transfer list`);
-          await moveItems(classified.tradeableDuplicates, W.ItemPile.TRANSFER, false);
+          await moveItems(classified.tradeableDuplicates, inventoryPile("transfer"), false);
         }
         if (classified.untradeableDuplicates.length) {
           assertPileSpace("SBC storage", storageSpaceLeft(), classified.untradeableDuplicates.length);
           log(`${loopDef.name}: moving ${classified.untradeableDuplicates.length} non-crafting untradeable duplicate(s) to SBC storage`);
-          await moveItems(classified.untradeableDuplicates, W.ItemPile.STORAGE, true);
+          await moveItems(classified.untradeableDuplicates, inventoryPile("storage"), true);
         }
         await sleep(CFG.pauseMs);
         await refreshInventoryCaches(`${loopDef.name} rare pack response routing`, { includePacks: false, quiet: true });
@@ -9759,7 +12575,7 @@
           ...classified.untradeableDuplicates
         ];
         const lowRare = classified.reservedDuplicates.length;
-        const inventoryAdapter = createEaInventoryAdapter(W);
+        const inventoryAdapter = adapters.inventory();
         const transientUnassignedSignals = classified.reservedDuplicates.map(
           (item) => inventoryAdapter.snapshotItem(item, "unassigned")
         );
@@ -9771,95 +12587,111 @@
         };
       });
     }
-    async function submitReservedDuplicateUpgrade(loopDef, upgradeDef, duplicatePredicate, label, options = {}) {
-      let completions = 0;
-      let forcedAttempts = Math.max(0, Number(options.forceAttempts || 0));
-      let transientUnassignedSignals = [...options.transientUnassignedSignals || []];
+    async function runReservedDuplicateCraftingStage(loopDef, upgradeDef, duplicatePredicate, label, options = {}) {
+      const dryRun = loopDef.dryRun === true;
       const broadDuplicatePredicate = options.dynamicPredicate === false ? duplicatePredicate : (item) => getChallengeMaterialDefs(upgradeDef).some((challengeDef) => isDuplicateForLoopRequirements(item, challengeDef));
-      while (true) {
-        stopPoint();
-        await refreshInventoryCaches(`${loopDef.name} ${label} pre-selection`, { includePacks: false, quiet: true });
-        const broadDuplicateCount = countUnassignedMatching(broadDuplicatePredicate) + transientUnassignedSignals.length;
-        if (!broadDuplicateCount && forcedAttempts <= 0) break;
-        const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name || label);
-        const challenges = await requestSbcChallenges(set, upgradeDef.name || label, { attempts: 3, allowEmpty: true });
-        const challengeIndex = challenges.findIndex((challenge) => !isCompletedChallenge(challenge));
-        if (challengeIndex < 0) {
-          if (transientUnassignedSignals.length) {
-            fail(`${loopDef.name}: ${label} has no available challenge for ${transientUnassignedSignals.length} just-opened duplicate(s)`);
+      const workflowResult = await runReservedDuplicateCraftingWorkflow({
+        maxCompletions: Number(options.maxCompletions || 100),
+        forceAttempts: options.forceAttempts,
+        transientSignals: options.transientUnassignedSignals,
+        stopPoint: () => stopPoint(),
+        planAttempt: async ({ forceAttempt, transientSignals }) => {
+          await refreshInventoryCaches(`${loopDef.name} ${label} pre-selection`, { includePacks: false, quiet: true });
+          const broadDuplicateCount = countUnassignedMatching(broadDuplicatePredicate) + transientSignals.length;
+          if (!broadDuplicateCount && !forceAttempt) return { status: "done", reason: "no reserved duplicate remains" };
+          const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name || label);
+          const challenges = await requestSbcChallenges(set, upgradeDef.name || label, { attempts: 3, allowEmpty: true });
+          const challengeIndex = challenges.findIndex((challenge) => !isCompletedChallenge(challenge));
+          if (challengeIndex < 0) {
+            if (transientSignals.length) {
+              fail2(`${loopDef.name}: ${label} has no available challenge for ${transientSignals.length} just-opened duplicate(s)`);
+            }
+            return { status: "done", reason: "no available challenge remains" };
           }
-          break;
-        }
-        const challengeDef = loopChallengeDef(upgradeDef, challengeIndex + 1);
-        const countNeeded = sumRequirementPlayerCount(challengeDef);
-        if (countNeeded <= 0) {
-          if (transientUnassignedSignals.length) {
-            fail(`${loopDef.name}: ${label} has no usable player requirement for ${transientUnassignedSignals.length} just-opened duplicate(s)`);
+          const challengeDef = loopChallengeDef(upgradeDef, challengeIndex + 1);
+          const countNeeded = sumRequirementPlayerCount(challengeDef);
+          if (countNeeded <= 0) {
+            if (transientSignals.length) {
+              fail2(`${loopDef.name}: ${label} has no usable player requirement for ${transientSignals.length} just-opened duplicate(s)`);
+            }
+            return { status: "done", reason: "challenge has no usable player requirement" };
           }
-          break;
-        }
-        const activeDuplicatePredicate = options.dynamicPredicate === false ? duplicatePredicate : (item) => isDuplicateForLoopRequirements(item, challengeDef);
-        const duplicateCount = countUnassignedMatching(activeDuplicatePredicate) + transientUnassignedSignals.length;
-        const fallbackPiles = challengeDef.priorityPiles || ["unassigned", "storage", "transfer", "club"];
-        if (!duplicateCount && forcedAttempts <= 0) break;
-        const transientSignalRefs = transientUnassignedSignals.map((signal) => signal.ref || signal);
-        const selectionOptions = {
-          transientUnassignedSignals,
-          preferredSignalRefs: transientSignalRefs
-        };
-        const duplicateOnlySelection = fallbackPiles.includes("unassigned") ? selectInventoryPlayers3(challengeDef, ["unassigned"], selectionOptions) : { ok: false };
-        const piles = duplicateOnlySelection.ok ? ["unassigned"] : fallbackPiles;
-        if (forcedAttempts > 0) forcedAttempts--;
-        const selection = selectInventoryPlayers3(challengeDef, piles, selectionOptions);
-        log(`${loopDef.name}: ${label} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
-        const repositorySignals = getUnassignedItems().filter(activeDuplicatePredicate);
-        const signalById = new Map([...repositorySignals, ...transientUnassignedSignals].map((signal) => [Number(signal?.id || signal?.ref?.id || 0), signal]).filter(([id]) => id));
-        const selectedSignalCount = (selection.entries || []).filter((entry) => entry.pileName === "unassigned" && entry.signal).length;
-        if (transientUnassignedSignals.length) {
-          log(`${loopDef.name}: ${label} duplicate signal sources response:${transientUnassignedSignals.length}, repository:${repositorySignals.length}, unique:${signalById.size}, selected:${selectedSignalCount}`);
-        }
-        const expectedSelectedSignalCount = Math.min(signalById.size, countNeeded);
-        const missedTransientSignal = !selectionConsumesAllSignalRefs(selection, transientSignalRefs);
-        if (selectedSignalCount < expectedSelectedSignalCount || missedTransientSignal) {
-          logDuplicateSignalDiagnostics(
-            `${loopDef.name} ${label}`,
-            [...signalById.values()],
-            selectionRequirements(challengeDef, piles)[0] || {},
-            selection
-          );
-        }
-        if (!selection.ok) {
-          const missing = selection.missing;
-          log(`${loopDef.name}: ${label} missing ${missing.count} player(s) after fallback; stopping ${label}`);
-          logSelectionDiagnostics(`${loopDef.name} ${label}`, selection, piles);
-          if (transientSignalRefs.length) {
-            fail(`${loopDef.name}: ${label} cannot consume ${transientSignalRefs.length} just-opened duplicate(s); stopping before Unassigned cleanup or another pack open`);
+          const activeDuplicatePredicate = options.dynamicPredicate === false ? duplicatePredicate : (item) => isDuplicateForLoopRequirements(item, challengeDef);
+          const duplicateCount = countUnassignedMatching(activeDuplicatePredicate) + transientSignals.length;
+          if (!duplicateCount && !forceAttempt) return { status: "done", reason: "no challenge-matching duplicate remains" };
+          const fallbackPiles = challengeDef.priorityPiles || ["unassigned", "storage", "transfer", "club"];
+          const transientSignalRefs = transientSignals.map((signal) => signal.ref || signal);
+          const selectionOptions = {
+            transientUnassignedSignals: transientSignals,
+            preferredSignalRefs: transientSignalRefs
+          };
+          const duplicateOnlySelection = fallbackPiles.includes("unassigned") ? selectInventoryPlayers3(challengeDef, ["unassigned"], selectionOptions) : { ok: false };
+          const piles = duplicateOnlySelection.ok ? ["unassigned"] : fallbackPiles;
+          const selection = selectInventoryPlayers3(challengeDef, piles, selectionOptions);
+          log(`${loopDef.name}: ${label} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
+          const repositorySignals = getUnassignedItems().filter(activeDuplicatePredicate);
+          const signalById = new Map([...repositorySignals, ...transientSignals].map((signal) => [Number(signal?.id || signal?.ref?.id || 0), signal]).filter(([id]) => id));
+          const selectedSignalCount = (selection.entries || []).filter((entry) => entry.pileName === "unassigned" && entry.signal).length;
+          if (transientSignals.length) {
+            log(`${loopDef.name}: ${label} duplicate signal sources response:${transientSignals.length}, repository:${repositorySignals.length}, unique:${signalById.size}, selected:${selectedSignalCount}`);
           }
-          break;
-        }
-        if (!selectionConsumesAllSignalRefs(selection, transientSignalRefs)) {
-          fail(`${loopDef.name}: ${label} cannot resolve every just-opened duplicate to a Club/Storage submit item; stopping before another pack is opened`);
-        }
-        const consumedSignalRefs = (selection.entries || []).filter((entry) => entry.pileName === "unassigned" && entry.signal).map((entry) => ({
-          ...liveItemRef(entry.signal, "unassigned"),
-          duplicateId: Number(entry.signal?.duplicateId || entry.item?.id || 0)
-        }));
-        const result = await submitInventorySelection(challengeDef, selection, { markConsumed: true });
-        if (!result) {
-          if (transientUnassignedSignals.length) {
-            fail(`${loopDef.name}: ${label} did not submit; preserving ${transientUnassignedSignals.length} just-opened duplicate(s) and stopping`);
+          const expectedSelectedSignalCount = Math.min(signalById.size, countNeeded);
+          const missedTransientSignal = !selectionConsumesAllSignalRefs(selection, transientSignalRefs);
+          if (selectedSignalCount < expectedSelectedSignalCount || missedTransientSignal) {
+            logDuplicateSignalDiagnostics(
+              `${loopDef.name} ${label}`,
+              [...signalById.values()],
+              selectionRequirements(challengeDef, piles)[0] || {},
+              selection
+            );
           }
-          break;
+          if (!selection.ok) {
+            const missing = selection.missing;
+            log(`${loopDef.name}: ${label} missing ${missing.count} player(s) after fallback; stopping ${label}`);
+            logSelectionDiagnostics(`${loopDef.name} ${label}`, selection, piles);
+            if (transientSignalRefs.length) {
+              fail2(`${loopDef.name}: ${label} cannot consume ${transientSignalRefs.length} just-opened duplicate(s); stopping before Unassigned cleanup or another pack open`);
+            }
+            return { status: "done", reason: "inventory selection is insufficient" };
+          }
+          if (!selectionConsumesAllSignalRefs(selection, transientSignalRefs)) {
+            fail2(`${loopDef.name}: ${label} cannot resolve every just-opened duplicate to a Club/Storage submit item; stopping before another pack is opened`);
+          }
+          const consumedSignalRefs = (selection.entries || []).filter((entry) => entry.pileName === "unassigned" && entry.signal).map((entry) => ({
+            ...liveItemRef(entry.signal, "unassigned"),
+            duplicateId: Number(entry.signal?.duplicateId || entry.item?.id || 0)
+          }));
+          return {
+            status: "ready",
+            challengeDef,
+            selection,
+            consumedSignalRefs,
+            transientSignalRefs,
+            transientSignalCount: transientSignals.length
+          };
+        },
+        executeAttempt: async ({ plan }) => {
+          if (dryRun) {
+            logDryRunSelection(`${loopDef.name} ${label}`, plan.selection);
+            log(`${loopDef.name}: dry-run would submit ${label} selection`);
+            return { status: "planned", reason: `would submit ${label}` };
+          }
+          const submitted = await submitInventorySelection(plan.challengeDef, plan.selection, { markConsumed: true });
+          if (!submitted) {
+            if (plan.transientSignalCount) {
+              fail2(`${loopDef.name}: ${label} did not submit; preserving ${plan.transientSignalCount} just-opened duplicate(s) and stopping`);
+            }
+            return { status: "done", reason: "SBC was not submitted" };
+          }
+          rememberConsumedDuplicateSignals(plan.consumedSignalRefs);
+          await refreshInventoryCaches(`${loopDef.name} ${label} post-submit duplicate sync`, { includePacks: false, quiet: true });
+          clearConsumedDuplicateSignals(plan.consumedSignalRefs, `${loopDef.name} ${label}`);
+          await sleep(CFG.pauseMs);
+          return { status: "submitted", submitted: true, transientSignals: [] };
         }
-        completions++;
-        rememberConsumedDuplicateSignals(consumedSignalRefs);
-        await refreshInventoryCaches(`${loopDef.name} ${label} post-submit duplicate sync`, { includePacks: false, quiet: true });
-        clearConsumedDuplicateSignals(consumedSignalRefs, `${loopDef.name} ${label}`);
-        transientUnassignedSignals = [];
-        await sleep(CFG.pauseMs);
-      }
-      log(`${loopDef.name}: ${label} submitted ${completions} SBC(s)`);
-      return completions;
+      });
+      log(`${loopDef.name}: ${dryRun ? "dry-run planned" : "submitted"} ${workflowResult.completions} ${label} SBC(s)`);
+      return workflowResult;
     }
     async function runProvisionCraftLoop(loopDef) {
       await waitAppReady();
@@ -9879,7 +12711,7 @@
             log(`${loopDef.name}: dry-run only inspects current reserved duplicates; it does not open Provision Packs`);
             return { hasItems: true, itemCount: items2.length, provisionHandling: {} };
           }
-          await unwindSbcSquadControllers(`${loopDef.name} resume`);
+          await unwindSbcSquadControllers2(`${loopDef.name} resume`);
           const items = await showUnassignedIfAny(`${loopDef.name} resume sync`);
           if (!items.length) return { hasItems: false };
           await refreshInventoryCaches(`${loopDef.name} resume duplicate validation`, { includePacks: false, quiet: true });
@@ -9929,22 +12761,22 @@
             const upgradeDef = craftingUpgrades[index];
             const label = `${phase === "resume" ? "resumed " : ""}${upgradeDef.name}`;
             if (dryRun) {
-              for (const challengeDef of getChallengeMaterialDefs(upgradeDef)) {
-                await runReservedDuplicateUpgradeDryRun(
-                  loopDef,
-                  challengeDef,
-                  (item) => isDuplicateForLoopRequirements(item, challengeDef),
-                  challengeDef.name
-                );
-              }
+              await runReservedDuplicateCraftingStage(
+                loopDef,
+                upgradeDef,
+                (item) => isDuplicateForLoopRequirements(item, upgradeDef),
+                label,
+                { maxCompletions: 1 }
+              );
               completions[`stage-${index}`] = 0;
             } else {
-              completions[`stage-${index}`] = await submitReservedDuplicateUpgrade(
+              const stageResult = await runReservedDuplicateCraftingStage(
                 loopDef,
                 upgradeDef,
                 (item) => isDuplicateForLoopRequirements(item, upgradeDef),
                 label
               );
+              completions[`stage-${index}`] = stageResult.completions;
             }
           }
           return { status: "completed", completions };
@@ -10000,7 +12832,7 @@
             log(`${loopDef.name}: dry-run resume found ${items2.length} unassigned item(s), ${usable2.length} usable low rare duplicate(s)`);
             return { hasItems: usable2.length > 0, usableCount: usable2.length };
           }
-          await unwindSbcSquadControllers(`${loopDef.name} resume`);
+          await unwindSbcSquadControllers2(`${loopDef.name} resume`);
           const items = await showUnassignedIfAny(`${loopDef.name} resume sync`);
           const usable = items.filter(isLowRareGoldDuplicate);
           if (items.length) log(`${loopDef.name}: resume found ${items.length} unassigned item(s), ${usable.length} usable low rare duplicate(s)`);
@@ -10024,15 +12856,16 @@
         },
         runStages: async ({ phase, context }) => {
           if (dryRun) {
-            await runReservedDuplicateUpgradeDryRun(
+            await runReservedDuplicateCraftingStage(
               loopDef,
               loopDef.rareUpgrade,
               isLowRareGoldDuplicate,
-              `2x84+ ${phase === "resume" ? "resumed " : ""}low rare gold`
+              `2x84+ ${phase === "resume" ? "resumed " : ""}low rare gold`,
+              { maxCompletions: 1 }
             );
             return { status: "planned", completions: { rare: 0 }, reason: "would submit 2x84+ stage" };
           }
-          const completions = await submitReservedDuplicateUpgrade(
+          const stageResult = await runReservedDuplicateCraftingStage(
             loopDef,
             loopDef.rareUpgrade,
             isLowRareGoldDuplicate,
@@ -10042,7 +12875,7 @@
               transientUnassignedSignals: phase === "pack" ? context?.transientUnassignedSignals || [] : []
             }
           );
-          return { status: "completed", completions: { rare: completions } };
+          return { status: "completed", completions: { rare: stageResult.completions } };
         },
         afterStages: async ({ phase }) => {
           if (dryRun) return;
@@ -10068,87 +12901,32 @@
       }
       return result;
     }
-    function isPlayerPickItem(item) {
-      try {
-        if (item?.isPlayerPickItem?.()) return true;
-      } catch {
-      }
-      return /player\s*pick/i.test(String(item?.name || item?.description || item?._staticData?.name || ""));
-    }
-    function pickItemName(item) {
-      return String(item?._staticData?.name || item?.name || item?.description || `Player Pick #${item?.id || "?"}`);
-    }
-    function sameLimitedUseType(a, b) {
-      const left = a?.limitedUseType ?? a?._limitedUseType ?? null;
-      const right = b?.limitedUseType ?? b?._limitedUseType ?? null;
-      return left === null || right === null || String(left) === String(right);
-    }
-    function playerPickMatchesLoop(item, loopDef) {
-      return isPlayerPickItem(item) && matchesAny(pickItemName(item), loopDef.pickItemNames || []);
-    }
-    function getPlayerPickOwnedItems() {
-      const seen = /* @__PURE__ */ new Set();
-      return [
-        ...getUnassignedItems(),
-        ...getStorageItems(),
-        ...getTransferItems(),
-        ...getClubItems()
-      ].filter((item) => {
-        const id = Number(item?.id || 0);
-        if (!id || seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-    }
     function isPlayerPickDuplicate(item) {
-      const itemId = Number(item?.id || 0);
-      return getPlayerPickOwnedItems().some(
-        (ownedItem) => Number(ownedItem?.id || 0) !== itemId && Number(ownedItem?.definitionId || 0) === Number(item?.definitionId || -1) && sameLimitedUseType(ownedItem, item)
-      );
+      return eaPlayerPickAdapter().isOwnedDuplicate(item);
     }
     async function getPlayerPickPrices(items, loopDef) {
-      const prices = /* @__PURE__ */ new Map();
-      const ids = [...new Set((items || []).map((item) => Number(item?.definitionId || 0)).filter(Boolean))];
-      if (!ids.length) return prices;
-      const platform = String(loopDef.pricePlatform || "pc").toLowerCase();
-      try {
-        const url = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(","))}&platform=${encodeURIComponent(platform)}`;
-        const response = JSON.parse(await requestPriceText(url, {
-          // Mirrors FSU's probe: FUT.GG accepts authenticated browser requests more
-          // reliably when the site's existing cookies and browser context are present.
-          sendCookies: true,
-          headers: {
-            Referer: W.location?.origin || location.origin,
-            "X-Requested-With": "XMLHttpRequest"
-          }
-        }));
-        for (const entry of response?.data || []) {
-          const definitionId = Number(entry?.eaId || entry?.definitionId || 0);
-          const price = Number(entry?.price);
-          if (definitionId && Number.isFinite(price) && price > 0) prices.set(definitionId, price);
+      const result = await loadPlayerPickPrices({
+        items,
+        platform: loopDef.pricePlatform,
+        referer: pageRuntime.origin(),
+        requestText: adapters.http.getText
+      });
+      for (const attempt of result.attempts) {
+        if (attempt.source === "FUT.GG" && attempt.status === "loaded") {
+          log(`${loopDef.name}: FUT.GG prices loaded for ${result.prices.size}/${result.ids.length} Pick candidate(s)`);
+        } else if (attempt.source === "FUT.GG" && attempt.status === "empty") {
+          log(`${loopDef.name}: FUT.GG returned no usable Pick prices; trying FUTNext`);
+        } else if (attempt.source === "FUT.GG") {
+          log(`${loopDef.name}: FUT.GG price lookup unavailable (${attempt.reason}); trying FUTNext`);
+        } else if (attempt.source === "FUTNext" && attempt.status === "loaded") {
+          log(`${loopDef.name}: FUTNext prices loaded for ${result.prices.size}/${result.ids.length} Pick candidate(s)`);
+        } else if (attempt.source === "FUTNext" && attempt.status === "empty") {
+          log(`${loopDef.name}: FUTNext returned no usable Pick prices; price ties require manual selection`);
+        } else {
+          log(`${loopDef.name}: FUTNext price lookup unavailable (${attempt.reason}); price ties require manual selection`);
         }
-        if (prices.size) {
-          log(`${loopDef.name}: FUT.GG prices loaded for ${prices.size}/${ids.length} Pick candidate(s)`);
-          return prices;
-        }
-        log(`${loopDef.name}: FUT.GG returned no usable Pick prices; trying FUTNext`);
-      } catch (error) {
-        log(`${loopDef.name}: FUT.GG price lookup unavailable (${error?.message || error}); trying FUTNext`);
       }
-      try {
-        const url = `https://enhancer-api.futnext.com/players/prices?ids=${encodeURIComponent(ids.join("_"))}&platform=${encodeURIComponent(platform)}`;
-        const response = JSON.parse(await requestPriceText(url));
-        for (const entry of Array.isArray(response) ? response : []) {
-          const definitionId = Number(entry?.definitionId || entry?.eaId || 0);
-          const price = Number(entry?.prices?.[0]);
-          if (definitionId && Number.isFinite(price) && price > 0) prices.set(definitionId, price);
-        }
-        if (prices.size) log(`${loopDef.name}: FUTNext prices loaded for ${prices.size}/${ids.length} Pick candidate(s)`);
-        else log(`${loopDef.name}: FUTNext returned no usable Pick prices; price ties require manual selection`);
-      } catch (error) {
-        log(`${loopDef.name}: FUTNext price lookup unavailable (${error?.message || error}); price ties require manual selection`);
-      }
-      return prices;
+      return result.prices;
     }
     function describePlayerPickCandidate(candidate) {
       const tags = [
@@ -10158,30 +12936,6 @@
       ];
       return `${itemDisplayName(candidate.item)} rating:${candidate.rating} ${tags.join(",")}`;
     }
-    function rankPlayerPickCandidates(items, prices) {
-      return (items || []).map((item, index) => ({
-        item,
-        index,
-        rating: Number(item?.rating || 0),
-        special: isSpecial(item),
-        duplicate: isPlayerPickDuplicate(item),
-        price: prices.has(Number(item?.definitionId || 0)) ? prices.get(Number(item.definitionId)) : null
-      })).sort(
-        (a, b) => b.rating - a.rating || Number(b.special) - Number(a.special) || Number(a.duplicate) - Number(b.duplicate) || (b.price ?? -1) - (a.price ?? -1) || a.index - b.index
-      );
-    }
-    function capturePlayerPickSelections(selected, ranked) {
-      return (selected || []).map((item) => {
-        const candidate = ranked.find((entry) => entry.item === item);
-        return {
-          item,
-          rating: candidate?.rating ?? Number(item?.rating || 0),
-          special: candidate?.special ?? isSpecial(item),
-          duplicate: candidate?.duplicate ?? isPlayerPickDuplicate(item),
-          price: candidate?.price ?? null
-        };
-      });
-    }
     function formatCompactPrice(price) {
       const value = Number(price);
       if (!Number.isFinite(value) || value <= 0) return "";
@@ -10189,125 +12943,14 @@
       if (value >= 1e3) return `${(value / 1e3).toFixed(value >= 1e5 ? 0 : 1)}k`;
       return String(Math.round(value));
     }
-    function getManualPickReason(ranked, pickCount) {
-      const topRating = ranked[0]?.rating;
-      const topSpecials = ranked.filter((candidate) => candidate.rating === topRating && candidate.special);
-      if (topSpecials.length > 1) {
-        return `${topSpecials.length} special card(s) share the highest rating ${topRating}`;
-      }
-      const groups = /* @__PURE__ */ new Map();
-      ranked.forEach((candidate, index) => {
-        const key = `${candidate.rating}:${candidate.special ? 1 : 0}:${candidate.duplicate ? 1 : 0}`;
-        const group = groups.get(key) || { candidates: [], firstIndex: index };
-        group.candidates.push(candidate);
-        groups.set(key, group);
-      });
-      for (const group of groups.values()) {
-        if (group.firstIndex >= pickCount || group.candidates.length < 2) continue;
-        if (group.candidates.some((candidate) => candidate.price === null)) {
-          return "price data is missing for a tie that affects the selected card(s)";
-        }
-      }
-      return "";
-    }
-    function waitForManualPlayerPick(ranked, pickCount, reason) {
-      return new Promise((resolve, reject) => {
-        let stopTimer = null;
-        const finish = (callback, value) => {
-          if (stopTimer) clearInterval(stopTimer);
-          overlay.remove();
-          callback(value);
-        };
-        const overlay = document.createElement("div");
-        overlay.id = "bronze-loop-pick-modal";
-        Object.assign(overlay.style, {
-          position: "fixed",
-          inset: "0",
-          zIndex: "100000",
-          background: "rgba(0, 0, 0, 0.78)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "20px",
-          boxSizing: "border-box"
-        });
-        const dialog = document.createElement("div");
-        Object.assign(dialog.style, {
-          width: "min(780px, 100%)",
-          maxHeight: "90vh",
-          overflow: "auto",
-          background: "#171b21",
-          color: "#f3f5f7",
-          border: "1px solid #65758a",
-          padding: "16px",
-          boxSizing: "border-box",
-          fontFamily: "Arial, sans-serif"
-        });
-        const title = document.createElement("div");
-        title.textContent = `Manual Player Pick: ${reason}`;
-        Object.assign(title.style, { fontWeight: "700", marginBottom: "8px" });
-        const hint = document.createElement("div");
-        hint.textContent = `Select exactly ${pickCount} player(s), then confirm.`;
-        Object.assign(hint.style, { color: "#b7c2d0", marginBottom: "12px" });
-        const list = document.createElement("div");
-        Object.assign(list.style, { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px" });
-        const selected = /* @__PURE__ */ new Set();
-        const cards = [];
-        const confirm = document.createElement("button");
-        confirm.textContent = "Confirm selection";
-        confirm.disabled = true;
-        Object.assign(confirm.style, { marginTop: "14px", minHeight: "34px", padding: "0 14px" });
-        const refresh = () => {
-          cards.forEach(({ card, candidate }) => {
-            card.style.borderColor = selected.has(candidate) ? "#64d77a" : "#536171";
-            card.style.background = selected.has(candidate) ? "#243c2b" : "#202731";
-          });
-          confirm.disabled = selected.size !== pickCount;
-        };
-        ranked.forEach((candidate) => {
-          const card = document.createElement("button");
-          card.type = "button";
-          card.textContent = describePlayerPickCandidate(candidate);
-          Object.assign(card.style, {
-            minHeight: "68px",
-            textAlign: "left",
-            color: "#f3f5f7",
-            background: "#202731",
-            border: "1px solid #536171",
-            padding: "9px",
-            cursor: "pointer",
-            lineHeight: "1.35"
-          });
-          card.addEventListener("click", () => {
-            if (selected.has(candidate)) selected.delete(candidate);
-            else if (selected.size < pickCount) selected.add(candidate);
-            refresh();
-          });
-          cards.push({ card, candidate });
-          list.appendChild(card);
-        });
-        confirm.addEventListener("click", () => {
-          if (selected.size !== pickCount) return;
-          finish(resolve, [...selected].map((candidate) => candidate.item));
-        });
-        dialog.append(title, hint, list, confirm);
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-        refresh();
-        stopTimer = setInterval(() => {
-          if (!state.stopping) return;
-          finish(reject, new Error("Stopped by user while a Player Pick selection was pending"));
-        }, 250);
-      });
-    }
     async function redeemAndSelectPlayerPick(pickItem, loopDef, options = {}) {
-      log(`${loopDef.name}: redeeming ${pickItemName(pickItem)}`);
-      const redeemed = await observeOnce(W.services.Item.redeem(pickItem), ctrl(), 3e4, "redeem Player Pick");
-      if (!redeemed?.success) fail(`${loopDef.name}: Player Pick redeem failed: ${serviceResultErrorText(redeemed)}`);
+      log(`${loopDef.name}: redeeming ${playerPickItemName(pickItem)}`);
+      const redeemed = await observeOnce(eaPlayerPickAdapter().redeem(pickItem), ctrl(), 3e4, "redeem Player Pick");
+      if (!redeemed?.success) fail2(`${loopDef.name}: Player Pick redeem failed: ${serviceResultErrorText(redeemed)}`);
       const data = redeemed.data || redeemed.response || {};
       const choices = (data.playerPicks || data.items || []).filter(isPlayer);
       const pickCount = Math.max(1, Number(data.availablePicks || loopDef.pickCount || 1) || 1);
-      if (choices.length < pickCount) fail(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
+      if (choices.length < pickCount) fail2(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
       const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
       const autoPickThreshold = Math.max(1, Math.min(99, Number(loopDef.autoPickRatingThreshold || 90) || 90));
       const autoSelectBelow90 = loopDef.autoSelectBelow90 !== false && maxRating < autoPickThreshold;
@@ -10316,20 +12959,33 @@
       }
       await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
       const prices = await getPlayerPickPrices(choices, loopDef);
-      const ranked = rankPlayerPickCandidates(choices, prices);
+      const pickRewardOptions = {
+        isSpecial,
+        isDuplicate: isPlayerPickDuplicate
+      };
+      const ranked = rankPlayerPickCandidates(choices, prices, pickRewardOptions);
       ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
-      const manualReason = autoSelectBelow90 ? "" : getManualPickReason(ranked, pickCount);
-      const selected = manualReason ? await waitForManualPlayerPick(ranked, pickCount, manualReason) : ranked.slice(0, pickCount).map((candidate) => candidate.item);
-      const selectedCards = capturePlayerPickSelections(selected, ranked);
+      const manualReason = autoSelectBelow90 ? "" : getManualPlayerPickReason(ranked, pickCount);
+      const selected = manualReason ? await waitForManualPlayerPickSelection({
+        dom: adapters.dom,
+        ranked,
+        pickCount,
+        reason: manualReason,
+        describeCandidate: describePlayerPickCandidate,
+        scheduleStopCheck: setInterval,
+        cancelStopCheck: clearInterval,
+        isStopping: () => state.stopping
+      }) : ranked.slice(0, pickCount).map((candidate) => candidate.item);
+      const selectedCards = capturePlayerPickSelections(selected, ranked, pickRewardOptions);
       if (manualReason) log(`${loopDef.name}: manual Player Pick confirmed`);
       else log(`${loopDef.name}: auto-selected ${selected.map((item) => itemDisplayName(item)).join(", ")}`);
       const confirmed = await observeOnce(
-        W.services.Item.confirmPlayerPickItemSelection(selected),
+        eaPlayerPickAdapter().confirmSelection(selected),
         ctrl(),
         3e4,
         "confirm Player Pick selection"
       );
-      if (!confirmed?.success) fail(`${loopDef.name}: Player Pick confirmation failed: ${serviceResultErrorText(confirmed)}`);
+      if (!confirmed?.success) fail2(`${loopDef.name}: Player Pick confirmation failed: ${serviceResultErrorText(confirmed)}`);
       await sleep(CFG.pauseMs);
       await refreshUnassigned({ quiet: true });
       selectedCards.forEach((card) => {
@@ -10341,13 +12997,16 @@
     async function findUnassignedPlayerPick(loopDef, attempts = 10, options = {}) {
       for (let attempt = 1; attempt <= attempts; attempt++) {
         await refreshUnassigned({ quiet: true, attempts: 1 });
-        const picks = getUnassignedItems().filter(isPlayerPickItem);
-        const unexpectedPick = picks.find((item) => !playerPickMatchesLoop(item, loopDef));
-        if (unexpectedPick && options.failOnUnexpected) {
-          fail(`${loopDef.name}: unrelated unassigned Player Pick detected (${pickItemName(unexpectedPick)}); stop without redeeming it`);
+        const picks = eaPlayerPickAdapter().listUnassignedPlayerPicks();
+        const pending = classifyPendingPlayerPicks(
+          picks,
+          loopDef.pickItemNames || [],
+          loopDef.pickItemResourceIds || []
+        );
+        if (pending.unexpected && options.failOnUnexpected) {
+          fail2(`${loopDef.name}: unrelated unassigned Player Pick detected (${playerPickItemName(pending.unexpected)}); stop without redeeming it`);
         }
-        const pickItem = picks.find((item) => playerPickMatchesLoop(item, loopDef));
-        if (pickItem) return pickItem;
+        if (pending.matching) return pending.matching;
         if (attempt < attempts) await sleep(900);
       }
       if (!options.quietMissing) log(`${loopDef.name}: Player Pick reward was not found in unassigned items`);
@@ -10365,12 +13024,12 @@
       );
       if (!protectedPlayers.length) return;
       const details = protectedPlayers.map((item) => `${itemDisplayName(item)} rating:${Number(item?.rating || 0)}`).join(", ");
-      fail(`${loopDef.name}: ${highGoldThreshold}+ normal gold protection blocked SBC submission: ${details}`);
+      fail2(`${loopDef.name}: ${highGoldThreshold}+ normal gold protection blocked SBC submission: ${details}`);
     }
     function assertSavedPlayerPickFodderProtection(loopDef, squad) {
       const savedPlayers = getSquadItems(squad);
       if (!savedPlayers.length) {
-        fail(`${loopDef.name}: cannot inspect the saved squad; stop before Player Pick submission`);
+        fail2(`${loopDef.name}: cannot inspect the saved squad; stop before Player Pick submission`);
       }
       assertPlayerPickFodderProtection(loopDef, savedPlayers);
     }
@@ -10444,14 +13103,14 @@
       };
       const pendingPick = await findUnassignedPlayerPick(pickDef, 1, { quietMissing: true, failOnUnexpected: true });
       if (pendingPick) {
-        log(`${loopDef.name}: resolving pending ${pickItemName(pendingPick)} before crafting upgrades`);
+        log(`${loopDef.name}: resolving pending ${playerPickItemName(pendingPick)} before crafting upgrades`);
         const pickedCards2 = await redeemAndSelectPlayerPick(pendingPick, pickDef, {
           cleanupOptions
         });
         log(`${loopDef.name}: pending ${pickDef.name} selected; continuing original crafting flow`);
         return [{ resumed: true, pickedCards: pickedCards2 || [] }];
       }
-      const set = await findSbcSet(pickDef.sbcNames, pickDef.name);
+      const set = await findSbcSetForLoopDef(pickDef, pickDef.name);
       if (isSbcSetComplete(set)) {
         log(`${loopDef.name}: ${pickDef.name} is already complete; continuing original crafting flow`);
         return [];
@@ -10517,7 +13176,7 @@
         return [];
       }
       const pickItem = await findUnassignedPlayerPick(pickDef, 10, { failOnUnexpected: true });
-      if (!pickItem) fail(`${loopDef.name}: ${pickDef.name} completed but its Player Pick reward was not found`);
+      if (!pickItem) fail2(`${loopDef.name}: ${pickDef.name} completed but its Player Pick reward was not found`);
       const pickedCards = await redeemAndSelectPlayerPick(pickItem, pickDef, {
         cleanupOptions
       });
@@ -10534,8 +13193,8 @@
         stopPoint: () => stopPoint(),
         findPendingPick: async () => {
           const pending = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true, failOnUnexpected: true });
-          if (pending && !dryRun) log(`${loopDef.name}: resuming pending ${pickItemName(pending)}`);
-          if (pending && dryRun) log(`${loopDef.name}: dry-run found pending ${pickItemName(pending)}; live run would resolve it before submitting another SBC`);
+          if (pending && !dryRun) log(`${loopDef.name}: resuming pending ${playerPickItemName(pending)}`);
+          if (pending && dryRun) log(`${loopDef.name}: dry-run found pending ${playerPickItemName(pending)}; live run would resolve it before submitting another SBC`);
           return dryRun ? null : pending;
         },
         redeemPick: async ({ pickItem, resumed }) => {
@@ -10550,7 +13209,7 @@
         },
         loadChallenges: async () => {
           if (dryRun) await refreshInventoryCaches(`${loopDef.name} dry-run`, { includePacks: false, quiet: true });
-          const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+          const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
           const challenges = await requestSbcChallenges(set, loopDef.name, { attempts: 3 });
           if (dryRun) {
             log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || "?"})`);
@@ -10585,336 +13244,122 @@
       }
       return result;
     }
-    async function showPickRecapModal(loopDef, pickResults) {
-      const entries = Array.isArray(pickResults) ? pickResults : [];
-      const flatCards = entries.flatMap((entry) => entry?.pickedCards || []);
-      if (!flatCards.length) return;
-      const destinationColors = { club: "#5cffa0", transfer: "#5c8aff", storage: "#ff9d4a", unknown: "#536171" };
-      const destinationLabels = { club: "->CLUB", transfer: "->TRANSFER", storage: "->STORAGE", unknown: "->?" };
-      return new Promise((resolve) => {
-        let stopTimer = null;
-        const overlay = document.createElement("div");
-        overlay.id = "bronze-loop-recap-modal";
-        Object.assign(overlay.style, {
-          position: "fixed",
-          inset: "0",
-          zIndex: "100000",
-          background: "rgba(0, 0, 0, 0.78)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "20px",
-          boxSizing: "border-box"
-        });
-        const dialog = document.createElement("div");
-        Object.assign(dialog.style, {
-          width: "min(620px, 100%)",
-          maxHeight: "90vh",
-          overflow: "auto",
-          background: "#171b21",
-          color: "#f3f5f7",
-          border: "1px solid #65758a",
-          padding: "12px 14px",
-          boxSizing: "border-box",
-          fontFamily: "Arial, sans-serif"
-        });
-        const title = document.createElement("div");
-        title.textContent = `Player Pick Recap: ${loopDef.name}`;
-        Object.assign(title.style, { fontWeight: "700", marginBottom: "4px", fontSize: "16px" });
-        const ratings = flatCards.map((card) => Number(card.rating || 0));
-        const maxRating = Math.max(...ratings);
-        const minRating = Math.min(...ratings);
-        const specialCount = flatCards.filter((card) => card.special).length;
-        const duplicateCount = flatCards.filter((card) => card.duplicate).length;
-        const highRatedCount = flatCards.filter((card) => Number(card.rating || 0) >= 91).length;
-        const resumedCount = entries.filter((entry) => entry?.resumed).length;
-        const destinations = flatCards.reduce((counts, card) => {
-          const destination = card.destination || "unknown";
-          counts[destination] = (counts[destination] || 0) + 1;
-          return counts;
-        }, {});
-        const summary = document.createElement("div");
-        const destinationSummary = Object.entries(destinations).map(([destination, count]) => `${count} ${destinationLabels[destination] || destination}`).join(", ");
-        summary.textContent = `${entries.length} pick(s), ${flatCards.length} card(s), rating ${minRating}-${maxRating}, ${specialCount} special, ${duplicateCount} duplicate, ${highRatedCount} rated 91+${destinationSummary ? `, ${destinationSummary}` : ""}${resumedCount ? `, ${resumedCount} resumed` : ""}`;
-        Object.assign(summary.style, { color: "#9aa6b8", marginBottom: "8px", fontSize: "12px" });
-        const list = document.createElement("div");
-        Object.assign(list.style, { display: "flex", flexDirection: "column", gap: "6px" });
-        const sortedRows = entries.flatMap((entry, pickIndex) => (entry?.pickedCards || []).map((card) => ({
-          card,
-          pickIndex: pickIndex + 1,
-          resumed: !!entry?.resumed
-        }))).sort((a, b) => Number(b.card.rating || 0) - Number(a.card.rating || 0) || a.pickIndex - b.pickIndex);
-        sortedRows.forEach(({ card, pickIndex, resumed }) => {
-          const rating = Number(card.rating || 0);
-          const highRated = rating >= 91;
-          const destination = card.destination || "unknown";
-          const row = document.createElement("div");
-          Object.assign(row.style, {
-            padding: "6px 8px",
-            fontSize: "13px",
-            color: "#f3f5f7",
-            background: highRated ? "#3a2f15" : card.special ? "#26223a" : "#1d2229",
-            borderLeft: `3px solid ${highRated ? "#ffd54a" : card.special ? "#7a5cff" : destinationColors[destination] || destinationColors.unknown}`,
-            display: "flex",
-            gap: "8px",
-            alignItems: "baseline"
-          });
-          const nameRating = document.createElement("span");
-          Object.assign(nameRating.style, { flex: "1 1 auto", minWidth: "0", display: "flex", gap: "6px", alignItems: "baseline", overflow: "hidden" });
-          const nameSpan = document.createElement("span");
-          nameSpan.textContent = itemDisplayName(card.item);
-          Object.assign(nameSpan.style, { fontWeight: "600", flex: "0 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-          const ratingSpan = document.createElement("span");
-          ratingSpan.textContent = `- ${rating}`;
-          Object.assign(ratingSpan.style, {
-            color: highRated ? "#ffd54a" : "#f3f5f7",
-            fontWeight: "700",
-            flex: "0 0 auto"
-          });
-          const pickTag = document.createElement("span");
-          pickTag.textContent = `P${pickIndex}${resumed ? "r" : ""}`;
-          Object.assign(pickTag.style, { color: "#7d8898", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
-          nameRating.append(nameSpan, ratingSpan, pickTag);
-          const destinationTag = document.createElement("span");
-          destinationTag.textContent = destinationLabels[destination] || destination;
-          Object.assign(destinationTag.style, { color: destinationColors[destination] || destinationColors.unknown, fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
-          const tags = document.createElement("span");
-          const compactPrice = formatCompactPrice(card.price);
-          tags.textContent = `${card.special ? "special" : "normal"}${card.duplicate ? ", duplicate" : ""}${compactPrice ? `, price:${compactPrice}` : ""}`;
-          Object.assign(tags.style, { color: "#9aa6b8", fontSize: "11px", flex: "0 0 auto", whiteSpace: "nowrap" });
-          row.append(nameRating, destinationTag, tags);
-          list.appendChild(row);
-        });
-        const closeButton = document.createElement("button");
-        closeButton.type = "button";
-        closeButton.textContent = "Close";
-        Object.assign(closeButton.style, {
-          marginTop: "10px",
-          minHeight: "30px",
-          padding: "0 14px",
-          background: "#2f6fde",
-          color: "#fff",
-          border: "none",
-          borderRadius: "3px",
-          cursor: "pointer",
-          fontSize: "13px"
-        });
-        const finish = () => {
-          if (stopTimer) clearInterval(stopTimer);
-          overlay.remove();
-          const recapBtn = document.querySelector("#bronze-loop-recap-reopen");
-          if (recapBtn) {
-            recapBtn.textContent = "View recap";
-            recapBtn.style.background = "";
+    function showPickRecapModal(loopDef, pickResults) {
+      return showPlayerPickRecap({
+        dom: adapters.dom,
+        name: loopDef?.name,
+        pickResults,
+        itemDisplayName,
+        formatPrice: formatCompactPrice,
+        scheduleStopCheck: setInterval,
+        cancelStopCheck: clearInterval,
+        isStopping: () => state.stopping,
+        onClose: () => {
+          const recapButton = document.querySelector("#bronze-loop-recap-reopen");
+          if (recapButton) {
+            recapButton.textContent = "View recap";
+            recapButton.style.background = "";
           }
-          resolve();
-        };
-        closeButton.addEventListener("click", finish);
-        overlay.addEventListener("click", (event) => {
-          if (event.target === overlay) finish();
-        });
-        dialog.append(title, summary, list, closeButton);
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-        if (specialCount > 0) triggerRecapFireworks(dialog, specialCount);
-        stopTimer = setInterval(() => {
-          if (state.stopping) finish();
-        }, 250);
+        },
+        celebrate: (dialog, specialCount) => triggerPlayerPickRecapFireworks(dialog, specialCount, {
+          dom: adapters.dom,
+          getComputedStyle: (element) => getComputedStyle(element),
+          devicePixelRatio: () => window.devicePixelRatio || 1,
+          now: () => performance.now(),
+          requestFrame: (callback) => requestAnimationFrame(callback)
+        })
       });
     }
-    function triggerRecapFireworks(dialog, specialCount) {
-      if (!dialog) return;
-      if (getComputedStyle(dialog).position === "static") dialog.style.position = "relative";
-      dialog.style.isolation = "isolate";
-      const canvas = document.createElement("canvas");
-      canvas.style.cssText = "position:absolute;top:0;left:0;width:100%;height:35%;pointer-events:none;z-index:-1;overflow:hidden;";
-      dialog.insertBefore(canvas, dialog.firstChild);
-      const W2 = Math.max(220, canvas.clientWidth);
-      const H = Math.max(120, canvas.clientHeight);
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
-      canvas.width = Math.round(W2 * dpr);
-      canvas.height = Math.round(H * dpr);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        canvas.remove();
-        return;
-      }
-      ctx.scale(dpr, dpr);
-      const palette = ["#ffd54a", "#ff5c5c", "#5c8aff", "#5cffa0", "#7a5cff", "#ff9d4a", "#ff5cb1", "#5ce0ff"];
-      const intensity = Math.max(1, Math.min(6, Number(specialCount) || 1));
-      const bursts = 3;
-      const particlesPerBurst = 70 + intensity * 14;
-      const totalDuration = 3e3;
-      const particles = [];
-      const burstSchedule = [80, 700, 1400];
-      function spawnBurst(x, y) {
-        const flash = {
-          x,
-          y,
-          life: 1,
-          decay: 0.05,
-          color: "#fff",
-          size: 14 + Math.random() * 6,
-          isFlash: true
-        };
-        particles.push(flash);
-        for (let i = 0; i < particlesPerBurst; i++) {
-          const baseAngle = i / particlesPerBurst * Math.PI * 2;
-          const angleJitter = (Math.random() - 0.5) * 0.5;
-          const angle = baseAngle + angleJitter;
-          const speed = 1.5 + Math.random() * 3.5;
-          const color = palette[Math.floor(Math.random() * palette.length)];
-          particles.push({
-            x,
-            y,
-            vx: Math.cos(angle) * speed,
-            vy: Math.sin(angle) * speed - 1.8,
-            color,
-            life: 1,
-            decay: 6e-3 + Math.random() * 0.012,
-            size: 0.9 + Math.random() * 1.4
-          });
-        }
-      }
-      const startMs = performance.now();
-      const cols = [0.22, 0.5, 0.78];
-      let lastBurstIdx = -1;
-      function tick(now2) {
-        const elapsed = now2 - startMs;
-        if (elapsed > totalDuration || !canvas.isConnected) {
-          canvas.remove();
-          return;
-        }
-        for (let b = lastBurstIdx + 1; b < bursts; b++) {
-          if (elapsed >= burstSchedule[b]) {
-            const ox = W2 * cols[b] + (Math.random() - 0.5) * 30;
-            const oy = H * (0.18 + Math.random() * 0.12);
-            spawnBurst(ox, oy);
-            lastBurstIdx = b;
-          }
-        }
-        ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
-        ctx.fillRect(0, 0, W2, H);
-        ctx.globalCompositeOperation = "lighter";
-        for (let i = particles.length - 1; i >= 0; i--) {
-          const p = particles[i];
-          p.vy += 0.06;
-          p.vx *= 0.985;
-          p.vy *= 0.985;
-          p.x += p.vx;
-          p.y += p.vy;
-          p.life -= p.decay;
-          if (p.life <= 0 || p.y > H + 30 || p.x < -30 || p.x > W2 + 30) {
-            particles.splice(i, 1);
-            continue;
-          }
-          ctx.shadowColor = p.color;
-          ctx.shadowBlur = p.isFlash ? 18 : 9;
-          ctx.fillStyle = p.color;
-          ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.isFlash ? p.size * (1 + (1 - p.life) * 0.6) : p.size, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1;
-        ctx.globalCompositeOperation = "source-over";
-        requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
-    }
-    async function runRound(roundNo) {
-      log(`Round ${roundNo} start`);
+    async function runValidationBronzeUpgrade(loopDef, roundNo) {
+      const dryRun = loopDef.dryRun === true;
+      log(`Round ${roundNo} ${dryRun ? "dry-run " : ""}start`);
       await waitAppReady();
-      await openSourceBronzePack();
-      const bronzeSet = await findBronzeUpgradeSet();
-      await openSbcSet(bronzeSet);
-      await fillBronzeUpgradeSquad();
-      const rewardPackId = await submitSbcAndGetAwardPackId(bronzeSet);
-      log(`Reward pack id: ${rewardPackId || "unknown"}`);
-      await openRewardSilverPack(rewardPackId);
-      const remaining = await showUnassignedIfAny(`round ${roundNo} end`);
-      if (remaining.length) fail(`Round ended with ${remaining.length} unassigned item(s); stop for manual inspection`);
-      log(`Round ${roundNo} done`);
+      const result = await runValidationRoundWorkflow({
+        dryRun,
+        inspectSourcePack: async () => {
+          const pack = await findValidationSourcePack(loopDef);
+          if (dryRun) log(`${loopDef.name}: dry-run source pack ${pack ? `${packName(pack)} (#${pack.id})` : "not found"}`);
+          return pack;
+        },
+        inspectSbc: async () => {
+          const set = await findSbcSet(loopDef.sbcNames || CFG.bronzeUpgradeNames, loopDef.name);
+          const challenge = await findAvailableSbcChallenge(set, loopDef.name);
+          if (!challenge) return null;
+          if (dryRun) log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || "?"}) challenge #${challenge.id || "?"}`);
+          return { set, challenge };
+        },
+        openSourcePack: async ({ sourcePack }) => {
+          const receipt = await openSourceBronzePack(loopDef, sourcePack);
+          return receipt || { status: "unavailable", reason: "source pack unavailable after refresh" };
+        },
+        submitSbc: async ({ sbc }) => {
+          await openSbcSet(sbc.set, { challenge: sbc.challenge });
+          await fillBronzeUpgradeSquad();
+          const rewardPackId = await submitSbcAndGetAwardPackId(sbc.set);
+          log(`Reward pack id: ${rewardPackId || "unknown"}`);
+          return { status: "submitted", submitted: true, rewardPackId };
+        },
+        openReward: async ({ rewardPackId }) => {
+          await openRewardSilverPack(rewardPackId);
+          return { status: "opened" };
+        },
+        finalize: async (workflowResult) => {
+          if (dryRun) {
+            log(`${loopDef.name}: dry run stops before opening packs, filling squads, or submitting SBCs`);
+            return;
+          }
+          if (workflowResult.status !== "completed") return;
+          const remaining = await showUnassignedIfAny(`round ${roundNo} end`);
+          if (remaining.length) fail2(`Round ended with ${remaining.length} unassigned item(s); stop for manual inspection`);
+          log(`Round ${roundNo} done`);
+        }
+      });
+      if (!dryRun && result.status !== "completed") {
+        fail2(`${loopDef.name}: validation round ${result.status}: ${result.reason || "unknown"}`);
+      }
+      return result;
     }
     async function runConfiguredLoop(loopDef, roundNo = 1) {
       state.loopStack.push(loopDef);
       try {
-        return await executeConfiguredLoopInternal(loopDef, roundNo);
+        return await dispatchConfiguredWorkflow({
+          loopDef,
+          roundNo,
+          log,
+          runners: {
+            validationBronzeUpgrade: runValidationBronzeUpgrade,
+            dailyRoutine: runDailySequence,
+            dailySingleCardRecycle: runRecycleLoop,
+            supplyAndCraft: runSupplyAndCraftLoop,
+            provisionPackCrafting: runProvisionCraftLoop,
+            rarePackTo84Upgrade: runRarePackCraftLoop,
+            playerPickSbc: runPlayerPickLoop,
+            fillAndVerifySbc: runFillAndVerifyLoop
+          },
+          afterStandardRun: async (definition) => {
+            await showUnassignedIfAny(`${definition.name} end`);
+          },
+          afterPlayerPickRun: async (definition, result) => {
+            const pickResults = result.pickResults || [];
+            state.lastPickRecap = {
+              name: definition.name,
+              pickResults,
+              completedAt: Date.now()
+            };
+            updateRecapButton();
+            await showPickRecapModal(definition, pickResults);
+            await showUnassignedIfAny(`${definition.name} end`);
+          }
+        });
       } finally {
         state.loopStack.pop();
       }
     }
-    async function executeConfiguredLoopInternal(loopDef, roundNo = 1) {
-      log(`Loop selected: ${loopDef.name} (${loopDef.strategy})`);
-      if (loopDef.disabledPiles?.length) log(`Disabled piles: ${loopDef.disabledPiles.join(", ")}`);
-      const dryRun = loopDef.dryRun === true;
-      if (dryRun) log(`Dry run active: no items will be moved, no packs opened, no squads saved, no SBCs submitted`);
-      if (loopDef.strategy === "dailyRoutine") {
-        const result = await runDailySequence(loopDef);
-        if (!dryRun) await showUnassignedIfAny(`${loopDef.name} end`);
-        return result;
-      }
-      if (loopDef.strategy === "validationBronzeUpgrade") {
-        if (dryRun) return runValidationBronzeUpgradeDryRun(loopDef, roundNo);
-        return runRound(roundNo);
-      }
-      if (loopDef.strategy === "dailySingleCardRecycle") {
-        const result = await runRecycleLoop(loopDef);
-        if (!dryRun) await showUnassignedIfAny(`${loopDef.name} end`);
-        return result;
-      }
-      if (["supplyAndCraft", "inventoryMixedUpgrade", "commonGoldToRareUpgrade"].includes(loopDef.strategy)) {
-        const result = await runSupplyAndCraftLoop(loopDef);
-        if (!dryRun) await showUnassignedIfAny(`${loopDef.name} end`);
-        return result;
-      }
-      if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") {
-        const result = await runProvisionCraftLoop(loopDef);
-        if (!dryRun) await showUnassignedIfAny(`${loopDef.name} end`);
-        return result;
-      }
-      if (loopDef.strategy === "rarePackTo84Upgrade") {
-        const result = await runRarePackCraftLoop(loopDef);
-        if (!dryRun) await showUnassignedIfAny(`${loopDef.name} end`);
-        return result;
-      }
-      if (loopDef.strategy === "playerPickSbc") {
-        const result = await runPlayerPickLoop(loopDef);
-        const pickResults = result.pickResults || [];
-        if (!dryRun) {
-          state.lastPickRecap = {
-            name: loopDef.name,
-            pickResults,
-            completedAt: Date.now()
-          };
-          updateRecapButton();
-          await showPickRecapModal(loopDef, pickResults);
-          await showUnassignedIfAny(`${loopDef.name} end`);
-        }
-        return result;
-      }
-      if (loopDef.strategy === "fillAndVerifySbc") {
-        const result = await runFillAndVerifyLoop(loopDef);
-        if (!dryRun) await showUnassignedIfAny(`${loopDef.name} end`);
-        return result;
-      }
-      fail(`Unsupported loop strategy: ${loopDef.strategy}`);
-    }
-    function getLiveRunLimit(loopDef, rounds) {
-      if (loopDef.strategy === "validationBronzeUpgrade") return Number(rounds || loopDef.maxRounds || 1);
-      if (loopDef.strategy === "fillAndVerifySbc") {
-        const completions = Number(loopDef.maxCompletions || 1);
-        return completions + (needsAutoTotwPreflight(loopDef) ? completions : 0);
-      }
-      if (loopDef.strategy === "rarePackTo84Upgrade") return Number(loopDef.maxPacks || 100);
-      if (loopDef.strategy === "playerPickSbc") {
-        return Number(loopDef.maxCompletions || 1) * getPlayerPickChallengeCount(loopDef);
-      }
-      if (loopDef.strategy === "dailyRoutine") {
-        return summarizeRoutineStepLimits(getRoutineStepLoopDefs(loopDef)).max;
-      }
-      return Number(loopDef.maxCompletions || loopDef.rounds || loopDef.maxRounds || 1);
+    function getLiveRunLimit2(loopDef, rounds) {
+      return getLiveRunLimit(loopDef, rounds, {
+        needsAutoTotwPreflight,
+        getRoutineSteps: getRoutineStepLoopDefs
+      });
     }
     async function startLoop() {
       if (state.running) return;
@@ -10924,11 +13369,12 @@
         loopDef = getSelectedLoopDef();
         const input = document.querySelector("#bronze-loop-rounds");
         rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
-        loopDef.dryRun = isDryRunEnabled() || loopDef.dryRun === true;
-        loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || isOpenRewardPacksEnabled();
-        applyPickRuntimeOptions(loopDef);
-        if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") loopDef.rounds = rounds;
-        if (loopDef.useRoundsAsCompletions === true) loopDef.maxCompletions = rounds;
+        applyLoopRuntimeOptions(loopDef, {
+          rounds,
+          dryRun: isDryRunEnabled(),
+          openRewardPacks: isOpenRewardPacksEnabled(),
+          pickOptions: getPickRuntimeOptions()
+        });
         logFsuSettingsForRun();
       } catch (e) {
         log(`Stopped: ${e.message || e}`);
@@ -10962,458 +13408,22 @@
       }
     }
     function setPanelState() {
-      const start = document.querySelector("#bronze-loop-start");
-      const stop = document.querySelector("#bronze-loop-stop");
-      const select = document.querySelector("#bronze-loop-select");
-      const edit = document.querySelector("#bronze-loop-edit");
-      const refresh = document.querySelector("#bronze-loop-refresh");
-      const loadJson = document.querySelector("#bronze-loop-load-json");
-      const builtIn = document.querySelector("#bronze-loop-built-in");
-      const dryRun = document.querySelector("#bronze-loop-dry-run");
-      const openRewards = document.querySelector("#bronze-loop-open-rewards");
-      const pickProtectHighGold = document.querySelector("#bronze-loop-pick-protect-high-gold");
-      const pickAutoBelow90 = document.querySelector("#bronze-loop-pick-auto-below-90");
-      const pickHighGoldThreshold = document.querySelector("#bronze-loop-pick-high-gold-threshold");
-      const pickAutoThreshold = document.querySelector("#bronze-loop-pick-auto-threshold");
-      const showMvp = document.querySelector("#bronze-loop-show-mvp");
-      const rounds = document.querySelector("#bronze-loop-rounds");
-      const json = document.querySelector("#bronze-loop-json");
-      if (start) start.disabled = state.running;
-      if (stop) stop.disabled = !state.running;
-      if (select) select.disabled = state.running;
-      if (edit) edit.disabled = state.running;
-      if (refresh) refresh.disabled = state.running || state.refreshing;
-      if (loadJson) loadJson.disabled = state.running || state.loadingLoops;
-      if (builtIn) builtIn.disabled = state.running || state.loadingLoops || state.loopConfigSource === "built-in";
-      if (dryRun) dryRun.disabled = state.running;
-      if (openRewards) openRewards.disabled = state.running;
-      if (pickProtectHighGold) pickProtectHighGold.disabled = state.running;
-      if (pickAutoBelow90) pickAutoBelow90.disabled = state.running;
-      if (pickHighGoldThreshold) pickHighGoldThreshold.disabled = state.running;
-      if (pickAutoThreshold) pickAutoThreshold.disabled = state.running;
-      if (showMvp) showMvp.disabled = state.running;
-      if (rounds) rounds.disabled = state.running;
-      if (json) json.disabled = state.running;
+      renderMainPanelRuntimeState({
+        panel: document.querySelector("#bronze-loop-panel"),
+        state: {
+          running: state.running,
+          refreshing: state.refreshing,
+          scanningPicks: state.scanningPicks,
+          loadingLoops: state.loadingLoops,
+          usingBuiltIn: state.loopConfigSource === "built-in"
+        }
+      });
       updateLoopControls();
     }
-    function getSavedPanelPos() {
-      try {
-        return JSON.parse(localStorage.getItem("fc-loop-panel-pos") || "null");
-      } catch {
-        return null;
-      }
-    }
-    function savePanelPos(panel) {
-      try {
-        const rect = panel.getBoundingClientRect();
-        localStorage.setItem("fc-loop-panel-pos", JSON.stringify({
-          left: Math.round(rect.left),
-          top: Math.round(rect.top),
-          width: Math.round(rect.width),
-          height: Math.round(rect.height)
-        }));
-      } catch {
-      }
-    }
-    function getPanelDefaultSize(panel) {
-      return panel.classList.contains("options-open") ? { width: 360, height: 620 } : { width: 300, height: 178 };
-    }
-    function resetPanelSize(panel) {
-      const size = getPanelDefaultSize(panel);
-      const width = Math.min(size.width, Math.max(220, window.innerWidth - 20));
-      const height = Math.min(size.height, Math.max(180, window.innerHeight - 20));
-      panel.dataset.minWidth = String(width);
-      panel.dataset.minHeight = String(height);
-      panel.style.width = `${width}px`;
-      panel.style.height = `${height}px`;
-    }
-    function makePanelDraggable(panel) {
-      const handle = panel.querySelector("#bronze-loop-drag");
-      if (!handle) return;
-      let dragging = false;
-      let startX = 0;
-      let startY = 0;
-      let startLeft = 0;
-      let startTop = 0;
-      let moved = false;
-      handle.addEventListener("pointerdown", (event) => {
-        if (!panel.classList.contains("icon-only") && event.target.closest("button,select,input,textarea")) return;
-        dragging = true;
-        moved = false;
-        const rect = panel.getBoundingClientRect();
-        startX = event.clientX;
-        startY = event.clientY;
-        startLeft = rect.left;
-        startTop = rect.top;
-        panel.style.left = `${rect.left}px`;
-        panel.style.top = `${rect.top}px`;
-        panel.style.right = "auto";
-        panel.style.bottom = "auto";
-        handle.setPointerCapture?.(event.pointerId);
-        event.preventDefault();
-      });
-      handle.addEventListener("pointermove", (event) => {
-        if (!dragging) return;
-        const deltaX = event.clientX - startX;
-        const deltaY = event.clientY - startY;
-        if (Math.abs(deltaX) + Math.abs(deltaY) > 3) moved = true;
-        const nextLeft = Math.max(0, Math.min(window.innerWidth - 36, startLeft + deltaX));
-        const nextTop = Math.max(0, Math.min(window.innerHeight - 36, startTop + deltaY));
-        panel.style.left = `${nextLeft}px`;
-        panel.style.top = `${nextTop}px`;
-        event.preventDefault();
-      });
-      const stopDrag = () => {
-        if (!dragging) return;
-        dragging = false;
-        if (panel.classList.contains("icon-only") && !moved) {
-          panel.dataset.dragJustEnded = "1";
-          panel.classList.remove("icon-only");
-          const optionsToggle = document.querySelector("#bronze-loop-options-toggle");
-          if (optionsToggle) {
-            optionsToggle.textContent = "Options";
-            optionsToggle.title = "Show advanced options";
-          }
-          resetPanelSize(panel);
-          setTimeout(() => {
-            delete panel.dataset.dragJustEnded;
-          }, 150);
-          savePanelPos(panel);
-          return;
-        }
-        if (moved) {
-          panel.dataset.dragJustEnded = "1";
-          setTimeout(() => {
-            delete panel.dataset.dragJustEnded;
-          }, 150);
-        }
-        savePanelPos(panel);
-      };
-      handle.addEventListener("pointerup", stopDrag);
-      handle.addEventListener("pointercancel", stopDrag);
-    }
-    function makePanelResizable(panel) {
-      const EDGE_PAD = 20;
-      const DIRS = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
-      let resizing = null;
-      const onMove = (event) => {
-        if (!resizing) return;
-        const dx = event.clientX - resizing.startX;
-        const dy = event.clientY - resizing.startY;
-        const dir = resizing.dir;
-        let newLeft = resizing.startLeft;
-        let newTop = resizing.startTop;
-        let newWidth = resizing.startWidth;
-        let newHeight = resizing.startHeight;
-        const minWidth = Number(panel.dataset.minWidth || 300);
-        const minHeight = Number(panel.dataset.minHeight || 178);
-        if (dir.includes("e")) newWidth = Math.max(minWidth, resizing.startWidth + dx);
-        if (dir.includes("s")) newHeight = Math.max(minHeight, resizing.startHeight + dy);
-        if (dir.includes("w")) {
-          newWidth = Math.max(minWidth, resizing.startWidth - dx);
-          if (newWidth > minWidth) newLeft = resizing.startLeft + (resizing.startWidth - newWidth);
-        }
-        if (dir.includes("n")) {
-          newHeight = Math.max(minHeight, resizing.startHeight - dy);
-          if (newHeight > minHeight) newTop = resizing.startTop + (resizing.startHeight - newHeight);
-        }
-        const maxW = window.innerWidth - EDGE_PAD;
-        const maxH = window.innerHeight - EDGE_PAD;
-        if (newWidth > maxW) {
-          const overflow = newWidth - maxW;
-          newWidth = maxW;
-          if (dir.includes("w")) newLeft += overflow;
-        }
-        if (newHeight > maxH) {
-          const overflow = newHeight - maxH;
-          newHeight = maxH;
-          if (dir.includes("n")) newTop += overflow;
-        }
-        newLeft = Math.max(0, Math.min(window.innerWidth - newWidth, newLeft));
-        newTop = Math.max(0, Math.min(window.innerHeight - newHeight, newTop));
-        panel.style.left = `${newLeft}px`;
-        panel.style.top = `${newTop}px`;
-        panel.style.width = `${newWidth}px`;
-        panel.style.height = `${newHeight}px`;
-        event.preventDefault();
-      };
-      const onUp = () => {
-        if (!resizing) return;
-        resizing = null;
-        savePanelPos(panel);
-      };
-      DIRS.forEach((dir) => {
-        const el = panel.querySelector(`#bronze-loop-resize-${dir}`);
-        if (!el) return;
-        el.addEventListener("pointerdown", (event) => {
-          if (panel.classList.contains("icon-only")) return;
-          const rect = panel.getBoundingClientRect();
-          panel.style.left = `${rect.left}px`;
-          panel.style.top = `${rect.top}px`;
-          panel.style.right = "auto";
-          panel.style.bottom = "auto";
-          panel.style.width = `${rect.width}px`;
-          panel.style.height = `${rect.height}px`;
-          resizing = {
-            dir,
-            startX: event.clientX,
-            startY: event.clientY,
-            startLeft: rect.left,
-            startTop: rect.top,
-            startWidth: rect.width,
-            startHeight: rect.height
-          };
-          el.setPointerCapture?.(event.pointerId);
-          event.preventDefault();
-        });
-        el.addEventListener("pointermove", onMove);
-        el.addEventListener("pointerup", onUp);
-        el.addEventListener("pointercancel", onUp);
-      });
-    }
     function installPanel() {
-      if (document.querySelector("#bronze-loop-panel")) return;
-      document.querySelector("#bronze-loop-style")?.remove();
-      const style = document.createElement("style");
-      style.id = "bronze-loop-style";
-      style.textContent = `
-      #bronze-loop-panel {
-        position: fixed;
-        right: 10px;
-        bottom: 10px;
-        z-index: 999999;
-        width: 300px;
-        height: 178px;
-        min-width: 300px;
-        min-height: 178px;
-        display: flex;
-        flex-direction: column;
-        background: #15181d;
-        border: 1px solid #5b6f8f;
-        color: #f4f6f8;
-        font: 12px Arial, sans-serif;
-        padding: 8px;
-        box-shadow: 0 8px 30px rgba(0,0,0,.35);
-        box-sizing: border-box;
-      }
-      #bronze-loop-panel .panel-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-      .bronze-loop-resize {
-        position: absolute;
-        z-index: 2;
-        touch-action: none;
-      }
-      #bronze-loop-resize-n { top: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
-      #bronze-loop-resize-s { bottom: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
-      #bronze-loop-resize-e { top: 12px; bottom: 12px; right: -3px; width: 6px; cursor: ew-resize; }
-      #bronze-loop-resize-w { top: 12px; bottom: 12px; left: -3px; width: 6px; cursor: ew-resize; }
-      #bronze-loop-resize-ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
-      #bronze-loop-resize-nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
-      #bronze-loop-resize-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
-      #bronze-loop-resize-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
-      #bronze-loop-panel.icon-only .bronze-loop-resize { display: none; }
-      #bronze-loop-panel.icon-only {
-        width: 36px;
-        height: 36px;
-        min-width: 0;
-        min-height: 0;
-        padding: 0;
-        background: rgba(12,15,19,.72);
-        border: 1px solid #78a6ff;
-        overflow: hidden;
-        box-shadow: 0 4px 16px rgba(0,0,0,.28);
-      }
-      #bronze-loop-panel.icon-only .panel-body,
-      #bronze-loop-panel.icon-only #bronze-loop-title,
-      #bronze-loop-panel.icon-only #bronze-loop-options-toggle {
-        display: none;
-      }
-      #bronze-loop-panel.icon-only #bronze-loop-drag {
-        width: 34px;
-        height: 34px;
-        margin: 0;
-        justify-content: center;
-      }
-      #bronze-loop-drag {
-        cursor: move;
-        user-select: none;
-        justify-content: space-between;
-      }
-      #bronze-loop-title {
-        font-weight: 700;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      #bronze-loop-panel .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-      #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; background: #222832; color: #fff; border: 1px solid #607089; }
-      #bronze-loop-panel button:disabled { opacity: .45; cursor: default; }
-      #bronze-loop-collapse { min-width: 28px !important; width: 28px; padding: 0; }
-      #bronze-loop-panel.icon-only #bronze-loop-collapse {
-        min-width: 34px !important;
-        width: 34px;
-        height: 34px;
-        border: 0;
-        background: transparent;
-        color: #78a6ff;
-        font-weight: 700;
-      }
-      #bronze-loop-options-toggle { min-width: 58px; }
-      #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; box-sizing: border-box; }
-      #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
-      #bronze-loop-panel label { cursor: pointer; user-select: none; }
-      #bronze-loop-panel select {
-        flex: 1;
-        min-width: 0;
-        height: 28px;
-        background: #222832;
-        color: #fff;
-        border: 1px solid #607089;
-      }
-      #bronze-loop-latest {
-        min-height: 28px;
-        max-height: 44px;
-        overflow: hidden;
-        background: #0c0f13;
-        border: 1px solid #303946;
-        padding: 6px;
-        line-height: 16px;
-        color: #d7e2f0;
-        word-break: break-word;
-        user-select: text;
-        -webkit-user-select: text;
-        cursor: text;
-      }
-      #bronze-loop-options {
-        display: none;
-        margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px solid #303946;
-      }
-      #bronze-loop-panel.options-open #bronze-loop-options {
-        display: flex;
-        flex-direction: column;
-        flex: 1 1 auto;
-        min-height: 0;
-        overflow: hidden;
-      }
-      #bronze-loop-panel.options-open #bronze-loop-latest {
-        display: none;
-      }
-      .bronze-loop-section {
-        color: #9fb2c9;
-        font-size: 11px;
-        margin: 8px 0 6px;
-      }
-      #bronze-loop-json {
-        display: none;
-        width: 100%;
-        height: 170px;
-        min-height: 60px;
-        flex-shrink: 1;
-        box-sizing: border-box;
-        margin-bottom: 8px;
-        background: #0c0f13;
-        color: #f4f6f8;
-        border: 1px solid #303946;
-        font: 11px Consolas, monospace;
-        padding: 8px;
-      }
-      #bronze-loop-json.show { display: block; }
-      #bronze-loop-log {
-        flex: 1 1 0;
-        min-height: 100px;
-        overflow: auto;
-        white-space: pre-wrap;
-        background: #0c0f13;
-        border: 1px solid #303946;
-        padding: 8px;
-        box-sizing: border-box;
-        user-select: text;
-        -webkit-user-select: text;
-        cursor: text;
-      }
-      #bronze-loop-log .bronze-loop-log-high-rated {
-        color: #ffd54a;
-        font-weight: 700;
-      }
-    `;
-      document.head.appendChild(style);
-      const panel = document.createElement("div");
-      panel.id = "bronze-loop-panel";
-      panel.innerHTML = `
-      <div class="row" id="bronze-loop-drag">
-        <span id="bronze-loop-title">Loop Runner</span>
-        <button id="bronze-loop-options-toggle" title="Options">Options</button>
-        <button id="bronze-loop-collapse" title="Compact">L</button>
-      </div>
-      <div class="panel-body">
-        <div class="row">
-          <select id="bronze-loop-select"></select>
-        </div>
-        <div class="row">
-          <button id="bronze-loop-start">Start</button>
-          <button id="bronze-loop-stop" disabled>Stop</button>
-          <button id="bronze-loop-recap-reopen" style="display:none" title="View last Player Pick recap">View recap</button>
-        </div>
-        <div id="bronze-loop-latest">Ready.</div>
-        <div id="bronze-loop-options">
-          <div class="bronze-loop-section">Run options</div>
-          <div class="row">
-            <label id="bronze-loop-dry-run-label" title="Log planned selections without moving items, opening packs, or submitting SBCs">
-              <input id="bronze-loop-dry-run" type="checkbox"> Dry run
-            </label>
-            <label title="Open reward packs automatically when a loop supports it">
-              <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
-            </label>
-          </div>
-          <div class="row">
-            <label title="Show MVP and one-run validation loops in the main selector">
-              <input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops
-            </label>
-          </div>
-          <div class="row">
-            <label title="Player Pick SBCs will not submit normal gold players at or above this rating">
-              <input id="bronze-loop-pick-protect-high-gold" type="checkbox"> Protect Pick fodder >=
-              <input id="bronze-loop-pick-high-gold-threshold" type="number" min="2" max="99" value="82">
-            </label>
-            <label title="Player Picks whose candidates are all below this rating will be selected automatically">
-              <input id="bronze-loop-pick-auto-below-90" type="checkbox"> Auto-pick below
-              <input id="bronze-loop-pick-auto-threshold" type="number" min="1" max="99" value="90">
-            </label>
-          </div>
-          <div class="row" id="bronze-loop-rounds-row">
-            <span id="bronze-loop-rounds-label">rounds</span>
-            <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${CFG.maxRounds}">
-          </div>
-          <div class="bronze-loop-section">Config</div>
-          <div class="row">
-            <button id="bronze-loop-refresh">Refresh caches</button>
-            <button id="bronze-loop-load-json">Load loops JSON</button>
-          </div>
-          <div class="row">
-            <button id="bronze-loop-built-in" disabled>Built-in loops</button>
-            <button id="bronze-loop-edit">Edit JSON</button>
-          </div>
-          <textarea id="bronze-loop-json" spellcheck="false"></textarea>
-          <div class="bronze-loop-section">Log</div>
-          <div class="row">
-            <button id="bronze-loop-copy">Copy log</button>
-            <button id="bronze-loop-clear">Clear log</button>
-            <button id="bronze-loop-download">Save log</button>
-          </div>
-          <div id="bronze-loop-log"></div>
-        </div>
-      </div>
-      <div class="bronze-loop-resize" id="bronze-loop-resize-n"></div>
-      <div class="bronze-loop-resize" id="bronze-loop-resize-s"></div>
-      <div class="bronze-loop-resize" id="bronze-loop-resize-e"></div>
-      <div class="bronze-loop-resize" id="bronze-loop-resize-w"></div>
-      <div class="bronze-loop-resize" id="bronze-loop-resize-ne"></div>
-      <div class="bronze-loop-resize" id="bronze-loop-resize-nw"></div>
-      <div class="bronze-loop-resize" id="bronze-loop-resize-se"></div>
-      <div class="bronze-loop-resize" id="bronze-loop-resize-sw"></div>
-    `;
-      document.body.appendChild(panel);
+      const mounted = mountMainPanel({ dom: adapters.dom, maxRounds: CFG.maxRounds });
+      if (!mounted.created) return;
+      const { panel } = mounted;
       state.logRenderer = createLogRenderer({
         getLines: () => state.logLines,
         getPanel: () => document.querySelector("#bronze-loop-panel"),
@@ -11423,149 +13433,62 @@
       });
       const savedLoopUiOptions = loadLoopUiOptions();
       state.showMvpLoops = savedLoopUiOptions.showMvpLoops;
-      document.querySelector("#bronze-loop-show-mvp").checked = state.showMvpLoops;
       const savedPickOptions = loadPickRuntimeOptions();
-      document.querySelector("#bronze-loop-pick-protect-high-gold").checked = savedPickOptions.protectHighGold;
-      document.querySelector("#bronze-loop-pick-auto-below-90").checked = savedPickOptions.autoSelectBelow90;
-      document.querySelector("#bronze-loop-pick-high-gold-threshold").value = savedPickOptions.highGoldThreshold;
-      document.querySelector("#bronze-loop-pick-auto-threshold").value = savedPickOptions.autoPickThreshold;
-      const savedPos = getSavedPanelPos();
-      if (savedPos && Number.isFinite(savedPos.left) && Number.isFinite(savedPos.top)) {
-        panel.style.left = `${Math.max(0, Math.min(window.innerWidth - 80, savedPos.left))}px`;
-        panel.style.top = `${Math.max(0, Math.min(window.innerHeight - 40, savedPos.top))}px`;
-        panel.style.right = "auto";
-        panel.style.bottom = "auto";
-      }
-      resetPanelSize(panel);
-      makePanelDraggable(panel);
-      makePanelResizable(panel);
+      hydrateMainPanelOptions({
+        panel,
+        loopOptions: savedLoopUiOptions,
+        pickOptions: savedPickOptions
+      });
+      createMainPanelGeometry({
+        panel,
+        getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
+        loadPosition: () => {
+          try {
+            return adapters.localStorage.getJson("fc-loop-panel-pos", null);
+          } catch {
+            return null;
+          }
+        },
+        savePosition: (position) => {
+          try {
+            adapters.localStorage.setJson("fc-loop-panel-pos", position);
+          } catch {
+          }
+        },
+        onModeChange: renderLog
+      });
       renderLoopSelect();
       renderLog();
-      document.querySelector("#bronze-loop-collapse").addEventListener("click", (event) => {
-        if (panel.dataset.dragJustEnded === "1") {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        panel.classList.toggle("icon-only");
-        if (panel.classList.contains("icon-only")) {
-          panel.classList.remove("options-open");
-          const optionsToggle = document.querySelector("#bronze-loop-options-toggle");
-          optionsToggle.textContent = "Options";
-          optionsToggle.title = "Show advanced options";
-          panel.style.width = "";
-          panel.style.height = "";
-        } else {
-          resetPanelSize(panel);
-        }
-        const collapseButton = document.querySelector("#bronze-loop-collapse");
-        collapseButton.textContent = "L";
-        collapseButton.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
-        renderLog();
-        savePanelPos(panel);
+      const panelCommands = createMainPanelCommands({
+        state,
+        log,
+        setPanelState,
+        getLoopDefById,
+        setLoopJson,
+        updateLoopControls,
+        savePickOptions: savePickRuntimeOptions,
+        saveLoopOptions: saveLoopUiOptions,
+        start: startLoop,
+        reopenRecap: reopenLastPickRecap,
+        refreshInventoryCaches,
+        scanPlayerPicks: scanAvailablePlayerPickSbcs,
+        loopConfigUrl: LOOP_CONFIG_URL,
+        loadLoopConfig,
+        resetLoopDefs,
+        userEffects: adapters.userEffects,
+        getLogText: () => state.logLines.join("\n"),
+        clearLog,
+        now: Date.now
       });
-      document.querySelector("#bronze-loop-options-toggle").addEventListener("click", () => {
-        panel.classList.toggle("options-open");
-        const optionsToggle = document.querySelector("#bronze-loop-options-toggle");
-        const optionsOpen = panel.classList.contains("options-open");
-        optionsToggle.textContent = optionsOpen ? "Hide" : "Options";
-        optionsToggle.title = optionsOpen ? "Hide advanced options" : "Show advanced options";
-        resetPanelSize(panel);
-        renderLog();
-        savePanelPos(panel);
+      bindMainPanelCommands({
+        panel,
+        commands: panelCommands
       });
-      document.querySelector("#bronze-loop-select").addEventListener("change", (event) => {
-        const selectedId = event.target.value;
-        if (selectedId !== "custom") setLoopJson(getLoopDefById(selectedId));
-        updateLoopControls();
-      });
-      document.querySelector("#bronze-loop-edit").addEventListener("click", () => {
-        const editor = document.querySelector("#bronze-loop-json");
-        editor.classList.toggle("show");
-        if (editor.classList.contains("show")) {
-          document.querySelector("#bronze-loop-select").value = "custom";
-        }
-        updateLoopControls();
-      });
-      document.querySelector("#bronze-loop-json").addEventListener("input", () => {
-        updateLoopControls();
-      });
-      document.querySelector("#bronze-loop-pick-protect-high-gold").addEventListener("change", savePickRuntimeOptions);
-      document.querySelector("#bronze-loop-pick-auto-below-90").addEventListener("change", savePickRuntimeOptions);
-      document.querySelector("#bronze-loop-pick-high-gold-threshold").addEventListener("change", savePickRuntimeOptions);
-      document.querySelector("#bronze-loop-pick-auto-threshold").addEventListener("change", savePickRuntimeOptions);
-      document.querySelector("#bronze-loop-show-mvp").addEventListener("change", saveLoopUiOptions);
-      document.querySelector("#bronze-loop-start").addEventListener("click", startLoop);
-      document.querySelector("#bronze-loop-recap-reopen").addEventListener("click", reopenLastPickRecap);
       updateRecapButton();
-      document.querySelector("#bronze-loop-refresh").addEventListener("click", async () => {
-        if (state.running || state.refreshing) return;
-        state.refreshing = true;
-        setPanelState();
-        try {
-          await refreshInventoryCaches("manual button");
-        } catch (e) {
-          log(`Cache refresh failed: ${e.message || e}`);
-        } finally {
-          state.refreshing = false;
-          setPanelState();
-        }
-      });
-      document.querySelector("#bronze-loop-load-json").addEventListener("click", async () => {
-        if (state.running || state.loadingLoops) return;
-        state.loadingLoops = true;
-        setPanelState();
-        try {
-          log(`Loading loop definitions from ${LOOP_CONFIG_URL}`);
-          await loadLoopConfig(LOOP_CONFIG_URL);
-        } catch (e) {
-          log(`Loop JSON load failed: ${e.message || e}`);
-        } finally {
-          state.loadingLoops = false;
-          setPanelState();
-        }
-      });
-      document.querySelector("#bronze-loop-built-in").addEventListener("click", () => {
-        if (state.running || state.loadingLoops) return;
-        resetLoopDefs();
-        setPanelState();
-      });
-      document.querySelector("#bronze-loop-stop").addEventListener("click", () => {
-        state.stopping = true;
-        log("Stop requested; waiting for current safe point");
-        setPanelState();
-      });
-      document.querySelector("#bronze-loop-copy").addEventListener("click", async () => {
-        const text = state.logLines.join("\n");
-        try {
-          await navigator.clipboard.writeText(text);
-          log("Log copied to clipboard");
-        } catch {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          ta.style.position = "fixed";
-          ta.style.left = "-9999px";
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand("copy");
-          ta.remove();
-          log("Log copied to clipboard");
-        }
-      });
-      document.querySelector("#bronze-loop-clear").addEventListener("click", clearLog);
-      document.querySelector("#bronze-loop-download").addEventListener("click", () => {
-        const blob = new Blob([state.logLines.join("\n")], { type: "text/plain;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `bronze-loop-${Date.now()}.log`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        log("Log download created");
-      });
       log(`Ready v${W[APP_KEY]?.version || "unknown"}. Keep FSU/Enhancer enabled before starting.`);
+      setTimeout(() => {
+        panelCommands.scanPicks();
+      }, 900);
     }
     state.bootTimer = setInterval(() => {
       if (document.body && isFutAppReady()) {
