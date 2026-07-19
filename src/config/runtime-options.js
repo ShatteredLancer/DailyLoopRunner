@@ -19,13 +19,35 @@ export function applyPickRuntimeOptions(loopDef, input = {}) {
   loopDef.autoPickRatingThreshold = options.autoPickThreshold;
   const requirementGroups = [loopDef.requirements, ...(loopDef.challengeRequirements || [])];
   requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
+    const previousThreshold = Number(requirement.highGoldThreshold);
+    const hadLegacyGeneratedMaxRating = requirement.highGoldProtectionMaxRating !== true
+      && requirement.protectHighGold === true
+      && Number.isFinite(previousThreshold)
+      && Number(requirement.maxRating) === previousThreshold - 1;
+    const hadGeneratedMaxRating = requirement.highGoldProtectionMaxRating === true
+      || hadLegacyGeneratedMaxRating;
     requirement.protectHighGold = options.protectHighGold;
     if (options.protectHighGold) {
+      if (!hadGeneratedMaxRating) {
+        const existingMaxRating = Number(requirement.maxRating);
+        if (Number.isFinite(existingMaxRating) && existingMaxRating > 81) {
+          requirement.maxRatingBeforeHighGoldProtection = existingMaxRating;
+        }
+      }
+      requirement.highGoldProtectionMaxRating = true;
       requirement.highGoldThreshold = options.highGoldThreshold;
       requirement.maxRating = options.highGoldThreshold - 1;
     } else {
       delete requirement.highGoldThreshold;
-      if (Number(requirement.maxRating) <= 81) {
+      if (hadGeneratedMaxRating) {
+        if (requirement.maxRatingBeforeHighGoldProtection !== undefined) {
+          requirement.maxRating = requirement.maxRatingBeforeHighGoldProtection;
+        } else {
+          delete requirement.maxRating;
+        }
+        delete requirement.highGoldProtectionMaxRating;
+        delete requirement.maxRatingBeforeHighGoldProtection;
+      } else if (Number(requirement.maxRating) <= 81) {
         delete requirement.maxRating;
       }
     }

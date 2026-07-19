@@ -41,12 +41,31 @@ describe('dynamic Player Pick SBC discovery', () => {
     expect(result.loop.requirements).toEqual([
       expect.objectContaining({
         tier: 'gold', rarity: 'rare', count: 4, maxRating: 81,
-        allowSpecial: false, protectHighGold: true,
+        allowSpecial: false, protectHighGold: true, highGoldThreshold: 82,
+        highGoldProtectionMaxRating: true,
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       }),
     ]);
     expect(result.loop.challengeRequirements).toBeUndefined();
     expect(validateLoopDef(result.loop, 'discovered Player Pick')).toEqual([]);
+  });
+
+  it('records the configured protection threshold so runtime disabling can remove its cap', async () => {
+    const fixture = await loadFixture('challenges/player-pick-discovery.json');
+    const result = parsePlayerPickSbcSnapshot({
+      ...fixture.singleChallenge,
+      highGoldThreshold: 84,
+    });
+
+    expect(result.status).toBe('supported');
+    expect(result.loop.requirements).toEqual([
+      expect.objectContaining({
+        maxRating: 83,
+        protectHighGold: true,
+        highGoldThreshold: 84,
+        highGoldProtectionMaxRating: true,
+      }),
+    ]);
   });
 
   it('preserves independent requirements for every Challenge and remaining set count', async () => {

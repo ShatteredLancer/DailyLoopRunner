@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.22
+// @version      0.5.23
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -12,6 +12,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
+// @connect      127.0.0.1
+// @connect      localhost
 // @connect      www.fut.gg
 // @connect      enhancer-api.futnext.com
 // @connect      ntfy.sh
@@ -1363,13 +1365,31 @@
     loopDef.autoPickRatingThreshold = options.autoPickThreshold;
     const requirementGroups = [loopDef.requirements, ...loopDef.challengeRequirements || []];
     requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
+      const previousThreshold = Number(requirement.highGoldThreshold);
+      const hadLegacyGeneratedMaxRating = requirement.highGoldProtectionMaxRating !== true && requirement.protectHighGold === true && Number.isFinite(previousThreshold) && Number(requirement.maxRating) === previousThreshold - 1;
+      const hadGeneratedMaxRating = requirement.highGoldProtectionMaxRating === true || hadLegacyGeneratedMaxRating;
       requirement.protectHighGold = options.protectHighGold;
       if (options.protectHighGold) {
+        if (!hadGeneratedMaxRating) {
+          const existingMaxRating = Number(requirement.maxRating);
+          if (Number.isFinite(existingMaxRating) && existingMaxRating > 81) {
+            requirement.maxRatingBeforeHighGoldProtection = existingMaxRating;
+          }
+        }
+        requirement.highGoldProtectionMaxRating = true;
         requirement.highGoldThreshold = options.highGoldThreshold;
         requirement.maxRating = options.highGoldThreshold - 1;
       } else {
         delete requirement.highGoldThreshold;
-        if (Number(requirement.maxRating) <= 81) {
+        if (hadGeneratedMaxRating) {
+          if (requirement.maxRatingBeforeHighGoldProtection !== void 0) {
+            requirement.maxRating = requirement.maxRatingBeforeHighGoldProtection;
+          } else {
+            delete requirement.maxRating;
+          }
+          delete requirement.highGoldProtectionMaxRating;
+          delete requirement.maxRatingBeforeHighGoldProtection;
+        } else if (Number(requirement.maxRating) <= 81) {
           delete requirement.maxRating;
         }
       }
@@ -2130,7 +2150,8 @@
       diagnostics.push(`${challengeLabel}: rarity count exceeds required player count`);
     }
     if (diagnostics.length) return { ok: false, diagnostics };
-    const maxRating = Math.max(1, Math.min(99, Number(options.highGoldThreshold || 82) || 82)) - 1;
+    const highGoldThreshold = Math.max(2, Math.min(99, Number(options.highGoldThreshold || 82) || 82));
+    const maxRating = highGoldThreshold - 1;
     const requirement = (rarity, count) => ({
       tier: "gold",
       rarity,
@@ -2139,6 +2160,8 @@
       playerOnly: true,
       allowSpecial: false,
       protectHighGold: true,
+      highGoldThreshold,
+      highGoldProtectionMaxRating: true,
       priorityPiles: [...options.priorityPiles || DEFAULT_PRIORITY_PILES]
     });
     const requirements = [];
@@ -8778,7 +8801,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.22",
+      version: "0.5.23",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -14033,7 +14056,7 @@
         pickDef.disabledPiles = [...loopDef.disabledPiles];
       }
       applyDisabledPiles(pickDef);
-      applyPickRuntimeOptions(pickDef);
+      applyPickRuntimeOptions(pickDef, getPickRuntimeOptions());
       pickDef.maxCompletions = 1;
       return pickDef;
     }

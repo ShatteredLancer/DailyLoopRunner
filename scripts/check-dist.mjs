@@ -18,4 +18,10 @@ const sourceVersion = sourceMetadata.match(/^\/\/ @version\s+(.+)$/m)?.[1]?.trim
 const builtVersion = builtMetadata.match(/^\/\/ @version\s+(.+)$/m)?.[1]?.trim();
 if (!sourceVersion || sourceVersion !== builtVersion) throw new Error('dist userscript version differs from source');
 
+for (const host of ['127.0.0.1', 'localhost']) {
+  if (!sourceMetadata.includes(`// @connect      ${host}`)) {
+    throw new Error(`userscript metadata must allow local Loop config host ${host}`);
+  }
+}
+
 console.log(`Verified root/dist userscript equality, metadata, and version ${builtVersion}`);

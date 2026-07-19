@@ -52,24 +52,51 @@ describe('loop runtime option projection', () => {
       openPicksAtEnd: true,
       pickHighGoldThreshold: 84,
       autoPickRatingThreshold: 91,
-      requirements: [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84 }],
+      requirements: [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84, highGoldProtectionMaxRating: true }],
       challengeRequirements: [
-        [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84 }],
-        [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84 }],
+        [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84, highGoldProtectionMaxRating: true }],
+        [{
+          maxRating: 83,
+          protectHighGold: true,
+          highGoldThreshold: 84,
+          highGoldProtectionMaxRating: true,
+          maxRatingBeforeHighGoldProtection: 85,
+        }],
       ],
     });
   });
 
-  it('removes only the legacy low-gold cap when Pick protection is disabled', () => {
+  it('removes legacy and custom protection caps when Pick protection is disabled', () => {
     const loopDef = {
       strategy: 'playerPickSbc',
-      requirements: [{ maxRating: 81, highGoldThreshold: 82 }, { maxRating: 85, highGoldThreshold: 82 }],
+      requirements: [
+        { maxRating: 81, highGoldThreshold: 82, protectHighGold: true },
+        {
+          maxRating: 83,
+          highGoldThreshold: 84,
+          protectHighGold: true,
+        },
+        { maxRating: 85, highGoldThreshold: 82, protectHighGold: true },
+      ],
     };
     applyPickRuntimeOptions(loopDef, { protectHighGold: false });
     expect(loopDef.requirements).toEqual([
       { protectHighGold: false },
+      { protectHighGold: false },
       { maxRating: 85, protectHighGold: false },
     ]);
+  });
+
+  it('restores an explicit Pick maxRating after temporary high-gold protection', () => {
+    const loopDef = {
+      strategy: 'playerPickSbc',
+      requirements: [{ maxRating: 85 }],
+    };
+
+    applyPickRuntimeOptions(loopDef, { protectHighGold: true, highGoldThreshold: 84 });
+    applyPickRuntimeOptions(loopDef, { protectHighGold: false, highGoldThreshold: 84 });
+
+    expect(loopDef.requirements).toEqual([{ maxRating: 85, protectHighGold: false }]);
   });
 
   it('preserves forced reward opening and applies rounds to the intended strategies', () => {

@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.22
+// @version      0.5.23
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -12,6 +12,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
+// @connect      127.0.0.1
+// @connect      localhost
 // @connect      www.fut.gg
 // @connect      enhancer-api.futnext.com
 // @connect      ntfy.sh
@@ -223,7 +225,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.22',
+    version: '0.5.23',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -6146,7 +6148,7 @@ function updateLoopControls() {
       pickDef.disabledPiles = [...loopDef.disabledPiles];
     }
     applyDisabledPiles(pickDef);
-    applyPickRuntimeOptions(pickDef);
+    applyPickRuntimeOptions(pickDef, getPickRuntimeOptions());
     pickDef.maxCompletions = 1;
     return pickDef;
   }

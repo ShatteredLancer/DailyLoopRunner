@@ -173,7 +173,8 @@ function parseChallengeRequirements(challenge, challengeIndex, options = {}) {
   }
   if (diagnostics.length) return { ok: false, diagnostics };
 
-  const maxRating = Math.max(1, Math.min(99, Number(options.highGoldThreshold || 82) || 82)) - 1;
+  const highGoldThreshold = Math.max(2, Math.min(99, Number(options.highGoldThreshold || 82) || 82));
+  const maxRating = highGoldThreshold - 1;
   const requirement = (rarity, count) => ({
     tier: 'gold',
     rarity,
@@ -182,6 +183,8 @@ function parseChallengeRequirements(challenge, challengeIndex, options = {}) {
     playerOnly: true,
     allowSpecial: false,
     protectHighGold: true,
+    highGoldThreshold,
+    highGoldProtectionMaxRating: true,
     priorityPiles: [...(options.priorityPiles || DEFAULT_PRIORITY_PILES)],
   });
   const requirements = [];

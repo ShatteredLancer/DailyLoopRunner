@@ -141,6 +141,7 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain("from './config/routine-steps.js'");
     expect(source).toContain("from './config/runtime-options.js'");
     expect(source).not.toMatch(/function\s+applyPickRuntimeOptions\s*\(/);
+    expect(source).toContain('applyPickRuntimeOptions(pickDef, getPickRuntimeOptions());');
     expect(source).not.toMatch(/\bconst\s+LOOP_DEFS\s*=\s*\[/);
     expect(source).toContain('return claimSbcRewards({');
     expect(source).not.toMatch(/while\s*\(Date\.now\(\)\s*-\s*start\s*<\s*25000\)/);
