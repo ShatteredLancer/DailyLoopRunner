@@ -21,9 +21,13 @@ export function applyPickRuntimeOptions(loopDef, input = {}) {
   requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
     requirement.protectHighGold = options.protectHighGold;
     if (options.protectHighGold) {
+      requirement.highGoldThreshold = options.highGoldThreshold;
       requirement.maxRating = options.highGoldThreshold - 1;
-    } else if (Number(requirement.maxRating) <= 81) {
-      delete requirement.maxRating;
+    } else {
+      delete requirement.highGoldThreshold;
+      if (Number(requirement.maxRating) <= 81) {
+        delete requirement.maxRating;
+      }
     }
   }));
   return loopDef;

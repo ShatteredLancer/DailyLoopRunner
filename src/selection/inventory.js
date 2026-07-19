@@ -28,6 +28,12 @@ function isNormalGold(item) {
   return item.tier === 'gold' && !item.special;
 }
 
+export function resolveHighGoldThreshold(requirement = {}) {
+  const raw = requirement.highGoldThreshold ?? requirement.protectHighGoldMinRating ?? 82;
+  const value = Number(raw);
+  return Math.max(2, Math.min(99, Number.isFinite(value) && value > 0 ? value : 82));
+}
+
 function itemMatchesRequirement(item, requirement = {}) {
   if (requirement.playerOnly && item.type !== 'player') return false;
   if (requirement.minRating !== undefined && item.rating < Number(requirement.minRating)) return false;
@@ -48,7 +54,9 @@ function rejectionReasons(item, requirement, fsuPolicy, protection) {
   if (protection.consumedItemIds.has(item.id)) reasons.push('consumed-item');
   if (protection.protectedItemIds.has(item.id)) reasons.push('protected-item');
   if (protection.protectedDefinitionIds.has(item.definitionId)) reasons.push('protected-definition');
-  if (requirement.protectHighGold && item.tier === 'gold' && item.rating >= 82) reasons.push('protected-high-gold');
+  if (requirement.protectHighGold && item.tier === 'gold' && item.rating >= resolveHighGoldThreshold(requirement)) {
+    reasons.push('protected-high-gold');
+  }
   if (item.limitedUse) reasons.push('limited-use');
   if (item.concept) reasons.push('concept');
   if (item.academyEnrolled) reasons.push('academy-enrolled');
