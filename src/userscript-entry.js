@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.12
+// @version      0.5.13
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -88,6 +88,8 @@ import {
   capturePlayerPickSelections,
   classifyPendingPlayerPicks,
   getManualPlayerPickReason,
+  partitionPendingPlayerPicks,
+  playerPickMatchesReward,
   playerPickItemName,
   rankPlayerPickCandidates,
 } from './reward/player-pick.js';
@@ -183,7 +185,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.12',
+    version: '0.5.13',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -5088,6 +5090,7 @@ function updateLoopControls() {
       protectHighGold: document.querySelector('#bronze-loop-pick-protect-high-gold')?.checked !== false,
       autoSelectBelow90: document.querySelector('#bronze-loop-pick-auto-below-90')?.checked !== false,
       preferScannedMetadata: document.querySelector('#bronze-loop-pick-prefer-scanned')?.checked === true,
+      openPicksAtEnd: document.querySelector('#bronze-loop-pick-open-at-end')?.checked === true,
       highGoldThreshold: document.querySelector('#bronze-loop-pick-high-gold-threshold')?.value,
       autoPickThreshold: document.querySelector('#bronze-loop-pick-auto-threshold')?.value,
     });
@@ -6690,6 +6693,51 @@ function updateLoopControls() {
     return null;
   }
 
+  function pendingPlayerPickQuantity(item) {
+    return Math.max(
+      1,
+      Number(item?.stackCount || 0) || 0,
+      Number(item?.untradeableCount || 0) || 0,
+    );
+  }
+
+  async function listUnassignedPlayerPicksForLoop(loopDef, attempts = 1, options = {}) {
+    const minimumCount = Math.max(0, Number(options.minimumCount || 0) || 0);
+    let matching = [];
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      await refreshUnassigned({ quiet: true, attempts: 1 });
+      const partitioned = partitionPendingPlayerPicks(
+        eaPlayerPickAdapter().listUnassignedPlayerPicks(),
+        loopDef.pickItemNames || [],
+        loopDef.pickItemResourceIds || [],
+      );
+      if (partitioned.unexpected.length && options.failOnUnexpected) {
+        fail(`${loopDef.name}: unrelated unassigned Player Pick detected (${playerPickItemName(partitioned.unexpected[0])}); stop without redeeming it`);
+      }
+      matching = partitioned.matching.flatMap((item) =>
+        Array.from({ length: pendingPlayerPickQuantity(item) }, () => item)
+      );
+      if (matching.length >= minimumCount) return matching;
+      if (attempt < attempts) await sleep(900);
+    }
+    if (!options.quietMissing && matching.length < minimumCount) {
+      log(`${loopDef.name}: found ${matching.length}/${minimumCount} expected pending Player Pick reward(s)`);
+    }
+    return matching;
+  }
+
+  async function reservePendingPlayerPicksDuringCleanup(loopDef, reason) {
+    const matching = await listUnassignedPlayerPicksForLoop(loopDef, 1, {
+      minimumCount: 0,
+      quietMissing: true,
+      failOnUnexpected: true,
+    });
+    const reservedIds = new Set(matching.map((item) => Number(item?.id || 0)).filter(Boolean));
+    await resolveRuntimeUnassigned(reason, {
+      reserveItem: (item) => reservedIds.has(Number(item?.id || 0)),
+    });
+  }
+
   function assertPlayerPickFodderProtection(loopDef, players) {
     const inspection = inspectSbcItems(loopDef, players, {
       expectedPlayerCount: sumRequirementPlayerCount(loopDef),
@@ -6886,8 +6934,13 @@ function updateLoopControls() {
     const dryRun = loopDef.dryRun === true;
     const maxPicks = Math.max(1, Math.min(50, Number(loopDef.maxCompletions || 1) || 1));
     const challengesPerPick = getPlayerPickChallengeCount(loopDef);
+    const openPicksAtEnd = !dryRun && loopDef.openPicksAtEnd === true;
+    if (openPicksAtEnd) {
+      log(`${loopDef.name}: batch Pick mode enabled; complete up to ${maxPicks} Pick(s), then open matching rewards together`);
+    }
     const result = await runPlayerPickWorkflow({
       maxPicks,
+      openPicksAtEnd,
       stopPoint: () => stopPoint(),
       findPendingPick: async () => {
         const pending = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true, failOnUnexpected: true });
@@ -6897,12 +6950,27 @@ function updateLoopControls() {
       },
       redeemPick: async ({ pickItem, resumed }) => {
         if (dryRun) return { status: 'planned', reason: 'would redeem Player Pick' };
-        const pickedCards = await redeemAndSelectPlayerPick(pickItem, loopDef);
+        const pickedCards = await redeemAndSelectPlayerPick(pickItem, loopDef, openPicksAtEnd ? {
+          cleanupOptions: {
+            reserveItem: (item) => playerPickMatchesReward(
+              item,
+              loopDef.pickItemNames || [],
+              loopDef.pickItemResourceIds || [],
+            ),
+          },
+        } : {});
         if (resumed) log(`${loopDef.name}: resumed Player Pick selected`);
         return { status: 'selected', pickedCards: pickedCards || [] };
       },
       beforePick: async ({ result: current }) => {
-        if (!dryRun) await resolveRuntimeUnassigned(`${loopDef.name} pick ${current.picksCompleted + 1} pre-submit cleanup`);
+        if (!dryRun && openPicksAtEnd) {
+          await reservePendingPlayerPicksDuringCleanup(
+            loopDef,
+            `${loopDef.name} queued pick ${current.picksQueued + 1} pre-submit cleanup`,
+          );
+        } else if (!dryRun) {
+          await resolveRuntimeUnassigned(`${loopDef.name} pick ${current.picksCompleted + 1} pre-submit cleanup`);
+        }
         return { status: 'ready' };
       },
       loadChallenges: async () => {
@@ -6933,6 +7001,22 @@ function updateLoopControls() {
       findRewardPick: async () => dryRun
         ? null
         : findUnassignedPlayerPick(loopDef, 10, { failOnUnexpected: true }),
+      listPendingPicks: async ({ minimumCount, phase }) => listUnassignedPlayerPicksForLoop(
+        loopDef,
+        phase === 'initial' ? 1 : 10,
+        {
+          minimumCount,
+          quietMissing: phase === 'initial',
+          failOnUnexpected: true,
+        },
+      ),
+      onEvent: async (event, payload) => {
+        if (event === 'queue') {
+          log(`${loopDef.name}: queued ${payload.queuedCount}/${maxPicks} matching Player Pick reward(s)`);
+        } else if (event === 'batch-open') {
+          log(`${loopDef.name}: submission phase ended; opening ${payload.queuedCount} queued Player Pick reward(s)`);
+        }
+      },
       afterPick: async ({ result: current, resumed }) => {
         if (resumed) log(`${loopDef.name}: resumed Player Pick counts as ${current.picksCompleted}/${maxPicks} requested completion(s)`);
         if (!dryRun) await sleep(CFG.pauseMs);
@@ -6942,7 +7026,7 @@ function updateLoopControls() {
       log(`${loopDef.name}: dry-run planned ${result.challengesPlanned} challenge(s)`);
       log(`${loopDef.name}: dry run stops before submitting SBCs, redeeming Picks, or moving items`);
     } else {
-      log(`${loopDef.name}: completed ${result.picksCompleted}/${maxPicks} Player Pick(s)`);
+      log(`${loopDef.name}: completed ${result.picksCompleted}/${maxPicks} Player Pick(s)${openPicksAtEnd ? `; queued ${result.picksQueued}` : ''}`);
     }
     return result;
   }

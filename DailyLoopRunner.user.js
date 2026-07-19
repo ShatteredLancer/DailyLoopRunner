@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.12
+// @version      0.5.13
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -1242,6 +1242,7 @@
       protectHighGold: input.protectHighGold !== false,
       autoSelectBelow90: input.autoSelectBelow90 !== false,
       preferScannedMetadata: input.preferScannedMetadata === true,
+      openPicksAtEnd: input.openPicksAtEnd === true,
       highGoldThreshold: Math.max(2, Math.min(99, Number(input.highGoldThreshold || 82) || 82)),
       autoPickThreshold: Math.max(1, Math.min(99, Number(input.autoPickThreshold || 90) || 90))
     };
@@ -1251,6 +1252,7 @@
     const options = normalizePickRuntimeOptions(input);
     loopDef.protectHighGold = options.protectHighGold;
     loopDef.autoSelectBelow90 = options.autoSelectBelow90;
+    loopDef.openPicksAtEnd = options.openPicksAtEnd;
     loopDef.pickHighGoldThreshold = options.highGoldThreshold;
     loopDef.autoPickRatingThreshold = options.autoPickThreshold;
     const requirementGroups = [loopDef.requirements, ...loopDef.challengeRequirements || []];
@@ -4702,18 +4704,26 @@
   function playerPickItemName(item) {
     return String(item?._staticData?.name || item?.name || item?.description || `Player Pick #${item?.id || "?"}`);
   }
-  function classifyPendingPlayerPicks(items, acceptedNames = [], acceptedResourceIds = []) {
+  function playerPickMatchesReward(item, acceptedNames = [], acceptedResourceIds = []) {
     const patterns = Array.isArray(acceptedNames) ? acceptedNames : acceptedNames === void 0 || acceptedNames === null ? [] : [acceptedNames];
     const resourceIds = new Set((acceptedResourceIds || []).map(Number).filter((value) => Number.isFinite(value) && value > 0));
-    const matches = (item) => {
-      if (resourceIds.size) return itemIdentityIds(item).some((id) => resourceIds.has(id));
-      const name = playerPickItemName(item).toLowerCase();
-      return patterns.some((pattern) => name.includes(String(pattern).toLowerCase()));
-    };
+    if (resourceIds.size) return itemIdentityIds(item).some((id) => resourceIds.has(id));
+    const name = playerPickItemName(item).toLowerCase();
+    return patterns.some((pattern) => name.includes(String(pattern).toLowerCase()));
+  }
+  function partitionPendingPlayerPicks(items, acceptedNames = [], acceptedResourceIds = []) {
+    const matches = (item) => playerPickMatchesReward(item, acceptedNames, acceptedResourceIds);
     const picks = items || [];
     return {
-      matching: picks.find(matches) || null,
-      unexpected: picks.find((item) => !matches(item)) || null
+      matching: picks.filter(matches),
+      unexpected: picks.filter((item) => !matches(item))
+    };
+  }
+  function classifyPendingPlayerPicks(items, acceptedNames = [], acceptedResourceIds = []) {
+    const partitioned = partitionPendingPlayerPicks(items, acceptedNames, acceptedResourceIds);
+    return {
+      matching: partitioned.matching[0] || null,
+      unexpected: partitioned.unexpected[0] || null
     };
   }
   function rankPlayerPickCandidates(items, prices = /* @__PURE__ */ new Map(), options = {}) {
@@ -5585,8 +5595,132 @@
   async function emit4(options, event, payload = {}) {
     await options.onEvent?.(event, payload);
   }
+  async function submitPickChallenges(options, result) {
+    await options.stopPoint?.();
+    const before = await options.beforePick?.({ result });
+    if (before?.status === "blocked" || before?.status === "planned") {
+      return {
+        status: before.status,
+        reason: before.reason || `pre-Pick ${before.status}`
+      };
+    }
+    const challengeContext = await options.loadChallenges({ result });
+    if (!challengeContext) {
+      return { status: "unavailable", reason: "Player Pick challenge list unavailable" };
+    }
+    const incomplete = challengeContext.incomplete || [];
+    let planned = false;
+    let submittedCount = 0;
+    for (const entry of incomplete) {
+      const submission = await options.submitChallenge({ result, challengeContext, entry });
+      await emit4(options, "challenge", { result, challengeContext, entry, submission });
+      const submissionOutcome2 = outcome(submission);
+      if (submissionOutcome2 === "submitted") {
+        result.challengesSubmitted++;
+        submittedCount++;
+        await options.afterChallenge?.({ result, challengeContext, entry, submission });
+        continue;
+      }
+      if (submissionOutcome2 === "planned") {
+        result.challengesPlanned++;
+        planned = true;
+        continue;
+      }
+      return {
+        status: submissionOutcome2,
+        reason: submission?.reason || `Player Pick challenge ${submissionOutcome2}`,
+        challengeContext
+      };
+    }
+    if (planned) {
+      return { status: "planned", reason: "Player Pick challenges planned", challengeContext };
+    }
+    return { status: "submitted", challengeContext, submittedCount };
+  }
+  async function selectPick(options, result, pickItem, metadata = {}) {
+    const selected = await options.redeemPick({ result, pickItem, ...metadata });
+    await emit4(options, "pick", { result, pickItem, ...metadata, selected });
+    const selectedOutcome = outcome(selected);
+    if (selectedOutcome !== "selected") {
+      return {
+        status: selectedOutcome,
+        reason: selected?.reason || `Player Pick selection ${selectedOutcome}`
+      };
+    }
+    result.pickResults.push({ ...metadata, pickedCards: selected.pickedCards || [] });
+    result.picksCompleted++;
+    await options.afterPick?.({ result, ...metadata, selected });
+    return { status: "selected" };
+  }
+  async function runDeferredPlayerPicks(options, result, maxPicks) {
+    if (typeof options.listPendingPicks !== "function") throw new TypeError("listPendingPicks is required");
+    let pending = await options.listPendingPicks({ result, minimumCount: 0, phase: "initial" });
+    pending = Array.isArray(pending) ? pending : [];
+    let queuedCount = Math.min(maxPicks, pending.length);
+    const initialQueuedCount = queuedCount;
+    result.picksQueued = queuedCount;
+    if (queuedCount) await emit4(options, "queue", { result, queuedCount, maxPicks, initial: true });
+    while (result.status === "completed" && queuedCount < maxPicks) {
+      const submission = await submitPickChallenges(options, result);
+      if (submission.status !== "submitted") {
+        result.status = submission.status;
+        result.reason = submission.reason;
+        break;
+      }
+      const noIncompleteChallenge = !submission.submittedCount && !submission.challengeContext?.incomplete?.length;
+      pending = await options.listPendingPicks({
+        result,
+        minimumCount: queuedCount + 1,
+        phase: "queued-reward"
+      });
+      pending = Array.isArray(pending) ? pending : [];
+      if (pending.length <= queuedCount) {
+        result.status = "unavailable";
+        result.reason = noIncompleteChallenge ? "No incomplete Player Pick challenge remains" : "Player Pick reward was not found";
+        break;
+      }
+      const previousCount = queuedCount;
+      queuedCount = Math.min(maxPicks, pending.length);
+      result.picksQueued = Math.max(result.picksQueued, queuedCount);
+      await emit4(options, "queue", {
+        result,
+        queuedCount,
+        added: queuedCount - previousCount,
+        maxPicks,
+        initial: false
+      });
+    }
+    const queuedStatus = result.status;
+    const queuedReason = result.reason;
+    if (queuedCount) await emit4(options, "batch-open", { result, queuedCount, maxPicks });
+    while (result.picksCompleted < queuedCount) {
+      await options.stopPoint?.();
+      pending = await options.listPendingPicks({ result, minimumCount: 1, phase: "redeem" });
+      pending = Array.isArray(pending) ? pending : [];
+      if (!pending.length) {
+        result.status = "unavailable";
+        result.reason = "Queued Player Pick reward was not found";
+        break;
+      }
+      const selected = await selectPick(options, result, pending[0], {
+        resumed: result.picksCompleted < initialQueuedCount,
+        deferred: true
+      });
+      if (selected.status !== "selected") {
+        result.status = selected.status;
+        result.reason = selected.reason;
+        break;
+      }
+    }
+    if (result.picksCompleted === queuedCount && queuedStatus !== "completed") {
+      result.status = queuedStatus;
+      result.reason = queuedReason;
+    }
+  }
   async function runPlayerPickWorkflow(options = {}) {
-    for (const name of ["findPendingPick", "redeemPick", "loadChallenges", "submitChallenge", "findRewardPick"]) {
+    const deferred = options.openPicksAtEnd === true;
+    const requiredCallbacks = deferred ? ["listPendingPicks", "redeemPick", "loadChallenges", "submitChallenge"] : ["findPendingPick", "redeemPick", "loadChallenges", "submitChallenge", "findRewardPick"];
+    for (const name of requiredCallbacks) {
       if (typeof options[name] !== "function") throw new TypeError(`${name} is required`);
     }
     const result = {
@@ -5594,83 +5728,44 @@
       picksCompleted: 0,
       challengesSubmitted: 0,
       challengesPlanned: 0,
+      picksQueued: 0,
       pickResults: [],
       reason: null
     };
     const maxPicks = pickLimit(options.maxPicks);
+    if (deferred) {
+      await runDeferredPlayerPicks(options, result, maxPicks);
+      await options.finalize?.(result);
+      return result;
+    }
     while (result.picksCompleted < maxPicks) {
       const pendingPick = await options.findPendingPick({ result });
       if (!pendingPick) break;
-      const selected = await options.redeemPick({ result, pickItem: pendingPick, resumed: true });
-      await emit4(options, "pick", { result, pickItem: pendingPick, resumed: true, selected });
-      const selectedOutcome = outcome(selected);
-      if (selectedOutcome === "selected") {
-        result.pickResults.push({ resumed: true, pickedCards: selected.pickedCards || [] });
-        result.picksCompleted++;
-        await options.afterPick?.({ result, resumed: true, selected });
-        continue;
-      }
-      result.status = selectedOutcome;
-      result.reason = selected?.reason || `pending Pick ${selectedOutcome}`;
+      const selected = await selectPick(options, result, pendingPick, { resumed: true, deferred: false });
+      if (selected.status === "selected") continue;
+      result.status = selected.status;
+      result.reason = selected.reason || `pending Pick ${selected.status}`;
       break;
     }
     while (result.status === "completed" && result.picksCompleted < maxPicks) {
-      await options.stopPoint?.();
-      const before = await options.beforePick?.({ result });
-      if (before?.status === "blocked" || before?.status === "planned") {
-        result.status = before.status;
-        result.reason = before.reason || `pre-Pick ${before.status}`;
+      const submission = await submitPickChallenges(options, result);
+      if (submission.status !== "submitted") {
+        result.status = submission.status;
+        result.reason = submission.reason;
         break;
       }
-      const challengeContext = await options.loadChallenges({ result });
-      if (!challengeContext) {
-        result.status = "unavailable";
-        result.reason = "Player Pick challenge list unavailable";
-        break;
-      }
-      const incomplete = challengeContext.incomplete || [];
-      let planned = false;
-      for (const entry of incomplete) {
-        const submission = await options.submitChallenge({ result, challengeContext, entry });
-        await emit4(options, "challenge", { result, challengeContext, entry, submission });
-        const submissionOutcome2 = outcome(submission);
-        if (submissionOutcome2 === "submitted") {
-          result.challengesSubmitted++;
-          await options.afterChallenge?.({ result, challengeContext, entry, submission });
-          continue;
-        }
-        if (submissionOutcome2 === "planned") {
-          result.challengesPlanned++;
-          planned = true;
-          continue;
-        }
-        result.status = submissionOutcome2;
-        result.reason = submission?.reason || `Player Pick challenge ${submissionOutcome2}`;
-        break;
-      }
-      if (result.status !== "completed") break;
-      if (planned) {
-        result.status = "planned";
-        result.reason = "Player Pick challenges planned";
-        break;
-      }
-      const rewardPick = await options.findRewardPick({ result, challengeContext });
+      const rewardPick = await options.findRewardPick({ result, challengeContext: submission.challengeContext });
       if (!rewardPick) {
         result.status = "unavailable";
         result.reason = "Player Pick reward was not found";
         break;
       }
-      const selected = await options.redeemPick({ result, pickItem: rewardPick, resumed: false });
-      await emit4(options, "pick", { result, pickItem: rewardPick, resumed: false, selected });
-      const selectedOutcome = outcome(selected);
-      if (selectedOutcome !== "selected") {
-        result.status = selectedOutcome;
-        result.reason = selected?.reason || `Player Pick selection ${selectedOutcome}`;
+      const selected = await selectPick(options, result, rewardPick, { resumed: false, deferred: false });
+      if (selected.status !== "selected") {
+        result.status = selected.status;
+        result.reason = selected.reason;
         break;
       }
-      result.pickResults.push({ resumed: false, pickedCards: selected.pickedCards || [] });
-      result.picksCompleted++;
-      await options.afterPick?.({ result, resumed: false, selected });
     }
     await options.finalize?.(result);
     return result;
@@ -6044,6 +6139,7 @@
     "bronze-loop-pick-protect-high-gold",
     "bronze-loop-pick-auto-below-90",
     "bronze-loop-pick-prefer-scanned",
+    "bronze-loop-pick-open-at-end",
     "bronze-loop-pick-high-gold-threshold",
     "bronze-loop-pick-auto-threshold"
   ];
@@ -6089,6 +6185,7 @@
     required(panel, "#bronze-loop-pick-protect-high-gold").checked = pickOptions.protectHighGold === true;
     required(panel, "#bronze-loop-pick-auto-below-90").checked = pickOptions.autoSelectBelow90 === true;
     required(panel, "#bronze-loop-pick-prefer-scanned").checked = pickOptions.preferScannedMetadata === true;
+    required(panel, "#bronze-loop-pick-open-at-end").checked = pickOptions.openPicksAtEnd === true;
     required(panel, "#bronze-loop-pick-high-gold-threshold").value = pickOptions.highGoldThreshold;
     required(panel, "#bronze-loop-pick-auto-threshold").value = pickOptions.autoPickThreshold;
   }
@@ -6509,6 +6606,7 @@
       "bronze-loop-pick-protect-high-gold": state.running === true,
       "bronze-loop-pick-auto-below-90": state.running === true,
       "bronze-loop-pick-prefer-scanned": state.running === true || state.scanningPicks === true,
+      "bronze-loop-pick-open-at-end": state.running === true,
       "bronze-loop-pick-high-gold-threshold": state.running === true,
       "bronze-loop-pick-auto-threshold": state.running === true,
       "bronze-loop-show-mvp": state.running === true,
@@ -6677,6 +6775,9 @@
         <div class="row">
           <label title="Use fully supported scanned Pick requirements and stable identities while keeping static loop IDs as fallback">
             <input id="bronze-loop-pick-prefer-scanned" type="checkbox"> Use scanned Pick metadata
+          </label>
+          <label title="Complete the requested Player Pick SBC count first, then open the matching Picks together">
+            <input id="bronze-loop-pick-open-at-end" type="checkbox"> Open Picks at end
           </label>
         </div>
         <div class="row" id="bronze-loop-rounds-row">
@@ -7235,7 +7336,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.12",
+      version: "0.5.13",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -11580,6 +11681,7 @@
         protectHighGold: document.querySelector("#bronze-loop-pick-protect-high-gold")?.checked !== false,
         autoSelectBelow90: document.querySelector("#bronze-loop-pick-auto-below-90")?.checked !== false,
         preferScannedMetadata: document.querySelector("#bronze-loop-pick-prefer-scanned")?.checked === true,
+        openPicksAtEnd: document.querySelector("#bronze-loop-pick-open-at-end")?.checked === true,
         highGoldThreshold: document.querySelector("#bronze-loop-pick-high-gold-threshold")?.value,
         autoPickThreshold: document.querySelector("#bronze-loop-pick-auto-threshold")?.value
       });
@@ -13014,6 +13116,48 @@
       if (!options.quietMissing) log(`${loopDef.name}: Player Pick reward was not found in unassigned items`);
       return null;
     }
+    function pendingPlayerPickQuantity(item) {
+      return Math.max(
+        1,
+        Number(item?.stackCount || 0) || 0,
+        Number(item?.untradeableCount || 0) || 0
+      );
+    }
+    async function listUnassignedPlayerPicksForLoop(loopDef, attempts = 1, options = {}) {
+      const minimumCount = Math.max(0, Number(options.minimumCount || 0) || 0);
+      let matching = [];
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        await refreshUnassigned({ quiet: true, attempts: 1 });
+        const partitioned = partitionPendingPlayerPicks(
+          eaPlayerPickAdapter().listUnassignedPlayerPicks(),
+          loopDef.pickItemNames || [],
+          loopDef.pickItemResourceIds || []
+        );
+        if (partitioned.unexpected.length && options.failOnUnexpected) {
+          fail2(`${loopDef.name}: unrelated unassigned Player Pick detected (${playerPickItemName(partitioned.unexpected[0])}); stop without redeeming it`);
+        }
+        matching = partitioned.matching.flatMap(
+          (item) => Array.from({ length: pendingPlayerPickQuantity(item) }, () => item)
+        );
+        if (matching.length >= minimumCount) return matching;
+        if (attempt < attempts) await sleep(900);
+      }
+      if (!options.quietMissing && matching.length < minimumCount) {
+        log(`${loopDef.name}: found ${matching.length}/${minimumCount} expected pending Player Pick reward(s)`);
+      }
+      return matching;
+    }
+    async function reservePendingPlayerPicksDuringCleanup(loopDef, reason) {
+      const matching = await listUnassignedPlayerPicksForLoop(loopDef, 1, {
+        minimumCount: 0,
+        quietMissing: true,
+        failOnUnexpected: true
+      });
+      const reservedIds = new Set(matching.map((item) => Number(item?.id || 0)).filter(Boolean));
+      await resolveRuntimeUnassigned(reason, {
+        reserveItem: (item) => reservedIds.has(Number(item?.id || 0))
+      });
+    }
     function assertPlayerPickFodderProtection(loopDef, players) {
       const inspection = inspectSbcItems(loopDef, players, {
         expectedPlayerCount: sumRequirementPlayerCount(loopDef)
@@ -13190,8 +13334,13 @@
       const dryRun = loopDef.dryRun === true;
       const maxPicks = Math.max(1, Math.min(50, Number(loopDef.maxCompletions || 1) || 1));
       const challengesPerPick = getPlayerPickChallengeCount(loopDef);
+      const openPicksAtEnd = !dryRun && loopDef.openPicksAtEnd === true;
+      if (openPicksAtEnd) {
+        log(`${loopDef.name}: batch Pick mode enabled; complete up to ${maxPicks} Pick(s), then open matching rewards together`);
+      }
       const result = await runPlayerPickWorkflow({
         maxPicks,
+        openPicksAtEnd,
         stopPoint: () => stopPoint(),
         findPendingPick: async () => {
           const pending = await findUnassignedPlayerPick(loopDef, 1, { quietMissing: true, failOnUnexpected: true });
@@ -13201,12 +13350,27 @@
         },
         redeemPick: async ({ pickItem, resumed }) => {
           if (dryRun) return { status: "planned", reason: "would redeem Player Pick" };
-          const pickedCards = await redeemAndSelectPlayerPick(pickItem, loopDef);
+          const pickedCards = await redeemAndSelectPlayerPick(pickItem, loopDef, openPicksAtEnd ? {
+            cleanupOptions: {
+              reserveItem: (item) => playerPickMatchesReward(
+                item,
+                loopDef.pickItemNames || [],
+                loopDef.pickItemResourceIds || []
+              )
+            }
+          } : {});
           if (resumed) log(`${loopDef.name}: resumed Player Pick selected`);
           return { status: "selected", pickedCards: pickedCards || [] };
         },
         beforePick: async ({ result: current }) => {
-          if (!dryRun) await resolveRuntimeUnassigned(`${loopDef.name} pick ${current.picksCompleted + 1} pre-submit cleanup`);
+          if (!dryRun && openPicksAtEnd) {
+            await reservePendingPlayerPicksDuringCleanup(
+              loopDef,
+              `${loopDef.name} queued pick ${current.picksQueued + 1} pre-submit cleanup`
+            );
+          } else if (!dryRun) {
+            await resolveRuntimeUnassigned(`${loopDef.name} pick ${current.picksCompleted + 1} pre-submit cleanup`);
+          }
           return { status: "ready" };
         },
         loadChallenges: async () => {
@@ -13233,6 +13397,22 @@
           if (!dryRun) await sleep(CFG.pauseMs);
         },
         findRewardPick: async () => dryRun ? null : findUnassignedPlayerPick(loopDef, 10, { failOnUnexpected: true }),
+        listPendingPicks: async ({ minimumCount, phase }) => listUnassignedPlayerPicksForLoop(
+          loopDef,
+          phase === "initial" ? 1 : 10,
+          {
+            minimumCount,
+            quietMissing: phase === "initial",
+            failOnUnexpected: true
+          }
+        ),
+        onEvent: async (event, payload) => {
+          if (event === "queue") {
+            log(`${loopDef.name}: queued ${payload.queuedCount}/${maxPicks} matching Player Pick reward(s)`);
+          } else if (event === "batch-open") {
+            log(`${loopDef.name}: submission phase ended; opening ${payload.queuedCount} queued Player Pick reward(s)`);
+          }
+        },
         afterPick: async ({ result: current, resumed }) => {
           if (resumed) log(`${loopDef.name}: resumed Player Pick counts as ${current.picksCompleted}/${maxPicks} requested completion(s)`);
           if (!dryRun) await sleep(CFG.pauseMs);
@@ -13242,7 +13422,7 @@
         log(`${loopDef.name}: dry-run planned ${result.challengesPlanned} challenge(s)`);
         log(`${loopDef.name}: dry run stops before submitting SBCs, redeeming Picks, or moving items`);
       } else {
-        log(`${loopDef.name}: completed ${result.picksCompleted}/${maxPicks} Player Pick(s)`);
+        log(`${loopDef.name}: completed ${result.picksCompleted}/${maxPicks} Player Pick(s)${openPicksAtEnd ? `; queued ${result.picksQueued}` : ""}`);
       }
       return result;
     }

@@ -64,6 +64,7 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-pick-protect-high-gold': state.running === true,
     'bronze-loop-pick-auto-below-90': state.running === true,
     'bronze-loop-pick-prefer-scanned': state.running === true || state.scanningPicks === true,
+    'bronze-loop-pick-open-at-end': state.running === true,
     'bronze-loop-pick-high-gold-threshold': state.running === true,
     'bronze-loop-pick-auto-threshold': state.running === true,
     'bronze-loop-show-mvp': state.running === true,

@@ -18,20 +18,30 @@ export function playerPickItemName(item) {
   return String(item?._staticData?.name || item?.name || item?.description || `Player Pick #${item?.id || '?'}`);
 }
 
-export function classifyPendingPlayerPicks(items, acceptedNames = [], acceptedResourceIds = []) {
+export function playerPickMatchesReward(item, acceptedNames = [], acceptedResourceIds = []) {
   const patterns = Array.isArray(acceptedNames)
     ? acceptedNames
     : (acceptedNames === undefined || acceptedNames === null ? [] : [acceptedNames]);
   const resourceIds = new Set((acceptedResourceIds || []).map(Number).filter((value) => Number.isFinite(value) && value > 0));
-  const matches = (item) => {
-    if (resourceIds.size) return itemIdentityIds(item).some((id) => resourceIds.has(id));
-    const name = playerPickItemName(item).toLowerCase();
-    return patterns.some((pattern) => name.includes(String(pattern).toLowerCase()));
-  };
+  if (resourceIds.size) return itemIdentityIds(item).some((id) => resourceIds.has(id));
+  const name = playerPickItemName(item).toLowerCase();
+  return patterns.some((pattern) => name.includes(String(pattern).toLowerCase()));
+}
+
+export function partitionPendingPlayerPicks(items, acceptedNames = [], acceptedResourceIds = []) {
+  const matches = (item) => playerPickMatchesReward(item, acceptedNames, acceptedResourceIds);
   const picks = items || [];
   return {
-    matching: picks.find(matches) || null,
-    unexpected: picks.find((item) => !matches(item)) || null,
+    matching: picks.filter(matches),
+    unexpected: picks.filter((item) => !matches(item)),
+  };
+}
+
+export function classifyPendingPlayerPicks(items, acceptedNames = [], acceptedResourceIds = []) {
+  const partitioned = partitionPendingPlayerPicks(items, acceptedNames, acceptedResourceIds);
+  return {
+    matching: partitioned.matching[0] || null,
+    unexpected: partitioned.unexpected[0] || null,
   };
 }
 

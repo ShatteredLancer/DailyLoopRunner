@@ -157,6 +157,9 @@ export function mainPanelHtml(maxRounds = 3) {
           <label title="Use fully supported scanned Pick requirements and stable identities while keeping static loop IDs as fallback">
             <input id="bronze-loop-pick-prefer-scanned" type="checkbox"> Use scanned Pick metadata
           </label>
+          <label title="Complete the requested Player Pick SBC count first, then open the matching Picks together">
+            <input id="bronze-loop-pick-open-at-end" type="checkbox"> Open Picks at end
+          </label>
         </div>
         <div class="row" id="bronze-loop-rounds-row">
           <span id="bronze-loop-rounds-label">rounds</span>

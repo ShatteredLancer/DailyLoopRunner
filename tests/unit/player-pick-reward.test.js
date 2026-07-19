@@ -3,6 +3,8 @@ import {
   capturePlayerPickSelections,
   classifyPendingPlayerPicks,
   getManualPlayerPickReason,
+  partitionPendingPlayerPicks,
+  playerPickMatchesReward,
   playerPickItemName,
   rankPlayerPickCandidates,
 } from '../../src/reward/player-pick.js';
@@ -24,6 +26,18 @@ describe('Player Pick reward planning', () => {
     const wrong = { id: 5009999, definitionId: 5009999, name: '1 of 5 83+ Player Pick' };
     expect(classifyPendingPlayerPicks([wrong, matching], ['83+ Player Pick'], [5004333]))
       .toEqual({ matching, unexpected: wrong });
+  });
+
+  it('returns every matching pending reward for deferred Pick opening', () => {
+    const matching = [
+      { id: 1, definitionId: 5004333 },
+      { id: 2, definitionId: 5004333 },
+    ];
+    const unexpected = { id: 3, definitionId: 5009999 };
+    expect(partitionPendingPlayerPicks([...matching, unexpected], [], [5004333]))
+      .toEqual({ matching, unexpected: [unexpected] });
+    expect(playerPickMatchesReward(matching[0], [], [5004333])).toBe(true);
+    expect(playerPickMatchesReward(unexpected, [], [5004333])).toBe(false);
   });
 
   it('orders by rating, special, non-duplicate, price, then original position', () => {

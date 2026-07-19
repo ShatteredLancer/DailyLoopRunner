@@ -11,6 +11,7 @@ describe('loop runtime option projection', () => {
       protectHighGold: true,
       autoSelectBelow90: true,
       preferScannedMetadata: false,
+      openPicksAtEnd: false,
       highGoldThreshold: 82,
       autoPickThreshold: 90,
     });
@@ -18,12 +19,14 @@ describe('loop runtime option projection', () => {
       protectHighGold: false,
       autoSelectBelow90: false,
       preferScannedMetadata: true,
+      openPicksAtEnd: true,
       highGoldThreshold: 120,
       autoPickThreshold: 0,
     })).toEqual({
       protectHighGold: false,
       autoSelectBelow90: false,
       preferScannedMetadata: true,
+      openPicksAtEnd: true,
       highGoldThreshold: 99,
       autoPickThreshold: 90,
     });
@@ -38,12 +41,14 @@ describe('loop runtime option projection', () => {
     applyPickRuntimeOptions(loopDef, {
       protectHighGold: true,
       autoSelectBelow90: false,
+      openPicksAtEnd: true,
       highGoldThreshold: 84,
       autoPickThreshold: 91,
     });
     expect(loopDef).toMatchObject({
       protectHighGold: true,
       autoSelectBelow90: false,
+      openPicksAtEnd: true,
       pickHighGoldThreshold: 84,
       autoPickRatingThreshold: 91,
       requirements: [{ maxRating: 83, protectHighGold: true }],

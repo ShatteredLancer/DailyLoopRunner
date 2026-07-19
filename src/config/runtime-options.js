@@ -3,6 +3,7 @@ export function normalizePickRuntimeOptions(input = {}) {
     protectHighGold: input.protectHighGold !== false,
     autoSelectBelow90: input.autoSelectBelow90 !== false,
     preferScannedMetadata: input.preferScannedMetadata === true,
+    openPicksAtEnd: input.openPicksAtEnd === true,
     highGoldThreshold: Math.max(2, Math.min(99, Number(input.highGoldThreshold || 82) || 82)),
     autoPickThreshold: Math.max(1, Math.min(99, Number(input.autoPickThreshold || 90) || 90)),
   };
@@ -13,6 +14,7 @@ export function applyPickRuntimeOptions(loopDef, input = {}) {
   const options = normalizePickRuntimeOptions(input);
   loopDef.protectHighGold = options.protectHighGold;
   loopDef.autoSelectBelow90 = options.autoSelectBelow90;
+  loopDef.openPicksAtEnd = options.openPicksAtEnd;
   loopDef.pickHighGoldThreshold = options.highGoldThreshold;
   loopDef.autoPickRatingThreshold = options.autoPickThreshold;
   const requirementGroups = [loopDef.requirements, ...(loopDef.challengeRequirements || [])];

@@ -30,6 +30,7 @@ describe('main panel view template', () => {
       'bronze-loop-pick-high-gold-threshold',
       'bronze-loop-pick-auto-below-90',
       'bronze-loop-pick-prefer-scanned',
+      'bronze-loop-pick-open-at-end',
       'bronze-loop-pick-auto-threshold',
       'bronze-loop-refresh',
       'bronze-loop-scan-picks',

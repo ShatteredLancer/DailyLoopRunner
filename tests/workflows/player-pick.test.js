@@ -61,4 +61,80 @@ describe('runPlayerPickWorkflow', () => {
     expect(result.picksCompleted).toBe(3);
     expect(options.findRewardPick).toHaveBeenCalledTimes(3);
   });
+
+  it('queues matching Pick rewards to the limit before redeeming them together', async () => {
+    const pending = [{ id: 40 }];
+    let nextId = 50;
+    const events = [];
+    const options = baseOptions({
+      maxPicks: 3,
+      openPicksAtEnd: true,
+      listPendingPicks: vi.fn(async () => [...pending]),
+      submitChallenge: vi.fn(async () => {
+        pending.push({ id: nextId++ });
+        return { status: 'submitted', submitted: true };
+      }),
+      redeemPick: vi.fn(async ({ pickItem }) => {
+        pending.splice(pending.findIndex((item) => item.id === pickItem.id), 1);
+        return { status: 'selected', pickedCards: [{ id: pickItem.id + 100 }] };
+      }),
+      onEvent: vi.fn(async (event) => { events.push(event); }),
+    });
+
+    const result = await runPlayerPickWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      picksQueued: 3,
+      picksCompleted: 3,
+      challengesSubmitted: 2,
+    });
+    expect(options.submitChallenge).toHaveBeenCalledTimes(2);
+    expect(options.redeemPick).toHaveBeenCalledTimes(3);
+    expect(events.indexOf('batch-open')).toBeGreaterThan(events.lastIndexOf('challenge'));
+    expect(pending).toEqual([]);
+  });
+
+  it('opens already queued Picks after a later submission is blocked', async () => {
+    const pending = [{ id: 40 }, { id: 41 }];
+    const options = baseOptions({
+      maxPicks: 3,
+      openPicksAtEnd: true,
+      listPendingPicks: vi.fn(async () => [...pending]),
+      submitChallenge: vi.fn(async () => ({ status: 'blocked', reason: 'missing rare gold' })),
+      redeemPick: vi.fn(async ({ pickItem }) => {
+        pending.splice(pending.findIndex((item) => item.id === pickItem.id), 1);
+        return { status: 'selected', pickedCards: [{ id: pickItem.id + 100 }] };
+      }),
+    });
+
+    const result = await runPlayerPickWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reason: 'missing rare gold',
+      picksQueued: 2,
+      picksCompleted: 2,
+    });
+    expect(options.redeemPick).toHaveBeenCalledTimes(2);
+    expect(pending).toEqual([]);
+  });
+
+  it('stops batch submission when the Pick SBC has no incomplete challenge', async () => {
+    const options = baseOptions({
+      maxPicks: 3,
+      openPicksAtEnd: true,
+      listPendingPicks: vi.fn(async () => []),
+      loadChallenges: vi.fn(async () => ({ incomplete: [] })),
+    });
+
+    const result = await runPlayerPickWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'unavailable',
+      reason: 'No incomplete Player Pick challenge remains',
+      picksCompleted: 0,
+    });
+    expect(options.redeemPick).not.toHaveBeenCalled();
+  });
 });

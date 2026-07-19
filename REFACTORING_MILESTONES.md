@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.5.12`
+- Userscript 版本：`0.5.13`
 - Git 基线：`2ddf933`
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
@@ -556,6 +556,7 @@ Status: In Progress
 - `0.5.11` 增加默认关闭的 `Use scanned Pick metadata` 验证选项。启用后立即重扫；完整且只匹配一个静态 Pick 的结果会覆盖当前会话中的 Set/奖励身份、Challenge 数量和材料比例，同时保留静态 Loop ID、名称、运行限制和 Provision `preCraftPlayerPickLoopId`。扫描失败、活动完成、unsupported 或多重匹配时继续使用静态回退；未知支持 Pick 的会话入口逻辑不变。
 - `0.5.11` 实盘验证通过：83+ 与 84+ 均先用扫描覆盖完成 Dry Run，严格选择 4 张低分普通稀有金；随后 Live 完成精确 Set/奖励领取、FUTNext 价格、自动 Pick 和 Unassigned 清理。83+ 领取 1/5，84+ 领取 1/3，结束均为空。
 - `0.5.12` 从内置和外部 JSON 删除 83+/84+ 的静态活动配置及静态场景登记；两者只在扫描成功且条件完整时生成会话 Loop。82+ 静态配置继续保留，Provision `preCraftPlayerPickLoopId` 不变；其多 Challenge 动态覆盖等待活动重新可用后实盘验证。
+- `0.5.13` 为直接运行的 Player Pick Loop 增加可持久化的 `Open Picks at end` 选项。开启后，同类型的已有 pending Pick 计入 `rounds` 上限，后续提交期间通过稳定奖励身份保留，达到上限、活动完成或材料不足后集中领取；其它 pending Pick 继续安全阻断。Provision 前置 Pick 保持原有即时领取流程。
 
 Live validation: `1 of 5 83+ Player Pick` 和 `1 of 3 84+ Summer Tournament Nations Player Pick` 的静态 Workflow 与 `0.5.11` 扫描覆盖模式均已真实提交并领取通过，因此 `0.5.12` 删除两者静态配置。`5 of 10 82+ Players Pick` 当前已全部完成，暂时无法复验动态多 Challenge/Provision 引用，不记为失败并继续保留静态配置。
 

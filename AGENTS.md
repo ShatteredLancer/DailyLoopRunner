@@ -219,7 +219,7 @@ EA objects
 - `loop-presentation.js`：MVP/hidden 可见性和 `disabledPiles` 投影。
 - `run-limits.js`：Live guard、One-click 阶段上限和 pack/SBC 单位摘要的纯计算。
 - `routine-steps.js`：One-click 子 Loop 查找、继承、校验和 disabled pile 投影。
-- `runtime-options.js`：Dry Run、奖励开包、rounds 和 Pick 82/90 阈值的运行时配置投影。
+- `runtime-options.js`：Dry Run、奖励开包、rounds、Pick 82/90 阈值和延迟集中开启 Pick 的运行时配置投影。
 - `player-pick-discovery.js`：从标准 SBC Set/Challenge/Reward 快照保守生成临时 `playerPickSbc` 配置；条件不完整时只返回诊断，不从名称猜测。
 - `fsu-compat.js`：FSU/Enhancer 嵌套设置、Storage 配置和锁卡身份的纯兼容解析。
 - `selection.js`：把 Loop 与 requirement 级别的保护字段规范化为选材输入。
@@ -389,7 +389,7 @@ Workflow 是无 EA/DOM 依赖的状态机：
 - `recycle.js`：重复卡、奖励包和 seed SBC 循环。
 - `supply-and-craft.js`：库存选择、补货包、fallback 和重复提交。
 - `pack-and-craft.js`：源包、恢复状态和有序 crafting stages。
-- `player-pick.js`：pending Pick 优先、Challenge 提交、领取和计数。
+- `player-pick.js`：pending Pick 优先、Challenge 提交、即时领取或达到上限后集中领取，以及 Pick 计数。
 - `repeated-submission.js`：重复提交型流程。
 - `reserved-duplicate-crafting.js`：Provision/Rare Pack 共用的重复材料 crafting 迭代、Dry Run 和停止状态。
 - `sequence.js`：One-click 等有序子流程。

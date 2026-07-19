@@ -2,6 +2,7 @@ const PICK_OPTION_IDS = [
   'bronze-loop-pick-protect-high-gold',
   'bronze-loop-pick-auto-below-90',
   'bronze-loop-pick-prefer-scanned',
+  'bronze-loop-pick-open-at-end',
   'bronze-loop-pick-high-gold-threshold',
   'bronze-loop-pick-auto-threshold',
 ];
@@ -52,6 +53,7 @@ export function hydrateMainPanelOptions(options = {}) {
   required(panel, '#bronze-loop-pick-protect-high-gold').checked = pickOptions.protectHighGold === true;
   required(panel, '#bronze-loop-pick-auto-below-90').checked = pickOptions.autoSelectBelow90 === true;
   required(panel, '#bronze-loop-pick-prefer-scanned').checked = pickOptions.preferScannedMetadata === true;
+  required(panel, '#bronze-loop-pick-open-at-end').checked = pickOptions.openPicksAtEnd === true;
   required(panel, '#bronze-loop-pick-high-gold-threshold').value = pickOptions.highGoldThreshold;
   required(panel, '#bronze-loop-pick-auto-threshold').value = pickOptions.autoPickThreshold;
 }

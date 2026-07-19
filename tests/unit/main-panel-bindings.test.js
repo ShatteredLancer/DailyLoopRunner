@@ -8,6 +8,7 @@ const IDS = [
   'bronze-loop-pick-protect-high-gold',
   'bronze-loop-pick-auto-below-90',
   'bronze-loop-pick-prefer-scanned',
+  'bronze-loop-pick-open-at-end',
   'bronze-loop-pick-high-gold-threshold',
   'bronze-loop-pick-auto-threshold',
   'bronze-loop-show-mvp',
@@ -137,6 +138,7 @@ describe('main panel bindings', () => {
         protectHighGold: true,
         autoSelectBelow90: false,
         preferScannedMetadata: true,
+        openPicksAtEnd: true,
         highGoldThreshold: 83,
         autoPickThreshold: 91,
       },
@@ -145,6 +147,7 @@ describe('main panel bindings', () => {
     expect(controls.get('bronze-loop-pick-protect-high-gold').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-auto-below-90').checked).toBe(false);
     expect(controls.get('bronze-loop-pick-prefer-scanned').checked).toBe(true);
+    expect(controls.get('bronze-loop-pick-open-at-end').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-high-gold-threshold').value).toBe(83);
     expect(controls.get('bronze-loop-pick-auto-threshold').value).toBe(91);
   });
