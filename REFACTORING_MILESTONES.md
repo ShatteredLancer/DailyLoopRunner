@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.5.20`
+- Userscript 版本：`0.5.21`
 - Git 基线：`2ddf933`
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
@@ -564,6 +564,7 @@ Status: In Progress
 - `0.5.18` 修正 Batch Open 在 Storage 满时丢失已开包回执并重复执行 final cleanup 的问题。单包 opened-item policy 会先尝试现有通用恢复配方，仍失败时安全保留无法移动的 Unassigned，高分/FSU 保护不变；已打开包进入 recap，剩余包停止。启动前也会以相同模式检查已有 Unassigned，阻塞未解除时不会打开新包。
 - `0.5.19` 将 Batch Open 的 My Packs `Add` 改为单按钮下拉菜单，支持 `Add 1` 和 `Add all (N)`；已加入项可用 `Added v` 快速重设为 1 或当前全部数量，并保持原有 Batch list 顺序和即时持久化。
 - `0.5.20` 扩展 Batch Open recap：特殊卡逐张查询并显示 FUT.GG/FUTNext 实时价格；非特殊 Gold、Silver、Bronze 球员按评分、Rare/Common 和卡色分别聚合，同评分不混合。价格失败显示 `price:?`，不影响已完成开包结果或 recap。
+- `0.5.21` 将 Batch Open 的 `Add all` 从数量快照改为持久化动态 `all` 模式。弹窗按当前 My Packs 显示实时数量，Start 前再次刷新并物化执行计划；库存增减会自动跟随，当前为 0 的类型安全跳过。旧的固定数量配置保持兼容。
 
 Live validation: `1 of 5 83+ Player Pick` 和 `1 of 3 84+ Summer Tournament Nations Player Pick` 的静态 Workflow 与 `0.5.11` 扫描覆盖模式均已真实提交并领取通过，因此 `0.5.12` 删除两者静态配置。`5 of 10 82+ Players Pick` 当前已全部完成，暂时无法复验动态多 Challenge/Provision 引用，不记为失败并继续保留静态配置。
 

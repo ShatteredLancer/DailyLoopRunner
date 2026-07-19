@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.20
+// @version      0.5.21
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -1696,7 +1696,8 @@
     return Object.freeze({
       packId: packId2,
       packName,
-      quantity: normalizedQuantity(entry.quantity)
+      quantity: normalizedQuantity(entry.quantity),
+      quantityMode: entry.quantityMode === "all" ? "all" : "fixed"
     });
   }
   function normalizeBatchOpenPlan(input = {}) {
@@ -1726,8 +1727,18 @@
     const byKey = new Map(groups.map((group) => [batchOpenEntryKey(group), group]));
     return plan.entries.map((entry) => Object.freeze({
       ...entry,
-      available: byKey.get(batchOpenEntryKey(entry))?.available || 0
+      available: byKey.get(batchOpenEntryKey(entry))?.available || 0,
+      effectiveQuantity: entry.quantityMode === "all" ? byKey.get(batchOpenEntryKey(entry))?.available || 0 : entry.quantity
     }));
+  }
+  function materializeBatchOpenPlan(planInput = {}, snapshot = {}) {
+    const rows = createBatchOpenAvailability(planInput, snapshot);
+    return normalizeBatchOpenPlan({
+      entries: rows.filter((entry) => entry.quantityMode !== "all" || entry.available > 0).map((entry) => ({
+        ...entry,
+        quantity: entry.quantityMode === "all" ? entry.available : entry.quantity
+      }))
+    });
   }
 
   // src/domain/rating.js
@@ -8383,7 +8394,8 @@
       entries: Array.from(planList.children || []).map((row) => ({
         packId: row.dataset?.packId || null,
         packName: row.dataset?.packName || "",
-        quantity: row.querySelector?.("input")?.value || 1
+        quantity: row.querySelector?.("input")?.value || 1,
+        quantityMode: row.dataset?.quantityMode || "fixed"
       }))
     });
     const render = () => {
@@ -8414,11 +8426,11 @@
           border: "1px solid #607089",
           boxShadow: "0 6px 18px rgba(0,0,0,.35)"
         });
-        const setQuantity = (quantity) => {
+        const setQuantity = (quantity, quantityMode = "fixed") => {
           plan = currentPlan();
           const key = batchOpenEntryKey({ packId: group.id, packName: group.name });
           const exists = plan.entries.some((entry) => batchOpenEntryKey(entry) === key);
-          const entries = exists ? plan.entries.map((entry) => batchOpenEntryKey(entry) === key ? { packId: group.id, packName: group.name, quantity } : entry) : [...plan.entries, { packId: group.id, packName: group.name, quantity }];
+          const entries = exists ? plan.entries.map((entry) => batchOpenEntryKey(entry) === key ? { packId: group.id, packName: group.name, quantity, quantityMode } : entry) : [...plan.entries, { packId: group.id, packName: group.name, quantity, quantityMode }];
           plan = normalizeBatchOpenPlan({ entries });
           notifyPlanChange();
           render();
@@ -8428,8 +8440,8 @@
         for (const option of [addOne, addAll]) {
           applyStyles5(option, { display: "block", width: "100%", minWidth: "0", textAlign: "left", border: "0" });
         }
-        addOne.addEventListener("click", () => setQuantity(1));
-        addAll.addEventListener("click", () => setQuantity(Math.max(1, Number(group.count) || 1)));
+        addOne.addEventListener("click", () => setQuantity(1, "fixed"));
+        addAll.addEventListener("click", () => setQuantity(Math.max(1, Number(group.count) || 1), "all"));
         add.addEventListener("click", () => {
           const open = menu.style.display === "none";
           menu.style.display = open ? "block" : "none";
@@ -8452,16 +8464,20 @@
         const row = dom.create("div");
         row.dataset.packId = entry.packId ? String(entry.packId) : "";
         row.dataset.packName = entry.packName;
+        row.dataset.quantityMode = entry.quantityMode;
         applyStyles5(row, { display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
         const label = dom.create("span");
         label.textContent = `${entry.packName || `Pack #${entry.packId}`} (#${entry.packId || "?"})`;
         applyStyles5(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
         const availability = dom.create("span");
-        availability.textContent = entry.available ? `${entry.available} available` : "unavailable";
+        availability.textContent = entry.available ? `${entry.quantityMode === "all" ? "all: " : ""}${entry.available} available` : "unavailable";
         applyStyles5(availability, { color: entry.available ? "#8fd19e" : "#e3a7a7", fontSize: "11px", flex: "0 0 auto" });
-        const quantity = quantityInput(dom, entry.quantity);
+        const quantity = quantityInput(dom, entry.effectiveQuantity);
         quantity.setAttribute?.("aria-label", `Quantity for ${entry.packName}`);
+        quantity.disabled = entry.quantityMode === "all";
+        quantity.title = entry.quantityMode === "all" ? `All available packs (${entry.available || "currently unavailable"})` : "Fixed quantity";
         quantity.addEventListener("change", () => {
+          row.dataset.quantityMode = "fixed";
           plan = currentPlan();
           notifyPlanChange();
         });
@@ -8736,7 +8752,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.20",
+      version: "0.5.21",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -15152,13 +15168,17 @@
     }
     async function executeBatchOpen(planInput) {
       if (state.running) return null;
-      const plan = persistBatchOpenPlan(planInput);
+      const savedPlan = persistBatchOpenPlan(planInput);
       state.running = true;
       state.stopping = false;
       setPanelState();
       let result = null;
       let recapModel = null;
       try {
+        await refreshStorePacks().catch((error) => {
+          log(`Batch Open: start-time My Packs refresh failed; using current cache (${error?.message || error})`);
+        });
+        const plan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
         const requested = plan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
         log(`Batch Open: starting ${requested} requested pack(s) across ${plan.entries.length} pack type(s)`);
         result = await runBatchOpenWorkflow({

@@ -220,7 +220,7 @@ EA objects
 - `run-limits.js`：Live guard、One-click 阶段执行策略和安全上限摘要的纯计算；安全上限不得伪装成业务 rounds。
 - `routine-steps.js`：One-click 子 Loop 查找、继承、校验、disabled pile 投影，以及 EA 实时剩余次数到子步骤完成数的投影。
 - `runtime-options.js`：Dry Run、奖励开包、rounds、Pick 82/90 阈值、是否显示 rounds 和延迟集中开启 Pick 的运行时配置投影。
-- `batch-open.js`：Batch Open 持久化计划规范化、稳定包类型 identity 和当前可用数量投影。
+- `batch-open.js`：Batch Open 持久化计划规范化、稳定包类型 identity、`fixed/all` 数量模式和当前可用数量投影/启动时物化。
 - `player-pick-discovery.js`：从标准 SBC Set/Challenge/Reward 快照保守生成临时 `playerPickSbc` 配置；条件不完整时只返回诊断，不从名称猜测。
 - `fsu-compat.js`：FSU/Enhancer 嵌套设置、Storage 配置和锁卡身份的纯兼容解析。
 - `selection.js`：把 Loop 与 requirement 级别的保护字段规范化为选材输入。
@@ -437,6 +437,8 @@ Reward Alerts 的三个测试入口必须保持解耦：Preview 只展示本地 
 Batch Open 是独立 operational tool，不是 Loop strategy。主面板只保留一个入口，详细配置在独立弹窗中。运行时必须调用共享 entry `openPack()`，每次打开前重新按 `packId + packName` 解析新的 live pack instance，并提供 `createMaterializeAndResolvePolicy()`；禁止直接调用 Adapter `open()`、复制 Unassigned 清理路径或为 Batch Open 生造专用物品路由。Preview 只显示本地 recap，不得发布 Reward Highlight、Desktop 或 ntfy 副作用。
 
 Batch Open 的 Unassigned 容量阻塞使用 `blockedPolicy: 'preserve'` 和显式 `enableRecovery: true`：先尝试现有通用恢复配方，仍无法处理时保留 Unassigned。已经成功打开的包必须保留 receipt 并进入 recap，后续包停止，不能再调用一次通用 final cleanup 覆盖结果。下一次 Batch 启动前也必须先执行同样的 preserve preflight；现有 Unassigned 未解除时不得打开新包。不要通过放宽高分、特殊卡、FSU 或 Lock 规则来强制腾出 Storage。
+
+Batch Open 的 `Add all` 必须持久化为 `quantityMode: 'all'`，不能只保存点击时的数量快照。弹窗展示使用当前 My Packs 数量，Start 前再次刷新并通过 `materializeBatchOpenPlan()` 物化执行数量；实时数量为 0 的 all entry 不进入执行计划。旧配置没有 `quantityMode` 时按 `fixed` 兼容。
 
 ### 5.11 `src/userscript-entry.js`
 

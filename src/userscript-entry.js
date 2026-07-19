@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.20
+// @version      0.5.21
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -57,7 +57,7 @@ import {
   validateLoopDefList as validateLoopDefListPure,
 } from './config/loop-schema.js';
 import { normalizeFsuSettings } from './config/fsu-compat.js';
-import { normalizeBatchOpenPlan } from './config/batch-open.js';
+import { materializeBatchOpenPlan, normalizeBatchOpenPlan } from './config/batch-open.js';
 import {
   buildPlayerPickDiscoverySession,
   parsePlayerPickSbcSnapshot,
@@ -225,7 +225,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.20',
+    version: '0.5.21',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -7431,13 +7431,17 @@ function updateLoopControls() {
 
   async function executeBatchOpen(planInput) {
     if (state.running) return null;
-    const plan = persistBatchOpenPlan(planInput);
+    const savedPlan = persistBatchOpenPlan(planInput);
     state.running = true;
     state.stopping = false;
     setPanelState();
     let result = null;
     let recapModel = null;
     try {
+      await refreshStorePacks().catch((error) => {
+        log(`Batch Open: start-time My Packs refresh failed; using current cache (${error?.message || error})`);
+      });
+      const plan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
       const requested = plan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
       log(`Batch Open: starting ${requested} requested pack(s) across ${plan.entries.length} pack type(s)`);
       result = await runBatchOpenWorkflow({

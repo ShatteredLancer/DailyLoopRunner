@@ -28,6 +28,7 @@ export function normalizeBatchOpenEntry(entry = {}) {
     packId,
     packName,
     quantity: normalizedQuantity(entry.quantity),
+    quantityMode: entry.quantityMode === 'all' ? 'all' : 'fixed',
   });
 }
 
@@ -60,6 +61,18 @@ export function createBatchOpenAvailability(planInput = {}, snapshot = {}) {
   return plan.entries.map((entry) => Object.freeze({
     ...entry,
     available: byKey.get(batchOpenEntryKey(entry))?.available || 0,
+    effectiveQuantity: entry.quantityMode === 'all'
+      ? (byKey.get(batchOpenEntryKey(entry))?.available || 0)
+      : entry.quantity,
   }));
 }
 
+export function materializeBatchOpenPlan(planInput = {}, snapshot = {}) {
+  const rows = createBatchOpenAvailability(planInput, snapshot);
+  return normalizeBatchOpenPlan({
+    entries: rows.filter((entry) => entry.quantityMode !== 'all' || entry.available > 0).map((entry) => ({
+      ...entry,
+      quantity: entry.quantityMode === 'all' ? entry.available : entry.quantity,
+    })),
+  });
+}

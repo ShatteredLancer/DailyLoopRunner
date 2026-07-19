@@ -72,7 +72,7 @@ describe('Batch Open dialog', () => {
     quantity.change();
     expect(onPlanChange).toHaveBeenLastCalledWith({
       version: 1,
-      entries: [{ packId: 999, packName: 'Remembered Pack', quantity: 5 }],
+      entries: [{ packId: 999, packName: 'Remembered Pack', quantity: 5, quantityMode: 'fixed' }],
     });
 
     ui.created.find((element) => element.textContent === 'Preview recap').click();
@@ -82,7 +82,7 @@ describe('Batch Open dialog', () => {
     await ui.created.find((element) => element.textContent === 'Start batch').click();
     expect(onStart).toHaveBeenCalledWith({
       version: 1,
-      entries: [{ packId: 999, packName: 'Remembered Pack', quantity: 5 }],
+      entries: [{ packId: 999, packName: 'Remembered Pack', quantity: 5, quantityMode: 'fixed' }],
     });
     expect(ui.body[0].removed).toBe(true);
   });
@@ -104,7 +104,7 @@ describe('Batch Open dialog', () => {
     expect(quantity.value).toBe('1');
     expect(onPlanChange).toHaveBeenCalledWith({
       version: 1,
-      entries: [{ packId: 205, packName: 'Silver Pack', quantity: 1 }],
+      entries: [{ packId: 205, packName: 'Silver Pack', quantity: 1, quantityMode: 'fixed' }],
     });
   });
 
@@ -124,7 +124,7 @@ describe('Batch Open dialog', () => {
     expect(quantity.value).toBe('6');
     expect(onPlanChange).toHaveBeenCalledWith({
       version: 1,
-      entries: [{ packId: 1039, packName: '4x 84+ Pack', quantity: 6 }],
+      entries: [{ packId: 1039, packName: '4x 84+ Pack', quantity: 6, quantityMode: 'all' }],
     });
   });
 
@@ -142,7 +142,20 @@ describe('Batch Open dialog', () => {
     ui.created.find((element) => element.textContent === 'Set to all (5)').click();
     expect(onPlanChange).toHaveBeenCalledWith({
       version: 1,
-      entries: [{ packId: 1039, packName: '4x 84+ Pack', quantity: 5 }],
+      entries: [{ packId: 1039, packName: '4x 84+ Pack', quantity: 5, quantityMode: 'all' }],
     });
+  });
+
+  it('shows the current live count for a remembered all entry instead of the saved snapshot quantity', () => {
+    const ui = createUiHarness();
+    showBatchOpenDialog({
+      dom: ui.dom,
+      plan: { entries: [{ packId: 1039, packName: '4x 84+ Pack', quantity: 6, quantityMode: 'all' }] },
+      snapshot: { total: 3, groups: [{ id: 1039, name: '4x 84+ Pack', count: 3 }] },
+    });
+    const quantity = ui.created.find((element) => element.getAttribute?.('aria-label') === 'Quantity for 4x 84+ Pack');
+    expect(quantity.value).toBe('3');
+    expect(quantity.disabled).toBe(true);
+    expect(quantity.title).toBe('All available packs (3)');
   });
 });
