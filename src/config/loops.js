@@ -236,6 +236,43 @@ export const LOOP_DEFS = [
     openRewardPacks: false,
   },
   {
+    id: 'inventory-fodder-exhaustion',
+    name: 'Bronze/Silver/Common Inventory Exhaustion Loop',
+    strategy: 'inventoryExhaustion',
+    stages: [
+      {
+        id: 'bronze-upgrade',
+        name: 'Bronze Upgrade',
+        sbcNames: ['Bronze Upgrade', '青铜升级', '青銅升級'],
+        requirements: [
+          { tier: 'bronze', count: 11, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        ],
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        maxCompletions: 1000,
+      },
+      {
+        id: 'silver-upgrade',
+        name: 'Silver Upgrade',
+        sbcNames: ['Silver Upgrade', '白银升级', '白銀升級'],
+        requirements: [
+          { tier: 'silver', count: 11, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        ],
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        maxCompletions: 1000,
+      },
+      {
+        id: 'gold-upgrade',
+        name: 'Gold Upgrade',
+        sbcNames: ['Gold Upgrade', '黄金升级', '黃金升級'],
+        requirements: [
+          { tier: 'gold', rarity: 'common', count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        ],
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        maxCompletions: 1000,
+      },
+    ],
+  },
+  {
     id: '2x84-fodder',
     hidden: true,
     mvp: true,

@@ -67,5 +67,14 @@ export function applyDisabledPiles(loopDef) {
     });
   });
 
+  (loopDef.stages || []).forEach((stageDef, index) => {
+    if (!isPlainObject(stageDef)) return;
+    stageDef.priorityPiles = filterPileList(stageDef.priorityPiles, disabledPiles, `stages[${index}].priorityPiles`);
+    filterRequirements(stageDef.requirements, disabledPiles, `stages[${index}].requirements`);
+    (stageDef.challengeRequirements || []).forEach((requirements, challengeIndex) => {
+      filterRequirements(requirements, disabledPiles, `stages[${index}].challengeRequirements[${challengeIndex}]`);
+    });
+  });
+
   return loopDef;
 }

@@ -8,6 +8,7 @@ const STANDARD_FINALIZATION_STRATEGIES = new Set([
   'provisionPackDualCrafting',
   'rarePackTo84Upgrade',
   'fillAndVerifySbc',
+  'inventoryExhaustion',
 ]);
 
 export async function dispatchConfiguredWorkflow(options = {}) {
@@ -45,6 +46,8 @@ export async function dispatchConfiguredWorkflow(options = {}) {
     return result;
   } else if (strategy === 'fillAndVerifySbc') {
     result = await runners.fillAndVerifySbc(loopDef);
+  } else if (strategy === 'inventoryExhaustion') {
+    result = await runners.inventoryExhaustion(loopDef);
   } else {
     throw new Error(`Unsupported loop strategy: ${strategy}`);
   }

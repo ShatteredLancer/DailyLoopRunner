@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.27
+// @version      0.5.28
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -136,6 +136,7 @@ import { runReservedDuplicateCraftingWorkflow } from './workflows/reserved-dupli
 import { runSequenceWorkflow } from './workflows/sequence.js';
 import { runValidationRoundWorkflow } from './workflows/validation-round.js';
 import { runBatchOpenWorkflow } from './workflows/batch-open.js';
+import { runInventoryExhaustionWorkflow } from './workflows/inventory-exhaustion.js';
 import { dispatchConfiguredWorkflow } from './workflows/dispatch.js';
 import { createLogRenderer, formatLogHtml } from './ui/log-renderer.js';
 import { bindMainPanelCommands, hydrateMainPanelOptions } from './ui/main-panel-bindings.js';
@@ -230,7 +231,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.27',
+    version: '0.5.28',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -5929,7 +5930,7 @@ function updateLoopControls() {
     return { openedCount, preserveUnassigned };
   }
 
-  async function runSupplyAndCraftLoop(loopDef) {
+  async function runSupplyAndCraftLoop(loopDef, workflowOptions = {}) {
     await waitAppReady();
     const dryRun = loopDef.dryRun === true;
     const shortagePacks = loopDef.shortagePacks?.length
@@ -6029,6 +6030,7 @@ function updateLoopControls() {
       },
       finalize: async () => {
         if (dryRun) return;
+        if (workflowOptions.skipFinalUnassignedCleanup === true) return;
         await resolveRuntimeUnassigned(`${loopDef.name} final cleanup`, {
           loopDef,
         });
@@ -6062,6 +6064,43 @@ function updateLoopControls() {
     } else {
       log(`${loopDef.name}: submitted ${result.completions} SBC(s) in this run`);
     }
+    return result;
+  }
+
+  async function runInventoryExhaustionLoop(loopDef) {
+    await waitAppReady();
+    log(`${loopDef.name}: exhausting stages in order: ${loopDef.stages.map((stage) => stage.name).join(' -> ')}`);
+    const result = await runInventoryExhaustionWorkflow({
+      stages: loopDef.stages,
+      stopPoint: () => stopPoint(),
+      runStage: async ({ stage }) => {
+        const stageDef = {
+          ...cloneLoopDef(stage),
+          strategy: 'supplyAndCraft',
+          dryRun: loopDef.dryRun === true,
+          openRewardPacks: loopDef.openRewardPacks === true,
+          disabledPiles: loopDef.disabledPiles?.length ? [...loopDef.disabledPiles] : undefined,
+          preSelectionCleanup: false,
+        };
+        applyDisabledPiles(stageDef);
+        return runSupplyAndCraftLoop(stageDef, { skipFinalUnassignedCleanup: true });
+      },
+      onEvent: async (event, payload) => {
+        if (event === 'stage-start') {
+          log(`${loopDef.name}: stage ${payload.index + 1}/${payload.total} ${payload.stage.name}`);
+        } else if (event === 'stage-complete') {
+          const stageResult = payload.stageResult;
+          if (stageResult.status === 'insufficient') {
+            log(`${loopDef.name}: ${payload.stage.name} exhausted; fewer than one complete safe squad remains`);
+          } else if (stageResult.status === 'unavailable') {
+            log(`${loopDef.name}: ${payload.stage.name} unavailable; continuing to the next stage`);
+          } else {
+            log(`${loopDef.name}: ${payload.stage.name} finished with ${stageResult.completions || 0} submission(s), status ${stageResult.status}`);
+          }
+        }
+      },
+    });
+    log(`${loopDef.name}: submitted ${result.totalCompletions} SBC(s) across ${result.completedStages.length} stage(s)`);
     return result;
   }
 
@@ -7661,6 +7700,7 @@ function updateLoopControls() {
           rarePackTo84Upgrade: runRarePackCraftLoop,
           playerPickSbc: runPlayerPickLoop,
           fillAndVerifySbc: runFillAndVerifyLoop,
+          inventoryExhaustion: runInventoryExhaustionLoop,
         },
         afterStandardRun: async (definition) => {
           await showUnassignedIfAny(`${definition.name} end`);

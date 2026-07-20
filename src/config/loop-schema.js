@@ -17,6 +17,7 @@ const LOOP_STRATEGIES = Object.freeze([
   'playerPickSbc',
   'dailyRoutine',
   'fillAndVerifySbc',
+  'inventoryExhaustion',
 ]);
 
 const INVENTORY_PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
@@ -321,6 +322,22 @@ export function validateLoopDef(loopDef, label = 'loop') {
   if (loopDef.strategy === 'fillAndVerifySbc') {
     validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
     if (loopDef.requirements !== undefined) validateRequirements(loopDef.requirements, 'requirements', errors, false);
+  }
+
+  if (loopDef.strategy === 'inventoryExhaustion') {
+    if (!Array.isArray(loopDef.stages) || !loopDef.stages.length) {
+      errors.push('stages must be a non-empty array');
+    } else {
+      loopDef.stages.forEach((stage, index) => {
+        validateUpgradeDef(stage, `stages[${index}]`, errors);
+        if (stage.maxCompletions !== undefined) {
+          const maxCompletions = Number(stage.maxCompletions);
+          if (!Number.isInteger(maxCompletions) || maxCompletions < 1 || maxCompletions > 1000) {
+            errors.push(`stages[${index}].maxCompletions must be an integer between 1 and 1000`);
+          }
+        }
+      });
+    }
   }
 
   if (['supplyAndCraft', 'inventoryMixedUpgrade', 'commonGoldToRareUpgrade'].includes(loopDef.strategy)) {

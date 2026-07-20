@@ -54,6 +54,9 @@ export function getLiveRunLimit(loopDef = {}, rounds = 1, options = {}) {
   if (loopDef.strategy === 'dailyRoutine') {
     return summarizeRoutineStepLimits(options.getRoutineSteps?.(loopDef) || [], options).max;
   }
+  if (loopDef.strategy === 'inventoryExhaustion') {
+    return Math.max(1, ...(loopDef.stages || []).map((stage) => Number(stage.maxCompletions || 1000)));
+  }
   return Number(loopDef.maxCompletions || loopDef.rounds || loopDef.maxRounds || 1);
 }
 

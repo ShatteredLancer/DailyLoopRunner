@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.27
+// @version      0.5.28
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -308,6 +308,43 @@
       openRewardPacks: false
     },
     {
+      id: "inventory-fodder-exhaustion",
+      name: "Bronze/Silver/Common Inventory Exhaustion Loop",
+      strategy: "inventoryExhaustion",
+      stages: [
+        {
+          id: "bronze-upgrade",
+          name: "Bronze Upgrade",
+          sbcNames: ["Bronze Upgrade", "\u9752\u94DC\u5347\u7EA7", "\u9752\u9285\u5347\u7D1A"],
+          requirements: [
+            { tier: "bronze", count: 11, playerOnly: true, allowSpecial: false, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
+          ],
+          priorityPiles: ["unassigned", "storage", "transfer", "club"],
+          maxCompletions: 1e3
+        },
+        {
+          id: "silver-upgrade",
+          name: "Silver Upgrade",
+          sbcNames: ["Silver Upgrade", "\u767D\u94F6\u5347\u7EA7", "\u767D\u9280\u5347\u7D1A"],
+          requirements: [
+            { tier: "silver", count: 11, playerOnly: true, allowSpecial: false, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
+          ],
+          priorityPiles: ["unassigned", "storage", "transfer", "club"],
+          maxCompletions: 1e3
+        },
+        {
+          id: "gold-upgrade",
+          name: "Gold Upgrade",
+          sbcNames: ["Gold Upgrade", "\u9EC4\u91D1\u5347\u7EA7", "\u9EC3\u91D1\u5347\u7D1A"],
+          requirements: [
+            { tier: "gold", rarity: "common", count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
+          ],
+          priorityPiles: ["unassigned", "storage", "transfer", "club"],
+          maxCompletions: 1e3
+        }
+      ]
+    },
+    {
       id: "2x84-fodder",
       hidden: true,
       mvp: true,
@@ -567,6 +604,14 @@
         filterRequirements(requirements, disabledPiles, `craftingUpgrades[${index}].challengeRequirements[${challengeIndex}]`);
       });
     });
+    (loopDef.stages || []).forEach((stageDef, index) => {
+      if (!isPlainObject(stageDef)) return;
+      stageDef.priorityPiles = filterPileList(stageDef.priorityPiles, disabledPiles, `stages[${index}].priorityPiles`);
+      filterRequirements(stageDef.requirements, disabledPiles, `stages[${index}].requirements`);
+      (stageDef.challengeRequirements || []).forEach((requirements, challengeIndex) => {
+        filterRequirements(requirements, disabledPiles, `stages[${index}].challengeRequirements[${challengeIndex}]`);
+      });
+    });
     return loopDef;
   }
 
@@ -615,6 +660,9 @@
     }
     if (loopDef.strategy === "dailyRoutine") {
       return summarizeRoutineStepLimits(options.getRoutineSteps?.(loopDef) || [], options).max;
+    }
+    if (loopDef.strategy === "inventoryExhaustion") {
+      return Math.max(1, ...(loopDef.stages || []).map((stage) => Number(stage.maxCompletions || 1e3)));
     }
     return Number(loopDef.maxCompletions || loopDef.rounds || loopDef.maxRounds || 1);
   }
@@ -774,7 +822,8 @@
     "rarePackTo84Upgrade",
     "playerPickSbc",
     "dailyRoutine",
-    "fillAndVerifySbc"
+    "fillAndVerifySbc",
+    "inventoryExhaustion"
   ]);
   var INVENTORY_PILES = Object.freeze(["unassigned", "storage", "transfer", "club"]);
   function fail(message) {
@@ -1055,6 +1104,21 @@
     if (loopDef.strategy === "fillAndVerifySbc") {
       validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
       if (loopDef.requirements !== void 0) validateRequirements(loopDef.requirements, "requirements", errors, false);
+    }
+    if (loopDef.strategy === "inventoryExhaustion") {
+      if (!Array.isArray(loopDef.stages) || !loopDef.stages.length) {
+        errors.push("stages must be a non-empty array");
+      } else {
+        loopDef.stages.forEach((stage, index) => {
+          validateUpgradeDef(stage, `stages[${index}]`, errors);
+          if (stage.maxCompletions !== void 0) {
+            const maxCompletions = Number(stage.maxCompletions);
+            if (!Number.isInteger(maxCompletions) || maxCompletions < 1 || maxCompletions > 1e3) {
+              errors.push(`stages[${index}].maxCompletions must be an integer between 1 and 1000`);
+            }
+          }
+        });
+      }
     }
     if (["supplyAndCraft", "inventoryMixedUpgrade", "commonGoldToRareUpgrade"].includes(loopDef.strategy)) {
       validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
@@ -6782,6 +6846,44 @@
     return finish("completed");
   }
 
+  // src/workflows/inventory-exhaustion.js
+  async function emit7(options, event, payload = {}) {
+    await options.onEvent?.(event, payload);
+  }
+  async function runInventoryExhaustionWorkflow(options = {}) {
+    if (!Array.isArray(options.stages) || !options.stages.length) {
+      throw new TypeError("stages must be a non-empty array");
+    }
+    if (typeof options.runStage !== "function") throw new TypeError("runStage is required");
+    const result = {
+      status: "completed",
+      completedStages: [],
+      totalCompletions: 0,
+      reason: null
+    };
+    for (let index = 0; index < options.stages.length; index++) {
+      await options.stopPoint?.();
+      const stage = options.stages[index];
+      await emit7(options, "stage-start", { result, stage, index, total: options.stages.length });
+      const stageResult = await options.runStage({ result, stage, index }) || { status: "blocked" };
+      await emit7(options, "stage-complete", { result, stage, index, stageResult });
+      result.completedStages.push({ id: stage.id || `stage-${index + 1}`, result: stageResult });
+      result.totalCompletions += Number(stageResult.completions || 0);
+      if (stageResult.status === "planned") {
+        result.status = "planned";
+        result.reason ||= stageResult.reason || "inventory exhaustion plan complete";
+        continue;
+      }
+      if (stageResult.status === "blocked" || stageResult.status === "stopped") {
+        result.status = stageResult.status;
+        result.reason = stageResult.reason || `${stage.name || `stage ${index + 1}`} stopped`;
+        break;
+      }
+    }
+    await options.finalize?.(result);
+    return result;
+  }
+
   // src/workflows/dispatch.js
   var STANDARD_FINALIZATION_STRATEGIES = /* @__PURE__ */ new Set([
     "dailyRoutine",
@@ -6792,7 +6894,8 @@
     "provisionPackCrafting",
     "provisionPackDualCrafting",
     "rarePackTo84Upgrade",
-    "fillAndVerifySbc"
+    "fillAndVerifySbc",
+    "inventoryExhaustion"
   ]);
   async function dispatchConfiguredWorkflow(options = {}) {
     const {
@@ -6828,6 +6931,8 @@
       return result;
     } else if (strategy === "fillAndVerifySbc") {
       result = await runners.fillAndVerifySbc(loopDef);
+    } else if (strategy === "inventoryExhaustion") {
+      result = await runners.inventoryExhaustion(loopDef);
     } else {
       throw new Error(`Unsupported loop strategy: ${strategy}`);
     }
@@ -8881,7 +8986,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.27",
+      version: "0.5.28",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -13932,7 +14037,7 @@
       }
       return { openedCount, preserveUnassigned };
     }
-    async function runSupplyAndCraftLoop(loopDef) {
+    async function runSupplyAndCraftLoop(loopDef, workflowOptions = {}) {
       await waitAppReady();
       const dryRun = loopDef.dryRun === true;
       const shortagePacks = loopDef.shortagePacks?.length ? loopDef.shortagePacks : loopDef.strategy === "commonGoldToRareUpgrade" ? [{
@@ -14023,6 +14128,7 @@
         },
         finalize: async () => {
           if (dryRun) return;
+          if (workflowOptions.skipFinalUnassignedCleanup === true) return;
           await resolveRuntimeUnassigned(`${loopDef.name} final cleanup`, {
             loopDef
           });
@@ -14051,6 +14157,42 @@
       } else {
         log(`${loopDef.name}: submitted ${result.completions} SBC(s) in this run`);
       }
+      return result;
+    }
+    async function runInventoryExhaustionLoop(loopDef) {
+      await waitAppReady();
+      log(`${loopDef.name}: exhausting stages in order: ${loopDef.stages.map((stage) => stage.name).join(" -> ")}`);
+      const result = await runInventoryExhaustionWorkflow({
+        stages: loopDef.stages,
+        stopPoint: () => stopPoint(),
+        runStage: async ({ stage }) => {
+          const stageDef = {
+            ...cloneLoopDef(stage),
+            strategy: "supplyAndCraft",
+            dryRun: loopDef.dryRun === true,
+            openRewardPacks: loopDef.openRewardPacks === true,
+            disabledPiles: loopDef.disabledPiles?.length ? [...loopDef.disabledPiles] : void 0,
+            preSelectionCleanup: false
+          };
+          applyDisabledPiles(stageDef);
+          return runSupplyAndCraftLoop(stageDef, { skipFinalUnassignedCleanup: true });
+        },
+        onEvent: async (event, payload) => {
+          if (event === "stage-start") {
+            log(`${loopDef.name}: stage ${payload.index + 1}/${payload.total} ${payload.stage.name}`);
+          } else if (event === "stage-complete") {
+            const stageResult = payload.stageResult;
+            if (stageResult.status === "insufficient") {
+              log(`${loopDef.name}: ${payload.stage.name} exhausted; fewer than one complete safe squad remains`);
+            } else if (stageResult.status === "unavailable") {
+              log(`${loopDef.name}: ${payload.stage.name} unavailable; continuing to the next stage`);
+            } else {
+              log(`${loopDef.name}: ${payload.stage.name} finished with ${stageResult.completions || 0} submission(s), status ${stageResult.status}`);
+            }
+          }
+        }
+      });
+      log(`${loopDef.name}: submitted ${result.totalCompletions} SBC(s) across ${result.completedStages.length} stage(s)`);
       return result;
     }
     function isRareGoldPlayer(item, options = {}) {
@@ -15513,7 +15655,8 @@
             provisionPackCrafting: runProvisionCraftLoop,
             rarePackTo84Upgrade: runRarePackCraftLoop,
             playerPickSbc: runPlayerPickLoop,
-            fillAndVerifySbc: runFillAndVerifyLoop
+            fillAndVerifySbc: runFillAndVerifyLoop,
+            inventoryExhaustion: runInventoryExhaustionLoop
           },
           afterStandardRun: async (definition) => {
             await showUnassignedIfAny(`${definition.name} end`);

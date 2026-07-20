@@ -15,7 +15,7 @@ describe('loop presentation and disabled pile projection', () => {
     expect(visibleLoopDefs(loops, true).map((loop) => loop.id)).toEqual(['daily', 'daily-mvp', 'validation']);
   });
 
-  it('projects disabled piles through loop, rating, challenge, legacy, and crafting requirements', () => {
+  it('projects disabled piles through loop, rating, challenge, legacy, crafting, and exhaustion requirements', () => {
     const loopDef = {
       disabledPiles: ['club', 'transfer'],
       priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
@@ -34,6 +34,10 @@ describe('loop presentation and disabled pile projection', () => {
         requirements: [{ priorityPiles: ['storage', 'club'] }],
         challengeRequirements: [[{ priorityPiles: ['storage', 'transfer'] }]],
       }],
+      stages: [{
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        requirements: [{ priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] }],
+      }],
     };
 
     expect(applyDisabledPiles(loopDef)).toBe(loopDef);
@@ -46,6 +50,8 @@ describe('loop presentation and disabled pile projection', () => {
     expect(loopDef.rareUpgrade.requirements[0].priorityPiles).toEqual(['storage']);
     expect(loopDef.craftingUpgrades[0].priorityPiles).toEqual(['unassigned']);
     expect(loopDef.craftingUpgrades[0].challengeRequirements[0][0].priorityPiles).toEqual(['storage']);
+    expect(loopDef.stages[0].priorityPiles).toEqual(['unassigned', 'storage']);
+    expect(loopDef.stages[0].requirements[0].priorityPiles).toEqual(['unassigned', 'storage']);
   });
 
   it('preserves missing pile lists and rejects a configured list with no enabled pile', () => {

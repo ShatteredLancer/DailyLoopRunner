@@ -26,6 +26,10 @@ describe('configured run limits', () => {
       strategy: 'fillAndVerifySbc',
       maxCompletions: 50,
     }, 1, { needsAutoTotwPreflight: () => true })).toBe(100);
+    expect(getLiveRunLimit({
+      strategy: 'inventoryExhaustion',
+      stages: [{ maxCompletions: 200 }, { maxCompletions: 1000 }],
+    })).toBe(1000);
   });
 
   it('preserves One-click stage labels, units, total, and maximum', () => {

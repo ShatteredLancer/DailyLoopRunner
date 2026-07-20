@@ -12,6 +12,7 @@ function harness(overrides = {}) {
     rarePackTo84Upgrade: vi.fn(async () => result),
     playerPickSbc: vi.fn(async () => ({ ...result, pickResults: [{ id: 1 }] })),
     fillAndVerifySbc: vi.fn(async () => result),
+    inventoryExhaustion: vi.fn(async () => result),
   };
   return {
     loopDef: { id: 'loop', name: 'Test Loop', strategy: 'dailyRoutine' },
@@ -56,6 +57,15 @@ describe('configured workflow dispatch', () => {
 
     expect(options.afterPlayerPickRun).toHaveBeenCalledWith(options.loopDef, result);
     expect(options.afterStandardRun).not.toHaveBeenCalled();
+  });
+
+  it('dispatches inventory exhaustion through the standard finalizer', async () => {
+    const options = harness({
+      loopDef: { id: 'inventory-exhaustion', name: 'Inventory Exhaustion', strategy: 'inventoryExhaustion' },
+    });
+    await dispatchConfiguredWorkflow(options);
+    expect(options.runners.inventoryExhaustion).toHaveBeenCalledWith(options.loopDef);
+    expect(options.afterStandardRun).toHaveBeenCalledWith(options.loopDef, { status: 'completed' });
   });
 
   it('skips all finalizers during Dry Run while keeping the same runner', async () => {

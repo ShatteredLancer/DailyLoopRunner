@@ -53,6 +53,10 @@
       "normal": "Run Daily Bronze, Silver, Common, Rare, then consume all matching Rare Packs before allowing one inventory 2x84+ fallback.",
       "recovery": "Restart from existing Unassigned state, skip completed stages, and continue after a prior safe stop without unbounded inventory fallback."
     },
+    "inventory-fodder-exhaustion": {
+      "normal": "Submit Bronze Upgrade until fewer than eleven safe bronze players remain, then do the same for Silver Upgrade and common-gold Gold Upgrade.",
+      "recovery": "Continue to the next stage on normal inventory shortage or SBC unavailability, but stop on unsafe selection or submission failures."
+    },
     "2x84-fodder": {
       "normal": "Submit six low rare gold players and let the current Open reward packs option decide whether to open the reward.",
       "recovery": "Stop before submission when fewer than six safe low rare gold players are available."
