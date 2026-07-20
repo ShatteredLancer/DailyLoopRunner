@@ -35,6 +35,62 @@ export function selectionConsumesSignalRefs(selection, expectedRefs = []) {
   );
 }
 
+function specialMode(spec = {}) {
+  if (spec.special === true) return 'special';
+  if (spec.allowSpecial === true) return 'any';
+  return 'normal';
+}
+
+function requirementAcceptsRecoveryMatch(requirement = {}, match = {}) {
+  if (requirement.playerOnly && match.playerOnly !== true) return false;
+  if (requirement.tier && requirement.tier !== match.tier) return false;
+  if (requirement.rarity && requirement.rarity !== match.rarity) return false;
+
+  const requirementSpecialMode = specialMode(requirement);
+  const matchSpecialMode = specialMode(match);
+  if (requirementSpecialMode !== 'any' && requirementSpecialMode !== matchSpecialMode) return false;
+
+  if (requirement.minRating !== undefined) {
+    if (match.minRating === undefined || Number(match.minRating) < Number(requirement.minRating)) return false;
+  }
+  if (requirement.maxRating !== undefined) {
+    if (match.maxRating === undefined || Number(match.maxRating) > Number(requirement.maxRating)) return false;
+  }
+  return true;
+}
+
+export function recoveryTriggerCapacity(recipe = {}, policy = {}) {
+  return (recipe.requirements || []).reduce((total, requirement) => {
+    if (!requirementAcceptsRecoveryMatch(requirement, policy.match || {})) return total;
+    return total + Math.max(0, Number(requirement.count || 0));
+  }, 0);
+}
+
+export function selectedRecoveryTriggerCount(selection, expectedRefs = []) {
+  const selectedKeys = new Set();
+  for (const entry of selection?.entries || []) {
+    if (entry.pileName !== 'unassigned' || !entry.signal) continue;
+    const signalRef = entry.signal.ref || entry.signal;
+    if (!refMatches(signalRef, expectedRefs)) continue;
+    const id = Number(signalRef?.id || 0);
+    const definitionId = Number(signalRef?.definitionId || 0);
+    selectedKeys.add(id ? `id:${id}` : `definition:${definitionId}`);
+  }
+  return selectedKeys.size;
+}
+
+export function evaluateRecoveryTriggerSelection(recipe, policy, selection, expectedRefs = []) {
+  const capacity = recoveryTriggerCapacity(recipe, policy);
+  const expectedCount = Math.min(expectedRefs.length, capacity);
+  const selectedCount = selectedRecoveryTriggerCount(selection, expectedRefs);
+  return {
+    capacity,
+    expectedCount,
+    selectedCount,
+    sufficient: expectedRefs.length === 0 || (expectedCount > 0 && selectedCount >= expectedCount),
+  };
+}
+
 function actionFor(recipe, status) {
   if (status === 'insufficient') return recipe.onInsufficient || 'continue';
   return recipe.onUnavailable || 'continue';

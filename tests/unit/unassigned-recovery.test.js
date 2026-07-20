@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createInventorySnapshot, createItemSnapshot } from '../../src/domain/contracts.js';
 import {
   createRecoveryOverflowResolvers,
+  evaluateRecoveryTriggerSelection,
   matchingBlockedItemRefs,
   selectionConsumesSignalRefs,
 } from '../../src/unassigned/recovery.js';
@@ -63,6 +64,63 @@ describe('Unassigned recovery policies', () => {
     expect(selectionConsumesSignalRefs(selection, [{ id: 10, definitionId: 110 }])).toBe(false);
   });
 
+  it('accepts five of seven bronze triggers when a mixed recipe has only five bronze slots', () => {
+    const triggerRefs = Array.from({ length: 7 }, (_, index) => ({ id: index + 1, definitionId: index + 101 }));
+    const recipe = {
+      requirements: [
+        { tier: 'silver', playerOnly: true, allowSpecial: false, count: 5 },
+        { tier: 'bronze', playerOnly: true, allowSpecial: false, count: 5 },
+      ],
+    };
+    const policy = { match: { tier: 'bronze', playerOnly: true, allowSpecial: false } };
+    const selection = {
+      entries: triggerRefs.slice(0, 5).map((ref) => ({ pileName: 'unassigned', signal: ref })),
+    };
+
+    expect(evaluateRecoveryTriggerSelection(recipe, policy, selection, triggerRefs)).toEqual({
+      capacity: 5,
+      expectedCount: 5,
+      selectedCount: 5,
+      sufficient: true,
+    });
+  });
+
+  it('detects genuine trigger loss when recipe capacity could consume every blocked duplicate', () => {
+    const triggerRefs = Array.from({ length: 4 }, (_, index) => ({ id: index + 1, definitionId: index + 101 }));
+    const recipe = {
+      requirements: [{ tier: 'bronze', playerOnly: true, allowSpecial: false, count: 5 }],
+    };
+    const policy = { match: { tier: 'bronze', playerOnly: true, allowSpecial: false } };
+    const selection = {
+      entries: triggerRefs.slice(0, 3).map((ref) => ({ pileName: 'unassigned', signal: ref })),
+    };
+
+    expect(evaluateRecoveryTriggerSelection(recipe, policy, selection, triggerRefs)).toEqual({
+      capacity: 5,
+      expectedCount: 4,
+      selectedCount: 3,
+      sufficient: false,
+    });
+  });
+
+  it('requires all seven bronze triggers when an upgrade has eleven bronze slots', () => {
+    const triggerRefs = Array.from({ length: 7 }, (_, index) => ({ id: index + 1, definitionId: index + 101 }));
+    const recipe = {
+      requirements: [{ tier: 'bronze', playerOnly: true, allowSpecial: false, count: 11 }],
+    };
+    const policy = { match: { tier: 'bronze', playerOnly: true, allowSpecial: false } };
+    const selection = {
+      entries: triggerRefs.map((ref) => ({ pileName: 'unassigned', signal: ref })),
+    };
+
+    expect(evaluateRecoveryTriggerSelection(recipe, policy, selection, triggerRefs)).toEqual({
+      capacity: 11,
+      expectedCount: 7,
+      selectedCount: 7,
+      sufficient: true,
+    });
+  });
+
   it('falls back in configured order and resolves four bronze duplicates with two Storage slots', async () => {
     let items = [1, 2, 3, 4].map(bronzeDuplicate);
     const attemptRecipe = vi.fn(async ({ recipe, triggerRefs }) => {
@@ -87,6 +145,63 @@ describe('Unassigned recovery policies', () => {
       'daily-bronze',
       'daily-common',
       'bronze-upgrade',
+    ]);
+  });
+
+  it('replans after Daily Common consumes five bronze triggers, then falls back for the remainder', async () => {
+    let items = [1, 2, 3, 4, 5, 6, 7].map(bronzeDuplicate);
+    let dailyCommonAvailable = true;
+    const recoveryRecipes = [
+      { id: 'daily-bronze', name: 'Daily Bronze', requirements: [{ tier: 'bronze', playerOnly: true, count: 1 }] },
+      {
+        id: 'daily-common',
+        name: 'Daily Common',
+        requirements: [
+          { tier: 'silver', playerOnly: true, count: 5 },
+          { tier: 'bronze', playerOnly: true, count: 5 },
+        ],
+      },
+      { id: 'bronze-upgrade', name: 'Bronze Upgrade', requirements: [{ tier: 'bronze', playerOnly: true, count: 11 }] },
+    ];
+    const attempts = [];
+    const attemptRecipe = vi.fn(async ({ policy, recipe, triggerRefs }) => {
+      attempts.push({ recipeId: recipe.id, triggerCount: triggerRefs.length });
+      if (recipe.id === 'daily-bronze') return { status: 'unavailable' };
+      if (recipe.id === 'daily-common') {
+        if (!dailyCommonAvailable) return { status: 'unavailable' };
+        const selectedRefs = triggerRefs.slice(0, 5);
+        const selection = {
+          entries: selectedRefs.map((ref) => ({ pileName: 'unassigned', signal: ref })),
+        };
+        expect(evaluateRecoveryTriggerSelection(recipe, policy, selection, triggerRefs).sufficient).toBe(true);
+        const selectedIds = new Set(selectedRefs.map((ref) => ref.id));
+        items = items.filter((item) => !selectedIds.has(item.id));
+        dailyCommonAvailable = false;
+        return { status: 'progress' };
+      }
+      items = [];
+      return { status: 'progress' };
+    });
+    const overflowResolvers = createRecoveryOverflowResolvers({
+      recipes: recoveryRecipes,
+      policies,
+      policyIds: ['bronze-overflow'],
+      attemptRecipe,
+    });
+
+    const result = await resolveUnassigned({
+      getSnapshot: async () => snapshot(items, 0),
+      executeAction: async () => {},
+      overflowResolvers,
+    });
+
+    expect(result.status).toBe('resolved');
+    expect(attempts).toEqual([
+      { recipeId: 'daily-bronze', triggerCount: 7 },
+      { recipeId: 'daily-common', triggerCount: 7 },
+      { recipeId: 'daily-bronze', triggerCount: 2 },
+      { recipeId: 'daily-common', triggerCount: 2 },
+      { recipeId: 'bronze-upgrade', triggerCount: 2 },
     ]);
   });
 

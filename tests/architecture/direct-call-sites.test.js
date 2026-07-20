@@ -140,6 +140,7 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain("from './config/run-limits.js'");
     expect(source).toContain("from './config/routine-steps.js'");
     expect(source).toContain("from './config/runtime-options.js'");
+    expect(source).toMatch(/import\s*\{[^}]*\bapplyPickRuntimeOptions\b[^}]*\}\s*from '\.\/config\/runtime-options\.js'/s);
     expect(source).not.toMatch(/function\s+applyPickRuntimeOptions\s*\(/);
     expect(source).toContain('applyPickRuntimeOptions(pickDef, getPickRuntimeOptions());');
     expect(source).not.toMatch(/\bconst\s+LOOP_DEFS\s*=\s*\[/);

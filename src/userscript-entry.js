@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.24
+// @version      0.5.26
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -45,6 +45,7 @@ import {
 } from './config/routine-steps.js';
 import {
   applyLoopRuntimeOptions,
+  applyPickRuntimeOptions,
   loopUsesRounds,
   normalizePickRuntimeOptions,
 } from './config/runtime-options.js';
@@ -118,7 +119,11 @@ import {
 } from './reward/batch-open-recap.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
-import { createRecoveryOverflowResolvers, selectionConsumesSignalRefs } from './unassigned/recovery.js';
+import {
+  createRecoveryOverflowResolvers,
+  evaluateRecoveryTriggerSelection,
+  selectionConsumesSignalRefs,
+} from './unassigned/recovery.js';
 import { openPackTransaction } from './pack/open-transaction.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import { classifyOpenedUpgradeDuplicates } from './pack/upgrade-duplicate-routing.js';
@@ -225,7 +230,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.24',
+    version: '0.5.26',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -4942,8 +4947,8 @@ function updateLoopControls() {
       log(`${label}: selected squad does not consume a blocked Unassigned duplicate; trying the next configured recipe`);
       return { status: 'insufficient', reason: 'selection does not consume trigger' };
     }
-    const countNeeded = sumRequirementPlayerCount(recipe);
-    if (triggerRefs.length <= countNeeded && !selectionConsumesAllSignalRefs(selection, triggerRefs)) {
+    const triggerCoverage = evaluateRecoveryTriggerSelection(recipe, policy, selection, triggerRefs);
+    if (!triggerCoverage.sufficient) {
       const triggerItems = triggerRefs
         .map((ref) => getUnassignedItems().find((item) => itemRefMatchesAny(item, [ref])))
         .filter(Boolean);
@@ -4955,7 +4960,7 @@ function updateLoopControls() {
       );
       return {
         status: 'blocked',
-        reason: `selection resolved only part of ${triggerRefs.length} blocked duplicate signal(s); diagnostic logged before submit`,
+        reason: `selection resolved ${triggerCoverage.selectedCount}/${triggerCoverage.expectedCount} expected blocked duplicate signal(s) for ${triggerCoverage.capacity} matching recipe slot(s); diagnostic logged before submit`,
       };
     }
     let opened;

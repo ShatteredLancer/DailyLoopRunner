@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.5.24`
+- Userscript 版本：`0.5.26`
 - Git 基线：`2ddf933`
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
@@ -568,6 +568,8 @@ Status: In Progress
 - `0.5.22` 小步安全修复：`protectHighGold` 支持可配置 `highGoldThreshold`（去掉 inventory/entry 硬编码 82）；日志 renderer 默认 HTML escape；主脚本 metadata 移除 localhost `@connect`（仅 Hot Reload 保留）。
 - `0.5.23` 修正 `0.5.22` 后续审计项：恢复生产脚本 localhost `@connect`，保证 `Load loops JSON` 可用；显式标记运行时生成的 Pick 高分 cap，关闭保护时清理该 cap 并恢复原有业务 `maxRating`；Provision 前置 Pick 统一使用当前 UI 的高分保护选项。自动测试锁定 metadata、动态扫描阈值切换和 Provision 配置透传。
 - `0.5.24` 调整动态 Pick 的 Set 完成状态语义：`completed` 不再在解析 Challenge 前直接过滤；奖励身份、候选/选择数、人数和材料比例完整时生成一次性运行探测 Loop，并保留 `discoveryReportedCompleted` 标记。实际 Challenge 不可用或提交被阻止时明确记录失败并停止，不生成空 recap；缺少 Challenge 元数据的 completed Pick 仍保持 unsupported。EA Adapter 同时禁止把缺失的 repeat counters 从 `null` 误转成 `0/0`。
+- `0.5.25` 修正配置化 Unassigned recovery 对混合配方的触发卡覆盖判断：本次期望消耗数改为“阻塞同类重复卡数量”和“与 recovery policy 匹配的 requirement 槽位容量”两者的较小值。Daily Common 因此可先合法消耗 7 张阻塞铜卡中的 5 张，刷新后重新规划剩余 2 张，并在该配方不可用时继续 Bronze Upgrade；容量足够却漏选触发卡时仍会阻止提交并输出诊断。新增纯函数和状态机回归测试锁定部分消费、真实信号丢失及后续 fallback。
+- `0.5.26` 修正 `0.5.23` 引入的 Provision 启动回归：Provision 前置 Pick 保持调用共享 `applyPickRuntimeOptions()` 投影当前 UI 的高分保护和自动选择阈值，同时恢复入口缺失的显式 import。架构测试新增 import contract，防止调用仍存在但模块绑定被删除时生成可构建、运行即报 `ReferenceError` 的脚本。
 
 Live validation: `1 of 5 83+ Player Pick` 和 `1 of 3 84+ Summer Tournament Nations Player Pick` 的静态 Workflow 与 `0.5.11` 扫描覆盖模式均已真实提交并领取通过，因此 `0.5.12` 删除两者静态配置。`5 of 10 82+ Players Pick` 当前已全部完成，暂时无法复验动态多 Challenge/Provision 引用，不记为失败并继续保留静态配置。
 

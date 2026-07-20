@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.24
+// @version      0.5.26
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -1355,7 +1355,7 @@
       autoPickThreshold: Math.max(1, Math.min(99, Number(input.autoPickThreshold || 90) || 90))
     };
   }
-  function applyPickRuntimeOptions2(loopDef, input = {}) {
+  function applyPickRuntimeOptions(loopDef, input = {}) {
     if (loopDef.strategy !== "playerPickSbc") return loopDef;
     const options = normalizePickRuntimeOptions(input);
     loopDef.protectHighGold = options.protectHighGold;
@@ -1403,7 +1403,7 @@
     const rounds = Math.max(1, Math.min(50, Number(options.rounds || 1) || 1));
     loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;
     loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || options.openRewardPacks === true;
-    applyPickRuntimeOptions2(loopDef, options.pickOptions);
+    applyPickRuntimeOptions(loopDef, options.pickOptions);
     if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") {
       loopDef.rounds = rounds;
     }
@@ -5597,6 +5597,55 @@
       (entry) => entry.pileName === "unassigned" && entry.signal && refMatches(entry.signal.ref || entry.signal, expectedRefs)
     );
   }
+  function specialMode(spec = {}) {
+    if (spec.special === true) return "special";
+    if (spec.allowSpecial === true) return "any";
+    return "normal";
+  }
+  function requirementAcceptsRecoveryMatch(requirement = {}, match = {}) {
+    if (requirement.playerOnly && match.playerOnly !== true) return false;
+    if (requirement.tier && requirement.tier !== match.tier) return false;
+    if (requirement.rarity && requirement.rarity !== match.rarity) return false;
+    const requirementSpecialMode = specialMode(requirement);
+    const matchSpecialMode = specialMode(match);
+    if (requirementSpecialMode !== "any" && requirementSpecialMode !== matchSpecialMode) return false;
+    if (requirement.minRating !== void 0) {
+      if (match.minRating === void 0 || Number(match.minRating) < Number(requirement.minRating)) return false;
+    }
+    if (requirement.maxRating !== void 0) {
+      if (match.maxRating === void 0 || Number(match.maxRating) > Number(requirement.maxRating)) return false;
+    }
+    return true;
+  }
+  function recoveryTriggerCapacity(recipe2 = {}, policy = {}) {
+    return (recipe2.requirements || []).reduce((total, requirement) => {
+      if (!requirementAcceptsRecoveryMatch(requirement, policy.match || {})) return total;
+      return total + Math.max(0, Number(requirement.count || 0));
+    }, 0);
+  }
+  function selectedRecoveryTriggerCount(selection, expectedRefs = []) {
+    const selectedKeys = /* @__PURE__ */ new Set();
+    for (const entry of selection?.entries || []) {
+      if (entry.pileName !== "unassigned" || !entry.signal) continue;
+      const signalRef = entry.signal.ref || entry.signal;
+      if (!refMatches(signalRef, expectedRefs)) continue;
+      const id = Number(signalRef?.id || 0);
+      const definitionId = Number(signalRef?.definitionId || 0);
+      selectedKeys.add(id ? `id:${id}` : `definition:${definitionId}`);
+    }
+    return selectedKeys.size;
+  }
+  function evaluateRecoveryTriggerSelection(recipe2, policy, selection, expectedRefs = []) {
+    const capacity = recoveryTriggerCapacity(recipe2, policy);
+    const expectedCount = Math.min(expectedRefs.length, capacity);
+    const selectedCount = selectedRecoveryTriggerCount(selection, expectedRefs);
+    return {
+      capacity,
+      expectedCount,
+      selectedCount,
+      sufficient: expectedRefs.length === 0 || expectedCount > 0 && selectedCount >= expectedCount
+    };
+  }
   function actionFor(recipe2, status) {
     if (status === "insufficient") return recipe2.onInsufficient || "continue";
     return recipe2.onUnavailable || "continue";
@@ -8817,7 +8866,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.24",
+      version: "0.5.26",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -12988,8 +13037,8 @@
         log(`${label}: selected squad does not consume a blocked Unassigned duplicate; trying the next configured recipe`);
         return { status: "insufficient", reason: "selection does not consume trigger" };
       }
-      const countNeeded = sumRequirementPlayerCount(recipe2);
-      if (triggerRefs.length <= countNeeded && !selectionConsumesAllSignalRefs(selection, triggerRefs)) {
+      const triggerCoverage = evaluateRecoveryTriggerSelection(recipe2, policy, selection, triggerRefs);
+      if (!triggerCoverage.sufficient) {
         const triggerItems = triggerRefs.map((ref) => getUnassignedItems().find((item) => itemRefMatchesAny(item, [ref]))).filter(Boolean);
         logDuplicateSignalDiagnostics(
           label,
@@ -12999,7 +13048,7 @@
         );
         return {
           status: "blocked",
-          reason: `selection resolved only part of ${triggerRefs.length} blocked duplicate signal(s); diagnostic logged before submit`
+          reason: `selection resolved ${triggerCoverage.selectedCount}/${triggerCoverage.expectedCount} expected blocked duplicate signal(s) for ${triggerCoverage.capacity} matching recipe slot(s); diagnostic logged before submit`
         };
       }
       let opened;
