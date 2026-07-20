@@ -28,6 +28,7 @@ export async function runRecycleWorkflow(options = {}) {
     reason: null,
   };
   const maxCompletions = completionLimit(options.maxCompletions);
+  const packOpeningEnabled = options.packOpeningEnabled !== false;
 
   while (result.completions < maxCompletions) {
     await options.stopPoint?.();
@@ -50,7 +51,9 @@ export async function runRecycleWorkflow(options = {}) {
       break;
     }
 
-    const pack = await options.findPack({ result, rewardPackId: result.lastRewardPackId });
+    const pack = packOpeningEnabled
+      ? await options.findPack({ result, rewardPackId: result.lastRewardPackId })
+      : null;
     if (pack) {
       const receipt = await options.openPack({ result, pack });
       await emit(options, 'pack', { result, pack, receipt });
@@ -89,7 +92,7 @@ export async function runRecycleWorkflow(options = {}) {
     break;
   }
 
-  if (result.lastRewardPackId !== null && options.openFinalReward) {
+  if (packOpeningEnabled && result.lastRewardPackId !== null && options.openFinalReward) {
     const finalReceipt = await options.openFinalReward({ result, rewardPackId: result.lastRewardPackId });
     await emit(options, 'final-reward', { result, receipt: finalReceipt });
     if (finalReceipt?.status === 'opened') {

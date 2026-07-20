@@ -11,6 +11,7 @@ const IDS = [
   'bronze-loop-pick-open-at-end',
   'bronze-loop-pick-high-gold-threshold',
   'bronze-loop-pick-auto-threshold',
+  'bronze-loop-daily-inventory-only',
   'bronze-loop-show-mvp',
   'bronze-loop-reward-alert-enabled',
   'bronze-loop-reward-alert-settings',
@@ -90,6 +91,7 @@ describe('main panel bindings', () => {
 
     for (const [id, event, command] of [
       ['bronze-loop-json', 'input', 'jsonInput'],
+      ['bronze-loop-daily-inventory-only', 'change', 'saveLoopOptions'],
       ['bronze-loop-show-mvp', 'change', 'saveLoopOptions'],
       ['bronze-loop-reward-alert-enabled', 'change', 'saveRewardAlertEnabled'],
       ['bronze-loop-reward-alert-settings', 'click', 'openRewardAlertSettings'],
@@ -140,7 +142,7 @@ describe('main panel bindings', () => {
     const { panel, controls } = harness();
     hydrateMainPanelOptions({
       panel,
-      loopOptions: { showMvpLoops: true },
+      loopOptions: { showMvpLoops: true, dailyRecycleInventoryOnly: true },
       pickOptions: {
         protectHighGold: true,
         autoSelectBelow90: false,
@@ -152,6 +154,7 @@ describe('main panel bindings', () => {
       rewardAlertSettings: { enabled: true },
     });
     expect(controls.get('bronze-loop-show-mvp').checked).toBe(true);
+    expect(controls.get('bronze-loop-daily-inventory-only').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-protect-high-gold').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-auto-below-90').checked).toBe(false);
     expect(controls.get('bronze-loop-pick-prefer-scanned').checked).toBe(true);

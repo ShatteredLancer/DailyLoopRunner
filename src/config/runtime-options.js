@@ -66,6 +66,9 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
   loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;
   loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || options.openRewardPacks === true;
   applyPickRuntimeOptions(loopDef, options.pickOptions);
+  if (loopDef.strategy === 'dailySingleCardRecycle' || loopDef.strategy === 'dailyRoutine') {
+    loopDef.dailyRecycleInventoryOnly = options.dailyRecycleInventoryOnly === true;
+  }
   if (loopDef.strategy === 'provisionPackCrafting' || loopDef.strategy === 'provisionPackDualCrafting') {
     loopDef.rounds = rounds;
   }

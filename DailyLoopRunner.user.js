@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.26
+// @version      0.5.27
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -1328,6 +1328,9 @@
       if (loopDef.openRewardPacks !== void 0) {
         childDef.openRewardPacks = childDef.forceOpenRewardPacks === true || loopDef.openRewardPacks === true;
       }
+      if (childDef.strategy === "dailySingleCardRecycle" && loopDef.dailyRecycleInventoryOnly !== void 0) {
+        childDef.dailyRecycleInventoryOnly = loopDef.dailyRecycleInventoryOnly === true;
+      }
       childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
       assertValidLoopDef(childDef, childDef.name || stepId);
       return applyDisabledPiles(childDef);
@@ -1404,6 +1407,9 @@
     loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;
     loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || options.openRewardPacks === true;
     applyPickRuntimeOptions(loopDef, options.pickOptions);
+    if (loopDef.strategy === "dailySingleCardRecycle" || loopDef.strategy === "dailyRoutine") {
+      loopDef.dailyRecycleInventoryOnly = options.dailyRecycleInventoryOnly === true;
+    }
     if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") {
       loopDef.rounds = rounds;
     }
@@ -5991,6 +5997,7 @@
       reason: null
     };
     const maxCompletions = completionLimit(options.maxCompletions);
+    const packOpeningEnabled = options.packOpeningEnabled !== false;
     while (result.completions < maxCompletions) {
       await options.stopPoint?.();
       result.iterations++;
@@ -6010,7 +6017,7 @@
         result.reason = submission2?.reason || `target submission ${outcome4}`;
         break;
       }
-      const pack = await options.findPack({ result, rewardPackId: result.lastRewardPackId });
+      const pack = packOpeningEnabled ? await options.findPack({ result, rewardPackId: result.lastRewardPackId }) : null;
       if (pack) {
         const receipt = await options.openPack({ result, pack });
         await emit2(options, "pack", { result, pack, receipt });
@@ -6047,7 +6054,7 @@
       result.reason = submission?.reason || `seed submission ${outcome3}`;
       break;
     }
-    if (result.lastRewardPackId !== null && options.openFinalReward) {
+    if (packOpeningEnabled && result.lastRewardPackId !== null && options.openFinalReward) {
       const finalReceipt = await options.openFinalReward({ result, rewardPackId: result.lastRewardPackId });
       await emit2(options, "final-reward", { result, receipt: finalReceipt });
       if (finalReceipt?.status === "opened") {
@@ -6938,6 +6945,7 @@
     PICK_OPTION_IDS.forEach((id) => {
       required(panel, `#${id}`).addEventListener("change", (event) => commands.savePickOptions?.(event));
     });
+    required(panel, "#bronze-loop-daily-inventory-only").addEventListener("change", (event) => commands.saveLoopOptions?.(event));
     required(panel, "#bronze-loop-show-mvp").addEventListener("change", (event) => commands.saveLoopOptions?.(event));
     required(panel, "#bronze-loop-reward-alert-enabled").addEventListener("change", (event) => commands.saveRewardAlertEnabled?.(event));
     required(panel, "#bronze-loop-reward-alert-settings").addEventListener("click", (event) => commands.openRewardAlertSettings?.(event));
@@ -6960,6 +6968,7 @@
     const pickOptions = options.pickOptions || {};
     const rewardAlertSettings = options.rewardAlertSettings || {};
     required(panel, "#bronze-loop-show-mvp").checked = loopOptions.showMvpLoops === true;
+    required(panel, "#bronze-loop-daily-inventory-only").checked = loopOptions.dailyRecycleInventoryOnly === true;
     required(panel, "#bronze-loop-pick-protect-high-gold").checked = pickOptions.protectHighGold === true;
     required(panel, "#bronze-loop-pick-auto-below-90").checked = pickOptions.autoSelectBelow90 === true;
     required(panel, "#bronze-loop-pick-prefer-scanned").checked = pickOptions.preferScannedMetadata === true;
@@ -7410,6 +7419,7 @@
       "bronze-loop-built-in": busy || state.usingBuiltIn === true,
       "bronze-loop-dry-run": state.running === true,
       "bronze-loop-open-rewards": state.running === true,
+      "bronze-loop-daily-inventory-only": state.running === true,
       "bronze-loop-pick-protect-high-gold": state.running === true,
       "bronze-loop-pick-auto-below-90": state.running === true,
       "bronze-loop-pick-prefer-scanned": state.running === true || state.scanningPicks === true,
@@ -7577,6 +7587,11 @@
           </label>
           <label title="Open reward packs automatically when a loop supports it">
             <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
+          </label>
+        </div>
+        <div class="row">
+          <label title="Do not open Bronze or Silver player packs; submit Daily Bronze and Daily Silver SBCs from current inventory">
+            <input id="bronze-loop-daily-inventory-only" type="checkbox"> Daily Bronze/Silver: inventory only
           </label>
         </div>
         <div class="row"><label title="Show MVP and one-run validation loops in the main selector"><input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops</label></div>
@@ -8866,7 +8881,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.26",
+      version: "0.5.27",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -13129,8 +13144,14 @@
     async function runRecycleLoop(loopDef) {
       await waitAppReady();
       const dryRun = loopDef.dryRun === true;
+      const inventoryOnly = loopDef.dailyRecycleInventoryOnly === true;
+      if (inventoryOnly) {
+        const tier = String(loopDef.targetDuplicate?.tier || "target");
+        log(`${loopDef.name}: inventory-only mode; ${tier} packs will remain unopened and SBCs will use current inventory`);
+      }
       const result = await runRecycleWorkflow({
         maxCompletions: Number(loopDef.maxCompletions || 7),
+        packOpeningEnabled: !inventoryOnly,
         stopPoint: () => stopPoint(),
         inspectTargets: async () => {
           if (dryRun) await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
@@ -13170,10 +13191,12 @@
             const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
             const challenge = await findAvailableSbcChallenge(set, loopDef.name);
             if (!challenge) return { status: "unavailable", reason: "no available seed SBC challenge remains" };
-            log(`${loopDef.name}: dry-run found no target duplicate or reward pack; seed SBC available ${set.name} (#${set.id || "?"}) challenge #${challenge.id || "?"}`);
+            const reason2 = inventoryOnly ? "inventory-only mode" : "no target duplicate or reward pack";
+            log(`${loopDef.name}: dry-run ${reason2}; seed SBC available ${set.name} (#${set.id || "?"}) challenge #${challenge.id || "?"}`);
             return { status: "planned", reason: "would submit seed SBC" };
           }
-          log(`${loopDef.name}: no target duplicate or reward pack; submitting seed SBC ${current.completions + 1}/${loopDef.maxCompletions}`);
+          const reason = inventoryOnly ? "inventory-only mode" : "no target duplicate or reward pack";
+          log(`${loopDef.name}: ${reason}; submitting seed SBC ${current.completions + 1}/${loopDef.maxCompletions}`);
           return await submitConfiguredSbc(loopDef, { returnNullIfComplete: true }) || {
             status: "unavailable",
             reason: "no available seed SBC challenge remains"
@@ -13188,7 +13211,7 @@
         afterStalePack: async () => {
           if (!dryRun) await sleep(CFG.pauseMs);
         },
-        openFinalReward: loopDef.openRewardPacks === true ? async ({ rewardPackId }) => {
+        openFinalReward: !inventoryOnly && loopDef.openRewardPacks === true ? async ({ rewardPackId }) => {
           if (dryRun) return { status: "planned", reason: `would open final reward #${rewardPackId}` };
           const opened = await openRewardPackAndCleanup(loopDef, rewardPackId, "final reward pack");
           return opened ? { status: "opened" } : { status: "unavailable", reason: "final reward unavailable" };
@@ -13223,15 +13246,22 @@
     function loadLoopUiOptions() {
       try {
         const saved = adapters.localStorage.getJson(LOOP_UI_OPTIONS_KEY, {});
-        return { showMvpLoops: saved.showMvpLoops === true };
+        return {
+          showMvpLoops: saved.showMvpLoops === true,
+          dailyRecycleInventoryOnly: saved.dailyRecycleInventoryOnly === true
+        };
       } catch {
-        return { showMvpLoops: false };
+        return { showMvpLoops: false, dailyRecycleInventoryOnly: false };
       }
     }
     function saveLoopUiOptions() {
       state.showMvpLoops = document.querySelector("#bronze-loop-show-mvp")?.checked === true;
+      const dailyRecycleInventoryOnly = document.querySelector("#bronze-loop-daily-inventory-only")?.checked === true;
       try {
-        adapters.localStorage.setJson(LOOP_UI_OPTIONS_KEY, { showMvpLoops: state.showMvpLoops });
+        adapters.localStorage.setJson(LOOP_UI_OPTIONS_KEY, {
+          showMvpLoops: state.showMvpLoops,
+          dailyRecycleInventoryOnly
+        });
       } catch {
       }
       renderLoopSelect();
@@ -15527,6 +15557,7 @@
           rounds,
           dryRun: isDryRunEnabled(),
           openRewardPacks: isOpenRewardPacksEnabled(),
+          dailyRecycleInventoryOnly: document.querySelector("#bronze-loop-daily-inventory-only")?.checked === true,
           pickOptions: getPickRuntimeOptions()
         });
         logFsuSettingsForRun();

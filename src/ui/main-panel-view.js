@@ -152,6 +152,11 @@ export function mainPanelHtml(maxRounds = 3) {
             <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
           </label>
         </div>
+        <div class="row">
+          <label title="Do not open Bronze or Silver player packs; submit Daily Bronze and Daily Silver SBCs from current inventory">
+            <input id="bronze-loop-daily-inventory-only" type="checkbox"> Daily Bronze/Silver: inventory only
+          </label>
+        </div>
         <div class="row"><label title="Show MVP and one-run validation loops in the main selector"><input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops</label></div>
         <div class="row" id="bronze-loop-reward-alert-row">
           <label title="Enable high-rated special-card alerts"><input id="bronze-loop-reward-alert-enabled" type="checkbox"> Reward alerts</label>

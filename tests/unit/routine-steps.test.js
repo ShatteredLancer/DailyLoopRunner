@@ -66,6 +66,22 @@ describe('daily routine step projection', () => {
     expect(forced[0].openRewardPacks).toBe(true);
   });
 
+  it('projects inventory-only mode only to Daily Bronze and Silver recycle steps', () => {
+    const recycle = childLoop();
+    const common = childLoop({
+      id: 'daily-common',
+      strategy: 'supplyAndCraft',
+      requirements: [{ tier: 'bronze', count: 5 }],
+    });
+    const resolved = resolveRoutineStepLoopDefs(dailyLoop({
+      steps: ['daily-bronze', 'daily-common'],
+      dailyRecycleInventoryOnly: true,
+    }), [recycle, common]);
+
+    expect(resolved[0].dailyRecycleInventoryOnly).toBe(true);
+    expect(resolved[1]).not.toHaveProperty('dailyRecycleInventoryOnly');
+  });
+
   it('applies a One-click-only Rare Pack override without mutating the standalone loop', () => {
     const standalone = childLoop({
       id: 'daily-rare-pack-84',

@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.26
+// @version      0.5.27
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -230,7 +230,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.26',
+    version: '0.5.27',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -5045,8 +5045,14 @@ function updateLoopControls() {
   async function runRecycleLoop(loopDef) {
     await waitAppReady();
     const dryRun = loopDef.dryRun === true;
+    const inventoryOnly = loopDef.dailyRecycleInventoryOnly === true;
+    if (inventoryOnly) {
+      const tier = String(loopDef.targetDuplicate?.tier || 'target');
+      log(`${loopDef.name}: inventory-only mode; ${tier} packs will remain unopened and SBCs will use current inventory`);
+    }
     const result = await runRecycleWorkflow({
       maxCompletions: Number(loopDef.maxCompletions || 7),
+      packOpeningEnabled: !inventoryOnly,
       stopPoint: () => stopPoint(),
       inspectTargets: async () => {
         if (dryRun) await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
@@ -5086,10 +5092,16 @@ function updateLoopControls() {
           const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
           const challenge = await findAvailableSbcChallenge(set, loopDef.name);
           if (!challenge) return { status: 'unavailable', reason: 'no available seed SBC challenge remains' };
-          log(`${loopDef.name}: dry-run found no target duplicate or reward pack; seed SBC available ${set.name} (#${set.id || '?'}) challenge #${challenge.id || '?'}`);
+          const reason = inventoryOnly
+            ? 'inventory-only mode'
+            : 'no target duplicate or reward pack';
+          log(`${loopDef.name}: dry-run ${reason}; seed SBC available ${set.name} (#${set.id || '?'}) challenge #${challenge.id || '?'}`);
           return { status: 'planned', reason: 'would submit seed SBC' };
         }
-        log(`${loopDef.name}: no target duplicate or reward pack; submitting seed SBC ${current.completions + 1}/${loopDef.maxCompletions}`);
+        const reason = inventoryOnly
+          ? 'inventory-only mode'
+          : 'no target duplicate or reward pack';
+        log(`${loopDef.name}: ${reason}; submitting seed SBC ${current.completions + 1}/${loopDef.maxCompletions}`);
         return await submitConfiguredSbc(loopDef, { returnNullIfComplete: true }) || {
           status: 'unavailable',
           reason: 'no available seed SBC challenge remains',
@@ -5104,7 +5116,7 @@ function updateLoopControls() {
       afterStalePack: async () => {
         if (!dryRun) await sleep(CFG.pauseMs);
       },
-      openFinalReward: loopDef.openRewardPacks === true
+      openFinalReward: !inventoryOnly && loopDef.openRewardPacks === true
         ? async ({ rewardPackId }) => {
             if (dryRun) return { status: 'planned', reason: `would open final reward #${rewardPackId}` };
             const opened = await openRewardPackAndCleanup(loopDef, rewardPackId, 'final reward pack');
@@ -5147,16 +5159,23 @@ function updateLoopControls() {
   function loadLoopUiOptions() {
     try {
       const saved = adapters.localStorage.getJson(LOOP_UI_OPTIONS_KEY, {});
-      return { showMvpLoops: saved.showMvpLoops === true };
+      return {
+        showMvpLoops: saved.showMvpLoops === true,
+        dailyRecycleInventoryOnly: saved.dailyRecycleInventoryOnly === true,
+      };
     } catch {
-      return { showMvpLoops: false };
+      return { showMvpLoops: false, dailyRecycleInventoryOnly: false };
     }
   }
 
   function saveLoopUiOptions() {
     state.showMvpLoops = document.querySelector('#bronze-loop-show-mvp')?.checked === true;
+    const dailyRecycleInventoryOnly = document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true;
     try {
-      adapters.localStorage.setJson(LOOP_UI_OPTIONS_KEY, { showMvpLoops: state.showMvpLoops });
+      adapters.localStorage.setJson(LOOP_UI_OPTIONS_KEY, {
+        showMvpLoops: state.showMvpLoops,
+        dailyRecycleInventoryOnly,
+      });
     } catch { }
     renderLoopSelect();
   }
@@ -7688,6 +7707,7 @@ function updateLoopControls() {
         rounds,
         dryRun: isDryRunEnabled(),
         openRewardPacks: isOpenRewardPacksEnabled(),
+        dailyRecycleInventoryOnly: document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true,
         pickOptions: getPickRuntimeOptions(),
       });
       logFsuSettingsForRun();

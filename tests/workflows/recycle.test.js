@@ -41,6 +41,21 @@ describe('runRecycleWorkflow', () => {
     expect(options.submitSeed).toHaveBeenCalledOnce();
   });
 
+  it('skips existing and final packs when pack opening is disabled', async () => {
+    const openFinalReward = vi.fn(async () => ({ status: 'opened' }));
+    const options = baseOptions({
+      packOpeningEnabled: false,
+      findPack: vi.fn(async () => ({ id: 105 })),
+      openFinalReward,
+    });
+    const result = await runRecycleWorkflow(options);
+    expect(result).toMatchObject({ completions: 1, packsOpened: 0, lastRewardPackId: 105 });
+    expect(options.findPack).not.toHaveBeenCalled();
+    expect(options.openPack).not.toHaveBeenCalled();
+    expect(options.submitSeed).toHaveBeenCalledOnce();
+    expect(openFinalReward).not.toHaveBeenCalled();
+  });
+
   it('retries the state after a stale pack without counting it', async () => {
     let findCalls = 0;
     const options = baseOptions({

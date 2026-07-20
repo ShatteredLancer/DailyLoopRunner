@@ -31,6 +31,7 @@ describe('main panel view template', () => {
     for (const id of [
       'bronze-loop-dry-run',
       'bronze-loop-open-rewards',
+      'bronze-loop-daily-inventory-only',
       'bronze-loop-show-mvp',
       'bronze-loop-pick-protect-high-gold',
       'bronze-loop-pick-high-gold-threshold',

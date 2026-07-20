@@ -28,6 +28,9 @@ export function resolveRoutineStepLoopDefs(loopDef = {}, loopDefs = []) {
     if (loopDef.openRewardPacks !== undefined) {
       childDef.openRewardPacks = childDef.forceOpenRewardPacks === true || loopDef.openRewardPacks === true;
     }
+    if (childDef.strategy === 'dailySingleCardRecycle' && loopDef.dailyRecycleInventoryOnly !== undefined) {
+      childDef.dailyRecycleInventoryOnly = loopDef.dailyRecycleInventoryOnly === true;
+    }
     childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
     assertValidLoopDef(childDef, childDef.name || stepId);
     return applyDisabledPiles(childDef);

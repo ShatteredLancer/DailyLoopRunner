@@ -83,6 +83,7 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-built-in': busy || state.usingBuiltIn === true,
     'bronze-loop-dry-run': state.running === true,
     'bronze-loop-open-rewards': state.running === true,
+    'bronze-loop-daily-inventory-only': state.running === true,
     'bronze-loop-pick-protect-high-gold': state.running === true,
     'bronze-loop-pick-auto-below-90': state.running === true,
     'bronze-loop-pick-prefer-scanned': state.running === true || state.scanningPicks === true,

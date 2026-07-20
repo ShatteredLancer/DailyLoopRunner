@@ -129,6 +129,14 @@ describe('loop runtime option projection', () => {
       maxCompletions: 3,
       openRewardPacks: false,
     });
+
+    const dailyRecycle = { strategy: 'dailySingleCardRecycle' };
+    applyLoopRuntimeOptions(dailyRecycle, { dailyRecycleInventoryOnly: true });
+    expect(dailyRecycle.dailyRecycleInventoryOnly).toBe(true);
+
+    const dailyRoutine = { strategy: 'dailyRoutine' };
+    applyLoopRuntimeOptions(dailyRoutine, { dailyRecycleInventoryOnly: true });
+    expect(dailyRoutine.dailyRecycleInventoryOnly).toBe(true);
   });
 
   it('shows rounds only for explicit repeat-count loops', () => {

@@ -76,6 +76,7 @@ describe('main panel state rendering', () => {
       'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-select', 'bronze-loop-edit',
       'bronze-loop-refresh', 'bronze-loop-scan-picks', 'bronze-loop-load-json', 'bronze-loop-built-in', 'bronze-loop-dry-run',
       'bronze-loop-open-rewards', 'bronze-loop-pick-protect-high-gold', 'bronze-loop-pick-auto-below-90',
+      'bronze-loop-daily-inventory-only',
       'bronze-loop-pick-prefer-scanned',
       'bronze-loop-pick-high-gold-threshold', 'bronze-loop-pick-auto-threshold', 'bronze-loop-show-mvp',
       'bronze-loop-rounds', 'bronze-loop-json',
