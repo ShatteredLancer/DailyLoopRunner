@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.32
+// @version      0.5.33
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -309,8 +309,17 @@
     },
     {
       id: "inventory-fodder-exhaustion",
-      name: "Bronze/Silver/Common Inventory Exhaustion Loop",
+      name: "Bronze/Silver/FOF Glory Hunters Exhaustion Loop",
       strategy: "inventoryExhaustion",
+      openRewardPacksAtEnd: true,
+      forceOpenRewardPacksAtEnd: true,
+      rewardPackNames: [
+        "5x 80+ Rare Gold Players Pack",
+        "5 x 80+ Rare Gold Players Pack",
+        "x1 5x 80+ Rare Gold Players Pack",
+        "5x80+ Rare Gold Players Pack",
+        "5x 80+ Rare Gold Players Pack (Untradeable)"
+      ],
       stages: [
         {
           id: "bronze-upgrade",
@@ -333,11 +342,20 @@
           maxCompletions: 1e3
         },
         {
-          id: "gold-upgrade",
-          name: "Gold Upgrade",
-          sbcNames: ["Gold Upgrade", "\u9EC4\u91D1\u5347\u7EA7", "\u9EC3\u91D1\u5347\u7D1A"],
+          id: "fof-glory-hunters",
+          name: "FOF Glory Hunters Crafting Upgrade",
+          sbcNames: ["FOF Glory Hunters Crafting Upgrade"],
           requirements: [
-            { tier: "gold", rarity: "common", count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
+            {
+              tier: "gold",
+              rarity: "common",
+              count: 9,
+              maxRating: 81,
+              playerOnly: true,
+              allowSpecial: false,
+              protectHighGold: true,
+              priorityPiles: ["unassigned", "storage", "transfer", "club"]
+            }
           ],
           priorityPiles: ["unassigned", "storage", "transfer", "club"],
           maxCompletions: 1e3
@@ -9233,7 +9251,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.32",
+      version: "0.5.33",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),

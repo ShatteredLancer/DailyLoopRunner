@@ -237,8 +237,17 @@ export const LOOP_DEFS = [
   },
   {
     id: 'inventory-fodder-exhaustion',
-    name: 'Bronze/Silver/Common Inventory Exhaustion Loop',
+    name: 'Bronze/Silver/FOF Glory Hunters Exhaustion Loop',
     strategy: 'inventoryExhaustion',
+    openRewardPacksAtEnd: true,
+    forceOpenRewardPacksAtEnd: true,
+    rewardPackNames: [
+      '5x 80+ Rare Gold Players Pack',
+      '5 x 80+ Rare Gold Players Pack',
+      'x1 5x 80+ Rare Gold Players Pack',
+      '5x80+ Rare Gold Players Pack',
+      '5x 80+ Rare Gold Players Pack (Untradeable)',
+    ],
     stages: [
       {
         id: 'bronze-upgrade',
@@ -261,11 +270,20 @@ export const LOOP_DEFS = [
         maxCompletions: 1000,
       },
       {
-        id: 'gold-upgrade',
-        name: 'Gold Upgrade',
-        sbcNames: ['Gold Upgrade', '黄金升级', '黃金升級'],
+        id: 'fof-glory-hunters',
+        name: 'FOF Glory Hunters Crafting Upgrade',
+        sbcNames: ['FOF Glory Hunters Crafting Upgrade'],
         requirements: [
-          { tier: 'gold', rarity: 'common', count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+          {
+            tier: 'gold',
+            rarity: 'common',
+            count: 9,
+            maxRating: 81,
+            playerOnly: true,
+            allowSpecial: false,
+            protectHighGold: true,
+            priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+          },
         ],
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
         maxCompletions: 1000,

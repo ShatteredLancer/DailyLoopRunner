@@ -119,11 +119,13 @@ describe('loop configuration contracts', () => {
     const { builtIn, external } = await loadDefinitions();
     for (const loop of [byId(builtIn, 'inventory-fodder-exhaustion'), byId(external, 'inventory-fodder-exhaustion')]) {
       expect(loop.strategy).toBe('inventoryExhaustion');
-      expect(loop.stages.map((stage) => stage.id)).toEqual(['bronze-upgrade', 'silver-upgrade', 'gold-upgrade']);
+      expect(loop.stages.map((stage) => stage.id)).toEqual(['bronze-upgrade', 'silver-upgrade', 'fof-glory-hunters']);
+      expect(loop.openRewardPacksAtEnd).toBe(true);
+      expect(loop.forceOpenRewardPacksAtEnd).toBe(true);
       expect(loop.stages.map((stage) => stage.requirements[0])).toEqual([
         expect.objectContaining({ tier: 'bronze', count: 11, allowSpecial: false }),
         expect.objectContaining({ tier: 'silver', count: 11, allowSpecial: false }),
-        expect.objectContaining({ tier: 'gold', rarity: 'common', count: 11, maxRating: 81, protectHighGold: true, allowSpecial: false }),
+        expect.objectContaining({ tier: 'gold', rarity: 'common', count: 9, maxRating: 81, protectHighGold: true, allowSpecial: false }),
       ]);
     }
   });
