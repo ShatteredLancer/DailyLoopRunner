@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.37
+// @version      0.5.38
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -7955,10 +7955,15 @@
   }
   #bronze-loop-json.show { display: block; }
   #bronze-loop-log {
-    flex: 1 1 0;
-    min-height: 100px;
-    overflow: auto;
+    flex: 1 1 64px;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: auto;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
     background: #0c0f13;
     border: 1px solid #303946;
     padding: 8px;
@@ -9289,7 +9294,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.37",
+      version: "0.5.38",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),

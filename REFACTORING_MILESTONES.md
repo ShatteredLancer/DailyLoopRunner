@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.5.37`
-- Git 基线：`9989b34` + local `0.5.37` conflict resolution
+- Userscript 版本：`0.5.38`
+- Git 基线：`8a94dc0` + local `0.5.38` UI fix
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -581,6 +581,7 @@ Status: In Progress
 - `0.5.35` 合并提交 `7e1b2d1` 的 `FOF Glory Hunters Exhaustion Loop` 与延迟奖励开包能力。新 Loop 严格使用 9 张 81 分及以下 Common Gold，正常耗尽后仅在 `Open reward packs` 开启时批量打开匹配的 `5x 80+` 奖励；移除远程配置中的强制开包覆盖，并禁止 blocked/stopped 后执行 finalize。保留 `0.5.34` 动态 Pick、Provision 动态引用和 Common-first 修复。完整 `npm run verify` 通过 74 个测试文件、396 个测试，内置/外部配置均为 19 个 Loop。
 - `0.5.36` 合并提交 `41285b4`，将组合库存耗尽 Loop 的 Common Gold `Gold Upgrade` 阶段替换为 9 张 81 分及以下 Common Gold 的 `FOF Glory Hunters Crafting Upgrade`，独立 FOF-only Loop继续保留。组合 Loop 的 `5x 80+` 奖励同样延迟到全部阶段结束，并继续服从 UI `Open reward packs`；移除远程强制开包字段，blocked/stopped 后不执行最终开包。完整 `npm run verify` 通过 74 个测试文件、396 个测试，内置/外部配置均为 19 个 Loop。
 - `0.5.37` 合并提交 `9989b34`，为组合库存耗尽 Loop 增加 stage 级奖励策略：Bronze 和 Silver 每次提交后强制打开各自奖励，使 Silver/Common Gold 继续供给下一阶段；父 Loop 的 FOF `5x80+` 奖励名不传入 stage，仍延迟到全部阶段结束并服从 UI `Open reward packs`。该强制行为仅配置在组合 Loop 的前两个 stage，不影响独立 Bronze/Silver/FOF Loop。完整 `npm run verify` 通过 74 个测试文件、396 个测试，内置/外部配置均为 19 个 Loop。
+- `0.5.38` 修正 Options 内容增长后完整日志被父容器裁切且无法滚动的问题。日志区允许在固定面板剩余空间内收缩，保留稳定的纵向滚动条，并对长错误栈和 URL 自动换行；面板默认尺寸、简洁日志和 Loop 执行逻辑不变。新增主面板 CSS 回归断言；完整 `npm run verify` 通过 74 个测试文件、396 个测试，内置/外部配置均为 19 个 Loop。
 
 Live validation: `1 of 5 83+ Player Pick` 和 `1 of 3 84+ Summer Tournament Nations Player Pick` 的静态 Workflow 与 `0.5.11` 扫描覆盖模式均已真实提交并领取通过，因此 `0.5.12` 删除两者静态配置。`5 of 10 82+ Players Pick` 已过期并在 `0.5.33` 删除；当前 `4 of 10 83+ Player Pick` 的双 Challenge 元数据已通过真实扫描获取，待补 Dry Run/Live 验证。
 

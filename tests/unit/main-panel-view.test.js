@@ -75,7 +75,10 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('overflow-wrap: anywhere;');
     expect(MAIN_PANEL_STYLE).toContain('overflow-y: auto;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-log {');
-    expect(MAIN_PANEL_STYLE).toContain('overflow: auto;');
+    expect(MAIN_PANEL_STYLE).toContain('flex: 1 1 64px;');
+    expect(MAIN_PANEL_STYLE).toContain('min-height: 0;');
+    expect(MAIN_PANEL_STYLE).toContain('scrollbar-gutter: stable;');
+    expect(MAIN_PANEL_STYLE).toContain('overscroll-behavior: contain;');
   });
 
   it('mounts style and panel once through the DOM adapter', () => {

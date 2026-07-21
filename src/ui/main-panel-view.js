@@ -107,10 +107,15 @@ export const MAIN_PANEL_STYLE = `
   }
   #bronze-loop-json.show { display: block; }
   #bronze-loop-log {
-    flex: 1 1 0;
-    min-height: 100px;
-    overflow: auto;
+    flex: 1 1 64px;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: auto;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
     background: #0c0f13;
     border: 1px solid #303946;
     padding: 8px;
