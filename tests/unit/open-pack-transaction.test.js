@@ -93,6 +93,18 @@ describe('openPackTransaction', () => {
     expect(beforeRetry).toHaveBeenCalledOnce();
   });
 
+  it('returns the final error code after a bounded retry is exhausted', async () => {
+    const beforeRetry = vi.fn(async () => {});
+    const receipt = await openPackTransaction({
+      packSelector: async ({ attempt }) => ({ id: 200 + attempt }),
+      openTransport: async () => ({ success: false, error: { code: 471 } }),
+      retryPolicy: { attempts: 2, retryCodes: ['471'] },
+      beforeRetry,
+    });
+    expect(receipt).toMatchObject({ status: 'blocked', reason: '471', attempts: 2 });
+    expect(beforeRetry).toHaveBeenCalledOnce();
+  });
+
   it('returns stale for an allowed 404', async () => {
     const onGone = vi.fn(async () => {});
     const receipt = await openPackTransaction({

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.30
+// @version      0.5.31
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -5938,6 +5938,44 @@
     return createOpenPackReceipt({ status: "blocked", reason: lastReason || "open failed", attempts });
   }
 
+  // src/pack/retry-recovery.js
+  function normalizedCode(value) {
+    return String(value ?? "").trim();
+  }
+  function shouldDiscardFailedPack(code) {
+    return normalizedCode(code) === "471";
+  }
+  async function recoverPackOpenRetry(options = {}) {
+    const label = String(options.label || "Pack open");
+    const code = normalizedCode(options.code) || "unknown";
+    const pack = options.pack || null;
+    const packId2 = Number(pack?.id ?? pack?.packId ?? pack?.packDefinitionId ?? pack?.packAssetId ?? 0) || null;
+    const log = typeof options.log === "function" ? options.log : () => {
+    };
+    log(`${label}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
+    if (shouldDiscardFailedPack(code)) {
+      options.markFailedPack?.(pack);
+      log(`${label}: excluding failed pack instance${packId2 ? ` #${packId2}` : ""} before retry`);
+    }
+    log(`${label}: retrying pack open after navigation and unassigned recovery`);
+    await options.sleep?.(Math.max(0, Number(options.pauseMs || 0)));
+    await options.unwind?.();
+    await options.showUnassigned?.();
+    await options.resolveUnassigned?.();
+    let storeRefreshed = false;
+    try {
+      storeRefreshed = await options.openStorePacks?.() === true;
+    } catch (error) {
+      log(`${label}: pack-open Store recovery skipped: ${error?.message || error}`);
+    }
+    if (!storeRefreshed) {
+      log(`${label}: Store Packs view refresh unavailable; continuing with repository refresh`);
+    }
+    await options.sleep?.(Math.max(0, Number(options.settleMs ?? 700)));
+    await options.refreshInventory?.({ storeRefreshed });
+    return { code, discarded: shouldDiscardFailedPack(code), storeRefreshed };
+  }
+
   // src/pack/stale-pack-tracker.js
   function createStalePackTracker() {
     const objectRefs = /* @__PURE__ */ new WeakSet();
@@ -9160,7 +9198,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.30",
+      version: "0.5.31",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -10616,22 +10654,24 @@
         onItemsOpenedError: (error) => log(`${purpose}: reward highlight failed: ${error?.message || error}`),
         openedItemPolicy: options.openedItemPolicy,
         retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
-        beforeRetry: async ({ code }) => {
-          log(`${purpose}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
-          log(`${purpose}: retrying pack open after navigation and unassigned recovery`);
-          await sleep(CFG.pauseMs);
-          await unwindSbcSquadControllers2(`${purpose} pack-open recovery`);
-          await showUnassignedIfAny(`${purpose} pack-open recovery sync`);
-          if (isSbcControllerActive()) {
-            await openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`).catch((error) => {
-              log(`${purpose}: pack-open Store recovery skipped: ${error?.message || error}`);
-              return false;
-            });
-          }
-          await sleep(700);
-          await resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`);
-          await refreshInventoryCaches(`${purpose} pack-open recovery`, { quiet: true });
-        },
+        beforeRetry: async ({ code, pack: failedPack }) => recoverPackOpenRetry({
+          label: purpose,
+          code,
+          pack: failedPack,
+          log,
+          markFailedPack: (item) => markStalePack(item),
+          sleep,
+          pauseMs: CFG.pauseMs,
+          settleMs: 700,
+          unwind: () => unwindSbcSquadControllers2(`${purpose} pack-open recovery`),
+          showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`),
+          openStorePacks: () => openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`),
+          resolveUnassigned: () => resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`),
+          refreshInventory: ({ storeRefreshed }) => refreshInventoryCaches(`${purpose} pack-open recovery`, {
+            quiet: true,
+            includePacks: !storeRefreshed
+          })
+        }),
         allowGone: options.allowGone === true,
         onGone: async (selectedPack) => {
           markStalePack(selectedPack, { gone: true });
@@ -10646,6 +10686,7 @@
         if (receipt.status === "unavailable") log(`${purpose}: no matching pack remains after recovery`);
         return null;
       }
+      log(`${purpose}: pack open blocked after ${receipt.attempts} attempt(s); reason:${receipt.reason || "unknown"}`);
       fail2(`Open pack failed: ${receipt.reason || "unknown"}`);
     }
     async function findValidationSourcePack(loopDef) {
@@ -11735,9 +11776,6 @@
         getItems: getUnassignedItems,
         log
       });
-    }
-    function isSbcControllerActive() {
-      return isSbcControllerName(currentControllerName());
     }
     async function unwindSbcSquadControllers2(label, maxPops = 20) {
       return unwindSbcSquadControllers({
@@ -15845,6 +15883,8 @@
               log(`Batch Open: Unassigned items were preserved after ${payload.entry.packName || `#${payload.entry.packId}`}; stopping before ${payload.remaining} remaining pack(s) in this type`);
             } else if (event === "preflight-preserved") {
               log(`Batch Open: existing Unassigned items cannot be safely resolved (${payload.preflight.reason || "capacity blocked"}); no pack will be opened`);
+            } else if (event === "blocked") {
+              log(`Batch Open: blocked at ${payload.entry.packName || `#${payload.entry.packId}`}; ${payload.entryResult.reason || "pack open failed"}`);
             }
           }
         });
@@ -15852,7 +15892,7 @@
         recapModel = createBatchOpenRecapModel({ ...result, prices });
         state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
         state.lastRecapType = "batch";
-        log(`Batch Open: ${result.status}; opened ${result.packsOpened}/${result.requestedPacks}, skipped ${result.skippedPacks}`);
+        log(`Batch Open: ${result.status}${result.reason ? ` (${result.reason})` : ""}; opened ${result.packsOpened}/${result.requestedPacks}, skipped ${result.skippedPacks}`);
         updateRecapButton();
         return recapModel;
       } catch (error) {

@@ -62,6 +62,7 @@ describe('runBatchOpenWorkflow', () => {
   });
 
   it('blocks later opens when the shared open or cleanup path fails', async () => {
+    const onEvent = vi.fn(async () => {});
     const result = await runBatchOpenWorkflow({
       plan: { entries: [
         { packId: 1, packName: 'One', quantity: 3 },
@@ -69,6 +70,7 @@ describe('runBatchOpenWorkflow', () => {
       ] },
       resolvePack: async () => ({ id: 1 }),
       openPack: async () => { throw new Error('Unassigned cleanup failed'); },
+      onEvent,
     });
     expect(result).toMatchObject({
       status: 'blocked',
@@ -77,6 +79,9 @@ describe('runBatchOpenWorkflow', () => {
       requestedPacks: 5,
       skippedPacks: 5,
     });
+    expect(onEvent).toHaveBeenCalledWith('blocked', expect.objectContaining({
+      entryResult: expect.objectContaining({ reason: 'Unassigned cleanup failed' }),
+    }));
   });
 
   it('counts an opened pack and stops before the next one when Unassigned is preserved', async () => {
