@@ -148,6 +148,8 @@ describe('current direct side-effect call baseline', () => {
     expect(source).not.toMatch(/while\s*\(Date\.now\(\)\s*-\s*start\s*<\s*25000\)/);
     expect(source).not.toMatch(/function\s+(?:validateStringArray|validateNumberArray|validatePileList|validateCardSpec|validateRequirements|validateUpgradeDef|validateShortagePacks|validateRecoveryAction|validateRecoveryRecipeList|validateRecoveryPolicyList|validateRecoveryPolicyIds)\s*\(/);
     expect(source).toContain("from './sbc/navigation-sync.js'");
+    expect(source).toContain("from './sbc/background-submit-retry.js'");
+    expect(source).toContain("from './pack/stale-pack-tracker.js'");
     expect(source).toContain("from './unassigned/confirmation.js'");
     expect(source).not.toMatch(/www\.fut\.gg\/api\/fut\/player-prices/);
     expect(source).not.toMatch(/enhancer-api\.futnext\.com\/players\/prices/);

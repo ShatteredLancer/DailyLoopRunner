@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.28
+// @version      0.5.29
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -125,7 +125,9 @@ import {
   selectionConsumesSignalRefs,
 } from './unassigned/recovery.js';
 import { openPackTransaction } from './pack/open-transaction.js';
+import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
+import { planBackgroundSubmitRetry } from './sbc/background-submit-retry.js';
 import { classifyOpenedUpgradeDuplicates } from './pack/upgrade-duplicate-routing.js';
 import { runSupplyAndCraftWorkflow } from './workflows/supply-and-craft.js';
 import { runRecycleWorkflow } from './workflows/recycle.js';
@@ -196,7 +198,7 @@ const state = {
     unassignedRecoveryPolicies: null,
     defaultUnassignedRecoveryPolicyIds: null,
     loopConfigSource: 'built-in',
-    stalePackRefs: new WeakSet(),
+    stalePackTracker: createStalePackTracker(),
     lastStorePacks: [],
     consumedItemIds: new Set(),
     pendingConsumedDuplicateSignals: new Map(),
@@ -231,7 +233,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.28',
+    version: '0.5.29',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -802,17 +804,18 @@ function updateLoopControls() {
   }
 
   function isStalePack(pack) {
-    try {
-      return !!pack && state.stalePackRefs.has(pack);
-    } catch {
-      return false;
-    }
+    return state.stalePackTracker.isStale(pack);
   }
 
-  function markStalePack(pack) {
-    try {
-      if (pack && typeof pack === 'object') state.stalePackRefs.add(pack);
-    } catch { }
+  function markStalePack(pack, options = {}) {
+    if (options.gone === true) {
+      const marked = state.stalePackTracker.markGone(pack);
+      if (marked.added && marked.id) {
+        log(`Pack #${marked.id} marked gone for this session after 404; further lookups will skip it`);
+      }
+      return;
+    }
+    state.stalePackTracker.markObject(pack);
   }
 
   function getAvailableMyPacks() {
@@ -1879,7 +1882,7 @@ function updateLoopControls() {
       },
       allowGone: options.allowGone === true,
       onGone: async (selectedPack) => {
-        markStalePack(selectedPack);
+        markStalePack(selectedPack, { gone: true });
         log(`Skipping stale pack for ${purpose}: ${packName(selectedPack)} (#${selectedPack.id}) returned 404`);
         await waitLoadingEnd().catch(() => null);
         await refreshStorePacks().catch(() => null);
@@ -2031,9 +2034,9 @@ function updateLoopControls() {
     return challenges.find((challenge) => !isCompletedChallenge(challenge)) || null;
   }
 
-  async function loadRatingSbcChallenge(challenge, label = 'rating SBC') {
+  async function loadRatingSbcChallenge(challenge, label = 'rating SBC', options = {}) {
     if (!challenge) return null;
-    if (challenge.squad) return challenge;
+    if (challenge.squad && options.force !== true) return challenge;
 
     if (!eaSbcAdapter().hasDaoLoadChallenge()) {
       fail(`${label}: direct SBC challenge loader is unavailable`);
@@ -4642,38 +4645,105 @@ function updateLoopControls() {
     return Number(set?.awards?.[0]?.value) || null;
   }
 
-  async function submitRatingSbcInBackground(set, challenge, label = set?.name || 'rating SBC') {
+  async function applyPlayersToRatingChallenge(challenge, players, label = 'rating SBC') {
+    const squad = challenge?.squad;
+    if (!squad) fail(`${label}: challenge squad missing while applying background players`);
+    const list = Array.isArray(players) ? players.filter(Boolean) : [];
+    if (!list.length) fail(`${label}: no players available to apply before background submit`);
+    const playerList = buildSquadPlayerList(challenge, list);
+    try { squad.removeAllItems?.(); } catch { }
+    squad.setPlayers(playerList, true);
+    return list;
+  }
+
+  async function submitRatingSbcInBackground(set, challenge, label = set?.name || 'rating SBC', options = {}) {
     const beforePackCounts = getPackCountsById();
-    let canSubmit = true;
-    try { canSubmit = challenge?.canSubmit?.() !== false; } catch { }
-    if (!canSubmit) fail(`${label}: challenge model rejected the background squad before submit`);
+    const players = Array.isArray(options.players) ? options.players.filter(Boolean) : [];
+    const maxAttempts = Math.max(1, Math.min(5, Number(options.maxAttempts || 3) || 3));
+    let currentChallenge = challenge;
+    let lastDetail = 'unknown';
 
-    const { skipValidation, chemistryEnabled } = eaSbcAdapter().submissionOptions();
-    log(`Submitting SBC in background: ${set.name}`);
-    const result = await observeOnce(
-      eaSbcAdapter().submitChallenge(challenge, set, { skipValidation, chemistryEnabled }),
-      ctrl(),
-      45000,
-      `submitChallenge ${label}`,
-    );
-    if (!result?.success) {
-      const detail = serviceResultErrorText(result) || result?.status || 'unknown';
-      fail(`${label}: background submit failed: ${detail}`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let canSubmit = true;
+
+      if (players.length) {
+        try {
+          await applyPlayersToRatingChallenge(currentChallenge, players, `${label} attempt ${attempt}`);
+        } catch (error) {
+          lastDetail = error?.message || String(error);
+          if (attempt >= maxAttempts) fail(`${label}: ${lastDetail}`);
+          log(`${label}: could not apply background squad before submit attempt ${attempt}/${maxAttempts}: ${lastDetail}`);
+          await sleep(Math.min(3000, (Number(CFG.pauseMs) || 800) + attempt * 500));
+          try {
+            currentChallenge = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, { force: true }) || currentChallenge;
+          } catch (reloadError) {
+            log(`${label}: challenge reload after apply failure: ${reloadError?.message || reloadError}`);
+          }
+          continue;
+        }
+      }
+
+      try { canSubmit = currentChallenge?.canSubmit?.() !== false; } catch { }
+      if (!canSubmit) {
+        lastDetail = 'challenge model rejected the background squad before submit';
+        if (attempt >= maxAttempts) fail(`${label}: ${lastDetail}`);
+        log(`${label}: ${lastDetail}; reloading before retry (${attempt}/${maxAttempts})`);
+      } else {
+        const { skipValidation, chemistryEnabled } = eaSbcAdapter().submissionOptions();
+        log(`Submitting SBC in background: ${set.name}${attempt > 1 ? ` (retry ${attempt}/${maxAttempts})` : ''}`);
+        const result = await observeOnce(
+          eaSbcAdapter().submitChallenge(currentChallenge, set, { skipValidation, chemistryEnabled }),
+          ctrl(),
+          45000,
+          `submitChallenge ${label}`,
+        );
+        if (result?.success) {
+          await refreshStorePacks().catch(() => null);
+          let rewardPackId = rewardPackIdFromSubmitResult(result, set);
+          if (!rewardPackId) {
+            const afterPacks = getAvailableRepositoryMyPacks();
+            const afterPackCounts = getPackCountsById(afterPacks);
+            const newPack = afterPacks.find((pack) => {
+              const id = packIdKey(pack);
+              return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
+            });
+            rewardPackId = Number(packIdKey(newPack)) || null;
+          }
+          log(`${label}: background submit complete; reward pack ${rewardPackId || 'unknown'}`);
+          return rewardPackId;
+        }
+        lastDetail = serviceResultErrorText(result) || result?.status || 'unknown';
+        const plan = planBackgroundSubmitRetry({
+          attempt,
+          maxAttempts,
+          detail: lastDetail,
+          baseDelayMs: Number(CFG.pauseMs) || 800,
+        });
+        if (!plan.retry) {
+          fail(`${label}: background submit failed: ${lastDetail}`);
+        }
+        log(`${label}: background submit returned ${lastDetail}; reloading challenge before retry (${attempt}/${maxAttempts})`);
+        await sleep(plan.delayMs);
+      }
+
+      try {
+        const reloaded = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, { force: true });
+        if (reloaded) currentChallenge = reloaded;
+        else {
+          const next = await findAvailableRatingSbcChallenge(set, `${label} submit-retry`);
+          if (next) {
+            currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, { force: true }) || next;
+          }
+        }
+      } catch (error) {
+        log(`${label}: challenge reload after submit conflict failed: ${error?.message || error}`);
+      }
+      if (!canSubmit && attempt < maxAttempts) {
+        await sleep(Math.min(3000, (Number(CFG.pauseMs) || 800) + attempt * 500));
+      }
     }
 
-    await refreshStorePacks().catch(() => null);
-    let rewardPackId = rewardPackIdFromSubmitResult(result, set);
-    if (!rewardPackId) {
-      const afterPacks = getAvailableRepositoryMyPacks();
-      const afterPackCounts = getPackCountsById(afterPacks);
-      const newPack = afterPacks.find((pack) => {
-        const id = packIdKey(pack);
-        return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
-      });
-      rewardPackId = Number(packIdKey(newPack)) || null;
-    }
-    log(`${label}: background submit complete; reward pack ${rewardPackId || 'unknown'}`);
-    return rewardPackId;
+    fail(`${label}: background submit failed after ${maxAttempts} attempt(s): ${lastDetail}`);
   }
 
   async function openRewardSilverPack(packId) {
@@ -5751,11 +5821,13 @@ function updateLoopControls() {
           return true;
         }],
         isSubmitReady: async () => fillResult.submitReady === true,
-        submitTransport: async ({ set, challenge }) => ({
+        submitTransport: async (context) => ({
           submitted: true,
           rewardPackId: ratingSbcFill
-            ? await submitRatingSbcInBackground(set, challenge, loopDef.name)
-            : await submitSbcAndGetAwardPackId(set),
+            ? await submitRatingSbcInBackground(context.set, context.challenge, loopDef.name, {
+                players: context.players || inspection.items || [],
+              })
+            : await submitSbcAndGetAwardPackId(context.set),
         }),
         afterSubmit: async ({ players }) => markSbcItemsConsumed(players, loopDef.name),
       });

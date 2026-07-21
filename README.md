@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.28`
+当前版本：`0.5.29`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -21,7 +21,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 完成加载。面板出现 `Ready v0.5.28` 后再开始运行。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 完成加载。面板出现 `Ready v0.5.29` 后再开始运行。
 
 ## 基本操作
 
