@@ -54,8 +54,8 @@
       "recovery": "Restart from existing Unassigned state, skip completed stages, and continue after a prior safe stop without unbounded inventory fallback."
     },
     "inventory-fodder-exhaustion": {
-      "normal": "Submit Bronze Upgrade until fewer than eleven safe bronze players remain, then Silver Upgrade the same way, then FOF Glory Hunters Crafting Upgrade with nine safe common gold cards rated <=81 until exhausted; open matching 5x 80+ reward packs only after stages finish.",
-      "recovery": "Continue to the next stage on normal inventory shortage or SBC unavailability, but stop on unsafe selection or submission failures; deferred reward packs open through the shared pack transaction at the end."
+      "normal": "Submit Bronze Upgrade and auto-open silver reward packs until bronze is exhausted, then Silver Upgrade with auto-open gold reward packs until exhausted, then FOF Glory Hunters with nine safe common gold <=81 while keeping 5x80+ packs closed; open matching 5x 80+ packs only after all stages finish.",
+      "recovery": "Continue to the next stage on normal inventory shortage or SBC unavailability, stop on unsafe selection or submission failures, and open only the configured deferred Glory Hunters reward packs at the end."
     },
     "2x84-fodder": {
       "normal": "Submit six low rare gold players and let the current Open reward packs option decide whether to open the reward.",

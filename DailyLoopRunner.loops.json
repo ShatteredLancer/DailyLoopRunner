@@ -1029,7 +1029,9 @@
             "transfer",
             "club"
           ],
-          "maxCompletions": 1000
+          "maxCompletions": 1000,
+          "openRewardPacks": true,
+          "forceOpenRewardPacks": true
         },
         {
           "id": "silver-upgrade",
@@ -1059,7 +1061,9 @@
             "transfer",
             "club"
           ],
-          "maxCompletions": 1000
+          "maxCompletions": 1000,
+          "openRewardPacks": true,
+          "forceOpenRewardPacks": true
         },
         {
           "id": "fof-glory-hunters",

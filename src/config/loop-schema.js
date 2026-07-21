@@ -136,6 +136,11 @@ function validateUpgradeDef(upgradeDef, path, errors) {
     }
   }
   validatePileList(upgradeDef.priorityPiles, `${path}.priorityPiles`, errors);
+  ['openRewardPacks', 'forceOpenRewardPacks'].forEach((field) => {
+    if (upgradeDef[field] !== undefined && typeof upgradeDef[field] !== 'boolean') {
+      errors.push(`${path}.${field} must be boolean`);
+    }
+  });
 }
 
 function validateShortagePacks(shortagePacks, path, errors) {

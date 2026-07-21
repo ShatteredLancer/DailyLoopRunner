@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.33
+// @version      0.5.34
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -329,7 +329,9 @@
             { tier: "bronze", count: 11, playerOnly: true, allowSpecial: false, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
           ],
           priorityPiles: ["unassigned", "storage", "transfer", "club"],
-          maxCompletions: 1e3
+          maxCompletions: 1e3,
+          openRewardPacks: true,
+          forceOpenRewardPacks: true
         },
         {
           id: "silver-upgrade",
@@ -339,7 +341,9 @@
             { tier: "silver", count: 11, playerOnly: true, allowSpecial: false, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
           ],
           priorityPiles: ["unassigned", "storage", "transfer", "club"],
-          maxCompletions: 1e3
+          maxCompletions: 1e3,
+          openRewardPacks: true,
+          forceOpenRewardPacks: true
         },
         {
           id: "fof-glory-hunters",
@@ -987,6 +991,11 @@
       }
     }
     validatePileList(upgradeDef.priorityPiles, `${path}.priorityPiles`, errors);
+    ["openRewardPacks", "forceOpenRewardPacks"].forEach((field2) => {
+      if (upgradeDef[field2] !== void 0 && typeof upgradeDef[field2] !== "boolean") {
+        errors.push(`${path}.${field2} must be boolean`);
+      }
+    });
   }
   function validateShortagePacks(shortagePacks, path, errors) {
     if (shortagePacks === void 0 || shortagePacks === null) return;
@@ -9251,7 +9260,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.33",
+      version: "0.5.34",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -14541,14 +14550,16 @@
         stages: loopDef.stages,
         stopPoint: () => stopPoint(),
         runStage: async ({ stage }) => {
+          const stageOpensRewards = stage.forceOpenRewardPacks === true || stage.openRewardPacks === true || !openAtEnd && loopDef.openRewardPacks === true;
           const stageDef = {
             ...cloneLoopDef(stage),
             strategy: "supplyAndCraft",
             dryRun: loopDef.dryRun === true,
-            // Deferring end-open must not open after every submission.
-            openRewardPacks: openAtEnd ? false : loopDef.openRewardPacks === true,
-            rewardPackNames: loopDef.rewardPackNames?.length ? [...loopDef.rewardPackNames] : stage.rewardPackNames,
-            rewardPackIds: loopDef.rewardPackIds?.length ? [...loopDef.rewardPackIds] : stage.rewardPackIds,
+            openRewardPacks: stageOpensRewards,
+            forceOpenRewardPacks: stage.forceOpenRewardPacks === true,
+            // Keep deferred end-open names on the parent loop only.
+            rewardPackNames: stage.rewardPackNames?.length ? [...stage.rewardPackNames] : void 0,
+            rewardPackIds: stage.rewardPackIds?.length ? [...stage.rewardPackIds] : void 0,
             disabledPiles: loopDef.disabledPiles?.length ? [...loopDef.disabledPiles] : void 0,
             preSelectionCleanup: false
           };

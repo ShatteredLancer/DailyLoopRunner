@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.33
+// @version      0.5.34
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -234,7 +234,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.33',
+    version: '0.5.34',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -6192,14 +6192,20 @@ function updateLoopControls() {
       stages: loopDef.stages,
       stopPoint: () => stopPoint(),
       runStage: async ({ stage }) => {
+        // Stage can force mid-run opens (bronze/silver packs feed later stages).
+        // Parent openRewardPacksAtEnd only suppresses opens for stages that did not opt in.
+        const stageOpensRewards = stage.forceOpenRewardPacks === true
+          || stage.openRewardPacks === true
+          || (!openAtEnd && loopDef.openRewardPacks === true);
         const stageDef = {
           ...cloneLoopDef(stage),
           strategy: 'supplyAndCraft',
           dryRun: loopDef.dryRun === true,
-          // Deferring end-open must not open after every submission.
-          openRewardPacks: openAtEnd ? false : loopDef.openRewardPacks === true,
-          rewardPackNames: loopDef.rewardPackNames?.length ? [...loopDef.rewardPackNames] : stage.rewardPackNames,
-          rewardPackIds: loopDef.rewardPackIds?.length ? [...loopDef.rewardPackIds] : stage.rewardPackIds,
+          openRewardPacks: stageOpensRewards,
+          forceOpenRewardPacks: stage.forceOpenRewardPacks === true,
+          // Keep deferred end-open names on the parent loop only.
+          rewardPackNames: stage.rewardPackNames?.length ? [...stage.rewardPackNames] : undefined,
+          rewardPackIds: stage.rewardPackIds?.length ? [...stage.rewardPackIds] : undefined,
           disabledPiles: loopDef.disabledPiles?.length ? [...loopDef.disabledPiles] : undefined,
           preSelectionCleanup: false,
         };

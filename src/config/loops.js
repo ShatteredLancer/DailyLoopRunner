@@ -258,6 +258,8 @@ export const LOOP_DEFS = [
         ],
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
         maxCompletions: 1000,
+        openRewardPacks: true,
+        forceOpenRewardPacks: true,
       },
       {
         id: 'silver-upgrade',
@@ -268,6 +270,8 @@ export const LOOP_DEFS = [
         ],
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
         maxCompletions: 1000,
+        openRewardPacks: true,
+        forceOpenRewardPacks: true,
       },
       {
         id: 'fof-glory-hunters',

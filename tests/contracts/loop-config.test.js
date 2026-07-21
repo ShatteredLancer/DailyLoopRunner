@@ -120,6 +120,9 @@ describe('loop configuration contracts', () => {
     for (const loop of [byId(builtIn, 'inventory-fodder-exhaustion'), byId(external, 'inventory-fodder-exhaustion')]) {
       expect(loop.strategy).toBe('inventoryExhaustion');
       expect(loop.stages.map((stage) => stage.id)).toEqual(['bronze-upgrade', 'silver-upgrade', 'fof-glory-hunters']);
+      expect(loop.stages[0]).toMatchObject({ openRewardPacks: true, forceOpenRewardPacks: true });
+      expect(loop.stages[1]).toMatchObject({ openRewardPacks: true, forceOpenRewardPacks: true });
+      expect(loop.stages[2].openRewardPacks === true).toBe(false);
       expect(loop.openRewardPacksAtEnd).toBe(true);
       expect(loop.forceOpenRewardPacksAtEnd).toBe(true);
       expect(loop.stages.map((stage) => stage.requirements[0])).toEqual([
