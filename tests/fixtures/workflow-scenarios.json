@@ -76,6 +76,10 @@
     "provision-crafting": {
       "normal": "Open one Provision pack per round, conditionally complete the configured Pick, then run configured crafting stages.",
       "recovery": "Resume pending Pick or reserved duplicates, preserve partial challenges, and continue on a later round."
+    },
+    "fof-glory-hunters-exhaustion": {
+      "normal": "Repeat FOF Glory Hunters Crafting Upgrade with nine safe common gold cards rated <=81 until fewer than one complete squad remains, then open all matching 5x 80+ reward packs together.",
+      "recovery": "Stop on unsafe selection or submission failure; leave reward packs unopened until the exhaustion stage ends, then open remaining matching packs through the shared pack transaction."
     }
   }
 }

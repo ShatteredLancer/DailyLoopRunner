@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.31`
+当前版本：`0.5.32`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -22,7 +22,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.31` 后即可开始；如果 FSU 正在后台校验已恢复的 Club 缓存，Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.32` 后即可开始；如果 FSU 正在后台校验已恢复的 Club 缓存，Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
 FSU 不再显示前台 Club loading 时，后台校验仍可能正在运行。此时普通页面操作和 Runner 的 provisional 读取可以继续，但 FSU 自身的 Fast SBC/阵容填充默认会等待 ready；Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
 
@@ -167,6 +167,11 @@ FUT.GG 返回 403 或无有效价格时会自动回退 FUTNext。价格会显示
 - 选材顺序是 `Unassigned -> Storage -> Transfer -> Club`，继续遵守 FSU Only Untradeable、排除联赛、Evolution、Lock 和评分范围。
 - `Open reward packs` 控制是否打开三个 Upgrade 的奖励；若打开，奖励产生的银卡或金卡可进入后续阶段。
 - 剩余不足 11 张时正常结束该阶段，不会为了清零强行使用其它类型材料。
+
+
+### FOF Glory Hunters Exhaustion Loop
+
+`FOF Glory Hunters Exhaustion Loop` 使用 9 张 `<=81` 普通金 common 反复提交 `FOF Glory Hunters Crafting Upgrade`，材料不足即停；默认在全部提交结束后再一次性打开 `5x 80+ Rare Gold Players Pack` 奖励包，中途不逐包打开。
 
 ### 评分型 SBC
 

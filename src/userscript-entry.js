@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.31
+// @version      0.5.32
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -234,7 +234,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.31',
+    version: '0.5.32',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -6148,8 +6148,45 @@ function updateLoopControls() {
     return result;
   }
 
+  async function openMatchingRewardPacksUntilEmpty(loopDef, reason = 'deferred reward pack') {
+    const maxOpens = Math.max(1, Math.min(500, Number(loopDef.maxDeferredRewardPackOpens || 200) || 200));
+    let opened = 0;
+    let failures = 0;
+    while (opened < maxOpens && failures < 3) {
+      await stopPoint();
+      await refreshStorePacks().catch(() => null);
+      const pack = findRewardPackInCache(loopDef, null);
+      if (!pack) break;
+      log(`${loopDef.name}: opening deferred reward pack ${opened + 1}: ${packName(pack)} (#${pack.id})`);
+      const ok = await openRewardPackAndCleanup(loopDef, pack.id, reason, {
+        openAttempts: 2,
+        findAttempts: 3,
+        findDelayMs: 900,
+      });
+      if (!ok) {
+        failures += 1;
+        markStalePack(pack, { gone: true });
+        log(`${loopDef.name}: deferred reward pack open failed (${failures}/3); skipping #${pack.id}`);
+        continue;
+      }
+      opened += 1;
+      failures = 0;
+      await sleep(CFG.pauseMs);
+    }
+    log(`${loopDef.name}: opened ${opened} deferred reward pack(s)${opened >= maxOpens ? ' (hit safety cap)' : ''}`);
+    return opened;
+  }
+
   async function runInventoryExhaustionLoop(loopDef) {
     await waitAppReady();
+    const openAtEnd = loopDef.openRewardPacksAtEnd === true;
+    const shouldOpenAtEnd = openAtEnd && (
+      loopDef.forceOpenRewardPacksAtEnd === true ||
+      loopDef.openRewardPacks === true
+    );
+    if (openAtEnd) {
+      log(`${loopDef.name}: reward packs deferred until stages finish${shouldOpenAtEnd ? '' : ' (end open disabled by options)'}`);
+    }
     log(`${loopDef.name}: exhausting stages in order: ${loopDef.stages.map((stage) => stage.name).join(' -> ')}`);
     const result = await runInventoryExhaustionWorkflow({
       stages: loopDef.stages,
@@ -6159,7 +6196,10 @@ function updateLoopControls() {
           ...cloneLoopDef(stage),
           strategy: 'supplyAndCraft',
           dryRun: loopDef.dryRun === true,
-          openRewardPacks: loopDef.openRewardPacks === true,
+          // Deferring end-open must not open after every submission.
+          openRewardPacks: openAtEnd ? false : loopDef.openRewardPacks === true,
+          rewardPackNames: loopDef.rewardPackNames?.length ? [...loopDef.rewardPackNames] : stage.rewardPackNames,
+          rewardPackIds: loopDef.rewardPackIds?.length ? [...loopDef.rewardPackIds] : stage.rewardPackIds,
           disabledPiles: loopDef.disabledPiles?.length ? [...loopDef.disabledPiles] : undefined,
           preSelectionCleanup: false,
         };
@@ -6180,8 +6220,21 @@ function updateLoopControls() {
           }
         }
       },
+      finalize: async (workflowResult) => {
+        if (loopDef.dryRun === true || !shouldOpenAtEnd) return;
+        if (Number(workflowResult?.totalCompletions || 0) < 1 && !findRewardPackInCache(loopDef, null)) {
+          log(`${loopDef.name}: no deferred reward packs to open`);
+          return;
+        }
+        log(`${loopDef.name}: stages complete; opening deferred reward packs`);
+        const opened = await openMatchingRewardPacksUntilEmpty(loopDef, 'deferred stage reward pack');
+        workflowResult.deferredRewardPacksOpened = opened;
+        await resolveRuntimeUnassigned(`${loopDef.name} post-deferred-reward cleanup`, { loopDef });
+      },
     });
-    log(`${loopDef.name}: submitted ${result.totalCompletions} SBC(s) across ${result.completedStages.length} stage(s)`);
+    log(`${loopDef.name}: submitted ${result.totalCompletions} SBC(s) across ${result.completedStages.length} stage(s)${
+      Number(result.deferredRewardPacksOpened || 0) ? `; opened ${result.deferredRewardPacksOpened} deferred reward pack(s)` : ''
+    }`);
     return result;
   }
 

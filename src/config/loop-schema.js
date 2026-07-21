@@ -180,7 +180,7 @@ export function validateLoopDef(loopDef, label = 'loop') {
   if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
     errors.push('dryRun must be boolean');
   }
-  ['hidden', 'mvp', 'openRewardPacks', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst', 'consumeAllSourcePacks', 'exhaustSbcSet', 'discoveryReportedCompleted'].forEach((field) => {
+  ['hidden', 'mvp', 'openRewardPacks', 'openRewardPacksAtEnd', 'forceOpenRewardPacksAtEnd', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst', 'consumeAllSourcePacks', 'exhaustSbcSet', 'discoveryReportedCompleted'].forEach((field) => {
     if (loopDef[field] !== undefined && typeof loopDef[field] !== 'boolean') {
       errors.push(`${field} must be boolean`);
     }

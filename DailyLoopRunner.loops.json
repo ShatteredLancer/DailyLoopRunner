@@ -3,9 +3,31 @@
     {
       "id": "daily-bronze-upgrade",
       "name": "Daily Bronze Upgrade",
-      "sbcNames": ["Daily Bronze Upgrade", "每日青铜升级", "每日青銅升級"],
-      "requirements": [{ "tier": "bronze", "count": 1, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "sbcNames": [
+        "Daily Bronze Upgrade",
+        "每日青铜升级",
+        "每日青銅升級"
+      ],
+      "requirements": [
+        {
+          "tier": "bronze",
+          "count": 1,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "maxSubmissions": 1,
       "mustConsumeTrigger": true,
       "onUnavailable": "continue",
@@ -15,9 +37,31 @@
     {
       "id": "daily-silver-upgrade",
       "name": "Daily Silver Upgrade",
-      "sbcNames": ["Daily Silver Upgrade", "每日白银升级", "每日白銀升級"],
-      "requirements": [{ "tier": "silver", "count": 1, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "sbcNames": [
+        "Daily Silver Upgrade",
+        "每日白银升级",
+        "每日白銀升級"
+      ],
+      "requirements": [
+        {
+          "tier": "silver",
+          "count": 1,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "maxSubmissions": 1,
       "mustConsumeTrigger": true,
       "onUnavailable": "continue",
@@ -27,12 +71,43 @@
     {
       "id": "daily-common-gold-upgrade",
       "name": "Daily Common Gold Upgrade",
-      "sbcNames": ["Daily Common Gold Upgrade", "每日普通金牌升级", "每日普通金牌升級"],
-      "requirements": [
-        { "tier": "silver", "count": 5, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] },
-        { "tier": "bronze", "count": 5, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }
+      "sbcNames": [
+        "Daily Common Gold Upgrade",
+        "每日普通金牌升级",
+        "每日普通金牌升級"
       ],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "requirements": [
+        {
+          "tier": "silver",
+          "count": 5,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        },
+        {
+          "tier": "bronze",
+          "count": 5,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "maxSubmissions": 1,
       "mustConsumeTrigger": true,
       "onUnavailable": "continue",
@@ -42,9 +117,31 @@
     {
       "id": "bronze-upgrade",
       "name": "Bronze Upgrade",
-      "sbcNames": ["Bronze Upgrade", "青铜升级", "青銅升級"],
-      "requirements": [{ "tier": "bronze", "count": 11, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "sbcNames": [
+        "Bronze Upgrade",
+        "青铜升级",
+        "青銅升級"
+      ],
+      "requirements": [
+        {
+          "tier": "bronze",
+          "count": 11,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "maxSubmissions": 1,
       "mustConsumeTrigger": true,
       "onUnavailable": "continue",
@@ -54,9 +151,31 @@
     {
       "id": "silver-upgrade",
       "name": "Silver Upgrade",
-      "sbcNames": ["Silver Upgrade", "白银升级", "白銀升級"],
-      "requirements": [{ "tier": "silver", "count": 11, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "sbcNames": [
+        "Silver Upgrade",
+        "白银升级",
+        "白銀升級"
+      ],
+      "requirements": [
+        {
+          "tier": "silver",
+          "count": 11,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "maxSubmissions": 1,
       "mustConsumeTrigger": true,
       "onUnavailable": "continue",
@@ -66,9 +185,34 @@
     {
       "id": "daily-rare-gold-upgrade",
       "name": "Daily Rare Gold Upgrade",
-      "sbcNames": ["Daily Rare Gold Upgrade", "每日稀有金牌升级", "每日稀有金牌升級"],
-      "requirements": [{ "tier": "gold", "rarity": "common", "count": 5, "maxRating": 81, "playerOnly": true, "allowSpecial": false, "protectHighGold": true, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "sbcNames": [
+        "Daily Rare Gold Upgrade",
+        "每日稀有金牌升级",
+        "每日稀有金牌升級"
+      ],
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "common",
+          "count": 5,
+          "maxRating": 81,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "protectHighGold": true,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "maxSubmissions": 1,
       "mustConsumeTrigger": true,
       "onUnavailable": "continue",
@@ -78,9 +222,32 @@
     {
       "id": "fof-glory-hunters-crafting-upgrade",
       "name": "FOF Glory Hunters Crafting Upgrade",
-      "sbcNames": ["FOF Glory Hunters Crafting Upgrade"],
-      "requirements": [{ "tier": "gold", "rarity": "common", "count": 9, "maxRating": 81, "playerOnly": true, "allowSpecial": false, "protectHighGold": true, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "sbcNames": [
+        "FOF Glory Hunters Crafting Upgrade"
+      ],
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "common",
+          "count": 9,
+          "maxRating": 81,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "protectHighGold": true,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "maxSubmissions": 1,
       "mustConsumeTrigger": true,
       "onUnavailable": "continue",
@@ -90,9 +257,34 @@
     {
       "id": "gold-upgrade",
       "name": "Gold Upgrade",
-      "sbcNames": ["Gold Upgrade", "黄金升级", "黃金升級"],
-      "requirements": [{ "tier": "gold", "rarity": "common", "count": 11, "maxRating": 81, "playerOnly": true, "allowSpecial": false, "protectHighGold": true, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "sbcNames": [
+        "Gold Upgrade",
+        "黄金升级",
+        "黃金升級"
+      ],
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "common",
+          "count": 11,
+          "maxRating": 81,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "protectHighGold": true,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "maxSubmissions": 1,
       "mustConsumeTrigger": true,
       "onUnavailable": "continue",
@@ -102,9 +294,33 @@
     {
       "id": "2x84-upgrade",
       "name": "2x 84+ Upgrade",
-      "sbcNames": ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
-      "requirements": [{ "tier": "gold", "rarity": "rare", "count": 6, "maxRating": 81, "playerOnly": true, "allowSpecial": false, "protectHighGold": true, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "sbcNames": [
+        "2x 84+ Upgrade",
+        "2 x 84+ Upgrade"
+      ],
+      "requirements": [
+        {
+          "tier": "gold",
+          "rarity": "rare",
+          "count": 6,
+          "maxRating": 81,
+          "playerOnly": true,
+          "allowSpecial": false,
+          "protectHighGold": true,
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
+        }
+      ],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "maxSubmissions": 1,
       "mustConsumeTrigger": true,
       "onUnavailable": "continue",
@@ -115,35 +331,77 @@
   "unassignedRecoveryPolicies": [
     {
       "id": "bronze-duplicate-overflow",
-      "match": { "tier": "bronze", "playerOnly": true, "allowSpecial": false },
+      "match": {
+        "tier": "bronze",
+        "playerOnly": true,
+        "allowSpecial": false
+      },
       "steps": [
-        { "recipeId": "daily-bronze-upgrade" },
-        { "recipeId": "daily-common-gold-upgrade" },
-        { "recipeId": "bronze-upgrade" }
+        {
+          "recipeId": "daily-bronze-upgrade"
+        },
+        {
+          "recipeId": "daily-common-gold-upgrade"
+        },
+        {
+          "recipeId": "bronze-upgrade"
+        }
       ]
     },
     {
       "id": "silver-duplicate-overflow",
-      "match": { "tier": "silver", "playerOnly": true, "allowSpecial": false },
+      "match": {
+        "tier": "silver",
+        "playerOnly": true,
+        "allowSpecial": false
+      },
       "steps": [
-        { "recipeId": "daily-silver-upgrade" },
-        { "recipeId": "daily-common-gold-upgrade" },
-        { "recipeId": "silver-upgrade" }
+        {
+          "recipeId": "daily-silver-upgrade"
+        },
+        {
+          "recipeId": "daily-common-gold-upgrade"
+        },
+        {
+          "recipeId": "silver-upgrade"
+        }
       ]
     },
     {
       "id": "common-gold-duplicate-overflow",
-      "match": { "tier": "gold", "rarity": "common", "playerOnly": true, "allowSpecial": false, "maxRating": 81 },
+      "match": {
+        "tier": "gold",
+        "rarity": "common",
+        "playerOnly": true,
+        "allowSpecial": false,
+        "maxRating": 81
+      },
       "steps": [
-        { "recipeId": "daily-rare-gold-upgrade" },
-        { "recipeId": "fof-glory-hunters-crafting-upgrade" },
-        { "recipeId": "gold-upgrade" }
+        {
+          "recipeId": "daily-rare-gold-upgrade"
+        },
+        {
+          "recipeId": "fof-glory-hunters-crafting-upgrade"
+        },
+        {
+          "recipeId": "gold-upgrade"
+        }
       ]
     },
     {
       "id": "rare-gold-duplicate-overflow",
-      "match": { "tier": "gold", "rarity": "rare", "playerOnly": true, "allowSpecial": false, "maxRating": 81 },
-      "steps": [{ "recipeId": "2x84-upgrade" }]
+      "match": {
+        "tier": "gold",
+        "rarity": "rare",
+        "playerOnly": true,
+        "allowSpecial": false,
+        "maxRating": 81
+      },
+      "steps": [
+        {
+          "recipeId": "2x84-upgrade"
+        }
+      ]
     }
   ],
   "defaultUnassignedRecoveryPolicyIds": [
@@ -159,7 +417,9 @@
       "mvp": true,
       "name": "Bronze Upgrade Validation",
       "strategy": "validationBronzeUpgrade",
-      "sourcePackIds": [105],
+      "sourcePackIds": [
+        105
+      ],
       "sourcePackNames": [
         "高级青铜球员",
         "高級青銅球員",
@@ -195,7 +455,9 @@
         "每日青铜升级",
         "每日青銅升級"
       ],
-      "rewardPackIds": [105],
+      "rewardPackIds": [
+        105
+      ],
       "rewardPackNames": [
         "Bronze Players Premium",
         "Premium Bronze Players",
@@ -220,7 +482,9 @@
         "每日青铜升级",
         "每日青銅升級"
       ],
-      "rewardPackIds": [105],
+      "rewardPackIds": [
+        105
+      ],
       "rewardPackNames": [
         "Bronze Players Premium",
         "Premium Bronze Players",
@@ -244,7 +508,9 @@
         "每日白银升级",
         "每日白銀升級"
       ],
-      "rewardPackIds": [205],
+      "rewardPackIds": [
+        205
+      ],
       "rewardPackNames": [
         "Silver Players Premium",
         "SILVER PLAYERS PREMIUM"
@@ -268,7 +534,9 @@
         "每日白银升级",
         "每日白銀升級"
       ],
-      "rewardPackIds": [205],
+      "rewardPackIds": [
+        205
+      ],
       "rewardPackNames": [
         "Silver Players Premium",
         "SILVER PLAYERS PREMIUM"
@@ -291,7 +559,9 @@
         "每日普通金牌升级",
         "每日普通金牌升級"
       ],
-      "rewardPackIds": [304],
+      "rewardPackIds": [
+        304
+      ],
       "rewardPackNames": [
         "Gold Players Pack"
       ],
@@ -301,30 +571,66 @@
           "count": 5,
           "playerOnly": true,
           "allowSpecial": false,
-          "priorityPiles": ["storage", "transfer", "club"]
+          "priorityPiles": [
+            "storage",
+            "transfer",
+            "club"
+          ]
         },
         {
           "tier": "bronze",
           "count": 5,
           "playerOnly": true,
           "allowSpecial": false,
-          "priorityPiles": ["storage", "transfer", "club"]
+          "priorityPiles": [
+            "storage",
+            "transfer",
+            "club"
+          ]
         }
       ],
-      "priorityPiles": ["storage", "transfer", "club"],
-      "primaryPiles": ["unassigned", "storage", "transfer"],
-      "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "priorityPiles": [
+        "storage",
+        "transfer",
+        "club"
+      ],
+      "primaryPiles": [
+        "unassigned",
+        "storage",
+        "transfer"
+      ],
+      "clubFallbackPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "shortagePacks": [
         {
-          "requirement": { "tier": "bronze" },
-          "packIds": [105],
-          "packNames": ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
+          "requirement": {
+            "tier": "bronze"
+          },
+          "packIds": [
+            105
+          ],
+          "packNames": [
+            "Bronze Players Premium",
+            "Premium Bronze Players",
+            "BRONZE PLAYERS PREMIUM"
+          ],
           "maxOpensPerAttempt": 1
         },
         {
-          "requirement": { "tier": "silver" },
-          "packIds": [205],
-          "packNames": ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
+          "requirement": {
+            "tier": "silver"
+          },
+          "packIds": [
+            205
+          ],
+          "packNames": [
+            "Silver Players Premium",
+            "SILVER PLAYERS PREMIUM"
+          ],
           "maxOpensPerAttempt": 1
         }
       ],
@@ -342,7 +648,9 @@
         "每日普通金牌升级",
         "每日普通金牌升級"
       ],
-      "rewardPackIds": [304],
+      "rewardPackIds": [
+        304
+      ],
       "rewardPackNames": [
         "Gold Players Pack"
       ],
@@ -352,30 +660,66 @@
           "count": 5,
           "playerOnly": true,
           "allowSpecial": false,
-          "priorityPiles": ["storage", "transfer", "club"]
+          "priorityPiles": [
+            "storage",
+            "transfer",
+            "club"
+          ]
         },
         {
           "tier": "bronze",
           "count": 5,
           "playerOnly": true,
           "allowSpecial": false,
-          "priorityPiles": ["storage", "transfer", "club"]
+          "priorityPiles": [
+            "storage",
+            "transfer",
+            "club"
+          ]
         }
       ],
-      "priorityPiles": ["storage", "transfer", "club"],
-      "primaryPiles": ["unassigned", "storage", "transfer"],
-      "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "priorityPiles": [
+        "storage",
+        "transfer",
+        "club"
+      ],
+      "primaryPiles": [
+        "unassigned",
+        "storage",
+        "transfer"
+      ],
+      "clubFallbackPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "shortagePacks": [
         {
-          "requirement": { "tier": "bronze" },
-          "packIds": [105],
-          "packNames": ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
+          "requirement": {
+            "tier": "bronze"
+          },
+          "packIds": [
+            105
+          ],
+          "packNames": [
+            "Bronze Players Premium",
+            "Premium Bronze Players",
+            "BRONZE PLAYERS PREMIUM"
+          ],
           "maxOpensPerAttempt": 1
         },
         {
-          "requirement": { "tier": "silver" },
-          "packIds": [205],
-          "packNames": ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
+          "requirement": {
+            "tier": "silver"
+          },
+          "packIds": [
+            205
+          ],
+          "packNames": [
+            "Silver Players Premium",
+            "SILVER PLAYERS PREMIUM"
+          ],
           "maxOpensPerAttempt": 1
         }
       ],
@@ -408,17 +752,39 @@
           "playerOnly": true,
           "allowSpecial": false,
           "protectHighGold": true,
-          "priorityPiles": ["unassigned", "storage", "transfer"]
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer"
+          ]
         }
       ],
-      "priorityPiles": ["unassigned", "storage", "transfer"],
-      "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer"
+      ],
+      "clubFallbackPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "deferChallengeLoad": true,
       "preSelectionCleanup": false,
       "shortagePacks": [
         {
-          "requirement": { "tier": "gold", "rarity": "common", "playerOnly": true, "allowSpecial": false, "protectHighGold": true },
-          "packNames": ["11x Gold Players Pack", "11 x Gold Players Pack"],
+          "requirement": {
+            "tier": "gold",
+            "rarity": "common",
+            "playerOnly": true,
+            "allowSpecial": false,
+            "protectHighGold": true
+          },
+          "packNames": [
+            "11x Gold Players Pack",
+            "11 x Gold Players Pack"
+          ],
           "maxOpensPerAttempt": 1,
           "repeatUntilSatisfied": true,
           "maxRuns": 100,
@@ -455,17 +821,39 @@
           "playerOnly": true,
           "allowSpecial": false,
           "protectHighGold": true,
-          "priorityPiles": ["unassigned", "storage", "transfer"]
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer"
+          ]
         }
       ],
-      "priorityPiles": ["unassigned", "storage", "transfer"],
-      "clubFallbackPiles": ["unassigned", "storage", "transfer", "club"],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer"
+      ],
+      "clubFallbackPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "deferChallengeLoad": true,
       "preSelectionCleanup": false,
       "shortagePacks": [
         {
-          "requirement": { "tier": "gold", "rarity": "common", "playerOnly": true, "allowSpecial": false, "protectHighGold": true },
-          "packNames": ["11x Gold Players Pack", "11 x Gold Players Pack"],
+          "requirement": {
+            "tier": "gold",
+            "rarity": "common",
+            "playerOnly": true,
+            "allowSpecial": false,
+            "protectHighGold": true
+          },
+          "packNames": [
+            "11x Gold Players Pack",
+            "11 x Gold Players Pack"
+          ],
           "maxOpensPerAttempt": 1,
           "repeatUntilSatisfied": true,
           "maxRuns": 100,
@@ -503,10 +891,20 @@
             "playerOnly": true,
             "allowSpecial": false,
             "protectHighGold": true,
-            "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+            "priorityPiles": [
+              "unassigned",
+              "storage",
+              "transfer",
+              "club"
+            ]
           }
         ],
-        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        "priorityPiles": [
+          "unassigned",
+          "storage",
+          "transfer",
+          "club"
+        ]
       },
       "maxPacks": 100,
       "maxCompletions": 1,
@@ -518,7 +916,9 @@
       "id": "82-plus-player-pick-5of10",
       "name": "5 of 10 82+ Players Pick",
       "strategy": "playerPickSbc",
-      "sbcSetIds": [1202],
+      "sbcSetIds": [
+        1202
+      ],
       "sbcNames": [
         "5 of 10 82+ Players Pick",
         "5 of 10 82+ Player Pick",
@@ -530,7 +930,9 @@
         "5 of 10 82+ Rare Gold Player Pick",
         "82+ Player Pick"
       ],
-      "pickItemResourceIds": [5005706],
+      "pickItemResourceIds": [
+        5005706
+      ],
       "requirements": [
         {
           "tier": "gold",
@@ -540,10 +942,20 @@
           "playerOnly": true,
           "allowSpecial": false,
           "protectHighGold": true,
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
         }
       ],
-      "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+      "priorityPiles": [
+        "unassigned",
+        "storage",
+        "transfer",
+        "club"
+      ],
       "challengesPerPick": 2,
       "pickCandidateCount": 10,
       "pickCount": 5,
@@ -592,31 +1004,141 @@
         {
           "id": "bronze-upgrade",
           "name": "Bronze Upgrade",
-          "sbcNames": ["Bronze Upgrade", "青铜升级", "青銅升級"],
-          "requirements": [
-            { "tier": "bronze", "count": 11, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }
+          "sbcNames": [
+            "Bronze Upgrade",
+            "青铜升级",
+            "青銅升級"
           ],
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+          "requirements": [
+            {
+              "tier": "bronze",
+              "count": 11,
+              "playerOnly": true,
+              "allowSpecial": false,
+              "priorityPiles": [
+                "unassigned",
+                "storage",
+                "transfer",
+                "club"
+              ]
+            }
+          ],
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ],
           "maxCompletions": 1000
         },
         {
           "id": "silver-upgrade",
           "name": "Silver Upgrade",
-          "sbcNames": ["Silver Upgrade", "白银升级", "白銀升級"],
-          "requirements": [
-            { "tier": "silver", "count": 11, "playerOnly": true, "allowSpecial": false, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }
+          "sbcNames": [
+            "Silver Upgrade",
+            "白银升级",
+            "白銀升級"
           ],
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+          "requirements": [
+            {
+              "tier": "silver",
+              "count": 11,
+              "playerOnly": true,
+              "allowSpecial": false,
+              "priorityPiles": [
+                "unassigned",
+                "storage",
+                "transfer",
+                "club"
+              ]
+            }
+          ],
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ],
           "maxCompletions": 1000
         },
         {
           "id": "gold-upgrade",
           "name": "Gold Upgrade",
-          "sbcNames": ["Gold Upgrade", "黄金升级", "黃金升級"],
-          "requirements": [
-            { "tier": "gold", "rarity": "common", "count": 11, "maxRating": 81, "playerOnly": true, "allowSpecial": false, "protectHighGold": true, "priorityPiles": ["unassigned", "storage", "transfer", "club"] }
+          "sbcNames": [
+            "Gold Upgrade",
+            "黄金升级",
+            "黃金升級"
           ],
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+          "requirements": [
+            {
+              "tier": "gold",
+              "rarity": "common",
+              "count": 11,
+              "maxRating": 81,
+              "playerOnly": true,
+              "allowSpecial": false,
+              "protectHighGold": true,
+              "priorityPiles": [
+                "unassigned",
+                "storage",
+                "transfer",
+                "club"
+              ]
+            }
+          ],
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ],
+          "maxCompletions": 1000
+        }
+      ]
+    },
+    {
+      "id": "fof-glory-hunters-exhaustion",
+      "name": "FOF Glory Hunters Exhaustion Loop",
+      "strategy": "inventoryExhaustion",
+      "openRewardPacksAtEnd": true,
+      "forceOpenRewardPacksAtEnd": true,
+      "rewardPackNames": [
+        "5x 80+ Rare Gold Players Pack",
+        "5 x 80+ Rare Gold Players Pack",
+        "x1 5x 80+ Rare Gold Players Pack",
+        "5x80+ Rare Gold Players Pack",
+        "5x 80+ Rare Gold Players Pack (Untradeable)"
+      ],
+      "stages": [
+        {
+          "id": "fof-glory-hunters",
+          "name": "FOF Glory Hunters Crafting Upgrade",
+          "sbcNames": [
+            "FOF Glory Hunters Crafting Upgrade"
+          ],
+          "requirements": [
+            {
+              "tier": "gold",
+              "rarity": "common",
+              "count": 9,
+              "maxRating": 81,
+              "playerOnly": true,
+              "allowSpecial": false,
+              "protectHighGold": true,
+              "priorityPiles": [
+                "unassigned",
+                "storage",
+                "transfer",
+                "club"
+              ]
+            }
+          ],
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ],
           "maxCompletions": 1000
         }
       ]
@@ -627,8 +1149,14 @@
       "mvp": true,
       "name": "2x84+ Fodder Loop",
       "strategy": "fillAndVerifySbc",
-      "sbcNames": ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
-      "rewardPackNames": ["2x 84+ Rare Gold Players Pack", "2 x 84+ Rare Gold Players Pack"],
+      "sbcNames": [
+        "2x 84+ Upgrade",
+        "2 x 84+ Upgrade"
+      ],
+      "rewardPackNames": [
+        "2x 84+ Rare Gold Players Pack",
+        "2 x 84+ Rare Gold Players Pack"
+      ],
       "maxCompletions": 1,
       "useRoundsAsCompletions": true,
       "allowMultipleCompletions": true,
@@ -642,10 +1170,16 @@
           "playerOnly": true,
           "allowSpecial": false,
           "protectHighGold": true,
-          "priorityPiles": ["storage", "club"]
+          "priorityPiles": [
+            "storage",
+            "club"
+          ]
         }
       ],
-      "priorityPiles": ["storage", "club"],
+      "priorityPiles": [
+        "storage",
+        "club"
+      ],
       "requiredSpecialCount": 0,
       "allowedSpecialCount": 0,
       "maxSubmittedRating": 81,
@@ -665,7 +1199,10 @@
         "84+ TOTW 升级",
         "84+ TOTW 升級"
       ],
-      "rewardPackIds": [20707, 20441],
+      "rewardPackIds": [
+        20707,
+        20441
+      ],
       "rewardPackNames": [
         "84+ TOTW 1-30 Player Pack",
         "TOTW 1-30 Player Pack",
@@ -684,7 +1221,12 @@
       "maxSubmittedRating": 88,
       "maxNormalGoldSubmittedRating": 99,
       "ratingSbcFill": {
-        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        "priorityPiles": [
+          "unassigned",
+          "storage",
+          "transfer",
+          "club"
+        ]
       },
       "requiredSpecialCount": 0,
       "allowedSpecialCount": 0,
@@ -712,15 +1254,31 @@
       "maxSubmittedRating": 88,
       "maxNormalGoldSubmittedRating": 99,
       "ratingSbcFill": {
-        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        "priorityPiles": [
+          "unassigned",
+          "storage",
+          "transfer",
+          "club"
+        ]
       },
       "requiredSpecialCount": 1,
       "allowedSpecialCount": 1,
       "requiredSpecialKind": "totw-tots-fof",
       "requiredSpecialMinRating": 84,
       "specialRequirementAdd": {
-        "patterns": ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
-        "buttonTexts": ["Add", "添加", "加入", "新增"]
+        "patterns": [
+          "Any TOTW/TOTS/FOF",
+          "TOTW/TOTS/FOF",
+          "TOTW",
+          "TOTS",
+          "FOF"
+        ],
+        "buttonTexts": [
+          "Add",
+          "添加",
+          "加入",
+          "新增"
+        ]
       },
       "autoTotwUpgrade": {
         "name": "84+ TOTW Upgrade",
@@ -731,7 +1289,10 @@
           "84+ TOTW 升级",
           "84+ TOTW 升級"
         ],
-        "rewardPackIds": [20707, 20441],
+        "rewardPackIds": [
+          20707,
+          20441
+        ],
         "rewardPackNames": [
           "84+ TOTW 1-30 Player Pack",
           "TOTW 1-30 Player Pack",
@@ -747,7 +1308,12 @@
         "maxSubmittedRating": 88,
         "maxNormalGoldSubmittedRating": 99,
         "ratingSbcFill": {
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
         },
         "blockSpecial": true,
         "blockTradeable": false,
@@ -777,15 +1343,31 @@
       "maxSubmittedRating": 88,
       "maxNormalGoldSubmittedRating": 99,
       "ratingSbcFill": {
-        "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+        "priorityPiles": [
+          "unassigned",
+          "storage",
+          "transfer",
+          "club"
+        ]
       },
       "requiredSpecialCount": 1,
       "allowedSpecialCount": 1,
       "requiredSpecialKind": "totw-tots-fof",
       "requiredSpecialMinRating": 84,
       "specialRequirementAdd": {
-        "patterns": ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
-        "buttonTexts": ["Add", "添加", "加入", "新增"]
+        "patterns": [
+          "Any TOTW/TOTS/FOF",
+          "TOTW/TOTS/FOF",
+          "TOTW",
+          "TOTS",
+          "FOF"
+        ],
+        "buttonTexts": [
+          "Add",
+          "添加",
+          "加入",
+          "新增"
+        ]
       },
       "autoTotwUpgrade": {
         "name": "84+ TOTW Upgrade",
@@ -796,7 +1378,10 @@
           "84+ TOTW 升级",
           "84+ TOTW 升級"
         ],
-        "rewardPackIds": [20707, 20441],
+        "rewardPackIds": [
+          20707,
+          20441
+        ],
         "rewardPackNames": [
           "84+ TOTW 1-30 Player Pack",
           "TOTW 1-30 Player Pack",
@@ -812,7 +1397,12 @@
         "maxSubmittedRating": 88,
         "maxNormalGoldSubmittedRating": 99,
         "ratingSbcFill": {
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
         },
         "blockSpecial": true,
         "blockTradeable": false,
@@ -829,7 +1419,9 @@
       "id": "provision-crafting",
       "name": "Provision Crafting Loop",
       "strategy": "provisionPackCrafting",
-      "sourcePackIds": [20643],
+      "sourcePackIds": [
+        20643
+      ],
       "sourcePackNames": [
         "Provision Pack",
         "Provisions Pack"
@@ -850,10 +1442,20 @@
               "playerOnly": true,
               "allowSpecial": false,
               "protectHighGold": true,
-              "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+              "priorityPiles": [
+                "unassigned",
+                "storage",
+                "transfer",
+                "club"
+              ]
             }
           ],
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
         },
         {
           "name": "2x 84+ Upgrade",
@@ -869,10 +1471,20 @@
               "playerOnly": true,
               "allowSpecial": false,
               "protectHighGold": true,
-              "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+              "priorityPiles": [
+                "unassigned",
+                "storage",
+                "transfer",
+                "club"
+              ]
             }
           ],
-          "priorityPiles": ["unassigned", "storage", "transfer", "club"]
+          "priorityPiles": [
+            "unassigned",
+            "storage",
+            "transfer",
+            "club"
+          ]
         }
       ]
     }

@@ -92,6 +92,29 @@ describe('loop configuration contracts', () => {
     });
   });
 
+  it('locks FOF Glory Hunters exhaustion materials and deferred reward opening', async () => {
+    const { builtIn, external } = await loadDefinitions();
+    for (const loop of [byId(builtIn, 'fof-glory-hunters-exhaustion'), byId(external, 'fof-glory-hunters-exhaustion')]) {
+      expect(loop.strategy).toBe('inventoryExhaustion');
+      expect(loop.openRewardPacksAtEnd).toBe(true);
+      expect(loop.forceOpenRewardPacksAtEnd).toBe(true);
+      expect(loop.stages).toHaveLength(1);
+      expect(loop.stages[0]).toMatchObject({
+        id: 'fof-glory-hunters',
+        maxCompletions: 1000,
+      });
+      expect(loop.stages[0].requirements[0]).toMatchObject({
+        tier: 'gold',
+        rarity: 'common',
+        count: 9,
+        maxRating: 81,
+        protectHighGold: true,
+        allowSpecial: false,
+      });
+      expect(loop.rewardPackNames.some((name) => /5x\s*80\+/i.test(name))).toBe(true);
+    }
+  });
+
   it('locks the ordered inventory exhaustion stages and strict card types', async () => {
     const { builtIn, external } = await loadDefinitions();
     for (const loop of [byId(builtIn, 'inventory-fodder-exhaustion'), byId(external, 'inventory-fodder-exhaustion')]) {

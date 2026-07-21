@@ -273,7 +273,43 @@ export const LOOP_DEFS = [
     ],
   },
   {
+    id: 'fof-glory-hunters-exhaustion',
+    name: 'FOF Glory Hunters Exhaustion Loop',
+    strategy: 'inventoryExhaustion',
+    openRewardPacksAtEnd: true,
+    forceOpenRewardPacksAtEnd: true,
+    rewardPackNames: [
+      '5x 80+ Rare Gold Players Pack',
+      '5 x 80+ Rare Gold Players Pack',
+      'x1 5x 80+ Rare Gold Players Pack',
+      '5x80+ Rare Gold Players Pack',
+      '5x 80+ Rare Gold Players Pack (Untradeable)',
+    ],
+    stages: [
+      {
+        id: 'fof-glory-hunters',
+        name: 'FOF Glory Hunters Crafting Upgrade',
+        sbcNames: ['FOF Glory Hunters Crafting Upgrade'],
+        requirements: [
+          {
+            tier: 'gold',
+            rarity: 'common',
+            count: 9,
+            maxRating: 81,
+            playerOnly: true,
+            allowSpecial: false,
+            protectHighGold: true,
+            priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+          },
+        ],
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        maxCompletions: 1000,
+      },
+    ],
+  },
+  {
     id: '2x84-fodder',
+
     hidden: true,
     mvp: true,
     name: '2x84+ Fodder Loop',

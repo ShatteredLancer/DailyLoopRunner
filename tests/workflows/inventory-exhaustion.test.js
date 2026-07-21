@@ -36,3 +36,18 @@ describe('runInventoryExhaustionWorkflow', () => {
     expect(result).toMatchObject({ status: 'planned', totalCompletions: 0, reason: 'dry-run plan' });
   });
 });
+
+  it('invokes finalize after stages so callers can open deferred reward packs', async () => {
+    const finalize = vi.fn(async (result) => {
+      result.deferredRewardPacksOpened = 2;
+    });
+    const runStage = vi.fn(async () => ({ status: 'insufficient', completions: 4 }));
+    const result = await runInventoryExhaustionWorkflow({
+      stages: [{ id: 'fof', name: 'FOF Glory Hunters Crafting Upgrade' }],
+      runStage,
+      finalize,
+    });
+    expect(finalize).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ status: 'completed', totalCompletions: 4, deferredRewardPacksOpened: 2 });
+  });
+
