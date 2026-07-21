@@ -195,25 +195,6 @@ export const LOOP_DEFS = [
     sourceExhaustedFallbackLoopId: '2x84-fodder',
   },
   {
-    id: '82-plus-player-pick-5of10',
-    name: '5 of 10 82+ Players Pick',
-    strategy: 'playerPickSbc',
-    sbcSetIds: [1202],
-    sbcNames: ['5 of 10 82+ Players Pick', '5 of 10 82+ Player Pick', '5 of 10 82+ Player Picks'],
-    pickItemResourceIds: [5005706],
-    pickItemNames: ['5 of 10 82+ Players Pick', '5 of 10 82+ Player Pick', '5 of 10 82+ Rare Gold Player Pick', '82+ Player Pick'],
-    requirements: [
-      { tier: 'gold', rarity: 'common', count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
-    ],
-    priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
-    challengesPerPick: 2,
-    pickCandidateCount: 10,
-    pickCount: 5,
-    exhaustSbcSet: true,
-    setCompletionSafetyLimit: 100,
-    pricePlatform: 'pc',
-  },
-  {
     id: 'one-click-daily-mvp',
     hidden: true,
     mvp: true,
@@ -240,7 +221,6 @@ export const LOOP_DEFS = [
     name: 'Bronze/Silver/FOF Glory Hunters Exhaustion Loop',
     strategy: 'inventoryExhaustion',
     openRewardPacksAtEnd: true,
-    forceOpenRewardPacksAtEnd: true,
     rewardPackNames: [
       '5x 80+ Rare Gold Players Pack',
       '5 x 80+ Rare Gold Players Pack',
@@ -299,7 +279,6 @@ export const LOOP_DEFS = [
     name: 'FOF Glory Hunters Exhaustion Loop',
     strategy: 'inventoryExhaustion',
     openRewardPacksAtEnd: true,
-    forceOpenRewardPacksAtEnd: true,
     rewardPackNames: [
       '5x 80+ Rare Gold Players Pack',
       '5 x 80+ Rare Gold Players Pack',
@@ -331,7 +310,6 @@ export const LOOP_DEFS = [
   },
   {
     id: '2x84-fodder',
-
     hidden: true,
     mvp: true,
     name: '2x84+ Fodder Loop',
@@ -474,7 +452,10 @@ export const LOOP_DEFS = [
     strategy: 'provisionPackCrafting',
     sourcePackIds: [20643],
     sourcePackNames: ['Provision Pack', 'Provisions Pack'],
-    preCraftPlayerPickLoopId: '82-plus-player-pick-5of10',
+    preCraftPlayerPick: {
+      sbcSetIds: [1256],
+      pickItemResourceIds: [5005713],
+    },
     rounds: 1,
     craftingUpgrades: [
       {

@@ -41,10 +41,6 @@
       "normal": "Standalone mode opens all matching Daily rare gold packs, counts duplicate-driven 2x84+ submissions toward rounds, then fills the remaining target from inventory; One-click mode limits the final inventory fallback to one completion.",
       "recovery": "Resume response-only duplicates even when the Unassigned UI cache is delayed, protect 82+ cards, and let the current Open reward packs option control every 2x84+ reward."
     },
-    "82-plus-player-pick-5of10": {
-      "normal": "Use EA Set progress to exhaust all remaining completions, submitting two challenges of eleven low common gold players and selecting five of ten results each time.",
-      "recovery": "Resume a partial multi-challenge Pick without replacing common requirements with rare cards."
-    },
     "one-click-daily-mvp": {
       "normal": "Run one completion for each configured MVP Daily stage.",
       "recovery": "Skip completed stages and continue from the first remaining or recoverable stage."
@@ -54,8 +50,8 @@
       "recovery": "Restart from existing Unassigned state, skip completed stages, and continue after a prior safe stop without unbounded inventory fallback."
     },
     "inventory-fodder-exhaustion": {
-      "normal": "Submit Bronze Upgrade and auto-open silver reward packs until bronze is exhausted, then Silver Upgrade with auto-open gold reward packs until exhausted, then FOF Glory Hunters with nine safe common gold <=81 while keeping 5x80+ packs closed; open matching 5x 80+ packs only after all stages finish.",
-      "recovery": "Continue to the next stage on normal inventory shortage or SBC unavailability, stop on unsafe selection or submission failures, and open only the configured deferred Glory Hunters reward packs at the end."
+      "normal": "Submit Bronze Upgrade and force-open its Silver rewards to feed the next stage, then do the same for Silver Upgrade and Common Gold rewards, then exhaust FOF Glory Hunters with nine safe common gold cards rated <=81; matching 5x 80+ rewards open at the end only when Open reward packs is enabled.",
+      "recovery": "Stop if a required Bronze/Silver reward cannot be opened or if selection/submission is unsafe; blocked or stopped runs do not enter the deferred FOF reward-opening phase."
     },
     "2x84-fodder": {
       "normal": "Submit six low rare gold players and let the current Open reward packs option decide whether to open the reward.",
@@ -78,8 +74,8 @@
       "recovery": "Resume pending Pick or reserved duplicates, preserve partial challenges, and continue on a later round."
     },
     "fof-glory-hunters-exhaustion": {
-      "normal": "Repeat FOF Glory Hunters Crafting Upgrade with nine safe common gold cards rated <=81 until fewer than one complete squad remains, then open all matching 5x 80+ reward packs together.",
-      "recovery": "Stop on unsafe selection or submission failure; leave reward packs unopened until the exhaustion stage ends, then open remaining matching packs through the shared pack transaction."
+      "normal": "Repeat FOF Glory Hunters Crafting Upgrade with nine safe common gold cards rated <=81 until fewer than one complete squad remains; when Open reward packs is enabled, open all matching 5x 80+ rewards together after the stage.",
+      "recovery": "Stop on unsafe selection or submission failure without entering the deferred reward-opening phase; otherwise use the shared pack transaction for the final batch."
     }
   }
 }

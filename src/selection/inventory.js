@@ -105,6 +105,17 @@ function findSubmissionItem(signal, snapshot, usedIds, requirement, fsuPolicy, p
   return sortCandidates(candidates, requirement, fsuPolicy).find((item) => item.definitionId === signal.definitionId) || null;
 }
 
+function requirementSelectionPhases(requirement = {}) {
+  const preferCommon = requirement.preferCommon === true
+    && requirement.tier === 'gold'
+    && requirement.rarity === undefined;
+  if (!preferCommon) return [requirement];
+  return [
+    { ...requirement, rarity: 'common' },
+    { ...requirement, rarity: 'rare' },
+  ];
+}
+
 export function selectInventoryPlayers(input = {}) {
   const snapshot = input.inventorySnapshot;
   if (!snapshot?.piles) throw new Error('inventorySnapshot is required');
@@ -135,40 +146,43 @@ export function selectInventoryPlayers(input = {}) {
     };
     const piles = applyPilePriority(requirement.priorityPiles || defaultPiles, fsuPolicy)
       .filter((pile) => INVENTORY_PILES.includes(pile));
-    for (const pileName of piles) {
+    for (const phaseRequirement of requirementSelectionPhases(requirement)) {
       if (need <= 0) break;
-      const preferredRefs = pileName === 'unassigned' || pileName === 'transfer'
-        ? preferredSignalRefs
-        : [];
-      const candidates = sortCandidates(snapshot.piles[pileName] || [], requirement, fsuPolicy, preferredRefs);
-      for (const candidate of candidates) {
+      for (const pileName of piles) {
         if (need <= 0) break;
-        if (selectedIds.has(candidate.id) || selectedDefinitionIds.has(candidate.definitionId)) continue;
-        const reasons = rejectionReasons(candidate, requirement, fsuPolicy, requirementProtection);
-        if (reasons.length) {
-          diagnostics.push({ pileName, itemRef: candidate.ref, reasons });
-          continue;
-        }
+        const preferredRefs = pileName === 'unassigned' || pileName === 'transfer'
+          ? preferredSignalRefs
+          : [];
+        const candidates = sortCandidates(snapshot.piles[pileName] || [], phaseRequirement, fsuPolicy, preferredRefs);
+        for (const candidate of candidates) {
+          if (need <= 0) break;
+          if (selectedIds.has(candidate.id) || selectedDefinitionIds.has(candidate.definitionId)) continue;
+          const reasons = rejectionReasons(candidate, phaseRequirement, fsuPolicy, requirementProtection);
+          if (reasons.length) {
+            diagnostics.push({ pileName, itemRef: candidate.ref, reasons });
+            continue;
+          }
 
-        let item = candidate;
-        let signal = null;
-        if (pileName === 'unassigned' || pileName === 'transfer') {
-          if (!candidate.duplicate) continue;
-          item = findSubmissionItem(candidate, snapshot, submissionIds, requirement, fsuPolicy, requirementProtection);
-          if (!item || selectedDefinitionIds.has(item.definitionId)) continue;
-          signal = candidate;
-          duplicateSignals.push({ pileName, signalRef: signal.ref, itemRef: item.ref });
-          selectedIds.add(signal.id);
-        }
+          let item = candidate;
+          let signal = null;
+          if (pileName === 'unassigned' || pileName === 'transfer') {
+            if (!candidate.duplicate) continue;
+            item = findSubmissionItem(candidate, snapshot, submissionIds, phaseRequirement, fsuPolicy, requirementProtection);
+            if (!item || selectedDefinitionIds.has(item.definitionId)) continue;
+            signal = candidate;
+            duplicateSignals.push({ pileName, signalRef: signal.ref, itemRef: item.ref });
+            selectedIds.add(signal.id);
+          }
 
-        if (submissionIds.has(item.id) || selectedIds.has(item.id) || selectedDefinitionIds.has(item.definitionId)) continue;
-        selectedIds.add(item.id);
-        selectedDefinitionIds.add(item.definitionId);
-        submissionIds.add(item.id);
-        selected.push(item);
-        entries.push({ pileName, signalRef: signal?.ref || null, itemRef: item.ref });
-        pileCounts[pileName] = (pileCounts[pileName] || 0) + 1;
-        need--;
+          if (submissionIds.has(item.id) || selectedIds.has(item.id) || selectedDefinitionIds.has(item.definitionId)) continue;
+          selectedIds.add(item.id);
+          selectedDefinitionIds.add(item.definitionId);
+          submissionIds.add(item.id);
+          selected.push(item);
+          entries.push({ pileName, signalRef: signal?.ref || null, itemRef: item.ref });
+          pileCounts[pileName] = (pileCounts[pileName] || 0) + 1;
+          need--;
+        }
       }
     }
 

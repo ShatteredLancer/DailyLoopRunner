@@ -64,6 +64,12 @@ describe('loop configuration schema', () => {
     expect(() => validateLoopDefList([validLoop({
       sourceExhaustedFallbackLoopId: 'missing-fallback',
     })], 'loops')).toThrow('loops[0].sourceExhaustedFallbackLoopId not found: missing-fallback');
+    expect(validateLoopDef(validLoop({ preCraftPlayerPick: {} }))).toContain(
+      'preCraftPlayerPick.sbcSetIds or preCraftPlayerPick.pickItemResourceIds is required',
+    );
+    expect(validateLoopDef(validLoop({
+      preCraftPlayerPick: { sbcSetIds: [1256], pickItemResourceIds: [5005713] },
+    }))).toEqual([]);
   });
 
   it('preserves recovery recipe, policy, and per-loop policy validation', () => {

@@ -156,9 +156,7 @@ function parseChallengeRequirements(challenge, challengeIndex, options = {}) {
     rarityCounts[rarity] = entry.count;
   }
 
-  if (!rarityEntries.length) {
-    diagnostics.push(`${challengeLabel}: exact common/rare ratio is unavailable`);
-  } else if (rarityCounts.common !== null && rarityCounts.rare !== null) {
+  if (rarityEntries.length && rarityCounts.common !== null && rarityCounts.rare !== null) {
     if (rarityCounts.common + rarityCounts.rare !== requiredPlayerCount) {
       diagnostics.push(`${challengeLabel}: common/rare counts do not equal required player count`);
     }
@@ -188,8 +186,15 @@ function parseChallengeRequirements(challenge, challengeIndex, options = {}) {
     priorityPiles: [...(options.priorityPiles || DEFAULT_PRIORITY_PILES)],
   });
   const requirements = [];
-  if (rarityCounts.rare > 0) requirements.push(requirement('rare', rarityCounts.rare));
-  if (rarityCounts.common > 0) requirements.push(requirement('common', rarityCounts.common));
+  if (!rarityEntries.length) {
+    const unrestricted = requirement(undefined, requiredPlayerCount);
+    delete unrestricted.rarity;
+    unrestricted.preferCommon = true;
+    requirements.push(unrestricted);
+  } else {
+    if (rarityCounts.rare > 0) requirements.push(requirement('rare', rarityCounts.rare));
+    if (rarityCounts.common > 0) requirements.push(requirement('common', rarityCounts.common));
+  }
   return { ok: true, requiredPlayerCount, requirements };
 }
 
@@ -198,7 +203,7 @@ function remainingCompletions(set) {
     || set?.repeats === undefined || set?.repeats === null) return null;
   const completed = Number(set?.timesCompleted);
   const repeats = Number(set?.repeats);
-  if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats < completed) return null;
+  if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats <= 0 || repeats < completed) return null;
   return Math.max(0, Math.floor(repeats - completed));
 }
 
@@ -240,6 +245,7 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
 
   const setRemaining = remainingCompletions(set);
   const reportedCompleted = isCompleted(set) || setRemaining === 0;
+  const boundedSet = positiveInteger(set?.repeats) !== null;
 
   const challenges = Array.isArray(set.challenges) ? set.challenges : [];
   if (!challenges.length) diagnostics.push('SBC Set challenge list is missing');
@@ -277,11 +283,15 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     pickCount: selectionCount,
     remainingCompletions: setRemaining,
     maxCompletions: 1,
-    useRoundsAsCompletions: !reportedCompleted,
+    useRoundsAsCompletions: !reportedCompleted && !boundedSet,
     discoveryReportedCompleted: reportedCompleted,
     pricePlatform: normalizedText(input.pricePlatform || 'pc').toLowerCase(),
     discoveryIdentity: identity,
   };
+  if (!reportedCompleted && boundedSet) {
+    loop.exhaustSbcSet = true;
+    loop.setCompletionSafetyLimit = Math.max(1, Math.min(100, Number(set.repeats) || 100));
+  }
   if (challengeRequirements.length === 1) {
     loop.requirements = challengeRequirements[0];
     delete loop.challengeRequirements;
@@ -317,6 +327,23 @@ function matchingPlayerPickLoops(loop, existingLoops = []) {
     return [...setIds].some((id) => existingSetIds.has(id))
       || [...rewardIds].some((id) => existingRewardIds.has(id));
   });
+}
+
+export function resolvePlayerPickLoopReference(reference = {}, loops = []) {
+  const target = {
+    sbcSetIds: reference.sbcSetIds || [],
+    pickItemResourceIds: reference.pickItemResourceIds || [],
+  };
+  const hasIdentity = loopSetIds(target).size > 0 || loopRewardIds(target).size > 0;
+  if (!hasIdentity) return { status: 'invalid', loop: null, matches: [] };
+  const matches = matchingPlayerPickLoops(target, loops)
+    .filter((loop) => loop?.strategy === 'playerPickSbc');
+  if (matches.length === 1) return { status: 'matched', loop: matches[0], matches };
+  return {
+    status: matches.length ? 'ambiguous' : 'missing',
+    loop: null,
+    matches,
+  };
 }
 
 export function isDuplicateDiscoveredPlayerPick(loop, existingLoops = []) {

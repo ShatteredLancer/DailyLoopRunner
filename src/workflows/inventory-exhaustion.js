@@ -37,6 +37,6 @@ export async function runInventoryExhaustionWorkflow(options = {}) {
     }
   }
 
-  await options.finalize?.(result);
+  if (!['blocked', 'stopped'].includes(result.status)) await options.finalize?.(result);
   return result;
 }

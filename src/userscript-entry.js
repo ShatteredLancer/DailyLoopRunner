@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.34
+// @version      0.5.37
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -62,6 +62,7 @@ import { materializeBatchOpenPlan, normalizeBatchOpenPlan } from './config/batch
 import {
   buildPlayerPickDiscoverySession,
   parsePlayerPickSbcSnapshot,
+  resolvePlayerPickLoopReference,
 } from './config/player-pick-discovery.js';
 import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
@@ -234,7 +235,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.34',
+    version: '0.5.37',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -2180,9 +2181,11 @@ function updateLoopControls() {
       onResult: async ({ snapshot, parsed, loadError }) => {
         const reward = snapshot.rewards?.[0] || {};
         const remaining = parsed.remainingCompletions ?? (() => {
+          if (parsed.loop?.useRoundsAsCompletions === true) return 'user rounds';
           const completed = snapshot.timesCompleted;
           const repeats = snapshot.repeats;
           if (completed === null || completed === undefined || repeats === null || repeats === undefined) return null;
+          if (!Number.isFinite(Number(repeats)) || Number(repeats) <= 0) return null;
           return Math.max(0, Number(repeats) - Number(completed));
         })();
         log(`Player Pick scan: set #${snapshot.id || '?'} ${snapshot.name || '?'}; reward ${describePlayerPickDiscoveryReward(reward, parsed)}; challenges:${snapshot.challenges?.length || 0}; set complete:${snapshot.complete ? 'yes' : 'no'}, state:${snapshot.status || '?'}, completed:${snapshot.timesCompleted ?? '?'}, repeats:${snapshot.repeats ?? '?'}, remaining:${remaining ?? '?'}; status:${parsed.status}${parsed.reportedCompleted ? ' (reported completed; runtime probe enabled)' : ''}`);
@@ -2211,14 +2214,14 @@ function updateLoopControls() {
     const duplicateCount = session.results.filter((result) => result.status === 'duplicate').length;
     for (const [loopId, loopDef] of Object.entries(state.discoveredLoopOverrides)) {
       const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []])
-        .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}`).join(' + ')}`)
+        .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? ' (common first)' : ''}`).join(' + ')}`)
         .join('; ');
       log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
     }
     for (const diagnostic of session.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
     for (const loopDef of state.discoveredLoopDefs) {
       const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []])
-        .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}`).join(' + ')}`)
+        .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? ' (common first)' : ''}`).join(' + ')}`)
         .join('; ');
       log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? '; reported completed, one runtime probe' : ''})`);
     }
@@ -6180,10 +6183,7 @@ function updateLoopControls() {
   async function runInventoryExhaustionLoop(loopDef) {
     await waitAppReady();
     const openAtEnd = loopDef.openRewardPacksAtEnd === true;
-    const shouldOpenAtEnd = openAtEnd && (
-      loopDef.forceOpenRewardPacksAtEnd === true ||
-      loopDef.openRewardPacks === true
-    );
+    const shouldOpenAtEnd = openAtEnd && loopDef.openRewardPacks === true;
     if (openAtEnd) {
       log(`${loopDef.name}: reward packs deferred until stages finish${shouldOpenAtEnd ? '' : ' (end open disabled by options)'}`);
     }
@@ -6412,11 +6412,20 @@ function updateLoopControls() {
 
   function getProvisionPreCraftPickDef(loopDef) {
     const pickLoopId = String(loopDef.preCraftPlayerPickLoopId || '').trim();
-    if (!pickLoopId) return null;
-    const basePickDef = findLoopDefById(pickLoopId);
-    if (!basePickDef || basePickDef.strategy !== 'playerPickSbc') {
-      fail(`${loopDef.name}: pre-craft Player Pick loop not found or invalid: ${pickLoopId}`);
+    let basePickDef = null;
+    if (pickLoopId) {
+      basePickDef = findLoopDefById(pickLoopId);
+      if (!basePickDef || basePickDef.strategy !== 'playerPickSbc') {
+        fail(`${loopDef.name}: pre-craft Player Pick loop not found or invalid: ${pickLoopId}`);
+      }
+    } else if (loopDef.preCraftPlayerPick) {
+      const resolved = resolvePlayerPickLoopReference(loopDef.preCraftPlayerPick, getLoopDefs());
+      if (resolved.status === 'ambiguous') {
+        fail(`${loopDef.name}: pre-craft Player Pick identity is ambiguous: ${resolved.matches.map((loop) => loop.id).join(', ')}`);
+      }
+      basePickDef = resolved.loop;
     }
+    if (!basePickDef) return null;
     const pickDef = cloneLoopDef(basePickDef);
     if (loopDef.disabledPiles?.length && !pickDef.disabledPiles?.length) {
       pickDef.disabledPiles = [...loopDef.disabledPiles];
@@ -6775,9 +6784,13 @@ function updateLoopControls() {
       runStages: async ({ phase, context }) => {
         const handling = phase === 'resume' ? context.provisionHandling || {} : context;
         if (dryRun) {
-          if (loopDef.preCraftPlayerPickLoopId) {
-            const pickDef = findLoopDefById(loopDef.preCraftPlayerPickLoopId);
-            log(`${loopDef.name}: after each opened Provision Pack, live run checks ${pickDef?.name || loopDef.preCraftPlayerPickLoopId} only when an unassigned duplicate matches that Pick's configured requirements`);
+          if (loopDef.preCraftPlayerPickLoopId || loopDef.preCraftPlayerPick) {
+            const pickDef = getProvisionPreCraftPickDef(loopDef);
+            if (pickDef) {
+              log(`${loopDef.name}: after each opened Provision Pack, live run checks ${pickDef.name} only when an unassigned duplicate matches that Pick's configured requirements`);
+            } else {
+              log(`${loopDef.name}: configured dynamic pre-craft Player Pick is not available in the current scan; live run would skip it and continue crafting stages`);
+            }
           }
         } else {
           const pickResults = await runProvisionPreCraftPlayerPick(loopDef, handling);
@@ -6828,15 +6841,15 @@ function updateLoopControls() {
     });
 
     if (preCraftPickResults.length) {
-      const pickDef = getLoopDefById(loopDef.preCraftPlayerPickLoopId);
+      const pickDef = getProvisionPreCraftPickDef(loopDef);
       state.lastPickRecap = {
-        name: pickDef.name,
+        name: pickDef?.name || 'Provision pre-craft Player Pick',
         pickResults: preCraftPickResults,
         completedAt: Date.now(),
       };
       state.lastRecapType = 'pick';
       updateRecapButton();
-      await showPickRecapModal(pickDef, preCraftPickResults);
+      if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults);
     }
     const completionSummary = craftingUpgrades
       .map((upgradeDef, index) => `${upgradeDef.name}:${result.stageCompletions[`stage-${index}`] || 0}`)
@@ -7370,7 +7383,12 @@ function updateLoopControls() {
 
   async function runProvisionPreCraftPlayerPick(loopDef, provisionHandling = {}) {
     const pickDef = getProvisionPreCraftPickDef(loopDef);
-    if (!pickDef) return [];
+    if (!pickDef) {
+      if (loopDef.preCraftPlayerPick) {
+        log(`${loopDef.name}: configured dynamic pre-craft Player Pick is unavailable; skipping it and continuing crafting stages`);
+      }
+      return [];
+    }
     const materialDefs = [
       ...getChallengeMaterialDefs(pickDef),
       ...getProvisionCraftingUpgrades(loopDef).flatMap(getChallengeMaterialDefs),

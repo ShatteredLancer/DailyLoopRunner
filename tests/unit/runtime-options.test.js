@@ -145,4 +145,16 @@ describe('loop runtime option projection', () => {
     expect(loopUsesRounds({ strategy: 'provisionPackCrafting' })).toBe(true);
     expect(loopUsesRounds({ strategy: 'dailyRoutine' })).toBe(false);
   });
+
+  it('applies the selected Rounds value to an unlimited discovered Pick', () => {
+    const loopDef = {
+      strategy: 'playerPickSbc',
+      discovered: true,
+      useRoundsAsCompletions: true,
+      maxCompletions: 1,
+    };
+    applyLoopRuntimeOptions(loopDef, { rounds: 6 });
+    expect(loopDef.maxCompletions).toBe(6);
+    expect(loopUsesRounds(loopDef)).toBe(true);
+  });
 });

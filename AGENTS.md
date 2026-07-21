@@ -534,10 +534,13 @@ Pack open 返回 `471` 时，重试恢复必须排除刚失败的 Pack 对象，
 - `sourceExhaustedFallbackLoopId`、`sourceExhaustedFallbackMaxCompletions`：来源耗尽后的可配置库存兜底及其边界。
 - `exhaustSbcSet`、`setCompletionSafetyLimit`：限次 Pick 使用 EA Set 当前剩余次数执行到耗尽；元数据不可读时只使用内部安全上限，不读取 UI `rounds`。
 - `openRewardPacks`：奖励包策略。
-- `forceOpenRewardPacks`：仅当同一流程的后续步骤必须立即消费该奖励时才可强制开包，例如 84x10 的 TOTW 前置；普通独立/兜底 2x84+ 奖励必须服从 UI `Open reward packs`。
+- `openRewardPacksAtEnd`：`inventoryExhaustion` 等阶段式 Workflow 延迟奖励开包；阶段提交期间保持关闭，仅在全部阶段正常结束且 UI `Open reward packs` 已开启时批量打开匹配奖励。blocked/stopped 后不得执行最终开包。
+- Stage 级 `openRewardPacks` / `forceOpenRewardPacks`：仅当同一组合 Workflow 的后续 stage 必须立即消费该奖励时使用，例如库存耗尽 Loop 的 Bronze -> Silver -> Common Gold 供应链；不得把父 Loop 的最终延迟奖励名传播给 stage。
+- Loop 级 `forceOpenRewardPacks`：仅当同一流程的后续步骤必须立即消费该奖励时才可强制开包，例如 84x10 的 TOTW 前置；普通独立/兜底 2x84+ 和最终 FOF 奖励必须服从 UI `Open reward packs`。
 - `protectHighGold`、`maxRating`、`allowSpecial`：普通材料保护。
 - `ratingSbcFill`、`requiredSpecialCount`、`requiredSpecialKind`：评分 SBC 参数。
-- `preCraftPlayerPickLoopId`：Provision 前置 Pick 引用。
+- `preCraftPlayerPick`：Provision 当前推荐的动态前置 Pick 引用，使用稳定 `sbcSetIds` / `pickItemResourceIds` 匹配扫描会话 Loop；扫描缺失时跳过该 stage，不得回退到过期活动。
+- `preCraftPlayerPickLoopId`：历史自定义 JSON 的静态前置 Pick 引用兼容字段；内置活动轮换不得依赖它保留过期 Pick。
 - `unassignedRecoveryPolicyIds`：当前 Loop 允许的恢复策略。
 
 `rounds` 契约：
@@ -549,6 +552,9 @@ Pack open 返回 `471` 时，重试恢复必须排除刚失败的 Pack 对象，
 5. `maxPacks` 等内部安全上限用于防止异常无限循环，达到时应安全停止并记录原因，不能在 UI/日志中描述成已完成的业务 rounds。
 6. 同时配置 `consumeAllSourcePacks` 与 `useRoundsAsCompletions` 时，必须先处理完所有来源包，再用库存补足 `rounds - 已完成数`；来源包重复卡清理允许完成数超过目标，库存兜底不得超额。Daily Routine 可通过 `stepOverrides` 关闭子步骤的 rounds 投影并配置有限兜底。
 7. 限次 Player Pick 配置 `exhaustSbcSet: true`，不得同时配置 `useRoundsAsCompletions`。运行目标是“已有同类型 pending Pick 数 + EA Set 剩余完成次数”；pending Pick 必须先处理，但不能消耗 Set 的剩余次数预算。
+8. 动态 Pick 扫描中，EA `repeats > 0` 表示有限 Set，按实时剩余次数耗尽并隐藏 UI `rounds`；`repeats: 0` 且 Set/Challenge 仍可用表示不限次，必须配置 `useRoundsAsCompletions: true`。只有 Set 明确完成或有限剩余数为 0 时才使用单次 runtime probe。
+9. Challenge 已证明所有球员必须为 Gold、但没有 rarity 条件时，生成不带 `rarity` 的 Gold requirement；不得因缺少 common/rare 比例拒绝，也不得猜测比例。
+10. 上述无 rarity Gold requirement 必须设置 `preferCommon: true`。统一选材器要先按配置的全部 pile 顺序完成 Common 阶段，再从第一个 pile 重新开始 Rare fallback；FSU 的 rarity 排序不得使任何 Rare 早于仍可用的 Common 被选中。
 
 新增静态 Player Pick 时：
 

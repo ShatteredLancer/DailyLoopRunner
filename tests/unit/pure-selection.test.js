@@ -145,4 +145,109 @@ describe('pure inventory selector', () => {
     expect(plan.ok).toBe(true);
     expect(plan.selected[0].id).toBe(34);
   });
+
+  it('uses eligible common gold across every pile before any rare gold', () => {
+    const adapter = createFakeInventoryAdapter({
+      unassigned: [
+        makePlayer({ id: 10, definitionId: 110, duplicate: true, duplicateId: 20, rating: 75, rareflag: 1 }),
+      ],
+      storage: [makePlayer({ id: 30, definitionId: 130, rating: 78, rareflag: 0 })],
+      transfer: [
+        makePlayer({ id: 40, definitionId: 140, duplicate: true, duplicateId: 50, rating: 76, rareflag: 0 }),
+      ],
+      club: [
+        makePlayer({ id: 20, definitionId: 110, rating: 75, rareflag: 1 }),
+        makePlayer({ id: 50, definitionId: 140, rating: 76, rareflag: 0 }),
+        makePlayer({ id: 60, definitionId: 160, rating: 77, rareflag: 0 }),
+      ],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 3,
+        preferCommon: true,
+        playerOnly: true,
+        allowSpecial: false,
+      }],
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      fsuPolicy: { ...fsuPolicy, priorityRareWithinGoldRange: true },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([30, 50, 60]);
+    expect(plan.selected.every((item) => item.rare === false)).toBe(true);
+  });
+
+  it('preserves pile order within the common phase before restarting at unassigned for rare fallback', () => {
+    const adapter = createFakeInventoryAdapter({
+      unassigned: [
+        makePlayer({ id: 10, definitionId: 110, duplicate: true, duplicateId: 20, rating: 75, rareflag: 0 }),
+        makePlayer({ id: 11, definitionId: 111, duplicate: true, duplicateId: 21, rating: 75, rareflag: 1 }),
+      ],
+      storage: [
+        makePlayer({ id: 20, definitionId: 110, rating: 75, rareflag: 0 }),
+        makePlayer({ id: 30, definitionId: 130, rating: 76, rareflag: 0 }),
+      ],
+      transfer: [
+        makePlayer({ id: 40, definitionId: 140, duplicate: true, duplicateId: 50, rating: 77, rareflag: 0 }),
+      ],
+      club: [
+        makePlayer({ id: 21, definitionId: 111, rating: 75, rareflag: 1 }),
+        makePlayer({ id: 50, definitionId: 140, rating: 77, rareflag: 0 }),
+        makePlayer({ id: 60, definitionId: 160, rating: 78, rareflag: 0 }),
+      ],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 5,
+        preferCommon: true,
+        playerOnly: true,
+        allowSpecial: false,
+      }],
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      fsuPolicy: { ...fsuPolicy, priorityRareWithinGoldRange: true },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([20, 30, 50, 60, 21]);
+    expect(plan.entries.map((entry) => entry.pileName)).toEqual([
+      'unassigned',
+      'storage',
+      'transfer',
+      'club',
+      'unassigned',
+    ]);
+    expect(plan.selected.map((item) => item.rare)).toEqual([false, false, false, false, true]);
+  });
+
+  it('uses rare gold only after all eligible common gold is exhausted', () => {
+    const adapter = createFakeInventoryAdapter({
+      unassigned: [
+        makePlayer({ id: 10, definitionId: 110, duplicate: true, duplicateId: 20, rating: 75, rareflag: 1 }),
+      ],
+      storage: [makePlayer({ id: 30, definitionId: 130, rating: 78, rareflag: 0 })],
+      club: [makePlayer({ id: 20, definitionId: 110, rating: 75, rareflag: 1 })],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 2,
+        preferCommon: true,
+        playerOnly: true,
+        allowSpecial: false,
+      }],
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      fsuPolicy: { ...fsuPolicy, priorityRareWithinGoldRange: true },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([30, 20]);
+    expect(plan.duplicateSignals).toEqual([
+      expect.objectContaining({ signalRef: expect.objectContaining({ id: 10 }), itemRef: expect.objectContaining({ id: 20 }) }),
+    ]);
+  });
 });

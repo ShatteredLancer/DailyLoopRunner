@@ -89,7 +89,7 @@ function validateCardSpec(spec, path, errors) {
       errors.push(`${path}.${field} must be a number between 1 and 99`);
     }
   });
-  ['playerOnly', 'allowSpecial', 'special', 'protectHighGold'].forEach((field) => {
+  ['playerOnly', 'allowSpecial', 'special', 'protectHighGold', 'preferCommon'].forEach((field) => {
     if (spec[field] !== undefined && typeof spec[field] !== 'boolean') {
       errors.push(`${path}.${field} must be boolean`);
     }
@@ -185,7 +185,7 @@ export function validateLoopDef(loopDef, label = 'loop') {
   if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
     errors.push('dryRun must be boolean');
   }
-  ['hidden', 'mvp', 'openRewardPacks', 'openRewardPacksAtEnd', 'forceOpenRewardPacksAtEnd', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst', 'consumeAllSourcePacks', 'exhaustSbcSet', 'discoveryReportedCompleted'].forEach((field) => {
+  ['hidden', 'mvp', 'openRewardPacks', 'openRewardPacksAtEnd', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst', 'consumeAllSourcePacks', 'exhaustSbcSet', 'discoveryReportedCompleted'].forEach((field) => {
     if (loopDef[field] !== undefined && typeof loopDef[field] !== 'boolean') {
       errors.push(`${field} must be boolean`);
     }
@@ -225,6 +225,17 @@ export function validateLoopDef(loopDef, label = 'loop') {
   }
   if (loopDef.preCraftPlayerPickLoopId !== undefined && (typeof loopDef.preCraftPlayerPickLoopId !== 'string' || !loopDef.preCraftPlayerPickLoopId.trim())) {
     errors.push('preCraftPlayerPickLoopId must be a non-empty string');
+  }
+  if (loopDef.preCraftPlayerPick !== undefined) {
+    if (!isPlainObject(loopDef.preCraftPlayerPick)) {
+      errors.push('preCraftPlayerPick must be an object');
+    } else {
+      validateNumberArray(loopDef.preCraftPlayerPick.sbcSetIds, 'preCraftPlayerPick.sbcSetIds', errors);
+      validateNumberArray(loopDef.preCraftPlayerPick.pickItemResourceIds, 'preCraftPlayerPick.pickItemResourceIds', errors);
+      if (!loopDef.preCraftPlayerPick.sbcSetIds?.length && !loopDef.preCraftPlayerPick.pickItemResourceIds?.length) {
+        errors.push('preCraftPlayerPick.sbcSetIds or preCraftPlayerPick.pickItemResourceIds is required');
+      }
+    }
   }
   if (loopDef.unassignedRecoveryPolicyIds !== undefined) {
     if (!Array.isArray(loopDef.unassignedRecoveryPolicyIds)) {

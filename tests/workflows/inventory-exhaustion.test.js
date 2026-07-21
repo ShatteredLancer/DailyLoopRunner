@@ -35,7 +35,6 @@ describe('runInventoryExhaustionWorkflow', () => {
     expect(runStage).toHaveBeenCalledTimes(3);
     expect(result).toMatchObject({ status: 'planned', totalCompletions: 0, reason: 'dry-run plan' });
   });
-});
 
   it('invokes finalize after stages so callers can open deferred reward packs', async () => {
     const finalize = vi.fn(async (result) => {
@@ -51,3 +50,14 @@ describe('runInventoryExhaustionWorkflow', () => {
     expect(result).toMatchObject({ status: 'completed', totalCompletions: 4, deferredRewardPacksOpened: 2 });
   });
 
+  it('does not finalize after a blocked stage', async () => {
+    const finalize = vi.fn();
+    const result = await runInventoryExhaustionWorkflow({
+      stages: [{ id: 'fof', name: 'FOF Glory Hunters Crafting Upgrade' }],
+      runStage: async () => ({ status: 'blocked', completions: 1, reason: 'unsafe selection' }),
+      finalize,
+    });
+    expect(result).toMatchObject({ status: 'blocked', totalCompletions: 1, reason: 'unsafe selection' });
+    expect(finalize).not.toHaveBeenCalled();
+  });
+});

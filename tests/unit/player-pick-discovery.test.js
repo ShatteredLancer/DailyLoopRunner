@@ -5,6 +5,7 @@ import {
   mergeScannedPlayerPickMetadata,
   parsePlayerPickSbcSnapshot,
   readPlayerPickRewardCounts,
+  resolvePlayerPickLoopReference,
 } from '../../src/config/player-pick-discovery.js';
 import { validateLoopDef } from '../../src/config/loop-schema.js';
 import { loadFixture } from '../helpers/fixtures.js';
@@ -78,6 +79,8 @@ describe('dynamic Player Pick SBC discovery', () => {
       pickCandidateCount: 10,
       pickCount: 4,
       remainingCompletions: 2,
+      exhaustSbcSet: true,
+      useRoundsAsCompletions: false,
     });
     expect(result.loop.challengeRequirements).toHaveLength(2);
     result.loop.challengeRequirements.forEach((requirements) => {
@@ -85,6 +88,47 @@ describe('dynamic Player Pick SBC discovery', () => {
         expect.objectContaining({ tier: 'gold', rarity: 'common', count: 9, maxRating: 81 }),
       ]);
     });
+  });
+
+  it('supports multi-Challenge Picks that require gold players without a rarity ratio', () => {
+    const result = parsePlayerPickSbcSnapshot({
+      set: {
+        id: 1256,
+        name: '4 of 10 83+ Player Pick',
+        timesCompleted: 0,
+        repeats: 3,
+        rewards: [{
+          type: 'PLAYER_PICK',
+          name: '4 of 10 83+ Player Pick',
+          resourceId: 5005713,
+          candidateCount: 10,
+          selectionCount: 4,
+        }],
+        challenges: [3637, 3638].map((id) => ({
+          id,
+          requiredPlayerCount: 10,
+          eligibilityRequirements: [{ key: 'PLAYER_QUALITY', values: [3], count: -1 }],
+        })),
+      },
+    });
+
+    expect(result.status).toBe('supported');
+    expect(result.loop).toMatchObject({
+      challengesPerPick: 2,
+      pickCandidateCount: 10,
+      pickCount: 4,
+      remainingCompletions: 3,
+      exhaustSbcSet: true,
+      setCompletionSafetyLimit: 3,
+      useRoundsAsCompletions: false,
+    });
+    result.loop.challengeRequirements.forEach((requirements) => {
+      expect(requirements).toEqual([
+        expect.objectContaining({ tier: 'gold', count: 10, maxRating: 81, preferCommon: true }),
+      ]);
+      expect(requirements[0]).not.toHaveProperty('rarity');
+    });
+    expect(validateLoopDef(result.loop, 'discovered Player Pick')).toEqual([]);
   });
 
   it('turns a minimum rare requirement into an exact safe rare/common ratio', async () => {
@@ -166,7 +210,31 @@ describe('dynamic Player Pick SBC discovery', () => {
       status: 'supported',
       reportedCompleted: false,
       remainingCompletions: null,
+      loop: { useRoundsAsCompletions: true },
     });
+  });
+
+  it('treats repeats zero on an available Set as unlimited and controlled by Rounds', async () => {
+    const fixture = await loadFixture('challenges/player-pick-discovery.json');
+    const result = parsePlayerPickSbcSnapshot({
+      set: {
+        ...fixture.singleChallenge.set,
+        complete: false,
+        timesCompleted: 14,
+        repeats: 0,
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'supported',
+      reportedCompleted: false,
+      remainingCompletions: null,
+      loop: {
+        useRoundsAsCompletions: true,
+        discoveryReportedCompleted: false,
+      },
+    });
+    expect(result.loop.exhaustSbcSet).toBeUndefined();
   });
 
   it('rejects missing reward identity and unsupported eligibility conditions', async () => {
@@ -227,6 +295,30 @@ describe('dynamic Player Pick SBC discovery', () => {
     expect(discovered.loops).toHaveLength(1);
     expect(discovered.loops[0].sbcSetIds).toEqual([4102]);
     expect(discovered.results.map(({ status }) => status)).toEqual(['duplicate', 'supported']);
+  });
+
+  it('resolves a Provision Pick reference from the current discovered Set or reward identity', () => {
+    const loops = [
+      { id: 'daily', strategy: 'dailyRoutine' },
+      {
+        id: 'discovered-player-pick-1256-5005713',
+        strategy: 'playerPickSbc',
+        sbcSetIds: [1256],
+        pickItemResourceIds: ['5005713'],
+      },
+    ];
+    expect(resolvePlayerPickLoopReference({ sbcSetIds: [1256] }, loops)).toMatchObject({
+      status: 'matched',
+      loop: { id: 'discovered-player-pick-1256-5005713' },
+    });
+    expect(resolvePlayerPickLoopReference({ pickItemResourceIds: [5005713] }, loops)).toMatchObject({
+      status: 'matched',
+      loop: { id: 'discovered-player-pick-1256-5005713' },
+    });
+    expect(resolvePlayerPickLoopReference({ sbcSetIds: [1202] }, loops)).toMatchObject({
+      status: 'missing',
+      loop: null,
+    });
   });
 
   it('builds a replaceable session list without duplicating static Picks', async () => {

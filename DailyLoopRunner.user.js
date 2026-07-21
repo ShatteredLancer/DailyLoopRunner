@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.34
+// @version      0.5.37
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -267,25 +267,6 @@
       sourceExhaustedFallbackLoopId: "2x84-fodder"
     },
     {
-      id: "82-plus-player-pick-5of10",
-      name: "5 of 10 82+ Players Pick",
-      strategy: "playerPickSbc",
-      sbcSetIds: [1202],
-      sbcNames: ["5 of 10 82+ Players Pick", "5 of 10 82+ Player Pick", "5 of 10 82+ Player Picks"],
-      pickItemResourceIds: [5005706],
-      pickItemNames: ["5 of 10 82+ Players Pick", "5 of 10 82+ Player Pick", "5 of 10 82+ Rare Gold Player Pick", "82+ Player Pick"],
-      requirements: [
-        { tier: "gold", rarity: "common", count: 11, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
-      ],
-      priorityPiles: ["unassigned", "storage", "transfer", "club"],
-      challengesPerPick: 2,
-      pickCandidateCount: 10,
-      pickCount: 5,
-      exhaustSbcSet: true,
-      setCompletionSafetyLimit: 100,
-      pricePlatform: "pc"
-    },
-    {
       id: "one-click-daily-mvp",
       hidden: true,
       mvp: true,
@@ -312,7 +293,6 @@
       name: "Bronze/Silver/FOF Glory Hunters Exhaustion Loop",
       strategy: "inventoryExhaustion",
       openRewardPacksAtEnd: true,
-      forceOpenRewardPacksAtEnd: true,
       rewardPackNames: [
         "5x 80+ Rare Gold Players Pack",
         "5 x 80+ Rare Gold Players Pack",
@@ -371,7 +351,6 @@
       name: "FOF Glory Hunters Exhaustion Loop",
       strategy: "inventoryExhaustion",
       openRewardPacksAtEnd: true,
-      forceOpenRewardPacksAtEnd: true,
       rewardPackNames: [
         "5x 80+ Rare Gold Players Pack",
         "5 x 80+ Rare Gold Players Pack",
@@ -545,7 +524,10 @@
       strategy: "provisionPackCrafting",
       sourcePackIds: [20643],
       sourcePackNames: ["Provision Pack", "Provisions Pack"],
-      preCraftPlayerPickLoopId: "82-plus-player-pick-5of10",
+      preCraftPlayerPick: {
+        sbcSetIds: [1256],
+        pickItemResourceIds: [5005713]
+      },
       rounds: 1,
       craftingUpgrades: [
         {
@@ -946,7 +928,7 @@
         errors.push(`${path}.${field2} must be a number between 1 and 99`);
       }
     });
-    ["playerOnly", "allowSpecial", "special", "protectHighGold"].forEach((field2) => {
+    ["playerOnly", "allowSpecial", "special", "protectHighGold", "preferCommon"].forEach((field2) => {
       if (spec[field2] !== void 0 && typeof spec[field2] !== "boolean") {
         errors.push(`${path}.${field2} must be boolean`);
       }
@@ -1037,7 +1019,7 @@
     if (loopDef.dryRun !== void 0 && typeof loopDef.dryRun !== "boolean") {
       errors.push("dryRun must be boolean");
     }
-    ["hidden", "mvp", "openRewardPacks", "openRewardPacksAtEnd", "forceOpenRewardPacksAtEnd", "blockSpecial", "blockTradeable", "inventoryFillFirst", "consumeAllSourcePacks", "exhaustSbcSet", "discoveryReportedCompleted"].forEach((field2) => {
+    ["hidden", "mvp", "openRewardPacks", "openRewardPacksAtEnd", "blockSpecial", "blockTradeable", "inventoryFillFirst", "consumeAllSourcePacks", "exhaustSbcSet", "discoveryReportedCompleted"].forEach((field2) => {
       if (loopDef[field2] !== void 0 && typeof loopDef[field2] !== "boolean") {
         errors.push(`${field2} must be boolean`);
       }
@@ -1077,6 +1059,17 @@
     }
     if (loopDef.preCraftPlayerPickLoopId !== void 0 && (typeof loopDef.preCraftPlayerPickLoopId !== "string" || !loopDef.preCraftPlayerPickLoopId.trim())) {
       errors.push("preCraftPlayerPickLoopId must be a non-empty string");
+    }
+    if (loopDef.preCraftPlayerPick !== void 0) {
+      if (!isPlainObject(loopDef.preCraftPlayerPick)) {
+        errors.push("preCraftPlayerPick must be an object");
+      } else {
+        validateNumberArray(loopDef.preCraftPlayerPick.sbcSetIds, "preCraftPlayerPick.sbcSetIds", errors);
+        validateNumberArray(loopDef.preCraftPlayerPick.pickItemResourceIds, "preCraftPlayerPick.pickItemResourceIds", errors);
+        if (!loopDef.preCraftPlayerPick.sbcSetIds?.length && !loopDef.preCraftPlayerPick.pickItemResourceIds?.length) {
+          errors.push("preCraftPlayerPick.sbcSetIds or preCraftPlayerPick.pickItemResourceIds is required");
+        }
+      }
     }
     if (loopDef.unassignedRecoveryPolicyIds !== void 0) {
       if (!Array.isArray(loopDef.unassignedRecoveryPolicyIds)) {
@@ -2267,9 +2260,7 @@
       }
       rarityCounts[rarity] = entry.count;
     }
-    if (!rarityEntries.length) {
-      diagnostics.push(`${challengeLabel}: exact common/rare ratio is unavailable`);
-    } else if (rarityCounts.common !== null && rarityCounts.rare !== null) {
+    if (rarityEntries.length && rarityCounts.common !== null && rarityCounts.rare !== null) {
       if (rarityCounts.common + rarityCounts.rare !== requiredPlayerCount) {
         diagnostics.push(`${challengeLabel}: common/rare counts do not equal required player count`);
       }
@@ -2297,15 +2288,22 @@
       priorityPiles: [...options.priorityPiles || DEFAULT_PRIORITY_PILES]
     });
     const requirements = [];
-    if (rarityCounts.rare > 0) requirements.push(requirement("rare", rarityCounts.rare));
-    if (rarityCounts.common > 0) requirements.push(requirement("common", rarityCounts.common));
+    if (!rarityEntries.length) {
+      const unrestricted = requirement(void 0, requiredPlayerCount);
+      delete unrestricted.rarity;
+      unrestricted.preferCommon = true;
+      requirements.push(unrestricted);
+    } else {
+      if (rarityCounts.rare > 0) requirements.push(requirement("rare", rarityCounts.rare));
+      if (rarityCounts.common > 0) requirements.push(requirement("common", rarityCounts.common));
+    }
     return { ok: true, requiredPlayerCount, requirements };
   }
   function remainingCompletions(set) {
     if (set?.timesCompleted === void 0 || set?.timesCompleted === null || set?.repeats === void 0 || set?.repeats === null) return null;
     const completed = Number(set?.timesCompleted);
     const repeats = Number(set?.repeats);
-    if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats < completed) return null;
+    if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats <= 0 || repeats < completed) return null;
     return Math.max(0, Math.floor(repeats - completed));
   }
   function discoveryIdentity(set, reward) {
@@ -2342,6 +2340,7 @@
     }
     const setRemaining = remainingCompletions(set);
     const reportedCompleted = isCompleted(set) || setRemaining === 0;
+    const boundedSet = positiveInteger(set?.repeats) !== null;
     const challenges = Array.isArray(set.challenges) ? set.challenges : [];
     if (!challenges.length) diagnostics.push("SBC Set challenge list is missing");
     const challengeRequirements = [];
@@ -2377,11 +2376,15 @@
       pickCount: selectionCount,
       remainingCompletions: setRemaining,
       maxCompletions: 1,
-      useRoundsAsCompletions: !reportedCompleted,
+      useRoundsAsCompletions: !reportedCompleted && !boundedSet,
       discoveryReportedCompleted: reportedCompleted,
       pricePlatform: normalizedText2(input.pricePlatform || "pc").toLowerCase(),
       discoveryIdentity: identity
     };
+    if (!reportedCompleted && boundedSet) {
+      loop.exhaustSbcSet = true;
+      loop.setCompletionSafetyLimit = Math.max(1, Math.min(100, Number(set.repeats) || 100));
+    }
     if (challengeRequirements.length === 1) {
       loop.requirements = challengeRequirements[0];
       delete loop.challengeRequirements;
@@ -2413,6 +2416,21 @@
       const existingRewardIds = loopRewardIds(existing);
       return [...setIds].some((id) => existingSetIds.has(id)) || [...rewardIds].some((id) => existingRewardIds.has(id));
     });
+  }
+  function resolvePlayerPickLoopReference(reference = {}, loops = []) {
+    const target = {
+      sbcSetIds: reference.sbcSetIds || [],
+      pickItemResourceIds: reference.pickItemResourceIds || []
+    };
+    const hasIdentity = loopSetIds(target).size > 0 || loopRewardIds(target).size > 0;
+    if (!hasIdentity) return { status: "invalid", loop: null, matches: [] };
+    const matches = matchingPlayerPickLoops(target, loops).filter((loop) => loop?.strategy === "playerPickSbc");
+    if (matches.length === 1) return { status: "matched", loop: matches[0], matches };
+    return {
+      status: matches.length ? "ambiguous" : "missing",
+      loop: null,
+      matches
+    };
   }
   function discoverPlayerPickSbcLoops(input = {}) {
     const loops = [];
@@ -4324,6 +4342,14 @@
     }
     return sortCandidates(candidates, requirement, fsuPolicy).find((item) => item.definitionId === signal.definitionId) || null;
   }
+  function requirementSelectionPhases(requirement = {}) {
+    const preferCommon = requirement.preferCommon === true && requirement.tier === "gold" && requirement.rarity === void 0;
+    if (!preferCommon) return [requirement];
+    return [
+      { ...requirement, rarity: "common" },
+      { ...requirement, rarity: "rare" }
+    ];
+  }
   function selectInventoryPlayers(input = {}) {
     const snapshot = input.inventorySnapshot;
     if (!snapshot?.piles) throw new Error("inventorySnapshot is required");
@@ -4352,36 +4378,39 @@
         protectedDefinitionIds: /* @__PURE__ */ new Set([...protection.protectedDefinitionIds, ...numberSet(requirement.protectedDefinitionIds)])
       };
       const piles = applyPilePriority(requirement.priorityPiles || defaultPiles, fsuPolicy).filter((pile) => INVENTORY_PILES2.includes(pile));
-      for (const pileName of piles) {
+      for (const phaseRequirement of requirementSelectionPhases(requirement)) {
         if (need <= 0) break;
-        const preferredRefs = pileName === "unassigned" || pileName === "transfer" ? preferredSignalRefs : [];
-        const candidates = sortCandidates(snapshot.piles[pileName] || [], requirement, fsuPolicy, preferredRefs);
-        for (const candidate of candidates) {
+        for (const pileName of piles) {
           if (need <= 0) break;
-          if (selectedIds.has(candidate.id) || selectedDefinitionIds.has(candidate.definitionId)) continue;
-          const reasons = rejectionReasons(candidate, requirement, fsuPolicy, requirementProtection);
-          if (reasons.length) {
-            diagnostics.push({ pileName, itemRef: candidate.ref, reasons });
-            continue;
+          const preferredRefs = pileName === "unassigned" || pileName === "transfer" ? preferredSignalRefs : [];
+          const candidates = sortCandidates(snapshot.piles[pileName] || [], phaseRequirement, fsuPolicy, preferredRefs);
+          for (const candidate of candidates) {
+            if (need <= 0) break;
+            if (selectedIds.has(candidate.id) || selectedDefinitionIds.has(candidate.definitionId)) continue;
+            const reasons = rejectionReasons(candidate, phaseRequirement, fsuPolicy, requirementProtection);
+            if (reasons.length) {
+              diagnostics.push({ pileName, itemRef: candidate.ref, reasons });
+              continue;
+            }
+            let item = candidate;
+            let signal = null;
+            if (pileName === "unassigned" || pileName === "transfer") {
+              if (!candidate.duplicate) continue;
+              item = findSubmissionItem(candidate, snapshot, submissionIds, phaseRequirement, fsuPolicy, requirementProtection);
+              if (!item || selectedDefinitionIds.has(item.definitionId)) continue;
+              signal = candidate;
+              duplicateSignals.push({ pileName, signalRef: signal.ref, itemRef: item.ref });
+              selectedIds.add(signal.id);
+            }
+            if (submissionIds.has(item.id) || selectedIds.has(item.id) || selectedDefinitionIds.has(item.definitionId)) continue;
+            selectedIds.add(item.id);
+            selectedDefinitionIds.add(item.definitionId);
+            submissionIds.add(item.id);
+            selected.push(item);
+            entries.push({ pileName, signalRef: signal?.ref || null, itemRef: item.ref });
+            pileCounts[pileName] = (pileCounts[pileName] || 0) + 1;
+            need--;
           }
-          let item = candidate;
-          let signal = null;
-          if (pileName === "unassigned" || pileName === "transfer") {
-            if (!candidate.duplicate) continue;
-            item = findSubmissionItem(candidate, snapshot, submissionIds, requirement, fsuPolicy, requirementProtection);
-            if (!item || selectedDefinitionIds.has(item.definitionId)) continue;
-            signal = candidate;
-            duplicateSignals.push({ pileName, signalRef: signal.ref, itemRef: item.ref });
-            selectedIds.add(signal.id);
-          }
-          if (submissionIds.has(item.id) || selectedIds.has(item.id) || selectedDefinitionIds.has(item.definitionId)) continue;
-          selectedIds.add(item.id);
-          selectedDefinitionIds.add(item.definitionId);
-          submissionIds.add(item.id);
-          selected.push(item);
-          entries.push({ pileName, signalRef: signal?.ref || null, itemRef: item.ref });
-          pileCounts[pileName] = (pileCounts[pileName] || 0) + 1;
-          need--;
         }
       }
       if (need > 0) {
@@ -7154,7 +7183,7 @@
         break;
       }
     }
-    await options.finalize?.(result);
+    if (!["blocked", "stopped"].includes(result.status)) await options.finalize?.(result);
     return result;
   }
 
@@ -9260,7 +9289,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.34",
+      version: "0.5.37",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -11009,9 +11038,11 @@
         onResult: async ({ snapshot, parsed, loadError }) => {
           const reward = snapshot.rewards?.[0] || {};
           const remaining = parsed.remainingCompletions ?? (() => {
+            if (parsed.loop?.useRoundsAsCompletions === true) return "user rounds";
             const completed = snapshot.timesCompleted;
             const repeats = snapshot.repeats;
             if (completed === null || completed === void 0 || repeats === null || repeats === void 0) return null;
+            if (!Number.isFinite(Number(repeats)) || Number(repeats) <= 0) return null;
             return Math.max(0, Number(repeats) - Number(completed));
           })();
           log(`Player Pick scan: set #${snapshot.id || "?"} ${snapshot.name || "?"}; reward ${describePlayerPickDiscoveryReward(reward, parsed)}; challenges:${snapshot.challenges?.length || 0}; set complete:${snapshot.complete ? "yes" : "no"}, state:${snapshot.status || "?"}, completed:${snapshot.timesCompleted ?? "?"}, repeats:${snapshot.repeats ?? "?"}, remaining:${remaining ?? "?"}; status:${parsed.status}${parsed.reportedCompleted ? " (reported completed; runtime probe enabled)" : ""}`);
@@ -11037,12 +11068,12 @@
       renderLoopSelect(session.selectedId);
       const duplicateCount = session.results.filter((result) => result.status === "duplicate").length;
       for (const [loopId, loopDef] of Object.entries(state.discoveredLoopOverrides)) {
-        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}`).join(" + ")}`).join("; ");
+        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
         log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
       }
       for (const diagnostic of session.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
       for (const loopDef of state.discoveredLoopDefs) {
-        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}`).join(" + ")}`).join("; ");
+        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
         log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? "; reported completed, one runtime probe" : ""})`);
       }
       log(`Player Pick scan complete: ${summary.pickSets} Pick Set(s) found among ${summary.setsScanned} SBC Set(s); ${state.discoveredLoopDefs.length} supported session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) using scanned metadata, ${duplicateCount} static/discovered duplicate(s) skipped`);
@@ -14541,7 +14572,7 @@
     async function runInventoryExhaustionLoop(loopDef) {
       await waitAppReady();
       const openAtEnd = loopDef.openRewardPacksAtEnd === true;
-      const shouldOpenAtEnd = openAtEnd && (loopDef.forceOpenRewardPacksAtEnd === true || loopDef.openRewardPacks === true);
+      const shouldOpenAtEnd = openAtEnd && loopDef.openRewardPacks === true;
       if (openAtEnd) {
         log(`${loopDef.name}: reward packs deferred until stages finish${shouldOpenAtEnd ? "" : " (end open disabled by options)"}`);
       }
@@ -14750,11 +14781,20 @@
     }
     function getProvisionPreCraftPickDef(loopDef) {
       const pickLoopId = String(loopDef.preCraftPlayerPickLoopId || "").trim();
-      if (!pickLoopId) return null;
-      const basePickDef = findLoopDefById(pickLoopId);
-      if (!basePickDef || basePickDef.strategy !== "playerPickSbc") {
-        fail2(`${loopDef.name}: pre-craft Player Pick loop not found or invalid: ${pickLoopId}`);
+      let basePickDef = null;
+      if (pickLoopId) {
+        basePickDef = findLoopDefById(pickLoopId);
+        if (!basePickDef || basePickDef.strategy !== "playerPickSbc") {
+          fail2(`${loopDef.name}: pre-craft Player Pick loop not found or invalid: ${pickLoopId}`);
+        }
+      } else if (loopDef.preCraftPlayerPick) {
+        const resolved = resolvePlayerPickLoopReference(loopDef.preCraftPlayerPick, getLoopDefs());
+        if (resolved.status === "ambiguous") {
+          fail2(`${loopDef.name}: pre-craft Player Pick identity is ambiguous: ${resolved.matches.map((loop) => loop.id).join(", ")}`);
+        }
+        basePickDef = resolved.loop;
       }
+      if (!basePickDef) return null;
       const pickDef = cloneLoopDef(basePickDef);
       if (loopDef.disabledPiles?.length && !pickDef.disabledPiles?.length) {
         pickDef.disabledPiles = [...loopDef.disabledPiles];
@@ -15066,9 +15106,13 @@
         runStages: async ({ phase, context }) => {
           const handling = phase === "resume" ? context.provisionHandling || {} : context;
           if (dryRun) {
-            if (loopDef.preCraftPlayerPickLoopId) {
-              const pickDef = findLoopDefById(loopDef.preCraftPlayerPickLoopId);
-              log(`${loopDef.name}: after each opened Provision Pack, live run checks ${pickDef?.name || loopDef.preCraftPlayerPickLoopId} only when an unassigned duplicate matches that Pick's configured requirements`);
+            if (loopDef.preCraftPlayerPickLoopId || loopDef.preCraftPlayerPick) {
+              const pickDef = getProvisionPreCraftPickDef(loopDef);
+              if (pickDef) {
+                log(`${loopDef.name}: after each opened Provision Pack, live run checks ${pickDef.name} only when an unassigned duplicate matches that Pick's configured requirements`);
+              } else {
+                log(`${loopDef.name}: configured dynamic pre-craft Player Pick is not available in the current scan; live run would skip it and continue crafting stages`);
+              }
             }
           } else {
             const pickResults = await runProvisionPreCraftPlayerPick(loopDef, handling);
@@ -15117,15 +15161,15 @@
         }
       });
       if (preCraftPickResults.length) {
-        const pickDef = getLoopDefById(loopDef.preCraftPlayerPickLoopId);
+        const pickDef = getProvisionPreCraftPickDef(loopDef);
         state.lastPickRecap = {
-          name: pickDef.name,
+          name: pickDef?.name || "Provision pre-craft Player Pick",
           pickResults: preCraftPickResults,
           completedAt: Date.now()
         };
         state.lastRecapType = "pick";
         updateRecapButton();
-        await showPickRecapModal(pickDef, preCraftPickResults);
+        if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults);
       }
       const completionSummary = craftingUpgrades.map((upgradeDef, index) => `${upgradeDef.name}:${result.stageCompletions[`stage-${index}`] || 0}`).join(", ");
       if (dryRun) {
@@ -15612,7 +15656,12 @@
     }
     async function runProvisionPreCraftPlayerPick(loopDef, provisionHandling = {}) {
       const pickDef = getProvisionPreCraftPickDef(loopDef);
-      if (!pickDef) return [];
+      if (!pickDef) {
+        if (loopDef.preCraftPlayerPick) {
+          log(`${loopDef.name}: configured dynamic pre-craft Player Pick is unavailable; skipping it and continuing crafting stages`);
+        }
+        return [];
+      }
       const materialDefs = [
         ...getChallengeMaterialDefs(pickDef),
         ...getProvisionCraftingUpgrades(loopDef).flatMap(getChallengeMaterialDefs)

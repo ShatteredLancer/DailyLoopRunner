@@ -97,7 +97,7 @@ describe('loop configuration contracts', () => {
     for (const loop of [byId(builtIn, 'fof-glory-hunters-exhaustion'), byId(external, 'fof-glory-hunters-exhaustion')]) {
       expect(loop.strategy).toBe('inventoryExhaustion');
       expect(loop.openRewardPacksAtEnd).toBe(true);
-      expect(loop.forceOpenRewardPacksAtEnd).toBe(true);
+      expect(loop.forceOpenRewardPacksAtEnd).toBeUndefined();
       expect(loop.stages).toHaveLength(1);
       expect(loop.stages[0]).toMatchObject({
         id: 'fof-glory-hunters',
@@ -124,7 +124,7 @@ describe('loop configuration contracts', () => {
       expect(loop.stages[1]).toMatchObject({ openRewardPacks: true, forceOpenRewardPacks: true });
       expect(loop.stages[2].openRewardPacks === true).toBe(false);
       expect(loop.openRewardPacksAtEnd).toBe(true);
-      expect(loop.forceOpenRewardPacksAtEnd).toBe(true);
+      expect(loop.forceOpenRewardPacksAtEnd).toBeUndefined();
       expect(loop.stages.map((stage) => stage.requirements[0])).toEqual([
         expect.objectContaining({ tier: 'bronze', count: 11, allowSpecial: false }),
         expect.objectContaining({ tier: 'silver', count: 11, allowSpecial: false }),
@@ -256,33 +256,24 @@ describe('loop configuration contracts', () => {
       sourceExhaustedFallbackLoopId: '2x84-fodder',
     });
     expect(rarePack.sourceExhaustedFallbackMaxCompletions).toBeUndefined();
-    expect(provision.preCraftPlayerPickLoopId).toBe('82-plus-player-pick-5of10');
+    expect(provision.preCraftPlayerPick).toEqual({
+      sbcSetIds: [1256],
+      pickItemResourceIds: [5005713],
+    });
+    expect(provision.preCraftPlayerPickLoopId).toBeUndefined();
     expect(provision.craftingUpgrades.map((upgrade) => upgrade.requirements[0].protectHighGold))
       .toEqual([true, true]);
   });
 
-  it('keeps Provision 82+ static fallback while retired 83+/84+ activities are discovery-only', async () => {
+  it('removes the expired 82+ Pick and keeps current activities discovery-only', async () => {
     const { builtIn, external } = await loadDefinitions();
-    const pick82 = byId(builtIn, '82-plus-player-pick-5of10');
 
+    expect(builtIn.some((loop) => loop.id === '82-plus-player-pick-5of10')).toBe(false);
+    expect(external.some((loop) => loop.id === '82-plus-player-pick-5of10')).toBe(false);
     expect(builtIn.some((loop) => loop.id === '83-plus-player-pick-1of5')).toBe(false);
     expect(builtIn.some((loop) => loop.id === '84-plus-summer-tournament-nations-pick-1of3')).toBe(false);
     expect(external.some((loop) => loop.id === '83-plus-player-pick-1of5')).toBe(false);
     expect(external.some((loop) => loop.id === '84-plus-summer-tournament-nations-pick-1of3')).toBe(false);
-    expect(pick82).toMatchObject({
-      sbcSetIds: [1202],
-      pickItemResourceIds: [5005706],
-      challengesPerPick: 2,
-      pickCandidateCount: 10,
-      pickCount: 5,
-      exhaustSbcSet: true,
-      setCompletionSafetyLimit: 100,
-    });
-    expect(pick82.useRoundsAsCompletions).toBeUndefined();
-    expect(pick82.maxCompletions).toBeUndefined();
-    expect(pick82.requirements).toEqual([
-      expect.objectContaining({ rarity: 'common', count: 11, maxRating: 81, protectHighGold: true }),
-    ]);
   });
 
   it('locks rating SBC entry points and special requirements', async () => {
