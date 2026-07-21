@@ -1,0 +1,685 @@
+# FSU Club Cache Optimization and Integration
+
+本文是 FSU `26.09` Club 加载优化、Daily Loop Runner 集成和第三方插件交互的维护事实来源。它记录当前已经实现并验证的行为，也记录仍待验证的风险和未来优化方向。
+
+适用组件：
+
+- FSU 脚本：`【FSU】EAFC FUT WEB 增强器-26.09.user.js`
+- Daily Loop Runner：`0.5.30` 起的 provisional Club 适配
+- FC26 Enhancer：已观察版本 `26.1.5.7`
+- EA FC Web App：2026-07-21 实际页面模型
+
+本文件不是普通用户操作手册。修改 FSU Club 加载、Runner 的 FSU Adapter、库存选材或 SBC 提交事务前，必须先读本文。
+
+## 1. 目标与结论
+
+原始 FSU 会在登录时同步读取整个 Club。Club 接近一万名球员时，这个过程会长时间占用 loading 界面，且每次登录都重复进行。
+
+当前优化采用：
+
+```text
+Tampermonkey 实体缓存快速恢复
+-> 立即提供 provisional Club Repository
+-> 后台逐页向 EA 做权威校验
+-> 删除过期缓存卡并更新变化卡
+-> 全量一致后进入 ready
+```
+
+这带来两个明确变化：
+
+1. 页面不再必须被前台 loading 界面阻塞到全量 Club 扫描结束。
+2. “页面可操作”不等于“Club 已全量校验完成”。后台校验期间，读取可以使用 provisional 数据，但任何将 Club 卡投入真实 SBC 的流程必须先做定向 EA 校验。
+
+最近一次完整验证的结果：
+
+| 指标 | 结果 |
+| --- | --- |
+| Club 预期球员 | 9826 |
+| 缓存恢复 | 9803 个实体，加上 Repository 初始已有 23 个 |
+| 缓存恢复耗时 | 976 ms |
+| 全量页面 | 50/50，全部 HTTP 200 |
+| Payload 所有权 | 全部 `scoped`，无 compatibility fallback |
+| 精确 EA payload | 9826 |
+| 最终 Repository 球员 | 9826 |
+| 全量后台校验耗时 | 65.592 s |
+| 缓存写入 | 40 chunks，约 7.96 MiB |
+| 最终状态 | `ready` |
+
+因此，当前优化解决的是“前台等待”和“重复实体构造”的问题，还没有消除一次完整的 EA 权威扫描成本。
+
+## 2. 为什么原始加载很慢
+
+FSU 需要 Club 球员实体来执行筛选、锁卡、SBC 填充和评分计算。原始流程必须：
+
+1. 查询 Club 玩家统计数量。
+2. 分页请求 Club 球员。
+3. 让 EA 模型构造实体并写入 Repository。
+4. 等待所有页结束后才把 FSU 标记为可用。
+
+约 9826 名球员、每页 200 名时需要 50 个串行请求。最近实测每页通常约 0.6 至 0.8 秒，完整扫描约 65 秒。EA 的 `Club.search` 在当前运行时内部串行化，简单增加 Promise 并发并不能线性提速，反而会与其它插件争用请求。
+
+之前尝试过的错误假设：
+
+- 只比较 Club 总数即可判断缓存新鲜：总数相同不代表实体未变化，也无法发现“一进一出”。
+- 直接把普通 JSON 放入 Repository：FSU 和 EA 需要真实 EA 实体方法，伪对象会在后续填充或保存时失败。
+- 设置 `criteria.cacheable = false`：当前对象该属性只有 getter，会抛出异常。
+- 只调用 `repositories.Item.setDirty(ItemPile.CLUB)`：这不能绕过 `clubRepo.hasAllItems()` 的短路。
+- 同时大量并发 Club 请求：当前 EA 路径会串行或发生竞争、超时和状态 0。
+
+## 3. 当前架构
+
+### 3.1 分层
+
+```text
+Tampermonkey cache
+  manifest + double-buffered chunks
+            |
+            v
+UTItemEntityFactory reconstruction
+            |
+            v
+EA Club Repository (provisional)
+            |
+            +--> FSU native reads, guarded writes
+            |
+            +--> Daily Loop Runner selection
+                         |
+                         v
+                targeted EA validation
+                         |
+                         v
+                   SBC save/submit
+
+Background full reconciliation
+  forced Club requests
+  + exact XHR-scoped payload capture
+  + add/update/remove Repository entities
+  + verified cache rewrite
+```
+
+FSU 负责缓存、EA 实体恢复、全量校验和定向校验。Runner 不复制这套网络与实体逻辑，只通过 Adapter 使用 FSU 暴露的状态和校验接口。
+
+### 3.2 缓存格式
+
+当前关键常量：
+
+| 项目 | 值 |
+| --- | --- |
+| Schema | `2` |
+| 每 chunk payload 数 | `250` |
+| 最大缓存年龄 | `3 days` |
+| 缓存作用域 | FSU 年份 + EA persona |
+| 写入策略 | 两个 slot 交替写入，最后切换 manifest |
+
+缓存 key 基础格式：
+
+```text
+fsu_club_entities_v2_<year>_<persona>
+```
+
+Manifest 至少记录：
+
+- `schema`
+- 当前 `slot`
+- `chunkCount`
+- `expectedCount`
+- `serializedCount`
+- `skippedCount`
+- Club `fingerprint`
+- `savedAt`
+
+双缓冲的目的，是避免写到一半就覆盖上一份可用缓存。新 slot 的所有 chunks 写完后才更新 manifest。
+
+### 3.3 缓存恢复
+
+缓存恢复不是把 JSON 当作 EA item 直接注入。FSU 会：
+
+1. 校验 manifest、缓存年龄、chunk 完整性和记录数量。
+2. 用 `UTItemEntityFactory.createItem()` 重建 EA 实体。
+3. 校验 item ID、definition ID、评分、稀有度、队伍、联赛、国家和交易属性。
+4. 通过官方 Club Repository `add()` 加入不存在的实体。
+5. 将这些实体标记为 provisional，并在后台继续权威校验。
+
+以下对象当前不会通过普通序列化缓存恢复：
+
+- 无法识别 ID、definition ID 或位置的对象
+- limited-use 球员
+- 含 upgrades/cosmetics、不能安全重建的对象
+- 工厂重建后关键属性不匹配的对象
+
+若不兼容对象超过缓存的 10%，整份缓存被判定为无效，不会冒险部分恢复。
+
+### 3.4 Fingerprint
+
+Fingerprint 包含数量以及 item ID、definition ID、评分、稀有度、队伍、联赛、国家、交易状态和升级/装饰标志的组合摘要。
+
+它用于：
+
+- 记录前后 Club 快照是否变化。
+- 已完成权威校验且内容未变时，避免重复序列化同一份缓存。
+
+它不用于替代 EA 权威校验。哈希相同也不能成为无限期信任缓存的理由。
+
+## 4. 状态机
+
+| 状态 | 含义 | Club 读取 | FSU 自动库存动作 | Runner Live 提交 |
+| --- | --- | --- | --- | --- |
+| `miss` | 没有可用缓存 | 不可靠 | 阻止 | 阻止依赖 Club 的提交 |
+| `invalid` | 缓存结构或实体不兼容 | 不可靠 | 阻止 | 阻止依赖 Club 的提交 |
+| `validating` | provisional 实体已恢复，后台校验中 | 可读，但非权威 | 默认阻止 | 选中 Club 卡定向校验后允许 |
+| `validation-failed` | 全量校验失败，provisional 实体仍保留 | 可读，但非权威 | 默认阻止 | 选中 Club 卡定向校验后允许；失败即停止 |
+| `finalizing` | 全量页面结束，正在处理定向队列和快照 | 已验证 | 允许 | 允许 |
+| `ready` | Repository 与 EA 权威结果一致 | 权威 | 允许 | 允许 |
+
+FSU 的总开关是：
+
+```js
+events.requireClubReady(action)
+```
+
+FSU 原生 squad fill、模板填充、rating fill 和 Fast SBC 都调用该 guard。仅当 Runner 明确开启 scoped provisional access 时，FSU 才会在 `validating` 或 `validation-failed` 状态临时允许特定填充调用。
+
+注意：`validation-failed` 不是 ready。保留 provisional 实体是为了允许 Runner 对实际要提交的少量卡做定向恢复，不代表可以信任整个 Club。
+
+## 5. 全量权威校验
+
+### 5.1 强制网络请求
+
+关键问题是 `clubRepo.hasAllItems()`。当 Repository 看起来已包含整个 Club 时，EA DAO 会直接返回缓存，不发送 `/club` 请求。历史诊断中出现过：
+
+```text
+page 31: hasAllItems=false, 发出网络请求
+page 32: hasAllItems=true, 没有网络请求，captured=0
+```
+
+当前实现的强制请求流程：
+
+```text
+requestFreshClubItems(criteria)
+-> 临时覆盖 clubRepo.hasAllItems()
+-> 只有 candidate === 当前 FSU criteria 时返回 false
+-> 调用 clubDao.getClubItems(criteria)
+-> 请求创建后立即恢复原 descriptor
+```
+
+安全约束：
+
+- 只影响当前 FSU 创建的 criteria 对象。
+- 每个请求必须观察到恰好一次 bypass。
+- 不全局关闭 Repository 缓存。
+- 不修改只读的 `criteria.cacheable`。
+- descriptor 必须在请求创建后立即恢复，即使调用抛错也必须走 `finally`。
+
+### 5.2 XHR scoped payload capture
+
+全量校验不能只读取 Repository 的最终集合，因为其它插件可能同时发起 Club 请求。当前 capture 通过 XHR 身份绑定请求和响应：
+
+```text
+XMLHttpRequest.open()
+-> 记录 method 和 URL
+
+XMLHttpRequest.send()
+-> 解析 type/count/start/完整 defId
+-> 将匹配的 FSU session 绑定到这个确切 XHR
+
+该 XHR 的 loadend
+-> 只解析这个 responseText
+-> 提取该响应的 player payload
+-> 将结果归属给已绑定 session
+```
+
+当前已经删除 compatibility broad capture fallback。没有 scoped payload 时，请求必须失败，不能拿“时间上刚好出现”的其它 XHR payload 顶替。
+
+这样做的原因：
+
+- Enhancer 和 FSU 可能同时请求 Club。
+- offset/count 相同仍不代表请求属于 FSU。
+- `defId` 必须完整匹配，不能只比第一个 ID。
+- Repository 更新事件无法证明某批实体来自哪一个网络响应。
+
+### 5.3 Reconciliation
+
+每一页的 exact payload 经 EA factory 构造后，使用 Club Repository 的官方方法更新。全量结束时：
+
+1. 记录所有服务端 item ID。
+2. 更新存在且仍有效的实体。
+3. 添加服务端新实体。
+4. 删除只存在于 provisional 缓存、不存在于服务端结果的 stale 实体。
+5. 检查 Repository 球员数与实时 `Club.getStats` 一致。
+6. 进入 `finalizing`，排空定向校验队列。
+7. 生成快照，设置 `ready`，后台写入新双缓冲缓存。
+
+一次历史验证发现并删除了 77 张 stale 缓存卡，Repository 从临时的 9903 修正为 9826。这说明只做数量比较或只添加新卡都不够。
+
+## 6. 定向校验
+
+Runner 不需要等整个 Club 50 页扫描完成再提交一个只使用少量 Club 卡的 SBC。FSU 暴露：
+
+```js
+events.validateClubPlayers(refs, options)
+```
+
+每个 ref 必须包含：
+
+```js
+{
+  id,
+  definitionId,
+}
+```
+
+定向校验会：
+
+1. 按完整 definition ID 集合创建 Club criteria。
+2. 强制发起 EA 网络请求。
+3. 要求 fresh scoped payload。
+4. 同时按 item ID 和 definition ID 匹配。
+5. 用返回实体更新 Repository。
+6. 如果缺失，删除 Repository 中对应 stale 实体并返回失败。
+
+只按 definition ID 不够，因为用户可能拥有同一球员卡的多个不同 item；只按 item ID 也不够，因为过期实体可能被错误复用。
+
+后台全量扫描和定向校验共用队列，不允许两个流程同时无序修改 Repository。
+
+## 7. Daily Loop Runner 集成
+
+### 7.1 Adapter 契约
+
+Runner 的 `src/adapters/ea/fsu.js` 暴露：
+
+```js
+snapshot()
+readiness()
+validateClubPlayers(refs, options)
+beginProvisionalClubAccess()
+endProvisionalClubAccess()
+```
+
+`readiness()` 将 FSU 状态投影为：
+
+- `not-detected`：未检测到 FSU，Adapter 本身不把它误报为 loading。
+- `loading` / `not-ready`：无可用 provisional 数据。
+- `provisional`：`validating` 或 `validation-failed`。
+- `ready`：FSU ready 或 finalizing。
+
+未检测到 FSU 不等于完整运行环境安全。Runner 其它启动检查和用户要求仍可以要求 FSU 存在；Adapter 这里只负责避免把“插件不存在”误解为“插件永久 loading”。
+
+### 7.2 Live SBC 提交流程
+
+Runner 的通用 `submitSbcAttempt()` 在 Live 保存前调用 `prepareRuntimeAccess`：
+
+```text
+生成 Selection/SquadPlan
+-> 检查 FSU readiness
+-> 只提取 pile=club 的 refs
+-> provisional 时调用 validateClubPlayers()
+-> 比较校验前后安全属性签名
+-> 通过后用 EA 最新实体替换旧对象
+-> pre-save validators
+-> save/reload/post-save validators
+-> submit
+```
+
+比较的关键属性包括：
+
+- item ID 和 definition ID
+- rating、rarity、special
+- tradeable
+- league、Evolution、groups
+- limited-use、concept、academy、active trade
+- end time
+
+如果卡已不存在或属性变化，Runner 不会在本次尝试中静默重新选材，而是停止并要求重新运行 Loop，让 Selection 基于刷新后的 Repository 重新规划。
+
+### 7.3 Dry Run
+
+Dry Run 继续使用同一套 Squad Provider 和 pre-save validators，但不会调用定向网络校验，也不会保存或提交。
+
+这是有意行为：Dry Run 验证的是当前缓存视图下的选材与约束，不产生账号副作用。它不能证明 provisional Club 卡此刻仍存在于 EA，最终 Live 提交仍必须重新校验。
+
+### 7.4 FSU 页面填充
+
+部分 Runner 流程仍会调用 FSU 原生填充。provisional 状态下，Runner 只在该调用的同步范围内：
+
+```text
+beginProvisionalClubAccess()
+-> FSU fill
+-> endProvisionalClubAccess()
+```
+
+这只是允许 FSU 从已恢复 Repository 生成候选阵容。后续 Live SBC 保存仍经过定向校验。访问深度必须在 `finally` 中归零，禁止长期全局绕过 `requireClubReady()`。
+
+## 8. 对各流程的影响
+
+| 流程 | provisional 阶段行为 | 风险控制 |
+| --- | --- | --- |
+| 只读取 FSU 设置/锁卡 | 正常 | 与 Club 实体权威性无关，但仍需完整识别锁卡身份 |
+| 读取 Club 用于候选规划 | 允许 | 结果只是 provisional plan |
+| Runner Dry Run | 允许 | 不保存、不提交、不做网络定向校验 |
+| Runner Live SBC，不使用 Club 卡 | 正常继续 | Storage/Transfer/Unassigned 实体不走 Club 定向校验 |
+| Runner Live SBC，使用 Club 卡 | 保存前逐卡定向校验 | 缺失或属性变化即停止 |
+| FSU 原生 Fast SBC/模板/评分填充 | 默认阻止 | 等 `ready`；只有 Runner 的 scoped access 例外 |
+| 手动浏览页面 | 可继续 | 页面可用不代表全量验证完成 |
+| 手动使用其它插件自动提交 SBC | 取决于该插件自身 | FSU/Runner 的定向保护不会自动覆盖第三方提交代码 |
+
+### 8.1 对 Loop 的总体影响
+
+所有最终复用 `submitSbcAttempt()` 且使用 `prepareFsuRuntimeAccess` 的 Runner Live SBC，都获得相同保护，包括普通库存阵容和评分型阵容。它不是针对某一个 Daily、Provision 或 84x10 的特殊补丁。
+
+仍需注意两类边界：
+
+- 在通用提交事务之外直接保存/提交 SBC 的遗留调用点，必须单独审计。
+- 仅调用 FSU 填充但没有进入 Runner 提交事务的第三方操作，不受 Runner 定向校验保护。
+
+修改 `submit-attempt.js`、`prepareFsuRuntimeAccess()` 或 FSU Adapter 时，影响面是所有 SBC Loop，不得只验证一个 Loop。
+
+## 9. 与 FC26 Enhancer 的交互
+
+已确认 Chrome 扩展：
+
+```text
+ID: boffdonfioidojlcpmfnkngipappmcoh
+Name: FC26 Enhancer | SBC Solver, Trader & Keyboard Shortcuts
+Observed version: 26.1.5.7
+```
+
+观察到 Enhancer 启动时调用类似：
+
+```text
+getAllClubPlayersFast()
+page size 90
+offset 0, 90, 180, 270, ...
+```
+
+早期 FSU 也以 200/page 扫描时，两者请求重叠曾导致约第 4 页 timeout/status 0。
+
+当前 scoped XHR routing 已解决“把 Enhancer 响应误认成 FSU 响应”的正确性问题，但没有解决两者同时占用 EA Club 接口的资源竞争。Enhancer 重新启用后的完整并发测试仍是未完成项。
+
+必须区分：
+
+- Payload ownership：当前已通过 scoped capture 解决。
+- Request contention/rate limit：仍需实测和可能的协调机制。
+
+如果并发时再次失败，不能恢复 broad capture fallback。正确方向是协调扫描、退避、限速或检测对方活动。
+
+## 10. 与其它插件和页面代码的边界
+
+FSU 的优化会触碰共享 EA 运行时，必须保持以下边界：
+
+- XHR hook 只观察并绑定匹配请求，不修改其它 XHR 的响应。
+- `hasAllItems()` 覆盖只对当前 criteria 对象生效，并立即恢复。
+- Repository 更新使用 EA/FSU 已有官方 `add/update/remove` 路径。
+- 不替换全局 Club service，不篡改其它插件的 criteria。
+- FSU 的 provisional access 只由显式深度控制，正常第三方调用不能自动获得绕过。
+- Tampermonkey GM 缓存按脚本隔离；其它扩展不能直接读取该缓存，除非主动桥接。
+
+第三方插件可能直接调用 EA DAO 或 Repository。FSU 无法保证这些插件在 provisional 状态下也执行定向校验，因此“FSU 后台已恢复缓存”不等于所有第三方自动化都安全。
+
+## 11. 故障模式
+
+### 11.1 `cacheable` 只有 getter
+
+历史错误：
+
+```text
+TypeError: Cannot set property cacheable ... which has only a getter
+```
+
+处理：不再写 `criteria.cacheable`。强制网络只使用 active-criteria `hasAllItems()` bypass。
+
+### 11.2 没有 fresh payload
+
+历史错误：
+
+```text
+returned no fresh Club player payloads
+```
+
+原因可能是 Repository 短路、请求未发出、XHR 归属失败或网络竞争。当前没有 scoped payload 就失败，不允许用 broad payload 继续。
+
+### 11.3 `setDirty()` 不足以绕过缓存
+
+历史错误：
+
+```text
+cannot bypass the Club repository cache because setDirty() is unavailable
+```
+
+以及即使 `setDirty()` 存在，`clubRepo.hasAllItems()` 仍可能直接短路。当前 `setDirty()` 只作为状态标记，强制请求依靠 scoped bypass。
+
+### 11.4 缓存数量与 Stats 不同
+
+允许先 provisional 恢复，再后台 reconcile。不能因为数量不同直接把缓存当权威，也不能只因数量相同就跳过验证。
+
+### 11.5 全量校验失败
+
+状态进入 `validation-failed`，保留 provisional 实体用于诊断和 Runner 定向校验。FSU 原生自动库存动作继续被阻止。修复网络或插件冲突后应手动刷新 Club 数据或重新登录。
+
+### 11.6 定向校验发现缺失/变化
+
+Runner 在保存前停止。用户应重新点击相同 Loop，让选材基于新 Repository 重算。不得自动用另一张卡替换后直接提交。
+
+## 12. 诊断与证据收集
+
+### 12.1 导出入口
+
+FSU 通过 Tampermonkey 菜单注册诊断导出命令。导出 JSON 包含：
+
+- script/year/persona/page 信息
+- 当前 cache state
+- Repository 数量
+- 请求序号与每次请求诊断
+- `hasAllItems` bypass 记录
+- XHR scoped capture 归属与 payload 数量
+- 运行时对象、descriptor 和有限方法样本
+- 完成或失败原因
+
+诊断上限当前为 6000 entries，方法源码最多保留 6000 字符，单个方法采样最多 4 次。
+
+### 12.2 一份成功日志应满足
+
+1. `requestSequence` 覆盖所有预期页面。
+2. 每页状态为 HTTP 200。
+3. 每页 `payloadCapture.selected` 为 `scoped`。
+4. `scopedCaptured` 与该页实际返回玩家数一致。
+5. 没有 `payload-capture-fallback`。
+6. 最终 `verified == expected == repositoryPlayers`。
+7. `clubCache.status == ready`，`clubState == true`。
+8. 缓存保存日志 `fallback:0, skipped:0`，或对 skipped 有明确解释。
+
+### 12.3 失败日志调查顺序
+
+1. 检查 `currentState.clubCache.status`。
+2. 检查 expected、restored、verified、repositoryPlayers。
+3. 找到第一个失败 request，而不是只看最终 stack。
+4. 检查是否记录了 `has-all-items-bypass`，且 count/offset 正确。
+5. 检查 XHR session 是否 `claimed`、`completed`，HTTP status 和 parse error。
+6. 对比 `scopedCaptured`、broad captured 和 response item 数。
+7. 检查同一时间是否有 Enhancer 的 90/page Club 请求。
+8. 检查 stale removal、targeted validation 和最终 count mismatch。
+
+### 12.4 已验证诊断样本
+
+| 文件 | 结论 |
+| --- | --- |
+| `fsu-club-diagnostics-2026-07-21T05-19-10-261Z.json` | 当前成功基线；50/50 scoped、9826 exact、ready |
+| `fsu-club-diagnostics-2026-07-21T04-51-19-284Z.json` | 发现并删除 77 个 stale 实体；当时仍使用 compatibility fallback，不能作为最终 capture 基线 |
+
+诊断文件包含账号库存元数据，不应直接提交到公开仓库。需要加入自动测试时，应抽取最小、脱敏 fixture。
+
+## 13. 测试覆盖
+
+Runner 当前自动测试至少覆盖：
+
+- FSU 不存在、loading、provisional、finalizing、ready 状态投影。
+- Adapter 调用 `validateClubPlayers()`。
+- provisional access begin/end 转发。
+- 通用 SBC 提交在 pre-save 前刷新运行时实体。
+- 定向校验失败时不保存、不提交。
+- runtime access 在成功或失败后释放。
+- Dry Run 不执行定向网络校验。
+
+相关文件：
+
+- `src/adapters/ea/fsu.js`
+- `src/sbc/submit-attempt.js`
+- `src/userscript-entry.js`
+- `tests/contracts/fsu-adapter.test.js`
+- `tests/unit/submit-attempt.test.js`
+
+FSU 本体仍是外部单文件脚本，目前没有完整 Node 单元测试框架。其网络 hook、EA factory 和 Repository 行为必须继续用真实页面诊断验证，同时逐步抽取纯函数和脱敏 fixture。
+
+## 14. 安全不变量
+
+以下规则不得为了加速而放宽：
+
+1. 不得用 Club 总数代替实体级权威校验。
+2. 不得把普通 JSON 当作 EA 实体注入 Repository。
+3. 不得在 provisional 状态提交未经定向校验的 Club 卡。
+4. 定向校验必须同时匹配 item ID 和 definition ID。
+5. 捕获 payload 必须属于确切 XHR；不得恢复 broad 时间窗口 fallback。
+6. `hasAllItems()` bypass 只能命中当前 criteria，且必须立即恢复。
+7. stale 缓存卡必须删除，不能只添加和更新。
+8. 全量校验失败不能设置 `info.base.state = true`。
+9. Runner 定向校验发现属性变化后必须重选，不能静默继续提交。
+10. provisional access 必须 scoped 并在 `finally` 中释放。
+11. FSU Lock、Only Untradeable、联赛、Evolution、高分和特殊卡保护仍由原有安全链执行；缓存优化不改变业务保护。
+12. Enhancer 并发问题必须通过协调请求解决，不能通过接受来源不明 payload 解决。
+
+## 15. 发布、补丁和回滚
+
+当前已验证 FSU 文件：
+
+```text
+C:\Users\Administrator\Desktop\FC Plugins\FSU\【FSU】EAFC FUT WEB 增强器-26.09.user.js
+SHA256: 3CF01F8FB6DF08CA402257803D3FD13847E88323C49E904661195DF8ABEAA5CF
+```
+
+可重放补丁：
+
+```text
+FSU-26.09-club-load-optimization.patch
+FSU-26.09-club-entity-cache.patch
+```
+
+补丁已基于当前脚本重新生成并验证可重放。发布或迁移到新的 FSU 上游版本时，应从干净上游文件应用补丁、检查冲突并重新走真实页面验证；不要直接按行号复制当前实现。
+
+主要历史回滚点：
+
+- `backup-20260720-before-club-load-opt`
+- `backup-20260720-before-entity-cache`
+- `backup-20260721-before-authoritative-cache-validation`
+- `backup-20260721-before-club-repository-dirty-fix`
+- `backup-20260721-before-club-runtime-diagnostics`
+- `backup-20260721-before-hasallitems-bypass`
+- `backup-20260721-before-readonly-cacheable-fix`
+- `backup-20260721-before-scoped-capture-onloadend`
+- `backup-20260721-before-xhr-response-id-routing`
+
+这些是历史调查点，不代表每个中间版本都安全。当前成功基线是最新 XHR response identity routing 之后的文件和 `05-19-10` 诊断。
+
+## 16. 后续优化路线
+
+### FSU-C1：Enhancer 并发复验
+
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | Pending |
+| 风险 | 高 |
+| 目标 | 重新启用 Enhancer，确认 FSU 50 页全部 scoped，且无 status 0/timeout |
+| 影响组件 | FSU XHR capture、Club request scheduling、Enhancer startup scan |
+| 验收 | `verified == expected`；0 fallback；无错误归属；记录总耗时和失败率 |
+
+### FSU-C2：跨插件 Club 扫描协调
+
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | Proposed |
+| 风险 | 高 |
+| 目标 | 避免 FSU 200/page 与 Enhancer 90/page 同时压测 EA Club API |
+| 候选方案 | 检测活动请求后退避；页面级互斥锁；低优先级调度；仅 FSU 侧指数退避 |
+| 禁止方案 | broad capture；吞掉 timeout；无限重试；全局改写其它插件请求 |
+| 验收 | 两插件同时启用连续多次登录无失败；不会显著拖慢任一插件的正常操作 |
+
+### FSU-P1：降低全量校验时间
+
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | Proposed |
+| 风险 | 高 |
+| 当前基线 | 约 65 秒，50 页，200/page |
+| 方向 | 重新探测 EA 可接受 page size；请求间自适应等待；优化本地 payload/Repository 处理 |
+| 验收 | 至少 20% 稳定降时；0 payload 丢失；0 stale 遗留；无更高网络失败率 |
+
+### FSU-P2：可信缓存快速路径与 freshness policy
+
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | Research |
+| 风险 | 很高 |
+| 目标 | 在明确时限和条件下减少登录后立即全量扫描 |
+| 必须回答 | EA 是否提供权威变更 token、etag、revision 或增量游标 |
+| 验收 | 有实体级新鲜度证明；可发现删除、替换和属性变化；失败自动回退全量校验 |
+
+没有 EA 权威变更标记前，不得仅凭缓存年龄、Club 数量或本地 fingerprint 跳过全量校验。
+
+### FSU-P3：后台低优先级校验
+
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | Proposed |
+| 风险 | 中高 |
+| 目标 | 页面空闲时推进全量页面，用户/Runner 发生定向请求时让路 |
+| 验收 | 定向校验延迟不因后台页显著增加；全量最终仍可完成；Stop/失败状态明确 |
+
+### FSU-D1：诊断体积与脱敏
+
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | Proposed |
+| 风险 | 中 |
+| 目标 | 缩小导出文件并移除不必要的球员细节，同时保留请求归属证据 |
+| 验收 | 能定位 criteria/XHR/response/repository 问题；默认不输出可识别账号库存详情 |
+
+### FSU-T1：自动测试提取
+
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | Proposed |
+| 风险 | 中 |
+| 目标 | 把 FSU 中可纯化的 matching/state/cache 函数移入可测试模块或独立 harness |
+| 必测场景 | active criteria bypass、XHR identity、完整 defId、90/page 并发、stale 删除、scoped capture 缺失、双缓冲损坏 |
+| 验收 | 每个历史回归都有失败测试；构建后仍可合并为单文件 Tampermonkey 脚本 |
+
+### FSU-I1：Runner 集成矩阵复验
+
+| 字段 | 内容 |
+| --- | --- |
+| 状态 | Pending |
+| 风险 | 高 |
+| 目标 | provisional 状态下验证普通 requirements SBC、评分 SBC、FSU fill、Storage-only 和 Dry Run |
+| 最小真实页面矩阵 | Daily/普通 Pick 或 Provision、84+ TOTW 或 84x10、无 Club 卡阵容、含 Club 卡阵容、定向 missing 模拟 |
+| 验收 | Live 提交前均有正确校验；Dry Run 无副作用；失败后重跑可继续 |
+
+## 17. Agent 修改流程
+
+接到 FSU Club、Runner FSU Adapter 或提交前校验任务时：
+
+1. 读取本文、`AGENTS.md`、完整 Runner 日志和 FSU diagnostics JSON。
+2. 查看当前 FSU 文件 hash、补丁、备份和 Runner git diff。
+3. 先判断问题属于缓存恢复、强制请求、XHR 所有权、Repository reconcile、状态机、Runner Adapter 还是提交事务。
+4. 搜索所有共享调用方，特别是 `submitSbcAttempt()` 和 FSU 原生 fill。
+5. 对历史线上 Bug 先抽取最小失败测试或诊断 fixture。
+6. 只修改对应层；不得为某个 Loop 在 Adapter 中写专属分支。
+7. Runner 修改运行 `npm run verify`；FSU 修改还必须重放补丁并真实页面验证。
+8. 同时启用 Enhancer 的改动必须额外验证并发，不得只在 Enhancer 关闭时验收。
+9. 更新本文的验证证据、状态和路线项，不在聊天记录中维护另一份事实来源。
+
+## 18. 当前未完成结论
+
+截至 2026-07-21：
+
+- 单独启用 FSU 时，实体缓存恢复、50 页 exact scoped capture、stale 清理和最终 ready 已验证。
+- Runner 的 provisional readiness 和提交前定向校验已有代码与自动测试，但仍需完整真实页面矩阵收尾。
+- Enhancer 并发下的 payload 误归属风险已从架构上消除；请求竞争是否完全可接受尚未验证。
+- 全量扫描约 65 秒仍存在，只是改为后台执行。后续优化不能以牺牲实体级正确性为代价。

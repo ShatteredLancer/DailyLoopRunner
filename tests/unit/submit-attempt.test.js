@@ -38,6 +38,48 @@ describe('submitSbcAttempt', () => {
     expect(calls).toEqual(['pre', 'save', 'reload', 'read', 'post', 'ready', 'submit', 'after']);
   });
 
+  it('refreshes runtime players before pre-save validation and releases access afterward', async () => {
+    const calls = [];
+    const refreshed = { id: 10, rating: 84 };
+    const options = baseOptions({
+      prepareRuntimeAccess: async () => {
+        calls.push('refresh');
+        return { ok: true, players: [refreshed], itemRefs: [{ id: 10, definitionId: 20, pile: 'club' }], token: 'access' };
+      },
+      preSaveValidators: [async ({ players }) => {
+        calls.push('pre');
+        expect(players).toEqual([refreshed]);
+      }],
+      saveSquad: async ({ players }) => {
+        calls.push('save');
+        expect(players).toEqual([refreshed]);
+      },
+      releaseRuntimeAccess: async ({ token }) => {
+        calls.push(`release:${token}`);
+      },
+    });
+
+    await expect(submitSbcAttempt(options)).resolves.toMatchObject({ submitted: true });
+    expect(calls).toEqual(['refresh', 'pre', 'save', 'release:access']);
+  });
+
+  it('blocks before save when runtime inventory validation fails', async () => {
+    const options = baseOptions({
+      prepareRuntimeAccess: async () => ({ ok: false, reason: 'Club item #10 is stale' }),
+      releaseRuntimeAccess: vi.fn(async () => {}),
+    });
+
+    const result = await submitSbcAttempt(options);
+    expect(result).toMatchObject({
+      status: 'blocked',
+      submitted: false,
+      reason: 'Club item #10 is stale',
+    });
+    expect(options.saveSquad).not.toHaveBeenCalled();
+    expect(options.submitTransport).not.toHaveBeenCalled();
+    expect(options.releaseRuntimeAccess).toHaveBeenCalledOnce();
+  });
+
   it('returns unavailable without side effects when no challenge exists', async () => {
     const options = baseOptions({ challengeProvider: async () => null });
     const result = await submitSbcAttempt(options);
@@ -48,12 +90,14 @@ describe('submitSbcAttempt', () => {
 
   it('uses the same squad provider and validators in dry run without saving or submitting', async () => {
     const pre = vi.fn(async () => {});
-    const options = baseOptions({ dryRun: true, preSaveValidators: [pre] });
+    const prepareRuntimeAccess = vi.fn(async () => ({ ok: true }));
+    const options = baseOptions({ dryRun: true, preSaveValidators: [pre], prepareRuntimeAccess });
     const result = await submitSbcAttempt(options);
     expect(result.status).toBe('planned');
     expect(pre).toHaveBeenCalledOnce();
     expect(options.saveSquad).not.toHaveBeenCalled();
     expect(options.submitTransport).not.toHaveBeenCalled();
+    expect(prepareRuntimeAccess).not.toHaveBeenCalled();
   });
 
   it('can prepare and validate a saved squad without checking submit readiness or submitting', async () => {

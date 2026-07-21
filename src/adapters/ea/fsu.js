@@ -230,5 +230,78 @@ export function createFsuAdapter(runtime, options = {}) {
     );
   }
 
-  return Object.freeze({ snapshot });
+  function readiness() {
+    const info = safeRead(runtime, 'info');
+    const build = safeRead(info, 'build');
+    if (!isInspectableObject(build)) {
+      return { detected: false, ready: true, state: 'not-detected' };
+    }
+    const base = safeRead(info, 'base');
+    const rawState = safeRead(base, 'state');
+    const cacheStatus = String(safeRead(safeRead(base, 'clubCache'), 'status') || '');
+    if (cacheStatus === 'finalizing') {
+      return {
+        detected: true,
+        ready: true,
+        fullyValidated: true,
+        state: 'ready',
+        cacheStatus,
+      };
+    }
+    if (['validating', 'validation-failed'].includes(cacheStatus)) {
+      return {
+        detected: true,
+        ready: true,
+        fullyValidated: false,
+        state: 'provisional',
+        cacheStatus,
+      };
+    }
+    if (rawState === false) {
+      return {
+        detected: true,
+        ready: false,
+        fullyValidated: false,
+        state: safeRead(base, 'reloadPlayersPromise') ? 'loading' : 'not-ready',
+      };
+    }
+    return {
+      detected: true,
+      ready: true,
+      fullyValidated: true,
+      state: 'ready',
+    };
+  }
+
+  async function validateClubPlayers(refs = [], options = {}) {
+    const events = safeRead(runtime, 'events');
+    const validate = safeRead(events, 'validateClubPlayers');
+    if (typeof validate !== 'function') {
+      return {
+        ok: readiness().fullyValidated !== false,
+        items: [],
+        missing: refs,
+        reason: 'FSU targeted Club validation is unavailable',
+      };
+    }
+    return validate(refs, options);
+  }
+
+  function beginProvisionalClubAccess() {
+    const begin = safeRead(safeRead(runtime, 'events'), 'beginProvisionalClubAccess');
+    return typeof begin === 'function' ? begin() : null;
+  }
+
+  function endProvisionalClubAccess() {
+    const end = safeRead(safeRead(runtime, 'events'), 'endProvisionalClubAccess');
+    return typeof end === 'function' ? end() : null;
+  }
+
+  return Object.freeze({
+    snapshot,
+    readiness,
+    validateClubPlayers,
+    beginProvisionalClubAccess,
+    endProvisionalClubAccess,
+  });
 }

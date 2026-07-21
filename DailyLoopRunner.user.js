@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.29
+// @version      0.5.30
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -3225,7 +3225,76 @@
         locked.itemIds.length || locked.definitionIds.length ? "locked-players" : ""
       );
     }
-    return Object.freeze({ snapshot });
+    function readiness() {
+      const info = safeRead2(runtime, "info");
+      const build = safeRead2(info, "build");
+      if (!isInspectableObject2(build)) {
+        return { detected: false, ready: true, state: "not-detected" };
+      }
+      const base = safeRead2(info, "base");
+      const rawState = safeRead2(base, "state");
+      const cacheStatus = String(safeRead2(safeRead2(base, "clubCache"), "status") || "");
+      if (cacheStatus === "finalizing") {
+        return {
+          detected: true,
+          ready: true,
+          fullyValidated: true,
+          state: "ready",
+          cacheStatus
+        };
+      }
+      if (["validating", "validation-failed"].includes(cacheStatus)) {
+        return {
+          detected: true,
+          ready: true,
+          fullyValidated: false,
+          state: "provisional",
+          cacheStatus
+        };
+      }
+      if (rawState === false) {
+        return {
+          detected: true,
+          ready: false,
+          fullyValidated: false,
+          state: safeRead2(base, "reloadPlayersPromise") ? "loading" : "not-ready"
+        };
+      }
+      return {
+        detected: true,
+        ready: true,
+        fullyValidated: true,
+        state: "ready"
+      };
+    }
+    async function validateClubPlayers(refs = [], options2 = {}) {
+      const events = safeRead2(runtime, "events");
+      const validate = safeRead2(events, "validateClubPlayers");
+      if (typeof validate !== "function") {
+        return {
+          ok: readiness().fullyValidated !== false,
+          items: [],
+          missing: refs,
+          reason: "FSU targeted Club validation is unavailable"
+        };
+      }
+      return validate(refs, options2);
+    }
+    function beginProvisionalClubAccess() {
+      const begin = safeRead2(safeRead2(runtime, "events"), "beginProvisionalClubAccess");
+      return typeof begin === "function" ? begin() : null;
+    }
+    function endProvisionalClubAccess() {
+      const end = safeRead2(safeRead2(runtime, "events"), "endProvisionalClubAccess");
+      return typeof end === "function" ? end() : null;
+    }
+    return Object.freeze({
+      snapshot,
+      readiness,
+      validateClubPlayers,
+      beginProvisionalClubAccess,
+      endProvisionalClubAccess
+    });
   }
 
   // src/domain/contracts.js
@@ -4778,8 +4847,8 @@
     }
     context.squadPlan = squadPlan;
     context.players = squadPlan.players || [];
-    await runValidators(options.preSaveValidators, context, "pre-save");
     if (context.dryRun) {
+      await runValidators(options.preSaveValidators, context, "pre-save");
       return createSubmissionResult({
         status: "planned",
         submitted: false,
@@ -4787,47 +4856,74 @@
         consumedItemRefs: squadPlan.itemRefs || []
       });
     }
-    await options.saveSquad?.(context);
-    if (options.reloadSquad) await options.reloadSquad(context);
-    if (options.readSavedPlayers) context.savedPlayers = await options.readSavedPlayers(context);
-    await runValidators(options.postSaveValidators, context, "post-save");
-    if (options.prepareOnly === true) {
-      return createSubmissionResult({
-        status: "prepared",
-        submitted: false,
+    let accessToken;
+    try {
+      if (options.prepareRuntimeAccess) {
+        const access = await options.prepareRuntimeAccess(context);
+        if (access?.ok === false) {
+          return createSubmissionResult({
+            status: "blocked",
+            submitted: false,
+            challengeRef: context.challengeRef || { id: context.challenge?.id || null },
+            consumedItemRefs: squadPlan.itemRefs || [],
+            reason: access.reason || "runtime inventory validation failed"
+          });
+        }
+        if (Array.isArray(access?.players)) {
+          context.players = access.players;
+          context.squadPlan = {
+            ...context.squadPlan,
+            players: access.players,
+            itemRefs: access.itemRefs || context.squadPlan.itemRefs
+          };
+        }
+        accessToken = access?.token;
+      }
+      await runValidators(options.preSaveValidators, context, "pre-save");
+      await options.saveSquad?.(context);
+      if (options.reloadSquad) await options.reloadSquad(context);
+      if (options.readSavedPlayers) context.savedPlayers = await options.readSavedPlayers(context);
+      await runValidators(options.postSaveValidators, context, "post-save");
+      if (options.prepareOnly === true) {
+        return createSubmissionResult({
+          status: "prepared",
+          submitted: false,
+          challengeRef: context.challengeRef || { id: context.challenge?.id || null },
+          consumedItemRefs: context.squadPlan.itemRefs || []
+        });
+      }
+      const submitReady = options.isSubmitReady ? await options.isSubmitReady(context) : true;
+      if (!submitReady) {
+        return createSubmissionResult({
+          status: "blocked",
+          submitted: false,
+          challengeRef: context.challengeRef || { id: context.challenge?.id || null },
+          consumedItemRefs: context.squadPlan.itemRefs || [],
+          reason: "saved squad is not submit ready"
+        });
+      }
+      const transportResult = await options.submitTransport?.(context);
+      if (transportResult?.submitted === false || transportResult?.ok === false) {
+        return createSubmissionResult({
+          status: "blocked",
+          submitted: false,
+          challengeRef: context.challengeRef || { id: context.challenge?.id || null },
+          consumedItemRefs: context.squadPlan.itemRefs || [],
+          reason: transportResult?.reason || "SBC submit transport failed"
+        });
+      }
+      const result = createSubmissionResult({
+        status: "submitted",
+        submitted: true,
         challengeRef: context.challengeRef || { id: context.challenge?.id || null },
-        consumedItemRefs: squadPlan.itemRefs || []
+        consumedItemRefs: context.squadPlan.itemRefs || [],
+        rewardPackId: transportResult?.rewardPackId
       });
+      if (options.afterSubmit) await options.afterSubmit({ ...context, result, transportResult });
+      return result;
+    } finally {
+      if (options.releaseRuntimeAccess) await options.releaseRuntimeAccess({ ...context, token: accessToken });
     }
-    const submitReady = options.isSubmitReady ? await options.isSubmitReady(context) : true;
-    if (!submitReady) {
-      return createSubmissionResult({
-        status: "blocked",
-        submitted: false,
-        challengeRef: context.challengeRef || { id: context.challenge?.id || null },
-        consumedItemRefs: squadPlan.itemRefs || [],
-        reason: "saved squad is not submit ready"
-      });
-    }
-    const transportResult = await options.submitTransport?.(context);
-    if (transportResult?.submitted === false || transportResult?.ok === false) {
-      return createSubmissionResult({
-        status: "blocked",
-        submitted: false,
-        challengeRef: context.challengeRef || { id: context.challenge?.id || null },
-        consumedItemRefs: squadPlan.itemRefs || [],
-        reason: transportResult?.reason || "SBC submit transport failed"
-      });
-    }
-    const result = createSubmissionResult({
-      status: "submitted",
-      submitted: true,
-      challengeRef: context.challengeRef || { id: context.challenge?.id || null },
-      consumedItemRefs: squadPlan.itemRefs || [],
-      rewardPackId: transportResult?.rewardPackId
-    });
-    if (options.afterSubmit) await options.afterSubmit({ ...context, result, transportResult });
-    return result;
   }
   function createInventorySquadProvider({ prepareSelection, selection, itemRef: itemRef2 }) {
     return async (context) => {
@@ -9064,7 +9160,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.29",
+      version: "0.5.30",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -11611,6 +11707,7 @@
           itemRef: liveItemRef,
           source: options.source || "prepared-squad"
         }),
+        prepareRuntimeAccess: prepareFsuRuntimeAccess,
         preSaveValidators: options.preSaveValidators || [],
         saveSquad: async ({ challenge: targetChallenge, players: targetPlayers }) => {
           await saveChallengeSquad(targetChallenge, targetPlayers, label, options);
@@ -11693,63 +11790,69 @@
       return false;
     }
     async function fillSbcSquad(label = "SBC", options = {}) {
-      const requireSubmitReady = options.requireSubmitReady !== false;
-      const squad = await waitFor(() => ctrl()?._squad, 15e3, "SBC squad object");
-      patchFsuLengthSafePlayerMetadata(`${label} before FSU fill`);
-      const existingItems = getSquadItems(squad);
+      const provisionalAccess = fsuAdapter().readiness().state === "provisional";
+      if (provisionalAccess) fsuAdapter().beginProvisionalClubAccess();
       try {
-        squad.removeAllItems?.();
-      } catch {
-      }
-      await sleep(500);
-      if (options.specialRequirementAdd) {
-        const clicked = await clickRequirementAddControl(options.specialRequirementAdd, `${label} special requirement`);
-        if (!clicked) log(`${label}: special requirement Add button not found; continuing with FSU fill`);
-      }
-      if (clickButtonByText(["\u91CD\u590D\u7403\u5458\u586B\u5145\u9635\u5BB9", "\u91CD\u8907\u7403\u54E1\u586B\u5145\u9663\u5BB9", "Repeat player fill squad"])) {
-        log("Clicked duplicate fill");
-        await waitLoadingEnd();
-        await sleep(CFG.pauseMs);
-      }
-      if (clickButtonByText(["\u4E00\u952E\u5B8C\u6210", "\u4E00\u9375\u5B8C\u6210", "\u4E00\u952E\u586B\u5145", "\u4E00\u9375\u586B\u5145", "One-click fill"])) {
-        log("Clicked FSU one-click fill/complete");
-        await waitAfterSbcFillAction(`${label} FSU one-click`, squad);
-        await sleep(CFG.pauseMs);
-      }
-      if (!findSubmitButton() && clickButtonByText(["Completion", "\u5B8C\u6210", "\u88DC\u5168", "\u8865\u5168"])) {
-        log("Clicked FSU completion");
-        await waitAfterSbcFillAction(`${label} FSU completion`, squad);
-        await sleep(CFG.pauseMs);
-      }
-      if (clickButtonByText(["\u9635\u5BB9\u8865\u5168", "\u9663\u5BB9\u88DC\u5168", "Squad completion"])) {
-        log("Clicked squad completion");
-        await waitLoadingEnd();
-        await sleep(CFG.pauseMs);
-        clickButtonByText(["\u786E\u5B9A", "\u78BA\u5B9A", "Ok"]);
-        await waitLoadingEnd();
-      }
-      if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && clickButtonByText(["One-click fill"])) {
-        log("Retrying FSU one-click fill after no progress");
-        await waitAfterSbcFillAction(`${label} FSU one-click retry`, squad);
-        await sleep(CFG.pauseMs);
-      }
-      if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && existingItems.length) {
+        const requireSubmitReady = options.requireSubmitReady !== false;
+        const squad = await waitFor(() => ctrl()?._squad, 15e3, "SBC squad object");
+        patchFsuLengthSafePlayerMetadata(`${label} before FSU fill`);
+        const existingItems = getSquadItems(squad);
         try {
-          squad.setPlayers?.(existingItems, true);
-          await sleep(350);
-          const restored = getFilledSquadSlots(squad);
-          if (restored) {
-            log(`${label}: FSU made no fill progress; restored ${restored} existing squad item(s) for safe repair`);
-          }
-        } catch (error) {
-          log(`${label}: could not restore existing squad after FSU made no fill progress: ${error?.message || error}`);
+          squad.removeAllItems?.();
+        } catch {
         }
+        await sleep(500);
+        if (options.specialRequirementAdd) {
+          const clicked = await clickRequirementAddControl(options.specialRequirementAdd, `${label} special requirement`);
+          if (!clicked) log(`${label}: special requirement Add button not found; continuing with FSU fill`);
+        }
+        if (clickButtonByText(["\u91CD\u590D\u7403\u5458\u586B\u5145\u9635\u5BB9", "\u91CD\u8907\u7403\u54E1\u586B\u5145\u9663\u5BB9", "Repeat player fill squad"])) {
+          log("Clicked duplicate fill");
+          await waitLoadingEnd();
+          await sleep(CFG.pauseMs);
+        }
+        if (clickButtonByText(["\u4E00\u952E\u5B8C\u6210", "\u4E00\u9375\u5B8C\u6210", "\u4E00\u952E\u586B\u5145", "\u4E00\u9375\u586B\u5145", "One-click fill"])) {
+          log("Clicked FSU one-click fill/complete");
+          await waitAfterSbcFillAction(`${label} FSU one-click`, squad);
+          await sleep(CFG.pauseMs);
+        }
+        if (!findSubmitButton() && clickButtonByText(["Completion", "\u5B8C\u6210", "\u88DC\u5168", "\u8865\u5168"])) {
+          log("Clicked FSU completion");
+          await waitAfterSbcFillAction(`${label} FSU completion`, squad);
+          await sleep(CFG.pauseMs);
+        }
+        if (clickButtonByText(["\u9635\u5BB9\u8865\u5168", "\u9663\u5BB9\u88DC\u5168", "Squad completion"])) {
+          log("Clicked squad completion");
+          await waitLoadingEnd();
+          await sleep(CFG.pauseMs);
+          clickButtonByText(["\u786E\u5B9A", "\u78BA\u5B9A", "Ok"]);
+          await waitLoadingEnd();
+        }
+        if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && clickButtonByText(["One-click fill"])) {
+          log("Retrying FSU one-click fill after no progress");
+          await waitAfterSbcFillAction(`${label} FSU one-click retry`, squad);
+          await sleep(CFG.pauseMs);
+        }
+        if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && existingItems.length) {
+          try {
+            squad.setPlayers?.(existingItems, true);
+            await sleep(350);
+            const restored = getFilledSquadSlots(squad);
+            if (restored) {
+              log(`${label}: FSU made no fill progress; restored ${restored} existing squad item(s) for safe repair`);
+            }
+          } catch (error) {
+            log(`${label}: could not restore existing squad after FSU made no fill progress: ${error?.message || error}`);
+          }
+        }
+        const filled = getFilledSquadSlots(squad);
+        const submitReady = !!findSubmitButton();
+        log(`${label} squad filled slots detected: ${filled}; submit ${submitReady ? "ready" : "not ready"}`);
+        if (!submitReady && requireSubmitReady) fail2(`${label} squad is not complete`);
+        return { squad, filled, submitReady };
+      } finally {
+        if (provisionalAccess) fsuAdapter().endProvisionalClubAccess();
       }
-      const filled = getFilledSquadSlots(squad);
-      const submitReady = !!findSubmitButton();
-      log(`${label} squad filled slots detected: ${filled}; submit ${submitReady ? "ready" : "not ready"}`);
-      if (!submitReady && requireSubmitReady) fail2(`${label} squad is not complete`);
-      return { squad, filled, submitReady };
     }
     function unwrapSquadSlot(slot) {
       return slot?._item || slot?.item || slot?.player || slot || null;
@@ -13186,6 +13289,7 @@
           getPlayers: async ({ challenge }) => getSquadItems(ctrl()?._squad || challenge?.squad),
           itemRef: liveItemRef
         }),
+        prepareRuntimeAccess: prepareFsuRuntimeAccess,
         preSaveValidators: [({ challenge }) => {
           const inspection = inspectSbcSquad(loopDef, ctrl()?._squad || challenge?.squad);
           logSbcSquadInspection(loopDef, inspection);
@@ -14012,6 +14116,7 @@
               itemRef: liveItemRef,
               source: ratingSbcFill ? "rating-squad" : "filled-squad"
             }),
+            prepareRuntimeAccess: prepareFsuRuntimeAccess,
             preSaveValidators: [() => {
               assertSbcSquadSafe(loopDef, inspection);
               if (shouldUseRatingSbcFill(loopDef)) {
@@ -14369,6 +14474,66 @@
         pile: detectedPile
       };
     }
+    async function prepareFsuRuntimeAccess(context) {
+      const readiness = fsuAdapter().readiness();
+      if (!readiness.detected || readiness.fullyValidated !== false) return { ok: true };
+      const itemRefs = context?.squadPlan?.itemRefs || [];
+      const clubRefs = itemRefs.filter((ref) => ref?.pile === "club");
+      if (!clubRefs.length) return { ok: true };
+      const beforeById = new Map((context.players || []).map((item, index) => {
+        const ref = itemRefs[index];
+        if (ref?.pile !== "club") return null;
+        return [Number(ref.id || 0), adapters.inventory().snapshotItem(item, "club")];
+      }).filter(Boolean));
+      log(`${context.label}: validating ${clubRefs.length} provisional Club player(s) against EA before save`);
+      const validation = await fsuAdapter().validateClubPlayers(clubRefs, {
+        label: `${context.label} targeted Club validation`
+      });
+      if (!validation?.ok) {
+        const missing = (validation?.missing || []).map((ref) => `#${ref.id}`).join(", ");
+        return {
+          ok: false,
+          reason: validation?.reason || `FSU provisional Club validation failed${missing ? ` for ${missing}` : ""}`
+        };
+      }
+      const validatedById = new Map((validation.items || []).map((item) => [Number(item?.id || 0), item]));
+      const changed = clubRefs.filter((ref) => {
+        const before = beforeById.get(Number(ref.id || 0));
+        const item = validatedById.get(Number(ref.id || 0));
+        if (!before || !item) return true;
+        const after = adapters.inventory().snapshotItem(item, "club");
+        const signature = (snapshot) => JSON.stringify({
+          id: snapshot.id,
+          definitionId: snapshot.definitionId,
+          rating: snapshot.rating,
+          rareflag: snapshot.rareflag,
+          rare: snapshot.rare,
+          special: snapshot.special,
+          tradeable: snapshot.tradeable,
+          leagueId: snapshot.leagueId,
+          evolution: snapshot.evolution,
+          limitedUse: snapshot.limitedUse,
+          concept: snapshot.concept,
+          academyEnrolled: snapshot.academyEnrolled,
+          activeTrade: snapshot.activeTrade,
+          endTime: snapshot.endTime,
+          groups: [...snapshot.groups || []].map(Number).sort((a, b) => a - b)
+        });
+        return signature(before) !== signature(after);
+      });
+      if (changed.length) {
+        return {
+          ok: false,
+          reason: `FSU provisional Club data changed for ${changed.map((ref) => `#${ref.id}`).join(", ")}; restart the Loop so selection uses the refreshed items`
+        };
+      }
+      const players = (context.players || []).map((item, index) => {
+        const ref = itemRefs[index];
+        return ref?.pile === "club" ? validatedById.get(Number(ref.id || 0)) || item : item;
+      });
+      log(`${context.label}: provisional Club validation passed in ${Number(validation.elapsed || 0)}ms`);
+      return { ok: true, players, itemRefs };
+    }
     async function submitInventorySbcAttempt(loopDef, selection, options = {}) {
       let openedContext = null;
       const label = options.label || loopDef.name;
@@ -14391,6 +14556,7 @@
           prepareSelection: async (_context, inputSelection) => prepareInventorySelection(loopDef, inputSelection),
           itemRef: liveItemRef
         }),
+        prepareRuntimeAccess: prepareFsuRuntimeAccess,
         preSaveValidators: options.preSaveValidators || [],
         saveSquad: async ({ challenge, players }) => {
           await saveChallengeSquad(challenge, players, label);
@@ -15838,6 +16004,7 @@
       if (state.running) return;
       let loopDef = null;
       let rounds = CFG.maxRounds;
+      let fsuReadiness = null;
       try {
         loopDef = getSelectedLoopDef();
         const input = document.querySelector("#bronze-loop-rounds");
@@ -15850,6 +16017,10 @@
           pickOptions: getPickRuntimeOptions()
         });
         logFsuSettingsForRun();
+        fsuReadiness = fsuAdapter().readiness();
+        if (fsuReadiness.detected && !fsuReadiness.ready) {
+          fail2(`FSU Club player data is ${fsuReadiness.state === "loading" ? "still loading in the background" : "not ready"}; wait for the FSU player-data success notice, then click Start again`);
+        }
       } catch (e) {
         log(`Stopped: ${e.message || e}`);
         errorStackLines(e).forEach((line) => log(`Error stack: ${line}`));
@@ -15858,6 +16029,9 @@
       }
       state.running = true;
       state.stopping = false;
+      if (fsuReadiness?.state === "provisional") {
+        log(`FSU Club cache is provisional (${fsuReadiness.cacheStatus}); selected Club players will be validated against EA before each SBC save`);
+      }
       setPanelState();
       try {
         if (loopDef.dryRun || loopDef.strategy !== "validationBronzeUpgrade") {

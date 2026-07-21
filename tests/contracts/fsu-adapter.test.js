@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createStorageAdapter } from '../../src/adapters/browser/storage.js';
 import { createFsuAdapter } from '../../src/adapters/ea/fsu.js';
 
@@ -141,6 +141,104 @@ describe('FSU runtime adapter', () => {
       source: 'manual-override+locked-players',
       lockedItemIds: [40],
       lockedDefinitionIds: [50],
+    });
+  });
+
+  it('reports FSU Club readiness without treating an absent FSU as blocked', () => {
+    expect(adapter().readiness()).toEqual({
+      detected: false,
+      ready: true,
+      state: 'not-detected',
+    });
+
+    expect(adapter({
+      info: {
+        build: { untradeable: false },
+        base: { state: false, reloadPlayersPromise: {} },
+      },
+    }).readiness()).toEqual({
+      detected: true,
+      ready: false,
+      fullyValidated: false,
+      state: 'loading',
+    });
+
+    expect(adapter({
+      info: {
+        build: { untradeable: false },
+        base: { state: true },
+      },
+    }).readiness()).toEqual({
+      detected: true,
+      ready: true,
+      fullyValidated: true,
+      state: 'ready',
+    });
+
+    expect(adapter({
+      info: {
+        build: { untradeable: false },
+        base: { state: false, clubCache: { status: 'finalizing' } },
+      },
+    }).readiness()).toEqual({
+      detected: true,
+      ready: true,
+      fullyValidated: true,
+      state: 'ready',
+      cacheStatus: 'finalizing',
+    });
+  });
+
+  it('exposes provisional Club cache validation and scoped access controls', async () => {
+    const validateClubPlayers = vi.fn(async (refs) => ({ ok: true, items: refs, missing: [] }));
+    const beginProvisionalClubAccess = vi.fn(() => 1);
+    const endProvisionalClubAccess = vi.fn(() => 0);
+    const fsu = adapter({
+      info: {
+        build: { untradeable: false },
+        base: {
+          state: false,
+          reloadPlayersPromise: {},
+          clubCache: { status: 'validating' },
+        },
+      },
+      events: {
+        validateClubPlayers,
+        beginProvisionalClubAccess,
+        endProvisionalClubAccess,
+      },
+    });
+
+    expect(fsu.readiness()).toEqual({
+      detected: true,
+      ready: true,
+      fullyValidated: false,
+      state: 'provisional',
+      cacheStatus: 'validating',
+    });
+    await expect(fsu.validateClubPlayers([{ id: 10, definitionId: 20 }]))
+      .resolves.toMatchObject({ ok: true, missing: [] });
+    expect(validateClubPlayers).toHaveBeenCalledWith(
+      [{ id: 10, definitionId: 20 }],
+      {},
+    );
+    expect(fsu.beginProvisionalClubAccess()).toBe(1);
+    expect(fsu.endProvisionalClubAccess()).toBe(0);
+
+    expect(adapter({
+      info: {
+        build: { untradeable: false },
+        base: {
+          state: false,
+          clubCache: { status: 'validation-failed' },
+        },
+      },
+    }).readiness()).toEqual({
+      detected: true,
+      ready: true,
+      fullyValidated: false,
+      state: 'provisional',
+      cacheStatus: 'validation-failed',
     });
   });
 });

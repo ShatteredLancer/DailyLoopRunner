@@ -7,7 +7,8 @@
 1. 本文件。
 2. 用户提供的完整日志和截图。
 3. [REFACTORING_MILESTONES.md](REFACTORING_MILESTONES.md) 中相关 Milestone 和已知缺口。
-4. `git status --short`、最近提交和当前 diff，避免覆盖未提交的正确行为。
+4. 涉及 FSU Club 加载、缓存、Runner FSU Adapter、运行时库存 readiness 或提交前定向校验时，必须读取 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
+5. `git status --short`、最近提交和当前 diff，避免覆盖未提交的正确行为。
 
 ## 1. 项目目标与安全原则
 
@@ -29,6 +30,8 @@ Daily Loop Runner 是 EA FC Web App 的 Tampermonkey 自动化脚本，运行时
 - FSU 是普通金材料策略的权威来源。Only Untradeable、排除联赛、Exclude Evolution、Golden Player Range、Storage 优先和 Lock player 必须跟随；Runner 不得为了凑够材料绕过这些过滤。评分型 SBC 可以不使用 FSU 页面一键填充，但候选仍必须经过 FSU 过滤和锁卡检查。
 - EA/FSU 的 `loans === -1` 表示无限使用的普通卡，不是 loan。`loans === 0` 或正数才表示受限使用；真实 loan、limited-use、concept、academy enrolled 和 active trade item 都不能提交。
 - FSU Lock 不能只匹配单一 `item.id`。身份匹配必须覆盖 item、resource、definition、asset 和 guid 类字段，以及 EA 对象常见的嵌套数据容器。
+- FSU Club 实体缓存恢复后属于 provisional 数据。Runner Live SBC 使用 Club 卡时，必须在保存前按 item ID 和 definition ID 向 EA 定向校验；发现缺失或属性变化时停止并重新选材。不得以 Club 数量、缓存年龄或 fingerprint 代替该校验。
+- FSU 全量 Club payload 必须绑定到确切 XHR。不得恢复 broad capture fallback，不得把 Enhancer 或其它插件的 Club 响应归属给 FSU；`clubRepo.hasAllItems()` bypass 只能影响当前 FSU criteria 并立即恢复。
 - 同一 SBC squad 的 `definitionId` 必须唯一；Unassigned/Transfer duplicate signal 只能解析到 Club/Storage 中真实可提交的对应卡。
 - 84x10 只能使用 Challenge 要求数量和类型的 requirement special。额外特殊卡、错误特殊卡、超出提交上限的卡和 protected id 必须在保存前、保存后和提交前拦截。
 
@@ -259,7 +262,7 @@ EA objects
 - `ea/pack.js`：统一读取/刷新 My Packs、按 ID/名称解析实例，并且是唯一允许直接调用 pack model `open()` 和 `Store.getPacks()` 的位置。
 - `ea/sbc.js`：SBC Set/Challenge/DAO/formation 读取、Squad Controller 构造、后台提交设置和底层 save/submit Adapter；同时提供只读 Player Pick discovery snapshot，未知字段保持为空交由纯解析层拒绝。
 - `ea/player-pick.js`：Player Pick 待领取物品读取、跨 pile 重复检查、领取与确认选择。
-- `ea/fsu.js`：按 `window.info`、命名/动态 window root、localStorage、sessionStorage 的既有优先级发现 FSU 策略，并合并所有来源的锁卡信息。
+- `ea/fsu.js`：按 `window.info`、命名/动态 window root、localStorage、sessionStorage 的既有优先级发现 FSU 策略，并合并所有来源的锁卡信息；同时投影 FSU Club 的 loading/provisional/ready 状态，转发定向 Club 校验和 scoped provisional access。完整契约、安全边界及与 Enhancer 的交互见 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
 - `browser/dom.js`、`browser/storage.js`：DOM 查询/创建/事件构造和浏览器存储接口适配。
 - `browser/http.js`：GM/fetch GET transport、Cookie/Header/timeout 和本地热加载 fallback。
 - `browser/page-runtime.js`：EA Controller 链、名称、导航 Controller、DOM root、loading/popup shield、popup 候选、`gotoUnassigned` fallback、origin 和 FUT readiness；不决定页面导航顺序、奖励业务规则或点击策略。
