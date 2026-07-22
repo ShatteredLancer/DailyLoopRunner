@@ -1,10 +1,12 @@
 {
   "name": "fc26-daily-loop-runner",
-  "version": "0.5.40",
+  "version": "0.5.41",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node scripts/build-userscript.mjs",
+    "build:fsu-patch": "node scripts/generate-fsu-patch.mjs",
+    "check:fsu-patch": "node scripts/check-fsu-patch.mjs",
     "check:dist": "node --check dist/DailyLoopRunner.user.js && node scripts/check-dist.mjs",
     "check:config": "node scripts/check-loop-config.mjs",
     "check:architecture": "node scripts/audit-architecture.mjs --check",
@@ -13,7 +15,7 @@
     "test:watch": "vitest",
     "test:contracts": "vitest run tests/contracts",
     "test:architecture": "vitest run tests/architecture",
-    "verify": "npm run lint:syntax && npm run check:config && npm run check:architecture && npm test && npm run build && npm run check:dist"
+    "verify": "npm run lint:syntax && npm run check:config && npm run check:architecture && npm run check:fsu-patch && npm test && npm run build && npm run check:dist"
   },
   "devDependencies": {
     "esbuild": "^0.25.6",

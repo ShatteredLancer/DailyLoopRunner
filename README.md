@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.40`
+当前版本：`0.5.41`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -9,7 +9,8 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 - 本文：面向使用者，介绍安装、界面、主要 Loop、常见问题和基本开发方式。
 - [AGENTS.md](AGENTS.md)：面向 AI agent 和开发者的完整工程手册，包括架构、模块职责、影响面分析、测试和发布流程。
 - [REFACTORING_MILESTONES.md](REFACTORING_MILESTONES.md)：重构进度、未完成工作和后续 Milestone。
-- [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)：FSU Club 实体缓存、后台权威校验、Runner/Enhancer 交互、诊断、回滚和后续优化跟踪。
+- [FSU_mod/README.md](FSU_mod/README.md)：FSU 优化版安装、上游更新、补丁应用和回滚说明。
+- [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)：FSU Club 实体缓存、权威校验、Runner/Enhancer 交互、诊断和完整开发手册。
 
 ## 安装要求
 
@@ -22,9 +23,9 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.40` 后即可开始；如果 FSU 正在后台校验已恢复的 Club 缓存，Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.41` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
-FSU 不再显示前台 Club loading 时，后台校验仍可能正在运行。此时普通页面操作和 Runner 的 provisional 读取可以继续，但 FSU 自身的 Fast SBC/阵容填充默认会等待 ready；Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
+FSU 不再显示前台 Club loading 时，可能正在后台校验，也可能已进入快速缓存状态。Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 
 ## 基本操作
 

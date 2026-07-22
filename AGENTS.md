@@ -7,7 +7,7 @@
 1. 本文件。
 2. 用户提供的完整日志和截图。
 3. [REFACTORING_MILESTONES.md](REFACTORING_MILESTONES.md) 中相关 Milestone 和已知缺口。
-4. 涉及 FSU Club 加载、缓存、Runner FSU Adapter、运行时库存 readiness 或提交前定向校验时，必须读取 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
+4. 涉及 FSU Club 加载、缓存、Runner FSU Adapter、运行时库存 readiness 或提交前定向校验时，必须读取 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 5. `git status --short`、最近提交和当前 diff，避免覆盖未提交的正确行为。
 
 ## 1. 项目目标与安全原则
@@ -262,7 +262,7 @@ EA objects
 - `ea/pack.js`：统一读取/刷新 My Packs、按 ID/名称解析实例，并且是唯一允许直接调用 pack model `open()` 和 `Store.getPacks()` 的位置。
 - `ea/sbc.js`：SBC Set/Challenge/DAO/formation 读取、Squad Controller 构造、后台提交设置和底层 save/submit Adapter；同时提供只读 Player Pick discovery snapshot，未知字段保持为空交由纯解析层拒绝。
 - `ea/player-pick.js`：Player Pick 待领取物品读取、跨 pile 重复检查、领取与确认选择。
-- `ea/fsu.js`：按 `window.info`、命名/动态 window root、localStorage、sessionStorage 的既有优先级发现 FSU 策略，并合并所有来源的锁卡信息；同时投影 FSU Club 的 loading/provisional/ready 状态，转发定向 Club 校验和 scoped provisional access。完整契约、安全边界及与 Enhancer 的交互见 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
+- `ea/fsu.js`：按 `window.info`、命名/动态 window root、localStorage、sessionStorage 的既有优先级发现 FSU 策略，并合并所有来源的锁卡信息；同时投影 FSU Club 的 loading/provisional/ready 状态，转发定向 Club 校验和 scoped provisional access。完整契约、安全边界及与 Enhancer 的交互见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 - `browser/dom.js`、`browser/storage.js`：DOM 查询/创建/事件构造和浏览器存储接口适配。
 - `browser/http.js`：GM/fetch GET transport、Cookie/Header/timeout 和本地热加载 fallback。
 - `browser/page-runtime.js`：EA Controller 链、名称、导航 Controller、DOM root、loading/popup shield、popup 候选、`gotoUnassigned` fallback、origin 和 FUT readiness；不决定页面导航顺序、奖励业务规则或点击策略。

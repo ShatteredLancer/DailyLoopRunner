@@ -248,7 +248,7 @@ export function createFsuAdapter(runtime, options = {}) {
         cacheStatus,
       };
     }
-    if (['validating', 'validation-failed'].includes(cacheStatus)) {
+    if (['validating', 'trusted-provisional', 'validation-failed'].includes(cacheStatus)) {
       return {
         detected: true,
         ready: true,

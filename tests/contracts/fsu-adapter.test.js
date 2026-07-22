@@ -240,5 +240,21 @@ describe('FSU runtime adapter', () => {
       state: 'provisional',
       cacheStatus: 'validation-failed',
     });
+
+    expect(adapter({
+      info: {
+        build: { untradeable: false },
+        base: {
+          state: false,
+          clubCache: { status: 'trusted-provisional' },
+        },
+      },
+    }).readiness()).toEqual({
+      detected: true,
+      ready: true,
+      fullyValidated: false,
+      state: 'provisional',
+      cacheStatus: 'trusted-provisional',
+    });
   });
 });

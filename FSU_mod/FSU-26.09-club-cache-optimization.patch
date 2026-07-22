@@ -1,0 +1,2328 @@
+diff --git a/FSU.user.js b/FSU.user.js
+index dd554ab..26eae93 100644
+--- a/FSU.user.js
++++ b/FSU.user.js
+@@ -18,6 +18,8 @@
+ // @grant        GM_xmlhttpRequest
+ // @grant        GM_getValue
+ // @grant        GM_setValue
++// @grant        GM_registerMenuCommand
++// @grant        GM_info
+ // @connect      *
+ // @connect      ea.com
+ // @connect      futbin.com
+@@ -259,7 +261,39 @@
+         events.notice = function(text,type){
+             services.Notification.queue([fy(text),type])
+         };
++        events.requireClubReady = function(action){
++            const cacheStatus = info.base.clubCache?.status;
++            const provisionalAccess = Number(info.base.provisionalAccessDepth || 0) > 0
++                && ["validating", "trusted-provisional", "validation-failed"].includes(cacheStatus);
++            if(info.base.state || cacheStatus === "finalizing" || provisionalAccess) return true;
++            if(cacheStatus === "trusted-provisional" && !info.base.reloadPlayersPromise){
++                console.log(`[FSU club cache] ${action || "inventory operation"} requested authoritative Club data; starting an on-demand full validation`);
++                events.reloadPlayers({ reason:"trusted-cache-demand", showLoader:true }).then(success => {
++                    if(success) console.log(`[FSU club cache] on-demand validation completed; retry ${action || "the inventory operation"}`);
++                });
++            }
++            console.warn(`[FSU club load] ${action || "inventory operation"} blocked until the background Club load completes`);
++            events.notice("notice.ldataloading",1);
++            return false;
++        };
++        events.beginProvisionalClubAccess = () => {
++            info.base.provisionalAccessDepth = Number(info.base.provisionalAccessDepth || 0) + 1;
++            return info.base.provisionalAccessDepth;
++        };
++        events.endProvisionalClubAccess = () => {
++            info.base.provisionalAccessDepth = Math.max(0, Number(info.base.provisionalAccessDepth || 0) - 1);
++            return info.base.provisionalAccessDepth;
++        };
+         events.init =  async function(){
++            if(info.base.initialized){
++                console.log("[FSU init] initialization already completed; skipped");
++                return true;
++            }
++            if(info.base.initPromise){
++                console.log("[FSU init] reusing the active initialization");
++                return info.base.initPromise;
++            }
++            const run = async() => {
+             SBCCount.init();
+             set.init();
+             build.init();
+@@ -646,7 +680,12 @@
+                 console.log("没加载 enhancer")
+                 info.isEnhancer = false;
+             }
+-            await events.reloadPlayers();
++            events.reloadPlayers({ reason:"startup" }).then(success => {
++                if(!success){
++                    console.error("[FSU init] background Club player data load failed");
++                }
++            });
++            console.log("[FSU init] core initialization continues while Club player data loads in the background");
+ 
+             //24.18 可进化标识：读取进化任务数据
+             //25.02 修复进化任务加载不全的问题
+@@ -735,6 +774,21 @@
+             }
+             info.squad = _.map(repositories.Squad.squads.get(services.User.getUser().selectedPersona).get(services.Squad.activeSquad).getPlayers(),"item.id");
+             console.log(info.squad)
++            };
++            info.base.initPromise = run()
++                .then(() => {
++                    info.base.initialized = true;
++                    return true;
++                })
++                .catch(error => {
++                    info.base.initialized = false;
++                    console.error("[FSU init] failed", error);
++                    return false;
++                })
++                .finally(() => {
++                    info.base.initPromise = null;
++                });
++            return info.base.initPromise;
+         };
+ 
+         //26.02 添加进化新增显示
+@@ -1270,6 +1324,7 @@
+             "set.sbc.squadcmpl":["阵容补全功能","陣容補全功能","Squad completion"],
+             "notice.ldatasuccess":["球员数据已全部加载成功","球員資料已全部載入成功","All player data has been loaded successfully"],
+             "notice.ldataerror":["球员数据加载失败 请重刷新页面加载 否则核心功能无法使用","球員資料載入失敗 請重重新整理頁面載入 否則核心功能無法使用","Player data loading failed, please refresh the page to load, otherwise the core functions cannot be used"],
++            "notice.ldataloading":["球员数据正在后台加载，请稍后再使用库存填充功能","球員資料正在背景載入，請稍後再使用庫存填充功能","Player data is loading in the background. Please retry the inventory action shortly."],
+             "loadingclose.ldata":["正在读取球员数据（%1/%2）请耐心等待","正在讀取球員資料（%1/%2）請耐心等待","Reading player data (%1/%2) please be patient"],
+             "uatoclub.btntext":["直接发送%1个至俱乐部","直接傳送%1個至俱樂部","Send %1 directly to the club"],
+             "uatoclub.success":["直接发送俱乐部成功","直接傳送俱樂部成功","Send directly to the club successfully"],
+@@ -6813,18 +6868,10 @@
+                     fy("tile.gptitle"),
+                     fy("tile.gptext"),
+                     (e) => {
+-                        services.Club.clubDao.clubRepo.items.reset();
+                         events.waitForClickShieldToHide(() => {
+-                            try {
+-                                const cur = cntlr.current(); 
+-                                if (cur) {
+-                                    events.init(); // 安全地调用
+-                                } else {
+-                                    console.warn("cntlr.current() 为空，跳过初始化");
+-                                }
+-                            } catch (e) {
+-                                console.warn("cntlr.current() 结构未就绪，跳过 events.init()");
+-                            }
++                            events.reloadPlayers({ reason:"manual", showLoader:true, forceReset:true }).catch(error => {
++                                console.error("[FSU club load] manual reload failed", error);
++                            });
+                         });
+                     }
+                 )
+@@ -6846,78 +6893,2102 @@
+                 });
+             }
+         };
+-        events.reloadPlayers = async(e) =>{
+-            GM_setValue("players",JSON.stringify({}));
+-            let current = getAppMain().getRootViewController();
+-            await services.Club.getStats().observe(current,async function _onGetStats(e, t) {
+-                e.unobserve(current);
+-                t.success ? t.response.stats.forEach(async function(e) {
+-                    if(e.type == 'players'){
+-                        if(e.count !== services.Club.clubDao.clubRepo.items.length){
+-                            events.showLoader();
+-                            let playersCount = isPhone() ? 200 : 200;
+-                            let playersPage = Math.ceil(e.count / playersCount);
+-                            let playerList = [];
+-                            for (let i = 0; i < playersPage; i++) {
+-                                let playersCriteria = new UTSearchCriteriaDTO();
+-                                playersCriteria.type = "player";
+-                                playersCriteria.sortBy = "ovr";
+-                                playersCriteria.sort = "desc";
+-                                playersCriteria.count = playersCount;
+-                                playersCriteria.offset = i * playersCount;
+-                                events.changeLoadingText(["loadingclose.ldata",`${i}`,`${playersPage}`]);
+-                                try {
+-                                    playerList = await new Promise((resolve, reject) => {
+-                                        services.Club.search(playersCriteria).observe(e, (p, t) => {
+-                                            if (p.unobserve(p), t.success && JSUtils.isObject(t.response)) {
+-                                                resolve(t.response);
+-                                            } else {
+-                                                reject(new Error("Search operation failed"));
+-                                            }
+-                                        });
+-                                    });
+-                                    await events.wait(0.2,0.5)
+-                                } catch (error) {
+-                                    console.error("Search error:", error);
+-                                    services.Notification.queue([services.Localization.localize("notification.club.failedToLoad"), UINotificationType.NEGATIVE]);
+-                                    const navController = e.getNavigationController();
+-                                    if (navController) {
+-                                        navController.popViewController(true);
+-                                    }
++        events.reloadPlayers = (options = {}) =>{
++            if(info.base.reloadPlayersPromise){
++                console.log("[FSU club load] reusing the active Club load");
++                return info.base.reloadPlayersPromise;
++            }
++
++            const current = getAppMain().getRootViewController();
++            const startedAt = Date.now();
++            const reason = options.reason || "unspecified";
++            const showLoader = options.showLoader === true;
++            const forceReset = options.forceReset === true;
++            let loaderShown = false;
++
++            const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
++            const observeOnce = (observableFactory, label, timeout = 30000) => new Promise((resolve, reject) => {
++                let observable;
++                let settled = false;
++                let timer;
++                const finish = (callback, value) => {
++                    if(settled) return;
++                    settled = true;
++                    clearTimeout(timer);
++                    callback(value);
++                };
++                try{
++                    observable = observableFactory();
++                    timer = setTimeout(() => {
++                        try{ observable?.unobserve?.(current); }catch(error){}
++                        finish(reject, new Error(`${label} timed out after ${timeout}ms`));
++                    }, timeout);
++                    observable.observe(current, (subscription, result) => {
++                        try{ subscription?.unobserve?.(current); }catch(error){}
++                        if(result?.success){
++                            finish(resolve, result);
++                        }else{
++                            const status = result?.status ?? result?.response?.status ?? "unknown";
++                            finish(reject, new Error(`${label} failed: ${status}`));
++                        }
++                    });
++                }catch(error){
++                    finish(reject, error);
++                }
++            });
++            const clubRepoItems = () => services.Club.clubDao.clubRepo.items;
++            const clubRepoValues = () => {
++                const values = clubRepoItems()?.values?.() || [];
++                return Array.isArray(values) ? values : Array.from(values);
++            };
++            const isClubPlayer = item => {
++                try{
++                    if(typeof item?.isPlayer === "function") return item.isPlayer();
++                }catch(error){}
++                return item?.type === "player" || item?.itemType === "player";
++            };
++            const clubRepoPlayerItems = () => clubRepoValues().filter(isClubPlayer);
++            const clubRepoPlayerCount = () => clubRepoPlayerItems().length;
++            const clubRepoTotalCount = () => Number(clubRepoItems()?.length || 0);
++            const clubRepoPlayerIds = () => new Set(
++                clubRepoPlayerItems()
++                    .map(item => Number(item?.id || 0))
++                    .filter(id => Number.isFinite(id) && id > 0)
++            );
++            const CLUB_ENTITY_CACHE_SCHEMA = 2;
++            const CLUB_ENTITY_CACHE_CHUNK_SIZE = 250;
++            const CLUB_ENTITY_CACHE_MAX_AGE = 3 * 24 * 60 * 60 * 1000;
++            const CLUB_FAST_CACHE_SIGNAL_SCHEMA = 1;
++            const CLUB_FULL_VALIDATION_MAX_AGE = 12 * 60 * 60 * 1000;
++            const getClubFastCacheDirtyKey = () => `fsu_club_fast_cache_dirty_${info.base.year}_${getPersonaCacheScope()}`;
++            const CLUB_DIAGNOSTIC_SCHEMA = 1;
++            const CLUB_DIAGNOSTIC_MAX_ENTRIES = 6000;
++            const CLUB_DIAGNOSTIC_METHOD_SAMPLE_LIMIT = 4;
++            const CLUB_DIAGNOSTIC_SOURCE_LIMIT = 6000;
++            const CLUB_DEEP_DIAGNOSTICS_KEY = `fsu_club_deep_diagnostics_${info.base.year}`;
++            const isClubDeepDiagnosticsEnabled = () => {
++                const value = GM_getValue(CLUB_DEEP_DIAGNOSTICS_KEY, false);
++                return value === true || value === "true";
++            };
++            const clubDeepDiagnosticsEnabled = isClubDeepDiagnosticsEnabled();
++            const getDiagnosticConstructorName = value => {
++                try{ return value?.constructor?.name || typeof value; }catch(error){ return typeof value; }
++            };
++            const summarizeDiagnosticValue = (value, depth = 0, seen = new Set()) => {
++                if(value === null || value === undefined) return value;
++                if(typeof value === "string") return value.length > 1000 ? `${value.slice(0, 1000)}...[${value.length}]` : value;
++                if(typeof value === "number" || typeof value === "boolean") return value;
++                if(typeof value === "bigint") return `${value}n`;
++                if(typeof value === "function"){
++                    return { type:"function", name:value.name || "anonymous", length:Number(value.length || 0) };
++                }
++                if(value instanceof Error){
++                    return {
++                        type:"Error",
++                        name:value.name,
++                        message:value.message,
++                        stack:String(value.stack || "").split("\n").slice(0, 12).join("\n")
++                    };
++                }
++                if(seen.has(value)) return `[Circular ${getDiagnosticConstructorName(value)}]`;
++                if(depth >= 7) return `[${getDiagnosticConstructorName(value)}]`;
++                seen.add(value);
++                try{
++                    if(Array.isArray(value)){
++                        return {
++                            type:"Array",
++                            length:value.length,
++                            values:value.slice(0, 20).map(item => summarizeDiagnosticValue(item, depth + 1, seen))
++                        };
++                    }
++                    if(value instanceof Map){
++                        return {
++                            type:"Map",
++                            size:value.size,
++                            entries:Array.from(value.entries()).slice(0, 20).map(([key, item]) => [
++                                summarizeDiagnosticValue(key, depth + 1, seen),
++                                summarizeDiagnosticValue(item, depth + 1, seen)
++                            ])
++                        };
++                    }
++                    if(value instanceof Set){
++                        return {
++                            type:"Set",
++                            size:value.size,
++                            values:Array.from(value.values()).slice(0, 20).map(item => summarizeDiagnosticValue(item, depth + 1, seen))
++                        };
++                    }
++                    const summary = { type:getDiagnosticConstructorName(value) };
++                    const preferredKeys = [
++                        "type", "itemType", "count", "offset", "sort", "sortBy", "cacheable", "defId", "id",
++                        "definitionId", "success", "status", "state", "length", "size", "dirty", "isDirty",
++                        "loaded", "complete", "completed", "expected", "restored", "verified"
++                    ];
++                    const keys = Array.from(new Set([
++                        ...preferredKeys,
++                        ...Object.keys(value).slice(0, 40)
++                    ])).slice(0, 60);
++                    keys.forEach(key => {
++                        let item;
++                        try{ item = value[key]; }catch(error){ return; }
++                        if(typeof item === "function") return;
++                        if(item === null || item === undefined || typeof item === "string" || typeof item === "number" || typeof item === "boolean"){
++                            summary[key] = item;
++                        }else if(Array.isArray(item)){
++                            summary[key] = {
++                                type:"Array",
++                                length:item.length,
++                                values:item.slice(0, 20).map(entry => summarizeDiagnosticValue(entry, depth + 1, seen))
++                            };
++                        }else if(item instanceof Map || item instanceof Set){
++                            summary[key] = summarizeDiagnosticValue(item, depth + 1, seen);
++                        }else if(item && typeof item === "object"){
++                            summary[key] = summarizeDiagnosticValue(item, depth + 1, seen);
++                        }
++                    });
++                    return summary;
++                }finally{
++                    seen.delete(value);
++                }
++            };
++            const ensureClubDiagnostics = () => {
++                if(!info.base.clubDiagnostics || Number(info.base.clubDiagnostics.schema) !== CLUB_DIAGNOSTIC_SCHEMA){
++                    info.base.clubDiagnostics = {
++                        schema:CLUB_DIAGNOSTIC_SCHEMA,
++                        startedAt:Date.now(),
++                        requestSequence:0,
++                        entries:[],
++                        runtimeInventory:null
++                    };
++                }
++                return info.base.clubDiagnostics;
++            };
++            const appendClubDiagnostic = (level, event, details = null) => {
++                const diagnostics = ensureClubDiagnostics();
++                diagnostics.entries.push({
++                    at:Date.now(),
++                    iso:new Date().toISOString(),
++                    level,
++                    event,
++                    details:summarizeDiagnosticValue(details)
++                });
++                if(diagnostics.entries.length > CLUB_DIAGNOSTIC_MAX_ENTRIES){
++                    diagnostics.entries.splice(0, diagnostics.entries.length - CLUB_DIAGNOSTIC_MAX_ENTRIES);
++                }
++            };
++            const installClubDiagnosticConsoleCapture = () => {
++                ensureClubDiagnostics();
++                if(info.base.clubDiagnosticConsoleCaptureInstalled) return;
++                info.base.clubDiagnosticConsoleCaptureInstalled = true;
++                info.base.clubDiagnosticConsoleOriginals = {};
++                ["log", "warn", "error"].forEach(level => {
++                    const original = console[level]?.bind(console);
++                    if(typeof original !== "function") return;
++                    info.base.clubDiagnosticConsoleOriginals[level] = original;
++                    console[level] = (...args) => {
++                        try{
++                            const first = typeof args[0] === "string" ? args[0] : "";
++                            if(first.startsWith("[FSU club") || first.startsWith("[FSU init]")){
++                                appendClubDiagnostic(level, "console", args);
++                            }
++                        }catch(error){}
++                        return original(...args);
++                    };
++                });
++            };
++            const emitClubDiagnostic = (level, event, summary, details = null) => {
++                appendClubDiagnostic(level, event, details ?? summary);
++                const output = info.base.clubDiagnosticConsoleOriginals?.[level] || console[level]?.bind(console);
++                if(typeof output === "function") output(`[FSU club diagnostic] ${summary}`);
++            };
++            const describeDiagnosticObject = (label, target) => {
++                if(!target) return { label, available:false };
++                const levels = [];
++                const seenNames = new Set();
++                let current = target;
++                let depth = 0;
++                while(current && current !== Object.prototype && depth < 6){
++                    const methods = [];
++                    const accessors = [];
++                    const scalars = {};
++                    let descriptors = {};
++                    try{ descriptors = Object.getOwnPropertyDescriptors(current); }catch(error){}
++                    Reflect.ownKeys(descriptors).forEach(rawKey => {
++                        const key = String(rawKey);
++                        if(key === "constructor" || seenNames.has(key)) return;
++                        seenNames.add(key);
++                        const descriptor = descriptors[rawKey];
++                        if(typeof descriptor?.value === "function"){
++                            const method = {
++                                name:key,
++                                length:Number(descriptor.value.length || 0),
++                                own:depth === 0,
++                                writable:descriptor.writable === true,
++                                configurable:descriptor.configurable === true
++                            };
++                            if(/search|request|club|item|stat|load|dirty|cache/i.test(key)){
++                                try{
++                                    const source = Function.prototype.toString.call(descriptor.value);
++                                    method.source = source.length > CLUB_DIAGNOSTIC_SOURCE_LIMIT
++                                        ? `${source.slice(0, CLUB_DIAGNOSTIC_SOURCE_LIMIT)}...[${source.length}]`
++                                        : source;
++                                }catch(error){ method.sourceError = error.message; }
++                            }
++                            methods.push(method);
++                        }else if(descriptor?.get || descriptor?.set){
++                            accessors.push({
++                                name:key,
++                                getter:typeof descriptor.get === "function",
++                                setter:typeof descriptor.set === "function",
++                                configurable:descriptor.configurable === true
++                            });
++                        }else if(depth === 0){
++                            const value = descriptor?.value;
++                            if(value === null || value === undefined || typeof value === "string" || typeof value === "number" || typeof value === "boolean"){
++                                scalars[key] = value;
++                            }else if(Array.isArray(value)){
++                                scalars[key] = { type:"Array", length:value.length };
++                            }else if(value instanceof Map || value instanceof Set){
++                                scalars[key] = { type:getDiagnosticConstructorName(value), size:value.size };
++                            }else if(value && typeof value === "object"){
++                                const length = Number(value.length);
++                                scalars[key] = {
++                                    type:getDiagnosticConstructorName(value),
++                                    length:Number.isFinite(length) ? length : undefined
++                                };
++                            }
++                        }
++                    });
++                    levels.push({
++                        depth,
++                        constructorName:getDiagnosticConstructorName(current),
++                        methods,
++                        accessors,
++                        scalars
++                    });
++                    current = Object.getPrototypeOf(current);
++                    depth++;
++                }
++                return { label, available:true, type:getDiagnosticConstructorName(target), extensible:Object.isExtensible(target), levels };
++            };
++            const collectClubRuntimeState = criteria => {
++                let itemPileDirty = null;
++                try{
++                    if(typeof repositories.Item?.isDirty === "function") itemPileDirty = Boolean(repositories.Item.isDirty(ItemPile.CLUB));
++                }catch(error){}
++                const ownState = target => {
++                    const result = {};
++                    if(!target) return result;
++                    let descriptors = {};
++                    try{ descriptors = Object.getOwnPropertyDescriptors(target); }catch(error){}
++                    Reflect.ownKeys(descriptors).slice(0, 80).forEach(rawKey => {
++                        const key = String(rawKey);
++                        const descriptor = descriptors[rawKey];
++                        if(!descriptor || descriptor.get || descriptor.set || typeof descriptor.value === "function") return;
++                        const value = descriptor.value;
++                        if(value === null || value === undefined || typeof value === "string" || typeof value === "number" || typeof value === "boolean"){
++                            result[key] = value;
++                        }else if(Array.isArray(value)){
++                            result[key] = { type:"Array", length:value.length };
++                        }else if(value instanceof Map || value instanceof Set){
++                            result[key] = { type:getDiagnosticConstructorName(value), size:value.size };
++                        }else if(value && typeof value === "object"){
++                            const length = Number(value.length);
++                            result[key] = { type:getDiagnosticConstructorName(value), length:Number.isFinite(length) ? length : undefined };
++                        }
++                    });
++                    return result;
++                };
++                return {
++                    criteria:summarizeDiagnosticValue(criteria),
++                    clubCache:summarizeDiagnosticValue(info.base.clubCache),
++                    clubState:Boolean(info.base.state),
++                    itemPileDirty,
++                    repositoryPlayers:clubRepoPlayerCount(),
++                    repositoryItems:clubRepoTotalCount(),
++                    service:ownState(services.Club),
++                    dao:ownState(services.Club?.clubDao),
++                    clubRepo:ownState(services.Club?.clubDao?.clubRepo),
++                    itemRepository:ownState(repositories.Item)
++                };
++            };
++            const collectClubRuntimeInventory = () => {
++                const diagnostics = ensureClubDiagnostics();
++                if(diagnostics.runtimeInventory) return diagnostics.runtimeInventory;
++                const targets = [
++                    ["services.Club", services.Club],
++                    ["services.Club.clubDao", services.Club?.clubDao],
++                    ["services.Club.clubDao.clubRepo", services.Club?.clubDao?.clubRepo],
++                    ["repositories.Item", repositories.Item],
++                    ["repositories.Item.club", repositories.Item?.club]
++                ];
++                try{ if(typeof UTClubService !== "undefined") targets.push(["UTClubService.prototype", UTClubService.prototype]); }catch(error){}
++                try{ if(typeof UTClubDAO !== "undefined") targets.push(["UTClubDAO.prototype", UTClubDAO.prototype]); }catch(error){}
++                try{ if(typeof UTClubRepository !== "undefined") targets.push(["UTClubRepository.prototype", UTClubRepository.prototype]); }catch(error){}
++                try{ if(typeof UTItemDAO !== "undefined") targets.push(["UTItemDAO.prototype", UTItemDAO.prototype]); }catch(error){}
++                try{ if(typeof UTHttpRequest !== "undefined") targets.push(["UTHttpRequest.prototype", UTHttpRequest.prototype]); }catch(error){}
++                try{ if(typeof EAHttpRequest !== "undefined") targets.push(["EAHttpRequest.prototype", EAHttpRequest.prototype]); }catch(error){}
++                diagnostics.runtimeInventory = targets.map(([label, target]) => describeDiagnosticObject(label, target));
++                const methodSummary = diagnostics.runtimeInventory.map(entry => {
++                    const names = entry.levels?.flatMap(level => level.methods.map(method => `${method.name}/${method.length}`)) || [];
++                    return `${entry.label}:${names.join(",") || "none"}`;
++                }).join(" | ");
++                emitClubDiagnostic("log", "runtime-inventory", `runtime inventory captured; ${methodSummary}`, diagnostics.runtimeInventory);
++                return diagnostics.runtimeInventory;
++            };
++            const installNetworkCallTrace = requestLabel => {
++                const calls = [];
++                const restore = [];
++                const errors = [];
++                const xhrState = new WeakMap();
++                const summarizeBody = body => {
++                    if(body === null || body === undefined) return null;
++                    if(typeof body === "string") return { type:"string", length:body.length, preview:body.slice(0, 500) };
++                    if(typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams){
++                        const value = String(body);
++                        return { type:"URLSearchParams", length:value.length, preview:value.slice(0, 500) };
++                    }
++                    if(typeof FormData !== "undefined" && body instanceof FormData){
++                        return { type:"FormData", keys:Array.from(body.keys()).slice(0, 50) };
++                    }
++                    if(typeof Blob !== "undefined" && body instanceof Blob) return { type:"Blob", size:body.size };
++                    if(typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer) return { type:"ArrayBuffer", byteLength:body.byteLength };
++                    return { type:getDiagnosticConstructorName(body) };
++                };
++                try{
++                    const prototype = XMLHttpRequest?.prototype;
++                    const openDescriptor = prototype && Object.getOwnPropertyDescriptor(prototype, "open");
++                    const sendDescriptor = prototype && Object.getOwnPropertyDescriptor(prototype, "send");
++                    if(openDescriptor?.writable && sendDescriptor?.writable){
++                        const originalOpen = openDescriptor.value;
++                        const originalSend = sendDescriptor.value;
++                        Object.defineProperty(prototype, "open", {
++                            ...openDescriptor,
++                            value:function(method, url, async, user, password){
++                                xhrState.set(this, {
++                                    transport:"xhr",
++                                    method:String(method || "GET"),
++                                    url:String(url || ""),
++                                    async:async !== false,
++                                    openedAt:Date.now()
++                                });
++                                return originalOpen.apply(this, arguments);
++                            }
++                        });
++                        Object.defineProperty(prototype, "send", {
++                            ...sendDescriptor,
++                            value:function(body){
++                                const state = xhrState.get(this) || {
++                                    transport:"xhr",
++                                    method:"unknown",
++                                    url:"unknown",
++                                    openedAt:Date.now()
++                                };
++                                state.sentAt = Date.now();
++                                state.body = summarizeBody(body);
++                                calls.push(state);
++                                const complete = outcome => {
++                                    if(state.completedAt) return;
++                                    state.completedAt = Date.now();
++                                    state.elapsed = state.completedAt - state.sentAt;
++                                    state.outcome = outcome;
++                                    try{ state.status = Number(this.status || 0); }catch(error){}
++                                    try{ state.statusText = String(this.statusText || ""); }catch(error){}
++                                    try{ state.responseURL = String(this.responseURL || ""); }catch(error){}
++                                    try{ state.responseType = String(this.responseType || ""); }catch(error){}
++                                    try{
++                                        if(typeof this.responseText === "string") state.responseLength = this.responseText.length;
++                                        else if(this.response instanceof ArrayBuffer) state.responseLength = this.response.byteLength;
++                                        else if(this.response instanceof Blob) state.responseLength = this.response.size;
++                                    }catch(error){}
++                                };
++                                try{
++                                    this.addEventListener("loadend", () => complete("loadend"), { once:true });
++                                    this.addEventListener("error", () => complete("error"), { once:true });
++                                    this.addEventListener("abort", () => complete("abort"), { once:true });
++                                    this.addEventListener("timeout", () => complete("timeout"), { once:true });
++                                }catch(error){}
++                                try{
++                                    return originalSend.apply(this, arguments);
++                                }catch(error){
++                                    complete("throw");
++                                    state.error = summarizeDiagnosticValue(error);
++                                    throw error;
++                                }
++                            }
++                        });
++                        restore.push(() => Object.defineProperty(prototype, "send", sendDescriptor));
++                        restore.push(() => Object.defineProperty(prototype, "open", openDescriptor));
++                    }else{
++                        errors.push("XMLHttpRequest.open/send are not writable");
++                    }
++                }catch(error){
++                    errors.push(`XMLHttpRequest trace: ${error.message}`);
++                }
++                try{
++                    const originalFetch = window.fetch;
++                    if(typeof originalFetch === "function"){
++                        window.fetch = function(input, init = {}){
++                            const state = {
++                                transport:"fetch",
++                                method:String(init?.method || input?.method || "GET"),
++                                url:String(input?.url || input || ""),
++                                body:summarizeBody(init?.body),
++                                sentAt:Date.now()
++                            };
++                            calls.push(state);
++                            let promise;
++                            try{ promise = originalFetch.apply(this, arguments); }
++                            catch(error){
++                                state.completedAt = Date.now();
++                                state.elapsed = state.completedAt - state.sentAt;
++                                state.outcome = "throw";
++                                state.error = summarizeDiagnosticValue(error);
++                                throw error;
++                            }
++                            return Promise.resolve(promise).then(response => {
++                                state.completedAt = Date.now();
++                                state.elapsed = state.completedAt - state.sentAt;
++                                state.outcome = "resolved";
++                                state.status = Number(response?.status || 0);
++                                state.statusText = String(response?.statusText || "");
++                                state.responseURL = String(response?.url || "");
++                                return response;
++                            }, error => {
++                                state.completedAt = Date.now();
++                                state.elapsed = state.completedAt - state.sentAt;
++                                state.outcome = "rejected";
++                                state.error = summarizeDiagnosticValue(error);
++                                throw error;
++                            });
++                        };
++                        restore.push(() => { window.fetch = originalFetch; });
++                    }
++                }catch(error){
++                    errors.push(`fetch trace: ${error.message}`);
++                }
++                return {
++                    calls,
++                    errors,
++                    restore:() => {
++                        for(let index = restore.length - 1; index >= 0; index--){
++                            try{ restore[index](); }catch(error){ errors.push(`network restore: ${error.message}`); }
++                        }
++                    }
++                };
++            };
++            const installObjectCallTrace = (target, targetLabel, requestLabel) => {
++                const calls = new Map();
++                const restore = [];
++                const wrapErrors = [];
++                if(!target) return { calls, restore:() => {}, wrapErrors:[`${targetLabel} unavailable`] };
++                const seenNames = new Set();
++                let current = target;
++                let depth = 0;
++                while(current && current !== Object.prototype && depth < 6){
++                    let descriptors = {};
++                    try{ descriptors = Object.getOwnPropertyDescriptors(current); }catch(error){}
++                    Reflect.ownKeys(descriptors).forEach(rawKey => {
++                        const key = String(rawKey);
++                        if(key === "constructor" || seenNames.has(key)) return;
++                        seenNames.add(key);
++                        const descriptor = descriptors[rawKey];
++                        const original = descriptor?.value;
++                        if(typeof original !== "function") return;
++                        const record = { target:targetLabel, method:key, length:Number(original.length || 0), count:0, samples:[], errors:[] };
++                        calls.set(key, record);
++                        const wrapper = function(...args){
++                            const startedAt = performance.now();
++                            record.count++;
++                            const sample = record.samples.length < CLUB_DIAGNOSTIC_METHOD_SAMPLE_LIMIT ? {
++                                at:Date.now(),
++                                args:args.map(argument => summarizeDiagnosticValue(argument)),
++                                stack:String(new Error().stack || "").split("\n").slice(2, 10).join("\n")
++                            } : null;
++                            try{
++                                const result = original.apply(this, args);
++                                if(sample){
++                                    sample.elapsedMs = Number((performance.now() - startedAt).toFixed(3));
++                                    sample.result = Array.isArray(result)
++                                        ? {
++                                            type:"Array",
++                                            length:result.length,
++                                            firstIds:result.slice(0, 12).map(item => Number(item?.id || 0)).filter(id => id > 0),
++                                            lastIds:result.slice(Math.max(0, result.length - 12)).map(item => Number(item?.id || 0)).filter(id => id > 0)
++                                        }
++                                        : summarizeDiagnosticValue(result);
++                                    record.samples.push(sample);
++                                }
++                                return result;
++                            }catch(error){
++                                if(sample){
++                                    sample.elapsedMs = Number((performance.now() - startedAt).toFixed(3));
++                                    sample.error = summarizeDiagnosticValue(error);
++                                    record.samples.push(sample);
+                                 }
++                                record.errors.push(summarizeDiagnosticValue(error));
++                                throw error;
+                             }
++                        };
++                        try{
++                            const ownDescriptor = Object.getOwnPropertyDescriptor(target, rawKey);
++                            if(ownDescriptor){
++                                if(ownDescriptor.get || ownDescriptor.set || (!ownDescriptor.writable && !ownDescriptor.configurable)) return;
++                                Object.defineProperty(target, rawKey, { ...ownDescriptor, value:wrapper });
++                                restore.push(() => Object.defineProperty(target, rawKey, ownDescriptor));
++                            }else if(Object.isExtensible(target)){
++                                Object.defineProperty(target, rawKey, { value:wrapper, writable:true, configurable:true, enumerable:descriptor.enumerable === true });
++                                restore.push(() => { try{ delete target[rawKey]; }catch(error){} });
++                            }
++                        }catch(error){
++                            wrapErrors.push(`${targetLabel}.${key}: ${error.message}`);
++                        }
++                    });
++                    current = Object.getPrototypeOf(current);
++                    depth++;
++                }
++                return {
++                    calls,
++                    wrapErrors,
++                    restore:() => {
++                        for(let index = restore.length - 1; index >= 0; index--){
++                            try{ restore[index](); }catch(error){ wrapErrors.push(`${targetLabel} restore: ${error.message}`); }
++                        }
++                    }
++                };
++            };
++            const beginClubRequestTrace = (criteria, label, attempt) => {
++                const diagnostics = ensureClubDiagnostics();
++                const requestId = ++diagnostics.requestSequence;
++                const startedAt = Date.now();
++                if(!clubDeepDiagnosticsEnabled){
++                    let stopped = false;
++                    return {
++                        requestId,
++                        stop:(outcome, extra = null) => {
++                            if(stopped) return;
++                            stopped = true;
++                            appendClubDiagnostic(outcome === "error" ? "error" : "log", "request-trace", {
++                                requestId,
++                                label,
++                                attempt,
++                                outcome,
++                                mode:"light",
++                                startedAt,
++                                elapsed:Date.now() - startedAt,
++                                extra
++                            });
++                        }
++                    };
++                }
++                collectClubRuntimeInventory();
++                const before = collectClubRuntimeState(criteria);
++                const traces = [
++                    installObjectCallTrace(services.Club, "services.Club", label),
++                    installObjectCallTrace(services.Club?.clubDao, "services.Club.clubDao", label),
++                    installObjectCallTrace(services.Club?.clubDao?.clubRepo, "services.Club.clubDao.clubRepo", label),
++                    installObjectCallTrace(repositories.Item, "repositories.Item", label)
++                ];
++                const networkTrace = installNetworkCallTrace(label);
++                let stopped = false;
++                return {
++                    requestId,
++                    stop:(outcome, extra = null) => {
++                        if(stopped) return;
++                        stopped = true;
++                        traces.forEach(trace => trace.restore());
++                        networkTrace.restore();
++                        const callRecords = traces.flatMap(trace => Array.from(trace.calls.values())).filter(record => record.count > 0);
++                        const wrapErrors = traces.flatMap(trace => trace.wrapErrors);
++                        const details = {
++                            requestId,
++                            label,
++                            attempt,
++                            outcome,
++                            startedAt,
++                            elapsed:Date.now() - startedAt,
++                            before,
++                            after:collectClubRuntimeState(criteria),
++                            calls:callRecords,
++                            wrapErrors,
++                            networkCalls:networkTrace.calls,
++                            networkErrors:networkTrace.errors,
++                            extra:summarizeDiagnosticValue(extra)
++                        };
++                        const callSummary = callRecords.map(record => `${record.target}.${record.method}/${record.length} x${record.count}`).join(", ") || "no traced calls";
++                        const networkSummary = networkTrace.calls.map(call => `${call.transport}:${call.method} ${call.status ?? "?"} ${call.url}`).join(" | ") || "no network calls";
++                        emitClubDiagnostic(outcome === "error" ? "error" : "log", "request-trace", `request #${requestId} ${label} attempt ${attempt} ${outcome}; ${callSummary}; ${networkSummary}`, details);
++                    }
++                };
++            };
++            const summarizeClubPageResult = (result, requestPayloads) => {
++                const responseItems = Array.isArray(result?.response?.items) ? result.response.items : [];
++                const capturedIds = Array.from(requestPayloads.keys());
++                const edge = values => ({
++                    count:values.length,
++                    first:values.slice(0, 12),
++                    last:values.slice(Math.max(0, values.length - 12)),
++                    min:values.length ? Math.min(...values) : null,
++                    max:values.length ? Math.max(...values) : null
++                });
++                return {
++                    success:result?.success,
++                    responseType:getDiagnosticConstructorName(result?.response),
++                    responseKeys:result?.response ? Object.keys(result.response).slice(0, 80) : [],
++                    responseItems:responseItems.length,
++                    responsePlayerIds:clubDeepDiagnosticsEnabled
++                        ? edge(responseItems
++                            .filter(isClubPlayer)
++                            .map(item => Number(item?.id || 0))
++                            .filter(id => Number.isFinite(id) && id > 0))
++                        : null,
++                    capturedPayloadIds:edge(capturedIds),
++                    responseOffset:result?.response?.offset,
++                    responseCount:result?.response?.count,
++                    responseTotal:result?.response?.total ?? result?.response?.totalCount
++                };
++            };
++            const buildClubDiagnosticExport = reason => ({
++                schema:CLUB_DIAGNOSTIC_SCHEMA,
++                reason:reason || "manual-download",
++                exportedAt:Date.now(),
++                exportedAtIso:new Date().toISOString(),
++                pageUrl:String(location.href),
++                userAgent:navigator.userAgent,
++                scriptVersion:typeof GM_info !== "undefined" ? GM_info?.script?.version : undefined,
++                year:info.base.year,
++                persona:String((() => { try{ return services.User.getUser()?.selectedPersona?.id ?? "unknown"; }catch(error){ return "unknown"; } })()),
++                deepDiagnostics:clubDeepDiagnosticsEnabled,
++                currentState:collectClubRuntimeState(null),
++                diagnostics:ensureClubDiagnostics()
++            });
++            const persistClubDiagnostics = (reason, error = null) => {
++                try{
++                    const payload = buildClubDiagnosticExport(reason);
++                    if(error) payload.error = summarizeDiagnosticValue(error);
++                    GM_setValue("fsu_club_diagnostics_latest", JSON.stringify(payload));
++                }catch(persistError){}
++            };
++            const downloadClubDiagnosticPayload = (payload, prefix = "fsu-club-diagnostics") => {
++                const encoded = JSON.stringify(payload, null, 2);
++                const blob = new Blob([encoded], { type:"application/json;charset=utf-8" });
++                const url = URL.createObjectURL(blob);
++                const link = document.createElement("a");
++                const stamp = new Date().toISOString().replace(/[:.]/g, "-");
++                link.href = url;
++                link.download = `${prefix}-${stamp}.json`;
++                document.body.appendChild(link);
++                link.click();
++                link.remove();
++                setTimeout(() => URL.revokeObjectURL(url), 1000);
++                const output = info.base.clubDiagnosticConsoleOriginals?.log || console.log.bind(console);
++                output(`[FSU club diagnostic] downloaded ${link.download}; entries:${payload.diagnostics?.entries?.length || 0}`);
++                return link.download;
++            };
++            events.downloadClubDiagnostics = () => {
++                let payload;
++                try{
++                    payload = buildClubDiagnosticExport("manual-download");
++                    if(!payload.diagnostics?.entries?.length){
++                        const saved = GM_getValue("fsu_club_diagnostics_latest", null);
++                        if(saved) payload = typeof saved === "string" ? JSON.parse(saved) : saved;
++                    }
++                }catch(error){
++                    payload = { exportedAtIso:new Date().toISOString(), error:summarizeDiagnosticValue(error) };
++                }
++                return downloadClubDiagnosticPayload(payload);
++            };
++            events.downloadSavedClubDiagnostics = () => {
++                try{
++                    const saved = GM_getValue("fsu_club_diagnostics_latest", null);
++                    if(!saved) throw new Error("no saved Club diagnostic session is available");
++                    const payload = typeof saved === "string" ? JSON.parse(saved) : saved;
++                    return downloadClubDiagnosticPayload(payload, "fsu-club-diagnostics-saved");
++                }catch(error){
++                    const output = info.base.clubDiagnosticConsoleOriginals?.error || console.error.bind(console);
++                    output("[FSU club diagnostic] could not download the saved diagnostic session", error);
++                    return null;
++                }
++            };
++            installClubDiagnosticConsoleCapture();
++            if(!info.base.clubDiagnosticMenuRegistered && typeof GM_registerMenuCommand === "function"){
++                info.base.clubDiagnosticMenuRegistered = true;
++                GM_registerMenuCommand("Download current FSU Club diagnostics", () => events.downloadClubDiagnostics());
++                GM_registerMenuCommand("Download last saved FSU Club diagnostics", () => events.downloadSavedClubDiagnostics());
++                GM_registerMenuCommand("Enable deep FSU Club diagnostics for next reload", () => {
++                    GM_setValue(CLUB_DEEP_DIAGNOSTICS_KEY, true);
++                    console.log("[FSU club diagnostic] deep request tracing enabled for the next page reload");
++                });
++                GM_registerMenuCommand("Disable deep FSU Club diagnostics for next reload", () => {
++                    GM_setValue(CLUB_DEEP_DIAGNOSTICS_KEY, false);
++                    console.log("[FSU club diagnostic] deep request tracing disabled for the next page reload");
++                });
++            }
++            const captureClubPayload = payload => {
++                if(payload?.itemType != ItemType.PLAYER) return;
++                const itemId = Number(payload?.id || 0);
++                if(!Number.isFinite(itemId) || itemId <= 0) return;
++                try{
++                    const snapshot = JSON.parse(JSON.stringify(payload));
++                    const broadCapture = info.base.clubPayloadCapture;
++                    if(broadCapture instanceof Map) broadCapture.set(itemId, snapshot);
++                    const activeCapture = info.base.clubPayloadCaptureActive;
++                    if(activeCapture?.payloads instanceof Map) activeCapture.payloads.set(itemId, snapshot);
++                }catch(error){}
++            };
++            if(clubDeepDiagnosticsEnabled && !info.base.clubPayloadCaptureHooked){
++                const generateItemConstructorOptions = UTItemEntityFactory.prototype.generateItemConstructorOptions;
++                UTItemEntityFactory.prototype.generateItemConstructorOptions = function(payload) {
++                    captureClubPayload(payload);
++                    return generateItemConstructorOptions.call(this, payload);
++                };
++                info.base.clubPayloadCaptureHooked = true;
++            }
++            const normalizeClubRequestDefIds = value => {
++                const values = Array.isArray(value)
++                    ? value
++                    : (typeof value === "string" && value ? value.split(",") : []);
++                return values
++                    .map(Number)
++                    .filter(id => Number.isFinite(id) && id > 0)
++                    .sort((a, b) => a - b);
++            };
++            const getClubRequestIdentity = (body, url = "") => {
++                if(!/\/club(?:\?|$)/i.test(String(url)) || !body || typeof body !== "object") return null;
++                return {
++                    url:String(url),
++                    type:String(body.type || ""),
++                    count:Number(body.count || 0),
++                    offset:Number(body.start || 0),
++                    defIds:normalizeClubRequestDefIds(body.defId)
++                };
++            };
++            const clubRequestIdentityMatchesSession = (identity, session) => {
++                if(!identity || !session) return false;
++                if(session.type !== identity.type || session.count !== identity.count || session.offset !== identity.offset) return false;
++                const expected = Array.isArray(session.defIds) ? session.defIds : [];
++                const actual = Array.isArray(identity.defIds) ? identity.defIds : [];
++                return expected.length === actual.length && expected.every((id, index) => id === actual[index]);
++            };
++            const extractClubResponsePayloads = responseText => {
++                if(typeof responseText !== "string" || !responseText) return new Map();
++                const root = JSON.parse(responseText);
++                const payloads = new Map();
++                const visit = (value, depth = 0) => {
++                    if(value === null || value === undefined || depth > 12) return;
++                    if(Array.isArray(value)){
++                        value.forEach(item => visit(item, depth + 1));
++                        return;
++                    }
++                    if(typeof value !== "object") return;
++                    const itemId = Number(value.id || 0);
++                    const resourceId = Number(value.resourceId ?? value.definitionId ?? 0);
++                    const itemType = value.itemType ?? value.type;
++                    const isPlayerPayload = itemId > 0
++                        && resourceId > 0
++                        && (itemType == ItemType.PLAYER || String(itemType).toLowerCase() === "player");
++                    if(isPlayerPayload){
++                        payloads.set(itemId, value);
++                        return;
++                    }
++                    Object.keys(value).forEach(key => visit(value[key], depth + 1));
++                };
++                visit(root);
++                return payloads;
++            };
++            const sanitizeClubResponseUrl = value => {
++                try{
++                    const url = new URL(String(value || ""), location.origin);
++                    return `${url.origin}${url.pathname}`;
++                }catch(error){
++                    return String(value || "").split("?")[0].slice(0, 240);
++                }
++            };
++            const CLUB_DELTA_HEADER_NAMES = [
++                "etag", "last-modified", "x-revision", "x-resource-version", "x-sync-token",
++                "x-last-sync", "x-update-sequence", "x-server-time", "date"
++            ];
++            const readClubDeltaHeaders = xhr => {
++                const headers = {};
++                CLUB_DELTA_HEADER_NAMES.forEach(name => {
++                    try{
++                        const value = xhr?.getResponseHeader?.(name);
++                        if(value) headers[name] = String(value).slice(0, 240);
++                    }catch(error){}
++                });
++                return headers;
++            };
++            const readClubResponseHeaderNames = xhr => {
++                try{
++                    return String(xhr?.getAllResponseHeaders?.() || "")
++                        .split(/\r?\n/)
++                        .map(line => line.split(":", 1)[0].trim().toLowerCase())
++                        .filter(Boolean)
++                        .slice(0, 80);
++                }catch(error){
++                    return [];
++                }
++            };
++            const summarizeClubResponseMetadata = responseText => {
++                if(typeof responseText !== "string" || !responseText) return {};
++                const root = JSON.parse(responseText);
++                const source = root && typeof root === "object" && !Array.isArray(root)
++                    ? (root.data && typeof root.data === "object" && !Array.isArray(root.data) ? root.data : root)
++                    : null;
++                if(!source) return {};
++                const scalarKeys = [];
++                const deltaCandidates = {};
++                Object.keys(source).slice(0, 80).forEach(key => {
++                    if(key === "items" || key === "players" || key === "entries") return;
++                    const value = source[key];
++                    if(value === null || value === undefined || typeof value === "string" || typeof value === "number" || typeof value === "boolean"){
++                        scalarKeys.push(key);
++                        if(/etag|revision|version|cursor|sync|modified|updated|timestamp|sequence/i.test(key)){
++                            deltaCandidates[key] = typeof value === "string" ? value.slice(0, 240) : value;
++                        }
++                    }
++                });
++                return { scalarKeys, deltaCandidates };
++            };
++            const registerClubPayloadCaptureSession = (criteria, payloads, label) => {
++                info.base.clubPayloadCaptureSessions ??= [];
++                const session = {
++                    id:`${Date.now()}-${Math.random().toString(36).slice(2)}`,
++                    label,
++                    type:String(criteria?.type || ""),
++                    count:Number(criteria?.count || 0),
++                    offset:Number(criteria?.offset || 0),
++                    defIds:normalizeClubRequestDefIds(criteria?.defId),
++                    payloads,
++                    claimed:false,
++                    completed:false
++                };
++                info.base.clubPayloadCaptureSessions.push(session);
++                return session;
++            };
++            const unregisterClubPayloadCaptureSession = session => {
++                if(!Array.isArray(info.base.clubPayloadCaptureSessions)) return;
++                const index = info.base.clubPayloadCaptureSessions.indexOf(session);
++                if(index >= 0) info.base.clubPayloadCaptureSessions.splice(index, 1);
++            };
++            if(!info.base.clubPayloadCaptureContextHooked){
++                const open = XMLHttpRequest.prototype.open;
++                const send = XMLHttpRequest.prototype.send;
++                const requestState = new WeakMap();
++                XMLHttpRequest.prototype.open = function(method, url, ...args) {
++                    requestState.set(this, {
++                        method:String(method || "GET"),
++                        url:String(url || "")
++                    });
++                    return open.call(this, method, url, ...args);
++                };
++                XMLHttpRequest.prototype.send = function(body) {
++                    let parsedBody = null;
++                    try{
++                        parsedBody = typeof body === "string" && body ? JSON.parse(body) : body;
++                    }catch(error){}
++                    const state = requestState.get(this) || {};
++                    const identity = getClubRequestIdentity(parsedBody, state.url);
++                    const sessions = Array.isArray(info.base.clubPayloadCaptureSessions)
++                        ? info.base.clubPayloadCaptureSessions
++                        : [];
++                    const session = identity
++                        ? sessions.find(candidate => !candidate.claimed
++                            && clubRequestIdentityMatchesSession(identity, candidate))
++                        : null;
++                    if(session){
++                        session.claimed = true;
++                        session.identity = identity;
++                        session.capturePhase = "xhr-send-bound";
++                        session.sentAt = performance.now();
++                        this.addEventListener("loadend", () => {
++                            session.capturePhase = "xhr-loadend-response";
++                            session.responseStatus = Number(this.status || 0);
++                            session.responseUrl = sanitizeClubResponseUrl(this.responseURL || session.identity?.url || state.url);
++                            session.responseHeaderNames = readClubResponseHeaderNames(this);
++                            session.deltaHeaders = readClubDeltaHeaders(this);
++                            const responseReceivedAt = performance.now();
++                            session.networkElapsedMs = Number((responseReceivedAt - Number(session.sentAt || responseReceivedAt)).toFixed(3));
++                            try{
++                                try{ session.responseLength = String(this.responseText || "").length; }catch(error){}
++                                const parseStartedAt = performance.now();
++                                session.responseMetadata = summarizeClubResponseMetadata(this.responseText);
++                                const responsePayloads = extractClubResponsePayloads(this.responseText);
++                                session.responseParseMs = Number((performance.now() - parseStartedAt).toFixed(3));
++                                if(responsePayloads.size > session.count){
++                                    throw new Error(`response contained ${responsePayloads.size} player payloads for a ${session.count}-player request`);
++                                }
++                                responsePayloads.forEach((payload, id) => session.payloads.set(id, payload));
++                                session.responsePayloadCount = responsePayloads.size;
++                                session.responseParsed = true;
++                            }catch(error){
++                                session.responseParseError = error.message;
++                            }finally{
++                                session.completed = true;
++                                session.captured = session.payloads.size;
++                            }
++                        }, { once:true });
++                    }
++                    return send.apply(this, arguments);
++                };
++                info.base.clubPayloadCaptureContextHook = "XMLHttpRequest.open/send-bound loadend response parser";
++                info.base.clubPayloadCaptureContextHooked = true;
++            }
++            const getPersonaCacheScope = () => {
++                const user = services.User.getUser();
++                const selectedPersona = user?.selectedPersona ?? user?.getSelectedPersona?.();
++                return selectedPersona?.id ?? selectedPersona?.personaId ?? selectedPersona ?? "default";
++            };
++            const getClubEntityCacheBaseKey = () => `fsu_club_entities_v${CLUB_ENTITY_CACHE_SCHEMA}_${info.base.year}_${getPersonaCacheScope()}`;
++            const getClubEntityCacheManifest = () => readJsonValue(`${getClubEntityCacheBaseKey()}_manifest`, {});
++            const readJsonValue = (key, fallback = null) => {
++                try{
++                    const value = GM_getValue(key, null);
++                    if(value === null || value === undefined || value === "") return fallback;
++                    return typeof value === "string" ? JSON.parse(value) : value;
++                }catch(error){
++                    return fallback;
++                }
++            };
++            const getInventoryPileItems = pile => {
++                try{
++                    let values = [];
++                    if(pile === ItemPile.STORAGE && typeof repositories.Item?.getStorageItems === "function"){
++                        values = repositories.Item.getStorageItems();
++                    }else if(pile === ItemPile.TRANSFER && typeof repositories.Item?.getTransferItems === "function"){
++                        values = repositories.Item.getTransferItems();
++                    }
++                    return Array.from(values || []).filter(Boolean);
++                }catch(error){
++                    return [];
++                }
++            };
++            const getInventoryPileSignal = (pile, label, authoritative = false) => {
++                const items = getInventoryPileItems(pile);
++                let dirty = null;
++                try{
++                    if(typeof repositories.Item?.isDirty === "function") dirty = Boolean(repositories.Item.isDirty(pile));
++                }catch(error){}
++                const entries = items.map(item => {
++                    const id = Number(item?.id || 0);
++                    const definitionId = Number(item?.definitionId || 0);
++                    const rating = Number(item?.rating ?? item?._rating ?? 0);
++                    const rarity = Number(item?.rareflag ?? item?._rareflag ?? 0);
++                    const state = String(item?.state || "");
++                    return `${id}:${definitionId}:${rating}:${rarity}:${state}`;
++                }).sort();
++                return {
++                    label,
++                    count:items.length,
++                    fingerprint:entries.join("|"),
++                    dirty,
++                    reliable:authoritative || dirty === false
++                };
++            };
++            const getFastCacheSignals = (expectedCount, options = {}) => ({
++                schema:CLUB_FAST_CACHE_SIGNAL_SCHEMA,
++                clubCount:Number(expectedCount || 0),
++                storage:getInventoryPileSignal(ItemPile.STORAGE, "storage", options.storageAuthoritative === true),
++                transfer:getInventoryPileSignal(ItemPile.TRANSFER, "transfer", options.transferAuthoritative === true),
++                capturedAt:Date.now()
++            });
++            const inventoryPileSignalsMatch = (previous, current) => Boolean(previous && current)
++                && Number(previous.count) === Number(current.count)
++                && String(previous.fingerprint || "") === String(current.fingerprint || "");
++            const evaluateFastCacheSignals = (manifest, currentSignals, options = {}) => {
++                const reasons = [];
++                const previousSignals = manifest?.inventorySignals;
++                const lastFullValidationAt = Number(manifest?.lastFullValidationAt || 0);
++                const ageMs = lastFullValidationAt > 0 ? Date.now() - lastFullValidationAt : Number.POSITIVE_INFINITY;
++                if(options.reason !== "startup") reasons.push(`load reason is ${options.reason || "unknown"}`);
++                if(options.forceReset === true) reasons.push("manual reset was requested");
++                if(Boolean(GM_getValue(getClubFastCacheDirtyKey(), false))) reasons.push("a local inventory mutation marked the cache dirty");
++                if(!lastFullValidationAt) reasons.push("cache has no full-validation timestamp");
++                else if(ageMs > CLUB_FULL_VALIDATION_MAX_AGE) reasons.push(`full validation is ${Math.round(ageMs / 60000)} minute(s) old`);
++                if(Number(manifest?.expectedCount || 0) !== Number(currentSignals?.clubCount || 0)){
++                    reasons.push(`Club count changed ${manifest?.expectedCount ?? "?"} -> ${currentSignals?.clubCount ?? "?"}`);
++                }
++                if(Number(previousSignals?.schema || 0) !== CLUB_FAST_CACHE_SIGNAL_SCHEMA){
++                    reasons.push("cache has no compatible inventory signals");
++                }else{
++                    ["storage", "transfer"].forEach(name => {
++                        const current = currentSignals?.[name];
++                        if(current?.reliable !== true) reasons.push(`${name} signal is not authoritative`);
++                        else if(!inventoryPileSignalsMatch(previousSignals?.[name], current)) reasons.push(`${name} inventory changed`);
++                    });
++                }
++                return {
++                    usable:reasons.length === 0,
++                    reasons,
++                    ageMs,
++                    lastFullValidationAt
++                };
++            };
++            events.markClubCacheDirty = reason => {
++                const previousMarker = Number(GM_getValue(getClubFastCacheDirtyKey(), 0)) || 0;
++                const nextMarker = Math.max(Date.now(), previousMarker + 1);
++                GM_setValue(getClubFastCacheDirtyKey(), nextMarker);
++                if(info.base.clubCache) info.base.clubCache.localDirty = true;
++                if(!previousMarker) console.log(`[FSU club cache] marked dirty${reason ? `: ${reason}` : ""}`);
++            };
++            events.installClubCacheMutationTracking = () => {
++                if(info.base.clubCacheMutationTrackingInstalled) return;
++                const wrap = (target, method, label) => {
++                    const original = target?.[method];
++                    if(typeof original !== "function" || original.__fsuClubCacheMutationWrapped) return;
++                    const wrapped = function(...args){
++                        events.markClubCacheDirty(label);
++                        return original.apply(this, args);
++                    };
++                    try{ Object.defineProperty(wrapped, "__fsuClubCacheMutationWrapped", { value:true }); }catch(error){}
++                    try{
++                        target[method] = wrapped;
++                    }catch(error){
++                        console.warn(`[FSU club cache] could not observe ${label}`, error);
++                    }
++                };
++                wrap(services.Item, "move", "item move started");
++                wrap(services.Item, "list", "transfer listing started");
++                wrap(services.Item, "bid", "market acquisition started");
++                info.base.clubCacheMutationTrackingInstalled = true;
++            };
++            events.installClubCacheMutationTracking();
++            const toPlainValue = value => {
++                if(value === undefined || value === null) return value;
++                try{ return JSON.parse(JSON.stringify(value)); }catch(error){ return undefined; }
++            };
++            const positionToName = position => {
++                if(typeof position === "string" && position) return position;
++                try{
++                    if(typeof PlayerPosition !== "undefined" && PlayerPosition[position]){
++                        return PlayerPosition[position];
++                    }
++                }catch(error){}
++                return null;
++            };
++            const traitId = trait => Number(trait?.traitId ?? trait?.id ?? trait);
++            const serializeClubPlayer = item => {
++                if(!isClubPlayer(item)) return null;
++                if(item?.upgrades || (item?.cosmetics && (!Array.isArray(item.cosmetics) || item.cosmetics.length))) return null;
++                try{
++                    if(typeof item?.isLimitedUse === "function" && item.isLimitedUse()) return null;
++                }catch(error){}
++
++                const id = Number(item?.id || 0);
++                const resourceId = Number(item?.definitionId || 0);
++                const preferredPosition = positionToName(item?.preferredPosition);
++                if(!Number.isFinite(id) || id <= 0 || !Number.isFinite(resourceId) || resourceId <= 0 || !preferredPosition){
++                    return null;
++                }
++
++                const possiblePositions = (Array.isArray(item?.possiblePositions) ? item.possiblePositions : [])
++                    .map(positionToName)
++                    .filter(Boolean);
++                if(!possiblePositions.length) possiblePositions.push(preferredPosition);
++
++                let playStyles = [];
++                try{
++                    playStyles = Array.isArray(item?._playStyles) && item._playStyles.length
++                        ? item._playStyles
++                        : (typeof item?.getPlayStyles === "function" ? item.getPlayStyles() : []);
++                }catch(error){}
++                const baseTraits = [];
++                const iconTraitsPriorities = {};
++                playStyles.forEach((trait, index) => {
++                    const id = traitId(trait);
++                    if(!Number.isFinite(id) || id < 0) return;
++                    if(trait?.isIcon === true) iconTraitsPriorities[id] = index;
++                    else baseTraits.push(id);
++                });
++
++                const skillMoves = Number(
++                    typeof item?.getSkillMoves === "function" ? item.getSkillMoves() : item?._skillMoves
++                );
++                const weakFoot = Number(
++                    typeof item?.getWeakFoot === "function" ? item.getWeakFoot() : item?._weakFoot
++                );
++                const baseRating = Number(
++                    typeof item?.getBaseRating === "function" ? item.getBaseRating() : item?._rating ?? item?.rating
++                );
++                const baseRarity = Number(
++                    typeof item?.getBaseRarity === "function" ? item.getBaseRarity() : item?._rareflag ?? item?.rareflag
++                );
++
++                return {
++                    id,
++                    timestamp:Number(item?.timestamp || 0),
++                    formation:item?.formation || "f3412",
++                    untradeable:item?.tradable === false || Number(item?.untradeableCount || 0) > 0,
++                    cardassetid:Number(item?._assetId ?? item?.assetId ?? 0),
++                    rating:Number.isFinite(baseRating) ? baseRating : 0,
++                    itemType:item?.type || "player",
++                    resourceId,
++                    owners:Number(item?.owners || 0),
++                    discardValue:Number(item?.discardValue || 0),
++                    itemState:item?.state || "free",
++                    cardsubtypeid:Number(item?.subtype || 0),
++                    lastSalePrice:Number(item?.lastSalePrice || 0),
++                    injuryType:item?.injuryType || "none",
++                    injuryGames:Number(item?.injuryGames || 0),
++                    preferredPosition,
++                    contract:Number(item?.contract || 0),
++                    teamid:Number(item?.teamId || 0),
++                    rareflag:Number.isFinite(baseRarity) ? baseRarity : 0,
++                    playStyle:Number(item?.playStyle || 0),
++                    leagueId:Number(item?.leagueId || 0),
++                    loyaltyBonus:Number(item?.loyaltyBonus || 0),
++                    pile:Number(item?.utasPile ?? item?.pile ?? 0),
++                    nation:Number(item?.nationId || 0),
++                    marketDataMinPrice:Number(item?._itemPriceLimits?.minimum || 0),
++                    marketDataMaxPrice:Number(item?._itemPriceLimits?.maximum || 0),
++                    guidAssetId:item?.guidAssetId || "",
++                    groups:toPlainValue(item?.groups) || [],
++                    attributeArray:toPlainValue(item?.attributes) || [],
++                    statsArray:toPlainValue(item?._stats ?? item?.stats) || [],
++                    lifetimeStatsArray:toPlainValue(item?._lifetimeStats ?? item?.lifetimeStats) || [],
++                    skillmoves:Number.isFinite(skillMoves) ? Math.max(0, skillMoves - 1) : 0,
++                    weakfootabilitytypecode:Number.isFinite(weakFoot) ? weakFoot : 0,
++                    preferredfoot:Number(item?._preferredFoot ?? item?.preferredFoot ?? 1),
++                    possiblePositions,
++                    gender:Number(item?.gender || 1),
++                    baseTraits,
++                    iconTraitsPriorities,
++                    tradableBeforeAcademy:item?.tradableBeforeAcademy === true,
++                    rankId:Number(item?.rankId ?? -1),
++                    startTime:Number(item?.startTime || 0),
++                    endTime:Number(item?.endTime || 0),
++                    marketAverage:Number(item?._marketAverage ?? item?.marketAverage ?? 0),
++                    undiscardable:item?.discardable === false,
++                    dream:item?.concept === true
++                };
++            };
++            const cacheEntityMatchesPayload = (entity, payload) => {
++                if(!entity || !isClubPlayer(entity)) return false;
++                const checks = [
++                    [Number(entity.id), Number(payload.id)],
++                    [Number(entity.definitionId), Number(payload.resourceId)],
++                    [Number(typeof entity.getBaseRating === "function" ? entity.getBaseRating() : entity._rating), Number(payload.rating)],
++                    [Number(typeof entity.getBaseRarity === "function" ? entity.getBaseRarity() : entity._rareflag), Number(payload.rareflag)],
++                    [Number(entity.teamId || 0), Number(payload.teamId ?? payload.teamid ?? 0)],
++                    [Number(entity.leagueId || 0), Number(payload.leagueId || 0)],
++                    [Number(entity.nationId || 0), Number(payload.nation || 0)]
++                ];
++                return checks.every(([actual, expected]) => actual === expected)
++                    && Boolean(entity.tradable) === !Boolean(payload.untradeable);
++            };
++            const restoreClubEntityCache = async expectedCount => {
++                const startedAt = Date.now();
++                const baseKey = getClubEntityCacheBaseKey();
++                const manifest = readJsonValue(`${baseKey}_manifest`);
++                const invalidManifest = !manifest
++                    || Number(manifest.schema) !== CLUB_ENTITY_CACHE_SCHEMA
++                    || !Number.isInteger(Number(manifest.slot))
++                    || !Number.isInteger(Number(manifest.chunkCount))
++                    || Number(manifest.chunkCount) < 1
++                    || Date.now() - Number(manifest.savedAt || 0) > CLUB_ENTITY_CACHE_MAX_AGE;
++                if(invalidManifest){
++                    info.base.clubCache = { status:"miss", restored:0, verified:0, expected:expectedCount };
++                    return { restored:false, ids:new Set(), count:0 };
++                }
++                if(Number(manifest.expectedCount) !== expectedCount){
++                    console.log(`[FSU club cache] cached Club count ${manifest.expectedCount} differs from current stats ${expectedCount}; restoring provisionally and reconciling in the background`);
++                }
++
++                const payloads = [];
++                for(let index = 0; index < Number(manifest.chunkCount); index++){
++                    const chunk = readJsonValue(`${baseKey}_slot${manifest.slot}_${index}`);
++                    if(!Array.isArray(chunk)){
++                        console.warn(`[FSU club cache] ignored incomplete cache; missing chunk ${index + 1}/${manifest.chunkCount}`);
++                        info.base.clubCache = { status:"invalid", restored:0, verified:0, expected:expectedCount };
++                        return { restored:false, ids:new Set(), count:0 };
++                    }
++                    payloads.push(...chunk);
++                }
++                if(payloads.length !== Number(manifest.serializedCount || payloads.length)){
++                    console.warn(`[FSU club cache] ignored cache with a payload count mismatch: expected ${manifest.serializedCount}, got ${payloads.length}`);
++                    info.base.clubCache = { status:"invalid", restored:0, verified:0, expected:expectedCount };
++                    return { restored:false, ids:new Set(), count:0 };
++                }
++
++                const factory = new UTItemEntityFactory();
++                const existingIds = clubRepoPlayerIds();
++                const entities = [];
++                let invalidCount = 0;
++                for(let index = 0; index < payloads.length; index++){
++                    const payload = payloads[index];
++                    try{
++                        const factoryPayload = JSON.parse(JSON.stringify(payload));
++                        const entity = factory.createItem(factoryPayload);
++                        if(!cacheEntityMatchesPayload(entity, factoryPayload)){
++                            invalidCount++;
++                        }else if(!existingIds.has(Number(entity.id))){
++                            entities.push(entity);
++                        }
++                    }catch(error){
++                        invalidCount++;
++                    }
++                    if(index > 0 && index % 250 === 0) await delay(0);
++                }
++                if(payloads.length && invalidCount / payloads.length > 0.1){
++                    console.warn(`[FSU club cache] ignored incompatible cache; ${invalidCount}/${payloads.length} payload(s) could not be reconstructed`);
++                    info.base.clubCache = { status:"invalid", restored:0, verified:0, expected:expectedCount };
++                    return { restored:false, ids:new Set(), count:0 };
++                }
++
++                const ids = new Set();
++                entities.forEach(entity => {
++                    services.Club.clubDao.clubRepo.add(entity);
++                    ids.add(Number(entity.id));
++                });
++                info.base.clubCache = {
++                    status:"validating",
++                    restored:ids.size,
++                    verified:0,
++                    expected:expectedCount,
++                    savedAt:Number(manifest.savedAt || 0),
++                    lastFullValidationAt:Number(manifest.lastFullValidationAt || 0),
++                    provisionalIds:ids
++                };
++                console.log(`[FSU club cache] restored ${ids.size} provisional Club player(s) from ${payloads.length} cached payload(s) in ${Date.now() - startedAt}ms; network validation remains required`);
++                return { restored:ids.size > 0, ids, count:ids.size, manifest };
++            };
++            const saveClubEntityCache = async(expectedCount, snapshot, verifiedPayloads = null, cacheMetadata = {}) => {
++                const startedAt = Date.now();
++                const baseKey = getClubEntityCacheBaseKey();
++                const previousManifest = readJsonValue(`${baseKey}_manifest`, {});
++                const capturedById = verifiedPayloads instanceof Map ? verifiedPayloads : new Map();
++                if(!capturedById.size
++                    && previousManifest?.fingerprint === snapshot?.fingerprint
++                    && Number(previousManifest?.expectedCount) === expectedCount
++                    && Number(previousManifest?.serializedCount) > 0
++                    && Number(previousManifest?.lastFullValidationAt || 0) > 0
++                    && Number(previousManifest?.inventorySignals?.schema || 0) === CLUB_FAST_CACHE_SIGNAL_SCHEMA
++                    && Date.now() - Number(previousManifest?.savedAt || 0) < 12 * 60 * 60 * 1000){
++                    console.log(`[FSU club cache] verified Club fingerprint is unchanged; reusing the existing ${previousManifest.serializedCount}-player cache`);
++                    return;
++                }
++                const slot = Number(previousManifest?.slot) === 0 ? 1 : 0;
++                const payloads = [];
++                let skipped = 0;
++                const players = clubRepoPlayerItems();
++                for(let index = 0; index < players.length; index++){
++                    const playerId = Number(players[index]?.id || 0);
++                    const payload = capturedById.get(playerId) || serializeClubPlayer(players[index]);
++                    if(payload) payloads.push(payload);
++                    else skipped++;
++                    if(index > 0 && index % 250 === 0) await delay(0);
++                }
++                if(!payloads.length) throw new Error("no serializable Club player payloads");
++
++                const chunkCount = Math.ceil(payloads.length / CLUB_ENTITY_CACHE_CHUNK_SIZE);
++                let storedBytes = 0;
++                for(let index = 0; index < chunkCount; index++){
++                    const chunk = payloads.slice(index * CLUB_ENTITY_CACHE_CHUNK_SIZE, (index + 1) * CLUB_ENTITY_CACHE_CHUNK_SIZE);
++                    const encoded = JSON.stringify(chunk);
++                    storedBytes += encoded.length;
++                    GM_setValue(`${baseKey}_slot${slot}_${index}`, encoded);
++                    await delay(0);
++                }
++                const manifest = {
++                    schema:CLUB_ENTITY_CACHE_SCHEMA,
++                    slot,
++                    chunkCount,
++                    expectedCount,
++                    serializedCount:payloads.length,
++                    skippedCount:skipped,
++                    fingerprint:snapshot?.fingerprint || "",
++                    lastFullValidationAt:Number(cacheMetadata.lastFullValidationAt || Date.now()),
++                    inventorySignals:cacheMetadata.inventorySignals || null,
++                    savedAt:Date.now()
++                };
++                GM_setValue(`${baseKey}_manifest`, JSON.stringify(manifest));
++                console.log(`[FSU club cache] saved ${payloads.length}/${players.length} Club player payload(s) in ${chunkCount} chunk(s), ${(storedBytes / 1024 / 1024).toFixed(2)} MiB, ${Date.now() - startedAt}ms; exact:${capturedById.size}, fallback:${Math.max(0, payloads.length - capturedById.size)}, skipped:${skipped}`);
++            };
++            const getClubSnapshot = () => {
++                const items = clubRepoPlayerItems();
++                let itemXor = 0, definitionXor = 0, itemSum = 0, definitionSum = 0, detailXor = 0, detailSum = 0;
++                items.forEach(item => {
++                    const itemId = Number(item?.id || 0) >>> 0;
++                    const definitionId = Number(item?.definitionId || 0) >>> 0;
++                    const rating = Number(item?.rating || item?._rating || 0) & 0xff;
++                    const rarity = Number(item?.rareflag || item?._rareflag || 0) & 0x3ff;
++                    const teamId = Number(item?.teamId || 0) & 0xffff;
++                    const leagueId = Number(item?.leagueId || 0) & 0xffff;
++                    const nationId = Number(item?.nationId || 0) & 0x3ff;
++                    const flags = (item?.tradable ? 1 : 0)
++                        | (item?.upgrades ? 2 : 0)
++                        | (item?.cosmetics && (!Array.isArray(item.cosmetics) || item.cosmetics.length) ? 4 : 0);
++                    const detail = (
++                        Math.imul(rating + 1, 0x45d9f3b)
++                        ^ Math.imul(rarity + 1, 0x119de1f3)
++                        ^ Math.imul(teamId + 1, 0x27d4eb2d)
++                        ^ Math.imul(leagueId + 1, 0x165667b1)
++                        ^ Math.imul(nationId + 1, 0x9e3779b1)
++                        ^ flags
++                    ) >>> 0;
++                    itemXor = (itemXor ^ itemId) >>> 0;
++                    definitionXor = (definitionXor ^ definitionId) >>> 0;
++                    itemSum = (itemSum + itemId) >>> 0;
++                    definitionSum = (definitionSum + definitionId) >>> 0;
++                    detailXor = (detailXor ^ detail) >>> 0;
++                    detailSum = (detailSum + detail) >>> 0;
++                });
++                return {
++                    count: items.length,
++                    fingerprint: [items.length, itemXor, definitionXor, itemSum, definitionSum, detailXor, detailSum]
++                        .map(value => (value >>> 0).toString(16))
++                        .join(":"),
++                    updatedAt: Date.now()
++                };
++            };
++            const getSnapshotKey = () => {
++                return `fsu_club_snapshot_${info.base.year}_${getPersonaCacheScope()}`;
++            };
++            const logSnapshotDifference = (previous, currentSnapshot) => {
++                if(!previous){
++                    console.log(`[FSU club load] saved first Club snapshot ${currentSnapshot.fingerprint}`);
++                }else if(previous.fingerprint === currentSnapshot.fingerprint){
++                    console.log(`[FSU club load] Club snapshot unchanged since ${new Date(previous.updatedAt || 0).toISOString()}`);
++                }else{
++                    console.log(`[FSU club load] Club snapshot changed: count ${previous.count ?? "?"} -> ${currentSnapshot.count}, fingerprint ${previous.fingerprint || "?"} -> ${currentSnapshot.fingerprint}`);
++                }
++            };
++            const refreshHomeTaskBadges = () => {
++                const controller = cntlr.current();
++                if(controller?.className !== "UTHomeHubViewController") return;
++                if(info.task.obj.html && controller.getView()._objectivesTile.__tileContent.querySelector(".ut-tile-view--subtitle")){
++                    if(!controller.getView()._objectivesTile.__root.querySelector(".fsu-task")){
++                        controller.getView()._objectivesTile.__tileContent.before(
++                            events.createDF(`<div class="fsu-task">${info.task.obj.html}</div>`)
++                        );
++                    }
++                    const objCountElement = controller.getView()._objectivesTile.getRootElement().querySelector(".fsu-obj-count");
++                    if(objCountElement && info.task.obj.stat.catReward){
++                        objCountElement.textContent = info.task.obj.stat.catReward;
++                        objCountElement.style.display = "block";
++                    }
++                }
++                if(info.task.sbc.html && !controller.getView()._sbcTile.__root.querySelector(".fsu-task") && controller.getView()._sbcTile.__tileContent.querySelector(".ut-tile-content-graphic-info")){
++                    controller.getView()._sbcTile.__tileContent.before(
++                        events.createDF(`<div class="fsu-task">${info.task.sbc.html}</div>`)
++                    );
++                }
++            };
++            const markClubRepositoryDirty = label => {
++                if(typeof repositories.Item?.setDirty !== "function"){
++                    throw new Error(`${label} cannot bypass the Club item cache because Item repository setDirty() is unavailable`);
++                }
++                let before = null;
++                try{
++                    if(typeof repositories.Item?.isDirty === "function"){
++                        before = Boolean(repositories.Item.isDirty(ItemPile.CLUB));
++                    }
++                }catch(error){}
++                repositories.Item.setDirty(ItemPile.CLUB);
++                let after = null;
++                try{
++                    if(typeof repositories.Item?.isDirty === "function"){
++                        after = Boolean(repositories.Item.isDirty(ItemPile.CLUB));
++                    }
++                }catch(error){}
++                if(!info.base.clubRepositoryDirtyModeLogged){
++                    info.base.clubRepositoryDirtyModeLogged = true;
++                    console.log(`[FSU club load] Club item-pile dirty state marked through repositories.Item.setDirty(ItemPile.CLUB); before:${before ?? "unknown"}, after:${after ?? "unknown"}; forced requests separately bypass hasAllItems() for the active criteria only`);
++                }
++                return { before, after };
++            };
++            const requestFreshClubItems = (criteria, label) => {
++                const clubDao = services.Club?.clubDao;
++                const clubRepo = clubDao?.clubRepo;
++                if(typeof clubDao?.getClubItems !== "function"){
++                    throw new Error(`${label} cannot force a Club network request because clubDao.getClubItems() is unavailable`);
++                }
++                if(typeof clubRepo?.hasAllItems !== "function"){
++                    throw new Error(`${label} cannot force a Club network request because clubRepo.hasAllItems() is unavailable`);
++                }
++                const ownDescriptor = Object.getOwnPropertyDescriptor(clubRepo, "hasAllItems");
++                const inherited = clubRepo.hasAllItems;
++                let bypassCount = 0;
++                Object.defineProperty(clubRepo, "hasAllItems", {
++                    configurable:true,
++                    enumerable:ownDescriptor?.enumerable === true,
++                    writable:true,
++                    value:function(candidate){
++                        if(candidate === criteria){
++                            bypassCount++;
++                            return false;
++                        }
++                        return inherited.call(this, candidate);
++                    }
++                });
++                try{
++                    const observable = clubDao.getClubItems(criteria);
++                    if(bypassCount !== 1){
++                        throw new Error(`${label} expected one hasAllItems() bypass, observed ${bypassCount}`);
++                    }
++                    appendClubDiagnostic("log", "has-all-items-bypass", {
++                        label,
++                        count:Number(criteria?.count || 0),
++                        offset:Number(criteria?.offset || 0),
++                        bypassCount
++                    });
++                    if(!info.base.clubHasAllItemsBypassLogged){
++                        info.base.clubHasAllItemsBypassLogged = true;
++                        console.log("[FSU club load] forced Club network mode enabled: clubRepo.hasAllItems() is bypassed only for the active FSU criteria object and restored immediately after request creation");
++                    }
++                    return observable;
++                }finally{
++                    if(ownDescriptor) Object.defineProperty(clubRepo, "hasAllItems", ownDescriptor);
++                    else delete clubRepo.hasAllItems;
++                }
++            };
++            const requestClubNetwork = async(criteria, label, maxAttempts = 3, options = {}) => {
++                const requestStartedAt = Date.now();
++                const deepDiagnostics = clubDeepDiagnosticsEnabled;
++                let lastError = null;
++                for(let attempt = 1; attempt <= maxAttempts; attempt++){
++                    const broadRequestPayloads = new Map();
++                    const ownedRequestPayloads = new Map();
++                    let requestPayloads = broadRequestPayloads;
++                    let criteriaCacheable = null;
++                    let dirtyState = { before:null, after:null };
++                    let runtimeTrace = null;
++                    let captureSession = null;
++                    try{
++                        try{ criteriaCacheable = criteria?.cacheable; }catch(error){}
++                        runtimeTrace = beginClubRequestTrace(criteria, label, attempt);
++                        if(options.forceNetwork === true) dirtyState = markClubRepositoryDirty(label);
++                        captureSession = registerClubPayloadCaptureSession(criteria, ownedRequestPayloads, label);
++                        if(deepDiagnostics) info.base.clubPayloadCapture = broadRequestPayloads;
++                        const result = await observeOnce(
++                            () => options.forceNetwork === true
++                                ? requestFreshClubItems(criteria, label)
++                                : services.Club.search(criteria),
++                            `${label} attempt ${attempt}`,
++                            45000
++                        );
++                        let payloadCaptureMode = "none";
++                        if(ownedRequestPayloads.size > 0){
++                            requestPayloads = ownedRequestPayloads;
++                            payloadCaptureMode = "scoped";
++                        }else{
++                            throw new Error(`${label} captured no scoped Club payloads; XHR claimed:${captureSession?.claimed === true}, completed:${captureSession?.completed === true}, status:${captureSession?.responseStatus ?? "unknown"}, parseError:${captureSession?.responseParseError || "none"}, broadCaptured:${broadRequestPayloads.size}`);
++                        }
++                        const pageSummary = summarizeClubPageResult(result, requestPayloads);
++                        pageSummary.payloadCapture = {
++                            selected:payloadCaptureMode,
++                            scopedCaptured:ownedRequestPayloads.size,
++                            broadCaptured:broadRequestPayloads.size,
++                            sessionClaimed:captureSession?.claimed === true,
++                            sessionCompleted:captureSession?.completed === true,
++                            capturePhase:captureSession?.capturePhase || null,
++                            responseLength:Number(captureSession?.responseLength || 0),
++                            networkElapsedMs:Number(captureSession?.networkElapsedMs || 0),
++                            responseParseMs:Number(captureSession?.responseParseMs || 0),
++                            responseUrl:captureSession?.responseUrl || null,
++                            responseHeaderNames:captureSession?.responseHeaderNames || [],
++                            deltaHeaders:captureSession?.deltaHeaders || {},
++                            responseMetadata:captureSession?.responseMetadata || {},
++                            hook:info.base.clubPayloadCaptureContextHook || null
++                        };
++                        runtimeTrace.stop("resolved", pageSummary);
++                        runtimeTrace = null;
++                        if(!JSUtils.isObject(result.response)){
++                            throw new Error(`${label} returned invalid data`);
++                        }
++                        const localProcessingStartedAt = performance.now();
++                        let dirtyAfterRequest = null;
++                        try{
++                            if(typeof repositories.Item?.isDirty === "function"){
++                                dirtyAfterRequest = Boolean(repositories.Item.isDirty(ItemPile.CLUB));
++                            }
++                        }catch(error){}
++                        const repositoryViewItems = Array.isArray(result.response?.items)
++                            ? result.response.items.length
++                            : 0;
++                        const factory = new UTItemEntityFactory();
++                        const authoritativeItems = [];
++                        const responsePayloads = new Map();
++                        requestPayloads.forEach((payload, id) => {
++                            try{
++                                const item = factory.createItem(JSON.parse(JSON.stringify(payload)));
++                                if(!cacheEntityMatchesPayload(item, payload) || Number(item.id) !== id) return;
++                                services.Club.clubDao.clubRepo.update(item);
++                                authoritativeItems.push(item);
++                                responsePayloads.set(id, payload);
++                            }catch(error){}
++                        });
++                        const responseIds = Array.from(responsePayloads.keys());
++                        return {
++                            attempt,
++                            elapsed:Date.now() - requestStartedAt,
++                            responseItems:authoritativeItems.length,
++                            repositoryViewItems,
++                            capturedPayloads:requestPayloads.size,
++                            responseIds,
++                            responsePayloads,
++                            items:authoritativeItems,
++                            criteriaCacheable,
++                            dirtyBefore:dirtyState.before,
++                            dirtyAfterMark:dirtyState.after,
++                            dirtyAfterRequest,
++                            timing:{
++                                networkMs:Number(captureSession?.networkElapsedMs || 0),
++                                responseParseMs:Number(captureSession?.responseParseMs || 0),
++                                localProcessingMs:Number((performance.now() - localProcessingStartedAt).toFixed(3)),
++                                totalMs:Date.now() - requestStartedAt
++                            }
++                        };
++                    }catch(error){
++                        if(runtimeTrace){
++                            runtimeTrace.stop("error", {
++                                error:summarizeDiagnosticValue(error),
++                                capturedPayloads:requestPayloads.size,
++                                broadCaptured:broadRequestPayloads.size,
++                                scopedCaptured:ownedRequestPayloads.size,
++                                sessionClaimed:captureSession?.claimed === true,
++                                capturePhase:captureSession?.capturePhase || null
++                            });
++                            runtimeTrace = null;
++                        }
++                        lastError = error;
++                        if(attempt >= maxAttempts) break;
++                        const retryDelay = 500 * Math.pow(2, attempt - 1);
++                        console.warn(`[FSU club load] ${label} attempt ${attempt} failed; retrying in ${retryDelay}ms`, error);
++                        await delay(retryDelay);
++                    }finally{
++                        if(runtimeTrace) runtimeTrace.stop("finally", { capturedPayloads:requestPayloads.size });
++                        unregisterClubPayloadCaptureSession(captureSession);
++                        if(deepDiagnostics && info.base.clubPayloadCapture === broadRequestPayloads) info.base.clubPayloadCapture = null;
++                    }
++                }
++                throw lastError || new Error(`${label} failed`);
++            };
++            const logClubSearchCacheMode = (criteria, label, forceNetwork = false) => {
++                if(info.base.clubSearchCacheModeLogged) return;
++                info.base.clubSearchCacheModeLogged = true;
++                let descriptor = null;
++                try{
++                    let target = criteria;
++                    while(target && !descriptor){
++                        descriptor = Object.getOwnPropertyDescriptor(target, "cacheable");
++                        target = Object.getPrototypeOf(target);
++                    }
++                }catch(error){}
++                let current = "unavailable";
++                try{ current = String(criteria?.cacheable); }catch(error){}
++                console.log(`[FSU club load] ${label} search criteria cacheable:${current}, writable:${descriptor?.writable === true || typeof descriptor?.set === "function"}; network mode:${forceNetwork ? "forced by an active-criteria hasAllItems() bypass" : "natural because the Club repository is incomplete"}`);
++            };
++            info.base.clubValidationQueue ??= [];
++            const validateClubPlayerRefs = async(refs, label = "Club player validation") => {
++                const requested = (Array.isArray(refs) ? refs : [])
++                    .map(ref => ({
++                        id:Number(ref?.id || 0),
++                        definitionId:Number(ref?.definitionId || 0)
++                    }))
++                    .filter(ref => ref.id > 0 && ref.definitionId > 0)
++                    .filter((ref, index, list) => list.findIndex(item => item.id === ref.id) === index);
++                if(!requested.length) return { ok:true, items:[], missing:[], elapsed:0 };
++
++                const criteria = new UTSearchCriteriaDTO();
++                criteria.type = "player";
++                criteria.defId = _.uniq(requested.map(ref => ref.definitionId));
++                criteria.count = Math.max(20, criteria.defId.length + 1);
++                criteria.offset = 0;
++                logClubSearchCacheMode(criteria, label, true);
++                const result = await requestClubNetwork(criteria, label, 2, { forceNetwork:true });
++                const networkConfirmed = result.capturedPayloads > 0
++                    || (result.dirtyAfterMark === true && result.dirtyAfterRequest === false);
++                if(!networkConfirmed){
++                    throw new Error(`${label} could not confirm a fresh Club response; cached players were preserved`);
++                }
++                const responseById = new Map(
++                    result.items
++                        .filter(isClubPlayer)
++                        .map(item => [Number(item?.id || 0), item])
++                        .filter(([id]) => id > 0)
++                );
++                const items = [];
++                const missing = [];
++                requested.forEach(ref => {
++                    const item = responseById.get(ref.id);
++                    if(!item || Number(item?.definitionId || 0) !== ref.definitionId){
++                        missing.push(ref);
++                        const stale = clubRepoItems()?.get?.(ref.id);
++                        if(stale){
++                            try{ services.Club.clubDao.clubRepo.remove(stale); }catch(error){ clubRepoItems()?.remove?.(ref.id); }
++                        }
++                        return;
++                    }
++                    services.Club.clubDao.clubRepo.update(item);
++                    items.push(item);
++                });
++                console.log(`[FSU club cache] targeted validation ${items.length}/${requested.length} Club player(s) in ${result.elapsed}ms; missing:${missing.length}`);
++                return {
++                    ok:missing.length === 0,
++                    items,
++                    missing,
++                    elapsed:result.elapsed,
++                    responsePayloads:result.responsePayloads,
++                    timing:result.timing
++                };
++            };
++            const drainClubValidationQueue = async() => {
++                if(info.base.clubValidationDraining) return info.base.clubValidationDraining;
++                const runQueue = async() => {
++                    while(info.base.clubValidationQueue.length){
++                        const task = info.base.clubValidationQueue.shift();
++                        try{
++                            task.resolve(await validateClubPlayerRefs(task.refs, task.label));
++                        }catch(error){
++                            task.reject(error);
++                        }
++                    }
++                };
++                info.base.clubValidationDraining = runQueue().finally(() => {
++                    info.base.clubValidationDraining = null;
++                });
++                return info.base.clubValidationDraining;
++            };
++            const rejectClubValidationQueue = error => {
++                while(info.base.clubValidationQueue.length){
++                    const task = info.base.clubValidationQueue.shift();
++                    task.reject(error);
++                }
++            };
++            events.validateClubPlayers = (refs, options = {}) => {
++                const status = info.base.clubCache?.status || (info.base.state ? "ready" : "loading");
++                if(status === "ready" || status === "finalizing"){
++                    const requested = Array.isArray(refs) ? refs : [];
++                    const items = [];
++                    const missing = [];
++                    requested.forEach(ref => {
++                        const item = clubRepoItems()?.get?.(Number(ref?.id || 0));
++                        if(item && Number(item?.definitionId || 0) === Number(ref?.definitionId || 0)) items.push(item);
++                        else missing.push(ref);
++                    });
++                    return Promise.resolve({ ok:missing.length === 0, items, missing, elapsed:0, cached:true });
++                }
++                if(!["validating", "trusted-provisional", "validation-failed"].includes(status)){
++                    return Promise.resolve({ ok:false, items:[], missing:refs || [], elapsed:0, reason:`Club cache state is ${status}` });
++                }
++                const promise = new Promise((resolve, reject) => {
++                    info.base.clubValidationQueue.push({
++                        refs:Array.isArray(refs) ? refs : [],
++                        label:options.label || "Club player validation",
++                        resolve,
++                        reject
++                    });
++                });
++                if(info.base.reloadPlayersPromise){
++                    info.base.reloadPlayersPromise.finally(() => drainClubValidationQueue());
++                }else{
++                    drainClubValidationQueue();
++                }
++                return promise;
++            };
++            events.getClubCacheState = () => ({
++                status:info.base.clubCache?.status || (info.base.state ? "ready" : "loading"),
++                restored:Number(info.base.clubCache?.restored || 0),
++                verified:Number(info.base.clubCache?.verified || 0),
++                expected:Number(info.base.clubCache?.expected || 0),
++                lastFullValidationAt:Number(info.base.clubCache?.lastFullValidationAt || 0),
++                fastCache:info.base.clubCache?.status === "trusted-provisional"
++            });
+ 
+-                            await services.Item.searchStorageItems(new UTSearchCriteriaDTO()).observe(current, function(e, t) {
+-                                e.unobserve(current);
+-                                if(t.success && t.response && !JSUtils.isString(t.response)){
+-                                    //console.log(t.response.items)
++            const run = async() => {
++                info.base.state = false;
++                try{
++                    const dirtyMarkerAtStart = Number(GM_getValue(getClubFastCacheDirtyKey(), 0)) || 0;
++                    console.log(`[FSU club load] starting ${reason} load; mode:${showLoader ? "foreground" : "background"}`);
++                    let previousSnapshot = null;
++                    const snapshotKey = getSnapshotKey();
++                    try{ previousSnapshot = JSON.parse(GM_getValue(snapshotKey, "null")); }catch(error){}
++
++                    if(forceReset){
++                        clubRepoItems()?.reset?.();
++                        info.base.clubCache = null;
++                        console.log("[FSU club load] Club repository reset for manual refresh");
++                    }
++
++                    const storagePromise = services.Configuration.checkFeatureEnabled(UTServerSettingsRepository.KEY.STORAGE_PILE_ENABLED)
++                        ? observeOnce(
++                            () => services.Item.searchStorageItems(new UTSearchCriteriaDTO()),
++                            "SBC Storage load",
++                            30000
++                        ).then(result => ({ result }), error => ({ error }))
++                        : Promise.resolve({ result:null });
++                    const readExpectedPlayerCount = async label => {
++                        const statsResult = await observeOnce(() => services.Club.getStats(), label);
++                        const playerStat = statsResult?.response?.stats?.find(stat => stat.type === "players");
++                        if(!playerStat || !Number.isFinite(Number(playerStat.count))){
++                            throw new Error(`${label} returned no player count`);
++                        }
++                        const scalarPaths = [];
++                        const deltaCandidates = {};
++                        const collectScalars = (value, prefix = "", depth = 0) => {
++                            if(!value || typeof value !== "object" || depth > 3) return;
++                            Object.keys(value).slice(0, 80).forEach(key => {
++                                const field = value[key];
++                                const path = prefix ? `${prefix}.${key}` : key;
++                                if(field === null || field === undefined || typeof field === "string" || typeof field === "number" || typeof field === "boolean"){
++                                    scalarPaths.push(path);
++                                    if(/etag|revision|version|cursor|sync|modified|updated|timestamp|sequence/i.test(path)){
++                                        deltaCandidates[path] = typeof field === "string" ? field.slice(0, 240) : field;
++                                    }
++                                }else if(!Array.isArray(field)){
++                                    collectScalars(field, path, depth + 1);
+                                 }
+                             });
+-                            events.hideLoader();
+-                            info.base.state = true;
+-                            events.notice("notice.ldatasuccess",0);
+-                            if(cntlr.current().className == "UTHomeHubViewController" && info.task.obj.html && cntlr.current().getView()._objectivesTile.__tileContent.querySelector(".ut-tile-view--subtitle")){
++                        };
++                        collectScalars(statsResult?.response);
++                        appendClubDiagnostic("log", "club-stats-metadata", {
++                            label,
++                            responseKeys:Object.keys(statsResult?.response || {}).slice(0, 80),
++                            stats:(statsResult?.response?.stats || []).map(stat => ({
++                                type:stat?.type,
++                                count:Number(stat?.count || 0)
++                            })),
++                            scalarPaths,
++                            deltaCandidates
++                        });
++                        console.log(`[FSU club delta] ${label} metadata candidates:${Object.keys(deltaCandidates).length ? JSON.stringify(deltaCandidates) : "none"}`);
++                        return Number(playerStat.count);
++                    };
++                    let expectedCount = await readExpectedPlayerCount("Club.getStats");
++                    let repositoryCount = clubRepoPlayerCount();
++                    console.log(`[FSU club load] expected players:${expectedCount}, repository players:${repositoryCount}, total items:${clubRepoTotalCount()}`);
++
++                    let restoredCache = { restored:false, ids:new Set(), count:0, manifest:getClubEntityCacheManifest() };
++                    const verifiedPlayerPayloads = new Map();
++                    const carriedProvisionalIds = info.base.clubCache?.provisionalIds instanceof Set
++                        ? new Set(info.base.clubCache.provisionalIds)
++                        : new Set();
++                    if(!forceReset && carriedProvisionalIds.size){
++                        restoredCache = {
++                            restored:true,
++                            ids:carriedProvisionalIds,
++                            count:carriedProvisionalIds.size
++                        };
++                        info.base.clubCache.status = "validating";
++                        info.base.clubCache.verified = 0;
++                        console.log(`[FSU club cache] retrying network validation for ${carriedProvisionalIds.size} provisional Club player(s)`);
++                    }else if(!forceReset && repositoryCount !== expectedCount){
++                        restoredCache = await restoreClubEntityCache(expectedCount);
++                        repositoryCount = clubRepoPlayerCount();
++                        if(restoredCache.restored){
++                            console.log(`[FSU club load] provisional repository players:${repositoryCount}, total items:${clubRepoTotalCount()}`);
++                        }
++                    }
+ 
+-                                if(!cntlr.current().getView()._objectivesTile.__root.querySelector(".fsu-task")){
+-                                    cntlr.current().getView()._objectivesTile.__tileContent.before(
+-                                        events.createDF(`<div class="fsu-task">${info.task.obj.html}</div>`)
+-                                    )
++                    const storageOutcome = await storagePromise;
++                    if(storageOutcome.error) throw storageOutcome.error;
++                    const fastSignals = getFastCacheSignals(expectedCount, {
++                        storageAuthoritative:true
++                    });
++                    const fastCacheEvaluation = evaluateFastCacheSignals(restoredCache.manifest || getClubEntityCacheManifest(), fastSignals, {
++                        reason,
++                        forceReset
++                    });
++                    const useFastCache = restoredCache.restored
++                        && repositoryCount === expectedCount
++                        && fastCacheEvaluation.usable;
++                    if(useFastCache){
++                        info.base.clubCache = {
++                            status:"trusted-provisional",
++                            restored:Number(restoredCache.count || 0),
++                            verified:0,
++                            expected:expectedCount,
++                            savedAt:Number(restoredCache.manifest?.savedAt || 0),
++                            lastFullValidationAt:fastCacheEvaluation.lastFullValidationAt,
++                            provisionalIds:clubRepoPlayerIds(),
++                            inventorySignals:fastSignals
++                        };
++                        info.base.state = false;
++                        appendClubDiagnostic("log", "fast-cache-decision", {
++                            decision:"skip-full-validation",
++                            ageMs:fastCacheEvaluation.ageMs,
++                            signals:fastSignals
++                        });
++                        await drainClubValidationQueue();
++                        events.notice("notice.ldatasuccess",0);
++                        refreshHomeTaskBadges();
++                        console.log(`[FSU club cache] fast startup accepted ${repositoryCount} cached Club player(s); Club/Storage/Transfer signals match and the last full validation is ${Math.round(fastCacheEvaluation.ageMs / 60000)} minute(s) old`);
++                        console.log("[FSU club cache] cached Club players remain provisional and will be validated against EA before SBC submission");
++                        persistClubDiagnostics("fast-cache-ready");
++                        return true;
++                    }
++                    appendClubDiagnostic("log", "fast-cache-decision", {
++                        decision:"run-full-validation",
++                        reasons:fastCacheEvaluation.reasons,
++                        ageMs:fastCacheEvaluation.ageMs,
++                        signals:fastSignals
++                    });
++                    if(restoredCache.restored){
++                        console.log(`[FSU club cache] full validation required: ${fastCacheEvaluation.reasons.join("; ") || "cache evidence is incomplete"}`);
++                    }
++
++                    const forceFullNetworkValidation = restoredCache.restored || repositoryCount === expectedCount;
++                    const requiresNetworkValidation = !useFastCache && (restoredCache.restored || repositoryCount !== expectedCount || !fastCacheEvaluation.usable);
++                    if(requiresNetworkValidation){
++                        const provisionalPlayerIds = clubRepoPlayerIds();
++                        if(showLoader){
++                            events.showLoader();
++                            loaderShown = true;
++                        }
++                        const requestPlayerWindow = async(offset, count, label, maxAttempts = 3) => {
++                            const criteria = new UTSearchCriteriaDTO();
++                            criteria.type = "player";
++                            criteria.sortBy = "ovr";
++                            criteria.sort = "desc";
++                            criteria.count = count;
++                            criteria.offset = offset;
++                            logClubSearchCacheMode(criteria, label, forceFullNetworkValidation);
++                            const result = await requestClubNetwork(criteria, label, maxAttempts, {
++                                forceNetwork:forceFullNetworkValidation
++                            });
++                            if(count > 0 && result.capturedPayloads === 0){
++                                throw new Error(`${label} returned no fresh Club player payloads`);
++                            }
++                            return result;
++                        };
++
++                        const pageSizeKey = `fsu_club_page_size_v2_${info.base.year}`;
++                        const supportedPageSizes = [200, 250, 300, 400, 500, 1000, 2000, 5000];
++                        const savedPageSize = Number(GM_getValue(pageSizeKey, 0));
++                        let pageSize = supportedPageSizes.includes(savedPageSize) ? savedPageSize : 0;
++                        let selectedProbeWindow = null;
++                        const serverPlayerIds = new Set();
++                        const validationTiming = {
++                            requests:0,
++                            networkMs:0,
++                            responseParseMs:0,
++                            localProcessingMs:0,
++                            totalMs:0
++                        };
++                        const recordValidationTiming = result => {
++                            const timing = result?.timing;
++                            if(!timing) return;
++                            validationTiming.requests++;
++                            validationTiming.networkMs += Number(timing.networkMs || 0);
++                            validationTiming.responseParseMs += Number(timing.responseParseMs || 0);
++                            validationTiming.localProcessingMs += Number(timing.localProcessingMs || 0);
++                            validationTiming.totalMs += Number(timing.totalMs || 0);
++                        };
++                        const pageSizeProbes = [{ count:250, offset:0 }];
++                        if(pageSize){
++                            console.log(`[FSU club load] using cached Club page size:${pageSize}`);
++                        }else{
++                            console.log("[FSU club load] Club.search is internally serialized; probing larger page sizes instead of queueing concurrent searches");
++                            for(const probe of pageSizeProbes){
++                                await drainClubValidationQueue();
++                                const available = expectedCount - probe.offset;
++                                if(available < probe.count) continue;
++                                try{
++                                    const probeResult = await requestPlayerWindow(
++                                        probe.offset,
++                                        probe.count,
++                                        `Club.search page-size probe count ${probe.count} offset ${probe.offset}`,
++                                        1
++                                    );
++                                    await drainClubValidationQueue();
++                                    recordValidationTiming(probeResult);
++                                    const serverPlayersBeforeProbe = serverPlayerIds.size;
++                                    probeResult.responseIds.forEach(id => serverPlayerIds.add(id));
++                                    probeResult.responsePayloads.forEach((payload, id) => verifiedPlayerPayloads.set(id, payload));
++                                    const newServerPlayers = serverPlayerIds.size - serverPlayersBeforeProbe;
++                                    console.log(`[FSU club load] page-size probe requested:${probe.count}, new server players:${newServerPlayers}, response items:${probeResult.responseItems}, repository view:${probeResult.repositoryViewItems}, captured payloads:${probeResult.capturedPayloads}, elapsed:${probeResult.elapsed}ms, network:${probeResult.timing?.networkMs || 0}ms, parse:${probeResult.timing?.responseParseMs || 0}ms, local:${probeResult.timing?.localProcessingMs || 0}ms`);
++                                    const requestedWindow = Math.min(probe.count, available);
++                                    const observedWindow = Number(probeResult.responseItems || 0);
++                                    if(observedWindow >= requestedWindow){
++                                        pageSize = probe.count;
++                                        selectedProbeWindow = `${probe.offset}:${pageSize}`;
++                                        console.log(`[FSU club load] selected supported page size:${pageSize}`);
++                                        break;
++                                    }
++                                    if(supportedPageSizes.includes(observedWindow) && observedWindow > 0){
++                                        pageSize = observedWindow;
++                                        selectedProbeWindow = `${probe.offset}:${pageSize}`;
++                                        console.log(`[FSU club load] EA truncated the ${probe.count}-player probe to ${observedWindow}; selected observed page size:${pageSize}`);
++                                        break;
++                                    }
++                                }catch(error){
++                                    console.warn(`[FSU club load] page-size probe count ${probe.count} failed; trying a smaller size`, error);
+                                 }
+-                                let objCountElement = cntlr.current().getView()._objectivesTile.getRootElement().querySelector(".fsu-obj-count");
+-                                if(objCountElement && info.task.obj.stat.catReward){
+-                                    objCountElement.textContent = info.task.obj.stat.catReward;
+-                                    objCountElement.style.display = "block";
++                            }
++                        }
++                        if(!pageSize){
++                            pageSize = 200;
++                            console.log("[FSU club load] EA capped larger requests; using page size:200");
++                        }
++
++                        const pageCount = Math.ceil(expectedCount / pageSize);
++                        for(let page = 0; page < pageCount; page++){
++                            await drainClubValidationQueue();
++                            if(loaderShown){
++                                events.changeLoadingText(["loadingclose.ldata", `${page + 1}`, `${pageCount}`]);
++                            }
++                            const offset = page * pageSize;
++                            if(selectedProbeWindow === `${offset}:${pageSize}`){
++                                console.log(`[FSU club load] page ${page + 1}/${pageCount} already loaded by the successful page-size probe`);
++                                continue;
++                            }
++                            const pageResult = await requestPlayerWindow(
++                                offset,
++                                pageSize,
++                                `Club.search page ${page + 1}/${pageCount}`
++                            );
++                            await drainClubValidationQueue();
++                            recordValidationTiming(pageResult);
++                            const serverPlayersBeforePage = serverPlayerIds.size;
++                            pageResult.responseIds.forEach(id => serverPlayerIds.add(id));
++                            pageResult.responsePayloads.forEach((payload, id) => verifiedPlayerPayloads.set(id, payload));
++                            const newServerPlayers = serverPlayerIds.size - serverPlayersBeforePage;
++                            if(info.base.clubCache?.status === "validating"){
++                                info.base.clubCache.verified = serverPlayerIds.size;
++                            }
++                            console.log(`[FSU club load] page ${page + 1}/${pageCount} offset:${offset} requested:${pageSize}, new server players:${newServerPlayers}, verified:${serverPlayerIds.size}/${expectedCount}, response items:${pageResult.responseItems}, repository view:${pageResult.repositoryViewItems}, captured payloads:${pageResult.capturedPayloads}, elapsed:${pageResult.elapsed}ms, network:${pageResult.timing?.networkMs || 0}ms, parse:${pageResult.timing?.responseParseMs || 0}ms, local:${pageResult.timing?.localProcessingMs || 0}ms, attempt:${pageResult.attempt}`);
++                            if(newServerPlayers === 0 && serverPlayerIds.size < expectedCount){
++                                console.warn(`[FSU club load] page ${page + 1}/${pageCount} observed no new server players before the expected count was reached`);
++                            }
++                        }
++
++                        const currentExpectedCount = await readExpectedPlayerCount("Club.getStats after validation");
++                        if(currentExpectedCount !== expectedCount){
++                            console.log(`[FSU club load] Club player count changed during background validation: ${expectedCount} -> ${currentExpectedCount}`);
++                            expectedCount = currentExpectedCount;
++                            if(info.base.clubCache) info.base.clubCache.expected = expectedCount;
++                        }
++
++                        if(provisionalPlayerIds.size){
++                            const unverifiedRefs = Array.from(provisionalPlayerIds)
++                                .filter(id => !serverPlayerIds.has(id))
++                                .map(id => clubRepoItems()?.get?.(id))
++                                .filter(Boolean)
++                                .map(item => ({ id:Number(item.id), definitionId:Number(item.definitionId) }))
++                                .filter(ref => ref.id > 0 && ref.definitionId > 0);
++                            const maxTargetedReconciliation = Math.max(200, Math.ceil(expectedCount * 0.05));
++                            if(unverifiedRefs.length > maxTargetedReconciliation){
++                                throw new Error(`Club background validation could not authoritatively observe ${unverifiedRefs.length} cached player(s); preserving the provisional cache instead of deleting them`);
++                            }
++                            let targetedConfirmed = 0;
++                            let targetedMissing = 0;
++                            for(let index = 0; index < unverifiedRefs.length; index += 100){
++                                const batch = unverifiedRefs.slice(index, index + 100);
++                                const validation = await validateClubPlayerRefs(
++                                    batch,
++                                    `Club cache reconciliation ${Math.floor(index / 100) + 1}/${Math.ceil(unverifiedRefs.length / 100)}`
++                                );
++                                recordValidationTiming(validation);
++                                validation.items.forEach(item => serverPlayerIds.add(Number(item.id)));
++                                validation.responsePayloads?.forEach((payload, id) => verifiedPlayerPayloads.set(id, payload));
++                                targetedConfirmed += validation.items.length;
++                                targetedMissing += validation.missing.length;
++                            }
++                            repositoryCount = clubRepoPlayerCount();
++                            console.log(`[FSU club cache] validation saw ${serverPlayerIds.size} server player(s), captured ${verifiedPlayerPayloads.size} exact payload(s), targeted reconciliation confirmed:${targetedConfirmed}, removed stale:${targetedMissing}; repository players:${repositoryCount}`);
++                        }
++
++                        repositoryCount = clubRepoPlayerCount();
++                        if(repositoryCount !== expectedCount){
++                            if(pageSize !== 200){
++                                console.warn(`[FSU club load] page size ${pageSize} left a count mismatch; retrying a complete page-size 200 scan`);
++                                pageSize = 200;
++                                const fallbackPageCount = Math.ceil(expectedCount / 200);
++                                for(let page = 0; page < fallbackPageCount && clubRepoPlayerCount() < expectedCount; page++){
++                                    await drainClubValidationQueue();
++                                    const offset = page * 200;
++                                    const fallbackResult = await requestPlayerWindow(
++                                        offset,
++                                        200,
++                                        `Club.search fallback page ${page + 1}/${fallbackPageCount}`
++                                    );
++                                    await drainClubValidationQueue();
++                                    recordValidationTiming(fallbackResult);
++                                    const serverPlayersBeforeFallback = serverPlayerIds.size;
++                                    fallbackResult.responseIds.forEach(id => serverPlayerIds.add(id));
++                                    fallbackResult.responsePayloads.forEach((payload, id) => verifiedPlayerPayloads.set(id, payload));
++                                    const newServerPlayers = serverPlayerIds.size - serverPlayersBeforeFallback;
++                                    console.log(`[FSU club load] fallback page ${page + 1}/${fallbackPageCount} new server players:${newServerPlayers}, verified:${serverPlayerIds.size}/${expectedCount}, response items:${fallbackResult.responseItems}, repository view:${fallbackResult.repositoryViewItems}, captured payloads:${fallbackResult.capturedPayloads}, elapsed:${fallbackResult.elapsed}ms, network:${fallbackResult.timing?.networkMs || 0}ms, parse:${fallbackResult.timing?.responseParseMs || 0}ms, local:${fallbackResult.timing?.localProcessingMs || 0}ms`);
+                                 }
+                             }
+-                            if(cntlr.current().className == "UTHomeHubViewController" && info.task.sbc.html && !cntlr.current().getView()._sbcTile.__root.querySelector(".fsu-task") && cntlr.current().getView()._sbcTile.__tileContent.querySelector(".ut-tile-content-graphic-info")){
+-                                cntlr.current().getView()._sbcTile.__tileContent.before(
+-                                    events.createDF(`<div class="fsu-task">${info.task.sbc.html}</div>`)
+-                                )
++                            repositoryCount = clubRepoPlayerCount();
++                            if(repositoryCount !== expectedCount){
++                                const finalExpectedCount = await readExpectedPlayerCount("Club.getStats before final count check");
++                                if(finalExpectedCount !== expectedCount){
++                                    console.log(`[FSU club load] Club player count changed before finalization: ${expectedCount} -> ${finalExpectedCount}`);
++                                    expectedCount = finalExpectedCount;
++                                    if(info.base.clubCache) info.base.clubCache.expected = expectedCount;
++                                    repositoryCount = clubRepoPlayerCount();
++                                }
++                            }
++                            if(repositoryCount !== expectedCount){
++                                throw new Error(`Club player repository count mismatch after load: expected ${expectedCount}, got ${repositoryCount}; total repository items:${clubRepoTotalCount()}`);
+                             }
+                         }
++                        GM_setValue(pageSizeKey, pageSize);
++                        console.log(`[FSU club load] saved Club page size:${pageSize}`);
++                        console.log(`[FSU club performance] requests:${validationTiming.requests}, network:${Math.round(validationTiming.networkMs)}ms, parse:${Math.round(validationTiming.responseParseMs)}ms, local:${Math.round(validationTiming.localProcessingMs)}ms, request-total:${Math.round(validationTiming.totalMs)}ms`);
++                    }else{
++                        console.log("[FSU club load] Club player repository already complete; skipped full reload");
+                     }
+-                }) : NetworkErrorManager.checkCriticalStatus(response.status) && NetworkErrorManager.handleStatus(response.status) && events.hideLoader() && events.notice("notice.ldataerror",2);
++
++                    if(info.base.clubCache) info.base.clubCache.status = "finalizing";
++                    await drainClubValidationQueue();
++                    const currentSnapshot = getClubSnapshot();
++                    const finalInventorySignals = getFastCacheSignals(expectedCount, {
++                        storageAuthoritative:true
++                    });
++                    logSnapshotDifference(previousSnapshot, currentSnapshot);
++                    GM_setValue(snapshotKey, JSON.stringify(currentSnapshot));
++                    info.base.clubCache = {
++                        status:"ready",
++                        restored:Number(restoredCache.count || 0),
++                        verified:currentSnapshot.count,
++                        expected:expectedCount,
++                        savedAt:Date.now(),
++                        lastFullValidationAt:Date.now(),
++                        inventorySignals:finalInventorySignals,
++                        provisionalIds:null
++                    };
++                    const dirtyMarkerAtFinish = Number(GM_getValue(getClubFastCacheDirtyKey(), 0)) || 0;
++                    if(dirtyMarkerAtFinish === dirtyMarkerAtStart){
++                        GM_setValue(getClubFastCacheDirtyKey(), 0);
++                    }else{
++                        console.log("[FSU club cache] kept the dirty marker because inventory changed during full validation");
++                    }
++                    info.base.state = true;
++                    events.notice("notice.ldatasuccess",0);
++                    refreshHomeTaskBadges();
++                    console.log(`[FSU club load] completed ${currentSnapshot.count} Club player(s) in ${Date.now() - startedAt}ms`);
++                    persistClubDiagnostics("load-completed");
++                    saveClubEntityCache(expectedCount, currentSnapshot, verifiedPlayerPayloads, {
++                        lastFullValidationAt:Date.now(),
++                        inventorySignals:finalInventorySignals
++                    }).catch(error => {
++                        console.warn("[FSU club cache] failed to save the verified Club cache", error);
++                        if(info.base.clubCache?.status === "ready") info.base.clubCache.saveFailed = true;
++                    });
++                    return true;
++                }catch(error){
++                    info.base.state = false;
++                    if(info.base.clubCache?.provisionalIds instanceof Set){
++                        info.base.clubCache.status = "validation-failed";
++                    }
++                    rejectClubValidationQueue(error);
++                    console.error("[FSU club load] failed", error);
++                    persistClubDiagnostics("load-failed", error);
++                    events.notice("notice.ldataerror",2);
++                    return false;
++                }finally{
++                    if(loaderShown) events.hideLoader();
++                }
++            };
++
++            info.base.reloadPlayersPromise = run().finally(() => {
++                info.base.reloadPlayersPromise = null;
+             });
++            return info.base.reloadPlayersPromise;
+         }
+         UTHomeHubView.prototype.getObjectivesTile = function() {
+             if(info.task.obj.html && !this._objectivesTile.__root.querySelector(".fsu-task") && info.set.info_obj){
+@@ -8252,6 +10323,7 @@
+         
+         //指定ID填充SBC
+         events.playerListFillSquad = (challenge,list,type) => {
++            if(!events.requireClubReady("squad fill")) return false;
+             events.showLoader();
+             let playerlist = [],substitute = Array.from(list);
+ 
+@@ -8291,6 +10363,7 @@
+         }
+         //阵容智能填充
+         events.getTemplate = async function(e,type,sId){
++            if(!events.requireClubReady("SBC template fill")) return false;
+             e.setInteractionState(0);
+             let squadPos = e.challenge.squad.getFieldPlayers().map(i => { return i.isBrick() ? null : i.getGeneralPosition()});
+             events.showLoader();
+@@ -8849,6 +10922,7 @@
+             }
+         }
+         events.getRatingPlayers = (squad,ratings) => {
++            if(!events.requireClubReady("rating squad fill")) return [];
+             const assignPlayer = (playerlist, shortlist, Exclusionlist, index, pos) => {
+                 const player = pos !== null ? _.find(shortlist, item => item.basePossiblePositions.includes(pos)) : _.head(shortlist);
+                 if (player) {
+@@ -10010,6 +12084,7 @@
+         //快速SBC
+         //24.20 新插入程序快速完成指定 SBC
+         events.fastSBC = async (id,cId) => {
++            if(!events.requireClubReady("Fast SBC")) return false;
+             let controller = events.getCurrent(),
+                 view = controller.getView(),
+                 SBCSetEntity = services.SBC.repository.getSetById(id),
+@@ -11811,6 +13886,7 @@
+         //24.23 添加拦截器来截获提交的SBC
+         const originalSubmitChallenge = UTSBCService.prototype.submitChallenge;
+         UTSBCService.prototype.submitChallenge = function(o, a, i, n) {
++            events.markClubCacheDirty("SBC submission started");
+             let r = originalSubmitChallenge.apply(this, arguments);
+             let s = this;
+             r.observe(this, function(e,t) {
+@@ -15731,4 +17807,4 @@
+         unsafeWindow._ = _;
+     }
+     main()
+-})();
+\ No newline at end of file
++})();

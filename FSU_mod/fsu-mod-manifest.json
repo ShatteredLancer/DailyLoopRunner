@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "upstreamVersion": "26.09",
+  "originFile": "【FSU】EAFC FUT WEB 增强器-26.09_origin.user.js",
+  "modifiedFile": "【FSU】EAFC FUT WEB 增强器-26.09_mod.user.js",
+  "patchFile": "FSU-26.09-club-cache-optimization.patch",
+  "patchTargetPath": "FSU.user.js",
+  "originSha256": "A2E0BEB018921CDD334D68BD4AF9BEE843F9F391A98E01E3B27D67E74D6B9634",
+  "modifiedSha256": "1A35FDD418314AD7AD654C68BE174786BBB431FFC4A2E538D92C5DA193D88656",
+  "patchSha256": "C4568A33F79BAEB1A7E899542719AE6BB694238857BF80743540BAFE3C467CAF",
+  "generator": "scripts/generate-fsu-patch.mjs"
+}
