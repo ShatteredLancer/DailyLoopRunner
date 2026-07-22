@@ -24,6 +24,7 @@ describe('main panel view template', () => {
     }
     expect(html).toContain('<button id="bronze-loop-collapse" title="Compact">L</button>');
     expect(html).toContain('id="bronze-loop-rounds" type="number" min="1" max="50" value="7"');
+    expect(html).toContain('type="checkbox"> Inventory only');
   });
 
   it('contains every advanced option and command control expected by entry bindings', () => {
@@ -44,6 +45,8 @@ describe('main panel view template', () => {
       'bronze-loop-load-json',
       'bronze-loop-built-in',
       'bronze-loop-edit',
+      'bronze-loop-edit-config',
+      'bronze-loop-apply-config',
       'bronze-loop-json',
       'bronze-loop-copy',
       'bronze-loop-clear',

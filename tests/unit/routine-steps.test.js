@@ -45,19 +45,19 @@ describe('daily routine step projection', () => {
     expect(child.priorityPiles).toEqual(['unassigned', 'storage', 'transfer', 'club']);
   });
 
-  it('lets the current routine reward option override child defaults while preserving forced rewards', () => {
+  it('uses rewardFlow for child overrides while preserving forced rewards', () => {
     const resolved = resolveRoutineStepLoopDefs(dailyLoop({
       openRewardPacks: false,
       disabledPiles: ['club'],
     }), [childLoop({
-      openRewardPacks: true,
+      rewardFlow: { open: 'always' },
       disabledPiles: ['transfer'],
     })]);
 
     expect(resolved[0]).toMatchObject({
-      openRewardPacks: false,
-      disabledPiles: ['transfer'],
-      priorityPiles: ['unassigned', 'storage', 'club'],
+      openRewardPacks: true,
+      disabledPiles: ['transfer', 'club'],
+      priorityPiles: ['unassigned', 'storage'],
     });
 
     const forced = resolveRoutineStepLoopDefs(dailyLoop({ openRewardPacks: false }), [childLoop({
@@ -66,7 +66,7 @@ describe('daily routine step projection', () => {
     expect(forced[0].openRewardPacks).toBe(true);
   });
 
-  it('projects inventory-only mode only to Daily Bronze and Silver recycle steps', () => {
+  it('projects inventory-only mode to every child strategy that supports it', () => {
     const recycle = childLoop();
     const common = childLoop({
       id: 'daily-common',
@@ -78,8 +78,8 @@ describe('daily routine step projection', () => {
       dailyRecycleInventoryOnly: true,
     }), [recycle, common]);
 
-    expect(resolved[0].dailyRecycleInventoryOnly).toBe(true);
-    expect(resolved[1]).not.toHaveProperty('dailyRecycleInventoryOnly');
+    expect(resolved[0].inventoryOnly).toBe(true);
+    expect(resolved[1].inventoryOnly).toBe(true);
   });
 
   it('applies a One-click-only Rare Pack override without mutating the standalone loop', () => {
@@ -112,7 +112,7 @@ describe('daily routine step projection', () => {
     expect(standalone).not.toHaveProperty('sourceExhaustedFallbackMaxCompletions');
   });
 
-  it('supports declarative workflow steps with a per-step limit and reward flow', () => {
+  it('keeps child business limits on the child loop and applies contextual reward flow', () => {
     const [resolved] = resolveRoutineStepLoopDefs({
       id: 'custom-workflow',
       name: 'Custom workflow',
@@ -121,14 +121,13 @@ describe('daily routine step projection', () => {
       steps: [{
         loopId: 'daily-bronze',
         name: 'Bronze with reward handling',
-        maxCompletions: 2,
         rewardFlow: {
           open: 'always',
           packIds: [105],
           packNames: ['Bronze Players Premium'],
         },
       }],
-    }, [childLoop({ rewardPackIds: [999] })]);
+    }, [childLoop({ maxCompletions: 2, rewardPackIds: [999] })]);
 
     expect(resolved).toMatchObject({
       id: 'daily-bronze',
@@ -137,6 +136,78 @@ describe('daily routine step projection', () => {
       openRewardPacks: true,
       rewardPackIds: [105],
       rewardPackNames: ['Bronze Players Premium'],
+    });
+  });
+
+  it('inherits parent recovery defaults while preserving child and step-specific policies', () => {
+    const parentDefault = resolveRoutineStepLoopDefs(dailyLoop({
+      strategy: 'workflowRoutine',
+      unassignedRecoveryPolicyIds: ['parent-policy'],
+    }), [childLoop()]);
+    expect(parentDefault[0].unassignedRecoveryPolicyIds).toEqual(['parent-policy']);
+
+    const [childSpecific] = resolveRoutineStepLoopDefs(dailyLoop({
+      strategy: 'workflowRoutine',
+      unassignedRecoveryPolicyIds: ['parent-policy'],
+      steps: [{
+        loopId: 'daily-bronze',
+        rewardFlow: { unassignedRecoveryPolicyIds: ['step-policy'] },
+      }],
+    }), [childLoop({ unassignedRecoveryPolicyIds: ['child-policy'] })]);
+    expect(childSpecific.unassignedRecoveryPolicyIds).toEqual(['step-policy']);
+  });
+
+  it('projects global Pick and Daily inventory-only settings to matching child loops', () => {
+    const pick = childLoop({
+      id: 'dynamic-pick',
+      strategy: 'playerPickSbc',
+      requirements: [{ tier: 'gold', count: 4, maxRating: 85 }],
+      sbcNames: ['Dynamic Pick'],
+      pickItemNames: ['Dynamic Pick Reward'],
+    });
+    const [recycle, resolvedPick] = resolveRoutineStepLoopDefs(dailyLoop({
+      strategy: 'workflowRoutine',
+      steps: ['daily-bronze', 'dynamic-pick'],
+      dailyRecycleInventoryOnly: true,
+      runtimePickOptions: {
+        protectHighGold: true,
+        autoSelectBelow90: false,
+        openPicksAtEnd: true,
+        highGoldThreshold: 84,
+        autoPickThreshold: 91,
+      },
+    }), [childLoop(), pick]);
+
+    expect(recycle.inventoryOnly).toBe(true);
+    expect(resolvedPick).toMatchObject({
+      protectHighGold: true,
+      autoSelectBelow90: false,
+      openPicksAtEnd: true,
+      pickHighGoldThreshold: 84,
+      autoPickRatingThreshold: 91,
+      requirements: [{ maxRating: 83 }],
+    });
+  });
+
+  it('inherits declarative parent Pick options before runtime projection', () => {
+    const pick = childLoop({
+      id: 'pick-child',
+      strategy: 'playerPickSbc',
+      requirements: [{ tier: 'gold', count: 4, maxRating: 85 }],
+      sbcNames: ['Pick Child'],
+      pickItemNames: ['Pick Reward'],
+      pickOptions: { openAtEnd: false },
+    });
+    const [resolved] = resolveRoutineStepLoopDefs(dailyLoop({
+      strategy: 'workflowRoutine',
+      steps: ['pick-child'],
+      pickOptions: { highGoldThreshold: 84, openAtEnd: true },
+    }), [pick]);
+
+    expect(resolved).toMatchObject({
+      pickHighGoldThreshold: 84,
+      openPicksAtEnd: false,
+      requirements: [{ maxRating: 83, maxRatingBeforeHighGoldProtection: 85 }],
     });
   });
 

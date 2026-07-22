@@ -33,6 +33,19 @@ export function renderMainPanelRounds(options = {}) {
     const element = query(panel, selector);
     if (element) element.style.display = display;
   }
+  if (display === 'none') return;
+  const quantity = options.quantity || {};
+  const label = query(panel, '#bronze-loop-rounds-label');
+  const input = query(panel, '#bronze-loop-rounds');
+  if (label) label.textContent = quantity.label || 'Rounds';
+  if (!input) return;
+  input.min = String(quantity.min || 1);
+  input.max = String(quantity.max || 50);
+  const quantityKey = String(options.quantityKey || '');
+  if (input.dataset?.quantityKey !== quantityKey) {
+    input.value = String(quantity.default || 1);
+    if (input.dataset) input.dataset.quantityKey = quantityKey;
+  }
 }
 
 export function renderMainPanelRecap(options = {}) {
@@ -77,6 +90,8 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-stop': state.running !== true,
     'bronze-loop-select': state.running === true || state.scanningPicks === true || state.loadingLoops === true,
     'bronze-loop-edit': state.running === true || state.scanningPicks === true || state.loadingLoops === true,
+    'bronze-loop-edit-config': busy,
+    'bronze-loop-apply-config': busy,
     'bronze-loop-refresh': busy,
     'bronze-loop-scan-picks': busy,
     'bronze-loop-load-json': busy,

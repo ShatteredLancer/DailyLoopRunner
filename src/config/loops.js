@@ -13,6 +13,7 @@ export const LOOP_DEFS = [
     rewardPackNames: CFG.silverRewardNames,
     targetDuplicate: { tier: 'bronze', playerOnly: true, allowSpecial: false },
     maxRounds: 3,
+    runtimeQuantity: { mode: 'user', target: 'validationRounds', default: 3, min: 1, max: 50, label: 'Validation runs' },
   },
   {
     id: 'daily-bronze',
@@ -25,6 +26,7 @@ export const LOOP_DEFS = [
     targetDuplicate: { tier: 'bronze', playerOnly: true, allowSpecial: false },
     dailyCompletionLimit: 7,
     maxCompletions: 7,
+    inventoryMode: 'inherit',
   },
   {
     id: 'daily-bronze-mvp',
@@ -38,6 +40,7 @@ export const LOOP_DEFS = [
     targetDuplicate: { tier: 'bronze', playerOnly: true, allowSpecial: false },
     dailyCompletionLimit: 7,
     maxCompletions: 1,
+    inventoryMode: 'inherit',
   },
   {
     id: 'daily-silver',
@@ -50,6 +53,7 @@ export const LOOP_DEFS = [
     targetDuplicate: { tier: 'silver', playerOnly: true, allowSpecial: false },
     dailyCompletionLimit: 7,
     maxCompletions: 7,
+    inventoryMode: 'inherit',
   },
   {
     id: 'daily-silver-mvp',
@@ -63,6 +67,7 @@ export const LOOP_DEFS = [
     targetDuplicate: { tier: 'silver', playerOnly: true, allowSpecial: false },
     dailyCompletionLimit: 7,
     maxCompletions: 1,
+    inventoryMode: 'inherit',
   },
   {
     id: 'daily-common',
@@ -191,6 +196,7 @@ export const LOOP_DEFS = [
     maxPacks: 100,
     maxCompletions: 1,
     useRoundsAsCompletions: true,
+    runtimeQuantity: { mode: 'user', target: 'maxCompletions', default: 3, min: 1, max: 50, label: 'SBC completions' },
     consumeAllSourcePacks: true,
     sourceExhaustedFallbackLoopId: '2x84-fodder',
   },
@@ -318,6 +324,7 @@ export const LOOP_DEFS = [
     rewardPackNames: ['2x 84+ Rare Gold Players Pack', '2 x 84+ Rare Gold Players Pack'],
     maxCompletions: 1,
     useRoundsAsCompletions: true,
+    runtimeQuantity: { mode: 'user', target: 'maxCompletions', default: 3, min: 1, max: 50, label: 'SBC completions' },
     allowMultipleCompletions: true,
     inventoryFillFirst: true,
     requirements: [
@@ -341,6 +348,7 @@ export const LOOP_DEFS = [
     rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
     maxCompletions: 1,
     useRoundsAsCompletions: true,
+    runtimeQuantity: { mode: 'user', target: 'maxCompletions', default: 3, min: 1, max: 50, label: 'SBC completions' },
     allowMultipleCompletions: true,
     maxSubmittedRating: 88,
     maxNormalGoldSubmittedRating: 99,
@@ -457,6 +465,7 @@ export const LOOP_DEFS = [
       pickItemResourceIds: [5005713],
     },
     rounds: 1,
+    runtimeQuantity: { mode: 'user', target: 'rounds', default: 1, min: 1, max: 50, label: 'Provision packs' },
     craftingUpgrades: [
       {
         name: 'FOF Glory Hunters Crafting Upgrade',

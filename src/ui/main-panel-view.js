@@ -158,8 +158,8 @@ export function mainPanelHtml(maxRounds = 3) {
           </label>
         </div>
         <div class="row">
-          <label title="Do not open Bronze or Silver player packs; submit Daily Bronze and Daily Silver SBCs from current inventory">
-            <input id="bronze-loop-daily-inventory-only" type="checkbox"> Daily Bronze/Silver: inventory only
+          <label title="Use current inventory instead of opening supply or reward packs for Loops whose strategy supports inventory-only mode">
+            <input id="bronze-loop-daily-inventory-only" type="checkbox"> Inventory only
           </label>
         </div>
         <div class="row"><label title="Show MVP and one-run validation loops in the main selector"><input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops</label></div>
@@ -187,7 +187,7 @@ export function mainPanelHtml(maxRounds = 3) {
           </label>
         </div>
         <div class="row" id="bronze-loop-rounds-row">
-          <span id="bronze-loop-rounds-label">rounds</span>
+          <span id="bronze-loop-rounds-label">Rounds</span>
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
         <div class="bronze-loop-section">Config</div>

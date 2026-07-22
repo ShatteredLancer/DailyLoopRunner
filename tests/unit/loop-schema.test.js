@@ -86,7 +86,6 @@ describe('loop configuration schema', () => {
       strategy: 'workflowRoutine',
       steps: [{
         loopId: 'bronze-child',
-        maxCompletions: 2,
         rewardFlow: { open: 'always', packNames: ['Bronze Players Premium'] },
       }],
     };
@@ -96,6 +95,15 @@ describe('loop configuration schema', () => {
       .toThrow('config.loops[1].steps[0] cannot reference itself');
     expect(() => validateLoopConfig({ loops: [child, { ...workflow, steps: ['missing'] }] }, 'config'))
       .toThrow('config.loops[1].steps[0] loop not found: missing');
+    expect(validateLoopDef({
+      ...workflow,
+      steps: [{ loopId: 'bronze-child', maxCompletions: 2, requirements: [{ count: 1 }] }],
+    })).toEqual(expect.arrayContaining([
+      'steps[0].maxCompletions belongs on the referenced child loop definition',
+      'steps[0].requirements belongs on the referenced child loop definition',
+    ]));
+    expect(validateLoopDef({ ...workflow, stepOverrides: { 'bronze-child': { maxCompletions: 2 } } }))
+      .toContain('stepOverrides is only supported by dailyRoutine compatibility flows; configure a dedicated child loop instead');
   });
 
   it('preserves recovery recipe, policy, and per-loop policy validation', () => {
@@ -174,6 +182,48 @@ describe('loop configuration schema', () => {
     })).toEqual(expect.arrayContaining([
       'setCompletionSafetyLimit must be an integer between 1 and 100',
       'exhaustSbcSet cannot be combined with useRoundsAsCompletions',
+    ]));
+  });
+
+  it('validates inheritable preferences, strategy capabilities, and runtime quantity metadata', () => {
+    const supported = {
+      id: 'common-loop',
+      name: 'Common Loop',
+      strategy: 'supplyAndCraft',
+      sbcNames: ['Common Upgrade'],
+      requirements: [{ tier: 'gold', count: 1 }],
+      inventoryMode: 'inventory-only',
+      pickOptions: { protectHighGold: false, autoPickThreshold: 91 },
+      runtimeQuantity: {
+        mode: 'user',
+        target: 'maxCompletions',
+        default: 3,
+        min: 1,
+        max: 10,
+        label: 'Attempts',
+      },
+    };
+    expect(validateLoopDef(supported)).toEqual([]);
+    expect(validateLoopDef({
+      id: 'provision',
+      name: 'Provision',
+      strategy: 'provisionPackCrafting',
+      sourcePackNames: ['Provision Pack'],
+      craftingUpgrades: [{ name: 'Upgrade', sbcNames: ['Upgrade'], requirements: [{ count: 1 }] }],
+      inventoryMode: 'inventory-only',
+    })).toContain('inventoryMode is not configurable for strategy provisionPackCrafting');
+    expect(validateLoopDef({
+      ...supported,
+      inventoryMode: 'sometimes',
+      pickOptions: { autoPickThreshold: 100, unsupported: true },
+      runtimeQuantity: { mode: 'manual', target: 'unknown', min: 5, max: 2 },
+    })).toEqual(expect.arrayContaining([
+      'pickOptions.autoPickThreshold must be a number between 1 and 99',
+      'pickOptions.unsupported is not supported',
+      'runtimeQuantity.mode must be one of: user, ea-remaining, exhaust, fixed',
+      'runtimeQuantity.target must be one of: maxCompletions, rounds, maxPacks, validationRounds',
+      'runtimeQuantity.min must not exceed runtimeQuantity.max',
+      'inventoryMode must be one of: inherit, inventory-only, normal',
     ]));
   });
 });

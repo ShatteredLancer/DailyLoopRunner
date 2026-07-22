@@ -57,7 +57,8 @@ export function hydrateMainPanelOptions(options = {}) {
   const pickOptions = options.pickOptions || {};
   const rewardAlertSettings = options.rewardAlertSettings || {};
   required(panel, '#bronze-loop-show-mvp').checked = loopOptions.showMvpLoops === true;
-  required(panel, '#bronze-loop-daily-inventory-only').checked = loopOptions.dailyRecycleInventoryOnly === true;
+  required(panel, '#bronze-loop-daily-inventory-only').checked = loopOptions.inventoryOnly === true
+    || loopOptions.dailyRecycleInventoryOnly === true;
   required(panel, '#bronze-loop-pick-protect-high-gold').checked = pickOptions.protectHighGold === true;
   required(panel, '#bronze-loop-pick-auto-below-90').checked = pickOptions.autoSelectBelow90 === true;
   required(panel, '#bronze-loop-pick-prefer-scanned').checked = pickOptions.preferScannedMetadata === true;

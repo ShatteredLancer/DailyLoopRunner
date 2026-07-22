@@ -165,6 +165,8 @@ esbuild, bundle=true, format=iife, target=chrome120
 - README 当前版本
 - 必要的 Milestone 版本记录
 
+新增或删除 Loop strategy 时，禁止只修改 schema 或只在 entry 注入 runner。`src/domain/strategies.js` 是 strategy 清单来源，必须同步贯通 `src/config/loop-schema.js`、`src/workflows/dispatch.js`、entry runner 注入、strategy dispatch 测试、架构 runner-map 测试和对应 Workflow/contract coverage。凡是 schema 接受但 dispatch 无法执行的 strategy 都属于发布阻断错误。
+
 ## 4. 架构和依赖方向
 
 期望依赖方向：
@@ -480,11 +482,44 @@ Pack open 返回 `471` 时，重试恢复必须排除刚失败的 Pack 对象，
 | `rarePackTo84Upgrade` | `runRarePackCraftLoop` | `runPackAndCraftWorkflow` |
 | `playerPickSbc` | `runPlayerPickLoop` | `runPlayerPickWorkflow` |
 | `dailyRoutine` | `runDailySequence` | `runSequenceWorkflow` |
+| `workflowRoutine` | `runWorkflowRoutine` | `runSequenceWorkflow` over referenced child Loops |
 | `fillAndVerifySbc` | `runFillAndVerifyLoop` | shared selection and submission transactions |
+| `inventoryExhaustion` | `runInventoryExhaustionLoop` | configured ordered exhaustion stages |
 
 旧 strategy 名仍用于外部配置兼容。不要新建更多兼容 strategy，优先用现有通用 Workflow 和参数表达需求。
 
-### 6.1 现象到代码定位表
+新增 strategy 的最低完整性要求：
+
+- 加入共享 `LOOP_STRATEGIES` registry。
+- Schema 能验证该 strategy 的必要字段。
+- `STRATEGY_RUNNER_KEYS` 映射到真实 runner。
+- `runConfiguredLoop()` 注入同名 runner key。
+- dispatch 测试真实调用该 runner，并覆盖正确 finalizer。
+- 架构测试验证 schema registry 与 dispatch registry 相等，且 entry 注入了每个 runner key。
+
+### 6.1 配置层级与继承
+
+配置分为全局运行设置、父 Loop、子 Loop 和 step 上下文四层：
+
+- 全局运行设置适合用户本次运行意图：Dry Run、是否打开奖励、Pick 高分保护阈值、自动 Pick 阈值、Open Picks at end 和 Inventory only。除 Dry Run 外，它们是可被父/子 Loop 显式覆盖的最低优先级默认值。
+- 父 Loop 负责组合级语义：step 顺序、组合名称、父级 `pickOptions`、父级 `inventoryMode`、奖励/recovery 默认和父级禁用 pile。
+- 子 Loop 负责真实业务：strategy、SBC/Pack identity、requirements、评分/特殊卡要求、priority piles、`runtimeQuantity`、`pickOptions`、`inventoryMode`、阶段和自身 reward/recovery 默认。
+- step 只允许 `loopId`、可选 `name` 和上下文 `rewardFlow`。不要在 step 发明跨 strategy 的通用 `maxCompletions`；Provision 的 `rounds`、有限 Pick 的 EA remaining、Inventory Exhaustion 的 stage limits 和普通重复提交的 `maxCompletions` 不是同一语义。需要不同参数时定义或修改子 Loop，再由父 Workflow 引用。
+
+配置对象先按父 Loop 默认 -> 子 Loop 配置 -> step 上下文合成，再施加适用的全局运行意图。不要用单一的“最具体层总是覆盖”规则实现所有字段。以下规则分别锁定：
+
+- FSU Lock、Only Untradeable、联赛/Evolution过滤、高分/特殊卡保护和提交前校验不能被任意层级关闭。
+- 父子 `disabledPiles` 取并集，更具体层级不能重新启用父级禁用来源。
+- recovery 默认允许 step > 子 Loop > 父 Loop，但只能引用已验证 policy，不能绕过 blocked condition。
+- 可继承偏好按 global UI -> parent Loop -> child Loop -> step context 合并；缺失表示继承，显式 `false`、`normal` 或 `never` 表示覆盖。不得用 `||` 合并布尔值，否则 child `false` 无法覆盖 parent `true`。
+- reward open 为 `forceOpenRewardPacks` > step `rewardFlow` > 子 Loop `rewardFlow` > 父 Loop/global checkbox。`forceOpenRewardPacks` 表示后续阶段的供应依赖，不能被 `never` 关闭。旧 `openRewardPacks` 字段保持兼容，不把它重新解释成新的显式 override；新覆盖必须使用 `rewardFlow.open`。
+- Dry Run 向所有子 Loop传播；不得出现父 Workflow 为 Dry Run、子 Loop实际提交的路径。
+- Pick 设置通过 `pickOptions` 逐字段继承，高分保护、阈值、自动选择和 Open Picks at end 都允许父/子 Loop覆盖全局默认。运行期生成的高分上限不得覆盖或删除 requirement 原始 `maxRating`；最终上限取业务上限与保护上限的更严格值。
+- Inventory only 使用 `inventoryMode: inherit | inventory-only | normal`。支持范围必须登记在 `LOOP_STRATEGY_CAPABILITIES`；`dailySingleCardRecycle` 和 Supply-and-Craft family 支持，Pick/Fill/Inventory Exhaustion 本身是 intrinsic，Provision/Rare Pack/Batch Open 不支持。unsupported strategy 显式配置必须 schema 报错。
+
+完整 Workflow 编辑器必须导出当前有效会话列表：静态 configured loops 应先应用 scanned metadata override，再追加纯动态 Pick。Apply 后即使 discovery cache 被清空，物化到配置中的 Pick 仍必须可见和可引用；重新扫描再按稳定 Set/Reward identity 更新或去重。
+
+### 6.2 现象到代码定位表
 
 | 现象 | 首先检查 | 关键符号 |
 | --- | --- | --- |
@@ -533,10 +568,13 @@ Pack open 返回 `471` 时，重试恢复必须排除刚失败的 Pack 对象，
 - `maxCompletions`：单次调用的完成上限；对 Daily Routine，EA 返回明确剩余次数时必须由实时值覆盖本地旧值。
 - `maxPacks`：来源包异常保护上限，不等于用户 rounds，也不应作为 Daily 业务目标展示。
 - `useRoundsAsCompletions`：仅用于明确由用户指定本次完成数的独立可重复 Loop。
+- `runtimeQuantity`：数量输入的声明式合同。`mode` 可为 `user`、`ea-remaining`、`exhaust`、`fixed`；只有 `user` 显示输入。`target` 明确投影到 `maxCompletions`、`rounds`、`maxPacks` 或 `validationRounds`，并由 Loop 自身定义 `default/min/max/label`。旧 `useRoundsAsCompletions`、Provision strategy 和 Validation `maxRounds` 只作为兼容回退。
 - `consumeAllSourcePacks`：要求有限来源工作流先处理完所有匹配来源包；它可以与独立 Loop 的 `rounds` 完成目标并存，两个终止维度不得互相替代。
 - `sourceExhaustedFallbackLoopId`、`sourceExhaustedFallbackMaxCompletions`：来源耗尽后的可配置库存兜底及其边界。
 - `exhaustSbcSet`、`setCompletionSafetyLimit`：限次 Pick 使用 EA Set 当前剩余次数执行到耗尽；元数据不可读时只使用内部安全上限，不读取 UI `rounds`。
-- `openRewardPacks`：奖励包策略。
+- `openRewardPacks`：历史奖励开包兼容字段；新的父/子覆盖使用 `rewardFlow.open` 三态。
+- `pickOptions`：可继承的 Pick 偏好，支持 `protectHighGold`、`highGoldThreshold`、`autoSelect`/`autoSelectBelow90`、`autoPickThreshold`、`openAtEnd`/`openPicksAtEnd`。
+- `inventoryMode`：可继承的库存模式，值为 `inherit`、`inventory-only` 或 `normal`；只能配置在 strategy capability 为 supported/container 的 Loop。
 - `openRewardPacksAtEnd`：`inventoryExhaustion` 等阶段式 Workflow 延迟奖励开包；阶段提交期间保持关闭，仅在全部阶段正常结束且 UI `Open reward packs` 已开启时批量打开匹配奖励。blocked/stopped 后不得执行最终开包。
 - Stage 级 `openRewardPacks` / `forceOpenRewardPacks`：仅当同一组合 Workflow 的后续 stage 必须立即消费该奖励时使用，例如库存耗尽 Loop 的 Bronze -> Silver -> Common Gold 供应链；不得把父 Loop 的最终延迟奖励名传播给 stage。
 - Loop 级 `forceOpenRewardPacks`：仅当同一流程的后续步骤必须立即消费该奖励时才可强制开包，例如 84x10 的 TOTW 前置；普通独立/兜底 2x84+ 和最终 FOF 奖励必须服从 UI `Open reward packs`。
@@ -550,8 +588,8 @@ Pack open 返回 `471` 时，重试恢复必须排除刚失败的 Pack 对象，
 
 1. `dailyRoutine` 和正式 Daily SBC 子步骤不得读取 UI `rounds`；EA 能提供 Daily 剩余次数时直接执行该剩余次数，进度暂不可用时运行到 Challenge 不可用并受内部安全上限保护。
 2. `mvp: true` 的 Daily 验证步骤可以保留明确的单次上限，这是测试入口，不代表正式 Daily 业务上限。
-3. 独立可重复 SBC/Player Pick 只有配置 `useRoundsAsCompletions: true` 时才把 UI `rounds` 投影到 `maxCompletions`。
-4. Provision 的 `rounds` 表示本次打开的来源包数；Validation 的 `rounds` 只表示测试轮数。
+3. 新 Loop 必须用 `runtimeQuantity` 声明是否显示数量输入及其目标；旧 `useRoundsAsCompletions` 仅作兼容。
+4. Provision 的 quantity target 为 `rounds`，表示本次打开的来源包数；Validation target 为 `validationRounds`，只表示测试轮数。
 5. `maxPacks` 等内部安全上限用于防止异常无限循环，达到时应安全停止并记录原因，不能在 UI/日志中描述成已完成的业务 rounds。
 6. 同时配置 `consumeAllSourcePacks` 与 `useRoundsAsCompletions` 时，必须先处理完所有来源包，再用库存补足 `rounds - 已完成数`；来源包重复卡清理允许完成数超过目标，库存兜底不得超额。Daily Routine 可通过 `stepOverrides` 关闭子步骤的 rounds 投影并配置有限兜底。
 7. 限次 Player Pick 配置 `exhaustSbcSet: true`，不得同时配置 `useRoundsAsCompletions`。运行目标是“已有同类型 pending Pick 数 + EA Set 剩余完成次数”；pending Pick 必须先处理，但不能消耗 Set 的剩余次数预算。

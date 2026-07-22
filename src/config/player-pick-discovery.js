@@ -288,6 +288,16 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     pricePlatform: normalizedText(input.pricePlatform || 'pc').toLowerCase(),
     discoveryIdentity: identity,
   };
+  if (loop.useRoundsAsCompletions) {
+    loop.runtimeQuantity = {
+      mode: 'user',
+      target: 'maxCompletions',
+      default: 3,
+      min: 1,
+      max: 50,
+      label: 'Pick completions',
+    };
+  }
   if (!reportedCompleted && boundedSet) {
     loop.exhaustSbcSet = true;
     loop.setCompletionSafetyLimit = Math.max(1, Math.min(100, Number(set.repeats) || 100));

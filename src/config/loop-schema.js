@@ -1,26 +1,20 @@
 import { isPlainObject } from '../domain/objects.js';
+import {
+  getLoopStrategyCapabilities,
+  INVENTORY_ONLY_CAPABILITIES,
+  LOOP_STRATEGIES,
+} from '../domain/strategies.js';
 import { validateRewardFlow } from './reward-flow.js';
+import {
+  INVENTORY_MODES,
+  RUNTIME_QUANTITY_MODES,
+  RUNTIME_QUANTITY_TARGETS,
+} from './runtime-options.js';
 import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
   RECOVERY_RECIPES,
   UNASSIGNED_RECOVERY_POLICIES,
 } from './recovery.js';
-
-const LOOP_STRATEGIES = Object.freeze([
-  'validationBronzeUpgrade',
-  'dailySingleCardRecycle',
-  'supplyAndCraft',
-  'inventoryMixedUpgrade',
-  'commonGoldToRareUpgrade',
-  'provisionPackCrafting',
-  'provisionPackDualCrafting',
-  'rarePackTo84Upgrade',
-  'playerPickSbc',
-  'dailyRoutine',
-  'workflowRoutine',
-  'fillAndVerifySbc',
-  'inventoryExhaustion',
-]);
 
 const INVENTORY_PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 
@@ -176,15 +170,8 @@ function normalizeRoutineStepId(step) {
   return typeof step === 'string' ? step : step?.loopId;
 }
 
-function validatePositiveInteger(value, path, errors, max = 1000) {
-  if (value === undefined) return;
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < 1 || number > max) {
-    errors.push(`${path} must be an integer between 1 and ${max}`);
-  }
-}
-
 function validateRoutineSteps(steps, path, errors) {
+  const allowedFields = new Set(['loopId', 'name', 'rewardFlow']);
   if (!Array.isArray(steps) || !steps.length) {
     errors.push(`${path} must be a non-empty array`);
     return;
@@ -205,9 +192,73 @@ function validateRoutineSteps(steps, path, errors) {
     if (step.name !== undefined && (typeof step.name !== 'string' || !step.name.trim())) {
       errors.push(`${stepPath}.name must be a non-empty string`);
     }
-    validatePositiveInteger(step.maxCompletions, `${stepPath}.maxCompletions`, errors);
+    Object.keys(step).forEach((field) => {
+      if (!allowedFields.has(field)) errors.push(`${stepPath}.${field} belongs on the referenced child loop definition`);
+    });
     validateRewardFlow(step.rewardFlow, `${stepPath}.rewardFlow`, errors);
   });
+}
+
+function validatePickOptions(value, path, errors) {
+  if (value === undefined) return;
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  const allowedFields = new Set([
+    'protectHighGold',
+    'highGoldThreshold',
+    'autoSelect',
+    'autoSelectBelow90',
+    'autoPickThreshold',
+    'openAtEnd',
+    'openPicksAtEnd',
+    'preferScannedMetadata',
+  ]);
+  Object.keys(value).forEach((field) => {
+    if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
+  });
+  ['protectHighGold', 'autoSelect', 'autoSelectBelow90', 'openAtEnd', 'openPicksAtEnd', 'preferScannedMetadata']
+    .forEach((field) => {
+      if (value[field] !== undefined && typeof value[field] !== 'boolean') {
+        errors.push(`${path}.${field} must be boolean`);
+      }
+    });
+  ['highGoldThreshold', 'autoPickThreshold'].forEach((field) => {
+    if (value[field] === undefined) return;
+    const number = Number(value[field]);
+    if (!Number.isFinite(number) || number < 1 || number > 99) {
+      errors.push(`${path}.${field} must be a number between 1 and 99`);
+    }
+  });
+}
+
+function validateRuntimeQuantity(value, path, errors) {
+  if (value === undefined) return;
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  if (value.mode !== undefined && !RUNTIME_QUANTITY_MODES.includes(value.mode)) {
+    errors.push(`${path}.mode must be one of: ${RUNTIME_QUANTITY_MODES.join(', ')}`);
+  }
+  if (value.target !== undefined && !RUNTIME_QUANTITY_TARGETS.includes(value.target)) {
+    errors.push(`${path}.target must be one of: ${RUNTIME_QUANTITY_TARGETS.join(', ')}`);
+  }
+  ['default', 'min', 'max'].forEach((field) => {
+    if (value[field] === undefined) return;
+    const number = Number(value[field]);
+    if (!Number.isInteger(number) || number < 1 || number > 1000) {
+      errors.push(`${path}.${field} must be an integer between 1 and 1000`);
+    }
+  });
+  if (Number.isFinite(Number(value.min)) && Number.isFinite(Number(value.max))
+    && Number(value.min) > Number(value.max)) {
+    errors.push(`${path}.min must not exceed ${path}.max`);
+  }
+  if (value.label !== undefined && (typeof value.label !== 'string' || !value.label.trim())) {
+    errors.push(`${path}.label must be a non-empty string`);
+  }
 }
 
 export function validateLoopDef(loopDef, label = 'loop') {
@@ -230,6 +281,26 @@ export function validateLoopDef(loopDef, label = 'loop') {
       errors.push(`${field} must be boolean`);
     }
   });
+  validatePickOptions(loopDef.pickOptions, 'pickOptions', errors);
+  validateRuntimeQuantity(loopDef.runtimeQuantity, 'runtimeQuantity', errors);
+  if (loopDef.inventoryMode !== undefined && !INVENTORY_MODES.includes(loopDef.inventoryMode)) {
+    errors.push(`inventoryMode must be one of: ${INVENTORY_MODES.join(', ')}`);
+  }
+  if (loopDef.inventoryOnly !== undefined && typeof loopDef.inventoryOnly !== 'boolean') {
+    errors.push('inventoryOnly must be boolean');
+  }
+  if (loopDef.dailyRecycleInventoryOnly !== undefined && typeof loopDef.dailyRecycleInventoryOnly !== 'boolean') {
+    errors.push('dailyRecycleInventoryOnly must be boolean');
+  }
+  const hasInventoryMode = loopDef.inventoryMode !== undefined
+    || loopDef.inventoryOnly !== undefined
+    || loopDef.dailyRecycleInventoryOnly !== undefined;
+  if (hasInventoryMode && LOOP_STRATEGIES.includes(loopDef.strategy)) {
+    const capability = getLoopStrategyCapabilities(loopDef.strategy).inventoryOnly;
+    if (![INVENTORY_ONLY_CAPABILITIES.supported, INVENTORY_ONLY_CAPABILITIES.container].includes(capability)) {
+      errors.push(`inventoryMode is not configurable for strategy ${loopDef.strategy}`);
+    }
+  }
   if (loopDef.maxSubmittedRating !== undefined) {
     const maxRating = Number(loopDef.maxSubmittedRating);
     if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
@@ -365,6 +436,9 @@ export function validateLoopDef(loopDef, label = 'loop') {
 
   if (['dailyRoutine', 'workflowRoutine'].includes(loopDef.strategy)) {
     validateRoutineSteps(loopDef.steps, 'steps', errors);
+    if (loopDef.strategy === 'workflowRoutine' && loopDef.stepOverrides !== undefined) {
+      errors.push('stepOverrides is only supported by dailyRoutine compatibility flows; configure a dedicated child loop instead');
+    }
     if (loopDef.stepOverrides !== undefined) {
       if (!isPlainObject(loopDef.stepOverrides)) {
         errors.push('stepOverrides must be an object');

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.41
+// @version      0.5.43
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -84,7 +84,8 @@
       sbcNames: CFG.bronzeUpgradeNames,
       rewardPackNames: CFG.silverRewardNames,
       targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false },
-      maxRounds: 3
+      maxRounds: 3,
+      runtimeQuantity: { mode: "user", target: "validationRounds", default: 3, min: 1, max: 50, label: "Validation runs" }
     },
     {
       id: "daily-bronze",
@@ -96,7 +97,8 @@
       rewardPackNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
       targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false },
       dailyCompletionLimit: 7,
-      maxCompletions: 7
+      maxCompletions: 7,
+      inventoryMode: "inherit"
     },
     {
       id: "daily-bronze-mvp",
@@ -109,7 +111,8 @@
       rewardPackNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"],
       targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false },
       dailyCompletionLimit: 7,
-      maxCompletions: 1
+      maxCompletions: 1,
+      inventoryMode: "inherit"
     },
     {
       id: "daily-silver",
@@ -121,7 +124,8 @@
       rewardPackNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
       targetDuplicate: { tier: "silver", playerOnly: true, allowSpecial: false },
       dailyCompletionLimit: 7,
-      maxCompletions: 7
+      maxCompletions: 7,
+      inventoryMode: "inherit"
     },
     {
       id: "daily-silver-mvp",
@@ -134,7 +138,8 @@
       rewardPackNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"],
       targetDuplicate: { tier: "silver", playerOnly: true, allowSpecial: false },
       dailyCompletionLimit: 7,
-      maxCompletions: 1
+      maxCompletions: 1,
+      inventoryMode: "inherit"
     },
     {
       id: "daily-common",
@@ -263,6 +268,7 @@
       maxPacks: 100,
       maxCompletions: 1,
       useRoundsAsCompletions: true,
+      runtimeQuantity: { mode: "user", target: "maxCompletions", default: 3, min: 1, max: 50, label: "SBC completions" },
       consumeAllSourcePacks: true,
       sourceExhaustedFallbackLoopId: "2x84-fodder"
     },
@@ -390,6 +396,7 @@
       rewardPackNames: ["2x 84+ Rare Gold Players Pack", "2 x 84+ Rare Gold Players Pack"],
       maxCompletions: 1,
       useRoundsAsCompletions: true,
+      runtimeQuantity: { mode: "user", target: "maxCompletions", default: 3, min: 1, max: 50, label: "SBC completions" },
       allowMultipleCompletions: true,
       inventoryFillFirst: true,
       requirements: [
@@ -413,6 +420,7 @@
       rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
       maxCompletions: 1,
       useRoundsAsCompletions: true,
+      runtimeQuantity: { mode: "user", target: "maxCompletions", default: 3, min: 1, max: 50, label: "SBC completions" },
       allowMultipleCompletions: true,
       maxSubmittedRating: 88,
       maxNormalGoldSubmittedRating: 99,
@@ -529,6 +537,7 @@
         pickItemResourceIds: [5005713]
       },
       rounds: 1,
+      runtimeQuantity: { mode: "user", target: "rounds", default: 1, min: 1, max: 50, label: "Provision packs" },
       craftingUpgrades: [
         {
           name: "FOF Glory Hunters Crafting Upgrade",
@@ -726,6 +735,35 @@
     };
   }
 
+  // src/domain/strategies.js
+  var INVENTORY_ONLY_CAPABILITIES = Object.freeze({
+    unsupported: "unsupported",
+    supported: "supported",
+    intrinsic: "intrinsic",
+    container: "container"
+  });
+  var LOOP_STRATEGY_CAPABILITIES = Object.freeze({
+    validationBronzeUpgrade: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.unsupported }),
+    dailySingleCardRecycle: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.supported }),
+    supplyAndCraft: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.supported }),
+    inventoryMixedUpgrade: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.supported }),
+    commonGoldToRareUpgrade: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.supported }),
+    provisionPackCrafting: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.unsupported }),
+    provisionPackDualCrafting: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.unsupported }),
+    rarePackTo84Upgrade: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.unsupported }),
+    playerPickSbc: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.intrinsic }),
+    dailyRoutine: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.container }),
+    workflowRoutine: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.container }),
+    fillAndVerifySbc: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.intrinsic }),
+    inventoryExhaustion: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.intrinsic })
+  });
+  var LOOP_STRATEGIES = Object.freeze(Object.keys(LOOP_STRATEGY_CAPABILITIES));
+  function getLoopStrategyCapabilities(strategy) {
+    return LOOP_STRATEGY_CAPABILITIES[strategy] || Object.freeze({
+      inventoryOnly: INVENTORY_ONLY_CAPABILITIES.unsupported
+    });
+  }
+
   // src/config/reward-flow.js
   var REWARD_OPEN_MODES = Object.freeze(["inherit", "always", "never"]);
   function validateNumberList(value, path, errors) {
@@ -777,9 +815,220 @@
   }
   function resolveRewardPackOpenEnabled(loopDef = {}, runtimeOpenEnabled = false) {
     const mode = loopDef.rewardOpenMode || loopDef.rewardFlow?.open || "inherit";
+    if (loopDef.forceOpenRewardPacks === true) return true;
     if (mode === "never") return false;
     if (mode === "always") return true;
-    return loopDef.forceOpenRewardPacks === true || runtimeOpenEnabled === true;
+    return runtimeOpenEnabled === true;
+  }
+
+  // src/config/runtime-options.js
+  var INVENTORY_MODES = Object.freeze(["inherit", "inventory-only", "normal"]);
+  var RUNTIME_QUANTITY_MODES = Object.freeze(["user", "ea-remaining", "exhaust", "fixed"]);
+  var RUNTIME_QUANTITY_TARGETS = Object.freeze([
+    "maxCompletions",
+    "rounds",
+    "maxPacks",
+    "validationRounds"
+  ]);
+  var PICK_OPTIONS_APPLIED = Symbol("pick-options-applied");
+  function boundedNumber(value, fallback, min, max) {
+    const parsed = Number(value);
+    return Math.max(min, Math.min(max, Number.isFinite(parsed) ? parsed : fallback));
+  }
+  function pickOptionOverrides(input = {}) {
+    if (!isPlainObject(input)) return {};
+    const nested = isPlainObject(input.pickOptions) ? input.pickOptions : {};
+    const result = {};
+    const assign = (target, ...sources) => {
+      const value = sources.find((entry) => entry !== void 0);
+      if (value !== void 0) result[target] = value;
+    };
+    assign("protectHighGold", nested.protectHighGold, input.protectHighGold);
+    assign("autoSelectBelow90", nested.autoSelectBelow90, nested.autoSelect, input.autoSelectBelow90);
+    assign("preferScannedMetadata", nested.preferScannedMetadata, input.preferScannedMetadata);
+    assign("openPicksAtEnd", nested.openPicksAtEnd, nested.openAtEnd, input.openPicksAtEnd);
+    assign("highGoldThreshold", nested.highGoldThreshold, input.pickHighGoldThreshold, input.highGoldThreshold);
+    assign("autoPickThreshold", nested.autoPickThreshold, input.autoPickRatingThreshold, input.autoPickThreshold);
+    return result;
+  }
+  function normalizePickRuntimeOptions(input = {}) {
+    const highGoldThreshold = Number(input.highGoldThreshold);
+    const autoPickThreshold = Number(input.autoPickThreshold);
+    return {
+      protectHighGold: input.protectHighGold !== false,
+      autoSelectBelow90: input.autoSelectBelow90 !== false,
+      preferScannedMetadata: input.preferScannedMetadata === true,
+      openPicksAtEnd: input.openPicksAtEnd === true,
+      highGoldThreshold: boundedNumber(highGoldThreshold > 0 ? highGoldThreshold : 82, 82, 2, 99),
+      autoPickThreshold: boundedNumber(autoPickThreshold > 0 ? autoPickThreshold : 90, 90, 1, 99)
+    };
+  }
+  function resolvePickRuntimeOptions(globalOptions = {}, ...overrides) {
+    const merged = { ...normalizePickRuntimeOptions(globalOptions) };
+    for (const override of overrides) Object.assign(merged, pickOptionOverrides(override));
+    return normalizePickRuntimeOptions(merged);
+  }
+  function requirementBusinessMaxRating(requirement = {}) {
+    const saved = Number(requirement.maxRatingBeforeHighGoldProtection);
+    if (Number.isFinite(saved)) return saved;
+    const current = Number(requirement.maxRating);
+    return requirement.highGoldProtectionMaxRating === true || !Number.isFinite(current) ? null : current;
+  }
+  function applyPickProtectionToRequirement(requirement, options) {
+    const businessMaxRating = requirementBusinessMaxRating(requirement);
+    requirement.protectHighGold = options.protectHighGold;
+    if (!options.protectHighGold) {
+      delete requirement.highGoldThreshold;
+      if (businessMaxRating === null) delete requirement.maxRating;
+      else requirement.maxRating = businessMaxRating;
+      delete requirement.highGoldProtectionMaxRating;
+      delete requirement.maxRatingBeforeHighGoldProtection;
+      return;
+    }
+    const protectionMaxRating = options.highGoldThreshold - 1;
+    requirement.highGoldThreshold = options.highGoldThreshold;
+    requirement.highGoldProtectionMaxRating = true;
+    if (businessMaxRating !== null) {
+      requirement.maxRatingBeforeHighGoldProtection = businessMaxRating;
+      requirement.maxRating = Math.min(businessMaxRating, protectionMaxRating);
+    } else {
+      delete requirement.maxRatingBeforeHighGoldProtection;
+      requirement.maxRating = protectionMaxRating;
+    }
+  }
+  function applyPickRuntimeOptions(loopDef, inheritedOptions = {}) {
+    if (loopDef.strategy !== "playerPickSbc") return loopDef;
+    const options = loopDef[PICK_OPTIONS_APPLIED] === true ? resolvePickRuntimeOptions(inheritedOptions, { pickOptions: loopDef.pickOptions }) : resolvePickRuntimeOptions(inheritedOptions, loopDef);
+    Object.defineProperty(loopDef, PICK_OPTIONS_APPLIED, {
+      configurable: true,
+      enumerable: false,
+      value: true
+    });
+    loopDef.protectHighGold = options.protectHighGold;
+    loopDef.autoSelectBelow90 = options.autoSelectBelow90;
+    loopDef.openPicksAtEnd = options.openPicksAtEnd;
+    loopDef.pickHighGoldThreshold = options.highGoldThreshold;
+    loopDef.autoPickRatingThreshold = options.autoPickThreshold;
+    const requirementGroups = [loopDef.requirements, ...loopDef.challengeRequirements || []];
+    requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
+      applyPickProtectionToRequirement(requirement, options);
+    }));
+    return loopDef;
+  }
+  function normalizeInventoryMode(value, fallback = "inherit") {
+    if (value === true) return "inventory-only";
+    if (value === false) return "normal";
+    return INVENTORY_MODES.includes(value) ? value : fallback;
+  }
+  function configuredInventoryMode(config = {}) {
+    if (!isPlainObject(config)) return "inherit";
+    if (config.inventoryMode !== void 0) return normalizeInventoryMode(config.inventoryMode);
+    if (config.inventoryOnly !== void 0) return normalizeInventoryMode(config.inventoryOnly);
+    if (config.dailyRecycleInventoryOnly !== void 0) {
+      return normalizeInventoryMode(config.dailyRecycleInventoryOnly);
+    }
+    return "inherit";
+  }
+  function resolveInventoryMode(globalMode = "normal", ...configs) {
+    let resolved = normalizeInventoryMode(globalMode, "normal");
+    if (resolved === "inherit") resolved = "normal";
+    for (const config of configs) {
+      const mode = configuredInventoryMode(config);
+      if (mode !== "inherit") resolved = mode;
+    }
+    return resolved;
+  }
+  function applyInventoryMode(loopDef, inheritedMode = "normal") {
+    const capability = getLoopStrategyCapabilities(loopDef.strategy).inventoryOnly;
+    const resolvedMode = resolveInventoryMode(inheritedMode, loopDef);
+    loopDef.runtimeInventoryMode = resolvedMode;
+    if (capability === INVENTORY_ONLY_CAPABILITIES.container) return loopDef;
+    if (capability === INVENTORY_ONLY_CAPABILITIES.unsupported) {
+      loopDef.inventoryOnlyIgnored = resolvedMode === "inventory-only";
+      return loopDef;
+    }
+    if (capability === INVENTORY_ONLY_CAPABILITIES.supported) {
+      loopDef.inventoryOnly = resolvedMode === "inventory-only";
+      if (loopDef.inventoryOnly) loopDef.openRewardPacks = false;
+    }
+    return loopDef;
+  }
+  function legacyRuntimeQuantity(loopDef = {}) {
+    if (loopDef.useRoundsAsCompletions === true) {
+      return {
+        mode: "user",
+        target: "maxCompletions",
+        default: Number(loopDef.maxCompletions || 3),
+        min: 1,
+        max: 50,
+        label: "Rounds"
+      };
+    }
+    if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") {
+      return {
+        mode: "user",
+        target: "rounds",
+        default: Number(loopDef.rounds || 3),
+        min: 1,
+        max: 50,
+        label: "Provision packs"
+      };
+    }
+    if (loopDef.strategy === "validationBronzeUpgrade") {
+      return {
+        mode: "user",
+        target: "validationRounds",
+        default: Number(loopDef.maxRounds || 3),
+        min: 1,
+        max: 50,
+        label: "Validation runs"
+      };
+    }
+    return null;
+  }
+  function resolveRuntimeQuantity(loopDef = {}) {
+    const configured = isPlainObject(loopDef.runtimeQuantity) ? loopDef.runtimeQuantity : legacyRuntimeQuantity(loopDef);
+    if (!configured) return null;
+    const mode = RUNTIME_QUANTITY_MODES.includes(configured.mode) ? configured.mode : "user";
+    const target = RUNTIME_QUANTITY_TARGETS.includes(configured.target) ? configured.target : "maxCompletions";
+    const min = Math.max(1, Math.floor(Number(configured.min) || 1));
+    const max = Math.max(min, Math.min(1e3, Math.floor(Number(configured.max) || 50)));
+    const fallback = target === "rounds" ? loopDef.rounds : target === "maxPacks" ? loopDef.maxPacks : target === "validationRounds" ? loopDef.maxRounds : loopDef.maxCompletions;
+    const defaultValue = Math.floor(boundedNumber(configured.default, Number(fallback || min), min, max));
+    return {
+      mode,
+      target,
+      default: defaultValue,
+      min,
+      max,
+      label: String(configured.label || "Rounds")
+    };
+  }
+  function loopUsesRounds(loopDef = {}) {
+    return resolveRuntimeQuantity(loopDef)?.mode === "user";
+  }
+  function applyRuntimeQuantity(loopDef, rawValue) {
+    const quantity = resolveRuntimeQuantity(loopDef);
+    if (!quantity || quantity.mode !== "user") return 1;
+    const value = Math.floor(boundedNumber(rawValue, quantity.default, quantity.min, quantity.max));
+    if (quantity.target === "validationRounds") loopDef.runtimeRounds = value;
+    else loopDef[quantity.target] = value;
+    return value;
+  }
+  function applyLoopRuntimeOptions(loopDef, options = {}) {
+    const globalPickOptions = normalizePickRuntimeOptions(options.pickOptions);
+    const resolvedPickOptions = resolvePickRuntimeOptions(globalPickOptions, loopDef);
+    const globalInventoryMode = options.inventoryMode !== void 0 ? options.inventoryMode : options.inventoryOnly !== void 0 ? options.inventoryOnly : options.dailyRecycleInventoryOnly;
+    const resolvedInventoryMode = resolveInventoryMode(globalInventoryMode === true ? "inventory-only" : globalInventoryMode === false || globalInventoryMode === void 0 ? "normal" : globalInventoryMode, loopDef);
+    loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;
+    applyRewardFlow(loopDef);
+    loopDef.openRewardPacks = resolveRewardPackOpenEnabled(loopDef, options.openRewardPacks === true);
+    loopDef.runtimePickOptions = resolvedPickOptions;
+    loopDef.runtimeInventoryMode = resolvedInventoryMode;
+    applyPickRuntimeOptions(loopDef, globalPickOptions);
+    applyInventoryMode(loopDef, resolvedInventoryMode);
+    applyRuntimeQuantity(loopDef, options.rounds);
+    return loopDef;
   }
 
   // src/config/recovery.js
@@ -906,21 +1155,6 @@
   ]);
 
   // src/config/loop-schema.js
-  var LOOP_STRATEGIES = Object.freeze([
-    "validationBronzeUpgrade",
-    "dailySingleCardRecycle",
-    "supplyAndCraft",
-    "inventoryMixedUpgrade",
-    "commonGoldToRareUpgrade",
-    "provisionPackCrafting",
-    "provisionPackDualCrafting",
-    "rarePackTo84Upgrade",
-    "playerPickSbc",
-    "dailyRoutine",
-    "workflowRoutine",
-    "fillAndVerifySbc",
-    "inventoryExhaustion"
-  ]);
   var INVENTORY_PILES = Object.freeze(["unassigned", "storage", "transfer", "club"]);
   function fail(message) {
     throw new Error(message);
@@ -1065,14 +1299,8 @@
   function normalizeRoutineStepId(step) {
     return typeof step === "string" ? step : step?.loopId;
   }
-  function validatePositiveInteger(value, path, errors, max = 1e3) {
-    if (value === void 0) return;
-    const number = Number(value);
-    if (!Number.isInteger(number) || number < 1 || number > max) {
-      errors.push(`${path} must be an integer between 1 and ${max}`);
-    }
-  }
   function validateRoutineSteps(steps, path, errors) {
+    const allowedFields = /* @__PURE__ */ new Set(["loopId", "name", "rewardFlow"]);
     if (!Array.isArray(steps) || !steps.length) {
       errors.push(`${path} must be a non-empty array`);
       return;
@@ -1093,9 +1321,69 @@
       if (step.name !== void 0 && (typeof step.name !== "string" || !step.name.trim())) {
         errors.push(`${stepPath}.name must be a non-empty string`);
       }
-      validatePositiveInteger(step.maxCompletions, `${stepPath}.maxCompletions`, errors);
+      Object.keys(step).forEach((field2) => {
+        if (!allowedFields.has(field2)) errors.push(`${stepPath}.${field2} belongs on the referenced child loop definition`);
+      });
       validateRewardFlow(step.rewardFlow, `${stepPath}.rewardFlow`, errors);
     });
+  }
+  function validatePickOptions(value, path, errors) {
+    if (value === void 0) return;
+    if (!isPlainObject(value)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    const allowedFields = /* @__PURE__ */ new Set([
+      "protectHighGold",
+      "highGoldThreshold",
+      "autoSelect",
+      "autoSelectBelow90",
+      "autoPickThreshold",
+      "openAtEnd",
+      "openPicksAtEnd",
+      "preferScannedMetadata"
+    ]);
+    Object.keys(value).forEach((field2) => {
+      if (!allowedFields.has(field2)) errors.push(`${path}.${field2} is not supported`);
+    });
+    ["protectHighGold", "autoSelect", "autoSelectBelow90", "openAtEnd", "openPicksAtEnd", "preferScannedMetadata"].forEach((field2) => {
+      if (value[field2] !== void 0 && typeof value[field2] !== "boolean") {
+        errors.push(`${path}.${field2} must be boolean`);
+      }
+    });
+    ["highGoldThreshold", "autoPickThreshold"].forEach((field2) => {
+      if (value[field2] === void 0) return;
+      const number = Number(value[field2]);
+      if (!Number.isFinite(number) || number < 1 || number > 99) {
+        errors.push(`${path}.${field2} must be a number between 1 and 99`);
+      }
+    });
+  }
+  function validateRuntimeQuantity(value, path, errors) {
+    if (value === void 0) return;
+    if (!isPlainObject(value)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (value.mode !== void 0 && !RUNTIME_QUANTITY_MODES.includes(value.mode)) {
+      errors.push(`${path}.mode must be one of: ${RUNTIME_QUANTITY_MODES.join(", ")}`);
+    }
+    if (value.target !== void 0 && !RUNTIME_QUANTITY_TARGETS.includes(value.target)) {
+      errors.push(`${path}.target must be one of: ${RUNTIME_QUANTITY_TARGETS.join(", ")}`);
+    }
+    ["default", "min", "max"].forEach((field2) => {
+      if (value[field2] === void 0) return;
+      const number = Number(value[field2]);
+      if (!Number.isInteger(number) || number < 1 || number > 1e3) {
+        errors.push(`${path}.${field2} must be an integer between 1 and 1000`);
+      }
+    });
+    if (Number.isFinite(Number(value.min)) && Number.isFinite(Number(value.max)) && Number(value.min) > Number(value.max)) {
+      errors.push(`${path}.min must not exceed ${path}.max`);
+    }
+    if (value.label !== void 0 && (typeof value.label !== "string" || !value.label.trim())) {
+      errors.push(`${path}.label must be a non-empty string`);
+    }
   }
   function validateLoopDef(loopDef, label = "loop") {
     const errors = [];
@@ -1116,6 +1404,24 @@
         errors.push(`${field2} must be boolean`);
       }
     });
+    validatePickOptions(loopDef.pickOptions, "pickOptions", errors);
+    validateRuntimeQuantity(loopDef.runtimeQuantity, "runtimeQuantity", errors);
+    if (loopDef.inventoryMode !== void 0 && !INVENTORY_MODES.includes(loopDef.inventoryMode)) {
+      errors.push(`inventoryMode must be one of: ${INVENTORY_MODES.join(", ")}`);
+    }
+    if (loopDef.inventoryOnly !== void 0 && typeof loopDef.inventoryOnly !== "boolean") {
+      errors.push("inventoryOnly must be boolean");
+    }
+    if (loopDef.dailyRecycleInventoryOnly !== void 0 && typeof loopDef.dailyRecycleInventoryOnly !== "boolean") {
+      errors.push("dailyRecycleInventoryOnly must be boolean");
+    }
+    const hasInventoryMode = loopDef.inventoryMode !== void 0 || loopDef.inventoryOnly !== void 0 || loopDef.dailyRecycleInventoryOnly !== void 0;
+    if (hasInventoryMode && LOOP_STRATEGIES.includes(loopDef.strategy)) {
+      const capability = getLoopStrategyCapabilities(loopDef.strategy).inventoryOnly;
+      if (![INVENTORY_ONLY_CAPABILITIES.supported, INVENTORY_ONLY_CAPABILITIES.container].includes(capability)) {
+        errors.push(`inventoryMode is not configurable for strategy ${loopDef.strategy}`);
+      }
+    }
     if (loopDef.maxSubmittedRating !== void 0) {
       const maxRating = Number(loopDef.maxSubmittedRating);
       if (!Number.isFinite(maxRating) || maxRating < 1 || maxRating > 99) {
@@ -1239,6 +1545,9 @@
     }
     if (["dailyRoutine", "workflowRoutine"].includes(loopDef.strategy)) {
       validateRoutineSteps(loopDef.steps, "steps", errors);
+      if (loopDef.strategy === "workflowRoutine" && loopDef.stepOverrides !== void 0) {
+        errors.push("stepOverrides is only supported by dailyRoutine compatibility flows; configure a dedicated child loop instead");
+      }
       if (loopDef.stepOverrides !== void 0) {
         if (!isPlainObject(loopDef.stepOverrides)) {
           errors.push("stepOverrides must be an object");
@@ -1579,19 +1888,26 @@
       }
       applyRewardFlow(childDef);
       if (step.name) childDef.name = step.name;
-      if (step.maxCompletions !== void 0) childDef.maxCompletions = step.maxCompletions;
       applyRewardFlow(childDef, step.rewardFlow);
-      if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
-        childDef.disabledPiles = [...loopDef.disabledPiles];
+      if (loopDef.disabledPiles?.length) {
+        childDef.disabledPiles = [.../* @__PURE__ */ new Set([
+          ...childDef.disabledPiles || [],
+          ...loopDef.disabledPiles
+        ])];
       }
-      if (childDef.rewardOpenMode) {
-        childDef.openRewardPacks = resolveRewardPackOpenEnabled(childDef, loopDef.openRewardPacks === true);
-      } else if (loopDef.openRewardPacks !== void 0) {
-        childDef.openRewardPacks = childDef.forceOpenRewardPacks === true || loopDef.openRewardPacks === true;
+      if (childDef.unassignedRecoveryPolicyIds === void 0 && loopDef.unassignedRecoveryPolicyIds !== void 0) {
+        childDef.unassignedRecoveryPolicyIds = [...loopDef.unassignedRecoveryPolicyIds];
       }
-      if (childDef.strategy === "dailySingleCardRecycle" && loopDef.dailyRecycleInventoryOnly !== void 0) {
-        childDef.dailyRecycleInventoryOnly = loopDef.dailyRecycleInventoryOnly === true;
+      childDef.openRewardPacks = resolveRewardPackOpenEnabled(
+        childDef,
+        loopDef.openRewardPacks === true
+      );
+      const parentPickOptions = isPlainObject(loopDef.runtimePickOptions) ? loopDef.runtimePickOptions : loopDef.pickOptions;
+      if (isPlainObject(parentPickOptions)) {
+        applyPickRuntimeOptions(childDef, parentPickOptions);
       }
+      const parentInventoryMode = loopDef.runtimeInventoryMode || resolveInventoryMode("normal", loopDef);
+      applyInventoryMode(childDef, parentInventoryMode);
       childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
       assertValidLoopDef(childDef, childDef.name || stepId);
       return applyDisabledPiles(childDef);
@@ -1606,77 +1922,6 @@
       configured.maxCompletions = Math.max(1, Math.floor(Number(availability.safetyLimit) || 100));
     }
     return configured;
-  }
-
-  // src/config/runtime-options.js
-  function normalizePickRuntimeOptions(input = {}) {
-    return {
-      protectHighGold: input.protectHighGold !== false,
-      autoSelectBelow90: input.autoSelectBelow90 !== false,
-      preferScannedMetadata: input.preferScannedMetadata === true,
-      openPicksAtEnd: input.openPicksAtEnd === true,
-      highGoldThreshold: Math.max(2, Math.min(99, Number(input.highGoldThreshold || 82) || 82)),
-      autoPickThreshold: Math.max(1, Math.min(99, Number(input.autoPickThreshold || 90) || 90))
-    };
-  }
-  function applyPickRuntimeOptions(loopDef, input = {}) {
-    if (loopDef.strategy !== "playerPickSbc") return loopDef;
-    const options = normalizePickRuntimeOptions(input);
-    loopDef.protectHighGold = options.protectHighGold;
-    loopDef.autoSelectBelow90 = options.autoSelectBelow90;
-    loopDef.openPicksAtEnd = options.openPicksAtEnd;
-    loopDef.pickHighGoldThreshold = options.highGoldThreshold;
-    loopDef.autoPickRatingThreshold = options.autoPickThreshold;
-    const requirementGroups = [loopDef.requirements, ...loopDef.challengeRequirements || []];
-    requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
-      const previousThreshold = Number(requirement.highGoldThreshold);
-      const hadLegacyGeneratedMaxRating = requirement.highGoldProtectionMaxRating !== true && requirement.protectHighGold === true && Number.isFinite(previousThreshold) && Number(requirement.maxRating) === previousThreshold - 1;
-      const hadGeneratedMaxRating = requirement.highGoldProtectionMaxRating === true || hadLegacyGeneratedMaxRating;
-      requirement.protectHighGold = options.protectHighGold;
-      if (options.protectHighGold) {
-        if (!hadGeneratedMaxRating) {
-          const existingMaxRating = Number(requirement.maxRating);
-          if (Number.isFinite(existingMaxRating) && existingMaxRating > 81) {
-            requirement.maxRatingBeforeHighGoldProtection = existingMaxRating;
-          }
-        }
-        requirement.highGoldProtectionMaxRating = true;
-        requirement.highGoldThreshold = options.highGoldThreshold;
-        requirement.maxRating = options.highGoldThreshold - 1;
-      } else {
-        delete requirement.highGoldThreshold;
-        if (hadGeneratedMaxRating) {
-          if (requirement.maxRatingBeforeHighGoldProtection !== void 0) {
-            requirement.maxRating = requirement.maxRatingBeforeHighGoldProtection;
-          } else {
-            delete requirement.maxRating;
-          }
-          delete requirement.highGoldProtectionMaxRating;
-          delete requirement.maxRatingBeforeHighGoldProtection;
-        } else if (Number(requirement.maxRating) <= 81) {
-          delete requirement.maxRating;
-        }
-      }
-    }));
-    return loopDef;
-  }
-  function loopUsesRounds(loopDef = {}) {
-    return loopDef.useRoundsAsCompletions === true || ["validationBronzeUpgrade", "provisionPackCrafting", "provisionPackDualCrafting"].includes(loopDef.strategy);
-  }
-  function applyLoopRuntimeOptions(loopDef, options = {}) {
-    const rounds = Math.max(1, Math.min(50, Number(options.rounds || 1) || 1));
-    loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;
-    applyRewardFlow(loopDef);
-    loopDef.openRewardPacks = resolveRewardPackOpenEnabled(loopDef, options.openRewardPacks === true);
-    applyPickRuntimeOptions(loopDef, options.pickOptions);
-    if (loopDef.strategy === "dailySingleCardRecycle" || loopDef.strategy === "dailyRoutine") {
-      loopDef.dailyRecycleInventoryOnly = options.dailyRecycleInventoryOnly === true;
-    }
-    if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") {
-      loopDef.rounds = rounds;
-    }
-    if (loopDef.useRoundsAsCompletions === true) loopDef.maxCompletions = rounds;
-    return loopDef;
   }
 
   // src/config/fsu-compat.js
@@ -2037,6 +2282,21 @@
         quantity: entry.quantityMode === "all" ? entry.available : entry.quantity
       }))
     });
+  }
+
+  // src/config/session-loops.js
+  function materializeSessionLoopDefs(options = {}) {
+    const configuredLoops = Array.isArray(options.configuredLoops) ? options.configuredLoops : [];
+    const loopOverrides = options.loopOverrides || {};
+    const discoveredLoops = Array.isArray(options.discoveredLoops) ? options.discoveredLoops : [];
+    const result = configuredLoops.map((loop) => loopOverrides[loop?.id] || loop);
+    const ids = new Set(result.map((loop) => loop?.id).filter(Boolean));
+    for (const loop of discoveredLoops) {
+      if (loop?.id && ids.has(loop.id)) continue;
+      result.push(loop);
+      if (loop?.id) ids.add(loop.id);
+    }
+    return result;
   }
 
   // src/domain/rating.js
@@ -2524,6 +2784,16 @@
       pricePlatform: normalizedText2(input.pricePlatform || "pc").toLowerCase(),
       discoveryIdentity: identity
     };
+    if (loop.useRoundsAsCompletions) {
+      loop.runtimeQuantity = {
+        mode: "user",
+        target: "maxCompletions",
+        default: 3,
+        min: 1,
+        max: 50,
+        label: "Pick completions"
+      };
+    }
     if (!reportedCompleted && boundedSet) {
       loop.exhaustSbcSet = true;
       loop.setCompletionSafetyLimit = Math.max(1, Math.min(100, Number(set.repeats) || 100));
@@ -5010,6 +5280,9 @@
   function entrySignalRef(entry = {}) {
     return entry.signalRef || entry.signal?.ref || entry.signal || null;
   }
+  function entryItemRef(entry = {}) {
+    return entry.itemRef || entry.item?.ref || entry.item || null;
+  }
   function mergeTransientUnassignedSignals(snapshot, signals = []) {
     if (!signals.length) return snapshot;
     const existing = snapshot?.piles?.unassigned || [];
@@ -5046,6 +5319,36 @@
     if (!expectedRefs.length) return true;
     const consumed = new Set((selection?.entries || []).filter((entry) => entry.pileName === "unassigned" && entrySignalRef(entry)).map((entry) => refKey(entrySignalRef(entry))));
     return expectedRefs.every((ref) => consumed.has(refKey(ref)));
+  }
+  function selectedUnassignedSignalRefs(selection) {
+    return (selection?.entries || []).filter((entry) => entry.pileName === "unassigned" && entrySignalRef(entry)).map((entry) => {
+      const signal = entrySignalRef(entry);
+      const item = entryItemRef(entry);
+      return {
+        id: Number(signal?.id || 0),
+        definitionId: Number(signal?.definitionId || 0),
+        duplicateId: Number(entry.signal?.duplicateId || signal?.duplicateId || item?.id || 0),
+        pile: "unassigned"
+      };
+    });
+  }
+  function submittedUnassignedSignalRefs(selection, submittedItemRefs = []) {
+    const submittedIds = new Set((submittedItemRefs || []).map((ref) => Number(ref?.id || ref?.ref?.id || 0)).filter(Boolean));
+    if (!submittedIds.size) return [];
+    return selectedUnassignedSignalRefs(selection).filter((ref) => submittedIds.has(Number(ref.duplicateId || 0)));
+  }
+  function evaluateUnassignedSignalCoverage(selection, availableCount, capacity) {
+    const available = Math.max(0, Number(availableCount || 0));
+    const slotCapacity = Math.max(0, Number(capacity || 0));
+    const expectedCount = Math.min(available, slotCapacity);
+    const selectedCount = selectedUnassignedSignalRefs(selection).length;
+    return {
+      availableCount: available,
+      capacity: slotCapacity,
+      expectedCount,
+      selectedCount,
+      sufficient: expectedCount === 0 || selectedCount >= expectedCount
+    };
   }
 
   // src/sbc/submit-attempt.js
@@ -7424,8 +7727,24 @@
   }
 
   // src/workflows/dispatch.js
+  var STRATEGY_RUNNER_KEYS = Object.freeze({
+    validationBronzeUpgrade: "validationBronzeUpgrade",
+    dailySingleCardRecycle: "dailySingleCardRecycle",
+    supplyAndCraft: "supplyAndCraft",
+    inventoryMixedUpgrade: "supplyAndCraft",
+    commonGoldToRareUpgrade: "supplyAndCraft",
+    provisionPackCrafting: "provisionPackCrafting",
+    provisionPackDualCrafting: "provisionPackCrafting",
+    rarePackTo84Upgrade: "rarePackTo84Upgrade",
+    playerPickSbc: "playerPickSbc",
+    dailyRoutine: "dailyRoutine",
+    workflowRoutine: "workflowRoutine",
+    fillAndVerifySbc: "fillAndVerifySbc",
+    inventoryExhaustion: "inventoryExhaustion"
+  });
   var STANDARD_FINALIZATION_STRATEGIES = /* @__PURE__ */ new Set([
     "dailyRoutine",
+    "workflowRoutine",
     "dailySingleCardRecycle",
     "supplyAndCraft",
     "inventoryMixedUpgrade",
@@ -7436,6 +7755,10 @@
     "fillAndVerifySbc",
     "inventoryExhaustion"
   ]);
+  var DISPATCHED_LOOP_STRATEGIES = Object.freeze(Object.keys(STRATEGY_RUNNER_KEYS));
+  if (LOOP_STRATEGIES.some((strategy) => !STRATEGY_RUNNER_KEYS[strategy])) {
+    throw new Error("Loop strategy registry and workflow dispatch are out of sync");
+  }
   async function dispatchConfiguredWorkflow(options = {}) {
     const {
       loopDef,
@@ -7449,31 +7772,24 @@
     const dryRun = loopDef.dryRun === true;
     log(`Loop selected: ${loopDef.name} (${strategy})`);
     if (loopDef.disabledPiles?.length) log(`Disabled piles: ${loopDef.disabledPiles.join(", ")}`);
+    if (loopDef.inventoryOnlyIgnored === true) {
+      log(`${loopDef.name}: global inventory-only mode is not supported by ${strategy}; using the Loop's normal workflow`);
+    }
     if (dryRun) log("Dry run active: no items will be moved, no packs opened, no squads saved, no SBCs submitted");
     let result;
     if (strategy === "validationBronzeUpgrade") {
       return runners.validationBronzeUpgrade(loopDef, roundNo);
     }
-    if (strategy === "dailyRoutine") {
-      result = await runners.dailyRoutine(loopDef);
-    } else if (strategy === "dailySingleCardRecycle") {
-      result = await runners.dailySingleCardRecycle(loopDef);
-    } else if (["supplyAndCraft", "inventoryMixedUpgrade", "commonGoldToRareUpgrade"].includes(strategy)) {
-      result = await runners.supplyAndCraft(loopDef);
-    } else if (strategy === "provisionPackCrafting" || strategy === "provisionPackDualCrafting") {
-      result = await runners.provisionPackCrafting(loopDef);
-    } else if (strategy === "rarePackTo84Upgrade") {
-      result = await runners.rarePackTo84Upgrade(loopDef);
-    } else if (strategy === "playerPickSbc") {
-      result = await runners.playerPickSbc(loopDef);
+    const runnerKey = STRATEGY_RUNNER_KEYS[strategy];
+    const runner = runnerKey ? runners[runnerKey] : null;
+    if (typeof runner !== "function") {
+      if (!runnerKey) throw new Error(`Unsupported loop strategy: ${strategy}`);
+      throw new Error(`Missing runner for loop strategy: ${strategy}`);
+    }
+    result = await runner(loopDef);
+    if (strategy === "playerPickSbc") {
       if (!dryRun) await afterPlayerPickRun(loopDef, result);
       return result;
-    } else if (strategy === "fillAndVerifySbc") {
-      result = await runners.fillAndVerifySbc(loopDef);
-    } else if (strategy === "inventoryExhaustion") {
-      result = await runners.inventoryExhaustion(loopDef);
-    } else {
-      throw new Error(`Unsupported loop strategy: ${strategy}`);
     }
     if (!dryRun && STANDARD_FINALIZATION_STRATEGIES.has(strategy)) {
       await afterStandardRun(loopDef, result);
@@ -7614,7 +7930,7 @@
     const pickOptions = options.pickOptions || {};
     const rewardAlertSettings = options.rewardAlertSettings || {};
     required(panel, "#bronze-loop-show-mvp").checked = loopOptions.showMvpLoops === true;
-    required(panel, "#bronze-loop-daily-inventory-only").checked = loopOptions.dailyRecycleInventoryOnly === true;
+    required(panel, "#bronze-loop-daily-inventory-only").checked = loopOptions.inventoryOnly === true || loopOptions.dailyRecycleInventoryOnly === true;
     required(panel, "#bronze-loop-pick-protect-high-gold").checked = pickOptions.protectHighGold === true;
     required(panel, "#bronze-loop-pick-auto-below-90").checked = pickOptions.autoSelectBelow90 === true;
     required(panel, "#bronze-loop-pick-prefer-scanned").checked = pickOptions.preferScannedMetadata === true;
@@ -8041,6 +8357,19 @@
       const element = query(panel, selector);
       if (element) element.style.display = display;
     }
+    if (display === "none") return;
+    const quantity = options.quantity || {};
+    const label = query(panel, "#bronze-loop-rounds-label");
+    const input = query(panel, "#bronze-loop-rounds");
+    if (label) label.textContent = quantity.label || "Rounds";
+    if (!input) return;
+    input.min = String(quantity.min || 1);
+    input.max = String(quantity.max || 50);
+    const quantityKey = String(options.quantityKey || "");
+    if (input.dataset?.quantityKey !== quantityKey) {
+      input.value = String(quantity.default || 1);
+      if (input.dataset) input.dataset.quantityKey = quantityKey;
+    }
   }
   function renderMainPanelRecap(options = {}) {
     const button2 = query(options.panel, "#bronze-loop-recap-reopen");
@@ -8079,6 +8408,8 @@
       "bronze-loop-stop": state.running !== true,
       "bronze-loop-select": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
       "bronze-loop-edit": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
+      "bronze-loop-edit-config": busy,
+      "bronze-loop-apply-config": busy,
       "bronze-loop-refresh": busy,
       "bronze-loop-scan-picks": busy,
       "bronze-loop-load-json": busy,
@@ -8261,8 +8592,8 @@
           </label>
         </div>
         <div class="row">
-          <label title="Do not open Bronze or Silver player packs; submit Daily Bronze and Daily Silver SBCs from current inventory">
-            <input id="bronze-loop-daily-inventory-only" type="checkbox"> Daily Bronze/Silver: inventory only
+          <label title="Use current inventory instead of opening supply or reward packs for Loops whose strategy supports inventory-only mode">
+            <input id="bronze-loop-daily-inventory-only" type="checkbox"> Inventory only
           </label>
         </div>
         <div class="row"><label title="Show MVP and one-run validation loops in the main selector"><input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops</label></div>
@@ -8290,7 +8621,7 @@
           </label>
         </div>
         <div class="row" id="bronze-loop-rounds-row">
-          <span id="bronze-loop-rounds-label">rounds</span>
+          <span id="bronze-loop-rounds-label">Rounds</span>
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
         <div class="bronze-loop-section">Config</div>
@@ -9553,7 +9884,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.41",
+      version: "0.5.43",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -9703,14 +10034,19 @@
     function editWorkflowConfig() {
       const editor = document.querySelector("#bronze-loop-json");
       if (!editor) return;
+      const sessionLoops = materializeSessionLoopDefs({
+        configuredLoops: getConfiguredLoopDefs(),
+        loopOverrides: state.discoveredLoopOverrides,
+        discoveredLoops: state.discoveredLoopDefs
+      });
       editor.value = JSON.stringify({
-        loops: getConfiguredLoopDefs(),
+        loops: sessionLoops,
         recoveryRecipes: getRecoveryRecipes(),
         unassignedRecoveryPolicies: getUnassignedRecoveryPolicies(),
         defaultUnassignedRecoveryPolicyIds: getDefaultUnassignedRecoveryPolicyIds()
       }, null, 2);
       editor.classList.add("show");
-      log("Editing full workflow JSON. Apply workflow JSON validates every loop and step before replacing the current session configuration.");
+      log(`Editing full workflow JSON with ${sessionLoops.length} current session Loop(s), including scanned Pick metadata. Apply workflow JSON validates every loop and step before replacing the current session configuration.`);
     }
     function applyWorkflowConfigEditor() {
       const text = document.querySelector("#bronze-loop-json")?.value || "";
@@ -9746,9 +10082,19 @@
     }
     function updateLoopControls() {
       const editorLoop = getEditorLoopDef();
+      const quantity = resolveRuntimeQuantity(editorLoop);
       renderMainPanelRounds({
         panel: document.querySelector("#bronze-loop-panel"),
-        show: loopUsesRounds(editorLoop)
+        show: loopUsesRounds(editorLoop),
+        quantity,
+        quantityKey: [
+          editorLoop.id || editorLoop.name || editorLoop.strategy || "custom",
+          quantity?.mode || "none",
+          quantity?.target || "none",
+          quantity?.default || 0,
+          quantity?.min || 0,
+          quantity?.max || 0
+        ].join(":")
       });
     }
     function updateRecapButton() {
@@ -13697,34 +14043,53 @@
       return pack || null;
     }
     async function submitConfiguredSbc(loopDef, options = {}) {
+      const selection = options.selection || null;
       const attempt = await submitSbcAttempt({
         label: loopDef.name,
         challengeProvider: async () => {
           const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
           return openSbcSet(set, { returnNullIfComplete: options.returnNullIfComplete });
         },
-        squadProvider: createFsuFillProvider({
+        squadProvider: selection ? createInventorySquadProvider({
+          selection,
+          prepareSelection: async (_context, inputSelection) => prepareInventorySelection(loopDef, inputSelection),
+          itemRef: liveItemRef
+        }) : createFsuFillProvider({
           fill: async () => fillSbcSquad(loopDef.name),
           getPlayers: async ({ challenge }) => getSquadItems(ctrl()?._squad || challenge?.squad),
           itemRef: liveItemRef
         }),
         prepareRuntimeAccess: prepareFsuRuntimeAccess,
         saveSquad: async ({ challenge, players, runtimeAccess }) => {
-          if (!runtimeAccess?.refreshedClubPlayers) return;
-          log(`${loopDef.name}: applying freshly validated Club entities before submit`);
-          await saveChallengeSquad(challenge, players, `${loopDef.name} provisional Club refresh`);
+          if (!selection && !runtimeAccess?.refreshedClubPlayers) return;
+          const reason = selection ? "inventory selection" : "provisional Club refresh";
+          if (selection) log(`${loopDef.name}: applying inventory selection before submit`);
+          else log(`${loopDef.name}: applying freshly validated Club entities before submit`);
+          await saveChallengeSquad(challenge, players, `${loopDef.name} ${reason}`);
         },
-        preSaveValidators: [({ challenge }) => {
-          const inspection = inspectSbcSquad(loopDef, ctrl()?._squad || challenge?.squad);
+        preSaveValidators: [({ challenge, players }) => {
+          const inspection = selection ? inspectSbcItems(loopDef, players, { expectedPlayerCount: expectedSbcPlayerCount(loopDef, challenge) }) : inspectSbcSquad(loopDef, ctrl()?._squad || challenge?.squad);
           logSbcSquadInspection(loopDef, inspection);
           assertSbcSquadSafe(loopDef, inspection);
           return true;
         }],
+        readSavedPlayers: selection ? async ({ challenge }) => getSquadItems(challenge?.squad || ctrl()?._squad) : void 0,
+        postSaveValidators: selection ? [({ challenge }) => {
+          const inspection = inspectSbcSquad(loopDef, challenge?.squad || ctrl()?._squad);
+          logSbcSquadInspection(loopDef, inspection);
+          assertSbcSquadSafe(loopDef, inspection);
+          return true;
+        }] : [],
         isSubmitReady: async () => !!findSubmitButton(),
         submitTransport: async ({ set }) => ({
           submitted: true,
           rewardPackId: await submitSbcAndGetAwardPackId(set)
-        })
+        }),
+        afterSubmit: selection ? async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
+          squadPlan?.selection || selection,
+          loopDef.name,
+          savedPlayers?.length ? savedPlayers : players
+        ) : void 0
       });
       if (attempt.status === "unavailable") {
         log(`${loopDef.name}: no available SBC challenge remains`);
@@ -13788,6 +14153,31 @@
       if (cleared && options.quiet !== true) log(`${label}: cleared ${cleared} consumed duplicate signal(s) after recovery`);
       if (resolved && options.quiet !== true) log(`${label}: confirmed ${resolved} duplicate signal(s) already resolved`);
       return cleared;
+    }
+    async function reconcileSubmittedDuplicateSignals(selection, label, submittedItems = []) {
+      const selectedSignalRefs = selectedUnassignedSignalRefs(selection);
+      if (!selectedSignalRefs.length) return 0;
+      const submittedIds = (submittedItems || []).map((item) => Number(item?.id || item?.ref?.id || 0)).filter(Boolean);
+      if (!submittedIds.length) {
+        log(`${label}: could not confirm submitted item IDs for ${selectedSignalRefs.length} Unassigned duplicate signal(s); preserving them for the next inventory refresh`);
+        return 0;
+      }
+      const consumedSignalRefs = submittedUnassignedSignalRefs(selection, submittedItems);
+      if (!consumedSignalRefs.length) return 0;
+      rememberConsumedDuplicateSignals(consumedSignalRefs);
+      log(`${label}: consumed ${consumedSignalRefs.length} Unassigned duplicate signal(s) by submitting their matching Club/Storage item(s)`);
+      await refreshInventoryCaches(`${label} post-submit duplicate sync`, { includePacks: false, quiet: true });
+      clearConsumedDuplicateSignals(consumedSignalRefs, label);
+      return consumedSignalRefs.length;
+    }
+    async function finalizeSubmittedInventorySelection(selection, label, players = []) {
+      const submittedPlayers = (players || []).filter((item) => Number(item?.id || 0));
+      if (!submittedPlayers.length) {
+        log(`${label}: submitted squad item IDs are unavailable; preserving inventory and Unassigned duplicate state for refresh`);
+        return;
+      }
+      markSbcItemsConsumed(submittedPlayers, label);
+      await reconcileSubmittedDuplicateSignals(selection, label, submittedPlayers);
     }
     async function trySubmitUnassignedRecoveryRecipe({ policy, recipe: recipe2, triggerRefs }) {
       const label = `Unassigned ${policy.id} -> ${recipe2.name}`;
@@ -13859,7 +14249,6 @@
       try {
         attempt = await submitInventorySbcAttempt(recipe2, selection, {
           label,
-          markConsumed: true,
           handleReward: false,
           opened
         });
@@ -13872,8 +14261,6 @@
         log(`${label}: recovery submit ${status}: ${attempt.result.reason || attempt.result.status}`);
         return { status, reason: attempt.result.reason || attempt.result.status };
       }
-      await refreshInventoryCaches(`${label} post-submit`, { includePacks: false, quiet: true });
-      clearConsumedDuplicateSignals(triggerRefs, label);
       return { status: "progress", consumedItemIds: attempt.result.consumedItemRefs.map((ref) => ref.id) };
     }
     function buildUnassignedRecoveryResolvers(options = {}) {
@@ -13921,7 +14308,7 @@
     async function runRecycleLoop(loopDef) {
       await waitAppReady();
       const dryRun = loopDef.dryRun === true;
-      const inventoryOnly = loopDef.dailyRecycleInventoryOnly === true;
+      const inventoryOnly = loopDef.inventoryOnly === true;
       if (inventoryOnly) {
         const tier = String(loopDef.targetDuplicate?.tier || "target");
         log(`${loopDef.name}: inventory-only mode; ${tier} packs will remain unopened and SBCs will use current inventory`);
@@ -13947,7 +14334,16 @@
             });
             return { status: "planned", reason: "would submit target duplicate" };
           }
-          return await submitConfiguredSbc(loopDef, { returnNullIfComplete: true }) || {
+          const selection = selectInventoryPlayers3([
+            { ...loopDef.targetDuplicate, count: 1, priorityPiles: ["unassigned"] }
+          ], ["unassigned"], {
+            preferredSignalRefs: targets.map((item) => liveItemRef(item, "unassigned"))
+          });
+          if (!selection.ok) {
+            logSelectionDiagnostics(`${loopDef.name} target duplicate`, selection, ["unassigned"]);
+            return { status: "blocked", reason: "target Unassigned duplicate cannot be resolved to a submit-ready Club/Storage item" };
+          }
+          return await submitConfiguredSbc(loopDef, { returnNullIfComplete: true, selection }) || {
             status: "unavailable",
             reason: "no available SBC challenge remains"
           };
@@ -14025,19 +14421,19 @@
         const saved = adapters.localStorage.getJson(LOOP_UI_OPTIONS_KEY, {});
         return {
           showMvpLoops: saved.showMvpLoops === true,
-          dailyRecycleInventoryOnly: saved.dailyRecycleInventoryOnly === true
+          inventoryOnly: saved.inventoryOnly === true || saved.dailyRecycleInventoryOnly === true
         };
       } catch {
-        return { showMvpLoops: false, dailyRecycleInventoryOnly: false };
+        return { showMvpLoops: false, inventoryOnly: false };
       }
     }
     function saveLoopUiOptions() {
       state.showMvpLoops = document.querySelector("#bronze-loop-show-mvp")?.checked === true;
-      const dailyRecycleInventoryOnly = document.querySelector("#bronze-loop-daily-inventory-only")?.checked === true;
+      const inventoryOnly = document.querySelector("#bronze-loop-daily-inventory-only")?.checked === true;
       try {
         adapters.localStorage.setJson(LOOP_UI_OPTIONS_KEY, {
           showMvpLoops: state.showMvpLoops,
-          dailyRecycleInventoryOnly
+          inventoryOnly
         });
       } catch {
       }
@@ -14591,7 +14987,11 @@
                 players: context.players || inspection.items || []
               }) : await submitSbcAndGetAwardPackId(context.set)
             }),
-            afterSubmit: async ({ players }) => markSbcItemsConsumed(players, loopDef.name)
+            afterSubmit: async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
+              squadPlan?.selection || configuredFill.selection,
+              loopDef.name,
+              savedPlayers?.length ? savedPlayers : players
+            )
           });
           if (!submitAttempt.submitted) {
             fail2(`${loopDef.name}: submit transaction blocked: ${submitAttempt.reason || submitAttempt.status}`);
@@ -14747,7 +15147,8 @@
     async function runSupplyAndCraftLoop(loopDef, workflowOptions = {}) {
       await waitAppReady();
       const dryRun = loopDef.dryRun === true;
-      const shortagePacks = loopDef.shortagePacks?.length ? loopDef.shortagePacks : loopDef.strategy === "commonGoldToRareUpgrade" ? [{
+      const inventoryOnly = loopDef.inventoryOnly === true;
+      const shortagePacks = inventoryOnly ? [] : loopDef.shortagePacks?.length ? loopDef.shortagePacks : loopDef.strategy === "commonGoldToRareUpgrade" ? [{
         requirement: { ...loopDef.requirements?.[0] || {} },
         packIds: loopDef.sourcePackIds || [],
         packNames: loopDef.sourcePackNames || [],
@@ -14756,7 +15157,10 @@
         maxRuns: 100,
         routingPolicy: "reserveMatchingDuplicates"
       }] : [];
-      const primaryPiles = shortagePacks.length ? loopDef.primaryPiles || ["unassigned", "storage", "transfer"] : loopDef.priorityPiles || ["storage", "transfer", "club"];
+      if (inventoryOnly) {
+        log(`${loopDef.name}: inventory-only mode; supply packs and reward packs will remain unopened`);
+      }
+      const primaryPiles = inventoryOnly ? loopDef.primaryPiles || loopDef.priorityPiles || ["unassigned", "storage", "transfer", "club"] : shortagePacks.length ? loopDef.primaryPiles || ["unassigned", "storage", "transfer"] : loopDef.priorityPiles || ["storage", "transfer", "club"];
       const fallbackPiles = loopDef.clubFallbackPiles || loopDef.priorityPiles || primaryPiles;
       const result = await runSupplyAndCraftWorkflow({
         maxCompletions: Number(loopDef.maxCompletions || 7),
@@ -15029,8 +15433,12 @@
           submitted: true,
           rewardPackId: await submitSbcAndGetAwardPackId(set)
         }),
-        afterSubmit: async ({ result: submissionResult, players }) => {
-          if (options.markConsumed === true) markSbcItemsConsumed(players, label);
+        afterSubmit: async ({ result: submissionResult, players, savedPlayers, squadPlan }) => {
+          await finalizeSubmittedInventorySelection(
+            squadPlan?.selection || selection,
+            label,
+            savedPlayers?.length ? savedPlayers : players
+          );
           if (options.handleReward === false) return;
           if (submissionResult.rewardPackId && loopDef.openRewardPacks) {
             await openRewardPackAndCleanup(loopDef, submissionResult.rewardPackId);
@@ -15077,7 +15485,7 @@
         pickDef.disabledPiles = [...loopDef.disabledPiles];
       }
       applyDisabledPiles(pickDef);
-      applyPickRuntimeOptions(pickDef, getPickRuntimeOptions());
+      applyPickRuntimeOptions(pickDef, loopDef.runtimePickOptions || getPickRuntimeOptions());
       pickDef.maxCompletions = 1;
       return pickDef;
     }
@@ -15270,7 +15678,9 @@
           if (transientSignals.length) {
             log(`${loopDef.name}: ${label} duplicate signal sources response:${transientSignals.length}, repository:${repositorySignals.length}, unique:${signalById.size}, selected:${selectedSignalCount}`);
           }
-          const expectedSelectedSignalCount = Math.min(signalById.size, countNeeded);
+          const signalRefs = [...signalById.values()].map((signal) => signal.ref || signal);
+          const signalCoverage = evaluateUnassignedSignalCoverage(selection, signalById.size, countNeeded);
+          const expectedSelectedSignalCount = signalCoverage.expectedCount;
           const missedTransientSignal = !selectionConsumesAllSignalRefs(selection, transientSignalRefs);
           if (selectedSignalCount < expectedSelectedSignalCount || missedTransientSignal) {
             logDuplicateSignalDiagnostics(
@@ -15279,6 +15689,12 @@
               selectionRequirements(challengeDef, piles)[0] || {},
               selection
             );
+          }
+          if (options.requireFullSignalCoverage === true && selection.ok && !signalCoverage.sufficient) {
+            return {
+              status: "blocked",
+              reason: `${label} found ${signalRefs.length} matching Unassigned duplicate signal(s), but the selected squad would consume only ${selectedSignalCount}/${expectedSelectedSignalCount}; refusing a fallback that skips Unassigned cards`
+            };
           }
           if (!selection.ok) {
             const missing = selection.missing;
@@ -15292,15 +15708,10 @@
           if (!selectionConsumesAllSignalRefs(selection, transientSignalRefs)) {
             fail2(`${loopDef.name}: ${label} cannot resolve every just-opened duplicate to a Club/Storage submit item; stopping before another pack is opened`);
           }
-          const consumedSignalRefs = (selection.entries || []).filter((entry) => entry.pileName === "unassigned" && entry.signal).map((entry) => ({
-            ...liveItemRef(entry.signal, "unassigned"),
-            duplicateId: Number(entry.signal?.duplicateId || entry.item?.id || 0)
-          }));
           return {
             status: "ready",
             challengeDef,
             selection,
-            consumedSignalRefs,
             transientSignalRefs,
             transientSignalCount: transientSignals.length
           };
@@ -15311,16 +15722,13 @@
             log(`${loopDef.name}: dry-run would submit ${label} selection`);
             return { status: "planned", reason: `would submit ${label}` };
           }
-          const submitted = await submitInventorySelection(plan.challengeDef, plan.selection, { markConsumed: true });
+          const submitted = await submitInventorySelection(plan.challengeDef, plan.selection);
           if (!submitted) {
             if (plan.transientSignalCount) {
               fail2(`${loopDef.name}: ${label} did not submit; preserving ${plan.transientSignalCount} just-opened duplicate(s) and stopping`);
             }
             return { status: "done", reason: "SBC was not submitted" };
           }
-          rememberConsumedDuplicateSignals(plan.consumedSignalRefs);
-          await refreshInventoryCaches(`${loopDef.name} ${label} post-submit duplicate sync`, { includePacks: false, quiet: true });
-          clearConsumedDuplicateSignals(plan.consumedSignalRefs, `${loopDef.name} ${label}`);
           await sleep(CFG.pauseMs);
           return { status: "submitted", submitted: true, transientSignals: [] };
         }
@@ -15405,7 +15813,7 @@
                 upgradeDef,
                 (item) => isDuplicateForLoopRequirements(item, upgradeDef),
                 label,
-                { maxCompletions: 1 }
+                { maxCompletions: 1, requireFullSignalCoverage: true }
               );
               completions[`stage-${index}`] = 0;
             } else {
@@ -15413,9 +15821,17 @@
                 loopDef,
                 upgradeDef,
                 (item) => isDuplicateForLoopRequirements(item, upgradeDef),
-                label
+                label,
+                { requireFullSignalCoverage: true }
               );
               completions[`stage-${index}`] = stageResult.completions;
+              if (stageResult.status === "blocked" || stageResult.status === "planned") {
+                return {
+                  status: stageResult.status,
+                  completions,
+                  reason: stageResult.reason || `${label} ${stageResult.status}`
+                };
+              }
             }
           }
           return { status: "completed", completions };
@@ -15911,7 +16327,6 @@
       const attempt = await submitInventorySbcAttempt(challengeDef, selection, {
         label,
         handleReward: false,
-        markConsumed: true,
         preSaveValidators: [({ players }) => {
           assertPlayerPickFodderProtection(challengeDef, players);
           return true;
@@ -16485,15 +16900,19 @@
       let fsuReadiness = null;
       try {
         loopDef = getSelectedLoopDef();
+        const quantity = resolveRuntimeQuantity(loopDef);
         const input = document.querySelector("#bronze-loop-rounds");
-        rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
+        rounds = quantity?.mode === "user" ? Math.max(quantity.min, Math.min(quantity.max, Number(input?.value || quantity.default) || quantity.default)) : 1;
         applyLoopRuntimeOptions(loopDef, {
           rounds,
           dryRun: isDryRunEnabled(),
           openRewardPacks: isOpenRewardPacksEnabled(),
-          dailyRecycleInventoryOnly: document.querySelector("#bronze-loop-daily-inventory-only")?.checked === true,
+          inventoryOnly: document.querySelector("#bronze-loop-daily-inventory-only")?.checked === true,
           pickOptions: getPickRuntimeOptions()
         });
+        if (Number(loopDef.runtimeRounds) > 0) {
+          rounds = Number(loopDef.runtimeRounds || rounds || 1);
+        }
         logFsuSettingsForRun();
         fsuReadiness = fsuAdapter().readiness();
         if (fsuReadiness.detected && !fsuReadiness.ready) {

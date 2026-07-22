@@ -10,6 +10,10 @@ function entrySignalRef(entry = {}) {
   return entry.signalRef || entry.signal?.ref || entry.signal || null;
 }
 
+function entryItemRef(entry = {}) {
+  return entry.itemRef || entry.item?.ref || entry.item || null;
+}
+
 export function mergeTransientUnassignedSignals(snapshot, signals = []) {
   if (!signals.length) return snapshot;
   const existing = snapshot?.piles?.unassigned || [];
@@ -51,4 +55,42 @@ export function selectionConsumesAllSignalRefs(selection, expectedRefs = []) {
     .filter((entry) => entry.pileName === 'unassigned' && entrySignalRef(entry))
     .map((entry) => refKey(entrySignalRef(entry))));
   return expectedRefs.every((ref) => consumed.has(refKey(ref)));
+}
+
+export function selectedUnassignedSignalRefs(selection) {
+  return (selection?.entries || [])
+    .filter((entry) => entry.pileName === 'unassigned' && entrySignalRef(entry))
+    .map((entry) => {
+      const signal = entrySignalRef(entry);
+      const item = entryItemRef(entry);
+      return {
+        id: Number(signal?.id || 0),
+        definitionId: Number(signal?.definitionId || 0),
+        duplicateId: Number(entry.signal?.duplicateId || signal?.duplicateId || item?.id || 0),
+        pile: 'unassigned',
+      };
+    });
+}
+
+export function submittedUnassignedSignalRefs(selection, submittedItemRefs = []) {
+  const submittedIds = new Set((submittedItemRefs || [])
+    .map((ref) => Number(ref?.id || ref?.ref?.id || 0))
+    .filter(Boolean));
+  if (!submittedIds.size) return [];
+  return selectedUnassignedSignalRefs(selection)
+    .filter((ref) => submittedIds.has(Number(ref.duplicateId || 0)));
+}
+
+export function evaluateUnassignedSignalCoverage(selection, availableCount, capacity) {
+  const available = Math.max(0, Number(availableCount || 0));
+  const slotCapacity = Math.max(0, Number(capacity || 0));
+  const expectedCount = Math.min(available, slotCapacity);
+  const selectedCount = selectedUnassignedSignalRefs(selection).length;
+  return {
+    availableCount: available,
+    capacity: slotCapacity,
+    expectedCount,
+    selectedCount,
+    sufficient: expectedCount === 0 || selectedCount >= expectedCount,
+  };
 }

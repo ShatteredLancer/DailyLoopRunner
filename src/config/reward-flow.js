@@ -55,7 +55,8 @@ export function applyRewardFlow(loopDef = {}, rewardFlow = loopDef.rewardFlow) {
 
 export function resolveRewardPackOpenEnabled(loopDef = {}, runtimeOpenEnabled = false) {
   const mode = loopDef.rewardOpenMode || loopDef.rewardFlow?.open || 'inherit';
+  if (loopDef.forceOpenRewardPacks === true) return true;
   if (mode === 'never') return false;
   if (mode === 'always') return true;
-  return loopDef.forceOpenRewardPacks === true || runtimeOpenEnabled === true;
+  return runtimeOpenEnabled === true;
 }

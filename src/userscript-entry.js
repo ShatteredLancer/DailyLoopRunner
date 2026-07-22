@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.41
+// @version      0.5.43
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -48,6 +48,7 @@ import {
   applyPickRuntimeOptions,
   loopUsesRounds,
   normalizePickRuntimeOptions,
+  resolveRuntimeQuantity,
 } from './config/runtime-options.js';
 import {
   assertValidLoopDef as assertValidLoopDefPure,
@@ -59,6 +60,7 @@ import {
 } from './config/loop-schema.js';
 import { normalizeFsuSettings } from './config/fsu-compat.js';
 import { materializeBatchOpenPlan, normalizeBatchOpenPlan } from './config/batch-open.js';
+import { materializeSessionLoopDefs } from './config/session-loops.js';
 import {
   buildPlayerPickDiscoverySession,
   parsePlayerPickSbcSnapshot,
@@ -83,8 +85,11 @@ import {
   validateRatingSbcModelAgainstItems as validateRatingSbcModelAgainstItemsPure,
 } from './selection/rating-model.js';
 import {
+  evaluateUnassignedSignalCoverage,
   mergeTransientUnassignedSignals,
+  selectedUnassignedSignalRefs,
   selectionConsumesAllSignalRefs,
+  submittedUnassignedSignalRefs,
 } from './selection/transient-signals.js';
 import {
   createExistingSquadProvider,
@@ -236,7 +241,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.41',
+    version: '0.5.43',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -408,14 +413,19 @@ const state = {
   function editWorkflowConfig() {
     const editor = document.querySelector('#bronze-loop-json');
     if (!editor) return;
+    const sessionLoops = materializeSessionLoopDefs({
+      configuredLoops: getConfiguredLoopDefs(),
+      loopOverrides: state.discoveredLoopOverrides,
+      discoveredLoops: state.discoveredLoopDefs,
+    });
     editor.value = JSON.stringify({
-      loops: getConfiguredLoopDefs(),
+      loops: sessionLoops,
       recoveryRecipes: getRecoveryRecipes(),
       unassignedRecoveryPolicies: getUnassignedRecoveryPolicies(),
       defaultUnassignedRecoveryPolicyIds: getDefaultUnassignedRecoveryPolicyIds(),
     }, null, 2);
     editor.classList.add('show');
-    log('Editing full workflow JSON. Apply workflow JSON validates every loop and step before replacing the current session configuration.');
+    log(`Editing full workflow JSON with ${sessionLoops.length} current session Loop(s), including scanned Pick metadata. Apply workflow JSON validates every loop and step before replacing the current session configuration.`);
   }
 
   function applyWorkflowConfigEditor() {
@@ -455,9 +465,19 @@ const state = {
 
 function updateLoopControls() {
     const editorLoop = getEditorLoopDef();
+    const quantity = resolveRuntimeQuantity(editorLoop);
     renderMainPanelRounds({
       panel: document.querySelector('#bronze-loop-panel'),
       show: loopUsesRounds(editorLoop),
+      quantity,
+      quantityKey: [
+        editorLoop.id || editorLoop.name || editorLoop.strategy || 'custom',
+        quantity?.mode || 'none',
+        quantity?.target || 'none',
+        quantity?.default || 0,
+        quantity?.min || 0,
+        quantity?.max || 0,
+      ].join(':'),
     });
   }
 
@@ -4923,34 +4943,63 @@ function updateLoopControls() {
   }
 
   async function submitConfiguredSbc(loopDef, options = {}) {
+    const selection = options.selection || null;
     const attempt = await submitSbcAttempt({
       label: loopDef.name,
       challengeProvider: async () => {
         const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
         return openSbcSet(set, { returnNullIfComplete: options.returnNullIfComplete });
       },
-      squadProvider: createFsuFillProvider({
-        fill: async () => fillSbcSquad(loopDef.name),
-        getPlayers: async ({ challenge }) => getSquadItems(ctrl()?._squad || challenge?.squad),
-        itemRef: liveItemRef,
-      }),
+      squadProvider: selection
+        ? createInventorySquadProvider({
+            selection,
+            prepareSelection: async (_context, inputSelection) => prepareInventorySelection(loopDef, inputSelection),
+            itemRef: liveItemRef,
+          })
+        : createFsuFillProvider({
+            fill: async () => fillSbcSquad(loopDef.name),
+            getPlayers: async ({ challenge }) => getSquadItems(ctrl()?._squad || challenge?.squad),
+            itemRef: liveItemRef,
+          }),
       prepareRuntimeAccess: prepareFsuRuntimeAccess,
       saveSquad: async ({ challenge, players, runtimeAccess }) => {
-        if (!runtimeAccess?.refreshedClubPlayers) return;
-        log(`${loopDef.name}: applying freshly validated Club entities before submit`);
-        await saveChallengeSquad(challenge, players, `${loopDef.name} provisional Club refresh`);
+        if (!selection && !runtimeAccess?.refreshedClubPlayers) return;
+        const reason = selection ? 'inventory selection' : 'provisional Club refresh';
+        if (selection) log(`${loopDef.name}: applying inventory selection before submit`);
+        else log(`${loopDef.name}: applying freshly validated Club entities before submit`);
+        await saveChallengeSquad(challenge, players, `${loopDef.name} ${reason}`);
       },
-      preSaveValidators: [({ challenge }) => {
-        const inspection = inspectSbcSquad(loopDef, ctrl()?._squad || challenge?.squad);
+      preSaveValidators: [({ challenge, players }) => {
+        const inspection = selection
+          ? inspectSbcItems(loopDef, players, { expectedPlayerCount: expectedSbcPlayerCount(loopDef, challenge) })
+          : inspectSbcSquad(loopDef, ctrl()?._squad || challenge?.squad);
         logSbcSquadInspection(loopDef, inspection);
         assertSbcSquadSafe(loopDef, inspection);
         return true;
       }],
+      readSavedPlayers: selection
+        ? async ({ challenge }) => getSquadItems(challenge?.squad || ctrl()?._squad)
+        : undefined,
+      postSaveValidators: selection
+        ? [({ challenge }) => {
+            const inspection = inspectSbcSquad(loopDef, challenge?.squad || ctrl()?._squad);
+            logSbcSquadInspection(loopDef, inspection);
+            assertSbcSquadSafe(loopDef, inspection);
+            return true;
+          }]
+        : [],
       isSubmitReady: async () => !!findSubmitButton(),
       submitTransport: async ({ set }) => ({
         submitted: true,
         rewardPackId: await submitSbcAndGetAwardPackId(set),
       }),
+      afterSubmit: selection
+        ? async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
+            squadPlan?.selection || selection,
+            loopDef.name,
+            savedPlayers?.length ? savedPlayers : players,
+          )
+        : undefined,
     });
     if (attempt.status === 'unavailable') {
       log(`${loopDef.name}: no available SBC challenge remains`);
@@ -5019,6 +5068,36 @@ function updateLoopControls() {
     if (cleared && options.quiet !== true) log(`${label}: cleared ${cleared} consumed duplicate signal(s) after recovery`);
     if (resolved && options.quiet !== true) log(`${label}: confirmed ${resolved} duplicate signal(s) already resolved`);
     return cleared;
+  }
+
+  async function reconcileSubmittedDuplicateSignals(selection, label, submittedItems = []) {
+    const selectedSignalRefs = selectedUnassignedSignalRefs(selection);
+    if (!selectedSignalRefs.length) return 0;
+    const submittedIds = (submittedItems || [])
+      .map((item) => Number(item?.id || item?.ref?.id || 0))
+      .filter(Boolean);
+    if (!submittedIds.length) {
+      log(`${label}: could not confirm submitted item IDs for ${selectedSignalRefs.length} Unassigned duplicate signal(s); preserving them for the next inventory refresh`);
+      return 0;
+    }
+    const consumedSignalRefs = submittedUnassignedSignalRefs(selection, submittedItems);
+    if (!consumedSignalRefs.length) return 0;
+
+    rememberConsumedDuplicateSignals(consumedSignalRefs);
+    log(`${label}: consumed ${consumedSignalRefs.length} Unassigned duplicate signal(s) by submitting their matching Club/Storage item(s)`);
+    await refreshInventoryCaches(`${label} post-submit duplicate sync`, { includePacks: false, quiet: true });
+    clearConsumedDuplicateSignals(consumedSignalRefs, label);
+    return consumedSignalRefs.length;
+  }
+
+  async function finalizeSubmittedInventorySelection(selection, label, players = []) {
+    const submittedPlayers = (players || []).filter((item) => Number(item?.id || 0));
+    if (!submittedPlayers.length) {
+      log(`${label}: submitted squad item IDs are unavailable; preserving inventory and Unassigned duplicate state for refresh`);
+      return;
+    }
+    markSbcItemsConsumed(submittedPlayers, label);
+    await reconcileSubmittedDuplicateSignals(selection, label, submittedPlayers);
   }
 
   async function trySubmitUnassignedRecoveryRecipe({ policy, recipe, triggerRefs }) {
@@ -5093,7 +5172,6 @@ function updateLoopControls() {
     try {
       attempt = await submitInventorySbcAttempt(recipe, selection, {
         label,
-        markConsumed: true,
         handleReward: false,
         opened,
       });
@@ -5106,8 +5184,6 @@ function updateLoopControls() {
       log(`${label}: recovery submit ${status}: ${attempt.result.reason || attempt.result.status}`);
       return { status, reason: attempt.result.reason || attempt.result.status };
     }
-    await refreshInventoryCaches(`${label} post-submit`, { includePacks: false, quiet: true });
-    clearConsumedDuplicateSignals(triggerRefs, label);
     return { status: 'progress', consumedItemIds: attempt.result.consumedItemRefs.map((ref) => ref.id) };
   }
 
@@ -5159,7 +5235,7 @@ function updateLoopControls() {
   async function runRecycleLoop(loopDef) {
     await waitAppReady();
     const dryRun = loopDef.dryRun === true;
-    const inventoryOnly = loopDef.dailyRecycleInventoryOnly === true;
+    const inventoryOnly = loopDef.inventoryOnly === true;
     if (inventoryOnly) {
       const tier = String(loopDef.targetDuplicate?.tier || 'target');
       log(`${loopDef.name}: inventory-only mode; ${tier} packs will remain unopened and SBCs will use current inventory`);
@@ -5185,7 +5261,16 @@ function updateLoopControls() {
           });
           return { status: 'planned', reason: 'would submit target duplicate' };
         }
-        return await submitConfiguredSbc(loopDef, { returnNullIfComplete: true }) || {
+        const selection = selectInventoryPlayers([
+          { ...loopDef.targetDuplicate, count: 1, priorityPiles: ['unassigned'] },
+        ], ['unassigned'], {
+          preferredSignalRefs: targets.map((item) => liveItemRef(item, 'unassigned')),
+        });
+        if (!selection.ok) {
+          logSelectionDiagnostics(`${loopDef.name} target duplicate`, selection, ['unassigned']);
+          return { status: 'blocked', reason: 'target Unassigned duplicate cannot be resolved to a submit-ready Club/Storage item' };
+        }
+        return await submitConfiguredSbc(loopDef, { returnNullIfComplete: true, selection }) || {
           status: 'unavailable',
           reason: 'no available SBC challenge remains',
         };
@@ -5275,20 +5360,20 @@ function updateLoopControls() {
       const saved = adapters.localStorage.getJson(LOOP_UI_OPTIONS_KEY, {});
       return {
         showMvpLoops: saved.showMvpLoops === true,
-        dailyRecycleInventoryOnly: saved.dailyRecycleInventoryOnly === true,
+        inventoryOnly: saved.inventoryOnly === true || saved.dailyRecycleInventoryOnly === true,
       };
     } catch {
-      return { showMvpLoops: false, dailyRecycleInventoryOnly: false };
+      return { showMvpLoops: false, inventoryOnly: false };
     }
   }
 
   function saveLoopUiOptions() {
     state.showMvpLoops = document.querySelector('#bronze-loop-show-mvp')?.checked === true;
-    const dailyRecycleInventoryOnly = document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true;
+    const inventoryOnly = document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true;
     try {
       adapters.localStorage.setJson(LOOP_UI_OPTIONS_KEY, {
         showMvpLoops: state.showMvpLoops,
-        dailyRecycleInventoryOnly,
+        inventoryOnly,
       });
     } catch { }
     renderLoopSelect();
@@ -5907,7 +5992,11 @@ function updateLoopControls() {
               })
             : await submitSbcAndGetAwardPackId(context.set),
         }),
-        afterSubmit: async ({ players }) => markSbcItemsConsumed(players, loopDef.name),
+        afterSubmit: async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
+          squadPlan?.selection || configuredFill.selection,
+          loopDef.name,
+          savedPlayers?.length ? savedPlayers : players,
+        ),
       });
       if (!submitAttempt.submitted) {
         fail(`${loopDef.name}: submit transaction blocked: ${submitAttempt.reason || submitAttempt.status}`);
@@ -6083,8 +6172,11 @@ function updateLoopControls() {
   async function runSupplyAndCraftLoop(loopDef, workflowOptions = {}) {
     await waitAppReady();
     const dryRun = loopDef.dryRun === true;
-    const shortagePacks = loopDef.shortagePacks?.length
-      ? loopDef.shortagePacks
+    const inventoryOnly = loopDef.inventoryOnly === true;
+    const shortagePacks = inventoryOnly
+      ? []
+      : loopDef.shortagePacks?.length
+        ? loopDef.shortagePacks
       : loopDef.strategy === 'commonGoldToRareUpgrade'
         ? [{
             requirement: { ...(loopDef.requirements?.[0] || {}) },
@@ -6096,9 +6188,14 @@ function updateLoopControls() {
             routingPolicy: 'reserveMatchingDuplicates',
           }]
         : [];
-    const primaryPiles = shortagePacks.length
-      ? (loopDef.primaryPiles || ['unassigned', 'storage', 'transfer'])
-      : (loopDef.priorityPiles || ['storage', 'transfer', 'club']);
+    if (inventoryOnly) {
+      log(`${loopDef.name}: inventory-only mode; supply packs and reward packs will remain unopened`);
+    }
+    const primaryPiles = inventoryOnly
+      ? (loopDef.primaryPiles || loopDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'])
+      : shortagePacks.length
+        ? (loopDef.primaryPiles || ['unassigned', 'storage', 'transfer'])
+        : (loopDef.priorityPiles || ['storage', 'transfer', 'club']);
     const fallbackPiles = loopDef.clubFallbackPiles || loopDef.priorityPiles || primaryPiles;
 
     const result = await runSupplyAndCraftWorkflow({
@@ -6395,8 +6492,12 @@ function updateLoopControls() {
         submitted: true,
         rewardPackId: await submitSbcAndGetAwardPackId(set),
       }),
-      afterSubmit: async ({ result: submissionResult, players }) => {
-        if (options.markConsumed === true) markSbcItemsConsumed(players, label);
+      afterSubmit: async ({ result: submissionResult, players, savedPlayers, squadPlan }) => {
+        await finalizeSubmittedInventorySelection(
+          squadPlan?.selection || selection,
+          label,
+          savedPlayers?.length ? savedPlayers : players,
+        );
         if (options.handleReward === false) return;
         if (submissionResult.rewardPackId && loopDef.openRewardPacks) {
           await openRewardPackAndCleanup(loopDef, submissionResult.rewardPackId);
@@ -6446,7 +6547,7 @@ function updateLoopControls() {
       pickDef.disabledPiles = [...loopDef.disabledPiles];
     }
     applyDisabledPiles(pickDef);
-    applyPickRuntimeOptions(pickDef, getPickRuntimeOptions());
+    applyPickRuntimeOptions(pickDef, loopDef.runtimePickOptions || getPickRuntimeOptions());
     pickDef.maxCompletions = 1;
     return pickDef;
   }
@@ -6679,7 +6780,9 @@ function updateLoopControls() {
         if (transientSignals.length) {
           log(`${loopDef.name}: ${label} duplicate signal sources response:${transientSignals.length}, repository:${repositorySignals.length}, unique:${signalById.size}, selected:${selectedSignalCount}`);
         }
-        const expectedSelectedSignalCount = Math.min(signalById.size, countNeeded);
+        const signalRefs = [...signalById.values()].map((signal) => signal.ref || signal);
+        const signalCoverage = evaluateUnassignedSignalCoverage(selection, signalById.size, countNeeded);
+        const expectedSelectedSignalCount = signalCoverage.expectedCount;
         const missedTransientSignal = !selectionConsumesAllSignalRefs(selection, transientSignalRefs);
         if (selectedSignalCount < expectedSelectedSignalCount || missedTransientSignal) {
           logDuplicateSignalDiagnostics(
@@ -6688,6 +6791,13 @@ function updateLoopControls() {
             selectionRequirements(challengeDef, piles)[0] || {},
             selection,
           );
+        }
+
+        if (options.requireFullSignalCoverage === true && selection.ok && !signalCoverage.sufficient) {
+          return {
+            status: 'blocked',
+            reason: `${label} found ${signalRefs.length} matching Unassigned duplicate signal(s), but the selected squad would consume only ${selectedSignalCount}/${expectedSelectedSignalCount}; refusing a fallback that skips Unassigned cards`,
+          };
         }
 
         if (!selection.ok) {
@@ -6703,17 +6813,10 @@ function updateLoopControls() {
           fail(`${loopDef.name}: ${label} cannot resolve every just-opened duplicate to a Club/Storage submit item; stopping before another pack is opened`);
         }
 
-        const consumedSignalRefs = (selection.entries || [])
-          .filter((entry) => entry.pileName === 'unassigned' && entry.signal)
-          .map((entry) => ({
-            ...liveItemRef(entry.signal, 'unassigned'),
-            duplicateId: Number(entry.signal?.duplicateId || entry.item?.id || 0),
-          }));
         return {
           status: 'ready',
           challengeDef,
           selection,
-          consumedSignalRefs,
           transientSignalRefs,
           transientSignalCount: transientSignals.length,
         };
@@ -6725,16 +6828,13 @@ function updateLoopControls() {
           return { status: 'planned', reason: `would submit ${label}` };
         }
 
-        const submitted = await submitInventorySelection(plan.challengeDef, plan.selection, { markConsumed: true });
+        const submitted = await submitInventorySelection(plan.challengeDef, plan.selection);
         if (!submitted) {
           if (plan.transientSignalCount) {
             fail(`${loopDef.name}: ${label} did not submit; preserving ${plan.transientSignalCount} just-opened duplicate(s) and stopping`);
           }
           return { status: 'done', reason: 'SBC was not submitted' };
         }
-        rememberConsumedDuplicateSignals(plan.consumedSignalRefs);
-        await refreshInventoryCaches(`${loopDef.name} ${label} post-submit duplicate sync`, { includePacks: false, quiet: true });
-        clearConsumedDuplicateSignals(plan.consumedSignalRefs, `${loopDef.name} ${label}`);
         await sleep(CFG.pauseMs);
         return { status: 'submitted', submitted: true, transientSignals: [] };
       },
@@ -6822,7 +6922,7 @@ function updateLoopControls() {
               upgradeDef,
               (item) => isDuplicateForLoopRequirements(item, upgradeDef),
               label,
-              { maxCompletions: 1 },
+              { maxCompletions: 1, requireFullSignalCoverage: true },
             );
             completions[`stage-${index}`] = 0;
           } else {
@@ -6831,8 +6931,16 @@ function updateLoopControls() {
               upgradeDef,
               (item) => isDuplicateForLoopRequirements(item, upgradeDef),
               label,
+              { requireFullSignalCoverage: true },
             );
             completions[`stage-${index}`] = stageResult.completions;
+            if (stageResult.status === 'blocked' || stageResult.status === 'planned') {
+              return {
+                status: stageResult.status,
+                completions,
+                reason: stageResult.reason || `${label} ${stageResult.status}`,
+              };
+            }
           }
         }
         return { status: 'completed', completions };
@@ -7374,7 +7482,6 @@ function updateLoopControls() {
     const attempt = await submitInventorySbcAttempt(challengeDef, selection, {
       label,
       handleReward: false,
-      markConsumed: true,
       preSaveValidators: [({ players }) => {
         assertPlayerPickFodderProtection(challengeDef, players);
         return true;
@@ -7478,10 +7585,10 @@ function updateLoopControls() {
     for (let index = 0; index < challengesToSubmit.length; index++) {
       const challengeNo = challengesToSubmit[index].challengeNo || index + 1;
       const submission = await submitPlayerPickChallenge(
-        pickDef,
-        challengeNo,
-        challenges.length || pickDef.challengesPerPick || incompleteChallenges.length,
-      );
+          pickDef,
+          challengeNo,
+          challenges.length || pickDef.challengesPerPick || incompleteChallenges.length,
+        );
       if (!submission.submitted) {
         log(`${loopDef.name}: could not complete ${pickDef.name} challenge ${challengeNo}; leaving it pending and continuing original crafting flow`);
         break;
@@ -7983,15 +8090,21 @@ function updateLoopControls() {
 
     try {
       loopDef = getSelectedLoopDef();
+      const quantity = resolveRuntimeQuantity(loopDef);
       const input = document.querySelector('#bronze-loop-rounds');
-      rounds = Math.max(1, Math.min(50, Number(input?.value || CFG.maxRounds) || CFG.maxRounds));
+      rounds = quantity?.mode === 'user'
+        ? Math.max(quantity.min, Math.min(quantity.max, Number(input?.value || quantity.default) || quantity.default))
+        : 1;
       applyLoopRuntimeOptions(loopDef, {
         rounds,
         dryRun: isDryRunEnabled(),
         openRewardPacks: isOpenRewardPacksEnabled(),
-        dailyRecycleInventoryOnly: document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true,
+        inventoryOnly: document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true,
         pickOptions: getPickRuntimeOptions(),
       });
+      if (Number(loopDef.runtimeRounds) > 0) {
+        rounds = Number(loopDef.runtimeRounds || rounds || 1);
+      }
       logFsuSettingsForRun();
       fsuReadiness = fsuAdapter().readiness();
       if (fsuReadiness.detected && !fsuReadiness.ready) {

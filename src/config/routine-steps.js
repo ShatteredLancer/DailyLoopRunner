@@ -1,7 +1,12 @@
-import { cloneLoopDef } from '../domain/objects.js';
+import { cloneLoopDef, isPlainObject } from '../domain/objects.js';
 import { applyDisabledPiles } from './loop-presentation.js';
 import { assertValidLoopDef } from './loop-schema.js';
 import { applyRewardFlow, resolveRewardPackOpenEnabled } from './reward-flow.js';
+import {
+  applyInventoryMode,
+  applyPickRuntimeOptions,
+  resolveInventoryMode,
+} from './runtime-options.js';
 
 function normalizeRoutineStep(step = {}) {
   return typeof step === 'string' ? { loopId: step } : step;
@@ -31,19 +36,29 @@ export function resolveRoutineStepLoopDefs(loopDef = {}, loopDefs = []) {
     }
     applyRewardFlow(childDef);
     if (step.name) childDef.name = step.name;
-    if (step.maxCompletions !== undefined) childDef.maxCompletions = step.maxCompletions;
     applyRewardFlow(childDef, step.rewardFlow);
-    if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
-      childDef.disabledPiles = [...loopDef.disabledPiles];
+    if (loopDef.disabledPiles?.length) {
+      childDef.disabledPiles = [...new Set([
+        ...(childDef.disabledPiles || []),
+        ...loopDef.disabledPiles,
+      ])];
     }
-    if (childDef.rewardOpenMode) {
-      childDef.openRewardPacks = resolveRewardPackOpenEnabled(childDef, loopDef.openRewardPacks === true);
-    } else if (loopDef.openRewardPacks !== undefined) {
-      childDef.openRewardPacks = childDef.forceOpenRewardPacks === true || loopDef.openRewardPacks === true;
+    if (childDef.unassignedRecoveryPolicyIds === undefined && loopDef.unassignedRecoveryPolicyIds !== undefined) {
+      childDef.unassignedRecoveryPolicyIds = [...loopDef.unassignedRecoveryPolicyIds];
     }
-    if (childDef.strategy === 'dailySingleCardRecycle' && loopDef.dailyRecycleInventoryOnly !== undefined) {
-      childDef.dailyRecycleInventoryOnly = loopDef.dailyRecycleInventoryOnly === true;
+    childDef.openRewardPacks = resolveRewardPackOpenEnabled(
+      childDef,
+      loopDef.openRewardPacks === true,
+    );
+    const parentPickOptions = isPlainObject(loopDef.runtimePickOptions)
+      ? loopDef.runtimePickOptions
+      : loopDef.pickOptions;
+    if (isPlainObject(parentPickOptions)) {
+      applyPickRuntimeOptions(childDef, parentPickOptions);
     }
+    const parentInventoryMode = loopDef.runtimeInventoryMode
+      || resolveInventoryMode('normal', loopDef);
+    applyInventoryMode(childDef, parentInventoryMode);
     childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
     assertValidLoopDef(childDef, childDef.name || stepId);
     return applyDisabledPiles(childDef);

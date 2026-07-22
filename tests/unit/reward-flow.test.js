@@ -34,6 +34,7 @@ describe('reward flow configuration', () => {
     expect(resolveRewardPackOpenEnabled({ rewardOpenMode: 'never' }, true)).toBe(false);
     expect(resolveRewardPackOpenEnabled({ rewardOpenMode: 'inherit' }, true)).toBe(true);
     expect(resolveRewardPackOpenEnabled({ forceOpenRewardPacks: true }, false)).toBe(true);
+    expect(resolveRewardPackOpenEnabled({ forceOpenRewardPacks: true, rewardOpenMode: 'never' }, false)).toBe(true);
   });
 
   it('rejects invalid flow shapes and unsupported action values', () => {

@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { dispatchConfiguredWorkflow } from '../../src/workflows/dispatch.js';
+import { LOOP_STRATEGIES } from '../../src/domain/strategies.js';
+import {
+  DISPATCHED_LOOP_STRATEGIES,
+  dispatchConfiguredWorkflow,
+} from '../../src/workflows/dispatch.js';
 
 function harness(overrides = {}) {
   const result = { status: 'completed' };
   const runners = {
     validationBronzeUpgrade: vi.fn(async () => result),
     dailyRoutine: vi.fn(async () => result),
+    workflowRoutine: vi.fn(async () => result),
     dailySingleCardRecycle: vi.fn(async () => result),
     supplyAndCraft: vi.fn(async () => result),
     provisionPackCrafting: vi.fn(async () => result),
@@ -26,6 +31,19 @@ function harness(overrides = {}) {
 }
 
 describe('configured workflow dispatch', () => {
+  it('keeps every schema strategy registered in the workflow dispatcher', () => {
+    expect(new Set(DISPATCHED_LOOP_STRATEGIES)).toEqual(new Set(LOOP_STRATEGIES));
+  });
+
+  it('dispatches declarative workflow routines through the standard finalizer', async () => {
+    const options = harness({
+      loopDef: { id: 'workflow', name: 'Workflow', strategy: 'workflowRoutine' },
+    });
+    const result = await dispatchConfiguredWorkflow(options);
+    expect(options.runners.workflowRoutine).toHaveBeenCalledWith(options.loopDef);
+    expect(options.afterStandardRun).toHaveBeenCalledWith(options.loopDef, result);
+  });
+
   it('dispatches standard strategies and runs the shared live finalizer', async () => {
     const options = harness({
       loopDef: { id: 'daily-common', name: 'Daily Common Loop', strategy: 'inventoryMixedUpgrade' },

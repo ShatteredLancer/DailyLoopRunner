@@ -8,7 +8,7 @@ import {
 } from '../../src/ui/main-panel-state.js';
 
 function element(id) {
-  return { id, style: {}, disabled: false, textContent: '', value: '', title: '' };
+  return { id, style: {}, disabled: false, textContent: '', value: '', title: '', dataset: {} };
 }
 
 function harness(ids = []) {
@@ -45,6 +45,14 @@ describe('main panel state rendering', () => {
     controls.forEach((control) => expect(control.style.display).toBe('none'));
     renderMainPanelRounds({ panel, show: true });
     controls.forEach((control) => expect(control.style.display).toBe(''));
+    renderMainPanelRounds({
+      panel,
+      show: true,
+      quantityKey: 'provision:rounds',
+      quantity: { label: 'Provision packs', default: 4, min: 2, max: 20 },
+    });
+    expect(controls.get('bronze-loop-rounds-label').textContent).toBe('Provision packs');
+    expect(controls.get('bronze-loop-rounds')).toMatchObject({ value: '4', min: '2', max: '20' });
   });
 
   it('renders recap availability and summary title', () => {
@@ -74,6 +82,7 @@ describe('main panel state rendering', () => {
   it('applies the complete runtime disabled-state matrix', () => {
     const ids = [
       'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-select', 'bronze-loop-edit',
+      'bronze-loop-edit-config', 'bronze-loop-apply-config',
       'bronze-loop-refresh', 'bronze-loop-scan-picks', 'bronze-loop-load-json', 'bronze-loop-built-in', 'bronze-loop-dry-run',
       'bronze-loop-open-rewards', 'bronze-loop-pick-protect-high-gold', 'bronze-loop-pick-auto-below-90',
       'bronze-loop-daily-inventory-only',

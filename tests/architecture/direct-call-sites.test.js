@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { STRATEGY_RUNNER_KEYS } from '../../src/workflows/dispatch.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -27,7 +28,7 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('prepareOnly: true');
     expect(source.match(/\bsubmitSbcAttempt\s*\(\{/g) || []).toHaveLength(4);
     expect(source.match(/prepareRuntimeAccess:\s*prepareFsuRuntimeAccess/g) || []).toHaveLength(4);
-    expect(source.match(/if \(!runtimeAccess\?\.refreshedClubPlayers\) return;/g) || []).toHaveLength(1);
+    expect(source.match(/if \(!selection && !runtimeAccess\?\.refreshedClubPlayers\) return;/g) || []).toHaveLength(1);
     expect(source.match(/if \(ratingSbcFill \|\| !runtimeAccess\?\.refreshedClubPlayers\) return;/g) || []).toHaveLength(1);
     expect(source.match(/applying freshly validated Club entities before submit/g) || []).toHaveLength(2);
     expect(source).toContain("from './sbc/fsu-runtime-access.js'");
@@ -98,6 +99,19 @@ describe('current direct side-effect call baseline', () => {
     expect(source).not.toMatch(/function\s+runReservedDuplicateUpgradeDryRun\s*\(/);
     expect(source).not.toMatch(/function\s+submitReservedDuplicateUpgrade\s*\(/);
     expect(source).toMatch(/function\s+runReservedDuplicateCraftingStage\s*\(/);
+    expect(source).toMatch(/function\s+reconcileSubmittedDuplicateSignals\s*\(/);
+    expect(source).toMatch(/function\s+finalizeSubmittedInventorySelection\s*\(/);
+    expect(source).toContain('await reconcileSubmittedDuplicateSignals(selection, label, submittedPlayers);');
+    expect(source).toMatch(/submitConfiguredSbc[\s\S]*?finalizeSubmittedInventorySelection\(\s*squadPlan\?\.selection \|\| selection,\s*loopDef\.name,\s*savedPlayers\?\.length \? savedPlayers : players,\s*\)/);
+    expect(source).toMatch(/consumeTarget[\s\S]*?selectInventoryPlayers\([\s\S]*?priorityPiles:\s*\['unassigned'\][\s\S]*?submitConfiguredSbc\(loopDef, \{ returnNullIfComplete: true, selection \}\)/);
+    expect(source).toMatch(/runFillAndVerifyLoop[\s\S]*?finalizeSubmittedInventorySelection\([\s\S]*?configuredFill\.selection/);
+    expect(source).toMatch(/submitInventorySbcAttempt[\s\S]*?finalizeSubmittedInventorySelection\(\s*squadPlan\?\.selection \|\| selection/);
+    expect(source).not.toContain('markConsumed: true');
+    expect(source).toContain('selectedSignalCount < expectedSelectedSignalCount');
+    expect(source).toContain('refusing a fallback that skips Unassigned cards');
+    expect(source).toContain('options.requireFullSignalCoverage === true');
+    expect(source).toMatch(/runProvisionCraftLoop[\s\S]*?runReservedDuplicateCraftingStage\([\s\S]*?requireFullSignalCoverage:\s*true/);
+    expect(source).toMatch(/if \(stageResult\.status === 'blocked' \|\| stageResult\.status === 'planned'\)/);
     expect(source).not.toMatch(/function\s+rankPlayerPickCandidates\s*\(/);
     expect(source).not.toMatch(/function\s+capturePlayerPickSelections\s*\(/);
     expect(source).not.toMatch(/function\s+getManualPickReason\s*\(/);
@@ -148,7 +162,7 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain("from './config/runtime-options.js'");
     expect(source).toMatch(/import\s*\{[^}]*\bapplyPickRuntimeOptions\b[^}]*\}\s*from '\.\/config\/runtime-options\.js'/s);
     expect(source).not.toMatch(/function\s+applyPickRuntimeOptions\s*\(/);
-    expect(source).toContain('applyPickRuntimeOptions(pickDef, getPickRuntimeOptions());');
+    expect(source).toContain('applyPickRuntimeOptions(pickDef, loopDef.runtimePickOptions || getPickRuntimeOptions());');
     expect(source).not.toMatch(/\bconst\s+LOOP_DEFS\s*=\s*\[/);
     expect(source).toContain('return claimSbcRewards({');
     expect(source).not.toMatch(/while\s*\(Date\.now\(\)\s*-\s*start\s*<\s*25000\)/);
@@ -166,6 +180,12 @@ describe('current direct side-effect call baseline', () => {
     expect(source).not.toMatch(/function\s+runDailyRoutine\s*\(/);
     expect(source).toMatch(/function\s+runDailySequence\s*\(/);
     expect(source).toContain("from './workflows/dispatch.js'");
+    const dispatchStart = source.indexOf('return await dispatchConfiguredWorkflow({');
+    const dispatchEnd = source.indexOf('afterStandardRun:', dispatchStart);
+    const dispatchRunnerBlock = source.slice(dispatchStart, dispatchEnd);
+    for (const runnerKey of new Set(Object.values(STRATEGY_RUNNER_KEYS))) {
+      expect(dispatchRunnerBlock, runnerKey).toMatch(new RegExp(`\\b${runnerKey}:\\s*`));
+    }
     expect(source).not.toMatch(/function\s+executeConfiguredLoopInternal\s*\(/);
     expect(source).not.toMatch(/function\s+(?:setLoopDefs|getEditorLoopStrategy|findBronzeUpgradeSet|isEligibleTotwForLoop|getEligibleTotwEntries|summarizeTotwEntries|sortTotwEntriesForSubmit|isCommonGoldPlayer|isCommonGoldDuplicate|isLowCommonGoldDuplicate)\s*\(/);
   });

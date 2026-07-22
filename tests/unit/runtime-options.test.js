@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   applyLoopRuntimeOptions,
   applyPickRuntimeOptions,
+  applyInventoryMode,
   loopUsesRounds,
   normalizePickRuntimeOptions,
+  resolveInventoryMode,
+  resolvePickRuntimeOptions,
+  resolveRuntimeQuantity,
 } from '../../src/config/runtime-options.js';
 
 describe('loop runtime option projection', () => {
@@ -52,9 +56,9 @@ describe('loop runtime option projection', () => {
       openPicksAtEnd: true,
       pickHighGoldThreshold: 84,
       autoPickRatingThreshold: 91,
-      requirements: [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84, highGoldProtectionMaxRating: true }],
+      requirements: [{ maxRating: 81, protectHighGold: true, highGoldThreshold: 84, highGoldProtectionMaxRating: true, maxRatingBeforeHighGoldProtection: 81 }],
       challengeRequirements: [
-        [{ maxRating: 83, protectHighGold: true, highGoldThreshold: 84, highGoldProtectionMaxRating: true }],
+        [{ maxRating: 81, protectHighGold: true, highGoldThreshold: 84, highGoldProtectionMaxRating: true, maxRatingBeforeHighGoldProtection: 81 }],
         [{
           maxRating: 83,
           protectHighGold: true,
@@ -66,15 +70,16 @@ describe('loop runtime option projection', () => {
     });
   });
 
-  it('removes legacy and custom protection caps when Pick protection is disabled', () => {
+  it('removes generated protection caps while preserving explicit business max ratings', () => {
     const loopDef = {
       strategy: 'playerPickSbc',
       requirements: [
-        { maxRating: 81, highGoldThreshold: 82, protectHighGold: true },
+        { maxRating: 81, highGoldThreshold: 82, protectHighGold: true, highGoldProtectionMaxRating: true },
         {
           maxRating: 83,
           highGoldThreshold: 84,
           protectHighGold: true,
+          highGoldProtectionMaxRating: true,
         },
         { maxRating: 85, highGoldThreshold: 82, protectHighGold: true },
       ],
@@ -132,11 +137,12 @@ describe('loop runtime option projection', () => {
 
     const dailyRecycle = { strategy: 'dailySingleCardRecycle' };
     applyLoopRuntimeOptions(dailyRecycle, { dailyRecycleInventoryOnly: true });
-    expect(dailyRecycle.dailyRecycleInventoryOnly).toBe(true);
+    expect(dailyRecycle.inventoryOnly).toBe(true);
+    expect(dailyRecycle.openRewardPacks).toBe(false);
 
     const dailyRoutine = { strategy: 'dailyRoutine' };
     applyLoopRuntimeOptions(dailyRoutine, { dailyRecycleInventoryOnly: true });
-    expect(dailyRoutine.dailyRecycleInventoryOnly).toBe(true);
+    expect(dailyRoutine.runtimeInventoryMode).toBe('inventory-only');
 
     const workflow = {
       strategy: 'workflowRoutine',
@@ -151,8 +157,9 @@ describe('loop runtime option projection', () => {
       openRewardPacks: false,
       rewardPackIds: [105],
       rewardPackNames: ['Bronze Players Premium'],
+      runtimeInventoryMode: 'inventory-only',
+      runtimePickOptions: normalizePickRuntimeOptions(),
     });
-    expect(workflow.dailyRecycleInventoryOnly).toBeUndefined();
   });
 
   it('shows rounds only for explicit repeat-count loops', () => {
@@ -172,5 +179,68 @@ describe('loop runtime option projection', () => {
     applyLoopRuntimeOptions(loopDef, { rounds: 6 });
     expect(loopDef.maxCompletions).toBe(6);
     expect(loopUsesRounds(loopDef)).toBe(true);
+  });
+
+  it('resolves Pick preferences from global to parent to child without weakening business limits', () => {
+    expect(resolvePickRuntimeOptions(
+      { protectHighGold: true, highGoldThreshold: 82, openPicksAtEnd: false },
+      { pickOptions: { highGoldThreshold: 84, openAtEnd: true } },
+      { pickOptions: { protectHighGold: false } },
+    )).toMatchObject({
+      protectHighGold: false,
+      highGoldThreshold: 84,
+      openPicksAtEnd: true,
+    });
+
+    const loopDef = {
+      strategy: 'playerPickSbc',
+      pickOptions: { highGoldThreshold: 86 },
+      requirements: [{ maxRating: 83 }],
+    };
+    applyPickRuntimeOptions(loopDef, { protectHighGold: true, highGoldThreshold: 82 });
+    expect(loopDef.requirements[0]).toMatchObject({
+      maxRating: 83,
+      maxRatingBeforeHighGoldProtection: 83,
+      highGoldThreshold: 86,
+    });
+  });
+
+  it('resolves inventory-only as an inheritable preference only for supported strategies', () => {
+    expect(resolveInventoryMode('normal', { inventoryMode: 'inventory-only' }, { inventoryMode: 'normal' }))
+      .toBe('normal');
+    const supported = { strategy: 'supplyAndCraft', inventoryMode: 'inventory-only', openRewardPacks: true };
+    applyInventoryMode(supported, 'normal');
+    expect(supported).toMatchObject({ inventoryOnly: true, openRewardPacks: false });
+
+    const unsupported = { strategy: 'provisionPackCrafting' };
+    applyInventoryMode(unsupported, 'inventory-only');
+    expect(unsupported).not.toHaveProperty('inventoryOnly');
+    expect(unsupported.inventoryOnlyIgnored).toBe(true);
+  });
+
+  it('uses declarative runtime quantity metadata before legacy rounds flags', () => {
+    const loopDef = {
+      strategy: 'fillAndVerifySbc',
+      useRoundsAsCompletions: true,
+      maxCompletions: 1,
+      runtimeQuantity: {
+        mode: 'user',
+        target: 'maxCompletions',
+        default: 7,
+        min: 2,
+        max: 12,
+        label: 'Craft count',
+      },
+    };
+    expect(resolveRuntimeQuantity(loopDef)).toEqual({
+      mode: 'user',
+      target: 'maxCompletions',
+      default: 7,
+      min: 2,
+      max: 12,
+      label: 'Craft count',
+    });
+    applyLoopRuntimeOptions(loopDef, { rounds: 50 });
+    expect(loopDef.maxCompletions).toBe(12);
   });
 });
