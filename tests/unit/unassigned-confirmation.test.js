@@ -26,8 +26,33 @@ describe('Unassigned view confirmation', () => {
     expect(current.calls).toEqual(['wait', 'refresh']);
     expect(current.logs).toEqual([
       'Opening unassigned items view for confirmation: Daily Rare end',
-      'Unassigned confirmation (Daily Rare end): empty',
+      'Unassigned confirmation (Daily Rare end): empty after 1 stable read(s)',
     ]);
+  });
+
+  it('requires consecutive empty reads when pack recovery requests stable confirmation', async () => {
+    const snapshots = [[], [], []];
+    const current = harness({
+      stableEmptyReads: 3,
+      emptyReadDelayMs: 250,
+      sleep: vi.fn(async (ms) => current.calls.push(`sleep:${ms}`)),
+      getItems: vi.fn(() => snapshots.shift() || []),
+    });
+    await expect(confirmUnassignedView(current.options)).resolves.toEqual([]);
+    expect(current.options.refreshUnassigned).toHaveBeenCalledTimes(3);
+    expect(current.options.sleep).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a delayed Unassigned item instead of accepting the first empty cache read', async () => {
+    const delayed = { id: 77 };
+    const snapshots = [[], [delayed]];
+    const current = harness({
+      stableEmptyReads: 2,
+      sleep: vi.fn(async () => {}),
+      getItems: vi.fn(() => snapshots.shift() || []),
+    });
+    await expect(confirmUnassignedView(current.options)).resolves.toEqual([delayed]);
+    expect(current.logs.at(-1)).toContain('1 item(s) still present');
   });
 
   it('uses the text-button fallback and returns remaining items', async () => {

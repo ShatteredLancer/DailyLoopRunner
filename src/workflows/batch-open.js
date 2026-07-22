@@ -130,6 +130,23 @@ export async function runBatchOpenWorkflow(options = {}) {
         packsOpened,
         requestedPacks,
       });
+      if ((receipt.pendingItemRefs || []).length) {
+        const remaining = entry.quantity - openIndex - 1;
+        entryResult.skipped += remaining;
+        entryResult.reason = receipt.details?.cleanupReason
+          || `${receipt.pendingItemRefs.length} opened item(s) remain unresolved`;
+        skippedPacks += remaining;
+        skipFollowingEntries(entryIndex + 1, 'not attempted while opened items remain unresolved');
+        await options.onEvent?.('pending', {
+          entry,
+          entryResult,
+          receipt,
+          remaining,
+          packsOpened,
+          requestedPacks,
+        });
+        return finish('preserved', entryResult.reason);
+      }
       if (receipt.details?.cleanupStatus === 'preserved') {
         const remaining = entry.quantity - openIndex - 1;
         entryResult.skipped += remaining;

@@ -130,4 +130,24 @@ describe('runBatchOpenWorkflow', () => {
     expect(resolvePack).not.toHaveBeenCalled();
     expect(openPack).not.toHaveBeenCalled();
   });
+
+  it('counts the opened pack but stops before the next pack when response items remain pending', async () => {
+    const openPack = vi.fn(async ({ pack }) => ({
+      ...receipt(pack.id, [{ id: 84, type: 'player' }]),
+      pendingItemRefs: [{ id: 84, definitionId: 1084, pile: 'unassigned' }],
+      details: { cleanupReason: 'opened item routing did not settle' },
+    }));
+    const result = await runBatchOpenWorkflow({
+      plan: { entries: [{ packId: 1031, packName: '2x 84+', quantity: 3 }] },
+      resolvePack: async () => ({ id: 1031 }),
+      openPack,
+    });
+    expect(result).toMatchObject({
+      status: 'preserved',
+      reason: 'opened item routing did not settle',
+      packsOpened: 1,
+      skippedPacks: 2,
+    });
+    expect(openPack).toHaveBeenCalledOnce();
+  });
 });

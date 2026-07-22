@@ -850,7 +850,9 @@ Dry run 必须在副作用前停止：
 - `unrelated unassigned Player Pick`：通常是奖励别名不匹配，不代表 SBC 提交失败。
 - `SBC storage has only ...`：根因可能是前一步不该清空 Unassigned，而不是容量检查本身。
 - `selected M/N`：先看 diagnostics 和 FSU settings，再判断库存不足。
-- `Open pack failed: 471/500`：检查重试日志中的失败实例排除、Store Packs 刷新、最终 attempt 和错误码；`471` 不得复用同一 Pack 对象，`500` 仍按有界重试处理。
+- `Open pack failed: 471/500`：先检查上一包响应是否已经完成 duplicate materialization、Unassigned settlement 和逐卡 destination confirmation。`471` 常表示仍有服务端待处理物品，不能直接推断当前 Pack 实例已经失效；Batch 对同 ID 多包使用启动时捕获的实例队列，普通奖励包可按自身 resolver 获取刷新模型。`500` 仍按有界重试处理。
+- 开包响应中的 `isDuplicate()`/`duplicateId` 可能晚于响应返回。通用开包路径必须先用 Club 相同 definition 恢复迟到的 duplicate signal，再清理 Unassigned；不得先把响应卡当 non-duplicate 移动后仅凭一次空 repository 继续下一包。
+- `pendingItemRefs` 表示开包响应卡尚未确认进入 Club/Storage/Transfer，也没有被明确 reserved。任何自动开包流程都必须停止后续包或 SBC 动作；reserved 与 pending 不得混淆。
 - `Pack #N marked gone for this session after 404`：同一 pack id 已按 404 拉黑，本会话不再重复尝试（例如僵尸 TOTW Provision Refresh）。
 - `background submit returned 409/429; reloading challenge before retry`：评分 SBC 后台提交冲突，脚本会有限次重载 challenge 并重放阵容后重试；仍失败再停。
 - `rating shortage before automatic 2x84+ recovery: ...`：84x10/评分 SBC 主求解失败原因；出现在自动 2x84+ 恢复之前。先读这行区分“评分无解/超时/约束不满足”与后面的 fodder 不足。

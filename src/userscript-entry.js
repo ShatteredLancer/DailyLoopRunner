@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.43
+// @version      0.5.44
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -132,6 +132,12 @@ import {
   selectionConsumesSignalRefs,
 } from './unassigned/recovery.js';
 import { openPackTransaction } from './pack/open-transaction.js';
+import {
+  classifyOpenedItemRouting,
+  materializeOpenedPlayerDuplicates,
+} from './pack/opened-item-materialization.js';
+import { createPackInstanceQueue } from './pack/instance-queue.js';
+import { settleOpenedItems } from './pack/opened-item-settlement.js';
 import { recoverPackOpenRetry } from './pack/retry-recovery.js';
 import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
@@ -241,7 +247,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.43',
+    version: '0.5.44',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1666,6 +1672,7 @@ function updateLoopControls() {
     let initialLogged = false;
     const adapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
     const getSnapshot = async () => {
+      await options.beforeSnapshot?.();
       const liveItems = getUnassignedItems();
       reservedIds = new Set(
         options.reserveItem
@@ -1796,22 +1803,61 @@ function updateLoopControls() {
     }
   }
 
+  function materializeOpenedResponsePlayerDuplicates(items, label = 'opened reward pack') {
+    const result = materializeOpenedPlayerDuplicates({
+      items,
+      clubItems: getClubItems(),
+      isPlayer,
+      isDuplicate,
+      preparePurchasedItem: (item) => eaInventoryAdapter().preparePurchasedItem(item),
+    });
+    if (result.inferredDuplicates.length) {
+      log(`${label}: restored delayed duplicate metadata for ${result.inferredDuplicates.length} opened player(s) from matching Club entities`);
+    }
+    return result;
+  }
+
+  function restoreOpenedUnassignedDuplicateMetadata(items, label = 'opened reward pack') {
+    const responseById = new Map((items || [])
+      .map((item) => [Number(item?.id || 0), item])
+      .filter(([id]) => id));
+    let restored = 0;
+    for (const item of getUnassignedItems()) {
+      const responseItem = responseById.get(Number(item?.id || 0));
+      if (!responseItem) continue;
+      const clubDuplicate = findClubDuplicate(item) || findClubDuplicate(responseItem);
+      const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
+      if (duplicateId && !Number(item?.duplicateId || 0)) {
+        item.duplicateId = duplicateId;
+        if (item._duplicateId !== undefined) item._duplicateId = duplicateId;
+        restored++;
+      }
+      eaInventoryAdapter().preparePurchasedItem(item);
+    }
+    if (restored) log(`${label}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)`);
+    return restored;
+  }
+
   async function materializeOpenedPlayerRewards(items, label = 'opened reward pack') {
     const players = uniqueItems((items || []).filter((item) => isPlayer(item)));
     if (!players.length) return 0;
+    const materialized = materializeOpenedResponsePlayerDuplicates(players, label);
 
     let moved = 0;
     const movedIds = new Set();
     const markMoved = (list) => list.forEach((item) => movedIds.add(Number(item?.id || 0)));
 
-    const nonDuplicates = players.filter((item) => !isDuplicate(item));
+    const duplicateIds = new Set(materialized.duplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
+    const nonDuplicates = players.filter((item) => !duplicateIds.has(Number(item?.id || 0)));
     const movedNonDuplicates = await tryMoveOpenedRewardItems(nonDuplicates, inventoryPile('club'), true, label, 'non-duplicate');
     if (movedNonDuplicates) {
       moved += movedNonDuplicates;
       markMoved(nonDuplicates);
     }
 
-    const remainingDuplicates = players.filter((item) => !movedIds.has(Number(item?.id || 0)) && isDuplicate(item));
+    const remainingDuplicates = players.filter((item) =>
+      !movedIds.has(Number(item?.id || 0)) && duplicateIds.has(Number(item?.id || 0))
+    );
     const tradeableDuplicates = remainingDuplicates.filter((item) => isTradeable(item));
     if (tradeableDuplicates.length) {
       try {
@@ -1859,17 +1905,38 @@ function updateLoopControls() {
   }
 
   function openedItemRoutingResult(items, reserveItem = null, details = {}) {
-    const unassignedIds = new Set(getUnassignedItems().map((item) => Number(item?.id || 0)).filter(Boolean));
-    const reservedItems = [];
-    const routedItems = [];
-    const pendingItems = [];
-    for (const item of items || []) {
-      const remainsUnassigned = unassignedIds.has(Number(item?.id || 0));
-      if (!remainsUnassigned) routedItems.push(item);
-      else if (reserveItem?.(item)) reservedItems.push(item);
-      else pendingItems.push(item);
+    return {
+      ...classifyOpenedItemRouting({
+        items,
+        reserveItem,
+        piles: {
+          unassigned: getUnassignedItems(),
+          club: getClubItems(),
+          storage: getStorageItems(),
+          transfer: getTransferItems(),
+        },
+      }),
+      details,
+    };
+  }
+
+  async function confirmOpenedItemRouting(items, label, options = {}) {
+    const attempts = Math.max(1, Math.min(8, Number(options.attempts || 4) || 4));
+    const delayMs = Math.max(0, Number(options.delayMs ?? 500));
+    let routing = openedItemRoutingResult(items, options.reserveItem || null);
+    for (let attempt = 1; attempt <= attempts && routing.pendingItems.length; attempt++) {
+      await refreshUnassigned({ quiet: true });
+      await refreshPileCacheByCandidates('storage', { quiet: true });
+      await refreshPileCacheByCandidates('transfer', { quiet: true });
+      routing = openedItemRoutingResult(items, options.reserveItem || null);
+      if (!routing.pendingItems.length || attempt >= attempts) break;
+      await sleep(delayMs);
     }
-    return { reservedItems, routedItems, pendingItems, details };
+    if (routing.pendingItems.length) {
+      const ids = routing.pendingItems.map((item) => Number(item?.id || 0) || '?').join(', ');
+      log(`${label}: ${routing.pendingItems.length} opened item(s) still have no confirmed destination after ${attempts} check(s); ids:${ids}`);
+    }
+    return routing;
   }
 
   async function openPack(pack, purpose, options = {}) {
@@ -1883,9 +1950,10 @@ function updateLoopControls() {
     const retryCodes = options.retryCodes || (options.retryOn471 === true ? ['471'] : []);
     const receipt = await openPackTransaction({
       preOpenResolver: () => resolveRuntimeUnassigned(`opening ${purpose}`),
-      packSelector: async ({ attempt }) => {
+      packSelector: async ({ attempt, lastReason }) => {
         if (attempt === 1) return currentPack;
-        if (typeof options.resolveRetryPack === 'function') {
+        const reuseCurrentPack = String(lastReason || '') === '471' && options.reusePackOn471 === true;
+        if (!reuseCurrentPack && typeof options.resolveRetryPack === 'function') {
           currentPack = await options.resolveRetryPack();
         }
         return currentPack;
@@ -1900,6 +1968,7 @@ function updateLoopControls() {
       normalizeItems: async (items, { pack: selectedPack }) => {
         markStalePack(selectedPack);
         await waitLoadingEnd();
+        materializeOpenedResponsePlayerDuplicates(items, purpose);
         return {
           items,
           receiptItems: items.map((item) => inventoryAdapter.snapshotItem(item, 'unassigned')),
@@ -1913,24 +1982,41 @@ function updateLoopControls() {
       onItemsOpenedError: (error) => log(`${purpose}: reward highlight failed: ${error?.message || error}`),
       openedItemPolicy: options.openedItemPolicy,
       retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
-      beforeRetry: async ({ code, pack: failedPack }) => recoverPackOpenRetry({
-        label: purpose,
-        code,
-        pack: failedPack,
-        log,
-        markFailedPack: (item) => markStalePack(item),
-        sleep,
-        pauseMs: CFG.pauseMs,
-        settleMs: 700,
-        unwind: () => unwindSbcSquadControllers(`${purpose} pack-open recovery`),
-        showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`),
-        openStorePacks: () => openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`),
-        resolveUnassigned: () => resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`),
-        refreshInventory: ({ storeRefreshed }) => refreshInventoryCaches(`${purpose} pack-open recovery`, {
-          quiet: true,
-          includePacks: !storeRefreshed,
-        }),
-      }),
+      beforeRetry: async ({ code, pack: failedPack }) => {
+        if (String(code) === '471') {
+          log(`${purpose}: pack open returned 471; rechecking delayed Unassigned state before retry`);
+          await sleep(CFG.pauseMs);
+          await unwindSbcSquadControllers(`${purpose} pack-open recovery`);
+          await showUnassignedIfAny(`${purpose} pack-open recovery sync`, {
+            stableEmptyReads: 3,
+            emptyReadDelayMs: 450,
+          });
+          await resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`);
+          await refreshInventoryCaches(`${purpose} pack-open recovery`, {
+            quiet: true,
+            includePacks: false,
+          });
+          return;
+        }
+        await recoverPackOpenRetry({
+          label: purpose,
+          code,
+          pack: failedPack,
+          log,
+          markFailedPack: (item) => markStalePack(item),
+          sleep,
+          pauseMs: CFG.pauseMs,
+          settleMs: 700,
+          unwind: () => unwindSbcSquadControllers(`${purpose} pack-open recovery`),
+          showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`),
+          openStorePacks: () => openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`),
+          resolveUnassigned: () => resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`),
+          refreshInventory: ({ storeRefreshed }) => refreshInventoryCaches(`${purpose} pack-open recovery`, {
+            quiet: true,
+            includePacks: !storeRefreshed,
+          }),
+        });
+      },
       allowGone: options.allowGone === true,
       onGone: async (selectedPack) => {
         markStalePack(selectedPack, { gone: true });
@@ -1940,7 +2026,12 @@ function updateLoopControls() {
       },
     });
     state.lastOpenPackReceipt = receipt;
-    if (receipt.status === 'opened') return receipt;
+    if (receipt.status === 'opened') {
+      if (receipt.pendingItemRefs.length && options.allowPendingItems !== true) {
+        fail(`${purpose}: ${receipt.pendingItemRefs.length} opened item(s) remain unresolved; stopping before another pack or SBC action`);
+      }
+      return receipt;
+    }
     if (receipt.status === 'stale' || receipt.status === 'unavailable') {
       if (receipt.status === 'unavailable') log(`${purpose}: no matching pack remains after recovery`);
       return null;
@@ -3152,7 +3243,7 @@ function updateLoopControls() {
     return result;
   }
 
-  async function showUnassignedIfAny(reason = 'final confirmation') {
+  async function showUnassignedIfAny(reason = 'final confirmation', options = {}) {
     return confirmUnassignedView({
       reason,
       openUnassigned: () => pageRuntime.gotoUnassigned(ctrl()),
@@ -3167,6 +3258,9 @@ function updateLoopControls() {
       waitLoadingEnd,
       refreshUnassigned,
       getItems: getUnassignedItems,
+      stableEmptyReads: options.stableEmptyReads || 1,
+      emptyReadDelayMs: options.emptyReadDelayMs || 0,
+      sleep,
       log,
     });
   }
@@ -6080,18 +6174,39 @@ function updateLoopControls() {
 
   function createMaterializeAndResolvePolicy(label, cleanupReason, cleanupOptions = {}) {
     return createOpenedItemPolicy(async (openedItems) => {
-      await materializeOpenedPlayerRewards(openedItems, label);
-      await sleep(CFG.pauseMs);
-      const cleanup = await resolveRuntimeUnassigned(cleanupReason, cleanupOptions);
-      await refreshInventoryCaches(`${label} resolved`, { quiet: true });
-      await refreshUnassigned();
-      return openedItemRoutingResult(openedItems, null, {
-        cleanupStatus: cleanup.status,
-        cleanupReason: cleanup.reason || null,
-        blockedDestination: cleanup.plan?.blocked?.destination || null,
-        blockedFree: cleanup.plan?.blocked?.free ?? null,
-        blockedRequired: cleanup.plan?.blocked?.required ?? null,
+      const settlement = await settleOpenedItems({
+        attempts: 3,
+        materialize: async () => {
+          const materialized = await materializeOpenedPlayerRewards(openedItems, label);
+          await sleep(CFG.pauseMs);
+          return materialized;
+        },
+        cleanup: async ({ attempt }) => resolveRuntimeUnassigned(
+          attempt === 1 ? cleanupReason : `${cleanupReason} delayed response retry ${attempt}/3`,
+          {
+            ...cleanupOptions,
+            beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label),
+          },
+        ),
+        confirmRouting: async () => confirmOpenedItemRouting(openedItems, label),
+        onRetry: async ({ attempt, routing }) => {
+          log(`${label}: ${routing.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
+          await sleep(CFG.pauseMs);
+        },
       });
+      const cleanup = settlement.cleanup || {};
+      const routing = settlement.routing || { reservedItems: [], routedItems: [], pendingItems: openedItems };
+      return {
+        ...routing,
+        details: {
+          cleanupStatus: settlement.status === 'pending' ? 'preserved' : cleanup.status,
+          cleanupReason: settlement.reason || cleanup.reason || null,
+          settlementAttempts: settlement.attempts,
+          blockedDestination: cleanup.plan?.blocked?.destination || null,
+          blockedFree: cleanup.plan?.blocked?.free ?? null,
+          blockedRequired: cleanup.plan?.blocked?.required ?? null,
+        },
+      };
     });
   }
 
@@ -6602,16 +6717,10 @@ function updateLoopControls() {
       const materialDefs = getProvisionMaterialDefs(loopDef);
       const isReservedDuplicate = (item) => materialDefs.some((def) => isDuplicateForLoopRequirements(item, def));
       await refreshInventoryCaches(`${loopDef.name} provision response classification`, { includePacks: false, quiet: true });
-      const responseDuplicates = [];
-      for (const item of openedItems) {
-        const clubDuplicate = findClubDuplicate(item);
-        if (!isDuplicate(item) && !clubDuplicate) continue;
-
-        // EA can return the item before Purchased sets duplicateId. Preserve the response identity.
-        if (clubDuplicate && !Number(item?.duplicateId || 0)) item.duplicateId = clubDuplicate.id;
-        eaInventoryAdapter().preparePurchasedItem(item);
-        responseDuplicates.push(item);
-      }
+      const responseDuplicates = materializeOpenedResponsePlayerDuplicates(
+        openedItems,
+        `${loopDef.name} provision response classification`,
+      ).duplicates;
       const responseDuplicateIds = new Set(responseDuplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
       const responseReservedIds = new Set(responseDuplicates
         .filter(isReservedDuplicate)
@@ -6664,16 +6773,10 @@ function updateLoopControls() {
     return createOpenedItemPolicy(async (openedItems) => {
       const responseCount = openedItems.length;
       await refreshInventoryCaches(`${loopDef.name} rare pack response classification`, { includePacks: false, quiet: true });
-      const responseDuplicates = [];
-      for (const item of openedItems) {
-        const clubDuplicate = findClubDuplicate(item);
-        if (!isDuplicate(item) && !clubDuplicate) continue;
-
-        // Pack response items can arrive before Purchased cache materialization.
-        if (clubDuplicate && !Number(item?.duplicateId || 0)) item.duplicateId = clubDuplicate.id;
-        eaInventoryAdapter().preparePurchasedItem(item);
-        responseDuplicates.push(item);
-      }
+      const responseDuplicates = materializeOpenedResponsePlayerDuplicates(
+        openedItems,
+        `${loopDef.name} rare pack response classification`,
+      ).duplicates;
       const duplicateIds = new Set(responseDuplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
       const classified = classifyOpenedUpgradeDuplicates(openedItems, {
         isDuplicate: (item) => duplicateIds.has(Number(item?.id || 0)),
@@ -7879,6 +7982,7 @@ function updateLoopControls() {
       });
       const plan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
       const requested = plan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
+      let packQueue = null;
       log(`Batch Open: starting ${requested} requested pack(s) across ${plan.entries.length} pack type(s)`);
       result = await runBatchOpenWorkflow({
         plan,
@@ -7888,21 +7992,19 @@ function updateLoopControls() {
           enableRecovery: true,
         }),
         resolvePack: async (entry) => {
-          const pack = entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
-          if (pack) return pack;
-          await refreshStorePacks().catch(() => null);
-          return entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
+          if (!packQueue) {
+            packQueue = createPackInstanceQueue(getAvailableRepositoryMyPacks(), { getName: packName });
+          }
+          return packQueue.take(entry);
         },
         openPack: async ({ entry, pack, openIndex }) => await openPack(
           pack,
           `Batch Open ${entry.packName || `#${entry.packId}`} ${openIndex + 1}/${entry.quantity}`,
           {
             allowGone: true,
+            allowPendingItems: true,
+            reusePackOn471: true,
             retryCodes: ['471', '500'],
-            resolveRetryPack: async () => {
-              await refreshStorePacks().catch(() => null);
-              return entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
-            },
             openedItemPolicy: createMaterializeAndResolvePolicy(
               `Batch Open ${entry.packName || `#${entry.packId}`}`,
               `Batch Open ${entry.packName || `#${entry.packId}`} cleanup`,
@@ -7919,6 +8021,8 @@ function updateLoopControls() {
             log(`Batch Open: Unassigned items were preserved after ${payload.entry.packName || `#${payload.entry.packId}`}; stopping before ${payload.remaining} remaining pack(s) in this type`);
           } else if (event === 'preflight-preserved') {
             log(`Batch Open: existing Unassigned items cannot be safely resolved (${payload.preflight.reason || 'capacity blocked'}); no pack will be opened`);
+          } else if (event === 'pending') {
+            log(`Batch Open: opened items remain unresolved after ${payload.entry.packName || `#${payload.entry.packId}`}; stopping before ${payload.remaining} remaining pack(s)`);
           } else if (event === 'blocked') {
             log(`Batch Open: blocked at ${payload.entry.packName || `#${payload.entry.packId}`}; ${payload.entryResult.reason || 'pack open failed'}`);
           }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.43
+// @version      0.5.44
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -4129,13 +4129,13 @@
     }
     function resolveItem(ref, preferredPiles = INVENTORY_PILES2) {
       const id = Number(ref?.id || 0);
-      const definitionId = Number(ref?.definitionId || 0);
+      const definitionId2 = Number(ref?.definitionId || 0);
       const piles = [...new Set([ref?.pile, ...preferredPiles || []].filter((pile) => INVENTORY_PILES2.includes(pile)))];
       for (const pile of piles) {
         const items = readPile(pile);
         const byId = id ? items.find((item) => Number(item?.id || 0) === id) : null;
         if (byId) return { item: byId, pile };
-        const byDefinition = !id && definitionId ? items.find((item) => Number(item?.definitionId || 0) === definitionId) : null;
+        const byDefinition = !id && definitionId2 ? items.find((item) => Number(item?.definitionId || 0) === definitionId2) : null;
         if (byDefinition) return { item: byDefinition, pile };
       }
       return null;
@@ -4282,9 +4282,9 @@
       return unassignedItems().filter(isPlayerPickItem);
     }
     function isOwnedDuplicate(item) {
-      const itemId = Number(item?.id || 0);
+      const itemId2 = Number(item?.id || 0);
       return uniqueOwnedItems().some(
-        (ownedItem) => Number(ownedItem?.id || 0) !== itemId && Number(ownedItem?.definitionId || 0) === Number(item?.definitionId || -1) && sameLimitedUseType(ownedItem, item)
+        (ownedItem) => Number(ownedItem?.id || 0) !== itemId2 && Number(ownedItem?.definitionId || 0) === Number(item?.definitionId || -1) && sameLimitedUseType(ownedItem, item)
       );
     }
     function redeem(pickItem) {
@@ -4457,12 +4457,12 @@
       const item = award?.item || award?.utItem || award?.data?.item || null;
       if (!item || !isPlayerPickItem(item)) return null;
       const staticData = staticItemData(item);
-      const definitionId = firstPositiveInteger([
+      const definitionId2 = firstPositiveInteger([
         item?.definitionId,
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId = positiveInteger3(item?.id);
+      const itemId2 = positiveInteger3(item?.id);
       return {
         type: "PLAYER_PICK",
         name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
@@ -4471,9 +4471,9 @@
           item?.resourceId,
           item?._data?.resourceId,
           staticData?.resourceId,
-          itemId && definitionId && itemId === definitionId ? itemId : null
+          itemId2 && definitionId2 && itemId2 === definitionId2 ? itemId2 : null
         ]),
-        definitionId,
+        definitionId: definitionId2,
         candidateCount: firstPositiveInteger([
           item?.candidateCount,
           item?.totalCandidates,
@@ -4672,8 +4672,8 @@
   }
   function isPreferredItem(item, preferredRefs) {
     const id = Number(item?.id || item?.ref?.id || 0);
-    const definitionId = Number(item?.definitionId || item?.ref?.definitionId || 0);
-    return preferredRefs.some((ref) => ref.id ? ref.id === id : ref.definitionId > 0 && ref.definitionId === definitionId);
+    const definitionId2 = Number(item?.definitionId || item?.ref?.definitionId || 0);
+    return preferredRefs.some((ref) => ref.id ? ref.id === id : ref.definitionId > 0 && ref.definitionId === definitionId2);
   }
   function applyPilePriority(piles = [], fsuPolicy = {}) {
     if (!fsuPolicy.priorityStoragePlayers || !piles.includes("storage")) return [...piles];
@@ -5129,22 +5129,22 @@
     const resolvedSignals = {};
     const safetyCache = /* @__PURE__ */ new Map();
     const cachedIsSafe = (item) => {
-      const itemId = Number(item?.id || 0);
-      if (!itemId) return false;
-      if (!safetyCache.has(itemId)) safetyCache.set(itemId, isSafe(item));
-      return safetyCache.get(itemId);
+      const itemId2 = Number(item?.id || 0);
+      if (!itemId2) return false;
+      if (!safetyCache.has(itemId2)) safetyCache.set(itemId2, isSafe(item));
+      return safetyCache.get(itemId2);
     };
     const safeSubmissionItems = submissionItems.filter(cachedIsSafe);
     const submissionById = /* @__PURE__ */ new Map();
     const submissionByDefinition = /* @__PURE__ */ new Map();
     for (const item of safeSubmissionItems) {
-      const itemId = Number(item?.id || 0);
-      const definitionId = Number(item?.definitionId || 0);
-      if (itemId) submissionById.set(itemId, item);
-      if (!definitionId) continue;
-      const entries = submissionByDefinition.get(definitionId) || [];
+      const itemId2 = Number(item?.id || 0);
+      const definitionId2 = Number(item?.definitionId || 0);
+      if (itemId2) submissionById.set(itemId2, item);
+      if (!definitionId2) continue;
+      const entries = submissionByDefinition.get(definitionId2) || [];
       entries.push(item);
-      submissionByDefinition.set(definitionId, entries);
+      submissionByDefinition.set(definitionId2, entries);
     }
     for (const entries of submissionByDefinition.values()) {
       const sorted = sortFodder(entries, broadSpec, settings);
@@ -5153,8 +5153,8 @@
     function resolveSignal(sourceItem) {
       const duplicateId = Number(sourceItem?.duplicateId || 0);
       if (duplicateId && submissionById.has(duplicateId)) return submissionById.get(duplicateId);
-      const definitionId = Number(sourceItem?.definitionId || 0);
-      return submissionByDefinition.get(definitionId)?.[0] || null;
+      const definitionId2 = Number(sourceItem?.definitionId || 0);
+      return submissionByDefinition.get(definitionId2)?.[0] || null;
     }
     const requirementCache = /* @__PURE__ */ new Map();
     let scannedItems = 0;
@@ -5169,15 +5169,15 @@
           if (!item) continue;
           signal = sourceItem;
         }
-        const itemId = Number(item?.id || 0);
-        const definitionId = Number(item?.definitionId || 0);
-        if (!itemId || !definitionId || byItemId.has(itemId)) continue;
+        const itemId2 = Number(item?.id || 0);
+        const definitionId2 = Number(item?.definitionId || 0);
+        if (!itemId2 || !definitionId2 || byItemId.has(itemId2)) continue;
         if (!cachedIsSafe(item)) continue;
-        if (!requirementCache.has(itemId)) {
-          requirementCache.set(itemId, model.constraints.map((constraint) => constraint.matches(item)));
+        if (!requirementCache.has(itemId2)) {
+          requirementCache.set(itemId2, model.constraints.map((constraint) => constraint.matches(item)));
         }
-        const requirementMatches = requirementCache.get(itemId);
-        byItemId.set(itemId, {
+        const requirementMatches = requirementCache.get(itemId2);
+        byItemId.set(itemId2, {
           item,
           signal,
           pileName,
@@ -5190,10 +5190,10 @@
     }
     const byDefinition = /* @__PURE__ */ new Map();
     for (const entry of byItemId.values()) {
-      const definitionId = Number(entry.item?.definitionId || 0);
-      const existing = byDefinition.get(definitionId);
+      const definitionId2 = Number(entry.item?.definitionId || 0);
+      const existing = byDefinition.get(definitionId2);
       if (!existing || entry.pileRank < existing.pileRank || entry.pileRank === existing.pileRank && Number(entry.item?.id || 0) < Number(existing.item?.id || 0)) {
-        byDefinition.set(definitionId, entry);
+        byDefinition.set(definitionId2, entry);
       }
     }
     return {
@@ -5528,8 +5528,8 @@
   }
   function describeRef(ref = {}) {
     const id = Number(ref.id || 0) || "?";
-    const definitionId = Number(ref.definitionId || 0) || "?";
-    return `#${id}/def:${definitionId}`;
+    const definitionId2 = Number(ref.definitionId || 0) || "?";
+    return `#${id}/def:${definitionId2}`;
   }
   function criticalSnapshotSignature(snapshot = {}) {
     const critical = Object.fromEntries(
@@ -5807,14 +5807,14 @@
     return Number(item?.definitionId || 0);
   }
   function itemIdentityIds(item) {
-    const definitionId = Number(item?.definitionId || 0);
-    const itemId = Number(item?.id || 0);
+    const definitionId2 = Number(item?.definitionId || 0);
+    const itemId2 = Number(item?.id || 0);
     return [...new Set([
-      definitionId,
+      definitionId2,
       Number(item?.resourceId || 0),
       Number(item?._data?.resourceId || 0),
       Number(item?._staticData?.resourceId || 0),
-      itemId && definitionId && itemId === definitionId ? itemId : 0
+      itemId2 && definitionId2 && itemId2 === definitionId2 ? itemId2 : 0
     ].filter((value) => Number.isFinite(value) && value > 0))];
   }
   function playerPickItemName(item) {
@@ -5907,9 +5907,9 @@
     const prices = /* @__PURE__ */ new Map();
     const response = parseJson(text, "FUT.GG");
     for (const entry of response?.data || []) {
-      const definitionId = Number(entry?.eaId || entry?.definitionId || 0);
+      const definitionId2 = Number(entry?.eaId || entry?.definitionId || 0);
       const price = Number(entry?.price);
-      if (definitionId && Number.isFinite(price) && price > 0) prices.set(definitionId, price);
+      if (definitionId2 && Number.isFinite(price) && price > 0) prices.set(definitionId2, price);
     }
     return prices;
   }
@@ -5917,9 +5917,9 @@
     const prices = /* @__PURE__ */ new Map();
     const response = parseJson(text, "FUTNext");
     for (const entry of Array.isArray(response) ? response : []) {
-      const definitionId = Number(entry?.definitionId || entry?.eaId || 0);
+      const definitionId2 = Number(entry?.definitionId || entry?.eaId || 0);
       const price = Number(entry?.prices?.[0]);
-      if (definitionId && Number.isFinite(price) && price > 0) prices.set(definitionId, price);
+      if (definitionId2 && Number.isFinite(price) && price > 0) prices.set(definitionId2, price);
     }
     return prices;
   }
@@ -6344,6 +6344,8 @@
     if (typeof options.waitLoadingEnd !== "function") throw new TypeError("waitLoadingEnd is required");
     if (typeof options.refreshUnassigned !== "function") throw new TypeError("refreshUnassigned is required");
     if (typeof options.getItems !== "function") throw new TypeError("getItems is required");
+    const stableEmptyReads = Math.max(1, Math.min(5, Number(options.stableEmptyReads || 1) || 1));
+    const emptyReadDelayMs = Math.max(0, Number(options.emptyReadDelayMs || 0));
     log(`Opening unassigned items view for confirmation: ${reason}`);
     try {
       if (options.openUnassigned() !== true) options.clickFallback();
@@ -6351,24 +6353,29 @@
       log(`Could not open unassigned view automatically: ${error?.message || error}`);
     }
     await options.waitLoadingEnd();
-    await options.refreshUnassigned();
-    const items = options.getItems() || [];
-    if (!items.length) {
-      log(`Unassigned confirmation (${reason}): empty`);
-      return [];
+    for (let read = 1; read <= stableEmptyReads; read++) {
+      await options.refreshUnassigned();
+      const items = options.getItems() || [];
+      if (items.length) {
+        log(`Unassigned confirmation (${reason}): ${items.length} item(s) still present`);
+        return items;
+      }
+      if (read < stableEmptyReads) {
+        await options.sleep?.(emptyReadDelayMs);
+      }
     }
-    log(`Unassigned confirmation (${reason}): ${items.length} item(s) still present`);
-    return items;
+    log(`Unassigned confirmation (${reason}): empty after ${stableEmptyReads} stable read(s)`);
+    return [];
   }
 
   // src/unassigned/recovery.js
   function refMatches(ref, expectedRefs = []) {
     const id = Number(ref?.id || 0);
-    const definitionId = Number(ref?.definitionId || 0);
+    const definitionId2 = Number(ref?.definitionId || 0);
     return expectedRefs.some((expected) => {
       const expectedId = Number(expected?.id || 0);
       if (expectedId) return expectedId === id;
-      return Number(expected?.definitionId || 0) > 0 && Number(expected.definitionId) === definitionId;
+      return Number(expected?.definitionId || 0) > 0 && Number(expected.definitionId) === definitionId2;
     });
   }
   function itemMatchesRecoverySpec(item, spec = {}) {
@@ -6426,8 +6433,8 @@
       const signalRef = entry.signal.ref || entry.signal;
       if (!refMatches(signalRef, expectedRefs)) continue;
       const id = Number(signalRef?.id || 0);
-      const definitionId = Number(signalRef?.definitionId || 0);
-      selectedKeys.add(id ? `id:${id}` : `definition:${definitionId}`);
+      const definitionId2 = Number(signalRef?.definitionId || 0);
+      selectedKeys.add(id ? `id:${id}` : `definition:${definitionId2}`);
     }
     return selectedKeys.size;
   }
@@ -6566,6 +6573,142 @@
       if (options.beforeRetry) await options.beforeRetry({ attempt, code, pack, packRef, result });
     }
     return createOpenPackReceipt({ status: "blocked", reason: lastReason || "open failed", attempts });
+  }
+
+  // src/pack/opened-item-materialization.js
+  function itemId(item) {
+    return Number(item?.id || item?.ref?.id || 0);
+  }
+  function definitionId(item) {
+    return Number(item?.definitionId || item?.ref?.definitionId || 0);
+  }
+  function itemIds(items = []) {
+    return new Set((items || []).map(itemId).filter(Boolean));
+  }
+  function materializeOpenedPlayerDuplicates(options = {}) {
+    const items = options.items || [];
+    const clubItems = options.clubItems || [];
+    const isPlayer2 = options.isPlayer || ((item) => item?.type === "player");
+    const isDuplicate = options.isDuplicate || ((item) => Number(item?.duplicateId || 0) > 0);
+    const preparePurchasedItem = options.preparePurchasedItem || (() => {
+    });
+    const clubById = new Map(clubItems.map((item) => [itemId(item), item]).filter(([id]) => id));
+    const clubByDefinition = /* @__PURE__ */ new Map();
+    for (const item of clubItems) {
+      const key = definitionId(item);
+      if (!key) continue;
+      const matches = clubByDefinition.get(key) || [];
+      matches.push(item);
+      clubByDefinition.set(key, matches);
+    }
+    const duplicates = [];
+    const nonDuplicates = [];
+    const inferredDuplicates = [];
+    for (const item of items) {
+      if (!isPlayer2(item)) continue;
+      const duplicateId = Number(item?.duplicateId || 0);
+      const clubDuplicate = duplicateId && clubById.get(duplicateId) || (clubByDefinition.get(definitionId(item)) || []).find((candidate) => itemId(candidate) !== itemId(item)) || null;
+      if (!isDuplicate(item) && !clubDuplicate) {
+        nonDuplicates.push(item);
+        continue;
+      }
+      if (!duplicateId && clubDuplicate) {
+        item.duplicateId = itemId(clubDuplicate);
+        if (item._duplicateId !== void 0) item._duplicateId = itemId(clubDuplicate);
+        inferredDuplicates.push(item);
+      }
+      preparePurchasedItem(item);
+      duplicates.push(item);
+    }
+    return { duplicates, nonDuplicates, inferredDuplicates };
+  }
+  function classifyOpenedItemRouting(options = {}) {
+    const items = options.items || [];
+    const piles = options.piles || {};
+    const reserveItem = options.reserveItem || (() => false);
+    const unassignedIds = itemIds(piles.unassigned);
+    const destinationIds = itemIds([
+      ...piles.club || [],
+      ...piles.storage || [],
+      ...piles.transfer || []
+    ]);
+    const reservedItems = [];
+    const routedItems = [];
+    const pendingItems = [];
+    for (const item of items) {
+      const id = itemId(item);
+      if (id && unassignedIds.has(id)) {
+        if (reserveItem(item)) reservedItems.push(item);
+        else pendingItems.push(item);
+      } else if (id && destinationIds.has(id)) {
+        routedItems.push(item);
+      } else {
+        pendingItems.push(item);
+      }
+    }
+    return { reservedItems, routedItems, pendingItems };
+  }
+
+  // src/pack/instance-queue.js
+  function normalizedId(value) {
+    const id = typeof value === "object" ? value?.id ?? value?.packId ?? value?.packDefinitionId ?? value?.packAssetId : value;
+    const number = Number(id);
+    return Number.isFinite(number) && number > 0 ? String(number) : "";
+  }
+  function createPackInstanceQueue(packs = [], options = {}) {
+    const queue = [...packs || []];
+    const getName = options.getName || ((pack) => String(pack?.name || pack?.packName || ""));
+    return {
+      take(entry = {}) {
+        const entryId = normalizedId(entry.packId);
+        const entryName = String(entry.packName || "").trim().toLowerCase();
+        const index = queue.findIndex((pack) => entryId ? normalizedId(pack) === entryId : entryName && getName(pack).trim().toLowerCase() === entryName);
+        if (index < 0) return null;
+        return queue.splice(index, 1)[0] || null;
+      },
+      remaining(entry = {}) {
+        const entryId = normalizedId(entry.packId);
+        const entryName = String(entry.packName || "").trim().toLowerCase();
+        return queue.filter((pack) => entryId ? normalizedId(pack) === entryId : entryName && getName(pack).trim().toLowerCase() === entryName).length;
+      }
+    };
+  }
+
+  // src/pack/opened-item-settlement.js
+  function boundedAttempts(value, fallback = 3) {
+    const number = Number(value);
+    return Math.max(1, Math.min(10, Number.isFinite(number) ? Math.floor(number) : fallback));
+  }
+  async function settleOpenedItems(options = {}) {
+    if (typeof options.materialize !== "function") throw new TypeError("materialize is required");
+    if (typeof options.cleanup !== "function") throw new TypeError("cleanup is required");
+    if (typeof options.confirmRouting !== "function") throw new TypeError("confirmRouting is required");
+    const attempts = boundedAttempts(options.attempts, 3);
+    const materialized = await options.materialize();
+    let cleanup = null;
+    let routing = { reservedItems: [], routedItems: [], pendingItems: [] };
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      cleanup = await options.cleanup({ attempt, materialized });
+      routing = await options.confirmRouting({ attempt, materialized, cleanup }) || routing;
+      if (!(routing.pendingItems || []).length) {
+        return { status: cleanup?.status || "resolved", attempts: attempt, materialized, cleanup, routing };
+      }
+      if (cleanup?.status === "preserved") {
+        return { status: "preserved", attempts: attempt, materialized, cleanup, routing };
+      }
+      if (attempt < attempts) {
+        await options.onRetry?.({ attempt, materialized, cleanup, routing });
+      }
+    }
+    const pendingCount = (routing.pendingItems || []).length;
+    return {
+      status: "pending",
+      reason: `${pendingCount} opened item(s) remain unresolved after ${attempts} settlement attempt(s)`,
+      attempts,
+      materialized,
+      cleanup,
+      routing
+    };
   }
 
   // src/pack/retry-recovery.js
@@ -7667,6 +7810,22 @@
           packsOpened,
           requestedPacks
         });
+        if ((receipt.pendingItemRefs || []).length) {
+          const remaining = entry.quantity - openIndex - 1;
+          entryResult.skipped += remaining;
+          entryResult.reason = receipt.details?.cleanupReason || `${receipt.pendingItemRefs.length} opened item(s) remain unresolved`;
+          skippedPacks += remaining;
+          skipFollowingEntries(entryIndex + 1, "not attempted while opened items remain unresolved");
+          await options.onEvent?.("pending", {
+            entry,
+            entryResult,
+            receipt,
+            remaining,
+            packsOpened,
+            requestedPacks
+          });
+          return finish("preserved", entryResult.reason);
+        }
         if (receipt.details?.cleanupStatus === "preserved") {
           const remaining = entry.quantity - openIndex - 1;
           entryResult.skipped += remaining;
@@ -9884,7 +10043,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.43",
+      version: "0.5.44",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -10874,12 +11033,12 @@
       const lockedItemIds = lockContext?.lockedItemIds || new Set((settings.lockedItemIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
       const lockedDefinitionIds = lockContext?.lockedDefinitionIds || new Set((settings.lockedDefinitionIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0));
       if (!lockedItemIds.size && !lockedDefinitionIds.size) return false;
-      const itemIds = itemIdentifierNumbers(item, ITEM_ID_FIELD_ALIASES);
+      const itemIds2 = itemIdentifierNumbers(item, ITEM_ID_FIELD_ALIASES);
       const definitionIds2 = itemIdentifierNumbers(item, DEFINITION_ID_FIELD_ALIASES);
-      if (itemIds.some((id) => lockedItemIds.has(id))) return true;
+      if (itemIds2.some((id) => lockedItemIds.has(id))) return true;
       if (definitionIds2.some((id) => lockedDefinitionIds.has(id))) return true;
       const allIds = uniqueNumberList([
-        ...itemIds,
+        ...itemIds2,
         ...definitionIds2,
         ...itemIdentifierNumbers(item, ITEM_IDENTITY_FIELD_ALIASES)
       ]);
@@ -10992,8 +11151,8 @@
       if (pileName === "club") return uniqueItems(getClubItems());
       return [];
     }
-    function findCachedItemById(itemId, pileNames = ["storage", "club", "unassigned", "transfer"]) {
-      const targetId = Number(itemId || 0);
+    function findCachedItemById(itemId2, pileNames = ["storage", "club", "unassigned", "transfer"]) {
+      const targetId = Number(itemId2 || 0);
       if (!targetId) return null;
       for (const pileName of pileNames) {
         const item = getPileItemsByName(pileName).find((entry) => Number(entry?.id || 0) === targetId);
@@ -11093,10 +11252,10 @@
     function isSbcUsablePlayer(item, options = {}, context = null) {
       if (!isPlayer2(item)) return false;
       const id = Number(item?.id || 0);
-      const definitionId = Number(item?.definitionId || 0);
+      const definitionId2 = Number(item?.definitionId || 0);
       if (id && state.consumedItemIds.has(id)) return false;
       if (id && (context?.protectedItemIds?.has(id) || options.protectedItemIds?.some((value) => Number(value) === id))) return false;
-      if (definitionId && (context?.protectedDefinitionIds?.has(definitionId) || options.protectedDefinitionIds?.some((value) => Number(value) === definitionId))) return false;
+      if (definitionId2 && (context?.protectedDefinitionIds?.has(definitionId2) || options.protectedDefinitionIds?.some((value) => Number(value) === definitionId2))) return false;
       if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) return false;
       if (isLimitedUseItem(item)) return false;
       if (isConceptItem(item)) return false;
@@ -11156,6 +11315,7 @@
       let initialLogged = false;
       const adapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
       const getSnapshot = async () => {
+        await options.beforeSnapshot?.();
         const liveItems = getUnassignedItems();
         reservedIds = new Set(
           options.reserveItem ? liveItems.filter(options.reserveItem).map((item) => Number(item?.id || 0)).filter(Boolean) : []
@@ -11271,19 +11431,54 @@
         return 0;
       }
     }
+    function materializeOpenedResponsePlayerDuplicates(items, label = "opened reward pack") {
+      const result = materializeOpenedPlayerDuplicates({
+        items,
+        clubItems: getClubItems(),
+        isPlayer: isPlayer2,
+        isDuplicate,
+        preparePurchasedItem: (item) => eaInventoryAdapter().preparePurchasedItem(item)
+      });
+      if (result.inferredDuplicates.length) {
+        log(`${label}: restored delayed duplicate metadata for ${result.inferredDuplicates.length} opened player(s) from matching Club entities`);
+      }
+      return result;
+    }
+    function restoreOpenedUnassignedDuplicateMetadata(items, label = "opened reward pack") {
+      const responseById = new Map((items || []).map((item) => [Number(item?.id || 0), item]).filter(([id]) => id));
+      let restored = 0;
+      for (const item of getUnassignedItems()) {
+        const responseItem = responseById.get(Number(item?.id || 0));
+        if (!responseItem) continue;
+        const clubDuplicate = findClubDuplicate2(item) || findClubDuplicate2(responseItem);
+        const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
+        if (duplicateId && !Number(item?.duplicateId || 0)) {
+          item.duplicateId = duplicateId;
+          if (item._duplicateId !== void 0) item._duplicateId = duplicateId;
+          restored++;
+        }
+        eaInventoryAdapter().preparePurchasedItem(item);
+      }
+      if (restored) log(`${label}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)`);
+      return restored;
+    }
     async function materializeOpenedPlayerRewards(items, label = "opened reward pack") {
       const players = uniqueItems((items || []).filter((item) => isPlayer2(item)));
       if (!players.length) return 0;
+      const materialized = materializeOpenedResponsePlayerDuplicates(players, label);
       let moved = 0;
       const movedIds = /* @__PURE__ */ new Set();
       const markMoved = (list) => list.forEach((item) => movedIds.add(Number(item?.id || 0)));
-      const nonDuplicates = players.filter((item) => !isDuplicate(item));
+      const duplicateIds = new Set(materialized.duplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
+      const nonDuplicates = players.filter((item) => !duplicateIds.has(Number(item?.id || 0)));
       const movedNonDuplicates = await tryMoveOpenedRewardItems(nonDuplicates, inventoryPile("club"), true, label, "non-duplicate");
       if (movedNonDuplicates) {
         moved += movedNonDuplicates;
         markMoved(nonDuplicates);
       }
-      const remainingDuplicates = players.filter((item) => !movedIds.has(Number(item?.id || 0)) && isDuplicate(item));
+      const remainingDuplicates = players.filter(
+        (item) => !movedIds.has(Number(item?.id || 0)) && duplicateIds.has(Number(item?.id || 0))
+      );
       const tradeableDuplicates = remainingDuplicates.filter((item) => isTradeable(item));
       if (tradeableDuplicates.length) {
         try {
@@ -11326,17 +11521,37 @@
       return moved;
     }
     function openedItemRoutingResult(items, reserveItem = null, details = {}) {
-      const unassignedIds = new Set(getUnassignedItems().map((item) => Number(item?.id || 0)).filter(Boolean));
-      const reservedItems = [];
-      const routedItems = [];
-      const pendingItems = [];
-      for (const item of items || []) {
-        const remainsUnassigned = unassignedIds.has(Number(item?.id || 0));
-        if (!remainsUnassigned) routedItems.push(item);
-        else if (reserveItem?.(item)) reservedItems.push(item);
-        else pendingItems.push(item);
+      return {
+        ...classifyOpenedItemRouting({
+          items,
+          reserveItem,
+          piles: {
+            unassigned: getUnassignedItems(),
+            club: getClubItems(),
+            storage: getStorageItems(),
+            transfer: getTransferItems()
+          }
+        }),
+        details
+      };
+    }
+    async function confirmOpenedItemRouting(items, label, options = {}) {
+      const attempts = Math.max(1, Math.min(8, Number(options.attempts || 4) || 4));
+      const delayMs = Math.max(0, Number(options.delayMs ?? 500));
+      let routing = openedItemRoutingResult(items, options.reserveItem || null);
+      for (let attempt = 1; attempt <= attempts && routing.pendingItems.length; attempt++) {
+        await refreshUnassigned({ quiet: true });
+        await refreshPileCacheByCandidates("storage", { quiet: true });
+        await refreshPileCacheByCandidates("transfer", { quiet: true });
+        routing = openedItemRoutingResult(items, options.reserveItem || null);
+        if (!routing.pendingItems.length || attempt >= attempts) break;
+        await sleep(delayMs);
       }
-      return { reservedItems, routedItems, pendingItems, details };
+      if (routing.pendingItems.length) {
+        const ids = routing.pendingItems.map((item) => Number(item?.id || 0) || "?").join(", ");
+        log(`${label}: ${routing.pendingItems.length} opened item(s) still have no confirmed destination after ${attempts} check(s); ids:${ids}`);
+      }
+      return routing;
     }
     async function openPack(pack, purpose, options = {}) {
       if (!pack) fail2(`Pack not found for ${purpose}`);
@@ -11349,9 +11564,10 @@
       const retryCodes = options.retryCodes || (options.retryOn471 === true ? ["471"] : []);
       const receipt = await openPackTransaction({
         preOpenResolver: () => resolveRuntimeUnassigned(`opening ${purpose}`),
-        packSelector: async ({ attempt }) => {
+        packSelector: async ({ attempt, lastReason }) => {
           if (attempt === 1) return currentPack;
-          if (typeof options.resolveRetryPack === "function") {
+          const reuseCurrentPack = String(lastReason || "") === "471" && options.reusePackOn471 === true;
+          if (!reuseCurrentPack && typeof options.resolveRetryPack === "function") {
             currentPack = await options.resolveRetryPack();
           }
           return currentPack;
@@ -11366,6 +11582,7 @@
         normalizeItems: async (items, { pack: selectedPack }) => {
           markStalePack(selectedPack);
           await waitLoadingEnd();
+          materializeOpenedResponsePlayerDuplicates(items, purpose);
           return {
             items,
             receiptItems: items.map((item) => inventoryAdapter.snapshotItem(item, "unassigned"))
@@ -11379,24 +11596,41 @@
         onItemsOpenedError: (error) => log(`${purpose}: reward highlight failed: ${error?.message || error}`),
         openedItemPolicy: options.openedItemPolicy,
         retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
-        beforeRetry: async ({ code, pack: failedPack }) => recoverPackOpenRetry({
-          label: purpose,
-          code,
-          pack: failedPack,
-          log,
-          markFailedPack: (item) => markStalePack(item),
-          sleep,
-          pauseMs: CFG.pauseMs,
-          settleMs: 700,
-          unwind: () => unwindSbcSquadControllers2(`${purpose} pack-open recovery`),
-          showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`),
-          openStorePacks: () => openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`),
-          resolveUnassigned: () => resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`),
-          refreshInventory: ({ storeRefreshed }) => refreshInventoryCaches(`${purpose} pack-open recovery`, {
-            quiet: true,
-            includePacks: !storeRefreshed
-          })
-        }),
+        beforeRetry: async ({ code, pack: failedPack }) => {
+          if (String(code) === "471") {
+            log(`${purpose}: pack open returned 471; rechecking delayed Unassigned state before retry`);
+            await sleep(CFG.pauseMs);
+            await unwindSbcSquadControllers2(`${purpose} pack-open recovery`);
+            await showUnassignedIfAny(`${purpose} pack-open recovery sync`, {
+              stableEmptyReads: 3,
+              emptyReadDelayMs: 450
+            });
+            await resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`);
+            await refreshInventoryCaches(`${purpose} pack-open recovery`, {
+              quiet: true,
+              includePacks: false
+            });
+            return;
+          }
+          await recoverPackOpenRetry({
+            label: purpose,
+            code,
+            pack: failedPack,
+            log,
+            markFailedPack: (item) => markStalePack(item),
+            sleep,
+            pauseMs: CFG.pauseMs,
+            settleMs: 700,
+            unwind: () => unwindSbcSquadControllers2(`${purpose} pack-open recovery`),
+            showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`),
+            openStorePacks: () => openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`),
+            resolveUnassigned: () => resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`),
+            refreshInventory: ({ storeRefreshed }) => refreshInventoryCaches(`${purpose} pack-open recovery`, {
+              quiet: true,
+              includePacks: !storeRefreshed
+            })
+          });
+        },
         allowGone: options.allowGone === true,
         onGone: async (selectedPack) => {
           markStalePack(selectedPack, { gone: true });
@@ -11406,7 +11640,12 @@
         }
       });
       state.lastOpenPackReceipt = receipt;
-      if (receipt.status === "opened") return receipt;
+      if (receipt.status === "opened") {
+        if (receipt.pendingItemRefs.length && options.allowPendingItems !== true) {
+          fail2(`${purpose}: ${receipt.pendingItemRefs.length} opened item(s) remain unresolved; stopping before another pack or SBC action`);
+        }
+        return receipt;
+      }
       if (receipt.status === "stale" || receipt.status === "unavailable") {
         if (receipt.status === "unavailable") log(`${purpose}: no matching pack remains after recovery`);
         return null;
@@ -11959,11 +12198,11 @@
     function getUsabilityRejectReasons(item, options = {}) {
       const reasons = [];
       const id = Number(item?.id || 0);
-      const definitionId = Number(item?.definitionId || 0);
+      const definitionId2 = Number(item?.definitionId || 0);
       if (!isPlayer2(item)) reasons.push("not-player");
       if (id && state.consumedItemIds.has(id)) reasons.push("consumed-this-run");
       if (id && options.protectedItemIds?.some((value) => Number(value) === id)) reasons.push("protected-id");
-      if (definitionId && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId)) reasons.push("protected-def");
+      if (definitionId2 && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId2)) reasons.push("protected-def");
       if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) {
         reasons.push("protected-high-gold");
       }
@@ -12093,9 +12332,9 @@
     }
     function duplicateSignalDiagnostic(signal, requirement = {}, settings = getFsuSettings()) {
       const signalId = Number(signal?.id || signal?.ref?.id || 0);
-      const definitionId = Number(signal?.definitionId || signal?.ref?.definitionId || 0);
+      const definitionId2 = Number(signal?.definitionId || signal?.ref?.definitionId || 0);
       const duplicateId = Number(signal?.duplicateId || 0);
-      const candidates = getSubmissionCacheItems().filter((item) => Number(item?.id || 0) === duplicateId || Number(item?.definitionId || 0) === definitionId).map((item) => {
+      const candidates = getSubmissionCacheItems().filter((item) => Number(item?.id || 0) === duplicateId || Number(item?.definitionId || 0) === definitionId2).map((item) => {
         const reasons = [.../* @__PURE__ */ new Set([
           ...getUsabilityRejectReasons(item, requirement),
           ...getSpecRejectReasons(item, requirement)
@@ -12117,7 +12356,7 @@
       ])];
       return {
         signalId,
-        definitionId,
+        definitionId: definitionId2,
         duplicateId,
         name: itemDisplayName(signal),
         rating: Number(signal?.rating || 0),
@@ -12388,11 +12627,11 @@
       );
       let resolvedCount = 0;
       const selected = (selection.selected || []).map((item) => {
-        const itemId = Number(item?.id || 0);
-        if (!transferIds.has(itemId)) return item;
+        const itemId2 = Number(item?.id || 0);
+        if (!transferIds.has(itemId2)) return item;
         const resolved = findSubmissionItemForDuplicateSignal(item, usedIds);
         if (!resolved) {
-          const name = item?.name || item?.lastName || item?.definitionId || itemId || "unknown";
+          const name = item?.name || item?.lastName || item?.definitionId || itemId2 || "unknown";
           fail2(`${loopDef.name}: transfer item ${name} cannot be resolved to a club/storage duplicate for SBC submit`);
         }
         usedIds.add(Number(resolved.id));
@@ -12486,7 +12725,7 @@
       if (result.status !== "prepared") fail2(`${label}: squad preparation failed: ${result.reason || result.status}`);
       return result;
     }
-    async function showUnassignedIfAny(reason = "final confirmation") {
+    async function showUnassignedIfAny(reason = "final confirmation", options = {}) {
       return confirmUnassignedView({
         reason,
         openUnassigned: () => pageRuntime.gotoUnassigned(ctrl()),
@@ -12501,6 +12740,9 @@
         waitLoadingEnd,
         refreshUnassigned,
         getItems: getUnassignedItems,
+        stableEmptyReads: options.stableEmptyReads || 1,
+        emptyReadDelayMs: options.emptyReadDelayMs || 0,
+        sleep,
         log
       });
     }
@@ -12946,8 +13188,8 @@
         for (const item of getPileItemsByName(pileName)) {
           const id = Number(item?.id || 0);
           if (!id || seen.has(id) || usedIds.has(id)) continue;
-          const definitionId = Number(item?.definitionId || 0);
-          if (definitionId && usedDefinitionIds.has(definitionId)) continue;
+          const definitionId2 = Number(item?.definitionId || 0);
+          if (definitionId2 && usedDefinitionIds.has(definitionId2)) continue;
           seen.add(id);
           if (isEligibleNormalRepairFiller(item, loopDef)) entries.push({ item, pileName });
         }
@@ -12968,8 +13210,8 @@
     function isRequiredTotwRepairTarget(loopDef, entry, keepTotwId) {
       const item = entry?.item;
       if (!item) return false;
-      const itemId = Number(item?.id || 0);
-      if (itemId && itemId === keepTotwId) return false;
+      const itemId2 = Number(item?.id || 0);
+      if (itemId2 && itemId2 === keepTotwId) return false;
       const reasons = entry?.reasons || [];
       return isSbcSpecialItem(item) || reasons.includes("required-totw") || reasons.some((reason) => String(reason).startsWith("required-totw-min-")) || reasons.includes("special-blocked") || reasons.includes("tradeable-blocked") || reasons.includes("fsu-locked-player") || reasons.includes("protected-id") || reasons.includes("protected-def") || reasons.includes("loan") || reasons.includes("limited-use") || reasons.includes("concept") || reasons.includes("academy") || reasons.some((reason) => reason.startsWith("rating-over-")) || getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }).length > 0;
     }
@@ -13085,8 +13327,8 @@
       const changes = [];
       for (const target of targets) {
         const fillerIndex = fillers.findIndex(({ item }) => {
-          const definitionId = Number(item?.definitionId || 0);
-          return !definitionId || !usedDefinitionIds.has(definitionId);
+          const definitionId2 = Number(item?.definitionId || 0);
+          return !definitionId2 || !usedDefinitionIds.has(definitionId2);
         });
         if (fillerIndex === -1) {
           return {
@@ -13188,16 +13430,16 @@
       const changes = [];
       for (let offset = 0; offset < missing.missing; offset++) {
         const filler = fillers.find(({ item }) => {
-          const definitionId2 = Number(item?.definitionId || 0);
-          return !definitionId2 || !usedDefinitionIds.has(definitionId2);
+          const definitionId3 = Number(item?.definitionId || 0);
+          return !definitionId3 || !usedDefinitionIds.has(definitionId3);
         });
         if (!filler) return null;
         const fillerIndex = fillers.indexOf(filler);
         if (fillerIndex >= 0) fillers.splice(fillerIndex, 1);
         players.push(filler.item);
         usedIds.add(Number(filler.item?.id || 0));
-        const definitionId = Number(filler.item?.definitionId || 0);
-        if (definitionId) usedDefinitionIds.add(definitionId);
+        const definitionId2 = Number(filler.item?.definitionId || 0);
+        if (definitionId2) usedDefinitionIds.add(definitionId2);
         changes.push({
           index: missing.current + offset,
           from: null,
@@ -13527,7 +13769,7 @@
     function getSbcProtectionReasons(item, loopDef = {}, context = {}) {
       const reasons = [];
       const rating = Number(item?.rating || 0);
-      const itemId = Number(item?.id || 0);
+      const itemId2 = Number(item?.id || 0);
       const settings = context.settings || getFsuSettings();
       const maxRating = getSubmittedRatingLimit(item, loopDef, settings);
       const protectedIds = context.protectedItemIds || new Set((loopDef.protectedItemIds || []).map(Number));
@@ -13539,7 +13781,7 @@
         playerOnly: true,
         allowSpecial: requiredSpecialCount > 0 && specialIndex <= requiredSpecialCount
       };
-      if (itemId && state.consumedItemIds.has(itemId)) reasons.push("consumed-this-run");
+      if (itemId2 && state.consumedItemIds.has(itemId2)) reasons.push("consumed-this-run");
       if (isLoanItem(item)) reasons.push("loan");
       else if (isLimitedUseItem(item)) reasons.push("limited-use");
       if (isConceptItem(item)) reasons.push("concept");
@@ -13551,7 +13793,7 @@
       if (!isInactiveTrade(item)) {
         if (!reasons.includes("active-trade")) reasons.push("active-trade");
       }
-      if (protectedIds.has(itemId)) reasons.push("protected-id");
+      if (protectedIds.has(itemId2)) reasons.push("protected-id");
       if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) reasons.push("protected-def");
       if (["totw", "totw-tots-fof"].includes(requiredSpecialKind(loopDef)) && requiredSpecialCount > 0 && isSbcSpecialItem(item) && specialIndex <= requiredSpecialCount && !isRequiredSpecialItem(item, loopDef)) {
         reasons.push("required-totw");
@@ -13623,10 +13865,10 @@
       for (const { item, index, reasons } of inspection.blocked || []) {
         const name = itemDisplayName(item);
         const rating = Number(item?.rating || 0) || "?";
-        const itemId = Number(item?.id || 0) || "?";
-        const definitionId = Number(item?.definitionId || 0) || "?";
+        const itemId2 = Number(item?.id || 0) || "?";
+        const definitionId2 = Number(item?.definitionId || 0) || "?";
         const ratingLimit = getSubmittedRatingLimit(item, loopDef);
-        const prefix = `slot ${index + 1} ${name} rating:${rating} id:${itemId} def:${definitionId}`;
+        const prefix = `slot ${index + 1} ${name} rating:${rating} id:${itemId2} def:${definitionId2}`;
         if (reasons.some((reason) => reason.startsWith("rating-over-"))) {
           const replacement = isNormalGoldFodder(item) ? "normal gold card" : "untradeable card";
           hints.push(`${prefix}: replace with rating <= ${ratingLimit || "limit"} ${replacement}`);
@@ -14108,8 +14350,8 @@
     function itemRefMatchesAny(item, refs = []) {
       const id = Number(item?.id || item?.ref?.id || 0);
       if (id) return refs.some((ref) => Number(ref?.id || 0) === id);
-      const definitionId = Number(item?.definitionId || item?.ref?.definitionId || 0);
-      return definitionId > 0 && refs.some((ref) => !Number(ref?.id || 0) && Number(ref?.definitionId || 0) === definitionId);
+      const definitionId2 = Number(item?.definitionId || item?.ref?.definitionId || 0);
+      return definitionId2 > 0 && refs.some((ref) => !Number(ref?.id || 0) && Number(ref?.definitionId || 0) === definitionId2);
     }
     function duplicateSignalRefKey(ref = {}) {
       const id = Number(ref?.id || ref?.ref?.id || 0);
@@ -15067,18 +15309,39 @@
     }
     function createMaterializeAndResolvePolicy(label, cleanupReason, cleanupOptions = {}) {
       return createOpenedItemPolicy(async (openedItems) => {
-        await materializeOpenedPlayerRewards(openedItems, label);
-        await sleep(CFG.pauseMs);
-        const cleanup = await resolveRuntimeUnassigned(cleanupReason, cleanupOptions);
-        await refreshInventoryCaches(`${label} resolved`, { quiet: true });
-        await refreshUnassigned();
-        return openedItemRoutingResult(openedItems, null, {
-          cleanupStatus: cleanup.status,
-          cleanupReason: cleanup.reason || null,
-          blockedDestination: cleanup.plan?.blocked?.destination || null,
-          blockedFree: cleanup.plan?.blocked?.free ?? null,
-          blockedRequired: cleanup.plan?.blocked?.required ?? null
+        const settlement = await settleOpenedItems({
+          attempts: 3,
+          materialize: async () => {
+            const materialized = await materializeOpenedPlayerRewards(openedItems, label);
+            await sleep(CFG.pauseMs);
+            return materialized;
+          },
+          cleanup: async ({ attempt }) => resolveRuntimeUnassigned(
+            attempt === 1 ? cleanupReason : `${cleanupReason} delayed response retry ${attempt}/3`,
+            {
+              ...cleanupOptions,
+              beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label)
+            }
+          ),
+          confirmRouting: async () => confirmOpenedItemRouting(openedItems, label),
+          onRetry: async ({ attempt, routing: routing2 }) => {
+            log(`${label}: ${routing2.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
+            await sleep(CFG.pauseMs);
+          }
         });
+        const cleanup = settlement.cleanup || {};
+        const routing = settlement.routing || { reservedItems: [], routedItems: [], pendingItems: openedItems };
+        return {
+          ...routing,
+          details: {
+            cleanupStatus: settlement.status === "pending" ? "preserved" : cleanup.status,
+            cleanupReason: settlement.reason || cleanup.reason || null,
+            settlementAttempts: settlement.attempts,
+            blockedDestination: cleanup.plan?.blocked?.destination || null,
+            blockedFree: cleanup.plan?.blocked?.free ?? null,
+            blockedRequired: cleanup.plan?.blocked?.required ?? null
+          }
+        };
       });
     }
     function createReserveMatchingDuplicatePackPolicy(loopDef, source) {
@@ -15531,14 +15794,10 @@
         const materialDefs = getProvisionMaterialDefs(loopDef);
         const isReservedDuplicate = (item) => materialDefs.some((def) => isDuplicateForLoopRequirements(item, def));
         await refreshInventoryCaches(`${loopDef.name} provision response classification`, { includePacks: false, quiet: true });
-        const responseDuplicates = [];
-        for (const item of openedItems) {
-          const clubDuplicate = findClubDuplicate2(item);
-          if (!isDuplicate(item) && !clubDuplicate) continue;
-          if (clubDuplicate && !Number(item?.duplicateId || 0)) item.duplicateId = clubDuplicate.id;
-          eaInventoryAdapter().preparePurchasedItem(item);
-          responseDuplicates.push(item);
-        }
+        const responseDuplicates = materializeOpenedResponsePlayerDuplicates(
+          openedItems,
+          `${loopDef.name} provision response classification`
+        ).duplicates;
         const responseDuplicateIds = new Set(responseDuplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
         const responseReservedIds = new Set(responseDuplicates.filter(isReservedDuplicate).map((item) => Number(item?.id || 0)).filter(Boolean));
         const directClub = openedItems.filter((item) => !responseDuplicateIds.has(Number(item?.id || 0)));
@@ -15582,14 +15841,10 @@
       return createOpenedItemPolicy(async (openedItems) => {
         const responseCount = openedItems.length;
         await refreshInventoryCaches(`${loopDef.name} rare pack response classification`, { includePacks: false, quiet: true });
-        const responseDuplicates = [];
-        for (const item of openedItems) {
-          const clubDuplicate = findClubDuplicate2(item);
-          if (!isDuplicate(item) && !clubDuplicate) continue;
-          if (clubDuplicate && !Number(item?.duplicateId || 0)) item.duplicateId = clubDuplicate.id;
-          eaInventoryAdapter().preparePurchasedItem(item);
-          responseDuplicates.push(item);
-        }
+        const responseDuplicates = materializeOpenedResponsePlayerDuplicates(
+          openedItems,
+          `${loopDef.name} rare pack response classification`
+        ).duplicates;
         const duplicateIds = new Set(responseDuplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
         const classified = classifyOpenedUpgradeDuplicates(openedItems, {
           isDuplicate: (item) => duplicateIds.has(Number(item?.id || 0)),
@@ -16695,6 +16950,7 @@
         });
         const plan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
         const requested = plan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
+        let packQueue = null;
         log(`Batch Open: starting ${requested} requested pack(s) across ${plan.entries.length} pack type(s)`);
         result = await runBatchOpenWorkflow({
           plan,
@@ -16704,21 +16960,19 @@
             enableRecovery: true
           }),
           resolvePack: async (entry) => {
-            const pack = entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
-            if (pack) return pack;
-            await refreshStorePacks().catch(() => null);
-            return entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
+            if (!packQueue) {
+              packQueue = createPackInstanceQueue(getAvailableRepositoryMyPacks(), { getName: packName });
+            }
+            return packQueue.take(entry);
           },
           openPack: async ({ entry, pack, openIndex }) => await openPack(
             pack,
             `Batch Open ${entry.packName || `#${entry.packId}`} ${openIndex + 1}/${entry.quantity}`,
             {
               allowGone: true,
+              allowPendingItems: true,
+              reusePackOn471: true,
               retryCodes: ["471", "500"],
-              resolveRetryPack: async () => {
-                await refreshStorePacks().catch(() => null);
-                return entry.packId ? findPackById(entry.packId) : findPackByName([entry.packName]);
-              },
               openedItemPolicy: createMaterializeAndResolvePolicy(
                 `Batch Open ${entry.packName || `#${entry.packId}`}`,
                 `Batch Open ${entry.packName || `#${entry.packId}`} cleanup`,
@@ -16735,6 +16989,8 @@
               log(`Batch Open: Unassigned items were preserved after ${payload.entry.packName || `#${payload.entry.packId}`}; stopping before ${payload.remaining} remaining pack(s) in this type`);
             } else if (event === "preflight-preserved") {
               log(`Batch Open: existing Unassigned items cannot be safely resolved (${payload.preflight.reason || "capacity blocked"}); no pack will be opened`);
+            } else if (event === "pending") {
+              log(`Batch Open: opened items remain unresolved after ${payload.entry.packName || `#${payload.entry.packId}`}; stopping before ${payload.remaining} remaining pack(s)`);
             } else if (event === "blocked") {
               log(`Batch Open: blocked at ${payload.entry.packName || `#${payload.entry.packId}`}; ${payload.entryResult.reason || "pack open failed"}`);
             }
