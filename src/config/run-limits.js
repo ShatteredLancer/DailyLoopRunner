@@ -51,7 +51,7 @@ export function getLiveRunLimit(loopDef = {}, rounds = 1, options = {}) {
       : Number(loopDef.maxCompletions || 1);
     return completions * getPlayerPickChallengeCount(loopDef);
   }
-  if (loopDef.strategy === 'dailyRoutine') {
+  if (loopDef.strategy === 'dailyRoutine' || loopDef.strategy === 'workflowRoutine') {
     return summarizeRoutineStepLimits(options.getRoutineSteps?.(loopDef) || [], options).max;
   }
   if (loopDef.strategy === 'inventoryExhaustion') {

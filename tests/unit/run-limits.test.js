@@ -77,6 +77,7 @@ describe('configured run limits', () => {
       },
     ];
     expect(getLiveRunLimit(routine, 1, { getRoutineSteps: () => steps })).toBe(100);
+    expect(getLiveRunLimit({ ...routine, strategy: 'workflowRoutine' }, 1, { getRoutineSteps: () => steps })).toBe(100);
   });
 
   it('combines pending rewards with the live remaining count for limited Player Picks', () => {

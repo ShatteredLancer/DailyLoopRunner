@@ -72,6 +72,32 @@ describe('loop configuration schema', () => {
     }))).toEqual([]);
   });
 
+  it('validates composable workflow routines and their safe step references', () => {
+    const child = {
+      id: 'bronze-child',
+      name: 'Bronze child',
+      strategy: 'dailySingleCardRecycle',
+      sbcNames: ['Bronze Upgrade'],
+      targetDuplicate: { tier: 'bronze' },
+    };
+    const workflow = {
+      id: 'custom-workflow',
+      name: 'Custom workflow',
+      strategy: 'workflowRoutine',
+      steps: [{
+        loopId: 'bronze-child',
+        maxCompletions: 2,
+        rewardFlow: { open: 'always', packNames: ['Bronze Players Premium'] },
+      }],
+    };
+    expect(validateLoopDef(workflow)).toEqual([]);
+    expect(() => validateLoopDefList([child, workflow], 'loops')).not.toThrow();
+    expect(() => validateLoopConfig({ loops: [child, { ...workflow, steps: ['custom-workflow'] }] }, 'config'))
+      .toThrow('config.loops[1].steps[0] cannot reference itself');
+    expect(() => validateLoopConfig({ loops: [child, { ...workflow, steps: ['missing'] }] }, 'config'))
+      .toThrow('config.loops[1].steps[0] loop not found: missing');
+  });
+
   it('preserves recovery recipe, policy, and per-loop policy validation', () => {
     const base = {
       loops: [validLoop()],

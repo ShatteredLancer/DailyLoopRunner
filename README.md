@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.39`
+当前版本：`0.5.40`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -22,7 +22,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.39` 后即可开始；如果 FSU 正在后台校验已恢复的 Club 缓存，Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.40` 后即可开始；如果 FSU 正在后台校验已恢复的 Club 缓存，Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
 FSU 不再显示前台 Club loading 时，后台校验仍可能正在运行。此时普通页面操作和 Runner 的 provisional 读取可以继续，但 FSU 自身的 Fast SBC/阵容填充默认会等待 ready；Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
 
@@ -75,7 +75,40 @@ Options 中的完整日志会占用面板剩余空间并独立滚动；长错误
 - `Refresh caches`：刷新当前可用的 Packs、Unassigned、Storage、Transfer 和 Club 缓存。
 - `Load loops JSON`：从本地开发服务加载 `DailyLoopRunner.loops.json`。
 - `Built-in loops`：切回脚本内置配置。
-- `Edit JSON`：临时编辑当前 Loop 配置。
+- `Edit loop JSON`：临时编辑当前 Loop 配置。
+- `Edit workflow JSON`：把当前完整配置（全部小 Loop、Workflow、recovery recipes 和 policies）放入编辑器。
+- `Apply workflow JSON`：校验后把编辑器中的完整配置应用到当前浏览器会话；JSON 无效时保留当前配置。`Built-in loops` 可随时恢复脚本内置配置。
+
+### Configurable Workflows
+
+`workflowRoutine` is a declarative sequence for composing existing small loops. It does not accept JavaScript, DOM commands, arbitrary item moves, or direct submit actions. Every referenced small loop still uses its original FSU filtering, dry-run behavior, candidate protection, final validation, and SBC transaction guard.
+
+Use `Edit workflow JSON` to start from the full current configuration. A workflow step can remain a legacy string id, or use an object when it needs a per-step name, completion cap, or reward policy:
+
+```json
+{
+  "id": "my-fodder-workflow",
+  "name": "My Fodder Workflow",
+  "strategy": "workflowRoutine",
+  "steps": [
+    {
+      "loopId": "2x84-fodder",
+      "name": "Open two fodder rewards",
+      "maxCompletions": 2,
+      "rewardFlow": {
+        "open": "always",
+        "packNames": ["2x 84+ Rare Gold Players Pack"],
+        "unassignedRecoveryPolicyIds": ["rare-gold-duplicate-overflow"]
+      }
+    },
+    "84x10"
+  ]
+}
+```
+
+`rewardFlow.open` is `inherit`, `always`, or `never`. `inherit` follows the panel `Open reward packs` checkbox, `always` opens the matched reward when available, and `never` leaves it unopened even when the checkbox is on. `packIds` or `packNames` replace that small loop's reward matcher for this step. `unassignedRecoveryPolicyIds` selects only already-defined recovery policies; it cannot bypass item protection or force a move. Flatten workflow steps instead of nesting a routine inside another routine.
+
+Panel-edited workflow JSON lasts for the current browser session. Save it as `DailyLoopRunner.loops.json` and use `Load loops JSON` when the configuration should be shared or reloaded.
 
 ### Reward Alerts
 

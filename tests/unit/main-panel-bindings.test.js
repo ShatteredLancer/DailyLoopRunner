@@ -5,6 +5,8 @@ const IDS = [
   'bronze-loop-select',
   'bronze-loop-json',
   'bronze-loop-edit',
+  'bronze-loop-edit-config',
+  'bronze-loop-apply-config',
   'bronze-loop-pick-protect-high-gold',
   'bronze-loop-pick-auto-below-90',
   'bronze-loop-pick-prefer-scanned',
@@ -79,7 +81,7 @@ describe('main panel bindings', () => {
   it('binds every command control and forwards the selected loop id', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
-      'selectLoop', 'editJson', 'jsonInput', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
+      'selectLoop', 'editJson', 'editConfig', 'applyConfig', 'jsonInput', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
       'refresh', 'scanPicks', 'loadJson', 'useBuiltIn', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
@@ -91,6 +93,8 @@ describe('main panel bindings', () => {
 
     for (const [id, event, command] of [
       ['bronze-loop-json', 'input', 'jsonInput'],
+      ['bronze-loop-edit-config', 'click', 'editConfig'],
+      ['bronze-loop-apply-config', 'click', 'applyConfig'],
       ['bronze-loop-daily-inventory-only', 'change', 'saveLoopOptions'],
       ['bronze-loop-show-mvp', 'change', 'saveLoopOptions'],
       ['bronze-loop-reward-alert-enabled', 'change', 'saveRewardAlertEnabled'],

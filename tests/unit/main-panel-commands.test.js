@@ -15,6 +15,8 @@ function harness(overrides = {}) {
     refreshInventoryCaches: vi.fn(async () => {}),
     scanPlayerPicks: vi.fn(async () => {}),
     loadLoopConfig: vi.fn(async () => {}),
+    editLoopConfig: vi.fn(),
+    applyLoopConfigEditor: vi.fn(),
     resetLoopDefs: vi.fn(),
     getLogText: () => 'line 1\nline 2',
     now: () => 123,
@@ -100,6 +102,25 @@ describe('main panel command orchestration', () => {
     current.commands.selectLoop('custom');
     expect(setLoopJson).toHaveBeenCalledOnce();
     expect(updateLoopControls).toHaveBeenCalledTimes(2);
+  });
+
+  it('edits and applies a full workflow configuration with the same busy guard', () => {
+    const success = harness();
+    expect(success.commands.editConfig()).toBe(true);
+    expect(success.options.editLoopConfig).toHaveBeenCalledOnce();
+    expect(success.commands.applyConfig()).toBe(true);
+    expect(success.options.applyLoopConfigEditor).toHaveBeenCalledOnce();
+    expect(success.state.loadingLoops).toBe(false);
+    expect(success.setPanelState).toHaveBeenCalledTimes(2);
+
+    const failure = harness({ applyLoopConfigEditor: vi.fn(() => { throw new Error('unknown loop'); }) });
+    expect(failure.commands.applyConfig()).toBe(false);
+    expect(failure.log).toHaveBeenCalledWith('Workflow JSON apply failed: unknown loop');
+    expect(failure.state.loadingLoops).toBe(false);
+
+    failure.state.running = true;
+    expect(failure.commands.editConfig()).toBe(false);
+    expect(failure.commands.applyConfig()).toBe(false);
   });
 
   it('does not start or overlap panel operations while another operation is active', async () => {

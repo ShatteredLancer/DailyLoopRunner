@@ -1,4 +1,5 @@
 import { isPlainObject } from '../domain/objects.js';
+import { validateRewardFlow } from './reward-flow.js';
 import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
   RECOVERY_RECIPES,
@@ -16,6 +17,7 @@ const LOOP_STRATEGIES = Object.freeze([
   'rarePackTo84Upgrade',
   'playerPickSbc',
   'dailyRoutine',
+  'workflowRoutine',
   'fillAndVerifySbc',
   'inventoryExhaustion',
 ]);
@@ -170,6 +172,44 @@ function validateShortagePacks(shortagePacks, path, errors) {
   });
 }
 
+function normalizeRoutineStepId(step) {
+  return typeof step === 'string' ? step : step?.loopId;
+}
+
+function validatePositiveInteger(value, path, errors, max = 1000) {
+  if (value === undefined) return;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1 || number > max) {
+    errors.push(`${path} must be an integer between 1 and ${max}`);
+  }
+}
+
+function validateRoutineSteps(steps, path, errors) {
+  if (!Array.isArray(steps) || !steps.length) {
+    errors.push(`${path} must be a non-empty array`);
+    return;
+  }
+  steps.forEach((step, index) => {
+    const stepPath = `${path}[${index}]`;
+    if (typeof step === 'string') {
+      if (!step.trim()) errors.push(`${stepPath} must be a non-empty string`);
+      return;
+    }
+    if (!isPlainObject(step)) {
+      errors.push(`${stepPath} must be a loop id string or an object`);
+      return;
+    }
+    if (typeof step.loopId !== 'string' || !step.loopId.trim()) {
+      errors.push(`${stepPath}.loopId is required`);
+    }
+    if (step.name !== undefined && (typeof step.name !== 'string' || !step.name.trim())) {
+      errors.push(`${stepPath}.name must be a non-empty string`);
+    }
+    validatePositiveInteger(step.maxCompletions, `${stepPath}.maxCompletions`, errors);
+    validateRewardFlow(step.rewardFlow, `${stepPath}.rewardFlow`, errors);
+  });
+}
+
 export function validateLoopDef(loopDef, label = 'loop') {
   const errors = [];
   if (!isPlainObject(loopDef)) return [`${label} must be an object`];
@@ -311,6 +351,7 @@ export function validateLoopDef(loopDef, label = 'loop') {
   validatePileList(loopDef.primaryPiles, 'primaryPiles', errors);
   validatePileList(loopDef.clubFallbackPiles, 'clubFallbackPiles', errors);
   validatePileList(loopDef.disabledPiles, 'disabledPiles', errors);
+  validateRewardFlow(loopDef.rewardFlow, 'rewardFlow', errors);
 
   if (loopDef.strategy === 'validationBronzeUpgrade') {
     validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
@@ -322,8 +363,8 @@ export function validateLoopDef(loopDef, label = 'loop') {
     validateCardSpec(loopDef.targetDuplicate, 'targetDuplicate', errors);
   }
 
-  if (loopDef.strategy === 'dailyRoutine') {
-    validateStringArray(loopDef.steps, 'steps', errors, true);
+  if (['dailyRoutine', 'workflowRoutine'].includes(loopDef.strategy)) {
+    validateRoutineSteps(loopDef.steps, 'steps', errors);
     if (loopDef.stepOverrides !== undefined) {
       if (!isPlainObject(loopDef.stepOverrides)) {
         errors.push('stepOverrides must be an object');
@@ -485,8 +526,8 @@ export function validateLoopDefList(loopDefs, label = 'Loop config') {
     }
   });
   loopDefs.forEach((loopDef, index) => {
-    if (loopDef.strategy === 'dailyRoutine' && isPlainObject(loopDef.stepOverrides)) {
-      const stepIds = new Set(loopDef.steps || []);
+    if (['dailyRoutine', 'workflowRoutine'].includes(loopDef.strategy) && isPlainObject(loopDef.stepOverrides)) {
+      const stepIds = new Set((loopDef.steps || []).map(normalizeRoutineStepId).filter(Boolean));
       Object.keys(loopDef.stepOverrides).forEach((stepId) => {
         if (!stepIds.has(stepId)) fail(`${label}[${index}].stepOverrides references a non-step loop: ${stepId}`);
       });
@@ -497,6 +538,23 @@ export function validateLoopDefList(loopDefs, label = 'Loop config') {
     if (target.strategy !== 'fillAndVerifySbc') {
       fail(`${label}[${index}].sourceExhaustedFallbackLoopId must reference a fillAndVerifySbc loop`);
     }
+  });
+}
+
+function validateRoutineReferences(loopDefs, label) {
+  const byId = new Map(loopDefs.map((loopDef) => [loopDef.id, loopDef]));
+  loopDefs.forEach((loopDef, loopIndex) => {
+    if (!['dailyRoutine', 'workflowRoutine'].includes(loopDef.strategy)) return;
+    (loopDef.steps || []).forEach((step, stepIndex) => {
+      const stepId = normalizeRoutineStepId(step);
+      const path = `${label}.loops[${loopIndex}].steps[${stepIndex}]`;
+      if (!stepId || !byId.has(stepId)) fail(`${path} loop not found: ${stepId || '?'}`);
+      if (stepId === loopDef.id) fail(`${path} cannot reference itself`);
+      const target = byId.get(stepId);
+      if (target?.strategy === 'dailyRoutine' || target?.strategy === 'workflowRoutine') {
+        fail(`${path} cannot reference another routine; flatten its child steps instead`);
+      }
+    });
   });
 }
 
@@ -615,6 +673,28 @@ export function validateLoopConfig(config, label = 'Loop config') {
       `${label}.loops[${index}].unassignedRecoveryPolicyIds`,
     );
   });
+  normalized.loops.forEach((loopDef, index) => {
+    const flowPolicies = loopDef.rewardFlow?.unassignedRecoveryPolicyIds;
+    if (flowPolicies === undefined) return;
+    validateRecoveryPolicyIds(
+      flowPolicies,
+      normalized.unassignedRecoveryPolicies,
+      `${label}.loops[${index}].rewardFlow.unassignedRecoveryPolicyIds`,
+    );
+  });
+  normalized.loops.forEach((loopDef, loopIndex) => {
+    if (!['dailyRoutine', 'workflowRoutine'].includes(loopDef.strategy)) return;
+    (loopDef.steps || []).forEach((step, stepIndex) => {
+      const flowPolicies = typeof step === 'object' ? step.rewardFlow?.unassignedRecoveryPolicyIds : undefined;
+      if (flowPolicies === undefined) return;
+      validateRecoveryPolicyIds(
+        flowPolicies,
+        normalized.unassignedRecoveryPolicies,
+        `${label}.loops[${loopIndex}].steps[${stepIndex}].rewardFlow.unassignedRecoveryPolicyIds`,
+      );
+    });
+  });
+  validateRoutineReferences(normalized.loops, label);
   return normalized;
 }
 

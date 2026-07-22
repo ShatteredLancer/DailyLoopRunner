@@ -10,6 +10,26 @@ export function createMainPanelCommands(options = {}) {
       options.updateLoopControls?.();
     },
     editJson: options.updateLoopControls,
+    editConfig() {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+      options.editLoopConfig?.();
+      return true;
+    },
+    applyConfig() {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+      state.loadingLoops = true;
+      setPanelState();
+      try {
+        options.applyLoopConfigEditor?.();
+        return true;
+      } catch (error) {
+        log(`Workflow JSON apply failed: ${error?.message || error}`);
+        return false;
+      } finally {
+        state.loadingLoops = false;
+        setPanelState();
+      }
+    },
     jsonInput: options.updateLoopControls,
     async savePickOptions(event) {
       options.savePickOptions?.(event);

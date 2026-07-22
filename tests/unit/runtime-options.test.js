@@ -137,6 +137,22 @@ describe('loop runtime option projection', () => {
     const dailyRoutine = { strategy: 'dailyRoutine' };
     applyLoopRuntimeOptions(dailyRoutine, { dailyRecycleInventoryOnly: true });
     expect(dailyRoutine.dailyRecycleInventoryOnly).toBe(true);
+
+    const workflow = {
+      strategy: 'workflowRoutine',
+      rewardFlow: {
+        open: 'never',
+        packIds: [105],
+        packNames: ['Bronze Players Premium'],
+      },
+    };
+    applyLoopRuntimeOptions(workflow, { openRewardPacks: true, dailyRecycleInventoryOnly: true });
+    expect(workflow).toMatchObject({
+      openRewardPacks: false,
+      rewardPackIds: [105],
+      rewardPackNames: ['Bronze Players Premium'],
+    });
+    expect(workflow.dailyRecycleInventoryOnly).toBeUndefined();
   });
 
   it('shows rounds only for explicit repeat-count loops', () => {

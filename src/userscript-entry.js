@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.39
+// @version      0.5.40
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -236,7 +236,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.39',
+    version: '0.5.40',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -403,6 +403,32 @@ const state = {
   function setLoopJson(def) {
     const editor = document.querySelector('#bronze-loop-json');
     if (editor) editor.value = JSON.stringify(def, null, 2);
+  }
+
+  function editWorkflowConfig() {
+    const editor = document.querySelector('#bronze-loop-json');
+    if (!editor) return;
+    editor.value = JSON.stringify({
+      loops: getConfiguredLoopDefs(),
+      recoveryRecipes: getRecoveryRecipes(),
+      unassignedRecoveryPolicies: getUnassignedRecoveryPolicies(),
+      defaultUnassignedRecoveryPolicyIds: getDefaultUnassignedRecoveryPolicyIds(),
+    }, null, 2);
+    editor.classList.add('show');
+    log('Editing full workflow JSON. Apply workflow JSON validates every loop and step before replacing the current session configuration.');
+  }
+
+  function applyWorkflowConfigEditor() {
+    const text = document.querySelector('#bronze-loop-json')?.value || '';
+    let config;
+    try {
+      config = parseLoopConfig(text);
+    } catch (error) {
+      if (error instanceof SyntaxError) fail(`Invalid workflow JSON: ${error.message || error}`);
+      throw error;
+    }
+    setLoopConfig(config, 'panel workflow JSON');
+    log('Applied panel workflow JSON. Built-in loops remain available through Built-in loops.');
   }
 
   function renderLoopSelect(selectedId = null) {
@@ -5433,6 +5459,35 @@ function updateLoopControls() {
     });
   }
 
+  async function runWorkflowRoutine(loopDef) {
+    await waitAppReady();
+    const steps = getRoutineStepLoopDefs(loopDef);
+    const limitSummary = summarizeRoutineStepLimits(steps);
+    log(`${loopDef.name}: running configurable workflow with ${steps.length} step(s): ${steps.map((step) => step.name).join(' -> ')}`);
+    log(`${loopDef.name}: step policy: ${limitSummary.text}`);
+
+    return runSequenceWorkflow({
+      steps,
+      stopPoint: () => stopPoint(),
+      beforeStep: async ({ step }) => {
+        if (step.dryRun) return { status: 'ready' };
+        const recovery = await recoverUnassignedOverflow(step, `${loopDef.name} step preflight`);
+        if (recovery.status === 'resolved') {
+          log(`${loopDef.name}: ${step.name} overflow recovery completed before step`);
+        }
+        if (recovery.status === 'blocked') return { status: 'blocked', reason: recovery.reason };
+        return { status: 'ready' };
+      },
+      runStep: async ({ step }) => runConfiguredLoop(step, 1),
+      afterStep: async () => sleep(CFG.pauseMs),
+      onEvent: async (event, payload) => {
+        if (event === 'step-start') {
+          log(`${loopDef.name}: step ${payload.index + 1}/${payload.total} ${payload.step.name}`);
+        }
+      },
+    });
+  }
+
   function shouldUseInventoryFirstFill(loopDef = {}) {
     return loopDef.inventoryFillFirst === true && Array.isArray(loopDef.requirements) && loopDef.requirements.length > 0;
   }
@@ -7879,6 +7934,7 @@ function updateLoopControls() {
         runners: {
           validationBronzeUpgrade: runValidationBronzeUpgrade,
           dailyRoutine: runDailySequence,
+          workflowRoutine: runWorkflowRoutine,
           dailySingleCardRecycle: runRecycleLoop,
           supplyAndCraft: runSupplyAndCraftLoop,
           provisionPackCrafting: runProvisionCraftLoop,
@@ -8037,6 +8093,8 @@ function updateLoopControls() {
       setPanelState,
       getLoopDefById,
       setLoopJson,
+      editLoopConfig: editWorkflowConfig,
+      applyLoopConfigEditor: applyWorkflowConfigEditor,
       updateLoopControls,
       savePickOptions: savePickRuntimeOptions,
       saveLoopOptions: saveLoopUiOptions,

@@ -1,9 +1,16 @@
 import { cloneLoopDef } from '../domain/objects.js';
 import { applyDisabledPiles } from './loop-presentation.js';
 import { assertValidLoopDef } from './loop-schema.js';
+import { applyRewardFlow, resolveRewardPackOpenEnabled } from './reward-flow.js';
+
+function normalizeRoutineStep(step = {}) {
+  return typeof step === 'string' ? { loopId: step } : step;
+}
 
 export function resolveRoutineStepLoopDefs(loopDef = {}, loopDefs = []) {
-  return (loopDef.steps || []).map((stepId, index) => {
+  return (loopDef.steps || []).map((rawStep, index) => {
+    const step = normalizeRoutineStep(rawStep);
+    const stepId = step.loopId;
     if (stepId === loopDef.id) {
       throw new Error(`${loopDef.name}: step ${index + 1} cannot reference itself`);
     }
@@ -19,13 +26,19 @@ export function resolveRoutineStepLoopDefs(loopDef = {}, loopDefs = []) {
       childDef.id = baseDef.id;
       childDef.strategy = baseDef.strategy;
     }
-    if (childDef.strategy === 'dailyRoutine') {
-      throw new Error(`${loopDef.name}: nested dailyRoutine steps are not supported`);
+    if (childDef.strategy === 'dailyRoutine' || childDef.strategy === 'workflowRoutine') {
+      throw new Error(`${loopDef.name}: nested routine steps are not supported`);
     }
+    applyRewardFlow(childDef);
+    if (step.name) childDef.name = step.name;
+    if (step.maxCompletions !== undefined) childDef.maxCompletions = step.maxCompletions;
+    applyRewardFlow(childDef, step.rewardFlow);
     if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
       childDef.disabledPiles = [...loopDef.disabledPiles];
     }
-    if (loopDef.openRewardPacks !== undefined) {
+    if (childDef.rewardOpenMode) {
+      childDef.openRewardPacks = resolveRewardPackOpenEnabled(childDef, loopDef.openRewardPacks === true);
+    } else if (loopDef.openRewardPacks !== undefined) {
       childDef.openRewardPacks = childDef.forceOpenRewardPacks === true || loopDef.openRewardPacks === true;
     }
     if (childDef.strategy === 'dailySingleCardRecycle' && loopDef.dailyRecycleInventoryOnly !== undefined) {

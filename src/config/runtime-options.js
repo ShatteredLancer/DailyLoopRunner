@@ -1,3 +1,5 @@
+import { applyRewardFlow, resolveRewardPackOpenEnabled } from './reward-flow.js';
+
 export function normalizePickRuntimeOptions(input = {}) {
   return {
     protectHighGold: input.protectHighGold !== false,
@@ -64,7 +66,8 @@ export function loopUsesRounds(loopDef = {}) {
 export function applyLoopRuntimeOptions(loopDef, options = {}) {
   const rounds = Math.max(1, Math.min(50, Number(options.rounds || 1) || 1));
   loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;
-  loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || options.openRewardPacks === true;
+  applyRewardFlow(loopDef);
+  loopDef.openRewardPacks = resolveRewardPackOpenEnabled(loopDef, options.openRewardPacks === true);
   applyPickRuntimeOptions(loopDef, options.pickOptions);
   if (loopDef.strategy === 'dailySingleCardRecycle' || loopDef.strategy === 'dailyRoutine') {
     loopDef.dailyRecycleInventoryOnly = options.dailyRecycleInventoryOnly === true;

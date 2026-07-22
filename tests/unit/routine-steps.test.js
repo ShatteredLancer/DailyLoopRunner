@@ -112,6 +112,34 @@ describe('daily routine step projection', () => {
     expect(standalone).not.toHaveProperty('sourceExhaustedFallbackMaxCompletions');
   });
 
+  it('supports declarative workflow steps with a per-step limit and reward flow', () => {
+    const [resolved] = resolveRoutineStepLoopDefs({
+      id: 'custom-workflow',
+      name: 'Custom workflow',
+      strategy: 'workflowRoutine',
+      openRewardPacks: false,
+      steps: [{
+        loopId: 'daily-bronze',
+        name: 'Bronze with reward handling',
+        maxCompletions: 2,
+        rewardFlow: {
+          open: 'always',
+          packIds: [105],
+          packNames: ['Bronze Players Premium'],
+        },
+      }],
+    }, [childLoop({ rewardPackIds: [999] })]);
+
+    expect(resolved).toMatchObject({
+      id: 'daily-bronze',
+      name: 'Bronze with reward handling',
+      maxCompletions: 2,
+      openRewardPacks: true,
+      rewardPackIds: [105],
+      rewardPackNames: ['Bronze Players Premium'],
+    });
+  });
+
   it('uses the current EA remaining count instead of capping it with stale local limits', () => {
     const configured = configureRoutineStepForAvailability(
       childLoop({ maxCompletions: 7 }),
@@ -142,6 +170,6 @@ describe('daily routine step projection', () => {
     expect(() => resolveRoutineStepLoopDefs(dailyLoop({ steps: ['missing'] }), []))
       .toThrow('One-click Daily Loop: step 1 loop not found: missing');
     expect(() => resolveRoutineStepLoopDefs(dailyLoop(), [childLoop({ strategy: 'dailyRoutine', steps: ['other'] })]))
-      .toThrow('One-click Daily Loop: nested dailyRoutine steps are not supported');
+      .toThrow('One-click Daily Loop: nested routine steps are not supported');
   });
 });

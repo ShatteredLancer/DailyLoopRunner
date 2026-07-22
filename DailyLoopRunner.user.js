@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.39
+// @version      0.5.40
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -697,7 +697,7 @@
       const completions = loopDef.exhaustSbcSet === true ? Number(loopDef.remainingCompletions ?? loopDef.setCompletionSafetyLimit ?? 100) : Number(loopDef.maxCompletions || 1);
       return completions * getPlayerPickChallengeCount(loopDef);
     }
-    if (loopDef.strategy === "dailyRoutine") {
+    if (loopDef.strategy === "dailyRoutine" || loopDef.strategy === "workflowRoutine") {
       return summarizeRoutineStepLimits(options.getRoutineSteps?.(loopDef) || [], options).max;
     }
     if (loopDef.strategy === "inventoryExhaustion") {
@@ -724,6 +724,62 @@
       total: limits.reduce((sum, step) => sum + step.limit, 0),
       text: limits.map((step) => `${step.name}: ${step.policy}`).join("; ")
     };
+  }
+
+  // src/config/reward-flow.js
+  var REWARD_OPEN_MODES = Object.freeze(["inherit", "always", "never"]);
+  function validateNumberList(value, path, errors) {
+    if (value === void 0) return;
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((entry, index) => {
+      if (!Number.isFinite(Number(entry))) errors.push(`${path}[${index}] must be a number`);
+    });
+  }
+  function validateStringList(value, path, errors) {
+    if (value === void 0) return;
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((entry, index) => {
+      if (typeof entry !== "string" || !entry.trim()) errors.push(`${path}[${index}] must be a non-empty string`);
+    });
+  }
+  function validateRewardFlow(value, path, errors) {
+    if (value === void 0) return;
+    if (!isPlainObject(value)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (value.open !== void 0 && !REWARD_OPEN_MODES.includes(value.open)) {
+      errors.push(`${path}.open must be one of: ${REWARD_OPEN_MODES.join(", ")}`);
+    }
+    validateNumberList(value.packIds, `${path}.packIds`, errors);
+    validateStringList(value.packNames, `${path}.packNames`, errors);
+    validateStringList(value.unassignedRecoveryPolicyIds, `${path}.unassignedRecoveryPolicyIds`, errors);
+  }
+  function applyRewardFlow(loopDef = {}, rewardFlow = loopDef.rewardFlow) {
+    if (!isPlainObject(rewardFlow)) return loopDef;
+    if (rewardFlow.open !== void 0) loopDef.rewardOpenMode = rewardFlow.open;
+    if (rewardFlow.packIds?.length || rewardFlow.packNames?.length) {
+      delete loopDef.rewardPackIds;
+      delete loopDef.rewardPackNames;
+      if (rewardFlow.packIds?.length) loopDef.rewardPackIds = [...rewardFlow.packIds];
+      if (rewardFlow.packNames?.length) loopDef.rewardPackNames = [...rewardFlow.packNames];
+    }
+    if (rewardFlow.unassignedRecoveryPolicyIds) {
+      loopDef.unassignedRecoveryPolicyIds = [...rewardFlow.unassignedRecoveryPolicyIds];
+    }
+    return loopDef;
+  }
+  function resolveRewardPackOpenEnabled(loopDef = {}, runtimeOpenEnabled = false) {
+    const mode = loopDef.rewardOpenMode || loopDef.rewardFlow?.open || "inherit";
+    if (mode === "never") return false;
+    if (mode === "always") return true;
+    return loopDef.forceOpenRewardPacks === true || runtimeOpenEnabled === true;
   }
 
   // src/config/recovery.js
@@ -861,6 +917,7 @@
     "rarePackTo84Upgrade",
     "playerPickSbc",
     "dailyRoutine",
+    "workflowRoutine",
     "fillAndVerifySbc",
     "inventoryExhaustion"
   ]);
@@ -1005,6 +1062,41 @@
       }
     });
   }
+  function normalizeRoutineStepId(step) {
+    return typeof step === "string" ? step : step?.loopId;
+  }
+  function validatePositiveInteger(value, path, errors, max = 1e3) {
+    if (value === void 0) return;
+    const number = Number(value);
+    if (!Number.isInteger(number) || number < 1 || number > max) {
+      errors.push(`${path} must be an integer between 1 and ${max}`);
+    }
+  }
+  function validateRoutineSteps(steps, path, errors) {
+    if (!Array.isArray(steps) || !steps.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    steps.forEach((step, index) => {
+      const stepPath = `${path}[${index}]`;
+      if (typeof step === "string") {
+        if (!step.trim()) errors.push(`${stepPath} must be a non-empty string`);
+        return;
+      }
+      if (!isPlainObject(step)) {
+        errors.push(`${stepPath} must be a loop id string or an object`);
+        return;
+      }
+      if (typeof step.loopId !== "string" || !step.loopId.trim()) {
+        errors.push(`${stepPath}.loopId is required`);
+      }
+      if (step.name !== void 0 && (typeof step.name !== "string" || !step.name.trim())) {
+        errors.push(`${stepPath}.name must be a non-empty string`);
+      }
+      validatePositiveInteger(step.maxCompletions, `${stepPath}.maxCompletions`, errors);
+      validateRewardFlow(step.rewardFlow, `${stepPath}.rewardFlow`, errors);
+    });
+  }
   function validateLoopDef(loopDef, label = "loop") {
     const errors = [];
     if (!isPlainObject(loopDef)) return [`${label} must be an object`];
@@ -1136,6 +1228,7 @@
     validatePileList(loopDef.primaryPiles, "primaryPiles", errors);
     validatePileList(loopDef.clubFallbackPiles, "clubFallbackPiles", errors);
     validatePileList(loopDef.disabledPiles, "disabledPiles", errors);
+    validateRewardFlow(loopDef.rewardFlow, "rewardFlow", errors);
     if (loopDef.strategy === "validationBronzeUpgrade") {
       validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
       validateCardSpec(loopDef.targetDuplicate, "targetDuplicate", errors);
@@ -1144,8 +1237,8 @@
       validateStringArray(loopDef.sbcNames, "sbcNames", errors, true);
       validateCardSpec(loopDef.targetDuplicate, "targetDuplicate", errors);
     }
-    if (loopDef.strategy === "dailyRoutine") {
-      validateStringArray(loopDef.steps, "steps", errors, true);
+    if (["dailyRoutine", "workflowRoutine"].includes(loopDef.strategy)) {
+      validateRoutineSteps(loopDef.steps, "steps", errors);
       if (loopDef.stepOverrides !== void 0) {
         if (!isPlainObject(loopDef.stepOverrides)) {
           errors.push("stepOverrides must be an object");
@@ -1293,8 +1386,8 @@
       }
     });
     loopDefs.forEach((loopDef, index) => {
-      if (loopDef.strategy === "dailyRoutine" && isPlainObject(loopDef.stepOverrides)) {
-        const stepIds = new Set(loopDef.steps || []);
+      if (["dailyRoutine", "workflowRoutine"].includes(loopDef.strategy) && isPlainObject(loopDef.stepOverrides)) {
+        const stepIds = new Set((loopDef.steps || []).map(normalizeRoutineStepId).filter(Boolean));
         Object.keys(loopDef.stepOverrides).forEach((stepId) => {
           if (!stepIds.has(stepId)) fail(`${label}[${index}].stepOverrides references a non-step loop: ${stepId}`);
         });
@@ -1305,6 +1398,22 @@
       if (target.strategy !== "fillAndVerifySbc") {
         fail(`${label}[${index}].sourceExhaustedFallbackLoopId must reference a fillAndVerifySbc loop`);
       }
+    });
+  }
+  function validateRoutineReferences(loopDefs, label) {
+    const byId = new Map(loopDefs.map((loopDef) => [loopDef.id, loopDef]));
+    loopDefs.forEach((loopDef, loopIndex) => {
+      if (!["dailyRoutine", "workflowRoutine"].includes(loopDef.strategy)) return;
+      (loopDef.steps || []).forEach((step, stepIndex) => {
+        const stepId = normalizeRoutineStepId(step);
+        const path = `${label}.loops[${loopIndex}].steps[${stepIndex}]`;
+        if (!stepId || !byId.has(stepId)) fail(`${path} loop not found: ${stepId || "?"}`);
+        if (stepId === loopDef.id) fail(`${path} cannot reference itself`);
+        const target = byId.get(stepId);
+        if (target?.strategy === "dailyRoutine" || target?.strategy === "workflowRoutine") {
+          fail(`${path} cannot reference another routine; flatten its child steps instead`);
+        }
+      });
     });
   }
   function validateRecoveryAction(value, path, errors) {
@@ -1415,6 +1524,28 @@
         `${label}.loops[${index}].unassignedRecoveryPolicyIds`
       );
     });
+    normalized.loops.forEach((loopDef, index) => {
+      const flowPolicies = loopDef.rewardFlow?.unassignedRecoveryPolicyIds;
+      if (flowPolicies === void 0) return;
+      validateRecoveryPolicyIds(
+        flowPolicies,
+        normalized.unassignedRecoveryPolicies,
+        `${label}.loops[${index}].rewardFlow.unassignedRecoveryPolicyIds`
+      );
+    });
+    normalized.loops.forEach((loopDef, loopIndex) => {
+      if (!["dailyRoutine", "workflowRoutine"].includes(loopDef.strategy)) return;
+      (loopDef.steps || []).forEach((step, stepIndex) => {
+        const flowPolicies = typeof step === "object" ? step.rewardFlow?.unassignedRecoveryPolicyIds : void 0;
+        if (flowPolicies === void 0) return;
+        validateRecoveryPolicyIds(
+          flowPolicies,
+          normalized.unassignedRecoveryPolicies,
+          `${label}.loops[${loopIndex}].steps[${stepIndex}].rewardFlow.unassignedRecoveryPolicyIds`
+        );
+      });
+    });
+    validateRoutineReferences(normalized.loops, label);
     return normalized;
   }
   function parseLoopConfig(text) {
@@ -1422,8 +1553,13 @@
   }
 
   // src/config/routine-steps.js
+  function normalizeRoutineStep(step = {}) {
+    return typeof step === "string" ? { loopId: step } : step;
+  }
   function resolveRoutineStepLoopDefs(loopDef = {}, loopDefs = []) {
-    return (loopDef.steps || []).map((stepId, index) => {
+    return (loopDef.steps || []).map((rawStep, index) => {
+      const step = normalizeRoutineStep(rawStep);
+      const stepId = step.loopId;
       if (stepId === loopDef.id) {
         throw new Error(`${loopDef.name}: step ${index + 1} cannot reference itself`);
       }
@@ -1438,13 +1574,19 @@
         childDef.id = baseDef.id;
         childDef.strategy = baseDef.strategy;
       }
-      if (childDef.strategy === "dailyRoutine") {
-        throw new Error(`${loopDef.name}: nested dailyRoutine steps are not supported`);
+      if (childDef.strategy === "dailyRoutine" || childDef.strategy === "workflowRoutine") {
+        throw new Error(`${loopDef.name}: nested routine steps are not supported`);
       }
+      applyRewardFlow(childDef);
+      if (step.name) childDef.name = step.name;
+      if (step.maxCompletions !== void 0) childDef.maxCompletions = step.maxCompletions;
+      applyRewardFlow(childDef, step.rewardFlow);
       if (loopDef.disabledPiles?.length && !childDef.disabledPiles?.length) {
         childDef.disabledPiles = [...loopDef.disabledPiles];
       }
-      if (loopDef.openRewardPacks !== void 0) {
+      if (childDef.rewardOpenMode) {
+        childDef.openRewardPacks = resolveRewardPackOpenEnabled(childDef, loopDef.openRewardPacks === true);
+      } else if (loopDef.openRewardPacks !== void 0) {
         childDef.openRewardPacks = childDef.forceOpenRewardPacks === true || loopDef.openRewardPacks === true;
       }
       if (childDef.strategy === "dailySingleCardRecycle" && loopDef.dailyRecycleInventoryOnly !== void 0) {
@@ -1524,7 +1666,8 @@
   function applyLoopRuntimeOptions(loopDef, options = {}) {
     const rounds = Math.max(1, Math.min(50, Number(options.rounds || 1) || 1));
     loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;
-    loopDef.openRewardPacks = loopDef.forceOpenRewardPacks === true || options.openRewardPacks === true;
+    applyRewardFlow(loopDef);
+    loopDef.openRewardPacks = resolveRewardPackOpenEnabled(loopDef, options.openRewardPacks === true);
     applyPickRuntimeOptions(loopDef, options.pickOptions);
     if (loopDef.strategy === "dailySingleCardRecycle" || loopDef.strategy === "dailyRoutine") {
       loopDef.dailyRecycleInventoryOnly = options.dailyRecycleInventoryOnly === true;
@@ -7442,6 +7585,8 @@
       if (editor.classList.contains("show")) select.value = "custom";
       commands.editJson?.({ visible: editor.classList.contains("show"), event });
     });
+    required(panel, "#bronze-loop-edit-config").addEventListener("click", (event) => commands.editConfig?.(event));
+    required(panel, "#bronze-loop-apply-config").addEventListener("click", (event) => commands.applyConfig?.(event));
     editor.addEventListener("input", (event) => commands.jsonInput?.(event));
     PICK_OPTION_IDS.forEach((id) => {
       required(panel, `#${id}`).addEventListener("change", (event) => commands.savePickOptions?.(event));
@@ -7493,6 +7638,26 @@
         options.updateLoopControls?.();
       },
       editJson: options.updateLoopControls,
+      editConfig() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        options.editLoopConfig?.();
+        return true;
+      },
+      applyConfig() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        state.loadingLoops = true;
+        setPanelState();
+        try {
+          options.applyLoopConfigEditor?.();
+          return true;
+        } catch (error) {
+          log(`Workflow JSON apply failed: ${error?.message || error}`);
+          return false;
+        } finally {
+          state.loadingLoops = false;
+          setPanelState();
+        }
+      },
       jsonInput: options.updateLoopControls,
       async savePickOptions(event) {
         options.savePickOptions?.(event);
@@ -8130,7 +8295,8 @@
         </div>
         <div class="bronze-loop-section">Config</div>
         <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
-        <div class="row"><button id="bronze-loop-built-in" disabled>Built-in loops</button><button id="bronze-loop-edit">Edit JSON</button></div>
+        <div class="row"><button id="bronze-loop-built-in" disabled>Built-in loops</button><button id="bronze-loop-edit">Edit loop JSON</button></div>
+        <div class="row"><button id="bronze-loop-edit-config" title="Edit every loop, workflow step, and recovery policy as one configuration">Edit workflow JSON</button><button id="bronze-loop-apply-config" title="Validate and apply the full workflow configuration in the editor">Apply workflow JSON</button></div>
         <textarea id="bronze-loop-json" spellcheck="false"></textarea>
         <div class="bronze-loop-section">Log</div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
@@ -9387,7 +9553,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.39",
+      version: "0.5.40",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -9533,6 +9699,30 @@
     function setLoopJson(def) {
       const editor = document.querySelector("#bronze-loop-json");
       if (editor) editor.value = JSON.stringify(def, null, 2);
+    }
+    function editWorkflowConfig() {
+      const editor = document.querySelector("#bronze-loop-json");
+      if (!editor) return;
+      editor.value = JSON.stringify({
+        loops: getConfiguredLoopDefs(),
+        recoveryRecipes: getRecoveryRecipes(),
+        unassignedRecoveryPolicies: getUnassignedRecoveryPolicies(),
+        defaultUnassignedRecoveryPolicyIds: getDefaultUnassignedRecoveryPolicyIds()
+      }, null, 2);
+      editor.classList.add("show");
+      log("Editing full workflow JSON. Apply workflow JSON validates every loop and step before replacing the current session configuration.");
+    }
+    function applyWorkflowConfigEditor() {
+      const text = document.querySelector("#bronze-loop-json")?.value || "";
+      let config;
+      try {
+        config = parseLoopConfig2(text);
+      } catch (error) {
+        if (error instanceof SyntaxError) fail2(`Invalid workflow JSON: ${error.message || error}`);
+        throw error;
+      }
+      setLoopConfig(config, "panel workflow JSON");
+      log("Applied panel workflow JSON. Built-in loops remain available through Built-in loops.");
     }
     function renderLoopSelect(selectedId = null) {
       const panel = document.querySelector("#bronze-loop-panel");
@@ -13998,6 +14188,33 @@
         }
       });
     }
+    async function runWorkflowRoutine(loopDef) {
+      await waitAppReady();
+      const steps = getRoutineStepLoopDefs(loopDef);
+      const limitSummary = summarizeRoutineStepLimits2(steps);
+      log(`${loopDef.name}: running configurable workflow with ${steps.length} step(s): ${steps.map((step) => step.name).join(" -> ")}`);
+      log(`${loopDef.name}: step policy: ${limitSummary.text}`);
+      return runSequenceWorkflow({
+        steps,
+        stopPoint: () => stopPoint(),
+        beforeStep: async ({ step }) => {
+          if (step.dryRun) return { status: "ready" };
+          const recovery = await recoverUnassignedOverflow(step, `${loopDef.name} step preflight`);
+          if (recovery.status === "resolved") {
+            log(`${loopDef.name}: ${step.name} overflow recovery completed before step`);
+          }
+          if (recovery.status === "blocked") return { status: "blocked", reason: recovery.reason };
+          return { status: "ready" };
+        },
+        runStep: async ({ step }) => runConfiguredLoop(step, 1),
+        afterStep: async () => sleep(CFG.pauseMs),
+        onEvent: async (event, payload) => {
+          if (event === "step-start") {
+            log(`${loopDef.name}: step ${payload.index + 1}/${payload.total} ${payload.step.name}`);
+          }
+        }
+      });
+    }
     function shouldUseInventoryFirstFill(loopDef = {}) {
       return loopDef.inventoryFillFirst === true && Array.isArray(loopDef.requirements) && loopDef.requirements.length > 0;
     }
@@ -16222,6 +16439,7 @@
           runners: {
             validationBronzeUpgrade: runValidationBronzeUpgrade,
             dailyRoutine: runDailySequence,
+            workflowRoutine: runWorkflowRoutine,
             dailySingleCardRecycle: runRecycleLoop,
             supplyAndCraft: runSupplyAndCraftLoop,
             provisionPackCrafting: runProvisionCraftLoop,
@@ -16380,6 +16598,8 @@
         setPanelState,
         getLoopDefById,
         setLoopJson,
+        editLoopConfig: editWorkflowConfig,
+        applyLoopConfigEditor: applyWorkflowConfigEditor,
         updateLoopControls,
         savePickOptions: savePickRuntimeOptions,
         saveLoopOptions: saveLoopUiOptions,

@@ -27,6 +27,8 @@ export function bindMainPanelCommands(options = {}) {
     if (editor.classList.contains('show')) select.value = 'custom';
     commands.editJson?.({ visible: editor.classList.contains('show'), event });
   });
+  required(panel, '#bronze-loop-edit-config').addEventListener('click', (event) => commands.editConfig?.(event));
+  required(panel, '#bronze-loop-apply-config').addEventListener('click', (event) => commands.applyConfig?.(event));
   editor.addEventListener('input', (event) => commands.jsonInput?.(event));
   PICK_OPTION_IDS.forEach((id) => {
     required(panel, `#${id}`).addEventListener('change', (event) => commands.savePickOptions?.(event));
