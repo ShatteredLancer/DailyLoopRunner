@@ -50,9 +50,10 @@ describe('submitSbcAttempt', () => {
         calls.push('pre');
         expect(players).toEqual([refreshed]);
       }],
-      saveSquad: async ({ players }) => {
+      saveSquad: async ({ players, runtimeAccess }) => {
         calls.push('save');
         expect(players).toEqual([refreshed]);
+        expect(runtimeAccess).toMatchObject({ ok: true, token: 'access' });
       },
       releaseRuntimeAccess: async ({ token }) => {
         calls.push(`release:${token}`);

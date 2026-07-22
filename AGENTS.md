@@ -362,6 +362,7 @@ EA objects
 文件：
 
 - `submit-attempt.js`：统一 Challenge 获取、Squad Provider、保存前/后 validator、保存、提交和结果。
+- `fsu-runtime-access.js`：纯化 provisional Club 定向校验结果的匹配、关键属性对比、实体替换和顺序保持。
 
 风险：最高。
 
@@ -374,6 +375,8 @@ EA objects
 - Dry run 返回 `planned`，不保存或提交。
 - 保存后重新读取实际阵容并运行 post-save validator。
 - Submit 不 ready 时停止。
+- provisional FSU 只校验 `pile: club`；必须按 item ID 与 definition ID 同时匹配，缺失或关键属性变化时停止，不得静默重选。
+- 定向校验通过后，Club 位置必须替换为新 EA 实体且保持原阵容顺序；FSU 可视填充已先保存旧实体时，最终提交前只在确有 refreshed Club 实体时补一次保存。
 - 成功提交后才标记 consumed 和处理奖励。
 
 ### 5.8 `src/reward`

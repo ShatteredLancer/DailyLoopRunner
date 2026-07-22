@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.38
+// @version      0.5.39
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -92,6 +92,7 @@ import {
   createInventorySquadProvider,
   submitSbcAttempt,
 } from './sbc/submit-attempt.js';
+import { prepareFsuProvisionalClubAccess } from './sbc/fsu-runtime-access.js';
 import {
   isSbcControllerName,
   synchronizeAfterSbcSubmit,
@@ -235,7 +236,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.38',
+    version: '0.5.39',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -4908,6 +4909,11 @@ function updateLoopControls() {
         itemRef: liveItemRef,
       }),
       prepareRuntimeAccess: prepareFsuRuntimeAccess,
+      saveSquad: async ({ challenge, players, runtimeAccess }) => {
+        if (!runtimeAccess?.refreshedClubPlayers) return;
+        log(`${loopDef.name}: applying freshly validated Club entities before submit`);
+        await saveChallengeSquad(challenge, players, `${loopDef.name} provisional Club refresh`);
+      },
       preSaveValidators: [({ challenge }) => {
         const inspection = inspectSbcSquad(loopDef, ctrl()?._squad || challenge?.squad);
         logSbcSquadInspection(loopDef, inspection);
@@ -5821,6 +5827,11 @@ function updateLoopControls() {
           source: ratingSbcFill ? 'rating-squad' : 'filled-squad',
         }),
         prepareRuntimeAccess: prepareFsuRuntimeAccess,
+        saveSquad: async ({ challenge, players, runtimeAccess }) => {
+          if (ratingSbcFill || !runtimeAccess?.refreshedClubPlayers) return;
+          log(`${loopDef.name}: applying freshly validated Club entities before submit`);
+          await saveChallengeSquad(challenge, players, `${loopDef.name} provisional Club refresh`);
+        },
         preSaveValidators: [() => {
           assertSbcSquadSafe(loopDef, inspection);
           if (shouldUseRatingSbcFill(loopDef)) {
@@ -6279,67 +6290,16 @@ function updateLoopControls() {
   }
 
   async function prepareFsuRuntimeAccess(context) {
-    const readiness = fsuAdapter().readiness();
-    if (!readiness.detected || readiness.fullyValidated !== false) return { ok: true };
-
-    const itemRefs = context?.squadPlan?.itemRefs || [];
-    const clubRefs = itemRefs.filter((ref) => ref?.pile === 'club');
-    if (!clubRefs.length) return { ok: true };
-    const beforeById = new Map((context.players || []).map((item, index) => {
-      const ref = itemRefs[index];
-      if (ref?.pile !== 'club') return null;
-      return [Number(ref.id || 0), adapters.inventory().snapshotItem(item, 'club')];
-    }).filter(Boolean));
-
-    log(`${context.label}: validating ${clubRefs.length} provisional Club player(s) against EA before save`);
-    const validation = await fsuAdapter().validateClubPlayers(clubRefs, {
-      label: `${context.label} targeted Club validation`,
+    const adapter = fsuAdapter();
+    return prepareFsuProvisionalClubAccess({
+      readiness: adapter.readiness(),
+      label: context.label,
+      players: context.players,
+      itemRefs: context?.squadPlan?.itemRefs || [],
+      snapshotItem: adapters.inventory().snapshotItem,
+      validateClubPlayers: (refs, options) => adapter.validateClubPlayers(refs, options),
+      log,
     });
-    if (!validation?.ok) {
-      const missing = (validation?.missing || []).map((ref) => `#${ref.id}`).join(', ');
-      return {
-        ok: false,
-        reason: validation?.reason || `FSU provisional Club validation failed${missing ? ` for ${missing}` : ''}`,
-      };
-    }
-
-    const validatedById = new Map((validation.items || []).map((item) => [Number(item?.id || 0), item]));
-    const changed = clubRefs.filter((ref) => {
-      const before = beforeById.get(Number(ref.id || 0));
-      const item = validatedById.get(Number(ref.id || 0));
-      if (!before || !item) return true;
-      const after = adapters.inventory().snapshotItem(item, 'club');
-      const signature = (snapshot) => JSON.stringify({
-        id: snapshot.id,
-        definitionId: snapshot.definitionId,
-        rating: snapshot.rating,
-        rareflag: snapshot.rareflag,
-        rare: snapshot.rare,
-        special: snapshot.special,
-        tradeable: snapshot.tradeable,
-        leagueId: snapshot.leagueId,
-        evolution: snapshot.evolution,
-        limitedUse: snapshot.limitedUse,
-        concept: snapshot.concept,
-        academyEnrolled: snapshot.academyEnrolled,
-        activeTrade: snapshot.activeTrade,
-        endTime: snapshot.endTime,
-        groups: [...(snapshot.groups || [])].map(Number).sort((a, b) => a - b),
-      });
-      return signature(before) !== signature(after);
-    });
-    if (changed.length) {
-      return {
-        ok: false,
-        reason: `FSU provisional Club data changed for ${changed.map((ref) => `#${ref.id}`).join(', ')}; restart the Loop so selection uses the refreshed items`,
-      };
-    }
-    const players = (context.players || []).map((item, index) => {
-      const ref = itemRefs[index];
-      return ref?.pile === 'club' ? validatedById.get(Number(ref.id || 0)) || item : item;
-    });
-    log(`${context.label}: provisional Club validation passed in ${Number(validation.elapsed || 0)}ms`);
-    return { ok: true, players, itemRefs };
   }
 
   async function submitInventorySbcAttempt(loopDef, selection, options = {}) {

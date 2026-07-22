@@ -22,9 +22,15 @@ describe('current direct side-effect call baseline', () => {
     expect(source.match(/\bW\.services\.Item\.confirmPlayerPickItemSelection\s*\(/g) || []).toHaveLength(0);
     expect(playerPickAdapter.match(/\bservice\.redeem\s*\(/g) || []).toHaveLength(1);
     expect(playerPickAdapter.match(/\bservice\.confirmPlayerPickItemSelection\s*\(/g) || []).toHaveLength(1);
-    expect(source.match(/\bsaveChallengeSquad\s*\(/g) || []).toHaveLength(3);
+    expect(source.match(/\bsaveChallengeSquad\s*\(/g) || []).toHaveLength(5);
     expect(source).toMatch(/function\s+prepareSbcSquad\s*\(/);
     expect(source).toContain('prepareOnly: true');
+    expect(source.match(/\bsubmitSbcAttempt\s*\(\{/g) || []).toHaveLength(4);
+    expect(source.match(/prepareRuntimeAccess:\s*prepareFsuRuntimeAccess/g) || []).toHaveLength(4);
+    expect(source.match(/if \(!runtimeAccess\?\.refreshedClubPlayers\) return;/g) || []).toHaveLength(1);
+    expect(source.match(/if \(ratingSbcFill \|\| !runtimeAccess\?\.refreshedClubPlayers\) return;/g) || []).toHaveLength(1);
+    expect(source.match(/applying freshly validated Club entities before submit/g) || []).toHaveLength(2);
+    expect(source).toContain("from './sbc/fsu-runtime-access.js'");
   });
 
   it('records the special workflow functions that still require migration', async () => {

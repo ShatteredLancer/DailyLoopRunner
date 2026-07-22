@@ -49,6 +49,7 @@ export async function submitSbcAttempt(options = {}) {
   try {
     if (options.prepareRuntimeAccess) {
       const access = await options.prepareRuntimeAccess(context);
+      context.runtimeAccess = access || null;
       if (access?.ok === false) {
         return createSubmissionResult({
           status: 'blocked',
