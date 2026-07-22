@@ -8479,6 +8479,17 @@
                 try{ current = String(criteria?.cacheable); }catch(error){}
                 console.log(`[FSU club load] ${label} search criteria cacheable:${current}, writable:${descriptor?.writable === true || typeof descriptor?.set === "function"}; network mode:${forceNetwork ? "forced by an active-criteria hasAllItems() bypass" : "natural because the Club repository is incomplete"}`);
             };
+            const removeClubPlayerById = id => {
+                const numericId = Number(id || 0);
+                const stale = clubRepoItems()?.get?.(numericId);
+                if(!stale) return true;
+                try{
+                    services.Club.clubDao.clubRepo.remove(stale);
+                }catch(error){
+                    clubRepoItems()?.remove?.(numericId);
+                }
+                return !clubRepoItems()?.get?.(numericId);
+            };
             info.base.clubValidationQueue ??= [];
             const validateClubPlayerRefs = async(refs, label = "Club player validation") => {
                 const requested = (Array.isArray(refs) ? refs : [])
@@ -8514,10 +8525,7 @@
                     const item = responseById.get(ref.id);
                     if(!item || Number(item?.definitionId || 0) !== ref.definitionId){
                         missing.push(ref);
-                        const stale = clubRepoItems()?.get?.(ref.id);
-                        if(stale){
-                            try{ services.Club.clubDao.clubRepo.remove(stale); }catch(error){ clubRepoItems()?.remove?.(ref.id); }
-                        }
+                        removeClubPlayerById(ref.id);
                         return;
                     }
                     services.Club.clubDao.clubRepo.update(item);
@@ -8822,7 +8830,8 @@
                             console.log("[FSU club load] EA capped larger requests; using page size:200");
                         }
 
-                        const pageCount = Math.ceil(expectedCount / pageSize);
+                        const validationExpectedCount = expectedCount;
+                        const pageCount = Math.ceil(validationExpectedCount / pageSize);
                         for(let page = 0; page < pageCount; page++){
                             await drainClubValidationQueue();
                             if(loaderShown){
@@ -8854,6 +8863,13 @@
                         }
 
                         const currentExpectedCount = await readExpectedPlayerCount("Club.getStats after validation");
+                        const dirtyMarkerAtSnapshot = Number(GM_getValue(getClubFastCacheDirtyKey(), 0)) || 0;
+                        const authoritativeFullSnapshot = validationExpectedCount > 0
+                            && validationTiming.requests >= pageCount
+                            && currentExpectedCount === validationExpectedCount
+                            && serverPlayerIds.size === currentExpectedCount
+                            && verifiedPlayerPayloads.size === currentExpectedCount
+                            && dirtyMarkerAtSnapshot === dirtyMarkerAtStart;
                         if(currentExpectedCount !== expectedCount){
                             console.log(`[FSU club load] Club player count changed during background validation: ${expectedCount} -> ${currentExpectedCount}`);
                             expectedCount = currentExpectedCount;
@@ -8861,29 +8877,54 @@
                         }
 
                         if(provisionalPlayerIds.size){
-                            const unverifiedRefs = Array.from(provisionalPlayerIds)
-                                .filter(id => !serverPlayerIds.has(id))
+                            const unverifiedIds = Array.from(provisionalPlayerIds)
+                                .filter(id => !serverPlayerIds.has(id));
+                            const unverifiedRefs = unverifiedIds
                                 .map(id => clubRepoItems()?.get?.(id))
                                 .filter(Boolean)
                                 .map(item => ({ id:Number(item.id), definitionId:Number(item.definitionId) }))
                                 .filter(ref => ref.id > 0 && ref.definitionId > 0);
-                            const maxTargetedReconciliation = Math.max(200, Math.ceil(expectedCount * 0.05));
-                            if(unverifiedRefs.length > maxTargetedReconciliation){
-                                throw new Error(`Club background validation could not authoritatively observe ${unverifiedRefs.length} cached player(s); preserving the provisional cache instead of deleting them`);
-                            }
                             let targetedConfirmed = 0;
                             let targetedMissing = 0;
-                            for(let index = 0; index < unverifiedRefs.length; index += 100){
-                                const batch = unverifiedRefs.slice(index, index + 100);
-                                const validation = await validateClubPlayerRefs(
-                                    batch,
-                                    `Club cache reconciliation ${Math.floor(index / 100) + 1}/${Math.ceil(unverifiedRefs.length / 100)}`
-                                );
-                                recordValidationTiming(validation);
-                                validation.items.forEach(item => serverPlayerIds.add(Number(item.id)));
-                                validation.responsePayloads?.forEach((payload, id) => verifiedPlayerPayloads.set(id, payload));
-                                targetedConfirmed += validation.items.length;
-                                targetedMissing += validation.missing.length;
+                            if(authoritativeFullSnapshot){
+                                const removalFailures = [];
+                                unverifiedIds.forEach(id => {
+                                    if(removeClubPlayerById(id)) targetedMissing++;
+                                    else removalFailures.push(id);
+                                });
+                                appendClubDiagnostic("log", "authoritative-cache-reconciliation", {
+                                    expectedCount,
+                                    pageCount,
+                                    completedRequests:validationTiming.requests,
+                                    serverPlayerIds:serverPlayerIds.size,
+                                    verifiedPayloads:verifiedPlayerPayloads.size,
+                                    dirtyMarkerAtStart,
+                                    dirtyMarkerAtSnapshot,
+                                    staleCandidates:unverifiedIds.length,
+                                    removedStale:targetedMissing,
+                                    removalFailures:removalFailures.slice(0, 50)
+                                });
+                                if(removalFailures.length){
+                                    throw new Error(`Club authoritative reconciliation could not remove ${removalFailures.length} stale cached player(s)`);
+                                }
+                                console.log(`[FSU club cache] complete exact Club snapshot proved ${serverPlayerIds.size}/${expectedCount} current player(s); removed ${targetedMissing} stale cached player(s) without per-player requests`);
+                            }else{
+                                const maxTargetedReconciliation = Math.max(200, Math.ceil(expectedCount * 0.05));
+                                if(unverifiedRefs.length > maxTargetedReconciliation){
+                                    throw new Error(`Club background validation could not authoritatively observe ${unverifiedRefs.length} cached player(s); preserving the provisional cache instead of deleting them`);
+                                }
+                                for(let index = 0; index < unverifiedRefs.length; index += 100){
+                                    const batch = unverifiedRefs.slice(index, index + 100);
+                                    const validation = await validateClubPlayerRefs(
+                                        batch,
+                                        `Club cache reconciliation ${Math.floor(index / 100) + 1}/${Math.ceil(unverifiedRefs.length / 100)}`
+                                    );
+                                    recordValidationTiming(validation);
+                                    validation.items.forEach(item => serverPlayerIds.add(Number(item.id)));
+                                    validation.responsePayloads?.forEach((payload, id) => verifiedPlayerPayloads.set(id, payload));
+                                    targetedConfirmed += validation.items.length;
+                                    targetedMissing += validation.missing.length;
+                                }
                             }
                             repositoryCount = clubRepoPlayerCount();
                             console.log(`[FSU club cache] validation saw ${serverPlayerIds.size} server player(s), captured ${verifiedPlayerPayloads.size} exact payload(s), targeted reconciliation confirmed:${targetedConfirmed}, removed stale:${targetedMissing}; repository players:${repositoryCount}`);

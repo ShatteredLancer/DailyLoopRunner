@@ -1,5 +1,5 @@
 diff --git a/FSU.user.js b/FSU.user.js
-index dd554ab..26eae93 100644
+index dd554ab..442ebb5 100644
 --- a/FSU.user.js
 +++ b/FSU.user.js
 @@ -18,6 +18,8 @@
@@ -117,7 +117,7 @@ index dd554ab..26eae93 100644
                          });
                      }
                  )
-@@ -6846,78 +6893,2102 @@
+@@ -6846,78 +6893,2143 @@
                  });
              }
          };
@@ -129,36 +129,6 @@ index dd554ab..26eae93 100644
 -                t.success ? t.response.stats.forEach(async function(e) {
 -                    if(e.type == 'players'){
 -                        if(e.count !== services.Club.clubDao.clubRepo.items.length){
--                            events.showLoader();
--                            let playersCount = isPhone() ? 200 : 200;
--                            let playersPage = Math.ceil(e.count / playersCount);
--                            let playerList = [];
--                            for (let i = 0; i < playersPage; i++) {
--                                let playersCriteria = new UTSearchCriteriaDTO();
--                                playersCriteria.type = "player";
--                                playersCriteria.sortBy = "ovr";
--                                playersCriteria.sort = "desc";
--                                playersCriteria.count = playersCount;
--                                playersCriteria.offset = i * playersCount;
--                                events.changeLoadingText(["loadingclose.ldata",`${i}`,`${playersPage}`]);
--                                try {
--                                    playerList = await new Promise((resolve, reject) => {
--                                        services.Club.search(playersCriteria).observe(e, (p, t) => {
--                                            if (p.unobserve(p), t.success && JSUtils.isObject(t.response)) {
--                                                resolve(t.response);
--                                            } else {
--                                                reject(new Error("Search operation failed"));
--                                            }
--                                        });
--                                    });
--                                    await events.wait(0.2,0.5)
--                                } catch (error) {
--                                    console.error("Search error:", error);
--                                    services.Notification.queue([services.Localization.localize("notification.club.failedToLoad"), UINotificationType.NEGATIVE]);
--                                    const navController = e.getNavigationController();
--                                    if (navController) {
--                                        navController.popViewController(true);
--                                    }
 +        events.reloadPlayers = (options = {}) =>{
 +            if(info.base.reloadPlayersPromise){
 +                console.log("[FSU club load] reusing the active Club load");
@@ -691,10 +661,10 @@ index dd554ab..26eae93 100644
 +                                    sample.elapsedMs = Number((performance.now() - startedAt).toFixed(3));
 +                                    sample.error = summarizeDiagnosticValue(error);
 +                                    record.samples.push(sample);
-                                 }
++                                }
 +                                record.errors.push(summarizeDiagnosticValue(error));
 +                                throw error;
-                             }
++                            }
 +                        };
 +                        try{
 +                            const ownDescriptor = Object.getOwnPropertyDescriptor(target, rawKey);
@@ -1745,6 +1715,17 @@ index dd554ab..26eae93 100644
 +                try{ current = String(criteria?.cacheable); }catch(error){}
 +                console.log(`[FSU club load] ${label} search criteria cacheable:${current}, writable:${descriptor?.writable === true || typeof descriptor?.set === "function"}; network mode:${forceNetwork ? "forced by an active-criteria hasAllItems() bypass" : "natural because the Club repository is incomplete"}`);
 +            };
++            const removeClubPlayerById = id => {
++                const numericId = Number(id || 0);
++                const stale = clubRepoItems()?.get?.(numericId);
++                if(!stale) return true;
++                try{
++                    services.Club.clubDao.clubRepo.remove(stale);
++                }catch(error){
++                    clubRepoItems()?.remove?.(numericId);
++                }
++                return !clubRepoItems()?.get?.(numericId);
++            };
 +            info.base.clubValidationQueue ??= [];
 +            const validateClubPlayerRefs = async(refs, label = "Club player validation") => {
 +                const requested = (Array.isArray(refs) ? refs : [])
@@ -1780,10 +1761,7 @@ index dd554ab..26eae93 100644
 +                    const item = responseById.get(ref.id);
 +                    if(!item || Number(item?.definitionId || 0) !== ref.definitionId){
 +                        missing.push(ref);
-+                        const stale = clubRepoItems()?.get?.(ref.id);
-+                        if(stale){
-+                            try{ services.Club.clubDao.clubRepo.remove(stale); }catch(error){ clubRepoItems()?.remove?.(ref.id); }
-+                        }
++                        removeClubPlayerById(ref.id);
 +                        return;
 +                    }
 +                    services.Club.clubDao.clubRepo.update(item);
@@ -1861,11 +1839,7 @@ index dd554ab..26eae93 100644
 +                lastFullValidationAt:Number(info.base.clubCache?.lastFullValidationAt || 0),
 +                fastCache:info.base.clubCache?.status === "trusted-provisional"
 +            });
- 
--                            await services.Item.searchStorageItems(new UTSearchCriteriaDTO()).observe(current, function(e, t) {
--                                e.unobserve(current);
--                                if(t.success && t.response && !JSUtils.isString(t.response)){
--                                    //console.log(t.response.items)
++
 +            const run = async() => {
 +                info.base.state = false;
 +                try{
@@ -1908,12 +1882,8 @@ index dd554ab..26eae93 100644
 +                                    }
 +                                }else if(!Array.isArray(field)){
 +                                    collectScalars(field, path, depth + 1);
-                                 }
-                             });
--                            events.hideLoader();
--                            info.base.state = true;
--                            events.notice("notice.ldatasuccess",0);
--                            if(cntlr.current().className == "UTHomeHubViewController" && info.task.obj.html && cntlr.current().getView()._objectivesTile.__tileContent.querySelector(".ut-tile-view--subtitle")){
++                                }
++                            });
 +                        };
 +                        collectScalars(statsResult?.response);
 +                        appendClubDiagnostic("log", "club-stats-metadata", {
@@ -1954,11 +1924,7 @@ index dd554ab..26eae93 100644
 +                            console.log(`[FSU club load] provisional repository players:${repositoryCount}, total items:${clubRepoTotalCount()}`);
 +                        }
 +                    }
- 
--                                if(!cntlr.current().getView()._objectivesTile.__root.querySelector(".fsu-task")){
--                                    cntlr.current().getView()._objectivesTile.__tileContent.before(
--                                        events.createDF(`<div class="fsu-task">${info.task.obj.html}</div>`)
--                                    )
++
 +                    const storageOutcome = await storagePromise;
 +                    if(storageOutcome.error) throw storageOutcome.error;
 +                    const fastSignals = getFastCacheSignals(expectedCount, {
@@ -2011,7 +1977,35 @@ index dd554ab..26eae93 100644
 +                    if(requiresNetworkValidation){
 +                        const provisionalPlayerIds = clubRepoPlayerIds();
 +                        if(showLoader){
-+                            events.showLoader();
+                             events.showLoader();
+-                            let playersCount = isPhone() ? 200 : 200;
+-                            let playersPage = Math.ceil(e.count / playersCount);
+-                            let playerList = [];
+-                            for (let i = 0; i < playersPage; i++) {
+-                                let playersCriteria = new UTSearchCriteriaDTO();
+-                                playersCriteria.type = "player";
+-                                playersCriteria.sortBy = "ovr";
+-                                playersCriteria.sort = "desc";
+-                                playersCriteria.count = playersCount;
+-                                playersCriteria.offset = i * playersCount;
+-                                events.changeLoadingText(["loadingclose.ldata",`${i}`,`${playersPage}`]);
+-                                try {
+-                                    playerList = await new Promise((resolve, reject) => {
+-                                        services.Club.search(playersCriteria).observe(e, (p, t) => {
+-                                            if (p.unobserve(p), t.success && JSUtils.isObject(t.response)) {
+-                                                resolve(t.response);
+-                                            } else {
+-                                                reject(new Error("Search operation failed"));
+-                                            }
+-                                        });
+-                                    });
+-                                    await events.wait(0.2,0.5)
+-                                } catch (error) {
+-                                    console.error("Search error:", error);
+-                                    services.Notification.queue([services.Localization.localize("notification.club.failedToLoad"), UINotificationType.NEGATIVE]);
+-                                    const navController = e.getNavigationController();
+-                                    if (navController) {
+-                                        navController.popViewController(true);
 +                            loaderShown = true;
 +                        }
 +                        const requestPlayerWindow = async(offset, count, label, maxAttempts = 3) => {
@@ -2089,22 +2083,19 @@ index dd554ab..26eae93 100644
 +                                        selectedProbeWindow = `${probe.offset}:${pageSize}`;
 +                                        console.log(`[FSU club load] EA truncated the ${probe.count}-player probe to ${observedWindow}; selected observed page size:${pageSize}`);
 +                                        break;
-+                                    }
+                                     }
 +                                }catch(error){
 +                                    console.warn(`[FSU club load] page-size probe count ${probe.count} failed; trying a smaller size`, error);
                                  }
--                                let objCountElement = cntlr.current().getView()._objectivesTile.getRootElement().querySelector(".fsu-obj-count");
--                                if(objCountElement && info.task.obj.stat.catReward){
--                                    objCountElement.textContent = info.task.obj.stat.catReward;
--                                    objCountElement.style.display = "block";
-+                            }
+                             }
 +                        }
 +                        if(!pageSize){
 +                            pageSize = 200;
 +                            console.log("[FSU club load] EA capped larger requests; using page size:200");
 +                        }
 +
-+                        const pageCount = Math.ceil(expectedCount / pageSize);
++                        const validationExpectedCount = expectedCount;
++                        const pageCount = Math.ceil(validationExpectedCount / pageSize);
 +                        for(let page = 0; page < pageCount; page++){
 +                            await drainClubValidationQueue();
 +                            if(loaderShown){
@@ -2134,8 +2125,19 @@ index dd554ab..26eae93 100644
 +                                console.warn(`[FSU club load] page ${page + 1}/${pageCount} observed no new server players before the expected count was reached`);
 +                            }
 +                        }
-+
+ 
+-                            await services.Item.searchStorageItems(new UTSearchCriteriaDTO()).observe(current, function(e, t) {
+-                                e.unobserve(current);
+-                                if(t.success && t.response && !JSUtils.isString(t.response)){
+-                                    //console.log(t.response.items)
 +                        const currentExpectedCount = await readExpectedPlayerCount("Club.getStats after validation");
++                        const dirtyMarkerAtSnapshot = Number(GM_getValue(getClubFastCacheDirtyKey(), 0)) || 0;
++                        const authoritativeFullSnapshot = validationExpectedCount > 0
++                            && validationTiming.requests >= pageCount
++                            && currentExpectedCount === validationExpectedCount
++                            && serverPlayerIds.size === currentExpectedCount
++                            && verifiedPlayerPayloads.size === currentExpectedCount
++                            && dirtyMarkerAtSnapshot === dirtyMarkerAtStart;
 +                        if(currentExpectedCount !== expectedCount){
 +                            console.log(`[FSU club load] Club player count changed during background validation: ${expectedCount} -> ${currentExpectedCount}`);
 +                            expectedCount = currentExpectedCount;
@@ -2143,34 +2145,68 @@ index dd554ab..26eae93 100644
 +                        }
 +
 +                        if(provisionalPlayerIds.size){
-+                            const unverifiedRefs = Array.from(provisionalPlayerIds)
-+                                .filter(id => !serverPlayerIds.has(id))
++                            const unverifiedIds = Array.from(provisionalPlayerIds)
++                                .filter(id => !serverPlayerIds.has(id));
++                            const unverifiedRefs = unverifiedIds
 +                                .map(id => clubRepoItems()?.get?.(id))
 +                                .filter(Boolean)
 +                                .map(item => ({ id:Number(item.id), definitionId:Number(item.definitionId) }))
 +                                .filter(ref => ref.id > 0 && ref.definitionId > 0);
-+                            const maxTargetedReconciliation = Math.max(200, Math.ceil(expectedCount * 0.05));
-+                            if(unverifiedRefs.length > maxTargetedReconciliation){
-+                                throw new Error(`Club background validation could not authoritatively observe ${unverifiedRefs.length} cached player(s); preserving the provisional cache instead of deleting them`);
-+                            }
 +                            let targetedConfirmed = 0;
 +                            let targetedMissing = 0;
-+                            for(let index = 0; index < unverifiedRefs.length; index += 100){
-+                                const batch = unverifiedRefs.slice(index, index + 100);
-+                                const validation = await validateClubPlayerRefs(
-+                                    batch,
-+                                    `Club cache reconciliation ${Math.floor(index / 100) + 1}/${Math.ceil(unverifiedRefs.length / 100)}`
-+                                );
-+                                recordValidationTiming(validation);
-+                                validation.items.forEach(item => serverPlayerIds.add(Number(item.id)));
-+                                validation.responsePayloads?.forEach((payload, id) => verifiedPlayerPayloads.set(id, payload));
-+                                targetedConfirmed += validation.items.length;
-+                                targetedMissing += validation.missing.length;
++                            if(authoritativeFullSnapshot){
++                                const removalFailures = [];
++                                unverifiedIds.forEach(id => {
++                                    if(removeClubPlayerById(id)) targetedMissing++;
++                                    else removalFailures.push(id);
++                                });
++                                appendClubDiagnostic("log", "authoritative-cache-reconciliation", {
++                                    expectedCount,
++                                    pageCount,
++                                    completedRequests:validationTiming.requests,
++                                    serverPlayerIds:serverPlayerIds.size,
++                                    verifiedPayloads:verifiedPlayerPayloads.size,
++                                    dirtyMarkerAtStart,
++                                    dirtyMarkerAtSnapshot,
++                                    staleCandidates:unverifiedIds.length,
++                                    removedStale:targetedMissing,
++                                    removalFailures:removalFailures.slice(0, 50)
++                                });
++                                if(removalFailures.length){
++                                    throw new Error(`Club authoritative reconciliation could not remove ${removalFailures.length} stale cached player(s)`);
+                                 }
+-                            });
+-                            events.hideLoader();
+-                            info.base.state = true;
+-                            events.notice("notice.ldatasuccess",0);
+-                            if(cntlr.current().className == "UTHomeHubViewController" && info.task.obj.html && cntlr.current().getView()._objectivesTile.__tileContent.querySelector(".ut-tile-view--subtitle")){
++                                console.log(`[FSU club cache] complete exact Club snapshot proved ${serverPlayerIds.size}/${expectedCount} current player(s); removed ${targetedMissing} stale cached player(s) without per-player requests`);
++                            }else{
++                                const maxTargetedReconciliation = Math.max(200, Math.ceil(expectedCount * 0.05));
++                                if(unverifiedRefs.length > maxTargetedReconciliation){
++                                    throw new Error(`Club background validation could not authoritatively observe ${unverifiedRefs.length} cached player(s); preserving the provisional cache instead of deleting them`);
++                                }
++                                for(let index = 0; index < unverifiedRefs.length; index += 100){
++                                    const batch = unverifiedRefs.slice(index, index + 100);
++                                    const validation = await validateClubPlayerRefs(
++                                        batch,
++                                        `Club cache reconciliation ${Math.floor(index / 100) + 1}/${Math.ceil(unverifiedRefs.length / 100)}`
++                                    );
++                                    recordValidationTiming(validation);
++                                    validation.items.forEach(item => serverPlayerIds.add(Number(item.id)));
++                                    validation.responsePayloads?.forEach((payload, id) => verifiedPlayerPayloads.set(id, payload));
++                                    targetedConfirmed += validation.items.length;
++                                    targetedMissing += validation.missing.length;
++                                }
 +                            }
 +                            repositoryCount = clubRepoPlayerCount();
 +                            console.log(`[FSU club cache] validation saw ${serverPlayerIds.size} server player(s), captured ${verifiedPlayerPayloads.size} exact payload(s), targeted reconciliation confirmed:${targetedConfirmed}, removed stale:${targetedMissing}; repository players:${repositoryCount}`);
 +                        }
-+
+ 
+-                                if(!cntlr.current().getView()._objectivesTile.__root.querySelector(".fsu-task")){
+-                                    cntlr.current().getView()._objectivesTile.__tileContent.before(
+-                                        events.createDF(`<div class="fsu-task">${info.task.obj.html}</div>`)
+-                                    )
 +                        repositoryCount = clubRepoPlayerCount();
 +                        if(repositoryCount !== expectedCount){
 +                            if(pageSize !== 200){
@@ -2193,11 +2229,11 @@ index dd554ab..26eae93 100644
 +                                    const newServerPlayers = serverPlayerIds.size - serverPlayersBeforeFallback;
 +                                    console.log(`[FSU club load] fallback page ${page + 1}/${fallbackPageCount} new server players:${newServerPlayers}, verified:${serverPlayerIds.size}/${expectedCount}, response items:${fallbackResult.responseItems}, repository view:${fallbackResult.repositoryViewItems}, captured payloads:${fallbackResult.capturedPayloads}, elapsed:${fallbackResult.elapsed}ms, network:${fallbackResult.timing?.networkMs || 0}ms, parse:${fallbackResult.timing?.responseParseMs || 0}ms, local:${fallbackResult.timing?.localProcessingMs || 0}ms`);
                                  }
-                             }
--                            if(cntlr.current().className == "UTHomeHubViewController" && info.task.sbc.html && !cntlr.current().getView()._sbcTile.__root.querySelector(".fsu-task") && cntlr.current().getView()._sbcTile.__tileContent.querySelector(".ut-tile-content-graphic-info")){
--                                cntlr.current().getView()._sbcTile.__tileContent.before(
--                                    events.createDF(`<div class="fsu-task">${info.task.sbc.html}</div>`)
--                                )
+-                                let objCountElement = cntlr.current().getView()._objectivesTile.getRootElement().querySelector(".fsu-obj-count");
+-                                if(objCountElement && info.task.obj.stat.catReward){
+-                                    objCountElement.textContent = info.task.obj.stat.catReward;
+-                                    objCountElement.style.display = "block";
++                            }
 +                            repositoryCount = clubRepoPlayerCount();
 +                            if(repositoryCount !== expectedCount){
 +                                const finalExpectedCount = await readExpectedPlayerCount("Club.getStats before final count check");
@@ -2206,8 +2242,12 @@ index dd554ab..26eae93 100644
 +                                    expectedCount = finalExpectedCount;
 +                                    if(info.base.clubCache) info.base.clubCache.expected = expectedCount;
 +                                    repositoryCount = clubRepoPlayerCount();
-+                                }
-+                            }
+                                 }
+                             }
+-                            if(cntlr.current().className == "UTHomeHubViewController" && info.task.sbc.html && !cntlr.current().getView()._sbcTile.__root.querySelector(".fsu-task") && cntlr.current().getView()._sbcTile.__tileContent.querySelector(".ut-tile-content-graphic-info")){
+-                                cntlr.current().getView()._sbcTile.__tileContent.before(
+-                                    events.createDF(`<div class="fsu-task">${info.task.sbc.html}</div>`)
+-                                )
 +                            if(repositoryCount !== expectedCount){
 +                                throw new Error(`Club player repository count mismatch after load: expected ${expectedCount}, got ${repositoryCount}; total repository items:${clubRepoTotalCount()}`);
                              }
@@ -2279,7 +2319,7 @@ index dd554ab..26eae93 100644
          }
          UTHomeHubView.prototype.getObjectivesTile = function() {
              if(info.task.obj.html && !this._objectivesTile.__root.querySelector(".fsu-task") && info.set.info_obj){
-@@ -8252,6 +10323,7 @@
+@@ -8252,6 +10364,7 @@
          
          //指定ID填充SBC
          events.playerListFillSquad = (challenge,list,type) => {
@@ -2287,7 +2327,7 @@ index dd554ab..26eae93 100644
              events.showLoader();
              let playerlist = [],substitute = Array.from(list);
  
-@@ -8291,6 +10363,7 @@
+@@ -8291,6 +10404,7 @@
          }
          //阵容智能填充
          events.getTemplate = async function(e,type,sId){
@@ -2295,7 +2335,7 @@ index dd554ab..26eae93 100644
              e.setInteractionState(0);
              let squadPos = e.challenge.squad.getFieldPlayers().map(i => { return i.isBrick() ? null : i.getGeneralPosition()});
              events.showLoader();
-@@ -8849,6 +10922,7 @@
+@@ -8849,6 +10963,7 @@
              }
          }
          events.getRatingPlayers = (squad,ratings) => {
@@ -2303,7 +2343,7 @@ index dd554ab..26eae93 100644
              const assignPlayer = (playerlist, shortlist, Exclusionlist, index, pos) => {
                  const player = pos !== null ? _.find(shortlist, item => item.basePossiblePositions.includes(pos)) : _.head(shortlist);
                  if (player) {
-@@ -10010,6 +12084,7 @@
+@@ -10010,6 +12125,7 @@
          //快速SBC
          //24.20 新插入程序快速完成指定 SBC
          events.fastSBC = async (id,cId) => {
@@ -2311,7 +2351,7 @@ index dd554ab..26eae93 100644
              let controller = events.getCurrent(),
                  view = controller.getView(),
                  SBCSetEntity = services.SBC.repository.getSetById(id),
-@@ -11811,6 +13886,7 @@
+@@ -11811,6 +13927,7 @@
          //24.23 添加拦截器来截获提交的SBC
          const originalSubmitChallenge = UTSBCService.prototype.submitChallenge;
          UTSBCService.prototype.submitChallenge = function(o, a, i, n) {
@@ -2319,7 +2359,7 @@ index dd554ab..26eae93 100644
              let r = originalSubmitChallenge.apply(this, arguments);
              let s = this;
              r.observe(this, function(e,t) {
-@@ -15731,4 +17807,4 @@
+@@ -15731,4 +17848,4 @@
          unsafeWindow._ = _;
      }
      main()

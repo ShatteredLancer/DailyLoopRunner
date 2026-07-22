@@ -821,6 +821,23 @@ completed: 52072ms
 截至 2026-07-22：
 
 - FSU-P2 已实现并完成首次真实页面快速路径验证：缓存 manifest 包含 `lastFullValidationAt` 及 Storage/Transfer 实例指纹。12 小时内且 Club 数量、两处库存指纹和本地 dirty 标记均未变化时，启动进入 `trusted-provisional` 并跳过本次全量 Club 扫描；首次升级、手动刷新、过期、任一信号变化或本地库存操作都会保留/触发全量校验。
+
+### 18.1 大规模 stale cache 清理
+
+`fsu-club-diagnostics-2026-07-22T22-56-12-375Z.json` 暴露了一个安全阈值误判：缓存记录 `9930` 个球员，EA 当前统计为 `9232`。37 页 Club 请求全部使用 exact scoped capture，并得到 `9232/9232` 个唯一服务器 ID 和 payload，但旧实现因 `871` 个缓存 ID 超过 5% 定向核对阈值而进入 `validation-failed`。
+
+修正后的全量校验只在以下条件同时成立时直接按服务器集合清理 stale provisional 实体：
+
+1. EA 统计值大于零，并实际完成了覆盖该数量所需的分页请求。
+2. 扫描前后的 `Club.getStats` 球员数量不变。
+3. scoped capture 得到的唯一服务器球员 ID 数等于该统计值。
+4. exact payload 数也等于该统计值。
+5. 扫描期间 FSU 的本地库存 dirty marker 未变化，排除用户、Runner 或其它 FSU 操作同时改变库存。
+
+满足五项说明本次分页已经形成完整权威快照，未出现在集合中的 provisional ID 可安全批量删除，不再受 5% 定向核对阈值限制。清理会记录 `authoritative-cache-reconciliation` 诊断事件，并在任一实体删除失败时停止进入 ready。
+
+如果五项中任意一项不成立，仍保留原有保护：小规模差异按 definition ID 分批向 EA 定向核对；差异超过阈值则保留 provisional cache 并进入 `validation-failed`，不会根据不完整快照批量删除。
+
 - EA `Club.getStats()` 和 `/club` 响应均未发现 ETag、Last-Modified、revision、cursor、sequence 或其它增量 token，因此快速路径是有时限的启发式缓存，不是服务器增量同步。Runner Live 提交仍必须通过 `validateClubPlayers()` 定向验证所选 Club 实体。
 - 单独启用 FSU 时，实体缓存恢复、50 页 exact scoped capture、stale 清理和最终 ready 已验证。
 - Runner 的 provisional readiness、4 个提交入口、精确实体匹配、FSU fill 最终刷新保存和 Dry Run 已完成代码审计及自动测试；仍需完整真实页面矩阵收尾。
