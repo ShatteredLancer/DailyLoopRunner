@@ -19,7 +19,23 @@ describe('opened item materialization', () => {
     expect(opened.duplicateId).toBe(201);
     expect(result.duplicates).toEqual([opened]);
     expect(result.inferredDuplicates).toEqual([opened]);
+    expect(result.directItems).toEqual([]);
+    expect(result.deferredDuplicates).toEqual([opened]);
     expect(prepared).toEqual([101]);
+  });
+
+  it('routes only confirmed non-duplicates directly and defers duplicates to live Unassigned', () => {
+    const normal = { id: 101, definitionId: 501, type: 'player', duplicateId: 0 };
+    const duplicate = { id: 102, definitionId: 502, type: 'player', duplicateId: 202 };
+    const result = materializeOpenedPlayerDuplicates({
+      items: [normal, duplicate],
+      clubItems: [{ id: 202, definitionId: 502, type: 'player' }],
+      isPlayer: (item) => item.type === 'player',
+      isDuplicate: (item) => Number(item.duplicateId || 0) > 0,
+    });
+
+    expect(result.directItems).toEqual([normal]);
+    expect(result.deferredDuplicates).toEqual([duplicate]);
   });
 
   it('keeps an opened item pending until its id appears in a destination pile', () => {

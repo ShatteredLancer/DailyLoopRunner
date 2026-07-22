@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.44`
+当前版本：`0.5.45`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -23,7 +23,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.44` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.45` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
 FSU 不再显示前台 Club loading 时，可能正在后台校验，也可能已进入快速缓存状态。Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 
@@ -58,7 +58,7 @@ Options 中的完整日志会占用面板剩余空间并独立滚动；长错误
 
 如果某包开出不可交易重复卡而 Storage/恢复 SBC 无法安全容纳，当前包仍计入已打开并进入 recap，重复卡保留在 Unassigned，后续包停止且显示容量原因。再次运行时会先检查现有 Unassigned；阻塞未解除前不会继续开包。
 
-开包响应可能早于 EA 写入 `duplicateId` 和 Unassigned repository。Runner 会先用 Club 中相同 definition 的实体恢复迟到的重复标记，再清理 Unassigned，并逐张确认本包物品已进入 Club、Storage、Transfer，或被当前 crafting 流程明确保留。仍有未确认物品时不会继续下一包；Batch 会保留本次已开结果并在 recap 中显示停止原因。
+开包响应可能早于 EA 写入 `duplicateId` 和 Unassigned repository。Runner 会先用 Club 中相同 definition 的实体恢复迟到的重复标记；明确的非重复卡可直接进入 Club，但重复卡必须等待 live Unassigned 实体出现后再移动、swap 或交给 recovery，避免对同一张卡重复执行移动。随后 Runner 会逐张确认本包物品已进入 Club、Storage、Transfer，或被当前 crafting 流程明确保留。仍有未确认物品时不会继续下一包；Batch 会保留本次已开结果并在 recap 中显示停止原因。
 
 Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的多份包按不同实例依次打开，不再每轮重新选择 repository 中的第一项。遇到 `471` 时先进行连续多次 Unassigned 空状态确认和二次清理；`471` 本身不再被当作 Pack 实例已经失效的证据。第二次仍失败时安全停止并保留完整日志和 recap。
 

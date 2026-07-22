@@ -4,6 +4,7 @@ export async function resolveUnassigned(options = {}) {
   if (typeof options.getSnapshot !== 'function') throw new Error('getSnapshot is required');
   if (typeof options.executeAction !== 'function') throw new Error('executeAction is required');
   const maxIterations = Math.max(1, Math.min(100, Number(options.maxIterations || 20) || 20));
+  const actionProgressAttempts = Math.max(1, Math.min(10, Number(options.actionProgressAttempts || 1) || 1));
   const overflowResolvers = options.overflowResolvers || [];
   const activeResolvers = options.activeResolvers || new Set();
   let previousFingerprint = null;
@@ -24,8 +25,20 @@ export async function resolveUnassigned(options = {}) {
 
     if (plan.status === 'action') {
       await options.executeAction(plan.action, { plan, snapshot, iteration });
-      const after = await options.getSnapshot();
-      const afterFingerprint = unassignedFingerprint(after);
+      let after = null;
+      let afterFingerprint = fingerprint;
+      for (let attempt = 1; attempt <= actionProgressAttempts; attempt++) {
+        after = await options.getSnapshot();
+        afterFingerprint = unassignedFingerprint(after);
+        if (afterFingerprint !== fingerprint || attempt >= actionProgressAttempts) break;
+        await options.onActionProgressRetry?.({
+          action: plan.action,
+          attempt,
+          maxAttempts: actionProgressAttempts,
+          iteration,
+          snapshot: after,
+        });
+      }
       if (afterFingerprint === fingerprint) {
         return { status: 'blocked', reason: `Unassigned action made no progress: ${plan.action.description}`, iterations: iteration, plan, snapshot: after };
       }

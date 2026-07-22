@@ -49,7 +49,13 @@ export function materializeOpenedPlayerDuplicates(options = {}) {
     duplicates.push(item);
   }
 
-  return { duplicates, nonDuplicates, inferredDuplicates };
+  return {
+    duplicates,
+    nonDuplicates,
+    inferredDuplicates,
+    directItems: nonDuplicates,
+    deferredDuplicates: duplicates,
+  };
 }
 
 export function classifyOpenedItemRouting(options = {}) {

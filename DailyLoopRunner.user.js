@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.44
+// @version      0.5.45
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -6244,6 +6244,7 @@
     if (typeof options.getSnapshot !== "function") throw new Error("getSnapshot is required");
     if (typeof options.executeAction !== "function") throw new Error("executeAction is required");
     const maxIterations = Math.max(1, Math.min(100, Number(options.maxIterations || 20) || 20));
+    const actionProgressAttempts = Math.max(1, Math.min(10, Number(options.actionProgressAttempts || 1) || 1));
     const overflowResolvers = options.overflowResolvers || [];
     const activeResolvers = options.activeResolvers || /* @__PURE__ */ new Set();
     let previousFingerprint = null;
@@ -6261,8 +6262,20 @@
       }
       if (plan.status === "action") {
         await options.executeAction(plan.action, { plan, snapshot, iteration });
-        const after = await options.getSnapshot();
-        const afterFingerprint = unassignedFingerprint(after);
+        let after = null;
+        let afterFingerprint = fingerprint;
+        for (let attempt = 1; attempt <= actionProgressAttempts; attempt++) {
+          after = await options.getSnapshot();
+          afterFingerprint = unassignedFingerprint(after);
+          if (afterFingerprint !== fingerprint || attempt >= actionProgressAttempts) break;
+          await options.onActionProgressRetry?.({
+            action: plan.action,
+            attempt,
+            maxAttempts: actionProgressAttempts,
+            iteration,
+            snapshot: after
+          });
+        }
         if (afterFingerprint === fingerprint) {
           return { status: "blocked", reason: `Unassigned action made no progress: ${plan.action.description}`, iterations: iteration, plan, snapshot: after };
         }
@@ -6620,7 +6633,13 @@
       preparePurchasedItem(item);
       duplicates.push(item);
     }
-    return { duplicates, nonDuplicates, inferredDuplicates };
+    return {
+      duplicates,
+      nonDuplicates,
+      inferredDuplicates,
+      directItems: nonDuplicates,
+      deferredDuplicates: duplicates
+    };
   }
   function classifyOpenedItemRouting(options = {}) {
     const items = options.items || [];
@@ -10043,7 +10062,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.44",
+      version: "0.5.45",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -11342,6 +11361,13 @@
         blockedPolicy: options.blockedPolicy || "fail",
         activeResolvers: options.activeResolvers,
         maxIterations: options.maxIterations || 20,
+        actionProgressAttempts: options.actionProgressAttempts || 6,
+        onActionProgressRetry: async ({ action: action2, attempt, maxAttempts }) => {
+          if (attempt === 1) {
+            log(`Unassigned ${action2.description} move is waiting for EA repository settlement (${attempt + 1}/${maxAttempts})`);
+          }
+          await sleep(Math.min(1800, 500 + attempt * 250));
+        },
         executeAction: async (action2) => {
           stopPoint();
           const items = action2.itemRefs.map((ref) => adapter.resolveItem(ref, ["unassigned"])?.item).filter(Boolean);
@@ -11466,53 +11492,15 @@
       const players = uniqueItems((items || []).filter((item) => isPlayer2(item)));
       if (!players.length) return 0;
       const materialized = materializeOpenedResponsePlayerDuplicates(players, label);
-      let moved = 0;
-      const movedIds = /* @__PURE__ */ new Set();
-      const markMoved = (list) => list.forEach((item) => movedIds.add(Number(item?.id || 0)));
-      const duplicateIds = new Set(materialized.duplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
-      const nonDuplicates = players.filter((item) => !duplicateIds.has(Number(item?.id || 0)));
-      const movedNonDuplicates = await tryMoveOpenedRewardItems(nonDuplicates, inventoryPile("club"), true, label, "non-duplicate");
-      if (movedNonDuplicates) {
-        moved += movedNonDuplicates;
-        markMoved(nonDuplicates);
-      }
-      const remainingDuplicates = players.filter(
-        (item) => !movedIds.has(Number(item?.id || 0)) && duplicateIds.has(Number(item?.id || 0))
+      const moved = await tryMoveOpenedRewardItems(
+        materialized.directItems,
+        inventoryPile("club"),
+        true,
+        label,
+        "non-duplicate"
       );
-      const tradeableDuplicates = remainingDuplicates.filter((item) => isTradeable(item));
-      if (tradeableDuplicates.length) {
-        try {
-          assertPileSpace("Transfer list", transferSpaceLeft(), tradeableDuplicates.length);
-          const count = await tryMoveOpenedRewardItems(tradeableDuplicates, inventoryPile("transfer"), false, label, "tradeable duplicate");
-          if (count) {
-            moved += count;
-            markMoved(tradeableDuplicates);
-          }
-        } catch (e) {
-          log(`${label}: direct tradeable duplicate reward move skipped: ${e.message || e}`);
-        }
-      }
-      const untradeableDuplicates = players.filter(
-        (item) => !movedIds.has(Number(item?.id || 0)) && isDuplicate(item) && !isTradeable(item)
-      );
-      const swappable = untradeableDuplicates.filter((item) => {
-        const clubDuplicate = findClubDuplicate2(item);
-        return clubDuplicate && isTradeable(clubDuplicate);
-      });
-      const storageDuplicates = untradeableDuplicates.filter((item) => !swappable.includes(item));
-      const swappedCount = await tryMoveOpenedRewardItems(swappable, inventoryPile("club"), true, label, "swappable duplicate");
-      if (swappedCount) {
-        moved += swappedCount;
-        markMoved(swappable);
-      }
-      if (storageDuplicates.length) {
-        try {
-          assertPileSpace("SBC storage", storageSpaceLeft(), storageDuplicates.length);
-          const count = await tryMoveOpenedRewardItems(storageDuplicates, inventoryPile("storage"), true, label, "untradeable duplicate");
-          if (count) moved += count;
-        } catch (e) {
-          log(`${label}: direct untradeable duplicate reward move skipped: ${e.message || e}`);
-        }
+      if (materialized.deferredDuplicates.length) {
+        log(`${label}: waiting for ${materialized.deferredDuplicates.length} duplicate opened reward item(s) to materialize in Unassigned`);
       }
       if (moved) {
         await refreshInventoryCaches(`${label} direct reward move`, { includePacks: false, quiet: true });

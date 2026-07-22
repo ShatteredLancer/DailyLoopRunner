@@ -34,6 +34,26 @@ describe('resolveUnassigned', () => {
     expect(executeAction).toHaveBeenCalledOnce();
   });
 
+  it('waits for delayed repository progress after a successful action', async () => {
+    const original = [createItemSnapshot({ id: 1, definitionId: 101, type: 'player', rating: 64 }, 'unassigned')];
+    let readsAfterAction = 0;
+    let actionExecuted = false;
+    const onActionProgressRetry = vi.fn(async () => {});
+    const result = await resolveUnassigned({
+      getSnapshot: async () => {
+        if (!actionExecuted) return stateSnapshot(original, 100);
+        readsAfterAction++;
+        return stateSnapshot(readsAfterAction < 3 ? original : [], 100);
+      },
+      executeAction: async () => { actionExecuted = true; },
+      actionProgressAttempts: 3,
+      onActionProgressRetry,
+    });
+
+    expect(result.status).toBe('resolved');
+    expect(onActionProgressRetry).toHaveBeenCalledTimes(2);
+  });
+
   it('runs ordered overflow resolvers and verifies actual progress', async () => {
     let items = [duplicate(1)];
     const first = vi.fn(async () => ({ status: 'unavailable' }));

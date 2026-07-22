@@ -331,7 +331,7 @@ EA objects
 - 开包前先处理或明确保留已有 Unassigned。
 - 每个开包调用必须提供 opened-item policy。
 - response item 与 Repository 延迟必须被 receipt/transient signal 覆盖。
-- EA pack response 经常早于 Unassigned cache。成功开包后必须先标准化并处理 response items：按 policy 将非重复、可交易重复、不可交易重复或当前 stage 保留材料分类和路由；然后再处理残留 Unassigned，最后刷新 recent reward/Repository 状态，才允许下一次选材或开下一包。
+- EA pack response 经常早于 Unassigned cache。成功开包后必须先标准化 response items，并可直接移动已确认的非重复卡；response duplicate 只用于恢复迟到的 duplicate metadata、通知和后续确认，不得直接作为重复卡移动实体。可交易重复、不可交易重复、swap 和当前 stage 保留材料必须等待 live Unassigned Repository 实体出现后再按 policy 路由，然后刷新 recent reward/Repository 状态，才允许下一次选材或开下一包。
 - 不得把“先清理旧 Unassigned”和“开包成功后的 response materialization”混为同一步。开包后的 response 处理必须先于该奖励产生的残留 Unassigned cleanup，否则下一轮会误报缺料或遗留重复卡。
 - 471、500、404 和 stale pack 的重试必须有界。
 - 开第二包前必须重新检查 Unassigned 和容量。
@@ -354,6 +354,7 @@ EA objects
 - Loop 专属保留通过 `reserveItem` 回调注入。
 - 容量 fail-safe 通过配置化 overflow resolver 注入。
 - action 或 resolver 报告 progress 后，Unassigned fingerprint 必须变化。
+- EA move/swap 返回 success 后 Repository 可能仍短暂保留旧 Unassigned 实体；必须有界重读并确认 fingerprint 变化，不能立即对同一实体规划第二次 move，也不能无限等待。
 - 必须有最大迭代和递归保护。
 - 无进展时安全停止，不能继续开包扩大阻塞。
 
@@ -851,7 +852,7 @@ Dry run 必须在副作用前停止：
 - `SBC storage has only ...`：根因可能是前一步不该清空 Unassigned，而不是容量检查本身。
 - `selected M/N`：先看 diagnostics 和 FSU settings，再判断库存不足。
 - `Open pack failed: 471/500`：先检查上一包响应是否已经完成 duplicate materialization、Unassigned settlement 和逐卡 destination confirmation。`471` 常表示仍有服务端待处理物品，不能直接推断当前 Pack 实例已经失效；Batch 对同 ID 多包使用启动时捕获的实例队列，普通奖励包可按自身 resolver 获取刷新模型。`500` 仍按有界重试处理。
-- 开包响应中的 `isDuplicate()`/`duplicateId` 可能晚于响应返回。通用开包路径必须先用 Club 相同 definition 恢复迟到的 duplicate signal，再清理 Unassigned；不得先把响应卡当 non-duplicate 移动后仅凭一次空 repository 继续下一包。
+- 开包响应中的 `isDuplicate()`/`duplicateId` 可能晚于响应返回。通用开包路径必须先用 Club 相同 definition 恢复迟到的 duplicate signal，再等待 live Unassigned 实体执行 duplicate move/swap；不得直接移动 response duplicate，也不得把响应卡当 non-duplicate 移动后仅凭一次空 repository 继续下一包。
 - `pendingItemRefs` 表示开包响应卡尚未确认进入 Club/Storage/Transfer，也没有被明确 reserved。任何自动开包流程都必须停止后续包或 SBC 动作；reserved 与 pending 不得混淆。
 - `Pack #N marked gone for this session after 404`：同一 pack id 已按 404 拉黑，本会话不再重复尝试（例如僵尸 TOTW Provision Refresh）。
 - `background submit returned 409/429; reloading challenge before retry`：评分 SBC 后台提交冲突，脚本会有限次重载 challenge 并重放阵容后重试；仍失败再停。
