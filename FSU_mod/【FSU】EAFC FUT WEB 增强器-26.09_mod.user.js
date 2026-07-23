@@ -7708,27 +7708,26 @@
                 "etag", "last-modified", "x-revision", "x-resource-version", "x-sync-token",
                 "x-last-sync", "x-update-sequence", "x-server-time", "date"
             ];
-            const readClubDeltaHeaders = xhr => {
+            const readExposedClubResponseHeaders = xhr => {
                 const headers = {};
-                CLUB_DELTA_HEADER_NAMES.forEach(name => {
-                    try{
-                        const value = xhr?.getResponseHeader?.(name);
-                        if(value) headers[name] = String(value).slice(0, 240);
-                    }catch(error){}
-                });
+                try{
+                    String(xhr?.getAllResponseHeaders?.() || "")
+                        .split(/\r?\n/)
+                        .forEach(line => {
+                            const separator = line.indexOf(":");
+                            if(separator <= 0) return;
+                            const name = line.slice(0, separator).trim().toLowerCase();
+                            const value = line.slice(separator + 1).trim();
+                            if(name && value) headers[name] = value.slice(0, 240);
+                        });
+                }catch(error){}
                 return headers;
             };
-            const readClubResponseHeaderNames = xhr => {
-                try{
-                    return String(xhr?.getAllResponseHeaders?.() || "")
-                        .split(/\r?\n/)
-                        .map(line => line.split(":", 1)[0].trim().toLowerCase())
-                        .filter(Boolean)
-                        .slice(0, 80);
-                }catch(error){
-                    return [];
-                }
-            };
+            const readClubDeltaHeaders = exposedHeaders => Object.fromEntries(
+                CLUB_DELTA_HEADER_NAMES
+                    .filter(name => exposedHeaders?.[name])
+                    .map(name => [name, exposedHeaders[name]])
+            );
             const summarizeClubResponseMetadata = responseText => {
                 if(typeof responseText !== "string" || !responseText) return {};
                 const root = JSON.parse(responseText);
@@ -7805,8 +7804,9 @@
                             session.capturePhase = "xhr-loadend-response";
                             session.responseStatus = Number(this.status || 0);
                             session.responseUrl = sanitizeClubResponseUrl(this.responseURL || session.identity?.url || state.url);
-                            session.responseHeaderNames = readClubResponseHeaderNames(this);
-                            session.deltaHeaders = readClubDeltaHeaders(this);
+                            const exposedResponseHeaders = readExposedClubResponseHeaders(this);
+                            session.responseHeaderNames = Object.keys(exposedResponseHeaders).slice(0, 80);
+                            session.deltaHeaders = readClubDeltaHeaders(exposedResponseHeaders);
                             const responseReceivedAt = performance.now();
                             session.networkElapsedMs = Number((responseReceivedAt - Number(session.sentAt || responseReceivedAt)).toFixed(3));
                             try{

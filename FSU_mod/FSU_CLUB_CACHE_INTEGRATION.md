@@ -838,6 +838,12 @@ completed: 52072ms
 
 如果五项中任意一项不成立，仍保留原有保护：小规模差异按 definition ID 分批向 EA 定向核对；差异超过阈值则保留 provisional cache 并进入 `validation-failed`，不会根据不完整快照批量删除。
 
+### 18.2 跨域 response header 控制台警告
+
+Club 分页诊断曾逐个调用 `XMLHttpRequest.getResponseHeader()` 试探 `etag`、`x-revision`、`x-sync-token` 等潜在增量 header。EA 的 `/club` 跨域响应没有通过 `Access-Control-Expose-Headers` 暴露这些名称，因此 Chrome 会为每页输出多条 `Refused to get unsafe header`。该消息不代表 Club 请求失败，但会污染控制台并掩盖真正错误。
+
+当前实现只调用一次 `getAllResponseHeaders()`，解析浏览器实际允许脚本读取的 header，再从其中筛选增量候选。未暴露的 header 不再主动查询；diagnostics 仍保留 `responseHeaderNames` 和可读取的 `deltaHeaders`，不会降低现有诊断能力。
+
 - EA `Club.getStats()` 和 `/club` 响应均未发现 ETag、Last-Modified、revision、cursor、sequence 或其它增量 token，因此快速路径是有时限的启发式缓存，不是服务器增量同步。Runner Live 提交仍必须通过 `validateClubPlayers()` 定向验证所选 Club 实体。
 - 单独启用 FSU 时，实体缓存恢复、50 页 exact scoped capture、stale 清理和最终 ready 已验证。
 - Runner 的 provisional readiness、4 个提交入口、精确实体匹配、FSU fill 最终刷新保存和 Dry Run 已完成代码审计及自动测试；仍需完整真实页面矩阵收尾。
