@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.52`
+当前版本：`0.5.53`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -23,7 +23,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.52` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.53` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
 FSU 不再显示前台 Club loading 时，可能正在后台校验，也可能已进入快速缓存状态。Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 
@@ -54,7 +54,7 @@ Options 中的完整日志会占用面板剩余空间并独立滚动；长错误
 2. 在 `My Packs` 区域点击 `Add v`：选择 `Add 1` 加入一包，或选择 `Add all (N)` 进入动态全部模式，不需要输入数量。动态全部模式记忆的是 `all`，不是当时的数字；下次打开弹窗和正式启动前都会读取实时 My Packs 数量。已加入的类型可通过 `Added v` 重设为固定 1 或动态全部数量。
 3. 列表、固定数量和 `all` 模式保存在浏览器本地存储中；下次打开弹窗会直接恢复。已经不在 `My Packs` 的记忆项仍会保留并显示 `unavailable`；`all` 模式实时数量为 0 时执行阶段会安全跳过。
 4. 点击 `Start batch` 后按列表顺序逐包打开。每包都走 Runner 的通用开包、Reward Alerts 和 Unassigned 处理流程；可用主面板 `Stop` 在下一个安全点停止。
-5. 结束后显示 Batch Open recap：特殊球员逐张列出并查询实时价格；其它非特殊球员按“评分 + Rare/Common + Gold/Silver/Bronze”聚合，例如 `89 Rare Gold x2`、`74 Common Silver x4`；整个列表按评分降序排列。价格查询失败只显示 `price:?`，不会阻断 recap。
+5. 结束后显示 Batch Open recap：所有球员都按 Pick recap 风格逐张列出并按评分降序排列，每页最多 20 条；特殊球员查询实时价格，普通球员显示 Rare/Common 和 Gold/Silver/Bronze tier。价格查询失败只显示 `price:?`，不会阻断 recap。
 
 当 EA 的全重复开包响应迟迟没有生成可读取的 Unassigned 实体时，Batch Open 会先主动进入 Unassigned、连续确认并运行通用清理/恢复流程。全部有界重试仍失败后，才会尝试直接结算响应实体；该兜底会按开包前库存快照确认新目标实体，并聚合检查 Storage/Transfer 容量（交换可交易 Club 版本同样占用 Transfer）。无法确认、容量不足或检测到新的 live Unassigned 时会保留现场并停止后续包，不会把该行为扩展到其它 Loop。
 
@@ -66,7 +66,7 @@ Options 中的完整日志会占用面板剩余空间并独立滚动；长错误
 
 Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的多份包按不同实例依次打开，不再每轮重新选择 repository 中的第一项。遇到 `471` 时先进行连续多次 Unassigned 空状态确认和二次清理；`471` 本身不再被当作 Pack 实例已经失效的证据。第二次仍失败时安全停止并保留完整日志和 recap。
 
-`Preview recap` 使用固定模拟数据，只预览 recap 和烟花，不开包、不访问 EA，也不会发送 Desktop 或 ntfy 通知。
+`Preview recap` 使用 23 条固定模拟数据实际验证第二页，只预览 recap 和烟花，不开包、不访问 EA，也不会发送 Desktop 或 ntfy 通知。Options 中的 `Preview Pick recap` 使用同一套 renderer 和分页规则验证 Player Pick 展示。
 
 ## Options
 
@@ -210,6 +210,8 @@ Player Pick 会严格保持 EA 元数据或静态配置中的普金/稀有金比
 4. 实时价格更高
 
 FUT.GG 返回 403 或无有效价格时会自动回退 FUTNext。价格会显示在 Pick 日志和汇总中。达到人工介入条件时，脚本会弹出选择窗口等待用户确认。
+
+Player Pick 与 Batch Open 使用统一逐卡 recap：每页最多 20 条，支持 Previous/Next、Preview 和 stopped/preserved/blocked 原因。普通卡按 Bronze、Silver、Common Gold、Rare Gold 85-、86-88、89+ 显示递进颜色；特殊卡优先使用 EA rarity card color map，无法安全读取时按 94-、95-97、98-99 三档回退。Pick 额外显示 Pick 序号和最终库存去向，Batch 保留包数量、跳过数量及金银铜汇总。
 
 ### Provision Crafting Loop
 

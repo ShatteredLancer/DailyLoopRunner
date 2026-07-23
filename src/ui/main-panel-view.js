@@ -191,7 +191,7 @@ export function mainPanelHtml(maxRounds = 3) {
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
         <div class="bronze-loop-section">Config</div>
-        <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
+        <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-preview-pick-recap">Preview Pick recap</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
         <div class="row"><button id="bronze-loop-built-in" disabled>Built-in loops</button><button id="bronze-loop-edit">Edit loop JSON</button></div>
         <div class="row"><button id="bronze-loop-edit-config" title="Edit every loop, workflow step, and recovery policy as one configuration">Edit workflow JSON</button><button id="bronze-loop-apply-config" title="Validate and apply the full workflow configuration in the editor">Apply workflow JSON</button></div>
         <textarea id="bronze-loop-json" spellcheck="false"></textarea>

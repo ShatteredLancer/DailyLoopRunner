@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.52
+// @version      0.5.53
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -127,6 +127,7 @@ import {
   createBatchOpenRecapModel,
   createBatchOpenRecapPreviewModel,
 } from './reward/batch-open-recap.js';
+import { createPlayerPickRecapPreviewModel } from './reward/player-pick-recap.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
 import {
@@ -200,6 +201,7 @@ import { showBatchOpenRecap } from './ui/batch-open-recap.js';
   const eaInventoryAdapter = () => adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
   const inventoryPile = (pileName) => eaInventoryAdapter().pileValue(pileName);
   const eaPlayerPickAdapter = () => adapters.playerPick();
+  const eaRarityAdapter = adapters.rarity;
   const eaSbcAdapter = () => adapters.sbc();
   const fsuAdapter = () => adapters.fsu();
   const localizationAdapter = adapters.localization;
@@ -254,7 +256,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.52',
+    version: '0.5.53',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -525,7 +527,7 @@ function updateLoopControls() {
       log('No previous recap available');
       return;
     }
-    await showPickRecapModal({ name: recap.name }, recap.pickResults);
+    await showPickRecapModal({ name: recap.name }, recap.pickResults, recap);
     if (btn && document.querySelector('#bronze-loop-recap-modal')) {
       btn.textContent = 'Hide recap';
       btn.style.background = '#b13b3b';
@@ -7247,11 +7249,13 @@ function updateLoopControls() {
       state.lastPickRecap = {
         name: pickDef?.name || 'Provision pre-craft Player Pick',
         pickResults: preCraftPickResults,
+        status: result.status,
+        reason: result.reason,
         completedAt: Date.now(),
       };
       state.lastRecapType = 'pick';
       updateRecapButton();
-      if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults);
+      if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults, result);
     }
     const completionSummary = craftingUpgrades
       .map((upgradeDef, index) => `${upgradeDef.name}:${result.stageCompletions[`stage-${index}`] || 0}`)
@@ -8044,18 +8048,18 @@ function updateLoopControls() {
       const targetLabel = loopDef.exhaustSbcSet === true ? 'available' : 'requested';
       log(`${loopDef.name}: completed ${result.picksCompleted}/${maxPicks} ${targetLabel} Player Pick(s)${openPicksAtEnd ? `; queued ${result.picksQueued}` : ''}`);
     }
-    if (!dryRun && loopDef.discoveryReportedCompleted === true && result.status !== 'completed') {
-      fail(`${loopDef.name}: completed-status runtime probe failed (${result.status}): ${result.reason || 'SBC Set or Challenge is unavailable'}`);
-    }
     return result;
   }
 
-  function showPickRecapModal(loopDef, pickResults) {
+  function showPickRecapModal(loopDef, pickResults, result = {}) {
     return showPlayerPickRecap({
       dom: adapters.dom,
       name: loopDef?.name,
       pickResults,
+      status: result.status,
+      reason: result.reason,
       itemDisplayName,
+      resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
       formatPrice: formatCompactPrice,
       scheduleStopCheck: setInterval,
       cancelStopCheck: clearInterval,
@@ -8101,6 +8105,26 @@ function updateLoopControls() {
 
   function previewBatchOpenRecap() {
     return showBatchRecapModal(createBatchOpenRecapPreviewModel());
+  }
+
+  function previewPlayerPickRecap() {
+    return showPlayerPickRecap({
+      dom: adapters.dom,
+      model: createPlayerPickRecapPreviewModel({
+        itemDisplayName,
+      }),
+      formatPrice: formatCompactPrice,
+      scheduleStopCheck: setInterval,
+      cancelStopCheck: clearInterval,
+      isStopping: () => false,
+      celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
+        dom: adapters.dom,
+        getComputedStyle: (element) => getComputedStyle(element),
+        devicePixelRatio: () => window.devicePixelRatio || 1,
+        now: () => performance.now(),
+        requestFrame: (callback) => requestAnimationFrame(callback),
+      }),
+    });
   }
 
   async function getBatchOpenSpecialPrices(items) {
@@ -8205,7 +8229,11 @@ function updateLoopControls() {
         },
       });
       const prices = await getBatchOpenSpecialPrices(result.openedItems);
-      recapModel = createBatchOpenRecapModel({ ...result, prices });
+      recapModel = createBatchOpenRecapModel({
+        ...result,
+        prices,
+        resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+      });
       state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
       state.lastRecapType = 'batch';
       log(`Batch Open: ${result.status}${result.reason ? ` (${result.reason})` : ''}; opened ${result.packsOpened}/${result.requestedPacks}, skipped ${result.skippedPacks}`);
@@ -8215,12 +8243,18 @@ function updateLoopControls() {
       log(`Batch Open stopped: ${error?.message || error}`);
       errorStackLines(error).forEach((line) => log(`Error stack: ${line}`));
       console.error('[BronzeLoop]', error);
-      if (result) {
-        recapModel = createBatchOpenRecapModel({ ...result, status: 'blocked', reason: error?.message || error });
-        state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
-        state.lastRecapType = 'batch';
-        updateRecapButton();
-      }
+      const fallbackPlan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
+      const requestedPacks = fallbackPlan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
+      recapModel = createBatchOpenRecapModel({
+        ...(result || {}),
+        requestedPacks: result?.requestedPacks ?? requestedPacks,
+        status: 'blocked',
+        reason: error?.message || error,
+        resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+      });
+      state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+      state.lastRecapType = 'batch';
+      updateRecapButton();
       return null;
     } finally {
       state.running = false;
@@ -8335,18 +8369,20 @@ function updateLoopControls() {
         },
         afterPlayerPickRun: async (definition, result) => {
           const pickResults = result.pickResults || [];
-          if (!pickResults.length) {
+          if (!pickResults.length && result.status === 'completed' && !result.reason) {
             await showUnassignedIfAny(`${definition.name} end`);
             return;
           }
           state.lastPickRecap = {
             name: definition.name,
             pickResults,
+            status: result.status,
+            reason: result.reason,
             completedAt: Date.now(),
           };
           state.lastRecapType = 'pick';
           updateRecapButton();
-          await showPickRecapModal(definition, pickResults);
+          await showPickRecapModal(definition, pickResults, result);
           await showUnassignedIfAny(`${definition.name} end`);
         },
       });
@@ -8496,6 +8532,7 @@ function updateLoopControls() {
       start: startLoop,
       openBatch: openBatchOpenDialogModal,
       reopenRecap: reopenLastRecap,
+      previewPickRecap: previewPlayerPickRecap,
       refreshInventoryCaches,
       scanPlayerPicks: scanAvailablePlayerPickSbcs,
       loopConfigUrl: LOOP_CONFIG_URL,

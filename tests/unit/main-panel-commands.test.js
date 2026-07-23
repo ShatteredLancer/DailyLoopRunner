@@ -126,21 +126,26 @@ describe('main panel command orchestration', () => {
   it('does not start or overlap panel operations while another operation is active', async () => {
     const start = vi.fn();
     const openBatch = vi.fn();
-    const current = harness({ start, openBatch });
+    const previewPickRecap = vi.fn();
+    const current = harness({ start, openBatch, previewPickRecap });
     current.state.scanningPicks = true;
     expect(current.commands.start()).toBe(false);
     expect(current.commands.openBatch()).toBe(false);
+    expect(current.commands.previewPickRecap()).toBe(false);
     await expect(current.commands.refresh()).resolves.toBe(false);
     await expect(current.commands.loadJson()).resolves.toBe(false);
     expect(current.commands.useBuiltIn()).toBe(false);
     expect(start).not.toHaveBeenCalled();
     expect(openBatch).not.toHaveBeenCalled();
+    expect(previewPickRecap).not.toHaveBeenCalled();
 
     current.state.scanningPicks = false;
     expect(current.commands.start()).toBe(true);
     expect(start).toHaveBeenCalledOnce();
     expect(current.commands.openBatch()).toBe(true);
     expect(openBatch).toHaveBeenCalledOnce();
+    expect(current.commands.previewPickRecap()).toBe(true);
+    expect(previewPickRecap).toHaveBeenCalledOnce();
   });
 
   it('rescans only when scanned Pick metadata is enabled', async () => {

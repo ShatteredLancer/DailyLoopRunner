@@ -158,4 +158,21 @@ describe('runPlayerPickWorkflow', () => {
     const deferredResult = await runPlayerPickWorkflow(deferred);
     expect(deferredResult).toMatchObject({ status: 'completed', picksCompleted: 0, reason: null });
   });
+
+  it('returns a structured stopped result while preserving already selected Picks', async () => {
+    let checks = 0;
+    const finalize = vi.fn(async () => {});
+    const options = baseOptions({
+      maxPicks: 2,
+      stopPoint: vi.fn(async () => {
+        checks++;
+        if (checks > 1) throw new Error('Stopped by user');
+      }),
+      finalize,
+    });
+    const result = await runPlayerPickWorkflow(options);
+    expect(result).toMatchObject({ status: 'stopped', reason: 'stopped by user', picksCompleted: 1 });
+    expect(result.pickResults).toHaveLength(1);
+    expect(finalize).toHaveBeenCalledWith(result);
+  });
 });

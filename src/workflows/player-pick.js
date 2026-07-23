@@ -170,53 +170,61 @@ export async function runPlayerPickWorkflow(options = {}) {
   };
   const maxPicks = pickLimit(options.maxPicks);
 
-  if (deferred) {
-    await runDeferredPlayerPicks(options, result, maxPicks);
+  try {
+    if (deferred) {
+      await runDeferredPlayerPicks(options, result, maxPicks);
+      await options.finalize?.(result);
+      return result;
+    }
+
+    while (result.picksCompleted < maxPicks) {
+      const pendingPick = await options.findPendingPick({ result });
+      if (!pendingPick) break;
+      const selected = await selectPick(options, result, pendingPick, { resumed: true, deferred: false });
+      if (selected.status === 'selected') continue;
+      result.status = selected.status;
+      result.reason = selected.reason || `pending Pick ${selected.status}`;
+      break;
+    }
+
+    while (result.status === 'completed' && result.picksCompleted < maxPicks) {
+      const submission = await submitPickChallenges(options, result);
+      if (submission.status !== 'submitted') {
+        result.status = submission.status;
+        result.reason = submission.reason;
+        break;
+      }
+      if (!submission.submittedCount && !submission.challengeContext?.incomplete?.length) {
+        if (options.completeWhenNoChallengeRemains === true) {
+          result.reason = null;
+          break;
+        }
+        result.status = 'unavailable';
+        result.reason = 'No incomplete Player Pick challenge remains';
+        break;
+      }
+
+      const rewardPick = await options.findRewardPick({ result, challengeContext: submission.challengeContext });
+      if (!rewardPick) {
+        result.status = 'unavailable';
+        result.reason = 'Player Pick reward was not found';
+        break;
+      }
+      const selected = await selectPick(options, result, rewardPick, { resumed: false, deferred: false });
+      if (selected.status !== 'selected') {
+        result.status = selected.status;
+        result.reason = selected.reason;
+        break;
+      }
+    }
+
+    await options.finalize?.(result);
+    return result;
+  } catch (error) {
+    if (!/stopped by user/i.test(String(error?.message || error))) throw error;
+    result.status = 'stopped';
+    result.reason = 'stopped by user';
     await options.finalize?.(result);
     return result;
   }
-
-  while (result.picksCompleted < maxPicks) {
-    const pendingPick = await options.findPendingPick({ result });
-    if (!pendingPick) break;
-    const selected = await selectPick(options, result, pendingPick, { resumed: true, deferred: false });
-    if (selected.status === 'selected') continue;
-    result.status = selected.status;
-    result.reason = selected.reason || `pending Pick ${selected.status}`;
-    break;
-  }
-
-  while (result.status === 'completed' && result.picksCompleted < maxPicks) {
-    const submission = await submitPickChallenges(options, result);
-    if (submission.status !== 'submitted') {
-      result.status = submission.status;
-      result.reason = submission.reason;
-      break;
-    }
-    if (!submission.submittedCount && !submission.challengeContext?.incomplete?.length) {
-      if (options.completeWhenNoChallengeRemains === true) {
-        result.reason = null;
-        break;
-      }
-      result.status = 'unavailable';
-      result.reason = 'No incomplete Player Pick challenge remains';
-      break;
-    }
-
-    const rewardPick = await options.findRewardPick({ result, challengeContext: submission.challengeContext });
-    if (!rewardPick) {
-      result.status = 'unavailable';
-      result.reason = 'Player Pick reward was not found';
-      break;
-    }
-    const selected = await selectPick(options, result, rewardPick, { resumed: false, deferred: false });
-    if (selected.status !== 'selected') {
-      result.status = selected.status;
-      result.reason = selected.reason;
-      break;
-    }
-  }
-
-  await options.finalize?.(result);
-  return result;
 }

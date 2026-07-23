@@ -1,3 +1,5 @@
+import { createRecapModel, recapCardTypeLabel, resolveRecapCardTheme } from './recap.js';
+
 function itemName(item = {}) {
   return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || 'Unknown player');
 }
@@ -20,108 +22,112 @@ function playerTier(item = {}) {
   return null;
 }
 
-function playerRarity(item = {}) {
-  return item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0 ? 'rare' : 'common';
-}
-
-function titleCase(value) {
-  const text = String(value || '');
-  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : '';
-}
-
 export function createBatchOpenRecapModel(input = {}) {
   const receipts = input.receipts || [];
   const items = input.openedItems || receipts.flatMap((receipt) => receipt?.openedItems || []);
-  const rows = [];
-  const groupedPlayers = new Map();
-  const prices = input.prices instanceof Map ? input.prices : new Map(Object.entries(input.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
+  const prices = input.prices instanceof Map
+    ? input.prices
+    : new Map(Object.entries(input.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
   let playerCount = 0;
   let specialCount = 0;
   let normalGoldCount = 0;
   let normalSilverCount = 0;
   let normalBronzeCount = 0;
-  let groupedPlayerCount = 0;
+  const rows = [];
 
   for (const item of items) {
     if (!isPlayer(item)) continue;
     playerCount++;
     const rating = Number(item.rating || 0);
-    if (isSpecial(item)) {
-      specialCount++;
-      rows.push(Object.freeze({
-        kind: 'special',
-        rating,
-        name: itemName(item),
-        duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
-        tradeable: item.tradeable === true,
-        price: prices.get(Number(item.definitionId || 0)) || null,
-        item,
-      }));
-    } else {
-      const tier = playerTier(item);
-      if (!tier) continue;
-      const rarity = playerRarity(item);
-      groupedPlayerCount++;
-      if (tier === 'gold') normalGoldCount++;
-      else if (tier === 'silver') normalSilverCount++;
-      else normalBronzeCount++;
-      const key = `${rating}:${rarity}:${tier}`;
-      const group = groupedPlayers.get(key) || { rating, rarity, tier, count: 0 };
-      group.count++;
-      groupedPlayers.set(key, group);
-    }
+    const special = isSpecial(item);
+    const tier = playerTier(item);
+    const rare = item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0;
+    if (special) specialCount++;
+    else if (tier === 'gold') normalGoldCount++;
+    else if (tier === 'silver') normalSilverCount++;
+    else if (tier === 'bronze') normalBronzeCount++;
+    const row = {
+      name: itemName(item),
+      rating,
+      tier,
+      rare,
+      special,
+      duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
+      tradeable: item.tradeable === true,
+      price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
+      showPrice: special,
+      sourceLabel: item.packName || item.sourceLabel || null,
+      item,
+    };
+    row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(item));
+    row.tierLabel = recapCardTypeLabel(row, row.theme);
+    rows.push(row);
   }
 
-  for (const group of groupedPlayers.values()) {
-    rows.push(Object.freeze({
-      kind: 'group',
-      rating: group.rating,
-      rarity: group.rarity,
-      tier: group.tier,
-      label: `${titleCase(group.rarity)} ${titleCase(group.tier)}`,
-      count: group.count,
-    }));
-  }
-  rows.sort((a, b) => {
-    const ratingOrder = b.rating - a.rating;
-    if (ratingOrder) return ratingOrder;
-    if (a.kind !== b.kind) return a.kind === 'special' ? -1 : 1;
-    if (a.kind === 'group' && a.rarity !== b.rarity) return a.rarity === 'rare' ? -1 : 1;
-    return String(a.name || '').localeCompare(String(b.name || ''));
+  const status = String(input.status || 'completed');
+  const requestedPacks = Number(input.requestedPacks || receipts.length);
+  const packsOpened = Number(input.packsOpened ?? receipts.length);
+  const skippedPacks = Number(input.skippedPacks || 0);
+  const omittedCount = Math.max(0, items.length - playerCount);
+  const model = createRecapModel({
+    kind: 'batch',
+    title: status === 'preview' ? 'Batch Open Recap Preview' : 'Batch Open Recap',
+    modalId: 'bronze-loop-batch-recap-modal',
+    status,
+    reason: input.reason,
+    summary: `${packsOpened}/${requestedPacks} pack(s) opened, ${items.length} item(s), ${specialCount} special, ${normalGoldCount} gold, ${normalSilverCount} silver, ${normalBronzeCount} bronze${skippedPacks ? `, ${skippedPacks} skipped` : ''}${omittedCount ? `, ${omittedCount} other item(s)` : ''}`,
+    rows,
   });
-
   return Object.freeze({
-    status: String(input.status || 'completed'),
-    reason: input.reason ? String(input.reason) : null,
-    requestedPacks: Number(input.requestedPacks || receipts.length),
-    packsOpened: Number(input.packsOpened ?? receipts.length),
-    skippedPacks: Number(input.skippedPacks || 0),
+    ...model,
+    requestedPacks,
+    packsOpened,
+    skippedPacks,
     itemCount: items.length,
     playerCount,
-    specialCount,
     normalGoldCount,
     normalSilverCount,
     normalBronzeCount,
-    groupedPlayerCount,
-    omittedCount: Math.max(0, items.length - specialCount - groupedPlayerCount),
-    rows: Object.freeze(rows),
+    groupedPlayerCount: playerCount - specialCount,
+    omittedCount,
   });
 }
 
-export function createBatchOpenRecapPreviewModel() {
+export function createBatchOpenRecapPreviewModel(options = {}) {
+  const samples = [
+    { rating: 99, rareflag: 9, special: true },
+    { rating: 97, rareflag: 8, special: true },
+    { rating: 94, rareflag: 7, special: true },
+    { rating: 91, rareflag: 1 },
+    { rating: 88, rareflag: 1 },
+    { rating: 85, rareflag: 1 },
+    { rating: 84, rareflag: 0 },
+    { rating: 74, rareflag: 1 },
+    { rating: 63, rareflag: 0 },
+  ];
+  const openedItems = Array.from({ length: 23 }, (_, index) => {
+    const sample = samples[index % samples.length];
+    return {
+      id: index + 1,
+      definitionId: 101 + index,
+      type: 'player',
+      name: `Preview Player ${String(index + 1).padStart(2, '0')}`,
+      rating: sample.rating,
+      rareflag: sample.rareflag,
+      rare: sample.rareflag > 0,
+      special: sample.special === true,
+      tier: sample.rating >= 75 ? 'gold' : sample.rating >= 65 ? 'silver' : 'bronze',
+      duplicate: index % 5 === 0,
+      tradeable: index % 3 === 0,
+    };
+  });
   return createBatchOpenRecapModel({
     status: 'preview',
-    requestedPacks: 3,
-    packsOpened: 3,
-    openedItems: [
-      { id: 1, definitionId: 101, type: 'player', name: 'Preview Special A', rating: 97, special: true, duplicate: false },
-      { id: 2, definitionId: 102, type: 'player', name: 'Preview Special B', rating: 95, special: true, duplicate: true },
-      { id: 3, type: 'player', name: 'Preview Gold', rating: 89, tier: 'gold', rare: true },
-      { id: 4, type: 'player', name: 'Preview Gold', rating: 89, tier: 'gold', rare: true },
-      { id: 5, type: 'player', name: 'Preview Gold', rating: 84, tier: 'gold', rare: false },
-      { id: 6, type: 'player', name: 'Preview Silver', rating: 74, tier: 'silver', rare: true },
-      { id: 7, type: 'player', name: 'Preview Bronze', rating: 63, tier: 'bronze', rare: false },
-    ],
-    prices: new Map([[101, 1250000], [102, 480000]]),
+    reason: 'Preview data only; no pack was opened',
+    requestedPacks: 12,
+    packsOpened: 12,
+    openedItems,
+    prices: new Map(openedItems.filter((item) => item.special).map((item, index) => [item.definitionId, 1250000 - index * 35000])),
+    resolveNativeTheme: options.resolveNativeTheme,
   });
 }

@@ -241,4 +241,12 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('all-duplicate materialization');
     expect(source).toContain('delayed materialization retry ${attempt + 1}/3');
   });
+
+  it('keeps discovered Pick probe failures as structured recap results', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    expect(source).not.toContain('completed-status runtime probe failed');
+    expect(source).toContain('showPickRecapModal(definition, pickResults, result)');
+    expect(source).toContain('status: result.status');
+    expect(source).toContain('reason: result.reason');
+  });
 });

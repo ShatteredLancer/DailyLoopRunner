@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.52
+// @version      0.5.53
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -3042,7 +3042,7 @@
     }
     function findButtonByText(patterns, matches) {
       return queryAll("button").find(
-        (button2) => matches(compactText(button2), patterns) && isClickable(button2)
+        (button3) => matches(compactText(button3), patterns) && isClickable(button3)
       ) || null;
     }
     function findClickableByText(patterns, matches, root = documentObject) {
@@ -4312,6 +4312,69 @@
     return Object.freeze({ redeem, confirmSelection, listUnassignedPlayerPicks, isOwnedDuplicate });
   }
 
+  // src/adapters/ea/rarity.js
+  function safeRead3(holder, key) {
+    try {
+      return holder?.[key];
+    } catch {
+      return void 0;
+    }
+  }
+  function call(holder, method, ...args) {
+    try {
+      return typeof holder?.[method] === "function" ? holder[method](...args) : null;
+    } catch {
+      return null;
+    }
+  }
+  function colorValue(value) {
+    if (!value) return null;
+    if (typeof value === "string") return value;
+    const channels = [value.r, value.g, value.b].map(Number);
+    if (channels.every(Number.isFinite)) return { r: channels[0], g: channels[1], b: channels[2] };
+    return null;
+  }
+  function firstColorMap(collection, tier) {
+    if (!collection) return null;
+    const candidates = [tier, Number(tier), 0, "0"].filter(
+      (value, index, values) => value !== void 0 && value !== null && values.indexOf(value) === index
+    );
+    for (const key of candidates) {
+      const value = call(collection, "get", key);
+      if (value) return value;
+    }
+    try {
+      if (typeof collection.values === "function") return Array.from(collection.values())[0] || null;
+    } catch {
+    }
+    if (Array.isArray(collection)) return collection[0] || null;
+    if (Array.isArray(collection._collection)) return collection._collection[0] || null;
+    return null;
+  }
+  function createEaRarityAdapter(runtime) {
+    const repository = safeRead3(safeRead3(runtime, "repositories"), "Rarity");
+    function playerTheme(item = {}) {
+      const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? 0);
+      if (!repository || rareflag <= 1) return null;
+      const rarity = call(repository, "get", rareflag);
+      if (!rarity) return null;
+      const tier = item?.tier ?? call(item, "getTier") ?? 0;
+      const map = call(rarity, "getExpColorMap", tier) || firstColorMap(safeRead3(rarity, "largeColorMaps"), tier) || firstColorMap(safeRead3(rarity, "colorMaps"), tier);
+      if (!map) return null;
+      const background = colorValue(safeRead3(map, "background"));
+      const foreground = colorValue(safeRead3(map, "name"));
+      if (!background) return null;
+      return Object.freeze({
+        background,
+        foreground,
+        accent: foreground,
+        rareflag,
+        source: "EA Rarity"
+      });
+    }
+    return Object.freeze({ playerTheme });
+  }
+
   // src/adapters/ea/sbc.js
   function createEaSbcAdapter(runtime) {
     const service = runtime?.services?.SBC;
@@ -4654,6 +4717,7 @@
       localization: createEaLocalizationAdapter(runtime),
       pack: () => createEaPackAdapter(runtime),
       playerPick: () => createEaPlayerPickAdapter(runtime),
+      rarity: createEaRarityAdapter(runtime),
       sbc: () => createEaSbcAdapter(runtime),
       fsu: () => createFsuAdapter(runtime, { documentObject, localStorage, sessionStorage }),
       dom,
@@ -5773,10 +5837,10 @@
       stopPoint();
       failIfSubmitError(label);
       if (await overlay.dismiss(label)) continue;
-      const button2 = overlay.findClaimButton();
-      if (button2) {
+      const button3 = overlay.findClaimButton();
+      if (button3) {
         log(`${label}: claiming rewards`);
-        click(button2);
+        click(button3);
         await waitLoadingEnd(900, 45e3);
         await sleep(1200);
         return true;
@@ -6050,6 +6114,170 @@
     return Object.freeze({ title, body: lines.join("\n") });
   }
 
+  // src/reward/recap.js
+  var RECAP_PAGE_SIZE = 20;
+  var BASE_BACKGROUND = "#171B21";
+  var DEFAULT_FOREGROUND = "#F4F6F8";
+  var DEFAULT_MUTED = "#AAB4C2";
+  var RECAP_TIER_COLORS = Object.freeze({
+    bronze: Object.freeze({ label: "Bronze", accent: "#B7793E" }),
+    silver: Object.freeze({ label: "Silver", accent: "#AEB7C2" }),
+    commonGold: Object.freeze({ label: "Common Gold", accent: "#A88638" }),
+    rareGoldLow: Object.freeze({ label: "Rare Gold 85-", accent: "#D6AA35" }),
+    rareGoldMid: Object.freeze({ label: "Rare Gold 86-88", accent: "#F0C34E" }),
+    rareGoldHigh: Object.freeze({ label: "Rare Gold 89+", accent: "#F3D98B" }),
+    specialLow: Object.freeze({ label: "Special 94-", accent: "#B45BD2" }),
+    specialMid: Object.freeze({ label: "Special 95-97", accent: "#2FC6C4" }),
+    specialHigh: Object.freeze({ label: "Special 98-99", accent: "#8E7CFF" }),
+    unknown: Object.freeze({ label: "Player", accent: "#64748B" })
+  });
+  function clampByte(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return null;
+    return Math.max(0, Math.min(255, Math.round(number)));
+  }
+  function rgbToHex(red, green, blue) {
+    const values = [red, green, blue].map(clampByte);
+    if (values.some((value) => value === null)) return null;
+    return `#${values.map((value) => value.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+  }
+  function normalizeRecapColor(value) {
+    if (value && typeof value === "object") return rgbToHex(value.r, value.g, value.b);
+    const text = String(value || "").trim();
+    const shortHex = text.match(/^#([0-9a-f]{3})$/i);
+    if (shortHex) return `#${shortHex[1].split("").map((part) => `${part}${part}`).join("")}`.toUpperCase();
+    const hex = text.match(/^#([0-9a-f]{6})$/i);
+    if (hex) return `#${hex[1].toUpperCase()}`;
+    const rgb = text.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,[^)]*)?\)$/i);
+    return rgb ? rgbToHex(rgb[1], rgb[2], rgb[3]) : null;
+  }
+  function hexChannels(color) {
+    const normalized = normalizeRecapColor(color);
+    if (!normalized) return null;
+    return [1, 3, 5].map((index) => Number.parseInt(normalized.slice(index, index + 2), 16));
+  }
+  function luminance(color) {
+    const channels = hexChannels(color);
+    if (!channels) return null;
+    const linear = channels.map((value) => {
+      const channel = value / 255;
+      return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  }
+  function recapContrastRatio(first, second) {
+    const a = luminance(first);
+    const b = luminance(second);
+    if (a === null || b === null) return 0;
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  }
+  function mixColors(foreground, background = BASE_BACKGROUND, weight = 0.18) {
+    const front = hexChannels(foreground);
+    const back = hexChannels(background);
+    if (!front || !back) return BASE_BACKGROUND;
+    return rgbToHex(...front.map((value, index) => value * weight + back[index] * (1 - weight)));
+  }
+  function localTierKey(card = {}) {
+    const rating = Number(card.rating || 0);
+    if (card.special === true) {
+      if (rating >= 98) return "specialHigh";
+      if (rating >= 95) return "specialMid";
+      return "specialLow";
+    }
+    const tier = String(card.tier || "").toLowerCase();
+    if (tier === "bronze" || rating > 0 && rating <= 64) return "bronze";
+    if (tier === "silver" || rating >= 65 && rating <= 74) return "silver";
+    if (tier === "gold" || rating >= 75) {
+      if (card.rare !== true) return "commonGold";
+      if (rating >= 89) return "rareGoldHigh";
+      if (rating >= 86) return "rareGoldMid";
+      return "rareGoldLow";
+    }
+    return "unknown";
+  }
+  function localTheme(card) {
+    const key = localTierKey(card);
+    const tier = RECAP_TIER_COLORS[key];
+    const background = mixColors(tier.accent);
+    return Object.freeze({
+      key,
+      label: tier.label,
+      source: "local",
+      accent: tier.accent,
+      background,
+      foreground: DEFAULT_FOREGROUND,
+      muted: DEFAULT_MUTED,
+      rating: recapContrastRatio(background, tier.accent) >= 4.5 ? tier.accent : DEFAULT_FOREGROUND
+    });
+  }
+  function recapCardTypeLabel(card = {}, theme = null) {
+    if (card.special === true) return theme?.label || localTheme(card).label;
+    const rating = Number(card.rating || 0);
+    const tier = String(card.tier || (rating >= 75 ? "gold" : rating >= 65 ? "silver" : rating > 0 ? "bronze" : "player"));
+    const normalizedTier = `${tier.slice(0, 1).toUpperCase()}${tier.slice(1).toLowerCase()}`;
+    if (!["Gold", "Silver", "Bronze"].includes(normalizedTier)) return theme?.label || "Player";
+    return `${card.rare === true ? "Rare" : "Common"} ${normalizedTier}`;
+  }
+  function resolveRecapCardTheme(card = {}, nativeTheme = null) {
+    const fallback = localTheme(card);
+    if (card.special !== true || !nativeTheme) return fallback;
+    const background = normalizeRecapColor(nativeTheme.background);
+    const requestedForeground = normalizeRecapColor(nativeTheme.foreground || nativeTheme.name);
+    if (!background) return fallback;
+    const automaticForeground = recapContrastRatio(background, "#FFFFFF") >= recapContrastRatio(background, "#111318") ? "#FFFFFF" : "#111318";
+    const foreground = requestedForeground && recapContrastRatio(background, requestedForeground) >= 4.5 ? requestedForeground : automaticForeground;
+    if (recapContrastRatio(background, foreground) < 4.5) return fallback;
+    const accent = normalizeRecapColor(nativeTheme.accent || nativeTheme.name) || fallback.accent;
+    return Object.freeze({
+      ...fallback,
+      source: "ea",
+      accent,
+      background,
+      foreground,
+      muted: foreground,
+      rating: foreground
+    });
+  }
+  function createRecapModel(input = {}) {
+    const rows = (input.rows || []).map((row, index) => Object.freeze({ ...row, order: Number(row.order ?? index) }));
+    rows.sort(
+      (a, b) => Number(b.rating || 0) - Number(a.rating || 0) || Number(b.special === true) - Number(a.special === true) || a.order - b.order
+    );
+    const status = String(input.status || "completed");
+    return Object.freeze({
+      kind: String(input.kind || "recap"),
+      title: String(input.title || "Recap"),
+      modalId: String(input.modalId || "bronze-loop-recap-modal"),
+      status,
+      reason: input.reason ? String(input.reason) : null,
+      summary: String(input.summary || ""),
+      rows: Object.freeze(rows),
+      totalRows: rows.length,
+      pageSize: RECAP_PAGE_SIZE,
+      pageCount: Math.max(1, Math.ceil(rows.length / RECAP_PAGE_SIZE)),
+      specialCount: rows.filter((row) => row.special === true).length,
+      meta: Object.freeze({ ...input.meta || {} })
+    });
+  }
+  function getRecapPage(model, requestedPage = 1) {
+    const pageCount = Math.max(1, Number(model?.pageCount || 1));
+    const page = Math.max(1, Math.min(pageCount, Math.floor(Number(requestedPage || 1))));
+    const pageSize = Math.max(1, Number(model?.pageSize || RECAP_PAGE_SIZE));
+    const start = (page - 1) * pageSize;
+    const rows = (model?.rows || []).slice(start, start + pageSize);
+    return Object.freeze({
+      page,
+      pageCount,
+      pageSize,
+      totalRows: Number(model?.totalRows || 0),
+      start: rows.length ? start + 1 : 0,
+      end: start + rows.length,
+      rows,
+      hasPrevious: page > 1,
+      hasNext: page < pageCount
+    });
+  }
+
   // src/reward/batch-open-recap.js
   function itemName(item = {}) {
     return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || "Unknown player");
@@ -6069,103 +6297,217 @@
     if (rating > 0) return "bronze";
     return null;
   }
-  function playerRarity(item = {}) {
-    return item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0 ? "rare" : "common";
-  }
-  function titleCase(value) {
-    const text = String(value || "");
-    return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "";
-  }
   function createBatchOpenRecapModel(input = {}) {
     const receipts = input.receipts || [];
     const items = input.openedItems || receipts.flatMap((receipt) => receipt?.openedItems || []);
-    const rows = [];
-    const groupedPlayers = /* @__PURE__ */ new Map();
     const prices = input.prices instanceof Map ? input.prices : new Map(Object.entries(input.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
     let playerCount = 0;
     let specialCount = 0;
     let normalGoldCount = 0;
     let normalSilverCount = 0;
     let normalBronzeCount = 0;
-    let groupedPlayerCount = 0;
+    const rows = [];
     for (const item of items) {
       if (!isPlayer(item)) continue;
       playerCount++;
       const rating = Number(item.rating || 0);
-      if (isSpecial(item)) {
-        specialCount++;
-        rows.push(Object.freeze({
-          kind: "special",
-          rating,
-          name: itemName(item),
-          duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
-          tradeable: item.tradeable === true,
-          price: prices.get(Number(item.definitionId || 0)) || null,
-          item
-        }));
-      } else {
-        const tier = playerTier(item);
-        if (!tier) continue;
-        const rarity = playerRarity(item);
-        groupedPlayerCount++;
-        if (tier === "gold") normalGoldCount++;
-        else if (tier === "silver") normalSilverCount++;
-        else normalBronzeCount++;
-        const key = `${rating}:${rarity}:${tier}`;
-        const group = groupedPlayers.get(key) || { rating, rarity, tier, count: 0 };
-        group.count++;
-        groupedPlayers.set(key, group);
-      }
+      const special = isSpecial(item);
+      const tier = playerTier(item);
+      const rare = item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0;
+      if (special) specialCount++;
+      else if (tier === "gold") normalGoldCount++;
+      else if (tier === "silver") normalSilverCount++;
+      else if (tier === "bronze") normalBronzeCount++;
+      const row = {
+        name: itemName(item),
+        rating,
+        tier,
+        rare,
+        special,
+        duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
+        tradeable: item.tradeable === true,
+        price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
+        showPrice: special,
+        sourceLabel: item.packName || item.sourceLabel || null,
+        item
+      };
+      row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(item));
+      row.tierLabel = recapCardTypeLabel(row, row.theme);
+      rows.push(row);
     }
-    for (const group of groupedPlayers.values()) {
-      rows.push(Object.freeze({
-        kind: "group",
-        rating: group.rating,
-        rarity: group.rarity,
-        tier: group.tier,
-        label: `${titleCase(group.rarity)} ${titleCase(group.tier)}`,
-        count: group.count
-      }));
-    }
-    rows.sort((a, b) => {
-      const ratingOrder = b.rating - a.rating;
-      if (ratingOrder) return ratingOrder;
-      if (a.kind !== b.kind) return a.kind === "special" ? -1 : 1;
-      if (a.kind === "group" && a.rarity !== b.rarity) return a.rarity === "rare" ? -1 : 1;
-      return String(a.name || "").localeCompare(String(b.name || ""));
+    const status = String(input.status || "completed");
+    const requestedPacks = Number(input.requestedPacks || receipts.length);
+    const packsOpened = Number(input.packsOpened ?? receipts.length);
+    const skippedPacks = Number(input.skippedPacks || 0);
+    const omittedCount = Math.max(0, items.length - playerCount);
+    const model = createRecapModel({
+      kind: "batch",
+      title: status === "preview" ? "Batch Open Recap Preview" : "Batch Open Recap",
+      modalId: "bronze-loop-batch-recap-modal",
+      status,
+      reason: input.reason,
+      summary: `${packsOpened}/${requestedPacks} pack(s) opened, ${items.length} item(s), ${specialCount} special, ${normalGoldCount} gold, ${normalSilverCount} silver, ${normalBronzeCount} bronze${skippedPacks ? `, ${skippedPacks} skipped` : ""}${omittedCount ? `, ${omittedCount} other item(s)` : ""}`,
+      rows
     });
     return Object.freeze({
-      status: String(input.status || "completed"),
-      reason: input.reason ? String(input.reason) : null,
-      requestedPacks: Number(input.requestedPacks || receipts.length),
-      packsOpened: Number(input.packsOpened ?? receipts.length),
-      skippedPacks: Number(input.skippedPacks || 0),
+      ...model,
+      requestedPacks,
+      packsOpened,
+      skippedPacks,
       itemCount: items.length,
       playerCount,
-      specialCount,
       normalGoldCount,
       normalSilverCount,
       normalBronzeCount,
-      groupedPlayerCount,
-      omittedCount: Math.max(0, items.length - specialCount - groupedPlayerCount),
-      rows: Object.freeze(rows)
+      groupedPlayerCount: playerCount - specialCount,
+      omittedCount
     });
   }
-  function createBatchOpenRecapPreviewModel() {
+  function createBatchOpenRecapPreviewModel(options = {}) {
+    const samples = [
+      { rating: 99, rareflag: 9, special: true },
+      { rating: 97, rareflag: 8, special: true },
+      { rating: 94, rareflag: 7, special: true },
+      { rating: 91, rareflag: 1 },
+      { rating: 88, rareflag: 1 },
+      { rating: 85, rareflag: 1 },
+      { rating: 84, rareflag: 0 },
+      { rating: 74, rareflag: 1 },
+      { rating: 63, rareflag: 0 }
+    ];
+    const openedItems = Array.from({ length: 23 }, (_, index) => {
+      const sample = samples[index % samples.length];
+      return {
+        id: index + 1,
+        definitionId: 101 + index,
+        type: "player",
+        name: `Preview Player ${String(index + 1).padStart(2, "0")}`,
+        rating: sample.rating,
+        rareflag: sample.rareflag,
+        rare: sample.rareflag > 0,
+        special: sample.special === true,
+        tier: sample.rating >= 75 ? "gold" : sample.rating >= 65 ? "silver" : "bronze",
+        duplicate: index % 5 === 0,
+        tradeable: index % 3 === 0
+      };
+    });
     return createBatchOpenRecapModel({
       status: "preview",
-      requestedPacks: 3,
-      packsOpened: 3,
-      openedItems: [
-        { id: 1, definitionId: 101, type: "player", name: "Preview Special A", rating: 97, special: true, duplicate: false },
-        { id: 2, definitionId: 102, type: "player", name: "Preview Special B", rating: 95, special: true, duplicate: true },
-        { id: 3, type: "player", name: "Preview Gold", rating: 89, tier: "gold", rare: true },
-        { id: 4, type: "player", name: "Preview Gold", rating: 89, tier: "gold", rare: true },
-        { id: 5, type: "player", name: "Preview Gold", rating: 84, tier: "gold", rare: false },
-        { id: 6, type: "player", name: "Preview Silver", rating: 74, tier: "silver", rare: true },
-        { id: 7, type: "player", name: "Preview Bronze", rating: 63, tier: "bronze", rare: false }
-      ],
-      prices: /* @__PURE__ */ new Map([[101, 125e4], [102, 48e4]])
+      reason: "Preview data only; no pack was opened",
+      requestedPacks: 12,
+      packsOpened: 12,
+      openedItems,
+      prices: new Map(openedItems.filter((item) => item.special).map((item, index) => [item.definitionId, 125e4 - index * 35e3])),
+      resolveNativeTheme: options.resolveNativeTheme
+    });
+  }
+
+  // src/reward/player-pick-recap.js
+  function itemName2(item, displayName2) {
+    if (typeof displayName2 === "function") return String(displayName2(item));
+    return String(item?.name || item?.commonName || item?.lastName || item?.definitionId || item?.id || "Unknown player");
+  }
+  function createPlayerPickRecapModel(pickResults = [], options = {}) {
+    const entries = Array.isArray(pickResults) ? pickResults : [];
+    const cards = entries.flatMap((entry) => entry?.pickedCards || []);
+    const status = String(options.status || "completed");
+    if (!cards.length && status === "completed" && !options.reason) return null;
+    const ratings = cards.map((card) => Number(card.rating || card.item?.rating || 0));
+    const destinations = {};
+    const rows = entries.flatMap((entry, pickIndex) => (entry?.pickedCards || []).map((card) => {
+      const item = card.item || {};
+      const destination = card.destination || "unknown";
+      destinations[destination] = (destinations[destination] || 0) + 1;
+      const row = {
+        name: itemName2(item, options.itemDisplayName),
+        rating: Number(card.rating || item.rating || 0),
+        tier: item.tier,
+        rare: item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0,
+        special: card.special === true,
+        duplicate: card.duplicate === true,
+        tradeable: typeof card.tradeable === "boolean" ? card.tradeable : item.tradeable,
+        price: card.price ?? null,
+        showPrice: true,
+        destination,
+        sourceLabel: `P${pickIndex + 1}${entry?.resumed === true ? "r" : ""}`,
+        card,
+        pickIndex: pickIndex + 1,
+        resumed: entry?.resumed === true,
+        item
+      };
+      row.theme = resolveRecapCardTheme(row, options.resolveNativeTheme?.(item));
+      row.tierLabel = recapCardTypeLabel(row, row.theme);
+      return row;
+    }));
+    const specialCount = rows.filter((row) => row.special).length;
+    const duplicateCount = rows.filter((row) => row.duplicate).length;
+    const highRatedCount = rows.filter((row) => row.rating >= 91).length;
+    const resumedCount = entries.filter((entry) => entry?.resumed).length;
+    const destinationSummary = Object.entries(destinations).map(([destination, count]) => `${count} ->${destination.toUpperCase()}`).join(", ");
+    const model = createRecapModel({
+      kind: "pick",
+      title: status === "preview" ? "Player Pick Recap Preview" : `Player Pick Recap: ${String(options.name || "")}`,
+      modalId: "bronze-loop-recap-modal",
+      status,
+      reason: options.reason,
+      summary: `${entries.length} pick(s), ${cards.length} card(s)${ratings.length ? `, rating ${Math.min(...ratings)}-${Math.max(...ratings)}` : ""}, ${specialCount} special, ${duplicateCount} duplicate, ${highRatedCount} rated 91+${destinationSummary ? `, ${destinationSummary}` : ""}${resumedCount ? `, ${resumedCount} resumed` : ""}`,
+      rows
+    });
+    return Object.freeze({
+      ...model,
+      cards,
+      entries,
+      minRating: ratings.length ? Math.min(...ratings) : 0,
+      maxRating: ratings.length ? Math.max(...ratings) : 0,
+      duplicateCount,
+      highRatedCount,
+      resumedCount,
+      destinations
+    });
+  }
+  function createPlayerPickRecapPreviewModel(options = {}) {
+    const tiers = [
+      { rating: 99, rareflag: 9, special: true },
+      { rating: 97, rareflag: 8, special: true },
+      { rating: 94, rareflag: 7, special: true },
+      { rating: 91, rareflag: 1 },
+      { rating: 88, rareflag: 1 },
+      { rating: 85, rareflag: 1 },
+      { rating: 84, rareflag: 0 },
+      { rating: 74, rareflag: 1 },
+      { rating: 63, rareflag: 0 }
+    ];
+    const pickResults = Array.from({ length: 23 }, (_, index) => {
+      const sample = tiers[index % tiers.length];
+      const item = {
+        id: index + 1,
+        definitionId: 1e3 + index,
+        type: "player",
+        name: `Preview Player ${String(index + 1).padStart(2, "0")}`,
+        rating: sample.rating,
+        rareflag: sample.rareflag,
+        rare: sample.rareflag > 0,
+        special: sample.special === true,
+        tier: sample.rating >= 75 ? "gold" : sample.rating >= 65 ? "silver" : "bronze",
+        tradeable: index % 3 === 0
+      };
+      return {
+        resumed: index % 7 === 0,
+        pickedCards: [{
+          item,
+          rating: item.rating,
+          special: item.special,
+          duplicate: index % 4 === 0,
+          destination: ["club", "storage", "transfer"][index % 3],
+          price: item.special ? 1e5 + index * 25e3 : 5e3 + index * 1e3
+        }]
+      };
+    });
+    return createPlayerPickRecapModel(pickResults, {
+      ...options,
+      name: "Preview",
+      status: "preview",
+      reason: "Preview data only; no Player Pick was redeemed"
     });
   }
 
@@ -7625,51 +7967,59 @@
       reason: null
     };
     const maxPicks = pickLimit(options.maxPicks);
-    if (deferred) {
-      await runDeferredPlayerPicks(options, result, maxPicks);
+    try {
+      if (deferred) {
+        await runDeferredPlayerPicks(options, result, maxPicks);
+        await options.finalize?.(result);
+        return result;
+      }
+      while (result.picksCompleted < maxPicks) {
+        const pendingPick = await options.findPendingPick({ result });
+        if (!pendingPick) break;
+        const selected = await selectPick(options, result, pendingPick, { resumed: true, deferred: false });
+        if (selected.status === "selected") continue;
+        result.status = selected.status;
+        result.reason = selected.reason || `pending Pick ${selected.status}`;
+        break;
+      }
+      while (result.status === "completed" && result.picksCompleted < maxPicks) {
+        const submission = await submitPickChallenges(options, result);
+        if (submission.status !== "submitted") {
+          result.status = submission.status;
+          result.reason = submission.reason;
+          break;
+        }
+        if (!submission.submittedCount && !submission.challengeContext?.incomplete?.length) {
+          if (options.completeWhenNoChallengeRemains === true) {
+            result.reason = null;
+            break;
+          }
+          result.status = "unavailable";
+          result.reason = "No incomplete Player Pick challenge remains";
+          break;
+        }
+        const rewardPick = await options.findRewardPick({ result, challengeContext: submission.challengeContext });
+        if (!rewardPick) {
+          result.status = "unavailable";
+          result.reason = "Player Pick reward was not found";
+          break;
+        }
+        const selected = await selectPick(options, result, rewardPick, { resumed: false, deferred: false });
+        if (selected.status !== "selected") {
+          result.status = selected.status;
+          result.reason = selected.reason;
+          break;
+        }
+      }
+      await options.finalize?.(result);
+      return result;
+    } catch (error) {
+      if (!/stopped by user/i.test(String(error?.message || error))) throw error;
+      result.status = "stopped";
+      result.reason = "stopped by user";
       await options.finalize?.(result);
       return result;
     }
-    while (result.picksCompleted < maxPicks) {
-      const pendingPick = await options.findPendingPick({ result });
-      if (!pendingPick) break;
-      const selected = await selectPick(options, result, pendingPick, { resumed: true, deferred: false });
-      if (selected.status === "selected") continue;
-      result.status = selected.status;
-      result.reason = selected.reason || `pending Pick ${selected.status}`;
-      break;
-    }
-    while (result.status === "completed" && result.picksCompleted < maxPicks) {
-      const submission = await submitPickChallenges(options, result);
-      if (submission.status !== "submitted") {
-        result.status = submission.status;
-        result.reason = submission.reason;
-        break;
-      }
-      if (!submission.submittedCount && !submission.challengeContext?.incomplete?.length) {
-        if (options.completeWhenNoChallengeRemains === true) {
-          result.reason = null;
-          break;
-        }
-        result.status = "unavailable";
-        result.reason = "No incomplete Player Pick challenge remains";
-        break;
-      }
-      const rewardPick = await options.findRewardPick({ result, challengeContext: submission.challengeContext });
-      if (!rewardPick) {
-        result.status = "unavailable";
-        result.reason = "Player Pick reward was not found";
-        break;
-      }
-      const selected = await selectPick(options, result, rewardPick, { resumed: false, deferred: false });
-      if (selected.status !== "selected") {
-        result.status = selected.status;
-        result.reason = selected.reason;
-        break;
-      }
-    }
-    await options.finalize?.(result);
-    return result;
   }
 
   // src/workflows/repeated-submission.js
@@ -8302,6 +8652,7 @@
     required(panel, "#bronze-loop-recap-reopen").addEventListener("click", (event) => commands.reopenRecap?.(event));
     required(panel, "#bronze-loop-refresh").addEventListener("click", (event) => commands.refresh?.(event));
     required(panel, "#bronze-loop-scan-picks").addEventListener("click", (event) => commands.scanPicks?.(event));
+    required(panel, "#bronze-loop-preview-pick-recap").addEventListener("click", (event) => commands.previewPickRecap?.(event));
     required(panel, "#bronze-loop-load-json").addEventListener("click", (event) => commands.loadJson?.(event));
     required(panel, "#bronze-loop-built-in").addEventListener("click", (event) => commands.useBuiltIn?.(event));
     required(panel, "#bronze-loop-stop").addEventListener("click", (event) => commands.stop?.(event));
@@ -8380,6 +8731,11 @@
         return true;
       },
       reopenRecap: options.reopenRecap,
+      previewPickRecap() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        options.previewPickRecap?.();
+        return true;
+      },
       async refresh() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
         state.refreshing = true;
@@ -8504,17 +8860,17 @@
       return clamped;
     }
     function updateOptionsButton() {
-      const button2 = panel.querySelector("#bronze-loop-options-toggle");
-      if (!button2) return;
+      const button3 = panel.querySelector("#bronze-loop-options-toggle");
+      if (!button3) return;
       const open = panel.classList.contains("options-open");
-      button2.textContent = open ? "Hide" : "Options";
-      button2.title = open ? "Hide advanced options" : "Show advanced options";
+      button3.textContent = open ? "Hide" : "Options";
+      button3.title = open ? "Hide advanced options" : "Show advanced options";
     }
     function updateCollapseButton() {
-      const button2 = panel.querySelector("#bronze-loop-collapse");
-      if (!button2) return;
-      button2.textContent = "L";
-      button2.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
+      const button3 = panel.querySelector("#bronze-loop-collapse");
+      if (!button3) return;
+      button3.textContent = "L";
+      button3.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
     }
     function notifyModeChange() {
       updateOptionsButton();
@@ -8758,13 +9114,13 @@
     }
   }
   function renderMainPanelRecap(options = {}) {
-    const button2 = query(options.panel, "#bronze-loop-recap-reopen");
-    if (!button2) return;
+    const button3 = query(options.panel, "#bronze-loop-recap-reopen");
+    if (!button3) return;
     const recap = options.recap;
-    button2.style.display = recap ? "" : "none";
+    button3.style.display = recap ? "" : "none";
     if (recap) {
       const label = recap.type === "batch" ? "Batch Open" : "Player Pick";
-      button2.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
+      button3.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
     }
   }
   function renderRewardAlertSummary(options = {}) {
@@ -9011,7 +9367,7 @@
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
         <div class="bronze-loop-section">Config</div>
-        <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
+        <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-preview-pick-recap">Preview Pick recap</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
         <div class="row"><button id="bronze-loop-built-in" disabled>Built-in loops</button><button id="bronze-loop-edit">Edit loop JSON</button></div>
         <div class="row"><button id="bronze-loop-edit-config" title="Edit every loop, workflow step, and recovery policy as one configuration">Edit workflow JSON</button><button id="bronze-loop-apply-config" title="Validate and apply the full workflow configuration in the editor">Apply workflow JSON</button></div>
         <textarea id="bronze-loop-json" spellcheck="false"></textarea>
@@ -9151,13 +9507,7 @@
     });
   }
 
-  // src/ui/player-pick-recap.js
-  var DESTINATION_COLORS = Object.freeze({
-    club: "#5cffa0",
-    transfer: "#5c8aff",
-    storage: "#ff9d4a",
-    unknown: "#536171"
-  });
+  // src/ui/card-recap.js
   var DESTINATION_LABELS = Object.freeze({
     club: "->CLUB",
     transfer: "->TRANSFER",
@@ -9167,147 +9517,244 @@
   function applyStyles2(element, styles) {
     Object.assign(element.style, styles);
   }
-  function createPlayerPickRecapModel(pickResults = []) {
-    const entries = Array.isArray(pickResults) ? pickResults : [];
-    const cards = entries.flatMap((entry) => entry?.pickedCards || []);
-    if (!cards.length) return null;
-    const ratings = cards.map((card) => Number(card.rating || 0));
-    const destinations = cards.reduce((counts, card) => {
-      const destination = card.destination || "unknown";
-      counts[destination] = (counts[destination] || 0) + 1;
-      return counts;
-    }, {});
-    const rows = entries.flatMap((entry, pickIndex) => (entry?.pickedCards || []).map((card) => ({
-      card,
-      pickIndex: pickIndex + 1,
-      resumed: entry?.resumed === true
-    }))).sort((a, b) => Number(b.card.rating || 0) - Number(a.card.rating || 0) || a.pickIndex - b.pickIndex);
-    return Object.freeze({
-      cards,
-      entries,
-      rows,
-      minRating: Math.min(...ratings),
-      maxRating: Math.max(...ratings),
-      specialCount: cards.filter((card) => card.special).length,
-      duplicateCount: cards.filter((card) => card.duplicate).length,
-      highRatedCount: cards.filter((card) => Number(card.rating || 0) >= 91).length,
-      resumedCount: entries.filter((entry) => entry?.resumed).length,
-      destinations
+  function button(dom, text, title) {
+    const element = dom.create("button");
+    element.type = "button";
+    element.textContent = text;
+    if (title) element.title = title;
+    applyStyles2(element, {
+      minHeight: "30px",
+      padding: "0 12px",
+      background: "#2F6FDE",
+      color: "#FFF",
+      border: "none",
+      borderRadius: "3px",
+      cursor: "pointer",
+      fontSize: "13px"
     });
+    return element;
   }
-  function showPlayerPickRecap(options = {}) {
-    if (!options.dom?.create || !options.dom?.appendToBody) throw new TypeError("dom adapter is required");
-    if (typeof options.itemDisplayName !== "function") throw new TypeError("itemDisplayName is required");
-    if (typeof options.formatPrice !== "function") throw new TypeError("formatPrice is required");
-    if (typeof options.scheduleStopCheck !== "function") throw new TypeError("scheduleStopCheck is required");
-    if (typeof options.cancelStopCheck !== "function") throw new TypeError("cancelStopCheck is required");
-    const model = createPlayerPickRecapModel(options.pickResults);
+  function setButtonEnabled(element, enabled) {
+    element.disabled = !enabled;
+    element.style.opacity = enabled ? "1" : "0.42";
+    element.style.cursor = enabled ? "pointer" : "default";
+  }
+  function rowTags(row, formatPrice) {
+    const tags = [row.tierLabel || row.theme?.label || null];
+    if (row.special) tags.push("special");
+    if (row.duplicate) tags.push("duplicate");
+    if (typeof row.tradeable === "boolean") tags.push(row.tradeable ? "tradeable" : "untradeable");
+    const price = formatPrice?.(row.price) || "";
+    if (row.showPrice === true || price) tags.push(`price:${price || "?"}`);
+    return tags.filter(Boolean).join(", ");
+  }
+  function renderCardRow(dom, row, formatPrice) {
+    const theme = row.theme || {};
+    const element = dom.create("div");
+    applyStyles2(element, {
+      minHeight: "38px",
+      padding: "6px 8px",
+      boxSizing: "border-box",
+      display: "flex",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: "8px",
+      color: theme.foreground || "#F4F6F8",
+      background: theme.background || "#1D2229",
+      borderLeft: `4px solid ${theme.accent || "#64748B"}`
+    });
+    const rating = dom.create("span");
+    rating.textContent = String(Number(row.rating || 0));
+    applyStyles2(rating, {
+      minWidth: "30px",
+      color: theme.rating || theme.accent || "#F4F6F8",
+      fontWeight: "700",
+      fontSize: "14px"
+    });
+    const identity = dom.create("span");
+    applyStyles2(identity, {
+      flex: "1 1 220px",
+      minWidth: "0",
+      display: "flex",
+      gap: "6px",
+      alignItems: "baseline",
+      overflow: "hidden"
+    });
+    const name = dom.create("span");
+    name.textContent = String(row.name || "Unknown player");
+    applyStyles2(name, {
+      fontWeight: "600",
+      minWidth: "0",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    });
+    identity.appendChild(name);
+    if (row.sourceLabel) {
+      const source = dom.create("span");
+      source.textContent = row.sourceLabel;
+      applyStyles2(source, { color: theme.muted || "#AAB4C2", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
+      identity.appendChild(source);
+    }
+    element.append(rating, identity);
+    if (row.destination) {
+      const destination = dom.create("span");
+      destination.textContent = DESTINATION_LABELS[row.destination] || String(row.destination);
+      applyStyles2(destination, { color: theme.accent || "#AAB4C2", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
+      element.appendChild(destination);
+    }
+    const tags = dom.create("span");
+    tags.textContent = rowTags(row, formatPrice);
+    applyStyles2(tags, {
+      color: theme.muted || "#AAB4C2",
+      fontSize: "11px",
+      flex: "0 1 auto",
+      maxWidth: "100%",
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis"
+    });
+    element.appendChild(tags);
+    return element;
+  }
+  function showCardRecap(options = {}) {
+    const dom = options.dom;
+    const model = options.model;
+    if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
     if (!model) return Promise.resolve(false);
+    dom.query?.(`#${model.modalId}`)?.remove?.();
     return new Promise((resolve) => {
       let stopTimer = null;
-      const overlay = options.dom.create("div");
-      overlay.id = "bronze-loop-recap-modal";
+      let currentPage = 1;
+      let finished = false;
+      const overlay = dom.create("div");
+      overlay.id = model.modalId;
       applyStyles2(overlay, {
         position: "fixed",
         inset: "0",
-        zIndex: "100000",
-        background: "rgba(0, 0, 0, 0.78)",
+        zIndex: "1000001",
+        background: "rgba(0,0,0,.76)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         padding: "20px",
         boxSizing: "border-box"
       });
-      const dialog = options.dom.create("div");
+      const dialog = dom.create("div");
       applyStyles2(dialog, {
-        width: "min(620px, 100%)",
+        width: "min(720px, 100%)",
         maxHeight: "90vh",
         overflow: "auto",
-        background: "#171b21",
-        color: "#f3f5f7",
-        border: "1px solid #65758a",
-        padding: "12px 14px",
+        background: "#171B21",
+        color: "#F4F6F8",
+        border: "1px solid #65758A",
+        padding: "14px",
         boxSizing: "border-box",
         fontFamily: "Arial, sans-serif"
       });
-      const title = options.dom.create("div");
-      title.textContent = `Player Pick Recap: ${String(options.name || "")}`;
-      applyStyles2(title, { fontWeight: "700", marginBottom: "4px", fontSize: "16px" });
-      const destinationSummary = Object.entries(model.destinations).map(([destination, count]) => `${count} ${DESTINATION_LABELS[destination] || destination}`).join(", ");
-      const summary = options.dom.create("div");
-      summary.textContent = `${model.entries.length} pick(s), ${model.cards.length} card(s), rating ${model.minRating}-${model.maxRating}, ${model.specialCount} special, ${model.duplicateCount} duplicate, ${model.highRatedCount} rated 91+${destinationSummary ? `, ${destinationSummary}` : ""}${model.resumedCount ? `, ${model.resumedCount} resumed` : ""}`;
-      applyStyles2(summary, { color: "#9aa6b8", marginBottom: "8px", fontSize: "12px" });
-      const list = options.dom.create("div");
-      applyStyles2(list, { display: "flex", flexDirection: "column", gap: "6px" });
-      for (const { card, pickIndex, resumed } of model.rows) {
-        const rating = Number(card.rating || 0);
-        const highRated = rating >= 91;
-        const destination = card.destination || "unknown";
-        const row = options.dom.create("div");
-        applyStyles2(row, {
-          padding: "6px 8px",
-          fontSize: "13px",
-          color: "#f3f5f7",
-          background: highRated ? "#3a2f15" : card.special ? "#26223a" : "#1d2229",
-          borderLeft: `3px solid ${highRated ? "#ffd54a" : card.special ? "#7a5cff" : DESTINATION_COLORS[destination] || DESTINATION_COLORS.unknown}`,
-          display: "flex",
-          gap: "8px",
-          alignItems: "baseline"
+      const title = dom.create("div");
+      title.textContent = model.title;
+      applyStyles2(title, { fontSize: "16px", fontWeight: "700", marginBottom: "5px" });
+      const summary = dom.create("div");
+      summary.textContent = model.summary;
+      applyStyles2(summary, { color: "#9AA6B8", marginBottom: "9px", fontSize: "12px" });
+      const reason = model.reason ? dom.create("div") : null;
+      if (reason) {
+        reason.textContent = `${model.status}: ${model.reason}`;
+        applyStyles2(reason, {
+          color: model.status === "preserved" ? "#FFD27A" : "#E3A7A7",
+          marginBottom: "10px",
+          fontSize: "12px",
+          padding: "7px 8px",
+          background: "#241F1A",
+          borderLeft: "3px solid #C48A3A",
+          overflowWrap: "anywhere"
         });
-        const nameRating = options.dom.create("span");
-        applyStyles2(nameRating, { flex: "1 1 auto", minWidth: "0", display: "flex", gap: "6px", alignItems: "baseline", overflow: "hidden" });
-        const name = options.dom.create("span");
-        name.textContent = options.itemDisplayName(card.item);
-        applyStyles2(name, { fontWeight: "600", flex: "0 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-        const ratingText = options.dom.create("span");
-        ratingText.textContent = `- ${rating}`;
-        applyStyles2(ratingText, { color: highRated ? "#ffd54a" : "#f3f5f7", fontWeight: "700", flex: "0 0 auto" });
-        const pickTag = options.dom.create("span");
-        pickTag.textContent = `P${pickIndex}${resumed ? "r" : ""}`;
-        applyStyles2(pickTag, { color: "#7d8898", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
-        nameRating.append(name, ratingText, pickTag);
-        const destinationTag = options.dom.create("span");
-        destinationTag.textContent = DESTINATION_LABELS[destination] || destination;
-        applyStyles2(destinationTag, { color: DESTINATION_COLORS[destination] || DESTINATION_COLORS.unknown, fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
-        const tags = options.dom.create("span");
-        const price = options.formatPrice(card.price);
-        tags.textContent = `${card.special ? "special" : "normal"}${card.duplicate ? ", duplicate" : ""}${price ? `, price:${price}` : ""}`;
-        applyStyles2(tags, { color: "#9aa6b8", fontSize: "11px", flex: "0 0 auto", whiteSpace: "nowrap" });
-        row.append(nameRating, destinationTag, tags);
-        list.appendChild(row);
       }
-      const closeButton = options.dom.create("button");
-      closeButton.type = "button";
-      closeButton.textContent = "Close";
-      applyStyles2(closeButton, {
-        marginTop: "10px",
-        minHeight: "30px",
-        padding: "0 14px",
-        background: "#2f6fde",
-        color: "#fff",
-        border: "none",
-        borderRadius: "3px",
-        cursor: "pointer",
-        fontSize: "13px"
+      const list = dom.create("div");
+      applyStyles2(list, { display: "flex", flexDirection: "column", gap: "6px" });
+      const footer = dom.create("div");
+      applyStyles2(footer, {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: "8px",
+        marginTop: "12px"
       });
+      const previous = button(dom, "Previous", "Previous recap page");
+      const pageLabel = dom.create("span");
+      applyStyles2(pageLabel, { color: "#AAB4C2", fontSize: "12px", flex: "1 1 auto", textAlign: "center" });
+      const next = button(dom, "Next", "Next recap page");
+      const close = button(dom, "Close");
+      const renderPage = () => {
+        const page = getRecapPage(model, currentPage);
+        currentPage = page.page;
+        list.textContent = "";
+        if (!page.rows.length) {
+          const empty = dom.create("div");
+          empty.textContent = "No player rows to display.";
+          applyStyles2(empty, { padding: "10px", color: "#9AA6B8", background: "#1D2229" });
+          list.appendChild(empty);
+        } else {
+          page.rows.forEach((row) => list.appendChild(renderCardRow(dom, row, options.formatPrice)));
+        }
+        pageLabel.textContent = page.totalRows ? `Page ${page.page}/${page.pageCount} | ${page.start}-${page.end} of ${page.totalRows}` : "Page 1/1 | 0 cards";
+        setButtonEnabled(previous, page.hasPrevious);
+        setButtonEnabled(next, page.hasNext);
+        previous.style.display = page.pageCount > 1 ? "" : "none";
+        next.style.display = page.pageCount > 1 ? "" : "none";
+      };
       const finish = () => {
-        if (stopTimer !== null) options.cancelStopCheck(stopTimer);
-        overlay.remove();
+        if (finished) return;
+        finished = true;
+        if (stopTimer !== null) options.cancelStopCheck?.(stopTimer);
+        overlay.remove?.();
         options.onClose?.();
         resolve(true);
       };
-      closeButton.addEventListener("click", finish);
+      previous.addEventListener("click", () => {
+        if (currentPage > 1) {
+          currentPage--;
+          renderPage();
+        }
+      });
+      next.addEventListener("click", () => {
+        if (currentPage < model.pageCount) {
+          currentPage++;
+          renderPage();
+        }
+      });
+      close.addEventListener("click", finish);
       overlay.addEventListener("click", (event) => {
         if (event.target === overlay) finish();
       });
-      dialog.append(title, summary, list, closeButton);
+      footer.append(previous, pageLabel, next, close);
+      dialog.append(title, summary);
+      if (reason) dialog.appendChild(reason);
+      dialog.append(list, footer);
       overlay.appendChild(dialog);
-      options.dom.appendToBody(overlay);
+      dom.appendToBody(overlay);
+      renderPage();
       if (model.specialCount > 0) options.celebrate?.(dialog, model.specialCount);
-      stopTimer = options.scheduleStopCheck(() => {
-        if (options.isStopping?.()) finish();
-      }, 250);
+      if (typeof options.scheduleStopCheck === "function") {
+        stopTimer = options.scheduleStopCheck(() => {
+          if (options.isStopping?.()) finish();
+        }, 250);
+      }
     });
+  }
+
+  // src/ui/player-pick-recap.js
+  function showPlayerPickRecap(options = {}) {
+    const model = options.model || createPlayerPickRecapModel(options.pickResults, {
+      name: options.name,
+      status: options.status,
+      reason: options.reason,
+      itemDisplayName: options.itemDisplayName,
+      resolveNativeTheme: options.resolveNativeTheme
+    });
+    return showCardRecap({ ...options, model });
   }
 
   // src/ui/reward-celebration.js
@@ -9455,9 +9902,9 @@
       const modal = error?.modal;
       if (!modal) return false;
       const buttons = Array.from(modal.querySelectorAll?.("button") || []);
-      const button2 = buttons.find((candidate) => /^(ok|okay|确定|確定)$/i.test(String(candidate?.textContent || "").trim())) || buttons.find((candidate) => !candidate?.disabled);
-      if (!button2) return false;
-      click(button2);
+      const button3 = buttons.find((candidate) => /^(ok|okay|确定|確定)$/i.test(String(candidate?.textContent || "").trim())) || buttons.find((candidate) => !candidate?.disabled);
+      if (!button3) return false;
+      click(button3);
       return true;
     }
     function findClaimContext() {
@@ -9749,7 +10196,7 @@
     applyStyles4(tests, { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" });
     const actions = dom.create("div");
     applyStyles4(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
-    const button2 = (id, text, primary = false) => {
+    const button3 = (id, text, primary = false) => {
       const value = dom.create("button");
       value.id = id;
       value.type = "button";
@@ -9764,11 +10211,11 @@
       });
       return value;
     };
-    const preview = button2("bronze-loop-alert-preview", "Preview highlight");
-    const desktopTest = button2("bronze-loop-alert-test-desktop", "Send desktop test");
-    const ntfyTest = button2("bronze-loop-alert-test-ntfy", "Send ntfy test");
-    const cancel = button2("bronze-loop-alert-cancel", "Cancel");
-    const save = button2("bronze-loop-alert-save", "Save", true);
+    const preview = button3("bronze-loop-alert-preview", "Preview highlight");
+    const desktopTest = button3("bronze-loop-alert-test-desktop", "Send desktop test");
+    const ntfyTest = button3("bronze-loop-alert-test-ntfy", "Send ntfy test");
+    const cancel = button3("bronze-loop-alert-cancel", "Cancel");
+    const save = button3("bronze-loop-alert-save", "Save", true);
     tests.append(preview, desktopTest, ntfyTest);
     actions.append(cancel, save);
     const updateNtfyTestState = () => {
@@ -9827,7 +10274,7 @@
   function applyStyles5(element, styles) {
     Object.assign(element.style, styles);
   }
-  function button(dom, text, primary = false) {
+  function button2(dom, text, primary = false) {
     const value = dom.create("button");
     value.type = "button";
     value.textContent = text;
@@ -9928,7 +10375,7 @@
         const selected = selectedKeys.has(batchOpenEntryKey({ packId: group.id, packName: group.name }));
         const addMenu = dom.create("div");
         applyStyles5(addMenu, { position: "relative", flex: "0 0 auto" });
-        const add = button(dom, selected ? "Added v" : "Add v");
+        const add = button2(dom, selected ? "Added v" : "Add v");
         add.setAttribute?.("aria-label", `Add ${group.name} to batch`);
         add.setAttribute?.("aria-expanded", "false");
         const menu = dom.create("div");
@@ -9953,8 +10400,8 @@
           notifyPlanChange();
           render();
         };
-        const addOne = button(dom, selected ? "Set to 1" : "Add 1");
-        const addAll = button(dom, `${selected ? "Set to all" : "Add all"} (${group.count})`);
+        const addOne = button2(dom, selected ? "Set to 1" : "Add 1");
+        const addAll = button2(dom, `${selected ? "Set to all" : "Add all"} (${group.count})`);
         for (const option of [addOne, addAll]) {
           applyStyles5(option, { display: "block", width: "100%", minWidth: "0", textAlign: "left", border: "0" });
         }
@@ -9999,7 +10446,7 @@
           plan = currentPlan();
           notifyPlanChange();
         });
-        const remove = button(dom, "Remove");
+        const remove = button2(dom, "Remove");
         remove.addEventListener("click", () => {
           const key = batchOpenEntryKey(entry);
           plan = normalizeBatchOpenPlan({ entries: currentPlan().entries.filter((candidate) => batchOpenEntryKey(candidate) !== key) });
@@ -10018,13 +10465,13 @@
     };
     const toolbar = dom.create("div");
     applyStyles5(toolbar, { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
-    const scan = button(dom, "Scan My Packs");
-    const preview = button(dom, "Preview recap");
+    const scan = button2(dom, "Scan My Packs");
+    const preview = button2(dom, "Preview recap");
     toolbar.append(scan, preview);
     const actions = dom.create("div");
     applyStyles5(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
-    const cancel = button(dom, "Cancel");
-    const start = button(dom, "Start batch", true);
+    const cancel = button2(dom, "Cancel");
+    const start = button2(dom, "Start batch", true);
     actions.append(cancel, start);
     const setPending = (pending) => {
       scan.disabled = pending;
@@ -10075,129 +10522,8 @@
   }
 
   // src/ui/batch-open-recap.js
-  function applyStyles6(element, styles) {
-    Object.assign(element.style, styles);
-  }
   function showBatchOpenRecap(options = {}) {
-    const dom = options.dom;
-    const model = options.model;
-    if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
-    if (!model) return Promise.resolve(false);
-    dom.query?.("#bronze-loop-batch-recap-modal")?.remove?.();
-    return new Promise((resolve) => {
-      const overlay = dom.create("div");
-      overlay.id = "bronze-loop-batch-recap-modal";
-      applyStyles6(overlay, {
-        position: "fixed",
-        inset: "0",
-        zIndex: "1000001",
-        background: "rgba(0,0,0,.72)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "20px",
-        boxSizing: "border-box"
-      });
-      const dialog = dom.create("div");
-      applyStyles6(dialog, {
-        width: "min(620px, 100%)",
-        maxHeight: "88vh",
-        overflow: "auto",
-        background: "#171b21",
-        color: "#f4f6f8",
-        border: "1px solid #65758a",
-        padding: "14px",
-        boxSizing: "border-box",
-        fontFamily: "Arial, sans-serif"
-      });
-      const title = dom.create("div");
-      title.textContent = model.status === "preview" ? "Batch Open Recap Preview" : "Batch Open Recap";
-      applyStyles6(title, { fontSize: "16px", fontWeight: "700", marginBottom: "8px" });
-      const summary = dom.create("div");
-      summary.textContent = `${model.packsOpened}/${model.requestedPacks} pack(s) opened, ${model.itemCount} item(s), ${model.specialCount} special, ${model.normalGoldCount} gold, ${model.normalSilverCount} silver, ${model.normalBronzeCount} bronze${model.skippedPacks ? `, ${model.skippedPacks} skipped` : ""}${model.omittedCount ? `, ${model.omittedCount} other item(s)` : ""}`;
-      applyStyles6(summary, { color: "#9aa6b8", marginBottom: "10px", fontSize: "12px" });
-      const reason = model.reason ? dom.create("div") : null;
-      if (reason) {
-        reason.textContent = `${model.status}: ${model.reason}`;
-        applyStyles6(reason, {
-          color: model.status === "preserved" ? "#ffd27a" : "#e3a7a7",
-          marginBottom: "10px",
-          fontSize: "12px",
-          padding: "7px 8px",
-          background: "#241f1a",
-          borderLeft: "3px solid #c48a3a",
-          overflowWrap: "anywhere"
-        });
-      }
-      const list = dom.create("div");
-      applyStyles6(list, { display: "flex", flexDirection: "column", gap: "6px" });
-      if (!model.rows.length) {
-        const empty = dom.create("div");
-        empty.textContent = "No player rows to display.";
-        applyStyles6(empty, { padding: "10px", color: "#9aa6b8", background: "#1d2229" });
-        list.appendChild(empty);
-      }
-      for (const rowModel of model.rows) {
-        const row = dom.create("div");
-        applyStyles6(row, {
-          minHeight: "34px",
-          padding: "6px 8px",
-          boxSizing: "border-box",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-          background: rowModel.kind === "special" ? "#30263d" : "#1d2229",
-          borderLeft: `3px solid ${rowModel.kind === "special" ? "#c48cff" : "#64748b"}`
-        });
-        const rating = dom.create("span");
-        rating.textContent = String(rowModel.rating);
-        applyStyles6(rating, { minWidth: "28px", color: rowModel.kind === "special" ? "#ffd54a" : "#f3f5f7", fontWeight: "700" });
-        const label = dom.create("span");
-        label.textContent = rowModel.kind === "special" ? rowModel.name : `${rowModel.label} x${rowModel.count}`;
-        applyStyles6(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-        row.append(rating, label);
-        if (rowModel.kind === "special") {
-          const tags = dom.create("span");
-          const price = options.formatPrice?.(rowModel.price) || "";
-          tags.textContent = [rowModel.duplicate ? "duplicate" : null, rowModel.tradeable ? "tradeable" : "untradeable", `price:${price || "?"}`].filter(Boolean).join(", ");
-          applyStyles6(tags, { color: "#9aa6b8", fontSize: "11px", flex: "0 0 auto" });
-          row.appendChild(tags);
-        }
-        list.appendChild(row);
-      }
-      const closeButton = dom.create("button");
-      closeButton.type = "button";
-      closeButton.textContent = "Close";
-      applyStyles6(closeButton, {
-        marginTop: "12px",
-        minHeight: "30px",
-        padding: "0 14px",
-        background: "#2f6fde",
-        color: "#fff",
-        border: "none",
-        borderRadius: "3px",
-        cursor: "pointer",
-        fontSize: "13px"
-      });
-      let finished = false;
-      const finish = () => {
-        if (finished) return;
-        finished = true;
-        overlay.remove?.();
-        options.onClose?.();
-        resolve(true);
-      };
-      closeButton.addEventListener("click", finish);
-      overlay.addEventListener("click", (event) => {
-        if (event.target === overlay) finish();
-      });
-      dialog.append(title, summary);
-      if (reason) dialog.appendChild(reason);
-      dialog.append(list, closeButton);
-      overlay.appendChild(dialog);
-      dom.appendToBody(overlay);
-      if (model.specialCount > 0) options.celebrate?.(dialog, model.specialCount);
-    });
+    return showCardRecap(options);
   }
 
   // src/userscript-entry.js
@@ -10220,6 +10546,7 @@
     const eaInventoryAdapter = () => adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
     const inventoryPile = (pileName) => eaInventoryAdapter().pileValue(pileName);
     const eaPlayerPickAdapter = () => adapters.playerPick();
+    const eaRarityAdapter = adapters.rarity;
     const eaSbcAdapter = () => adapters.sbc();
     const fsuAdapter = () => adapters.fsu();
     const localizationAdapter = adapters.localization;
@@ -10270,7 +10597,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.52",
+      version: "0.5.53",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -10515,7 +10842,7 @@
         log("No previous recap available");
         return;
       }
-      await showPickRecapModal({ name: recap.name }, recap.pickResults);
+      await showPickRecapModal({ name: recap.name }, recap.pickResults, recap);
       if (btn && document.querySelector("#bronze-loop-recap-modal")) {
         btn.textContent = "Hide recap";
         btn.style.background = "#b13b3b";
@@ -16492,11 +16819,13 @@
         state.lastPickRecap = {
           name: pickDef?.name || "Provision pre-craft Player Pick",
           pickResults: preCraftPickResults,
+          status: result.status,
+          reason: result.reason,
           completedAt: Date.now()
         };
         state.lastRecapType = "pick";
         updateRecapButton();
-        if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults);
+        if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults, result);
       }
       const completionSummary = craftingUpgrades.map((upgradeDef, index) => `${upgradeDef.name}:${result.stageCompletions[`stage-${index}`] || 0}`).join(", ");
       if (dryRun) {
@@ -17222,17 +17551,17 @@
         const targetLabel = loopDef.exhaustSbcSet === true ? "available" : "requested";
         log(`${loopDef.name}: completed ${result.picksCompleted}/${maxPicks} ${targetLabel} Player Pick(s)${openPicksAtEnd ? `; queued ${result.picksQueued}` : ""}`);
       }
-      if (!dryRun && loopDef.discoveryReportedCompleted === true && result.status !== "completed") {
-        fail2(`${loopDef.name}: completed-status runtime probe failed (${result.status}): ${result.reason || "SBC Set or Challenge is unavailable"}`);
-      }
       return result;
     }
-    function showPickRecapModal(loopDef, pickResults) {
+    function showPickRecapModal(loopDef, pickResults, result = {}) {
       return showPlayerPickRecap({
         dom: adapters.dom,
         name: loopDef?.name,
         pickResults,
+        status: result.status,
+        reason: result.reason,
         itemDisplayName,
+        resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
         formatPrice: formatCompactPrice,
         scheduleStopCheck: setInterval,
         cancelStopCheck: clearInterval,
@@ -17276,6 +17605,25 @@
     }
     function previewBatchOpenRecap() {
       return showBatchRecapModal(createBatchOpenRecapPreviewModel());
+    }
+    function previewPlayerPickRecap() {
+      return showPlayerPickRecap({
+        dom: adapters.dom,
+        model: createPlayerPickRecapPreviewModel({
+          itemDisplayName
+        }),
+        formatPrice: formatCompactPrice,
+        scheduleStopCheck: setInterval,
+        cancelStopCheck: clearInterval,
+        isStopping: () => false,
+        celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
+          dom: adapters.dom,
+          getComputedStyle: (element) => getComputedStyle(element),
+          devicePixelRatio: () => window.devicePixelRatio || 1,
+          now: () => performance.now(),
+          requestFrame: (callback) => requestAnimationFrame(callback)
+        })
+      });
     }
     async function getBatchOpenSpecialPrices(items) {
       const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
@@ -17376,7 +17724,11 @@
           }
         });
         const prices = await getBatchOpenSpecialPrices(result.openedItems);
-        recapModel = createBatchOpenRecapModel({ ...result, prices });
+        recapModel = createBatchOpenRecapModel({
+          ...result,
+          prices,
+          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item)
+        });
         state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
         state.lastRecapType = "batch";
         log(`Batch Open: ${result.status}${result.reason ? ` (${result.reason})` : ""}; opened ${result.packsOpened}/${result.requestedPacks}, skipped ${result.skippedPacks}`);
@@ -17386,12 +17738,18 @@
         log(`Batch Open stopped: ${error?.message || error}`);
         errorStackLines(error).forEach((line) => log(`Error stack: ${line}`));
         console.error("[BronzeLoop]", error);
-        if (result) {
-          recapModel = createBatchOpenRecapModel({ ...result, status: "blocked", reason: error?.message || error });
-          state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
-          state.lastRecapType = "batch";
-          updateRecapButton();
-        }
+        const fallbackPlan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
+        const requestedPacks = fallbackPlan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
+        recapModel = createBatchOpenRecapModel({
+          ...result || {},
+          requestedPacks: result?.requestedPacks ?? requestedPacks,
+          status: "blocked",
+          reason: error?.message || error,
+          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item)
+        });
+        state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+        state.lastRecapType = "batch";
+        updateRecapButton();
         return null;
       } finally {
         state.running = false;
@@ -17503,18 +17861,20 @@
           },
           afterPlayerPickRun: async (definition, result) => {
             const pickResults = result.pickResults || [];
-            if (!pickResults.length) {
+            if (!pickResults.length && result.status === "completed" && !result.reason) {
               await showUnassignedIfAny(`${definition.name} end`);
               return;
             }
             state.lastPickRecap = {
               name: definition.name,
               pickResults,
+              status: result.status,
+              reason: result.reason,
               completedAt: Date.now()
             };
             state.lastRecapType = "pick";
             updateRecapButton();
-            await showPickRecapModal(definition, pickResults);
+            await showPickRecapModal(definition, pickResults, result);
             await showUnassignedIfAny(`${definition.name} end`);
           }
         });
@@ -17662,6 +18022,7 @@
         start: startLoop,
         openBatch: openBatchOpenDialogModal,
         reopenRecap: reopenLastRecap,
+        previewPickRecap: previewPlayerPickRecap,
         refreshInventoryCaches,
         scanPlayerPicks: scanAvailablePlayerPickSbcs,
         loopConfigUrl: LOOP_CONFIG_URL,

@@ -42,6 +42,7 @@ export function bindMainPanelCommands(options = {}) {
   required(panel, '#bronze-loop-recap-reopen').addEventListener('click', (event) => commands.reopenRecap?.(event));
   required(panel, '#bronze-loop-refresh').addEventListener('click', (event) => commands.refresh?.(event));
   required(panel, '#bronze-loop-scan-picks').addEventListener('click', (event) => commands.scanPicks?.(event));
+  required(panel, '#bronze-loop-preview-pick-recap').addEventListener('click', (event) => commands.previewPickRecap?.(event));
   required(panel, '#bronze-loop-load-json').addEventListener('click', (event) => commands.loadJson?.(event));
   required(panel, '#bronze-loop-built-in').addEventListener('click', (event) => commands.useBuiltIn?.(event));
   required(panel, '#bronze-loop-stop').addEventListener('click', (event) => commands.stop?.(event));

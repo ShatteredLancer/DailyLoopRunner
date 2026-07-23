@@ -8,7 +8,7 @@ function harness() {
   const create = (tagName) => {
     const listeners = new Map();
     const element = {
-      tagName, style: {}, children: [], textContent: '',
+      tagName, style: {}, children: [], textContent: '', disabled: false,
       addEventListener(type, callback) { listeners.set(type, callback); },
       append(...items) { element.children.push(...items); },
       appendChild(item) { element.children.push(item); },
@@ -22,7 +22,7 @@ function harness() {
 }
 
 describe('Batch Open recap UI', () => {
-  it('renders preview rows and celebrates special cards', async () => {
+  it('renders single-card preview rows, pages after 20, and celebrates special cards', async () => {
     const ui = harness();
     const celebrate = vi.fn();
     const promise = showBatchOpenRecap({
@@ -32,13 +32,11 @@ describe('Batch Open recap UI', () => {
       formatPrice: (price) => `${price / 1000}k`,
     });
     expect(ui.created.find((element) => element.textContent === 'Batch Open Recap Preview')).toBeTruthy();
-    expect(ui.created.find((element) => element.textContent === 'Preview Special A')).toBeTruthy();
-    expect(ui.created.find((element) => element.textContent === 'Rare Gold x2')).toBeTruthy();
-    expect(ui.created.find((element) => element.textContent === 'Common Gold x1')).toBeTruthy();
-    expect(ui.created.find((element) => element.textContent === 'Rare Silver x1')).toBeTruthy();
-    expect(ui.created.find((element) => element.textContent === 'Common Bronze x1')).toBeTruthy();
-    expect(ui.created.find((element) => element.textContent.includes('price:1250k'))).toBeTruthy();
-    expect(celebrate).toHaveBeenCalledWith(expect.anything(), 2);
+    expect(ui.created.find((element) => element.textContent === 'Preview Player 01')).toBeTruthy();
+    expect(ui.created.find((element) => element.textContent === 'Page 1/2 | 1-20 of 23')).toBeTruthy();
+    expect(celebrate).toHaveBeenCalled();
+    ui.created.find((element) => element.textContent === 'Next').click();
+    expect(ui.created.find((element) => element.textContent === 'Page 2/2 | 21-23 of 23')).toBeTruthy();
     ui.created.find((element) => element.textContent === 'Close').click();
     await expect(promise).resolves.toBe(true);
   });
@@ -48,9 +46,9 @@ describe('Batch Open recap UI', () => {
     void showBatchOpenRecap({
       dom: ui.dom,
       model: {
-        status: 'preserved', reason: 'storage capacity 0/3', requestedPacks: 2, packsOpened: 1,
-        skippedPacks: 1, itemCount: 4, specialCount: 0, normalGoldCount: 4,
-        normalSilverCount: 0, normalBronzeCount: 0, omittedCount: 0, rows: [],
+        modalId: 'bronze-loop-batch-recap-modal', title: 'Batch Open Recap', summary: '1/2 pack(s) opened',
+        status: 'preserved', reason: 'storage capacity 0/3', specialCount: 0, pageCount: 1, pageSize: 20,
+        totalRows: 0, rows: [],
       },
     });
     expect(ui.created.find((element) => element.textContent === 'preserved: storage capacity 0/3')).toBeTruthy();

@@ -10,6 +10,7 @@ import { createEaInventoryAdapter } from './ea/inventory.js';
 import { createEaLocalizationAdapter } from './ea/localization.js';
 import { createEaPackAdapter } from './ea/pack.js';
 import { createEaPlayerPickAdapter } from './ea/player-pick.js';
+import { createEaRarityAdapter } from './ea/rarity.js';
 import { createEaSbcAdapter } from './ea/sbc.js';
 
 export function createRuntimeAdapters(runtime, documentObject = runtime?.document || globalThis.document, options = {}) {
@@ -28,6 +29,7 @@ export function createRuntimeAdapters(runtime, documentObject = runtime?.documen
     localization: createEaLocalizationAdapter(runtime),
     pack: () => createEaPackAdapter(runtime),
     playerPick: () => createEaPlayerPickAdapter(runtime),
+    rarity: createEaRarityAdapter(runtime),
     sbc: () => createEaSbcAdapter(runtime),
     fsu: () => createFsuAdapter(runtime, { documentObject, localStorage, sessionStorage }),
     dom,

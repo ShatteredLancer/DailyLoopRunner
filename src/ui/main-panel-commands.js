@@ -50,6 +50,11 @@ export function createMainPanelCommands(options = {}) {
       return true;
     },
     reopenRecap: options.reopenRecap,
+    previewPickRecap() {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+      options.previewPickRecap?.();
+      return true;
+    },
     async refresh() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
       state.refreshing = true;

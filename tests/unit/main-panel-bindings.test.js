@@ -22,6 +22,7 @@ const IDS = [
   'bronze-loop-recap-reopen',
   'bronze-loop-refresh',
   'bronze-loop-scan-picks',
+  'bronze-loop-preview-pick-recap',
   'bronze-loop-load-json',
   'bronze-loop-built-in',
   'bronze-loop-stop',
@@ -82,7 +83,7 @@ describe('main panel bindings', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
       'selectLoop', 'editJson', 'editConfig', 'applyConfig', 'jsonInput', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
-      'refresh', 'scanPicks', 'loadJson', 'useBuiltIn', 'stop', 'copyLog', 'clearLog', 'downloadLog',
+      'refresh', 'scanPicks', 'previewPickRecap', 'loadJson', 'useBuiltIn', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
     bindMainPanelCommands({ panel, commands });
@@ -104,6 +105,7 @@ describe('main panel bindings', () => {
       ['bronze-loop-recap-reopen', 'click', 'reopenRecap'],
       ['bronze-loop-refresh', 'click', 'refresh'],
       ['bronze-loop-scan-picks', 'click', 'scanPicks'],
+      ['bronze-loop-preview-pick-recap', 'click', 'previewPickRecap'],
       ['bronze-loop-load-json', 'click', 'loadJson'],
       ['bronze-loop-built-in', 'click', 'useBuiltIn'],
       ['bronze-loop-stop', 'click', 'stop'],
