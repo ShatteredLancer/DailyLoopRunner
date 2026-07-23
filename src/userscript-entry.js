@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.48
+// @version      0.5.49
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -248,7 +248,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.48',
+    version: '0.5.49',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -5099,6 +5099,19 @@ function updateLoopControls() {
     return getUnassignedItems().filter((item) => isTargetDuplicate(item, loopDef));
   }
 
+  async function selectDailySeedInventory(loopDef) {
+    const requirement = {
+      ...loopDef.targetDuplicate,
+      count: 1,
+      priorityPiles: ['storage', 'transfer', 'club'],
+    };
+    await refreshInventoryCaches(`${loopDef.name} seed inventory selection`, { includePacks: false, quiet: true });
+    return {
+      requirement,
+      selection: selectInventoryPlayers([requirement], requirement.priorityPiles),
+    };
+  }
+
   function itemRefMatchesAny(item, refs = []) {
     const id = Number(item?.id || item?.ref?.id || 0);
     if (id) return refs.some((ref) => Number(ref?.id || 0) === id);
@@ -5373,6 +5386,11 @@ function updateLoopControls() {
           const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
           const challenge = await findAvailableSbcChallenge(set, loopDef.name);
           if (!challenge) return { status: 'unavailable', reason: 'no available seed SBC challenge remains' };
+          const { requirement, selection } = await selectDailySeedInventory(loopDef);
+          logDryRunSelection(`${loopDef.name} seed inventory`, selection, { priorityPiles: requirement.priorityPiles });
+          if (!selection.ok) {
+            return { status: 'blocked', reason: 'no FSU-compatible daily seed player is available' };
+          }
           const reason = inventoryOnly
             ? 'inventory-only mode'
             : 'no target duplicate or reward pack';
@@ -5382,8 +5400,14 @@ function updateLoopControls() {
         const reason = inventoryOnly
           ? 'inventory-only mode'
           : 'no target duplicate or reward pack';
+        const { requirement, selection } = await selectDailySeedInventory(loopDef);
+        log(`${loopDef.name}: seed inventory selected ${selection.selected.length}/1 player(s) (${formatSelectionStats(selection.stats)})`);
+        if (!selection.ok) {
+          logSelectionDiagnostics(`${loopDef.name} seed inventory`, selection, requirement.priorityPiles);
+          return { status: 'blocked', reason: 'no FSU-compatible daily seed player is available' };
+        }
         log(`${loopDef.name}: ${reason}; submitting seed SBC ${current.completions + 1}/${loopDef.maxCompletions}`);
-        return await submitConfiguredSbc(loopDef, { returnNullIfComplete: true }) || {
+        return await submitConfiguredSbc(loopDef, { returnNullIfComplete: true, selection }) || {
           status: 'unavailable',
           reason: 'no available seed SBC challenge remains',
         };
