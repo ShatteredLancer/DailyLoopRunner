@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.50
+// @version      0.5.51
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -6765,6 +6765,18 @@
         if (!destinationsForSignature.length || destinationsForSignature.length !== pending.length) continue;
         pending.forEach((item, index) => aliasRoutes.push({ item, destination: destinationsForSignature[index] }));
       }
+      const strictSourceIds = new Set(aliasRoutes.map((route) => itemId(route.item)));
+      const strictDestinationIds = new Set(aliasRoutes.map((route) => itemId(route.destination.item)));
+      const staticAliases = matchOpenedItemsToNewPileAliases({
+        items: pendingItems.filter((item) => !strictSourceIds.has(itemId(item))),
+        pileItems: destinations.filter((entry) => !strictDestinationIds.has(itemId(entry.item))).map((entry) => entry.item),
+        baselineIds: options.routingBaseline?.destinationIds || []
+      });
+      const destinationById = new Map(destinations.map((entry) => [itemId(entry.item), entry]));
+      for (const { item, alias } of staticAliases) {
+        const destination = destinationById.get(itemId(alias));
+        if (destination) aliasRoutes.push({ item, destination });
+      }
     }
     const routedAliasItems = new Set(aliasRoutes.map((route) => route.item));
     return {
@@ -10169,7 +10181,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.50",
+      version: "0.5.51",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -11616,7 +11628,7 @@
     }
     async function materializeOpenedPlayerRewards(items, label = "opened reward pack") {
       const players = uniqueItems((items || []).filter((item) => isPlayer2(item)));
-      if (!players.length) return 0;
+      if (!players.length) return { moved: 0, deferredDuplicates: [] };
       const materialized = materializeOpenedResponsePlayerDuplicates(players, label);
       const moved = await tryMoveOpenedRewardItems(
         materialized.directItems,
@@ -11632,7 +11644,92 @@
         await refreshInventoryCaches(`${label} direct reward move`, { includePacks: false, quiet: true });
         resolveRecentRewardItems(`${label} direct reward move`);
       }
-      return moved;
+      return { ...materialized, moved };
+    }
+    function hasNewUnassignedOpenedDuplicateEntity(items, routingBaseline = null) {
+      const baselineIds = new Set((routingBaseline?.unassignedIds || []).map((id) => Number(id || 0)).filter(Boolean));
+      const definitionIds2 = new Set((items || []).map((item) => Number(item?.definitionId || item?.ref?.definitionId || 0)).filter(Boolean));
+      if (!definitionIds2.size) return false;
+      return getUnassignedItems().some((item) => {
+        const id = Number(item?.id || item?.ref?.id || 0);
+        const definitionId2 = Number(item?.definitionId || item?.ref?.definitionId || 0);
+        return id && !baselineIds.has(id) && definitionIds2.has(definitionId2);
+      });
+    }
+    function openedDuplicateFallbackDestination(item) {
+      if (isTradeable(item)) {
+        return { key: "transfer", pile: inventoryPile("transfer"), allowStorage: false, description: "tradeable duplicate fallback" };
+      }
+      const clubDuplicate = findClubDuplicate2(item);
+      if (clubDuplicate && isTradeable(clubDuplicate)) {
+        return { key: "club", pile: inventoryPile("club"), allowStorage: true, description: "untradeable duplicate swap fallback" };
+      }
+      return { key: "storage", pile: inventoryPile("storage"), allowStorage: true, description: "untradeable duplicate fallback" };
+    }
+    async function tryDirectlySettleUnmaterializedOpenedDuplicates({
+      openedItems,
+      materialized,
+      routing,
+      label,
+      routingBaseline
+    }) {
+      const pendingIds = new Set((routing?.pendingItems || []).map((item) => Number(item?.id || 0)).filter(Boolean));
+      const duplicates = uniqueItems((materialized?.deferredDuplicates || []).filter((item) => pendingIds.has(Number(item?.id || 0))));
+      if (!duplicates.length) return null;
+      await refreshInventoryCaches(`${label} direct duplicate fallback preflight`, { includePacks: false, quiet: true });
+      if (hasNewUnassignedOpenedDuplicateEntity(duplicates, routingBaseline)) {
+        log(`${label}: direct duplicate fallback skipped because a matching live Unassigned entity appeared`);
+        return null;
+      }
+      const groups = /* @__PURE__ */ new Map();
+      for (const item of duplicates) {
+        const destination = openedDuplicateFallbackDestination(item);
+        const group = groups.get(destination.key) || { ...destination, items: [] };
+        group.items.push(item);
+        groups.set(destination.key, group);
+      }
+      for (const group of groups.values()) {
+        const free = group.key === "storage" ? storageSpaceLeft() : group.key === "transfer" ? transferSpaceLeft() : null;
+        if (free !== null && group.items.length > free) {
+          log(`${label}: direct duplicate fallback skipped; ${group.key} has only ${free} slot(s) for ${group.items.length} item(s)`);
+          return null;
+        }
+      }
+      log(`${label}: no matching live Unassigned entity after bounded settlement; attempting direct routing for ${duplicates.length} duplicate response item(s)`);
+      let moved = 0;
+      for (const group of groups.values()) {
+        moved += await tryMoveOpenedRewardItems(
+          group.items,
+          group.pile,
+          group.allowStorage,
+          label,
+          group.description
+        );
+      }
+      if (moved !== duplicates.length) {
+        log(`${label}: direct duplicate fallback moved ${moved}/${duplicates.length}; preserving unresolved response item(s)`);
+        return null;
+      }
+      await sleep(CFG.pauseMs);
+      await refreshInventoryCaches(`${label} direct duplicate fallback`, { includePacks: false, quiet: true });
+      if (hasNewUnassignedOpenedDuplicateEntity(duplicates, routingBaseline)) {
+        const pending = openedItemRoutingResult(openedItems, null, {}, routingBaseline);
+        log(`${label}: direct duplicate fallback detected a new live Unassigned entity after move; preserving it to avoid a second route`);
+        return {
+          status: "preserved",
+          reason: "direct duplicate fallback left a live Unassigned entity for manual resolution",
+          cleanup: { status: "preserved", reason: "direct duplicate fallback left a live Unassigned entity for manual resolution" },
+          routing: pending,
+          moved
+        };
+      }
+      const confirmed = await confirmOpenedItemRouting(openedItems, label, { routingBaseline });
+      if (confirmed.pendingItems.length) {
+        log(`${label}: direct duplicate fallback moved ${moved} item(s), but EA did not confirm every destination; preserving`);
+        return { status: "pending", cleanup: null, routing: confirmed, moved };
+      }
+      log(`${label}: direct duplicate fallback confirmed ${moved} routed response item(s)`);
+      return { status: "resolved", cleanup: { status: "resolved" }, routing: confirmed, moved };
     }
     function openedItemRoutingResult(items, reserveItem = null, details = {}, routingBaseline = null) {
       return {
@@ -15465,6 +15562,7 @@
     }
     function createMaterializeAndResolvePolicy(label, cleanupReason, cleanupOptions = {}) {
       return createOpenedItemPolicy(async (openedItems, context = {}) => {
+        const { directDuplicateFallback = false, ...unassignedCleanupOptions } = cleanupOptions;
         const settlement = await settleOpenedItems({
           attempts: 3,
           materialize: async () => {
@@ -15475,7 +15573,7 @@
           cleanup: async ({ attempt }) => resolveRuntimeUnassigned(
             attempt === 1 ? cleanupReason : `${cleanupReason} delayed response retry ${attempt}/3`,
             {
-              ...cleanupOptions,
+              ...unassignedCleanupOptions,
               beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
                 routingBaseline: context.routingBaseline || null
               })
@@ -15489,18 +15587,27 @@
             await sleep(CFG.pauseMs);
           }
         });
-        const cleanup = settlement.cleanup || {};
-        const routing = settlement.routing || { reservedItems: [], routedItems: [], pendingItems: openedItems };
+        const fallback = settlement.status === "pending" && directDuplicateFallback ? await tryDirectlySettleUnmaterializedOpenedDuplicates({
+          openedItems,
+          materialized: settlement.materialized,
+          routing: settlement.routing,
+          label,
+          routingBaseline: context.routingBaseline || null
+        }) : null;
+        const finalSettlement = fallback ? { ...settlement, ...fallback } : settlement;
+        const cleanup = finalSettlement.cleanup || {};
+        const routing = finalSettlement.routing || { reservedItems: [], routedItems: [], pendingItems: openedItems };
         return {
           ...routing,
           details: {
-            cleanupStatus: settlement.status === "pending" ? "preserved" : cleanup.status,
-            cleanupReason: settlement.reason || cleanup.reason || null,
-            settlementAttempts: settlement.attempts,
+            cleanupStatus: finalSettlement.status === "pending" ? "preserved" : cleanup.status,
+            cleanupReason: finalSettlement.reason || cleanup.reason || null,
+            settlementAttempts: finalSettlement.attempts,
             blockedDestination: cleanup.plan?.blocked?.destination || null,
             blockedFree: cleanup.plan?.blocked?.free ?? null,
             blockedRequired: cleanup.plan?.blocked?.required ?? null,
-            resolvedAliasCount: routing.aliasRoutes?.length || 0
+            resolvedAliasCount: routing.aliasRoutes?.length || 0,
+            directDuplicateFallback: fallback?.status || null
           }
         };
       });
@@ -17141,7 +17248,7 @@
               openedItemPolicy: createMaterializeAndResolvePolicy(
                 `Batch Open ${entry.packName || `#${entry.packId}`}`,
                 `Batch Open ${entry.packName || `#${entry.packId}`} cleanup`,
-                { blockedPolicy: "preserve", enableRecovery: true }
+                { blockedPolicy: "preserve", enableRecovery: true, directDuplicateFallback: true }
               )
             }
           ),

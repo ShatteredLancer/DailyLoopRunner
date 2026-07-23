@@ -198,6 +198,25 @@ export function classifyOpenedItemRouting(options = {}) {
       if (!destinationsForSignature.length || destinationsForSignature.length !== pending.length) continue;
       pending.forEach((item, index) => aliasRoutes.push({ item, destination: destinationsForSignature[index] }));
     }
+
+    // EA can hydrate a response entity with an unknown tradeability state, then
+    // materialize the same card in a destination pile with its final state. Keep
+    // the stricter route above first; this one-to-one static fallback only accepts
+    // entities that were absent from the pre-open snapshot.
+    const strictSourceIds = new Set(aliasRoutes.map((route) => itemId(route.item)));
+    const strictDestinationIds = new Set(aliasRoutes.map((route) => itemId(route.destination.item)));
+    const staticAliases = matchOpenedItemsToNewPileAliases({
+      items: pendingItems.filter((item) => !strictSourceIds.has(itemId(item))),
+      pileItems: destinations
+        .filter((entry) => !strictDestinationIds.has(itemId(entry.item)))
+        .map((entry) => entry.item),
+      baselineIds: options.routingBaseline?.destinationIds || [],
+    });
+    const destinationById = new Map(destinations.map((entry) => [itemId(entry.item), entry]));
+    for (const { item, alias } of staticAliases) {
+      const destination = destinationById.get(itemId(alias));
+      if (destination) aliasRoutes.push({ item, destination });
+    }
   }
   const routedAliasItems = new Set(aliasRoutes.map((route) => route.item));
 

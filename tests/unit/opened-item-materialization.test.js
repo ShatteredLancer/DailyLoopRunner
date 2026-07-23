@@ -78,6 +78,22 @@ describe('opened item materialization', () => {
     expect(result.aliasRoutes).toEqual([{ item: opened, destination: { pile: 'transfer', item: landed } }]);
   });
 
+  it('routes a remapped destination entity when EA hydrates tradeability after the response', () => {
+    const opened = { id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1 };
+    const existing = { id: 201, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: true };
+    const landed = { id: 301, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: true };
+    const routingBaseline = createOpenedItemRoutingBaseline({ storage: [existing] });
+
+    const result = classifyOpenedItemRouting({
+      items: [opened],
+      piles: { storage: [existing, landed] },
+      routingBaseline,
+    });
+
+    expect(result.pendingItems).toEqual([]);
+    expect(result.aliasRoutes).toEqual([{ item: opened, destination: { pile: 'storage', item: landed } }]);
+  });
+
   it('does not mistake a pre-open matching destination item for an opened item', () => {
     const opened = { id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false };
     const existing = { id: 201, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false };
