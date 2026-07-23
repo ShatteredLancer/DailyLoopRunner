@@ -331,7 +331,7 @@ EA objects
 - 开包前先处理或明确保留已有 Unassigned。
 - 每个开包调用必须提供 opened-item policy。
 - response item 与 Repository 延迟必须被 receipt/transient signal 覆盖。
-- EA pack response 经常早于 Unassigned cache。成功开包后必须先标准化 response items，并可直接移动已确认的非重复卡；response duplicate 只用于恢复迟到的 duplicate metadata、通知和后续确认，不得直接作为重复卡移动实体。可交易重复、不可交易重复、swap 和当前 stage 保留材料必须等待 live Unassigned Repository 实体出现后再按 policy 路由，然后刷新 recent reward/Repository 状态，才允许下一次选材或开下一包。
+- EA pack response 经常早于 Unassigned cache。成功开包后必须先标准化 response items，并可直接移动已确认的非重复卡；默认情况下，response duplicate 只用于恢复迟到的 duplicate metadata、通知和后续确认，不得直接作为重复卡移动实体。可交易重复、不可交易重复、swap 和当前 stage 保留材料必须等待 live Unassigned Repository 实体出现后再按 policy 路由，然后刷新 recent reward/Repository 状态，才允许下一次选材或开下一包。唯一例外是 Batch Open 的有界最终兜底：必须已经完成主动打开 Unassigned、连续稳定读取、通用 resolver 和全部 settlement retry，确认没有新增 live Unassigned 实体，并按开包前 baseline 验证目标 pile 新实体；同时必须聚合检查 Storage/Transfer 容量，其中 swap 也计入 Transfer 占用。任何条件不满足都必须 preserve 并停止后续包。
 - 全重复包可能没有任何 direct move 来触发 EA 的 Purchased/Unassigned 页面模型；当 response 全是 duplicate 且 Repository 仍为空时，必须主动打开 Unassigned 页面并进行连续空读确认，再让通用 resolver 处理 live 实体。pending settlement 的后续尝试也必须执行页面同步，不能只重复调用 Item service。
 - 不得把“先清理旧 Unassigned”和“开包成功后的 response materialization”混为同一步。开包后的 response 处理必须先于该奖励产生的残留 Unassigned cleanup，否则下一轮会误报缺料或遗留重复卡。
 - 471、500、404 和 stale pack 的重试必须有界。
@@ -448,6 +448,8 @@ Reward Alerts 的三个测试入口必须保持解耦：Preview 只展示本地 
 Batch Open 是独立 operational tool，不是 Loop strategy。主面板只保留一个入口，详细配置在独立弹窗中。运行时必须调用共享 entry `openPack()`，每次打开前重新按 `packId + packName` 解析新的 live pack instance，并提供 `createMaterializeAndResolvePolicy()`；禁止直接调用 Adapter `open()`、复制 Unassigned 清理路径或为 Batch Open 生造专用物品路由。Preview 只显示本地 recap，不得发布 Reward Highlight、Desktop 或 ntfy 副作用。
 
 Batch Open 的 Unassigned 容量阻塞使用 `blockedPolicy: 'preserve'` 和显式 `enableRecovery: true`：先尝试现有通用恢复配方，仍无法处理时保留 Unassigned。已经成功打开的包必须保留 receipt 并进入 recap，后续包停止，不能再调用一次通用 final cleanup 覆盖结果。下一次 Batch 启动前也必须先执行同样的 preserve preflight；现有 Unassigned 未解除时不得打开新包。不要通过放宽高分、特殊卡、FSU 或 Lock 规则来强制腾出 Storage。
+
+Batch Open 的 response duplicate 直接结算只能作为上述流程全部耗尽后的最终 fallback，且不得扩散到其它 Loop。目标确认优先使用精确 item ID；ID 被 EA 重建时，只允许把开包前 baseline 中不存在、静态签名一一对应的新目标实体作为 alias。仅相同 `definitionId`、无法一一对应、容量不足或仍出现 live Unassigned 时都不能判定成功。
 
 Batch Open 的 `Add all` 必须持久化为 `quantityMode: 'all'`，不能只保存点击时的数量快照。弹窗展示使用当前 My Packs 数量，Start 前再次刷新并通过 `materializeBatchOpenPlan()` 物化执行数量；实时数量为 0 的 all entry 不进入执行计划。旧配置没有 `quantityMode` 时按 `fixed` 兼容。
 
@@ -854,7 +856,7 @@ Dry run 必须在副作用前停止：
 - `SBC storage has only ...`：根因可能是前一步不该清空 Unassigned，而不是容量检查本身。
 - `selected M/N`：先看 diagnostics 和 FSU settings，再判断库存不足。
 - `Open pack failed: 471/500`：先检查上一包响应是否已经完成 duplicate materialization、Unassigned settlement 和逐卡 destination confirmation。`471` 常表示仍有服务端待处理物品，不能直接推断当前 Pack 实例已经失效；Batch 对同 ID 多包使用启动时捕获的实例队列，普通奖励包可按自身 resolver 获取刷新模型。`500` 仍按有界重试处理。
-- 开包响应中的 `isDuplicate()`/`duplicateId` 可能晚于响应返回。通用开包路径必须先用 Club 相同 definition 恢复迟到的 duplicate signal，再等待 live Unassigned 实体执行 duplicate move/swap；不得直接移动 response duplicate，也不得把响应卡当 non-duplicate 移动后仅凭一次空 repository 继续下一包。
+- 开包响应中的 `isDuplicate()`/`duplicateId` 可能晚于响应返回。通用开包路径必须先用 Club 相同 definition 恢复迟到的 duplicate signal，再等待 live Unassigned 实体执行 duplicate move/swap；不得把响应卡当 non-duplicate 移动后仅凭一次空 repository 继续下一包。Batch Open 的 response duplicate 最终 fallback 必须满足 Pack 模块不变量中列出的页面同步、baseline、容量和确认条件，其它路径仍不得直接移动 response duplicate。
 - `pendingItemRefs` 表示开包响应卡尚未确认进入 Club/Storage/Transfer，也没有被明确 reserved。任何自动开包流程都必须停止后续包或 SBC 动作；reserved 与 pending 不得混淆。
 - `Pack #N marked gone for this session after 404`：同一 pack id 已按 404 拉黑，本会话不再重复尝试（例如僵尸 TOTW Provision Refresh）。
 - `background submit returned 409/429; reloading challenge before retry`：评分 SBC 后台提交冲突，脚本会有限次重载 challenge 并重放阵容后重试；仍失败再停。

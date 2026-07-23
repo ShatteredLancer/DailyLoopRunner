@@ -223,6 +223,7 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toMatch(/runBatchOpenWorkflow\(\{[\s\S]*?openPack:\s*async[\s\S]*?openedItemPolicy:\s*createMaterializeAndResolvePolicy/);
     expect(source).toMatch(/Batch Open[\s\S]*?createMaterializeAndResolvePolicy\([\s\S]*?blockedPolicy:\s*['"]preserve['"]/);
     expect(source).toMatch(/Batch Open[\s\S]*?createMaterializeAndResolvePolicy\([\s\S]*?enableRecovery:\s*true/);
+    expect(source).toMatch(/Batch Open[\s\S]*?createMaterializeAndResolvePolicy\([\s\S]*?directDuplicateFallback:\s*true/);
     expect(source).toMatch(/beforeStart:[\s\S]*?Batch Open preflight[\s\S]*?blockedPolicy:\s*['"]preserve['"][\s\S]*?enableRecovery:\s*true/);
     expect(source).not.toContain("resolveRuntimeUnassigned('Batch Open final cleanup')");
   });

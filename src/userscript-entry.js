@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.51
+// @version      0.5.52
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -141,6 +141,7 @@ import {
   matchOpenedItemsToNewPileAliases,
   materializeOpenedPlayerDuplicates,
   needsUnassignedViewMaterialization,
+  planUnmaterializedDuplicateFallback,
 } from './pack/opened-item-materialization.js';
 import { createPackInstanceQueue } from './pack/instance-queue.js';
 import { settleOpenedItems } from './pack/opened-item-settlement.js';
@@ -253,7 +254,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.51',
+    version: '0.5.52',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1878,7 +1879,7 @@ function updateLoopControls() {
 
   async function materializeOpenedPlayerRewards(items, label = 'opened reward pack') {
     const players = uniqueItems((items || []).filter((item) => isPlayer(item)));
-    if (!players.length) return 0;
+    if (!players.length) return { moved: 0, deferredDuplicates: [] };
     const materialized = materializeOpenedResponsePlayerDuplicates(players, label);
 
     const moved = await tryMoveOpenedRewardItems(
@@ -1909,7 +1910,99 @@ function updateLoopControls() {
       await refreshInventoryCaches(`${label} direct reward move`, { includePacks: false, quiet: true });
       resolveRecentRewardItems(`${label} direct reward move`);
     }
-    return moved;
+    return { ...materialized, moved };
+  }
+
+  function hasNewUnassignedOpenedDuplicateEntity(items, routingBaseline = null) {
+    const baselineIds = new Set((routingBaseline?.unassignedIds || []).map((id) => Number(id || 0)).filter(Boolean));
+    const definitionIds = new Set((items || [])
+      .map((item) => Number(item?.definitionId || item?.ref?.definitionId || 0))
+      .filter(Boolean));
+    if (!definitionIds.size) return false;
+    return getUnassignedItems().some((item) => {
+      const id = Number(item?.id || item?.ref?.id || 0);
+      const definitionId = Number(item?.definitionId || item?.ref?.definitionId || 0);
+      return id && !baselineIds.has(id) && definitionIds.has(definitionId);
+    });
+  }
+
+  async function tryDirectlySettleUnmaterializedOpenedDuplicates({
+    openedItems,
+    materialized,
+    routing,
+    label,
+    routingBaseline,
+  }) {
+    const pendingIds = new Set((routing?.pendingItems || []).map((item) => Number(item?.id || 0)).filter(Boolean));
+    const duplicates = uniqueItems((materialized?.deferredDuplicates || [])
+      .filter((item) => pendingIds.has(Number(item?.id || 0))));
+    if (!duplicates.length) return null;
+
+    await refreshInventoryCaches(`${label} direct duplicate fallback preflight`, { includePacks: false, quiet: true });
+    if (hasNewUnassignedOpenedDuplicateEntity(duplicates, routingBaseline)) {
+      log(`${label}: direct duplicate fallback skipped because a matching live Unassigned entity appeared`);
+      return null;
+    }
+
+    const fallbackPlan = planUnmaterializedDuplicateFallback({
+      items: duplicates,
+      isTradeable,
+      findClubDuplicate,
+      capacities: {
+        storage: storageSpaceLeft(),
+        transfer: transferSpaceLeft(),
+      },
+    });
+    if (fallbackPlan.status === 'blocked') {
+      const blocked = fallbackPlan.blocked;
+      const reason = `direct duplicate fallback blocked: ${blocked.destination} has only ${blocked.free} slot(s) for ${blocked.required} item(s)`;
+      log(`${label}: ${reason}`);
+      return {
+        status: 'preserved',
+        reason,
+        cleanup: { status: 'preserved', reason, plan: { blocked } },
+        routing,
+        moved: 0,
+      };
+    }
+
+    log(`${label}: no matching live Unassigned entity after bounded settlement; attempting direct routing for ${duplicates.length} duplicate response item(s)`);
+    let moved = 0;
+    for (const group of fallbackPlan.groups) {
+      moved += await tryMoveOpenedRewardItems(
+        group.items,
+        inventoryPile(group.key),
+        group.allowStorage,
+        label,
+        group.description,
+      );
+    }
+    if (moved !== duplicates.length) {
+      log(`${label}: direct duplicate fallback moved ${moved}/${duplicates.length}; preserving unresolved response item(s)`);
+      return null;
+    }
+
+    await sleep(CFG.pauseMs);
+    await refreshInventoryCaches(`${label} direct duplicate fallback`, { includePacks: false, quiet: true });
+    if (hasNewUnassignedOpenedDuplicateEntity(duplicates, routingBaseline)) {
+      const pending = openedItemRoutingResult(openedItems, null, {}, routingBaseline);
+      log(`${label}: direct duplicate fallback detected a new live Unassigned entity after move; preserving it to avoid a second route`);
+      return {
+        status: 'preserved',
+        reason: 'direct duplicate fallback left a live Unassigned entity for manual resolution',
+        cleanup: { status: 'preserved', reason: 'direct duplicate fallback left a live Unassigned entity for manual resolution' },
+        routing: pending,
+        moved,
+      };
+    }
+
+    const confirmed = await confirmOpenedItemRouting(openedItems, label, { routingBaseline });
+    if (confirmed.pendingItems.length) {
+      log(`${label}: direct duplicate fallback moved ${moved} item(s), but EA did not confirm every destination; preserving`);
+      return { status: 'pending', cleanup: null, routing: confirmed, moved };
+    }
+    log(`${label}: direct duplicate fallback confirmed ${moved} routed response item(s)`);
+    return { status: 'resolved', cleanup: { status: 'resolved' }, routing: confirmed, moved };
   }
 
   function openedItemRoutingResult(items, reserveItem = null, details = {}, routingBaseline = null) {
@@ -6229,6 +6322,7 @@ function updateLoopControls() {
 
   function createMaterializeAndResolvePolicy(label, cleanupReason, cleanupOptions = {}) {
     return createOpenedItemPolicy(async (openedItems, context = {}) => {
+      const { directDuplicateFallback = false, ...unassignedCleanupOptions } = cleanupOptions;
       const settlement = await settleOpenedItems({
         attempts: 3,
         materialize: async () => {
@@ -6239,7 +6333,7 @@ function updateLoopControls() {
         cleanup: async ({ attempt }) => resolveRuntimeUnassigned(
           attempt === 1 ? cleanupReason : `${cleanupReason} delayed response retry ${attempt}/3`,
           {
-            ...cleanupOptions,
+            ...unassignedCleanupOptions,
             beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
               routingBaseline: context.routingBaseline || null,
             }),
@@ -6258,18 +6352,29 @@ function updateLoopControls() {
           });
         },
       });
-      const cleanup = settlement.cleanup || {};
-      const routing = settlement.routing || { reservedItems: [], routedItems: [], pendingItems: openedItems };
+      const fallback = settlement.status === 'pending' && directDuplicateFallback
+        ? await tryDirectlySettleUnmaterializedOpenedDuplicates({
+            openedItems,
+            materialized: settlement.materialized,
+            routing: settlement.routing,
+            label,
+            routingBaseline: context.routingBaseline || null,
+          })
+        : null;
+      const finalSettlement = fallback ? { ...settlement, ...fallback } : settlement;
+      const cleanup = finalSettlement.cleanup || {};
+      const routing = finalSettlement.routing || { reservedItems: [], routedItems: [], pendingItems: openedItems };
       return {
         ...routing,
         details: {
-          cleanupStatus: settlement.status === 'pending' ? 'preserved' : cleanup.status,
-          cleanupReason: settlement.reason || cleanup.reason || null,
-          settlementAttempts: settlement.attempts,
+          cleanupStatus: finalSettlement.status === 'pending' ? 'preserved' : cleanup.status,
+          cleanupReason: finalSettlement.reason || cleanup.reason || null,
+          settlementAttempts: finalSettlement.attempts,
           blockedDestination: cleanup.plan?.blocked?.destination || null,
           blockedFree: cleanup.plan?.blocked?.free ?? null,
           blockedRequired: cleanup.plan?.blocked?.required ?? null,
           resolvedAliasCount: routing.aliasRoutes?.length || 0,
+          directDuplicateFallback: fallback?.status || null,
         },
       };
     });
@@ -8079,7 +8184,7 @@ function updateLoopControls() {
             openedItemPolicy: createMaterializeAndResolvePolicy(
               `Batch Open ${entry.packName || `#${entry.packId}`}`,
               `Batch Open ${entry.packName || `#${entry.packId}`} cleanup`,
-              { blockedPolicy: 'preserve', enableRecovery: true },
+              { blockedPolicy: 'preserve', enableRecovery: true, directDuplicateFallback: true },
             ),
           },
         ),

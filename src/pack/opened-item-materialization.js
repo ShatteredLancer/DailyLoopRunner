@@ -146,6 +146,63 @@ export function needsUnassignedViewMaterialization(materialized = {}) {
     && (materialized.directItems || []).length === 0;
 }
 
+export function planUnmaterializedDuplicateFallback(options = {}) {
+  const items = options.items || [];
+  const isTradeable = options.isTradeable || ((item) => item?.tradeable === true);
+  const findClubDuplicate = options.findClubDuplicate || (() => null);
+  const capacities = options.capacities || {};
+  const groups = new Map();
+  const capacityNeeds = new Map();
+
+  for (const item of items) {
+    let route;
+    if (isTradeable(item)) {
+      route = {
+        key: 'transfer',
+        capacityKey: 'transfer',
+        allowStorage: false,
+        description: 'tradeable duplicate fallback',
+      };
+    } else {
+      const clubDuplicate = findClubDuplicate(item);
+      route = clubDuplicate && isTradeable(clubDuplicate)
+        ? {
+            key: 'club',
+            capacityKey: 'transfer',
+            allowStorage: true,
+            description: 'untradeable duplicate swap fallback',
+          }
+        : {
+            key: 'storage',
+            capacityKey: 'storage',
+            allowStorage: true,
+            description: 'untradeable duplicate fallback',
+          };
+    }
+
+    const group = groups.get(route.key) || { ...route, items: [] };
+    group.items.push(item);
+    groups.set(route.key, group);
+    capacityNeeds.set(route.capacityKey, (capacityNeeds.get(route.capacityKey) || 0) + 1);
+  }
+
+  for (const [destination, required] of capacityNeeds) {
+    const rawFree = capacities[destination];
+    const free = rawFree === null || rawFree === undefined || !Number.isFinite(Number(rawFree))
+      ? null
+      : Math.max(0, Number(rawFree));
+    if (free !== null && required > free) {
+      return {
+        status: 'blocked',
+        blocked: { destination, required, free },
+        groups: [...groups.values()],
+      };
+    }
+  }
+
+  return { status: 'ready', blocked: null, groups: [...groups.values()] };
+}
+
 export function classifyOpenedItemRouting(options = {}) {
   const items = options.items || [];
   const piles = options.piles || {};
@@ -202,6 +259,28 @@ export function classifyOpenedItemRouting(options = {}) {
       // newly observed destination entity belongs to this exact response group.
       if (!destinationsForSignature.length || destinationsForSignature.length !== pending.length) continue;
       pending.forEach((item, index) => aliasRoutes.push({ item, destination: destinationsForSignature[index] }));
+    }
+
+    // EA can hydrate a response entity with an unknown tradeability state, then
+    // materialize the same card in a destination pile with its final state. Keep
+    // the stricter route above first; this one-to-one static fallback only accepts
+    // entities that were absent from the pre-open snapshot.
+    const strictSourceIds = new Set(aliasRoutes.map((route) => itemId(route.item)));
+    const strictDestinationIds = new Set(aliasRoutes.map((route) => itemId(route.destination.item)));
+    const staticAliases = matchOpenedItemsToNewPileAliases({
+      items: pendingItems.filter((item) => {
+        const id = itemId(item);
+        return !strictSourceIds.has(id) && !unassignedIds.has(id);
+      }),
+      pileItems: destinations
+        .filter((entry) => !strictDestinationIds.has(itemId(entry.item)))
+        .map((entry) => entry.item),
+      baselineIds: options.routingBaseline?.destinationIds || [],
+    });
+    const destinationById = new Map(destinations.map((entry) => [itemId(entry.item), entry]));
+    for (const { item, alias } of staticAliases) {
+      const destination = destinationById.get(itemId(alias));
+      if (destination) aliasRoutes.push({ item, destination });
     }
   }
   const routedAliasItems = new Set(aliasRoutes.map((route) => route.item));

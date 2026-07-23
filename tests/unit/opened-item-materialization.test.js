@@ -5,6 +5,7 @@ import {
   matchOpenedItemsToNewPileAliases,
   materializeOpenedPlayerDuplicates,
   needsUnassignedViewMaterialization,
+  planUnmaterializedDuplicateFallback,
 } from '../../src/pack/opened-item-materialization.js';
 
 describe('opened item materialization', () => {
@@ -53,6 +54,46 @@ describe('opened item materialization', () => {
     })).toBe(false);
   });
 
+  it('plans direct duplicate fallback without bypassing aggregate destination capacity', () => {
+    const tradeable = { id: 101, tradeable: true };
+    const swappable = { id: 102, tradeable: false, duplicateId: 202 };
+    const clubTradeable = { id: 202, tradeable: true };
+    const blocked = planUnmaterializedDuplicateFallback({
+      items: [tradeable, swappable],
+      isTradeable: (item) => item.tradeable === true,
+      findClubDuplicate: (item) => item.id === swappable.id ? clubTradeable : null,
+      capacities: { transfer: 1, storage: 10 },
+    });
+
+    expect(blocked).toMatchObject({
+      status: 'blocked',
+      blocked: { destination: 'transfer', required: 2, free: 1 },
+    });
+  });
+
+  it('groups direct duplicate fallback routes by EA move destination', () => {
+    const tradeable = { id: 101, tradeable: true };
+    const swappable = { id: 102, tradeable: false };
+    const storage = { id: 103, tradeable: false };
+    const plan = planUnmaterializedDuplicateFallback({
+      items: [tradeable, swappable, storage],
+      isTradeable: (item) => item.tradeable === true,
+      findClubDuplicate: (item) => item.id === swappable.id ? { id: 202, tradeable: true } : null,
+      capacities: { transfer: 2, storage: 1 },
+    });
+
+    expect(plan.status).toBe('ready');
+    expect(plan.groups.map((group) => ({
+      key: group.key,
+      capacityKey: group.capacityKey,
+      ids: group.items.map((item) => item.id),
+    }))).toEqual([
+      { key: 'transfer', capacityKey: 'transfer', ids: [101] },
+      { key: 'club', capacityKey: 'transfer', ids: [102] },
+      { key: 'storage', capacityKey: 'storage', ids: [103] },
+    ]);
+  });
+
   it('keeps an opened item pending until its id appears in a destination pile', () => {
     const opened = { id: 101, definitionId: 501 };
     expect(classifyOpenedItemRouting({ items: [opened], piles: {} }).pendingItems).toEqual([opened]);
@@ -93,6 +134,35 @@ describe('opened item materialization', () => {
     expect(result.pendingItems).toEqual([]);
     expect(result.routedItems).toEqual([opened]);
     expect(result.aliasRoutes).toEqual([{ item: opened, destination: { pile: 'transfer', item: landed } }]);
+  });
+
+  it('routes a remapped destination entity when EA hydrates tradeability after the response', () => {
+    const opened = { id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1 };
+    const existing = { id: 201, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: true };
+    const landed = { id: 301, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: true };
+    const routingBaseline = createOpenedItemRoutingBaseline({ storage: [existing] });
+
+    const result = classifyOpenedItemRouting({
+      items: [opened],
+      piles: { storage: [existing, landed] },
+      routingBaseline,
+    });
+
+    expect(result.pendingItems).toEqual([]);
+    expect(result.aliasRoutes).toEqual([{ item: opened, destination: { pile: 'storage', item: landed } }]);
+  });
+
+  it('keeps an exact live Unassigned entity pending even when a matching new destination appears', () => {
+    const opened = { id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1 };
+    const landed = { id: 301, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: true };
+    const result = classifyOpenedItemRouting({
+      items: [opened],
+      piles: { unassigned: [opened], storage: [landed] },
+      routingBaseline: createOpenedItemRoutingBaseline(),
+    });
+
+    expect(result.pendingItems).toEqual([opened]);
+    expect(result.aliasRoutes).toEqual([]);
   });
 
   it('does not mistake a pre-open matching destination item for an opened item', () => {
