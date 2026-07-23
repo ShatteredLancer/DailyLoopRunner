@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.50
+// @version      0.5.51
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -31,7 +31,10 @@ import {
   REWARD_ALERT_SETTINGS_KEY,
 } from './config/runtime.js';
 import { LOOP_DEFS } from './config/loops.js';
-import { selectionRequirements } from './config/selection.js';
+import {
+  createSingleCardSelectionRequirement,
+  selectionRequirements,
+} from './config/selection.js';
 import { applyDisabledPiles, visibleLoopDefs } from './config/loop-presentation.js';
 import {
   getLiveRunLimit as getLiveRunLimitPure,
@@ -137,6 +140,7 @@ import {
   createOpenedItemRoutingBaseline,
   matchOpenedItemsToNewPileAliases,
   materializeOpenedPlayerDuplicates,
+  needsUnassignedViewMaterialization,
 } from './pack/opened-item-materialization.js';
 import { createPackInstanceQueue } from './pack/instance-queue.js';
 import { settleOpenedItems } from './pack/opened-item-settlement.js';
@@ -249,7 +253,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.50',
+    version: '0.5.51',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1828,6 +1832,7 @@ function updateLoopControls() {
 
   function restoreOpenedUnassignedDuplicateMetadata(items, label = 'opened reward pack', options = {}) {
     const unassignedItems = getUnassignedItems();
+    const responseDuplicates = (items || []).filter((item) => isDuplicate(item));
     const responseById = new Map((items || [])
       .map((item) => [Number(item?.id || 0), item])
       .filter(([id]) => id));
@@ -1864,6 +1869,9 @@ function updateLoopControls() {
     }
     if (restored) {
       log(`${label}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)${remapped ? ` (${remapped} remapped response id(s))` : ''}`);
+    } else if (responseDuplicates.length) {
+      const describe = (item) => `id:${Number(item?.id || 0) || '?'} def:${Number(item?.definitionId || 0) || '?'} rating:${Number(item?.rating || 0) || '?'} dup:${Number(item?.duplicateId || 0) || '?'}`;
+      log(`${label}: duplicate metadata restore snapshot response:${responseDuplicates.length} [${responseDuplicates.map(describe).join('; ')}] liveUnassigned:${unassignedItems.length} [${unassignedItems.map(describe).join('; ')}] baselineUnassigned:${Array.isArray(baselineUnassignedIds) ? baselineUnassignedIds.length : '?'}`);
     }
     return restored;
   }
@@ -1886,6 +1894,15 @@ function updateLoopControls() {
     // time. Let the shared Unassigned resolver route duplicates only after materialization.
     if (materialized.deferredDuplicates.length) {
       log(`${label}: waiting for ${materialized.deferredDuplicates.length} duplicate opened reward item(s) to materialize in Unassigned`);
+    }
+
+    if (needsUnassignedViewMaterialization(materialized)) {
+      log(`${label}: all opened player item(s) are duplicates; opening Unassigned to materialize live EA entities`);
+      await showUnassignedIfAny(`${label} all-duplicate materialization`, {
+        stableEmptyReads: 3,
+        emptyReadDelayMs: 450,
+        diagnostic: true,
+      });
     }
 
     if (moved) {
@@ -1930,6 +1947,9 @@ function updateLoopControls() {
     if (routing.pendingItems.length) {
       const ids = routing.pendingItems.map((item) => Number(item?.id || 0) || '?').join(', ');
       log(`${label}: ${routing.pendingItems.length} opened item(s) still have no confirmed destination after ${attempts} check(s); ids:${ids}`);
+      const describe = (item) => `id:${Number(item?.id || 0) || '?'} def:${Number(item?.definitionId || 0) || '?'} rating:${Number(item?.rating || 0) || '?'} dup:${Number(item?.duplicateId || 0) || '?'}`;
+      const baseline = options.routingBaseline || {};
+      log(`${label}: routing snapshot pending:[${routing.pendingItems.map(describe).join('; ')}]; piles unassigned:${getUnassignedItems().length} storage:${getStorageItems().length} transfer:${getTransferItems().length} club:${getClubItems().length}; baseline destinations:${Array.isArray(baseline.destinationIds) ? baseline.destinationIds.length : '?'} unassigned:${Array.isArray(baseline.unassignedIds) ? baseline.unassignedIds.length : '?'}`);
     }
     return routing;
   }
@@ -3265,6 +3285,8 @@ function updateLoopControls() {
       getItems: getUnassignedItems,
       stableEmptyReads: options.stableEmptyReads || 1,
       emptyReadDelayMs: options.emptyReadDelayMs || 0,
+      diagnostic: options.diagnostic === true,
+      getControllerName: currentControllerName,
       sleep,
       log,
     });
@@ -5122,15 +5144,14 @@ function updateLoopControls() {
   }
 
   async function selectDailySeedInventory(loopDef) {
-    const requirement = {
-      ...loopDef.targetDuplicate,
-      count: 1,
-      priorityPiles: ['storage', 'transfer', 'club'],
-    };
+    const { requirement, priorityPiles } = createSingleCardSelectionRequirement(
+      loopDef,
+      loopDef.targetDuplicate,
+    );
     await refreshInventoryCaches(`${loopDef.name} seed inventory selection`, { includePacks: false, quiet: true });
     return {
       requirement,
-      selection: selectInventoryPlayers([requirement], requirement.priorityPiles),
+      selection: selectInventoryPlayers([requirement], priorityPiles),
     };
   }
 
@@ -6230,6 +6251,11 @@ function updateLoopControls() {
         onRetry: async ({ attempt, routing }) => {
           log(`${label}: ${routing.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
           await sleep(CFG.pauseMs);
+          await showUnassignedIfAny(`${label} delayed materialization retry ${attempt + 1}/3`, {
+            stableEmptyReads: 3,
+            emptyReadDelayMs: 450,
+            diagnostic: true,
+          });
         },
       });
       const cleanup = settlement.cleanup || {};

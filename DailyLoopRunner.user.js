@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.50
+// @version      0.5.51
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -582,6 +582,18 @@
         priorityPiles
       };
     });
+  }
+  function createSingleCardSelectionRequirement(loopDef = {}, cardSpec = {}, defaultPriorityPiles = ["storage", "transfer", "club"]) {
+    const configuredPiles = Array.isArray(loopDef.priorityPiles) && loopDef.priorityPiles.length ? loopDef.priorityPiles : defaultPriorityPiles;
+    const disabledPiles = new Set(loopDef.disabledPiles || []);
+    const priorityPiles = configuredPiles.filter((pile) => !disabledPiles.has(pile));
+    if (!priorityPiles.length) throw new Error(`${loopDef.name || "single-card selection"} has no enabled inventory pile`);
+    const [requirement] = selectionRequirements({
+      ...loopDef,
+      requirements: [{ ...cardSpec, count: 1, priorityPiles }]
+    }, priorityPiles);
+    if (!requirement) throw new Error(`${loopDef.name || "single-card selection"} has no card requirement`);
+    return { requirement, priorityPiles };
   }
 
   // src/domain/objects.js
@@ -6359,16 +6371,39 @@
     if (typeof options.getItems !== "function") throw new TypeError("getItems is required");
     const stableEmptyReads = Math.max(1, Math.min(5, Number(options.stableEmptyReads || 1) || 1));
     const emptyReadDelayMs = Math.max(0, Number(options.emptyReadDelayMs || 0));
+    const diagnostic = options.diagnostic === true;
+    const controllerName2 = () => {
+      try {
+        return String(options.getControllerName?.() || "?");
+      } catch {
+        return "?";
+      }
+    };
     log(`Opening unassigned items view for confirmation: ${reason}`);
+    const controllerBefore = controllerName2();
+    let navigationMethod = "none";
     try {
-      if (options.openUnassigned() !== true) options.clickFallback();
+      if (options.openUnassigned() === true) {
+        navigationMethod = "controller";
+      } else {
+        const fallbackResult = options.clickFallback();
+        navigationMethod = fallbackResult === false ? "unavailable" : "text-fallback";
+      }
     } catch (error) {
+      navigationMethod = "error";
       log(`Could not open unassigned view automatically: ${error?.message || error}`);
     }
     await options.waitLoadingEnd();
+    if (diagnostic) {
+      log(`Unassigned navigation (${reason}): method:${navigationMethod}; controller:${controllerBefore}->${controllerName2()}`);
+    }
     for (let read = 1; read <= stableEmptyReads; read++) {
-      await options.refreshUnassigned();
+      const refreshResult = await options.refreshUnassigned();
       const items = options.getItems() || [];
+      if (diagnostic) {
+        const refreshState = refreshResult?.success === true ? "success" : refreshResult?.cachedFallback ? `cache-fallback:${refreshResult.cachedCount ?? "?"}` : String(refreshResult?.error?.message || refreshResult?.status || "unknown");
+        log(`Unassigned read (${reason}) ${read}/${stableEmptyReads}: items:${items.length}; refresh:${refreshState}; controller:${controllerName2()}`);
+      }
       if (items.length) {
         log(`Unassigned confirmation (${reason}): ${items.length} item(s) still present`);
         return items;
@@ -6713,6 +6748,9 @@
       directItems: nonDuplicates,
       deferredDuplicates: duplicates
     };
+  }
+  function needsUnassignedViewMaterialization(materialized = {}) {
+    return (materialized.deferredDuplicates || []).length > 0 && (materialized.directItems || []).length === 0;
   }
   function classifyOpenedItemRouting(options = {}) {
     const items = options.items || [];
@@ -10169,7 +10207,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.50",
+      version: "0.5.51",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -11579,6 +11617,7 @@
     }
     function restoreOpenedUnassignedDuplicateMetadata(items, label = "opened reward pack", options = {}) {
       const unassignedItems = getUnassignedItems();
+      const responseDuplicates = (items || []).filter((item) => isDuplicate(item));
       const responseById = new Map((items || []).map((item) => [Number(item?.id || 0), item]).filter(([id]) => id));
       let restored = 0;
       let remapped = 0;
@@ -11611,6 +11650,9 @@
       }
       if (restored) {
         log(`${label}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)${remapped ? ` (${remapped} remapped response id(s))` : ""}`);
+      } else if (responseDuplicates.length) {
+        const describe = (item) => `id:${Number(item?.id || 0) || "?"} def:${Number(item?.definitionId || 0) || "?"} rating:${Number(item?.rating || 0) || "?"} dup:${Number(item?.duplicateId || 0) || "?"}`;
+        log(`${label}: duplicate metadata restore snapshot response:${responseDuplicates.length} [${responseDuplicates.map(describe).join("; ")}] liveUnassigned:${unassignedItems.length} [${unassignedItems.map(describe).join("; ")}] baselineUnassigned:${Array.isArray(baselineUnassignedIds) ? baselineUnassignedIds.length : "?"}`);
       }
       return restored;
     }
@@ -11627,6 +11669,14 @@
       );
       if (materialized.deferredDuplicates.length) {
         log(`${label}: waiting for ${materialized.deferredDuplicates.length} duplicate opened reward item(s) to materialize in Unassigned`);
+      }
+      if (needsUnassignedViewMaterialization(materialized)) {
+        log(`${label}: all opened player item(s) are duplicates; opening Unassigned to materialize live EA entities`);
+        await showUnassignedIfAny(`${label} all-duplicate materialization`, {
+          stableEmptyReads: 3,
+          emptyReadDelayMs: 450,
+          diagnostic: true
+        });
       }
       if (moved) {
         await refreshInventoryCaches(`${label} direct reward move`, { includePacks: false, quiet: true });
@@ -11668,6 +11718,9 @@
       if (routing.pendingItems.length) {
         const ids = routing.pendingItems.map((item) => Number(item?.id || 0) || "?").join(", ");
         log(`${label}: ${routing.pendingItems.length} opened item(s) still have no confirmed destination after ${attempts} check(s); ids:${ids}`);
+        const describe = (item) => `id:${Number(item?.id || 0) || "?"} def:${Number(item?.definitionId || 0) || "?"} rating:${Number(item?.rating || 0) || "?"} dup:${Number(item?.duplicateId || 0) || "?"}`;
+        const baseline = options.routingBaseline || {};
+        log(`${label}: routing snapshot pending:[${routing.pendingItems.map(describe).join("; ")}]; piles unassigned:${getUnassignedItems().length} storage:${getStorageItems().length} transfer:${getTransferItems().length} club:${getClubItems().length}; baseline destinations:${Array.isArray(baseline.destinationIds) ? baseline.destinationIds.length : "?"} unassigned:${Array.isArray(baseline.unassignedIds) ? baseline.unassignedIds.length : "?"}`);
       }
       return routing;
     }
@@ -12870,6 +12923,8 @@
         getItems: getUnassignedItems,
         stableEmptyReads: options.stableEmptyReads || 1,
         emptyReadDelayMs: options.emptyReadDelayMs || 0,
+        diagnostic: options.diagnostic === true,
+        getControllerName: currentControllerName,
         sleep,
         log
       });
@@ -14481,15 +14536,14 @@
       return getUnassignedItems().filter((item) => isTargetDuplicate(item, loopDef));
     }
     async function selectDailySeedInventory(loopDef) {
-      const requirement = {
-        ...loopDef.targetDuplicate,
-        count: 1,
-        priorityPiles: ["storage", "transfer", "club"]
-      };
+      const { requirement, priorityPiles } = createSingleCardSelectionRequirement(
+        loopDef,
+        loopDef.targetDuplicate
+      );
       await refreshInventoryCaches(`${loopDef.name} seed inventory selection`, { includePacks: false, quiet: true });
       return {
         requirement,
-        selection: selectInventoryPlayers3([requirement], requirement.priorityPiles)
+        selection: selectInventoryPlayers3([requirement], priorityPiles)
       };
     }
     function itemRefMatchesAny(item, refs = []) {
@@ -15487,6 +15541,11 @@
           onRetry: async ({ attempt, routing: routing2 }) => {
             log(`${label}: ${routing2.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
             await sleep(CFG.pauseMs);
+            await showUnassignedIfAny(`${label} delayed materialization retry ${attempt + 1}/3`, {
+              stableEmptyReads: 3,
+              emptyReadDelayMs: 450,
+              diagnostic: true
+            });
           }
         });
         const cleanup = settlement.cleanup || {};

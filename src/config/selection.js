@@ -26,3 +26,23 @@ export function selectionRequirements(loopDef = {}, priorityPiles = loopDef.prio
     };
   });
 }
+
+export function createSingleCardSelectionRequirement(
+  loopDef = {},
+  cardSpec = {},
+  defaultPriorityPiles = ['storage', 'transfer', 'club'],
+) {
+  const configuredPiles = Array.isArray(loopDef.priorityPiles) && loopDef.priorityPiles.length
+    ? loopDef.priorityPiles
+    : defaultPriorityPiles;
+  const disabledPiles = new Set(loopDef.disabledPiles || []);
+  const priorityPiles = configuredPiles.filter((pile) => !disabledPiles.has(pile));
+  if (!priorityPiles.length) throw new Error(`${loopDef.name || 'single-card selection'} has no enabled inventory pile`);
+
+  const [requirement] = selectionRequirements({
+    ...loopDef,
+    requirements: [{ ...cardSpec, count: 1, priorityPiles }],
+  }, priorityPiles);
+  if (!requirement) throw new Error(`${loopDef.name || 'single-card selection'} has no card requirement`);
+  return { requirement, priorityPiles };
+}

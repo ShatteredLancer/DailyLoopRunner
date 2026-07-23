@@ -4,6 +4,7 @@ import {
   createOpenedItemRoutingBaseline,
   matchOpenedItemsToNewPileAliases,
   materializeOpenedPlayerDuplicates,
+  needsUnassignedViewMaterialization,
 } from '../../src/pack/opened-item-materialization.js';
 
 describe('opened item materialization', () => {
@@ -38,6 +39,18 @@ describe('opened item materialization', () => {
 
     expect(result.directItems).toEqual([normal]);
     expect(result.deferredDuplicates).toEqual([duplicate]);
+    expect(needsUnassignedViewMaterialization(result)).toBe(false);
+  });
+
+  it('requires a page sync when every opened player is a deferred duplicate', () => {
+    expect(needsUnassignedViewMaterialization({
+      directItems: [],
+      deferredDuplicates: [{ id: 101 }, { id: 102 }],
+    })).toBe(true);
+    expect(needsUnassignedViewMaterialization({
+      directItems: [{ id: 101 }],
+      deferredDuplicates: [{ id: 102 }],
+    })).toBe(false);
   });
 
   it('keeps an opened item pending until its id appears in a destination pile', () => {
@@ -47,6 +60,10 @@ describe('opened item materialization', () => {
       items: [opened],
       piles: { club: [{ id: 101, definitionId: 501 }] },
     }).routedItems).toEqual([opened]);
+    expect(classifyOpenedItemRouting({
+      items: [opened],
+      piles: { club: [{ id: 201, definitionId: 501 }] },
+    }).pendingItems).toEqual([opened]);
   });
 
   it('distinguishes intentionally reserved Unassigned items from unresolved items', () => {

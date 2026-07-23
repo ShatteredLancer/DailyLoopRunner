@@ -332,6 +332,7 @@ EA objects
 - 每个开包调用必须提供 opened-item policy。
 - response item 与 Repository 延迟必须被 receipt/transient signal 覆盖。
 - EA pack response 经常早于 Unassigned cache。成功开包后必须先标准化 response items，并可直接移动已确认的非重复卡；response duplicate 只用于恢复迟到的 duplicate metadata、通知和后续确认，不得直接作为重复卡移动实体。可交易重复、不可交易重复、swap 和当前 stage 保留材料必须等待 live Unassigned Repository 实体出现后再按 policy 路由，然后刷新 recent reward/Repository 状态，才允许下一次选材或开下一包。
+- 全重复包可能没有任何 direct move 来触发 EA 的 Purchased/Unassigned 页面模型；当 response 全是 duplicate 且 Repository 仍为空时，必须主动打开 Unassigned 页面并进行连续空读确认，再让通用 resolver 处理 live 实体。pending settlement 的后续尝试也必须执行页面同步，不能只重复调用 Item service。
 - 不得把“先清理旧 Unassigned”和“开包成功后的 response materialization”混为同一步。开包后的 response 处理必须先于该奖励产生的残留 Unassigned cleanup，否则下一轮会误报缺料或遗留重复卡。
 - 471、500、404 和 stale pack 的重试必须有界。
 - 开第二包前必须重新检查 Unassigned 和容量。

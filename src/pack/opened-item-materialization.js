@@ -141,6 +141,11 @@ export function materializeOpenedPlayerDuplicates(options = {}) {
   };
 }
 
+export function needsUnassignedViewMaterialization(materialized = {}) {
+  return (materialized.deferredDuplicates || []).length > 0
+    && (materialized.directItems || []).length === 0;
+}
+
 export function classifyOpenedItemRouting(options = {}) {
   const items = options.items || [];
   const piles = options.piles || {};

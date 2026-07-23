@@ -233,4 +233,11 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toMatch(/resolveRuntimeUnassigned\(`\$\{loopDef\.name\} pre-submit cleanup`, \{[\s\S]*?reserveItem: reservePrimaryUnassigned/);
     expect(source).toContain('const preserveSupply = cleanup.status === \'preserved\';');
   });
+
+  it('opens the Unassigned page to materialize all-duplicate pack responses', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    expect(source).toContain('needsUnassignedViewMaterialization(materialized)');
+    expect(source).toContain('all-duplicate materialization');
+    expect(source).toContain('delayed materialization retry ${attempt + 1}/3');
+  });
 });

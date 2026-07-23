@@ -8,17 +8,40 @@ export async function confirmUnassignedView(options = {}) {
   if (typeof options.getItems !== 'function') throw new TypeError('getItems is required');
   const stableEmptyReads = Math.max(1, Math.min(5, Number(options.stableEmptyReads || 1) || 1));
   const emptyReadDelayMs = Math.max(0, Number(options.emptyReadDelayMs || 0));
+  const diagnostic = options.diagnostic === true;
+  const controllerName = () => {
+    try { return String(options.getControllerName?.() || '?'); } catch { return '?'; }
+  };
 
   log(`Opening unassigned items view for confirmation: ${reason}`);
+  const controllerBefore = controllerName();
+  let navigationMethod = 'none';
   try {
-    if (options.openUnassigned() !== true) options.clickFallback();
+    if (options.openUnassigned() === true) {
+      navigationMethod = 'controller';
+    } else {
+      const fallbackResult = options.clickFallback();
+      navigationMethod = fallbackResult === false ? 'unavailable' : 'text-fallback';
+    }
   } catch (error) {
+    navigationMethod = 'error';
     log(`Could not open unassigned view automatically: ${error?.message || error}`);
   }
   await options.waitLoadingEnd();
+  if (diagnostic) {
+    log(`Unassigned navigation (${reason}): method:${navigationMethod}; controller:${controllerBefore}->${controllerName()}`);
+  }
   for (let read = 1; read <= stableEmptyReads; read++) {
-    await options.refreshUnassigned();
+    const refreshResult = await options.refreshUnassigned();
     const items = options.getItems() || [];
+    if (diagnostic) {
+      const refreshState = refreshResult?.success === true
+        ? 'success'
+        : refreshResult?.cachedFallback
+          ? `cache-fallback:${refreshResult.cachedCount ?? '?'}`
+          : String(refreshResult?.error?.message || refreshResult?.status || 'unknown');
+      log(`Unassigned read (${reason}) ${read}/${stableEmptyReads}: items:${items.length}; refresh:${refreshState}; controller:${controllerName()}`);
+    }
     if (items.length) {
       log(`Unassigned confirmation (${reason}): ${items.length} item(s) still present`);
       return items;

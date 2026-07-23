@@ -66,6 +66,20 @@ describe('Unassigned view confirmation', () => {
     expect(current.logs.at(-1)).toBe('Unassigned confirmation (Daily Rare end): 2 item(s) still present');
   });
 
+  it('reports navigation, controller transition, and refresh state in diagnostic mode', async () => {
+    const current = harness({
+      diagnostic: true,
+      getControllerName: vi.fn()
+        .mockReturnValueOnce('UTStorePackViewController')
+        .mockReturnValue('UTStoreViewController'),
+      refreshUnassigned: vi.fn(async () => ({ success: true })),
+    });
+
+    await expect(confirmUnassignedView(current.options)).resolves.toEqual([]);
+    expect(current.logs).toContain('Unassigned navigation (Daily Rare end): method:controller; controller:UTStorePackViewController->UTStoreViewController');
+    expect(current.logs).toContain('Unassigned read (Daily Rare end) 1/1: items:0; refresh:success; controller:UTStoreViewController');
+  });
+
   it('logs navigation errors but still waits and refreshes the inventory', async () => {
     const current = harness({
       openUnassigned: vi.fn(() => { throw new Error('controller unavailable'); }),
