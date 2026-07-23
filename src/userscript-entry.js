@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.46
+// @version      0.5.47
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -134,6 +134,7 @@ import {
 import { openPackTransaction } from './pack/open-transaction.js';
 import {
   classifyOpenedItemRouting,
+  createOpenedItemRoutingBaseline,
   materializeOpenedPlayerDuplicates,
 } from './pack/opened-item-materialization.js';
 import { createPackInstanceQueue } from './pack/instance-queue.js';
@@ -247,7 +248,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.46',
+    version: '0.5.47',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1872,11 +1873,12 @@ function updateLoopControls() {
     return moved;
   }
 
-  function openedItemRoutingResult(items, reserveItem = null, details = {}) {
+  function openedItemRoutingResult(items, reserveItem = null, details = {}, routingBaseline = null) {
     return {
       ...classifyOpenedItemRouting({
         items,
         reserveItem,
+        routingBaseline,
         piles: {
           unassigned: getUnassignedItems(),
           club: getClubItems(),
@@ -1891,14 +1893,17 @@ function updateLoopControls() {
   async function confirmOpenedItemRouting(items, label, options = {}) {
     const attempts = Math.max(1, Math.min(8, Number(options.attempts || 4) || 4));
     const delayMs = Math.max(0, Number(options.delayMs ?? 500));
-    let routing = openedItemRoutingResult(items, options.reserveItem || null);
+    let routing = openedItemRoutingResult(items, options.reserveItem || null, {}, options.routingBaseline || null);
     for (let attempt = 1; attempt <= attempts && routing.pendingItems.length; attempt++) {
       await refreshUnassigned({ quiet: true });
       await refreshPileCacheByCandidates('storage', { quiet: true });
       await refreshPileCacheByCandidates('transfer', { quiet: true });
-      routing = openedItemRoutingResult(items, options.reserveItem || null);
+      routing = openedItemRoutingResult(items, options.reserveItem || null, {}, options.routingBaseline || null);
       if (!routing.pendingItems.length || attempt >= attempts) break;
       await sleep(delayMs);
+    }
+    for (const route of routing.aliasRoutes || []) {
+      log(`${label}: confirmed opened item via new ${route.destination.pile} entity ${Number(route.destination.item?.id || 0) || '?'} for response id:${Number(route.item?.id || 0) || '?'} def:${Number(route.item?.definitionId || 0) || '?'}`);
     }
     if (routing.pendingItems.length) {
       const ids = routing.pendingItems.map((item) => Number(item?.id || 0) || '?').join(', ');
@@ -1915,6 +1920,7 @@ function updateLoopControls() {
     const packAdapter = adapters.pack();
     const inventoryAdapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
     let currentPack = pack;
+    let routingBaseline = null;
     const retryCodes = options.retryCodes || (options.retryOn471 === true ? ['471'] : []);
     const receipt = await openPackTransaction({
       preOpenResolver: () => resolveRuntimeUnassigned(`opening ${purpose}`),
@@ -1928,6 +1934,12 @@ function updateLoopControls() {
       },
       packRef: (selectedPack) => ({ id: Number(selectedPack?.id || 0), name: packName(selectedPack) }),
       openTransport: async (selectedPack, { attempt }) => {
+        routingBaseline = createOpenedItemRoutingBaseline({
+          unassigned: getUnassignedItems(),
+          club: getClubItems(),
+          storage: getStorageItems(),
+          transfer: getTransferItems(),
+        });
         const name = packName(selectedPack);
         const attempts = retryCodes.length ? 2 : 1;
         log(`Opening pack: ${name} (#${selectedPack.id})${attempt > 1 ? ` retry ${attempt}/${attempts}` : ''}`);
@@ -1948,7 +1960,10 @@ function updateLoopControls() {
         assumeSpecialPlayers: options.assumeSpecialPlayers === true,
       }),
       onItemsOpenedError: (error) => log(`${purpose}: reward highlight failed: ${error?.message || error}`),
-      openedItemPolicy: options.openedItemPolicy,
+      openedItemPolicy: (openedItems, context) => options.openedItemPolicy(openedItems, {
+        ...context,
+        routingBaseline,
+      }),
       retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
       beforeRetry: async ({ code, pack: failedPack }) => {
         if (String(code) === '471') {
@@ -6141,7 +6156,7 @@ function updateLoopControls() {
   }
 
   function createMaterializeAndResolvePolicy(label, cleanupReason, cleanupOptions = {}) {
-    return createOpenedItemPolicy(async (openedItems) => {
+    return createOpenedItemPolicy(async (openedItems, context = {}) => {
       const settlement = await settleOpenedItems({
         attempts: 3,
         materialize: async () => {
@@ -6156,7 +6171,9 @@ function updateLoopControls() {
             beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label),
           },
         ),
-        confirmRouting: async () => confirmOpenedItemRouting(openedItems, label),
+        confirmRouting: async () => confirmOpenedItemRouting(openedItems, label, {
+          routingBaseline: context.routingBaseline || null,
+        }),
         onRetry: async ({ attempt, routing }) => {
           log(`${label}: ${routing.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
           await sleep(CFG.pauseMs);
@@ -6173,6 +6190,7 @@ function updateLoopControls() {
           blockedDestination: cleanup.plan?.blocked?.destination || null,
           blockedFree: cleanup.plan?.blocked?.free ?? null,
           blockedRequired: cleanup.plan?.blocked?.required ?? null,
+          resolvedAliasCount: routing.aliasRoutes?.length || 0,
         },
       };
     });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifyOpenedItemRouting,
+  createOpenedItemRoutingBaseline,
   materializeOpenedPlayerDuplicates,
 } from '../../src/pack/opened-item-materialization.js';
 
@@ -57,5 +58,55 @@ describe('opened item materialization', () => {
     });
     expect(result.reservedItems).toEqual([reserved]);
     expect(result.pendingItems).toEqual([pending]);
+  });
+
+  it('routes a response item through one matching destination entity that appeared after the pack opened', () => {
+    const opened = { id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false };
+    const existing = { id: 201, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false };
+    const landed = { id: 301, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false };
+    const routingBaseline = createOpenedItemRoutingBaseline({ transfer: [existing] });
+
+    const result = classifyOpenedItemRouting({
+      items: [opened],
+      piles: { transfer: [existing, landed] },
+      routingBaseline,
+    });
+
+    expect(result.pendingItems).toEqual([]);
+    expect(result.routedItems).toEqual([opened]);
+    expect(result.aliasRoutes).toEqual([{ item: opened, destination: { pile: 'transfer', item: landed } }]);
+  });
+
+  it('does not mistake a pre-open matching destination item for an opened item', () => {
+    const opened = { id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false };
+    const existing = { id: 201, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false };
+    const routingBaseline = createOpenedItemRoutingBaseline({ transfer: [existing] });
+
+    const result = classifyOpenedItemRouting({
+      items: [opened],
+      piles: { transfer: [existing] },
+      routingBaseline,
+    });
+
+    expect(result.pendingItems).toEqual([opened]);
+    expect(result.aliasRoutes).toEqual([]);
+  });
+
+  it('keeps an alias pending when multiple new destination entities could match it', () => {
+    const opened = { id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false };
+    const routingBaseline = createOpenedItemRoutingBaseline();
+    const result = classifyOpenedItemRouting({
+      items: [opened],
+      piles: {
+        transfer: [
+          { id: 301, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false },
+          { id: 302, definitionId: 501, type: 'player', rating: 84, rareflag: 1, untradeable: false },
+        ],
+      },
+      routingBaseline,
+    });
+
+    expect(result.pendingItems).toEqual([opened]);
+    expect(result.aliasRoutes).toEqual([]);
   });
 });

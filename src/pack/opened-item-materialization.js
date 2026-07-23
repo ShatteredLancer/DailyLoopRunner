@@ -10,6 +10,38 @@ function itemIds(items = []) {
   return new Set((items || []).map(itemId).filter(Boolean));
 }
 
+function itemRoutingSignature(item) {
+  const definition = definitionId(item);
+  if (!definition) return null;
+  const type = String(item?.type || item?._itemType || item?._type || 'unknown').toLowerCase();
+  const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
+  const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+  let untradeable = 'unknown';
+  try {
+    if (typeof item?.isUntradeable === 'function') untradeable = item.isUntradeable() ? 'yes' : 'no';
+  } catch {
+    // Some stale EA entities expose the method but throw until their data is hydrated.
+  }
+  if (untradeable === 'unknown' && item?.untradeable === true) untradeable = 'yes';
+  if (untradeable === 'unknown' && item?.untradeable === false) untradeable = 'no';
+  if (untradeable === 'unknown' && item?.untradeableCount !== undefined) {
+    untradeable = Number(item.untradeableCount || 0) > 0 ? 'yes' : 'no';
+  }
+  return `${type}:${definition}:${rating}:${rareflag}:${untradeable}`;
+}
+
+function destinationEntries(piles = {}) {
+  return ['club', 'storage', 'transfer'].flatMap((pile) =>
+    (piles[pile] || []).map((item) => ({ pile, item })),
+  );
+}
+
+export function createOpenedItemRoutingBaseline(piles = {}) {
+  return {
+    destinationIds: [...itemIds(destinationEntries(piles).map((entry) => entry.item))],
+  };
+}
+
 export function materializeOpenedPlayerDuplicates(options = {}) {
   const items = options.items || [];
   const clubItems = options.clubItems || [];
@@ -63,11 +95,8 @@ export function classifyOpenedItemRouting(options = {}) {
   const piles = options.piles || {};
   const reserveItem = options.reserveItem || (() => false);
   const unassignedIds = itemIds(piles.unassigned);
-  const destinationIds = itemIds([
-    ...(piles.club || []),
-    ...(piles.storage || []),
-    ...(piles.transfer || []),
-  ]);
+  const destinations = destinationEntries(piles);
+  const destinationIds = itemIds(destinations.map((entry) => entry.item));
   const reservedItems = [];
   const routedItems = [];
   const pendingItems = [];
@@ -84,5 +113,47 @@ export function classifyOpenedItemRouting(options = {}) {
     }
   }
 
-  return { reservedItems, routedItems, pendingItems };
+  const hasRoutingBaseline = Array.isArray(options.routingBaseline?.destinationIds);
+  const baselineIds = new Set(options.routingBaseline?.destinationIds || []);
+  const openedIds = itemIds(items);
+  const aliasesBySignature = new Map();
+  for (const entry of destinations) {
+    const id = itemId(entry.item);
+    if (!id || baselineIds.has(id) || openedIds.has(id)) continue;
+    const signature = itemRoutingSignature(entry.item);
+    if (!signature) continue;
+    const matches = aliasesBySignature.get(signature) || [];
+    matches.push(entry);
+    aliasesBySignature.set(signature, matches);
+  }
+
+  const pendingBySignature = new Map();
+  for (const item of pendingItems) {
+    const id = itemId(item);
+    if (!id || unassignedIds.has(id)) continue;
+    const signature = itemRoutingSignature(item);
+    if (!signature) continue;
+    const matches = pendingBySignature.get(signature) || [];
+    matches.push(item);
+    pendingBySignature.set(signature, matches);
+  }
+
+  const aliasRoutes = [];
+  if (hasRoutingBaseline) {
+    for (const [signature, pending] of pendingBySignature) {
+      const destinationsForSignature = aliasesBySignature.get(signature) || [];
+      // A fallback route is safe only when the pre-open baseline proves every
+      // newly observed destination entity belongs to this exact response group.
+      if (!destinationsForSignature.length || destinationsForSignature.length !== pending.length) continue;
+      pending.forEach((item, index) => aliasRoutes.push({ item, destination: destinationsForSignature[index] }));
+    }
+  }
+  const routedAliasItems = new Set(aliasRoutes.map((route) => route.item));
+
+  return {
+    reservedItems,
+    routedItems: [...routedItems, ...aliasRoutes.map((route) => route.item)],
+    pendingItems: pendingItems.filter((item) => !routedAliasItems.has(item)),
+    aliasRoutes,
+  };
 }

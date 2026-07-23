@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.46
+// @version      0.5.47
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -6598,6 +6598,34 @@
   function itemIds(items = []) {
     return new Set((items || []).map(itemId).filter(Boolean));
   }
+  function itemRoutingSignature(item) {
+    const definition = definitionId(item);
+    if (!definition) return null;
+    const type = String(item?.type || item?._itemType || item?._type || "unknown").toLowerCase();
+    const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
+    const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+    let untradeable = "unknown";
+    try {
+      if (typeof item?.isUntradeable === "function") untradeable = item.isUntradeable() ? "yes" : "no";
+    } catch {
+    }
+    if (untradeable === "unknown" && item?.untradeable === true) untradeable = "yes";
+    if (untradeable === "unknown" && item?.untradeable === false) untradeable = "no";
+    if (untradeable === "unknown" && item?.untradeableCount !== void 0) {
+      untradeable = Number(item.untradeableCount || 0) > 0 ? "yes" : "no";
+    }
+    return `${type}:${definition}:${rating}:${rareflag}:${untradeable}`;
+  }
+  function destinationEntries(piles = {}) {
+    return ["club", "storage", "transfer"].flatMap(
+      (pile) => (piles[pile] || []).map((item) => ({ pile, item }))
+    );
+  }
+  function createOpenedItemRoutingBaseline(piles = {}) {
+    return {
+      destinationIds: [...itemIds(destinationEntries(piles).map((entry) => entry.item))]
+    };
+  }
   function materializeOpenedPlayerDuplicates(options = {}) {
     const items = options.items || [];
     const clubItems = options.clubItems || [];
@@ -6646,11 +6674,8 @@
     const piles = options.piles || {};
     const reserveItem = options.reserveItem || (() => false);
     const unassignedIds = itemIds(piles.unassigned);
-    const destinationIds = itemIds([
-      ...piles.club || [],
-      ...piles.storage || [],
-      ...piles.transfer || []
-    ]);
+    const destinations = destinationEntries(piles);
+    const destinationIds = itemIds(destinations.map((entry) => entry.item));
     const reservedItems = [];
     const routedItems = [];
     const pendingItems = [];
@@ -6665,7 +6690,44 @@
         pendingItems.push(item);
       }
     }
-    return { reservedItems, routedItems, pendingItems };
+    const hasRoutingBaseline = Array.isArray(options.routingBaseline?.destinationIds);
+    const baselineIds = new Set(options.routingBaseline?.destinationIds || []);
+    const openedIds = itemIds(items);
+    const aliasesBySignature = /* @__PURE__ */ new Map();
+    for (const entry of destinations) {
+      const id = itemId(entry.item);
+      if (!id || baselineIds.has(id) || openedIds.has(id)) continue;
+      const signature = itemRoutingSignature(entry.item);
+      if (!signature) continue;
+      const matches = aliasesBySignature.get(signature) || [];
+      matches.push(entry);
+      aliasesBySignature.set(signature, matches);
+    }
+    const pendingBySignature = /* @__PURE__ */ new Map();
+    for (const item of pendingItems) {
+      const id = itemId(item);
+      if (!id || unassignedIds.has(id)) continue;
+      const signature = itemRoutingSignature(item);
+      if (!signature) continue;
+      const matches = pendingBySignature.get(signature) || [];
+      matches.push(item);
+      pendingBySignature.set(signature, matches);
+    }
+    const aliasRoutes = [];
+    if (hasRoutingBaseline) {
+      for (const [signature, pending] of pendingBySignature) {
+        const destinationsForSignature = aliasesBySignature.get(signature) || [];
+        if (!destinationsForSignature.length || destinationsForSignature.length !== pending.length) continue;
+        pending.forEach((item, index) => aliasRoutes.push({ item, destination: destinationsForSignature[index] }));
+      }
+    }
+    const routedAliasItems = new Set(aliasRoutes.map((route) => route.item));
+    return {
+      reservedItems,
+      routedItems: [...routedItems, ...aliasRoutes.map((route) => route.item)],
+      pendingItems: pendingItems.filter((item) => !routedAliasItems.has(item)),
+      aliasRoutes
+    };
   }
 
   // src/pack/instance-queue.js
@@ -10062,7 +10124,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.46",
+      version: "0.5.47",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -11508,11 +11570,12 @@
       }
       return moved;
     }
-    function openedItemRoutingResult(items, reserveItem = null, details = {}) {
+    function openedItemRoutingResult(items, reserveItem = null, details = {}, routingBaseline = null) {
       return {
         ...classifyOpenedItemRouting({
           items,
           reserveItem,
+          routingBaseline,
           piles: {
             unassigned: getUnassignedItems(),
             club: getClubItems(),
@@ -11526,14 +11589,17 @@
     async function confirmOpenedItemRouting(items, label, options = {}) {
       const attempts = Math.max(1, Math.min(8, Number(options.attempts || 4) || 4));
       const delayMs = Math.max(0, Number(options.delayMs ?? 500));
-      let routing = openedItemRoutingResult(items, options.reserveItem || null);
+      let routing = openedItemRoutingResult(items, options.reserveItem || null, {}, options.routingBaseline || null);
       for (let attempt = 1; attempt <= attempts && routing.pendingItems.length; attempt++) {
         await refreshUnassigned({ quiet: true });
         await refreshPileCacheByCandidates("storage", { quiet: true });
         await refreshPileCacheByCandidates("transfer", { quiet: true });
-        routing = openedItemRoutingResult(items, options.reserveItem || null);
+        routing = openedItemRoutingResult(items, options.reserveItem || null, {}, options.routingBaseline || null);
         if (!routing.pendingItems.length || attempt >= attempts) break;
         await sleep(delayMs);
+      }
+      for (const route of routing.aliasRoutes || []) {
+        log(`${label}: confirmed opened item via new ${route.destination.pile} entity ${Number(route.destination.item?.id || 0) || "?"} for response id:${Number(route.item?.id || 0) || "?"} def:${Number(route.item?.definitionId || 0) || "?"}`);
       }
       if (routing.pendingItems.length) {
         const ids = routing.pendingItems.map((item) => Number(item?.id || 0) || "?").join(", ");
@@ -11549,6 +11615,7 @@
       const packAdapter = adapters.pack();
       const inventoryAdapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
       let currentPack = pack;
+      let routingBaseline = null;
       const retryCodes = options.retryCodes || (options.retryOn471 === true ? ["471"] : []);
       const receipt = await openPackTransaction({
         preOpenResolver: () => resolveRuntimeUnassigned(`opening ${purpose}`),
@@ -11562,6 +11629,12 @@
         },
         packRef: (selectedPack) => ({ id: Number(selectedPack?.id || 0), name: packName(selectedPack) }),
         openTransport: async (selectedPack, { attempt }) => {
+          routingBaseline = createOpenedItemRoutingBaseline({
+            unassigned: getUnassignedItems(),
+            club: getClubItems(),
+            storage: getStorageItems(),
+            transfer: getTransferItems()
+          });
           const name = packName(selectedPack);
           const attempts = retryCodes.length ? 2 : 1;
           log(`Opening pack: ${name} (#${selectedPack.id})${attempt > 1 ? ` retry ${attempt}/${attempts}` : ""}`);
@@ -11582,7 +11655,10 @@
           assumeSpecialPlayers: options.assumeSpecialPlayers === true
         }),
         onItemsOpenedError: (error) => log(`${purpose}: reward highlight failed: ${error?.message || error}`),
-        openedItemPolicy: options.openedItemPolicy,
+        openedItemPolicy: (openedItems, context) => options.openedItemPolicy(openedItems, {
+          ...context,
+          routingBaseline
+        }),
         retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
         beforeRetry: async ({ code, pack: failedPack }) => {
           if (String(code) === "471") {
@@ -15296,7 +15372,7 @@
       ).length;
     }
     function createMaterializeAndResolvePolicy(label, cleanupReason, cleanupOptions = {}) {
-      return createOpenedItemPolicy(async (openedItems) => {
+      return createOpenedItemPolicy(async (openedItems, context = {}) => {
         const settlement = await settleOpenedItems({
           attempts: 3,
           materialize: async () => {
@@ -15311,7 +15387,9 @@
               beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label)
             }
           ),
-          confirmRouting: async () => confirmOpenedItemRouting(openedItems, label),
+          confirmRouting: async () => confirmOpenedItemRouting(openedItems, label, {
+            routingBaseline: context.routingBaseline || null
+          }),
           onRetry: async ({ attempt, routing: routing2 }) => {
             log(`${label}: ${routing2.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
             await sleep(CFG.pauseMs);
@@ -15327,7 +15405,8 @@
             settlementAttempts: settlement.attempts,
             blockedDestination: cleanup.plan?.blocked?.destination || null,
             blockedFree: cleanup.plan?.blocked?.free ?? null,
-            blockedRequired: cleanup.plan?.blocked?.required ?? null
+            blockedRequired: cleanup.plan?.blocked?.required ?? null,
+            resolvedAliasCount: routing.aliasRoutes?.length || 0
           }
         };
       });
