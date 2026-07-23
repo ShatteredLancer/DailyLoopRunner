@@ -42,7 +42,7 @@ describe('runInventoryExhaustionWorkflow', () => {
     });
     const runStage = vi.fn(async () => ({ status: 'insufficient', completions: 4 }));
     const result = await runInventoryExhaustionWorkflow({
-      stages: [{ id: 'fof', name: 'FOF Glory Hunters Crafting Upgrade' }],
+      stages: [{ id: 'fof', name: '5x 80+ Upgrade' }],
       runStage,
       finalize,
     });
@@ -53,7 +53,7 @@ describe('runInventoryExhaustionWorkflow', () => {
   it('does not finalize after a blocked stage', async () => {
     const finalize = vi.fn();
     const result = await runInventoryExhaustionWorkflow({
-      stages: [{ id: 'fof', name: 'FOF Glory Hunters Crafting Upgrade' }],
+      stages: [{ id: 'fof', name: '5x 80+ Upgrade' }],
       runStage: async () => ({ status: 'blocked', completions: 1, reason: 'unsafe selection' }),
       finalize,
     });

@@ -92,7 +92,7 @@ describe('loop configuration contracts', () => {
     });
   });
 
-  it('locks FOF Glory Hunters exhaustion materials and deferred reward opening', async () => {
+  it('locks 5x 80+ exhaustion materials and deferred reward opening', async () => {
     const { builtIn, external } = await loadDefinitions();
     for (const loop of [byId(builtIn, 'fof-glory-hunters-exhaustion'), byId(external, 'fof-glory-hunters-exhaustion')]) {
       expect(loop.strategy).toBe('inventoryExhaustion');
@@ -101,6 +101,8 @@ describe('loop configuration contracts', () => {
       expect(loop.stages).toHaveLength(1);
       expect(loop.stages[0]).toMatchObject({
         id: 'fof-glory-hunters',
+        name: '5x 80+ Upgrade',
+        sbcNames: ['5x 80+ Upgrade'],
         maxCompletions: 1000,
       });
       expect(loop.stages[0].requirements[0]).toMatchObject({
@@ -130,6 +132,7 @@ describe('loop configuration contracts', () => {
         expect.objectContaining({ tier: 'silver', count: 11, allowSpecial: false }),
         expect.objectContaining({ tier: 'gold', rarity: 'common', count: 9, maxRating: 81, protectHighGold: true, allowSpecial: false }),
       ]);
+      expect(loop.stages[2]).toMatchObject({ name: '5x 80+ Upgrade', sbcNames: ['5x 80+ Upgrade'] });
     }
   });
 

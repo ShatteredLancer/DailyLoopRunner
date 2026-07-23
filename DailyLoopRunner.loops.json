@@ -221,9 +221,9 @@
     },
     {
       "id": "fof-glory-hunters-crafting-upgrade",
-      "name": "FOF Glory Hunters Crafting Upgrade",
+      "name": "5x 80+ Upgrade",
       "sbcNames": [
-        "FOF Glory Hunters Crafting Upgrade"
+        "5x 80+ Upgrade"
       ],
       "requirements": [
         {
@@ -967,7 +967,7 @@
     },
     {
       "id": "inventory-fodder-exhaustion",
-      "name": "Bronze/Silver/FOF Glory Hunters Exhaustion Loop",
+      "name": "Bronze/Silver/5x 80+ Exhaustion Loop",
       "strategy": "inventoryExhaustion",
       "stages": [
         {
@@ -1036,9 +1036,9 @@
         },
         {
           "id": "fof-glory-hunters",
-          "name": "FOF Glory Hunters Crafting Upgrade",
+          "name": "5x 80+ Upgrade",
           "sbcNames": [
-            "FOF Glory Hunters Crafting Upgrade"
+            "5x 80+ Upgrade"
           ],
           "requirements": [
             {
@@ -1077,7 +1077,7 @@
     },
     {
       "id": "fof-glory-hunters-exhaustion",
-      "name": "FOF Glory Hunters Exhaustion Loop",
+      "name": "5x 80+ Exhaustion Loop",
       "strategy": "inventoryExhaustion",
       "openRewardPacksAtEnd": true,
       "rewardPackNames": [
@@ -1090,9 +1090,9 @@
       "stages": [
         {
           "id": "fof-glory-hunters",
-          "name": "FOF Glory Hunters Crafting Upgrade",
+          "name": "5x 80+ Upgrade",
           "sbcNames": [
-            "FOF Glory Hunters Crafting Upgrade"
+            "5x 80+ Upgrade"
           ],
           "requirements": [
             {
@@ -1439,9 +1439,9 @@
       },
       "craftingUpgrades": [
         {
-          "name": "FOF Glory Hunters Crafting Upgrade",
+          "name": "5x 80+ Upgrade",
           "sbcNames": [
-            "FOF Glory Hunters Crafting Upgrade"
+            "5x 80+ Upgrade"
           ],
           "requirements": [
             {

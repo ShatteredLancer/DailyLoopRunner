@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.58
+// @version      0.5.59
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -296,7 +296,7 @@
     },
     {
       id: "inventory-fodder-exhaustion",
-      name: "Bronze/Silver/FOF Glory Hunters Exhaustion Loop",
+      name: "Bronze/Silver/5x 80+ Exhaustion Loop",
       strategy: "inventoryExhaustion",
       openRewardPacksAtEnd: true,
       rewardPackNames: [
@@ -333,8 +333,8 @@
         },
         {
           id: "fof-glory-hunters",
-          name: "FOF Glory Hunters Crafting Upgrade",
-          sbcNames: ["FOF Glory Hunters Crafting Upgrade"],
+          name: "5x 80+ Upgrade",
+          sbcNames: ["5x 80+ Upgrade"],
           requirements: [
             {
               tier: "gold",
@@ -354,7 +354,7 @@
     },
     {
       id: "fof-glory-hunters-exhaustion",
-      name: "FOF Glory Hunters Exhaustion Loop",
+      name: "5x 80+ Exhaustion Loop",
       strategy: "inventoryExhaustion",
       openRewardPacksAtEnd: true,
       rewardPackNames: [
@@ -367,8 +367,8 @@
       stages: [
         {
           id: "fof-glory-hunters",
-          name: "FOF Glory Hunters Crafting Upgrade",
-          sbcNames: ["FOF Glory Hunters Crafting Upgrade"],
+          name: "5x 80+ Upgrade",
+          sbcNames: ["5x 80+ Upgrade"],
           requirements: [
             {
               tier: "gold",
@@ -540,8 +540,8 @@
       runtimeQuantity: { mode: "user", target: "rounds", default: 1, min: 1, max: 50, label: "Provision packs" },
       craftingUpgrades: [
         {
-          name: "FOF Glory Hunters Crafting Upgrade",
-          sbcNames: ["FOF Glory Hunters Crafting Upgrade"],
+          name: "5x 80+ Upgrade",
+          sbcNames: ["5x 80+ Upgrade"],
           requirements: [
             { tier: "gold", rarity: "common", count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
           ],
@@ -1106,8 +1106,8 @@
     }),
     recipe({
       id: "fof-glory-hunters-crafting-upgrade",
-      name: "FOF Glory Hunters Crafting Upgrade",
-      sbcNames: ["FOF Glory Hunters Crafting Upgrade"],
+      name: "5x 80+ Upgrade",
+      sbcNames: ["5x 80+ Upgrade"],
       requirements: [lowFodderRequirement({ tier: "gold", rarity: "common", count: 9, maxRating: 81, protectHighGold: true })]
     }),
     recipe({
@@ -10696,6 +10696,7 @@
       showMvpLoops: false,
       loopStack: [],
       logRenderer: null,
+      sbcLoadLogKeys: /* @__PURE__ */ new Set(),
       rewardAlertSettings: normalizeRewardAlertSettings()
     };
     function destroyRunner() {
@@ -10713,7 +10714,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.58",
+      version: "0.5.59",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -12749,6 +12750,11 @@
         `loadChallenge ${challenge.id}`
       );
       if (!load?.success) fail2(`Challenge load failed for ${set.name}`);
+      const sbcLoadKey = `${Number(set?.id || 0)}:${Number(challenge?.id || 0)}`;
+      if (!state.sbcLoadLogKeys.has(sbcLoadKey)) {
+        state.sbcLoadLogKeys.add(sbcLoadKey);
+        log(`SBC loaded: ${set.name} (Set #${set.id || "?"}, Challenge #${challenge.id || "?"})`);
+      }
       try {
         const localChallenge = set.getChallenge?.(challenge.id);
         if (localChallenge && !localChallenge.squad) localChallenge.update?.(challenge);
@@ -18135,6 +18141,7 @@
       }
       state.running = true;
       state.stopping = false;
+      state.sbcLoadLogKeys.clear();
       beginLoopRecapSession(loopDef);
       if (fsuReadiness?.state === "provisional") {
         log(`FSU Club cache is provisional (${fsuReadiness.cacheStatus}); selected Club players will be validated against EA before each SBC save`);

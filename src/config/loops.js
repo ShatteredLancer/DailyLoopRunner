@@ -224,7 +224,7 @@ export const LOOP_DEFS = [
   },
   {
     id: 'inventory-fodder-exhaustion',
-    name: 'Bronze/Silver/FOF Glory Hunters Exhaustion Loop',
+    name: 'Bronze/Silver/5x 80+ Exhaustion Loop',
     strategy: 'inventoryExhaustion',
     openRewardPacksAtEnd: true,
     rewardPackNames: [
@@ -261,8 +261,8 @@ export const LOOP_DEFS = [
       },
       {
         id: 'fof-glory-hunters',
-        name: 'FOF Glory Hunters Crafting Upgrade',
-        sbcNames: ['FOF Glory Hunters Crafting Upgrade'],
+        name: '5x 80+ Upgrade',
+        sbcNames: ['5x 80+ Upgrade'],
         requirements: [
           {
             tier: 'gold',
@@ -282,7 +282,7 @@ export const LOOP_DEFS = [
   },
   {
     id: 'fof-glory-hunters-exhaustion',
-    name: 'FOF Glory Hunters Exhaustion Loop',
+    name: '5x 80+ Exhaustion Loop',
     strategy: 'inventoryExhaustion',
     openRewardPacksAtEnd: true,
     rewardPackNames: [
@@ -295,8 +295,8 @@ export const LOOP_DEFS = [
     stages: [
       {
         id: 'fof-glory-hunters',
-        name: 'FOF Glory Hunters Crafting Upgrade',
-        sbcNames: ['FOF Glory Hunters Crafting Upgrade'],
+        name: '5x 80+ Upgrade',
+        sbcNames: ['5x 80+ Upgrade'],
         requirements: [
           {
             tier: 'gold',
@@ -468,8 +468,8 @@ export const LOOP_DEFS = [
     runtimeQuantity: { mode: 'user', target: 'rounds', default: 1, min: 1, max: 50, label: 'Provision packs' },
     craftingUpgrades: [
       {
-        name: 'FOF Glory Hunters Crafting Upgrade',
-        sbcNames: ['FOF Glory Hunters Crafting Upgrade'],
+        name: '5x 80+ Upgrade',
+        sbcNames: ['5x 80+ Upgrade'],
         requirements: [
           { tier: 'gold', rarity: 'common', count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
         ],

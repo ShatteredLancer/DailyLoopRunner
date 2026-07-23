@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.58`
+当前版本：`0.5.59`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -23,7 +23,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.58` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.59` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
 FSU 不再显示前台 Club loading 时，可能正在后台校验，也可能已进入快速缓存状态。Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 
@@ -226,20 +226,20 @@ Player Pick、普通 Loop 与 Batch Open 使用统一逐卡 recap renderer：每
 
 当前默认前置 Pick 和后续 crafting SBC 只是配置，不是 Workflow 写死的名称或人数。
 
-### Bronze/Silver/FOF Glory Hunters Exhaustion Loop
+### Bronze/Silver/5x 80+ Exhaustion Loop
 
-该 Loop 不打开来源包，按顺序用库存完成 `Bronze Upgrade -> Silver Upgrade -> FOF Glory Hunters Crafting Upgrade`。Bronze 每次提交后会立即打开其 Silver 奖励，Silver 每次提交后会立即打开其 Common Gold 奖励，使产出继续供给后续阶段；第三阶段以 9 张 81 分及以下 Common Gold 持续完成 FOF Glory Hunters，直到对应材料不足。
+该 Loop 不打开来源包，按顺序用库存完成 `Bronze Upgrade -> Silver Upgrade -> 5x 80+ Upgrade`。Bronze 每次提交后会立即打开其 Silver 奖励，Silver 每次提交后会立即打开其 Common Gold 奖励，使产出继续供给后续阶段；第三阶段以 9 张 81 分及以下 Common Gold 持续完成 `5x 80+ Upgrade`，直到对应材料不足。
 
 - Bronze 和 Silver 阶段只使用对应等级的普通卡，不使用特殊卡。
-- FOF 阶段严格使用 81 分及以下 Common Gold，不会混入 Rare Gold、特殊卡或受保护高分卡。
+- `5x 80+ Upgrade` 阶段严格使用 81 分及以下 Common Gold，不会混入 Rare Gold、特殊卡或受保护高分卡。
 - 选材顺序是 `Unassigned -> Storage -> Transfer -> Club`，继续遵守 FSU Only Untradeable、排除联赛、Evolution、Lock 和评分范围。
 - Bronze/Silver 奖励是本 Loop 后续阶段的必要输入，因此只在该组合 Loop 内强制逐包打开，不受 UI `Open reward packs` 控制；其它 Bronze/Silver Loop 不受影响。
-- FOF 的 `5x 80+ Rare Gold Players Pack` 始终保持延迟；仅当 UI `Open reward packs` 开启且全部阶段正常结束时才批量打开，blocked/stopped 后不会进入批量开包。
+- `5x 80+ Upgrade` 的 `5x 80+ Rare Gold Players Pack` 始终保持延迟；仅当 UI `Open reward packs` 开启且全部阶段正常结束时才批量打开，blocked/stopped 后不会进入批量开包。
 - 铜、银不足 11 张或 Common Gold 不足 9 张时正常结束对应阶段，不会强行使用其它类型材料。
 
-### FOF Glory Hunters Exhaustion Loop
+### 5x 80+ Exhaustion Loop
 
-该 Loop 使用统一库存选材和提交事务，以 9 张 81 分及以下 Common Gold 反复完成 `FOF Glory Hunters Crafting Upgrade`，直到不足一个完整安全阵容。
+该 Loop 使用统一库存选材和提交事务，以 9 张 81 分及以下 Common Gold 反复完成 `5x 80+ Upgrade`，直到不足一个完整安全阵容。
 
 - 选材严格为 Common Gold，不会使用 Rare Gold、特殊卡或受保护高分卡。
 - `Open reward packs` 关闭时，所有 `5x 80+ Rare Gold Players Pack` 奖励保留在 My Packs。

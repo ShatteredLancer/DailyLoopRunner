@@ -50,8 +50,8 @@
       "recovery": "Restart from existing Unassigned state, skip completed stages, and continue after a prior safe stop without unbounded inventory fallback."
     },
     "inventory-fodder-exhaustion": {
-      "normal": "Submit Bronze Upgrade and force-open its Silver rewards to feed the next stage, then do the same for Silver Upgrade and Common Gold rewards, then exhaust FOF Glory Hunters with nine safe common gold cards rated <=81; matching 5x 80+ rewards open at the end only when Open reward packs is enabled.",
-      "recovery": "Stop if a required Bronze/Silver reward cannot be opened or if selection/submission is unsafe; blocked or stopped runs do not enter the deferred FOF reward-opening phase."
+      "normal": "Submit Bronze Upgrade and force-open its Silver rewards to feed the next stage, then do the same for Silver Upgrade and Common Gold rewards, then exhaust 5x 80+ Upgrade with nine safe common gold cards rated <=81; matching 5x 80+ rewards open at the end only when Open reward packs is enabled.",
+      "recovery": "Stop if a required Bronze/Silver reward cannot be opened or if selection/submission is unsafe; blocked or stopped runs do not enter the deferred 5x 80+ reward-opening phase."
     },
     "2x84-fodder": {
       "normal": "Submit six low rare gold players and let the current Open reward packs option decide whether to open the reward.",
@@ -74,7 +74,7 @@
       "recovery": "Resume pending Pick or reserved duplicates, preserve partial challenges, and continue on a later round."
     },
     "fof-glory-hunters-exhaustion": {
-      "normal": "Repeat FOF Glory Hunters Crafting Upgrade with nine safe common gold cards rated <=81 until fewer than one complete squad remains; when Open reward packs is enabled, open all matching 5x 80+ rewards together after the stage.",
+      "normal": "Repeat 5x 80+ Upgrade with nine safe common gold cards rated <=81 until fewer than one complete squad remains; when Open reward packs is enabled, open all matching 5x 80+ rewards together after the stage.",
       "recovery": "Stop on unsafe selection or submission failure without entering the deferred reward-opening phase; otherwise use the shared pack transaction for the final batch."
     }
   }

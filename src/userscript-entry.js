@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.58
+// @version      0.5.59
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -246,6 +246,7 @@ const state = {
     showMvpLoops: false,
     loopStack: [],
     logRenderer: null,
+    sbcLoadLogKeys: new Set(),
     rewardAlertSettings: normalizeRewardAlertSettings(),
   };
 
@@ -265,7 +266,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.58',
+    version: '0.5.59',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -2528,6 +2529,11 @@ function updateLoopControls() {
       `loadChallenge ${challenge.id}`,
     );
     if (!load?.success) fail(`Challenge load failed for ${set.name}`);
+    const sbcLoadKey = `${Number(set?.id || 0)}:${Number(challenge?.id || 0)}`;
+    if (!state.sbcLoadLogKeys.has(sbcLoadKey)) {
+      state.sbcLoadLogKeys.add(sbcLoadKey);
+      log(`SBC loaded: ${set.name} (Set #${set.id || '?'}, Challenge #${challenge.id || '?'})`);
+    }
 
     try {
       const localChallenge = set.getChallenge?.(challenge.id);
@@ -8548,6 +8554,7 @@ function updateLoopControls() {
 
     state.running = true;
     state.stopping = false;
+    state.sbcLoadLogKeys.clear();
     beginLoopRecapSession(loopDef);
     if (fsuReadiness?.state === 'provisional') {
       log(`FSU Club cache is provisional (${fsuReadiness.cacheStatus}); selected Club players will be validated against EA before each SBC save`);

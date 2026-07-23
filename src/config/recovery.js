@@ -63,8 +63,8 @@ export const RECOVERY_RECIPES = Object.freeze([
   }),
   recipe({
     id: 'fof-glory-hunters-crafting-upgrade',
-    name: 'FOF Glory Hunters Crafting Upgrade',
-    sbcNames: ['FOF Glory Hunters Crafting Upgrade'],
+    name: '5x 80+ Upgrade',
+    sbcNames: ['5x 80+ Upgrade'],
     requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'common', count: 9, maxRating: 81, protectHighGold: true })],
   }),
   recipe({
