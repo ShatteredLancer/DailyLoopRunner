@@ -352,6 +352,7 @@ EA objects
 
 - `plan` 不写具体 SBC 或 Loop 名称。
 - Loop 专属保留通过 `reserveItem` 回调注入。
+- `supplyAndCraft` 的 primary piles 包含 Unassigned 时，符合当前 SBC requirements 的 duplicate signals 必须在 pre-selection cleanup 中保留，先交给当前阵容消费；不得先移动到 Storage，也不得在这些信号未参与 fallback 选材前继续开 shortage pack。
 - 容量 fail-safe 通过配置化 overflow resolver 注入。
 - action 或 resolver 报告 progress 后，Unassigned fingerprint 必须变化。
 - EA move/swap 返回 success 后 Repository 可能仍短暂保留旧 Unassigned 实体；必须有界重读并确认 fingerprint 变化，不能立即对同一实体规划第二次 move，也不能无限等待。

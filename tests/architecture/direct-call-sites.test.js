@@ -226,4 +226,11 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toMatch(/beforeStart:[\s\S]*?Batch Open preflight[\s\S]*?blockedPolicy:\s*['"]preserve['"][\s\S]*?enableRecovery:\s*true/);
     expect(source).not.toContain("resolveRuntimeUnassigned('Batch Open final cleanup')");
   });
+
+  it('reserves supply-and-craft Unassigned materials before pre-selection cleanup', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    expect(source).toContain("const reservePrimaryUnassigned = primaryPiles.includes('unassigned')");
+    expect(source).toMatch(/resolveRuntimeUnassigned\(`\$\{loopDef\.name\} pre-submit cleanup`, \{[\s\S]*?reserveItem: reservePrimaryUnassigned/);
+    expect(source).toContain('const preserveSupply = cleanup.status === \'preserved\';');
+  });
 });

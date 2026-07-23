@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.45
+// @version      0.5.46
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -10062,7 +10062,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.45",
+      version: "0.5.46",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -15413,17 +15413,21 @@
       }
       const primaryPiles = inventoryOnly ? loopDef.primaryPiles || loopDef.priorityPiles || ["unassigned", "storage", "transfer", "club"] : shortagePacks.length ? loopDef.primaryPiles || ["unassigned", "storage", "transfer"] : loopDef.priorityPiles || ["storage", "transfer", "club"];
       const fallbackPiles = loopDef.clubFallbackPiles || loopDef.priorityPiles || primaryPiles;
+      const reservePrimaryUnassigned = primaryPiles.includes("unassigned") ? (item) => isDuplicateForLoopRequirements(item, loopDef) : null;
       const result = await runSupplyAndCraftWorkflow({
         maxCompletions: Number(loopDef.maxCompletions || 7),
         stopPoint: () => stopPoint(),
         beforeIteration: async () => {
           if (dryRun) return { preserveSupply: false };
           if (loopDef.preSelectionCleanup === false) return { preserveSupply: false };
-          if (!shortagePacks.length) {
+          if (!shortagePacks.length && !reservePrimaryUnassigned) {
             await resolveRuntimeUnassigned(`${loopDef.name} pre-submit cleanup`);
             return { preserveSupply: false };
           }
-          const cleanup = await resolveRuntimeUnassigned(`${loopDef.name} pre-submit cleanup`, { blockedPolicy: "preserve" });
+          const cleanup = await resolveRuntimeUnassigned(`${loopDef.name} pre-submit cleanup`, {
+            blockedPolicy: "preserve",
+            reserveItem: reservePrimaryUnassigned
+          });
           const preserveSupply = cleanup.status === "preserved";
           if (preserveSupply) {
             const overflow = getUnassignedStorageOverflow();

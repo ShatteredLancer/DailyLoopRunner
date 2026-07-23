@@ -219,6 +219,7 @@ describe('loop configuration contracts', () => {
     ]);
     expect(loop.primaryPiles).toEqual(['unassigned', 'storage', 'transfer']);
     expect(loop.clubFallbackPiles).toEqual(['unassigned', 'storage', 'transfer', 'club']);
+    expect(loop.preSelectionCleanup).not.toBe(false);
   });
 
   it('locks protected low-gold crafting contracts', async () => {
