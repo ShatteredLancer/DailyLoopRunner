@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.47
+// @version      0.5.48
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -248,7 +248,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.47',
+    version: '0.5.48',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -3308,6 +3308,8 @@ function updateLoopControls() {
     const requireSubmitReady = options.requireSubmitReady !== false;
     const squad = await waitFor(() => ctrl()?._squad, 15000, 'SBC squad object');
     patchFsuLengthSafePlayerMetadata(`${label} before FSU fill`);
+    const fsuRepeatFillTexts = ['重复球员填充阵容', '重複球員填充陣容', 'Repeat player fill squad'];
+    const fsuOneClickFillTexts = ['一键完成', '一鍵完成', '一键填充', '一鍵填充', 'One-click fill'];
     // FSU can occasionally fail to fill after we clear the squad. Keep a local
     // snapshot so the existing safe-repair flow still has a squad to work with.
     const existingItems = getSquadItems(squad);
@@ -3319,13 +3321,13 @@ function updateLoopControls() {
       if (!clicked) log(`${label}: special requirement Add button not found; continuing with FSU fill`);
     }
 
-    if (clickButtonByText(['重复球员填充阵容', '重複球員填充陣容', 'Repeat player fill squad'])) {
+    if (clickButtonByText(fsuRepeatFillTexts)) {
       log('Clicked duplicate fill');
       await waitLoadingEnd();
       await sleep(CFG.pauseMs);
     }
 
-    if (clickButtonByText(['一键完成', '一鍵完成', '一键填充', '一鍵填充', 'One-click fill'])) {
+    if (clickButtonByText(fsuOneClickFillTexts)) {
       log('Clicked FSU one-click fill/complete');
       await waitAfterSbcFillAction(`${label} FSU one-click`, squad);
       await sleep(CFG.pauseMs);
@@ -3345,7 +3347,7 @@ function updateLoopControls() {
       await waitLoadingEnd();
     }
 
-    if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && clickButtonByText(['One-click fill'])) {
+    if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && clickButtonByText(fsuOneClickFillTexts)) {
       log('Retrying FSU one-click fill after no progress');
       await waitAfterSbcFillAction(`${label} FSU one-click retry`, squad);
       await sleep(CFG.pauseMs);
@@ -3367,6 +3369,9 @@ function updateLoopControls() {
     const filled = getFilledSquadSlots(squad);
     const submitReady = !!findSubmitButton();
     log(`${label} squad filled slots detected: ${filled}; submit ${submitReady ? 'ready' : 'not ready'}`);
+    if (!submitReady && filled === 0) {
+      log(`${label}: FSU did not place any players after the supported fill attempts; no squad was saved and no SBC was submitted. Check the FSU fill overlay and its lock/rarity/range settings.`);
+    }
     if (!submitReady && requireSubmitReady) fail(`${label} squad is not complete`);
     return { squad, filled, submitReady };
     } finally {
