@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.53
+// @version      0.5.56
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -6120,15 +6120,15 @@
   var DEFAULT_FOREGROUND = "#F4F6F8";
   var DEFAULT_MUTED = "#AAB4C2";
   var RECAP_TIER_COLORS = Object.freeze({
-    bronze: Object.freeze({ label: "Bronze", accent: "#B7793E" }),
-    silver: Object.freeze({ label: "Silver", accent: "#AEB7C2" }),
-    commonGold: Object.freeze({ label: "Common Gold", accent: "#A88638" }),
-    rareGoldLow: Object.freeze({ label: "Rare Gold 85-", accent: "#D6AA35" }),
-    rareGoldMid: Object.freeze({ label: "Rare Gold 86-88", accent: "#F0C34E" }),
-    rareGoldHigh: Object.freeze({ label: "Rare Gold 89+", accent: "#F3D98B" }),
-    specialLow: Object.freeze({ label: "Special 94-", accent: "#B45BD2" }),
-    specialMid: Object.freeze({ label: "Special 95-97", accent: "#2FC6C4" }),
-    specialHigh: Object.freeze({ label: "Special 98-99", accent: "#8E7CFF" }),
+    bronze: Object.freeze({ label: "Bronze", accent: "#B7793E", background: "#45281C" }),
+    silver: Object.freeze({ label: "Silver", accent: "#AEB7C2", background: "#46515F" }),
+    commonGold: Object.freeze({ label: "Common Gold", accent: "#A88638", background: "#302B22" }),
+    rareGoldLow: Object.freeze({ label: "Rare Gold 85-", accent: "#D6AA35", background: "#493B15" }),
+    rareGoldMid: Object.freeze({ label: "Rare Gold 86-88", accent: "#F0C34E", background: "#604A12" }),
+    rareGoldHigh: Object.freeze({ label: "Rare Gold 89+", accent: "#F3D98B", background: "#5F563A" }),
+    specialLow: Object.freeze({ label: "Special 94-", accent: "#8E7CFF", background: "#324A7A" }),
+    specialMid: Object.freeze({ label: "Special 95-97", accent: "#2FC6C4", background: "#153F42" }),
+    specialHigh: Object.freeze({ label: "Special 98-99", accent: "#B45BD2", background: "#421F39" }),
     unknown: Object.freeze({ label: "Player", accent: "#64748B" })
   });
   function clampByte(value) {
@@ -6177,6 +6177,9 @@
     if (!front || !back) return BASE_BACKGROUND;
     return rgbToHex(...front.map((value, index) => value * weight + back[index] * (1 - weight)));
   }
+  function contrastForeground(background) {
+    return recapContrastRatio(background, "#FFFFFF") >= recapContrastRatio(background, "#111318") ? "#FFFFFF" : "#111318";
+  }
   function localTierKey(card = {}) {
     const rating = Number(card.rating || 0);
     if (card.special === true) {
@@ -6198,7 +6201,7 @@
   function localTheme(card) {
     const key = localTierKey(card);
     const tier = RECAP_TIER_COLORS[key];
-    const background = mixColors(tier.accent);
+    const background = tier.background || mixColors(tier.accent);
     return Object.freeze({
       key,
       label: tier.label,
@@ -6207,7 +6210,8 @@
       background,
       foreground: DEFAULT_FOREGROUND,
       muted: DEFAULT_MUTED,
-      rating: recapContrastRatio(background, tier.accent) >= 4.5 ? tier.accent : DEFAULT_FOREGROUND
+      ratingBackground: tier.accent,
+      rating: contrastForeground(tier.accent)
     });
   }
   function recapCardTypeLabel(card = {}, theme = null) {
@@ -6235,7 +6239,8 @@
       background,
       foreground,
       muted: foreground,
-      rating: foreground
+      ratingBackground: accent,
+      rating: contrastForeground(accent)
     });
   }
   function createRecapModel(input = {}) {
@@ -9566,10 +9571,17 @@
     const rating = dom.create("span");
     rating.textContent = String(Number(row.rating || 0));
     applyStyles2(rating, {
-      minWidth: "30px",
-      color: theme.rating || theme.accent || "#F4F6F8",
+      minWidth: "34px",
+      padding: "2px 5px",
+      boxSizing: "border-box",
+      textAlign: "center",
+      lineHeight: "18px",
+      color: theme.rating || "#111318",
+      background: theme.ratingBackground || theme.accent || "#64748B",
+      borderRadius: "2px",
       fontWeight: "700",
-      fontSize: "14px"
+      fontSize: "14px",
+      flex: "0 0 auto"
     });
     const identity = dom.create("span");
     applyStyles2(identity, {
@@ -10597,7 +10609,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.53",
+      version: "0.5.56",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),

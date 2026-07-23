@@ -51,7 +51,9 @@ function renderCardRow(dom, row, formatPrice) {
   const rating = dom.create('span');
   rating.textContent = String(Number(row.rating || 0));
   applyStyles(rating, {
-    minWidth: '30px', color: theme.rating || theme.accent || '#F4F6F8', fontWeight: '700', fontSize: '14px',
+    minWidth: '34px', padding: '2px 5px', boxSizing: 'border-box', textAlign: 'center', lineHeight: '18px',
+    color: theme.rating || '#111318', background: theme.ratingBackground || theme.accent || '#64748B',
+    borderRadius: '2px', fontWeight: '700', fontSize: '14px', flex: '0 0 auto',
   });
   const identity = dom.create('span');
   applyStyles(identity, {

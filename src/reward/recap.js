@@ -5,15 +5,15 @@ const DEFAULT_FOREGROUND = '#F4F6F8';
 const DEFAULT_MUTED = '#AAB4C2';
 
 export const RECAP_TIER_COLORS = Object.freeze({
-  bronze: Object.freeze({ label: 'Bronze', accent: '#B7793E' }),
-  silver: Object.freeze({ label: 'Silver', accent: '#AEB7C2' }),
-  commonGold: Object.freeze({ label: 'Common Gold', accent: '#A88638' }),
-  rareGoldLow: Object.freeze({ label: 'Rare Gold 85-', accent: '#D6AA35' }),
-  rareGoldMid: Object.freeze({ label: 'Rare Gold 86-88', accent: '#F0C34E' }),
-  rareGoldHigh: Object.freeze({ label: 'Rare Gold 89+', accent: '#F3D98B' }),
-  specialLow: Object.freeze({ label: 'Special 94-', accent: '#B45BD2' }),
-  specialMid: Object.freeze({ label: 'Special 95-97', accent: '#2FC6C4' }),
-  specialHigh: Object.freeze({ label: 'Special 98-99', accent: '#8E7CFF' }),
+  bronze: Object.freeze({ label: 'Bronze', accent: '#B7793E', background: '#45281C' }),
+  silver: Object.freeze({ label: 'Silver', accent: '#AEB7C2', background: '#46515F' }),
+  commonGold: Object.freeze({ label: 'Common Gold', accent: '#A88638', background: '#302B22' }),
+  rareGoldLow: Object.freeze({ label: 'Rare Gold 85-', accent: '#D6AA35', background: '#493B15' }),
+  rareGoldMid: Object.freeze({ label: 'Rare Gold 86-88', accent: '#F0C34E', background: '#604A12' }),
+  rareGoldHigh: Object.freeze({ label: 'Rare Gold 89+', accent: '#F3D98B', background: '#5F563A' }),
+  specialLow: Object.freeze({ label: 'Special 94-', accent: '#8E7CFF', background: '#324A7A' }),
+  specialMid: Object.freeze({ label: 'Special 95-97', accent: '#2FC6C4', background: '#153F42' }),
+  specialHigh: Object.freeze({ label: 'Special 98-99', accent: '#B45BD2', background: '#421F39' }),
   unknown: Object.freeze({ label: 'Player', accent: '#64748B' }),
 });
 
@@ -70,6 +70,12 @@ function mixColors(foreground, background = BASE_BACKGROUND, weight = 0.18) {
   return rgbToHex(...front.map((value, index) => value * weight + back[index] * (1 - weight)));
 }
 
+function contrastForeground(background) {
+  return recapContrastRatio(background, '#FFFFFF') >= recapContrastRatio(background, '#111318')
+    ? '#FFFFFF'
+    : '#111318';
+}
+
 function localTierKey(card = {}) {
   const rating = Number(card.rating || 0);
   if (card.special === true) {
@@ -92,7 +98,7 @@ function localTierKey(card = {}) {
 function localTheme(card) {
   const key = localTierKey(card);
   const tier = RECAP_TIER_COLORS[key];
-  const background = mixColors(tier.accent);
+  const background = tier.background || mixColors(tier.accent);
   return Object.freeze({
     key,
     label: tier.label,
@@ -101,7 +107,8 @@ function localTheme(card) {
     background,
     foreground: DEFAULT_FOREGROUND,
     muted: DEFAULT_MUTED,
-    rating: recapContrastRatio(background, tier.accent) >= 4.5 ? tier.accent : DEFAULT_FOREGROUND,
+    ratingBackground: tier.accent,
+    rating: contrastForeground(tier.accent),
   });
 }
 
@@ -135,7 +142,8 @@ export function resolveRecapCardTheme(card = {}, nativeTheme = null) {
     background,
     foreground,
     muted: foreground,
-    rating: foreground,
+    ratingBackground: accent,
+    rating: contrastForeground(accent),
   });
 }
 

@@ -37,6 +37,8 @@ describe('Batch Open recap UI', () => {
     expect(celebrate).toHaveBeenCalled();
     ui.created.find((element) => element.textContent === 'Next').click();
     expect(ui.created.find((element) => element.textContent === 'Page 2/2 | 21-23 of 23')).toBeTruthy();
+    expect(ui.created.find((element) => element.textContent === '74').style.background).toBe('#AEB7C2');
+    expect(ui.created.find((element) => element.textContent === '63').style.background).toBe('#B7793E');
     ui.created.find((element) => element.textContent === 'Close').click();
     await expect(promise).resolves.toBe(true);
   });

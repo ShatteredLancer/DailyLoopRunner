@@ -25,20 +25,21 @@ describe('shared recap model and tier themes', () => {
 
   it('uses the fixed product tier colors without overlapping high rare gold and top special', () => {
     const samples = [
-      [{ rating: 63, tier: 'bronze' }, 'bronze'],
-      [{ rating: 74, tier: 'silver' }, 'silver'],
-      [{ rating: 84, tier: 'gold', rare: false }, 'commonGold'],
-      [{ rating: 85, tier: 'gold', rare: true }, 'rareGoldLow'],
-      [{ rating: 86, tier: 'gold', rare: true }, 'rareGoldMid'],
-      [{ rating: 89, tier: 'gold', rare: true }, 'rareGoldHigh'],
-      [{ rating: 94, special: true }, 'specialLow'],
-      [{ rating: 95, special: true }, 'specialMid'],
-      [{ rating: 98, special: true }, 'specialHigh'],
+      [{ rating: 63, tier: 'bronze' }, 'bronze', '#45281C'],
+      [{ rating: 74, tier: 'silver' }, 'silver', '#46515F'],
+      [{ rating: 84, tier: 'gold', rare: false }, 'commonGold', '#302B22'],
+      [{ rating: 85, tier: 'gold', rare: true }, 'rareGoldLow', '#493B15'],
+      [{ rating: 86, tier: 'gold', rare: true }, 'rareGoldMid', '#604A12'],
+      [{ rating: 89, tier: 'gold', rare: true }, 'rareGoldHigh', '#5F563A'],
+      [{ rating: 94, special: true }, 'specialLow', '#324A7A'],
+      [{ rating: 95, special: true }, 'specialMid', '#153F42'],
+      [{ rating: 98, special: true }, 'specialHigh', '#421F39'],
     ];
-    for (const [card, key] of samples) {
+    for (const [card, key, background] of samples) {
       const theme = resolveRecapCardTheme(card);
-      expect(theme).toMatchObject({ key, accent: RECAP_TIER_COLORS[key].accent });
-      expect(recapContrastRatio(theme.background, theme.rating)).toBeGreaterThanOrEqual(4.5);
+      expect(theme).toMatchObject({ key, accent: RECAP_TIER_COLORS[key].accent, background });
+      expect(recapContrastRatio(theme.background, theme.foreground)).toBeGreaterThanOrEqual(4.5);
+      expect(recapContrastRatio(theme.ratingBackground, theme.rating)).toBeGreaterThanOrEqual(4.5);
     }
     expect(RECAP_TIER_COLORS.rareGoldHigh.accent).not.toBe(RECAP_TIER_COLORS.specialHigh.accent);
     expect(recapCardTypeLabel({ rating: 74, tier: 'silver', rare: true })).toBe('Rare Silver');
@@ -59,7 +60,7 @@ describe('shared recap model and tier themes', () => {
 
   it('keeps Preview theme resolution local when no native resolver is supplied', () => {
     expect(resolveRecapCardTheme({ rating: 99, special: true })).toMatchObject({
-      source: 'local', key: 'specialHigh', accent: '#8E7CFF',
+      source: 'local', key: 'specialHigh', accent: '#B45BD2',
     });
   });
 });
