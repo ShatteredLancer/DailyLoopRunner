@@ -30,6 +30,15 @@ function itemRoutingSignature(item) {
   return `${type}:${definition}:${rating}:${rareflag}:${untradeable}`;
 }
 
+function itemStaticRoutingSignature(item) {
+  const definition = definitionId(item);
+  if (!definition) return null;
+  const type = String(item?.type || item?._itemType || item?._type || 'unknown').toLowerCase();
+  const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
+  const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+  return `${type}:${definition}:${rating}:${rareflag}`;
+}
+
 function destinationEntries(piles = {}) {
   return ['club', 'storage', 'transfer'].flatMap((pile) =>
     (piles[pile] || []).map((item) => ({ pile, item })),
@@ -39,7 +48,49 @@ function destinationEntries(piles = {}) {
 export function createOpenedItemRoutingBaseline(piles = {}) {
   return {
     destinationIds: [...itemIds(destinationEntries(piles).map((entry) => entry.item))],
+    unassignedIds: [...itemIds(piles.unassigned)],
   };
+}
+
+export function matchOpenedItemsToNewPileAliases(options = {}) {
+  const items = options.items || [];
+  const pileItems = options.pileItems || [];
+  const baselineIds = new Set(options.baselineIds || []);
+  const currentPileIds = itemIds(pileItems);
+  const openedIds = itemIds(items);
+  const sourcesBySignature = new Map();
+  const aliasesBySignature = new Map();
+
+  for (const item of items) {
+    const id = itemId(item);
+    if (!id || currentPileIds.has(id)) continue;
+    const signature = itemStaticRoutingSignature(item);
+    if (!signature) continue;
+    const matches = sourcesBySignature.get(signature) || [];
+    matches.push(item);
+    sourcesBySignature.set(signature, matches);
+  }
+  for (const item of pileItems) {
+    const id = itemId(item);
+    if (!id || baselineIds.has(id) || openedIds.has(id)) continue;
+    const signature = itemStaticRoutingSignature(item);
+    if (!signature) continue;
+    const matches = aliasesBySignature.get(signature) || [];
+    matches.push(item);
+    aliasesBySignature.set(signature, matches);
+  }
+
+  const aliases = [];
+  for (const [signature, sources] of sourcesBySignature) {
+    const candidates = aliasesBySignature.get(signature) || [];
+    // The pre-open baseline and a one-to-one response group make this safe even
+    // when EA replaces the response entity id while materializing Unassigned.
+    if (!candidates.length || candidates.length !== sources.length) continue;
+    const orderedSources = [...sources].sort((a, b) => itemId(a) - itemId(b));
+    const orderedCandidates = [...candidates].sort((a, b) => itemId(a) - itemId(b));
+    orderedSources.forEach((item, index) => aliases.push({ item, alias: orderedCandidates[index] }));
+  }
+  return aliases;
 }
 
 export function materializeOpenedPlayerDuplicates(options = {}) {

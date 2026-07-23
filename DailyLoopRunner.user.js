@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.49
+// @version      0.5.50
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -6616,6 +6616,14 @@
     }
     return `${type}:${definition}:${rating}:${rareflag}:${untradeable}`;
   }
+  function itemStaticRoutingSignature(item) {
+    const definition = definitionId(item);
+    if (!definition) return null;
+    const type = String(item?.type || item?._itemType || item?._type || "unknown").toLowerCase();
+    const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
+    const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+    return `${type}:${definition}:${rating}:${rareflag}`;
+  }
   function destinationEntries(piles = {}) {
     return ["club", "storage", "transfer"].flatMap(
       (pile) => (piles[pile] || []).map((item) => ({ pile, item }))
@@ -6623,8 +6631,45 @@
   }
   function createOpenedItemRoutingBaseline(piles = {}) {
     return {
-      destinationIds: [...itemIds(destinationEntries(piles).map((entry) => entry.item))]
+      destinationIds: [...itemIds(destinationEntries(piles).map((entry) => entry.item))],
+      unassignedIds: [...itemIds(piles.unassigned)]
     };
+  }
+  function matchOpenedItemsToNewPileAliases(options = {}) {
+    const items = options.items || [];
+    const pileItems = options.pileItems || [];
+    const baselineIds = new Set(options.baselineIds || []);
+    const currentPileIds = itemIds(pileItems);
+    const openedIds = itemIds(items);
+    const sourcesBySignature = /* @__PURE__ */ new Map();
+    const aliasesBySignature = /* @__PURE__ */ new Map();
+    for (const item of items) {
+      const id = itemId(item);
+      if (!id || currentPileIds.has(id)) continue;
+      const signature = itemStaticRoutingSignature(item);
+      if (!signature) continue;
+      const matches = sourcesBySignature.get(signature) || [];
+      matches.push(item);
+      sourcesBySignature.set(signature, matches);
+    }
+    for (const item of pileItems) {
+      const id = itemId(item);
+      if (!id || baselineIds.has(id) || openedIds.has(id)) continue;
+      const signature = itemStaticRoutingSignature(item);
+      if (!signature) continue;
+      const matches = aliasesBySignature.get(signature) || [];
+      matches.push(item);
+      aliasesBySignature.set(signature, matches);
+    }
+    const aliases = [];
+    for (const [signature, sources] of sourcesBySignature) {
+      const candidates = aliasesBySignature.get(signature) || [];
+      if (!candidates.length || candidates.length !== sources.length) continue;
+      const orderedSources = [...sources].sort((a, b) => itemId(a) - itemId(b));
+      const orderedCandidates = [...candidates].sort((a, b) => itemId(a) - itemId(b));
+      orderedSources.forEach((item, index) => aliases.push({ item, alias: orderedCandidates[index] }));
+    }
+    return aliases;
   }
   function materializeOpenedPlayerDuplicates(options = {}) {
     const items = options.items || [];
@@ -10124,7 +10169,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.49",
+      version: "0.5.50",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -11532,12 +11577,13 @@
       }
       return result;
     }
-    function restoreOpenedUnassignedDuplicateMetadata(items, label = "opened reward pack") {
+    function restoreOpenedUnassignedDuplicateMetadata(items, label = "opened reward pack", options = {}) {
+      const unassignedItems = getUnassignedItems();
       const responseById = new Map((items || []).map((item) => [Number(item?.id || 0), item]).filter(([id]) => id));
       let restored = 0;
-      for (const item of getUnassignedItems()) {
-        const responseItem = responseById.get(Number(item?.id || 0));
-        if (!responseItem) continue;
+      let remapped = 0;
+      const restore = (item, responseItem) => {
+        if (!responseItem) return;
         const clubDuplicate = findClubDuplicate2(item) || findClubDuplicate2(responseItem);
         const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
         if (duplicateId && !Number(item?.duplicateId || 0)) {
@@ -11546,8 +11592,26 @@
           restored++;
         }
         eaInventoryAdapter().preparePurchasedItem(item);
+      };
+      for (const item of unassignedItems) {
+        const responseItem = responseById.get(Number(item?.id || 0));
+        restore(item, responseItem);
       }
-      if (restored) log(`${label}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)`);
+      const baselineUnassignedIds = options.routingBaseline?.unassignedIds;
+      const aliases = Array.isArray(baselineUnassignedIds) ? matchOpenedItemsToNewPileAliases({
+        items: (items || []).filter((item) => isDuplicate(item)),
+        pileItems: unassignedItems,
+        baselineIds: baselineUnassignedIds
+      }) : [];
+      for (const { item: responseItem, alias } of aliases) {
+        if (Number(alias?.id || 0) === Number(responseItem?.id || 0)) continue;
+        const before = restored;
+        restore(alias, responseItem);
+        if (restored > before) remapped++;
+      }
+      if (restored) {
+        log(`${label}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)${remapped ? ` (${remapped} remapped response id(s))` : ""}`);
+      }
       return restored;
     }
     async function materializeOpenedPlayerRewards(items, label = "opened reward pack") {
@@ -15412,7 +15476,9 @@
             attempt === 1 ? cleanupReason : `${cleanupReason} delayed response retry ${attempt}/3`,
             {
               ...cleanupOptions,
-              beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label)
+              beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
+                routingBaseline: context.routingBaseline || null
+              })
             }
           ),
           confirmRouting: async () => confirmOpenedItemRouting(openedItems, label, {

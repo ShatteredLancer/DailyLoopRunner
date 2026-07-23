@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyOpenedItemRouting,
   createOpenedItemRoutingBaseline,
+  matchOpenedItemsToNewPileAliases,
   materializeOpenedPlayerDuplicates,
 } from '../../src/pack/opened-item-materialization.js';
 
@@ -108,5 +109,37 @@ describe('opened item materialization', () => {
 
     expect(result.pendingItems).toEqual([opened]);
     expect(result.aliasRoutes).toEqual([]);
+  });
+
+  it('matches a complete response group to new Unassigned aliases after EA remaps ids', () => {
+    const opened = [
+      { id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1 },
+      { id: 102, definitionId: 502, type: 'player', rating: 85, rareflag: 1 },
+    ];
+    const existing = { id: 201, definitionId: 501, type: 'player', rating: 84, rareflag: 1 };
+    const aliases = [
+      { id: 301, definitionId: 501, type: 'player', rating: 84, rareflag: 1 },
+      { id: 302, definitionId: 502, type: 'player', rating: 85, rareflag: 1 },
+    ];
+    const baseline = createOpenedItemRoutingBaseline({ unassigned: [existing] });
+
+    expect(matchOpenedItemsToNewPileAliases({
+      items: opened,
+      pileItems: [existing, ...aliases],
+      baselineIds: baseline.unassignedIds,
+    })).toEqual([
+      { item: opened[0], alias: aliases[0] },
+      { item: opened[1], alias: aliases[1] },
+    ]);
+  });
+
+  it('keeps remapped Unassigned entities unmatched when the response group is not one-to-one', () => {
+    const opened = [{ id: 101, definitionId: 501, type: 'player', rating: 84, rareflag: 1 }];
+    const aliases = [
+      { id: 301, definitionId: 501, type: 'player', rating: 84, rareflag: 1 },
+      { id: 302, definitionId: 501, type: 'player', rating: 84, rareflag: 1 },
+    ];
+
+    expect(matchOpenedItemsToNewPileAliases({ items: opened, pileItems: aliases, baselineIds: [] })).toEqual([]);
   });
 });

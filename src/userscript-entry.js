@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.49
+// @version      0.5.50
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -135,6 +135,7 @@ import { openPackTransaction } from './pack/open-transaction.js';
 import {
   classifyOpenedItemRouting,
   createOpenedItemRoutingBaseline,
+  matchOpenedItemsToNewPileAliases,
   materializeOpenedPlayerDuplicates,
 } from './pack/opened-item-materialization.js';
 import { createPackInstanceQueue } from './pack/instance-queue.js';
@@ -248,7 +249,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.49',
+    version: '0.5.50',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1825,14 +1826,15 @@ function updateLoopControls() {
     return result;
   }
 
-  function restoreOpenedUnassignedDuplicateMetadata(items, label = 'opened reward pack') {
+  function restoreOpenedUnassignedDuplicateMetadata(items, label = 'opened reward pack', options = {}) {
+    const unassignedItems = getUnassignedItems();
     const responseById = new Map((items || [])
       .map((item) => [Number(item?.id || 0), item])
       .filter(([id]) => id));
     let restored = 0;
-    for (const item of getUnassignedItems()) {
-      const responseItem = responseById.get(Number(item?.id || 0));
-      if (!responseItem) continue;
+    let remapped = 0;
+    const restore = (item, responseItem) => {
+      if (!responseItem) return;
       const clubDuplicate = findClubDuplicate(item) || findClubDuplicate(responseItem);
       const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
       if (duplicateId && !Number(item?.duplicateId || 0)) {
@@ -1841,8 +1843,28 @@ function updateLoopControls() {
         restored++;
       }
       eaInventoryAdapter().preparePurchasedItem(item);
+    };
+    for (const item of unassignedItems) {
+      const responseItem = responseById.get(Number(item?.id || 0));
+      restore(item, responseItem);
     }
-    if (restored) log(`${label}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)`);
+    const baselineUnassignedIds = options.routingBaseline?.unassignedIds;
+    const aliases = Array.isArray(baselineUnassignedIds)
+      ? matchOpenedItemsToNewPileAliases({
+          items: (items || []).filter((item) => isDuplicate(item)),
+          pileItems: unassignedItems,
+          baselineIds: baselineUnassignedIds,
+        })
+      : [];
+    for (const { item: responseItem, alias } of aliases) {
+      if (Number(alias?.id || 0) === Number(responseItem?.id || 0)) continue;
+      const before = restored;
+      restore(alias, responseItem);
+      if (restored > before) remapped++;
+    }
+    if (restored) {
+      log(`${label}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)${remapped ? ` (${remapped} remapped response id(s))` : ''}`);
+    }
     return restored;
   }
 
@@ -6197,7 +6219,9 @@ function updateLoopControls() {
           attempt === 1 ? cleanupReason : `${cleanupReason} delayed response retry ${attempt}/3`,
           {
             ...cleanupOptions,
-            beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label),
+            beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
+              routingBaseline: context.routingBaseline || null,
+            }),
           },
         ),
         confirmRouting: async () => confirmOpenedItemRouting(openedItems, label, {
