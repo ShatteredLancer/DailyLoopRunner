@@ -18,6 +18,7 @@ describe('main panel view template', () => {
       'bronze-loop-collapse',
       'bronze-loop-latest',
       'bronze-loop-options',
+      'bronze-loop-options-scroll',
       'bronze-loop-log',
     ]) {
       expect(html.match(new RegExp(`id="${id}"`, 'g')) || [], id).toHaveLength(1);
@@ -70,6 +71,8 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-options { display: none;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.options-open #bronze-loop-options { display: flex;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.options-open #bronze-loop-latest { display: none; }');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-options-scroll { flex: 1 1 auto;');
+    expect(MAIN_PANEL_STYLE).toContain('overflow-y: auto;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.icon-only .panel-body,');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.startup-hidden {');
     expect(MAIN_PANEL_STYLE).toContain('visibility: hidden;');
@@ -78,8 +81,8 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('overflow-wrap: anywhere;');
     expect(MAIN_PANEL_STYLE).toContain('overflow-y: auto;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-log {');
-    expect(MAIN_PANEL_STYLE).toContain('flex: 1 1 64px;');
-    expect(MAIN_PANEL_STYLE).toContain('min-height: 0;');
+    expect(MAIN_PANEL_STYLE).toContain('flex: 0 1 110px;');
+    expect(MAIN_PANEL_STYLE).toContain('min-height: 64px;');
     expect(MAIN_PANEL_STYLE).toContain('scrollbar-gutter: stable;');
     expect(MAIN_PANEL_STYLE).toContain('overscroll-behavior: contain;');
   });

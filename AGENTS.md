@@ -445,7 +445,7 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `player-pick-modal.js`：中等，影响人工 Pick 的选择数量、Stop 中断和弹窗清理。
 - `sbc-reward-overlay.js`：中高，影响页面型 SBC 奖励覆盖层识别和关闭；25 秒等待、Pack 增量和 SBC 进度确认位于 `src/reward/sbc-claim.js`。
 
-UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文本、日志高频更新和 Pick recap。
+UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文本、日志高频更新和 Pick recap。Options 展开后设置控件可以在独立区域滚动，但日志必须始终保留独立的可视滚动区域，不能因为配置变长而被 flex 压缩或裁掉。
 
 Reward Alerts 的三个测试入口必须保持解耦：Preview 只展示本地 Toast/烟花，不调用 `GM_notification` 或网络；Desktop test 实际调用本机系统通知；ntfy test 实际发送远程测试消息。不要为了减少按钮数量把真实通知副作用合并进 Preview。
 

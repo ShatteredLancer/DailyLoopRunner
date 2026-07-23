@@ -90,6 +90,7 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-options { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid #303946; }
   #bronze-loop-panel.options-open #bronze-loop-options { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   #bronze-loop-panel.options-open #bronze-loop-latest { display: none; }
+  #bronze-loop-options-scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
   .bronze-loop-section { color: #9fb2c9; font-size: 11px; margin: 8px 0 6px; }
   #bronze-loop-json {
     display: none;
@@ -107,8 +108,8 @@ export const MAIN_PANEL_STYLE = `
   }
   #bronze-loop-json.show { display: block; }
   #bronze-loop-log {
-    flex: 1 1 64px;
-    min-height: 0;
+    flex: 0 1 110px;
+    min-height: 64px;
     overflow-x: auto;
     overflow-y: auto;
     white-space: pre-wrap;
@@ -148,7 +149,8 @@ export function mainPanelHtml(maxRounds = 3) {
       </div>
       <div id="bronze-loop-latest">Ready.</div>
       <div id="bronze-loop-options">
-        <div class="bronze-loop-section">Run options</div>
+        <div id="bronze-loop-options-scroll">
+          <div class="bronze-loop-section">Run options</div>
         <div class="row">
           <label id="bronze-loop-dry-run-label" title="Log planned selections without moving items, opening packs, or submitting SBCs">
             <input id="bronze-loop-dry-run" type="checkbox"> Dry run
@@ -191,10 +193,11 @@ export function mainPanelHtml(maxRounds = 3) {
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
         <div class="bronze-loop-section">Config</div>
-        <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-preview-pick-recap">Preview Pick recap</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
-        <div class="row"><button id="bronze-loop-built-in" disabled>Built-in loops</button><button id="bronze-loop-edit">Edit loop JSON</button></div>
-        <div class="row"><button id="bronze-loop-edit-config" title="Edit every loop, workflow step, and recovery policy as one configuration">Edit workflow JSON</button><button id="bronze-loop-apply-config" title="Validate and apply the full workflow configuration in the editor">Apply workflow JSON</button></div>
-        <textarea id="bronze-loop-json" spellcheck="false"></textarea>
+          <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-preview-pick-recap">Preview Pick recap</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
+          <div class="row"><button id="bronze-loop-built-in" disabled>Built-in loops</button><button id="bronze-loop-edit">Edit loop JSON</button></div>
+          <div class="row"><button id="bronze-loop-edit-config" title="Edit every loop, workflow step, and recovery policy as one configuration">Edit workflow JSON</button><button id="bronze-loop-apply-config" title="Validate and apply the full workflow configuration in the editor">Apply workflow JSON</button></div>
+          <textarea id="bronze-loop-json" spellcheck="false"></textarea>
+        </div>
         <div class="bronze-loop-section">Log</div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
         <div id="bronze-loop-log"></div>
