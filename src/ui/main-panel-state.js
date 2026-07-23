@@ -54,7 +54,7 @@ export function renderMainPanelRecap(options = {}) {
   const recap = options.recap;
   button.style.display = recap ? '' : 'none';
   if (recap) {
-    const label = recap.type === 'batch' ? 'Batch Open' : 'Player Pick';
+    const label = recap.type === 'batch' ? 'Batch Open' : recap.type === 'loop' ? 'Loop' : 'Player Pick';
     button.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
   }
 }

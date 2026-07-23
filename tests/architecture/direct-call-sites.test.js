@@ -228,6 +228,18 @@ describe('current direct side-effect call baseline', () => {
     expect(source).not.toContain("resolveRuntimeUnassigned('Batch Open final cleanup')");
   });
 
+  it('collects ordinary Loop receipts once at shared pack entry and finalizes one top-level recap session', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    expect(source).toContain('function recordLoopPackReceipt(receipt)');
+    expect(source).toMatch(/state\.lastOpenPackReceipt = receipt;\s*recordLoopPackReceipt\(receipt\);/);
+    expect(source.match(/recordLoopPackReceipt\(receipt\)/g) || []).toHaveLength(2);
+    expect(source).toMatch(/state\.running = true;[\s\S]*?beginLoopRecapSession\(loopDef\);/);
+    expect(source).toMatch(/finally \{[\s\S]*?await finalizeLoopRecap\(loopDef, runStatus, runReason\);/);
+    expect(source).toContain('if (!session || session.dedicatedRecap) return null;');
+    expect(source).toContain('if (!hasRecapRareGoldOrAbove(openedItems))');
+    expect(source).toContain('if (recapModel?.hasQualifyingCards) void showBatchRecapModal(recapModel);');
+  });
+
   it('reserves supply-and-craft Unassigned materials before pre-selection cleanup', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     expect(source).toContain("const reservePrimaryUnassigned = primaryPiles.includes('unassigned')");

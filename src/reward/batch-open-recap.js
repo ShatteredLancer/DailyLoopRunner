@@ -1,25 +1,13 @@
 import { createRecapModel, recapCardTypeLabel, resolveRecapCardTheme } from './recap.js';
+import {
+  isRecapPlayer,
+  isRecapRareGoldOrAbove,
+  isRecapSpecial,
+  recapPlayerTier,
+} from './loop-recap.js';
 
 function itemName(item = {}) {
   return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || 'Unknown player');
-}
-
-function isPlayer(item = {}) {
-  return String(item.type || '').toLowerCase() === 'player';
-}
-
-function isSpecial(item = {}) {
-  return item.special === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 1;
-}
-
-function playerTier(item = {}) {
-  const explicit = String(item.tier || '').toLowerCase();
-  if (['gold', 'silver', 'bronze'].includes(explicit)) return explicit;
-  const rating = Number(item.rating || 0);
-  if (rating >= 75) return 'gold';
-  if (rating >= 65) return 'silver';
-  if (rating > 0) return 'bronze';
-  return null;
 }
 
 export function createBatchOpenRecapModel(input = {}) {
@@ -36,11 +24,11 @@ export function createBatchOpenRecapModel(input = {}) {
   const rows = [];
 
   for (const item of items) {
-    if (!isPlayer(item)) continue;
+    if (!isRecapPlayer(item)) continue;
     playerCount++;
     const rating = Number(item.rating || 0);
-    const special = isSpecial(item);
-    const tier = playerTier(item);
+    const special = isRecapSpecial(item);
+    const tier = recapPlayerTier(item);
     const rare = item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0;
     if (special) specialCount++;
     else if (tier === 'gold') normalGoldCount++;
@@ -90,6 +78,8 @@ export function createBatchOpenRecapModel(input = {}) {
     normalBronzeCount,
     groupedPlayerCount: playerCount - specialCount,
     omittedCount,
+    qualifyingCount: items.filter(isRecapRareGoldOrAbove).length,
+    hasQualifyingCards: items.some(isRecapRareGoldOrAbove),
   });
 }
 

@@ -392,8 +392,9 @@ EA objects
 - `sbc-claim.js`：编排有限 Claim Rewards 等待，并通过 Pack 计数或 SBC 进度判断奖励是否已经发放。
 - `player-pick.js`：Player Pick 候选排序和人工介入原因。
 - `player-pick-recap.js`：把 Pick 结果投影为统一单卡 recap model，并提供 23 条本地 Preview。
-- `batch-open-recap.js`：把 Batch receipt 投影为统一单卡 recap model；保留 pack/tier 汇总、特殊卡价格和 23 条本地 Preview，不再聚合普通球员行。
-- `recap.js`：Player Pick/Batch Open 共用的单卡排序、固定 20 条分页、颜色解析、对比度和 tier theme 纯模型。
+- `loop-recap.js`：普通 Loop 的 Pack receipt 投影、球员/tier/special 识别和 Rare Gold/Special 展示门槛；不负责运行时 session 或 UI。
+- `batch-open-recap.js`：把 Batch receipt 投影为统一单卡 recap model；复用 `loop-recap.js` 的卡片资格判断，保留 pack/tier 汇总、特殊卡价格和 23 条本地 Preview，不再聚合普通球员行。
+- `recap.js`：Player Pick、普通 Loop 与 Batch Open 共用的单卡排序、固定 20 条分页、颜色解析、对比度和 tier theme 纯模型。
 - `player-prices.js`：FUT.GG 价格解析、FUTNext fallback 和结构化诊断。
 - `pack-highlight.js`：从通用 Pack receipt 识别达到阈值的特殊卡，并生成本地/远程通知模型；不执行 DOM 或网络副作用。
 
@@ -430,12 +431,13 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `main-panel-state.js`：Loop 列表、rounds、recap 和 disabled 状态投影。
 - `player-pick-modal.js`：人工 Player Pick 选择。
 - `player-pick-recap.js`：Player Pick recap 汇总、卡片列表、价格展示和关闭。
+- `loop-recap.js`：普通 Loop recap 的共享 UI 入口；只调用通用 card renderer。
 - `reward-celebration.js`：Pick recap 与 Pack Highlight 共用的烟花动画。
 - `reward-highlight.js`：靠近主面板显示的非阻塞 Pack Highlight Toast。
 - `reward-alert-settings.js`：Reward Alerts 独立设置弹窗及 Preview/Desktop/ntfy 测试入口。
 - `batch-open-dialog.js`：My Packs 扫描、Add 1/Add all 下拉菜单、记忆列表、数量编辑、Preview 和 Start 命令弹窗。
 - `batch-open-recap.js`：批量开包汇总弹窗；不负责开包、通知或库存处理。
-- `card-recap.js`：Player Pick/Batch Open 共用的单卡列表、reason、分页、Close 和 Stop 关闭 renderer；不访问 EA Repository。
+- `card-recap.js`：Player Pick、普通 Loop 与 Batch Open 共用的单卡列表、reason、分页、Close 和 Stop 关闭 renderer；不访问 EA Repository。
 - `sbc-reward-overlay.js`：Claim Rewards 控件、奖励 Controller/DOM 覆盖层识别和关闭。
 
 风险：
@@ -449,7 +451,9 @@ UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文
 
 Reward Alerts 的三个测试入口必须保持解耦：Preview 只展示本地 Toast/烟花，不调用 `GM_notification` 或网络；Desktop test 实际调用本机系统通知；ntfy test 实际发送远程测试消息。不要为了减少按钮数量把真实通知副作用合并进 Preview。
 
-Player Pick 与 Batch Open recap 必须共用同一套单卡列表、分页和 tier 主题，不得分别维护两套颜色判断。每页固定最多 20 条，Preview 和 stopped/preserved/blocked reason 都必须走真实通用 renderer。普通卡配色是稳定产品约束：Bronze 黄铜 `#B7793E` 配红棕背景 `#45281C`、Silver 银灰 `#AEB7C2` 配冷灰蓝背景 `#46515F`、Common Gold 暗金 `#A88638` 配旧金背景 `#302B22`、Rare Gold 85 及以下亮金 `#D6AA35` 配橄榄金背景 `#493B15`、Rare Gold 86-88 琥珀金 `#F0C34E` 配琥珀背景 `#604A12`、Rare Gold 89+ 象牙金 `#F3D98B` 配香槟背景 `#5F563A`。每行评分必须使用对应 accent 的实色徽标和自动高对比文字，不能只依赖深色行背景或左侧细边表达 tier。特殊卡可通过只读 EA Rarity/card color map 获取强调色，但必须校验颜色格式和文字对比度，不得把 EA Repository 依赖放进纯 UI/model；EA 色不可用时按当前产品层级回退：94 及以下虹彩紫 `#8E7CFF` 配高阶靛紫背景 `#324A7A`、95-97 宝石青 `#2FC6C4` 配深青背景 `#153F42`、98-99 紫红 `#B45BD2` 配暗莓紫背景 `#421F39`。特殊卡三档必须同时通过强调色和整行背景保持可辨识，不能统一按同一低比例混入深灰。禁止把 89+ Rare Gold 和 98-99 Special 都做成白金色，也禁止使用“颜色 A/颜色 B”这种未决 tier 定义。
+Player Pick、普通 Loop 与 Batch Open recap 必须共用同一套单卡列表、分页和 tier 主题，不得分别维护颜色判断。每页固定最多 20 条，Preview 和 stopped/preserved/blocked reason 都必须走真实通用 renderer。普通卡配色是稳定产品约束：Bronze 黄铜 `#B7793E` 配红棕背景 `#45281C`、Silver 银灰 `#AEB7C2` 配冷灰蓝背景 `#46515F`、Common Gold 暗金 `#A88638` 配旧金背景 `#302B22`、Rare Gold 85 及以下亮金 `#D6AA35` 配橄榄金背景 `#493B15`、Rare Gold 86-88 琥珀金 `#F0C34E` 配琥珀背景 `#604A12`、Rare Gold 89+ 象牙金 `#F3D98B` 配香槟背景 `#5F563A`。每行评分必须使用对应 accent 的实色徽标和自动高对比文字，不能只依赖深色行背景或左侧细边表达 tier。特殊卡可通过只读 EA Rarity/card color map 获取强调色，但必须校验颜色格式和文字对比度，不得把 EA Repository 依赖放进纯 UI/model；EA 色不可用时按当前产品层级回退：94 及以下虹彩紫 `#8E7CFF` 配高阶靛紫背景 `#324A7A`、95-97 宝石青 `#2FC6C4` 配深青背景 `#153F42`、98-99 紫红 `#B45BD2` 配暗莓紫背景 `#421F39`。特殊卡三档必须同时通过强调色和整行背景保持可辨识，不能统一按同一低比例混入深灰。禁止把 89+ Rare Gold 和 98-99 Special 都做成白金色，也禁止使用“颜色 A/颜色 B”这种未决 tier 定义。
+
+所有普通 Loop 的真实奖励 recap 必须从唯一共享 `openPack()` 返回的成功 receipt 收集，不能让各 strategy、子 Loop 或奖励处理函数复制一套收集逻辑。Session 只在顶层 `Start` 建立并在顶层 `finally` 收尾，因此 workflowRoutine/Daily 子 Loop 必须继承同一 session；Batch Open 保留独立 recap，不能被普通 Loop session 重复收集。只有 session 中至少一张 Player 是 Rare Gold 或 Special 时才创建和展示普通 Loop recap；Common Gold、Silver、Bronze、Dry run 和纯库存提交不展示。Pick/Provision 已有专用 Pick recap 时不得再弹内容重复的普通 Loop recap。停止或阻塞时已经成功打开的 receipt 必须保留，并把 status/reason 带入 recap。Special 价格查询和 EA rarity theme 仍由 entry 注入，Reward model/UI 不直接访问网络或 EA Repository。
 
 Batch Open 是独立 operational tool，不是 Loop strategy。主面板只保留一个入口，详细配置在独立弹窗中。运行时必须调用共享 entry `openPack()`，每次打开前重新按 `packId + packName` 解析新的 live pack instance，并提供 `createMaterializeAndResolvePolicy()`；禁止直接调用 Adapter `open()`、复制 Unassigned 清理路径或为 Batch Open 生造专用物品路由。Preview 只显示本地 recap，不得发布 Reward Highlight、Desktop 或 ntfy 副作用。
 

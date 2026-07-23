@@ -65,6 +65,8 @@ describe('main panel state rendering', () => {
     expect(button.title).toBe('Last Player Pick recap: 84+ Pick (5 card(s))');
     renderMainPanelRecap({ panel, recap: { type: 'batch', name: 'Batch Open', totalCards: 20 } });
     expect(button.title).toBe('Last Batch Open recap: Batch Open (20 card(s))');
+    renderMainPanelRecap({ panel, recap: { type: 'loop', name: 'Daily Rare', totalCards: 3 } });
+    expect(button.title).toBe('Last Loop recap: Daily Rare (3 card(s))');
   });
 
   it('renders the compact reward alert summary', () => {

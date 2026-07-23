@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.57
+// @version      0.5.58
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -5919,13 +5919,13 @@
     };
   }
   function rankPlayerPickCandidates(items, prices = /* @__PURE__ */ new Map(), options = {}) {
-    const isSpecial2 = options.isSpecial || (() => false);
+    const isSpecial = options.isSpecial || (() => false);
     const isDuplicate = options.isDuplicate || (() => false);
     return (items || []).map((item, index) => ({
       item,
       index,
       rating: Number(item?.rating || 0),
-      special: isSpecial2(item) === true,
+      special: isSpecial(item) === true,
       duplicate: isDuplicate(item) === true,
       price: prices.has(itemDefinitionId(item)) ? prices.get(itemDefinitionId(item)) : null
     })).sort(
@@ -5933,14 +5933,14 @@
     );
   }
   function capturePlayerPickSelections(selected, ranked, options = {}) {
-    const isSpecial2 = options.isSpecial || (() => false);
+    const isSpecial = options.isSpecial || (() => false);
     const isDuplicate = options.isDuplicate || (() => false);
     return (selected || []).map((item) => {
       const candidate = ranked.find((entry) => entry.item === item);
       return {
         item,
         rating: candidate?.rating ?? Number(item?.rating || 0),
-        special: candidate?.special ?? isSpecial2(item) === true,
+        special: candidate?.special ?? isSpecial(item) === true,
         duplicate: candidate?.duplicate ?? isDuplicate(item) === true,
         price: candidate?.price ?? null
       };
@@ -6283,17 +6283,17 @@
     });
   }
 
-  // src/reward/batch-open-recap.js
+  // src/reward/loop-recap.js
   function itemName(item = {}) {
     return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || "Unknown player");
   }
-  function isPlayer(item = {}) {
+  function isRecapPlayer(item = {}) {
     return String(item.type || "").toLowerCase() === "player";
   }
-  function isSpecial(item = {}) {
+  function isRecapSpecial(item = {}) {
     return item.special === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 1;
   }
-  function playerTier(item = {}) {
+  function recapPlayerTier(item = {}) {
     const explicit = String(item.tier || "").toLowerCase();
     if (["gold", "silver", "bronze"].includes(explicit)) return explicit;
     const rating = Number(item.rating || 0);
@@ -6301,6 +6301,97 @@
     if (rating >= 65) return "silver";
     if (rating > 0) return "bronze";
     return null;
+  }
+  function isRecapRareGoldOrAbove(item = {}) {
+    if (!isRecapPlayer(item)) return false;
+    if (isRecapSpecial(item)) return true;
+    return recapPlayerTier(item) === "gold" && (item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0);
+  }
+  function hasRecapRareGoldOrAbove(items = []) {
+    return (items || []).some(isRecapRareGoldOrAbove);
+  }
+  function flattenReceiptItems(receipts = [], inputItems = null) {
+    if (Array.isArray(inputItems)) return inputItems.map((item) => ({ item, packName: item?.packName || null }));
+    return (receipts || []).flatMap((receipt) => (receipt?.openedItems || []).map((item) => ({
+      item,
+      packName: receipt?.packRef?.name || null
+    })));
+  }
+  function createLoopRecapModel(input = {}) {
+    const receipts = input.receipts || [];
+    const entries = flattenReceiptItems(receipts, input.openedItems);
+    const items = entries.map(({ item }) => item);
+    const players = entries.filter(({ item }) => isRecapPlayer(item));
+    const qualifyingCount = players.filter(({ item }) => isRecapRareGoldOrAbove(item)).length;
+    if (input.requireQualifying !== false && qualifyingCount === 0) return null;
+    const prices = input.prices instanceof Map ? input.prices : new Map(Object.entries(input.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
+    let specialCount = 0;
+    let rareGoldCount = 0;
+    let normalGoldCount = 0;
+    let normalSilverCount = 0;
+    let normalBronzeCount = 0;
+    const rows = players.map(({ item, packName }, index) => {
+      const rating = Number(item.rating || 0);
+      const special = isRecapSpecial(item);
+      const tier = recapPlayerTier(item);
+      const rare = item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0;
+      if (special) specialCount++;
+      else if (tier === "gold" && rare) rareGoldCount++;
+      else if (tier === "gold") normalGoldCount++;
+      else if (tier === "silver") normalSilverCount++;
+      else if (tier === "bronze") normalBronzeCount++;
+      const row = {
+        name: itemName(item),
+        rating,
+        tier,
+        rare,
+        special,
+        duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
+        tradeable: item.tradeable === true,
+        price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
+        showPrice: special,
+        sourceLabel: item.packName || packName || null,
+        item,
+        order: index
+      };
+      row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(item));
+      row.tierLabel = recapCardTypeLabel(row, row.theme);
+      return row;
+    });
+    const status = String(input.status || "completed");
+    const name = String(input.name || "Loop");
+    const requestedPacks = Number(input.requestedPacks || receipts.length);
+    const packsOpened = Number(input.packsOpened ?? receipts.filter((receipt) => receipt?.status === "opened").length);
+    const model = createRecapModel({
+      kind: "loop",
+      title: `${name} Recap`,
+      modalId: "bronze-loop-loop-recap-modal",
+      status,
+      reason: input.reason,
+      summary: `${packsOpened}/${requestedPacks} pack(s) opened, ${items.length} item(s), ${qualifyingCount} rare gold+ card(s), ${specialCount} special, ${rareGoldCount} rare gold${normalGoldCount || normalSilverCount || normalBronzeCount ? `, ${normalGoldCount} common gold, ${normalSilverCount} silver, ${normalBronzeCount} bronze` : ""}`,
+      rows
+    });
+    return Object.freeze({
+      ...model,
+      name,
+      receipts,
+      requestedPacks,
+      packsOpened,
+      itemCount: items.length,
+      playerCount: players.length,
+      qualifyingCount,
+      hasQualifyingCards: qualifyingCount > 0,
+      specialCount,
+      rareGoldCount,
+      normalGoldCount,
+      normalSilverCount,
+      normalBronzeCount
+    });
+  }
+
+  // src/reward/batch-open-recap.js
+  function itemName2(item = {}) {
+    return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || "Unknown player");
   }
   function createBatchOpenRecapModel(input = {}) {
     const receipts = input.receipts || [];
@@ -6313,18 +6404,18 @@
     let normalBronzeCount = 0;
     const rows = [];
     for (const item of items) {
-      if (!isPlayer(item)) continue;
+      if (!isRecapPlayer(item)) continue;
       playerCount++;
       const rating = Number(item.rating || 0);
-      const special = isSpecial(item);
-      const tier = playerTier(item);
+      const special = isRecapSpecial(item);
+      const tier = recapPlayerTier(item);
       const rare = item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0;
       if (special) specialCount++;
       else if (tier === "gold") normalGoldCount++;
       else if (tier === "silver") normalSilverCount++;
       else if (tier === "bronze") normalBronzeCount++;
       const row = {
-        name: itemName(item),
+        name: itemName2(item),
         rating,
         tier,
         rare,
@@ -6365,7 +6456,9 @@
       normalSilverCount,
       normalBronzeCount,
       groupedPlayerCount: playerCount - specialCount,
-      omittedCount
+      omittedCount,
+      qualifyingCount: items.filter(isRecapRareGoldOrAbove).length,
+      hasQualifyingCards: items.some(isRecapRareGoldOrAbove)
     });
   }
   function createBatchOpenRecapPreviewModel(options = {}) {
@@ -6408,7 +6501,7 @@
   }
 
   // src/reward/player-pick-recap.js
-  function itemName2(item, displayName2) {
+  function itemName3(item, displayName2) {
     if (typeof displayName2 === "function") return String(displayName2(item));
     return String(item?.name || item?.commonName || item?.lastName || item?.definitionId || item?.id || "Unknown player");
   }
@@ -6424,7 +6517,7 @@
       const destination = card.destination || "unknown";
       destinations[destination] = (destinations[destination] || 0) + 1;
       const row = {
-        name: itemName2(item, options.itemDisplayName),
+        name: itemName3(item, options.itemDisplayName),
         rating: Number(card.rating || item.rating || 0),
         tier: item.tier,
         rare: item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0,
@@ -7056,7 +7149,7 @@
   function materializeOpenedPlayerDuplicates(options = {}) {
     const items = options.items || [];
     const clubItems = options.clubItems || [];
-    const isPlayer2 = options.isPlayer || ((item) => item?.type === "player");
+    const isPlayer = options.isPlayer || ((item) => item?.type === "player");
     const isDuplicate = options.isDuplicate || ((item) => Number(item?.duplicateId || 0) > 0);
     const preparePurchasedItem = options.preparePurchasedItem || (() => {
     });
@@ -7073,7 +7166,7 @@
     const nonDuplicates = [];
     const inferredDuplicates = [];
     for (const item of items) {
-      if (!isPlayer2(item)) continue;
+      if (!isPlayer(item)) continue;
       const duplicateId = Number(item?.duplicateId || 0);
       const clubDuplicate = duplicateId && clubById.get(duplicateId) || (clubByDefinition.get(definitionId(item)) || []).find((candidate) => itemId(candidate) !== itemId(item)) || null;
       if (!isDuplicate(item) && !clubDuplicate) {
@@ -9124,7 +9217,7 @@
     const recap = options.recap;
     button3.style.display = recap ? "" : "none";
     if (recap) {
-      const label = recap.type === "batch" ? "Batch Open" : "Player Pick";
+      const label = recap.type === "batch" ? "Batch Open" : recap.type === "loop" ? "Loop" : "Player Pick";
       button3.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
     }
   }
@@ -10541,6 +10634,11 @@
     return showCardRecap(options);
   }
 
+  // src/ui/loop-recap.js
+  function showLoopRecap(options = {}) {
+    return showCardRecap(options);
+  }
+
   // src/userscript-entry.js
   (function() {
     "use strict";
@@ -10592,7 +10690,9 @@
       lastOpenPackReceipt: null,
       lastPickRecap: null,
       lastBatchRecap: null,
+      lastLoopRecap: null,
       lastRecapType: null,
+      loopRecapSession: null,
       showMvpLoops: false,
       loopStack: [],
       logRenderer: null,
@@ -10608,11 +10708,12 @@
       document.querySelector("#bronze-loop-reward-alert-modal")?.remove();
       document.querySelector("#bronze-loop-batch-open-modal")?.remove();
       document.querySelector("#bronze-loop-batch-recap-modal")?.remove();
+      document.querySelector("#bronze-loop-loop-recap-modal")?.remove();
       document.querySelector("#bronze-loop-reward-highlight-stack")?.remove();
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.57",
+      version: "0.5.58",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -10828,13 +10929,14 @@
     function updateRecapButton() {
       const batch = state.lastRecapType === "batch" ? state.lastBatchRecap : null;
       const pick = state.lastRecapType === "pick" ? state.lastPickRecap : null;
+      const loop = state.lastRecapType === "loop" ? state.lastLoopRecap : null;
       const totalCards = batch?.model?.itemCount || (pick ? (pick.pickResults || []).reduce(
         (sum, entry) => sum + (entry?.pickedCards || entry?.pickedItems || []).length,
         0
-      ) : 0);
+      ) : loop?.model?.itemCount || 0);
       renderMainPanelRecap({
         panel: document.querySelector("#bronze-loop-panel"),
-        recap: batch ? { type: "batch", name: "Batch Open", totalCards } : pick ? { type: "pick", name: pick.name, totalCards } : null
+        recap: batch ? { type: "batch", name: "Batch Open", totalCards } : pick ? { type: "pick", name: pick.name, totalCards } : loop ? { type: "loop", name: loop.name, totalCards } : null
       });
     }
     async function reopenLastRecap() {
@@ -10850,6 +10952,10 @@
       }
       if (state.lastRecapType === "batch" && state.lastBatchRecap?.model) {
         await showBatchRecapModal(state.lastBatchRecap.model);
+        return;
+      }
+      if (state.lastRecapType === "loop" && state.lastLoopRecap?.model) {
+        await showLoopRecapModal(state.lastLoopRecap.model);
         return;
       }
       const recap = state.lastRecapType === "pick" ? state.lastPickRecap : null;
@@ -11216,7 +11322,7 @@
       await waitLoadingEnd();
       return result;
     }
-    function isPlayer2(item) {
+    function isPlayer(item) {
       return item?.type === "player" || item?.isPlayer?.();
     }
     function isBronze(item) {
@@ -11260,7 +11366,7 @@
     function itemRareFlag(item) {
       return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
     }
-    function isSpecial2(item) {
+    function isSpecial(item) {
       try {
         return !!item?.isSpecial?.();
       } catch {
@@ -11272,15 +11378,15 @@
       return isGold(item) && !isSbcSpecialItem(item);
     }
     function itemMatchesSpec(item, spec = {}, settings = getFsuSettings()) {
-      if (spec.playerOnly && !isPlayer2(item)) return false;
+      if (spec.playerOnly && !isPlayer(item)) return false;
       const rating = Number(item?.rating || 0);
       if (spec.minRating !== void 0 && rating < Number(spec.minRating)) return false;
       if (spec.maxRating !== void 0 && rating > Number(spec.maxRating)) return false;
       if (spec.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) return false;
-      if (spec.special === true && !isSpecial2(item)) return false;
-      if (spec.special === false && isSpecial2(item)) return false;
-      if (spec.special !== true && spec.allowSpecial !== true && isSpecial2(item)) return false;
-      if (settings.useRarityPlayer === false && spec.special !== true && spec.allowSpecial !== true && isSpecial2(item)) return false;
+      if (spec.special === true && !isSpecial(item)) return false;
+      if (spec.special === false && isSpecial(item)) return false;
+      if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
+      if (settings.useRarityPlayer === false && spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) return false;
       if (spec.tier === "bronze" && !isBronze(item)) return false;
       if (spec.tier === "silver" && !isSilver(item)) return false;
       if (spec.tier === "gold" && !isGold(item)) return false;
@@ -11642,7 +11748,7 @@
     }
     function getFsuRejectReasons(item, spec = {}, settings = getFsuSettings(), context = null) {
       const reasons = [];
-      if (!isPlayer2(item)) return reasons;
+      if (!isPlayer(item)) return reasons;
       if (isFsuLockedItem(item, settings, context)) reasons.push("fsu-locked-player");
       if (settings.onlyUntradeable && isTradeable(item)) reasons.push("fsu-only-untradeable");
       if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push("fsu-exclude-evolution");
@@ -11662,7 +11768,7 @@
           reasons.push(`fsu-gold-range-${minRating}-${maxRating}`);
         }
       }
-      if (settings.useRarityPlayer === false && spec.special !== true && spec.allowSpecial !== true && isSpecial2(item)) {
+      if (settings.useRarityPlayer === false && spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) {
         reasons.push("fsu-rarity-player-off");
       }
       return reasons;
@@ -11789,7 +11895,7 @@
       let patchedItems = 0;
       let patchedFields = 0;
       for (const item of items) {
-        if (!isPlayer2(item)) continue;
+        if (!isPlayer(item)) continue;
         if (!targetIds.has(Number(item?.id || 0))) continue;
         let itemPatched = false;
         const holders = [item, item?._data, item?._staticData, item?.assetData, item?._assetData];
@@ -11819,7 +11925,7 @@
       }
     }
     function isSbcUsablePlayer(item, options = {}, context = null) {
-      if (!isPlayer2(item)) return false;
+      if (!isPlayer(item)) return false;
       const id = Number(item?.id || 0);
       const definitionId2 = Number(item?.definitionId || 0);
       if (id && state.consumedItemIds.has(id)) return false;
@@ -12011,7 +12117,7 @@
       const result = materializeOpenedPlayerDuplicates({
         items,
         clubItems: getClubItems(),
-        isPlayer: isPlayer2,
+        isPlayer,
         isDuplicate,
         preparePurchasedItem: (item) => eaInventoryAdapter().preparePurchasedItem(item)
       });
@@ -12062,7 +12168,7 @@
       return restored;
     }
     async function materializeOpenedPlayerRewards(items, label = "opened reward pack") {
-      const players = uniqueItems((items || []).filter((item) => isPlayer2(item)));
+      const players = uniqueItems((items || []).filter((item) => isPlayer(item)));
       if (!players.length) return { moved: 0, deferredDuplicates: [] };
       const materialized = materializeOpenedResponsePlayerDuplicates(players, label);
       const moved = await tryMoveOpenedRewardItems(
@@ -12211,6 +12317,10 @@
       }
       return routing;
     }
+    function recordLoopPackReceipt(receipt) {
+      if (!state.loopRecapSession || receipt?.status !== "opened") return;
+      state.loopRecapSession.receipts.push(receipt);
+    }
     async function openPack(pack, purpose, options = {}) {
       if (!pack) fail2(`Pack not found for ${purpose}`);
       if (typeof options.openedItemPolicy !== "function") {
@@ -12308,6 +12418,7 @@
         }
       });
       state.lastOpenPackReceipt = receipt;
+      recordLoopPackReceipt(receipt);
       if (receipt.status === "opened") {
         if (receipt.pendingItemRefs.length && options.allowPendingItems !== true) {
           fail2(`${purpose}: ${receipt.pendingItemRefs.length} opened item(s) remain unresolved; stopping before another pack or SBC action`);
@@ -12333,10 +12444,10 @@
       }
       const receipt = await openPack(pack, "source bronze pack", {
         openedItemPolicy: createOpenedItemPolicy(async (openedItems) => {
-          const bronzeDuplicates = openedItems.filter((item) => isPlayer2(item) && isBronze(item) && isDuplicate(item));
+          const bronzeDuplicates = openedItems.filter((item) => isPlayer(item) && isBronze(item) && isDuplicate(item));
           const duplicateIds = new Set(bronzeDuplicates.map((item) => Number(item?.id || 0)));
           const directClub = openedItems.filter(
-            (item) => !duplicateIds.has(Number(item?.id || 0)) && (!isPlayer2(item) || !isDuplicate(item))
+            (item) => !duplicateIds.has(Number(item?.id || 0)) && (!isPlayer(item) || !isDuplicate(item))
           );
           if (directClub.length) {
             log(`Moving ${directClub.length} non-duplicate source item(s) to club`);
@@ -12779,8 +12890,8 @@
     }
     function sortSbcFodder(items, spec = {}, settings = getFsuSettings()) {
       return [...items].sort((a, b) => {
-        if (settings.priorityNonSpecialPlayers && isSpecial2(a) !== isSpecial2(b)) {
-          return Number(isSpecial2(a)) - Number(isSpecial2(b));
+        if (settings.priorityNonSpecialPlayers && isSpecial(a) !== isSpecial(b)) {
+          return Number(isSpecial(a)) - Number(isSpecial(b));
         }
         const aGoldRange = isInGoldPriorityRange(a, settings);
         const bGoldRange = isInGoldPriorityRange(b, settings);
@@ -12867,7 +12978,7 @@
       const reasons = [];
       const id = Number(item?.id || 0);
       const definitionId2 = Number(item?.definitionId || 0);
-      if (!isPlayer2(item)) reasons.push("not-player");
+      if (!isPlayer(item)) reasons.push("not-player");
       if (id && state.consumedItemIds.has(id)) reasons.push("consumed-this-run");
       if (id && options.protectedItemIds?.some((value) => Number(value) === id)) reasons.push("protected-id");
       if (definitionId2 && options.protectedDefinitionIds?.some((value) => Number(value) === definitionId2)) reasons.push("protected-def");
@@ -12889,13 +13000,13 @@
     function getSpecRejectReasons(item, spec = {}) {
       const reasons = [];
       const rating = Number(item?.rating || 0);
-      if (spec.playerOnly && !isPlayer2(item)) reasons.push("not-player");
+      if (spec.playerOnly && !isPlayer(item)) reasons.push("not-player");
       if (spec.minRating !== void 0 && rating < Number(spec.minRating)) reasons.push(`rating-under-${Number(spec.minRating)}`);
       if (spec.maxRating !== void 0 && rating > Number(spec.maxRating)) reasons.push(`rating-over-${Number(spec.maxRating)}`);
       if (spec.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) reasons.push("tradeable-blocked");
-      if (spec.special === true && !isSpecial2(item)) reasons.push("not-special");
-      if (spec.special === false && isSpecial2(item)) reasons.push("special-blocked");
-      if (spec.special !== true && spec.allowSpecial !== true && isSpecial2(item)) reasons.push("special-blocked");
+      if (spec.special === true && !isSpecial(item)) reasons.push("not-special");
+      if (spec.special === false && isSpecial(item)) reasons.push("special-blocked");
+      if (spec.special !== true && spec.allowSpecial !== true && isSpecial(item)) reasons.push("special-blocked");
       if (spec.tier === "bronze" && !isBronze(item)) reasons.push("tier-not-bronze");
       if (spec.tier === "silver" && !isSilver(item)) reasons.push("tier-not-silver");
       if (spec.tier === "gold" && !isGold(item)) reasons.push("tier-not-gold");
@@ -13174,7 +13285,7 @@
     }
     function isRatingSbcCandidateSafe(item, loopDef, model = null, context = null) {
       const allowedSpecialCount = model ? model.maxSpecialCount : Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
-      if (!isPlayer2(item)) return false;
+      if (!isPlayer(item)) return false;
       if (isSbcSpecialItem(item)) {
         if (!allowedSpecialCount) return false;
         if (requiredSpecialKind(loopDef) && !isRequiredSpecialItem(item, loopDef)) return false;
@@ -13186,7 +13297,7 @@
       }).length === 0;
     }
     function isResolvableRatingSbcUnassignedDuplicate(item, loopDef) {
-      if (!isDuplicate(item) || !isPlayer2(item)) return false;
+      if (!isDuplicate(item) || !isPlayer(item)) return false;
       const resolved = findSubmissionItemForDuplicateSignal(item, /* @__PURE__ */ new Set(), {
         playerOnly: true,
         allowSpecial: true,
@@ -13236,7 +13347,7 @@
       return createItemSnapshot({
         id: item?.id,
         definitionId: item?.definitionId,
-        type: isPlayer2(item) ? "player" : item?.type,
+        type: isPlayer(item) ? "player" : item?.type,
         name: itemDisplayName(item),
         rating: item?.rating,
         rareflag: itemRareFlag(item),
@@ -13573,7 +13684,7 @@
       return parts.join(" | ");
     }
     function isSbcSpecialItem(item) {
-      return isSpecial2(item) || isTotwItem(item) || isTotsItem(item) || isFofItem(item);
+      return isSpecial(item) || isTotwItem(item) || isTotsItem(item) || isFofItem(item);
     }
     function itemSearchText(item) {
       return [
@@ -13691,7 +13802,7 @@
     function requiredSpecialRejectReasons(item, loopDef = {}) {
       const reasons = [];
       const id = Number(item?.id || 0);
-      if (!isPlayer2(item)) reasons.push("not-player");
+      if (!isPlayer(item)) reasons.push("not-player");
       if (id && state.consumedItemIds.has(id)) reasons.push("consumed-this-run");
       if (!isRequiredSpecialItem(item, loopDef)) reasons.push(`not-${requiredSpecialLabel(loopDef)}`);
       const minRating = Number(loopDef.requiredSpecialMinRating || 0);
@@ -13714,9 +13825,9 @@
       for (const { pileName, items } of piles) {
         for (const item of items || []) {
           const id = Number(item?.id || 0);
-          if (!id || seen.has(id) || !isPlayer2(item)) continue;
+          if (!id || seen.has(id) || !isPlayer(item)) continue;
           seen.add(id);
-          if (!isSbcSpecialItem(item) && !isSpecial2(item)) continue;
+          if (!isSbcSpecialItem(item) && !isSpecial(item)) continue;
           const reasons = requiredSpecialRejectReasons(item, loopDef);
           reasons.forEach((reason) => addCount(reasonCounts, reason));
           if (reasons.length) candidates.push({ item, pileName, reasons });
@@ -13756,7 +13867,7 @@
     function markAssumedTotwRewardItems(items = [], label = "TOTW reward pack") {
       const marked = [];
       for (const item of items || []) {
-        if (!item || !isPlayer2(item)) continue;
+        if (!item || !isPlayer(item)) continue;
         const id = Number(item?.id || 0);
         if (id && state.consumedItemIds.has(id)) continue;
         if (id) state.assumedTotwItemIds.add(id);
@@ -13832,7 +13943,7 @@
       return Number(loopDef.maxSubmittedRating || 0);
     }
     function isEligibleNormalRepairFiller(item, loopDef = {}) {
-      if (!isPlayer2(item)) return false;
+      if (!isPlayer(item)) return false;
       const id = Number(item?.id || 0);
       if (id && state.consumedItemIds.has(id)) return false;
       if (isSbcSpecialItem(item)) return false;
@@ -14844,7 +14955,7 @@
       }
       await openPack(pack, "Bronze Upgrade reward", {
         openedItemPolicy: createOpenedItemPolicy(async (openedItems) => {
-          const silverCount = openedItems.filter((item) => isPlayer2(item) && isSilver(item)).length;
+          const silverCount = openedItems.filter((item) => isPlayer(item) && isSilver(item)).length;
           log(`Reward opened; detected ${silverCount} silver player(s)`);
           log(`Handling ${openedItems.length} reward item(s) with unassigned cleanup strategy`);
           await resolveRuntimeUnassigned("reward item handling");
@@ -16829,7 +16940,7 @@
           }
         }
       });
-      if (preCraftPickResults.length) {
+      if (preCraftPickResults.length && hasPickRecapRareGoldOrAbove(preCraftPickResults)) {
         const pickDef = getProvisionPreCraftPickDef(loopDef);
         state.lastPickRecap = {
           name: pickDef?.name || "Provision pre-craft Player Pick",
@@ -16841,6 +16952,8 @@
         state.lastRecapType = "pick";
         updateRecapButton();
         if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults, result);
+      } else if (preCraftPickResults.length) {
+        log(`${loopDef.name}: pre-craft Pick results contain no Rare Gold or Special card; Pick recap skipped`);
       }
       const completionSummary = craftingUpgrades.map((upgradeDef, index) => `${upgradeDef.name}:${result.stageCompletions[`stage-${index}`] || 0}`).join(", ");
       if (dryRun) {
@@ -17033,7 +17146,7 @@
       const redeemed = await observeOnce(eaPlayerPickAdapter().redeem(pickItem), ctrl(), 3e4, "redeem Player Pick");
       if (!redeemed?.success) fail2(`${loopDef.name}: Player Pick redeem failed: ${serviceResultErrorText(redeemed)}`);
       const data = redeemed.data || redeemed.response || {};
-      const choices = (data.playerPicks || data.items || []).filter(isPlayer2);
+      const choices = (data.playerPicks || data.items || []).filter(isPlayer);
       const pickCount = Math.max(1, Number(data.availablePicks || loopDef.pickCount || 1) || 1);
       if (choices.length < pickCount) fail2(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
       const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
@@ -17045,7 +17158,7 @@
       await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
       const prices = await getPlayerPickPrices(choices, loopDef);
       const pickRewardOptions = {
-        isSpecial: isSpecial2,
+        isSpecial,
         isDuplicate: isPlayerPickDuplicate
       };
       const ranked = rankPlayerPickCandidates(choices, prices, pickRewardOptions);
@@ -17264,7 +17377,7 @@
       if (loopDef.protectHighGold === false) return;
       const highGoldThreshold = Math.max(2, Math.min(99, Number(loopDef.pickHighGoldThreshold || 82) || 82));
       const protectedPlayers = (players || []).filter(
-        (item) => isGold(item) && !isSpecial2(item) && Number(item?.rating || 0) >= highGoldThreshold
+        (item) => isGold(item) && !isSpecial(item) && Number(item?.rating || 0) >= highGoldThreshold
       );
       if (!protectedPlayers.length) return;
       const details = protectedPlayers.map((item) => `${itemDisplayName(item)} rating:${Number(item?.rating || 0)}`).join(", ");
@@ -17569,6 +17682,7 @@
       return result;
     }
     function showPickRecapModal(loopDef, pickResults, result = {}) {
+      if (state.loopRecapSession) state.loopRecapSession.dedicatedRecap = true;
       return showPlayerPickRecap({
         dom: adapters.dom,
         name: loopDef?.name,
@@ -17618,6 +17732,27 @@
         })
       });
     }
+    function showLoopRecapModal(model) {
+      return showLoopRecap({
+        dom: adapters.dom,
+        model,
+        formatPrice: formatCompactPrice,
+        onClose: () => {
+          const recapButton = document.querySelector("#bronze-loop-recap-reopen");
+          if (recapButton) {
+            recapButton.textContent = "View recap";
+            recapButton.style.background = "";
+          }
+        },
+        celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
+          dom: adapters.dom,
+          getComputedStyle: (element) => getComputedStyle(element),
+          devicePixelRatio: () => window.devicePixelRatio || 1,
+          now: () => performance.now(),
+          requestFrame: (callback) => requestAnimationFrame(callback)
+        })
+      });
+    }
     function previewBatchOpenRecap() {
       return showBatchRecapModal(createBatchOpenRecapPreviewModel());
     }
@@ -17640,7 +17775,7 @@
         })
       });
     }
-    async function getBatchOpenSpecialPrices(items) {
+    async function getSpecialCardPrices(items, label = "Recap") {
       const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
       if (!specialItems.length) return /* @__PURE__ */ new Map();
       let result;
@@ -17652,19 +17787,68 @@
           requestText: adapters.http.getText
         });
       } catch (error) {
-        log(`Batch Open: special card price lookup failed (${error?.message || error}); recap will show price:?`);
+        log(`${label}: special card price lookup failed (${error?.message || error}); recap will show price:?`);
         return /* @__PURE__ */ new Map();
       }
       for (const attempt of result.attempts) {
         if (attempt.status === "loaded") {
-          log(`Batch Open: ${attempt.source} prices loaded for ${result.prices.size}/${result.ids.length} special card(s)`);
+          log(`${label}: ${attempt.source} prices loaded for ${result.prices.size}/${result.ids.length} special card(s)`);
         } else if (attempt.source === "FUT.GG") {
-          log(`Batch Open: FUT.GG price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; trying FUTNext`);
+          log(`${label}: FUT.GG price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; trying FUTNext`);
         } else {
-          log(`Batch Open: FUTNext price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; unavailable prices will show as ?`);
+          log(`${label}: FUTNext price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; unavailable prices will show as ?`);
         }
       }
       return result.prices;
+    }
+    function beginLoopRecapSession(loopDef) {
+      state.loopRecapSession = {
+        name: loopDef?.name || loopDef?.id || "Loop",
+        receipts: [],
+        dedicatedRecap: false,
+        startedAt: Date.now()
+      };
+    }
+    async function finalizeLoopRecap(loopDef, status = "completed", reason = null) {
+      const session = state.loopRecapSession;
+      state.loopRecapSession = null;
+      if (!session || session.dedicatedRecap) return null;
+      const openedItems = session.receipts.flatMap((receipt) => receipt?.openedItems || []);
+      if (!hasRecapRareGoldOrAbove(openedItems)) {
+        log(`${session.name}: no Rare Gold or Special card in this session; recap skipped`);
+        return null;
+      }
+      try {
+        const prices = await getSpecialCardPrices(openedItems, `${session.name} recap`);
+        const model = createLoopRecapModel({
+          name: session.name,
+          receipts: session.receipts,
+          status,
+          reason,
+          prices,
+          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item)
+        });
+        if (!model) return null;
+        state.lastLoopRecap = { name: session.name, model, completedAt: Date.now() };
+        state.lastRecapType = "loop";
+        updateRecapButton();
+        await showLoopRecapModal(model);
+        return model;
+      } catch (error) {
+        log(`${session.name}: recap failed (${error?.message || error})`);
+        errorStackLines(error).forEach((line) => log(`Error stack: ${line}`));
+        return null;
+      }
+    }
+    function hasPickRecapRareGoldOrAbove(pickResults = []) {
+      return (pickResults || []).some((entry) => (entry?.pickedCards || entry?.pickedItems || []).some((card) => {
+        const item = card?.item || card || {};
+        return isRecapRareGoldOrAbove({
+          ...item,
+          special: card?.special === true || item.special === true,
+          rare: card?.rare === true || item.rare === true
+        });
+      }));
     }
     function loadBatchOpenPlan() {
       try {
@@ -17738,14 +17922,18 @@
             }
           }
         });
-        const prices = await getBatchOpenSpecialPrices(result.openedItems);
+        const prices = await getSpecialCardPrices(result.openedItems, "Batch Open");
         recapModel = createBatchOpenRecapModel({
           ...result,
           prices,
           resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item)
         });
-        state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
-        state.lastRecapType = "batch";
+        if (recapModel?.hasQualifyingCards) {
+          state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+          state.lastRecapType = "batch";
+        } else {
+          log("Batch Open: no Rare Gold or Special card in this session; recap skipped");
+        }
         log(`Batch Open: ${result.status}${result.reason ? ` (${result.reason})` : ""}; opened ${result.packsOpened}/${result.requestedPacks}, skipped ${result.skippedPacks}`);
         updateRecapButton();
         return recapModel;
@@ -17762,15 +17950,19 @@
           reason: error?.message || error,
           resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item)
         });
-        state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
-        state.lastRecapType = "batch";
+        if (recapModel?.hasQualifyingCards) {
+          state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+          state.lastRecapType = "batch";
+        } else {
+          log("Batch Open: no Rare Gold or Special card in this session; blocked recap skipped");
+        }
         updateRecapButton();
         return null;
       } finally {
         state.running = false;
         state.stopping = false;
         setPanelState();
-        if (recapModel) void showBatchRecapModal(recapModel);
+        if (recapModel?.hasQualifyingCards) void showBatchRecapModal(recapModel);
       }
     }
     async function openBatchOpenDialogModal() {
@@ -17880,6 +18072,11 @@
               await showUnassignedIfAny(`${definition.name} end`);
               return;
             }
+            if (!hasPickRecapRareGoldOrAbove(pickResults)) {
+              log(`${definition.name}: Pick results contain no Rare Gold or Special card; Pick recap skipped`);
+              await showUnassignedIfAny(`${definition.name} end`);
+              return;
+            }
             state.lastPickRecap = {
               name: definition.name,
               pickResults,
@@ -17908,6 +18105,8 @@
       let loopDef = null;
       let rounds = CFG.maxRounds;
       let fsuReadiness = null;
+      let runStatus = "completed";
+      let runReason = null;
       try {
         loopDef = getSelectedLoopDef();
         const quantity = resolveRuntimeQuantity(loopDef);
@@ -17936,23 +18135,31 @@
       }
       state.running = true;
       state.stopping = false;
+      beginLoopRecapSession(loopDef);
       if (fsuReadiness?.state === "provisional") {
         log(`FSU Club cache is provisional (${fsuReadiness.cacheStatus}); selected Club players will be validated against EA before each SBC save`);
       }
       setPanelState();
       try {
+        let runResult = null;
         if (loopDef.dryRun || loopDef.strategy !== "validationBronzeUpgrade") {
           stopPoint();
-          await runConfiguredLoop(loopDef, 1);
+          runResult = await runConfiguredLoop(loopDef, 1);
         } else {
           for (let i = 1; i <= rounds; i++) {
             stopPoint();
-            await runConfiguredLoop(loopDef, i);
+            runResult = await runConfiguredLoop(loopDef, i);
             await sleep(CFG.pauseMs);
           }
         }
+        if (runResult?.status && runResult.status !== "completed") {
+          runStatus = String(runResult.status);
+          runReason = runResult.reason || null;
+        }
         log("All requested rounds completed");
       } catch (e) {
+        runStatus = state.stopping ? "stopped" : "blocked";
+        runReason = e?.message || String(e);
         log(`Stopped: ${e.message || e}`);
         errorStackLines(e).forEach((line) => log(`Error stack: ${line}`));
         console.error("[BronzeLoop]", e);
@@ -17960,6 +18167,7 @@
         state.running = false;
         state.stopping = false;
         setPanelState();
+        await finalizeLoopRecap(loopDef, runStatus, runReason);
       }
     }
     function setPanelState() {

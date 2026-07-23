@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.57
+// @version      0.5.58
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -127,6 +127,11 @@ import {
   createBatchOpenRecapModel,
   createBatchOpenRecapPreviewModel,
 } from './reward/batch-open-recap.js';
+import {
+  createLoopRecapModel,
+  hasRecapRareGoldOrAbove,
+  isRecapRareGoldOrAbove,
+} from './reward/loop-recap.js';
 import { createPlayerPickRecapPreviewModel } from './reward/player-pick-recap.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
@@ -182,6 +187,7 @@ import { showPackHighlightToast } from './ui/reward-highlight.js';
 import { showRewardAlertSettings } from './ui/reward-alert-settings.js';
 import { showBatchOpenDialog } from './ui/batch-open-dialog.js';
 import { showBatchOpenRecap } from './ui/batch-open-recap.js';
+import { showLoopRecap } from './ui/loop-recap.js';
 
 (function () {
   'use strict';
@@ -234,7 +240,9 @@ const state = {
     lastOpenPackReceipt: null,
     lastPickRecap: null,
     lastBatchRecap: null,
+    lastLoopRecap: null,
     lastRecapType: null,
+    loopRecapSession: null,
     showMvpLoops: false,
     loopStack: [],
     logRenderer: null,
@@ -251,12 +259,13 @@ const state = {
     document.querySelector('#bronze-loop-reward-alert-modal')?.remove();
     document.querySelector('#bronze-loop-batch-open-modal')?.remove();
     document.querySelector('#bronze-loop-batch-recap-modal')?.remove();
+    document.querySelector('#bronze-loop-loop-recap-modal')?.remove();
     document.querySelector('#bronze-loop-reward-highlight-stack')?.remove();
     document.querySelector('#bronze-loop-style')?.remove();
   }
 
   W[APP_KEY] = {
-    version: '0.5.57',
+    version: '0.5.58',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -499,14 +508,16 @@ function updateLoopControls() {
   function updateRecapButton() {
     const batch = state.lastRecapType === 'batch' ? state.lastBatchRecap : null;
     const pick = state.lastRecapType === 'pick' ? state.lastPickRecap : null;
+    const loop = state.lastRecapType === 'loop' ? state.lastLoopRecap : null;
     const totalCards = batch?.model?.itemCount || (pick ? (pick.pickResults || []).reduce(
       (sum, entry) => sum + ((entry?.pickedCards || entry?.pickedItems || []).length), 0
-    ) : 0);
+    ) : loop?.model?.itemCount || 0);
     renderMainPanelRecap({
       panel: document.querySelector('#bronze-loop-panel'),
       recap: batch
         ? { type: 'batch', name: 'Batch Open', totalCards }
-        : pick ? { type: 'pick', name: pick.name, totalCards } : null,
+        : pick ? { type: 'pick', name: pick.name, totalCards }
+          : loop ? { type: 'loop', name: loop.name, totalCards } : null,
     });
   }
 
@@ -520,6 +531,10 @@ function updateLoopControls() {
     }
     if (state.lastRecapType === 'batch' && state.lastBatchRecap?.model) {
       await showBatchRecapModal(state.lastBatchRecap.model);
+      return;
+    }
+    if (state.lastRecapType === 'loop' && state.lastLoopRecap?.model) {
+      await showLoopRecapModal(state.lastLoopRecap.model);
       return;
     }
     const recap = state.lastRecapType === 'pick' ? state.lastPickRecap : null;
@@ -2049,6 +2064,11 @@ function updateLoopControls() {
     return routing;
   }
 
+  function recordLoopPackReceipt(receipt) {
+    if (!state.loopRecapSession || receipt?.status !== 'opened') return;
+    state.loopRecapSession.receipts.push(receipt);
+  }
+
   async function openPack(pack, purpose, options = {}) {
     if (!pack) fail(`Pack not found for ${purpose}`);
     if (typeof options.openedItemPolicy !== 'function') {
@@ -2146,6 +2166,7 @@ function updateLoopControls() {
       },
     });
     state.lastOpenPackReceipt = receipt;
+    recordLoopPackReceipt(receipt);
     if (receipt.status === 'opened') {
       if (receipt.pendingItemRefs.length && options.allowPendingItems !== true) {
         fail(`${purpose}: ${receipt.pendingItemRefs.length} opened item(s) remain unresolved; stopping before another pack or SBC action`);
@@ -7244,7 +7265,7 @@ function updateLoopControls() {
       },
     });
 
-    if (preCraftPickResults.length) {
+    if (preCraftPickResults.length && hasPickRecapRareGoldOrAbove(preCraftPickResults)) {
       const pickDef = getProvisionPreCraftPickDef(loopDef);
       state.lastPickRecap = {
         name: pickDef?.name || 'Provision pre-craft Player Pick',
@@ -7256,6 +7277,8 @@ function updateLoopControls() {
       state.lastRecapType = 'pick';
       updateRecapButton();
       if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults, result);
+    } else if (preCraftPickResults.length) {
+      log(`${loopDef.name}: pre-craft Pick results contain no Rare Gold or Special card; Pick recap skipped`);
     }
     const completionSummary = craftingUpgrades
       .map((upgradeDef, index) => `${upgradeDef.name}:${result.stageCompletions[`stage-${index}`] || 0}`)
@@ -8052,6 +8075,7 @@ function updateLoopControls() {
   }
 
   function showPickRecapModal(loopDef, pickResults, result = {}) {
+    if (state.loopRecapSession) state.loopRecapSession.dedicatedRecap = true;
     return showPlayerPickRecap({
       dom: adapters.dom,
       name: loopDef?.name,
@@ -8103,6 +8127,28 @@ function updateLoopControls() {
     });
   }
 
+  function showLoopRecapModal(model) {
+    return showLoopRecap({
+      dom: adapters.dom,
+      model,
+      formatPrice: formatCompactPrice,
+      onClose: () => {
+        const recapButton = document.querySelector('#bronze-loop-recap-reopen');
+        if (recapButton) {
+          recapButton.textContent = 'View recap';
+          recapButton.style.background = '';
+        }
+      },
+      celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
+        dom: adapters.dom,
+        getComputedStyle: (element) => getComputedStyle(element),
+        devicePixelRatio: () => window.devicePixelRatio || 1,
+        now: () => performance.now(),
+        requestFrame: (callback) => requestAnimationFrame(callback),
+      }),
+    });
+  }
+
   function previewBatchOpenRecap() {
     return showBatchRecapModal(createBatchOpenRecapPreviewModel());
   }
@@ -8127,7 +8173,7 @@ function updateLoopControls() {
     });
   }
 
-  async function getBatchOpenSpecialPrices(items) {
+  async function getSpecialCardPrices(items, label = 'Recap') {
     const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
     if (!specialItems.length) return new Map();
     let result;
@@ -8139,19 +8185,71 @@ function updateLoopControls() {
         requestText: adapters.http.getText,
       });
     } catch (error) {
-      log(`Batch Open: special card price lookup failed (${error?.message || error}); recap will show price:?`);
+      log(`${label}: special card price lookup failed (${error?.message || error}); recap will show price:?`);
       return new Map();
     }
     for (const attempt of result.attempts) {
       if (attempt.status === 'loaded') {
-        log(`Batch Open: ${attempt.source} prices loaded for ${result.prices.size}/${result.ids.length} special card(s)`);
+        log(`${label}: ${attempt.source} prices loaded for ${result.prices.size}/${result.ids.length} special card(s)`);
       } else if (attempt.source === 'FUT.GG') {
-        log(`Batch Open: FUT.GG price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ''}; trying FUTNext`);
+        log(`${label}: FUT.GG price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ''}; trying FUTNext`);
       } else {
-        log(`Batch Open: FUTNext price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ''}; unavailable prices will show as ?`);
+        log(`${label}: FUTNext price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ''}; unavailable prices will show as ?`);
       }
     }
     return result.prices;
+  }
+
+  function beginLoopRecapSession(loopDef) {
+    state.loopRecapSession = {
+      name: loopDef?.name || loopDef?.id || 'Loop',
+      receipts: [],
+      dedicatedRecap: false,
+      startedAt: Date.now(),
+    };
+  }
+
+  async function finalizeLoopRecap(loopDef, status = 'completed', reason = null) {
+    const session = state.loopRecapSession;
+    state.loopRecapSession = null;
+    if (!session || session.dedicatedRecap) return null;
+    const openedItems = session.receipts.flatMap((receipt) => receipt?.openedItems || []);
+    if (!hasRecapRareGoldOrAbove(openedItems)) {
+      log(`${session.name}: no Rare Gold or Special card in this session; recap skipped`);
+      return null;
+    }
+    try {
+      const prices = await getSpecialCardPrices(openedItems, `${session.name} recap`);
+      const model = createLoopRecapModel({
+        name: session.name,
+        receipts: session.receipts,
+        status,
+        reason,
+        prices,
+        resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+      });
+      if (!model) return null;
+      state.lastLoopRecap = { name: session.name, model, completedAt: Date.now() };
+      state.lastRecapType = 'loop';
+      updateRecapButton();
+      await showLoopRecapModal(model);
+      return model;
+    } catch (error) {
+      log(`${session.name}: recap failed (${error?.message || error})`);
+      errorStackLines(error).forEach((line) => log(`Error stack: ${line}`));
+      return null;
+    }
+  }
+
+  function hasPickRecapRareGoldOrAbove(pickResults = []) {
+    return (pickResults || []).some((entry) => (entry?.pickedCards || entry?.pickedItems || []).some((card) => {
+      const item = card?.item || card || {};
+      return isRecapRareGoldOrAbove({
+        ...item,
+        special: card?.special === true || item.special === true,
+        rare: card?.rare === true || item.rare === true,
+      });
+    }));
   }
 
   function loadBatchOpenPlan() {
@@ -8228,14 +8326,18 @@ function updateLoopControls() {
           }
         },
       });
-      const prices = await getBatchOpenSpecialPrices(result.openedItems);
+      const prices = await getSpecialCardPrices(result.openedItems, 'Batch Open');
       recapModel = createBatchOpenRecapModel({
         ...result,
         prices,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
       });
-      state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
-      state.lastRecapType = 'batch';
+      if (recapModel?.hasQualifyingCards) {
+        state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+        state.lastRecapType = 'batch';
+      } else {
+        log('Batch Open: no Rare Gold or Special card in this session; recap skipped');
+      }
       log(`Batch Open: ${result.status}${result.reason ? ` (${result.reason})` : ''}; opened ${result.packsOpened}/${result.requestedPacks}, skipped ${result.skippedPacks}`);
       updateRecapButton();
       return recapModel;
@@ -8252,15 +8354,19 @@ function updateLoopControls() {
         reason: error?.message || error,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
       });
-      state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
-      state.lastRecapType = 'batch';
+      if (recapModel?.hasQualifyingCards) {
+        state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
+        state.lastRecapType = 'batch';
+      } else {
+        log('Batch Open: no Rare Gold or Special card in this session; blocked recap skipped');
+      }
       updateRecapButton();
       return null;
     } finally {
       state.running = false;
       state.stopping = false;
       setPanelState();
-      if (recapModel) void showBatchRecapModal(recapModel);
+      if (recapModel?.hasQualifyingCards) void showBatchRecapModal(recapModel);
     }
   }
 
@@ -8373,6 +8479,11 @@ function updateLoopControls() {
             await showUnassignedIfAny(`${definition.name} end`);
             return;
           }
+          if (!hasPickRecapRareGoldOrAbove(pickResults)) {
+            log(`${definition.name}: Pick results contain no Rare Gold or Special card; Pick recap skipped`);
+            await showUnassignedIfAny(`${definition.name} end`);
+            return;
+          }
           state.lastPickRecap = {
             name: definition.name,
             pickResults,
@@ -8403,6 +8514,8 @@ function updateLoopControls() {
     let loopDef = null;
     let rounds = CFG.maxRounds;
     let fsuReadiness = null;
+    let runStatus = 'completed';
+    let runReason = null;
 
     try {
       loopDef = getSelectedLoopDef();
@@ -8435,24 +8548,33 @@ function updateLoopControls() {
 
     state.running = true;
     state.stopping = false;
+    beginLoopRecapSession(loopDef);
     if (fsuReadiness?.state === 'provisional') {
       log(`FSU Club cache is provisional (${fsuReadiness.cacheStatus}); selected Club players will be validated against EA before each SBC save`);
     }
     setPanelState();
     try {
+      let runResult = null;
       if (loopDef.dryRun || loopDef.strategy !== 'validationBronzeUpgrade') {
         stopPoint();
-        await runConfiguredLoop(loopDef, 1);
+        runResult = await runConfiguredLoop(loopDef, 1);
       } else {
         for (let i = 1; i <= rounds; i++) {
           stopPoint();
-          await runConfiguredLoop(loopDef, i);
+          runResult = await runConfiguredLoop(loopDef, i);
           await sleep(CFG.pauseMs);
       }
     }
 
+      if (runResult?.status && runResult.status !== 'completed') {
+        runStatus = String(runResult.status);
+        runReason = runResult.reason || null;
+      }
+
       log('All requested rounds completed');
     } catch (e) {
+      runStatus = state.stopping ? 'stopped' : 'blocked';
+      runReason = e?.message || String(e);
       log(`Stopped: ${e.message || e}`);
       errorStackLines(e).forEach((line) => log(`Error stack: ${line}`));
       console.error('[BronzeLoop]', e);
@@ -8460,6 +8582,7 @@ function updateLoopControls() {
       state.running = false;
       state.stopping = false;
       setPanelState();
+      await finalizeLoopRecap(loopDef, runStatus, runReason);
     }
   }
 
