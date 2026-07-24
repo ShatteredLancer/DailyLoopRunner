@@ -20,7 +20,9 @@ export function createPlayerPickRecapModel(pickResults = [], options = {}) {
       name: itemName(item, options.itemDisplayName),
       rating: Number(card.rating || item.rating || 0),
       tier: item.tier,
-      rare: item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0,
+      rare: card.rare === true || item.rare === true || Number(
+        item.rareflag ?? item.rareFlag ?? item._rareflag ?? item._staticData?.rareflag ?? 0,
+      ) > 0,
       special: card.special === true,
       duplicate: card.duplicate === true,
       tradeable: typeof card.tradeable === 'boolean' ? card.tradeable : item.tradeable,

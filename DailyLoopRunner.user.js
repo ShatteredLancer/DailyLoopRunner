@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.61
+// @version      0.5.62
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -5921,10 +5921,12 @@
   function rankPlayerPickCandidates(items, prices = /* @__PURE__ */ new Map(), options = {}) {
     const isSpecial = options.isSpecial || (() => false);
     const isDuplicate = options.isDuplicate || (() => false);
+    const isRare = options.isRare || (() => false);
     return (items || []).map((item, index) => ({
       item,
       index,
       rating: Number(item?.rating || 0),
+      rare: isRare(item) === true,
       special: isSpecial(item) === true,
       duplicate: isDuplicate(item) === true,
       price: prices.has(itemDefinitionId(item)) ? prices.get(itemDefinitionId(item)) : null
@@ -5935,11 +5937,13 @@
   function capturePlayerPickSelections(selected, ranked, options = {}) {
     const isSpecial = options.isSpecial || (() => false);
     const isDuplicate = options.isDuplicate || (() => false);
+    const isRare = options.isRare || (() => false);
     return (selected || []).map((item) => {
       const candidate = ranked.find((entry) => entry.item === item);
       return {
         item,
         rating: candidate?.rating ?? Number(item?.rating || 0),
+        rare: (candidate?.rare ?? isRare(item)) === true,
         special: candidate?.special ?? isSpecial(item) === true,
         duplicate: candidate?.duplicate ?? isDuplicate(item) === true,
         price: candidate?.price ?? null
@@ -6520,7 +6524,9 @@
         name: itemName3(item, options.itemDisplayName),
         rating: Number(card.rating || item.rating || 0),
         tier: item.tier,
-        rare: item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0,
+        rare: card.rare === true || item.rare === true || Number(
+          item.rareflag ?? item.rareFlag ?? item._rareflag ?? item._staticData?.rareflag ?? 0
+        ) > 0,
         special: card.special === true,
         duplicate: card.duplicate === true,
         tradeable: typeof card.tradeable === "boolean" ? card.tradeable : item.tradeable,
@@ -10714,7 +10720,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.61",
+      version: "0.5.62",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -17200,6 +17206,12 @@
       if (value >= 1e3) return `${(value / 1e3).toFixed(value >= 1e5 ? 0 : 1)}k`;
       return String(Math.round(value));
     }
+    function isPlayerPickRare(item) {
+      return isRare(item) || itemRareFlag(item) > 0;
+    }
+    function isPlayerPickSpecial(item) {
+      return isSpecial(item) || itemRareFlag(item) > 1;
+    }
     async function redeemAndSelectPlayerPick(pickItem, loopDef, options = {}) {
       log(`${loopDef.name}: redeeming ${playerPickItemName(pickItem)}`);
       const redeemed = await observeOnce(eaPlayerPickAdapter().redeem(pickItem), ctrl(), 3e4, "redeem Player Pick");
@@ -17217,8 +17229,9 @@
       await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
       const prices = await getPlayerPickPrices(choices, loopDef);
       const pickRewardOptions = {
-        isSpecial,
-        isDuplicate: isPlayerPickDuplicate
+        isSpecial: isPlayerPickSpecial,
+        isDuplicate: isPlayerPickDuplicate,
+        isRare: isPlayerPickRare
       };
       const ranked = rankPlayerPickCandidates(choices, prices, pickRewardOptions);
       ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));

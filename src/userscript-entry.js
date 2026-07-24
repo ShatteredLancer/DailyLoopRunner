@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.61
+// @version      0.5.62
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -266,7 +266,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.61',
+    version: '0.5.62',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -7556,6 +7556,14 @@ function updateLoopControls() {
     return String(Math.round(value));
   }
 
+  function isPlayerPickRare(item) {
+    return isRare(item) || itemRareFlag(item) > 0;
+  }
+
+  function isPlayerPickSpecial(item) {
+    return isSpecial(item) || itemRareFlag(item) > 1;
+  }
+
   async function redeemAndSelectPlayerPick(pickItem, loopDef, options = {}) {
     log(`${loopDef.name}: redeeming ${playerPickItemName(pickItem)}`);
     const redeemed = await observeOnce(eaPlayerPickAdapter().redeem(pickItem), ctrl(), 30000, 'redeem Player Pick');
@@ -7575,8 +7583,9 @@ function updateLoopControls() {
     await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
     const prices = await getPlayerPickPrices(choices, loopDef);
     const pickRewardOptions = {
-      isSpecial,
+      isSpecial: isPlayerPickSpecial,
       isDuplicate: isPlayerPickDuplicate,
+      isRare: isPlayerPickRare,
     };
     const ranked = rankPlayerPickCandidates(choices, prices, pickRewardOptions);
     ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));

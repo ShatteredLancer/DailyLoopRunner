@@ -48,10 +48,12 @@ export function classifyPendingPlayerPicks(items, acceptedNames = [], acceptedRe
 export function rankPlayerPickCandidates(items, prices = new Map(), options = {}) {
   const isSpecial = options.isSpecial || (() => false);
   const isDuplicate = options.isDuplicate || (() => false);
+  const isRare = options.isRare || (() => false);
   return (items || []).map((item, index) => ({
     item,
     index,
     rating: Number(item?.rating || 0),
+    rare: isRare(item) === true,
     special: isSpecial(item) === true,
     duplicate: isDuplicate(item) === true,
     price: prices.has(itemDefinitionId(item)) ? prices.get(itemDefinitionId(item)) : null,
@@ -67,11 +69,13 @@ export function rankPlayerPickCandidates(items, prices = new Map(), options = {}
 export function capturePlayerPickSelections(selected, ranked, options = {}) {
   const isSpecial = options.isSpecial || (() => false);
   const isDuplicate = options.isDuplicate || (() => false);
+  const isRare = options.isRare || (() => false);
   return (selected || []).map((item) => {
     const candidate = ranked.find((entry) => entry.item === item);
     return {
       item,
       rating: candidate?.rating ?? Number(item?.rating || 0),
+      rare: (candidate?.rare ?? isRare(item)) === true,
       special: candidate?.special ?? isSpecial(item) === true,
       duplicate: candidate?.duplicate ?? isDuplicate(item) === true,
       price: candidate?.price ?? null,

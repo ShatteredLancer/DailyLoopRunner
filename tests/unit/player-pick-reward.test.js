@@ -11,6 +11,7 @@ import {
 
 const special = (item) => item.special === true;
 const duplicate = (item) => item.duplicate === true;
+const rare = (item) => Number(item?._staticData?.rareflag || 0) > 0;
 
 describe('Player Pick reward planning', () => {
   it('classifies matching and unrelated pending Pick rewards by configured aliases', () => {
@@ -71,15 +72,17 @@ describe('Player Pick reward planning', () => {
     expect(getManualPlayerPickReason(ranked, 1)).toMatch(/price data is missing/);
   });
 
-  it('captures recap metadata from the selected ranked candidate', () => {
-    const item = { id: 1, rating: 88, special: true, duplicate: false };
+  it('captures the EA static rare flag for a selected recap card', () => {
+    const item = { id: 1, rating: 88, special: true, duplicate: false, _staticData: { rareflag: 1 } };
     const ranked = rankPlayerPickCandidates([item], new Map([[0, 25000]]), {
       isSpecial: special,
       isDuplicate: duplicate,
+      isRare: rare,
     });
     expect(capturePlayerPickSelections([item], ranked, {
       isSpecial: special,
       isDuplicate: duplicate,
-    })).toEqual([expect.objectContaining({ item, rating: 88, special: true, duplicate: false })]);
+      isRare: rare,
+    })).toEqual([expect.objectContaining({ item, rating: 88, rare: true, special: true, duplicate: false })]);
   });
 });

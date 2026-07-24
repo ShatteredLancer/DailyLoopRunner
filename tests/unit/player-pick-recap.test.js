@@ -42,6 +42,20 @@ describe('Player Pick recap UI', () => {
       .toMatchObject({ status: 'blocked', reason: 'missing fodder', totalRows: 0, pageCount: 1 });
   });
 
+  it('renders a selected card as Rare Gold when the captured Pick metadata confirms its rarity', () => {
+    const model = createPlayerPickRecapModel([{
+      pickedCards: [{
+        item: { name: 'Static Rare Flag', rating: 84, tier: 'gold' },
+        rating: 84,
+        rare: true,
+        special: false,
+        duplicate: false,
+        destination: 'club',
+      }],
+    }]);
+    expect(model.rows[0]).toMatchObject({ rare: true, tierLabel: 'Rare Gold' });
+  });
+
   it('renders prices, destinations, stopped reason, and resolves when Close is clicked', async () => {
     const harness = createUiHarness();
     const cancelStopCheck = vi.fn();
