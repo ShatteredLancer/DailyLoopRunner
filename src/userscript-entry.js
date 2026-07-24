@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.63
+// @version      0.5.64
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -149,6 +149,7 @@ import {
   matchOpenedItemsToNewPileAliases,
   materializeOpenedPlayerDuplicates,
   needsUnassignedViewMaterialization,
+  partitionOpenedItemsByLiveUnassigned,
   planUnmaterializedDuplicateFallback,
 } from './pack/opened-item-materialization.js';
 import { createPackInstanceQueue } from './pack/instance-queue.js';
@@ -268,7 +269,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.63',
+    version: '0.5.64',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1933,19 +1934,6 @@ function updateLoopControls() {
     return { ...materialized, moved };
   }
 
-  function hasNewUnassignedOpenedDuplicateEntity(items, routingBaseline = null) {
-    const baselineIds = new Set((routingBaseline?.unassignedIds || []).map((id) => Number(id || 0)).filter(Boolean));
-    const definitionIds = new Set((items || [])
-      .map((item) => Number(item?.definitionId || item?.ref?.definitionId || 0))
-      .filter(Boolean));
-    if (!definitionIds.size) return false;
-    return getUnassignedItems().some((item) => {
-      const id = Number(item?.id || item?.ref?.id || 0);
-      const definitionId = Number(item?.definitionId || item?.ref?.definitionId || 0);
-      return id && !baselineIds.has(id) && definitionIds.has(definitionId);
-    });
-  }
-
   async function tryDirectlySettleUnmaterializedOpenedDuplicates({
     openedItems,
     materialized,
@@ -1959,13 +1947,22 @@ function updateLoopControls() {
     if (!duplicates.length) return null;
 
     await refreshInventoryCaches(`${label} direct duplicate fallback preflight`, { includePacks: false, quiet: true });
-    if (hasNewUnassignedOpenedDuplicateEntity(duplicates, routingBaseline)) {
-      log(`${label}: direct duplicate fallback skipped because a matching live Unassigned entity appeared`);
+    const materialization = partitionOpenedItemsByLiveUnassigned({
+      items: duplicates,
+      pileItems: getUnassignedItems(),
+      baselineIds: routingBaseline?.unassignedIds || [],
+    });
+    const unresolvedDuplicates = materialization.unresolvedItems;
+    if (!unresolvedDuplicates.length) {
+      log(`${label}: direct duplicate fallback skipped because every pending duplicate has a live Unassigned entity`);
       return null;
+    }
+    if (materialization.materializedItems.length) {
+      log(`${label}: direct duplicate fallback preserving ${materialization.materializedItems.length} live Unassigned duplicate response item(s); routing ${unresolvedDuplicates.length} unmaterialized duplicate response item(s)`);
     }
 
     const fallbackPlan = planUnmaterializedDuplicateFallback({
-      items: duplicates,
+      items: unresolvedDuplicates,
       isTradeable,
       findClubDuplicate,
       capacities: {
@@ -1986,7 +1983,7 @@ function updateLoopControls() {
       };
     }
 
-    log(`${label}: no matching live Unassigned entity after bounded settlement; attempting direct routing for ${duplicates.length} duplicate response item(s)`);
+    log(`${label}: no matching live Unassigned entity for ${unresolvedDuplicates.length} unmaterialized duplicate response item(s) after bounded settlement; attempting direct routing`);
     let moved = 0;
     for (const group of fallbackPlan.groups) {
       moved += await tryMoveOpenedRewardItems(
@@ -1997,14 +1994,20 @@ function updateLoopControls() {
         group.description,
       );
     }
-    if (moved !== duplicates.length) {
-      log(`${label}: direct duplicate fallback moved ${moved}/${duplicates.length}; preserving unresolved response item(s)`);
+    if (moved !== unresolvedDuplicates.length) {
+      log(`${label}: direct duplicate fallback moved ${moved}/${unresolvedDuplicates.length}; preserving unresolved response item(s)`);
       return null;
     }
 
     await sleep(CFG.pauseMs);
     await refreshInventoryCaches(`${label} direct duplicate fallback`, { includePacks: false, quiet: true });
-    if (hasNewUnassignedOpenedDuplicateEntity(duplicates, routingBaseline)) {
+    const postMoveMaterialization = partitionOpenedItemsByLiveUnassigned({
+      items: unresolvedDuplicates,
+      responseItems: duplicates,
+      pileItems: getUnassignedItems(),
+      baselineIds: routingBaseline?.unassignedIds || [],
+    });
+    if (postMoveMaterialization.materializedItems.length) {
       const pending = openedItemRoutingResult(openedItems, null, {}, routingBaseline);
       log(`${label}: direct duplicate fallback detected a new live Unassigned entity after move; preserving it to avoid a second route`);
       return {

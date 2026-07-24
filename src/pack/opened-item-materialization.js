@@ -93,6 +93,32 @@ export function matchOpenedItemsToNewPileAliases(options = {}) {
   return aliases;
 }
 
+export function partitionOpenedItemsByLiveUnassigned(options = {}) {
+  const items = options.items || [];
+  const responseItems = options.responseItems || items;
+  const pileItems = options.pileItems || [];
+  const baselineIds = options.baselineIds || [];
+  const baselineIdSet = new Set(baselineIds);
+  const liveUnassignedIds = new Set(
+    pileItems
+      .map(itemId)
+      .filter((id) => id && !baselineIdSet.has(id)),
+  );
+  const trackedItemIds = itemIds(items);
+  const aliases = matchOpenedItemsToNewPileAliases({ items: responseItems, pileItems, baselineIds })
+    .filter(({ item }) => trackedItemIds.has(itemId(item)));
+  const materializedItems = new Set([
+    ...items.filter((item) => liveUnassignedIds.has(itemId(item))),
+    ...aliases.map(({ item }) => item),
+  ]);
+
+  return {
+    materializedItems: items.filter((item) => materializedItems.has(item)),
+    unresolvedItems: items.filter((item) => !materializedItems.has(item)),
+    aliases,
+  };
+}
+
 export function materializeOpenedPlayerDuplicates(options = {}) {
   const items = options.items || [];
   const clubItems = options.clubItems || [];

@@ -28,6 +28,19 @@ describe('opened item settlement', () => {
     expect(result.reason).toContain('2 opened item(s) remain unresolved');
   });
 
+  it('keeps unresolved response items pending when Unassigned cleanup made no progress', async () => {
+    const cleanup = vi.fn(async () => ({ status: 'blocked', reason: 'Unassigned action made no progress' }));
+    const result = await settleOpenedItems({
+      attempts: 2,
+      materialize: async () => ({}),
+      cleanup,
+      confirmRouting: async () => ({ pendingItems: [{ id: 1 }] }),
+    });
+
+    expect(result).toMatchObject({ status: 'pending', attempts: 2 });
+    expect(cleanup).toHaveBeenCalledTimes(2);
+  });
+
   it('preserves an explicit capacity stop without replacing its reason or retrying', async () => {
     const cleanup = vi.fn(async () => ({ status: 'preserved', reason: 'storage capacity 0/3' }));
     const result = await settleOpenedItems({

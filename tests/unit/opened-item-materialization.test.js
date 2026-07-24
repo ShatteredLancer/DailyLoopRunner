@@ -5,6 +5,7 @@ import {
   matchOpenedItemsToNewPileAliases,
   materializeOpenedPlayerDuplicates,
   needsUnassignedViewMaterialization,
+  partitionOpenedItemsByLiveUnassigned,
   planUnmaterializedDuplicateFallback,
 } from '../../src/pack/opened-item-materialization.js';
 
@@ -228,5 +229,27 @@ describe('opened item materialization', () => {
     ];
 
     expect(matchOpenedItemsToNewPileAliases({ items: opened, pileItems: aliases, baselineIds: [] })).toEqual([]);
+  });
+
+  it('keeps only the response duplicates missing from live Unassigned eligible for direct fallback', () => {
+    const first = { id: 101, definitionId: 501, type: 'player', rating: 88, rareflag: 1 };
+    const second = { id: 102, definitionId: 501, type: 'player', rating: 88, rareflag: 1 };
+    const initial = partitionOpenedItemsByLiveUnassigned({
+      items: [first, second],
+      pileItems: [first],
+      baselineIds: [],
+    });
+    const afterDirectRoute = partitionOpenedItemsByLiveUnassigned({
+      items: [second],
+      responseItems: [first, second],
+      pileItems: [first],
+      baselineIds: [],
+    });
+
+    expect(initial.materializedItems).toEqual([first]);
+    expect(initial.unresolvedItems).toEqual([second]);
+    expect(initial.aliases).toEqual([]);
+    expect(afterDirectRoute.materializedItems).toEqual([]);
+    expect(afterDirectRoute.unresolvedItems).toEqual([second]);
   });
 });
