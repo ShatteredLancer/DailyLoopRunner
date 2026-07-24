@@ -70,8 +70,8 @@
       "recovery": "Resume after prerequisite crafting and stop without submission when dynamic validation fails."
     },
     "provision-crafting": {
-      "normal": "Open one Provision pack per round, conditionally complete the configured Pick, then run configured crafting stages.",
-      "recovery": "Resume pending Pick or reserved duplicates, preserve partial challenges, and continue on a later round."
+      "normal": "Route Common Gold through the configured 4 of 10 83+ Player Pick and then 5x 80+ Upgrade; route Rare Gold through 2x 84+ Upgrade at every pre-open, pack, and final cleanup point.",
+      "recovery": "Resume pending Pick or reserved duplicates without generic recovery consumption; preserve incomplete materials and continue on a later Provision round."
     },
     "fof-glory-hunters-exhaustion": {
       "normal": "Repeat 5x 80+ Upgrade with nine safe common gold cards rated <=81 until fewer than one complete squad remains; when Open reward packs is enabled, open all matching 5x 80+ rewards together after the stage.",

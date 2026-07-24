@@ -265,6 +265,12 @@ describe('loop configuration contracts', () => {
       pickItemResourceIds: [5005713],
     });
     expect(provision.preCraftPlayerPickLoopId).toBeUndefined();
+    expect(provision.craftingUpgrades.map((upgrade) => upgrade.name))
+      .toEqual(['5x 80+ Upgrade', '2x 84+ Upgrade']);
+    expect(provision.craftingUpgrades.map((upgrade) => upgrade.sbcNames))
+      .toEqual([['5x 80+ Upgrade'], ['2x 84+ Upgrade', '2 x 84+ Upgrade']]);
+    expect(provision.craftingUpgrades.map((upgrade) => upgrade.requirements[0].rarity))
+      .toEqual(['common', 'rare']);
     expect(provision.craftingUpgrades.map((upgrade) => upgrade.requirements[0].protectHighGold))
       .toEqual([true, true]);
   });

@@ -111,6 +111,17 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('refusing a fallback that skips Unassigned cards');
     expect(source).toContain('options.requireFullSignalCoverage === true');
     expect(source).toMatch(/runProvisionCraftLoop[\s\S]*?runReservedDuplicateCraftingStage\([\s\S]*?requireFullSignalCoverage:\s*true/);
+    expect(source).toMatch(/const runProvisionMaterialStages[\s\S]*?runProvisionPreCraftPlayerPick\([\s\S]*?for \(let index = 0; index < craftingUpgrades\.length; index\+\+\)/);
+    expect(source).toMatch(/runProvisionCraftLoop[\s\S]*?afterStages:[\s\S]*?enableRecovery:\s*false[\s\S]*?reserveItem:\s*isReservedDuplicate/);
+    expect(source).toMatch(/runProvisionCraftLoop[\s\S]*?finalize:[\s\S]*?runProvisionMaterialStages\('final-cleanup'\)[\s\S]*?enableRecovery:\s*false/);
+    expect(source).toMatch(/runProvisionCraftLoop[\s\S]*?beforePack:[\s\S]*?runProvisionMaterialStages\('pre-open'\)[\s\S]*?if \(!dryRun\)/);
+    expect(source).toContain('effective material routing:');
+    expect(source).toMatch(/const materialTypes[\s\S]*?materialTypes\.length[\s\S]*?material/);
+    expect(source).toMatch(/const preOpenUnassignedOptions = options\.preOpenUnassignedOptions \|\| \{\}/);
+    expect(source).toMatch(/preOpenResolver:\s*\(\)\s*=>\s*resolveRuntimeUnassigned\([\s\S]*?preOpenUnassignedOptions/);
+    expect(source).toMatch(/pack-open recovery cleanup`,\s*preOpenUnassignedOptions/);
+    expect(source).toMatch(/runProvisionCraftLoop[\s\S]*?preOpenUnassignedOptions:\s*\{[\s\S]*?enableRecovery:\s*false[\s\S]*?reserveItem:\s*isReservedDuplicate/);
+    expect(source).toMatch(/createProvisionPackPolicy[\s\S]*?blockedPolicy:\s*'preserve'[\s\S]*?enableRecovery:\s*false[\s\S]*?isReservedDuplicate/);
     expect(source).toMatch(/if \(stageResult\.status === 'blocked' \|\| stageResult\.status === 'planned'\)/);
     expect(source).not.toMatch(/function\s+rankPlayerPickCandidates\s*\(/);
     expect(source).not.toMatch(/function\s+capturePlayerPickSelections\s*\(/);

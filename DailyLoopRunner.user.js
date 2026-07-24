@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.59
+// @version      0.5.61
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -10714,7 +10714,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.59",
+      version: "0.5.61",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -12332,8 +12332,12 @@
       let currentPack = pack;
       let routingBaseline = null;
       const retryCodes = options.retryCodes || (options.retryOn471 === true ? ["471"] : []);
+      const preOpenUnassignedOptions = options.preOpenUnassignedOptions || {};
       const receipt = await openPackTransaction({
-        preOpenResolver: () => resolveRuntimeUnassigned(`opening ${purpose}`),
+        preOpenResolver: () => resolveRuntimeUnassigned(
+          `opening ${purpose}`,
+          preOpenUnassignedOptions
+        ),
         packSelector: async ({ attempt, lastReason }) => {
           if (attempt === 1) return currentPack;
           const reuseCurrentPack = String(lastReason || "") === "471" && options.reusePackOn471 === true;
@@ -12384,7 +12388,7 @@
               stableEmptyReads: 3,
               emptyReadDelayMs: 450
             });
-            await resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`);
+            await resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`, preOpenUnassignedOptions);
             await refreshInventoryCaches(`${purpose} pack-open recovery`, {
               quiet: true,
               includePacks: false
@@ -12403,7 +12407,7 @@
             unwind: () => unwindSbcSquadControllers2(`${purpose} pack-open recovery`),
             showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`),
             openStorePacks: () => openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`),
-            resolveUnassigned: () => resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`),
+            resolveUnassigned: () => resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`, preOpenUnassignedOptions),
             refreshInventory: ({ storeRefreshed }) => refreshInventoryCaches(`${purpose} pack-open recovery`, {
               quiet: true,
               includePacks: !storeRefreshed
@@ -16656,6 +16660,9 @@
           await moveItems(directClub, inventoryPile("club"), true);
         }
         await resolveRuntimeUnassigned(`${loopDef.name} provision pack handling`, {
+          loopDef,
+          blockedPolicy: "preserve",
+          enableRecovery: false,
           reserveItem: (item) => responseReservedIds.has(Number(item?.id || 0)) || isReservedDuplicate(item)
         });
         await refreshUnassigned();
@@ -16837,6 +16844,66 @@
       const materialDefs = getProvisionMaterialDefs(loopDef);
       const isReservedDuplicate = (item) => materialDefs.some((def) => isDuplicateForLoopRequirements(item, def));
       const preCraftPickResults = [];
+      const preCraftPickDef = getProvisionPreCraftPickDef(loopDef);
+      const effectiveMaterialStages = [
+        preCraftPickDef ? `${preCraftPickDef.name} [common material]` : loopDef.preCraftPlayerPick ? "dynamic pre-craft Player Pick [unavailable]" : null,
+        ...craftingUpgrades.map((upgradeDef) => {
+          const materialTypes = [...new Set(
+            getChallengeMaterialDefs(upgradeDef).flatMap((challengeDef) => challengeDef.requirements || []).map((requirement) => requirement.rarity || requirement.tier).filter(Boolean)
+          )];
+          const materialType = materialTypes.length ? `${materialTypes.join("/")} material` : "configured material";
+          return `${upgradeDef.name} [${materialType}; ${(upgradeDef.sbcNames || []).join(" | ")}]`;
+        })
+      ].filter(Boolean);
+      log(`${loopDef.name}: effective material routing: ${effectiveMaterialStages.join(" -> ") || "none"}`);
+      const runProvisionMaterialStages = async (phase, context = {}) => {
+        const handling = phase === "resume" ? context.provisionHandling || {} : context;
+        if (dryRun) {
+          if (loopDef.preCraftPlayerPickLoopId || loopDef.preCraftPlayerPick) {
+            const pickDef = getProvisionPreCraftPickDef(loopDef);
+            if (pickDef) {
+              log(`${loopDef.name}: dry-run ${phase} checks ${pickDef.name} before 5x 80+ Upgrade when an unassigned duplicate matches`);
+            } else {
+              log(`${loopDef.name}: configured dynamic pre-craft Player Pick is not available in the current scan; live run would skip it and continue 5x 80+ / 2x 84+ stages`);
+            }
+          }
+        } else {
+          const pickResults = await runProvisionPreCraftPlayerPick(loopDef, handling);
+          preCraftPickResults.push(...pickResults);
+        }
+        const completions = {};
+        for (let index = 0; index < craftingUpgrades.length; index++) {
+          const upgradeDef = craftingUpgrades[index];
+          const label = `${phase === "resume" ? "resumed " : ""}${upgradeDef.name}`;
+          if (dryRun) {
+            await runReservedDuplicateCraftingStage(
+              loopDef,
+              upgradeDef,
+              (item) => isDuplicateForLoopRequirements(item, upgradeDef),
+              label,
+              { maxCompletions: 1, requireFullSignalCoverage: true }
+            );
+            completions[`stage-${index}`] = 0;
+          } else {
+            const stageResult = await runReservedDuplicateCraftingStage(
+              loopDef,
+              upgradeDef,
+              (item) => isDuplicateForLoopRequirements(item, upgradeDef),
+              label,
+              { requireFullSignalCoverage: true }
+            );
+            completions[`stage-${index}`] = stageResult.completions;
+            if (stageResult.status === "blocked" || stageResult.status === "planned") {
+              return {
+                status: stageResult.status,
+                completions,
+                reason: stageResult.reason || `${label} ${stageResult.status}`
+              };
+            }
+          }
+        }
+        return { status: "completed", completions };
+      };
       const result = await runPackAndCraftWorkflow({
         maxPacks: rounds,
         stopPoint: () => stopPoint(),
@@ -16866,7 +16933,16 @@
           return { hasItems: true, itemCount: items.length, provisionHandling };
         },
         beforePack: async ({ result: current }) => {
-          if (!dryRun) await resolveRuntimeUnassigned(`${loopDef.name} round ${current.packsOpened + 1} pre-open cleanup`);
+          const stageResult = await runProvisionMaterialStages("pre-open");
+          if (stageResult.status === "blocked" || stageResult.status === "planned") return stageResult;
+          if (!dryRun) {
+            await resolveRuntimeUnassigned(`${loopDef.name} round ${current.packsOpened + 1} pre-open cleanup`, {
+              loopDef,
+              blockedPolicy: "preserve",
+              enableRecovery: false,
+              reserveItem: isReservedDuplicate
+            });
+          }
           return { status: "ready" };
         },
         findPack: async () => findSourcePack(loopDef),
@@ -16877,68 +16953,45 @@
             allowGone: true,
             retryCodes: ["471", "500"],
             resolveRetryPack: () => findSourcePack(loopDef),
+            preOpenUnassignedOptions: {
+              loopDef,
+              blockedPolicy: "preserve",
+              enableRecovery: false,
+              reserveItem: isReservedDuplicate
+            },
             openedItemPolicy: createProvisionPackPolicy(loopDef)
           });
           return receipt || { status: "stale", reason: "source pack stale or unavailable" };
         },
         runStages: async ({ phase, context }) => {
-          const handling = phase === "resume" ? context.provisionHandling || {} : context;
-          if (dryRun) {
-            if (loopDef.preCraftPlayerPickLoopId || loopDef.preCraftPlayerPick) {
-              const pickDef = getProvisionPreCraftPickDef(loopDef);
-              if (pickDef) {
-                log(`${loopDef.name}: after each opened Provision Pack, live run checks ${pickDef.name} only when an unassigned duplicate matches that Pick's configured requirements`);
-              } else {
-                log(`${loopDef.name}: configured dynamic pre-craft Player Pick is not available in the current scan; live run would skip it and continue crafting stages`);
-              }
-            }
-          } else {
-            const pickResults = await runProvisionPreCraftPlayerPick(loopDef, handling);
-            preCraftPickResults.push(...pickResults);
-          }
-          const completions = {};
-          for (let index = 0; index < craftingUpgrades.length; index++) {
-            const upgradeDef = craftingUpgrades[index];
-            const label = `${phase === "resume" ? "resumed " : ""}${upgradeDef.name}`;
-            if (dryRun) {
-              await runReservedDuplicateCraftingStage(
-                loopDef,
-                upgradeDef,
-                (item) => isDuplicateForLoopRequirements(item, upgradeDef),
-                label,
-                { maxCompletions: 1, requireFullSignalCoverage: true }
-              );
-              completions[`stage-${index}`] = 0;
-            } else {
-              const stageResult = await runReservedDuplicateCraftingStage(
-                loopDef,
-                upgradeDef,
-                (item) => isDuplicateForLoopRequirements(item, upgradeDef),
-                label,
-                { requireFullSignalCoverage: true }
-              );
-              completions[`stage-${index}`] = stageResult.completions;
-              if (stageResult.status === "blocked" || stageResult.status === "planned") {
-                return {
-                  status: stageResult.status,
-                  completions,
-                  reason: stageResult.reason || `${label} ${stageResult.status}`
-                };
-              }
-            }
-          }
-          return { status: "completed", completions };
+          return runProvisionMaterialStages(phase, context);
         },
         afterStages: async ({ phase, result: current }) => {
           if (dryRun) return;
-          await resolveRuntimeUnassigned(`${loopDef.name} ${phase === "resume" ? "resume" : `round ${current.packsOpened}`} cleanup`);
+          await resolveRuntimeUnassigned(`${loopDef.name} ${phase === "resume" ? "resume" : `round ${current.packsOpened}`} cleanup`, {
+            loopDef,
+            blockedPolicy: "preserve",
+            enableRecovery: false,
+            reserveItem: isReservedDuplicate
+          });
           if (phase === "pack") await sleep(CFG.pauseMs);
         },
         afterStalePack: async () => {
           if (!dryRun) await sleep(CFG.pauseMs);
         },
         finalize: async () => {
-          if (!dryRun) await resolveRuntimeUnassigned(`${loopDef.name} final cleanup`);
+          if (!dryRun) {
+            const stageResult = await runProvisionMaterialStages("final-cleanup");
+            if (stageResult.status === "blocked" || stageResult.status === "planned") {
+              fail2(`${loopDef.name}: final material cleanup ${stageResult.status}: ${stageResult.reason || "unknown reason"}`);
+            }
+            await resolveRuntimeUnassigned(`${loopDef.name} final cleanup`, {
+              loopDef,
+              blockedPolicy: "preserve",
+              enableRecovery: false,
+              reserveItem: isReservedDuplicate
+            });
+          }
         },
         onEvent: async (event, payload) => {
           if (event === "pack-unavailable") {
@@ -17457,6 +17510,9 @@
       ];
       const isReservedDuplicate = (item) => materialDefs.some((def) => isDuplicateForLoopRequirements(item, def));
       const cleanupOptions = {
+        loopDef,
+        blockedPolicy: "preserve",
+        enableRecovery: false,
         reserveItem: (item) => {
           if (!isReservedDuplicate(item)) return false;
           const clubDuplicate = findClubDuplicate2(item);
