@@ -2759,8 +2759,21 @@
     const challenges = Array.isArray(set.challenges) ? set.challenges : [];
     if (!challenges.length) diagnostics.push("SBC Set challenge list is missing");
     const challengeRequirements = [];
+    const challengeWarnings = [];
+    const knownChallengePlayerCounts = unique(
+      challenges.map((challenge) => positiveInteger(challenge?.requiredPlayerCount)).filter(Boolean)
+    );
+    const inferredCompletedChallengePlayerCount = knownChallengePlayerCounts.length === 1 ? knownChallengePlayerCounts[0] : null;
     for (let index = 0; index < challenges.length; index++) {
-      const parsed = parseChallengeRequirements(challenges[index], index, input);
+      const challenge = challenges[index];
+      const missingPlayerCount = !positiveInteger(challenge?.requiredPlayerCount);
+      const canInferCompletedPlayerCount = missingPlayerCount && isCompleted(challenge) && inferredCompletedChallengePlayerCount;
+      const challengeForParsing = canInferCompletedPlayerCount ? { ...challenge, requiredPlayerCount: inferredCompletedChallengePlayerCount } : challenge;
+      if (canInferCompletedPlayerCount) {
+        const challengeLabel = `challenge ${index + 1}${challenge?.id ? ` (#${challenge.id})` : ""}`;
+        challengeWarnings.push(`${challengeLabel}: inferred completed Challenge player count ${inferredCompletedChallengePlayerCount} from consistent sibling metadata`);
+      }
+      const parsed = parseChallengeRequirements(challengeForParsing, index, input);
       if (parsed.ok) challengeRequirements.push(parsed.requirements);
       else diagnostics.push(...parsed.diagnostics);
     }
@@ -2823,7 +2836,7 @@
       pickCount: selectionCount,
       reportedCompleted,
       remainingCompletions: setRemaining,
-      diagnostics: []
+      diagnostics: unique(challengeWarnings)
     };
   }
   function loopSetIds(loop) {
@@ -12685,7 +12698,8 @@
           if (!result?.success || !squad) throw new Error(serviceResultErrorText(result) || "squad unavailable");
           challenge.squad = squad;
         } catch (error) {
-          log(`${label}: Challenge #${challenge?.id || "?"} squad metadata unavailable (${error?.message || error}); player count will remain unsupported`);
+          const completed = isCompletedChallenge(challenge);
+          log(`${label}: Challenge #${challenge?.id || "?"} squad metadata unavailable (${error?.message || error}); player count ${completed ? "may be inferred only from consistent sibling Challenge metadata" : "will remain unsupported"}`);
         }
         loaded.push(challenge);
       }

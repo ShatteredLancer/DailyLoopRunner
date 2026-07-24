@@ -131,6 +131,91 @@ describe('dynamic Player Pick SBC discovery', () => {
     expect(validateLoopDef(result.loop, 'discovered Player Pick')).toEqual([]);
   });
 
+  it('infers a completed Challenge player count from consistent sibling metadata', () => {
+    const result = parsePlayerPickSbcSnapshot({
+      set: {
+        id: 1256,
+        name: '4 of 10 83+ Player Pick',
+        timesCompleted: 0,
+        repeats: 3,
+        rewards: [{
+          type: 'PLAYER_PICK',
+          name: '4 of 10 83+ Player Pick',
+          resourceId: 5005713,
+          candidateCount: 10,
+          selectionCount: 4,
+        }],
+        challenges: [
+          {
+            id: 3637,
+            completed: true,
+            requiredPlayerCount: null,
+            eligibilityRequirements: [{ key: 'PLAYER_QUALITY', values: [3], count: -1 }],
+          },
+          {
+            id: 3638,
+            completed: false,
+            requiredPlayerCount: 10,
+            eligibilityRequirements: [{ key: 'PLAYER_QUALITY', values: [3], count: -1 }],
+          },
+        ],
+      },
+    });
+
+    expect(result.status).toBe('supported');
+    expect(result.loop.challengeRequirements).toHaveLength(2);
+    result.loop.challengeRequirements.forEach((requirements) => {
+      expect(requirements).toEqual([
+        expect.objectContaining({ tier: 'gold', count: 10, maxRating: 81, preferCommon: true }),
+      ]);
+    });
+    expect(result.diagnostics).toEqual([
+      'challenge 1 (#3637): inferred completed Challenge player count 10 from consistent sibling metadata',
+    ]);
+    expect(validateLoopDef(result.loop, 'discovered Player Pick')).toEqual([]);
+  });
+
+  it('does not infer missing player counts for incomplete or inconsistent Challenges', () => {
+    const baseSet = {
+      id: 1256,
+      name: '4 of 10 83+ Player Pick',
+      rewards: [{
+        type: 'PLAYER_PICK',
+        name: '4 of 10 83+ Player Pick',
+        resourceId: 5005713,
+        candidateCount: 10,
+        selectionCount: 4,
+      }],
+    };
+    const requirement = [{ key: 'PLAYER_QUALITY', values: [3], count: -1 }];
+    const incomplete = parsePlayerPickSbcSnapshot({
+      set: {
+        ...baseSet,
+        challenges: [
+          { id: 3637, completed: false, requiredPlayerCount: null, eligibilityRequirements: requirement },
+          { id: 3638, completed: false, requiredPlayerCount: 10, eligibilityRequirements: requirement },
+        ],
+      },
+    });
+    const inconsistent = parsePlayerPickSbcSnapshot({
+      set: {
+        ...baseSet,
+        challenges: [
+          { id: 3637, completed: true, requiredPlayerCount: null, eligibilityRequirements: requirement },
+          { id: 3638, completed: false, requiredPlayerCount: 9, eligibilityRequirements: requirement },
+          { id: 3639, completed: false, requiredPlayerCount: 10, eligibilityRequirements: requirement },
+        ],
+      },
+    });
+
+    expect(incomplete).toMatchObject({
+      status: 'unsupported',
+      diagnostics: ['challenge 1 (#3637): required player count is missing or invalid'],
+    });
+    expect(inconsistent.status).toBe('unsupported');
+    expect(inconsistent.diagnostics).toContain('challenge 1 (#3637): required player count is missing or invalid');
+  });
+
   it('turns a minimum rare requirement into an exact safe rare/common ratio', async () => {
     const fixture = await loadFixture('challenges/player-pick-discovery.json');
     const result = parsePlayerPickSbcSnapshot(fixture.mixedRatio);
@@ -318,6 +403,57 @@ describe('dynamic Player Pick SBC discovery', () => {
     expect(resolvePlayerPickLoopReference({ sbcSetIds: [1202] }, loops)).toMatchObject({
       status: 'missing',
       loop: null,
+    });
+  });
+
+  it('keeps Provision bound to a partially completed discovered Pick with inferred completed-Challenge metadata', () => {
+    const provision = {
+      id: 'provision-crafting',
+      name: 'Provision Crafting Loop',
+      strategy: 'provisionPackCrafting',
+      preCraftPlayerPick: {
+        sbcSetIds: [1256],
+        pickItemResourceIds: [5005713],
+      },
+    };
+    const session = buildPlayerPickDiscoverySession({
+      configuredLoops: [provision],
+      sets: [{
+        id: 1256,
+        name: '4 of 10 83+ Player Pick',
+        timesCompleted: 0,
+        repeats: 3,
+        rewards: [{
+          type: 'PLAYER_PICK',
+          name: '4 of 10 83+ Player Pick',
+          resourceId: 5005713,
+          candidateCount: 10,
+          selectionCount: 4,
+        }],
+        challenges: [
+          {
+            id: 3637,
+            completed: true,
+            requiredPlayerCount: null,
+            eligibilityRequirements: [{ key: 'PLAYER_QUALITY', values: [3], count: -1 }],
+          },
+          {
+            id: 3638,
+            completed: false,
+            requiredPlayerCount: 10,
+            eligibilityRequirements: [{ key: 'PLAYER_QUALITY', values: [3], count: -1 }],
+          },
+        ],
+      }],
+    });
+
+    expect(session.discoveredLoops).toHaveLength(1);
+    expect(resolvePlayerPickLoopReference(provision.preCraftPlayerPick, session.loopDefs)).toMatchObject({
+      status: 'matched',
+      loop: {
+        name: '4 of 10 83+ Player Pick',
+        challengesPerPick: 2,
+      },
     });
   });
 

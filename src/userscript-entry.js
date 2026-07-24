@@ -2421,7 +2421,8 @@ function updateLoopControls() {
         if (!result?.success || !squad) throw new Error(serviceResultErrorText(result) || 'squad unavailable');
         challenge.squad = squad;
       } catch (error) {
-        log(`${label}: Challenge #${challenge?.id || '?'} squad metadata unavailable (${error?.message || error}); player count will remain unsupported`);
+        const completed = isCompletedChallenge(challenge);
+        log(`${label}: Challenge #${challenge?.id || '?'} squad metadata unavailable (${error?.message || error}); player count ${completed ? 'may be inferred only from consistent sibling Challenge metadata' : 'will remain unsupported'}`);
       }
       loaded.push(challenge);
     }
