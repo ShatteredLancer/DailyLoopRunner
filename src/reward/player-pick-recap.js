@@ -5,6 +5,10 @@ function itemName(item, displayName) {
   return String(item?.name || item?.commonName || item?.lastName || item?.definitionId || item?.id || 'Unknown player');
 }
 
+export function hasPlayerPickRecapCards(pickResults = []) {
+  return (pickResults || []).some((entry) => (entry?.pickedCards || entry?.pickedItems || []).length > 0);
+}
+
 export function createPlayerPickRecapModel(pickResults = [], options = {}) {
   const entries = Array.isArray(pickResults) ? pickResults : [];
   const cards = entries.flatMap((entry) => entry?.pickedCards || []);

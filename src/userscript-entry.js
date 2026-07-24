@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.62
+// @version      0.5.63
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -130,9 +130,11 @@ import {
 import {
   createLoopRecapModel,
   hasRecapRareGoldOrAbove,
-  isRecapRareGoldOrAbove,
 } from './reward/loop-recap.js';
-import { createPlayerPickRecapPreviewModel } from './reward/player-pick-recap.js';
+import {
+  createPlayerPickRecapPreviewModel,
+  hasPlayerPickRecapCards,
+} from './reward/player-pick-recap.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
 import {
@@ -266,7 +268,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.62',
+    version: '0.5.63',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -7331,7 +7333,7 @@ function updateLoopControls() {
       },
     });
 
-    if (preCraftPickResults.length && hasPickRecapRareGoldOrAbove(preCraftPickResults)) {
+    if (hasPlayerPickRecapCards(preCraftPickResults)) {
       const pickDef = getProvisionPreCraftPickDef(loopDef);
       state.lastPickRecap = {
         name: pickDef?.name || 'Provision pre-craft Player Pick',
@@ -7344,7 +7346,7 @@ function updateLoopControls() {
       updateRecapButton();
       if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults, result);
     } else if (preCraftPickResults.length) {
-      log(`${loopDef.name}: pre-craft Pick results contain no Rare Gold or Special card; Pick recap skipped`);
+      log(`${loopDef.name}: pre-craft Pick results contain no selected card; Pick recap skipped`);
     }
     const completionSummary = craftingUpgrades
       .map((upgradeDef, index) => `${upgradeDef.name}:${result.stageCompletions[`stage-${index}`] || 0}`)
@@ -8319,17 +8321,6 @@ function updateLoopControls() {
     }
   }
 
-  function hasPickRecapRareGoldOrAbove(pickResults = []) {
-    return (pickResults || []).some((entry) => (entry?.pickedCards || entry?.pickedItems || []).some((card) => {
-      const item = card?.item || card || {};
-      return isRecapRareGoldOrAbove({
-        ...item,
-        special: card?.special === true || item.special === true,
-        rare: card?.rare === true || item.rare === true,
-      });
-    }));
-  }
-
   function loadBatchOpenPlan() {
     try {
       return normalizeBatchOpenPlan(adapters.localStorage.getJson(BATCH_OPEN_PLAN_KEY, {}));
@@ -8557,8 +8548,8 @@ function updateLoopControls() {
             await showUnassignedIfAny(`${definition.name} end`);
             return;
           }
-          if (!hasPickRecapRareGoldOrAbove(pickResults)) {
-            log(`${definition.name}: Pick results contain no Rare Gold or Special card; Pick recap skipped`);
+          if (!hasPlayerPickRecapCards(pickResults)) {
+            log(`${definition.name}: Pick results contain no selected card; Pick recap skipped`);
             await showUnassignedIfAny(`${definition.name} end`);
             return;
           }

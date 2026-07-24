@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createPlayerPickRecapPreviewModel } from '../../src/reward/player-pick-recap.js';
+import {
+  createPlayerPickRecapPreviewModel,
+  hasPlayerPickRecapCards,
+} from '../../src/reward/player-pick-recap.js';
 import { createPlayerPickRecapModel, showPlayerPickRecap } from '../../src/ui/player-pick-recap.js';
 
 function createUiHarness() {
@@ -29,6 +32,13 @@ const PICK_RESULTS = [
 ];
 
 describe('Player Pick recap UI', () => {
+  it('shows a recap whenever the Pick workflow recorded selected cards', () => {
+    expect(hasPlayerPickRecapCards([])).toBe(false);
+    expect(hasPlayerPickRecapCards([{ pickedCards: [] }])).toBe(false);
+    expect(hasPlayerPickRecapCards([{ pickedItems: [{ rating: 84 }] }])).toBe(true);
+    expect(hasPlayerPickRecapCards([{ pickedCards: [{ rating: 84 }] }])).toBe(true);
+  });
+
   it('builds a stable summary, keeps compatibility fields, and sorts by rating', () => {
     const model = createPlayerPickRecapModel(PICK_RESULTS);
     expect(model).toEqual(expect.objectContaining({

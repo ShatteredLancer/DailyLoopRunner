@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.62
+// @version      0.5.63
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -6509,6 +6509,9 @@
     if (typeof displayName2 === "function") return String(displayName2(item));
     return String(item?.name || item?.commonName || item?.lastName || item?.definitionId || item?.id || "Unknown player");
   }
+  function hasPlayerPickRecapCards(pickResults = []) {
+    return (pickResults || []).some((entry) => (entry?.pickedCards || entry?.pickedItems || []).length > 0);
+  }
   function createPlayerPickRecapModel(pickResults = [], options = {}) {
     const entries = Array.isArray(pickResults) ? pickResults : [];
     const cards = entries.flatMap((entry) => entry?.pickedCards || []);
@@ -10720,7 +10723,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.62",
+      version: "0.5.63",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -17005,7 +17008,7 @@
           }
         }
       });
-      if (preCraftPickResults.length && hasPickRecapRareGoldOrAbove(preCraftPickResults)) {
+      if (hasPlayerPickRecapCards(preCraftPickResults)) {
         const pickDef = getProvisionPreCraftPickDef(loopDef);
         state.lastPickRecap = {
           name: pickDef?.name || "Provision pre-craft Player Pick",
@@ -17018,7 +17021,7 @@
         updateRecapButton();
         if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults, result);
       } else if (preCraftPickResults.length) {
-        log(`${loopDef.name}: pre-craft Pick results contain no Rare Gold or Special card; Pick recap skipped`);
+        log(`${loopDef.name}: pre-craft Pick results contain no selected card; Pick recap skipped`);
       }
       const completionSummary = craftingUpgrades.map((upgradeDef, index) => `${upgradeDef.name}:${result.stageCompletions[`stage-${index}`] || 0}`).join(", ");
       if (dryRun) {
@@ -17915,16 +17918,6 @@
         return null;
       }
     }
-    function hasPickRecapRareGoldOrAbove(pickResults = []) {
-      return (pickResults || []).some((entry) => (entry?.pickedCards || entry?.pickedItems || []).some((card) => {
-        const item = card?.item || card || {};
-        return isRecapRareGoldOrAbove({
-          ...item,
-          special: card?.special === true || item.special === true,
-          rare: card?.rare === true || item.rare === true
-        });
-      }));
-    }
     function loadBatchOpenPlan() {
       try {
         return normalizeBatchOpenPlan(adapters.localStorage.getJson(BATCH_OPEN_PLAN_KEY, {}));
@@ -18147,8 +18140,8 @@
               await showUnassignedIfAny(`${definition.name} end`);
               return;
             }
-            if (!hasPickRecapRareGoldOrAbove(pickResults)) {
-              log(`${definition.name}: Pick results contain no Rare Gold or Special card; Pick recap skipped`);
+            if (!hasPlayerPickRecapCards(pickResults)) {
+              log(`${definition.name}: Pick results contain no selected card; Pick recap skipped`);
               await showUnassignedIfAny(`${definition.name} end`);
               return;
             }
