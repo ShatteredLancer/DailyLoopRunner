@@ -157,8 +157,8 @@
       primaryPiles: ["unassigned", "storage", "transfer"],
       clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
       shortagePacks: [
-        { requirement: { tier: "bronze" }, packIds: [105], packNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"], maxOpensPerAttempt: 1 },
-        { requirement: { tier: "silver" }, packIds: [205], packNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"], maxOpensPerAttempt: 1 }
+        { requirement: { tier: "bronze" }, packIds: [105], packNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"], maxOpensPerAttempt: 1, routingPolicy: "reserveMatchingDuplicates" },
+        { requirement: { tier: "silver" }, packIds: [205], packNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"], maxOpensPerAttempt: 1, routingPolicy: "reserveMatchingDuplicates" }
       ],
       dailyCompletionLimit: 7,
       maxCompletions: 7
@@ -180,8 +180,8 @@
       primaryPiles: ["unassigned", "storage", "transfer"],
       clubFallbackPiles: ["unassigned", "storage", "transfer", "club"],
       shortagePacks: [
-        { requirement: { tier: "bronze" }, packIds: [105], packNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"], maxOpensPerAttempt: 1 },
-        { requirement: { tier: "silver" }, packIds: [205], packNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"], maxOpensPerAttempt: 1 }
+        { requirement: { tier: "bronze" }, packIds: [105], packNames: ["Bronze Players Premium", "Premium Bronze Players", "BRONZE PLAYERS PREMIUM"], maxOpensPerAttempt: 1, routingPolicy: "reserveMatchingDuplicates" },
+        { requirement: { tier: "silver" }, packIds: [205], packNames: ["Silver Players Premium", "SILVER PLAYERS PREMIUM"], maxOpensPerAttempt: 1, routingPolicy: "reserveMatchingDuplicates" }
       ],
       dailyCompletionLimit: 7,
       maxCompletions: 1

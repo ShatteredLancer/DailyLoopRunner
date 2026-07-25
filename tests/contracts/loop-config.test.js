@@ -216,10 +216,14 @@ describe('loop configuration contracts', () => {
       tier: source.requirement.tier,
       packIds: source.packIds,
       maxOpensPerAttempt: source.maxOpensPerAttempt,
+      routingPolicy: source.routingPolicy,
     }))).toEqual([
-      { tier: 'bronze', packIds: [105], maxOpensPerAttempt: 1 },
-      { tier: 'silver', packIds: [205], maxOpensPerAttempt: 1 },
+      { tier: 'bronze', packIds: [105], maxOpensPerAttempt: 1, routingPolicy: 'reserveMatchingDuplicates' },
+      { tier: 'silver', packIds: [205], maxOpensPerAttempt: 1, routingPolicy: 'reserveMatchingDuplicates' },
     ]);
+    expect(byId(builtIn, 'daily-common-mvp').shortagePacks.every(
+      (source) => source.routingPolicy === 'reserveMatchingDuplicates',
+    )).toBe(true);
     expect(loop.primaryPiles).toEqual(['unassigned', 'storage', 'transfer']);
     expect(loop.clubFallbackPiles).toEqual(['unassigned', 'storage', 'transfer', 'club']);
     expect(loop.preSelectionCleanup).not.toBe(false);

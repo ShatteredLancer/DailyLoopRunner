@@ -630,7 +630,8 @@
             "Premium Bronze Players",
             "BRONZE PLAYERS PREMIUM"
           ],
-          "maxOpensPerAttempt": 1
+          "maxOpensPerAttempt": 1,
+          "routingPolicy": "reserveMatchingDuplicates"
         },
         {
           "requirement": {
@@ -643,7 +644,8 @@
             "Silver Players Premium",
             "SILVER PLAYERS PREMIUM"
           ],
-          "maxOpensPerAttempt": 1
+          "maxOpensPerAttempt": 1,
+          "routingPolicy": "reserveMatchingDuplicates"
         }
       ],
       "dailyCompletionLimit": 7,
@@ -719,7 +721,8 @@
             "Premium Bronze Players",
             "BRONZE PLAYERS PREMIUM"
           ],
-          "maxOpensPerAttempt": 1
+          "maxOpensPerAttempt": 1,
+          "routingPolicy": "reserveMatchingDuplicates"
         },
         {
           "requirement": {
@@ -732,7 +735,8 @@
             "Silver Players Premium",
             "SILVER PLAYERS PREMIUM"
           ],
-          "maxOpensPerAttempt": 1
+          "maxOpensPerAttempt": 1,
+          "routingPolicy": "reserveMatchingDuplicates"
         }
       ],
       "dailyCompletionLimit": 7,
