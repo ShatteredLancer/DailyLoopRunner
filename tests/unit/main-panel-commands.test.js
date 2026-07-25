@@ -14,10 +14,9 @@ function harness(overrides = {}) {
     loopConfigUrl: 'http://127.0.0.1/loops.json',
     refreshInventoryCaches: vi.fn(async () => {}),
     scanPlayerPicks: vi.fn(async () => {}),
-    loadLoopConfig: vi.fn(async () => {}),
-    editLoopConfig: vi.fn(),
-    applyLoopConfigEditor: vi.fn(),
-    resetLoopDefs: vi.fn(),
+    importLoopConfig: vi.fn(async () => {}),
+    openBuilder: vi.fn(),
+    useBuiltIn: vi.fn(),
     getLogText: () => 'line 1\nline 2',
     now: () => 123,
     ...overrides,
@@ -46,13 +45,13 @@ describe('main panel command orchestration', () => {
   it('loads external config with the existing logs and restores loading state on failure', async () => {
     const success = harness();
     await expect(success.commands.loadJson()).resolves.toBe(true);
-    expect(success.log).toHaveBeenCalledWith('Loading loop definitions from http://127.0.0.1/loops.json');
-    expect(success.options.loadLoopConfig).toHaveBeenCalledWith('http://127.0.0.1/loops.json');
+    expect(success.log).toHaveBeenCalledWith('Importing loop definitions from http://127.0.0.1/loops.json into the Builder draft');
+    expect(success.options.importLoopConfig).toHaveBeenCalledWith('http://127.0.0.1/loops.json');
     expect(success.state.loadingLoops).toBe(false);
 
-    const failure = harness({ loadLoopConfig: vi.fn(async () => { throw new Error('bad json'); }) });
+    const failure = harness({ importLoopConfig: vi.fn(async () => { throw new Error('bad json'); }) });
     await expect(failure.commands.loadJson()).resolves.toBe(false);
-    expect(failure.log).toHaveBeenCalledWith('Loop JSON load failed: bad json');
+    expect(failure.log).toHaveBeenCalledWith('Loop JSON import failed: bad json');
     expect(failure.state.loadingLoops).toBe(false);
   });
 
@@ -76,7 +75,7 @@ describe('main panel command orchestration', () => {
   it('preserves built-in, Stop, copy, and download command effects', async () => {
     const current = harness();
     expect(current.commands.useBuiltIn()).toBe(true);
-    expect(current.options.resetLoopDefs).toHaveBeenCalledOnce();
+    expect(current.options.useBuiltIn).toHaveBeenCalledOnce();
 
     current.commands.stop();
     expect(current.state.stopping).toBe(true);
@@ -88,39 +87,23 @@ describe('main panel command orchestration', () => {
     expect(current.userEffects.downloadText).toHaveBeenCalledWith('line 1\nline 2', 'bronze-loop-123.log');
   });
 
-  it('updates the selected loop without duplicating JSON editor behavior', () => {
-    const setLoopJson = vi.fn();
+  it('updates controls when the selected loop changes', () => {
     const updateLoopControls = vi.fn();
-    const loop = { id: 'daily' };
-    const current = harness({
-      getLoopDefById: () => loop,
-      setLoopJson,
-      updateLoopControls,
-    });
+    const current = harness({ updateLoopControls });
     current.commands.selectLoop('daily');
-    expect(setLoopJson).toHaveBeenCalledWith(loop);
-    current.commands.selectLoop('custom');
-    expect(setLoopJson).toHaveBeenCalledOnce();
-    expect(updateLoopControls).toHaveBeenCalledTimes(2);
+    expect(updateLoopControls).toHaveBeenCalledOnce();
   });
 
-  it('edits and applies a full workflow configuration with the same busy guard', () => {
+  it('opens the visual Builder and its JSON validation tab with the same busy guard', () => {
     const success = harness();
-    expect(success.commands.editConfig()).toBe(true);
-    expect(success.options.editLoopConfig).toHaveBeenCalledOnce();
-    expect(success.commands.applyConfig()).toBe(true);
-    expect(success.options.applyLoopConfigEditor).toHaveBeenCalledOnce();
-    expect(success.state.loadingLoops).toBe(false);
-    expect(success.setPanelState).toHaveBeenCalledTimes(2);
+    expect(success.commands.openBuilder()).toBe(true);
+    expect(success.options.openBuilder).toHaveBeenCalledWith('workflows');
+    expect(success.commands.validateJson()).toBe(true);
+    expect(success.options.openBuilder).toHaveBeenCalledWith('json');
 
-    const failure = harness({ applyLoopConfigEditor: vi.fn(() => { throw new Error('unknown loop'); }) });
-    expect(failure.commands.applyConfig()).toBe(false);
-    expect(failure.log).toHaveBeenCalledWith('Workflow JSON apply failed: unknown loop');
-    expect(failure.state.loadingLoops).toBe(false);
-
-    failure.state.running = true;
-    expect(failure.commands.editConfig()).toBe(false);
-    expect(failure.commands.applyConfig()).toBe(false);
+    success.state.running = true;
+    expect(success.commands.openBuilder()).toBe(false);
+    expect(success.commands.validateJson()).toBe(false);
   });
 
   it('does not start or overlap panel operations while another operation is active', async () => {

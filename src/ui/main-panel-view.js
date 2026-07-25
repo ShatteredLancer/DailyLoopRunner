@@ -92,21 +92,6 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel.options-open #bronze-loop-latest { display: none; }
   #bronze-loop-options-scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
   .bronze-loop-section { color: #9fb2c9; font-size: 11px; margin: 8px 0 6px; }
-  #bronze-loop-json {
-    display: none;
-    width: 100%;
-    height: 170px;
-    min-height: 60px;
-    flex-shrink: 1;
-    box-sizing: border-box;
-    margin-bottom: 8px;
-    background: #0c0f13;
-    color: #f4f6f8;
-    border: 1px solid #303946;
-    font: 11px Consolas, monospace;
-    padding: 8px;
-  }
-  #bronze-loop-json.show { display: block; }
   #bronze-loop-log {
     flex: 0 1 110px;
     min-height: 64px;
@@ -193,10 +178,9 @@ export function mainPanelHtml(maxRounds = 3) {
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
         <div class="bronze-loop-section">Config</div>
-          <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-preview-pick-recap">Preview Pick recap</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
-          <div class="row"><button id="bronze-loop-built-in" disabled>Built-in loops</button><button id="bronze-loop-edit">Edit loop JSON</button></div>
-          <div class="row"><button id="bronze-loop-edit-config" title="Edit every loop, workflow step, and recovery policy as one configuration">Edit workflow JSON</button><button id="bronze-loop-apply-config" title="Validate and apply the full workflow configuration in the editor">Apply workflow JSON</button></div>
-          <textarea id="bronze-loop-json" spellcheck="false"></textarea>
+          <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-preview-pick-recap">Preview Pick recap</button></div>
+          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-validate-json" title="Open the Builder JSON validation and import view">Validate JSON</button></div>
+          <div class="row"><button id="bronze-loop-load-json" title="Import the development-server loops JSON into the current Builder draft">Import JSON</button><button id="bronze-loop-built-in" disabled>Built-in loops</button></div>
         </div>
         <div class="bronze-loop-section">Log</div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>

@@ -6,7 +6,7 @@
 
 1. 本文件。
 2. 用户提供的完整日志和截图。
-3. [REFACTORING_MILESTONES.md](REFACTORING_MILESTONES.md) 中相关 Milestone 和已知缺口。
+3. [REFACTORING_MILESTONES.md](docs/REFACTORING_MILESTONES.md) 中相关 Milestone 和已知缺口。
 4. 涉及 FSU Club 加载、缓存、Runner FSU Adapter、运行时库存 readiness 或提交前定向校验时，必须读取 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 5. `git status --short`、最近提交和当前 diff，避免覆盖未提交的正确行为。
 
@@ -225,6 +225,9 @@ EA objects
 - `run-limits.js`：Live guard、One-click 阶段执行策略和安全上限摘要的纯计算；安全上限不得伪装成业务 rounds。
 - `routine-steps.js`：One-click 子 Loop 查找、继承、校验、disabled pile 投影，以及 EA 实时剩余次数到子步骤完成数的投影。
 - `runtime-options.js`：Dry Run、奖励开包、rounds、Pick 82/90 阈值、是否显示 rounds 和延迟集中开启 Pick 的运行时配置投影。
+- `builder-profile.js`：Builder Profile、Draft/Saved/Active、last-known-good、内置三方 rebase、动态 Pick 绑定和 JSON import/export 的纯配置模型。
+- `builder-descriptors.js`：所有已注册 Loop strategy 的可视化字段描述；新增 strategy 时必须同步 descriptor contract。
+- `builder-editor.js`：Workflow step、Step Variant、Loop/Recovery 引用重命名和结构化字段更新的纯编辑操作。
 - `batch-open.js`：Batch Open 持久化计划规范化、稳定包类型 identity、`fixed/all` 数量模式和当前可用数量投影/启动时物化。
 - `player-pick-discovery.js`：从标准 SBC Set/Challenge/Reward 快照保守生成临时 `playerPickSbc` 配置；条件不完整时只返回诊断，不从名称猜测。
 - `fsu-compat.js`：FSU/Enhancer 嵌套设置、Storage 配置和锁卡身份的纯兼容解析。
@@ -429,6 +432,8 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `main-panel-bindings.js`：选项回填和 UI command 事件转发。
 - `main-panel-commands.js`：刷新、配置加载、Stop、复制和下载日志等主面板 command 编排。
 - `main-panel-state.js`：Loop 列表、rounds、recap 和 disabled 状态投影。
+- `workflow-loop-builder-view.js`：全屏 Builder 的结构化 Workflow、Loop、Recovery、Dynamic Pick、Preview 和 JSON validation UI。
+- `workflow-loop-builder.js`：Builder Profile 生命周期、Undo/Redo、事件编排、持久化和经过验证的 runtime activation。
 - `player-pick-modal.js`：人工 Player Pick 选择。
 - `player-pick-recap.js`：Player Pick recap 汇总、卡片列表、价格展示和关闭。
 - `loop-recap.js`：普通 Loop recap 的共享 UI 入口；只调用通用 card renderer。
@@ -448,6 +453,8 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `sbc-reward-overlay.js`：中高，影响页面型 SBC 奖励覆盖层识别和关闭；25 秒等待、Pack 增量和 SBC 进度确认位于 `src/reward/sbc-claim.js`。
 
 UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文本、日志高频更新和 Pick recap。Options 展开后设置控件可以在独立区域滚动，但日志必须始终保留独立的可视滚动区域，不能因为配置变长而被 flex 压缩或裁掉。
+
+Workflow/Loop Builder 的完整设计与阶段状态见 `docs/WORKFLOW_LOOP_BUILDER.md`。Builder Profile、草稿、override、冲突和动态绑定只能存在于 `src/config/builder-*` 与 `src/ui/workflow-loop-builder*`；runner、workflow 和 EA Adapter 仍只接受 `loop-schema.js` 的物化配置。Raw JSON 只允许验证、导入和导出，不得恢复主面板直接执行 JSON 的入口。Draft 可以处于暂时无效状态并跨重载保留，但启动和 Activate 只能使用完整验证的 last-known-good。动态 Pick 持久化后必须先标记 unavailable，只有本次只读扫描按稳定 Set/Reward identity 刷新成功才可物化；禁止把上次快照作为静态 Loop 静默执行。
 
 Reward Alerts 的三个测试入口必须保持解耦：Preview 只展示本地 Toast/烟花，不调用 `GM_notification` 或网络；Desktop test 实际调用本机系统通知；ntfy test 实际发送远程测试消息。不要为了减少按钮数量把真实通知副作用合并进 Preview。
 
@@ -532,7 +539,7 @@ Pack open 返回 `471` 时，重试恢复必须排除刚失败的 Pack 对象，
 - Pick 设置通过 `pickOptions` 逐字段继承，高分保护、阈值、自动选择和 Open Picks at end 都允许父/子 Loop覆盖全局默认。运行期生成的高分上限不得覆盖或删除 requirement 原始 `maxRating`；最终上限取业务上限与保护上限的更严格值。
 - Inventory only 使用 `inventoryMode: inherit | inventory-only | normal`。支持范围必须登记在 `LOOP_STRATEGY_CAPABILITIES`；`dailySingleCardRecycle` 和 Supply-and-Craft family 支持，Pick/Fill/Inventory Exhaustion 本身是 intrinsic，Provision/Rare Pack/Batch Open 不支持。unsupported strategy 显式配置必须 schema 报错。
 
-完整 Workflow 编辑器必须导出当前有效会话列表：静态 configured loops 应先应用 scanned metadata override，再追加纯动态 Pick。Apply 后即使 discovery cache 被清空，物化到配置中的 Pick 仍必须可见和可引用；重新扫描再按稳定 Set/Reward identity 更新或去重。
+Builder 激活必须先物化当前 Profile：静态 configured loops 经过内置三方 rebase，动态 Pick 再按本次扫描结果替换绑定定义。刷新扫描后应重新应用 Active Profile；绑定不可用、内置冲突或 schema/reference 校验失败时保留 last-known-good 或回退 built-ins，不得清空 Draft，也不得把缓存 Pick 降级为普通静态 Loop。JSON import 只更新 Draft，不得直接调用 runtime activation。
 
 ### 6.2 现象到代码定位表
 
@@ -948,4 +955,4 @@ Agent 完成任务时应说明：
 - 旧 strategy 名仍保留外部配置兼容。
 - Player Pick SBC 动态发现已完成保守的纯解析、EA 快照、只读扫描、当前会话列表合并、稳定身份去重、成功重扫替换和可选的静态配置会话覆盖；83+/84+ 动态 Dry Run/Live 已通过并删除静态配置，82+ 多 Challenge/Provision 动态覆盖及其它新 Pick 仍需实盘验证，复杂评分/化学/特殊卡条件仍保持 unsupported，见 M9。
 
-是否删除旧路径或继续物理拆分，以 [REFACTORING_MILESTONES.md](REFACTORING_MILESTONES.md) 为准，不因单个功能任务顺带扩大重构范围。
+是否删除旧路径或继续物理拆分，以 [REFACTORING_MILESTONES.md](docs/REFACTORING_MILESTONES.md) 为准，不因单个功能任务顺带扩大重构范围。

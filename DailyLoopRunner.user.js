@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.64
+// @version      0.6.0
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -28,6 +28,7 @@
   var LOOP_UI_OPTIONS_KEY = "fc-loop-runner-ui-options";
   var REWARD_ALERT_SETTINGS_KEY = "fc-loop-runner-reward-alert-settings";
   var BATCH_OPEN_PLAN_KEY = "fc-loop-runner-batch-open-plan";
+  var BUILDER_PROFILE_KEY = "fc-loop-runner-builder-profiles-v1";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -561,23 +562,23 @@
 
   // src/config/selection.js
   function selectionRequirements(loopDef = {}, priorityPiles = loopDef.priorityPiles) {
-    return (loopDef.requirements || []).map((requirement) => {
-      const protectHighGold = requirement.protectHighGold === true || loopDef.protectHighGold === true;
+    return (loopDef.requirements || []).map((requirement2) => {
+      const protectHighGold = requirement2.protectHighGold === true || loopDef.protectHighGold === true;
       const highGoldThreshold = Number(
-        requirement.highGoldThreshold ?? requirement.protectHighGoldMinRating ?? loopDef.pickHighGoldThreshold ?? 82
+        requirement2.highGoldThreshold ?? requirement2.protectHighGoldMinRating ?? loopDef.pickHighGoldThreshold ?? 82
       );
       return {
-        ...requirement,
-        protectHighGold: requirement.protectHighGold !== void 0 ? requirement.protectHighGold : loopDef.protectHighGold,
-        highGoldThreshold: protectHighGold ? Math.max(2, Math.min(99, Number.isFinite(highGoldThreshold) && highGoldThreshold > 0 ? highGoldThreshold : 82)) : requirement.highGoldThreshold,
-        blockTradeable: requirement.blockTradeable !== void 0 ? requirement.blockTradeable : loopDef.blockTradeable,
+        ...requirement2,
+        protectHighGold: requirement2.protectHighGold !== void 0 ? requirement2.protectHighGold : loopDef.protectHighGold,
+        highGoldThreshold: protectHighGold ? Math.max(2, Math.min(99, Number.isFinite(highGoldThreshold) && highGoldThreshold > 0 ? highGoldThreshold : 82)) : requirement2.highGoldThreshold,
+        blockTradeable: requirement2.blockTradeable !== void 0 ? requirement2.blockTradeable : loopDef.blockTradeable,
         protectedItemIds: [...new Set([
           ...loopDef.protectedItemIds || [],
-          ...requirement.protectedItemIds || []
+          ...requirement2.protectedItemIds || []
         ].map(Number).filter(Boolean))],
         protectedDefinitionIds: [...new Set([
           ...loopDef.protectedDefinitionIds || [],
-          ...requirement.protectedDefinitionIds || []
+          ...requirement2.protectedDefinitionIds || []
         ].map(Number).filter(Boolean))],
         priorityPiles
       };
@@ -588,12 +589,12 @@
     const disabledPiles = new Set(loopDef.disabledPiles || []);
     const priorityPiles = configuredPiles.filter((pile) => !disabledPiles.has(pile));
     if (!priorityPiles.length) throw new Error(`${loopDef.name || "single-card selection"} has no enabled inventory pile`);
-    const [requirement] = selectionRequirements({
+    const [requirement2] = selectionRequirements({
       ...loopDef,
       requirements: [{ ...cardSpec, count: 1, priorityPiles }]
     }, priorityPiles);
-    if (!requirement) throw new Error(`${loopDef.name || "single-card selection"} has no card requirement`);
-    return { requirement, priorityPiles };
+    if (!requirement2) throw new Error(`${loopDef.name || "single-card selection"} has no card requirement`);
+    return { requirement: requirement2, priorityPiles };
   }
 
   // src/domain/objects.js
@@ -622,9 +623,9 @@
   }
   function filterRequirements(requirements, disabledPiles, path) {
     if (!Array.isArray(requirements)) return;
-    requirements.forEach((requirement, index) => {
-      requirement.priorityPiles = filterPileList(
-        requirement.priorityPiles,
+    requirements.forEach((requirement2, index) => {
+      requirement2.priorityPiles = filterPileList(
+        requirement2.priorityPiles,
         disabledPiles,
         `${path}[${index}].priorityPiles`
       );
@@ -880,32 +881,32 @@
     for (const override of overrides) Object.assign(merged, pickOptionOverrides(override));
     return normalizePickRuntimeOptions(merged);
   }
-  function requirementBusinessMaxRating(requirement = {}) {
-    const saved = Number(requirement.maxRatingBeforeHighGoldProtection);
+  function requirementBusinessMaxRating(requirement2 = {}) {
+    const saved = Number(requirement2.maxRatingBeforeHighGoldProtection);
     if (Number.isFinite(saved)) return saved;
-    const current = Number(requirement.maxRating);
-    return requirement.highGoldProtectionMaxRating === true || !Number.isFinite(current) ? null : current;
+    const current = Number(requirement2.maxRating);
+    return requirement2.highGoldProtectionMaxRating === true || !Number.isFinite(current) ? null : current;
   }
-  function applyPickProtectionToRequirement(requirement, options) {
-    const businessMaxRating = requirementBusinessMaxRating(requirement);
-    requirement.protectHighGold = options.protectHighGold;
+  function applyPickProtectionToRequirement(requirement2, options) {
+    const businessMaxRating = requirementBusinessMaxRating(requirement2);
+    requirement2.protectHighGold = options.protectHighGold;
     if (!options.protectHighGold) {
-      delete requirement.highGoldThreshold;
-      if (businessMaxRating === null) delete requirement.maxRating;
-      else requirement.maxRating = businessMaxRating;
-      delete requirement.highGoldProtectionMaxRating;
-      delete requirement.maxRatingBeforeHighGoldProtection;
+      delete requirement2.highGoldThreshold;
+      if (businessMaxRating === null) delete requirement2.maxRating;
+      else requirement2.maxRating = businessMaxRating;
+      delete requirement2.highGoldProtectionMaxRating;
+      delete requirement2.maxRatingBeforeHighGoldProtection;
       return;
     }
     const protectionMaxRating = options.highGoldThreshold - 1;
-    requirement.highGoldThreshold = options.highGoldThreshold;
-    requirement.highGoldProtectionMaxRating = true;
+    requirement2.highGoldThreshold = options.highGoldThreshold;
+    requirement2.highGoldProtectionMaxRating = true;
     if (businessMaxRating !== null) {
-      requirement.maxRatingBeforeHighGoldProtection = businessMaxRating;
-      requirement.maxRating = Math.min(businessMaxRating, protectionMaxRating);
+      requirement2.maxRatingBeforeHighGoldProtection = businessMaxRating;
+      requirement2.maxRating = Math.min(businessMaxRating, protectionMaxRating);
     } else {
-      delete requirement.maxRatingBeforeHighGoldProtection;
-      requirement.maxRating = protectionMaxRating;
+      delete requirement2.maxRatingBeforeHighGoldProtection;
+      requirement2.maxRating = protectionMaxRating;
     }
   }
   function applyPickRuntimeOptions(loopDef, inheritedOptions = {}) {
@@ -922,8 +923,8 @@
     loopDef.pickHighGoldThreshold = options.highGoldThreshold;
     loopDef.autoPickRatingThreshold = options.autoPickThreshold;
     const requirementGroups = [loopDef.requirements, ...loopDef.challengeRequirements || []];
-    requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
-      applyPickProtectionToRequirement(requirement, options);
+    requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement2) => {
+      applyPickProtectionToRequirement(requirement2, options);
     }));
     return loopDef;
   }
@@ -1246,13 +1247,13 @@
       errors.push(`${path} must be a non-empty array`);
       return;
     }
-    requirements.forEach((requirement, index) => {
+    requirements.forEach((requirement2, index) => {
       const reqPath = `${path}[${index}]`;
-      validateCardSpec(requirement, reqPath, errors);
-      if (!Number.isFinite(Number(requirement?.count)) || Number(requirement.count) <= 0) {
+      validateCardSpec(requirement2, reqPath, errors);
+      if (!Number.isFinite(Number(requirement2?.count)) || Number(requirement2.count) <= 0) {
         errors.push(`${reqPath}.count must be a positive number`);
       }
-      validatePileList(requirement?.priorityPiles, `${reqPath}.priorityPiles`, errors);
+      validatePileList(requirement2?.priorityPiles, `${reqPath}.priorityPiles`, errors);
     });
   }
   function validateUpgradeDef(upgradeDef, path, errors) {
@@ -2296,21 +2297,6 @@
     });
   }
 
-  // src/config/session-loops.js
-  function materializeSessionLoopDefs(options = {}) {
-    const configuredLoops = Array.isArray(options.configuredLoops) ? options.configuredLoops : [];
-    const loopOverrides = options.loopOverrides || {};
-    const discoveredLoops = Array.isArray(options.discoveredLoops) ? options.discoveredLoops : [];
-    const result = configuredLoops.map((loop) => loopOverrides[loop?.id] || loop);
-    const ids = new Set(result.map((loop) => loop?.id).filter(Boolean));
-    for (const loop of discoveredLoops) {
-      if (loop?.id && ids.has(loop.id)) continue;
-      result.push(loop);
-      if (loop?.id) ids.add(loop.id);
-    }
-    return result;
-  }
-
   // src/domain/rating.js
   function calculateEaSquadRating(ratings = [], requiredPlayerCount = ratings.length) {
     const count = Number(requiredPlayerCount || ratings.length || 0);
@@ -2336,14 +2322,14 @@
     "LEAGUE_ID",
     "NATION_ID"
   ]);
-  function firstRequirementKey(requirement) {
-    if (requirement?.key !== void 0 && requirement?.key !== null) return requirement.key;
+  function firstRequirementKey(requirement2) {
+    if (requirement2?.key !== void 0 && requirement2?.key !== null) return requirement2.key;
     try {
-      const key = requirement?.getFirstKey?.();
+      const key = requirement2?.getFirstKey?.();
       if (key !== void 0 && key !== null) return key;
     } catch {
     }
-    const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+    const collection = requirement2?.kvPairs?._collection || requirement2?.kvPairs || {};
     return Object.keys(collection)[0];
   }
   function flattenValues(value) {
@@ -2351,49 +2337,49 @@
     if (value === void 0 || value === null) return [];
     return [value];
   }
-  function requirementValues(requirement, key) {
-    const normalized = flattenValues(requirement?.values);
+  function requirementValues(requirement2, key) {
+    const normalized = flattenValues(requirement2?.values);
     if (normalized.length) return normalized;
     try {
-      const values = flattenValues(requirement?.getValue?.(key));
+      const values = flattenValues(requirement2?.getValue?.(key));
       if (values.length) return values;
     } catch {
     }
-    const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+    const collection = requirement2?.kvPairs?._collection || requirement2?.kvPairs || {};
     const direct = flattenValues(collection?.[key]);
     if (direct.length) return direct;
     try {
-      return flattenValues(requirement?.getFirstValue?.(key));
+      return flattenValues(requirement2?.getFirstValue?.(key));
     } catch {
       return [];
     }
   }
-  function requirementCount(requirement, requiredPlayerCount) {
-    const count = Number(requirement?.count);
+  function requirementCount(requirement2, requiredPlayerCount) {
+    const count = Number(requirement2?.count);
     if (count === -1 || !Number.isFinite(count)) return requiredPlayerCount;
     return Math.max(0, Math.min(requiredPlayerCount, count));
   }
   function readEligibilityRequirements(challenge, options = {}) {
     const requiredPlayerCount = Math.max(0, Number(options.requiredPlayerCount || 0) || 0);
     const eligibilityKeyName = options.eligibilityKeyName || ((key) => String(key || ""));
-    return (challenge?.eligibilityRequirements || []).map((requirement) => {
-      const key = firstRequirementKey(requirement);
+    return (challenge?.eligibilityRequirements || []).map((requirement2) => {
+      const key = firstRequirementKey(requirement2);
       return {
-        requirement,
+        requirement: requirement2,
         key,
         keyName: eligibilityKeyName(key),
-        values: requirementValues(requirement, key),
-        count: requirementCount(requirement, requiredPlayerCount)
+        values: requirementValues(requirement2, key),
+        count: requirementCount(requirement2, requiredPlayerCount)
       };
     });
   }
   function rareFlag(item) {
     return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
   }
-  function matchesDynamicRequirement(item, requirement, keyName, rawValues, matchers) {
+  function matchesDynamicRequirement(item, requirement2, keyName, rawValues, matchers) {
     try {
-      if (typeof requirement?.meetsRequirements === "function") {
-        const result = requirement.meetsRequirements(item);
+      if (typeof requirement2?.meetsRequirements === "function") {
+        const result = requirement2.meetsRequirements(item);
         if (typeof result === "boolean") return result;
       }
     } catch {
@@ -2441,7 +2427,7 @@
     const unsupported = [];
     let targetRating = Number(loopDef.ratingSbcFill?.targetRating || 0) || 0;
     for (const entry of readEligibilityRequirements(challenge, { requiredPlayerCount, eligibilityKeyName })) {
-      const { requirement, keyName, values, count } = entry;
+      const { requirement: requirement2, keyName, values, count } = entry;
       if (keyName === "TEAM_RATING") {
         const ratings = values.map(Number).filter(Number.isFinite);
         if (ratings.length) targetRating = Math.max(targetRating, ...ratings);
@@ -2456,14 +2442,14 @@
         continue;
       }
       if (!count || !values.length) {
-        unsupported.push(`${keyName}(count:${requirement?.count ?? "?"}, values:${values.join("/") || "?"})`);
+        unsupported.push(`${keyName}(count:${requirement2?.count ?? "?"}, values:${values.join("/") || "?"})`);
         continue;
       }
       constraints.push({
         id: `challenge-${constraints.length}`,
         label: `${keyName} ${values.join("/")} x${count}`,
         count,
-        matches: (item) => matchesDynamicRequirement(item, requirement, keyName, values, matchers)
+        matches: (item) => matchesDynamicRequirement(item, requirement2, keyName, values, matchers)
       });
     }
     const configuredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
@@ -2690,7 +2676,7 @@
     if (diagnostics.length) return { ok: false, diagnostics };
     const highGoldThreshold = Math.max(2, Math.min(99, Number(options.highGoldThreshold || 82) || 82));
     const maxRating = highGoldThreshold - 1;
-    const requirement = (rarity, count) => ({
+    const requirement2 = (rarity, count) => ({
       tier: "gold",
       rarity,
       count,
@@ -2704,13 +2690,13 @@
     });
     const requirements = [];
     if (!rarityEntries.length) {
-      const unrestricted = requirement(void 0, requiredPlayerCount);
+      const unrestricted = requirement2(void 0, requiredPlayerCount);
       delete unrestricted.rarity;
       unrestricted.preferCommon = true;
       requirements.push(unrestricted);
     } else {
-      if (rarityCounts.rare > 0) requirements.push(requirement("rare", rarityCounts.rare));
-      if (rarityCounts.common > 0) requirements.push(requirement("common", rarityCounts.common));
+      if (rarityCounts.rare > 0) requirements.push(requirement2("rare", rarityCounts.rare));
+      if (rarityCounts.common > 0) requirements.push(requirement2("common", rarityCounts.common));
     }
     return { ok: true, requiredPlayerCount, requirements };
   }
@@ -2912,13 +2898,13 @@
     };
     if (Array.isArray(discoveredLoop.challengeRequirements)) {
       merged.challengeRequirements = discoveredLoop.challengeRequirements.map(
-        (requirements) => requirements.map((requirement) => ({ ...requirement, priorityPiles: [...requirement.priorityPiles || []] }))
+        (requirements) => requirements.map((requirement2) => ({ ...requirement2, priorityPiles: [...requirement2.priorityPiles || []] }))
       );
       delete merged.requirements;
     } else {
-      merged.requirements = (discoveredLoop.requirements || []).map((requirement) => ({
-        ...requirement,
-        priorityPiles: [...requirement.priorityPiles || []]
+      merged.requirements = (discoveredLoop.requirements || []).map((requirement2) => ({
+        ...requirement2,
+        priorityPiles: [...requirement2.priorityPiles || []]
       }));
       delete merged.challengeRequirements;
     }
@@ -2960,6 +2946,18 @@
       loopDefs,
       selectedId
     };
+  }
+  function collectScannedPlayerPickLoopDefs(results = []) {
+    const loops = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const result of results || []) {
+      const loop = result?.discoveredLoop || result?.loop;
+      const id = normalizedText2(loop?.id);
+      if (!loop || !id || seen.has(id)) continue;
+      seen.add(id);
+      loops.push(loop);
+    }
+    return loops;
   }
 
   // src/adapters/browser/dom.js
@@ -4452,14 +4450,14 @@
       if (/^[A-Z][A-Z0-9_]+$/.test(keyText)) return keyText;
       return `UNKNOWN_${keyText || "?"}`;
     }
-    function firstRequirementKey2(requirement) {
-      if (requirement?.key !== void 0 && requirement?.key !== null) return requirement.key;
+    function firstRequirementKey2(requirement2) {
+      if (requirement2?.key !== void 0 && requirement2?.key !== null) return requirement2.key;
       try {
-        const key = requirement?.getFirstKey?.();
+        const key = requirement2?.getFirstKey?.();
         if (key !== void 0 && key !== null) return key;
       } catch {
       }
-      const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+      const collection = requirement2?.kvPairs?._collection || requirement2?.kvPairs || {};
       return Object.keys(collection)[0];
     }
     function flattenValues2(value) {
@@ -4467,19 +4465,19 @@
       if (value === void 0 || value === null) return [];
       return [value];
     }
-    function requirementValues2(requirement, key) {
-      const normalized = flattenValues2(requirement?.values);
+    function requirementValues2(requirement2, key) {
+      const normalized = flattenValues2(requirement2?.values);
       if (normalized.length) return normalized;
       try {
-        const values = flattenValues2(requirement?.getValue?.(key));
+        const values = flattenValues2(requirement2?.getValue?.(key));
         if (values.length) return values;
       } catch {
       }
-      const collection = requirement?.kvPairs?._collection || requirement?.kvPairs || {};
+      const collection = requirement2?.kvPairs?._collection || requirement2?.kvPairs || {};
       const direct = flattenValues2(collection?.[key]);
       if (direct.length) return direct;
       try {
-        return flattenValues2(requirement?.getFirstValue?.(key));
+        return flattenValues2(requirement2?.getFirstValue?.(key));
       } catch {
         return [];
       }
@@ -4629,12 +4627,12 @@
           }
         })(),
         requiredPlayerCount: discoveryRequiredPlayerCount(challenge),
-        eligibilityRequirements: (challenge?.eligibilityRequirements || []).map((requirement) => {
-          const key = firstRequirementKey2(requirement);
+        eligibilityRequirements: (challenge?.eligibilityRequirements || []).map((requirement2) => {
+          const key = firstRequirementKey2(requirement2);
           return {
             key: eligibilityKeyName(key),
-            values: requirementValues2(requirement, key),
-            count: Number.isFinite(Number(requirement?.count)) ? Number(requirement.count) : null
+            values: requirementValues2(requirement2, key),
+            count: Number.isFinite(Number(requirement2?.count)) ? Number(requirement2.count) : null
           };
         })
       };
@@ -4773,31 +4771,31 @@
   function isNormalGold(item) {
     return item.tier === "gold" && !item.special;
   }
-  function resolveHighGoldThreshold(requirement = {}) {
-    const raw = requirement.highGoldThreshold ?? requirement.protectHighGoldMinRating ?? 82;
+  function resolveHighGoldThreshold(requirement2 = {}) {
+    const raw = requirement2.highGoldThreshold ?? requirement2.protectHighGoldMinRating ?? 82;
     const value = Number(raw);
     return Math.max(2, Math.min(99, Number.isFinite(value) && value > 0 ? value : 82));
   }
-  function itemMatchesRequirement(item, requirement = {}) {
-    if (requirement.playerOnly && item.type !== "player") return false;
-    if (requirement.minRating !== void 0 && item.rating < Number(requirement.minRating)) return false;
-    if (requirement.maxRating !== void 0 && item.rating > Number(requirement.maxRating)) return false;
-    if (requirement.blockTradeable === true && item.tradeable && !isNormalGold(item)) return false;
-    if (requirement.special === true && !item.special) return false;
-    if (requirement.special === false && item.special) return false;
-    if (requirement.special !== true && requirement.allowSpecial !== true && item.special) return false;
-    if (requirement.tier && item.tier !== requirement.tier) return false;
-    if (requirement.rarity === "rare" && !item.rare) return false;
-    if (requirement.rarity === "common" && item.rare) return false;
+  function itemMatchesRequirement(item, requirement2 = {}) {
+    if (requirement2.playerOnly && item.type !== "player") return false;
+    if (requirement2.minRating !== void 0 && item.rating < Number(requirement2.minRating)) return false;
+    if (requirement2.maxRating !== void 0 && item.rating > Number(requirement2.maxRating)) return false;
+    if (requirement2.blockTradeable === true && item.tradeable && !isNormalGold(item)) return false;
+    if (requirement2.special === true && !item.special) return false;
+    if (requirement2.special === false && item.special) return false;
+    if (requirement2.special !== true && requirement2.allowSpecial !== true && item.special) return false;
+    if (requirement2.tier && item.tier !== requirement2.tier) return false;
+    if (requirement2.rarity === "rare" && !item.rare) return false;
+    if (requirement2.rarity === "common" && item.rare) return false;
     return true;
   }
-  function rejectionReasons(item, requirement, fsuPolicy, protection) {
+  function rejectionReasons(item, requirement2, fsuPolicy, protection) {
     const reasons = [];
     if (item.type !== "player") reasons.push("not-player");
     if (protection.consumedItemIds.has(item.id)) reasons.push("consumed-item");
     if (protection.protectedItemIds.has(item.id)) reasons.push("protected-item");
     if (protection.protectedDefinitionIds.has(item.definitionId)) reasons.push("protected-definition");
-    if (requirement.protectHighGold && item.tier === "gold" && item.rating >= resolveHighGoldThreshold(requirement)) {
+    if (requirement2.protectHighGold && item.tier === "gold" && item.rating >= resolveHighGoldThreshold(requirement2)) {
       reasons.push("protected-high-gold");
     }
     if (item.limitedUse) reasons.push("limited-use");
@@ -4814,11 +4812,11 @@
       const [minRating = 75, maxRating = 83] = fsuPolicy.goldRange || [75, 83];
       if (item.rating < Number(minRating) || item.rating > Number(maxRating)) reasons.push(`fsu-gold-range-${minRating}-${maxRating}`);
     }
-    if (fsuPolicy.useRarityPlayer === false && requirement.special !== true && requirement.allowSpecial !== true && item.special) reasons.push("fsu-rarity-player-off");
-    if (!itemMatchesRequirement(item, requirement)) reasons.push("requirement-mismatch");
+    if (fsuPolicy.useRarityPlayer === false && requirement2.special !== true && requirement2.allowSpecial !== true && item.special) reasons.push("fsu-rarity-player-off");
+    if (!itemMatchesRequirement(item, requirement2)) reasons.push("requirement-mismatch");
     return reasons;
   }
-  function sortCandidates(items, requirement, fsuPolicy, preferredRefs = []) {
+  function sortCandidates(items, requirement2, fsuPolicy, preferredRefs = []) {
     return [...items].sort((a, b) => {
       const aPreferred = isPreferredItem(a, preferredRefs);
       const bPreferred = isPreferredItem(b, preferredRefs);
@@ -4827,7 +4825,7 @@
       const [minRating = 75, maxRating = 83] = fsuPolicy.goldRange || [75, 83];
       const aGoldRange = a.tier === "gold" && a.rating >= minRating && a.rating <= maxRating;
       const bGoldRange = b.tier === "gold" && b.rating >= minRating && b.rating <= maxRating;
-      if (fsuPolicy.priorityRareWithinGoldRange && requirement.rarity === void 0 && aGoldRange && bGoldRange && a.rare !== b.rare) {
+      if (fsuPolicy.priorityRareWithinGoldRange && requirement2.rarity === void 0 && aGoldRange && bGoldRange && a.rare !== b.rare) {
         return Number(b.rare) - Number(a.rare);
       }
       const aLowTier = a.tier === "bronze" || a.tier === "silver";
@@ -4836,20 +4834,20 @@
       return a.rating - b.rating || Number(a.rare) - Number(b.rare) || a.id - b.id;
     });
   }
-  function findSubmissionItem(signal, snapshot, usedIds, requirement, fsuPolicy, protection) {
-    const candidates = [...snapshot.piles.storage, ...snapshot.piles.club].filter((item) => !usedIds.has(item.id) && rejectionReasons(item, requirement, fsuPolicy, protection).length === 0);
+  function findSubmissionItem(signal, snapshot, usedIds, requirement2, fsuPolicy, protection) {
+    const candidates = [...snapshot.piles.storage, ...snapshot.piles.club].filter((item) => !usedIds.has(item.id) && rejectionReasons(item, requirement2, fsuPolicy, protection).length === 0);
     if (signal.duplicateId) {
       const direct = candidates.find((item) => item.id === signal.duplicateId);
       if (direct) return direct;
     }
-    return sortCandidates(candidates, requirement, fsuPolicy).find((item) => item.definitionId === signal.definitionId) || null;
+    return sortCandidates(candidates, requirement2, fsuPolicy).find((item) => item.definitionId === signal.definitionId) || null;
   }
-  function requirementSelectionPhases(requirement = {}) {
-    const preferCommon = requirement.preferCommon === true && requirement.tier === "gold" && requirement.rarity === void 0;
-    if (!preferCommon) return [requirement];
+  function requirementSelectionPhases(requirement2 = {}) {
+    const preferCommon = requirement2.preferCommon === true && requirement2.tier === "gold" && requirement2.rarity === void 0;
+    if (!preferCommon) return [requirement2];
     return [
-      { ...requirement, rarity: "common" },
-      { ...requirement, rarity: "rare" }
+      { ...requirement2, rarity: "common" },
+      { ...requirement2, rarity: "rare" }
     ];
   }
   function selectInventoryPlayers(input = {}) {
@@ -4866,21 +4864,21 @@
     const selectedIds = /* @__PURE__ */ new Set();
     const selectedDefinitionIds = /* @__PURE__ */ new Set();
     const submissionIds = /* @__PURE__ */ new Set();
-    const selected = [];
+    const selected2 = [];
     const entries = [];
     const pileCounts = {};
     const duplicateSignals = [];
     const diagnostics = [];
     const preferredSignalRefs = preferredItemRefs(input.preferredSignalRefs);
-    for (const requirement of requirements) {
-      let need = Number(requirement.count || 0);
+    for (const requirement2 of requirements) {
+      let need = Number(requirement2.count || 0);
       const requirementProtection = {
         consumedItemIds: protection.consumedItemIds,
-        protectedItemIds: /* @__PURE__ */ new Set([...protection.protectedItemIds, ...numberSet(requirement.protectedItemIds)]),
-        protectedDefinitionIds: /* @__PURE__ */ new Set([...protection.protectedDefinitionIds, ...numberSet(requirement.protectedDefinitionIds)])
+        protectedItemIds: /* @__PURE__ */ new Set([...protection.protectedItemIds, ...numberSet(requirement2.protectedItemIds)]),
+        protectedDefinitionIds: /* @__PURE__ */ new Set([...protection.protectedDefinitionIds, ...numberSet(requirement2.protectedDefinitionIds)])
       };
-      const piles = applyPilePriority(requirement.priorityPiles || defaultPiles, fsuPolicy).filter((pile) => INVENTORY_PILES2.includes(pile));
-      for (const phaseRequirement of requirementSelectionPhases(requirement)) {
+      const piles = applyPilePriority(requirement2.priorityPiles || defaultPiles, fsuPolicy).filter((pile) => INVENTORY_PILES2.includes(pile));
+      for (const phaseRequirement of requirementSelectionPhases(requirement2)) {
         if (need <= 0) break;
         for (const pileName of piles) {
           if (need <= 0) break;
@@ -4908,7 +4906,7 @@
             selectedIds.add(item.id);
             selectedDefinitionIds.add(item.definitionId);
             submissionIds.add(item.id);
-            selected.push(item);
+            selected2.push(item);
             entries.push({ pileName, signalRef: signal?.ref || null, itemRef: item.ref });
             pileCounts[pileName] = (pileCounts[pileName] || 0) + 1;
             need--;
@@ -4920,8 +4918,8 @@
           ok: false,
           mode: input.mode || "requirements",
           entries,
-          selected,
-          missing: { ...requirement, count: need },
+          selected: selected2,
+          missing: { ...requirement2, count: need },
           pileCounts,
           duplicateSignals,
           diagnostics
@@ -4932,7 +4930,7 @@
       ok: true,
       mode: input.mode || "requirements",
       entries,
-      selected,
+      selected: selected2,
       missing: null,
       pileCounts,
       duplicateSignals,
@@ -5167,13 +5165,13 @@
         const ratingValue = calculateEaSquadRating(step.ratings, requiredCount);
         descendingRatings.pop();
         usedCounts.delete(rating);
-        const selected = materialized.entries.map((entry) => entry.item);
+        const selected2 = materialized.entries.map((entry) => entry.item);
         const duplicateSignals = materialized.entries.filter((entry) => entry.signal?.ref || entry.signalRef).map((entry) => ({ pileName: entry.pileName, signalRef: entry.signal?.ref || entry.signalRef, itemRef: entry.item.ref }));
         return createSelectionPlan({
           ok: true,
           mode: "rating",
           entries: planEntries(materialized.entries),
-          selected,
+          selected: selected2,
           missing: null,
           pileCounts: materialized.pileCounts,
           duplicateSignals,
@@ -5947,11 +5945,11 @@
       (a, b) => b.rating - a.rating || Number(b.special) - Number(a.special) || Number(a.duplicate) - Number(b.duplicate) || (b.price ?? -1) - (a.price ?? -1) || a.index - b.index
     );
   }
-  function capturePlayerPickSelections(selected, ranked, options = {}) {
+  function capturePlayerPickSelections(selected2, ranked, options = {}) {
     const isSpecial = options.isSpecial || (() => false);
     const isDuplicate = options.isDuplicate || (() => false);
     const isRare = options.isRare || (() => false);
-    return (selected || []).map((item) => {
+    return (selected2 || []).map((item) => {
       const candidate = ranked.find((entry) => entry.item === item);
       return {
         item,
@@ -6915,25 +6913,25 @@
     if (spec.allowSpecial === true) return "any";
     return "normal";
   }
-  function requirementAcceptsRecoveryMatch(requirement = {}, match = {}) {
-    if (requirement.playerOnly && match.playerOnly !== true) return false;
-    if (requirement.tier && requirement.tier !== match.tier) return false;
-    if (requirement.rarity && requirement.rarity !== match.rarity) return false;
-    const requirementSpecialMode = specialMode(requirement);
+  function requirementAcceptsRecoveryMatch(requirement2 = {}, match = {}) {
+    if (requirement2.playerOnly && match.playerOnly !== true) return false;
+    if (requirement2.tier && requirement2.tier !== match.tier) return false;
+    if (requirement2.rarity && requirement2.rarity !== match.rarity) return false;
+    const requirementSpecialMode = specialMode(requirement2);
     const matchSpecialMode = specialMode(match);
     if (requirementSpecialMode !== "any" && requirementSpecialMode !== matchSpecialMode) return false;
-    if (requirement.minRating !== void 0) {
-      if (match.minRating === void 0 || Number(match.minRating) < Number(requirement.minRating)) return false;
+    if (requirement2.minRating !== void 0) {
+      if (match.minRating === void 0 || Number(match.minRating) < Number(requirement2.minRating)) return false;
     }
-    if (requirement.maxRating !== void 0) {
-      if (match.maxRating === void 0 || Number(match.maxRating) > Number(requirement.maxRating)) return false;
+    if (requirement2.maxRating !== void 0) {
+      if (match.maxRating === void 0 || Number(match.maxRating) > Number(requirement2.maxRating)) return false;
     }
     return true;
   }
   function recoveryTriggerCapacity(recipe2 = {}, policy = {}) {
-    return (recipe2.requirements || []).reduce((total, requirement) => {
-      if (!requirementAcceptsRecoveryMatch(requirement, policy.match || {})) return total;
-      return total + Math.max(0, Number(requirement.count || 0));
+    return (recipe2.requirements || []).reduce((total, requirement2) => {
+      if (!requirementAcceptsRecoveryMatch(requirement2, policy.match || {})) return total;
+      return total + Math.max(0, Number(requirement2.count || 0));
     }, 0);
   }
   function selectedRecoveryTriggerCount(selection, expectedRefs = []) {
@@ -8009,18 +8007,18 @@
     return { status: "submitted", challengeContext, submittedCount };
   }
   async function selectPick(options, result, pickItem, metadata = {}) {
-    const selected = await options.redeemPick({ result, pickItem, ...metadata });
-    await emit4(options, "pick", { result, pickItem, ...metadata, selected });
-    const selectedOutcome = outcome(selected);
+    const selected2 = await options.redeemPick({ result, pickItem, ...metadata });
+    await emit4(options, "pick", { result, pickItem, ...metadata, selected: selected2 });
+    const selectedOutcome = outcome(selected2);
     if (selectedOutcome !== "selected") {
       return {
         status: selectedOutcome,
-        reason: selected?.reason || `Player Pick selection ${selectedOutcome}`
+        reason: selected2?.reason || `Player Pick selection ${selectedOutcome}`
       };
     }
-    result.pickResults.push({ ...metadata, pickedCards: selected.pickedCards || [] });
+    result.pickResults.push({ ...metadata, pickedCards: selected2.pickedCards || [] });
     result.picksCompleted++;
-    await options.afterPick?.({ result, ...metadata, selected });
+    await options.afterPick?.({ result, ...metadata, selected: selected2 });
     return { status: "selected" };
   }
   async function runDeferredPlayerPicks(options, result, maxPicks) {
@@ -8077,13 +8075,13 @@
         result.reason = "Queued Player Pick reward was not found";
         break;
       }
-      const selected = await selectPick(options, result, pending[0], {
+      const selected2 = await selectPick(options, result, pending[0], {
         resumed: result.picksCompleted < initialQueuedCount,
         deferred: true
       });
-      if (selected.status !== "selected") {
-        result.status = selected.status;
-        result.reason = selected.reason;
+      if (selected2.status !== "selected") {
+        result.status = selected2.status;
+        result.reason = selected2.reason;
         break;
       }
     }
@@ -8117,10 +8115,10 @@
       while (result.picksCompleted < maxPicks) {
         const pendingPick = await options.findPendingPick({ result });
         if (!pendingPick) break;
-        const selected = await selectPick(options, result, pendingPick, { resumed: true, deferred: false });
-        if (selected.status === "selected") continue;
-        result.status = selected.status;
-        result.reason = selected.reason || `pending Pick ${selected.status}`;
+        const selected2 = await selectPick(options, result, pendingPick, { resumed: true, deferred: false });
+        if (selected2.status === "selected") continue;
+        result.status = selected2.status;
+        result.reason = selected2.reason || `pending Pick ${selected2.status}`;
         break;
       }
       while (result.status === "completed" && result.picksCompleted < maxPicks) {
@@ -8145,10 +8143,10 @@
           result.reason = "Player Pick reward was not found";
           break;
         }
-        const selected = await selectPick(options, result, rewardPick, { resumed: false, deferred: false });
-        if (selected.status !== "selected") {
-          result.status = selected.status;
-          result.reason = selected.reason;
+        const selected2 = await selectPick(options, result, rewardPick, { resumed: false, deferred: false });
+        if (selected2.status !== "selected") {
+          result.status = selected2.status;
+          result.reason = selected2.reason;
           break;
         }
       }
@@ -8692,8 +8690,8 @@
       "'": "&#39;"
     })[ch]);
   }
-  function formatLogHtml(lines = [], escapeHtml = escapeLogHtml) {
-    return lines.map((line) => escapeHtml(line).replace(
+  function formatLogHtml(lines = [], escapeHtml2 = escapeLogHtml) {
+    return lines.map((line) => escapeHtml2(line).replace(
       /(rating:(?:9[1-9]|[1-9]\d{2,}))/g,
       '<span class="bronze-loop-log-high-rated">$1</span>'
     )).join("\n");
@@ -8771,16 +8769,9 @@
     const commands = options.commands || {};
     if (!panel?.querySelector) throw new TypeError("panel element is required");
     const select = required(panel, "#bronze-loop-select");
-    const editor = required(panel, "#bronze-loop-json");
     select.addEventListener("change", (event) => commands.selectLoop?.(event.target?.value, event));
-    required(panel, "#bronze-loop-edit").addEventListener("click", (event) => {
-      editor.classList.toggle("show");
-      if (editor.classList.contains("show")) select.value = "custom";
-      commands.editJson?.({ visible: editor.classList.contains("show"), event });
-    });
-    required(panel, "#bronze-loop-edit-config").addEventListener("click", (event) => commands.editConfig?.(event));
-    required(panel, "#bronze-loop-apply-config").addEventListener("click", (event) => commands.applyConfig?.(event));
-    editor.addEventListener("input", (event) => commands.jsonInput?.(event));
+    required(panel, "#bronze-loop-open-builder").addEventListener("click", (event) => commands.openBuilder?.(event));
+    required(panel, "#bronze-loop-validate-json").addEventListener("click", (event) => commands.validateJson?.(event));
     PICK_OPTION_IDS.forEach((id) => {
       required(panel, `#${id}`).addEventListener("change", (event) => commands.savePickOptions?.(event));
     });
@@ -8827,32 +8818,19 @@
     const setPanelState = options.setPanelState || (() => {
     });
     const commands = {
-      selectLoop(selectedId) {
-        if (selectedId !== "custom") options.setLoopJson?.(options.getLoopDefById?.(selectedId));
+      selectLoop() {
         options.updateLoopControls?.();
       },
-      editJson: options.updateLoopControls,
-      editConfig() {
+      openBuilder() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-        options.editLoopConfig?.();
+        options.openBuilder?.("workflows");
         return true;
       },
-      applyConfig() {
+      validateJson() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-        state.loadingLoops = true;
-        setPanelState();
-        try {
-          options.applyLoopConfigEditor?.();
-          return true;
-        } catch (error) {
-          log(`Workflow JSON apply failed: ${error?.message || error}`);
-          return false;
-        } finally {
-          state.loadingLoops = false;
-          setPanelState();
-        }
+        options.openBuilder?.("json");
+        return true;
       },
-      jsonInput: options.updateLoopControls,
       async savePickOptions(event) {
         options.savePickOptions?.(event);
         if (event?.target?.id !== "bronze-loop-pick-prefer-scanned" || event.target.checked !== true) return true;
@@ -8912,11 +8890,11 @@
         state.loadingLoops = true;
         setPanelState();
         try {
-          log(`Loading loop definitions from ${options.loopConfigUrl}`);
-          await options.loadLoopConfig?.(options.loopConfigUrl);
+          log(`Importing loop definitions from ${options.loopConfigUrl} into the Builder draft`);
+          await options.importLoopConfig?.(options.loopConfigUrl);
           return true;
         } catch (error) {
-          log(`Loop JSON load failed: ${error?.message || error}`);
+          log(`Loop JSON import failed: ${error?.message || error}`);
           return false;
         } finally {
           state.loadingLoops = false;
@@ -8925,7 +8903,7 @@
       },
       useBuiltIn() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-        options.resetLoopDefs?.();
+        options.useBuiltIn?.();
         setPanelState();
         return true;
       },
@@ -9224,10 +9202,6 @@
       option.textContent = loop.name;
       select.appendChild(option);
     }
-    const custom = createOption();
-    custom.value = "custom";
-    custom.textContent = "Custom JSON";
-    select.appendChild(custom);
     const values = Array.from(select.options || []).map((option) => option.value);
     const nextValue = values.includes(previous) ? previous : loops[0]?.id;
     if (nextValue) select.value = nextValue;
@@ -9285,14 +9259,13 @@
     const panel = options.panel;
     const state = options.state || {};
     const busy = state.running === true || state.refreshing === true || state.scanningPicks === true || state.loadingLoops === true;
-    const disabled = {
+    const disabled2 = {
       "bronze-loop-start": busy,
       "bronze-loop-batch-open": busy,
       "bronze-loop-stop": state.running !== true,
       "bronze-loop-select": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
-      "bronze-loop-edit": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
-      "bronze-loop-edit-config": busy,
-      "bronze-loop-apply-config": busy,
+      "bronze-loop-open-builder": busy,
+      "bronze-loop-validate-json": busy,
       "bronze-loop-refresh": busy,
       "bronze-loop-scan-picks": busy,
       "bronze-loop-load-json": busy,
@@ -9308,10 +9281,9 @@
       "bronze-loop-pick-auto-threshold": state.running === true,
       "bronze-loop-show-mvp": state.running === true,
       "bronze-loop-reward-alert-settings": state.running === true,
-      "bronze-loop-rounds": state.running === true,
-      "bronze-loop-json": state.running === true
+      "bronze-loop-rounds": state.running === true
     };
-    for (const [id, value] of Object.entries(disabled)) {
+    for (const [id, value] of Object.entries(disabled2)) {
       const element = query(panel, `#${id}`);
       if (element) element.disabled = value;
     }
@@ -9412,21 +9384,6 @@
   #bronze-loop-panel.options-open #bronze-loop-latest { display: none; }
   #bronze-loop-options-scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
   .bronze-loop-section { color: #9fb2c9; font-size: 11px; margin: 8px 0 6px; }
-  #bronze-loop-json {
-    display: none;
-    width: 100%;
-    height: 170px;
-    min-height: 60px;
-    flex-shrink: 1;
-    box-sizing: border-box;
-    margin-bottom: 8px;
-    background: #0c0f13;
-    color: #f4f6f8;
-    border: 1px solid #303946;
-    font: 11px Consolas, monospace;
-    padding: 8px;
-  }
-  #bronze-loop-json.show { display: block; }
   #bronze-loop-log {
     flex: 0 1 110px;
     min-height: 64px;
@@ -9510,10 +9467,9 @@
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
         <div class="bronze-loop-section">Config</div>
-          <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-preview-pick-recap">Preview Pick recap</button><button id="bronze-loop-load-json">Load loops JSON</button></div>
-          <div class="row"><button id="bronze-loop-built-in" disabled>Built-in loops</button><button id="bronze-loop-edit">Edit loop JSON</button></div>
-          <div class="row"><button id="bronze-loop-edit-config" title="Edit every loop, workflow step, and recovery policy as one configuration">Edit workflow JSON</button><button id="bronze-loop-apply-config" title="Validate and apply the full workflow configuration in the editor">Apply workflow JSON</button></div>
-          <textarea id="bronze-loop-json" spellcheck="false"></textarea>
+          <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-preview-pick-recap">Preview Pick recap</button></div>
+          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-validate-json" title="Open the Builder JSON validation and import view">Validate JSON</button></div>
+          <div class="row"><button id="bronze-loop-load-json" title="Import the development-server loops JSON into the current Builder draft">Import JSON</button><button id="bronze-loop-built-in" disabled>Built-in loops</button></div>
         </div>
         <div class="bronze-loop-section">Log</div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
@@ -9547,6 +9503,2523 @@
     panel.classList.toggle("startup-hidden", hidden === true);
     if (hidden === true) panel.setAttribute?.("aria-hidden", "true");
     else panel.removeAttribute?.("aria-hidden");
+  }
+
+  // src/config/builder-profile.js
+  var BUILDER_SCHEMA_VERSION = 1;
+  var ENTITY_COLLECTIONS = Object.freeze([
+    "loops",
+    "recoveryRecipes",
+    "unassignedRecoveryPolicies"
+  ]);
+  function clone(value) {
+    return cloneLoopDef(value);
+  }
+  function stableValue(value) {
+    if (Array.isArray(value)) return value.map(stableValue);
+    if (!isPlainObject(value)) return value;
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+  }
+  function sameValue(left, right) {
+    return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+  }
+  function valueAt(value, path) {
+    let current = value;
+    for (const key of path) {
+      if (!isPlainObject(current) && !Array.isArray(current)) return void 0;
+      current = current[key];
+    }
+    return current;
+  }
+  function setValueAt(value, path, nextValue) {
+    if (!path.length) return clone(nextValue);
+    const result = isPlainObject(value) ? clone(value) : {};
+    let current = result;
+    for (const key2 of path.slice(0, -1)) {
+      if (!isPlainObject(current[key2])) current[key2] = {};
+      current = current[key2];
+    }
+    const key = path.at(-1);
+    if (nextValue === void 0) delete current[key];
+    else current[key] = clone(nextValue);
+    return result;
+  }
+  function replaceEntity(items, id, entity) {
+    const result = [];
+    let replaced = false;
+    for (const item of items || []) {
+      if (String(item?.id || "") !== String(id)) {
+        result.push(clone(item));
+        continue;
+      }
+      replaced = true;
+      if (entity) result.push(clone(entity));
+    }
+    if (!replaced && entity) result.push(clone(entity));
+    return result;
+  }
+  function mergePatch(base, patch) {
+    if (!isPlainObject(patch)) return clone(patch);
+    const result = isPlainObject(base) ? clone(base) : {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) delete result[key];
+      else result[key] = isPlainObject(value) ? mergePatch(result[key], value) : clone(value);
+    }
+    return result;
+  }
+  function createPatch(base, target) {
+    if (sameValue(base, target)) return void 0;
+    if (!isPlainObject(base) || !isPlainObject(target)) return clone(target);
+    const patch = {};
+    const keys = /* @__PURE__ */ new Set([...Object.keys(base), ...Object.keys(target)]);
+    for (const key of keys) {
+      if (!Object.hasOwn(target, key)) {
+        patch[key] = null;
+        continue;
+      }
+      if (!Object.hasOwn(base, key)) {
+        patch[key] = clone(target[key]);
+        continue;
+      }
+      const child = createPatch(base[key], target[key]);
+      if (child !== void 0) patch[key] = child;
+    }
+    return Object.keys(patch).length ? patch : void 0;
+  }
+  function patchLeafPaths(patch, prefix = []) {
+    if (!isPlainObject(patch)) return [prefix];
+    const entries = Object.entries(patch);
+    if (!entries.length) return [prefix];
+    return entries.flatMap(([key, value]) => patchLeafPaths(value, [...prefix, key]));
+  }
+  function entityMap(items = []) {
+    return new Map((items || []).filter((item) => item?.id).map((item) => [String(item.id), item]));
+  }
+  function rebaseEntityCollection(collection, baseItems, targetItems, currentItems) {
+    const base = entityMap(baseItems);
+    const target = entityMap(targetItems);
+    const current = entityMap(currentItems);
+    const orderedIds = (targetItems || []).map((item) => String(item?.id || "")).filter(Boolean);
+    for (const item of currentItems || []) {
+      const id = String(item?.id || "");
+      if (id && !base.has(id) && !target.has(id)) orderedIds.push(id);
+    }
+    const entities = [];
+    const conflicts = [];
+    for (const id of [...new Set(orderedIds)]) {
+      const baseEntity = base.get(id);
+      const targetEntity = target.get(id);
+      const currentEntity = current.get(id);
+      if (!targetEntity) {
+        if (!baseEntity && currentEntity) entities.push(clone(currentEntity));
+        continue;
+      }
+      if (!baseEntity) {
+        if (currentEntity && !sameValue(currentEntity, targetEntity)) {
+          conflicts.push({ collection, id, path: "", reason: "custom-id-collision" });
+        }
+        entities.push(clone(targetEntity));
+        continue;
+      }
+      if (!currentEntity) {
+        conflicts.push({ collection, id, path: "", reason: "built-in-removed" });
+        entities.push(clone(targetEntity));
+        continue;
+      }
+      if (sameValue(baseEntity, targetEntity)) {
+        entities.push(clone(currentEntity));
+        continue;
+      }
+      const patch = createPatch(baseEntity, targetEntity);
+      for (const path of patchLeafPaths(patch)) {
+        const before = valueAt(baseEntity, path);
+        const upstream = valueAt(currentEntity, path);
+        const desired = valueAt(targetEntity, path);
+        if (!sameValue(before, upstream) && !sameValue(upstream, desired)) {
+          conflicts.push({
+            collection,
+            id,
+            path: path.join("."),
+            reason: "both-changed",
+            base: clone(before),
+            builtIn: clone(upstream),
+            profile: clone(desired)
+          });
+        }
+      }
+      entities.push(mergePatch(currentEntity, patch));
+    }
+    return { entities, conflicts };
+  }
+  function rebaseDefaultPolicies(baseConfig, targetConfig, currentConfig) {
+    const field2 = "defaultUnassignedRecoveryPolicyIds";
+    const base = baseConfig[field2];
+    const target = targetConfig[field2];
+    const current = currentConfig[field2];
+    if (sameValue(base, target)) return { value: clone(current), conflicts: [] };
+    if (!sameValue(base, current) && !sameValue(current, target)) {
+      return {
+        value: clone(target),
+        conflicts: [{
+          collection: field2,
+          id: field2,
+          path: "",
+          reason: "both-changed",
+          base: clone(base),
+          builtIn: clone(current),
+          profile: clone(target)
+        }]
+      };
+    }
+    return { value: clone(target), conflicts: [] };
+  }
+  function normalizeDynamicBinding(binding = {}) {
+    return {
+      id: String(binding.id || binding.loopId || ""),
+      loopId: String(binding.loopId || binding.definition?.id || ""),
+      sbcSetIds: [...new Set((binding.sbcSetIds || binding.definition?.sbcSetIds || []).map(Number).filter(Number.isFinite))],
+      pickItemResourceIds: [...new Set((binding.pickItemResourceIds || binding.definition?.pickItemResourceIds || []).map(Number).filter(Number.isFinite))],
+      available: binding.available === true,
+      definition: binding.definition ? clone(binding.definition) : null,
+      lastSeenAt: Number(binding.lastSeenAt || 0) || 0
+    };
+  }
+  function dynamicLoopMatch(binding, loop) {
+    if (!binding || !loop) return false;
+    if (binding.loopId && binding.loopId === String(loop.id || "")) return true;
+    const setIds = new Set((loop.sbcSetIds || []).map(Number));
+    if (binding.sbcSetIds.some((id) => setIds.has(id))) return true;
+    const resourceIds = new Set((loop.pickItemResourceIds || []).map(Number));
+    return binding.pickItemResourceIds.some((id) => resourceIds.has(id));
+  }
+  function fingerprintBuilderValue(value) {
+    const text = JSON.stringify(stableValue(value));
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index++) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+  function createBuilderProfile(options = {}) {
+    const baseConfig = clone(normalizeLoopConfig(options.baseConfig || options.config));
+    const config = clone(normalizeLoopConfig(options.config || baseConfig));
+    const now = Number(options.now || Date.now());
+    return {
+      schemaVersion: BUILDER_SCHEMA_VERSION,
+      id: String(options.id || "default"),
+      name: String(options.name || "Default"),
+      baseFingerprint: fingerprintBuilderValue(baseConfig),
+      baseConfig,
+      draftConfig: config,
+      savedConfig: clone(config),
+      lastKnownGood: clone(validateLoopConfig(config, "Builder profile")),
+      dynamicBindings: (options.dynamicBindings || []).map(normalizeDynamicBinding),
+      draftRevision: 1,
+      savedRevision: 1,
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+  function normalizeBuilderProfile(profile, baseConfig, options = {}) {
+    if (!isPlainObject(profile)) return createBuilderProfile({ baseConfig, ...options });
+    let normalizedBase;
+    try {
+      normalizedBase = clone(validateLoopConfig(profile.baseConfig || baseConfig, "Builder profile base"));
+    } catch {
+      normalizedBase = clone(validateLoopConfig(baseConfig, "Current built-in config"));
+    }
+    let lastKnownGood = null;
+    for (const candidate of [profile.lastKnownGood, profile.savedConfig, normalizedBase]) {
+      if (!candidate) continue;
+      try {
+        lastKnownGood = clone(validateLoopConfig(candidate, "Builder last known good"));
+        break;
+      } catch {
+      }
+    }
+    const draftConfig = clone(normalizeLoopConfig(profile.draftConfig || lastKnownGood));
+    const result = {
+      ...createBuilderProfile({
+        id: profile.id || options.id,
+        name: profile.name || options.name,
+        baseConfig: normalizedBase,
+        config: lastKnownGood,
+        now: profile.createdAt || options.now
+      }),
+      ...clone(profile),
+      schemaVersion: BUILDER_SCHEMA_VERSION,
+      baseConfig: clone(normalizedBase),
+      draftConfig,
+      savedConfig: clone(lastKnownGood),
+      lastKnownGood: clone(lastKnownGood),
+      dynamicBindings: (profile.dynamicBindings || []).map((binding) => ({
+        ...normalizeDynamicBinding(binding),
+        available: false
+      }))
+    };
+    result.baseFingerprint = fingerprintBuilderValue(result.baseConfig);
+    return result;
+  }
+  function createBuilderStore(options = {}) {
+    const profile = createBuilderProfile({
+      id: options.profileId || "default",
+      name: options.profileName || "Default",
+      baseConfig: options.baseConfig,
+      config: options.config || options.baseConfig,
+      now: options.now
+    });
+    return {
+      schemaVersion: BUILDER_SCHEMA_VERSION,
+      activeProfileId: null,
+      activeDynamicBindings: [],
+      profiles: [profile],
+      lastKnownGood: null
+    };
+  }
+  function normalizeBuilderStore(store, baseConfig, options = {}) {
+    if (!isPlainObject(store) || Number(store.schemaVersion) !== BUILDER_SCHEMA_VERSION || !Array.isArray(store.profiles)) {
+      return createBuilderStore({ baseConfig, ...options });
+    }
+    const profiles = store.profiles.flatMap((profile, index) => {
+      try {
+        return [normalizeBuilderProfile(profile, baseConfig, {
+          id: index ? `profile-${index + 1}` : "default",
+          name: index ? `Profile ${index + 1}` : "Default",
+          now: options.now
+        })];
+      } catch {
+        return [];
+      }
+    });
+    if (!profiles.length) return createBuilderStore({ baseConfig, ...options });
+    const activeProfileId = profiles.some((profile) => profile.id === store.activeProfileId) ? store.activeProfileId : null;
+    return {
+      schemaVersion: BUILDER_SCHEMA_VERSION,
+      activeProfileId,
+      activeDynamicBindings: (Object.hasOwn(store, "activeDynamicBindings") ? store.activeDynamicBindings : profiles.find((profile) => profile.id === activeProfileId)?.dynamicBindings || []).map((binding) => ({
+        ...normalizeDynamicBinding(binding),
+        available: false
+      })),
+      profiles,
+      lastKnownGood: store.lastKnownGood ? clone(store.lastKnownGood) : null
+    };
+  }
+  function updateBuilderProfileDraft(profile, config, now = Date.now()) {
+    return {
+      ...clone(profile),
+      draftConfig: clone(normalizeLoopConfig(config)),
+      draftRevision: Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1,
+      updatedAt: Number(now)
+    };
+  }
+  function refreshBuilderDynamicBindings(profile, discoveredLoops = [], now = Date.now()) {
+    const result = clone(profile);
+    result.dynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).map((binding) => {
+      const definition = discoveredLoops.find((loop) => dynamicLoopMatch(binding, loop));
+      return {
+        ...binding,
+        available: Boolean(definition),
+        definition: definition ? clone(definition) : binding.definition,
+        lastSeenAt: definition ? Number(now) : binding.lastSeenAt
+      };
+    });
+    return result;
+  }
+  function materializeBuilderProfile(profile, currentBuiltInConfig) {
+    const baseConfig = normalizeLoopConfig(profile.baseConfig || currentBuiltInConfig);
+    const targetConfig = normalizeLoopConfig(profile.draftConfig || profile.savedConfig || baseConfig);
+    const currentConfig = normalizeLoopConfig(currentBuiltInConfig);
+    const config = {};
+    const conflicts = [];
+    for (const collection of ENTITY_COLLECTIONS) {
+      const rebased = rebaseEntityCollection(
+        collection,
+        baseConfig[collection],
+        targetConfig[collection],
+        currentConfig[collection]
+      );
+      config[collection] = rebased.entities;
+      conflicts.push(...rebased.conflicts);
+    }
+    const defaults = rebaseDefaultPolicies(baseConfig, targetConfig, currentConfig);
+    config.defaultUnassignedRecoveryPolicyIds = defaults.value;
+    conflicts.push(...defaults.conflicts);
+    const unavailableBindings = [];
+    for (const binding of (profile.dynamicBindings || []).map(normalizeDynamicBinding)) {
+      config.loops = config.loops.filter((loop) => String(loop.id || "") !== binding.loopId);
+      if (!binding.available || !binding.definition) {
+        unavailableBindings.push({ id: binding.id, loopId: binding.loopId });
+        continue;
+      }
+      config.loops.push(clone(binding.definition));
+    }
+    return {
+      config,
+      conflicts,
+      unavailableBindings,
+      valid: conflicts.length === 0 && unavailableBindings.length === 0
+    };
+  }
+  function validateBuilderProfile(profile, currentBuiltInConfig) {
+    const materialized = materializeBuilderProfile(profile, currentBuiltInConfig);
+    const errors = [];
+    if (materialized.conflicts.length) errors.push(`${materialized.conflicts.length} built-in conflict(s) require resolution`);
+    if (materialized.unavailableBindings.length) errors.push(`${materialized.unavailableBindings.length} dynamic binding(s) are unavailable`);
+    try {
+      validateLoopConfig(materialized.config, "Builder profile");
+    } catch (error) {
+      errors.push(error?.message || String(error));
+    }
+    return { ...materialized, errors, valid: errors.length === 0 };
+  }
+  function resolveBuilderProfileConflict(profile, currentBuiltInConfig, conflict, choice, now = Date.now()) {
+    if (!["built-in", "profile"].includes(choice)) throw new Error(`Unsupported conflict choice: ${choice}`);
+    const result = clone(profile);
+    const currentConfig = normalizeLoopConfig(currentBuiltInConfig);
+    const path = String(conflict?.path || "").split(".").filter(Boolean);
+    const collection = String(conflict?.collection || "");
+    if (collection === "defaultUnassignedRecoveryPolicyIds") {
+      if (choice === "built-in") {
+        result.draftConfig[collection] = clone(currentConfig[collection]);
+      } else {
+        result.baseConfig[collection] = clone(currentConfig[collection]);
+      }
+    } else if (ENTITY_COLLECTIONS.includes(collection)) {
+      const id = String(conflict?.id || "");
+      const currentEntity = (currentConfig[collection] || []).find((item) => String(item?.id || "") === id) || null;
+      if (choice === "built-in") {
+        if (!path.length) {
+          result.draftConfig[collection] = replaceEntity(result.draftConfig[collection], id, currentEntity);
+        } else {
+          const draftEntity = (result.draftConfig[collection] || []).find((item) => String(item?.id || "") === id);
+          if (!draftEntity) throw new Error(`Profile object not found while resolving conflict: ${collection}.${id}`);
+          const replacement = setValueAt(draftEntity, path, valueAt(currentEntity, path));
+          result.draftConfig[collection] = replaceEntity(result.draftConfig[collection], id, replacement);
+        }
+      } else if (!path.length) {
+        result.baseConfig[collection] = replaceEntity(result.baseConfig[collection], id, currentEntity);
+      } else {
+        const baseEntity = (result.baseConfig[collection] || []).find((item) => String(item?.id || "") === id);
+        if (!baseEntity) throw new Error(`Profile base object not found while resolving conflict: ${collection}.${id}`);
+        const replacement = setValueAt(baseEntity, path, valueAt(currentEntity, path));
+        result.baseConfig[collection] = replaceEntity(result.baseConfig[collection], id, replacement);
+      }
+    } else {
+      throw new Error(`Unsupported conflict collection: ${collection}`);
+    }
+    result.baseFingerprint = fingerprintBuilderValue(result.baseConfig);
+    result.draftRevision = Math.max(Number(result.draftRevision || 0), Number(result.savedRevision || 0)) + 1;
+    result.updatedAt = Number(now);
+    return result;
+  }
+  function saveBuilderProfile(profile, currentBuiltInConfig, now = Date.now()) {
+    const validation = validateBuilderProfile(profile, currentBuiltInConfig);
+    if (!validation.valid) throw new Error(validation.errors.join("; "));
+    const revision = Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1;
+    const currentBase = clone(normalizeLoopConfig(currentBuiltInConfig));
+    return {
+      ...clone(profile),
+      baseConfig: currentBase,
+      baseFingerprint: fingerprintBuilderValue(currentBase),
+      draftConfig: clone(validation.config),
+      savedConfig: clone(validation.config),
+      lastKnownGood: clone(validation.config),
+      draftRevision: revision,
+      savedRevision: revision,
+      updatedAt: Number(now)
+    };
+  }
+  function upsertBuilderProfile(store, profile) {
+    const profiles = [...store.profiles || []];
+    const index = profiles.findIndex((entry) => entry.id === profile.id);
+    if (index >= 0) profiles[index] = clone(profile);
+    else profiles.push(clone(profile));
+    return { ...clone(store), profiles };
+  }
+  function activateBuilderProfile(store, profile, currentBuiltInConfig) {
+    const saved = saveBuilderProfile(profile, currentBuiltInConfig);
+    const nextStore = upsertBuilderProfile(store, saved);
+    return {
+      store: {
+        ...nextStore,
+        activeProfileId: saved.id,
+        activeDynamicBindings: clone(saved.dynamicBindings || []),
+        lastKnownGood: clone(saved.lastKnownGood)
+      },
+      profile: saved,
+      config: clone(saved.lastKnownGood)
+    };
+  }
+  function deactivateBuilderProfile(store) {
+    return {
+      ...clone(store),
+      activeProfileId: null,
+      activeDynamicBindings: []
+    };
+  }
+  function importBuilderProfileJson(text, options = {}) {
+    const config = validateLoopConfig(parseLoopConfig(text), "Imported Builder JSON");
+    return createBuilderProfile({
+      id: options.id,
+      name: options.name || "Imported",
+      baseConfig: options.baseConfig,
+      config,
+      now: options.now
+    });
+  }
+  function exportBuilderProfileJson(profile, currentBuiltInConfig) {
+    const validation = validateBuilderProfile(profile, currentBuiltInConfig);
+    if (!validation.valid) throw new Error(validation.errors.join("; "));
+    return `${JSON.stringify(validation.config, null, 2)}
+`;
+  }
+  function builderObjectSources(profile, currentBuiltInConfig) {
+    const baseConfig = normalizeLoopConfig(profile.baseConfig || currentBuiltInConfig);
+    const targetConfig = normalizeLoopConfig(profile.draftConfig || profile.savedConfig || baseConfig);
+    const currentConfig = normalizeLoopConfig(currentBuiltInConfig);
+    const sources = {};
+    for (const collection of ENTITY_COLLECTIONS) {
+      const base = entityMap(baseConfig[collection]);
+      const target = entityMap(targetConfig[collection]);
+      const current = entityMap(currentConfig[collection]);
+      const dynamicIds = collection === "loops" ? new Set((profile.dynamicBindings || []).map((binding) => String(binding.loopId || "")).filter(Boolean)) : /* @__PURE__ */ new Set();
+      sources[collection] = (targetConfig[collection] || []).map((entity) => {
+        const id = String(entity.id);
+        const source = dynamicIds.has(id) ? "dynamic" : base.has(id) && sameValue(base.get(id), entity) || current.has(id) && sameValue(current.get(id), entity) ? "built-in" : !base.has(id) && !current.has(id) ? "custom" : "override";
+        return { id, source, current: current.has(id) };
+      });
+    }
+    return sources;
+  }
+
+  // src/config/builder-editor.js
+  function clone2(value) {
+    return cloneLoopDef(value);
+  }
+  function slug(value) {
+    return String(value || "custom-loop").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "custom-loop";
+  }
+  function uniqueId(config, requested) {
+    const ids = new Set((config.loops || []).map((loop) => String(loop.id)));
+    const base = slug(requested);
+    if (!ids.has(base)) return base;
+    let index = 2;
+    while (ids.has(`${base}-${index}`)) index++;
+    return `${base}-${index}`;
+  }
+  function requirement(tier = "gold") {
+    return { tier, count: 1, playerOnly: true, allowSpecial: false };
+  }
+  function upgrade(name = "Upgrade") {
+    return { name, sbcNames: [name], requirements: [requirement()] };
+  }
+  function createLoopTemplate(strategy, options = {}) {
+    if (!LOOP_STRATEGIES.includes(strategy)) throw new Error(`Unsupported Loop strategy: ${strategy}`);
+    const name = String(options.name || "Custom Loop");
+    const loop = { id: slug(options.id || name), name, strategy };
+    switch (strategy) {
+      case "validationBronzeUpgrade":
+        return { ...loop, sbcNames: ["SBC name"], targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false }, maxRounds: 1 };
+      case "dailySingleCardRecycle":
+        return { ...loop, sbcNames: ["SBC name"], targetDuplicate: { tier: "bronze", playerOnly: true, allowSpecial: false }, maxCompletions: 1 };
+      case "supplyAndCraft":
+      case "inventoryMixedUpgrade":
+      case "commonGoldToRareUpgrade":
+        return { ...loop, sbcNames: ["SBC name"], requirements: [requirement()], priorityPiles: ["unassigned", "storage", "transfer", "club"], maxCompletions: 1 };
+      case "provisionPackCrafting":
+      case "provisionPackDualCrafting":
+        return { ...loop, sourcePackNames: ["Source pack"], craftingUpgrades: [upgrade()], rounds: 1 };
+      case "rarePackTo84Upgrade":
+        return { ...loop, sourcePackNames: ["Source pack"], rareUpgrade: upgrade(), maxPacks: 1 };
+      case "playerPickSbc":
+        return { ...loop, sbcNames: ["Player Pick SBC"], pickItemNames: ["Player Pick"], requirements: [requirement()], pickCandidateCount: 3, pickCount: 1, maxCompletions: 1 };
+      case "dailyRoutine":
+      case "workflowRoutine":
+        return { ...loop, steps: [] };
+      case "fillAndVerifySbc":
+        return { ...loop, sbcNames: ["SBC name"], requirements: [requirement()], priorityPiles: ["unassigned", "storage", "transfer", "club"], maxCompletions: 1 };
+      case "inventoryExhaustion":
+        return { ...loop, stages: [{ id: "stage-1", ...upgrade("Upgrade"), maxCompletions: 1 }] };
+      default:
+        return loop;
+    }
+  }
+  function addBuilderLoop(config, strategy, options = {}) {
+    const normalized = clone2(normalizeLoopConfig(config));
+    const template = createLoopTemplate(strategy, options);
+    template.id = uniqueId(normalized, template.id);
+    normalized.loops.push(template);
+    return { config: normalized, loop: template };
+  }
+  function duplicateBuilderLoop(config, loopId, options = {}) {
+    const normalized = clone2(normalizeLoopConfig(config));
+    const source = normalized.loops.find((loop) => String(loop.id) === String(loopId));
+    if (!source) throw new Error(`Loop not found: ${loopId}`);
+    const copy = clone2(source);
+    copy.id = uniqueId(normalized, options.id || `${source.id}-copy`);
+    copy.name = String(options.name || `${source.name} Copy`);
+    delete copy.discoveryReportedCompleted;
+    normalized.loops.push(copy);
+    return { config: normalized, loop: copy };
+  }
+  function findBuilderReferences(config, id) {
+    const normalized = normalizeLoopConfig(config);
+    const references = [];
+    for (const loop of normalized.loops) {
+      (loop.steps || []).forEach((step, index) => {
+        const loopId = typeof step === "string" ? step : step?.loopId;
+        if (String(loopId || "") === String(id)) references.push({ type: "workflow-step", ownerId: loop.id, index });
+      });
+      if (String(loop.sourceExhaustedFallbackLoopId || "") === String(id)) {
+        references.push({ type: "fallback-loop", ownerId: loop.id, path: "sourceExhaustedFallbackLoopId" });
+      }
+      if (String(loop.preCraftPlayerPickLoopId || "") === String(id)) {
+        references.push({ type: "pre-craft-pick", ownerId: loop.id, path: "preCraftPlayerPickLoopId" });
+      }
+    }
+    return references;
+  }
+  function removeBuilderLoop(config, loopId) {
+    const normalized = clone2(normalizeLoopConfig(config));
+    const references = findBuilderReferences(normalized, loopId);
+    if (references.length) throw new Error(`Loop ${loopId} is referenced by ${references.length} configuration location(s)`);
+    const previousLength = normalized.loops.length;
+    normalized.loops = normalized.loops.filter((loop) => String(loop.id) !== String(loopId));
+    if (normalized.loops.length === previousLength) throw new Error(`Loop not found: ${loopId}`);
+    return normalized;
+  }
+  function renameBuilderLoopId(config, oldId, requestedId) {
+    const normalized = clone2(normalizeLoopConfig(config));
+    const nextId = slug(requestedId);
+    const target = normalized.loops.find((loop) => String(loop.id) === String(oldId));
+    if (!target) throw new Error(`Loop not found: ${oldId}`);
+    if (normalized.loops.some((loop) => String(loop.id) === nextId && loop !== target)) {
+      throw new Error(`Loop ID already exists: ${nextId}`);
+    }
+    target.id = nextId;
+    for (const loop of normalized.loops) {
+      loop.steps = (loop.steps || []).map((step) => {
+        if (typeof step === "string") return step === oldId ? nextId : step;
+        if (step?.loopId !== oldId) return step;
+        return { ...step, loopId: nextId };
+      });
+      if (loop.sourceExhaustedFallbackLoopId === oldId) loop.sourceExhaustedFallbackLoopId = nextId;
+      if (loop.preCraftPlayerPickLoopId === oldId) loop.preCraftPlayerPickLoopId = nextId;
+      if (isPlainObject(loop.stepOverrides) && Object.hasOwn(loop.stepOverrides, oldId)) {
+        loop.stepOverrides[nextId] = loop.stepOverrides[oldId];
+        delete loop.stepOverrides[oldId];
+      }
+    }
+    return { config: normalized, id: nextId };
+  }
+  function findBuilderRecoveryReferences(config, kind, id) {
+    const normalized = normalizeLoopConfig(config);
+    const references = [];
+    if (kind === "recoveryRecipes") {
+      for (const policy of normalized.unassignedRecoveryPolicies) {
+        (policy.steps || []).forEach((step, index) => {
+          if (String(step?.recipeId || "") === String(id)) {
+            references.push({ type: "recovery-step", ownerId: policy.id, index });
+          }
+        });
+      }
+      return references;
+    }
+    if (kind !== "unassignedRecoveryPolicies") throw new Error(`Unsupported recovery collection: ${kind}`);
+    normalized.defaultUnassignedRecoveryPolicyIds.forEach((policyId, index) => {
+      if (String(policyId) === String(id)) references.push({ type: "default-policy", ownerId: "config", index });
+    });
+    for (const loop of normalized.loops) {
+      for (const [path, policyIds] of [
+        ["unassignedRecoveryPolicyIds", loop.unassignedRecoveryPolicyIds],
+        ["rewardFlow.unassignedRecoveryPolicyIds", loop.rewardFlow?.unassignedRecoveryPolicyIds]
+      ]) {
+        (policyIds || []).forEach((policyId, index) => {
+          if (String(policyId) === String(id)) references.push({ type: "loop-policy", ownerId: loop.id, path, index });
+        });
+      }
+      (loop.steps || []).forEach((step, stepIndex) => {
+        if (!isPlainObject(step)) return;
+        (step.rewardFlow?.unassignedRecoveryPolicyIds || []).forEach((policyId, index) => {
+          if (String(policyId) === String(id)) {
+            references.push({ type: "workflow-step-policy", ownerId: loop.id, stepIndex, index });
+          }
+        });
+      });
+    }
+    return references;
+  }
+  function renameBuilderRecoveryId(config, kind, oldId, requestedId) {
+    if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(kind)) {
+      throw new Error(`Unsupported recovery collection: ${kind}`);
+    }
+    const normalized = clone2(normalizeLoopConfig(config));
+    const nextId = slug(requestedId);
+    const target = normalized[kind].find((item) => String(item.id) === String(oldId));
+    if (!target) throw new Error(`Recovery object not found: ${oldId}`);
+    if (normalized[kind].some((item) => String(item.id) === nextId && item !== target)) {
+      throw new Error(`Recovery ID already exists: ${nextId}`);
+    }
+    target.id = nextId;
+    if (kind === "recoveryRecipes") {
+      for (const policy of normalized.unassignedRecoveryPolicies) {
+        for (const step of policy.steps || []) {
+          if (step.recipeId === oldId) step.recipeId = nextId;
+        }
+      }
+    } else {
+      normalized.defaultUnassignedRecoveryPolicyIds = normalized.defaultUnassignedRecoveryPolicyIds.map((policyId) => policyId === oldId ? nextId : policyId);
+      for (const loop of normalized.loops) {
+        if (Array.isArray(loop.unassignedRecoveryPolicyIds)) {
+          loop.unassignedRecoveryPolicyIds = loop.unassignedRecoveryPolicyIds.map((policyId) => policyId === oldId ? nextId : policyId);
+        }
+        if (Array.isArray(loop.rewardFlow?.unassignedRecoveryPolicyIds)) {
+          loop.rewardFlow.unassignedRecoveryPolicyIds = loop.rewardFlow.unassignedRecoveryPolicyIds.map((policyId) => policyId === oldId ? nextId : policyId);
+        }
+        for (const step of loop.steps || []) {
+          if (!Array.isArray(step?.rewardFlow?.unassignedRecoveryPolicyIds)) continue;
+          step.rewardFlow.unassignedRecoveryPolicyIds = step.rewardFlow.unassignedRecoveryPolicyIds.map((policyId) => policyId === oldId ? nextId : policyId);
+        }
+      }
+    }
+    return { config: normalized, id: nextId };
+  }
+  function removeBuilderRecovery(config, kind, id) {
+    const normalized = clone2(normalizeLoopConfig(config));
+    const references = findBuilderRecoveryReferences(normalized, kind, id);
+    if (references.length) throw new Error(`Recovery object ${id} is referenced by ${references.length} configuration location(s)`);
+    const previousLength = normalized[kind]?.length;
+    if (!Number.isFinite(previousLength)) throw new Error(`Unsupported recovery collection: ${kind}`);
+    normalized[kind] = normalized[kind].filter((item) => String(item.id) !== String(id));
+    if (normalized[kind].length === previousLength) throw new Error(`Recovery object not found: ${id}`);
+    return normalized;
+  }
+  function addBuilderWorkflowStep(config, workflowId, loopId, options = {}) {
+    const normalized = clone2(normalizeLoopConfig(config));
+    const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
+    const child = normalized.loops.find((loop) => String(loop.id) === String(loopId));
+    if (!workflow || !["dailyRoutine", "workflowRoutine"].includes(workflow.strategy)) throw new Error(`Workflow not found: ${workflowId}`);
+    if (!child) throw new Error(`Child Loop not found: ${loopId}`);
+    if (["dailyRoutine", "workflowRoutine"].includes(child.strategy)) throw new Error("Nested workflows are not supported");
+    const step = options.name || options.rewardFlow ? { loopId: child.id, ...options.name ? { name: options.name } : {}, ...options.rewardFlow ? { rewardFlow: clone2(options.rewardFlow) } : {} } : child.id;
+    workflow.steps = [...workflow.steps || [], step];
+    return normalized;
+  }
+  function moveBuilderWorkflowStep(config, workflowId, fromIndex, toIndex) {
+    const normalized = clone2(normalizeLoopConfig(config));
+    const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
+    if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
+    const from = Number(fromIndex);
+    const to = Math.max(0, Math.min(workflow.steps.length - 1, Number(toIndex)));
+    if (!Number.isInteger(from) || from < 0 || from >= workflow.steps.length) throw new Error(`Invalid Workflow step index: ${fromIndex}`);
+    const [step] = workflow.steps.splice(from, 1);
+    workflow.steps.splice(to, 0, step);
+    return normalized;
+  }
+  function removeBuilderWorkflowStep(config, workflowId, index) {
+    const normalized = clone2(normalizeLoopConfig(config));
+    const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
+    if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
+    if (!Number.isInteger(Number(index)) || Number(index) < 0 || Number(index) >= workflow.steps.length) {
+      throw new Error(`Invalid Workflow step index: ${index}`);
+    }
+    workflow.steps.splice(Number(index), 1);
+    return normalized;
+  }
+  function setBuilderWorkflowStepPath(config, workflowId, index, path, value) {
+    const normalized = clone2(normalizeLoopConfig(config));
+    const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
+    const stepIndex = Number(index);
+    if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
+    if (!Number.isInteger(stepIndex) || stepIndex < 0 || stepIndex >= workflow.steps.length) {
+      throw new Error(`Invalid Workflow step index: ${index}`);
+    }
+    const rawStep = workflow.steps[stepIndex];
+    const step = typeof rawStep === "string" ? { loopId: rawStep } : clone2(rawStep);
+    if (!step?.loopId) throw new Error(`Workflow step has no Loop reference: ${workflowId}[${index}]`);
+    workflow.steps[stepIndex] = setBuilderPath(step, path, value);
+    return normalized;
+  }
+  function createBuilderStepVariant(config, workflowId, stepIndex) {
+    let normalized = clone2(normalizeLoopConfig(config));
+    const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
+    const rawStep = workflow?.steps?.[Number(stepIndex)];
+    const sourceId = typeof rawStep === "string" ? rawStep : rawStep?.loopId;
+    if (!workflow || !sourceId) throw new Error(`Workflow step not found: ${workflowId}[${stepIndex}]`);
+    const source = normalized.loops.find((loop) => String(loop.id) === String(sourceId));
+    if (!source) throw new Error(`Child Loop not found: ${sourceId}`);
+    const result = duplicateBuilderLoop(normalized, source.id, {
+      id: `${workflow.id}-${source.id}-step-${Number(stepIndex) + 1}`,
+      name: `${source.name} (${workflow.name} step ${Number(stepIndex) + 1})`
+    });
+    normalized = result.config;
+    result.loop.hidden = true;
+    const nextWorkflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
+    const step = typeof rawStep === "string" ? { loopId: result.loop.id } : { ...clone2(rawStep), loopId: result.loop.id };
+    nextWorkflow.steps[Number(stepIndex)] = step;
+    return { config: normalized, loop: result.loop };
+  }
+  function setBuilderPath(object, path, value) {
+    const result = clone2(object);
+    const parts = Array.isArray(path) ? path : String(path).split(".").filter(Boolean);
+    let target = result;
+    for (let index = 0; index < parts.length - 1; index++) {
+      const key = parts[index];
+      if (!isPlainObject(target[key]) && !Array.isArray(target[key])) target[key] = {};
+      target = target[key];
+    }
+    const finalKey = parts.at(-1);
+    if (value === void 0) delete target[finalKey];
+    else target[finalKey] = clone2(value);
+    return result;
+  }
+
+  // src/config/builder-descriptors.js
+  var BUILDER_COMMON_FIELDS = Object.freeze([
+    Object.freeze({ path: "name", label: "Name", type: "text", required: true }),
+    Object.freeze({ path: "id", label: "Stable ID", type: "id", required: true }),
+    Object.freeze({ path: "strategy", label: "Strategy", type: "strategy", required: true }),
+    Object.freeze({ path: "hidden", label: "Hidden", type: "boolean-inherit" }),
+    Object.freeze({ path: "mvp", label: "MVP", type: "boolean-inherit" }),
+    Object.freeze({ path: "dryRun", label: "Always dry run", type: "boolean-inherit" }),
+    Object.freeze({ path: "runtimeQuantity", label: "Runtime quantity", type: "runtime-quantity" }),
+    Object.freeze({ path: "rewardFlow", label: "Reward flow", type: "reward-flow" }),
+    Object.freeze({
+      path: "inventoryMode",
+      label: "Inventory mode",
+      type: "inventory-mode",
+      strategies: Object.freeze([
+        "dailySingleCardRecycle",
+        "supplyAndCraft",
+        "inventoryMixedUpgrade",
+        "commonGoldToRareUpgrade",
+        "dailyRoutine",
+        "workflowRoutine"
+      ])
+    }),
+    Object.freeze({ path: "disabledPiles", label: "Disabled piles", type: "pile-list" }),
+    Object.freeze({ path: "unassignedRecoveryPolicyIds", label: "Recovery policies", type: "policy-list" }),
+    Object.freeze({
+      path: "pickOptions",
+      label: "Player Pick options",
+      type: "pick-options",
+      strategies: Object.freeze(["playerPickSbc", "dailyRoutine", "workflowRoutine"])
+    })
+  ]);
+  function descriptor(strategy, label, fields, options = {}) {
+    return Object.freeze({ strategy, label, fields: Object.freeze(fields), ...options });
+  }
+  var BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
+    validationBronzeUpgrade: descriptor("validationBronzeUpgrade", "Validation recycle", [
+      { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
+      { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
+      { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
+      { path: "rewardPackIds", label: "Reward pack IDs", type: "number-list" },
+      { path: "rewardPackNames", label: "Reward pack aliases", type: "string-list" },
+      { path: "targetDuplicate", label: "Target duplicate", type: "card-spec", required: true },
+      { path: "maxRounds", label: "Maximum runs", type: "integer" }
+    ]),
+    dailySingleCardRecycle: descriptor("dailySingleCardRecycle", "Single-card recycle", [
+      { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
+      { path: "rewardPackIds", label: "Reward pack IDs", type: "number-list" },
+      { path: "rewardPackNames", label: "Reward pack aliases", type: "string-list" },
+      { path: "targetDuplicate", label: "Target duplicate", type: "card-spec", required: true },
+      { path: "dailyCompletionLimit", label: "Daily limit", type: "integer" },
+      { path: "maxCompletions", label: "Maximum completions", type: "integer" }
+    ]),
+    supplyAndCraft: descriptor("supplyAndCraft", "Supply and craft", [
+      { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
+      { path: "requirements", label: "Requirements", type: "requirements", required: true },
+      { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
+      { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
+      { path: "priorityPiles", label: "Default pile order", type: "pile-list" },
+      { path: "primaryPiles", label: "Primary pile order", type: "pile-list" },
+      { path: "clubFallbackPiles", label: "Fallback pile order", type: "pile-list" },
+      { path: "shortagePacks", label: "Shortage packs", type: "shortage-packs" },
+      { path: "rewardPackIds", label: "Reward pack IDs", type: "number-list" },
+      { path: "rewardPackNames", label: "Reward pack aliases", type: "string-list" },
+      { path: "deferChallengeLoad", label: "Defer challenge load", type: "boolean-inherit" },
+      { path: "preSelectionCleanup", label: "Pre-selection cleanup", type: "boolean-inherit" },
+      { path: "dailyCompletionLimit", label: "Daily limit", type: "integer" },
+      { path: "maxCompletions", label: "Maximum completions", type: "integer" }
+    ]),
+    inventoryMixedUpgrade: descriptor("inventoryMixedUpgrade", "Inventory mixed upgrade", [
+      { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
+      { path: "requirements", label: "Requirements", type: "requirements", required: true },
+      { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
+      { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
+      { path: "priorityPiles", label: "Pile order", type: "pile-list" },
+      { path: "shortagePacks", label: "Shortage packs", type: "shortage-packs" },
+      { path: "rewardPackIds", label: "Reward pack IDs", type: "number-list" },
+      { path: "rewardPackNames", label: "Reward pack aliases", type: "string-list" },
+      { path: "maxCompletions", label: "Maximum completions", type: "integer" }
+    ]),
+    commonGoldToRareUpgrade: descriptor("commonGoldToRareUpgrade", "Common Gold upgrade", [
+      { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
+      { path: "requirements", label: "Requirements", type: "requirements", required: true },
+      { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
+      { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
+      { path: "priorityPiles", label: "Pile order", type: "pile-list" },
+      { path: "primaryPiles", label: "Primary pile order", type: "pile-list" },
+      { path: "clubFallbackPiles", label: "Fallback pile order", type: "pile-list" },
+      { path: "rewardPackIds", label: "Reward pack IDs", type: "number-list" },
+      { path: "rewardPackNames", label: "Reward pack aliases", type: "string-list" },
+      { path: "maxCompletions", label: "Maximum completions", type: "integer" }
+    ]),
+    provisionPackCrafting: descriptor("provisionPackCrafting", "Provision crafting", [
+      { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
+      { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
+      { path: "preCraftPlayerPickLoopId", label: "Pre-craft Pick Loop", type: "pick-loop-reference" },
+      { path: "preCraftPlayerPick", label: "Pre-craft Pick binding", type: "pick-binding" },
+      { path: "craftingUpgrades", label: "Crafting upgrades", type: "upgrade-list", required: true },
+      { path: "rounds", label: "Provision packs", type: "integer" }
+    ]),
+    provisionPackDualCrafting: descriptor("provisionPackDualCrafting", "Dual provision crafting", [
+      { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
+      { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
+      { path: "preCraftPlayerPickLoopId", label: "Pre-craft Pick Loop", type: "pick-loop-reference" },
+      { path: "preCraftPlayerPick", label: "Pre-craft Pick binding", type: "pick-binding" },
+      { path: "craftingUpgrades", label: "Crafting upgrades", type: "upgrade-list", required: true },
+      { path: "rounds", label: "Provision packs", type: "integer" }
+    ]),
+    rarePackTo84Upgrade: descriptor("rarePackTo84Upgrade", "Pack to upgrade", [
+      { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
+      { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
+      { path: "rareUpgrade", label: "Upgrade", type: "upgrade", required: true },
+      { path: "sourceExhaustedFallbackLoopId", label: "Fallback Loop", type: "loop-reference" },
+      { path: "sourceExhaustedFallbackMaxCompletions", label: "Fallback maximum completions", type: "integer" },
+      { path: "maxPacks", label: "Maximum source packs", type: "integer" },
+      { path: "maxCompletions", label: "Maximum completions", type: "integer" },
+      { path: "useRoundsAsCompletions", label: "Use runtime rounds", type: "boolean-inherit" },
+      { path: "consumeAllSourcePacks", label: "Consume all source packs", type: "boolean-inherit" }
+    ]),
+    playerPickSbc: descriptor("playerPickSbc", "Player Pick", [
+      { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
+      { path: "sbcSetIds", label: "SBC Set IDs", type: "number-list" },
+      { path: "pickItemNames", label: "Pick item aliases", type: "string-list", required: true },
+      { path: "pickItemResourceIds", label: "Pick resource IDs", type: "number-list" },
+      { path: "requirements", label: "Requirements", type: "requirements" },
+      { path: "challengeRequirements", label: "Challenge requirements", type: "challenge-requirements" },
+      { path: "pickCandidateCount", label: "Candidates", type: "integer" },
+      { path: "pickCount", label: "Selections", type: "integer" },
+      { path: "challengesPerPick", label: "Challenges per Pick", type: "integer" },
+      { path: "maxCompletions", label: "Maximum completions", type: "integer" },
+      { path: "exhaustSbcSet", label: "Use all remaining completions", type: "boolean-inherit" },
+      { path: "setCompletionSafetyLimit", label: "Set completion safety limit", type: "integer" },
+      { path: "pricePlatform", label: "Price platform", type: "price-platform" }
+    ]),
+    dailyRoutine: descriptor("dailyRoutine", "Daily workflow", [
+      { path: "steps", label: "Workflow steps", type: "workflow-steps", required: true },
+      { path: "stepOverrides", label: "Legacy step overrides", type: "legacy-step-overrides" },
+      { path: "openRewardPacks", label: "Open reward packs", type: "boolean-inherit" }
+    ], { routine: true }),
+    workflowRoutine: descriptor("workflowRoutine", "Workflow", [
+      { path: "steps", label: "Workflow steps", type: "workflow-steps", required: true }
+    ], { routine: true }),
+    fillAndVerifySbc: descriptor("fillAndVerifySbc", "Fill SBC", [
+      { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
+      { path: "requirements", label: "Requirements", type: "requirements" },
+      { path: "ratingSbcFill", label: "Rating solver", type: "rating-fill" },
+      { path: "priorityPiles", label: "Pile order", type: "pile-list" },
+      { path: "maxSubmittedRating", label: "Maximum submitted rating", type: "rating" },
+      { path: "maxNormalGoldSubmittedRating", label: "Maximum normal Gold rating", type: "rating" },
+      { path: "requiredSpecialKind", label: "Required special type", type: "special-kind" },
+      { path: "requiredSpecialMinRating", label: "Required special minimum", type: "rating" },
+      { path: "autoTotwUpgrade", label: "Automatic special recovery", type: "auto-totw-upgrade" },
+      { path: "autoFodderUpgrade", label: "Automatic fodder recovery", type: "auto-fodder-upgrade" },
+      { path: "rewardPackIds", label: "Reward pack IDs", type: "number-list" },
+      { path: "rewardPackNames", label: "Reward pack aliases", type: "string-list" },
+      { path: "useRoundsAsCompletions", label: "Use runtime rounds", type: "boolean-inherit" },
+      { path: "allowMultipleCompletions", label: "Allow multiple completions", type: "boolean-inherit" },
+      { path: "inventoryFillFirst", label: "Fill from inventory first", type: "boolean-inherit" },
+      { path: "requiredSpecialCount", label: "Required special cards", type: "integer" },
+      { path: "allowedSpecialCount", label: "Allowed special cards", type: "integer" },
+      { path: "specialRequirementAdd", label: "Additional special requirement", type: "special-requirement-control" },
+      { path: "blockSpecial", label: "Block unnecessary special cards", type: "boolean-inherit" },
+      { path: "blockTradeable", label: "Block tradeable cards", type: "boolean-inherit" },
+      { path: "openRewardPacks", label: "Open reward packs", type: "boolean-inherit" },
+      { path: "forceOpenRewardPacks", label: "Force reward opening", type: "boolean-inherit" },
+      { path: "assumeTotwRewardPack", label: "Assume TOTW reward", type: "boolean-inherit" },
+      { path: "protectedItemIds", label: "Protected item IDs", type: "number-list" },
+      { path: "protectedDefinitionIds", label: "Protected definition IDs", type: "number-list" },
+      { path: "protectedRepairMaxAttempts", label: "Protected-card repair attempts", type: "integer" },
+      { path: "submitReadyRepairMaxAttempts", label: "Submit-ready repair attempts", type: "integer" },
+      { path: "maxCompletions", label: "Maximum completions", type: "integer" }
+    ]),
+    inventoryExhaustion: descriptor("inventoryExhaustion", "Inventory exhaustion", [
+      { path: "stages", label: "Upgrade stages", type: "stage-list", required: true },
+      { path: "openRewardPacksAtEnd", label: "Open rewards at end", type: "boolean-inherit" },
+      { path: "rewardPackIds", label: "Reward pack IDs", type: "number-list" },
+      { path: "rewardPackNames", label: "Reward pack aliases", type: "string-list" }
+    ])
+  });
+  var BUILDER_STRATEGY_OPTIONS = Object.freeze(LOOP_STRATEGIES.map((strategy) => ({
+    value: strategy,
+    label: BUILDER_STRATEGY_DESCRIPTORS[strategy]?.label || strategy
+  })));
+  function getBuilderStrategyDescriptor(strategy) {
+    return BUILDER_STRATEGY_DESCRIPTORS[strategy] || null;
+  }
+  function getBuilderLoopFields(loopDef = {}) {
+    const common = BUILDER_COMMON_FIELDS.filter((field2) => !field2.strategies || field2.strategies.includes(loopDef.strategy));
+    return [...common, ...getBuilderStrategyDescriptor(loopDef.strategy)?.fields || []];
+  }
+
+  // src/ui/workflow-loop-builder-view.js
+  var PILES = Object.freeze(["unassigned", "storage", "transfer", "club"]);
+  function escapeHtml(value) {
+    return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+  }
+  function selected(value, expected) {
+    return String(value ?? "") === String(expected ?? "") ? " selected" : "";
+  }
+  function disabled(value) {
+    return value ? " disabled" : "";
+  }
+  function optionList(options, value, includeInherit = false) {
+    const inherit = includeInherit ? `<option value=""${selected(value, void 0)}>Inherit</option>` : "";
+    return `${inherit}${options.map((option) => `<option value="${escapeHtml(option.value)}"${selected(value, option.value)}>${escapeHtml(option.label)}</option>`).join("")}`;
+  }
+  function boolOptions(value) {
+    return optionList([
+      { value: "true", label: "Enabled" },
+      { value: "false", label: "Disabled" }
+    ], value === void 0 ? void 0 : String(value), true);
+  }
+  function fieldRow(label, control, options = {}) {
+    return `<label class="dlr-builder-field${options.wide ? " wide" : ""}">
+    <span>${escapeHtml(label)}${options.required ? " *" : ""}</span>
+    ${control}
+  </label>`;
+  }
+  function textInput(path, value, type = "text", readOnly = false, placeholder = "") {
+    return `<input type="${type}" data-builder-field="${escapeHtml(path)}" data-builder-value-type="${escapeHtml(type)}" value="${escapeHtml(value ?? "")}" placeholder="${escapeHtml(placeholder)}"${disabled(readOnly)}>`;
+  }
+  function selectInput(path, value, options, readOnly = false, includeInherit = false) {
+    return `<select data-builder-field="${escapeHtml(path)}"${disabled(readOnly)}>${optionList(options, value, includeInherit)}</select>`;
+  }
+  function renderScalarField(field2, value, context) {
+    const readOnly = context.readOnly || field2.path === "strategy" && context.source !== "custom" || field2.path === "id" && context.source !== "custom";
+    switch (field2.type) {
+      case "id":
+        return fieldRow(field2.label, textInput(field2.path, value, "id", readOnly), { required: field2.required });
+      case "integer":
+      case "rating":
+        return fieldRow(field2.label, textInput(field2.path, value, "number", readOnly), { required: field2.required });
+      case "boolean-inherit":
+        return fieldRow(field2.label, `<select data-builder-field="${escapeHtml(field2.path)}" data-builder-value-type="boolean-inherit"${disabled(readOnly)}>${boolOptions(value)}</select>`);
+      case "strategy":
+        return fieldRow(field2.label, selectInput(field2.path, value, BUILDER_STRATEGY_OPTIONS, readOnly), { required: true });
+      case "inventory-mode":
+        return fieldRow(field2.label, selectInput(field2.path, value, [
+          { value: "inherit", label: "Inherit" },
+          { value: "normal", label: "Normal" },
+          { value: "inventory-only", label: "Inventory only" }
+        ], readOnly));
+      case "special-kind":
+        return fieldRow(field2.label, selectInput(field2.path, value, [
+          { value: "", label: "None" },
+          { value: "totw", label: "TOTW" },
+          { value: "totw-tots-fof", label: "TOTW / TOTS / FOF" }
+        ], readOnly));
+      case "loop-reference":
+        return fieldRow(field2.label, selectInput(field2.path, value, [
+          { value: "", label: "None" },
+          ...context.atomicLoops.map((loop) => ({ value: loop.id, label: loop.name }))
+        ], readOnly));
+      case "pick-loop-reference":
+        return fieldRow(field2.label, selectInput(field2.path, value, [
+          { value: "", label: "None" },
+          ...context.playerPickLoops.map((loop) => ({ value: loop.id, label: loop.name }))
+        ], readOnly));
+      case "price-platform":
+        return fieldRow(field2.label, selectInput(field2.path, value, [
+          { value: "", label: "Runtime default" },
+          { value: "pc", label: "PC" },
+          { value: "ps", label: "PlayStation" },
+          { value: "xbox", label: "Xbox" }
+        ], readOnly));
+      default:
+        return fieldRow(field2.label, textInput(field2.path, value, "text", readOnly), { required: field2.required });
+    }
+  }
+  function renderList(path, label, values, itemType, context) {
+    const rows = (values || []).map((value, index) => `<div class="dlr-builder-list-row">
+    ${textInput(`${path}.${index}`, value, itemType === "number" ? "number" : "text", context.readOnly)}
+    <button data-builder-action="move-list" data-path="${escapeHtml(path)}" data-index="${index}" data-delta="-1" title="Move up"${disabled(context.readOnly || index === 0)}>Up</button>
+    <button data-builder-action="move-list" data-path="${escapeHtml(path)}" data-index="${index}" data-delta="1" title="Move down"${disabled(context.readOnly || index === values.length - 1)}>Down</button>
+    <button data-builder-action="remove-list" data-path="${escapeHtml(path)}" data-index="${index}" title="Remove"${disabled(context.readOnly)}>Remove</button>
+  </div>`).join("");
+    return `<section class="dlr-builder-form-section">
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-list" data-path="${escapeHtml(path)}" data-item-type="${itemType}"${disabled(context.readOnly)}>Add</button></div>
+    ${rows || '<div class="dlr-builder-empty">No entries</div>'}
+  </section>`;
+  }
+  function renderPileList(path, label, values, context) {
+    const piles = Array.isArray(values) ? values : [];
+    const rows = piles.map((pile, index) => `<div class="dlr-builder-pile-row">
+    <span class="dlr-builder-pile-order">${index + 1}</span><strong>${escapeHtml(pile)}</strong>
+    <button data-builder-action="move-list" data-path="${escapeHtml(path)}" data-index="${index}" data-delta="-1"${disabled(context.readOnly || index === 0)}>Up</button>
+    <button data-builder-action="move-list" data-path="${escapeHtml(path)}" data-index="${index}" data-delta="1"${disabled(context.readOnly || index === piles.length - 1)}>Down</button>
+    <button data-builder-action="remove-list" data-path="${escapeHtml(path)}" data-index="${index}"${disabled(context.readOnly)}>Remove</button>
+  </div>`).join("");
+    const available = PILES.filter((pile) => !piles.includes(pile));
+    return `<section class="dlr-builder-form-section">
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3></div>
+    ${rows || '<div class="dlr-builder-empty">Inherit strategy default</div>'}
+    <div class="dlr-builder-add-row">
+      <select data-builder-add-select="${escapeHtml(path)}"${disabled(context.readOnly || !available.length)}>${available.map((pile) => `<option value="${pile}">${pile}</option>`).join("")}</select>
+      <button data-builder-action="add-selected-list" data-path="${escapeHtml(path)}"${disabled(context.readOnly || !available.length)}>Add pile</button>
+    </div>
+  </section>`;
+  }
+  function renderCardSpec(path, spec = {}, context, options = {}) {
+    const prefix = path ? `${path}.` : "";
+    return `<div class="dlr-builder-requirement">
+    ${options.index !== void 0 ? `<span class="dlr-builder-requirement-index">${options.index + 1}</span>` : ""}
+    ${fieldRow("Tier", selectInput(`${prefix}tier`, spec.tier, [
+      { value: "", label: "Any" },
+      { value: "bronze", label: "Bronze" },
+      { value: "silver", label: "Silver" },
+      { value: "gold", label: "Gold" }
+    ], context.readOnly))}
+    ${fieldRow("Rarity", selectInput(`${prefix}rarity`, spec.rarity, [
+      { value: "", label: "Any" },
+      { value: "common", label: "Common" },
+      { value: "rare", label: "Rare" }
+    ], context.readOnly))}
+    ${options.withCount !== false ? fieldRow("Count", textInput(`${prefix}count`, spec.count ?? 1, "number", context.readOnly)) : ""}
+    ${fieldRow("Min rating", textInput(`${prefix}minRating`, spec.minRating, "number", context.readOnly))}
+    ${fieldRow("Max rating", textInput(`${prefix}maxRating`, spec.maxRating, "number", context.readOnly))}
+    ${fieldRow("Special cards", `<select data-builder-field="${escapeHtml(`${prefix}allowSpecial`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.allowSpecial)}</select>`)}
+    ${fieldRow("Player only", `<select data-builder-field="${escapeHtml(`${prefix}playerOnly`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.playerOnly)}</select>`)}
+    ${fieldRow("Require special", `<select data-builder-field="${escapeHtml(`${prefix}special`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.special)}</select>`)}
+    ${fieldRow("Protect high Gold", `<select data-builder-field="${escapeHtml(`${prefix}protectHighGold`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.protectHighGold)}</select>`)}
+    ${fieldRow("Prefer Common", `<select data-builder-field="${escapeHtml(`${prefix}preferCommon`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.preferCommon)}</select>`)}
+    <div class="wide">${renderPileList(`${prefix}priorityPiles`, "Pile order", spec.priorityPiles, context)}</div>
+    ${options.removable ? `<button class="dlr-builder-remove-inline" data-builder-action="remove-list" data-path="${escapeHtml(options.listPath)}" data-index="${options.index}"${disabled(context.readOnly)}>Remove</button>` : ""}
+  </div>`;
+  }
+  function renderRequirements(path, label, requirements, context) {
+    return `<section class="dlr-builder-form-section">
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-requirement" data-path="${escapeHtml(path)}"${disabled(context.readOnly)}>Add</button></div>
+    ${(requirements || []).map((spec, index) => renderCardSpec(`${path}.${index}`, spec, context, { index, removable: true, listPath: path })).join("") || '<div class="dlr-builder-empty">No requirements</div>'}
+  </section>`;
+  }
+  function renderChallengeRequirements(path, label, groups, context) {
+    return `<section class="dlr-builder-form-section">
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-challenge-group" data-path="${escapeHtml(path)}"${disabled(context.readOnly)}>Add challenge</button></div>
+    ${(groups || []).map((requirements, index) => `<div class="dlr-builder-subsection">
+      <div class="dlr-builder-section-head"><h4>Challenge ${index + 1}</h4><button data-builder-action="remove-list" data-path="${escapeHtml(path)}" data-index="${index}"${disabled(context.readOnly)}>Remove</button></div>
+      ${renderRequirements(`${path}.${index}`, "Materials", requirements, context)}
+    </div>`).join("") || '<div class="dlr-builder-empty">No per-challenge requirements</div>'}
+  </section>`;
+  }
+  function renderRuntimeQuantity(path, value = {}, context) {
+    return `<section class="dlr-builder-form-section"><h3>Runtime quantity</h3><div class="dlr-builder-form-grid">
+    ${fieldRow("Mode", selectInput(`${path}.mode`, value.mode, [
+      { value: "user", label: "User input" },
+      { value: "ea-remaining", label: "Current EA remaining" },
+      { value: "exhaust", label: "All matching sources" },
+      { value: "fixed", label: "Fixed" }
+    ], context.readOnly, true))}
+    ${fieldRow("Target", selectInput(`${path}.target`, value.target, [
+      { value: "maxCompletions", label: "SBC completions" },
+      { value: "rounds", label: "Rounds" },
+      { value: "maxPacks", label: "Packs" },
+      { value: "validationRounds", label: "Validation runs" }
+    ], context.readOnly, true))}
+    ${fieldRow("Default", textInput(`${path}.default`, value.default, "number", context.readOnly))}
+    ${fieldRow("Minimum", textInput(`${path}.min`, value.min, "number", context.readOnly))}
+    ${fieldRow("Maximum", textInput(`${path}.max`, value.max, "number", context.readOnly))}
+    ${fieldRow("Label", textInput(`${path}.label`, value.label, "text", context.readOnly))}
+  </div></section>`;
+  }
+  function renderRewardFlow(path, value = {}, context) {
+    return `<section class="dlr-builder-form-section"><h3>Reward flow</h3><div class="dlr-builder-form-grid">
+    ${fieldRow("Open rewards", selectInput(`${path}.open`, value.open, [
+      { value: "inherit", label: "Inherit" },
+      { value: "always", label: "Always" },
+      { value: "never", label: "Never" }
+    ], context.readOnly))}
+  </div>
+  ${renderList(`${path}.packIds`, "Reward pack IDs", value.packIds, "number", context)}
+  ${renderList(`${path}.packNames`, "Reward pack aliases", value.packNames, "text", context)}
+  ${renderList(`${path}.unassignedRecoveryPolicyIds`, "Recovery policies", value.unassignedRecoveryPolicyIds, "text", context)}
+  </section>`;
+  }
+  function renderPickOptions(path, value = {}, context) {
+    const fields = [
+      ["protectHighGold", "Protect high Gold", "boolean-inherit"],
+      ["highGoldThreshold", "Protection threshold", "number"],
+      ["autoSelectBelow90", "Automatic selection", "boolean-inherit"],
+      ["autoPickThreshold", "Automatic selection threshold", "number"],
+      ["openPicksAtEnd", "Open Picks at end", "boolean-inherit"],
+      ["preferScannedMetadata", "Prefer scanned metadata", "boolean-inherit"]
+    ];
+    return `<section class="dlr-builder-form-section"><h3>Player Pick options</h3><div class="dlr-builder-form-grid">${fields.map(([key, label, type]) => type === "boolean-inherit" ? fieldRow(label, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value[key])}</select>`) : fieldRow(label, textInput(`${path}.${key}`, value[key], type, context.readOnly))).join("")}</div></section>`;
+  }
+  function renderPickBinding(path, value = {}, context) {
+    return `<section class="dlr-builder-form-section"><h3>Pre-craft Player Pick</h3>
+    ${renderList(`${path}.sbcSetIds`, "SBC Set IDs", value.sbcSetIds, "number", context)}
+    ${renderList(`${path}.pickItemResourceIds`, "Pick resource IDs", value.pickItemResourceIds, "number", context)}
+  </section>`;
+  }
+  function renderUpgrade(path, value = {}, context, options = {}) {
+    return `<div class="dlr-builder-subsection">
+    <div class="dlr-builder-section-head"><h4>${escapeHtml(options.label || value.name || "Upgrade")}</h4>${options.removable ? `<button data-builder-action="remove-list" data-path="${escapeHtml(options.listPath)}" data-index="${options.index}"${disabled(context.readOnly)}>Remove</button>` : ""}</div>
+    <div class="dlr-builder-form-grid">
+      ${fieldRow("ID", textInput(`${path}.id`, value.id, "id", context.readOnly))}
+      ${fieldRow("Name", textInput(`${path}.name`, value.name, "text", context.readOnly))}
+      ${fieldRow("Maximum completions", textInput(`${path}.maxCompletions`, value.maxCompletions, "number", context.readOnly))}
+      ${fieldRow("Open rewards", `<select data-builder-field="${path}.openRewardPacks" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.openRewardPacks)}</select>`)}
+      ${fieldRow("Force reward opening", `<select data-builder-field="${path}.forceOpenRewardPacks" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.forceOpenRewardPacks)}</select>`)}
+    </div>
+    ${renderList(`${path}.sbcNames`, "SBC aliases", value.sbcNames, "text", context)}
+    ${renderList(`${path}.rewardPackIds`, "Reward pack IDs", value.rewardPackIds, "number", context)}
+    ${renderList(`${path}.rewardPackNames`, "Reward pack aliases", value.rewardPackNames, "text", context)}
+    ${renderRequirements(`${path}.requirements`, "Requirements", value.requirements, context)}
+    ${renderChallengeRequirements(`${path}.challengeRequirements`, "Challenge requirements", value.challengeRequirements, context)}
+    ${renderPileList(`${path}.priorityPiles`, "Pile order", value.priorityPiles, context)}
+  </div>`;
+  }
+  function renderUpgradeList(path, label, values, context, stage = false) {
+    return `<section class="dlr-builder-form-section">
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-upgrade" data-path="${escapeHtml(path)}" data-stage="${stage}"${disabled(context.readOnly)}>Add</button></div>
+    ${(values || []).map((value, index) => renderUpgrade(`${path}.${index}`, value, context, { label: stage ? `Stage ${index + 1}` : `Upgrade ${index + 1}`, removable: true, listPath: path, index })).join("") || '<div class="dlr-builder-empty">No upgrades</div>'}
+  </section>`;
+  }
+  function renderShortagePacks(path, label, values, context) {
+    return `<section class="dlr-builder-form-section">
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-shortage" data-path="${escapeHtml(path)}"${disabled(context.readOnly)}>Add</button></div>
+    ${(values || []).map((source, index) => `<div class="dlr-builder-subsection">
+      <div class="dlr-builder-section-head"><h4>Source ${index + 1}</h4><button data-builder-action="remove-list" data-path="${escapeHtml(path)}" data-index="${index}"${disabled(context.readOnly)}>Remove</button></div>
+      ${renderCardSpec(`${path}.${index}.requirement`, source.requirement, context, { withCount: false })}
+      ${renderList(`${path}.${index}.packIds`, "Pack IDs", source.packIds, "number", context)}
+      ${renderList(`${path}.${index}.packNames`, "Pack aliases", source.packNames, "text", context)}
+      <div class="dlr-builder-form-grid">
+        ${fieldRow("Maximum opens", textInput(`${path}.${index}.maxOpensPerAttempt`, source.maxOpensPerAttempt, "number", context.readOnly))}
+        ${fieldRow("Repeat until supplied", `<select data-builder-field="${path}.${index}.repeatUntilSatisfied" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(source.repeatUntilSatisfied)}</select>`)}
+        ${fieldRow("Maximum supply runs", textInput(`${path}.${index}.maxRuns`, source.maxRuns, "number", context.readOnly))}
+        ${fieldRow("Duplicate routing", selectInput(`${path}.${index}.routingPolicy`, source.routingPolicy, [
+      { value: "", label: "Resolve normally" },
+      { value: "reserveMatchingDuplicates", label: "Reserve matching duplicates" }
+    ], context.readOnly))}
+      </div>
+    </div>`).join("") || '<div class="dlr-builder-empty">No shortage pack sources</div>'}
+  </section>`;
+  }
+  function renderRatingFill(path, value = {}, context) {
+    return `<section class="dlr-builder-form-section"><h3>Rating solver</h3><div class="dlr-builder-form-grid">
+    ${fieldRow("Target rating", textInput(`${path}.targetRating`, value.targetRating, "number", context.readOnly))}
+    ${fieldRow("Maximum search nodes", textInput(`${path}.maxSearchNodes`, value.maxSearchNodes, "number", context.readOnly))}
+    ${fieldRow("Maximum search ms", textInput(`${path}.maxSearchMs`, value.maxSearchMs, "number", context.readOnly))}
+    ${fieldRow("Yield every nodes", textInput(`${path}.yieldEveryNodes`, value.yieldEveryNodes, "number", context.readOnly))}
+  </div>${renderPileList(`${path}.priorityPiles`, "Pile order", value.priorityPiles, context)}</section>`;
+  }
+  function renderGenericObject(path, label, value, context) {
+    if (value === void 0 || value === null || value === false) {
+      return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3>${fieldRow("Enabled", `<select data-builder-field="${path}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value=""${selected(value, void 0)}>Inherit</option><option value="false"${selected(value, false)}>Disabled</option><option value="true"${selected(Boolean(value), true)}>Enabled</option></select>`)}</section>`;
+    }
+    const fields = Object.entries(value).filter(([, entry]) => ["string", "number", "boolean"].includes(typeof entry));
+    return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3><div class="dlr-builder-form-grid">
+    ${fieldRow("Enabled", `<select data-builder-field="${path}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value="true" selected>Enabled</option><option value="false">Disabled</option></select>`)}
+    ${fields.map(([key, entry]) => typeof entry === "boolean" ? fieldRow(key, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(entry)}</select>`) : fieldRow(key, textInput(`${path}.${key}`, entry, typeof entry === "number" ? "number" : "text", context.readOnly))).join("")}
+  </div></section>`;
+  }
+  function renderSpecialRequirementControl(path, value, context) {
+    if (value === void 0 || value === null || value === false) {
+      return renderGenericObject(path, "Additional special requirement control", value, context);
+    }
+    return `<section class="dlr-builder-form-section"><h3>Additional special requirement control</h3>
+    ${fieldRow("Enabled", `<select data-builder-field="${path}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value="true" selected>Enabled</option><option value="false">Disabled</option></select>`)}
+    ${renderList(`${path}.patterns`, "Requirement label patterns", value.patterns, "text", context)}
+    ${renderList(`${path}.buttonTexts`, "Add button labels", value.buttonTexts, "text", context)}
+  </section>`;
+  }
+  function renderAutomaticFillRecovery(path, label, value, context, options = {}) {
+    if (value === void 0 || value === null || value === false) {
+      return renderGenericObject(path, label, value, context);
+    }
+    return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3>
+    <div class="dlr-builder-form-grid">
+      ${fieldRow("Enabled", `<select data-builder-field="${path}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value="true" selected>Enabled</option><option value="false">Disabled</option></select>`)}
+      ${fieldRow("Name", textInput(`${path}.name`, value.name, "text", context.readOnly))}
+      ${options.attempts ? fieldRow("Maximum attempts per completion", textInput(`${path}.maxAttemptsPerCompletion`, value.maxAttemptsPerCompletion, "number", context.readOnly)) : ""}
+      ${fieldRow("Maximum completions", textInput(`${path}.maxCompletions`, value.maxCompletions, "number", context.readOnly))}
+      ${fieldRow("Maximum submitted rating", textInput(`${path}.maxSubmittedRating`, value.maxSubmittedRating, "number", context.readOnly))}
+      ${fieldRow("Maximum normal Gold rating", textInput(`${path}.maxNormalGoldSubmittedRating`, value.maxNormalGoldSubmittedRating, "number", context.readOnly))}
+      ${fieldRow("Required special cards", textInput(`${path}.requiredSpecialCount`, value.requiredSpecialCount, "number", context.readOnly))}
+      ${fieldRow("Allowed special cards", textInput(`${path}.allowedSpecialCount`, value.allowedSpecialCount, "number", context.readOnly))}
+      ${fieldRow("Fill from inventory first", `<select data-builder-field="${path}.inventoryFillFirst" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.inventoryFillFirst)}</select>`)}
+      ${fieldRow("Block special cards", `<select data-builder-field="${path}.blockSpecial" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.blockSpecial)}</select>`)}
+      ${fieldRow("Block tradeable cards", `<select data-builder-field="${path}.blockTradeable" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.blockTradeable)}</select>`)}
+      ${fieldRow("Open reward packs", `<select data-builder-field="${path}.openRewardPacks" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.openRewardPacks)}</select>`)}
+      ${fieldRow("Force reward opening", `<select data-builder-field="${path}.forceOpenRewardPacks" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.forceOpenRewardPacks)}</select>`)}
+    </div>
+    ${renderList(`${path}.sbcNames`, "SBC aliases", value.sbcNames, "text", context)}
+    ${renderList(`${path}.rewardPackIds`, "Reward pack IDs", value.rewardPackIds, "number", context)}
+    ${renderList(`${path}.rewardPackNames`, "Reward pack aliases", value.rewardPackNames, "text", context)}
+    ${renderRequirements(`${path}.requirements`, "Requirements", value.requirements, context)}
+    ${renderRatingFill(`${path}.ratingSbcFill`, value.ratingSbcFill, context)}
+    ${renderPileList(`${path}.priorityPiles`, "Pile order", value.priorityPiles, context)}
+  </section>`;
+  }
+  function renderAutoTotwUpgrade(path, value, context) {
+    return renderAutomaticFillRecovery(path, "Automatic special recovery", value, context);
+  }
+  function renderAutoFodderUpgrade(path, value, context) {
+    return renderAutomaticFillRecovery(path, "Automatic fodder recovery", value, context, { attempts: true });
+  }
+  function renderLegacyOverrides(path, value = {}, context) {
+    return `<section class="dlr-builder-form-section"><h3>Legacy step overrides</h3>
+    ${Object.entries(value || {}).map(([stepId, override]) => `<div class="dlr-builder-subsection"><h4>${escapeHtml(stepId)}</h4><div class="dlr-builder-form-grid">
+      ${Object.entries(override || {}).map(([key, entry]) => typeof entry === "boolean" ? fieldRow(key, `<select data-builder-field="${path}.${stepId}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(entry)}</select>`) : fieldRow(key, textInput(`${path}.${stepId}.${key}`, entry, typeof entry === "number" ? "number" : "text", context.readOnly))).join("")}
+    </div></div>`).join("") || '<div class="dlr-builder-empty">No legacy overrides</div>'}
+  </section>`;
+  }
+  function renderField(field2, loop, context) {
+    const value = loop[field2.path];
+    switch (field2.type) {
+      case "string-list":
+        return renderList(field2.path, field2.label, value, "text", context);
+      case "number-list":
+        return renderList(field2.path, field2.label, value, "number", context);
+      case "pile-list":
+        return renderPileList(field2.path, field2.label, value, context);
+      case "policy-list":
+        return renderList(field2.path, field2.label, value, "text", context);
+      case "card-spec":
+        return `<section class="dlr-builder-form-section"><h3>${escapeHtml(field2.label)}</h3>${renderCardSpec(field2.path, value, context, { withCount: false })}</section>`;
+      case "requirements":
+        return renderRequirements(field2.path, field2.label, value, context);
+      case "challenge-requirements":
+        return renderChallengeRequirements(field2.path, field2.label, value, context);
+      case "runtime-quantity":
+        return renderRuntimeQuantity(field2.path, value, context);
+      case "reward-flow":
+        return renderRewardFlow(field2.path, value, context);
+      case "pick-options":
+        return renderPickOptions(field2.path, value, context);
+      case "pick-binding":
+        return renderPickBinding(field2.path, value, context);
+      case "upgrade":
+        return `<section class="dlr-builder-form-section"><h3>${escapeHtml(field2.label)}</h3>${renderUpgrade(field2.path, value, context)}</section>`;
+      case "upgrade-list":
+        return renderUpgradeList(field2.path, field2.label, value, context);
+      case "stage-list":
+        return renderUpgradeList(field2.path, field2.label, value, context, true);
+      case "shortage-packs":
+        return renderShortagePacks(field2.path, field2.label, value, context);
+      case "rating-fill":
+        return renderRatingFill(field2.path, value, context);
+      case "auto-totw-upgrade":
+        return renderAutoTotwUpgrade(field2.path, value, context);
+      case "auto-fodder-upgrade":
+        return renderAutoFodderUpgrade(field2.path, value, context);
+      case "special-requirement-control":
+        return renderSpecialRequirementControl(field2.path, value, context);
+      case "object-toggle":
+        return renderGenericObject(field2.path, field2.label, value, context);
+      case "legacy-step-overrides":
+        return renderLegacyOverrides(field2.path, value, context);
+      case "workflow-steps":
+        return "";
+      default:
+        return renderScalarField(field2, value, context);
+    }
+  }
+  function renderWorkflow(loop, context) {
+    const steps = loop.steps || [];
+    return `<section class="dlr-builder-workflow">
+    <div class="dlr-builder-section-head"><h2>Steps</h2><div class="dlr-builder-add-row">
+      <select id="dlr-builder-add-step-select"${disabled(context.readOnly)}>${context.atomicLoops.map((child) => `<option value="${escapeHtml(child.id)}">${escapeHtml(child.name)} (${escapeHtml(child.strategy)})</option>`).join("")}</select>
+      <button data-builder-action="add-step"${disabled(context.readOnly || !context.atomicLoops.length)}>Add step</button>
+    </div></div>
+    <div class="dlr-builder-step-list">${steps.map((rawStep, index) => {
+      const step = typeof rawStep === "string" ? { loopId: rawStep } : rawStep;
+      const child = context.allLoops.find((candidate) => String(candidate.id) === String(step.loopId));
+      return `<div class="dlr-builder-step${index === context.selectedStep ? " selected" : ""}" data-builder-action="select-step" data-index="${index}">
+        <span class="dlr-builder-step-number">${index + 1}</span>
+        <div><strong>${escapeHtml(step.name || child?.name || step.loopId)}</strong><small>${escapeHtml(child?.strategy || "Missing Loop")} | ${escapeHtml(step.loopId)}</small></div>
+        <button data-builder-action="move-step" data-index="${index}" data-delta="-1"${disabled(context.readOnly || index === 0)}>Up</button>
+        <button data-builder-action="move-step" data-index="${index}" data-delta="1"${disabled(context.readOnly || index === steps.length - 1)}>Down</button>
+        <button data-builder-action="variant-step" data-index="${index}"${disabled(context.readOnly || !child)}>Customize</button>
+        <button data-builder-action="remove-step" data-index="${index}"${disabled(context.readOnly)}>Remove</button>
+      </div>`;
+    }).join("") || '<div class="dlr-builder-empty">Add at least one atomic Loop</div>'}</div>
+  </section>`;
+  }
+  function renderLoopEditor(loop, context) {
+    if (!loop) return '<div class="dlr-builder-empty large">Select a Loop or Workflow</div>';
+    const descriptor2 = getBuilderStrategyDescriptor(loop.strategy);
+    const fields = getBuilderLoopFields(loop);
+    return `<div class="dlr-builder-editor-title"><div><span class="dlr-builder-source ${context.source}">${escapeHtml(context.source)}</span><h1>${escapeHtml(loop.name)}</h1><code>${escapeHtml(loop.id)}</code></div>
+    <div class="dlr-builder-object-actions">
+      ${context.source === "dynamic" ? '<button data-builder-action="bind-dynamic">Add to profile</button>' : ""}
+      ${context.source === "dynamic-bound" ? '<button class="danger" data-builder-action="unbind-dynamic">Remove binding</button>' : ""}
+      ${context.source === "built-in" ? '<button data-builder-action="override-object">Override</button>' : ""}
+      ${context.source === "override" ? '<button data-builder-action="reset-object">Reset</button>' : ""}
+      ${context.source !== "dynamic" ? '<button data-builder-action="duplicate-object">Duplicate</button>' : ""}
+      ${context.source === "custom" ? '<button class="danger" data-builder-action="delete-object">Delete</button>' : ""}
+    </div>
+  </div>
+  ${descriptor2?.routine ? renderWorkflow(loop, context) : ""}
+  <div class="dlr-builder-form-grid common">${fields.filter((field2) => ["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "pick-loop-reference", "price-platform"].includes(field2.type)).map((field2) => renderField(field2, loop, context)).join("")}</div>
+  ${fields.filter((field2) => !["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "pick-loop-reference", "price-platform", "workflow-steps"].includes(field2.type)).map((field2) => renderField(field2, loop, context)).join("")}`;
+  }
+  function renderRecoveryEditor(object, kind, context) {
+    if (!object) return '<div class="dlr-builder-empty large">Select a recovery recipe or policy</div>';
+    const actions = `<div class="dlr-builder-object-actions">
+    ${context.source === "built-in" ? '<button data-builder-action="override-object">Override</button>' : ""}
+    ${context.source === "override" ? '<button data-builder-action="reset-object">Reset</button>' : ""}
+    <button data-builder-action="duplicate-object">Duplicate</button>
+    ${context.source === "custom" ? '<button class="danger" data-builder-action="delete-object">Delete</button>' : ""}
+  </div>`;
+    const common = `<div class="dlr-builder-form-grid common">${fieldRow("Name", textInput("name", object.name, "text", context.readOnly))}${fieldRow("Stable ID", textInput("id", object.id, "id", context.readOnly || context.source !== "custom"))}</div>`;
+    if (kind === "recoveryRecipes") {
+      return `<div class="dlr-builder-editor-title"><div><span class="dlr-builder-source ${context.source}">${context.source}</span><h1>${escapeHtml(object.name)}</h1></div>${actions}</div>${common}
+      <section class="dlr-builder-form-section"><h3>Recovery behavior</h3><div class="dlr-builder-form-grid">
+        ${fieldRow("Maximum submissions", textInput("maxSubmissions", object.maxSubmissions, "number", context.readOnly))}
+        ${fieldRow("Must consume trigger", `<select data-builder-field="mustConsumeTrigger" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(object.mustConsumeTrigger)}</select>`)}
+        ${fieldRow("Unavailable", selectInput("onUnavailable", object.onUnavailable, [{ value: "", label: "Default" }, { value: "continue", label: "Continue" }, { value: "stop", label: "Stop" }], context.readOnly))}
+        ${fieldRow("Insufficient", selectInput("onInsufficient", object.onInsufficient, [{ value: "", label: "Default" }, { value: "continue", label: "Continue" }, { value: "stop", label: "Stop" }], context.readOnly))}
+        ${fieldRow("Blocked", selectInput("onBlocked", object.onBlocked, [{ value: "", label: "Default (stop)" }, { value: "stop", label: "Stop" }], context.readOnly))}
+      </div></section>
+      ${renderList("sbcNames", "SBC aliases", object.sbcNames, "text", context)}
+      ${renderRequirements("requirements", "Requirements", object.requirements, context)}
+      ${renderPileList("priorityPiles", "Pile order", object.priorityPiles, context)}`;
+    }
+    return `<div class="dlr-builder-editor-title"><div><span class="dlr-builder-source ${context.source}">${context.source}</span><h1>${escapeHtml(object.id)}</h1></div>${actions}</div>${common}
+    <section class="dlr-builder-form-section"><div class="dlr-builder-form-grid">
+      ${fieldRow("Use by default", `<select data-builder-action="toggle-default-policy" data-policy-id="${escapeHtml(object.id)}"${disabled(context.readOnly)}><option value="false"${selected(context.defaultRecoveryPolicyIds.includes(object.id), false)}>Disabled</option><option value="true"${selected(context.defaultRecoveryPolicyIds.includes(object.id), true)}>Enabled</option></select>`)}
+    </div></section>
+    <section class="dlr-builder-form-section"><h3>Match</h3>${renderCardSpec("match", object.match, context, { withCount: false })}</section>
+    <section class="dlr-builder-form-section"><div class="dlr-builder-section-head"><h3>Recovery steps</h3><button data-builder-action="add-recovery-step"${disabled(context.readOnly)}>Add</button></div>
+      ${(object.steps || []).map((step, index) => `<div class="dlr-builder-form-grid recovery-step">
+        ${fieldRow("Recipe", selectInput(`steps.${index}.recipeId`, step.recipeId, context.recoveryRecipes.map((recipe2) => ({ value: recipe2.id, label: recipe2.name })), context.readOnly))}
+        ${fieldRow("Unavailable", selectInput(`steps.${index}.onUnavailable`, step.onUnavailable, [{ value: "", label: "Default" }, { value: "continue", label: "Continue" }, { value: "stop", label: "Stop" }], context.readOnly))}
+        ${fieldRow("Insufficient", selectInput(`steps.${index}.onInsufficient`, step.onInsufficient, [{ value: "", label: "Default" }, { value: "continue", label: "Continue" }, { value: "stop", label: "Stop" }], context.readOnly))}
+        ${fieldRow("Blocked", selectInput(`steps.${index}.onBlocked`, step.onBlocked, [{ value: "", label: "Default (stop)" }, { value: "stop", label: "Stop" }], context.readOnly))}
+        <button data-builder-action="remove-list" data-path="steps" data-index="${index}"${disabled(context.readOnly)}>Remove</button>
+      </div>`).join("") || '<div class="dlr-builder-empty">No recovery steps</div>'}
+    </section>`;
+  }
+  function libraryRows(model) {
+    const search = String(model.search || "").toLowerCase();
+    let entries = [];
+    if (model.tab === "workflows") entries = model.config.loops.filter((loop) => ["dailyRoutine", "workflowRoutine"].includes(loop.strategy)).map((object) => ({ kind: "loops", object }));
+    if (model.tab === "loops") entries = model.config.loops.filter((loop) => !["dailyRoutine", "workflowRoutine"].includes(loop.strategy)).map((object) => ({ kind: "loops", object }));
+    if (model.tab === "dynamic") entries = model.discoveredLoops.map((object) => ({ kind: "dynamic", object }));
+    if (model.tab === "recovery") entries = [
+      ...model.config.recoveryRecipes.map((object) => ({ kind: "recoveryRecipes", object })),
+      ...model.config.unassignedRecoveryPolicies.map((object) => ({ kind: "unassignedRecoveryPolicies", object }))
+    ];
+    return entries.filter(({ object }) => `${object.name || ""} ${object.id || ""} ${object.strategy || ""}`.toLowerCase().includes(search));
+  }
+  function renderLibrary(model) {
+    const entries = libraryRows(model);
+    return `<aside class="dlr-builder-library">
+    <div class="dlr-builder-library-tools"><input id="dlr-builder-search" type="search" value="${escapeHtml(model.search)}" placeholder="Search"><button data-builder-action="new-object"${disabled(model.tab === "dynamic")}>New</button></div>
+    <div class="dlr-builder-library-list">${entries.map(({ kind, object }) => {
+      const source = kind === "dynamic" ? "dynamic" : model.sources[kind]?.find((entry) => entry.id === String(object.id))?.source || "custom";
+      const binding = kind === "loops" && source === "dynamic" ? (model.profile.dynamicBindings || []).find((entry) => String(entry.loopId) === String(object.id)) : null;
+      const availability = binding ? binding.available ? "available" : "unavailable" : "";
+      return `<button class="dlr-builder-library-row${model.selectedKind === kind && String(model.selectedId) === String(object.id) ? " selected" : ""}" data-builder-action="select-object" data-kind="${kind}" data-id="${escapeHtml(object.id)}">
+        <span><strong>${escapeHtml(object.name || object.id)}</strong><small>${escapeHtml(object.strategy || (kind === "recoveryRecipes" ? "Recovery recipe" : "Recovery policy"))}${availability ? ` | ${availability}` : ""}</small></span>
+        <span class="dlr-builder-source ${source}${availability ? ` ${availability}` : ""}">${source}</span>
+      </button>`;
+    }).join("") || '<div class="dlr-builder-empty">No matching objects</div>'}</div>
+    ${model.tab === "loops" ? `<div class="dlr-builder-new-type"><select id="dlr-builder-new-strategy">${optionList(BUILDER_STRATEGY_OPTIONS.filter((entry) => !["dailyRoutine", "workflowRoutine"].includes(entry.value)), "fillAndVerifySbc")}</select></div>` : ""}
+    ${model.tab === "recovery" ? '<div class="dlr-builder-new-type"><select id="dlr-builder-new-recovery-type"><option value="recipe">Recovery recipe</option><option value="policy">Recovery policy</option></select></div>' : ""}
+  </aside>`;
+  }
+  function renderInspector(model, selected2) {
+    const errors = model.validation?.errors || [];
+    const conflicts = model.validation?.conflicts || [];
+    const references = model.references || [];
+    const step = model.selectedStepData;
+    return `<aside class="dlr-builder-inspector">
+    <h2>Inspector</h2>
+    ${step ? `<section><h3>Selected step</h3><div class="dlr-builder-form-grid">
+      ${fieldRow("Display name", textInput(`steps.${model.selectedStep}.name`, step.name, "text", model.editorReadOnly))}
+    </div>${renderRewardFlow(`steps.${model.selectedStep}.rewardFlow`, step.rewardFlow, { ...model, readOnly: model.editorReadOnly })}</section>` : ""}
+    <section><h3>Validation</h3>${errors.length ? `<ul class="dlr-builder-errors">${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : '<div class="dlr-builder-valid">Valid draft</div>'}</section>
+    ${conflicts.length ? `<section><h3>Built-in conflicts</h3>${conflicts.map((conflict, index) => `<div class="dlr-builder-conflict"><strong>${escapeHtml(`${conflict.collection}.${conflict.id}${conflict.path ? `.${conflict.path}` : ""}`)}</strong><small>${escapeHtml(conflict.reason)}</small><div><button data-builder-action="resolve-conflict" data-index="${index}" data-choice="built-in">Use built-in</button><button data-builder-action="resolve-conflict" data-index="${index}" data-choice="profile">Keep mine</button></div></div>`).join("")}</section>` : ""}
+    <section><h3>References</h3>${references?.length ? `<ul>${references.map((ref) => `<li>${escapeHtml(ref.ownerId)}: ${escapeHtml(ref.type)}</li>`).join("")}</ul>` : '<div class="dlr-builder-empty">No references</div>'}</section>
+    <section><h3>Revision</h3><dl><dt>Draft</dt><dd>${model.profile.draftRevision}</dd><dt>Saved</dt><dd>${model.profile.savedRevision}</dd><dt>Source</dt><dd>${escapeHtml(model.selectedSource || "n/a")}</dd></dl></section>
+  </aside>`;
+  }
+  function renderJson(model) {
+    return `<main class="dlr-builder-json-view">
+    <div class="dlr-builder-json-tools">
+      <button data-builder-action="validate-json">Validate pasted JSON</button>
+      <button data-builder-action="apply-json">Import valid JSON</button>
+      <button data-builder-action="export-json">Export generated JSON</button>
+    </div>
+    <div class="dlr-builder-json-grid">
+      <section><h2>Paste / validate</h2><textarea id="dlr-builder-json-input" spellcheck="false">${escapeHtml(model.jsonInput || "")}</textarea></section>
+      <section><h2>Generated draft</h2><pre>${escapeHtml(model.generatedJson)}</pre></section>
+    </div>
+    ${model.jsonMessage ? `<div class="dlr-builder-json-message ${model.jsonValid ? "valid" : "error"}">${escapeHtml(model.jsonMessage)}</div>` : ""}
+  </main>`;
+  }
+  function quantitySummary(loop = {}) {
+    const quantity = loop.runtimeQuantity;
+    if (quantity?.mode) {
+      const target = quantity.target || "maxCompletions";
+      const amount = quantity.mode === "user" ? `${quantity.default || "?"} (${quantity.min || 1}-${quantity.max || "?"})` : quantity.mode;
+      return `${target}: ${amount}`;
+    }
+    if (loop.consumeAllSourcePacks) return "all matching source packs";
+    if (loop.exhaustSbcSet) return "all EA remaining completions";
+    for (const field2 of ["maxCompletions", "rounds", "maxPacks", "maxRounds"]) {
+      if (loop[field2] !== void 0) return `${field2}: ${loop[field2]}`;
+    }
+    return "strategy default";
+  }
+  function rewardSummary(loop = {}) {
+    const mode = loop.rewardFlow?.open || (loop.forceOpenRewardPacks ? "always" : loop.openRewardPacks === true ? "always" : loop.openRewardPacks === false ? "never" : "inherit");
+    const packs = [...loop.rewardFlow?.packNames || [], ...loop.rewardPackNames || []];
+    return `${mode}${packs.length ? ` | ${packs.slice(0, 2).join(", ")}${packs.length > 2 ? ` +${packs.length - 2}` : ""}` : ""}`;
+  }
+  function renderPreview(model) {
+    const config = model.validation.config;
+    const byId = new Map((config.loops || []).map((loop) => [String(loop.id), loop]));
+    const workflows = (config.loops || []).filter((loop) => ["dailyRoutine", "workflowRoutine"].includes(loop.strategy));
+    const atomic = (config.loops || []).filter((loop) => !["dailyRoutine", "workflowRoutine"].includes(loop.strategy));
+    return `<main class="dlr-builder-preview">
+    <div class="dlr-builder-editor-title"><div><h1>Configuration preview</h1><small>Read-only</small></div><button data-builder-action="close-preview">Back to editor</button></div>
+    <section class="dlr-builder-form-section"><h2>Validation</h2>
+      ${model.validation.errors.length ? `<ul class="dlr-builder-errors">${model.validation.errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : '<div class="dlr-builder-valid">Materialized configuration is valid</div>'}
+    </section>
+    <section class="dlr-builder-form-section"><h2>Workflows</h2>
+      ${workflows.map((workflow) => `<div class="dlr-builder-preview-workflow"><h3>${escapeHtml(workflow.name)} <code>${escapeHtml(workflow.id)}</code></h3>
+        <ol>${(workflow.steps || []).map((rawStep) => {
+      const step = typeof rawStep === "string" ? { loopId: rawStep } : rawStep;
+      const child = byId.get(String(step.loopId));
+      const previewLoop = child ? { ...child, rewardFlow: step.rewardFlow || child.rewardFlow } : {};
+      return `<li class="${child ? "" : "missing"}"><strong>${escapeHtml(step.name || child?.name || step.loopId)}</strong><span>${escapeHtml(child?.strategy || "Missing Loop")}</span><span>${escapeHtml(child ? quantitySummary(child) : step.loopId)}</span><span>Rewards: ${escapeHtml(rewardSummary(previewLoop))}</span></li>`;
+    }).join("")}</ol>
+      </div>`).join("") || '<div class="dlr-builder-empty">No Workflows</div>'}
+    </section>
+    <section class="dlr-builder-form-section"><h2>Atomic Loops</h2>
+      <div class="dlr-builder-preview-table">${atomic.map((loop) => `<div><strong>${escapeHtml(loop.name)}</strong><code>${escapeHtml(loop.id)}</code><span>${escapeHtml(loop.strategy)}</span><span>${escapeHtml(quantitySummary(loop))}</span><span>Inventory: ${escapeHtml(loop.inventoryMode || "inherit")}</span><span>Rewards: ${escapeHtml(rewardSummary(loop))}</span></div>`).join("")}</div>
+    </section>
+    ${model.validation.unavailableBindings.length ? `<section class="dlr-builder-form-section"><h2>Unavailable Dynamic Picks</h2><ul class="dlr-builder-errors">${model.validation.unavailableBindings.map((binding) => `<li>${escapeHtml(binding.loopId || binding.id)}</li>`).join("")}</ul></section>` : ""}
+  </main>`;
+  }
+  var WORKFLOW_LOOP_BUILDER_STYLE = `
+  #dlr-workflow-builder { position: fixed; inset: 0; z-index: 1000001; display: none; background: #101214; color: #edf1f4; font: 12px Arial, sans-serif; }
+  #dlr-workflow-builder.open { display: grid; grid-template-rows: auto minmax(0, 1fr) 28px; }
+  #dlr-workflow-builder * { box-sizing: border-box; letter-spacing: 0; }
+  .dlr-builder-body { min-height: 0; display: grid; grid-template-rows: 35px minmax(0, 1fr); overflow: hidden; }
+  #dlr-workflow-builder button, #dlr-workflow-builder input, #dlr-workflow-builder select, #dlr-workflow-builder textarea { font: inherit; }
+  #dlr-workflow-builder button { min-height: 28px; border: 1px solid #4a535d; background: #24292e; color: #f5f7f8; padding: 4px 9px; cursor: pointer; }
+  #dlr-workflow-builder button:hover:not(:disabled) { border-color: #79a7d8; background: #2d343a; }
+  #dlr-workflow-builder button:disabled { opacity: .42; cursor: default; }
+  #dlr-workflow-builder button.primary { background: #276749; border-color: #48a679; }
+  #dlr-workflow-builder button.danger { color: #ffb3b3; border-color: #824848; }
+  .dlr-builder-toolbar { min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #394047; background: #171a1d; }
+  .dlr-builder-toolbar h1 { margin: 0 12px 0 0; font-size: 16px; white-space: nowrap; }
+  .dlr-builder-toolbar select { max-width: 210px; }
+  .dlr-builder-toolbar .spacer { flex: 1; }
+  .dlr-builder-dirty { color: #ffcf66; min-width: 56px; }
+  .dlr-builder-workspace { min-height: 0; display: grid; grid-template-columns: 260px minmax(420px, 1fr) 340px; }
+  .dlr-builder-library, .dlr-builder-inspector { min-width: 0; overflow: auto; background: #171a1d; }
+  .dlr-builder-library { border-right: 1px solid #394047; }
+  .dlr-builder-inspector { border-left: 1px solid #394047; padding: 12px; }
+  .dlr-builder-editor { min-width: 0; overflow: auto; padding: 16px 20px 60px; }
+  .dlr-builder-tabs { display: flex; gap: 0; border-bottom: 1px solid #394047; background: #171a1d; padding-left: 12px; }
+  .dlr-builder-tabs button { border-width: 0 0 2px; background: transparent; min-height: 34px; }
+  .dlr-builder-tabs button.active { border-color: #58a6ff; color: #a9d2ff; }
+  .dlr-builder-library-tools, .dlr-builder-add-row, .dlr-builder-json-tools { display: flex; gap: 6px; align-items: center; padding: 8px; }
+  .dlr-builder-library-tools input { min-width: 0; flex: 1; }
+  .dlr-builder-library-list { overflow: auto; }
+  .dlr-builder-library-row { width: 100%; border: 0 !important; border-bottom: 1px solid #2e3439 !important; background: transparent !important; display: flex; justify-content: space-between; text-align: left; padding: 9px 10px !important; }
+  .dlr-builder-library-row.selected { background: #243342 !important; box-shadow: inset 3px 0 #58a6ff; }
+  .dlr-builder-library-row span:first-child { min-width: 0; display: flex; flex-direction: column; }
+  .dlr-builder-library-row strong, .dlr-builder-library-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dlr-builder-library-row small { color: #aab4bd; margin-top: 3px; }
+  .dlr-builder-source { display: inline-block; font-size: 10px; text-transform: uppercase; padding: 2px 5px; border: 1px solid #56616b; color: #c8d1d9; }
+  .dlr-builder-source.custom { color: #8ee6b6; border-color: #377a55; }
+  .dlr-builder-source.override { color: #ffd67a; border-color: #80652d; }
+  .dlr-builder-source.dynamic { color: #d2b5ff; border-color: #71529a; }
+  .dlr-builder-source.dynamic-bound { color: #d2b5ff; border-color: #71529a; }
+  .dlr-builder-editor-title { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 1px solid #394047; padding-bottom: 12px; margin-bottom: 14px; }
+  .dlr-builder-editor-title h1 { margin: 5px 0 2px; font-size: 20px; }
+  .dlr-builder-editor-title code { color: #aab4bd; }
+  .dlr-builder-object-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .dlr-builder-form-grid { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 10px 12px; }
+  .dlr-builder-form-grid.common { grid-template-columns: repeat(3, minmax(160px, 1fr)); margin-bottom: 14px; }
+  .dlr-builder-field { min-width: 0; display: flex; flex-direction: column; gap: 4px; color: #b8c2ca; }
+  .dlr-builder-field.wide { grid-column: 1 / -1; }
+  .dlr-builder-field input, .dlr-builder-field select, .dlr-builder-add-row select, .dlr-builder-library-tools input, .dlr-builder-new-type select { width: 100%; min-width: 0; height: 30px; border: 1px solid #4a535d; background: #0e1012; color: #f4f6f8; padding: 4px 6px; }
+  .dlr-builder-form-section { border-top: 1px solid #394047; padding: 13px 0; margin: 0; }
+  .dlr-builder-form-section h3, .dlr-builder-inspector h2, .dlr-builder-inspector h3 { margin: 0 0 9px; font-size: 13px; }
+  .dlr-builder-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .dlr-builder-section-head h2, .dlr-builder-section-head h3, .dlr-builder-section-head h4 { margin: 0; }
+  .dlr-builder-list-row, .dlr-builder-pile-row { display: grid; grid-template-columns: minmax(120px, 1fr) auto auto auto; gap: 6px; margin: 5px 0; align-items: center; }
+  .dlr-builder-list-row input { min-width: 0; height: 30px; border: 1px solid #4a535d; background: #0e1012; color: #fff; padding: 4px 6px; }
+  .dlr-builder-pile-row { grid-template-columns: 28px 1fr auto auto auto; padding: 5px 0; border-bottom: 1px solid #292f34; }
+  .dlr-builder-pile-order, .dlr-builder-step-number { color: #91a0ad; font-variant-numeric: tabular-nums; }
+  .dlr-builder-requirement { display: grid; grid-template-columns: 30px repeat(4, minmax(100px, 1fr)); gap: 8px; align-items: end; margin: 6px 0; padding: 8px; border-left: 3px solid #a87932; background: #15181a; }
+  .dlr-builder-requirement .dlr-builder-field { min-width: 90px; }
+  .dlr-builder-requirement-index { align-self: center; font-weight: 700; }
+  .dlr-builder-remove-inline { align-self: end; }
+  .dlr-builder-subsection { border-left: 2px solid #46515b; padding: 9px 0 9px 12px; margin: 8px 0; }
+  .dlr-builder-step { display: grid; grid-template-columns: 28px minmax(160px, 1fr) auto auto auto auto; gap: 7px; align-items: center; padding: 8px; border-bottom: 1px solid #343b41; cursor: pointer; }
+  .dlr-builder-step.selected { background: #21303a; }
+  .dlr-builder-step div { min-width: 0; display: flex; flex-direction: column; }
+  .dlr-builder-step small { color: #aab4bd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dlr-builder-inspector section { border-top: 1px solid #394047; padding: 12px 0; }
+  .dlr-builder-inspector dl { display: grid; grid-template-columns: 80px 1fr; gap: 5px; }
+  .dlr-builder-inspector dt { color: #9faab4; }
+  .dlr-builder-inspector dd { margin: 0; overflow-wrap: anywhere; }
+  .dlr-builder-errors { color: #ffaaa5; padding-left: 18px; }
+  .dlr-builder-conflict { display: grid; gap: 5px; padding: 8px 0; border-bottom: 1px solid #343b41; }
+  .dlr-builder-conflict small { color: #aab4bd; }
+  .dlr-builder-conflict div { display: flex; gap: 6px; }
+  .dlr-builder-valid { color: #85dfaa; }
+  .dlr-builder-empty { color: #8f9aa3; padding: 10px; text-align: center; }
+  .dlr-builder-empty.large { padding: 60px 20px; font-size: 14px; }
+  .dlr-builder-status { display: flex; gap: 18px; align-items: center; padding: 5px 12px; border-top: 1px solid #394047; background: #171a1d; color: #aeb8c0; }
+  .dlr-builder-json-view { min-height: 0; overflow: auto; padding: 12px; }
+  .dlr-builder-json-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 520px; }
+  .dlr-builder-json-grid section { min-width: 0; display: flex; flex-direction: column; }
+  .dlr-builder-json-grid h2 { font-size: 14px; }
+  .dlr-builder-json-grid textarea, .dlr-builder-json-grid pre { flex: 1; min-height: 420px; margin: 0; overflow: auto; border: 1px solid #4a535d; background: #0b0d0e; color: #eef2f4; padding: 10px; font: 11px Consolas, monospace; white-space: pre; }
+  .dlr-builder-json-message { padding: 8px; margin-top: 8px; border: 1px solid; }
+  .dlr-builder-json-message.valid { color: #85dfaa; border-color: #377a55; }
+  .dlr-builder-json-message.error { color: #ffaaa5; border-color: #824848; }
+  .dlr-builder-preview { min-height: 0; overflow: auto; padding: 12px; }
+  .dlr-builder-preview-workflow { border-top: 1px solid #394047; padding: 10px 0; }
+  .dlr-builder-preview-workflow ol { margin: 8px 0; padding-left: 24px; }
+  .dlr-builder-preview-workflow li { display: grid; grid-template-columns: minmax(160px, 1fr) 150px 180px minmax(180px, 1fr); gap: 8px; padding: 5px; }
+  .dlr-builder-preview-workflow li.missing { color: #ff9f9f; }
+  .dlr-builder-preview-table > div { display: grid; grid-template-columns: minmax(160px, 1fr) 150px 170px 180px 160px minmax(180px, 1fr); gap: 8px; border-top: 1px solid #394047; padding: 7px 5px; align-items: center; }
+  .dlr-builder-new-type { padding: 8px; border-top: 1px solid #394047; }
+  @media (max-width: 1200px) {
+    .dlr-builder-toolbar { flex-wrap: wrap; }
+  }
+  @media (max-width: 900px) {
+    .dlr-builder-workspace { grid-template-columns: 220px minmax(360px, 1fr); }
+    .dlr-builder-inspector { display: none; }
+    .dlr-builder-form-grid.common { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+    .dlr-builder-requirement { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+    .dlr-builder-preview-workflow li, .dlr-builder-preview-table > div { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+  }
+  @media (max-width: 620px) {
+    #dlr-workflow-builder.open { grid-template-rows: auto minmax(0, 1fr) 28px; }
+    .dlr-builder-workspace { grid-template-columns: 1fr; }
+    .dlr-builder-library { max-height: 34vh; border-right: 0; border-bottom: 1px solid #394047; }
+    .dlr-builder-editor { padding: 12px 10px 50px; }
+    .dlr-builder-form-grid, .dlr-builder-form-grid.common, .dlr-builder-json-grid { grid-template-columns: 1fr; }
+    .dlr-builder-step { grid-template-columns: 24px 1fr auto auto; }
+    .dlr-builder-step button:nth-of-type(3), .dlr-builder-step button:nth-of-type(4) { grid-row: 2; }
+  }
+`;
+  function workflowLoopBuilderHtml(model) {
+    const profileOptions = model.store.profiles.map((profile) => ({ value: profile.id, label: profile.name }));
+    const tabs = [
+      ["workflows", "Workflows"],
+      ["loops", "Loops"],
+      ["recovery", "Recovery"],
+      ["dynamic", "Dynamic Picks"],
+      ["json", "JSON validation"]
+    ];
+    const selected2 = model.selectedObject ? { kind: model.selectedKind, object: model.selectedObject } : null;
+    const context = {
+      readOnly: model.editorReadOnly,
+      source: model.selectedKind === "loops" && model.selectedSource === "dynamic" ? "dynamic-bound" : model.selectedSource,
+      allLoops: model.config.loops,
+      atomicLoops: model.config.loops.filter((loop) => !["dailyRoutine", "workflowRoutine"].includes(loop.strategy)),
+      playerPickLoops: model.config.loops.filter((loop) => loop.strategy === "playerPickSbc"),
+      selectedStep: model.selectedStep,
+      recoveryRecipes: model.config.recoveryRecipes,
+      defaultRecoveryPolicyIds: model.config.defaultUnassignedRecoveryPolicyIds || []
+    };
+    const editor = model.previewOpen ? renderPreview(model) : model.tab === "json" ? renderJson(model) : `<div class="dlr-builder-workspace">${renderLibrary(model)}<main class="dlr-builder-editor">${model.selectedKind === "loops" || model.selectedKind === "dynamic" ? renderLoopEditor(model.selectedObject, context) : renderRecoveryEditor(model.selectedObject, model.selectedKind, context)}</main>${renderInspector(model, selected2)}</div>`;
+    return `<header class="dlr-builder-toolbar">
+    <h1>Workflow Builder</h1>
+    <select data-builder-action="select-profile">${optionList(profileOptions, model.profile.id)}</select>
+    <input id="dlr-builder-profile-name" value="${escapeHtml(model.profile.name)}" aria-label="Profile name">
+    <button data-builder-action="new-profile">New profile</button>
+    <button data-builder-action="delete-profile"${disabled(model.store.profiles.length <= 1)}>Delete profile</button>
+    <span class="dlr-builder-dirty">${model.profile.draftRevision !== model.profile.savedRevision ? "Unsaved" : "Saved"}</span>
+    <span class="spacer"></span>
+    <button data-builder-action="undo-draft" title="Undo"${disabled(!model.canUndo)}>Undo</button>
+    <button data-builder-action="redo-draft" title="Redo"${disabled(!model.canRedo)}>Redo</button>
+    <button data-builder-action="validate-profile">Validate</button>
+    <button data-builder-action="preview-profile">Preview</button>
+    <button data-builder-action="save-profile">Save</button>
+    <button class="primary" data-builder-action="activate-profile">Activate</button>
+    <button data-builder-action="show-import">Import</button>
+    <button data-builder-action="export-json">Export</button>
+    <button data-builder-action="close-builder">Close</button>
+  </header>
+  <div class="dlr-builder-body"><nav class="dlr-builder-tabs">${tabs.map(([id, label]) => `<button class="${model.tab === id ? "active" : ""}" data-builder-action="select-tab" data-tab="${id}">${label}</button>`).join("")}</nav>${editor}</div>
+  <footer class="dlr-builder-status"><span>${model.validation.valid ? "Valid" : `${model.validation.errors.length} error(s)`}</span><span>${model.validation.conflicts.length} conflict(s)</span><span>${model.validation.unavailableBindings.length} unavailable binding(s)</span><span>Active: ${escapeHtml(model.store.activeProfileId || "Built-in")}</span></footer>`;
+  }
+  function mountWorkflowLoopBuilder(options = {}) {
+    const dom = options.dom;
+    if (!dom?.query || !dom?.create || !dom?.appendToHead || !dom?.appendToBody) throw new TypeError("dom adapter is required");
+    let root = dom.query("#dlr-workflow-builder");
+    if (root) return { root, created: false };
+    const style = dom.create("style");
+    style.id = "dlr-workflow-builder-style";
+    style.textContent = WORKFLOW_LOOP_BUILDER_STYLE;
+    dom.appendToHead(style);
+    root = dom.create("div");
+    root.id = "dlr-workflow-builder";
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-modal", "true");
+    root.setAttribute("aria-label", "Workflow and Loop Builder");
+    dom.appendToBody(root);
+    return { root, style, created: true };
+  }
+
+  // src/ui/workflow-loop-builder.js
+  function clone3(value) {
+    return cloneLoopDef(value);
+  }
+  function pathValue(object, path) {
+    return String(path || "").split(".").filter(Boolean).reduce((value, key) => value?.[key], object);
+  }
+  function replaceById(items, id, replacement) {
+    return items.map((item) => String(item.id) === String(id) ? replacement : item);
+  }
+  var BUILDER_COLLECTIONS = Object.freeze(["loops", "recoveryRecipes", "unassignedRecoveryPolicies"]);
+  function uniqueProfileId(store, name) {
+    const base = String(name || "profile").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "profile";
+    const ids = new Set((store.profiles || []).map((profile) => profile.id));
+    if (!ids.has(base)) return base;
+    let index = 2;
+    while (ids.has(`${base}-${index}`)) index++;
+    return `${base}-${index}`;
+  }
+  function defaultRequirement() {
+    return { tier: "gold", count: 1, playerOnly: true, allowSpecial: false };
+  }
+  function defaultUpgrade(stage = false, index = 0) {
+    return {
+      ...stage ? { id: `stage-${index + 1}` } : {},
+      name: stage ? `Stage ${index + 1}` : `Upgrade ${index + 1}`,
+      sbcNames: ["SBC name"],
+      requirements: [defaultRequirement()],
+      ...stage ? { maxCompletions: 1 } : {}
+    };
+  }
+  function normalizeFieldValue(element) {
+    const valueType = element?.dataset?.builderValueType || element?.type || "text";
+    const raw = element?.value;
+    if (valueType === "boolean-inherit") {
+      if (raw === "") return void 0;
+      return raw === "true";
+    }
+    if (valueType === "object-toggle") {
+      if (raw === "") return void 0;
+      return raw === "true" ? {} : false;
+    }
+    if (valueType === "number") return raw === "" ? void 0 : Number(raw);
+    if (element?.tagName === "SELECT" && raw === "") return void 0;
+    if (raw === "" && ["special-kind", "loop-reference"].includes(valueType)) return void 0;
+    return raw;
+  }
+  function firstObjectForTab(config, tab, discoveredLoops = []) {
+    if (tab === "workflows") return { kind: "loops", object: config.loops.find((loop) => ["dailyRoutine", "workflowRoutine"].includes(loop.strategy)) || null };
+    if (tab === "loops") return { kind: "loops", object: config.loops.find((loop) => !["dailyRoutine", "workflowRoutine"].includes(loop.strategy)) || null };
+    if (tab === "dynamic") return { kind: "dynamic", object: discoveredLoops[0] || null };
+    if (tab === "recovery") return config.recoveryRecipes.length ? { kind: "recoveryRecipes", object: config.recoveryRecipes[0] } : { kind: "unassignedRecoveryPolicies", object: config.unassignedRecoveryPolicies[0] || null };
+    return { kind: null, object: null };
+  }
+  function createWorkflowLoopBuilder(options = {}) {
+    const dom = options.dom;
+    const builtInConfig = () => clone3(normalizeLoopConfig(options.getBuiltInConfig?.()));
+    const mounted = mountWorkflowLoopBuilder({ dom });
+    const root = mounted.root;
+    let store = normalizeBuilderStore(options.loadStore?.(), builtInConfig(), { now: options.now?.() });
+    let profileId = store.activeProfileId || store.profiles[0].id;
+    let tab = "workflows";
+    let selectedKind = null;
+    let selectedId = null;
+    let selectedStep = null;
+    let search = "";
+    let jsonInput = "";
+    let jsonMessage = "";
+    let jsonValid = false;
+    let importedProfile = null;
+    let previewOpen = false;
+    const editableBuiltIns = /* @__PURE__ */ new Set();
+    const profileHistory = /* @__PURE__ */ new Map();
+    function now() {
+      return Number(options.now?.() || Date.now());
+    }
+    function discoveredLoops() {
+      return clone3(options.getDiscoveredLoops?.() || []);
+    }
+    function profile() {
+      return store.profiles.find((entry) => entry.id === profileId) || store.profiles[0];
+    }
+    function persist() {
+      options.saveStore?.(clone3(store));
+    }
+    function setProfile(nextProfile, persistNow = true) {
+      store = upsertBuilderProfile(store, nextProfile);
+      profileId = nextProfile.id;
+      if (persistNow) persist();
+    }
+    function history(profileKey = profileId) {
+      if (!profileHistory.has(profileKey)) profileHistory.set(profileKey, { undo: [], redo: [] });
+      return profileHistory.get(profileKey);
+    }
+    function setEditedProfile(nextProfile) {
+      const current = profile();
+      if (JSON.stringify(current) === JSON.stringify(nextProfile)) return false;
+      const currentHistory = history();
+      currentHistory.undo.push(clone3(current));
+      if (currentHistory.undo.length > 50) currentHistory.undo.shift();
+      currentHistory.redo = [];
+      setProfile(nextProfile);
+      return true;
+    }
+    function setDraftConfig(config) {
+      return setEditedProfile(updateBuilderProfileDraft(profile(), config, now()));
+    }
+    function undoDraft() {
+      const currentHistory = history();
+      const previous = currentHistory.undo.pop();
+      if (!previous) return false;
+      currentHistory.redo.push(clone3(profile()));
+      setProfile(previous);
+      selectedKind = null;
+      selectedId = null;
+      selectedStep = null;
+      render();
+      return true;
+    }
+    function redoDraft() {
+      const currentHistory = history();
+      const next = currentHistory.redo.pop();
+      if (!next) return false;
+      currentHistory.undo.push(clone3(profile()));
+      setProfile(next);
+      selectedKind = null;
+      selectedId = null;
+      selectedStep = null;
+      render();
+      return true;
+    }
+    function selectedObject(config) {
+      if (selectedKind === "loops") return config.loops.find((loop) => String(loop.id) === String(selectedId)) || null;
+      if (selectedKind === "dynamic") return discoveredLoops().find((loop) => String(loop.id) === String(selectedId)) || null;
+      if (selectedKind === "recoveryRecipes") return config.recoveryRecipes.find((item) => String(item.id) === String(selectedId)) || null;
+      if (selectedKind === "unassignedRecoveryPolicies") return config.unassignedRecoveryPolicies.find((item) => String(item.id) === String(selectedId)) || null;
+      return null;
+    }
+    function ensureSelection(config) {
+      const selected2 = selectedObject(config);
+      if (selected2 || tab === "json") return selected2;
+      const first = firstObjectForTab(config, tab, discoveredLoops());
+      selectedKind = first.kind;
+      selectedId = first.object?.id || null;
+      selectedStep = null;
+      return first.object;
+    }
+    function sourceFor(config, kind, id, sources) {
+      if (kind === "dynamic") return "dynamic";
+      return sources[kind]?.find((entry) => entry.id === String(id))?.source || "custom";
+    }
+    function editableKey(kind = selectedKind, id = selectedId) {
+      return `${profileId}:${kind}:${id}`;
+    }
+    function displayConfig(currentProfile, validation, sources) {
+      const config = clone3(normalizeLoopConfig(currentProfile.draftConfig));
+      for (const collection of BUILDER_COLLECTIONS) {
+        const effective = new Map((validation.config[collection] || []).map((item) => [String(item.id), item]));
+        const sourceMap = new Map((sources[collection] || []).map((entry) => [String(entry.id), entry.source]));
+        config[collection] = (config[collection] || []).map((item) => {
+          const source = sourceMap.get(String(item.id));
+          return ["built-in", "override", "dynamic"].includes(source) && effective.has(String(item.id)) ? clone3(effective.get(String(item.id))) : item;
+        });
+        const ids = new Set(config[collection].map((item) => String(item.id)));
+        for (const item of validation.config[collection] || []) {
+          const id = String(item.id);
+          if (ids.has(id)) continue;
+          config[collection].push(clone3(item));
+          sources[collection] = [...sources[collection] || [], { id, source: "built-in", current: true }];
+          ids.add(id);
+        }
+      }
+      config.defaultUnassignedRecoveryPolicyIds = clone3(validation.config.defaultUnassignedRecoveryPolicyIds);
+      return config;
+    }
+    function buildModel() {
+      const currentProfile = profile();
+      const validation = validateBuilderProfile(currentProfile, builtInConfig());
+      const sources = builderObjectSources(currentProfile, builtInConfig());
+      const config = displayConfig(currentProfile, validation, sources);
+      const object = ensureSelection(config);
+      const selectedSource = sourceFor(config, selectedKind, selectedId, sources);
+      const editorReadOnly = selectedKind === "dynamic" || selectedSource === "dynamic" || selectedSource === "built-in" && !editableBuiltIns.has(editableKey());
+      const rawStep = selectedKind === "loops" && Array.isArray(object?.steps) && selectedStep !== null ? object.steps[selectedStep] : null;
+      const selectedStepData = typeof rawStep === "string" ? { loopId: rawStep } : rawStep;
+      return {
+        store,
+        profile: currentProfile,
+        tab,
+        search,
+        config,
+        discoveredLoops: discoveredLoops(),
+        sources,
+        selectedKind,
+        selectedId,
+        selectedObject: object,
+        selectedSource,
+        selectedStep,
+        selectedStepData,
+        editorReadOnly,
+        references: selectedKind === "loops" && object ? findBuilderReferences(config, object.id) : ["recoveryRecipes", "unassignedRecoveryPolicies"].includes(selectedKind) && object ? findBuilderRecoveryReferences(config, selectedKind, object.id) : [],
+        validation,
+        generatedJson: `${JSON.stringify(validation.config, null, 2)}
+`,
+        jsonInput,
+        jsonMessage,
+        jsonValid,
+        previewOpen,
+        canUndo: history().undo.length > 0,
+        canRedo: history().redo.length > 0
+      };
+    }
+    function render() {
+      root.innerHTML = workflowLoopBuilderHtml(buildModel());
+    }
+    function open(requestedTab = tab) {
+      tab = requestedTab;
+      previewOpen = false;
+      selectedKind = null;
+      selectedId = null;
+      selectedStep = null;
+      const refreshed = refreshBuilderDynamicBindings(profile(), discoveredLoops(), now());
+      setProfile(refreshed, false);
+      root.classList.add("open");
+      root.setAttribute("aria-hidden", "false");
+      render();
+      return true;
+    }
+    function close() {
+      previewOpen = false;
+      root.classList.remove("open");
+      root.setAttribute("aria-hidden", "true");
+      return true;
+    }
+    function updateSelectedObject(mutator) {
+      const config = clone3(profile().draftConfig);
+      const object = selectedObject(config);
+      if (!object || selectedKind === "dynamic") return false;
+      const updated = mutator(clone3(object));
+      if (!updated) return false;
+      config[selectedKind] = replaceById(config[selectedKind], object.id, updated);
+      setDraftConfig(config);
+      selectedId = updated.id;
+      render();
+      return true;
+    }
+    function updateList(path, updater) {
+      const stepPath = selectedKind === "loops" && selectedStep !== null ? String(path).match(new RegExp(`^steps\\.${selectedStep}\\.(.+)$`)) : null;
+      if (stepPath) {
+        const config = profile().draftConfig;
+        const workflow = config.loops.find((loop) => String(loop.id) === String(selectedId));
+        const rawStep = workflow?.steps?.[selectedStep];
+        const step = typeof rawStep === "string" ? { loopId: rawStep } : rawStep;
+        const previous = pathValue(step, stepPath[1]);
+        setDraftConfig(setBuilderWorkflowStepPath(
+          config,
+          selectedId,
+          selectedStep,
+          stepPath[1],
+          updater(Array.isArray(previous) ? [...previous] : [])
+        ));
+        render();
+        return true;
+      }
+      return updateSelectedObject((object) => {
+        const previous = pathValue(object, path);
+        return setBuilderPath(object, path, updater(Array.isArray(previous) ? [...previous] : []));
+      });
+    }
+    function handleFieldChange(element) {
+      const path = element.dataset.builderField;
+      if (!path) return;
+      const value = normalizeFieldValue(element);
+      const stepPath = selectedKind === "loops" && selectedStep !== null ? path.match(new RegExp(`^steps\\.${selectedStep}\\.(.+)$`)) : null;
+      if (stepPath) {
+        setDraftConfig(setBuilderWorkflowStepPath(
+          profile().draftConfig,
+          selectedId,
+          selectedStep,
+          stepPath[1],
+          value
+        ));
+        render();
+        return;
+      }
+      if (selectedKind === "loops" && path === "id") {
+        const renamed = renameBuilderLoopId(profile().draftConfig, selectedId, value);
+        setDraftConfig(renamed.config);
+        selectedId = renamed.id;
+        render();
+        return;
+      }
+      if (["recoveryRecipes", "unassignedRecoveryPolicies"].includes(selectedKind) && path === "id") {
+        const renamed = renameBuilderRecoveryId(profile().draftConfig, selectedKind, selectedId, value);
+        setDraftConfig(renamed.config);
+        selectedId = renamed.id;
+        render();
+        return;
+      }
+      updateSelectedObject((object) => setBuilderPath(object, path, value));
+    }
+    function toggleDefaultRecoveryPolicy(element) {
+      const policyId = String(element?.dataset?.policyId || "");
+      if (!policyId) return;
+      const config = clone3(profile().draftConfig);
+      const ids = new Set(config.defaultUnassignedRecoveryPolicyIds || []);
+      if (element.value === "true") ids.add(policyId);
+      else ids.delete(policyId);
+      config.defaultUnassignedRecoveryPolicyIds = [...ids];
+      setDraftConfig(config);
+      render();
+    }
+    function newObject() {
+      const config = clone3(profile().draftConfig);
+      if (tab === "workflows") {
+        const result = addBuilderLoop(config, "workflowRoutine", { name: "Custom Workflow" });
+        setDraftConfig(result.config);
+        selectedKind = "loops";
+        selectedId = result.loop.id;
+        editableBuiltIns.add(editableKey("loops", selectedId));
+        render();
+        return;
+      }
+      if (tab === "loops") {
+        const strategy = root.querySelector("#dlr-builder-new-strategy")?.value || "fillAndVerifySbc";
+        const result = addBuilderLoop(config, strategy, { name: "Custom Loop" });
+        setDraftConfig(result.config);
+        selectedKind = "loops";
+        selectedId = result.loop.id;
+        render();
+        return;
+      }
+      if (tab === "recovery") {
+        const type = root.querySelector("#dlr-builder-new-recovery-type")?.value || "recipe";
+        if (type === "policy") {
+          const id = `custom-policy-${config.unassignedRecoveryPolicies.length + 1}`;
+          config.unassignedRecoveryPolicies.push({ id, match: { tier: "gold", playerOnly: true, allowSpecial: false }, steps: [{ recipeId: config.recoveryRecipes[0]?.id || "" }] });
+          selectedKind = "unassignedRecoveryPolicies";
+          selectedId = id;
+        } else {
+          const id = `custom-recovery-${config.recoveryRecipes.length + 1}`;
+          config.recoveryRecipes.push({
+            id,
+            name: "Custom Recovery",
+            sbcNames: ["SBC name"],
+            requirements: [defaultRequirement()],
+            maxSubmissions: 1,
+            mustConsumeTrigger: true,
+            onUnavailable: "continue",
+            onInsufficient: "continue",
+            onBlocked: "stop"
+          });
+          selectedKind = "recoveryRecipes";
+          selectedId = id;
+        }
+        setDraftConfig(config);
+        render();
+      }
+    }
+    function duplicateObject() {
+      if (selectedKind === "loops") {
+        const config2 = clone3(profile().draftConfig);
+        const hadSource = config2.loops.some((loop) => String(loop.id) === String(selectedId));
+        if (!hadSource) {
+          const effective = validateBuilderProfile(profile(), builtInConfig()).config.loops.find((loop) => String(loop.id) === String(selectedId));
+          if (!effective) throw new Error(`Loop not found: ${selectedId}`);
+          config2.loops.push(clone3(effective));
+        }
+        const result = duplicateBuilderLoop(config2, selectedId);
+        if (!hadSource) result.config.loops = result.config.loops.filter((loop) => String(loop.id) !== String(selectedId));
+        setDraftConfig(result.config);
+        selectedId = result.loop.id;
+        selectedKind = "loops";
+        render();
+        return;
+      }
+      if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(selectedKind)) return;
+      const config = clone3(profile().draftConfig);
+      let source = config[selectedKind].find((item) => String(item.id) === String(selectedId));
+      if (!source) {
+        source = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind].find((item) => String(item.id) === String(selectedId));
+      }
+      if (!source) return;
+      const ids = new Set(config[selectedKind].map((item) => String(item.id)));
+      let index = 2;
+      let id = `${source.id}-copy`;
+      while (ids.has(id)) id = `${source.id}-copy-${index++}`;
+      const copy = { ...clone3(source), id, ...source.name ? { name: `${source.name} Copy` } : {} };
+      config[selectedKind].push(copy);
+      setDraftConfig(config);
+      selectedId = id;
+      render();
+    }
+    function resetObject() {
+      const config = clone3(profile().draftConfig);
+      const current = builtInConfig()[selectedKind]?.find((item) => String(item.id) === String(selectedId));
+      if (!current) return;
+      config[selectedKind] = replaceById(config[selectedKind], selectedId, clone3(current));
+      editableBuiltIns.delete(editableKey());
+      setDraftConfig(config);
+      render();
+    }
+    function deleteObject() {
+      if (selectedKind === "loops") {
+        const next = removeBuilderLoop(profile().draftConfig, selectedId);
+        setDraftConfig(next);
+        selectedId = null;
+        render();
+        return;
+      }
+      if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(selectedKind)) return;
+      setDraftConfig(removeBuilderRecovery(profile().draftConfig, selectedKind, selectedId));
+      selectedId = null;
+      render();
+    }
+    function bindDynamic() {
+      if (selectedKind !== "dynamic") return;
+      const definition = selectedObject(profile().draftConfig);
+      if (!definition) return;
+      const currentProfile = clone3(profile());
+      const config = clone3(currentProfile.draftConfig);
+      const existing = config.loops.findIndex((loop) => String(loop.id) === String(definition.id));
+      if (existing >= 0) config.loops[existing] = clone3(definition);
+      else config.loops.push(clone3(definition));
+      currentProfile.dynamicBindings = [
+        ...(currentProfile.dynamicBindings || []).filter((binding) => binding.loopId !== definition.id),
+        {
+          id: definition.id,
+          loopId: definition.id,
+          sbcSetIds: clone3(definition.sbcSetIds || []),
+          pickItemResourceIds: clone3(definition.pickItemResourceIds || []),
+          definition: clone3(definition),
+          available: true,
+          lastSeenAt: now()
+        }
+      ];
+      const updated = updateBuilderProfileDraft(currentProfile, config, now());
+      setEditedProfile(updated);
+      tab = "loops";
+      selectedKind = "loops";
+      selectedId = definition.id;
+      render();
+    }
+    function unbindDynamic() {
+      if (selectedKind !== "loops") return;
+      const currentProfile = clone3(profile());
+      const binding = (currentProfile.dynamicBindings || []).find((entry) => String(entry.loopId) === String(selectedId));
+      if (!binding) return;
+      const references = findBuilderReferences(currentProfile.draftConfig, binding.loopId);
+      if (references.length) {
+        throw new Error(`Dynamic Pick ${binding.loopId} is referenced by ${references.length} Workflow location(s); remove those steps first`);
+      }
+      const config = clone3(currentProfile.draftConfig);
+      config.loops = config.loops.filter((loop) => String(loop.id) !== String(binding.loopId));
+      currentProfile.dynamicBindings = currentProfile.dynamicBindings.filter((entry) => String(entry.loopId) !== String(binding.loopId));
+      setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
+      selectedId = null;
+      render();
+    }
+    function saveProfile() {
+      try {
+        const saved = saveBuilderProfile(profile(), builtInConfig(), now());
+        setProfile(saved);
+        jsonMessage = "Profile saved";
+        jsonValid = true;
+      } catch (error) {
+        jsonMessage = error?.message || String(error);
+        jsonValid = false;
+      }
+      render();
+    }
+    function resolveConflict(index, choice) {
+      const validation = validateBuilderProfile(profile(), builtInConfig());
+      const conflict = validation.conflicts[Number(index)];
+      if (!conflict) throw new Error(`Builder conflict not found: ${index}`);
+      setEditedProfile(resolveBuilderProfileConflict(profile(), builtInConfig(), conflict, choice, now()));
+      jsonMessage = `Resolved ${conflict.collection}.${conflict.id}${conflict.path ? `.${conflict.path}` : ""}`;
+      jsonValid = false;
+      render();
+    }
+    function activateProfile() {
+      try {
+        const activated = activateBuilderProfile(store, profile(), builtInConfig());
+        store = activated.store;
+        profileId = activated.profile.id;
+        persist();
+        options.applyConfig?.(clone3(activated.config), `Builder profile: ${activated.profile.name}`);
+        jsonMessage = "Profile activated";
+        jsonValid = true;
+      } catch (error) {
+        jsonMessage = error?.message || String(error);
+        jsonValid = false;
+      }
+      render();
+    }
+    function validateJson() {
+      try {
+        importedProfile = importBuilderProfileJson(jsonInput, {
+          id: profile().id,
+          name: profile().name,
+          baseConfig: builtInConfig(),
+          now: now()
+        });
+        jsonMessage = `Valid configuration with ${importedProfile.draftConfig.loops.length} Loop(s)`;
+        jsonValid = true;
+      } catch (error) {
+        importedProfile = null;
+        jsonMessage = error?.message || String(error);
+        jsonValid = false;
+      }
+      render();
+    }
+    function importedDynamicBindings(currentProfile, config) {
+      const loops = new Map((config.loops || []).map((loop) => [String(loop.id || ""), loop]));
+      return clone3((currentProfile.dynamicBindings || []).filter((binding) => {
+        const loop = loops.get(String(binding.loopId || ""));
+        return loop?.strategy === "playerPickSbc";
+      }));
+    }
+    function applyImportedDraft(currentProfile, imported) {
+      const next = updateBuilderProfileDraft(currentProfile, imported.draftConfig, now());
+      next.dynamicBindings = importedDynamicBindings(currentProfile, imported.draftConfig);
+      return next;
+    }
+    function applyJson() {
+      if (!importedProfile) validateJson();
+      if (!importedProfile) return;
+      setEditedProfile(applyImportedDraft(profile(), importedProfile));
+      jsonMessage = "Validated JSON imported into the current draft";
+      jsonValid = true;
+      render();
+    }
+    function exportJson() {
+      try {
+        const text = exportBuilderProfileJson(profile(), builtInConfig());
+        options.exportText?.(text, `${profile().id}.loops.json`);
+        jsonMessage = "Generated JSON exported";
+        jsonValid = true;
+      } catch (error) {
+        jsonMessage = error?.message || String(error);
+        jsonValid = false;
+      }
+      render();
+    }
+    function newProfile() {
+      const name = `Profile ${store.profiles.length + 1}`;
+      const next = createBuilderProfile({
+        id: uniqueProfileId(store, name),
+        name,
+        baseConfig: builtInConfig(),
+        config: builtInConfig(),
+        now: now()
+      });
+      setProfile(next);
+      profileHistory.delete(next.id);
+      selectedKind = null;
+      selectedId = null;
+      render();
+    }
+    function deleteProfile() {
+      if (store.profiles.length <= 1) return;
+      const deletedProfileId = profileId;
+      const deletedActiveProfile = store.activeProfileId === profileId;
+      store = {
+        ...store,
+        profiles: store.profiles.filter((entry) => entry.id !== profileId),
+        activeProfileId: store.activeProfileId === profileId ? null : store.activeProfileId,
+        activeDynamicBindings: deletedActiveProfile ? [] : store.activeDynamicBindings
+      };
+      profileId = store.profiles[0].id;
+      profileHistory.delete(deletedProfileId);
+      selectedKind = null;
+      selectedId = null;
+      persist();
+      if (deletedActiveProfile) options.useBuiltIn?.();
+      render();
+    }
+    function handleAction(button3) {
+      const action2 = button3.dataset.builderAction;
+      if (!action2) return;
+      if (action2 === "close-builder") return close();
+      if (action2 === "undo-draft") return undoDraft();
+      if (action2 === "redo-draft") return redoDraft();
+      if (action2 === "preview-profile") {
+        previewOpen = true;
+        render();
+        return;
+      }
+      if (action2 === "close-preview") {
+        previewOpen = false;
+        render();
+        return;
+      }
+      if (action2 === "show-import") {
+        previewOpen = false;
+        tab = "json";
+        selectedKind = null;
+        selectedId = null;
+        selectedStep = null;
+        render();
+        return;
+      }
+      if (action2 === "select-tab") {
+        tab = button3.dataset.tab;
+        previewOpen = false;
+        selectedKind = null;
+        selectedId = null;
+        selectedStep = null;
+        render();
+        return;
+      }
+      if (action2 === "select-object") {
+        selectedKind = button3.dataset.kind;
+        selectedId = button3.dataset.id;
+        selectedStep = null;
+        render();
+        return;
+      }
+      if (action2 === "new-object") return newObject();
+      if (action2 === "duplicate-object") return duplicateObject();
+      if (action2 === "override-object") {
+        const config = clone3(profile().draftConfig);
+        if (!config[selectedKind]?.some((item) => String(item.id) === String(selectedId))) {
+          const effective = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind]?.find((item) => String(item.id) === String(selectedId));
+          if (!effective) throw new Error(`Built-in object not found: ${selectedKind}.${selectedId}`);
+          config[selectedKind].push(clone3(effective));
+          const currentProfile = clone3(profile());
+          currentProfile.baseConfig[selectedKind].push(clone3(effective));
+          currentProfile.baseFingerprint = fingerprintBuilderValue(currentProfile.baseConfig);
+          setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
+        }
+        editableBuiltIns.add(editableKey());
+        render();
+        return;
+      }
+      if (action2 === "reset-object") return resetObject();
+      if (action2 === "delete-object") return deleteObject();
+      if (action2 === "bind-dynamic") return bindDynamic();
+      if (action2 === "unbind-dynamic") return unbindDynamic();
+      if (action2 === "add-list") return updateList(button3.dataset.path, (items) => [...items, button3.dataset.itemType === "number" ? 0 : ""]);
+      if (action2 === "add-selected-list") {
+        const select = root.querySelector(`[data-builder-add-select="${button3.dataset.path}"]`);
+        if (select?.value) updateList(button3.dataset.path, (items) => [...items, select.value]);
+        return;
+      }
+      if (action2 === "remove-list") return updateList(button3.dataset.path, (items) => items.filter((_, index) => index !== Number(button3.dataset.index)));
+      if (action2 === "move-list") return updateList(button3.dataset.path, (items) => {
+        const from = Number(button3.dataset.index);
+        const to = Math.max(0, Math.min(items.length - 1, from + Number(button3.dataset.delta)));
+        const [item] = items.splice(from, 1);
+        items.splice(to, 0, item);
+        return items;
+      });
+      if (action2 === "add-requirement") return updateList(button3.dataset.path, (items) => [...items, defaultRequirement()]);
+      if (action2 === "add-challenge-group") return updateList(button3.dataset.path, (items) => [...items, [defaultRequirement()]]);
+      if (action2 === "add-shortage") return updateList(button3.dataset.path, (items) => [...items, { requirement: { tier: "gold", playerOnly: true, allowSpecial: false }, packNames: ["Source pack"], maxOpensPerAttempt: 1 }]);
+      if (action2 === "add-upgrade") return updateList(button3.dataset.path, (items) => [...items, defaultUpgrade(button3.dataset.stage === "true", items.length)]);
+      if (action2 === "add-recovery-step") return updateList("steps", (items) => [...items, { recipeId: profile().draftConfig.recoveryRecipes[0]?.id || "" }]);
+      if (action2 === "add-step") {
+        const loopId = root.querySelector("#dlr-builder-add-step-select")?.value;
+        if (loopId) setDraftConfig(addBuilderWorkflowStep(profile().draftConfig, selectedId, loopId));
+        render();
+        return;
+      }
+      if (action2 === "select-step") {
+        selectedStep = Number(button3.dataset.index);
+        render();
+        return;
+      }
+      if (action2 === "move-step") {
+        const index = Number(button3.dataset.index);
+        setDraftConfig(moveBuilderWorkflowStep(profile().draftConfig, selectedId, index, index + Number(button3.dataset.delta)));
+        selectedStep = Math.max(0, index + Number(button3.dataset.delta));
+        render();
+        return;
+      }
+      if (action2 === "remove-step") {
+        setDraftConfig(removeBuilderWorkflowStep(profile().draftConfig, selectedId, Number(button3.dataset.index)));
+        selectedStep = null;
+        render();
+        return;
+      }
+      if (action2 === "variant-step") {
+        const result = createBuilderStepVariant(profile().draftConfig, selectedId, Number(button3.dataset.index));
+        setDraftConfig(result.config);
+        selectedKind = "loops";
+        selectedId = result.loop.id;
+        tab = "loops";
+        selectedStep = null;
+        render();
+        return;
+      }
+      if (action2 === "validate-profile") {
+        const validation = validateBuilderProfile(profile(), builtInConfig());
+        jsonMessage = validation.valid ? "Draft is valid" : validation.errors.join("; ");
+        jsonValid = validation.valid;
+        render();
+        return;
+      }
+      if (action2 === "resolve-conflict") return resolveConflict(button3.dataset.index, button3.dataset.choice);
+      if (action2 === "save-profile") return saveProfile();
+      if (action2 === "activate-profile") return activateProfile();
+      if (action2 === "validate-json") return validateJson();
+      if (action2 === "apply-json") return applyJson();
+      if (action2 === "export-json") return exportJson();
+      if (action2 === "new-profile") return newProfile();
+      if (action2 === "delete-profile") return deleteProfile();
+    }
+    function onClick(event) {
+      const button3 = event.target?.closest?.("[data-builder-action]");
+      if (!button3 || !root.contains(button3)) return;
+      try {
+        handleAction(button3);
+      } catch (error) {
+        jsonMessage = error?.message || String(error);
+        jsonValid = false;
+        options.log?.(`Builder action failed: ${jsonMessage}`);
+        render();
+      }
+    }
+    function onChange(event) {
+      const element = event.target;
+      try {
+        if (element?.dataset?.builderAction === "select-profile") {
+          profileId = element.value;
+          previewOpen = false;
+          selectedKind = null;
+          selectedId = null;
+          render();
+          return;
+        }
+        if (element?.dataset?.builderAction === "toggle-default-policy") {
+          toggleDefaultRecoveryPolicy(element);
+          return;
+        }
+        if (element?.id === "dlr-builder-profile-name") {
+          const next = { ...clone3(profile()), name: String(element.value || "").trim() || profile().name, updatedAt: now() };
+          setEditedProfile(next);
+          render();
+          return;
+        }
+        if (element?.dataset?.builderField) handleFieldChange(element);
+      } catch (error) {
+        jsonMessage = error?.message || String(error);
+        jsonValid = false;
+        options.log?.(`Builder edit failed: ${jsonMessage}`);
+        render();
+      }
+    }
+    function onInput(event) {
+      if (event.target?.id === "dlr-builder-search") {
+        search = event.target.value;
+        const query2 = search.trim().toLowerCase();
+        root.querySelectorAll(".dlr-builder-library-row").forEach((row) => {
+          row.style.display = !query2 || String(row.textContent || "").toLowerCase().includes(query2) ? "" : "none";
+        });
+      }
+      if (event.target?.id === "dlr-builder-json-input") {
+        jsonInput = event.target.value;
+        importedProfile = null;
+        jsonMessage = "";
+        jsonValid = false;
+      }
+    }
+    root.addEventListener("click", onClick);
+    root.addEventListener("change", onChange);
+    root.addEventListener("input", onInput);
+    root.setAttribute("aria-hidden", "true");
+    function importConfigText(text, importOptions = {}) {
+      jsonInput = String(text || "");
+      importedProfile = importBuilderProfileJson(jsonInput, {
+        id: profile().id,
+        name: importOptions.name || profile().name,
+        baseConfig: builtInConfig(),
+        now: now()
+      });
+      setEditedProfile(applyImportedDraft(profile(), importedProfile));
+      jsonMessage = `Imported ${importedProfile.draftConfig.loops.length} Loop(s)`;
+      jsonValid = true;
+      if (importOptions.open !== false) open("json");
+      return clone3(importedProfile.draftConfig);
+    }
+    function refreshDynamic(nextDiscoveredLoops = discoveredLoops()) {
+      const loops = clone3(nextDiscoveredLoops);
+      const activeBindingSnapshot = refreshBuilderDynamicBindings({
+        dynamicBindings: store.activeDynamicBindings || []
+      }, loops, now()).dynamicBindings;
+      store = {
+        ...store,
+        activeDynamicBindings: activeBindingSnapshot,
+        profiles: store.profiles.map((entry) => refreshBuilderDynamicBindings(entry, loops, now()))
+      };
+      persist();
+      if (root.classList.contains("open")) render();
+      return clone3(store);
+    }
+    function restoreActiveProfile() {
+      if (!store.activeProfileId) return { status: "built-in", config: null };
+      const active = store.profiles.find((entry) => entry.id === store.activeProfileId);
+      if (!active) return { status: "missing", config: null };
+      const activeConfig = store.lastKnownGood || active.lastKnownGood || active.savedConfig;
+      const startupProfile = {
+        ...clone3(active),
+        draftConfig: clone3(activeConfig),
+        savedConfig: clone3(activeConfig),
+        dynamicBindings: clone3(store.activeDynamicBindings || [])
+      };
+      const validation = validateBuilderProfile(startupProfile, builtInConfig());
+      if (!validation.valid) return { status: "blocked", errors: validation.errors, config: null };
+      options.applyConfig?.(clone3(validation.config), `Builder profile: ${active.name}`);
+      return { status: "applied", config: clone3(validation.config) };
+    }
+    function useBuiltIn() {
+      store = deactivateBuilderProfile(store);
+      persist();
+      options.useBuiltIn?.();
+      if (root.classList.contains("open")) render();
+      return true;
+    }
+    function destroy() {
+      root.removeEventListener("click", onClick);
+      root.removeEventListener("change", onChange);
+      root.removeEventListener("input", onInput);
+      root.remove();
+      mounted.style?.remove?.();
+    }
+    return Object.freeze({
+      open,
+      close,
+      undoDraft,
+      redoDraft,
+      destroy,
+      importConfigText,
+      refreshDynamic,
+      restoreActiveProfile,
+      useBuiltIn,
+      getStore: () => clone3(store),
+      isOpen: () => root.classList.contains("open"),
+      root
+    });
   }
 
   // src/ui/player-pick-modal.js
@@ -9601,7 +12074,7 @@
       applyStyles(hint, { color: "#b7c2d0", marginBottom: "12px" });
       const list = options.dom.create("div");
       applyStyles(list, { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px" });
-      const selected = /* @__PURE__ */ new Set();
+      const selected2 = /* @__PURE__ */ new Set();
       const cards = [];
       const confirm = options.dom.create("button");
       confirm.textContent = "Confirm selection";
@@ -9609,10 +12082,10 @@
       applyStyles(confirm, { marginTop: "14px", minHeight: "34px", padding: "0 14px" });
       const refresh = () => {
         cards.forEach(({ card, candidate }) => {
-          card.style.borderColor = selected.has(candidate) ? "#64d77a" : "#536171";
-          card.style.background = selected.has(candidate) ? "#243c2b" : "#202731";
+          card.style.borderColor = selected2.has(candidate) ? "#64d77a" : "#536171";
+          card.style.background = selected2.has(candidate) ? "#243c2b" : "#202731";
         });
-        confirm.disabled = selected.size !== pickCount;
+        confirm.disabled = selected2.size !== pickCount;
       };
       ranked.forEach((candidate) => {
         const card = options.dom.create("button");
@@ -9629,16 +12102,16 @@
           lineHeight: "1.35"
         });
         card.addEventListener("click", () => {
-          if (selected.has(candidate)) selected.delete(candidate);
-          else if (selected.size < pickCount) selected.add(candidate);
+          if (selected2.has(candidate)) selected2.delete(candidate);
+          else if (selected2.size < pickCount) selected2.add(candidate);
           refresh();
         });
         cards.push({ card, candidate });
         list.appendChild(card);
       });
       confirm.addEventListener("click", () => {
-        if (selected.size !== pickCount) return;
-        finish(resolve, [...selected].map((candidate) => candidate.item));
+        if (selected2.size !== pickCount) return;
+        finish(resolve, [...selected2].map((candidate) => candidate.item));
       });
       dialog.append(title, hint, list, confirm);
       overlay.appendChild(dialog);
@@ -10523,10 +12996,10 @@
         const label = dom.create("span");
         label.textContent = `${group.name} (#${group.id || "?"}) x${group.count}`;
         applyStyles5(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-        const selected = selectedKeys.has(batchOpenEntryKey({ packId: group.id, packName: group.name }));
+        const selected2 = selectedKeys.has(batchOpenEntryKey({ packId: group.id, packName: group.name }));
         const addMenu = dom.create("div");
         applyStyles5(addMenu, { position: "relative", flex: "0 0 auto" });
-        const add = button2(dom, selected ? "Added v" : "Add v");
+        const add = button2(dom, selected2 ? "Added v" : "Add v");
         add.setAttribute?.("aria-label", `Add ${group.name} to batch`);
         add.setAttribute?.("aria-expanded", "false");
         const menu = dom.create("div");
@@ -10551,8 +13024,8 @@
           notifyPlanChange();
           render();
         };
-        const addOne = button2(dom, selected ? "Set to 1" : "Add 1");
-        const addAll = button2(dom, `${selected ? "Set to all" : "Add all"} (${group.count})`);
+        const addOne = button2(dom, selected2 ? "Set to 1" : "Add 1");
+        const addAll = button2(dom, `${selected2 ? "Set to all" : "Add all"} (${group.count})`);
         for (const option of [addOne, addAll]) {
           applyStyles5(option, { display: "block", width: "100%", minWidth: "0", textAlign: "left", border: "0" });
         }
@@ -10647,15 +13120,15 @@
     const close = () => overlay.remove?.();
     cancel.addEventListener("click", close);
     start.addEventListener("click", async () => {
-      const selected = currentPlan();
-      if (!selected.entries.length) {
+      const selected2 = currentPlan();
+      if (!selected2.entries.length) {
         status.textContent = "Add at least one pack type first";
         return;
       }
       setPending(true);
       status.textContent = "Starting batch...";
       try {
-        await options.onStart?.(selected);
+        await options.onStart?.(selected2);
         close();
       } catch (error) {
         status.textContent = `Start failed: ${error?.message || error}`;
@@ -10716,6 +13189,7 @@
       loopDefs: null,
       discoveredLoopDefs: [],
       discoveredLoopOverrides: {},
+      scannedPlayerPickDefs: [],
       recoveryRecipes: null,
       unassignedRecoveryPolicies: null,
       defaultUnassignedRecoveryPolicyIds: null,
@@ -10739,6 +13213,7 @@
       showMvpLoops: false,
       loopStack: [],
       logRenderer: null,
+      workflowBuilder: null,
       sbcLoadLogKeys: /* @__PURE__ */ new Set(),
       rewardAlertSettings: normalizeRewardAlertSettings()
     };
@@ -10746,6 +13221,7 @@
       state.stopping = true;
       if (state.bootTimer) clearInterval(state.bootTimer);
       state.logRenderer?.destroy?.();
+      state.workflowBuilder?.destroy?.();
       document.querySelector("#bronze-loop-panel")?.remove();
       document.querySelector("#bronze-loop-pick-modal")?.remove();
       document.querySelector("#bronze-loop-recap-modal")?.remove();
@@ -10757,7 +13233,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.5.64",
+      version: "0.6.0",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -10791,7 +13267,7 @@
       sleep,
       log
     });
-    function escapeHtml(text) {
+    function escapeHtml2(text) {
       return String(text).replace(/[&<>"']/g, (ch) => ({
         "&": "&amp;",
         "<": "&lt;",
@@ -10812,7 +13288,12 @@
     function getLoopDefs() {
       const configured = state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
       const effectiveConfigured = configured.map((loopDef) => state.discoveredLoopOverrides?.[loopDef.id] || loopDef);
-      return [...effectiveConfigured, ...state.discoveredLoopDefs || []];
+      const configuredIds = new Set(effectiveConfigured.map((loopDef) => String(loopDef?.id || "")).filter(Boolean));
+      const discovered = (state.discoveredLoopDefs || []).filter((loopDef) => {
+        const id = String(loopDef?.id || "");
+        return !id || !configuredIds.has(id);
+      });
+      return [...effectiveConfigured, ...discovered];
     }
     function getConfiguredLoopDefs() {
       return state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
@@ -10825,6 +13306,24 @@
     }
     function getDefaultUnassignedRecoveryPolicyIds() {
       return state.defaultUnassignedRecoveryPolicyIds || DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS;
+    }
+    function getBuiltInLoopConfig() {
+      return {
+        loops: LOOP_DEFS,
+        recoveryRecipes: RECOVERY_RECIPES,
+        unassignedRecoveryPolicies: UNASSIGNED_RECOVERY_POLICIES,
+        defaultUnassignedRecoveryPolicyIds: DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS
+      };
+    }
+    function getScannedPlayerPickLoopDefs() {
+      const loops = state.scannedPlayerPickDefs || [];
+      const seen = /* @__PURE__ */ new Set();
+      return loops.filter((loopDef) => {
+        const id = String(loopDef?.id || "");
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
     }
     function getVisibleLoopDefs() {
       return visibleLoopDefs(getLoopDefs(), state.showMvpLoops);
@@ -10851,87 +13350,53 @@
     function validateLoopConfig2(config, label = "Loop config") {
       return validateLoopConfig(config, label);
     }
-    function setLoopConfig(config, source = "custom") {
+    function setLoopConfig(config, source = "custom", options = {}) {
       const normalized = validateLoopConfig2(config, source);
       state.loopDefs = cloneLoopDef(normalized.loops);
       state.recoveryRecipes = cloneLoopDef(normalized.recoveryRecipes);
       state.unassignedRecoveryPolicies = cloneLoopDef(normalized.unassignedRecoveryPolicies);
       state.defaultUnassignedRecoveryPolicyIds = [...normalized.defaultUnassignedRecoveryPolicyIds];
       state.loopConfigSource = source;
-      state.discoveredLoopDefs = [];
-      state.discoveredLoopOverrides = {};
+      if (options.preserveDiscovery !== true) {
+        state.discoveredLoopDefs = [];
+        state.discoveredLoopOverrides = {};
+        state.scannedPlayerPickDefs = [];
+      }
       renderLoopSelect(state.loopDefs[0]?.id);
       log(`Loaded ${state.loopDefs.length} loop definition(s), ${state.recoveryRecipes.length} recovery recipe(s), and ${state.unassignedRecoveryPolicies.length} recovery policy(s) from ${source}`);
     }
-    function resetLoopDefs() {
+    function resetLoopDefs(options = {}) {
       state.loopDefs = null;
       state.recoveryRecipes = null;
       state.unassignedRecoveryPolicies = null;
       state.defaultUnassignedRecoveryPolicyIds = null;
       state.loopConfigSource = "built-in";
-      state.discoveredLoopDefs = [];
-      state.discoveredLoopOverrides = {};
+      if (options.preserveDiscovery !== true) {
+        state.discoveredLoopDefs = [];
+        state.discoveredLoopOverrides = {};
+        state.scannedPlayerPickDefs = [];
+      }
       renderLoopSelect(LOOP_DEFS[0]?.id);
       log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
     }
     function parseLoopConfig2(text) {
       return parseLoopConfig(text);
     }
-    async function loadLoopConfig(url = LOOP_CONFIG_URL) {
+    async function importLoopConfig(url = LOOP_CONFIG_URL) {
       const text = await adapters.http.getText(`${url}?t=${Date.now()}`, { useRuntimeFallback: true });
-      const config = parseLoopConfig2(text);
-      setLoopConfig(config, url);
+      const config = state.workflowBuilder?.importConfigText(text, {
+        name: "Development server import"
+      });
+      if (!config) fail2("Workflow Builder is unavailable");
+      log(`Imported ${config.loops.length} Loop(s) from ${url} into the current Builder draft; activate the profile to use them`);
+      return config;
     }
     function getSelectedLoopDef() {
       const select = document.querySelector("#bronze-loop-select");
       const selectedId = select?.value || getVisibleLoopDefs()[0]?.id || LOOP_DEFS[0].id;
-      if (selectedId === "custom") {
-        const text = document.querySelector("#bronze-loop-json")?.value || "";
-        try {
-          const parsed = JSON.parse(text);
-          assertValidLoopDef2(parsed, "Custom loop JSON");
-          return applyDisabledPiles(parsed);
-        } catch (e) {
-          if (e instanceof SyntaxError) fail2(`Invalid custom loop JSON: ${e.message || e}`);
-          throw e;
-        }
-      }
       const loopDef = cloneLoopDef(getLoopDefById(selectedId));
       assertValidLoopDef2(loopDef, loopDef.name || selectedId);
       return applyDisabledPiles(loopDef);
-    }
-    function setLoopJson(def) {
-      const editor = document.querySelector("#bronze-loop-json");
-      if (editor) editor.value = JSON.stringify(def, null, 2);
-    }
-    function editWorkflowConfig() {
-      const editor = document.querySelector("#bronze-loop-json");
-      if (!editor) return;
-      const sessionLoops = materializeSessionLoopDefs({
-        configuredLoops: getConfiguredLoopDefs(),
-        loopOverrides: state.discoveredLoopOverrides,
-        discoveredLoops: state.discoveredLoopDefs
-      });
-      editor.value = JSON.stringify({
-        loops: sessionLoops,
-        recoveryRecipes: getRecoveryRecipes(),
-        unassignedRecoveryPolicies: getUnassignedRecoveryPolicies(),
-        defaultUnassignedRecoveryPolicyIds: getDefaultUnassignedRecoveryPolicyIds()
-      }, null, 2);
-      editor.classList.add("show");
-      log(`Editing full workflow JSON with ${sessionLoops.length} current session Loop(s), including scanned Pick metadata. Apply workflow JSON validates every loop and step before replacing the current session configuration.`);
-    }
-    function applyWorkflowConfigEditor() {
-      const text = document.querySelector("#bronze-loop-json")?.value || "";
-      let config;
-      try {
-        config = parseLoopConfig2(text);
-      } catch (error) {
-        if (error instanceof SyntaxError) fail2(`Invalid workflow JSON: ${error.message || error}`);
-        throw error;
-      }
-      setLoopConfig(config, "panel workflow JSON");
-      log("Applied panel workflow JSON. Built-in loops remain available through Built-in loops.");
     }
     function renderLoopSelect(selectedId = null) {
       const panel = document.querySelector("#bronze-loop-panel");
@@ -10941,17 +13406,11 @@
         selectedId,
         createOption: () => document.createElement("option")
       });
-      if (nextValue && nextValue !== "custom") setLoopJson(getLoopDefById(nextValue));
       updateLoopControls();
     }
     function getEditorLoopDef() {
       const selectedId = document.querySelector("#bronze-loop-select")?.value || getVisibleLoopDefs()[0]?.id || LOOP_DEFS[0].id;
-      if (selectedId !== "custom") return getLoopDefById(selectedId);
-      try {
-        return JSON.parse(document.querySelector("#bronze-loop-json")?.value || "{}");
-      } catch {
-        return {};
-      }
+      return getLoopDefById(selectedId);
     }
     function updateLoopControls() {
       const editorLoop = getEditorLoopDef();
@@ -12714,8 +15173,8 @@
         `select:${parsed.pickCount || reward.selectionCount || "?"}`
       ].join(", ");
     }
-    function describePlayerPickDiscoveryRequirement(requirement = {}) {
-      return `${requirement.key || "?"}=${(requirement.values || []).join("/") || "?"} x${requirement.count ?? "?"}`;
+    function describePlayerPickDiscoveryRequirement(requirement2 = {}) {
+      return `${requirement2.key || "?"}=${(requirement2.values || []).join("/") || "?"} x${requirement2.count ?? "?"}`;
     }
     function logPlayerPickDiscoveryMetadataHints(reward = {}) {
       for (const [source, hint] of Object.entries(reward.metadataHints || {})) {
@@ -12771,15 +15230,27 @@
       });
       state.discoveredLoopDefs = cloneLoopDef(session.discoveredLoops);
       state.discoveredLoopOverrides = cloneLoopDef(session.loopOverrides);
+      state.scannedPlayerPickDefs = cloneLoopDef(collectScannedPlayerPickLoopDefs(session.results));
+      state.workflowBuilder?.refreshDynamic(getScannedPlayerPickLoopDefs());
+      const activeBuilderId = state.workflowBuilder?.getStore?.().activeProfileId;
+      if (activeBuilderId) {
+        const restored = state.workflowBuilder.restoreActiveProfile();
+        if (restored.status === "blocked") {
+          if (String(state.loopConfigSource || "").startsWith("Builder profile:")) {
+            resetLoopDefs({ preserveDiscovery: true });
+          }
+          log(`Active Builder profile remains unavailable after Player Pick scan: ${(restored.errors || []).join("; ")}`);
+        }
+      }
       renderLoopSelect(session.selectedId);
       const duplicateCount = session.results.filter((result) => result.status === "duplicate").length;
       for (const [loopId, loopDef] of Object.entries(state.discoveredLoopOverrides)) {
-        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
+        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
         log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
       }
       for (const diagnostic of session.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
       for (const loopDef of state.discoveredLoopDefs) {
-        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
+        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
         log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? "; reported completed, one runtime probe" : ""})`);
       }
       log(`Player Pick scan complete: ${summary.pickSets} Pick Set(s) found among ${summary.setsScanned} SBC Set(s); ${state.discoveredLoopDefs.length} supported session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) using scanned metadata, ${duplicateCount} static/discovered duplicate(s) skipped`);
@@ -12928,8 +15399,8 @@
     }
     function sumRequirementPlayerCount(loopDef = {}) {
       if (!Array.isArray(loopDef.requirements)) return 0;
-      return loopDef.requirements.reduce((sum, requirement) => {
-        const count = Number(requirement?.count || 0);
+      return loopDef.requirements.reduce((sum, requirement2) => {
+        const count = Number(requirement2?.count || 0);
         return Number.isFinite(count) && count > 0 ? sum + count : sum;
       }, 0);
     }
@@ -13022,15 +15493,15 @@
       const entries = Object.entries(counts || {}).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit);
       return entries.map(([key, count]) => `${key}:${count}`).join(", ");
     }
-    function describeRequirement(requirement = {}) {
+    function describeRequirement(requirement2 = {}) {
       return [
-        requirement.count ? `${requirement.count}x` : "",
-        requirement.tier || "any-tier",
-        requirement.rarity || "",
-        requirement.minRating ? `min${requirement.minRating}` : "",
-        requirement.maxRating ? `max${requirement.maxRating}` : "",
-        requirement.playerOnly ? "player" : "",
-        requirement.allowSpecial ? "special-ok" : "no-special"
+        requirement2.count ? `${requirement2.count}x` : "",
+        requirement2.tier || "any-tier",
+        requirement2.rarity || "",
+        requirement2.minRating ? `min${requirement2.minRating}` : "",
+        requirement2.maxRating ? `max${requirement2.maxRating}` : "",
+        requirement2.playerOnly ? "player" : "",
+        requirement2.allowSpecial ? "special-ok" : "no-special"
       ].filter(Boolean).join(" ");
     }
     function getUsabilityRejectReasons(item, options = {}) {
@@ -13073,7 +15544,7 @@
       if (spec.rarity === "common" && isRare(item)) reasons.push("rarity-not-common");
       return reasons;
     }
-    function diagnosePileForRequirement(pileName, requirement, settings = getFsuSettings()) {
+    function diagnosePileForRequirement(pileName, requirement2, settings = getFsuSettings()) {
       const items = getPileItemsByName(pileName);
       const result = {
         total: items.length,
@@ -13086,8 +15557,8 @@
       };
       const matchingDefinitions = /* @__PURE__ */ new Set();
       for (const item of items) {
-        const usabilityRejects = getUsabilityRejectReasons(item, requirement);
-        const specRejects = getSpecRejectReasons(item, requirement);
+        const usabilityRejects = getUsabilityRejectReasons(item, requirement2);
+        const specRejects = getSpecRejectReasons(item, requirement2);
         const rejects = [...new Set(usabilityRejects.concat(specRejects))];
         if (rejects.length) {
           rejects.forEach((reason) => addCount(result.reasons, reason));
@@ -13102,7 +15573,7 @@
             continue;
           }
           result.duplicateSignals++;
-          const resolved = findSubmissionItemForDuplicateSignal(item, /* @__PURE__ */ new Set(), requirement, settings);
+          const resolved = findSubmissionItemForDuplicateSignal(item, /* @__PURE__ */ new Set(), requirement2, settings);
           if (resolved) {
             result.resolvedSignals++;
           } else {
@@ -13113,13 +15584,13 @@
       result.uniqueDefinitions = Array.from(matchingDefinitions).filter(Boolean).length;
       return result;
     }
-    function logRequirementDiagnostics(label, requirement, fallbackPriorityPiles) {
+    function logRequirementDiagnostics(label, requirement2, fallbackPriorityPiles) {
       const settings = getFsuSettings();
-      const piles = applyFsuPilePriority(requirement?.priorityPiles || fallbackPriorityPiles || ["storage", "transfer", "club"], settings);
+      const piles = applyFsuPilePriority(requirement2?.priorityPiles || fallbackPriorityPiles || ["storage", "transfer", "club"], settings);
       const diagnostics = [];
-      log(`${label}: diagnostics for ${describeRequirement(requirement)} across ${piles.join(" > ")}`);
+      log(`${label}: diagnostics for ${describeRequirement(requirement2)} across ${piles.join(" > ")}`);
       for (const pileName of piles) {
-        const diag = diagnosePileForRequirement(pileName, requirement, settings);
+        const diag = diagnosePileForRequirement(pileName, requirement2, settings);
         diagnostics.push({ pileName, ...diag });
         const signalText = pileNeedsDuplicateSignalResolution(pileName) ? `, duplicate signals:${diag.duplicateSignals}, resolved:${diag.resolvedSignals}` : "";
         log(`${label}: ${pileName} total:${diag.total}, matching:${diag.matching}, unique defs:${diag.uniqueDefinitions}${signalText}`);
@@ -13168,14 +15639,14 @@
     function getSubmissionCacheItems() {
       return uniqueItems(getStorageItems().concat(getClubItems()));
     }
-    function duplicateSignalDiagnostic(signal, requirement = {}, settings = getFsuSettings()) {
+    function duplicateSignalDiagnostic(signal, requirement2 = {}, settings = getFsuSettings()) {
       const signalId = Number(signal?.id || signal?.ref?.id || 0);
       const definitionId2 = Number(signal?.definitionId || signal?.ref?.definitionId || 0);
       const duplicateId = Number(signal?.duplicateId || 0);
       const candidates = getSubmissionCacheItems().filter((item) => Number(item?.id || 0) === duplicateId || Number(item?.definitionId || 0) === definitionId2).map((item) => {
         const reasons = [.../* @__PURE__ */ new Set([
-          ...getUsabilityRejectReasons(item, requirement),
-          ...getSpecRejectReasons(item, requirement)
+          ...getUsabilityRejectReasons(item, requirement2),
+          ...getSpecRejectReasons(item, requirement2)
         ])];
         return {
           id: Number(item?.id || 0),
@@ -13187,10 +15658,10 @@
           reasons
         };
       });
-      const resolved = findSubmissionItemForDuplicateSignal(signal, /* @__PURE__ */ new Set(), requirement, settings);
+      const resolved = findSubmissionItemForDuplicateSignal(signal, /* @__PURE__ */ new Set(), requirement2, settings);
       const signalReasons = [.../* @__PURE__ */ new Set([
-        ...getUsabilityRejectReasons(signal, requirement),
-        ...getSpecRejectReasons(signal, requirement)
+        ...getUsabilityRejectReasons(signal, requirement2),
+        ...getSpecRejectReasons(signal, requirement2)
       ])];
       return {
         signalId,
@@ -13207,11 +15678,11 @@
         candidates
       };
     }
-    function logDuplicateSignalDiagnostics(label, signals = [], requirement = {}, selection = null) {
+    function logDuplicateSignalDiagnostics(label, signals = [], requirement2 = {}, selection = null) {
       if (!signals.length) return [];
       const selectedSignalIds = new Set((selection?.entries || []).filter((entry) => entry.pileName === "unassigned" && entry.signal).map((entry) => Number(entry.signal?.id || 0)).filter(Boolean));
       const settings = getFsuSettings();
-      const diagnostics = signals.map((signal) => duplicateSignalDiagnostic(signal, requirement, settings));
+      const diagnostics = signals.map((signal) => duplicateSignalDiagnostic(signal, requirement2, settings));
       log(`${label}: duplicate resolution diagnostics ${selectedSignalIds.size}/${diagnostics.length} signal(s) selected; ${formatFsuSettings(settings)}; consumed cache:${state.consumedItemIds.size}`);
       diagnostics.forEach((diag, index) => {
         log(`${label}: signal ${index + 1}/${diagnostics.length} selected:${selectedSignalIds.has(diag.signalId) ? "yes" : "no"} name:${diag.name} id:${diag.signalId || "?"} def:${diag.definitionId || "?"} duplicateId:${diag.duplicateId || "?"} rating:${diag.rating || "?"} rareflag:${diag.rareflag} tradeable:${diag.tradeable ? "yes" : "no"} league:${diag.leagueId || "?"} evo:${diag.evolution ? "yes" : "no"} signal rejects:${diag.signalReasons.join("/") || "none"} resolved:${diag.resolvedId || "none"}`);
@@ -13250,11 +15721,11 @@
         if (live) return live;
         return transientById.get(Number(ref?.id || 0)) || null;
       };
-      const selected = plan.selected.map((item) => resolvedByRef(item.ref));
-      if (selected.some((item) => !item)) {
+      const selected2 = plan.selected.map((item) => resolvedByRef(item.ref));
+      if (selected2.some((item) => !item)) {
         return {
           ok: false,
-          selected: selected.filter(Boolean),
+          selected: selected2.filter(Boolean),
           entries: [],
           stats: { ...plan.pileCounts },
           missing: plan.missing || { count: 1, reason: "selection-item-stale" },
@@ -13269,7 +15740,7 @@
       if (entries.some((entry, index) => !entry.item || plan.entries[index]?.signalRef && !entry.signal)) {
         return {
           ok: false,
-          selected,
+          selected: selected2,
           entries: entries.filter((entry) => entry.item),
           stats: { ...plan.pileCounts },
           missing: plan.missing || { count: 1, reason: "selection-signal-stale" },
@@ -13282,7 +15753,7 @@
       }, {});
       return {
         ok: plan.ok,
-        selected,
+        selected: selected2,
         entries,
         stats: { ...plan.pileCounts },
         missing: plan.missing,
@@ -13464,7 +15935,7 @@
         (selection.selected || []).filter((item) => !transferIds.has(Number(item?.id || 0))).map((item) => Number(item?.id || 0))
       );
       let resolvedCount = 0;
-      const selected = (selection.selected || []).map((item) => {
+      const selected2 = (selection.selected || []).map((item) => {
         const itemId2 = Number(item?.id || 0);
         if (!transferIds.has(itemId2)) return item;
         const resolved = findSubmissionItemForDuplicateSignal(item, usedIds);
@@ -13477,7 +15948,7 @@
         return resolved;
       });
       log(`${loopDef.name}: resolved ${resolvedCount} transfer item(s) through duplicateId to club/storage submit item(s)`);
-      return { ...selection, selected, resolvedSignals: { ...selection.resolvedSignals || {}, transfer: resolvedCount } };
+      return { ...selection, selected: selected2, resolvedSignals: { ...selection.resolvedSignals || {}, transfer: resolvedCount } };
     }
     function buildSquadPlayerList(challenge, players) {
       const substitute = [...players];
@@ -15193,14 +17664,14 @@
       return getUnassignedItems().filter((item) => isTargetDuplicate(item, loopDef));
     }
     async function selectDailySeedInventory(loopDef) {
-      const { requirement, priorityPiles } = createSingleCardSelectionRequirement(
+      const { requirement: requirement2, priorityPiles } = createSingleCardSelectionRequirement(
         loopDef,
         loopDef.targetDuplicate
       );
       await refreshInventoryCaches(`${loopDef.name} seed inventory selection`, { includePacks: false, quiet: true });
       return {
-        requirement,
-        selection: selectInventoryPlayers3([requirement], priorityPiles)
+        requirement: requirement2,
+        selection: selectInventoryPlayers3([requirement2], priorityPiles)
       };
     }
     function itemRefMatchesAny(item, refs = []) {
@@ -15462,8 +17933,8 @@
             const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
             const challenge = await findAvailableSbcChallenge(set, loopDef.name);
             if (!challenge) return { status: "unavailable", reason: "no available seed SBC challenge remains" };
-            const { requirement: requirement2, selection: selection2 } = await selectDailySeedInventory(loopDef);
-            logDryRunSelection(`${loopDef.name} seed inventory`, selection2, { priorityPiles: requirement2.priorityPiles });
+            const { requirement: requirement3, selection: selection2 } = await selectDailySeedInventory(loopDef);
+            logDryRunSelection(`${loopDef.name} seed inventory`, selection2, { priorityPiles: requirement3.priorityPiles });
             if (!selection2.ok) {
               return { status: "blocked", reason: "no FSU-compatible daily seed player is available" };
             }
@@ -15472,10 +17943,10 @@
             return { status: "planned", reason: "would submit seed SBC" };
           }
           const reason = inventoryOnly ? "inventory-only mode" : "no target duplicate or reward pack";
-          const { requirement, selection } = await selectDailySeedInventory(loopDef);
+          const { requirement: requirement2, selection } = await selectDailySeedInventory(loopDef);
           log(`${loopDef.name}: seed inventory selected ${selection.selected.length}/1 player(s) (${formatSelectionStats(selection.stats)})`);
           if (!selection.ok) {
-            logSelectionDiagnostics(`${loopDef.name} seed inventory`, selection, requirement.priorityPiles);
+            logSelectionDiagnostics(`${loopDef.name} seed inventory`, selection, requirement2.priorityPiles);
             return { status: "blocked", reason: "no FSU-compatible daily seed player is available" };
           }
           log(`${loopDef.name}: ${reason}; submitting seed SBC ${current.completions + 1}/${loopDef.maxCompletions}`);
@@ -16142,19 +18613,19 @@
       log(`${loopDef.name}: submitted ${result.completions} SBC(s) in this run`);
       return result;
     }
-    function shortageSourceMatchesRequirement(source, requirement) {
+    function shortageSourceMatchesRequirement(source, requirement2) {
       const target = source?.requirement || {};
       return ["tier", "rarity", "special", "playerOnly", "allowSpecial"].every(
-        (field2) => target[field2] === void 0 || target[field2] === requirement?.[field2]
+        (field2) => target[field2] === void 0 || target[field2] === requirement2?.[field2]
       );
     }
     function getShortageForSource(loopDef, source, piles) {
       const requirements = (loopDef.requirements || []).filter(
-        (requirement) => shortageSourceMatchesRequirement(source, requirement)
+        (requirement2) => shortageSourceMatchesRequirement(source, requirement2)
       );
       if (!requirements.length) return 0;
-      return requirements.reduce((total, requirement) => {
-        const scoped = { ...requirement, priorityPiles: piles };
+      return requirements.reduce((total, requirement2) => {
+        const scoped = { ...requirement2, priorityPiles: piles };
         const selection = selectInventoryPlayers3([scoped], piles);
         return total + (selection.ok ? 0 : Number(selection.missing?.count || 0));
       }, 0);
@@ -16233,9 +18704,9 @@
     }
     function createReserveMatchingDuplicatePackPolicy(loopDef, source) {
       return createOpenedItemPolicy(async (openedItems) => {
-        const requirement = { ...source?.requirement || {} };
-        delete requirement.count;
-        const reserveDuplicate = (item) => isDuplicate(item) && isSbcUsablePlayer(item, requirement) && itemMatchesSpec(item, requirement);
+        const requirement2 = { ...source?.requirement || {} };
+        delete requirement2.count;
+        const reserveDuplicate = (item) => isDuplicate(item) && isSbcUsablePlayer(item, requirement2) && itemMatchesSpec(item, requirement2);
         const reservedIds = new Set(openedItems.filter(reserveDuplicate).map((item) => Number(item?.id || 0)));
         const directClub = openedItems.filter(
           (item) => !reservedIds.has(Number(item?.id || 0)) && !isDuplicate(item)
@@ -16665,7 +19136,7 @@
         loopDef.priorityPiles || ["unassigned", "storage", "transfer", "club"]
       );
       return requirements.some(
-        (requirement) => isSbcUsablePlayer(item, requirement) && itemMatchesSpec(item, requirement)
+        (requirement2) => isSbcUsablePlayer(item, requirement2) && itemMatchesSpec(item, requirement2)
       );
     }
     function isDuplicateForLoopRequirements(item, loopDef) {
@@ -16898,7 +19369,7 @@
         preCraftPickDef ? `${preCraftPickDef.name} [common material]` : loopDef.preCraftPlayerPick ? "dynamic pre-craft Player Pick [unavailable]" : null,
         ...craftingUpgrades.map((upgradeDef) => {
           const materialTypes = [...new Set(
-            getChallengeMaterialDefs(upgradeDef).flatMap((challengeDef) => challengeDef.requirements || []).map((requirement) => requirement.rarity || requirement.tier).filter(Boolean)
+            getChallengeMaterialDefs(upgradeDef).flatMap((challengeDef) => challengeDef.requirements || []).map((requirement2) => requirement2.rarity || requirement2.tier).filter(Boolean)
           )];
           const materialType = materialTypes.length ? `${materialTypes.join("/")} material` : "configured material";
           return `${upgradeDef.name} [${materialType}; ${(upgradeDef.sbcNames || []).join(" | ")}]`;
@@ -17279,7 +19750,7 @@
       const ranked = rankPlayerPickCandidates(choices, prices, pickRewardOptions);
       ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
       const manualReason = autoSelectBelow90 ? "" : getManualPlayerPickReason(ranked, pickCount);
-      const selected = manualReason ? await waitForManualPlayerPickSelection({
+      const selected2 = manualReason ? await waitForManualPlayerPickSelection({
         dom: adapters.dom,
         ranked,
         pickCount,
@@ -17289,11 +19760,11 @@
         cancelStopCheck: clearInterval,
         isStopping: () => state.stopping
       }) : ranked.slice(0, pickCount).map((candidate) => candidate.item);
-      const selectedCards = capturePlayerPickSelections(selected, ranked, pickRewardOptions);
+      const selectedCards = capturePlayerPickSelections(selected2, ranked, pickRewardOptions);
       if (manualReason) log(`${loopDef.name}: manual Player Pick confirmed`);
-      else log(`${loopDef.name}: auto-selected ${selected.map((item) => itemDisplayName(item)).join(", ")}`);
+      else log(`${loopDef.name}: auto-selected ${selected2.map((item) => itemDisplayName(item)).join(", ")}`);
       const confirmed = await observeOnce(
-        eaPlayerPickAdapter().confirmSelection(selected),
+        eaPlayerPickAdapter().confirmSelection(selected2),
         ctrl(),
         3e4,
         "confirm Player Pick selection"
@@ -18287,7 +20758,7 @@
           refreshing: state.refreshing,
           scanningPicks: state.scanningPicks,
           loadingLoops: state.loadingLoops,
-          usingBuiltIn: state.loopConfigSource === "built-in"
+          usingBuiltIn: state.loopConfigSource === "built-in" && !state.workflowBuilder?.getStore?.().activeProfileId
         }
       });
       updateLoopControls();
@@ -18305,7 +20776,7 @@
         getPanel: () => document.querySelector("#bronze-loop-panel"),
         getLatestBox: () => document.querySelector("#bronze-loop-latest"),
         getFullBox: () => document.querySelector("#bronze-loop-log"),
-        formatFullLog: (lines) => formatLogHtml(lines, escapeHtml)
+        formatFullLog: (lines) => formatLogHtml(lines, escapeHtml2)
       });
       const savedLoopUiOptions = loadLoopUiOptions();
       state.showMvpLoops = savedLoopUiOptions.showMvpLoops;
@@ -18336,16 +20807,35 @@
         },
         onModeChange: renderLog
       });
+      state.workflowBuilder = createWorkflowLoopBuilder({
+        dom: adapters.dom,
+        getBuiltInConfig: getBuiltInLoopConfig,
+        getDiscoveredLoops: getScannedPlayerPickLoopDefs,
+        loadStore: () => {
+          try {
+            return adapters.localStorage.getJson(BUILDER_PROFILE_KEY, null);
+          } catch {
+            return null;
+          }
+        },
+        saveStore: (store) => adapters.localStorage.setJson(BUILDER_PROFILE_KEY, store),
+        applyConfig: (config, source) => setLoopConfig(config, source, { preserveDiscovery: true }),
+        useBuiltIn: () => resetLoopDefs(),
+        exportText: (text, filename) => adapters.userEffects.downloadText(text, filename),
+        log,
+        now: Date.now
+      });
+      const restoredProfile = state.workflowBuilder.restoreActiveProfile();
+      if (restoredProfile.status === "blocked") {
+        log(`Active Builder profile was not restored before Player Pick refresh: ${(restoredProfile.errors || []).join("; ")}`);
+      }
       renderLoopSelect();
       renderLog();
       const panelCommands = createMainPanelCommands({
         state,
         log,
         setPanelState,
-        getLoopDefById,
-        setLoopJson,
-        editLoopConfig: editWorkflowConfig,
-        applyLoopConfigEditor: applyWorkflowConfigEditor,
+        openBuilder: (tab) => state.workflowBuilder?.open(tab),
         updateLoopControls,
         savePickOptions: savePickRuntimeOptions,
         saveLoopOptions: saveLoopUiOptions,
@@ -18358,8 +20848,8 @@
         refreshInventoryCaches,
         scanPlayerPicks: scanAvailablePlayerPickSbcs,
         loopConfigUrl: LOOP_CONFIG_URL,
-        loadLoopConfig,
-        resetLoopDefs,
+        importLoopConfig,
+        useBuiltIn: () => state.workflowBuilder?.useBuiltIn(),
         userEffects: adapters.userEffects,
         getLogText: () => state.logLines.join("\n"),
         clearLog,

@@ -5,32 +5,19 @@ export function createMainPanelCommands(options = {}) {
   const setPanelState = options.setPanelState || (() => {});
 
   const commands = {
-    selectLoop(selectedId) {
-      if (selectedId !== 'custom') options.setLoopJson?.(options.getLoopDefById?.(selectedId));
+    selectLoop() {
       options.updateLoopControls?.();
     },
-    editJson: options.updateLoopControls,
-    editConfig() {
+    openBuilder() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-      options.editLoopConfig?.();
+      options.openBuilder?.('workflows');
       return true;
     },
-    applyConfig() {
+    validateJson() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-      state.loadingLoops = true;
-      setPanelState();
-      try {
-        options.applyLoopConfigEditor?.();
-        return true;
-      } catch (error) {
-        log(`Workflow JSON apply failed: ${error?.message || error}`);
-        return false;
-      } finally {
-        state.loadingLoops = false;
-        setPanelState();
-      }
+      options.openBuilder?.('json');
+      return true;
     },
-    jsonInput: options.updateLoopControls,
     async savePickOptions(event) {
       options.savePickOptions?.(event);
       if (event?.target?.id !== 'bronze-loop-pick-prefer-scanned' || event.target.checked !== true) return true;
@@ -90,11 +77,11 @@ export function createMainPanelCommands(options = {}) {
       state.loadingLoops = true;
       setPanelState();
       try {
-        log(`Loading loop definitions from ${options.loopConfigUrl}`);
-        await options.loadLoopConfig?.(options.loopConfigUrl);
+        log(`Importing loop definitions from ${options.loopConfigUrl} into the Builder draft`);
+        await options.importLoopConfig?.(options.loopConfigUrl);
         return true;
       } catch (error) {
-        log(`Loop JSON load failed: ${error?.message || error}`);
+        log(`Loop JSON import failed: ${error?.message || error}`);
         return false;
       } finally {
         state.loadingLoops = false;
@@ -103,7 +90,7 @@ export function createMainPanelCommands(options = {}) {
     },
     useBuiltIn() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-      options.resetLoopDefs?.();
+      options.useBuiltIn?.();
       setPanelState();
       return true;
     },

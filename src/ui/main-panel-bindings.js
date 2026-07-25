@@ -19,17 +19,10 @@ export function bindMainPanelCommands(options = {}) {
   if (!panel?.querySelector) throw new TypeError('panel element is required');
 
   const select = required(panel, '#bronze-loop-select');
-  const editor = required(panel, '#bronze-loop-json');
 
   select.addEventListener('change', (event) => commands.selectLoop?.(event.target?.value, event));
-  required(panel, '#bronze-loop-edit').addEventListener('click', (event) => {
-    editor.classList.toggle('show');
-    if (editor.classList.contains('show')) select.value = 'custom';
-    commands.editJson?.({ visible: editor.classList.contains('show'), event });
-  });
-  required(panel, '#bronze-loop-edit-config').addEventListener('click', (event) => commands.editConfig?.(event));
-  required(panel, '#bronze-loop-apply-config').addEventListener('click', (event) => commands.applyConfig?.(event));
-  editor.addEventListener('input', (event) => commands.jsonInput?.(event));
+  required(panel, '#bronze-loop-open-builder').addEventListener('click', (event) => commands.openBuilder?.(event));
+  required(panel, '#bronze-loop-validate-json').addEventListener('click', (event) => commands.validateJson?.(event));
   PICK_OPTION_IDS.forEach((id) => {
     required(panel, `#${id}`).addEventListener('change', (event) => commands.savePickOptions?.(event));
   });

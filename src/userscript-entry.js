@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.5.64
+// @version      0.6.0
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -23,6 +23,7 @@
 import {
   APP_KEY,
   BATCH_OPEN_PLAN_KEY,
+  BUILDER_PROFILE_KEY,
   CFG,
   FSU_COMPAT_DEFAULTS,
   LOOP_CONFIG_URL,
@@ -63,9 +64,9 @@ import {
 } from './config/loop-schema.js';
 import { normalizeFsuSettings } from './config/fsu-compat.js';
 import { materializeBatchOpenPlan, normalizeBatchOpenPlan } from './config/batch-open.js';
-import { materializeSessionLoopDefs } from './config/session-loops.js';
 import {
   buildPlayerPickDiscoverySession,
+  collectScannedPlayerPickLoopDefs,
   parsePlayerPickSbcSnapshot,
   resolvePlayerPickLoopReference,
 } from './config/player-pick-discovery.js';
@@ -182,6 +183,7 @@ import {
   renderRewardAlertSummary,
 } from './ui/main-panel-state.js';
 import { mountMainPanel, setMainPanelStartupHidden } from './ui/main-panel-view.js';
+import { createWorkflowLoopBuilder } from './ui/workflow-loop-builder.js';
 import { waitForManualPlayerPickSelection } from './ui/player-pick-modal.js';
 import { showPlayerPickRecap } from './ui/player-pick-recap.js';
 import { triggerRewardFireworks } from './ui/reward-celebration.js';
@@ -226,6 +228,7 @@ const state = {
     loopDefs: null,
     discoveredLoopDefs: [],
     discoveredLoopOverrides: {},
+    scannedPlayerPickDefs: [],
     recoveryRecipes: null,
     unassignedRecoveryPolicies: null,
     defaultUnassignedRecoveryPolicyIds: null,
@@ -249,6 +252,7 @@ const state = {
     showMvpLoops: false,
     loopStack: [],
     logRenderer: null,
+    workflowBuilder: null,
     sbcLoadLogKeys: new Set(),
     rewardAlertSettings: normalizeRewardAlertSettings(),
   };
@@ -257,6 +261,7 @@ const state = {
     state.stopping = true;
     if (state.bootTimer) clearInterval(state.bootTimer);
     state.logRenderer?.destroy?.();
+    state.workflowBuilder?.destroy?.();
     document.querySelector('#bronze-loop-panel')?.remove();
     document.querySelector('#bronze-loop-pick-modal')?.remove();
     document.querySelector('#bronze-loop-recap-modal')?.remove();
@@ -269,7 +274,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.5.64',
+    version: '0.6.0',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -327,7 +332,12 @@ const state = {
   function getLoopDefs() {
     const configured = state.loopDefs?.length ? state.loopDefs : LOOP_DEFS;
     const effectiveConfigured = configured.map((loopDef) => state.discoveredLoopOverrides?.[loopDef.id] || loopDef);
-    return [...effectiveConfigured, ...(state.discoveredLoopDefs || [])];
+    const configuredIds = new Set(effectiveConfigured.map((loopDef) => String(loopDef?.id || '')).filter(Boolean));
+    const discovered = (state.discoveredLoopDefs || []).filter((loopDef) => {
+      const id = String(loopDef?.id || '');
+      return !id || !configuredIds.has(id);
+    });
+    return [...effectiveConfigured, ...discovered];
   }
 
   function getConfiguredLoopDefs() {
@@ -344,6 +354,26 @@ const state = {
 
   function getDefaultUnassignedRecoveryPolicyIds() {
     return state.defaultUnassignedRecoveryPolicyIds || DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS;
+  }
+
+  function getBuiltInLoopConfig() {
+    return {
+      loops: LOOP_DEFS,
+      recoveryRecipes: RECOVERY_RECIPES,
+      unassignedRecoveryPolicies: UNASSIGNED_RECOVERY_POLICIES,
+      defaultUnassignedRecoveryPolicyIds: DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
+    };
+  }
+
+  function getScannedPlayerPickLoopDefs() {
+    const loops = state.scannedPlayerPickDefs || [];
+    const seen = new Set();
+    return loops.filter((loopDef) => {
+      const id = String(loopDef?.id || '');
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
   }
 
   function getVisibleLoopDefs() {
@@ -379,27 +409,33 @@ const state = {
     return validateLoopConfigPure(config, label);
   }
 
-  function setLoopConfig(config, source = 'custom') {
+  function setLoopConfig(config, source = 'custom', options = {}) {
     const normalized = validateLoopConfig(config, source);
     state.loopDefs = cloneLoopDef(normalized.loops);
     state.recoveryRecipes = cloneLoopDef(normalized.recoveryRecipes);
     state.unassignedRecoveryPolicies = cloneLoopDef(normalized.unassignedRecoveryPolicies);
     state.defaultUnassignedRecoveryPolicyIds = [...normalized.defaultUnassignedRecoveryPolicyIds];
     state.loopConfigSource = source;
-    state.discoveredLoopDefs = [];
-    state.discoveredLoopOverrides = {};
+    if (options.preserveDiscovery !== true) {
+      state.discoveredLoopDefs = [];
+      state.discoveredLoopOverrides = {};
+      state.scannedPlayerPickDefs = [];
+    }
     renderLoopSelect(state.loopDefs[0]?.id);
     log(`Loaded ${state.loopDefs.length} loop definition(s), ${state.recoveryRecipes.length} recovery recipe(s), and ${state.unassignedRecoveryPolicies.length} recovery policy(s) from ${source}`);
   }
 
-  function resetLoopDefs() {
+  function resetLoopDefs(options = {}) {
     state.loopDefs = null;
     state.recoveryRecipes = null;
     state.unassignedRecoveryPolicies = null;
     state.defaultUnassignedRecoveryPolicyIds = null;
     state.loopConfigSource = 'built-in';
-    state.discoveredLoopDefs = [];
-    state.discoveredLoopOverrides = {};
+    if (options.preserveDiscovery !== true) {
+      state.discoveredLoopDefs = [];
+      state.discoveredLoopOverrides = {};
+      state.scannedPlayerPickDefs = [];
+    }
     renderLoopSelect(LOOP_DEFS[0]?.id);
     log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
   }
@@ -408,65 +444,22 @@ const state = {
     return parseLoopConfigPure(text);
   }
 
-  async function loadLoopConfig(url = LOOP_CONFIG_URL) {
+  async function importLoopConfig(url = LOOP_CONFIG_URL) {
     const text = await adapters.http.getText(`${url}?t=${Date.now()}`, { useRuntimeFallback: true });
-    const config = parseLoopConfig(text);
-    setLoopConfig(config, url);
+    const config = state.workflowBuilder?.importConfigText(text, {
+      name: 'Development server import',
+    });
+    if (!config) fail('Workflow Builder is unavailable');
+    log(`Imported ${config.loops.length} Loop(s) from ${url} into the current Builder draft; activate the profile to use them`);
+    return config;
   }
 
   function getSelectedLoopDef() {
     const select = document.querySelector('#bronze-loop-select');
     const selectedId = select?.value || getVisibleLoopDefs()[0]?.id || LOOP_DEFS[0].id;
-    if (selectedId === 'custom') {
-      const text = document.querySelector('#bronze-loop-json')?.value || '';
-      try {
-        const parsed = JSON.parse(text);
-        assertValidLoopDef(parsed, 'Custom loop JSON');
-        return applyDisabledPiles(parsed);
-      } catch (e) {
-        if (e instanceof SyntaxError) fail(`Invalid custom loop JSON: ${e.message || e}`);
-        throw e;
-      }
-    }
     const loopDef = cloneLoopDef(getLoopDefById(selectedId));
     assertValidLoopDef(loopDef, loopDef.name || selectedId);
     return applyDisabledPiles(loopDef);
-  }
-
-  function setLoopJson(def) {
-    const editor = document.querySelector('#bronze-loop-json');
-    if (editor) editor.value = JSON.stringify(def, null, 2);
-  }
-
-  function editWorkflowConfig() {
-    const editor = document.querySelector('#bronze-loop-json');
-    if (!editor) return;
-    const sessionLoops = materializeSessionLoopDefs({
-      configuredLoops: getConfiguredLoopDefs(),
-      loopOverrides: state.discoveredLoopOverrides,
-      discoveredLoops: state.discoveredLoopDefs,
-    });
-    editor.value = JSON.stringify({
-      loops: sessionLoops,
-      recoveryRecipes: getRecoveryRecipes(),
-      unassignedRecoveryPolicies: getUnassignedRecoveryPolicies(),
-      defaultUnassignedRecoveryPolicyIds: getDefaultUnassignedRecoveryPolicyIds(),
-    }, null, 2);
-    editor.classList.add('show');
-    log(`Editing full workflow JSON with ${sessionLoops.length} current session Loop(s), including scanned Pick metadata. Apply workflow JSON validates every loop and step before replacing the current session configuration.`);
-  }
-
-  function applyWorkflowConfigEditor() {
-    const text = document.querySelector('#bronze-loop-json')?.value || '';
-    let config;
-    try {
-      config = parseLoopConfig(text);
-    } catch (error) {
-      if (error instanceof SyntaxError) fail(`Invalid workflow JSON: ${error.message || error}`);
-      throw error;
-    }
-    setLoopConfig(config, 'panel workflow JSON');
-    log('Applied panel workflow JSON. Built-in loops remain available through Built-in loops.');
   }
 
   function renderLoopSelect(selectedId = null) {
@@ -477,18 +470,12 @@ const state = {
       selectedId,
       createOption: () => document.createElement('option'),
     });
-    if (nextValue && nextValue !== 'custom') setLoopJson(getLoopDefById(nextValue));
     updateLoopControls();
   }
 
   function getEditorLoopDef() {
     const selectedId = document.querySelector('#bronze-loop-select')?.value || getVisibleLoopDefs()[0]?.id || LOOP_DEFS[0].id;
-    if (selectedId !== 'custom') return getLoopDefById(selectedId);
-    try {
-      return JSON.parse(document.querySelector('#bronze-loop-json')?.value || '{}');
-    } catch {
-      return {};
-    }
+    return getLoopDefById(selectedId);
   }
 
 function updateLoopControls() {
@@ -2500,6 +2487,18 @@ function updateLoopControls() {
     });
     state.discoveredLoopDefs = cloneLoopDef(session.discoveredLoops);
     state.discoveredLoopOverrides = cloneLoopDef(session.loopOverrides);
+    state.scannedPlayerPickDefs = cloneLoopDef(collectScannedPlayerPickLoopDefs(session.results));
+    state.workflowBuilder?.refreshDynamic(getScannedPlayerPickLoopDefs());
+    const activeBuilderId = state.workflowBuilder?.getStore?.().activeProfileId;
+    if (activeBuilderId) {
+      const restored = state.workflowBuilder.restoreActiveProfile();
+      if (restored.status === 'blocked') {
+        if (String(state.loopConfigSource || '').startsWith('Builder profile:')) {
+          resetLoopDefs({ preserveDiscovery: true });
+        }
+        log(`Active Builder profile remains unavailable after Player Pick scan: ${(restored.errors || []).join('; ')}`);
+      }
+    }
     renderLoopSelect(session.selectedId);
     const duplicateCount = session.results.filter((result) => result.status === 'duplicate').length;
     for (const [loopId, loopDef] of Object.entries(state.discoveredLoopOverrides)) {
@@ -8668,7 +8667,8 @@ function updateLoopControls() {
           refreshing: state.refreshing,
           scanningPicks: state.scanningPicks,
           loadingLoops: state.loadingLoops,
-        usingBuiltIn: state.loopConfigSource === 'built-in',
+        usingBuiltIn: state.loopConfigSource === 'built-in'
+          && !state.workflowBuilder?.getStore?.().activeProfileId,
       },
     });
     updateLoopControls();
@@ -8711,16 +8711,31 @@ function updateLoopControls() {
       },
       onModeChange: renderLog,
     });
+    state.workflowBuilder = createWorkflowLoopBuilder({
+      dom: adapters.dom,
+      getBuiltInConfig: getBuiltInLoopConfig,
+      getDiscoveredLoops: getScannedPlayerPickLoopDefs,
+      loadStore: () => {
+        try { return adapters.localStorage.getJson(BUILDER_PROFILE_KEY, null); } catch { return null; }
+      },
+      saveStore: (store) => adapters.localStorage.setJson(BUILDER_PROFILE_KEY, store),
+      applyConfig: (config, source) => setLoopConfig(config, source, { preserveDiscovery: true }),
+      useBuiltIn: () => resetLoopDefs(),
+      exportText: (text, filename) => adapters.userEffects.downloadText(text, filename),
+      log,
+      now: Date.now,
+    });
+    const restoredProfile = state.workflowBuilder.restoreActiveProfile();
+    if (restoredProfile.status === 'blocked') {
+      log(`Active Builder profile was not restored before Player Pick refresh: ${(restoredProfile.errors || []).join('; ')}`);
+    }
     renderLoopSelect();
     renderLog();
     const panelCommands = createMainPanelCommands({
       state,
       log,
       setPanelState,
-      getLoopDefById,
-      setLoopJson,
-      editLoopConfig: editWorkflowConfig,
-      applyLoopConfigEditor: applyWorkflowConfigEditor,
+      openBuilder: (tab) => state.workflowBuilder?.open(tab),
       updateLoopControls,
       savePickOptions: savePickRuntimeOptions,
       saveLoopOptions: saveLoopUiOptions,
@@ -8733,8 +8748,8 @@ function updateLoopControls() {
       refreshInventoryCaches,
       scanPlayerPicks: scanAvailablePlayerPickSbcs,
       loopConfigUrl: LOOP_CONFIG_URL,
-      loadLoopConfig,
-      resetLoopDefs,
+      importLoopConfig,
+      useBuiltIn: () => state.workflowBuilder?.useBuiltIn(),
       userEffects: adapters.userEffects,
       getLogText: () => state.logLines.join('\n'),
       clearLog,

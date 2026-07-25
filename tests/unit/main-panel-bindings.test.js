@@ -3,10 +3,8 @@ import { bindMainPanelCommands, hydrateMainPanelOptions } from '../../src/ui/mai
 
 const IDS = [
   'bronze-loop-select',
-  'bronze-loop-json',
-  'bronze-loop-edit',
-  'bronze-loop-edit-config',
-  'bronze-loop-apply-config',
+  'bronze-loop-open-builder',
+  'bronze-loop-validate-json',
   'bronze-loop-pick-protect-high-gold',
   'bronze-loop-pick-auto-below-90',
   'bronze-loop-pick-prefer-scanned',
@@ -82,7 +80,7 @@ describe('main panel bindings', () => {
   it('binds every command control and forwards the selected loop id', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
-      'selectLoop', 'editJson', 'editConfig', 'applyConfig', 'jsonInput', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
+      'selectLoop', 'openBuilder', 'validateJson', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
       'refresh', 'scanPicks', 'previewPickRecap', 'loadJson', 'useBuiltIn', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
@@ -93,9 +91,8 @@ describe('main panel bindings', () => {
     expect(commands.selectLoop).toHaveBeenCalledWith('daily-routine', expect.any(Object));
 
     for (const [id, event, command] of [
-      ['bronze-loop-json', 'input', 'jsonInput'],
-      ['bronze-loop-edit-config', 'click', 'editConfig'],
-      ['bronze-loop-apply-config', 'click', 'applyConfig'],
+      ['bronze-loop-open-builder', 'click', 'openBuilder'],
+      ['bronze-loop-validate-json', 'click', 'validateJson'],
       ['bronze-loop-daily-inventory-only', 'change', 'saveLoopOptions'],
       ['bronze-loop-show-mvp', 'change', 'saveLoopOptions'],
       ['bronze-loop-reward-alert-enabled', 'change', 'saveRewardAlertEnabled'],
@@ -119,22 +116,6 @@ describe('main panel bindings', () => {
     controls.get('bronze-loop-pick-protect-high-gold').emit('change');
     controls.get('bronze-loop-pick-auto-threshold').emit('change');
     expect(commands.savePickOptions).toHaveBeenCalledTimes(2);
-  });
-
-  it('owns Edit JSON visibility and switches the selector to custom', () => {
-    const { panel, controls } = harness();
-    const editJson = vi.fn();
-    bindMainPanelCommands({ panel, commands: { editJson } });
-    controls.get('bronze-loop-select').value = 'daily-routine';
-
-    controls.get('bronze-loop-edit').emit('click');
-    expect(controls.get('bronze-loop-json').classList.contains('show')).toBe(true);
-    expect(controls.get('bronze-loop-select').value).toBe('custom');
-    expect(editJson).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
-
-    controls.get('bronze-loop-edit').emit('click');
-    expect(controls.get('bronze-loop-json').classList.contains('show')).toBe(false);
-    expect(editJson).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
   });
 
   it('fails fast when a required template control is missing', () => {

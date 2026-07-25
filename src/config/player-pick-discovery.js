@@ -477,3 +477,16 @@ export function buildPlayerPickDiscoverySession(input = {}) {
     selectedId,
   };
 }
+
+export function collectScannedPlayerPickLoopDefs(results = []) {
+  const loops = [];
+  const seen = new Set();
+  for (const result of results || []) {
+    const loop = result?.discoveredLoop || result?.loop;
+    const id = normalizedText(loop?.id);
+    if (!loop || !id || seen.has(id)) continue;
+    seen.add(id);
+    loops.push(loop);
+  }
+  return loops;
+}

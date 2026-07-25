@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.5.64`
+当前版本：`0.6.0`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -8,9 +8,11 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 - 本文：面向使用者，介绍安装、界面、主要 Loop、常见问题和基本开发方式。
 - [AGENTS.md](AGENTS.md)：面向 AI agent 和开发者的完整工程手册，包括架构、模块职责、影响面分析、测试和发布流程。
-- [REFACTORING_MILESTONES.md](REFACTORING_MILESTONES.md)：重构进度、未完成工作和后续 Milestone。
+- [docs/REFACTORING_MILESTONES.md](docs/REFACTORING_MILESTONES.md)：重构进度、未完成工作和后续 Milestone。
 - [FSU_mod/README.md](FSU_mod/README.md)：FSU 优化版安装、上游更新、补丁应用和回滚说明。
 - [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)：FSU Club 实体缓存、权威校验、Runner/Enhancer 交互、诊断和完整开发手册。
+- [docs/WORKFLOW_LOOP_BUILDER_GUIDE_ZH.md](docs/WORKFLOW_LOOP_BUILDER_GUIDE_ZH.md)：Workflow/Loop Builder 中文图示操作指南，包括修改流程、Step Variant、Dynamic Pick 和激活步骤。
+- [docs/WORKFLOW_LOOP_BUILDER.md](docs/WORKFLOW_LOOP_BUILDER.md)：可视化 Workflow/Loop Builder 的模型、界面、兼容边界、实施阶段和后续计划。
 
 ## 安装要求
 
@@ -23,7 +25,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.5.64` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.6.0` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
 FSU 不再显示前台 Club loading 时，可能正在后台校验，也可能已进入快速缓存状态。Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 
@@ -82,17 +84,29 @@ Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的
 - `Open Picks at end`：仅对直接运行的 Player Pick Loop 生效；先完成当前 Loop 的目标数量，再集中开启同类型奖励。不限次 Pick 使用 `rounds`，限次 Pick 使用 EA Set 的当前剩余次数。默认关闭。
 - 数量输入：只对声明 `runtimeQuantity.mode: "user"` 的 Loop 显示，标签和默认值由该 Loop 定义。不限次 Player Pick、Daily Rare Pack to 2x84+、2x84+ Fodder、84+ TOTW 等表示目标完成数；Provision 显示 `Provision packs`；Validation 显示 `Validation runs`。One-click Daily、其内部 Daily 阶段、限次 Player Pick 和 84x10 不显示该输入。
 - `Refresh caches`：刷新当前可用的 Packs、Unassigned、Storage、Transfer 和 Club 缓存。
-- `Load loops JSON`：从本地开发服务加载 `DailyLoopRunner.loops.json`。
-- `Built-in loops`：切回脚本内置配置。
-- `Edit loop JSON`：临时编辑当前 Loop 配置。
-- `Edit workflow JSON`：把当前完整配置放入编辑器，包括静态小 Loop、Workflow、当前动态扫描得到的 Pick、扫描 metadata override、recovery recipes 和 policies。
-- `Apply workflow JSON`：校验后把编辑器中的完整配置应用到当前浏览器会话；JSON 无效时保留当前配置。`Built-in loops` 可随时恢复脚本内置配置。
+- `Open Builder`：打开全屏可视化 Workflow/Loop Builder。普通编辑不再要求手写 JSON。
+- `Validate JSON`：直接进入 Builder 的 JSON 验证/导入页；JSON 只作为验证、兼容导入和导出格式保留。
+- `Import JSON`：从本地开发服务读取 `DailyLoopRunner.loops.json`，校验后写入当前 Profile 的 Draft，不会直接替换运行配置。
+- `Built-in loops`：停用当前 Active Profile 并切回脚本内置配置；Profile 和草稿仍保留。
+
+### Workflow/Loop Builder
+
+Builder 把配置分为 Draft、Saved 和 Active 三个状态。字段修改会自动持久化到 Draft；`Save` 只在完整配置通过 schema、引用、动态 Pick 和内置更新冲突检查后更新 Saved；`Activate` 再把通过验证的物化配置交给原有 `setLoopConfig()` 运行时边界。只打开、预览、导入或保存 Builder 都不会移动物品、开包或提交 SBC。
+
+- 内置 Workflow、Loop 和 Recovery 对象默认只读。使用 `Override` 创建覆盖，`Reset` 恢复当前版本内置值，或 `Duplicate` 创建独立自定义对象。
+- Workflow 用有序 step 列表引用原子 Loop。step 只直接保存 `loopId`、显示名称和 `rewardFlow`；需要单次参数差异时使用 Step Variant，避免改变其它引用同一 Loop 的 Workflow。
+- Dynamic Picks 页读取本次 `Scan Picks` 的安全扫描结果。绑定记录 Set/Reward 稳定身份；刷新或重登后找不到当前 Pick 时，该 Profile 阻止激活并回退内置配置，不会执行上次缓存快照。
+- Recovery 页编辑 recipes、policies 和默认 policy 集；所有引用在保存和激活前统一校验。
+- `Preview` 只显示物化后的 step、strategy、数量、库存和奖励摘要，不执行 Dry Run。`Undo/Redo` 仅修改当前 Profile Draft。
+- JSON 页可以验证并导入旧配置，也可以导出当前物化配置。导入只更新 Draft，必须再次 `Save`/`Activate`；外部顶层格式继续保持 `loops`、`recoveryRecipes`、`unassignedRecoveryPolicies` 和 `defaultUnassignedRecoveryPolicyIds`。
+
+Profile 存在浏览器本地存储中。重登只恢复 Active Profile 的 last-known-good；未保存草稿即使当前校验失败也会保留在 Builder 内，但不会进入运行时。内置版本更新后，未改字段继承新值，同一字段被内置与 Profile 同时修改时必须在 Inspector 中选择 `Use built-in` 或 `Keep mine`。
 
 ### Configurable Workflows
 
 `workflowRoutine` 是现有小 Loop 的声明式顺序编排。它不接受 JavaScript、DOM 命令、任意物品移动或直接提交动作；每个子 Loop 仍走原有 FSU 过滤、Dry Run、材料保护、最终校验和 SBC transaction。
 
-使用 `Edit workflow JSON` 从当前会话的完整配置开始。step 可以是 Loop id 字符串，也可以用对象增加本次编排中的显示名称或奖励策略。次数、材料、评分、来源包和阶段等业务参数必须配置在被引用的子 Loop 中，不在 step 上定义伪通用的 `maxCompletions`：
+使用 `Open Builder` 的 Workflows 页从当前 Profile 开始。step 可以引用已有原子 Loop，也可以增加本次编排中的显示名称或奖励策略。次数、材料、评分、来源包和阶段等业务参数必须配置在被引用的子 Loop 或 Step Variant 中，不在 step 上定义伪通用的 `maxCompletions`：
 
 ```json
 {
@@ -137,7 +151,7 @@ Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的
 
 子 Pick 可配置 `pickOptions: { "openAtEnd": false }` 单独关闭集中领取；支持库存模式的子 Loop 可配置 `inventoryMode: "normal"` 单独忽略全局 Inventory only。
 
-面板编辑的 Workflow JSON 只在当前浏览器会话生效。编辑器会把当前动态 Pick 物化进 `loops`，因此 Apply 后不会因为扫描缓存清空而丢失这些 Pick；后续重新 Scan Picks 会再按稳定身份更新或去重。需要共享或重载时，将配置维护到 `DailyLoopRunner.loops.json` 并使用 `Load loops JSON`。
+Builder Profile 会跨重登保存，但 Active Profile 中绑定的动态 Pick 必须在每次会话重新扫描成功后才会恢复。需要共享时使用 Builder `Export`；需要加载旧配置或开发服务器配置时使用 JSON 验证页或主面板 `Import JSON`，导入结果仍需显式保存和激活。
 
 ### Reward Alerts
 

@@ -30,8 +30,8 @@ describe('main panel state rendering', () => {
     const loops = [{ id: 'daily', name: 'Daily' }, { id: 'provision', name: 'Provision' }];
 
     expect(renderMainPanelLoopOptions({ panel, loops, selectedId: 'provision', createOption })).toBe('provision');
-    expect(select.children.map((option) => option.value)).toEqual(['daily', 'provision', 'custom']);
-    expect(select.children.map((option) => option.textContent)).toEqual(['Daily', 'Provision', 'Custom JSON']);
+    expect(select.children.map((option) => option.value)).toEqual(['daily', 'provision']);
+    expect(select.children.map((option) => option.textContent)).toEqual(['Daily', 'Provision']);
 
     expect(renderMainPanelLoopOptions({ panel, loops, selectedId: 'missing', createOption })).toBe('daily');
     expect(select.value).toBe('daily');
@@ -83,14 +83,14 @@ describe('main panel state rendering', () => {
 
   it('applies the complete runtime disabled-state matrix', () => {
     const ids = [
-      'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-select', 'bronze-loop-edit',
-      'bronze-loop-edit-config', 'bronze-loop-apply-config',
+      'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-select',
+      'bronze-loop-open-builder', 'bronze-loop-validate-json',
       'bronze-loop-refresh', 'bronze-loop-scan-picks', 'bronze-loop-load-json', 'bronze-loop-built-in', 'bronze-loop-dry-run',
       'bronze-loop-open-rewards', 'bronze-loop-pick-protect-high-gold', 'bronze-loop-pick-auto-below-90',
       'bronze-loop-daily-inventory-only',
       'bronze-loop-pick-prefer-scanned',
       'bronze-loop-pick-high-gold-threshold', 'bronze-loop-pick-auto-threshold', 'bronze-loop-show-mvp',
-      'bronze-loop-rounds', 'bronze-loop-json',
+      'bronze-loop-rounds',
       'bronze-loop-reward-alert-enabled', 'bronze-loop-reward-alert-settings',
     ];
     const { panel, controls } = harness(ids);

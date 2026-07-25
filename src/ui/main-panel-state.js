@@ -16,10 +16,6 @@ export function renderMainPanelLoopOptions(options = {}) {
     option.textContent = loop.name;
     select.appendChild(option);
   }
-  const custom = createOption();
-  custom.value = 'custom';
-  custom.textContent = 'Custom JSON';
-  select.appendChild(custom);
   const values = Array.from(select.options || []).map((option) => option.value);
   const nextValue = values.includes(previous) ? previous : loops[0]?.id;
   if (nextValue) select.value = nextValue;
@@ -89,9 +85,8 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-batch-open': busy,
     'bronze-loop-stop': state.running !== true,
     'bronze-loop-select': state.running === true || state.scanningPicks === true || state.loadingLoops === true,
-    'bronze-loop-edit': state.running === true || state.scanningPicks === true || state.loadingLoops === true,
-    'bronze-loop-edit-config': busy,
-    'bronze-loop-apply-config': busy,
+    'bronze-loop-open-builder': busy,
+    'bronze-loop-validate-json': busy,
     'bronze-loop-refresh': busy,
     'bronze-loop-scan-picks': busy,
     'bronze-loop-load-json': busy,
@@ -108,7 +103,6 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-show-mvp': state.running === true,
     'bronze-loop-reward-alert-settings': state.running === true,
     'bronze-loop-rounds': state.running === true,
-    'bronze-loop-json': state.running === true,
   };
   for (const [id, value] of Object.entries(disabled)) {
     const element = query(panel, `#${id}`);

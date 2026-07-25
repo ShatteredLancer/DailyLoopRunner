@@ -1,0 +1,198 @@
+import { LOOP_STRATEGIES } from '../domain/strategies.js';
+
+export const BUILDER_COMMON_FIELDS = Object.freeze([
+  Object.freeze({ path: 'name', label: 'Name', type: 'text', required: true }),
+  Object.freeze({ path: 'id', label: 'Stable ID', type: 'id', required: true }),
+  Object.freeze({ path: 'strategy', label: 'Strategy', type: 'strategy', required: true }),
+  Object.freeze({ path: 'hidden', label: 'Hidden', type: 'boolean-inherit' }),
+  Object.freeze({ path: 'mvp', label: 'MVP', type: 'boolean-inherit' }),
+  Object.freeze({ path: 'dryRun', label: 'Always dry run', type: 'boolean-inherit' }),
+  Object.freeze({ path: 'runtimeQuantity', label: 'Runtime quantity', type: 'runtime-quantity' }),
+  Object.freeze({ path: 'rewardFlow', label: 'Reward flow', type: 'reward-flow' }),
+  Object.freeze({
+    path: 'inventoryMode',
+    label: 'Inventory mode',
+    type: 'inventory-mode',
+    strategies: Object.freeze([
+      'dailySingleCardRecycle',
+      'supplyAndCraft',
+      'inventoryMixedUpgrade',
+      'commonGoldToRareUpgrade',
+      'dailyRoutine',
+      'workflowRoutine',
+    ]),
+  }),
+  Object.freeze({ path: 'disabledPiles', label: 'Disabled piles', type: 'pile-list' }),
+  Object.freeze({ path: 'unassignedRecoveryPolicyIds', label: 'Recovery policies', type: 'policy-list' }),
+  Object.freeze({
+    path: 'pickOptions',
+    label: 'Player Pick options',
+    type: 'pick-options',
+    strategies: Object.freeze(['playerPickSbc', 'dailyRoutine', 'workflowRoutine']),
+  }),
+]);
+
+function descriptor(strategy, label, fields, options = {}) {
+  return Object.freeze({ strategy, label, fields: Object.freeze(fields), ...options });
+}
+
+export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
+  validationBronzeUpgrade: descriptor('validationBronzeUpgrade', 'Validation recycle', [
+    { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
+    { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
+    { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
+    { path: 'rewardPackIds', label: 'Reward pack IDs', type: 'number-list' },
+    { path: 'rewardPackNames', label: 'Reward pack aliases', type: 'string-list' },
+    { path: 'targetDuplicate', label: 'Target duplicate', type: 'card-spec', required: true },
+    { path: 'maxRounds', label: 'Maximum runs', type: 'integer' },
+  ]),
+  dailySingleCardRecycle: descriptor('dailySingleCardRecycle', 'Single-card recycle', [
+    { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
+    { path: 'rewardPackIds', label: 'Reward pack IDs', type: 'number-list' },
+    { path: 'rewardPackNames', label: 'Reward pack aliases', type: 'string-list' },
+    { path: 'targetDuplicate', label: 'Target duplicate', type: 'card-spec', required: true },
+    { path: 'dailyCompletionLimit', label: 'Daily limit', type: 'integer' },
+    { path: 'maxCompletions', label: 'Maximum completions', type: 'integer' },
+  ]),
+  supplyAndCraft: descriptor('supplyAndCraft', 'Supply and craft', [
+    { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
+    { path: 'requirements', label: 'Requirements', type: 'requirements', required: true },
+    { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
+    { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
+    { path: 'priorityPiles', label: 'Default pile order', type: 'pile-list' },
+    { path: 'primaryPiles', label: 'Primary pile order', type: 'pile-list' },
+    { path: 'clubFallbackPiles', label: 'Fallback pile order', type: 'pile-list' },
+    { path: 'shortagePacks', label: 'Shortage packs', type: 'shortage-packs' },
+    { path: 'rewardPackIds', label: 'Reward pack IDs', type: 'number-list' },
+    { path: 'rewardPackNames', label: 'Reward pack aliases', type: 'string-list' },
+    { path: 'deferChallengeLoad', label: 'Defer challenge load', type: 'boolean-inherit' },
+    { path: 'preSelectionCleanup', label: 'Pre-selection cleanup', type: 'boolean-inherit' },
+    { path: 'dailyCompletionLimit', label: 'Daily limit', type: 'integer' },
+    { path: 'maxCompletions', label: 'Maximum completions', type: 'integer' },
+  ]),
+  inventoryMixedUpgrade: descriptor('inventoryMixedUpgrade', 'Inventory mixed upgrade', [
+    { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
+    { path: 'requirements', label: 'Requirements', type: 'requirements', required: true },
+    { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
+    { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
+    { path: 'priorityPiles', label: 'Pile order', type: 'pile-list' },
+    { path: 'shortagePacks', label: 'Shortage packs', type: 'shortage-packs' },
+    { path: 'rewardPackIds', label: 'Reward pack IDs', type: 'number-list' },
+    { path: 'rewardPackNames', label: 'Reward pack aliases', type: 'string-list' },
+    { path: 'maxCompletions', label: 'Maximum completions', type: 'integer' },
+  ]),
+  commonGoldToRareUpgrade: descriptor('commonGoldToRareUpgrade', 'Common Gold upgrade', [
+    { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
+    { path: 'requirements', label: 'Requirements', type: 'requirements', required: true },
+    { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
+    { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
+    { path: 'priorityPiles', label: 'Pile order', type: 'pile-list' },
+    { path: 'primaryPiles', label: 'Primary pile order', type: 'pile-list' },
+    { path: 'clubFallbackPiles', label: 'Fallback pile order', type: 'pile-list' },
+    { path: 'rewardPackIds', label: 'Reward pack IDs', type: 'number-list' },
+    { path: 'rewardPackNames', label: 'Reward pack aliases', type: 'string-list' },
+    { path: 'maxCompletions', label: 'Maximum completions', type: 'integer' },
+  ]),
+  provisionPackCrafting: descriptor('provisionPackCrafting', 'Provision crafting', [
+    { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
+    { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
+    { path: 'preCraftPlayerPickLoopId', label: 'Pre-craft Pick Loop', type: 'pick-loop-reference' },
+    { path: 'preCraftPlayerPick', label: 'Pre-craft Pick binding', type: 'pick-binding' },
+    { path: 'craftingUpgrades', label: 'Crafting upgrades', type: 'upgrade-list', required: true },
+    { path: 'rounds', label: 'Provision packs', type: 'integer' },
+  ]),
+  provisionPackDualCrafting: descriptor('provisionPackDualCrafting', 'Dual provision crafting', [
+    { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
+    { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
+    { path: 'preCraftPlayerPickLoopId', label: 'Pre-craft Pick Loop', type: 'pick-loop-reference' },
+    { path: 'preCraftPlayerPick', label: 'Pre-craft Pick binding', type: 'pick-binding' },
+    { path: 'craftingUpgrades', label: 'Crafting upgrades', type: 'upgrade-list', required: true },
+    { path: 'rounds', label: 'Provision packs', type: 'integer' },
+  ]),
+  rarePackTo84Upgrade: descriptor('rarePackTo84Upgrade', 'Pack to upgrade', [
+    { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
+    { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
+    { path: 'rareUpgrade', label: 'Upgrade', type: 'upgrade', required: true },
+    { path: 'sourceExhaustedFallbackLoopId', label: 'Fallback Loop', type: 'loop-reference' },
+    { path: 'sourceExhaustedFallbackMaxCompletions', label: 'Fallback maximum completions', type: 'integer' },
+    { path: 'maxPacks', label: 'Maximum source packs', type: 'integer' },
+    { path: 'maxCompletions', label: 'Maximum completions', type: 'integer' },
+    { path: 'useRoundsAsCompletions', label: 'Use runtime rounds', type: 'boolean-inherit' },
+    { path: 'consumeAllSourcePacks', label: 'Consume all source packs', type: 'boolean-inherit' },
+  ]),
+  playerPickSbc: descriptor('playerPickSbc', 'Player Pick', [
+    { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
+    { path: 'sbcSetIds', label: 'SBC Set IDs', type: 'number-list' },
+    { path: 'pickItemNames', label: 'Pick item aliases', type: 'string-list', required: true },
+    { path: 'pickItemResourceIds', label: 'Pick resource IDs', type: 'number-list' },
+    { path: 'requirements', label: 'Requirements', type: 'requirements' },
+    { path: 'challengeRequirements', label: 'Challenge requirements', type: 'challenge-requirements' },
+    { path: 'pickCandidateCount', label: 'Candidates', type: 'integer' },
+    { path: 'pickCount', label: 'Selections', type: 'integer' },
+    { path: 'challengesPerPick', label: 'Challenges per Pick', type: 'integer' },
+    { path: 'maxCompletions', label: 'Maximum completions', type: 'integer' },
+    { path: 'exhaustSbcSet', label: 'Use all remaining completions', type: 'boolean-inherit' },
+    { path: 'setCompletionSafetyLimit', label: 'Set completion safety limit', type: 'integer' },
+    { path: 'pricePlatform', label: 'Price platform', type: 'price-platform' },
+  ]),
+  dailyRoutine: descriptor('dailyRoutine', 'Daily workflow', [
+    { path: 'steps', label: 'Workflow steps', type: 'workflow-steps', required: true },
+    { path: 'stepOverrides', label: 'Legacy step overrides', type: 'legacy-step-overrides' },
+    { path: 'openRewardPacks', label: 'Open reward packs', type: 'boolean-inherit' },
+  ], { routine: true }),
+  workflowRoutine: descriptor('workflowRoutine', 'Workflow', [
+    { path: 'steps', label: 'Workflow steps', type: 'workflow-steps', required: true },
+  ], { routine: true }),
+  fillAndVerifySbc: descriptor('fillAndVerifySbc', 'Fill SBC', [
+    { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
+    { path: 'requirements', label: 'Requirements', type: 'requirements' },
+    { path: 'ratingSbcFill', label: 'Rating solver', type: 'rating-fill' },
+    { path: 'priorityPiles', label: 'Pile order', type: 'pile-list' },
+    { path: 'maxSubmittedRating', label: 'Maximum submitted rating', type: 'rating' },
+    { path: 'maxNormalGoldSubmittedRating', label: 'Maximum normal Gold rating', type: 'rating' },
+    { path: 'requiredSpecialKind', label: 'Required special type', type: 'special-kind' },
+    { path: 'requiredSpecialMinRating', label: 'Required special minimum', type: 'rating' },
+    { path: 'autoTotwUpgrade', label: 'Automatic special recovery', type: 'auto-totw-upgrade' },
+    { path: 'autoFodderUpgrade', label: 'Automatic fodder recovery', type: 'auto-fodder-upgrade' },
+    { path: 'rewardPackIds', label: 'Reward pack IDs', type: 'number-list' },
+    { path: 'rewardPackNames', label: 'Reward pack aliases', type: 'string-list' },
+    { path: 'useRoundsAsCompletions', label: 'Use runtime rounds', type: 'boolean-inherit' },
+    { path: 'allowMultipleCompletions', label: 'Allow multiple completions', type: 'boolean-inherit' },
+    { path: 'inventoryFillFirst', label: 'Fill from inventory first', type: 'boolean-inherit' },
+    { path: 'requiredSpecialCount', label: 'Required special cards', type: 'integer' },
+    { path: 'allowedSpecialCount', label: 'Allowed special cards', type: 'integer' },
+    { path: 'specialRequirementAdd', label: 'Additional special requirement', type: 'special-requirement-control' },
+    { path: 'blockSpecial', label: 'Block unnecessary special cards', type: 'boolean-inherit' },
+    { path: 'blockTradeable', label: 'Block tradeable cards', type: 'boolean-inherit' },
+    { path: 'openRewardPacks', label: 'Open reward packs', type: 'boolean-inherit' },
+    { path: 'forceOpenRewardPacks', label: 'Force reward opening', type: 'boolean-inherit' },
+    { path: 'assumeTotwRewardPack', label: 'Assume TOTW reward', type: 'boolean-inherit' },
+    { path: 'protectedItemIds', label: 'Protected item IDs', type: 'number-list' },
+    { path: 'protectedDefinitionIds', label: 'Protected definition IDs', type: 'number-list' },
+    { path: 'protectedRepairMaxAttempts', label: 'Protected-card repair attempts', type: 'integer' },
+    { path: 'submitReadyRepairMaxAttempts', label: 'Submit-ready repair attempts', type: 'integer' },
+    { path: 'maxCompletions', label: 'Maximum completions', type: 'integer' },
+  ]),
+  inventoryExhaustion: descriptor('inventoryExhaustion', 'Inventory exhaustion', [
+    { path: 'stages', label: 'Upgrade stages', type: 'stage-list', required: true },
+    { path: 'openRewardPacksAtEnd', label: 'Open rewards at end', type: 'boolean-inherit' },
+    { path: 'rewardPackIds', label: 'Reward pack IDs', type: 'number-list' },
+    { path: 'rewardPackNames', label: 'Reward pack aliases', type: 'string-list' },
+  ]),
+});
+
+export const BUILDER_STRATEGY_OPTIONS = Object.freeze(LOOP_STRATEGIES.map((strategy) => ({
+  value: strategy,
+  label: BUILDER_STRATEGY_DESCRIPTORS[strategy]?.label || strategy,
+})));
+
+export function getBuilderStrategyDescriptor(strategy) {
+  return BUILDER_STRATEGY_DESCRIPTORS[strategy] || null;
+}
+
+export function getBuilderLoopFields(loopDef = {}) {
+  const common = BUILDER_COMMON_FIELDS.filter((field) => (
+    !field.strategies || field.strategies.includes(loopDef.strategy)
+  ));
+  return [...common, ...(getBuilderStrategyDescriptor(loopDef.strategy)?.fields || [])];
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPlayerPickDiscoverySession,
+  collectScannedPlayerPickLoopDefs,
   discoverPlayerPickSbcLoops,
   mergeScannedPlayerPickMetadata,
   parsePlayerPickSbcSnapshot,
@@ -11,6 +12,18 @@ import { validateLoopDef } from '../../src/config/loop-schema.js';
 import { loadFixture } from '../helpers/fixtures.js';
 
 describe('dynamic Player Pick SBC discovery', () => {
+  it('collects both new and configured-duplicate Pick definitions for Builder discovery', () => {
+    const fresh = { id: 'fresh-pick', strategy: 'playerPickSbc' };
+    const configured = { id: 'configured-pick', strategy: 'playerPickSbc' };
+
+    expect(collectScannedPlayerPickLoopDefs([
+      { status: 'supported', loop: fresh },
+      { status: 'duplicate', loop: null, discoveredLoop: configured },
+      { status: 'supported', loop: fresh },
+      { status: 'unsupported' },
+    ])).toEqual([fresh, configured]);
+  });
+
   it('reads Pick counts only from explicit fields or an official reward description prefix', () => {
     expect(readPlayerPickRewardCounts({ candidateCount: 5, selectionCount: 1 })).toEqual({
       candidateCount: 5, selectionCount: 1, source: 'fields',
