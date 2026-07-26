@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.16`
-- Git 基线：`1dbc7c1` FUTBIN recap links
+- Userscript 版本：`0.6.17`
+- Git 基线：`f6c038a` Compact help button placement
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -16,6 +16,8 @@
 `0.6.15` 发布记录：将 Dry Run 的安全边界下沉到共享事务。`openPackTransaction()` 在 Dry Run 仅查询并返回 planned receipt；`resolveUnassigned()` 仅返回路由计划且不执行移动或 overflow recovery；`submitSbcAttempt()` 保留保存前校验但不准备运行时访问、不保存、不重载、不提交。入口层将当前 Loop 的 Dry Run 状态传入开包和 Unassigned 路径，避免仅依赖各 Workflow 的分支约定。
 
 `0.6.16` 发布记录：共享 recap model 为每张球员卡生成 FUTBIN 名称搜索链接，Player Pick、Batch Open 与普通 Loop recap 都在 `price:` 后显示新标签 `FUTBIN` 链接。已有的显式 recap URL 保持优先；Runner 没有 FUTBIN 专属 card ID，因此明确使用球员名搜索，不伪造特殊卡详情页。链接采用 `noopener noreferrer`。
+
+`0.6.17` 发布记录：主面板的四个帮助入口统一紧贴所属标题；标题栏的 `?` 从右侧 `Options / L` 操作组移至 `Loop Runner` 标题后，Run options、Config 和 Log 的 `?` 也统一收紧为 18px 圆形按钮。帮助 topic、事件 ID 和弹窗内容保持不变。
 
 ## 1. 重构目标
 
@@ -552,6 +554,7 @@ Status: In Progress
 
 当前进度（2026-07-26）：
 
+- `0.6.17`（`f6c038a`）主面板帮助入口改为标题内紧凑布局，并由 `main-panel-view` 单测锁定标题/帮助按钮的同组结构和 18px 样式。完整 `npm run verify` 通过 91 个测试文件、567 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。
 - `0.6.16`（`1dbc7c1`）共享 recap model 增加 FUTBIN 名称搜索 URL，Player Pick UI 覆盖外链的新窗口与 `noopener noreferrer`。完整 `npm run verify` 通过 91 个测试文件、567 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。
 - `0.6.15`（`d03ecf7`）新增 `tests/contracts/dry-run-effects.test.js`。四条契约测试分别锁定 Dry Run 不会执行开包前 Unassigned 处理、开包/奖励处理、Unassigned 移动/overflow recovery，以及 SBC 的 runtime access、保存、重载、提交与后处理。完整 `npm run verify` 通过 91 个测试文件、566 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。
 - 本次不改变 Live 提交路径，也未把 FSU 填充误标为无副作用：现有入口层 Dry Run 分支继续在调用可能保存阵容的 FSU provider 前停止。共享事务契约负责兜住开包、Unassigned 和标准提交事务，后续新增 provider 时必须延续该规则。
