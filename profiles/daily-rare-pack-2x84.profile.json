@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "daily-rare-pack-2x84",
+  "name": "Daily + Rare Pack to 2x84+",
+  "description": "Runs the four built-in One-click Daily stages, then consumes matching Rare Gold source packs through the Daily Rare Pack to 2x84+ Loop.",
+  "preset": "daily-rare-pack-2x84",
+  "minimumRunnerVersion": "0.6.1",
+  "tags": ["official", "daily", "rare-gold", "2x84"]
+}

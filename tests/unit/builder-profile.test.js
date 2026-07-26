@@ -38,7 +38,7 @@ function config(overrides = {}) {
 }
 
 describe('Builder profiles', () => {
-  it('creates default and bronze/silver inventory-only starter profiles', () => {
+  it('creates the official starter profiles', () => {
     const base = config();
     base.loops.push(
       {
@@ -67,6 +67,7 @@ describe('Builder profiles', () => {
     expect(store.profiles.map((profile) => profile.id)).toEqual([
       BUILDER_STARTER_PROFILE_IDS.default,
       BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly,
+      BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84,
     ]);
     const inventoryOnly = store.profiles.find((profile) => profile.id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
     expect(inventoryOnly.savedConfig.loops.find((loop) => loop.id === 'base').inventoryMode).toBe('normal');
@@ -97,6 +98,38 @@ describe('Builder profiles', () => {
     for (const id of ['one-click-daily', 'one-click-daily-mvp', 'daily-rare', 'daily-rare-mvp']) {
       expect(modes.get(id), id).toBe('normal');
     }
+    expect(profile.savedConfig.loops.find((loop) => loop.id === 'one-click-daily').steps).toEqual([
+      'daily-bronze',
+      'daily-silver',
+      'daily-common',
+      'daily-rare',
+    ]);
+  });
+
+  it('adds the Rare Pack to 2x84+ stage only in its dedicated starter profile', () => {
+    const builtIns = {
+      loops: LOOP_DEFS,
+      recoveryRecipes: RECOVERY_RECIPES,
+      unassignedRecoveryPolicies: UNASSIGNED_RECOVERY_POLICIES,
+      defaultUnassignedRecoveryPolicyIds: DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
+    };
+    const store = createBuilderStore({ baseConfig: builtIns });
+    const defaultProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.default);
+    const inventoryProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
+    const rarePackProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
+    const workflow = (profile) => profile.savedConfig.loops.find((loop) => loop.id === 'one-click-daily');
+
+    expect(workflow(defaultProfile).steps).toEqual(['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare']);
+    expect(workflow(inventoryProfile).steps).toEqual(workflow(defaultProfile).steps);
+    expect(workflow(rarePackProfile)).toMatchObject({
+      steps: ['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare', 'daily-rare-pack-84'],
+      stepOverrides: {
+        'daily-rare-pack-84': {
+          useRoundsAsCompletions: false,
+          sourceExhaustedFallbackMaxCompletions: 1,
+        },
+      },
+    });
   });
 
   it('adds missing starter profiles without replacing an existing profile with the same id', () => {
@@ -107,6 +140,7 @@ describe('Builder profiles', () => {
     const normalized = normalizeBuilderStore(store, base);
     expect(normalized.profiles.find((profile) => profile.id === 'default').name).toBe('My Default');
     expect(normalized.profiles.map((profile) => profile.id)).toContain(BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
+    expect(normalized.profiles.map((profile) => profile.id)).toContain(BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
   });
 
   it('migrates an untouched legacy Inventory Only starter without overwriting customized copies', () => {
@@ -303,7 +337,11 @@ describe('Builder profiles', () => {
       profiles: [{ id: 'broken', draftConfig: { loops: 'invalid' } }],
     }, base);
     expect(normalized.activeProfileId).toBeNull();
-    expect(normalized.profiles).toHaveLength(2);
+    expect(normalized.profiles.map((profile) => profile.id)).toEqual([
+      BUILDER_STARTER_PROFILE_IDS.default,
+      BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly,
+      BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84,
+    ]);
     expect(normalized.profiles[0].draftConfig).toEqual(base);
   });
 });

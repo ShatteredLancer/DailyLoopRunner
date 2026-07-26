@@ -80,10 +80,13 @@ Each profile contains:
 
 Draft edits are auto-saved, but only an explicitly saved and validated revision can be activated. `lastKnownGood` and `activeDynamicBindings` are snapshots of the last explicit activation, so later Draft or Saved changes cannot leak into runtime during an automatic Pick rescan. Startup loads the active profile's last known good configuration. Corrupt or incompatible storage falls back to built-ins without partially applying a profile.
 
-Every store includes two starter profiles:
+Every store includes three starter profiles:
 
 - **Default**: follows the built-in configuration and inherits future built-in changes through rebase.
 - **Bronze/Silver Inventory Only**: sets `inventoryMode: "inventory-only"` on configurable Loops whose target or requirements consume bronze/silver players, including Daily Bronze, Daily Silver, and Daily Common. Other configurable Loops and container Workflows are explicitly set to `normal`, so this profile remains scoped even when the main-panel global Inventory only checkbox is enabled.
+- **Daily + Rare Pack to 2x84+**: keeps the four built-in One-click Daily stages, then appends `Daily Rare Pack to 2x84+ Loop` with source-pack exhaustion and at most one inventory fallback completion.
+
+Built-in, Default, and Bronze/Silver Inventory Only all keep One-click Daily at four stages. The standalone Rare Pack Loop remains available in every configuration.
 
 Existing stores receive missing starter profiles during normalization. A user profile with the same stable ID is never overwritten.
 

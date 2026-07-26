@@ -285,13 +285,7 @@
       id: "one-click-daily",
       name: "One-click Daily Loop",
       strategy: "dailyRoutine",
-      steps: ["daily-bronze", "daily-silver", "daily-common", "daily-rare", "daily-rare-pack-84"],
-      stepOverrides: {
-        "daily-rare-pack-84": {
-          useRoundsAsCompletions: false,
-          sourceExhaustedFallbackMaxCompletions: 1
-        }
-      },
+      steps: ["daily-bronze", "daily-silver", "daily-common", "daily-rare"],
       openRewardPacks: false
     },
     {
@@ -9459,7 +9453,8 @@
   var BUILDER_BUILT_IN_PROFILE_ID = "__built-in__";
   var BUILDER_STARTER_PROFILE_IDS = Object.freeze({
     default: "default",
-    bronzeSilverInventoryOnly: "starter-bronze-silver-inventory-only"
+    bronzeSilverInventoryOnly: "starter-bronze-silver-inventory-only",
+    dailyRarePack2x84: "starter-daily-rare-pack-2x84"
   });
   var LEGACY_INVENTORY_ONLY_PROFILE_ID = "starter-inventory-only";
   var ENTITY_COLLECTIONS = Object.freeze([
@@ -9674,6 +9669,25 @@
     });
     return validateLoopConfig(config, "Bronze/Silver Inventory Only starter profile");
   }
+  function dailyRarePack2x84StarterConfig(baseConfig) {
+    const config = clone(normalizeLoopConfig(baseConfig));
+    config.loops = config.loops.map((loop) => {
+      if (loop.id !== "one-click-daily") return loop;
+      const steps = (loop.steps || []).filter((step) => String(typeof step === "object" ? step?.loopId || "" : step) !== "daily-rare-pack-84");
+      return {
+        ...loop,
+        steps: [...steps, "daily-rare-pack-84"],
+        stepOverrides: {
+          ...loop.stepOverrides || {},
+          "daily-rare-pack-84": {
+            useRoundsAsCompletions: false,
+            sourceExhaustedFallbackMaxCompletions: 1
+          }
+        }
+      };
+    });
+    return validateLoopConfig(config, "Daily Rare Pack to 2x84+ starter profile");
+  }
   function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
     if (profile?.preset !== "inventory-only" || profile?.id !== LEGACY_INVENTORY_ONLY_PROFILE_ID || profile?.name !== "Inventory Only") return false;
     const legacyConfig = legacyInventoryOnlyStarterConfig(profile.baseConfig || baseConfig);
@@ -9696,6 +9710,14 @@
         preset: "bronze-silver-inventory-only",
         baseConfig: normalizedBase,
         config: bronzeSilverInventoryOnlyStarterConfig(normalizedBase),
+        now: options.now
+      }),
+      createBuilderProfile({
+        id: BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84,
+        name: "Daily + Rare Pack to 2x84+",
+        preset: "daily-rare-pack-2x84",
+        baseConfig: normalizedBase,
+        config: dailyRarePack2x84StarterConfig(normalizedBase),
         now: options.now
       })
     ];

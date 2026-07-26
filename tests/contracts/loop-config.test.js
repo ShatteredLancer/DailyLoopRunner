@@ -47,14 +47,8 @@ describe('loop configuration contracts', () => {
       'daily-silver',
       'daily-common',
       'daily-rare',
-      'daily-rare-pack-84',
     ]);
-    expect(builtInLoop.stepOverrides).toEqual({
-      'daily-rare-pack-84': {
-        useRoundsAsCompletions: false,
-        sourceExhaustedFallbackMaxCompletions: 1,
-      },
-    });
+    expect(builtInLoop.stepOverrides).toBeUndefined();
     expect(externalLoop.stepOverrides).toEqual(builtInLoop.stepOverrides);
   });
 

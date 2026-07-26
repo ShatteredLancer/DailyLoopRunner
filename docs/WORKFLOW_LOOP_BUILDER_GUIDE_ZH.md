@@ -39,6 +39,7 @@ flowchart LR
 - `Built-in`：停用 Active Profile，恢复脚本内置配置。
 - `Default`：可编辑的默认 Starter Profile。
 - `Bronze/Silver Inventory Only`：只让 Daily Bronze、Daily Silver、Daily Common 等使用铜/银材料的 Loop 使用库存模式；其他可配置 Loop 和父 Workflow 显式保持 `normal`。因此它是一个小范围持久策略，不等同于主面板 `Inventory only` 的全局运行时默认值。
+- `Daily + Rare Pack to 2x84+`：在 Built-in 的四步 One-click Daily 后追加 `Daily Rare Pack to 2x84+ Loop`；Built-in、Default 和铜银库存 Profile 本身都不会自动处理 Rare Gold 来源包。
 - 用户在 Builder 创建的其他 Profile。
 
 主面板只加载 Profile 的 Saved/last-known-good，不会应用 Builder 中尚未保存的 Draft。Builder 顶部的 Profile 下拉用于切换当前编辑对象；修改完成后仍需 Save/Activate，或先 Save 再回主面板选择该 Profile。

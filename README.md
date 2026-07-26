@@ -85,7 +85,7 @@ Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的
 - 数量输入：只对声明 `runtimeQuantity.mode: "user"` 的 Loop 显示，标签和默认值由该 Loop 定义。不限次 Player Pick、Daily Rare Pack to 2x84+、2x84+ Fodder、84+ TOTW 等表示目标完成数；Provision 显示 `Provision packs`；Validation 显示 `Validation runs`。One-click Daily、其内部 Daily 阶段、限次 Player Pick 和 84x10 不显示该输入。
 - `Refresh caches`：刷新当前可用的 Packs、Unassigned、Storage、Transfer 和 Club 缓存。
 - `Scan Picks`：重新扫描当前活动 Player Pick，并刷新 Builder 的动态 Pick 绑定。启动时会自动扫描，但活动刷新、重新登录后的绑定恢复和故障调查仍需要这个手动入口。
-- `Profile`：在 `Built-in`、`Default`、`Bronze/Silver Inventory Only` 和用户 Profile 之间切换。主面板只加载 Profile 的 Saved/last-known-good；Builder 中尚未保存的 Draft 不会进入运行时。`Bronze/Silver Inventory Only` 只让 Daily Bronze、Daily Silver、Daily Common 等使用铜银材料的 Loop 从库存完成，其余可配置 Workflow/Loop 强制保持正常模式；它不同于主面板 `Inventory only` 的全局运行时默认值。
+- `Profile`：在 `Built-in`、`Default`、`Bronze/Silver Inventory Only`、`Daily + Rare Pack to 2x84+` 和用户 Profile 之间切换。主面板只加载 Profile 的 Saved/last-known-good；Builder 中尚未保存的 Draft 不会进入运行时。`Bronze/Silver Inventory Only` 只让 Daily Bronze、Daily Silver、Daily Common 等使用铜银材料的 Loop 从库存完成，其余可配置 Workflow/Loop 强制保持正常模式；它不同于主面板 `Inventory only` 的全局运行时默认值。`Daily + Rare Pack to 2x84+` 在四步 One-click Daily 后追加 Rare Gold 来源包处理。
 - `Open Builder`：打开全屏可视化 Workflow/Loop Builder。普通编辑不再要求手写 JSON。
 
 主面板不再提供 `Validate JSON`、`Import JSON`、`Built-in loops` 或 `Preview Pick recap` 按钮。JSON 验证/导入仍保留在 Builder 的 JSON validation 页；切回内置配置统一通过 Profile 下拉的 `Built-in`。
@@ -177,20 +177,21 @@ Reward Alerts 只监听 Runner 自己打开的包，不监听用户手动打开�
 2. Daily Silver
 3. Daily Common
 4. Daily Rare
-5. Daily Rare Pack to 2x84+
+
+`Built-in`、`Default` 和 `Bronze/Silver Inventory Only` 都使用以上四步，不会自动打开 Rare Gold 来源包。选择 `Daily + Rare Pack to 2x84+` Profile 时，才会在第 4 步之后追加 `Daily Rare Pack to 2x84+ Loop`。
 
 每个 Daily 阶段会读取当前实际完成进度：
 
 - 已完成的阶段直接跳过。
 - 部分完成的阶段只运行剩余次数。
 - Daily 阶段不按固定 7 次重新执行，而是以 EA 返回的当日剩余次数为准。
-- `One-click Daily Loop` 不读取 `rounds`；终止条件是当前 Daily SBC/来源包已经耗尽，或流程触发安全停止。
+- `One-click Daily Loop` 不读取 `rounds`；终止条件是当前 Daily SBC 已经耗尽，或流程触发安全停止。专用 Rare Pack Profile 追加的第 5 步会继续处理匹配来源包。
 - 某阶段安全停止后，可以处理问题并重新点击同一个 One-click 继续。
 - `openRewardPacks` 默认关闭，避免一次性扩大 Unassigned 压力。
 
 Daily Bronze 和 Silver 会优先消费对应重复卡。Daily Common 严格使用 5 银加 5 铜；材料不足时按配置尝试对应补货包，最后才使用 Club。Daily Rare 严格使用普通金，并在库存不足时尝试 `11x Gold Players Pack`。
 
-启用全局 `Inventory only` 后，One-click 会把该模式传给所有声明支持它的子 Loop。Daily Bronze/Silver 保持原行为：不打开现有或新获得的铜/银球员包，也不受 `Open reward packs` 控制，直接从库存完成剩余次数。Daily Common/Rare 属于 Supply-and-Craft family，会跳过 shortage/source packs 并仅使用当前库存；库存不足时停止。Daily Rare Pack to 2x84+ 不支持该模式，仍保持自身来源包工作流。需要保留某个子 Loop 的正常模式时，在该子 Loop 配置 `inventoryMode: "normal"`。
+启用全局 `Inventory only` 后，One-click 会把该模式传给所有声明支持它的子 Loop。Daily Bronze/Silver 保持原行为：不打开现有或新获得的铜/银球员包，也不受 `Open reward packs` 控制，直接从库存完成剩余次数。Daily Common/Rare 属于 Supply-and-Craft family，会跳过 shortage/source packs 并仅使用当前库存；库存不足时停止。专用 Rare Pack Profile 中追加的 `Daily Rare Pack to 2x84+` 不支持该模式，仍保持自身来源包工作流。需要保留某个子 Loop 的正常模式时，在该子 Loop 配置 `inventoryMode: "normal"`。
 
 单项 Daily Loop 默认隐藏，仅供 One-click 内部调用；开启 `Show MVP loops` 后可看到单次 MVP 验证入口。
 
@@ -205,7 +206,7 @@ Daily Bronze 和 Silver 会优先消费对应重复卡。Daily Common 严格使�
 
 独立运行时，该 Loop 使用 `rounds` 作为本次 `2x84+` 的最低目标：先处理完当前所有匹配来源包，并把启动时已有重复卡及开包期间提交的 `2x84+` 计入目标；来源包耗尽后，再调用配置的 `2x84+ Fodder Loop` 从库存补足剩余次数。为清理刚开出的重复卡，包阶段允许实际完成数超过 `rounds`，但库存兜底不会继续超额。是否打开 `2x84+` 奖励由 `Open reward packs` 决定。
 
-作为 `One-click Daily Loop` 的内部步骤时，它不读取 UI `rounds`：仍会开完全部匹配来源包，但来源耗尽后最多只做一次库存兜底。独立的 `2x84+ Fodder Loop` 继续保留，适合完全不依赖 Daily 来源包时按 `rounds` 连续制作。
+在 `Daily + Rare Pack to 2x84+` Profile 中作为 One-click 的追加步骤时，它不读取 UI `rounds`：仍会开完全部匹配来源包，但来源耗尽后最多只做一次库存兜底。Built-in、Default 和 Bronze/Silver Inventory Only 不包含该步骤。独立的 `2x84+ Fodder Loop` 继续保留，适合完全不依赖 Daily 来源包时按 `rounds` 连续制作。
 
 ### Player Pick
 

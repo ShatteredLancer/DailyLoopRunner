@@ -213,13 +213,7 @@ export const LOOP_DEFS = [
     id: 'one-click-daily',
     name: 'One-click Daily Loop',
     strategy: 'dailyRoutine',
-    steps: ['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare', 'daily-rare-pack-84'],
-    stepOverrides: {
-      'daily-rare-pack-84': {
-        useRoundsAsCompletions: false,
-        sourceExhaustedFallbackMaxCompletions: 1,
-      },
-    },
+    steps: ['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare'],
     openRewardPacks: false,
   },
   {
