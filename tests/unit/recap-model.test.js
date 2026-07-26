@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   RECAP_TIER_COLORS,
+  createFutbinPlayerSearchUrl,
   createRecapModel,
   getRecapPage,
   normalizeRecapColor,
@@ -14,6 +15,19 @@ function rows(count) {
 }
 
 describe('shared recap model and tier themes', () => {
+  it('builds a FUTBIN player search URL and preserves an explicit recap URL', () => {
+    expect(createFutbinPlayerSearchUrl('Karius P7')).toBe('https://www.futbin.com/players?search=Karius%20P7');
+    expect(createFutbinPlayerSearchUrl('')).toBeNull();
+    const model = createRecapModel({
+      rows: [
+        { name: 'Bühl', rating: 89 },
+        { name: 'Gabriel', rating: 88, futbinUrl: 'https://example.test/player/gabriel' },
+      ],
+    });
+    expect(model.rows[0].futbinUrl).toBe('https://www.futbin.com/players?search=B%C3%BChl');
+    expect(model.rows[1].futbinUrl).toBe('https://example.test/player/gabriel');
+  });
+
   it.each([
     [0, 1, 0], [1, 1, 1], [14, 1, 14], [15, 1, 15], [16, 2, 15], [30, 2, 15], [31, 3, 15],
   ])('paginates %i rows into %i page(s)', (count, pages, firstPageRows) => {

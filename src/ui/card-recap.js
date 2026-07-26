@@ -87,6 +87,19 @@ function renderCardRow(dom, row, formatPrice) {
     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
   });
   element.appendChild(tags);
+  if (row.futbinUrl) {
+    const futbin = dom.create('a');
+    futbin.textContent = 'FUTBIN';
+    futbin.href = row.futbinUrl;
+    futbin.target = '_blank';
+    futbin.rel = 'noopener noreferrer';
+    futbin.title = `Search ${String(row.name || 'player')} on FUTBIN`;
+    applyStyles(futbin, {
+      color: theme.accent || '#8CB7FF', fontSize: '11px', fontWeight: '600', textDecoration: 'underline',
+      whiteSpace: 'nowrap', flex: '0 0 auto',
+    });
+    element.appendChild(futbin);
+  }
   return element;
 }
 

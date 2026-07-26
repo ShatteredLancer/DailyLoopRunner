@@ -101,6 +101,12 @@ describe('Player Pick recap UI', () => {
     expect(harness.created.find((element) => element.textContent === 'stopped: stopped by user')).toBeTruthy();
     expect(harness.created.find((element) => element.textContent.includes('price:80K'))).toBeTruthy();
     expect(harness.created.find((element) => element.textContent === '->CLUB')).toBeTruthy();
+    const futbin = harness.created.find((element) => element.tagName === 'a' && element.textContent === 'FUTBIN');
+    expect(futbin).toMatchObject({
+      href: 'https://www.futbin.com/players?search=Player%20B',
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    });
     expect(celebrate).toHaveBeenCalledWith(expect.anything(), 1);
     harness.created.find((element) => element.textContent === 'Close').click();
     await expect(promise).resolves.toBe(true);

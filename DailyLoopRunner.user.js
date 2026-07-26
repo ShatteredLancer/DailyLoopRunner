@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.15
+// @version      0.6.16
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -6750,6 +6750,10 @@
   var BASE_BACKGROUND = "#171B21";
   var DEFAULT_FOREGROUND = "#F4F6F8";
   var DEFAULT_MUTED = "#AAB4C2";
+  function createFutbinPlayerSearchUrl(name) {
+    const query2 = String(name || "").trim();
+    return query2 ? `https://www.futbin.com/players?search=${encodeURIComponent(query2)}` : null;
+  }
   var RECAP_TIER_COLORS = Object.freeze({
     bronze: Object.freeze({ label: "Bronze", accent: "#B7793E", background: "#45281C" }),
     silver: Object.freeze({ label: "Silver", accent: "#AEB7C2", background: "#46515F" }),
@@ -6875,7 +6879,11 @@
     });
   }
   function createRecapModel(input = {}) {
-    const rows = (input.rows || []).map((row, index) => Object.freeze({ ...row, order: Number(row.order ?? index) }));
+    const rows = (input.rows || []).map((row, index) => Object.freeze({
+      ...row,
+      futbinUrl: row.futbinUrl || createFutbinPlayerSearchUrl(row.name),
+      order: Number(row.order ?? index)
+    }));
     rows.sort(
       (a, b) => Number(b.rating || 0) - Number(a.rating || 0) || Number(b.special === true) - Number(a.special === true) || a.order - b.order
     );
@@ -13227,6 +13235,23 @@
       textOverflow: "ellipsis"
     });
     element.appendChild(tags);
+    if (row.futbinUrl) {
+      const futbin = dom.create("a");
+      futbin.textContent = "FUTBIN";
+      futbin.href = row.futbinUrl;
+      futbin.target = "_blank";
+      futbin.rel = "noopener noreferrer";
+      futbin.title = `Search ${String(row.name || "player")} on FUTBIN`;
+      applyStyles3(futbin, {
+        color: theme.accent || "#8CB7FF",
+        fontSize: "11px",
+        fontWeight: "600",
+        textDecoration: "underline",
+        whiteSpace: "nowrap",
+        flex: "0 0 auto"
+      });
+      element.appendChild(futbin);
+    }
     return element;
   }
   function showCardRecap(options = {}) {
@@ -14220,7 +14245,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.15",
+      version: "0.6.16",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
