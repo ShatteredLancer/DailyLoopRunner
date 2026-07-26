@@ -4,14 +4,16 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.10`
-- Git 基线：当前 `0.6.10` Dynamic SBC discovery and cache release
+- Userscript 版本：`0.6.15`
+- Git 基线：`d03ecf7` Dry Run shared effect contracts
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
 本文档是重构工作的状态来源。实施过程中应更新里程碑状态、验收记录和发现的问题，不在聊天记录或临时日志中维护另一套进度。
 
 `0.6.0` 发布记录：将完整 Workflow/Loop JSON 能力迁移为可视化 Builder，支持 Profile、Draft/Saved/Active 生命周期、内置 Override/Duplicate、Workflow Step Variant、Recovery 编辑、Dynamic Pick 绑定、Preview 和 JSON 兼容验证；修正新扫描 Pick 未进入 Dynamic Picks 页的问题，并增加中文图示操作指南。运行时继续使用既有配置校验、strategy dispatch 和安全事务边界。
+
+`0.6.15` 发布记录：将 Dry Run 的安全边界下沉到共享事务。`openPackTransaction()` 在 Dry Run 仅查询并返回 planned receipt；`resolveUnassigned()` 仅返回路由计划且不执行移动或 overflow recovery；`submitSbcAttempt()` 保留保存前校验但不准备运行时访问、不保存、不重载、不提交。入口层将当前 Loop 的 Dry Run 状态传入开包和 Unassigned 路径，避免仅依赖各 Workflow 的分支约定。
 
 ## 1. 重构目标
 
@@ -546,7 +548,11 @@ Status: In Progress
 
 回滚条件：无法稳定识别奖励 Pick、动态条件转换不完整，或扫描结果可能导致错误 SBC/奖励被提交或领取。
 
-当前进度（2026-07-19）：
+当前进度（2026-07-26）：
+
+- `0.6.15`（`d03ecf7`）新增 `tests/contracts/dry-run-effects.test.js`。四条契约测试分别锁定 Dry Run 不会执行开包前 Unassigned 处理、开包/奖励处理、Unassigned 移动/overflow recovery，以及 SBC 的 runtime access、保存、重载、提交与后处理。完整 `npm run verify` 通过 91 个测试文件、566 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。
+- 本次不改变 Live 提交路径，也未把 FSU 填充误标为无副作用：现有入口层 Dry Run 分支继续在调用可能保存阵容的 FSU provider 前停止。共享事务契约负责兜住开包、Unassigned 和标准提交事务，后续新增 provider 时必须延续该规则。
+- Live validation: 本次为事务安全加固，未额外在真实 EA Web App 执行 Dry Run/Live 抽样；后续浏览器回归应确认 Dry Run 日志只出现 planned/inspection，不出现开包、移动、保存或提交。
 
 - `0.6.1` 后续开发新增 `src/sbc/dynamic-sbc-cache.js` 和 `src/config/upgrade-discovery.js`，统一 Player Pick/Upgrade 候选索引、逐 SBC 指纹、24 小时 TTL、账号隔离 GM 缓存和缓存统计。进度变化只合并 live state，不触发结构重扫；Set/Category/Challenge/Reward/时间变化会重读对应 Challenge。
 - 主面板入口改为 `Scan SBCs`，提供 Incremental、Full rescan、Clear cache；Builder 页改为 `Dynamic SBCs`，绑定可按 Loop ID、Set ID、Pick resource ID 或 Pack ID 恢复。JSON 导入会保留动态 `playerPickSbc` 与 `fillAndVerifySbc` 绑定。
