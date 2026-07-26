@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.11
+// @version      0.6.12
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -177,6 +177,7 @@ import { createLogRenderer, formatLogHtml } from './ui/log-renderer.js';
 import { bindMainPanelCommands, hydrateMainPanelOptions } from './ui/main-panel-bindings.js';
 import { createMainPanelCommands } from './ui/main-panel-commands.js';
 import { createMainPanelGeometry } from './ui/main-panel-geometry.js';
+import { showMainPanelHelp } from './ui/main-panel-help.js';
 import {
   renderMainPanelLoopOptions,
   renderMainPanelProfileOptions,
@@ -276,7 +277,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.11',
+    version: '0.6.12',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -8832,6 +8833,12 @@ function updateLoopControls() {
       savePosition: (position) => {
         try { adapters.localStorage.setJson('fc-loop-panel-pos', position); } catch { }
       },
+      loadLogHeight: () => {
+        try { return adapters.localStorage.get('fc-loop-panel-log-height', null); } catch { return null; }
+      },
+      saveLogHeight: (height) => {
+        try { adapters.localStorage.set('fc-loop-panel-log-height', height); } catch { }
+      },
       onModeChange: renderLog,
     });
     state.workflowBuilder = createWorkflowLoopBuilder({
@@ -8861,6 +8868,7 @@ function updateLoopControls() {
       log,
       setPanelState,
       openBuilder: (tab) => state.workflowBuilder?.open(tab),
+      openHelp: (topic) => showMainPanelHelp({ dom: adapters.dom, topic }),
       selectProfile: (profileId) => state.workflowBuilder?.selectRuntimeProfile(profileId),
       renderProfiles: renderProfileSelect,
       updateLoopControls,

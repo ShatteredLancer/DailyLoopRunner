@@ -27,6 +27,10 @@ export function createMainPanelCommands(options = {}) {
       options.openBuilder?.('workflows');
       return true;
     },
+    openHelp(topic) {
+      options.openHelp?.(topic);
+      return true;
+    },
     savePickOptions(event) {
       options.savePickOptions?.(event);
       return true;

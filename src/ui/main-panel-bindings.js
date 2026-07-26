@@ -6,6 +6,13 @@ const PICK_OPTION_IDS = [
   'bronze-loop-pick-auto-threshold',
 ];
 
+const HELP_BUTTON_TOPICS = Object.freeze({
+  'bronze-loop-help-overview': 'overview',
+  'bronze-loop-help-run-options': 'run-options',
+  'bronze-loop-help-config': 'config',
+  'bronze-loop-help-log': 'log',
+});
+
 function required(panel, selector) {
   const element = panel?.querySelector?.(selector);
   if (!element) throw new Error(`Main panel control is missing: ${selector}`);
@@ -22,6 +29,9 @@ export function bindMainPanelCommands(options = {}) {
   select.addEventListener('change', (event) => commands.selectLoop?.(event.target?.value, event));
   required(panel, '#bronze-loop-profile-select').addEventListener('change', (event) => commands.selectProfile?.(event.target?.value, event));
   required(panel, '#bronze-loop-open-builder').addEventListener('click', (event) => commands.openBuilder?.(event));
+  Object.entries(HELP_BUTTON_TOPICS).forEach(([id, topic]) => {
+    required(panel, `#${id}`).addEventListener('click', (event) => commands.openHelp?.(topic, event));
+  });
   PICK_OPTION_IDS.forEach((id) => {
     required(panel, `#${id}`).addEventListener('change', (event) => commands.savePickOptions?.(event));
   });

@@ -112,6 +112,14 @@ describe('main panel command orchestration', () => {
     expect(success.commands.openBuilder()).toBe(false);
   });
 
+  it('opens help without blocking a running Loop', () => {
+    const openHelp = vi.fn();
+    const current = harness({ openHelp });
+    current.state.running = true;
+    expect(current.commands.openHelp('log')).toBe(true);
+    expect(openHelp).toHaveBeenCalledWith('log');
+  });
+
   it('does not start or overlap panel operations while another operation is active', async () => {
     const start = vi.fn();
     const openBatch = vi.fn();

@@ -46,10 +46,12 @@ export const MAIN_PANEL_STYLE = `
   }
   #bronze-loop-panel.icon-only .panel-body,
   #bronze-loop-panel.icon-only #bronze-loop-title,
+  #bronze-loop-panel.icon-only #bronze-loop-help-overview,
   #bronze-loop-panel.icon-only #bronze-loop-options-toggle { display: none; }
   #bronze-loop-panel.icon-only #bronze-loop-drag { width: 34px; height: 34px; margin: 0; justify-content: center; }
   #bronze-loop-drag { cursor: move; user-select: none; justify-content: space-between; }
   #bronze-loop-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bronze-loop-title-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
   #bronze-loop-panel .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
   #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; background: #222832; color: #fff; border: 1px solid #607089; }
   #bronze-loop-panel button:disabled { opacity: .45; cursor: default; }
@@ -64,6 +66,7 @@ export const MAIN_PANEL_STYLE = `
     font-weight: 700;
   }
   #bronze-loop-options-toggle { min-width: 58px; }
+  #bronze-loop-panel .bronze-loop-help-button { min-width: 22px; width: 22px; height: 22px; padding: 0; border-radius: 50%; font-weight: 700; line-height: 1; }
   #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; box-sizing: border-box; }
   #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
@@ -93,10 +96,13 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel.options-open #bronze-loop-options { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   #bronze-loop-panel.options-open #bronze-loop-latest { display: none; }
   #bronze-loop-options-scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
-  .bronze-loop-section { color: #9fb2c9; font-size: 11px; margin: 8px 0 6px; }
+  .bronze-loop-section-heading { display: flex; align-items: center; gap: 6px; margin: 8px 0 6px; }
+  .bronze-loop-section { color: #9fb2c9; font-size: 11px; }
   #bronze-loop-log {
-    flex: 0 1 110px;
+    flex: 0 0 auto;
+    height: 110px;
     min-height: 64px;
+    resize: vertical;
     overflow-x: auto;
     overflow-y: auto;
     white-space: pre-wrap;
@@ -125,8 +131,11 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
   return `
     <div class="row" id="bronze-loop-drag">
       <span id="bronze-loop-title">${title}</span>
-      <button id="bronze-loop-options-toggle" title="Options">Options</button>
-      <button id="bronze-loop-collapse" title="Compact">L</button>
+      <div class="bronze-loop-title-actions">
+        <button id="bronze-loop-help-overview" class="bronze-loop-help-button" type="button" title="Loop Runner guide" aria-label="Loop Runner guide">?</button>
+        <button id="bronze-loop-options-toggle" title="Options">Options</button>
+        <button id="bronze-loop-collapse" title="Compact">L</button>
+      </div>
     </div>
     <div class="panel-body">
       <div class="row"><select id="bronze-loop-select"></select></div>
@@ -139,7 +148,7 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
       <div id="bronze-loop-latest">Ready.</div>
       <div id="bronze-loop-options">
         <div id="bronze-loop-options-scroll">
-          <div class="bronze-loop-section">Run options</div>
+        <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Run options</div><button id="bronze-loop-help-run-options" class="bronze-loop-help-button" type="button" title="Explain run options" aria-label="Explain run options">?</button></div>
         <div class="row">
           <label title="Open reward packs automatically when a loop supports it">
             <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
@@ -172,12 +181,12 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
           <span id="bronze-loop-rounds-label">Rounds</span>
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
-        <div class="bronze-loop-section">Config</div>
+        <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Config</div><button id="bronze-loop-help-config" class="bronze-loop-help-button" type="button" title="Explain configuration" aria-label="Explain configuration">?</button></div>
           <div class="row bronze-loop-profile-row"><span>Profile</span><select id="bronze-loop-profile-select" title="Load a saved Builder Profile or restore built-in loops"></select></div>
           <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button></div>
           <div class="row"><span class="bronze-loop-option-summary">SBC scan</span><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental scan</option><option value="full">Full rescan</option><option value="clear">Clear cache + scan</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
         </div>
-        <div class="bronze-loop-section">Log</div>
+        <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Log</div><button id="bronze-loop-help-log" class="bronze-loop-help-button" type="button" title="Explain log controls and resizing" aria-label="Explain log controls and resizing">?</button></div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
         <div id="bronze-loop-log"></div>
       </div>

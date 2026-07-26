@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.11
+// @version      0.6.12
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -9349,6 +9349,12 @@
     "bronze-loop-pick-high-gold-threshold",
     "bronze-loop-pick-auto-threshold"
   ];
+  var HELP_BUTTON_TOPICS = Object.freeze({
+    "bronze-loop-help-overview": "overview",
+    "bronze-loop-help-run-options": "run-options",
+    "bronze-loop-help-config": "config",
+    "bronze-loop-help-log": "log"
+  });
   function required(panel, selector) {
     const element = panel?.querySelector?.(selector);
     if (!element) throw new Error(`Main panel control is missing: ${selector}`);
@@ -9362,6 +9368,9 @@
     select.addEventListener("change", (event) => commands.selectLoop?.(event.target?.value, event));
     required(panel, "#bronze-loop-profile-select").addEventListener("change", (event) => commands.selectProfile?.(event.target?.value, event));
     required(panel, "#bronze-loop-open-builder").addEventListener("click", (event) => commands.openBuilder?.(event));
+    Object.entries(HELP_BUTTON_TOPICS).forEach(([id, topic]) => {
+      required(panel, `#${id}`).addEventListener("click", (event) => commands.openHelp?.(topic, event));
+    });
     PICK_OPTION_IDS.forEach((id) => {
       required(panel, `#${id}`).addEventListener("change", (event) => commands.savePickOptions?.(event));
     });
@@ -9422,6 +9431,10 @@
       openBuilder() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
         options.openBuilder?.("workflows");
+        return true;
+      },
+      openHelp(topic) {
+        options.openHelp?.(topic);
         return true;
       },
       savePickOptions(event) {
@@ -9498,6 +9511,9 @@
     compact: Object.freeze({ width: 300, height: 178 }),
     options: Object.freeze({ width: 360, height: 620 })
   });
+  var DEFAULT_LOG_HEIGHT = 110;
+  var MIN_LOG_HEIGHT = 64;
+  var MAX_LOG_HEIGHT = 720;
   function viewportSize(getViewport) {
     const value = getViewport?.() || {};
     return {
@@ -9514,6 +9530,11 @@
       height: Math.min(Number(size.height), Math.max(180, Number(viewport.height) - 20))
     };
   }
+  function normalizeMainPanelLogHeight(value) {
+    const height = Number(value);
+    if (!Number.isFinite(height)) return DEFAULT_LOG_HEIGHT;
+    return Math.max(MIN_LOG_HEIGHT, Math.min(MAX_LOG_HEIGHT, Math.round(height)));
+  }
   function createMainPanelGeometry(options = {}) {
     const panel = options.panel;
     if (!panel?.querySelector || !panel?.classList) throw new TypeError("panel element is required");
@@ -9521,6 +9542,9 @@
     const savePosition = options.savePosition || (() => {
     });
     const loadPosition = options.loadPosition || (() => null);
+    const saveLogHeight = options.saveLogHeight || (() => {
+    });
+    const loadLogHeight = options.loadLogHeight || (() => null);
     const onModeChange = options.onModeChange || (() => {
     });
     const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
@@ -9544,6 +9568,19 @@
       panel.style.width = `${clamped.width}px`;
       panel.style.height = `${clamped.height}px`;
       return clamped;
+    }
+    function persistLogHeight() {
+      const log = panel.querySelector("#bronze-loop-log");
+      if (!log) return;
+      const height = Number(log.getBoundingClientRect?.().height || Number.parseFloat(log.style?.height));
+      if (!Number.isFinite(height)) return;
+      saveLogHeight(normalizeMainPanelLogHeight(height));
+    }
+    function restoreLogHeight() {
+      const log = panel.querySelector("#bronze-loop-log");
+      const saved = loadLogHeight();
+      if (!log || saved === null || saved === void 0) return;
+      log.style.height = `${normalizeMainPanelLogHeight(saved)}px`;
     }
     function updateOptionsButton() {
       const button3 = panel.querySelector("#bronze-loop-options-toggle");
@@ -9741,14 +9778,151 @@
         element.addEventListener("pointercancel", onUp);
       });
     }
+    function makeLogResizable() {
+      const log = panel.querySelector("#bronze-loop-log");
+      if (!log) return;
+      log.addEventListener("pointerup", persistLogHeight);
+    }
     restoreSavedPosition();
     resetSize();
+    restoreLogHeight();
     makeDraggable();
     makeResizable();
+    makeLogResizable();
     panel.querySelector("#bronze-loop-collapse")?.addEventListener("click", toggleIconOnly);
     panel.querySelector("#bronze-loop-options-toggle")?.addEventListener("click", toggleOptions);
     notifyModeChange();
-    return Object.freeze({ resetSize, restorePanel, toggleIconOnly, toggleOptions, persistPosition });
+    return Object.freeze({ resetSize, restorePanel, toggleIconOnly, toggleOptions, persistPosition, persistLogHeight });
+  }
+
+  // src/ui/main-panel-help.js
+  var MAIN_PANEL_HELP_TOPICS = Object.freeze([
+    Object.freeze({
+      id: "overview",
+      title: "Loop Runner guide",
+      items: Object.freeze([
+        Object.freeze(["Start and Stop", "Start runs the selected Loop. Stop waits for the next safe point before ending the run."]),
+        Object.freeze(["Batch Open", "Choose pack types from My Packs, save a batch, and open only the saved selection."]),
+        Object.freeze(["Options", "Show run settings, Builder Profiles, Dynamic SBC scan controls, and the full log."]),
+        Object.freeze(["Move and resize", "Drag the title bar to move the panel. Drag any panel edge or corner to resize the panel."])
+      ])
+    }),
+    Object.freeze({
+      id: "run-options",
+      title: "Run options",
+      items: Object.freeze([
+        Object.freeze(["Open reward packs", "Open reward packs after a Loop stage when that Loop supports automatic opening."]),
+        Object.freeze(["Inventory only", "For compatible Loops, use current inventory instead of opening supply or reward packs."]),
+        Object.freeze(["Reward alerts", "Highlight eligible high-rated special cards and optionally send desktop or ntfy alerts."]),
+        Object.freeze(["Player Pick controls", "Set normal-gold protection and the automatic Pick threshold. Open Picks at end queues matching Picks until the requested SBC count is complete."]),
+        Object.freeze(["Rounds", "Sets the requested run count for Loops that expose a repeat quantity."])
+      ])
+    }),
+    Object.freeze({
+      id: "config",
+      title: "Config",
+      items: Object.freeze([
+        Object.freeze(["Profile", "Load a saved Builder Profile or switch back to the built-in Loop set."]),
+        Object.freeze(["Open Builder", "Edit Workflows and Loops, including their steps, run settings, pack handling, and recovery rules."]),
+        Object.freeze(["Refresh caches", "Refresh available EA and FSU inventory data after changes made outside the Runner."]),
+        Object.freeze(["SBC scan", "Discover supported dynamic Player Pick and Upgrade SBCs. Incremental reuses cache, Full refreshes Challenge data, and Clear cache + scan rebuilds it."])
+      ])
+    }),
+    Object.freeze({
+      id: "log",
+      title: "Log",
+      items: Object.freeze([
+        Object.freeze(["Latest log", "The compact panel shows the newest status messages. Options shows the complete session log."]),
+        Object.freeze(["Copy, Clear, Save", "Copy the session log, clear the on-screen history, or download it as a log file."]),
+        Object.freeze(["Resize log", "Drag the lower-right corner of the full log vertically. The chosen height is saved locally for the next Web App visit."])
+      ])
+    })
+  ]);
+  function applyStyles(element, styles) {
+    Object.assign(element.style, styles);
+  }
+  function getMainPanelHelpTopics(topic = "overview") {
+    const requested = String(topic || "overview");
+    if (requested === "overview") return MAIN_PANEL_HELP_TOPICS;
+    const match = MAIN_PANEL_HELP_TOPICS.find((entry) => entry.id === requested);
+    return match ? [match] : MAIN_PANEL_HELP_TOPICS;
+  }
+  function showMainPanelHelp(options = {}) {
+    const dom = options.dom;
+    if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
+    dom.query?.("#bronze-loop-help-modal")?.remove?.();
+    const overlay = dom.create("div");
+    overlay.id = "bronze-loop-help-modal";
+    applyStyles(overlay, {
+      position: "fixed",
+      inset: "0",
+      zIndex: "1000001",
+      background: "rgba(0,0,0,.72)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "20px",
+      boxSizing: "border-box"
+    });
+    const dialog = dom.create("div");
+    applyStyles(dialog, {
+      width: "min(560px, 100%)",
+      maxHeight: "90vh",
+      overflow: "auto",
+      background: "#171b21",
+      color: "#f4f6f8",
+      border: "1px solid #65758a",
+      padding: "14px",
+      boxSizing: "border-box",
+      fontFamily: "Arial, sans-serif"
+    });
+    const title = dom.create("div");
+    title.textContent = options.topic && options.topic !== "overview" ? getMainPanelHelpTopics(options.topic)[0]?.title || "Loop Runner guide" : "Loop Runner guide";
+    applyStyles(title, { fontSize: "16px", fontWeight: "700", marginBottom: "12px" });
+    dialog.appendChild(title);
+    for (const section of getMainPanelHelpTopics(options.topic)) {
+      const heading = dom.create("div");
+      heading.textContent = section.title;
+      applyStyles(heading, { color: "#b8c3d2", fontSize: "12px", fontWeight: "700", margin: "12px 0 6px" });
+      const list = dom.create("div");
+      applyStyles(list, { display: "flex", flexDirection: "column", gap: "6px" });
+      for (const [label, description] of section.items) {
+        const row = dom.create("div");
+        applyStyles(row, { padding: "7px 8px", background: "#1d2229", lineHeight: "17px" });
+        const name = dom.create("span");
+        name.textContent = `${label}: `;
+        applyStyles(name, { color: "#f4f6f8", fontWeight: "700" });
+        const detail = dom.create("span");
+        detail.textContent = description;
+        applyStyles(detail, { color: "#b8c3d2" });
+        row.append(name, detail);
+        list.appendChild(row);
+      }
+      dialog.append(heading, list);
+    }
+    const actions = dom.create("div");
+    applyStyles(actions, { display: "flex", justifyContent: "flex-end", marginTop: "14px" });
+    const close = dom.create("button");
+    close.type = "button";
+    close.textContent = "Close";
+    applyStyles(close, {
+      minHeight: "30px",
+      padding: "0 12px",
+      cursor: "pointer",
+      color: "#fff",
+      background: "#2f6fde",
+      border: "1px solid #4f8cff"
+    });
+    const dismiss = () => overlay.remove?.();
+    close.addEventListener("click", dismiss);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) dismiss();
+    });
+    actions.appendChild(close);
+    dialog.appendChild(actions);
+    overlay.appendChild(dialog);
+    dom.appendToBody(overlay);
+    return overlay;
   }
 
   // src/ui/main-panel-state.js
@@ -9919,10 +10093,12 @@
   }
   #bronze-loop-panel.icon-only .panel-body,
   #bronze-loop-panel.icon-only #bronze-loop-title,
+  #bronze-loop-panel.icon-only #bronze-loop-help-overview,
   #bronze-loop-panel.icon-only #bronze-loop-options-toggle { display: none; }
   #bronze-loop-panel.icon-only #bronze-loop-drag { width: 34px; height: 34px; margin: 0; justify-content: center; }
   #bronze-loop-drag { cursor: move; user-select: none; justify-content: space-between; }
   #bronze-loop-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bronze-loop-title-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
   #bronze-loop-panel .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
   #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; background: #222832; color: #fff; border: 1px solid #607089; }
   #bronze-loop-panel button:disabled { opacity: .45; cursor: default; }
@@ -9937,6 +10113,7 @@
     font-weight: 700;
   }
   #bronze-loop-options-toggle { min-width: 58px; }
+  #bronze-loop-panel .bronze-loop-help-button { min-width: 22px; width: 22px; height: 22px; padding: 0; border-radius: 50%; font-weight: 700; line-height: 1; }
   #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; box-sizing: border-box; }
   #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
@@ -9966,10 +10143,13 @@
   #bronze-loop-panel.options-open #bronze-loop-options { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   #bronze-loop-panel.options-open #bronze-loop-latest { display: none; }
   #bronze-loop-options-scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
-  .bronze-loop-section { color: #9fb2c9; font-size: 11px; margin: 8px 0 6px; }
+  .bronze-loop-section-heading { display: flex; align-items: center; gap: 6px; margin: 8px 0 6px; }
+  .bronze-loop-section { color: #9fb2c9; font-size: 11px; }
   #bronze-loop-log {
-    flex: 0 1 110px;
+    flex: 0 0 auto;
+    height: 110px;
     min-height: 64px;
+    resize: vertical;
     overflow-x: auto;
     overflow-y: auto;
     white-space: pre-wrap;
@@ -9995,8 +10175,11 @@
     return `
     <div class="row" id="bronze-loop-drag">
       <span id="bronze-loop-title">${title}</span>
-      <button id="bronze-loop-options-toggle" title="Options">Options</button>
-      <button id="bronze-loop-collapse" title="Compact">L</button>
+      <div class="bronze-loop-title-actions">
+        <button id="bronze-loop-help-overview" class="bronze-loop-help-button" type="button" title="Loop Runner guide" aria-label="Loop Runner guide">?</button>
+        <button id="bronze-loop-options-toggle" title="Options">Options</button>
+        <button id="bronze-loop-collapse" title="Compact">L</button>
+      </div>
     </div>
     <div class="panel-body">
       <div class="row"><select id="bronze-loop-select"></select></div>
@@ -10009,7 +10192,7 @@
       <div id="bronze-loop-latest">Ready.</div>
       <div id="bronze-loop-options">
         <div id="bronze-loop-options-scroll">
-          <div class="bronze-loop-section">Run options</div>
+        <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Run options</div><button id="bronze-loop-help-run-options" class="bronze-loop-help-button" type="button" title="Explain run options" aria-label="Explain run options">?</button></div>
         <div class="row">
           <label title="Open reward packs automatically when a loop supports it">
             <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
@@ -10042,12 +10225,12 @@
           <span id="bronze-loop-rounds-label">Rounds</span>
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
-        <div class="bronze-loop-section">Config</div>
+        <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Config</div><button id="bronze-loop-help-config" class="bronze-loop-help-button" type="button" title="Explain configuration" aria-label="Explain configuration">?</button></div>
           <div class="row bronze-loop-profile-row"><span>Profile</span><select id="bronze-loop-profile-select" title="Load a saved Builder Profile or restore built-in loops"></select></div>
           <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button></div>
           <div class="row"><span class="bronze-loop-option-summary">SBC scan</span><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental scan</option><option value="full">Full rescan</option><option value="clear">Clear cache + scan</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
         </div>
-        <div class="bronze-loop-section">Log</div>
+        <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Log</div><button id="bronze-loop-help-log" class="bronze-loop-help-button" type="button" title="Explain log controls and resizing" aria-label="Explain log controls and resizing">?</button></div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
         <div id="bronze-loop-log"></div>
       </div>
@@ -12760,7 +12943,7 @@
   }
 
   // src/ui/player-pick-modal.js
-  function applyStyles(element, styles) {
+  function applyStyles2(element, styles) {
     Object.assign(element.style, styles);
   }
   function waitForManualPlayerPickSelection(options = {}) {
@@ -12780,7 +12963,7 @@
         callback(value);
       };
       overlay.id = "bronze-loop-pick-modal";
-      applyStyles(overlay, {
+      applyStyles2(overlay, {
         position: "fixed",
         inset: "0",
         zIndex: "100000",
@@ -12792,7 +12975,7 @@
         boxSizing: "border-box"
       });
       const dialog = options.dom.create("div");
-      applyStyles(dialog, {
+      applyStyles2(dialog, {
         width: "min(780px, 100%)",
         maxHeight: "90vh",
         overflow: "auto",
@@ -12805,18 +12988,18 @@
       });
       const title = options.dom.create("div");
       title.textContent = `Manual Player Pick: ${reason}`;
-      applyStyles(title, { fontWeight: "700", marginBottom: "8px" });
+      applyStyles2(title, { fontWeight: "700", marginBottom: "8px" });
       const hint = options.dom.create("div");
       hint.textContent = `Select exactly ${pickCount} player(s), then confirm.`;
-      applyStyles(hint, { color: "#b7c2d0", marginBottom: "12px" });
+      applyStyles2(hint, { color: "#b7c2d0", marginBottom: "12px" });
       const list = options.dom.create("div");
-      applyStyles(list, { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px" });
+      applyStyles2(list, { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px" });
       const selected2 = /* @__PURE__ */ new Set();
       const cards = [];
       const confirm = options.dom.create("button");
       confirm.textContent = "Confirm selection";
       confirm.disabled = true;
-      applyStyles(confirm, { marginTop: "14px", minHeight: "34px", padding: "0 14px" });
+      applyStyles2(confirm, { marginTop: "14px", minHeight: "34px", padding: "0 14px" });
       const refresh = () => {
         cards.forEach(({ card, candidate }) => {
           card.style.borderColor = selected2.has(candidate) ? "#64d77a" : "#536171";
@@ -12828,7 +13011,7 @@
         const card = options.dom.create("button");
         card.type = "button";
         card.textContent = options.describeCandidate(candidate);
-        applyStyles(card, {
+        applyStyles2(card, {
           minHeight: "68px",
           textAlign: "left",
           color: "#f3f5f7",
@@ -12870,7 +13053,7 @@
     blocked: "->BLOCKED",
     unknown: "->?"
   });
-  function applyStyles2(element, styles) {
+  function applyStyles3(element, styles) {
     Object.assign(element.style, styles);
   }
   function button(dom, text, title) {
@@ -12878,7 +13061,7 @@
     element.type = "button";
     element.textContent = text;
     if (title) element.title = title;
-    applyStyles2(element, {
+    applyStyles3(element, {
       minHeight: "30px",
       padding: "0 12px",
       background: "#2F6FDE",
@@ -12907,7 +13090,7 @@
   function renderCardRow(dom, row, formatPrice) {
     const theme = row.theme || {};
     const element = dom.create("div");
-    applyStyles2(element, {
+    applyStyles3(element, {
       minHeight: "38px",
       padding: "6px 8px",
       boxSizing: "border-box",
@@ -12921,7 +13104,7 @@
     });
     const rating = dom.create("span");
     rating.textContent = String(Number(row.rating || 0));
-    applyStyles2(rating, {
+    applyStyles3(rating, {
       minWidth: "34px",
       padding: "2px 5px",
       boxSizing: "border-box",
@@ -12935,7 +13118,7 @@
       flex: "0 0 auto"
     });
     const identity = dom.create("span");
-    applyStyles2(identity, {
+    applyStyles3(identity, {
       flex: "1 1 220px",
       minWidth: "0",
       display: "flex",
@@ -12945,7 +13128,7 @@
     });
     const name = dom.create("span");
     name.textContent = String(row.name || "Unknown player");
-    applyStyles2(name, {
+    applyStyles3(name, {
       fontWeight: "600",
       minWidth: "0",
       overflow: "hidden",
@@ -12956,19 +13139,19 @@
     if (row.sourceLabel) {
       const source = dom.create("span");
       source.textContent = row.sourceLabel;
-      applyStyles2(source, { color: theme.muted || "#AAB4C2", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
+      applyStyles3(source, { color: theme.muted || "#AAB4C2", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
       identity.appendChild(source);
     }
     element.append(rating, identity);
     if (row.destination) {
       const destination = dom.create("span");
       destination.textContent = DESTINATION_LABELS[row.destination] || String(row.destination);
-      applyStyles2(destination, { color: theme.accent || "#AAB4C2", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
+      applyStyles3(destination, { color: theme.accent || "#AAB4C2", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
       element.appendChild(destination);
     }
     const tags = dom.create("span");
     tags.textContent = rowTags(row, formatPrice);
-    applyStyles2(tags, {
+    applyStyles3(tags, {
       color: theme.muted || "#AAB4C2",
       fontSize: "11px",
       flex: "0 1 auto",
@@ -12992,7 +13175,7 @@
       let finished = false;
       const overlay = dom.create("div");
       overlay.id = model.modalId;
-      applyStyles2(overlay, {
+      applyStyles3(overlay, {
         position: "fixed",
         inset: "0",
         zIndex: "1000001",
@@ -13004,7 +13187,7 @@
         boxSizing: "border-box"
       });
       const dialog = dom.create("div");
-      applyStyles2(dialog, {
+      applyStyles3(dialog, {
         width: "min(720px, 100%)",
         maxHeight: "90vh",
         overflow: "auto",
@@ -13017,14 +13200,14 @@
       });
       const title = dom.create("div");
       title.textContent = model.title;
-      applyStyles2(title, { fontSize: "16px", fontWeight: "700", marginBottom: "5px" });
+      applyStyles3(title, { fontSize: "16px", fontWeight: "700", marginBottom: "5px" });
       const summary = dom.create("div");
       summary.textContent = model.summary;
-      applyStyles2(summary, { color: "#9AA6B8", marginBottom: "9px", fontSize: "12px" });
+      applyStyles3(summary, { color: "#9AA6B8", marginBottom: "9px", fontSize: "12px" });
       const reason = model.reason ? dom.create("div") : null;
       if (reason) {
         reason.textContent = `${model.status}: ${model.reason}`;
-        applyStyles2(reason, {
+        applyStyles3(reason, {
           color: model.status === "preserved" ? "#FFD27A" : "#E3A7A7",
           marginBottom: "10px",
           fontSize: "12px",
@@ -13035,9 +13218,9 @@
         });
       }
       const list = dom.create("div");
-      applyStyles2(list, { display: "flex", flexDirection: "column", gap: "6px" });
+      applyStyles3(list, { display: "flex", flexDirection: "column", gap: "6px" });
       const footer = dom.create("div");
-      applyStyles2(footer, {
+      applyStyles3(footer, {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -13047,7 +13230,7 @@
       });
       const previous = button(dom, "Previous", "Previous recap page");
       const pageLabel = dom.create("span");
-      applyStyles2(pageLabel, { color: "#AAB4C2", fontSize: "12px", flex: "1 1 auto", textAlign: "center" });
+      applyStyles3(pageLabel, { color: "#AAB4C2", fontSize: "12px", flex: "1 1 auto", textAlign: "center" });
       const next = button(dom, "Next", "Next recap page");
       const close = button(dom, "Close");
       const renderPage = () => {
@@ -13057,7 +13240,7 @@
         if (!page.rows.length) {
           const empty = dom.create("div");
           empty.textContent = "No player rows to display.";
-          applyStyles2(empty, { padding: "10px", color: "#9AA6B8", background: "#1D2229" });
+          applyStyles3(empty, { padding: "10px", color: "#9AA6B8", background: "#1D2229" });
           list.appendChild(empty);
         } else {
           page.rows.forEach((row) => list.appendChild(renderCardRow(dom, row, options.formatPrice)));
@@ -13324,7 +13507,7 @@
   }
 
   // src/ui/reward-highlight.js
-  function applyStyles3(element, styles) {
+  function applyStyles4(element, styles) {
     Object.assign(element.style, styles);
   }
   function positionStack(stack, panel, viewport = {}) {
@@ -13356,7 +13539,7 @@
     if (!stack) {
       stack = dom.create("div");
       stack.id = "bronze-loop-reward-highlight-stack";
-      applyStyles3(stack, {
+      applyStyles4(stack, {
         position: "fixed",
         zIndex: "1000000",
         display: "flex",
@@ -13370,7 +13553,7 @@
     }
     positionStack(stack, options.panel, options.viewport?.() || {});
     const toast = dom.create("div");
-    applyStyles3(toast, {
+    applyStyles4(toast, {
       position: "relative",
       overflow: "hidden",
       isolation: "isolate",
@@ -13387,29 +13570,29 @@
     });
     const title = dom.create("div");
     title.textContent = `${model.maxRating} Special Highlight`;
-    applyStyles3(title, { color: "#ffd54a", fontSize: "14px", fontWeight: "700", marginBottom: "3px" });
+    applyStyles4(title, { color: "#ffd54a", fontSize: "14px", fontWeight: "700", marginBottom: "3px" });
     const pack = dom.create("div");
     pack.textContent = model.pack?.name || model.purpose || "Opened pack";
-    applyStyles3(pack, { color: "#9fb2c9", fontSize: "11px", marginBottom: "6px" });
+    applyStyles4(pack, { color: "#9fb2c9", fontSize: "11px", marginBottom: "6px" });
     const list = dom.create("div");
-    applyStyles3(list, { display: "flex", flexDirection: "column", gap: "3px" });
+    applyStyles4(list, { display: "flex", flexDirection: "column", gap: "3px" });
     for (const card of model.cards.slice(0, 5)) {
       const row = dom.create("div");
       row.textContent = `${card.name} - ${card.rating}${card.duplicate ? " | duplicate" : ""}${card.tradeable ? " | tradeable" : ""}`;
-      applyStyles3(row, { fontSize: "12px", lineHeight: "16px", overflowWrap: "anywhere" });
+      applyStyles4(row, { fontSize: "12px", lineHeight: "16px", overflowWrap: "anywhere" });
       list.appendChild(row);
     }
     if (model.cards.length > 5) {
       const more = dom.create("div");
       more.textContent = `+${model.cards.length - 5} more`;
-      applyStyles3(more, { color: "#9fb2c9", fontSize: "11px" });
+      applyStyles4(more, { color: "#9fb2c9", fontSize: "11px" });
       list.appendChild(more);
     }
     const close = dom.create("button");
     close.type = "button";
     close.textContent = "x";
     close.title = "Dismiss highlight";
-    applyStyles3(close, {
+    applyStyles4(close, {
       position: "absolute",
       top: "4px",
       right: "5px",
@@ -13442,11 +13625,11 @@
   }
 
   // src/ui/reward-alert-settings.js
-  function applyStyles4(element, styles) {
+  function applyStyles5(element, styles) {
     Object.assign(element.style, styles);
   }
   function inputStyles(input) {
-    applyStyles4(input, {
+    applyStyles5(input, {
       width: "100%",
       minWidth: "0",
       height: "30px",
@@ -13460,16 +13643,16 @@
   }
   function field(dom, labelText, input) {
     const label = dom.create("label");
-    applyStyles4(label, { display: "grid", gridTemplateColumns: "140px minmax(0, 1fr)", alignItems: "center", gap: "10px" });
+    applyStyles5(label, { display: "grid", gridTemplateColumns: "140px minmax(0, 1fr)", alignItems: "center", gap: "10px" });
     const text = dom.create("span");
     text.textContent = labelText;
-    applyStyles4(text, { color: "#b8c3d2", fontSize: "12px" });
+    applyStyles5(text, { color: "#b8c3d2", fontSize: "12px" });
     label.append(text, input);
     return label;
   }
   function checkbox(dom, id, labelText, checked) {
     const label = dom.create("label");
-    applyStyles4(label, { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" });
+    applyStyles5(label, { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" });
     const input = dom.create("input");
     input.id = id;
     input.type = "checkbox";
@@ -13490,7 +13673,7 @@
     const initial = normalizeRewardAlertSettings(options.settings);
     const overlay = dom.create("div");
     overlay.id = "bronze-loop-reward-alert-modal";
-    applyStyles4(overlay, {
+    applyStyles5(overlay, {
       position: "fixed",
       inset: "0",
       zIndex: "1000001",
@@ -13502,7 +13685,7 @@
       boxSizing: "border-box"
     });
     const dialog = dom.create("div");
-    applyStyles4(dialog, {
+    applyStyles5(dialog, {
       width: "min(520px, 100%)",
       maxHeight: "90vh",
       overflow: "auto",
@@ -13515,9 +13698,9 @@
     });
     const title = dom.create("div");
     title.textContent = "Reward Alerts";
-    applyStyles4(title, { fontSize: "16px", fontWeight: "700", marginBottom: "12px" });
+    applyStyles5(title, { fontSize: "16px", fontWeight: "700", marginBottom: "12px" });
     const form = dom.create("div");
-    applyStyles4(form, { display: "flex", flexDirection: "column", gap: "10px" });
+    applyStyles5(form, { display: "flex", flexDirection: "column", gap: "10px" });
     const enabled = checkbox(dom, "bronze-loop-alert-enabled-modal", "Enable reward alerts", initial.enabled);
     const highlight = checkbox(dom, "bronze-loop-alert-highlight-enabled", "Show pack highlight", initial.highlightEnabled);
     const desktop = checkbox(dom, "bronze-loop-alert-desktop-enabled", "Desktop notification", initial.desktopEnabled);
@@ -13554,17 +13737,17 @@
       field(dom, "ntfy token", token)
     );
     const status = dom.create("div");
-    applyStyles4(status, { minHeight: "16px", marginTop: "10px", color: "#9fb2c9", fontSize: "11px" });
+    applyStyles5(status, { minHeight: "16px", marginTop: "10px", color: "#9fb2c9", fontSize: "11px" });
     const tests = dom.create("div");
-    applyStyles4(tests, { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" });
+    applyStyles5(tests, { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" });
     const actions = dom.create("div");
-    applyStyles4(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
+    applyStyles5(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
     const button3 = (id, text, primary = false) => {
       const value = dom.create("button");
       value.id = id;
       value.type = "button";
       value.textContent = text;
-      applyStyles4(value, {
+      applyStyles5(value, {
         minHeight: "30px",
         padding: "0 12px",
         cursor: "pointer",
@@ -13634,14 +13817,14 @@
   }
 
   // src/ui/batch-open-dialog.js
-  function applyStyles5(element, styles) {
+  function applyStyles6(element, styles) {
     Object.assign(element.style, styles);
   }
   function button2(dom, text, primary = false) {
     const value = dom.create("button");
     value.type = "button";
     value.textContent = text;
-    applyStyles5(value, {
+    applyStyles6(value, {
       minHeight: "30px",
       padding: "0 12px",
       cursor: "pointer",
@@ -13657,7 +13840,7 @@
     input.min = "1";
     input.max = "999";
     input.value = String(quantity);
-    applyStyles5(input, {
+    applyStyles6(input, {
       width: "70px",
       height: "30px",
       boxSizing: "border-box",
@@ -13674,7 +13857,7 @@
     dom.query?.("#bronze-loop-batch-open-modal")?.remove?.();
     const overlay = dom.create("div");
     overlay.id = "bronze-loop-batch-open-modal";
-    applyStyles5(overlay, {
+    applyStyles6(overlay, {
       position: "fixed",
       inset: "0",
       zIndex: "1000001",
@@ -13686,7 +13869,7 @@
       boxSizing: "border-box"
     });
     const dialog = dom.create("div");
-    applyStyles5(dialog, {
+    applyStyles6(dialog, {
       width: "min(700px, 100%)",
       maxHeight: "90vh",
       overflow: "auto",
@@ -13699,22 +13882,22 @@
     });
     const title = dom.create("div");
     title.textContent = "Batch Open Packs";
-    applyStyles5(title, { fontSize: "16px", fontWeight: "700" });
+    applyStyles6(title, { fontSize: "16px", fontWeight: "700" });
     const note = dom.create("div");
     note.textContent = "Choose pack types and quantities. The saved list is reused next time; unavailable remembered types are skipped.";
-    applyStyles5(note, { color: "#9aa6b8", fontSize: "11px", margin: "6px 0 10px" });
+    applyStyles6(note, { color: "#9aa6b8", fontSize: "11px", margin: "6px 0 10px" });
     const status = dom.create("div");
-    applyStyles5(status, { minHeight: "16px", color: "#9fb2c9", fontSize: "11px", marginTop: "8px" });
+    applyStyles6(status, { minHeight: "16px", color: "#9fb2c9", fontSize: "11px", marginTop: "8px" });
     const availableTitle = dom.create("div");
     availableTitle.textContent = "My Packs";
-    applyStyles5(availableTitle, { color: "#b8c3d2", fontSize: "12px", fontWeight: "700", marginBottom: "6px" });
+    applyStyles6(availableTitle, { color: "#b8c3d2", fontSize: "12px", fontWeight: "700", marginBottom: "6px" });
     const availableList = dom.create("div");
-    applyStyles5(availableList, { display: "flex", flexDirection: "column", gap: "5px", marginBottom: "12px" });
+    applyStyles6(availableList, { display: "flex", flexDirection: "column", gap: "5px", marginBottom: "12px" });
     const planTitle = dom.create("div");
     planTitle.textContent = "Batch list";
-    applyStyles5(planTitle, { color: "#b8c3d2", fontSize: "12px", fontWeight: "700", marginBottom: "6px" });
+    applyStyles6(planTitle, { color: "#b8c3d2", fontSize: "12px", fontWeight: "700", marginBottom: "6px" });
     const planList = dom.create("div");
-    applyStyles5(planList, { display: "flex", flexDirection: "column", gap: "5px" });
+    applyStyles6(planList, { display: "flex", flexDirection: "column", gap: "5px" });
     let snapshot = options.snapshot || { total: 0, groups: [] };
     let plan = normalizeBatchOpenPlan(options.plan);
     const notifyPlanChange = () => options.onPlanChange?.(plan);
@@ -13731,18 +13914,18 @@
       const selectedKeys = new Set(plan.entries.map(batchOpenEntryKey));
       for (const group of snapshot.groups || []) {
         const row = dom.create("div");
-        applyStyles5(row, { position: "relative", display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
+        applyStyles6(row, { position: "relative", display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
         const label = dom.create("span");
         label.textContent = `${group.name} (#${group.id || "?"}) x${group.count}`;
-        applyStyles5(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        applyStyles6(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
         const selected2 = selectedKeys.has(batchOpenEntryKey({ packId: group.id, packName: group.name }));
         const addMenu = dom.create("div");
-        applyStyles5(addMenu, { position: "relative", flex: "0 0 auto" });
+        applyStyles6(addMenu, { position: "relative", flex: "0 0 auto" });
         const add = button2(dom, selected2 ? "Added v" : "Add v");
         add.setAttribute?.("aria-label", `Add ${group.name} to batch`);
         add.setAttribute?.("aria-expanded", "false");
         const menu = dom.create("div");
-        applyStyles5(menu, {
+        applyStyles6(menu, {
           display: "none",
           position: "absolute",
           right: "0",
@@ -13766,7 +13949,7 @@
         const addOne = button2(dom, selected2 ? "Set to 1" : "Add 1");
         const addAll = button2(dom, `${selected2 ? "Set to all" : "Add all"} (${group.count})`);
         for (const option of [addOne, addAll]) {
-          applyStyles5(option, { display: "block", width: "100%", minWidth: "0", textAlign: "left", border: "0" });
+          applyStyles6(option, { display: "block", width: "100%", minWidth: "0", textAlign: "left", border: "0" });
         }
         addOne.addEventListener("click", () => setQuantity(1, "fixed"));
         addAll.addEventListener("click", () => setQuantity(Math.max(1, Number(group.count) || 1), "all"));
@@ -13783,7 +13966,7 @@
       if (!(snapshot.groups || []).length) {
         const empty = dom.create("div");
         empty.textContent = "No packs found. Use Scan My Packs to refresh.";
-        applyStyles5(empty, { color: "#9aa6b8", padding: "8px" });
+        applyStyles6(empty, { color: "#9aa6b8", padding: "8px" });
         availableList.appendChild(empty);
       }
       planList.textContent = "";
@@ -13793,13 +13976,13 @@
         row.dataset.packId = entry.packId ? String(entry.packId) : "";
         row.dataset.packName = entry.packName;
         row.dataset.quantityMode = entry.quantityMode;
-        applyStyles5(row, { display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
+        applyStyles6(row, { display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
         const label = dom.create("span");
         label.textContent = `${entry.packName || `Pack #${entry.packId}`} (#${entry.packId || "?"})`;
-        applyStyles5(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        applyStyles6(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
         const availability = dom.create("span");
         availability.textContent = entry.available ? `${entry.quantityMode === "all" ? "all: " : ""}${entry.available} available` : "unavailable";
-        applyStyles5(availability, { color: entry.available ? "#8fd19e" : "#e3a7a7", fontSize: "11px", flex: "0 0 auto" });
+        applyStyles6(availability, { color: entry.available ? "#8fd19e" : "#e3a7a7", fontSize: "11px", flex: "0 0 auto" });
         const quantity = quantityInput(dom, entry.effectiveQuantity);
         quantity.setAttribute?.("aria-label", `Quantity for ${entry.packName}`);
         quantity.disabled = entry.quantityMode === "all";
@@ -13822,17 +14005,17 @@
       if (!rows.length) {
         const empty = dom.create("div");
         empty.textContent = "No pack types in the batch list.";
-        applyStyles5(empty, { color: "#9aa6b8", padding: "8px" });
+        applyStyles6(empty, { color: "#9aa6b8", padding: "8px" });
         planList.appendChild(empty);
       }
     };
     const toolbar = dom.create("div");
-    applyStyles5(toolbar, { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
+    applyStyles6(toolbar, { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
     const scan = button2(dom, "Scan My Packs");
     const preview = button2(dom, "Preview recap");
     toolbar.append(scan, preview);
     const actions = dom.create("div");
-    applyStyles5(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
+    applyStyles6(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
     const cancel = button2(dom, "Cancel");
     const start = button2(dom, "Start batch", true);
     actions.append(cancel, start);
@@ -13971,7 +14154,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.11",
+      version: "0.6.12",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -21652,6 +21835,19 @@
           } catch {
           }
         },
+        loadLogHeight: () => {
+          try {
+            return adapters.localStorage.get("fc-loop-panel-log-height", null);
+          } catch {
+            return null;
+          }
+        },
+        saveLogHeight: (height) => {
+          try {
+            adapters.localStorage.set("fc-loop-panel-log-height", height);
+          } catch {
+          }
+        },
         onModeChange: renderLog
       });
       state.workflowBuilder = createWorkflowLoopBuilder({
@@ -21685,6 +21881,7 @@
         log,
         setPanelState,
         openBuilder: (tab) => state.workflowBuilder?.open(tab),
+        openHelp: (topic) => showMainPanelHelp({ dom: adapters.dom, topic }),
         selectProfile: (profileId) => state.workflowBuilder?.selectRuntimeProfile(profileId),
         renderProfiles: renderProfileSelect,
         updateLoopControls,

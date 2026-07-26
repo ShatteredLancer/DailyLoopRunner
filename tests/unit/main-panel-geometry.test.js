@@ -3,6 +3,7 @@ import {
   clampMainPanelDefaultSize,
   createMainPanelGeometry,
   getMainPanelDefaultSize,
+  normalizeMainPanelLogHeight,
 } from '../../src/ui/main-panel-geometry.js';
 
 function classList(initial = []) {
@@ -40,6 +41,10 @@ function harness(options = {}) {
     ['#bronze-loop-drag', element()],
     ...['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map((dir) => [`#bronze-loop-resize-${dir}`, element()]),
   ]);
+  const log = element();
+  log.style = {};
+  log.getBoundingClientRect = () => ({ height: Number.parseFloat(log.style.height) || 110 });
+  controls.set('#bronze-loop-log', log);
   const panel = {
     classList: classList(),
     dataset: {},
@@ -55,6 +60,7 @@ function harness(options = {}) {
     },
   };
   const saved = [];
+  const savedLogHeights = [];
   const modes = [];
   const scheduled = [];
   const geometry = createMainPanelGeometry({
@@ -62,10 +68,12 @@ function harness(options = {}) {
     getViewport: () => ({ width: 1200, height: 800 }),
     loadPosition: () => options.savedPosition || null,
     savePosition: (position) => saved.push(position),
+    loadLogHeight: () => options.savedLogHeight ?? null,
+    saveLogHeight: (height) => savedLogHeights.push(height),
     onModeChange: (mode) => modes.push(mode),
     schedule: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; },
   });
-  return { panel, controls, geometry, saved, modes, scheduled };
+  return { panel, controls, geometry, saved, savedLogHeights, modes, scheduled };
 }
 
 function pointerEvent(values = {}) {
@@ -155,5 +163,16 @@ describe('main panel geometry', () => {
     southeast.emit('pointerup', pointerEvent({ clientX: 100, clientY: 100 }));
     expect(panel.style.width).toBe('360px');
     expect(panel.style.height).toBe('620px');
+  });
+
+  it('restores and persists an independently resized full log height', () => {
+    const { controls, savedLogHeights } = harness({ savedLogHeight: 236 });
+    const log = controls.get('#bronze-loop-log');
+    expect(log.style.height).toBe('236px');
+    log.style.height = '284px';
+    log.emit('pointerup', pointerEvent());
+    expect(savedLogHeights).toEqual([284]);
+    expect(normalizeMainPanelLogHeight(10)).toBe(64);
+    expect(normalizeMainPanelLogHeight(9999)).toBe(720);
   });
 });

@@ -5,6 +5,10 @@ const IDS = [
   'bronze-loop-select',
   'bronze-loop-profile-select',
   'bronze-loop-open-builder',
+  'bronze-loop-help-overview',
+  'bronze-loop-help-run-options',
+  'bronze-loop-help-config',
+  'bronze-loop-help-log',
   'bronze-loop-pick-protect-high-gold',
   'bronze-loop-pick-auto-below-90',
   'bronze-loop-pick-open-at-end',
@@ -75,7 +79,7 @@ describe('main panel bindings', () => {
   it('binds every command control and forwards the selected loop id', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
-      'selectLoop', 'selectProfile', 'openBuilder', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
+      'selectLoop', 'selectProfile', 'openBuilder', 'openHelp', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
       'refresh', 'scanPicks', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
@@ -105,6 +109,15 @@ describe('main panel bindings', () => {
     ]) {
       controls.get(id).emit(event);
       expect(commands[command], id).toHaveBeenCalled();
+    }
+    for (const [id, topic] of [
+      ['bronze-loop-help-overview', 'overview'],
+      ['bronze-loop-help-run-options', 'run-options'],
+      ['bronze-loop-help-config', 'config'],
+      ['bronze-loop-help-log', 'log'],
+    ]) {
+      controls.get(id).emit('click');
+      expect(commands.openHelp).toHaveBeenCalledWith(topic, expect.any(Object));
     }
     controls.get('bronze-loop-pick-protect-high-gold').emit('change');
     controls.get('bronze-loop-pick-auto-threshold').emit('change');

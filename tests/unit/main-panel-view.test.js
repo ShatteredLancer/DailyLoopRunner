@@ -16,6 +16,10 @@ describe('main panel view template', () => {
       'bronze-loop-batch-open',
       'bronze-loop-options-toggle',
       'bronze-loop-collapse',
+      'bronze-loop-help-overview',
+      'bronze-loop-help-run-options',
+      'bronze-loop-help-config',
+      'bronze-loop-help-log',
       'bronze-loop-latest',
       'bronze-loop-options',
       'bronze-loop-options-scroll',
@@ -90,8 +94,10 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('overflow-wrap: anywhere;');
     expect(MAIN_PANEL_STYLE).toContain('overflow-y: auto;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-log {');
-    expect(MAIN_PANEL_STYLE).toContain('flex: 0 1 110px;');
+    expect(MAIN_PANEL_STYLE).toContain('flex: 0 0 auto;');
+    expect(MAIN_PANEL_STYLE).toContain('height: 110px;');
     expect(MAIN_PANEL_STYLE).toContain('min-height: 64px;');
+    expect(MAIN_PANEL_STYLE).toContain('resize: vertical;');
     expect(MAIN_PANEL_STYLE).toContain('scrollbar-gutter: stable;');
     expect(MAIN_PANEL_STYLE).toContain('overscroll-behavior: contain;');
   });

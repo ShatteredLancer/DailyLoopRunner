@@ -2,6 +2,9 @@ const DEFAULT_SIZES = Object.freeze({
   compact: Object.freeze({ width: 300, height: 178 }),
   options: Object.freeze({ width: 360, height: 620 }),
 });
+const DEFAULT_LOG_HEIGHT = 110;
+const MIN_LOG_HEIGHT = 64;
+const MAX_LOG_HEIGHT = 720;
 
 function viewportSize(getViewport) {
   const value = getViewport?.() || {};
@@ -22,12 +25,20 @@ export function clampMainPanelDefaultSize(size, viewport) {
   };
 }
 
+export function normalizeMainPanelLogHeight(value) {
+  const height = Number(value);
+  if (!Number.isFinite(height)) return DEFAULT_LOG_HEIGHT;
+  return Math.max(MIN_LOG_HEIGHT, Math.min(MAX_LOG_HEIGHT, Math.round(height)));
+}
+
 export function createMainPanelGeometry(options = {}) {
   const panel = options.panel;
   if (!panel?.querySelector || !panel?.classList) throw new TypeError('panel element is required');
   const getViewport = options.getViewport || (() => ({ width: 0, height: 0 }));
   const savePosition = options.savePosition || (() => {});
   const loadPosition = options.loadPosition || (() => null);
+  const saveLogHeight = options.saveLogHeight || (() => {});
+  const loadLogHeight = options.loadLogHeight || (() => null);
   const onModeChange = options.onModeChange || (() => {});
   const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
 
@@ -51,6 +62,21 @@ export function createMainPanelGeometry(options = {}) {
     panel.style.width = `${clamped.width}px`;
     panel.style.height = `${clamped.height}px`;
     return clamped;
+  }
+
+  function persistLogHeight() {
+    const log = panel.querySelector('#bronze-loop-log');
+    if (!log) return;
+    const height = Number(log.getBoundingClientRect?.().height || Number.parseFloat(log.style?.height));
+    if (!Number.isFinite(height)) return;
+    saveLogHeight(normalizeMainPanelLogHeight(height));
+  }
+
+  function restoreLogHeight() {
+    const log = panel.querySelector('#bronze-loop-log');
+    const saved = loadLogHeight();
+    if (!log || saved === null || saved === undefined) return;
+    log.style.height = `${normalizeMainPanelLogHeight(saved)}px`;
   }
 
   function updateOptionsButton() {
@@ -260,13 +286,21 @@ export function createMainPanelGeometry(options = {}) {
     });
   }
 
+  function makeLogResizable() {
+    const log = panel.querySelector('#bronze-loop-log');
+    if (!log) return;
+    log.addEventListener('pointerup', persistLogHeight);
+  }
+
   restoreSavedPosition();
   resetSize();
+  restoreLogHeight();
   makeDraggable();
   makeResizable();
+  makeLogResizable();
   panel.querySelector('#bronze-loop-collapse')?.addEventListener('click', toggleIconOnly);
   panel.querySelector('#bronze-loop-options-toggle')?.addEventListener('click', toggleOptions);
   notifyModeChange();
 
-  return Object.freeze({ resetSize, restorePanel, toggleIconOnly, toggleOptions, persistPosition });
+  return Object.freeze({ resetSize, restorePanel, toggleIconOnly, toggleOptions, persistPosition, persistLogHeight });
 }
