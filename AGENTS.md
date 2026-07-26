@@ -456,6 +456,10 @@ UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文
 
 Workflow/Loop Builder 的完整设计与阶段状态见 `docs/WORKFLOW_LOOP_BUILDER.md`。Builder Profile、草稿、override、冲突和动态绑定只能存在于 `src/config/builder-*` 与 `src/ui/workflow-loop-builder*`；runner、workflow 和 EA Adapter 仍只接受 `loop-schema.js` 的物化配置。Raw JSON 只允许验证、导入和导出，不得恢复主面板直接执行 JSON 的入口。Draft 可以处于暂时无效状态并跨重载保留，但启动和 Activate 只能使用完整验证的 last-known-good。动态 Pick 持久化后必须先标记 unavailable，只有本次只读扫描按稳定 Set/Reward identity 刷新成功才可物化；禁止把上次快照作为静态 Loop 静默执行。
 
+主面板 Profile 选择器只能激活 Profile 的 Saved/last-known-good，不得隐式保存或应用 Draft。内置 Starter Profile 在 Store 归一化时只补缺，不得覆盖同 ID 的现有用户 Profile。`Bronze/Silver Inventory Only` Starter 只能把使用铜/银 `targetDuplicate` 或 requirements 的 supported Loop 设为 `inventory-only`，并把其余 supported/container Loop 显式设为 `normal`，使它与主面板全局 `Inventory only` 区分；不得给 unsupported/intrinsic strategy 写入非法配置。旧 `starter-inventory-only` 仅在保持原始名称、preset 和未修改配置时自动迁移，用户自定义副本必须保留。主面板保留 `Refresh caches` 和 `Scan Picks` 作为缓存恢复与动态绑定刷新入口；JSON 验证/导入和 recap 模拟预览只放在 Builder/开发入口，不恢复为主面板按钮。
+
+可发布 Profile 的源目录固定为 `profiles/`。每个 `*.profile.json` 文件名必须与 kebab-case `id` 一致，且只能二选一引用官方 `preset` 或提供完整 `config`；新增文件必须通过 `npm run check:profiles`，并由 `npm run build:profiles` 生成 `dist/profiles/*.loops.json` 和 manifest。禁止上传带 `discovered`、`discoveryIdentity` 或 `discovered-player-pick-*` 的动态 Pick 快照。`.github/workflows/release-assets.yml` 负责在 Release 发布时上传 userscript、完整 Loop 配置和 `DailyLoopRunner.profiles.zip`；Profile-only 合并到 `main` 时仅在最新 Release 与当前 package 版本一致的情况下覆盖 Profile ZIP/manifest，避免把未发布代码生成的 Profile 附到旧版本。
+
 Reward Alerts 的三个测试入口必须保持解耦：Preview 只展示本地 Toast/烟花，不调用 `GM_notification` 或网络；Desktop test 实际调用本机系统通知；ntfy test 实际发送远程测试消息。不要为了减少按钮数量把真实通知副作用合并进 Preview。
 
 Player Pick、普通 Loop 与 Batch Open recap 必须共用同一套单卡列表、分页和 tier 主题，不得分别维护颜色判断。每页固定最多 20 条，Preview 和 stopped/preserved/blocked reason 都必须走真实通用 renderer。普通卡配色是稳定产品约束：Bronze 黄铜 `#B7793E` 配红棕背景 `#45281C`、Silver 银灰 `#AEB7C2` 配冷灰蓝背景 `#46515F`、Common Gold 暗金 `#A88638` 配旧金背景 `#302B22`、Rare Gold 85 及以下亮金 `#D6AA35` 配橄榄金背景 `#493B15`、Rare Gold 86-88 琥珀金 `#F0C34E` 配琥珀背景 `#604A12`、Rare Gold 89+ 象牙金 `#F3D98B` 配香槟背景 `#5F563A`。每行评分必须使用对应 accent 的实色徽标和自动高对比文字，不能只依赖深色行背景或左侧细边表达 tier。特殊卡可通过只读 EA Rarity/card color map 获取强调色，但必须校验颜色格式和文字对比度，不得把 EA Repository 依赖放进纯 UI/model；EA 色不可用时按当前产品层级回退：94 及以下虹彩紫 `#8E7CFF` 配高阶靛紫背景 `#324A7A`、95-97 宝石青 `#2FC6C4` 配深青背景 `#153F42`、98-99 紫红 `#B45BD2` 配暗莓紫背景 `#421F39`。特殊卡三档必须同时通过强调色和整行背景保持可辨识，不能统一按同一低比例混入深灰。禁止把 89+ Rare Gold 和 98-99 Special 都做成白金色，也禁止使用“颜色 A/颜色 B”这种未决 tier 定义。
@@ -927,7 +931,7 @@ git diff --check
 
 共享底层修改不得仅凭 Node tests 宣布完成；Agent 应根据影响面列出真实页面验证场景，由能够访问账号和 Web App 的用户执行。
 
-CI 位于 `.github/workflows`，Windows + Node 22 执行 `npm ci` 和 `npm run verify`，并检查生成的根目录 userscript 已提交。
+CI 位于 `.github/workflows`，Windows + Node 22 执行 `npm ci` 和 `npm run verify`，并检查生成的根目录 userscript 已提交。`verify.yml` 同时构建 Profile preview artifact；`release-assets.yml` 负责 GitHub Release 资产打包和上传。
 
 ## 15. 交付报告要求
 

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "bronze-silver-inventory-only",
+  "name": "Bronze/Silver Inventory Only",
+  "description": "Uses inventory-only mode for Daily Bronze, Daily Silver, Daily Common, and equivalent bronze/silver material loops while keeping other configurable loops in normal mode.",
+  "preset": "bronze-silver-inventory-only",
+  "minimumRunnerVersion": "0.6.1",
+  "tags": ["official", "daily", "inventory"]
+}

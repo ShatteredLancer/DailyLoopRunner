@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   renderMainPanelLoopOptions,
+  renderMainPanelProfileOptions,
   renderMainPanelRecap,
   renderMainPanelRounds,
   renderMainPanelRuntimeState,
@@ -69,6 +70,29 @@ describe('main panel state rendering', () => {
     expect(button.title).toBe('Last Loop recap: Daily Rare (3 card(s))');
   });
 
+  it('renders built-in, starter, and user profiles with the active selection', () => {
+    const { panel, controls } = harness(['bronze-loop-profile-select']);
+    const select = controls.get('bronze-loop-profile-select');
+    select.children = [];
+    select.appendChild = (option) => select.children.push(option);
+    Object.defineProperty(select, 'options', { get: () => select.children });
+    const profiles = [
+      { id: '__built-in__', name: 'Built-in' },
+      { id: 'default', name: 'Default' },
+      { id: 'starter-bronze-silver-inventory-only', name: 'Bronze/Silver Inventory Only' },
+      { id: 'custom', name: 'Custom' },
+    ];
+    expect(renderMainPanelProfileOptions({
+      panel,
+      profiles,
+      selectedId: 'custom',
+      createOption: () => element('option'),
+    })).toBe('custom');
+    expect(select.children.map((option) => option.textContent)).toEqual([
+      'Built-in', 'Default', 'Bronze/Silver Inventory Only', 'Custom',
+    ]);
+  });
+
   it('renders the compact reward alert summary', () => {
     const { panel, controls } = harness(['bronze-loop-reward-alert-summary', 'bronze-loop-reward-alert-enabled']);
     renderRewardAlertSummary({
@@ -84,8 +108,8 @@ describe('main panel state rendering', () => {
   it('applies the complete runtime disabled-state matrix', () => {
     const ids = [
       'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-select',
-      'bronze-loop-open-builder', 'bronze-loop-validate-json',
-      'bronze-loop-refresh', 'bronze-loop-scan-picks', 'bronze-loop-load-json', 'bronze-loop-built-in', 'bronze-loop-dry-run',
+      'bronze-loop-profile-select', 'bronze-loop-open-builder',
+      'bronze-loop-refresh', 'bronze-loop-scan-picks', 'bronze-loop-dry-run',
       'bronze-loop-open-rewards', 'bronze-loop-pick-protect-high-gold', 'bronze-loop-pick-auto-below-90',
       'bronze-loop-daily-inventory-only',
       'bronze-loop-pick-prefer-scanned',
@@ -102,8 +126,7 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-stop').disabled).toBe(true);
     expect(controls.get('bronze-loop-refresh').disabled).toBe(true);
     expect(controls.get('bronze-loop-scan-picks').disabled).toBe(true);
-    expect(controls.get('bronze-loop-load-json').disabled).toBe(true);
-    expect(controls.get('bronze-loop-built-in').disabled).toBe(true);
+    expect(controls.get('bronze-loop-profile-select').disabled).toBe(true);
     expect(controls.get('bronze-loop-select').disabled).toBe(true);
 
     renderMainPanelRuntimeState({ panel, state: { running: true } });

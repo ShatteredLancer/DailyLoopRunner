@@ -3,8 +3,8 @@ import { bindMainPanelCommands, hydrateMainPanelOptions } from '../../src/ui/mai
 
 const IDS = [
   'bronze-loop-select',
+  'bronze-loop-profile-select',
   'bronze-loop-open-builder',
-  'bronze-loop-validate-json',
   'bronze-loop-pick-protect-high-gold',
   'bronze-loop-pick-auto-below-90',
   'bronze-loop-pick-prefer-scanned',
@@ -20,9 +20,6 @@ const IDS = [
   'bronze-loop-recap-reopen',
   'bronze-loop-refresh',
   'bronze-loop-scan-picks',
-  'bronze-loop-preview-pick-recap',
-  'bronze-loop-load-json',
-  'bronze-loop-built-in',
   'bronze-loop-stop',
   'bronze-loop-copy',
   'bronze-loop-clear',
@@ -80,8 +77,8 @@ describe('main panel bindings', () => {
   it('binds every command control and forwards the selected loop id', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
-      'selectLoop', 'openBuilder', 'validateJson', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
-      'refresh', 'scanPicks', 'previewPickRecap', 'loadJson', 'useBuiltIn', 'stop', 'copyLog', 'clearLog', 'downloadLog',
+      'selectLoop', 'selectProfile', 'openBuilder', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
+      'refresh', 'scanPicks', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
     bindMainPanelCommands({ panel, commands });
@@ -89,10 +86,12 @@ describe('main panel bindings', () => {
     controls.get('bronze-loop-select').value = 'daily-routine';
     controls.get('bronze-loop-select').emit('change');
     expect(commands.selectLoop).toHaveBeenCalledWith('daily-routine', expect.any(Object));
+    controls.get('bronze-loop-profile-select').value = 'inventory-only';
+    controls.get('bronze-loop-profile-select').emit('change');
+    expect(commands.selectProfile).toHaveBeenCalledWith('inventory-only', expect.any(Object));
 
     for (const [id, event, command] of [
       ['bronze-loop-open-builder', 'click', 'openBuilder'],
-      ['bronze-loop-validate-json', 'click', 'validateJson'],
       ['bronze-loop-daily-inventory-only', 'change', 'saveLoopOptions'],
       ['bronze-loop-show-mvp', 'change', 'saveLoopOptions'],
       ['bronze-loop-reward-alert-enabled', 'change', 'saveRewardAlertEnabled'],
@@ -102,9 +101,6 @@ describe('main panel bindings', () => {
       ['bronze-loop-recap-reopen', 'click', 'reopenRecap'],
       ['bronze-loop-refresh', 'click', 'refresh'],
       ['bronze-loop-scan-picks', 'click', 'scanPicks'],
-      ['bronze-loop-preview-pick-recap', 'click', 'previewPickRecap'],
-      ['bronze-loop-load-json', 'click', 'loadJson'],
-      ['bronze-loop-built-in', 'click', 'useBuiltIn'],
       ['bronze-loop-stop', 'click', 'stop'],
       ['bronze-loop-copy', 'click', 'copyLog'],
       ['bronze-loop-clear', 'click', 'clearLog'],

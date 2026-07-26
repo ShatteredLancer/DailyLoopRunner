@@ -13,7 +13,7 @@ Raw JSON remains available for validation, import, export, and diagnostics. It i
 - Do not replace workflow runners, EA adapters, inventory selection, or pack transaction logic.
 - Do not add nested workflows. `dailyRoutine` and `workflowRoutine` steps remain references to atomic Loops.
 - Do not silently execute stale dynamic Player Pick snapshots.
-- Do not add Builder controls to the compact main panel beyond the Builder and JSON validation commands.
+- Keep the compact main panel limited to Profile selection, opening the Builder, cache refresh, and Pick scanning; JSON validation stays inside the Builder workspace.
 - Do not make built-in definitions directly mutable.
 
 ## 3. Compatibility boundary
@@ -80,16 +80,23 @@ Each profile contains:
 
 Draft edits are auto-saved, but only an explicitly saved and validated revision can be activated. `lastKnownGood` and `activeDynamicBindings` are snapshots of the last explicit activation, so later Draft or Saved changes cannot leak into runtime during an automatic Pick rescan. Startup loads the active profile's last known good configuration. Corrupt or incompatible storage falls back to built-ins without partially applying a profile.
 
+Every store includes two starter profiles:
+
+- **Default**: follows the built-in configuration and inherits future built-in changes through rebase.
+- **Bronze/Silver Inventory Only**: sets `inventoryMode: "inventory-only"` on configurable Loops whose target or requirements consume bronze/silver players, including Daily Bronze, Daily Silver, and Daily Common. Other configurable Loops and container Workflows are explicitly set to `normal`, so this profile remains scoped even when the main-panel global Inventory only checkbox is enabled.
+
+Existing stores receive missing starter profiles during normalization. A user profile with the same stable ID is never overwritten.
+
 ## 6. Main panel integration
 
 The main panel retains execution controls and common runtime options. Its Config section contains:
 
+- **Profile**: selects Built-in, a starter profile, or a user-created profile. It applies only the profile's Saved/last-known-good revision; a dirty Draft cannot leak into runtime.
 - **Open Builder**: opens the full-screen workspace.
-- **Validate JSON**: opens the Builder JSON validation tab.
-- **Load loops JSON**: retained as a developer-server import source.
-- **Built-in loops**: retained as an immediate runtime reset.
+- **Refresh caches**: retained as a recovery control after inventory changes made outside the Runner or when EA/FSU caches need explicit synchronization.
+- **Scan Picks**: retained because dynamic Pick discovery, activity changes, and persisted dynamic binding recovery require a fresh session scan.
 
-The current inline JSON textarea is removed from the normal panel flow. Existing control IDs may remain as compatibility aliases during migration, but raw JSON cannot be started directly without successful validation and conversion into a Builder draft.
+**Validate JSON**, **Import JSON**, **Built-in loops**, and **Preview Pick recap** are removed from the main panel. JSON validation/import/export remains available in the Builder. Selecting **Built-in** in the Profile control replaces the old reset button. Raw JSON cannot be started directly without successful validation and conversion into a Builder draft.
 
 ## 7. Full-screen workspace
 
@@ -239,6 +246,8 @@ The JSON tab has four modes:
 Validation errors are grouped by JSON path and link to the corresponding visual field. Imported JSON is parsed with the existing parser, converted to a structured draft, and activated only after complete validation. Unknown but valid fields are retained and shown as advanced fields.
 
 Export always emits the existing top-level configuration shape so files remain compatible with the development server and older manual workflows.
+
+Reusable repository Profiles live in `profiles/*.profile.json`. A descriptor references an official preset or embeds one complete validated `config`. `npm run check:profiles` rejects invalid configuration and dynamic Pick snapshots; `npm run build:profiles` emits importable `.loops.json` files plus a manifest under `dist/profiles/`. GitHub Actions packages these outputs into `DailyLoopRunner.profiles.zip` for Releases.
 
 ## 15. Built-in update conflicts
 

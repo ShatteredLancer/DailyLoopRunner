@@ -41,12 +41,10 @@ describe('main panel view template', () => {
       'bronze-loop-pick-prefer-scanned',
       'bronze-loop-pick-open-at-end',
       'bronze-loop-pick-auto-threshold',
+      'bronze-loop-profile-select',
       'bronze-loop-refresh',
       'bronze-loop-scan-picks',
-      'bronze-loop-load-json',
-      'bronze-loop-built-in',
       'bronze-loop-open-builder',
-      'bronze-loop-validate-json',
       'bronze-loop-copy',
       'bronze-loop-clear',
       'bronze-loop-download',
@@ -56,6 +54,14 @@ describe('main panel view template', () => {
       'bronze-loop-reward-alert-settings',
     ]) {
       expect(html, id).toContain(`id="${id}"`);
+    }
+    for (const removedId of [
+      'bronze-loop-validate-json',
+      'bronze-loop-load-json',
+      'bronze-loop-built-in',
+      'bronze-loop-preview-pick-recap',
+    ]) {
+      expect(html, removedId).not.toContain(`id="${removedId}"`);
     }
   });
 

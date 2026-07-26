@@ -217,6 +217,40 @@ describe('Workflow and Loop Builder controller', () => {
     expect(applyConfig).toHaveBeenCalledWith(base, 'Builder profile: Default');
   });
 
+  it('loads a saved profile from the runtime selector without applying its dirty draft', () => {
+    const base = config();
+    const store = createBuilderStore({ baseConfig: base });
+    store.profiles[0].draftConfig.loops.push({
+      id: 'dirty', name: 'Dirty', strategy: 'fillAndVerifySbc', sbcNames: ['Dirty'],
+    });
+    const { builder, applyConfig } = harness(store);
+    const result = builder.selectRuntimeProfile('default');
+    expect(result.status).toBe('applied');
+    expect(builder.getStore().activeProfileId).toBe('default');
+    expect(applyConfig).toHaveBeenCalledWith(base, 'Builder profile: Default');
+  });
+
+  it('rejects a saved profile whose dynamic Pick binding is unavailable', () => {
+    const base = config();
+    const dynamic = {
+      id: 'dynamic-pick',
+      name: 'Dynamic Pick',
+      strategy: 'playerPickSbc',
+      sbcNames: ['Dynamic Pick'],
+      pickItemNames: ['Dynamic Pick Item'],
+      sbcSetIds: [99],
+      requirements: [{ tier: 'gold', count: 1 }],
+    };
+    const store = createBuilderStore({ baseConfig: base });
+    store.profiles[0].savedConfig.loops.push(dynamic);
+    store.profiles[0].lastKnownGood.loops.push(dynamic);
+    store.profiles[0].dynamicBindings = [{ loopId: dynamic.id, sbcSetIds: [99], definition: dynamic }];
+    const { builder, applyConfig } = harness(store);
+    expect(() => builder.selectRuntimeProfile('default')).toThrow(/dynamic binding\(s\) are unavailable/);
+    expect(builder.getStore().activeProfileId).toBeNull();
+    expect(applyConfig).not.toHaveBeenCalled();
+  });
+
   it('deactivates the active profile when switching to built-ins', () => {
     const base = config();
     const store = createBuilderStore({ baseConfig: base });
@@ -225,6 +259,15 @@ describe('Workflow and Loop Builder controller', () => {
     expect(builder.useBuiltIn()).toBe(true);
     expect(builder.getStore().activeProfileId).toBeNull();
     expect(useBuiltIn).toHaveBeenCalledOnce();
+  });
+
+  it('lists built-in, starter, and user profiles for the main selector', () => {
+    const { builder } = harness();
+    expect(builder.listRuntimeProfiles()).toEqual([
+      expect.objectContaining({ id: '__built-in__', name: 'Built-in' }),
+      expect.objectContaining({ id: 'default', name: 'Default' }),
+      expect.objectContaining({ id: 'starter-bronze-silver-inventory-only', name: 'Bronze/Silver Inventory Only' }),
+    ]);
   });
 
   it('shows rebased current built-ins instead of stale profile snapshots', () => {

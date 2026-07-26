@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.0`
-- Git 基线：当前 `0.6.0` Workflow/Loop Builder release
+- Userscript 版本：`0.6.1`
+- Git 基线：当前 `0.6.1` Profile library release
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 

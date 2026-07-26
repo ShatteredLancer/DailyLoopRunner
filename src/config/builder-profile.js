@@ -1,7 +1,19 @@
 import { cloneLoopDef, isPlainObject } from '../domain/objects.js';
+import {
+  getLoopStrategyCapabilities,
+  INVENTORY_ONLY_CAPABILITIES,
+} from '../domain/strategies.js';
 import { normalizeLoopConfig, parseLoopConfig, validateLoopConfig } from './loop-schema.js';
 
 export const BUILDER_SCHEMA_VERSION = 1;
+export const BUILDER_BUILT_IN_PROFILE_ID = '__built-in__';
+
+export const BUILDER_STARTER_PROFILE_IDS = Object.freeze({
+  default: 'default',
+  bronzeSilverInventoryOnly: 'starter-bronze-silver-inventory-only',
+});
+
+const LEGACY_INVENTORY_ONLY_PROFILE_ID = 'starter-inventory-only';
 
 const ENTITY_COLLECTIONS = Object.freeze([
   'loops',
@@ -206,6 +218,75 @@ function dynamicLoopMatch(binding, loop) {
   return binding.pickItemResourceIds.some((id) => resourceIds.has(id));
 }
 
+function legacyInventoryOnlyStarterConfig(baseConfig) {
+  const config = clone(normalizeLoopConfig(baseConfig));
+  config.loops = config.loops.map((loop) => (
+    getLoopStrategyCapabilities(loop.strategy).inventoryOnly === INVENTORY_ONLY_CAPABILITIES.container
+      ? { ...loop, inventoryMode: 'inventory-only' }
+      : loop
+  ));
+  return validateLoopConfig(config, 'Legacy Inventory Only starter profile');
+}
+
+function requirementUsesBronzeOrSilver(requirement = {}) {
+  return ['bronze', 'silver'].includes(String(requirement.tier || '').toLowerCase());
+}
+
+function loopUsesBronzeOrSilverInventory(loop = {}) {
+  if (requirementUsesBronzeOrSilver(loop.targetDuplicate)) return true;
+  if ((loop.requirements || []).some(requirementUsesBronzeOrSilver)) return true;
+  return (loop.challengeRequirements || []).some((requirements) => (
+    (requirements || []).some(requirementUsesBronzeOrSilver)
+  ));
+}
+
+function bronzeSilverInventoryOnlyStarterConfig(baseConfig) {
+  const config = clone(normalizeLoopConfig(baseConfig));
+  config.loops = config.loops.map((loop) => {
+    const capability = getLoopStrategyCapabilities(loop.strategy).inventoryOnly;
+    if (![INVENTORY_ONLY_CAPABILITIES.supported, INVENTORY_ONLY_CAPABILITIES.container].includes(capability)) {
+      return loop;
+    }
+    return {
+      ...loop,
+      inventoryMode: loopUsesBronzeOrSilverInventory(loop) ? 'inventory-only' : 'normal',
+    };
+  });
+  return validateLoopConfig(config, 'Bronze/Silver Inventory Only starter profile');
+}
+
+function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
+  if (profile?.preset !== 'inventory-only'
+    || profile?.id !== LEGACY_INVENTORY_ONLY_PROFILE_ID
+    || profile?.name !== 'Inventory Only') return false;
+  const legacyConfig = legacyInventoryOnlyStarterConfig(profile.baseConfig || baseConfig);
+  return [profile.draftConfig, profile.savedConfig, profile.lastKnownGood]
+    .filter(Boolean)
+    .every((config) => sameValue(normalizeLoopConfig(config), legacyConfig));
+}
+
+export function createBuilderStarterProfiles(baseConfig, options = {}) {
+  const normalizedBase = clone(validateLoopConfig(baseConfig, 'Builder starter profile base'));
+  return [
+    createBuilderProfile({
+      id: BUILDER_STARTER_PROFILE_IDS.default,
+      name: 'Default',
+      preset: 'default',
+      baseConfig: normalizedBase,
+      config: normalizedBase,
+      now: options.now,
+    }),
+    createBuilderProfile({
+      id: BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly,
+      name: 'Bronze/Silver Inventory Only',
+      preset: 'bronze-silver-inventory-only',
+      baseConfig: normalizedBase,
+      config: bronzeSilverInventoryOnlyStarterConfig(normalizedBase),
+      now: options.now,
+    }),
+  ];
+}
+
 export function fingerprintBuilderValue(value) {
   const text = JSON.stringify(stableValue(value));
   let hash = 0x811c9dc5;
@@ -224,6 +305,7 @@ export function createBuilderProfile(options = {}) {
     schemaVersion: BUILDER_SCHEMA_VERSION,
     id: String(options.id || 'default'),
     name: String(options.name || 'Default'),
+    ...(options.preset ? { preset: String(options.preset) } : {}),
     baseFingerprint: fingerprintBuilderValue(baseConfig),
     baseConfig,
     draftConfig: config,
@@ -278,18 +360,22 @@ export function normalizeBuilderProfile(profile, baseConfig, options = {}) {
 }
 
 export function createBuilderStore(options = {}) {
-  const profile = createBuilderProfile({
-    id: options.profileId || 'default',
-    name: options.profileName || 'Default',
-    baseConfig: options.baseConfig,
-    config: options.config || options.baseConfig,
-    now: options.now,
-  });
+  const profiles = createBuilderStarterProfiles(options.baseConfig, { now: options.now });
+  if (options.profileId || options.profileName || options.config) {
+    profiles[0] = createBuilderProfile({
+      id: options.profileId || BUILDER_STARTER_PROFILE_IDS.default,
+      name: options.profileName || 'Default',
+      preset: options.profileId && options.profileId !== BUILDER_STARTER_PROFILE_IDS.default ? null : 'default',
+      baseConfig: options.baseConfig,
+      config: options.config || options.baseConfig,
+      now: options.now,
+    });
+  }
   return {
     schemaVersion: BUILDER_SCHEMA_VERSION,
     activeProfileId: null,
     activeDynamicBindings: [],
-    profiles: [profile],
+    profiles,
     lastKnownGood: null,
   };
 }
@@ -310,8 +396,21 @@ export function normalizeBuilderStore(store, baseConfig, options = {}) {
     }
   });
   if (!profiles.length) return createBuilderStore({ baseConfig, ...options });
-  const activeProfileId = profiles.some((profile) => profile.id === store.activeProfileId)
-    ? store.activeProfileId
+  let migratedLegacyActive = false;
+  const legacyIndex = profiles.findIndex((profile) => isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig));
+  if (legacyIndex >= 0) {
+    migratedLegacyActive = store.activeProfileId === LEGACY_INVENTORY_ONLY_PROFILE_ID;
+    profiles.splice(legacyIndex, 1);
+  }
+  const profileIds = new Set(profiles.map((profile) => profile.id));
+  for (const starter of createBuilderStarterProfiles(baseConfig, options)) {
+    if (!profileIds.has(starter.id)) profiles.push(starter);
+  }
+  const requestedActiveProfileId = migratedLegacyActive
+    ? BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly
+    : store.activeProfileId;
+  const activeProfileId = profiles.some((profile) => profile.id === requestedActiveProfileId)
+    ? requestedActiveProfileId
     : null;
   return {
     schemaVersion: BUILDER_SCHEMA_VERSION,
@@ -324,7 +423,9 @@ export function normalizeBuilderStore(store, baseConfig, options = {}) {
         available: false,
       })),
     profiles,
-    lastKnownGood: store.lastKnownGood ? clone(store.lastKnownGood) : null,
+    lastKnownGood: migratedLegacyActive
+      ? clone(profiles.find((profile) => profile.id === activeProfileId)?.lastKnownGood || null)
+      : store.lastKnownGood ? clone(store.lastKnownGood) : null,
   };
 }
 
@@ -484,6 +585,36 @@ export function activateBuilderProfile(store, profile, currentBuiltInConfig) {
     },
     profile: saved,
     config: clone(saved.lastKnownGood),
+  };
+}
+
+export function activateSavedBuilderProfile(store, profileId, currentBuiltInConfig) {
+  const profile = (store.profiles || []).find((entry) => String(entry.id) === String(profileId));
+  if (!profile) throw new Error(`Builder profile not found: ${profileId}`);
+  const savedConfig = clone(profile.lastKnownGood || profile.savedConfig);
+  if (!savedConfig) throw new Error(`Builder profile has no saved configuration: ${profile.name || profile.id}`);
+  const savedLoopIds = new Set((savedConfig.loops || []).map((loop) => String(loop.id || '')));
+  const savedDynamicBindings = (profile.dynamicBindings || [])
+    .map(normalizeDynamicBinding)
+    .filter((binding) => savedLoopIds.has(binding.loopId));
+  const savedProfile = {
+    ...clone(profile),
+    draftConfig: clone(savedConfig),
+    savedConfig: clone(savedConfig),
+    lastKnownGood: clone(savedConfig),
+    dynamicBindings: savedDynamicBindings,
+  };
+  const validation = validateBuilderProfile(savedProfile, currentBuiltInConfig);
+  if (!validation.valid) throw new Error(validation.errors.join('; '));
+  return {
+    store: {
+      ...clone(store),
+      activeProfileId: profile.id,
+      activeDynamicBindings: clone(savedDynamicBindings),
+      lastKnownGood: clone(validation.config),
+    },
+    profile: clone(profile),
+    config: clone(validation.config),
   };
 }
 

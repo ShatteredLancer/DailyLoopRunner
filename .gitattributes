@@ -3,3 +3,7 @@ FSU_mod/*.patch text eol=lf
 FSU_mod/*.json text eol=lf
 FSU_mod/*.md text eol=lf
 FSU_mod/*.ps1 text eol=crlf
+profiles/*.json text eol=lf
+profiles/*.md text eol=lf
+.github/workflows/*.yml text eol=lf
+scripts/*.mjs text eol=lf

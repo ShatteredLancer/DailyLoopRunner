@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.6.0`
+当前版本：`0.6.1`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -25,7 +25,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.6.0` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。面板出现 `Ready v0.6.1` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
 FSU 不再显示前台 Club loading 时，可能正在后台校验，也可能已进入快速缓存状态。Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 
@@ -70,7 +70,7 @@ Options 中的完整日志会占用面板剩余空间并独立滚动；长错误
 
 Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的多份包按不同实例依次打开，不再每轮重新选择 repository 中的第一项。遇到 `471` 时先进行连续多次 Unassigned 空状态确认和二次清理；`471` 本身不再被当作 Pack 实例已经失效的证据。第二次仍失败时安全停止并保留完整日志和 recap。
 
-`Preview recap` 使用 23 条固定模拟数据实际验证第二页，只预览 recap 和烟花，不开包、不访问 EA，也不会发送 Desktop 或 ntfy 通知。Options 中的 `Preview Pick recap` 使用同一套 renderer 和分页规则验证 Player Pick 展示。
+`Preview recap` 使用 23 条固定模拟数据实际验证第二页，只预览 recap 和烟花，不开包、不访问 EA，也不会发送 Desktop 或 ntfy 通知。Player Pick recap 的预览继续由测试和开发入口覆盖，不再占用主面板操作区。
 
 ## Options
 
@@ -84,10 +84,11 @@ Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的
 - `Open Picks at end`：仅对直接运行的 Player Pick Loop 生效；先完成当前 Loop 的目标数量，再集中开启同类型奖励。不限次 Pick 使用 `rounds`，限次 Pick 使用 EA Set 的当前剩余次数。默认关闭。
 - 数量输入：只对声明 `runtimeQuantity.mode: "user"` 的 Loop 显示，标签和默认值由该 Loop 定义。不限次 Player Pick、Daily Rare Pack to 2x84+、2x84+ Fodder、84+ TOTW 等表示目标完成数；Provision 显示 `Provision packs`；Validation 显示 `Validation runs`。One-click Daily、其内部 Daily 阶段、限次 Player Pick 和 84x10 不显示该输入。
 - `Refresh caches`：刷新当前可用的 Packs、Unassigned、Storage、Transfer 和 Club 缓存。
+- `Scan Picks`：重新扫描当前活动 Player Pick，并刷新 Builder 的动态 Pick 绑定。启动时会自动扫描，但活动刷新、重新登录后的绑定恢复和故障调查仍需要这个手动入口。
+- `Profile`：在 `Built-in`、`Default`、`Bronze/Silver Inventory Only` 和用户 Profile 之间切换。主面板只加载 Profile 的 Saved/last-known-good；Builder 中尚未保存的 Draft 不会进入运行时。`Bronze/Silver Inventory Only` 只让 Daily Bronze、Daily Silver、Daily Common 等使用铜银材料的 Loop 从库存完成，其余可配置 Workflow/Loop 强制保持正常模式；它不同于主面板 `Inventory only` 的全局运行时默认值。
 - `Open Builder`：打开全屏可视化 Workflow/Loop Builder。普通编辑不再要求手写 JSON。
-- `Validate JSON`：直接进入 Builder 的 JSON 验证/导入页；JSON 只作为验证、兼容导入和导出格式保留。
-- `Import JSON`：从本地开发服务读取 `DailyLoopRunner.loops.json`，校验后写入当前 Profile 的 Draft，不会直接替换运行配置。
-- `Built-in loops`：停用当前 Active Profile 并切回脚本内置配置；Profile 和草稿仍保留。
+
+主面板不再提供 `Validate JSON`、`Import JSON`、`Built-in loops` 或 `Preview Pick recap` 按钮。JSON 验证/导入仍保留在 Builder 的 JSON validation 页；切回内置配置统一通过 Profile 下拉的 `Built-in`。
 
 ### Workflow/Loop Builder
 
@@ -151,7 +152,9 @@ Profile 存在浏览器本地存储中。重登只恢复 Active Profile 的 last
 
 子 Pick 可配置 `pickOptions: { "openAtEnd": false }` 单独关闭集中领取；支持库存模式的子 Loop 可配置 `inventoryMode: "normal"` 单独忽略全局 Inventory only。
 
-Builder Profile 会跨重登保存，但 Active Profile 中绑定的动态 Pick 必须在每次会话重新扫描成功后才会恢复。需要共享时使用 Builder `Export`；需要加载旧配置或开发服务器配置时使用 JSON 验证页或主面板 `Import JSON`，导入结果仍需显式保存和激活。
+Builder Profile 会跨重登保存，但 Active Profile 中绑定的动态 Pick 必须在每次会话重新扫描成功后才会恢复。需要共享时使用 Builder `Export`；需要加载旧配置时使用 Builder 的 JSON validation 页，导入结果仍需显式保存和激活。
+
+仓库中的可下载 Profile 位于 [`profiles/`](profiles/)。每个 `*.profile.json` descriptor 必须提供官方 `preset` 或完整 `config`，并通过 `npm run check:profiles` 校验；动态扫描 Pick 快照不得作为静态 Profile 上传。`npm run build:profiles` 会在 `dist/profiles/` 生成可由 Builder JSON validation 页面导入的 `*.loops.json`、manifest 和说明文件。Profile 文件合并到 `main` 后，GitHub Actions 会重新生成 `DailyLoopRunner.profiles.zip` 并更新与当前 `package.json` 版本一致的最新 Release；发布新 Release 时也会自动附加该 ZIP、manifest、userscript 和完整 Loop 配置。
 
 ### Reward Alerts
 
@@ -401,6 +404,7 @@ src/
   userscript-entry.js
 tests/
 scripts/
+profiles/      可下载 Builder Profile descriptor；CI 校验并打包到 Release
 ```
 
 详细职责、依赖方向、现存边界和修改规则见 [AGENTS.md](AGENTS.md)。
@@ -447,10 +451,11 @@ npm run verify
 
 1. JavaScript 语法检查
 2. 内置/外部配置校验
-3. 架构直接调用点检查
-4. 全部 Vitest 测试
-5. esbuild 打包
-6. 根目录与 `dist` 发布产物一致性检查
+3. `profiles/` Profile descriptor 和物化配置校验
+4. 架构直接调用点检查
+5. 全部 Vitest 测试
+6. esbuild 打包
+7. 根目录与 `dist` 发布产物一致性检查
 
 发布文件由 `src/userscript-entry.js` 和其模块依赖构建生成：
 

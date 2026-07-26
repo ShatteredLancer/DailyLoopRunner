@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.0
+// @version      0.6.1
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -23,7 +23,6 @@
 (() => {
   // src/config/runtime.js
   var APP_KEY = "__FCLoopRunner";
-  var LOOP_CONFIG_URL = "http://127.0.0.1:8765/DailyLoopRunner.loops.json";
   var PICK_OPTIONS_KEY = "fc-loop-runner-pick-options";
   var LOOP_UI_OPTIONS_KEY = "fc-loop-runner-ui-options";
   var REWARD_ALERT_SETTINGS_KEY = "fc-loop-runner-reward-alert-settings";
@@ -6583,51 +6582,6 @@
       destinations
     });
   }
-  function createPlayerPickRecapPreviewModel(options = {}) {
-    const tiers = [
-      { rating: 99, rareflag: 9, special: true },
-      { rating: 97, rareflag: 8, special: true },
-      { rating: 94, rareflag: 7, special: true },
-      { rating: 91, rareflag: 1 },
-      { rating: 88, rareflag: 1 },
-      { rating: 85, rareflag: 1 },
-      { rating: 84, rareflag: 0 },
-      { rating: 74, rareflag: 1 },
-      { rating: 63, rareflag: 0 }
-    ];
-    const pickResults = Array.from({ length: 23 }, (_, index) => {
-      const sample = tiers[index % tiers.length];
-      const item = {
-        id: index + 1,
-        definitionId: 1e3 + index,
-        type: "player",
-        name: `Preview Player ${String(index + 1).padStart(2, "0")}`,
-        rating: sample.rating,
-        rareflag: sample.rareflag,
-        rare: sample.rareflag > 0,
-        special: sample.special === true,
-        tier: sample.rating >= 75 ? "gold" : sample.rating >= 65 ? "silver" : "bronze",
-        tradeable: index % 3 === 0
-      };
-      return {
-        resumed: index % 7 === 0,
-        pickedCards: [{
-          item,
-          rating: item.rating,
-          special: item.special,
-          duplicate: index % 4 === 0,
-          destination: ["club", "storage", "transfer"][index % 3],
-          price: item.special ? 1e5 + index * 25e3 : 5e3 + index * 1e3
-        }]
-      };
-    });
-    return createPlayerPickRecapModel(pickResults, {
-      ...options,
-      name: "Preview",
-      status: "preview",
-      reason: "Preview data only; no Player Pick was redeemed"
-    });
-  }
 
   // src/unassigned/plan.js
   function itemRef(item) {
@@ -8770,8 +8724,8 @@
     if (!panel?.querySelector) throw new TypeError("panel element is required");
     const select = required(panel, "#bronze-loop-select");
     select.addEventListener("change", (event) => commands.selectLoop?.(event.target?.value, event));
+    required(panel, "#bronze-loop-profile-select").addEventListener("change", (event) => commands.selectProfile?.(event.target?.value, event));
     required(panel, "#bronze-loop-open-builder").addEventListener("click", (event) => commands.openBuilder?.(event));
-    required(panel, "#bronze-loop-validate-json").addEventListener("click", (event) => commands.validateJson?.(event));
     PICK_OPTION_IDS.forEach((id) => {
       required(panel, `#${id}`).addEventListener("change", (event) => commands.savePickOptions?.(event));
     });
@@ -8784,9 +8738,6 @@
     required(panel, "#bronze-loop-recap-reopen").addEventListener("click", (event) => commands.reopenRecap?.(event));
     required(panel, "#bronze-loop-refresh").addEventListener("click", (event) => commands.refresh?.(event));
     required(panel, "#bronze-loop-scan-picks").addEventListener("click", (event) => commands.scanPicks?.(event));
-    required(panel, "#bronze-loop-preview-pick-recap").addEventListener("click", (event) => commands.previewPickRecap?.(event));
-    required(panel, "#bronze-loop-load-json").addEventListener("click", (event) => commands.loadJson?.(event));
-    required(panel, "#bronze-loop-built-in").addEventListener("click", (event) => commands.useBuiltIn?.(event));
     required(panel, "#bronze-loop-stop").addEventListener("click", (event) => commands.stop?.(event));
     required(panel, "#bronze-loop-copy").addEventListener("click", (event) => commands.copyLog?.(event));
     required(panel, "#bronze-loop-clear").addEventListener("click", (event) => commands.clearLog?.(event));
@@ -8821,14 +8772,23 @@
       selectLoop() {
         options.updateLoopControls?.();
       },
+      selectProfile(profileId) {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        try {
+          options.selectProfile?.(profileId);
+          options.renderProfiles?.();
+          setPanelState();
+          return true;
+        } catch (error) {
+          log(`Profile switch failed: ${error?.message || error}`);
+          options.renderProfiles?.();
+          setPanelState();
+          return false;
+        }
+      },
       openBuilder() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
         options.openBuilder?.("workflows");
-        return true;
-      },
-      validateJson() {
-        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-        options.openBuilder?.("json");
         return true;
       },
       async savePickOptions(event) {
@@ -8850,11 +8810,6 @@
         return true;
       },
       reopenRecap: options.reopenRecap,
-      previewPickRecap() {
-        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-        options.previewPickRecap?.();
-        return true;
-      },
       async refresh() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
         state.refreshing = true;
@@ -8884,28 +8839,6 @@
           state.scanningPicks = false;
           setPanelState();
         }
-      },
-      async loadJson() {
-        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-        state.loadingLoops = true;
-        setPanelState();
-        try {
-          log(`Importing loop definitions from ${options.loopConfigUrl} into the Builder draft`);
-          await options.importLoopConfig?.(options.loopConfigUrl);
-          return true;
-        } catch (error) {
-          log(`Loop JSON import failed: ${error?.message || error}`);
-          return false;
-        } finally {
-          state.loadingLoops = false;
-          setPanelState();
-        }
-      },
-      useBuiltIn() {
-        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-        options.useBuiltIn?.();
-        setPanelState();
-        return true;
       },
       stop() {
         state.stopping = true;
@@ -9228,6 +9161,24 @@
       if (input.dataset) input.dataset.quantityKey = quantityKey;
     }
   }
+  function renderMainPanelProfileOptions(options = {}) {
+    const panel = options.panel;
+    const createOption = options.createOption;
+    const select = query(panel, "#bronze-loop-profile-select");
+    if (!select || typeof createOption !== "function") return null;
+    const profiles = options.profiles || [];
+    select.textContent = "";
+    for (const profile of profiles) {
+      const option = createOption();
+      option.value = profile.id;
+      option.textContent = profile.name;
+      select.appendChild(option);
+    }
+    const values = Array.from(select.options || []).map((option) => option.value);
+    const selectedId = String(options.selectedId || "");
+    select.value = values.includes(selectedId) ? selectedId : values[0] || "";
+    return select.value || null;
+  }
   function renderMainPanelRecap(options = {}) {
     const button3 = query(options.panel, "#bronze-loop-recap-reopen");
     if (!button3) return;
@@ -9264,12 +9215,10 @@
       "bronze-loop-batch-open": busy,
       "bronze-loop-stop": state.running !== true,
       "bronze-loop-select": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
+      "bronze-loop-profile-select": busy,
       "bronze-loop-open-builder": busy,
-      "bronze-loop-validate-json": busy,
       "bronze-loop-refresh": busy,
       "bronze-loop-scan-picks": busy,
-      "bronze-loop-load-json": busy,
-      "bronze-loop-built-in": busy || state.usingBuiltIn === true,
       "bronze-loop-dry-run": state.running === true,
       "bronze-loop-open-rewards": state.running === true,
       "bronze-loop-daily-inventory-only": state.running === true,
@@ -9361,6 +9310,7 @@
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
   #bronze-loop-panel .bronze-loop-option-summary { color: #9fb2c9; font-size: 11px; flex: 1 1 auto; min-width: 100px; }
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
+  #bronze-loop-panel .bronze-loop-profile-row span { flex: 0 0 auto; color: #9fb2c9; }
   #bronze-loop-latest {
     flex: 1 1 auto;
     min-height: 28px;
@@ -9467,9 +9417,8 @@
           <input id="bronze-loop-rounds" type="number" min="1" max="50" value="${rounds}">
         </div>
         <div class="bronze-loop-section">Config</div>
-          <div class="row"><button id="bronze-loop-refresh">Refresh caches</button><button id="bronze-loop-scan-picks">Scan Picks</button><button id="bronze-loop-preview-pick-recap">Preview Pick recap</button></div>
-          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-validate-json" title="Open the Builder JSON validation and import view">Validate JSON</button></div>
-          <div class="row"><button id="bronze-loop-load-json" title="Import the development-server loops JSON into the current Builder draft">Import JSON</button><button id="bronze-loop-built-in" disabled>Built-in loops</button></div>
+          <div class="row bronze-loop-profile-row"><span>Profile</span><select id="bronze-loop-profile-select" title="Load a saved Builder Profile or restore built-in loops"></select></div>
+          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button><button id="bronze-loop-scan-picks" title="Rescan active Player Pick SBCs and refresh dynamic Builder bindings">Scan Picks</button></div>
         </div>
         <div class="bronze-loop-section">Log</div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
@@ -9507,6 +9456,12 @@
 
   // src/config/builder-profile.js
   var BUILDER_SCHEMA_VERSION = 1;
+  var BUILDER_BUILT_IN_PROFILE_ID = "__built-in__";
+  var BUILDER_STARTER_PROFILE_IDS = Object.freeze({
+    default: "default",
+    bronzeSilverInventoryOnly: "starter-bronze-silver-inventory-only"
+  });
+  var LEGACY_INVENTORY_ONLY_PROFILE_ID = "starter-inventory-only";
   var ENTITY_COLLECTIONS = Object.freeze([
     "loops",
     "recoveryRecipes",
@@ -9692,6 +9647,59 @@
     const resourceIds = new Set((loop.pickItemResourceIds || []).map(Number));
     return binding.pickItemResourceIds.some((id) => resourceIds.has(id));
   }
+  function legacyInventoryOnlyStarterConfig(baseConfig) {
+    const config = clone(normalizeLoopConfig(baseConfig));
+    config.loops = config.loops.map((loop) => getLoopStrategyCapabilities(loop.strategy).inventoryOnly === INVENTORY_ONLY_CAPABILITIES.container ? { ...loop, inventoryMode: "inventory-only" } : loop);
+    return validateLoopConfig(config, "Legacy Inventory Only starter profile");
+  }
+  function requirementUsesBronzeOrSilver(requirement2 = {}) {
+    return ["bronze", "silver"].includes(String(requirement2.tier || "").toLowerCase());
+  }
+  function loopUsesBronzeOrSilverInventory(loop = {}) {
+    if (requirementUsesBronzeOrSilver(loop.targetDuplicate)) return true;
+    if ((loop.requirements || []).some(requirementUsesBronzeOrSilver)) return true;
+    return (loop.challengeRequirements || []).some((requirements) => (requirements || []).some(requirementUsesBronzeOrSilver));
+  }
+  function bronzeSilverInventoryOnlyStarterConfig(baseConfig) {
+    const config = clone(normalizeLoopConfig(baseConfig));
+    config.loops = config.loops.map((loop) => {
+      const capability = getLoopStrategyCapabilities(loop.strategy).inventoryOnly;
+      if (![INVENTORY_ONLY_CAPABILITIES.supported, INVENTORY_ONLY_CAPABILITIES.container].includes(capability)) {
+        return loop;
+      }
+      return {
+        ...loop,
+        inventoryMode: loopUsesBronzeOrSilverInventory(loop) ? "inventory-only" : "normal"
+      };
+    });
+    return validateLoopConfig(config, "Bronze/Silver Inventory Only starter profile");
+  }
+  function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
+    if (profile?.preset !== "inventory-only" || profile?.id !== LEGACY_INVENTORY_ONLY_PROFILE_ID || profile?.name !== "Inventory Only") return false;
+    const legacyConfig = legacyInventoryOnlyStarterConfig(profile.baseConfig || baseConfig);
+    return [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean).every((config) => sameValue(normalizeLoopConfig(config), legacyConfig));
+  }
+  function createBuilderStarterProfiles(baseConfig, options = {}) {
+    const normalizedBase = clone(validateLoopConfig(baseConfig, "Builder starter profile base"));
+    return [
+      createBuilderProfile({
+        id: BUILDER_STARTER_PROFILE_IDS.default,
+        name: "Default",
+        preset: "default",
+        baseConfig: normalizedBase,
+        config: normalizedBase,
+        now: options.now
+      }),
+      createBuilderProfile({
+        id: BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly,
+        name: "Bronze/Silver Inventory Only",
+        preset: "bronze-silver-inventory-only",
+        baseConfig: normalizedBase,
+        config: bronzeSilverInventoryOnlyStarterConfig(normalizedBase),
+        now: options.now
+      })
+    ];
+  }
   function fingerprintBuilderValue(value) {
     const text = JSON.stringify(stableValue(value));
     let hash = 2166136261;
@@ -9709,6 +9717,7 @@
       schemaVersion: BUILDER_SCHEMA_VERSION,
       id: String(options.id || "default"),
       name: String(options.name || "Default"),
+      ...options.preset ? { preset: String(options.preset) } : {},
       baseFingerprint: fingerprintBuilderValue(baseConfig),
       baseConfig,
       draftConfig: config,
@@ -9762,18 +9771,22 @@
     return result;
   }
   function createBuilderStore(options = {}) {
-    const profile = createBuilderProfile({
-      id: options.profileId || "default",
-      name: options.profileName || "Default",
-      baseConfig: options.baseConfig,
-      config: options.config || options.baseConfig,
-      now: options.now
-    });
+    const profiles = createBuilderStarterProfiles(options.baseConfig, { now: options.now });
+    if (options.profileId || options.profileName || options.config) {
+      profiles[0] = createBuilderProfile({
+        id: options.profileId || BUILDER_STARTER_PROFILE_IDS.default,
+        name: options.profileName || "Default",
+        preset: options.profileId && options.profileId !== BUILDER_STARTER_PROFILE_IDS.default ? null : "default",
+        baseConfig: options.baseConfig,
+        config: options.config || options.baseConfig,
+        now: options.now
+      });
+    }
     return {
       schemaVersion: BUILDER_SCHEMA_VERSION,
       activeProfileId: null,
       activeDynamicBindings: [],
-      profiles: [profile],
+      profiles,
       lastKnownGood: null
     };
   }
@@ -9793,7 +9806,18 @@
       }
     });
     if (!profiles.length) return createBuilderStore({ baseConfig, ...options });
-    const activeProfileId = profiles.some((profile) => profile.id === store.activeProfileId) ? store.activeProfileId : null;
+    let migratedLegacyActive = false;
+    const legacyIndex = profiles.findIndex((profile) => isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig));
+    if (legacyIndex >= 0) {
+      migratedLegacyActive = store.activeProfileId === LEGACY_INVENTORY_ONLY_PROFILE_ID;
+      profiles.splice(legacyIndex, 1);
+    }
+    const profileIds = new Set(profiles.map((profile) => profile.id));
+    for (const starter of createBuilderStarterProfiles(baseConfig, options)) {
+      if (!profileIds.has(starter.id)) profiles.push(starter);
+    }
+    const requestedActiveProfileId = migratedLegacyActive ? BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly : store.activeProfileId;
+    const activeProfileId = profiles.some((profile) => profile.id === requestedActiveProfileId) ? requestedActiveProfileId : null;
     return {
       schemaVersion: BUILDER_SCHEMA_VERSION,
       activeProfileId,
@@ -9802,7 +9826,7 @@
         available: false
       })),
       profiles,
-      lastKnownGood: store.lastKnownGood ? clone(store.lastKnownGood) : null
+      lastKnownGood: migratedLegacyActive ? clone(profiles.find((profile) => profile.id === activeProfileId)?.lastKnownGood || null) : store.lastKnownGood ? clone(store.lastKnownGood) : null
     };
   }
   function updateBuilderProfileDraft(profile, config, now = Date.now()) {
@@ -9949,6 +9973,33 @@
       },
       profile: saved,
       config: clone(saved.lastKnownGood)
+    };
+  }
+  function activateSavedBuilderProfile(store, profileId, currentBuiltInConfig) {
+    const profile = (store.profiles || []).find((entry) => String(entry.id) === String(profileId));
+    if (!profile) throw new Error(`Builder profile not found: ${profileId}`);
+    const savedConfig = clone(profile.lastKnownGood || profile.savedConfig);
+    if (!savedConfig) throw new Error(`Builder profile has no saved configuration: ${profile.name || profile.id}`);
+    const savedLoopIds = new Set((savedConfig.loops || []).map((loop) => String(loop.id || "")));
+    const savedDynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).filter((binding) => savedLoopIds.has(binding.loopId));
+    const savedProfile = {
+      ...clone(profile),
+      draftConfig: clone(savedConfig),
+      savedConfig: clone(savedConfig),
+      lastKnownGood: clone(savedConfig),
+      dynamicBindings: savedDynamicBindings
+    };
+    const validation = validateBuilderProfile(savedProfile, currentBuiltInConfig);
+    if (!validation.valid) throw new Error(validation.errors.join("; "));
+    return {
+      store: {
+        ...clone(store),
+        activeProfileId: profile.id,
+        activeDynamicBindings: clone(savedDynamicBindings),
+        lastKnownGood: clone(validation.config)
+      },
+      profile: clone(profile),
+      config: clone(validation.config)
     };
   }
   function deactivateBuilderProfile(store) {
@@ -11263,7 +11314,9 @@
       return store.profiles.find((entry) => entry.id === profileId) || store.profiles[0];
     }
     function persist() {
-      options.saveStore?.(clone3(store));
+      const snapshot = clone3(store);
+      options.saveStore?.(snapshot);
+      options.onStoreChange?.(snapshot);
     }
     function setProfile(nextProfile, persistNow = true) {
       store = upsertBuilderProfile(store, nextProfile);
@@ -11992,6 +12045,23 @@
       options.applyConfig?.(clone3(validation.config), `Builder profile: ${active.name}`);
       return { status: "applied", config: clone3(validation.config) };
     }
+    function selectRuntimeProfile(nextProfileId) {
+      if (String(nextProfileId) === BUILDER_BUILT_IN_PROFILE_ID) {
+        useBuiltIn();
+        return { status: "built-in", profileId: null, config: null };
+      }
+      const activated = activateSavedBuilderProfile(store, nextProfileId, builtInConfig());
+      store = activated.store;
+      profileId = activated.profile.id;
+      persist();
+      options.applyConfig?.(clone3(activated.config), `Builder profile: ${activated.profile.name}`);
+      if (root.classList.contains("open")) render();
+      return {
+        status: "applied",
+        profileId: activated.profile.id,
+        config: clone3(activated.config)
+      };
+    }
     function useBuiltIn() {
       store = deactivateBuilderProfile(store);
       persist();
@@ -12015,7 +12085,13 @@
       importConfigText,
       refreshDynamic,
       restoreActiveProfile,
+      selectRuntimeProfile,
       useBuiltIn,
+      listRuntimeProfiles: () => [
+        { id: BUILDER_BUILT_IN_PROFILE_ID, name: "Built-in", builtIn: true },
+        ...store.profiles.map((entry) => ({ id: entry.id, name: entry.name, preset: entry.preset || null }))
+      ],
+      getSelectedRuntimeProfileId: () => store.activeProfileId || BUILDER_BUILT_IN_PROFILE_ID,
       getStore: () => clone3(store),
       isOpen: () => root.classList.contains("open"),
       root
@@ -13233,7 +13309,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.0",
+      version: "0.6.1",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -13381,15 +13457,6 @@
     }
     function parseLoopConfig2(text) {
       return parseLoopConfig(text);
-    }
-    async function importLoopConfig(url = LOOP_CONFIG_URL) {
-      const text = await adapters.http.getText(`${url}?t=${Date.now()}`, { useRuntimeFallback: true });
-      const config = state.workflowBuilder?.importConfigText(text, {
-        name: "Development server import"
-      });
-      if (!config) fail2("Workflow Builder is unavailable");
-      log(`Imported ${config.loops.length} Loop(s) from ${url} into the current Builder draft; activate the profile to use them`);
-      return config;
     }
     function getSelectedLoopDef() {
       const select = document.querySelector("#bronze-loop-select");
@@ -20345,25 +20412,6 @@
     function previewBatchOpenRecap() {
       return showBatchRecapModal(createBatchOpenRecapPreviewModel());
     }
-    function previewPlayerPickRecap() {
-      return showPlayerPickRecap({
-        dom: adapters.dom,
-        model: createPlayerPickRecapPreviewModel({
-          itemDisplayName
-        }),
-        formatPrice: formatCompactPrice,
-        scheduleStopCheck: setInterval,
-        cancelStopCheck: clearInterval,
-        isStopping: () => false,
-        celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
-          dom: adapters.dom,
-          getComputedStyle: (element) => getComputedStyle(element),
-          devicePixelRatio: () => window.devicePixelRatio || 1,
-          now: () => performance.now(),
-          requestFrame: (callback) => requestAnimationFrame(callback)
-        })
-      });
-    }
     async function getSpecialCardPrices(items, label = "Recap") {
       const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
       if (!specialItems.length) return /* @__PURE__ */ new Map();
@@ -20763,6 +20811,16 @@
       });
       updateLoopControls();
     }
+    function renderProfileSelect() {
+      const builder = state.workflowBuilder;
+      if (!builder) return null;
+      return renderMainPanelProfileOptions({
+        panel: document.querySelector("#bronze-loop-panel"),
+        profiles: builder.listRuntimeProfiles(),
+        selectedId: builder.getSelectedRuntimeProfileId(),
+        createOption: () => document.createElement("option")
+      });
+    }
     function installPanel() {
       const mounted = mountMainPanel({
         dom: adapters.dom,
@@ -20819,8 +20877,9 @@
           }
         },
         saveStore: (store) => adapters.localStorage.setJson(BUILDER_PROFILE_KEY, store),
+        onStoreChange: renderProfileSelect,
         applyConfig: (config, source) => setLoopConfig(config, source, { preserveDiscovery: true }),
-        useBuiltIn: () => resetLoopDefs(),
+        useBuiltIn: () => resetLoopDefs({ preserveDiscovery: true }),
         exportText: (text, filename) => adapters.userEffects.downloadText(text, filename),
         log,
         now: Date.now
@@ -20829,6 +20888,7 @@
       if (restoredProfile.status === "blocked") {
         log(`Active Builder profile was not restored before Player Pick refresh: ${(restoredProfile.errors || []).join("; ")}`);
       }
+      renderProfileSelect();
       renderLoopSelect();
       renderLog();
       const panelCommands = createMainPanelCommands({
@@ -20836,6 +20896,8 @@
         log,
         setPanelState,
         openBuilder: (tab) => state.workflowBuilder?.open(tab),
+        selectProfile: (profileId) => state.workflowBuilder?.selectRuntimeProfile(profileId),
+        renderProfiles: renderProfileSelect,
         updateLoopControls,
         savePickOptions: savePickRuntimeOptions,
         saveLoopOptions: saveLoopUiOptions,
@@ -20844,12 +20906,8 @@
         start: startLoop,
         openBatch: openBatchOpenDialogModal,
         reopenRecap: reopenLastRecap,
-        previewPickRecap: previewPlayerPickRecap,
         refreshInventoryCaches,
         scanPlayerPicks: scanAvailablePlayerPickSbcs,
-        loopConfigUrl: LOOP_CONFIG_URL,
-        importLoopConfig,
-        useBuiltIn: () => state.workflowBuilder?.useBuiltIn(),
         userEffects: adapters.userEffects,
         getLogText: () => state.logLines.join("\n"),
         clearLog,

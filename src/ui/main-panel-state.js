@@ -44,6 +44,25 @@ export function renderMainPanelRounds(options = {}) {
   }
 }
 
+export function renderMainPanelProfileOptions(options = {}) {
+  const panel = options.panel;
+  const createOption = options.createOption;
+  const select = query(panel, '#bronze-loop-profile-select');
+  if (!select || typeof createOption !== 'function') return null;
+  const profiles = options.profiles || [];
+  select.textContent = '';
+  for (const profile of profiles) {
+    const option = createOption();
+    option.value = profile.id;
+    option.textContent = profile.name;
+    select.appendChild(option);
+  }
+  const values = Array.from(select.options || []).map((option) => option.value);
+  const selectedId = String(options.selectedId || '');
+  select.value = values.includes(selectedId) ? selectedId : values[0] || '';
+  return select.value || null;
+}
+
 export function renderMainPanelRecap(options = {}) {
   const button = query(options.panel, '#bronze-loop-recap-reopen');
   if (!button) return;
@@ -85,12 +104,10 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-batch-open': busy,
     'bronze-loop-stop': state.running !== true,
     'bronze-loop-select': state.running === true || state.scanningPicks === true || state.loadingLoops === true,
+    'bronze-loop-profile-select': busy,
     'bronze-loop-open-builder': busy,
-    'bronze-loop-validate-json': busy,
     'bronze-loop-refresh': busy,
     'bronze-loop-scan-picks': busy,
-    'bronze-loop-load-json': busy,
-    'bronze-loop-built-in': busy || state.usingBuiltIn === true,
     'bronze-loop-dry-run': state.running === true,
     'bronze-loop-open-rewards': state.running === true,
     'bronze-loop-daily-inventory-only': state.running === true,

@@ -1,0 +1,95 @@
+name: Publish release assets
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - "profiles/**"
+      - "scripts/build-profile-library.mjs"
+      - "src/config/builder-profile.js"
+      - "src/config/loop-schema.js"
+      - "src/config/loops.js"
+      - "src/config/recovery.js"
+      - "src/domain/strategies.js"
+      - "package.json"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub Release tag to update
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run build:profiles
+      - name: Package Profile library
+        shell: pwsh
+        run: Compress-Archive -Path 'dist\profiles\*' -DestinationPath 'dist\DailyLoopRunner.profiles.zip' -Force
+      - name: Resolve target Release
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          if ($env:EVENT_NAME -eq 'release') {
+            $tag = $env:EVENT_TAG
+          } elseif ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            $tag = $env:INPUT_TAG
+          } else {
+            $tag = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $tag) {
+              Write-Host 'No published Release exists; Profile bundle will be attached on the next Release.'
+              Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'tag=' -Encoding utf8
+              exit 0
+            }
+          }
+          $tag = $tag.Trim()
+          if ($tag.TrimStart('v') -ne $version) {
+            Write-Host "Release $tag does not match package version $version; skipping asset upload."
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'tag=' -Encoding utf8
+            exit 0
+          }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "tag=$tag" -Encoding utf8
+      - name: Upload Profile bundle
+        if: steps.release.outputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh release upload $env:RELEASE_TAG `
+            'dist/DailyLoopRunner.profiles.zip' `
+            'dist/profiles/manifest.json#DailyLoopRunner.profiles.manifest.json' `
+            --clobber
+      - name: Upload versioned Runner assets
+        if: steps.release.outputs.tag != '' && github.event_name != 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh release upload $env:RELEASE_TAG `
+            'dist/DailyLoopRunner.user.js' `
+            'DailyLoopRunner.loops.json' `
+            --clobber

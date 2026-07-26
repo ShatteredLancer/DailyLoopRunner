@@ -11,12 +11,11 @@ function harness(overrides = {}) {
     log,
     setPanelState,
     userEffects,
-    loopConfigUrl: 'http://127.0.0.1/loops.json',
     refreshInventoryCaches: vi.fn(async () => {}),
     scanPlayerPicks: vi.fn(async () => {}),
-    importLoopConfig: vi.fn(async () => {}),
     openBuilder: vi.fn(),
-    useBuiltIn: vi.fn(),
+    selectProfile: vi.fn(),
+    renderProfiles: vi.fn(),
     getLogText: () => 'line 1\nline 2',
     now: () => 123,
     ...overrides,
@@ -42,19 +41,6 @@ describe('main panel command orchestration', () => {
     expect(failure.options.refreshInventoryCaches).toHaveBeenCalledOnce();
   });
 
-  it('loads external config with the existing logs and restores loading state on failure', async () => {
-    const success = harness();
-    await expect(success.commands.loadJson()).resolves.toBe(true);
-    expect(success.log).toHaveBeenCalledWith('Importing loop definitions from http://127.0.0.1/loops.json into the Builder draft');
-    expect(success.options.importLoopConfig).toHaveBeenCalledWith('http://127.0.0.1/loops.json');
-    expect(success.state.loadingLoops).toBe(false);
-
-    const failure = harness({ importLoopConfig: vi.fn(async () => { throw new Error('bad json'); }) });
-    await expect(failure.commands.loadJson()).resolves.toBe(false);
-    expect(failure.log).toHaveBeenCalledWith('Loop JSON import failed: bad json');
-    expect(failure.state.loadingLoops).toBe(false);
-  });
-
   it('runs a read-only Player Pick scan and restores scan state on failure', async () => {
     const success = harness();
     await expect(success.commands.scanPicks()).resolves.toBe(true);
@@ -72,11 +58,21 @@ describe('main panel command orchestration', () => {
     expect(failure.options.scanPlayerPicks).toHaveBeenCalledOnce();
   });
 
-  it('preserves built-in, Stop, copy, and download command effects', async () => {
-    const current = harness();
-    expect(current.commands.useBuiltIn()).toBe(true);
-    expect(current.options.useBuiltIn).toHaveBeenCalledOnce();
+  it('switches saved profiles and restores the selector after success or failure', () => {
+    const success = harness();
+    expect(success.commands.selectProfile('starter-bronze-silver-inventory-only')).toBe(true);
+    expect(success.options.selectProfile).toHaveBeenCalledWith('starter-bronze-silver-inventory-only');
+    expect(success.options.renderProfiles).toHaveBeenCalledOnce();
+    expect(success.setPanelState).toHaveBeenCalledOnce();
 
+    const failure = harness({ selectProfile: vi.fn(() => { throw new Error('dynamic Pick unavailable'); }) });
+    expect(failure.commands.selectProfile('custom')).toBe(false);
+    expect(failure.log).toHaveBeenCalledWith('Profile switch failed: dynamic Pick unavailable');
+    expect(failure.options.renderProfiles).toHaveBeenCalledOnce();
+  });
+
+  it('preserves Stop, copy, and download command effects', async () => {
+    const current = harness();
     current.commands.stop();
     expect(current.state.stopping).toBe(true);
     expect(current.log).toHaveBeenCalledWith('Stop requested; waiting for current safe point');
@@ -94,41 +90,32 @@ describe('main panel command orchestration', () => {
     expect(updateLoopControls).toHaveBeenCalledOnce();
   });
 
-  it('opens the visual Builder and its JSON validation tab with the same busy guard', () => {
+  it('opens the visual Builder with the busy guard', () => {
     const success = harness();
     expect(success.commands.openBuilder()).toBe(true);
     expect(success.options.openBuilder).toHaveBeenCalledWith('workflows');
-    expect(success.commands.validateJson()).toBe(true);
-    expect(success.options.openBuilder).toHaveBeenCalledWith('json');
 
     success.state.running = true;
     expect(success.commands.openBuilder()).toBe(false);
-    expect(success.commands.validateJson()).toBe(false);
   });
 
   it('does not start or overlap panel operations while another operation is active', async () => {
     const start = vi.fn();
     const openBatch = vi.fn();
-    const previewPickRecap = vi.fn();
-    const current = harness({ start, openBatch, previewPickRecap });
+    const current = harness({ start, openBatch });
     current.state.scanningPicks = true;
     expect(current.commands.start()).toBe(false);
     expect(current.commands.openBatch()).toBe(false);
-    expect(current.commands.previewPickRecap()).toBe(false);
     await expect(current.commands.refresh()).resolves.toBe(false);
-    await expect(current.commands.loadJson()).resolves.toBe(false);
-    expect(current.commands.useBuiltIn()).toBe(false);
+    expect(current.commands.selectProfile('default')).toBe(false);
     expect(start).not.toHaveBeenCalled();
     expect(openBatch).not.toHaveBeenCalled();
-    expect(previewPickRecap).not.toHaveBeenCalled();
 
     current.state.scanningPicks = false;
     expect(current.commands.start()).toBe(true);
     expect(start).toHaveBeenCalledOnce();
     expect(current.commands.openBatch()).toBe(true);
     expect(openBatch).toHaveBeenCalledOnce();
-    expect(current.commands.previewPickRecap()).toBe(true);
-    expect(previewPickRecap).toHaveBeenCalledOnce();
   });
 
   it('rescans only when scanned Pick metadata is enabled', async () => {

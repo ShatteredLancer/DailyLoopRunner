@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.0
+// @version      0.6.1
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -26,7 +26,6 @@ import {
   BUILDER_PROFILE_KEY,
   CFG,
   FSU_COMPAT_DEFAULTS,
-  LOOP_CONFIG_URL,
   LOOP_UI_OPTIONS_KEY,
   PICK_OPTIONS_KEY,
   REWARD_ALERT_SETTINGS_KEY,
@@ -132,10 +131,7 @@ import {
   createLoopRecapModel,
   hasRecapRareGoldOrAbove,
 } from './reward/loop-recap.js';
-import {
-  createPlayerPickRecapPreviewModel,
-  hasPlayerPickRecapCards,
-} from './reward/player-pick-recap.js';
+import { hasPlayerPickRecapCards } from './reward/player-pick-recap.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
 import {
@@ -177,6 +173,7 @@ import { createMainPanelCommands } from './ui/main-panel-commands.js';
 import { createMainPanelGeometry } from './ui/main-panel-geometry.js';
 import {
   renderMainPanelLoopOptions,
+  renderMainPanelProfileOptions,
   renderMainPanelRecap,
   renderMainPanelRounds,
   renderMainPanelRuntimeState,
@@ -274,7 +271,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.0',
+    version: '0.6.1',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -442,16 +439,6 @@ const state = {
 
   function parseLoopConfig(text) {
     return parseLoopConfigPure(text);
-  }
-
-  async function importLoopConfig(url = LOOP_CONFIG_URL) {
-    const text = await adapters.http.getText(`${url}?t=${Date.now()}`, { useRuntimeFallback: true });
-    const config = state.workflowBuilder?.importConfigText(text, {
-      name: 'Development server import',
-    });
-    if (!config) fail('Workflow Builder is unavailable');
-    log(`Imported ${config.loops.length} Loop(s) from ${url} into the current Builder draft; activate the profile to use them`);
-    return config;
   }
 
   function getSelectedLoopDef() {
@@ -8236,26 +8223,6 @@ function updateLoopControls() {
     return showBatchRecapModal(createBatchOpenRecapPreviewModel());
   }
 
-  function previewPlayerPickRecap() {
-    return showPlayerPickRecap({
-      dom: adapters.dom,
-      model: createPlayerPickRecapPreviewModel({
-        itemDisplayName,
-      }),
-      formatPrice: formatCompactPrice,
-      scheduleStopCheck: setInterval,
-      cancelStopCheck: clearInterval,
-      isStopping: () => false,
-      celebrate: (dialog, specialCount) => triggerRewardFireworks(dialog, specialCount, {
-        dom: adapters.dom,
-        getComputedStyle: (element) => getComputedStyle(element),
-        devicePixelRatio: () => window.devicePixelRatio || 1,
-        now: () => performance.now(),
-        requestFrame: (callback) => requestAnimationFrame(callback),
-      }),
-    });
-  }
-
   async function getSpecialCardPrices(items, label = 'Recap') {
     const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
     if (!specialItems.length) return new Map();
@@ -8674,6 +8641,17 @@ function updateLoopControls() {
     updateLoopControls();
   }
 
+  function renderProfileSelect() {
+    const builder = state.workflowBuilder;
+    if (!builder) return null;
+    return renderMainPanelProfileOptions({
+      panel: document.querySelector('#bronze-loop-panel'),
+      profiles: builder.listRuntimeProfiles(),
+      selectedId: builder.getSelectedRuntimeProfileId(),
+      createOption: () => document.createElement('option'),
+    });
+  }
+
   function installPanel() {
     const mounted = mountMainPanel({
       dom: adapters.dom,
@@ -8719,8 +8697,9 @@ function updateLoopControls() {
         try { return adapters.localStorage.getJson(BUILDER_PROFILE_KEY, null); } catch { return null; }
       },
       saveStore: (store) => adapters.localStorage.setJson(BUILDER_PROFILE_KEY, store),
+      onStoreChange: renderProfileSelect,
       applyConfig: (config, source) => setLoopConfig(config, source, { preserveDiscovery: true }),
-      useBuiltIn: () => resetLoopDefs(),
+      useBuiltIn: () => resetLoopDefs({ preserveDiscovery: true }),
       exportText: (text, filename) => adapters.userEffects.downloadText(text, filename),
       log,
       now: Date.now,
@@ -8729,6 +8708,7 @@ function updateLoopControls() {
     if (restoredProfile.status === 'blocked') {
       log(`Active Builder profile was not restored before Player Pick refresh: ${(restoredProfile.errors || []).join('; ')}`);
     }
+    renderProfileSelect();
     renderLoopSelect();
     renderLog();
     const panelCommands = createMainPanelCommands({
@@ -8736,6 +8716,8 @@ function updateLoopControls() {
       log,
       setPanelState,
       openBuilder: (tab) => state.workflowBuilder?.open(tab),
+      selectProfile: (profileId) => state.workflowBuilder?.selectRuntimeProfile(profileId),
+      renderProfiles: renderProfileSelect,
       updateLoopControls,
       savePickOptions: savePickRuntimeOptions,
       saveLoopOptions: saveLoopUiOptions,
@@ -8744,12 +8726,8 @@ function updateLoopControls() {
       start: startLoop,
       openBatch: openBatchOpenDialogModal,
       reopenRecap: reopenLastRecap,
-      previewPickRecap: previewPlayerPickRecap,
       refreshInventoryCaches,
       scanPlayerPicks: scanAvailablePlayerPickSbcs,
-      loopConfigUrl: LOOP_CONFIG_URL,
-      importLoopConfig,
-      useBuiltIn: () => state.workflowBuilder?.useBuiltIn(),
       userEffects: adapters.userEffects,
       getLogText: () => state.logLines.join('\n'),
       clearLog,

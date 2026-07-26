@@ -34,6 +34,15 @@ flowchart LR
 2. 点击 `Open Builder`。
 3. 建议第一次修改前点击 `New profile`，为实验配置建立独立 Profile。
 
+主面板的 `Profile` 下拉用于切换实际运行配置，默认包含：
+
+- `Built-in`：停用 Active Profile，恢复脚本内置配置。
+- `Default`：可编辑的默认 Starter Profile。
+- `Bronze/Silver Inventory Only`：只让 Daily Bronze、Daily Silver、Daily Common 等使用铜/银材料的 Loop 使用库存模式；其他可配置 Loop 和父 Workflow 显式保持 `normal`。因此它是一个小范围持久策略，不等同于主面板 `Inventory only` 的全局运行时默认值。
+- 用户在 Builder 创建的其他 Profile。
+
+主面板只加载 Profile 的 Saved/last-known-good，不会应用 Builder 中尚未保存的 Draft。Builder 顶部的 Profile 下拉用于切换当前编辑对象；修改完成后仍需 Save/Activate，或先 Save 再回主面板选择该 Profile。
+
 ![Workflow Builder 整体界面](images/workflow-loop-builder-overview.png)
 
 界面由四个区域组成：
@@ -101,7 +110,7 @@ flowchart LR
 - `Preview`：查看最终 Workflow 顺序、策略、数量、奖励和库存摘要，不执行 Dry run，更不会开包或提交 SBC。
 - `Save`：验证 Draft 并保存为 Saved/last-known-good，但不切换当前 Runner。
 - `Activate`：验证当前 Draft，保存它，并立即作为 Active Profile 应用到主面板。
-- `Built-in loops`：在主面板停用 Active Profile 并恢复脚本内置配置，Profile 本身不会被删除。
+- 主面板 `Profile -> Built-in`：停用 Active Profile 并恢复脚本内置配置，Profile 本身不会被删除。
 
 因此修改完成后的推荐顺序是：
 
@@ -313,7 +322,7 @@ JSON 现在是兼容和诊断入口，不是独立运行路径：
 ### 想完全回退
 
 - 单个内置 Override：点击 `Reset`。
-- 整个运行配置：主面板点击 `Built-in loops`。
+- 整个运行配置：主面板选择 `Profile -> Built-in`。
 - 保留当前实验并另起配置：创建 `New profile`。
 
 ## 15. 当前首版限制
@@ -337,4 +346,3 @@ JSON 现在是兼容和诊断入口，不是独立运行路径：
 7. 点击 Preview，确认 Workflow 步骤和每个 Loop 摘要。
 8. 点击 Activate。
 9. 首次真实运行时启用主面板 `Dry run`，确认日志后再关闭。
-

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "default",
+  "name": "Default",
+  "description": "Editable profile that follows the current built-in Workflow and Loop configuration.",
+  "preset": "default",
+  "minimumRunnerVersion": "0.6.1",
+  "tags": ["official", "default"]
+}

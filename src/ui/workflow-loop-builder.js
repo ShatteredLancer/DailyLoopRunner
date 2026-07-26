@@ -1,6 +1,8 @@
 import { cloneLoopDef } from '../domain/objects.js';
 import {
   activateBuilderProfile,
+  activateSavedBuilderProfile,
+  BUILDER_BUILT_IN_PROFILE_ID,
   builderObjectSources,
   createBuilderProfile,
   createBuilderStore,
@@ -135,7 +137,9 @@ export function createWorkflowLoopBuilder(options = {}) {
   }
 
   function persist() {
-    options.saveStore?.(clone(store));
+    const snapshot = clone(store);
+    options.saveStore?.(snapshot);
+    options.onStoreChange?.(snapshot);
   }
 
   function setProfile(nextProfile, persistNow = true) {
@@ -923,6 +927,24 @@ export function createWorkflowLoopBuilder(options = {}) {
     return { status: 'applied', config: clone(validation.config) };
   }
 
+  function selectRuntimeProfile(nextProfileId) {
+    if (String(nextProfileId) === BUILDER_BUILT_IN_PROFILE_ID) {
+      useBuiltIn();
+      return { status: 'built-in', profileId: null, config: null };
+    }
+    const activated = activateSavedBuilderProfile(store, nextProfileId, builtInConfig());
+    store = activated.store;
+    profileId = activated.profile.id;
+    persist();
+    options.applyConfig?.(clone(activated.config), `Builder profile: ${activated.profile.name}`);
+    if (root.classList.contains('open')) render();
+    return {
+      status: 'applied',
+      profileId: activated.profile.id,
+      config: clone(activated.config),
+    };
+  }
+
   function useBuiltIn() {
     store = deactivateBuilderProfile(store);
     persist();
@@ -948,7 +970,13 @@ export function createWorkflowLoopBuilder(options = {}) {
     importConfigText,
     refreshDynamic,
     restoreActiveProfile,
+    selectRuntimeProfile,
     useBuiltIn,
+    listRuntimeProfiles: () => [
+      { id: BUILDER_BUILT_IN_PROFILE_ID, name: 'Built-in', builtIn: true },
+      ...store.profiles.map((entry) => ({ id: entry.id, name: entry.name, preset: entry.preset || null })),
+    ],
+    getSelectedRuntimeProfileId: () => store.activeProfileId || BUILDER_BUILT_IN_PROFILE_ID,
     getStore: () => clone(store),
     isOpen: () => root.classList.contains('open'),
     root,

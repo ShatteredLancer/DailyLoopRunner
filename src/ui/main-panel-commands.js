@@ -8,14 +8,23 @@ export function createMainPanelCommands(options = {}) {
     selectLoop() {
       options.updateLoopControls?.();
     },
+    selectProfile(profileId) {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+      try {
+        options.selectProfile?.(profileId);
+        options.renderProfiles?.();
+        setPanelState();
+        return true;
+      } catch (error) {
+        log(`Profile switch failed: ${error?.message || error}`);
+        options.renderProfiles?.();
+        setPanelState();
+        return false;
+      }
+    },
     openBuilder() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
       options.openBuilder?.('workflows');
-      return true;
-    },
-    validateJson() {
-      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-      options.openBuilder?.('json');
       return true;
     },
     async savePickOptions(event) {
@@ -37,11 +46,6 @@ export function createMainPanelCommands(options = {}) {
       return true;
     },
     reopenRecap: options.reopenRecap,
-    previewPickRecap() {
-      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-      options.previewPickRecap?.();
-      return true;
-    },
     async refresh() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
       state.refreshing = true;
@@ -71,28 +75,6 @@ export function createMainPanelCommands(options = {}) {
         state.scanningPicks = false;
         setPanelState();
       }
-    },
-    async loadJson() {
-      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-      state.loadingLoops = true;
-      setPanelState();
-      try {
-        log(`Importing loop definitions from ${options.loopConfigUrl} into the Builder draft`);
-        await options.importLoopConfig?.(options.loopConfigUrl);
-        return true;
-      } catch (error) {
-        log(`Loop JSON import failed: ${error?.message || error}`);
-        return false;
-      } finally {
-        state.loadingLoops = false;
-        setPanelState();
-      }
-    },
-    useBuiltIn() {
-      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
-      options.useBuiltIn?.();
-      setPanelState();
-      return true;
     },
     stop() {
       state.stopping = true;

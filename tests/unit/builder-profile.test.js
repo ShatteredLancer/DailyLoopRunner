@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   activateBuilderProfile,
+  activateSavedBuilderProfile,
+  BUILDER_STARTER_PROFILE_IDS,
   builderObjectSources,
   createBuilderProfile,
   createBuilderStore,
@@ -36,6 +38,108 @@ function config(overrides = {}) {
 }
 
 describe('Builder profiles', () => {
+  it('creates default and bronze/silver inventory-only starter profiles', () => {
+    const base = config();
+    base.loops.push(
+      {
+        id: 'daily-bronze',
+        name: 'Daily Bronze',
+        strategy: 'dailySingleCardRecycle',
+        sbcNames: ['Daily Bronze'],
+        targetDuplicate: { tier: 'bronze', playerOnly: true, allowSpecial: false },
+      },
+      {
+        id: 'daily-common',
+        name: 'Daily Common',
+        strategy: 'supplyAndCraft',
+        sbcNames: ['Daily Common'],
+        requirements: [{ tier: 'silver', count: 5 }, { tier: 'bronze', count: 5 }],
+      },
+      {
+        id: 'daily-rare',
+        name: 'Daily Rare',
+        strategy: 'supplyAndCraft',
+        sbcNames: ['Daily Rare'],
+        requirements: [{ tier: 'gold', rarity: 'common', count: 5 }],
+      },
+    );
+    const store = createBuilderStore({ baseConfig: base, now: 1 });
+    expect(store.profiles.map((profile) => profile.id)).toEqual([
+      BUILDER_STARTER_PROFILE_IDS.default,
+      BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly,
+    ]);
+    const inventoryOnly = store.profiles.find((profile) => profile.id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
+    expect(inventoryOnly.savedConfig.loops.find((loop) => loop.id === 'base').inventoryMode).toBe('normal');
+    expect(inventoryOnly.savedConfig.loops.find((loop) => loop.id === 'daily-bronze').inventoryMode).toBe('inventory-only');
+    expect(inventoryOnly.savedConfig.loops.find((loop) => loop.id === 'daily-common').inventoryMode).toBe('inventory-only');
+    expect(inventoryOnly.savedConfig.loops.find((loop) => loop.id === 'daily-rare').inventoryMode).toBe('normal');
+    expect(inventoryOnly.savedConfig.loops.find((loop) => loop.id === 'child').inventoryMode).toBeUndefined();
+    expect(validateBuilderProfile(inventoryOnly, base).valid).toBe(true);
+  });
+
+  it('scopes the bronze/silver starter against the complete built-in configuration', () => {
+    const builtIns = {
+      loops: LOOP_DEFS,
+      recoveryRecipes: RECOVERY_RECIPES,
+      unassignedRecoveryPolicies: UNASSIGNED_RECOVERY_POLICIES,
+      defaultUnassignedRecoveryPolicyIds: DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
+    };
+    const store = createBuilderStore({ baseConfig: builtIns });
+    const profile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
+    const modes = new Map(profile.savedConfig.loops.map((loop) => [loop.id, loop.inventoryMode]));
+    for (const id of [
+      'daily-bronze', 'daily-bronze-mvp',
+      'daily-silver', 'daily-silver-mvp',
+      'daily-common', 'daily-common-mvp',
+    ]) {
+      expect(modes.get(id), id).toBe('inventory-only');
+    }
+    for (const id of ['one-click-daily', 'one-click-daily-mvp', 'daily-rare', 'daily-rare-mvp']) {
+      expect(modes.get(id), id).toBe('normal');
+    }
+  });
+
+  it('adds missing starter profiles without replacing an existing profile with the same id', () => {
+    const base = config();
+    const store = createBuilderStore({ baseConfig: base });
+    store.profiles[0].name = 'My Default';
+    store.profiles = [store.profiles[0]];
+    const normalized = normalizeBuilderStore(store, base);
+    expect(normalized.profiles.find((profile) => profile.id === 'default').name).toBe('My Default');
+    expect(normalized.profiles.map((profile) => profile.id)).toContain(BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
+  });
+
+  it('migrates an untouched legacy Inventory Only starter without overwriting customized copies', () => {
+    const base = config();
+    const legacyConfig = {
+      ...base,
+      loops: base.loops.map((loop) => loop.strategy === 'workflowRoutine'
+        ? { ...loop, inventoryMode: 'inventory-only' }
+        : loop),
+    };
+    const legacy = createBuilderProfile({
+      id: 'starter-inventory-only',
+      name: 'Inventory Only',
+      preset: 'inventory-only',
+      baseConfig: base,
+      config: legacyConfig,
+    });
+    const migrated = normalizeBuilderStore({
+      schemaVersion: 1,
+      activeProfileId: legacy.id,
+      activeDynamicBindings: [],
+      profiles: [createBuilderProfile({ baseConfig: base }), legacy],
+      lastKnownGood: legacyConfig,
+    }, base);
+    expect(migrated.activeProfileId).toBe(BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
+    expect(migrated.profiles.map((profile) => profile.id)).not.toContain('starter-inventory-only');
+
+    legacy.name = 'My Inventory Profile';
+    const customized = normalizeBuilderStore({ schemaVersion: 1, profiles: [legacy] }, base);
+    expect(customized.profiles.map((profile) => profile.id)).toContain('starter-inventory-only');
+    expect(customized.profiles.map((profile) => profile.id)).toContain(BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
+  });
+
   it('round-trips validated JSON and stable fingerprints', () => {
     const base = config();
     const profile = importBuilderProfileJson(JSON.stringify(base), {
@@ -120,6 +224,17 @@ describe('Builder profiles', () => {
     expect(activated.config.loops.map((loop) => loop.id)).toContain('extra');
   });
 
+  it('activates only the saved revision and never leaks a later draft', () => {
+    const base = config();
+    const store = createBuilderStore({ baseConfig: base });
+    store.profiles[0].draftConfig.loops.push({
+      id: 'draft-only', name: 'Draft only', strategy: 'fillAndVerifySbc', sbcNames: ['Draft SBC'],
+    });
+    const activated = activateSavedBuilderProfile(store, 'default', base);
+    expect(activated.config.loops.map((loop) => loop.id)).not.toContain('draft-only');
+    expect(activated.store.activeProfileId).toBe('default');
+  });
+
   it('deactivates a profile without deleting its saved configuration', () => {
     const base = config();
     const store = createBuilderStore({ baseConfig: base });
@@ -188,7 +303,7 @@ describe('Builder profiles', () => {
       profiles: [{ id: 'broken', draftConfig: { loops: 'invalid' } }],
     }, base);
     expect(normalized.activeProfileId).toBeNull();
-    expect(normalized.profiles).toHaveLength(1);
+    expect(normalized.profiles).toHaveLength(2);
     expect(normalized.profiles[0].draftConfig).toEqual(base);
   });
 });

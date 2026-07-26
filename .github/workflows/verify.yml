@@ -16,5 +16,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify
+      - run: npm run build:profiles
       - name: Check generated compatibility userscript is committed
         run: git diff --exit-code -- DailyLoopRunner.user.js
+      - name: Upload Profile library preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: DailyLoopRunner-profiles
+          path: dist/profiles
