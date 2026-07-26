@@ -5,6 +5,24 @@ export async function openPackTransaction(options = {}) {
   const retryCodes = new Set((options.retryPolicy?.retryCodes || []).map(String));
   let lastReason = null;
 
+  if (options.dryRun === true) {
+    const pack = await options.packSelector?.({ attempt: 1, lastReason: null, dryRun: true });
+    if (!pack) {
+      return createOpenPackReceipt({
+        status: 'unavailable',
+        reason: 'matching pack is unavailable',
+        attempts: 0,
+      });
+    }
+    const packRef = options.packRef ? options.packRef(pack) : { id: Number(pack.id || 0), name: String(pack.name || '') };
+    return createOpenPackReceipt({
+      status: 'planned',
+      packRef,
+      reason: 'dry run would open pack',
+      attempts: 0,
+    });
+  }
+
   if (options.preOpenResolver) {
     const preOpen = await options.preOpenResolver();
     if (preOpen?.status === 'blocked') {

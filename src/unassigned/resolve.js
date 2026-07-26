@@ -23,6 +23,19 @@ export async function resolveUnassigned(options = {}) {
       };
     }
 
+    if (options.dryRun === true && (plan.status === 'action' || plan.status === 'blocked')) {
+      const reason = plan.status === 'action'
+        ? `dry run would ${plan.action.description}`
+        : `dry run would preserve blocked Unassigned recovery: ${plan.blocked.destination} capacity ${plan.blocked.free}/${plan.blocked.required}`;
+      return {
+        status: 'planned',
+        reason,
+        iterations: iteration,
+        plan,
+        snapshot,
+      };
+    }
+
     if (plan.status === 'action') {
       await options.executeAction(plan.action, { plan, snapshot, iteration });
       let after = null;

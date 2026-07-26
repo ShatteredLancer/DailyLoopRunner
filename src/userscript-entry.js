@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.14
+// @version      0.6.15
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -277,7 +277,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.14',
+    version: '0.6.15',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -1712,6 +1712,7 @@ function updateLoopControls() {
         });
     const result = await resolveUnassigned({
       getSnapshot,
+      dryRun: options.dryRun === true || state.loopStack.some((loopDef) => loopDef?.dryRun === true),
       reserveItem: (item) => reservedIds.has(Number(item?.id || 0)),
       overflowResolvers: [...(options.overflowResolvers || []), ...configuredResolvers],
       blockedPolicy: options.blockedPolicy || 'fail',
@@ -2056,6 +2057,10 @@ function updateLoopControls() {
     state.loopRecapSession.receipts.push(receipt);
   }
 
+  function isDryRunEffectGuarded(options = {}) {
+    return options.dryRun === true || state.loopStack.some((loopDef) => loopDef?.dryRun === true);
+  }
+
   async function openPack(pack, purpose, options = {}) {
     if (!pack) fail(`Pack not found for ${purpose}`);
     if (typeof options.openedItemPolicy !== 'function') {
@@ -2067,7 +2072,9 @@ function updateLoopControls() {
     let routingBaseline = null;
     const retryCodes = options.retryCodes || (options.retryOn471 === true ? ['471'] : []);
     const preOpenUnassignedOptions = options.preOpenUnassignedOptions || {};
+    const dryRun = isDryRunEffectGuarded(options);
     const receipt = await openPackTransaction({
+      dryRun,
       preOpenResolver: () => resolveRuntimeUnassigned(
         `opening ${purpose}`,
         preOpenUnassignedOptions,
@@ -2158,6 +2165,10 @@ function updateLoopControls() {
     });
     state.lastOpenPackReceipt = receipt;
     recordLoopPackReceipt(receipt);
+    if (receipt.status === 'planned') {
+      log(`${purpose}: dry-run would open ${receipt.packRef?.name || packName(pack)} (#${receipt.packRef?.id || pack.id || '?'})`);
+      return receipt;
+    }
     if (receipt.status === 'opened') {
       if (receipt.pendingItemRefs.length && options.allowPendingItems !== true) {
         fail(`${purpose}: ${receipt.pendingItemRefs.length} opened item(s) remain unresolved; stopping before another pack or SBC action`);
@@ -6340,6 +6351,7 @@ function updateLoopControls() {
       if (!fillResult.submitReady) fail(`${loopDef.name}: submit is not ready after protection inspection`);
       const submitAttempt = await submitSbcAttempt({
         label: loopDef.name,
+        dryRun: loopDef.dryRun === true,
         challengeProvider: async () => opened,
         squadProvider: createExistingSquadProvider({
           getPlayers: async () => inspection.items,
@@ -6888,7 +6900,7 @@ function updateLoopControls() {
     const label = options.label || loopDef.name;
     const result = await submitSbcAttempt({
       label,
-      dryRun: options.dryRun === true,
+      dryRun: options.dryRun === true || loopDef.dryRun === true,
       challengeProvider: async () => {
         if (options.opened) {
           openedContext = options.opened;
