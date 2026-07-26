@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.16
+// @version      0.6.17
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -10149,12 +10149,12 @@
     box-shadow: 0 4px 16px rgba(0,0,0,.28);
   }
   #bronze-loop-panel.icon-only .panel-body,
-  #bronze-loop-panel.icon-only #bronze-loop-title,
-  #bronze-loop-panel.icon-only #bronze-loop-help-overview,
+  #bronze-loop-panel.icon-only .bronze-loop-title-label,
   #bronze-loop-panel.icon-only #bronze-loop-options-toggle { display: none; }
   #bronze-loop-panel.icon-only #bronze-loop-drag { width: 34px; height: 34px; margin: 0; justify-content: center; }
   #bronze-loop-drag { cursor: move; user-select: none; justify-content: space-between; }
-  #bronze-loop-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bronze-loop-title-label { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
+  #bronze-loop-title { flex: 0 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bronze-loop-title-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
   #bronze-loop-panel .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
   #bronze-loop-panel button { min-width: 62px; height: 26px; cursor: pointer; font-size: 11px; background: #222832; color: #fff; border: 1px solid #607089; }
@@ -10170,7 +10170,7 @@
     font-weight: 700;
   }
   #bronze-loop-options-toggle { min-width: 58px; }
-  #bronze-loop-panel .bronze-loop-help-button { min-width: 22px; width: 22px; height: 22px; padding: 0; border-radius: 50%; font-weight: 700; line-height: 1; }
+  #bronze-loop-panel .bronze-loop-help-button { min-width: 18px; width: 18px; height: 18px; padding: 0; border-radius: 50%; font-size: 10px; font-weight: 700; line-height: 1; }
   #bronze-loop-panel input { width: 54px; height: 24px; background: #222832; color: #fff; border: 1px solid #607089; box-sizing: border-box; }
   #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
@@ -10200,7 +10200,7 @@
   #bronze-loop-panel.options-open #bronze-loop-options { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
   #bronze-loop-panel.options-open #bronze-loop-latest { display: none; }
   #bronze-loop-options-scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
-  .bronze-loop-section-heading { display: flex; align-items: center; gap: 6px; margin: 8px 0 6px; }
+  .bronze-loop-section-heading { display: flex; align-items: center; gap: 4px; margin: 8px 0 6px; }
   .bronze-loop-section { color: #9fb2c9; font-size: 11px; }
   #bronze-loop-log {
     flex: 0 0 auto;
@@ -10247,9 +10247,8 @@
     const resizeHandles = ["n", "s", "e", "w", "ne", "nw", "se", "sw"].map((dir) => `<div class="bronze-loop-resize" id="bronze-loop-resize-${dir}"></div>`).join("\n");
     return `
     <div class="row" id="bronze-loop-drag">
-      <span id="bronze-loop-title">${title}</span>
+      <div class="bronze-loop-title-label"><span id="bronze-loop-title">${title}</span><button id="bronze-loop-help-overview" class="bronze-loop-help-button" type="button" title="Loop Runner guide" aria-label="Loop Runner guide">?</button></div>
       <div class="bronze-loop-title-actions">
-        <button id="bronze-loop-help-overview" class="bronze-loop-help-button" type="button" title="Loop Runner guide" aria-label="Loop Runner guide">?</button>
         <button id="bronze-loop-options-toggle" title="Options">Options</button>
         <button id="bronze-loop-collapse" title="Compact">L</button>
       </div>
@@ -14245,7 +14244,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.16",
+      version: "0.6.17",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),

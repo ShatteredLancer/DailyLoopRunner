@@ -30,6 +30,7 @@ describe('main panel view template', () => {
     }
     expect(html).toContain('<button id="bronze-loop-collapse" title="Compact">L</button>');
     expect(html).toContain('<span id="bronze-loop-title">Loop Runner v0.6.10</span>');
+    expect(html).toContain('<div class="bronze-loop-title-label"><span id="bronze-loop-title">Loop Runner v0.6.10</span><button id="bronze-loop-help-overview"');
     expect(html).toContain('id="bronze-loop-rounds" type="number" min="1" max="50" value="7"');
     expect(html).toContain('type="checkbox"> Inventory only');
   });
@@ -88,6 +89,10 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-options-scroll { flex: 1 1 auto;');
     expect(MAIN_PANEL_STYLE).toContain('overflow-y: auto;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.icon-only .panel-body,');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.icon-only .bronze-loop-title-label,');
+    expect(MAIN_PANEL_STYLE).toContain('.bronze-loop-title-label { display: flex; align-items: center; gap: 4px;');
+    expect(MAIN_PANEL_STYLE).toContain('.bronze-loop-section-heading { display: flex; align-items: center; gap: 4px;');
+    expect(MAIN_PANEL_STYLE).toContain('min-width: 18px; width: 18px; height: 18px;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.startup-hidden {');
     expect(MAIN_PANEL_STYLE).toContain('visibility: hidden;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-latest {');
