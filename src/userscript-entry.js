@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.13
+// @version      0.6.14
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -277,7 +277,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.13',
+    version: '0.6.14',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -2306,7 +2306,15 @@ function updateLoopControls() {
 
   async function findAvailableRatingSbcChallenge(set, label = set?.name || 'rating SBC') {
     const challenges = await requestRatingSbcChallenges(set, label);
-    return challenges.find((challenge) => !isCompletedChallenge(challenge)) || null;
+    const available = challenges.find((challenge) => !isCompletedChallenge(challenge)) || null;
+    if (!available && challenges.length) {
+      const states = challenges.map((challenge, index) => {
+        const status = String(challenge?.status || challenge?.state || 'unknown').toUpperCase();
+        return `#${challenge?.id || '?'} (${index + 1}/${challenges.length}) status:${status} completed:${isCompletedChallenge(challenge) ? 'yes' : 'no'}`;
+      });
+      log(`${label}: no incomplete direct rating challenge; ${states.join('; ')}`);
+    }
+    return available;
   }
 
   async function loadRatingSbcChallenge(challenge, label = 'rating SBC', options = {}) {
