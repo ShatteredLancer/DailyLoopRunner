@@ -15,7 +15,7 @@ Official presets may reference a built-in preset:
   "name": "Example",
   "description": "What this Profile changes.",
   "preset": "default",
-  "minimumRunnerVersion": "0.6.1",
+  "minimumRunnerVersion": "0.6.10",
   "tags": ["official"]
 }
 ```
@@ -28,7 +28,7 @@ Uploaded custom Profiles should contain the complete validated Builder export un
   "id": "my-profile",
   "name": "My Profile",
   "description": "A complete custom Workflow/Loop configuration.",
-  "minimumRunnerVersion": "0.6.1",
+  "minimumRunnerVersion": "0.6.10",
   "tags": ["community"],
   "config": {
     "loops": [],

@@ -170,6 +170,32 @@ describe('Workflow and Loop Builder controller', () => {
     ]);
   });
 
+  it('retains an existing dynamic Upgrade binding when validated JSON keeps the Loop', () => {
+    const base = config();
+    const dynamic = {
+      id: 'dynamic-upgrade',
+      name: '10x 85+ Upgrade',
+      strategy: 'fillAndVerifySbc',
+      discoveryKind: 'upgrade',
+      sbcNames: ['10x 85+ Upgrade'],
+      sbcSetIds: [900],
+      rewardPackIds: [300],
+      ratingSbcFill: { targetRating: 88, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+    };
+    const store = createBuilderStore({ baseConfig: base });
+    store.profiles[0].draftConfig.loops.push(dynamic);
+    store.profiles[0].savedConfig.loops.push(dynamic);
+    store.profiles[0].lastKnownGood.loops.push(dynamic);
+    store.profiles[0].dynamicBindings = [{ loopId: dynamic.id, sbcSetIds: [900], rewardPackIds: [300], definition: dynamic }];
+    const { builder } = harness(store, base);
+
+    builder.importConfigText(JSON.stringify({ ...base, loops: [...base.loops, dynamic] }), { open: false });
+
+    expect(builder.getStore().profiles[0].dynamicBindings).toEqual([
+      expect.objectContaining({ loopId: dynamic.id, sbcSetIds: [900], rewardPackIds: [300] }),
+    ]);
+  });
+
   it('undoes and redoes draft imports without changing the runtime configuration', () => {
     const { builder, applyConfig } = harness();
     const imported = { ...config(), loops: [...config().loops, { id: 'extra', name: 'Extra', strategy: 'fillAndVerifySbc', sbcNames: ['Extra'] }] };

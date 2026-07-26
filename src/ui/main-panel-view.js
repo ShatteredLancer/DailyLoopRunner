@@ -69,6 +69,7 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
   #bronze-loop-panel .bronze-loop-option-summary { color: #9fb2c9; font-size: 11px; flex: 1 1 auto; min-width: 100px; }
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
+  #bronze-loop-scan-mode { flex: 0 1 94px !important; min-width: 86px !important; }
   #bronze-loop-panel .bronze-loop-profile-row span { flex: 0 0 auto; color: #9fb2c9; }
   #bronze-loop-latest {
     flex: 1 1 auto;
@@ -114,14 +115,16 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-log .bronze-loop-log-high-rated { color: #ffd54a; font-weight: 700; }
 `;
 
-export function mainPanelHtml(maxRounds = 3) {
+export function mainPanelHtml(maxRounds = 3, version = '') {
   const rounds = Math.max(1, Number(maxRounds) || 3);
+  const versionLabel = String(version || '').trim();
+  const title = versionLabel ? `Loop Runner v${versionLabel}` : 'Loop Runner';
   const resizeHandles = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
     .map((dir) => `<div class="bronze-loop-resize" id="bronze-loop-resize-${dir}"></div>`)
     .join('\n');
   return `
     <div class="row" id="bronze-loop-drag">
-      <span id="bronze-loop-title">Loop Runner</span>
+      <span id="bronze-loop-title">${title}</span>
       <button id="bronze-loop-options-toggle" title="Options">Options</button>
       <button id="bronze-loop-collapse" title="Compact">L</button>
     </div>
@@ -180,7 +183,7 @@ export function mainPanelHtml(maxRounds = 3) {
         </div>
         <div class="bronze-loop-section">Config</div>
           <div class="row bronze-loop-profile-row"><span>Profile</span><select id="bronze-loop-profile-select" title="Load a saved Builder Profile or restore built-in loops"></select></div>
-          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button><button id="bronze-loop-scan-picks" title="Rescan active Player Pick SBCs and refresh dynamic Builder bindings">Scan Picks</button></div>
+          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental</option><option value="full">Full rescan</option><option value="clear">Clear cache</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
         </div>
         <div class="bronze-loop-section">Log</div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
@@ -206,7 +209,7 @@ export function mountMainPanel(options = {}) {
   const panel = dom.create('div');
   panel.id = 'bronze-loop-panel';
   if (options.startupHidden === true) panel.classList?.add?.('startup-hidden');
-  panel.innerHTML = mainPanelHtml(options.maxRounds);
+  panel.innerHTML = mainPanelHtml(options.maxRounds, options.version);
   dom.appendToBody(panel);
   return { panel, style, created: true };
 }

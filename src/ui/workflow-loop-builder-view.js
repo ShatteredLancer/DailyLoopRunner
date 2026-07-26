@@ -573,7 +573,7 @@ function renderPreview(model) {
     <section class="dlr-builder-form-section"><h2>Atomic Loops</h2>
       <div class="dlr-builder-preview-table">${atomic.map((loop) => `<div><strong>${escapeHtml(loop.name)}</strong><code>${escapeHtml(loop.id)}</code><span>${escapeHtml(loop.strategy)}</span><span>${escapeHtml(quantitySummary(loop))}</span><span>Inventory: ${escapeHtml(loop.inventoryMode || 'inherit')}</span><span>Rewards: ${escapeHtml(rewardSummary(loop))}</span></div>`).join('')}</div>
     </section>
-    ${model.validation.unavailableBindings.length ? `<section class="dlr-builder-form-section"><h2>Unavailable Dynamic Picks</h2><ul class="dlr-builder-errors">${model.validation.unavailableBindings.map((binding) => `<li>${escapeHtml(binding.loopId || binding.id)}</li>`).join('')}</ul></section>` : ''}
+    ${model.validation.unavailableBindings.length ? `<section class="dlr-builder-form-section"><h2>Unavailable Dynamic SBCs</h2><ul class="dlr-builder-errors">${model.validation.unavailableBindings.map((binding) => `<li>${escapeHtml(binding.loopId || binding.id)}</li>`).join('')}</ul></section>` : ''}
   </main>`;
 }
 
@@ -691,7 +691,7 @@ export const WORKFLOW_LOOP_BUILDER_STYLE = `
 export function workflowLoopBuilderHtml(model) {
   const profileOptions = model.store.profiles.map((profile) => ({ value: profile.id, label: profile.name }));
   const tabs = [
-    ['workflows', 'Workflows'], ['loops', 'Loops'], ['recovery', 'Recovery'], ['dynamic', 'Dynamic Picks'], ['json', 'JSON validation'],
+    ['workflows', 'Workflows'], ['loops', 'Loops'], ['recovery', 'Recovery'], ['dynamic', 'Dynamic SBCs'], ['json', 'JSON validation'],
   ];
   const selected = model.selectedObject ? { kind: model.selectedKind, object: model.selectedObject } : null;
   const context = {

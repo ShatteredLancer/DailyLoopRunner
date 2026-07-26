@@ -8,7 +8,7 @@ import {
 
 describe('main panel view template', () => {
   it('contains the compact controls, one latest log, and one full log', () => {
-    const html = mainPanelHtml(7);
+    const html = mainPanelHtml(7, '0.6.10');
     for (const id of [
       'bronze-loop-select',
       'bronze-loop-start',
@@ -24,6 +24,7 @@ describe('main panel view template', () => {
       expect(html.match(new RegExp(`id="${id}"`, 'g')) || [], id).toHaveLength(1);
     }
     expect(html).toContain('<button id="bronze-loop-collapse" title="Compact">L</button>');
+    expect(html).toContain('<span id="bronze-loop-title">Loop Runner v0.6.10</span>');
     expect(html).toContain('id="bronze-loop-rounds" type="number" min="1" max="50" value="7"');
     expect(html).toContain('type="checkbox"> Inventory only');
   });
@@ -43,6 +44,7 @@ describe('main panel view template', () => {
       'bronze-loop-pick-auto-threshold',
       'bronze-loop-profile-select',
       'bronze-loop-refresh',
+      'bronze-loop-scan-mode',
       'bronze-loop-scan-picks',
       'bronze-loop-open-builder',
       'bronze-loop-copy',
@@ -113,12 +115,13 @@ describe('main panel view template', () => {
       appendToHead: (element) => { head.push(element); existing.set(`#${element.id}`, element); },
       appendToBody: (element) => { body.push(element); existing.set(`#${element.id}`, element); },
     };
-    const first = mountMainPanel({ dom, maxRounds: 7, startupHidden: true });
+    const first = mountMainPanel({ dom, maxRounds: 7, version: '0.6.10', startupHidden: true });
     expect(first.created).toBe(true);
     expect(head).toHaveLength(1);
     expect(body).toHaveLength(1);
     expect(head[0].textContent).toBe(MAIN_PANEL_STYLE);
     expect(body[0].innerHTML).toContain('id="bronze-loop-rounds" type="number" min="1" max="50" value="7"');
+    expect(body[0].innerHTML).toContain('<span id="bronze-loop-title">Loop Runner v0.6.10</span>');
     expect(first.panel.classList.contains('startup-hidden')).toBe(true);
 
     setMainPanelStartupHidden(first.panel, false);

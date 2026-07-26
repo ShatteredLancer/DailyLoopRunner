@@ -109,7 +109,7 @@ describe('main panel state rendering', () => {
     const ids = [
       'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-select',
       'bronze-loop-profile-select', 'bronze-loop-open-builder',
-      'bronze-loop-refresh', 'bronze-loop-scan-picks', 'bronze-loop-dry-run',
+      'bronze-loop-refresh', 'bronze-loop-scan-mode', 'bronze-loop-scan-picks', 'bronze-loop-dry-run',
       'bronze-loop-open-rewards', 'bronze-loop-pick-protect-high-gold', 'bronze-loop-pick-auto-below-90',
       'bronze-loop-daily-inventory-only',
       'bronze-loop-pick-prefer-scanned',
@@ -126,6 +126,7 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-stop').disabled).toBe(true);
     expect(controls.get('bronze-loop-refresh').disabled).toBe(true);
     expect(controls.get('bronze-loop-scan-picks').disabled).toBe(true);
+    expect(controls.get('bronze-loop-scan-mode').disabled).toBe(true);
     expect(controls.get('bronze-loop-profile-select').disabled).toBe(true);
     expect(controls.get('bronze-loop-select').disabled).toBe(true);
 

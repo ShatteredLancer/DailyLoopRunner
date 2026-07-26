@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.1`
-- Git 基线：当前 `0.6.1` Profile library release
+- Userscript 版本：`0.6.10`
+- Git 基线：当前 `0.6.10` Dynamic SBC discovery and cache release
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -516,11 +516,11 @@ M7 完成后应删除或降级为声明式 Workflow 的旧函数：
 
 正式切换条件：连续多次真实运行无旧路径回退需求，且远程合并后完整测试仍通过。
 
-### M9：动态 Player Pick SBC 发现
+### M9：统一 Dynamic SBC 发现与增量缓存
 
 Status: In Progress
 
-目标：插件自动扫描当前 EA 会话中可用的 Player Pick SBC，生成临时 loop 入口供用户选择，不再要求每个新 Pick 都先发布静态脚本配置。
+目标：插件自动扫描当前 EA 会话中受支持的 Player Pick 与 Upgrade SBC，生成或覆盖临时 Loop，并通过逐 SBC 结构指纹减少重复 Challenge 加载。
 
 范围：
 
@@ -531,6 +531,8 @@ Status: In Progress
 - 将扫描结果作为只存在于当前会话的 discovered loop 合并到下拉列表，并与内置/外部 JSON loop 按 Set id 和奖励标识去重。
 - 提供手动 Refresh；活动过期、Challenge 完成或 EA Repository 更新后移除失效入口。
 - 不支持或无法完整解释的动态条件显示为不可运行并输出诊断，不得猜测材料比例或跳过 EA 条件。
+- 每次扫描先刷新轻量 Set/Category 索引；逐个 SBC 比较 Set、Category、Challenge ID、奖励和时间指纹，仅重读新增、变化或 TTL 过期的 Challenge。
+- Upgrade 只接受 EA 明确归入 `Upgrades` Category 的白名单家族；当前首批为 84+ TOTW 和高评分 x10。84x10/TOTW 覆盖静态 Loop metadata，新评分 x10 生成 Dynamic Loop。
 
 验收标准：
 
@@ -540,10 +542,15 @@ Status: In Progress
 - 静态 Pick、外部 JSON Pick 和动态发现 Pick 不重复显示。
 - Node fixture 覆盖已支持、条件不支持、奖励标识缺失、活动完成和 Repository 刷新场景。
 - 动态发现只负责生成配置，实际选材、提交、价格查询、自动/人工选择和 recap 继续复用现有 `playerPickSbc` Workflow。
+- 缓存只保存 Challenge 快照，不保存可运行授权；当前会话索引验证失败时动态绑定保持 unavailable。
 
 回滚条件：无法稳定识别奖励 Pick、动态条件转换不完整，或扫描结果可能导致错误 SBC/奖励被提交或领取。
 
 当前进度（2026-07-19）：
+
+- `0.6.1` 后续开发新增 `src/sbc/dynamic-sbc-cache.js` 和 `src/config/upgrade-discovery.js`，统一 Player Pick/Upgrade 候选索引、逐 SBC 指纹、24 小时 TTL、账号隔离 GM 缓存和缓存统计。进度变化只合并 live state，不触发结构重扫；Set/Category/Challenge/Reward/时间变化会重读对应 Challenge。
+- 主面板入口改为 `Scan SBCs`，提供 Incremental、Full rescan、Clear cache；Builder 页改为 `Dynamic SBCs`，绑定可按 Loop ID、Set ID、Pick resource ID 或 Pack ID 恢复。JSON 导入会保留动态 `playerPickSbc` 与 `fillAndVerifySbc` 绑定。
+- Upgrade parser 仅允许 EA `Upgrades` Category 下的单阵、单 Pack 奖励、单 TEAM_RATING 的 84+ TOTW 或 84+/85+ x10；化学、未知条件、多阵、多奖励和 Category 不明均拒绝。安全保护继承内置 84x10/TOTW 模板，扫描只覆盖 Set/Pack/人数/评分/特殊需求 metadata。
 
 - 新增 `src/config/player-pick-discovery.js` 纯解析层，只接受普通 Set/Challenge/Reward 快照；支持单/多 Challenge、全金卡及精确 common/rare 比例，并生成现有 `playerPickSbc` 配置契约。
 - 新增 `src/adapters/ea/sbc.js#snapshotDiscoverySet()` 只读快照转换，识别 EA `awards[].item.isPlayerPickItem()`、缓存 Challenge、formation 人数和 `eligibilityRequirements`；不请求、不提交、不操作 UI。

@@ -432,7 +432,7 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `main-panel-bindings.js`：选项回填和 UI command 事件转发。
 - `main-panel-commands.js`：刷新、配置加载、Stop、复制和下载日志等主面板 command 编排。
 - `main-panel-state.js`：Loop 列表、rounds、recap 和 disabled 状态投影。
-- `workflow-loop-builder-view.js`：全屏 Builder 的结构化 Workflow、Loop、Recovery、Dynamic Pick、Preview 和 JSON validation UI。
+- `workflow-loop-builder-view.js`：全屏 Builder 的结构化 Workflow、Loop、Recovery、Dynamic SBC、Preview 和 JSON validation UI。
 - `workflow-loop-builder.js`：Builder Profile 生命周期、Undo/Redo、事件编排、持久化和经过验证的 runtime activation。
 - `player-pick-modal.js`：人工 Player Pick 选择。
 - `player-pick-recap.js`：Player Pick recap 汇总、卡片列表、价格展示和关闭。
@@ -454,9 +454,11 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 
 UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文本、日志高频更新和 Pick recap。Options 展开后设置控件可以在独立区域滚动，但日志必须始终保留独立的可视滚动区域，不能因为配置变长而被 flex 压缩或裁掉。
 
-Workflow/Loop Builder 的完整设计与阶段状态见 `docs/WORKFLOW_LOOP_BUILDER.md`。Builder Profile、草稿、override、冲突和动态绑定只能存在于 `src/config/builder-*` 与 `src/ui/workflow-loop-builder*`；runner、workflow 和 EA Adapter 仍只接受 `loop-schema.js` 的物化配置。Raw JSON 只允许验证、导入和导出，不得恢复主面板直接执行 JSON 的入口。Draft 可以处于暂时无效状态并跨重载保留，但启动和 Activate 只能使用完整验证的 last-known-good。动态 Pick 持久化后必须先标记 unavailable，只有本次只读扫描按稳定 Set/Reward identity 刷新成功才可物化；禁止把上次快照作为静态 Loop 静默执行。
+Workflow/Loop Builder 的完整设计与阶段状态见 `docs/WORKFLOW_LOOP_BUILDER.md`。Builder Profile、草稿、override、冲突和动态绑定只能存在于 `src/config/builder-*` 与 `src/ui/workflow-loop-builder*`；runner、workflow 和 EA Adapter 仍只接受 `loop-schema.js` 的物化配置。Raw JSON 只允许验证、导入和导出，不得恢复主面板直接执行 JSON 的入口。Draft 可以处于暂时无效状态并跨重载保留，但启动和 Activate 只能使用完整验证的 last-known-good。Dynamic SBC 持久化后必须先标记 unavailable，只有本次只读扫描按稳定 Set/Reward identity 刷新成功才可物化；禁止把上次快照作为静态 Loop 静默执行。
 
-主面板 Profile 选择器只能激活 Profile 的 Saved/last-known-good，不得隐式保存或应用 Draft。内置 Starter Profile 在 Store 归一化时只补缺，不得覆盖同 ID 的现有用户 Profile。Built-in、Default 和 `Bronze/Silver Inventory Only` 的 `One-click Daily Loop` 固定为 Daily Bronze -> Daily Silver -> Daily Common -> Daily Rare 四步，不得隐式追加 `Daily Rare Pack to 2x84+ Loop`；只有 `Daily + Rare Pack to 2x84+` Starter 可以追加该第 5 步，并保持 `useRoundsAsCompletions:false` 与最多一次库存 fallback。独立 Rare Pack Loop 在所有配置中仍保留。`Bronze/Silver Inventory Only` Starter 只能把使用铜/银 `targetDuplicate` 或 requirements 的 supported Loop 设为 `inventory-only`，并把其余 supported/container Loop 显式设为 `normal`，使它与主面板全局 `Inventory only` 区分；不得给 unsupported/intrinsic strategy 写入非法配置。旧 `starter-inventory-only` 仅在保持原始名称、preset 和未修改配置时自动迁移，用户自定义副本必须保留。主面板保留 `Refresh caches` 和 `Scan Picks` 作为缓存恢复与动态绑定刷新入口；JSON 验证/导入和 recap 模拟预览只放在 Builder/开发入口，不恢复为主面板按钮。
+Dynamic SBC 缓存只能缓存只读 Challenge 快照，不能缓存“可运行”结论。每次启动/手动扫描必须刷新当前 Set/Category 索引，并逐个按 Set ID、名称、时间、repeat、Category、Challenge ID 和奖励身份计算结构指纹；`timesCompleted`/complete 只作为 live progress 合并，不能让所有 SBC 因进度变化失效。只有本次索引验证成功、指纹未变且未过 TTL 的条目可复用 Challenge 快照。新建、结构变化、TTL 过期的 SBC 必须重读 Challenge；加载失败不得把空快照写回覆盖好缓存，也不得在本次会话恢复成可运行 Loop。Upgrade 发现必须由 EA 权威 Category 明确证明属于 `Upgrades`，禁止从名称猜 Category；只允许白名单家族，安全上限和高卡/特殊卡保护必须继承内置模板/Profile，禁止从奖励评分推导提交保护。
+
+主面板 Profile 选择器只能激活 Profile 的 Saved/last-known-good，不得隐式保存或应用 Draft。内置 Starter Profile 在 Store 归一化时只补缺，不得覆盖同 ID 的现有用户 Profile。Built-in、Default 和 `Bronze/Silver Inventory Only` 的 `One-click Daily Loop` 固定为 Daily Bronze -> Daily Silver -> Daily Common -> Daily Rare 四步，不得隐式追加 `Daily Rare Pack to 2x84+ Loop`；只有 `Daily + Rare Pack to 2x84+` Starter 可以追加该第 5 步，并保持 `useRoundsAsCompletions:false` 与最多一次库存 fallback。独立 Rare Pack Loop 在所有配置中仍保留。`Bronze/Silver Inventory Only` Starter 只能把使用铜/银 `targetDuplicate` 或 requirements 的 supported Loop 设为 `inventory-only`，并把其余 supported/container Loop 显式设为 `normal`，使它与主面板全局 `Inventory only` 区分；不得给 unsupported/intrinsic strategy 写入非法配置。旧 `starter-inventory-only` 仅在保持原始名称、preset 和未修改配置时自动迁移，用户自定义副本必须保留。主面板保留 `Refresh caches` 和 `Scan SBCs` 作为库存缓存恢复与 Dynamic SBC 绑定刷新入口；`Scan SBCs` 必须提供 Incremental、Full rescan 和 Clear cache 三种只读模式。JSON 验证/导入和 recap 模拟预览只放在 Builder/开发入口，不恢复为主面板按钮。
 
 可发布 Profile 的源目录固定为 `profiles/`。每个 `*.profile.json` 文件名必须与 kebab-case `id` 一致，且只能二选一引用官方 `preset` 或提供完整 `config`；新增文件必须通过 `npm run check:profiles`，并由 `npm run build:profiles` 生成 `dist/profiles/*.loops.json` 和 manifest。禁止上传带 `discovered`、`discoveryIdentity` 或 `discovered-player-pick-*` 的动态 Pick 快照。`.github/workflows/release-assets.yml` 负责在 Release 发布时上传 userscript、完整 Loop 配置和 `DailyLoopRunner.profiles.zip`；Profile-only 合并到 `main` 时仅在最新 Release 与当前 package 版本一致的情况下覆盖 Profile ZIP/manifest，避免把未发布代码生成的 Profile 附到旧版本。
 
@@ -632,7 +634,7 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 5. `pickCount` 是最终选择数量，`pickCandidateCount` 是候选数量；动态发现只允许从奖励显式字段或官方奖励描述开头的 `X of Y` 读取，禁止从 SBC 名称推断。
 6. 更新内置配置、外部 JSON、fixture coverage、contract test 和 README。
 
-自动扫描当前可用 Pick SBC 的设计记录在 M9。当前已完成纯 discovery parser、fixture、EA Adapter 只读快照、启动自动扫描和 Options 中的 `Scan Picks` 重扫入口；扫描必须先加载 Challenge squad 得到 brick 后的真实人数，禁止从 formation 槽位数猜测。完全支持且不与静态配置重复的结果只作为当前会话 Loop 合并到列表，成功重扫会替换旧会话结果。83+/84+ 已完成动态覆盖 Dry Run/Live 验证并删除静态活动配置，今后只由扫描生成。`Use scanned Pick metadata` 默认关闭且只作用于仍有静态配置的 Pick；启用后，仅当扫描结果完整且精确匹配一个静态 `playerPickSbc` 时，才覆盖其 Set/奖励身份、Challenge 数量和 requirements，必须保留静态 Loop ID、运行限制和流程引用。扫描失败、完成、unsupported 或歧义匹配必须回退静态配置。82+ 在 Provision 多 Challenge 实盘验证前必须保留静态配置。扫描本身不会提交或领取，实际运行继续复用现有 `playerPickSbc` Workflow。
+自动扫描当前可用 Dynamic SBC 的设计记录在 M9。Player Pick 扫描必须先加载 Challenge squad 得到 brick 后的真实人数，禁止从 formation 槽位数猜测。完全支持且不与静态配置重复的结果只作为当前会话 Loop 合并到列表，成功重扫会替换旧会话结果。83+/84+ 已完成动态覆盖 Dry Run/Live 验证并删除静态活动配置，今后只由扫描生成。`Use scanned Pick metadata` 默认关闭且只作用于仍有静态配置的 Pick；启用后，仅当扫描结果完整且精确匹配一个静态 `playerPickSbc` 时，才覆盖其 Set/奖励身份、Challenge 数量和 requirements，必须保留静态 Loop ID、运行限制和流程引用。Upgrade 当前只允许 EA `Upgrades` Category 下的 84+ TOTW 和高评分 x10；静态 84x10/TOTW 只接收扫描 metadata，新评分 x10 可生成 Dynamic Loop。扫描失败、完成、unsupported 或歧义匹配必须回退静态配置；扫描本身不会提交或领取，实际运行继续复用现有 `playerPickSbc` / `fillAndVerifySbc` Workflow。
 
 ## 8. Agent 接到任务后的标准流程
 

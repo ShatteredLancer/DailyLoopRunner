@@ -50,7 +50,7 @@ describe('main panel command orchestration', () => {
 
     const failure = harness({ scanPlayerPicks: vi.fn(async () => { throw new Error('metadata unavailable'); }) });
     await expect(failure.commands.scanPicks()).resolves.toBe(false);
-    expect(failure.log).toHaveBeenCalledWith('Player Pick scan failed: metadata unavailable');
+    expect(failure.log).toHaveBeenCalledWith('Dynamic SBC scan failed: metadata unavailable');
     expect(failure.state.scanningPicks).toBe(false);
 
     failure.state.running = true;
@@ -69,6 +69,19 @@ describe('main panel command orchestration', () => {
     expect(failure.commands.selectProfile('custom')).toBe(false);
     expect(failure.log).toHaveBeenCalledWith('Profile switch failed: dynamic Pick unavailable');
     expect(failure.options.renderProfiles).toHaveBeenCalledOnce();
+  });
+
+  it('passes the selected Dynamic SBC scan mode and resets it after the scan', async () => {
+    const scanDynamicSbcs = vi.fn(async () => {});
+    const resetDynamicSbcScanMode = vi.fn();
+    const current = harness({
+      scanDynamicSbcs,
+      getDynamicSbcScanOptions: () => ({ forceFull: true, clearCache: true }),
+      resetDynamicSbcScanMode,
+    });
+    await expect(current.commands.scanPicks()).resolves.toBe(true);
+    expect(scanDynamicSbcs).toHaveBeenCalledWith({ forceFull: true, clearCache: true });
+    expect(resetDynamicSbcScanMode).toHaveBeenCalledOnce();
   });
 
   it('preserves Stop, copy, and download command effects', async () => {

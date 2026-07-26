@@ -12,7 +12,7 @@ Raw JSON remains available for validation, import, export, and diagnostics. It i
 
 - Do not replace workflow runners, EA adapters, inventory selection, or pack transaction logic.
 - Do not add nested workflows. `dailyRoutine` and `workflowRoutine` steps remain references to atomic Loops.
-- Do not silently execute stale dynamic Player Pick snapshots.
+- Do not silently execute stale Dynamic SBC snapshots.
 - Keep the compact main panel limited to Profile selection, opening the Builder, cache refresh, and Pick scanning; JSON validation stays inside the Builder workspace.
 - Do not make built-in definitions directly mutable.
 
@@ -46,12 +46,12 @@ Every object shown by the Builder has one source:
 - **Built-in**: read-only definitions compiled into the userscript.
 - **Custom**: definitions owned by a local Builder profile.
 - **Override**: sparse changes applied to a built-in definition with the same stable ID.
-- **Dynamic**: session Player Pick definitions produced by the existing scanner.
+- **Dynamic**: session Player Pick or approved Upgrade definitions produced by the Dynamic SBC scanner.
 - **Imported**: custom definitions created by validated JSON import.
 
 Built-in objects support View, Duplicate, and Override. They do not support direct mutation or deletion. A profile may hide a built-in object from its effective list, but the underlying built-in definition remains recoverable.
 
-Dynamic objects are read-only snapshots. A Workflow may reference a dynamic Pick only when its stable identity can be recorded. The Builder stores Set IDs, Pick resource IDs, and the last valid definition. A later scan refreshes the effective definition. An unresolved or expired binding is marked unavailable and cannot be activated silently.
+Dynamic objects are read-only snapshots. A Workflow may reference a Dynamic SBC only when its stable identity can be recorded. The Builder stores Loop IDs, Set IDs, Pick resource IDs or Pack reward IDs, and the last valid definition. A later scan refreshes the effective definition. An unresolved or expired binding is marked unavailable and cannot be activated silently.
 
 ## 5. Profiles and persistence
 
@@ -73,7 +73,7 @@ Each profile contains:
 - Custom definitions.
 - Sparse built-in overrides.
 - Hidden built-in IDs.
-- Dynamic Pick bindings.
+- Dynamic SBC bindings.
 - Draft revision and saved revision.
 - Built-in fingerprints used for update conflict detection.
 - The last materialized and validated configuration.
@@ -97,7 +97,7 @@ The main panel retains execution controls and common runtime options. Its Config
 - **Profile**: selects Built-in, a starter profile, or a user-created profile. It applies only the profile's Saved/last-known-good revision; a dirty Draft cannot leak into runtime.
 - **Open Builder**: opens the full-screen workspace.
 - **Refresh caches**: retained as a recovery control after inventory changes made outside the Runner or when EA/FSU caches need explicit synchronization.
-- **Scan Picks**: retained because dynamic Pick discovery, activity changes, and persisted dynamic binding recovery require a fresh session scan.
+- **Scan SBCs**: validates the current Set/Category index and refreshes Dynamic SBC bindings. Incremental mode reuses unchanged per-SBC Challenge snapshots; Full rescan forces all candidate Challenge loads; Clear cache rebuilds the current account cache.
 
 **Validate JSON**, **Import JSON**, **Built-in loops**, and **Preview Pick recap** are removed from the main panel. JSON validation/import/export remains available in the Builder. Selecting **Built-in** in the Profile control replaces the old reset button. Raw JSON cannot be started directly without successful validation and conversion into a Builder draft.
 
@@ -105,7 +105,7 @@ The main panel retains execution controls and common runtime options. Its Config
 
 Desktop layout uses three stable columns:
 
-- A 260 px library containing Workflows, Loops, Recovery, and Dynamic Picks.
+- A 260 px library containing Workflows, Loops, Recovery, and Dynamic SBCs.
 - A flexible central editor.
 - A 340 px inspector for the selected object or Workflow step.
 
@@ -250,7 +250,7 @@ Validation errors are grouped by JSON path and link to the corresponding visual 
 
 Export always emits the existing top-level configuration shape so files remain compatible with the development server and older manual workflows.
 
-Reusable repository Profiles live in `profiles/*.profile.json`. A descriptor references an official preset or embeds one complete validated `config`. `npm run check:profiles` rejects invalid configuration and dynamic Pick snapshots; `npm run build:profiles` emits importable `.loops.json` files plus a manifest under `dist/profiles/`. GitHub Actions packages these outputs into `DailyLoopRunner.profiles.zip` for Releases.
+Reusable repository Profiles live in `profiles/*.profile.json`. A descriptor references an official preset or embeds one complete validated `config`. `npm run check:profiles` rejects invalid configuration and stale Dynamic SBC snapshots; `npm run build:profiles` emits importable `.loops.json` files plus a manifest under `dist/profiles/`. GitHub Actions packages these outputs into `DailyLoopRunner.profiles.zip` for Releases.
 
 ## 15. Built-in update conflicts
 
@@ -271,7 +271,7 @@ Preview validates the materialized configuration and displays:
 - Effective Workflow step order.
 - Strategy and run-limit summary for each atomic Loop.
 - Effective reward, Pick, inventory, and recovery settings.
-- Missing SBC, Pack, Dynamic Pick, or Loop references.
+- Missing SBC, Pack, Dynamic SBC, or Loop references.
 - Built-in update conflicts.
 
 Live Dry run remains a separate explicit command and continues to use the current runtime safety boundary. Builder preview itself performs no item moves, pack opens, SBC saves, submissions, or Pick claims.
@@ -298,7 +298,7 @@ Live Dry run remains a separate explicit command and continues to use the curren
 ### Phase 4: Complete strategy coverage
 
 - Add every strategy-specific editor listed in section 10.
-- Add Recovery editors and Dynamic Pick bindings.
+- Add Recovery editors and Dynamic SBC bindings.
 - Add a contract test requiring an editor descriptor for every registered strategy.
 
 ### Phase 5: Runtime activation
@@ -320,7 +320,7 @@ Live Dry run remains a separate explicit command and continues to use the curren
 - Built-in definitions are recoverable and cannot be directly mutated.
 - Custom profiles survive reload and activate only after validation.
 - Workflow references remain valid after rename, duplicate, override, delete, import, and built-in update operations.
-- Dynamic Pick bindings cannot silently run an expired snapshot.
+- Dynamic SBC bindings cannot silently run an expired snapshot.
 - Builder edits preserve unknown supported fields.
 - JSON validation links errors to visual fields and never bypasses runtime validation.
 - The main panel remains compact and its log remains available when Options is open.
@@ -335,7 +335,7 @@ The first Builder release is userscript `0.6.0`. The runtime contract remains un
 | 1. Foundation | Complete | Versioned profiles, Draft/Saved/Active revisions, last-known-good recovery, built-in rebase/conflicts, JSON round-trip, and persistence tests. |
 | 2. Workspace shell | Complete for the first release | Full-screen library/editor/inspector workspace, profiles, Undo/Redo, validation, Preview, import/export, desktop and responsive layouts. |
 | 3. Workflow/common editing | Complete | Ordered steps, Step Variants, transactional reference renames, runtime quantity, reward flow, Pick options, requirements, and pile ordering. |
-| 4. Strategy coverage | Complete for the current schema | Descriptors and structured editors for all registered strategies, Recovery recipes/policies, and Dynamic Pick binding. A contract test fails when a strategy or built-in field has no descriptor. |
+| 4. Strategy coverage | Complete for the current schema | Descriptors and structured editors for all registered strategies, Recovery recipes/policies, and Dynamic SBC binding. A contract test fails when a strategy or built-in field has no descriptor. |
 | 5. Runtime activation | Complete | Main-panel migration, draft-only development JSON import, Active Profile startup restore, Built-in reset, and post-scan dynamic reapplication through `validateLoopConfig()` and `setLoopConfig()`. |
 | 6. Verification/migration | Automated coverage complete; live validation pending | Unit, contract, workflow, and architecture coverage plus generated userscript checks. Real EA-page interaction and layout sampling remain release validation work. |
 
@@ -348,4 +348,4 @@ The following enhancements are intentionally deferred and do not change the runt
 - Replace the current narrow responsive stack with dedicated Library, Editor, and Inspector mobile tabs.
 - Surface preserved unknown valid fields in an Advanced diagnostics editor; the first release preserves them during structured edits and export but does not expose arbitrary raw-field mutation.
 
-Release verification must explicitly cover startup with a valid Active Profile, an invalid autosaved Draft, an unavailable Dynamic Pick binding, a built-in update conflict, Built-in reset, and development-server JSON import. Until real EA-page validation is recorded, the Builder is considered implemented but not live-validated for SBC/Pack selector ergonomics.
+Release verification must explicitly cover startup with a valid Active Profile, an invalid autosaved Draft, an unavailable Dynamic SBC binding, a built-in update conflict, Built-in reset, and development-server JSON import. Until real EA-page validation is recorded, the Builder is considered implemented but not live-validated for SBC/Pack selector ergonomics.

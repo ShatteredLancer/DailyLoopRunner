@@ -4,6 +4,6 @@
   "name": "Default",
   "description": "Editable profile that follows the current built-in Workflow and Loop configuration.",
   "preset": "default",
-  "minimumRunnerVersion": "0.6.1",
+  "minimumRunnerVersion": "0.6.10",
   "tags": ["official", "default"]
 }

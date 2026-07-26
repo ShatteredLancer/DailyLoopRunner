@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.1
+// @version      0.6.10
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -28,6 +28,7 @@
   var REWARD_ALERT_SETTINGS_KEY = "fc-loop-runner-reward-alert-settings";
   var BATCH_OPEN_PLAN_KEY = "fc-loop-runner-batch-open-plan";
   var BUILDER_PROFILE_KEY = "fc-loop-runner-builder-profiles-v1";
+  var DYNAMIC_SBC_CACHE_KEY = "fc-loop-runner-dynamic-sbc-cache-v1";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -689,11 +690,11 @@
       1,
       Math.min(100, Math.floor(Number(loopDef.setCompletionSafetyLimit) || 100))
     );
-    const remainingCompletions2 = hasKnownRemaining ? Math.max(0, Math.floor(Number(rawRemaining))) : safetyLimit;
+    const remainingCompletions3 = hasKnownRemaining ? Math.max(0, Math.floor(Number(rawRemaining))) : safetyLimit;
     return {
-      maxPicks: Math.min(200, pendingCount + remainingCompletions2),
+      maxPicks: Math.min(200, pendingCount + remainingCompletions3),
       pendingCount,
-      remainingCompletions: remainingCompletions2,
+      remainingCompletions: remainingCompletions3,
       usedSafetyLimit: !hasKnownRemaining
     };
   }
@@ -2953,6 +2954,281 @@
     return loops;
   }
 
+  // src/config/upgrade-discovery.js
+  var SUPPORTED_PLAYER_KEYS = /* @__PURE__ */ new Set([
+    "PLAYER_QUALITY",
+    "PLAYER_LEVEL",
+    "PLAYER_RARITY",
+    "PLAYER_RARITY_GROUP",
+    "PLAYER_MIN_OVR",
+    "PLAYER_EXACT_OVR"
+  ]);
+  var UNSUPPORTED_TEAM_KEYS = /* @__PURE__ */ new Set(["CHEMISTRY_POINTS", "ALL_PLAYERS_CHEMISTRY_POINTS"]);
+  function clone(value) {
+    return cloneLoopDef(value);
+  }
+  function positiveInteger2(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : null;
+  }
+  function normalizedText3(value) {
+    return String(value ?? "").trim();
+  }
+  function unique2(values = []) {
+    return [...new Set(values.filter((value) => value !== void 0 && value !== null && value !== ""))];
+  }
+  function remainingCompletions2(set = {}) {
+    if (set.timesCompleted === null || set.timesCompleted === void 0 || set.repeats === null || set.repeats === void 0) return null;
+    const completed = Number(set.timesCompleted);
+    const repeats = Number(set.repeats);
+    if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats <= 0 || repeats < completed) return null;
+    return Math.max(0, Math.floor(repeats - completed));
+  }
+  function detectDynamicUpgradeFamily(set = {}) {
+    const text = `${normalizedText3(set.name)} ${(set.rewards || []).map((reward) => `${reward.name || ""} ${reward.description || ""}`).join(" ")}`;
+    if (/\b84\+\s*TOTW\b.*\bUpgrade\b|\bTOTW\b.*\bUpgrade\b/i.test(text)) {
+      return { id: "totw-upgrade", rewardCount: 1, rewardMinRating: 84 };
+    }
+    const prefix = /\b10\s*x\s*(\d{2})\+(?:\s*Players?)?\s*Upgrade\b/i.exec(text);
+    const suffix = /\b(\d{2})\+\s*x\s*10(?:\s*Players?)?(?:\s*Upgrade)?\b/i.exec(text);
+    const rating = positiveInteger2(prefix?.[1] || suffix?.[1]);
+    if (rating && rating >= 84 && rating <= 99) {
+      return { id: "high-rated-x10", rewardCount: 10, rewardMinRating: rating };
+    }
+    return null;
+  }
+  function requirementSummary2(entry = {}) {
+    return `${entry.keyName || "?"}(count:${entry.count || "?"}, values:${entry.values?.join("/") || "?"})`;
+  }
+  function parseUpgradeChallenge(challenge, family) {
+    const requiredPlayerCount = positiveInteger2(challenge?.requiredPlayerCount);
+    const diagnostics = [];
+    if (!requiredPlayerCount) diagnostics.push("required player count is missing or invalid");
+    const entries = readEligibilityRequirements(challenge, {
+      requiredPlayerCount: requiredPlayerCount || 0,
+      eligibilityKeyName: (key) => String(key || "")
+    });
+    const teamRatings = [];
+    let specialCount = 0;
+    for (const entry of entries) {
+      if (!entry.values.length || !entry.count) {
+        diagnostics.push(`incomplete eligibility condition ${requirementSummary2(entry)}`);
+        continue;
+      }
+      if (entry.keyName === "TEAM_RATING") {
+        const ratings = entry.values.map(Number).filter(Number.isFinite);
+        if (ratings.length !== 1) diagnostics.push(`ambiguous TEAM_RATING condition ${requirementSummary2(entry)}`);
+        else teamRatings.push(ratings[0]);
+        continue;
+      }
+      if (UNSUPPORTED_TEAM_KEYS.has(entry.keyName)) {
+        diagnostics.push(`unsupported chemistry condition ${requirementSummary2(entry)}`);
+        continue;
+      }
+      if (!SUPPORTED_PLAYER_KEYS.has(entry.keyName)) {
+        diagnostics.push(`unsupported eligibility condition ${requirementSummary2(entry)}`);
+        continue;
+      }
+      if (entry.keyName === "PLAYER_RARITY_GROUP") {
+        const values = entry.values.map(Number).filter(Number.isFinite);
+        const unknown = values.filter((value) => ![4, 83].includes(value));
+        if (unknown.length) diagnostics.push(`unknown PLAYER_RARITY_GROUP encoding ${unknown.join("/")}`);
+        if (values.includes(83)) specialCount = Math.max(specialCount, entry.count);
+      }
+    }
+    if (teamRatings.length !== 1) diagnostics.push("exactly one TEAM_RATING condition is required");
+    if (family.id === "high-rated-x10" && specialCount > 1) {
+      diagnostics.push(`more than one required special card is unsupported (${specialCount})`);
+    }
+    if (family.id === "totw-upgrade" && specialCount) {
+      diagnostics.push("TOTW Upgrade unexpectedly requires a special card");
+    }
+    return {
+      ok: diagnostics.length === 0,
+      diagnostics: unique2(diagnostics),
+      requiredPlayerCount,
+      targetRating: teamRatings[0] || null,
+      specialCount
+    };
+  }
+  function rewardPackIdentity(set = {}) {
+    const packs = (set.rewards || []).filter((reward) => String(reward?.type || "").toUpperCase() === "PACK");
+    return {
+      packs,
+      ids: unique2(packs.map((reward) => positiveInteger2(reward.packId || reward.resourceId || reward.definitionId)).filter(Boolean)),
+      names: unique2(packs.map((reward) => normalizedText3(reward.name || reward.description)).filter(Boolean))
+    };
+  }
+  function runtimeQuantityForRemaining(remaining) {
+    const max = remaining === null ? 50 : Math.max(1, Math.min(50, remaining));
+    return {
+      mode: "user",
+      target: "maxCompletions",
+      default: Math.min(3, max),
+      min: 1,
+      max,
+      label: "SBC completions"
+    };
+  }
+  function parseDynamicUpgradeSbcSnapshot(input = {}) {
+    const set = input.set || {};
+    const setId = positiveInteger2(set.id);
+    const setName = normalizedText3(set.name);
+    const family = detectDynamicUpgradeFamily(set);
+    const diagnostics = [];
+    if (!setId) diagnostics.push("stable SBC Set id is missing");
+    if (!setName) diagnostics.push("SBC Set display name is missing");
+    if (set.inUpgradesCategory !== true) diagnostics.push("SBC Set is not confirmed in the Upgrades category");
+    if (!family) return { status: "ignored", setId, diagnostics: ["SBC Set is not an allowed dynamic Upgrade family"] };
+    const rewards = rewardPackIdentity(set);
+    if (rewards.packs.length !== 1) diagnostics.push(`exactly one Pack reward is required; found ${rewards.packs.length}`);
+    if (!rewards.ids.length && !rewards.names.length) diagnostics.push("stable Pack reward identity is missing");
+    const challenges = Array.isArray(set.challenges) ? set.challenges : [];
+    if (challenges.length !== 1) diagnostics.push(`exactly one Challenge is required; found ${challenges.length}`);
+    const parsedChallenge = challenges.length === 1 ? parseUpgradeChallenge(challenges[0], family) : { ok: false, diagnostics: [], requiredPlayerCount: null, targetRating: null, specialCount: 0 };
+    diagnostics.push(...parsedChallenge.diagnostics);
+    const remaining = remainingCompletions2(set);
+    if (remaining === 0) {
+      return {
+        status: "completed",
+        setId,
+        family,
+        remainingCompletions: 0,
+        diagnostics: unique2(diagnostics)
+      };
+    }
+    if (diagnostics.length) {
+      return {
+        status: "unsupported",
+        setId,
+        family,
+        remainingCompletions: remaining,
+        diagnostics: unique2(diagnostics)
+      };
+    }
+    const template = family.id === "totw-upgrade" ? input.totwTemplate : input.x10Template;
+    if (!template) {
+      return { status: "unsupported", setId, family, diagnostics: ["safe built-in Upgrade template is unavailable"] };
+    }
+    const loop = {
+      ...clone(template),
+      id: `discovered-upgrade-${setId}-${family.id}-${family.rewardMinRating}`,
+      name: setName,
+      discovered: true,
+      discoveryKind: "upgrade",
+      dynamicSbcFamily: family.id,
+      dynamicRewardMinRating: family.rewardMinRating,
+      sbcSetIds: [setId],
+      sbcNames: [setName],
+      rewardPackIds: rewards.ids,
+      rewardPackNames: rewards.names,
+      remainingCompletions: remaining,
+      scannedMetadata: true,
+      ratingSbcFill: {
+        ...clone(template.ratingSbcFill) || {},
+        targetRating: parsedChallenge.targetRating
+      },
+      expectedPlayerCount: parsedChallenge.requiredPlayerCount
+    };
+    if (family.id === "high-rated-x10") {
+      loop.requiredSpecialCount = parsedChallenge.specialCount;
+      loop.allowedSpecialCount = parsedChallenge.specialCount;
+      if (!parsedChallenge.specialCount) {
+        delete loop.requiredSpecialKind;
+        delete loop.requiredSpecialMinRating;
+        loop.autoTotwUpgrade = false;
+      }
+    }
+    if (remaining !== null) loop.maxCompletions = Math.max(1, Math.min(50, remaining));
+    else loop.maxCompletions = 50;
+    loop.allowMultipleCompletions = true;
+    loop.useRoundsAsCompletions = true;
+    loop.runtimeQuantity = runtimeQuantityForRemaining(remaining);
+    return {
+      status: "supported",
+      setId,
+      family,
+      loop,
+      remainingCompletions: remaining,
+      targetRating: parsedChallenge.targetRating,
+      requiredPlayerCount: parsedChallenge.requiredPlayerCount,
+      specialCount: parsedChallenge.specialCount,
+      diagnostics: []
+    };
+  }
+  function configuredUpgradeMatches(result, loop = {}) {
+    if (loop.strategy !== "fillAndVerifySbc") return false;
+    if ((loop.sbcSetIds || []).map(Number).includes(Number(result.setId))) return true;
+    if (result.family?.id === "totw-upgrade") return loop.id === "auto-totw-upgrade";
+    if (result.family?.id === "high-rated-x10" && Number(result.family.rewardMinRating) === 84) {
+      return ["84x10", "84x10-mvp"].includes(String(loop.id));
+    }
+    return false;
+  }
+  function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
+    const merged = {
+      ...clone(configuredLoop),
+      sbcSetIds: [...discoveredLoop.sbcSetIds || []],
+      sbcNames: unique2([...discoveredLoop.sbcNames || [], ...configuredLoop.sbcNames || []]),
+      rewardPackIds: unique2([...discoveredLoop.rewardPackIds || [], ...configuredLoop.rewardPackIds || []]),
+      rewardPackNames: unique2([...discoveredLoop.rewardPackNames || [], ...configuredLoop.rewardPackNames || []]),
+      remainingCompletions: discoveredLoop.remainingCompletions,
+      dynamicSbcFamily: discoveredLoop.dynamicSbcFamily,
+      dynamicRewardMinRating: discoveredLoop.dynamicRewardMinRating,
+      expectedPlayerCount: discoveredLoop.expectedPlayerCount,
+      requiredSpecialCount: discoveredLoop.requiredSpecialCount,
+      allowedSpecialCount: discoveredLoop.allowedSpecialCount,
+      ratingSbcFill: {
+        ...clone(configuredLoop.ratingSbcFill) || {},
+        targetRating: discoveredLoop.ratingSbcFill?.targetRating
+      },
+      scannedMetadata: true
+    };
+    if (discoveredLoop.requiredSpecialCount) {
+      merged.requiredSpecialKind = discoveredLoop.requiredSpecialKind || configuredLoop.requiredSpecialKind;
+      merged.requiredSpecialMinRating = discoveredLoop.requiredSpecialMinRating || configuredLoop.requiredSpecialMinRating;
+    } else {
+      delete merged.requiredSpecialKind;
+      delete merged.requiredSpecialMinRating;
+      delete merged.specialRequirementAdd;
+      merged.autoTotwUpgrade = false;
+    }
+    return merged;
+  }
+  function buildUpgradeDiscoverySession(input = {}) {
+    const configuredLoops = [...input.configuredLoops || []];
+    const discoveredLoops = [];
+    const loopOverrides = {};
+    const results = [];
+    for (const set of input.sets || []) {
+      const parsed = parseDynamicUpgradeSbcSnapshot({
+        set,
+        x10Template: input.x10Template,
+        totwTemplate: input.totwTemplate
+      });
+      if (parsed.status !== "supported") {
+        results.push(parsed);
+        continue;
+      }
+      const matches = configuredLoops.filter((loop) => configuredUpgradeMatches(parsed, loop));
+      if (matches.length) {
+        matches.forEach((loop) => {
+          loopOverrides[loop.id] = mergeScannedUpgradeMetadata(loop, parsed.loop);
+        });
+        results.push({ ...parsed, status: "duplicate", discoveredLoop: parsed.loop, matchingLoopIds: matches.map((loop) => loop.id) });
+        continue;
+      }
+      const duplicate = discoveredLoops.some((loop) => (loop.sbcSetIds || []).includes(parsed.setId));
+      if (duplicate) {
+        results.push({ ...parsed, status: "duplicate", discoveredLoop: parsed.loop, matchingLoopIds: [] });
+        continue;
+      }
+      discoveredLoops.push(parsed.loop);
+      results.push(parsed);
+    }
+    return { discoveredLoops, loopOverrides, results };
+  }
+
   // src/adapters/browser/dom.js
   function createDomAdapter(documentObject = globalThis.document, runtime = globalThis) {
     function query2(selector) {
@@ -4475,7 +4751,7 @@
         return [];
       }
     }
-    function positiveInteger3(value) {
+    function positiveInteger5(value) {
       const number = Number(value);
       return Number.isInteger(number) && number > 0 ? number : null;
     }
@@ -4486,7 +4762,7 @@
     }
     function firstPositiveInteger(values = []) {
       for (const value of values) {
-        const number = positiveInteger3(value);
+        const number = positiveInteger5(value);
         if (number) return number;
       }
       return null;
@@ -4541,7 +4817,7 @@
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId2 = positiveInteger3(item?.id);
+      const itemId2 = positiveInteger5(item?.id);
       return {
         type: "PLAYER_PICK",
         name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
@@ -4579,6 +4855,157 @@
         }
       };
     }
+    function normalizeDiscoveryPackReward(award) {
+      const item = award?.item || award?.utItem || award?.data?.item || null;
+      if (item && isPlayerPickItem(item)) return null;
+      const typeText = String(
+        award?.type || award?.rewardType || award?.awardType || award?.kind || award?.data?.type || ""
+      ).trim().toUpperCase();
+      const packId2 = firstPositiveInteger([
+        award?.packId,
+        award?.packDefinitionId,
+        award?.packAssetId,
+        award?.value,
+        award?.data?.packId,
+        award?.data?.value
+      ]);
+      let isPack = /PACK/.test(typeText);
+      try {
+        isPack = isPack || award?.isPack?.() === true || award?.isPack === true;
+      } catch {
+      }
+      if (!isPack && packId2 && !item && !/COIN|CURRENCY|ITEM|PLAYER/i.test(typeText)) isPack = true;
+      if (!isPack) return null;
+      return {
+        type: "PACK",
+        name: String(
+          award?.name || award?.displayName || award?.description || award?.data?.name || award?.data?.description || ""
+        ).trim(),
+        description: String(award?.description || award?.data?.description || "").trim(),
+        packId: packId2,
+        resourceId: firstPositiveInteger([award?.resourceId, award?.data?.resourceId, packId2]),
+        definitionId: firstPositiveInteger([award?.definitionId, award?.data?.definitionId]),
+        count: firstPositiveInteger([award?.count, award?.amount, award?.quantity, award?.data?.count]) || 1,
+        metadataHints: {
+          award: metadataFieldHints(award),
+          data: metadataFieldHints(award?.data)
+        }
+      };
+    }
+    function normalizeDiscoveryAward(award) {
+      return normalizeDiscoveryReward(award) || normalizeDiscoveryPackReward(award);
+    }
+    function currentController() {
+      try {
+        return runtime?.getAppMain?.()?.getRootViewController?.()?.getPresentedViewController?.()?.getCurrentViewController?.()?.getCurrentController?.() || null;
+      } catch {
+        return null;
+      }
+    }
+    function safeScalar(value, keys = []) {
+      for (const key of keys) {
+        try {
+          const candidate = value?.[key];
+          if (["string", "number", "boolean"].includes(typeof candidate)) return candidate;
+        } catch {
+        }
+      }
+      return null;
+    }
+    function categoryRoots(refreshResult = null) {
+      const controller = currentController();
+      const roots = [
+        service?.repository?.categories,
+        service?.repository?.category,
+        service?.categories,
+        service?.categoriesIterator,
+        service?.viewmodel,
+        service?.viewModel,
+        refreshResult?.data?.categories,
+        refreshResult?.response?.categories,
+        controller?.viewmodel,
+        controller?.viewModel,
+        controller?._viewmodel,
+        controller?._viewModel
+      ];
+      return roots.filter(Boolean);
+    }
+    function categoriesFromRoot(root) {
+      const candidates = [];
+      try {
+        if (typeof root?.getCategories === "function") candidates.push(...collectionValues3(root.getCategories()));
+      } catch {
+      }
+      try {
+        candidates.push(...collectionValues3(root?.categoriesIterator));
+      } catch {
+      }
+      try {
+        candidates.push(...collectionValues3(root?.categories));
+      } catch {
+      }
+      candidates.push(...collectionValues3(root));
+      return candidates;
+    }
+    function normalizeDiscoveryCategory(category) {
+      const setIds = collectionValues3(
+        category?.setIds || category?.sets || category?.data?.setIds || category?.data?.sets
+      ).map((entry) => positiveInteger5(entry?.id || entry)).filter(Boolean);
+      return {
+        id: positiveInteger5(category?.id || category?.categoryId || category?.data?.id),
+        name: String(
+          category?.name || category?.description || category?.displayName || category?.data?.name || category?.data?.description || ""
+        ).trim(),
+        setIds: [...new Set(setIds)]
+      };
+    }
+    function listDiscoveryCategories(refreshResult = null) {
+      const byKey = /* @__PURE__ */ new Map();
+      for (const root of categoryRoots(refreshResult)) {
+        for (const category of categoriesFromRoot(root)) {
+          const normalized = normalizeDiscoveryCategory(category);
+          if (!normalized.id && !normalized.name && !normalized.setIds.length) continue;
+          const key = `${normalized.id || "?"}:${normalized.name}`;
+          const existing = byKey.get(key);
+          byKey.set(key, existing ? {
+            ...existing,
+            setIds: [.../* @__PURE__ */ new Set([...existing.setIds, ...normalized.setIds])]
+          } : normalized);
+        }
+      }
+      return [...byKey.values()];
+    }
+    function discoveryCategoryMembership(set, refreshResult = null) {
+      const setId = positiveInteger5(set?.id);
+      const directCategories = collectionValues3(
+        set?.categoryIds || set?.categories || set?.data?.categoryIds || set?.data?.categories
+      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger5(entry), name: "", setIds: [] });
+      const directIds = directCategories.map((category) => category.id).filter(Boolean);
+      const directCategoryId = positiveInteger5(set?.categoryId || set?.data?.categoryId);
+      if (directCategoryId) directIds.push(directCategoryId);
+      const categories = listDiscoveryCategories(refreshResult);
+      const matching = [
+        ...directCategories,
+        ...categories.filter((category) => setId && category.setIds.includes(setId) || category.id && directIds.includes(category.id))
+      ];
+      const categoryIds = [.../* @__PURE__ */ new Set([...directIds, ...matching.map((category) => category.id).filter(Boolean)])];
+      const categoryNames = [...new Set(matching.map((category) => category.name).filter(Boolean))];
+      return {
+        categoryIds,
+        categoryNames,
+        inUpgradesCategory: matching.some((category) => /\bupgrades?\b/i.test(category.name)),
+        categoriesAvailable: directCategories.length > 0 || Boolean(directCategoryId) || categories.length > 0
+      };
+    }
+    function discoveryChallengeIds(set) {
+      const sources = [
+        set?.challengeIds,
+        set?.data?.challengeIds,
+        set?.challenges,
+        set?._challenges
+      ];
+      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger5(entry?.id || entry)).filter(Boolean))];
+    }
     function discoveryRequiredPlayerCount(challenge) {
       const explicit = firstPositiveInteger([
         challenge?.requiredPlayerCount,
@@ -4587,13 +5014,13 @@
       ]);
       if (explicit) return explicit;
       try {
-        const squadCount = positiveInteger3(challenge?.squad?.getNumOfRequiredPlayers?.());
+        const squadCount = positiveInteger5(challenge?.squad?.getNumOfRequiredPlayers?.());
         if (squadCount) return squadCount;
       } catch {
       }
       if (!challenge?.squad) return null;
       const challengeFormation = formation(challenge?.formation);
-      const formationCount = positiveInteger3(challengeFormation?.generalPositions?.length);
+      const formationCount = positiveInteger5(challengeFormation?.generalPositions?.length);
       if (!formationCount) return null;
       try {
         const brickCount = challenge.squad.getAllBrickIndices?.()?.length;
@@ -4610,7 +5037,7 @@
     }
     function normalizeDiscoveryChallenge(challenge) {
       return {
-        id: positiveInteger3(challenge?.id),
+        id: positiveInteger5(challenge?.id),
         status: String(challenge?.status || challenge?.state || ""),
         completed: challenge?.completed === true || (() => {
           try {
@@ -4630,11 +5057,11 @@
         })
       };
     }
-    function snapshotDiscoverySet(set, challenges = null) {
+    function snapshotDiscoveryIndex(set, refreshResult = null) {
       const rawAwards = collectionValues3(set?.awards || set?.data?.awards);
-      const rawChallenges = challenges === null ? collectionValues3(set?.challenges || set?._challenges) : collectionValues3(challenges);
+      const category = discoveryCategoryMembership(set, refreshResult);
       return {
-        id: positiveInteger3(set?.id),
+        id: positiveInteger5(set?.id),
         name: String(set?.name || set?.data?.name || "").trim(),
         status: String(set?.status || set?.state || ""),
         complete: (() => {
@@ -4646,9 +5073,46 @@
         })(),
         timesCompleted: finiteNumberOrNull(set?.timesCompleted),
         repeats: finiteNumberOrNull(set?.repeats),
-        rewards: rawAwards.map(normalizeDiscoveryReward).filter(Boolean),
+        startTime: finiteNumberOrNull(safeScalar(set, ["startTime", "start", "startsAt", "startDate"])),
+        endTime: finiteNumberOrNull(safeScalar(set, ["endTime", "end", "expires", "expiresAt", "endDate"])),
+        rewards: rawAwards.map(normalizeDiscoveryAward).filter(Boolean),
+        challengeIds: discoveryChallengeIds(set),
+        challenges: [],
+        ...category
+      };
+    }
+    function snapshotDiscoverySet(set, challenges = null, refreshResult = null) {
+      const index = snapshotDiscoveryIndex(set, refreshResult);
+      const rawChallenges = challenges === null ? collectionValues3(set?.challenges || set?._challenges) : collectionValues3(challenges);
+      return {
+        ...index,
         challenges: rawChallenges.map(normalizeDiscoveryChallenge)
       };
+    }
+    function cacheScope() {
+      const roots = [
+        runtime?.services?.User,
+        runtime?.services?.Session,
+        runtime?.services?.Authentication,
+        runtime?.repositories?.User,
+        runtime?.repositories?.Persona,
+        runtime?.repositories?.Account
+      ].filter(Boolean);
+      const keys = ["personaId", "personaID", "userId", "accountId", "nucleusId", "id"];
+      for (const root of roots) {
+        const candidates = [root];
+        for (const method of ["getUser", "getCurrentUser", "getPersona", "getCurrentPersona", "getAccount"]) {
+          try {
+            if (typeof root?.[method] === "function") candidates.push(root[method]());
+          } catch {
+          }
+        }
+        for (const candidate of candidates.filter(Boolean)) {
+          const value = safeScalar(candidate, keys);
+          if (value !== null && value !== "") return String(value);
+        }
+      }
+      return "default";
     }
     function canLoadChallengeData() {
       return typeof service.loadChallengeData === "function";
@@ -4695,7 +5159,10 @@
       formation,
       createSquadController,
       eligibilityKeyName,
+      listDiscoveryCategories,
+      snapshotDiscoveryIndex,
       snapshotDiscoverySet,
+      cacheScope,
       canLoadChallengeData,
       submissionOptions,
       saveChallenge,
@@ -5752,41 +6219,197 @@
     return { before, after };
   }
 
-  // src/sbc/player-pick-discovery-scan.js
-  async function scanPlayerPickSbcSnapshots(options = {}) {
+  // src/sbc/dynamic-sbc-cache.js
+  var DYNAMIC_SBC_CACHE_SCHEMA_VERSION = 1;
+  var DYNAMIC_SBC_PARSER_VERSION = 1;
+  var DYNAMIC_SBC_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
+  function clone2(value) {
+    return cloneLoopDef(value);
+  }
+  function positiveInteger3(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : null;
+  }
+  function stableValue(value) {
+    if (Array.isArray(value)) return value.map(stableValue);
+    if (!isPlainObject(value)) return value;
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+  }
+  function fingerprintDynamicSbcValue(value) {
+    const text = JSON.stringify(stableValue(value));
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index++) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+  function rewardFingerprint(reward = {}) {
+    return {
+      type: String(reward.type || ""),
+      resourceId: positiveInteger3(reward.resourceId),
+      definitionId: positiveInteger3(reward.definitionId),
+      packId: positiveInteger3(reward.packId),
+      candidateCount: positiveInteger3(reward.candidateCount),
+      selectionCount: positiveInteger3(reward.selectionCount),
+      count: positiveInteger3(reward.count),
+      name: String(reward.name || ""),
+      description: String(reward.description || "")
+    };
+  }
+  function dynamicSbcIndexFingerprint(index = {}) {
+    return fingerprintDynamicSbcValue({
+      id: positiveInteger3(index.id),
+      name: String(index.name || ""),
+      repeats: index.repeats ?? null,
+      startTime: index.startTime ?? null,
+      endTime: index.endTime ?? null,
+      categoryIds: [...index.categoryIds || []].map(Number).filter(Number.isFinite).sort((a, b) => a - b),
+      categoryNames: [...index.categoryNames || []].map(String).sort(),
+      categoriesAvailable: index.categoriesAvailable === true,
+      inUpgradesCategory: index.inUpgradesCategory === true,
+      challengeIds: [...index.challengeIds || []].map(Number).filter(Number.isFinite).sort((a, b) => a - b),
+      rewards: (index.rewards || []).map(rewardFingerprint)
+    });
+  }
+  function createDynamicSbcCache(now = Date.now()) {
+    return {
+      schemaVersion: DYNAMIC_SBC_CACHE_SCHEMA_VERSION,
+      parserVersion: DYNAMIC_SBC_PARSER_VERSION,
+      updatedAt: Number(now) || 0,
+      sets: {}
+    };
+  }
+  function normalizeDynamicSbcCache(cache, now = Date.now()) {
+    if (!isPlainObject(cache) || Number(cache.schemaVersion) !== DYNAMIC_SBC_CACHE_SCHEMA_VERSION || Number(cache.parserVersion) !== DYNAMIC_SBC_PARSER_VERSION || !isPlainObject(cache.sets)) {
+      return createDynamicSbcCache(now);
+    }
+    const sets = {};
+    for (const [key, entry] of Object.entries(cache.sets)) {
+      const setId = positiveInteger3(entry?.setId || key);
+      if (!setId || !entry?.fingerprint || !isPlainObject(entry?.snapshot)) continue;
+      sets[String(setId)] = {
+        setId,
+        fingerprint: String(entry.fingerprint),
+        snapshot: clone2(entry.snapshot),
+        scannedAt: Number(entry.scannedAt || 0) || 0,
+        validatedAt: Number(entry.validatedAt || 0) || 0
+      };
+    }
+    return {
+      schemaVersion: DYNAMIC_SBC_CACHE_SCHEMA_VERSION,
+      parserVersion: DYNAMIC_SBC_PARSER_VERSION,
+      updatedAt: Number(cache.updatedAt || now) || 0,
+      sets
+    };
+  }
+  function mergeDynamicSbcLiveState(snapshot = {}, index = {}) {
+    return {
+      ...clone2(snapshot),
+      id: index.id ?? snapshot.id,
+      name: index.name || snapshot.name,
+      status: index.status ?? snapshot.status,
+      complete: index.complete === true,
+      timesCompleted: index.timesCompleted ?? null,
+      repeats: index.repeats ?? null,
+      startTime: index.startTime ?? snapshot.startTime ?? null,
+      endTime: index.endTime ?? snapshot.endTime ?? null,
+      categoryIds: clone2(index.categoryIds || snapshot.categoryIds || []),
+      categoryNames: clone2(index.categoryNames || snapshot.categoryNames || []),
+      categoriesAvailable: index.categoriesAvailable === true,
+      inUpgradesCategory: index.inUpgradesCategory === true,
+      rewards: clone2(index.rewards?.length ? index.rewards : snapshot.rewards || [])
+    };
+  }
+  async function scanDynamicSbcSnapshots(options = {}) {
     if (typeof options.refreshSets !== "function") throw new TypeError("refreshSets is required");
     if (typeof options.listSets !== "function") throw new TypeError("listSets is required");
+    if (typeof options.snapshotIndex !== "function") throw new TypeError("snapshotIndex is required");
     if (typeof options.snapshotSet !== "function") throw new TypeError("snapshotSet is required");
     if (typeof options.loadChallenges !== "function") throw new TypeError("loadChallenges is required");
-    if (typeof options.parseSnapshot !== "function") throw new TypeError("parseSnapshot is required");
-    await options.refreshSets();
+    if (typeof options.isCandidate !== "function") throw new TypeError("isCandidate is required");
+    const now = Number(options.now?.() ?? Date.now()) || Date.now();
+    const maxAgeMs = Math.max(0, Number(options.maxAgeMs ?? DYNAMIC_SBC_CACHE_MAX_AGE_MS) || 0);
+    const forceFull = options.forceFull === true;
+    const cache = normalizeDynamicSbcCache(options.cache, now);
+    const refreshResult = await options.refreshSets();
     const sets = options.listSets() || [];
     const results = [];
+    const currentCandidateIds = /* @__PURE__ */ new Set();
+    const stats = {
+      setsScanned: sets.length,
+      candidates: 0,
+      cacheHits: 0,
+      rescanned: 0,
+      newSets: 0,
+      changedSets: 0,
+      expiredEntries: 0,
+      loadFailures: 0,
+      removedEntries: 0
+    };
     for (const set of sets) {
-      const initial = options.snapshotSet(set);
-      const hasPlayerPickReward = (initial?.rewards || []).some((reward) => reward?.type === "PLAYER_PICK");
-      if (!hasPlayerPickReward) continue;
-      let challenges = initial?.challenges || [];
+      const index = options.snapshotIndex(set, refreshResult);
+      if (!options.isCandidate(index, set)) continue;
+      const setId = positiveInteger3(index?.id);
+      if (!setId) continue;
+      currentCandidateIds.add(String(setId));
+      stats.candidates++;
+      const fingerprint = dynamicSbcIndexFingerprint(index);
+      const cached = cache.sets[String(setId)] || null;
+      const age = cached ? Math.max(0, now - Number(cached.scannedAt || 0)) : Infinity;
+      const unchanged = Boolean(cached && cached.fingerprint === fingerprint);
+      const fresh = unchanged && age <= maxAgeMs;
+      let snapshot;
       let loadError = null;
-      if (initial?.complete !== true) {
-        try {
-          challenges = await options.loadChallenges(set, initial);
-        } catch (error) {
-          loadError = error;
+      let cacheStatus = "miss";
+      if (!forceFull && fresh) {
+        snapshot = mergeDynamicSbcLiveState(cached.snapshot, index);
+        cacheStatus = "hit";
+        stats.cacheHits++;
+        cache.sets[String(setId)] = {
+          ...cached,
+          snapshot: clone2(snapshot),
+          validatedAt: now
+        };
+      } else {
+        if (!cached) stats.newSets++;
+        else if (!unchanged) stats.changedSets++;
+        else stats.expiredEntries++;
+        let challenges = null;
+        if (index?.complete !== true) {
+          try {
+            challenges = await options.loadChallenges(set, index);
+          } catch (error) {
+            loadError = error;
+            stats.loadFailures++;
+          }
+        }
+        snapshot = loadError && cached && unchanged ? mergeDynamicSbcLiveState(cached.snapshot, index) : options.snapshotSet(set, challenges, refreshResult);
+        cacheStatus = forceFull ? "forced" : cached ? unchanged ? "expired" : "changed" : "new";
+        stats.rescanned++;
+        if (!loadError) {
+          cache.sets[String(setId)] = {
+            setId,
+            fingerprint,
+            snapshot: clone2(snapshot),
+            scannedAt: now,
+            validatedAt: now
+          };
+        } else if (cached && unchanged) {
+          cacheStatus = "load-failed-cached";
         }
       }
-      const snapshot = options.snapshotSet(set, challenges);
-      const parsed = options.parseSnapshot(snapshot);
-      const result = {
-        set,
-        snapshot,
-        parsed: loadError && parsed.status === "supported" ? { ...parsed, status: "unsupported", loop: null, diagnostics: [`challenge metadata load failed: ${loadError?.message || loadError}`] } : parsed,
-        loadError
-      };
+      const result = { set, index, snapshot, loadError, cacheStatus, fingerprint };
       results.push(result);
       await options.onResult?.(result);
     }
-    return { setsScanned: sets.length, pickSets: results.length, results };
+    for (const key of Object.keys(cache.sets)) {
+      if (currentCandidateIds.has(key)) continue;
+      delete cache.sets[key];
+      stats.removedEntries++;
+    }
+    cache.updatedAt = now;
+    return { refreshResult, results, stats, cache };
   }
 
   // src/reward/sbc-claim.js
@@ -6067,7 +6690,7 @@
     const rating = Number(value);
     return Number.isFinite(rating) ? Math.max(1, Math.min(99, Math.floor(rating))) : fallback;
   }
-  function normalizedText3(value) {
+  function normalizedText4(value) {
     return String(value || "").trim();
   }
   function normalizeRewardAlertSettings(input = {}) {
@@ -6077,13 +6700,13 @@
       highlightEnabled: input.highlightEnabled !== false,
       desktopEnabled: input.desktopEnabled === true,
       ntfyEnabled: input.ntfyEnabled === true,
-      ntfyServer: normalizedText3(input.ntfyServer) || DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
-      ntfyTopic: normalizedText3(input.ntfyTopic),
-      ntfyToken: normalizedText3(input.ntfyToken)
+      ntfyServer: normalizedText4(input.ntfyServer) || DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
+      ntfyTopic: normalizedText4(input.ntfyTopic),
+      ntfyToken: normalizedText4(input.ntfyToken)
     });
   }
   function displayName(item = {}) {
-    return normalizedText3(item.name || item.commonName || item.lastName || item.definitionId || item.id) || "Unknown player";
+    return normalizedText4(item.name || item.commonName || item.lastName || item.definitionId || item.id) || "Unknown player";
   }
   function createPackHighlightModel(receipt = {}, settingsInput = {}, context = {}) {
     const settings = normalizeRewardAlertSettings(settingsInput);
@@ -6102,9 +6725,9 @@
     return Object.freeze({
       pack: Object.freeze({
         id: Number(receipt.packRef?.id || 0),
-        name: normalizedText3(receipt.packRef?.name) || normalizedText3(context.purpose) || "Opened pack"
+        name: normalizedText4(receipt.packRef?.name) || normalizedText4(context.purpose) || "Opened pack"
       }),
-      purpose: normalizedText3(context.purpose),
+      purpose: normalizedText4(context.purpose),
       threshold: settings.minimumRating,
       cards: Object.freeze(cards.map((card) => Object.freeze(card))),
       maxRating: Math.max(...cards.map((card) => card.rating))
@@ -7553,7 +8176,7 @@
   }
 
   // src/workflows/supply-and-craft.js
-  function positiveInteger2(value, fallback = 1, max = 1e3) {
+  function positiveInteger4(value, fallback = 1, max = 1e3) {
     const number = Number(value);
     return Math.max(1, Math.min(max, Number.isFinite(number) ? Math.floor(number) : fallback));
   }
@@ -7564,7 +8187,7 @@
     if (typeof options.challengeProvider !== "function") throw new TypeError("challengeProvider is required");
     if (typeof options.selectPrimary !== "function") throw new TypeError("selectPrimary is required");
     if (typeof options.submit !== "function") throw new TypeError("submit is required");
-    const maxCompletions = positiveInteger2(options.maxCompletions, 1);
+    const maxCompletions = positiveInteger4(options.maxCompletions, 1);
     const result = {
       status: "completed",
       completions: 0,
@@ -7593,7 +8216,7 @@
       let supplied = false;
       if (!selection?.ok && !preserveSupply) {
         for (const supply of options.supplies || []) {
-          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger2(supply.maxRuns, 100, 1e3) : 1;
+          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger4(supply.maxRuns, 100, 1e3) : 1;
           for (let run = 1; run <= maxRuns && !selection?.ok && !preserveSupply; run++) {
             await options.stopPoint?.();
             const supplyResult = await supply.provide({
@@ -8824,12 +9447,14 @@
         state.scanningPicks = true;
         setPanelState();
         try {
-          await options.scanPlayerPicks?.();
+          const scanOptions = options.getDynamicSbcScanOptions?.() || {};
+          await (options.scanDynamicSbcs || options.scanPlayerPicks)?.(scanOptions);
           return true;
         } catch (error) {
-          log(`Player Pick scan failed: ${error?.message || error}`);
+          log(`Dynamic SBC scan failed: ${error?.message || error}`);
           return false;
         } finally {
+          options.resetDynamicSbcScanMode?.();
           state.scanningPicks = false;
           setPanelState();
         }
@@ -9212,6 +9837,7 @@
       "bronze-loop-profile-select": busy,
       "bronze-loop-open-builder": busy,
       "bronze-loop-refresh": busy,
+      "bronze-loop-scan-mode": busy,
       "bronze-loop-scan-picks": busy,
       "bronze-loop-dry-run": state.running === true,
       "bronze-loop-open-rewards": state.running === true,
@@ -9304,6 +9930,7 @@
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
   #bronze-loop-panel .bronze-loop-option-summary { color: #9fb2c9; font-size: 11px; flex: 1 1 auto; min-width: 100px; }
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
+  #bronze-loop-scan-mode { flex: 0 1 94px !important; min-width: 86px !important; }
   #bronze-loop-panel .bronze-loop-profile-row span { flex: 0 0 auto; color: #9fb2c9; }
   #bronze-loop-latest {
     flex: 1 1 auto;
@@ -9348,12 +9975,14 @@
   }
   #bronze-loop-log .bronze-loop-log-high-rated { color: #ffd54a; font-weight: 700; }
 `;
-  function mainPanelHtml(maxRounds = 3) {
+  function mainPanelHtml(maxRounds = 3, version = "") {
     const rounds = Math.max(1, Number(maxRounds) || 3);
+    const versionLabel = String(version || "").trim();
+    const title = versionLabel ? `Loop Runner v${versionLabel}` : "Loop Runner";
     const resizeHandles = ["n", "s", "e", "w", "ne", "nw", "se", "sw"].map((dir) => `<div class="bronze-loop-resize" id="bronze-loop-resize-${dir}"></div>`).join("\n");
     return `
     <div class="row" id="bronze-loop-drag">
-      <span id="bronze-loop-title">Loop Runner</span>
+      <span id="bronze-loop-title">${title}</span>
       <button id="bronze-loop-options-toggle" title="Options">Options</button>
       <button id="bronze-loop-collapse" title="Compact">L</button>
     </div>
@@ -9412,7 +10041,7 @@
         </div>
         <div class="bronze-loop-section">Config</div>
           <div class="row bronze-loop-profile-row"><span>Profile</span><select id="bronze-loop-profile-select" title="Load a saved Builder Profile or restore built-in loops"></select></div>
-          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button><button id="bronze-loop-scan-picks" title="Rescan active Player Pick SBCs and refresh dynamic Builder bindings">Scan Picks</button></div>
+          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental</option><option value="full">Full rescan</option><option value="clear">Clear cache</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
         </div>
         <div class="bronze-loop-section">Log</div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
@@ -9437,7 +10066,7 @@
     const panel = dom.create("div");
     panel.id = "bronze-loop-panel";
     if (options.startupHidden === true) panel.classList?.add?.("startup-hidden");
-    panel.innerHTML = mainPanelHtml(options.maxRounds);
+    panel.innerHTML = mainPanelHtml(options.maxRounds, options.version);
     dom.appendToBody(panel);
     return { panel, style, created: true };
   }
@@ -9462,16 +10091,16 @@
     "recoveryRecipes",
     "unassignedRecoveryPolicies"
   ]);
-  function clone(value) {
+  function clone3(value) {
     return cloneLoopDef(value);
   }
-  function stableValue(value) {
-    if (Array.isArray(value)) return value.map(stableValue);
+  function stableValue2(value) {
+    if (Array.isArray(value)) return value.map(stableValue2);
     if (!isPlainObject(value)) return value;
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue2(value[key])]));
   }
   function sameValue(left, right) {
-    return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+    return JSON.stringify(stableValue2(left)) === JSON.stringify(stableValue2(right));
   }
   function valueAt(value, path) {
     let current = value;
@@ -9482,8 +10111,8 @@
     return current;
   }
   function setValueAt(value, path, nextValue) {
-    if (!path.length) return clone(nextValue);
-    const result = isPlainObject(value) ? clone(value) : {};
+    if (!path.length) return clone3(nextValue);
+    const result = isPlainObject(value) ? clone3(value) : {};
     let current = result;
     for (const key2 of path.slice(0, -1)) {
       if (!isPlainObject(current[key2])) current[key2] = {};
@@ -9491,7 +10120,7 @@
     }
     const key = path.at(-1);
     if (nextValue === void 0) delete current[key];
-    else current[key] = clone(nextValue);
+    else current[key] = clone3(nextValue);
     return result;
   }
   function replaceEntity(items, id, entity) {
@@ -9499,27 +10128,27 @@
     let replaced = false;
     for (const item of items || []) {
       if (String(item?.id || "") !== String(id)) {
-        result.push(clone(item));
+        result.push(clone3(item));
         continue;
       }
       replaced = true;
-      if (entity) result.push(clone(entity));
+      if (entity) result.push(clone3(entity));
     }
-    if (!replaced && entity) result.push(clone(entity));
+    if (!replaced && entity) result.push(clone3(entity));
     return result;
   }
   function mergePatch(base, patch) {
-    if (!isPlainObject(patch)) return clone(patch);
-    const result = isPlainObject(base) ? clone(base) : {};
+    if (!isPlainObject(patch)) return clone3(patch);
+    const result = isPlainObject(base) ? clone3(base) : {};
     for (const [key, value] of Object.entries(patch)) {
       if (value === null) delete result[key];
-      else result[key] = isPlainObject(value) ? mergePatch(result[key], value) : clone(value);
+      else result[key] = isPlainObject(value) ? mergePatch(result[key], value) : clone3(value);
     }
     return result;
   }
   function createPatch(base, target) {
     if (sameValue(base, target)) return void 0;
-    if (!isPlainObject(base) || !isPlainObject(target)) return clone(target);
+    if (!isPlainObject(base) || !isPlainObject(target)) return clone3(target);
     const patch = {};
     const keys = /* @__PURE__ */ new Set([...Object.keys(base), ...Object.keys(target)]);
     for (const key of keys) {
@@ -9528,7 +10157,7 @@
         continue;
       }
       if (!Object.hasOwn(base, key)) {
-        patch[key] = clone(target[key]);
+        patch[key] = clone3(target[key]);
         continue;
       }
       const child = createPatch(base[key], target[key]);
@@ -9561,23 +10190,23 @@
       const targetEntity = target.get(id);
       const currentEntity = current.get(id);
       if (!targetEntity) {
-        if (!baseEntity && currentEntity) entities.push(clone(currentEntity));
+        if (!baseEntity && currentEntity) entities.push(clone3(currentEntity));
         continue;
       }
       if (!baseEntity) {
         if (currentEntity && !sameValue(currentEntity, targetEntity)) {
           conflicts.push({ collection, id, path: "", reason: "custom-id-collision" });
         }
-        entities.push(clone(targetEntity));
+        entities.push(clone3(targetEntity));
         continue;
       }
       if (!currentEntity) {
         conflicts.push({ collection, id, path: "", reason: "built-in-removed" });
-        entities.push(clone(targetEntity));
+        entities.push(clone3(targetEntity));
         continue;
       }
       if (sameValue(baseEntity, targetEntity)) {
-        entities.push(clone(currentEntity));
+        entities.push(clone3(currentEntity));
         continue;
       }
       const patch = createPatch(baseEntity, targetEntity);
@@ -9591,9 +10220,9 @@
             id,
             path: path.join("."),
             reason: "both-changed",
-            base: clone(before),
-            builtIn: clone(upstream),
-            profile: clone(desired)
+            base: clone3(before),
+            builtIn: clone3(upstream),
+            profile: clone3(desired)
           });
         }
       }
@@ -9606,22 +10235,22 @@
     const base = baseConfig[field2];
     const target = targetConfig[field2];
     const current = currentConfig[field2];
-    if (sameValue(base, target)) return { value: clone(current), conflicts: [] };
+    if (sameValue(base, target)) return { value: clone3(current), conflicts: [] };
     if (!sameValue(base, current) && !sameValue(current, target)) {
       return {
-        value: clone(target),
+        value: clone3(target),
         conflicts: [{
           collection: field2,
           id: field2,
           path: "",
           reason: "both-changed",
-          base: clone(base),
-          builtIn: clone(current),
-          profile: clone(target)
+          base: clone3(base),
+          builtIn: clone3(current),
+          profile: clone3(target)
         }]
       };
     }
-    return { value: clone(target), conflicts: [] };
+    return { value: clone3(target), conflicts: [] };
   }
   function normalizeDynamicBinding(binding = {}) {
     return {
@@ -9629,8 +10258,10 @@
       loopId: String(binding.loopId || binding.definition?.id || ""),
       sbcSetIds: [...new Set((binding.sbcSetIds || binding.definition?.sbcSetIds || []).map(Number).filter(Number.isFinite))],
       pickItemResourceIds: [...new Set((binding.pickItemResourceIds || binding.definition?.pickItemResourceIds || []).map(Number).filter(Number.isFinite))],
+      rewardPackIds: [...new Set((binding.rewardPackIds || binding.definition?.rewardPackIds || []).map(Number).filter(Number.isFinite))],
+      discoveryKind: String(binding.discoveryKind || binding.definition?.discoveryKind || ""),
       available: binding.available === true,
-      definition: binding.definition ? clone(binding.definition) : null,
+      definition: binding.definition ? clone3(binding.definition) : null,
       lastSeenAt: Number(binding.lastSeenAt || 0) || 0
     };
   }
@@ -9640,10 +10271,12 @@
     const setIds = new Set((loop.sbcSetIds || []).map(Number));
     if (binding.sbcSetIds.some((id) => setIds.has(id))) return true;
     const resourceIds = new Set((loop.pickItemResourceIds || []).map(Number));
-    return binding.pickItemResourceIds.some((id) => resourceIds.has(id));
+    if (binding.pickItemResourceIds.some((id) => resourceIds.has(id))) return true;
+    const packIds = new Set((loop.rewardPackIds || []).map(Number));
+    return binding.rewardPackIds.some((id) => packIds.has(id));
   }
   function legacyInventoryOnlyStarterConfig(baseConfig) {
-    const config = clone(normalizeLoopConfig(baseConfig));
+    const config = clone3(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => getLoopStrategyCapabilities(loop.strategy).inventoryOnly === INVENTORY_ONLY_CAPABILITIES.container ? { ...loop, inventoryMode: "inventory-only" } : loop);
     return validateLoopConfig(config, "Legacy Inventory Only starter profile");
   }
@@ -9656,7 +10289,7 @@
     return (loop.challengeRequirements || []).some((requirements) => (requirements || []).some(requirementUsesBronzeOrSilver));
   }
   function bronzeSilverInventoryOnlyStarterConfig(baseConfig) {
-    const config = clone(normalizeLoopConfig(baseConfig));
+    const config = clone3(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => {
       const capability = getLoopStrategyCapabilities(loop.strategy).inventoryOnly;
       if (![INVENTORY_ONLY_CAPABILITIES.supported, INVENTORY_ONLY_CAPABILITIES.container].includes(capability)) {
@@ -9670,7 +10303,7 @@
     return validateLoopConfig(config, "Bronze/Silver Inventory Only starter profile");
   }
   function dailyRarePack2x84StarterConfig(baseConfig) {
-    const config = clone(normalizeLoopConfig(baseConfig));
+    const config = clone3(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => {
       if (loop.id !== "one-click-daily") return loop;
       const steps = (loop.steps || []).filter((step) => String(typeof step === "object" ? step?.loopId || "" : step) !== "daily-rare-pack-84");
@@ -9694,7 +10327,7 @@
     return [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean).every((config) => sameValue(normalizeLoopConfig(config), legacyConfig));
   }
   function createBuilderStarterProfiles(baseConfig, options = {}) {
-    const normalizedBase = clone(validateLoopConfig(baseConfig, "Builder starter profile base"));
+    const normalizedBase = clone3(validateLoopConfig(baseConfig, "Builder starter profile base"));
     return [
       createBuilderProfile({
         id: BUILDER_STARTER_PROFILE_IDS.default,
@@ -9723,7 +10356,7 @@
     ];
   }
   function fingerprintBuilderValue(value) {
-    const text = JSON.stringify(stableValue(value));
+    const text = JSON.stringify(stableValue2(value));
     let hash = 2166136261;
     for (let index = 0; index < text.length; index++) {
       hash ^= text.charCodeAt(index);
@@ -9732,8 +10365,8 @@
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
   function createBuilderProfile(options = {}) {
-    const baseConfig = clone(normalizeLoopConfig(options.baseConfig || options.config));
-    const config = clone(normalizeLoopConfig(options.config || baseConfig));
+    const baseConfig = clone3(normalizeLoopConfig(options.baseConfig || options.config));
+    const config = clone3(normalizeLoopConfig(options.config || baseConfig));
     const now = Number(options.now || Date.now());
     return {
       schemaVersion: BUILDER_SCHEMA_VERSION,
@@ -9743,8 +10376,8 @@
       baseFingerprint: fingerprintBuilderValue(baseConfig),
       baseConfig,
       draftConfig: config,
-      savedConfig: clone(config),
-      lastKnownGood: clone(validateLoopConfig(config, "Builder profile")),
+      savedConfig: clone3(config),
+      lastKnownGood: clone3(validateLoopConfig(config, "Builder profile")),
       dynamicBindings: (options.dynamicBindings || []).map(normalizeDynamicBinding),
       draftRevision: 1,
       savedRevision: 1,
@@ -9756,20 +10389,20 @@
     if (!isPlainObject(profile)) return createBuilderProfile({ baseConfig, ...options });
     let normalizedBase;
     try {
-      normalizedBase = clone(validateLoopConfig(profile.baseConfig || baseConfig, "Builder profile base"));
+      normalizedBase = clone3(validateLoopConfig(profile.baseConfig || baseConfig, "Builder profile base"));
     } catch {
-      normalizedBase = clone(validateLoopConfig(baseConfig, "Current built-in config"));
+      normalizedBase = clone3(validateLoopConfig(baseConfig, "Current built-in config"));
     }
     let lastKnownGood = null;
     for (const candidate of [profile.lastKnownGood, profile.savedConfig, normalizedBase]) {
       if (!candidate) continue;
       try {
-        lastKnownGood = clone(validateLoopConfig(candidate, "Builder last known good"));
+        lastKnownGood = clone3(validateLoopConfig(candidate, "Builder last known good"));
         break;
       } catch {
       }
     }
-    const draftConfig = clone(normalizeLoopConfig(profile.draftConfig || lastKnownGood));
+    const draftConfig = clone3(normalizeLoopConfig(profile.draftConfig || lastKnownGood));
     const result = {
       ...createBuilderProfile({
         id: profile.id || options.id,
@@ -9778,12 +10411,12 @@
         config: lastKnownGood,
         now: profile.createdAt || options.now
       }),
-      ...clone(profile),
+      ...clone3(profile),
       schemaVersion: BUILDER_SCHEMA_VERSION,
-      baseConfig: clone(normalizedBase),
+      baseConfig: clone3(normalizedBase),
       draftConfig,
-      savedConfig: clone(lastKnownGood),
-      lastKnownGood: clone(lastKnownGood),
+      savedConfig: clone3(lastKnownGood),
+      lastKnownGood: clone3(lastKnownGood),
       dynamicBindings: (profile.dynamicBindings || []).map((binding) => ({
         ...normalizeDynamicBinding(binding),
         available: false
@@ -9848,25 +10481,25 @@
         available: false
       })),
       profiles,
-      lastKnownGood: migratedLegacyActive ? clone(profiles.find((profile) => profile.id === activeProfileId)?.lastKnownGood || null) : store.lastKnownGood ? clone(store.lastKnownGood) : null
+      lastKnownGood: migratedLegacyActive ? clone3(profiles.find((profile) => profile.id === activeProfileId)?.lastKnownGood || null) : store.lastKnownGood ? clone3(store.lastKnownGood) : null
     };
   }
   function updateBuilderProfileDraft(profile, config, now = Date.now()) {
     return {
-      ...clone(profile),
-      draftConfig: clone(normalizeLoopConfig(config)),
+      ...clone3(profile),
+      draftConfig: clone3(normalizeLoopConfig(config)),
       draftRevision: Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1,
       updatedAt: Number(now)
     };
   }
   function refreshBuilderDynamicBindings(profile, discoveredLoops = [], now = Date.now()) {
-    const result = clone(profile);
+    const result = clone3(profile);
     result.dynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).map((binding) => {
       const definition = discoveredLoops.find((loop) => dynamicLoopMatch(binding, loop));
       return {
         ...binding,
         available: Boolean(definition),
-        definition: definition ? clone(definition) : binding.definition,
+        definition: definition ? clone3(definition) : binding.definition,
         lastSeenAt: definition ? Number(now) : binding.lastSeenAt
       };
     });
@@ -9898,7 +10531,7 @@
         unavailableBindings.push({ id: binding.id, loopId: binding.loopId });
         continue;
       }
-      config.loops.push(clone(binding.definition));
+      config.loops.push(clone3(binding.definition));
     }
     return {
       config,
@@ -9921,15 +10554,15 @@
   }
   function resolveBuilderProfileConflict(profile, currentBuiltInConfig, conflict, choice, now = Date.now()) {
     if (!["built-in", "profile"].includes(choice)) throw new Error(`Unsupported conflict choice: ${choice}`);
-    const result = clone(profile);
+    const result = clone3(profile);
     const currentConfig = normalizeLoopConfig(currentBuiltInConfig);
     const path = String(conflict?.path || "").split(".").filter(Boolean);
     const collection = String(conflict?.collection || "");
     if (collection === "defaultUnassignedRecoveryPolicyIds") {
       if (choice === "built-in") {
-        result.draftConfig[collection] = clone(currentConfig[collection]);
+        result.draftConfig[collection] = clone3(currentConfig[collection]);
       } else {
-        result.baseConfig[collection] = clone(currentConfig[collection]);
+        result.baseConfig[collection] = clone3(currentConfig[collection]);
       }
     } else if (ENTITY_COLLECTIONS.includes(collection)) {
       const id = String(conflict?.id || "");
@@ -9963,14 +10596,14 @@
     const validation = validateBuilderProfile(profile, currentBuiltInConfig);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
     const revision = Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1;
-    const currentBase = clone(normalizeLoopConfig(currentBuiltInConfig));
+    const currentBase = clone3(normalizeLoopConfig(currentBuiltInConfig));
     return {
-      ...clone(profile),
+      ...clone3(profile),
       baseConfig: currentBase,
       baseFingerprint: fingerprintBuilderValue(currentBase),
-      draftConfig: clone(validation.config),
-      savedConfig: clone(validation.config),
-      lastKnownGood: clone(validation.config),
+      draftConfig: clone3(validation.config),
+      savedConfig: clone3(validation.config),
+      lastKnownGood: clone3(validation.config),
       draftRevision: revision,
       savedRevision: revision,
       updatedAt: Number(now)
@@ -9979,9 +10612,9 @@
   function upsertBuilderProfile(store, profile) {
     const profiles = [...store.profiles || []];
     const index = profiles.findIndex((entry) => entry.id === profile.id);
-    if (index >= 0) profiles[index] = clone(profile);
-    else profiles.push(clone(profile));
-    return { ...clone(store), profiles };
+    if (index >= 0) profiles[index] = clone3(profile);
+    else profiles.push(clone3(profile));
+    return { ...clone3(store), profiles };
   }
   function activateBuilderProfile(store, profile, currentBuiltInConfig) {
     const saved = saveBuilderProfile(profile, currentBuiltInConfig);
@@ -9990,43 +10623,43 @@
       store: {
         ...nextStore,
         activeProfileId: saved.id,
-        activeDynamicBindings: clone(saved.dynamicBindings || []),
-        lastKnownGood: clone(saved.lastKnownGood)
+        activeDynamicBindings: clone3(saved.dynamicBindings || []),
+        lastKnownGood: clone3(saved.lastKnownGood)
       },
       profile: saved,
-      config: clone(saved.lastKnownGood)
+      config: clone3(saved.lastKnownGood)
     };
   }
   function activateSavedBuilderProfile(store, profileId, currentBuiltInConfig) {
     const profile = (store.profiles || []).find((entry) => String(entry.id) === String(profileId));
     if (!profile) throw new Error(`Builder profile not found: ${profileId}`);
-    const savedConfig = clone(profile.lastKnownGood || profile.savedConfig);
+    const savedConfig = clone3(profile.lastKnownGood || profile.savedConfig);
     if (!savedConfig) throw new Error(`Builder profile has no saved configuration: ${profile.name || profile.id}`);
     const savedLoopIds = new Set((savedConfig.loops || []).map((loop) => String(loop.id || "")));
     const savedDynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).filter((binding) => savedLoopIds.has(binding.loopId));
     const savedProfile = {
-      ...clone(profile),
-      draftConfig: clone(savedConfig),
-      savedConfig: clone(savedConfig),
-      lastKnownGood: clone(savedConfig),
+      ...clone3(profile),
+      draftConfig: clone3(savedConfig),
+      savedConfig: clone3(savedConfig),
+      lastKnownGood: clone3(savedConfig),
       dynamicBindings: savedDynamicBindings
     };
     const validation = validateBuilderProfile(savedProfile, currentBuiltInConfig);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
     return {
       store: {
-        ...clone(store),
+        ...clone3(store),
         activeProfileId: profile.id,
-        activeDynamicBindings: clone(savedDynamicBindings),
-        lastKnownGood: clone(validation.config)
+        activeDynamicBindings: clone3(savedDynamicBindings),
+        lastKnownGood: clone3(validation.config)
       },
-      profile: clone(profile),
-      config: clone(validation.config)
+      profile: clone3(profile),
+      config: clone3(validation.config)
     };
   }
   function deactivateBuilderProfile(store) {
     return {
-      ...clone(store),
+      ...clone3(store),
       activeProfileId: null,
       activeDynamicBindings: []
     };
@@ -10067,7 +10700,7 @@
   }
 
   // src/config/builder-editor.js
-  function clone2(value) {
+  function clone4(value) {
     return cloneLoopDef(value);
   }
   function slug(value) {
@@ -10119,17 +10752,17 @@
     }
   }
   function addBuilderLoop(config, strategy, options = {}) {
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const template = createLoopTemplate(strategy, options);
     template.id = uniqueId(normalized, template.id);
     normalized.loops.push(template);
     return { config: normalized, loop: template };
   }
   function duplicateBuilderLoop(config, loopId, options = {}) {
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const source = normalized.loops.find((loop) => String(loop.id) === String(loopId));
     if (!source) throw new Error(`Loop not found: ${loopId}`);
-    const copy = clone2(source);
+    const copy = clone4(source);
     copy.id = uniqueId(normalized, options.id || `${source.id}-copy`);
     copy.name = String(options.name || `${source.name} Copy`);
     delete copy.discoveryReportedCompleted;
@@ -10154,7 +10787,7 @@
     return references;
   }
   function removeBuilderLoop(config, loopId) {
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const references = findBuilderReferences(normalized, loopId);
     if (references.length) throw new Error(`Loop ${loopId} is referenced by ${references.length} configuration location(s)`);
     const previousLength = normalized.loops.length;
@@ -10163,7 +10796,7 @@
     return normalized;
   }
   function renameBuilderLoopId(config, oldId, requestedId) {
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const nextId = slug(requestedId);
     const target = normalized.loops.find((loop) => String(loop.id) === String(oldId));
     if (!target) throw new Error(`Loop not found: ${oldId}`);
@@ -10227,7 +10860,7 @@
     if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(kind)) {
       throw new Error(`Unsupported recovery collection: ${kind}`);
     }
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const nextId = slug(requestedId);
     const target = normalized[kind].find((item) => String(item.id) === String(oldId));
     if (!target) throw new Error(`Recovery object not found: ${oldId}`);
@@ -10259,7 +10892,7 @@
     return { config: normalized, id: nextId };
   }
   function removeBuilderRecovery(config, kind, id) {
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const references = findBuilderRecoveryReferences(normalized, kind, id);
     if (references.length) throw new Error(`Recovery object ${id} is referenced by ${references.length} configuration location(s)`);
     const previousLength = normalized[kind]?.length;
@@ -10269,18 +10902,18 @@
     return normalized;
   }
   function addBuilderWorkflowStep(config, workflowId, loopId, options = {}) {
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const child = normalized.loops.find((loop) => String(loop.id) === String(loopId));
     if (!workflow || !["dailyRoutine", "workflowRoutine"].includes(workflow.strategy)) throw new Error(`Workflow not found: ${workflowId}`);
     if (!child) throw new Error(`Child Loop not found: ${loopId}`);
     if (["dailyRoutine", "workflowRoutine"].includes(child.strategy)) throw new Error("Nested workflows are not supported");
-    const step = options.name || options.rewardFlow ? { loopId: child.id, ...options.name ? { name: options.name } : {}, ...options.rewardFlow ? { rewardFlow: clone2(options.rewardFlow) } : {} } : child.id;
+    const step = options.name || options.rewardFlow ? { loopId: child.id, ...options.name ? { name: options.name } : {}, ...options.rewardFlow ? { rewardFlow: clone4(options.rewardFlow) } : {} } : child.id;
     workflow.steps = [...workflow.steps || [], step];
     return normalized;
   }
   function moveBuilderWorkflowStep(config, workflowId, fromIndex, toIndex) {
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
     const from = Number(fromIndex);
@@ -10291,7 +10924,7 @@
     return normalized;
   }
   function removeBuilderWorkflowStep(config, workflowId, index) {
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
     if (!Number.isInteger(Number(index)) || Number(index) < 0 || Number(index) >= workflow.steps.length) {
@@ -10301,7 +10934,7 @@
     return normalized;
   }
   function setBuilderWorkflowStepPath(config, workflowId, index, path, value) {
-    const normalized = clone2(normalizeLoopConfig(config));
+    const normalized = clone4(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const stepIndex = Number(index);
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
@@ -10309,13 +10942,13 @@
       throw new Error(`Invalid Workflow step index: ${index}`);
     }
     const rawStep = workflow.steps[stepIndex];
-    const step = typeof rawStep === "string" ? { loopId: rawStep } : clone2(rawStep);
+    const step = typeof rawStep === "string" ? { loopId: rawStep } : clone4(rawStep);
     if (!step?.loopId) throw new Error(`Workflow step has no Loop reference: ${workflowId}[${index}]`);
     workflow.steps[stepIndex] = setBuilderPath(step, path, value);
     return normalized;
   }
   function createBuilderStepVariant(config, workflowId, stepIndex) {
-    let normalized = clone2(normalizeLoopConfig(config));
+    let normalized = clone4(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const rawStep = workflow?.steps?.[Number(stepIndex)];
     const sourceId = typeof rawStep === "string" ? rawStep : rawStep?.loopId;
@@ -10329,12 +10962,12 @@
     normalized = result.config;
     result.loop.hidden = true;
     const nextWorkflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
-    const step = typeof rawStep === "string" ? { loopId: result.loop.id } : { ...clone2(rawStep), loopId: result.loop.id };
+    const step = typeof rawStep === "string" ? { loopId: result.loop.id } : { ...clone4(rawStep), loopId: result.loop.id };
     nextWorkflow.steps[Number(stepIndex)] = step;
     return { config: normalized, loop: result.loop };
   }
   function setBuilderPath(object, path, value) {
-    const result = clone2(object);
+    const result = clone4(object);
     const parts = Array.isArray(path) ? path : String(path).split(".").filter(Boolean);
     let target = result;
     for (let index = 0; index < parts.length - 1; index++) {
@@ -10344,7 +10977,7 @@
     }
     const finalKey = parts.at(-1);
     if (value === void 0) delete target[finalKey];
-    else target[finalKey] = clone2(value);
+    else target[finalKey] = clone4(value);
     return result;
   }
 
@@ -11080,7 +11713,7 @@
     <section class="dlr-builder-form-section"><h2>Atomic Loops</h2>
       <div class="dlr-builder-preview-table">${atomic.map((loop) => `<div><strong>${escapeHtml(loop.name)}</strong><code>${escapeHtml(loop.id)}</code><span>${escapeHtml(loop.strategy)}</span><span>${escapeHtml(quantitySummary(loop))}</span><span>Inventory: ${escapeHtml(loop.inventoryMode || "inherit")}</span><span>Rewards: ${escapeHtml(rewardSummary(loop))}</span></div>`).join("")}</div>
     </section>
-    ${model.validation.unavailableBindings.length ? `<section class="dlr-builder-form-section"><h2>Unavailable Dynamic Picks</h2><ul class="dlr-builder-errors">${model.validation.unavailableBindings.map((binding) => `<li>${escapeHtml(binding.loopId || binding.id)}</li>`).join("")}</ul></section>` : ""}
+    ${model.validation.unavailableBindings.length ? `<section class="dlr-builder-form-section"><h2>Unavailable Dynamic SBCs</h2><ul class="dlr-builder-errors">${model.validation.unavailableBindings.map((binding) => `<li>${escapeHtml(binding.loopId || binding.id)}</li>`).join("")}</ul></section>` : ""}
   </main>`;
   }
   var WORKFLOW_LOOP_BUILDER_STYLE = `
@@ -11199,7 +11832,7 @@
       ["workflows", "Workflows"],
       ["loops", "Loops"],
       ["recovery", "Recovery"],
-      ["dynamic", "Dynamic Picks"],
+      ["dynamic", "Dynamic SBCs"],
       ["json", "JSON validation"]
     ];
     const selected2 = model.selectedObject ? { kind: model.selectedKind, object: model.selectedObject } : null;
@@ -11254,7 +11887,7 @@
   }
 
   // src/ui/workflow-loop-builder.js
-  function clone3(value) {
+  function clone5(value) {
     return cloneLoopDef(value);
   }
   function pathValue(object, path) {
@@ -11309,7 +11942,7 @@
   }
   function createWorkflowLoopBuilder(options = {}) {
     const dom = options.dom;
-    const builtInConfig = () => clone3(normalizeLoopConfig(options.getBuiltInConfig?.()));
+    const builtInConfig = () => clone5(normalizeLoopConfig(options.getBuiltInConfig?.()));
     const mounted = mountWorkflowLoopBuilder({ dom });
     const root = mounted.root;
     let store = normalizeBuilderStore(options.loadStore?.(), builtInConfig(), { now: options.now?.() });
@@ -11330,13 +11963,13 @@
       return Number(options.now?.() || Date.now());
     }
     function discoveredLoops() {
-      return clone3(options.getDiscoveredLoops?.() || []);
+      return clone5(options.getDiscoveredLoops?.() || []);
     }
     function profile() {
       return store.profiles.find((entry) => entry.id === profileId) || store.profiles[0];
     }
     function persist() {
-      const snapshot = clone3(store);
+      const snapshot = clone5(store);
       options.saveStore?.(snapshot);
       options.onStoreChange?.(snapshot);
     }
@@ -11353,7 +11986,7 @@
       const current = profile();
       if (JSON.stringify(current) === JSON.stringify(nextProfile)) return false;
       const currentHistory = history();
-      currentHistory.undo.push(clone3(current));
+      currentHistory.undo.push(clone5(current));
       if (currentHistory.undo.length > 50) currentHistory.undo.shift();
       currentHistory.redo = [];
       setProfile(nextProfile);
@@ -11366,7 +11999,7 @@
       const currentHistory = history();
       const previous = currentHistory.undo.pop();
       if (!previous) return false;
-      currentHistory.redo.push(clone3(profile()));
+      currentHistory.redo.push(clone5(profile()));
       setProfile(previous);
       selectedKind = null;
       selectedId = null;
@@ -11378,7 +12011,7 @@
       const currentHistory = history();
       const next = currentHistory.redo.pop();
       if (!next) return false;
-      currentHistory.undo.push(clone3(profile()));
+      currentHistory.undo.push(clone5(profile()));
       setProfile(next);
       selectedKind = null;
       selectedId = null;
@@ -11410,24 +12043,24 @@
       return `${profileId}:${kind}:${id}`;
     }
     function displayConfig(currentProfile, validation, sources) {
-      const config = clone3(normalizeLoopConfig(currentProfile.draftConfig));
+      const config = clone5(normalizeLoopConfig(currentProfile.draftConfig));
       for (const collection of BUILDER_COLLECTIONS) {
         const effective = new Map((validation.config[collection] || []).map((item) => [String(item.id), item]));
         const sourceMap = new Map((sources[collection] || []).map((entry) => [String(entry.id), entry.source]));
         config[collection] = (config[collection] || []).map((item) => {
           const source = sourceMap.get(String(item.id));
-          return ["built-in", "override", "dynamic"].includes(source) && effective.has(String(item.id)) ? clone3(effective.get(String(item.id))) : item;
+          return ["built-in", "override", "dynamic"].includes(source) && effective.has(String(item.id)) ? clone5(effective.get(String(item.id))) : item;
         });
         const ids = new Set(config[collection].map((item) => String(item.id)));
         for (const item of validation.config[collection] || []) {
           const id = String(item.id);
           if (ids.has(id)) continue;
-          config[collection].push(clone3(item));
+          config[collection].push(clone5(item));
           sources[collection] = [...sources[collection] || [], { id, source: "built-in", current: true }];
           ids.add(id);
         }
       }
-      config.defaultUnassignedRecoveryPolicyIds = clone3(validation.config.defaultUnassignedRecoveryPolicyIds);
+      config.defaultUnassignedRecoveryPolicyIds = clone5(validation.config.defaultUnassignedRecoveryPolicyIds);
       return config;
     }
     function buildModel() {
@@ -11490,10 +12123,10 @@
       return true;
     }
     function updateSelectedObject(mutator) {
-      const config = clone3(profile().draftConfig);
+      const config = clone5(profile().draftConfig);
       const object = selectedObject(config);
       if (!object || selectedKind === "dynamic") return false;
-      const updated = mutator(clone3(object));
+      const updated = mutator(clone5(object));
       if (!updated) return false;
       config[selectedKind] = replaceById(config[selectedKind], object.id, updated);
       setDraftConfig(config);
@@ -11559,7 +12192,7 @@
     function toggleDefaultRecoveryPolicy(element) {
       const policyId = String(element?.dataset?.policyId || "");
       if (!policyId) return;
-      const config = clone3(profile().draftConfig);
+      const config = clone5(profile().draftConfig);
       const ids = new Set(config.defaultUnassignedRecoveryPolicyIds || []);
       if (element.value === "true") ids.add(policyId);
       else ids.delete(policyId);
@@ -11568,7 +12201,7 @@
       render();
     }
     function newObject() {
-      const config = clone3(profile().draftConfig);
+      const config = clone5(profile().draftConfig);
       if (tab === "workflows") {
         const result = addBuilderLoop(config, "workflowRoutine", { name: "Custom Workflow" });
         setDraftConfig(result.config);
@@ -11616,12 +12249,12 @@
     }
     function duplicateObject() {
       if (selectedKind === "loops") {
-        const config2 = clone3(profile().draftConfig);
+        const config2 = clone5(profile().draftConfig);
         const hadSource = config2.loops.some((loop) => String(loop.id) === String(selectedId));
         if (!hadSource) {
           const effective = validateBuilderProfile(profile(), builtInConfig()).config.loops.find((loop) => String(loop.id) === String(selectedId));
           if (!effective) throw new Error(`Loop not found: ${selectedId}`);
-          config2.loops.push(clone3(effective));
+          config2.loops.push(clone5(effective));
         }
         const result = duplicateBuilderLoop(config2, selectedId);
         if (!hadSource) result.config.loops = result.config.loops.filter((loop) => String(loop.id) !== String(selectedId));
@@ -11632,7 +12265,7 @@
         return;
       }
       if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(selectedKind)) return;
-      const config = clone3(profile().draftConfig);
+      const config = clone5(profile().draftConfig);
       let source = config[selectedKind].find((item) => String(item.id) === String(selectedId));
       if (!source) {
         source = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind].find((item) => String(item.id) === String(selectedId));
@@ -11642,17 +12275,17 @@
       let index = 2;
       let id = `${source.id}-copy`;
       while (ids.has(id)) id = `${source.id}-copy-${index++}`;
-      const copy = { ...clone3(source), id, ...source.name ? { name: `${source.name} Copy` } : {} };
+      const copy = { ...clone5(source), id, ...source.name ? { name: `${source.name} Copy` } : {} };
       config[selectedKind].push(copy);
       setDraftConfig(config);
       selectedId = id;
       render();
     }
     function resetObject() {
-      const config = clone3(profile().draftConfig);
+      const config = clone5(profile().draftConfig);
       const current = builtInConfig()[selectedKind]?.find((item) => String(item.id) === String(selectedId));
       if (!current) return;
-      config[selectedKind] = replaceById(config[selectedKind], selectedId, clone3(current));
+      config[selectedKind] = replaceById(config[selectedKind], selectedId, clone5(current));
       editableBuiltIns.delete(editableKey());
       setDraftConfig(config);
       render();
@@ -11674,19 +12307,21 @@
       if (selectedKind !== "dynamic") return;
       const definition = selectedObject(profile().draftConfig);
       if (!definition) return;
-      const currentProfile = clone3(profile());
-      const config = clone3(currentProfile.draftConfig);
+      const currentProfile = clone5(profile());
+      const config = clone5(currentProfile.draftConfig);
       const existing = config.loops.findIndex((loop) => String(loop.id) === String(definition.id));
-      if (existing >= 0) config.loops[existing] = clone3(definition);
-      else config.loops.push(clone3(definition));
+      if (existing >= 0) config.loops[existing] = clone5(definition);
+      else config.loops.push(clone5(definition));
       currentProfile.dynamicBindings = [
         ...(currentProfile.dynamicBindings || []).filter((binding) => binding.loopId !== definition.id),
         {
           id: definition.id,
           loopId: definition.id,
-          sbcSetIds: clone3(definition.sbcSetIds || []),
-          pickItemResourceIds: clone3(definition.pickItemResourceIds || []),
-          definition: clone3(definition),
+          sbcSetIds: clone5(definition.sbcSetIds || []),
+          pickItemResourceIds: clone5(definition.pickItemResourceIds || []),
+          rewardPackIds: clone5(definition.rewardPackIds || []),
+          discoveryKind: String(definition.discoveryKind || ""),
+          definition: clone5(definition),
           available: true,
           lastSeenAt: now()
         }
@@ -11700,14 +12335,14 @@
     }
     function unbindDynamic() {
       if (selectedKind !== "loops") return;
-      const currentProfile = clone3(profile());
+      const currentProfile = clone5(profile());
       const binding = (currentProfile.dynamicBindings || []).find((entry) => String(entry.loopId) === String(selectedId));
       if (!binding) return;
       const references = findBuilderReferences(currentProfile.draftConfig, binding.loopId);
       if (references.length) {
-        throw new Error(`Dynamic Pick ${binding.loopId} is referenced by ${references.length} Workflow location(s); remove those steps first`);
+        throw new Error(`Dynamic SBC ${binding.loopId} is referenced by ${references.length} Workflow location(s); remove those steps first`);
       }
-      const config = clone3(currentProfile.draftConfig);
+      const config = clone5(currentProfile.draftConfig);
       config.loops = config.loops.filter((loop) => String(loop.id) !== String(binding.loopId));
       currentProfile.dynamicBindings = currentProfile.dynamicBindings.filter((entry) => String(entry.loopId) !== String(binding.loopId));
       setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
@@ -11741,7 +12376,7 @@
         store = activated.store;
         profileId = activated.profile.id;
         persist();
-        options.applyConfig?.(clone3(activated.config), `Builder profile: ${activated.profile.name}`);
+        options.applyConfig?.(clone5(activated.config), `Builder profile: ${activated.profile.name}`);
         jsonMessage = "Profile activated";
         jsonValid = true;
       } catch (error) {
@@ -11769,9 +12404,9 @@
     }
     function importedDynamicBindings(currentProfile, config) {
       const loops = new Map((config.loops || []).map((loop) => [String(loop.id || ""), loop]));
-      return clone3((currentProfile.dynamicBindings || []).filter((binding) => {
+      return clone5((currentProfile.dynamicBindings || []).filter((binding) => {
         const loop = loops.get(String(binding.loopId || ""));
-        return loop?.strategy === "playerPickSbc";
+        return ["playerPickSbc", "fillAndVerifySbc"].includes(loop?.strategy);
       }));
     }
     function applyImportedDraft(currentProfile, imported) {
@@ -11876,13 +12511,13 @@
       if (action2 === "new-object") return newObject();
       if (action2 === "duplicate-object") return duplicateObject();
       if (action2 === "override-object") {
-        const config = clone3(profile().draftConfig);
+        const config = clone5(profile().draftConfig);
         if (!config[selectedKind]?.some((item) => String(item.id) === String(selectedId))) {
           const effective = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind]?.find((item) => String(item.id) === String(selectedId));
           if (!effective) throw new Error(`Built-in object not found: ${selectedKind}.${selectedId}`);
-          config[selectedKind].push(clone3(effective));
-          const currentProfile = clone3(profile());
-          currentProfile.baseConfig[selectedKind].push(clone3(effective));
+          config[selectedKind].push(clone5(effective));
+          const currentProfile = clone5(profile());
+          currentProfile.baseConfig[selectedKind].push(clone5(effective));
           currentProfile.baseFingerprint = fingerprintBuilderValue(currentProfile.baseConfig);
           setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
         }
@@ -11991,7 +12626,7 @@
           return;
         }
         if (element?.id === "dlr-builder-profile-name") {
-          const next = { ...clone3(profile()), name: String(element.value || "").trim() || profile().name, updatedAt: now() };
+          const next = { ...clone5(profile()), name: String(element.value || "").trim() || profile().name, updatedAt: now() };
           setEditedProfile(next);
           render();
           return;
@@ -12035,10 +12670,10 @@
       jsonMessage = `Imported ${importedProfile.draftConfig.loops.length} Loop(s)`;
       jsonValid = true;
       if (importOptions.open !== false) open("json");
-      return clone3(importedProfile.draftConfig);
+      return clone5(importedProfile.draftConfig);
     }
     function refreshDynamic(nextDiscoveredLoops = discoveredLoops()) {
-      const loops = clone3(nextDiscoveredLoops);
+      const loops = clone5(nextDiscoveredLoops);
       const activeBindingSnapshot = refreshBuilderDynamicBindings({
         dynamicBindings: store.activeDynamicBindings || []
       }, loops, now()).dynamicBindings;
@@ -12049,7 +12684,7 @@
       };
       persist();
       if (root.classList.contains("open")) render();
-      return clone3(store);
+      return clone5(store);
     }
     function restoreActiveProfile() {
       if (!store.activeProfileId) return { status: "built-in", config: null };
@@ -12057,15 +12692,15 @@
       if (!active) return { status: "missing", config: null };
       const activeConfig = store.lastKnownGood || active.lastKnownGood || active.savedConfig;
       const startupProfile = {
-        ...clone3(active),
-        draftConfig: clone3(activeConfig),
-        savedConfig: clone3(activeConfig),
-        dynamicBindings: clone3(store.activeDynamicBindings || [])
+        ...clone5(active),
+        draftConfig: clone5(activeConfig),
+        savedConfig: clone5(activeConfig),
+        dynamicBindings: clone5(store.activeDynamicBindings || [])
       };
       const validation = validateBuilderProfile(startupProfile, builtInConfig());
       if (!validation.valid) return { status: "blocked", errors: validation.errors, config: null };
-      options.applyConfig?.(clone3(validation.config), `Builder profile: ${active.name}`);
-      return { status: "applied", config: clone3(validation.config) };
+      options.applyConfig?.(clone5(validation.config), `Builder profile: ${active.name}`);
+      return { status: "applied", config: clone5(validation.config) };
     }
     function selectRuntimeProfile(nextProfileId) {
       if (String(nextProfileId) === BUILDER_BUILT_IN_PROFILE_ID) {
@@ -12076,12 +12711,12 @@
       store = activated.store;
       profileId = activated.profile.id;
       persist();
-      options.applyConfig?.(clone3(activated.config), `Builder profile: ${activated.profile.name}`);
+      options.applyConfig?.(clone5(activated.config), `Builder profile: ${activated.profile.name}`);
       if (root.classList.contains("open")) render();
       return {
         status: "applied",
         profileId: activated.profile.id,
-        config: clone3(activated.config)
+        config: clone5(activated.config)
       };
     }
     function useBuiltIn() {
@@ -12114,7 +12749,7 @@
         ...store.profiles.map((entry) => ({ id: entry.id, name: entry.name, preset: entry.preset || null }))
       ],
       getSelectedRuntimeProfileId: () => store.activeProfileId || BUILDER_BUILT_IN_PROFILE_ID,
-      getStore: () => clone3(store),
+      getStore: () => clone5(store),
       isOpen: () => root.classList.contains("open"),
       root
     });
@@ -13287,7 +13922,7 @@
       loopDefs: null,
       discoveredLoopDefs: [],
       discoveredLoopOverrides: {},
-      scannedPlayerPickDefs: [],
+      scannedDynamicSbcDefs: [],
       recoveryRecipes: null,
       unassignedRecoveryPolicies: null,
       defaultUnassignedRecoveryPolicyIds: null,
@@ -13331,7 +13966,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.1",
+      version: "0.6.10",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -13339,7 +13974,8 @@
       clearFsuSettingsOverride,
       calculateSquadRating: calculateEaSquadRating,
       solveRatingSbcCandidates: findOptimalRatingSbcSelection,
-      scanPlayerPicks: () => scanAvailablePlayerPickSbcs(),
+      scanPlayerPicks: () => scanAvailableDynamicSbcs(),
+      scanDynamicSbcs: (options = {}) => scanAvailableDynamicSbcs(options),
       previewPackHighlight: (input = {}) => previewPackHighlight(input),
       previewBatchOpenRecap: () => previewBatchOpenRecap()
     };
@@ -13413,8 +14049,8 @@
         defaultUnassignedRecoveryPolicyIds: DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS
       };
     }
-    function getScannedPlayerPickLoopDefs() {
-      const loops = state.scannedPlayerPickDefs || [];
+    function getScannedDynamicSbcLoopDefs() {
+      const loops = state.scannedDynamicSbcDefs || [];
       const seen = /* @__PURE__ */ new Set();
       return loops.filter((loopDef) => {
         const id = String(loopDef?.id || "");
@@ -13458,7 +14094,7 @@
       if (options.preserveDiscovery !== true) {
         state.discoveredLoopDefs = [];
         state.discoveredLoopOverrides = {};
-        state.scannedPlayerPickDefs = [];
+        state.scannedDynamicSbcDefs = [];
       }
       renderLoopSelect(state.loopDefs[0]?.id);
       log(`Loaded ${state.loopDefs.length} loop definition(s), ${state.recoveryRecipes.length} recovery recipe(s), and ${state.unassignedRecoveryPolicies.length} recovery policy(s) from ${source}`);
@@ -13472,7 +14108,7 @@
       if (options.preserveDiscovery !== true) {
         state.discoveredLoopDefs = [];
         state.discoveredLoopOverrides = {};
-        state.scannedPlayerPickDefs = [];
+        state.scannedDynamicSbcDefs = [];
       }
       renderLoopSelect(LOOP_DEFS[0]?.id);
       log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
@@ -15207,8 +15843,8 @@
       const detail = lastError?.message || lastResult?.error?.code || lastResult?.status || "unknown";
       fail2(`No challenge loaded for ${label} after ${attempts} attempt(s): ${detail}`);
     }
-    async function loadPlayerPickDiscoveryChallenges(set) {
-      const label = `Player Pick scan ${set?.name || `#${set?.id || "?"}`}`;
+    async function loadDynamicSbcDiscoveryChallenges(set) {
+      const label = `Dynamic SBC scan ${set?.name || `#${set?.id || "?"}`}`;
       let challenges = null;
       if (eaSbcAdapter().hasDaoGetChallengesForSet()) {
         const result = await observeOnce(
@@ -15273,23 +15909,76 @@
         log(`Player Pick scan: reward ${source} keys: ${keys}; related prototype keys: ${prototypeKeys}; related scalar values: ${values}`);
       }
     }
-    async function scanAvailablePlayerPickSbcs() {
-      log("Player Pick scan: refreshing SBC Sets and reading metadata; only fully supported non-duplicate Picks will be added as session Loops, nothing will be executed");
+    function dynamicSbcCacheStorageKey() {
+      return `${DYNAMIC_SBC_CACHE_KEY}:${eaSbcAdapter().cacheScope()}`;
+    }
+    function dynamicSbcCandidate(index = {}) {
+      const hasPlayerPickReward = (index.rewards || []).some((reward) => reward?.type === "PLAYER_PICK");
+      return hasPlayerPickReward || index.inUpgradesCategory === true && Boolean(detectDynamicUpgradeFamily(index));
+    }
+    function configuredLoopTemplate(id) {
+      return getConfiguredLoopDefs().find((loopDef) => loopDef?.id === id) || LOOP_DEFS.find((loopDef) => loopDef?.id === id) || null;
+    }
+    function unavailableDynamicSbcParse(parsed, loadError) {
+      if (!loadError) return parsed;
+      return {
+        ...parsed,
+        status: "unavailable",
+        loop: null,
+        diagnostics: [
+          `Challenge metadata refresh failed: ${loadError?.message || loadError}`,
+          ...parsed?.diagnostics || []
+        ]
+      };
+    }
+    function logDynamicUpgradeDiscovery(snapshot, parsed, loadError) {
+      const reward = (snapshot.rewards || []).find((entry) => entry?.type === "PACK") || {};
+      log(`Dynamic SBC scan: Upgrade set #${snapshot.id || "?"} ${snapshot.name || "?"}; category:${snapshot.categoryNames?.join("/") || "?"}; reward ${reward.name || "?"} (#${reward.packId || reward.resourceId || "?"}); challenges:${snapshot.challenges?.length || 0}; completed:${snapshot.timesCompleted ?? "?"}, repeats:${snapshot.repeats ?? "?"}, remaining:${parsed.remainingCompletions ?? "?"}; status:${parsed.status}`);
+      for (const [index, challenge] of (snapshot.challenges || []).entries()) {
+        const requirements = (challenge.eligibilityRequirements || []).map(describePlayerPickDiscoveryRequirement).join(", ");
+        log(`Dynamic SBC scan: Upgrade challenge ${index + 1} #${challenge.id || "?"} players:${challenge.requiredPlayerCount || "?"} completed:${challenge.completed ? "yes" : "no"}; ${requirements || "requirements unavailable"}`);
+      }
+      if (loadError) log(`Dynamic SBC scan: Upgrade challenge load warning: ${loadError?.message || loadError}`);
+      for (const diagnostic of parsed.diagnostics || []) log(`Dynamic SBC scan: Upgrade diagnostic: ${diagnostic}`);
+    }
+    async function scanAvailableDynamicSbcs(options = {}) {
+      const forceFull = options.forceFull === true;
+      const clearCache = options.clearCache === true;
+      log(`Dynamic SBC scan: refreshing the current Set/Category index and validating per-SBC cache${forceFull ? "; forcing full Challenge refresh" : ""}; nothing will be executed`);
       const pickOptions = getPickRuntimeOptions();
-      const summary = await scanPlayerPickSbcSnapshots({
+      const cacheKey = dynamicSbcCacheStorageKey();
+      if (clearCache) adapters.userscriptStorage.remove(cacheKey);
+      const cached = clearCache ? null : adapters.userscriptStorage.get(cacheKey, null);
+      const summary = await scanDynamicSbcSnapshots({
+        cache: cached,
+        forceFull,
         refreshSets: async () => {
-          const result = await observeOnce(eaSbcAdapter().requestSets(), ctrl(), 3e4, "Player Pick scan SBC.requestSets");
+          const result = await observeOnce(eaSbcAdapter().requestSets(), ctrl(), 3e4, "Dynamic SBC scan SBC.requestSets");
           if (!result?.success) throw new Error(serviceResultErrorText(result) || "SBC Set request failed");
+          return result;
         },
         listSets: getSbcSets,
-        snapshotSet: (set, challenges) => eaSbcAdapter().snapshotDiscoverySet(set, challenges),
-        loadChallenges: loadPlayerPickDiscoveryChallenges,
-        parseSnapshot: (snapshot) => parsePlayerPickSbcSnapshot({
-          set: snapshot,
-          highGoldThreshold: pickOptions.highGoldThreshold,
-          pricePlatform: "pc"
-        }),
-        onResult: async ({ snapshot, parsed, loadError }) => {
+        snapshotIndex: (set, refreshResult) => eaSbcAdapter().snapshotDiscoveryIndex(set, refreshResult),
+        snapshotSet: (set, challenges, refreshResult) => eaSbcAdapter().snapshotDiscoverySet(set, challenges, refreshResult),
+        loadChallenges: loadDynamicSbcDiscoveryChallenges,
+        isCandidate: dynamicSbcCandidate,
+        onResult: async ({ snapshot, loadError, cacheStatus }) => {
+          const isPick = (snapshot.rewards || []).some((reward2) => reward2?.type === "PLAYER_PICK");
+          if (!isPick) {
+            const parsed2 = unavailableDynamicSbcParse(parseDynamicUpgradeSbcSnapshot({
+              set: snapshot,
+              x10Template: configuredLoopTemplate("84x10"),
+              totwTemplate: configuredLoopTemplate("auto-totw-upgrade")
+            }), loadError);
+            logDynamicUpgradeDiscovery(snapshot, parsed2, loadError);
+            log(`Dynamic SBC scan: set #${snapshot.id || "?"} cache:${cacheStatus}`);
+            return;
+          }
+          const parsed = unavailableDynamicSbcParse(parsePlayerPickSbcSnapshot({
+            set: snapshot,
+            highGoldThreshold: pickOptions.highGoldThreshold,
+            pricePlatform: "pc"
+          }), loadError);
           const reward = snapshot.rewards?.[0] || {};
           const remaining = parsed.remainingCompletions ?? (() => {
             if (parsed.loop?.useRoundsAsCompletions === true) return "user rounds";
@@ -15307,20 +15996,42 @@
           }
           if (loadError) log(`Player Pick scan: challenge load warning: ${loadError?.message || loadError}`);
           for (const diagnostic of parsed.diagnostics || []) log(`Player Pick scan: diagnostic: ${diagnostic}`);
+          log(`Dynamic SBC scan: set #${snapshot.id || "?"} cache:${cacheStatus}`);
         }
       });
-      const session = buildPlayerPickDiscoverySession({
-        sets: summary.results.map((result) => result.snapshot),
-        configuredLoops: getConfiguredLoopDefs(),
+      adapters.userscriptStorage.set(cacheKey, summary.cache);
+      const snapshots = summary.results.map((result) => result.loadError ? { ...result.snapshot, challenges: [] } : result.snapshot);
+      const configuredLoops = getConfiguredLoopDefs();
+      const pickSession = buildPlayerPickDiscoverySession({
+        sets: snapshots,
+        configuredLoops,
         selectedId: document.querySelector("#bronze-loop-select")?.value || null,
         preferScannedMetadata: pickOptions.preferScannedMetadata,
         highGoldThreshold: pickOptions.highGoldThreshold,
         pricePlatform: "pc"
       });
-      state.discoveredLoopDefs = cloneLoopDef(session.discoveredLoops);
-      state.discoveredLoopOverrides = cloneLoopDef(session.loopOverrides);
-      state.scannedPlayerPickDefs = cloneLoopDef(collectScannedPlayerPickLoopDefs(session.results));
-      state.workflowBuilder?.refreshDynamic(getScannedPlayerPickLoopDefs());
+      const upgradeSession = buildUpgradeDiscoverySession({
+        sets: snapshots,
+        configuredLoops,
+        x10Template: configuredLoopTemplate("84x10"),
+        totwTemplate: configuredLoopTemplate("auto-totw-upgrade")
+      });
+      state.discoveredLoopDefs = cloneLoopDef([
+        ...pickSession.discoveredLoops,
+        ...upgradeSession.discoveredLoops
+      ]);
+      state.discoveredLoopOverrides = cloneLoopDef({
+        ...pickSession.loopOverrides,
+        ...upgradeSession.loopOverrides
+      });
+      state.scannedDynamicSbcDefs = cloneLoopDef([
+        ...collectScannedPlayerPickLoopDefs(pickSession.results),
+        ...upgradeSession.discoveredLoops,
+        ...Object.values(upgradeSession.loopOverrides).filter(
+          (loopDef) => loopDef?.discovered === true && loopDef?.discoveryKind === "upgrade"
+        )
+      ]);
+      state.workflowBuilder?.refreshDynamic(getScannedDynamicSbcLoopDefs());
       const activeBuilderId = state.workflowBuilder?.getStore?.().activeProfileId;
       if (activeBuilderId) {
         const restored = state.workflowBuilder.restoreActiveProfile();
@@ -15328,21 +16039,32 @@
           if (String(state.loopConfigSource || "").startsWith("Builder profile:")) {
             resetLoopDefs({ preserveDiscovery: true });
           }
-          log(`Active Builder profile remains unavailable after Player Pick scan: ${(restored.errors || []).join("; ")}`);
+          log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join("; ")}`);
         }
       }
-      renderLoopSelect(session.selectedId);
-      const duplicateCount = session.results.filter((result) => result.status === "duplicate").length;
-      for (const [loopId, loopDef] of Object.entries(state.discoveredLoopOverrides)) {
+      const requestedSelection = document.querySelector("#bronze-loop-select")?.value || pickSession.selectedId;
+      const selectedId = getLoopDefs().some((loopDef) => loopDef.id === requestedSelection) ? requestedSelection : getLoopDefs()[0]?.id;
+      renderLoopSelect(selectedId);
+      const pickDuplicateCount = pickSession.results.filter((result) => result.status === "duplicate").length;
+      for (const [loopId, loopDef] of Object.entries(pickSession.loopOverrides)) {
         const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
         log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
       }
-      for (const diagnostic of session.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
-      for (const loopDef of state.discoveredLoopDefs) {
+      for (const diagnostic of pickSession.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
+      for (const loopDef of pickSession.discoveredLoops) {
         const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
         log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? "; reported completed, one runtime probe" : ""})`);
       }
-      log(`Player Pick scan complete: ${summary.pickSets} Pick Set(s) found among ${summary.setsScanned} SBC Set(s); ${state.discoveredLoopDefs.length} supported session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) using scanned metadata, ${duplicateCount} static/discovered duplicate(s) skipped`);
+      for (const [loopId, loopDef] of Object.entries(upgradeSession.loopOverrides)) {
+        log(`Dynamic SBC scan: using scanned Upgrade metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.rewardPackIds?.[0] || "?"}, target rating:${loopDef.ratingSbcFill?.targetRating || "?"}, players:${loopDef.expectedPlayerCount || "?"})`);
+      }
+      for (const loopDef of upgradeSession.discoveredLoops) {
+        log(`Dynamic SBC scan: added session Upgrade Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.rewardPackIds?.[0] || "?"}, target rating:${loopDef.ratingSbcFill?.targetRating || "?"}, players:${loopDef.expectedPlayerCount || "?"})`);
+      }
+      const upgradeDuplicateCount = upgradeSession.results.filter((result) => result.status === "duplicate").length;
+      const pickSetCount = snapshots.filter((snapshot) => (snapshot.rewards || []).some((reward) => reward?.type === "PLAYER_PICK")).length;
+      const upgradeSetCount = snapshots.length - pickSetCount;
+      log(`Dynamic SBC scan complete: ${summary.stats.setsScanned} Set(s) checked, ${summary.stats.candidates} candidate(s) (${pickSetCount} Pick, ${upgradeSetCount} Upgrade); cache hits:${summary.stats.cacheHits}, rescanned:${summary.stats.rescanned}, new:${summary.stats.newSets}, changed:${summary.stats.changedSets}, expired:${summary.stats.expiredEntries}, removed:${summary.stats.removedEntries}, failures:${summary.stats.loadFailures}; ${state.discoveredLoopDefs.length} session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) updated, ${pickDuplicateCount + upgradeDuplicateCount} duplicate(s) skipped`);
       return summary;
     }
     async function findAvailableSbcChallenge(set, label = set?.name || "SBC") {
@@ -17694,7 +18416,7 @@
       const attempt = await submitSbcAttempt({
         label: loopDef.name,
         challengeProvider: async () => {
-          const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+          const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
           return openSbcSet(set, { returnNullIfComplete: options.returnNullIfComplete });
         },
         squadProvider: selection ? createInventorySquadProvider({
@@ -18131,8 +18853,10 @@
         adapters.localStorage.setJson(PICK_OPTIONS_KEY, options);
       } catch {
       }
-      if (!options.preferScannedMetadata && Object.keys(state.discoveredLoopOverrides).length) {
-        state.discoveredLoopOverrides = {};
+      if (!options.preferScannedMetadata && Object.values(state.discoveredLoopOverrides).some((loopDef) => loopDef?.strategy === "playerPickSbc")) {
+        state.discoveredLoopOverrides = Object.fromEntries(
+          Object.entries(state.discoveredLoopOverrides).filter(([, loopDef]) => loopDef?.strategy !== "playerPickSbc")
+        );
         renderLoopSelect(document.querySelector("#bronze-loop-select")?.value || null);
         log("Player Pick scan: scanned metadata preference disabled; configured Pick Loops reverted to static fallback");
       }
@@ -18521,7 +19245,7 @@
           const preflightReady = await ensureTotwForFillAndVerify(loopDef);
           if (preflightReady === false) return { status: "unavailable", reason: "required TOTW preflight is unavailable" };
           patchFsuLengthSafePlayerMetadata(`${loopDef.name} before opening SBC`);
-          const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+          const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
           let opened;
           if (shouldUseRatingSbcFill(loopDef)) {
             log(`${loopDef.name}: reading dynamic challenge requirements through the direct rating SBC path`);
@@ -19680,8 +20404,8 @@
           return receipt || { status: "stale", reason: "source pack stale or unavailable" };
         },
         runStages: async ({ result: current, phase, context }) => {
-          const remainingCompletions2 = consumeAllSourcePacks ? null : Math.max(0, maxCompletions - Number(current.stageCompletions.rare || 0));
-          if (remainingCompletions2 === 0) {
+          const remainingCompletions3 = consumeAllSourcePacks ? null : Math.max(0, maxCompletions - Number(current.stageCompletions.rare || 0));
+          if (remainingCompletions3 === 0) {
             return { status: "completed", completions: { rare: 0 }, reason: "completion target reached" };
           }
           if (dryRun) {
@@ -19700,7 +20424,7 @@
             isLowRareGoldDuplicate,
             `2x84+ ${phase === "resume" ? "resumed " : ""}low rare gold`,
             {
-              maxCompletions: remainingCompletions2 ?? 100,
+              maxCompletions: remainingCompletions3 ?? 100,
               forceAttempts: phase === "pack" && Number(context?.lowRare || 0) > 0 ? 1 : 0,
               transientUnassignedSignals: phase === "pack" ? context?.transientUnassignedSignals || [] : []
             }
@@ -19715,9 +20439,9 @@
         afterStalePack: async () => {
           if (!dryRun) await sleep(CFG.pauseMs);
         },
-        onSourceExhausted: async ({ remainingCompletions: remainingCompletions2 }) => {
+        onSourceExhausted: async ({ remainingCompletions: remainingCompletions3 }) => {
           const fallbackLoopId = String(loopDef.sourceExhaustedFallbackLoopId || "").trim();
-          const requestedFallbackCompletions = fillRemainingRoundsFromInventory ? Number(remainingCompletions2 || 0) : consumeAllSourcePacks ? Number(loopDef.sourceExhaustedFallbackMaxCompletions || 1) : Number(remainingCompletions2 || 0);
+          const requestedFallbackCompletions = fillRemainingRoundsFromInventory ? Number(remainingCompletions3 || 0) : consumeAllSourcePacks ? Number(loopDef.sourceExhaustedFallbackMaxCompletions || 1) : Number(remainingCompletions3 || 0);
           if (fillRemainingRoundsFromInventory && requestedFallbackCompletions === 0) {
             log(`${loopDef.name}: source packs completed the requested ${maxCompletions} round(s); no inventory fallback needed`);
             return { status: "completed", completions: { rare: 0 }, reason: null };
@@ -20233,10 +20957,10 @@
           failOnUnexpected: true
         });
         const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
-        const remainingCompletions2 = getDailySetRemaining(set);
+        const remainingCompletions3 = getDailySetRemaining(set);
         pickTarget = resolvePlayerPickRunTarget(loopDef, {
           pendingCount: pending.length,
-          remainingCompletions: remainingCompletions2
+          remainingCompletions: remainingCompletions3
         });
         const remainingLabel = pickTarget.usedSafetyLimit ? `unknown; running until unavailable (safety cap ${pickTarget.remainingCompletions})` : `${pickTarget.remainingCompletions}`;
         log(`${loopDef.name}: limited Set progress completed:${Number.isFinite(Number(set?.timesCompleted)) ? set.timesCompleted : "?"}, repeats:${Number.isFinite(Number(set?.repeats)) ? set.repeats : "?"}, remaining:${remainingLabel}; pending Pick(s):${pickTarget.pendingCount}`);
@@ -20847,6 +21571,7 @@
       const mounted = mountMainPanel({
         dom: adapters.dom,
         maxRounds: CFG.maxRounds,
+        version: W[APP_KEY]?.version,
         startupHidden: true
       });
       if (!mounted.created) return;
@@ -20890,7 +21615,7 @@
       state.workflowBuilder = createWorkflowLoopBuilder({
         dom: adapters.dom,
         getBuiltInConfig: getBuiltInLoopConfig,
-        getDiscoveredLoops: getScannedPlayerPickLoopDefs,
+        getDiscoveredLoops: getScannedDynamicSbcLoopDefs,
         loadStore: () => {
           try {
             return adapters.localStorage.getJson(BUILDER_PROFILE_KEY, null);
@@ -20908,7 +21633,7 @@
       });
       const restoredProfile = state.workflowBuilder.restoreActiveProfile();
       if (restoredProfile.status === "blocked") {
-        log(`Active Builder profile was not restored before Player Pick refresh: ${(restoredProfile.errors || []).join("; ")}`);
+        log(`Active Builder profile was not restored before Dynamic SBC refresh: ${(restoredProfile.errors || []).join("; ")}`);
       }
       renderProfileSelect();
       renderLoopSelect();
@@ -20929,7 +21654,19 @@
         openBatch: openBatchOpenDialogModal,
         reopenRecap: reopenLastRecap,
         refreshInventoryCaches,
-        scanPlayerPicks: scanAvailablePlayerPickSbcs,
+        scanDynamicSbcs: scanAvailableDynamicSbcs,
+        scanPlayerPicks: scanAvailableDynamicSbcs,
+        getDynamicSbcScanOptions: () => {
+          const mode = document.querySelector("#bronze-loop-scan-mode")?.value || "incremental";
+          return {
+            forceFull: mode === "full" || mode === "clear",
+            clearCache: mode === "clear"
+          };
+        },
+        resetDynamicSbcScanMode: () => {
+          const select = document.querySelector("#bronze-loop-scan-mode");
+          if (select) select.value = "incremental";
+        },
         userEffects: adapters.userEffects,
         getLogText: () => state.logLines.join("\n"),
         clearLog,

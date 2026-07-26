@@ -163,6 +163,13 @@ describe('effect adapter contracts', () => {
       complete: false,
       timesCompleted: 0,
       repeats: 1,
+      startTime: null,
+      endTime: null,
+      categoryIds: [],
+      categoryNames: [],
+      inUpgradesCategory: false,
+      categoriesAvailable: false,
+      challengeIds: [5101],
       rewards: [{
         type: 'PLAYER_PICK',
         name: 'Tournament Player Pick',
@@ -191,6 +198,90 @@ describe('effect adapter contracts', () => {
           { key: 'PLAYER_RARITY', values: [1], count: 4 },
         ],
       }],
+    });
+  });
+
+  it('normalizes Pack rewards and confirms Upgrades membership from EA Category data', () => {
+    const set = {
+      id: 4201,
+      name: '10x 85+ Upgrade',
+      awards: [{ type: 'PACK', value: 30001, name: '10x 85+ Players Pack' }],
+      challengeIds: [5201],
+    };
+    const category = { id: 7, name: 'Upgrades', setIds: [4201] };
+    const ea = createEaSbcAdapter({
+      services: { SBC: {
+        repository: {
+          sets: { _collection: { 4201: set } },
+          categories: { _collection: { 7: category } },
+        },
+        requestSets() {}, requestChallengesForSet() {}, loadChallenge() {}, saveChallenge() {}, submitChallenge() {},
+      } },
+      repositories: { Squad: { getFormation: () => null } },
+      UTSBCSquadSplitViewController: class {},
+    });
+
+    expect(ea.snapshotDiscoveryIndex(set)).toMatchObject({
+      rewards: [{ type: 'PACK', packId: 30001, resourceId: 30001, count: 1 }],
+      challengeIds: [5201],
+      categoryIds: [7],
+      categoryNames: ['Upgrades'],
+      categoriesAvailable: true,
+      inUpgradesCategory: true,
+    });
+  });
+
+  it('accepts authoritative Set-local Category metadata when the global Category repository is unavailable', () => {
+    const set = {
+      id: 4202,
+      name: '10x 85+ Upgrade',
+      categories: [{ id: 7, name: 'Upgrades' }],
+      awards: [{ type: 'PACK', value: 30002, name: '10x 85+ Players Pack' }],
+      challengeIds: [5202],
+    };
+    const ea = createEaSbcAdapter({
+      services: { SBC: {
+        repository: { sets: { _collection: { 4202: set } } },
+        requestSets() {}, requestChallengesForSet() {}, loadChallenge() {}, saveChallenge() {}, submitChallenge() {},
+      } },
+      repositories: { Squad: { getFormation: () => null } },
+      UTSBCSquadSplitViewController: class {},
+    });
+
+    expect(ea.snapshotDiscoveryIndex(set)).toMatchObject({
+      categoryIds: [7],
+      categoryNames: ['Upgrades'],
+      categoriesAvailable: true,
+      inUpgradesCategory: true,
+    });
+  });
+
+  it('joins a Set-local Category id to a global Category name without requiring reverse Set membership', () => {
+    const set = {
+      id: 4203,
+      name: '10x 85+ Upgrade',
+      categoryId: 7,
+      awards: [{ type: 'PACK', value: 30003, name: '10x 85+ Players Pack' }],
+      challengeIds: [5203],
+    };
+    const category = { id: 7, name: 'Upgrades' };
+    const ea = createEaSbcAdapter({
+      services: { SBC: {
+        repository: {
+          sets: { _collection: { 4203: set } },
+          categories: { _collection: { 7: category } },
+        },
+        requestSets() {}, requestChallengesForSet() {}, loadChallenge() {}, saveChallenge() {}, submitChallenge() {},
+      } },
+      repositories: { Squad: { getFormation: () => null } },
+      UTSBCSquadSplitViewController: class {},
+    });
+
+    expect(ea.snapshotDiscoveryIndex(set)).toMatchObject({
+      categoryIds: [7],
+      categoryNames: ['Upgrades'],
+      categoriesAvailable: true,
+      inUpgradesCategory: true,
     });
   });
 

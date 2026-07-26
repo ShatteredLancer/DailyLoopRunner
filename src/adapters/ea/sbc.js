@@ -99,16 +99,16 @@ export function createEaSbcAdapter(runtime) {
     try { return flattenValues(requirement?.getFirstValue?.(key)); } catch { return []; }
   }
 
-function positiveInteger(value) {
-  const number = Number(value);
-  return Number.isInteger(number) && number > 0 ? number : null;
-}
+  function positiveInteger(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : null;
+  }
 
-function finiteNumberOrNull(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
+  function finiteNumberOrNull(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
 
   function firstPositiveInteger(values = []) {
     for (const value of values) {
@@ -197,6 +197,165 @@ function finiteNumberOrNull(value) {
     };
   }
 
+  function normalizeDiscoveryPackReward(award) {
+    const item = award?.item || award?.utItem || award?.data?.item || null;
+    if (item && isPlayerPickItem(item)) return null;
+    const typeText = String(
+      award?.type || award?.rewardType || award?.awardType || award?.kind || award?.data?.type || ''
+    ).trim().toUpperCase();
+    const packId = firstPositiveInteger([
+      award?.packId,
+      award?.packDefinitionId,
+      award?.packAssetId,
+      award?.value,
+      award?.data?.packId,
+      award?.data?.value,
+    ]);
+    let isPack = /PACK/.test(typeText);
+    try { isPack = isPack || award?.isPack?.() === true || award?.isPack === true; } catch { }
+    if (!isPack && packId && !item && !/COIN|CURRENCY|ITEM|PLAYER/i.test(typeText)) isPack = true;
+    if (!isPack) return null;
+    return {
+      type: 'PACK',
+      name: String(
+        award?.name || award?.displayName || award?.description || award?.data?.name || award?.data?.description || ''
+      ).trim(),
+      description: String(award?.description || award?.data?.description || '').trim(),
+      packId,
+      resourceId: firstPositiveInteger([award?.resourceId, award?.data?.resourceId, packId]),
+      definitionId: firstPositiveInteger([award?.definitionId, award?.data?.definitionId]),
+      count: firstPositiveInteger([award?.count, award?.amount, award?.quantity, award?.data?.count]) || 1,
+      metadataHints: {
+        award: metadataFieldHints(award),
+        data: metadataFieldHints(award?.data),
+      },
+    };
+  }
+
+  function normalizeDiscoveryAward(award) {
+    return normalizeDiscoveryReward(award) || normalizeDiscoveryPackReward(award);
+  }
+
+  function currentController() {
+    try {
+      return runtime?.getAppMain?.()
+        ?.getRootViewController?.()
+        ?.getPresentedViewController?.()
+        ?.getCurrentViewController?.()
+        ?.getCurrentController?.() || null;
+    } catch { return null; }
+  }
+
+  function safeScalar(value, keys = []) {
+    for (const key of keys) {
+      try {
+        const candidate = value?.[key];
+        if (['string', 'number', 'boolean'].includes(typeof candidate)) return candidate;
+      } catch { }
+    }
+    return null;
+  }
+
+  function categoryRoots(refreshResult = null) {
+    const controller = currentController();
+    const roots = [
+      service?.repository?.categories,
+      service?.repository?.category,
+      service?.categories,
+      service?.categoriesIterator,
+      service?.viewmodel,
+      service?.viewModel,
+      refreshResult?.data?.categories,
+      refreshResult?.response?.categories,
+      controller?.viewmodel,
+      controller?.viewModel,
+      controller?._viewmodel,
+      controller?._viewModel,
+    ];
+    return roots.filter(Boolean);
+  }
+
+  function categoriesFromRoot(root) {
+    const candidates = [];
+    try {
+      if (typeof root?.getCategories === 'function') candidates.push(...collectionValues(root.getCategories()));
+    } catch { }
+    try { candidates.push(...collectionValues(root?.categoriesIterator)); } catch { }
+    try { candidates.push(...collectionValues(root?.categories)); } catch { }
+    candidates.push(...collectionValues(root));
+    return candidates;
+  }
+
+  function normalizeDiscoveryCategory(category) {
+    const setIds = collectionValues(
+      category?.setIds || category?.sets || category?.data?.setIds || category?.data?.sets
+    ).map((entry) => positiveInteger(entry?.id || entry)).filter(Boolean);
+    return {
+      id: positiveInteger(category?.id || category?.categoryId || category?.data?.id),
+      name: String(
+        category?.name || category?.description || category?.displayName ||
+        category?.data?.name || category?.data?.description || ''
+      ).trim(),
+      setIds: [...new Set(setIds)],
+    };
+  }
+
+  function listDiscoveryCategories(refreshResult = null) {
+    const byKey = new Map();
+    for (const root of categoryRoots(refreshResult)) {
+      for (const category of categoriesFromRoot(root)) {
+        const normalized = normalizeDiscoveryCategory(category);
+        if (!normalized.id && !normalized.name && !normalized.setIds.length) continue;
+        const key = `${normalized.id || '?'}:${normalized.name}`;
+        const existing = byKey.get(key);
+        byKey.set(key, existing ? {
+          ...existing,
+          setIds: [...new Set([...existing.setIds, ...normalized.setIds])],
+        } : normalized);
+      }
+    }
+    return [...byKey.values()];
+  }
+
+  function discoveryCategoryMembership(set, refreshResult = null) {
+    const setId = positiveInteger(set?.id);
+    const directCategories = collectionValues(
+      set?.categoryIds || set?.categories || set?.data?.categoryIds || set?.data?.categories
+    ).map((entry) => (typeof entry === 'object'
+      ? normalizeDiscoveryCategory(entry)
+      : { id: positiveInteger(entry), name: '', setIds: [] }));
+    const directIds = directCategories.map((category) => category.id).filter(Boolean);
+    const directCategoryId = positiveInteger(set?.categoryId || set?.data?.categoryId);
+    if (directCategoryId) directIds.push(directCategoryId);
+    const categories = listDiscoveryCategories(refreshResult);
+    const matching = [
+      ...directCategories,
+      ...categories.filter((category) => (
+        (setId && category.setIds.includes(setId))
+        || (category.id && directIds.includes(category.id))
+      )),
+    ];
+    const categoryIds = [...new Set([...directIds, ...matching.map((category) => category.id).filter(Boolean)])];
+    const categoryNames = [...new Set(matching.map((category) => category.name).filter(Boolean))];
+    return {
+      categoryIds,
+      categoryNames,
+      inUpgradesCategory: matching.some((category) => /\bupgrades?\b/i.test(category.name)),
+      categoriesAvailable: directCategories.length > 0 || Boolean(directCategoryId) || categories.length > 0,
+    };
+  }
+
+  function discoveryChallengeIds(set) {
+    const sources = [
+      set?.challengeIds,
+      set?.data?.challengeIds,
+      set?.challenges,
+      set?._challenges,
+    ];
+    return [...new Set(sources.flatMap((source) => collectionValues(source))
+      .map((entry) => positiveInteger(entry?.id || entry)).filter(Boolean))];
+  }
+
   function discoveryRequiredPlayerCount(challenge) {
     const explicit = firstPositiveInteger([
       challenge?.requiredPlayerCount,
@@ -246,11 +405,9 @@ function finiteNumberOrNull(value) {
     };
   }
 
-  function snapshotDiscoverySet(set, challenges = null) {
+  function snapshotDiscoveryIndex(set, refreshResult = null) {
     const rawAwards = collectionValues(set?.awards || set?.data?.awards);
-    const rawChallenges = challenges === null
-      ? collectionValues(set?.challenges || set?._challenges)
-      : collectionValues(challenges);
+    const category = discoveryCategoryMembership(set, refreshResult);
     return {
       id: positiveInteger(set?.id),
       name: String(set?.name || set?.data?.name || '').trim(),
@@ -260,9 +417,47 @@ function finiteNumberOrNull(value) {
       })(),
       timesCompleted: finiteNumberOrNull(set?.timesCompleted),
       repeats: finiteNumberOrNull(set?.repeats),
-      rewards: rawAwards.map(normalizeDiscoveryReward).filter(Boolean),
+      startTime: finiteNumberOrNull(safeScalar(set, ['startTime', 'start', 'startsAt', 'startDate'])),
+      endTime: finiteNumberOrNull(safeScalar(set, ['endTime', 'end', 'expires', 'expiresAt', 'endDate'])),
+      rewards: rawAwards.map(normalizeDiscoveryAward).filter(Boolean),
+      challengeIds: discoveryChallengeIds(set),
+      challenges: [],
+      ...category,
+    };
+  }
+
+  function snapshotDiscoverySet(set, challenges = null, refreshResult = null) {
+    const index = snapshotDiscoveryIndex(set, refreshResult);
+    const rawChallenges = challenges === null
+      ? collectionValues(set?.challenges || set?._challenges)
+      : collectionValues(challenges);
+    return {
+      ...index,
       challenges: rawChallenges.map(normalizeDiscoveryChallenge),
     };
+  }
+
+  function cacheScope() {
+    const roots = [
+      runtime?.services?.User,
+      runtime?.services?.Session,
+      runtime?.services?.Authentication,
+      runtime?.repositories?.User,
+      runtime?.repositories?.Persona,
+      runtime?.repositories?.Account,
+    ].filter(Boolean);
+    const keys = ['personaId', 'personaID', 'userId', 'accountId', 'nucleusId', 'id'];
+    for (const root of roots) {
+      const candidates = [root];
+      for (const method of ['getUser', 'getCurrentUser', 'getPersona', 'getCurrentPersona', 'getAccount']) {
+        try { if (typeof root?.[method] === 'function') candidates.push(root[method]()); } catch { }
+      }
+      for (const candidate of candidates.filter(Boolean)) {
+        const value = safeScalar(candidate, keys);
+        if (value !== null && value !== '') return String(value);
+      }
+    }
+    return 'default';
   }
 
   function canLoadChallengeData() {
@@ -309,7 +504,10 @@ function finiteNumberOrNull(value) {
     formation,
     createSquadController,
     eligibilityKeyName,
+    listDiscoveryCategories,
+    snapshotDiscoveryIndex,
     snapshotDiscoverySet,
+    cacheScope,
     canLoadChallengeData,
     submissionOptions,
     saveChallenge,

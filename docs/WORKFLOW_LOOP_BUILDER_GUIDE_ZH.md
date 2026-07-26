@@ -1,6 +1,6 @@
 # Workflow/Loop Builder 使用指南
 
-本文面向实际使用者，说明如何用可视化 Builder 修改现有流程、创建新流程、绑定动态 Player Pick，以及如何安全地把草稿应用到 Runner。
+本文面向实际使用者，说明如何用可视化 Builder 修改现有流程、创建新流程、绑定动态 SBC，以及如何安全地把草稿应用到 Runner。
 
 实现模型、兼容边界和开发计划见 [WORKFLOW_LOOP_BUILDER.md](WORKFLOW_LOOP_BUILDER.md)。
 
@@ -11,7 +11,7 @@
 - **Step**：Workflow 中的一次 Loop 调用。Step 默认只保存引用、显示名称和奖励处理设置。
 - **Step Variant**：只为某个 Step 创建的独立 Loop 副本。它用于“只改这一次调用”，避免影响其他 Workflow。
 - **Recovery**：Unassigned 或重复卡阻塞时使用的恢复 recipe 和 policy。
-- **Dynamic Pick**：当前会话通过 `Scan Picks` 安全识别出的 Player Pick Loop。
+- **Dynamic SBC**：当前会话通过 `Scan SBCs` 安全识别出的 Player Pick 或受支持 Upgrade Loop。
 
 ```mermaid
 flowchart LR
@@ -52,7 +52,7 @@ flowchart LR
 ┌────────────────────────────────────────────────────────────────────┐
 │ Profile / Undo / Redo / Validate / Preview / Save / Activate ... │  顶部工具栏
 ├────────────────────────────────────────────────────────────────────┤
-│ Workflows | Loops | Recovery | Dynamic Picks | JSON validation    │  对象分类
+│ Workflows | Loops | Recovery | Dynamic SBCs | JSON validation     │  对象分类
 ├───────────────┬───────────────────────────────┬────────────────────┤
 │ 对象库         │ 当前对象编辑器                 │ Inspector          │
 │ 搜索、选择对象 │ 字段、Step、Requirements 等    │ 校验、引用、冲突、版本 │
@@ -71,7 +71,7 @@ flowchart LR
 | `Workflows` | 编辑父流程及 Step 顺序 | Add step、Up、Down、Customize、Remove |
 | `Loops` | 编辑可独立运行的原子流程 | Override、Duplicate、Requirements、数量、奖励、pile |
 | `Recovery` | 编辑重复卡和 Unassigned 恢复规则 | recipe、policy、默认 policy、失败处理 |
-| `Dynamic Picks` | 查看本次扫描支持的 Pick | `Add to profile` 后供 Workflow/Loop 引用 |
+| `Dynamic SBCs` | 查看本次扫描支持的 Pick 和 Upgrade | `Add to profile` 后供 Workflow/Loop 引用 |
 | `JSON validation` | 兼容旧 JSON、诊断和导出 | 验证、导入 Draft、导出有效配置 |
 
 ## 4. 对象来源和可编辑性
@@ -83,8 +83,8 @@ flowchart LR
 | `built-in` | 当前脚本自带对象，默认只读 | 点击 `Override` 或 `Duplicate` |
 | `override` | 当前 Profile 对内置对象的覆盖 | 直接编辑；`Reset` 恢复当前版本内置值 |
 | `custom` | 当前 Profile 自己拥有的对象 | 直接编辑、复制或删除 |
-| `dynamic` | 本次扫描到、尚未绑定的 Pick | 点击 `Add to profile` |
-| `dynamic-bound` | 已加入当前 Profile 的 Pick | 可被 Workflow 引用；可移除 binding |
+| `dynamic` | 本次扫描到、尚未绑定的 Dynamic SBC | 点击 `Add to profile` |
+| `dynamic-bound` | 已加入当前 Profile 的 Dynamic SBC | 可被 Workflow 引用；可移除 binding |
 
 `Override` 和 `Duplicate` 的区别：
 
@@ -205,37 +205,37 @@ flowchart TD
 
 新 Workflow 使用 `workflowRoutine`。它只能编排现有 Runner Loop，不能插入 JavaScript、DOM 命令或任意 EA 请求。
 
-## 9. 使用 Dynamic Pick
+## 9. 使用 Dynamic SBC
 
-Dynamic Pick 不会自动写入 Profile，需要显式绑定：
+Dynamic Player Pick 和 Dynamic Upgrade 不会自动写入 Profile，需要显式绑定：
 
 ```mermaid
 flowchart LR
-  S[主面板 Scan Picks] --> D[Dynamic Picks 页]
+  S[主面板 Scan SBCs] --> D[Dynamic SBCs 页]
   D --> B[Add to profile]
   B --> L[Loops 页 dynamic-bound]
-  L --> W[加入 Workflow 或作为 Provision 前置 Pick]
+  L --> W[加入 Workflow；Pick 也可作为 Provision 前置]
   W --> A[Validate / Activate]
 ```
 
 操作步骤：
 
-1. 等启动自动扫描完成，或在主面板点击 `Scan Picks`。
+1. 等启动自动扫描完成，或在主面板点击 `Scan SBCs`。正常使用选 `Incremental`；排查缓存时选 `Full rescan` 或 `Clear cache`。
 2. 确认日志出现 `added session Loop ...`。
-3. 打开 Builder 的 `Dynamic Picks`。
-4. 选择目标 Pick，点击 `Add to profile`。
-5. 该 Pick 会进入 `Loops`，来源显示为 `dynamic-bound`。
-6. 在 Workflow 中把它作为 Step 加入，或在 Provision Loop 的 `Pre-craft Pick Loop` 中选择它。
+3. 打开 Builder 的 `Dynamic SBCs`。
+4. 选择目标 Pick 或 Upgrade，点击 `Add to profile`。
+5. 该 SBC 会进入 `Loops`，来源显示为 `dynamic-bound`。
+6. 在 Workflow 中把它作为 Step 加入；只有 `playerPickSbc` 可在 Provision Loop 的 `Pre-craft Pick Loop` 中选择。
 7. Validate、Preview、Activate。
 
 安全规则：
 
-- 只显示当前扫描中完整且可安全解释的 Pick。
+- 只显示当前扫描中完整且可安全解释的 Dynamic SBC。Upgrade 还必须由 EA Category 明确证明属于 `Upgrades`。
 - 重登后必须重新扫描，绑定才会恢复为 available。
-- Pick 过期、次数耗尽或 EA 不再返回完整 Challenge metadata 时，绑定会变成 unavailable。
+- SBC 过期、次数耗尽或 EA 不再返回完整 Challenge metadata 时，绑定会变成 unavailable。
 - unavailable dynamic binding 会阻止 Profile 激活，不会执行上次缓存的过期 Pick 定义。
 
-如果 Dynamic Picks 页显示 `No matching objects`，先检查主面板日志中的扫描汇总。主下拉存在 dynamic Pick 但 Builder 为空属于异常，应保存日志并报告。
+如果 Dynamic SBCs 页显示 `No matching objects`，先检查主面板日志中的扫描汇总。主下拉存在 Dynamic SBC 但 Builder 为空属于异常，应保存日志并报告。
 
 ## 10. Provision 使用新的 Dynamic Pick
 
@@ -302,7 +302,7 @@ JSON 现在是兼容和诊断入口，不是独立运行路径：
 
 ### 字段都是只读的
 
-当前对象是 `built-in` 或 `dynamic`。内置对象先点击 `Override`；dynamic Pick 先点击 `Add to profile`。
+当前对象是 `built-in` 或 `dynamic`。内置对象先点击 `Override`；Dynamic SBC 先点击 `Add to profile`。
 
 ### 修改后主面板没有变化
 
@@ -314,7 +314,7 @@ JSON 现在是兼容和诊断入口，不是独立运行路径：
 
 ### Activate 提示 dynamic binding unavailable
 
-重新运行 `Scan Picks`。如果当前扫描不再支持该 Pick，先从 Workflow 移除引用，再移除 binding，或等待新的可用 Pick 后重新绑定。
+先用 `Scan SBCs -> Incremental` 更新当前会话。若怀疑 EA Challenge 缓存未更新，使用 `Full rescan`；只有缓存损坏或账号切换诊断时才需要 `Clear cache`。如果当前扫描不再支持该 SBC，先从 Workflow 移除引用，再移除 binding，或等待新的可用 SBC 后重新绑定。
 
 ### Activate 提示 built-in conflict
 

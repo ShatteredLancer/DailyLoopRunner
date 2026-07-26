@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.1
+// @version      0.6.10
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -25,6 +25,7 @@ import {
   BATCH_OPEN_PLAN_KEY,
   BUILDER_PROFILE_KEY,
   CFG,
+  DYNAMIC_SBC_CACHE_KEY,
   FSU_COMPAT_DEFAULTS,
   LOOP_UI_OPTIONS_KEY,
   PICK_OPTIONS_KEY,
@@ -70,6 +71,11 @@ import {
   resolvePlayerPickLoopReference,
 } from './config/player-pick-discovery.js';
 import {
+  buildUpgradeDiscoverySession,
+  detectDynamicUpgradeFamily,
+  parseDynamicUpgradeSbcSnapshot,
+} from './config/upgrade-discovery.js';
+import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
   RECOVERY_RECIPES,
   UNASSIGNED_RECOVERY_POLICIES,
@@ -106,7 +112,7 @@ import {
   synchronizeAfterSbcSubmit,
   unwindSbcSquadControllers as unwindSbcSquadControllersShared,
 } from './sbc/navigation-sync.js';
-import { scanPlayerPickSbcSnapshots } from './sbc/player-pick-discovery-scan.js';
+import { scanDynamicSbcSnapshots } from './sbc/dynamic-sbc-cache.js';
 import { claimSbcRewards } from './reward/sbc-claim.js';
 import {
   capturePlayerPickSelections,
@@ -225,7 +231,7 @@ const state = {
     loopDefs: null,
     discoveredLoopDefs: [],
     discoveredLoopOverrides: {},
-    scannedPlayerPickDefs: [],
+    scannedDynamicSbcDefs: [],
     recoveryRecipes: null,
     unassignedRecoveryPolicies: null,
     defaultUnassignedRecoveryPolicyIds: null,
@@ -271,7 +277,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.1',
+    version: '0.6.10',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -279,7 +285,8 @@ const state = {
     clearFsuSettingsOverride,
     calculateSquadRating: calculateEaSquadRating,
     solveRatingSbcCandidates: findOptimalRatingSbcSelection,
-    scanPlayerPicks: () => scanAvailablePlayerPickSbcs(),
+    scanPlayerPicks: () => scanAvailableDynamicSbcs(),
+    scanDynamicSbcs: (options = {}) => scanAvailableDynamicSbcs(options),
     previewPackHighlight: (input = {}) => previewPackHighlight(input),
     previewBatchOpenRecap: () => previewBatchOpenRecap(),
   };
@@ -362,8 +369,8 @@ const state = {
     };
   }
 
-  function getScannedPlayerPickLoopDefs() {
-    const loops = state.scannedPlayerPickDefs || [];
+  function getScannedDynamicSbcLoopDefs() {
+    const loops = state.scannedDynamicSbcDefs || [];
     const seen = new Set();
     return loops.filter((loopDef) => {
       const id = String(loopDef?.id || '');
@@ -416,7 +423,7 @@ const state = {
     if (options.preserveDiscovery !== true) {
       state.discoveredLoopDefs = [];
       state.discoveredLoopOverrides = {};
-      state.scannedPlayerPickDefs = [];
+      state.scannedDynamicSbcDefs = [];
     }
     renderLoopSelect(state.loopDefs[0]?.id);
     log(`Loaded ${state.loopDefs.length} loop definition(s), ${state.recoveryRecipes.length} recovery recipe(s), and ${state.unassignedRecoveryPolicies.length} recovery policy(s) from ${source}`);
@@ -431,7 +438,7 @@ const state = {
     if (options.preserveDiscovery !== true) {
       state.discoveredLoopDefs = [];
       state.discoveredLoopOverrides = {};
-      state.scannedPlayerPickDefs = [];
+      state.scannedDynamicSbcDefs = [];
     }
     renderLoopSelect(LOOP_DEFS[0]?.id);
     log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
@@ -2358,8 +2365,8 @@ function updateLoopControls() {
     fail(`No challenge loaded for ${label} after ${attempts} attempt(s): ${detail}`);
   }
 
-  async function loadPlayerPickDiscoveryChallenges(set) {
-    const label = `Player Pick scan ${set?.name || `#${set?.id || '?'}`}`;
+  async function loadDynamicSbcDiscoveryChallenges(set) {
+    const label = `Dynamic SBC scan ${set?.name || `#${set?.id || '?'}`}`;
     let challenges = null;
     if (eaSbcAdapter().hasDaoGetChallengesForSet()) {
       const result = await observeOnce(
@@ -2426,23 +2433,86 @@ function updateLoopControls() {
     }
   }
 
-  async function scanAvailablePlayerPickSbcs() {
-    log('Player Pick scan: refreshing SBC Sets and reading metadata; only fully supported non-duplicate Picks will be added as session Loops, nothing will be executed');
+  function dynamicSbcCacheStorageKey() {
+    return `${DYNAMIC_SBC_CACHE_KEY}:${eaSbcAdapter().cacheScope()}`;
+  }
+
+  function dynamicSbcCandidate(index = {}) {
+    const hasPlayerPickReward = (index.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK');
+    return hasPlayerPickReward
+      || (index.inUpgradesCategory === true && Boolean(detectDynamicUpgradeFamily(index)));
+  }
+
+  function configuredLoopTemplate(id) {
+    return getConfiguredLoopDefs().find((loopDef) => loopDef?.id === id)
+      || LOOP_DEFS.find((loopDef) => loopDef?.id === id)
+      || null;
+  }
+
+  function unavailableDynamicSbcParse(parsed, loadError) {
+    if (!loadError) return parsed;
+    return {
+      ...parsed,
+      status: 'unavailable',
+      loop: null,
+      diagnostics: [
+        `Challenge metadata refresh failed: ${loadError?.message || loadError}`,
+        ...(parsed?.diagnostics || []),
+      ],
+    };
+  }
+
+  function logDynamicUpgradeDiscovery(snapshot, parsed, loadError) {
+    const reward = (snapshot.rewards || []).find((entry) => entry?.type === 'PACK') || {};
+    log(`Dynamic SBC scan: Upgrade set #${snapshot.id || '?'} ${snapshot.name || '?'}; category:${snapshot.categoryNames?.join('/') || '?'}; reward ${reward.name || '?'} (#${reward.packId || reward.resourceId || '?'}); challenges:${snapshot.challenges?.length || 0}; completed:${snapshot.timesCompleted ?? '?'}, repeats:${snapshot.repeats ?? '?'}, remaining:${parsed.remainingCompletions ?? '?'}; status:${parsed.status}`);
+    for (const [index, challenge] of (snapshot.challenges || []).entries()) {
+      const requirements = (challenge.eligibilityRequirements || [])
+        .map(describePlayerPickDiscoveryRequirement)
+        .join(', ');
+      log(`Dynamic SBC scan: Upgrade challenge ${index + 1} #${challenge.id || '?'} players:${challenge.requiredPlayerCount || '?'} completed:${challenge.completed ? 'yes' : 'no'}; ${requirements || 'requirements unavailable'}`);
+    }
+    if (loadError) log(`Dynamic SBC scan: Upgrade challenge load warning: ${loadError?.message || loadError}`);
+    for (const diagnostic of parsed.diagnostics || []) log(`Dynamic SBC scan: Upgrade diagnostic: ${diagnostic}`);
+  }
+
+  async function scanAvailableDynamicSbcs(options = {}) {
+    const forceFull = options.forceFull === true;
+    const clearCache = options.clearCache === true;
+    log(`Dynamic SBC scan: refreshing the current Set/Category index and validating per-SBC cache${forceFull ? '; forcing full Challenge refresh' : ''}; nothing will be executed`);
     const pickOptions = getPickRuntimeOptions();
-    const summary = await scanPlayerPickSbcSnapshots({
+    const cacheKey = dynamicSbcCacheStorageKey();
+    if (clearCache) adapters.userscriptStorage.remove(cacheKey);
+    const cached = clearCache ? null : adapters.userscriptStorage.get(cacheKey, null);
+    const summary = await scanDynamicSbcSnapshots({
+      cache: cached,
+      forceFull,
       refreshSets: async () => {
-        const result = await observeOnce(eaSbcAdapter().requestSets(), ctrl(), 30000, 'Player Pick scan SBC.requestSets');
+        const result = await observeOnce(eaSbcAdapter().requestSets(), ctrl(), 30000, 'Dynamic SBC scan SBC.requestSets');
         if (!result?.success) throw new Error(serviceResultErrorText(result) || 'SBC Set request failed');
+        return result;
       },
       listSets: getSbcSets,
-      snapshotSet: (set, challenges) => eaSbcAdapter().snapshotDiscoverySet(set, challenges),
-      loadChallenges: loadPlayerPickDiscoveryChallenges,
-      parseSnapshot: (snapshot) => parsePlayerPickSbcSnapshot({
-        set: snapshot,
-        highGoldThreshold: pickOptions.highGoldThreshold,
-        pricePlatform: 'pc',
-      }),
-      onResult: async ({ snapshot, parsed, loadError }) => {
+      snapshotIndex: (set, refreshResult) => eaSbcAdapter().snapshotDiscoveryIndex(set, refreshResult),
+      snapshotSet: (set, challenges, refreshResult) => eaSbcAdapter().snapshotDiscoverySet(set, challenges, refreshResult),
+      loadChallenges: loadDynamicSbcDiscoveryChallenges,
+      isCandidate: dynamicSbcCandidate,
+      onResult: async ({ snapshot, loadError, cacheStatus }) => {
+        const isPick = (snapshot.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK');
+        if (!isPick) {
+          const parsed = unavailableDynamicSbcParse(parseDynamicUpgradeSbcSnapshot({
+            set: snapshot,
+            x10Template: configuredLoopTemplate('84x10'),
+            totwTemplate: configuredLoopTemplate('auto-totw-upgrade'),
+          }), loadError);
+          logDynamicUpgradeDiscovery(snapshot, parsed, loadError);
+          log(`Dynamic SBC scan: set #${snapshot.id || '?'} cache:${cacheStatus}`);
+          return;
+        }
+        const parsed = unavailableDynamicSbcParse(parsePlayerPickSbcSnapshot({
+          set: snapshot,
+          highGoldThreshold: pickOptions.highGoldThreshold,
+          pricePlatform: 'pc',
+        }), loadError);
         const reward = snapshot.rewards?.[0] || {};
         const remaining = parsed.remainingCompletions ?? (() => {
           if (parsed.loop?.useRoundsAsCompletions === true) return 'user rounds';
@@ -2462,20 +2532,46 @@ function updateLoopControls() {
         }
         if (loadError) log(`Player Pick scan: challenge load warning: ${loadError?.message || loadError}`);
         for (const diagnostic of parsed.diagnostics || []) log(`Player Pick scan: diagnostic: ${diagnostic}`);
+        log(`Dynamic SBC scan: set #${snapshot.id || '?'} cache:${cacheStatus}`);
       },
     });
-    const session = buildPlayerPickDiscoverySession({
-      sets: summary.results.map((result) => result.snapshot),
-      configuredLoops: getConfiguredLoopDefs(),
+    adapters.userscriptStorage.set(cacheKey, summary.cache);
+    const snapshots = summary.results.map((result) => (
+      result.loadError
+        ? { ...result.snapshot, challenges: [] }
+        : result.snapshot
+    ));
+    const configuredLoops = getConfiguredLoopDefs();
+    const pickSession = buildPlayerPickDiscoverySession({
+      sets: snapshots,
+      configuredLoops,
       selectedId: document.querySelector('#bronze-loop-select')?.value || null,
       preferScannedMetadata: pickOptions.preferScannedMetadata,
       highGoldThreshold: pickOptions.highGoldThreshold,
       pricePlatform: 'pc',
     });
-    state.discoveredLoopDefs = cloneLoopDef(session.discoveredLoops);
-    state.discoveredLoopOverrides = cloneLoopDef(session.loopOverrides);
-    state.scannedPlayerPickDefs = cloneLoopDef(collectScannedPlayerPickLoopDefs(session.results));
-    state.workflowBuilder?.refreshDynamic(getScannedPlayerPickLoopDefs());
+    const upgradeSession = buildUpgradeDiscoverySession({
+      sets: snapshots,
+      configuredLoops,
+      x10Template: configuredLoopTemplate('84x10'),
+      totwTemplate: configuredLoopTemplate('auto-totw-upgrade'),
+    });
+    state.discoveredLoopDefs = cloneLoopDef([
+      ...pickSession.discoveredLoops,
+      ...upgradeSession.discoveredLoops,
+    ]);
+    state.discoveredLoopOverrides = cloneLoopDef({
+      ...pickSession.loopOverrides,
+      ...upgradeSession.loopOverrides,
+    });
+    state.scannedDynamicSbcDefs = cloneLoopDef([
+      ...collectScannedPlayerPickLoopDefs(pickSession.results),
+      ...upgradeSession.discoveredLoops,
+      ...Object.values(upgradeSession.loopOverrides).filter((loopDef) =>
+        loopDef?.discovered === true && loopDef?.discoveryKind === 'upgrade'
+      ),
+    ]);
+    state.workflowBuilder?.refreshDynamic(getScannedDynamicSbcLoopDefs());
     const activeBuilderId = state.workflowBuilder?.getStore?.().activeProfileId;
     if (activeBuilderId) {
       const restored = state.workflowBuilder.restoreActiveProfile();
@@ -2483,25 +2579,38 @@ function updateLoopControls() {
         if (String(state.loopConfigSource || '').startsWith('Builder profile:')) {
           resetLoopDefs({ preserveDiscovery: true });
         }
-        log(`Active Builder profile remains unavailable after Player Pick scan: ${(restored.errors || []).join('; ')}`);
+        log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join('; ')}`);
       }
     }
-    renderLoopSelect(session.selectedId);
-    const duplicateCount = session.results.filter((result) => result.status === 'duplicate').length;
-    for (const [loopId, loopDef] of Object.entries(state.discoveredLoopOverrides)) {
+    const requestedSelection = document.querySelector('#bronze-loop-select')?.value || pickSession.selectedId;
+    const selectedId = getLoopDefs().some((loopDef) => loopDef.id === requestedSelection)
+      ? requestedSelection
+      : getLoopDefs()[0]?.id;
+    renderLoopSelect(selectedId);
+    const pickDuplicateCount = pickSession.results.filter((result) => result.status === 'duplicate').length;
+    for (const [loopId, loopDef] of Object.entries(pickSession.loopOverrides)) {
       const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []])
         .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? ' (common first)' : ''}`).join(' + ')}`)
         .join('; ');
       log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
     }
-    for (const diagnostic of session.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
-    for (const loopDef of state.discoveredLoopDefs) {
+    for (const diagnostic of pickSession.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
+    for (const loopDef of pickSession.discoveredLoops) {
       const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []])
         .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? ' (common first)' : ''}`).join(' + ')}`)
         .join('; ');
       log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? '; reported completed, one runtime probe' : ''})`);
     }
-    log(`Player Pick scan complete: ${summary.pickSets} Pick Set(s) found among ${summary.setsScanned} SBC Set(s); ${state.discoveredLoopDefs.length} supported session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) using scanned metadata, ${duplicateCount} static/discovered duplicate(s) skipped`);
+    for (const [loopId, loopDef] of Object.entries(upgradeSession.loopOverrides)) {
+      log(`Dynamic SBC scan: using scanned Upgrade metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.rewardPackIds?.[0] || '?'}, target rating:${loopDef.ratingSbcFill?.targetRating || '?'}, players:${loopDef.expectedPlayerCount || '?'})`);
+    }
+    for (const loopDef of upgradeSession.discoveredLoops) {
+      log(`Dynamic SBC scan: added session Upgrade Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.rewardPackIds?.[0] || '?'}, target rating:${loopDef.ratingSbcFill?.targetRating || '?'}, players:${loopDef.expectedPlayerCount || '?'})`);
+    }
+    const upgradeDuplicateCount = upgradeSession.results.filter((result) => result.status === 'duplicate').length;
+    const pickSetCount = snapshots.filter((snapshot) => (snapshot.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK')).length;
+    const upgradeSetCount = snapshots.length - pickSetCount;
+    log(`Dynamic SBC scan complete: ${summary.stats.setsScanned} Set(s) checked, ${summary.stats.candidates} candidate(s) (${pickSetCount} Pick, ${upgradeSetCount} Upgrade); cache hits:${summary.stats.cacheHits}, rescanned:${summary.stats.rescanned}, new:${summary.stats.newSets}, changed:${summary.stats.changedSets}, expired:${summary.stats.expiredEntries}, removed:${summary.stats.removedEntries}, failures:${summary.stats.loadFailures}; ${state.discoveredLoopDefs.length} session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) updated, ${pickDuplicateCount + upgradeDuplicateCount} duplicate(s) skipped`);
     return summary;
   }
 
@@ -5191,7 +5300,7 @@ function updateLoopControls() {
     const attempt = await submitSbcAttempt({
       label: loopDef.name,
       challengeProvider: async () => {
-        const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+        const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
         return openSbcSet(set, { returnNullIfComplete: options.returnNullIfComplete });
       },
       squadProvider: selection
@@ -5670,8 +5779,12 @@ function updateLoopControls() {
     try {
       adapters.localStorage.setJson(PICK_OPTIONS_KEY, options);
     } catch { }
-    if (!options.preferScannedMetadata && Object.keys(state.discoveredLoopOverrides).length) {
-      state.discoveredLoopOverrides = {};
+    if (!options.preferScannedMetadata && Object.values(state.discoveredLoopOverrides)
+      .some((loopDef) => loopDef?.strategy === 'playerPickSbc')) {
+      state.discoveredLoopOverrides = Object.fromEntries(
+        Object.entries(state.discoveredLoopOverrides)
+          .filter(([, loopDef]) => loopDef?.strategy !== 'playerPickSbc'),
+      );
       renderLoopSelect(document.querySelector('#bronze-loop-select')?.value || null);
       log('Player Pick scan: scanned metadata preference disabled; configured Pick Loops reverted to static fallback');
     }
@@ -6096,7 +6209,7 @@ function updateLoopControls() {
       if (preflightReady === false) return { status: 'unavailable', reason: 'required TOTW preflight is unavailable' };
       patchFsuLengthSafePlayerMetadata(`${loopDef.name} before opening SBC`);
 
-      const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+      const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
       let opened;
       if (shouldUseRatingSbcFill(loopDef)) {
         log(`${loopDef.name}: reading dynamic challenge requirements through the direct rating SBC path`);
@@ -8656,6 +8769,7 @@ function updateLoopControls() {
     const mounted = mountMainPanel({
       dom: adapters.dom,
       maxRounds: CFG.maxRounds,
+      version: W[APP_KEY]?.version,
       startupHidden: true,
     });
     if (!mounted.created) return;
@@ -8692,7 +8806,7 @@ function updateLoopControls() {
     state.workflowBuilder = createWorkflowLoopBuilder({
       dom: adapters.dom,
       getBuiltInConfig: getBuiltInLoopConfig,
-      getDiscoveredLoops: getScannedPlayerPickLoopDefs,
+      getDiscoveredLoops: getScannedDynamicSbcLoopDefs,
       loadStore: () => {
         try { return adapters.localStorage.getJson(BUILDER_PROFILE_KEY, null); } catch { return null; }
       },
@@ -8706,7 +8820,7 @@ function updateLoopControls() {
     });
     const restoredProfile = state.workflowBuilder.restoreActiveProfile();
     if (restoredProfile.status === 'blocked') {
-      log(`Active Builder profile was not restored before Player Pick refresh: ${(restoredProfile.errors || []).join('; ')}`);
+      log(`Active Builder profile was not restored before Dynamic SBC refresh: ${(restoredProfile.errors || []).join('; ')}`);
     }
     renderProfileSelect();
     renderLoopSelect();
@@ -8727,7 +8841,19 @@ function updateLoopControls() {
       openBatch: openBatchOpenDialogModal,
       reopenRecap: reopenLastRecap,
       refreshInventoryCaches,
-      scanPlayerPicks: scanAvailablePlayerPickSbcs,
+      scanDynamicSbcs: scanAvailableDynamicSbcs,
+      scanPlayerPicks: scanAvailableDynamicSbcs,
+      getDynamicSbcScanOptions: () => {
+        const mode = document.querySelector('#bronze-loop-scan-mode')?.value || 'incremental';
+        return {
+          forceFull: mode === 'full' || mode === 'clear',
+          clearCache: mode === 'clear',
+        };
+      },
+      resetDynamicSbcScanMode: () => {
+        const select = document.querySelector('#bronze-loop-scan-mode');
+        if (select) select.value = 'incremental';
+      },
       userEffects: adapters.userEffects,
       getLogText: () => state.logLines.join('\n'),
       clearLog,

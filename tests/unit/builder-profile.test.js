@@ -304,6 +304,28 @@ describe('Builder profiles', () => {
     expect(builderObjectSources(refreshed, base).loops.find((entry) => entry.id === 'dynamic-pick').source).toBe('dynamic');
   });
 
+  it('refreshes dynamic Upgrade bindings by Set or Pack reward identity', () => {
+    const base = config();
+    const dynamic = {
+      id: 'discovered-upgrade-900-high-rated-x10-85',
+      name: '10x 85+ Upgrade',
+      strategy: 'fillAndVerifySbc',
+      discoveryKind: 'upgrade',
+      sbcNames: ['10x 85+ Upgrade'],
+      sbcSetIds: [900],
+      rewardPackIds: [300],
+      ratingSbcFill: { targetRating: 88, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+    };
+    const profile = createBuilderProfile({
+      baseConfig: base,
+      config: { ...base, loops: [...base.loops, dynamic] },
+      dynamicBindings: [{ loopId: 'old-upgrade-id', rewardPackIds: [300], definition: dynamic }],
+    });
+    const refreshed = refreshBuilderDynamicBindings(profile, [{ ...dynamic, id: 'new-upgrade-id' }], 10);
+    expect(refreshed.dynamicBindings[0]).toMatchObject({ available: true, lastSeenAt: 10 });
+    expect(refreshed.dynamicBindings[0].definition.id).toBe('new-upgrade-id');
+  });
+
   it('normalizes stale persisted dynamic availability to unavailable', () => {
     const base = config();
     const store = createBuilderStore({ baseConfig: base });

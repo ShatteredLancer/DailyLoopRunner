@@ -66,12 +66,14 @@ export function createMainPanelCommands(options = {}) {
       state.scanningPicks = true;
       setPanelState();
       try {
-        await options.scanPlayerPicks?.();
+        const scanOptions = options.getDynamicSbcScanOptions?.() || {};
+        await (options.scanDynamicSbcs || options.scanPlayerPicks)?.(scanOptions);
         return true;
       } catch (error) {
-        log(`Player Pick scan failed: ${error?.message || error}`);
+        log(`Dynamic SBC scan failed: ${error?.message || error}`);
         return false;
       } finally {
+        options.resetDynamicSbcScanMode?.();
         state.scanningPicks = false;
         setPanelState();
       }

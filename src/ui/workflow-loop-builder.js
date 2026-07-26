@@ -525,6 +525,8 @@ export function createWorkflowLoopBuilder(options = {}) {
         loopId: definition.id,
         sbcSetIds: clone(definition.sbcSetIds || []),
         pickItemResourceIds: clone(definition.pickItemResourceIds || []),
+        rewardPackIds: clone(definition.rewardPackIds || []),
+        discoveryKind: String(definition.discoveryKind || ''),
         definition: clone(definition),
         available: true,
         lastSeenAt: now(),
@@ -546,7 +548,7 @@ export function createWorkflowLoopBuilder(options = {}) {
     if (!binding) return;
     const references = findBuilderReferences(currentProfile.draftConfig, binding.loopId);
     if (references.length) {
-      throw new Error(`Dynamic Pick ${binding.loopId} is referenced by ${references.length} Workflow location(s); remove those steps first`);
+      throw new Error(`Dynamic SBC ${binding.loopId} is referenced by ${references.length} Workflow location(s); remove those steps first`);
     }
     const config = clone(currentProfile.draftConfig);
     config.loops = config.loops.filter((loop) => String(loop.id) !== String(binding.loopId));
@@ -618,7 +620,7 @@ export function createWorkflowLoopBuilder(options = {}) {
     const loops = new Map((config.loops || []).map((loop) => [String(loop.id || ''), loop]));
     return clone((currentProfile.dynamicBindings || []).filter((binding) => {
       const loop = loops.get(String(binding.loopId || ''));
-      return loop?.strategy === 'playerPickSbc';
+      return ['playerPickSbc', 'fillAndVerifySbc'].includes(loop?.strategy);
     }));
   }
 

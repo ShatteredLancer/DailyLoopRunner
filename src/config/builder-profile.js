@@ -204,6 +204,8 @@ function normalizeDynamicBinding(binding = {}) {
     loopId: String(binding.loopId || binding.definition?.id || ''),
     sbcSetIds: [...new Set((binding.sbcSetIds || binding.definition?.sbcSetIds || []).map(Number).filter(Number.isFinite))],
     pickItemResourceIds: [...new Set((binding.pickItemResourceIds || binding.definition?.pickItemResourceIds || []).map(Number).filter(Number.isFinite))],
+    rewardPackIds: [...new Set((binding.rewardPackIds || binding.definition?.rewardPackIds || []).map(Number).filter(Number.isFinite))],
+    discoveryKind: String(binding.discoveryKind || binding.definition?.discoveryKind || ''),
     available: binding.available === true,
     definition: binding.definition ? clone(binding.definition) : null,
     lastSeenAt: Number(binding.lastSeenAt || 0) || 0,
@@ -216,7 +218,9 @@ function dynamicLoopMatch(binding, loop) {
   const setIds = new Set((loop.sbcSetIds || []).map(Number));
   if (binding.sbcSetIds.some((id) => setIds.has(id))) return true;
   const resourceIds = new Set((loop.pickItemResourceIds || []).map(Number));
-  return binding.pickItemResourceIds.some((id) => resourceIds.has(id));
+  if (binding.pickItemResourceIds.some((id) => resourceIds.has(id))) return true;
+  const packIds = new Set((loop.rewardPackIds || []).map(Number));
+  return binding.rewardPackIds.some((id) => packIds.has(id));
 }
 
 function legacyInventoryOnlyStarterConfig(baseConfig) {
