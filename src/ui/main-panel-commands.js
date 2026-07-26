@@ -27,10 +27,9 @@ export function createMainPanelCommands(options = {}) {
       options.openBuilder?.('workflows');
       return true;
     },
-    async savePickOptions(event) {
+    savePickOptions(event) {
       options.savePickOptions?.(event);
-      if (event?.target?.id !== 'bronze-loop-pick-prefer-scanned' || event.target.checked !== true) return true;
-      return commands.scanPicks();
+      return true;
     },
     saveLoopOptions: options.saveLoopOptions,
     saveRewardAlertEnabled: options.saveRewardAlertEnabled,

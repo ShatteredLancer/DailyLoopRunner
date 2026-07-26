@@ -131,15 +131,11 @@ describe('main panel command orchestration', () => {
     expect(openBatch).toHaveBeenCalledOnce();
   });
 
-  it('rescans only when scanned Pick metadata is enabled', async () => {
+  it('saves Player Pick options without starting an SBC scan', () => {
     const savePickOptions = vi.fn();
     const current = harness({ savePickOptions });
-    await current.commands.savePickOptions({ target: { id: 'bronze-loop-pick-auto-threshold', checked: true } });
+    current.commands.savePickOptions({ target: { id: 'bronze-loop-pick-auto-threshold', checked: true } });
     expect(savePickOptions).toHaveBeenCalledOnce();
     expect(current.options.scanPlayerPicks).not.toHaveBeenCalled();
-
-    await current.commands.savePickOptions({ target: { id: 'bronze-loop-pick-prefer-scanned', checked: true } });
-    expect(savePickOptions).toHaveBeenCalledTimes(2);
-    expect(current.options.scanPlayerPicks).toHaveBeenCalledOnce();
   });
 });

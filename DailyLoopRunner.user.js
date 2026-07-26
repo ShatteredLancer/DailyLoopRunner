@@ -9345,7 +9345,6 @@
   var PICK_OPTION_IDS = [
     "bronze-loop-pick-protect-high-gold",
     "bronze-loop-pick-auto-below-90",
-    "bronze-loop-pick-prefer-scanned",
     "bronze-loop-pick-open-at-end",
     "bronze-loop-pick-high-gold-threshold",
     "bronze-loop-pick-auto-threshold"
@@ -9367,7 +9366,6 @@
       required(panel, `#${id}`).addEventListener("change", (event) => commands.savePickOptions?.(event));
     });
     required(panel, "#bronze-loop-daily-inventory-only").addEventListener("change", (event) => commands.saveLoopOptions?.(event));
-    required(panel, "#bronze-loop-show-mvp").addEventListener("change", (event) => commands.saveLoopOptions?.(event));
     required(panel, "#bronze-loop-reward-alert-enabled").addEventListener("change", (event) => commands.saveRewardAlertEnabled?.(event));
     required(panel, "#bronze-loop-reward-alert-settings").addEventListener("click", (event) => commands.openRewardAlertSettings?.(event));
     required(panel, "#bronze-loop-start").addEventListener("click", (event) => commands.start?.(event));
@@ -9386,11 +9384,9 @@
     const loopOptions = options.loopOptions || {};
     const pickOptions = options.pickOptions || {};
     const rewardAlertSettings = options.rewardAlertSettings || {};
-    required(panel, "#bronze-loop-show-mvp").checked = loopOptions.showMvpLoops === true;
     required(panel, "#bronze-loop-daily-inventory-only").checked = loopOptions.inventoryOnly === true || loopOptions.dailyRecycleInventoryOnly === true;
     required(panel, "#bronze-loop-pick-protect-high-gold").checked = pickOptions.protectHighGold === true;
     required(panel, "#bronze-loop-pick-auto-below-90").checked = pickOptions.autoSelectBelow90 === true;
-    required(panel, "#bronze-loop-pick-prefer-scanned").checked = pickOptions.preferScannedMetadata === true;
     required(panel, "#bronze-loop-pick-open-at-end").checked = pickOptions.openPicksAtEnd === true;
     required(panel, "#bronze-loop-pick-high-gold-threshold").value = pickOptions.highGoldThreshold;
     required(panel, "#bronze-loop-pick-auto-threshold").value = pickOptions.autoPickThreshold;
@@ -9428,10 +9424,9 @@
         options.openBuilder?.("workflows");
         return true;
       },
-      async savePickOptions(event) {
+      savePickOptions(event) {
         options.savePickOptions?.(event);
-        if (event?.target?.id !== "bronze-loop-pick-prefer-scanned" || event.target.checked !== true) return true;
-        return commands.scanPicks();
+        return true;
       },
       saveLoopOptions: options.saveLoopOptions,
       saveRewardAlertEnabled: options.saveRewardAlertEnabled,
@@ -9859,16 +9854,13 @@
       "bronze-loop-refresh": busy,
       "bronze-loop-scan-mode": busy,
       "bronze-loop-scan-picks": busy,
-      "bronze-loop-dry-run": state.running === true,
       "bronze-loop-open-rewards": state.running === true,
       "bronze-loop-daily-inventory-only": state.running === true,
       "bronze-loop-pick-protect-high-gold": state.running === true,
       "bronze-loop-pick-auto-below-90": state.running === true,
-      "bronze-loop-pick-prefer-scanned": state.running === true || state.scanningPicks === true,
       "bronze-loop-pick-open-at-end": state.running === true,
       "bronze-loop-pick-high-gold-threshold": state.running === true,
       "bronze-loop-pick-auto-threshold": state.running === true,
-      "bronze-loop-show-mvp": state.running === true,
       "bronze-loop-reward-alert-settings": state.running === true,
       "bronze-loop-rounds": state.running === true
     };
@@ -10019,19 +10011,13 @@
         <div id="bronze-loop-options-scroll">
           <div class="bronze-loop-section">Run options</div>
         <div class="row">
-          <label id="bronze-loop-dry-run-label" title="Log planned selections without moving items, opening packs, or submitting SBCs">
-            <input id="bronze-loop-dry-run" type="checkbox"> Dry run
-          </label>
           <label title="Open reward packs automatically when a loop supports it">
             <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
           </label>
-        </div>
-        <div class="row">
           <label title="Use current inventory instead of opening supply or reward packs for Loops whose strategy supports inventory-only mode">
             <input id="bronze-loop-daily-inventory-only" type="checkbox"> Inventory only
           </label>
         </div>
-        <div class="row"><label title="Show MVP and one-run validation loops in the main selector"><input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops</label></div>
         <div class="row" id="bronze-loop-reward-alert-row">
           <label title="Enable high-rated special-card alerts"><input id="bronze-loop-reward-alert-enabled" type="checkbox"> Reward alerts</label>
           <span id="bronze-loop-reward-alert-summary" class="bronze-loop-option-summary">94+ special | highlight</span>
@@ -10048,9 +10034,6 @@
           </label>
         </div>
         <div class="row">
-          <label title="Use fully supported scanned Pick requirements and stable identities while keeping static loop IDs as fallback">
-            <input id="bronze-loop-pick-prefer-scanned" type="checkbox"> Use scanned Pick metadata
-          </label>
           <label title="Complete the requested Player Pick SBC count first, then open the matching Picks together">
             <input id="bronze-loop-pick-open-at-end" type="checkbox"> Open Picks at end
           </label>
@@ -10061,7 +10044,8 @@
         </div>
         <div class="bronze-loop-section">Config</div>
           <div class="row bronze-loop-profile-row"><span>Profile</span><select id="bronze-loop-profile-select" title="Load a saved Builder Profile or restore built-in loops"></select></div>
-          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental</option><option value="full">Full rescan</option><option value="clear">Clear cache</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
+          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button></div>
+          <div class="row"><span class="bronze-loop-option-summary">SBC scan</span><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental scan</option><option value="full">Full rescan</option><option value="clear">Clear cache + scan</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
         </div>
         <div class="bronze-loop-section">Log</div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
@@ -13965,7 +13949,6 @@
       lastLoopRecap: null,
       lastRecapType: null,
       loopRecapSession: null,
-      showMvpLoops: false,
       loopStack: [],
       logRenderer: null,
       workflowBuilder: null,
@@ -14082,7 +14065,7 @@
       });
     }
     function getVisibleLoopDefs() {
-      return visibleLoopDefs(getLoopDefs(), state.showMvpLoops);
+      return visibleLoopDefs(getLoopDefs());
     }
     function findLoopDefById(id) {
       const loopDefs = getLoopDefs();
@@ -18823,9 +18806,6 @@
     function formatSelectionStats(stats = {}) {
       return ["unassigned", "storage", "transfer", "club"].map((pile) => `${pile}:${stats[pile] || 0}`).join(", ");
     }
-    function isDryRunEnabled() {
-      return document.querySelector("#bronze-loop-dry-run")?.checked === true;
-    }
     function isOpenRewardPacksEnabled() {
       return document.querySelector("#bronze-loop-open-rewards")?.checked === true;
     }
@@ -18833,30 +18813,25 @@
       try {
         const saved = adapters.localStorage.getJson(LOOP_UI_OPTIONS_KEY, {});
         return {
-          showMvpLoops: saved.showMvpLoops === true,
           inventoryOnly: saved.inventoryOnly === true || saved.dailyRecycleInventoryOnly === true
         };
       } catch {
-        return { showMvpLoops: false, inventoryOnly: false };
+        return { inventoryOnly: false };
       }
     }
     function saveLoopUiOptions() {
-      state.showMvpLoops = document.querySelector("#bronze-loop-show-mvp")?.checked === true;
       const inventoryOnly = document.querySelector("#bronze-loop-daily-inventory-only")?.checked === true;
       try {
         adapters.localStorage.setJson(LOOP_UI_OPTIONS_KEY, {
-          showMvpLoops: state.showMvpLoops,
           inventoryOnly
         });
       } catch {
       }
-      renderLoopSelect();
     }
     function getPickRuntimeOptions() {
       return normalizePickRuntimeOptions({
         protectHighGold: document.querySelector("#bronze-loop-pick-protect-high-gold")?.checked !== false,
         autoSelectBelow90: document.querySelector("#bronze-loop-pick-auto-below-90")?.checked !== false,
-        preferScannedMetadata: document.querySelector("#bronze-loop-pick-prefer-scanned")?.checked === true,
         openPicksAtEnd: document.querySelector("#bronze-loop-pick-open-at-end")?.checked === true,
         highGoldThreshold: document.querySelector("#bronze-loop-pick-high-gold-threshold")?.value,
         autoPickThreshold: document.querySelector("#bronze-loop-pick-auto-threshold")?.value
@@ -21555,7 +21530,6 @@
         rounds = quantity?.mode === "user" ? Math.max(quantity.min, Math.min(quantity.max, Number(input?.value || quantity.default) || quantity.default)) : 1;
         applyLoopRuntimeOptions(loopDef, {
           rounds,
-          dryRun: isDryRunEnabled(),
           openRewardPacks: isOpenRewardPacksEnabled(),
           inventoryOnly: document.querySelector("#bronze-loop-daily-inventory-only")?.checked === true,
           pickOptions: getPickRuntimeOptions()
@@ -21652,7 +21626,6 @@
         formatFullLog: (lines) => formatLogHtml(lines, escapeHtml2)
       });
       const savedLoopUiOptions = loadLoopUiOptions();
-      state.showMvpLoops = savedLoopUiOptions.showMvpLoops;
       const savedPickOptions = loadPickRuntimeOptions();
       state.rewardAlertSettings = loadRewardAlertSettings();
       hydrateMainPanelOptions({

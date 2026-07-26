@@ -141,19 +141,13 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
         <div id="bronze-loop-options-scroll">
           <div class="bronze-loop-section">Run options</div>
         <div class="row">
-          <label id="bronze-loop-dry-run-label" title="Log planned selections without moving items, opening packs, or submitting SBCs">
-            <input id="bronze-loop-dry-run" type="checkbox"> Dry run
-          </label>
           <label title="Open reward packs automatically when a loop supports it">
             <input id="bronze-loop-open-rewards" type="checkbox"> Open reward packs
           </label>
-        </div>
-        <div class="row">
           <label title="Use current inventory instead of opening supply or reward packs for Loops whose strategy supports inventory-only mode">
             <input id="bronze-loop-daily-inventory-only" type="checkbox"> Inventory only
           </label>
         </div>
-        <div class="row"><label title="Show MVP and one-run validation loops in the main selector"><input id="bronze-loop-show-mvp" type="checkbox"> Show MVP loops</label></div>
         <div class="row" id="bronze-loop-reward-alert-row">
           <label title="Enable high-rated special-card alerts"><input id="bronze-loop-reward-alert-enabled" type="checkbox"> Reward alerts</label>
           <span id="bronze-loop-reward-alert-summary" class="bronze-loop-option-summary">94+ special | highlight</span>
@@ -170,9 +164,6 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
           </label>
         </div>
         <div class="row">
-          <label title="Use fully supported scanned Pick requirements and stable identities while keeping static loop IDs as fallback">
-            <input id="bronze-loop-pick-prefer-scanned" type="checkbox"> Use scanned Pick metadata
-          </label>
           <label title="Complete the requested Player Pick SBC count first, then open the matching Picks together">
             <input id="bronze-loop-pick-open-at-end" type="checkbox"> Open Picks at end
           </label>
@@ -183,7 +174,8 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
         </div>
         <div class="bronze-loop-section">Config</div>
           <div class="row bronze-loop-profile-row"><span>Profile</span><select id="bronze-loop-profile-select" title="Load a saved Builder Profile or restore built-in loops"></select></div>
-          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental</option><option value="full">Full rescan</option><option value="clear">Clear cache</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
+          <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button></div>
+          <div class="row"><span class="bronze-loop-option-summary">SBC scan</span><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental scan</option><option value="full">Full rescan</option><option value="clear">Clear cache + scan</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
         </div>
         <div class="bronze-loop-section">Log</div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>

@@ -32,7 +32,7 @@ FSU 不再显示前台 Club loading 时，可能正在后台校验，也可能�
 ## 基本操作
 
 1. 在下拉列表选择 Loop。
-2. 首次运行高风险或新加入的 Loop 时，先在 Options 中启用 `Dry run`。
+2. 首次运行高风险或新加入的 Loop 时，在 Builder 中为该 Loop/Profile 设置 `Always dry run`，保存并激活后先验证规划结果。
 3. 如果当前 Loop 显示 `rounds`，设置本次要执行的数量；Daily 类 Loop 不使用该选项。
 4. 点击 `Start`。
 5. 需要停止时点击 `Stop`，脚本会在下一个可停止点结束。
@@ -74,21 +74,19 @@ Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的
 
 ## Options
 
-- `Dry run`：只读取和规划，不移动物品、开包、保存阵容或提交 SBC。
-- `Open reward packs`：允许支持该选项的 Loop 自动打开奖励包；默认关闭。
+- `Open reward packs`：作为本次所选顶层 Loop/Workflow 的奖励开包默认值，并传播给其子 Loop。`rewardFlow.open: "always" | "never"` 可以在父 Loop、子 Loop 或 step 上覆盖；后续阶段必须消费的奖励可由 `forceOpenRewardPacks` 强制打开。它不控制 Player Pick 领取、Batch Open、手动开包，也不能强制不支持自动开包的流程。默认关闭。
 - `Inventory only`：作为全局默认值传给支持该能力的 Loop。Daily Bronze/Silver 会保持原行为，不打开来源或最终奖励包并直接从库存提交；Supply-and-Craft Loop 会跳过 shortage/source packs，仅从配置的库存 pile 填充。Loop 可用 `inventoryMode: "inventory-only" | "normal" | "inherit"` 覆盖全局值。不支持该能力的 Provision、Rare Pack 与 Batch Open 不会被静默改写。
-- `Show MVP loops`：显示单次验证和 MVP Loop；默认关闭。
 - `Reward alerts`：开包命中配置阈值的特殊卡时触发提示。主面板只显示开关和摘要；点击 `Settings` 可设置最低评分、桌面通知和 ntfy。默认条件为特殊卡且评分不低于 `94`。
 - `Protect Pick fodder >= N`：Player Pick SBC 禁止使用评分大于等于阈值的普通金卡，默认 `82`。
 - `Auto-pick below N`：所有候选都低于阈值时自动选择，默认 `90`。
-- `Open Picks at end`：仅对直接运行的 Player Pick Loop 生效；先完成当前 Loop 的目标数量，再集中开启同类型奖励。不限次 Pick 使用 `rounds`，限次 Pick 使用 EA Set 的当前剩余次数。默认关闭。
+- `Open Picks at end`：只影响 `playerPickSbc`。直接运行 Pick 时先完成目标数量再集中领取；父 Workflow 的设置会作为默认值传给其中的 Pick 子 Loop，子 Loop 可以显式覆盖。不限次 Pick 使用 `rounds`，限次 Pick 使用 EA Set 当前剩余次数。Provision 的 pre-craft Pick 始终即时领取，普通 Pack 奖励和 Batch Open 不受影响。默认关闭。
 - 数量输入：只对声明 `runtimeQuantity.mode: "user"` 的 Loop 显示，标签和默认值由该 Loop 定义。不限次 Player Pick、Daily Rare Pack to 2x84+、2x84+ Fodder、84+ TOTW 等表示目标完成数；Provision 显示 `Provision packs`；Validation 显示 `Validation runs`。One-click Daily、其内部 Daily 阶段、限次 Player Pick 和 84x10 不显示该输入。
 - `Refresh caches`：刷新当前可用的 Packs、Unassigned、Storage、Transfer 和 Club 缓存。
-- `Scan SBCs`：扫描支持的 Dynamic Player Pick 与 Upgrade SBC，并刷新 Builder 动态绑定。默认 `Incremental` 每次先刷新轻量 Set/Category 索引，再按每个 SBC 的结构指纹复用未变化的 Challenge 快照；`Full rescan` 强制重读全部候选 Challenge；`Clear cache` 删除当前账号缓存后全量重建。三种模式都只读，不提交或领取。
+- `SBC scan`：选择 `Scan SBCs` 的读取模式。`Incremental scan` 先刷新轻量 Set/Category 索引，逐个比较 SBC 结构指纹并复用 24 小时内未变化的 Challenge 快照；`Full rescan` 忽略 Challenge 快照并重新读取所有当前候选；`Clear cache + scan` 先删除当前账号的 Dynamic SBC 缓存，再执行一次全量扫描。三种模式都只读，不提交 SBC、不领取奖励；扫描完成后下拉菜单自动恢复为 Incremental。
 - `Profile`：在 `Built-in`、`Default`、`Bronze/Silver Inventory Only`、`Daily + Rare Pack to 2x84+` 和用户 Profile 之间切换。主面板只加载 Profile 的 Saved/last-known-good；Builder 中尚未保存的 Draft 不会进入运行时。`Bronze/Silver Inventory Only` 只让 Daily Bronze、Daily Silver、Daily Common 等使用铜银材料的 Loop 从库存完成，其余可配置 Workflow/Loop 强制保持正常模式；它不同于主面板 `Inventory only` 的全局运行时默认值。`Daily + Rare Pack to 2x84+` 在四步 One-click Daily 后追加 Rare Gold 来源包处理。
 - `Open Builder`：打开全屏可视化 Workflow/Loop Builder。普通编辑不再要求手写 JSON。
 
-主面板不再提供 `Validate JSON`、`Import JSON`、`Built-in loops` 或 `Preview Pick recap` 按钮。JSON 验证/导入仍保留在 Builder 的 JSON validation 页；切回内置配置统一通过 Profile 下拉的 `Built-in`。
+主面板不再提供 `Dry run`、`Show MVP loops`、`Use scan data for static Picks`、`Validate JSON`、`Import JSON`、`Built-in loops` 或 `Preview Pick recap` 控件。Dry Run 仍可在 Builder 的 Loop/Profile 配置中设置，MVP/验证 Loop 仍可在 Builder 中编辑并被自定义 Workflow 引用，但不会出现在主 Loop 下拉列表。静态 Pick 的 `preferScannedMetadata` 字段仅保留用于旧 Profile 和 JSON 兼容；当前 Built-in Pick 都由动态扫描生成。JSON 验证/导入仍保留在 Builder 的 JSON validation 页；切回内置配置统一通过 Profile 下拉的 `Built-in`。
 
 ### Workflow/Loop Builder
 
@@ -133,7 +131,7 @@ Profile 存在浏览器本地存储中。重登只恢复 Active Profile 的 last
 
 配置分为三层：
 
-- 全局运行设置：主面板的 Dry Run、Open reward packs、Pick 高分保护/自动选择/Open Picks at end 和 Inventory only。除 Dry Run 外，这些是最低优先级默认值。
+- 全局运行设置：主面板的 Open reward packs、Pick 高分保护/自动选择/Open Picks at end 和 Inventory only；这些是最低优先级默认值。Dry Run 不再是主面板开关，只能由激活的父/子 Loop 或 Profile 配置启用。
 - 父 Loop 设置：step 顺序、组合名称、`pickOptions`、`inventoryMode`、父级奖励/recovery 默认和 `disabledPiles`。可继承偏好会传给子 Loop。
 - 子 Loop 设置：strategy、SBC/Pack identity、requirements、评分和特殊卡要求、`runtimeQuantity`、`pickOptions`、`inventoryMode`、来源 pile、阶段和自身 recovery/reward 默认。子 Loop 显式偏好优先于父 Loop 和全局默认。
 - step 上下文：仅保留 `loopId`、可选显示名称和 `rewardFlow`。需要不同次数或材料规则时，修改对应子 Loop，或者定义一个独立子 Loop 变体再引用。
@@ -193,7 +191,7 @@ Daily Bronze 和 Silver 会优先消费对应重复卡。Daily Common 严格使�
 
 启用全局 `Inventory only` 后，One-click 会把该模式传给所有声明支持它的子 Loop。Daily Bronze/Silver 保持原行为：不打开现有或新获得的铜/银球员包，也不受 `Open reward packs` 控制，直接从库存完成剩余次数。Daily Common/Rare 属于 Supply-and-Craft family，会跳过 shortage/source packs 并仅使用当前库存；库存不足时停止。专用 Rare Pack Profile 中追加的 `Daily Rare Pack to 2x84+` 不支持该模式，仍保持自身来源包工作流。需要保留某个子 Loop 的正常模式时，在该子 Loop 配置 `inventoryMode: "normal"`。
 
-单项 Daily Loop 默认隐藏，仅供 One-click 内部调用；开启 `Show MVP loops` 后可看到单次 MVP 验证入口。
+单项 Daily Loop 和 MVP/验证 Loop 默认不进入主下拉列表，仅供 One-click、Builder 和自定义 Workflow 引用。
 
 ### Daily Rare Pack to 2x84+
 
@@ -283,7 +281,7 @@ Dynamic Upgrade 只扫描 EA 明确归入 `Upgrades` Category 的白名单家族
 
 ### MVP 和验证 Loop
 
-开启 `Show MVP loops` 后可见：
+以下 MVP 和验证 Loop 保留在内置配置与 Builder 中，但不再显示在主 Loop 下拉列表：
 
 - `One-click Daily MVP (1 each)`
 - 四个单项 Daily MVP
@@ -313,7 +311,7 @@ FSU 过滤可能导致“库存看起来足够，但 Runner 只识别到部分�
 
 普通数量型 SBC 默认通过配置的 `protectHighGold`、`maxRating` 和 `allowSpecial` 保护高分普通金及特殊卡。Player Pick 的保护阈值可以在 Options 修改。
 
-`Use scanned Pick metadata` 默认关闭，只作用于仍有静态配置的 Pick。启用后会立即重扫，并在扫描结果完整且只匹配一个静态 Pick 时，用扫描得到的 Set/奖励身份、Challenge 数量和材料比例覆盖当前会话中的静态字段；Loop ID、显示名、运行限制和 Provision 引用保持不变。扫描失败、活动已完成、条件不支持或匹配有歧义时继续使用静态配置。没有静态配置的 83+/84+ 无需启用该选项，只要扫描成功就会作为动态会话 Loop 出现。
+旧 Profile 或用户 JSON 中的 `preferScannedMetadata` 字段仍可通过兼容层读取，但主面板不再提供该开关。当前 Built-in Pick 都由扫描动态生成，不依赖静态 Pick metadata 覆盖。
 
 评分型 SBC 是明确例外：它们必须使用足够评分的材料，但仍受动态 Challenge、特殊卡数量、FSU Lock 和提交上限校验。
 

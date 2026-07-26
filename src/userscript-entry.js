@@ -252,7 +252,6 @@ const state = {
     lastLoopRecap: null,
     lastRecapType: null,
     loopRecapSession: null,
-    showMvpLoops: false,
     loopStack: [],
     logRenderer: null,
     workflowBuilder: null,
@@ -381,7 +380,7 @@ const state = {
   }
 
   function getVisibleLoopDefs() {
-    return visibleLoopDefs(getLoopDefs(), state.showMvpLoops);
+    return visibleLoopDefs(getLoopDefs());
   }
 
   function findLoopDefById(id) {
@@ -5723,10 +5722,6 @@ function updateLoopControls() {
       .join(', ');
   }
 
-  function isDryRunEnabled() {
-    return document.querySelector('#bronze-loop-dry-run')?.checked === true;
-  }
-
   function isOpenRewardPacksEnabled() {
     return document.querySelector('#bronze-loop-open-rewards')?.checked === true;
   }
@@ -5735,31 +5730,26 @@ function updateLoopControls() {
     try {
       const saved = adapters.localStorage.getJson(LOOP_UI_OPTIONS_KEY, {});
       return {
-        showMvpLoops: saved.showMvpLoops === true,
         inventoryOnly: saved.inventoryOnly === true || saved.dailyRecycleInventoryOnly === true,
       };
     } catch {
-      return { showMvpLoops: false, inventoryOnly: false };
+      return { inventoryOnly: false };
     }
   }
 
   function saveLoopUiOptions() {
-    state.showMvpLoops = document.querySelector('#bronze-loop-show-mvp')?.checked === true;
     const inventoryOnly = document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true;
     try {
       adapters.localStorage.setJson(LOOP_UI_OPTIONS_KEY, {
-        showMvpLoops: state.showMvpLoops,
         inventoryOnly,
       });
     } catch { }
-    renderLoopSelect();
   }
 
   function getPickRuntimeOptions() {
     return normalizePickRuntimeOptions({
       protectHighGold: document.querySelector('#bronze-loop-pick-protect-high-gold')?.checked !== false,
       autoSelectBelow90: document.querySelector('#bronze-loop-pick-auto-below-90')?.checked !== false,
-      preferScannedMetadata: document.querySelector('#bronze-loop-pick-prefer-scanned')?.checked === true,
       openPicksAtEnd: document.querySelector('#bronze-loop-pick-open-at-end')?.checked === true,
       highGoldThreshold: document.querySelector('#bronze-loop-pick-high-gold-threshold')?.value,
       autoPickThreshold: document.querySelector('#bronze-loop-pick-auto-threshold')?.value,
@@ -8720,7 +8710,6 @@ function updateLoopControls() {
         : 1;
       applyLoopRuntimeOptions(loopDef, {
         rounds,
-        dryRun: isDryRunEnabled(),
         openRewardPacks: isOpenRewardPacksEnabled(),
         inventoryOnly: document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true,
         pickOptions: getPickRuntimeOptions(),
@@ -8824,7 +8813,6 @@ function updateLoopControls() {
       formatFullLog: (lines) => formatLogHtml(lines, escapeHtml),
     });
     const savedLoopUiOptions = loadLoopUiOptions();
-    state.showMvpLoops = savedLoopUiOptions.showMvpLoops;
     const savedPickOptions = loadPickRuntimeOptions();
     state.rewardAlertSettings = loadRewardAlertSettings();
     hydrateMainPanelOptions({

@@ -109,11 +109,10 @@ describe('main panel state rendering', () => {
     const ids = [
       'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-select',
       'bronze-loop-profile-select', 'bronze-loop-open-builder',
-      'bronze-loop-refresh', 'bronze-loop-scan-mode', 'bronze-loop-scan-picks', 'bronze-loop-dry-run',
+      'bronze-loop-refresh', 'bronze-loop-scan-mode', 'bronze-loop-scan-picks',
       'bronze-loop-open-rewards', 'bronze-loop-pick-protect-high-gold', 'bronze-loop-pick-auto-below-90',
       'bronze-loop-daily-inventory-only',
-      'bronze-loop-pick-prefer-scanned',
-      'bronze-loop-pick-high-gold-threshold', 'bronze-loop-pick-auto-threshold', 'bronze-loop-show-mvp',
+      'bronze-loop-pick-high-gold-threshold', 'bronze-loop-pick-auto-threshold',
       'bronze-loop-rounds',
       'bronze-loop-reward-alert-enabled', 'bronze-loop-reward-alert-settings',
     ];

@@ -7,12 +7,10 @@ const IDS = [
   'bronze-loop-open-builder',
   'bronze-loop-pick-protect-high-gold',
   'bronze-loop-pick-auto-below-90',
-  'bronze-loop-pick-prefer-scanned',
   'bronze-loop-pick-open-at-end',
   'bronze-loop-pick-high-gold-threshold',
   'bronze-loop-pick-auto-threshold',
   'bronze-loop-daily-inventory-only',
-  'bronze-loop-show-mvp',
   'bronze-loop-reward-alert-enabled',
   'bronze-loop-reward-alert-settings',
   'bronze-loop-start',
@@ -93,7 +91,6 @@ describe('main panel bindings', () => {
     for (const [id, event, command] of [
       ['bronze-loop-open-builder', 'click', 'openBuilder'],
       ['bronze-loop-daily-inventory-only', 'change', 'saveLoopOptions'],
-      ['bronze-loop-show-mvp', 'change', 'saveLoopOptions'],
       ['bronze-loop-reward-alert-enabled', 'change', 'saveRewardAlertEnabled'],
       ['bronze-loop-reward-alert-settings', 'click', 'openRewardAlertSettings'],
       ['bronze-loop-start', 'click', 'start'],
@@ -121,26 +118,23 @@ describe('main panel bindings', () => {
     })).toThrow(/control is missing/);
   });
 
-  it('hydrates saved MVP and Player Pick options', () => {
+  it('hydrates saved inventory and Player Pick options', () => {
     const { panel, controls } = harness();
     hydrateMainPanelOptions({
       panel,
-      loopOptions: { showMvpLoops: true, dailyRecycleInventoryOnly: true },
+      loopOptions: { dailyRecycleInventoryOnly: true },
       pickOptions: {
         protectHighGold: true,
         autoSelectBelow90: false,
-        preferScannedMetadata: true,
         openPicksAtEnd: true,
         highGoldThreshold: 83,
         autoPickThreshold: 91,
       },
       rewardAlertSettings: { enabled: true },
     });
-    expect(controls.get('bronze-loop-show-mvp').checked).toBe(true);
     expect(controls.get('bronze-loop-daily-inventory-only').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-protect-high-gold').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-auto-below-90').checked).toBe(false);
-    expect(controls.get('bronze-loop-pick-prefer-scanned').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-open-at-end').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-high-gold-threshold').value).toBe(83);
     expect(controls.get('bronze-loop-pick-auto-threshold').value).toBe(91);

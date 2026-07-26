@@ -32,14 +32,11 @@ describe('main panel view template', () => {
   it('contains every advanced option and command control expected by entry bindings', () => {
     const html = mainPanelHtml();
     for (const id of [
-      'bronze-loop-dry-run',
       'bronze-loop-open-rewards',
       'bronze-loop-daily-inventory-only',
-      'bronze-loop-show-mvp',
       'bronze-loop-pick-protect-high-gold',
       'bronze-loop-pick-high-gold-threshold',
       'bronze-loop-pick-auto-below-90',
-      'bronze-loop-pick-prefer-scanned',
       'bronze-loop-pick-open-at-end',
       'bronze-loop-pick-auto-threshold',
       'bronze-loop-profile-select',
@@ -62,9 +59,15 @@ describe('main panel view template', () => {
       'bronze-loop-load-json',
       'bronze-loop-built-in',
       'bronze-loop-preview-pick-recap',
+      'bronze-loop-dry-run',
+      'bronze-loop-show-mvp',
+      'bronze-loop-pick-prefer-scanned',
     ]) {
       expect(html, removedId).not.toContain(`id="${removedId}"`);
     }
+    expect(html).toContain('SBC scan');
+    expect(html).toContain('Incremental scan');
+    expect(html).toContain('Clear cache + scan');
   });
 
   it('defines exactly eight stable resize handles', () => {

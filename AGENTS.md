@@ -458,7 +458,7 @@ Workflow/Loop Builder 的完整设计与阶段状态见 `docs/WORKFLOW_LOOP_BUIL
 
 Dynamic SBC 缓存只能缓存只读 Challenge 快照，不能缓存“可运行”结论。每次启动/手动扫描必须刷新当前 Set/Category 索引，并逐个按 Set ID、名称、时间、repeat、Category、Challenge ID 和奖励身份计算结构指纹；`timesCompleted`/complete 只作为 live progress 合并，不能让所有 SBC 因进度变化失效。只有本次索引验证成功、指纹未变且未过 TTL 的条目可复用 Challenge 快照。新建、结构变化、TTL 过期的 SBC 必须重读 Challenge；加载失败不得把空快照写回覆盖好缓存，也不得在本次会话恢复成可运行 Loop。Upgrade 发现必须由 EA 权威 Category 明确证明属于 `Upgrades`，禁止从名称猜 Category；只允许白名单家族，安全上限和高卡/特殊卡保护必须继承内置模板/Profile，禁止从奖励评分推导提交保护。
 
-主面板 Profile 选择器只能激活 Profile 的 Saved/last-known-good，不得隐式保存或应用 Draft。内置 Starter Profile 在 Store 归一化时只补缺，不得覆盖同 ID 的现有用户 Profile。Built-in、Default 和 `Bronze/Silver Inventory Only` 的 `One-click Daily Loop` 固定为 Daily Bronze -> Daily Silver -> Daily Common -> Daily Rare 四步，不得隐式追加 `Daily Rare Pack to 2x84+ Loop`；只有 `Daily + Rare Pack to 2x84+` Starter 可以追加该第 5 步，并保持 `useRoundsAsCompletions:false` 与最多一次库存 fallback。独立 Rare Pack Loop 在所有配置中仍保留。`Bronze/Silver Inventory Only` Starter 只能把使用铜/银 `targetDuplicate` 或 requirements 的 supported Loop 设为 `inventory-only`，并把其余 supported/container Loop 显式设为 `normal`，使它与主面板全局 `Inventory only` 区分；不得给 unsupported/intrinsic strategy 写入非法配置。旧 `starter-inventory-only` 仅在保持原始名称、preset 和未修改配置时自动迁移，用户自定义副本必须保留。主面板保留 `Refresh caches` 和 `Scan SBCs` 作为库存缓存恢复与 Dynamic SBC 绑定刷新入口；`Scan SBCs` 必须提供 Incremental、Full rescan 和 Clear cache 三种只读模式。JSON 验证/导入和 recap 模拟预览只放在 Builder/开发入口，不恢复为主面板按钮。
+主面板 Profile 选择器只能激活 Profile 的 Saved/last-known-good，不得隐式保存或应用 Draft。内置 Starter Profile 在 Store 归一化时只补缺，不得覆盖同 ID 的现有用户 Profile。Built-in、Default 和 `Bronze/Silver Inventory Only` 的 `One-click Daily Loop` 固定为 Daily Bronze -> Daily Silver -> Daily Common -> Daily Rare 四步，不得隐式追加 `Daily Rare Pack to 2x84+ Loop`；只有 `Daily + Rare Pack to 2x84+` Starter 可以追加该第 5 步，并保持 `useRoundsAsCompletions:false` 与最多一次库存 fallback。独立 Rare Pack Loop 在所有配置中仍保留。`Bronze/Silver Inventory Only` Starter 只能把使用铜/银 `targetDuplicate` 或 requirements 的 supported Loop 设为 `inventory-only`，并把其余 supported/container Loop 显式设为 `normal`，使它与主面板全局 `Inventory only` 区分；不得给 unsupported/intrinsic strategy 写入非法配置。旧 `starter-inventory-only` 仅在保持原始名称、preset 和未修改配置时自动迁移，用户自定义副本必须保留。主面板不得恢复 `Dry run` 或 `Show MVP loops` 控件；Dry Run 仅由 Builder/Profile 中的 Loop 配置启用，MVP/验证 Loop 保留在配置和 Builder 中但始终从主 Loop 下拉列表隐藏。主面板保留 `Refresh caches` 和 `Scan SBCs` 作为库存缓存恢复与 Dynamic SBC 绑定刷新入口；`Scan SBCs` 必须提供 Incremental、Full rescan 和 Clear cache 三种只读模式。JSON 验证/导入和 recap 模拟预览只放在 Builder/开发入口，不恢复为主面板按钮。
 
 可发布 Profile 的源目录固定为 `profiles/`。每个 `*.profile.json` 文件名必须与 kebab-case `id` 一致，且只能二选一引用官方 `preset` 或提供完整 `config`；新增文件必须通过 `npm run check:profiles`，并由 `npm run build:profiles` 生成 `dist/profiles/*.loops.json` 和 manifest。禁止上传带 `discovered`、`discoveryIdentity` 或 `discovered-player-pick-*` 的动态 Pick 快照。`.github/workflows/release-assets.yml` 负责在 Release 发布时上传 userscript、完整 Loop 配置和 `DailyLoopRunner.profiles.zip`；Profile-only 合并到 `main` 时仅在最新 Release 与当前 package 版本一致的情况下覆盖 Profile ZIP/manifest，避免把未发布代码生成的 Profile 附到旧版本。
 
@@ -531,7 +531,7 @@ Pack open 返回 `471` 时，重试恢复必须排除刚失败的 Pack 对象，
 
 配置分为全局运行设置、父 Loop、子 Loop 和 step 上下文四层：
 
-- 全局运行设置适合用户本次运行意图：Dry Run、是否打开奖励、Pick 高分保护阈值、自动 Pick 阈值、Open Picks at end 和 Inventory only。除 Dry Run 外，它们是可被父/子 Loop 显式覆盖的最低优先级默认值。
+- 全局运行设置适合用户本次运行意图：是否打开奖励、Pick 高分保护阈值、自动 Pick 阈值、Open Picks at end 和 Inventory only；它们是可被父/子 Loop 显式覆盖的最低优先级默认值。Dry Run 不属于主面板全局设置，只能由激活的父/子 Loop 或 Profile 配置启用。
 - 父 Loop 负责组合级语义：step 顺序、组合名称、父级 `pickOptions`、父级 `inventoryMode`、奖励/recovery 默认和父级禁用 pile。
 - 子 Loop 负责真实业务：strategy、SBC/Pack identity、requirements、评分/特殊卡要求、priority piles、`runtimeQuantity`、`pickOptions`、`inventoryMode`、阶段和自身 reward/recovery 默认。
 - step 只允许 `loopId`、可选 `name` 和上下文 `rewardFlow`。不要在 step 发明跨 strategy 的通用 `maxCompletions`；Provision 的 `rounds`、有限 Pick 的 EA remaining、Inventory Exhaustion 的 stage limits 和普通重复提交的 `maxCompletions` 不是同一语义。需要不同参数时定义或修改子 Loop，再由父 Workflow 引用。
@@ -543,7 +543,7 @@ Pack open 返回 `471` 时，重试恢复必须排除刚失败的 Pack 对象，
 - recovery 默认允许 step > 子 Loop > 父 Loop，但只能引用已验证 policy，不能绕过 blocked condition。
 - 可继承偏好按 global UI -> parent Loop -> child Loop -> step context 合并；缺失表示继承，显式 `false`、`normal` 或 `never` 表示覆盖。不得用 `||` 合并布尔值，否则 child `false` 无法覆盖 parent `true`。
 - reward open 为 `forceOpenRewardPacks` > step `rewardFlow` > 子 Loop `rewardFlow` > 父 Loop/global checkbox。`forceOpenRewardPacks` 表示后续阶段的供应依赖，不能被 `never` 关闭。旧 `openRewardPacks` 字段保持兼容，不把它重新解释成新的显式 override；新覆盖必须使用 `rewardFlow.open`。
-- Dry Run 向所有子 Loop传播；不得出现父 Workflow 为 Dry Run、子 Loop实际提交的路径。
+- Dry Run 向所有子 Loop传播；不得出现父 Workflow 为 Dry Run、子 Loop实际提交的路径。主面板不得把隐藏或已删除的 UI 状态再次注入 `dryRun`。
 - Pick 设置通过 `pickOptions` 逐字段继承，高分保护、阈值、自动选择和 Open Picks at end 都允许父/子 Loop覆盖全局默认。运行期生成的高分上限不得覆盖或删除 requirement 原始 `maxRating`；最终上限取业务上限与保护上限的更严格值。
 - Inventory only 使用 `inventoryMode: inherit | inventory-only | normal`。支持范围必须登记在 `LOOP_STRATEGY_CAPABILITIES`；`dailySingleCardRecycle` 和 Supply-and-Craft family 支持，Pick/Fill/Inventory Exhaustion 本身是 intrinsic，Provision/Rare Pack/Batch Open 不支持。unsupported strategy 显式配置必须 schema 报错。
 
@@ -636,7 +636,7 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 5. `pickCount` 是最终选择数量，`pickCandidateCount` 是候选数量；动态发现只允许从奖励显式字段或官方奖励描述开头的 `X of Y` 读取，禁止从 SBC 名称推断。
 6. 更新内置配置、外部 JSON、fixture coverage、contract test 和 README。
 
-自动扫描当前可用 Dynamic SBC 的设计记录在 M9。Player Pick 扫描必须先加载 Challenge squad 得到 brick 后的真实人数，禁止从 formation 槽位数猜测。完全支持且不与静态配置重复的结果只作为当前会话 Loop 合并到列表，成功重扫会替换旧会话结果。83+/84+ 已完成动态覆盖 Dry Run/Live 验证并删除静态活动配置，今后只由扫描生成。`Use scanned Pick metadata` 默认关闭且只作用于仍有静态配置的 Pick；启用后，仅当扫描结果完整且精确匹配一个静态 `playerPickSbc` 时，才覆盖其 Set/奖励身份、Challenge 数量和 requirements，必须保留静态 Loop ID、运行限制和流程引用。Upgrade 当前只允许 EA `Upgrades` Category 下的 84+ TOTW 和高评分 x10；静态 84x10/TOTW 只接收扫描 metadata，新评分 x10 可生成 Dynamic Loop。扫描失败、完成、unsupported 或歧义匹配必须回退静态配置；扫描本身不会提交或领取，实际运行继续复用现有 `playerPickSbc` / `fillAndVerifySbc` Workflow。
+自动扫描当前可用 Dynamic SBC 的设计记录在 M9。Player Pick 扫描必须先加载 Challenge squad 得到 brick 后的真实人数，禁止从 formation 槽位数猜测。完全支持且不与静态配置重复的结果只作为当前会话 Loop 合并到列表，成功重扫会替换旧会话结果。83+/84+ 已完成动态覆盖 Dry Run/Live 验证并删除静态活动配置，今后只由扫描生成。主面板不得重新加入 `Use scan data for static Picks`；内部 `preferScannedMetadata` 仅作为旧 Profile/用户 JSON 的兼容字段保留。若兼容路径启用该字段，仅当扫描结果完整且精确匹配一个静态 `playerPickSbc` 时，才覆盖其 Set/奖励身份、Challenge 数量和 requirements，并必须保留静态 Loop ID、运行限制和流程引用。当前 Built-in Pick 均为动态扫描结果，不依赖该字段。Upgrade 当前只允许 EA `Upgrades` Category 下的 84+ TOTW 和高评分 x10；静态 84x10/TOTW 只接收扫描 metadata，新评分 x10 可生成 Dynamic Loop。扫描失败、完成、unsupported 或歧义匹配必须回退静态配置；扫描本身不会提交或领取，实际运行继续复用现有 `playerPickSbc` / `fillAndVerifySbc` Workflow。
 
 ## 8. Agent 接到任务后的标准流程
 
