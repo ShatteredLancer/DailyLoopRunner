@@ -102,7 +102,6 @@ export const MAIN_PANEL_STYLE = `
     flex: 0 0 auto;
     height: 110px;
     min-height: 64px;
-    resize: vertical;
     overflow-x: auto;
     overflow-y: auto;
     white-space: pre-wrap;
@@ -118,6 +117,23 @@ export const MAIN_PANEL_STYLE = `
     -webkit-user-select: text;
     cursor: text;
   }
+  #bronze-loop-log-resize {
+    position: relative;
+    flex: 0 0 10px;
+    cursor: ns-resize;
+    touch-action: none;
+  }
+  #bronze-loop-log-resize::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 4px;
+    width: 34px;
+    height: 2px;
+    transform: translateX(-50%);
+    background: #607089;
+  }
+  #bronze-loop-log-resize:hover::before { background: #9fb2c9; }
   #bronze-loop-log .bronze-loop-log-high-rated { color: #ffd54a; font-weight: 700; }
 `;
 
@@ -189,6 +205,7 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
         <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Log</div><button id="bronze-loop-help-log" class="bronze-loop-help-button" type="button" title="Explain log controls and resizing" aria-label="Explain log controls and resizing">?</button></div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
         <div id="bronze-loop-log"></div>
+        <div id="bronze-loop-log-resize" role="separator" aria-orientation="horizontal" title="Drag up or down to resize the log"></div>
       </div>
     </div>
     ${resizeHandles}

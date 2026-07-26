@@ -288,8 +288,32 @@ export function createMainPanelGeometry(options = {}) {
 
   function makeLogResizable() {
     const log = panel.querySelector('#bronze-loop-log');
-    if (!log) return;
-    log.addEventListener('pointerup', persistLogHeight);
+    const handle = panel.querySelector('#bronze-loop-log-resize');
+    if (!log || !handle) return;
+    let resizing = null;
+
+    const onMove = (event) => {
+      if (!resizing) return;
+      const height = normalizeMainPanelLogHeight(resizing.startHeight + event.clientY - resizing.startY);
+      log.style.height = `${height}px`;
+      event.preventDefault?.();
+    };
+    const onUp = () => {
+      if (!resizing) return;
+      resizing = null;
+      persistLogHeight();
+    };
+
+    handle.addEventListener('pointerdown', (event) => {
+      const startHeight = Number(log.getBoundingClientRect?.().height || Number.parseFloat(log.style?.height));
+      if (!Number.isFinite(startHeight)) return;
+      resizing = { startY: event.clientY, startHeight };
+      handle.setPointerCapture?.(event.pointerId);
+      event.preventDefault?.();
+    });
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
   }
 
   restoreSavedPosition();

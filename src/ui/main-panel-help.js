@@ -36,7 +36,7 @@ export const MAIN_PANEL_HELP_TOPICS = Object.freeze([
     items: Object.freeze([
       Object.freeze(['Latest log', 'The compact panel shows the newest status messages. Options shows the complete session log.']),
       Object.freeze(['Copy, Clear, Save', 'Copy the session log, clear the on-screen history, or download it as a log file.']),
-      Object.freeze(['Resize log', 'Drag the lower-right corner of the full log vertically. The chosen height is saved locally for the next Web App visit.']),
+      Object.freeze(['Resize log', 'Drag the horizontal resize bar below the full log up or down. The chosen height is saved locally for the next Web App visit.']),
     ]),
   }),
 ]);

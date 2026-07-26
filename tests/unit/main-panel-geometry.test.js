@@ -45,6 +45,7 @@ function harness(options = {}) {
   log.style = {};
   log.getBoundingClientRect = () => ({ height: Number.parseFloat(log.style.height) || 110 });
   controls.set('#bronze-loop-log', log);
+  controls.set('#bronze-loop-log-resize', element());
   const panel = {
     classList: classList(),
     dataset: {},
@@ -168,9 +169,12 @@ describe('main panel geometry', () => {
   it('restores and persists an independently resized full log height', () => {
     const { controls, savedLogHeights } = harness({ savedLogHeight: 236 });
     const log = controls.get('#bronze-loop-log');
+    const resize = controls.get('#bronze-loop-log-resize');
     expect(log.style.height).toBe('236px');
-    log.style.height = '284px';
-    log.emit('pointerup', pointerEvent());
+    resize.emit('pointerdown', pointerEvent({ clientY: 100 }));
+    resize.emit('pointermove', pointerEvent({ clientY: 148 }));
+    resize.emit('pointerup', pointerEvent({ clientY: 148 }));
+    expect(log.style.height).toBe('284px');
     expect(savedLogHeights).toEqual([284]);
     expect(normalizeMainPanelLogHeight(10)).toBe(64);
     expect(normalizeMainPanelLogHeight(9999)).toBe(720);

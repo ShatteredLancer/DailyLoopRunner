@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.12
+// @version      0.6.13
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -9780,8 +9780,30 @@
     }
     function makeLogResizable() {
       const log = panel.querySelector("#bronze-loop-log");
-      if (!log) return;
-      log.addEventListener("pointerup", persistLogHeight);
+      const handle = panel.querySelector("#bronze-loop-log-resize");
+      if (!log || !handle) return;
+      let resizing = null;
+      const onMove = (event) => {
+        if (!resizing) return;
+        const height = normalizeMainPanelLogHeight(resizing.startHeight + event.clientY - resizing.startY);
+        log.style.height = `${height}px`;
+        event.preventDefault?.();
+      };
+      const onUp = () => {
+        if (!resizing) return;
+        resizing = null;
+        persistLogHeight();
+      };
+      handle.addEventListener("pointerdown", (event) => {
+        const startHeight = Number(log.getBoundingClientRect?.().height || Number.parseFloat(log.style?.height));
+        if (!Number.isFinite(startHeight)) return;
+        resizing = { startY: event.clientY, startHeight };
+        handle.setPointerCapture?.(event.pointerId);
+        event.preventDefault?.();
+      });
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onUp);
+      handle.addEventListener("pointercancel", onUp);
     }
     restoreSavedPosition();
     resetSize();
@@ -9834,7 +9856,7 @@
       items: Object.freeze([
         Object.freeze(["Latest log", "The compact panel shows the newest status messages. Options shows the complete session log."]),
         Object.freeze(["Copy, Clear, Save", "Copy the session log, clear the on-screen history, or download it as a log file."]),
-        Object.freeze(["Resize log", "Drag the lower-right corner of the full log vertically. The chosen height is saved locally for the next Web App visit."])
+        Object.freeze(["Resize log", "Drag the horizontal resize bar below the full log up or down. The chosen height is saved locally for the next Web App visit."])
       ])
     })
   ]);
@@ -10149,7 +10171,6 @@
     flex: 0 0 auto;
     height: 110px;
     min-height: 64px;
-    resize: vertical;
     overflow-x: auto;
     overflow-y: auto;
     white-space: pre-wrap;
@@ -10165,6 +10186,23 @@
     -webkit-user-select: text;
     cursor: text;
   }
+  #bronze-loop-log-resize {
+    position: relative;
+    flex: 0 0 10px;
+    cursor: ns-resize;
+    touch-action: none;
+  }
+  #bronze-loop-log-resize::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 4px;
+    width: 34px;
+    height: 2px;
+    transform: translateX(-50%);
+    background: #607089;
+  }
+  #bronze-loop-log-resize:hover::before { background: #9fb2c9; }
   #bronze-loop-log .bronze-loop-log-high-rated { color: #ffd54a; font-weight: 700; }
 `;
   function mainPanelHtml(maxRounds = 3, version = "") {
@@ -10233,6 +10271,7 @@
         <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Log</div><button id="bronze-loop-help-log" class="bronze-loop-help-button" type="button" title="Explain log controls and resizing" aria-label="Explain log controls and resizing">?</button></div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
         <div id="bronze-loop-log"></div>
+        <div id="bronze-loop-log-resize" role="separator" aria-orientation="horizontal" title="Drag up or down to resize the log"></div>
       </div>
     </div>
     ${resizeHandles}
@@ -14154,7 +14193,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.12",
+      version: "0.6.13",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
