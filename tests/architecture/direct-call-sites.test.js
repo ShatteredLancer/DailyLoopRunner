@@ -276,4 +276,14 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toMatch(/recordPreCraftPick[\s\S]*?loopRecapSession\.dedicatedRecap = true/);
     expect(source).toMatch(/catch \(error\) \{[\s\S]*?publishPreCraftPickRecap\(failedResult\)[\s\S]*?throw error/);
   });
+
+  it('marks the auto-crafted TOTW reward as known before 84x10 eligibility is rechecked', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const autoTotwStart = source.indexOf('function getAutoTotwUpgradeDef(loopDef = {})');
+    const autoFodderStart = source.indexOf('function getAutoFodderUpgradeDef(loopDef = {})', autoTotwStart);
+    expect(autoTotwStart).toBeGreaterThan(-1);
+    expect(autoFodderStart).toBeGreaterThan(autoTotwStart);
+    const autoTotwDefinition = source.slice(autoTotwStart, autoFodderStart);
+    expect(autoTotwDefinition).toMatch(/openRewardPacks:\s*true,[\s\S]*?assumeTotwRewardPack:\s*true,[\s\S]*?\.\.\.override,/);
+  });
 });
