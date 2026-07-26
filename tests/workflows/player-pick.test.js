@@ -175,4 +175,65 @@ describe('runPlayerPickWorkflow', () => {
     expect(result.pickResults).toHaveLength(1);
     expect(finalize).toHaveBeenCalledWith(result);
   });
+
+  it('returns a blocked partial result when cleanup fails after EA confirms a Pick', async () => {
+    const confirmedCard = { id: 199, destination: 'unassigned' };
+    const finalize = vi.fn(async () => {});
+    const onPickConfirmed = vi.fn(async () => {});
+    const options = baseOptions({
+      maxPicks: 2,
+      redeemPick: vi.fn(async ({ pickItem, onSelectionConfirmed }) => {
+        if (pickItem.id === 50) {
+          await onSelectionConfirmed([{ id: 150, destination: 'club' }]);
+          return { status: 'selected', pickedCards: [{ id: 150, destination: 'club' }] };
+        }
+        await onSelectionConfirmed([confirmedCard]);
+        confirmedCard.destination = 'blocked';
+        throw new Error('SBC storage has only 0 slot(s), but 1 item(s) need moving');
+      }),
+      findRewardPick: vi.fn(async ({ result }) => ({ id: 50 + result.picksCompleted })),
+      finalize,
+      onPickConfirmed,
+    });
+
+    const result = await runPlayerPickWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reason: 'SBC storage has only 0 slot(s), but 1 item(s) need moving',
+      picksCompleted: 2,
+    });
+    expect(result.pickResults).toEqual([
+      expect.objectContaining({ pickedCards: [{ id: 150, destination: 'club' }] }),
+      expect.objectContaining({ pickedCards: [expect.objectContaining({ id: 199, destination: 'blocked' })] }),
+    ]);
+    expect(onPickConfirmed).toHaveBeenCalledTimes(2);
+    expect(finalize).toHaveBeenCalledWith(result);
+  });
+
+  it('does not hide an error when redemption fails before any EA confirmation', async () => {
+    const options = baseOptions({
+      redeemPick: vi.fn(async () => { throw new Error('redeem failed'); }),
+    });
+
+    await expect(runPlayerPickWorkflow(options)).rejects.toThrow('redeem failed');
+  });
+
+  it('preserves earlier confirmed Picks when a later redemption fails before confirmation', async () => {
+    const options = baseOptions({
+      maxPicks: 2,
+      redeemPick: vi.fn(async ({ pickItem, onSelectionConfirmed }) => {
+        if (pickItem.id !== 50) throw new Error('second redeem failed');
+        const cards = [{ id: 150, destination: 'club' }];
+        await onSelectionConfirmed(cards);
+        return { status: 'selected', pickedCards: cards };
+      }),
+      findRewardPick: vi.fn(async ({ result }) => ({ id: 50 + result.picksCompleted })),
+    });
+
+    const result = await runPlayerPickWorkflow(options);
+
+    expect(result).toMatchObject({ status: 'blocked', reason: 'second redeem failed', picksCompleted: 1 });
+    expect(result.pickResults).toHaveLength(1);
+  });
 });

@@ -1,4 +1,4 @@
-export const RECAP_PAGE_SIZE = 20;
+export const RECAP_PAGE_SIZE = 15;
 
 const BASE_BACKGROUND = '#171B21';
 const DEFAULT_FOREGROUND = '#F4F6F8';

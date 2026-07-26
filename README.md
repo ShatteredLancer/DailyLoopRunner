@@ -58,7 +58,7 @@ Options 中的完整日志会占用面板剩余空间并独立滚动；长错误
 2. 在 `My Packs` 区域点击 `Add v`：选择 `Add 1` 加入一包，或选择 `Add all (N)` 进入动态全部模式，不需要输入数量。动态全部模式记忆的是 `all`，不是当时的数字；下次打开弹窗和正式启动前都会读取实时 My Packs 数量。已加入的类型可通过 `Added v` 重设为固定 1 或动态全部数量。
 3. 列表、固定数量和 `all` 模式保存在浏览器本地存储中；下次打开弹窗会直接恢复。已经不在 `My Packs` 的记忆项仍会保留并显示 `unavailable`；`all` 模式实时数量为 0 时执行阶段会安全跳过。
 4. 点击 `Start batch` 后按列表顺序逐包打开。每包都走 Runner 的通用开包、Reward Alerts 和 Unassigned 处理流程；可用主面板 `Stop` 在下一个安全点停止。
-5. 结束后如果本次至少开出一张 Rare Gold 或 Special 球员，则显示 Batch Open recap：所有球员都按 Pick recap 风格逐张列出并按评分降序排列，每页最多 20 条；特殊球员查询实时价格，普通球员显示 Rare/Common 和 Gold/Silver/Bronze tier。价格查询失败只显示 `price:?`，不会阻断 recap。没有 Rare Gold 或 Special 时只记录日志，不弹 recap。
+5. 结束后如果本次至少开出一张 Rare Gold 或 Special 球员，则显示 Batch Open recap：所有球员都按 Pick recap 风格逐张列出并按评分降序排列，每页最多 15 条；特殊球员查询实时价格，普通球员显示 Rare/Common 和 Gold/Silver/Bronze tier。价格查询失败只显示 `price:?`，不会阻断 recap。没有 Rare Gold 或 Special 时只记录日志，不弹 recap。
 
 当 EA 的全重复开包响应迟迟没有生成可读取的 Unassigned 实体时，Batch Open 会先主动进入 Unassigned、连续确认并运行通用清理/恢复流程。全部有界重试仍失败后，才会尝试直接结算响应实体；该兜底会按开包前库存快照确认新目标实体，并聚合检查 Storage/Transfer 容量（交换可交易 Club 版本同样占用 Transfer）。无法确认、容量不足或检测到新的 live Unassigned 时会保留现场并停止后续包，不会把该行为扩展到其它 Loop。
 
@@ -231,7 +231,7 @@ Player Pick 会严格保持 EA 元数据或静态配置中的普金/稀有金比
 
 FUT.GG 返回 403 或无有效价格时会自动回退 FUTNext。价格会显示在 Pick 日志和汇总中。达到人工介入条件时，脚本会弹出选择窗口等待用户确认。
 
-Player Pick、普通 Loop 与 Batch Open 使用统一逐卡 recap renderer：每页最多 20 条，支持 Previous/Next 和 stopped/preserved/blocked 原因。普通卡按 Bronze、Silver、Common Gold、Rare Gold 85-、86-88、89+ 使用独立整行背景和评分色块；特殊卡优先使用 EA rarity card color map，无法安全读取时按 94-、95-97、98-99 三档回退。Pick 额外显示 Pick 序号和最终库存去向，普通 Loop 显示来源包，Batch 保留包数量、跳过数量及金银铜汇总。真实运行仅在本次结果包含 Rare Gold 或 Special 时展示 recap；Preview 仍使用固定模拟数据。
+Player Pick、普通 Loop 与 Batch Open 使用统一逐卡 recap renderer：每页最多 15 条，支持 Previous/Next 和 stopped/preserved/blocked 原因。普通卡按 Bronze、Silver、Common Gold、Rare Gold 85-、86-88、89+ 使用独立整行背景和评分色块；特殊卡优先使用 EA rarity card color map，无法安全读取时按 94-、95-97、98-99 三档回退。Pick 额外显示 Pick 序号和最终库存去向，普通 Loop 显示来源包，Batch 保留包数量、跳过数量及金银铜汇总。真实运行仅在本次结果包含 Rare Gold 或 Special 时展示 recap；Preview 仍使用固定模拟数据。EA 已确认的 Pick 必须立即计入本次结果；即使后续 Unassigned/Storage 清理失败，也会显示已选卡、`blocked` 状态和停止原因，尚未打开的 Pick 不会被计入。
 
 ### Provision Crafting Loop
 

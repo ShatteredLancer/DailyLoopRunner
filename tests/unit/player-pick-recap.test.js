@@ -66,6 +66,26 @@ describe('Player Pick recap UI', () => {
     expect(model.rows[0]).toMatchObject({ rare: true, tierLabel: 'Rare Gold' });
   });
 
+  it('renders a confirmed Pick as blocked when post-selection cleanup fails', () => {
+    const harness = createUiHarness();
+    void showPlayerPickRecap({
+      dom: harness.dom,
+      name: '84+ Pick',
+      status: 'blocked',
+      reason: 'SBC storage is full',
+      pickResults: [{
+        pickedCards: [{
+          item: { name: 'Confirmed Player', rating: 91, tier: 'gold', rare: true },
+          rating: 91,
+          rare: true,
+          destination: 'blocked',
+        }],
+      }],
+    });
+    expect(harness.created.find((element) => element.textContent === '->BLOCKED')).toBeTruthy();
+    expect(harness.created.find((element) => element.textContent === 'blocked: SBC storage is full')).toBeTruthy();
+  });
+
   it('renders prices, destinations, stopped reason, and resolves when Close is clicked', async () => {
     const harness = createUiHarness();
     const cancelStopCheck = vi.fn();
@@ -91,7 +111,7 @@ describe('Player Pick recap UI', () => {
 
   it('provides a 23-card Preview and closes at the next stop check', async () => {
     const model = createPlayerPickRecapPreviewModel();
-    expect(model).toMatchObject({ status: 'preview', totalRows: 23, pageCount: 2 });
+    expect(model).toMatchObject({ status: 'preview', totalRows: 23, pageSize: 15, pageCount: 2 });
     const harness = createUiHarness();
     let stopCheck;
     const promise = showPlayerPickRecap({

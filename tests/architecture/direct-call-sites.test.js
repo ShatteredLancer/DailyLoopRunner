@@ -271,5 +271,9 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('showPickRecapModal(definition, pickResults, result)');
     expect(source).toContain('status: result.status');
     expect(source).toContain('reason: result.reason');
+    expect(source).toMatch(/confirmSelection\(selected\)[\s\S]*?onSelectionConfirmed\?\.\(selectedCards\)[\s\S]*?resolveRuntimeUnassigned/);
+    expect(source).toMatch(/redeemPick: async \(\{ pickItem, resumed, onSelectionConfirmed \}\)[\s\S]*?redeemAndSelectPlayerPick\(pickItem, loopDef[\s\S]*?onSelectionConfirmed/);
+    expect(source).toMatch(/recordPreCraftPick[\s\S]*?loopRecapSession\.dedicatedRecap = true/);
+    expect(source).toMatch(/catch \(error\) \{[\s\S]*?publishPreCraftPickRecap\(failedResult\)[\s\S]*?throw error/);
   });
 });

@@ -6746,7 +6746,7 @@
   }
 
   // src/reward/recap.js
-  var RECAP_PAGE_SIZE = 20;
+  var RECAP_PAGE_SIZE = 15;
   var BASE_BACKGROUND = "#171B21";
   var DEFAULT_FOREGROUND = "#F4F6F8";
   var DEFAULT_MUTED = "#AAB4C2";
@@ -8578,7 +8578,24 @@
     return { status: "submitted", challengeContext, submittedCount };
   }
   async function selectPick(options, result, pickItem, metadata = {}) {
-    const selected2 = await options.redeemPick({ result, pickItem, ...metadata });
+    let confirmedEntry = null;
+    const recordConfirmedPick = async (pickedCards = []) => {
+      if (confirmedEntry) {
+        confirmedEntry.pickedCards = pickedCards;
+        return confirmedEntry;
+      }
+      confirmedEntry = { ...metadata, pickedCards };
+      result.pickResults.push(confirmedEntry);
+      result.picksCompleted++;
+      await options.onPickConfirmed?.({ result, pickItem, entry: confirmedEntry, ...metadata });
+      return confirmedEntry;
+    };
+    const selected2 = await options.redeemPick({
+      result,
+      pickItem,
+      ...metadata,
+      onSelectionConfirmed: recordConfirmedPick
+    });
     await emit4(options, "pick", { result, pickItem, ...metadata, selected: selected2 });
     const selectedOutcome = outcome(selected2);
     if (selectedOutcome !== "selected") {
@@ -8587,8 +8604,7 @@
         reason: selected2?.reason || `Player Pick selection ${selectedOutcome}`
       };
     }
-    result.pickResults.push({ ...metadata, pickedCards: selected2.pickedCards || [] });
-    result.picksCompleted++;
+    await recordConfirmedPick(selected2.pickedCards || []);
     await options.afterPick?.({ result, ...metadata, selected: selected2 });
     return { status: "selected" };
   }
@@ -8680,56 +8696,60 @@
     try {
       if (deferred) {
         await runDeferredPlayerPicks(options, result, maxPicks);
-        await options.finalize?.(result);
-        return result;
-      }
-      while (result.picksCompleted < maxPicks) {
-        const pendingPick = await options.findPendingPick({ result });
-        if (!pendingPick) break;
-        const selected2 = await selectPick(options, result, pendingPick, { resumed: true, deferred: false });
-        if (selected2.status === "selected") continue;
-        result.status = selected2.status;
-        result.reason = selected2.reason || `pending Pick ${selected2.status}`;
-        break;
-      }
-      while (result.status === "completed" && result.picksCompleted < maxPicks) {
-        const submission = await submitPickChallenges(options, result);
-        if (submission.status !== "submitted") {
-          result.status = submission.status;
-          result.reason = submission.reason;
+      } else {
+        while (result.picksCompleted < maxPicks) {
+          const pendingPick = await options.findPendingPick({ result });
+          if (!pendingPick) break;
+          const selected2 = await selectPick(options, result, pendingPick, { resumed: true, deferred: false });
+          if (selected2.status === "selected") continue;
+          result.status = selected2.status;
+          result.reason = selected2.reason || `pending Pick ${selected2.status}`;
           break;
         }
-        if (!submission.submittedCount && !submission.challengeContext?.incomplete?.length) {
-          if (options.completeWhenNoChallengeRemains === true) {
-            result.reason = null;
+        while (result.status === "completed" && result.picksCompleted < maxPicks) {
+          const submission = await submitPickChallenges(options, result);
+          if (submission.status !== "submitted") {
+            result.status = submission.status;
+            result.reason = submission.reason;
             break;
           }
-          result.status = "unavailable";
-          result.reason = "No incomplete Player Pick challenge remains";
-          break;
-        }
-        const rewardPick = await options.findRewardPick({ result, challengeContext: submission.challengeContext });
-        if (!rewardPick) {
-          result.status = "unavailable";
-          result.reason = "Player Pick reward was not found";
-          break;
-        }
-        const selected2 = await selectPick(options, result, rewardPick, { resumed: false, deferred: false });
-        if (selected2.status !== "selected") {
-          result.status = selected2.status;
-          result.reason = selected2.reason;
-          break;
+          if (!submission.submittedCount && !submission.challengeContext?.incomplete?.length) {
+            if (options.completeWhenNoChallengeRemains === true) {
+              result.reason = null;
+              break;
+            }
+            result.status = "unavailable";
+            result.reason = "No incomplete Player Pick challenge remains";
+            break;
+          }
+          const rewardPick = await options.findRewardPick({ result, challengeContext: submission.challengeContext });
+          if (!rewardPick) {
+            result.status = "unavailable";
+            result.reason = "Player Pick reward was not found";
+            break;
+          }
+          const selected2 = await selectPick(options, result, rewardPick, { resumed: false, deferred: false });
+          if (selected2.status !== "selected") {
+            result.status = selected2.status;
+            result.reason = selected2.reason;
+            break;
+          }
         }
       }
-      await options.finalize?.(result);
-      return result;
     } catch (error) {
-      if (!/stopped by user/i.test(String(error?.message || error))) throw error;
-      result.status = "stopped";
-      result.reason = "stopped by user";
-      await options.finalize?.(result);
-      return result;
+      const message = String(error?.message || error);
+      if (/stopped by user/i.test(message)) {
+        result.status = "stopped";
+        result.reason = "stopped by user";
+      } else if (result.pickResults.length) {
+        result.status = "blocked";
+        result.reason = message;
+      } else {
+        throw error;
+      }
     }
+    await options.finalize?.(result);
+    return result;
   }
 
   // src/workflows/repeated-submission.js
@@ -12862,6 +12882,8 @@
     club: "->CLUB",
     transfer: "->TRANSFER",
     storage: "->STORAGE",
+    unassigned: "->UNASSIGNED",
+    blocked: "->BLOCKED",
     unknown: "->?"
   });
   function applyStyles2(element, styles) {
@@ -20177,7 +20199,26 @@
       const materialDefs = getProvisionMaterialDefs(loopDef);
       const isReservedDuplicate = (item) => materialDefs.some((def) => isDuplicateForLoopRequirements(item, def));
       const preCraftPickResults = [];
+      let preCraftPickRecapPublished = false;
       const preCraftPickDef = getProvisionPreCraftPickDef(loopDef);
+      const recordPreCraftPick = (entry) => {
+        preCraftPickResults.push(entry);
+        if (state.loopRecapSession) state.loopRecapSession.dedicatedRecap = true;
+      };
+      const publishPreCraftPickRecap = async (result2) => {
+        if (preCraftPickRecapPublished || !hasPlayerPickRecapCards(preCraftPickResults)) return;
+        preCraftPickRecapPublished = true;
+        state.lastPickRecap = {
+          name: preCraftPickDef?.name || "Provision pre-craft Player Pick",
+          pickResults: preCraftPickResults,
+          status: result2.status,
+          reason: result2.reason,
+          completedAt: Date.now()
+        };
+        state.lastRecapType = "pick";
+        updateRecapButton();
+        if (preCraftPickDef) await showPickRecapModal(preCraftPickDef, preCraftPickResults, result2);
+      };
       const effectiveMaterialStages = [
         preCraftPickDef ? `${preCraftPickDef.name} [common material]` : loopDef.preCraftPlayerPick ? "dynamic pre-craft Player Pick [unavailable]" : null,
         ...craftingUpgrades.map((upgradeDef) => {
@@ -20201,8 +20242,9 @@
             }
           }
         } else {
-          const pickResults = await runProvisionPreCraftPlayerPick(loopDef, handling);
-          preCraftPickResults.push(...pickResults);
+          await runProvisionPreCraftPlayerPick(loopDef, handling, {
+            onPickConfirmed: recordPreCraftPick
+          });
         }
         const completions = {};
         for (let index = 0; index < craftingUpgrades.length; index++) {
@@ -20237,113 +20279,114 @@
         }
         return { status: "completed", completions };
       };
-      const result = await runPackAndCraftWorkflow({
-        maxPacks: rounds,
-        stopPoint: () => stopPoint(),
-        resume: async () => {
-          if (dryRun) {
-            await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
-            const items2 = getUnassignedItems();
-            log(`${loopDef.name}: dry-run only inspects current reserved duplicates; it does not open Provision Packs`);
-            return { hasItems: true, itemCount: items2.length, provisionHandling: {} };
-          }
-          await unwindSbcSquadControllers2(`${loopDef.name} resume`);
-          const items = await showUnassignedIfAny(`${loopDef.name} resume sync`);
-          if (!items.length) return { hasItems: false };
-          await refreshInventoryCaches(`${loopDef.name} resume duplicate validation`, { includePacks: false, quiet: true });
-          for (const item of items) {
-            if (!isReservedDuplicate(item) || findClubDuplicate2(item)) continue;
-            item.duplicateId = 0;
-            if (item._duplicateId !== void 0) item._duplicateId = 0;
-          }
-          const reserved = items.filter((item) => findClubDuplicate2(item) && isReservedDuplicate(item));
-          const provisionHandling = {
-            reservedCount: reserved.length,
-            reservedItemIds: reserved.map((item) => Number(item?.id || 0)).filter(Boolean),
-            reservedDefinitionIds: reserved.map((item) => Number(item?.definitionId || 0)).filter(Boolean)
-          };
-          log(`${loopDef.name}: resume found ${items.length} unassigned item(s), ${reserved.length} duplicate(s) matching configured stages (${provisionMaterialLabel(loopDef)})`);
-          return { hasItems: true, itemCount: items.length, provisionHandling };
-        },
-        beforePack: async ({ result: current }) => {
-          const stageResult = await runProvisionMaterialStages("pre-open");
-          if (stageResult.status === "blocked" || stageResult.status === "planned") return stageResult;
-          if (!dryRun) {
-            await resolveRuntimeUnassigned(`${loopDef.name} round ${current.packsOpened + 1} pre-open cleanup`, {
-              loopDef,
-              blockedPolicy: "preserve",
-              enableRecovery: false,
-              reserveItem: isReservedDuplicate
-            });
-          }
-          return { status: "ready" };
-        },
-        findPack: async () => findSourcePack(loopDef),
-        openPack: async ({ result: current, pack }) => {
-          log(`${loopDef.name}: ${dryRun ? "dry-run would open" : `round ${current.packsOpened + 1}/${rounds} opening`} ${packName(pack)} (#${pack.id})`);
-          if (dryRun) return { status: "planned", reason: `would open ${packName(pack)}` };
-          const receipt = await openPack(pack, `${loopDef.name} round ${current.packsOpened + 1}`, {
-            allowGone: true,
-            retryCodes: ["471", "500"],
-            resolveRetryPack: () => findSourcePack(loopDef),
-            preOpenUnassignedOptions: {
-              loopDef,
-              blockedPolicy: "preserve",
-              enableRecovery: false,
-              reserveItem: isReservedDuplicate
-            },
-            openedItemPolicy: createProvisionPackPolicy(loopDef)
-          });
-          return receipt || { status: "stale", reason: "source pack stale or unavailable" };
-        },
-        runStages: async ({ phase, context }) => {
-          return runProvisionMaterialStages(phase, context);
-        },
-        afterStages: async ({ phase, result: current }) => {
-          if (dryRun) return;
-          await resolveRuntimeUnassigned(`${loopDef.name} ${phase === "resume" ? "resume" : `round ${current.packsOpened}`} cleanup`, {
-            loopDef,
-            blockedPolicy: "preserve",
-            enableRecovery: false,
-            reserveItem: isReservedDuplicate
-          });
-          if (phase === "pack") await sleep(CFG.pauseMs);
-        },
-        afterStalePack: async () => {
-          if (!dryRun) await sleep(CFG.pauseMs);
-        },
-        finalize: async () => {
-          if (!dryRun) {
-            const stageResult = await runProvisionMaterialStages("final-cleanup");
-            if (stageResult.status === "blocked" || stageResult.status === "planned") {
-              fail2(`${loopDef.name}: final material cleanup ${stageResult.status}: ${stageResult.reason || "unknown reason"}`);
+      let result;
+      try {
+        result = await runPackAndCraftWorkflow({
+          maxPacks: rounds,
+          stopPoint: () => stopPoint(),
+          resume: async () => {
+            if (dryRun) {
+              await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
+              const items2 = getUnassignedItems();
+              log(`${loopDef.name}: dry-run only inspects current reserved duplicates; it does not open Provision Packs`);
+              return { hasItems: true, itemCount: items2.length, provisionHandling: {} };
             }
-            await resolveRuntimeUnassigned(`${loopDef.name} final cleanup`, {
+            await unwindSbcSquadControllers2(`${loopDef.name} resume`);
+            const items = await showUnassignedIfAny(`${loopDef.name} resume sync`);
+            if (!items.length) return { hasItems: false };
+            await refreshInventoryCaches(`${loopDef.name} resume duplicate validation`, { includePacks: false, quiet: true });
+            for (const item of items) {
+              if (!isReservedDuplicate(item) || findClubDuplicate2(item)) continue;
+              item.duplicateId = 0;
+              if (item._duplicateId !== void 0) item._duplicateId = 0;
+            }
+            const reserved = items.filter((item) => findClubDuplicate2(item) && isReservedDuplicate(item));
+            const provisionHandling = {
+              reservedCount: reserved.length,
+              reservedItemIds: reserved.map((item) => Number(item?.id || 0)).filter(Boolean),
+              reservedDefinitionIds: reserved.map((item) => Number(item?.definitionId || 0)).filter(Boolean)
+            };
+            log(`${loopDef.name}: resume found ${items.length} unassigned item(s), ${reserved.length} duplicate(s) matching configured stages (${provisionMaterialLabel(loopDef)})`);
+            return { hasItems: true, itemCount: items.length, provisionHandling };
+          },
+          beforePack: async ({ result: current }) => {
+            const stageResult = await runProvisionMaterialStages("pre-open");
+            if (stageResult.status === "blocked" || stageResult.status === "planned") return stageResult;
+            if (!dryRun) {
+              await resolveRuntimeUnassigned(`${loopDef.name} round ${current.packsOpened + 1} pre-open cleanup`, {
+                loopDef,
+                blockedPolicy: "preserve",
+                enableRecovery: false,
+                reserveItem: isReservedDuplicate
+              });
+            }
+            return { status: "ready" };
+          },
+          findPack: async () => findSourcePack(loopDef),
+          openPack: async ({ result: current, pack }) => {
+            log(`${loopDef.name}: ${dryRun ? "dry-run would open" : `round ${current.packsOpened + 1}/${rounds} opening`} ${packName(pack)} (#${pack.id})`);
+            if (dryRun) return { status: "planned", reason: `would open ${packName(pack)}` };
+            const receipt = await openPack(pack, `${loopDef.name} round ${current.packsOpened + 1}`, {
+              allowGone: true,
+              retryCodes: ["471", "500"],
+              resolveRetryPack: () => findSourcePack(loopDef),
+              preOpenUnassignedOptions: {
+                loopDef,
+                blockedPolicy: "preserve",
+                enableRecovery: false,
+                reserveItem: isReservedDuplicate
+              },
+              openedItemPolicy: createProvisionPackPolicy(loopDef)
+            });
+            return receipt || { status: "stale", reason: "source pack stale or unavailable" };
+          },
+          runStages: async ({ phase, context }) => {
+            return runProvisionMaterialStages(phase, context);
+          },
+          afterStages: async ({ phase, result: current }) => {
+            if (dryRun) return;
+            await resolveRuntimeUnassigned(`${loopDef.name} ${phase === "resume" ? "resume" : `round ${current.packsOpened}`} cleanup`, {
               loopDef,
               blockedPolicy: "preserve",
               enableRecovery: false,
               reserveItem: isReservedDuplicate
             });
+            if (phase === "pack") await sleep(CFG.pauseMs);
+          },
+          afterStalePack: async () => {
+            if (!dryRun) await sleep(CFG.pauseMs);
+          },
+          finalize: async () => {
+            if (!dryRun) {
+              const stageResult = await runProvisionMaterialStages("final-cleanup");
+              if (stageResult.status === "blocked" || stageResult.status === "planned") {
+                fail2(`${loopDef.name}: final material cleanup ${stageResult.status}: ${stageResult.reason || "unknown reason"}`);
+              }
+              await resolveRuntimeUnassigned(`${loopDef.name} final cleanup`, {
+                loopDef,
+                blockedPolicy: "preserve",
+                enableRecovery: false,
+                reserveItem: isReservedDuplicate
+              });
+            }
+          },
+          onEvent: async (event, payload) => {
+            if (event === "pack-unavailable") {
+              log(`${loopDef.name}: configured source pack not found; stopping at round ${payload.result.packsOpened + 1}/${rounds}`);
+            }
           }
-        },
-        onEvent: async (event, payload) => {
-          if (event === "pack-unavailable") {
-            log(`${loopDef.name}: configured source pack not found; stopping at round ${payload.result.packsOpened + 1}/${rounds}`);
-          }
-        }
-      });
-      if (hasPlayerPickRecapCards(preCraftPickResults)) {
-        const pickDef = getProvisionPreCraftPickDef(loopDef);
-        state.lastPickRecap = {
-          name: pickDef?.name || "Provision pre-craft Player Pick",
-          pickResults: preCraftPickResults,
-          status: result.status,
-          reason: result.reason,
-          completedAt: Date.now()
+        });
+      } catch (error) {
+        const message = String(error?.message || error);
+        const failedResult = {
+          status: /stopped by user/i.test(message) ? "stopped" : "blocked",
+          reason: /stopped by user/i.test(message) ? "stopped by user" : message
         };
-        state.lastRecapType = "pick";
-        updateRecapButton();
-        if (pickDef) await showPickRecapModal(pickDef, preCraftPickResults, result);
+        await publishPreCraftPickRecap(failedResult);
+        throw error;
+      }
+      if (hasPlayerPickRecapCards(preCraftPickResults)) {
+        await publishPreCraftPickRecap(result);
       } else if (preCraftPickResults.length) {
         log(`${loopDef.name}: pre-craft Pick results contain no selected card; Pick recap skipped`);
       }
@@ -20583,12 +20626,23 @@
         "confirm Player Pick selection"
       );
       if (!confirmed?.success) fail2(`${loopDef.name}: Player Pick confirmation failed: ${serviceResultErrorText(confirmed)}`);
+      selectedCards.forEach((card) => {
+        card.destination = "unassigned";
+      });
+      await options.onSelectionConfirmed?.(selectedCards);
       await sleep(CFG.pauseMs);
       await refreshUnassigned({ quiet: true });
       selectedCards.forEach((card) => {
         card.destination = predictUnassignedDestination(card.item);
       });
-      await resolveRuntimeUnassigned(`${loopDef.name} Player Pick result`, options.cleanupOptions || {});
+      try {
+        await resolveRuntimeUnassigned(`${loopDef.name} Player Pick result`, options.cleanupOptions || {});
+      } catch (error) {
+        selectedCards.forEach((card) => {
+          card.destination = "blocked";
+        });
+        throw error;
+      }
       return selectedCards;
     }
     async function findUnassignedPlayerPick(loopDef, attempts = 10, options = {}) {
@@ -20836,7 +20890,7 @@
       }
       return { status: "submitted", submitted: true, rewardPackId: attempt.result.rewardPackId };
     }
-    async function runProvisionPreCraftPlayerPick(loopDef, provisionHandling = {}) {
+    async function runProvisionPreCraftPlayerPick(loopDef, provisionHandling = {}, options = {}) {
       const pickDef = getProvisionPreCraftPickDef(loopDef);
       if (!pickDef) {
         if (loopDef.preCraftPlayerPick) {
@@ -20867,11 +20921,16 @@
       const pendingPick = await findUnassignedPlayerPick(pickDef, 1, { quietMissing: true, failOnUnexpected: true });
       if (pendingPick) {
         log(`${loopDef.name}: resolving pending ${playerPickItemName(pendingPick)} before crafting upgrades`);
+        let confirmedResult2 = null;
         const pickedCards2 = await redeemAndSelectPlayerPick(pendingPick, pickDef, {
-          cleanupOptions
+          cleanupOptions,
+          onSelectionConfirmed: async (cards) => {
+            confirmedResult2 = { resumed: true, pickedCards: cards || [] };
+            await options.onPickConfirmed?.(confirmedResult2);
+          }
         });
         log(`${loopDef.name}: pending ${pickDef.name} selected; continuing original crafting flow`);
-        return [{ resumed: true, pickedCards: pickedCards2 || [] }];
+        return [confirmedResult2 || { resumed: true, pickedCards: pickedCards2 || [] }];
       }
       const set = await findSbcSetForLoopDef(pickDef, pickDef.name);
       if (isSbcSetComplete(set)) {
@@ -20940,11 +20999,16 @@
       }
       const pickItem = await findUnassignedPlayerPick(pickDef, 10, { failOnUnexpected: true });
       if (!pickItem) fail2(`${loopDef.name}: ${pickDef.name} completed but its Player Pick reward was not found`);
+      let confirmedResult = null;
       const pickedCards = await redeemAndSelectPlayerPick(pickItem, pickDef, {
-        cleanupOptions
+        cleanupOptions,
+        onSelectionConfirmed: async (cards) => {
+          confirmedResult = { resumed: false, pickedCards: cards || [] };
+          await options.onPickConfirmed?.(confirmedResult);
+        }
       });
       log(`${loopDef.name}: ${pickDef.name} completed and selected; continuing original crafting flow`);
-      return [{ resumed: false, pickedCards: pickedCards || [] }];
+      return [confirmedResult || { resumed: false, pickedCards: pickedCards || [] }];
     }
     async function runPlayerPickLoop(loopDef) {
       await waitAppReady();
@@ -20999,9 +21063,10 @@
           if (pending && dryRun) log(`${loopDef.name}: dry-run found pending ${playerPickItemName(pending)}; live run would resolve it before submitting another SBC`);
           return dryRun ? null : pending;
         },
-        redeemPick: async ({ pickItem, resumed }) => {
+        redeemPick: async ({ pickItem, resumed, onSelectionConfirmed }) => {
           if (dryRun) return { status: "planned", reason: "would redeem Player Pick" };
           const pickedCards = await redeemAndSelectPlayerPick(pickItem, loopDef, openPicksAtEnd ? {
+            onSelectionConfirmed,
             cleanupOptions: {
               reserveItem: (item) => playerPickMatchesReward(
                 item,
@@ -21009,7 +21074,7 @@
                 loopDef.pickItemResourceIds || []
               )
             }
-          } : {});
+          } : { onSelectionConfirmed });
           if (resumed) log(`${loopDef.name}: resumed Player Pick selected`);
           return { status: "selected", pickedCards: pickedCards || [] };
         },
@@ -21063,6 +21128,9 @@
           } else if (event === "batch-open") {
             log(`${loopDef.name}: submission phase ended; opening ${payload.queuedCount} queued Player Pick reward(s)`);
           }
+        },
+        onPickConfirmed: async () => {
+          if (state.loopRecapSession) state.loopRecapSession.dedicatedRecap = true;
         },
         afterPick: async ({ result: current, resumed }) => {
           if (resumed) {

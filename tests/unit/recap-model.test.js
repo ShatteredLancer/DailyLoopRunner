@@ -15,7 +15,7 @@ function rows(count) {
 
 describe('shared recap model and tier themes', () => {
   it.each([
-    [0, 1, 0], [1, 1, 1], [19, 1, 19], [20, 1, 20], [21, 2, 20], [40, 2, 20],
+    [0, 1, 0], [1, 1, 1], [14, 1, 14], [15, 1, 15], [16, 2, 15], [30, 2, 15], [31, 3, 15],
   ])('paginates %i rows into %i page(s)', (count, pages, firstPageRows) => {
     const model = createRecapModel({ rows: rows(count) });
     expect(model.pageCount).toBe(pages);

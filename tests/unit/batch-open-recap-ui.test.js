@@ -22,7 +22,7 @@ function harness() {
 }
 
 describe('Batch Open recap UI', () => {
-  it('renders single-card preview rows, pages after 20, and celebrates special cards', async () => {
+  it('renders single-card preview rows, pages after 15, and celebrates special cards', async () => {
     const ui = harness();
     const celebrate = vi.fn();
     const promise = showBatchOpenRecap({
@@ -33,10 +33,10 @@ describe('Batch Open recap UI', () => {
     });
     expect(ui.created.find((element) => element.textContent === 'Batch Open Recap Preview')).toBeTruthy();
     expect(ui.created.find((element) => element.textContent === 'Preview Player 01')).toBeTruthy();
-    expect(ui.created.find((element) => element.textContent === 'Page 1/2 | 1-20 of 23')).toBeTruthy();
+    expect(ui.created.find((element) => element.textContent === 'Page 1/2 | 1-15 of 23')).toBeTruthy();
     expect(celebrate).toHaveBeenCalled();
     ui.created.find((element) => element.textContent === 'Next').click();
-    expect(ui.created.find((element) => element.textContent === 'Page 2/2 | 21-23 of 23')).toBeTruthy();
+    expect(ui.created.find((element) => element.textContent === 'Page 2/2 | 16-23 of 23')).toBeTruthy();
     expect(ui.created.find((element) => element.textContent === '74').style.background).toBe('#AEB7C2');
     expect(ui.created.find((element) => element.textContent === '63').style.background).toBe('#B7793E');
     ui.created.find((element) => element.textContent === 'Close').click();
@@ -49,7 +49,7 @@ describe('Batch Open recap UI', () => {
       dom: ui.dom,
       model: {
         modalId: 'bronze-loop-batch-recap-modal', title: 'Batch Open Recap', summary: '1/2 pack(s) opened',
-        status: 'preserved', reason: 'storage capacity 0/3', specialCount: 0, pageCount: 1, pageSize: 20,
+        status: 'preserved', reason: 'storage capacity 0/3', specialCount: 0, pageCount: 1, pageSize: 15,
         totalRows: 0, rows: [],
       },
     });

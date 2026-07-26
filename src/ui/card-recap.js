@@ -4,6 +4,8 @@ const DESTINATION_LABELS = Object.freeze({
   club: '->CLUB',
   transfer: '->TRANSFER',
   storage: '->STORAGE',
+  unassigned: '->UNASSIGNED',
+  blocked: '->BLOCKED',
   unknown: '->?',
 });
 
