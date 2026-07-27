@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.22
+// @version      0.6.23
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -7288,6 +7288,7 @@
   async function resolveFutbinCardIds(options = {}) {
     const items = Array.isArray(options.items) ? options.items : [];
     const cache = normalizeFutbinCardIdCache(options.cache);
+    const hydrateItem = typeof options.hydrateItem === "function" ? options.hydrateItem : (item) => item;
     const resolveKnownId = typeof options.resolveKnownId === "function" ? options.resolveKnownId : () => null;
     const getLookupContext = typeof options.getLookupContext === "function" ? options.getLookupContext : () => null;
     const shouldResolve = typeof options.shouldResolve === "function" ? options.shouldResolve : () => true;
@@ -7295,16 +7296,22 @@
     const ids = /* @__PURE__ */ new Map();
     const queued = /* @__PURE__ */ new Map();
     let cacheHits = 0;
-    for (const item of items) {
-      const definitionId2 = positiveInteger5(item?.definitionId);
+    for (const originalItem of items) {
+      const definitionId2 = positiveInteger5(originalItem?.definitionId);
       if (!definitionId2 || ids.has(definitionId2)) continue;
-      const knownId = positiveInteger5(resolveKnownId(item));
+      let item = originalItem;
+      try {
+        item = hydrateItem(originalItem) || originalItem;
+      } catch {
+        item = originalItem;
+      }
+      const knownId = positiveInteger5(resolveKnownId(item)) || positiveInteger5(resolveKnownId(originalItem));
       if (knownId) {
         ids.set(definitionId2, knownId);
         continue;
       }
-      if (!shouldResolve(item)) continue;
-      const context = getLookupContext(item);
+      if (!shouldResolve(originalItem)) continue;
+      const context = getLookupContext(item) || getLookupContext(originalItem);
       const cacheHit = getCachedFutbinPlayerId(cache, context);
       if (cacheHit) {
         ids.set(definitionId2, cacheHit);
@@ -14457,7 +14464,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.22",
+      version: "0.6.23",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -21636,11 +21643,30 @@
       const definitionId2 = Number(item?.definitionId || 0);
       return Number.isInteger(definitionId2) && definitionId2 > 0 ? definitionId2 : null;
     }
+    function createRecapFutbinItemHydrator() {
+      const byItemId = /* @__PURE__ */ new Map();
+      const byDefinitionId = /* @__PURE__ */ new Map();
+      ["storage", "club", "unassigned", "transfer"].forEach((pileName) => {
+        getPileItemsByName(pileName).forEach((item) => {
+          const itemId2 = Number(item?.id || 0);
+          const definitionId2 = recapDefinitionId(item);
+          if (Number.isInteger(itemId2) && itemId2 > 0 && !byItemId.has(itemId2)) byItemId.set(itemId2, item);
+          if (definitionId2 && !byDefinitionId.has(definitionId2)) byDefinitionId.set(definitionId2, item);
+        });
+      });
+      return (item) => {
+        const itemId2 = Number(item?.id || 0);
+        if (Number.isInteger(itemId2) && itemId2 > 0 && byItemId.has(itemId2)) return byItemId.get(itemId2);
+        return byDefinitionId.get(recapDefinitionId(item)) || item;
+      };
+    }
     async function resolveRecapFutbinPlayerIds(items, label) {
       const fsu = fsuAdapter();
+      const hydrateItem = createRecapFutbinItemHydrator();
       const resolved = await resolveFutbinCardIds({
         items,
         cache: adapters.userscriptStorage.get(FUTBIN_CARD_ID_CACHE_KEY, null),
+        hydrateItem,
         resolveKnownId: (item) => fsu.getFutbinPlayerId(item),
         getLookupContext: (item) => fsu.getFutbinLookupContext(item),
         shouldResolve: () => true,
@@ -21660,7 +21686,7 @@
       } else if (resolved.unmatched > 0) {
         log(`${label}: FUTBIN returned no exact card ID for ${resolved.unmatched} card(s); those links stay hidden`);
       }
-      return (item) => resolved.ids.get(recapDefinitionId(item)) || fsu.getFutbinPlayerId(item);
+      return (item) => resolved.ids.get(recapDefinitionId(item)) || fsu.getFutbinPlayerId(hydrateItem(item));
     }
     async function showPickRecapModal(loopDef, pickResults, result = {}) {
       if (state.loopRecapSession) state.loopRecapSession.dedicatedRecap = true;

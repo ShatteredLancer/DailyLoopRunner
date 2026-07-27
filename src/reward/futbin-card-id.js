@@ -106,6 +106,7 @@ async function mapWithConcurrency(entries, limit, callback) {
 export async function resolveFutbinCardIds(options = {}) {
   const items = Array.isArray(options.items) ? options.items : [];
   const cache = normalizeFutbinCardIdCache(options.cache);
+  const hydrateItem = typeof options.hydrateItem === 'function' ? options.hydrateItem : (item) => item;
   const resolveKnownId = typeof options.resolveKnownId === 'function' ? options.resolveKnownId : () => null;
   const getLookupContext = typeof options.getLookupContext === 'function' ? options.getLookupContext : () => null;
   const shouldResolve = typeof options.shouldResolve === 'function' ? options.shouldResolve : () => true;
@@ -114,16 +115,18 @@ export async function resolveFutbinCardIds(options = {}) {
   const queued = new Map();
   let cacheHits = 0;
 
-  for (const item of items) {
-    const definitionId = positiveInteger(item?.definitionId);
+  for (const originalItem of items) {
+    const definitionId = positiveInteger(originalItem?.definitionId);
     if (!definitionId || ids.has(definitionId)) continue;
-    const knownId = positiveInteger(resolveKnownId(item));
+    let item = originalItem;
+    try { item = hydrateItem(originalItem) || originalItem; } catch { item = originalItem; }
+    const knownId = positiveInteger(resolveKnownId(item)) || positiveInteger(resolveKnownId(originalItem));
     if (knownId) {
       ids.set(definitionId, knownId);
       continue;
     }
-    if (!shouldResolve(item)) continue;
-    const context = getLookupContext(item);
+    if (!shouldResolve(originalItem)) continue;
+    const context = getLookupContext(item) || getLookupContext(originalItem);
     const cacheHit = getCachedFutbinPlayerId(cache, context);
     if (cacheHit) {
       ids.set(definitionId, cacheHit);

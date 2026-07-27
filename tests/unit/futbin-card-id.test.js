@@ -102,6 +102,23 @@ describe('FUTBIN card ID resolver', () => {
     expect(result).toMatchObject({ queried: 1, resolved: 0, failed: 0, unmatched: 1 });
   });
 
+  it('hydrates an incomplete opened receipt before resolving its exact card ID', async () => {
+    const receipt = { definitionId: CONTEXT.definitionId, special: true };
+    const inventoryItem = { ...receipt, id: 123456789 };
+    const requestText = vi.fn(async () => JSON.stringify({
+      data: [{ resource_id: CONTEXT.definitionId, ID: 51234 }],
+    }));
+    const result = await resolveFutbinCardIds({
+      items: [receipt],
+      hydrateItem: (item) => item === receipt ? inventoryItem : item,
+      getLookupContext: (item) => item === inventoryItem ? CONTEXT : null,
+      requestText,
+    });
+    expect(requestText).toHaveBeenCalledTimes(1);
+    expect(result.ids.get(receipt.definitionId)).toBe(51234);
+    expect(getCachedFutbinPlayerId(result.cache, CONTEXT)).toBe(51234);
+  });
+
   it('skips incomplete card metadata without interrupting the recap', async () => {
     const requestText = vi.fn();
     const result = await resolveFutbinCardIds({
