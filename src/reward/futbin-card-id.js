@@ -11,10 +11,15 @@ function normalizedPlatform(value) {
   return platform === 'PC' || platform === 'PS' ? platform : null;
 }
 
+function safeContext(context) {
+  return context && typeof context === 'object' ? context : {};
+}
+
 function cacheEntryKey(context = {}) {
-  const season = positiveInteger(context.season);
-  const platform = normalizedPlatform(context.platform);
-  const definitionId = positiveInteger(context.definitionId);
+  const source = safeContext(context);
+  const season = positiveInteger(source.season);
+  const platform = normalizedPlatform(source.platform);
+  const definitionId = positiveInteger(source.definitionId);
   if (!season || !platform || !definitionId) return null;
   return `${season}:${platform}:${definitionId}`;
 }
@@ -52,13 +57,14 @@ export function cacheFutbinPlayerId(cache, context = {}, futbinPlayerId) {
 }
 
 export function createFutbinFilteredPlayersUrl(context = {}) {
-  const season = positiveInteger(context.season);
-  const platform = normalizedPlatform(context.platform);
-  const nationId = positiveInteger(context.nationId);
-  const leagueId = positiveInteger(context.leagueId);
-  const teamId = positiveInteger(context.teamId);
-  const rating = positiveInteger(context.rating);
-  const position = String(context.position || '').trim();
+  const source = safeContext(context);
+  const season = positiveInteger(source.season);
+  const platform = normalizedPlatform(source.platform);
+  const nationId = positiveInteger(source.nationId);
+  const leagueId = positiveInteger(source.leagueId);
+  const teamId = positiveInteger(source.teamId);
+  const rating = positiveInteger(source.rating);
+  const position = String(source.position || '').trim();
   if (!season || !platform || !nationId || !leagueId || !teamId || !rating || !position) return null;
   const query = new URLSearchParams({
     platform,

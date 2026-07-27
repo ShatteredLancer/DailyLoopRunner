@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.20
+// @version      0.6.21
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -7195,10 +7195,14 @@
     const platform = String(value || "").trim().toUpperCase();
     return platform === "PC" || platform === "PS" ? platform : null;
   }
+  function safeContext(context) {
+    return context && typeof context === "object" ? context : {};
+  }
   function cacheEntryKey(context = {}) {
-    const season = positiveInteger5(context.season);
-    const platform = normalizedPlatform(context.platform);
-    const definitionId2 = positiveInteger5(context.definitionId);
+    const source = safeContext(context);
+    const season = positiveInteger5(source.season);
+    const platform = normalizedPlatform(source.platform);
+    const definitionId2 = positiveInteger5(source.definitionId);
     if (!season || !platform || !definitionId2) return null;
     return `${season}:${platform}:${definitionId2}`;
   }
@@ -7230,13 +7234,14 @@
     return true;
   }
   function createFutbinFilteredPlayersUrl(context = {}) {
-    const season = positiveInteger5(context.season);
-    const platform = normalizedPlatform(context.platform);
-    const nationId = positiveInteger5(context.nationId);
-    const leagueId = positiveInteger5(context.leagueId);
-    const teamId = positiveInteger5(context.teamId);
-    const rating = positiveInteger5(context.rating);
-    const position = String(context.position || "").trim();
+    const source = safeContext(context);
+    const season = positiveInteger5(source.season);
+    const platform = normalizedPlatform(source.platform);
+    const nationId = positiveInteger5(source.nationId);
+    const leagueId = positiveInteger5(source.leagueId);
+    const teamId = positiveInteger5(source.teamId);
+    const rating = positiveInteger5(source.rating);
+    const position = String(source.position || "").trim();
     if (!season || !platform || !nationId || !leagueId || !teamId || !rating || !position) return null;
     const query2 = new URLSearchParams({
       platform,
@@ -14448,7 +14453,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.20",
+      version: "0.6.21",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),

@@ -54,6 +54,8 @@ describe('FUTBIN card ID resolver', () => {
     });
     expect(getCachedFutbinPlayerId(cache, CONTEXT)).toBe(51234);
     expect(getCachedFutbinPlayerId(cache, { ...CONTEXT, platform: 'PC' })).toBe(61234);
+    expect(getCachedFutbinPlayerId(cache, null)).toBeNull();
+    expect(cacheFutbinPlayerId(cache, null, 71234)).toBe(false);
     expect(cacheFutbinPlayerId(cache, { ...CONTEXT, definitionId: 900000000001 }, 71234)).toBe(true);
     expect(getCachedFutbinPlayerId(cache, { ...CONTEXT, definitionId: 900000000001 })).toBe(71234);
   });
@@ -98,5 +100,18 @@ describe('FUTBIN card ID resolver', () => {
     });
     expect(result.ids.has(CONTEXT.definitionId)).toBe(false);
     expect(result).toMatchObject({ queried: 1, resolved: 0, failed: 0, unmatched: 1 });
+  });
+
+  it('skips incomplete card metadata without interrupting the recap', async () => {
+    const requestText = vi.fn();
+    const result = await resolveFutbinCardIds({
+      items: [{ definitionId: 777777 }],
+      getLookupContext: () => null,
+      requestText,
+    });
+    expect(createFutbinFilteredPlayersUrl(null)).toBeNull();
+    expect(requestText).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ queried: 0, resolved: 0, failed: 0, unmatched: 0 });
+    expect(result.ids.has(777777)).toBe(false);
   });
 });
