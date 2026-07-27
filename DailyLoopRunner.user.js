@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.18
+// @version      0.6.19
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -15,6 +15,7 @@
 // @connect      127.0.0.1
 // @connect      localhost
 // @connect      www.fut.gg
+// @connect      www.futbin.org
 // @connect      enhancer-api.futnext.com
 // @connect      ntfy.sh
 // @run-at       document-end
@@ -29,6 +30,7 @@
   var BATCH_OPEN_PLAN_KEY = "fc-loop-runner-batch-open-plan";
   var BUILDER_PROFILE_KEY = "fc-loop-runner-builder-profiles-v1";
   var DYNAMIC_SBC_CACHE_KEY = "fc-loop-runner-dynamic-sbc-cache-v1";
+  var FUTBIN_CARD_ID_CACHE_KEY = "fc-loop-runner-futbin-card-id-cache-v1";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -4086,13 +4088,38 @@
       const futbinIds = safeRead2(safeRead2(runtime, "info"), "futbinId");
       return positiveInteger3(safeRead2(futbinIds, definitionId2));
     }
+    function getFutbinLookupContext(itemOrDefinitionId) {
+      const item = itemOrDefinitionId && typeof itemOrDefinitionId === "object" ? itemOrDefinitionId : null;
+      const definitionId2 = positiveInteger3(item?.definitionId ?? itemOrDefinitionId);
+      if (!item || !definitionId2) return null;
+      const info = safeRead2(runtime, "info");
+      const base = safeRead2(info, "base");
+      const staticData = safeRead2(item, "_staticData") || safeRead2(item, "_data") || {};
+      const firstPositive = (...values) => values.map(positiveInteger3).find(Boolean) || null;
+      const nationId = firstPositive(item.nationId, item._nationId, staticData.nationId, staticData._nationId);
+      const leagueId = firstPositive(item.leagueId, item._leagueId, staticData.leagueId, staticData._leagueId);
+      const teamId = firstPositive(item.teamId, item._teamId, staticData.teamId, staticData._teamId);
+      const rating = firstPositive(item._rating, item.rating, staticData._rating, staticData.rating);
+      const positionId = firstPositive(
+        item.preferredPosition,
+        item._preferredPosition,
+        staticData.preferredPosition,
+        staticData._preferredPosition
+      );
+      const position = String(safeRead2(safeRead2(info, "posIdToName"), positionId) || "").trim();
+      const season = positiveInteger3(safeRead2(base, "year"));
+      const platform = String(safeRead2(base, "platform") || "").trim().toLowerCase() === "pc" ? "PC" : "PS";
+      if (!nationId || !leagueId || !teamId || !rating || !position || !season) return null;
+      return Object.freeze({ definitionId: definitionId2, season, platform, nationId, leagueId, teamId, rating, position });
+    }
     return Object.freeze({
       snapshot,
       readiness,
       validateClubPlayers,
       beginProvisionalClubAccess,
       endProvisionalClubAccess,
-      getFutbinPlayerId
+      getFutbinPlayerId,
+      getFutbinLookupContext
     });
   }
 
@@ -4765,7 +4792,7 @@
         return [];
       }
     }
-    function positiveInteger6(value) {
+    function positiveInteger7(value) {
       const number = Number(value);
       return Number.isInteger(number) && number > 0 ? number : null;
     }
@@ -4776,7 +4803,7 @@
     }
     function firstPositiveInteger(values = []) {
       for (const value of values) {
-        const number = positiveInteger6(value);
+        const number = positiveInteger7(value);
         if (number) return number;
       }
       return null;
@@ -4831,7 +4858,7 @@
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId2 = positiveInteger6(item?.id);
+      const itemId2 = positiveInteger7(item?.id);
       return {
         type: "PLAYER_PICK",
         name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
@@ -4964,9 +4991,9 @@
     function normalizeDiscoveryCategory(category) {
       const setIds = collectionValues3(
         category?.setIds || category?.sets || category?.data?.setIds || category?.data?.sets
-      ).map((entry) => positiveInteger6(entry?.id || entry)).filter(Boolean);
+      ).map((entry) => positiveInteger7(entry?.id || entry)).filter(Boolean);
       return {
-        id: positiveInteger6(category?.id || category?.categoryId || category?.data?.id),
+        id: positiveInteger7(category?.id || category?.categoryId || category?.data?.id),
         name: String(
           category?.name || category?.description || category?.displayName || category?.data?.name || category?.data?.description || ""
         ).trim(),
@@ -4990,12 +5017,12 @@
       return [...byKey.values()];
     }
     function discoveryCategoryMembership(set, refreshResult = null) {
-      const setId = positiveInteger6(set?.id);
+      const setId = positiveInteger7(set?.id);
       const directCategories = collectionValues3(
         set?.categoryIds || set?.categories || set?.data?.categoryIds || set?.data?.categories
-      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger6(entry), name: "", setIds: [] });
+      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger7(entry), name: "", setIds: [] });
       const directIds = directCategories.map((category) => category.id).filter(Boolean);
-      const directCategoryId = positiveInteger6(set?.categoryId || set?.data?.categoryId);
+      const directCategoryId = positiveInteger7(set?.categoryId || set?.data?.categoryId);
       if (directCategoryId) directIds.push(directCategoryId);
       const categories = listDiscoveryCategories(refreshResult);
       const matching = [
@@ -5018,7 +5045,7 @@
         set?.challenges,
         set?._challenges
       ];
-      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger6(entry?.id || entry)).filter(Boolean))];
+      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger7(entry?.id || entry)).filter(Boolean))];
     }
     function discoveryRequiredPlayerCount(challenge) {
       const explicit = firstPositiveInteger([
@@ -5028,13 +5055,13 @@
       ]);
       if (explicit) return explicit;
       try {
-        const squadCount = positiveInteger6(challenge?.squad?.getNumOfRequiredPlayers?.());
+        const squadCount = positiveInteger7(challenge?.squad?.getNumOfRequiredPlayers?.());
         if (squadCount) return squadCount;
       } catch {
       }
       if (!challenge?.squad) return null;
       const challengeFormation = formation(challenge?.formation);
-      const formationCount = positiveInteger6(challengeFormation?.generalPositions?.length);
+      const formationCount = positiveInteger7(challengeFormation?.generalPositions?.length);
       if (!formationCount) return null;
       try {
         const brickCount = challenge.squad.getAllBrickIndices?.()?.length;
@@ -5051,7 +5078,7 @@
     }
     function normalizeDiscoveryChallenge(challenge) {
       return {
-        id: positiveInteger6(challenge?.id),
+        id: positiveInteger7(challenge?.id),
         status: String(challenge?.status || challenge?.state || ""),
         completed: challenge?.completed === true || (() => {
           try {
@@ -5075,7 +5102,7 @@
       const rawAwards = collectionValues3(set?.awards || set?.data?.awards);
       const category = discoveryCategoryMembership(set, refreshResult);
       return {
-        id: positiveInteger6(set?.id),
+        id: positiveInteger7(set?.id),
         name: String(set?.name || set?.data?.name || "").trim(),
         status: String(set?.status || set?.state || ""),
         complete: (() => {
@@ -7157,6 +7184,163 @@
     });
   }
 
+  // src/reward/futbin-card-id.js
+  var CACHE_VERSION = 1;
+  var MAX_CACHE_ENTRIES = 2e3;
+  function positiveInteger5(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : null;
+  }
+  function normalizedPlatform(value) {
+    const platform = String(value || "").trim().toUpperCase();
+    return platform === "PC" || platform === "PS" ? platform : null;
+  }
+  function cacheEntryKey(context = {}) {
+    const season = positiveInteger5(context.season);
+    const platform = normalizedPlatform(context.platform);
+    const definitionId2 = positiveInteger5(context.definitionId);
+    if (!season || !platform || !definitionId2) return null;
+    return `${season}:${platform}:${definitionId2}`;
+  }
+  function normalizeFutbinCardIdCache(rawCache) {
+    const entries = {};
+    const rawEntries = rawCache?.version === CACHE_VERSION && rawCache?.entries && typeof rawCache.entries === "object" ? rawCache.entries : {};
+    for (const [key, value] of Object.entries(rawEntries)) {
+      if (!/^\d{2}:(?:PC|PS):\d+$/.test(key)) continue;
+      const futbinPlayerId = positiveInteger5(value);
+      if (futbinPlayerId) entries[key] = futbinPlayerId;
+      if (Object.keys(entries).length >= MAX_CACHE_ENTRIES) break;
+    }
+    return { version: CACHE_VERSION, entries };
+  }
+  function getCachedFutbinPlayerId(cache, context = {}) {
+    const key = cacheEntryKey(context);
+    return key ? positiveInteger5(cache?.entries?.[key]) : null;
+  }
+  function cacheFutbinPlayerId(cache, context = {}, futbinPlayerId) {
+    const key = cacheEntryKey(context);
+    const id = positiveInteger5(futbinPlayerId);
+    if (!key || !id) return false;
+    if (!cache.entries || typeof cache.entries !== "object") cache.entries = {};
+    cache.entries[key] = id;
+    const keys = Object.keys(cache.entries);
+    if (keys.length > MAX_CACHE_ENTRIES) {
+      keys.slice(0, keys.length - MAX_CACHE_ENTRIES).forEach((staleKey) => delete cache.entries[staleKey]);
+    }
+    return true;
+  }
+  function createFutbinFilteredPlayersUrl(context = {}) {
+    const season = positiveInteger5(context.season);
+    const platform = normalizedPlatform(context.platform);
+    const nationId = positiveInteger5(context.nationId);
+    const leagueId = positiveInteger5(context.leagueId);
+    const teamId = positiveInteger5(context.teamId);
+    const rating = positiveInteger5(context.rating);
+    const position = String(context.position || "").trim();
+    if (!season || !platform || !nationId || !leagueId || !teamId || !rating || !position) return null;
+    const query2 = new URLSearchParams({
+      platform,
+      nation: String(nationId),
+      league: String(leagueId),
+      rating: `${rating}-${rating}`,
+      club: String(teamId),
+      sort: "rating",
+      position,
+      order: "desc",
+      page: "1"
+    });
+    return `https://www.futbin.org/futbin/api/${season}/getFilteredPlayers?${query2.toString()}`;
+  }
+  function parseFutbinFilteredPlayerId(responseText, definitionId2) {
+    const targetDefinitionId = positiveInteger5(definitionId2);
+    if (!targetDefinitionId || typeof responseText !== "string") return null;
+    let response;
+    try {
+      response = JSON.parse(responseText);
+    } catch {
+      return null;
+    }
+    const entries = Array.isArray(response?.data) ? response.data : [];
+    const exactMatch = entries.find((entry) => positiveInteger5(entry?.resource_id) === targetDefinitionId);
+    return positiveInteger5(exactMatch?.ID);
+  }
+  async function mapWithConcurrency(entries, limit, callback) {
+    const results = [];
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(Math.max(1, Number(limit) || 1), entries.length) }, async () => {
+      while (cursor < entries.length) {
+        const index = cursor++;
+        results[index] = await callback(entries[index]);
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
+  async function resolveFutbinCardIds(options = {}) {
+    const items = Array.isArray(options.items) ? options.items : [];
+    const cache = normalizeFutbinCardIdCache(options.cache);
+    const resolveKnownId = typeof options.resolveKnownId === "function" ? options.resolveKnownId : () => null;
+    const getLookupContext = typeof options.getLookupContext === "function" ? options.getLookupContext : () => null;
+    const shouldResolve = typeof options.shouldResolve === "function" ? options.shouldResolve : () => true;
+    const requestText = typeof options.requestText === "function" ? options.requestText : null;
+    const ids = /* @__PURE__ */ new Map();
+    const queued = /* @__PURE__ */ new Map();
+    let cacheHits = 0;
+    for (const item of items) {
+      const definitionId2 = positiveInteger5(item?.definitionId);
+      if (!definitionId2 || ids.has(definitionId2)) continue;
+      const knownId = positiveInteger5(resolveKnownId(item));
+      if (knownId) {
+        ids.set(definitionId2, knownId);
+        continue;
+      }
+      if (!shouldResolve(item)) continue;
+      const context = getLookupContext(item);
+      const cacheHit = getCachedFutbinPlayerId(cache, context);
+      if (cacheHit) {
+        ids.set(definitionId2, cacheHit);
+        cacheHits++;
+        continue;
+      }
+      const url = createFutbinFilteredPlayersUrl(context);
+      if (url) queued.set(definitionId2, { item, context, url });
+    }
+    const lookups = [...queued.values()];
+    const responses = requestText ? await mapWithConcurrency(lookups, options.maxConcurrency || 2, async (lookup) => {
+      try {
+        const body = await requestText(lookup.url, {
+          headers: { Accept: "application/json" },
+          sendCookies: false,
+          timeout: 1e4
+        });
+        const id = parseFutbinFilteredPlayerId(body, lookup.context.definitionId);
+        return { ...lookup, id, failed: false };
+      } catch {
+        return { ...lookup, id: null, failed: true };
+      }
+    }) : lookups.map((lookup) => ({ ...lookup, id: null, failed: true }));
+    let resolved = 0;
+    let failed = 0;
+    responses.forEach((response) => {
+      if (!response.id) {
+        if (response.failed) failed++;
+        return;
+      }
+      ids.set(response.context.definitionId, response.id);
+      cacheFutbinPlayerId(cache, response.context, response.id);
+      resolved++;
+    });
+    return {
+      ids,
+      cache,
+      cacheHits,
+      queried: lookups.length,
+      resolved,
+      failed,
+      unmatched: lookups.length - resolved - failed
+    };
+  }
+
   // src/reward/player-pick-recap.js
   function itemName3(item, displayName2) {
     if (typeof displayName2 === "function") return String(displayName2(item));
@@ -8230,7 +8414,7 @@
   }
 
   // src/workflows/supply-and-craft.js
-  function positiveInteger5(value, fallback = 1, max = 1e3) {
+  function positiveInteger6(value, fallback = 1, max = 1e3) {
     const number = Number(value);
     return Math.max(1, Math.min(max, Number.isFinite(number) ? Math.floor(number) : fallback));
   }
@@ -8241,7 +8425,7 @@
     if (typeof options.challengeProvider !== "function") throw new TypeError("challengeProvider is required");
     if (typeof options.selectPrimary !== "function") throw new TypeError("selectPrimary is required");
     if (typeof options.submit !== "function") throw new TypeError("submit is required");
-    const maxCompletions = positiveInteger5(options.maxCompletions, 1);
+    const maxCompletions = positiveInteger6(options.maxCompletions, 1);
     const result = {
       status: "completed",
       completions: 0,
@@ -8270,7 +8454,7 @@
       let supplied = false;
       if (!selection?.ok && !preserveSupply) {
         for (const supply of options.supplies || []) {
-          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger5(supply.maxRuns, 100, 1e3) : 1;
+          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger6(supply.maxRuns, 100, 1e3) : 1;
           for (let run = 1; run <= maxRuns && !selection?.ok && !preserveSupply; run++) {
             await options.stopPoint?.();
             const supplyResult = await supply.provide({
@@ -14264,7 +14448,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.18",
+      version: "0.6.19",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -21439,8 +21623,49 @@
       }
       return result;
     }
-    function showPickRecapModal(loopDef, pickResults, result = {}) {
+    function recapDefinitionId(item) {
+      const definitionId2 = Number(item?.definitionId || 0);
+      return Number.isInteger(definitionId2) && definitionId2 > 0 ? definitionId2 : null;
+    }
+    function isSpecialRecapItem(item, extraSpecialDefinitionIds = null) {
+      const definitionId2 = recapDefinitionId(item);
+      return isRecapSpecial(item) || definitionId2 && extraSpecialDefinitionIds?.has(definitionId2) === true;
+    }
+    async function resolveRecapFutbinPlayerIds(items, label, extraSpecialDefinitionIds = null) {
+      const fsu = fsuAdapter();
+      const resolved = await resolveFutbinCardIds({
+        items,
+        cache: adapters.userscriptStorage.get(FUTBIN_CARD_ID_CACHE_KEY, null),
+        resolveKnownId: (item) => fsu.getFutbinPlayerId(item),
+        getLookupContext: (item) => fsu.getFutbinLookupContext(item),
+        shouldResolve: (item) => isSpecialRecapItem(item, extraSpecialDefinitionIds),
+        requestText: adapters.http.getText,
+        maxConcurrency: 2
+      });
+      if (resolved.resolved > 0) {
+        try {
+          adapters.userscriptStorage.set(FUTBIN_CARD_ID_CACHE_KEY, resolved.cache);
+          log(`${label}: FUTBIN direct links resolved for ${resolved.resolved} special card(s) and cached`);
+        } catch {
+          log(`${label}: FUTBIN direct links resolved for ${resolved.resolved} special card(s); local cache unavailable`);
+        }
+      }
+      if (resolved.failed > 0) {
+        log(`${label}: FUTBIN special-card lookup unavailable for ${resolved.failed} card(s); those links stay hidden`);
+      } else if (resolved.unmatched > 0) {
+        log(`${label}: FUTBIN returned no exact card ID for ${resolved.unmatched} special card(s); those links stay hidden`);
+      }
+      return (item) => resolved.ids.get(recapDefinitionId(item)) || fsu.getFutbinPlayerId(item);
+    }
+    async function showPickRecapModal(loopDef, pickResults, result = {}) {
       if (state.loopRecapSession) state.loopRecapSession.dedicatedRecap = true;
+      const pickedCards = (pickResults || []).flatMap((entry) => entry?.pickedCards || []);
+      const specialDefinitionIds = new Set(pickedCards.filter((card) => card?.special === true).map((card) => recapDefinitionId(card.item)).filter(Boolean));
+      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(
+        pickedCards.map((card) => card.item),
+        `${loopDef?.name || "Player Pick"} recap`,
+        specialDefinitionIds
+      );
       return showPlayerPickRecap({
         dom: adapters.dom,
         name: loopDef?.name,
@@ -21449,7 +21674,7 @@
         reason: result.reason,
         itemDisplayName,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
-        resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
+        resolveFutbinPlayerId,
         formatPrice: formatCompactPrice,
         scheduleStopCheck: setInterval,
         cancelStopCheck: clearInterval,
@@ -21560,6 +21785,7 @@
       }
       try {
         const prices = await getSpecialCardPrices(openedItems, `${session.name} recap`);
+        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(openedItems, `${session.name} recap`);
         const model = createLoopRecapModel({
           name: session.name,
           receipts: session.receipts,
@@ -21567,7 +21793,7 @@
           reason,
           prices,
           resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
-          resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item)
+          resolveFutbinPlayerId
         });
         if (!model) return null;
         state.lastLoopRecap = { name: session.name, model, completedAt: Date.now() };
@@ -21654,11 +21880,12 @@
           }
         });
         const prices = await getSpecialCardPrices(result.openedItems, "Batch Open");
+        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result.openedItems, "Batch Open recap");
         recapModel = createBatchOpenRecapModel({
           ...result,
           prices,
           resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
-          resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item)
+          resolveFutbinPlayerId
         });
         if (recapModel?.hasQualifyingCards) {
           state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
@@ -21675,13 +21902,14 @@
         console.error("[BronzeLoop]", error);
         const fallbackPlan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
         const requestedPacks = fallbackPlan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
+        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result?.openedItems || [], "Batch Open recap");
         recapModel = createBatchOpenRecapModel({
           ...result || {},
           requestedPacks: result?.requestedPacks ?? requestedPacks,
           status: "blocked",
           reason: error?.message || error,
           resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
-          resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item)
+          resolveFutbinPlayerId
         });
         if (recapModel?.hasQualifyingCards) {
           state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };

@@ -314,6 +314,31 @@ export function createFsuAdapter(runtime, options = {}) {
     return positiveInteger(safeRead(futbinIds, definitionId));
   }
 
+  function getFutbinLookupContext(itemOrDefinitionId) {
+    const item = itemOrDefinitionId && typeof itemOrDefinitionId === 'object' ? itemOrDefinitionId : null;
+    const definitionId = positiveInteger(item?.definitionId ?? itemOrDefinitionId);
+    if (!item || !definitionId) return null;
+    const info = safeRead(runtime, 'info');
+    const base = safeRead(info, 'base');
+    const staticData = safeRead(item, '_staticData') || safeRead(item, '_data') || {};
+    const firstPositive = (...values) => values.map(positiveInteger).find(Boolean) || null;
+    const nationId = firstPositive(item.nationId, item._nationId, staticData.nationId, staticData._nationId);
+    const leagueId = firstPositive(item.leagueId, item._leagueId, staticData.leagueId, staticData._leagueId);
+    const teamId = firstPositive(item.teamId, item._teamId, staticData.teamId, staticData._teamId);
+    const rating = firstPositive(item._rating, item.rating, staticData._rating, staticData.rating);
+    const positionId = firstPositive(
+      item.preferredPosition,
+      item._preferredPosition,
+      staticData.preferredPosition,
+      staticData._preferredPosition,
+    );
+    const position = String(safeRead(safeRead(info, 'posIdToName'), positionId) || '').trim();
+    const season = positiveInteger(safeRead(base, 'year'));
+    const platform = String(safeRead(base, 'platform') || '').trim().toLowerCase() === 'pc' ? 'PC' : 'PS';
+    if (!nationId || !leagueId || !teamId || !rating || !position || !season) return null;
+    return Object.freeze({ definitionId, season, platform, nationId, leagueId, teamId, rating, position });
+  }
+
   return Object.freeze({
     snapshot,
     readiness,
@@ -321,5 +346,6 @@ export function createFsuAdapter(runtime, options = {}) {
     beginProvisionalClubAccess,
     endProvisionalClubAccess,
     getFutbinPlayerId,
+    getFutbinLookupContext,
   });
 }

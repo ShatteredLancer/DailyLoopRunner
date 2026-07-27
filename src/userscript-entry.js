@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.18
+// @version      0.6.19
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -15,6 +15,7 @@
 // @connect      127.0.0.1
 // @connect      localhost
 // @connect      www.fut.gg
+// @connect      www.futbin.org
 // @connect      enhancer-api.futnext.com
 // @connect      ntfy.sh
 // @run-at       document-end
@@ -26,6 +27,7 @@ import {
   BUILDER_PROFILE_KEY,
   CFG,
   DYNAMIC_SBC_CACHE_KEY,
+  FUTBIN_CARD_ID_CACHE_KEY,
   FSU_COMPAT_DEFAULTS,
   LOOP_UI_OPTIONS_KEY,
   PICK_OPTIONS_KEY,
@@ -136,7 +138,9 @@ import {
 import {
   createLoopRecapModel,
   hasRecapRareGoldOrAbove,
+  isRecapSpecial,
 } from './reward/loop-recap.js';
+import { resolveFutbinCardIds } from './reward/futbin-card-id.js';
 import { hasPlayerPickRecapCards } from './reward/player-pick-recap.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
@@ -277,7 +281,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.18',
+    version: '0.6.19',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -8311,8 +8315,56 @@ function updateLoopControls() {
     return result;
   }
 
-  function showPickRecapModal(loopDef, pickResults, result = {}) {
+  function recapDefinitionId(item) {
+    const definitionId = Number(item?.definitionId || 0);
+    return Number.isInteger(definitionId) && definitionId > 0 ? definitionId : null;
+  }
+
+  function isSpecialRecapItem(item, extraSpecialDefinitionIds = null) {
+    const definitionId = recapDefinitionId(item);
+    return isRecapSpecial(item)
+      || (definitionId && extraSpecialDefinitionIds?.has(definitionId) === true);
+  }
+
+  async function resolveRecapFutbinPlayerIds(items, label, extraSpecialDefinitionIds = null) {
+    const fsu = fsuAdapter();
+    const resolved = await resolveFutbinCardIds({
+      items,
+      cache: adapters.userscriptStorage.get(FUTBIN_CARD_ID_CACHE_KEY, null),
+      resolveKnownId: (item) => fsu.getFutbinPlayerId(item),
+      getLookupContext: (item) => fsu.getFutbinLookupContext(item),
+      shouldResolve: (item) => isSpecialRecapItem(item, extraSpecialDefinitionIds),
+      requestText: adapters.http.getText,
+      maxConcurrency: 2,
+    });
+    if (resolved.resolved > 0) {
+      try {
+        adapters.userscriptStorage.set(FUTBIN_CARD_ID_CACHE_KEY, resolved.cache);
+        log(`${label}: FUTBIN direct links resolved for ${resolved.resolved} special card(s) and cached`);
+      } catch {
+        log(`${label}: FUTBIN direct links resolved for ${resolved.resolved} special card(s); local cache unavailable`);
+      }
+    }
+    if (resolved.failed > 0) {
+      log(`${label}: FUTBIN special-card lookup unavailable for ${resolved.failed} card(s); those links stay hidden`);
+    } else if (resolved.unmatched > 0) {
+      log(`${label}: FUTBIN returned no exact card ID for ${resolved.unmatched} special card(s); those links stay hidden`);
+    }
+    return (item) => resolved.ids.get(recapDefinitionId(item)) || fsu.getFutbinPlayerId(item);
+  }
+
+  async function showPickRecapModal(loopDef, pickResults, result = {}) {
     if (state.loopRecapSession) state.loopRecapSession.dedicatedRecap = true;
+    const pickedCards = (pickResults || []).flatMap((entry) => entry?.pickedCards || []);
+    const specialDefinitionIds = new Set(pickedCards
+      .filter((card) => card?.special === true)
+      .map((card) => recapDefinitionId(card.item))
+      .filter(Boolean));
+    const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(
+      pickedCards.map((card) => card.item),
+      `${loopDef?.name || 'Player Pick'} recap`,
+      specialDefinitionIds,
+    );
     return showPlayerPickRecap({
       dom: adapters.dom,
       name: loopDef?.name,
@@ -8321,7 +8373,7 @@ function updateLoopControls() {
       reason: result.reason,
       itemDisplayName,
       resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
-      resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
+      resolveFutbinPlayerId,
       formatPrice: formatCompactPrice,
       scheduleStopCheck: setInterval,
       cancelStopCheck: clearInterval,
@@ -8438,6 +8490,7 @@ function updateLoopControls() {
     }
     try {
       const prices = await getSpecialCardPrices(openedItems, `${session.name} recap`);
+      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(openedItems, `${session.name} recap`);
       const model = createLoopRecapModel({
         name: session.name,
         receipts: session.receipts,
@@ -8445,7 +8498,7 @@ function updateLoopControls() {
         reason,
         prices,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
-        resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
+        resolveFutbinPlayerId,
       });
       if (!model) return null;
       state.lastLoopRecap = { name: session.name, model, completedAt: Date.now() };
@@ -8535,11 +8588,12 @@ function updateLoopControls() {
         },
       });
       const prices = await getSpecialCardPrices(result.openedItems, 'Batch Open');
+      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result.openedItems, 'Batch Open recap');
       recapModel = createBatchOpenRecapModel({
         ...result,
         prices,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
-        resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
+        resolveFutbinPlayerId,
       });
       if (recapModel?.hasQualifyingCards) {
         state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
@@ -8556,13 +8610,14 @@ function updateLoopControls() {
       console.error('[BronzeLoop]', error);
       const fallbackPlan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
       const requestedPacks = fallbackPlan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
+      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result?.openedItems || [], 'Batch Open recap');
       recapModel = createBatchOpenRecapModel({
         ...(result || {}),
         requestedPacks: result?.requestedPacks ?? requestedPacks,
         status: 'blocked',
         reason: error?.message || error,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
-        resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
+        resolveFutbinPlayerId,
       });
       if (recapModel?.hasQualifyingCards) {
         state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };

@@ -270,4 +270,35 @@ describe('FSU runtime adapter', () => {
     expect(fsu.getFutbinPlayerId({ definitionId: 123456 })).toBeNull();
     expect(fsu.getFutbinPlayerId({ definitionId: 0, futbinId: 16453 })).toBeNull();
   });
+
+  it('exposes FSU-compatible FUTBIN lookup metadata only for complete raw EA items', () => {
+    const fsu = adapter({
+      info: {
+        base: { year: 26, platform: 'pc' },
+        posIdToName: { 18: 'CAM' },
+      },
+    });
+    expect(fsu.getFutbinLookupContext({
+      definitionId: 886062903293,
+      nationId: 38,
+      leagueId: 13,
+      teamId: 243,
+      _rating: 91,
+      preferredPosition: 18,
+    })).toEqual({
+      definitionId: 886062903293,
+      season: 26,
+      platform: 'PC',
+      nationId: 38,
+      leagueId: 13,
+      teamId: 243,
+      rating: 91,
+      position: 'CAM',
+    });
+    expect(fsu.getFutbinLookupContext({
+      definitionId: 886062903294,
+      _staticData: { nationId: 38, leagueId: 13, teamId: 243, rating: 91, preferredPosition: 18 },
+    })).toMatchObject({ definitionId: 886062903294, rating: 91, position: 'CAM' });
+    expect(fsu.getFutbinLookupContext({ definitionId: 886062903295, rating: 91 })).toBeNull();
+  });
 });
