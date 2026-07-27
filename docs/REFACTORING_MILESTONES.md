@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.19`
-- Git 基线：`main` FUTBIN special-card ID cache
+- Userscript 版本：`0.6.20`
+- Git 基线：`main` FUTBIN exact card ID cache
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -22,6 +22,8 @@
 `0.6.18` 发布记录：recap 的 FUTBIN 链接改为只使用 FSU 已确认的 `definitionId -> FUTBIN card ID` 映射，直接打开 `https://www.futbin.com/26/player/<id>/1`。不再用球员名称搜索，也不把 EA `definitionId` 当作 FUTBIN ID；映射缺失时不显示链接，避免同名或错误版本误跳转。
 
 `0.6.19` 发布记录：特殊卡 recap 在 FSU 已确认映射缺失时，使用原始 EA 卡片的赛季、平台、国家、联赛、俱乐部、评分和位置查询 FUTBIN 筛选接口，并且只接受返回项 `resource_id` 与 EA `definitionId` 完全一致的 FUTBIN card ID。确认结果按赛季/平台/EA definition ID 缓存到 Runner 本地；查询失败、元数据不完整或无精确结果时继续隐藏链接，不会退回姓名搜索或跳转同名普卡。Player Pick、普通 Loop 和 Batch Open recap 均覆盖。
+
+`0.6.20` 发布记录：精确 FUTBIN card ID 解析从“特殊卡缺失映射”扩大到所有 recap 球员卡。Runner 仍然优先使用 FSU 已确认映射；其余卡片按相同原始 EA 元数据查询，并且只有 `resource_id === definitionId` 时才缓存和显示直达链接。相同 definition ID 在单次 recap 只查询一次，后续 recap 直接读取缓存。
 
 ## 1. 重构目标
 
@@ -558,6 +560,7 @@ Status: In Progress
 
 当前进度（2026-07-27）：
 
+- `0.6.20` FUTBIN 精确解析覆盖普通金和特殊卡：FSU 缓存缺失的 recap 卡都可按 EA 元数据补齐并缓存；同一张重复卡仅查一次。链接依然只在精确 `resource_id` 匹配时显示，不回退姓名搜索。完整 release gate 通过 92 个测试文件、574 个测试、206 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.19` 特殊卡 FUTBIN 直达链接补齐精确解析与 Runner 本地缓存：缺失 FSU 映射时仅以原始 EA 元数据筛选 FUTBIN，并以 `resource_id === definitionId` 作为唯一接受条件；无精确匹配、元数据不足或请求失败都隐藏链接。该功能仅在 recap 生成前读取公开 FUTBIN 数据，不读取 EA Cookie，也不改变开包、选卡、SBC 或 Unassigned 路径。完整 release gate 通过 92 个测试文件、574 个测试、206 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.18` recap 的 FUTBIN 链接只读取 FSU 已确认的 card ID 并直达该卡详情页，不再以球员名称搜索，也不把 EA `definitionId` 伪装为 FUTBIN ID；Player Pick、Batch Open 和普通 Loop recap 均覆盖，缺失映射时隐藏链接。完整 `npm run verify` 通过 91 个测试文件、568 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。
 - `0.6.17`（`f6c038a`）主面板帮助入口改为标题内紧凑布局，并由 `main-panel-view` 单测锁定标题/帮助按钮的同组结构和 18px 样式。完整 `npm run verify` 通过 91 个测试文件、567 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。

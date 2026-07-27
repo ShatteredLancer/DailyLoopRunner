@@ -58,32 +58,38 @@ describe('FUTBIN card ID resolver', () => {
     expect(getCachedFutbinPlayerId(cache, { ...CONTEXT, definitionId: 900000000001 })).toBe(71234);
   });
 
-  it('uses FSU-known IDs first, then caches only exact special-card matches', async () => {
-    const normal = { definitionId: 1001, special: false };
+  it('uses FSU-known IDs first, then caches exact cards regardless of their colour', async () => {
+    const fsuKnown = { definitionId: 1001, special: false };
+    const normal = { definitionId: 1002, special: false };
     const special = { definitionId: CONTEXT.definitionId, special: true };
-    const requestText = vi.fn(async () => JSON.stringify({
-      data: [{ resource_id: CONTEXT.definitionId, ID: 51234 }],
+    const normalContext = { ...CONTEXT, definitionId: normal.definitionId, rating: 88, position: 'CM' };
+    const requestText = vi.fn(async (url) => JSON.stringify({
+      data: url.includes('rating=88-88')
+        ? [{ resource_id: normal.definitionId, ID: 41234 }]
+        : [{ resource_id: CONTEXT.definitionId, ID: 51234 }],
     }));
     const result = await resolveFutbinCardIds({
-      items: [normal, special],
+      items: [fsuKnown, normal, special],
       cache: null,
-      resolveKnownId: (item) => item.definitionId === normal.definitionId ? 16453 : null,
-      getLookupContext: (item) => item.definitionId === special.definitionId ? CONTEXT : null,
-      shouldResolve: (item) => item.special === true,
+      resolveKnownId: (item) => item.definitionId === fsuKnown.definitionId ? 16453 : null,
+      getLookupContext: (item) => item.definitionId === normal.definitionId ? normalContext : CONTEXT,
+      shouldResolve: () => true,
       requestText,
     });
-    expect(requestText).toHaveBeenCalledTimes(1);
+    expect(requestText).toHaveBeenCalledTimes(2);
     expect(requestText).toHaveBeenCalledWith(expect.stringContaining('getFilteredPlayers'), expect.objectContaining({
       sendCookies: false,
       headers: { Accept: 'application/json' },
     }));
-    expect(result.ids.get(normal.definitionId)).toBe(16453);
+    expect(result.ids.get(fsuKnown.definitionId)).toBe(16453);
+    expect(result.ids.get(normal.definitionId)).toBe(41234);
     expect(result.ids.get(special.definitionId)).toBe(51234);
-    expect(result).toMatchObject({ queried: 1, resolved: 1, failed: 0, unmatched: 0 });
+    expect(result).toMatchObject({ queried: 2, resolved: 2, failed: 0, unmatched: 0 });
+    expect(getCachedFutbinPlayerId(result.cache, normalContext)).toBe(41234);
     expect(getCachedFutbinPlayerId(result.cache, CONTEXT)).toBe(51234);
   });
 
-  it('keeps the link hidden when FUTBIN has no exact matching special-card resource ID', async () => {
+  it('keeps the link hidden when FUTBIN has no exact matching card resource ID', async () => {
     const result = await resolveFutbinCardIds({
       items: [{ definitionId: CONTEXT.definitionId, special: true }],
       getLookupContext: () => CONTEXT,
