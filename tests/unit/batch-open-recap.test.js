@@ -22,6 +22,7 @@ describe('Batch Open recap model', () => {
         { id: 9, type: 'consumable' },
       ],
       prices: new Map([[101, 125000], [102, 48000]]),
+      resolveFutbinPlayerId: (openedItem) => openedItem.definitionId === 101 ? 16453 : null,
     });
     expect(model).toMatchObject({
       requestedPacks: 4,
@@ -46,6 +47,7 @@ describe('Batch Open recap model', () => {
       '63 Bronze A',
     ]);
     expect(model.rows[0]).toMatchObject({ price: 125000, tierLabel: 'Special 95-97' });
+    expect(model.rows[0].futbinUrl).toBe('https://www.futbin.com/26/player/16453/1');
     expect(model.rows[1].tierLabel).toBe('Rare Gold');
     expect(model.rows[3].tierLabel).toBe('Common Gold');
   });

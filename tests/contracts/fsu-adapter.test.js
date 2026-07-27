@@ -257,4 +257,17 @@ describe('FSU runtime adapter', () => {
       cacheStatus: 'trusted-provisional',
     });
   });
+
+  it('returns only FSU-confirmed FUTBIN card IDs for direct player links', () => {
+    const fsu = adapter({
+      info: {
+        futbinId: { 267336: 16453, 999999: '20486' },
+      },
+    });
+
+    expect(fsu.getFutbinPlayerId({ definitionId: 267336 })).toBe(16453);
+    expect(fsu.getFutbinPlayerId(999999)).toBe(20486);
+    expect(fsu.getFutbinPlayerId({ definitionId: 123456 })).toBeNull();
+    expect(fsu.getFutbinPlayerId({ definitionId: 0, futbinId: 16453 })).toBeNull();
+  });
 });

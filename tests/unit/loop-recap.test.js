@@ -37,6 +37,7 @@ describe('generic Loop recap', () => {
       reason: 'stopped by user',
       receipts: [{ status: 'opened', packRef: { name: 'Rare Gold Pack' }, openedItems: [special, rareGold] }],
       prices: new Map([[202, 125000]]),
+      resolveFutbinPlayerId: (openedItem) => openedItem.definitionId === 202 ? 16453 : null,
     });
     expect(model).toMatchObject({
       kind: 'loop', title: 'Daily Rare Recap', status: 'stopped', reason: 'stopped by user',
@@ -44,6 +45,7 @@ describe('generic Loop recap', () => {
     });
     expect(model.rows).toHaveLength(2);
     expect(model.rows[0]).toMatchObject({ name: 'Special Player', price: 125000, sourceLabel: 'Rare Gold Pack' });
+    expect(model.rows[0].futbinUrl).toBe('https://www.futbin.com/26/player/16453/1');
     expect(model.rows[1]).toMatchObject({ name: 'Rare Gold Player', showPrice: false, tierLabel: 'Rare Gold' });
   });
 });

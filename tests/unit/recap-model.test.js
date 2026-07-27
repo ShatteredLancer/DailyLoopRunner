@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   RECAP_TIER_COLORS,
-  createFutbinPlayerSearchUrl,
+  createFutbinPlayerUrl,
   createRecapModel,
   getRecapPage,
   normalizeRecapColor,
@@ -15,17 +15,19 @@ function rows(count) {
 }
 
 describe('shared recap model and tier themes', () => {
-  it('builds a FUTBIN player search URL and preserves an explicit recap URL', () => {
-    expect(createFutbinPlayerSearchUrl('Karius P7')).toBe('https://www.futbin.com/players?search=Karius%20P7');
-    expect(createFutbinPlayerSearchUrl('')).toBeNull();
+  it('builds a direct FUTBIN player URL from a confirmed card ID and preserves an explicit recap URL', () => {
+    expect(createFutbinPlayerUrl(16453)).toBe('https://www.futbin.com/26/player/16453/1');
+    expect(createFutbinPlayerUrl('')).toBeNull();
     const model = createRecapModel({
       rows: [
-        { name: 'Bühl', rating: 89 },
+        { name: 'Bühl', rating: 89, futbinPlayerId: 16453 },
+        { name: 'No confirmed FUTBIN ID', rating: 87 },
         { name: 'Gabriel', rating: 88, futbinUrl: 'https://example.test/player/gabriel' },
       ],
     });
-    expect(model.rows[0].futbinUrl).toBe('https://www.futbin.com/players?search=B%C3%BChl');
+    expect(model.rows[0].futbinUrl).toBe('https://www.futbin.com/26/player/16453/1');
     expect(model.rows[1].futbinUrl).toBe('https://example.test/player/gabriel');
+    expect(model.rows[2].futbinUrl).toBeNull();
   });
 
   it.each([

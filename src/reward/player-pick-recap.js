@@ -34,6 +34,7 @@ export function createPlayerPickRecapModel(pickResults = [], options = {}) {
       showPrice: true,
       destination,
       sourceLabel: `P${pickIndex + 1}${entry?.resumed === true ? 'r' : ''}`,
+      futbinPlayerId: options.resolveFutbinPlayerId?.(item) ?? null,
       card,
       pickIndex: pickIndex + 1,
       resumed: entry?.resumed === true,

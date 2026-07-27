@@ -45,6 +45,7 @@ export function createBatchOpenRecapModel(input = {}) {
       price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
       showPrice: special,
       sourceLabel: item.packName || item.sourceLabel || null,
+      futbinPlayerId: input.resolveFutbinPlayerId?.(item) ?? null,
       item,
     };
     row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(item));

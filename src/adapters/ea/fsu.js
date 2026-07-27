@@ -58,6 +58,11 @@ function uniquePositiveNumbers(values = []) {
     .filter((value, index, list) => list.indexOf(value) === index);
 }
 
+function positiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
 function cloneDefaults() {
   return {
     ...FSU_COMPAT_DEFAULTS,
@@ -297,11 +302,24 @@ export function createFsuAdapter(runtime, options = {}) {
     return typeof end === 'function' ? end() : null;
   }
 
+  function getFutbinPlayerId(itemOrDefinitionId) {
+    const item = itemOrDefinitionId && typeof itemOrDefinitionId === 'object' ? itemOrDefinitionId : null;
+    const definitionId = positiveInteger(item?.definitionId ?? itemOrDefinitionId);
+    if (!definitionId) return null;
+
+    const explicitId = positiveInteger(item?.futbinId ?? item?.futbinPlayerId);
+    if (explicitId) return explicitId;
+
+    const futbinIds = safeRead(safeRead(runtime, 'info'), 'futbinId');
+    return positiveInteger(safeRead(futbinIds, definitionId));
+  }
+
   return Object.freeze({
     snapshot,
     readiness,
     validateClubPlayers,
     beginProvisionalClubAccess,
     endProvisionalClubAccess,
+    getFutbinPlayerId,
   });
 }

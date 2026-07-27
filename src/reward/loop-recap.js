@@ -82,6 +82,7 @@ export function createLoopRecapModel(input = {}) {
       price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
       showPrice: special,
       sourceLabel: item.packName || packName || null,
+      futbinPlayerId: input.resolveFutbinPlayerId?.(item) ?? null,
       item,
       order: index,
     };

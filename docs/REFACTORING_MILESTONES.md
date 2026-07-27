@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.17`
-- Git 基线：`f6c038a` Compact help button placement
+- Userscript 版本：`0.6.18`
+- Git 基线：`main` FUTBIN direct card links
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -18,6 +18,8 @@
 `0.6.16` 发布记录：共享 recap model 为每张球员卡生成 FUTBIN 名称搜索链接，Player Pick、Batch Open 与普通 Loop recap 都在 `price:` 后显示新标签 `FUTBIN` 链接。已有的显式 recap URL 保持优先；Runner 没有 FUTBIN 专属 card ID，因此明确使用球员名搜索，不伪造特殊卡详情页。链接采用 `noopener noreferrer`。
 
 `0.6.17` 发布记录：主面板的四个帮助入口统一紧贴所属标题；标题栏的 `?` 从右侧 `Options / L` 操作组移至 `Loop Runner` 标题后，Run options、Config 和 Log 的 `?` 也统一收紧为 18px 圆形按钮。帮助 topic、事件 ID 和弹窗内容保持不变。
+
+`0.6.18` 发布记录：recap 的 FUTBIN 链接改为只使用 FSU 已确认的 `definitionId -> FUTBIN card ID` 映射，直接打开 `https://www.futbin.com/26/player/<id>/1`。不再用球员名称搜索，也不把 EA `definitionId` 当作 FUTBIN ID；映射缺失时不显示链接，避免同名或错误版本误跳转。
 
 ## 1. 重构目标
 
@@ -552,8 +554,9 @@ Status: In Progress
 
 回滚条件：无法稳定识别奖励 Pick、动态条件转换不完整，或扫描结果可能导致错误 SBC/奖励被提交或领取。
 
-当前进度（2026-07-26）：
+当前进度（2026-07-27）：
 
+- `0.6.18` recap 的 FUTBIN 链接只读取 FSU 已确认的 card ID 并直达该卡详情页，不再以球员名称搜索，也不把 EA `definitionId` 伪装为 FUTBIN ID；Player Pick、Batch Open 和普通 Loop recap 均覆盖，缺失映射时隐藏链接。完整 `npm run verify` 通过 91 个测试文件、568 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。
 - `0.6.17`（`f6c038a`）主面板帮助入口改为标题内紧凑布局，并由 `main-panel-view` 单测锁定标题/帮助按钮的同组结构和 18px 样式。完整 `npm run verify` 通过 91 个测试文件、567 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。
 - `0.6.16`（`1dbc7c1`）共享 recap model 增加 FUTBIN 名称搜索 URL，Player Pick UI 覆盖外链的新窗口与 `noopener noreferrer`。完整 `npm run verify` 通过 91 个测试文件、567 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。
 - `0.6.15`（`d03ecf7`）新增 `tests/contracts/dry-run-effects.test.js`。四条契约测试分别锁定 Dry Run 不会执行开包前 Unassigned 处理、开包/奖励处理、Unassigned 移动/overflow recovery，以及 SBC 的 runtime access、保存、重载、提交与后处理。完整 `npm run verify` 通过 91 个测试文件、566 个测试，204 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性均通过。

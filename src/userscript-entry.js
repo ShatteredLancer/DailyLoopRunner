@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.17
+// @version      0.6.18
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -277,7 +277,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.17',
+    version: '0.6.18',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -8321,6 +8321,7 @@ function updateLoopControls() {
       reason: result.reason,
       itemDisplayName,
       resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+      resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
       formatPrice: formatCompactPrice,
       scheduleStopCheck: setInterval,
       cancelStopCheck: clearInterval,
@@ -8444,6 +8445,7 @@ function updateLoopControls() {
         reason,
         prices,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+        resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
       });
       if (!model) return null;
       state.lastLoopRecap = { name: session.name, model, completedAt: Date.now() };
@@ -8537,6 +8539,7 @@ function updateLoopControls() {
         ...result,
         prices,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+        resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
       });
       if (recapModel?.hasQualifyingCards) {
         state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
@@ -8559,6 +8562,7 @@ function updateLoopControls() {
         status: 'blocked',
         reason: error?.message || error,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+        resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
       });
       if (recapModel?.hasQualifyingCards) {
         state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };

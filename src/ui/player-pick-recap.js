@@ -13,6 +13,7 @@ export function showPlayerPickRecap(options = {}) {
     reason: options.reason,
     itemDisplayName: options.itemDisplayName,
     resolveNativeTheme: options.resolveNativeTheme,
+    resolveFutbinPlayerId: options.resolveFutbinPlayerId,
   });
   return showCardRecap({ ...options, model });
 }

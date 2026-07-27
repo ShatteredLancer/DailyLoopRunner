@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.17
+// @version      0.6.18
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -3854,6 +3854,10 @@
   function uniquePositiveNumbers2(values = []) {
     return values.map(Number).filter((value) => Number.isFinite(value) && value > 0).filter((value, index, list) => list.indexOf(value) === index);
   }
+  function positiveInteger3(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : null;
+  }
   function cloneDefaults() {
     return {
       ...FSU_COMPAT_DEFAULTS,
@@ -4073,12 +4077,22 @@
       const end = safeRead2(safeRead2(runtime, "events"), "endProvisionalClubAccess");
       return typeof end === "function" ? end() : null;
     }
+    function getFutbinPlayerId(itemOrDefinitionId) {
+      const item = itemOrDefinitionId && typeof itemOrDefinitionId === "object" ? itemOrDefinitionId : null;
+      const definitionId2 = positiveInteger3(item?.definitionId ?? itemOrDefinitionId);
+      if (!definitionId2) return null;
+      const explicitId = positiveInteger3(item?.futbinId ?? item?.futbinPlayerId);
+      if (explicitId) return explicitId;
+      const futbinIds = safeRead2(safeRead2(runtime, "info"), "futbinId");
+      return positiveInteger3(safeRead2(futbinIds, definitionId2));
+    }
     return Object.freeze({
       snapshot,
       readiness,
       validateClubPlayers,
       beginProvisionalClubAccess,
-      endProvisionalClubAccess
+      endProvisionalClubAccess,
+      getFutbinPlayerId
     });
   }
 
@@ -4751,7 +4765,7 @@
         return [];
       }
     }
-    function positiveInteger5(value) {
+    function positiveInteger6(value) {
       const number = Number(value);
       return Number.isInteger(number) && number > 0 ? number : null;
     }
@@ -4762,7 +4776,7 @@
     }
     function firstPositiveInteger(values = []) {
       for (const value of values) {
-        const number = positiveInteger5(value);
+        const number = positiveInteger6(value);
         if (number) return number;
       }
       return null;
@@ -4817,7 +4831,7 @@
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId2 = positiveInteger5(item?.id);
+      const itemId2 = positiveInteger6(item?.id);
       return {
         type: "PLAYER_PICK",
         name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
@@ -4950,9 +4964,9 @@
     function normalizeDiscoveryCategory(category) {
       const setIds = collectionValues3(
         category?.setIds || category?.sets || category?.data?.setIds || category?.data?.sets
-      ).map((entry) => positiveInteger5(entry?.id || entry)).filter(Boolean);
+      ).map((entry) => positiveInteger6(entry?.id || entry)).filter(Boolean);
       return {
-        id: positiveInteger5(category?.id || category?.categoryId || category?.data?.id),
+        id: positiveInteger6(category?.id || category?.categoryId || category?.data?.id),
         name: String(
           category?.name || category?.description || category?.displayName || category?.data?.name || category?.data?.description || ""
         ).trim(),
@@ -4976,12 +4990,12 @@
       return [...byKey.values()];
     }
     function discoveryCategoryMembership(set, refreshResult = null) {
-      const setId = positiveInteger5(set?.id);
+      const setId = positiveInteger6(set?.id);
       const directCategories = collectionValues3(
         set?.categoryIds || set?.categories || set?.data?.categoryIds || set?.data?.categories
-      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger5(entry), name: "", setIds: [] });
+      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger6(entry), name: "", setIds: [] });
       const directIds = directCategories.map((category) => category.id).filter(Boolean);
-      const directCategoryId = positiveInteger5(set?.categoryId || set?.data?.categoryId);
+      const directCategoryId = positiveInteger6(set?.categoryId || set?.data?.categoryId);
       if (directCategoryId) directIds.push(directCategoryId);
       const categories = listDiscoveryCategories(refreshResult);
       const matching = [
@@ -5004,7 +5018,7 @@
         set?.challenges,
         set?._challenges
       ];
-      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger5(entry?.id || entry)).filter(Boolean))];
+      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger6(entry?.id || entry)).filter(Boolean))];
     }
     function discoveryRequiredPlayerCount(challenge) {
       const explicit = firstPositiveInteger([
@@ -5014,13 +5028,13 @@
       ]);
       if (explicit) return explicit;
       try {
-        const squadCount = positiveInteger5(challenge?.squad?.getNumOfRequiredPlayers?.());
+        const squadCount = positiveInteger6(challenge?.squad?.getNumOfRequiredPlayers?.());
         if (squadCount) return squadCount;
       } catch {
       }
       if (!challenge?.squad) return null;
       const challengeFormation = formation(challenge?.formation);
-      const formationCount = positiveInteger5(challengeFormation?.generalPositions?.length);
+      const formationCount = positiveInteger6(challengeFormation?.generalPositions?.length);
       if (!formationCount) return null;
       try {
         const brickCount = challenge.squad.getAllBrickIndices?.()?.length;
@@ -5037,7 +5051,7 @@
     }
     function normalizeDiscoveryChallenge(challenge) {
       return {
-        id: positiveInteger5(challenge?.id),
+        id: positiveInteger6(challenge?.id),
         status: String(challenge?.status || challenge?.state || ""),
         completed: challenge?.completed === true || (() => {
           try {
@@ -5061,7 +5075,7 @@
       const rawAwards = collectionValues3(set?.awards || set?.data?.awards);
       const category = discoveryCategoryMembership(set, refreshResult);
       return {
-        id: positiveInteger5(set?.id),
+        id: positiveInteger6(set?.id),
         name: String(set?.name || set?.data?.name || "").trim(),
         status: String(set?.status || set?.state || ""),
         complete: (() => {
@@ -6226,7 +6240,7 @@
   function clone2(value) {
     return cloneLoopDef(value);
   }
-  function positiveInteger3(value) {
+  function positiveInteger4(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -6247,19 +6261,19 @@
   function rewardFingerprint(reward = {}) {
     return {
       type: String(reward.type || ""),
-      resourceId: positiveInteger3(reward.resourceId),
-      definitionId: positiveInteger3(reward.definitionId),
-      packId: positiveInteger3(reward.packId),
-      candidateCount: positiveInteger3(reward.candidateCount),
-      selectionCount: positiveInteger3(reward.selectionCount),
-      count: positiveInteger3(reward.count),
+      resourceId: positiveInteger4(reward.resourceId),
+      definitionId: positiveInteger4(reward.definitionId),
+      packId: positiveInteger4(reward.packId),
+      candidateCount: positiveInteger4(reward.candidateCount),
+      selectionCount: positiveInteger4(reward.selectionCount),
+      count: positiveInteger4(reward.count),
       name: String(reward.name || ""),
       description: String(reward.description || "")
     };
   }
   function dynamicSbcIndexFingerprint(index = {}) {
     return fingerprintDynamicSbcValue({
-      id: positiveInteger3(index.id),
+      id: positiveInteger4(index.id),
       name: String(index.name || ""),
       repeats: index.repeats ?? null,
       startTime: index.startTime ?? null,
@@ -6286,7 +6300,7 @@
     }
     const sets = {};
     for (const [key, entry] of Object.entries(cache.sets)) {
-      const setId = positiveInteger3(entry?.setId || key);
+      const setId = positiveInteger4(entry?.setId || key);
       if (!setId || !entry?.fingerprint || !isPlainObject(entry?.snapshot)) continue;
       sets[String(setId)] = {
         setId,
@@ -6350,7 +6364,7 @@
     for (const set of sets) {
       const index = options.snapshotIndex(set, refreshResult);
       if (!options.isCandidate(index, set)) continue;
-      const setId = positiveInteger3(index?.id);
+      const setId = positiveInteger4(index?.id);
       if (!setId) continue;
       currentCandidateIds.add(String(setId));
       stats.candidates++;
@@ -6750,9 +6764,11 @@
   var BASE_BACKGROUND = "#171B21";
   var DEFAULT_FOREGROUND = "#F4F6F8";
   var DEFAULT_MUTED = "#AAB4C2";
-  function createFutbinPlayerSearchUrl(name) {
-    const query2 = String(name || "").trim();
-    return query2 ? `https://www.futbin.com/players?search=${encodeURIComponent(query2)}` : null;
+  function createFutbinPlayerUrl(futbinPlayerId, season = 26) {
+    const id = Number(futbinPlayerId);
+    const year = Number(season);
+    if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(year) || year < 20 || year > 99) return null;
+    return `https://www.futbin.com/${year}/player/${id}/1`;
   }
   var RECAP_TIER_COLORS = Object.freeze({
     bronze: Object.freeze({ label: "Bronze", accent: "#B7793E", background: "#45281C" }),
@@ -6881,7 +6897,7 @@
   function createRecapModel(input = {}) {
     const rows = (input.rows || []).map((row, index) => Object.freeze({
       ...row,
-      futbinUrl: row.futbinUrl || createFutbinPlayerSearchUrl(row.name),
+      futbinUrl: row.futbinUrl || createFutbinPlayerUrl(row.futbinPlayerId, input.futbinSeason),
       order: Number(row.order ?? index)
     }));
     rows.sort(
@@ -6990,6 +7006,7 @@
         price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
         showPrice: special,
         sourceLabel: item.packName || packName || null,
+        futbinPlayerId: input.resolveFutbinPlayerId?.(item) ?? null,
         item,
         order: index
       };
@@ -7064,6 +7081,7 @@
         price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
         showPrice: special,
         sourceLabel: item.packName || item.sourceLabel || null,
+        futbinPlayerId: input.resolveFutbinPlayerId?.(item) ?? null,
         item
       };
       row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(item));
@@ -7172,6 +7190,7 @@
         showPrice: true,
         destination,
         sourceLabel: `P${pickIndex + 1}${entry?.resumed === true ? "r" : ""}`,
+        futbinPlayerId: options.resolveFutbinPlayerId?.(item) ?? null,
         card,
         pickIndex: pickIndex + 1,
         resumed: entry?.resumed === true,
@@ -8211,7 +8230,7 @@
   }
 
   // src/workflows/supply-and-craft.js
-  function positiveInteger4(value, fallback = 1, max = 1e3) {
+  function positiveInteger5(value, fallback = 1, max = 1e3) {
     const number = Number(value);
     return Math.max(1, Math.min(max, Number.isFinite(number) ? Math.floor(number) : fallback));
   }
@@ -8222,7 +8241,7 @@
     if (typeof options.challengeProvider !== "function") throw new TypeError("challengeProvider is required");
     if (typeof options.selectPrimary !== "function") throw new TypeError("selectPrimary is required");
     if (typeof options.submit !== "function") throw new TypeError("submit is required");
-    const maxCompletions = positiveInteger4(options.maxCompletions, 1);
+    const maxCompletions = positiveInteger5(options.maxCompletions, 1);
     const result = {
       status: "completed",
       completions: 0,
@@ -8251,7 +8270,7 @@
       let supplied = false;
       if (!selection?.ok && !preserveSupply) {
         for (const supply of options.supplies || []) {
-          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger4(supply.maxRuns, 100, 1e3) : 1;
+          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger5(supply.maxRuns, 100, 1e3) : 1;
           for (let run = 1; run <= maxRuns && !selection?.ok && !preserveSupply; run++) {
             await options.stopPoint?.();
             const supplyResult = await supply.provide({
@@ -13240,7 +13259,7 @@
       futbin.href = row.futbinUrl;
       futbin.target = "_blank";
       futbin.rel = "noopener noreferrer";
-      futbin.title = `Search ${String(row.name || "player")} on FUTBIN`;
+      futbin.title = `Open ${String(row.name || "player")} on FUTBIN`;
       applyStyles3(futbin, {
         color: theme.accent || "#8CB7FF",
         fontSize: "11px",
@@ -13388,7 +13407,8 @@
       status: options.status,
       reason: options.reason,
       itemDisplayName: options.itemDisplayName,
-      resolveNativeTheme: options.resolveNativeTheme
+      resolveNativeTheme: options.resolveNativeTheme,
+      resolveFutbinPlayerId: options.resolveFutbinPlayerId
     });
     return showCardRecap({ ...options, model });
   }
@@ -14244,7 +14264,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.17",
+      version: "0.6.18",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -21429,6 +21449,7 @@
         reason: result.reason,
         itemDisplayName,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+        resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item),
         formatPrice: formatCompactPrice,
         scheduleStopCheck: setInterval,
         cancelStopCheck: clearInterval,
@@ -21545,7 +21566,8 @@
           status,
           reason,
           prices,
-          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item)
+          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+          resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item)
         });
         if (!model) return null;
         state.lastLoopRecap = { name: session.name, model, completedAt: Date.now() };
@@ -21635,7 +21657,8 @@
         recapModel = createBatchOpenRecapModel({
           ...result,
           prices,
-          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item)
+          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+          resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item)
         });
         if (recapModel?.hasQualifyingCards) {
           state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };
@@ -21657,7 +21680,8 @@
           requestedPacks: result?.requestedPacks ?? requestedPacks,
           status: "blocked",
           reason: error?.message || error,
-          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item)
+          resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+          resolveFutbinPlayerId: (item) => fsuAdapter().getFutbinPlayerId(item)
         });
         if (recapModel?.hasQualifyingCards) {
           state.lastBatchRecap = { model: recapModel, completedAt: Date.now() };

@@ -40,13 +40,19 @@ describe('Player Pick recap UI', () => {
   });
 
   it('builds a stable summary, keeps compatibility fields, and sorts by rating', () => {
-    const model = createPlayerPickRecapModel(PICK_RESULTS);
+    const model = createPlayerPickRecapModel(PICK_RESULTS, {
+      resolveFutbinPlayerId: (item) => item.name === 'Player B' ? 16453 : null,
+    });
     expect(model).toEqual(expect.objectContaining({
       minRating: 88, maxRating: 92, specialCount: 1, duplicateCount: 1,
       highRatedCount: 1, resumedCount: 1, destinations: { storage: 1, club: 1 },
     }));
     expect(model.rows.map((row) => row.card.item.name)).toEqual(['Player B', 'Player A']);
     expect(model.rows.map((row) => row.tierLabel)).toEqual(['Special 94-', 'Rare Gold']);
+    expect(model.rows.map((row) => row.futbinUrl)).toEqual([
+      'https://www.futbin.com/26/player/16453/1',
+      null,
+    ]);
     expect(createPlayerPickRecapModel([])).toBeNull();
     expect(createPlayerPickRecapModel([], { status: 'blocked', reason: 'missing fodder', name: 'Pick' }))
       .toMatchObject({ status: 'blocked', reason: 'missing fodder', totalRows: 0, pageCount: 1 });
@@ -94,6 +100,7 @@ describe('Player Pick recap UI', () => {
     const promise = showPlayerPickRecap({
       dom: harness.dom, name: '84+ Pick', pickResults: PICK_RESULTS, status: 'stopped', reason: 'stopped by user',
       itemDisplayName: (item) => item.name, formatPrice: (price) => `${price / 1000}K`,
+      resolveFutbinPlayerId: (item) => item.name === 'Player B' ? 16453 : null,
       scheduleStopCheck: () => 17, cancelStopCheck, isStopping: () => false, celebrate, onClose,
     });
     expect(harness.created.find((element) => element.textContent === 'Player Pick Recap: 84+ Pick')).toBeTruthy();
@@ -103,7 +110,7 @@ describe('Player Pick recap UI', () => {
     expect(harness.created.find((element) => element.textContent === '->CLUB')).toBeTruthy();
     const futbin = harness.created.find((element) => element.tagName === 'a' && element.textContent === 'FUTBIN');
     expect(futbin).toMatchObject({
-      href: 'https://www.futbin.com/players?search=Player%20B',
+      href: 'https://www.futbin.com/26/player/16453/1',
       target: '_blank',
       rel: 'noopener noreferrer',
     });

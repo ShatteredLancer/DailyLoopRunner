@@ -4,9 +4,11 @@ const BASE_BACKGROUND = '#171B21';
 const DEFAULT_FOREGROUND = '#F4F6F8';
 const DEFAULT_MUTED = '#AAB4C2';
 
-export function createFutbinPlayerSearchUrl(name) {
-  const query = String(name || '').trim();
-  return query ? `https://www.futbin.com/players?search=${encodeURIComponent(query)}` : null;
+export function createFutbinPlayerUrl(futbinPlayerId, season = 26) {
+  const id = Number(futbinPlayerId);
+  const year = Number(season);
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(year) || year < 20 || year > 99) return null;
+  return `https://www.futbin.com/${year}/player/${id}/1`;
 }
 
 export const RECAP_TIER_COLORS = Object.freeze({
@@ -155,7 +157,7 @@ export function resolveRecapCardTheme(card = {}, nativeTheme = null) {
 export function createRecapModel(input = {}) {
   const rows = (input.rows || []).map((row, index) => Object.freeze({
     ...row,
-    futbinUrl: row.futbinUrl || createFutbinPlayerSearchUrl(row.name),
+    futbinUrl: row.futbinUrl || createFutbinPlayerUrl(row.futbinPlayerId, input.futbinSeason),
     order: Number(row.order ?? index),
   }));
   rows.sort((a, b) =>
