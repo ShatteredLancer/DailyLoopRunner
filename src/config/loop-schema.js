@@ -27,8 +27,12 @@ function validateStringArray(value, path, errors, required = false) {
     if (required) errors.push(`${path} is required`);
     return;
   }
-  if (!Array.isArray(value) || !value.length) {
+  if (!Array.isArray(value)) {
     errors.push(`${path} must be a non-empty array`);
+    return;
+  }
+  if (!value.length) {
+    if (required) errors.push(`${path} must be a non-empty array`);
     return;
   }
   value.forEach((entry, index) => {

@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.21`
-- Git 基线：`main` FUTBIN recap resilience
+- Userscript 版本：`0.6.22`
+- Git 基线：`main` optional pack aliases
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -26,6 +26,8 @@
 `0.6.20` 发布记录：精确 FUTBIN card ID 解析从“特殊卡缺失映射”扩大到所有 recap 球员卡。Runner 仍然优先使用 FSU 已确认映射；其余卡片按相同原始 EA 元数据查询，并且只有 `resource_id === definitionId` 时才缓存和显示直达链接。相同 definition ID 在单次 recap 只查询一次，后续 recap 直接读取缓存。
 
 `0.6.21` 发布记录：缺失 FUTBIN 查询元数据的已开包卡不再中断 recap。空或不完整的查询上下文会安全降级为“该卡不显示链接”，其余卡照常解析、缓存和展示；Batch Open、普通 Loop 与 Player Pick 的 recap 继续显示。
+
+`0.6.22` 发布记录：Loop Builder 或旧 Profile 将未填写的可选奖励包别名保存为 `[]` 时，Runner 将其视为未配置，不再阻止 Loop 启动；必填的 SBC 名称、步骤和材料列表仍保持非空校验。
 
 ## 1. 重构目标
 
@@ -562,6 +564,7 @@ Status: In Progress
 
 当前进度（2026-07-27）：
 
+- `0.6.22` 修复空的可选 `rewardPackNames` 阻断 84x10 启动：配置校验允许可选字符串列表为空，等同未设置；必填列表仍拒绝空值。完整 release gate 通过 92 个测试文件、576 个测试、206 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.21` 修复 recap FUTBIN 解析的空元数据路径：缓存 key 和 URL 构造均接受 `null` 上下文并安全返回空结果，避免单张未完整 materialize 的开包卡阻断整个 recap。完整 release gate 通过 92 个测试文件、575 个测试、206 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.20` FUTBIN 精确解析覆盖普通金和特殊卡：FSU 缓存缺失的 recap 卡都可按 EA 元数据补齐并缓存；同一张重复卡仅查一次。链接依然只在精确 `resource_id` 匹配时显示，不回退姓名搜索。完整 release gate 通过 92 个测试文件、574 个测试、206 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.19` 特殊卡 FUTBIN 直达链接补齐精确解析与 Runner 本地缓存：缺失 FSU 映射时仅以原始 EA 元数据筛选 FUTBIN，并以 `resource_id === definitionId` 作为唯一接受条件；无精确匹配、元数据不足或请求失败都隐藏链接。该功能仅在 recap 生成前读取公开 FUTBIN 数据，不读取 EA Cookie，也不改变开包、选卡、SBC 或 Unassigned 路径。完整 release gate 通过 92 个测试文件、574 个测试、206 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。

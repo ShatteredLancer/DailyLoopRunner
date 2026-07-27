@@ -52,6 +52,19 @@ describe('loop configuration schema', () => {
       .toThrow('Custom loop JSON validation failed:\n- name is required\n- steps must be a non-empty array');
   });
 
+  it('treats an empty optional reward pack alias list as omitted', () => {
+    const loop = {
+      id: '84x10',
+      name: '84x10 Loop',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['10x 84+ Upgrade'],
+      rewardPackNames: [],
+    };
+    expect(validateLoopDef(loop)).toEqual([]);
+    expect(() => assertValidLoopDef(loop, loop.name)).not.toThrow();
+    expect(validateLoopDef({ ...loop, sbcNames: [] })).toContain('sbcNames must be a non-empty array');
+  });
+
   it('preserves list reference and duplicate-id validation', () => {
     expect(() => validateLoopDefList([validLoop(), validLoop()], 'loops'))
       .toThrow('loops has duplicate id: daily-sequence');
