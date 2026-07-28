@@ -234,6 +234,8 @@ describe('loop configuration contracts', () => {
     });
     expect(rare).toMatchObject({
       strategy: 'supplyAndCraft',
+      sourcePackIds: [20060],
+      rewardPackIds: [20059],
       deferChallengeLoad: true,
       preSelectionCleanup: false,
       priorityPiles: ['unassigned', 'storage', 'transfer'],
@@ -243,6 +245,7 @@ describe('loop configuration contracts', () => {
       expect.objectContaining({
         repeatUntilSatisfied: true,
         routingPolicy: 'reserveMatchingDuplicates',
+        packIds: [20060],
         packNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
         requirement: expect.objectContaining({ rarity: 'common', protectHighGold: true }),
       }),
@@ -251,6 +254,7 @@ describe('loop configuration contracts', () => {
       tier: 'gold', rarity: 'rare', count: 6, protectHighGold: true,
     });
     expect(rarePack).toMatchObject({
+      sourcePackIds: [20059],
       maxPacks: 100,
       maxCompletions: 1,
       useRoundsAsCompletions: true,

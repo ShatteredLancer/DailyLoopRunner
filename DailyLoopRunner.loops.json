@@ -756,9 +756,15 @@
         "11x Gold Players Pack",
         "11 x Gold Players Pack"
       ],
+      "sourcePackIds": [
+        20060
+      ],
       "rewardPackNames": [
         "Max. 78 Rare Gold Players Pack",
         "Max 78 Rare Gold Players Pack"
+      ],
+      "rewardPackIds": [
+        20059
       ],
       "requirements": [
         {
@@ -800,6 +806,9 @@
           "packNames": [
             "11x Gold Players Pack",
             "11 x Gold Players Pack"
+          ],
+          "packIds": [
+            20060
           ],
           "maxOpensPerAttempt": 1,
           "repeatUntilSatisfied": true,
@@ -825,9 +834,15 @@
         "11x Gold Players Pack",
         "11 x Gold Players Pack"
       ],
+      "sourcePackIds": [
+        20060
+      ],
       "rewardPackNames": [
         "Max. 78 Rare Gold Players Pack",
         "Max 78 Rare Gold Players Pack"
+      ],
+      "rewardPackIds": [
+        20059
       ],
       "requirements": [
         {
@@ -870,6 +885,9 @@
             "11x Gold Players Pack",
             "11 x Gold Players Pack"
           ],
+          "packIds": [
+            20060
+          ],
           "maxOpensPerAttempt": 1,
           "repeatUntilSatisfied": true,
           "maxRuns": 100,
@@ -883,6 +901,9 @@
       "id": "daily-rare-pack-84",
       "name": "Daily Rare Pack to 2x84+ Loop",
       "strategy": "rarePackTo84Upgrade",
+      "sourcePackIds": [
+        20059
+      ],
       "sourcePackNames": [
         "5x Max.78 Rare Gold Players Pack",
         "5x Max. 78 Rare Gold Players Pack",

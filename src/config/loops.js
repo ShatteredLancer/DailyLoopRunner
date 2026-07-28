@@ -120,7 +120,9 @@ export const LOOP_DEFS = [
     name: 'Daily Rare Loop',
     strategy: 'supplyAndCraft',
     sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
+    sourcePackIds: [20060],
     sourcePackNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
+    rewardPackIds: [20059],
     rewardPackNames: ['Max. 78 Rare Gold Players Pack', 'Max 78 Rare Gold Players Pack'],
     requirements: [
       { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer'] },
@@ -132,6 +134,7 @@ export const LOOP_DEFS = [
     shortagePacks: [
       {
         requirement: { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false, protectHighGold: true },
+        packIds: [20060],
         packNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
         maxOpensPerAttempt: 1,
         repeatUntilSatisfied: true,
@@ -149,7 +152,9 @@ export const LOOP_DEFS = [
     name: 'Daily Rare MVP (1 run)',
     strategy: 'supplyAndCraft',
     sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
+    sourcePackIds: [20060],
     sourcePackNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
+    rewardPackIds: [20059],
     rewardPackNames: ['Max. 78 Rare Gold Players Pack', 'Max 78 Rare Gold Players Pack'],
     requirements: [
       { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer'] },
@@ -161,6 +166,7 @@ export const LOOP_DEFS = [
     shortagePacks: [
       {
         requirement: { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false, protectHighGold: true },
+        packIds: [20060],
         packNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
         maxOpensPerAttempt: 1,
         repeatUntilSatisfied: true,
@@ -175,6 +181,7 @@ export const LOOP_DEFS = [
     id: 'daily-rare-pack-84',
     name: 'Daily Rare Pack to 2x84+ Loop',
     strategy: 'rarePackTo84Upgrade',
+    sourcePackIds: [20059],
     sourcePackNames: [
       '5x Max.78 Rare Gold Players Pack',
       '5x Max. 78 Rare Gold Players Pack',

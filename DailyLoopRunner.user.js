@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.23
+// @version      0.6.24
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -195,7 +195,9 @@
       name: "Daily Rare Loop",
       strategy: "supplyAndCraft",
       sbcNames: ["Daily Rare Gold Upgrade", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7D1A"],
+      sourcePackIds: [20060],
       sourcePackNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
+      rewardPackIds: [20059],
       rewardPackNames: ["Max. 78 Rare Gold Players Pack", "Max 78 Rare Gold Players Pack"],
       requirements: [
         { tier: "gold", rarity: "common", count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer"] }
@@ -207,6 +209,7 @@
       shortagePacks: [
         {
           requirement: { tier: "gold", rarity: "common", playerOnly: true, allowSpecial: false, protectHighGold: true },
+          packIds: [20060],
           packNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
           maxOpensPerAttempt: 1,
           repeatUntilSatisfied: true,
@@ -224,7 +227,9 @@
       name: "Daily Rare MVP (1 run)",
       strategy: "supplyAndCraft",
       sbcNames: ["Daily Rare Gold Upgrade", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7D1A"],
+      sourcePackIds: [20060],
       sourcePackNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
+      rewardPackIds: [20059],
       rewardPackNames: ["Max. 78 Rare Gold Players Pack", "Max 78 Rare Gold Players Pack"],
       requirements: [
         { tier: "gold", rarity: "common", count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer"] }
@@ -236,6 +241,7 @@
       shortagePacks: [
         {
           requirement: { tier: "gold", rarity: "common", playerOnly: true, allowSpecial: false, protectHighGold: true },
+          packIds: [20060],
           packNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
           maxOpensPerAttempt: 1,
           repeatUntilSatisfied: true,
@@ -250,6 +256,7 @@
       id: "daily-rare-pack-84",
       name: "Daily Rare Pack to 2x84+ Loop",
       strategy: "rarePackTo84Upgrade",
+      sourcePackIds: [20059],
       sourcePackNames: [
         "5x Max.78 Rare Gold Players Pack",
         "5x Max. 78 Rare Gold Players Pack",
@@ -8282,6 +8289,43 @@
     return { code, discarded: shouldDiscardFailedPack(code), storeRefreshed };
   }
 
+  // src/pack/source-lookup.js
+  async function findPackWithRecovery(options = {}) {
+    if (typeof options.findCached !== "function") throw new TypeError("findCached is required");
+    const label = String(options.label || "Pack lookup");
+    const attempts = Math.max(1, Math.min(10, Number(options.attempts || 3) || 3));
+    const delayMs = Math.max(0, Number(options.delayMs || 0) || 0);
+    const log = typeof options.log === "function" ? options.log : () => {
+    };
+    let storeFallbackTried = false;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        await options.refresh?.({ attempt, attempts });
+      } catch (error) {
+        if (attempt === attempts) log(`${label}: final repository refresh failed: ${error?.message || error}`);
+      }
+      let pack = options.findCached();
+      if (pack) return pack;
+      const shouldTryStore = options.openStoreFallback !== false && !storeFallbackTried && (attempt === attempts || attempt >= Math.max(2, Math.ceil(attempts / 2)));
+      if (shouldTryStore) {
+        storeFallbackTried = true;
+        try {
+          const openedStore = await options.openStorePacks?.({ attempt, attempts }) === true;
+          if (openedStore) {
+            pack = options.findCached();
+            if (pack) return pack;
+          }
+        } catch (error) {
+          log(`${label}: Store Packs fallback skipped: ${error?.message || error}`);
+        }
+      }
+      await options.onWait?.({ attempt, attempts, storeFallbackTried });
+      if (attempt < attempts && delayMs) await options.sleep?.(delayMs);
+    }
+    await options.onExhausted?.({ attempts, storeFallbackTried });
+    return null;
+  }
+
   // src/pack/stale-pack-tracker.js
   function createStalePackTracker() {
     const objectRefs = /* @__PURE__ */ new WeakSet();
@@ -14464,7 +14508,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.23",
+      version: "0.6.24",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -18919,14 +18963,57 @@
       }
       return false;
     }
-    async function findSourcePack(loopDef) {
-      await refreshStorePacks();
+    function findSourcePackInCache(loopDef) {
       let pack = null;
       if (loopDef.sourcePackIds?.length) {
         pack = loopDef.sourcePackIds.map((id) => findPackById(id)).find(Boolean);
       }
       if (!pack && loopDef.sourcePackNames?.length) pack = findPackByName(loopDef.sourcePackNames);
       return pack || null;
+    }
+    function sourcePackExpectation(loopDef) {
+      const ids = (loopDef.sourcePackIds || []).map(packIdKey).filter(Boolean);
+      const names = (loopDef.sourcePackNames || []).map((name) => String(name || "").trim()).filter(Boolean);
+      return [
+        ids.length ? `IDs:${ids.join("/")}` : "",
+        names.length ? `names:${names.join(" / ")}` : ""
+      ].filter(Boolean).join("; ") || "no configured identity";
+    }
+    const warnedSourcePackIdentityMismatches = /* @__PURE__ */ new Set();
+    function warnSourcePackIdentityMismatch(loopDef, pack, label) {
+      const ids = new Set((loopDef.sourcePackIds || []).map(packIdKey).filter(Boolean));
+      const names = (loopDef.sourcePackNames || []).filter(Boolean);
+      const id = packIdKey(pack);
+      const name = packName(pack);
+      if (!id || !ids.has(id) || !names.length || matchesAny(name, names)) return;
+      const warningKey = `${id}:${name}`;
+      if (warnedSourcePackIdentityMismatches.has(warningKey)) return;
+      warnedSourcePackIdentityMismatches.add(warningKey);
+      log(`${label}: pack #${id} matched a configured source ID, but its name "${name || "?"}" did not match configured aliases; accepting the configured ID and retaining name fallback for future pack IDs`);
+    }
+    async function findSourcePack(loopDef, options = {}) {
+      const label = String(options.label || `${loopDef.name}: source pack lookup`);
+      const pack = await findPackWithRecovery({
+        label,
+        attempts: options.attempts || 3,
+        delayMs: options.delayMs ?? 900,
+        openStoreFallback: options.openStoreFallback !== false,
+        refresh: () => refreshStorePacks(),
+        findCached: () => findSourcePackInCache(loopDef),
+        openStorePacks: () => openStorePacksViewForRefresh(label),
+        sleep,
+        log,
+        onWait: ({ attempt, attempts }) => {
+          if (options.logWait === true || attempt === attempts) {
+            log(`${label}: waiting for ${sourcePackExpectation(loopDef)} (${attempt}/${attempts}); current packs: ${summarizePacks() || "none"}`);
+          }
+        },
+        onExhausted: ({ attempts }) => {
+          log(`${label}: confirmed unavailable after ${attempts} refresh attempt(s); expected ${sourcePackExpectation(loopDef)}; current packs: ${summarizePacks() || "none"}`);
+        }
+      });
+      if (pack) warnSourcePackIdentityMismatch(loopDef, pack, label);
+      return pack;
     }
     async function submitConfiguredSbc(loopDef, options = {}) {
       const selection = options.selection || null;
@@ -20056,14 +20143,19 @@
       let preserveUnassigned = false;
       while (openedCount < maxOpens && getShortageForSource(loopDef, source, primaryPiles) > 0) {
         stopPoint();
-        await refreshStorePacks().catch((e) => log(`${loopDef.name}: ${label} source pack refresh skipped: ${e.message || e}`));
         const shortage = getShortageForSource(loopDef, source, primaryPiles);
-        const availableCount = countShortageSourcePacks(source);
-        const pack = findShortageSourcePack(source);
+        const pack = await findSourcePack({
+          name: `${loopDef.name} ${label} shortage`,
+          sourcePackIds: source?.packIds || [],
+          sourcePackNames: source?.packNames || []
+        }, {
+          label: `${loopDef.name}: ${label} shortage source pack lookup`
+        });
         if (!pack) {
           log(`${loopDef.name}: missing ${shortage} ${label} player(s); no matching source pack available, skipping`);
           break;
         }
+        const availableCount = countShortageSourcePacks(source);
         log(`${loopDef.name}: missing ${shortage} ${label} player(s); opening ${packName(pack)} (#${packIdKey(pack) || "?"}, available:${availableCount || "?"})`);
         const receipt = await openPack(pack, `${loopDef.name} ${label} shortage`, {
           allowGone: true,
@@ -20810,7 +20902,7 @@
             }
             return { status: "ready" };
           },
-          findPack: async () => findSourcePack(loopDef),
+          findPack: async () => findSourcePack(loopDef, { openStoreFallback: !dryRun }),
           openPack: async ({ result: current, pack }) => {
             log(`${loopDef.name}: ${dryRun ? "dry-run would open" : `round ${current.packsOpened + 1}/${rounds} opening`} ${packName(pack)} (#${pack.id})`);
             if (dryRun) return { status: "planned", reason: `would open ${packName(pack)}` };
@@ -20921,7 +21013,7 @@
           if (!dryRun) await resolveRuntimeUnassigned(`${loopDef.name} pre-open cleanup`);
           return { status: "ready" };
         },
-        findPack: async () => findSourcePack(loopDef),
+        findPack: async () => findSourcePack(loopDef, { openStoreFallback: !dryRun }),
         openPack: async ({ result: current, pack }) => {
           const packProgress = consumeAllSourcePacks ? `source pack ${current.packsOpened + 1}` : `${current.packsOpened + 1}/${maxPacks}`;
           log(`${loopDef.name}: ${dryRun ? "dry-run would open" : "opening"} ${packName(pack)} (#${pack.id}) ${packProgress}`);

@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.23
+// @version      0.6.24
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -161,6 +161,7 @@ import {
 import { createPackInstanceQueue } from './pack/instance-queue.js';
 import { settleOpenedItems } from './pack/opened-item-settlement.js';
 import { recoverPackOpenRetry } from './pack/retry-recovery.js';
+import { findPackWithRecovery } from './pack/source-lookup.js';
 import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import { planBackgroundSubmitRetry } from './sbc/background-submit-retry.js';
@@ -280,7 +281,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.23',
+    version: '0.6.24',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -5308,14 +5309,61 @@ function updateLoopControls() {
     return false;
   }
 
-  async function findSourcePack(loopDef) {
-    await refreshStorePacks();
+  function findSourcePackInCache(loopDef) {
     let pack = null;
     if (loopDef.sourcePackIds?.length) {
       pack = loopDef.sourcePackIds.map((id) => findPackById(id)).find(Boolean);
     }
     if (!pack && loopDef.sourcePackNames?.length) pack = findPackByName(loopDef.sourcePackNames);
     return pack || null;
+  }
+
+  function sourcePackExpectation(loopDef) {
+    const ids = (loopDef.sourcePackIds || []).map(packIdKey).filter(Boolean);
+    const names = (loopDef.sourcePackNames || []).map((name) => String(name || '').trim()).filter(Boolean);
+    return [
+      ids.length ? `IDs:${ids.join('/')}` : '',
+      names.length ? `names:${names.join(' / ')}` : '',
+    ].filter(Boolean).join('; ') || 'no configured identity';
+  }
+
+  const warnedSourcePackIdentityMismatches = new Set();
+
+  function warnSourcePackIdentityMismatch(loopDef, pack, label) {
+    const ids = new Set((loopDef.sourcePackIds || []).map(packIdKey).filter(Boolean));
+    const names = (loopDef.sourcePackNames || []).filter(Boolean);
+    const id = packIdKey(pack);
+    const name = packName(pack);
+    if (!id || !ids.has(id) || !names.length || matchesAny(name, names)) return;
+    const warningKey = `${id}:${name}`;
+    if (warnedSourcePackIdentityMismatches.has(warningKey)) return;
+    warnedSourcePackIdentityMismatches.add(warningKey);
+    log(`${label}: pack #${id} matched a configured source ID, but its name "${name || '?'}" did not match configured aliases; accepting the configured ID and retaining name fallback for future pack IDs`);
+  }
+
+  async function findSourcePack(loopDef, options = {}) {
+    const label = String(options.label || `${loopDef.name}: source pack lookup`);
+    const pack = await findPackWithRecovery({
+      label,
+      attempts: options.attempts || 3,
+      delayMs: options.delayMs ?? 900,
+      openStoreFallback: options.openStoreFallback !== false,
+      refresh: () => refreshStorePacks(),
+      findCached: () => findSourcePackInCache(loopDef),
+      openStorePacks: () => openStorePacksViewForRefresh(label),
+      sleep,
+      log,
+      onWait: ({ attempt, attempts }) => {
+        if (options.logWait === true || attempt === attempts) {
+          log(`${label}: waiting for ${sourcePackExpectation(loopDef)} (${attempt}/${attempts}); current packs: ${summarizePacks() || 'none'}`);
+        }
+      },
+      onExhausted: ({ attempts }) => {
+        log(`${label}: confirmed unavailable after ${attempts} refresh attempt(s); expected ${sourcePackExpectation(loopDef)}; current packs: ${summarizePacks() || 'none'}`);
+      },
+    });
+    if (pack) warnSourcePackIdentityMismatch(loopDef, pack, label);
+    return pack;
   }
 
   async function submitConfiguredSbc(loopDef, options = {}) {
@@ -6569,14 +6617,19 @@ function updateLoopControls() {
 
     while (openedCount < maxOpens && getShortageForSource(loopDef, source, primaryPiles) > 0) {
       stopPoint();
-      await refreshStorePacks().catch((e) => log(`${loopDef.name}: ${label} source pack refresh skipped: ${e.message || e}`));
       const shortage = getShortageForSource(loopDef, source, primaryPiles);
-      const availableCount = countShortageSourcePacks(source);
-      const pack = findShortageSourcePack(source);
+      const pack = await findSourcePack({
+        name: `${loopDef.name} ${label} shortage`,
+        sourcePackIds: source?.packIds || [],
+        sourcePackNames: source?.packNames || [],
+      }, {
+        label: `${loopDef.name}: ${label} shortage source pack lookup`,
+      });
       if (!pack) {
         log(`${loopDef.name}: missing ${shortage} ${label} player(s); no matching source pack available, skipping`);
         break;
       }
+      const availableCount = countShortageSourcePacks(source);
 
       log(`${loopDef.name}: missing ${shortage} ${label} player(s); opening ${packName(pack)} (#${packIdKey(pack) || '?'}, available:${availableCount || '?'})`);
       const receipt = await openPack(pack, `${loopDef.name} ${label} shortage`, {
@@ -7418,7 +7471,7 @@ function updateLoopControls() {
           }
           return { status: 'ready' };
         },
-        findPack: async () => findSourcePack(loopDef),
+        findPack: async () => findSourcePack(loopDef, { openStoreFallback: !dryRun }),
         openPack: async ({ result: current, pack }) => {
           log(`${loopDef.name}: ${dryRun ? 'dry-run would open' : `round ${current.packsOpened + 1}/${rounds} opening`} ${packName(pack)} (#${pack.id})`);
           if (dryRun) return { status: 'planned', reason: `would open ${packName(pack)}` };
@@ -7535,7 +7588,7 @@ function updateLoopControls() {
         if (!dryRun) await resolveRuntimeUnassigned(`${loopDef.name} pre-open cleanup`);
         return { status: 'ready' };
       },
-      findPack: async () => findSourcePack(loopDef),
+      findPack: async () => findSourcePack(loopDef, { openStoreFallback: !dryRun }),
       openPack: async ({ result: current, pack }) => {
         const packProgress = consumeAllSourcePacks
           ? `source pack ${current.packsOpened + 1}`
