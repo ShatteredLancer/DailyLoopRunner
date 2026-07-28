@@ -80,6 +80,31 @@ describe('Builder editor model', () => {
     expect(renamed.config.loops[2].sourceExhaustedFallbackLoopId).toBe('renamed-child');
   });
 
+  it('tracks and renames source reward references at Loop and shortage-source level', () => {
+    const input = config();
+    input.loops.push({
+      id: 'source-owner',
+      name: 'Source owner',
+      strategy: 'supplyAndCraft',
+      sbcNames: ['Owner SBC'],
+      requirements: [{ tier: 'gold', count: 1 }],
+      sourcePackRef: { rewardOfLoopId: 'child' },
+      shortagePacks: [{
+        requirement: { tier: 'gold' },
+        sourcePackRef: { rewardOfLoopId: 'child' },
+      }],
+    });
+    expect(findBuilderReferences(input, 'child')).toEqual([
+      { type: 'workflow-step', ownerId: 'flow', index: 0 },
+      { type: 'source-pack-reward', ownerId: 'source-owner', path: 'sourcePackRef.rewardOfLoopId' },
+      { type: 'shortage-pack-reward', ownerId: 'source-owner', path: 'shortagePacks.0.sourcePackRef.rewardOfLoopId' },
+    ]);
+    const renamed = renameBuilderLoopId(input, 'child', 'renamed-child');
+    const owner = renamed.config.loops.find((loop) => loop.id === 'source-owner');
+    expect(owner.sourcePackRef.rewardOfLoopId).toBe('renamed-child');
+    expect(owner.shortagePacks[0].sourcePackRef.rewardOfLoopId).toBe('renamed-child');
+  });
+
   it('reports references before delete and creates private Step Variants', () => {
     expect(findBuilderReferences(config(), 'child')).toEqual([
       { type: 'workflow-step', ownerId: 'flow', index: 0 },

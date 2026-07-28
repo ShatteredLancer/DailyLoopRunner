@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.6.24`
+当前版本：`0.6.25`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -25,7 +25,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。主面板标题显示 `Loop Runner v0.6.24`，日志出现 `Ready v0.6.24` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。主面板标题显示 `Loop Runner v0.6.25`，日志出现 `Ready v0.6.25` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
 FSU 不再显示前台 Club loading 时，可能正在后台校验，也可能已进入快速缓存状态。Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 
@@ -83,6 +83,7 @@ Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的
 - 数量输入：只对声明 `runtimeQuantity.mode: "user"` 的 Loop 显示，标签和默认值由该 Loop 定义。不限次 Player Pick、Daily Rare Pack to 2x84+、2x84+ Fodder、84+ TOTW 等表示目标完成数；Provision 显示 `Provision packs`；Validation 显示 `Validation runs`。One-click Daily、其内部 Daily 阶段、限次 Player Pick 和 84x10 不显示该输入。
 - `Refresh caches`：刷新当前可用的 Packs、Unassigned、Storage、Transfer 和 Club 缓存。
 - `SBC scan`：选择 `Scan SBCs` 的读取模式。`Incremental scan` 先刷新轻量 Set/Category 索引，逐个比较 SBC 结构指纹并复用 24 小时内未变化的 Challenge 快照；`Full rescan` 忽略 Challenge 快照并重新读取所有当前候选；`Clear cache + scan` 先删除当前账号的 Dynamic SBC 缓存，再执行一次全量扫描。三种模式都只读，不提交 SBC、不领取奖励；扫描完成后下拉菜单自动恢复为 Incremental。
+- `Pack Catalog`：启动扫描会同时读取当前 My Packs 的实时 ID、名称和数量，并从全部已加载 SBC Set 的 PACK reward 元数据建立 `Loop -> SBC Set -> Reward Pack` 会话索引。来源包按“动态 Reward ID、动态 Reward 名称、兼容 ID、兼容名称”顺序解析；My Packs 数量不写入持久缓存，每次刷新都覆盖旧快照。Catalog 不替代延迟可见重试、Store Packs 页面刷新或静态 fallback。
 - `Profile`：在 `Built-in`、`Default`、`Bronze/Silver Inventory Only`、`Daily + Rare Pack to 2x84+` 和用户 Profile 之间切换。主面板只加载 Profile 的 Saved/last-known-good；Builder 中尚未保存的 Draft 不会进入运行时。`Bronze/Silver Inventory Only` 只让 Daily Bronze、Daily Silver、Daily Common 等使用铜银材料的 Loop 从库存完成，其余可配置 Workflow/Loop 强制保持正常模式；它不同于主面板 `Inventory only` 的全局运行时默认值。`Daily + Rare Pack to 2x84+` 在四步 One-click Daily 后追加 Rare Gold 来源包处理。
 - `Open Builder`：打开全屏可视化 Workflow/Loop Builder。普通编辑不再要求手写 JSON。
 
@@ -95,6 +96,7 @@ Builder 把配置分为 Draft、Saved 和 Active 三个状态。字段修改会�
 - 内置 Workflow、Loop 和 Recovery 对象默认只读。使用 `Override` 创建覆盖，`Reset` 恢复当前版本内置值，或 `Duplicate` 创建独立自定义对象。
 - Workflow 用有序 step 列表引用原子 Loop。step 只直接保存 `loopId`、显示名称和 `rewardFlow`；需要单次参数差异时使用 Step Variant，避免改变其它引用同一 Loop 的 Workflow。
 - Dynamic SBCs 页读取本次 `Scan SBCs` 的安全扫描结果。绑定记录 Set/Reward 稳定身份；刷新或重登后找不到当前 SBC 时，该 Profile 阻止激活并回退内置配置。磁盘缓存只能减少 Challenge 读取，不能绕过当前会话的 Set/Category 指纹验证。
+- 来源包可在 Loop 或 shortage source 中选择 `Source reward Loop`。Builder 保存为 `sourcePackRef.rewardOfLoopId`，重命名和删除检查会同步维护该引用；目标必须是带 `sbcSetIds` 或 `sbcNames` 的 SBC Loop。旧 `sourcePackIds/sourcePackNames` 继续作为兼容 fallback，便于分阶段迁移现有 Profile。
 - Recovery 页编辑 recipes、policies 和默认 policy 集；所有引用在保存和激活前统一校验。
 - `Preview` 只显示物化后的 step、strategy、数量、库存和奖励摘要，不执行 Dry Run。`Undo/Redo` 仅修改当前 Profile Draft。
 - JSON 页可以验证并导入旧配置，也可以导出当前物化配置。导入只更新 Draft，必须再次 `Save`/`Activate`；外部顶层格式继续保持 `loops`、`recoveryRecipes`、`unassignedRecoveryPolicies` 和 `defaultUnassignedRecoveryPolicyIds`。

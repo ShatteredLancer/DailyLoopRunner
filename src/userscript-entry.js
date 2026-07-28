@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.24
+// @version      0.6.25
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -162,6 +162,13 @@ import { createPackInstanceQueue } from './pack/instance-queue.js';
 import { settleOpenedItems } from './pack/opened-item-settlement.js';
 import { recoverPackOpenRetry } from './pack/retry-recovery.js';
 import { findPackWithRecovery } from './pack/source-lookup.js';
+import {
+  bindPackCatalogLoops,
+  createPackCatalog,
+  recordObservedSbcReward,
+  resolveSourcePackIdentity,
+  updatePackCatalogInventory,
+} from './pack/catalog.js';
 import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import { planBackgroundSubmitRetry } from './sbc/background-submit-retry.js';
@@ -243,6 +250,7 @@ const state = {
     loopConfigSource: 'built-in',
     stalePackTracker: createStalePackTracker(),
     lastStorePacks: [],
+    packCatalog: createPackCatalog(),
     consumedItemIds: new Set(),
     pendingConsumedDuplicateSignals: new Map(),
     assumedTotwItemIds: new Set(),
@@ -281,10 +289,11 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.24',
+    version: '0.6.25',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
+    getPackCatalog: () => cloneLoopDef(state.packCatalog),
     setFsuSettingsOverride,
     clearFsuSettingsOverride,
     calculateSquadRating: calculateEaSquadRating,
@@ -429,6 +438,7 @@ const state = {
       state.discoveredLoopOverrides = {};
       state.scannedDynamicSbcDefs = [];
     }
+    state.packCatalog = bindPackCatalogLoops(state.packCatalog, getConfiguredLoopDefs());
     renderLoopSelect(state.loopDefs[0]?.id);
     log(`Loaded ${state.loopDefs.length} loop definition(s), ${state.recoveryRecipes.length} recovery recipe(s), and ${state.unassignedRecoveryPolicies.length} recovery policy(s) from ${source}`);
   }
@@ -444,6 +454,7 @@ const state = {
       state.discoveredLoopOverrides = {};
       state.scannedDynamicSbcDefs = [];
     }
+    state.packCatalog = bindPackCatalogLoops(state.packCatalog, getConfiguredLoopDefs());
     renderLoopSelect(LOOP_DEFS[0]?.id);
     log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
   }
@@ -655,6 +666,7 @@ function updateLoopControls() {
       ...collectPackLikeObjects(result),
       ...(state.lastStorePacks || []),
     ]).slice(0, 200);
+    syncPackCatalogInventory();
     return result;
   }
 
@@ -665,6 +677,7 @@ function updateLoopControls() {
       ...(state.lastStorePacks || []),
     ]).slice(0, 300);
     if (packs.length) state.lastStorePacks = packs;
+    syncPackCatalogInventory();
     return packs.length;
   }
 
@@ -943,6 +956,67 @@ function updateLoopControls() {
       groups: Array.from(groups.values())
         .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
     };
+  }
+
+  function syncPackCatalogInventory() {
+    state.packCatalog = updatePackCatalogInventory(
+      state.packCatalog,
+      getPackInventorySnapshot().groups,
+    );
+    return state.packCatalog.inventory;
+  }
+
+  function sourceRewardLoopIds(loopDefs = getConfiguredLoopDefs()) {
+    const ids = new Set();
+    for (const loopDef of loopDefs || []) {
+      const direct = String(loopDef?.sourcePackRef?.rewardOfLoopId || '').trim();
+      if (direct) ids.add(direct);
+      for (const source of loopDef?.shortagePacks || []) {
+        const nested = String(source?.sourcePackRef?.rewardOfLoopId || '').trim();
+        if (nested) ids.add(nested);
+      }
+    }
+    return ids;
+  }
+
+  async function refreshPackCatalogFromSbcIndex(refreshResult) {
+    await refreshStorePacks().catch((error) => {
+      log(`Pack Catalog: My Packs refresh failed; keeping current inventory snapshot (${error?.message || error})`);
+    });
+    const indexes = getSbcSets().map((set) => eaSbcAdapter().snapshotDiscoveryIndex(set, refreshResult));
+    const loopDefs = getConfiguredLoopDefs();
+    state.packCatalog = createPackCatalog({
+      packs: getPackInventorySnapshot().groups,
+      sbcIndexes: indexes,
+      loopDefs,
+      previousCatalog: state.packCatalog,
+    });
+    const rewardSets = state.packCatalog.sbcRewards.filter((entry) => entry.packIds.length || entry.packNames.length);
+    const referencedIds = sourceRewardLoopIds(loopDefs);
+    const resolvedReferences = [...referencedIds].filter((loopId) => {
+      const reward = state.packCatalog.loopRewards?.[loopId];
+      return reward?.packIds?.length || reward?.packNames?.length;
+    });
+    log(`Pack Catalog: ${state.packCatalog.inventory.reduce((total, group) => total + group.count, 0)} current My Packs across ${state.packCatalog.inventory.length} type(s); ${rewardSets.length} SBC Set reward binding(s); ${resolvedReferences.length}/${referencedIds.size} referenced source Loop(s) resolved`);
+    for (const loopId of referencedIds) {
+      const reward = state.packCatalog.loopRewards?.[loopId];
+      if (reward?.packIds?.length || reward?.packNames?.length) continue;
+      log(`Pack Catalog: reward source Loop ${loopId} is not dynamically resolved; configured pack ID/name fallback remains active`);
+    }
+    return state.packCatalog;
+  }
+
+  function recordObservedPackCatalogReward(set, packId) {
+    const id = Number(packId || 0);
+    if (!id) return;
+    const pack = findPackById(id);
+    state.packCatalog = recordObservedSbcReward(state.packCatalog, {
+      setId: Number(set?.id || 0) || null,
+      setName: String(set?.name || ''),
+      packId: id,
+      packName: packName(pack),
+    });
+    state.packCatalog = bindPackCatalogLoops(state.packCatalog, getConfiguredLoopDefs());
   }
 
   function formatPackInventorySnapshot(snapshot = getPackInventorySnapshot()) {
@@ -2189,8 +2263,11 @@ function updateLoopControls() {
 
   async function findValidationSourcePack(loopDef) {
     await refreshStorePacks();
-    return (loopDef.sourcePackIds || CFG.sourcePackIds).map((id) => findPackById(id)).find(Boolean) ||
-      findPackByName(loopDef.sourcePackNames || CFG.sourcePackNames) || null;
+    return findSourcePackInCache({
+      ...loopDef,
+      sourcePackIds: loopDef.sourcePackIds || CFG.sourcePackIds,
+      sourcePackNames: loopDef.sourcePackNames || CFG.sourcePackNames,
+    });
   }
 
   async function openSourceBronzePack(loopDef, selectedPack = null) {
@@ -2605,6 +2682,7 @@ function updateLoopControls() {
         log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join('; ')}`);
       }
     }
+    await refreshPackCatalogFromSbcIndex(summary.refreshResult);
     const requestedSelection = document.querySelector('#bronze-loop-select')?.value || pickSession.selectedId;
     const selectedId = getLoopDefs().some((loopDef) => loopDef.id === requestedSelection)
       ? requestedSelection
@@ -5055,6 +5133,7 @@ function updateLoopControls() {
       });
       rewardPackId = Number(packIdKey(newPack)) || null;
     }
+    recordObservedPackCatalogReward(set, rewardPackId);
 
     // Capture the reward before leaving the submitted squad, then unwind every SBC
     // submission path before a reward pack is opened or another challenge is loaded.
@@ -5143,6 +5222,7 @@ function updateLoopControls() {
             });
             rewardPackId = Number(packIdKey(newPack)) || null;
           }
+          recordObservedPackCatalogReward(set, rewardPackId);
           log(`${label}: background submit complete; reward pack ${rewardPackId || 'unknown'}`);
           return rewardPackId;
         }
@@ -5207,11 +5287,8 @@ function updateLoopControls() {
     if (!pack && loopDef.rewardPackIds?.length) {
       pack = loopDef.rewardPackIds.map((id) => findPackById(id)).find(Boolean);
     }
-    if (!pack && loopDef.sourcePackIds?.length) {
-      pack = loopDef.sourcePackIds.map((id) => findPackById(id)).find(Boolean);
-    }
+    if (!pack) pack = findSourcePackInCache(loopDef);
     if (!pack && loopDef.rewardPackNames?.length) pack = findPackByName(loopDef.rewardPackNames);
-    if (!pack && loopDef.sourcePackNames?.length) pack = findPackByName(loopDef.sourcePackNames);
     return pack || null;
   }
 
@@ -5309,36 +5386,50 @@ function updateLoopControls() {
     return false;
   }
 
+  function resolvedSourcePackIdentity(loopDef = {}) {
+    return resolveSourcePackIdentity({
+      sourcePackRef: loopDef.sourcePackRef,
+      sourcePackIds: loopDef.sourcePackIds,
+      sourcePackNames: loopDef.sourcePackNames,
+      catalog: state.packCatalog,
+    });
+  }
+
   function findSourcePackInCache(loopDef) {
-    let pack = null;
-    if (loopDef.sourcePackIds?.length) {
-      pack = loopDef.sourcePackIds.map((id) => findPackById(id)).find(Boolean);
+    const identity = resolvedSourcePackIdentity(loopDef);
+    for (const candidate of identity.candidates) {
+      const pack = candidate.type === 'id'
+        ? findPackById(candidate.value)
+        : findPackByName([candidate.value]);
+      if (pack) return pack;
     }
-    if (!pack && loopDef.sourcePackNames?.length) pack = findPackByName(loopDef.sourcePackNames);
-    return pack || null;
+    return null;
   }
 
   function sourcePackExpectation(loopDef) {
-    const ids = (loopDef.sourcePackIds || []).map(packIdKey).filter(Boolean);
-    const names = (loopDef.sourcePackNames || []).map((name) => String(name || '').trim()).filter(Boolean);
+    const identity = resolvedSourcePackIdentity(loopDef);
     return [
-      ids.length ? `IDs:${ids.join('/')}` : '',
-      names.length ? `names:${names.join(' / ')}` : '',
+      identity.rewardOfLoopId ? `reward of Loop:${identity.rewardOfLoopId}${identity.dynamicResolved ? '' : ' (unresolved)'}` : '',
+      identity.dynamicPackIds.length ? `dynamic IDs:${identity.dynamicPackIds.join('/')}` : '',
+      identity.dynamicPackNames.length ? `dynamic names:${identity.dynamicPackNames.join(' / ')}` : '',
+      identity.staticPackIds.length ? `fallback IDs:${identity.staticPackIds.join('/')}` : '',
+      identity.staticPackNames.length ? `fallback names:${identity.staticPackNames.join(' / ')}` : '',
     ].filter(Boolean).join('; ') || 'no configured identity';
   }
 
   const warnedSourcePackIdentityMismatches = new Set();
 
   function warnSourcePackIdentityMismatch(loopDef, pack, label) {
-    const ids = new Set((loopDef.sourcePackIds || []).map(packIdKey).filter(Boolean));
-    const names = (loopDef.sourcePackNames || []).filter(Boolean);
+    const identity = resolvedSourcePackIdentity(loopDef);
+    const ids = new Set(identity.packIds.map(packIdKey).filter(Boolean));
+    const names = identity.packNames;
     const id = packIdKey(pack);
     const name = packName(pack);
     if (!id || !ids.has(id) || !names.length || matchesAny(name, names)) return;
     const warningKey = `${id}:${name}`;
     if (warnedSourcePackIdentityMismatches.has(warningKey)) return;
     warnedSourcePackIdentityMismatches.add(warningKey);
-    log(`${label}: pack #${id} matched a configured source ID, but its name "${name || '?'}" did not match configured aliases; accepting the configured ID and retaining name fallback for future pack IDs`);
+    log(`${label}: pack #${id} matched a resolved source ID, but its name "${name || '?'}" did not match Catalog or fallback aliases; accepting the ID and retaining name fallback for future pack IDs`);
   }
 
   async function findSourcePack(loopDef, options = {}) {
@@ -6503,10 +6594,11 @@ function updateLoopControls() {
   }
 
   function findShortageSourcePack(source) {
-    let pack = null;
-    if (source?.packIds?.length) pack = source.packIds.map((id) => findPackById(id)).find(Boolean);
-    if (!pack && source?.packNames?.length) pack = findPackByName(source.packNames);
-    return pack || null;
+    return findSourcePackInCache({
+      sourcePackRef: source?.sourcePackRef,
+      sourcePackIds: source?.packIds || [],
+      sourcePackNames: source?.packNames || [],
+    });
   }
 
   function shortageSourceLabel(source) {
@@ -6514,10 +6606,15 @@ function updateLoopControls() {
   }
 
   function countShortageSourcePacks(source) {
-    const ids = new Set((source?.packIds || []).map(packIdKey).filter(Boolean));
+    const identity = resolvedSourcePackIdentity({
+      sourcePackRef: source?.sourcePackRef,
+      sourcePackIds: source?.packIds || [],
+      sourcePackNames: source?.packNames || [],
+    });
+    const ids = new Set(identity.packIds.map(packIdKey).filter(Boolean));
     return getAvailableRepositoryMyPacks().filter((pack) =>
       (ids.size && ids.has(packIdKey(pack))) ||
-      (source?.packNames?.length && matchesAny(packName(pack), source.packNames))
+      (identity.packNames.length && matchesAny(packName(pack), identity.packNames))
     ).length;
   }
 
@@ -6620,6 +6717,7 @@ function updateLoopControls() {
       const shortage = getShortageForSource(loopDef, source, primaryPiles);
       const pack = await findSourcePack({
         name: `${loopDef.name} ${label} shortage`,
+        sourcePackRef: source?.sourcePackRef,
         sourcePackIds: source?.packIds || [],
         sourcePackNames: source?.packNames || [],
       }, {
@@ -6671,6 +6769,7 @@ function updateLoopControls() {
       : loopDef.strategy === 'commonGoldToRareUpgrade'
         ? [{
             requirement: { ...(loopDef.requirements?.[0] || {}) },
+            sourcePackRef: loopDef.sourcePackRef,
             packIds: loopDef.sourcePackIds || [],
             packNames: loopDef.sourcePackNames || [],
             maxOpensPerAttempt: 1,

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.24
+// @version      0.6.25
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -194,6 +194,7 @@
       hidden: true,
       name: "Daily Rare Loop",
       strategy: "supplyAndCraft",
+      sourcePackRef: { rewardOfLoopId: "daily-common" },
       sbcNames: ["Daily Rare Gold Upgrade", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7D1A"],
       sourcePackIds: [20060],
       sourcePackNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
@@ -208,6 +209,7 @@
       preSelectionCleanup: false,
       shortagePacks: [
         {
+          sourcePackRef: { rewardOfLoopId: "daily-common" },
           requirement: { tier: "gold", rarity: "common", playerOnly: true, allowSpecial: false, protectHighGold: true },
           packIds: [20060],
           packNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
@@ -226,6 +228,7 @@
       mvp: true,
       name: "Daily Rare MVP (1 run)",
       strategy: "supplyAndCraft",
+      sourcePackRef: { rewardOfLoopId: "daily-common-mvp" },
       sbcNames: ["Daily Rare Gold Upgrade", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7EA7", "\u6BCF\u65E5\u7A00\u6709\u91D1\u724C\u5347\u7D1A"],
       sourcePackIds: [20060],
       sourcePackNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
@@ -240,6 +243,7 @@
       preSelectionCleanup: false,
       shortagePacks: [
         {
+          sourcePackRef: { rewardOfLoopId: "daily-common-mvp" },
           requirement: { tier: "gold", rarity: "common", playerOnly: true, allowSpecial: false, protectHighGold: true },
           packIds: [20060],
           packNames: ["11x Gold Players Pack", "11 x Gold Players Pack"],
@@ -256,6 +260,7 @@
       id: "daily-rare-pack-84",
       name: "Daily Rare Pack to 2x84+ Loop",
       strategy: "rarePackTo84Upgrade",
+      sourcePackRef: { rewardOfLoopId: "daily-rare" },
       sourcePackIds: [20059],
       sourcePackNames: [
         "5x Max.78 Rare Gold Players Pack",
@@ -1172,6 +1177,15 @@
 
   // src/config/loop-schema.js
   var INVENTORY_PILES = Object.freeze(["unassigned", "storage", "transfer", "club"]);
+  var SOURCE_PACK_REF_STRATEGIES = Object.freeze([
+    "validationBronzeUpgrade",
+    "supplyAndCraft",
+    "inventoryMixedUpgrade",
+    "commonGoldToRareUpgrade",
+    "provisionPackCrafting",
+    "provisionPackDualCrafting",
+    "rarePackTo84Upgrade"
+  ]);
   function fail(message) {
     throw new Error(message);
   }
@@ -1205,6 +1219,23 @@
         errors.push(`${path}[${index}] must be a number`);
       }
     });
+  }
+  function validateSourcePackRef(value, path, errors) {
+    if (value === void 0 || value === null) return;
+    if (!isPlainObject(value)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    const allowedFields = /* @__PURE__ */ new Set(["rewardOfLoopId"]);
+    Object.keys(value).forEach((field2) => {
+      if (!allowedFields.has(field2)) errors.push(`${path}.${field2} is not supported`);
+    });
+    if (typeof value.rewardOfLoopId !== "string" || !value.rewardOfLoopId.trim()) {
+      errors.push(`${path}.rewardOfLoopId is required`);
+    }
+  }
+  function hasSourcePackIdentity(value = {}) {
+    return Boolean(value.sourcePackRef?.rewardOfLoopId || value.sourcePackIds?.length || value.sourcePackNames?.length);
   }
   function validatePileList(value, path, errors, required2 = false) {
     if (value === void 0 || value === null) {
@@ -1303,10 +1334,11 @@
         return;
       }
       validateCardSpec(source.requirement, `${sourcePath}.requirement`, errors);
+      validateSourcePackRef(source.sourcePackRef, `${sourcePath}.sourcePackRef`, errors);
       validateNumberArray(source.packIds, `${sourcePath}.packIds`, errors);
       validateStringArray(source.packNames, `${sourcePath}.packNames`, errors);
-      if (!source.packIds?.length && !source.packNames?.length) {
-        errors.push(`${sourcePath}.packIds or ${sourcePath}.packNames is required`);
+      if (!source.sourcePackRef?.rewardOfLoopId && !source.packIds?.length && !source.packNames?.length) {
+        errors.push(`${sourcePath}.sourcePackRef, ${sourcePath}.packIds, or ${sourcePath}.packNames is required`);
       }
       if (source.maxOpensPerAttempt !== void 0) {
         const maxOpens = Number(source.maxOpensPerAttempt);
@@ -1549,6 +1581,10 @@
     validateNumberArray(loopDef.protectedItemIds, "protectedItemIds", errors);
     validateNumberArray(loopDef.protectedDefinitionIds, "protectedDefinitionIds", errors);
     validateStringArray(loopDef.sourcePackNames, "sourcePackNames", errors);
+    validateSourcePackRef(loopDef.sourcePackRef, "sourcePackRef", errors);
+    if (loopDef.sourcePackRef !== void 0 && !SOURCE_PACK_REF_STRATEGIES.includes(loopDef.strategy)) {
+      errors.push(`sourcePackRef is not supported by strategy ${loopDef.strategy}`);
+    }
     validateStringArray(loopDef.rewardPackNames, "rewardPackNames", errors);
     validatePileList(loopDef.priorityPiles, "priorityPiles", errors);
     validatePileList(loopDef.primaryPiles, "primaryPiles", errors);
@@ -1605,8 +1641,8 @@
       }
     }
     if (loopDef.strategy === "provisionPackCrafting" || loopDef.strategy === "provisionPackDualCrafting") {
-      if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
-        errors.push("sourcePackIds or sourcePackNames is required");
+      if (!hasSourcePackIdentity(loopDef)) {
+        errors.push("sourcePackRef, sourcePackIds, or sourcePackNames is required");
       }
       if (loopDef.craftingUpgrades !== void 0) {
         if (!Array.isArray(loopDef.craftingUpgrades) || !loopDef.craftingUpgrades.length) {
@@ -1624,8 +1660,8 @@
       }
     }
     if (loopDef.strategy === "rarePackTo84Upgrade") {
-      if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
-        errors.push("sourcePackIds or sourcePackNames is required");
+      if (!hasSourcePackIdentity(loopDef)) {
+        errors.push("sourcePackRef, sourcePackIds, or sourcePackNames is required");
       }
       validateUpgradeDef(loopDef.rareUpgrade, "rareUpgrade", errors);
       if (loopDef.sourceExhaustedFallbackLoopId !== void 0 && (typeof loopDef.sourceExhaustedFallbackLoopId !== "string" || !loopDef.sourceExhaustedFallbackLoopId.trim())) {
@@ -1704,6 +1740,26 @@
       if (loopDef.id) {
         if (seen.has(loopDef.id)) fail(`${label} has duplicate id: ${loopDef.id}`);
         seen.add(loopDef.id);
+      }
+    });
+    const byId = new Map(loopDefs.map((loopDef) => [loopDef.id, loopDef]));
+    loopDefs.forEach((loopDef, index) => {
+      const references = [
+        { path: `${label}[${index}].sourcePackRef`, value: loopDef.sourcePackRef },
+        ...(loopDef.shortagePacks || []).map((source, sourceIndex) => ({
+          path: `${label}[${index}].shortagePacks[${sourceIndex}].sourcePackRef`,
+          value: source?.sourcePackRef
+        }))
+      ];
+      for (const reference of references) {
+        const targetId = reference.value?.rewardOfLoopId;
+        if (!targetId) continue;
+        if (targetId === loopDef.id) fail(`${reference.path}.rewardOfLoopId cannot reference its own Loop`);
+        const target = byId.get(targetId);
+        if (!target) fail(`${reference.path}.rewardOfLoopId not found: ${targetId}`);
+        if (!target.sbcSetIds?.length && !target.sbcNames?.length) {
+          fail(`${reference.path}.rewardOfLoopId must reference a Loop with sbcSetIds or sbcNames: ${targetId}`);
+        }
       }
     });
     loopDefs.forEach((loopDef, index) => {
@@ -4803,7 +4859,7 @@
         return [];
       }
     }
-    function positiveInteger7(value) {
+    function positiveInteger8(value) {
       const number = Number(value);
       return Number.isInteger(number) && number > 0 ? number : null;
     }
@@ -4814,7 +4870,7 @@
     }
     function firstPositiveInteger(values = []) {
       for (const value of values) {
-        const number = positiveInteger7(value);
+        const number = positiveInteger8(value);
         if (number) return number;
       }
       return null;
@@ -4869,7 +4925,7 @@
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId2 = positiveInteger7(item?.id);
+      const itemId2 = positiveInteger8(item?.id);
       return {
         type: "PLAYER_PICK",
         name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
@@ -5002,9 +5058,9 @@
     function normalizeDiscoveryCategory(category) {
       const setIds = collectionValues3(
         category?.setIds || category?.sets || category?.data?.setIds || category?.data?.sets
-      ).map((entry) => positiveInteger7(entry?.id || entry)).filter(Boolean);
+      ).map((entry) => positiveInteger8(entry?.id || entry)).filter(Boolean);
       return {
-        id: positiveInteger7(category?.id || category?.categoryId || category?.data?.id),
+        id: positiveInteger8(category?.id || category?.categoryId || category?.data?.id),
         name: String(
           category?.name || category?.description || category?.displayName || category?.data?.name || category?.data?.description || ""
         ).trim(),
@@ -5028,12 +5084,12 @@
       return [...byKey.values()];
     }
     function discoveryCategoryMembership(set, refreshResult = null) {
-      const setId = positiveInteger7(set?.id);
+      const setId = positiveInteger8(set?.id);
       const directCategories = collectionValues3(
         set?.categoryIds || set?.categories || set?.data?.categoryIds || set?.data?.categories
-      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger7(entry), name: "", setIds: [] });
+      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger8(entry), name: "", setIds: [] });
       const directIds = directCategories.map((category) => category.id).filter(Boolean);
-      const directCategoryId = positiveInteger7(set?.categoryId || set?.data?.categoryId);
+      const directCategoryId = positiveInteger8(set?.categoryId || set?.data?.categoryId);
       if (directCategoryId) directIds.push(directCategoryId);
       const categories = listDiscoveryCategories(refreshResult);
       const matching = [
@@ -5056,7 +5112,7 @@
         set?.challenges,
         set?._challenges
       ];
-      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger7(entry?.id || entry)).filter(Boolean))];
+      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger8(entry?.id || entry)).filter(Boolean))];
     }
     function discoveryRequiredPlayerCount(challenge) {
       const explicit = firstPositiveInteger([
@@ -5066,13 +5122,13 @@
       ]);
       if (explicit) return explicit;
       try {
-        const squadCount = positiveInteger7(challenge?.squad?.getNumOfRequiredPlayers?.());
+        const squadCount = positiveInteger8(challenge?.squad?.getNumOfRequiredPlayers?.());
         if (squadCount) return squadCount;
       } catch {
       }
       if (!challenge?.squad) return null;
       const challengeFormation = formation(challenge?.formation);
-      const formationCount = positiveInteger7(challengeFormation?.generalPositions?.length);
+      const formationCount = positiveInteger8(challengeFormation?.generalPositions?.length);
       if (!formationCount) return null;
       try {
         const brickCount = challenge.squad.getAllBrickIndices?.()?.length;
@@ -5089,7 +5145,7 @@
     }
     function normalizeDiscoveryChallenge(challenge) {
       return {
-        id: positiveInteger7(challenge?.id),
+        id: positiveInteger8(challenge?.id),
         status: String(challenge?.status || challenge?.state || ""),
         completed: challenge?.completed === true || (() => {
           try {
@@ -5113,7 +5169,7 @@
       const rawAwards = collectionValues3(set?.awards || set?.data?.awards);
       const category = discoveryCategoryMembership(set, refreshResult);
       return {
-        id: positiveInteger7(set?.id),
+        id: positiveInteger8(set?.id),
         name: String(set?.name || set?.data?.name || "").trim(),
         status: String(set?.status || set?.state || ""),
         complete: (() => {
@@ -8326,6 +8382,234 @@
     return null;
   }
 
+  // src/pack/catalog.js
+  function positiveInteger6(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : null;
+  }
+  function unique3(values, normalizer = (value) => value) {
+    const seen = /* @__PURE__ */ new Set();
+    const result = [];
+    for (const value of values || []) {
+      const normalized = normalizer(value);
+      if (normalized === null || normalized === void 0 || normalized === "") continue;
+      const key = String(normalized).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(normalized);
+    }
+    return result;
+  }
+  function cleanName(value) {
+    return String(value || "").trim();
+  }
+  function normalizedName(value) {
+    return cleanName(value).toLowerCase().replace(/\s+/g, " ");
+  }
+  function packIdFromReward(reward = {}) {
+    return positiveInteger6(reward.packId) || positiveInteger6(reward.resourceId) || positiveInteger6(reward.definitionId);
+  }
+  function normalizeInventory(packs = []) {
+    const groups = /* @__PURE__ */ new Map();
+    for (const pack of packs || []) {
+      if (!pack) continue;
+      const id = positiveInteger6(pack.id ?? pack.packId ?? pack.packDefinitionId ?? pack.packAssetId);
+      const name = cleanName(pack.name ?? pack.packName ?? pack.displayName);
+      if (!id && !name) continue;
+      const countValue = Number(pack.count);
+      const count = Number.isInteger(countValue) && countValue >= 0 ? countValue : 1;
+      const key = id ? `id:${id}` : `name:${normalizedName(name)}`;
+      const existing = groups.get(key) || { id, name, count: 0 };
+      existing.count += count;
+      if (!existing.name && name) existing.name = name;
+      groups.set(key, existing);
+    }
+    return [...groups.values()].sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
+  }
+  function normalizeSbcRewardIndex(index = {}, previousEntry = null) {
+    const rewards = (index.rewards || []).filter((reward) => reward?.type === "PACK");
+    const metadataPackIds = unique3([
+      ...index.packIds || [],
+      ...rewards.map(packIdFromReward)
+    ], positiveInteger6);
+    const metadataPackNames = unique3([
+      ...index.packNames || [],
+      ...rewards.flatMap((reward) => [reward?.name, reward?.description])
+    ], cleanName);
+    const observedPackIds = unique3(previousEntry?.observedPackIds || [], positiveInteger6);
+    const observedPackNames = unique3(previousEntry?.observedPackNames || [], cleanName);
+    return {
+      setId: positiveInteger6(index.setId ?? index.id),
+      setName: cleanName(index.setName ?? index.name),
+      packIds: unique3([...observedPackIds, ...metadataPackIds], positiveInteger6),
+      packNames: unique3([...observedPackNames, ...metadataPackNames], cleanName),
+      observedPackIds,
+      observedPackNames
+    };
+  }
+  function sbcRewardKey(entry = {}) {
+    if (entry.setId) return `id:${entry.setId}`;
+    const name = normalizedName(entry.setName);
+    return name ? `name:${name}` : "";
+  }
+  function normalizeSbcRewards(indexes = [], previousCatalog = null) {
+    const previousByKey = new Map((previousCatalog?.sbcRewards || []).map((entry) => [sbcRewardKey(entry), entry]));
+    const rewards = /* @__PURE__ */ new Map();
+    for (const index of indexes || []) {
+      const candidate = normalizeSbcRewardIndex(index);
+      const key = sbcRewardKey(candidate);
+      if (!key) continue;
+      const entry = normalizeSbcRewardIndex(index, previousByKey.get(key));
+      rewards.set(key, entry);
+    }
+    return [...rewards.values()].sort((left, right) => Number(left.setId || Number.MAX_SAFE_INTEGER) - Number(right.setId || Number.MAX_SAFE_INTEGER) || left.setName.localeCompare(right.setName));
+  }
+  function setNameMatches(setName, aliases = []) {
+    const actual = normalizedName(setName);
+    if (!actual) return false;
+    return (aliases || []).some((alias) => {
+      const expected = normalizedName(alias);
+      return expected && actual.includes(expected);
+    });
+  }
+  function matchLoopRewardSets(loopDef = {}, sbcRewards = []) {
+    const setIds = new Set((loopDef.sbcSetIds || []).map(positiveInteger6).filter(Boolean));
+    if (setIds.size) {
+      const idMatches = sbcRewards.filter((entry) => setIds.has(entry.setId));
+      if (idMatches.length) return { matches: idMatches, matchSource: "set-id", ambiguous: false };
+    }
+    const names = (loopDef.sbcNames || []).map(cleanName).filter(Boolean);
+    if (!names.length) return { matches: [], matchSource: null, ambiguous: false };
+    const nameMatches = sbcRewards.filter((entry) => setNameMatches(entry.setName, names));
+    if (nameMatches.length === 1) return { matches: nameMatches, matchSource: "set-name", ambiguous: false };
+    return { matches: [], matchSource: "set-name", ambiguous: nameMatches.length > 1, candidates: nameMatches };
+  }
+  function bindPackCatalogLoops(catalog = {}, loopDefs = [], now = Date.now()) {
+    const sbcRewards = Array.isArray(catalog.sbcRewards) ? catalog.sbcRewards : [];
+    const loopRewards = {};
+    const diagnostics = [];
+    for (const loopDef of loopDefs || []) {
+      const loopId = cleanName(loopDef?.id);
+      const hasSbcIdentity = Boolean(loopDef?.sbcSetIds?.length || loopDef?.sbcNames?.length);
+      if (!loopId || !hasSbcIdentity) continue;
+      const match = matchLoopRewardSets(loopDef, sbcRewards);
+      if (match.ambiguous) {
+        diagnostics.push({
+          type: "ambiguous-loop-sbc",
+          loopId,
+          message: `${loopId}: SBC aliases matched multiple Sets (${(match.candidates || []).map((entry) => `#${entry.setId || "?"} ${entry.setName}`).join(", ")})`
+        });
+        continue;
+      }
+      if (!match.matches.length) {
+        diagnostics.push({
+          type: "loop-sbc-not-found",
+          loopId,
+          message: `${loopId}: no current SBC Set matched its configured Set IDs or names`
+        });
+        continue;
+      }
+      const packIds = unique3(match.matches.flatMap((entry) => entry.packIds || []), positiveInteger6);
+      const packNames = unique3(match.matches.flatMap((entry) => entry.packNames || []), cleanName);
+      loopRewards[loopId] = {
+        loopId,
+        setIds: unique3(match.matches.map((entry) => entry.setId), positiveInteger6),
+        setNames: unique3(match.matches.map((entry) => entry.setName), cleanName),
+        packIds,
+        packNames,
+        matchSource: match.matchSource
+      };
+      if (!packIds.length && !packNames.length) {
+        diagnostics.push({
+          type: "loop-reward-not-found",
+          loopId,
+          message: `${loopId}: matched SBC Set has no PACK reward metadata`
+        });
+      }
+    }
+    return {
+      updatedAt: Number(now) || Date.now(),
+      inventory: normalizeInventory(catalog.inventory || []),
+      sbcRewards,
+      loopRewards,
+      diagnostics
+    };
+  }
+  function createPackCatalog(options = {}) {
+    const now = Number(options.now ?? Date.now()) || Date.now();
+    const catalog = {
+      updatedAt: now,
+      inventory: normalizeInventory(options.packs || []),
+      sbcRewards: normalizeSbcRewards(options.sbcIndexes || [], options.previousCatalog),
+      loopRewards: {},
+      diagnostics: []
+    };
+    return bindPackCatalogLoops(catalog, options.loopDefs || [], now);
+  }
+  function updatePackCatalogInventory(catalog = {}, packs = [], now = Date.now()) {
+    return {
+      ...catalog,
+      updatedAt: Number(now) || Date.now(),
+      inventory: normalizeInventory(packs)
+    };
+  }
+  function resolveSourcePackIdentity(options = {}) {
+    const sourcePackRef = isPlainObject(options.sourcePackRef) ? options.sourcePackRef : {};
+    const rewardOfLoopId = cleanName(sourcePackRef.rewardOfLoopId);
+    const dynamic = rewardOfLoopId ? options.catalog?.loopRewards?.[rewardOfLoopId] : null;
+    const dynamicPackIds = unique3(dynamic?.packIds || [], positiveInteger6);
+    const dynamicPackNames = unique3(dynamic?.packNames || [], cleanName);
+    const staticPackIds = unique3(options.sourcePackIds || [], positiveInteger6);
+    const staticPackNames = unique3(options.sourcePackNames || [], cleanName);
+    const candidates = [
+      ...dynamicPackIds.map((value) => ({ type: "id", value, source: "catalog" })),
+      ...dynamicPackNames.map((value) => ({ type: "name", value, source: "catalog" })),
+      ...staticPackIds.map((value) => ({ type: "id", value, source: "fallback" })),
+      ...staticPackNames.map((value) => ({ type: "name", value, source: "fallback" }))
+    ];
+    return {
+      rewardOfLoopId: rewardOfLoopId || null,
+      dynamicResolved: dynamicPackIds.length > 0 || dynamicPackNames.length > 0,
+      dynamicPackIds,
+      dynamicPackNames,
+      staticPackIds,
+      staticPackNames,
+      packIds: unique3([...dynamicPackIds, ...staticPackIds], positiveInteger6),
+      packNames: unique3([...dynamicPackNames, ...staticPackNames], cleanName),
+      candidates
+    };
+  }
+  function recordObservedSbcReward(catalog = {}, observation = {}, now = Date.now()) {
+    const setId = positiveInteger6(observation.setId);
+    const setName = cleanName(observation.setName);
+    const key = setId ? `id:${setId}` : setName ? `name:${normalizedName(setName)}` : "";
+    if (!key) return catalog;
+    const packId2 = positiveInteger6(observation.packId);
+    const packName = cleanName(observation.packName);
+    if (!packId2 && !packName) return catalog;
+    const entries = new Map((catalog.sbcRewards || []).map((entry) => [sbcRewardKey(entry), { ...entry }]));
+    const current = entries.get(key) || {
+      setId,
+      setName,
+      packIds: [],
+      packNames: [],
+      observedPackIds: [],
+      observedPackNames: []
+    };
+    current.setId ||= setId;
+    current.setName ||= setName;
+    current.observedPackIds = unique3([packId2, ...current.observedPackIds || []], positiveInteger6);
+    current.observedPackNames = unique3([packName, ...current.observedPackNames || []], cleanName);
+    current.packIds = unique3([...current.observedPackIds, ...current.packIds || []], positiveInteger6);
+    current.packNames = unique3([...current.observedPackNames, ...current.packNames || []], cleanName);
+    entries.set(key, current);
+    return {
+      ...catalog,
+      updatedAt: Number(now) || Date.now(),
+      sbcRewards: [...entries.values()]
+    };
+  }
+
   // src/pack/stale-pack-tracker.js
   function createStalePackTracker() {
     const objectRefs = /* @__PURE__ */ new WeakSet();
@@ -8474,7 +8758,7 @@
   }
 
   // src/workflows/supply-and-craft.js
-  function positiveInteger6(value, fallback = 1, max = 1e3) {
+  function positiveInteger7(value, fallback = 1, max = 1e3) {
     const number = Number(value);
     return Math.max(1, Math.min(max, Number.isFinite(number) ? Math.floor(number) : fallback));
   }
@@ -8485,7 +8769,7 @@
     if (typeof options.challengeProvider !== "function") throw new TypeError("challengeProvider is required");
     if (typeof options.selectPrimary !== "function") throw new TypeError("selectPrimary is required");
     if (typeof options.submit !== "function") throw new TypeError("submit is required");
-    const maxCompletions = positiveInteger6(options.maxCompletions, 1);
+    const maxCompletions = positiveInteger7(options.maxCompletions, 1);
     const result = {
       status: "completed",
       completions: 0,
@@ -8514,7 +8798,7 @@
       let supplied = false;
       if (!selection?.ok && !preserveSupply) {
         for (const supply of options.supplies || []) {
-          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger6(supply.maxRuns, 100, 1e3) : 1;
+          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger7(supply.maxRuns, 100, 1e3) : 1;
           for (let run = 1; run <= maxRuns && !selection?.ok && !preserveSupply; run++) {
             await options.stopPoint?.();
             const supplyResult = await supply.provide({
@@ -11306,6 +11590,14 @@
       if (String(loop.preCraftPlayerPickLoopId || "") === String(id)) {
         references.push({ type: "pre-craft-pick", ownerId: loop.id, path: "preCraftPlayerPickLoopId" });
       }
+      if (String(loop.sourcePackRef?.rewardOfLoopId || "") === String(id)) {
+        references.push({ type: "source-pack-reward", ownerId: loop.id, path: "sourcePackRef.rewardOfLoopId" });
+      }
+      (loop.shortagePacks || []).forEach((source, index) => {
+        if (String(source?.sourcePackRef?.rewardOfLoopId || "") === String(id)) {
+          references.push({ type: "shortage-pack-reward", ownerId: loop.id, path: `shortagePacks.${index}.sourcePackRef.rewardOfLoopId` });
+        }
+      });
     }
     return references;
   }
@@ -11335,6 +11627,10 @@
       });
       if (loop.sourceExhaustedFallbackLoopId === oldId) loop.sourceExhaustedFallbackLoopId = nextId;
       if (loop.preCraftPlayerPickLoopId === oldId) loop.preCraftPlayerPickLoopId = nextId;
+      if (loop.sourcePackRef?.rewardOfLoopId === oldId) loop.sourcePackRef.rewardOfLoopId = nextId;
+      for (const source of loop.shortagePacks || []) {
+        if (source?.sourcePackRef?.rewardOfLoopId === oldId) source.sourcePackRef.rewardOfLoopId = nextId;
+      }
       if (isPlainObject(loop.stepOverrides) && Object.hasOwn(loop.stepOverrides, oldId)) {
         loop.stepOverrides[nextId] = loop.stepOverrides[oldId];
         delete loop.stepOverrides[oldId];
@@ -11493,14 +11789,24 @@
     const result = clone4(object);
     const parts = Array.isArray(path) ? path : String(path).split(".").filter(Boolean);
     let target = result;
+    const parents = [];
     for (let index = 0; index < parts.length - 1; index++) {
       const key = parts[index];
       if (!isPlainObject(target[key]) && !Array.isArray(target[key])) target[key] = {};
+      parents.push({ target, key });
       target = target[key];
     }
     const finalKey = parts.at(-1);
     if (value === void 0) delete target[finalKey];
     else target[finalKey] = clone4(value);
+    if (value === void 0) {
+      for (let index = parents.length - 1; index >= 0; index--) {
+        const parent = parents[index];
+        const child = parent.target[parent.key];
+        if (!isPlainObject(child) || Object.keys(child).length) break;
+        delete parent.target[parent.key];
+      }
+    }
     return result;
   }
 
@@ -11542,6 +11848,7 @@
   var BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
     validationBronzeUpgrade: descriptor("validationBronzeUpgrade", "Validation recycle", [
       { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
+      { path: "sourcePackRef", label: "Source reward Loop", type: "source-pack-ref" },
       { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
       { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
       { path: "rewardPackIds", label: "Reward pack IDs", type: "number-list" },
@@ -11560,6 +11867,7 @@
     supplyAndCraft: descriptor("supplyAndCraft", "Supply and craft", [
       { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
       { path: "requirements", label: "Requirements", type: "requirements", required: true },
+      { path: "sourcePackRef", label: "Source reward Loop", type: "source-pack-ref" },
       { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
       { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
       { path: "priorityPiles", label: "Default pile order", type: "pile-list" },
@@ -11576,6 +11884,7 @@
     inventoryMixedUpgrade: descriptor("inventoryMixedUpgrade", "Inventory mixed upgrade", [
       { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
       { path: "requirements", label: "Requirements", type: "requirements", required: true },
+      { path: "sourcePackRef", label: "Source reward Loop", type: "source-pack-ref" },
       { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
       { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
       { path: "priorityPiles", label: "Pile order", type: "pile-list" },
@@ -11587,6 +11896,7 @@
     commonGoldToRareUpgrade: descriptor("commonGoldToRareUpgrade", "Common Gold upgrade", [
       { path: "sbcNames", label: "SBC aliases", type: "string-list", required: true },
       { path: "requirements", label: "Requirements", type: "requirements", required: true },
+      { path: "sourcePackRef", label: "Source reward Loop", type: "source-pack-ref" },
       { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
       { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
       { path: "priorityPiles", label: "Pile order", type: "pile-list" },
@@ -11597,6 +11907,7 @@
       { path: "maxCompletions", label: "Maximum completions", type: "integer" }
     ]),
     provisionPackCrafting: descriptor("provisionPackCrafting", "Provision crafting", [
+      { path: "sourcePackRef", label: "Source reward Loop", type: "source-pack-ref" },
       { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
       { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
       { path: "preCraftPlayerPickLoopId", label: "Pre-craft Pick Loop", type: "pick-loop-reference" },
@@ -11605,6 +11916,7 @@
       { path: "rounds", label: "Provision packs", type: "integer" }
     ]),
     provisionPackDualCrafting: descriptor("provisionPackDualCrafting", "Dual provision crafting", [
+      { path: "sourcePackRef", label: "Source reward Loop", type: "source-pack-ref" },
       { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
       { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
       { path: "preCraftPlayerPickLoopId", label: "Pre-craft Pick Loop", type: "pick-loop-reference" },
@@ -11613,6 +11925,7 @@
       { path: "rounds", label: "Provision packs", type: "integer" }
     ]),
     rarePackTo84Upgrade: descriptor("rarePackTo84Upgrade", "Pack to upgrade", [
+      { path: "sourcePackRef", label: "Source reward Loop", type: "source-pack-ref" },
       { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
       { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
       { path: "rareUpgrade", label: "Upgrade", type: "upgrade", required: true },
@@ -11785,6 +12098,14 @@
     ${rows || '<div class="dlr-builder-empty">No entries</div>'}
   </section>`;
   }
+  function renderSourcePackRef(path, label, value = {}, context) {
+    return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3><div class="dlr-builder-form-grid">
+    ${fieldRow("Reward produced by Loop", selectInput(`${path}.rewardOfLoopId`, value?.rewardOfLoopId, [
+      { value: "", label: "Use pack ID/name fallback only" },
+      ...context.rewardSourceLoops.map((loop) => ({ value: loop.id, label: `${loop.name} (${loop.id})` }))
+    ], context.readOnly))}
+  </div></section>`;
+  }
   function renderPileList(path, label, values, context) {
     const piles = Array.isArray(values) ? values : [];
     const rows = piles.map((pile, index) => `<div class="dlr-builder-pile-row">
@@ -11925,6 +12246,12 @@
     ${(values || []).map((source, index) => `<div class="dlr-builder-subsection">
       <div class="dlr-builder-section-head"><h4>Source ${index + 1}</h4><button data-builder-action="remove-list" data-path="${escapeHtml(path)}" data-index="${index}"${disabled(context.readOnly)}>Remove</button></div>
       ${renderCardSpec(`${path}.${index}.requirement`, source.requirement, context, { withCount: false })}
+      <div class="dlr-builder-form-grid">
+        ${fieldRow("Reward produced by Loop", selectInput(`${path}.${index}.sourcePackRef.rewardOfLoopId`, source.sourcePackRef?.rewardOfLoopId, [
+      { value: "", label: "Use pack ID/name fallback only" },
+      ...context.rewardSourceLoops.map((loop) => ({ value: loop.id, label: `${loop.name} (${loop.id})` }))
+    ], context.readOnly))}
+      </div>
       ${renderList(`${path}.${index}.packIds`, "Pack IDs", source.packIds, "number", context)}
       ${renderList(`${path}.${index}.packNames`, "Pack aliases", source.packNames, "text", context)}
       <div class="dlr-builder-form-grid">
@@ -12041,6 +12368,8 @@
         return renderUpgradeList(field2.path, field2.label, value, context, true);
       case "shortage-packs":
         return renderShortagePacks(field2.path, field2.label, value, context);
+      case "source-pack-ref":
+        return renderSourcePackRef(field2.path, field2.label, value, context);
       case "rating-fill":
         return renderRatingFill(field2.path, value, context);
       case "auto-totw-upgrade":
@@ -12365,6 +12694,7 @@
       allLoops: model.config.loops,
       atomicLoops: model.config.loops.filter((loop) => !["dailyRoutine", "workflowRoutine"].includes(loop.strategy)),
       playerPickLoops: model.config.loops.filter((loop) => loop.strategy === "playerPickSbc"),
+      rewardSourceLoops: model.config.loops.filter((loop) => (loop.sbcSetIds?.length || loop.sbcNames?.length) && String(loop.id) !== String(model.selectedObject?.id)),
       selectedStep: model.selectedStep,
       recoveryRecipes: model.config.recoveryRecipes,
       defaultRecoveryPolicyIds: model.config.defaultUnassignedRecoveryPolicyIds || []
@@ -14472,6 +14802,7 @@
       loopConfigSource: "built-in",
       stalePackTracker: createStalePackTracker(),
       lastStorePacks: [],
+      packCatalog: createPackCatalog(),
       consumedItemIds: /* @__PURE__ */ new Set(),
       pendingConsumedDuplicateSignals: /* @__PURE__ */ new Map(),
       assumedTotwItemIds: /* @__PURE__ */ new Set(),
@@ -14508,10 +14839,11 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.24",
+      version: "0.6.25",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
+      getPackCatalog: () => cloneLoopDef(state.packCatalog),
       setFsuSettingsOverride,
       clearFsuSettingsOverride,
       calculateSquadRating: calculateEaSquadRating,
@@ -14638,6 +14970,7 @@
         state.discoveredLoopOverrides = {};
         state.scannedDynamicSbcDefs = [];
       }
+      state.packCatalog = bindPackCatalogLoops(state.packCatalog, getConfiguredLoopDefs());
       renderLoopSelect(state.loopDefs[0]?.id);
       log(`Loaded ${state.loopDefs.length} loop definition(s), ${state.recoveryRecipes.length} recovery recipe(s), and ${state.unassignedRecoveryPolicies.length} recovery policy(s) from ${source}`);
     }
@@ -14652,6 +14985,7 @@
         state.discoveredLoopOverrides = {};
         state.scannedDynamicSbcDefs = [];
       }
+      state.packCatalog = bindPackCatalogLoops(state.packCatalog, getConfiguredLoopDefs());
       renderLoopSelect(LOOP_DEFS[0]?.id);
       log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
     }
@@ -14825,6 +15159,7 @@
         ...collectPackLikeObjects(result),
         ...state.lastStorePacks || []
       ]).slice(0, 200);
+      syncPackCatalogInventory();
       return result;
     }
     function mergeStorePacksFromController(controller = ctrl()) {
@@ -14834,6 +15169,7 @@
         ...state.lastStorePacks || []
       ]).slice(0, 300);
       if (packs.length) state.lastStorePacks = packs;
+      syncPackCatalogInventory();
       return packs.length;
     }
     async function openStorePacksViewForRefresh(label = "reward pack lookup") {
@@ -15068,6 +15404,63 @@
         total: instances.length,
         groups: Array.from(groups.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
       };
+    }
+    function syncPackCatalogInventory() {
+      state.packCatalog = updatePackCatalogInventory(
+        state.packCatalog,
+        getPackInventorySnapshot().groups
+      );
+      return state.packCatalog.inventory;
+    }
+    function sourceRewardLoopIds(loopDefs = getConfiguredLoopDefs()) {
+      const ids = /* @__PURE__ */ new Set();
+      for (const loopDef of loopDefs || []) {
+        const direct = String(loopDef?.sourcePackRef?.rewardOfLoopId || "").trim();
+        if (direct) ids.add(direct);
+        for (const source of loopDef?.shortagePacks || []) {
+          const nested = String(source?.sourcePackRef?.rewardOfLoopId || "").trim();
+          if (nested) ids.add(nested);
+        }
+      }
+      return ids;
+    }
+    async function refreshPackCatalogFromSbcIndex(refreshResult) {
+      await refreshStorePacks().catch((error) => {
+        log(`Pack Catalog: My Packs refresh failed; keeping current inventory snapshot (${error?.message || error})`);
+      });
+      const indexes = getSbcSets().map((set) => eaSbcAdapter().snapshotDiscoveryIndex(set, refreshResult));
+      const loopDefs = getConfiguredLoopDefs();
+      state.packCatalog = createPackCatalog({
+        packs: getPackInventorySnapshot().groups,
+        sbcIndexes: indexes,
+        loopDefs,
+        previousCatalog: state.packCatalog
+      });
+      const rewardSets = state.packCatalog.sbcRewards.filter((entry) => entry.packIds.length || entry.packNames.length);
+      const referencedIds = sourceRewardLoopIds(loopDefs);
+      const resolvedReferences = [...referencedIds].filter((loopId) => {
+        const reward = state.packCatalog.loopRewards?.[loopId];
+        return reward?.packIds?.length || reward?.packNames?.length;
+      });
+      log(`Pack Catalog: ${state.packCatalog.inventory.reduce((total, group) => total + group.count, 0)} current My Packs across ${state.packCatalog.inventory.length} type(s); ${rewardSets.length} SBC Set reward binding(s); ${resolvedReferences.length}/${referencedIds.size} referenced source Loop(s) resolved`);
+      for (const loopId of referencedIds) {
+        const reward = state.packCatalog.loopRewards?.[loopId];
+        if (reward?.packIds?.length || reward?.packNames?.length) continue;
+        log(`Pack Catalog: reward source Loop ${loopId} is not dynamically resolved; configured pack ID/name fallback remains active`);
+      }
+      return state.packCatalog;
+    }
+    function recordObservedPackCatalogReward(set, packId2) {
+      const id = Number(packId2 || 0);
+      if (!id) return;
+      const pack = findPackById(id);
+      state.packCatalog = recordObservedSbcReward(state.packCatalog, {
+        setId: Number(set?.id || 0) || null,
+        setName: String(set?.name || ""),
+        packId: id,
+        packName: packName(pack)
+      });
+      state.packCatalog = bindPackCatalogLoops(state.packCatalog, getConfiguredLoopDefs());
     }
     function formatPackInventorySnapshot(snapshot = getPackInventorySnapshot()) {
       return (snapshot?.groups || []).map((group) => `${group.name} (#${group.id || "?"}) x${group.count}`).join(", ");
@@ -16223,7 +16616,11 @@
     }
     async function findValidationSourcePack(loopDef) {
       await refreshStorePacks();
-      return (loopDef.sourcePackIds || CFG.sourcePackIds).map((id) => findPackById(id)).find(Boolean) || findPackByName(loopDef.sourcePackNames || CFG.sourcePackNames) || null;
+      return findSourcePackInCache({
+        ...loopDef,
+        sourcePackIds: loopDef.sourcePackIds || CFG.sourcePackIds,
+        sourcePackNames: loopDef.sourcePackNames || CFG.sourcePackNames
+      });
     }
     async function openSourceBronzePack(loopDef, selectedPack = null) {
       const pack = selectedPack || await findValidationSourcePack(loopDef);
@@ -16602,6 +16999,7 @@
           log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join("; ")}`);
         }
       }
+      await refreshPackCatalogFromSbcIndex(summary.refreshResult);
       const requestedSelection = document.querySelector("#bronze-loop-select")?.value || pickSession.selectedId;
       const selectedId = getLoopDefs().some((loopDef) => loopDef.id === requestedSelection) ? requestedSelection : getLoopDefs()[0]?.id;
       renderLoopSelect(selectedId);
@@ -18728,6 +19126,7 @@
         });
         rewardPackId = Number(packIdKey(newPack)) || null;
       }
+      recordObservedPackCatalogReward(set, rewardPackId);
       await syncAfterSbcSubmit(set?.name || "SBC submit");
       return rewardPackId;
     }
@@ -18813,6 +19212,7 @@
               });
               rewardPackId = Number(packIdKey(newPack)) || null;
             }
+            recordObservedPackCatalogReward(set, rewardPackId);
             log(`${label}: background submit complete; reward pack ${rewardPackId || "unknown"}`);
             return rewardPackId;
           }
@@ -18872,11 +19272,8 @@
       if (!pack && loopDef.rewardPackIds?.length) {
         pack = loopDef.rewardPackIds.map((id) => findPackById(id)).find(Boolean);
       }
-      if (!pack && loopDef.sourcePackIds?.length) {
-        pack = loopDef.sourcePackIds.map((id) => findPackById(id)).find(Boolean);
-      }
+      if (!pack) pack = findSourcePackInCache(loopDef);
       if (!pack && loopDef.rewardPackNames?.length) pack = findPackByName(loopDef.rewardPackNames);
-      if (!pack && loopDef.sourcePackNames?.length) pack = findPackByName(loopDef.sourcePackNames);
       return pack || null;
     }
     function findRewardPackInCache(loopDef, explicitPackId = null, options = {}) {
@@ -18963,33 +19360,44 @@
       }
       return false;
     }
+    function resolvedSourcePackIdentity(loopDef = {}) {
+      return resolveSourcePackIdentity({
+        sourcePackRef: loopDef.sourcePackRef,
+        sourcePackIds: loopDef.sourcePackIds,
+        sourcePackNames: loopDef.sourcePackNames,
+        catalog: state.packCatalog
+      });
+    }
     function findSourcePackInCache(loopDef) {
-      let pack = null;
-      if (loopDef.sourcePackIds?.length) {
-        pack = loopDef.sourcePackIds.map((id) => findPackById(id)).find(Boolean);
+      const identity = resolvedSourcePackIdentity(loopDef);
+      for (const candidate of identity.candidates) {
+        const pack = candidate.type === "id" ? findPackById(candidate.value) : findPackByName([candidate.value]);
+        if (pack) return pack;
       }
-      if (!pack && loopDef.sourcePackNames?.length) pack = findPackByName(loopDef.sourcePackNames);
-      return pack || null;
+      return null;
     }
     function sourcePackExpectation(loopDef) {
-      const ids = (loopDef.sourcePackIds || []).map(packIdKey).filter(Boolean);
-      const names = (loopDef.sourcePackNames || []).map((name) => String(name || "").trim()).filter(Boolean);
+      const identity = resolvedSourcePackIdentity(loopDef);
       return [
-        ids.length ? `IDs:${ids.join("/")}` : "",
-        names.length ? `names:${names.join(" / ")}` : ""
+        identity.rewardOfLoopId ? `reward of Loop:${identity.rewardOfLoopId}${identity.dynamicResolved ? "" : " (unresolved)"}` : "",
+        identity.dynamicPackIds.length ? `dynamic IDs:${identity.dynamicPackIds.join("/")}` : "",
+        identity.dynamicPackNames.length ? `dynamic names:${identity.dynamicPackNames.join(" / ")}` : "",
+        identity.staticPackIds.length ? `fallback IDs:${identity.staticPackIds.join("/")}` : "",
+        identity.staticPackNames.length ? `fallback names:${identity.staticPackNames.join(" / ")}` : ""
       ].filter(Boolean).join("; ") || "no configured identity";
     }
     const warnedSourcePackIdentityMismatches = /* @__PURE__ */ new Set();
     function warnSourcePackIdentityMismatch(loopDef, pack, label) {
-      const ids = new Set((loopDef.sourcePackIds || []).map(packIdKey).filter(Boolean));
-      const names = (loopDef.sourcePackNames || []).filter(Boolean);
+      const identity = resolvedSourcePackIdentity(loopDef);
+      const ids = new Set(identity.packIds.map(packIdKey).filter(Boolean));
+      const names = identity.packNames;
       const id = packIdKey(pack);
       const name = packName(pack);
       if (!id || !ids.has(id) || !names.length || matchesAny(name, names)) return;
       const warningKey = `${id}:${name}`;
       if (warnedSourcePackIdentityMismatches.has(warningKey)) return;
       warnedSourcePackIdentityMismatches.add(warningKey);
-      log(`${label}: pack #${id} matched a configured source ID, but its name "${name || "?"}" did not match configured aliases; accepting the configured ID and retaining name fallback for future pack IDs`);
+      log(`${label}: pack #${id} matched a resolved source ID, but its name "${name || "?"}" did not match Catalog or fallback aliases; accepting the ID and retaining name fallback for future pack IDs`);
     }
     async function findSourcePack(loopDef, options = {}) {
       const label = String(options.label || `${loopDef.name}: source pack lookup`);
@@ -20041,18 +20449,24 @@
       }, 0);
     }
     function findShortageSourcePack(source) {
-      let pack = null;
-      if (source?.packIds?.length) pack = source.packIds.map((id) => findPackById(id)).find(Boolean);
-      if (!pack && source?.packNames?.length) pack = findPackByName(source.packNames);
-      return pack || null;
+      return findSourcePackInCache({
+        sourcePackRef: source?.sourcePackRef,
+        sourcePackIds: source?.packIds || [],
+        sourcePackNames: source?.packNames || []
+      });
     }
     function shortageSourceLabel(source) {
       return source?.requirement?.tier || source?.requirement?.rarity || "material";
     }
     function countShortageSourcePacks(source) {
-      const ids = new Set((source?.packIds || []).map(packIdKey).filter(Boolean));
+      const identity = resolvedSourcePackIdentity({
+        sourcePackRef: source?.sourcePackRef,
+        sourcePackIds: source?.packIds || [],
+        sourcePackNames: source?.packNames || []
+      });
+      const ids = new Set(identity.packIds.map(packIdKey).filter(Boolean));
       return getAvailableRepositoryMyPacks().filter(
-        (pack) => ids.size && ids.has(packIdKey(pack)) || source?.packNames?.length && matchesAny(packName(pack), source.packNames)
+        (pack) => ids.size && ids.has(packIdKey(pack)) || identity.packNames.length && matchesAny(packName(pack), identity.packNames)
       ).length;
     }
     function createMaterializeAndResolvePolicy(label, cleanupReason, cleanupOptions = {}) {
@@ -20146,6 +20560,7 @@
         const shortage = getShortageForSource(loopDef, source, primaryPiles);
         const pack = await findSourcePack({
           name: `${loopDef.name} ${label} shortage`,
+          sourcePackRef: source?.sourcePackRef,
           sourcePackIds: source?.packIds || [],
           sourcePackNames: source?.packNames || []
         }, {
@@ -20186,6 +20601,7 @@
       const inventoryOnly = loopDef.inventoryOnly === true;
       const shortagePacks = inventoryOnly ? [] : loopDef.shortagePacks?.length ? loopDef.shortagePacks : loopDef.strategy === "commonGoldToRareUpgrade" ? [{
         requirement: { ...loopDef.requirements?.[0] || {} },
+        sourcePackRef: loopDef.sourcePackRef,
         packIds: loopDef.sourcePackIds || [],
         packNames: loopDef.sourcePackNames || [],
         maxOpensPerAttempt: 1,

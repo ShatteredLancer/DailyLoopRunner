@@ -97,6 +97,14 @@ export function findBuilderReferences(config, id) {
     if (String(loop.preCraftPlayerPickLoopId || '') === String(id)) {
       references.push({ type: 'pre-craft-pick', ownerId: loop.id, path: 'preCraftPlayerPickLoopId' });
     }
+    if (String(loop.sourcePackRef?.rewardOfLoopId || '') === String(id)) {
+      references.push({ type: 'source-pack-reward', ownerId: loop.id, path: 'sourcePackRef.rewardOfLoopId' });
+    }
+    (loop.shortagePacks || []).forEach((source, index) => {
+      if (String(source?.sourcePackRef?.rewardOfLoopId || '') === String(id)) {
+        references.push({ type: 'shortage-pack-reward', ownerId: loop.id, path: `shortagePacks.${index}.sourcePackRef.rewardOfLoopId` });
+      }
+    });
   }
   return references;
 }
@@ -128,6 +136,10 @@ export function renameBuilderLoopId(config, oldId, requestedId) {
     });
     if (loop.sourceExhaustedFallbackLoopId === oldId) loop.sourceExhaustedFallbackLoopId = nextId;
     if (loop.preCraftPlayerPickLoopId === oldId) loop.preCraftPlayerPickLoopId = nextId;
+    if (loop.sourcePackRef?.rewardOfLoopId === oldId) loop.sourcePackRef.rewardOfLoopId = nextId;
+    for (const source of loop.shortagePacks || []) {
+      if (source?.sourcePackRef?.rewardOfLoopId === oldId) source.sourcePackRef.rewardOfLoopId = nextId;
+    }
     if (isPlainObject(loop.stepOverrides) && Object.hasOwn(loop.stepOverrides, oldId)) {
       loop.stepOverrides[nextId] = loop.stepOverrides[oldId];
       delete loop.stepOverrides[oldId];
@@ -301,13 +313,23 @@ export function setBuilderPath(object, path, value) {
   const result = clone(object);
   const parts = Array.isArray(path) ? path : String(path).split('.').filter(Boolean);
   let target = result;
+  const parents = [];
   for (let index = 0; index < parts.length - 1; index++) {
     const key = parts[index];
     if (!isPlainObject(target[key]) && !Array.isArray(target[key])) target[key] = {};
+    parents.push({ target, key });
     target = target[key];
   }
   const finalKey = parts.at(-1);
   if (value === undefined) delete target[finalKey];
   else target[finalKey] = clone(value);
+  if (value === undefined) {
+    for (let index = parents.length - 1; index >= 0; index--) {
+      const parent = parents[index];
+      const child = parent.target[parent.key];
+      if (!isPlainObject(child) || Object.keys(child).length) break;
+      delete parent.target[parent.key];
+    }
+  }
   return result;
 }

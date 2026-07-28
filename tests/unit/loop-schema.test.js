@@ -34,6 +34,53 @@ describe('loop configuration schema', () => {
     }
   });
 
+  it('validates dynamic source-pack reward references and compatibility fallbacks', () => {
+    const producer = {
+      id: 'producer',
+      name: 'Producer',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['Current SBC'],
+      requirements: [{ tier: 'gold', count: 1 }],
+    };
+    const consumer = {
+      id: 'consumer',
+      name: 'Consumer',
+      strategy: 'rarePackTo84Upgrade',
+      sourcePackRef: { rewardOfLoopId: 'producer' },
+      rareUpgrade: {
+        name: 'Upgrade',
+        sbcNames: ['Upgrade'],
+        requirements: [{ tier: 'gold', count: 1 }],
+      },
+    };
+    const shortageConsumer = {
+      id: 'shortage-consumer',
+      name: 'Shortage consumer',
+      strategy: 'supplyAndCraft',
+      sbcNames: ['Shortage SBC'],
+      requirements: [{ tier: 'gold', count: 1 }],
+      shortagePacks: [{
+        requirement: { tier: 'gold' },
+        sourcePackRef: { rewardOfLoopId: 'producer' },
+      }],
+    };
+
+    expect(validateLoopDef(consumer)).toEqual([]);
+    expect(validateLoopDef(shortageConsumer)).toEqual([]);
+    expect(() => validateLoopDefList([producer, consumer, shortageConsumer])).not.toThrow();
+    expect(() => validateLoopDefList([producer, { ...consumer, sourcePackRef: { rewardOfLoopId: 'missing' } }]))
+      .toThrow(/rewardOfLoopId not found: missing/);
+    expect(() => validateLoopDefList([producer, { ...consumer, sourcePackRef: { rewardOfLoopId: 'consumer' } }]))
+      .toThrow(/cannot reference its own Loop/);
+    expect(validateLoopDef({ ...consumer, sourcePackRef: { rewardOfLoopId: '', extra: true } }))
+      .toEqual(expect.arrayContaining([
+        'sourcePackRef.rewardOfLoopId is required',
+        'sourcePackRef.extra is not supported',
+      ]));
+    expect(validateLoopDef(validLoop({ sourcePackRef: { rewardOfLoopId: 'producer' } })))
+      .toContain('sourcePackRef is not supported by strategy dailyRoutine');
+  });
+
   it('preserves the exact invalid-container and field error messages', () => {
     expect(() => normalizeLoopConfig({})).toThrow(
       'Loop config JSON must be an array or an object with a loops array',

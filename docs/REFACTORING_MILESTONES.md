@@ -4,8 +4,8 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.24`
-- Git 基线：`main` delayed source-pack recovery
+- Userscript 版本：`0.6.25`
+- Git 基线：`main` dynamic Pack Catalog
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
@@ -30,6 +30,8 @@
 `0.6.22` 发布记录：Loop Builder 或旧 Profile 将未填写的可选奖励包别名保存为 `[]` 时，Runner 将其视为未配置，不再阻止 Loop 启动；必填的 SBC 名称、步骤和材料列表仍保持非空校验。
 
 `0.6.24` 发布记录：来源包查找不再以单次 `Store.getPacks` 结果判定耗尽，而是执行有限重试，并在缓存仍为空时进入 Store Packs 强制刷新后再次匹配；最终确认耗尽时记录期望 ID、名称和当前 My Packs 快照。Daily Rare 的 `11x Gold Players Pack` 当前已确认 ID 为 `20060`，其产出的 `5x Max 78 Rare Gold Players Pack` 当前已确认 ID 为 `20059`；ID 不存在时仍回退名称别名。缺料开包和 Rare Pack to 2x84+ 阶段均使用相同恢复路径，避免 SBC 奖励延迟可见时少开或完全跳过来源包。
+
+`0.6.25` 发布记录：新增会话级 Pack Catalog。启动 Dynamic SBC 扫描完成后，Runner 对当前全部 SBC Set 建立轻量 PACK reward 索引，同时刷新 My Packs 的实时 ID、名称和数量；该步骤不扩大 Challenge 读取范围。Loop 新增 `sourcePackRef.rewardOfLoopId`，来源包按动态 Reward ID、动态 Reward 名称、静态兼容 ID、静态兼容名称依次解析。Daily Rare、Daily Rare MVP、对应 shortage source 和 Daily Rare Pack to 2x84+ 已迁移到动态引用，`20060/20059` 继续作为兼容 fallback。Builder 提供 Source reward Loop 下拉框，并在重命名、删除和 schema 校验中维护引用。SBC 实际提交后观测到的 Reward Pack ID 会补充当前会话 Catalog；实时 My Packs 数量不持久化，原有限次重试和 Store Packs 页面恢复保持不变。
 
 `0.6.23` 发布记录：recap 解析 FUTBIN 精确 card ID 前，会先用当前库存中相同实例 ID（再回退相同 definition ID）的完整 EA 球员实体补齐开包回执。这样可复用 FSU 已确认映射，或在其映射尚未写入时使用完整元数据作精确查询；仍只接受 `resource_id === definitionId`，不回退球员名称搜索，也不改动开包、发卡、SBC 或 Unassigned 流程。
 
@@ -568,6 +570,7 @@ Status: In Progress
 
 当前进度（2026-07-28）：
 
+- `0.6.25` 建立第一阶段动态 Pack Catalog：My Packs 实时库存与 SBC PACK reward 元数据汇总到独立纯模块，Daily 来源包改为 `sourcePackRef` 主解析和 ID/名称 fallback。下一阶段逐步迁移 Provision、Validation 和其它 `sourcePackIds/sourcePackNames`，再评估由 Reward 内容/材料语义生成 Pack 分类，避免把活动名称或 Pack ID 当作永久业务主键。完整 release gate 通过 94 个测试文件、587 个测试、210 个 JavaScript 文件语法检查、19 个 Loop 配置、3 个 Profile、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.24` 来源包耗尽判断增加三次有限刷新、一次 Store Packs 页面刷新兜底和最终 My Packs 诊断；Daily Rare 的 `#20060` 缺料包与 Rare Pack to 2x84+ 的 `#20059` 来源包同时使用当前已确认 ID 和名称 fallback。单元测试覆盖延迟到第二次刷新、仅在 Store 页面刷新后出现，以及真实耗尽三种路径。完整 release gate 通过 93 个测试文件、580 个测试、208 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.23` recap FUTBIN 精确解析会先以库存实体补全简化的开包回执：按 item ID 优先、definition ID 回退，随后优先读取 FSU 映射或使用完整 EA 元数据查询；全程保持 exact `resource_id` 校验，且只是只读库存。回归测试覆盖“开包回执元数据不足、库存实体完整”的特殊卡路径。完整 release gate 通过 92 个测试文件、577 个测试、206 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.22` 修复空的可选 `rewardPackNames` 阻断 84x10 启动：配置校验允许可选字符串列表为空，等同未设置；必填列表仍拒绝空值。完整 release gate 通过 92 个测试文件、576 个测试、206 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。

@@ -113,6 +113,15 @@ function renderList(path, label, values, itemType, context) {
   </section>`;
 }
 
+function renderSourcePackRef(path, label, value = {}, context) {
+  return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3><div class="dlr-builder-form-grid">
+    ${fieldRow('Reward produced by Loop', selectInput(`${path}.rewardOfLoopId`, value?.rewardOfLoopId, [
+      { value: '', label: 'Use pack ID/name fallback only' },
+      ...context.rewardSourceLoops.map((loop) => ({ value: loop.id, label: `${loop.name} (${loop.id})` })),
+    ], context.readOnly))}
+  </div></section>`;
+}
+
 function renderPileList(path, label, values, context) {
   const piles = Array.isArray(values) ? values : [];
   const rows = piles.map((pile, index) => `<div class="dlr-builder-pile-row">
@@ -257,6 +266,12 @@ function renderShortagePacks(path, label, values, context) {
     ${(values || []).map((source, index) => `<div class="dlr-builder-subsection">
       <div class="dlr-builder-section-head"><h4>Source ${index + 1}</h4><button data-builder-action="remove-list" data-path="${escapeHtml(path)}" data-index="${index}"${disabled(context.readOnly)}>Remove</button></div>
       ${renderCardSpec(`${path}.${index}.requirement`, source.requirement, context, { withCount: false })}
+      <div class="dlr-builder-form-grid">
+        ${fieldRow('Reward produced by Loop', selectInput(`${path}.${index}.sourcePackRef.rewardOfLoopId`, source.sourcePackRef?.rewardOfLoopId, [
+          { value: '', label: 'Use pack ID/name fallback only' },
+          ...context.rewardSourceLoops.map((loop) => ({ value: loop.id, label: `${loop.name} (${loop.id})` })),
+        ], context.readOnly))}
+      </div>
       ${renderList(`${path}.${index}.packIds`, 'Pack IDs', source.packIds, 'number', context)}
       ${renderList(`${path}.${index}.packNames`, 'Pack aliases', source.packNames, 'text', context)}
       <div class="dlr-builder-form-grid">
@@ -369,6 +384,7 @@ function renderField(field, loop, context) {
     case 'upgrade-list': return renderUpgradeList(field.path, field.label, value, context);
     case 'stage-list': return renderUpgradeList(field.path, field.label, value, context, true);
     case 'shortage-packs': return renderShortagePacks(field.path, field.label, value, context);
+    case 'source-pack-ref': return renderSourcePackRef(field.path, field.label, value, context);
     case 'rating-fill': return renderRatingFill(field.path, value, context);
     case 'auto-totw-upgrade': return renderAutoTotwUpgrade(field.path, value, context);
     case 'auto-fodder-upgrade': return renderAutoFodderUpgrade(field.path, value, context);
@@ -702,6 +718,10 @@ export function workflowLoopBuilderHtml(model) {
     allLoops: model.config.loops,
     atomicLoops: model.config.loops.filter((loop) => !['dailyRoutine', 'workflowRoutine'].includes(loop.strategy)),
     playerPickLoops: model.config.loops.filter((loop) => loop.strategy === 'playerPickSbc'),
+    rewardSourceLoops: model.config.loops.filter((loop) => (
+      (loop.sbcSetIds?.length || loop.sbcNames?.length)
+      && String(loop.id) !== String(model.selectedObject?.id)
+    )),
     selectedStep: model.selectedStep,
     recoveryRecipes: model.config.recoveryRecipes,
     defaultRecoveryPolicyIds: model.config.defaultUnassignedRecoveryPolicyIds || [],

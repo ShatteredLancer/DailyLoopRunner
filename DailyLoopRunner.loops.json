@@ -747,6 +747,9 @@
       "hidden": true,
       "name": "Daily Rare Loop",
       "strategy": "supplyAndCraft",
+      "sourcePackRef": {
+        "rewardOfLoopId": "daily-common"
+      },
       "sbcNames": [
         "Daily Rare Gold Upgrade",
         "每日稀有金牌升级",
@@ -796,6 +799,9 @@
       "preSelectionCleanup": false,
       "shortagePacks": [
         {
+          "sourcePackRef": {
+            "rewardOfLoopId": "daily-common"
+          },
           "requirement": {
             "tier": "gold",
             "rarity": "common",
@@ -825,6 +831,9 @@
       "mvp": true,
       "name": "Daily Rare MVP (1 run)",
       "strategy": "supplyAndCraft",
+      "sourcePackRef": {
+        "rewardOfLoopId": "daily-common-mvp"
+      },
       "sbcNames": [
         "Daily Rare Gold Upgrade",
         "每日稀有金牌升级",
@@ -874,6 +883,9 @@
       "preSelectionCleanup": false,
       "shortagePacks": [
         {
+          "sourcePackRef": {
+            "rewardOfLoopId": "daily-common-mvp"
+          },
           "requirement": {
             "tier": "gold",
             "rarity": "common",
@@ -901,6 +913,9 @@
       "id": "daily-rare-pack-84",
       "name": "Daily Rare Pack to 2x84+ Loop",
       "strategy": "rarePackTo84Upgrade",
+      "sourcePackRef": {
+        "rewardOfLoopId": "daily-rare"
+      },
       "sourcePackIds": [
         20059
       ],

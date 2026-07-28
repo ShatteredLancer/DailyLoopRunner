@@ -69,28 +69,43 @@ describe('Workflow and Loop Builder view', () => {
   });
 
   it('renders every major structured editor instead of a raw Loop JSON input', () => {
+    const producer = {
+      id: 'producer',
+      name: 'Producer',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['Producer SBC'],
+      requirements: [{ tier: 'gold', count: 1 }],
+    };
     const loop = {
       id: 'supply',
       name: 'Supply',
       strategy: 'supplyAndCraft',
       sbcNames: ['SBC'],
       requirements: [{ tier: 'gold', rarity: 'common', count: 5 }],
-      shortagePacks: [{ requirement: { tier: 'gold' }, packNames: ['Pack'] }],
+      sourcePackRef: { rewardOfLoopId: 'producer' },
+      shortagePacks: [{
+        requirement: { tier: 'gold' },
+        sourcePackRef: { rewardOfLoopId: 'producer' },
+        packNames: ['Pack'],
+      }],
       primaryPiles: ['unassigned', 'storage'],
     };
     const html = workflowLoopBuilderHtml(model({
       tab: 'loops',
-      config: { ...config(), loops: [loop] },
+      config: { ...config(), loops: [producer, loop] },
       selectedId: loop.id,
       selectedObject: loop,
       selectedSource: 'custom',
       editorReadOnly: false,
-      sources: { loops: [{ id: loop.id, source: 'custom' }], recoveryRecipes: [], unassignedRecoveryPolicies: [] },
+      sources: { loops: [{ id: producer.id, source: 'custom' }, { id: loop.id, source: 'custom' }], recoveryRecipes: [], unassignedRecoveryPolicies: [] },
     }));
     expect(html).toContain('Requirements');
     expect(html).toContain('Shortage packs');
     expect(html).toContain('Primary pile order');
     expect(html).toContain('Duplicate routing');
+    expect(html).toContain('Reward produced by Loop');
+    expect(html).toContain('data-builder-field="sourcePackRef.rewardOfLoopId"');
+    expect(html).toContain('data-builder-field="shortagePacks.0.sourcePackRef.rewardOfLoopId"');
     expect(html).not.toContain('Edit loop JSON');
   });
 

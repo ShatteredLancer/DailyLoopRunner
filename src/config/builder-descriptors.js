@@ -39,6 +39,7 @@ function descriptor(strategy, label, fields, options = {}) {
 export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
   validationBronzeUpgrade: descriptor('validationBronzeUpgrade', 'Validation recycle', [
     { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
+    { path: 'sourcePackRef', label: 'Source reward Loop', type: 'source-pack-ref' },
     { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
     { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
     { path: 'rewardPackIds', label: 'Reward pack IDs', type: 'number-list' },
@@ -57,6 +58,7 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
   supplyAndCraft: descriptor('supplyAndCraft', 'Supply and craft', [
     { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
     { path: 'requirements', label: 'Requirements', type: 'requirements', required: true },
+    { path: 'sourcePackRef', label: 'Source reward Loop', type: 'source-pack-ref' },
     { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
     { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
     { path: 'priorityPiles', label: 'Default pile order', type: 'pile-list' },
@@ -73,6 +75,7 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
   inventoryMixedUpgrade: descriptor('inventoryMixedUpgrade', 'Inventory mixed upgrade', [
     { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
     { path: 'requirements', label: 'Requirements', type: 'requirements', required: true },
+    { path: 'sourcePackRef', label: 'Source reward Loop', type: 'source-pack-ref' },
     { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
     { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
     { path: 'priorityPiles', label: 'Pile order', type: 'pile-list' },
@@ -84,6 +87,7 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
   commonGoldToRareUpgrade: descriptor('commonGoldToRareUpgrade', 'Common Gold upgrade', [
     { path: 'sbcNames', label: 'SBC aliases', type: 'string-list', required: true },
     { path: 'requirements', label: 'Requirements', type: 'requirements', required: true },
+    { path: 'sourcePackRef', label: 'Source reward Loop', type: 'source-pack-ref' },
     { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
     { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
     { path: 'priorityPiles', label: 'Pile order', type: 'pile-list' },
@@ -94,6 +98,7 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
     { path: 'maxCompletions', label: 'Maximum completions', type: 'integer' },
   ]),
   provisionPackCrafting: descriptor('provisionPackCrafting', 'Provision crafting', [
+    { path: 'sourcePackRef', label: 'Source reward Loop', type: 'source-pack-ref' },
     { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
     { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
     { path: 'preCraftPlayerPickLoopId', label: 'Pre-craft Pick Loop', type: 'pick-loop-reference' },
@@ -102,6 +107,7 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
     { path: 'rounds', label: 'Provision packs', type: 'integer' },
   ]),
   provisionPackDualCrafting: descriptor('provisionPackDualCrafting', 'Dual provision crafting', [
+    { path: 'sourcePackRef', label: 'Source reward Loop', type: 'source-pack-ref' },
     { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
     { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
     { path: 'preCraftPlayerPickLoopId', label: 'Pre-craft Pick Loop', type: 'pick-loop-reference' },
@@ -110,6 +116,7 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
     { path: 'rounds', label: 'Provision packs', type: 'integer' },
   ]),
   rarePackTo84Upgrade: descriptor('rarePackTo84Upgrade', 'Pack to upgrade', [
+    { path: 'sourcePackRef', label: 'Source reward Loop', type: 'source-pack-ref' },
     { path: 'sourcePackIds', label: 'Source pack IDs', type: 'number-list' },
     { path: 'sourcePackNames', label: 'Source pack aliases', type: 'string-list' },
     { path: 'rareUpgrade', label: 'Upgrade', type: 'upgrade', required: true },

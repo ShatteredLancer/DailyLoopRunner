@@ -234,6 +234,7 @@ describe('loop configuration contracts', () => {
     });
     expect(rare).toMatchObject({
       strategy: 'supplyAndCraft',
+      sourcePackRef: { rewardOfLoopId: 'daily-common' },
       sourcePackIds: [20060],
       rewardPackIds: [20059],
       deferChallengeLoad: true,
@@ -243,6 +244,7 @@ describe('loop configuration contracts', () => {
     });
     expect(rare.shortagePacks).toEqual([
       expect.objectContaining({
+        sourcePackRef: { rewardOfLoopId: 'daily-common' },
         repeatUntilSatisfied: true,
         routingPolicy: 'reserveMatchingDuplicates',
         packIds: [20060],
@@ -254,6 +256,7 @@ describe('loop configuration contracts', () => {
       tier: 'gold', rarity: 'rare', count: 6, protectHighGold: true,
     });
     expect(rarePack).toMatchObject({
+      sourcePackRef: { rewardOfLoopId: 'daily-rare' },
       sourcePackIds: [20059],
       maxPacks: 100,
       maxCompletions: 1,
@@ -262,6 +265,12 @@ describe('loop configuration contracts', () => {
       sourceExhaustedFallbackLoopId: '2x84-fodder',
     });
     expect(rarePack.sourceExhaustedFallbackMaxCompletions).toBeUndefined();
+    expect(byId(builtIn, 'daily-rare-mvp')).toMatchObject({
+      sourcePackRef: { rewardOfLoopId: 'daily-common-mvp' },
+      shortagePacks: [expect.objectContaining({
+        sourcePackRef: { rewardOfLoopId: 'daily-common-mvp' },
+      })],
+    });
     expect(provision.preCraftPlayerPick).toEqual({
       sbcSetIds: [1256],
       pickItemResourceIds: [5005713],

@@ -119,6 +119,7 @@ export const LOOP_DEFS = [
     hidden: true,
     name: 'Daily Rare Loop',
     strategy: 'supplyAndCraft',
+    sourcePackRef: { rewardOfLoopId: 'daily-common' },
     sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
     sourcePackIds: [20060],
     sourcePackNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
@@ -133,6 +134,7 @@ export const LOOP_DEFS = [
     preSelectionCleanup: false,
     shortagePacks: [
       {
+        sourcePackRef: { rewardOfLoopId: 'daily-common' },
         requirement: { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false, protectHighGold: true },
         packIds: [20060],
         packNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
@@ -151,6 +153,7 @@ export const LOOP_DEFS = [
     mvp: true,
     name: 'Daily Rare MVP (1 run)',
     strategy: 'supplyAndCraft',
+    sourcePackRef: { rewardOfLoopId: 'daily-common-mvp' },
     sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
     sourcePackIds: [20060],
     sourcePackNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
@@ -165,6 +168,7 @@ export const LOOP_DEFS = [
     preSelectionCleanup: false,
     shortagePacks: [
       {
+        sourcePackRef: { rewardOfLoopId: 'daily-common-mvp' },
         requirement: { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false, protectHighGold: true },
         packIds: [20060],
         packNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
@@ -181,6 +185,7 @@ export const LOOP_DEFS = [
     id: 'daily-rare-pack-84',
     name: 'Daily Rare Pack to 2x84+ Loop',
     strategy: 'rarePackTo84Upgrade',
+    sourcePackRef: { rewardOfLoopId: 'daily-rare' },
     sourcePackIds: [20059],
     sourcePackNames: [
       '5x Max.78 Rare Gold Players Pack',

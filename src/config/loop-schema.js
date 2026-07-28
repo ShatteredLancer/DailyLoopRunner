@@ -17,6 +17,15 @@ import {
 } from './recovery.js';
 
 const INVENTORY_PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
+const SOURCE_PACK_REF_STRATEGIES = Object.freeze([
+  'validationBronzeUpgrade',
+  'supplyAndCraft',
+  'inventoryMixedUpgrade',
+  'commonGoldToRareUpgrade',
+  'provisionPackCrafting',
+  'provisionPackDualCrafting',
+  'rarePackTo84Upgrade',
+]);
 
 function fail(message) {
   throw new Error(message);
@@ -53,6 +62,25 @@ function validateNumberArray(value, path, errors) {
       errors.push(`${path}[${index}] must be a number`);
     }
   });
+}
+
+function validateSourcePackRef(value, path, errors) {
+  if (value === undefined || value === null) return;
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  const allowedFields = new Set(['rewardOfLoopId']);
+  Object.keys(value).forEach((field) => {
+    if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
+  });
+  if (typeof value.rewardOfLoopId !== 'string' || !value.rewardOfLoopId.trim()) {
+    errors.push(`${path}.rewardOfLoopId is required`);
+  }
+}
+
+function hasSourcePackIdentity(value = {}) {
+  return Boolean(value.sourcePackRef?.rewardOfLoopId || value.sourcePackIds?.length || value.sourcePackNames?.length);
 }
 
 function validatePileList(value, path, errors, required = false) {
@@ -156,10 +184,11 @@ function validateShortagePacks(shortagePacks, path, errors) {
       return;
     }
     validateCardSpec(source.requirement, `${sourcePath}.requirement`, errors);
+    validateSourcePackRef(source.sourcePackRef, `${sourcePath}.sourcePackRef`, errors);
     validateNumberArray(source.packIds, `${sourcePath}.packIds`, errors);
     validateStringArray(source.packNames, `${sourcePath}.packNames`, errors);
-    if (!source.packIds?.length && !source.packNames?.length) {
-      errors.push(`${sourcePath}.packIds or ${sourcePath}.packNames is required`);
+    if (!source.sourcePackRef?.rewardOfLoopId && !source.packIds?.length && !source.packNames?.length) {
+      errors.push(`${sourcePath}.sourcePackRef, ${sourcePath}.packIds, or ${sourcePath}.packNames is required`);
     }
     if (source.maxOpensPerAttempt !== undefined) {
       const maxOpens = Number(source.maxOpensPerAttempt);
@@ -421,6 +450,10 @@ export function validateLoopDef(loopDef, label = 'loop') {
   validateNumberArray(loopDef.protectedItemIds, 'protectedItemIds', errors);
   validateNumberArray(loopDef.protectedDefinitionIds, 'protectedDefinitionIds', errors);
   validateStringArray(loopDef.sourcePackNames, 'sourcePackNames', errors);
+  validateSourcePackRef(loopDef.sourcePackRef, 'sourcePackRef', errors);
+  if (loopDef.sourcePackRef !== undefined && !SOURCE_PACK_REF_STRATEGIES.includes(loopDef.strategy)) {
+    errors.push(`sourcePackRef is not supported by strategy ${loopDef.strategy}`);
+  }
   validateStringArray(loopDef.rewardPackNames, 'rewardPackNames', errors);
   validatePileList(loopDef.priorityPiles, 'priorityPiles', errors);
   validatePileList(loopDef.primaryPiles, 'primaryPiles', errors);
@@ -484,8 +517,8 @@ export function validateLoopDef(loopDef, label = 'loop') {
   }
 
   if (loopDef.strategy === 'provisionPackCrafting' || loopDef.strategy === 'provisionPackDualCrafting') {
-    if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
-      errors.push('sourcePackIds or sourcePackNames is required');
+    if (!hasSourcePackIdentity(loopDef)) {
+      errors.push('sourcePackRef, sourcePackIds, or sourcePackNames is required');
     }
     if (loopDef.craftingUpgrades !== undefined) {
       if (!Array.isArray(loopDef.craftingUpgrades) || !loopDef.craftingUpgrades.length) {
@@ -504,8 +537,8 @@ export function validateLoopDef(loopDef, label = 'loop') {
   }
 
   if (loopDef.strategy === 'rarePackTo84Upgrade') {
-    if (!loopDef.sourcePackIds?.length && !loopDef.sourcePackNames?.length) {
-      errors.push('sourcePackIds or sourcePackNames is required');
+    if (!hasSourcePackIdentity(loopDef)) {
+      errors.push('sourcePackRef, sourcePackIds, or sourcePackNames is required');
     }
     validateUpgradeDef(loopDef.rareUpgrade, 'rareUpgrade', errors);
     if (loopDef.sourceExhaustedFallbackLoopId !== undefined && (typeof loopDef.sourceExhaustedFallbackLoopId !== 'string' || !loopDef.sourceExhaustedFallbackLoopId.trim())) {
@@ -593,6 +626,26 @@ export function validateLoopDefList(loopDefs, label = 'Loop config') {
     if (loopDef.id) {
       if (seen.has(loopDef.id)) fail(`${label} has duplicate id: ${loopDef.id}`);
       seen.add(loopDef.id);
+    }
+  });
+  const byId = new Map(loopDefs.map((loopDef) => [loopDef.id, loopDef]));
+  loopDefs.forEach((loopDef, index) => {
+    const references = [
+      { path: `${label}[${index}].sourcePackRef`, value: loopDef.sourcePackRef },
+      ...(loopDef.shortagePacks || []).map((source, sourceIndex) => ({
+        path: `${label}[${index}].shortagePacks[${sourceIndex}].sourcePackRef`,
+        value: source?.sourcePackRef,
+      })),
+    ];
+    for (const reference of references) {
+      const targetId = reference.value?.rewardOfLoopId;
+      if (!targetId) continue;
+      if (targetId === loopDef.id) fail(`${reference.path}.rewardOfLoopId cannot reference its own Loop`);
+      const target = byId.get(targetId);
+      if (!target) fail(`${reference.path}.rewardOfLoopId not found: ${targetId}`);
+      if (!target.sbcSetIds?.length && !target.sbcNames?.length) {
+        fail(`${reference.path}.rewardOfLoopId must reference a Loop with sbcSetIds or sbcNames: ${targetId}`);
+      }
     }
   });
   loopDefs.forEach((loopDef, index) => {
