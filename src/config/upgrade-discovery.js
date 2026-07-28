@@ -310,3 +310,27 @@ export function collectScannedUpgradeLoopDefs(results = []) {
   }
   return loops;
 }
+
+export function collectScannedUpgradeActivities(results = []) {
+  const activities = [];
+  const seen = new Set();
+  for (const result of results || []) {
+    const loop = result?.discoveredLoop || result?.loop;
+    const familyId = normalizedText(loop?.dynamicSbcFamily);
+    const setId = positiveInteger(loop?.sbcSetIds?.[0]);
+    if (!loop || !familyId || !setId) continue;
+    const key = `${familyId}:${setId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    activities.push({
+      familyId,
+      setId,
+      setName: normalizedText(loop.sbcNames?.[0] || loop.name),
+      rewardPackIds: [...(loop.rewardPackIds || [])],
+      rewardPackNames: [...(loop.rewardPackNames || [])],
+      remainingCompletions: loop.remainingCompletions ?? null,
+      requirements: [],
+    });
+  }
+  return activities;
+}

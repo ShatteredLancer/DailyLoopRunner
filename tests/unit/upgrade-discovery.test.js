@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildUpgradeDiscoverySession,
+  collectScannedUpgradeActivities,
   parseDynamicUpgradeSbcSnapshot,
 } from '../../src/config/upgrade-discovery.js';
 
@@ -110,6 +111,29 @@ describe('dynamic Upgrade discovery', () => {
     });
     expect(session.discoveredLoops).toHaveLength(1);
     expect(session.discoveredLoops[0].name).toBe('10x 85+ Upgrade');
+  });
+
+  it('collects supported x10 and TOTW metadata as activity bindings', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [x10Template, totwTemplate],
+      x10Template,
+      totwTemplate,
+      sets: [
+        set({ id: 840, name: '10x 84+ Upgrade', rewards: [{ type: 'PACK', packId: 284 }] }),
+        set({
+          id: 841,
+          name: '84+ TOTW Upgrade',
+          rewards: [{ type: 'PACK', packId: 20707 }],
+          challenges: [{ id: 842, requiredPlayerCount: 11, eligibilityRequirements: [{ key: 'TEAM_RATING', values: [84], count: -1 }] }],
+        }),
+        set({ id: 850, name: '10x 85+ Upgrade', timesCompleted: 5 }),
+      ],
+    });
+
+    expect(collectScannedUpgradeActivities(session.results)).toEqual([
+      expect.objectContaining({ familyId: 'high-rated-x10', setId: 840, rewardPackIds: [284] }),
+      expect.objectContaining({ familyId: 'totw-upgrade', setId: 841, rewardPackIds: [20707] }),
+    ]);
   });
 
   it.each([

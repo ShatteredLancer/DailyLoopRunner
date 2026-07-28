@@ -11,7 +11,7 @@
 - **Step**：Workflow 中的一次 Loop 调用。Step 默认只保存引用、显示名称和奖励处理设置。
 - **Step Variant**：只为某个 Step 创建的独立 Loop 副本。它用于“只改这一次调用”，避免影响其他 Workflow。
 - **Recovery**：Unassigned 或重复卡阻塞时使用的恢复 recipe 和 policy。
-- **Dynamic SBC**：当前会话通过 `Scan SBCs` 安全识别出的 Player Pick 或受支持 Upgrade Loop。
+- **Dynamic SBC**：当前会话通过 `Scan SBCs` 安全识别出的 Player Pick 或受支持 Upgrade。它可以是独立临时 Loop，也可以只为内置 Loop 提供当前活动身份。
 
 ```mermaid
 flowchart LR
@@ -142,6 +142,7 @@ Validate -> Preview -> Activate
 - `Requirements`：设置 tier、rarity、数量、评分边界、特殊卡保护和材料 pile 顺序。
 - `Default/Primary/Fallback pile order`：明确 `Unassigned -> Storage -> Transfer -> Club` 的使用顺序。
 - `SBC aliases/Set IDs`：定位目标 SBC。
+- `Dynamic SBC activity`：按业务 family 自动使用当前扫描到的 SBC Set/Challenge/Reward identity，同时保留当前 Loop 的材料保护和执行策略。
 - `Pack aliases/IDs`：定位来源包、奖励包或 shortage pack。
 - `Player Pick options`：高分保护、自动选择、集中开 Pick 和扫描元数据偏好。
 
@@ -207,7 +208,12 @@ flowchart TD
 
 ## 9. 使用 Dynamic SBC
 
-Dynamic Player Pick 和 Dynamic Upgrade 不会自动写入 Profile，需要显式绑定：
+动态扫描结果分为两类：
+
+- **独立 Dynamic Loop**：当前 Pick 或新的高评分 x10 等可独立运行对象。它们显示在 `Dynamic SBCs` 页面，需要 `Add to profile` 后才能被自定义 Workflow 长期引用。
+- **内置 activity binding**：Daily Upgrade、Bronze/Silver/Gold Upgrade、Common Gold crafting、2x84、自动 TOTW/2x84 recovery 和 Recovery recipe 等已有行为模板，只自动替换当前 EA 身份，不需要逐个 `Add to profile`。
+
+独立 Dynamic Loop 的操作流程：
 
 ```mermaid
 flowchart LR
@@ -235,21 +241,32 @@ flowchart LR
 - SBC 过期、次数耗尽或 EA 不再返回完整 Challenge metadata 时，绑定会变成 unavailable。
 - unavailable dynamic binding 会阻止 Profile 激活，不会执行上次缓存的过期 Pick 定义。
 
+`Dynamic SBC activity` 的使用方法：
+
+1. 在 `Loops` 或 `Recovery` 中选择已有对象；内置对象先点击 `Override`。
+2. 在直接 Loop、`Crafting upgrades`、`Stages`、`Automatic special/fodder recovery` 或 Recovery recipe 中启用 `Dynamic SBC activity`。
+3. 选择 family，例如 `daily-common-gold-upgrade`、`common-gold-crafting-upgrade` 或 `2x84-upgrade`。
+4. 保留完整 SBC alias/ID 作为迁移期 fallback，再 Validate、Preview、Activate。
+
+activity binding 只改变扫描事实：当前 Set/Challenge、显示名、材料条件、Reward Pack 和剩余次数。它不会改变 pile 顺序、高分/Special/Tradeable 保护、评分求解范围、fallback、Workflow 顺序或用户数量设置。每个嵌套 stage/recovery 必须单独绑定，父 Loop 不会自动把 family 传给子对象。
+
+同一 family 必须恰好匹配一个当前 Set。没有匹配时保留兼容 fallback；匹配多个时日志显示 `ambiguous`，Runner 不会猜选。实际运行优先使用扫描得到的 Set ID，完整名称 alias 只作为 fallback。
+
 如果 Dynamic SBCs 页显示 `No matching objects`，先检查主面板日志中的扫描汇总。主下拉存在 Dynamic SBC 但 Builder 为空属于异常，应保存日志并报告。
 
 ## 10. Provision 使用新的 Dynamic Pick
 
-以修改 `Provision Crafting Loop` 的前置 Pick 为例：
+内置 Provision 推荐使用语义选择器，不再固定某一期 Pick 的 Set ID：
 
-1. 按上一节把当前 Pick `Add to profile`。
-2. 进入 `Loops`，选择 `Provision Crafting Loop`。
-3. 点击 `Override`。
-4. 在 `Pre-craft Pick Loop` 中选择刚绑定的 dynamic Pick。
-5. 检查 `Crafting upgrades` 的顺序、SBC aliases、Requirements 和 pile 顺序。
-6. Preview 中确认前置 Pick、来源包和后续 Upgrade 顺序。
-7. Activate。
+1. 进入 `Loops`，选择 `Provision Crafting Loop`。
+2. 点击 `Override`。
+3. 在 `Pre-craft Player Pick selector` 中选择 `Common Gold compatible`。
+4. 检查 `Crafting upgrades` 的 activity family、Requirements 和 pile 顺序。
+5. Preview 中确认来源包和后续 Upgrade 策略，再 Activate。
 
-不要只改 `Pre-craft Pick binding` 中的数字来猜测新 Pick。优先使用扫描生成并绑定的稳定 Set/Reward 身份。
+该 selector 只接受当前扫描中所有 Challenge 都满足以下条件的 Pick：全部球员为 Gold、没有 Rare 最低数量，并且可以 Common-first 填充。没有匹配时 Provision 跳过前置 Pick并继续后续 crafting；多个匹配时停止并报告歧义，不会猜 Set ID。
+
+自定义 Profile 仍可先把某个独立 Pick `Add to profile`，再通过 `Pre-craft Pick Loop` 或显式 binding 固定引用；这适合确实要锁定某个 Pick 的高级配置。不要只改数字来猜测新 Pick。
 
 ## 11. 设置继承关系
 

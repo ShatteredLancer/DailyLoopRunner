@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.25`
+- Userscript 版本：`0.6.30`
 - Git 基线：`main` dynamic Pack Catalog
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
@@ -32,6 +32,8 @@
 `0.6.24` 发布记录：来源包查找不再以单次 `Store.getPacks` 结果判定耗尽，而是执行有限重试，并在缓存仍为空时进入 Store Packs 强制刷新后再次匹配；最终确认耗尽时记录期望 ID、名称和当前 My Packs 快照。Daily Rare 的 `11x Gold Players Pack` 当前已确认 ID 为 `20060`，其产出的 `5x Max 78 Rare Gold Players Pack` 当前已确认 ID 为 `20059`；ID 不存在时仍回退名称别名。缺料开包和 Rare Pack to 2x84+ 阶段均使用相同恢复路径，避免 SBC 奖励延迟可见时少开或完全跳过来源包。
 
 `0.6.25` 发布记录：新增会话级 Pack Catalog。启动 Dynamic SBC 扫描完成后，Runner 对当前全部 SBC Set 建立轻量 PACK reward 索引，同时刷新 My Packs 的实时 ID、名称和数量；该步骤不扩大 Challenge 读取范围。Loop 新增 `sourcePackRef.rewardOfLoopId`，来源包按动态 Reward ID、动态 Reward 名称、静态兼容 ID、静态兼容名称依次解析。Daily Rare、Daily Rare MVP、对应 shortage source 和 Daily Rare Pack to 2x84+ 已迁移到动态引用，`20060/20059` 继续作为兼容 fallback。Builder 提供 Source reward Loop 下拉框，并在重命名、删除和 schema 校验中维护引用。SBC 实际提交后观测到的 Reward Pack ID 会补充当前会话 Catalog；实时 My Packs 数量不持久化，原有限次重试和 Store Packs 页面恢复保持不变。
+
+`0.6.30` 发布记录：将内置 Daily、基础 Upgrade、Common Gold crafting、2x84、TOTW 和高评分 x10 的当前 SBC Set/Challenge/Reward identity 迁移为会话级动态绑定，并覆盖直接 Loop、嵌套 stage、自动恢复与 Recovery recipe。Provision 前置 Pick 改用 common-gold 语义 selector；运行时按扫描结果优先、静态名称/ID 兼容 fallback 的顺序查找 SBC。动态扫描仍只替换 EA 实时事实，保留既有 Workflow 顺序、选材、保护、库存来源、回退和运行次数策略；歧义 family 匹配会拒绝自动绑定。Builder、schema、诊断、文档和自动化测试同步覆盖该迁移。
 
 `0.6.23` 发布记录：recap 解析 FUTBIN 精确 card ID 前，会先用当前库存中相同实例 ID（再回退相同 definition ID）的完整 EA 球员实体补齐开包回执。这样可复用 FSU 已确认映射，或在其映射尚未写入时使用完整元数据作精确查询；仍只接受 `resource_id === definitionId`，不回退球员名称搜索，也不改动开包、发卡、SBC 或 Unassigned 流程。
 
@@ -298,7 +300,7 @@ Tampermonkey 继续只安装单个 `dist/DailyLoopRunner.user.js`。源码多文
 | M6 | 统一 Pack Transaction | Complete | M5 |
 | M7 | 分批迁移全部 Workflow | Complete | M3-M6 |
 | M8 | 删除旧路径、完整回归和正式切换 | Complete | M7 |
-| M9 | 动态发现当前可用 Player Pick SBC | In Progress | M2-M8 |
+| M9 | 统一发现当前可用 Player Pick 与 Upgrade SBC | In Progress | M2-M8 |
 
 状态只能使用：`Pending`、`In Progress`、`Blocked`、`Complete`。
 
@@ -554,7 +556,9 @@ Status: In Progress
 - 提供手动 Refresh；活动过期、Challenge 完成或 EA Repository 更新后移除失效入口。
 - 不支持或无法完整解释的动态条件显示为不可运行并输出诊断，不得猜测材料比例或跳过 EA 条件。
 - 每次扫描先刷新轻量 Set/Category 索引；逐个 SBC 比较 Set、Category、Challenge ID、奖励和时间指纹，仅重读新增、变化或 TTL 过期的 Challenge。
-- Upgrade 只接受 EA 明确归入 `Upgrades` Category 的白名单家族；当前首批为 84+ TOTW 和高评分 x10。84x10/TOTW 覆盖静态 Loop metadata，新评分 x10 生成 Dynamic Loop。
+- 所有 EA 明确归入 `Upgrades` Category 的 Set 都进入逐 SBC 增量比较，但只有已实现保守 parser 的 family 可物化。84+ TOTW/高评分 x10 解析评分和特殊卡条件；基础 family 解析完整的单 Challenge、单 Pack reward 和球员质量/稀有度条件。
+- 通过 `activityBinding` 将基础 family 的当前 Set/Challenge/Reward identity 注入已有直接 Loop、嵌套 stage、自动恢复和 Recovery recipe，不复制其 Workflow、安全策略或选材 policy。
+- Provision 前置 Pick 使用语义 selector 匹配当前 Common Gold compatible Pick，不再把某一期 Set/Reward ID 当作内置业务身份。
 
 验收标准：
 
@@ -565,11 +569,16 @@ Status: In Progress
 - Node fixture 覆盖已支持、条件不支持、奖励标识缺失、活动完成和 Repository 刷新场景。
 - 动态发现只负责生成配置，实际选材、提交、价格查询、自动/人工选择和 recap 继续复用现有 `playerPickSbc` Workflow。
 - 缓存只保存 Challenge 快照，不保存可运行授权；当前会话索引验证失败时动态绑定保持 unavailable。
+- 同一 activity family 只允许唯一匹配；无匹配保留迁移期兼容 alias/ID，多匹配拒绝自动选择。扫描 Set ID 在运行时优先于名称 fallback。
 
 回滚条件：无法稳定识别奖励 Pick、动态条件转换不完整，或扫描结果可能导致错误 SBC/奖励被提交或领取。
 
 当前进度（2026-07-28）：
 
+- 开发快照完成第二阶段内置 SBC identity 迁移：新增 `src/config/activity-discovery.js`，支持 Daily Bronze/Silver/Common/Rare、Bronze/Silver/Gold、Common Gold crafting、2x84、TOTW 和高评分 x10 family；Daily/MVP、Inventory Exhaustion、Provision crafting、84x10 嵌套恢复和 9 个 Unassigned Recovery recipe 均声明 session-only binding。扫描只覆盖 EA 事实，旧名称/ID 暂时保留兼容 fallback。
+- Dynamic 扫描候选扩展到全部 EA `Upgrades` Set，并继续使用现有逐 SBC 结构指纹缓存。评分型 parser 与基础 activity parser 分层运行，84x10 的评分/特殊卡 metadata 与嵌套 TOTW/2x84 binding 可同时物化，不会互相覆盖。
+- Provision 内置固定 Pick identity 已替换为 `preCraftPlayerPickSelector.material = "common-gold"`。零匹配跳过前置 stage，多匹配停止；旧 `preCraftPlayerPick` / `preCraftPlayerPickLoopId` 继续兼容外部配置。
+- Builder、schema、内置/外部配置和结构化扫描日志已接入 activity family、嵌套 binding、Recovery binding 与 Provision selector。自动化测试覆盖基础 family 解析、歧义拒绝、策略字段与 requirement 顺序保留、x10 与嵌套恢复合并、消费者追踪、Set ID 优先级和 Builder 字段；完整 release gate 通过 96 个测试文件、607 个测试、214 个 JavaScript 文件语法检查、19 个 Loop、9 个 Recovery recipe、4 个 Recovery policy、3 个 Profile、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.25` 建立第一阶段动态 Pack Catalog：My Packs 实时库存与 SBC PACK reward 元数据汇总到独立纯模块，Daily 来源包改为 `sourcePackRef` 主解析和 ID/名称 fallback。下一阶段逐步迁移 Provision、Validation 和其它 `sourcePackIds/sourcePackNames`，再评估由 Reward 内容/材料语义生成 Pack 分类，避免把活动名称或 Pack ID 当作永久业务主键。完整 release gate 通过 94 个测试文件、587 个测试、210 个 JavaScript 文件语法检查、19 个 Loop 配置、3 个 Profile、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.24` 来源包耗尽判断增加三次有限刷新、一次 Store Packs 页面刷新兜底和最终 My Packs 诊断；Daily Rare 的 `#20060` 缺料包与 Rare Pack to 2x84+ 的 `#20059` 来源包同时使用当前已确认 ID 和名称 fallback。单元测试覆盖延迟到第二次刷新、仅在 Store 页面刷新后出现，以及真实耗尽三种路径。完整 release gate 通过 93 个测试文件、580 个测试、208 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.23` recap FUTBIN 精确解析会先以库存实体补全简化的开包回执：按 item ID 优先、definition ID 回退，随后优先读取 FSU 映射或使用完整 EA 元数据查询；全程保持 exact `resource_id` 校验，且只是只读库存。回归测试覆盖“开包回执元数据不足、库存实体完整”的特殊卡路径。完整 release gate 通过 92 个测试文件、577 个测试、206 个 JavaScript 文件语法检查、19 个 Loop 配置、FSU patch replay 和根目录/`dist` 产物一致性。
@@ -637,7 +646,7 @@ Live validation: `1 of 5 83+ Player Pick` 和 `1 of 3 84+ Summer Tournament Nati
 
 `0.5.12` 启动扫描实盘确认：83+/84+ 各输出一条 `added session Loop`，最终为 `2 supported session Loop(s) added`、`0 configured Loop(s) using scanned metadata`、`0 static/discovered duplicate(s) skipped`。两者纯动态入口不重复，静态配置删除后的会话列表行为通过。
 
-Next: M9 继续作为独立功能迭代。`4 of 10 83+ Player Pick` 已有真实扫描元数据和自动化覆盖，后续分别验证独立 Dry Run/Live 与 Provision 动态前置流程。评分、化学和特殊卡等复杂 Pick 条件继续保持 unsupported，直到有明确模型与测试支持。
+Next: M9 继续作为独立功能迭代。先收集真实启动日志确认每个 family 唯一解析到预期 Set/Reward/consumer，并验证 Daily 四类、Common Gold crafting、2x84、Provision selector 和 84x10 嵌套恢复。兼容名称/ID 只有在对应 family 完成真实页面验证后才能逐项删除。后续再迁移 Provision source Pack `20643` 等尚无可靠 Reward 语义的硬编码，并仅在明确 EA 模型、fixture 和安全测试齐备时扩展新的 Upgrade/Pick family；评分、化学和复杂特殊卡 Pick 条件继续保持 unsupported。
 
 ## 7. 全量测试矩阵
 

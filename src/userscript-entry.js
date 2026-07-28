@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.25
+// @version      0.6.30
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -71,12 +71,19 @@ import {
   collectScannedPlayerPickLoopDefs,
   parsePlayerPickSbcSnapshot,
   resolvePlayerPickLoopReference,
+  resolvePlayerPickLoopSelector,
 } from './config/player-pick-discovery.js';
 import {
   buildUpgradeDiscoverySession,
+  collectScannedUpgradeActivities,
   detectDynamicUpgradeFamily,
   parseDynamicUpgradeSbcSnapshot,
 } from './config/upgrade-discovery.js';
+import {
+  buildActivityBindingSession,
+  parseBasicUpgradeActivitySnapshot,
+} from './config/activity-discovery.js';
+import { findSbcSetByPreferredId } from './sbc/set-identity.js';
 import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
   RECOVERY_RECIPES,
@@ -243,6 +250,7 @@ const state = {
     loopDefs: null,
     discoveredLoopDefs: [],
     discoveredLoopOverrides: {},
+    discoveredRecoveryRecipeOverrides: {},
     scannedDynamicSbcDefs: [],
     recoveryRecipes: null,
     unassignedRecoveryPolicies: null,
@@ -289,7 +297,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.25',
+    version: '0.6.30',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -362,6 +370,11 @@ const state = {
   }
 
   function getRecoveryRecipes() {
+    const configured = state.recoveryRecipes || RECOVERY_RECIPES;
+    return configured.map((recipe) => state.discoveredRecoveryRecipeOverrides?.[recipe.id] || recipe);
+  }
+
+  function getConfiguredRecoveryRecipes() {
     return state.recoveryRecipes || RECOVERY_RECIPES;
   }
 
@@ -436,9 +449,10 @@ const state = {
     if (options.preserveDiscovery !== true) {
       state.discoveredLoopDefs = [];
       state.discoveredLoopOverrides = {};
+      state.discoveredRecoveryRecipeOverrides = {};
       state.scannedDynamicSbcDefs = [];
     }
-    state.packCatalog = bindPackCatalogLoops(state.packCatalog, getConfiguredLoopDefs());
+    state.packCatalog = bindPackCatalogLoops(state.packCatalog, getLoopDefs());
     renderLoopSelect(state.loopDefs[0]?.id);
     log(`Loaded ${state.loopDefs.length} loop definition(s), ${state.recoveryRecipes.length} recovery recipe(s), and ${state.unassignedRecoveryPolicies.length} recovery policy(s) from ${source}`);
   }
@@ -452,9 +466,10 @@ const state = {
     if (options.preserveDiscovery !== true) {
       state.discoveredLoopDefs = [];
       state.discoveredLoopOverrides = {};
+      state.discoveredRecoveryRecipeOverrides = {};
       state.scannedDynamicSbcDefs = [];
     }
-    state.packCatalog = bindPackCatalogLoops(state.packCatalog, getConfiguredLoopDefs());
+    state.packCatalog = bindPackCatalogLoops(state.packCatalog, getLoopDefs());
     renderLoopSelect(LOOP_DEFS[0]?.id);
     log(`Using built-in loop definitions (${LOOP_DEFS.length})`);
   }
@@ -984,7 +999,7 @@ function updateLoopControls() {
       log(`Pack Catalog: My Packs refresh failed; keeping current inventory snapshot (${error?.message || error})`);
     });
     const indexes = getSbcSets().map((set) => eaSbcAdapter().snapshotDiscoveryIndex(set, refreshResult));
-    const loopDefs = getConfiguredLoopDefs();
+    const loopDefs = getLoopDefs();
     state.packCatalog = createPackCatalog({
       packs: getPackInventorySnapshot().groups,
       sbcIndexes: indexes,
@@ -1016,7 +1031,7 @@ function updateLoopControls() {
       packId: id,
       packName: packName(pack),
     });
-    state.packCatalog = bindPackCatalogLoops(state.packCatalog, getConfiguredLoopDefs());
+    state.packCatalog = bindPackCatalogLoops(state.packCatalog, getLoopDefs());
   }
 
   function formatPackInventorySnapshot(snapshot = getPackInventorySnapshot()) {
@@ -2322,18 +2337,20 @@ function updateLoopControls() {
     return set;
   }
 
-  async function findSbcSetIfPresent(names) {
+  async function findSbcSetForDefIfPresent(definition = {}) {
     await ensureSbcSetsLoaded();
-    return getSbcSets().find((set) => matchesAny(set?.name, names)) || null;
+    const byId = findSbcSetByPreferredId(getSbcSets(), definition.sbcSetIds);
+    if (byId) return byId;
+    return getSbcSets().find((set) => matchesAny(set?.name, definition.sbcNames)) || null;
   }
 
   async function findSbcSetForLoopDef(loopDef, label = loopDef?.name || 'SBC') {
     await ensureSbcSetsLoaded();
-    const setIds = new Set((loopDef?.sbcSetIds || []).map(Number).filter(Boolean));
-    if (setIds.size) {
-      const byId = getSbcSets().find((set) => setIds.has(Number(set?.id || 0)));
+    const setIds = [...new Set((loopDef?.sbcSetIds || []).map(Number).filter(Boolean))];
+    if (setIds.length) {
+      const byId = findSbcSetByPreferredId(getSbcSets(), setIds);
       if (byId) return byId;
-      fail(`${label} SBC not found by configured Set id(s): ${[...setIds].join(', ')}`);
+      fail(`${label} SBC not found by configured Set id(s): ${setIds.join(', ')}`);
     }
     return findSbcSet(loopDef?.sbcNames, label);
   }
@@ -2539,8 +2556,7 @@ function updateLoopControls() {
 
   function dynamicSbcCandidate(index = {}) {
     const hasPlayerPickReward = (index.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK');
-    return hasPlayerPickReward
-      || (index.inUpgradesCategory === true && Boolean(detectDynamicUpgradeFamily(index)));
+    return hasPlayerPickReward || index.inUpgradesCategory === true;
   }
 
   function configuredLoopTemplate(id) {
@@ -2575,6 +2591,13 @@ function updateLoopControls() {
     for (const diagnostic of parsed.diagnostics || []) log(`Dynamic SBC scan: Upgrade diagnostic: ${diagnostic}`);
   }
 
+  function logBasicActivityDiscovery(snapshot, parsed, loadError) {
+    const reward = (snapshot.rewards || []).find((entry) => entry?.type === 'PACK') || {};
+    log(`Dynamic SBC scan: Activity set #${snapshot.id || '?'} ${snapshot.name || '?'}; family:${parsed.familyId || '?'}; reward ${reward.name || '?'} (#${reward.packId || reward.resourceId || '?'}); challenges:${snapshot.challenges?.length || 0}; remaining:${parsed.remainingCompletions ?? parsed.activity?.remainingCompletions ?? '?'}; status:${parsed.status}`);
+    if (loadError) log(`Dynamic SBC scan: Activity challenge load warning: ${loadError?.message || loadError}`);
+    for (const diagnostic of parsed.diagnostics || []) log(`Dynamic SBC scan: Activity diagnostic: ${diagnostic}`);
+  }
+
   async function scanAvailableDynamicSbcs(options = {}) {
     const forceFull = options.forceFull === true;
     const clearCache = options.clearCache === true;
@@ -2599,12 +2622,19 @@ function updateLoopControls() {
       onResult: async ({ snapshot, loadError, cacheStatus }) => {
         const isPick = (snapshot.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK');
         if (!isPick) {
-          const parsed = unavailableDynamicSbcParse(parseDynamicUpgradeSbcSnapshot({
-            set: snapshot,
-            x10Template: configuredLoopTemplate('84x10'),
-            totwTemplate: configuredLoopTemplate('auto-totw-upgrade'),
-          }), loadError);
-          logDynamicUpgradeDiscovery(snapshot, parsed, loadError);
+          if (detectDynamicUpgradeFamily(snapshot)) {
+            const parsed = unavailableDynamicSbcParse(parseDynamicUpgradeSbcSnapshot({
+              set: snapshot,
+              x10Template: configuredLoopTemplate('84x10'),
+              totwTemplate: configuredLoopTemplate('auto-totw-upgrade'),
+            }), loadError);
+            logDynamicUpgradeDiscovery(snapshot, parsed, loadError);
+          } else {
+            const parsed = loadError
+              ? { status: 'unavailable', diagnostics: [`Challenge metadata refresh failed: ${loadError?.message || loadError}`] }
+              : parseBasicUpgradeActivitySnapshot({ set: snapshot });
+            logBasicActivityDiscovery(snapshot, parsed, loadError);
+          }
           log(`Dynamic SBC scan: set #${snapshot.id || '?'} cache:${cacheStatus}`);
           return;
         }
@@ -2656,14 +2686,25 @@ function updateLoopControls() {
       x10Template: configuredLoopTemplate('84x10'),
       totwTemplate: configuredLoopTemplate('auto-totw-upgrade'),
     });
+    const specializedLoopOverrides = {
+      ...pickSession.loopOverrides,
+      ...upgradeSession.loopOverrides,
+    };
+    const activitySession = buildActivityBindingSession({
+      sets: snapshots,
+      configuredLoops: configuredLoops.map((loopDef) => specializedLoopOverrides[loopDef.id] || loopDef),
+      recoveryRecipes: getConfiguredRecoveryRecipes(),
+      additionalActivities: collectScannedUpgradeActivities(upgradeSession.results),
+    });
     state.discoveredLoopDefs = cloneLoopDef([
       ...pickSession.discoveredLoops,
       ...upgradeSession.discoveredLoops,
     ]);
     state.discoveredLoopOverrides = cloneLoopDef({
-      ...pickSession.loopOverrides,
-      ...upgradeSession.loopOverrides,
+      ...specializedLoopOverrides,
+      ...activitySession.loopOverrides,
     });
+    state.discoveredRecoveryRecipeOverrides = cloneLoopDef(activitySession.recoveryRecipeOverrides);
     state.scannedDynamicSbcDefs = cloneLoopDef([
       ...collectScannedPlayerPickLoopDefs(pickSession.results),
       ...upgradeSession.discoveredLoops,
@@ -2708,10 +2749,14 @@ function updateLoopControls() {
     for (const loopDef of upgradeSession.discoveredLoops) {
       log(`Dynamic SBC scan: added session Upgrade Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.rewardPackIds?.[0] || '?'}, target rating:${loopDef.ratingSbcFill?.targetRating || '?'}, players:${loopDef.expectedPlayerCount || '?'})`);
     }
+    for (const activity of activitySession.activities) {
+      log(`Dynamic SBC scan: resolved activity ${activity.familyId} -> Set #${activity.setId} ${activity.setName}; reward #${activity.rewardPackIds?.[0] || '?'}; consumers:${activity.consumers?.join(', ') || 'none'}`);
+    }
+    for (const diagnostic of activitySession.diagnostics) log(`Dynamic SBC scan: activity binding: ${diagnostic}`);
     const upgradeDuplicateCount = upgradeSession.results.filter((result) => result.status === 'duplicate').length;
     const pickSetCount = snapshots.filter((snapshot) => (snapshot.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK')).length;
     const upgradeSetCount = snapshots.length - pickSetCount;
-    log(`Dynamic SBC scan complete: ${summary.stats.setsScanned} Set(s) checked, ${summary.stats.candidates} candidate(s) (${pickSetCount} Pick, ${upgradeSetCount} Upgrade); cache hits:${summary.stats.cacheHits}, rescanned:${summary.stats.rescanned}, new:${summary.stats.newSets}, changed:${summary.stats.changedSets}, expired:${summary.stats.expiredEntries}, removed:${summary.stats.removedEntries}, failures:${summary.stats.loadFailures}; ${state.discoveredLoopDefs.length} session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) updated, ${pickDuplicateCount + upgradeDuplicateCount} duplicate(s) skipped`);
+    log(`Dynamic SBC scan complete: ${summary.stats.setsScanned} Set(s) checked, ${summary.stats.candidates} candidate(s) (${pickSetCount} Pick, ${upgradeSetCount} Upgrade); cache hits:${summary.stats.cacheHits}, rescanned:${summary.stats.rescanned}, new:${summary.stats.newSets}, changed:${summary.stats.changedSets}, expired:${summary.stats.expiredEntries}, removed:${summary.stats.removedEntries}, failures:${summary.stats.loadFailures}; ${state.discoveredLoopDefs.length} session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) updated, ${Object.keys(state.discoveredRecoveryRecipeOverrides).length} recovery recipe(s) updated, ${pickDuplicateCount + upgradeDuplicateCount} duplicate(s) skipped`);
     return summary;
   }
 
@@ -4770,7 +4815,7 @@ function updateLoopControls() {
         log(`${loopDef.name}: dry-run found unopened ${upgradeDef.name} reward pack ${packName(existingPack)} (#${existingPack.id}); live run would open it before crafting another ${requiredSpecialLabel(loopDef)}`);
         return true;
       }
-      const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name);
+      const set = await findSbcSetForLoopDef(upgradeDef, upgradeDef.name);
       const challenge = shouldUseRatingSbcFill(upgradeDef)
         ? await findAvailableRatingSbcChallenge(set, upgradeDef.name)
         : await findAvailableSbcChallenge(set, upgradeDef.name);
@@ -5631,7 +5676,7 @@ function updateLoopControls() {
     const label = `Unassigned ${policy.id} -> ${recipe.name}`;
     let set;
     try {
-      set = await findSbcSetIfPresent(recipe.sbcNames);
+      set = await findSbcSetForDefIfPresent(recipe);
     } catch (error) {
       log(`${label}: SBC lookup failed: ${error?.message || error}`);
       return { status: 'blocked', reason: error?.message || String(error) };
@@ -5815,7 +5860,7 @@ function updateLoopControls() {
       },
       submitSeed: async ({ result: current }) => {
         if (dryRun) {
-          const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+          const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
           const challenge = await findAvailableSbcChallenge(set, loopDef.name);
           if (!challenge) return { status: 'unavailable', reason: 'no available seed SBC challenge remains' };
           const { requirement, selection } = await selectDailySeedInventory(loopDef);
@@ -5994,7 +6039,7 @@ function updateLoopControls() {
     const configuredDailyLimit = Number(step?.dailyCompletionLimit || 0);
     if (!Number.isFinite(configuredDailyLimit) || configuredDailyLimit <= 0 || !step?.sbcNames?.length) return null;
 
-    const set = await findSbcSet(step.sbcNames, step.name);
+    const set = await findSbcSetForLoopDef(step, step.name);
     const challenges = await requestSbcChallenges(set, step.name, { allowEmpty: true, attempts: 3 });
     const setComplete = isSbcSetComplete(set);
     const setRemaining = getDailySetRemaining(set);
@@ -6813,7 +6858,7 @@ function updateLoopControls() {
         return { preserveSupply };
       },
       challengeProvider: async ({ refresh }) => {
-        const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+        const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
         if (dryRun || loopDef.deferChallengeLoad === true) {
           const challenge = await findAvailableSbcChallenge(set, loopDef.name);
           if (!challenge) return null;
@@ -7061,7 +7106,7 @@ function updateLoopControls() {
           openedContext = options.opened;
           return options.opened;
         }
-        const set = await findSbcSet(loopDef.sbcNames, loopDef.name);
+        const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
         const opened = await openSbcSet(set, { returnNullIfComplete: true });
         if (!opened) return null;
         openedContext = opened;
@@ -7134,6 +7179,12 @@ function updateLoopControls() {
       const resolved = resolvePlayerPickLoopReference(loopDef.preCraftPlayerPick, getLoopDefs());
       if (resolved.status === 'ambiguous') {
         fail(`${loopDef.name}: pre-craft Player Pick identity is ambiguous: ${resolved.matches.map((loop) => loop.id).join(', ')}`);
+      }
+      basePickDef = resolved.loop;
+    } else if (loopDef.preCraftPlayerPickSelector) {
+      const resolved = resolvePlayerPickLoopSelector(loopDef.preCraftPlayerPickSelector, getLoopDefs());
+      if (resolved.status === 'ambiguous') {
+        fail(`${loopDef.name}: pre-craft Player Pick selector is ambiguous: ${resolved.matches.map((loop) => loop.id).join(', ')}`);
       }
       basePickDef = resolved.loop;
     }
@@ -7320,7 +7371,7 @@ function updateLoopControls() {
         const broadDuplicateCount = countUnassignedMatching(broadDuplicatePredicate) + transientSignals.length;
         if (!broadDuplicateCount && !forceAttempt) return { status: 'done', reason: 'no reserved duplicate remains' };
 
-        const set = await findSbcSet(upgradeDef.sbcNames, upgradeDef.name || label);
+        const set = await findSbcSetForLoopDef(upgradeDef, upgradeDef.name || label);
         const challenges = await requestSbcChallenges(set, upgradeDef.name || label, { attempts: 3, allowEmpty: true });
         const challengeIndex = challenges.findIndex((challenge) => !isCompletedChallenge(challenge));
         if (challengeIndex < 0) {
@@ -7462,7 +7513,7 @@ function updateLoopControls() {
     const effectiveMaterialStages = [
       preCraftPickDef
         ? `${preCraftPickDef.name} [common material]`
-        : (loopDef.preCraftPlayerPick ? 'dynamic pre-craft Player Pick [unavailable]' : null),
+        : (loopDef.preCraftPlayerPick || loopDef.preCraftPlayerPickSelector ? 'dynamic pre-craft Player Pick [unavailable]' : null),
       ...craftingUpgrades.map((upgradeDef) => {
         const materialTypes = [...new Set(
           getChallengeMaterialDefs(upgradeDef)
@@ -7480,7 +7531,7 @@ function updateLoopControls() {
     const runProvisionMaterialStages = async (phase, context = {}) => {
       const handling = phase === 'resume' ? context.provisionHandling || {} : context;
       if (dryRun) {
-        if (loopDef.preCraftPlayerPickLoopId || loopDef.preCraftPlayerPick) {
+        if (loopDef.preCraftPlayerPickLoopId || loopDef.preCraftPlayerPick || loopDef.preCraftPlayerPickSelector) {
           const pickDef = getProvisionPreCraftPickDef(loopDef);
           if (pickDef) {
             log(`${loopDef.name}: dry-run ${phase} checks ${pickDef.name} before 5x 80+ Upgrade when an unassigned duplicate matches`);
@@ -8187,7 +8238,7 @@ function updateLoopControls() {
   async function runProvisionPreCraftPlayerPick(loopDef, provisionHandling = {}, options = {}) {
     const pickDef = getProvisionPreCraftPickDef(loopDef);
     if (!pickDef) {
-      if (loopDef.preCraftPlayerPick) {
+      if (loopDef.preCraftPlayerPick || loopDef.preCraftPlayerPickSelector) {
         log(`${loopDef.name}: configured dynamic pre-craft Player Pick is unavailable; skipping it and continuing crafting stages`);
       }
       return [];
@@ -8839,7 +8890,10 @@ function updateLoopControls() {
         return pack;
       },
       inspectSbc: async () => {
-        const set = await findSbcSet(loopDef.sbcNames || CFG.bronzeUpgradeNames, loopDef.name);
+        const set = await findSbcSetForLoopDef({
+          ...loopDef,
+          sbcNames: loopDef.sbcNames || CFG.bronzeUpgradeNames,
+        }, loopDef.name);
         const challenge = await findAvailableSbcChallenge(set, loopDef.name);
         if (!challenge) return null;
         if (dryRun) log(`${loopDef.name}: dry-run SBC found ${set.name} (#${set.id || '?'}) challenge #${challenge.id || '?'}`);

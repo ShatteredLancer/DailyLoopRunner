@@ -3,6 +3,7 @@ import {
   getBuilderLoopFields,
   getBuilderStrategyDescriptor,
 } from '../config/builder-descriptors.js';
+import { SBC_ACTIVITY_FAMILY_IDS } from '../config/activity-discovery.js';
 
 const PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 
@@ -122,6 +123,18 @@ function renderSourcePackRef(path, label, value = {}, context) {
   </div></section>`;
 }
 
+function renderActivityBinding(path, value, context) {
+  const enabled = value && typeof value === 'object';
+  return `<section class="dlr-builder-form-section"><h3>Dynamic SBC activity</h3>
+    <div class="dlr-builder-form-grid">
+      ${fieldRow('Binding', `<select data-builder-field="${escapeHtml(path)}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value=""${selected(enabled, false)}>None</option><option value="true"${selected(enabled, true)}>Enabled</option></select>`)}
+      ${enabled ? fieldRow('Family', selectInput(`${path}.family`, value.family, SBC_ACTIVITY_FAMILY_IDS.map((family) => ({ value: family, label: family })), context.readOnly)) : ''}
+      ${enabled ? fieldRow('Required', `<select data-builder-field="${path}.required" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.required)}</select>`) : ''}
+      ${enabled ? fieldRow('Category', textInput(`${path}.category`, value.category || 'Upgrades', 'text', true)) : ''}
+    </div>
+  </section>`;
+}
+
 function renderPileList(path, label, values, context) {
   const piles = Array.isArray(values) ? values : [];
   const rows = piles.map((pile, index) => `<div class="dlr-builder-pile-row">
@@ -234,6 +247,15 @@ function renderPickBinding(path, value = {}, context) {
   </section>`;
 }
 
+function renderPickSelector(path, value = {}, context) {
+  return `<section class="dlr-builder-form-section"><h3>Pre-craft Player Pick selector</h3><div class="dlr-builder-form-grid">
+    ${fieldRow('Material', selectInput(`${path}.material`, value.material, [
+      { value: '', label: 'Disabled' },
+      { value: 'common-gold', label: 'Common Gold compatible' },
+    ], context.readOnly))}
+  </div></section>`;
+}
+
 function renderUpgrade(path, value = {}, context, options = {}) {
   return `<div class="dlr-builder-subsection">
     <div class="dlr-builder-section-head"><h4>${escapeHtml(options.label || value.name || 'Upgrade')}</h4>${options.removable ? `<button data-builder-action="remove-list" data-path="${escapeHtml(options.listPath)}" data-index="${options.index}"${disabled(context.readOnly)}>Remove</button>` : ''}</div>
@@ -244,6 +266,7 @@ function renderUpgrade(path, value = {}, context, options = {}) {
       ${fieldRow('Open rewards', `<select data-builder-field="${path}.openRewardPacks" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.openRewardPacks)}</select>`)}
       ${fieldRow('Force reward opening', `<select data-builder-field="${path}.forceOpenRewardPacks" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.forceOpenRewardPacks)}</select>`)}
     </div>
+    ${renderActivityBinding(`${path}.activityBinding`, value.activityBinding, context)}
     ${renderList(`${path}.sbcNames`, 'SBC aliases', value.sbcNames, 'text', context)}
     ${renderList(`${path}.rewardPackIds`, 'Reward pack IDs', value.rewardPackIds, 'number', context)}
     ${renderList(`${path}.rewardPackNames`, 'Reward pack aliases', value.rewardPackNames, 'text', context)}
@@ -324,6 +347,7 @@ function renderAutomaticFillRecovery(path, label, value, context, options = {}) 
     return renderGenericObject(path, label, value, context);
   }
   return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3>
+    ${renderActivityBinding(`${path}.activityBinding`, value.activityBinding, context)}
     <div class="dlr-builder-form-grid">
       ${fieldRow('Enabled', `<select data-builder-field="${path}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value="true" selected>Enabled</option><option value="false">Disabled</option></select>`)}
       ${fieldRow('Name', textInput(`${path}.name`, value.name, 'text', context.readOnly))}
@@ -380,6 +404,8 @@ function renderField(field, loop, context) {
     case 'reward-flow': return renderRewardFlow(field.path, value, context);
     case 'pick-options': return renderPickOptions(field.path, value, context);
     case 'pick-binding': return renderPickBinding(field.path, value, context);
+    case 'pick-selector': return renderPickSelector(field.path, value, context);
+    case 'activity-binding': return renderActivityBinding(field.path, value, context);
     case 'upgrade': return `<section class="dlr-builder-form-section"><h3>${escapeHtml(field.label)}</h3>${renderUpgrade(field.path, value, context)}</section>`;
     case 'upgrade-list': return renderUpgradeList(field.path, field.label, value, context);
     case 'stage-list': return renderUpgradeList(field.path, field.label, value, context, true);
@@ -455,6 +481,7 @@ function renderRecoveryEditor(object, kind, context) {
         ${fieldRow('Insufficient', selectInput('onInsufficient', object.onInsufficient, [{ value: '', label: 'Default' }, { value: 'continue', label: 'Continue' }, { value: 'stop', label: 'Stop' }], context.readOnly))}
         ${fieldRow('Blocked', selectInput('onBlocked', object.onBlocked, [{ value: '', label: 'Default (stop)' }, { value: 'stop', label: 'Stop' }], context.readOnly))}
       </div></section>
+      ${renderActivityBinding('activityBinding', object.activityBinding, context)}
       ${renderList('sbcNames', 'SBC aliases', object.sbcNames, 'text', context)}
       ${renderRequirements('requirements', 'Requirements', object.requirements, context)}
       ${renderPileList('priorityPiles', 'Pile order', object.priorityPiles, context)}`;

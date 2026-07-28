@@ -36,6 +36,27 @@ describe('loop configuration contracts', () => {
       .toEqual(builtIn.map(({ id, strategy }) => ({ id, strategy })));
   });
 
+  it('keeps dynamic activity bindings aligned across built-ins, nested upgrades and recovery recipes', async () => {
+    const { api, builtIn, external, externalConfig } = await loadDefinitions();
+    const expectedFamilies = {
+      'daily-bronze': 'daily-bronze-upgrade',
+      'daily-silver': 'daily-silver-upgrade',
+      'daily-common': 'daily-common-gold-upgrade',
+      'daily-rare': 'daily-rare-gold-upgrade',
+      '2x84-fodder': '2x84-upgrade',
+    };
+    for (const [id, family] of Object.entries(expectedFamilies)) {
+      expect(byId(builtIn, id).activityBinding).toMatchObject({ family, category: 'Upgrades' });
+      expect(byId(external, id).activityBinding).toEqual(byId(builtIn, id).activityBinding);
+    }
+    expect(byId(builtIn, 'inventory-fodder-exhaustion').stages.map((stage) => stage.activityBinding.family))
+      .toEqual(['bronze-upgrade', 'silver-upgrade', 'common-gold-crafting-upgrade']);
+    expect(byId(builtIn, 'provision-crafting').craftingUpgrades.map((upgrade) => upgrade.activityBinding.family))
+      .toEqual(['common-gold-crafting-upgrade', '2x84-upgrade']);
+    expect(externalConfig.recoveryRecipes.map((recipe) => recipe.activityBinding))
+      .toEqual(api.RECOVERY_RECIPES.map((recipe) => recipe.activityBinding));
+  });
+
   it('locks the One-click Daily stage order', async () => {
     const { builtIn, external } = await loadDefinitions();
     const builtInLoop = byId(builtIn, 'one-click-daily');
@@ -271,10 +292,8 @@ describe('loop configuration contracts', () => {
         sourcePackRef: { rewardOfLoopId: 'daily-common-mvp' },
       })],
     });
-    expect(provision.preCraftPlayerPick).toEqual({
-      sbcSetIds: [1256],
-      pickItemResourceIds: [5005713],
-    });
+    expect(provision.preCraftPlayerPick).toBeUndefined();
+    expect(provision.preCraftPlayerPickSelector).toEqual({ material: 'common-gold' });
     expect(provision.preCraftPlayerPickLoopId).toBeUndefined();
     expect(provision.craftingUpgrades.map((upgrade) => upgrade.name))
       .toEqual(['5x 80+ Upgrade', '2x 84+ Upgrade']);

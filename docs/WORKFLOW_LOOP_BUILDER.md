@@ -51,7 +51,21 @@ Every object shown by the Builder has one source:
 
 Built-in objects support View, Duplicate, and Override. They do not support direct mutation or deletion. A profile may hide a built-in object from its effective list, but the underlying built-in definition remains recoverable.
 
-Dynamic objects are read-only snapshots. A Workflow may reference a Dynamic SBC only when its stable identity can be recorded. The Builder stores Loop IDs, Set IDs, Pick resource IDs or Pack reward IDs, and the last valid definition. A later scan refreshes the effective definition. An unresolved or expired binding is marked unavailable and cannot be activated silently.
+Dynamic objects are read-only snapshots. A Workflow may reference a standalone Dynamic SBC only when its stable identity can be recorded. The Builder stores Loop IDs, Set IDs, Pick resource IDs or Pack reward IDs, and the last valid definition. A later scan refreshes the effective definition. An unresolved or expired standalone binding is marked unavailable and cannot be activated silently.
+
+Dynamic discovery has a second mode for built-in behavior templates: `activityBinding`. Daily Upgrades, inventory exhaustion stages, Provision crafting stages, automatic TOTW/2x84 recovery, and Unassigned Recovery recipes declare a supported activity family. The current scan materializes the matching EA Set into the existing object; users do not add these basic activities from the Dynamic SBC library one by one.
+
+The boundary is strict:
+
+| Scanned EA facts | Preserved Loop policy |
+| --- | --- |
+| Set and Challenge identity | Workflow order and strategy |
+| Current display name | Pile order and fallback policy |
+| Player requirement structure | High Gold, Special, Tradeable, Evolution, and FSU protection |
+| Reward Pack identity | Rating solver limits and submission safety |
+| Remaining completions | User run limits and reward/recovery behavior |
+
+Exactly one current Set must match an activity family. Zero matches retain the compatibility aliases/IDs during the migration period; multiple matches are ambiguous and are never selected automatically. Runtime SBC resolution tries scanned Set IDs first and uses full-name aliases only as compatibility fallback.
 
 ## 5. Profiles and persistence
 
@@ -158,6 +172,7 @@ Every Loop editor begins with common fields:
 - Player Pick options where supported.
 - Unassigned recovery policies.
 - Submission rating and special-card safety limits.
+- Dynamic SBC activity family where the strategy supports automatic identity refresh.
 
 Strategy-specific editors cover the full current registry:
 
@@ -205,6 +220,14 @@ The selector reads current My Packs metadata and supports manual ID/name aliases
 
 The UI supports fixed limits, user input at run time, current EA daily remaining, and all matching source packs where the existing strategy supports them. It serializes to `runtimeQuantity`, `dailyCompletionLimit`, `consumeAllSourcePacks`, and the strategy's established limit fields.
 
+### 11.6 Dynamic SBC activity binding
+
+`Dynamic SBC activity` selects a supported semantic family such as Daily Bronze, Common Gold crafting, 2x84, TOTW, or high-rated x10. It is available on direct Loop definitions and on nested crafting, stage, automatic recovery, and Recovery recipe editors.
+
+Each nested consumer owns its binding. A parent binding is not inherited by `craftingUpgrades`, `stages`, `autoTotwUpgrade`, `autoFodderUpgrade`, or Recovery recipes. The scanner may replace only live EA metadata; configured safety fields remain in the draft and are merged into the materialized session definition.
+
+This differs from **Add to profile** in the Dynamic SBC library. Add to profile creates a stable Profile reference to one standalone scanned Loop. Activity binding keeps an existing behavior template and refreshes only its current EA identity.
+
 ## 12. Inheritance and effective values
 
 Inherited boolean settings use a three-state control:
@@ -229,7 +252,7 @@ Existing runtime behavior remains authoritative:
 
 Recovery is an Advanced Builder section because it is part of the current full Workflow JSON contract. It supports:
 
-- Recovery recipes with SBC aliases, requirements, and pile order.
+- Recovery recipes with dynamic activity family, SBC aliases, requirements, and pile order.
 - Recovery policies with match requirements and ordered recipe steps.
 - Continue/stop handling for unavailable, insufficient, and blocked outcomes.
 - Selection of default policy IDs.

@@ -7,6 +7,7 @@ import {
   parsePlayerPickSbcSnapshot,
   readPlayerPickRewardCounts,
   resolvePlayerPickLoopReference,
+  resolvePlayerPickLoopSelector,
 } from '../../src/config/player-pick-discovery.js';
 import { validateLoopDef } from '../../src/config/loop-schema.js';
 import { loadFixture } from '../helpers/fixtures.js';
@@ -419,15 +420,12 @@ describe('dynamic Player Pick SBC discovery', () => {
     });
   });
 
-  it('keeps Provision bound to a partially completed discovered Pick with inferred completed-Challenge metadata', () => {
+  it('selects a partially completed common-Gold Pick for Provision without a fixed Set or reward ID', () => {
     const provision = {
       id: 'provision-crafting',
       name: 'Provision Crafting Loop',
       strategy: 'provisionPackCrafting',
-      preCraftPlayerPick: {
-        sbcSetIds: [1256],
-        pickItemResourceIds: [5005713],
-      },
+      preCraftPlayerPickSelector: { material: 'common-gold' },
     };
     const session = buildPlayerPickDiscoverySession({
       configuredLoops: [provision],
@@ -461,13 +459,39 @@ describe('dynamic Player Pick SBC discovery', () => {
     });
 
     expect(session.discoveredLoops).toHaveLength(1);
-    expect(resolvePlayerPickLoopReference(provision.preCraftPlayerPick, session.loopDefs)).toMatchObject({
+    expect(resolvePlayerPickLoopSelector(provision.preCraftPlayerPickSelector, session.loopDefs)).toMatchObject({
       status: 'matched',
       loop: {
         name: '4 of 10 83+ Player Pick',
         challengesPerPick: 2,
       },
     });
+  });
+
+  it('rejects rare-required or ambiguous common-Gold Provision Pick selectors', () => {
+    const common = {
+      id: 'common',
+      strategy: 'playerPickSbc',
+      discovered: true,
+      sbcSetIds: [1],
+      pickItemResourceIds: [10],
+      requirements: [{ tier: 'gold', count: 10, preferCommon: true }],
+    };
+    const rareRequired = {
+      id: 'rare',
+      strategy: 'playerPickSbc',
+      discovered: true,
+      sbcSetIds: [2],
+      pickItemResourceIds: [20],
+      requirements: [
+        { tier: 'gold', rarity: 'rare', count: 3 },
+        { tier: 'gold', rarity: 'common', count: 1 },
+      ],
+    };
+    expect(resolvePlayerPickLoopSelector({ material: 'common-gold' }, [common, rareRequired]))
+      .toMatchObject({ status: 'matched', loop: { id: 'common' } });
+    expect(resolvePlayerPickLoopSelector({ material: 'common-gold' }, [common, { ...common, id: 'other', sbcSetIds: [3], pickItemResourceIds: [30] }]))
+      .toMatchObject({ status: 'ambiguous', loop: null });
   });
 
   it('builds a replaceable session list without duplicating static Picks', async () => {

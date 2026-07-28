@@ -205,6 +205,36 @@ describe('Workflow and Loop Builder view', () => {
     expect(html).toContain('data-builder-field="stages.0.rewardPackNames.0"');
   });
 
+  it('renders dynamic activity bindings and the Provision common-Gold Pick selector', () => {
+    const loop = {
+      id: 'provision',
+      name: 'Provision',
+      strategy: 'provisionPackCrafting',
+      preCraftPlayerPickSelector: { material: 'common-gold' },
+      craftingUpgrades: [{
+        id: 'craft',
+        name: 'Crafting Upgrade',
+        activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: true },
+        sbcNames: ['Compatibility Upgrade'],
+        requirements: [{ tier: 'gold', rarity: 'common', count: 9 }],
+      }],
+    };
+    const html = workflowLoopBuilderHtml(model({
+      tab: 'loops',
+      config: { ...config(), loops: [loop] },
+      selectedId: loop.id,
+      selectedObject: loop,
+      selectedSource: 'custom',
+      editorReadOnly: false,
+      sources: { loops: [{ id: loop.id, source: 'custom' }], recoveryRecipes: [], unassignedRecoveryPolicies: [] },
+    }));
+
+    expect(html).toContain('data-builder-field="preCraftPlayerPickSelector.material"');
+    expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.family"');
+    expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.required"');
+    expect(html).toContain('common-gold-crafting-upgrade');
+  });
+
   it('renders special controls, complete Recovery behavior, and Workflow step reward flow', () => {
     const draft = config();
     draft.loops[0].steps = [{

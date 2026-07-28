@@ -15,6 +15,7 @@ import {
   RECOVERY_RECIPES,
   UNASSIGNED_RECOVERY_POLICIES,
 } from './recovery.js';
+import { SBC_ACTIVITY_FAMILY_IDS } from './activity-discovery.js';
 
 const INVENTORY_PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 const SOURCE_PACK_REF_STRATEGIES = Object.freeze([
@@ -81,6 +82,29 @@ function validateSourcePackRef(value, path, errors) {
 
 function hasSourcePackIdentity(value = {}) {
   return Boolean(value.sourcePackRef?.rewardOfLoopId || value.sourcePackIds?.length || value.sourcePackNames?.length);
+}
+
+function validateActivityBinding(value, path, errors) {
+  if (value === undefined || value === null) return;
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  const allowedFields = new Set(['family', 'category', 'required']);
+  Object.keys(value).forEach((field) => {
+    if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
+  });
+  if (typeof value.family !== 'string' || !value.family.trim()) {
+    errors.push(`${path}.family is required`);
+  } else if (!SBC_ACTIVITY_FAMILY_IDS.includes(value.family)) {
+    errors.push(`${path}.family must be one of: ${SBC_ACTIVITY_FAMILY_IDS.join(', ')}`);
+  }
+  if (value.category !== undefined && value.category !== 'Upgrades') {
+    errors.push(`${path}.category must be Upgrades`);
+  }
+  if (value.required !== undefined && typeof value.required !== 'boolean') {
+    errors.push(`${path}.required must be boolean`);
+  }
 }
 
 function validatePileList(value, path, errors, required = false) {
@@ -152,6 +176,7 @@ function validateUpgradeDef(upgradeDef, path, errors) {
     errors.push(`${path}.name is required`);
   }
   validateStringArray(upgradeDef.sbcNames, `${path}.sbcNames`, errors, true);
+  validateActivityBinding(upgradeDef.activityBinding, `${path}.activityBinding`, errors);
   const hasChallengeRequirements = upgradeDef.challengeRequirements !== undefined;
   validateRequirements(upgradeDef.requirements, `${path}.requirements`, errors, !hasChallengeRequirements);
   if (hasChallengeRequirements) {
@@ -413,6 +438,25 @@ export function validateLoopDef(loopDef, label = 'loop') {
       errors.push('autoFodderUpgrade.maxAttemptsPerCompletion must be a number between 1 and 10');
     }
   }
+  if (loopDef.preCraftPlayerPickSelector !== undefined) {
+    if (!isPlainObject(loopDef.preCraftPlayerPickSelector)) {
+      errors.push('preCraftPlayerPickSelector must be an object');
+    } else {
+      const allowedFields = new Set(['material']);
+      Object.keys(loopDef.preCraftPlayerPickSelector).forEach((field) => {
+        if (!allowedFields.has(field)) errors.push(`preCraftPlayerPickSelector.${field} is not supported`);
+      });
+      if (loopDef.preCraftPlayerPickSelector.material !== 'common-gold') {
+        errors.push('preCraftPlayerPickSelector.material must be common-gold');
+      }
+    }
+  }
+  if (isPlainObject(loopDef.autoTotwUpgrade)) {
+    validateActivityBinding(loopDef.autoTotwUpgrade.activityBinding, 'autoTotwUpgrade.activityBinding', errors);
+  }
+  if (isPlainObject(loopDef.autoFodderUpgrade)) {
+    validateActivityBinding(loopDef.autoFodderUpgrade.activityBinding, 'autoFodderUpgrade.activityBinding', errors);
+  }
   if (loopDef.ratingSbcFill !== undefined) {
     if (!isPlainObject(loopDef.ratingSbcFill)) {
       errors.push('ratingSbcFill must be an object');
@@ -460,6 +504,7 @@ export function validateLoopDef(loopDef, label = 'loop') {
   validatePileList(loopDef.clubFallbackPiles, 'clubFallbackPiles', errors);
   validatePileList(loopDef.disabledPiles, 'disabledPiles', errors);
   validateRewardFlow(loopDef.rewardFlow, 'rewardFlow', errors);
+  validateActivityBinding(loopDef.activityBinding, 'activityBinding', errors);
 
   if (loopDef.strategy === 'validationBronzeUpgrade') {
     validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);

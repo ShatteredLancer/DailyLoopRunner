@@ -7,6 +7,7 @@ export const LOOP_DEFS = [
     mvp: true,
     name: 'Bronze Upgrade Validation',
     strategy: 'validationBronzeUpgrade',
+    activityBinding: { family: 'bronze-upgrade', category: 'Upgrades', required: true },
     sourcePackIds: [105],
     sourcePackNames: CFG.sourcePackNames,
     sbcNames: CFG.bronzeUpgradeNames,
@@ -20,6 +21,7 @@ export const LOOP_DEFS = [
     hidden: true,
     name: 'Daily Bronze Loop',
     strategy: 'dailySingleCardRecycle',
+    activityBinding: { family: 'daily-bronze-upgrade', category: 'Upgrades', required: true },
     sbcNames: ['Daily Bronze Upgrade', '每日青铜升级', '每日青銅升級'],
     rewardPackIds: [105],
     rewardPackNames: ['Bronze Players Premium', 'Premium Bronze Players', 'BRONZE PLAYERS PREMIUM'],
@@ -34,6 +36,7 @@ export const LOOP_DEFS = [
     mvp: true,
     name: 'Daily Bronze MVP (1 run)',
     strategy: 'dailySingleCardRecycle',
+    activityBinding: { family: 'daily-bronze-upgrade', category: 'Upgrades', required: true },
     sbcNames: ['Daily Bronze Upgrade', '每日青铜升级', '每日青銅升級'],
     rewardPackIds: [105],
     rewardPackNames: ['Bronze Players Premium', 'Premium Bronze Players', 'BRONZE PLAYERS PREMIUM'],
@@ -47,6 +50,7 @@ export const LOOP_DEFS = [
     hidden: true,
     name: 'Daily Silver Loop',
     strategy: 'dailySingleCardRecycle',
+    activityBinding: { family: 'daily-silver-upgrade', category: 'Upgrades', required: true },
     sbcNames: ['Daily Silver Upgrade', '每日白银升级', '每日白銀升級'],
     rewardPackIds: [205],
     rewardPackNames: ['Silver Players Premium', 'SILVER PLAYERS PREMIUM'],
@@ -61,6 +65,7 @@ export const LOOP_DEFS = [
     mvp: true,
     name: 'Daily Silver MVP (1 run)',
     strategy: 'dailySingleCardRecycle',
+    activityBinding: { family: 'daily-silver-upgrade', category: 'Upgrades', required: true },
     sbcNames: ['Daily Silver Upgrade', '每日白银升级', '每日白銀升級'],
     rewardPackIds: [205],
     rewardPackNames: ['Silver Players Premium', 'SILVER PLAYERS PREMIUM'],
@@ -74,6 +79,7 @@ export const LOOP_DEFS = [
     hidden: true,
     name: 'Daily Common Loop',
     strategy: 'supplyAndCraft',
+    activityBinding: { family: 'daily-common-gold-upgrade', category: 'Upgrades', required: true },
     sbcNames: ['Daily Common Gold Upgrade', '每日普通金牌升级', '每日普通金牌升級'],
     rewardPackIds: [304],
     rewardPackNames: ['Gold Players Pack'],
@@ -97,6 +103,7 @@ export const LOOP_DEFS = [
     mvp: true,
     name: 'Daily Common MVP (1 run)',
     strategy: 'supplyAndCraft',
+    activityBinding: { family: 'daily-common-gold-upgrade', category: 'Upgrades', required: true },
     sbcNames: ['Daily Common Gold Upgrade', '每日普通金牌升级', '每日普通金牌升級'],
     rewardPackIds: [304],
     rewardPackNames: ['Gold Players Pack'],
@@ -119,6 +126,7 @@ export const LOOP_DEFS = [
     hidden: true,
     name: 'Daily Rare Loop',
     strategy: 'supplyAndCraft',
+    activityBinding: { family: 'daily-rare-gold-upgrade', category: 'Upgrades', required: true },
     sourcePackRef: { rewardOfLoopId: 'daily-common' },
     sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
     sourcePackIds: [20060],
@@ -153,6 +161,7 @@ export const LOOP_DEFS = [
     mvp: true,
     name: 'Daily Rare MVP (1 run)',
     strategy: 'supplyAndCraft',
+    activityBinding: { family: 'daily-rare-gold-upgrade', category: 'Upgrades', required: true },
     sourcePackRef: { rewardOfLoopId: 'daily-common-mvp' },
     sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
     sourcePackIds: [20060],
@@ -199,6 +208,7 @@ export const LOOP_DEFS = [
     ],
     rareUpgrade: {
       name: '2x 84+ Upgrade',
+      activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: true },
       sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
       requirements: [
         { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
@@ -244,6 +254,7 @@ export const LOOP_DEFS = [
       {
         id: 'bronze-upgrade',
         name: 'Bronze Upgrade',
+        activityBinding: { family: 'bronze-upgrade', category: 'Upgrades', required: true },
         sbcNames: ['Bronze Upgrade', '青铜升级', '青銅升級'],
         requirements: [
           { tier: 'bronze', count: 11, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
@@ -256,6 +267,7 @@ export const LOOP_DEFS = [
       {
         id: 'silver-upgrade',
         name: 'Silver Upgrade',
+        activityBinding: { family: 'silver-upgrade', category: 'Upgrades', required: true },
         sbcNames: ['Silver Upgrade', '白银升级', '白銀升級'],
         requirements: [
           { tier: 'silver', count: 11, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
@@ -268,6 +280,7 @@ export const LOOP_DEFS = [
       {
         id: 'fof-glory-hunters',
         name: '5x 80+ Upgrade',
+        activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: true },
         sbcNames: ['5x 80+ Upgrade'],
         requirements: [
           {
@@ -302,6 +315,7 @@ export const LOOP_DEFS = [
       {
         id: 'fof-glory-hunters',
         name: '5x 80+ Upgrade',
+        activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: true },
         sbcNames: ['5x 80+ Upgrade'],
         requirements: [
           {
@@ -326,6 +340,7 @@ export const LOOP_DEFS = [
     mvp: true,
     name: '2x84+ Fodder Loop',
     strategy: 'fillAndVerifySbc',
+    activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: true },
     sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
     rewardPackNames: ['2x 84+ Rare Gold Players Pack', '2 x 84+ Rare Gold Players Pack'],
     maxCompletions: 1,
@@ -349,6 +364,7 @@ export const LOOP_DEFS = [
     id: 'auto-totw-upgrade',
     name: '84+ TOTW Upgrade Loop',
     strategy: 'fillAndVerifySbc',
+    activityBinding: { family: 'totw-upgrade', category: 'Upgrades', required: true },
     sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
     rewardPackIds: [20707, 20441],
     rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
@@ -399,6 +415,7 @@ export const LOOP_DEFS = [
     },
     autoTotwUpgrade: {
       name: '84+ TOTW Upgrade',
+      activityBinding: { family: 'totw-upgrade', category: 'Upgrades', required: true },
       sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
       rewardPackIds: [20707, 20441],
       rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
@@ -409,6 +426,7 @@ export const LOOP_DEFS = [
       openRewardPacks: true,
     },
     autoFodderUpgrade: {
+      activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: false },
       maxAttemptsPerCompletion: 3,
     },
     blockSpecial: true,
@@ -444,6 +462,7 @@ export const LOOP_DEFS = [
     },
     autoTotwUpgrade: {
       name: '84+ TOTW Upgrade',
+      activityBinding: { family: 'totw-upgrade', category: 'Upgrades', required: true },
       sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
       rewardPackIds: [20707, 20441],
       rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
@@ -454,6 +473,7 @@ export const LOOP_DEFS = [
       openRewardPacks: true,
     },
     autoFodderUpgrade: {
+      activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: false },
       maxAttemptsPerCompletion: 3,
     },
     blockSpecial: true,
@@ -466,15 +486,13 @@ export const LOOP_DEFS = [
     strategy: 'provisionPackCrafting',
     sourcePackIds: [20643],
     sourcePackNames: ['Provision Pack', 'Provisions Pack'],
-    preCraftPlayerPick: {
-      sbcSetIds: [1256],
-      pickItemResourceIds: [5005713],
-    },
+    preCraftPlayerPickSelector: { material: 'common-gold' },
     rounds: 1,
     runtimeQuantity: { mode: 'user', target: 'rounds', default: 1, min: 1, max: 50, label: 'Provision packs' },
     craftingUpgrades: [
       {
         name: '5x 80+ Upgrade',
+        activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: true },
         sbcNames: ['5x 80+ Upgrade'],
         requirements: [
           { tier: 'gold', rarity: 'common', count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
@@ -483,6 +501,7 @@ export const LOOP_DEFS = [
       },
       {
         name: '2x 84+ Upgrade',
+        activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: true },
         sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
         requirements: [
           { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },

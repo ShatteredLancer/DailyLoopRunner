@@ -478,6 +478,47 @@ export function buildPlayerPickDiscoverySession(input = {}) {
   };
 }
 
+function playerPickRequirementGroups(loop = {}) {
+  if (Array.isArray(loop.challengeRequirements) && loop.challengeRequirements.length) {
+    return loop.challengeRequirements;
+  }
+  return Array.isArray(loop.requirements) && loop.requirements.length ? [loop.requirements] : [];
+}
+
+function commonGoldMaterialPick(loop = {}) {
+  const groups = playerPickRequirementGroups(loop);
+  if (!groups.length) return false;
+  return groups.every((requirements) => (
+    Array.isArray(requirements)
+      && requirements.length > 0
+      && requirements.every((requirement) => (
+        requirement?.tier === 'gold'
+          && requirement?.rarity !== 'rare'
+          && (requirement?.rarity === 'common' || requirement?.preferCommon === true)
+          && Number(requirement?.count || 0) > 0
+      ))
+  ));
+}
+
+export function resolvePlayerPickLoopSelector(selector = {}, loops = []) {
+  if (selector?.material !== 'common-gold') {
+    return { status: 'invalid', loop: null, matches: [] };
+  }
+  const matches = (loops || []).filter((loop) => (
+    loop?.strategy === 'playerPickSbc'
+      && (loop?.discovered === true || loop?.scannedMetadata === true)
+      && loopSetIds(loop).size > 0
+      && loopRewardIds(loop).size > 0
+      && commonGoldMaterialPick(loop)
+  ));
+  if (matches.length === 1) return { status: 'matched', loop: matches[0], matches };
+  return {
+    status: matches.length ? 'ambiguous' : 'missing',
+    loop: null,
+    matches,
+  };
+}
+
 export function collectScannedPlayerPickLoopDefs(results = []) {
   const loops = [];
   const seen = new Set();

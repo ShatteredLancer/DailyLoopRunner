@@ -610,7 +610,9 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 - Loop 级 `forceOpenRewardPacks`：仅当同一流程的后续步骤必须立即消费该奖励时才可强制开包，例如 84x10 的 TOTW 前置；普通独立/兜底 2x84+ 和最终 FOF 奖励必须服从 UI `Open reward packs`。
 - `protectHighGold`、`maxRating`、`allowSpecial`：普通材料保护。
 - `ratingSbcFill`、`requiredSpecialCount`、`requiredSpecialKind`：评分 SBC 参数。
-- `preCraftPlayerPick`：Provision 当前推荐的动态前置 Pick 引用，使用稳定 `sbcSetIds` / `pickItemResourceIds` 匹配扫描会话 Loop；扫描缺失时跳过该 stage，不得回退到过期活动。
+- `activityBinding`：内置/自定义 Loop、嵌套 stage、自动恢复和 Recovery recipe 对当前动态 SBC family 的声明式绑定。扫描只可覆盖 Set/Challenge/Reward identity、当前显示名、requirements 事实和剩余次数；不得覆盖高卡/特殊卡/可交易卡保护、pile 顺序、评分策略、fallback、Workflow 顺序或运行上限。每个嵌套消费者和 Recovery recipe 必须显式声明自己的 binding，不能依赖父对象名称或顶层 binding 传播。
+- `preCraftPlayerPick`：Provision 显式动态前置 Pick 引用兼容字段，使用稳定 `sbcSetIds` / `pickItemResourceIds` 匹配扫描会话 Loop；扫描缺失时跳过该 stage，不得回退到过期活动。内置轮换优先使用语义 selector。
+- `preCraftPlayerPickSelector`：Provision 内置活动轮换的语义选择器。当前仅支持 `material: "common-gold"`，只接受所有 Challenge 都已证明为全 Gold、无 Rare 最低要求且可按 Common-first 填充的当前扫描 Pick；无匹配时跳过，多匹配时停止并记录歧义，不得猜 Set ID。
 - `preCraftPlayerPickLoopId`：历史自定义 JSON 的静态前置 Pick 引用兼容字段；内置活动轮换不得依赖它保留过期 Pick。
 - `unassignedRecoveryPolicyIds`：当前 Loop 允许的恢复策略。
 
@@ -636,7 +638,9 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 5. `pickCount` 是最终选择数量，`pickCandidateCount` 是候选数量；动态发现只允许从奖励显式字段或官方奖励描述开头的 `X of Y` 读取，禁止从 SBC 名称推断。
 6. 更新内置配置、外部 JSON、fixture coverage、contract test 和 README。
 
-自动扫描当前可用 Dynamic SBC 的设计记录在 M9。Player Pick 扫描必须先加载 Challenge squad 得到 brick 后的真实人数，禁止从 formation 槽位数猜测。完全支持且不与静态配置重复的结果只作为当前会话 Loop 合并到列表，成功重扫会替换旧会话结果。83+/84+ 已完成动态覆盖 Dry Run/Live 验证并删除静态活动配置，今后只由扫描生成。主面板不得重新加入 `Use scan data for static Picks`；内部 `preferScannedMetadata` 仅作为旧 Profile/用户 JSON 的兼容字段保留。若兼容路径启用该字段，仅当扫描结果完整且精确匹配一个静态 `playerPickSbc` 时，才覆盖其 Set/奖励身份、Challenge 数量和 requirements，并必须保留静态 Loop ID、运行限制和流程引用。当前 Built-in Pick 均为动态扫描结果，不依赖该字段。Upgrade 当前只允许 EA `Upgrades` Category 下的 84+ TOTW 和高评分 x10；静态 84x10/TOTW 只接收扫描 metadata，新评分 x10 可生成 Dynamic Loop。扫描失败、完成、unsupported 或歧义匹配必须回退静态配置；扫描本身不会提交或领取，实际运行继续复用现有 `playerPickSbc` / `fillAndVerifySbc` Workflow。
+自动扫描当前可用 Dynamic SBC 的设计记录在 M9。Player Pick 扫描必须先加载 Challenge squad 得到 brick 后的真实人数，禁止从 formation 槽位数猜测。完全支持且不与静态配置重复的 Pick/新评分 x10 只作为当前会话 Loop 合并到列表，成功重扫会替换旧会话结果。83+/84+ Pick 已完成动态覆盖 Dry Run/Live 验证并删除静态活动配置，今后只由扫描生成。主面板不得重新加入 `Use scan data for static Picks`；内部 `preferScannedMetadata` 仅作为旧 Profile/用户 JSON 的兼容字段保留。
+
+所有 EA 明确归入 `Upgrades` Category 的 Set 都可进入增量扫描候选，但可运行授权仍按 family parser 分层：84+ TOTW 和高评分 x10 解析评分/特殊卡条件；Daily Bronze/Silver/Common/Rare、Bronze/Silver/Gold、Common Gold crafting、2x84 等基础 family 必须是单 Challenge、单 Pack reward，并且全部资格条件可完整转换。基础 family 默认通过 `activityBinding` 物化现有内置 Loop/嵌套 stage/Recovery，不自动生成新的独立 Loop。运行时查找顺序必须是扫描得到的 `sbcSetIds` 优先，完整 `sbcNames` 只作兼容 fallback。一个 family 无匹配时保留兼容配置，多匹配时必须判为歧义且不得自动选择；扫描完成、unsupported、缓存/Challenge 加载失败时同样不得把旧缓存当作新的运行授权。扫描本身不会提交或领取，实际运行继续复用现有 Workflow 和安全事务。
 
 ## 8. Agent 接到任务后的标准流程
 
