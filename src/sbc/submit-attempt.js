@@ -8,6 +8,16 @@ async function runValidators(validators, context, phase) {
   }
 }
 
+async function resolveSubmitReadiness(options, context) {
+  const maxAttempts = Math.max(1, Math.min(5, Number(options.submitReadyAttempts || 1) || 1));
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const ready = options.isSubmitReady ? await options.isSubmitReady(context) : true;
+    if (ready || attempt >= maxAttempts) return ready;
+    await options.onSubmitNotReady?.({ context, attempt, maxAttempts });
+  }
+  return false;
+}
+
 export async function submitSbcAttempt(options = {}) {
   const challengeContext = await options.challengeProvider?.();
   if (!challengeContext?.challenge || !challengeContext?.set) {
@@ -85,7 +95,7 @@ export async function submitSbcAttempt(options = {}) {
       });
     }
 
-    const submitReady = options.isSubmitReady ? await options.isSubmitReady(context) : true;
+    const submitReady = await resolveSubmitReadiness(options, context);
     if (!submitReady) {
       return createSubmissionResult({
         status: 'blocked',

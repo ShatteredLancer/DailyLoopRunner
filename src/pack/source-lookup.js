@@ -25,6 +25,7 @@ export async function findPackWithRecovery(options = {}) {
       try {
         const openedStore = await options.openStorePacks?.({ attempt, attempts }) === true;
         if (openedStore) {
+          await options.onStoreOpened?.({ attempt, attempts });
           pack = options.findCached();
           if (pack) return pack;
         }

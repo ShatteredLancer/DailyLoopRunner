@@ -67,6 +67,23 @@ describe('runSupplyAndCraftWorkflow', () => {
     expect(fallback).toHaveBeenCalledOnce();
   });
 
+  it('reloads the challenge when an unavailable supply lookup navigated away', async () => {
+    const challengeProvider = vi.fn(async () => ({ set: { id: 1 }, challenge: { id: 2 } }));
+    const result = await runSupplyAndCraftWorkflow(baseOptions({
+      challengeProvider,
+      selectPrimary: async () => selection(false, 2),
+      supplies: [{
+        id: 'bronze',
+        provide: async () => ({ status: 'unavailable', challengeInvalidated: true }),
+      }],
+      selectFallback: async () => selection(true),
+    }));
+
+    expect(result.completions).toBe(1);
+    expect(challengeProvider).toHaveBeenCalledTimes(2);
+    expect(challengeProvider.mock.calls[1][0]).toMatchObject({ refresh: true });
+  });
+
   it('can repeat one supply until the primary selection is satisfied', async () => {
     const selections = [selection(false, 0), selection(false, 3), selection(true)];
     const provide = vi.fn(async () => ({ status: 'provided', openedCount: 1 }));

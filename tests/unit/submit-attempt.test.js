@@ -121,6 +121,23 @@ describe('submitSbcAttempt', () => {
     expect(options.submitTransport).not.toHaveBeenCalled();
   });
 
+  it('rechecks submit readiness when the saved squad button appears late', async () => {
+    let checks = 0;
+    const onSubmitNotReady = vi.fn(async () => {});
+    const result = await submitSbcAttempt(baseOptions({
+      submitReadyAttempts: 3,
+      isSubmitReady: async () => {
+        checks++;
+        return checks === 3;
+      },
+      onSubmitNotReady,
+    }));
+
+    expect(result).toMatchObject({ status: 'submitted', submitted: true });
+    expect(checks).toBe(3);
+    expect(onSubmitNotReady).toHaveBeenCalledTimes(2);
+  });
+
   it('adapts an inventory selection through createInventorySquadProvider', async () => {
     const provider = createInventorySquadProvider({
       selection: { ok: true, selected: [{ id: 10 }] },

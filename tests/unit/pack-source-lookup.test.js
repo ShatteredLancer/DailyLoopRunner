@@ -27,6 +27,7 @@ describe('pack source lookup', () => {
   it('rechecks the cache after opening Store Packs', async () => {
     let cachedPack = null;
     const onExhausted = vi.fn();
+    const onStoreOpened = vi.fn();
     const pack = await findPackWithRecovery({
       attempts: 3,
       refresh: async () => {},
@@ -35,17 +36,20 @@ describe('pack source lookup', () => {
         cachedPack = { id: 20059 };
         return true;
       },
+      onStoreOpened,
       sleep: async () => {},
       onExhausted,
     });
 
     expect(pack).toEqual({ id: 20059 });
+    expect(onStoreOpened).toHaveBeenCalledOnce();
     expect(onExhausted).not.toHaveBeenCalled();
   });
 
   it('reports exhaustion only after refresh and Store recovery are exhausted', async () => {
     const refresh = vi.fn(async () => {});
     const openStorePacks = vi.fn(async () => true);
+    const onStoreOpened = vi.fn();
     const onExhausted = vi.fn();
 
     await expect(findPackWithRecovery({
@@ -53,12 +57,14 @@ describe('pack source lookup', () => {
       refresh,
       findCached: () => null,
       openStorePacks,
+      onStoreOpened,
       sleep: async () => {},
       onExhausted,
     })).resolves.toBeNull();
 
     expect(refresh).toHaveBeenCalledTimes(3);
     expect(openStorePacks).toHaveBeenCalledTimes(1);
+    expect(onStoreOpened).toHaveBeenCalledOnce();
     expect(onExhausted).toHaveBeenCalledWith({ attempts: 3, storeFallbackTried: true });
   });
 });

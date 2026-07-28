@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.30
+// @version      0.6.31
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -6488,6 +6488,15 @@
       if (result?.ok === false) throw new Error(result.reason || `${phase} validator rejected the SBC attempt`);
     }
   }
+  async function resolveSubmitReadiness(options, context) {
+    const maxAttempts = Math.max(1, Math.min(5, Number(options.submitReadyAttempts || 1) || 1));
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const ready = options.isSubmitReady ? await options.isSubmitReady(context) : true;
+      if (ready || attempt >= maxAttempts) return ready;
+      await options.onSubmitNotReady?.({ context, attempt, maxAttempts });
+    }
+    return false;
+  }
   async function submitSbcAttempt(options = {}) {
     const challengeContext = await options.challengeProvider?.();
     if (!challengeContext?.challenge || !challengeContext?.set) {
@@ -6559,7 +6568,7 @@
           consumedItemRefs: context.squadPlan.itemRefs || []
         });
       }
-      const submitReady = options.isSubmitReady ? await options.isSubmitReady(context) : true;
+      const submitReady = await resolveSubmitReadiness(options, context);
       if (!submitReady) {
         return createSubmissionResult({
           status: "blocked",
@@ -8842,6 +8851,7 @@
         try {
           const openedStore = await options.openStorePacks?.({ attempt, attempts }) === true;
           if (openedStore) {
+            await options.onStoreOpened?.({ attempt, attempts });
             pack = options.findCached();
             if (pack) return pack;
           }
@@ -9258,6 +9268,7 @@
       const iteration = result.iterations;
       const before = await options.beforeIteration?.({ iteration, result }) || {};
       let preserveSupply = before.preserveSupply === true;
+      let challengeInvalidated = false;
       let challengeContext = await options.challengeProvider({ iteration, result, refresh: false });
       if (!challengeContext?.challenge || !challengeContext?.set) {
         result.status = "unavailable";
@@ -9286,6 +9297,7 @@
             const record = { id: String(supply.id || "supply"), run, ...supplyResult };
             result.supplyRuns.push(record);
             await emit(options, "supply", { iteration, supply, supplyResult: record, selection });
+            challengeInvalidated = challengeInvalidated || supplyResult.challengeInvalidated === true;
             if (supplyResult.status === "planned") {
               result.status = "planned";
               result.reason = supplyResult.reason || `supply ${record.id} would be opened`;
@@ -9325,12 +9337,12 @@
         await emit(options, "selection-insufficient", { iteration, selection, preserveSupply });
         break;
       }
-      if (supplied && typeof options.challengeProvider === "function") {
+      if ((supplied || challengeInvalidated) && typeof options.challengeProvider === "function") {
         challengeContext = await options.challengeProvider({ iteration, result, refresh: true, previous: challengeContext });
         if (!challengeContext?.challenge || !challengeContext?.set) {
           result.status = "unavailable";
           result.reason = challengeContext?.reason || "no available SBC challenge after supply";
-          await emit(options, "challenge-unavailable", { iteration, result, afterSupply: true });
+          await emit(options, "challenge-unavailable", { iteration, result, afterSupply: supplied, afterNavigation: challengeInvalidated });
           break;
         }
       }
@@ -15355,7 +15367,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.30",
+      version: "0.6.31",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -19959,6 +19971,7 @@
         refresh: () => refreshStorePacks(),
         findCached: () => findSourcePackInCache(loopDef),
         openStorePacks: () => openStorePacksViewForRefresh(label),
+        onStoreOpened: options.onStoreOpened,
         sleep,
         log,
         onWait: ({ attempt, attempts }) => {
@@ -20527,6 +20540,8 @@
           } else if (event === "step-skipped") {
             const reason = payload.availability.reason === "unavailable" ? "challenge list unavailable after retry" : "daily SBC is complete";
             log(`${loopDef.name}: skipping ${payload.step.name}; ${reason}`);
+          } else if (event === "step-complete" && payload.stepResult?.status !== "completed") {
+            log(`${loopDef.name}: ${payload.step.name} ended with status:${payload.stepResult?.status || "unknown"}; reason:${payload.stepResult?.reason || "unknown"}`);
           }
         }
       });
@@ -21105,6 +21120,7 @@
       let openedCount = 0;
       let lookupAttempts = 0;
       let preserveUnassigned = false;
+      let challengeInvalidated = false;
       while (openedCount < maxOpens && getShortageForSource(loopDef, source, primaryPiles) > 0) {
         stopPoint();
         const shortage = getShortageForSource(loopDef, source, primaryPiles);
@@ -21114,7 +21130,10 @@
           sourcePackIds: source?.packIds || [],
           sourcePackNames: source?.packNames || []
         }, {
-          label: `${loopDef.name}: ${label} shortage source pack lookup`
+          label: `${loopDef.name}: ${label} shortage source pack lookup`,
+          onStoreOpened: () => {
+            challengeInvalidated = true;
+          }
         });
         if (!pack) {
           log(`${loopDef.name}: missing ${shortage} ${label} player(s); no matching source pack available, skipping`);
@@ -21143,7 +21162,7 @@
           break;
         }
       }
-      return { openedCount, preserveUnassigned };
+      return { openedCount, preserveUnassigned, challengeInvalidated };
     }
     async function runSupplyAndCraftLoop(loopDef, workflowOptions = {}) {
       await waitAppReady();
@@ -21221,11 +21240,18 @@
               return { status: "planned", reason: `would open ${packName(pack)}` };
             }
             const supplied = await tryOpenMixedUpgradeShortagePacks(loopDef, source, primaryPiles);
-            if (!supplied.openedCount) return { status: "unavailable", reason: "matching source pack unavailable" };
+            if (!supplied.openedCount) {
+              return {
+                status: "unavailable",
+                reason: "matching source pack unavailable",
+                challengeInvalidated: supplied.challengeInvalidated
+              };
+            }
             return {
               status: "provided",
               openedCount: supplied.openedCount,
-              preserveSupply: supplied.preserveUnassigned
+              preserveSupply: supplied.preserveUnassigned,
+              challengeInvalidated: supplied.challengeInvalidated
             };
           }
         })),
@@ -21264,15 +21290,18 @@
             log(`${loopDef.name}: missing ${missing.count || "?"} ${missing.tier || "any"} ${missing.rarity || ""} player(s); stopping before submit`);
             logSelectionDiagnostics(loopDef.name, payload.selection, fallbackPiles);
           } else if (event === "challenge-unavailable") {
-            log(`${loopDef.name}: no available SBC challenge remains${payload.afterSupply ? " after source pack handling" : ""}`);
+            const suffix = payload.afterSupply ? " after source pack handling" : payload.afterNavigation ? " after restoring the SBC from Store Packs" : "";
+            log(`${loopDef.name}: no available SBC challenge remains${suffix}`);
           }
         }
       });
       if (dryRun) {
         log(`${loopDef.name}: dry-run result ${result.status}; planned completions:${result.completions}`);
         log(`${loopDef.name}: dry run stops before cleanup, opening packs, squad save, or SBC submit`);
-      } else {
+      } else if (result.status === "completed") {
         log(`${loopDef.name}: submitted ${result.completions} SBC(s) in this run`);
+      } else {
+        log(`${loopDef.name}: ended after ${result.completions} SBC(s); status:${result.status}; reason:${result.reason || "unknown"}`);
       }
       return result;
     }
@@ -21434,6 +21463,12 @@
           const ready = !!findSubmitButton();
           log(`${label}: inventory squad saved; submit ${ready ? "ready" : "not ready"}`);
           return ready;
+        },
+        submitReadyAttempts: 3,
+        onSubmitNotReady: async ({ attempt, maxAttempts }) => {
+          log(`${label}: submit button not ready after saved squad; waiting before recheck (${attempt}/${maxAttempts})`);
+          await waitLoadingEnd(250, attempt === 1 ? 6e3 : 12e3).catch(() => null);
+          await sleep(Math.min(1500, Math.max(500, Number(CFG.pauseMs) || 800)));
         },
         submitTransport: async ({ set }) => ({
           submitted: true,
@@ -23213,7 +23248,11 @@
           runStatus = String(runResult.status);
           runReason = runResult.reason || null;
         }
-        log("All requested rounds completed");
+        if (runStatus === "completed") {
+          log("All requested rounds completed");
+        } else {
+          log(`Run ended before all requested work completed; status:${runStatus}; reason:${runReason || "unknown"}`);
+        }
       } catch (e) {
         runStatus = state.stopping ? "stopped" : "blocked";
         runReason = e?.message || String(e);

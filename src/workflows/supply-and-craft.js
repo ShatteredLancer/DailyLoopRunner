@@ -28,6 +28,7 @@ export async function runSupplyAndCraftWorkflow(options = {}) {
     const iteration = result.iterations;
     const before = await options.beforeIteration?.({ iteration, result }) || {};
     let preserveSupply = before.preserveSupply === true;
+    let challengeInvalidated = false;
     let challengeContext = await options.challengeProvider({ iteration, result, refresh: false });
     if (!challengeContext?.challenge || !challengeContext?.set) {
       result.status = 'unavailable';
@@ -60,6 +61,7 @@ export async function runSupplyAndCraftWorkflow(options = {}) {
           const record = { id: String(supply.id || 'supply'), run, ...supplyResult };
           result.supplyRuns.push(record);
           await emit(options, 'supply', { iteration, supply, supplyResult: record, selection });
+          challengeInvalidated = challengeInvalidated || supplyResult.challengeInvalidated === true;
 
           if (supplyResult.status === 'planned') {
             result.status = 'planned';
@@ -107,12 +109,12 @@ export async function runSupplyAndCraftWorkflow(options = {}) {
       break;
     }
 
-    if (supplied && typeof options.challengeProvider === 'function') {
+    if ((supplied || challengeInvalidated) && typeof options.challengeProvider === 'function') {
       challengeContext = await options.challengeProvider({ iteration, result, refresh: true, previous: challengeContext });
       if (!challengeContext?.challenge || !challengeContext?.set) {
         result.status = 'unavailable';
         result.reason = challengeContext?.reason || 'no available SBC challenge after supply';
-        await emit(options, 'challenge-unavailable', { iteration, result, afterSupply: true });
+        await emit(options, 'challenge-unavailable', { iteration, result, afterSupply: supplied, afterNavigation: challengeInvalidated });
         break;
       }
     }
