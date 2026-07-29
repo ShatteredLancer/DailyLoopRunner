@@ -68,4 +68,18 @@ describe('runSequenceWorkflow', () => {
     expect(result).toMatchObject({ status: 'blocked', reason: 'storage full' });
     expect(result.completedSteps.map((entry) => entry.id)).toEqual(['bronze']);
   });
+
+  it('does not run Daily Rare after a partially completed Daily Common step is blocked', async () => {
+    const runStep = vi.fn(async ({ step }) => step.id === 'common'
+      ? { status: 'blocked', completions: 5, reason: 'saved squad is not submit ready' }
+      : { status: 'completed' });
+    const result = await runSequenceWorkflow({ steps, runStep });
+
+    expect(runStep.mock.calls.map(([payload]) => payload.step.id)).toEqual(['bronze', 'silver', 'common']);
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reason: 'saved squad is not submit ready',
+    });
+    expect(result.completedSteps.map((entry) => entry.id)).toEqual(['bronze', 'silver']);
+  });
 });

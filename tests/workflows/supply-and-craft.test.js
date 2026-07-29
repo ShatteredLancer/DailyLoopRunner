@@ -84,6 +84,59 @@ describe('runSupplyAndCraftWorkflow', () => {
     expect(challengeProvider.mock.calls[1][0]).toMatchObject({ refresh: true });
   });
 
+  it('finishes the remaining daily completions after Store fallback reloads the challenge', async () => {
+    const challengeProvider = vi.fn(async ({ iteration, refresh }) => ({
+      set: { id: 1037 },
+      challenge: { id: refresh ? 3000 + iteration : 2000 + iteration },
+    }));
+    const provide = vi.fn(async () => ({
+      status: 'unavailable',
+      challengeInvalidated: true,
+    }));
+    const fallback = vi.fn(async () => selection(true));
+    const submittedChallengeIds = [];
+    const result = await runSupplyAndCraftWorkflow(baseOptions({
+      maxCompletions: 7,
+      challengeProvider,
+      selectPrimary: async ({ iteration }) => iteration === 6 ? selection(false, 5) : selection(true),
+      supplies: [{ id: 'bronze', provide }],
+      selectFallback: fallback,
+      submit: async ({ challengeContext }) => {
+        submittedChallengeIds.push(challengeContext.challenge.id);
+        return { status: 'submitted', submitted: true };
+      },
+    }));
+
+    expect(result).toMatchObject({ status: 'completed', completions: 7, iterations: 7 });
+    expect(provide).toHaveBeenCalledOnce();
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(challengeProvider).toHaveBeenCalledTimes(8);
+    expect(challengeProvider.mock.calls[6][0]).toMatchObject({ iteration: 6, refresh: true });
+    expect(submittedChallengeIds[5]).toBe(3006);
+  });
+
+  it('preserves partial completion count when submission stays blocked after Store recovery', async () => {
+    const result = await runSupplyAndCraftWorkflow(baseOptions({
+      maxCompletions: 7,
+      selectPrimary: async ({ iteration }) => iteration === 6 ? selection(false, 5) : selection(true),
+      supplies: [{
+        id: 'bronze',
+        provide: async () => ({ status: 'unavailable', challengeInvalidated: true }),
+      }],
+      selectFallback: async () => selection(true),
+      submit: async ({ iteration }) => iteration === 6
+        ? { status: 'blocked', submitted: false, reason: 'saved squad is not submit ready' }
+        : { status: 'submitted', submitted: true },
+    }));
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      completions: 5,
+      iterations: 6,
+      reason: 'saved squad is not submit ready',
+    });
+  });
+
   it('can repeat one supply until the primary selection is satisfied', async () => {
     const selections = [selection(false, 0), selection(false, 3), selection(true)];
     const provide = vi.fn(async () => ({ status: 'provided', openedCount: 1 }));
