@@ -18,6 +18,18 @@ describe('runRepeatedSubmissionWorkflow', () => {
     expect(result).toMatchObject({ completions: 1, retries: 1, attempts: 2 });
   });
 
+  it('does not count an intermediate multi-Challenge submission as a completion', async () => {
+    const executeAttempt = vi.fn()
+      .mockResolvedValueOnce({ status: 'progressed', details: { challengeSubmissions: 1 } })
+      .mockResolvedValueOnce({ status: 'submitted', submitted: true, details: { challengeSubmissions: 2 } });
+    const result = await runRepeatedSubmissionWorkflow({ maxCompletions: 1, executeAttempt });
+
+    expect(executeAttempt).toHaveBeenCalledTimes(2);
+    expect(result.completions).toBe(1);
+    expect(result.retries).toBe(0);
+    expect(result.details.challengeSubmissions).toBe(2);
+  });
+
   it('returns a dry-run plan without a side-effect completion', async () => {
     const result = await runRepeatedSubmissionWorkflow({
       executeAttempt: async () => ({ status: 'planned', reason: 'dry run', details: { ok: true } }),

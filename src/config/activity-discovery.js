@@ -42,6 +42,7 @@ export const SBC_ACTIVITY_FAMILY_IDS = Object.freeze([
   ...FAMILY_DEFS.map((family) => family.id),
   'totw-upgrade',
   'high-rated-x10',
+  'high-rated-pack-upgrade',
 ]);
 
 function clone(value) {
@@ -59,6 +60,25 @@ function normalizedText(value) {
 
 function unique(values = []) {
   return [...new Set(values.filter((value) => value !== undefined && value !== null && value !== ''))];
+}
+
+export function collectActivityBindingSbcNames(values = []) {
+  const names = new Set();
+  const visited = new WeakSet();
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (visited.has(value)) return;
+    visited.add(value);
+    if (value.activityBinding?.family && Array.isArray(value.sbcNames)) {
+      value.sbcNames.forEach((name) => {
+        const normalized = normalizedText(name).toLowerCase();
+        if (normalized) names.add(normalized);
+      });
+    }
+    Object.values(value).forEach(visit);
+  };
+  visit(values);
+  return [...names];
 }
 
 function canonicalTier(value) {
@@ -103,7 +123,7 @@ function requirementSummary(entry = {}) {
   return `${entry.keyName || '?'}(count:${entry.count || '?'}, values:${entry.values?.join('/') || '?'})`;
 }
 
-function parseBasicUpgradeChallenge(challenge = {}) {
+export function parseBasicUpgradeChallenge(challenge = {}) {
   const requiredPlayerCount = positiveInteger(challenge.requiredPlayerCount);
   const diagnostics = [];
   if (!requiredPlayerCount) {
@@ -359,9 +379,13 @@ export function buildActivityBindingSession(input = {}) {
     ...results.filter((result) => result.status === 'supported' && result.activity).map((result) => result.activity),
     ...(input.additionalActivities || []),
   ];
+  const seenActivities = new Set();
   for (const activity of activities) {
     if (!activity?.familyId || !activity?.setId) continue;
     const family = activity.familyId;
+    const key = `${family}:${activity.setId}`;
+    if (seenActivities.has(key)) continue;
+    seenActivities.add(key);
     activitiesByFamily.set(family, [...(activitiesByFamily.get(family) || []), clone(activity)]);
   }
 

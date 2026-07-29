@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.31
+// @version      0.6.40
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -49,6 +49,7 @@ import {
   configureRoutineStepForAvailability,
   resolveRoutineStepLoopDefs,
 } from './config/routine-steps.js';
+import { resolveSessionLoopByActivityFamily } from './config/session-loops.js';
 import {
   applyLoopRuntimeOptions,
   applyPickRuntimeOptions,
@@ -77,12 +78,18 @@ import {
   buildUpgradeDiscoverySession,
   collectScannedUpgradeActivities,
   detectDynamicUpgradeFamily,
+  materializeDynamicUpgradeChallengeLoopDef,
   parseDynamicUpgradeSbcSnapshot,
 } from './config/upgrade-discovery.js';
 import {
   buildActivityBindingSession,
+  collectActivityBindingSbcNames,
   parseBasicUpgradeActivitySnapshot,
 } from './config/activity-discovery.js';
+import {
+  createTotwUpgradePolicy,
+  createTwoBy84UpgradePolicy,
+} from './config/upgrade-policies.js';
 import { findSbcSetByPreferredId } from './sbc/set-identity.js';
 import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
@@ -121,7 +128,13 @@ import {
   synchronizeAfterSbcSubmit,
   unwindSbcSquadControllers as unwindSbcSquadControllersShared,
 } from './sbc/navigation-sync.js';
-import { scanDynamicSbcSnapshots } from './sbc/dynamic-sbc-cache.js';
+import {
+  dynamicSbcLoadErrorCode,
+  normalizeDynamicSbcCache,
+  normalizeDynamicSbcScanHealth,
+  scanDynamicSbcSnapshots,
+  updateDynamicSbcScanHealth,
+} from './sbc/dynamic-sbc-cache.js';
 import { claimSbcRewards } from './reward/sbc-claim.js';
 import {
   capturePlayerPickSelections,
@@ -297,7 +310,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.31',
+    version: '0.6.40',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -2382,12 +2395,12 @@ function updateLoopControls() {
     return Array.isArray(challenge?.eligibilityRequirements) && challenge.eligibilityRequirements.length > 0;
   }
 
-  async function requestRatingSbcChallenges(set, label = set?.name || 'rating SBC') {
+  async function requestRatingSbcChallenges(set, label = set?.name || 'rating SBC', options = {}) {
     const cached = getCachedSbcChallenges(set);
     const cachedAvailable = cached.find((challenge) =>
       !isCompletedChallenge(challenge) && hasRatingSbcChallengeRequirements(challenge)
     );
-    if (cachedAvailable || (cached.length && isSbcSetComplete(set))) {
+    if (options.force !== true && (cachedAvailable || (cached.length && isSbcSetComplete(set)))) {
       log(`${label}: using ${cached.length} cached challenge(s); bypassed requestChallengesForSet`);
       return cached;
     }
@@ -2413,9 +2426,20 @@ function updateLoopControls() {
     return received;
   }
 
+  async function findAvailableRatingSbcChallengeContext(set, label = set?.name || 'rating SBC', options = {}) {
+    const challenges = await requestRatingSbcChallenges(set, label, options);
+    const available = challenges.filter((challenge) => !isCompletedChallenge(challenge));
+    return {
+      challenge: available[0] || null,
+      challenges,
+      incompleteCount: available.length,
+    };
+  }
+
   async function findAvailableRatingSbcChallenge(set, label = set?.name || 'rating SBC') {
-    const challenges = await requestRatingSbcChallenges(set, label);
-    const available = challenges.find((challenge) => !isCompletedChallenge(challenge)) || null;
+    const context = await findAvailableRatingSbcChallengeContext(set, label);
+    const { challenges } = context;
+    const available = context.challenge;
     if (!available && challenges.length) {
       const states = challenges.map((challenge, index) => {
         const status = String(challenge?.status || challenge?.state || 'unknown').toUpperCase();
@@ -2460,12 +2484,15 @@ function updateLoopControls() {
       stopPoint();
       await waitLoadingEnd(350, attempt === 1 ? 6000 : 12000).catch(() => null);
       try {
-        const result = await observeOnce(
+        const request = () => observeOnce(
           eaSbcAdapter().requestChallengesForSet(set),
           ctrl(),
           30000,
           `requestChallengesForSet ${label}`,
         );
+        const result = options.runRequest
+          ? await options.runRequest(`standard Challenges ${label}`, request)
+          : await request();
         lastResult = result;
         if (result?.success && result?.data?.challenges?.length) return result.data.challenges;
         lastError = new Error(serviceResultErrorText(result) || 'no challenge data returned');
@@ -2482,43 +2509,72 @@ function updateLoopControls() {
     fail(`No challenge loaded for ${label} after ${attempts} attempt(s): ${detail}`);
   }
 
-  async function loadDynamicSbcDiscoveryChallenges(set) {
+  async function loadDynamicSbcDiscoveryChallenges(set, index = {}, context = {}) {
     const label = `Dynamic SBC scan ${set?.name || `#${set?.id || '?'}`}`;
+    const repositoryChallenges = getCachedSbcChallenges(set);
+    const repositorySnapshot = eaSbcAdapter().snapshotDiscoverySet(set, repositoryChallenges);
+    const repositoryMetadataComplete = repositoryChallenges.length > 0
+      && repositoryChallenges.length === (index.challengeIds?.length || repositoryChallenges.length)
+      && repositorySnapshot.challenges.every((challenge) => (
+        Number(challenge?.requiredPlayerCount || 0) > 0
+          && Array.isArray(challenge?.eligibilityRequirements)
+          && challenge.eligibilityRequirements.length > 0
+      ));
+    if (!context.cachedSnapshot && repositoryMetadataComplete) {
+      log(`${label}: using ${repositoryChallenges.length} complete repository Challenge metadata snapshot(s)`);
+      return repositoryChallenges;
+    }
+
     let challenges = null;
     if (eaSbcAdapter().hasDaoGetChallengesForSet()) {
-      const result = await observeOnce(
+      const request = () => observeOnce(
         eaSbcAdapter().getChallengesForSet(set?.id),
         ctrl(),
         20000,
         `sbcDAO.getChallengesForSet ${label}`,
       );
+      const result = context.runRequest
+        ? await context.runRequest(`DAO Challenges ${label}`, request)
+        : await request();
       if (result?.success && Array.isArray(result?.response?.challenges)) {
         challenges = result.response.challenges;
       } else {
-        log(`${label}: direct Challenge metadata unavailable (${serviceResultErrorText(result) || 'unknown'}); trying standard request`);
+        const detail = serviceResultErrorText(result) || 'unknown';
+        throw new Error(`direct Challenge metadata unavailable: ${detail}`);
       }
     }
-    if (!challenges) challenges = await requestSbcChallenges(set, label, { attempts: 1 });
+    if (!challenges) challenges = await requestSbcChallenges(set, label, {
+      attempts: 1,
+      runRequest: context.runRequest,
+    });
 
     const loaded = [];
     for (const challenge of challenges) {
-      if (challenge?.squad || !eaSbcAdapter().hasDaoLoadChallenge()) {
+      const metadata = eaSbcAdapter().snapshotDiscoverySet(set, [challenge])?.challenges?.[0] || null;
+      const metadataComplete = Number(metadata?.requiredPlayerCount || 0) > 0
+        && Array.isArray(metadata?.eligibilityRequirements)
+        && metadata.eligibilityRequirements.length > 0;
+      if (metadataComplete || challenge?.squad || !eaSbcAdapter().hasDaoLoadChallenge()) {
         loaded.push(challenge);
         continue;
       }
       let inProgress = false;
       try { inProgress = challenge.isInProgress?.() === true; } catch { }
       try {
-        const result = await observeOnce(
+        const request = () => observeOnce(
           eaSbcAdapter().loadDaoChallenge(challenge.id, inProgress),
           ctrl(),
           20000,
           `sbcDAO.loadChallenge ${label} #${challenge.id || '?'}`,
         );
+        const result = context.runRequest
+          ? await context.runRequest(`DAO Challenge squad ${label} #${challenge.id || '?'}`, request)
+          : await request();
         const squad = result?.response?.squad;
         if (!result?.success || !squad) throw new Error(serviceResultErrorText(result) || 'squad unavailable');
         challenge.squad = squad;
       } catch (error) {
+        if (dynamicSbcLoadErrorCode(error) === 429) throw error;
         const completed = isCompletedChallenge(challenge);
         log(`${label}: Challenge #${challenge?.id || '?'} squad metadata unavailable (${error?.message || error}); player count ${completed ? 'may be inferred only from consistent sibling Challenge metadata' : 'will remain unsupported'}`);
       }
@@ -2554,19 +2610,72 @@ function updateLoopControls() {
     return `${DYNAMIC_SBC_CACHE_KEY}:${eaSbcAdapter().cacheScope()}`;
   }
 
-  function dynamicSbcCandidate(index = {}) {
+  function dynamicSbcScanHealthStorageKey() {
+    return `${dynamicSbcCacheStorageKey()}:scan-health`;
+  }
+
+  function createDynamicSbcRequestPacer() {
+    const healthKey = dynamicSbcScanHealthStorageKey();
+    const previous = normalizeDynamicSbcScanHealth(adapters.userscriptStorage.get(healthKey, null), Date.now());
+    const metrics = {
+      requestCount: 0,
+      failureCount: 0,
+      rateLimitCount: 0,
+      codes: {},
+    };
+    let gapMs = previous.recommendedGapMs;
+    let lastStartedAt = 0;
+    const recordFailure = (error) => {
+      metrics.failureCount++;
+      const code = dynamicSbcLoadErrorCode(error);
+      if (code) metrics.codes[code] = (metrics.codes[code] || 0) + 1;
+      if (code === 429) {
+        metrics.rateLimitCount++;
+        gapMs = 3000;
+      } else if ([426, 512, 521].includes(code)) {
+        gapMs = Math.max(gapMs, 2500);
+      }
+    };
+    return {
+      initialGapMs: gapMs,
+      previous,
+      metrics,
+      async run(label, request) {
+        const waitMs = Math.max(0, gapMs - (Date.now() - lastStartedAt));
+        if (waitMs) await sleep(waitMs);
+        lastStartedAt = Date.now();
+        metrics.requestCount++;
+        try {
+          const result = await request();
+          if (!result?.success) recordFailure(new Error(serviceResultErrorText(result) || `${label} failed`));
+          return result;
+        } catch (error) {
+          recordFailure(error);
+          throw error;
+        }
+      },
+      save() {
+        const health = updateDynamicSbcScanHealth(previous, metrics, Date.now());
+        adapters.userscriptStorage.set(healthKey, health);
+        return health;
+      },
+    };
+  }
+
+  function dynamicSbcCandidate(index = {}, activitySbcNames = []) {
     const hasPlayerPickReward = (index.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK');
-    return hasPlayerPickReward || index.inUpgradesCategory === true;
+    if (hasPlayerPickReward) return true;
+    if (index.inUpgradesCategory !== true) return false;
+    if (detectDynamicUpgradeFamily(index)) return true;
+    const setName = String(index.name || '').trim().toLowerCase();
+    if (setName && activitySbcNames.includes(setName)) return true;
+    const challengeCount = (index.challengeIds || []).length;
+    const packRewardCount = (index.rewards || []).filter((reward) => reward?.type === 'PACK').length;
+    return challengeCount === 1 && packRewardCount === 1;
   }
 
-  function configuredLoopTemplate(id) {
-    return getConfiguredLoopDefs().find((loopDef) => loopDef?.id === id)
-      || LOOP_DEFS.find((loopDef) => loopDef?.id === id)
-      || null;
-  }
-
-  function unavailableDynamicSbcParse(parsed, loadError) {
-    if (!loadError) return parsed;
+  function unavailableDynamicSbcParse(parsed, loadError, cacheStatus) {
+    if (!loadError || cacheStatus === 'load-failed-compatible-cache') return parsed;
     return {
       ...parsed,
       status: 'unavailable',
@@ -2601,12 +2710,54 @@ function updateLoopControls() {
   async function scanAvailableDynamicSbcs(options = {}) {
     const forceFull = options.forceFull === true;
     const clearCache = options.clearCache === true;
-    log(`Dynamic SBC scan: refreshing the current Set/Category index and validating per-SBC cache${forceFull ? '; forcing full Challenge refresh' : ''}; nothing will be executed`);
+    const cacheOnly = options.cacheOnly === true;
+    log(cacheOnly
+      ? 'Dynamic SBC cache: restoring previously validated session Loops before background refresh'
+      : `Dynamic SBC scan: refreshing the current Set/Category index and validating per-SBC cache${forceFull ? '; forcing full Challenge refresh' : ''}; nothing will be executed`);
     const pickOptions = getPickRuntimeOptions();
+    const activitySbcNames = collectActivityBindingSbcNames([
+      getConfiguredLoopDefs(),
+      getConfiguredRecoveryRecipes(),
+    ]);
     const cacheKey = dynamicSbcCacheStorageKey();
     if (clearCache) adapters.userscriptStorage.remove(cacheKey);
     const cached = clearCache ? null : adapters.userscriptStorage.get(cacheKey, null);
-    const summary = await scanDynamicSbcSnapshots({
+    const requestPacer = cacheOnly ? null : createDynamicSbcRequestPacer();
+    if (requestPacer) {
+      log(`Dynamic SBC scan pacing: minimum ${requestPacer.initialGapMs}ms between EA Challenge requests; recent failure rate ${(requestPacer.previous.failureRate * 100).toFixed(1)}%, recent 429 count ${requestPacer.previous.rateLimitCount}`);
+    }
+    const summary = cacheOnly ? (() => {
+      const normalized = normalizeDynamicSbcCache(cached, Date.now());
+      const results = Object.values(normalized.sets).map((entry) => ({
+        set: null,
+        index: null,
+        snapshot: cloneLoopDef(entry.snapshot),
+        loadError: null,
+        cacheStatus: 'restored',
+        fingerprint: entry.fingerprint,
+      }));
+      return {
+        refreshResult: null,
+        results,
+        cache: normalized,
+        stats: {
+          setsScanned: results.length,
+          candidates: results.length,
+          cacheHits: results.length,
+          rescanned: 0,
+          newSets: 0,
+          changedSets: 0,
+          expiredEntries: 0,
+          invalidEntries: 0,
+          loadFailures: 0,
+          loadRetries: 0,
+          cacheFallbacks: 0,
+          circuitBreakers: 0,
+          circuitSkipped: 0,
+          removedEntries: 0,
+        },
+      };
+    })() : await scanDynamicSbcSnapshots({
       cache: cached,
       forceFull,
       refreshSets: async () => {
@@ -2617,20 +2768,36 @@ function updateLoopControls() {
       listSets: getSbcSets,
       snapshotIndex: (set, refreshResult) => eaSbcAdapter().snapshotDiscoveryIndex(set, refreshResult),
       snapshotSet: (set, challenges, refreshResult) => eaSbcAdapter().snapshotDiscoverySet(set, challenges, refreshResult),
-      loadChallenges: loadDynamicSbcDiscoveryChallenges,
-      isCandidate: dynamicSbcCandidate,
+      loadChallenges: (set, index, context) => loadDynamicSbcDiscoveryChallenges(set, index, {
+        ...context,
+        runRequest: (label, request) => requestPacer.run(label, request),
+      }),
+      loadAttempts: 3,
+      loadRetryDelayMs: 1500,
+      sleep,
+      onLoadRetry: ({ index, attempt, attempts, delayMs, error }) => {
+        log(`Dynamic SBC scan ${index?.name || `#${index?.id || '?'}`}: Challenge metadata attempt ${attempt}/${attempts} failed (${error?.message || error}); retrying in ${delayMs}ms`);
+      },
+      onCircuitOpen: ({ index, circuit }) => {
+        log(`Dynamic SBC scan ${index?.name || `#${index?.id || '?'}`}: EA ${circuit?.code || 429} opened the Challenge request circuit; remaining candidates will use compatible cache or remain unavailable`);
+      },
+      onLoadSkipped: ({ index, circuit }) => {
+        log(`Dynamic SBC scan ${index?.name || `#${index?.id || '?'}`}: Challenge request skipped because the EA ${circuit?.code || 429} circuit is open`);
+      },
+      isCandidate: (index) => dynamicSbcCandidate(index, activitySbcNames),
       onResult: async ({ snapshot, loadError, cacheStatus }) => {
+        if (cacheStatus === 'load-failed-compatible-cache') {
+          log(`Dynamic SBC scan: set #${snapshot.id || '?'} retained from compatible validated cache after live Challenge refresh failed`);
+        }
         const isPick = (snapshot.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK');
         if (!isPick) {
           if (detectDynamicUpgradeFamily(snapshot)) {
             const parsed = unavailableDynamicSbcParse(parseDynamicUpgradeSbcSnapshot({
               set: snapshot,
-              x10Template: configuredLoopTemplate('84x10'),
-              totwTemplate: configuredLoopTemplate('auto-totw-upgrade'),
-            }), loadError);
+            }), loadError, cacheStatus);
             logDynamicUpgradeDiscovery(snapshot, parsed, loadError);
           } else {
-            const parsed = loadError
+            const parsed = loadError && cacheStatus !== 'load-failed-compatible-cache'
               ? { status: 'unavailable', diagnostics: [`Challenge metadata refresh failed: ${loadError?.message || loadError}`] }
               : parseBasicUpgradeActivitySnapshot({ set: snapshot });
             logBasicActivityDiscovery(snapshot, parsed, loadError);
@@ -2642,7 +2809,7 @@ function updateLoopControls() {
           set: snapshot,
           highGoldThreshold: pickOptions.highGoldThreshold,
           pricePlatform: 'pc',
-        }), loadError);
+        }), loadError, cacheStatus);
         const reward = snapshot.rewards?.[0] || {};
         const remaining = parsed.remainingCompletions ?? (() => {
           if (parsed.loop?.useRoundsAsCompletions === true) return 'user rounds';
@@ -2665,9 +2832,10 @@ function updateLoopControls() {
         log(`Dynamic SBC scan: set #${snapshot.id || '?'} cache:${cacheStatus}`);
       },
     });
-    adapters.userscriptStorage.set(cacheKey, summary.cache);
+    const scanHealth = requestPacer?.save() || null;
+    if (!cacheOnly) adapters.userscriptStorage.set(cacheKey, summary.cache);
     const snapshots = summary.results.map((result) => (
-      result.loadError
+      result.loadError && result.cacheStatus !== 'load-failed-compatible-cache'
         ? { ...result.snapshot, challenges: [] }
         : result.snapshot
     ));
@@ -2683,8 +2851,6 @@ function updateLoopControls() {
     const upgradeSession = buildUpgradeDiscoverySession({
       sets: snapshots,
       configuredLoops,
-      x10Template: configuredLoopTemplate('84x10'),
-      totwTemplate: configuredLoopTemplate('auto-totw-upgrade'),
     });
     const specializedLoopOverrides = {
       ...pickSession.loopOverrides,
@@ -2692,22 +2858,32 @@ function updateLoopControls() {
     };
     const activitySession = buildActivityBindingSession({
       sets: snapshots,
-      configuredLoops: configuredLoops.map((loopDef) => specializedLoopOverrides[loopDef.id] || loopDef),
+      configuredLoops: [
+        ...configuredLoops.map((loopDef) => specializedLoopOverrides[loopDef.id] || loopDef),
+        ...upgradeSession.discoveredLoops,
+      ],
       recoveryRecipes: getConfiguredRecoveryRecipes(),
       additionalActivities: collectScannedUpgradeActivities(upgradeSession.results),
     });
+    const configuredLoopIds = new Set(configuredLoops.map((loopDef) => String(loopDef?.id || '')).filter(Boolean));
+    const configuredActivityOverrides = Object.fromEntries(
+      Object.entries(activitySession.loopOverrides).filter(([loopId]) => configuredLoopIds.has(String(loopId))),
+    );
+    const materializedUpgradeLoops = upgradeSession.discoveredLoops.map((loopDef) => (
+      activitySession.loopOverrides[loopDef.id] || loopDef
+    ));
     state.discoveredLoopDefs = cloneLoopDef([
       ...pickSession.discoveredLoops,
-      ...upgradeSession.discoveredLoops,
+      ...materializedUpgradeLoops,
     ]);
     state.discoveredLoopOverrides = cloneLoopDef({
       ...specializedLoopOverrides,
-      ...activitySession.loopOverrides,
+      ...configuredActivityOverrides,
     });
     state.discoveredRecoveryRecipeOverrides = cloneLoopDef(activitySession.recoveryRecipeOverrides);
     state.scannedDynamicSbcDefs = cloneLoopDef([
       ...collectScannedPlayerPickLoopDefs(pickSession.results),
-      ...upgradeSession.discoveredLoops,
+      ...materializedUpgradeLoops,
       ...Object.values(upgradeSession.loopOverrides).filter((loopDef) =>
         loopDef?.discovered === true && loopDef?.discoveryKind === 'upgrade'
       ),
@@ -2723,7 +2899,7 @@ function updateLoopControls() {
         log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join('; ')}`);
       }
     }
-    await refreshPackCatalogFromSbcIndex(summary.refreshResult);
+    if (!cacheOnly) await refreshPackCatalogFromSbcIndex(summary.refreshResult);
     const requestedSelection = document.querySelector('#bronze-loop-select')?.value || pickSession.selectedId;
     const selectedId = getLoopDefs().some((loopDef) => loopDef.id === requestedSelection)
       ? requestedSelection
@@ -2756,7 +2932,16 @@ function updateLoopControls() {
     const upgradeDuplicateCount = upgradeSession.results.filter((result) => result.status === 'duplicate').length;
     const pickSetCount = snapshots.filter((snapshot) => (snapshot.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK')).length;
     const upgradeSetCount = snapshots.length - pickSetCount;
-    log(`Dynamic SBC scan complete: ${summary.stats.setsScanned} Set(s) checked, ${summary.stats.candidates} candidate(s) (${pickSetCount} Pick, ${upgradeSetCount} Upgrade); cache hits:${summary.stats.cacheHits}, rescanned:${summary.stats.rescanned}, new:${summary.stats.newSets}, changed:${summary.stats.changedSets}, expired:${summary.stats.expiredEntries}, removed:${summary.stats.removedEntries}, failures:${summary.stats.loadFailures}; ${state.discoveredLoopDefs.length} session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) updated, ${Object.keys(state.discoveredRecoveryRecipeOverrides).length} recovery recipe(s) updated, ${pickDuplicateCount + upgradeDuplicateCount} duplicate(s) skipped`);
+    if (cacheOnly) {
+      log(`Dynamic SBC cache restore complete: ${summary.results.length} cached Set snapshot(s), ${state.discoveredLoopDefs.length} session Loop(s); live validation continues in background`);
+    } else {
+      log(`Dynamic SBC scan complete: ${summary.stats.setsScanned} Set(s) checked, ${summary.stats.candidates} candidate(s) (${pickSetCount} Pick, ${upgradeSetCount} Upgrade); cache hits:${summary.stats.cacheHits}, cache fallbacks:${summary.stats.cacheFallbacks}, rescanned:${summary.stats.rescanned}, new:${summary.stats.newSets}, changed:${summary.stats.changedSets}, expired:${summary.stats.expiredEntries}, invalid:${summary.stats.invalidEntries}, removed:${summary.stats.removedEntries}, retries:${summary.stats.loadRetries}, failures:${summary.stats.loadFailures}, circuit opened:${summary.stats.circuitBreakers}, requests skipped:${summary.stats.circuitSkipped}; ${state.discoveredLoopDefs.length} session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) updated, ${Object.keys(state.discoveredRecoveryRecipeOverrides).length} recovery recipe(s) updated, ${pickDuplicateCount + upgradeDuplicateCount} duplicate(s) skipped`);
+      const requestFailureRate = requestPacer.metrics.requestCount
+        ? (requestPacer.metrics.failureCount / requestPacer.metrics.requestCount) * 100
+        : 0;
+      const codes = Object.entries(requestPacer.metrics.codes).map(([code, count]) => `${code}:${count}`).join(', ') || 'none';
+      log(`Dynamic SBC scan request health: ${requestPacer.metrics.requestCount} EA Challenge request(s), ${requestPacer.metrics.failureCount} failure(s) (${requestFailureRate.toFixed(1)}%), codes:${codes}; next scan minimum gap:${scanHealth.recommendedGapMs}ms`);
+    }
     return summary;
   }
 
@@ -4677,23 +4862,9 @@ function updateLoopControls() {
     const override = isPlainObject(loopDef.autoTotwUpgrade) ? loopDef.autoTotwUpgrade : {};
     return {
       id: `${loopDef.id || 'fill-and-verify'}-auto-totw-upgrade`,
-      name: '84+ TOTW Upgrade',
-      strategy: 'fillAndVerifySbc',
-      sbcNames: ['84+ TOTW Upgrade', '84+ TOTW', 'TOTW Upgrade', '84+ TOTW 升级', '84+ TOTW 升級'],
-      rewardPackIds: [20707, 20441],
-      rewardPackNames: ['84+ TOTW 1-30 Player Pack', 'TOTW 1-30 Player Pack', '84+ TOTW 1-30', 'TOTW 1-30', '84+ TOTW Player Pack', 'TOTW Player Pack', '84+ TOTW Pack', 'TOTW Pack', 'TOTW Provision Refresh', 'TOTW Provision Refresh Pack'],
+      name: 'Scanned TOTW Upgrade',
+      ...createTotwUpgradePolicy(),
       maxCompletions: 1,
-      maxSubmittedRating: 88,
-      maxNormalGoldSubmittedRating: 99,
-      ratingSbcFill: {
-        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
-      },
-      requiredSpecialCount: 0,
-      allowedSpecialCount: 0,
-      blockSpecial: true,
-      blockTradeable: false,
-      openRewardPacks: true,
-      assumeTotwRewardPack: true,
       ...override,
     };
   }
@@ -4702,26 +4873,16 @@ function updateLoopControls() {
     const override = isPlainObject(loopDef.autoFodderUpgrade) ? loopDef.autoFodderUpgrade : {};
     return {
       id: `${loopDef.id || 'fill-and-verify'}-auto-2x84-fodder`,
-      name: '2x84+ Fodder Recovery',
-      strategy: 'fillAndVerifySbc',
-      sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
-      rewardPackNames: ['2x 84+ Rare Gold Players Pack', '2 x 84+ Rare Gold Players Pack'],
+      name: 'Scanned 2x84+ Fodder Recovery',
+      ...createTwoBy84UpgradePolicy({ hidden: false, forceOpenRewardPacks: true }),
       maxCompletions: 1,
-      inventoryFillFirst: true,
-      requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['storage', 'club'] },
-      ],
-      priorityPiles: ['storage', 'club'],
-      requiredSpecialCount: 0,
-      allowedSpecialCount: 0,
-      maxSubmittedRating: 81,
-      maxNormalGoldSubmittedRating: 81,
-      blockSpecial: true,
-      blockTradeable: false,
-      openRewardPacks: true,
-      forceOpenRewardPacks: true,
       ...override,
     };
+  }
+
+  function hasResolvedSbcIdentity(definition = {}) {
+    return (definition.sbcSetIds || []).some((value) => Number(value) > 0)
+      || (definition.sbcNames || []).some((value) => String(value || '').trim());
   }
 
   function getAutoFodderUpgradeAttemptLimit(loopDef = {}) {
@@ -4732,9 +4893,17 @@ function updateLoopControls() {
 
   async function craftAutoFodderUpgrade(loopDef, attempt, maxAttempts) {
     const upgradeDef = getAutoFodderUpgradeDef(loopDef);
+    if (!hasResolvedSbcIdentity(upgradeDef)) {
+      log(`${loopDef.name}: scanned 2x84+ recovery activity is unavailable; keeping the current squad unsubmitted`);
+      return { ok: false, reason: 'scanned 2x84+ recovery activity is unavailable' };
+    }
     await refreshInventoryCaches(`${loopDef.name} ${upgradeDef.name} preflight`, { includePacks: false, quiet: true });
     const selection = selectInventoryPlayers(upgradeDef);
-    log(`${loopDef.name}: ${upgradeDef.name} attempt ${attempt}/${maxAttempts} selected ${selection.selected.length}/6 low rare gold player(s) (${formatSelectionStats(selection.stats)})`);
+    const requiredFodderCount = (upgradeDef.requirements || []).reduce(
+      (total, requirement) => total + Math.max(0, Number(requirement?.count || 0) || 0),
+      0,
+    ) || Number(upgradeDef.expectedPlayerCount || 0) || '?';
+    log(`${loopDef.name}: ${upgradeDef.name} attempt ${attempt}/${maxAttempts} selected ${selection.selected.length}/${requiredFodderCount} low rare gold player(s) (${formatSelectionStats(selection.stats)})`);
     if (!selection.ok) {
       logSelectionDiagnostics(`${loopDef.name} ${upgradeDef.name}`, selection, upgradeDef.priorityPiles);
       log(`${loopDef.name}: ${upgradeDef.name} recovery is unavailable; keeping the current 84x10 unsubmitted`);
@@ -4751,7 +4920,7 @@ function updateLoopControls() {
       return { ok: false, reason: `${upgradeDef.name} was not submitted` };
     }
     if (Number(result?.rewardPacksOpened || 0) < 1) {
-      log(`${loopDef.name}: ${upgradeDef.name} was submitted but its reward pack was not opened; stop before consuming another six cards`);
+      log(`${loopDef.name}: ${upgradeDef.name} was submitted but its reward pack was not opened; stop before consuming another ${requiredFodderCount} low rare gold card(s)`);
       return { ok: false, reason: `${upgradeDef.name} reward pack was not opened` };
     }
     return { ok: true };
@@ -4779,6 +4948,11 @@ function updateLoopControls() {
 
   async function craftAutoTotwUpgrade(loopDef) {
     const upgradeDef = getAutoTotwUpgradeDef(loopDef);
+    if (!hasResolvedSbcIdentity(upgradeDef)) {
+      const reason = 'scanned TOTW Upgrade activity is unavailable';
+      log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${reason}`);
+      return { ok: false, reason };
+    }
     log(`${loopDef.name}: no eligible ${requiredSpecialLabel(loopDef)} found; submitting ${upgradeDef.name} first`);
     const result = await runFillAndVerifyLoop(upgradeDef);
     if (Number(result?.completions || 0) < 1) {
@@ -5186,8 +5360,15 @@ function updateLoopControls() {
     return rewardPackId;
   }
 
-  function rewardPackIdFromSubmitResult(result, set) {
-    const awards = result?.data?.grantedChallengeAwards || result?.response?.grantedChallengeAwards || [];
+  function rewardPackIdFromSubmitResult(result, set, options = {}) {
+    const awards = [
+      ...collectionValues(result?.data?.grantedChallengeAwards),
+      ...collectionValues(result?.response?.grantedChallengeAwards),
+      ...collectionValues(result?.data?.grantedSetAwards),
+      ...collectionValues(result?.response?.grantedSetAwards),
+      ...collectionValues(result?.data?.awards),
+      ...collectionValues(result?.response?.awards),
+    ];
     for (const award of awards) {
       const values = [
         award?.value,
@@ -5200,7 +5381,7 @@ function updateLoopControls() {
       const id = values.map(Number).find((value) => Number.isFinite(value) && value > 0);
       if (id) return id;
     }
-    return Number(set?.awards?.[0]?.value) || null;
+    return options.allowSetFallback === true ? Number(set?.awards?.[0]?.value) || null : null;
   }
 
   async function applyPlayersToRatingChallenge(challenge, players, label = 'rating SBC') {
@@ -5256,20 +5437,33 @@ function updateLoopControls() {
           `submitChallenge ${label}`,
         );
         if (result?.success) {
-          await refreshStorePacks().catch(() => null);
-          let rewardPackId = rewardPackIdFromSubmitResult(result, set);
-          if (!rewardPackId) {
+          const directRewardPackId = rewardPackIdFromSubmitResult(result, set);
+          let newPackId = null;
+          const observationAttempts = Math.max(1, Math.min(5, Number(options.rewardObservationAttempts || 3) || 3));
+          for (let observationAttempt = 1; observationAttempt <= observationAttempts; observationAttempt++) {
+            await refreshStorePacks().catch(() => null);
             const afterPacks = getAvailableRepositoryMyPacks();
             const afterPackCounts = getPackCountsById(afterPacks);
             const newPack = afterPacks.find((pack) => {
               const id = packIdKey(pack);
               return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
             });
-            rewardPackId = Number(packIdKey(newPack)) || null;
+            newPackId = Number(packIdKey(newPack)) || null;
+            if (directRewardPackId || newPackId || observationAttempt >= observationAttempts) break;
+            await sleep(Math.min(2000, 500 * observationAttempt));
           }
+          const rewardObserved = Boolean(directRewardPackId || newPackId);
+          const usedKnownFallback = !rewardObserved && options.allowKnownRewardFallback === true;
+          const rewardPackId = directRewardPackId
+            || newPackId
+            || (usedKnownFallback ? rewardPackIdFromSubmitResult(result, set, { allowSetFallback: true }) : null);
           recordObservedPackCatalogReward(set, rewardPackId);
-          log(`${label}: background submit complete; reward pack ${rewardPackId || 'unknown'}`);
-          return rewardPackId;
+          log(`${label}: background submit complete; reward pack ${rewardPackId || 'not granted for this Challenge'}${usedKnownFallback ? ' (single-Challenge identity fallback)' : ''}`);
+          return {
+            rewardPackId,
+            rewardObserved,
+            usedKnownFallback,
+          };
         }
         lastDetail = serviceResultErrorText(result) || result?.status || 'unknown';
         const plan = planBackgroundSubmitRetry({
@@ -6394,6 +6588,8 @@ function updateLoopControls() {
     const completionLimit = loopDef.allowMultipleCompletions === true ? 50 : 1;
     const maxCompletions = Math.max(1, Math.min(completionLimit, Number(loopDef.maxCompletions || 1) || 1));
     let autoFodderAttempts = 0;
+    let forceRatingChallengeRefresh = false;
+    let challengeSubmissions = 0;
 
     const result = await runRepeatedSubmissionWorkflow({
       maxCompletions,
@@ -6406,15 +6602,19 @@ function updateLoopControls() {
       } else {
         log(`${loopDef.name}: dry-run skips unassigned cleanup (no item moves)`);
       }
-      const preflightReady = await ensureTotwForFillAndVerify(loopDef);
-      if (preflightReady === false) return { status: 'unavailable', reason: 'required TOTW preflight is unavailable' };
       patchFsuLengthSafePlayerMetadata(`${loopDef.name} before opening SBC`);
 
       const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
       let opened;
+      let ratingChallengeIncompleteCount = 0;
       if (shouldUseRatingSbcFill(loopDef)) {
         log(`${loopDef.name}: reading dynamic challenge requirements through the direct rating SBC path`);
-        const challenge = await findAvailableRatingSbcChallenge(set, loopDef.name);
+        const challengeContext = await findAvailableRatingSbcChallengeContext(set, loopDef.name, {
+          force: forceRatingChallengeRefresh,
+        });
+        forceRatingChallengeRefresh = false;
+        ratingChallengeIncompleteCount = challengeContext.incompleteCount;
+        const challenge = challengeContext.challenge;
         const loadedChallenge = challenge && !loopDef.dryRun
           ? await loadRatingSbcChallenge(challenge, loopDef.name)
           : challenge;
@@ -6430,11 +6630,16 @@ function updateLoopControls() {
         return { status: 'unavailable', reason: 'no available SBC challenge remains' };
       }
 
-      const expectedPlayerCount = expectedSbcPlayerCount(loopDef, opened.challenge);
-      const configuredFill = await fillConfiguredSbcSquad(loopDef, opened, {
+      const activeLoopDef = shouldUseRatingSbcFill(loopDef)
+        ? materializeDynamicUpgradeChallengeLoopDef(loopDef, opened.challenge)
+        : loopDef;
+      const preflightReady = await ensureTotwForFillAndVerify(activeLoopDef);
+      if (preflightReady === false) return { status: 'unavailable', reason: 'required TOTW preflight is unavailable' };
+      const expectedPlayerCount = expectedSbcPlayerCount(activeLoopDef, opened.challenge);
+      const configuredFill = await fillConfiguredSbcSquad(activeLoopDef, opened, {
         dryRun: loopDef.dryRun,
         stopOnMissingSelection: true,
-        skipInventoryRefresh: needsAutoTotwPreflight(loopDef),
+        skipInventoryRefresh: needsAutoTotwPreflight(activeLoopDef),
       });
       if (loopDef.dryRun) {
         if (!configuredFill.ok) {
@@ -6448,14 +6653,14 @@ function updateLoopControls() {
         };
       }
       if (!configuredFill.ok) {
-        const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(loopDef);
+        const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(activeLoopDef);
         if (configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit) {
           log(`${loopDef.name}: rating shortage before automatic 2x84+ recovery: ${configuredFill.reason || 'unknown reason'}`);
           const nextAttempt = autoFodderAttempts + 1;
-          const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit);
+          const recovery = await craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit);
           if (recovery.ok) {
             autoFodderAttempts = nextAttempt;
-            log(`${loopDef.name}: ${getAutoFodderUpgradeDef(loopDef).name} opened successfully; retrying optimized rating fill`);
+            log(`${loopDef.name}: ${getAutoFodderUpgradeDef(activeLoopDef).name} opened successfully; retrying optimized rating fill`);
             return { status: 'retry', reason: 'automatic fodder recovery succeeded' };
           }
           log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || 'unknown reason'}`);
@@ -6468,39 +6673,39 @@ function updateLoopControls() {
       let inspection = configuredFill.inspection;
       let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
 
-      const ratingSbcFill = shouldUseRatingSbcFill(loopDef);
+      const ratingSbcFill = shouldUseRatingSbcFill(activeLoopDef);
       const totwInjection = ratingSbcFill
         ? { fillResult, inspection, planned: false, injected: false }
-        : await injectRequiredTotwIfNeeded(loopDef, opened, fillResult, inspection);
+        : await injectRequiredTotwIfNeeded(activeLoopDef, opened, fillResult, inspection);
       fillResult = totwInjection.fillResult;
       inspection = totwInjection.inspection;
       squad = fillResult.squad || squad;
 
-      const protectedRepair = !ratingSbcFill && (!loopDef.dryRun || !totwInjection.planned)
-        ? await repairProtectedSquadItemsIfNeeded(loopDef, opened, fillResult, inspection)
+      const protectedRepair = !ratingSbcFill && (!activeLoopDef.dryRun || !totwInjection.planned)
+        ? await repairProtectedSquadItemsIfNeeded(activeLoopDef, opened, fillResult, inspection)
         : { fillResult, inspection, planned: false, repaired: false };
       fillResult = protectedRepair.fillResult;
       inspection = protectedRepair.inspection;
       squad = fillResult.squad || squad;
 
-      const submitReadyRepair = !ratingSbcFill && (!loopDef.dryRun || (!totwInjection.planned && !protectedRepair.planned))
-        ? await repairSubmitReadinessIfNeeded(loopDef, opened, fillResult, inspection)
+      const submitReadyRepair = !ratingSbcFill && (!activeLoopDef.dryRun || (!totwInjection.planned && !protectedRepair.planned))
+        ? await repairSubmitReadinessIfNeeded(activeLoopDef, opened, fillResult, inspection)
         : { fillResult, inspection, planned: false, repaired: false };
       fillResult = submitReadyRepair.fillResult;
       inspection = submitReadyRepair.inspection;
       squad = fillResult.squad || squad;
 
       if (loopDef.dryRun) {
-        const injectableIssues = getDryRunInjectableIssues(loopDef, inspection);
+        const injectableIssues = getDryRunInjectableIssues(activeLoopDef, inspection);
         if (totwInjection.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
-          log(`${loopDef.name}: dry-run squad needs required ${requiredSpecialLabel(loopDef)} repair; live run would save the repair plan and re-check before submit`);
+          log(`${loopDef.name}: dry-run squad needs required ${requiredSpecialLabel(activeLoopDef)} repair; live run would save the repair plan and re-check before submit`);
         } else if (protectedRepair.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
           log(`${loopDef.name}: dry-run squad needs protected item repair; live run would save the repair plan and re-check before submit`);
         } else if (submitReadyRepair.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
           log(`${loopDef.name}: dry-run squad may need submit-ready rating repair; live run would save the repair plan and re-check before submit`);
         } else if (inspection.blocked.length || inspection.missingRequirements?.length) {
           log(`${loopDef.name}: dry-run blocked by protected or missing squad requirement(s); live run would stop before submit`);
-          logManualSbcFixHints(loopDef, inspection);
+          logManualSbcFixHints(activeLoopDef, inspection);
         } else if (!fillResult.submitReady) {
           log(`${loopDef.name}: dry-run squad passed protection, but submit is not ready; live run would stop before submit`);
         } else {
@@ -6510,7 +6715,7 @@ function updateLoopControls() {
         return { status: 'planned', reason: 'dry-run protection inspection complete', details: { dryRun: true } };
       }
 
-      const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(loopDef);
+      const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(activeLoopDef);
       if (
         !fillResult.submitReady &&
         !inspection.blocked.length &&
@@ -6519,10 +6724,10 @@ function updateLoopControls() {
       ) {
         log(`${loopDef.name}: submit not ready before automatic 2x84+ recovery (${inspection.items?.length || fillResult.filled || 0} filled)`);
         const nextAttempt = autoFodderAttempts + 1;
-        const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit);
+        const recovery = await craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit);
         if (recovery.ok) {
           autoFodderAttempts = nextAttempt;
-          log(`${loopDef.name}: ${getAutoFodderUpgradeDef(loopDef).name} opened successfully; retrying the same 84x10 completion with refreshed inventory`);
+          log(`${loopDef.name}: ${getAutoFodderUpgradeDef(activeLoopDef).name} opened successfully; retrying the same Upgrade completion with refreshed inventory`);
           return { status: 'retry', reason: 'automatic submit-ready recovery succeeded' };
         }
         log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || 'unknown reason'}`);
@@ -6539,6 +6744,7 @@ function updateLoopControls() {
       }
 
       if (!fillResult.submitReady) fail(`${loopDef.name}: submit is not ready after protection inspection`);
+      let ratingSubmission = null;
       const submitAttempt = await submitSbcAttempt({
         label: loopDef.name,
         dryRun: loopDef.dryRun === true,
@@ -6555,10 +6761,10 @@ function updateLoopControls() {
           await saveChallengeSquad(challenge, players, `${loopDef.name} provisional Club refresh`);
         },
         preSaveValidators: [() => {
-          assertSbcSquadSafe(loopDef, inspection);
-          if (shouldUseRatingSbcFill(loopDef)) {
+          assertSbcSquadSafe(activeLoopDef, inspection);
+          if (shouldUseRatingSbcFill(activeLoopDef)) {
             const finalModelValidation = validateRatingSbcModelAgainstItems(configuredFill.model, inspection.items, opened.challenge);
-            logRatingSbcValidation(loopDef, 'final rating squad', finalModelValidation, configuredFill.model);
+            logRatingSbcValidation(activeLoopDef, 'final rating squad', finalModelValidation, configuredFill.model);
             if (!finalModelValidation.ok) {
               fail(`${loopDef.name}: final rating squad failed dynamic requirement validation: ${finalModelValidation.errors.join(', ')}`);
             }
@@ -6566,14 +6772,16 @@ function updateLoopControls() {
           return true;
         }],
         isSubmitReady: async () => fillResult.submitReady === true,
-        submitTransport: async (context) => ({
-          submitted: true,
-          rewardPackId: ratingSbcFill
-            ? await submitRatingSbcInBackground(context.set, context.challenge, loopDef.name, {
-                players: context.players || inspection.items || [],
-              })
-            : await submitSbcAndGetAwardPackId(context.set),
-        }),
+        submitTransport: async (context) => {
+          if (ratingSbcFill) {
+            ratingSubmission = await submitRatingSbcInBackground(context.set, context.challenge, loopDef.name, {
+              players: context.players || inspection.items || [],
+              allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
+            });
+            return { submitted: true, rewardPackId: ratingSubmission.rewardPackId };
+          }
+          return { submitted: true, rewardPackId: await submitSbcAndGetAwardPackId(context.set) };
+        },
         afterSubmit: async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
           squadPlan?.selection || configuredFill.selection,
           loopDef.name,
@@ -6583,20 +6791,40 @@ function updateLoopControls() {
       if (!submitAttempt.submitted) {
         fail(`${loopDef.name}: submit transaction blocked: ${submitAttempt.reason || submitAttempt.status}`);
       }
+      challengeSubmissions++;
       const rewardPackId = submitAttempt.rewardPackId;
+      const dynamicChallengeCount = Math.max(1, Number(activeLoopDef.dynamicChallengeCount || 1) || 1);
+      if (ratingSbcFill && dynamicChallengeCount > 1 && !ratingSubmission?.rewardObserved) {
+        autoFodderAttempts = 0;
+        forceRatingChallengeRefresh = true;
+        if (ratingChallengeIncompleteCount <= 1) {
+          log(`${loopDef.name}: final Challenge #${opened.challenge?.id || '?'} submitted, but the Set reward was not observed after bounded refresh; stopping before a new round`);
+          return {
+            status: 'blocked',
+            reason: 'final multi-Challenge Upgrade reward was not observed',
+            details: { challengeSubmissions, lastChallengeId: opened.challenge?.id || null },
+          };
+        }
+        log(`${loopDef.name}: intermediate Challenge #${opened.challenge?.id || '?'} submitted (${ratingChallengeIncompleteCount - 1} Challenge(s) remain in this round); reward handling deferred`);
+        await sleep(CFG.pauseMs);
+        return {
+          status: 'progressed',
+          details: { challengeSubmissions, lastChallengeId: opened.challenge?.id || null },
+        };
+      }
       let stopAfterRewardFailure = false;
       let rewardPacksOpened = 0;
       let rewardPacksPending = 0;
-      if (loopDef.openRewardPacks) {
-        const openedReward = await openRewardPackAndCleanup(loopDef, rewardPackId, 'reward pack', {
-          assumeTotwReward: loopDef.assumeTotwRewardPack === true,
-          fallbackPackMatcher: loopDef.assumeTotwRewardPack === true ? isLikelyTotwRewardPack : null,
-          openAttempts: loopDef.assumeTotwRewardPack === true ? 3 : 1,
+      if (activeLoopDef.openRewardPacks) {
+        const openedReward = await openRewardPackAndCleanup(activeLoopDef, rewardPackId, 'reward pack', {
+          assumeTotwReward: activeLoopDef.assumeTotwRewardPack === true,
+          fallbackPackMatcher: activeLoopDef.assumeTotwRewardPack === true ? isLikelyTotwRewardPack : null,
+          openAttempts: activeLoopDef.assumeTotwRewardPack === true ? 3 : 1,
         });
         if (openedReward) rewardPacksOpened++;
         else {
           rewardPacksPending++;
-          if (loopDef.forceOpenRewardPacks === true) {
+          if (activeLoopDef.forceOpenRewardPacks === true) {
             stopAfterRewardFailure = true;
             log(`${loopDef.name}: required reward pack could not be opened; stopping before another SBC submission`);
           }
@@ -6613,12 +6841,16 @@ function updateLoopControls() {
         rewardPacksPending,
         stopAfterCompletion: stopAfterRewardFailure,
         reason: stopAfterRewardFailure ? 'required reward pack could not be opened' : null,
-        details: { lastRewardPackId: rewardPackId || null, completedBefore: workflowResult.completions },
+        details: {
+          lastRewardPackId: rewardPackId || null,
+          completedBefore: workflowResult.completions,
+          challengeSubmissions,
+        },
       };
       },
     });
 
-    log(`${loopDef.name}: submitted ${result.completions} SBC(s) in this run`);
+    log(`${loopDef.name}: completed ${result.completions} round(s) with ${challengeSubmissions} Challenge submission(s) in this run`);
     return result;
   }
 
@@ -7820,6 +8052,7 @@ function updateLoopControls() {
       },
       onSourceExhausted: async ({ remainingCompletions }) => {
         const fallbackLoopId = String(loopDef.sourceExhaustedFallbackLoopId || '').trim();
+        const fallbackActivityFamily = String(loopDef.sourceExhaustedFallbackActivityFamily || '').trim();
         const requestedFallbackCompletions = fillRemainingRoundsFromInventory
           ? Number(remainingCompletions || 0)
           : (consumeAllSourcePacks
@@ -7829,12 +8062,23 @@ function updateLoopControls() {
           log(`${loopDef.name}: source packs completed the requested ${maxCompletions} round(s); no inventory fallback needed`);
           return { status: 'completed', completions: { rare: 0 }, reason: null };
         }
-        if (!fallbackLoopId || requestedFallbackCompletions <= 0) {
+        if ((!fallbackLoopId && !fallbackActivityFamily) || requestedFallbackCompletions <= 0) {
           return { status: 'unavailable', completions: { rare: 0 }, reason: 'no source-exhausted fallback configured' };
         }
-        const baseFallbackDef = findLoopDefById(fallbackLoopId);
+        let baseFallbackDef = fallbackLoopId ? findLoopDefById(fallbackLoopId) : null;
+        if (!baseFallbackDef && fallbackActivityFamily) {
+          const resolution = resolveSessionLoopByActivityFamily(getLoopDefs(), fallbackActivityFamily);
+          if (resolution.status === 'ambiguous') {
+            fail(`${loopDef.name}: source-exhausted fallback activity ${fallbackActivityFamily} is ambiguous: ${resolution.matches.map((entry) => `${entry.name} (${entry.id})`).join(', ')}`);
+          }
+          if (resolution.status === 'unavailable') {
+            log(`${loopDef.name}: source-exhausted fallback activity ${fallbackActivityFamily} is unavailable in the current scan`);
+            return { status: 'unavailable', completions: { rare: 0 }, reason: `fallback activity unavailable: ${fallbackActivityFamily}` };
+          }
+          baseFallbackDef = resolution.loop;
+        }
         if (!baseFallbackDef || baseFallbackDef.strategy !== 'fillAndVerifySbc') {
-          fail(`${loopDef.name}: source-exhausted fallback loop not found or invalid: ${fallbackLoopId}`);
+          fail(`${loopDef.name}: source-exhausted fallback loop not found or invalid: ${fallbackLoopId || fallbackActivityFamily}`);
         }
         const configuredFallbackLimit = Number(loopDef.sourceExhaustedFallbackMaxCompletions || requestedFallbackCompletions);
         const fallbackCompletions = Math.max(1, Math.min(requestedFallbackCompletions, configuredFallbackLimit));
@@ -9231,7 +9475,14 @@ function updateLoopControls() {
     log(`Ready v${W[APP_KEY]?.version || 'unknown'}. Keep FSU/Enhancer enabled before starting.`);
     setTimeout(async () => {
       try {
-        await panelCommands.scanPicks();
+        await scanAvailableDynamicSbcs({ cacheOnly: true });
+      } catch (error) {
+        log(`Dynamic SBC cache restore skipped: ${error?.message || error}`);
+      }
+      const scanPromise = panelCommands.scanPicks();
+      setMainPanelStartupHidden(panel, false);
+      try {
+        await scanPromise;
       } finally {
         setMainPanelStartupHidden(panel, false);
       }

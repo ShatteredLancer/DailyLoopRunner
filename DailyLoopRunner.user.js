@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.31
+// @version      0.6.40
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -295,7 +295,7 @@
       useRoundsAsCompletions: true,
       runtimeQuantity: { mode: "user", target: "maxCompletions", default: 3, min: 1, max: 50, label: "SBC completions" },
       consumeAllSourcePacks: true,
-      sourceExhaustedFallbackLoopId: "2x84-fodder"
+      sourceExhaustedFallbackActivityFamily: "2x84-upgrade"
     },
     {
       id: "one-click-daily-mvp",
@@ -408,152 +408,6 @@
           maxCompletions: 1e3
         }
       ]
-    },
-    {
-      id: "2x84-fodder",
-      hidden: true,
-      mvp: true,
-      name: "2x84+ Fodder Loop",
-      strategy: "fillAndVerifySbc",
-      activityBinding: { family: "2x84-upgrade", category: "Upgrades", required: true },
-      sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
-      rewardPackNames: ["2x 84+ Rare Gold Players Pack", "2 x 84+ Rare Gold Players Pack"],
-      maxCompletions: 1,
-      useRoundsAsCompletions: true,
-      runtimeQuantity: { mode: "user", target: "maxCompletions", default: 3, min: 1, max: 50, label: "SBC completions" },
-      allowMultipleCompletions: true,
-      inventoryFillFirst: true,
-      requirements: [
-        { tier: "gold", rarity: "rare", count: 6, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["storage", "club"] }
-      ],
-      priorityPiles: ["storage", "club"],
-      requiredSpecialCount: 0,
-      allowedSpecialCount: 0,
-      maxSubmittedRating: 81,
-      maxNormalGoldSubmittedRating: 81,
-      blockSpecial: true,
-      blockTradeable: false,
-      openRewardPacks: true
-    },
-    {
-      id: "auto-totw-upgrade",
-      name: "84+ TOTW Upgrade Loop",
-      strategy: "fillAndVerifySbc",
-      activityBinding: { family: "totw-upgrade", category: "Upgrades", required: true },
-      sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
-      rewardPackIds: [20707, 20441],
-      rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
-      maxCompletions: 1,
-      useRoundsAsCompletions: true,
-      runtimeQuantity: { mode: "user", target: "maxCompletions", default: 3, min: 1, max: 50, label: "SBC completions" },
-      allowMultipleCompletions: true,
-      maxSubmittedRating: 88,
-      maxNormalGoldSubmittedRating: 99,
-      ratingSbcFill: {
-        priorityPiles: ["unassigned", "storage", "transfer", "club"]
-      },
-      requiredSpecialCount: 0,
-      allowedSpecialCount: 0,
-      blockSpecial: true,
-      blockTradeable: false,
-      openRewardPacks: true,
-      forceOpenRewardPacks: true,
-      assumeTotwRewardPack: true
-    },
-    {
-      id: "84x10-mvp",
-      hidden: true,
-      mvp: true,
-      name: "84x10 MVP (1 run)",
-      strategy: "fillAndVerifySbc",
-      sbcNames: [
-        "84+ x10",
-        "84+ x 10",
-        "10x 84+ Upgrade",
-        "10 x 84+ Upgrade",
-        "10 \u540D 84+ \u5347\u7EA7",
-        "10\u540D84+\u5347\u7EA7"
-      ],
-      maxCompletions: 1,
-      maxSubmittedRating: 88,
-      maxNormalGoldSubmittedRating: 99,
-      ratingSbcFill: {
-        priorityPiles: ["unassigned", "storage", "transfer", "club"]
-      },
-      requiredSpecialCount: 1,
-      allowedSpecialCount: 1,
-      requiredSpecialKind: "totw-tots-fof",
-      requiredSpecialMinRating: 84,
-      specialRequirementAdd: {
-        patterns: ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
-        buttonTexts: ["Add", "\u6DFB\u52A0", "\u52A0\u5165", "\u65B0\u589E"]
-      },
-      autoTotwUpgrade: {
-        name: "84+ TOTW Upgrade",
-        activityBinding: { family: "totw-upgrade", category: "Upgrades", required: true },
-        sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
-        rewardPackIds: [20707, 20441],
-        rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
-        maxSubmittedRating: 88,
-        maxNormalGoldSubmittedRating: 99,
-        blockSpecial: true,
-        blockTradeable: false,
-        openRewardPacks: true
-      },
-      autoFodderUpgrade: {
-        activityBinding: { family: "2x84-upgrade", category: "Upgrades", required: false },
-        maxAttemptsPerCompletion: 3
-      },
-      blockSpecial: true,
-      blockTradeable: false,
-      openRewardPacks: false
-    },
-    {
-      id: "84x10",
-      name: "84x10 Loop",
-      strategy: "fillAndVerifySbc",
-      sbcNames: [
-        "84+ x10",
-        "84+ x 10",
-        "10x 84+ Upgrade",
-        "10 x 84+ Upgrade",
-        "10 \u540D 84+ \u5347\u7EA7",
-        "10\u540D84+\u5347\u7EA7"
-      ],
-      maxCompletions: 50,
-      allowMultipleCompletions: true,
-      maxSubmittedRating: 88,
-      maxNormalGoldSubmittedRating: 99,
-      ratingSbcFill: {
-        priorityPiles: ["unassigned", "storage", "transfer", "club"]
-      },
-      requiredSpecialCount: 1,
-      allowedSpecialCount: 1,
-      requiredSpecialKind: "totw-tots-fof",
-      requiredSpecialMinRating: 84,
-      specialRequirementAdd: {
-        patterns: ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
-        buttonTexts: ["Add", "\u6DFB\u52A0", "\u52A0\u5165", "\u65B0\u589E"]
-      },
-      autoTotwUpgrade: {
-        name: "84+ TOTW Upgrade",
-        activityBinding: { family: "totw-upgrade", category: "Upgrades", required: true },
-        sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
-        rewardPackIds: [20707, 20441],
-        rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
-        maxSubmittedRating: 88,
-        maxNormalGoldSubmittedRating: 99,
-        blockSpecial: true,
-        blockTradeable: false,
-        openRewardPacks: true
-      },
-      autoFodderUpgrade: {
-        activityBinding: { family: "2x84-upgrade", category: "Upgrades", required: false },
-        maxAttemptsPerCompletion: 3
-      },
-      blockSpecial: true,
-      blockTradeable: false,
-      openRewardPacks: false
     },
     {
       id: "provision-crafting",
@@ -1469,7 +1323,8 @@
   var SBC_ACTIVITY_FAMILY_IDS = Object.freeze([
     ...FAMILY_DEFS.map((family) => family.id),
     "totw-upgrade",
-    "high-rated-x10"
+    "high-rated-x10",
+    "high-rated-pack-upgrade"
   ]);
   function clone(value) {
     return cloneLoopDef(value);
@@ -1483,6 +1338,24 @@
   }
   function unique(values = []) {
     return [...new Set(values.filter((value) => value !== void 0 && value !== null && value !== ""))];
+  }
+  function collectActivityBindingSbcNames(values = []) {
+    const names = /* @__PURE__ */ new Set();
+    const visited = /* @__PURE__ */ new WeakSet();
+    const visit = (value) => {
+      if (!value || typeof value !== "object") return;
+      if (visited.has(value)) return;
+      visited.add(value);
+      if (value.activityBinding?.family && Array.isArray(value.sbcNames)) {
+        value.sbcNames.forEach((name) => {
+          const normalized = normalizedText(name).toLowerCase();
+          if (normalized) names.add(normalized);
+        });
+      }
+      Object.values(value).forEach(visit);
+    };
+    visit(values);
+    return [...names];
   }
   function canonicalTier(value) {
     const text = normalizedText(value).toUpperCase();
@@ -1737,9 +1610,13 @@
       ...results.filter((result) => result.status === "supported" && result.activity).map((result) => result.activity),
       ...input.additionalActivities || []
     ];
+    const seenActivities = /* @__PURE__ */ new Set();
     for (const activity of activities) {
       if (!activity?.familyId || !activity?.setId) continue;
       const family = activity.familyId;
+      const key = `${family}:${activity.setId}`;
+      if (seenActivities.has(key)) continue;
+      seenActivities.add(key);
       activitiesByFamily.set(family, [...activitiesByFamily.get(family) || [], clone(activity)]);
     }
     const diagnostics = [];
@@ -2305,6 +2182,16 @@
       if (loopDef.sourceExhaustedFallbackLoopId !== void 0 && (typeof loopDef.sourceExhaustedFallbackLoopId !== "string" || !loopDef.sourceExhaustedFallbackLoopId.trim())) {
         errors.push("sourceExhaustedFallbackLoopId must be a non-empty string");
       }
+      if (loopDef.sourceExhaustedFallbackActivityFamily !== void 0) {
+        if (typeof loopDef.sourceExhaustedFallbackActivityFamily !== "string" || !loopDef.sourceExhaustedFallbackActivityFamily.trim()) {
+          errors.push("sourceExhaustedFallbackActivityFamily must be a non-empty string");
+        } else if (!SBC_ACTIVITY_FAMILY_IDS.includes(loopDef.sourceExhaustedFallbackActivityFamily)) {
+          errors.push(`sourceExhaustedFallbackActivityFamily is not supported: ${loopDef.sourceExhaustedFallbackActivityFamily}`);
+        }
+      }
+      if (loopDef.sourceExhaustedFallbackLoopId && loopDef.sourceExhaustedFallbackActivityFamily) {
+        errors.push("sourceExhaustedFallbackLoopId and sourceExhaustedFallbackActivityFamily cannot both be configured");
+      }
       if (loopDef.sourceExhaustedFallbackMaxCompletions !== void 0) {
         const fallbackLimit = Number(loopDef.sourceExhaustedFallbackMaxCompletions);
         if (!Number.isFinite(fallbackLimit) || fallbackLimit <= 0) {
@@ -2636,6 +2523,15 @@
       configured.maxCompletions = Math.max(1, Math.floor(Number(availability.safetyLimit) || 100));
     }
     return configured;
+  }
+
+  // src/config/session-loops.js
+  function resolveSessionLoopByActivityFamily(loopDefs = [], family) {
+    const normalizedFamily = String(family || "").trim();
+    if (!normalizedFamily) return { status: "unavailable", loop: null, matches: [] };
+    const matches = (loopDefs || []).filter((loop) => loop?.strategy === "fillAndVerifySbc" && (String(loop.dynamicSbcFamily || "") === normalizedFamily || String(loop.activityBinding?.family || "") === normalizedFamily));
+    if (matches.length === 1) return { status: "resolved", loop: matches[0], matches };
+    return { status: matches.length ? "ambiguous" : "unavailable", loop: null, matches };
   }
 
   // src/config/fsu-compat.js
@@ -3456,6 +3352,100 @@
     return loops;
   }
 
+  // src/config/upgrade-policies.js
+  var ALL_INVENTORY_PILES2 = Object.freeze(["unassigned", "storage", "transfer", "club"]);
+  var FODDER_PILES = Object.freeze(["storage", "club"]);
+  function clone2(value) {
+    return value === void 0 ? void 0 : cloneLoopDef(value);
+  }
+  function mergePolicy(base, overrides = {}) {
+    return {
+      ...clone2(base),
+      ...clone2(overrides),
+      ...base.ratingSbcFill || overrides.ratingSbcFill ? {
+        ratingSbcFill: {
+          ...clone2(base.ratingSbcFill) || {},
+          ...clone2(overrides.ratingSbcFill) || {}
+        }
+      } : {}
+    };
+  }
+  function createTotwUpgradePolicy(overrides = {}) {
+    return mergePolicy({
+      strategy: "fillAndVerifySbc",
+      maxSubmittedRating: 88,
+      maxNormalGoldSubmittedRating: 99,
+      ratingSbcFill: { priorityPiles: [...ALL_INVENTORY_PILES2] },
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      blockSpecial: true,
+      blockTradeable: false,
+      openRewardPacks: true,
+      forceOpenRewardPacks: true,
+      assumeTotwRewardPack: true
+    }, overrides);
+  }
+  function createTwoBy84UpgradePolicy(overrides = {}) {
+    return mergePolicy({
+      strategy: "fillAndVerifySbc",
+      hidden: true,
+      inventoryFillFirst: true,
+      requirements: [{
+        tier: "gold",
+        rarity: "rare",
+        count: 6,
+        maxRating: 81,
+        playerOnly: true,
+        allowSpecial: false,
+        protectHighGold: true,
+        priorityPiles: [...FODDER_PILES]
+      }],
+      priorityPiles: [...FODDER_PILES],
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      maxSubmittedRating: 81,
+      maxNormalGoldSubmittedRating: 81,
+      blockSpecial: true,
+      blockTradeable: false,
+      openRewardPacks: true
+    }, overrides);
+  }
+  function createHighRatedUpgradePolicy(overrides = {}) {
+    return mergePolicy({
+      strategy: "fillAndVerifySbc",
+      maxSubmittedRating: 88,
+      maxNormalGoldSubmittedRating: 99,
+      ratingSbcFill: { priorityPiles: [...ALL_INVENTORY_PILES2] },
+      requiredSpecialCount: 0,
+      allowedSpecialCount: 0,
+      requiredSpecialKind: "totw-tots-fof",
+      requiredSpecialMinRating: 84,
+      specialRequirementAdd: {
+        patterns: ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
+        buttonTexts: ["Add", "\u6DFB\u52A0", "\u52A0\u5165", "\u65B0\u589E"]
+      },
+      autoTotwUpgrade: {
+        name: "Scanned TOTW Upgrade",
+        activityBinding: { family: "totw-upgrade", category: "Upgrades", required: true },
+        ...createTotwUpgradePolicy({ forceOpenRewardPacks: false })
+      },
+      autoFodderUpgrade: {
+        name: "Scanned 2x84+ Upgrade",
+        activityBinding: { family: "2x84-upgrade", category: "Upgrades", required: false },
+        maxAttemptsPerCompletion: 3,
+        ...createTwoBy84UpgradePolicy({ hidden: false, forceOpenRewardPacks: true })
+      },
+      blockSpecial: true,
+      blockTradeable: false,
+      openRewardPacks: false
+    }, overrides);
+  }
+  function createDynamicUpgradePolicy(family = {}, overrides = {}) {
+    if (family.id === "totw-upgrade") return createTotwUpgradePolicy(overrides);
+    if (family.id === "2x84-upgrade") return createTwoBy84UpgradePolicy(overrides);
+    return createHighRatedUpgradePolicy(overrides);
+  }
+
   // src/config/upgrade-discovery.js
   var SUPPORTED_PLAYER_KEYS = /* @__PURE__ */ new Set([
     "PLAYER_QUALITY",
@@ -3466,8 +3456,8 @@
     "PLAYER_EXACT_OVR"
   ]);
   var UNSUPPORTED_TEAM_KEYS = /* @__PURE__ */ new Set(["CHEMISTRY_POINTS", "ALL_PLAYERS_CHEMISTRY_POINTS"]);
-  function clone2(value) {
-    return cloneLoopDef(value);
+  function clone3(value) {
+    return value === void 0 ? void 0 : cloneLoopDef(value);
   }
   function positiveInteger3(value) {
     const number = Number(value);
@@ -3491,13 +3481,44 @@
     if (/\b84\+\s*TOTW\b.*\bUpgrade\b|\bTOTW\b.*\bUpgrade\b/i.test(text)) {
       return { id: "totw-upgrade", rewardCount: 1, rewardMinRating: 84 };
     }
-    const prefix = /\b10\s*x\s*(\d{2})\+(?:\s*Players?)?\s*Upgrade\b/i.exec(text);
-    const suffix = /\b(\d{2})\+\s*x\s*10(?:\s*Players?)?(?:\s*Upgrade)?\b/i.exec(text);
-    const rating = positiveInteger3(prefix?.[1] || suffix?.[1]);
-    if (rating && rating >= 84 && rating <= 99) {
-      return { id: "high-rated-x10", rewardCount: 10, rewardMinRating: rating };
+    const prefix = /\b(\d{1,2})\s*x\s*(\d{2})\+(?:\s+(?:Rare\s+Gold\s+)?Players?)?\s+Upgrade\b/i.exec(text);
+    const suffix = /\b(\d{2})\+\s*x\s*(\d{1,2})(?:\s+(?:Rare\s+Gold\s+)?Players?)?\s+Upgrade\b/i.exec(text);
+    const rewardCount = positiveInteger3(prefix?.[1] || suffix?.[2]);
+    const rating = positiveInteger3(prefix?.[2] || suffix?.[1]);
+    if (rewardCount && rewardCount <= 30 && rating && rating >= 84 && rating <= 99) {
+      return {
+        id: rewardCount === 2 && rating === 84 ? "2x84-upgrade" : rewardCount === 10 ? "high-rated-x10" : "high-rated-pack-upgrade",
+        rewardCount,
+        rewardMinRating: rating
+      };
     }
     return null;
+  }
+  function isHighRatedUpgradeFamily(family = {}) {
+    return ["high-rated-x10", "high-rated-pack-upgrade"].includes(family.id);
+  }
+  function parseTwoBy84Challenge(challenge) {
+    const parsed = parseBasicUpgradeChallenge(challenge);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        diagnostics: parsed.diagnostics || [],
+        requiredPlayerCount: parsed.requiredPlayerCount || null,
+        requirements: [],
+        targetRating: null,
+        specialCount: 0
+      };
+    }
+    const requirements = parsed.requirements || [];
+    const valid = requirements.length === 1 && requirements[0].tier === "gold" && requirements[0].rarity === "rare" && Number(requirements[0].count) === Number(parsed.requiredPlayerCount);
+    return {
+      ok: valid,
+      diagnostics: valid ? [] : ["2x84+ Upgrade must require only Rare Gold players"],
+      requiredPlayerCount: parsed.requiredPlayerCount,
+      requirements,
+      targetRating: null,
+      specialCount: 0
+    };
   }
   function requirementSummary3(entry = {}) {
     return `${entry.keyName || "?"}(count:${entry.count || "?"}, values:${entry.values?.join("/") || "?"})`;
@@ -3539,7 +3560,7 @@
       }
     }
     if (teamRatings.length !== 1) diagnostics.push("exactly one TEAM_RATING condition is required");
-    if (family.id === "high-rated-x10" && specialCount > 1) {
+    if (isHighRatedUpgradeFamily(family) && specialCount > 1) {
       diagnostics.push(`more than one required special card is unsupported (${specialCount})`);
     }
     if (family.id === "totw-upgrade" && specialCount) {
@@ -3572,6 +3593,20 @@
       label: "SBC completions"
     };
   }
+  function materializeDynamicUpgradeChallengeLoopDef(loopDef = {}, challenge = {}) {
+    const challengeId = positiveInteger3(challenge?.id || challenge?.challengeId);
+    const metadata = (loopDef.dynamicChallenges || []).find((entry) => positiveInteger3(entry?.challengeId) === challengeId);
+    if (!metadata) return clone3(loopDef);
+    const result = clone3(loopDef);
+    result.expectedPlayerCount = positiveInteger3(metadata.requiredPlayerCount) || result.expectedPlayerCount;
+    result.requiredSpecialCount = Math.max(0, Number(metadata.specialCount || 0) || 0);
+    result.allowedSpecialCount = result.requiredSpecialCount;
+    result.ratingSbcFill = { ...clone3(result.ratingSbcFill) || {} };
+    if (positiveInteger3(metadata.targetRating)) result.ratingSbcFill.targetRating = Number(metadata.targetRating);
+    else delete result.ratingSbcFill.targetRating;
+    result.dynamicActiveChallengeId = challengeId;
+    return result;
+  }
   function parseDynamicUpgradeSbcSnapshot(input = {}) {
     const set = input.set || {};
     const setId = positiveInteger3(set.id);
@@ -3586,9 +3621,29 @@
     if (rewards.packs.length !== 1) diagnostics.push(`exactly one Pack reward is required; found ${rewards.packs.length}`);
     if (!rewards.ids.length && !rewards.names.length) diagnostics.push("stable Pack reward identity is missing");
     const challenges = Array.isArray(set.challenges) ? set.challenges : [];
-    if (challenges.length !== 1) diagnostics.push(`exactly one Challenge is required; found ${challenges.length}`);
-    const parsedChallenge = challenges.length === 1 ? parseUpgradeChallenge(challenges[0], family) : { ok: false, diagnostics: [], requiredPlayerCount: null, targetRating: null, specialCount: 0 };
-    diagnostics.push(...parsedChallenge.diagnostics);
+    const supportsMultipleChallenges = isHighRatedUpgradeFamily(family);
+    if (!challenges.length) diagnostics.push("at least one Challenge is required");
+    if (!supportsMultipleChallenges && challenges.length !== 1) {
+      diagnostics.push(`exactly one Challenge is required; found ${challenges.length}`);
+    }
+    const parsedChallenges = challenges.map((challenge, index) => {
+      if (!positiveInteger3(challenge?.id)) diagnostics.push(`challenge ${index + 1} has no stable id`);
+      const parsed = family.id === "2x84-upgrade" ? parseTwoBy84Challenge(challenge) : parseUpgradeChallenge(challenge, family);
+      diagnostics.push(...(parsed.diagnostics || []).map((diagnostic) => challenges.length > 1 ? `challenge ${index + 1} (#${challenge?.id || "?"}): ${diagnostic}` : diagnostic));
+      return {
+        challengeId: positiveInteger3(challenge?.id),
+        requiredPlayerCount: parsed.requiredPlayerCount,
+        targetRating: parsed.targetRating,
+        specialCount: parsed.specialCount,
+        requirements: parsed.requirements || []
+      };
+    });
+    const parsedChallenge = parsedChallenges[0] || {
+      requiredPlayerCount: null,
+      targetRating: null,
+      specialCount: 0,
+      requirements: []
+    };
     const remaining = remainingCompletions3(set);
     if (remaining === 0) {
       return {
@@ -3608,17 +3663,17 @@
         diagnostics: unique3(diagnostics)
       };
     }
-    const template = family.id === "totw-upgrade" ? input.totwTemplate : input.x10Template;
-    if (!template) {
-      return { status: "unsupported", setId, family, diagnostics: ["safe built-in Upgrade template is unavailable"] };
-    }
+    const policy = createDynamicUpgradePolicy(family);
+    const playerCounts = unique3(parsedChallenges.map((challenge) => positiveInteger3(challenge.requiredPlayerCount)).filter(Boolean));
+    const maximumSpecialCount = Math.max(0, ...parsedChallenges.map((challenge) => Number(challenge.specialCount || 0) || 0));
     const loop = {
-      ...clone2(template),
+      ...policy,
       id: `discovered-upgrade-${setId}-${family.id}-${family.rewardMinRating}`,
       name: setName,
       discovered: true,
       discoveryKind: "upgrade",
       dynamicSbcFamily: family.id,
+      dynamicRewardCount: family.rewardCount,
       dynamicRewardMinRating: family.rewardMinRating,
       sbcSetIds: [setId],
       sbcNames: [setName],
@@ -3627,15 +3682,29 @@
       remainingCompletions: remaining,
       scannedMetadata: true,
       ratingSbcFill: {
-        ...clone2(template.ratingSbcFill) || {},
-        targetRating: parsedChallenge.targetRating
+        ...clone3(policy.ratingSbcFill) || {},
+        ...parsedChallenges.length === 1 && parsedChallenge.targetRating ? { targetRating: parsedChallenge.targetRating } : {}
       },
-      expectedPlayerCount: parsedChallenge.requiredPlayerCount
+      expectedPlayerCount: playerCounts.length === 1 ? playerCounts[0] : null,
+      dynamicChallengeCount: parsedChallenges.length,
+      dynamicChallenges: parsedChallenges.map((challenge) => ({
+        challengeId: challenge.challengeId,
+        requiredPlayerCount: challenge.requiredPlayerCount,
+        targetRating: challenge.targetRating,
+        specialCount: challenge.specialCount
+      }))
     };
-    if (family.id === "high-rated-x10") {
-      loop.requiredSpecialCount = parsedChallenge.specialCount;
-      loop.allowedSpecialCount = parsedChallenge.specialCount;
-      if (!parsedChallenge.specialCount) {
+    if (family.id === "2x84-upgrade") {
+      const configuredRequirement = policy.requirements?.[0] || {};
+      loop.requirements = (parsedChallenge.requirements || []).map((requirement2) => ({
+        ...clone3(configuredRequirement),
+        ...clone3(requirement2)
+      }));
+    }
+    if (isHighRatedUpgradeFamily(family)) {
+      loop.requiredSpecialCount = maximumSpecialCount;
+      loop.allowedSpecialCount = maximumSpecialCount;
+      if (!maximumSpecialCount) {
         delete loop.requiredSpecialKind;
         delete loop.requiredSpecialMinRating;
         loop.autoTotwUpgrade = false;
@@ -3654,14 +3723,17 @@
       remainingCompletions: remaining,
       targetRating: parsedChallenge.targetRating,
       requiredPlayerCount: parsedChallenge.requiredPlayerCount,
-      specialCount: parsedChallenge.specialCount,
+      specialCount: maximumSpecialCount,
+      challengeCount: parsedChallenges.length,
       diagnostics: []
     };
   }
   function configuredUpgradeMatches(result, loop = {}) {
     if (loop.strategy !== "fillAndVerifySbc") return false;
     if ((loop.sbcSetIds || []).map(Number).includes(Number(result.setId))) return true;
+    if (loop.activityBinding?.family === result.family?.id) return true;
     if (result.family?.id === "totw-upgrade") return loop.id === "auto-totw-upgrade";
+    if (result.family?.id === "2x84-upgrade") return loop.id === "2x84-fodder";
     if (result.family?.id === "high-rated-x10" && Number(result.family.rewardMinRating) === 84) {
       return ["84x10", "84x10-mvp"].includes(String(loop.id));
     }
@@ -3669,23 +3741,29 @@
   }
   function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
     const merged = {
-      ...clone2(configuredLoop),
+      ...clone3(configuredLoop),
       sbcSetIds: [...discoveredLoop.sbcSetIds || []],
       sbcNames: unique3([...discoveredLoop.sbcNames || [], ...configuredLoop.sbcNames || []]),
       rewardPackIds: unique3([...discoveredLoop.rewardPackIds || [], ...configuredLoop.rewardPackIds || []]),
       rewardPackNames: unique3([...discoveredLoop.rewardPackNames || [], ...configuredLoop.rewardPackNames || []]),
       remainingCompletions: discoveredLoop.remainingCompletions,
       dynamicSbcFamily: discoveredLoop.dynamicSbcFamily,
+      dynamicRewardCount: discoveredLoop.dynamicRewardCount,
       dynamicRewardMinRating: discoveredLoop.dynamicRewardMinRating,
+      dynamicChallengeCount: discoveredLoop.dynamicChallengeCount,
+      dynamicChallenges: clone3(discoveredLoop.dynamicChallenges || []),
       expectedPlayerCount: discoveredLoop.expectedPlayerCount,
       requiredSpecialCount: discoveredLoop.requiredSpecialCount,
       allowedSpecialCount: discoveredLoop.allowedSpecialCount,
       ratingSbcFill: {
-        ...clone2(configuredLoop.ratingSbcFill) || {},
+        ...clone3(configuredLoop.ratingSbcFill) || {},
         targetRating: discoveredLoop.ratingSbcFill?.targetRating
       },
       scannedMetadata: true
     };
+    if (discoveredLoop.ratingSbcFill?.targetRating === void 0) {
+      delete merged.ratingSbcFill.targetRating;
+    }
     if (discoveredLoop.requiredSpecialCount) {
       merged.requiredSpecialKind = discoveredLoop.requiredSpecialKind || configuredLoop.requiredSpecialKind;
       merged.requiredSpecialMinRating = discoveredLoop.requiredSpecialMinRating || configuredLoop.requiredSpecialMinRating;
@@ -3704,9 +3782,7 @@
     const results = [];
     for (const set of input.sets || []) {
       const parsed = parseDynamicUpgradeSbcSnapshot({
-        set,
-        x10Template: input.x10Template,
-        totwTemplate: input.totwTemplate
+        set
       });
       if (parsed.status !== "supported") {
         results.push(parsed);
@@ -3747,8 +3823,13 @@
         setName: normalizedText4(loop.sbcNames?.[0] || loop.name),
         rewardPackIds: [...loop.rewardPackIds || []],
         rewardPackNames: [...loop.rewardPackNames || []],
+        rewardCount: loop.dynamicRewardCount ?? null,
         remainingCompletions: loop.remainingCompletions ?? null,
-        requirements: []
+        requirements: (loop.requirements || []).map((requirement2) => ({
+          tier: requirement2.tier,
+          ...requirement2.rarity ? { rarity: requirement2.rarity } : {},
+          count: requirement2.count
+        }))
       });
     }
     return activities;
@@ -6812,9 +6893,89 @@
 
   // src/sbc/dynamic-sbc-cache.js
   var DYNAMIC_SBC_CACHE_SCHEMA_VERSION = 1;
-  var DYNAMIC_SBC_PARSER_VERSION = 1;
+  var DYNAMIC_SBC_PARSER_VERSION = 3;
   var DYNAMIC_SBC_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
-  function clone3(value) {
+  var DYNAMIC_SBC_SCAN_HEALTH_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
+  var BOUNDED_RETRY_LOAD_CODES = /* @__PURE__ */ new Set([426, 512, 521]);
+  function dynamicSbcLoadErrorCode(error) {
+    const directValues = [
+      error?.status,
+      error?.statusCode,
+      error?.code,
+      error?.error?.status,
+      error?.error?.code
+    ];
+    for (const value of directValues) {
+      const code = Number(value);
+      if (Number.isInteger(code) && code >= 100 && code <= 599) return code;
+    }
+    const match = String(error?.message || error || "").match(/(?:^|\D)(426|429|512|521)(?:\D|$)/);
+    return match ? Number(match[1]) : null;
+  }
+  function dynamicSbcLoadFailurePolicy(error, context = {}) {
+    const code = dynamicSbcLoadErrorCode(error);
+    const attempt = Math.max(1, Number(context.attempt || 1) || 1);
+    const attempts = Math.max(attempt, Number(context.attempts || attempt) || attempt);
+    if (code === 429) return { code, retry: false, openCircuit: true };
+    if (BOUNDED_RETRY_LOAD_CODES.has(code)) {
+      return { code, retry: attempt < Math.min(attempts, 2), openCircuit: false };
+    }
+    return { code, retry: attempt < attempts, openCircuit: false };
+  }
+  function normalizeDynamicSbcScanHealth(value = {}, now = Date.now()) {
+    const updatedAt = Math.max(0, Number(value?.updatedAt || 0) || 0);
+    const stale = !updatedAt || Math.max(0, Number(now) - updatedAt) > DYNAMIC_SBC_SCAN_HEALTH_MAX_AGE_MS;
+    if (stale) {
+      return {
+        updatedAt: 0,
+        runs: 0,
+        requestCount: 0,
+        failureCount: 0,
+        rateLimitCount: 0,
+        failureRate: 0,
+        recommendedGapMs: 1200
+      };
+    }
+    return {
+      updatedAt,
+      runs: Math.max(0, Number(value?.runs || 0) || 0),
+      requestCount: Math.max(0, Number(value?.requestCount || 0) || 0),
+      failureCount: Math.max(0, Number(value?.failureCount || 0) || 0),
+      rateLimitCount: Math.max(0, Number(value?.rateLimitCount || 0) || 0),
+      failureRate: Math.max(0, Math.min(1, Number(value?.failureRate || 0) || 0)),
+      recommendedGapMs: Math.max(800, Math.min(3e3, Number(value?.recommendedGapMs || 1200) || 1200))
+    };
+  }
+  function updateDynamicSbcScanHealth(previous = {}, metrics = {}, now = Date.now()) {
+    const normalized = normalizeDynamicSbcScanHealth(previous, now);
+    const requestCount = Math.max(0, Number(metrics.requestCount || 0) || 0);
+    if (!requestCount) return normalized;
+    const failureCount = Math.max(0, Math.min(requestCount, Number(metrics.failureCount || 0) || 0));
+    const rateLimitCount = Math.max(0, Number(metrics.rateLimitCount || 0) || 0);
+    const currentRate = requestCount ? failureCount / requestCount : 0;
+    const failureRate = normalized.runs && requestCount ? normalized.failureRate * 0.65 + currentRate * 0.35 : requestCount ? currentRate : normalized.failureRate;
+    let recommendedGapMs = normalized.recommendedGapMs;
+    if (rateLimitCount > 0) recommendedGapMs = 3e3;
+    else if (currentRate >= 0.2 || failureRate >= 0.2) recommendedGapMs = Math.max(recommendedGapMs, 2500);
+    else if (currentRate >= 0.1 || failureRate >= 0.1) recommendedGapMs = Math.max(recommendedGapMs, 1800);
+    else if (requestCount >= 10 && failureCount === 0) recommendedGapMs = Math.max(800, recommendedGapMs - 200);
+    return {
+      updatedAt: Number(now) || Date.now(),
+      runs: normalized.runs + 1,
+      requestCount,
+      failureCount,
+      rateLimitCount,
+      failureRate,
+      recommendedGapMs
+    };
+  }
+  function scanCircuitOpenError(circuit) {
+    const error = new Error(`Challenge metadata request skipped because the scan circuit opened after EA ${circuit?.code || "rate limiting"}`);
+    error.code = "DYNAMIC_SBC_SCAN_CIRCUIT_OPEN";
+    error.eaCode = circuit?.code || null;
+    return error;
+  }
+  function clone4(value) {
     return cloneLoopDef(value);
   }
   function positiveInteger6(value) {
@@ -6848,6 +7009,33 @@
       description: String(reward.description || "")
     };
   }
+  function knownChallengeIds(value = {}) {
+    return [...new Set([
+      ...value.challengeIds || [],
+      ...(value.challenges || []).map((challenge) => challenge?.id)
+    ].map(positiveInteger6).filter(Boolean))].sort((a, b) => a - b);
+  }
+  function cachedChallengeSnapshotUsable(cached, index = {}) {
+    return index?.complete === true || Array.isArray(cached?.snapshot?.challenges) && cached.snapshot.challenges.length > 0;
+  }
+  function compatibleIndexCore(value = {}) {
+    return {
+      id: positiveInteger6(value.id),
+      name: String(value.name || ""),
+      repeats: value.repeats ?? null,
+      startTime: value.startTime ?? null,
+      endTime: value.endTime ?? null,
+      inUpgradesCategory: value.inUpgradesCategory === true,
+      rewards: (value.rewards || []).map(rewardFingerprint)
+    };
+  }
+  function isCompatibleDynamicSbcIndex(cachedSnapshot = {}, index = {}) {
+    if (fingerprintDynamicSbcValue(compatibleIndexCore(cachedSnapshot)) !== fingerprintDynamicSbcValue(compatibleIndexCore(index))) return false;
+    const cachedIds = knownChallengeIds(cachedSnapshot);
+    const currentIds = knownChallengeIds(index);
+    if (!currentIds.length) return true;
+    return cachedIds.length === currentIds.length && currentIds.every((id, position) => id === cachedIds[position]);
+  }
   function dynamicSbcIndexFingerprint(index = {}) {
     return fingerprintDynamicSbcValue({
       id: positiveInteger6(index.id),
@@ -6872,7 +7060,7 @@
     };
   }
   function normalizeDynamicSbcCache(cache, now = Date.now()) {
-    if (!isPlainObject(cache) || Number(cache.schemaVersion) !== DYNAMIC_SBC_CACHE_SCHEMA_VERSION || Number(cache.parserVersion) !== DYNAMIC_SBC_PARSER_VERSION || !isPlainObject(cache.sets)) {
+    if (!isPlainObject(cache) || Number(cache.schemaVersion) !== DYNAMIC_SBC_CACHE_SCHEMA_VERSION || !isPlainObject(cache.sets)) {
       return createDynamicSbcCache(now);
     }
     const sets = {};
@@ -6882,7 +7070,7 @@
       sets[String(setId)] = {
         setId,
         fingerprint: String(entry.fingerprint),
-        snapshot: clone3(entry.snapshot),
+        snapshot: clone4(entry.snapshot),
         scannedAt: Number(entry.scannedAt || 0) || 0,
         validatedAt: Number(entry.validatedAt || 0) || 0
       };
@@ -6896,7 +7084,7 @@
   }
   function mergeDynamicSbcLiveState(snapshot = {}, index = {}) {
     return {
-      ...clone3(snapshot),
+      ...clone4(snapshot),
       id: index.id ?? snapshot.id,
       name: index.name || snapshot.name,
       status: index.status ?? snapshot.status,
@@ -6905,11 +7093,11 @@
       repeats: index.repeats ?? null,
       startTime: index.startTime ?? snapshot.startTime ?? null,
       endTime: index.endTime ?? snapshot.endTime ?? null,
-      categoryIds: clone3(index.categoryIds || snapshot.categoryIds || []),
-      categoryNames: clone3(index.categoryNames || snapshot.categoryNames || []),
+      categoryIds: clone4(index.categoryIds || snapshot.categoryIds || []),
+      categoryNames: clone4(index.categoryNames || snapshot.categoryNames || []),
       categoriesAvailable: index.categoriesAvailable === true,
       inUpgradesCategory: index.inUpgradesCategory === true,
-      rewards: clone3(index.rewards?.length ? index.rewards : snapshot.rewards || [])
+      rewards: clone4(index.rewards?.length ? index.rewards : snapshot.rewards || [])
     };
   }
   async function scanDynamicSbcSnapshots(options = {}) {
@@ -6922,6 +7110,8 @@
     const now = Number(options.now?.() ?? Date.now()) || Date.now();
     const maxAgeMs = Math.max(0, Number(options.maxAgeMs ?? DYNAMIC_SBC_CACHE_MAX_AGE_MS) || 0);
     const forceFull = options.forceFull === true;
+    const loadAttempts = Math.max(1, Math.min(5, Number(options.loadAttempts || 1) || 1));
+    const loadRetryDelayMs = Math.max(0, Number(options.loadRetryDelayMs || 0) || 0);
     const cache = normalizeDynamicSbcCache(options.cache, now);
     const refreshResult = await options.refreshSets();
     const sets = options.listSets() || [];
@@ -6935,9 +7125,15 @@
       newSets: 0,
       changedSets: 0,
       expiredEntries: 0,
+      invalidEntries: 0,
       loadFailures: 0,
+      loadRetries: 0,
+      cacheFallbacks: 0,
+      circuitBreakers: 0,
+      circuitSkipped: 0,
       removedEntries: 0
     };
+    let loadCircuit = null;
     for (const set of sets) {
       const index = options.snapshotIndex(set, refreshResult);
       if (!options.isCandidate(index, set)) continue;
@@ -6949,45 +7145,91 @@
       const cached = cache.sets[String(setId)] || null;
       const age = cached ? Math.max(0, now - Number(cached.scannedAt || 0)) : Infinity;
       const unchanged = Boolean(cached && cached.fingerprint === fingerprint);
-      const fresh = unchanged && age <= maxAgeMs;
+      const cacheMetadataUsable = cachedChallengeSnapshotUsable(cached, index);
+      const fresh = unchanged && age <= maxAgeMs && cacheMetadataUsable;
+      const compatibleFresh = Boolean(
+        cached && !unchanged && age <= maxAgeMs && cacheMetadataUsable && isCompatibleDynamicSbcIndex(cached.snapshot, index)
+      );
       let snapshot;
       let loadError = null;
       let cacheStatus = "miss";
-      if (!forceFull && fresh) {
+      if (!forceFull && (fresh || compatibleFresh)) {
         snapshot = mergeDynamicSbcLiveState(cached.snapshot, index);
-        cacheStatus = "hit";
+        cacheStatus = compatibleFresh ? "compatible-hit" : "hit";
         stats.cacheHits++;
         cache.sets[String(setId)] = {
           ...cached,
-          snapshot: clone3(snapshot),
+          fingerprint,
+          snapshot: clone4(snapshot),
           validatedAt: now
         };
       } else {
         if (!cached) stats.newSets++;
         else if (!unchanged) stats.changedSets++;
+        else if (!cacheMetadataUsable) stats.invalidEntries++;
         else stats.expiredEntries++;
         let challenges = null;
         if (index?.complete !== true) {
-          try {
-            challenges = await options.loadChallenges(set, index);
-          } catch (error) {
-            loadError = error;
-            stats.loadFailures++;
+          if (loadCircuit) {
+            loadError = scanCircuitOpenError(loadCircuit);
+            stats.circuitSkipped++;
+            await options.onLoadSkipped?.({ set, index, circuit: loadCircuit, error: loadError });
+          } else {
+            for (let attempt = 1; attempt <= loadAttempts; attempt++) {
+              try {
+                challenges = await options.loadChallenges(set, index, {
+                  attempt,
+                  attempts: loadAttempts,
+                  cachedSnapshot: cached?.snapshot || null,
+                  unchanged
+                });
+                loadError = null;
+                break;
+              } catch (error) {
+                loadError = error;
+                const policy = options.loadFailurePolicy?.(error, {
+                  set,
+                  index,
+                  attempt,
+                  attempts: loadAttempts
+                }) || dynamicSbcLoadFailurePolicy(error, { attempt, attempts: loadAttempts });
+                if (policy.openCircuit) {
+                  loadCircuit = { code: policy.code || dynamicSbcLoadErrorCode(error), error };
+                  stats.circuitBreakers++;
+                  await options.onCircuitOpen?.({ set, index, circuit: loadCircuit, error });
+                }
+                if (!policy.retry || attempt >= loadAttempts || loadCircuit) break;
+                const delayMs = loadRetryDelayMs * attempt;
+                stats.loadRetries++;
+                await options.onLoadRetry?.({ set, index, attempt, attempts: loadAttempts, delayMs, error });
+                if (delayMs && typeof options.sleep === "function") await options.sleep(delayMs);
+              }
+            }
           }
+          if (loadError) stats.loadFailures++;
         }
-        snapshot = loadError && cached && unchanged ? mergeDynamicSbcLiveState(cached.snapshot, index) : options.snapshotSet(set, challenges, refreshResult);
-        cacheStatus = forceFull ? "forced" : cached ? unchanged ? "expired" : "changed" : "new";
+        const compatibleCacheFallback = Boolean(
+          loadError && cached && cacheMetadataUsable && isCompatibleDynamicSbcIndex(cached.snapshot, index)
+        );
+        snapshot = compatibleCacheFallback ? mergeDynamicSbcLiveState(cached.snapshot, index) : options.snapshotSet(set, challenges, refreshResult);
+        cacheStatus = compatibleCacheFallback ? "load-failed-compatible-cache" : forceFull ? "forced" : cached ? unchanged ? cacheMetadataUsable ? "expired" : "invalid" : "changed" : "new";
         stats.rescanned++;
-        if (!loadError) {
+        if (compatibleCacheFallback) {
+          stats.cacheFallbacks++;
+          cache.sets[String(setId)] = {
+            ...cached,
+            fingerprint,
+            snapshot: clone4(snapshot),
+            validatedAt: now
+          };
+        } else if (!loadError) {
           cache.sets[String(setId)] = {
             setId,
             fingerprint,
-            snapshot: clone3(snapshot),
+            snapshot: clone4(snapshot),
             scannedAt: now,
             validatedAt: now
           };
-        } else if (cached && unchanged) {
-          cacheStatus = "load-failed-cached";
         }
       }
       const result = { set, index, snapshot, loadError, cacheStatus, fingerprint };
@@ -9851,6 +10093,11 @@
         await options.afterRetry?.({ result, attempt });
         continue;
       }
+      if (attempt.status === "progressed") {
+        result.details = { ...result.details, ...attempt.details || {} };
+        await options.afterProgress?.({ result, attempt });
+        continue;
+      }
       if (attempt.status === "submitted" || attempt.submitted === true) {
         result.completions++;
         result.rewardPacksOpened += Number(attempt.rewardPacksOpened || 0);
@@ -11384,7 +11631,7 @@
     "recoveryRecipes",
     "unassignedRecoveryPolicies"
   ]);
-  function clone4(value) {
+  function clone5(value) {
     return cloneLoopDef(value);
   }
   function stableValue2(value) {
@@ -11404,8 +11651,8 @@
     return current;
   }
   function setValueAt(value, path, nextValue) {
-    if (!path.length) return clone4(nextValue);
-    const result = isPlainObject(value) ? clone4(value) : {};
+    if (!path.length) return clone5(nextValue);
+    const result = isPlainObject(value) ? clone5(value) : {};
     let current = result;
     for (const key2 of path.slice(0, -1)) {
       if (!isPlainObject(current[key2])) current[key2] = {};
@@ -11413,7 +11660,7 @@
     }
     const key = path.at(-1);
     if (nextValue === void 0) delete current[key];
-    else current[key] = clone4(nextValue);
+    else current[key] = clone5(nextValue);
     return result;
   }
   function replaceEntity(items, id, entity) {
@@ -11421,27 +11668,27 @@
     let replaced = false;
     for (const item of items || []) {
       if (String(item?.id || "") !== String(id)) {
-        result.push(clone4(item));
+        result.push(clone5(item));
         continue;
       }
       replaced = true;
-      if (entity) result.push(clone4(entity));
+      if (entity) result.push(clone5(entity));
     }
-    if (!replaced && entity) result.push(clone4(entity));
+    if (!replaced && entity) result.push(clone5(entity));
     return result;
   }
   function mergePatch(base, patch) {
-    if (!isPlainObject(patch)) return clone4(patch);
-    const result = isPlainObject(base) ? clone4(base) : {};
+    if (!isPlainObject(patch)) return clone5(patch);
+    const result = isPlainObject(base) ? clone5(base) : {};
     for (const [key, value] of Object.entries(patch)) {
       if (value === null) delete result[key];
-      else result[key] = isPlainObject(value) ? mergePatch(result[key], value) : clone4(value);
+      else result[key] = isPlainObject(value) ? mergePatch(result[key], value) : clone5(value);
     }
     return result;
   }
   function createPatch(base, target) {
     if (sameValue(base, target)) return void 0;
-    if (!isPlainObject(base) || !isPlainObject(target)) return clone4(target);
+    if (!isPlainObject(base) || !isPlainObject(target)) return clone5(target);
     const patch = {};
     const keys = /* @__PURE__ */ new Set([...Object.keys(base), ...Object.keys(target)]);
     for (const key of keys) {
@@ -11450,7 +11697,7 @@
         continue;
       }
       if (!Object.hasOwn(base, key)) {
-        patch[key] = clone4(target[key]);
+        patch[key] = clone5(target[key]);
         continue;
       }
       const child = createPatch(base[key], target[key]);
@@ -11483,23 +11730,23 @@
       const targetEntity = target.get(id);
       const currentEntity = current.get(id);
       if (!targetEntity) {
-        if (!baseEntity && currentEntity) entities.push(clone4(currentEntity));
+        if (!baseEntity && currentEntity) entities.push(clone5(currentEntity));
         continue;
       }
       if (!baseEntity) {
         if (currentEntity && !sameValue(currentEntity, targetEntity)) {
           conflicts.push({ collection, id, path: "", reason: "custom-id-collision" });
         }
-        entities.push(clone4(targetEntity));
+        entities.push(clone5(targetEntity));
         continue;
       }
       if (!currentEntity) {
         conflicts.push({ collection, id, path: "", reason: "built-in-removed" });
-        entities.push(clone4(targetEntity));
+        entities.push(clone5(targetEntity));
         continue;
       }
       if (sameValue(baseEntity, targetEntity)) {
-        entities.push(clone4(currentEntity));
+        entities.push(clone5(currentEntity));
         continue;
       }
       const patch = createPatch(baseEntity, targetEntity);
@@ -11513,9 +11760,9 @@
             id,
             path: path.join("."),
             reason: "both-changed",
-            base: clone4(before),
-            builtIn: clone4(upstream),
-            profile: clone4(desired)
+            base: clone5(before),
+            builtIn: clone5(upstream),
+            profile: clone5(desired)
           });
         }
       }
@@ -11528,22 +11775,22 @@
     const base = baseConfig[field2];
     const target = targetConfig[field2];
     const current = currentConfig[field2];
-    if (sameValue(base, target)) return { value: clone4(current), conflicts: [] };
+    if (sameValue(base, target)) return { value: clone5(current), conflicts: [] };
     if (!sameValue(base, current) && !sameValue(current, target)) {
       return {
-        value: clone4(target),
+        value: clone5(target),
         conflicts: [{
           collection: field2,
           id: field2,
           path: "",
           reason: "both-changed",
-          base: clone4(base),
-          builtIn: clone4(current),
-          profile: clone4(target)
+          base: clone5(base),
+          builtIn: clone5(current),
+          profile: clone5(target)
         }]
       };
     }
-    return { value: clone4(target), conflicts: [] };
+    return { value: clone5(target), conflicts: [] };
   }
   function normalizeDynamicBinding(binding = {}) {
     return {
@@ -11554,7 +11801,7 @@
       rewardPackIds: [...new Set((binding.rewardPackIds || binding.definition?.rewardPackIds || []).map(Number).filter(Number.isFinite))],
       discoveryKind: String(binding.discoveryKind || binding.definition?.discoveryKind || ""),
       available: binding.available === true,
-      definition: binding.definition ? clone4(binding.definition) : null,
+      definition: binding.definition ? clone5(binding.definition) : null,
       lastSeenAt: Number(binding.lastSeenAt || 0) || 0
     };
   }
@@ -11569,7 +11816,7 @@
     return binding.rewardPackIds.some((id) => packIds.has(id));
   }
   function legacyInventoryOnlyStarterConfig(baseConfig) {
-    const config = clone4(normalizeLoopConfig(baseConfig));
+    const config = clone5(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => getLoopStrategyCapabilities(loop.strategy).inventoryOnly === INVENTORY_ONLY_CAPABILITIES.container ? { ...loop, inventoryMode: "inventory-only" } : loop);
     return validateLoopConfig(config, "Legacy Inventory Only starter profile");
   }
@@ -11582,7 +11829,7 @@
     return (loop.challengeRequirements || []).some((requirements) => (requirements || []).some(requirementUsesBronzeOrSilver));
   }
   function bronzeSilverInventoryOnlyStarterConfig(baseConfig) {
-    const config = clone4(normalizeLoopConfig(baseConfig));
+    const config = clone5(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => {
       const capability = getLoopStrategyCapabilities(loop.strategy).inventoryOnly;
       if (![INVENTORY_ONLY_CAPABILITIES.supported, INVENTORY_ONLY_CAPABILITIES.container].includes(capability)) {
@@ -11596,7 +11843,7 @@
     return validateLoopConfig(config, "Bronze/Silver Inventory Only starter profile");
   }
   function dailyRarePack2x84StarterConfig(baseConfig) {
-    const config = clone4(normalizeLoopConfig(baseConfig));
+    const config = clone5(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => {
       if (loop.id !== "one-click-daily") return loop;
       const steps = (loop.steps || []).filter((step) => String(typeof step === "object" ? step?.loopId || "" : step) !== "daily-rare-pack-84");
@@ -11620,7 +11867,7 @@
     return [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean).every((config) => sameValue(normalizeLoopConfig(config), legacyConfig));
   }
   function createBuilderStarterProfiles(baseConfig, options = {}) {
-    const normalizedBase = clone4(validateLoopConfig(baseConfig, "Builder starter profile base"));
+    const normalizedBase = clone5(validateLoopConfig(baseConfig, "Builder starter profile base"));
     return [
       createBuilderProfile({
         id: BUILDER_STARTER_PROFILE_IDS.default,
@@ -11658,8 +11905,8 @@
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
   function createBuilderProfile(options = {}) {
-    const baseConfig = clone4(normalizeLoopConfig(options.baseConfig || options.config));
-    const config = clone4(normalizeLoopConfig(options.config || baseConfig));
+    const baseConfig = clone5(normalizeLoopConfig(options.baseConfig || options.config));
+    const config = clone5(normalizeLoopConfig(options.config || baseConfig));
     const now = Number(options.now || Date.now());
     return {
       schemaVersion: BUILDER_SCHEMA_VERSION,
@@ -11669,8 +11916,8 @@
       baseFingerprint: fingerprintBuilderValue(baseConfig),
       baseConfig,
       draftConfig: config,
-      savedConfig: clone4(config),
-      lastKnownGood: clone4(validateLoopConfig(config, "Builder profile")),
+      savedConfig: clone5(config),
+      lastKnownGood: clone5(validateLoopConfig(config, "Builder profile")),
       dynamicBindings: (options.dynamicBindings || []).map(normalizeDynamicBinding),
       draftRevision: 1,
       savedRevision: 1,
@@ -11682,20 +11929,20 @@
     if (!isPlainObject(profile)) return createBuilderProfile({ baseConfig, ...options });
     let normalizedBase;
     try {
-      normalizedBase = clone4(validateLoopConfig(profile.baseConfig || baseConfig, "Builder profile base"));
+      normalizedBase = clone5(validateLoopConfig(profile.baseConfig || baseConfig, "Builder profile base"));
     } catch {
-      normalizedBase = clone4(validateLoopConfig(baseConfig, "Current built-in config"));
+      normalizedBase = clone5(validateLoopConfig(baseConfig, "Current built-in config"));
     }
     let lastKnownGood = null;
     for (const candidate of [profile.lastKnownGood, profile.savedConfig, normalizedBase]) {
       if (!candidate) continue;
       try {
-        lastKnownGood = clone4(validateLoopConfig(candidate, "Builder last known good"));
+        lastKnownGood = clone5(validateLoopConfig(candidate, "Builder last known good"));
         break;
       } catch {
       }
     }
-    const draftConfig = clone4(normalizeLoopConfig(profile.draftConfig || lastKnownGood));
+    const draftConfig = clone5(normalizeLoopConfig(profile.draftConfig || lastKnownGood));
     const result = {
       ...createBuilderProfile({
         id: profile.id || options.id,
@@ -11704,12 +11951,12 @@
         config: lastKnownGood,
         now: profile.createdAt || options.now
       }),
-      ...clone4(profile),
+      ...clone5(profile),
       schemaVersion: BUILDER_SCHEMA_VERSION,
-      baseConfig: clone4(normalizedBase),
+      baseConfig: clone5(normalizedBase),
       draftConfig,
-      savedConfig: clone4(lastKnownGood),
-      lastKnownGood: clone4(lastKnownGood),
+      savedConfig: clone5(lastKnownGood),
+      lastKnownGood: clone5(lastKnownGood),
       dynamicBindings: (profile.dynamicBindings || []).map((binding) => ({
         ...normalizeDynamicBinding(binding),
         available: false
@@ -11774,25 +12021,25 @@
         available: false
       })),
       profiles,
-      lastKnownGood: migratedLegacyActive ? clone4(profiles.find((profile) => profile.id === activeProfileId)?.lastKnownGood || null) : store.lastKnownGood ? clone4(store.lastKnownGood) : null
+      lastKnownGood: migratedLegacyActive ? clone5(profiles.find((profile) => profile.id === activeProfileId)?.lastKnownGood || null) : store.lastKnownGood ? clone5(store.lastKnownGood) : null
     };
   }
   function updateBuilderProfileDraft(profile, config, now = Date.now()) {
     return {
-      ...clone4(profile),
-      draftConfig: clone4(normalizeLoopConfig(config)),
+      ...clone5(profile),
+      draftConfig: clone5(normalizeLoopConfig(config)),
       draftRevision: Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1,
       updatedAt: Number(now)
     };
   }
   function refreshBuilderDynamicBindings(profile, discoveredLoops = [], now = Date.now()) {
-    const result = clone4(profile);
+    const result = clone5(profile);
     result.dynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).map((binding) => {
       const definition = discoveredLoops.find((loop) => dynamicLoopMatch(binding, loop));
       return {
         ...binding,
         available: Boolean(definition),
-        definition: definition ? clone4(definition) : binding.definition,
+        definition: definition ? clone5(definition) : binding.definition,
         lastSeenAt: definition ? Number(now) : binding.lastSeenAt
       };
     });
@@ -11824,7 +12071,7 @@
         unavailableBindings.push({ id: binding.id, loopId: binding.loopId });
         continue;
       }
-      config.loops.push(clone4(binding.definition));
+      config.loops.push(clone5(binding.definition));
     }
     return {
       config,
@@ -11847,15 +12094,15 @@
   }
   function resolveBuilderProfileConflict(profile, currentBuiltInConfig, conflict, choice, now = Date.now()) {
     if (!["built-in", "profile"].includes(choice)) throw new Error(`Unsupported conflict choice: ${choice}`);
-    const result = clone4(profile);
+    const result = clone5(profile);
     const currentConfig = normalizeLoopConfig(currentBuiltInConfig);
     const path = String(conflict?.path || "").split(".").filter(Boolean);
     const collection = String(conflict?.collection || "");
     if (collection === "defaultUnassignedRecoveryPolicyIds") {
       if (choice === "built-in") {
-        result.draftConfig[collection] = clone4(currentConfig[collection]);
+        result.draftConfig[collection] = clone5(currentConfig[collection]);
       } else {
-        result.baseConfig[collection] = clone4(currentConfig[collection]);
+        result.baseConfig[collection] = clone5(currentConfig[collection]);
       }
     } else if (ENTITY_COLLECTIONS.includes(collection)) {
       const id = String(conflict?.id || "");
@@ -11889,14 +12136,14 @@
     const validation = validateBuilderProfile(profile, currentBuiltInConfig);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
     const revision = Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1;
-    const currentBase = clone4(normalizeLoopConfig(currentBuiltInConfig));
+    const currentBase = clone5(normalizeLoopConfig(currentBuiltInConfig));
     return {
-      ...clone4(profile),
+      ...clone5(profile),
       baseConfig: currentBase,
       baseFingerprint: fingerprintBuilderValue(currentBase),
-      draftConfig: clone4(validation.config),
-      savedConfig: clone4(validation.config),
-      lastKnownGood: clone4(validation.config),
+      draftConfig: clone5(validation.config),
+      savedConfig: clone5(validation.config),
+      lastKnownGood: clone5(validation.config),
       draftRevision: revision,
       savedRevision: revision,
       updatedAt: Number(now)
@@ -11905,9 +12152,9 @@
   function upsertBuilderProfile(store, profile) {
     const profiles = [...store.profiles || []];
     const index = profiles.findIndex((entry) => entry.id === profile.id);
-    if (index >= 0) profiles[index] = clone4(profile);
-    else profiles.push(clone4(profile));
-    return { ...clone4(store), profiles };
+    if (index >= 0) profiles[index] = clone5(profile);
+    else profiles.push(clone5(profile));
+    return { ...clone5(store), profiles };
   }
   function activateBuilderProfile(store, profile, currentBuiltInConfig) {
     const saved = saveBuilderProfile(profile, currentBuiltInConfig);
@@ -11916,43 +12163,43 @@
       store: {
         ...nextStore,
         activeProfileId: saved.id,
-        activeDynamicBindings: clone4(saved.dynamicBindings || []),
-        lastKnownGood: clone4(saved.lastKnownGood)
+        activeDynamicBindings: clone5(saved.dynamicBindings || []),
+        lastKnownGood: clone5(saved.lastKnownGood)
       },
       profile: saved,
-      config: clone4(saved.lastKnownGood)
+      config: clone5(saved.lastKnownGood)
     };
   }
   function activateSavedBuilderProfile(store, profileId, currentBuiltInConfig) {
     const profile = (store.profiles || []).find((entry) => String(entry.id) === String(profileId));
     if (!profile) throw new Error(`Builder profile not found: ${profileId}`);
-    const savedConfig = clone4(profile.lastKnownGood || profile.savedConfig);
+    const savedConfig = clone5(profile.lastKnownGood || profile.savedConfig);
     if (!savedConfig) throw new Error(`Builder profile has no saved configuration: ${profile.name || profile.id}`);
     const savedLoopIds = new Set((savedConfig.loops || []).map((loop) => String(loop.id || "")));
     const savedDynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).filter((binding) => savedLoopIds.has(binding.loopId));
     const savedProfile = {
-      ...clone4(profile),
-      draftConfig: clone4(savedConfig),
-      savedConfig: clone4(savedConfig),
-      lastKnownGood: clone4(savedConfig),
+      ...clone5(profile),
+      draftConfig: clone5(savedConfig),
+      savedConfig: clone5(savedConfig),
+      lastKnownGood: clone5(savedConfig),
       dynamicBindings: savedDynamicBindings
     };
     const validation = validateBuilderProfile(savedProfile, currentBuiltInConfig);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
     return {
       store: {
-        ...clone4(store),
+        ...clone5(store),
         activeProfileId: profile.id,
-        activeDynamicBindings: clone4(savedDynamicBindings),
-        lastKnownGood: clone4(validation.config)
+        activeDynamicBindings: clone5(savedDynamicBindings),
+        lastKnownGood: clone5(validation.config)
       },
-      profile: clone4(profile),
-      config: clone4(validation.config)
+      profile: clone5(profile),
+      config: clone5(validation.config)
     };
   }
   function deactivateBuilderProfile(store) {
     return {
-      ...clone4(store),
+      ...clone5(store),
       activeProfileId: null,
       activeDynamicBindings: []
     };
@@ -11993,7 +12240,7 @@
   }
 
   // src/config/builder-editor.js
-  function clone5(value) {
+  function clone6(value) {
     return cloneLoopDef(value);
   }
   function slug(value) {
@@ -12045,17 +12292,17 @@
     }
   }
   function addBuilderLoop(config, strategy, options = {}) {
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const template = createLoopTemplate(strategy, options);
     template.id = uniqueId(normalized, template.id);
     normalized.loops.push(template);
     return { config: normalized, loop: template };
   }
   function duplicateBuilderLoop(config, loopId, options = {}) {
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const source = normalized.loops.find((loop) => String(loop.id) === String(loopId));
     if (!source) throw new Error(`Loop not found: ${loopId}`);
-    const copy = clone5(source);
+    const copy = clone6(source);
     copy.id = uniqueId(normalized, options.id || `${source.id}-copy`);
     copy.name = String(options.name || `${source.name} Copy`);
     delete copy.discoveryReportedCompleted;
@@ -12088,7 +12335,7 @@
     return references;
   }
   function removeBuilderLoop(config, loopId) {
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const references = findBuilderReferences(normalized, loopId);
     if (references.length) throw new Error(`Loop ${loopId} is referenced by ${references.length} configuration location(s)`);
     const previousLength = normalized.loops.length;
@@ -12097,7 +12344,7 @@
     return normalized;
   }
   function renameBuilderLoopId(config, oldId, requestedId) {
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const nextId = slug(requestedId);
     const target = normalized.loops.find((loop) => String(loop.id) === String(oldId));
     if (!target) throw new Error(`Loop not found: ${oldId}`);
@@ -12165,7 +12412,7 @@
     if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(kind)) {
       throw new Error(`Unsupported recovery collection: ${kind}`);
     }
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const nextId = slug(requestedId);
     const target = normalized[kind].find((item) => String(item.id) === String(oldId));
     if (!target) throw new Error(`Recovery object not found: ${oldId}`);
@@ -12197,7 +12444,7 @@
     return { config: normalized, id: nextId };
   }
   function removeBuilderRecovery(config, kind, id) {
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const references = findBuilderRecoveryReferences(normalized, kind, id);
     if (references.length) throw new Error(`Recovery object ${id} is referenced by ${references.length} configuration location(s)`);
     const previousLength = normalized[kind]?.length;
@@ -12207,18 +12454,18 @@
     return normalized;
   }
   function addBuilderWorkflowStep(config, workflowId, loopId, options = {}) {
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const child = normalized.loops.find((loop) => String(loop.id) === String(loopId));
     if (!workflow || !["dailyRoutine", "workflowRoutine"].includes(workflow.strategy)) throw new Error(`Workflow not found: ${workflowId}`);
     if (!child) throw new Error(`Child Loop not found: ${loopId}`);
     if (["dailyRoutine", "workflowRoutine"].includes(child.strategy)) throw new Error("Nested workflows are not supported");
-    const step = options.name || options.rewardFlow ? { loopId: child.id, ...options.name ? { name: options.name } : {}, ...options.rewardFlow ? { rewardFlow: clone5(options.rewardFlow) } : {} } : child.id;
+    const step = options.name || options.rewardFlow ? { loopId: child.id, ...options.name ? { name: options.name } : {}, ...options.rewardFlow ? { rewardFlow: clone6(options.rewardFlow) } : {} } : child.id;
     workflow.steps = [...workflow.steps || [], step];
     return normalized;
   }
   function moveBuilderWorkflowStep(config, workflowId, fromIndex, toIndex) {
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
     const from = Number(fromIndex);
@@ -12229,7 +12476,7 @@
     return normalized;
   }
   function removeBuilderWorkflowStep(config, workflowId, index) {
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
     if (!Number.isInteger(Number(index)) || Number(index) < 0 || Number(index) >= workflow.steps.length) {
@@ -12239,7 +12486,7 @@
     return normalized;
   }
   function setBuilderWorkflowStepPath(config, workflowId, index, path, value) {
-    const normalized = clone5(normalizeLoopConfig(config));
+    const normalized = clone6(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const stepIndex = Number(index);
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
@@ -12247,13 +12494,13 @@
       throw new Error(`Invalid Workflow step index: ${index}`);
     }
     const rawStep = workflow.steps[stepIndex];
-    const step = typeof rawStep === "string" ? { loopId: rawStep } : clone5(rawStep);
+    const step = typeof rawStep === "string" ? { loopId: rawStep } : clone6(rawStep);
     if (!step?.loopId) throw new Error(`Workflow step has no Loop reference: ${workflowId}[${index}]`);
     workflow.steps[stepIndex] = setBuilderPath(step, path, value);
     return normalized;
   }
   function createBuilderStepVariant(config, workflowId, stepIndex) {
-    let normalized = clone5(normalizeLoopConfig(config));
+    let normalized = clone6(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const rawStep = workflow?.steps?.[Number(stepIndex)];
     const sourceId = typeof rawStep === "string" ? rawStep : rawStep?.loopId;
@@ -12267,12 +12514,12 @@
     normalized = result.config;
     result.loop.hidden = true;
     const nextWorkflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
-    const step = typeof rawStep === "string" ? { loopId: result.loop.id } : { ...clone5(rawStep), loopId: result.loop.id };
+    const step = typeof rawStep === "string" ? { loopId: result.loop.id } : { ...clone6(rawStep), loopId: result.loop.id };
     nextWorkflow.steps[Number(stepIndex)] = step;
     return { config: normalized, loop: result.loop };
   }
   function setBuilderPath(object, path, value) {
-    const result = clone5(object);
+    const result = clone6(object);
     const parts = Array.isArray(path) ? path : String(path).split(".").filter(Boolean);
     let target = result;
     const parents = [];
@@ -12284,7 +12531,7 @@
     }
     const finalKey = parts.at(-1);
     if (value === void 0) delete target[finalKey];
-    else target[finalKey] = clone5(value);
+    else target[finalKey] = clone6(value);
     if (value === void 0) {
       for (let index = parents.length - 1; index >= 0; index--) {
         const parent = parents[index];
@@ -12430,7 +12677,8 @@
       { path: "sourcePackIds", label: "Source pack IDs", type: "number-list" },
       { path: "sourcePackNames", label: "Source pack aliases", type: "string-list" },
       { path: "rareUpgrade", label: "Upgrade", type: "upgrade", required: true },
-      { path: "sourceExhaustedFallbackLoopId", label: "Fallback Loop", type: "loop-reference" },
+      { path: "sourceExhaustedFallbackActivityFamily", label: "Fallback dynamic activity", type: "activity-family" },
+      { path: "sourceExhaustedFallbackLoopId", label: "Legacy fallback Loop", type: "loop-reference" },
       { path: "sourceExhaustedFallbackMaxCompletions", label: "Fallback maximum completions", type: "integer" },
       { path: "maxPacks", label: "Maximum source packs", type: "integer" },
       { path: "maxCompletions", label: "Maximum completions", type: "integer" },
@@ -12570,6 +12818,11 @@
         return fieldRow(field2.label, selectInput(field2.path, value, [
           { value: "", label: "None" },
           ...context.atomicLoops.map((loop) => ({ value: loop.id, label: loop.name }))
+        ], readOnly));
+      case "activity-family":
+        return fieldRow(field2.label, selectInput(field2.path, value, [
+          { value: "", label: "None" },
+          ...SBC_ACTIVITY_FAMILY_IDS.map((family) => ({ value: family, label: family }))
         ], readOnly));
       case "pick-loop-reference":
         return fieldRow(field2.label, selectInput(field2.path, value, [
@@ -12950,8 +13203,8 @@
     </div>
   </div>
   ${descriptor2?.routine ? renderWorkflow(loop, context) : ""}
-  <div class="dlr-builder-form-grid common">${fields.filter((field2) => ["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "pick-loop-reference", "price-platform"].includes(field2.type)).map((field2) => renderField(field2, loop, context)).join("")}</div>
-  ${fields.filter((field2) => !["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "pick-loop-reference", "price-platform", "workflow-steps"].includes(field2.type)).map((field2) => renderField(field2, loop, context)).join("")}`;
+  <div class="dlr-builder-form-grid common">${fields.filter((field2) => ["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "activity-family", "pick-loop-reference", "price-platform"].includes(field2.type)).map((field2) => renderField(field2, loop, context)).join("")}</div>
+  ${fields.filter((field2) => !["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "activity-family", "pick-loop-reference", "price-platform", "workflow-steps"].includes(field2.type)).map((field2) => renderField(field2, loop, context)).join("")}`;
   }
   function renderRecoveryEditor(object, kind, context) {
     if (!object) return '<div class="dlr-builder-empty large">Select a recovery recipe or policy</div>';
@@ -13267,7 +13520,7 @@
   }
 
   // src/ui/workflow-loop-builder.js
-  function clone6(value) {
+  function clone7(value) {
     return cloneLoopDef(value);
   }
   function pathValue(object, path) {
@@ -13322,7 +13575,7 @@
   }
   function createWorkflowLoopBuilder(options = {}) {
     const dom = options.dom;
-    const builtInConfig = () => clone6(normalizeLoopConfig(options.getBuiltInConfig?.()));
+    const builtInConfig = () => clone7(normalizeLoopConfig(options.getBuiltInConfig?.()));
     const mounted = mountWorkflowLoopBuilder({ dom });
     const root = mounted.root;
     let store = normalizeBuilderStore(options.loadStore?.(), builtInConfig(), { now: options.now?.() });
@@ -13343,13 +13596,13 @@
       return Number(options.now?.() || Date.now());
     }
     function discoveredLoops() {
-      return clone6(options.getDiscoveredLoops?.() || []);
+      return clone7(options.getDiscoveredLoops?.() || []);
     }
     function profile() {
       return store.profiles.find((entry) => entry.id === profileId) || store.profiles[0];
     }
     function persist() {
-      const snapshot = clone6(store);
+      const snapshot = clone7(store);
       options.saveStore?.(snapshot);
       options.onStoreChange?.(snapshot);
     }
@@ -13366,7 +13619,7 @@
       const current = profile();
       if (JSON.stringify(current) === JSON.stringify(nextProfile)) return false;
       const currentHistory = history();
-      currentHistory.undo.push(clone6(current));
+      currentHistory.undo.push(clone7(current));
       if (currentHistory.undo.length > 50) currentHistory.undo.shift();
       currentHistory.redo = [];
       setProfile(nextProfile);
@@ -13379,7 +13632,7 @@
       const currentHistory = history();
       const previous = currentHistory.undo.pop();
       if (!previous) return false;
-      currentHistory.redo.push(clone6(profile()));
+      currentHistory.redo.push(clone7(profile()));
       setProfile(previous);
       selectedKind = null;
       selectedId = null;
@@ -13391,7 +13644,7 @@
       const currentHistory = history();
       const next = currentHistory.redo.pop();
       if (!next) return false;
-      currentHistory.undo.push(clone6(profile()));
+      currentHistory.undo.push(clone7(profile()));
       setProfile(next);
       selectedKind = null;
       selectedId = null;
@@ -13423,24 +13676,24 @@
       return `${profileId}:${kind}:${id}`;
     }
     function displayConfig(currentProfile, validation, sources) {
-      const config = clone6(normalizeLoopConfig(currentProfile.draftConfig));
+      const config = clone7(normalizeLoopConfig(currentProfile.draftConfig));
       for (const collection of BUILDER_COLLECTIONS) {
         const effective = new Map((validation.config[collection] || []).map((item) => [String(item.id), item]));
         const sourceMap = new Map((sources[collection] || []).map((entry) => [String(entry.id), entry.source]));
         config[collection] = (config[collection] || []).map((item) => {
           const source = sourceMap.get(String(item.id));
-          return ["built-in", "override", "dynamic"].includes(source) && effective.has(String(item.id)) ? clone6(effective.get(String(item.id))) : item;
+          return ["built-in", "override", "dynamic"].includes(source) && effective.has(String(item.id)) ? clone7(effective.get(String(item.id))) : item;
         });
         const ids = new Set(config[collection].map((item) => String(item.id)));
         for (const item of validation.config[collection] || []) {
           const id = String(item.id);
           if (ids.has(id)) continue;
-          config[collection].push(clone6(item));
+          config[collection].push(clone7(item));
           sources[collection] = [...sources[collection] || [], { id, source: "built-in", current: true }];
           ids.add(id);
         }
       }
-      config.defaultUnassignedRecoveryPolicyIds = clone6(validation.config.defaultUnassignedRecoveryPolicyIds);
+      config.defaultUnassignedRecoveryPolicyIds = clone7(validation.config.defaultUnassignedRecoveryPolicyIds);
       return config;
     }
     function buildModel() {
@@ -13503,10 +13756,10 @@
       return true;
     }
     function updateSelectedObject(mutator) {
-      const config = clone6(profile().draftConfig);
+      const config = clone7(profile().draftConfig);
       const object = selectedObject(config);
       if (!object || selectedKind === "dynamic") return false;
-      const updated = mutator(clone6(object));
+      const updated = mutator(clone7(object));
       if (!updated) return false;
       config[selectedKind] = replaceById(config[selectedKind], object.id, updated);
       setDraftConfig(config);
@@ -13572,7 +13825,7 @@
     function toggleDefaultRecoveryPolicy(element) {
       const policyId = String(element?.dataset?.policyId || "");
       if (!policyId) return;
-      const config = clone6(profile().draftConfig);
+      const config = clone7(profile().draftConfig);
       const ids = new Set(config.defaultUnassignedRecoveryPolicyIds || []);
       if (element.value === "true") ids.add(policyId);
       else ids.delete(policyId);
@@ -13581,7 +13834,7 @@
       render();
     }
     function newObject() {
-      const config = clone6(profile().draftConfig);
+      const config = clone7(profile().draftConfig);
       if (tab === "workflows") {
         const result = addBuilderLoop(config, "workflowRoutine", { name: "Custom Workflow" });
         setDraftConfig(result.config);
@@ -13629,12 +13882,12 @@
     }
     function duplicateObject() {
       if (selectedKind === "loops") {
-        const config2 = clone6(profile().draftConfig);
+        const config2 = clone7(profile().draftConfig);
         const hadSource = config2.loops.some((loop) => String(loop.id) === String(selectedId));
         if (!hadSource) {
           const effective = validateBuilderProfile(profile(), builtInConfig()).config.loops.find((loop) => String(loop.id) === String(selectedId));
           if (!effective) throw new Error(`Loop not found: ${selectedId}`);
-          config2.loops.push(clone6(effective));
+          config2.loops.push(clone7(effective));
         }
         const result = duplicateBuilderLoop(config2, selectedId);
         if (!hadSource) result.config.loops = result.config.loops.filter((loop) => String(loop.id) !== String(selectedId));
@@ -13645,7 +13898,7 @@
         return;
       }
       if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(selectedKind)) return;
-      const config = clone6(profile().draftConfig);
+      const config = clone7(profile().draftConfig);
       let source = config[selectedKind].find((item) => String(item.id) === String(selectedId));
       if (!source) {
         source = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind].find((item) => String(item.id) === String(selectedId));
@@ -13655,17 +13908,17 @@
       let index = 2;
       let id = `${source.id}-copy`;
       while (ids.has(id)) id = `${source.id}-copy-${index++}`;
-      const copy = { ...clone6(source), id, ...source.name ? { name: `${source.name} Copy` } : {} };
+      const copy = { ...clone7(source), id, ...source.name ? { name: `${source.name} Copy` } : {} };
       config[selectedKind].push(copy);
       setDraftConfig(config);
       selectedId = id;
       render();
     }
     function resetObject() {
-      const config = clone6(profile().draftConfig);
+      const config = clone7(profile().draftConfig);
       const current = builtInConfig()[selectedKind]?.find((item) => String(item.id) === String(selectedId));
       if (!current) return;
-      config[selectedKind] = replaceById(config[selectedKind], selectedId, clone6(current));
+      config[selectedKind] = replaceById(config[selectedKind], selectedId, clone7(current));
       editableBuiltIns.delete(editableKey());
       setDraftConfig(config);
       render();
@@ -13687,21 +13940,21 @@
       if (selectedKind !== "dynamic") return;
       const definition = selectedObject(profile().draftConfig);
       if (!definition) return;
-      const currentProfile = clone6(profile());
-      const config = clone6(currentProfile.draftConfig);
+      const currentProfile = clone7(profile());
+      const config = clone7(currentProfile.draftConfig);
       const existing = config.loops.findIndex((loop) => String(loop.id) === String(definition.id));
-      if (existing >= 0) config.loops[existing] = clone6(definition);
-      else config.loops.push(clone6(definition));
+      if (existing >= 0) config.loops[existing] = clone7(definition);
+      else config.loops.push(clone7(definition));
       currentProfile.dynamicBindings = [
         ...(currentProfile.dynamicBindings || []).filter((binding) => binding.loopId !== definition.id),
         {
           id: definition.id,
           loopId: definition.id,
-          sbcSetIds: clone6(definition.sbcSetIds || []),
-          pickItemResourceIds: clone6(definition.pickItemResourceIds || []),
-          rewardPackIds: clone6(definition.rewardPackIds || []),
+          sbcSetIds: clone7(definition.sbcSetIds || []),
+          pickItemResourceIds: clone7(definition.pickItemResourceIds || []),
+          rewardPackIds: clone7(definition.rewardPackIds || []),
           discoveryKind: String(definition.discoveryKind || ""),
-          definition: clone6(definition),
+          definition: clone7(definition),
           available: true,
           lastSeenAt: now()
         }
@@ -13715,14 +13968,14 @@
     }
     function unbindDynamic() {
       if (selectedKind !== "loops") return;
-      const currentProfile = clone6(profile());
+      const currentProfile = clone7(profile());
       const binding = (currentProfile.dynamicBindings || []).find((entry) => String(entry.loopId) === String(selectedId));
       if (!binding) return;
       const references = findBuilderReferences(currentProfile.draftConfig, binding.loopId);
       if (references.length) {
         throw new Error(`Dynamic SBC ${binding.loopId} is referenced by ${references.length} Workflow location(s); remove those steps first`);
       }
-      const config = clone6(currentProfile.draftConfig);
+      const config = clone7(currentProfile.draftConfig);
       config.loops = config.loops.filter((loop) => String(loop.id) !== String(binding.loopId));
       currentProfile.dynamicBindings = currentProfile.dynamicBindings.filter((entry) => String(entry.loopId) !== String(binding.loopId));
       setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
@@ -13756,7 +14009,7 @@
         store = activated.store;
         profileId = activated.profile.id;
         persist();
-        options.applyConfig?.(clone6(activated.config), `Builder profile: ${activated.profile.name}`);
+        options.applyConfig?.(clone7(activated.config), `Builder profile: ${activated.profile.name}`);
         jsonMessage = "Profile activated";
         jsonValid = true;
       } catch (error) {
@@ -13784,7 +14037,7 @@
     }
     function importedDynamicBindings(currentProfile, config) {
       const loops = new Map((config.loops || []).map((loop) => [String(loop.id || ""), loop]));
-      return clone6((currentProfile.dynamicBindings || []).filter((binding) => {
+      return clone7((currentProfile.dynamicBindings || []).filter((binding) => {
         const loop = loops.get(String(binding.loopId || ""));
         return ["playerPickSbc", "fillAndVerifySbc"].includes(loop?.strategy);
       }));
@@ -13891,13 +14144,13 @@
       if (action2 === "new-object") return newObject();
       if (action2 === "duplicate-object") return duplicateObject();
       if (action2 === "override-object") {
-        const config = clone6(profile().draftConfig);
+        const config = clone7(profile().draftConfig);
         if (!config[selectedKind]?.some((item) => String(item.id) === String(selectedId))) {
           const effective = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind]?.find((item) => String(item.id) === String(selectedId));
           if (!effective) throw new Error(`Built-in object not found: ${selectedKind}.${selectedId}`);
-          config[selectedKind].push(clone6(effective));
-          const currentProfile = clone6(profile());
-          currentProfile.baseConfig[selectedKind].push(clone6(effective));
+          config[selectedKind].push(clone7(effective));
+          const currentProfile = clone7(profile());
+          currentProfile.baseConfig[selectedKind].push(clone7(effective));
           currentProfile.baseFingerprint = fingerprintBuilderValue(currentProfile.baseConfig);
           setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
         }
@@ -14006,7 +14259,7 @@
           return;
         }
         if (element?.id === "dlr-builder-profile-name") {
-          const next = { ...clone6(profile()), name: String(element.value || "").trim() || profile().name, updatedAt: now() };
+          const next = { ...clone7(profile()), name: String(element.value || "").trim() || profile().name, updatedAt: now() };
           setEditedProfile(next);
           render();
           return;
@@ -14050,10 +14303,10 @@
       jsonMessage = `Imported ${importedProfile.draftConfig.loops.length} Loop(s)`;
       jsonValid = true;
       if (importOptions.open !== false) open("json");
-      return clone6(importedProfile.draftConfig);
+      return clone7(importedProfile.draftConfig);
     }
     function refreshDynamic(nextDiscoveredLoops = discoveredLoops()) {
-      const loops = clone6(nextDiscoveredLoops);
+      const loops = clone7(nextDiscoveredLoops);
       const activeBindingSnapshot = refreshBuilderDynamicBindings({
         dynamicBindings: store.activeDynamicBindings || []
       }, loops, now()).dynamicBindings;
@@ -14064,7 +14317,7 @@
       };
       persist();
       if (root.classList.contains("open")) render();
-      return clone6(store);
+      return clone7(store);
     }
     function restoreActiveProfile() {
       if (!store.activeProfileId) return { status: "built-in", config: null };
@@ -14072,15 +14325,15 @@
       if (!active) return { status: "missing", config: null };
       const activeConfig = store.lastKnownGood || active.lastKnownGood || active.savedConfig;
       const startupProfile = {
-        ...clone6(active),
-        draftConfig: clone6(activeConfig),
-        savedConfig: clone6(activeConfig),
-        dynamicBindings: clone6(store.activeDynamicBindings || [])
+        ...clone7(active),
+        draftConfig: clone7(activeConfig),
+        savedConfig: clone7(activeConfig),
+        dynamicBindings: clone7(store.activeDynamicBindings || [])
       };
       const validation = validateBuilderProfile(startupProfile, builtInConfig());
       if (!validation.valid) return { status: "blocked", errors: validation.errors, config: null };
-      options.applyConfig?.(clone6(validation.config), `Builder profile: ${active.name}`);
-      return { status: "applied", config: clone6(validation.config) };
+      options.applyConfig?.(clone7(validation.config), `Builder profile: ${active.name}`);
+      return { status: "applied", config: clone7(validation.config) };
     }
     function selectRuntimeProfile(nextProfileId) {
       if (String(nextProfileId) === BUILDER_BUILT_IN_PROFILE_ID) {
@@ -14091,12 +14344,12 @@
       store = activated.store;
       profileId = activated.profile.id;
       persist();
-      options.applyConfig?.(clone6(activated.config), `Builder profile: ${activated.profile.name}`);
+      options.applyConfig?.(clone7(activated.config), `Builder profile: ${activated.profile.name}`);
       if (root.classList.contains("open")) render();
       return {
         status: "applied",
         profileId: activated.profile.id,
-        config: clone6(activated.config)
+        config: clone7(activated.config)
       };
     }
     function useBuiltIn() {
@@ -14129,7 +14382,7 @@
         ...store.profiles.map((entry) => ({ id: entry.id, name: entry.name, preset: entry.preset || null }))
       ],
       getSelectedRuntimeProfileId: () => store.activeProfileId || BUILDER_BUILT_IN_PROFILE_ID,
-      getStore: () => clone6(store),
+      getStore: () => clone7(store),
       isOpen: () => root.classList.contains("open"),
       root
     });
@@ -15367,7 +15620,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.31",
+      version: "0.6.40",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -17241,12 +17494,12 @@
     function hasRatingSbcChallengeRequirements(challenge) {
       return Array.isArray(challenge?.eligibilityRequirements) && challenge.eligibilityRequirements.length > 0;
     }
-    async function requestRatingSbcChallenges(set, label = set?.name || "rating SBC") {
+    async function requestRatingSbcChallenges(set, label = set?.name || "rating SBC", options = {}) {
       const cached = getCachedSbcChallenges(set);
       const cachedAvailable = cached.find(
         (challenge) => !isCompletedChallenge(challenge) && hasRatingSbcChallengeRequirements(challenge)
       );
-      if (cachedAvailable || cached.length && isSbcSetComplete(set)) {
+      if (options.force !== true && (cachedAvailable || cached.length && isSbcSetComplete(set))) {
         log(`${label}: using ${cached.length} cached challenge(s); bypassed requestChallengesForSet`);
         return cached;
       }
@@ -17268,9 +17521,19 @@
       log(`${label}: direct SBC challenge load returned ${received.length} challenge(s)`);
       return received;
     }
+    async function findAvailableRatingSbcChallengeContext(set, label = set?.name || "rating SBC", options = {}) {
+      const challenges = await requestRatingSbcChallenges(set, label, options);
+      const available = challenges.filter((challenge) => !isCompletedChallenge(challenge));
+      return {
+        challenge: available[0] || null,
+        challenges,
+        incompleteCount: available.length
+      };
+    }
     async function findAvailableRatingSbcChallenge(set, label = set?.name || "rating SBC") {
-      const challenges = await requestRatingSbcChallenges(set, label);
-      const available = challenges.find((challenge) => !isCompletedChallenge(challenge)) || null;
+      const context = await findAvailableRatingSbcChallengeContext(set, label);
+      const { challenges } = context;
+      const available = context.challenge;
       if (!available && challenges.length) {
         const states = challenges.map((challenge, index) => {
           const status = String(challenge?.status || challenge?.state || "unknown").toUpperCase();
@@ -17315,12 +17578,13 @@
         stopPoint();
         await waitLoadingEnd(350, attempt === 1 ? 6e3 : 12e3).catch(() => null);
         try {
-          const result = await observeOnce(
+          const request = () => observeOnce(
             eaSbcAdapter().requestChallengesForSet(set),
             ctrl(),
             3e4,
             `requestChallengesForSet ${label}`
           );
+          const result = options.runRequest ? await options.runRequest(`standard Challenges ${label}`, request) : await request();
           lastResult = result;
           if (result?.success && result?.data?.challenges?.length) return result.data.challenges;
           lastError = new Error(serviceResultErrorText(result) || "no challenge data returned");
@@ -17336,26 +17600,40 @@
       const detail = lastError?.message || lastResult?.error?.code || lastResult?.status || "unknown";
       fail2(`No challenge loaded for ${label} after ${attempts} attempt(s): ${detail}`);
     }
-    async function loadDynamicSbcDiscoveryChallenges(set) {
+    async function loadDynamicSbcDiscoveryChallenges(set, index = {}, context = {}) {
       const label = `Dynamic SBC scan ${set?.name || `#${set?.id || "?"}`}`;
+      const repositoryChallenges = getCachedSbcChallenges(set);
+      const repositorySnapshot = eaSbcAdapter().snapshotDiscoverySet(set, repositoryChallenges);
+      const repositoryMetadataComplete = repositoryChallenges.length > 0 && repositoryChallenges.length === (index.challengeIds?.length || repositoryChallenges.length) && repositorySnapshot.challenges.every((challenge) => Number(challenge?.requiredPlayerCount || 0) > 0 && Array.isArray(challenge?.eligibilityRequirements) && challenge.eligibilityRequirements.length > 0);
+      if (!context.cachedSnapshot && repositoryMetadataComplete) {
+        log(`${label}: using ${repositoryChallenges.length} complete repository Challenge metadata snapshot(s)`);
+        return repositoryChallenges;
+      }
       let challenges = null;
       if (eaSbcAdapter().hasDaoGetChallengesForSet()) {
-        const result = await observeOnce(
+        const request = () => observeOnce(
           eaSbcAdapter().getChallengesForSet(set?.id),
           ctrl(),
           2e4,
           `sbcDAO.getChallengesForSet ${label}`
         );
+        const result = context.runRequest ? await context.runRequest(`DAO Challenges ${label}`, request) : await request();
         if (result?.success && Array.isArray(result?.response?.challenges)) {
           challenges = result.response.challenges;
         } else {
-          log(`${label}: direct Challenge metadata unavailable (${serviceResultErrorText(result) || "unknown"}); trying standard request`);
+          const detail = serviceResultErrorText(result) || "unknown";
+          throw new Error(`direct Challenge metadata unavailable: ${detail}`);
         }
       }
-      if (!challenges) challenges = await requestSbcChallenges(set, label, { attempts: 1 });
+      if (!challenges) challenges = await requestSbcChallenges(set, label, {
+        attempts: 1,
+        runRequest: context.runRequest
+      });
       const loaded = [];
       for (const challenge of challenges) {
-        if (challenge?.squad || !eaSbcAdapter().hasDaoLoadChallenge()) {
+        const metadata = eaSbcAdapter().snapshotDiscoverySet(set, [challenge])?.challenges?.[0] || null;
+        const metadataComplete = Number(metadata?.requiredPlayerCount || 0) > 0 && Array.isArray(metadata?.eligibilityRequirements) && metadata.eligibilityRequirements.length > 0;
+        if (metadataComplete || challenge?.squad || !eaSbcAdapter().hasDaoLoadChallenge()) {
           loaded.push(challenge);
           continue;
         }
@@ -17365,16 +17643,18 @@
         } catch {
         }
         try {
-          const result = await observeOnce(
+          const request = () => observeOnce(
             eaSbcAdapter().loadDaoChallenge(challenge.id, inProgress),
             ctrl(),
             2e4,
             `sbcDAO.loadChallenge ${label} #${challenge.id || "?"}`
           );
+          const result = context.runRequest ? await context.runRequest(`DAO Challenge squad ${label} #${challenge.id || "?"}`, request) : await request();
           const squad = result?.response?.squad;
           if (!result?.success || !squad) throw new Error(serviceResultErrorText(result) || "squad unavailable");
           challenge.squad = squad;
         } catch (error) {
+          if (dynamicSbcLoadErrorCode(error) === 429) throw error;
           const completed = isCompletedChallenge(challenge);
           log(`${label}: Challenge #${challenge?.id || "?"} squad metadata unavailable (${error?.message || error}); player count ${completed ? "may be inferred only from consistent sibling Challenge metadata" : "will remain unsupported"}`);
         }
@@ -17405,15 +17685,69 @@
     function dynamicSbcCacheStorageKey() {
       return `${DYNAMIC_SBC_CACHE_KEY}:${eaSbcAdapter().cacheScope()}`;
     }
-    function dynamicSbcCandidate(index = {}) {
+    function dynamicSbcScanHealthStorageKey() {
+      return `${dynamicSbcCacheStorageKey()}:scan-health`;
+    }
+    function createDynamicSbcRequestPacer() {
+      const healthKey = dynamicSbcScanHealthStorageKey();
+      const previous = normalizeDynamicSbcScanHealth(adapters.userscriptStorage.get(healthKey, null), Date.now());
+      const metrics = {
+        requestCount: 0,
+        failureCount: 0,
+        rateLimitCount: 0,
+        codes: {}
+      };
+      let gapMs = previous.recommendedGapMs;
+      let lastStartedAt = 0;
+      const recordFailure = (error) => {
+        metrics.failureCount++;
+        const code = dynamicSbcLoadErrorCode(error);
+        if (code) metrics.codes[code] = (metrics.codes[code] || 0) + 1;
+        if (code === 429) {
+          metrics.rateLimitCount++;
+          gapMs = 3e3;
+        } else if ([426, 512, 521].includes(code)) {
+          gapMs = Math.max(gapMs, 2500);
+        }
+      };
+      return {
+        initialGapMs: gapMs,
+        previous,
+        metrics,
+        async run(label, request) {
+          const waitMs = Math.max(0, gapMs - (Date.now() - lastStartedAt));
+          if (waitMs) await sleep(waitMs);
+          lastStartedAt = Date.now();
+          metrics.requestCount++;
+          try {
+            const result = await request();
+            if (!result?.success) recordFailure(new Error(serviceResultErrorText(result) || `${label} failed`));
+            return result;
+          } catch (error) {
+            recordFailure(error);
+            throw error;
+          }
+        },
+        save() {
+          const health = updateDynamicSbcScanHealth(previous, metrics, Date.now());
+          adapters.userscriptStorage.set(healthKey, health);
+          return health;
+        }
+      };
+    }
+    function dynamicSbcCandidate(index = {}, activitySbcNames = []) {
       const hasPlayerPickReward = (index.rewards || []).some((reward) => reward?.type === "PLAYER_PICK");
-      return hasPlayerPickReward || index.inUpgradesCategory === true;
+      if (hasPlayerPickReward) return true;
+      if (index.inUpgradesCategory !== true) return false;
+      if (detectDynamicUpgradeFamily(index)) return true;
+      const setName = String(index.name || "").trim().toLowerCase();
+      if (setName && activitySbcNames.includes(setName)) return true;
+      const challengeCount = (index.challengeIds || []).length;
+      const packRewardCount = (index.rewards || []).filter((reward) => reward?.type === "PACK").length;
+      return challengeCount === 1 && packRewardCount === 1;
     }
-    function configuredLoopTemplate(id) {
-      return getConfiguredLoopDefs().find((loopDef) => loopDef?.id === id) || LOOP_DEFS.find((loopDef) => loopDef?.id === id) || null;
-    }
-    function unavailableDynamicSbcParse(parsed, loadError) {
-      if (!loadError) return parsed;
+    function unavailableDynamicSbcParse(parsed, loadError, cacheStatus) {
+      if (!loadError || cacheStatus === "load-failed-compatible-cache") return parsed;
       return {
         ...parsed,
         status: "unavailable",
@@ -17443,12 +17777,52 @@
     async function scanAvailableDynamicSbcs(options = {}) {
       const forceFull = options.forceFull === true;
       const clearCache = options.clearCache === true;
-      log(`Dynamic SBC scan: refreshing the current Set/Category index and validating per-SBC cache${forceFull ? "; forcing full Challenge refresh" : ""}; nothing will be executed`);
+      const cacheOnly = options.cacheOnly === true;
+      log(cacheOnly ? "Dynamic SBC cache: restoring previously validated session Loops before background refresh" : `Dynamic SBC scan: refreshing the current Set/Category index and validating per-SBC cache${forceFull ? "; forcing full Challenge refresh" : ""}; nothing will be executed`);
       const pickOptions = getPickRuntimeOptions();
+      const activitySbcNames = collectActivityBindingSbcNames([
+        getConfiguredLoopDefs(),
+        getConfiguredRecoveryRecipes()
+      ]);
       const cacheKey = dynamicSbcCacheStorageKey();
       if (clearCache) adapters.userscriptStorage.remove(cacheKey);
       const cached = clearCache ? null : adapters.userscriptStorage.get(cacheKey, null);
-      const summary = await scanDynamicSbcSnapshots({
+      const requestPacer = cacheOnly ? null : createDynamicSbcRequestPacer();
+      if (requestPacer) {
+        log(`Dynamic SBC scan pacing: minimum ${requestPacer.initialGapMs}ms between EA Challenge requests; recent failure rate ${(requestPacer.previous.failureRate * 100).toFixed(1)}%, recent 429 count ${requestPacer.previous.rateLimitCount}`);
+      }
+      const summary = cacheOnly ? (() => {
+        const normalized = normalizeDynamicSbcCache(cached, Date.now());
+        const results = Object.values(normalized.sets).map((entry) => ({
+          set: null,
+          index: null,
+          snapshot: cloneLoopDef(entry.snapshot),
+          loadError: null,
+          cacheStatus: "restored",
+          fingerprint: entry.fingerprint
+        }));
+        return {
+          refreshResult: null,
+          results,
+          cache: normalized,
+          stats: {
+            setsScanned: results.length,
+            candidates: results.length,
+            cacheHits: results.length,
+            rescanned: 0,
+            newSets: 0,
+            changedSets: 0,
+            expiredEntries: 0,
+            invalidEntries: 0,
+            loadFailures: 0,
+            loadRetries: 0,
+            cacheFallbacks: 0,
+            circuitBreakers: 0,
+            circuitSkipped: 0,
+            removedEntries: 0
+          }
+        };
+      })() : await scanDynamicSbcSnapshots({
         cache: cached,
         forceFull,
         refreshSets: async () => {
@@ -17459,20 +17833,36 @@
         listSets: getSbcSets,
         snapshotIndex: (set, refreshResult) => eaSbcAdapter().snapshotDiscoveryIndex(set, refreshResult),
         snapshotSet: (set, challenges, refreshResult) => eaSbcAdapter().snapshotDiscoverySet(set, challenges, refreshResult),
-        loadChallenges: loadDynamicSbcDiscoveryChallenges,
-        isCandidate: dynamicSbcCandidate,
+        loadChallenges: (set, index, context) => loadDynamicSbcDiscoveryChallenges(set, index, {
+          ...context,
+          runRequest: (label, request) => requestPacer.run(label, request)
+        }),
+        loadAttempts: 3,
+        loadRetryDelayMs: 1500,
+        sleep,
+        onLoadRetry: ({ index, attempt, attempts, delayMs, error }) => {
+          log(`Dynamic SBC scan ${index?.name || `#${index?.id || "?"}`}: Challenge metadata attempt ${attempt}/${attempts} failed (${error?.message || error}); retrying in ${delayMs}ms`);
+        },
+        onCircuitOpen: ({ index, circuit }) => {
+          log(`Dynamic SBC scan ${index?.name || `#${index?.id || "?"}`}: EA ${circuit?.code || 429} opened the Challenge request circuit; remaining candidates will use compatible cache or remain unavailable`);
+        },
+        onLoadSkipped: ({ index, circuit }) => {
+          log(`Dynamic SBC scan ${index?.name || `#${index?.id || "?"}`}: Challenge request skipped because the EA ${circuit?.code || 429} circuit is open`);
+        },
+        isCandidate: (index) => dynamicSbcCandidate(index, activitySbcNames),
         onResult: async ({ snapshot, loadError, cacheStatus }) => {
+          if (cacheStatus === "load-failed-compatible-cache") {
+            log(`Dynamic SBC scan: set #${snapshot.id || "?"} retained from compatible validated cache after live Challenge refresh failed`);
+          }
           const isPick = (snapshot.rewards || []).some((reward2) => reward2?.type === "PLAYER_PICK");
           if (!isPick) {
             if (detectDynamicUpgradeFamily(snapshot)) {
               const parsed2 = unavailableDynamicSbcParse(parseDynamicUpgradeSbcSnapshot({
-                set: snapshot,
-                x10Template: configuredLoopTemplate("84x10"),
-                totwTemplate: configuredLoopTemplate("auto-totw-upgrade")
-              }), loadError);
+                set: snapshot
+              }), loadError, cacheStatus);
               logDynamicUpgradeDiscovery(snapshot, parsed2, loadError);
             } else {
-              const parsed2 = loadError ? { status: "unavailable", diagnostics: [`Challenge metadata refresh failed: ${loadError?.message || loadError}`] } : parseBasicUpgradeActivitySnapshot({ set: snapshot });
+              const parsed2 = loadError && cacheStatus !== "load-failed-compatible-cache" ? { status: "unavailable", diagnostics: [`Challenge metadata refresh failed: ${loadError?.message || loadError}`] } : parseBasicUpgradeActivitySnapshot({ set: snapshot });
               logBasicActivityDiscovery(snapshot, parsed2, loadError);
             }
             log(`Dynamic SBC scan: set #${snapshot.id || "?"} cache:${cacheStatus}`);
@@ -17482,7 +17872,7 @@
             set: snapshot,
             highGoldThreshold: pickOptions.highGoldThreshold,
             pricePlatform: "pc"
-          }), loadError);
+          }), loadError, cacheStatus);
           const reward = snapshot.rewards?.[0] || {};
           const remaining = parsed.remainingCompletions ?? (() => {
             if (parsed.loop?.useRoundsAsCompletions === true) return "user rounds";
@@ -17503,8 +17893,9 @@
           log(`Dynamic SBC scan: set #${snapshot.id || "?"} cache:${cacheStatus}`);
         }
       });
-      adapters.userscriptStorage.set(cacheKey, summary.cache);
-      const snapshots = summary.results.map((result) => result.loadError ? { ...result.snapshot, challenges: [] } : result.snapshot);
+      const scanHealth = requestPacer?.save() || null;
+      if (!cacheOnly) adapters.userscriptStorage.set(cacheKey, summary.cache);
+      const snapshots = summary.results.map((result) => result.loadError && result.cacheStatus !== "load-failed-compatible-cache" ? { ...result.snapshot, challenges: [] } : result.snapshot);
       const configuredLoops = getConfiguredLoopDefs();
       const pickSession = buildPlayerPickDiscoverySession({
         sets: snapshots,
@@ -17516,9 +17907,7 @@
       });
       const upgradeSession = buildUpgradeDiscoverySession({
         sets: snapshots,
-        configuredLoops,
-        x10Template: configuredLoopTemplate("84x10"),
-        totwTemplate: configuredLoopTemplate("auto-totw-upgrade")
+        configuredLoops
       });
       const specializedLoopOverrides = {
         ...pickSession.loopOverrides,
@@ -17526,22 +17915,30 @@
       };
       const activitySession = buildActivityBindingSession({
         sets: snapshots,
-        configuredLoops: configuredLoops.map((loopDef) => specializedLoopOverrides[loopDef.id] || loopDef),
+        configuredLoops: [
+          ...configuredLoops.map((loopDef) => specializedLoopOverrides[loopDef.id] || loopDef),
+          ...upgradeSession.discoveredLoops
+        ],
         recoveryRecipes: getConfiguredRecoveryRecipes(),
         additionalActivities: collectScannedUpgradeActivities(upgradeSession.results)
       });
+      const configuredLoopIds = new Set(configuredLoops.map((loopDef) => String(loopDef?.id || "")).filter(Boolean));
+      const configuredActivityOverrides = Object.fromEntries(
+        Object.entries(activitySession.loopOverrides).filter(([loopId]) => configuredLoopIds.has(String(loopId)))
+      );
+      const materializedUpgradeLoops = upgradeSession.discoveredLoops.map((loopDef) => activitySession.loopOverrides[loopDef.id] || loopDef);
       state.discoveredLoopDefs = cloneLoopDef([
         ...pickSession.discoveredLoops,
-        ...upgradeSession.discoveredLoops
+        ...materializedUpgradeLoops
       ]);
       state.discoveredLoopOverrides = cloneLoopDef({
         ...specializedLoopOverrides,
-        ...activitySession.loopOverrides
+        ...configuredActivityOverrides
       });
       state.discoveredRecoveryRecipeOverrides = cloneLoopDef(activitySession.recoveryRecipeOverrides);
       state.scannedDynamicSbcDefs = cloneLoopDef([
         ...collectScannedPlayerPickLoopDefs(pickSession.results),
-        ...upgradeSession.discoveredLoops,
+        ...materializedUpgradeLoops,
         ...Object.values(upgradeSession.loopOverrides).filter(
           (loopDef) => loopDef?.discovered === true && loopDef?.discoveryKind === "upgrade"
         )
@@ -17557,7 +17954,7 @@
           log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join("; ")}`);
         }
       }
-      await refreshPackCatalogFromSbcIndex(summary.refreshResult);
+      if (!cacheOnly) await refreshPackCatalogFromSbcIndex(summary.refreshResult);
       const requestedSelection = document.querySelector("#bronze-loop-select")?.value || pickSession.selectedId;
       const selectedId = getLoopDefs().some((loopDef) => loopDef.id === requestedSelection) ? requestedSelection : getLoopDefs()[0]?.id;
       renderLoopSelect(selectedId);
@@ -17584,7 +17981,14 @@
       const upgradeDuplicateCount = upgradeSession.results.filter((result) => result.status === "duplicate").length;
       const pickSetCount = snapshots.filter((snapshot) => (snapshot.rewards || []).some((reward) => reward?.type === "PLAYER_PICK")).length;
       const upgradeSetCount = snapshots.length - pickSetCount;
-      log(`Dynamic SBC scan complete: ${summary.stats.setsScanned} Set(s) checked, ${summary.stats.candidates} candidate(s) (${pickSetCount} Pick, ${upgradeSetCount} Upgrade); cache hits:${summary.stats.cacheHits}, rescanned:${summary.stats.rescanned}, new:${summary.stats.newSets}, changed:${summary.stats.changedSets}, expired:${summary.stats.expiredEntries}, removed:${summary.stats.removedEntries}, failures:${summary.stats.loadFailures}; ${state.discoveredLoopDefs.length} session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) updated, ${Object.keys(state.discoveredRecoveryRecipeOverrides).length} recovery recipe(s) updated, ${pickDuplicateCount + upgradeDuplicateCount} duplicate(s) skipped`);
+      if (cacheOnly) {
+        log(`Dynamic SBC cache restore complete: ${summary.results.length} cached Set snapshot(s), ${state.discoveredLoopDefs.length} session Loop(s); live validation continues in background`);
+      } else {
+        log(`Dynamic SBC scan complete: ${summary.stats.setsScanned} Set(s) checked, ${summary.stats.candidates} candidate(s) (${pickSetCount} Pick, ${upgradeSetCount} Upgrade); cache hits:${summary.stats.cacheHits}, cache fallbacks:${summary.stats.cacheFallbacks}, rescanned:${summary.stats.rescanned}, new:${summary.stats.newSets}, changed:${summary.stats.changedSets}, expired:${summary.stats.expiredEntries}, invalid:${summary.stats.invalidEntries}, removed:${summary.stats.removedEntries}, retries:${summary.stats.loadRetries}, failures:${summary.stats.loadFailures}, circuit opened:${summary.stats.circuitBreakers}, requests skipped:${summary.stats.circuitSkipped}; ${state.discoveredLoopDefs.length} session Loop(s) added, ${Object.keys(state.discoveredLoopOverrides).length} configured Loop(s) updated, ${Object.keys(state.discoveredRecoveryRecipeOverrides).length} recovery recipe(s) updated, ${pickDuplicateCount + upgradeDuplicateCount} duplicate(s) skipped`);
+        const requestFailureRate = requestPacer.metrics.requestCount ? requestPacer.metrics.failureCount / requestPacer.metrics.requestCount * 100 : 0;
+        const codes = Object.entries(requestPacer.metrics.codes).map(([code, count]) => `${code}:${count}`).join(", ") || "none";
+        log(`Dynamic SBC scan request health: ${requestPacer.metrics.requestCount} EA Challenge request(s), ${requestPacer.metrics.failureCount} failure(s) (${requestFailureRate.toFixed(1)}%), codes:${codes}; next scan minimum gap:${scanHealth.recommendedGapMs}ms`);
+      }
       return summary;
     }
     async function findAvailableSbcChallenge(set, label = set?.name || "SBC") {
@@ -19254,23 +19658,9 @@
       const override = isPlainObject(loopDef.autoTotwUpgrade) ? loopDef.autoTotwUpgrade : {};
       return {
         id: `${loopDef.id || "fill-and-verify"}-auto-totw-upgrade`,
-        name: "84+ TOTW Upgrade",
-        strategy: "fillAndVerifySbc",
-        sbcNames: ["84+ TOTW Upgrade", "84+ TOTW", "TOTW Upgrade", "84+ TOTW \u5347\u7EA7", "84+ TOTW \u5347\u7D1A"],
-        rewardPackIds: [20707, 20441],
-        rewardPackNames: ["84+ TOTW 1-30 Player Pack", "TOTW 1-30 Player Pack", "84+ TOTW 1-30", "TOTW 1-30", "84+ TOTW Player Pack", "TOTW Player Pack", "84+ TOTW Pack", "TOTW Pack", "TOTW Provision Refresh", "TOTW Provision Refresh Pack"],
+        name: "Scanned TOTW Upgrade",
+        ...createTotwUpgradePolicy(),
         maxCompletions: 1,
-        maxSubmittedRating: 88,
-        maxNormalGoldSubmittedRating: 99,
-        ratingSbcFill: {
-          priorityPiles: ["unassigned", "storage", "transfer", "club"]
-        },
-        requiredSpecialCount: 0,
-        allowedSpecialCount: 0,
-        blockSpecial: true,
-        blockTradeable: false,
-        openRewardPacks: true,
-        assumeTotwRewardPack: true,
         ...override
       };
     }
@@ -19278,26 +19668,14 @@
       const override = isPlainObject(loopDef.autoFodderUpgrade) ? loopDef.autoFodderUpgrade : {};
       return {
         id: `${loopDef.id || "fill-and-verify"}-auto-2x84-fodder`,
-        name: "2x84+ Fodder Recovery",
-        strategy: "fillAndVerifySbc",
-        sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
-        rewardPackNames: ["2x 84+ Rare Gold Players Pack", "2 x 84+ Rare Gold Players Pack"],
+        name: "Scanned 2x84+ Fodder Recovery",
+        ...createTwoBy84UpgradePolicy({ hidden: false, forceOpenRewardPacks: true }),
         maxCompletions: 1,
-        inventoryFillFirst: true,
-        requirements: [
-          { tier: "gold", rarity: "rare", count: 6, maxRating: 81, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["storage", "club"] }
-        ],
-        priorityPiles: ["storage", "club"],
-        requiredSpecialCount: 0,
-        allowedSpecialCount: 0,
-        maxSubmittedRating: 81,
-        maxNormalGoldSubmittedRating: 81,
-        blockSpecial: true,
-        blockTradeable: false,
-        openRewardPacks: true,
-        forceOpenRewardPacks: true,
         ...override
       };
+    }
+    function hasResolvedSbcIdentity(definition = {}) {
+      return (definition.sbcSetIds || []).some((value) => Number(value) > 0) || (definition.sbcNames || []).some((value) => String(value || "").trim());
     }
     function getAutoFodderUpgradeAttemptLimit(loopDef = {}) {
       if (loopDef.autoFodderUpgrade === void 0 || loopDef.autoFodderUpgrade === false) return 0;
@@ -19306,9 +19684,17 @@
     }
     async function craftAutoFodderUpgrade(loopDef, attempt, maxAttempts) {
       const upgradeDef = getAutoFodderUpgradeDef(loopDef);
+      if (!hasResolvedSbcIdentity(upgradeDef)) {
+        log(`${loopDef.name}: scanned 2x84+ recovery activity is unavailable; keeping the current squad unsubmitted`);
+        return { ok: false, reason: "scanned 2x84+ recovery activity is unavailable" };
+      }
       await refreshInventoryCaches(`${loopDef.name} ${upgradeDef.name} preflight`, { includePacks: false, quiet: true });
       const selection = selectInventoryPlayers3(upgradeDef);
-      log(`${loopDef.name}: ${upgradeDef.name} attempt ${attempt}/${maxAttempts} selected ${selection.selected.length}/6 low rare gold player(s) (${formatSelectionStats(selection.stats)})`);
+      const requiredFodderCount = (upgradeDef.requirements || []).reduce(
+        (total, requirement2) => total + Math.max(0, Number(requirement2?.count || 0) || 0),
+        0
+      ) || Number(upgradeDef.expectedPlayerCount || 0) || "?";
+      log(`${loopDef.name}: ${upgradeDef.name} attempt ${attempt}/${maxAttempts} selected ${selection.selected.length}/${requiredFodderCount} low rare gold player(s) (${formatSelectionStats(selection.stats)})`);
       if (!selection.ok) {
         logSelectionDiagnostics(`${loopDef.name} ${upgradeDef.name}`, selection, upgradeDef.priorityPiles);
         log(`${loopDef.name}: ${upgradeDef.name} recovery is unavailable; keeping the current 84x10 unsubmitted`);
@@ -19323,7 +19709,7 @@
         return { ok: false, reason: `${upgradeDef.name} was not submitted` };
       }
       if (Number(result?.rewardPacksOpened || 0) < 1) {
-        log(`${loopDef.name}: ${upgradeDef.name} was submitted but its reward pack was not opened; stop before consuming another six cards`);
+        log(`${loopDef.name}: ${upgradeDef.name} was submitted but its reward pack was not opened; stop before consuming another ${requiredFodderCount} low rare gold card(s)`);
         return { ok: false, reason: `${upgradeDef.name} reward pack was not opened` };
       }
       return { ok: true };
@@ -19349,6 +19735,11 @@
     }
     async function craftAutoTotwUpgrade(loopDef) {
       const upgradeDef = getAutoTotwUpgradeDef(loopDef);
+      if (!hasResolvedSbcIdentity(upgradeDef)) {
+        const reason = "scanned TOTW Upgrade activity is unavailable";
+        log(`${loopDef.name}: cannot auto-craft ${requiredSpecialLabel(loopDef)} because ${reason}`);
+        return { ok: false, reason };
+      }
       log(`${loopDef.name}: no eligible ${requiredSpecialLabel(loopDef)} found; submitting ${upgradeDef.name} first`);
       const result = await runFillAndVerifyLoop(upgradeDef);
       if (Number(result?.completions || 0) < 1) {
@@ -19692,8 +20083,15 @@
       await syncAfterSbcSubmit(set?.name || "SBC submit");
       return rewardPackId;
     }
-    function rewardPackIdFromSubmitResult(result, set) {
-      const awards = result?.data?.grantedChallengeAwards || result?.response?.grantedChallengeAwards || [];
+    function rewardPackIdFromSubmitResult(result, set, options = {}) {
+      const awards = [
+        ...collectionValues3(result?.data?.grantedChallengeAwards),
+        ...collectionValues3(result?.response?.grantedChallengeAwards),
+        ...collectionValues3(result?.data?.grantedSetAwards),
+        ...collectionValues3(result?.response?.grantedSetAwards),
+        ...collectionValues3(result?.data?.awards),
+        ...collectionValues3(result?.response?.awards)
+      ];
       for (const award of awards) {
         const values = [
           award?.value,
@@ -19706,7 +20104,7 @@
         const id = values.map(Number).find((value) => Number.isFinite(value) && value > 0);
         if (id) return id;
       }
-      return Number(set?.awards?.[0]?.value) || null;
+      return options.allowSetFallback === true ? Number(set?.awards?.[0]?.value) || null : null;
     }
     async function applyPlayersToRatingChallenge(challenge, players, label = "rating SBC") {
       const squad = challenge?.squad;
@@ -19763,20 +20161,31 @@
             `submitChallenge ${label}`
           );
           if (result?.success) {
-            await refreshStorePacks().catch(() => null);
-            let rewardPackId = rewardPackIdFromSubmitResult(result, set);
-            if (!rewardPackId) {
+            const directRewardPackId = rewardPackIdFromSubmitResult(result, set);
+            let newPackId = null;
+            const observationAttempts = Math.max(1, Math.min(5, Number(options.rewardObservationAttempts || 3) || 3));
+            for (let observationAttempt = 1; observationAttempt <= observationAttempts; observationAttempt++) {
+              await refreshStorePacks().catch(() => null);
               const afterPacks = getAvailableRepositoryMyPacks();
               const afterPackCounts = getPackCountsById(afterPacks);
               const newPack = afterPacks.find((pack) => {
                 const id = packIdKey(pack);
                 return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
               });
-              rewardPackId = Number(packIdKey(newPack)) || null;
+              newPackId = Number(packIdKey(newPack)) || null;
+              if (directRewardPackId || newPackId || observationAttempt >= observationAttempts) break;
+              await sleep(Math.min(2e3, 500 * observationAttempt));
             }
+            const rewardObserved = Boolean(directRewardPackId || newPackId);
+            const usedKnownFallback = !rewardObserved && options.allowKnownRewardFallback === true;
+            const rewardPackId = directRewardPackId || newPackId || (usedKnownFallback ? rewardPackIdFromSubmitResult(result, set, { allowSetFallback: true }) : null);
             recordObservedPackCatalogReward(set, rewardPackId);
-            log(`${label}: background submit complete; reward pack ${rewardPackId || "unknown"}`);
-            return rewardPackId;
+            log(`${label}: background submit complete; reward pack ${rewardPackId || "not granted for this Challenge"}${usedKnownFallback ? " (single-Challenge identity fallback)" : ""}`);
+            return {
+              rewardPackId,
+              rewardObserved,
+              usedKnownFallback
+            };
           }
           lastDetail = serviceResultErrorText(result) || result?.status || "unknown";
           const plan = planBackgroundSubmitRetry({
@@ -20800,6 +21209,8 @@
       const completionLimit4 = loopDef.allowMultipleCompletions === true ? 50 : 1;
       const maxCompletions = Math.max(1, Math.min(completionLimit4, Number(loopDef.maxCompletions || 1) || 1));
       let autoFodderAttempts = 0;
+      let forceRatingChallengeRefresh = false;
+      let challengeSubmissions = 0;
       const result = await runRepeatedSubmissionWorkflow({
         maxCompletions,
         stopPoint: () => stopPoint(),
@@ -20811,14 +21222,18 @@
           } else {
             log(`${loopDef.name}: dry-run skips unassigned cleanup (no item moves)`);
           }
-          const preflightReady = await ensureTotwForFillAndVerify(loopDef);
-          if (preflightReady === false) return { status: "unavailable", reason: "required TOTW preflight is unavailable" };
           patchFsuLengthSafePlayerMetadata(`${loopDef.name} before opening SBC`);
           const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
           let opened;
+          let ratingChallengeIncompleteCount = 0;
           if (shouldUseRatingSbcFill(loopDef)) {
             log(`${loopDef.name}: reading dynamic challenge requirements through the direct rating SBC path`);
-            const challenge = await findAvailableRatingSbcChallenge(set, loopDef.name);
+            const challengeContext = await findAvailableRatingSbcChallengeContext(set, loopDef.name, {
+              force: forceRatingChallengeRefresh
+            });
+            forceRatingChallengeRefresh = false;
+            ratingChallengeIncompleteCount = challengeContext.incompleteCount;
+            const challenge = challengeContext.challenge;
             const loadedChallenge = challenge && !loopDef.dryRun ? await loadRatingSbcChallenge(challenge, loopDef.name) : challenge;
             opened = loadedChallenge ? { set, challenge: loadedChallenge, background: true } : null;
           } else {
@@ -20831,11 +21246,14 @@
             log(`${loopDef.name}: no available SBC challenge remains`);
             return { status: "unavailable", reason: "no available SBC challenge remains" };
           }
-          const expectedPlayerCount = expectedSbcPlayerCount(loopDef, opened.challenge);
-          const configuredFill = await fillConfiguredSbcSquad(loopDef, opened, {
+          const activeLoopDef = shouldUseRatingSbcFill(loopDef) ? materializeDynamicUpgradeChallengeLoopDef(loopDef, opened.challenge) : loopDef;
+          const preflightReady = await ensureTotwForFillAndVerify(activeLoopDef);
+          if (preflightReady === false) return { status: "unavailable", reason: "required TOTW preflight is unavailable" };
+          const expectedPlayerCount = expectedSbcPlayerCount(activeLoopDef, opened.challenge);
+          const configuredFill = await fillConfiguredSbcSquad(activeLoopDef, opened, {
             dryRun: loopDef.dryRun,
             stopOnMissingSelection: true,
-            skipInventoryRefresh: needsAutoTotwPreflight(loopDef)
+            skipInventoryRefresh: needsAutoTotwPreflight(activeLoopDef)
           });
           if (loopDef.dryRun) {
             if (!configuredFill.ok) {
@@ -20849,14 +21267,14 @@
             };
           }
           if (!configuredFill.ok) {
-            const autoFodderLimit2 = getAutoFodderUpgradeAttemptLimit(loopDef);
+            const autoFodderLimit2 = getAutoFodderUpgradeAttemptLimit(activeLoopDef);
             if (configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit2) {
               log(`${loopDef.name}: rating shortage before automatic 2x84+ recovery: ${configuredFill.reason || "unknown reason"}`);
               const nextAttempt = autoFodderAttempts + 1;
-              const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit2);
+              const recovery = await craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit2);
               if (recovery.ok) {
                 autoFodderAttempts = nextAttempt;
-                log(`${loopDef.name}: ${getAutoFodderUpgradeDef(loopDef).name} opened successfully; retrying optimized rating fill`);
+                log(`${loopDef.name}: ${getAutoFodderUpgradeDef(activeLoopDef).name} opened successfully; retrying optimized rating fill`);
                 return { status: "retry", reason: "automatic fodder recovery succeeded" };
               }
               log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || "unknown reason"}`);
@@ -20868,30 +21286,30 @@
           let fillResult = configuredFill.fillResult;
           let inspection = configuredFill.inspection;
           let squad = fillResult.squad || ctrl()?._squad || opened.challenge?.squad;
-          const ratingSbcFill = shouldUseRatingSbcFill(loopDef);
-          const totwInjection = ratingSbcFill ? { fillResult, inspection, planned: false, injected: false } : await injectRequiredTotwIfNeeded(loopDef, opened, fillResult, inspection);
+          const ratingSbcFill = shouldUseRatingSbcFill(activeLoopDef);
+          const totwInjection = ratingSbcFill ? { fillResult, inspection, planned: false, injected: false } : await injectRequiredTotwIfNeeded(activeLoopDef, opened, fillResult, inspection);
           fillResult = totwInjection.fillResult;
           inspection = totwInjection.inspection;
           squad = fillResult.squad || squad;
-          const protectedRepair = !ratingSbcFill && (!loopDef.dryRun || !totwInjection.planned) ? await repairProtectedSquadItemsIfNeeded(loopDef, opened, fillResult, inspection) : { fillResult, inspection, planned: false, repaired: false };
+          const protectedRepair = !ratingSbcFill && (!activeLoopDef.dryRun || !totwInjection.planned) ? await repairProtectedSquadItemsIfNeeded(activeLoopDef, opened, fillResult, inspection) : { fillResult, inspection, planned: false, repaired: false };
           fillResult = protectedRepair.fillResult;
           inspection = protectedRepair.inspection;
           squad = fillResult.squad || squad;
-          const submitReadyRepair = !ratingSbcFill && (!loopDef.dryRun || !totwInjection.planned && !protectedRepair.planned) ? await repairSubmitReadinessIfNeeded(loopDef, opened, fillResult, inspection) : { fillResult, inspection, planned: false, repaired: false };
+          const submitReadyRepair = !ratingSbcFill && (!activeLoopDef.dryRun || !totwInjection.planned && !protectedRepair.planned) ? await repairSubmitReadinessIfNeeded(activeLoopDef, opened, fillResult, inspection) : { fillResult, inspection, planned: false, repaired: false };
           fillResult = submitReadyRepair.fillResult;
           inspection = submitReadyRepair.inspection;
           squad = fillResult.squad || squad;
           if (loopDef.dryRun) {
-            const injectableIssues = getDryRunInjectableIssues(loopDef, inspection);
+            const injectableIssues = getDryRunInjectableIssues(activeLoopDef, inspection);
             if (totwInjection.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
-              log(`${loopDef.name}: dry-run squad needs required ${requiredSpecialLabel(loopDef)} repair; live run would save the repair plan and re-check before submit`);
+              log(`${loopDef.name}: dry-run squad needs required ${requiredSpecialLabel(activeLoopDef)} repair; live run would save the repair plan and re-check before submit`);
             } else if (protectedRepair.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
               log(`${loopDef.name}: dry-run squad needs protected item repair; live run would save the repair plan and re-check before submit`);
             } else if (submitReadyRepair.planned && !injectableIssues.blocked.length && !injectableIssues.missingRequirements.length) {
               log(`${loopDef.name}: dry-run squad may need submit-ready rating repair; live run would save the repair plan and re-check before submit`);
             } else if (inspection.blocked.length || inspection.missingRequirements?.length) {
               log(`${loopDef.name}: dry-run blocked by protected or missing squad requirement(s); live run would stop before submit`);
-              logManualSbcFixHints(loopDef, inspection);
+              logManualSbcFixHints(activeLoopDef, inspection);
             } else if (!fillResult.submitReady) {
               log(`${loopDef.name}: dry-run squad passed protection, but submit is not ready; live run would stop before submit`);
             } else {
@@ -20900,14 +21318,14 @@
             log(`${loopDef.name}: dry run stops before SBC submit`);
             return { status: "planned", reason: "dry-run protection inspection complete", details: { dryRun: true } };
           }
-          const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(loopDef);
+          const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(activeLoopDef);
           if (!fillResult.submitReady && !inspection.blocked.length && !inspection.missingRequirements?.length && autoFodderAttempts < autoFodderLimit) {
             log(`${loopDef.name}: submit not ready before automatic 2x84+ recovery (${inspection.items?.length || fillResult.filled || 0} filled)`);
             const nextAttempt = autoFodderAttempts + 1;
-            const recovery = await craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit);
+            const recovery = await craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit);
             if (recovery.ok) {
               autoFodderAttempts = nextAttempt;
-              log(`${loopDef.name}: ${getAutoFodderUpgradeDef(loopDef).name} opened successfully; retrying the same 84x10 completion with refreshed inventory`);
+              log(`${loopDef.name}: ${getAutoFodderUpgradeDef(activeLoopDef).name} opened successfully; retrying the same Upgrade completion with refreshed inventory`);
               return { status: "retry", reason: "automatic submit-ready recovery succeeded" };
             }
             log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || "unknown reason"}`);
@@ -20917,6 +21335,7 @@
             return { status: "blocked", reason: "automatic 2x84+ recovery attempt limit reached" };
           }
           if (!fillResult.submitReady) fail2(`${loopDef.name}: submit is not ready after protection inspection`);
+          let ratingSubmission = null;
           const submitAttempt = await submitSbcAttempt({
             label: loopDef.name,
             dryRun: loopDef.dryRun === true,
@@ -20933,10 +21352,10 @@
               await saveChallengeSquad(challenge, players, `${loopDef.name} provisional Club refresh`);
             },
             preSaveValidators: [() => {
-              assertSbcSquadSafe(loopDef, inspection);
-              if (shouldUseRatingSbcFill(loopDef)) {
+              assertSbcSquadSafe(activeLoopDef, inspection);
+              if (shouldUseRatingSbcFill(activeLoopDef)) {
                 const finalModelValidation = validateRatingSbcModelAgainstItems2(configuredFill.model, inspection.items, opened.challenge);
-                logRatingSbcValidation(loopDef, "final rating squad", finalModelValidation, configuredFill.model);
+                logRatingSbcValidation(activeLoopDef, "final rating squad", finalModelValidation, configuredFill.model);
                 if (!finalModelValidation.ok) {
                   fail2(`${loopDef.name}: final rating squad failed dynamic requirement validation: ${finalModelValidation.errors.join(", ")}`);
                 }
@@ -20944,12 +21363,16 @@
               return true;
             }],
             isSubmitReady: async () => fillResult.submitReady === true,
-            submitTransport: async (context) => ({
-              submitted: true,
-              rewardPackId: ratingSbcFill ? await submitRatingSbcInBackground(context.set, context.challenge, loopDef.name, {
-                players: context.players || inspection.items || []
-              }) : await submitSbcAndGetAwardPackId(context.set)
-            }),
+            submitTransport: async (context) => {
+              if (ratingSbcFill) {
+                ratingSubmission = await submitRatingSbcInBackground(context.set, context.challenge, loopDef.name, {
+                  players: context.players || inspection.items || [],
+                  allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1
+                });
+                return { submitted: true, rewardPackId: ratingSubmission.rewardPackId };
+              }
+              return { submitted: true, rewardPackId: await submitSbcAndGetAwardPackId(context.set) };
+            },
             afterSubmit: async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
               squadPlan?.selection || configuredFill.selection,
               loopDef.name,
@@ -20959,20 +21382,40 @@
           if (!submitAttempt.submitted) {
             fail2(`${loopDef.name}: submit transaction blocked: ${submitAttempt.reason || submitAttempt.status}`);
           }
+          challengeSubmissions++;
           const rewardPackId = submitAttempt.rewardPackId;
+          const dynamicChallengeCount = Math.max(1, Number(activeLoopDef.dynamicChallengeCount || 1) || 1);
+          if (ratingSbcFill && dynamicChallengeCount > 1 && !ratingSubmission?.rewardObserved) {
+            autoFodderAttempts = 0;
+            forceRatingChallengeRefresh = true;
+            if (ratingChallengeIncompleteCount <= 1) {
+              log(`${loopDef.name}: final Challenge #${opened.challenge?.id || "?"} submitted, but the Set reward was not observed after bounded refresh; stopping before a new round`);
+              return {
+                status: "blocked",
+                reason: "final multi-Challenge Upgrade reward was not observed",
+                details: { challengeSubmissions, lastChallengeId: opened.challenge?.id || null }
+              };
+            }
+            log(`${loopDef.name}: intermediate Challenge #${opened.challenge?.id || "?"} submitted (${ratingChallengeIncompleteCount - 1} Challenge(s) remain in this round); reward handling deferred`);
+            await sleep(CFG.pauseMs);
+            return {
+              status: "progressed",
+              details: { challengeSubmissions, lastChallengeId: opened.challenge?.id || null }
+            };
+          }
           let stopAfterRewardFailure = false;
           let rewardPacksOpened = 0;
           let rewardPacksPending = 0;
-          if (loopDef.openRewardPacks) {
-            const openedReward = await openRewardPackAndCleanup(loopDef, rewardPackId, "reward pack", {
-              assumeTotwReward: loopDef.assumeTotwRewardPack === true,
-              fallbackPackMatcher: loopDef.assumeTotwRewardPack === true ? isLikelyTotwRewardPack : null,
-              openAttempts: loopDef.assumeTotwRewardPack === true ? 3 : 1
+          if (activeLoopDef.openRewardPacks) {
+            const openedReward = await openRewardPackAndCleanup(activeLoopDef, rewardPackId, "reward pack", {
+              assumeTotwReward: activeLoopDef.assumeTotwRewardPack === true,
+              fallbackPackMatcher: activeLoopDef.assumeTotwRewardPack === true ? isLikelyTotwRewardPack : null,
+              openAttempts: activeLoopDef.assumeTotwRewardPack === true ? 3 : 1
             });
             if (openedReward) rewardPacksOpened++;
             else {
               rewardPacksPending++;
-              if (loopDef.forceOpenRewardPacks === true) {
+              if (activeLoopDef.forceOpenRewardPacks === true) {
                 stopAfterRewardFailure = true;
                 log(`${loopDef.name}: required reward pack could not be opened; stopping before another SBC submission`);
               }
@@ -20989,11 +21432,15 @@
             rewardPacksPending,
             stopAfterCompletion: stopAfterRewardFailure,
             reason: stopAfterRewardFailure ? "required reward pack could not be opened" : null,
-            details: { lastRewardPackId: rewardPackId || null, completedBefore: workflowResult.completions }
+            details: {
+              lastRewardPackId: rewardPackId || null,
+              completedBefore: workflowResult.completions,
+              challengeSubmissions
+            }
           };
         }
       });
-      log(`${loopDef.name}: submitted ${result.completions} SBC(s) in this run`);
+      log(`${loopDef.name}: completed ${result.completions} round(s) with ${challengeSubmissions} Challenge submission(s) in this run`);
       return result;
     }
     function shortageSourceMatchesRequirement(source, requirement2) {
@@ -22071,17 +22518,29 @@
         },
         onSourceExhausted: async ({ remainingCompletions: remainingCompletions4 }) => {
           const fallbackLoopId = String(loopDef.sourceExhaustedFallbackLoopId || "").trim();
+          const fallbackActivityFamily = String(loopDef.sourceExhaustedFallbackActivityFamily || "").trim();
           const requestedFallbackCompletions = fillRemainingRoundsFromInventory ? Number(remainingCompletions4 || 0) : consumeAllSourcePacks ? Number(loopDef.sourceExhaustedFallbackMaxCompletions || 1) : Number(remainingCompletions4 || 0);
           if (fillRemainingRoundsFromInventory && requestedFallbackCompletions === 0) {
             log(`${loopDef.name}: source packs completed the requested ${maxCompletions} round(s); no inventory fallback needed`);
             return { status: "completed", completions: { rare: 0 }, reason: null };
           }
-          if (!fallbackLoopId || requestedFallbackCompletions <= 0) {
+          if (!fallbackLoopId && !fallbackActivityFamily || requestedFallbackCompletions <= 0) {
             return { status: "unavailable", completions: { rare: 0 }, reason: "no source-exhausted fallback configured" };
           }
-          const baseFallbackDef = findLoopDefById(fallbackLoopId);
+          let baseFallbackDef = fallbackLoopId ? findLoopDefById(fallbackLoopId) : null;
+          if (!baseFallbackDef && fallbackActivityFamily) {
+            const resolution = resolveSessionLoopByActivityFamily(getLoopDefs(), fallbackActivityFamily);
+            if (resolution.status === "ambiguous") {
+              fail2(`${loopDef.name}: source-exhausted fallback activity ${fallbackActivityFamily} is ambiguous: ${resolution.matches.map((entry) => `${entry.name} (${entry.id})`).join(", ")}`);
+            }
+            if (resolution.status === "unavailable") {
+              log(`${loopDef.name}: source-exhausted fallback activity ${fallbackActivityFamily} is unavailable in the current scan`);
+              return { status: "unavailable", completions: { rare: 0 }, reason: `fallback activity unavailable: ${fallbackActivityFamily}` };
+            }
+            baseFallbackDef = resolution.loop;
+          }
           if (!baseFallbackDef || baseFallbackDef.strategy !== "fillAndVerifySbc") {
-            fail2(`${loopDef.name}: source-exhausted fallback loop not found or invalid: ${fallbackLoopId}`);
+            fail2(`${loopDef.name}: source-exhausted fallback loop not found or invalid: ${fallbackLoopId || fallbackActivityFamily}`);
           }
           const configuredFallbackLimit = Number(loopDef.sourceExhaustedFallbackMaxCompletions || requestedFallbackCompletions);
           const fallbackCompletions = Math.max(1, Math.min(requestedFallbackCompletions, configuredFallbackLimit));
@@ -23415,7 +23874,14 @@
       log(`Ready v${W[APP_KEY]?.version || "unknown"}. Keep FSU/Enhancer enabled before starting.`);
       setTimeout(async () => {
         try {
-          await panelCommands.scanPicks();
+          await scanAvailableDynamicSbcs({ cacheOnly: true });
+        } catch (error) {
+          log(`Dynamic SBC cache restore skipped: ${error?.message || error}`);
+        }
+        const scanPromise = panelCommands.scanPicks();
+        setMainPanelStartupHidden(panel, false);
+        try {
+          await scanPromise;
         } finally {
           setMainPanelStartupHidden(panel, false);
         }

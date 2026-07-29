@@ -53,22 +53,6 @@
       "normal": "Submit Bronze Upgrade and force-open its Silver rewards to feed the next stage, then do the same for Silver Upgrade and Common Gold rewards, then exhaust 5x 80+ Upgrade with nine safe common gold cards rated <=81; matching 5x 80+ rewards open at the end only when Open reward packs is enabled.",
       "recovery": "Stop if a required Bronze/Silver reward cannot be opened or if selection/submission is unsafe; blocked or stopped runs do not enter the deferred 5x 80+ reward-opening phase."
     },
-    "2x84-fodder": {
-      "normal": "Submit six low rare gold players and let the current Open reward packs option decide whether to open the reward.",
-      "recovery": "Stop before submission when fewer than six safe low rare gold players are available."
-    },
-    "auto-totw-upgrade": {
-      "normal": "Build the lowest safe dynamic-rating squad and open the resulting TOTW reward pack.",
-      "recovery": "Stop on unsupported dynamic requirements, rating shortage, or reward-pack failure."
-    },
-    "84x10-mvp": {
-      "normal": "Submit one lowest safe dynamic-rating squad with exactly one eligible TOTW, TOTS, or FOF card.",
-      "recovery": "Use configured TOTW and 2x84+ prerequisites, then stop if a safe squad still cannot be built."
-    },
-    "84x10": {
-      "normal": "Repeat the shared rating workflow until the SBC is unavailable, bounded only by the configured safety cap while preserving reward packs by default.",
-      "recovery": "Resume after prerequisite crafting and stop without submission when dynamic validation fails."
-    },
     "provision-crafting": {
       "normal": "Route Common Gold through the configured 4 of 10 83+ Player Pick and then 5x 80+ Upgrade; route Rare Gold through 2x 84+ Upgrade at every pre-open, pack, and final cleanup point.",
       "recovery": "Resume pending Pick or reserved duplicates without generic recovery consumption; preserve incomplete materials and continue on a later Provision round."

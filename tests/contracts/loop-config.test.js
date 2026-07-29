@@ -43,7 +43,6 @@ describe('loop configuration contracts', () => {
       'daily-silver': 'daily-silver-upgrade',
       'daily-common': 'daily-common-gold-upgrade',
       'daily-rare': 'daily-rare-gold-upgrade',
-      '2x84-fodder': '2x84-upgrade',
     };
     for (const [id, family] of Object.entries(expectedFamilies)) {
       expect(byId(builtIn, id).activityBinding).toMatchObject({ family, category: 'Upgrades' });
@@ -283,7 +282,7 @@ describe('loop configuration contracts', () => {
       maxCompletions: 1,
       useRoundsAsCompletions: true,
       consumeAllSourcePacks: true,
-      sourceExhaustedFallbackLoopId: '2x84-fodder',
+      sourceExhaustedFallbackActivityFamily: '2x84-upgrade',
     });
     expect(rarePack.sourceExhaustedFallbackMaxCompletions).toBeUndefined();
     expect(byId(builtIn, 'daily-rare-mvp')).toMatchObject({
@@ -316,32 +315,10 @@ describe('loop configuration contracts', () => {
     expect(external.some((loop) => loop.id === '84-plus-summer-tournament-nations-pick-1of3')).toBe(false);
   });
 
-  it('locks rating SBC entry points and special requirements', async () => {
+  it('keeps rating SBC entry points discovery-only', async () => {
     const { builtIn, external } = await loadDefinitions();
-    const fodder = byId(builtIn, '2x84-fodder');
-    const externalFodder = byId(external, '2x84-fodder');
-    const totw = byId(builtIn, 'auto-totw-upgrade');
-    const x10 = byId(builtIn, '84x10');
-    const externalX10 = byId(external, '84x10');
-    expect(fodder).toMatchObject({ hidden: true, mvp: true });
-    expect(fodder.forceOpenRewardPacks).toBeUndefined();
-    expect(externalFodder).toMatchObject({ hidden: true, mvp: true });
-    expect(externalFodder.forceOpenRewardPacks).toBeUndefined();
-    expect(totw.ratingSbcFill.priorityPiles).toEqual(['unassigned', 'storage', 'transfer', 'club']);
-    expect(totw.blockSpecial).toBe(true);
-    expect(x10).toMatchObject({
-      name: '84x10 Loop',
-      maxCompletions: 50,
-      allowMultipleCompletions: true,
-      requiredSpecialCount: 1,
-      allowedSpecialCount: 1,
-      requiredSpecialKind: 'totw-tots-fof',
-      requiredSpecialMinRating: 84,
-    });
-    expect(externalX10).toMatchObject({
-      name: '84x10 Loop',
-      maxCompletions: 50,
-      allowMultipleCompletions: true,
-    });
+    const removedIds = ['2x84-fodder', 'auto-totw-upgrade', '84x10-mvp', '84x10'];
+    expect(builtIn.filter((loop) => removedIds.includes(loop.id))).toEqual([]);
+    expect(external.filter((loop) => removedIds.includes(loop.id))).toEqual([]);
   });
 });

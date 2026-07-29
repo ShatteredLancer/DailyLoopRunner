@@ -84,6 +84,11 @@ function renderScalarField(field, value, context) {
         { value: '', label: 'None' },
         ...context.atomicLoops.map((loop) => ({ value: loop.id, label: loop.name })),
       ], readOnly));
+    case 'activity-family':
+      return fieldRow(field.label, selectInput(field.path, value, [
+        { value: '', label: 'None' },
+        ...SBC_ACTIVITY_FAMILY_IDS.map((family) => ({ value: family, label: family })),
+      ], readOnly));
     case 'pick-loop-reference':
       return fieldRow(field.label, selectInput(field.path, value, [
         { value: '', label: 'None' },
@@ -459,8 +464,8 @@ function renderLoopEditor(loop, context) {
     </div>
   </div>
   ${descriptor?.routine ? renderWorkflow(loop, context) : ''}
-  <div class="dlr-builder-form-grid common">${fields.filter((field) => ['text', 'id', 'strategy', 'integer', 'rating', 'boolean-inherit', 'inventory-mode', 'special-kind', 'loop-reference', 'pick-loop-reference', 'price-platform'].includes(field.type)).map((field) => renderField(field, loop, context)).join('')}</div>
-  ${fields.filter((field) => !['text', 'id', 'strategy', 'integer', 'rating', 'boolean-inherit', 'inventory-mode', 'special-kind', 'loop-reference', 'pick-loop-reference', 'price-platform', 'workflow-steps'].includes(field.type)).map((field) => renderField(field, loop, context)).join('')}`;
+  <div class="dlr-builder-form-grid common">${fields.filter((field) => ['text', 'id', 'strategy', 'integer', 'rating', 'boolean-inherit', 'inventory-mode', 'special-kind', 'loop-reference', 'activity-family', 'pick-loop-reference', 'price-platform'].includes(field.type)).map((field) => renderField(field, loop, context)).join('')}</div>
+  ${fields.filter((field) => !['text', 'id', 'strategy', 'integer', 'rating', 'boolean-inherit', 'inventory-mode', 'special-kind', 'loop-reference', 'activity-family', 'pick-loop-reference', 'price-platform', 'workflow-steps'].includes(field.type)).map((field) => renderField(field, loop, context)).join('')}`;
 }
 
 function renderRecoveryEditor(object, kind, context) {

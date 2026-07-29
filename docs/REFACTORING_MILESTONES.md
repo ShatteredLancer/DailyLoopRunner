@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.6.31`
+- Userscript 版本：`0.6.40`
 - Git 基线：`main` dynamic Pack Catalog
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
@@ -556,7 +556,8 @@ Status: In Progress
 - 提供手动 Refresh；活动过期、Challenge 完成或 EA Repository 更新后移除失效入口。
 - 不支持或无法完整解释的动态条件显示为不可运行并输出诊断，不得猜测材料比例或跳过 EA 条件。
 - 每次扫描先刷新轻量 Set/Category 索引；逐个 SBC 比较 Set、Category、Challenge ID、奖励和时间指纹，仅重读新增、变化或 TTL 过期的 Challenge。
-- 所有 EA 明确归入 `Upgrades` Category 的 Set 都进入逐 SBC 增量比较，但只有已实现保守 parser 的 family 可物化。84+ TOTW/高评分 x10 解析评分和特殊卡条件；基础 family 解析完整的单 Challenge、单 Pack reward 和球员质量/稀有度条件。
+- EA Challenge 读取采用扫描级限流保护：`429` 立即打开本轮熔断并跳过后续网络请求，`426/512/521` 每个候选最多额外重试一次。只要当前 Set 索引已验证且核心身份与缓存兼容，Incremental 和 Full rescan 都可降级使用此前验证的 Challenge 快照；新建、真实变化或 Clear cache 后的对象保持 unavailable，不从名称或旧快照猜测。实际 Challenge/Challenge-squad 请求健康度按账号保存 24 小时，以指数平滑失败率选择 800-3000ms 最小间隔；扫描汇总输出请求数、失败率、错误码和下一轮建议间隔，连续健康扫描才逐步提速。
+- 所有 EA 明确归入 `Upgrades` Category 的 Set 都进入逐 SBC 增量比较，但只有已实现保守 parser 的 family 可物化。84+ TOTW/高评分 xN 解析评分和特殊卡条件；基础 family 解析完整的单 Challenge、单 Pack reward 和球员质量/稀有度条件。
 - 通过 `activityBinding` 将基础 family 的当前 Set/Challenge/Reward identity 注入已有直接 Loop、嵌套 stage、自动恢复和 Recovery recipe，不复制其 Workflow、安全策略或选材 policy。
 - Provision 前置 Pick 使用语义 selector 匹配当前 Common Gold compatible Pick，不再把某一期 Set/Reward ID 当作内置业务身份。
 
@@ -575,8 +576,11 @@ Status: In Progress
 
 当前进度（2026-07-28）：
 
+- `84x10`、`2x84+ Upgrade` 和 `84+ TOTW Upgrade` 已迁移为纯动态会话 Loop。扫描器直接把当前 Set、单 Challenge、Pack reward、人数、评分和特殊卡条件与 `src/config/upgrade-policies.js` 的通用安全策略组合，不再要求 `loops.js` / `DailyLoopRunner.loops.json` 存在具体活动模板。Daily Rare 的 source-exhausted fallback 改为按 `2x84-upgrade` family 唯一解析；零匹配返回 unavailable，多匹配停止并输出候选。旧 Profile 中的 `2x84-fodder`、`auto-totw-upgrade`、`84x10-mvp`、`84x10` 仍可作为兼容模板被扫描覆盖，但新内置配置不再发布这些 ID。
+- 其余 activity-bound built-in 暂不按同样方式删除。Daily Bronze/Silver/Common/Rare、Bronze/Silver/Gold Upgrade、5x80+ crafting 的静态定义承载的是工作流角色、库存路由、来源包、阶段顺序和 recovery policy，不只是当前 EA Set identity；这些对象已经动态覆盖 Set/Challenge/Reward 身份。要继续全动态化，需先引入按业务角色生成 Workflow/Stage 的模型，不能只删除模板。
+
 - 开发快照完成第二阶段内置 SBC identity 迁移：新增 `src/config/activity-discovery.js`，支持 Daily Bronze/Silver/Common/Rare、Bronze/Silver/Gold、Common Gold crafting、2x84、TOTW 和高评分 x10 family；Daily/MVP、Inventory Exhaustion、Provision crafting、84x10 嵌套恢复和 9 个 Unassigned Recovery recipe 均声明 session-only binding。扫描只覆盖 EA 事实，旧名称/ID 暂时保留兼容 fallback。
-- Dynamic 扫描候选扩展到全部 EA `Upgrades` Set，并继续使用现有逐 SBC 结构指纹缓存。评分型 parser 与基础 activity parser 分层运行，84x10 的评分/特殊卡 metadata 与嵌套 TOTW/2x84 binding 可同时物化，不会互相覆盖。
+- Dynamic 扫描候选扩展到全部 EA `Upgrades` Set，并继续使用现有逐 SBC 结构指纹缓存。评分型 parser 与基础 activity parser 分层运行，高评分 xN 的评分/特殊卡 metadata 与嵌套 TOTW/2x84 binding 可同时物化，不会互相覆盖。
 - Provision 内置固定 Pick identity 已替换为 `preCraftPlayerPickSelector.material = "common-gold"`。零匹配跳过前置 stage，多匹配停止；旧 `preCraftPlayerPick` / `preCraftPlayerPickLoopId` 继续兼容外部配置。
 - Builder、schema、内置/外部配置和结构化扫描日志已接入 activity family、嵌套 binding、Recovery binding 与 Provision selector。自动化测试覆盖基础 family 解析、歧义拒绝、策略字段与 requirement 顺序保留、x10 与嵌套恢复合并、消费者追踪、Set ID 优先级和 Builder 字段；完整 release gate 通过 96 个测试文件、607 个测试、214 个 JavaScript 文件语法检查、19 个 Loop、9 个 Recovery recipe、4 个 Recovery policy、3 个 Profile、FSU patch replay 和根目录/`dist` 产物一致性。
 - `0.6.25` 建立第一阶段动态 Pack Catalog：My Packs 实时库存与 SBC PACK reward 元数据汇总到独立纯模块，Daily 来源包改为 `sourcePackRef` 主解析和 ID/名称 fallback。下一阶段逐步迁移 Provision、Validation 和其它 `sourcePackIds/sourcePackNames`，再评估由 Reward 内容/材料语义生成 Pack 分类，避免把活动名称或 Pack ID 当作永久业务主键。完整 release gate 通过 94 个测试文件、587 个测试、210 个 JavaScript 文件语法检查、19 个 Loop 配置、3 个 Profile、FSU patch replay 和根目录/`dist` 产物一致性。
@@ -595,7 +599,7 @@ Status: In Progress
 
 - `0.6.1` 后续开发新增 `src/sbc/dynamic-sbc-cache.js` 和 `src/config/upgrade-discovery.js`，统一 Player Pick/Upgrade 候选索引、逐 SBC 指纹、24 小时 TTL、账号隔离 GM 缓存和缓存统计。进度变化只合并 live state，不触发结构重扫；Set/Category/Challenge/Reward/时间变化会重读对应 Challenge。
 - 主面板入口改为 `Scan SBCs`，提供 Incremental、Full rescan、Clear cache；Builder 页改为 `Dynamic SBCs`，绑定可按 Loop ID、Set ID、Pick resource ID 或 Pack ID 恢复。JSON 导入会保留动态 `playerPickSbc` 与 `fillAndVerifySbc` 绑定。
-- Upgrade parser 仅允许 EA `Upgrades` Category 下的单阵、单 Pack 奖励、单 TEAM_RATING 的 84+ TOTW 或 84+/85+ x10；化学、未知条件、多阵、多奖励和 Category 不明均拒绝。安全保护继承内置 84x10/TOTW 模板，扫描只覆盖 Set/Pack/人数/评分/特殊需求 metadata。
+- Upgrade parser 仅允许 EA `Upgrades` Category 下的单阵、单 Pack 奖励、单 TEAM_RATING 的 84+ TOTW 或高评分 xN；`2x84+` 保留独立 activity family。化学、未知条件、多阵、多奖励和 Category 不明均拒绝。扫描结果直接生成会话 Loop，Set、Pack、人数、评分、特殊需求和 2x84 稀有金人数来自 EA metadata；高卡、特殊卡、可交易卡和 pile 顺序保护来自通用 Upgrade policy，不再依赖内置 84x10/TOTW 实体模板。Challenge 元数据瞬时失败时执行最多 3 次带退避重试，最终失败仍保持 unavailable。
 
 - 新增 `src/config/player-pick-discovery.js` 纯解析层，只接受普通 Set/Challenge/Reward 快照；支持单/多 Challenge、全金卡及精确 common/rare 比例，并生成现有 `playerPickSbc` 配置契约。
 - 新增 `src/adapters/ea/sbc.js#snapshotDiscoverySet()` 只读快照转换，识别 EA `awards[].item.isPlayerPickItem()`、缓存 Challenge、formation 人数和 `eligibilityRequirements`；不请求、不提交、不操作 UI。

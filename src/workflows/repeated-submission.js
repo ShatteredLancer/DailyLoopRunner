@@ -32,6 +32,11 @@ export async function runRepeatedSubmissionWorkflow(options = {}) {
       await options.afterRetry?.({ result, attempt });
       continue;
     }
+    if (attempt.status === 'progressed') {
+      result.details = { ...result.details, ...(attempt.details || {}) };
+      await options.afterProgress?.({ result, attempt });
+      continue;
+    }
     if (attempt.status === 'submitted' || attempt.submitted === true) {
       result.completions++;
       result.rewardPacksOpened += Number(attempt.rewardPacksOpened || 0);

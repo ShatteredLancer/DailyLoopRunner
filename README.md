@@ -1,6 +1,6 @@
 # FC26 Daily Loop Runner
 
-当前版本：`0.6.31`
+当前版本：`0.6.40`
 
 Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于编排开包、处理 Unassigned、选择 SBC 材料、提交 SBC 和处理 Player Pick。脚本会尽量复用当前页面已经加载的 EA、FSU 和 Enhancer 能力，并在无法确认材料或奖励身份时停止，而不是继续猜测。
 
@@ -25,7 +25,7 @@ Daily Loop Runner 是运行在 EA FC Web App 中的 Tampermonkey 脚本，用于
 
 安装或更新时，将仓库根目录生成的 `DailyLoopRunner.user.js` 更新到 Tampermonkey。不要直接使用 `src/userscript-entry.js`，它包含模块导入，必须先经过构建。
 
-进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。主面板标题显示 `Loop Runner v0.6.31`，日志出现 `Ready v0.6.31` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
+进入 EA FC Web App 后，等待页面、FSU 和 Enhancer 初始化。主面板标题显示 `Loop Runner v0.6.40`，日志出现 `Ready v0.6.40` 后即可开始；优化版 FSU 命中快速缓存时会进入 `trusted-provisional`，后台继续校验已恢复的 Club 缓存。Runner 会在每次保存 SBC 前只向 EA 校验本次选中的 Club 球员，全量校验结束后自动切换为普通 ready 状态。
 
 FSU 不再显示前台 Club loading 时，可能正在后台校验，也可能已进入快速缓存状态。Runner 的 Live SBC 只有在选中的 Club 球员通过提交前定向 EA 校验后才会保存。详细状态和故障调查见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 
@@ -80,9 +80,9 @@ Batch 启动时会捕获本次计划使用的 My Packs 实例队列；同 ID 的
 - `Protect Pick fodder >= N`：Player Pick SBC 禁止使用评分大于等于阈值的普通金卡，默认 `82`。
 - `Auto-pick below N`：所有候选都低于阈值时自动选择，默认 `90`。
 - `Open Picks at end`：只影响 `playerPickSbc`。直接运行 Pick 时先完成目标数量再集中领取；父 Workflow 的设置会作为默认值传给其中的 Pick 子 Loop，子 Loop 可以显式覆盖。不限次 Pick 使用 `rounds`，限次 Pick 使用 EA Set 当前剩余次数。Provision 的 pre-craft Pick 始终即时领取，普通 Pack 奖励和 Batch Open 不受影响。默认关闭。
-- 数量输入：只对声明 `runtimeQuantity.mode: "user"` 的 Loop 显示，标签和默认值由该 Loop 定义。不限次 Player Pick、Daily Rare Pack to 2x84+、2x84+ Fodder、84+ TOTW 等表示目标完成数；Provision 显示 `Provision packs`；Validation 显示 `Validation runs`。One-click Daily、其内部 Daily 阶段、限次 Player Pick 和 84x10 不显示该输入。
+- 数量输入：只对声明 `runtimeQuantity.mode: "user"` 的 Loop 显示，标签和默认值由该 Loop 定义。不限次 Player Pick、Daily Rare Pack to 2x84+ 以及动态扫描得到的 2x84+、84+ TOTW、84x10/85x10/7x87+ 等 Upgrade 表示目标完成数，并受 EA 当前剩余次数约束；Provision 显示 `Provision packs`；Validation 显示 `Validation runs`。One-click Daily、其内部 Daily 阶段和限次 Player Pick 不显示该输入。
 - `Refresh caches`：刷新当前可用的 Packs、Unassigned、Storage、Transfer 和 Club 缓存。
-- `SBC scan`：选择 `Scan SBCs` 的读取模式。`Incremental scan` 先刷新轻量 Set/Category 索引，逐个比较 SBC 结构指纹并复用 24 小时内未变化的 Challenge 快照；`Full rescan` 忽略 Challenge 快照并重新读取所有当前候选；`Clear cache + scan` 先删除当前账号的 Dynamic SBC 缓存，再执行一次全量扫描。三种模式都只读，不提交 SBC、不领取奖励；扫描完成后下拉菜单自动恢复为 Incremental。
+- `SBC scan`：选择 `Scan SBCs` 的读取模式。`Incremental scan` 先刷新轻量 Set/Category 索引，逐个比较 SBC 结构指纹并复用 24 小时内未变化的 Challenge 快照；`Full rescan` 尝试重新读取所有当前候选，但 EA 临时失败时可保留当前索引身份兼容的已验证快照；`Clear cache + scan` 先删除当前账号的 Dynamic SBC 缓存，再执行一次全量扫描，因此没有缓存降级能力。三种模式共用账号级自适应节流：根据最近 24 小时实际 Challenge 请求失败率，在请求之间保持 800-3000ms 间隔；`426/512/521` 最多额外重试一次并立即降低本轮频率，`429` 会终止本轮后续 Challenge 网络读取。没有兼容缓存的新建或真实变化 SBC 本轮显示 unavailable。扫描日志会输出实际请求数、失败率、错误码和下一轮建议间隔。三种模式都只读，不提交 SBC、不领取奖励；扫描完成后下拉菜单自动恢复为 Incremental。
 - `Pack Catalog`：启动扫描会同时读取当前 My Packs 的实时 ID、名称和数量，并从全部已加载 SBC Set 的 PACK reward 元数据建立 `Loop -> SBC Set -> Reward Pack` 会话索引。来源包按“动态 Reward ID、动态 Reward 名称、兼容 ID、兼容名称”顺序解析；My Packs 数量不写入持久缓存，每次刷新都覆盖旧快照。Catalog 不替代延迟可见重试、Store Packs 页面刷新或静态 fallback。
 - `Profile`：在 `Built-in`、`Default`、`Bronze/Silver Inventory Only`、`Daily + Rare Pack to 2x84+` 和用户 Profile 之间切换。主面板只加载 Profile 的 Saved/last-known-good；Builder 中尚未保存的 Draft 不会进入运行时。`Bronze/Silver Inventory Only` 只让 Daily Bronze、Daily Silver、Daily Common 等使用铜银材料的 Loop 从库存完成，其余可配置 Workflow/Loop 强制保持正常模式；它不同于主面板 `Inventory only` 的全局运行时默认值。`Daily + Rare Pack to 2x84+` 在四步 One-click Daily 后追加 Rare Gold 来源包处理。
 - `Open Builder`：打开全屏可视化 Workflow/Loop Builder。普通编辑不再要求手写 JSON。
@@ -116,7 +116,7 @@ Profile 存在浏览器本地存储中。重登只恢复 Active Profile 的 last
   "strategy": "workflowRoutine",
   "steps": [
     {
-      "loopId": "2x84-fodder",
+      "loopId": "my-scanned-2x84-binding",
       "name": "Open configured fodder rewards",
       "rewardFlow": {
         "open": "always",
@@ -124,10 +124,12 @@ Profile 存在浏览器本地存储中。重登只恢复 Active Profile 的 last
         "unassignedRecoveryPolicyIds": ["rare-gold-duplicate-overflow"]
       }
     },
-    "84x10"
+    "my-scanned-high-rated-upgrade"
   ]
 }
 ```
+
+示例中的两个 `loopId` 是用户在 Builder 的 `Dynamic SBCs` 页通过 `Add to profile` 创建的绑定 ID，不是内置固定 ID。动态 Upgrade 到期或 EA 更换 Set 后，必须先重新扫描并让 Builder 刷新绑定；找不到唯一匹配时 Profile 会保持 unavailable，不会回退到过期名称或 Pack ID。
 
 `rewardFlow.open` 可为 `inherit`、`always` 或 `never`。`inherit` 继承父 Workflow 和主面板 `Open reward packs`，`always` 打开匹配奖励，`never` 保留奖励；但子 Loop 的 `forceOpenRewardPacks` 属于后续流程依赖，优先级更高，不能被关闭。`packIds` 或 `packNames` 只替换该 step 的奖励匹配器。`unassignedRecoveryPolicyIds` 只能选择已经定义的恢复策略，不能绕过材料保护或强制移动物品。Workflow 不允许嵌套另一个 Routine，应展开为小 Loop 列表。
 
@@ -268,18 +270,18 @@ Provision material routing is fixed by the configured stage order at every clean
 
 ### 评分型 SBC
 
-`84+ TOTW Upgrade Loop`、`84x10 Loop` 和安全扫描生成的高评分 x10 Upgrade 使用同一套评分求解与提交基础设施：
+动态扫描生成的 `84+ TOTW Upgrade`、`2x84+ Upgrade` 和高评分 xN Upgrade 使用通用安全策略与同一套评分求解/提交基础设施：
 
 - 从当前 EA Challenge 动态读取人数、目标评分和可识别的特殊条件。
 - 先选择满足要求的最低评分组合，再按 `unassigned -> storage -> transfer -> club` 比较同评分材料来源。
 - 保存前、保存后和提交前都会复核实际阵容。
 - 遇到无法识别的动态条件时停止。
 
-84x10 默认要求恰好一张符合条件的 TOTW/TOTS/FOF，并可按配置自动完成 TOTW 或 2x84+ 前置补料。84x10 奖励默认保留，不自动打开。
+高评分 Upgrade 会按扫描到的 Challenge 特殊条件决定是否要求 TOTW/TOTS/FOF，并可按配置自动完成当前扫描到的 TOTW 或 2x84+ 前置补料。高评分 Upgrade 奖励默认保留，不自动打开。
 
-`84x10 Loop` 会持续处理当前仍可用的 Challenge，直到 SBC 已完成或材料、保护规则、运行状态使流程安全停止；内部保留 50 次安全上限，避免异常状态导致无限循环。
+动态 Upgrade 会按 `timesCompleted/repeats` 计算当前 EA 剩余次数；信息不可用时仍保留 50 次内部安全上限，直到 SBC 已完成或材料、保护规则、运行状态使流程安全停止。
 
-Dynamic Upgrade 只扫描 EA 明确归入 `Upgrades` Category 的白名单家族。当前支持 `84+ TOTW Upgrade` 和高评分 x10（例如 84x10、85x10）；84x10/TOTW 会把扫描到的 Set、Pack、人数和评分要求覆盖到现有静态 Loop，85x10 等新评分会生成当前会话 Dynamic Loop。多阵、化学、未知 eligibility、多个奖励或无法确认 Category 的 SBC 只记录诊断，不会加入列表。高卡和特殊卡保护继续来自内置安全模板/Profile，不按奖励评分猜测。
+Dynamic Upgrade 只扫描 EA 明确归入 `Upgrades` Category 的白名单家族。当前支持 `2x84+ Upgrade`、`84+ TOTW Upgrade` 和高评分 xN（例如 84x10、85x10、7x87+）；三类都直接从 Set、Challenge 和 Pack reward 元数据生成当前会话 Loop，不再依赖对应的内置实体模板。`2x84+` 使用独立 activity family，不会被高评分 xN 误分类；Daily Rare 的库存 fallback 也按该 family 唯一解析。多阵、化学、未知 eligibility、多个奖励、无法确认 Category 或同 family 多个候选的 SBC 只记录诊断并安全停止。高卡、特殊卡、可交易卡和 pile 顺序保护来自代码中的通用安全策略，不按奖励评分猜测，也不保存当前活动的 Set/Challenge/Pack ID。
 
 ### MVP 和验证 Loop
 
@@ -288,8 +290,6 @@ Dynamic Upgrade 只扫描 EA 明确归入 `Upgrades` Category 的白名单家族
 - `One-click Daily MVP (1 each)`
 - 四个单项 Daily MVP
 - `Bronze Upgrade Validation`
-- `2x84+ Fodder Loop`
-- `84x10 MVP (1 run)`
 
 `Bronze Upgrade Validation` 是早期验证入口，普通日常使用不需要选择它，因此默认隐藏在 MVP 列表中。
 
@@ -474,7 +474,7 @@ src/userscript-entry.js + src/**
 ## 已知限制
 
 - EA、FSU 和 Enhancer 都是运行时依赖，其内部模型或名称变化可能要求补充适配。
-- Dynamic SBC 扫描只读取当前 SBC Set、Category、Challenge 和奖励元数据，不会提交 SBC、领取 Pick 或开包。启动后会自动增量扫描，也可在 Options 中使用 `Scan SBCs`；`Incremental` 按逐个 SBC 的结构指纹复用 24 小时内未变化的 Challenge 快照，`Full rescan` 强制重新加载所有候选 SBC，`Clear cache` 清除当前账号缓存后重建。完全支持且不与静态配置重复的 Player Pick 会作为当前会话 Loop 加入下拉列表；EA `Upgrades` Category 中通过安全校验的 84+ TOTW、高评分 x10 Upgrade 会更新现有 Loop 元数据，新的评分档位（例如 85x10）会生成 Dynamic Loop。缓存结果必须经过当前会话的 Set/Category 验证，Challenge 刷新失败的 SBC 本次不会变成可运行 Loop。`repeats > 0` 的有限 Pick 按 EA 当前剩余次数运行并隐藏 `rounds`；`repeats:0` 且 Set/Challenge 仍可用的不限次 Pick 显示 `rounds`。奖励身份、人数、材料条件、评分或 Category 证据不完整，以及化学或未知条件不会生成可运行 Loop。
+- Dynamic SBC 扫描只读取当前 SBC Set、Category、Challenge 和奖励元数据，不会提交 SBC、领取 Pick 或开包。启动后会自动增量扫描，也可在 Options 中使用 `Scan SBCs`；`Incremental` 按逐个 SBC 的结构指纹复用 24 小时内未变化的 Challenge 快照，`Full rescan` 强制重新加载所有候选 SBC，`Clear cache` 清除当前账号缓存后重建。完全支持且不与静态配置重复的 Player Pick 会作为当前会话 Loop 加入下拉列表；EA `Upgrades` Category 中通过安全校验的 84+ TOTW、高评分 xN Upgrade 会更新现有 Loop 元数据或生成 Dynamic Loop。Challenge 元数据遇到 EA 瞬时错误时会进行最多 3 次带退避的整轮重试；仍失败的 SBC 本次保持 unavailable，不会根据名称猜测材料要求。缓存结果必须经过当前会话的 Set/Category 验证。`repeats > 0` 的有限 Pick 按 EA 当前剩余次数运行并隐藏 `rounds`；`repeats:0` 且 Set/Challenge 仍可用的不限次 Pick 显示 `rounds`。奖励身份、人数、材料条件、评分或 Category 证据不完整，以及化学或未知条件不会生成可运行 Loop。
 - FUT.GG 可能返回 403，当前使用 FUTNext 作为回退。
 - Node 自动测试不能替代真实 Web App 验证；共享底层改动完成后仍需验证受影响的真实页面流程。
 - 核心架构重构已在 `0.5.12` 收尾。`src/userscript-entry.js` 继续承担运行时组合、页面导航编排和 Workflow 副作用回调；后续不会仅为了减少行数继续拆分，动态 Pick 等功能进度以 Milestone 文档为准。

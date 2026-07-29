@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { createTotwUpgradePolicy } from '../../src/config/upgrade-policies.js';
 import { STRATEGY_RUNNER_KEYS } from '../../src/workflows/dispatch.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -142,7 +143,14 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('reopenRecap: reopenLastRecap,');
     expect(source).toContain('bindMainPanelCommands({');
     expect(source).toContain('commands: panelCommands,');
-    expect(source).toContain('await panelCommands.scanPicks();');
+    const cacheRestoreIndex = source.indexOf('await scanAvailableDynamicSbcs({ cacheOnly: true });');
+    const scanStartIndex = source.indexOf('const scanPromise = panelCommands.scanPicks();', cacheRestoreIndex);
+    const panelRevealIndex = source.indexOf('setMainPanelStartupHidden(panel, false);', scanStartIndex);
+    const scanAwaitIndex = source.indexOf('await scanPromise;', panelRevealIndex);
+    expect(cacheRestoreIndex).toBeGreaterThan(-1);
+    expect(scanStartIndex).toBeGreaterThan(cacheRestoreIndex);
+    expect(panelRevealIndex).toBeGreaterThan(scanStartIndex);
+    expect(scanAwaitIndex).toBeGreaterThan(panelRevealIndex);
     expect(source).toContain('renderMainPanelRuntimeState({');
     expect(source).not.toContain('style.textContent = `');
     expect(source).not.toContain('panel.innerHTML = `');
@@ -204,7 +212,7 @@ describe('current direct side-effect call baseline', () => {
   it('logs rating shortage or submit-not-ready reasons before automatic 2x84+ recovery', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     const shortageIdx = source.indexOf("configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit");
-    const shortageCraftIdx = source.indexOf('craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit)', shortageIdx);
+    const shortageCraftIdx = source.indexOf('craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit)', shortageIdx);
     expect(shortageIdx).toBeGreaterThan(-1);
     expect(shortageCraftIdx).toBeGreaterThan(shortageIdx);
     const shortageWindow = source.slice(shortageIdx, shortageCraftIdx);
@@ -212,7 +220,7 @@ describe('current direct side-effect call baseline', () => {
     expect(shortageWindow).toContain('configuredFill.reason');
 
     const submitIdx = source.indexOf('!fillResult.submitReady &&');
-    const submitCraftIdx = source.indexOf('craftAutoFodderUpgrade(loopDef, nextAttempt, autoFodderLimit)', submitIdx);
+    const submitCraftIdx = source.indexOf('craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit)', submitIdx);
     expect(submitIdx).toBeGreaterThan(-1);
     expect(submitCraftIdx).toBeGreaterThan(submitIdx);
     const submitWindow = source.slice(submitIdx, submitCraftIdx);
@@ -278,12 +286,16 @@ describe('current direct side-effect call baseline', () => {
   });
 
   it('marks the auto-crafted TOTW reward as known before 84x10 eligibility is rechecked', async () => {
+    expect(createTotwUpgradePolicy()).toMatchObject({
+      openRewardPacks: true,
+      assumeTotwRewardPack: true,
+    });
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     const autoTotwStart = source.indexOf('function getAutoTotwUpgradeDef(loopDef = {})');
     const autoFodderStart = source.indexOf('function getAutoFodderUpgradeDef(loopDef = {})', autoTotwStart);
     expect(autoTotwStart).toBeGreaterThan(-1);
     expect(autoFodderStart).toBeGreaterThan(autoTotwStart);
     const autoTotwDefinition = source.slice(autoTotwStart, autoFodderStart);
-    expect(autoTotwDefinition).toMatch(/openRewardPacks:\s*true,[\s\S]*?assumeTotwRewardPack:\s*true,[\s\S]*?\.\.\.override,/);
+    expect(autoTotwDefinition).toMatch(/\.\.\.createTotwUpgradePolicy\(\),[\s\S]*?\.\.\.override,/);
   });
 });

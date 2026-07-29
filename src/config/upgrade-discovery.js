@@ -1,5 +1,7 @@
 import { cloneLoopDef } from '../domain/objects.js';
 import { readEligibilityRequirements } from '../selection/rating-model.js';
+import { parseBasicUpgradeChallenge } from './activity-discovery.js';
+import { createDynamicUpgradePolicy } from './upgrade-policies.js';
 
 const SUPPORTED_PLAYER_KEYS = new Set([
   'PLAYER_QUALITY',
@@ -12,7 +14,7 @@ const SUPPORTED_PLAYER_KEYS = new Set([
 const UNSUPPORTED_TEAM_KEYS = new Set(['CHEMISTRY_POINTS', 'ALL_PLAYERS_CHEMISTRY_POINTS']);
 
 function clone(value) {
-  return cloneLoopDef(value);
+  return value === undefined ? undefined : cloneLoopDef(value);
 }
 
 function positiveInteger(value) {
@@ -42,13 +44,51 @@ export function detectDynamicUpgradeFamily(set = {}) {
   if (/\b84\+\s*TOTW\b.*\bUpgrade\b|\bTOTW\b.*\bUpgrade\b/i.test(text)) {
     return { id: 'totw-upgrade', rewardCount: 1, rewardMinRating: 84 };
   }
-  const prefix = /\b10\s*x\s*(\d{2})\+(?:\s*Players?)?\s*Upgrade\b/i.exec(text);
-  const suffix = /\b(\d{2})\+\s*x\s*10(?:\s*Players?)?(?:\s*Upgrade)?\b/i.exec(text);
-  const rating = positiveInteger(prefix?.[1] || suffix?.[1]);
-  if (rating && rating >= 84 && rating <= 99) {
-    return { id: 'high-rated-x10', rewardCount: 10, rewardMinRating: rating };
+  const prefix = /\b(\d{1,2})\s*x\s*(\d{2})\+(?:\s+(?:Rare\s+Gold\s+)?Players?)?\s+Upgrade\b/i.exec(text);
+  const suffix = /\b(\d{2})\+\s*x\s*(\d{1,2})(?:\s+(?:Rare\s+Gold\s+)?Players?)?\s+Upgrade\b/i.exec(text);
+  const rewardCount = positiveInteger(prefix?.[1] || suffix?.[2]);
+  const rating = positiveInteger(prefix?.[2] || suffix?.[1]);
+  if (rewardCount && rewardCount <= 30 && rating && rating >= 84 && rating <= 99) {
+    return {
+      id: rewardCount === 2 && rating === 84
+        ? '2x84-upgrade'
+        : (rewardCount === 10 ? 'high-rated-x10' : 'high-rated-pack-upgrade'),
+      rewardCount,
+      rewardMinRating: rating,
+    };
   }
   return null;
+}
+
+function isHighRatedUpgradeFamily(family = {}) {
+  return ['high-rated-x10', 'high-rated-pack-upgrade'].includes(family.id);
+}
+
+function parseTwoBy84Challenge(challenge) {
+  const parsed = parseBasicUpgradeChallenge(challenge);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      diagnostics: parsed.diagnostics || [],
+      requiredPlayerCount: parsed.requiredPlayerCount || null,
+      requirements: [],
+      targetRating: null,
+      specialCount: 0,
+    };
+  }
+  const requirements = parsed.requirements || [];
+  const valid = requirements.length === 1
+    && requirements[0].tier === 'gold'
+    && requirements[0].rarity === 'rare'
+    && Number(requirements[0].count) === Number(parsed.requiredPlayerCount);
+  return {
+    ok: valid,
+    diagnostics: valid ? [] : ['2x84+ Upgrade must require only Rare Gold players'],
+    requiredPlayerCount: parsed.requiredPlayerCount,
+    requirements,
+    targetRating: null,
+    specialCount: 0,
+  };
 }
 
 function requirementSummary(entry = {}) {
@@ -94,7 +134,7 @@ function parseUpgradeChallenge(challenge, family) {
   }
 
   if (teamRatings.length !== 1) diagnostics.push('exactly one TEAM_RATING condition is required');
-  if (family.id === 'high-rated-x10' && specialCount > 1) {
+  if (isHighRatedUpgradeFamily(family) && specialCount > 1) {
     diagnostics.push(`more than one required special card is unsupported (${specialCount})`);
   }
   if (family.id === 'totw-upgrade' && specialCount) {
@@ -130,6 +170,23 @@ function runtimeQuantityForRemaining(remaining) {
   };
 }
 
+export function materializeDynamicUpgradeChallengeLoopDef(loopDef = {}, challenge = {}) {
+  const challengeId = positiveInteger(challenge?.id || challenge?.challengeId);
+  const metadata = (loopDef.dynamicChallenges || []).find((entry) => (
+    positiveInteger(entry?.challengeId) === challengeId
+  ));
+  if (!metadata) return clone(loopDef);
+  const result = clone(loopDef);
+  result.expectedPlayerCount = positiveInteger(metadata.requiredPlayerCount) || result.expectedPlayerCount;
+  result.requiredSpecialCount = Math.max(0, Number(metadata.specialCount || 0) || 0);
+  result.allowedSpecialCount = result.requiredSpecialCount;
+  result.ratingSbcFill = { ...(clone(result.ratingSbcFill) || {}) };
+  if (positiveInteger(metadata.targetRating)) result.ratingSbcFill.targetRating = Number(metadata.targetRating);
+  else delete result.ratingSbcFill.targetRating;
+  result.dynamicActiveChallengeId = challengeId;
+  return result;
+}
+
 export function parseDynamicUpgradeSbcSnapshot(input = {}) {
   const set = input.set || {};
   const setId = positiveInteger(set.id);
@@ -146,11 +203,33 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
   if (!rewards.ids.length && !rewards.names.length) diagnostics.push('stable Pack reward identity is missing');
 
   const challenges = Array.isArray(set.challenges) ? set.challenges : [];
-  if (challenges.length !== 1) diagnostics.push(`exactly one Challenge is required; found ${challenges.length}`);
-  const parsedChallenge = challenges.length === 1
-    ? parseUpgradeChallenge(challenges[0], family)
-    : { ok: false, diagnostics: [], requiredPlayerCount: null, targetRating: null, specialCount: 0 };
-  diagnostics.push(...parsedChallenge.diagnostics);
+  const supportsMultipleChallenges = isHighRatedUpgradeFamily(family);
+  if (!challenges.length) diagnostics.push('at least one Challenge is required');
+  if (!supportsMultipleChallenges && challenges.length !== 1) {
+    diagnostics.push(`exactly one Challenge is required; found ${challenges.length}`);
+  }
+  const parsedChallenges = challenges.map((challenge, index) => {
+    if (!positiveInteger(challenge?.id)) diagnostics.push(`challenge ${index + 1} has no stable id`);
+    const parsed = family.id === '2x84-upgrade'
+      ? parseTwoBy84Challenge(challenge)
+      : parseUpgradeChallenge(challenge, family);
+    diagnostics.push(...(parsed.diagnostics || []).map((diagnostic) => (
+      challenges.length > 1 ? `challenge ${index + 1} (#${challenge?.id || '?'}): ${diagnostic}` : diagnostic
+    )));
+    return {
+      challengeId: positiveInteger(challenge?.id),
+      requiredPlayerCount: parsed.requiredPlayerCount,
+      targetRating: parsed.targetRating,
+      specialCount: parsed.specialCount,
+      requirements: parsed.requirements || [],
+    };
+  });
+  const parsedChallenge = parsedChallenges[0] || {
+    requiredPlayerCount: null,
+    targetRating: null,
+    specialCount: 0,
+    requirements: [],
+  };
 
   const remaining = remainingCompletions(set);
   if (remaining === 0) {
@@ -172,17 +251,17 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
     };
   }
 
-  const template = family.id === 'totw-upgrade' ? input.totwTemplate : input.x10Template;
-  if (!template) {
-    return { status: 'unsupported', setId, family, diagnostics: ['safe built-in Upgrade template is unavailable'] };
-  }
+  const policy = createDynamicUpgradePolicy(family);
+  const playerCounts = unique(parsedChallenges.map((challenge) => positiveInteger(challenge.requiredPlayerCount)).filter(Boolean));
+  const maximumSpecialCount = Math.max(0, ...parsedChallenges.map((challenge) => Number(challenge.specialCount || 0) || 0));
   const loop = {
-    ...clone(template),
+    ...policy,
     id: `discovered-upgrade-${setId}-${family.id}-${family.rewardMinRating}`,
     name: setName,
     discovered: true,
     discoveryKind: 'upgrade',
     dynamicSbcFamily: family.id,
+    dynamicRewardCount: family.rewardCount,
     dynamicRewardMinRating: family.rewardMinRating,
     sbcSetIds: [setId],
     sbcNames: [setName],
@@ -191,15 +270,29 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
     remainingCompletions: remaining,
     scannedMetadata: true,
     ratingSbcFill: {
-      ...(clone(template.ratingSbcFill) || {}),
-      targetRating: parsedChallenge.targetRating,
+      ...(clone(policy.ratingSbcFill) || {}),
+      ...(parsedChallenges.length === 1 && parsedChallenge.targetRating ? { targetRating: parsedChallenge.targetRating } : {}),
     },
-    expectedPlayerCount: parsedChallenge.requiredPlayerCount,
+    expectedPlayerCount: playerCounts.length === 1 ? playerCounts[0] : null,
+    dynamicChallengeCount: parsedChallenges.length,
+    dynamicChallenges: parsedChallenges.map((challenge) => ({
+      challengeId: challenge.challengeId,
+      requiredPlayerCount: challenge.requiredPlayerCount,
+      targetRating: challenge.targetRating,
+      specialCount: challenge.specialCount,
+    })),
   };
-  if (family.id === 'high-rated-x10') {
-    loop.requiredSpecialCount = parsedChallenge.specialCount;
-    loop.allowedSpecialCount = parsedChallenge.specialCount;
-    if (!parsedChallenge.specialCount) {
+  if (family.id === '2x84-upgrade') {
+    const configuredRequirement = policy.requirements?.[0] || {};
+    loop.requirements = (parsedChallenge.requirements || []).map((requirement) => ({
+      ...clone(configuredRequirement),
+      ...clone(requirement),
+    }));
+  }
+  if (isHighRatedUpgradeFamily(family)) {
+    loop.requiredSpecialCount = maximumSpecialCount;
+    loop.allowedSpecialCount = maximumSpecialCount;
+    if (!maximumSpecialCount) {
       delete loop.requiredSpecialKind;
       delete loop.requiredSpecialMinRating;
       loop.autoTotwUpgrade = false;
@@ -218,7 +311,8 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
     remainingCompletions: remaining,
     targetRating: parsedChallenge.targetRating,
     requiredPlayerCount: parsedChallenge.requiredPlayerCount,
-    specialCount: parsedChallenge.specialCount,
+    specialCount: maximumSpecialCount,
+    challengeCount: parsedChallenges.length,
     diagnostics: [],
   };
 }
@@ -226,7 +320,9 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
 function configuredUpgradeMatches(result, loop = {}) {
   if (loop.strategy !== 'fillAndVerifySbc') return false;
   if ((loop.sbcSetIds || []).map(Number).includes(Number(result.setId))) return true;
+  if (loop.activityBinding?.family === result.family?.id) return true;
   if (result.family?.id === 'totw-upgrade') return loop.id === 'auto-totw-upgrade';
+  if (result.family?.id === '2x84-upgrade') return loop.id === '2x84-fodder';
   if (result.family?.id === 'high-rated-x10' && Number(result.family.rewardMinRating) === 84) {
     return ['84x10', '84x10-mvp'].includes(String(loop.id));
   }
@@ -242,7 +338,10 @@ export function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
     rewardPackNames: unique([...(discoveredLoop.rewardPackNames || []), ...(configuredLoop.rewardPackNames || [])]),
     remainingCompletions: discoveredLoop.remainingCompletions,
     dynamicSbcFamily: discoveredLoop.dynamicSbcFamily,
+    dynamicRewardCount: discoveredLoop.dynamicRewardCount,
     dynamicRewardMinRating: discoveredLoop.dynamicRewardMinRating,
+    dynamicChallengeCount: discoveredLoop.dynamicChallengeCount,
+    dynamicChallenges: clone(discoveredLoop.dynamicChallenges || []),
     expectedPlayerCount: discoveredLoop.expectedPlayerCount,
     requiredSpecialCount: discoveredLoop.requiredSpecialCount,
     allowedSpecialCount: discoveredLoop.allowedSpecialCount,
@@ -252,6 +351,9 @@ export function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
     },
     scannedMetadata: true,
   };
+  if (discoveredLoop.ratingSbcFill?.targetRating === undefined) {
+    delete merged.ratingSbcFill.targetRating;
+  }
   if (discoveredLoop.requiredSpecialCount) {
     merged.requiredSpecialKind = discoveredLoop.requiredSpecialKind || configuredLoop.requiredSpecialKind;
     merged.requiredSpecialMinRating = discoveredLoop.requiredSpecialMinRating || configuredLoop.requiredSpecialMinRating;
@@ -272,8 +374,6 @@ export function buildUpgradeDiscoverySession(input = {}) {
   for (const set of input.sets || []) {
     const parsed = parseDynamicUpgradeSbcSnapshot({
       set,
-      x10Template: input.x10Template,
-      totwTemplate: input.totwTemplate,
     });
     if (parsed.status !== 'supported') {
       results.push(parsed);
@@ -328,8 +428,13 @@ export function collectScannedUpgradeActivities(results = []) {
       setName: normalizedText(loop.sbcNames?.[0] || loop.name),
       rewardPackIds: [...(loop.rewardPackIds || [])],
       rewardPackNames: [...(loop.rewardPackNames || [])],
+      rewardCount: loop.dynamicRewardCount ?? null,
       remainingCompletions: loop.remainingCompletions ?? null,
-      requirements: [],
+      requirements: (loop.requirements || []).map((requirement) => ({
+        tier: requirement.tier,
+        ...(requirement.rarity ? { rarity: requirement.rarity } : {}),
+        count: requirement.count,
+      })),
     });
   }
   return activities;

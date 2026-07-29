@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { materializeSessionLoopDefs } from '../../src/config/session-loops.js';
+import {
+  materializeSessionLoopDefs,
+  resolveSessionLoopByActivityFamily,
+} from '../../src/config/session-loops.js';
 
 describe('session loop materialization', () => {
   it('exports scanned overrides and pure dynamic Picks into workflow JSON', () => {
@@ -14,5 +17,22 @@ describe('session loop materialization', () => {
       loopOverrides: { 'static-pick': overridden },
       discoveredLoops: [dynamic, { ...dynamic }],
     })).toEqual([configured[0], overridden, dynamic]);
+  });
+
+  it('resolves exactly one dynamic fallback by activity family', () => {
+    const dynamic = {
+      id: 'scanned-2x84',
+      strategy: 'fillAndVerifySbc',
+      dynamicSbcFamily: '2x84-upgrade',
+    };
+    expect(resolveSessionLoopByActivityFamily([dynamic], '2x84-upgrade')).toMatchObject({
+      status: 'resolved',
+      loop: dynamic,
+    });
+    expect(resolveSessionLoopByActivityFamily([], '2x84-upgrade').status).toBe('unavailable');
+    expect(resolveSessionLoopByActivityFamily([
+      dynamic,
+      { ...dynamic, id: 'legacy', dynamicSbcFamily: undefined, activityBinding: { family: '2x84-upgrade' } },
+    ], '2x84-upgrade').status).toBe('ambiguous');
   });
 });

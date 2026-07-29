@@ -11,3 +11,15 @@ export function materializeSessionLoopDefs(options = {}) {
   }
   return result;
 }
+
+export function resolveSessionLoopByActivityFamily(loopDefs = [], family) {
+  const normalizedFamily = String(family || '').trim();
+  if (!normalizedFamily) return { status: 'unavailable', loop: null, matches: [] };
+  const matches = (loopDefs || []).filter((loop) => (
+    loop?.strategy === 'fillAndVerifySbc'
+      && (String(loop.dynamicSbcFamily || '') === normalizedFamily
+        || String(loop.activityBinding?.family || '') === normalizedFamily)
+  ));
+  if (matches.length === 1) return { status: 'resolved', loop: matches[0], matches };
+  return { status: matches.length ? 'ambiguous' : 'unavailable', loop: null, matches };
+}

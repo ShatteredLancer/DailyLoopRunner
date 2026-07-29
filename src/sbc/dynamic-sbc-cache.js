@@ -1,8 +1,96 @@
 import { cloneLoopDef, isPlainObject } from '../domain/objects.js';
 
 export const DYNAMIC_SBC_CACHE_SCHEMA_VERSION = 1;
-export const DYNAMIC_SBC_PARSER_VERSION = 1;
+export const DYNAMIC_SBC_PARSER_VERSION = 3;
 export const DYNAMIC_SBC_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+export const DYNAMIC_SBC_SCAN_HEALTH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+const BOUNDED_RETRY_LOAD_CODES = new Set([426, 512, 521]);
+
+export function dynamicSbcLoadErrorCode(error) {
+  const directValues = [
+    error?.status,
+    error?.statusCode,
+    error?.code,
+    error?.error?.status,
+    error?.error?.code,
+  ];
+  for (const value of directValues) {
+    const code = Number(value);
+    if (Number.isInteger(code) && code >= 100 && code <= 599) return code;
+  }
+  const match = String(error?.message || error || '').match(/(?:^|\D)(426|429|512|521)(?:\D|$)/);
+  return match ? Number(match[1]) : null;
+}
+
+export function dynamicSbcLoadFailurePolicy(error, context = {}) {
+  const code = dynamicSbcLoadErrorCode(error);
+  const attempt = Math.max(1, Number(context.attempt || 1) || 1);
+  const attempts = Math.max(attempt, Number(context.attempts || attempt) || attempt);
+  if (code === 429) return { code, retry: false, openCircuit: true };
+  if (BOUNDED_RETRY_LOAD_CODES.has(code)) {
+    return { code, retry: attempt < Math.min(attempts, 2), openCircuit: false };
+  }
+  return { code, retry: attempt < attempts, openCircuit: false };
+}
+
+export function normalizeDynamicSbcScanHealth(value = {}, now = Date.now()) {
+  const updatedAt = Math.max(0, Number(value?.updatedAt || 0) || 0);
+  const stale = !updatedAt || Math.max(0, Number(now) - updatedAt) > DYNAMIC_SBC_SCAN_HEALTH_MAX_AGE_MS;
+  if (stale) {
+    return {
+      updatedAt: 0,
+      runs: 0,
+      requestCount: 0,
+      failureCount: 0,
+      rateLimitCount: 0,
+      failureRate: 0,
+      recommendedGapMs: 1200,
+    };
+  }
+  return {
+    updatedAt,
+    runs: Math.max(0, Number(value?.runs || 0) || 0),
+    requestCount: Math.max(0, Number(value?.requestCount || 0) || 0),
+    failureCount: Math.max(0, Number(value?.failureCount || 0) || 0),
+    rateLimitCount: Math.max(0, Number(value?.rateLimitCount || 0) || 0),
+    failureRate: Math.max(0, Math.min(1, Number(value?.failureRate || 0) || 0)),
+    recommendedGapMs: Math.max(800, Math.min(3000, Number(value?.recommendedGapMs || 1200) || 1200)),
+  };
+}
+
+export function updateDynamicSbcScanHealth(previous = {}, metrics = {}, now = Date.now()) {
+  const normalized = normalizeDynamicSbcScanHealth(previous, now);
+  const requestCount = Math.max(0, Number(metrics.requestCount || 0) || 0);
+  if (!requestCount) return normalized;
+  const failureCount = Math.max(0, Math.min(requestCount, Number(metrics.failureCount || 0) || 0));
+  const rateLimitCount = Math.max(0, Number(metrics.rateLimitCount || 0) || 0);
+  const currentRate = requestCount ? failureCount / requestCount : 0;
+  const failureRate = normalized.runs && requestCount
+    ? (normalized.failureRate * 0.65) + (currentRate * 0.35)
+    : requestCount ? currentRate : normalized.failureRate;
+  let recommendedGapMs = normalized.recommendedGapMs;
+  if (rateLimitCount > 0) recommendedGapMs = 3000;
+  else if (currentRate >= 0.2 || failureRate >= 0.2) recommendedGapMs = Math.max(recommendedGapMs, 2500);
+  else if (currentRate >= 0.1 || failureRate >= 0.1) recommendedGapMs = Math.max(recommendedGapMs, 1800);
+  else if (requestCount >= 10 && failureCount === 0) recommendedGapMs = Math.max(800, recommendedGapMs - 200);
+  return {
+    updatedAt: Number(now) || Date.now(),
+    runs: normalized.runs + 1,
+    requestCount,
+    failureCount,
+    rateLimitCount,
+    failureRate,
+    recommendedGapMs,
+  };
+}
+
+function scanCircuitOpenError(circuit) {
+  const error = new Error(`Challenge metadata request skipped because the scan circuit opened after EA ${circuit?.code || 'rate limiting'}`);
+  error.code = 'DYNAMIC_SBC_SCAN_CIRCUIT_OPEN';
+  error.eaCode = circuit?.code || null;
+  return error;
+}
 
 function clone(value) {
   return cloneLoopDef(value);
@@ -43,6 +131,40 @@ function rewardFingerprint(reward = {}) {
   };
 }
 
+function knownChallengeIds(value = {}) {
+  return [...new Set([
+    ...(value.challengeIds || []),
+    ...(value.challenges || []).map((challenge) => challenge?.id),
+  ].map(positiveInteger).filter(Boolean))].sort((a, b) => a - b);
+}
+
+function cachedChallengeSnapshotUsable(cached, index = {}) {
+  return index?.complete === true
+    || (Array.isArray(cached?.snapshot?.challenges) && cached.snapshot.challenges.length > 0);
+}
+
+function compatibleIndexCore(value = {}) {
+  return {
+    id: positiveInteger(value.id),
+    name: String(value.name || ''),
+    repeats: value.repeats ?? null,
+    startTime: value.startTime ?? null,
+    endTime: value.endTime ?? null,
+    inUpgradesCategory: value.inUpgradesCategory === true,
+    rewards: (value.rewards || []).map(rewardFingerprint),
+  };
+}
+
+export function isCompatibleDynamicSbcIndex(cachedSnapshot = {}, index = {}) {
+  if (fingerprintDynamicSbcValue(compatibleIndexCore(cachedSnapshot))
+    !== fingerprintDynamicSbcValue(compatibleIndexCore(index))) return false;
+  const cachedIds = knownChallengeIds(cachedSnapshot);
+  const currentIds = knownChallengeIds(index);
+  if (!currentIds.length) return true;
+  return cachedIds.length === currentIds.length
+    && currentIds.every((id, position) => id === cachedIds[position]);
+}
+
 export function dynamicSbcIndexFingerprint(index = {}) {
   return fingerprintDynamicSbcValue({
     id: positiveInteger(index.id),
@@ -71,7 +193,6 @@ export function createDynamicSbcCache(now = Date.now()) {
 export function normalizeDynamicSbcCache(cache, now = Date.now()) {
   if (!isPlainObject(cache)
     || Number(cache.schemaVersion) !== DYNAMIC_SBC_CACHE_SCHEMA_VERSION
-    || Number(cache.parserVersion) !== DYNAMIC_SBC_PARSER_VERSION
     || !isPlainObject(cache.sets)) {
     return createDynamicSbcCache(now);
   }
@@ -125,6 +246,8 @@ export async function scanDynamicSbcSnapshots(options = {}) {
   const now = Number(options.now?.() ?? Date.now()) || Date.now();
   const maxAgeMs = Math.max(0, Number(options.maxAgeMs ?? DYNAMIC_SBC_CACHE_MAX_AGE_MS) || 0);
   const forceFull = options.forceFull === true;
+  const loadAttempts = Math.max(1, Math.min(5, Number(options.loadAttempts || 1) || 1));
+  const loadRetryDelayMs = Math.max(0, Number(options.loadRetryDelayMs || 0) || 0);
   const cache = normalizeDynamicSbcCache(options.cache, now);
   const refreshResult = await options.refreshSets();
   const sets = options.listSets() || [];
@@ -138,9 +261,15 @@ export async function scanDynamicSbcSnapshots(options = {}) {
     newSets: 0,
     changedSets: 0,
     expiredEntries: 0,
+    invalidEntries: 0,
     loadFailures: 0,
+    loadRetries: 0,
+    cacheFallbacks: 0,
+    circuitBreakers: 0,
+    circuitSkipped: 0,
     removedEntries: 0,
   };
+  let loadCircuit = null;
 
   for (const set of sets) {
     const index = options.snapshotIndex(set, refreshResult);
@@ -154,39 +283,96 @@ export async function scanDynamicSbcSnapshots(options = {}) {
     const cached = cache.sets[String(setId)] || null;
     const age = cached ? Math.max(0, now - Number(cached.scannedAt || 0)) : Infinity;
     const unchanged = Boolean(cached && cached.fingerprint === fingerprint);
-    const fresh = unchanged && age <= maxAgeMs;
+    const cacheMetadataUsable = cachedChallengeSnapshotUsable(cached, index);
+    const fresh = unchanged && age <= maxAgeMs && cacheMetadataUsable;
+    const compatibleFresh = Boolean(
+      cached
+        && !unchanged
+        && age <= maxAgeMs
+        && cacheMetadataUsable
+        && isCompatibleDynamicSbcIndex(cached.snapshot, index)
+    );
     let snapshot;
     let loadError = null;
     let cacheStatus = 'miss';
 
-    if (!forceFull && fresh) {
+    if (!forceFull && (fresh || compatibleFresh)) {
       snapshot = mergeDynamicSbcLiveState(cached.snapshot, index);
-      cacheStatus = 'hit';
+      cacheStatus = compatibleFresh ? 'compatible-hit' : 'hit';
       stats.cacheHits++;
       cache.sets[String(setId)] = {
         ...cached,
+        fingerprint,
         snapshot: clone(snapshot),
         validatedAt: now,
       };
     } else {
       if (!cached) stats.newSets++;
       else if (!unchanged) stats.changedSets++;
+      else if (!cacheMetadataUsable) stats.invalidEntries++;
       else stats.expiredEntries++;
       let challenges = null;
       if (index?.complete !== true) {
-        try {
-          challenges = await options.loadChallenges(set, index);
-        } catch (error) {
-          loadError = error;
-          stats.loadFailures++;
+        if (loadCircuit) {
+          loadError = scanCircuitOpenError(loadCircuit);
+          stats.circuitSkipped++;
+          await options.onLoadSkipped?.({ set, index, circuit: loadCircuit, error: loadError });
+        } else {
+          for (let attempt = 1; attempt <= loadAttempts; attempt++) {
+            try {
+              challenges = await options.loadChallenges(set, index, {
+                attempt,
+                attempts: loadAttempts,
+                cachedSnapshot: cached?.snapshot || null,
+                unchanged,
+              });
+              loadError = null;
+              break;
+            } catch (error) {
+              loadError = error;
+              const policy = options.loadFailurePolicy?.(error, {
+                set,
+                index,
+                attempt,
+                attempts: loadAttempts,
+              }) || dynamicSbcLoadFailurePolicy(error, { attempt, attempts: loadAttempts });
+              if (policy.openCircuit) {
+                loadCircuit = { code: policy.code || dynamicSbcLoadErrorCode(error), error };
+                stats.circuitBreakers++;
+                await options.onCircuitOpen?.({ set, index, circuit: loadCircuit, error });
+              }
+              if (!policy.retry || attempt >= loadAttempts || loadCircuit) break;
+              const delayMs = loadRetryDelayMs * attempt;
+              stats.loadRetries++;
+              await options.onLoadRetry?.({ set, index, attempt, attempts: loadAttempts, delayMs, error });
+              if (delayMs && typeof options.sleep === 'function') await options.sleep(delayMs);
+            }
+          }
         }
+        if (loadError) stats.loadFailures++;
       }
-      snapshot = loadError && cached && unchanged
+      const compatibleCacheFallback = Boolean(
+        loadError
+          && cached
+          && cacheMetadataUsable
+          && isCompatibleDynamicSbcIndex(cached.snapshot, index)
+      );
+      snapshot = compatibleCacheFallback
         ? mergeDynamicSbcLiveState(cached.snapshot, index)
         : options.snapshotSet(set, challenges, refreshResult);
-      cacheStatus = forceFull ? 'forced' : cached ? (unchanged ? 'expired' : 'changed') : 'new';
+      cacheStatus = compatibleCacheFallback
+        ? 'load-failed-compatible-cache'
+        : forceFull ? 'forced' : cached ? (unchanged ? (cacheMetadataUsable ? 'expired' : 'invalid') : 'changed') : 'new';
       stats.rescanned++;
-      if (!loadError) {
+      if (compatibleCacheFallback) {
+        stats.cacheFallbacks++;
+        cache.sets[String(setId)] = {
+          ...cached,
+          fingerprint,
+          snapshot: clone(snapshot),
+          validatedAt: now,
+        };
+      } else if (!loadError) {
         cache.sets[String(setId)] = {
           setId,
           fingerprint,
@@ -194,8 +380,6 @@ export async function scanDynamicSbcSnapshots(options = {}) {
           scannedAt: now,
           validatedAt: now,
         };
-      } else if (cached && unchanged) {
-        cacheStatus = 'load-failed-cached';
       }
     }
 

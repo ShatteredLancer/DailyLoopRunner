@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildActivityBindingSession,
+  collectActivityBindingSbcNames,
   parseBasicUpgradeActivitySnapshot,
 } from '../../src/config/activity-discovery.js';
 import {
@@ -125,34 +126,7 @@ describe('basic Upgrade activity discovery', () => {
     ]);
   });
 
-  it('preserves x10 rating metadata while resolving nested TOTW and 2x84 activities', () => {
-    const x10Template = {
-      id: '84x10',
-      name: '84x10 Loop',
-      strategy: 'fillAndVerifySbc',
-      sbcNames: ['Compatibility 84x10'],
-      ratingSbcFill: { targetRating: 87, priorityPiles: ['unassigned', 'storage', 'club'] },
-      requiredSpecialCount: 1,
-      allowedSpecialCount: 1,
-      requiredSpecialKind: 'totw-tots-fof',
-      autoTotwUpgrade: {
-        name: 'Compatibility TOTW',
-        activityBinding: { family: 'totw-upgrade', category: 'Upgrades', required: true },
-        sbcNames: ['Old TOTW Upgrade'],
-      },
-      autoFodderUpgrade: {
-        name: 'Compatibility 2x84',
-        activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: false },
-        sbcNames: ['Old 2x84 Upgrade'],
-      },
-    };
-    const totwTemplate = {
-      id: 'auto-totw-upgrade',
-      name: 'TOTW Loop',
-      strategy: 'fillAndVerifySbc',
-      sbcNames: ['Old TOTW Upgrade'],
-      ratingSbcFill: { targetRating: 84 },
-    };
+  it('preserves dynamic rating metadata while resolving nested TOTW and 2x84 activities', () => {
     const x10 = {
       id: 840,
       name: '10x 84+ Upgrade',
@@ -186,33 +160,37 @@ describe('basic Upgrade activity discovery', () => {
       id: 842,
       name: '2x 84+ Upgrade',
       reward: '2x 84+ Rare Gold Players Pack',
-      players: 6,
+      players: 7,
       requirements: [quality('gold', -1), rarity('rare', -1)],
     });
     const upgradeSession = buildUpgradeDiscoverySession({
       sets: [x10, totw, fodder],
-      configuredLoops: [x10Template, totwTemplate],
-      x10Template,
-      totwTemplate,
+      configuredLoops: [],
     });
-    const specializedX10 = upgradeSession.loopOverrides['84x10'];
+    const specializedX10 = upgradeSession.discoveredLoops.find((loop) => loop.dynamicSbcFamily === 'high-rated-x10');
     const activitySession = buildActivityBindingSession({
       sets: [x10, totw, fodder],
       configuredLoops: [specializedX10],
       additionalActivities: collectScannedUpgradeActivities(upgradeSession.results),
     });
+    const materialized = activitySession.loopOverrides[specializedX10.id];
 
-    expect(activitySession.loopOverrides['84x10']).toMatchObject({
+    expect(materialized).toMatchObject({
       sbcSetIds: [840],
       dynamicRewardMinRating: 84,
       ratingSbcFill: { targetRating: 88 },
       autoTotwUpgrade: { sbcSetIds: [841], dynamicSbcFamily: 'totw-upgrade', activityResolved: true },
-      autoFodderUpgrade: { sbcSetIds: [842], dynamicSbcFamily: '2x84-upgrade', activityResolved: true },
+      autoFodderUpgrade: {
+        sbcSetIds: [842],
+        dynamicSbcFamily: '2x84-upgrade',
+        activityResolved: true,
+        requirements: [expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 7 })],
+      },
     });
     expect(activitySession.activities.find((activity) => activity.familyId === 'totw-upgrade').consumers)
-      .toEqual(['Loop:84x10']);
+      .toEqual([`Loop:${specializedX10.id}`]);
     expect(activitySession.activities.find((activity) => activity.familyId === '2x84-upgrade').consumers)
-      .toEqual(['Loop:84x10']);
+      .toEqual([`Loop:${specializedX10.id}`]);
   });
 
   it('does not choose between multiple Sets for the same family', () => {
@@ -227,5 +205,24 @@ describe('basic Upgrade activity discovery', () => {
     const session = buildActivityBindingSession({ sets: [first, second], configuredLoops: [loop] });
     expect(session.loopOverrides).toEqual({});
     expect(session.diagnostics.join(' ')).toContain('ambiguous');
+  });
+
+  it('collects activity-bound SBC aliases from direct and nested consumers for scan prefiltering', () => {
+    const names = collectActivityBindingSbcNames([
+      {
+        activityBinding: { family: 'daily-bronze-upgrade' },
+        sbcNames: ['Daily Bronze Upgrade'],
+        stages: [{
+          activityBinding: { family: 'common-gold-crafting-upgrade' },
+          sbcNames: ['5x 80+ Upgrade'],
+        }],
+      },
+      {
+        activityBinding: { family: 'daily-bronze-upgrade' },
+        sbcNames: ['DAILY BRONZE UPGRADE'],
+      },
+    ]);
+
+    expect(names.sort()).toEqual(['5x 80+ upgrade', 'daily bronze upgrade']);
   });
 });

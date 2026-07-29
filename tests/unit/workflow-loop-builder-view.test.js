@@ -235,6 +235,32 @@ describe('Workflow and Loop Builder view', () => {
     expect(html).toContain('common-gold-crafting-upgrade');
   });
 
+  it('renders a dynamic activity family selector for source-exhausted fallback', () => {
+    const loop = {
+      id: 'rare-pack',
+      name: 'Rare pack',
+      strategy: 'rarePackTo84Upgrade',
+      sourcePackNames: ['Pack'],
+      sourceExhaustedFallbackActivityFamily: '2x84-upgrade',
+      rareUpgrade: {
+        name: 'Upgrade',
+        sbcNames: ['Upgrade'],
+        requirements: [{ tier: 'gold', rarity: 'rare', count: 6 }],
+      },
+    };
+    const html = workflowLoopBuilderHtml(model({
+      tab: 'loops',
+      config: { ...config(), loops: [loop] },
+      selectedId: loop.id,
+      selectedObject: loop,
+      selectedSource: 'custom',
+      editorReadOnly: false,
+      sources: { loops: [{ id: loop.id, source: 'custom' }], recoveryRecipes: [], unassignedRecoveryPolicies: [] },
+    }));
+    expect(html).toContain('data-builder-field="sourceExhaustedFallbackActivityFamily"');
+    expect(html).toContain('<option value="2x84-upgrade" selected>2x84-upgrade</option>');
+  });
+
   it('renders special controls, complete Recovery behavior, and Workflow step reward flow', () => {
     const draft = config();
     draft.loops[0].steps = [{

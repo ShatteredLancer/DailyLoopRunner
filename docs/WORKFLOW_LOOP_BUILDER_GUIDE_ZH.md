@@ -210,8 +210,8 @@ flowchart TD
 
 动态扫描结果分为两类：
 
-- **独立 Dynamic Loop**：当前 Pick 或新的高评分 x10 等可独立运行对象。它们显示在 `Dynamic SBCs` 页面，需要 `Add to profile` 后才能被自定义 Workflow 长期引用。
-- **内置 activity binding**：Daily Upgrade、Bronze/Silver/Gold Upgrade、Common Gold crafting、2x84、自动 TOTW/2x84 recovery 和 Recovery recipe 等已有行为模板，只自动替换当前 EA 身份，不需要逐个 `Add to profile`。
+- **独立 Dynamic Loop**：当前 Pick、2x84+、84+ TOTW 或新的高评分 xN 等可独立运行对象。它们显示在 `Dynamic SBCs` 页面，需要 `Add to profile` 后才能被自定义 Workflow 长期引用；这些 Upgrade 不再提供固定 built-in Loop ID。
+- **内置 activity binding**：Daily Upgrade、Bronze/Silver/Gold Upgrade、Common Gold crafting、Daily Rare 的 2x84 consumer、自动 TOTW/2x84 recovery 和 Recovery recipe 等已有工作流角色，只自动绑定当前 EA 身份，不需要逐个 `Add to profile`。独立的 2x84、TOTW 和高评分 xN Loop 本身由扫描结果直接生成。
 
 独立 Dynamic Loop 的操作流程：
 
@@ -237,6 +237,8 @@ flowchart LR
 安全规则：
 
 - 只显示当前扫描中完整且可安全解释的 Dynamic SBC。Upgrade 还必须由 EA Category 明确证明属于 `Upgrades`。
+- 启动时会先恢复只读缓存并显示面板，随后在后台校验当前 Set/Category；校验结束前 Start 保持禁用。后台校验失败的 SBC 会变成 unavailable，不会继续执行旧快照。
+- 高评级 xN Upgrade 可以包含多个子阵，但每个子阵都必须完整解析人数、评分和特殊卡要求。中间子阵只推进当前轮次，不计为完成且不开最终奖励；最后子阵必须确认奖励已经出现，才会计为一轮。
 - 重登后必须重新扫描，绑定才会恢复为 available。
 - SBC 过期、次数耗尽或 EA 不再返回完整 Challenge metadata 时，绑定会变成 unavailable。
 - unavailable dynamic binding 会阻止 Profile 激活，不会执行上次缓存的过期 Pick 定义。

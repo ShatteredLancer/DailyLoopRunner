@@ -589,6 +589,16 @@ export function validateLoopDef(loopDef, label = 'loop') {
     if (loopDef.sourceExhaustedFallbackLoopId !== undefined && (typeof loopDef.sourceExhaustedFallbackLoopId !== 'string' || !loopDef.sourceExhaustedFallbackLoopId.trim())) {
       errors.push('sourceExhaustedFallbackLoopId must be a non-empty string');
     }
+    if (loopDef.sourceExhaustedFallbackActivityFamily !== undefined) {
+      if (typeof loopDef.sourceExhaustedFallbackActivityFamily !== 'string' || !loopDef.sourceExhaustedFallbackActivityFamily.trim()) {
+        errors.push('sourceExhaustedFallbackActivityFamily must be a non-empty string');
+      } else if (!SBC_ACTIVITY_FAMILY_IDS.includes(loopDef.sourceExhaustedFallbackActivityFamily)) {
+        errors.push(`sourceExhaustedFallbackActivityFamily is not supported: ${loopDef.sourceExhaustedFallbackActivityFamily}`);
+      }
+    }
+    if (loopDef.sourceExhaustedFallbackLoopId && loopDef.sourceExhaustedFallbackActivityFamily) {
+      errors.push('sourceExhaustedFallbackLoopId and sourceExhaustedFallbackActivityFamily cannot both be configured');
+    }
     if (loopDef.sourceExhaustedFallbackMaxCompletions !== undefined) {
       const fallbackLimit = Number(loopDef.sourceExhaustedFallbackMaxCompletions);
       if (!Number.isFinite(fallbackLimit) || fallbackLimit <= 0) {

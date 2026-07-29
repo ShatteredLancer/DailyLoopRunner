@@ -2,39 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildUpgradeDiscoverySession,
   collectScannedUpgradeActivities,
+  detectDynamicUpgradeFamily,
+  materializeDynamicUpgradeChallengeLoopDef,
   parseDynamicUpgradeSbcSnapshot,
 } from '../../src/config/upgrade-discovery.js';
-
-const x10Template = {
-  id: '84x10',
-  name: '84x10 Loop',
-  strategy: 'fillAndVerifySbc',
-  sbcNames: ['10x 84+ Upgrade'],
-  maxCompletions: 50,
-  maxSubmittedRating: 88,
-  maxNormalGoldSubmittedRating: 99,
-  ratingSbcFill: { priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
-  requiredSpecialCount: 1,
-  allowedSpecialCount: 1,
-  requiredSpecialKind: 'totw-tots-fof',
-  requiredSpecialMinRating: 84,
-  autoTotwUpgrade: { name: '84+ TOTW Upgrade' },
-  blockSpecial: true,
-};
-
-const totwTemplate = {
-  id: 'auto-totw-upgrade',
-  name: '84+ TOTW Upgrade Loop',
-  strategy: 'fillAndVerifySbc',
-  sbcNames: ['84+ TOTW Upgrade'],
-  maxCompletions: 1,
-  maxSubmittedRating: 88,
-  maxNormalGoldSubmittedRating: 99,
-  ratingSbcFill: { priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
-  requiredSpecialCount: 0,
-  allowedSpecialCount: 0,
-  blockSpecial: true,
-};
 
 function set(overrides = {}) {
   return {
@@ -56,9 +27,40 @@ function set(overrides = {}) {
   };
 }
 
+function totwSet(overrides = {}) {
+  return set({
+    id: 841,
+    name: '84+ TOTW Upgrade',
+    rewards: [{ type: 'PACK', packId: 20707, name: '84+ TOTW Pack' }],
+    challenges: [{
+      id: 842,
+      requiredPlayerCount: 11,
+      eligibilityRequirements: [{ key: 'TEAM_RATING', values: [84], count: -1 }],
+    }],
+    ...overrides,
+  });
+}
+
+function twoBy84Set(overrides = {}) {
+  return set({
+    id: 843,
+    name: '2x 84+ Upgrade',
+    rewards: [{ type: 'PACK', packId: 1031, name: '2x 84+ Rare Gold Players Pack' }],
+    challenges: [{
+      id: 844,
+      requiredPlayerCount: 6,
+      eligibilityRequirements: [
+        { key: 'PLAYER_QUALITY', values: ['gold'], count: -1 },
+        { key: 'PLAYER_RARITY', values: ['rare'], count: -1 },
+      ],
+    }],
+    ...overrides,
+  });
+}
+
 describe('dynamic Upgrade discovery', () => {
-  it('creates a new safe dynamic 85x10 Loop from the 84x10 template', () => {
-    const result = parseDynamicUpgradeSbcSnapshot({ set: set(), x10Template, totwTemplate });
+  it('creates a safe dynamic 85x10 Loop from generic policy', () => {
+    const result = parseDynamicUpgradeSbcSnapshot({ set: set() });
     expect(result.status).toBe('supported');
     expect(result.loop).toMatchObject({
       strategy: 'fillAndVerifySbc',
@@ -70,62 +72,158 @@ describe('dynamic Upgrade discovery', () => {
       expectedPlayerCount: 11,
       maxSubmittedRating: 88,
       requiredSpecialCount: 1,
+      requiredSpecialKind: 'totw-tots-fof',
       maxCompletions: 5,
+      autoTotwUpgrade: { activityBinding: { family: 'totw-upgrade', required: true } },
+      autoFodderUpgrade: { activityBinding: { family: '2x84-upgrade', required: false } },
     });
     expect(result.loop.ratingSbcFill.targetRating).toBe(88);
   });
 
-  it('overlays scanned 84x10 and TOTW metadata onto built-in Loops', () => {
-    const x10Mvp = { ...x10Template, id: '84x10-mvp' };
+  it('creates a safe dynamic high-rated xN Loop for 7x 87+', () => {
+    const result = parseDynamicUpgradeSbcSnapshot({
+      set: set({
+        name: '7x 87+ Upgrade',
+        rewards: [{ type: 'PACK', packId: 1095, name: '7x 87+ Rare Gold Players Pack' }],
+        challenges: [
+          {
+            id: 3720,
+            requiredPlayerCount: 11,
+            eligibilityRequirements: [
+              { key: 'TEAM_RATING', values: [83], count: -1 },
+              { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+            ],
+          },
+          {
+            id: 3721,
+            requiredPlayerCount: 11,
+            eligibilityRequirements: [
+              { key: 'TEAM_RATING', values: [84], count: -1 },
+              { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(result.status).toBe('supported');
+    expect(result.family).toEqual({
+      id: 'high-rated-pack-upgrade',
+      rewardCount: 7,
+      rewardMinRating: 87,
+    });
+    expect(result.loop).toMatchObject({
+      name: '7x 87+ Upgrade',
+      dynamicSbcFamily: 'high-rated-pack-upgrade',
+      dynamicRewardCount: 7,
+      dynamicRewardMinRating: 87,
+      rewardPackIds: [1095],
+      expectedPlayerCount: 11,
+      requiredSpecialCount: 1,
+      dynamicChallengeCount: 2,
+      dynamicChallenges: [
+        { challengeId: 3720, requiredPlayerCount: 11, targetRating: 83, specialCount: 1 },
+        { challengeId: 3721, requiredPlayerCount: 11, targetRating: 84, specialCount: 1 },
+      ],
+    });
+    expect(result.loop.ratingSbcFill.targetRating).toBeUndefined();
+    expect(materializeDynamicUpgradeChallengeLoopDef(result.loop, { id: 3720 })).toMatchObject({
+      expectedPlayerCount: 11,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      ratingSbcFill: { targetRating: 83 },
+    });
+    expect(materializeDynamicUpgradeChallengeLoopDef(result.loop, { id: 3721 }).ratingSbcFill.targetRating).toBe(84);
+  });
+
+  it('creates 2x84+ directly from scanned requirements without a built-in Loop', () => {
+    expect(detectDynamicUpgradeFamily(twoBy84Set())).toEqual({
+      id: '2x84-upgrade',
+      rewardCount: 2,
+      rewardMinRating: 84,
+    });
+    const result = parseDynamicUpgradeSbcSnapshot({ set: twoBy84Set() });
+    expect(result.status).toBe('supported');
+    expect(result.loop).toMatchObject({
+      hidden: true,
+      dynamicSbcFamily: '2x84-upgrade',
+      sbcSetIds: [843],
+      rewardPackIds: [1031],
+      expectedPlayerCount: 6,
+      requirements: [expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 6, maxRating: 81 })],
+      priorityPiles: ['storage', 'club'],
+      blockSpecial: true,
+    });
+    expect(result.loop.ratingSbcFill).toEqual({});
+  });
+
+  it('uses the scanned Rare Gold player count instead of a fixed 2x84+ template count', () => {
+    const result = parseDynamicUpgradeSbcSnapshot({
+      set: twoBy84Set({
+        challenges: [{
+          id: 844,
+          requiredPlayerCount: 7,
+          eligibilityRequirements: [
+            { key: 'PLAYER_QUALITY', values: ['gold'], count: -1 },
+            { key: 'PLAYER_RARITY', values: ['rare'], count: -1 },
+          ],
+        }],
+      }),
+    });
+
+    expect(result.status).toBe('supported');
+    expect(result.loop.expectedPlayerCount).toBe(7);
+    expect(result.loop.requirements).toEqual([
+      expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 7, maxRating: 81 }),
+    ]);
+    expect(collectScannedUpgradeActivities([{ loop: result.loop }])[0].requirements)
+      .toEqual([{ tier: 'gold', rarity: 'rare', count: 7 }]);
+  });
+
+  it('discovers current 84x10, TOTW, and 2x84+ as session Loops', () => {
     const session = buildUpgradeDiscoverySession({
-      configuredLoops: [x10Template, x10Mvp, totwTemplate],
-      x10Template,
-      totwTemplate,
+      configuredLoops: [],
       sets: [
         set({ id: 840, name: '10x 84+ Upgrade', rewards: [{ type: 'PACK', packId: 284 }] }),
-        set({
-          id: 841,
-          name: '84+ TOTW Upgrade',
-          rewards: [{ type: 'PACK', packId: 20707 }],
-          challenges: [{ id: 842, requiredPlayerCount: 11, eligibilityRequirements: [{ key: 'TEAM_RATING', values: [84], count: -1 }] }],
-        }),
+        totwSet(),
+        twoBy84Set(),
       ],
     });
 
+    expect(session.loopOverrides).toEqual({});
+    expect(session.discoveredLoops.map((loop) => loop.dynamicSbcFamily).sort())
+      .toEqual(['2x84-upgrade', 'high-rated-x10', 'totw-upgrade']);
+  });
+
+  it('keeps legacy configured templates compatible without requiring them', () => {
+    const legacy = {
+      id: '84x10',
+      name: 'Legacy 84x10',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['Legacy'],
+      ratingSbcFill: { priorityPiles: ['club'] },
+      requiredSpecialCount: 1,
+    };
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [legacy],
+      sets: [set({ id: 840, name: '10x 84+ Upgrade', rewards: [{ type: 'PACK', packId: 284 }] })],
+    });
     expect(session.discoveredLoops).toEqual([]);
-    expect(Object.keys(session.loopOverrides).sort()).toEqual(['84x10', '84x10-mvp', 'auto-totw-upgrade']);
-    expect(session.loopOverrides['84x10']).toMatchObject({ sbcSetIds: [840], scannedMetadata: true });
-    expect(session.loopOverrides['auto-totw-upgrade']).toMatchObject({
-      sbcSetIds: [841],
-      requiredSpecialCount: 0,
-      autoTotwUpgrade: false,
+    expect(session.loopOverrides['84x10']).toMatchObject({
+      id: '84x10',
+      sbcSetIds: [840],
+      dynamicSbcFamily: 'high-rated-x10',
+      scannedMetadata: true,
     });
   });
 
-  it('adds 85x10 only once when no configured Loop matches its stable identity', () => {
+  it('collects supported Upgrade metadata as activity bindings', () => {
     const session = buildUpgradeDiscoverySession({
-      configuredLoops: [x10Template, totwTemplate],
-      x10Template,
-      totwTemplate,
-      sets: [set()],
-    });
-    expect(session.discoveredLoops).toHaveLength(1);
-    expect(session.discoveredLoops[0].name).toBe('10x 85+ Upgrade');
-  });
-
-  it('collects supported x10 and TOTW metadata as activity bindings', () => {
-    const session = buildUpgradeDiscoverySession({
-      configuredLoops: [x10Template, totwTemplate],
-      x10Template,
-      totwTemplate,
+      configuredLoops: [],
       sets: [
         set({ id: 840, name: '10x 84+ Upgrade', rewards: [{ type: 'PACK', packId: 284 }] }),
-        set({
-          id: 841,
-          name: '84+ TOTW Upgrade',
-          rewards: [{ type: 'PACK', packId: 20707 }],
-          challenges: [{ id: 842, requiredPlayerCount: 11, eligibilityRequirements: [{ key: 'TEAM_RATING', values: [84], count: -1 }] }],
-        }),
+        totwSet(),
+        twoBy84Set(),
         set({ id: 850, name: '10x 85+ Upgrade', timesCompleted: 5 }),
       ],
     });
@@ -133,20 +231,47 @@ describe('dynamic Upgrade discovery', () => {
     expect(collectScannedUpgradeActivities(session.results)).toEqual([
       expect.objectContaining({ familyId: 'high-rated-x10', setId: 840, rewardPackIds: [284] }),
       expect.objectContaining({ familyId: 'totw-upgrade', setId: 841, rewardPackIds: [20707] }),
+      expect.objectContaining({ familyId: '2x84-upgrade', setId: 843, rewardPackIds: [1031] }),
     ]);
   });
 
   it.each([
     ['non-Upgrades category', { inUpgradesCategory: false }],
-    ['multiple Challenges', { challenges: [...set().challenges, { ...set().challenges[0], id: 902 }] }],
     ['chemistry', { challenges: [{ ...set().challenges[0], eligibilityRequirements: [...set().challenges[0].eligibilityRequirements, { key: 'CHEMISTRY_POINTS', values: [20], count: -1 }] }] }],
     ['unsupported condition', { challenges: [{ ...set().challenges[0], eligibilityRequirements: [...set().challenges[0].eligibilityRequirements, { key: 'LEAGUE_ID', values: [13], count: 1 }] }] }],
   ])('rejects %s', (_label, overrides) => {
-    expect(parseDynamicUpgradeSbcSnapshot({ set: set(overrides), x10Template, totwTemplate }).status).toBe('unsupported');
+    expect(parseDynamicUpgradeSbcSnapshot({ set: set(overrides) }).status).toBe('unsupported');
+  });
+
+  it('keeps multi-Challenge support limited to high-rated xN Upgrades', () => {
+    const result = parseDynamicUpgradeSbcSnapshot({
+      set: totwSet({
+        challenges: [
+          ...totwSet().challenges,
+          { ...totwSet().challenges[0], id: 845 },
+        ],
+      }),
+    });
+    expect(result.status).toBe('unsupported');
+    expect(result.diagnostics).toContain('exactly one Challenge is required; found 2');
+  });
+
+  it('rejects a 2x84+ identity with non-Rare-Gold requirements', () => {
+    const result = parseDynamicUpgradeSbcSnapshot({
+      set: twoBy84Set({
+        challenges: [{
+          id: 844,
+          requiredPlayerCount: 6,
+          eligibilityRequirements: [{ key: 'PLAYER_QUALITY', values: ['gold'], count: -1 }],
+        }],
+      }),
+    });
+    expect(result.status).toBe('unsupported');
+    expect(result.diagnostics.join(' ')).toContain('Rare Gold');
   });
 
   it('does not expose a completed Upgrade as runnable', () => {
-    const result = parseDynamicUpgradeSbcSnapshot({ set: set({ timesCompleted: 5 }), x10Template, totwTemplate });
+    const result = parseDynamicUpgradeSbcSnapshot({ set: set({ timesCompleted: 5 }) });
     expect(result.status).toBe('completed');
   });
 });

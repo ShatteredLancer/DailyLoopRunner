@@ -53,7 +53,7 @@ Built-in objects support View, Duplicate, and Override. They do not support dire
 
 Dynamic objects are read-only snapshots. A Workflow may reference a standalone Dynamic SBC only when its stable identity can be recorded. The Builder stores Loop IDs, Set IDs, Pick resource IDs or Pack reward IDs, and the last valid definition. A later scan refreshes the effective definition. An unresolved or expired standalone binding is marked unavailable and cannot be activated silently.
 
-Dynamic discovery has a second mode for built-in behavior templates: `activityBinding`. Daily Upgrades, inventory exhaustion stages, Provision crafting stages, automatic TOTW/2x84 recovery, and Unassigned Recovery recipes declare a supported activity family. The current scan materializes the matching EA Set into the existing object; users do not add these basic activities from the Dynamic SBC library one by one.
+Dynamic discovery has a second mode for built-in workflow roles: `activityBinding`. Daily Upgrades, inventory exhaustion stages, Provision crafting stages, Daily Rare's 2x84 consumer, automatic TOTW/2x84 recovery, and Unassigned Recovery recipes declare a supported activity family. The current scan materializes the matching EA Set into the existing workflow object; users do not add these consumers from the Dynamic SBC library one by one. Standalone 2x84, TOTW, and high-rated xN Loops are generated directly from scan metadata.
 
 The boundary is strict:
 
@@ -111,7 +111,9 @@ The main panel retains execution controls and common runtime options. Its Config
 - **Profile**: selects Built-in, a starter profile, or a user-created profile. It applies only the profile's Saved/last-known-good revision; a dirty Draft cannot leak into runtime.
 - **Open Builder**: opens the full-screen workspace.
 - **Refresh caches**: retained as a recovery control after inventory changes made outside the Runner or when EA/FSU caches need explicit synchronization.
-- **Scan SBCs**: validates the current Set/Category index and refreshes Dynamic SBC bindings. Incremental mode reuses unchanged per-SBC Challenge snapshots; Full rescan forces all candidate Challenge loads; Clear cache rebuilds the current account cache.
+- **Scan SBCs**: validates the current Set/Category index and refreshes Dynamic SBC bindings. Startup restores cached read-only definitions first and reveals the panel while live validation continues, but Run remains disabled until validation ends. Incremental mode reuses unchanged per-SBC Challenge snapshots and treats newly exposed matching Challenge IDs or Category details as a compatible cache enrichment; Full rescan forces all candidate Challenge loads; Clear cache rebuilds the current account cache. Cold scans prefilter unsupported Upgrade shapes and reuse complete repository Challenge metadata without loading squads.
+
+High-rated xN Upgrade discovery supports multiple Challenges only when every Challenge can be parsed safely. Each Challenge keeps its own player count, target rating, and special-card count. Submitting an intermediate Challenge advances Set progress without incrementing the requested round count or opening the Set reward; the final Challenge must produce an observed reward before another round can begin.
 
 **Validate JSON**, **Import JSON**, **Built-in loops**, and **Preview Pick recap** are removed from the main panel. JSON validation/import/export remains available in the Builder. Selecting **Built-in** in the Profile control replaces the old reset button. Raw JSON cannot be started directly without successful validation and conversion into a Builder draft.
 
@@ -184,7 +186,7 @@ Strategy-specific editors cover the full current registry:
 | Fill SBC | `fillAndVerifySbc` | Requirements or rating solver, automatic fodder/TOTW recovery, limits |
 | Player Pick | `playerPickSbc` | Scan binding, candidates, selected count, challenge requirements, Pick behavior |
 | Provision crafting | `provisionPackCrafting`, `provisionPackDualCrafting` | Source packs, pre-craft Pick, ordered upgrades, rounds |
-| Pack to upgrade | `rarePackTo84Upgrade` | Source packs, upgrade definition, fallback Loop, pack limits |
+| Pack to upgrade | `rarePackTo84Upgrade` | Source packs, upgrade definition, dynamic fallback activity or legacy fallback Loop, pack limits |
 | Inventory exhaustion | `inventoryExhaustion` | Ordered upgrade stages and per-stage limits |
 | Workflow | `dailyRoutine`, `workflowRoutine` | Ordered referenced steps and inherited settings |
 
@@ -222,7 +224,7 @@ The UI supports fixed limits, user input at run time, current EA daily remaining
 
 ### 11.6 Dynamic SBC activity binding
 
-`Dynamic SBC activity` selects a supported semantic family such as Daily Bronze, Common Gold crafting, 2x84, TOTW, or high-rated x10. It is available on direct Loop definitions and on nested crafting, stage, automatic recovery, and Recovery recipe editors.
+`Dynamic SBC activity` selects a supported semantic family such as Daily Bronze, Common Gold crafting, 2x84, TOTW, or a safely parsed high-rated xN Upgrade. It is available on direct Loop definitions and on nested crafting, stage, automatic recovery, and Recovery recipe editors.
 
 Each nested consumer owns its binding. A parent binding is not inherited by `craftingUpgrades`, `stages`, `autoTotwUpgrade`, `autoFodderUpgrade`, or Recovery recipes. The scanner may replace only live EA metadata; configured safety fields remain in the draft and are merged into the materialized session definition.
 

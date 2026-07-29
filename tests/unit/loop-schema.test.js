@@ -66,6 +66,19 @@ describe('loop configuration schema', () => {
     };
 
     expect(validateLoopDef(consumer)).toEqual([]);
+    expect(validateLoopDef({
+      ...consumer,
+      sourceExhaustedFallbackActivityFamily: '2x84-upgrade',
+    })).toEqual([]);
+    expect(validateLoopDef({
+      ...consumer,
+      sourceExhaustedFallbackActivityFamily: 'unknown-upgrade',
+    })).toContain('sourceExhaustedFallbackActivityFamily is not supported: unknown-upgrade');
+    expect(validateLoopDef({
+      ...consumer,
+      sourceExhaustedFallbackLoopId: 'producer',
+      sourceExhaustedFallbackActivityFamily: '2x84-upgrade',
+    })).toContain('sourceExhaustedFallbackLoopId and sourceExhaustedFallbackActivityFamily cannot both be configured');
     expect(validateLoopDef(shortageConsumer)).toEqual([]);
     expect(() => validateLoopDefList([producer, consumer, shortageConsumer])).not.toThrow();
     expect(() => validateLoopDefList([producer, { ...consumer, sourcePackRef: { rewardOfLoopId: 'missing' } }]))
