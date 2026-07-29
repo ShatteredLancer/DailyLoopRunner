@@ -160,7 +160,7 @@ describe('Builder profiles', () => {
     })));
   });
 
-  it('refreshes an untouched active official starter after obsolete built-ins are removed', () => {
+  it('refreshes every untouched official starter after obsolete built-ins are removed', () => {
     const current = {
       loops: JSON.parse(JSON.stringify(LOOP_DEFS)),
       recoveryRecipes: JSON.parse(JSON.stringify(RECOVERY_RECIPES)),
@@ -176,18 +176,39 @@ describe('Builder profiles', () => {
     }));
     const previous = { ...current, loops: [...current.loops, ...obsoleteLoops] };
     const store = createBuilderStore({ baseConfig: previous, now: 1 });
+    const officialProfileIds = [
+      BUILDER_STARTER_PROFILE_IDS.default,
+      BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly,
+      BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84,
+    ];
     const staleProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
     store.activeProfileId = staleProfile.id;
     store.lastKnownGood = JSON.parse(JSON.stringify(staleProfile.lastKnownGood));
 
-    const staleValidation = validateBuilderProfile(staleProfile, current);
-    expect(staleValidation.conflicts).toHaveLength(4);
-    expect(staleValidation.conflicts.every((conflict) => conflict.reason === 'built-in-removed')).toBe(true);
+    for (const profileId of officialProfileIds) {
+      const staleValidation = validateBuilderProfile(
+        store.profiles.find((entry) => entry.id === profileId),
+        current,
+      );
+      expect(staleValidation.conflicts, profileId).toHaveLength(4);
+      expect(
+        staleValidation.conflicts.every((conflict) => conflict.reason === 'built-in-removed'),
+        profileId,
+      ).toBe(true);
+    }
 
     const normalized = normalizeBuilderStore(store, current, { now: 2 });
+    for (const profileId of officialProfileIds) {
+      const officialProfile = normalized.profiles.find((entry) => entry.id === profileId);
+      expect(validateBuilderProfile(officialProfile, current).valid, profileId).toBe(true);
+      expect(
+        officialProfile.lastKnownGood.loops.some((loop) => loop.id.startsWith('obsolete-')),
+        profileId,
+      ).toBe(false);
+    }
+
     const refreshed = normalized.profiles.find((entry) => entry.id === staleProfile.id);
     const workflow = refreshed.lastKnownGood.loops.find((loop) => loop.id === 'one-click-daily');
-    expect(validateBuilderProfile(refreshed, current).valid).toBe(true);
     expect(workflow.steps).toEqual([
       'daily-bronze',
       'daily-silver',
@@ -199,7 +220,6 @@ describe('Builder profiles', () => {
       useRoundsAsCompletions: false,
       sourceExhaustedFallbackMaxCompletions: 1,
     });
-    expect(refreshed.lastKnownGood.loops.some((loop) => loop.id.startsWith('obsolete-'))).toBe(false);
     expect(normalized.lastKnownGood).toEqual(refreshed.lastKnownGood);
   });
 
