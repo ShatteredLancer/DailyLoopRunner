@@ -292,6 +292,52 @@ function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
     .every((config) => sameValue(normalizeLoopConfig(config), legacyConfig));
 }
 
+function officialStarterConfig(profile, baseConfig) {
+  const id = String(profile?.id || '');
+  const preset = String(profile?.preset || '');
+  const normalizedBase = clone(normalizeLoopConfig(baseConfig));
+  if (id === BUILDER_STARTER_PROFILE_IDS.default && preset === 'default') return normalizedBase;
+  if (id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly && preset === 'bronze-silver-inventory-only') {
+    return bronzeSilverInventoryOnlyStarterConfig(normalizedBase);
+  }
+  if (id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84 && preset === 'daily-rare-pack-2x84') {
+    return dailyRarePack2x84StarterConfig(normalizedBase);
+  }
+  return null;
+}
+
+function refreshUnmodifiedOfficialStarterProfile(profile, currentBaseConfig, now = Date.now()) {
+  if ((profile?.dynamicBindings || []).length) return null;
+  const previousBaseConfig = normalizeLoopConfig(profile?.baseConfig || currentBaseConfig);
+  const normalizedCurrentBase = normalizeLoopConfig(currentBaseConfig);
+  if (sameValue(previousBaseConfig, normalizedCurrentBase)) return null;
+  const previousStarterConfig = officialStarterConfig(profile, previousBaseConfig);
+  if (!previousStarterConfig) return null;
+  const snapshots = [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean);
+  if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), previousStarterConfig))) {
+    return null;
+  }
+
+  const currentStarterConfig = officialStarterConfig(profile, normalizedCurrentBase);
+  const revision = Math.max(Number(profile.draftRevision || 0), Number(profile.savedRevision || 0), 1) + 1;
+  const refreshed = createBuilderProfile({
+    id: profile.id,
+    name: profile.name,
+    preset: profile.preset,
+    baseConfig: normalizedCurrentBase,
+    config: currentStarterConfig,
+    now,
+  });
+  return {
+    ...clone(profile),
+    ...refreshed,
+    createdAt: Number(profile.createdAt || refreshed.createdAt),
+    updatedAt: Number(now),
+    draftRevision: revision,
+    savedRevision: revision,
+  };
+}
+
 export function createBuilderStarterProfiles(baseConfig, options = {}) {
   const normalizedBase = clone(validateLoopConfig(baseConfig, 'Builder starter profile base'));
   return [
@@ -419,13 +465,17 @@ export function normalizeBuilderStore(store, baseConfig, options = {}) {
   if (!isPlainObject(store) || Number(store.schemaVersion) !== BUILDER_SCHEMA_VERSION || !Array.isArray(store.profiles)) {
     return createBuilderStore({ baseConfig, ...options });
   }
+  const refreshedStarterIds = new Set();
   const profiles = store.profiles.flatMap((profile, index) => {
     try {
-      return [normalizeBuilderProfile(profile, baseConfig, {
+      const normalized = normalizeBuilderProfile(profile, baseConfig, {
         id: index ? `profile-${index + 1}` : 'default',
         name: index ? `Profile ${index + 1}` : 'Default',
         now: options.now,
-      })];
+      });
+      const refreshed = refreshUnmodifiedOfficialStarterProfile(normalized, baseConfig, options.now);
+      if (refreshed) refreshedStarterIds.add(refreshed.id);
+      return [refreshed || normalized];
     } catch {
       return [];
     }
@@ -447,19 +497,23 @@ export function normalizeBuilderStore(store, baseConfig, options = {}) {
   const activeProfileId = profiles.some((profile) => profile.id === requestedActiveProfileId)
     ? requestedActiveProfileId
     : null;
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
+  const activeStarterRefreshed = refreshedStarterIds.has(activeProfileId);
   return {
     schemaVersion: BUILDER_SCHEMA_VERSION,
     activeProfileId,
-    activeDynamicBindings: (Object.hasOwn(store, 'activeDynamicBindings')
+    activeDynamicBindings: (activeStarterRefreshed
+      ? activeProfile?.dynamicBindings || []
+      : Object.hasOwn(store, 'activeDynamicBindings')
       ? store.activeDynamicBindings
-      : profiles.find((profile) => profile.id === activeProfileId)?.dynamicBindings || [])
+      : activeProfile?.dynamicBindings || [])
       .map((binding) => ({
         ...normalizeDynamicBinding(binding),
         available: false,
       })),
     profiles,
-    lastKnownGood: migratedLegacyActive
-      ? clone(profiles.find((profile) => profile.id === activeProfileId)?.lastKnownGood || null)
+    lastKnownGood: migratedLegacyActive || activeStarterRefreshed
+      ? clone(activeProfile?.lastKnownGood || null)
       : store.lastKnownGood ? clone(store.lastKnownGood) : null,
   };
 }

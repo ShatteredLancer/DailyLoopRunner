@@ -143,6 +143,89 @@ describe('Builder profiles', () => {
     expect(normalized.profiles.map((profile) => profile.id)).toContain(BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
   });
 
+  it('does not revise untouched official starters when the built-in baseline is unchanged', () => {
+    const base = config();
+    const store = createBuilderStore({ baseConfig: base, now: 1 });
+    const normalized = normalizeBuilderStore(store, base, { now: 2 });
+    expect(normalized.profiles.map((profile) => ({
+      id: profile.id,
+      draftRevision: profile.draftRevision,
+      savedRevision: profile.savedRevision,
+      updatedAt: profile.updatedAt,
+    }))).toEqual(store.profiles.map((profile) => ({
+      id: profile.id,
+      draftRevision: profile.draftRevision,
+      savedRevision: profile.savedRevision,
+      updatedAt: profile.updatedAt,
+    })));
+  });
+
+  it('refreshes an untouched active official starter after obsolete built-ins are removed', () => {
+    const current = {
+      loops: JSON.parse(JSON.stringify(LOOP_DEFS)),
+      recoveryRecipes: JSON.parse(JSON.stringify(RECOVERY_RECIPES)),
+      unassignedRecoveryPolicies: JSON.parse(JSON.stringify(UNASSIGNED_RECOVERY_POLICIES)),
+      defaultUnassignedRecoveryPolicyIds: [...DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS],
+    };
+    const obsoleteLoops = Array.from({ length: 4 }, (_, index) => ({
+      id: `obsolete-${index + 1}`,
+      name: `Obsolete ${index + 1}`,
+      strategy: 'fillAndVerifySbc',
+      sbcNames: [`Obsolete SBC ${index + 1}`],
+      maxCompletions: 1,
+    }));
+    const previous = { ...current, loops: [...current.loops, ...obsoleteLoops] };
+    const store = createBuilderStore({ baseConfig: previous, now: 1 });
+    const staleProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
+    store.activeProfileId = staleProfile.id;
+    store.lastKnownGood = JSON.parse(JSON.stringify(staleProfile.lastKnownGood));
+
+    const staleValidation = validateBuilderProfile(staleProfile, current);
+    expect(staleValidation.conflicts).toHaveLength(4);
+    expect(staleValidation.conflicts.every((conflict) => conflict.reason === 'built-in-removed')).toBe(true);
+
+    const normalized = normalizeBuilderStore(store, current, { now: 2 });
+    const refreshed = normalized.profiles.find((entry) => entry.id === staleProfile.id);
+    const workflow = refreshed.lastKnownGood.loops.find((loop) => loop.id === 'one-click-daily');
+    expect(validateBuilderProfile(refreshed, current).valid).toBe(true);
+    expect(workflow.steps).toEqual([
+      'daily-bronze',
+      'daily-silver',
+      'daily-common',
+      'daily-rare',
+      'daily-rare-pack-84',
+    ]);
+    expect(workflow.stepOverrides['daily-rare-pack-84']).toEqual({
+      useRoundsAsCompletions: false,
+      sourceExhaustedFallbackMaxCompletions: 1,
+    });
+    expect(refreshed.lastKnownGood.loops.some((loop) => loop.id.startsWith('obsolete-'))).toBe(false);
+    expect(normalized.lastKnownGood).toEqual(refreshed.lastKnownGood);
+  });
+
+  it('does not replace a customized official starter during built-in migration', () => {
+    const current = config();
+    const previous = config({
+      loops: [
+        ...current.loops,
+        { id: 'obsolete', name: 'Obsolete', strategy: 'fillAndVerifySbc', sbcNames: ['Obsolete SBC'] },
+      ],
+    });
+    const store = createBuilderStore({ baseConfig: previous, now: 1 });
+    const profile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.default);
+    for (const field of ['draftConfig', 'savedConfig', 'lastKnownGood']) {
+      profile[field].loops.find((loop) => loop.id === 'base').openRewardPacks = true;
+    }
+
+    const normalized = normalizeBuilderStore(store, current, { now: 2 });
+    const preserved = normalized.profiles.find((entry) => entry.id === profile.id);
+    expect(preserved.lastKnownGood.loops.find((loop) => loop.id === 'base').openRewardPacks).toBe(true);
+    expect(preserved.lastKnownGood.loops.some((loop) => loop.id === 'obsolete')).toBe(true);
+    expect(validateBuilderProfile(preserved, current).conflicts).toEqual([
+      expect.objectContaining({ id: 'obsolete', reason: 'built-in-removed' }),
+    ]);
+  });
+
   it('migrates an untouched legacy Inventory Only starter without overwriting customized copies', () => {
     const base = config();
     const legacyConfig = {

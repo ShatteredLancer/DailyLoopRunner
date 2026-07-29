@@ -2925,7 +2925,7 @@ function updateLoopControls() {
         if (String(state.loopConfigSource || '').startsWith('Builder profile:')) {
           resetLoopDefs({ preserveDiscovery: true });
         }
-        log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join('; ')}`);
+        log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join('; ')}; using built-in Workflow/Loop configuration until the conflicts are resolved`);
       }
     }
     if (!cacheOnly) await refreshPackCatalogFromSbcIndex(summary.refreshResult);
@@ -9463,7 +9463,7 @@ function updateLoopControls() {
     });
     const restoredProfile = state.workflowBuilder.restoreActiveProfile();
     if (restoredProfile.status === 'blocked') {
-      log(`Active Builder profile was not restored before Dynamic SBC refresh: ${(restoredProfile.errors || []).join('; ')}`);
+      log(`Active Builder profile was not restored before Dynamic SBC refresh: ${(restoredProfile.errors || []).join('; ')}; using built-in Workflow/Loop configuration until the conflicts are resolved`);
     }
     renderProfileSelect();
     renderLoopSelect();

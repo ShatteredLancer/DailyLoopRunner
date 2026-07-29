@@ -11938,6 +11938,49 @@
     const legacyConfig = legacyInventoryOnlyStarterConfig(profile.baseConfig || baseConfig);
     return [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean).every((config) => sameValue(normalizeLoopConfig(config), legacyConfig));
   }
+  function officialStarterConfig(profile, baseConfig) {
+    const id = String(profile?.id || "");
+    const preset = String(profile?.preset || "");
+    const normalizedBase = clone5(normalizeLoopConfig(baseConfig));
+    if (id === BUILDER_STARTER_PROFILE_IDS.default && preset === "default") return normalizedBase;
+    if (id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly && preset === "bronze-silver-inventory-only") {
+      return bronzeSilverInventoryOnlyStarterConfig(normalizedBase);
+    }
+    if (id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84 && preset === "daily-rare-pack-2x84") {
+      return dailyRarePack2x84StarterConfig(normalizedBase);
+    }
+    return null;
+  }
+  function refreshUnmodifiedOfficialStarterProfile(profile, currentBaseConfig, now = Date.now()) {
+    if ((profile?.dynamicBindings || []).length) return null;
+    const previousBaseConfig = normalizeLoopConfig(profile?.baseConfig || currentBaseConfig);
+    const normalizedCurrentBase = normalizeLoopConfig(currentBaseConfig);
+    if (sameValue(previousBaseConfig, normalizedCurrentBase)) return null;
+    const previousStarterConfig = officialStarterConfig(profile, previousBaseConfig);
+    if (!previousStarterConfig) return null;
+    const snapshots = [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean);
+    if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), previousStarterConfig))) {
+      return null;
+    }
+    const currentStarterConfig = officialStarterConfig(profile, normalizedCurrentBase);
+    const revision = Math.max(Number(profile.draftRevision || 0), Number(profile.savedRevision || 0), 1) + 1;
+    const refreshed = createBuilderProfile({
+      id: profile.id,
+      name: profile.name,
+      preset: profile.preset,
+      baseConfig: normalizedCurrentBase,
+      config: currentStarterConfig,
+      now
+    });
+    return {
+      ...clone5(profile),
+      ...refreshed,
+      createdAt: Number(profile.createdAt || refreshed.createdAt),
+      updatedAt: Number(now),
+      draftRevision: revision,
+      savedRevision: revision
+    };
+  }
   function createBuilderStarterProfiles(baseConfig, options = {}) {
     const normalizedBase = clone5(validateLoopConfig(baseConfig, "Builder starter profile base"));
     return [
@@ -12061,13 +12104,17 @@
     if (!isPlainObject(store) || Number(store.schemaVersion) !== BUILDER_SCHEMA_VERSION || !Array.isArray(store.profiles)) {
       return createBuilderStore({ baseConfig, ...options });
     }
+    const refreshedStarterIds = /* @__PURE__ */ new Set();
     const profiles = store.profiles.flatMap((profile, index) => {
       try {
-        return [normalizeBuilderProfile(profile, baseConfig, {
+        const normalized = normalizeBuilderProfile(profile, baseConfig, {
           id: index ? `profile-${index + 1}` : "default",
           name: index ? `Profile ${index + 1}` : "Default",
           now: options.now
-        })];
+        });
+        const refreshed = refreshUnmodifiedOfficialStarterProfile(normalized, baseConfig, options.now);
+        if (refreshed) refreshedStarterIds.add(refreshed.id);
+        return [refreshed || normalized];
       } catch {
         return [];
       }
@@ -12085,15 +12132,17 @@
     }
     const requestedActiveProfileId = migratedLegacyActive ? BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly : store.activeProfileId;
     const activeProfileId = profiles.some((profile) => profile.id === requestedActiveProfileId) ? requestedActiveProfileId : null;
+    const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
+    const activeStarterRefreshed = refreshedStarterIds.has(activeProfileId);
     return {
       schemaVersion: BUILDER_SCHEMA_VERSION,
       activeProfileId,
-      activeDynamicBindings: (Object.hasOwn(store, "activeDynamicBindings") ? store.activeDynamicBindings : profiles.find((profile) => profile.id === activeProfileId)?.dynamicBindings || []).map((binding) => ({
+      activeDynamicBindings: (activeStarterRefreshed ? activeProfile?.dynamicBindings || [] : Object.hasOwn(store, "activeDynamicBindings") ? store.activeDynamicBindings : activeProfile?.dynamicBindings || []).map((binding) => ({
         ...normalizeDynamicBinding(binding),
         available: false
       })),
       profiles,
-      lastKnownGood: migratedLegacyActive ? clone5(profiles.find((profile) => profile.id === activeProfileId)?.lastKnownGood || null) : store.lastKnownGood ? clone5(store.lastKnownGood) : null
+      lastKnownGood: migratedLegacyActive || activeStarterRefreshed ? clone5(activeProfile?.lastKnownGood || null) : store.lastKnownGood ? clone5(store.lastKnownGood) : null
     };
   }
   function updateBuilderProfileDraft(profile, config, now = Date.now()) {
@@ -18046,7 +18095,7 @@
           if (String(state.loopConfigSource || "").startsWith("Builder profile:")) {
             resetLoopDefs({ preserveDiscovery: true });
           }
-          log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join("; ")}`);
+          log(`Active Builder profile remains unavailable after Dynamic SBC scan: ${(restored.errors || []).join("; ")}; using built-in Workflow/Loop configuration until the conflicts are resolved`);
         }
       }
       if (!cacheOnly) await refreshPackCatalogFromSbcIndex(summary.refreshResult);
@@ -23928,7 +23977,7 @@
       });
       const restoredProfile = state.workflowBuilder.restoreActiveProfile();
       if (restoredProfile.status === "blocked") {
-        log(`Active Builder profile was not restored before Dynamic SBC refresh: ${(restoredProfile.errors || []).join("; ")}`);
+        log(`Active Builder profile was not restored before Dynamic SBC refresh: ${(restoredProfile.errors || []).join("; ")}; using built-in Workflow/Loop configuration until the conflicts are resolved`);
       }
       renderProfileSelect();
       renderLoopSelect();
