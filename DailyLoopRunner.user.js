@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.41
+// @version      0.6.42
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -7134,6 +7134,7 @@
       removedEntries: 0
     };
     let loadCircuit = null;
+    const candidates = [];
     for (const set of sets) {
       const index = options.snapshotIndex(set, refreshResult);
       if (!options.isCandidate(index, set)) continue;
@@ -7141,6 +7142,16 @@
       if (!setId) continue;
       currentCandidateIds.add(String(setId));
       stats.candidates++;
+      candidates.push({ set, index, setId });
+    }
+    await options.onProgress?.({
+      phase: "validating",
+      completed: 0,
+      total: candidates.length,
+      setsScanned: sets.length,
+      index: candidates[0]?.index || null
+    });
+    for (const { set, index, setId } of candidates) {
       const fingerprint = dynamicSbcIndexFingerprint(index);
       const cached = cache.sets[String(setId)] || null;
       const age = cached ? Math.max(0, now - Number(cached.scannedAt || 0)) : Infinity;
@@ -7235,6 +7246,14 @@
       const result = { set, index, snapshot, loadError, cacheStatus, fingerprint };
       results.push(result);
       await options.onResult?.(result);
+      await options.onProgress?.({
+        phase: "validating",
+        completed: results.length,
+        total: candidates.length,
+        setsScanned: sets.length,
+        index: candidates[results.length]?.index || index,
+        result
+      });
     }
     for (const key of Object.keys(cache.sets)) {
       if (currentCandidateIds.has(key)) continue;
@@ -10788,6 +10807,12 @@
       async scanPicks() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
         state.scanningPicks = true;
+        state.dynamicSbcScanProgress = {
+          phase: "refreshing",
+          completed: 0,
+          total: 0,
+          label: "Refreshing SBC index"
+        };
         setPanelState();
         try {
           const scanOptions = options.getDynamicSbcScanOptions?.() || {};
@@ -10799,6 +10824,7 @@
         } finally {
           options.resetDynamicSbcScanMode?.();
           state.scanningPicks = false;
+          state.dynamicSbcScanProgress = null;
           setPanelState();
         }
       },
@@ -11351,6 +11377,36 @@
     if (settings.ntfyEnabled === true) channels.push("ntfy");
     summary.textContent = `${Number(settings.minimumRating || 94)}+ special${channels.length ? ` | ${channels.join(" | ")}` : ""}`;
   }
+  function renderMainPanelScanProgress(options = {}) {
+    const panel = options.panel;
+    const state = options.state || {};
+    const container = query(panel, "#bronze-loop-scan-progress");
+    if (!container) return;
+    const scanning = state.scanningPicks === true;
+    const progress = state.dynamicSbcScanProgress || {};
+    const completed = Math.max(0, Number(progress.completed || 0) || 0);
+    const total = Math.max(0, Number(progress.total || 0) || 0);
+    const determinate = scanning && total > 0;
+    const boundedCompleted = determinate ? Math.min(completed, total) : completed;
+    const percentage = determinate ? Math.round(boundedCompleted / total * 100) : 0;
+    const label = query(panel, "#bronze-loop-scan-progress-label");
+    const count = query(panel, "#bronze-loop-scan-progress-count");
+    const track = query(panel, "#bronze-loop-scan-progress-track");
+    const bar = query(panel, "#bronze-loop-scan-progress-bar");
+    container.style.display = scanning ? "block" : "none";
+    container.dataset.mode = determinate ? "determinate" : "indeterminate";
+    if (label) label.textContent = progress.label || "Scanning dynamic SBCs";
+    if (count) count.textContent = determinate ? `${boundedCompleted} / ${total}` : "";
+    if (bar) bar.style.width = determinate ? `${percentage}%` : "35%";
+    track?.setAttribute?.("aria-valuemin", "0");
+    if (determinate) {
+      track?.setAttribute?.("aria-valuemax", String(total));
+      track?.setAttribute?.("aria-valuenow", String(boundedCompleted));
+    } else {
+      track?.removeAttribute?.("aria-valuemax");
+      track?.removeAttribute?.("aria-valuenow");
+    }
+  }
   function renderMainPanelRuntimeState(options = {}) {
     const panel = options.panel;
     const state = options.state || {};
@@ -11379,6 +11435,9 @@
       const element = query(panel, `#${id}`);
       if (element) element.disabled = value;
     }
+    const scanButton = query(panel, "#bronze-loop-scan-picks");
+    if (scanButton) scanButton.textContent = state.scanningPicks === true ? "Scanning..." : "Scan SBCs";
+    renderMainPanelScanProgress({ panel, state });
   }
 
   // src/ui/main-panel-view.js
@@ -11458,6 +11517,15 @@
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
   #bronze-loop-scan-mode { flex: 0 1 94px !important; min-width: 86px !important; }
   #bronze-loop-panel .bronze-loop-profile-row span { flex: 0 0 auto; color: #9fb2c9; }
+  #bronze-loop-scan-progress { display: none; flex: 0 0 auto; margin: 0 0 8px; }
+  .bronze-loop-scan-progress-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 4px; color: #c8d5e5; font-size: 11px; }
+  #bronze-loop-scan-progress-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bronze-loop-scan-progress-count { flex: 0 0 auto; color: #9fb2c9; font-variant-numeric: tabular-nums; }
+  #bronze-loop-scan-progress-track { position: relative; height: 6px; overflow: hidden; background: #252c35; border: 1px solid #3c4858; box-sizing: border-box; }
+  #bronze-loop-scan-progress-bar { height: 100%; width: 0; background: #54b4d3; transition: width .18s ease-out; }
+  #bronze-loop-scan-progress[data-mode="indeterminate"] #bronze-loop-scan-progress-bar { width: 35% !important; animation: bronze-loop-scan-slide 1.05s ease-in-out infinite; }
+  @keyframes bronze-loop-scan-slide { from { transform: translateX(-120%); } to { transform: translateX(310%); } }
+  @media (prefers-reduced-motion: reduce) { #bronze-loop-scan-progress-bar { transition: none; } #bronze-loop-scan-progress[data-mode="indeterminate"] #bronze-loop-scan-progress-bar { animation: none; } }
   #bronze-loop-latest {
     flex: 1 1 auto;
     min-height: 28px;
@@ -11540,6 +11608,10 @@
         <button id="bronze-loop-stop" disabled>Stop</button>
         <button id="bronze-loop-batch-open" title="Scan My Packs and open a saved batch">Batch Open</button>
         <button id="bronze-loop-recap-reopen" style="display:none" title="View last Player Pick recap">View recap</button>
+      </div>
+      <div id="bronze-loop-scan-progress" role="status" aria-live="polite" data-mode="indeterminate">
+        <div class="bronze-loop-scan-progress-head"><span id="bronze-loop-scan-progress-label">Refreshing SBC index</span><span id="bronze-loop-scan-progress-count"></span></div>
+        <div id="bronze-loop-scan-progress-track" role="progressbar" aria-label="Dynamic SBC scan progress"><div id="bronze-loop-scan-progress-bar"></div></div>
       </div>
       <div id="bronze-loop-latest">Ready.</div>
       <div id="bronze-loop-options">
@@ -15571,6 +15643,7 @@
       stopping: false,
       refreshing: false,
       scanningPicks: false,
+      dynamicSbcScanProgress: null,
       loadingLoops: false,
       loopDefs: null,
       discoveredLoopDefs: [],
@@ -15620,7 +15693,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.41",
+      version: "0.6.42",
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -17778,6 +17851,15 @@
       const forceFull = options.forceFull === true;
       const clearCache = options.clearCache === true;
       const cacheOnly = options.cacheOnly === true;
+      const reportProgress = async (progress) => {
+        if (typeof options.onProgress === "function") await options.onProgress(progress);
+      };
+      await reportProgress({
+        phase: cacheOnly ? "restoring" : "refreshing",
+        completed: 0,
+        total: 0,
+        label: cacheOnly ? "Restoring cached SBC metadata" : "Refreshing SBC index"
+      });
       log(cacheOnly ? "Dynamic SBC cache: restoring previously validated session Loops before background refresh" : `Dynamic SBC scan: refreshing the current Set/Category index and validating per-SBC cache${forceFull ? "; forcing full Challenge refresh" : ""}; nothing will be executed`);
       const pickOptions = getPickRuntimeOptions();
       const activitySbcNames = collectActivityBindingSbcNames([
@@ -17850,6 +17932,13 @@
           log(`Dynamic SBC scan ${index?.name || `#${index?.id || "?"}`}: Challenge request skipped because the EA ${circuit?.code || 429} circuit is open`);
         },
         isCandidate: (index) => dynamicSbcCandidate(index, activitySbcNames),
+        onProgress: (progress) => {
+          const completed = Math.max(0, Number(progress.completed || 0) || 0);
+          const total = Math.max(0, Number(progress.total || 0) || 0);
+          const currentName = String(progress.index?.name || "").trim();
+          const label = total > 0 && completed >= total ? "Dynamic SBC metadata validated" : currentName ? `Checking ${currentName}` : total === 0 ? "No matching dynamic SBCs found" : "Validating dynamic SBC metadata";
+          return reportProgress({ ...progress, label });
+        },
         onResult: async ({ snapshot, loadError, cacheStatus }) => {
           if (cacheStatus === "load-failed-compatible-cache") {
             log(`Dynamic SBC scan: set #${snapshot.id || "?"} retained from compatible validated cache after live Challenge refresh failed`);
@@ -17892,6 +17981,12 @@
           for (const diagnostic of parsed.diagnostics || []) log(`Player Pick scan: diagnostic: ${diagnostic}`);
           log(`Dynamic SBC scan: set #${snapshot.id || "?"} cache:${cacheStatus}`);
         }
+      });
+      await reportProgress({
+        phase: "finalizing",
+        completed: summary.results.length,
+        total: summary.results.length,
+        label: "Updating Loops and pack catalog"
       });
       const scanHealth = requestPacer?.save() || null;
       if (!cacheOnly) adapters.userscriptStorage.set(cacheKey, summary.cache);
@@ -17989,6 +18084,12 @@
         const codes = Object.entries(requestPacer.metrics.codes).map(([code, count]) => `${code}:${count}`).join(", ") || "none";
         log(`Dynamic SBC scan request health: ${requestPacer.metrics.requestCount} EA Challenge request(s), ${requestPacer.metrics.failureCount} failure(s) (${requestFailureRate.toFixed(1)}%), codes:${codes}; next scan minimum gap:${scanHealth.recommendedGapMs}ms`);
       }
+      await reportProgress({
+        phase: "complete",
+        completed: summary.results.length,
+        total: summary.results.length,
+        label: "Dynamic SBC scan complete"
+      });
       return summary;
     }
     async function findAvailableSbcChallenge(set, label = set?.name || "SBC") {
@@ -23732,6 +23833,7 @@
           running: state.running,
           refreshing: state.refreshing,
           scanningPicks: state.scanningPicks,
+          dynamicSbcScanProgress: state.dynamicSbcScanProgress,
           loadingLoops: state.loadingLoops,
           usingBuiltIn: state.loopConfigSource === "built-in" && !state.workflowBuilder?.getStore?.().activeProfileId
         }
@@ -23831,6 +23933,13 @@
       renderProfileSelect();
       renderLoopSelect();
       renderLog();
+      const scanDynamicSbcsWithProgress = (scanOptions = {}) => scanAvailableDynamicSbcs({
+        ...scanOptions,
+        onProgress: (progress) => {
+          state.dynamicSbcScanProgress = { ...progress };
+          setPanelState();
+        }
+      });
       const panelCommands = createMainPanelCommands({
         state,
         log,
@@ -23848,8 +23957,8 @@
         openBatch: openBatchOpenDialogModal,
         reopenRecap: reopenLastRecap,
         refreshInventoryCaches,
-        scanDynamicSbcs: scanAvailableDynamicSbcs,
-        scanPlayerPicks: scanAvailableDynamicSbcs,
+        scanDynamicSbcs: scanDynamicSbcsWithProgress,
+        scanPlayerPicks: scanDynamicSbcsWithProgress,
         getDynamicSbcScanOptions: () => {
           const mode = document.querySelector("#bronze-loop-scan-mode")?.value || "incremental";
           return {

@@ -67,6 +67,12 @@ export function createMainPanelCommands(options = {}) {
     async scanPicks() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
       state.scanningPicks = true;
+      state.dynamicSbcScanProgress = {
+        phase: 'refreshing',
+        completed: 0,
+        total: 0,
+        label: 'Refreshing SBC index',
+      };
       setPanelState();
       try {
         const scanOptions = options.getDynamicSbcScanOptions?.() || {};
@@ -78,6 +84,7 @@ export function createMainPanelCommands(options = {}) {
       } finally {
         options.resetDynamicSbcScanMode?.();
         state.scanningPicks = false;
+        state.dynamicSbcScanProgress = null;
         setPanelState();
       }
     },

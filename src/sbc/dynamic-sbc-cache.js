@@ -270,6 +270,7 @@ export async function scanDynamicSbcSnapshots(options = {}) {
     removedEntries: 0,
   };
   let loadCircuit = null;
+  const candidates = [];
 
   for (const set of sets) {
     const index = options.snapshotIndex(set, refreshResult);
@@ -278,7 +279,18 @@ export async function scanDynamicSbcSnapshots(options = {}) {
     if (!setId) continue;
     currentCandidateIds.add(String(setId));
     stats.candidates++;
+    candidates.push({ set, index, setId });
+  }
 
+  await options.onProgress?.({
+    phase: 'validating',
+    completed: 0,
+    total: candidates.length,
+    setsScanned: sets.length,
+    index: candidates[0]?.index || null,
+  });
+
+  for (const { set, index, setId } of candidates) {
     const fingerprint = dynamicSbcIndexFingerprint(index);
     const cached = cache.sets[String(setId)] || null;
     const age = cached ? Math.max(0, now - Number(cached.scannedAt || 0)) : Infinity;
@@ -386,6 +398,14 @@ export async function scanDynamicSbcSnapshots(options = {}) {
     const result = { set, index, snapshot, loadError, cacheStatus, fingerprint };
     results.push(result);
     await options.onResult?.(result);
+    await options.onProgress?.({
+      phase: 'validating',
+      completed: results.length,
+      total: candidates.length,
+      setsScanned: sets.length,
+      index: candidates[results.length]?.index || index,
+      result,
+    });
   }
 
   for (const key of Object.keys(cache.sets)) {

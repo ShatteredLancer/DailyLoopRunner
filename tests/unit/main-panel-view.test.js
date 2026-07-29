@@ -23,6 +23,11 @@ describe('main panel view template', () => {
       'bronze-loop-latest',
       'bronze-loop-options',
       'bronze-loop-options-scroll',
+      'bronze-loop-scan-progress',
+      'bronze-loop-scan-progress-label',
+      'bronze-loop-scan-progress-count',
+      'bronze-loop-scan-progress-track',
+      'bronze-loop-scan-progress-bar',
       'bronze-loop-log',
       'bronze-loop-log-resize',
     ]) {
@@ -107,6 +112,8 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('cursor: ns-resize;');
     expect(MAIN_PANEL_STYLE).toContain('scrollbar-gutter: stable;');
     expect(MAIN_PANEL_STYLE).toContain('overscroll-behavior: contain;');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-scan-progress[data-mode="indeterminate"]');
+    expect(MAIN_PANEL_STYLE).toContain('@keyframes bronze-loop-scan-slide');
   });
 
   it('mounts style and panel once through the DOM adapter', () => {

@@ -46,12 +46,14 @@ describe('main panel command orchestration', () => {
     await expect(success.commands.scanPicks()).resolves.toBe(true);
     expect(success.options.scanPlayerPicks).toHaveBeenCalledOnce();
     expect(success.state.scanningPicks).toBe(false);
+    expect(success.state.dynamicSbcScanProgress).toBeNull();
     expect(success.setPanelState).toHaveBeenCalledTimes(2);
 
     const failure = harness({ scanPlayerPicks: vi.fn(async () => { throw new Error('metadata unavailable'); }) });
     await expect(failure.commands.scanPicks()).resolves.toBe(false);
     expect(failure.log).toHaveBeenCalledWith('Dynamic SBC scan failed: metadata unavailable');
     expect(failure.state.scanningPicks).toBe(false);
+    expect(failure.state.dynamicSbcScanProgress).toBeNull();
 
     failure.state.running = true;
     await expect(failure.commands.scanPicks()).resolves.toBe(false);

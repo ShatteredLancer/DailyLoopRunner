@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         FC26 Daily Loop Runner - Validation
 // @namespace    local.fc26.validation
-// @version      0.6.41
+// @version      0.6.42
 // @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -259,6 +259,7 @@ const state = {
     stopping: false,
     refreshing: false,
     scanningPicks: false,
+    dynamicSbcScanProgress: null,
     loadingLoops: false,
     loopDefs: null,
     discoveredLoopDefs: [],
@@ -310,7 +311,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.41',
+    version: '0.6.42',
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -2711,6 +2712,15 @@ function updateLoopControls() {
     const forceFull = options.forceFull === true;
     const clearCache = options.clearCache === true;
     const cacheOnly = options.cacheOnly === true;
+    const reportProgress = async (progress) => {
+      if (typeof options.onProgress === 'function') await options.onProgress(progress);
+    };
+    await reportProgress({
+      phase: cacheOnly ? 'restoring' : 'refreshing',
+      completed: 0,
+      total: 0,
+      label: cacheOnly ? 'Restoring cached SBC metadata' : 'Refreshing SBC index',
+    });
     log(cacheOnly
       ? 'Dynamic SBC cache: restoring previously validated session Loops before background refresh'
       : `Dynamic SBC scan: refreshing the current Set/Category index and validating per-SBC cache${forceFull ? '; forcing full Challenge refresh' : ''}; nothing will be executed`);
@@ -2785,6 +2795,19 @@ function updateLoopControls() {
         log(`Dynamic SBC scan ${index?.name || `#${index?.id || '?'}`}: Challenge request skipped because the EA ${circuit?.code || 429} circuit is open`);
       },
       isCandidate: (index) => dynamicSbcCandidate(index, activitySbcNames),
+      onProgress: (progress) => {
+        const completed = Math.max(0, Number(progress.completed || 0) || 0);
+        const total = Math.max(0, Number(progress.total || 0) || 0);
+        const currentName = String(progress.index?.name || '').trim();
+        const label = total > 0 && completed >= total
+          ? 'Dynamic SBC metadata validated'
+          : currentName
+            ? `Checking ${currentName}`
+            : total === 0
+              ? 'No matching dynamic SBCs found'
+              : 'Validating dynamic SBC metadata';
+        return reportProgress({ ...progress, label });
+      },
       onResult: async ({ snapshot, loadError, cacheStatus }) => {
         if (cacheStatus === 'load-failed-compatible-cache') {
           log(`Dynamic SBC scan: set #${snapshot.id || '?'} retained from compatible validated cache after live Challenge refresh failed`);
@@ -2831,6 +2854,12 @@ function updateLoopControls() {
         for (const diagnostic of parsed.diagnostics || []) log(`Player Pick scan: diagnostic: ${diagnostic}`);
         log(`Dynamic SBC scan: set #${snapshot.id || '?'} cache:${cacheStatus}`);
       },
+    });
+    await reportProgress({
+      phase: 'finalizing',
+      completed: summary.results.length,
+      total: summary.results.length,
+      label: 'Updating Loops and pack catalog',
     });
     const scanHealth = requestPacer?.save() || null;
     if (!cacheOnly) adapters.userscriptStorage.set(cacheKey, summary.cache);
@@ -2942,6 +2971,12 @@ function updateLoopControls() {
       const codes = Object.entries(requestPacer.metrics.codes).map(([code, count]) => `${code}:${count}`).join(', ') || 'none';
       log(`Dynamic SBC scan request health: ${requestPacer.metrics.requestCount} EA Challenge request(s), ${requestPacer.metrics.failureCount} failure(s) (${requestFailureRate.toFixed(1)}%), codes:${codes}; next scan minimum gap:${scanHealth.recommendedGapMs}ms`);
     }
+    await reportProgress({
+      phase: 'complete',
+      completed: summary.results.length,
+      total: summary.results.length,
+      label: 'Dynamic SBC scan complete',
+    });
     return summary;
   }
 
@@ -9348,6 +9383,7 @@ function updateLoopControls() {
           running: state.running,
           refreshing: state.refreshing,
           scanningPicks: state.scanningPicks,
+          dynamicSbcScanProgress: state.dynamicSbcScanProgress,
           loadingLoops: state.loadingLoops,
         usingBuiltIn: state.loopConfigSource === 'built-in'
           && !state.workflowBuilder?.getStore?.().activeProfileId,
@@ -9432,6 +9468,13 @@ function updateLoopControls() {
     renderProfileSelect();
     renderLoopSelect();
     renderLog();
+    const scanDynamicSbcsWithProgress = (scanOptions = {}) => scanAvailableDynamicSbcs({
+      ...scanOptions,
+      onProgress: (progress) => {
+        state.dynamicSbcScanProgress = { ...progress };
+        setPanelState();
+      },
+    });
     const panelCommands = createMainPanelCommands({
       state,
       log,
@@ -9449,8 +9492,8 @@ function updateLoopControls() {
       openBatch: openBatchOpenDialogModal,
       reopenRecap: reopenLastRecap,
       refreshInventoryCaches,
-      scanDynamicSbcs: scanAvailableDynamicSbcs,
-      scanPlayerPicks: scanAvailableDynamicSbcs,
+      scanDynamicSbcs: scanDynamicSbcsWithProgress,
+      scanPlayerPicks: scanDynamicSbcsWithProgress,
       getDynamicSbcScanOptions: () => {
         const mode = document.querySelector('#bronze-loop-scan-mode')?.value || 'incremental';
         return {

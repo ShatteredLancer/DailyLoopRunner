@@ -5,6 +5,7 @@ import {
   renderMainPanelRecap,
   renderMainPanelRounds,
   renderMainPanelRuntimeState,
+  renderMainPanelScanProgress,
   renderRewardAlertSummary,
 } from '../../src/ui/main-panel-state.js';
 
@@ -103,6 +104,44 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-reward-alert-summary').textContent).toBe('94+ special | highlight | desktop');
     renderRewardAlertSummary({ panel, settings: { enabled: false } });
     expect(controls.get('bronze-loop-reward-alert-summary').textContent).toBe('Off');
+  });
+
+  it('renders indeterminate and determinate Dynamic SBC scan progress', () => {
+    const { panel, controls } = harness([
+      'bronze-loop-scan-progress',
+      'bronze-loop-scan-progress-label',
+      'bronze-loop-scan-progress-count',
+      'bronze-loop-scan-progress-track',
+      'bronze-loop-scan-progress-bar',
+    ]);
+    renderMainPanelScanProgress({
+      panel,
+      state: {
+        scanningPicks: true,
+        dynamicSbcScanProgress: { label: 'Refreshing SBC index', completed: 0, total: 0 },
+      },
+    });
+    expect(controls.get('bronze-loop-scan-progress')).toMatchObject({
+      style: { display: 'block' },
+      dataset: { mode: 'indeterminate' },
+    });
+    expect(controls.get('bronze-loop-scan-progress-label').textContent).toBe('Refreshing SBC index');
+    expect(controls.get('bronze-loop-scan-progress-count').textContent).toBe('');
+    expect(controls.get('bronze-loop-scan-progress-bar').style.width).toBe('35%');
+
+    renderMainPanelScanProgress({
+      panel,
+      state: {
+        scanningPicks: true,
+        dynamicSbcScanProgress: { label: 'Checking 85x10 Upgrade', completed: 3, total: 10 },
+      },
+    });
+    expect(controls.get('bronze-loop-scan-progress').dataset.mode).toBe('determinate');
+    expect(controls.get('bronze-loop-scan-progress-count').textContent).toBe('3 / 10');
+    expect(controls.get('bronze-loop-scan-progress-bar').style.width).toBe('30%');
+
+    renderMainPanelScanProgress({ panel, state: { scanningPicks: false } });
+    expect(controls.get('bronze-loop-scan-progress').style.display).toBe('none');
   });
 
   it('applies the complete runtime disabled-state matrix', () => {

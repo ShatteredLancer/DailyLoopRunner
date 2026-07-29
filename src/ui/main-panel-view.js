@@ -74,6 +74,15 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
   #bronze-loop-scan-mode { flex: 0 1 94px !important; min-width: 86px !important; }
   #bronze-loop-panel .bronze-loop-profile-row span { flex: 0 0 auto; color: #9fb2c9; }
+  #bronze-loop-scan-progress { display: none; flex: 0 0 auto; margin: 0 0 8px; }
+  .bronze-loop-scan-progress-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 4px; color: #c8d5e5; font-size: 11px; }
+  #bronze-loop-scan-progress-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bronze-loop-scan-progress-count { flex: 0 0 auto; color: #9fb2c9; font-variant-numeric: tabular-nums; }
+  #bronze-loop-scan-progress-track { position: relative; height: 6px; overflow: hidden; background: #252c35; border: 1px solid #3c4858; box-sizing: border-box; }
+  #bronze-loop-scan-progress-bar { height: 100%; width: 0; background: #54b4d3; transition: width .18s ease-out; }
+  #bronze-loop-scan-progress[data-mode="indeterminate"] #bronze-loop-scan-progress-bar { width: 35% !important; animation: bronze-loop-scan-slide 1.05s ease-in-out infinite; }
+  @keyframes bronze-loop-scan-slide { from { transform: translateX(-120%); } to { transform: translateX(310%); } }
+  @media (prefers-reduced-motion: reduce) { #bronze-loop-scan-progress-bar { transition: none; } #bronze-loop-scan-progress[data-mode="indeterminate"] #bronze-loop-scan-progress-bar { animation: none; } }
   #bronze-loop-latest {
     flex: 1 1 auto;
     min-height: 28px;
@@ -159,6 +168,10 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
         <button id="bronze-loop-stop" disabled>Stop</button>
         <button id="bronze-loop-batch-open" title="Scan My Packs and open a saved batch">Batch Open</button>
         <button id="bronze-loop-recap-reopen" style="display:none" title="View last Player Pick recap">View recap</button>
+      </div>
+      <div id="bronze-loop-scan-progress" role="status" aria-live="polite" data-mode="indeterminate">
+        <div class="bronze-loop-scan-progress-head"><span id="bronze-loop-scan-progress-label">Refreshing SBC index</span><span id="bronze-loop-scan-progress-count"></span></div>
+        <div id="bronze-loop-scan-progress-track" role="progressbar" aria-label="Dynamic SBC scan progress"><div id="bronze-loop-scan-progress-bar"></div></div>
       </div>
       <div id="bronze-loop-latest">Ready.</div>
       <div id="bronze-loop-options">

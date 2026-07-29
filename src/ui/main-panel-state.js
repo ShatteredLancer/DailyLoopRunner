@@ -92,6 +92,38 @@ export function renderRewardAlertSummary(options = {}) {
   summary.textContent = `${Number(settings.minimumRating || 94)}+ special${channels.length ? ` | ${channels.join(' | ')}` : ''}`;
 }
 
+export function renderMainPanelScanProgress(options = {}) {
+  const panel = options.panel;
+  const state = options.state || {};
+  const container = query(panel, '#bronze-loop-scan-progress');
+  if (!container) return;
+  const scanning = state.scanningPicks === true;
+  const progress = state.dynamicSbcScanProgress || {};
+  const completed = Math.max(0, Number(progress.completed || 0) || 0);
+  const total = Math.max(0, Number(progress.total || 0) || 0);
+  const determinate = scanning && total > 0;
+  const boundedCompleted = determinate ? Math.min(completed, total) : completed;
+  const percentage = determinate ? Math.round((boundedCompleted / total) * 100) : 0;
+  const label = query(panel, '#bronze-loop-scan-progress-label');
+  const count = query(panel, '#bronze-loop-scan-progress-count');
+  const track = query(panel, '#bronze-loop-scan-progress-track');
+  const bar = query(panel, '#bronze-loop-scan-progress-bar');
+
+  container.style.display = scanning ? 'block' : 'none';
+  container.dataset.mode = determinate ? 'determinate' : 'indeterminate';
+  if (label) label.textContent = progress.label || 'Scanning dynamic SBCs';
+  if (count) count.textContent = determinate ? `${boundedCompleted} / ${total}` : '';
+  if (bar) bar.style.width = determinate ? `${percentage}%` : '35%';
+  track?.setAttribute?.('aria-valuemin', '0');
+  if (determinate) {
+    track?.setAttribute?.('aria-valuemax', String(total));
+    track?.setAttribute?.('aria-valuenow', String(boundedCompleted));
+  } else {
+    track?.removeAttribute?.('aria-valuemax');
+    track?.removeAttribute?.('aria-valuenow');
+  }
+}
+
 export function renderMainPanelRuntimeState(options = {}) {
   const panel = options.panel;
   const state = options.state || {};
@@ -123,4 +155,7 @@ export function renderMainPanelRuntimeState(options = {}) {
     const element = query(panel, `#${id}`);
     if (element) element.disabled = value;
   }
+  const scanButton = query(panel, '#bronze-loop-scan-picks');
+  if (scanButton) scanButton.textContent = state.scanningPicks === true ? 'Scanning...' : 'Scan SBCs';
+  renderMainPanelScanProgress({ panel, state });
 }

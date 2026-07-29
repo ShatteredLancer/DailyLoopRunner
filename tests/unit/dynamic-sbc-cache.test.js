@@ -39,6 +39,7 @@ async function scan(input = {}) {
     loadRetryDelayMs: input.loadRetryDelayMs,
     sleep: input.sleep,
     onLoadRetry: input.onLoadRetry,
+    onProgress: input.onProgress,
     refreshSets: vi.fn(async () => ({ success: true })),
     listSets: () => sets,
     snapshotIndex: (set) => ({ ...set, challenges: [] }),
@@ -86,6 +87,27 @@ describe('dynamic SBC cache', () => {
     });
     expect(normalizeDynamicSbcScanHealth(limited, 3000 + (25 * 60 * 60 * 1000)).recommendedGapMs).toBe(1200);
     expect(updateDynamicSbcScanHealth(limited, { requestCount: 0 }, 4000)).toEqual(limited);
+  });
+
+  it('reports determinate candidate progress without extra Challenge loads', async () => {
+    const onProgress = vi.fn();
+    const loadChallenges = vi.fn(async (set) => [{ id: set.id + 100, requiredPlayerCount: 4 }]);
+    await scan({
+      sets: [makeSet({ id: 100 }), makeSet({ id: 101, challengeIds: [201] })],
+      loadChallenges,
+      onProgress,
+    });
+
+    expect(loadChallenges).toHaveBeenCalledTimes(2);
+    expect(onProgress.mock.calls.map(([progress]) => ({
+      completed: progress.completed,
+      total: progress.total,
+      setId: progress.index?.id,
+    }))).toEqual([
+      { completed: 0, total: 2, setId: 100 },
+      { completed: 1, total: 2, setId: 101 },
+      { completed: 2, total: 2, setId: 101 },
+    ]);
   });
 
   it('reuses unchanged Challenge snapshots while merging current progress', async () => {
