@@ -28,7 +28,7 @@ jobs:
           }
       - name: Upload verification failure logs
         if: always() && steps.verify.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: DailyLoopRunner-verification-failure-${{ github.run_id }}
           path: |
@@ -38,7 +38,7 @@ jobs:
           retention-days: 14
       - name: Upload JUnit test report
         if: always() && hashFiles('reports/junit.xml') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: DailyLoopRunner-junit-${{ github.run_id }}
           path: reports/junit.xml
@@ -50,7 +50,7 @@ jobs:
         id: compatibility
         run: git diff --exit-code -- DailyLoopRunner.user.js
       - name: Upload Profile library preview
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: DailyLoopRunner-profiles
           path: dist/profiles
