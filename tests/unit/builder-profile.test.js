@@ -117,6 +117,7 @@ describe('Builder profiles', () => {
     const defaultProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.default);
     const inventoryProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
     const rarePackProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
+    expect(rarePackProfile.name).toBe('Daily + Rare Pack Recycling');
     const workflow = (profile) => profile.savedConfig.loops.find((loop) => loop.id === 'one-click-daily');
 
     expect(workflow(defaultProfile).steps).toEqual(['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare']);
@@ -130,6 +131,24 @@ describe('Builder profiles', () => {
         },
       },
     });
+  });
+
+  it('renames only an untouched legacy Daily Rare Pack starter profile', () => {
+    const base = config();
+    const store = createBuilderStore({ baseConfig: base, now: 1 });
+    const legacy = store.profiles.find((profile) => profile.id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
+    legacy.name = 'Daily + Rare Pack to 2x84+';
+
+    const migrated = normalizeBuilderStore(store, base, { now: 2 });
+    expect(migrated.profiles.find((profile) => profile.id === legacy.id).name)
+      .toBe('Daily + Rare Pack Recycling');
+
+    legacy.draftConfig.loops[0].openRewardPacks = true;
+    legacy.savedConfig.loops[0].openRewardPacks = true;
+    legacy.lastKnownGood.loops[0].openRewardPacks = true;
+    const customized = normalizeBuilderStore(store, base, { now: 3 });
+    expect(customized.profiles.find((profile) => profile.id === legacy.id).name)
+      .toBe('Daily + Rare Pack to 2x84+');
   });
 
   it('adds missing starter profiles without replacing an existing profile with the same id', () => {

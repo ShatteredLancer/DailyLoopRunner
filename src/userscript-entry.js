@@ -94,6 +94,7 @@ import {
   createTotwUpgradePolicy,
   createTwoBy84UpgradePolicy,
 } from './config/upgrade-policies.js';
+import { MATERIAL_SINK_BASELINES } from './config/material-sink.js';
 import { findSbcSetByPreferredId } from './sbc/set-identity.js';
 import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
@@ -2709,7 +2710,10 @@ function updateLoopControls() {
 
   function logBasicActivityDiscovery(snapshot, parsed, loadError) {
     const reward = (snapshot.rewards || []).find((entry) => entry?.type === 'PACK') || {};
-    log(`Dynamic SBC scan: Activity set #${snapshot.id || '?'} ${snapshot.name || '?'}; family:${parsed.familyId || '?'}; reward ${reward.name || '?'} (#${reward.packId || reward.resourceId || '?'}); challenges:${snapshot.challenges?.length || 0}; remaining:${parsed.remainingCompletions ?? parsed.activity?.remainingCompletions ?? '?'}; status:${parsed.status}`);
+    const families = (parsed.activities || (parsed.activity ? [parsed.activity] : []))
+      .map((activity) => `${activity.familyId}${activity.materialSink ? `:${activity.materialSink.className}` : ''}`)
+      .join(',') || parsed.familyId || '?';
+    log(`Dynamic SBC scan: Activity set #${snapshot.id || '?'} ${snapshot.name || '?'}; family:${families}; reward ${reward.name || '?'} (#${reward.packId || reward.resourceId || '?'}); challenges:${snapshot.challenges?.length || 0}; remaining:${parsed.remainingCompletions ?? parsed.activity?.remainingCompletions ?? '?'}; status:${parsed.status}`);
     if (loadError) log(`Dynamic SBC scan: Activity challenge load warning: ${loadError?.message || loadError}`);
     for (const diagnostic of parsed.diagnostics || []) log(`Dynamic SBC scan: Activity diagnostic: ${diagnostic}`);
   }
@@ -2825,6 +2829,12 @@ function updateLoopControls() {
               set: snapshot,
             }), loadError, cacheStatus);
             logDynamicUpgradeDiscovery(snapshot, parsed, loadError);
+            const activityParsed = loadError && cacheStatus !== 'load-failed-compatible-cache'
+              ? { status: 'unavailable', diagnostics: [`Challenge metadata refresh failed: ${loadError?.message || loadError}`] }
+              : parseBasicUpgradeActivitySnapshot({ set: snapshot });
+            if (activityParsed.status === 'supported') {
+              logBasicActivityDiscovery(snapshot, activityParsed, loadError);
+            }
           } else {
             const parsed = loadError && cacheStatus !== 'load-failed-compatible-cache'
               ? { status: 'unavailable', diagnostics: [`Challenge metadata refresh failed: ${loadError?.message || loadError}`] }
@@ -2961,7 +2971,11 @@ function updateLoopControls() {
       log(`Dynamic SBC scan: added session Upgrade Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.rewardPackIds?.[0] || '?'}, target rating:${loopDef.ratingSbcFill?.targetRating || '?'}, players:${loopDef.expectedPlayerCount || '?'})`);
     }
     for (const activity of activitySession.activities) {
-      log(`Dynamic SBC scan: resolved activity ${activity.familyId} -> Set #${activity.setId} ${activity.setName}; reward #${activity.rewardPackIds?.[0] || '?'}; consumers:${activity.consumers?.join(', ') || 'none'}`);
+      const sink = activity.materialSink;
+      const sinkSummary = sink
+        ? `; class:${sink.className}; cost:${sink.cost}; guaranteed:${sink.reward?.guaranteedCount || '?'}x${sink.reward?.minimumRating || '?'}+ ${sink.reward?.rarity || '?'}`
+        : '';
+      log(`Dynamic SBC scan: resolved activity ${activity.familyId} -> Set #${activity.setId} ${activity.setName}; reward #${activity.rewardPackIds?.[0] || '?'}${sinkSummary}; consumers:${activity.consumers?.join(', ') || 'none'}`);
     }
     for (const diagnostic of activitySession.diagnostics) log(`Dynamic SBC scan: activity binding: ${diagnostic}`);
     const upgradeDuplicateCount = upgradeSession.results.filter((result) => result.status === 'duplicate').length;
@@ -4914,7 +4928,7 @@ function updateLoopControls() {
     const override = isPlainObject(loopDef.autoFodderUpgrade) ? loopDef.autoFodderUpgrade : {};
     return {
       id: `${loopDef.id || 'fill-and-verify'}-auto-2x84-fodder`,
-      name: 'Scanned 2x84+ Fodder Recovery',
+      name: 'Scanned Rare Gold Fodder Recovery',
       ...createTwoBy84UpgradePolicy({ hidden: false, forceOpenRewardPacks: true }),
       maxCompletions: 1,
       ...override,
@@ -4935,8 +4949,8 @@ function updateLoopControls() {
   async function craftAutoFodderUpgrade(loopDef, attempt, maxAttempts) {
     const upgradeDef = getAutoFodderUpgradeDef(loopDef);
     if (!hasResolvedSbcIdentity(upgradeDef)) {
-      log(`${loopDef.name}: scanned 2x84+ recovery activity is unavailable; keeping the current squad unsubmitted`);
-      return { ok: false, reason: 'scanned 2x84+ recovery activity is unavailable' };
+      log(`${loopDef.name}: scanned Rare Gold recovery activity is unavailable; keeping the current squad unsubmitted`);
+      return { ok: false, reason: 'scanned Rare Gold recovery activity is unavailable' };
     }
     await refreshInventoryCaches(`${loopDef.name} ${upgradeDef.name} preflight`, { includePacks: false, quiet: true });
     const selection = selectInventoryPlayers(upgradeDef);
@@ -6696,7 +6710,7 @@ function updateLoopControls() {
       if (!configuredFill.ok) {
         const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(activeLoopDef);
         if (configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit) {
-          log(`${loopDef.name}: rating shortage before automatic 2x84+ recovery: ${configuredFill.reason || 'unknown reason'}`);
+          log(`${loopDef.name}: rating shortage before automatic Rare Gold recovery: ${configuredFill.reason || 'unknown reason'}`);
           const nextAttempt = autoFodderAttempts + 1;
           const recovery = await craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit);
           if (recovery.ok) {
@@ -6704,7 +6718,7 @@ function updateLoopControls() {
             log(`${loopDef.name}: ${getAutoFodderUpgradeDef(activeLoopDef).name} opened successfully; retrying optimized rating fill`);
             return { status: 'retry', reason: 'automatic fodder recovery succeeded' };
           }
-          log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || 'unknown reason'}`);
+          log(`${loopDef.name}: automatic Rare Gold recovery stopped: ${recovery.reason || 'unknown reason'}`);
         } else {
           log(`${loopDef.name}: stopping because ${configuredFill.reason || 'configured SBC fill failed'}`);
         }
@@ -6763,7 +6777,7 @@ function updateLoopControls() {
         !inspection.missingRequirements?.length &&
         autoFodderAttempts < autoFodderLimit
       ) {
-        log(`${loopDef.name}: submit not ready before automatic 2x84+ recovery (${inspection.items?.length || fillResult.filled || 0} filled)`);
+        log(`${loopDef.name}: submit not ready before automatic Rare Gold recovery (${inspection.items?.length || fillResult.filled || 0} filled)`);
         const nextAttempt = autoFodderAttempts + 1;
         const recovery = await craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit);
         if (recovery.ok) {
@@ -6771,8 +6785,8 @@ function updateLoopControls() {
           log(`${loopDef.name}: ${getAutoFodderUpgradeDef(activeLoopDef).name} opened successfully; retrying the same Upgrade completion with refreshed inventory`);
           return { status: 'retry', reason: 'automatic submit-ready recovery succeeded' };
         }
-        log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || 'unknown reason'}`);
-        return { status: 'blocked', reason: recovery.reason || 'automatic 2x84+ recovery stopped' };
+        log(`${loopDef.name}: automatic Rare Gold recovery stopped: ${recovery.reason || 'unknown reason'}`);
+        return { status: 'blocked', reason: recovery.reason || 'automatic Rare Gold recovery stopped' };
       } else if (
         !fillResult.submitReady &&
         !inspection.blocked.length &&
@@ -6780,8 +6794,8 @@ function updateLoopControls() {
         autoFodderLimit > 0 &&
         autoFodderAttempts >= autoFodderLimit
       ) {
-        log(`${loopDef.name}: automatic 2x84+ recovery reached its ${autoFodderLimit} attempt limit for this completion`);
-        return { status: 'blocked', reason: 'automatic 2x84+ recovery attempt limit reached' };
+        log(`${loopDef.name}: automatic Rare Gold recovery reached its ${autoFodderLimit} attempt limit for this completion`);
+        return { status: 'blocked', reason: 'automatic Rare Gold recovery attempt limit reached' };
       }
 
       if (!fillResult.submitReady) fail(`${loopDef.name}: submit is not ready after protection inspection`);
@@ -7834,9 +7848,9 @@ function updateLoopControls() {
         if (loopDef.preCraftPlayerPickLoopId || loopDef.preCraftPlayerPick || loopDef.preCraftPlayerPickSelector) {
           const pickDef = getProvisionPreCraftPickDef(loopDef);
           if (pickDef) {
-            log(`${loopDef.name}: dry-run ${phase} checks ${pickDef.name} before 5x 80+ Upgrade when an unassigned duplicate matches`);
+            log(`${loopDef.name}: dry-run ${phase} checks ${pickDef.name} before the Common Gold Premium stage when an unassigned duplicate matches`);
           } else {
-            log(`${loopDef.name}: configured dynamic pre-craft Player Pick is not available in the current scan; live run would skip it and continue 5x 80+ / 2x 84+ stages`);
+            log(`${loopDef.name}: configured dynamic pre-craft Player Pick is not available in the current scan; live run would skip it and continue Common/Rare Gold recycling stages`);
           }
         }
       } else {
@@ -8002,8 +8016,19 @@ function updateLoopControls() {
     return result;
   }
 
+  function getBoundRarePackFallbackDef(loopDef, rareUpgradeDef, activityFamily) {
+    if (!activityFamily
+      || rareUpgradeDef?.activityResolved !== true
+      || String(rareUpgradeDef?.activityBinding?.family || '') !== String(activityFamily)) return null;
+    return {
+      id: `${loopDef?.id || 'rare-pack-recycling'}-inventory-fallback`,
+      ...createTwoBy84UpgradePolicy({ hidden: false }),
+      ...cloneLoopDef(rareUpgradeDef),
+      strategy: 'fillAndVerifySbc',
+    };
+  }
+
   async function runRarePackCraftLoop(loopDef) {
-    await waitAppReady();
     const dryRun = loopDef.dryRun === true;
     const consumeAllSourcePacks = loopDef.consumeAllSourcePacks === true;
     const fillRemainingRoundsFromInventory = consumeAllSourcePacks && loopDef.useRoundsAsCompletions === true;
@@ -8013,6 +8038,18 @@ function updateLoopControls() {
       ...loopDef.rareUpgrade,
       openRewardPacks: loopDef.openRewardPacks === true,
     };
+    if (rareUpgradeDef.activityBinding?.required === true && rareUpgradeDef.activityResolved !== true) {
+      const family = String(rareUpgradeDef.activityBinding.family || 'Rare Gold material Upgrade');
+      log(`${loopDef.name}: required scanned activity ${family} is unavailable; stopping before opening a source pack`);
+      return {
+        status: 'unavailable',
+        packsOpened: 0,
+        stageCompletions: { rare: 0 },
+        reason: `required scanned activity unavailable: ${family}`,
+      };
+    }
+    const rareUpgradeLabel = rareUpgradeDef.name || 'Rare Gold Recycling Upgrade';
+    await waitAppReady();
     const result = await runPackAndCraftWorkflow({
       maxPacks,
       completionTarget: fillRemainingRoundsFromInventory || !consumeAllSourcePacks
@@ -8065,16 +8102,16 @@ function updateLoopControls() {
             loopDef,
             rareUpgradeDef,
             isLowRareGoldDuplicate,
-            `2x84+ ${phase === 'resume' ? 'resumed ' : ''}low rare gold`,
+            `${rareUpgradeLabel} ${phase === 'resume' ? 'resumed ' : ''}low rare gold`,
             { maxCompletions: 1 },
           );
-          return { status: 'planned', completions: { rare: 0 }, reason: 'would submit 2x84+ stage' };
+          return { status: 'planned', completions: { rare: 0 }, reason: `would submit ${rareUpgradeLabel} stage` };
         }
         const stageResult = await runReservedDuplicateCraftingStage(
           loopDef,
           rareUpgradeDef,
           isLowRareGoldDuplicate,
-          `2x84+ ${phase === 'resume' ? 'resumed ' : ''}low rare gold`,
+          `${rareUpgradeLabel} ${phase === 'resume' ? 'resumed ' : ''}low rare gold`,
           {
             maxCompletions: remainingCompletions ?? 100,
             forceAttempts: phase === 'pack' && Number(context?.lowRare || 0) > 0 ? 1 : 0,
@@ -8107,6 +8144,9 @@ function updateLoopControls() {
           return { status: 'unavailable', completions: { rare: 0 }, reason: 'no source-exhausted fallback configured' };
         }
         let baseFallbackDef = fallbackLoopId ? findLoopDefById(fallbackLoopId) : null;
+        if (!baseFallbackDef) {
+          baseFallbackDef = getBoundRarePackFallbackDef(loopDef, rareUpgradeDef, fallbackActivityFamily);
+        }
         if (!baseFallbackDef && fallbackActivityFamily) {
           const resolution = resolveSessionLoopByActivityFamily(getLoopDefs(), fallbackActivityFamily);
           if (resolution.status === 'ambiguous') {
@@ -8133,7 +8173,7 @@ function updateLoopControls() {
         fallbackDef.openRewardPacks = loopDef.openRewardPacks === true;
         fallbackDef.forceOpenRewardPacks = false;
         applyDisabledPiles(fallbackDef);
-        log(`${loopDef.name}: no matching source pack remains; running ${fallbackDef.name} for up to ${fallbackCompletions} remaining 2x84+ completion(s)`);
+        log(`${loopDef.name}: no matching source pack remains; running ${fallbackDef.name} for up to ${fallbackCompletions} remaining recycling completion(s)`);
         const fallbackResult = await runFillAndVerifyLoop(fallbackDef);
         const fallbackUnavailableIsExhausted = consumeAllSourcePacks
           && !fillRemainingRoundsFromInventory
@@ -8161,7 +8201,7 @@ function updateLoopControls() {
       const completionSummary = fillRemainingRoundsFromInventory || !consumeAllSourcePacks
         ? `${rareCompletions}/${maxCompletions}`
         : `${rareCompletions}`;
-      log(`${loopDef.name}: opened ${result.packsOpened} rare gold pack(s), submitted 2x84+:${completionSummary}`);
+      log(`${loopDef.name}: opened ${result.packsOpened} rare gold pack(s), submitted ${rareUpgradeLabel}:${completionSummary}`);
     }
     return result;
   }
@@ -9243,7 +9283,34 @@ function updateLoopControls() {
     return result;
   }
 
+  function unresolvedRequiredMaterialActivities(value, path = 'Loop', visited = new WeakSet()) {
+    if (!value || typeof value !== 'object') return [];
+    if (visited.has(value)) return [];
+    visited.add(value);
+    if (Array.isArray(value)) {
+      return value.flatMap((entry, index) => unresolvedRequiredMaterialActivities(entry, `${path}[${index}]`, visited));
+    }
+    const binding = value.activityBinding;
+    const current = binding?.required === true
+      && MATERIAL_SINK_BASELINES[binding.family]
+      && value.activityResolved !== true
+      ? [{ path, family: binding.family }]
+      : [];
+    return [
+      ...current,
+      ...Object.entries(value).flatMap(([key, entry]) => (
+        unresolvedRequiredMaterialActivities(entry, `${path}.${key}`, visited)
+      )),
+    ];
+  }
+
   async function runConfiguredLoop(loopDef, roundNo = 1) {
+    const unresolvedActivities = unresolvedRequiredMaterialActivities(loopDef, loopDef.name || loopDef.id || 'Loop');
+    if (unresolvedActivities.length) {
+      const reason = `required scanned material activity unavailable: ${unresolvedActivities.map((entry) => `${entry.family} at ${entry.path}`).join(', ')}`;
+      log(`${loopDef.name}: ${reason}; stopping before pack or SBC actions`);
+      return { status: 'unavailable', reason };
+    }
     state.loopStack.push(loopDef);
     try {
       return await dispatchConfiguredWorkflow({

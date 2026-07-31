@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.0
+// @version      0.7.1
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -28,7 +28,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.0",
+    version: "0.7.1",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -309,7 +309,7 @@
     },
     {
       id: "daily-rare-pack-84",
-      name: "Daily Rare Pack to 2x84+ Loop",
+      name: "Daily Rare Pack Recycling Loop",
       strategy: "rarePackTo84Upgrade",
       sourcePackRef: { rewardOfLoopId: "daily-rare" },
       sourcePackIds: [20059],
@@ -324,8 +324,14 @@
         "5 x 80+ Rare Gold Players Pack"
       ],
       rareUpgrade: {
-        name: "2x 84+ Upgrade",
-        activityBinding: { family: "2x84-upgrade", category: "Upgrades", required: true },
+        name: "Rare Gold Recycling Upgrade",
+        activityBinding: {
+          family: "rare-gold-material-upgrade",
+          classes: ["premium", "baseline"],
+          preference: "reward-first",
+          category: "Upgrades",
+          required: true
+        },
         sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
         requirements: [
           { tier: "gold", rarity: "rare", count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
@@ -337,7 +343,7 @@
       useRoundsAsCompletions: true,
       runtimeQuantity: { mode: "user", target: "maxCompletions", default: 3, min: 1, max: 50, label: "SBC completions" },
       consumeAllSourcePacks: true,
-      sourceExhaustedFallbackActivityFamily: "2x84-upgrade"
+      sourceExhaustedFallbackActivityFamily: "rare-gold-material-upgrade"
     },
     {
       id: "one-click-daily-mvp",
@@ -357,7 +363,7 @@
     },
     {
       id: "inventory-fodder-exhaustion",
-      name: "Bronze/Silver/5x 80+ Exhaustion Loop",
+      name: "Bronze/Silver/Common Gold Premium Exhaustion Loop",
       strategy: "inventoryExhaustion",
       openRewardPacksAtEnd: true,
       rewardPackNames: [
@@ -396,8 +402,14 @@
         },
         {
           id: "fof-glory-hunters",
-          name: "5x 80+ Upgrade",
-          activityBinding: { family: "common-gold-crafting-upgrade", category: "Upgrades", required: true },
+          name: "Common Gold Premium Upgrade",
+          activityBinding: {
+            family: "common-gold-material-upgrade",
+            classes: ["premium"],
+            preference: "reward-first",
+            category: "Upgrades",
+            required: true
+          },
           sbcNames: ["5x 80+ Upgrade"],
           requirements: [
             {
@@ -418,7 +430,7 @@
     },
     {
       id: "fof-glory-hunters-exhaustion",
-      name: "5x 80+ Exhaustion Loop",
+      name: "Common Gold Premium Exhaustion Loop",
       strategy: "inventoryExhaustion",
       openRewardPacksAtEnd: true,
       rewardPackNames: [
@@ -431,8 +443,14 @@
       stages: [
         {
           id: "fof-glory-hunters",
-          name: "5x 80+ Upgrade",
-          activityBinding: { family: "common-gold-crafting-upgrade", category: "Upgrades", required: true },
+          name: "Common Gold Premium Upgrade",
+          activityBinding: {
+            family: "common-gold-material-upgrade",
+            classes: ["premium"],
+            preference: "reward-first",
+            category: "Upgrades",
+            required: true
+          },
           sbcNames: ["5x 80+ Upgrade"],
           requirements: [
             {
@@ -462,8 +480,14 @@
       runtimeQuantity: { mode: "user", target: "rounds", default: 1, min: 1, max: 50, label: "Provision packs" },
       craftingUpgrades: [
         {
-          name: "5x 80+ Upgrade",
-          activityBinding: { family: "common-gold-crafting-upgrade", category: "Upgrades", required: true },
+          name: "Common Gold Premium Upgrade",
+          activityBinding: {
+            family: "common-gold-material-upgrade",
+            classes: ["premium"],
+            preference: "reward-first",
+            category: "Upgrades",
+            required: true
+          },
           sbcNames: ["5x 80+ Upgrade"],
           requirements: [
             { tier: "gold", rarity: "common", count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
@@ -471,8 +495,14 @@
           priorityPiles: ["unassigned", "storage", "transfer", "club"]
         },
         {
-          name: "2x 84+ Upgrade",
-          activityBinding: { family: "2x84-upgrade", category: "Upgrades", required: true },
+          name: "Rare Gold Recycling Upgrade",
+          activityBinding: {
+            family: "rare-gold-material-upgrade",
+            classes: ["premium", "baseline"],
+            preference: "reward-first",
+            category: "Upgrades",
+            required: true
+          },
           sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
           requirements: [
             { tier: "gold", rarity: "rare", count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ["unassigned", "storage", "transfer", "club"] }
@@ -1036,8 +1066,14 @@
     }),
     recipe({
       id: "fof-glory-hunters-crafting-upgrade",
-      name: "5x 80+ Upgrade",
-      activityBinding: { family: "common-gold-crafting-upgrade", category: "Upgrades", required: false },
+      name: "Common Gold Premium Upgrade",
+      activityBinding: {
+        family: "common-gold-material-upgrade",
+        classes: ["premium"],
+        preference: "reward-first",
+        category: "Upgrades",
+        required: false
+      },
       sbcNames: ["5x 80+ Upgrade"],
       requirements: [lowFodderRequirement({ tier: "gold", rarity: "common", count: 9, maxRating: 81, protectHighGold: true })]
     }),
@@ -1050,8 +1086,14 @@
     }),
     recipe({
       id: "2x84-upgrade",
-      name: "2x 84+ Upgrade",
-      activityBinding: { family: "2x84-upgrade", category: "Upgrades", required: false },
+      name: "Rare Gold Recycling Upgrade",
+      activityBinding: {
+        family: "rare-gold-material-upgrade",
+        classes: ["premium", "baseline"],
+        preference: "reward-first",
+        category: "Upgrades",
+        required: false
+      },
       sbcNames: ["2x 84+ Upgrade", "2 x 84+ Upgrade"],
       requirements: [lowFodderRequirement({ tier: "gold", rarity: "rare", count: 6, maxRating: 81, protectHighGold: true })]
     })
@@ -1327,6 +1369,184 @@
     };
   }
 
+  // src/config/material-sink.js
+  var NUMBER_WORDS = Object.freeze({
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12
+  });
+  var RARITY_RANK = Object.freeze({ common: 1, rare: 2 });
+  var CLASS_RANK = Object.freeze({ premium: 0, baseline: 1, "sub-baseline": 2, incomparable: 3 });
+  var MATERIAL_SINK_FAMILIES = Object.freeze({
+    commonGold: "common-gold-material-upgrade",
+    rareGold: "rare-gold-material-upgrade"
+  });
+  var MATERIAL_SINK_CLASSES = Object.freeze([
+    "premium",
+    "baseline",
+    "sub-baseline",
+    "incomparable"
+  ]);
+  var MATERIAL_SINK_PREFERENCES = Object.freeze([
+    "reward-first",
+    "quantity-first",
+    "cost-first"
+  ]);
+  var MATERIAL_SINK_BASELINES = Object.freeze({
+    [MATERIAL_SINK_FAMILIES.commonGold]: Object.freeze({
+      material: "common-gold",
+      cost: 11,
+      reward: Object.freeze({ guaranteedCount: 2, minimumRating: 75, rarity: "rare" })
+    }),
+    [MATERIAL_SINK_FAMILIES.rareGold]: Object.freeze({
+      material: "rare-gold",
+      cost: 6,
+      reward: Object.freeze({ guaranteedCount: 2, minimumRating: 84, rarity: "rare" })
+    })
+  });
+  function positiveInteger(value) {
+    const number = Number(value);
+    return Number.isInteger(number) && number > 0 ? number : null;
+  }
+  function normalizedText(value) {
+    return String(value ?? "").trim();
+  }
+  function parsedCount(value) {
+    const numeric = positiveInteger(value);
+    if (numeric) return numeric;
+    return NUMBER_WORDS[normalizedText(value).toLowerCase()] || null;
+  }
+  function rewardText(reward = {}, fallbackText = "") {
+    return [reward.name, reward.description, fallbackText].map(normalizedText).filter(Boolean).join(" ");
+  }
+  function parseMaterialSinkReward(reward = {}, options = {}) {
+    if (normalizedText(reward.type).toUpperCase() !== "PACK") return null;
+    const text = rewardText(reward, options.fallbackText);
+    if (!text) return null;
+    const prefix = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*x\s*(\d{2})\+/i.exec(text);
+    const suffix = /\b(\d{2})\+\s*x\s*(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i.exec(text);
+    const rareGoldCount = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+rare\s+gold\s+players?\b/i.exec(text);
+    const guaranteedCount = parsedCount(
+      positiveInteger(reward.guaranteedCount || reward.playerCount || reward.itemCount) || prefix?.[1] || suffix?.[2] || rareGoldCount?.[1]
+    );
+    const minimumRating = positiveInteger(
+      reward.minimumRating || prefix?.[2] || suffix?.[1]
+    ) || (/\brare\s+gold\s+players?\b/i.test(text) ? 75 : null);
+    const rarity = /\brare\s+gold\b/i.test(text) ? "rare" : (prefix || suffix) && options.fallbackRarity === "rare" ? "rare" : null;
+    if (!guaranteedCount || !minimumRating || !rarity) return null;
+    return {
+      type: "pack",
+      guaranteedCount,
+      minimumRating,
+      rarity,
+      tradeable: /\buntradeable\b/i.test(text) ? false : null
+    };
+  }
+  function rewardRelation(left = {}, right = {}) {
+    const leftRarity = RARITY_RANK[left.rarity] || 0;
+    const rightRarity = RARITY_RANK[right.rarity] || 0;
+    if (!left.guaranteedCount || !left.minimumRating || !leftRarity || !right.guaranteedCount || !right.minimumRating || !rightRarity) return null;
+    const values = [
+      Number(left.guaranteedCount) - Number(right.guaranteedCount),
+      Number(left.minimumRating) - Number(right.minimumRating),
+      leftRarity - rightRarity
+    ];
+    if (values.every((value) => value >= 0)) return values.some((value) => value > 0) ? 1 : 0;
+    if (values.every((value) => value <= 0)) return values.some((value) => value < 0) ? -1 : 0;
+    return null;
+  }
+  function classifyMaterialSinkCandidate(input = {}) {
+    const familyId = String(input.familyId || "");
+    const baseline = MATERIAL_SINK_BASELINES[familyId];
+    const cost = positiveInteger(input.cost);
+    const reward = input.reward || null;
+    if (!baseline || !cost || !reward) return { className: "incomparable", relation: null };
+    const rewardVsBaseline = rewardRelation(reward, baseline.reward);
+    const baselineVsReward = rewardRelation(baseline.reward, reward);
+    const costNoWorse = cost <= baseline.cost;
+    const costStrictlyBetter = cost < baseline.cost;
+    const rewardNoWorse = rewardVsBaseline === 0 || rewardVsBaseline === 1;
+    const rewardStrictlyBetter = rewardVsBaseline === 1;
+    if (costStrictlyBetter && rewardStrictlyBetter) {
+      return { className: "premium", relation: "dominates-baseline" };
+    }
+    if (costNoWorse && rewardNoWorse) {
+      return { className: "baseline", relation: "baseline-compatible" };
+    }
+    const baselineCostNoWorse = baseline.cost <= cost;
+    const baselineRewardNoWorse = baselineVsReward === 0 || baselineVsReward === 1;
+    if (baselineCostNoWorse && baselineRewardNoWorse && (baseline.cost < cost || baselineVsReward === 1)) {
+      return { className: "sub-baseline", relation: "dominated-by-baseline" };
+    }
+    return { className: "incomparable", relation: "cross-tradeoff" };
+  }
+  function dominates(left, right) {
+    if (!left?.materialSink || !right?.materialSink) return false;
+    const leftSink = left.materialSink;
+    const rightSink = right.materialSink;
+    const reward = rewardRelation(leftSink.reward, rightSink.reward);
+    return leftSink.cost <= rightSink.cost && (reward === 0 || reward === 1) && (leftSink.cost < rightSink.cost || reward === 1);
+  }
+  function assignMaterialSinkParetoLayers(candidates = []) {
+    const remaining = [...candidates];
+    const layers = [];
+    while (remaining.length) {
+      const layer = remaining.filter((candidate) => !remaining.some((other) => other !== candidate && dominates(other, candidate)));
+      if (!layer.length) break;
+      layers.push(layer);
+      layer.forEach((candidate) => remaining.splice(remaining.indexOf(candidate), 1));
+    }
+    return layers;
+  }
+  function compareNumbers(left, right, direction = "desc") {
+    const a = Number(left || 0);
+    const b = Number(right || 0);
+    return direction === "asc" ? a - b : b - a;
+  }
+  function preferenceFields(preference) {
+    if (preference === "quantity-first") {
+      return [["guaranteedCount", "desc"], ["minimumRating", "desc"], ["cost", "asc"]];
+    }
+    if (preference === "cost-first") {
+      return [["cost", "asc"], ["minimumRating", "desc"], ["guaranteedCount", "desc"]];
+    }
+    return [["minimumRating", "desc"], ["guaranteedCount", "desc"], ["cost", "asc"]];
+  }
+  function preferenceValue(candidate, field2) {
+    if (field2 === "cost") return candidate.materialSink?.cost;
+    return candidate.materialSink?.reward?.[field2];
+  }
+  function selectMaterialSinkCandidate(candidates = [], binding = {}) {
+    const allowedClasses = Array.isArray(binding.classes) && binding.classes.length ? binding.classes : ["premium", "baseline"];
+    const allowedClassSet = new Set(allowedClasses);
+    const eligible = candidates.filter((candidate) => allowedClassSet.has(candidate.materialSink?.className));
+    if (!eligible.length) return { status: "unavailable", candidate: null, matches: [] };
+    const bestClass = Math.min(...eligible.map((candidate) => CLASS_RANK[candidate.materialSink.className]));
+    const sameClass = eligible.filter((candidate) => CLASS_RANK[candidate.materialSink.className] === bestClass);
+    const topLayer = assignMaterialSinkParetoLayers(sameClass)[0] || [];
+    if (topLayer.length === 1) return { status: "resolved", candidate: topLayer[0], matches: topLayer };
+    const preference = MATERIAL_SINK_PREFERENCES.includes(binding.preference) ? binding.preference : null;
+    if (!preference) return { status: "ambiguous", candidate: null, matches: topLayer };
+    const fields = preferenceFields(preference);
+    const ranked = [...topLayer].sort((left, right) => {
+      for (const [field2, direction] of fields) {
+        const compared = compareNumbers(preferenceValue(left, field2), preferenceValue(right, field2), direction);
+        if (compared) return compared;
+      }
+      return Number(left.setId || 0) - Number(right.setId || 0);
+    });
+    return { status: "resolved", candidate: ranked[0], matches: ranked };
+  }
+
   // src/config/activity-discovery.js
   var SUPPORTED_REQUIREMENT_KEYS = /* @__PURE__ */ new Set([
     "PLAYER_QUALITY",
@@ -1364,6 +1584,7 @@
   ]);
   var SBC_ACTIVITY_FAMILY_IDS = Object.freeze([
     ...FAMILY_DEFS.map((family) => family.id),
+    ...Object.values(MATERIAL_SINK_FAMILIES),
     "totw-upgrade",
     "high-rated-x10",
     "high-rated-pack-upgrade"
@@ -1371,11 +1592,11 @@
   function clone(value) {
     return cloneLoopDef(value);
   }
-  function positiveInteger(value) {
+  function positiveInteger2(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
-  function normalizedText(value) {
+  function normalizedText2(value) {
     return String(value ?? "").trim();
   }
   function unique(values = []) {
@@ -1390,7 +1611,7 @@
       visited.add(value);
       if (value.activityBinding?.family && Array.isArray(value.sbcNames)) {
         value.sbcNames.forEach((name) => {
-          const normalized = normalizedText(name).toLowerCase();
+          const normalized = normalizedText2(name).toLowerCase();
           if (normalized) names.add(normalized);
         });
       }
@@ -1400,14 +1621,14 @@
     return [...names];
   }
   function canonicalTier(value) {
-    const text = normalizedText(value).toUpperCase();
+    const text = normalizedText2(value).toUpperCase();
     if (["BRONZE", "QUALITY_BRONZE", "LEVEL_BRONZE", "1"].includes(text)) return "bronze";
     if (["SILVER", "QUALITY_SILVER", "LEVEL_SILVER", "2"].includes(text)) return "silver";
     if (["GOLD", "QUALITY_GOLD", "LEVEL_GOLD", "3"].includes(text)) return "gold";
     return null;
   }
   function canonicalRarity(value, keyName) {
-    const text = normalizedText(value).toUpperCase();
+    const text = normalizedText2(value).toUpperCase();
     if (keyName === "PLAYER_RARITY_GROUP") {
       return ["4", "RARE"].includes(text) ? "rare" : null;
     }
@@ -1434,7 +1655,7 @@
     return `${entry.keyName || "?"}(count:${entry.count || "?"}, values:${entry.values?.join("/") || "?"})`;
   }
   function parseBasicUpgradeChallenge(challenge = {}) {
-    const requiredPlayerCount = positiveInteger(challenge.requiredPlayerCount);
+    const requiredPlayerCount = positiveInteger2(challenge.requiredPlayerCount);
     const diagnostics = [];
     if (!requiredPlayerCount) {
       return { ok: false, diagnostics: ["required player count is missing or invalid"] };
@@ -1494,11 +1715,11 @@
     return { ok: true, requiredPlayerCount, requirements: normalizedRequirements(requirements), diagnostics: [] };
   }
   function rewardPackIdentity(set = {}) {
-    const packs = (set.rewards || []).filter((reward) => normalizedText(reward?.type).toUpperCase() === "PACK");
+    const packs = (set.rewards || []).filter((reward) => normalizedText2(reward?.type).toUpperCase() === "PACK");
     return {
       packs,
-      ids: unique(packs.map((reward) => positiveInteger(reward.packId || reward.resourceId || reward.definitionId)).filter(Boolean)),
-      names: unique(packs.flatMap((reward) => [normalizedText(reward.name), normalizedText(reward.description)]).filter(Boolean))
+      ids: unique(packs.map((reward) => positiveInteger2(reward.packId || reward.resourceId || reward.definitionId)).filter(Boolean)),
+      names: unique(packs.flatMap((reward) => [normalizedText2(reward.name), normalizedText2(reward.description)]).filter(Boolean))
     };
   }
   function remainingCompletions(set = {}) {
@@ -1510,14 +1731,36 @@
   }
   function activityIdentityText(set, rewards) {
     return [
-      normalizedText(set.name),
+      normalizedText2(set.name),
       ...rewards.names
     ].join(" ");
   }
+  function materialSinkFamily(requirements = []) {
+    if (requirements.length !== 1 || requirements[0].tier !== "gold") return null;
+    if (requirements[0].rarity === "rare") return MATERIAL_SINK_FAMILIES.rareGold;
+    return MATERIAL_SINK_FAMILIES.commonGold;
+  }
+  function materialSinkSelectionRequirements(requirements = [], familyId) {
+    if (familyId !== MATERIAL_SINK_FAMILIES.commonGold) return requirements;
+    return requirements.map((requirement2) => requirement2.tier === "gold" && !requirement2.rarity ? { ...requirement2, rarity: "common" } : requirement2);
+  }
+  function createActivity({ familyId, setId, setName, requirements, rewards, remaining, challenges, materialSink = null }) {
+    return {
+      familyId,
+      setId,
+      setName,
+      requirements,
+      rewardPackIds: rewards.ids,
+      rewardPackNames: rewards.names,
+      remainingCompletions: remaining,
+      challengeIds: challenges.map((challenge) => positiveInteger2(challenge.id)).filter(Boolean),
+      ...materialSink ? { materialSink } : {}
+    };
+  }
   function parseBasicUpgradeActivitySnapshot(input = {}) {
     const set = input.set || {};
-    const setId = positiveInteger(set.id);
-    const setName = normalizedText(set.name);
+    const setId = positiveInteger2(set.id);
+    const setName = normalizedText2(set.name);
     if (set.inUpgradesCategory !== true) {
       return { status: "ignored", setId, diagnostics: ["SBC Set is not confirmed in the Upgrades category"] };
     }
@@ -1533,8 +1776,17 @@
     if (!rewards.ids.length && !rewards.names.length) diagnostics.push("stable Pack reward identity is missing");
     if (diagnostics.length) return { status: "unsupported", setId, diagnostics: unique(diagnostics) };
     const identityText = activityIdentityText(set, rewards);
-    const family = FAMILY_DEFS.find((candidate) => requirementsEqual(candidate.requirements, parsedChallenge.requirements) && (!candidate.identityPattern || candidate.identityPattern.test(identityText)));
-    if (!family) {
+    const sinkFamilyId = materialSinkFamily(parsedChallenge.requirements);
+    const sinkRequirements = materialSinkSelectionRequirements(parsedChallenge.requirements, sinkFamilyId);
+    const family = FAMILY_DEFS.find((candidate) => (requirementsEqual(candidate.requirements, parsedChallenge.requirements) || requirementsEqual(candidate.requirements, sinkRequirements)) && (!candidate.identityPattern || candidate.identityPattern.test(identityText)));
+    const sinkBaseline = MATERIAL_SINK_BASELINES[sinkFamilyId];
+    const sinkReward = sinkFamilyId ? parseMaterialSinkReward(rewards.packs[0], { fallbackText: setName, fallbackRarity: "rare" }) : null;
+    const sinkClassification = sinkBaseline && sinkReward ? classifyMaterialSinkCandidate({
+      familyId: sinkFamilyId,
+      cost: parsedChallenge.requiredPlayerCount,
+      reward: sinkReward
+    }) : null;
+    if (!family && !sinkClassification) {
       return {
         status: "ignored",
         setId,
@@ -1543,22 +1795,51 @@
     }
     const remaining = remainingCompletions(set);
     if (remaining === 0) {
-      return { status: "completed", setId, familyId: family.id, remainingCompletions: 0, diagnostics: [] };
+      return {
+        status: "completed",
+        setId,
+        familyId: family?.id || sinkFamilyId,
+        remainingCompletions: 0,
+        diagnostics: []
+      };
     }
-    return {
-      status: "supported",
-      setId,
-      familyId: family.id,
-      activity: {
+    const activities = [];
+    if (family) {
+      activities.push(createActivity({
         familyId: family.id,
         setId,
         setName,
         requirements: parsedChallenge.requirements,
-        rewardPackIds: rewards.ids,
-        rewardPackNames: rewards.names,
-        remainingCompletions: remaining,
-        challengeIds: challenges.map((challenge) => positiveInteger(challenge.id)).filter(Boolean)
-      },
+        rewards,
+        remaining,
+        challenges
+      }));
+    }
+    if (sinkClassification) {
+      activities.push(createActivity({
+        familyId: sinkFamilyId,
+        setId,
+        setName,
+        requirements: sinkRequirements,
+        rewards,
+        remaining,
+        challenges,
+        materialSink: {
+          material: sinkBaseline.material,
+          className: sinkClassification.className,
+          relation: sinkClassification.relation,
+          cost: parsedChallenge.requiredPlayerCount,
+          reward: sinkReward
+        }
+      }));
+    }
+    const primaryActivity = activities[0];
+    return {
+      status: "supported",
+      setId,
+      familyId: primaryActivity.familyId,
+      activity: primaryActivity,
+      activities,
       diagnostics: []
     };
   }
@@ -1585,14 +1866,20 @@
   function mergeScannedActivityMetadata(target = {}, activity = {}) {
     const merged = {
       ...clone(target),
-      sbcSetIds: unique([activity.setId, ...target.sbcSetIds || []].map(positiveInteger).filter(Boolean)),
-      sbcNames: unique([activity.setName, ...target.sbcNames || []].map(normalizedText).filter(Boolean)),
-      rewardPackIds: unique([...activity.rewardPackIds || [], ...target.rewardPackIds || []].map(positiveInteger).filter(Boolean)),
-      rewardPackNames: unique([...activity.rewardPackNames || [], ...target.rewardPackNames || []].map(normalizedText).filter(Boolean)),
+      ...activity.materialSink ? { name: activity.setName } : {},
+      sbcSetIds: unique([activity.setId, ...target.sbcSetIds || []].map(positiveInteger2).filter(Boolean)),
+      sbcNames: unique([activity.setName, ...target.sbcNames || []].map(normalizedText2).filter(Boolean)),
+      rewardPackIds: unique([...activity.rewardPackIds || [], ...target.rewardPackIds || []].map(positiveInteger2).filter(Boolean)),
+      rewardPackNames: unique([...activity.rewardPackNames || [], ...target.rewardPackNames || []].map(normalizedText2).filter(Boolean)),
       remainingCompletions: activity.remainingCompletions,
       dynamicSbcFamily: activity.familyId,
       scannedMetadata: true,
-      activityResolved: true
+      activityResolved: true,
+      ...activity.materialSink ? {
+        materialSinkClass: activity.materialSink.className,
+        materialSinkCost: activity.materialSink.cost,
+        materialSinkReward: clone(activity.materialSink.reward)
+      } : {}
     };
     if (Array.isArray(target.requirements)) {
       merged.requirements = mergeRequirements(activity.requirements, target.requirements);
@@ -1603,6 +1890,18 @@
     if (!target?.activityBinding?.family) return clone(target);
     const family = target.activityBinding.family;
     const matches = activitiesByFamily.get(family) || [];
+    if (MATERIAL_SINK_BASELINES[family]) {
+      const resolution = selectMaterialSinkCandidate(matches, target.activityBinding);
+      if (resolution.status === "resolved") {
+        return mergeScannedActivityMetadata(target, resolution.candidate);
+      }
+      if (resolution.status === "ambiguous") {
+        diagnostics.push(`${path}: activity family ${family} is ambiguous (${resolution.matches.map((entry) => `#${entry.setId} ${entry.setName}`).join(", ")})`);
+      } else {
+        diagnostics.push(`${path}: activity family ${family} has no candidate in classes ${(target.activityBinding.classes || ["premium", "baseline"]).join("/")}; ${target.activityBinding.required === true ? "runtime preflight will block this consumer" : "compatibility fallback remains active"}`);
+      }
+      return clone(target);
+    }
     if (matches.length === 1) return mergeScannedActivityMetadata(target, matches[0]);
     if (matches.length > 1) {
       diagnostics.push(`${path}: activity family ${family} is ambiguous (${matches.map((entry) => `#${entry.setId} ${entry.setName}`).join(", ")})`);
@@ -1633,23 +1932,23 @@
     }
     return result;
   }
-  function containsResolvedFamily(value, familyId) {
+  function containsResolvedActivity(value, familyId, setId) {
     if (!value || typeof value !== "object") return false;
-    if (Array.isArray(value)) return value.some((entry) => containsResolvedFamily(entry, familyId));
-    if (value.dynamicSbcFamily === familyId && value.activityResolved === true) return true;
-    return Object.values(value).some((entry) => containsResolvedFamily(entry, familyId));
+    if (Array.isArray(value)) return value.some((entry) => containsResolvedActivity(entry, familyId, setId));
+    if (value.dynamicSbcFamily === familyId && value.activityResolved === true && (value.sbcSetIds || []).map(Number).includes(Number(setId))) return true;
+    return Object.values(value).some((entry) => containsResolvedActivity(entry, familyId, setId));
   }
-  function activityConsumers(familyId, loopOverrides, recoveryRecipeOverrides) {
+  function activityConsumers(activity, loopOverrides, recoveryRecipeOverrides) {
     return unique([
-      ...Object.values(loopOverrides).filter((loop) => containsResolvedFamily(loop, familyId)).map((loop) => `Loop:${loop.id}`),
-      ...Object.values(recoveryRecipeOverrides).filter((recipe2) => containsResolvedFamily(recipe2, familyId)).map((recipe2) => `Recovery:${recipe2.id}`)
+      ...Object.values(loopOverrides).filter((loop) => containsResolvedActivity(loop, activity.familyId, activity.setId)).map((loop) => `Loop:${loop.id}`),
+      ...Object.values(recoveryRecipeOverrides).filter((recipe2) => containsResolvedActivity(recipe2, activity.familyId, activity.setId)).map((recipe2) => `Recovery:${recipe2.id}`)
     ]);
   }
   function buildActivityBindingSession(input = {}) {
     const results = (input.sets || []).map((set) => parseBasicUpgradeActivitySnapshot({ set }));
     const activitiesByFamily = /* @__PURE__ */ new Map();
     const activities = [
-      ...results.filter((result) => result.status === "supported" && result.activity).map((result) => result.activity),
+      ...results.filter((result) => result.status === "supported").flatMap((result) => result.activities || (result.activity ? [result.activity] : [])),
       ...input.additionalActivities || []
     ];
     const seenActivities = /* @__PURE__ */ new Set();
@@ -1684,7 +1983,7 @@
       diagnostics: unique(diagnostics),
       activities: [...activitiesByFamily.values()].flat().map((activity) => ({
         ...clone(activity),
-        consumers: activityConsumers(activity.familyId, loopOverrides, recoveryRecipeOverrides)
+        consumers: activityConsumers(activity, loopOverrides, recoveryRecipeOverrides)
       }))
     };
   }
@@ -1757,7 +2056,7 @@
       errors.push(`${path} must be an object`);
       return;
     }
-    const allowedFields = /* @__PURE__ */ new Set(["family", "category", "required"]);
+    const allowedFields = /* @__PURE__ */ new Set(["family", "category", "required", "classes", "preference"]);
     Object.keys(value).forEach((field2) => {
       if (!allowedFields.has(field2)) errors.push(`${path}.${field2} is not supported`);
     });
@@ -1771,6 +2070,23 @@
     }
     if (value.required !== void 0 && typeof value.required !== "boolean") {
       errors.push(`${path}.required must be boolean`);
+    }
+    if (value.classes !== void 0) {
+      if (!Array.isArray(value.classes) || !value.classes.length) {
+        errors.push(`${path}.classes must be a non-empty array`);
+      } else {
+        value.classes.forEach((className, index) => {
+          if (!MATERIAL_SINK_CLASSES.includes(className)) {
+            errors.push(`${path}.classes[${index}] must be one of: ${MATERIAL_SINK_CLASSES.join(", ")}`);
+          }
+        });
+      }
+    }
+    if (value.preference !== void 0 && !MATERIAL_SINK_PREFERENCES.includes(value.preference)) {
+      errors.push(`${path}.preference must be one of: ${MATERIAL_SINK_PREFERENCES.join(", ")}`);
+    }
+    if ((value.classes !== void 0 || value.preference !== void 0) && !MATERIAL_SINK_BASELINES[value.family]) {
+      errors.push(`${path}.classes and preference require a material sink family`);
     }
   }
   function validatePileList(value, path, errors, required2 = false) {
@@ -2868,7 +3184,7 @@
 
   // src/config/batch-open.js
   var MAX_BATCH_QUANTITY = 999;
-  function normalizedText2(value) {
+  function normalizedText3(value) {
     return String(value || "").trim();
   }
   function normalizedPackId(value) {
@@ -2881,12 +3197,12 @@
   function batchOpenEntryKey(entry = {}) {
     const packId2 = normalizedPackId(entry.packId ?? entry.id);
     if (packId2) return `id:${packId2}`;
-    const packName = normalizedText2(entry.packName ?? entry.name).toLowerCase();
+    const packName = normalizedText3(entry.packName ?? entry.name).toLowerCase();
     return packName ? `name:${packName}` : "";
   }
   function normalizeBatchOpenEntry(entry = {}) {
     const packId2 = normalizedPackId(entry.packId ?? entry.id);
-    const packName = normalizedText2(entry.packName ?? entry.name);
+    const packName = normalizedText3(entry.packName ?? entry.name);
     if (!packId2 && !packName) return null;
     return Object.freeze({
       packId: packId2,
@@ -2916,7 +3232,7 @@
     const plan = normalizeBatchOpenPlan(planInput);
     const groups = (snapshot?.groups || []).map((group) => ({
       packId: normalizedPackId(group.id ?? group.packId),
-      packName: normalizedText2(group.name ?? group.packName),
+      packName: normalizedText3(group.name ?? group.packName),
       available: Math.max(0, Math.floor(Number(group.count) || 0))
     }));
     const byKey = new Map(groups.map((group) => [batchOpenEntryKey(group), group]));
@@ -2944,22 +3260,22 @@
     "PLAYER_RARITY",
     "PLAYER_RARITY_GROUP"
   ]);
-  function positiveInteger2(value) {
+  function positiveInteger3(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
-  function normalizedText3(value) {
+  function normalizedText4(value) {
     return String(value ?? "").trim();
   }
   function unique2(values = []) {
     return [...new Set(values.filter((value) => value !== void 0 && value !== null && value !== ""))];
   }
   function isCompleted(value) {
-    const status = normalizedText3(value?.status || value?.state).toUpperCase();
+    const status = normalizedText4(value?.status || value?.state).toUpperCase();
     return value?.complete === true || value?.completed === true || status === "COMPLETE" || status === "COMPLETED";
   }
   function rewardType(reward) {
-    return normalizedText3(reward?.type || reward?.rewardType || reward?.kind).toUpperCase().replaceAll(/[^A-Z0-9]+/g, "_");
+    return normalizedText4(reward?.type || reward?.rewardType || reward?.kind).toUpperCase().replaceAll(/[^A-Z0-9]+/g, "_");
   }
   function isPlayerPickReward(reward) {
     return reward?.playerPick === true || ["PLAYER_PICK", "PLAYERPICK"].includes(rewardType(reward));
@@ -2970,19 +3286,19 @@
       reward?.itemResourceId,
       reward?.definitionId,
       reward?.itemDefinitionId
-    ].map(normalizedText3));
+    ].map(normalizedText4));
   }
   function rewardIdentityKey(reward) {
     const values = rewardIdentityValues(reward);
     return values.length ? values.join("|") : "";
   }
   function readPlayerPickRewardCounts(reward = {}) {
-    const explicitCandidateCount = positiveInteger2(reward.candidateCount ?? reward.totalCandidates);
-    const explicitSelectionCount = positiveInteger2(reward.selectionCount ?? reward.availablePicks);
+    const explicitCandidateCount = positiveInteger3(reward.candidateCount ?? reward.totalCandidates);
+    const explicitSelectionCount = positiveInteger3(reward.selectionCount ?? reward.availablePicks);
     if (explicitCandidateCount && explicitSelectionCount) {
       return { candidateCount: explicitCandidateCount, selectionCount: explicitSelectionCount, source: "fields" };
     }
-    const description = normalizedText3(reward.description);
+    const description = normalizedText4(reward.description);
     const match = /^(\d+)\s+of\s+(\d+)(?:\s|$)/i.exec(description);
     if (!match) {
       return {
@@ -2992,29 +3308,29 @@
       };
     }
     return {
-      candidateCount: explicitCandidateCount || positiveInteger2(match[2]),
-      selectionCount: explicitSelectionCount || positiveInteger2(match[1]),
+      candidateCount: explicitCandidateCount || positiveInteger3(match[2]),
+      selectionCount: explicitSelectionCount || positiveInteger3(match[1]),
       source: explicitCandidateCount || explicitSelectionCount ? "fields-and-description" : "description"
     };
   }
   function canonicalQuality(value, options = {}) {
-    const text = normalizedText3(value).toUpperCase();
+    const text = normalizedText4(value).toUpperCase();
     if (["GOLD", "QUALITY_GOLD", "LEVEL_GOLD"].includes(text)) return "gold";
-    const goldValues = new Set((options.goldQualityValues || [3]).map((entry) => normalizedText3(entry)));
-    return goldValues.has(normalizedText3(value)) ? "gold" : null;
+    const goldValues = new Set((options.goldQualityValues || [3]).map((entry) => normalizedText4(entry)));
+    return goldValues.has(normalizedText4(value)) ? "gold" : null;
   }
   function canonicalRarity2(value, options = {}, keyName = "PLAYER_RARITY") {
     if (keyName === "PLAYER_RARITY_GROUP") {
-      const rareGroupValues = new Set((options.rareRarityGroupValues || [4]).map((entry) => normalizedText3(entry)));
-      return rareGroupValues.has(normalizedText3(value)) ? "rare" : null;
+      const rareGroupValues = new Set((options.rareRarityGroupValues || [4]).map((entry) => normalizedText4(entry)));
+      return rareGroupValues.has(normalizedText4(value)) ? "rare" : null;
     }
-    const text = normalizedText3(value).toUpperCase();
+    const text = normalizedText4(value).toUpperCase();
     if (["COMMON", "NORMAL", "NON_RARE", "NONRARE"].includes(text)) return "common";
     if (["RARE"].includes(text)) return "rare";
-    const commonValues = new Set((options.commonRarityValues || [0]).map((entry) => normalizedText3(entry)));
-    const rareValues = new Set((options.rareRarityValues || [1]).map((entry) => normalizedText3(entry)));
-    if (commonValues.has(normalizedText3(value))) return "common";
-    if (rareValues.has(normalizedText3(value))) return "rare";
+    const commonValues = new Set((options.commonRarityValues || [0]).map((entry) => normalizedText4(entry)));
+    const rareValues = new Set((options.rareRarityValues || [1]).map((entry) => normalizedText4(entry)));
+    if (commonValues.has(normalizedText4(value))) return "common";
+    if (rareValues.has(normalizedText4(value))) return "rare";
     return null;
   }
   function requirementSummary2(entry) {
@@ -3022,7 +3338,7 @@
   }
   function parseChallengeRequirements(challenge, challengeIndex, options = {}) {
     const challengeLabel = `challenge ${challengeIndex + 1}${challenge?.id ? ` (#${challenge.id})` : ""}`;
-    const requiredPlayerCount = positiveInteger2(challenge?.requiredPlayerCount);
+    const requiredPlayerCount = positiveInteger3(challenge?.requiredPlayerCount);
     if (!requiredPlayerCount) {
       return { ok: false, diagnostics: [`${challengeLabel}: required player count is missing or invalid`] };
     }
@@ -3063,7 +3379,7 @@
       }
       const rarity = canonicalRarity2(entry.values[0], options, entry.keyName);
       if (!rarity) {
-        diagnostics.push(`${challengeLabel}: unknown ${entry.keyName} encoding ${normalizedText3(entry.values[0]) || "?"}`);
+        diagnostics.push(`${challengeLabel}: unknown ${entry.keyName} encoding ${normalizedText4(entry.values[0]) || "?"}`);
         continue;
       }
       if (rarityCounts[rarity] !== null) {
@@ -3120,15 +3436,15 @@
   }
   function discoveryIdentity(set, reward) {
     return Object.freeze({
-      setId: positiveInteger2(set?.id),
+      setId: positiveInteger3(set?.id),
       rewardKey: rewardIdentityKey(reward),
       rewardIdentityValues: Object.freeze(rewardIdentityValues(reward))
     });
   }
   function parsePlayerPickSbcSnapshot(input = {}) {
     const set = input.set || {};
-    const setId = positiveInteger2(set.id);
-    const setName = normalizedText3(set.name);
+    const setId = positiveInteger3(set.id);
+    const setName = normalizedText4(set.name);
     const diagnostics = [];
     if (!setId) diagnostics.push("stable SBC Set id is missing");
     if (!setName) diagnostics.push("SBC Set display name is missing");
@@ -3140,7 +3456,7 @@
     const reward = playerPickRewards[0] || {};
     const identity = discoveryIdentity(set, reward);
     if (!identity.rewardKey) diagnostics.push("stable Player Pick reward identity is missing");
-    const rewardName = normalizedText3(reward.name || reward.displayName);
+    const rewardName = normalizedText4(reward.name || reward.displayName);
     if (!rewardName) diagnostics.push("Player Pick reward display name is missing");
     const rewardCounts = readPlayerPickRewardCounts(reward);
     const candidateCount = rewardCounts.candidateCount;
@@ -3152,18 +3468,18 @@
     }
     const setRemaining = remainingCompletions2(set);
     const reportedCompleted = isCompleted(set) || setRemaining === 0;
-    const boundedSet = positiveInteger2(set?.repeats) !== null;
+    const boundedSet = positiveInteger3(set?.repeats) !== null;
     const challenges = Array.isArray(set.challenges) ? set.challenges : [];
     if (!challenges.length) diagnostics.push("SBC Set challenge list is missing");
     const challengeRequirements = [];
     const challengeWarnings = [];
     const knownChallengePlayerCounts = unique2(
-      challenges.map((challenge) => positiveInteger2(challenge?.requiredPlayerCount)).filter(Boolean)
+      challenges.map((challenge) => positiveInteger3(challenge?.requiredPlayerCount)).filter(Boolean)
     );
     const inferredCompletedChallengePlayerCount = knownChallengePlayerCounts.length === 1 ? knownChallengePlayerCounts[0] : null;
     for (let index = 0; index < challenges.length; index++) {
       const challenge = challenges[index];
-      const missingPlayerCount = !positiveInteger2(challenge?.requiredPlayerCount);
+      const missingPlayerCount = !positiveInteger3(challenge?.requiredPlayerCount);
       const canInferCompletedPlayerCount = missingPlayerCount && isCompleted(challenge) && inferredCompletedChallengePlayerCount;
       const challengeForParsing = canInferCompletedPlayerCount ? { ...challenge, requiredPlayerCount: inferredCompletedChallengePlayerCount } : challenge;
       if (canInferCompletedPlayerCount) {
@@ -3203,7 +3519,7 @@
       maxCompletions: 1,
       useRoundsAsCompletions: !reportedCompleted && !boundedSet,
       discoveryReportedCompleted: reportedCompleted,
-      pricePlatform: normalizedText3(input.pricePlatform || "pc").toLowerCase(),
+      pricePlatform: normalizedText4(input.pricePlatform || "pc").toLowerCase(),
       discoveryIdentity: identity
     };
     if (loop.useRoundsAsCompletions) {
@@ -3237,10 +3553,10 @@
     };
   }
   function loopSetIds(loop) {
-    return new Set((loop?.sbcSetIds || []).map(positiveInteger2).filter(Boolean));
+    return new Set((loop?.sbcSetIds || []).map(positiveInteger3).filter(Boolean));
   }
   function loopRewardIds(loop) {
-    return new Set((loop?.pickItemResourceIds || []).map(normalizedText3).filter(Boolean));
+    return new Set((loop?.pickItemResourceIds || []).map(normalizedText4).filter(Boolean));
   }
   function matchingPlayerPickLoops(loop, existingLoops = []) {
     const setIds = loopSetIds(loop);
@@ -3280,7 +3596,7 @@
           status: "duplicate",
           loop: null,
           discoveredLoop: result.loop,
-          matchingLoopIds: matches.map((loop) => normalizedText3(loop?.id)).filter(Boolean),
+          matchingLoopIds: matches.map((loop) => normalizedText4(loop?.id)).filter(Boolean),
           diagnostics: ["matching static or discovered Player Pick already exists"]
         });
         continue;
@@ -3346,7 +3662,7 @@
     const configuredSessionLoops = configuredLoops.map((loop) => loopOverrides[loop?.id] || loop);
     const discoveredLoops = [...discovery.loops];
     const loopDefs = [...configuredSessionLoops, ...discoveredLoops];
-    const requestedSelection = normalizedText3(input.selectedId);
+    const requestedSelection = normalizedText4(input.selectedId);
     const selectedId = requestedSelection === "custom" || loopDefs.some((loop) => loop?.id === requestedSelection) ? requestedSelection : loopDefs[0]?.id || null;
     return {
       ...discovery,
@@ -3386,7 +3702,7 @@
     const seen = /* @__PURE__ */ new Set();
     for (const result of results || []) {
       const loop = result?.discoveredLoop || result?.loop;
-      const id = normalizedText3(loop?.id);
+      const id = normalizedText4(loop?.id);
       if (!loop || !id || seen.has(id)) continue;
       seen.add(id);
       loops.push(loop);
@@ -3472,8 +3788,14 @@
         ...createTotwUpgradePolicy({ forceOpenRewardPacks: false })
       },
       autoFodderUpgrade: {
-        name: "Scanned 2x84+ Upgrade",
-        activityBinding: { family: "2x84-upgrade", category: "Upgrades", required: false },
+        name: "Scanned Rare Gold Recycling Upgrade",
+        activityBinding: {
+          family: "rare-gold-material-upgrade",
+          classes: ["premium", "baseline"],
+          preference: "reward-first",
+          category: "Upgrades",
+          required: false
+        },
         maxAttemptsPerCompletion: 3,
         ...createTwoBy84UpgradePolicy({ hidden: false, forceOpenRewardPacks: true })
       },
@@ -3501,11 +3823,11 @@
   function clone3(value) {
     return value === void 0 ? void 0 : cloneLoopDef(value);
   }
-  function positiveInteger3(value) {
+  function positiveInteger4(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
-  function normalizedText4(value) {
+  function normalizedText5(value) {
     return String(value ?? "").trim();
   }
   function unique3(values = []) {
@@ -3519,14 +3841,14 @@
     return Math.max(0, Math.floor(repeats - completed));
   }
   function detectDynamicUpgradeFamily(set = {}) {
-    const text = `${normalizedText4(set.name)} ${(set.rewards || []).map((reward) => `${reward.name || ""} ${reward.description || ""}`).join(" ")}`;
+    const text = `${normalizedText5(set.name)} ${(set.rewards || []).map((reward) => `${reward.name || ""} ${reward.description || ""}`).join(" ")}`;
     if (/\b84\+\s*TOTW\b.*\bUpgrade\b|\bTOTW\b.*\bUpgrade\b/i.test(text)) {
       return { id: "totw-upgrade", rewardCount: 1, rewardMinRating: 84 };
     }
     const prefix = /\b(\d{1,2})\s*x\s*(\d{2})\+(?:\s+(?:Rare\s+Gold\s+)?Players?)?\s+Upgrade\b/i.exec(text);
     const suffix = /\b(\d{2})\+\s*x\s*(\d{1,2})(?:\s+(?:Rare\s+Gold\s+)?Players?)?\s+Upgrade\b/i.exec(text);
-    const rewardCount = positiveInteger3(prefix?.[1] || suffix?.[2]);
-    const rating = positiveInteger3(prefix?.[2] || suffix?.[1]);
+    const rewardCount = positiveInteger4(prefix?.[1] || suffix?.[2]);
+    const rating = positiveInteger4(prefix?.[2] || suffix?.[1]);
     if (rewardCount && rewardCount <= 30 && rating && rating >= 84 && rating <= 99) {
       return {
         id: rewardCount === 2 && rating === 84 ? "2x84-upgrade" : rewardCount === 10 ? "high-rated-x10" : "high-rated-pack-upgrade",
@@ -3566,7 +3888,7 @@
     return `${entry.keyName || "?"}(count:${entry.count || "?"}, values:${entry.values?.join("/") || "?"})`;
   }
   function parseUpgradeChallenge(challenge, family) {
-    const requiredPlayerCount = positiveInteger3(challenge?.requiredPlayerCount);
+    const requiredPlayerCount = positiveInteger4(challenge?.requiredPlayerCount);
     const diagnostics = [];
     if (!requiredPlayerCount) diagnostics.push("required player count is missing or invalid");
     const entries = readEligibilityRequirements(challenge, {
@@ -3620,8 +3942,8 @@
     const packs = (set.rewards || []).filter((reward) => String(reward?.type || "").toUpperCase() === "PACK");
     return {
       packs,
-      ids: unique3(packs.map((reward) => positiveInteger3(reward.packId || reward.resourceId || reward.definitionId)).filter(Boolean)),
-      names: unique3(packs.map((reward) => normalizedText4(reward.name || reward.description)).filter(Boolean))
+      ids: unique3(packs.map((reward) => positiveInteger4(reward.packId || reward.resourceId || reward.definitionId)).filter(Boolean)),
+      names: unique3(packs.map((reward) => normalizedText5(reward.name || reward.description)).filter(Boolean))
     };
   }
   function runtimeQuantityForRemaining(remaining) {
@@ -3636,23 +3958,23 @@
     };
   }
   function materializeDynamicUpgradeChallengeLoopDef(loopDef = {}, challenge = {}) {
-    const challengeId = positiveInteger3(challenge?.id || challenge?.challengeId);
-    const metadata = (loopDef.dynamicChallenges || []).find((entry) => positiveInteger3(entry?.challengeId) === challengeId);
+    const challengeId = positiveInteger4(challenge?.id || challenge?.challengeId);
+    const metadata = (loopDef.dynamicChallenges || []).find((entry) => positiveInteger4(entry?.challengeId) === challengeId);
     if (!metadata) return clone3(loopDef);
     const result = clone3(loopDef);
-    result.expectedPlayerCount = positiveInteger3(metadata.requiredPlayerCount) || result.expectedPlayerCount;
+    result.expectedPlayerCount = positiveInteger4(metadata.requiredPlayerCount) || result.expectedPlayerCount;
     result.requiredSpecialCount = Math.max(0, Number(metadata.specialCount || 0) || 0);
     result.allowedSpecialCount = result.requiredSpecialCount;
     result.ratingSbcFill = { ...clone3(result.ratingSbcFill) || {} };
-    if (positiveInteger3(metadata.targetRating)) result.ratingSbcFill.targetRating = Number(metadata.targetRating);
+    if (positiveInteger4(metadata.targetRating)) result.ratingSbcFill.targetRating = Number(metadata.targetRating);
     else delete result.ratingSbcFill.targetRating;
     result.dynamicActiveChallengeId = challengeId;
     return result;
   }
   function parseDynamicUpgradeSbcSnapshot(input = {}) {
     const set = input.set || {};
-    const setId = positiveInteger3(set.id);
-    const setName = normalizedText4(set.name);
+    const setId = positiveInteger4(set.id);
+    const setName = normalizedText5(set.name);
     const family = detectDynamicUpgradeFamily(set);
     const diagnostics = [];
     if (!setId) diagnostics.push("stable SBC Set id is missing");
@@ -3669,11 +3991,11 @@
       diagnostics.push(`exactly one Challenge is required; found ${challenges.length}`);
     }
     const parsedChallenges = challenges.map((challenge, index) => {
-      if (!positiveInteger3(challenge?.id)) diagnostics.push(`challenge ${index + 1} has no stable id`);
+      if (!positiveInteger4(challenge?.id)) diagnostics.push(`challenge ${index + 1} has no stable id`);
       const parsed = family.id === "2x84-upgrade" ? parseTwoBy84Challenge(challenge) : parseUpgradeChallenge(challenge, family);
       diagnostics.push(...(parsed.diagnostics || []).map((diagnostic) => challenges.length > 1 ? `challenge ${index + 1} (#${challenge?.id || "?"}): ${diagnostic}` : diagnostic));
       return {
-        challengeId: positiveInteger3(challenge?.id),
+        challengeId: positiveInteger4(challenge?.id),
         requiredPlayerCount: parsed.requiredPlayerCount,
         targetRating: parsed.targetRating,
         specialCount: parsed.specialCount,
@@ -3706,7 +4028,7 @@
       };
     }
     const policy = createDynamicUpgradePolicy(family);
-    const playerCounts = unique3(parsedChallenges.map((challenge) => positiveInteger3(challenge.requiredPlayerCount)).filter(Boolean));
+    const playerCounts = unique3(parsedChallenges.map((challenge) => positiveInteger4(challenge.requiredPlayerCount)).filter(Boolean));
     const maximumSpecialCount = Math.max(0, ...parsedChallenges.map((challenge) => Number(challenge.specialCount || 0) || 0));
     const loop = {
       ...policy,
@@ -3853,8 +4175,8 @@
     const seen = /* @__PURE__ */ new Set();
     for (const result of results || []) {
       const loop = result?.discoveredLoop || result?.loop;
-      const familyId = normalizedText4(loop?.dynamicSbcFamily);
-      const setId = positiveInteger3(loop?.sbcSetIds?.[0]);
+      const familyId = normalizedText5(loop?.dynamicSbcFamily);
+      const setId = positiveInteger4(loop?.sbcSetIds?.[0]);
       if (!loop || !familyId || !setId) continue;
       const key = `${familyId}:${setId}`;
       if (seen.has(key)) continue;
@@ -3862,7 +4184,7 @@
       activities.push({
         familyId,
         setId,
-        setName: normalizedText4(loop.sbcNames?.[0] || loop.name),
+        setName: normalizedText5(loop.sbcNames?.[0] || loop.name),
         rewardPackIds: [...loop.rewardPackIds || []],
         rewardPackNames: [...loop.rewardPackNames || []],
         rewardCount: loop.dynamicRewardCount ?? null,
@@ -3878,7 +4200,7 @@
   }
 
   // src/sbc/set-identity.js
-  function positiveInteger4(value) {
+  function positiveInteger5(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -3886,10 +4208,10 @@
     const available = Array.isArray(sets) ? sets : [];
     const seen = /* @__PURE__ */ new Set();
     for (const value of setIds || []) {
-      const setId = positiveInteger4(value);
+      const setId = positiveInteger5(value);
       if (!setId || seen.has(setId)) continue;
       seen.add(setId);
-      const match = available.find((set) => positiveInteger4(set?.id) === setId);
+      const match = available.find((set) => positiveInteger5(set?.id) === setId);
       if (match) return match;
     }
     return null;
@@ -4523,7 +4845,7 @@
   function uniquePositiveNumbers2(values = []) {
     return values.map(Number).filter((value) => Number.isFinite(value) && value > 0).filter((value, index, list) => list.indexOf(value) === index);
   }
-  function positiveInteger5(value) {
+  function positiveInteger6(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -4748,21 +5070,21 @@
     }
     function getFutbinPlayerId(itemOrDefinitionId) {
       const item = itemOrDefinitionId && typeof itemOrDefinitionId === "object" ? itemOrDefinitionId : null;
-      const definitionId2 = positiveInteger5(item?.definitionId ?? itemOrDefinitionId);
+      const definitionId2 = positiveInteger6(item?.definitionId ?? itemOrDefinitionId);
       if (!definitionId2) return null;
-      const explicitId = positiveInteger5(item?.futbinId ?? item?.futbinPlayerId);
+      const explicitId = positiveInteger6(item?.futbinId ?? item?.futbinPlayerId);
       if (explicitId) return explicitId;
       const futbinIds = safeRead2(safeRead2(runtime, "info"), "futbinId");
-      return positiveInteger5(safeRead2(futbinIds, definitionId2));
+      return positiveInteger6(safeRead2(futbinIds, definitionId2));
     }
     function getFutbinLookupContext(itemOrDefinitionId) {
       const item = itemOrDefinitionId && typeof itemOrDefinitionId === "object" ? itemOrDefinitionId : null;
-      const definitionId2 = positiveInteger5(item?.definitionId ?? itemOrDefinitionId);
+      const definitionId2 = positiveInteger6(item?.definitionId ?? itemOrDefinitionId);
       if (!item || !definitionId2) return null;
       const info = safeRead2(runtime, "info");
       const base = safeRead2(info, "base");
       const staticData = safeRead2(item, "_staticData") || safeRead2(item, "_data") || {};
-      const firstPositive = (...values) => values.map(positiveInteger5).find(Boolean) || null;
+      const firstPositive = (...values) => values.map(positiveInteger6).find(Boolean) || null;
       const nationId = firstPositive(item.nationId, item._nationId, staticData.nationId, staticData._nationId);
       const leagueId = firstPositive(item.leagueId, item._leagueId, staticData.leagueId, staticData._leagueId);
       const teamId = firstPositive(item.teamId, item._teamId, staticData.teamId, staticData._teamId);
@@ -4774,7 +5096,7 @@
         staticData._preferredPosition
       );
       const position = String(safeRead2(safeRead2(info, "posIdToName"), positionId) || "").trim();
-      const season = positiveInteger5(safeRead2(base, "year"));
+      const season = positiveInteger6(safeRead2(base, "year"));
       const platform = String(safeRead2(base, "platform") || "").trim().toLowerCase() === "pc" ? "PC" : "PS";
       if (!nationId || !leagueId || !teamId || !rating || !position || !season) return null;
       return Object.freeze({ definitionId: definitionId2, season, platform, nationId, leagueId, teamId, rating, position });
@@ -5459,7 +5781,7 @@
         return [];
       }
     }
-    function positiveInteger10(value) {
+    function positiveInteger11(value) {
       const number = Number(value);
       return Number.isInteger(number) && number > 0 ? number : null;
     }
@@ -5470,7 +5792,7 @@
     }
     function firstPositiveInteger(values = []) {
       for (const value of values) {
-        const number = positiveInteger10(value);
+        const number = positiveInteger11(value);
         if (number) return number;
       }
       return null;
@@ -5525,7 +5847,7 @@
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId2 = positiveInteger10(item?.id);
+      const itemId2 = positiveInteger11(item?.id);
       return {
         type: "PLAYER_PICK",
         name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
@@ -5658,9 +5980,9 @@
     function normalizeDiscoveryCategory(category) {
       const setIds = collectionValues3(
         category?.setIds || category?.sets || category?.data?.setIds || category?.data?.sets
-      ).map((entry) => positiveInteger10(entry?.id || entry)).filter(Boolean);
+      ).map((entry) => positiveInteger11(entry?.id || entry)).filter(Boolean);
       return {
-        id: positiveInteger10(category?.id || category?.categoryId || category?.data?.id),
+        id: positiveInteger11(category?.id || category?.categoryId || category?.data?.id),
         name: String(
           category?.name || category?.description || category?.displayName || category?.data?.name || category?.data?.description || ""
         ).trim(),
@@ -5684,12 +6006,12 @@
       return [...byKey.values()];
     }
     function discoveryCategoryMembership(set, refreshResult = null) {
-      const setId = positiveInteger10(set?.id);
+      const setId = positiveInteger11(set?.id);
       const directCategories = collectionValues3(
         set?.categoryIds || set?.categories || set?.data?.categoryIds || set?.data?.categories
-      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger10(entry), name: "", setIds: [] });
+      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger11(entry), name: "", setIds: [] });
       const directIds = directCategories.map((category) => category.id).filter(Boolean);
-      const directCategoryId = positiveInteger10(set?.categoryId || set?.data?.categoryId);
+      const directCategoryId = positiveInteger11(set?.categoryId || set?.data?.categoryId);
       if (directCategoryId) directIds.push(directCategoryId);
       const categories = listDiscoveryCategories(refreshResult);
       const matching = [
@@ -5712,7 +6034,7 @@
         set?.challenges,
         set?._challenges
       ];
-      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger10(entry?.id || entry)).filter(Boolean))];
+      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger11(entry?.id || entry)).filter(Boolean))];
     }
     function discoveryRequiredPlayerCount(challenge) {
       const explicit = firstPositiveInteger([
@@ -5722,13 +6044,13 @@
       ]);
       if (explicit) return explicit;
       try {
-        const squadCount = positiveInteger10(challenge?.squad?.getNumOfRequiredPlayers?.());
+        const squadCount = positiveInteger11(challenge?.squad?.getNumOfRequiredPlayers?.());
         if (squadCount) return squadCount;
       } catch {
       }
       if (!challenge?.squad) return null;
       const challengeFormation = formation(challenge?.formation);
-      const formationCount = positiveInteger10(challengeFormation?.generalPositions?.length);
+      const formationCount = positiveInteger11(challengeFormation?.generalPositions?.length);
       if (!formationCount) return null;
       try {
         const brickCount = challenge.squad.getAllBrickIndices?.()?.length;
@@ -5745,7 +6067,7 @@
     }
     function normalizeDiscoveryChallenge(challenge) {
       return {
-        id: positiveInteger10(challenge?.id),
+        id: positiveInteger11(challenge?.id),
         status: String(challenge?.status || challenge?.state || ""),
         completed: challenge?.completed === true || (() => {
           try {
@@ -5769,7 +6091,7 @@
       const rawAwards = collectionValues3(set?.awards || set?.data?.awards);
       const category = discoveryCategoryMembership(set, refreshResult);
       return {
-        id: positiveInteger10(set?.id),
+        id: positiveInteger11(set?.id),
         name: String(set?.name || set?.data?.name || "").trim(),
         status: String(set?.status || set?.state || ""),
         complete: (() => {
@@ -7023,7 +7345,7 @@
   function clone4(value) {
     return cloneLoopDef(value);
   }
-  function positiveInteger6(value) {
+  function positiveInteger7(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -7044,12 +7366,12 @@
   function rewardFingerprint(reward = {}) {
     return {
       type: String(reward.type || ""),
-      resourceId: positiveInteger6(reward.resourceId),
-      definitionId: positiveInteger6(reward.definitionId),
-      packId: positiveInteger6(reward.packId),
-      candidateCount: positiveInteger6(reward.candidateCount),
-      selectionCount: positiveInteger6(reward.selectionCount),
-      count: positiveInteger6(reward.count),
+      resourceId: positiveInteger7(reward.resourceId),
+      definitionId: positiveInteger7(reward.definitionId),
+      packId: positiveInteger7(reward.packId),
+      candidateCount: positiveInteger7(reward.candidateCount),
+      selectionCount: positiveInteger7(reward.selectionCount),
+      count: positiveInteger7(reward.count),
       name: String(reward.name || ""),
       description: String(reward.description || "")
     };
@@ -7058,14 +7380,14 @@
     return [...new Set([
       ...value.challengeIds || [],
       ...(value.challenges || []).map((challenge) => challenge?.id)
-    ].map(positiveInteger6).filter(Boolean))].sort((a, b) => a - b);
+    ].map(positiveInteger7).filter(Boolean))].sort((a, b) => a - b);
   }
   function cachedChallengeSnapshotUsable(cached, index = {}) {
     return index?.complete === true || Array.isArray(cached?.snapshot?.challenges) && cached.snapshot.challenges.length > 0;
   }
   function compatibleIndexCore(value = {}) {
     return {
-      id: positiveInteger6(value.id),
+      id: positiveInteger7(value.id),
       name: String(value.name || ""),
       repeats: value.repeats ?? null,
       startTime: value.startTime ?? null,
@@ -7083,7 +7405,7 @@
   }
   function dynamicSbcIndexFingerprint(index = {}) {
     return fingerprintDynamicSbcValue({
-      id: positiveInteger6(index.id),
+      id: positiveInteger7(index.id),
       name: String(index.name || ""),
       repeats: index.repeats ?? null,
       startTime: index.startTime ?? null,
@@ -7110,7 +7432,7 @@
     }
     const sets = {};
     for (const [key, entry] of Object.entries(cache.sets)) {
-      const setId = positiveInteger6(entry?.setId || key);
+      const setId = positiveInteger7(entry?.setId || key);
       if (!setId || !entry?.fingerprint || !isPlainObject(entry?.snapshot)) continue;
       sets[String(setId)] = {
         setId,
@@ -7183,7 +7505,7 @@
     for (const set of sets) {
       const index = options.snapshotIndex(set, refreshResult);
       if (!options.isCandidate(index, set)) continue;
-      const setId = positiveInteger6(index?.id);
+      const setId = positiveInteger7(index?.id);
       if (!setId) continue;
       currentCandidateIds.add(String(setId));
       stats.candidates++;
@@ -7587,7 +7909,7 @@
     const rating = Number(value);
     return Number.isFinite(rating) ? Math.max(1, Math.min(99, Math.floor(rating))) : fallback;
   }
-  function normalizedText5(value) {
+  function normalizedText6(value) {
     return String(value || "").trim();
   }
   function normalizeRewardAlertSettings(input = {}) {
@@ -7598,12 +7920,12 @@
       desktopEnabled: input.desktopEnabled === true,
       ntfyEnabled: input.ntfyEnabled === true,
       ntfyServer: DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
-      ntfyTopic: normalizedText5(input.ntfyTopic),
-      ntfyToken: normalizedText5(input.ntfyToken)
+      ntfyTopic: normalizedText6(input.ntfyTopic),
+      ntfyToken: normalizedText6(input.ntfyToken)
     });
   }
   function displayName(item = {}) {
-    return normalizedText5(item.name || item.commonName || item.lastName || item.definitionId || item.id) || "Unknown player";
+    return normalizedText6(item.name || item.commonName || item.lastName || item.definitionId || item.id) || "Unknown player";
   }
   function createPackHighlightModel(receipt = {}, settingsInput = {}, context = {}) {
     const settings = normalizeRewardAlertSettings(settingsInput);
@@ -7622,9 +7944,9 @@
     return Object.freeze({
       pack: Object.freeze({
         id: Number(receipt.packRef?.id || 0),
-        name: normalizedText5(receipt.packRef?.name) || normalizedText5(context.purpose) || "Opened pack"
+        name: normalizedText6(receipt.packRef?.name) || normalizedText6(context.purpose) || "Opened pack"
       }),
-      purpose: normalizedText5(context.purpose),
+      purpose: normalizedText6(context.purpose),
       threshold: settings.minimumRating,
       cards: Object.freeze(cards.map((card) => Object.freeze(card))),
       maxRating: Math.max(...cards.map((card) => card.rating))
@@ -8043,7 +8365,7 @@
   // src/reward/futbin-card-id.js
   var CACHE_VERSION = 1;
   var MAX_CACHE_ENTRIES = 2e3;
-  function positiveInteger7(value) {
+  function positiveInteger8(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -8056,9 +8378,9 @@
   }
   function cacheEntryKey(context = {}) {
     const source = safeContext(context);
-    const season = positiveInteger7(source.season);
+    const season = positiveInteger8(source.season);
     const platform = normalizedPlatform(source.platform);
-    const definitionId2 = positiveInteger7(source.definitionId);
+    const definitionId2 = positiveInteger8(source.definitionId);
     if (!season || !platform || !definitionId2) return null;
     return `${season}:${platform}:${definitionId2}`;
   }
@@ -8067,7 +8389,7 @@
     const rawEntries = rawCache?.version === CACHE_VERSION && rawCache?.entries && typeof rawCache.entries === "object" ? rawCache.entries : {};
     for (const [key, value] of Object.entries(rawEntries)) {
       if (!/^\d{2}:(?:PC|PS):\d+$/.test(key)) continue;
-      const futbinPlayerId = positiveInteger7(value);
+      const futbinPlayerId = positiveInteger8(value);
       if (futbinPlayerId) entries[key] = futbinPlayerId;
       if (Object.keys(entries).length >= MAX_CACHE_ENTRIES) break;
     }
@@ -8075,11 +8397,11 @@
   }
   function getCachedFutbinPlayerId(cache, context = {}) {
     const key = cacheEntryKey(context);
-    return key ? positiveInteger7(cache?.entries?.[key]) : null;
+    return key ? positiveInteger8(cache?.entries?.[key]) : null;
   }
   function cacheFutbinPlayerId(cache, context = {}, futbinPlayerId) {
     const key = cacheEntryKey(context);
-    const id = positiveInteger7(futbinPlayerId);
+    const id = positiveInteger8(futbinPlayerId);
     if (!key || !id) return false;
     if (!cache.entries || typeof cache.entries !== "object") cache.entries = {};
     cache.entries[key] = id;
@@ -8091,12 +8413,12 @@
   }
   function createFutbinFilteredPlayersUrl(context = {}) {
     const source = safeContext(context);
-    const season = positiveInteger7(source.season);
+    const season = positiveInteger8(source.season);
     const platform = normalizedPlatform(source.platform);
-    const nationId = positiveInteger7(source.nationId);
-    const leagueId = positiveInteger7(source.leagueId);
-    const teamId = positiveInteger7(source.teamId);
-    const rating = positiveInteger7(source.rating);
+    const nationId = positiveInteger8(source.nationId);
+    const leagueId = positiveInteger8(source.leagueId);
+    const teamId = positiveInteger8(source.teamId);
+    const rating = positiveInteger8(source.rating);
     const position = String(source.position || "").trim();
     if (!season || !platform || !nationId || !leagueId || !teamId || !rating || !position) return null;
     const query2 = new URLSearchParams({
@@ -8113,7 +8435,7 @@
     return `https://www.futbin.org/futbin/api/${season}/getFilteredPlayers?${query2.toString()}`;
   }
   function parseFutbinFilteredPlayerId(responseText, definitionId2) {
-    const targetDefinitionId = positiveInteger7(definitionId2);
+    const targetDefinitionId = positiveInteger8(definitionId2);
     if (!targetDefinitionId || typeof responseText !== "string") return null;
     let response;
     try {
@@ -8122,8 +8444,8 @@
       return null;
     }
     const entries = Array.isArray(response?.data) ? response.data : [];
-    const exactMatch = entries.find((entry) => positiveInteger7(entry?.resource_id) === targetDefinitionId);
-    return positiveInteger7(exactMatch?.ID);
+    const exactMatch = entries.find((entry) => positiveInteger8(entry?.resource_id) === targetDefinitionId);
+    return positiveInteger8(exactMatch?.ID);
   }
   async function mapWithConcurrency(entries, limit, callback) {
     const results = [];
@@ -8149,7 +8471,7 @@
     const queued = /* @__PURE__ */ new Map();
     let cacheHits = 0;
     for (const originalItem of items) {
-      const definitionId2 = positiveInteger7(originalItem?.definitionId);
+      const definitionId2 = positiveInteger8(originalItem?.definitionId);
       if (!definitionId2 || ids.has(definitionId2)) continue;
       let item = originalItem;
       try {
@@ -8157,7 +8479,7 @@
       } catch {
         item = originalItem;
       }
-      const knownId = positiveInteger7(resolveKnownId(item)) || positiveInteger7(resolveKnownId(originalItem));
+      const knownId = positiveInteger8(resolveKnownId(item)) || positiveInteger8(resolveKnownId(originalItem));
       if (knownId) {
         ids.set(definitionId2, knownId);
         continue;
@@ -9173,7 +9495,7 @@
   }
 
   // src/pack/catalog.js
-  function positiveInteger8(value) {
+  function positiveInteger9(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -9197,13 +9519,13 @@
     return cleanName(value).toLowerCase().replace(/\s+/g, " ");
   }
   function packIdFromReward(reward = {}) {
-    return positiveInteger8(reward.packId) || positiveInteger8(reward.resourceId) || positiveInteger8(reward.definitionId);
+    return positiveInteger9(reward.packId) || positiveInteger9(reward.resourceId) || positiveInteger9(reward.definitionId);
   }
   function normalizeInventory(packs = []) {
     const groups = /* @__PURE__ */ new Map();
     for (const pack of packs || []) {
       if (!pack) continue;
-      const id = positiveInteger8(pack.id ?? pack.packId ?? pack.packDefinitionId ?? pack.packAssetId);
+      const id = positiveInteger9(pack.id ?? pack.packId ?? pack.packDefinitionId ?? pack.packAssetId);
       const name = cleanName(pack.name ?? pack.packName ?? pack.displayName);
       if (!id && !name) continue;
       const countValue = Number(pack.count);
@@ -9221,17 +9543,17 @@
     const metadataPackIds = unique4([
       ...index.packIds || [],
       ...rewards.map(packIdFromReward)
-    ], positiveInteger8);
+    ], positiveInteger9);
     const metadataPackNames = unique4([
       ...index.packNames || [],
       ...rewards.flatMap((reward) => [reward?.name, reward?.description])
     ], cleanName);
-    const observedPackIds = unique4(previousEntry?.observedPackIds || [], positiveInteger8);
+    const observedPackIds = unique4(previousEntry?.observedPackIds || [], positiveInteger9);
     const observedPackNames = unique4(previousEntry?.observedPackNames || [], cleanName);
     return {
-      setId: positiveInteger8(index.setId ?? index.id),
+      setId: positiveInteger9(index.setId ?? index.id),
       setName: cleanName(index.setName ?? index.name),
-      packIds: unique4([...observedPackIds, ...metadataPackIds], positiveInteger8),
+      packIds: unique4([...observedPackIds, ...metadataPackIds], positiveInteger9),
       packNames: unique4([...observedPackNames, ...metadataPackNames], cleanName),
       observedPackIds,
       observedPackNames
@@ -9263,7 +9585,7 @@
     });
   }
   function matchLoopRewardSets(loopDef = {}, sbcRewards = []) {
-    const setIds = new Set((loopDef.sbcSetIds || []).map(positiveInteger8).filter(Boolean));
+    const setIds = new Set((loopDef.sbcSetIds || []).map(positiveInteger9).filter(Boolean));
     if (setIds.size) {
       const idMatches = sbcRewards.filter((entry) => setIds.has(entry.setId));
       if (idMatches.length) return { matches: idMatches, matchSource: "set-id", ambiguous: false };
@@ -9299,11 +9621,11 @@
         });
         continue;
       }
-      const packIds = unique4(match.matches.flatMap((entry) => entry.packIds || []), positiveInteger8);
+      const packIds = unique4(match.matches.flatMap((entry) => entry.packIds || []), positiveInteger9);
       const packNames = unique4(match.matches.flatMap((entry) => entry.packNames || []), cleanName);
       loopRewards[loopId] = {
         loopId,
-        setIds: unique4(match.matches.map((entry) => entry.setId), positiveInteger8),
+        setIds: unique4(match.matches.map((entry) => entry.setId), positiveInteger9),
         setNames: unique4(match.matches.map((entry) => entry.setName), cleanName),
         packIds,
         packNames,
@@ -9347,9 +9669,9 @@
     const sourcePackRef = isPlainObject(options.sourcePackRef) ? options.sourcePackRef : {};
     const rewardOfLoopId = cleanName(sourcePackRef.rewardOfLoopId);
     const dynamic = rewardOfLoopId ? options.catalog?.loopRewards?.[rewardOfLoopId] : null;
-    const dynamicPackIds = unique4(dynamic?.packIds || [], positiveInteger8);
+    const dynamicPackIds = unique4(dynamic?.packIds || [], positiveInteger9);
     const dynamicPackNames = unique4(dynamic?.packNames || [], cleanName);
-    const staticPackIds = unique4(options.sourcePackIds || [], positiveInteger8);
+    const staticPackIds = unique4(options.sourcePackIds || [], positiveInteger9);
     const staticPackNames = unique4(options.sourcePackNames || [], cleanName);
     const candidates = [
       ...dynamicPackIds.map((value) => ({ type: "id", value, source: "catalog" })),
@@ -9364,17 +9686,17 @@
       dynamicPackNames,
       staticPackIds,
       staticPackNames,
-      packIds: unique4([...dynamicPackIds, ...staticPackIds], positiveInteger8),
+      packIds: unique4([...dynamicPackIds, ...staticPackIds], positiveInteger9),
       packNames: unique4([...dynamicPackNames, ...staticPackNames], cleanName),
       candidates
     };
   }
   function recordObservedSbcReward(catalog = {}, observation = {}, now = Date.now()) {
-    const setId = positiveInteger8(observation.setId);
+    const setId = positiveInteger9(observation.setId);
     const setName = cleanName(observation.setName);
     const key = setId ? `id:${setId}` : setName ? `name:${normalizedName(setName)}` : "";
     if (!key) return catalog;
-    const packId2 = positiveInteger8(observation.packId);
+    const packId2 = positiveInteger9(observation.packId);
     const packName = cleanName(observation.packName);
     if (!packId2 && !packName) return catalog;
     const entries = new Map((catalog.sbcRewards || []).map((entry) => [sbcRewardKey(entry), { ...entry }]));
@@ -9388,9 +9710,9 @@
     };
     current.setId ||= setId;
     current.setName ||= setName;
-    current.observedPackIds = unique4([packId2, ...current.observedPackIds || []], positiveInteger8);
+    current.observedPackIds = unique4([packId2, ...current.observedPackIds || []], positiveInteger9);
     current.observedPackNames = unique4([packName, ...current.observedPackNames || []], cleanName);
-    current.packIds = unique4([...current.observedPackIds, ...current.packIds || []], positiveInteger8);
+    current.packIds = unique4([...current.observedPackIds, ...current.packIds || []], positiveInteger9);
     current.packNames = unique4([...current.observedPackNames, ...current.packNames || []], cleanName);
     entries.set(key, current);
     return {
@@ -9548,7 +9870,7 @@
   }
 
   // src/workflows/supply-and-craft.js
-  function positiveInteger9(value, fallback = 1, max = 1e3) {
+  function positiveInteger10(value, fallback = 1, max = 1e3) {
     const number = Number(value);
     return Math.max(1, Math.min(max, Number.isFinite(number) ? Math.floor(number) : fallback));
   }
@@ -9559,7 +9881,7 @@
     if (typeof options.challengeProvider !== "function") throw new TypeError("challengeProvider is required");
     if (typeof options.selectPrimary !== "function") throw new TypeError("selectPrimary is required");
     if (typeof options.submit !== "function") throw new TypeError("submit is required");
-    const maxCompletions = positiveInteger9(options.maxCompletions, 1);
+    const maxCompletions = positiveInteger10(options.maxCompletions, 1);
     const result = {
       status: "completed",
       completions: 0,
@@ -9589,7 +9911,7 @@
       let supplied = false;
       if (!selection?.ok && !preserveSupply) {
         for (const supply of options.supplies || []) {
-          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger9(supply.maxRuns, 100, 1e3) : 1;
+          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger10(supply.maxRuns, 100, 1e3) : 1;
           for (let run = 1; run <= maxRuns && !selection?.ok && !preserveSupply; run++) {
             await options.stopPoint?.();
             const supplyResult = await supply.provide({
@@ -11743,6 +12065,8 @@
     dailyRarePack2x84: "starter-daily-rare-pack-2x84"
   });
   var LEGACY_INVENTORY_ONLY_PROFILE_ID = "starter-inventory-only";
+  var LEGACY_DAILY_RARE_PACK_PROFILE_NAME = "Daily + Rare Pack to 2x84+";
+  var DAILY_RARE_PACK_PROFILE_NAME = "Daily + Rare Pack Recycling";
   var ENTITY_COLLECTIONS = Object.freeze([
     "loops",
     "recoveryRecipes",
@@ -11976,7 +12300,17 @@
         }
       };
     });
-    return validateLoopConfig(config, "Daily Rare Pack to 2x84+ starter profile");
+    return validateLoopConfig(config, "Daily Rare Pack Recycling starter profile");
+  }
+  function migrateOfficialStarterMetadata(profile, baseConfig, now = Date.now()) {
+    if (profile?.id !== BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84 || profile?.preset !== "daily-rare-pack-2x84" || profile?.name !== LEGACY_DAILY_RARE_PACK_PROFILE_NAME || (profile.dynamicBindings || []).length) return profile;
+    const previousBase = normalizeLoopConfig(profile.baseConfig || baseConfig);
+    const expected = dailyRarePack2x84StarterConfig(previousBase);
+    const snapshots = [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean);
+    if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), expected))) {
+      return profile;
+    }
+    return { ...clone5(profile), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
   }
   function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
     if (profile?.preset !== "inventory-only" || profile?.id !== LEGACY_INVENTORY_ONLY_PROFILE_ID || profile?.name !== "Inventory Only") return false;
@@ -12047,7 +12381,7 @@
       }),
       createBuilderProfile({
         id: BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84,
-        name: "Daily + Rare Pack to 2x84+",
+        name: DAILY_RARE_PACK_PROFILE_NAME,
         preset: "daily-rare-pack-2x84",
         baseConfig: normalizedBase,
         config: dailyRarePack2x84StarterConfig(normalizedBase),
@@ -12159,7 +12493,7 @@
         });
         const refreshed = refreshUnmodifiedOfficialStarterProfile(normalized, baseConfig, options.now);
         if (refreshed) refreshedStarterIds.add(refreshed.id);
-        return [refreshed || normalized];
+        return [migrateOfficialStarterMetadata(refreshed || normalized, baseConfig, options.now)];
       } catch {
         return [];
       }
@@ -13028,12 +13362,16 @@
   }
   function renderActivityBinding(path, value, context) {
     const enabled = value && typeof value === "object";
+    const materialSink = enabled && MATERIAL_SINK_BASELINES[value.family];
+    const classes = Array.isArray(value?.classes) ? value.classes : [];
     return `<section class="dlr-builder-form-section"><h3>Dynamic SBC activity</h3>
     <div class="dlr-builder-form-grid">
       ${fieldRow("Binding", `<select data-builder-field="${escapeHtml(path)}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value=""${selected(enabled, false)}>None</option><option value="true"${selected(enabled, true)}>Enabled</option></select>`)}
       ${enabled ? fieldRow("Family", selectInput(`${path}.family`, value.family, SBC_ACTIVITY_FAMILY_IDS.map((family) => ({ value: family, label: family })), context.readOnly)) : ""}
       ${enabled ? fieldRow("Required", `<select data-builder-field="${path}.required" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.required)}</select>`) : ""}
       ${enabled ? fieldRow("Category", textInput(`${path}.category`, value.category || "Upgrades", "text", true)) : ""}
+      ${materialSink ? fieldRow("Accepted classes", `<select multiple size="4" data-builder-field="${path}.classes" data-builder-value-type="string-list"${disabled(context.readOnly)}>${MATERIAL_SINK_CLASSES.map((className) => `<option value="${className}"${classes.includes(className) ? " selected" : ""}>${className}</option>`).join("")}</select>`) : ""}
+      ${materialSink ? fieldRow("Preference", selectInput(`${path}.preference`, value.preference, MATERIAL_SINK_PREFERENCES.map((preference) => ({ value: preference, label: preference })), context.readOnly, true)) : ""}
     </div>
   </section>`;
   }
@@ -13726,6 +14064,9 @@
     if (valueType === "object-toggle") {
       if (raw === "") return void 0;
       return raw === "true" ? {} : false;
+    }
+    if (valueType === "string-list") {
+      return [...element?.selectedOptions || []].map((option) => option.value).filter(Boolean);
     }
     if (valueType === "number") return raw === "" ? void 0 : Number(raw);
     if (element?.tagName === "SELECT" && raw === "") return void 0;
@@ -17932,7 +18273,8 @@
     }
     function logBasicActivityDiscovery(snapshot, parsed, loadError) {
       const reward = (snapshot.rewards || []).find((entry) => entry?.type === "PACK") || {};
-      log(`Dynamic SBC scan: Activity set #${snapshot.id || "?"} ${snapshot.name || "?"}; family:${parsed.familyId || "?"}; reward ${reward.name || "?"} (#${reward.packId || reward.resourceId || "?"}); challenges:${snapshot.challenges?.length || 0}; remaining:${parsed.remainingCompletions ?? parsed.activity?.remainingCompletions ?? "?"}; status:${parsed.status}`);
+      const families = (parsed.activities || (parsed.activity ? [parsed.activity] : [])).map((activity) => `${activity.familyId}${activity.materialSink ? `:${activity.materialSink.className}` : ""}`).join(",") || parsed.familyId || "?";
+      log(`Dynamic SBC scan: Activity set #${snapshot.id || "?"} ${snapshot.name || "?"}; family:${families}; reward ${reward.name || "?"} (#${reward.packId || reward.resourceId || "?"}); challenges:${snapshot.challenges?.length || 0}; remaining:${parsed.remainingCompletions ?? parsed.activity?.remainingCompletions ?? "?"}; status:${parsed.status}`);
       if (loadError) log(`Dynamic SBC scan: Activity challenge load warning: ${loadError?.message || loadError}`);
       for (const diagnostic of parsed.diagnostics || []) log(`Dynamic SBC scan: Activity diagnostic: ${diagnostic}`);
     }
@@ -18039,6 +18381,10 @@
                 set: snapshot
               }), loadError, cacheStatus);
               logDynamicUpgradeDiscovery(snapshot, parsed2, loadError);
+              const activityParsed = loadError && cacheStatus !== "load-failed-compatible-cache" ? { status: "unavailable", diagnostics: [`Challenge metadata refresh failed: ${loadError?.message || loadError}`] } : parseBasicUpgradeActivitySnapshot({ set: snapshot });
+              if (activityParsed.status === "supported") {
+                logBasicActivityDiscovery(snapshot, activityParsed, loadError);
+              }
             } else {
               const parsed2 = loadError && cacheStatus !== "load-failed-compatible-cache" ? { status: "unavailable", diagnostics: [`Challenge metadata refresh failed: ${loadError?.message || loadError}`] } : parseBasicUpgradeActivitySnapshot({ set: snapshot });
               logBasicActivityDiscovery(snapshot, parsed2, loadError);
@@ -18159,7 +18505,9 @@
         log(`Dynamic SBC scan: added session Upgrade Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.rewardPackIds?.[0] || "?"}, target rating:${loopDef.ratingSbcFill?.targetRating || "?"}, players:${loopDef.expectedPlayerCount || "?"})`);
       }
       for (const activity of activitySession.activities) {
-        log(`Dynamic SBC scan: resolved activity ${activity.familyId} -> Set #${activity.setId} ${activity.setName}; reward #${activity.rewardPackIds?.[0] || "?"}; consumers:${activity.consumers?.join(", ") || "none"}`);
+        const sink = activity.materialSink;
+        const sinkSummary = sink ? `; class:${sink.className}; cost:${sink.cost}; guaranteed:${sink.reward?.guaranteedCount || "?"}x${sink.reward?.minimumRating || "?"}+ ${sink.reward?.rarity || "?"}` : "";
+        log(`Dynamic SBC scan: resolved activity ${activity.familyId} -> Set #${activity.setId} ${activity.setName}; reward #${activity.rewardPackIds?.[0] || "?"}${sinkSummary}; consumers:${activity.consumers?.join(", ") || "none"}`);
       }
       for (const diagnostic of activitySession.diagnostics) log(`Dynamic SBC scan: activity binding: ${diagnostic}`);
       const upgradeDuplicateCount = upgradeSession.results.filter((result) => result.status === "duplicate").length;
@@ -19858,7 +20206,7 @@
       const override = isPlainObject(loopDef.autoFodderUpgrade) ? loopDef.autoFodderUpgrade : {};
       return {
         id: `${loopDef.id || "fill-and-verify"}-auto-2x84-fodder`,
-        name: "Scanned 2x84+ Fodder Recovery",
+        name: "Scanned Rare Gold Fodder Recovery",
         ...createTwoBy84UpgradePolicy({ hidden: false, forceOpenRewardPacks: true }),
         maxCompletions: 1,
         ...override
@@ -19875,8 +20223,8 @@
     async function craftAutoFodderUpgrade(loopDef, attempt, maxAttempts) {
       const upgradeDef = getAutoFodderUpgradeDef(loopDef);
       if (!hasResolvedSbcIdentity(upgradeDef)) {
-        log(`${loopDef.name}: scanned 2x84+ recovery activity is unavailable; keeping the current squad unsubmitted`);
-        return { ok: false, reason: "scanned 2x84+ recovery activity is unavailable" };
+        log(`${loopDef.name}: scanned Rare Gold recovery activity is unavailable; keeping the current squad unsubmitted`);
+        return { ok: false, reason: "scanned Rare Gold recovery activity is unavailable" };
       }
       await refreshInventoryCaches(`${loopDef.name} ${upgradeDef.name} preflight`, { includePacks: false, quiet: true });
       const selection = selectInventoryPlayers3(upgradeDef);
@@ -21459,7 +21807,7 @@
           if (!configuredFill.ok) {
             const autoFodderLimit2 = getAutoFodderUpgradeAttemptLimit(activeLoopDef);
             if (configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit2) {
-              log(`${loopDef.name}: rating shortage before automatic 2x84+ recovery: ${configuredFill.reason || "unknown reason"}`);
+              log(`${loopDef.name}: rating shortage before automatic Rare Gold recovery: ${configuredFill.reason || "unknown reason"}`);
               const nextAttempt = autoFodderAttempts + 1;
               const recovery = await craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit2);
               if (recovery.ok) {
@@ -21467,7 +21815,7 @@
                 log(`${loopDef.name}: ${getAutoFodderUpgradeDef(activeLoopDef).name} opened successfully; retrying optimized rating fill`);
                 return { status: "retry", reason: "automatic fodder recovery succeeded" };
               }
-              log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || "unknown reason"}`);
+              log(`${loopDef.name}: automatic Rare Gold recovery stopped: ${recovery.reason || "unknown reason"}`);
             } else {
               log(`${loopDef.name}: stopping because ${configuredFill.reason || "configured SBC fill failed"}`);
             }
@@ -21510,7 +21858,7 @@
           }
           const autoFodderLimit = getAutoFodderUpgradeAttemptLimit(activeLoopDef);
           if (!fillResult.submitReady && !inspection.blocked.length && !inspection.missingRequirements?.length && autoFodderAttempts < autoFodderLimit) {
-            log(`${loopDef.name}: submit not ready before automatic 2x84+ recovery (${inspection.items?.length || fillResult.filled || 0} filled)`);
+            log(`${loopDef.name}: submit not ready before automatic Rare Gold recovery (${inspection.items?.length || fillResult.filled || 0} filled)`);
             const nextAttempt = autoFodderAttempts + 1;
             const recovery = await craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit);
             if (recovery.ok) {
@@ -21518,11 +21866,11 @@
               log(`${loopDef.name}: ${getAutoFodderUpgradeDef(activeLoopDef).name} opened successfully; retrying the same Upgrade completion with refreshed inventory`);
               return { status: "retry", reason: "automatic submit-ready recovery succeeded" };
             }
-            log(`${loopDef.name}: automatic 2x84+ recovery stopped: ${recovery.reason || "unknown reason"}`);
-            return { status: "blocked", reason: recovery.reason || "automatic 2x84+ recovery stopped" };
+            log(`${loopDef.name}: automatic Rare Gold recovery stopped: ${recovery.reason || "unknown reason"}`);
+            return { status: "blocked", reason: recovery.reason || "automatic Rare Gold recovery stopped" };
           } else if (!fillResult.submitReady && !inspection.blocked.length && !inspection.missingRequirements?.length && autoFodderLimit > 0 && autoFodderAttempts >= autoFodderLimit) {
-            log(`${loopDef.name}: automatic 2x84+ recovery reached its ${autoFodderLimit} attempt limit for this completion`);
-            return { status: "blocked", reason: "automatic 2x84+ recovery attempt limit reached" };
+            log(`${loopDef.name}: automatic Rare Gold recovery reached its ${autoFodderLimit} attempt limit for this completion`);
+            return { status: "blocked", reason: "automatic Rare Gold recovery attempt limit reached" };
           }
           if (!fillResult.submitReady) fail2(`${loopDef.name}: submit is not ready after protection inspection`);
           let ratingSubmission = null;
@@ -22460,9 +22808,9 @@
           if (loopDef.preCraftPlayerPickLoopId || loopDef.preCraftPlayerPick || loopDef.preCraftPlayerPickSelector) {
             const pickDef = getProvisionPreCraftPickDef(loopDef);
             if (pickDef) {
-              log(`${loopDef.name}: dry-run ${phase} checks ${pickDef.name} before 5x 80+ Upgrade when an unassigned duplicate matches`);
+              log(`${loopDef.name}: dry-run ${phase} checks ${pickDef.name} before the Common Gold Premium stage when an unassigned duplicate matches`);
             } else {
-              log(`${loopDef.name}: configured dynamic pre-craft Player Pick is not available in the current scan; live run would skip it and continue 5x 80+ / 2x 84+ stages`);
+              log(`${loopDef.name}: configured dynamic pre-craft Player Pick is not available in the current scan; live run would skip it and continue Common/Rare Gold recycling stages`);
             }
           }
         } else {
@@ -22623,8 +22971,16 @@
       }
       return result;
     }
+    function getBoundRarePackFallbackDef(loopDef, rareUpgradeDef, activityFamily) {
+      if (!activityFamily || rareUpgradeDef?.activityResolved !== true || String(rareUpgradeDef?.activityBinding?.family || "") !== String(activityFamily)) return null;
+      return {
+        id: `${loopDef?.id || "rare-pack-recycling"}-inventory-fallback`,
+        ...createTwoBy84UpgradePolicy({ hidden: false }),
+        ...cloneLoopDef(rareUpgradeDef),
+        strategy: "fillAndVerifySbc"
+      };
+    }
     async function runRarePackCraftLoop(loopDef) {
-      await waitAppReady();
       const dryRun = loopDef.dryRun === true;
       const consumeAllSourcePacks = loopDef.consumeAllSourcePacks === true;
       const fillRemainingRoundsFromInventory = consumeAllSourcePacks && loopDef.useRoundsAsCompletions === true;
@@ -22634,6 +22990,18 @@
         ...loopDef.rareUpgrade,
         openRewardPacks: loopDef.openRewardPacks === true
       };
+      if (rareUpgradeDef.activityBinding?.required === true && rareUpgradeDef.activityResolved !== true) {
+        const family = String(rareUpgradeDef.activityBinding.family || "Rare Gold material Upgrade");
+        log(`${loopDef.name}: required scanned activity ${family} is unavailable; stopping before opening a source pack`);
+        return {
+          status: "unavailable",
+          packsOpened: 0,
+          stageCompletions: { rare: 0 },
+          reason: `required scanned activity unavailable: ${family}`
+        };
+      }
+      const rareUpgradeLabel = rareUpgradeDef.name || "Rare Gold Recycling Upgrade";
+      await waitAppReady();
       const result = await runPackAndCraftWorkflow({
         maxPacks,
         completionTarget: fillRemainingRoundsFromInventory || !consumeAllSourcePacks ? { id: "rare", max: maxCompletions } : null,
@@ -22680,16 +23048,16 @@
               loopDef,
               rareUpgradeDef,
               isLowRareGoldDuplicate,
-              `2x84+ ${phase === "resume" ? "resumed " : ""}low rare gold`,
+              `${rareUpgradeLabel} ${phase === "resume" ? "resumed " : ""}low rare gold`,
               { maxCompletions: 1 }
             );
-            return { status: "planned", completions: { rare: 0 }, reason: "would submit 2x84+ stage" };
+            return { status: "planned", completions: { rare: 0 }, reason: `would submit ${rareUpgradeLabel} stage` };
           }
           const stageResult = await runReservedDuplicateCraftingStage(
             loopDef,
             rareUpgradeDef,
             isLowRareGoldDuplicate,
-            `2x84+ ${phase === "resume" ? "resumed " : ""}low rare gold`,
+            `${rareUpgradeLabel} ${phase === "resume" ? "resumed " : ""}low rare gold`,
             {
               maxCompletions: remainingCompletions4 ?? 100,
               forceAttempts: phase === "pack" && Number(context?.lowRare || 0) > 0 ? 1 : 0,
@@ -22718,6 +23086,9 @@
             return { status: "unavailable", completions: { rare: 0 }, reason: "no source-exhausted fallback configured" };
           }
           let baseFallbackDef = fallbackLoopId ? findLoopDefById(fallbackLoopId) : null;
+          if (!baseFallbackDef) {
+            baseFallbackDef = getBoundRarePackFallbackDef(loopDef, rareUpgradeDef, fallbackActivityFamily);
+          }
           if (!baseFallbackDef && fallbackActivityFamily) {
             const resolution = resolveSessionLoopByActivityFamily(getLoopDefs(), fallbackActivityFamily);
             if (resolution.status === "ambiguous") {
@@ -22744,7 +23115,7 @@
           fallbackDef.openRewardPacks = loopDef.openRewardPacks === true;
           fallbackDef.forceOpenRewardPacks = false;
           applyDisabledPiles(fallbackDef);
-          log(`${loopDef.name}: no matching source pack remains; running ${fallbackDef.name} for up to ${fallbackCompletions} remaining 2x84+ completion(s)`);
+          log(`${loopDef.name}: no matching source pack remains; running ${fallbackDef.name} for up to ${fallbackCompletions} remaining recycling completion(s)`);
           const fallbackResult = await runFillAndVerifyLoop(fallbackDef);
           const fallbackUnavailableIsExhausted = consumeAllSourcePacks && !fillRemainingRoundsFromInventory && fallbackResult.status === "unavailable";
           return {
@@ -22766,7 +23137,7 @@
         log(`${loopDef.name}: dry run stops before opening packs, moving items, or submitting SBCs`);
       } else {
         const completionSummary = fillRemainingRoundsFromInventory || !consumeAllSourcePacks ? `${rareCompletions}/${maxCompletions}` : `${rareCompletions}`;
-        log(`${loopDef.name}: opened ${result.packsOpened} rare gold pack(s), submitted 2x84+:${completionSummary}`);
+        log(`${loopDef.name}: opened ${result.packsOpened} rare gold pack(s), submitted ${rareUpgradeLabel}:${completionSummary}`);
       }
       return result;
     }
@@ -23785,7 +24156,27 @@
       }
       return result;
     }
+    function unresolvedRequiredMaterialActivities(value, path = "Loop", visited = /* @__PURE__ */ new WeakSet()) {
+      if (!value || typeof value !== "object") return [];
+      if (visited.has(value)) return [];
+      visited.add(value);
+      if (Array.isArray(value)) {
+        return value.flatMap((entry, index) => unresolvedRequiredMaterialActivities(entry, `${path}[${index}]`, visited));
+      }
+      const binding = value.activityBinding;
+      const current = binding?.required === true && MATERIAL_SINK_BASELINES[binding.family] && value.activityResolved !== true ? [{ path, family: binding.family }] : [];
+      return [
+        ...current,
+        ...Object.entries(value).flatMap(([key, entry]) => unresolvedRequiredMaterialActivities(entry, `${path}.${key}`, visited))
+      ];
+    }
     async function runConfiguredLoop(loopDef, roundNo = 1) {
+      const unresolvedActivities = unresolvedRequiredMaterialActivities(loopDef, loopDef.name || loopDef.id || "Loop");
+      if (unresolvedActivities.length) {
+        const reason = `required scanned material activity unavailable: ${unresolvedActivities.map((entry) => `${entry.family} at ${entry.path}`).join(", ")}`;
+        log(`${loopDef.name}: ${reason}; stopping before pack or SBC actions`);
+        return { status: "unavailable", reason };
+      }
       state.loopStack.push(loopDef);
       try {
         return await dispatchConfiguredWorkflow({

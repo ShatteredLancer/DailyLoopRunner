@@ -94,6 +94,35 @@ describe('loop configuration schema', () => {
       .toContain('sourcePackRef is not supported by strategy dailyRoutine');
   });
 
+  it('validates material sink classes and ranking preferences only on semantic families', () => {
+    const loop = {
+      id: 'common-premium',
+      name: 'Common Premium',
+      strategy: 'fillAndVerifySbc',
+      activityBinding: {
+        family: 'common-gold-material-upgrade',
+        classes: ['premium'],
+        preference: 'reward-first',
+        category: 'Upgrades',
+        required: true,
+      },
+      sbcNames: ['Compatibility Upgrade'],
+      requirements: [{ tier: 'gold', rarity: 'common', count: 9 }],
+    };
+    expect(validateLoopDef(loop)).toEqual([]);
+    expect(validateLoopDef({
+      ...loop,
+      activityBinding: { ...loop.activityBinding, classes: ['unknown'], preference: 'random' },
+    })).toEqual(expect.arrayContaining([
+      'activityBinding.classes[0] must be one of: premium, baseline, sub-baseline, incomparable',
+      'activityBinding.preference must be one of: reward-first, quantity-first, cost-first',
+    ]));
+    expect(validateLoopDef({
+      ...loop,
+      activityBinding: { family: 'gold-upgrade', classes: ['baseline'] },
+    })).toContain('activityBinding.classes and preference require a material sink family');
+  });
+
   it('preserves the exact invalid-container and field error messages', () => {
     expect(() => normalizeLoopConfig({})).toThrow(
       'Loop config JSON must be an array or an object with a loops array',

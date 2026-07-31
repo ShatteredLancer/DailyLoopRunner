@@ -62,7 +62,7 @@ Profile 保存完整 Workflow、Loop 和 Recovery 配置。
 - `Built-in`：直接使用当前内置定义。
 - `Default`：可编辑的内置基线副本。
 - `Bronze/Silver Inventory Only`：只将需要铜银材料的相关 Loop 固定为库存模式。
-- `Daily + Rare Pack to 2x84+`：One-click Daily 后追加 Rare Pack 转 2x84+。
+- `Daily + Rare Pack Recycling`：One-click Daily 后追加 Rare Pack 回收，优先使用当前 Rare Gold Premium，否则使用 Rare Gold Baseline。
 
 Builder 将每个 Profile 分为：
 

@@ -88,6 +88,9 @@ function normalizeFieldValue(element) {
     if (raw === '') return undefined;
     return raw === 'true' ? {} : false;
   }
+  if (valueType === 'string-list') {
+    return [...(element?.selectedOptions || [])].map((option) => option.value).filter(Boolean);
+  }
   if (valueType === 'number') return raw === '' ? undefined : Number(raw);
   if (element?.tagName === 'SELECT' && raw === '') return undefined;
   if (raw === '' && ['special-kind', 'loop-reference'].includes(valueType)) return undefined;

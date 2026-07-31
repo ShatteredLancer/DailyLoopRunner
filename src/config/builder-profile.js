@@ -15,6 +15,8 @@ export const BUILDER_STARTER_PROFILE_IDS = Object.freeze({
 });
 
 const LEGACY_INVENTORY_ONLY_PROFILE_ID = 'starter-inventory-only';
+const LEGACY_DAILY_RARE_PACK_PROFILE_NAME = 'Daily + Rare Pack to 2x84+';
+const DAILY_RARE_PACK_PROFILE_NAME = 'Daily + Rare Pack Recycling';
 
 const ENTITY_COLLECTIONS = Object.freeze([
   'loops',
@@ -279,7 +281,21 @@ function dailyRarePack2x84StarterConfig(baseConfig) {
       },
     };
   });
-  return validateLoopConfig(config, 'Daily Rare Pack to 2x84+ starter profile');
+  return validateLoopConfig(config, 'Daily Rare Pack Recycling starter profile');
+}
+
+function migrateOfficialStarterMetadata(profile, baseConfig, now = Date.now()) {
+  if (profile?.id !== BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84
+    || profile?.preset !== 'daily-rare-pack-2x84'
+    || profile?.name !== LEGACY_DAILY_RARE_PACK_PROFILE_NAME
+    || (profile.dynamicBindings || []).length) return profile;
+  const previousBase = normalizeLoopConfig(profile.baseConfig || baseConfig);
+  const expected = dailyRarePack2x84StarterConfig(previousBase);
+  const snapshots = [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean);
+  if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), expected))) {
+    return profile;
+  }
+  return { ...clone(profile), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
 }
 
 function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
@@ -359,7 +375,7 @@ export function createBuilderStarterProfiles(baseConfig, options = {}) {
     }),
     createBuilderProfile({
       id: BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84,
-      name: 'Daily + Rare Pack to 2x84+',
+      name: DAILY_RARE_PACK_PROFILE_NAME,
       preset: 'daily-rare-pack-2x84',
       baseConfig: normalizedBase,
       config: dailyRarePack2x84StarterConfig(normalizedBase),
@@ -475,7 +491,7 @@ export function normalizeBuilderStore(store, baseConfig, options = {}) {
       });
       const refreshed = refreshUnmodifiedOfficialStarterProfile(normalized, baseConfig, options.now);
       if (refreshed) refreshedStarterIds.add(refreshed.id);
-      return [refreshed || normalized];
+      return [migrateOfficialStarterMetadata(refreshed || normalized, baseConfig, options.now)];
     } catch {
       return [];
     }

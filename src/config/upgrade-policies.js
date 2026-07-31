@@ -82,8 +82,14 @@ export function createHighRatedUpgradePolicy(overrides = {}) {
       ...createTotwUpgradePolicy({ forceOpenRewardPacks: false }),
     },
     autoFodderUpgrade: {
-      name: 'Scanned 2x84+ Upgrade',
-      activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: false },
+      name: 'Scanned Rare Gold Recycling Upgrade',
+      activityBinding: {
+        family: 'rare-gold-material-upgrade',
+        classes: ['premium', 'baseline'],
+        preference: 'reward-first',
+        category: 'Upgrades',
+        required: false,
+      },
       maxAttemptsPerCompletion: 3,
       ...createTwoBy84UpgradePolicy({ hidden: false, forceOpenRewardPacks: true }),
     },

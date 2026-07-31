@@ -53,7 +53,7 @@ Built-in objects support View, Duplicate, and Override. They do not support dire
 
 Dynamic objects are read-only snapshots. A Workflow may reference a standalone Dynamic SBC only when its stable identity can be recorded. The Builder stores Loop IDs, Set IDs, Pick resource IDs or Pack reward IDs, and the last valid definition. A later scan refreshes the effective definition. An unresolved or expired standalone binding is marked unavailable and cannot be activated silently.
 
-Dynamic discovery has a second mode for built-in workflow roles: `activityBinding`. Daily Upgrades, inventory exhaustion stages, Provision crafting stages, Daily Rare's 2x84 consumer, automatic TOTW/2x84 recovery, and Unassigned Recovery recipes declare a supported activity family. The current scan materializes the matching EA Set into the existing workflow object; users do not add these consumers from the Dynamic SBC library one by one. Standalone 2x84, TOTW, and high-rated xN Loops are generated directly from scan metadata.
+Dynamic discovery has a second mode for built-in workflow roles: `activityBinding`. Daily Upgrades, inventory exhaustion stages, Provision crafting stages, Rare Gold recycling, automatic TOTW/fodder recovery, and Unassigned Recovery recipes declare a supported activity family. The current scan materializes the selected EA Set into the existing workflow object; users do not add these consumers from the Dynamic SBC library one by one. Standalone TOTW and high-rated xN Loops are generated directly from scan metadata.
 
 The boundary is strict:
 
@@ -98,7 +98,7 @@ Every store includes three starter profiles:
 
 - **Default**: follows the built-in configuration and inherits future built-in changes through rebase.
 - **Bronze/Silver Inventory Only**: sets `inventoryMode: "inventory-only"` on configurable Loops whose target or requirements consume bronze/silver players, including Daily Bronze, Daily Silver, and Daily Common. Other configurable Loops and container Workflows are explicitly set to `normal`, so this profile remains scoped even when the main-panel global Inventory only checkbox is enabled.
-- **Daily + Rare Pack to 2x84+**: keeps the four built-in One-click Daily stages, then appends `Daily Rare Pack to 2x84+ Loop` with source-pack exhaustion and at most one inventory fallback completion.
+- **Daily + Rare Pack Recycling**: keeps the four built-in One-click Daily stages, then appends `Daily Rare Pack Recycling Loop` with source-pack exhaustion and at most one inventory fallback completion. The recycling SBC is selected from current Rare Gold Premium candidates, then the Rare Gold Baseline.
 
 Built-in, Default, and Bronze/Silver Inventory Only all keep One-click Daily at four stages. The standalone Rare Pack Loop remains available in every configuration.
 
@@ -224,7 +224,7 @@ The UI supports fixed limits, user input at run time, current EA daily remaining
 
 ### 11.6 Dynamic SBC activity binding
 
-`Dynamic SBC activity` selects a supported semantic family such as Daily Bronze, Common Gold crafting, 2x84, TOTW, or a safely parsed high-rated xN Upgrade. It is available on direct Loop definitions and on nested crafting, stage, automatic recovery, and Recovery recipe editors.
+`Dynamic SBC activity` selects a supported semantic family such as Daily Bronze, Common/Rare Gold material recycling, TOTW, or a safely parsed high-rated xN Upgrade. Material families also expose accepted classes (`premium`, `baseline`, and explicit lower classes) plus `reward-first`, `quantity-first`, or `cost-first` preference. It is available on direct Loop definitions and on nested crafting, stage, automatic recovery, and Recovery recipe editors.
 
 Each nested consumer owns its binding. A parent binding is not inherited by `craftingUpgrades`, `stages`, `autoTotwUpgrade`, `autoFodderUpgrade`, or Recovery recipes. The scanner may replace only live EA metadata; configured safety fields remain in the draft and are merged into the materialized session definition.
 

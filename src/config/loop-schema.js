@@ -16,6 +16,11 @@ import {
   UNASSIGNED_RECOVERY_POLICIES,
 } from './recovery.js';
 import { SBC_ACTIVITY_FAMILY_IDS } from './activity-discovery.js';
+import {
+  MATERIAL_SINK_BASELINES,
+  MATERIAL_SINK_CLASSES,
+  MATERIAL_SINK_PREFERENCES,
+} from './material-sink.js';
 
 const INVENTORY_PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 const SOURCE_PACK_REF_STRATEGIES = Object.freeze([
@@ -90,7 +95,7 @@ function validateActivityBinding(value, path, errors) {
     errors.push(`${path} must be an object`);
     return;
   }
-  const allowedFields = new Set(['family', 'category', 'required']);
+  const allowedFields = new Set(['family', 'category', 'required', 'classes', 'preference']);
   Object.keys(value).forEach((field) => {
     if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
   });
@@ -104,6 +109,23 @@ function validateActivityBinding(value, path, errors) {
   }
   if (value.required !== undefined && typeof value.required !== 'boolean') {
     errors.push(`${path}.required must be boolean`);
+  }
+  if (value.classes !== undefined) {
+    if (!Array.isArray(value.classes) || !value.classes.length) {
+      errors.push(`${path}.classes must be a non-empty array`);
+    } else {
+      value.classes.forEach((className, index) => {
+        if (!MATERIAL_SINK_CLASSES.includes(className)) {
+          errors.push(`${path}.classes[${index}] must be one of: ${MATERIAL_SINK_CLASSES.join(', ')}`);
+        }
+      });
+    }
+  }
+  if (value.preference !== undefined && !MATERIAL_SINK_PREFERENCES.includes(value.preference)) {
+    errors.push(`${path}.preference must be one of: ${MATERIAL_SINK_PREFERENCES.join(', ')}`);
+  }
+  if ((value.classes !== undefined || value.preference !== undefined) && !MATERIAL_SINK_BASELINES[value.family]) {
+    errors.push(`${path}.classes and preference require a material sink family`);
   }
 }
 

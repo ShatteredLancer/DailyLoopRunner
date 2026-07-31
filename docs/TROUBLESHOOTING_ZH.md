@@ -61,7 +61,7 @@ Active Builder profile ... built-in conflict(s) require resolution
 
 ## 6. 奖励包没有被打开
 
-先确认实际 Profile 和步骤。Built-in One-click Daily 只有四步，不处理最终 Daily Rare packs；必须使用 `Daily + Rare Pack to 2x84+` Profile 才有第五步。
+先确认实际 Profile 和步骤。Built-in One-click Daily 只有四步，不处理最终 Daily Rare packs；必须使用 `Daily + Rare Pack Recycling` Profile 才有第五步。
 
 日志应同时显示：
 

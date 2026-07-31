@@ -62,6 +62,50 @@ describe('basic Upgrade activity discovery', () => {
     expect(parsed.diagnostics.join(' ')).toContain('CHEMISTRY_POINTS');
   });
 
+  it('uses the Set name when EA omits Pack text and keeps unrestricted Gold sinks common-only', () => {
+    const common = parseBasicUpgradeActivitySnapshot({
+      set: set({
+        id: 501,
+        name: '5x 80+ Upgrade',
+        reward: '',
+        players: 9,
+        requirements: [quality('gold', -1)],
+      }),
+    });
+    expect(common).toMatchObject({
+      status: 'supported',
+      activities: expect.arrayContaining([
+        expect.objectContaining({ familyId: 'common-gold-crafting-upgrade' }),
+        expect.objectContaining({
+          familyId: 'common-gold-material-upgrade',
+          requirements: [{ tier: 'gold', rarity: 'common', count: 9 }],
+          materialSink: expect.objectContaining({
+            material: 'common-gold',
+            className: 'premium',
+            cost: 9,
+            reward: expect.objectContaining({ guaranteedCount: 5, minimumRating: 80 }),
+          }),
+        }),
+      ]),
+    });
+
+    const rare = parseBasicUpgradeActivitySnapshot({
+      set: set({
+        id: 502,
+        name: '2x 84+ Upgrade',
+        reward: '',
+        players: 6,
+        requirements: [quality('gold', -1), rarity('rare', -1)],
+      }),
+    });
+    expect(rare.activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        familyId: 'rare-gold-material-upgrade',
+        materialSink: expect.objectContaining({ className: 'baseline' }),
+      }),
+    ]));
+  });
+
   it('materializes direct, nested and recovery bindings while preserving safety policy', () => {
     const snapshot = set({
       id: 500,
@@ -160,7 +204,7 @@ describe('basic Upgrade activity discovery', () => {
       id: 842,
       name: '2x 84+ Upgrade',
       reward: '2x 84+ Rare Gold Players Pack',
-      players: 7,
+      players: 6,
       requirements: [quality('gold', -1), rarity('rare', -1)],
     });
     const upgradeSession = buildUpgradeDiscoverySession({
@@ -182,15 +226,150 @@ describe('basic Upgrade activity discovery', () => {
       autoTotwUpgrade: { sbcSetIds: [841], dynamicSbcFamily: 'totw-upgrade', activityResolved: true },
       autoFodderUpgrade: {
         sbcSetIds: [842],
-        dynamicSbcFamily: '2x84-upgrade',
+        dynamicSbcFamily: 'rare-gold-material-upgrade',
         activityResolved: true,
-        requirements: [expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 7 })],
+        requirements: [expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 6 })],
       },
     });
     expect(activitySession.activities.find((activity) => activity.familyId === 'totw-upgrade').consumers)
       .toEqual([`Loop:${specializedX10.id}`]);
-    expect(activitySession.activities.find((activity) => activity.familyId === '2x84-upgrade').consumers)
+    expect(activitySession.activities.find((activity) => activity.familyId === 'rare-gold-material-upgrade').consumers)
       .toEqual([`Loop:${specializedX10.id}`]);
+  });
+
+  it('selects the best Common Gold Premium while leaving Gold Upgrade as the explicit baseline', () => {
+    const baseline = set({
+      id: 600,
+      name: 'Gold Upgrade',
+      reward: 'Two Rare Gold Players Pack',
+      players: 11,
+      requirements: [quality('gold', -1), rarity('common', -1)],
+    });
+    const quantityPremium = set({
+      id: 601,
+      name: '6x 80+ Upgrade',
+      reward: '6x 80+ Rare Gold Players Pack',
+      players: 9,
+      requirements: [quality('gold', -1), rarity('common', -1)],
+    });
+    const ratingPremium = set({
+      id: 602,
+      name: '3x 82+ Upgrade',
+      reward: '3x 82+ Rare Gold Players Pack',
+      players: 8,
+      requirements: [quality('gold', -1), rarity('common', -1)],
+    });
+    const loop = {
+      id: 'common-premium',
+      strategy: 'inventoryExhaustion',
+      stages: [{
+        name: 'Common Gold Premium',
+        activityBinding: {
+          family: 'common-gold-material-upgrade',
+          classes: ['premium'],
+          preference: 'reward-first',
+          required: true,
+        },
+        sbcNames: ['Compatibility'],
+        requirements: [{ tier: 'gold', rarity: 'common', count: 9, maxRating: 81 }],
+      }],
+    };
+    const session = buildActivityBindingSession({
+      sets: [baseline, quantityPremium, ratingPremium],
+      configuredLoops: [loop],
+    });
+
+    expect(session.loopOverrides['common-premium'].stages[0]).toMatchObject({
+      name: '3x 82+ Upgrade',
+      sbcSetIds: [602],
+      materialSinkClass: 'premium',
+      materialSinkCost: 8,
+      requirements: [expect.objectContaining({ count: 8, maxRating: 81 })],
+    });
+    expect(session.activities.find((activity) => (
+      activity.familyId === 'common-gold-material-upgrade' && activity.setId === 600
+    )).materialSink.className).toBe('baseline');
+    expect(session.activities.find((activity) => (
+      activity.familyId === 'common-gold-material-upgrade' && activity.setId === 600
+    )).consumers).toEqual([]);
+    expect(session.activities.find((activity) => (
+      activity.familyId === 'common-gold-material-upgrade' && activity.setId === 602
+    )).consumers).toEqual(['Loop:common-premium']);
+  });
+
+  it('does not authorize an unknown reward or choose incomparable Premium candidates without a preference', () => {
+    const unknown = set({
+      id: 610,
+      name: 'Mystery Upgrade',
+      reward: 'Mystery Players Pack',
+      players: 8,
+      requirements: [quality('gold', -1), rarity('common', -1)],
+    });
+    const quantity = set({
+      id: 611,
+      name: '6x 80+ Upgrade',
+      reward: '6x 80+ Rare Gold Players Pack',
+      players: 9,
+      requirements: [quality('gold', -1), rarity('common', -1)],
+    });
+    const rating = set({
+      id: 612,
+      name: '3x 82+ Upgrade',
+      reward: '3x 82+ Rare Gold Players Pack',
+      players: 9,
+      requirements: [quality('gold', -1), rarity('common', -1)],
+    });
+    const loop = {
+      id: 'ambiguous',
+      strategy: 'inventoryExhaustion',
+      stages: [{
+        name: 'Common Premium',
+        activityBinding: { family: 'common-gold-material-upgrade', classes: ['premium'] },
+        sbcNames: ['Compatibility'],
+        requirements: [{ tier: 'gold', rarity: 'common', count: 9 }],
+      }],
+    };
+    const session = buildActivityBindingSession({ sets: [unknown, quantity, rating], configuredLoops: [loop] });
+    expect(session.activities.some((activity) => activity.setId === 610)).toBe(false);
+    expect(session.loopOverrides).toEqual({});
+    expect(session.diagnostics.join(' ')).toContain('ambiguous');
+  });
+
+  it('materializes a future Rare Gold Premium without a 2x84 identity template', () => {
+    const futurePremium = set({
+      id: 620,
+      name: '3x 85+ Upgrade',
+      reward: '3x 85+ Rare Gold Players Pack',
+      players: 5,
+      requirements: [quality('gold', -1), rarity('rare', -1)],
+    });
+    const session = buildActivityBindingSession({
+      sets: [futurePremium],
+      configuredLoops: [{
+        id: 'rare-recycling',
+        strategy: 'rarePackTo84Upgrade',
+        sourcePackNames: ['Source'],
+        rareUpgrade: {
+          name: 'Rare Gold Recycling',
+          activityBinding: {
+            family: 'rare-gold-material-upgrade',
+            classes: ['premium', 'baseline'],
+            preference: 'reward-first',
+            required: true,
+          },
+          sbcNames: ['2x 84+ Upgrade'],
+          requirements: [{ tier: 'gold', rarity: 'rare', count: 6, maxRating: 81 }],
+        },
+      }],
+    });
+
+    expect(session.loopOverrides['rare-recycling'].rareUpgrade).toMatchObject({
+      name: '3x 85+ Upgrade',
+      sbcSetIds: [620],
+      dynamicSbcFamily: 'rare-gold-material-upgrade',
+      materialSinkClass: 'premium',
+      requirements: [expect.objectContaining({ count: 5, maxRating: 81 })],
+    });
   });
 
   it('does not choose between multiple Sets for the same family', () => {

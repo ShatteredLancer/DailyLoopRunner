@@ -1,5 +1,12 @@
 import { cloneLoopDef } from '../domain/objects.js';
 import { readEligibilityRequirements } from '../selection/rating-model.js';
+import {
+  classifyMaterialSinkCandidate,
+  MATERIAL_SINK_BASELINES,
+  MATERIAL_SINK_FAMILIES,
+  parseMaterialSinkReward,
+  selectMaterialSinkCandidate,
+} from './material-sink.js';
 
 const SUPPORTED_REQUIREMENT_KEYS = new Set([
   'PLAYER_QUALITY',
@@ -40,6 +47,7 @@ const FAMILY_DEFS = Object.freeze([
 export const SBC_ACTIVITY_FAMILIES = FAMILY_DEFS;
 export const SBC_ACTIVITY_FAMILY_IDS = Object.freeze([
   ...FAMILY_DEFS.map((family) => family.id),
+  ...Object.values(MATERIAL_SINK_FAMILIES),
   'totw-upgrade',
   'high-rated-x10',
   'high-rated-pack-upgrade',
@@ -214,6 +222,35 @@ function activityIdentityText(set, rewards) {
   ].join(' ');
 }
 
+function materialSinkFamily(requirements = []) {
+  if (requirements.length !== 1 || requirements[0].tier !== 'gold') return null;
+  if (requirements[0].rarity === 'rare') return MATERIAL_SINK_FAMILIES.rareGold;
+  return MATERIAL_SINK_FAMILIES.commonGold;
+}
+
+function materialSinkSelectionRequirements(requirements = [], familyId) {
+  if (familyId !== MATERIAL_SINK_FAMILIES.commonGold) return requirements;
+  return requirements.map((requirement) => (
+    requirement.tier === 'gold' && !requirement.rarity
+      ? { ...requirement, rarity: 'common' }
+      : requirement
+  ));
+}
+
+function createActivity({ familyId, setId, setName, requirements, rewards, remaining, challenges, materialSink = null }) {
+  return {
+    familyId,
+    setId,
+    setName,
+    requirements,
+    rewardPackIds: rewards.ids,
+    rewardPackNames: rewards.names,
+    remainingCompletions: remaining,
+    challengeIds: challenges.map((challenge) => positiveInteger(challenge.id)).filter(Boolean),
+    ...(materialSink ? { materialSink } : {}),
+  };
+}
+
 export function parseBasicUpgradeActivitySnapshot(input = {}) {
   const set = input.set || {};
   const setId = positiveInteger(set.id);
@@ -238,11 +275,25 @@ export function parseBasicUpgradeActivitySnapshot(input = {}) {
   if (diagnostics.length) return { status: 'unsupported', setId, diagnostics: unique(diagnostics) };
 
   const identityText = activityIdentityText(set, rewards);
+  const sinkFamilyId = materialSinkFamily(parsedChallenge.requirements);
+  const sinkRequirements = materialSinkSelectionRequirements(parsedChallenge.requirements, sinkFamilyId);
   const family = FAMILY_DEFS.find((candidate) => (
-    requirementsEqual(candidate.requirements, parsedChallenge.requirements)
+    (requirementsEqual(candidate.requirements, parsedChallenge.requirements)
+      || requirementsEqual(candidate.requirements, sinkRequirements))
       && (!candidate.identityPattern || candidate.identityPattern.test(identityText))
   ));
-  if (!family) {
+  const sinkBaseline = MATERIAL_SINK_BASELINES[sinkFamilyId];
+  const sinkReward = sinkFamilyId
+    ? parseMaterialSinkReward(rewards.packs[0], { fallbackText: setName, fallbackRarity: 'rare' })
+    : null;
+  const sinkClassification = sinkBaseline && sinkReward
+    ? classifyMaterialSinkCandidate({
+      familyId: sinkFamilyId,
+      cost: parsedChallenge.requiredPlayerCount,
+      reward: sinkReward,
+    })
+    : null;
+  if (!family && !sinkClassification) {
     return {
       status: 'ignored',
       setId,
@@ -252,22 +303,51 @@ export function parseBasicUpgradeActivitySnapshot(input = {}) {
 
   const remaining = remainingCompletions(set);
   if (remaining === 0) {
-    return { status: 'completed', setId, familyId: family.id, remainingCompletions: 0, diagnostics: [] };
+    return {
+      status: 'completed',
+      setId,
+      familyId: family?.id || sinkFamilyId,
+      remainingCompletions: 0,
+      diagnostics: [],
+    };
   }
-  return {
-    status: 'supported',
-    setId,
-    familyId: family.id,
-    activity: {
+  const activities = [];
+  if (family) {
+    activities.push(createActivity({
       familyId: family.id,
       setId,
       setName,
       requirements: parsedChallenge.requirements,
-      rewardPackIds: rewards.ids,
-      rewardPackNames: rewards.names,
-      remainingCompletions: remaining,
-      challengeIds: challenges.map((challenge) => positiveInteger(challenge.id)).filter(Boolean),
-    },
+      rewards,
+      remaining,
+      challenges,
+    }));
+  }
+  if (sinkClassification) {
+    activities.push(createActivity({
+      familyId: sinkFamilyId,
+      setId,
+      setName,
+      requirements: sinkRequirements,
+      rewards,
+      remaining,
+      challenges,
+      materialSink: {
+        material: sinkBaseline.material,
+        className: sinkClassification.className,
+        relation: sinkClassification.relation,
+        cost: parsedChallenge.requiredPlayerCount,
+        reward: sinkReward,
+      },
+    }));
+  }
+  const primaryActivity = activities[0];
+  return {
+    status: 'supported',
+    setId,
+    familyId: primaryActivity.familyId,
+    activity: primaryActivity,
+    activities,
     diagnostics: [],
   };
 }
@@ -303,6 +383,7 @@ function mergeRequirements(scanned = [], configured = []) {
 export function mergeScannedActivityMetadata(target = {}, activity = {}) {
   const merged = {
     ...clone(target),
+    ...(activity.materialSink ? { name: activity.setName } : {}),
     sbcSetIds: unique([activity.setId, ...(target.sbcSetIds || [])].map(positiveInteger).filter(Boolean)),
     sbcNames: unique([activity.setName, ...(target.sbcNames || [])].map(normalizedText).filter(Boolean)),
     rewardPackIds: unique([...(activity.rewardPackIds || []), ...(target.rewardPackIds || [])].map(positiveInteger).filter(Boolean)),
@@ -311,6 +392,11 @@ export function mergeScannedActivityMetadata(target = {}, activity = {}) {
     dynamicSbcFamily: activity.familyId,
     scannedMetadata: true,
     activityResolved: true,
+    ...(activity.materialSink ? {
+      materialSinkClass: activity.materialSink.className,
+      materialSinkCost: activity.materialSink.cost,
+      materialSinkReward: clone(activity.materialSink.reward),
+    } : {}),
   };
   if (Array.isArray(target.requirements)) {
     merged.requirements = mergeRequirements(activity.requirements, target.requirements);
@@ -322,6 +408,18 @@ function materializeBoundTarget(target, activitiesByFamily, diagnostics, path) {
   if (!target?.activityBinding?.family) return clone(target);
   const family = target.activityBinding.family;
   const matches = activitiesByFamily.get(family) || [];
+  if (MATERIAL_SINK_BASELINES[family]) {
+    const resolution = selectMaterialSinkCandidate(matches, target.activityBinding);
+    if (resolution.status === 'resolved') {
+      return mergeScannedActivityMetadata(target, resolution.candidate);
+    }
+    if (resolution.status === 'ambiguous') {
+      diagnostics.push(`${path}: activity family ${family} is ambiguous (${resolution.matches.map((entry) => `#${entry.setId} ${entry.setName}`).join(', ')})`);
+    } else {
+      diagnostics.push(`${path}: activity family ${family} has no candidate in classes ${(target.activityBinding.classes || ['premium', 'baseline']).join('/')}; ${target.activityBinding.required === true ? 'runtime preflight will block this consumer' : 'compatibility fallback remains active'}`);
+    }
+    return clone(target);
+  }
   if (matches.length === 1) return mergeScannedActivityMetadata(target, matches[0]);
   if (matches.length > 1) {
     diagnostics.push(`${path}: activity family ${family} is ambiguous (${matches.map((entry) => `#${entry.setId} ${entry.setName}`).join(', ')})`);
@@ -354,20 +452,22 @@ function materializeLoop(loop, activitiesByFamily, diagnostics) {
   return result;
 }
 
-function containsResolvedFamily(value, familyId) {
+function containsResolvedActivity(value, familyId, setId) {
   if (!value || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return value.some((entry) => containsResolvedFamily(entry, familyId));
-  if (value.dynamicSbcFamily === familyId && value.activityResolved === true) return true;
-  return Object.values(value).some((entry) => containsResolvedFamily(entry, familyId));
+  if (Array.isArray(value)) return value.some((entry) => containsResolvedActivity(entry, familyId, setId));
+  if (value.dynamicSbcFamily === familyId
+    && value.activityResolved === true
+    && (value.sbcSetIds || []).map(Number).includes(Number(setId))) return true;
+  return Object.values(value).some((entry) => containsResolvedActivity(entry, familyId, setId));
 }
 
-function activityConsumers(familyId, loopOverrides, recoveryRecipeOverrides) {
+function activityConsumers(activity, loopOverrides, recoveryRecipeOverrides) {
   return unique([
     ...Object.values(loopOverrides)
-      .filter((loop) => containsResolvedFamily(loop, familyId))
+      .filter((loop) => containsResolvedActivity(loop, activity.familyId, activity.setId))
       .map((loop) => `Loop:${loop.id}`),
     ...Object.values(recoveryRecipeOverrides)
-      .filter((recipe) => containsResolvedFamily(recipe, familyId))
+      .filter((recipe) => containsResolvedActivity(recipe, activity.familyId, activity.setId))
       .map((recipe) => `Recovery:${recipe.id}`),
   ]);
 }
@@ -376,7 +476,9 @@ export function buildActivityBindingSession(input = {}) {
   const results = (input.sets || []).map((set) => parseBasicUpgradeActivitySnapshot({ set }));
   const activitiesByFamily = new Map();
   const activities = [
-    ...results.filter((result) => result.status === 'supported' && result.activity).map((result) => result.activity),
+    ...results
+      .filter((result) => result.status === 'supported')
+      .flatMap((result) => result.activities || (result.activity ? [result.activity] : [])),
     ...(input.additionalActivities || []),
   ];
   const seenActivities = new Set();
@@ -414,7 +516,7 @@ export function buildActivityBindingSession(input = {}) {
     diagnostics: unique(diagnostics),
     activities: [...activitiesByFamily.values()].flat().map((activity) => ({
       ...clone(activity),
-      consumers: activityConsumers(activity.familyId, loopOverrides, recoveryRecipeOverrides),
+      consumers: activityConsumers(activity, loopOverrides, recoveryRecipeOverrides),
     })),
   };
 }

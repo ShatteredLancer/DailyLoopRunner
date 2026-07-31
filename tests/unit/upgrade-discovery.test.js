@@ -75,7 +75,7 @@ describe('dynamic Upgrade discovery', () => {
       requiredSpecialKind: 'totw-tots-fof',
       maxCompletions: 5,
       autoTotwUpgrade: { activityBinding: { family: 'totw-upgrade', required: true } },
-      autoFodderUpgrade: { activityBinding: { family: '2x84-upgrade', required: false } },
+      autoFodderUpgrade: { activityBinding: { family: 'rare-gold-material-upgrade', required: false } },
     });
     expect(result.loop.ratingSbcFill.targetRating).toBe(88);
   });
@@ -178,6 +178,27 @@ describe('dynamic Upgrade discovery', () => {
     ]);
     expect(collectScannedUpgradeActivities([{ loop: result.loop }])[0].requirements)
       .toEqual([{ tier: 'gold', rarity: 'rare', count: 7 }]);
+  });
+
+  it('does not misclassify a pure Rare Gold material sink as a TEAM_RATING Upgrade', () => {
+    const pureRare = twoBy84Set({
+      id: 845,
+      name: '3x 85+ Upgrade',
+      rewards: [{ type: 'PACK', packId: 1032, name: '3x 85+ Rare Gold Players Pack' }],
+      challenges: [{
+        id: 846,
+        requiredPlayerCount: 5,
+        eligibilityRequirements: [
+          { key: 'PLAYER_QUALITY', values: ['gold'], count: -1 },
+          { key: 'PLAYER_RARITY', values: ['rare'], count: -1 },
+        ],
+      }],
+    });
+    const parsed = parseDynamicUpgradeSbcSnapshot({ set: pureRare });
+    expect(parsed.status).toBe('unsupported');
+    expect(parsed.diagnostics).toContain('exactly one TEAM_RATING condition is required');
+    expect(buildUpgradeDiscoverySession({ sets: [pureRare], configuredLoops: [] }).discoveredLoops)
+      .toEqual([]);
   });
 
   it('discovers current 84x10, TOTW, and 2x84+ as session Loops', () => {

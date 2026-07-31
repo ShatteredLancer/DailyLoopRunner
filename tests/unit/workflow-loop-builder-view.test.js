@@ -214,7 +214,13 @@ describe('Workflow and Loop Builder view', () => {
       craftingUpgrades: [{
         id: 'craft',
         name: 'Crafting Upgrade',
-        activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: true },
+        activityBinding: {
+          family: 'common-gold-material-upgrade',
+          classes: ['premium'],
+          preference: 'reward-first',
+          category: 'Upgrades',
+          required: true,
+        },
         sbcNames: ['Compatibility Upgrade'],
         requirements: [{ tier: 'gold', rarity: 'common', count: 9 }],
       }],
@@ -232,7 +238,10 @@ describe('Workflow and Loop Builder view', () => {
     expect(html).toContain('data-builder-field="preCraftPlayerPickSelector.material"');
     expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.family"');
     expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.required"');
-    expect(html).toContain('common-gold-crafting-upgrade');
+    expect(html).toContain('common-gold-material-upgrade');
+    expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.classes"');
+    expect(html).toContain('<option value="premium" selected>premium</option>');
+    expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.preference"');
   });
 
   it('renders a dynamic activity family selector for source-exhausted fallback', () => {
@@ -241,7 +250,7 @@ describe('Workflow and Loop Builder view', () => {
       name: 'Rare pack',
       strategy: 'rarePackTo84Upgrade',
       sourcePackNames: ['Pack'],
-      sourceExhaustedFallbackActivityFamily: '2x84-upgrade',
+      sourceExhaustedFallbackActivityFamily: 'rare-gold-material-upgrade',
       rareUpgrade: {
         name: 'Upgrade',
         sbcNames: ['Upgrade'],
@@ -258,7 +267,7 @@ describe('Workflow and Loop Builder view', () => {
       sources: { loops: [{ id: loop.id, source: 'custom' }], recoveryRecipes: [], unassignedRecoveryPolicies: [] },
     }));
     expect(html).toContain('data-builder-field="sourceExhaustedFallbackActivityFamily"');
-    expect(html).toContain('<option value="2x84-upgrade" selected>2x84-upgrade</option>');
+    expect(html).toContain('<option value="rare-gold-material-upgrade" selected>rare-gold-material-upgrade</option>');
   });
 
   it('renders special controls, complete Recovery behavior, and Workflow step reward flow', () => {

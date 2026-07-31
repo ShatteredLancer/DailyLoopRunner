@@ -38,7 +38,7 @@
       "recovery": "Stop safely when the challenge or source pack is unavailable."
     },
     "daily-rare-pack-84": {
-      "normal": "Standalone mode opens all matching Daily rare gold packs, counts duplicate-driven 2x84+ submissions toward rounds, then fills the remaining target from inventory; the dedicated Daily + Rare Pack to 2x84+ profile limits the final inventory fallback to one completion.",
+      "normal": "Standalone mode opens all matching Daily rare gold packs, counts duplicate-driven submissions to the selected Rare Gold Premium/Baseline Upgrade toward rounds, then fills the remaining target from inventory; the dedicated Daily + Rare Pack Recycling profile limits the final inventory fallback to one completion.",
       "recovery": "Resume response-only duplicates even when the Unassigned UI cache is delayed, protect 82+ cards, and let the current Open reward packs option control every 2x84+ reward."
     },
     "one-click-daily-mvp": {
@@ -50,15 +50,15 @@
       "recovery": "Restart from existing Unassigned state, skip completed stages, and continue after a prior safe stop."
     },
     "inventory-fodder-exhaustion": {
-      "normal": "Submit Bronze Upgrade and force-open its Silver rewards to feed the next stage, then do the same for Silver Upgrade and Common Gold rewards, then exhaust 5x 80+ Upgrade with nine safe common gold cards rated <=81; matching 5x 80+ rewards open at the end only when Open reward packs is enabled.",
+      "normal": "Submit Bronze Upgrade and force-open its Silver rewards to feed the next stage, then do the same for Silver Upgrade and Common Gold rewards, then exhaust the selected Common Gold Premium with its scanned safe common-gold count; matching rewards open at the end only when Open reward packs is enabled.",
       "recovery": "Stop if a required Bronze/Silver reward cannot be opened or if selection/submission is unsafe; blocked or stopped runs do not enter the deferred 5x 80+ reward-opening phase."
     },
     "provision-crafting": {
-      "normal": "Route Common Gold through the configured 4 of 10 83+ Player Pick and then 5x 80+ Upgrade; route Rare Gold through 2x 84+ Upgrade at every pre-open, pack, and final cleanup point.",
+      "normal": "Route Common Gold through the configured dynamic Player Pick and then the selected Common Gold Premium; route Rare Gold through the selected Rare Gold Premium/Baseline at every pre-open, pack, and final cleanup point.",
       "recovery": "Resume pending Pick or reserved duplicates without generic recovery consumption; preserve incomplete materials and continue on a later Provision round."
     },
     "fof-glory-hunters-exhaustion": {
-      "normal": "Repeat 5x 80+ Upgrade with nine safe common gold cards rated <=81 until fewer than one complete squad remains; when Open reward packs is enabled, open all matching 5x 80+ rewards together after the stage.",
+      "normal": "Repeat the selected Common Gold Premium with its scanned safe common-gold count until fewer than one complete squad remains; when Open reward packs is enabled, open all matching rewards together after the stage.",
       "recovery": "Stop on unsafe selection or submission failure without entering the deferred reward-opening phase; otherwise use the shared pack transaction for the final batch."
     }
   }

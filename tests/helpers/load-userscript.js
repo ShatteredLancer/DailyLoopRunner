@@ -103,6 +103,9 @@ export async function loadUserscript(options = {}) {
       rememberConsumedDuplicateSignals,
       clearConsumedDuplicateSignals,
       duplicateSignalDiagnostic,
+      getBoundRarePackFallbackDef,
+      runRarePackCraftLoop,
+      unresolvedRequiredMaterialActivities,
     };
   `;
   const instrumentedSource = original.replace(/\}\)\(\);\s*$/, `${exportBlock}\n})();`);

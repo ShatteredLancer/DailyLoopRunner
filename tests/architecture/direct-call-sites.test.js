@@ -209,14 +209,14 @@ describe('current direct side-effect call baseline', () => {
     expect(source).not.toMatch(/function\s+(?:setLoopDefs|getEditorLoopStrategy|findBronzeUpgradeSet|isEligibleTotwForLoop|getEligibleTotwEntries|summarizeTotwEntries|sortTotwEntriesForSubmit|isCommonGoldPlayer|isCommonGoldDuplicate|isLowCommonGoldDuplicate)\s*\(/);
   });
 
-  it('logs rating shortage or submit-not-ready reasons before automatic 2x84+ recovery', async () => {
+  it('logs rating shortage or submit-not-ready reasons before automatic Rare Gold recovery', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     const shortageIdx = source.indexOf("configuredFill.ratingShortage && autoFodderAttempts < autoFodderLimit");
     const shortageCraftIdx = source.indexOf('craftAutoFodderUpgrade(activeLoopDef, nextAttempt, autoFodderLimit)', shortageIdx);
     expect(shortageIdx).toBeGreaterThan(-1);
     expect(shortageCraftIdx).toBeGreaterThan(shortageIdx);
     const shortageWindow = source.slice(shortageIdx, shortageCraftIdx);
-    expect(shortageWindow).toContain('rating shortage before automatic 2x84+ recovery');
+    expect(shortageWindow).toContain('rating shortage before automatic Rare Gold recovery');
     expect(shortageWindow).toContain('configuredFill.reason');
 
     const submitIdx = source.indexOf('!fillResult.submitReady &&');
@@ -224,7 +224,7 @@ describe('current direct side-effect call baseline', () => {
     expect(submitIdx).toBeGreaterThan(-1);
     expect(submitCraftIdx).toBeGreaterThan(submitIdx);
     const submitWindow = source.slice(submitIdx, submitCraftIdx);
-    expect(submitWindow).toContain('submit not ready before automatic 2x84+ recovery');
+    expect(submitWindow).toContain('submit not ready before automatic Rare Gold recovery');
   });
 
   it('requires every userscript pack call to provide an opened-item policy', async () => {

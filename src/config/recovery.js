@@ -69,8 +69,14 @@ export const RECOVERY_RECIPES = Object.freeze([
   }),
   recipe({
     id: 'fof-glory-hunters-crafting-upgrade',
-    name: '5x 80+ Upgrade',
-    activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: false },
+    name: 'Common Gold Premium Upgrade',
+    activityBinding: {
+      family: 'common-gold-material-upgrade',
+      classes: ['premium'],
+      preference: 'reward-first',
+      category: 'Upgrades',
+      required: false,
+    },
     sbcNames: ['5x 80+ Upgrade'],
     requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'common', count: 9, maxRating: 81, protectHighGold: true })],
   }),
@@ -83,8 +89,14 @@ export const RECOVERY_RECIPES = Object.freeze([
   }),
   recipe({
     id: '2x84-upgrade',
-    name: '2x 84+ Upgrade',
-    activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: false },
+    name: 'Rare Gold Recycling Upgrade',
+    activityBinding: {
+      family: 'rare-gold-material-upgrade',
+      classes: ['premium', 'baseline'],
+      preference: 'reward-first',
+      category: 'Upgrades',
+      required: false,
+    },
     sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
     requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'rare', count: 6, maxRating: 81, protectHighGold: true })],
   }),

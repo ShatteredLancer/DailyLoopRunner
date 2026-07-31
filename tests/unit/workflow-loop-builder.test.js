@@ -293,7 +293,7 @@ describe('Workflow and Loop Builder controller', () => {
       expect.objectContaining({ id: '__built-in__', name: 'Built-in' }),
       expect.objectContaining({ id: 'default', name: 'Default' }),
       expect.objectContaining({ id: 'starter-bronze-silver-inventory-only', name: 'Bronze/Silver Inventory Only' }),
-      expect.objectContaining({ id: 'starter-daily-rare-pack-2x84', name: 'Daily + Rare Pack to 2x84+' }),
+      expect.objectContaining({ id: 'starter-daily-rare-pack-2x84', name: 'Daily + Rare Pack Recycling' }),
     ]);
   });
 

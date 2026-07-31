@@ -251,9 +251,13 @@
     },
     {
       "id": "fof-glory-hunters-crafting-upgrade",
-      "name": "5x 80+ Upgrade",
+      "name": "Common Gold Premium Upgrade",
       "activityBinding": {
-        "family": "common-gold-crafting-upgrade",
+        "family": "common-gold-material-upgrade",
+        "classes": [
+          "premium"
+        ],
+        "preference": "reward-first",
         "category": "Upgrades",
         "required": false
       },
@@ -333,9 +337,14 @@
     },
     {
       "id": "2x84-upgrade",
-      "name": "2x 84+ Upgrade",
+      "name": "Rare Gold Recycling Upgrade",
       "activityBinding": {
-        "family": "2x84-upgrade",
+        "family": "rare-gold-material-upgrade",
+        "classes": [
+          "premium",
+          "baseline"
+        ],
+        "preference": "reward-first",
         "category": "Upgrades",
         "required": false
       },
@@ -1001,7 +1010,7 @@
     },
     {
       "id": "daily-rare-pack-84",
-      "name": "Daily Rare Pack to 2x84+ Loop",
+      "name": "Daily Rare Pack Recycling Loop",
       "strategy": "rarePackTo84Upgrade",
       "sourcePackRef": {
         "rewardOfLoopId": "daily-rare"
@@ -1020,9 +1029,14 @@
         "5 x 80+ Rare Gold Players Pack"
       ],
       "rareUpgrade": {
-        "name": "2x 84+ Upgrade",
+        "name": "Rare Gold Recycling Upgrade",
         "activityBinding": {
-          "family": "2x84-upgrade",
+          "family": "rare-gold-material-upgrade",
+          "classes": [
+            "premium",
+            "baseline"
+          ],
+          "preference": "reward-first",
           "category": "Upgrades",
           "required": true
         },
@@ -1065,7 +1079,7 @@
         "label": "SBC completions"
       },
       "consumeAllSourcePacks": true,
-      "sourceExhaustedFallbackActivityFamily": "2x84-upgrade"
+      "sourceExhaustedFallbackActivityFamily": "rare-gold-material-upgrade"
     },
     {
       "id": "one-click-daily-mvp",
@@ -1095,7 +1109,7 @@
     },
     {
       "id": "inventory-fodder-exhaustion",
-      "name": "Bronze/Silver/5x 80+ Exhaustion Loop",
+      "name": "Bronze/Silver/Common Gold Premium Exhaustion Loop",
       "strategy": "inventoryExhaustion",
       "stages": [
         {
@@ -1174,9 +1188,13 @@
         },
         {
           "id": "fof-glory-hunters",
-          "name": "5x 80+ Upgrade",
+          "name": "Common Gold Premium Upgrade",
           "activityBinding": {
-            "family": "common-gold-crafting-upgrade",
+            "family": "common-gold-material-upgrade",
+            "classes": [
+              "premium"
+            ],
+            "preference": "reward-first",
             "category": "Upgrades",
             "required": true
           },
@@ -1220,7 +1238,7 @@
     },
     {
       "id": "fof-glory-hunters-exhaustion",
-      "name": "5x 80+ Exhaustion Loop",
+      "name": "Common Gold Premium Exhaustion Loop",
       "strategy": "inventoryExhaustion",
       "openRewardPacksAtEnd": true,
       "rewardPackNames": [
@@ -1233,9 +1251,13 @@
       "stages": [
         {
           "id": "fof-glory-hunters",
-          "name": "5x 80+ Upgrade",
+          "name": "Common Gold Premium Upgrade",
           "activityBinding": {
-            "family": "common-gold-crafting-upgrade",
+            "family": "common-gold-material-upgrade",
+            "classes": [
+              "premium"
+            ],
+            "preference": "reward-first",
             "category": "Upgrades",
             "required": true
           },
@@ -1294,9 +1316,13 @@
       },
       "craftingUpgrades": [
         {
-          "name": "5x 80+ Upgrade",
+          "name": "Common Gold Premium Upgrade",
           "activityBinding": {
-            "family": "common-gold-crafting-upgrade",
+            "family": "common-gold-material-upgrade",
+            "classes": [
+              "premium"
+            ],
+            "preference": "reward-first",
             "category": "Upgrades",
             "required": true
           },
@@ -1327,9 +1353,14 @@
           ]
         },
         {
-          "name": "2x 84+ Upgrade",
+          "name": "Rare Gold Recycling Upgrade",
           "activityBinding": {
-            "family": "2x84-upgrade",
+            "family": "rare-gold-material-upgrade",
+            "classes": [
+              "premium",
+              "baseline"
+            ],
+            "preference": "reward-first",
             "category": "Upgrades",
             "required": true
           },

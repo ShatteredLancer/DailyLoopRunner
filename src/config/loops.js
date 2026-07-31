@@ -192,7 +192,7 @@ export const LOOP_DEFS = [
   },
   {
     id: 'daily-rare-pack-84',
-    name: 'Daily Rare Pack to 2x84+ Loop',
+    name: 'Daily Rare Pack Recycling Loop',
     strategy: 'rarePackTo84Upgrade',
     sourcePackRef: { rewardOfLoopId: 'daily-rare' },
     sourcePackIds: [20059],
@@ -207,8 +207,14 @@ export const LOOP_DEFS = [
       '5 x 80+ Rare Gold Players Pack',
     ],
     rareUpgrade: {
-      name: '2x 84+ Upgrade',
-      activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: true },
+      name: 'Rare Gold Recycling Upgrade',
+      activityBinding: {
+        family: 'rare-gold-material-upgrade',
+        classes: ['premium', 'baseline'],
+        preference: 'reward-first',
+        category: 'Upgrades',
+        required: true,
+      },
       sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
       requirements: [
         { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
@@ -220,7 +226,7 @@ export const LOOP_DEFS = [
     useRoundsAsCompletions: true,
     runtimeQuantity: { mode: 'user', target: 'maxCompletions', default: 3, min: 1, max: 50, label: 'SBC completions' },
     consumeAllSourcePacks: true,
-    sourceExhaustedFallbackActivityFamily: '2x84-upgrade',
+    sourceExhaustedFallbackActivityFamily: 'rare-gold-material-upgrade',
   },
   {
     id: 'one-click-daily-mvp',
@@ -240,7 +246,7 @@ export const LOOP_DEFS = [
   },
   {
     id: 'inventory-fodder-exhaustion',
-    name: 'Bronze/Silver/5x 80+ Exhaustion Loop',
+    name: 'Bronze/Silver/Common Gold Premium Exhaustion Loop',
     strategy: 'inventoryExhaustion',
     openRewardPacksAtEnd: true,
     rewardPackNames: [
@@ -279,8 +285,14 @@ export const LOOP_DEFS = [
       },
       {
         id: 'fof-glory-hunters',
-        name: '5x 80+ Upgrade',
-        activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: true },
+        name: 'Common Gold Premium Upgrade',
+        activityBinding: {
+          family: 'common-gold-material-upgrade',
+          classes: ['premium'],
+          preference: 'reward-first',
+          category: 'Upgrades',
+          required: true,
+        },
         sbcNames: ['5x 80+ Upgrade'],
         requirements: [
           {
@@ -301,7 +313,7 @@ export const LOOP_DEFS = [
   },
   {
     id: 'fof-glory-hunters-exhaustion',
-    name: '5x 80+ Exhaustion Loop',
+    name: 'Common Gold Premium Exhaustion Loop',
     strategy: 'inventoryExhaustion',
     openRewardPacksAtEnd: true,
     rewardPackNames: [
@@ -314,8 +326,14 @@ export const LOOP_DEFS = [
     stages: [
       {
         id: 'fof-glory-hunters',
-        name: '5x 80+ Upgrade',
-        activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: true },
+        name: 'Common Gold Premium Upgrade',
+        activityBinding: {
+          family: 'common-gold-material-upgrade',
+          classes: ['premium'],
+          preference: 'reward-first',
+          category: 'Upgrades',
+          required: true,
+        },
         sbcNames: ['5x 80+ Upgrade'],
         requirements: [
           {
@@ -345,8 +363,14 @@ export const LOOP_DEFS = [
     runtimeQuantity: { mode: 'user', target: 'rounds', default: 1, min: 1, max: 50, label: 'Provision packs' },
     craftingUpgrades: [
       {
-        name: '5x 80+ Upgrade',
-        activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: true },
+        name: 'Common Gold Premium Upgrade',
+        activityBinding: {
+          family: 'common-gold-material-upgrade',
+          classes: ['premium'],
+          preference: 'reward-first',
+          category: 'Upgrades',
+          required: true,
+        },
         sbcNames: ['5x 80+ Upgrade'],
         requirements: [
           { tier: 'gold', rarity: 'common', count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
@@ -354,8 +378,14 @@ export const LOOP_DEFS = [
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       },
       {
-        name: '2x 84+ Upgrade',
-        activityBinding: { family: '2x84-upgrade', category: 'Upgrades', required: true },
+        name: 'Rare Gold Recycling Upgrade',
+        activityBinding: {
+          family: 'rare-gold-material-upgrade',
+          classes: ['premium', 'baseline'],
+          preference: 'reward-first',
+          category: 'Upgrades',
+          required: true,
+        },
         sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
         requirements: [
           { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },

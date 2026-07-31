@@ -4,6 +4,11 @@ import {
   getBuilderStrategyDescriptor,
 } from '../config/builder-descriptors.js';
 import { SBC_ACTIVITY_FAMILY_IDS } from '../config/activity-discovery.js';
+import {
+  MATERIAL_SINK_BASELINES,
+  MATERIAL_SINK_CLASSES,
+  MATERIAL_SINK_PREFERENCES,
+} from '../config/material-sink.js';
 
 const PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 
@@ -130,12 +135,16 @@ function renderSourcePackRef(path, label, value = {}, context) {
 
 function renderActivityBinding(path, value, context) {
   const enabled = value && typeof value === 'object';
+  const materialSink = enabled && MATERIAL_SINK_BASELINES[value.family];
+  const classes = Array.isArray(value?.classes) ? value.classes : [];
   return `<section class="dlr-builder-form-section"><h3>Dynamic SBC activity</h3>
     <div class="dlr-builder-form-grid">
       ${fieldRow('Binding', `<select data-builder-field="${escapeHtml(path)}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value=""${selected(enabled, false)}>None</option><option value="true"${selected(enabled, true)}>Enabled</option></select>`)}
       ${enabled ? fieldRow('Family', selectInput(`${path}.family`, value.family, SBC_ACTIVITY_FAMILY_IDS.map((family) => ({ value: family, label: family })), context.readOnly)) : ''}
       ${enabled ? fieldRow('Required', `<select data-builder-field="${path}.required" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.required)}</select>`) : ''}
       ${enabled ? fieldRow('Category', textInput(`${path}.category`, value.category || 'Upgrades', 'text', true)) : ''}
+      ${materialSink ? fieldRow('Accepted classes', `<select multiple size="4" data-builder-field="${path}.classes" data-builder-value-type="string-list"${disabled(context.readOnly)}>${MATERIAL_SINK_CLASSES.map((className) => `<option value="${className}"${classes.includes(className) ? ' selected' : ''}>${className}</option>`).join('')}</select>`) : ''}
+      ${materialSink ? fieldRow('Preference', selectInput(`${path}.preference`, value.preference, MATERIAL_SINK_PREFERENCES.map((preference) => ({ value: preference, label: preference })), context.readOnly, true)) : ''}
     </div>
   </section>`;
 }

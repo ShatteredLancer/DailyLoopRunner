@@ -39,7 +39,7 @@ flowchart LR
 - `Built-in`：停用 Active Profile，恢复脚本内置配置。
 - `Default`：可编辑的默认 Starter Profile。
 - `Bronze/Silver Inventory Only`：只让 Daily Bronze、Daily Silver、Daily Common 等使用铜/银材料的 Loop 使用库存模式；其他可配置 Loop 和父 Workflow 显式保持 `normal`。因此它是一个小范围持久策略，不等同于主面板 `Inventory only` 的全局运行时默认值。
-- `Daily + Rare Pack to 2x84+`：在 Built-in 的四步 One-click Daily 后追加 `Daily Rare Pack to 2x84+ Loop`；Built-in、Default 和铜银库存 Profile 本身都不会自动处理 Rare Gold 来源包。
+- `Daily + Rare Pack Recycling`：在 Built-in 的四步 One-click Daily 后追加 `Daily Rare Pack Recycling Loop`；它优先使用当前扫描到的 Rare Gold Premium，找不到时使用 Rare Gold Baseline。Built-in、Default 和铜银库存 Profile 本身都不会自动处理 Rare Gold 来源包。
 - 用户在 Builder 创建的其他 Profile。
 
 主面板只加载 Profile 的 Saved/last-known-good，不会应用 Builder 中尚未保存的 Draft。Builder 顶部的 Profile 下拉用于切换当前编辑对象；修改完成后仍需 Save/Activate，或先 Save 再回主面板选择该 Profile。
@@ -211,7 +211,7 @@ flowchart TD
 动态扫描结果分为两类：
 
 - **独立 Dynamic Loop**：当前 Pick、2x84+、84+ TOTW 或新的高评分 xN 等可独立运行对象。它们显示在 `Dynamic SBCs` 页面，需要 `Add to profile` 后才能被自定义 Workflow 长期引用；这些 Upgrade 不再提供固定 built-in Loop ID。
-- **内置 activity binding**：Daily Upgrade、Bronze/Silver/Gold Upgrade、Common Gold crafting、Daily Rare 的 2x84 consumer、自动 TOTW/2x84 recovery 和 Recovery recipe 等已有工作流角色，只自动绑定当前 EA 身份，不需要逐个 `Add to profile`。独立的 2x84、TOTW 和高评分 xN Loop 本身由扫描结果直接生成。
+- **内置 activity binding**：Daily Upgrade、Bronze/Silver/Gold Upgrade、Common/Rare Gold 材料消耗、自动 TOTW/fodder recovery 和 Recovery recipe 等已有工作流角色，只自动绑定当前 EA 身份，不需要逐个 `Add to profile`。材料 family 可在 Builder 中选择 Premium/Baseline 等等级和 reward/quantity/cost 排序偏好。
 
 独立 Dynamic Loop 的操作流程：
 
@@ -247,7 +247,7 @@ flowchart LR
 
 1. 在 `Loops` 或 `Recovery` 中选择已有对象；内置对象先点击 `Override`。
 2. 在直接 Loop、`Crafting upgrades`、`Stages`、`Automatic special/fodder recovery` 或 Recovery recipe 中启用 `Dynamic SBC activity`。
-3. 选择 family，例如 `daily-common-gold-upgrade`、`common-gold-crafting-upgrade` 或 `2x84-upgrade`。
+3. 选择 family，例如 `daily-common-gold-upgrade`、`common-gold-material-upgrade` 或 `rare-gold-material-upgrade`。材料 family 还需选择可接受的 class 和排序偏好。
 4. 保留完整 SBC alias/ID 作为迁移期 fallback，再 Validate、Preview、Activate。
 
 activity binding 只改变扫描事实：当前 Set/Challenge、显示名、材料条件、Reward Pack 和剩余次数。它不会改变 pile 顺序、高分/Special/Tradeable 保护、评分求解范围、fallback、Workflow 顺序或用户数量设置。每个嵌套 stage/recovery 必须单独绑定，父 Loop 不会自动把 family 传给子对象。

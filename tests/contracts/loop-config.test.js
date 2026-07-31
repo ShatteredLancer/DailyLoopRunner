@@ -49,9 +49,11 @@ describe('loop configuration contracts', () => {
       expect(byId(external, id).activityBinding).toEqual(byId(builtIn, id).activityBinding);
     }
     expect(byId(builtIn, 'inventory-fodder-exhaustion').stages.map((stage) => stage.activityBinding.family))
-      .toEqual(['bronze-upgrade', 'silver-upgrade', 'common-gold-crafting-upgrade']);
+      .toEqual(['bronze-upgrade', 'silver-upgrade', 'common-gold-material-upgrade']);
     expect(byId(builtIn, 'provision-crafting').craftingUpgrades.map((upgrade) => upgrade.activityBinding.family))
-      .toEqual(['common-gold-crafting-upgrade', '2x84-upgrade']);
+      .toEqual(['common-gold-material-upgrade', 'rare-gold-material-upgrade']);
+    expect(byId(builtIn, 'provision-crafting').craftingUpgrades.map((upgrade) => upgrade.activityBinding.classes))
+      .toEqual([['premium'], ['premium', 'baseline']]);
     expect(externalConfig.recoveryRecipes.map((recipe) => recipe.activityBinding))
       .toEqual(api.RECOVERY_RECIPES.map((recipe) => recipe.activityBinding));
   });
@@ -106,7 +108,7 @@ describe('loop configuration contracts', () => {
     });
   });
 
-  it('locks 5x 80+ exhaustion materials and deferred reward opening', async () => {
+  it('locks Common Gold Premium exhaustion materials and deferred reward opening', async () => {
     const { builtIn, external } = await loadDefinitions();
     for (const loop of [byId(builtIn, 'fof-glory-hunters-exhaustion'), byId(external, 'fof-glory-hunters-exhaustion')]) {
       expect(loop.strategy).toBe('inventoryExhaustion');
@@ -115,7 +117,7 @@ describe('loop configuration contracts', () => {
       expect(loop.stages).toHaveLength(1);
       expect(loop.stages[0]).toMatchObject({
         id: 'fof-glory-hunters',
-        name: '5x 80+ Upgrade',
+        name: 'Common Gold Premium Upgrade',
         sbcNames: ['5x 80+ Upgrade'],
         maxCompletions: 1000,
       });
@@ -146,7 +148,15 @@ describe('loop configuration contracts', () => {
         expect.objectContaining({ tier: 'silver', count: 11, allowSpecial: false }),
         expect.objectContaining({ tier: 'gold', rarity: 'common', count: 9, maxRating: 81, protectHighGold: true, allowSpecial: false }),
       ]);
-      expect(loop.stages[2]).toMatchObject({ name: '5x 80+ Upgrade', sbcNames: ['5x 80+ Upgrade'] });
+      expect(loop.stages[2]).toMatchObject({
+        name: 'Common Gold Premium Upgrade',
+        sbcNames: ['5x 80+ Upgrade'],
+        activityBinding: {
+          family: 'common-gold-material-upgrade',
+          classes: ['premium'],
+          preference: 'reward-first',
+        },
+      });
     }
   });
 
@@ -282,7 +292,7 @@ describe('loop configuration contracts', () => {
       maxCompletions: 1,
       useRoundsAsCompletions: true,
       consumeAllSourcePacks: true,
-      sourceExhaustedFallbackActivityFamily: '2x84-upgrade',
+      sourceExhaustedFallbackActivityFamily: 'rare-gold-material-upgrade',
     });
     expect(rarePack.sourceExhaustedFallbackMaxCompletions).toBeUndefined();
     expect(byId(builtIn, 'daily-rare-mvp')).toMatchObject({
@@ -295,7 +305,7 @@ describe('loop configuration contracts', () => {
     expect(provision.preCraftPlayerPickSelector).toEqual({ material: 'common-gold' });
     expect(provision.preCraftPlayerPickLoopId).toBeUndefined();
     expect(provision.craftingUpgrades.map((upgrade) => upgrade.name))
-      .toEqual(['5x 80+ Upgrade', '2x 84+ Upgrade']);
+      .toEqual(['Common Gold Premium Upgrade', 'Rare Gold Recycling Upgrade']);
     expect(provision.craftingUpgrades.map((upgrade) => upgrade.sbcNames))
       .toEqual([['5x 80+ Upgrade'], ['2x 84+ Upgrade', '2 x 84+ Upgrade']]);
     expect(provision.craftingUpgrades.map((upgrade) => upgrade.requirements[0].rarity))
