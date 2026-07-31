@@ -7,8 +7,15 @@ import { spawnSync } from 'node:child_process';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fsuDir = join(repoRoot, 'FSU_mod');
+const configPath = join(fsuDir, 'fsu-mod.config.json');
 const manifestPath = join(fsuDir, 'fsu-mod-manifest.json');
+const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+for (const [key, value] of Object.entries(config)) {
+  if (JSON.stringify(manifest[key]) !== JSON.stringify(value)) {
+    throw new Error(`FSU manifest ${key} differs from fsu-mod.config.json. Run npm run build:fsu-patch.`);
+  }
+}
 const originPath = join(fsuDir, manifest.originFile);
 const modifiedPath = join(fsuDir, manifest.modifiedFile);
 const patchPath = join(fsuDir, manifest.patchFile);
@@ -16,6 +23,15 @@ const patchPath = join(fsuDir, manifest.patchFile);
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex').toUpperCase();
 }
+
+function readVersion(path) {
+  const match = readFileSync(path, 'utf8').match(/^\/\/\s*@version\s+([^\s]+)\s*$/m);
+  if (!match) throw new Error(`No userscript @version found in ${path}`);
+  return match[1];
+}
+
+if (readVersion(originPath) !== manifest.upstreamVersion) throw new Error('FSU origin version differs from manifest');
+if (readVersion(modifiedPath) !== manifest.localVersion) throw new Error('FSU local version differs from manifest');
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, {

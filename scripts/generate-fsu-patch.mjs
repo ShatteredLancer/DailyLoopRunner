@@ -7,17 +7,19 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fsuDir = join(repoRoot, 'FSU_mod');
-const originPath = join(fsuDir, '【FSU】EAFC FUT WEB 增强器-26.09_origin.user.js');
-const modifiedPath = join(fsuDir, '【FSU】EAFC FUT WEB 增强器-26.09_mod.user.js');
-const patchPath = join(fsuDir, 'FSU-26.09-club-cache-optimization.patch');
+const configPath = join(fsuDir, 'fsu-mod.config.json');
 const manifestPath = join(fsuDir, 'fsu-mod-manifest.json');
-const replayName = 'FSU.user.js';
+const config = JSON.parse(readFileSync(configPath, 'utf8'));
+const originPath = join(fsuDir, config.originFile);
+const modifiedPath = join(fsuDir, config.modifiedFile);
+const patchPath = join(fsuDir, config.patchFile);
+const replayName = config.patchTargetPath;
 
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex').toUpperCase();
@@ -59,13 +61,12 @@ function normalizePatchHeaders(rawPatch) {
 
 const originVersion = readVersion(originPath);
 const modifiedVersion = readVersion(modifiedPath);
-if (originVersion !== modifiedVersion) {
-  throw new Error(`FSU version mismatch: origin ${originVersion}, modified ${modifiedVersion}`);
-}
+if (originVersion !== config.upstreamVersion) throw new Error(`FSU upstream version mismatch: expected ${config.upstreamVersion}, got ${originVersion}`);
+if (modifiedVersion !== config.localVersion) throw new Error(`FSU local version mismatch: expected ${config.localVersion}, got ${modifiedVersion}`);
 
 const diff = run(
   'git',
-  ['diff', '--no-index', '--binary', '--no-ext-diff', '--', originPath, modifiedPath],
+  ['diff', '--no-index', '--binary', '--no-ext-diff', '--unified=1', '--', originPath, modifiedPath],
   { allowedStatuses: [1] },
 );
 const patch = normalizePatchHeaders(diff.stdout);
@@ -89,12 +90,7 @@ try {
 }
 
 const manifest = {
-  schema: 1,
-  upstreamVersion: originVersion,
-  originFile: basename(originPath),
-  modifiedFile: basename(modifiedPath),
-  patchFile: basename(patchPath),
-  patchTargetPath: replayName,
+  ...config,
   originSha256: sha256(originPath),
   modifiedSha256: sha256(modifiedPath),
   patchSha256: sha256(patchPath),

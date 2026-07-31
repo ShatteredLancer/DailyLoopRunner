@@ -1,6 +1,9 @@
 function normalizedServer(value) {
   const url = new URL(String(value || 'https://ntfy.sh'));
   if (url.protocol !== 'https:') throw new Error('ntfy server must use HTTPS');
+  if (url.hostname !== 'ntfy.sh' || (url.port && url.port !== '443')) {
+    throw new Error('only ntfy.sh is supported by the production userscript');
+  }
   url.pathname = url.pathname.replace(/\/+$/, '');
   url.search = '';
   url.hash = '';

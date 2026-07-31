@@ -1,9 +1,12 @@
 // ==UserScript==
-// @name         【FSU】EAFC FUT WEB 增强器
-// @namespace    https://futcd.com/
-// @version      26.09
-// @description  EAFCFUT模式SBC任务便捷操作增强器👍👍👍，模拟开包、额外信息展示、近期低价自动查询、一键挂出球员、跳转FUTBIN、快捷搜索、拍卖行优化等等...👍👍👍
+// @name         【FSU Local】EAFC FUT WEB 增强器
+// @namespace    https://github.com/ShatteredLancer/DailyLoopRunner/FSU_mod
+// @version      26.09.1
+// @description  Local maintained FSU 26.09 build with validated Club cache and scoped payload optimizations.
 // @author       Futcd_kcka
+// @contributor  ShatteredLancer
+// @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner/tree/main/FSU_mod
+// @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -32,8 +35,8 @@
 // @connect      pages.dev
 // @license      MIT
 // @run-at       document-end
-// @downloadURL https://update.greasyfork.org/scripts/431044/%E3%80%90FSU%E3%80%91EAFC%20FUT%20WEB%20%E5%A2%9E%E5%BC%BA%E5%99%A8.user.js
-// @updateURL https://update.greasyfork.org/scripts/431044/%E3%80%90FSU%E3%80%91EAFC%20FUT%20WEB%20%E5%A2%9E%E5%BC%BA%E5%99%A8.meta.js
+// @downloadURL  https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/FSU-Local.user.js
+// @updateURL    https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/FSU-Local.meta.js
 // ==/UserScript==
 
 

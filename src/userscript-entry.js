@@ -1,8 +1,13 @@
 ﻿// ==UserScript==
-// @name         FC26 Daily Loop Runner - Validation
-// @namespace    local.fc26.validation
-// @version      0.6.42
-// @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
+// @name         FC26 Daily Loop Runner
+// @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
+// @version      __DLR_VERSION__
+// @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
+// @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
+// @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
+// @updateURL    https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/DailyLoopRunner.meta.js
+// @downloadURL  https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/DailyLoopRunner.user.js
+// @license      MIT
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -12,8 +17,6 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
-// @connect      127.0.0.1
-// @connect      localhost
 // @connect      www.fut.gg
 // @connect      www.futbin.org
 // @connect      enhancer-api.futnext.com
@@ -21,6 +24,7 @@
 // @run-at       document-end
 // ==/UserScript==
 
+import packageInfo from '../package.json' with { type: 'json' };
 import {
   APP_KEY,
   BATCH_OPEN_PLAN_KEY,
@@ -229,6 +233,8 @@ import { showBatchOpenDialog } from './ui/batch-open-dialog.js';
 import { showBatchOpenRecap } from './ui/batch-open-recap.js';
 import { showLoopRecap } from './ui/loop-recap.js';
 
+const RUNNER_VERSION = packageInfo.version;
+
 (function () {
   'use strict';
 
@@ -311,7 +317,7 @@ const state = {
   }
 
   W[APP_KEY] = {
-    version: '0.6.42',
+    version: RUNNER_VERSION,
     destroy: destroyRunner,
     getFsuSettings: () => getFsuSettings({ force: true }),
     getPackInventory: () => getPackInventorySnapshot(),
@@ -9515,7 +9521,7 @@ function updateLoopControls() {
       commands: panelCommands,
     });
     updateRecapButton();
-    log(`Ready v${W[APP_KEY]?.version || 'unknown'}. Keep FSU/Enhancer enabled before starting.`);
+    log(`Ready v${W[APP_KEY]?.version || 'unknown'}. Keep FSU enabled before starting; FC26 Enhancer may remain enabled.`);
     setTimeout(async () => {
       try {
         await scanAvailableDynamicSbcs({ cacheOnly: true });

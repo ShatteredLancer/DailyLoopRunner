@@ -1,8 +1,13 @@
 // ==UserScript==
-// @name         FC26 Daily Loop Runner - Validation
-// @namespace    local.fc26.validation
-// @version      0.6.42
-// @description  Configurable FC26 Web App loop runner for pack/SBC validation flows.
+// @name         FC26 Daily Loop Runner
+// @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
+// @version      0.7.0
+// @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
+// @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
+// @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
+// @updateURL    https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/DailyLoopRunner.meta.js
+// @downloadURL  https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/DailyLoopRunner.user.js
+// @license      MIT
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*
@@ -12,8 +17,6 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
-// @connect      127.0.0.1
-// @connect      localhost
 // @connect      www.fut.gg
 // @connect      www.futbin.org
 // @connect      enhancer-api.futnext.com
@@ -22,6 +25,45 @@
 // ==/UserScript==
 
 (() => {
+  // package.json
+  var package_default = {
+    name: "fc26-daily-loop-runner",
+    version: "0.7.0",
+    description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
+    private: true,
+    license: "MIT",
+    repository: {
+      type: "git",
+      url: "https://github.com/ShatteredLancer/DailyLoopRunner.git"
+    },
+    engines: {
+      node: ">=22 <25"
+    },
+    type: "module",
+    scripts: {
+      build: "node scripts/build-userscript.mjs && node scripts/build-fsu-release-assets.mjs",
+      "build:profiles": "node scripts/build-profile-library.mjs",
+      "build:fsu-patch": "node scripts/generate-fsu-patch.mjs",
+      "build:fsu-release": "node scripts/build-fsu-release-assets.mjs",
+      "check:fsu-patch": "node scripts/check-fsu-patch.mjs",
+      "check:fsu-release": "node scripts/build-fsu-release-assets.mjs --check",
+      "check:dist": "node --check dist/DailyLoopRunner.user.js && node scripts/check-dist.mjs",
+      "check:profiles": "node scripts/build-profile-library.mjs --check",
+      "check:config": "node scripts/check-loop-config.mjs",
+      "check:architecture": "node scripts/audit-architecture.mjs --check",
+      "lint:syntax": "node scripts/check-syntax.mjs",
+      test: "vitest run",
+      "test:watch": "vitest",
+      "test:contracts": "vitest run tests/contracts",
+      "test:architecture": "vitest run tests/architecture",
+      verify: "npm run lint:syntax && npm run check:config && npm run check:profiles && npm run check:architecture && npm run check:fsu-patch && npm test && npm run build && npm run check:dist && npm run check:fsu-release"
+    },
+    devDependencies: {
+      esbuild: "^0.25.6",
+      vitest: "^3.2.4"
+    }
+  };
+
   // src/config/runtime.js
   var APP_KEY = "__FCLoopRunner";
   var PICK_OPTIONS_KEY = "fc-loop-runner-pick-options";
@@ -4064,6 +4106,9 @@
   function normalizedServer(value) {
     const url = new URL(String(value || "https://ntfy.sh"));
     if (url.protocol !== "https:") throw new Error("ntfy server must use HTTPS");
+    if (url.hostname !== "ntfy.sh" || url.port && url.port !== "443") {
+      throw new Error("only ntfy.sh is supported by the production userscript");
+    }
     url.pathname = url.pathname.replace(/\/+$/, "");
     url.search = "";
     url.hash = "";
@@ -7552,7 +7597,7 @@
       highlightEnabled: input.highlightEnabled !== false,
       desktopEnabled: input.desktopEnabled === true,
       ntfyEnabled: input.ntfyEnabled === true,
-      ntfyServer: normalizedText5(input.ntfyServer) || DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
+      ntfyServer: DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
       ntfyTopic: normalizedText5(input.ntfyTopic),
       ntfyToken: normalizedText5(input.ntfyToken)
     });
@@ -15296,11 +15341,6 @@
     threshold.min = "1";
     threshold.max = "99";
     threshold.value = String(initial.minimumRating);
-    const server = inputStyles(dom.create("input"));
-    server.id = "bronze-loop-alert-ntfy-server";
-    server.type = "url";
-    server.value = initial.ntfyServer;
-    server.readOnly = true;
     const topic = inputStyles(dom.create("input"));
     topic.id = "bronze-loop-alert-ntfy-topic";
     topic.type = "text";
@@ -15317,7 +15357,6 @@
       field(dom, "Minimum rating", threshold),
       desktop.label,
       ntfy.label,
-      field(dom, "ntfy server", server),
       field(dom, "ntfy topic", topic),
       field(dom, "ntfy token", token)
     );
@@ -15362,7 +15401,7 @@
       minimumRating: threshold.value,
       desktopEnabled: desktop.input.checked,
       ntfyEnabled: ntfy.input.checked,
-      ntfyServer: server.value,
+      ntfyServer: initial.ntfyServer,
       ntfyTopic: topic.value,
       ntfyToken: token.value
     });
@@ -15663,6 +15702,7 @@
   }
 
   // src/userscript-entry.js
+  var RUNNER_VERSION = package_default.version;
   (function() {
     "use strict";
     const W = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
@@ -15742,7 +15782,7 @@
       document.querySelector("#bronze-loop-style")?.remove();
     }
     W[APP_KEY] = {
-      version: "0.6.42",
+      version: RUNNER_VERSION,
       destroy: destroyRunner,
       getFsuSettings: () => getFsuSettings({ force: true }),
       getPackInventory: () => getPackInventorySnapshot(),
@@ -24029,7 +24069,7 @@
         commands: panelCommands
       });
       updateRecapButton();
-      log(`Ready v${W[APP_KEY]?.version || "unknown"}. Keep FSU/Enhancer enabled before starting.`);
+      log(`Ready v${W[APP_KEY]?.version || "unknown"}. Keep FSU enabled before starting; FC26 Enhancer may remain enabled.`);
       setTimeout(async () => {
         try {
           await scanAvailableDynamicSbcs({ cacheOnly: true });

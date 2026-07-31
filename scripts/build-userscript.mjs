@@ -5,6 +5,7 @@ import { build } from 'esbuild';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourcePath = path.join(root, 'src', 'userscript-entry.js');
+const packageInfo = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const outputPaths = [
   path.join(root, 'DailyLoopRunner.user.js'),
   path.join(root, 'dist', 'DailyLoopRunner.user.js'),
@@ -14,11 +15,18 @@ const metadataMatch = source.match(/^(\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserSc
 
 if (!metadataMatch) throw new Error('Userscript metadata block not found');
 
-const metadata = metadataMatch[1];
+const sourceMetadata = metadataMatch[1];
 const body = source.slice(metadataMatch[0].length);
-const version = metadata.match(/^\/\/ @version\s+(.+)$/m)?.[1]?.trim();
+const version = String(packageInfo.version || '').trim();
 
-if (!version) throw new Error('Userscript @version not found');
+if (!version) throw new Error('package.json version not found');
+if (!/^\/\/ @version\s+__DLR_VERSION__$/m.test(sourceMetadata)) {
+  throw new Error('Source userscript @version must use the __DLR_VERSION__ build token');
+}
+const metadata = sourceMetadata.replace(
+  /^\/\/ @version\s+__DLR_VERSION__$/m,
+  `// @version      ${version}`,
+);
 
 const result = await build({
   stdin: {
@@ -41,4 +49,6 @@ for (const outputPath of outputPaths) {
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, output, 'utf8');
 }
+await writeFile(path.join(root, 'dist', 'DailyLoopRunner.meta.js'), `${metadata}\n`, 'utf8');
 console.log(`Built DailyLoopRunner.user.js and dist/DailyLoopRunner.user.js v${version}`);
+console.log('Built dist/DailyLoopRunner.meta.js');

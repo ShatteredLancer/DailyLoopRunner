@@ -9,9 +9,5 @@
   "patchFile": "FSU-26.09-club-cache-optimization.patch",
   "patchTargetPath": "FSU.user.js",
   "releaseUserFile": "FSU-Local.user.js",
-  "releaseMetaFile": "FSU-Local.meta.js",
-  "originSha256": "A2E0BEB018921CDD334D68BD4AF9BEE843F9F391A98E01E3B27D67E74D6B9634",
-  "modifiedSha256": "4CF986CE63091A19E122E1FB92DC4FC3E6F8408E7F5BE09BE12435B3E2342108",
-  "patchSha256": "6A0A8CB1B4DCA3D49FB32D5A3D2906D40ABC73FDE8B39F11514B2478DA5289D5",
-  "generator": "scripts/generate-fsu-patch.mjs"
+  "releaseMetaFile": "FSU-Local.meta.js"
 }

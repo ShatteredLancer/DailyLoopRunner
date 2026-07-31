@@ -71,11 +71,6 @@ export function showRewardAlertSettings(options = {}) {
   threshold.min = '1';
   threshold.max = '99';
   threshold.value = String(initial.minimumRating);
-  const server = inputStyles(dom.create('input'));
-  server.id = 'bronze-loop-alert-ntfy-server';
-  server.type = 'url';
-  server.value = initial.ntfyServer;
-  server.readOnly = true;
   const topic = inputStyles(dom.create('input'));
   topic.id = 'bronze-loop-alert-ntfy-topic';
   topic.type = 'text';
@@ -92,7 +87,6 @@ export function showRewardAlertSettings(options = {}) {
     field(dom, 'Minimum rating', threshold),
     desktop.label,
     ntfy.label,
-    field(dom, 'ntfy server', server),
     field(dom, 'ntfy topic', topic),
     field(dom, 'ntfy token', token),
   );
@@ -136,7 +130,7 @@ export function showRewardAlertSettings(options = {}) {
     minimumRating: threshold.value,
     desktopEnabled: desktop.input.checked,
     ntfyEnabled: ntfy.input.checked,
-    ntfyServer: server.value,
+    ntfyServer: initial.ntfyServer,
     ntfyTopic: topic.value,
     ntfyToken: token.value,
   });

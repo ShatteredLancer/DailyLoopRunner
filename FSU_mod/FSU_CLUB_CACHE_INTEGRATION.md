@@ -4,7 +4,8 @@
 
 适用组件：
 
-- FSU 脚本：`【FSU】EAFC FUT WEB 增强器-26.09.user.js`
+- FSU 上游基线：`26.09`
+- FSU Local：`26.09.1`，Release 资产 `FSU-Local.user.js`
 - Daily Loop Runner：`0.5.39` 起支持 `trusted-provisional` 快速缓存状态
 - FC26 Enhancer：已观察版本 `26.1.5.7`
 - EA FC Web App：2026-07-21 实际页面模型

@@ -50,4 +50,4 @@ npm run check:profiles
 npm run build:profiles
 ```
 
-The build writes importable `*.loops.json` files and `manifest.json` to `dist/profiles/`. GitHub Actions validates Profile uploads on every push and pull request. Published releases include `DailyLoopRunner.profiles.zip`; Profile-only pushes to `main` refresh that asset when the latest release version matches `package.json`.
+The build writes importable `*.loops.json` files and `manifest.json` to `dist/profiles/`. GitHub Actions validates Profile changes on every push and pull request. A tagged release includes the current library as `DailyLoopRunner.profiles.zip`. Published releases are immutable, so every Profile library update that must be distributed requires a new package version and matching release tag.

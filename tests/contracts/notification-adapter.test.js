@@ -27,9 +27,10 @@ describe('notification adapter', () => {
     );
   });
 
-  it('rejects insecure servers and invalid topics', async () => {
+  it('rejects insecure or unapproved servers and invalid topics', async () => {
     const adapter = createNotificationAdapter({ http: { postText: vi.fn() } });
     await expect(adapter.ntfy({}, { server: 'http://ntfy.test', topic: 'topic' })).rejects.toThrow(/HTTPS/);
+    await expect(adapter.ntfy({}, { server: 'https://ntfy.example', topic: 'topic' })).rejects.toThrow(/only ntfy\.sh/);
     await expect(adapter.ntfy({}, { server: 'https://ntfy.sh', topic: 'bad topic' })).rejects.toThrow(/unsupported/);
   });
 });

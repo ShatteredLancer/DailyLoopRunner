@@ -31,8 +31,13 @@ describe('pack highlight model', () => {
   });
 
   it('normalizes settings and formats one batched notification per pack', () => {
-    const settings = normalizeRewardAlertSettings({ minimumRating: 120, ntfyTopic: ' topic ' });
+    const settings = normalizeRewardAlertSettings({
+      minimumRating: 120,
+      ntfyServer: 'https://notifications.example',
+      ntfyTopic: ' topic ',
+    });
     expect(settings.minimumRating).toBe(99);
+    expect(settings.ntfyServer).toBe('https://ntfy.sh');
     expect(settings.ntfyTopic).toBe('topic');
     const message = formatPackHighlightNotification({
       pack: { name: 'Pack' },

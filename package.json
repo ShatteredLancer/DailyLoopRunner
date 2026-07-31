@@ -1,13 +1,24 @@
 {
   "name": "fc26-daily-loop-runner",
-  "version": "0.6.42",
+  "version": "0.7.0",
+  "description": "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ShatteredLancer/DailyLoopRunner.git"
+  },
+  "engines": {
+    "node": ">=22 <25"
+  },
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-userscript.mjs",
+    "build": "node scripts/build-userscript.mjs && node scripts/build-fsu-release-assets.mjs",
     "build:profiles": "node scripts/build-profile-library.mjs",
     "build:fsu-patch": "node scripts/generate-fsu-patch.mjs",
+    "build:fsu-release": "node scripts/build-fsu-release-assets.mjs",
     "check:fsu-patch": "node scripts/check-fsu-patch.mjs",
+    "check:fsu-release": "node scripts/build-fsu-release-assets.mjs --check",
     "check:dist": "node --check dist/DailyLoopRunner.user.js && node scripts/check-dist.mjs",
     "check:profiles": "node scripts/build-profile-library.mjs --check",
     "check:config": "node scripts/check-loop-config.mjs",
@@ -17,7 +28,7 @@
     "test:watch": "vitest",
     "test:contracts": "vitest run tests/contracts",
     "test:architecture": "vitest run tests/architecture",
-    "verify": "npm run lint:syntax && npm run check:config && npm run check:profiles && npm run check:architecture && npm run check:fsu-patch && npm test && npm run build && npm run check:dist"
+    "verify": "npm run lint:syntax && npm run check:config && npm run check:profiles && npm run check:architecture && npm run check:fsu-patch && npm test && npm run build && npm run check:dist && npm run check:fsu-release"
   },
   "devDependencies": {
     "esbuild": "^0.25.6",

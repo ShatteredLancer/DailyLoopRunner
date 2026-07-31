@@ -131,6 +131,10 @@ src/**
 ```text
 DailyLoopRunner.user.js
 dist/DailyLoopRunner.user.js
+dist/DailyLoopRunner.meta.js
+dist/FSU-Local.user.js
+dist/FSU-Local.meta.js
+dist/profiles/*
 ```
 
 禁止手工编辑生成文件。构建链路：
@@ -148,22 +152,23 @@ esbuild, bundle=true, format=iife, target=chrome120
         |
         +--> DailyLoopRunner.user.js
         +--> dist/DailyLoopRunner.user.js
+        +--> dist/DailyLoopRunner.meta.js
 ```
 
 `scripts/check-dist.mjs` 验证：
 
-- metadata 与源码一致。
-- 版本一致。
+- metadata 与生产身份、更新地址和许可证约束一致。
+- `package.json`、`package-lock.json`、完整脚本和 `.meta.js` 版本一致。
 - 根目录和 `dist` 产物字节一致。
+- 生产脚本不包含 localhost 网络权限。
 
-源码行为变更发布时，同步更新：
+`package.json` 是 Runner 版本的唯一来源。`src/userscript-entry.js` 中的 `__DLR_VERSION__` 由构建注入，运行时显示读取打包后的 package version；禁止在源码或生成脚本中维护第二份手写版本号。升级版本时必须同步 `package-lock.json`，再由构建刷新生成产物。
 
-- userscript `@version`
-- `W[APP_KEY].version`
-- `package.json`
-- `package-lock.json` 根版本
-- README 当前版本
-- 必要的 Milestone 版本记录
+`FC26 Daily Loop Runner` 的生产 `@name`、GitHub namespace、update/download URL 和 MIT `@license` 从 `0.7.0` 起属于稳定安装身份。除非明确设计并记录一次新的安装迁移，不得随重构、仓库移动或开发脚本改名而改变。生产 metadata 只允许已审查的远程域名；`127.0.0.1` 和 `localhost` 仅允许出现在 `DailyLoopRunnerHotReload.user.js`。
+
+FSU Local 的维护输入是 `FSU_mod/fsu-mod.config.json`。上游 `26.09` 原文件必须保持字节不变，`upstreamVersion` 不得因本地修改变化；本地改动只提升独立的 `localVersion`，并重新生成 patch、manifest、`FSU-Local.user.js` 和 `FSU-Local.meta.js`。`npm run check:fsu-patch` 必须证明 patch 可从 immutable origin 重放到 manifest 记录的 modified SHA256；直接编辑 manifest hash 或发布产物不算修复。
+
+DailyLoopRunner、仓库内原创文档/脚本和 FSU Local 修改均按 MIT 发布。第三方代码必须保留其原始作者、许可证和 notice；不得仅因为仓库采用 MIT 就删除第三方归属，也不得把第三方商标或在线服务描述为本项目资产。许可证边界以 `LICENSE`、`FSU_mod/LICENSE` 和 `THIRD_PARTY_NOTICES.md` 为准。
 
 新增或删除 Loop strategy 时，禁止只修改 schema 或只在 entry 注入 runner。`src/domain/strategies.js` 是 strategy 清单来源，必须同步贯通 `src/config/loop-schema.js`、`src/workflows/dispatch.js`、entry runner 注入、strategy dispatch 测试、架构 runner-map 测试和对应 Workflow/contract coverage。凡是 schema 接受但 dispatch 无法执行的 strategy 都属于发布阻断错误。
 
@@ -461,7 +466,7 @@ Dynamic SBC 缓存只能缓存只读 Challenge 快照，不能缓存“可运行
 
 主面板 Profile 选择器只能激活 Profile 的 Saved/last-known-good，不得隐式保存或应用 Draft。内置 Starter Profile 在 Store 归一化时只补缺，不得覆盖同 ID 的现有用户 Profile。Built-in、Default 和 `Bronze/Silver Inventory Only` 的 `One-click Daily Loop` 固定为 Daily Bronze -> Daily Silver -> Daily Common -> Daily Rare 四步，不得隐式追加 `Daily Rare Pack to 2x84+ Loop`；只有 `Daily + Rare Pack to 2x84+` Starter 可以追加该第 5 步，并保持 `useRoundsAsCompletions:false` 与最多一次库存 fallback。独立 Rare Pack Loop 在所有配置中仍保留。`Bronze/Silver Inventory Only` Starter 只能把使用铜/银 `targetDuplicate` 或 requirements 的 supported Loop 设为 `inventory-only`，并把其余 supported/container Loop 显式设为 `normal`，使它与主面板全局 `Inventory only` 区分；不得给 unsupported/intrinsic strategy 写入非法配置。旧 `starter-inventory-only` 仅在保持原始名称、preset 和未修改配置时自动迁移，用户自定义副本必须保留。主面板不得恢复 `Dry run` 或 `Show MVP loops` 控件；Dry Run 仅由 Builder/Profile 中的 Loop 配置启用，MVP/验证 Loop 保留在配置和 Builder 中但始终从主 Loop 下拉列表隐藏。主面板保留 `Refresh caches` 和 `Scan SBCs` 作为库存缓存恢复与 Dynamic SBC 绑定刷新入口；`Scan SBCs` 必须提供 Incremental、Full rescan 和 Clear cache 三种只读模式。JSON 验证/导入和 recap 模拟预览只放在 Builder/开发入口，不恢复为主面板按钮。
 
-可发布 Profile 的源目录固定为 `profiles/`。每个 `*.profile.json` 文件名必须与 kebab-case `id` 一致，且只能二选一引用官方 `preset` 或提供完整 `config`；新增文件必须通过 `npm run check:profiles`，并由 `npm run build:profiles` 生成 `dist/profiles/*.loops.json` 和 manifest。禁止上传带 `discovered`、`discoveryIdentity` 或 `discovered-player-pick-*` 的动态 Pick 快照。`.github/workflows/release-assets.yml` 负责在 Release 发布时上传 userscript、完整 Loop 配置和 `DailyLoopRunner.profiles.zip`；Profile-only 合并到 `main` 时仅在最新 Release 与当前 package 版本一致的情况下覆盖 Profile ZIP/manifest，避免把未发布代码生成的 Profile 附到旧版本。
+可发布 Profile 的源目录固定为 `profiles/`。每个 `*.profile.json` 文件名必须与 kebab-case `id` 一致，且只能二选一引用官方 `preset` 或提供完整 `config`；新增文件必须通过 `npm run check:profiles`，并由 `npm run build:profiles` 生成 `dist/profiles/*.loops.json` 和 manifest。禁止上传带 `discovered`、`discoveryIdentity` 或 `discovered-player-pick-*` 的动态 Pick 快照。`.github/workflows/release-assets.yml` 只在新版本 Release 发布时上传 userscript、完整 Loop 配置和 `DailyLoopRunner.profiles.zip`；已发布 Release 不得因 Profile-only 合并而覆盖资产，需分发的 Profile 变化必须提升 package 版本并创建新 tag。
 
 Reward Alerts 的三个测试入口必须保持解耦：Preview 只展示本地 Toast/烟花，不调用 `GM_notification` 或网络；Desktop test 实际调用本机系统通知；ntfy test 实际发送远程测试消息。不要为了减少按钮数量把真实通知副作用合并进 Preview。
 
@@ -941,6 +946,8 @@ git diff --check
 共享底层修改不得仅凭 Node tests 宣布完成；Agent 应根据影响面列出真实页面验证场景，由能够访问账号和 Web App 的用户执行。
 
 CI 位于 `.github/workflows`，Windows + Node 22 执行 `npm ci` 和 `npm run verify`，并检查生成的根目录 userscript 已提交。`verify.yml` 同时构建 Profile preview artifact；`release-assets.yml` 负责 GitHub Release 资产打包和上传。
+
+正式 Release 只能由与 `package.json` 完全匹配的 `v<version>` tag 或指向该既有 tag 的手动触发创建。发布 workflow 必须先完成完整验证、构建全部 Runner/FSU/Profile 资产并生成 SHA256，再从 draft 发布；已发布 Release 不得覆盖、替换或因 Profile 单独变更而修改。需要更新任何资产时提升版本并创建新 tag。
 
 ## 15. 交付报告要求
 

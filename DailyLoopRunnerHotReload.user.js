@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner - Hot Reload
-// @namespace    local.fc26.validation
+// @namespace    https://github.com/ShatteredLancer/DailyLoopRunner/dev
 // @version      0.1.2
 // @description  Reloads the local Daily Loop Runner userscript without refreshing the Web App page.
+// @license      MIT
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.easports.com/*/ea-sports-fc/ultimate-team/web-app/*
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*

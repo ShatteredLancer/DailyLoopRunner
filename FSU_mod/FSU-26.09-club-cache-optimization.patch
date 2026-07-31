@@ -1,19 +1,35 @@
 diff --git a/FSU.user.js b/FSU.user.js
-index dd554ab..a8e642f 100644
+index dd554ab..159f732 100644
 --- a/FSU.user.js
 +++ b/FSU.user.js
-@@ -18,6 +18,8 @@
- // @grant        GM_xmlhttpRequest
- // @grant        GM_getValue
+@@ -1,7 +1,10 @@
+ // ==UserScript==
+-// @name         【FSU】EAFC FUT WEB 增强器
+-// @namespace    https://futcd.com/
+-// @version      26.09
+-// @description  EAFCFUT模式SBC任务便捷操作增强器👍👍👍，模拟开包、额外信息展示、近期低价自动查询、一键挂出球员、跳转FUTBIN、快捷搜索、拍卖行优化等等...👍👍👍
++// @name         【FSU Local】EAFC FUT WEB 增强器
++// @namespace    https://github.com/ShatteredLancer/DailyLoopRunner/FSU_mod
++// @version      26.09.1
++// @description  Local maintained FSU 26.09 build with validated Club cache and scoped payload optimizations.
+ // @author       Futcd_kcka
++// @contributor  ShatteredLancer
++// @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner/tree/main/FSU_mod
++// @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
+ // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app/*
+@@ -20,2 +23,4 @@
  // @grant        GM_setValue
 +// @grant        GM_registerMenuCommand
 +// @grant        GM_info
  // @connect      *
- // @connect      ea.com
- // @connect      futbin.com
-@@ -259,7 +261,39 @@
-         events.notice = function(text,type){
-             services.Notification.queue([fy(text),type])
+@@ -32,4 +37,4 @@
+ // @run-at       document-end
+-// @downloadURL https://update.greasyfork.org/scripts/431044/%E3%80%90FSU%E3%80%91EAFC%20FUT%20WEB%20%E5%A2%9E%E5%BC%BA%E5%99%A8.user.js
+-// @updateURL https://update.greasyfork.org/scripts/431044/%E3%80%90FSU%E3%80%91EAFC%20FUT%20WEB%20%E5%A2%9E%E5%BC%BA%E5%99%A8.meta.js
++// @downloadURL  https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/FSU-Local.user.js
++// @updateURL    https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/FSU-Local.meta.js
+ // ==/UserScript==
+@@ -261,3 +266,35 @@
          };
 +        events.requireClubReady = function(action){
 +            const cacheStatus = info.base.clubCache?.status;
@@ -49,11 +65,7 @@ index dd554ab..a8e642f 100644
 +            }
 +            const run = async() => {
              SBCCount.init();
-             set.init();
-             build.init();
-@@ -646,7 +680,12 @@
-                 console.log("没加载 enhancer")
-                 info.isEnhancer = false;
+@@ -648,3 +685,8 @@
              }
 -            await events.reloadPlayers();
 +            events.reloadPlayers({ reason:"startup" }).then(success => {
@@ -63,11 +75,7 @@ index dd554ab..a8e642f 100644
 +            });
 +            console.log("[FSU init] core initialization continues while Club player data loads in the background");
  
-             //24.18 可进化标识：读取进化任务数据
-             //25.02 修复进化任务加载不全的问题
-@@ -735,6 +774,21 @@
-             }
-             info.squad = _.map(repositories.Squad.squads.get(services.User.getUser().selectedPersona).get(services.Squad.activeSquad).getPlayers(),"item.id");
+@@ -737,2 +779,17 @@
              console.log(info.squad)
 +            };
 +            info.base.initPromise = run()
@@ -85,19 +93,11 @@ index dd554ab..a8e642f 100644
 +                });
 +            return info.base.initPromise;
          };
- 
-         //26.02 添加进化新增显示
-@@ -1270,6 +1324,7 @@
-             "set.sbc.squadcmpl":["阵容补全功能","陣容補全功能","Squad completion"],
-             "notice.ldatasuccess":["球员数据已全部加载成功","球員資料已全部載入成功","All player data has been loaded successfully"],
+@@ -1272,2 +1329,3 @@
              "notice.ldataerror":["球员数据加载失败 请重刷新页面加载 否则核心功能无法使用","球員資料載入失敗 請重重新整理頁面載入 否則核心功能無法使用","Player data loading failed, please refresh the page to load, otherwise the core functions cannot be used"],
 +            "notice.ldataloading":["球员数据正在后台加载，请稍后再使用库存填充功能","球員資料正在背景載入，請稍後再使用庫存填充功能","Player data is loading in the background. Please retry the inventory action shortly."],
              "loadingclose.ldata":["正在读取球员数据（%1/%2）请耐心等待","正在讀取球員資料（%1/%2）請耐心等待","Reading player data (%1/%2) please be patient"],
-             "uatoclub.btntext":["直接发送%1个至俱乐部","直接傳送%1個至俱樂部","Send %1 directly to the club"],
-             "uatoclub.success":["直接发送俱乐部成功","直接傳送俱樂部成功","Send directly to the club successfully"],
-@@ -6813,18 +6868,10 @@
-                     fy("tile.gptitle"),
-                     fy("tile.gptext"),
+@@ -6815,14 +6873,6 @@
                      (e) => {
 -                        services.Club.clubDao.clubRepo.items.reset();
                          events.waitForClickShieldToHide(() => {
@@ -115,11 +115,7 @@ index dd554ab..a8e642f 100644
 +                                console.error("[FSU club load] manual reload failed", error);
 +                            });
                          });
-                     }
-                 )
-@@ -6846,78 +6893,2143 @@
-                 });
-             }
+@@ -6848,74 +6898,2139 @@
          };
 -        events.reloadPlayers = async(e) =>{
 -            GM_setValue("players",JSON.stringify({}));
@@ -2317,51 +2313,27 @@ index dd554ab..a8e642f 100644
              });
 +            return info.base.reloadPlayersPromise;
          }
-         UTHomeHubView.prototype.getObjectivesTile = function() {
-             if(info.task.obj.html && !this._objectivesTile.__root.querySelector(".fsu-task") && info.set.info_obj){
-@@ -8252,6 +10364,7 @@
-         
-         //指定ID填充SBC
+@@ -8254,2 +10369,3 @@
          events.playerListFillSquad = (challenge,list,type) => {
 +            if(!events.requireClubReady("squad fill")) return false;
              events.showLoader();
-             let playerlist = [],substitute = Array.from(list);
- 
-@@ -8291,6 +10404,7 @@
-         }
-         //阵容智能填充
+@@ -8293,2 +10409,3 @@
          events.getTemplate = async function(e,type,sId){
 +            if(!events.requireClubReady("SBC template fill")) return false;
              e.setInteractionState(0);
-             let squadPos = e.challenge.squad.getFieldPlayers().map(i => { return i.isBrick() ? null : i.getGeneralPosition()});
-             events.showLoader();
-@@ -8849,6 +10963,7 @@
-             }
-         }
+@@ -8851,2 +10968,3 @@
          events.getRatingPlayers = (squad,ratings) => {
 +            if(!events.requireClubReady("rating squad fill")) return [];
              const assignPlayer = (playerlist, shortlist, Exclusionlist, index, pos) => {
-                 const player = pos !== null ? _.find(shortlist, item => item.basePossiblePositions.includes(pos)) : _.head(shortlist);
-                 if (player) {
-@@ -10010,6 +12125,7 @@
-         //快速SBC
-         //24.20 新插入程序快速完成指定 SBC
+@@ -10012,2 +12130,3 @@
          events.fastSBC = async (id,cId) => {
 +            if(!events.requireClubReady("Fast SBC")) return false;
              let controller = events.getCurrent(),
-                 view = controller.getView(),
-                 SBCSetEntity = services.SBC.repository.getSetById(id),
-@@ -11811,6 +13927,7 @@
-         //24.23 添加拦截器来截获提交的SBC
-         const originalSubmitChallenge = UTSBCService.prototype.submitChallenge;
+@@ -11813,2 +13932,3 @@
          UTSBCService.prototype.submitChallenge = function(o, a, i, n) {
 +            events.markClubCacheDirty("SBC submission started");
              let r = originalSubmitChallenge.apply(this, arguments);
-             let s = this;
-             r.observe(this, function(e,t) {
-@@ -15731,4 +17848,4 @@
-         unsafeWindow._ = _;
-     }
+@@ -15733,2 +17853,2 @@
      main()
 -})();
 \ No newline at end of file

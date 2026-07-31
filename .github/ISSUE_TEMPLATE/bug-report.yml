@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible Runner, FSU Local, SBC, Pack, or UI failure.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Review logs for account identifiers and never upload ntfy tokens or authentication headers.
+  - type: input
+    id: runner-version
+    attributes:
+      label: DailyLoopRunner version
+      placeholder: 0.7.0
+    validations:
+      required: true
+  - type: input
+    id: fsu-version
+    attributes:
+      label: FSU version
+      placeholder: FSU upstream 26.09 or FSU Local 26.09.1
+    validations:
+      required: true
+  - type: dropdown
+    id: enhancer
+    attributes:
+      label: FC26 Enhancer state
+      options:
+        - Enabled
+        - Disabled
+        - Not installed
+    validations:
+      required: true
+  - type: input
+    id: profile
+    attributes:
+      label: Active Profile and Loop
+      placeholder: Daily + Rare Pack to 2x84+ / One-click Daily Loop
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include the starting Unassigned, Storage, My Packs, and SBC state when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and diagnostics
+      description: Drag the complete Save log output or FSU diagnostics JSON here after reviewing it for sensitive data.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I stopped the Runner and preserved the current Unassigned state after the failure.
+          required: true
+        - label: I reviewed attached files and removed secrets such as ntfy tokens.
+          required: true

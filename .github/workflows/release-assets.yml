@@ -1,95 +1,140 @@
-name: Publish release assets
+name: Publish immutable release
 
 on:
-  release:
-    types: [published]
   push:
-    branches: [main]
-    paths:
-      - "profiles/**"
-      - "scripts/build-profile-library.mjs"
-      - "src/config/builder-profile.js"
-      - "src/config/loop-schema.js"
-      - "src/config/loops.js"
-      - "src/config/recovery.js"
-      - "src/domain/strategies.js"
-      - "package.json"
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing GitHub Release tag to update
+        description: Existing version tag to publish, for example v0.7.0
         required: true
         type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run verify
+      - name: Verify committed compatibility userscript
+        run: git diff --exit-code -- DailyLoopRunner.user.js
       - run: npm run build:profiles
-      - name: Package Profile library
-        shell: pwsh
-        run: Compress-Archive -Path 'dist\profiles\*' -DestinationPath 'dist\DailyLoopRunner.profiles.zip' -Force
-      - name: Resolve target Release
-        id: release
+
+      - name: Validate release tag
+        id: version
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_TAG: ${{ github.event.release.tag_name }}
           INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          if ($env:EVENT_NAME -eq 'release') {
-            $tag = $env:EVENT_TAG
-          } elseif ($env:EVENT_NAME -eq 'workflow_dispatch') {
-            $tag = $env:INPUT_TAG
-          } else {
-            $tag = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>$null
-            if ($LASTEXITCODE -ne 0 -or -not $tag) {
-              Write-Host 'No published Release exists; Profile bundle will be attached on the next Release.'
-              Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'tag=' -Encoding utf8
-              exit 0
-            }
+          $tag = if ($env:EVENT_NAME -eq 'workflow_dispatch') { $env:INPUT_TAG.Trim() } else { $env:REF_NAME.Trim() }
+          if ($tag -ne "v$version") {
+            throw "Release tag $tag does not match package version $version"
           }
-          $tag = $tag.Trim()
-          if ($tag.TrimStart('v') -ne $version) {
-            Write-Host "Release $tag does not match package version $version; skipping asset upload."
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'tag=' -Encoding utf8
-            exit 0
-          }
+          git rev-parse --verify "$tag^{commit}" | Out-Null
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "tag=$tag" -Encoding utf8
-      - name: Upload Profile bundle
-        if: steps.release.outputs.tag != ''
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "version=$version" -Encoding utf8
+
+      - name: Package release assets
+        shell: pwsh
+        run: |
+          Compress-Archive -Path 'dist\profiles\*' -DestinationPath 'dist\DailyLoopRunner.profiles.zip' -Force
+          Copy-Item -LiteralPath 'dist\profiles\manifest.json' -Destination 'dist\DailyLoopRunner.profiles.manifest.json' -Force
+          Copy-Item -LiteralPath 'FSU_mod\fsu-mod-manifest.json' -Destination 'dist\FSU-Local.manifest.json' -Force
+          $assets = @(
+            'dist\DailyLoopRunner.user.js',
+            'dist\DailyLoopRunner.meta.js',
+            'DailyLoopRunner.loops.json',
+            'dist\DailyLoopRunner.profiles.zip',
+            'dist\DailyLoopRunner.profiles.manifest.json',
+            'dist\FSU-Local.user.js',
+            'dist\FSU-Local.meta.js',
+            'dist\FSU-Local.manifest.json'
+          )
+          $checksums = foreach ($asset in $assets) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
+            "$hash  $([System.IO.Path]::GetFileName($asset))"
+          }
+          Set-Content -LiteralPath 'dist\SHA256SUMS' -Value $checksums -Encoding ascii
+
+      - name: Create or reuse draft release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release upload $env:RELEASE_TAG `
-            'dist/DailyLoopRunner.profiles.zip' `
-            'dist/profiles/manifest.json#DailyLoopRunner.profiles.manifest.json' `
-            --clobber
-      - name: Upload versioned Runner assets
-        if: steps.release.outputs.tag != '' && github.event_name != 'push'
+          $draft = gh release view $env:RELEASE_TAG --json isDraft --jq .isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if ($draft.Trim() -ne 'true') {
+              throw "Release $env:RELEASE_TAG is already published and must remain immutable"
+            }
+          } else {
+            gh release create $env:RELEASE_TAG --verify-tag --draft --generate-notes --title "DailyLoopRunner v$env:RELEASE_VERSION"
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to create draft release' }
+          }
+
+      - name: Upload release assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release upload $env:RELEASE_TAG `
-            'dist/DailyLoopRunner.user.js' `
-            'DailyLoopRunner.loops.json' `
-            --clobber
+          $assets = @(
+            'dist/DailyLoopRunner.user.js',
+            'dist/DailyLoopRunner.meta.js',
+            'DailyLoopRunner.loops.json',
+            'dist/DailyLoopRunner.profiles.zip',
+            'dist/DailyLoopRunner.profiles.manifest.json',
+            'dist/FSU-Local.user.js',
+            'dist/FSU-Local.meta.js',
+            'dist/FSU-Local.manifest.json',
+            'dist/SHA256SUMS'
+          )
+          gh release upload $env:RELEASE_TAG $assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to upload release assets' }
+
+      - name: Publish verified release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release edit $env:RELEASE_TAG --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to publish release' }
+
+      - name: Write release summary
+        shell: pwsh
+        run: |
+          $manifest = Get-Content 'FSU_mod\fsu-mod-manifest.json' | ConvertFrom-Json
+          @"
+          ## DailyLoopRunner release
+
+          | Field | Value |
+          | --- | --- |
+          | Runner | ``${{ steps.version.outputs.version }}`` |
+          | Tag | ``${{ steps.version.outputs.tag }}`` |
+          | FSU upstream | ``$($manifest.upstreamVersion)`` |
+          | FSU Local | ``$($manifest.localVersion)`` |
+          | Update metadata | ``DailyLoopRunner.meta.js`` |
+          | Checksums | ``SHA256SUMS`` |
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8

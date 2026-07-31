@@ -1,6 +1,6 @@
-# FSU Club Cache Optimization
+# FSU Local 26.09.1
 
-本目录保存 FSU Club 加载优化的可重放发布材料。普通用户只需要阅读本文；修改缓存、XHR capture、状态机或 Runner 集成时，继续阅读同目录的 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
+本目录维护基于上游 FSU `26.09` 的本地版本 `26.09.1`。上游原版保持字节不变，本地版本通过可重放 Git patch 生成并保留原作者和 MIT 许可证。普通用户只需要阅读本文；修改缓存、XHR capture、状态机或 Runner 集成时，继续阅读同目录的 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
 
 ## 文件说明
 
@@ -9,22 +9,24 @@
 | `【FSU】EAFC FUT WEB 增强器-26.09_origin.user.js` | 未修改的 FSU `26.09` 上游基线 |
 | `【FSU】EAFC FUT WEB 增强器-26.09_mod.user.js` | 已完成真实页面验证的优化版 |
 | `FSU-26.09-club-cache-optimization.patch` | 从原版生成优化版的标准 Git patch |
+| `fsu-mod.config.json` | 固定上游版本、本地版本、来源、许可证和 Release 文件名 |
 | `fsu-mod-manifest.json` | 版本、文件名和 SHA256 基线 |
 | `Apply-FsuOptimization.ps1` | 对原版或后续上游版本安全尝试应用补丁 |
+| `LICENSE` | 上游和本地修改共同保留的 MIT 许可证 |
 
 补丁由 `scripts/generate-fsu-patch.mjs` 生成。不要手工同时修改 patch、manifest 和优化版脚本。
 
 ## 直接安装
 
-将以下文件更新到 Tampermonkey：
+从最新 GitHub Release 安装：
 
 ```text
-【FSU】EAFC FUT WEB 增强器-26.09_mod.user.js
+https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/FSU-Local.user.js
 ```
 
-建议先禁用原来的 FSU 脚本，避免两个 FSU 实例同时运行。优化版仍使用原 FSU 名称和版本号，因此 Tampermonkey 中应只保留一个启用实例。
+先禁用原来的 FSU 脚本，避免两个 FSU 实例同时运行。Tampermonkey 中应只保留一个启用的 FSU；本地版本显示为 `【FSU Local】EAFC FUT WEB 增强器 26.09.1`。
 
-优化版保留了上游的 `@downloadURL` 和 `@updateURL`。Tampermonkey 自动更新可能将它替换回新的上游版本。建议关闭该脚本的自动更新，或者在每次 FSU 上游更新后重新取得干净上游文件、应用补丁并完成验证。
+本地版本使用 DailyLoopRunner GitHub Release 的独立 `@downloadURL` 和 `@updateURL`，不会被上游 Greasy Fork 自动覆盖。上游更新不会自动进入本地版本；必须先更新不可变基线、重放或重建补丁并完成真实页面验证。
 
 第一次登录会执行一次完整 Club 扫描，用于建立新的实体缓存、Storage/Transfer 指纹和全量校验时间。第一次成功日志应包含：
 
@@ -41,6 +43,14 @@
 ```
 
 此时不应再出现 `Club.search page 1/N` 到 `N/N` 的完整分页扫描。
+
+## 本地维护模型
+
+- `26.09` 表示不可变上游版本。
+- `26.09.1` 的最后一位表示本地修订号；本地行为变化必须递增。
+- 上游升级到新版本时新增对应 origin/mod 基线，不直接覆盖已发布的 `26.09` 文件。
+- `fsu-mod.config.json` 是维护输入，`fsu-mod-manifest.json` 是生成后的 hash 证明。
+- Release 中使用稳定文件名 `FSU-Local.user.js` 和 `FSU-Local.meta.js`，Tampermonkey 按本地版本号更新。
 
 ## 应用到更新后的 FSU
 
@@ -68,7 +78,7 @@
 5. 原版 hash 完全匹配时，再校验输出必须等于已验证优化版 hash。
 6. 全部通过后才写入输出文件。
 
-新上游 hash 与 `26.09` 基线不同时会显示警告。即使补丁可以自动应用，也必须人工审阅 diff，并重新验证首次全量登录、第二次快速登录和 Runner Live SBC 定向校验。
+新上游 hash 与 `26.09` 基线不同时会显示警告。即使补丁可以自动应用，也只能作为迁移预览；必须建立新的 origin/mod 基线、更新配置、人工审阅 diff，并重新验证首次全量登录、第二次快速登录和 Runner Live SBC 定向校验。
 
 ## 重新生成补丁
 

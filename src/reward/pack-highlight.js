@@ -25,7 +25,7 @@ export function normalizeRewardAlertSettings(input = {}) {
     highlightEnabled: input.highlightEnabled !== false,
     desktopEnabled: input.desktopEnabled === true,
     ntfyEnabled: input.ntfyEnabled === true,
-    ntfyServer: normalizedText(input.ntfyServer) || DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
+    ntfyServer: DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
     ntfyTopic: normalizedText(input.ntfyTopic),
     ntfyToken: normalizedText(input.ntfyToken),
   });
