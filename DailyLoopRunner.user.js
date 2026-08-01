@@ -59,8 +59,8 @@
       verify: "npm run lint:syntax && npm run check:config && npm run check:profiles && npm run check:architecture && npm run check:fsu-patch && npm test && npm run build && npm run check:dist && npm run check:fsu-release"
     },
     devDependencies: {
-      esbuild: "^0.25.6",
-      vitest: "^3.2.4"
+      esbuild: "^0.28.1",
+      vitest: "^4.1.10"
     }
   };
 
@@ -931,7 +931,7 @@
     "maxPacks",
     "validationRounds"
   ]);
-  var PICK_OPTIONS_APPLIED = Symbol("pick-options-applied");
+  var PICK_OPTIONS_APPLIED = /* @__PURE__ */ Symbol("pick-options-applied");
   function boundedNumber(value, fallback, min, max) {
     const parsed = Number(value);
     return Math.max(min, Math.min(max, Number.isFinite(parsed) ? parsed : fallback));
