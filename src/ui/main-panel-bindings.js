@@ -1,9 +1,12 @@
 const PICK_OPTION_IDS = [
-  'bronze-loop-pick-protect-high-gold',
   'bronze-loop-pick-auto-below-90',
   'bronze-loop-pick-open-at-end',
-  'bronze-loop-pick-high-gold-threshold',
   'bronze-loop-pick-auto-threshold',
+];
+
+const SBC_FODDER_OPTION_IDS = [
+  'bronze-loop-low-rated-gold-max',
+  'bronze-loop-rating-sbc-max-card',
 ];
 
 const HELP_BUTTON_TOPICS = Object.freeze({
@@ -35,6 +38,9 @@ export function bindMainPanelCommands(options = {}) {
   PICK_OPTION_IDS.forEach((id) => {
     required(panel, `#${id}`).addEventListener('change', (event) => commands.savePickOptions?.(event));
   });
+  SBC_FODDER_OPTION_IDS.forEach((id) => {
+    required(panel, `#${id}`).addEventListener('change', (event) => commands.saveSbcFodderOptions?.(event));
+  });
   required(panel, '#bronze-loop-daily-inventory-only').addEventListener('change', (event) => commands.saveLoopOptions?.(event));
   required(panel, '#bronze-loop-reward-alert-enabled').addEventListener('change', (event) => commands.saveRewardAlertEnabled?.(event));
   required(panel, '#bronze-loop-reward-alert-settings').addEventListener('click', (event) => commands.openRewardAlertSettings?.(event));
@@ -54,13 +60,14 @@ export function hydrateMainPanelOptions(options = {}) {
   if (!panel?.querySelector) throw new TypeError('panel element is required');
   const loopOptions = options.loopOptions || {};
   const pickOptions = options.pickOptions || {};
+  const sbcFodderOptions = options.sbcFodderOptions || {};
   const rewardAlertSettings = options.rewardAlertSettings || {};
   required(panel, '#bronze-loop-daily-inventory-only').checked = loopOptions.inventoryOnly === true
     || loopOptions.dailyRecycleInventoryOnly === true;
-  required(panel, '#bronze-loop-pick-protect-high-gold').checked = pickOptions.protectHighGold === true;
   required(panel, '#bronze-loop-pick-auto-below-90').checked = pickOptions.autoSelectBelow90 === true;
   required(panel, '#bronze-loop-pick-open-at-end').checked = pickOptions.openPicksAtEnd === true;
-  required(panel, '#bronze-loop-pick-high-gold-threshold').value = pickOptions.highGoldThreshold;
   required(panel, '#bronze-loop-pick-auto-threshold').value = pickOptions.autoPickThreshold;
+  required(panel, '#bronze-loop-low-rated-gold-max').value = sbcFodderOptions.lowRatedGoldMaxRating ?? 82;
+  required(panel, '#bronze-loop-rating-sbc-max-card').value = sbcFodderOptions.ratingSbcMaxCardRating ?? 88;
   required(panel, '#bronze-loop-reward-alert-enabled').checked = rewardAlertSettings.enabled !== false;
 }

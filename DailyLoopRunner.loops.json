@@ -3,6 +3,7 @@
     {
       "id": "daily-bronze-upgrade",
       "name": "Daily Bronze Upgrade",
+      "sbcFodderPolicy": { "mode": "low-gold" },
       "activityBinding": {
         "family": "daily-bronze-upgrade",
         "category": "Upgrades",
@@ -42,6 +43,7 @@
     {
       "id": "daily-silver-upgrade",
       "name": "Daily Silver Upgrade",
+      "sbcFodderPolicy": { "mode": "low-gold" },
       "activityBinding": {
         "family": "daily-silver-upgrade",
         "category": "Upgrades",
@@ -81,6 +83,7 @@
     {
       "id": "daily-common-gold-upgrade",
       "name": "Daily Common Gold Upgrade",
+      "sbcFodderPolicy": { "mode": "low-gold" },
       "activityBinding": {
         "family": "daily-common-gold-upgrade",
         "category": "Upgrades",
@@ -132,6 +135,7 @@
     {
       "id": "bronze-upgrade",
       "name": "Bronze Upgrade",
+      "sbcFodderPolicy": { "mode": "low-gold" },
       "activityBinding": {
         "family": "bronze-upgrade",
         "category": "Upgrades",
@@ -171,6 +175,7 @@
     {
       "id": "silver-upgrade",
       "name": "Silver Upgrade",
+      "sbcFodderPolicy": { "mode": "low-gold" },
       "activityBinding": {
         "family": "silver-upgrade",
         "category": "Upgrades",
@@ -210,6 +215,7 @@
     {
       "id": "daily-rare-gold-upgrade",
       "name": "Daily Rare Gold Upgrade",
+      "sbcFodderPolicy": { "mode": "low-gold" },
       "activityBinding": {
         "family": "daily-rare-gold-upgrade",
         "category": "Upgrades",
@@ -225,10 +231,8 @@
           "tier": "gold",
           "rarity": "common",
           "count": 5,
-          "maxRating": 81,
           "playerOnly": true,
           "allowSpecial": false,
-          "protectHighGold": true,
           "priorityPiles": [
             "unassigned",
             "storage",
@@ -252,6 +256,7 @@
     {
       "id": "fof-glory-hunters-crafting-upgrade",
       "name": "Common Gold Premium Upgrade",
+      "sbcFodderPolicy": { "mode": "low-gold" },
       "activityBinding": {
         "family": "common-gold-material-upgrade",
         "classes": [
@@ -269,10 +274,8 @@
           "tier": "gold",
           "rarity": "common",
           "count": 9,
-          "maxRating": 81,
           "playerOnly": true,
           "allowSpecial": false,
-          "protectHighGold": true,
           "priorityPiles": [
             "unassigned",
             "storage",
@@ -296,6 +299,7 @@
     {
       "id": "gold-upgrade",
       "name": "Gold Upgrade",
+      "sbcFodderPolicy": { "mode": "low-gold" },
       "activityBinding": {
         "family": "gold-upgrade",
         "category": "Upgrades",
@@ -311,10 +315,8 @@
           "tier": "gold",
           "rarity": "common",
           "count": 11,
-          "maxRating": 81,
           "playerOnly": true,
           "allowSpecial": false,
-          "protectHighGold": true,
           "priorityPiles": [
             "unassigned",
             "storage",
@@ -338,6 +340,7 @@
     {
       "id": "2x84-upgrade",
       "name": "Rare Gold Recycling Upgrade",
+      "sbcFodderPolicy": { "mode": "low-gold" },
       "activityBinding": {
         "family": "rare-gold-material-upgrade",
         "classes": [
@@ -357,10 +360,8 @@
           "tier": "gold",
           "rarity": "rare",
           "count": 6,
-          "maxRating": 81,
           "playerOnly": true,
           "allowSpecial": false,
-          "protectHighGold": true,
           "priorityPiles": [
             "unassigned",
             "storage",
@@ -428,7 +429,7 @@
         "rarity": "common",
         "playerOnly": true,
         "allowSpecial": false,
-        "maxRating": 81
+        "maxRating": 82
       },
       "steps": [
         {
@@ -449,7 +450,7 @@
         "rarity": "rare",
         "playerOnly": true,
         "allowSpecial": false,
-        "maxRating": 81
+        "maxRating": 82
       },
       "steps": [
         {
@@ -870,7 +871,6 @@
           "count": 5,
           "playerOnly": true,
           "allowSpecial": false,
-          "protectHighGold": true,
           "priorityPiles": [
             "unassigned",
             "storage",
@@ -900,8 +900,7 @@
             "tier": "gold",
             "rarity": "common",
             "playerOnly": true,
-            "allowSpecial": false,
-            "protectHighGold": true
+            "allowSpecial": false
           },
           "packNames": [
             "11x Gold Players Pack",
@@ -959,7 +958,6 @@
           "count": 5,
           "playerOnly": true,
           "allowSpecial": false,
-          "protectHighGold": true,
           "priorityPiles": [
             "unassigned",
             "storage",
@@ -989,8 +987,7 @@
             "tier": "gold",
             "rarity": "common",
             "playerOnly": true,
-            "allowSpecial": false,
-            "protectHighGold": true
+            "allowSpecial": false
           },
           "packNames": [
             "11x Gold Players Pack",
@@ -1051,7 +1048,6 @@
             "count": 6,
             "playerOnly": true,
             "allowSpecial": false,
-            "protectHighGold": true,
             "priorityPiles": [
               "unassigned",
               "storage",
@@ -1206,10 +1202,8 @@
               "tier": "gold",
               "rarity": "common",
               "count": 9,
-              "maxRating": 81,
               "playerOnly": true,
               "allowSpecial": false,
-              "protectHighGold": true,
               "priorityPiles": [
                 "unassigned",
                 "storage",
@@ -1269,10 +1263,8 @@
               "tier": "gold",
               "rarity": "common",
               "count": 9,
-              "maxRating": 81,
               "playerOnly": true,
               "allowSpecial": false,
-              "protectHighGold": true,
               "priorityPiles": [
                 "unassigned",
                 "storage",
@@ -1336,7 +1328,6 @@
               "count": 9,
               "playerOnly": true,
               "allowSpecial": false,
-              "protectHighGold": true,
               "priorityPiles": [
                 "unassigned",
                 "storage",
@@ -1375,7 +1366,6 @@
               "count": 6,
               "playerOnly": true,
               "allowSpecial": false,
-              "protectHighGold": true,
               "priorityPiles": [
                 "unassigned",
                 "storage",

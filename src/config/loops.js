@@ -134,7 +134,7 @@ export const LOOP_DEFS = [
     rewardPackIds: [20059],
     rewardPackNames: ['Max. 78 Rare Gold Players Pack', 'Max 78 Rare Gold Players Pack'],
     requirements: [
-      { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer'] },
+      { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer'] },
     ],
     priorityPiles: ['unassigned', 'storage', 'transfer'],
     clubFallbackPiles: ['unassigned', 'storage', 'transfer', 'club'],
@@ -143,7 +143,7 @@ export const LOOP_DEFS = [
     shortagePacks: [
       {
         sourcePackRef: { rewardOfLoopId: 'daily-common' },
-        requirement: { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false, protectHighGold: true },
+        requirement: { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false },
         packIds: [20060],
         packNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
         maxOpensPerAttempt: 1,
@@ -169,7 +169,7 @@ export const LOOP_DEFS = [
     rewardPackIds: [20059],
     rewardPackNames: ['Max. 78 Rare Gold Players Pack', 'Max 78 Rare Gold Players Pack'],
     requirements: [
-      { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer'] },
+      { tier: 'gold', rarity: 'common', count: 5, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer'] },
     ],
     priorityPiles: ['unassigned', 'storage', 'transfer'],
     clubFallbackPiles: ['unassigned', 'storage', 'transfer', 'club'],
@@ -178,7 +178,7 @@ export const LOOP_DEFS = [
     shortagePacks: [
       {
         sourcePackRef: { rewardOfLoopId: 'daily-common-mvp' },
-        requirement: { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false, protectHighGold: true },
+        requirement: { tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false },
         packIds: [20060],
         packNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
         maxOpensPerAttempt: 1,
@@ -217,7 +217,7 @@ export const LOOP_DEFS = [
       },
       sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
       requirements: [
-        { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+        { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
       ],
       priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
     },
@@ -299,10 +299,8 @@ export const LOOP_DEFS = [
             tier: 'gold',
             rarity: 'common',
             count: 9,
-            maxRating: 81,
             playerOnly: true,
             allowSpecial: false,
-            protectHighGold: true,
             priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
           },
         ],
@@ -340,10 +338,8 @@ export const LOOP_DEFS = [
             tier: 'gold',
             rarity: 'common',
             count: 9,
-            maxRating: 81,
             playerOnly: true,
             allowSpecial: false,
-            protectHighGold: true,
             priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
           },
         ],
@@ -373,7 +369,7 @@ export const LOOP_DEFS = [
         },
         sbcNames: ['5x 80+ Upgrade'],
         requirements: [
-          { tier: 'gold', rarity: 'common', count: 9, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+          { tier: 'gold', rarity: 'common', count: 9, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
         ],
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       },
@@ -388,7 +384,7 @@ export const LOOP_DEFS = [
         },
         sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
         requirements: [
-          { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, protectHighGold: true, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+          { tier: 'gold', rarity: 'rare', count: 6, playerOnly: true, allowSpecial: false, priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
         ],
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       },

@@ -57,6 +57,20 @@ function rejectionReasons(item, requirement, fsuPolicy, protection) {
   if (requirement.protectHighGold && item.tier === 'gold' && item.rating >= resolveHighGoldThreshold(requirement)) {
     reasons.push('protected-high-gold');
   }
+  if (
+    isNormalGold(item)
+    && Number(requirement.lowRatedGoldMaxRating || 0) > 0
+    && item.rating > Number(requirement.lowRatedGoldMaxRating)
+  ) {
+    reasons.push(`low-rated-gold-over-${Number(requirement.lowRatedGoldMaxRating)}`);
+  }
+  if (
+    requirement.sbcFodderPolicy?.mode === 'rating-constrained'
+    && Number(requirement.ratingSbcMaxCardRating || requirement.sbcFodderPolicy.ratingSbcMaxCardRating || 0) > 0
+    && item.rating > Number(requirement.ratingSbcMaxCardRating || requirement.sbcFodderPolicy.ratingSbcMaxCardRating)
+  ) {
+    reasons.push(`rating-sbc-card-over-${Number(requirement.ratingSbcMaxCardRating || requirement.sbcFodderPolicy.ratingSbcMaxCardRating)}`);
+  }
   if (item.limitedUse) reasons.push('limited-use');
   if (item.concept) reasons.push('concept');
   if (item.academyEnrolled) reasons.push('academy-enrolled');
@@ -67,7 +81,7 @@ function rejectionReasons(item, requirement, fsuPolicy, protection) {
   if (fsuPolicy.onlyUntradeable && item.tradeable) reasons.push('fsu-only-untradeable');
   if (fsuPolicy.excludeEvolution && item.evolution) reasons.push('fsu-exclude-evolution');
   if (fsuPolicy.excludeDesignatedLeagues && (fsuPolicy.excludedLeagueIds || []).includes(item.leagueId)) reasons.push(`fsu-excluded-league-${item.leagueId}`);
-  if (isNormalGold(item)) {
+  if (isNormalGold(item) && requirement.respectFsuGoldRange !== false) {
     const [minRating = 75, maxRating = 83] = fsuPolicy.goldRange || [75, 83];
     if (item.rating < Number(minRating) || item.rating > Number(maxRating)) reasons.push(`fsu-gold-range-${minRating}-${maxRating}`);
   }

@@ -143,11 +143,11 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-scan-picks': busy,
     'bronze-loop-open-rewards': state.running === true,
     'bronze-loop-daily-inventory-only': state.running === true,
-    'bronze-loop-pick-protect-high-gold': state.running === true,
     'bronze-loop-pick-auto-below-90': state.running === true,
     'bronze-loop-pick-open-at-end': state.running === true,
-    'bronze-loop-pick-high-gold-threshold': state.running === true,
     'bronze-loop-pick-auto-threshold': state.running === true,
+    'bronze-loop-low-rated-gold-max': state.running === true,
+    'bronze-loop-rating-sbc-max-card': state.running === true,
     'bronze-loop-reward-alert-settings': state.running === true,
     'bronze-loop-rounds': state.running === true,
   };

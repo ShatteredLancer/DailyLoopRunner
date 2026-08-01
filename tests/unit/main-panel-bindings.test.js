@@ -9,10 +9,10 @@ const IDS = [
   'bronze-loop-help-run-options',
   'bronze-loop-help-config',
   'bronze-loop-help-log',
-  'bronze-loop-pick-protect-high-gold',
+  'bronze-loop-low-rated-gold-max',
+  'bronze-loop-rating-sbc-max-card',
   'bronze-loop-pick-auto-below-90',
   'bronze-loop-pick-open-at-end',
-  'bronze-loop-pick-high-gold-threshold',
   'bronze-loop-pick-auto-threshold',
   'bronze-loop-daily-inventory-only',
   'bronze-loop-reward-alert-enabled',
@@ -79,7 +79,7 @@ describe('main panel bindings', () => {
   it('binds every command control and forwards the selected loop id', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
-      'selectLoop', 'selectProfile', 'openBuilder', 'openHelp', 'savePickOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
+      'selectLoop', 'selectProfile', 'openBuilder', 'openHelp', 'savePickOptions', 'saveSbcFodderOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
       'refresh', 'scanPicks', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
@@ -119,9 +119,11 @@ describe('main panel bindings', () => {
       controls.get(id).emit('click');
       expect(commands.openHelp).toHaveBeenCalledWith(topic, expect.any(Object));
     }
-    controls.get('bronze-loop-pick-protect-high-gold').emit('change');
+    controls.get('bronze-loop-low-rated-gold-max').emit('change');
+    controls.get('bronze-loop-rating-sbc-max-card').emit('change');
     controls.get('bronze-loop-pick-auto-threshold').emit('change');
-    expect(commands.savePickOptions).toHaveBeenCalledTimes(2);
+    expect(commands.saveSbcFodderOptions).toHaveBeenCalledTimes(2);
+    expect(commands.savePickOptions).toHaveBeenCalledTimes(1);
   });
 
   it('fails fast when a required template control is missing', () => {
@@ -137,19 +139,21 @@ describe('main panel bindings', () => {
       panel,
       loopOptions: { dailyRecycleInventoryOnly: true },
       pickOptions: {
-        protectHighGold: true,
         autoSelectBelow90: false,
         openPicksAtEnd: true,
-        highGoldThreshold: 83,
         autoPickThreshold: 91,
+      },
+      sbcFodderOptions: {
+        lowRatedGoldMaxRating: 82,
+        ratingSbcMaxCardRating: 88,
       },
       rewardAlertSettings: { enabled: true },
     });
     expect(controls.get('bronze-loop-daily-inventory-only').checked).toBe(true);
-    expect(controls.get('bronze-loop-pick-protect-high-gold').checked).toBe(true);
+    expect(controls.get('bronze-loop-low-rated-gold-max').value).toBe(82);
+    expect(controls.get('bronze-loop-rating-sbc-max-card').value).toBe(88);
     expect(controls.get('bronze-loop-pick-auto-below-90').checked).toBe(false);
     expect(controls.get('bronze-loop-pick-open-at-end').checked).toBe(true);
-    expect(controls.get('bronze-loop-pick-high-gold-threshold').value).toBe(83);
     expect(controls.get('bronze-loop-pick-auto-threshold').value).toBe(91);
     expect(controls.get('bronze-loop-reward-alert-enabled').checked).toBe(true);
   });

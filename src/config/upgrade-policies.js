@@ -17,14 +17,19 @@ function mergePolicy(base, overrides = {}) {
         ...(clone(overrides.ratingSbcFill) || {}),
       },
     } : {}),
+    ...(base.sbcFodderPolicy || overrides.sbcFodderPolicy ? {
+      sbcFodderPolicy: {
+        ...(clone(base.sbcFodderPolicy) || {}),
+        ...(clone(overrides.sbcFodderPolicy) || {}),
+      },
+    } : {}),
   };
 }
 
 export function createTotwUpgradePolicy(overrides = {}) {
   return mergePolicy({
     strategy: 'fillAndVerifySbc',
-    maxSubmittedRating: 88,
-    maxNormalGoldSubmittedRating: 99,
+    sbcFodderPolicy: { mode: 'rating-constrained' },
     ratingSbcFill: { priorityPiles: [...ALL_INVENTORY_PILES] },
     requiredSpecialCount: 0,
     allowedSpecialCount: 0,
@@ -45,17 +50,14 @@ export function createTwoBy84UpgradePolicy(overrides = {}) {
       tier: 'gold',
       rarity: 'rare',
       count: 6,
-      maxRating: 81,
       playerOnly: true,
       allowSpecial: false,
-      protectHighGold: true,
       priorityPiles: [...FODDER_PILES],
     }],
     priorityPiles: [...FODDER_PILES],
     requiredSpecialCount: 0,
     allowedSpecialCount: 0,
-    maxSubmittedRating: 81,
-    maxNormalGoldSubmittedRating: 81,
+    sbcFodderPolicy: { mode: 'low-gold' },
     blockSpecial: true,
     blockTradeable: false,
     openRewardPacks: true,
@@ -65,8 +67,7 @@ export function createTwoBy84UpgradePolicy(overrides = {}) {
 export function createHighRatedUpgradePolicy(overrides = {}) {
   return mergePolicy({
     strategy: 'fillAndVerifySbc',
-    maxSubmittedRating: 88,
-    maxNormalGoldSubmittedRating: 99,
+    sbcFodderPolicy: { mode: 'rating-constrained' },
     ratingSbcFill: { priorityPiles: [...ALL_INVENTORY_PILES] },
     requiredSpecialCount: 0,
     allowedSpecialCount: 0,

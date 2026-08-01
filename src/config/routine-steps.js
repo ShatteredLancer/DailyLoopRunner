@@ -7,6 +7,7 @@ import {
   applyPickRuntimeOptions,
   resolveInventoryMode,
 } from './runtime-options.js';
+import { applySbcFodderPolicy } from './sbc-fodder-policy.js';
 
 function normalizeRoutineStep(step = {}) {
   return typeof step === 'string' ? { loopId: step } : step;
@@ -59,6 +60,7 @@ export function resolveRoutineStepLoopDefs(loopDef = {}, loopDefs = []) {
     const parentInventoryMode = loopDef.runtimeInventoryMode
       || resolveInventoryMode('normal', loopDef);
     applyInventoryMode(childDef, parentInventoryMode);
+    applySbcFodderPolicy(childDef, loopDef.runtimeSbcFodderPolicy || loopDef.sbcFodderPolicy);
     childDef.dryRun = loopDef.dryRun === true || childDef.dryRun === true;
     assertValidLoopDef(childDef, childDef.name || stepId);
     return applyDisabledPiles(childDef);

@@ -125,10 +125,10 @@ describe('loop configuration contracts', () => {
         tier: 'gold',
         rarity: 'common',
         count: 9,
-        maxRating: 81,
-        protectHighGold: true,
         allowSpecial: false,
       });
+      expect(loop.stages[0].requirements[0]).not.toHaveProperty('protectHighGold');
+      expect(loop.stages[0].requirements[0]).not.toHaveProperty('maxRating');
       expect(loop.rewardPackNames.some((name) => /5x\s*80\+/i.test(name))).toBe(true);
     }
   });
@@ -146,7 +146,7 @@ describe('loop configuration contracts', () => {
       expect(loop.stages.map((stage) => stage.requirements[0])).toEqual([
         expect.objectContaining({ tier: 'bronze', count: 11, allowSpecial: false }),
         expect.objectContaining({ tier: 'silver', count: 11, allowSpecial: false }),
-        expect.objectContaining({ tier: 'gold', rarity: 'common', count: 9, maxRating: 81, protectHighGold: true, allowSpecial: false }),
+        expect.objectContaining({ tier: 'gold', rarity: 'common', count: 9, allowSpecial: false }),
       ]);
       expect(loop.stages[2]).toMatchObject({
         name: 'Common Gold Premium Upgrade',
@@ -160,7 +160,7 @@ describe('loop configuration contracts', () => {
     }
   });
 
-  it('locks configurable Unassigned recovery routes and low-gold protection', async () => {
+  it('locks configurable Unassigned recovery routes without legacy protection fields', async () => {
     const { api, externalConfig } = await loadDefinitions();
     const builtInPolicies = Object.fromEntries(api.UNASSIGNED_RECOVERY_POLICIES.map((policy) => [policy.id, policy]));
     expect(builtInPolicies['bronze-duplicate-overflow'].steps.map((step) => step.recipeId)).toEqual([
@@ -184,12 +184,18 @@ describe('loop configuration contracts', () => {
       recipe.requirements.some((requirement) => requirement.tier === 'gold')
     );
     protectedRecipes.forEach((recipe) => {
+      expect(recipe.sbcFodderPolicy).toEqual({ mode: 'low-gold' });
       recipe.requirements.forEach((requirement) => {
-        expect(requirement).toMatchObject({ maxRating: 81, protectHighGold: true, allowSpecial: false });
+        expect(requirement).toMatchObject({ allowSpecial: false });
+        expect(requirement).not.toHaveProperty('maxRating');
+        expect(requirement).not.toHaveProperty('protectHighGold');
       });
     });
     expect(externalConfig.recoveryRecipes.map((recipe) => recipe.id))
       .toEqual(api.RECOVERY_RECIPES.map((recipe) => recipe.id));
+    expect(externalConfig.recoveryRecipes.every(
+      (recipe) => recipe.sbcFodderPolicy?.mode === 'low-gold',
+    )).toBe(true);
     expect(externalConfig.unassignedRecoveryPolicies.map((policy) => policy.id))
       .toEqual(api.UNASSIGNED_RECOVERY_POLICIES.map((policy) => policy.id));
   });
@@ -253,14 +259,14 @@ describe('loop configuration contracts', () => {
     expect(loop.preSelectionCleanup).not.toBe(false);
   });
 
-  it('locks protected low-gold crafting contracts', async () => {
+  it('locks low-gold crafting contracts under the shared runtime policy', async () => {
     const { builtIn } = await loadDefinitions();
     const rare = byId(builtIn, 'daily-rare');
     const rarePack = byId(builtIn, 'daily-rare-pack-84');
     const provision = byId(builtIn, 'provision-crafting');
 
     expect(rare.requirements[0]).toMatchObject({
-      tier: 'gold', rarity: 'common', count: 5, protectHighGold: true,
+      tier: 'gold', rarity: 'common', count: 5,
     });
     expect(rare).toMatchObject({
       strategy: 'supplyAndCraft',
@@ -279,11 +285,11 @@ describe('loop configuration contracts', () => {
         routingPolicy: 'reserveMatchingDuplicates',
         packIds: [20060],
         packNames: ['11x Gold Players Pack', '11 x Gold Players Pack'],
-        requirement: expect.objectContaining({ rarity: 'common', protectHighGold: true }),
+        requirement: expect.objectContaining({ rarity: 'common' }),
       }),
     ]);
     expect(rarePack.rareUpgrade.requirements[0]).toMatchObject({
-      tier: 'gold', rarity: 'rare', count: 6, protectHighGold: true,
+      tier: 'gold', rarity: 'rare', count: 6,
     });
     expect(rarePack).toMatchObject({
       sourcePackRef: { rewardOfLoopId: 'daily-rare' },
@@ -310,8 +316,10 @@ describe('loop configuration contracts', () => {
       .toEqual([['5x 80+ Upgrade'], ['2x 84+ Upgrade', '2 x 84+ Upgrade']]);
     expect(provision.craftingUpgrades.map((upgrade) => upgrade.requirements[0].rarity))
       .toEqual(['common', 'rare']);
-    expect(provision.craftingUpgrades.map((upgrade) => upgrade.requirements[0].protectHighGold))
-      .toEqual([true, true]);
+    provision.craftingUpgrades.forEach((upgrade) => {
+      expect(upgrade.requirements[0]).not.toHaveProperty('protectHighGold');
+      expect(upgrade.requirements[0]).not.toHaveProperty('maxRating');
+    });
   });
 
   it('removes the expired 82+ Pick and keeps current activities discovery-only', async () => {

@@ -37,7 +37,7 @@ describe('dynamic Player Pick SBC discovery', () => {
     });
   });
 
-  it('builds a protected single-Challenge Player Pick config from stable metadata', async () => {
+  it('builds a low-Gold-policy single-Challenge Player Pick config from stable metadata', async () => {
     const fixture = await loadFixture('challenges/player-pick-discovery.json');
     const result = parsePlayerPickSbcSnapshot(fixture.singleChallenge);
 
@@ -52,12 +52,12 @@ describe('dynamic Player Pick SBC discovery', () => {
       pickCandidateCount: 3,
       pickCount: 1,
       maxCompletions: 1,
+      sbcFodderPolicy: { mode: 'low-gold' },
     });
     expect(result.loop.requirements).toEqual([
       expect.objectContaining({
-        tier: 'gold', rarity: 'rare', count: 4, maxRating: 81,
-        allowSpecial: false, protectHighGold: true, highGoldThreshold: 82,
-        highGoldProtectionMaxRating: true,
+        tier: 'gold', rarity: 'rare', count: 4,
+        allowSpecial: false,
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       }),
     ]);
@@ -65,7 +65,7 @@ describe('dynamic Player Pick SBC discovery', () => {
     expect(validateLoopDef(result.loop, 'discovered Player Pick')).toEqual([]);
   });
 
-  it('records the configured protection threshold so runtime disabling can remove its cap', async () => {
+  it('does not generate legacy Pick protection fields from snapshot metadata', async () => {
     const fixture = await loadFixture('challenges/player-pick-discovery.json');
     const result = parsePlayerPickSbcSnapshot({
       ...fixture.singleChallenge,
@@ -73,14 +73,10 @@ describe('dynamic Player Pick SBC discovery', () => {
     });
 
     expect(result.status).toBe('supported');
-    expect(result.loop.requirements).toEqual([
-      expect.objectContaining({
-        maxRating: 83,
-        protectHighGold: true,
-        highGoldThreshold: 84,
-        highGoldProtectionMaxRating: true,
-      }),
-    ]);
+    expect(result.loop.sbcFodderPolicy).toEqual({ mode: 'low-gold' });
+    expect(result.loop.requirements[0]).not.toHaveProperty('maxRating');
+    expect(result.loop.requirements[0]).not.toHaveProperty('protectHighGold');
+    expect(result.loop.requirements[0]).not.toHaveProperty('highGoldThreshold');
   });
 
   it('preserves independent requirements for every Challenge and remaining set count', async () => {
@@ -99,7 +95,7 @@ describe('dynamic Player Pick SBC discovery', () => {
     expect(result.loop.challengeRequirements).toHaveLength(2);
     result.loop.challengeRequirements.forEach((requirements) => {
       expect(requirements).toEqual([
-        expect.objectContaining({ tier: 'gold', rarity: 'common', count: 9, maxRating: 81 }),
+        expect.objectContaining({ tier: 'gold', rarity: 'common', count: 9 }),
       ]);
     });
   });
@@ -138,7 +134,7 @@ describe('dynamic Player Pick SBC discovery', () => {
     });
     result.loop.challengeRequirements.forEach((requirements) => {
       expect(requirements).toEqual([
-        expect.objectContaining({ tier: 'gold', count: 10, maxRating: 81, preferCommon: true }),
+        expect.objectContaining({ tier: 'gold', count: 10, preferCommon: true }),
       ]);
       expect(requirements[0]).not.toHaveProperty('rarity');
     });
@@ -180,7 +176,7 @@ describe('dynamic Player Pick SBC discovery', () => {
     expect(result.loop.challengeRequirements).toHaveLength(2);
     result.loop.challengeRequirements.forEach((requirements) => {
       expect(requirements).toEqual([
-        expect.objectContaining({ tier: 'gold', count: 10, maxRating: 81, preferCommon: true }),
+        expect.objectContaining({ tier: 'gold', count: 10, preferCommon: true }),
       ]);
     });
     expect(result.diagnostics).toEqual([
@@ -359,7 +355,7 @@ describe('dynamic Player Pick SBC discovery', () => {
     const result = parsePlayerPickSbcSnapshot(fixture.rarityGroup);
     expect(result.status).toBe('supported');
     expect(result.loop.requirements).toEqual([
-      expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 4, maxRating: 81 }),
+      expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 4 }),
     ]);
     expect(result.loop).toMatchObject({ pickCandidateCount: 5, pickCount: 1 });
   });
@@ -535,7 +531,8 @@ describe('dynamic Player Pick SBC discovery', () => {
       sbcNames: ['Static SBC fallback'],
       pickItemResourceIds: [5004333],
       pickItemNames: ['Static reward fallback'],
-      requirements: [{ tier: 'gold', rarity: 'common', count: 11, maxRating: 81 }],
+      requirements: [{ tier: 'gold', rarity: 'common', count: 11 }],
+      sbcFodderPolicy: { mode: 'low-gold' },
       challengesPerPick: 2,
       pickCandidateCount: 3,
       pickCount: 1,
@@ -561,7 +558,8 @@ describe('dynamic Player Pick SBC discovery', () => {
       pickCandidateCount: 5,
       pickCount: 1,
       maxCompletions: 7,
-      requirements: [{ tier: 'gold', rarity: 'rare', count: 4, maxRating: 81 }],
+      requirements: [{ tier: 'gold', rarity: 'rare', count: 4 }],
+      sbcFodderPolicy: { mode: 'low-gold' },
     });
     expect(session.loopDefs.find((loop) => loop.id === 'provision').preCraftPlayerPickLoopId).toBe(staticPick.id);
     expect(session.loopDefs.find((loop) => loop.id === staticPick.id).requirements[0]).toMatchObject({

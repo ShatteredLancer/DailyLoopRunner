@@ -45,8 +45,8 @@ describe('main panel view template', () => {
     for (const id of [
       'bronze-loop-open-rewards',
       'bronze-loop-daily-inventory-only',
-      'bronze-loop-pick-protect-high-gold',
-      'bronze-loop-pick-high-gold-threshold',
+      'bronze-loop-low-rated-gold-max',
+      'bronze-loop-rating-sbc-max-card',
       'bronze-loop-pick-auto-below-90',
       'bronze-loop-pick-open-at-end',
       'bronze-loop-pick-auto-threshold',
@@ -73,6 +73,8 @@ describe('main panel view template', () => {
       'bronze-loop-dry-run',
       'bronze-loop-show-mvp',
       'bronze-loop-pick-prefer-scanned',
+      'bronze-loop-pick-protect-high-gold',
+      'bronze-loop-pick-high-gold-threshold',
     ]) {
       expect(html, removedId).not.toContain(`id="${removedId}"`);
     }

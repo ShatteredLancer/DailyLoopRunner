@@ -188,7 +188,6 @@ function renderCardSpec(path, spec = {}, context, options = {}) {
     ${fieldRow('Special cards', `<select data-builder-field="${escapeHtml(`${prefix}allowSpecial`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.allowSpecial)}</select>`)}
     ${fieldRow('Player only', `<select data-builder-field="${escapeHtml(`${prefix}playerOnly`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.playerOnly)}</select>`)}
     ${fieldRow('Require special', `<select data-builder-field="${escapeHtml(`${prefix}special`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.special)}</select>`)}
-    ${fieldRow('Protect high Gold', `<select data-builder-field="${escapeHtml(`${prefix}protectHighGold`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.protectHighGold)}</select>`)}
     ${fieldRow('Prefer Common', `<select data-builder-field="${escapeHtml(`${prefix}preferCommon`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.preferCommon)}</select>`)}
     <div class="wide">${renderPileList(`${prefix}priorityPiles`, 'Pile order', spec.priorityPiles, context)}</div>
     ${options.removable ? `<button class="dlr-builder-remove-inline" data-builder-action="remove-list" data-path="${escapeHtml(options.listPath)}" data-index="${options.index}"${disabled(context.readOnly)}>Remove</button>` : ''}
@@ -244,8 +243,6 @@ function renderRewardFlow(path, value = {}, context) {
 
 function renderPickOptions(path, value = {}, context) {
   const fields = [
-    ['protectHighGold', 'Protect high Gold', 'boolean-inherit'],
-    ['highGoldThreshold', 'Protection threshold', 'number'],
     ['autoSelectBelow90', 'Automatic selection', 'boolean-inherit'],
     ['autoPickThreshold', 'Automatic selection threshold', 'number'],
     ['openPicksAtEnd', 'Open Picks at end', 'boolean-inherit'],
@@ -256,6 +253,18 @@ function renderPickOptions(path, value = {}, context) {
       ? fieldRow(label, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value[key])}</select>`)
       : fieldRow(label, textInput(`${path}.${key}`, value[key], type, context.readOnly))
   )).join('')}</div></section>`;
+}
+
+function renderSbcFodderPolicy(path, value = {}, context) {
+  return `<section class="dlr-builder-form-section"><h3>SBC fodder policy</h3><div class="dlr-builder-form-grid">
+    ${fieldRow('Mode', selectInput(`${path}.mode`, value.mode, [
+      { value: 'auto', label: 'Auto detect' },
+      { value: 'low-gold', label: 'Low-rated Gold' },
+      { value: 'rating-constrained', label: 'Rating-constrained' },
+    ], context.readOnly, true))}
+    ${fieldRow('Low-rated SBC Gold max rating', textInput(`${path}.lowRatedGoldMaxRating`, value.lowRatedGoldMaxRating, 'number', context.readOnly))}
+    ${fieldRow('Rating SBC max card rating', textInput(`${path}.ratingSbcMaxCardRating`, value.ratingSbcMaxCardRating, 'number', context.readOnly))}
+  </div></section>`;
 }
 
 function renderPickBinding(path, value = {}, context) {
@@ -371,8 +380,6 @@ function renderAutomaticFillRecovery(path, label, value, context, options = {}) 
       ${fieldRow('Name', textInput(`${path}.name`, value.name, 'text', context.readOnly))}
       ${options.attempts ? fieldRow('Maximum attempts per completion', textInput(`${path}.maxAttemptsPerCompletion`, value.maxAttemptsPerCompletion, 'number', context.readOnly)) : ''}
       ${fieldRow('Maximum completions', textInput(`${path}.maxCompletions`, value.maxCompletions, 'number', context.readOnly))}
-      ${fieldRow('Maximum submitted rating', textInput(`${path}.maxSubmittedRating`, value.maxSubmittedRating, 'number', context.readOnly))}
-      ${fieldRow('Maximum normal Gold rating', textInput(`${path}.maxNormalGoldSubmittedRating`, value.maxNormalGoldSubmittedRating, 'number', context.readOnly))}
       ${fieldRow('Required special cards', textInput(`${path}.requiredSpecialCount`, value.requiredSpecialCount, 'number', context.readOnly))}
       ${fieldRow('Allowed special cards', textInput(`${path}.allowedSpecialCount`, value.allowedSpecialCount, 'number', context.readOnly))}
       ${fieldRow('Fill from inventory first', `<select data-builder-field="${path}.inventoryFillFirst" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.inventoryFillFirst)}</select>`)}
@@ -381,6 +388,7 @@ function renderAutomaticFillRecovery(path, label, value, context, options = {}) 
       ${fieldRow('Open reward packs', `<select data-builder-field="${path}.openRewardPacks" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.openRewardPacks)}</select>`)}
       ${fieldRow('Force reward opening', `<select data-builder-field="${path}.forceOpenRewardPacks" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.forceOpenRewardPacks)}</select>`)}
     </div>
+    ${renderSbcFodderPolicy(`${path}.sbcFodderPolicy`, value.sbcFodderPolicy, context)}
     ${renderList(`${path}.sbcNames`, 'SBC aliases', value.sbcNames, 'text', context)}
     ${renderList(`${path}.rewardPackIds`, 'Reward pack IDs', value.rewardPackIds, 'number', context)}
     ${renderList(`${path}.rewardPackNames`, 'Reward pack aliases', value.rewardPackNames, 'text', context)}
@@ -421,6 +429,7 @@ function renderField(field, loop, context) {
     case 'runtime-quantity': return renderRuntimeQuantity(field.path, value, context);
     case 'reward-flow': return renderRewardFlow(field.path, value, context);
     case 'pick-options': return renderPickOptions(field.path, value, context);
+    case 'sbc-fodder-policy': return renderSbcFodderPolicy(field.path, value, context);
     case 'pick-binding': return renderPickBinding(field.path, value, context);
     case 'pick-selector': return renderPickSelector(field.path, value, context);
     case 'activity-binding': return renderActivityBinding(field.path, value, context);

@@ -11,13 +11,11 @@ import {
 } from '../../src/config/runtime-options.js';
 
 describe('loop runtime option projection', () => {
-  it('normalizes configurable Pick thresholds to the existing bounds', () => {
+  it('normalizes Pick redemption controls without material-protection fields', () => {
     expect(normalizePickRuntimeOptions()).toEqual({
-      protectHighGold: true,
       autoSelectBelow90: true,
       preferScannedMetadata: false,
       openPicksAtEnd: false,
-      highGoldThreshold: 82,
       autoPickThreshold: 90,
     });
     expect(normalizePickRuntimeOptions({
@@ -28,16 +26,14 @@ describe('loop runtime option projection', () => {
       highGoldThreshold: 120,
       autoPickThreshold: 0,
     })).toEqual({
-      protectHighGold: false,
       autoSelectBelow90: false,
       preferScannedMetadata: true,
       openPicksAtEnd: true,
-      highGoldThreshold: 99,
       autoPickThreshold: 90,
     });
   });
 
-  it('projects Pick protection across normal and challenge requirements', () => {
+  it('projects only Pick redemption options and preserves SBC requirements', () => {
     const loopDef = {
       strategy: 'playerPickSbc',
       requirements: [{ maxRating: 81 }],
@@ -51,26 +47,17 @@ describe('loop runtime option projection', () => {
       autoPickThreshold: 91,
     });
     expect(loopDef).toMatchObject({
-      protectHighGold: true,
       autoSelectBelow90: false,
       openPicksAtEnd: true,
-      pickHighGoldThreshold: 84,
       autoPickRatingThreshold: 91,
-      requirements: [{ maxRating: 81, protectHighGold: true, highGoldThreshold: 84, highGoldProtectionMaxRating: true, maxRatingBeforeHighGoldProtection: 81 }],
-      challengeRequirements: [
-        [{ maxRating: 81, protectHighGold: true, highGoldThreshold: 84, highGoldProtectionMaxRating: true, maxRatingBeforeHighGoldProtection: 81 }],
-        [{
-          maxRating: 83,
-          protectHighGold: true,
-          highGoldThreshold: 84,
-          highGoldProtectionMaxRating: true,
-          maxRatingBeforeHighGoldProtection: 85,
-        }],
-      ],
+      requirements: [{ maxRating: 81 }],
+      challengeRequirements: [[{ maxRating: 81 }], [{ maxRating: 85 }]],
     });
+    expect(loopDef).not.toHaveProperty('protectHighGold');
+    expect(loopDef).not.toHaveProperty('pickHighGoldThreshold');
   });
 
-  it('removes generated protection caps while preserving explicit business max ratings', () => {
+  it('does not rewrite legacy requirement fields while applying Pick options', () => {
     const loopDef = {
       strategy: 'playerPickSbc',
       requirements: [
@@ -86,13 +73,13 @@ describe('loop runtime option projection', () => {
     };
     applyPickRuntimeOptions(loopDef, { protectHighGold: false });
     expect(loopDef.requirements).toEqual([
-      { protectHighGold: false },
-      { protectHighGold: false },
-      { maxRating: 85, protectHighGold: false },
+      { maxRating: 81, highGoldThreshold: 82, protectHighGold: true, highGoldProtectionMaxRating: true },
+      { maxRating: 83, highGoldThreshold: 84, protectHighGold: true, highGoldProtectionMaxRating: true },
+      { maxRating: 85, highGoldThreshold: 82, protectHighGold: true },
     ]);
   });
 
-  it('restores an explicit Pick maxRating after temporary high-gold protection', () => {
+  it('preserves an explicit Pick business maxRating across repeated option projection', () => {
     const loopDef = {
       strategy: 'playerPickSbc',
       requirements: [{ maxRating: 85 }],
@@ -101,7 +88,7 @@ describe('loop runtime option projection', () => {
     applyPickRuntimeOptions(loopDef, { protectHighGold: true, highGoldThreshold: 84 });
     applyPickRuntimeOptions(loopDef, { protectHighGold: false, highGoldThreshold: 84 });
 
-    expect(loopDef.requirements).toEqual([{ maxRating: 85, protectHighGold: false }]);
+    expect(loopDef.requirements).toEqual([{ maxRating: 85 }]);
   });
 
   it('preserves forced reward opening and applies rounds to the intended strategies', () => {
@@ -181,27 +168,42 @@ describe('loop runtime option projection', () => {
     expect(loopUsesRounds(loopDef)).toBe(true);
   });
 
-  it('resolves Pick preferences from global to parent to child without weakening business limits', () => {
+  it('resolves Pick preferences from global to parent to child without material settings', () => {
     expect(resolvePickRuntimeOptions(
       { protectHighGold: true, highGoldThreshold: 82, openPicksAtEnd: false },
-      { pickOptions: { highGoldThreshold: 84, openAtEnd: true } },
-      { pickOptions: { protectHighGold: false } },
+      { pickOptions: { openAtEnd: true, autoPickThreshold: 92 } },
+      { pickOptions: { autoSelectBelow90: false } },
     )).toMatchObject({
-      protectHighGold: false,
-      highGoldThreshold: 84,
+      autoSelectBelow90: false,
+      autoPickThreshold: 92,
       openPicksAtEnd: true,
     });
 
     const loopDef = {
       strategy: 'playerPickSbc',
-      pickOptions: { highGoldThreshold: 86 },
+      pickOptions: { autoPickThreshold: 86 },
       requirements: [{ maxRating: 83 }],
     };
     applyPickRuntimeOptions(loopDef, { protectHighGold: true, highGoldThreshold: 82 });
-    expect(loopDef.requirements[0]).toMatchObject({
-      maxRating: 83,
-      maxRatingBeforeHighGoldProtection: 83,
-      highGoldThreshold: 86,
+    expect(loopDef.requirements).toEqual([{ maxRating: 83 }]);
+    expect(loopDef.autoPickRatingThreshold).toBe(86);
+  });
+
+  it('infers rating-constrained fodder policy independently from Pick options', () => {
+    const loopDef = {
+      strategy: 'fillAndVerifySbc',
+      ratingSbcFill: { priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+    };
+    applyLoopRuntimeOptions(loopDef, {
+      pickOptions: { autoPickThreshold: 92 },
+      sbcFodderPolicy: { lowRatedGoldMaxRating: 82, ratingSbcMaxCardRating: 88 },
+    });
+    expect(loopDef).not.toHaveProperty('protectHighGold');
+    expect(loopDef).not.toHaveProperty('pickHighGoldThreshold');
+    expect(loopDef.runtimeSbcFodderPolicy).toEqual({
+      mode: 'rating-constrained',
+      lowRatedGoldMaxRating: 82,
+      ratingSbcMaxCardRating: 88,
     });
   });
 

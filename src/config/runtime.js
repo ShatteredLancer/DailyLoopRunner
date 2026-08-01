@@ -1,5 +1,6 @@
 export const APP_KEY = '__FCLoopRunner';
 export const PICK_OPTIONS_KEY = 'fc-loop-runner-pick-options';
+export const SBC_FODDER_OPTIONS_KEY = 'fc-loop-runner-sbc-fodder-options';
 export const LOOP_UI_OPTIONS_KEY = 'fc-loop-runner-ui-options';
 export const REWARD_ALERT_SETTINGS_KEY = 'fc-loop-runner-reward-alert-settings';
 export const BATCH_OPEN_PLAN_KEY = 'fc-loop-runner-batch-open-plan';

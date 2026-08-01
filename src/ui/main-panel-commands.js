@@ -35,6 +35,10 @@ export function createMainPanelCommands(options = {}) {
       options.savePickOptions?.(event);
       return true;
     },
+    saveSbcFodderOptions(event) {
+      options.saveSbcFodderOptions?.(event);
+      return true;
+    },
     saveLoopOptions: options.saveLoopOptions,
     saveRewardAlertEnabled: options.saveRewardAlertEnabled,
     openRewardAlertSettings: options.openRewardAlertSettings,

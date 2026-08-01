@@ -156,7 +156,7 @@ describe('Workflow and Loop Builder view', () => {
         sbcNames: ['TOTW Upgrade'],
         rewardPackIds: [1],
         rewardPackNames: ['TOTW Pack'],
-        maxSubmittedRating: 88,
+        sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 88 },
         blockSpecial: true,
       },
       autoFodderUpgrade: { maxAttemptsPerCompletion: 3 },
@@ -173,6 +173,7 @@ describe('Workflow and Loop Builder view', () => {
     expect(html).toContain('data-path="requirements.0.priorityPiles"');
     expect(html).toContain('data-builder-field="autoTotwUpgrade.sbcNames.0"');
     expect(html).toContain('data-builder-field="autoTotwUpgrade.rewardPackIds.0"');
+    expect(html).toContain('data-builder-field="autoTotwUpgrade.sbcFodderPolicy.ratingSbcMaxCardRating"');
     expect(html).toContain('data-builder-add-select="autoTotwUpgrade.ratingSbcFill.priorityPiles"');
     expect(html).toContain('data-builder-field="autoFodderUpgrade.maxAttemptsPerCompletion"');
   });

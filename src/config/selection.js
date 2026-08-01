@@ -1,18 +1,41 @@
+import { effectiveSbcFodderPolicy } from './sbc-fodder-policy.js';
+
 export function selectionRequirements(loopDef = {}, priorityPiles = loopDef.priorityPiles) {
+  const fodderPolicy = effectiveSbcFodderPolicy(
+    loopDef,
+    loopDef.runtimeSbcFodderPolicy || loopDef.sbcFodderPolicy,
+  );
   return (loopDef.requirements || []).map((requirement) => {
-    const protectHighGold = requirement.protectHighGold === true || loopDef.protectHighGold === true;
+    const configuredProtectHighGold = requirement.protectHighGold !== undefined
+      ? requirement.protectHighGold
+      : loopDef.protectHighGold;
+    const protectHighGold = configuredProtectHighGold === true;
     const highGoldThreshold = Number(
       requirement.highGoldThreshold
       ?? requirement.protectHighGoldMinRating
       ?? loopDef.pickHighGoldThreshold
       ?? 82,
     );
+    const legacyProtection = {};
+    if (configuredProtectHighGold !== undefined) legacyProtection.protectHighGold = configuredProtectHighGold;
+    if (protectHighGold) {
+      legacyProtection.highGoldThreshold = Math.max(
+        2,
+        Math.min(99, Number.isFinite(highGoldThreshold) && highGoldThreshold > 0 ? highGoldThreshold : 82),
+      );
+    } else if (requirement.highGoldThreshold !== undefined) {
+      legacyProtection.highGoldThreshold = requirement.highGoldThreshold;
+    }
     return {
       ...requirement,
-      protectHighGold: requirement.protectHighGold !== undefined ? requirement.protectHighGold : loopDef.protectHighGold,
-      highGoldThreshold: protectHighGold
-        ? Math.max(2, Math.min(99, Number.isFinite(highGoldThreshold) && highGoldThreshold > 0 ? highGoldThreshold : 82))
-        : requirement.highGoldThreshold,
+      sbcFodderPolicy: fodderPolicy,
+      ...legacyProtection,
+      ...(fodderPolicy.mode === 'low-gold' ? {
+        lowRatedGoldMaxRating: fodderPolicy.lowRatedGoldMaxRating,
+      } : {
+        ratingSbcMaxCardRating: fodderPolicy.ratingSbcMaxCardRating,
+      }),
+      respectFsuGoldRange: fodderPolicy.mode === 'low-gold',
       blockTradeable: requirement.blockTradeable !== undefined ? requirement.blockTradeable : loopDef.blockTradeable,
       protectedItemIds: [...new Set([
         ...(loopDef.protectedItemIds || []),

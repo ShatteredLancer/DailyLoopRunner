@@ -22,6 +22,7 @@ import {
   MATERIAL_SINK_MATERIALS,
   MATERIAL_SINK_PREFERENCES,
 } from './material-sink.js';
+import { SBC_FODDER_MODES } from './sbc-fodder-policy.js';
 
 const INVENTORY_PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 const SOURCE_PACK_REF_STRATEGIES = Object.freeze([
@@ -204,6 +205,7 @@ function validateUpgradeDef(upgradeDef, path, errors) {
   }
   validateStringArray(upgradeDef.sbcNames, `${path}.sbcNames`, errors, true);
   validateActivityBinding(upgradeDef.activityBinding, `${path}.activityBinding`, errors);
+  validateSbcFodderPolicy(upgradeDef.sbcFodderPolicy, `${path}.sbcFodderPolicy`, errors);
   const hasChallengeRequirements = upgradeDef.challengeRequirements !== undefined;
   validateRequirements(upgradeDef.requirements, `${path}.requirements`, errors, !hasChallengeRequirements);
   if (hasChallengeRequirements) {
@@ -318,6 +320,28 @@ function validatePickOptions(value, path, errors) {
   });
 }
 
+function validateSbcFodderPolicy(value, path, errors) {
+  if (value === undefined) return;
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  const allowedFields = new Set(['mode', 'lowRatedGoldMaxRating', 'ratingSbcMaxCardRating']);
+  Object.keys(value).forEach((field) => {
+    if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
+  });
+  if (value.mode !== undefined && !SBC_FODDER_MODES.includes(value.mode)) {
+    errors.push(`${path}.mode must be one of: ${SBC_FODDER_MODES.join(', ')}`);
+  }
+  ['lowRatedGoldMaxRating', 'ratingSbcMaxCardRating'].forEach((field) => {
+    if (value[field] === undefined) return;
+    const rating = Number(value[field]);
+    if (!Number.isFinite(rating) || rating < 1 || rating > 99) {
+      errors.push(`${path}.${field} must be a number between 1 and 99`);
+    }
+  });
+}
+
 function validateRuntimeQuantity(value, path, errors) {
   if (value === undefined) return;
   if (!isPlainObject(value)) {
@@ -361,12 +385,13 @@ export function validateLoopDef(loopDef, label = 'loop') {
   if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
     errors.push('dryRun must be boolean');
   }
-  ['hidden', 'mvp', 'openRewardPacks', 'openRewardPacksAtEnd', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst', 'consumeAllSourcePacks', 'exhaustSbcSet', 'discoveryReportedCompleted'].forEach((field) => {
+  ['hidden', 'mvp', 'openRewardPacks', 'openRewardPacksAtEnd', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst', 'consumeAllSourcePacks', 'exhaustSbcSet', 'discoveryReportedCompleted', 'respectFsuGoldRange'].forEach((field) => {
     if (loopDef[field] !== undefined && typeof loopDef[field] !== 'boolean') {
       errors.push(`${field} must be boolean`);
     }
   });
   validatePickOptions(loopDef.pickOptions, 'pickOptions', errors);
+  validateSbcFodderPolicy(loopDef.sbcFodderPolicy, 'sbcFodderPolicy', errors);
   validateRuntimeQuantity(loopDef.runtimeQuantity, 'runtimeQuantity', errors);
   if (loopDef.inventoryMode !== undefined && !INVENTORY_MODES.includes(loopDef.inventoryMode)) {
     errors.push(`inventoryMode must be one of: ${INVENTORY_MODES.join(', ')}`);

@@ -103,7 +103,7 @@ describe('inventory and Unassigned characterization', () => {
       rarity: 'rare',
       playerOnly: true,
       allowSpecial: false,
-      protectHighGold: true,
+      sbcFodderPolicy: { mode: 'low-gold', lowRatedGoldMaxRating: 82 },
     });
 
     expect(result).toMatchObject({

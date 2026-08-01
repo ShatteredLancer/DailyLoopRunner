@@ -12,6 +12,7 @@ function lowFodderRequirement(input) {
 function recipe(input) {
   return Object.freeze({
     priorityPiles: ALL_INVENTORY_PILES,
+    sbcFodderPolicy: Object.freeze({ mode: 'low-gold' }),
     maxSubmissions: 1,
     mustConsumeTrigger: true,
     onUnavailable: 'continue',
@@ -65,7 +66,7 @@ export const RECOVERY_RECIPES = Object.freeze([
     name: 'Daily Rare Gold Upgrade',
     activityBinding: { family: 'daily-rare-gold-upgrade', category: 'Upgrades', required: false },
     sbcNames: ['Daily Rare Gold Upgrade', '每日稀有金牌升级', '每日稀有金牌升級'],
-    requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'common', count: 5, maxRating: 81, protectHighGold: true })],
+    requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'common', count: 5 })],
   }),
   recipe({
     id: 'fof-glory-hunters-crafting-upgrade',
@@ -78,14 +79,14 @@ export const RECOVERY_RECIPES = Object.freeze([
       required: false,
     },
     sbcNames: ['5x 80+ Upgrade'],
-    requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'common', count: 9, maxRating: 81, protectHighGold: true })],
+    requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'common', count: 9 })],
   }),
   recipe({
     id: 'gold-upgrade',
     name: 'Gold Upgrade',
     activityBinding: { family: 'gold-upgrade', category: 'Upgrades', required: false },
     sbcNames: ['Gold Upgrade', '黄金升级', '黃金升級'],
-    requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'common', count: 11, maxRating: 81, protectHighGold: true })],
+    requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'common', count: 11 })],
   }),
   recipe({
     id: '2x84-upgrade',
@@ -98,7 +99,7 @@ export const RECOVERY_RECIPES = Object.freeze([
       required: false,
     },
     sbcNames: ['2x 84+ Upgrade', '2 x 84+ Upgrade'],
-    requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'rare', count: 6, maxRating: 81, protectHighGold: true })],
+    requirements: [lowFodderRequirement({ tier: 'gold', rarity: 'rare', count: 6 })],
   }),
 ]);
 
@@ -123,7 +124,7 @@ export const UNASSIGNED_RECOVERY_POLICIES = Object.freeze([
   }),
   Object.freeze({
     id: 'common-gold-duplicate-overflow',
-    match: Object.freeze({ tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false, maxRating: 81 }),
+    match: Object.freeze({ tier: 'gold', rarity: 'common', playerOnly: true, allowSpecial: false, maxRating: 82 }),
     steps: Object.freeze([
       Object.freeze({ recipeId: 'daily-rare-gold-upgrade' }),
       Object.freeze({ recipeId: 'fof-glory-hunters-crafting-upgrade' }),
@@ -132,7 +133,7 @@ export const UNASSIGNED_RECOVERY_POLICIES = Object.freeze([
   }),
   Object.freeze({
     id: 'rare-gold-duplicate-overflow',
-    match: Object.freeze({ tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false, maxRating: 81 }),
+    match: Object.freeze({ tier: 'gold', rarity: 'rare', playerOnly: true, allowSpecial: false, maxRating: 82 }),
     steps: Object.freeze([
       Object.freeze({ recipeId: '2x84-upgrade' }),
     ]),

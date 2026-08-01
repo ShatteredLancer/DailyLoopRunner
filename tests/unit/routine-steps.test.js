@@ -170,22 +170,28 @@ describe('daily routine step projection', () => {
       steps: ['daily-bronze', 'dynamic-pick'],
       dailyRecycleInventoryOnly: true,
       runtimePickOptions: {
-        protectHighGold: true,
         autoSelectBelow90: false,
         openPicksAtEnd: true,
-        highGoldThreshold: 84,
         autoPickThreshold: 91,
+      },
+      runtimeSbcFodderPolicy: {
+        mode: 'auto',
+        lowRatedGoldMaxRating: 82,
+        ratingSbcMaxCardRating: 88,
       },
     }), [childLoop(), pick]);
 
     expect(recycle.inventoryOnly).toBe(true);
     expect(resolvedPick).toMatchObject({
-      protectHighGold: true,
       autoSelectBelow90: false,
       openPicksAtEnd: true,
-      pickHighGoldThreshold: 84,
       autoPickRatingThreshold: 91,
-      requirements: [{ maxRating: 83 }],
+      requirements: [{ maxRating: 85 }],
+      runtimeSbcFodderPolicy: {
+        mode: 'low-gold',
+        lowRatedGoldMaxRating: 82,
+        ratingSbcMaxCardRating: 88,
+      },
     });
   });
 
@@ -201,13 +207,39 @@ describe('daily routine step projection', () => {
     const [resolved] = resolveRoutineStepLoopDefs(dailyLoop({
       strategy: 'workflowRoutine',
       steps: ['pick-child'],
-      pickOptions: { highGoldThreshold: 84, openAtEnd: true },
+      pickOptions: { autoPickThreshold: 84, openAtEnd: true },
     }), [pick]);
 
     expect(resolved).toMatchObject({
-      pickHighGoldThreshold: 84,
       openPicksAtEnd: false,
-      requirements: [{ maxRating: 83, maxRatingBeforeHighGoldProtection: 85 }],
+      autoPickRatingThreshold: 84,
+      requirements: [{ maxRating: 85 }],
+    });
+  });
+
+  it('inherits Workflow fodder limits and lets the child override one limit', () => {
+    const pick = childLoop({
+      id: 'pick-child',
+      strategy: 'playerPickSbc',
+      requirements: [{ tier: 'gold', count: 4 }],
+      sbcNames: ['Pick Child'],
+      pickItemNames: ['Pick Reward'],
+      sbcFodderPolicy: { lowRatedGoldMaxRating: 80 },
+    });
+    const [resolved] = resolveRoutineStepLoopDefs(dailyLoop({
+      strategy: 'workflowRoutine',
+      steps: ['pick-child'],
+      runtimeSbcFodderPolicy: {
+        mode: 'auto',
+        lowRatedGoldMaxRating: 82,
+        ratingSbcMaxCardRating: 89,
+      },
+    }), [pick]);
+
+    expect(resolved.runtimeSbcFodderPolicy).toEqual({
+      mode: 'low-gold',
+      lowRatedGoldMaxRating: 80,
+      ratingSbcMaxCardRating: 89,
     });
   });
 

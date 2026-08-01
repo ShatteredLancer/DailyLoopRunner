@@ -19,6 +19,142 @@ const fsuPolicy = {
 };
 
 describe('pure inventory selector', () => {
+  it('allows normal Gold 82 and rejects normal Gold 83 in low-rated mode', () => {
+    const adapter = createFakeInventoryAdapter({ storage: [
+      makePlayer({ id: 1, definitionId: 101, rating: 82, rareflag: 0 }),
+      makePlayer({ id: 2, definitionId: 102, rating: 83, rareflag: 0 }),
+    ] });
+    const requirement = {
+      tier: 'gold',
+      rarity: 'common',
+      count: 1,
+      playerOnly: true,
+      allowSpecial: false,
+      sbcFodderPolicy: { mode: 'low-gold', lowRatedGoldMaxRating: 82, ratingSbcMaxCardRating: 88 },
+      lowRatedGoldMaxRating: 82,
+      respectFsuGoldRange: true,
+    };
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [requirement],
+      priorityPiles: ['storage'],
+      fsuPolicy,
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([1]);
+    const rejected = selectInventoryPlayers({
+      inventorySnapshot: createFakeInventoryAdapter({ storage: [
+        makePlayer({ id: 2, definitionId: 102, rating: 83, rareflag: 0 }),
+      ] }).snapshot(),
+      requirements: [requirement],
+      priorityPiles: ['storage'],
+      fsuPolicy,
+    });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.diagnostics[0].reasons).toContain('low-rated-gold-over-82');
+  });
+
+  it('lets the FSU Gold range lower the effective low-rated limit', () => {
+    const adapter = createFakeInventoryAdapter({ storage: [
+      makePlayer({ id: 1, definitionId: 101, rating: 80, rareflag: 0 }),
+      makePlayer({ id: 2, definitionId: 102, rating: 81, rareflag: 0 }),
+    ] });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        rarity: 'common',
+        count: 1,
+        playerOnly: true,
+        allowSpecial: false,
+        sbcFodderPolicy: { mode: 'low-gold', lowRatedGoldMaxRating: 82, ratingSbcMaxCardRating: 88 },
+        lowRatedGoldMaxRating: 82,
+        respectFsuGoldRange: true,
+      }],
+      priorityPiles: ['storage'],
+      fsuPolicy: { ...fsuPolicy, goldRange: [75, 80] },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([1]);
+  });
+
+  it('caps every card at 88 and ignores FSU Gold range in rating-constrained mode', () => {
+    const adapter = createFakeInventoryAdapter({ storage: [
+      makePlayer({ id: 1, definitionId: 101, rating: 83, rareflag: 0 }),
+      makePlayer({ id: 2, definitionId: 102, rating: 88, rareflag: 2 }),
+      makePlayer({ id: 3, definitionId: 103, rating: 89, rareflag: 0 }),
+      makePlayer({ id: 4, definitionId: 104, rating: 89, rareflag: 2 }),
+    ] });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 2,
+        playerOnly: true,
+        allowSpecial: true,
+        sbcFodderPolicy: { mode: 'rating-constrained', lowRatedGoldMaxRating: 82, ratingSbcMaxCardRating: 88 },
+        ratingSbcMaxCardRating: 88,
+        respectFsuGoldRange: false,
+      }],
+      priorityPiles: ['storage'],
+      fsuPolicy: { ...fsuPolicy, goldRange: [75, 82] },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([1, 2]);
+    const rejected = selectInventoryPlayers({
+      inventorySnapshot: createFakeInventoryAdapter({ storage: [
+        makePlayer({ id: 3, definitionId: 103, rating: 89, rareflag: 0 }),
+        makePlayer({ id: 4, definitionId: 104, rating: 89, rareflag: 2 }),
+      ] }).snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 1,
+        playerOnly: true,
+        allowSpecial: true,
+        sbcFodderPolicy: { mode: 'rating-constrained', lowRatedGoldMaxRating: 82, ratingSbcMaxCardRating: 88 },
+        ratingSbcMaxCardRating: 88,
+        respectFsuGoldRange: false,
+      }],
+      priorityPiles: ['storage'],
+      fsuPolicy: { ...fsuPolicy, goldRange: [75, 82] },
+    });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.diagnostics.filter(({ reasons }) => reasons.includes('rating-sbc-card-over-88'))).toHaveLength(2);
+  });
+
+  it('keeps non-range FSU protections active in rating-constrained mode', () => {
+    const adapter = createFakeInventoryAdapter({ storage: [
+      makePlayer({ id: 1, definitionId: 101, rating: 83, rareflag: 1 }),
+      { ...makePlayer({ id: 2, definitionId: 102, rating: 84, rareflag: 1 }), evolution: true },
+      makePlayer({ id: 3, definitionId: 103, rating: 85, rareflag: 1 }),
+    ] });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 1,
+        playerOnly: true,
+        allowSpecial: false,
+        sbcFodderPolicy: { mode: 'rating-constrained', lowRatedGoldMaxRating: 82, ratingSbcMaxCardRating: 88 },
+        ratingSbcMaxCardRating: 88,
+        respectFsuGoldRange: false,
+      }],
+      priorityPiles: ['storage'],
+      fsuPolicy: {
+        ...fsuPolicy,
+        goldRange: [75, 82],
+        lockedItemIds: [1],
+        excludeEvolution: true,
+      },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([3]);
+  });
+
   it('selects strict rarity ratios and protects high gold', () => {
     const adapter = createFakeInventoryAdapter({ storage: [
       makePlayer({ id: 1, rating: 75, rareflag: 1 }),

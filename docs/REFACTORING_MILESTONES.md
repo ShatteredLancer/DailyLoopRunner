@@ -4,7 +4,7 @@
 
 当前基线：
 
-- Userscript 版本：`0.7.2`
+- Userscript 版本：`0.7.10`
 - Git 基线：`main` dynamic Pack Catalog
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`

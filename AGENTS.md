@@ -609,12 +609,13 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 - `sourceExhaustedFallbackLoopId`、`sourceExhaustedFallbackMaxCompletions`：来源耗尽后的可配置库存兜底及其边界。
 - `exhaustSbcSet`、`setCompletionSafetyLimit`：限次 Pick 使用 EA Set 当前剩余次数执行到耗尽；元数据不可读时只使用内部安全上限，不读取 UI `rounds`。
 - `openRewardPacks`：历史奖励开包兼容字段；新的父/子覆盖使用 `rewardFlow.open` 三态。
-- `pickOptions`：可继承的 Pick 偏好，支持 `protectHighGold`、`highGoldThreshold`、`autoSelect`/`autoSelectBelow90`、`autoPickThreshold`、`openAtEnd`/`openPicksAtEnd`。
+- `pickOptions`：可继承的 Pick 偏好，仅负责 `autoSelect`/`autoSelectBelow90`、`autoPickThreshold`、`openAtEnd`/`openPicksAtEnd`；SBC 材料上限统一由 `sbcFodderPolicy` 管理，不得再生成 Pick 专用高分保护字段。
+- `sbcFodderPolicy`：可从全局到 Workflow、Loop 和嵌套 stage 继承并由子级覆盖的统一材料策略。`mode` 可为 `inherit`、`auto`、`low-gold`、`rating-constrained`；默认 `lowRatedGoldMaxRating: 82`、`ratingSbcMaxCardRating: 88`。
 - `inventoryMode`：可继承的库存模式，值为 `inherit`、`inventory-only` 或 `normal`；只能配置在 strategy capability 为 supported/container 的 Loop。
 - `openRewardPacksAtEnd`：`inventoryExhaustion` 等阶段式 Workflow 延迟奖励开包；阶段提交期间保持关闭，仅在全部阶段正常结束且 UI `Open reward packs` 已开启时批量打开匹配奖励。blocked/stopped 后不得执行最终开包。
 - Stage 级 `openRewardPacks` / `forceOpenRewardPacks`：仅当同一组合 Workflow 的后续 stage 必须立即消费该奖励时使用，例如库存耗尽 Loop 的 Bronze -> Silver -> Common Gold 供应链；不得把父 Loop 的最终延迟奖励名传播给 stage。
 - Loop 级 `forceOpenRewardPacks`：仅当同一流程的后续步骤必须立即消费该奖励时才可强制开包，例如 84x10 的 TOTW 前置；普通独立/兜底 2x84+ 和最终 FOF 奖励必须服从 UI `Open reward packs`。
-- `protectHighGold`、`maxRating`、`allowSpecial`：普通材料保护。
+- `maxRating`、`allowSpecial`：单条 requirement 的业务条件，不得代替统一材料策略。
 - `ratingSbcFill`、`requiredSpecialCount`、`requiredSpecialKind`：评分 SBC 参数。
 - `activityBinding`：内置/自定义 Loop、嵌套 stage、自动恢复和 Recovery recipe 对当前动态 SBC family 的声明式绑定。扫描只可覆盖 Set/Challenge/Reward identity、当前显示名、requirements 事实和剩余次数；不得覆盖高卡/特殊卡/可交易卡保护、pile 顺序、评分策略、fallback、Workflow 顺序或运行上限。每个嵌套消费者和 Recovery recipe 必须显式声明自己的 binding，不能依赖父对象名称或顶层 binding 传播。
 - `preCraftPlayerPick`：Provision 显式动态前置 Pick 引用兼容字段，使用稳定 `sbcSetIds` / `pickItemResourceIds` 匹配扫描会话 Loop；扫描缺失时跳过该 stage，不得回退到过期活动。内置轮换优先使用语义 selector。
@@ -634,6 +635,17 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 8. 动态 Pick 扫描中，EA `repeats > 0` 表示有限 Set，按实时剩余次数耗尽并隐藏 UI `rounds`；`repeats: 0` 且 Set/Challenge 仍可用表示不限次，必须配置 `useRoundsAsCompletions: true`。只有 Set 明确完成或有限剩余数为 0 时才使用单次 runtime probe。
 9. Challenge 已证明所有球员必须为 Gold、但没有 rarity 条件时，生成不带 `rarity` 的 Gold requirement；不得因缺少 common/rare 比例拒绝，也不得猜测比例。
 10. 上述无 rarity Gold requirement 必须设置 `preferCommon: true`。统一选材器要先按配置的全部 pile 顺序完成 Common 阶段，再从第一个 pile 重新开始 Rare fallback；FSU 的 rarity 排序不得使任何 Rare 早于仍可用的 Common 被选中。
+
+`sbcFodderPolicy` 契约：
+
+1. 没有 `TEAM_RATING` 条件的 SBC 使用 `low-gold`；上限只保护普通 Gold，默认允许到 82。Special、Bronze、Silver 不受这个数值上限影响，但仍受 requirement 和其他保护约束。
+2. 包含 `TEAM_RATING` 条件的 SBC 使用 `rating-constrained`；上限应用于所有卡，包括普通 Gold、Special、TOTW、TOTS、FOF，默认允许到 88。
+3. 动态模式推断必须来自扫描到的 `TEAM_RATING` 元数据或等价的结构化 rating model，不得根据 SBC 名称、奖励名或硬编码 family 猜测。
+4. FSU Gold rating range 只在 `low-gold` 模式生效，并与 `lowRatedGoldMaxRating` 取更严格的交集；`rating-constrained` 必须忽略 FSU Gold range。
+5. FSU locked player、Only Untradeable、Exclude Evolution、Excluded Leagues 等非 Gold range 保护在两种模式都必须生效。
+6. Pick、Pack、动态 Upgrade、自动 TOTW/材料恢复、Provision stage 和 Unassigned recovery 必须共享同一策略解析及 `Unassigned -> Storage -> Transfer -> Club` 来源语义，不得维护彼此分离的数值保护逻辑。
+7. 继承优先级为全局 < Workflow < Loop/嵌套 stage；子级只覆盖显式配置字段，`inherit` 保留父级，`auto` 由当前实际 SBC 条件确定模式。
+8. `protectHighGold`、`highGoldThreshold`、`maxNormalGoldSubmittedRating`、`maxSubmittedRating` 仅用于旧配置读取兼容；内置 Loop、动态扫描、Profile、Builder、导出 JSON 和新测试夹具不得继续生成这些字段。
 
 新增静态 Player Pick 时：
 

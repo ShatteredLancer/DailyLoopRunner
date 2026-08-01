@@ -199,8 +199,9 @@ describe('basic Upgrade activity discovery', () => {
       name: 'Compatibility Upgrade',
       activityBinding: { family: 'common-gold-crafting-upgrade', category: 'Upgrades', required: true },
       sbcNames: ['Old Upgrade'],
+      sbcFodderPolicy: { mode: 'low-gold', lowRatedGoldMaxRating: 82 },
       requirements: [{
-        tier: 'gold', rarity: 'common', count: 9, maxRating: 81, protectHighGold: true,
+        tier: 'gold', rarity: 'common', count: 9,
         priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
       }],
     };
@@ -219,7 +220,8 @@ describe('basic Upgrade activity discovery', () => {
       sbcNames: ['Current 5x 80+ Upgrade', 'Old Upgrade'],
       rewardPackIds: [1500],
       scannedMetadata: true,
-      requirements: [expect.objectContaining({ maxRating: 81, protectHighGold: true, count: 9 })],
+      sbcFodderPolicy: { mode: 'low-gold', lowRatedGoldMaxRating: 82 },
+      requirements: [expect.objectContaining({ count: 9 })],
     });
     expect(session.recoveryRecipeOverrides.recovery).toMatchObject({ sbcSetIds: [500], activityResolved: true });
     expect(session.activities[0].consumers).toEqual(['Loop:nested', 'Recovery:recovery']);

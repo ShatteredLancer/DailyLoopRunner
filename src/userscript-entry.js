@@ -36,6 +36,7 @@ import {
   LOOP_UI_OPTIONS_KEY,
   PICK_OPTIONS_KEY,
   REWARD_ALERT_SETTINGS_KEY,
+  SBC_FODDER_OPTIONS_KEY,
 } from './config/runtime.js';
 import { LOOP_DEFS } from './config/loops.js';
 import {
@@ -70,6 +71,12 @@ import {
   validateLoopDefList as validateLoopDefListPure,
 } from './config/loop-schema.js';
 import { normalizeFsuSettings } from './config/fsu-compat.js';
+import {
+  DEFAULT_SBC_FODDER_POLICY,
+  effectiveNormalGoldMaxRating,
+  effectiveSbcFodderPolicy,
+  normalizeSbcFodderPolicy,
+} from './config/sbc-fodder-policy.js';
 import { materializeBatchOpenPlan, normalizeBatchOpenPlan } from './config/batch-open.js';
 import {
   buildPlayerPickDiscoverySession,
@@ -1542,7 +1549,10 @@ function updateLoopControls() {
         reasons.push(`fsu-excluded-league-${leagueId}`);
       }
     }
-    if (isNormalGoldFodder(item)) {
+    const respectFsuGoldRange = context?.respectFsuGoldRange !== undefined
+      ? context.respectFsuGoldRange !== false
+      : context?.sbcFodderPolicy?.mode !== 'rating-constrained';
+    if (isNormalGoldFodder(item) && respectFsuGoldRange) {
       const range = settings.goldRange || FSU_COMPAT_DEFAULTS.goldRange;
       const minRating = Number(range[0] || 75);
       const maxRating = Number(range[1] || 83);
@@ -1567,6 +1577,11 @@ function updateLoopControls() {
     const pinned = piles[0] === 'unassigned' ? ['unassigned'] : [];
     const rest = piles.filter((pile) => !pinned.includes(pile) && pile !== 'storage');
     return [...pinned, 'storage', ...rest];
+  }
+
+  function getRatingSbcPriorityPiles(loopDef = {}, settings = getFsuSettings()) {
+    const configured = loopDef.ratingSbcFill?.priorityPiles || loopDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'];
+    return applyFsuPilePriority([...configured], settings);
   }
 
   function isInGoldPriorityRange(item, settings = getFsuSettings()) {
@@ -1736,12 +1751,27 @@ function updateLoopControls() {
     if (id && (context?.protectedItemIds?.has(id) || options.protectedItemIds?.some((value) => Number(value) === id))) return false;
     if (definitionId && (context?.protectedDefinitionIds?.has(definitionId) || options.protectedDefinitionIds?.some((value) => Number(value) === definitionId))) return false;
     if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) return false;
+    const policy = options.sbcFodderPolicy;
+    const lowRatedGoldMaxRating = Number(options.lowRatedGoldMaxRating || getSbcFodderRuntimeOptions().lowRatedGoldMaxRating || 0);
+    if (policy?.mode !== 'rating-constrained' && isNormalGoldFodder(item) && lowRatedGoldMaxRating > 0 && Number(item?.rating || 0) > lowRatedGoldMaxRating) return false;
+    if (policy?.mode === 'rating-constrained'
+      && Number(policy.ratingSbcMaxCardRating || 0) > 0
+      && Number(item?.rating || 0) > Number(policy.ratingSbcMaxCardRating)) return false;
     if (isLimitedUseItem(item)) return false;
     if (isConceptItem(item)) return false;
     try { if (item?.isEnrolledInAcademy?.()) return false; } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) return false;
     if (!isInactiveTrade(item)) return false;
-    if (getFsuRejectReasons(item, options, context?.settings, context).length) return false;
+    const fsuContext = {
+      ...(context || {}),
+      sbcFodderPolicy: context?.sbcFodderPolicy || options.sbcFodderPolicy,
+      respectFsuGoldRange: context?.respectFsuGoldRange !== undefined
+        ? context.respectFsuGoldRange
+        : options.respectFsuGoldRange !== undefined
+          ? options.respectFsuGoldRange
+          : options.sbcFodderPolicy?.mode !== 'rating-constrained',
+    };
+    if (getFsuRejectReasons(item, options, context?.settings, fsuContext).length) return false;
     return true;
   }
 
@@ -2846,7 +2876,6 @@ function updateLoopControls() {
         }
         const parsed = unavailableDynamicSbcParse(parsePlayerPickSbcSnapshot({
           set: snapshot,
-          highGoldThreshold: pickOptions.highGoldThreshold,
           pricePlatform: 'pc',
         }), loadError, cacheStatus);
         const reward = snapshot.rewards?.[0] || {};
@@ -2890,7 +2919,6 @@ function updateLoopControls() {
       configuredLoops,
       selectedId: document.querySelector('#bronze-loop-select')?.value || null,
       preferScannedMetadata: pickOptions.preferScannedMetadata,
-      highGoldThreshold: pickOptions.highGoldThreshold,
       pricePlatform: 'pc',
     });
     const upgradeSession = buildUpgradeDiscoverySession({
@@ -3307,13 +3335,22 @@ function updateLoopControls() {
     if (options.protectHighGold && isProtectedHighGold(item, resolveProtectHighGoldThreshold(options))) {
       reasons.push('protected-high-gold');
     }
+    const lowRatedGoldMaxRating = Number(options.lowRatedGoldMaxRating || getSbcFodderRuntimeOptions().lowRatedGoldMaxRating || 0);
+    if (options.sbcFodderPolicy?.mode !== 'rating-constrained' && isNormalGoldFodder(item) && lowRatedGoldMaxRating > 0 && Number(item?.rating || 0) > lowRatedGoldMaxRating) {
+      reasons.push(`low-rated-gold-over-${lowRatedGoldMaxRating}`);
+    }
     if (isLoanItem(item)) reasons.push('loan');
     else if (isLimitedUseItem(item)) reasons.push('limited-use');
     if (isConceptItem(item)) reasons.push('concept');
     try { if (item?.isEnrolledInAcademy?.()) reasons.push('academy'); } catch { }
     if (item?.endTime !== undefined && Number(item.endTime) !== -1) reasons.push('active-trade');
     if (!isInactiveTrade(item)) reasons.push('active-trade');
-    getFsuRejectReasons(item, options).forEach((reason) => reasons.push(reason));
+    getFsuRejectReasons(item, options, getFsuSettings(), {
+      sbcFodderPolicy: options.sbcFodderPolicy,
+      respectFsuGoldRange: options.respectFsuGoldRange !== undefined
+        ? options.respectFsuGoldRange
+        : options.sbcFodderPolicy?.mode !== 'rating-constrained',
+    }).forEach((reason) => reasons.push(reason));
     return reasons;
   }
 
@@ -3592,9 +3629,16 @@ function updateLoopControls() {
         ? ['storage', 'transfer', 'club']
         : requirementsOrLoopDef?.priorityPiles || ['storage', 'transfer', 'club']
     );
+    const selectionLoopDef = !Array.isArray(requirementsOrLoopDef) && requirementsOrLoopDef
+      ? {
+        ...requirementsOrLoopDef,
+        runtimeSbcFodderPolicy: requirementsOrLoopDef.runtimeSbcFodderPolicy
+          || effectiveSbcFodderPolicy(requirementsOrLoopDef, getSbcFodderRuntimeOptions()),
+      }
+      : null;
     const requirements = Array.isArray(requirementsOrLoopDef)
-      ? requirementsOrLoopDef
-      : selectionRequirements(requirementsOrLoopDef || {}, effectivePriorityPiles);
+      ? selectionRequirements({ requirements: requirementsOrLoopDef, runtimeSbcFodderPolicy: getSbcFodderRuntimeOptions() }, effectivePriorityPiles)
+      : selectionRequirements(selectionLoopDef || {}, effectivePriorityPiles);
     const inventoryAdapter = adapters.inventory();
     const transientUnassignedSignals = options.transientUnassignedSignals || [];
     const inventorySnapshot = mergeTransientUnassignedSignals(
@@ -3668,6 +3712,7 @@ function updateLoopControls() {
     const resolved = findSubmissionItemForDuplicateSignal(item, new Set(), {
       playerOnly: true,
       allowSpecial: true,
+      sbcFodderPolicy: getSbcFodderPolicy(loopDef),
       protectedItemIds: loopDef.protectedItemIds,
       protectedDefinitionIds: loopDef.protectedDefinitionIds,
     });
@@ -3677,10 +3722,7 @@ function updateLoopControls() {
 
   function buildRatingSbcCandidateEntries(loopDef, model) {
     const settings = getFsuSettings();
-    const piles = applyFsuPilePriority(
-      loopDef.ratingSbcFill?.priorityPiles || loopDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'],
-      settings,
-    );
+    const piles = getRatingSbcPriorityPiles(loopDef, settings);
     const protectedItemIds = new Set((loopDef.protectedItemIds || []).map(Number).filter(Boolean));
     const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number).filter(Boolean));
     const context = {
@@ -3694,6 +3736,7 @@ function updateLoopControls() {
     const broadSpec = {
       playerOnly: true,
       allowSpecial: true,
+      sbcFodderPolicy: getSbcFodderPolicy(loopDef),
       protectedItemIds: loopDef.protectedItemIds,
       protectedDefinitionIds: loopDef.protectedDefinitionIds,
     };
@@ -4148,18 +4191,33 @@ function updateLoopControls() {
 
   function getEligibleRequiredSpecialEntries(loopDef = {}, options = {}) {
     const entries = [];
-    const seen = new Set();
-    const piles = [
-      { pileName: 'storage', items: getPileItemsByName('storage') },
-      { pileName: 'club', items: getPileItemsByName('club') },
-    ];
+    const seenIds = new Set();
+    const seenDefinitions = new Set();
+    const settings = getFsuSettings();
+    const piles = getRatingSbcPriorityPiles(loopDef, settings)
+      .map((pileName) => ({ pileName, items: getPileItemsByName(pileName) }));
     if (options.includeRecent !== false) piles.push({ pileName: 'recent', items: state.recentRewardItems || [] });
+    const submissionSpec = {
+      playerOnly: true,
+      allowSpecial: true,
+      sbcFodderPolicy: getSbcFodderPolicy(loopDef),
+      protectedItemIds: loopDef.protectedItemIds,
+      protectedDefinitionIds: loopDef.protectedDefinitionIds,
+    };
     for (const { pileName, items } of piles) {
-      for (const item of (items || [])) {
+      for (const sourceItem of (items || [])) {
+        let item = sourceItem;
+        if (pileNeedsDuplicateSignalResolution(pileName)) {
+          if (!isDuplicate(sourceItem)) continue;
+          item = findSubmissionItemForDuplicateSignal(sourceItem, new Set(), submissionSpec, settings);
+          if (!item) continue;
+        }
         const id = Number(item?.id || 0);
-        if (!id || seen.has(id)) continue;
+        const definitionId = Number(item?.definitionId || 0);
+        if (!id || seenIds.has(id) || (definitionId && seenDefinitions.has(definitionId))) continue;
         if (state.consumedItemIds.has(id)) continue;
-        seen.add(id);
+        seenIds.add(id);
+        if (definitionId) seenDefinitions.add(definitionId);
         if (isEligibleRequiredSpecialForLoop(item, loopDef)) entries.push({ item, pileName });
       }
     }
@@ -4185,11 +4243,12 @@ function updateLoopControls() {
         await refreshInventoryCaches(`${loopDef.name} ${label} ${attempt}/${attempts}`, { includePacks: false, quiet: true });
       }
       resolveRecentRewardItems(`${loopDef.name} ${label} ${attempt}/${attempts}`);
-      entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
+      entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef), loopDef);
       if (entries.length >= required) return entries;
 
       const recentEntries = sortRequiredSpecialEntriesForSubmit(
-        getEligibleRequiredSpecialEntries(loopDef).filter(({ pileName }) => pileName === 'recent')
+        getEligibleRequiredSpecialEntries(loopDef).filter(({ pileName }) => pileName === 'recent'),
+        loopDef,
       );
       if (recentEntries.length && attempt < attempts) {
         log(`${loopDef.name}: waiting for opened ${requiredSpecialLabel(loopDef)} to enter submit cache (${attempt}/${attempts}); recent ${summarizeRequiredSpecialEntries(recentEntries)}`);
@@ -4198,8 +4257,9 @@ function updateLoopControls() {
     return entries;
   }
 
-  function sortRequiredSpecialEntriesForSubmit(entries) {
-    const pileRank = { storage: 0, club: 1, recent: 2, unassigned: 3 };
+  function sortRequiredSpecialEntriesForSubmit(entries, loopDef = {}) {
+    const priorityPiles = getRatingSbcPriorityPiles(loopDef);
+    const pileRank = Object.fromEntries([...priorityPiles, 'recent'].map((pileName, index) => [pileName, index]));
     return [...(entries || [])].sort((a, b) =>
       Number(a?.item?.rating || 0) - Number(b?.item?.rating || 0) ||
       (pileRank[a?.pileName] ?? 9) - (pileRank[b?.pileName] ?? 9) ||
@@ -4369,14 +4429,13 @@ function updateLoopControls() {
   }
 
   function getSubmittedRatingLimit(item, loopDef = {}, settings = getFsuSettings()) {
-    const normalGoldLimit = Number(loopDef.maxNormalGoldSubmittedRating || 0);
-    if (isNormalGoldFodder(item)) {
-      const fsuRange = settings.goldRange || FSU_COMPAT_DEFAULTS.goldRange;
-      const fsuGoldLimit = Number(fsuRange[1] || 0);
-      const limits = [normalGoldLimit, fsuGoldLimit].filter((limit) => Number.isFinite(limit) && limit > 0);
-      if (limits.length) return Math.min(...limits);
-    }
-    return Number(loopDef.maxSubmittedRating || 0);
+    const policy = getSbcFodderPolicy(loopDef);
+    if (policy.mode === 'rating-constrained') return Number(policy.ratingSbcMaxCardRating || 0);
+    if (!isNormalGoldFodder(item)) return 0;
+    return effectiveNormalGoldMaxRating(
+      policy,
+      settings.goldRange || FSU_COMPAT_DEFAULTS.goldRange,
+    );
   }
 
   function isEligibleNormalRepairFiller(item, loopDef = {}) {
@@ -4396,7 +4455,11 @@ function updateLoopControls() {
     const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number));
     if (protectedIds.has(Number(item?.id || 0))) return false;
     if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) return false;
-    if (getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }).length) return false;
+    const policy = getSbcFodderPolicy(loopDef);
+    if (getFsuRejectReasons(item, { playerOnly: true, allowSpecial: false }, getFsuSettings(), {
+      sbcFodderPolicy: policy,
+      respectFsuGoldRange: policy.mode === 'low-gold',
+    }).length) return false;
     return true;
   }
 
@@ -4499,7 +4562,7 @@ function updateLoopControls() {
       keepTotwId = Number(currentTotw.item?.id || 0);
       keepTotwMessage = `keep ${itemDisplayName(currentTotw.item)} rating:${Number(currentTotw.item?.rating || 0) || '?'} at slot ${currentTotw.index + 1}`;
     } else {
-      const externalTotw = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef))
+      const externalTotw = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef), loopDef)
         .filter(({ item }) => !usedIds.has(Number(item?.id || 0)))[0] || null;
       if (!externalTotw) return null;
 
@@ -4814,7 +4877,10 @@ function updateLoopControls() {
         } else {
           log(`${loopDef.name}: submit-ready repair found no eligible normal gold upgrade candidate`);
         }
-        const maxRating = Number(loopDef.maxNormalGoldSubmittedRating || loopDef.maxSubmittedRating || 0);
+        const policy = getSbcFodderPolicy(loopDef);
+        const maxRating = policy.mode === 'rating-constrained'
+          ? Number(policy.ratingSbcMaxCardRating || 0)
+          : Number(policy.lowRatedGoldMaxRating || 0);
         log(`${loopDef.name}: safe fodder exhausted at squad ratings ${summarizeSquadRatings(nextInspection.items)}; no unused eligible normal gold card can raise another slot${maxRating ? ` within rating <= ${maxRating}` : ''}; special, FSU-locked, and over-cap cards remain protected`);
         return { fillResult: nextFillResult, inspection: nextInspection, planned: false, repaired: false };
       }
@@ -4913,26 +4979,34 @@ function updateLoopControls() {
     return { fillResult: nextFillResult, inspection: nextInspection, planned: false, injected: true };
   }
 
+  function inheritSbcFodderPolicy(definition = {}, parent = {}) {
+    definition.runtimeSbcFodderPolicy = effectiveSbcFodderPolicy(
+      definition,
+      parent.runtimeSbcFodderPolicy || getSbcFodderRuntimeOptions(),
+    );
+    return definition;
+  }
+
   function getAutoTotwUpgradeDef(loopDef = {}) {
     const override = isPlainObject(loopDef.autoTotwUpgrade) ? loopDef.autoTotwUpgrade : {};
-    return {
+    return inheritSbcFodderPolicy({
       id: `${loopDef.id || 'fill-and-verify'}-auto-totw-upgrade`,
       name: 'Scanned TOTW Upgrade',
       ...createTotwUpgradePolicy(),
       maxCompletions: 1,
       ...override,
-    };
+    }, loopDef);
   }
 
   function getAutoFodderUpgradeDef(loopDef = {}) {
     const override = isPlainObject(loopDef.autoFodderUpgrade) ? loopDef.autoFodderUpgrade : {};
-    return {
+    return inheritSbcFodderPolicy({
       id: `${loopDef.id || 'fill-and-verify'}-auto-2x84-fodder`,
       name: 'Scanned Rare Gold Fodder Recovery',
       ...createTwoBy84UpgradePolicy({ hidden: false, forceOpenRewardPacks: true }),
       maxCompletions: 1,
       ...override,
-    };
+    }, loopDef);
   }
 
   function hasResolvedSbcIdentity(definition = {}) {
@@ -5026,10 +5100,19 @@ function updateLoopControls() {
   async function ensureTotwForFillAndVerify(loopDef) {
     if (!needsAutoTotwPreflight(loopDef)) return true;
     const required = Math.max(1, Number(loopDef.requiredSpecialCount || 1) || 1);
+    const fodderPolicy = getSbcFodderPolicy(loopDef);
+    const requiredSpecialMinRating = Number(loopDef.requiredSpecialMinRating || 0);
+    if (
+      fodderPolicy.mode === 'rating-constrained'
+      && requiredSpecialMinRating > Number(fodderPolicy.ratingSbcMaxCardRating || 0)
+    ) {
+      log(`${loopDef.name}: required ${requiredSpecialLabel(loopDef)} minimum rating ${requiredSpecialMinRating} exceeds rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating}; stopping before automatic recovery`);
+      return false;
+    }
     await refreshInventoryCaches(`${loopDef.name} ${requiredSpecialLabel(loopDef)} preflight`, { includePacks: false, quiet: true });
     resolveRecentRewardItems(`${loopDef.name} ${requiredSpecialLabel(loopDef)} preflight`);
 
-    let entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef));
+    let entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef), loopDef);
     if (entries.length >= required) {
       log(`${loopDef.name}: ${requiredSpecialLabel(loopDef)} preflight found ${entries.length} eligible ${requiredSpecialLabel(loopDef)} card(s): ${summarizeRequiredSpecialEntries(entries)}`);
       return true;
@@ -5086,6 +5169,7 @@ function updateLoopControls() {
     const rating = Number(item?.rating || 0);
     const itemId = Number(item?.id || 0);
     const settings = context.settings || getFsuSettings();
+    const fodderPolicy = getSbcFodderPolicy(loopDef);
     const maxRating = getSubmittedRatingLimit(item, loopDef, settings);
     const protectedIds = context.protectedItemIds || new Set((loopDef.protectedItemIds || []).map(Number));
     const protectedDefinitionIds = context.protectedDefinitionIds || new Set((loopDef.protectedDefinitionIds || []).map(Number));
@@ -5134,7 +5218,11 @@ function updateLoopControls() {
     }
     if (loopDef.blockTradeable === true && isTradeable(item) && !isNormalGoldFodder(item)) reasons.push('tradeable-blocked');
     if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
-    getFsuRejectReasons(item, fsuSpec, settings, context).forEach((reason) => {
+    getFsuRejectReasons(item, fsuSpec, settings, {
+      ...(context || {}),
+      sbcFodderPolicy: fodderPolicy,
+      respectFsuGoldRange: fodderPolicy.mode === 'low-gold',
+    }).forEach((reason) => {
       if (!reasons.includes(reason)) reasons.push(reason);
     });
 
@@ -5276,7 +5364,7 @@ function updateLoopControls() {
     }
 
     if (requiredSpecialCount && (inspection.requiredSpecialMetCount || 0) < requiredSpecialCount) {
-      const requiredSpecialMaxRating = Number(loopDef.maxSubmittedRating || 0);
+      const requiredSpecialMaxRating = Number(getSbcFodderPolicy(loopDef).ratingSbcMaxCardRating || 0);
       hints.push(`add ${requiredSpecialCount - (inspection.requiredSpecialMetCount || 0)} untradeable ${requiredSpecialLabel(loopDef)} card(s) rating <= ${requiredSpecialMaxRating || 'limit'}`);
     }
     const missingPlayers = parseMissingPlayerCount(inspection);
@@ -5954,6 +6042,8 @@ function updateLoopControls() {
   }
 
   async function trySubmitUnassignedRecoveryRecipe({ policy, recipe, triggerRefs }) {
+    const parentLoopDef = state.loopStack[state.loopStack.length - 1] || null;
+    recipe = inheritSbcFodderPolicy(cloneLoopDef(recipe), parentLoopDef || {});
     const label = `Unassigned ${policy.id} -> ${recipe.name}`;
     let set;
     try {
@@ -6237,12 +6327,44 @@ function updateLoopControls() {
 
   function getPickRuntimeOptions() {
     return normalizePickRuntimeOptions({
-      protectHighGold: document.querySelector('#bronze-loop-pick-protect-high-gold')?.checked !== false,
       autoSelectBelow90: document.querySelector('#bronze-loop-pick-auto-below-90')?.checked !== false,
       openPicksAtEnd: document.querySelector('#bronze-loop-pick-open-at-end')?.checked === true,
-      highGoldThreshold: document.querySelector('#bronze-loop-pick-high-gold-threshold')?.value,
       autoPickThreshold: document.querySelector('#bronze-loop-pick-auto-threshold')?.value,
     });
+  }
+
+  function getSbcFodderRuntimeOptions() {
+    return normalizeSbcFodderPolicy(state.sbcFodderOptions || DEFAULT_SBC_FODDER_POLICY);
+  }
+
+  function loadSbcFodderOptions() {
+    try {
+      const stored = adapters.localStorage.getJson(SBC_FODDER_OPTIONS_KEY, null);
+      if (stored && typeof stored === 'object') return normalizeSbcFodderPolicy(stored);
+      const legacyPickOptions = adapters.localStorage.getJson(PICK_OPTIONS_KEY, {});
+      return normalizeSbcFodderPolicy(legacyPickOptions);
+    } catch {
+      return normalizeSbcFodderPolicy();
+    }
+  }
+
+  function getSbcFodderPolicy(loopDef = {}) {
+    return effectiveSbcFodderPolicy(
+      loopDef,
+      loopDef.runtimeSbcFodderPolicy || getSbcFodderRuntimeOptions(),
+    );
+  }
+
+  function saveSbcFodderOptions() {
+    const options = normalizeSbcFodderPolicy({
+      lowRatedGoldMaxRating: document.querySelector('#bronze-loop-low-rated-gold-max')?.value,
+      ratingSbcMaxCardRating: document.querySelector('#bronze-loop-rating-sbc-max-card')?.value,
+    });
+    state.sbcFodderOptions = options;
+    try {
+      adapters.localStorage.setJson(SBC_FODDER_OPTIONS_KEY, options);
+    } catch { }
+    log(`SBC fodder policy updated: low-rated Gold <= ${options.lowRatedGoldMaxRating}; rating SBC all cards <= ${options.ratingSbcMaxCardRating}`);
   }
 
   function loadPickRuntimeOptions() {
@@ -6468,6 +6590,8 @@ function updateLoopControls() {
     }
     const model = parseRatingSbcChallenge(loopDef, opened.challenge);
     logRatingSbcModel(loopDef, model);
+    const fodderPolicy = getSbcFodderPolicy(loopDef);
+    log(`${loopDef.name}: rating-constrained fodder cap applies to every card at rating <= ${fodderPolicy.ratingSbcMaxCardRating}; FSU Gold rating range is ignored while other FSU protections remain active`);
     if (model.unsupported.length) {
       return {
         ok: false,
@@ -7046,7 +7170,12 @@ function updateLoopControls() {
 
   function createReserveMatchingDuplicatePackPolicy(loopDef, source) {
     return createOpenedItemPolicy(async (openedItems) => {
-      const requirement = { ...(source?.requirement || {}) };
+      const fodderPolicy = getSbcFodderPolicy(loopDef);
+      const requirement = {
+        ...(source?.requirement || {}),
+        sbcFodderPolicy: fodderPolicy,
+        ...(fodderPolicy.mode === 'low-gold' ? { lowRatedGoldMaxRating: fodderPolicy.lowRatedGoldMaxRating } : {}),
+      };
       delete requirement.count;
       const reserveDuplicate = (item) =>
         isDuplicate(item) &&
@@ -7352,6 +7481,7 @@ function updateLoopControls() {
           disabledPiles: loopDef.disabledPiles?.length ? [...loopDef.disabledPiles] : undefined,
           preSelectionCleanup: false,
         };
+        inheritSbcFodderPolicy(stageDef, loopDef);
         applyDisabledPiles(stageDef);
         return runSupplyAndCraftLoop(stageDef, { skipFinalUnassignedCleanup: true });
       },
@@ -7388,26 +7518,22 @@ function updateLoopControls() {
   }
 
   function isRareGoldPlayer(item, options = {}) {
-    const highGoldThreshold = resolveProtectHighGoldThreshold(options);
+    const fodderPolicy = options.sbcFodderPolicy || getSbcFodderRuntimeOptions();
+    const lowRatedGoldMaxRating = Number(options.lowRatedGoldMaxRating || fodderPolicy.lowRatedGoldMaxRating || 82);
     const spec = {
       tier: 'gold',
       rarity: 'rare',
       playerOnly: true,
       allowSpecial: false,
-      protectHighGold: options.protectHighGold === true,
-      highGoldThreshold,
+      sbcFodderPolicy: fodderPolicy,
+      lowRatedGoldMaxRating,
     };
-    return !(options.protectHighGold && isProtectedHighGold(item, highGoldThreshold)) &&
-      isSbcUsablePlayer(item, spec) &&
+    return isSbcUsablePlayer(item, spec, null) &&
       itemMatchesSpec(item, spec);
   }
 
   function isRareGoldDuplicate(item, options = {}) {
     return isDuplicate(item) && isRareGoldPlayer(item, options);
-  }
-
-  function isLowRareGoldDuplicate(item) {
-    return isRareGoldDuplicate(item, { protectHighGold: true });
   }
 
   function liveItemRef(item, pile = null) {
@@ -7540,6 +7666,7 @@ function updateLoopControls() {
     }
     applyDisabledPiles(pickDef);
     applyPickRuntimeOptions(pickDef, loopDef.runtimePickOptions || getPickRuntimeOptions());
+    inheritSbcFodderPolicy(pickDef, loopDef);
     pickDef.maxCompletions = 1;
     return pickDef;
   }
@@ -7548,10 +7675,10 @@ function updateLoopControls() {
     const configured = Array.isArray(loopDef.craftingUpgrades) && loopDef.craftingUpgrades.length
       ? loopDef.craftingUpgrades
       : [loopDef.commonUpgrade, loopDef.rareUpgrade].filter(isPlainObject);
-    return configured.map((upgradeDef) => ({
+    return configured.map((upgradeDef) => inheritSbcFodderPolicy({
       ...upgradeDef,
       openRewardPacks: loopDef.openRewardPacks === true || upgradeDef.openRewardPacks === true,
-    }));
+    }, loopDef));
   }
 
   function getChallengeMaterialDefs(loopDef) {
@@ -7660,7 +7787,7 @@ function updateLoopControls() {
       const duplicateIds = new Set(responseDuplicates.map((item) => Number(item?.id || 0)).filter(Boolean));
       const classified = classifyOpenedUpgradeDuplicates(openedItems, {
         isDuplicate: (item) => duplicateIds.has(Number(item?.id || 0)),
-        isEligibleDuplicate: (item) => isRareGoldPlayer(item, { protectHighGold: true }),
+        isEligibleDuplicate: (item) => isRareGoldPlayer(item, { sbcFodderPolicy: getSbcFodderPolicy(loopDef) }),
         isTradeable,
       });
 
@@ -8065,10 +8192,10 @@ function updateLoopControls() {
     const fillRemainingRoundsFromInventory = consumeAllSourcePacks && loopDef.useRoundsAsCompletions === true;
     const maxPacks = Math.max(1, Math.min(100, Number(loopDef.maxPacks || 100) || 100));
     const maxCompletions = Math.max(1, Math.min(100, Number(loopDef.maxCompletions || 1) || 1));
-    const rareUpgradeDef = {
+    const rareUpgradeDef = inheritSbcFodderPolicy({
       ...loopDef.rareUpgrade,
       openRewardPacks: loopDef.openRewardPacks === true,
-    };
+    }, loopDef);
     if (sourcePackIdentityBlocked(loopDef, loopDef.name)) {
       return {
         status: 'blocked',
@@ -8088,6 +8215,9 @@ function updateLoopControls() {
       };
     }
     const rareUpgradeLabel = rareUpgradeDef.name || 'Rare Gold Recycling Upgrade';
+    const isEligibleLowRareGoldDuplicate = (item) => isRareGoldDuplicate(item, {
+      sbcFodderPolicy: getSbcFodderPolicy(rareUpgradeDef),
+    });
     await waitAppReady();
     const result = await runPackAndCraftWorkflow({
       maxPacks,
@@ -8100,13 +8230,13 @@ function updateLoopControls() {
         if (dryRun) {
           await refreshInventoryCaches(`${loopDef.name} dry-run`, { quiet: true });
           const items = getUnassignedItems();
-          const usable = items.filter(isLowRareGoldDuplicate);
+          const usable = items.filter(isEligibleLowRareGoldDuplicate);
           log(`${loopDef.name}: dry-run resume found ${items.length} unassigned item(s), ${usable.length} usable low rare duplicate(s)`);
           return { hasItems: usable.length > 0, usableCount: usable.length };
         }
         await unwindSbcSquadControllers(`${loopDef.name} resume`);
         const items = await showUnassignedIfAny(`${loopDef.name} resume sync`);
-        const usable = items.filter(isLowRareGoldDuplicate);
+        const usable = items.filter(isEligibleLowRareGoldDuplicate);
         if (items.length) log(`${loopDef.name}: resume found ${items.length} unassigned item(s), ${usable.length} usable low rare duplicate(s)`);
         return { hasItems: usable.length > 0, usableCount: usable.length };
       },
@@ -8140,7 +8270,7 @@ function updateLoopControls() {
           await runReservedDuplicateCraftingStage(
             loopDef,
             rareUpgradeDef,
-            isLowRareGoldDuplicate,
+            isEligibleLowRareGoldDuplicate,
             `${rareUpgradeLabel} ${phase === 'resume' ? 'resumed ' : ''}low rare gold`,
             { maxCompletions: 1 },
           );
@@ -8149,7 +8279,7 @@ function updateLoopControls() {
         const stageResult = await runReservedDuplicateCraftingStage(
           loopDef,
           rareUpgradeDef,
-          isLowRareGoldDuplicate,
+          isEligibleLowRareGoldDuplicate,
           `${rareUpgradeLabel} ${phase === 'resume' ? 'resumed ' : ''}low rare gold`,
           {
             maxCompletions: remainingCompletions ?? 100,
@@ -8555,16 +8685,6 @@ function updateLoopControls() {
       expectedPlayerCount: sumRequirementPlayerCount(loopDef),
     });
     assertSbcSquadSafe(loopDef, inspection);
-    if (loopDef.protectHighGold === false) return;
-    const highGoldThreshold = Math.max(2, Math.min(99, Number(loopDef.pickHighGoldThreshold || 82) || 82));
-    const protectedPlayers = (players || []).filter((item) =>
-      isGold(item) && !isSpecial(item) && Number(item?.rating || 0) >= highGoldThreshold
-    );
-    if (!protectedPlayers.length) return;
-    const details = protectedPlayers
-      .map((item) => `${itemDisplayName(item)} rating:${Number(item?.rating || 0)}`)
-      .join(', ');
-    fail(`${loopDef.name}: ${highGoldThreshold}+ normal gold protection blocked SBC submission: ${details}`);
   }
 
   function assertSavedPlayerPickFodderProtection(loopDef, squad) {
@@ -9427,7 +9547,10 @@ function updateLoopControls() {
         openRewardPacks: isOpenRewardPacksEnabled(),
         inventoryOnly: document.querySelector('#bronze-loop-daily-inventory-only')?.checked === true,
         pickOptions: getPickRuntimeOptions(),
+        sbcFodderPolicy: getSbcFodderRuntimeOptions(),
       });
+      const fodderPolicy = getSbcFodderPolicy(loopDef);
+      log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
       if (Number(loopDef.runtimeRounds) > 0) {
         rounds = Number(loopDef.runtimeRounds || rounds || 1);
       }
@@ -9533,11 +9656,13 @@ function updateLoopControls() {
     });
     const savedLoopUiOptions = loadLoopUiOptions();
     const savedPickOptions = loadPickRuntimeOptions();
+    state.sbcFodderOptions = loadSbcFodderOptions();
     state.rewardAlertSettings = loadRewardAlertSettings();
     hydrateMainPanelOptions({
       panel,
       loopOptions: savedLoopUiOptions,
       pickOptions: savedPickOptions,
+      sbcFodderOptions: state.sbcFodderOptions,
       rewardAlertSettings: state.rewardAlertSettings,
     });
     renderRewardAlertSummary({ panel, settings: state.rewardAlertSettings });
@@ -9597,6 +9722,7 @@ function updateLoopControls() {
       renderProfiles: renderProfileSelect,
       updateLoopControls,
       savePickOptions: savePickRuntimeOptions,
+      saveSbcFodderOptions,
       saveLoopOptions: saveLoopUiOptions,
       saveRewardAlertEnabled,
       openRewardAlertSettings: openRewardAlertSettingsModal,

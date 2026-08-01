@@ -171,18 +171,12 @@ function parseChallengeRequirements(challenge, challengeIndex, options = {}) {
   }
   if (diagnostics.length) return { ok: false, diagnostics };
 
-  const highGoldThreshold = Math.max(2, Math.min(99, Number(options.highGoldThreshold || 82) || 82));
-  const maxRating = highGoldThreshold - 1;
   const requirement = (rarity, count) => ({
     tier: 'gold',
     rarity,
     count,
-    maxRating,
     playerOnly: true,
     allowSpecial: false,
-    protectHighGold: true,
-    highGoldThreshold,
-    highGoldProtectionMaxRating: true,
     priorityPiles: [...(options.priorityPiles || DEFAULT_PRIORITY_PILES)],
   });
   const requirements = [];
@@ -290,6 +284,7 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     id: `discovered-player-pick-${setId}-${identity.rewardIdentityValues[0]}`,
     name: setName,
     strategy: 'playerPickSbc',
+    sbcFodderPolicy: { mode: 'low-gold' },
     discovered: true,
     sbcSetIds: [setId],
     sbcNames: [setName],

@@ -70,7 +70,7 @@ describe('dynamic Upgrade discovery', () => {
       sbcSetIds: [900],
       rewardPackIds: [300],
       expectedPlayerCount: 11,
-      maxSubmittedRating: 88,
+      sbcFodderPolicy: { mode: 'rating-constrained' },
       requiredSpecialCount: 1,
       requiredSpecialKind: 'totw-tots-fof',
       maxCompletions: 5,
@@ -150,7 +150,8 @@ describe('dynamic Upgrade discovery', () => {
       sbcSetIds: [843],
       rewardPackIds: [1031],
       expectedPlayerCount: 6,
-      requirements: [expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 6, maxRating: 81 })],
+      requirements: [expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 6 })],
+      sbcFodderPolicy: { mode: 'low-gold' },
       priorityPiles: ['storage', 'club'],
       blockSpecial: true,
     });
@@ -174,7 +175,7 @@ describe('dynamic Upgrade discovery', () => {
     expect(result.status).toBe('supported');
     expect(result.loop.expectedPlayerCount).toBe(7);
     expect(result.loop.requirements).toEqual([
-      expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 7, maxRating: 81 }),
+      expect.objectContaining({ tier: 'gold', rarity: 'rare', count: 7 }),
     ]);
     expect(collectScannedUpgradeActivities([{ loop: result.loop }])[0].requirements)
       .toEqual([{ tier: 'gold', rarity: 'rare', count: 7 }]);

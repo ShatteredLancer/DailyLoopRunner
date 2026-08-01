@@ -100,7 +100,7 @@ The patch generator must reproduce the exact modified SHA256 from the immutable 
 3. Run `npm install --package-lock-only` if package metadata changed.
 4. Run `npm run verify` and commit the generated root userscript.
 5. Complete the real Web App smoke checklist.
-6. Create and push a matching tag, for example `v0.7.2`.
+6. Create and push a matching tag, for example `v0.7.10`.
 
 The tag workflow verifies again, builds profiles, creates a draft Release, uploads Runner/FSU/Profile assets plus `SHA256SUMS`, and only then publishes it. A published Release is immutable and cannot be overwritten by rerunning the workflow.
 

@@ -4,6 +4,11 @@ import {
   INVENTORY_ONLY_CAPABILITIES,
 } from '../domain/strategies.js';
 import { applyRewardFlow, resolveRewardPackOpenEnabled } from './reward-flow.js';
+import {
+  applySbcFodderPolicy,
+  normalizeSbcFodderPolicy,
+  resolveSbcFodderPolicy,
+} from './sbc-fodder-policy.js';
 
 export const INVENTORY_MODES = Object.freeze(['inherit', 'inventory-only', 'normal']);
 export const RUNTIME_QUANTITY_MODES = Object.freeze(['user', 'ea-remaining', 'exhaust', 'fixed']);
@@ -28,24 +33,19 @@ function pickOptionOverrides(input = {}) {
     const value = sources.find((entry) => entry !== undefined);
     if (value !== undefined) result[target] = value;
   };
-  assign('protectHighGold', nested.protectHighGold, input.protectHighGold);
   assign('autoSelectBelow90', nested.autoSelectBelow90, nested.autoSelect, input.autoSelectBelow90);
   assign('preferScannedMetadata', nested.preferScannedMetadata, input.preferScannedMetadata);
   assign('openPicksAtEnd', nested.openPicksAtEnd, nested.openAtEnd, input.openPicksAtEnd);
-  assign('highGoldThreshold', nested.highGoldThreshold, input.pickHighGoldThreshold, input.highGoldThreshold);
   assign('autoPickThreshold', nested.autoPickThreshold, input.autoPickRatingThreshold, input.autoPickThreshold);
   return result;
 }
 
 export function normalizePickRuntimeOptions(input = {}) {
-  const highGoldThreshold = Number(input.highGoldThreshold);
   const autoPickThreshold = Number(input.autoPickThreshold);
   return {
-    protectHighGold: input.protectHighGold !== false,
     autoSelectBelow90: input.autoSelectBelow90 !== false,
     preferScannedMetadata: input.preferScannedMetadata === true,
     openPicksAtEnd: input.openPicksAtEnd === true,
-    highGoldThreshold: boundedNumber(highGoldThreshold > 0 ? highGoldThreshold : 82, 82, 2, 99),
     autoPickThreshold: boundedNumber(autoPickThreshold > 0 ? autoPickThreshold : 90, 90, 1, 99),
   };
 }
@@ -54,37 +54,6 @@ export function resolvePickRuntimeOptions(globalOptions = {}, ...overrides) {
   const merged = { ...normalizePickRuntimeOptions(globalOptions) };
   for (const override of overrides) Object.assign(merged, pickOptionOverrides(override));
   return normalizePickRuntimeOptions(merged);
-}
-
-function requirementBusinessMaxRating(requirement = {}) {
-  const saved = Number(requirement.maxRatingBeforeHighGoldProtection);
-  if (Number.isFinite(saved)) return saved;
-  const current = Number(requirement.maxRating);
-  return requirement.highGoldProtectionMaxRating === true || !Number.isFinite(current) ? null : current;
-}
-
-function applyPickProtectionToRequirement(requirement, options) {
-  const businessMaxRating = requirementBusinessMaxRating(requirement);
-  requirement.protectHighGold = options.protectHighGold;
-  if (!options.protectHighGold) {
-    delete requirement.highGoldThreshold;
-    if (businessMaxRating === null) delete requirement.maxRating;
-    else requirement.maxRating = businessMaxRating;
-    delete requirement.highGoldProtectionMaxRating;
-    delete requirement.maxRatingBeforeHighGoldProtection;
-    return;
-  }
-
-  const protectionMaxRating = options.highGoldThreshold - 1;
-  requirement.highGoldThreshold = options.highGoldThreshold;
-  requirement.highGoldProtectionMaxRating = true;
-  if (businessMaxRating !== null) {
-    requirement.maxRatingBeforeHighGoldProtection = businessMaxRating;
-    requirement.maxRating = Math.min(businessMaxRating, protectionMaxRating);
-  } else {
-    delete requirement.maxRatingBeforeHighGoldProtection;
-    requirement.maxRating = protectionMaxRating;
-  }
 }
 
 export function applyPickRuntimeOptions(loopDef, inheritedOptions = {}) {
@@ -97,15 +66,9 @@ export function applyPickRuntimeOptions(loopDef, inheritedOptions = {}) {
     enumerable: false,
     value: true,
   });
-  loopDef.protectHighGold = options.protectHighGold;
   loopDef.autoSelectBelow90 = options.autoSelectBelow90;
   loopDef.openPicksAtEnd = options.openPicksAtEnd;
-  loopDef.pickHighGoldThreshold = options.highGoldThreshold;
   loopDef.autoPickRatingThreshold = options.autoPickThreshold;
-  const requirementGroups = [loopDef.requirements, ...(loopDef.challengeRequirements || [])];
-  requirementGroups.forEach((requirements) => (requirements || []).forEach((requirement) => {
-    applyPickProtectionToRequirement(requirement, options);
-  }));
   return loopDef;
 }
 
@@ -236,14 +199,18 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
       ? options.inventoryOnly
       : options.dailyRecycleInventoryOnly;
   const resolvedInventoryMode = resolveInventoryMode(globalInventoryMode === true ? 'inventory-only' : globalInventoryMode === false || globalInventoryMode === undefined ? 'normal' : globalInventoryMode, loopDef);
+  const globalSbcFodderPolicy = normalizeSbcFodderPolicy(options.sbcFodderPolicy);
+  const resolvedSbcFodderPolicy = resolveSbcFodderPolicy(globalSbcFodderPolicy, loopDef);
 
   loopDef.dryRun = options.dryRun === true || loopDef.dryRun === true;
   applyRewardFlow(loopDef);
   loopDef.openRewardPacks = resolveRewardPackOpenEnabled(loopDef, options.openRewardPacks === true);
   loopDef.runtimePickOptions = resolvedPickOptions;
   loopDef.runtimeInventoryMode = resolvedInventoryMode;
+  loopDef.runtimeSbcFodderPolicy = resolvedSbcFodderPolicy;
   applyPickRuntimeOptions(loopDef, globalPickOptions);
   applyInventoryMode(loopDef, resolvedInventoryMode);
+  applySbcFodderPolicy(loopDef, resolvedSbcFodderPolicy);
   applyRuntimeQuantity(loopDef, options.rounds);
   return loopDef;
 }

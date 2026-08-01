@@ -191,9 +191,13 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
           <button id="bronze-loop-reward-alert-settings" title="Reward alert settings">Settings</button>
         </div>
         <div class="row">
-          <label title="Player Pick SBCs will not submit normal gold players at or above this rating">
-            <input id="bronze-loop-pick-protect-high-gold" type="checkbox"> Protect Pick fodder >=
-            <input id="bronze-loop-pick-high-gold-threshold" type="number" min="2" max="99" value="82">
+          <label title="Non-rating SBCs use normal Gold players up to this rating; FSU Gold Range can make the effective limit lower">
+            Low-rated SBC Gold max
+            <input id="bronze-loop-low-rated-gold-max" type="number" min="1" max="99" value="82">
+          </label>
+          <label title="Rating-constrained SBCs use no submitted player above this rating, including Special cards">
+            Rating SBC max card
+            <input id="bronze-loop-rating-sbc-max-card" type="number" min="1" max="99" value="88">
           </label>
           <label title="Player Picks whose candidates are all below this rating will be selected automatically">
             <input id="bronze-loop-pick-auto-below-90" type="checkbox"> Auto-pick below

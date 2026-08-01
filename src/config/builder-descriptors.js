@@ -43,6 +43,7 @@ export const BUILDER_COMMON_FIELDS = Object.freeze([
     type: 'pick-options',
     strategies: Object.freeze(['playerPickSbc', 'dailyRoutine', 'workflowRoutine']),
   }),
+  Object.freeze({ path: 'sbcFodderPolicy', label: 'SBC fodder policy', type: 'sbc-fodder-policy' }),
 ]);
 
 function descriptor(strategy, label, fields, options = {}) {
@@ -171,8 +172,6 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
     { path: 'requirements', label: 'Requirements', type: 'requirements' },
     { path: 'ratingSbcFill', label: 'Rating solver', type: 'rating-fill' },
     { path: 'priorityPiles', label: 'Pile order', type: 'pile-list' },
-    { path: 'maxSubmittedRating', label: 'Maximum submitted rating', type: 'rating' },
-    { path: 'maxNormalGoldSubmittedRating', label: 'Maximum normal Gold rating', type: 'rating' },
     { path: 'requiredSpecialKind', label: 'Required special type', type: 'special-kind' },
     { path: 'requiredSpecialMinRating', label: 'Required special minimum', type: 'rating' },
     { path: 'autoTotwUpgrade', label: 'Automatic special recovery', type: 'auto-totw-upgrade' },

@@ -345,6 +345,10 @@ export function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
     expectedPlayerCount: discoveredLoop.expectedPlayerCount,
     requiredSpecialCount: discoveredLoop.requiredSpecialCount,
     allowedSpecialCount: discoveredLoop.allowedSpecialCount,
+    sbcFodderPolicy: {
+      ...(clone(discoveredLoop.sbcFodderPolicy) || {}),
+      ...(clone(configuredLoop.sbcFodderPolicy) || {}),
+    },
     ratingSbcFill: {
       ...(clone(configuredLoop.ratingSbcFill) || {}),
       targetRating: discoveredLoop.ratingSbcFill?.targetRating,
