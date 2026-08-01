@@ -31,7 +31,7 @@
     "verify": "npm run lint:syntax && npm run check:config && npm run check:profiles && npm run check:architecture && npm run check:fsu-patch && npm test && npm run build && npm run check:dist && npm run check:fsu-release"
   },
   "devDependencies": {
-    "esbuild": "^0.25.6",
+    "esbuild": "^0.28.1",
     "vitest": "^3.2.4"
   }
 }
