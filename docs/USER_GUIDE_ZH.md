@@ -63,6 +63,7 @@ Profile 保存完整 Workflow、Loop 和 Recovery 配置。
 - `Default`：可编辑的内置基线副本。
 - `Bronze/Silver Inventory Only`：只将需要铜银材料的相关 Loop 固定为库存模式。
 - `Daily + Rare Pack Recycling`：One-click Daily 后追加 Rare Pack 回收，优先使用当前 Rare Gold Premium，否则使用 Rare Gold Baseline。
+- `Daily + Rare Pack to 5x80+`：One-click Daily 后追加 quantity-first Common Gold Premium 回收，当前使用 `5x 80+ Upgrade`。EA 资格保持 unrestricted Gold，选卡先用 Common Gold，不足时才用 Rare Gold；自己的 5x80+ 奖励包不会被当作来源包。
 
 Builder 将每个 Profile 分为：
 
@@ -124,11 +125,11 @@ Batch Open 每次打开时读取当前 My Packs：
 
 ### One-click Daily
 
-Built-in 默认依次运行 Daily Bronze、Silver、Common、Rare，并按 EA 当前剩余次数执行。专用 Profile 可以追加 Rare Pack 到 2x84+ 阶段。
+Built-in 默认依次运行 Daily Bronze、Silver、Common、Rare，并按 EA 当前剩余次数执行。`Daily + Rare Pack Recycling` 追加当前 Rare Gold Premium/Baseline；`Daily + Rare Pack to 5x80+` 则追加 quantity-first Common Gold Premium，按 Common-first、Rare-fallback 方式处理 Daily Rare 来源包。两个 Profile 都只在第五步改变消耗方式。
 
 ### Provision Crafting
 
-打开 Provision 来源包并按材料类型清理：Common Gold 优先进入当前动态 Pick，再进入 common crafting Upgrade；Rare Gold 进入动态 2x84+。所有路径保持 `Unassigned -> Storage -> Transfer -> Club` 的优先级和 Common-first 规则。
+打开 Provision 来源包并按材料类型清理：Common Gold 优先进入当前动态 Pick，再进入 Common Gold Premium Upgrade；Rare Gold 进入当前动态 Rare Gold Premium 或 Baseline。所有路径保持 `Unassigned -> Storage -> Transfer -> Club` 的优先级和 Common-first 规则。
 
 ### Inventory Exhaustion
 

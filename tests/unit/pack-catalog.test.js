@@ -72,6 +72,37 @@ describe('pack catalog', () => {
     ]);
   });
 
+  it('excludes a loop output pack from source candidates and reports the overlap', () => {
+    const identity = resolveSourcePackIdentity({
+      sourcePackRef: { rewardOfLoopId: 'daily-rare' },
+      sourcePackIds: [20059, 30060],
+      sourcePackNames: ['Daily Rare source', '5x 80+ Rare Gold Players Pack'],
+      producedRewardPackIds: [30060],
+      producedRewardPackNames: ['5x 80+ Rare Gold Players Pack'],
+      catalog: {
+        loopRewards: {
+          'daily-rare': {
+            packIds: [30060],
+            packNames: ['5x 80+ Rare Gold Players Pack'],
+          },
+        },
+      },
+    });
+
+    expect(identity.sourceOutputOverlap).toEqual([
+      { type: 'id', value: 30060, source: 'catalog' },
+      { type: 'name', value: '5x 80+ Rare Gold Players Pack', source: 'catalog' },
+      { type: 'id', value: 30060, source: 'fallback' },
+      { type: 'name', value: '5x 80+ Rare Gold Players Pack', source: 'fallback' },
+    ]);
+    expect(identity.candidates).toEqual([
+      { type: 'id', value: 20059, source: 'fallback' },
+      { type: 'name', value: 'Daily Rare source', source: 'fallback' },
+    ]);
+    expect(identity.packIds).toEqual([20059]);
+    expect(identity.packNames).toEqual(['Daily Rare source']);
+  });
+
   it('keeps static identity usable when the referenced SBC reward is unavailable', () => {
     const identity = resolveSourcePackIdentity({
       sourcePackRef: { rewardOfLoopId: 'expired-loop' },

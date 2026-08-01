@@ -65,16 +65,21 @@ describe('material sink classification', () => {
     }).className).toBe('premium');
   });
 
-  it('classifies 2x84 as the Rare Gold baseline and future superior sinks as premium', () => {
+  it('classifies 2x85 as the Rare Gold baseline and keeps the retired 2x84 tradeoff incomparable', () => {
     const familyId = MATERIAL_SINK_FAMILIES.rareGold;
+    expect(classifyMaterialSinkCandidate({
+      familyId,
+      cost: 10,
+      reward: reward('2x 85+ Rare Gold Players Pack'),
+    }).className).toBe('baseline');
     expect(classifyMaterialSinkCandidate({
       familyId,
       cost: 6,
       reward: reward('2x 84+ Rare Gold Players Pack'),
-    }).className).toBe('baseline');
+    }).className).toBe('incomparable');
     expect(classifyMaterialSinkCandidate({
       familyId,
-      cost: 5,
+      cost: 9,
       reward: reward('3x 85+ Rare Gold Players Pack'),
     }).className).toBe('premium');
   });

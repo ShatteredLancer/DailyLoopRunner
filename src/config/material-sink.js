@@ -34,6 +34,11 @@ export const MATERIAL_SINK_PREFERENCES = Object.freeze([
   'cost-first',
 ]);
 
+export const MATERIAL_SINK_MATERIALS = Object.freeze([
+  'common-gold',
+  'rare-gold',
+]);
+
 export const MATERIAL_SINK_BASELINES = Object.freeze({
   [MATERIAL_SINK_FAMILIES.commonGold]: Object.freeze({
     material: 'common-gold',
@@ -42,8 +47,8 @@ export const MATERIAL_SINK_BASELINES = Object.freeze({
   }),
   [MATERIAL_SINK_FAMILIES.rareGold]: Object.freeze({
     material: 'rare-gold',
-    cost: 6,
-    reward: Object.freeze({ guaranteedCount: 2, minimumRating: 84, rarity: 'rare' }),
+    cost: 10,
+    reward: Object.freeze({ guaranteedCount: 2, minimumRating: 85, rarity: 'rare' }),
   }),
 });
 

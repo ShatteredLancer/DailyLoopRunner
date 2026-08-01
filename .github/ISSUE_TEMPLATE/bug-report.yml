@@ -18,7 +18,7 @@ body:
     id: fsu-version
     attributes:
       label: FSU version
-      placeholder: FSU upstream 26.09 or FSU Local 26.09.1
+      placeholder: FSU upstream 26.09 or FSU Local 26.09.2
     validations:
       required: true
   - type: dropdown

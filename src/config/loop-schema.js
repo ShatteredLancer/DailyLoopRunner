@@ -19,6 +19,7 @@ import { SBC_ACTIVITY_FAMILY_IDS } from './activity-discovery.js';
 import {
   MATERIAL_SINK_BASELINES,
   MATERIAL_SINK_CLASSES,
+  MATERIAL_SINK_MATERIALS,
   MATERIAL_SINK_PREFERENCES,
 } from './material-sink.js';
 
@@ -95,7 +96,7 @@ function validateActivityBinding(value, path, errors) {
     errors.push(`${path} must be an object`);
     return;
   }
-  const allowedFields = new Set(['family', 'category', 'required', 'classes', 'preference']);
+  const allowedFields = new Set(['family', 'category', 'required', 'classes', 'preference', 'selectionMaterial']);
   Object.keys(value).forEach((field) => {
     if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
   });
@@ -124,8 +125,12 @@ function validateActivityBinding(value, path, errors) {
   if (value.preference !== undefined && !MATERIAL_SINK_PREFERENCES.includes(value.preference)) {
     errors.push(`${path}.preference must be one of: ${MATERIAL_SINK_PREFERENCES.join(', ')}`);
   }
-  if ((value.classes !== undefined || value.preference !== undefined) && !MATERIAL_SINK_BASELINES[value.family]) {
-    errors.push(`${path}.classes and preference require a material sink family`);
+  if (value.selectionMaterial !== undefined && !MATERIAL_SINK_MATERIALS.includes(value.selectionMaterial)) {
+    errors.push(`${path}.selectionMaterial must be one of: ${MATERIAL_SINK_MATERIALS.join(', ')}`);
+  }
+  if ((value.classes !== undefined || value.preference !== undefined || value.selectionMaterial !== undefined)
+    && !MATERIAL_SINK_BASELINES[value.family]) {
+    errors.push(`${path}.classes, preference, and selectionMaterial require a material sink family`);
   }
 }
 

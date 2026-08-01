@@ -55,6 +55,46 @@ describe('Rare Pack recycling preflight', () => {
     }, 'rare-gold-material-upgrade')).toBeNull();
   });
 
+  it('blocks a source pack when it is also produced by the same recycling loop', async () => {
+    const { api } = await loadUserscript({
+      packs: [{ id: 30060, name: '5x 80+ Rare Gold Players Pack' }],
+    });
+    api.state.packCatalog = {
+      loopRewards: {
+        'daily-rare': {
+          packIds: [30060],
+          packNames: ['5x 80+ Rare Gold Players Pack'],
+        },
+      },
+    };
+
+    const result = await api.runRarePackCraftLoop({
+      id: 'daily-rare-pack-80x5',
+      name: 'Daily Rare Pack to 5x80+ Loop',
+      strategy: 'rarePackTo84Upgrade',
+      sourcePackRef: { rewardOfLoopId: 'daily-rare' },
+      sourcePackIds: [30060],
+      sourcePackNames: ['5x 80+ Rare Gold Players Pack'],
+      rareUpgrade: {
+        name: '5x80+ Rare Gold Recycling Upgrade',
+        activityResolved: true,
+        activityBinding: { family: 'common-gold-material-upgrade', required: true },
+        rewardPackIds: [30060],
+        rewardPackNames: ['5x 80+ Rare Gold Players Pack'],
+        sbcNames: ['5x 80+ Upgrade'],
+        requirements: [{ tier: 'gold', count: 9, preferCommon: true }],
+      },
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'blocked',
+      packsOpened: 0,
+      stageCompletions: { rare: 0 },
+      reason: 'source/output pack identity overlap',
+    }));
+    expect(api.state.logLines.join(' ')).toContain('source/output pack identity overlap detected');
+  });
+
   it('finds unresolved required material stages in any Loop container', async () => {
     const { api } = await loadUserscript();
     expect(api.unresolvedRequiredMaterialActivities({

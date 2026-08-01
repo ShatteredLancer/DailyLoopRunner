@@ -5681,21 +5681,36 @@ function updateLoopControls() {
   }
 
   function resolvedSourcePackIdentity(loopDef = {}) {
+    const producedDefs = [
+      loopDef,
+      loopDef.rareUpgrade,
+      loopDef.commonUpgrade,
+      ...(Array.isArray(loopDef.craftingUpgrades) ? loopDef.craftingUpgrades : []),
+      ...(Array.isArray(loopDef.stages) ? loopDef.stages : []),
+    ].filter(Boolean);
     return resolveSourcePackIdentity({
       sourcePackRef: loopDef.sourcePackRef,
       sourcePackIds: loopDef.sourcePackIds,
       sourcePackNames: loopDef.sourcePackNames,
+      producedRewardPackIds: producedDefs.flatMap((definition) => definition.rewardPackIds || []),
+      producedRewardPackNames: producedDefs.flatMap((definition) => definition.rewardPackNames || []),
       catalog: state.packCatalog,
     });
   }
 
   function findSourcePackInCache(loopDef) {
     const identity = resolvedSourcePackIdentity(loopDef);
+    if (identity.sourceOutputOverlap.length) return null;
+    const producedIds = new Set(identity.producedPackIds.map(packIdKey).filter(Boolean));
+    const isProducedPack = (pack) => (
+      producedIds.has(packIdKey(pack))
+        || matchesAny(packName(pack), identity.producedPackNames)
+    );
     for (const candidate of identity.candidates) {
       const pack = candidate.type === 'id'
         ? findPackById(candidate.value)
         : findPackByName([candidate.value]);
-      if (pack) return pack;
+      if (pack && !isProducedPack(pack)) return pack;
     }
     return null;
   }
@@ -5712,6 +5727,21 @@ function updateLoopControls() {
   }
 
   const warnedSourcePackIdentityMismatches = new Set();
+  const warnedSourceOutputOverlaps = new Set();
+
+  function sourcePackIdentityBlocked(loopDef, label) {
+    const identity = resolvedSourcePackIdentity(loopDef);
+    if (!identity.sourceOutputOverlap.length) return false;
+    const overlap = identity.sourceOutputOverlap
+      .map((candidate) => `${candidate.type}:${candidate.value} (${candidate.source})`)
+      .join(', ');
+    const warningKey = `${loopDef?.id || label}:${overlap}`;
+    if (!warnedSourceOutputOverlaps.has(warningKey)) {
+      warnedSourceOutputOverlaps.add(warningKey);
+      log(`${label}: source/output pack identity overlap detected; refusing to open matching source pack(s): ${overlap}`);
+    }
+    return true;
+  }
 
   function warnSourcePackIdentityMismatch(loopDef, pack, label) {
     const identity = resolvedSourcePackIdentity(loopDef);
@@ -5728,6 +5758,7 @@ function updateLoopControls() {
 
   async function findSourcePack(loopDef, options = {}) {
     const label = String(options.label || `${loopDef.name}: source pack lookup`);
+    if (sourcePackIdentityBlocked(loopDef, label)) return null;
     const pack = await findPackWithRecovery({
       label,
       attempts: options.attempts || 3,
@@ -8038,6 +8069,14 @@ function updateLoopControls() {
       ...loopDef.rareUpgrade,
       openRewardPacks: loopDef.openRewardPacks === true,
     };
+    if (sourcePackIdentityBlocked(loopDef, loopDef.name)) {
+      return {
+        status: 'blocked',
+        packsOpened: 0,
+        stageCompletions: { rare: 0 },
+        reason: 'source/output pack identity overlap',
+      };
+    }
     if (rareUpgradeDef.activityBinding?.required === true && rareUpgradeDef.activityResolved !== true) {
       const family = String(rareUpgradeDef.activityBinding.family || 'Rare Gold material Upgrade');
       log(`${loopDef.name}: required scanned activity ${family} is unavailable; stopping before opening a source pack`);

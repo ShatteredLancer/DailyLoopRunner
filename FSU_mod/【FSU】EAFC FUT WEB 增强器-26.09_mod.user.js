@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         【FSU Local】EAFC FUT WEB 增强器
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner/FSU_mod
-// @version      26.09.1
+// @version      26.09.2
 // @description  Local maintained FSU 26.09 build with validated Club cache and scoped payload optimizations.
 // @author       Futcd_kcka
 // @contributor  ShatteredLancer
@@ -7740,9 +7740,17 @@
                 if(!source) return {};
                 const scalarKeys = [];
                 const deltaCandidates = {};
+                const collectionCounts = {};
+                const arrayCounts = {};
                 Object.keys(source).slice(0, 80).forEach(key => {
-                    if(key === "items" || key === "players" || key === "entries") return;
                     const value = source[key];
+                    if(Array.isArray(value)){
+                        arrayCounts[key] = value.length;
+                        if(key === "items" || key === "players" || key === "entries"){
+                            collectionCounts[key] = value.length;
+                        }
+                        return;
+                    }
                     if(value === null || value === undefined || typeof value === "string" || typeof value === "number" || typeof value === "boolean"){
                         scalarKeys.push(key);
                         if(/etag|revision|version|cursor|sync|modified|updated|timestamp|sequence/i.test(key)){
@@ -7750,7 +7758,27 @@
                         }
                     }
                 });
-                return { scalarKeys, deltaCandidates };
+                return { scalarKeys, deltaCandidates, collectionCounts, arrayCounts };
+            };
+            const isAuthoritativeEmptyClubResponse = session => {
+                const status = Number(session?.responseStatus || 0);
+                const metadata = session?.responseMetadata;
+                const collectionCounts = metadata?.collectionCounts;
+                const arrayCounts = metadata?.arrayCounts;
+                if(session?.claimed !== true
+                    || session?.completed !== true
+                    || session?.responseParsed !== true
+                    || session?.responseParseError
+                    || status < 200
+                    || status >= 300
+                    || !collectionCounts
+                    || !arrayCounts){
+                    return false;
+                }
+                const recognizedCounts = Object.values(collectionCounts);
+                return recognizedCounts.length > 0
+                    && recognizedCounts.every(count => Number(count) === 0)
+                    && Object.values(arrayCounts).every(count => Number(count) === 0);
             };
             const registerClubPayloadCaptureSession = (criteria, payloads, label) => {
                 info.base.clubPayloadCaptureSessions ??= [];
@@ -8371,11 +8399,19 @@
                             45000
                         );
                         let payloadCaptureMode = "none";
+                        let scopedResponseConfirmed = false;
                         if(ownedRequestPayloads.size > 0){
                             requestPayloads = ownedRequestPayloads;
                             payloadCaptureMode = "scoped";
+                            scopedResponseConfirmed = true;
+                        }else if(options.allowAuthoritativeEmpty === true && isAuthoritativeEmptyClubResponse(captureSession)){
+                            requestPayloads = ownedRequestPayloads;
+                            payloadCaptureMode = "scoped-empty";
+                            scopedResponseConfirmed = true;
+                            console.log(`[FSU club cache] ${label} accepted authoritative empty scoped Club response; stale targeted entities will be removed after ID matching`);
                         }else{
-                            throw new Error(`${label} captured no scoped Club payloads; XHR claimed:${captureSession?.claimed === true}, completed:${captureSession?.completed === true}, status:${captureSession?.responseStatus ?? "unknown"}, parseError:${captureSession?.responseParseError || "none"}, broadCaptured:${broadRequestPayloads.size}`);
+                            const responseMetadata = captureSession?.responseMetadata || {};
+                            throw new Error(`${label} captured no scoped Club payloads; XHR claimed:${captureSession?.claimed === true}, completed:${captureSession?.completed === true}, status:${captureSession?.responseStatus ?? "unknown"}, responseLength:${Number(captureSession?.responseLength || 0)}, parseError:${captureSession?.responseParseError || "none"}, collections:${JSON.stringify(responseMetadata.collectionCounts || {})}, arrays:${JSON.stringify(responseMetadata.arrayCounts || {})}, metadata:${JSON.stringify(responseMetadata)}, broadCaptured:${broadRequestPayloads.size}`);
                         }
                         const pageSummary = summarizeClubPageResult(result, requestPayloads);
                         pageSummary.payloadCapture = {
@@ -8384,6 +8420,7 @@
                             broadCaptured:broadRequestPayloads.size,
                             sessionClaimed:captureSession?.claimed === true,
                             sessionCompleted:captureSession?.completed === true,
+                            scopedResponseConfirmed,
                             capturePhase:captureSession?.capturePhase || null,
                             responseLength:Number(captureSession?.responseLength || 0),
                             networkElapsedMs:Number(captureSession?.networkElapsedMs || 0),
@@ -8428,6 +8465,7 @@
                             responseItems:authoritativeItems.length,
                             repositoryViewItems,
                             capturedPayloads:requestPayloads.size,
+                            scopedResponseConfirmed,
                             responseIds,
                             responsePayloads,
                             items:authoritativeItems,
@@ -8510,8 +8548,12 @@
                 criteria.count = Math.max(20, criteria.defId.length + 1);
                 criteria.offset = 0;
                 logClubSearchCacheMode(criteria, label, true);
-                const result = await requestClubNetwork(criteria, label, 2, { forceNetwork:true });
-                const networkConfirmed = result.capturedPayloads > 0
+                const result = await requestClubNetwork(criteria, label, 2, {
+                    forceNetwork:true,
+                    allowAuthoritativeEmpty:true
+                });
+                const networkConfirmed = result.scopedResponseConfirmed === true
+                    || result.capturedPayloads > 0
                     || (result.dirtyAfterMark === true && result.dirtyAfterRequest === false);
                 if(!networkConfirmed){
                     throw new Error(`${label} could not confirm a fresh Club response; cached players were preserved`);

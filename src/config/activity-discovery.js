@@ -237,12 +237,23 @@ function materialSinkSelectionRequirements(requirements = [], familyId) {
   ));
 }
 
-function createActivity({ familyId, setId, setName, requirements, rewards, remaining, challenges, materialSink = null }) {
+function createActivity({
+  familyId,
+  setId,
+  setName,
+  requirements,
+  eligibilityRequirements = null,
+  rewards,
+  remaining,
+  challenges,
+  materialSink = null,
+}) {
   return {
     familyId,
     setId,
     setName,
     requirements,
+    ...(Array.isArray(eligibilityRequirements) ? { eligibilityRequirements } : {}),
     rewardPackIds: rewards.ids,
     rewardPackNames: rewards.names,
     remainingCompletions: remaining,
@@ -329,6 +340,7 @@ export function parseBasicUpgradeActivitySnapshot(input = {}) {
       setId,
       setName,
       requirements: sinkRequirements,
+      eligibilityRequirements: parsedChallenge.requirements,
       rewards,
       remaining,
       challenges,
@@ -352,21 +364,71 @@ export function parseBasicUpgradeActivitySnapshot(input = {}) {
   };
 }
 
-function requirementPolicyMatch(requirement, configured = []) {
-  return configured.find((candidate) => (
+function selectionMaterialRarity(selectionMaterial) {
+  if (selectionMaterial === 'common-gold') return 'common';
+  if (selectionMaterial === 'rare-gold') return 'rare';
+  return null;
+}
+
+function requirementPolicyMatch(requirement, configured = [], selectionMaterial = null) {
+  const exact = configured.find((candidate) => (
     candidate?.tier === requirement.tier
       && (candidate?.rarity || null) === (requirement.rarity || null)
+  ));
+  if (exact) return exact;
+  const selectionRarity = selectionMaterialRarity(selectionMaterial);
+  if (!selectionRarity || requirement?.tier !== 'gold') return null;
+  return configured.find((candidate) => (
+    candidate?.tier === 'gold' && candidate?.rarity === selectionRarity
   )) || null;
 }
 
-function mergeRequirements(scanned = [], configured = []) {
+function applySelectionMaterial(requirements = [], selectionMaterial = null) {
+  const rarity = selectionMaterialRarity(selectionMaterial);
+  if (!rarity) return requirements;
+  return requirements.map((requirement) => (
+    requirement?.tier === 'gold' ? { ...requirement, rarity } : requirement
+  ));
+}
+
+function hasUnrestrictedGoldEligibility(eligibilityRequirements = [], configuredRequirement = {}) {
+  if (configuredRequirement?.tier !== 'gold'
+    || configuredRequirement?.rarity !== undefined
+    || configuredRequirement?.preferCommon !== true) return false;
+  return eligibilityRequirements.some((requirement) => (
+    requirement?.tier === 'gold'
+      && requirement?.rarity === undefined
+      && Number(requirement?.count || 0) === Number(configuredRequirement?.count || 0)
+  ));
+}
+
+function mergeRequirements(
+  scanned = [],
+  configured = [],
+  selectionMaterial = null,
+  eligibilityRequirements = [],
+) {
   const remaining = [...scanned];
   const merged = [];
   for (const configuredRequirement of configured) {
-    const index = remaining.findIndex((requirement) => (
+    if (hasUnrestrictedGoldEligibility(eligibilityRequirements, configuredRequirement)) {
+      const index = remaining.findIndex((requirement) => (
+        requirement?.tier === 'gold'
+          && Number(requirement?.count || 0) === Number(configuredRequirement?.count || 0)
+      ));
+      if (index >= 0) {
+        const [requirement] = remaining.splice(index, 1);
+        merged.push({ ...clone(configuredRequirement), count: Number(requirement.count || configuredRequirement.count) });
+        continue;
+      }
+    }
+    let index = remaining.findIndex((requirement) => (
       requirement.tier === configuredRequirement?.tier
         && (requirement.rarity || null) === (configuredRequirement?.rarity || null)
     ));
+    if (index < 0 && selectionMaterialRarity(selectionMaterial) === configuredRequirement?.rarity) {
+      index = remaining.findIndex((requirement) => requirement?.tier === configuredRequirement?.tier);
+    }
     if (index < 0) continue;
     const [requirement] = remaining.splice(index, 1);
     merged.push({ ...clone(configuredRequirement), ...clone(requirement) });
@@ -374,10 +436,21 @@ function mergeRequirements(scanned = [], configured = []) {
   return [
     ...merged,
     ...remaining.map((requirement) => ({
-      ...(clone(requirementPolicyMatch(requirement, configured) || {})),
+      ...(clone(requirementPolicyMatch(requirement, configured, selectionMaterial) || {})),
       ...clone(requirement),
     })),
   ];
+}
+
+function activityAcceptsSelectionMaterial(activity, selectionMaterial) {
+  const rarity = selectionMaterialRarity(selectionMaterial);
+  if (!rarity) return true;
+  const requirements = activity?.eligibilityRequirements;
+  if (!Array.isArray(requirements) || !requirements.length) return false;
+  return requirements.every((requirement) => (
+    requirement?.tier === 'gold'
+      && (!requirement.rarity || requirement.rarity === rarity)
+  ));
 }
 
 export function mergeScannedActivityMetadata(target = {}, activity = {}) {
@@ -399,7 +472,15 @@ export function mergeScannedActivityMetadata(target = {}, activity = {}) {
     } : {}),
   };
   if (Array.isArray(target.requirements)) {
-    merged.requirements = mergeRequirements(activity.requirements, target.requirements);
+    merged.requirements = applySelectionMaterial(
+      mergeRequirements(
+        activity.requirements,
+        target.requirements,
+        target.activityBinding?.selectionMaterial,
+        activity.eligibilityRequirements,
+      ),
+      target.activityBinding?.selectionMaterial,
+    );
   }
   return merged;
 }
@@ -409,14 +490,20 @@ function materializeBoundTarget(target, activitiesByFamily, diagnostics, path) {
   const family = target.activityBinding.family;
   const matches = activitiesByFamily.get(family) || [];
   if (MATERIAL_SINK_BASELINES[family]) {
-    const resolution = selectMaterialSinkCandidate(matches, target.activityBinding);
+    const compatibleMatches = matches.filter((activity) => (
+      activityAcceptsSelectionMaterial(activity, target.activityBinding.selectionMaterial)
+    ));
+    const resolution = selectMaterialSinkCandidate(compatibleMatches, target.activityBinding);
     if (resolution.status === 'resolved') {
       return mergeScannedActivityMetadata(target, resolution.candidate);
     }
     if (resolution.status === 'ambiguous') {
       diagnostics.push(`${path}: activity family ${family} is ambiguous (${resolution.matches.map((entry) => `#${entry.setId} ${entry.setName}`).join(', ')})`);
     } else {
-      diagnostics.push(`${path}: activity family ${family} has no candidate in classes ${(target.activityBinding.classes || ['premium', 'baseline']).join('/')}; ${target.activityBinding.required === true ? 'runtime preflight will block this consumer' : 'compatibility fallback remains active'}`);
+      const selectionConstraint = target.activityBinding.selectionMaterial
+        ? ` compatible with selection material ${target.activityBinding.selectionMaterial}`
+        : '';
+      diagnostics.push(`${path}: activity family ${family} has no candidate${selectionConstraint} in classes ${(target.activityBinding.classes || ['premium', 'baseline']).join('/')}; ${target.activityBinding.required === true ? 'runtime preflight will block this consumer' : 'compatibility fallback remains active'}`);
     }
     return clone(target);
   }

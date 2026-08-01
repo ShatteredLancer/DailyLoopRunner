@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.1
+// @version      0.7.2
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -28,7 +28,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.1",
+    version: "0.7.2",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -1401,6 +1401,10 @@
     "quantity-first",
     "cost-first"
   ]);
+  var MATERIAL_SINK_MATERIALS = Object.freeze([
+    "common-gold",
+    "rare-gold"
+  ]);
   var MATERIAL_SINK_BASELINES = Object.freeze({
     [MATERIAL_SINK_FAMILIES.commonGold]: Object.freeze({
       material: "common-gold",
@@ -1409,8 +1413,8 @@
     }),
     [MATERIAL_SINK_FAMILIES.rareGold]: Object.freeze({
       material: "rare-gold",
-      cost: 6,
-      reward: Object.freeze({ guaranteedCount: 2, minimumRating: 84, rarity: "rare" })
+      cost: 10,
+      reward: Object.freeze({ guaranteedCount: 2, minimumRating: 85, rarity: "rare" })
     })
   });
   function positiveInteger(value) {
@@ -1744,12 +1748,23 @@
     if (familyId !== MATERIAL_SINK_FAMILIES.commonGold) return requirements;
     return requirements.map((requirement2) => requirement2.tier === "gold" && !requirement2.rarity ? { ...requirement2, rarity: "common" } : requirement2);
   }
-  function createActivity({ familyId, setId, setName, requirements, rewards, remaining, challenges, materialSink = null }) {
+  function createActivity({
+    familyId,
+    setId,
+    setName,
+    requirements,
+    eligibilityRequirements = null,
+    rewards,
+    remaining,
+    challenges,
+    materialSink = null
+  }) {
     return {
       familyId,
       setId,
       setName,
       requirements,
+      ...Array.isArray(eligibilityRequirements) ? { eligibilityRequirements } : {},
       rewardPackIds: rewards.ids,
       rewardPackNames: rewards.names,
       remainingCompletions: remaining,
@@ -1821,6 +1836,7 @@
         setId,
         setName,
         requirements: sinkRequirements,
+        eligibilityRequirements: parsedChallenge.requirements,
         rewards,
         remaining,
         challenges,
@@ -1843,14 +1859,43 @@
       diagnostics: []
     };
   }
-  function requirementPolicyMatch(requirement2, configured = []) {
-    return configured.find((candidate) => candidate?.tier === requirement2.tier && (candidate?.rarity || null) === (requirement2.rarity || null)) || null;
+  function selectionMaterialRarity(selectionMaterial) {
+    if (selectionMaterial === "common-gold") return "common";
+    if (selectionMaterial === "rare-gold") return "rare";
+    return null;
   }
-  function mergeRequirements(scanned = [], configured = []) {
+  function requirementPolicyMatch(requirement2, configured = [], selectionMaterial = null) {
+    const exact = configured.find((candidate) => candidate?.tier === requirement2.tier && (candidate?.rarity || null) === (requirement2.rarity || null));
+    if (exact) return exact;
+    const selectionRarity = selectionMaterialRarity(selectionMaterial);
+    if (!selectionRarity || requirement2?.tier !== "gold") return null;
+    return configured.find((candidate) => candidate?.tier === "gold" && candidate?.rarity === selectionRarity) || null;
+  }
+  function applySelectionMaterial(requirements = [], selectionMaterial = null) {
+    const rarity = selectionMaterialRarity(selectionMaterial);
+    if (!rarity) return requirements;
+    return requirements.map((requirement2) => requirement2?.tier === "gold" ? { ...requirement2, rarity } : requirement2);
+  }
+  function hasUnrestrictedGoldEligibility(eligibilityRequirements = [], configuredRequirement = {}) {
+    if (configuredRequirement?.tier !== "gold" || configuredRequirement?.rarity !== void 0 || configuredRequirement?.preferCommon !== true) return false;
+    return eligibilityRequirements.some((requirement2) => requirement2?.tier === "gold" && requirement2?.rarity === void 0 && Number(requirement2?.count || 0) === Number(configuredRequirement?.count || 0));
+  }
+  function mergeRequirements(scanned = [], configured = [], selectionMaterial = null, eligibilityRequirements = []) {
     const remaining = [...scanned];
     const merged = [];
     for (const configuredRequirement of configured) {
-      const index = remaining.findIndex((requirement3) => requirement3.tier === configuredRequirement?.tier && (requirement3.rarity || null) === (configuredRequirement?.rarity || null));
+      if (hasUnrestrictedGoldEligibility(eligibilityRequirements, configuredRequirement)) {
+        const index2 = remaining.findIndex((requirement3) => requirement3?.tier === "gold" && Number(requirement3?.count || 0) === Number(configuredRequirement?.count || 0));
+        if (index2 >= 0) {
+          const [requirement3] = remaining.splice(index2, 1);
+          merged.push({ ...clone(configuredRequirement), count: Number(requirement3.count || configuredRequirement.count) });
+          continue;
+        }
+      }
+      let index = remaining.findIndex((requirement3) => requirement3.tier === configuredRequirement?.tier && (requirement3.rarity || null) === (configuredRequirement?.rarity || null));
+      if (index < 0 && selectionMaterialRarity(selectionMaterial) === configuredRequirement?.rarity) {
+        index = remaining.findIndex((requirement3) => requirement3?.tier === configuredRequirement?.tier);
+      }
       if (index < 0) continue;
       const [requirement2] = remaining.splice(index, 1);
       merged.push({ ...clone(configuredRequirement), ...clone(requirement2) });
@@ -1858,10 +1903,17 @@
     return [
       ...merged,
       ...remaining.map((requirement2) => ({
-        ...clone(requirementPolicyMatch(requirement2, configured) || {}),
+        ...clone(requirementPolicyMatch(requirement2, configured, selectionMaterial) || {}),
         ...clone(requirement2)
       }))
     ];
+  }
+  function activityAcceptsSelectionMaterial(activity, selectionMaterial) {
+    const rarity = selectionMaterialRarity(selectionMaterial);
+    if (!rarity) return true;
+    const requirements = activity?.eligibilityRequirements;
+    if (!Array.isArray(requirements) || !requirements.length) return false;
+    return requirements.every((requirement2) => requirement2?.tier === "gold" && (!requirement2.rarity || requirement2.rarity === rarity));
   }
   function mergeScannedActivityMetadata(target = {}, activity = {}) {
     const merged = {
@@ -1882,7 +1934,15 @@
       } : {}
     };
     if (Array.isArray(target.requirements)) {
-      merged.requirements = mergeRequirements(activity.requirements, target.requirements);
+      merged.requirements = applySelectionMaterial(
+        mergeRequirements(
+          activity.requirements,
+          target.requirements,
+          target.activityBinding?.selectionMaterial,
+          activity.eligibilityRequirements
+        ),
+        target.activityBinding?.selectionMaterial
+      );
     }
     return merged;
   }
@@ -1891,14 +1951,16 @@
     const family = target.activityBinding.family;
     const matches = activitiesByFamily.get(family) || [];
     if (MATERIAL_SINK_BASELINES[family]) {
-      const resolution = selectMaterialSinkCandidate(matches, target.activityBinding);
+      const compatibleMatches = matches.filter((activity) => activityAcceptsSelectionMaterial(activity, target.activityBinding.selectionMaterial));
+      const resolution = selectMaterialSinkCandidate(compatibleMatches, target.activityBinding);
       if (resolution.status === "resolved") {
         return mergeScannedActivityMetadata(target, resolution.candidate);
       }
       if (resolution.status === "ambiguous") {
         diagnostics.push(`${path}: activity family ${family} is ambiguous (${resolution.matches.map((entry) => `#${entry.setId} ${entry.setName}`).join(", ")})`);
       } else {
-        diagnostics.push(`${path}: activity family ${family} has no candidate in classes ${(target.activityBinding.classes || ["premium", "baseline"]).join("/")}; ${target.activityBinding.required === true ? "runtime preflight will block this consumer" : "compatibility fallback remains active"}`);
+        const selectionConstraint = target.activityBinding.selectionMaterial ? ` compatible with selection material ${target.activityBinding.selectionMaterial}` : "";
+        diagnostics.push(`${path}: activity family ${family} has no candidate${selectionConstraint} in classes ${(target.activityBinding.classes || ["premium", "baseline"]).join("/")}; ${target.activityBinding.required === true ? "runtime preflight will block this consumer" : "compatibility fallback remains active"}`);
       }
       return clone(target);
     }
@@ -2056,7 +2118,7 @@
       errors.push(`${path} must be an object`);
       return;
     }
-    const allowedFields = /* @__PURE__ */ new Set(["family", "category", "required", "classes", "preference"]);
+    const allowedFields = /* @__PURE__ */ new Set(["family", "category", "required", "classes", "preference", "selectionMaterial"]);
     Object.keys(value).forEach((field2) => {
       if (!allowedFields.has(field2)) errors.push(`${path}.${field2} is not supported`);
     });
@@ -2085,8 +2147,11 @@
     if (value.preference !== void 0 && !MATERIAL_SINK_PREFERENCES.includes(value.preference)) {
       errors.push(`${path}.preference must be one of: ${MATERIAL_SINK_PREFERENCES.join(", ")}`);
     }
-    if ((value.classes !== void 0 || value.preference !== void 0) && !MATERIAL_SINK_BASELINES[value.family]) {
-      errors.push(`${path}.classes and preference require a material sink family`);
+    if (value.selectionMaterial !== void 0 && !MATERIAL_SINK_MATERIALS.includes(value.selectionMaterial)) {
+      errors.push(`${path}.selectionMaterial must be one of: ${MATERIAL_SINK_MATERIALS.join(", ")}`);
+    }
+    if ((value.classes !== void 0 || value.preference !== void 0 || value.selectionMaterial !== void 0) && !MATERIAL_SINK_BASELINES[value.family]) {
+      errors.push(`${path}.classes, preference, and selectionMaterial require a material sink family`);
     }
   }
   function validatePileList(value, path, errors, required2 = false) {
@@ -9673,21 +9738,40 @@
     const dynamicPackNames = unique4(dynamic?.packNames || [], cleanName);
     const staticPackIds = unique4(options.sourcePackIds || [], positiveInteger9);
     const staticPackNames = unique4(options.sourcePackNames || [], cleanName);
-    const candidates = [
+    const producedPackIds = unique4([
+      ...options.producedRewardPackIds || [],
+      ...options.rewardPackIds || []
+    ], positiveInteger9);
+    const producedPackNames = unique4([
+      ...options.producedRewardPackNames || [],
+      ...options.rewardPackNames || []
+    ], cleanName);
+    const excludedIds = new Set(producedPackIds.map((value) => String(value)));
+    const excludedNames = new Set(producedPackNames.map(normalizedName).filter(Boolean));
+    const allCandidates = [
       ...dynamicPackIds.map((value) => ({ type: "id", value, source: "catalog" })),
       ...dynamicPackNames.map((value) => ({ type: "name", value, source: "catalog" })),
       ...staticPackIds.map((value) => ({ type: "id", value, source: "fallback" })),
       ...staticPackNames.map((value) => ({ type: "name", value, source: "fallback" }))
     ];
+    const sourceOutputOverlap = allCandidates.filter((candidate) => candidate.type === "id" ? excludedIds.has(String(candidate.value)) : excludedNames.has(normalizedName(candidate.value)));
+    const candidates = allCandidates.filter((candidate) => !sourceOutputOverlap.includes(candidate));
+    const availableDynamicPackIds = dynamicPackIds.filter((value) => !excludedIds.has(String(value)));
+    const availableDynamicPackNames = dynamicPackNames.filter((value) => !excludedNames.has(normalizedName(value)));
+    const availableStaticPackIds = staticPackIds.filter((value) => !excludedIds.has(String(value)));
+    const availableStaticPackNames = staticPackNames.filter((value) => !excludedNames.has(normalizedName(value)));
     return {
       rewardOfLoopId: rewardOfLoopId || null,
-      dynamicResolved: dynamicPackIds.length > 0 || dynamicPackNames.length > 0,
-      dynamicPackIds,
-      dynamicPackNames,
-      staticPackIds,
-      staticPackNames,
-      packIds: unique4([...dynamicPackIds, ...staticPackIds], positiveInteger9),
-      packNames: unique4([...dynamicPackNames, ...staticPackNames], cleanName),
+      dynamicResolved: availableDynamicPackIds.length > 0 || availableDynamicPackNames.length > 0,
+      dynamicPackIds: availableDynamicPackIds,
+      dynamicPackNames: availableDynamicPackNames,
+      staticPackIds: availableStaticPackIds,
+      staticPackNames: availableStaticPackNames,
+      producedPackIds,
+      producedPackNames,
+      sourceOutputOverlap,
+      packIds: unique4([...availableDynamicPackIds, ...availableStaticPackIds], positiveInteger9),
+      packNames: unique4([...availableDynamicPackNames, ...availableStaticPackNames], cleanName),
       candidates
     };
   }
@@ -12062,11 +12146,14 @@
   var BUILDER_STARTER_PROFILE_IDS = Object.freeze({
     default: "default",
     bronzeSilverInventoryOnly: "starter-bronze-silver-inventory-only",
-    dailyRarePack2x84: "starter-daily-rare-pack-2x84"
+    dailyRarePack2x84: "starter-daily-rare-pack-2x84",
+    dailyRarePack80x5: "starter-daily-rare-pack-80x5"
   });
   var LEGACY_INVENTORY_ONLY_PROFILE_ID = "starter-inventory-only";
   var LEGACY_DAILY_RARE_PACK_PROFILE_NAME = "Daily + Rare Pack to 2x84+";
   var DAILY_RARE_PACK_PROFILE_NAME = "Daily + Rare Pack Recycling";
+  var DAILY_RARE_PACK_80X5_PROFILE_NAME = "Daily + Rare Pack to 5x80+";
+  var DAILY_RARE_PACK_80X5_LOOP_ID = "daily-rare-pack-80x5";
   var ENTITY_COLLECTIONS = Object.freeze([
     "loops",
     "recoveryRecipes",
@@ -12302,6 +12389,61 @@
     });
     return validateLoopConfig(config, "Daily Rare Pack Recycling starter profile");
   }
+  function dailyRarePack80x5StarterConfig(baseConfig) {
+    const config = clone5(normalizeLoopConfig(baseConfig));
+    const template = config.loops.find((loop) => loop.id === "daily-rare-pack-84");
+    if (!template) return validateLoopConfig(config, "Daily Rare Pack to 5x80+ starter profile");
+    const templateRequirement = clone5(template.rareUpgrade?.requirements?.[0] || {});
+    const { rarity: _templateRarity, ...goldRequirement } = templateRequirement;
+    const sourcePackNames = (template.sourcePackNames || []).filter((name) => !/\b80\s*\+/i.test(String(name)));
+    const recyclingLoop = {
+      ...clone5(template),
+      id: DAILY_RARE_PACK_80X5_LOOP_ID,
+      name: "Daily Rare Pack to 5x80+ Loop",
+      sourcePackNames,
+      rareUpgrade: {
+        ...clone5(template.rareUpgrade),
+        name: "5x80+ Rare Gold Recycling Upgrade",
+        activityBinding: {
+          family: "common-gold-material-upgrade",
+          classes: ["premium"],
+          preference: "quantity-first",
+          category: "Upgrades",
+          required: true
+        },
+        sbcNames: ["5x 80+ Upgrade", "5 x 80+ Upgrade"],
+        requirements: [{
+          ...goldRequirement,
+          tier: "gold",
+          count: 9,
+          preferCommon: true
+        }]
+      },
+      sourceExhaustedFallbackActivityFamily: "common-gold-material-upgrade"
+    };
+    config.loops = [
+      ...config.loops.filter((loop) => loop.id !== DAILY_RARE_PACK_80X5_LOOP_ID),
+      recyclingLoop
+    ].map((loop) => {
+      if (loop.id !== "one-click-daily") return loop;
+      const steps = (loop.steps || []).filter((step) => {
+        const loopId = String(typeof step === "object" ? step?.loopId || "" : step);
+        return loopId !== "daily-rare-pack-84" && loopId !== DAILY_RARE_PACK_80X5_LOOP_ID;
+      });
+      return {
+        ...loop,
+        steps: [...steps, DAILY_RARE_PACK_80X5_LOOP_ID],
+        stepOverrides: {
+          ...loop.stepOverrides || {},
+          [DAILY_RARE_PACK_80X5_LOOP_ID]: {
+            useRoundsAsCompletions: false,
+            sourceExhaustedFallbackMaxCompletions: 1
+          }
+        }
+      };
+    });
+    return validateLoopConfig(config, "Daily Rare Pack to 5x80+ starter profile");
+  }
   function migrateOfficialStarterMetadata(profile, baseConfig, now = Date.now()) {
     if (profile?.id !== BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84 || profile?.preset !== "daily-rare-pack-2x84" || profile?.name !== LEGACY_DAILY_RARE_PACK_PROFILE_NAME || (profile.dynamicBindings || []).length) return profile;
     const previousBase = normalizeLoopConfig(profile.baseConfig || baseConfig);
@@ -12327,6 +12469,9 @@
     }
     if (id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84 && preset === "daily-rare-pack-2x84") {
       return dailyRarePack2x84StarterConfig(normalizedBase);
+    }
+    if (id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack80x5 && preset === "daily-rare-pack-80x5") {
+      return dailyRarePack80x5StarterConfig(normalizedBase);
     }
     return null;
   }
@@ -12385,6 +12530,14 @@
         preset: "daily-rare-pack-2x84",
         baseConfig: normalizedBase,
         config: dailyRarePack2x84StarterConfig(normalizedBase),
+        now: options.now
+      }),
+      createBuilderProfile({
+        id: BUILDER_STARTER_PROFILE_IDS.dailyRarePack80x5,
+        name: DAILY_RARE_PACK_80X5_PROFILE_NAME,
+        preset: "daily-rare-pack-80x5",
+        baseConfig: normalizedBase,
+        config: dailyRarePack80x5StarterConfig(normalizedBase),
         now: options.now
       })
     ];
@@ -13372,6 +13525,10 @@
       ${enabled ? fieldRow("Category", textInput(`${path}.category`, value.category || "Upgrades", "text", true)) : ""}
       ${materialSink ? fieldRow("Accepted classes", `<select multiple size="4" data-builder-field="${path}.classes" data-builder-value-type="string-list"${disabled(context.readOnly)}>${MATERIAL_SINK_CLASSES.map((className) => `<option value="${className}"${classes.includes(className) ? " selected" : ""}>${className}</option>`).join("")}</select>`) : ""}
       ${materialSink ? fieldRow("Preference", selectInput(`${path}.preference`, value.preference, MATERIAL_SINK_PREFERENCES.map((preference) => ({ value: preference, label: preference })), context.readOnly, true)) : ""}
+      ${materialSink ? fieldRow("Selection material", selectInput(`${path}.selectionMaterial`, value.selectionMaterial, [
+      { value: "common-gold", label: "Common Gold only" },
+      { value: "rare-gold", label: "Rare Gold only" }
+    ], context.readOnly, true)) : ""}
     </div>
   </section>`;
   }
@@ -20870,18 +21027,30 @@
       return false;
     }
     function resolvedSourcePackIdentity(loopDef = {}) {
+      const producedDefs = [
+        loopDef,
+        loopDef.rareUpgrade,
+        loopDef.commonUpgrade,
+        ...Array.isArray(loopDef.craftingUpgrades) ? loopDef.craftingUpgrades : [],
+        ...Array.isArray(loopDef.stages) ? loopDef.stages : []
+      ].filter(Boolean);
       return resolveSourcePackIdentity({
         sourcePackRef: loopDef.sourcePackRef,
         sourcePackIds: loopDef.sourcePackIds,
         sourcePackNames: loopDef.sourcePackNames,
+        producedRewardPackIds: producedDefs.flatMap((definition) => definition.rewardPackIds || []),
+        producedRewardPackNames: producedDefs.flatMap((definition) => definition.rewardPackNames || []),
         catalog: state.packCatalog
       });
     }
     function findSourcePackInCache(loopDef) {
       const identity = resolvedSourcePackIdentity(loopDef);
+      if (identity.sourceOutputOverlap.length) return null;
+      const producedIds = new Set(identity.producedPackIds.map(packIdKey).filter(Boolean));
+      const isProducedPack = (pack) => producedIds.has(packIdKey(pack)) || matchesAny(packName(pack), identity.producedPackNames);
       for (const candidate of identity.candidates) {
         const pack = candidate.type === "id" ? findPackById(candidate.value) : findPackByName([candidate.value]);
-        if (pack) return pack;
+        if (pack && !isProducedPack(pack)) return pack;
       }
       return null;
     }
@@ -20896,6 +21065,18 @@
       ].filter(Boolean).join("; ") || "no configured identity";
     }
     const warnedSourcePackIdentityMismatches = /* @__PURE__ */ new Set();
+    const warnedSourceOutputOverlaps = /* @__PURE__ */ new Set();
+    function sourcePackIdentityBlocked(loopDef, label) {
+      const identity = resolvedSourcePackIdentity(loopDef);
+      if (!identity.sourceOutputOverlap.length) return false;
+      const overlap = identity.sourceOutputOverlap.map((candidate) => `${candidate.type}:${candidate.value} (${candidate.source})`).join(", ");
+      const warningKey = `${loopDef?.id || label}:${overlap}`;
+      if (!warnedSourceOutputOverlaps.has(warningKey)) {
+        warnedSourceOutputOverlaps.add(warningKey);
+        log(`${label}: source/output pack identity overlap detected; refusing to open matching source pack(s): ${overlap}`);
+      }
+      return true;
+    }
     function warnSourcePackIdentityMismatch(loopDef, pack, label) {
       const identity = resolvedSourcePackIdentity(loopDef);
       const ids = new Set(identity.packIds.map(packIdKey).filter(Boolean));
@@ -20910,6 +21091,7 @@
     }
     async function findSourcePack(loopDef, options = {}) {
       const label = String(options.label || `${loopDef.name}: source pack lookup`);
+      if (sourcePackIdentityBlocked(loopDef, label)) return null;
       const pack = await findPackWithRecovery({
         label,
         attempts: options.attempts || 3,
@@ -22990,6 +23172,14 @@
         ...loopDef.rareUpgrade,
         openRewardPacks: loopDef.openRewardPacks === true
       };
+      if (sourcePackIdentityBlocked(loopDef, loopDef.name)) {
+        return {
+          status: "blocked",
+          packsOpened: 0,
+          stageCompletions: { rare: 0 },
+          reason: "source/output pack identity overlap"
+        };
+      }
       if (rareUpgradeDef.activityBinding?.required === true && rareUpgradeDef.activityResolved !== true) {
         const family = String(rareUpgradeDef.activityBinding.family || "Rare Gold material Upgrade");
         log(`${loopDef.name}: required scanned activity ${family} is unavailable; stopping before opening a source pack`);

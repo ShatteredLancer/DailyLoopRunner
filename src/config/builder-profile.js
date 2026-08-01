@@ -12,11 +12,14 @@ export const BUILDER_STARTER_PROFILE_IDS = Object.freeze({
   default: 'default',
   bronzeSilverInventoryOnly: 'starter-bronze-silver-inventory-only',
   dailyRarePack2x84: 'starter-daily-rare-pack-2x84',
+  dailyRarePack80x5: 'starter-daily-rare-pack-80x5',
 });
 
 const LEGACY_INVENTORY_ONLY_PROFILE_ID = 'starter-inventory-only';
 const LEGACY_DAILY_RARE_PACK_PROFILE_NAME = 'Daily + Rare Pack to 2x84+';
 const DAILY_RARE_PACK_PROFILE_NAME = 'Daily + Rare Pack Recycling';
+const DAILY_RARE_PACK_80X5_PROFILE_NAME = 'Daily + Rare Pack to 5x80+';
+const DAILY_RARE_PACK_80X5_LOOP_ID = 'daily-rare-pack-80x5';
 
 const ENTITY_COLLECTIONS = Object.freeze([
   'loops',
@@ -284,6 +287,63 @@ function dailyRarePack2x84StarterConfig(baseConfig) {
   return validateLoopConfig(config, 'Daily Rare Pack Recycling starter profile');
 }
 
+function dailyRarePack80x5StarterConfig(baseConfig) {
+  const config = clone(normalizeLoopConfig(baseConfig));
+  const template = config.loops.find((loop) => loop.id === 'daily-rare-pack-84');
+  if (!template) return validateLoopConfig(config, 'Daily Rare Pack to 5x80+ starter profile');
+
+  const templateRequirement = clone(template.rareUpgrade?.requirements?.[0] || {});
+  const { rarity: _templateRarity, ...goldRequirement } = templateRequirement;
+  const sourcePackNames = (template.sourcePackNames || []).filter((name) => !/\b80\s*\+/i.test(String(name)));
+  const recyclingLoop = {
+    ...clone(template),
+    id: DAILY_RARE_PACK_80X5_LOOP_ID,
+    name: 'Daily Rare Pack to 5x80+ Loop',
+    sourcePackNames,
+    rareUpgrade: {
+      ...clone(template.rareUpgrade),
+      name: '5x80+ Rare Gold Recycling Upgrade',
+      activityBinding: {
+        family: 'common-gold-material-upgrade',
+        classes: ['premium'],
+        preference: 'quantity-first',
+        category: 'Upgrades',
+        required: true,
+      },
+      sbcNames: ['5x 80+ Upgrade', '5 x 80+ Upgrade'],
+      requirements: [{
+        ...goldRequirement,
+        tier: 'gold',
+        count: 9,
+        preferCommon: true,
+      }],
+    },
+    sourceExhaustedFallbackActivityFamily: 'common-gold-material-upgrade',
+  };
+  config.loops = [
+    ...config.loops.filter((loop) => loop.id !== DAILY_RARE_PACK_80X5_LOOP_ID),
+    recyclingLoop,
+  ].map((loop) => {
+    if (loop.id !== 'one-click-daily') return loop;
+    const steps = (loop.steps || []).filter((step) => {
+      const loopId = String(typeof step === 'object' ? step?.loopId || '' : step);
+      return loopId !== 'daily-rare-pack-84' && loopId !== DAILY_RARE_PACK_80X5_LOOP_ID;
+    });
+    return {
+      ...loop,
+      steps: [...steps, DAILY_RARE_PACK_80X5_LOOP_ID],
+      stepOverrides: {
+        ...(loop.stepOverrides || {}),
+        [DAILY_RARE_PACK_80X5_LOOP_ID]: {
+          useRoundsAsCompletions: false,
+          sourceExhaustedFallbackMaxCompletions: 1,
+        },
+      },
+    };
+  });
+  return validateLoopConfig(config, 'Daily Rare Pack to 5x80+ starter profile');
+}
+
 function migrateOfficialStarterMetadata(profile, baseConfig, now = Date.now()) {
   if (profile?.id !== BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84
     || profile?.preset !== 'daily-rare-pack-2x84'
@@ -318,6 +378,9 @@ function officialStarterConfig(profile, baseConfig) {
   }
   if (id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84 && preset === 'daily-rare-pack-2x84') {
     return dailyRarePack2x84StarterConfig(normalizedBase);
+  }
+  if (id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack80x5 && preset === 'daily-rare-pack-80x5') {
+    return dailyRarePack80x5StarterConfig(normalizedBase);
   }
   return null;
 }
@@ -379,6 +442,14 @@ export function createBuilderStarterProfiles(baseConfig, options = {}) {
       preset: 'daily-rare-pack-2x84',
       baseConfig: normalizedBase,
       config: dailyRarePack2x84StarterConfig(normalizedBase),
+      now: options.now,
+    }),
+    createBuilderProfile({
+      id: BUILDER_STARTER_PROFILE_IDS.dailyRarePack80x5,
+      name: DAILY_RARE_PACK_80X5_PROFILE_NAME,
+      preset: 'daily-rare-pack-80x5',
+      baseConfig: normalizedBase,
+      config: dailyRarePack80x5StarterConfig(normalizedBase),
       now: options.now,
     }),
   ];

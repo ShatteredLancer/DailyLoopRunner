@@ -99,8 +99,9 @@ Every store includes three starter profiles:
 - **Default**: follows the built-in configuration and inherits future built-in changes through rebase.
 - **Bronze/Silver Inventory Only**: sets `inventoryMode: "inventory-only"` on configurable Loops whose target or requirements consume bronze/silver players, including Daily Bronze, Daily Silver, and Daily Common. Other configurable Loops and container Workflows are explicitly set to `normal`, so this profile remains scoped even when the main-panel global Inventory only checkbox is enabled.
 - **Daily + Rare Pack Recycling**: keeps the four built-in One-click Daily stages, then appends `Daily Rare Pack Recycling Loop` with source-pack exhaustion and at most one inventory fallback completion. The recycling SBC is selected from current Rare Gold Premium candidates, then the Rare Gold Baseline.
+- **Daily + Rare Pack to 5x80+**: appends a separate quantity-first Common Gold Premium recycling stage for the current `5x 80+ Upgrade`. Its EA eligibility remains unrestricted Gold; runtime selection consumes Common Gold first and uses Rare Gold only when Common Gold is insufficient. Source packs are bound to the Daily Rare reward and the loop's own 5x80+ output is excluded from source candidates.
 
-Built-in, Default, and Bronze/Silver Inventory Only all keep One-click Daily at four stages. The standalone Rare Pack Loop remains available in every configuration.
+Built-in, Default, and Bronze/Silver Inventory Only all keep One-click Daily at four stages. The two Rare Pack Profiles append different fifth stages and do not alter Provision, Recovery, or automatic high-rated fodder recovery. The standalone Rare Pack Loop remains available in every configuration.
 
 Existing stores receive missing starter profiles during normalization. A user profile with the same stable ID is never overwritten.
 

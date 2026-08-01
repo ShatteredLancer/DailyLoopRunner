@@ -145,6 +145,10 @@ function renderActivityBinding(path, value, context) {
       ${enabled ? fieldRow('Category', textInput(`${path}.category`, value.category || 'Upgrades', 'text', true)) : ''}
       ${materialSink ? fieldRow('Accepted classes', `<select multiple size="4" data-builder-field="${path}.classes" data-builder-value-type="string-list"${disabled(context.readOnly)}>${MATERIAL_SINK_CLASSES.map((className) => `<option value="${className}"${classes.includes(className) ? ' selected' : ''}>${className}</option>`).join('')}</select>`) : ''}
       ${materialSink ? fieldRow('Preference', selectInput(`${path}.preference`, value.preference, MATERIAL_SINK_PREFERENCES.map((preference) => ({ value: preference, label: preference })), context.readOnly, true)) : ''}
+      ${materialSink ? fieldRow('Selection material', selectInput(`${path}.selectionMaterial`, value.selectionMaterial, [
+        { value: 'common-gold', label: 'Common Gold only' },
+        { value: 'rare-gold', label: 'Rare Gold only' },
+      ], context.readOnly, true)) : ''}
     </div>
   </section>`;
 }

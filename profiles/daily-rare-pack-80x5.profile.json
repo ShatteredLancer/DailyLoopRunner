@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "daily-rare-pack-80x5",
+  "name": "Daily + Rare Pack to 5x80+",
+  "description": "Runs the four built-in One-click Daily stages, then consumes Daily Rare reward packs through the current quantity-first 5x 80+ Upgrade. The SBC keeps unrestricted Gold eligibility, selects Common Gold first, falls back to Rare Gold only when needed, and never reuses its own reward pack as a source.",
+  "preset": "daily-rare-pack-80x5",
+  "minimumRunnerVersion": "0.7.1",
+  "tags": ["official", "daily", "rare-gold", "recycling", "quantity-first"]
+}

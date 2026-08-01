@@ -68,6 +68,7 @@ describe('Builder profiles', () => {
       BUILDER_STARTER_PROFILE_IDS.default,
       BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly,
       BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84,
+      BUILDER_STARTER_PROFILE_IDS.dailyRarePack80x5,
     ]);
     const inventoryOnly = store.profiles.find((profile) => profile.id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
     expect(inventoryOnly.savedConfig.loops.find((loop) => loop.id === 'base').inventoryMode).toBe('normal');
@@ -106,7 +107,7 @@ describe('Builder profiles', () => {
     ]);
   });
 
-  it('adds the Rare Pack to 2x84+ stage only in its dedicated starter profile', () => {
+  it('keeps quality-first and quantity-first Rare Pack recycling in separate starter profiles', () => {
     const builtIns = {
       loops: LOOP_DEFS,
       recoveryRecipes: RECOVERY_RECIPES,
@@ -117,6 +118,7 @@ describe('Builder profiles', () => {
     const defaultProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.default);
     const inventoryProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
     const rarePackProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
+    const quantityProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack80x5);
     expect(rarePackProfile.name).toBe('Daily + Rare Pack Recycling');
     const workflow = (profile) => profile.savedConfig.loops.find((loop) => loop.id === 'one-click-daily');
 
@@ -131,6 +133,33 @@ describe('Builder profiles', () => {
         },
       },
     });
+    expect(quantityProfile.name).toBe('Daily + Rare Pack to 5x80+');
+    expect(workflow(quantityProfile)).toMatchObject({
+      steps: ['daily-bronze', 'daily-silver', 'daily-common', 'daily-rare', 'daily-rare-pack-80x5'],
+      stepOverrides: {
+        'daily-rare-pack-80x5': {
+          useRoundsAsCompletions: false,
+          sourceExhaustedFallbackMaxCompletions: 1,
+        },
+      },
+    });
+    expect(quantityProfile.savedConfig.loops.find((loop) => loop.id === 'daily-rare-pack-80x5')).toMatchObject({
+      sourceExhaustedFallbackActivityFamily: 'common-gold-material-upgrade',
+      sourcePackRef: { rewardOfLoopId: 'daily-rare' },
+      rareUpgrade: {
+        activityBinding: {
+          family: 'common-gold-material-upgrade',
+          classes: ['premium'],
+          preference: 'quantity-first',
+          required: true,
+        },
+        requirements: [expect.objectContaining({ tier: 'gold', count: 9, preferCommon: true })],
+      },
+    });
+    const quantityLoop = quantityProfile.savedConfig.loops.find((loop) => loop.id === 'daily-rare-pack-80x5');
+    expect(quantityLoop.rareUpgrade.activityBinding.selectionMaterial).toBeUndefined();
+    expect(quantityLoop.rareUpgrade.requirements[0].rarity).toBeUndefined();
+    expect(quantityLoop.sourcePackNames.every((name) => !/\b80\s*\+/i.test(name))).toBe(true);
   });
 
   it('renames only an untouched legacy Daily Rare Pack starter profile', () => {
@@ -160,6 +189,7 @@ describe('Builder profiles', () => {
     expect(normalized.profiles.find((profile) => profile.id === 'default').name).toBe('My Default');
     expect(normalized.profiles.map((profile) => profile.id)).toContain(BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly);
     expect(normalized.profiles.map((profile) => profile.id)).toContain(BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
+    expect(normalized.profiles.map((profile) => profile.id)).toContain(BUILDER_STARTER_PROFILE_IDS.dailyRarePack80x5);
   });
 
   it('does not revise untouched official starters when the built-in baseline is unchanged', () => {
@@ -199,6 +229,7 @@ describe('Builder profiles', () => {
       BUILDER_STARTER_PROFILE_IDS.default,
       BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly,
       BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84,
+      BUILDER_STARTER_PROFILE_IDS.dailyRarePack80x5,
     ];
     const staleProfile = store.profiles.find((entry) => entry.id === BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84);
     store.activeProfileId = staleProfile.id;
@@ -485,6 +516,7 @@ describe('Builder profiles', () => {
       BUILDER_STARTER_PROFILE_IDS.default,
       BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly,
       BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84,
+      BUILDER_STARTER_PROFILE_IDS.dailyRarePack80x5,
     ]);
     expect(normalized.profiles[0].draftConfig).toEqual(base);
   });

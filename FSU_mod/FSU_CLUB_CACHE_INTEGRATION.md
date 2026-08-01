@@ -5,7 +5,7 @@
 适用组件：
 
 - FSU 上游基线：`26.09`
-- FSU Local：`26.09.1`，Release 资产 `FSU-Local.user.js`
+- FSU Local：`26.09.2`，Release 资产 `FSU-Local.user.js`
 - Daily Loop Runner：`0.5.39` 起支持 `trusted-provisional` 快速缓存状态
 - FC26 Enhancer：已观察版本 `26.1.5.7`
 - EA FC Web App：2026-07-21 实际页面模型
@@ -851,3 +851,16 @@ Club 分页诊断曾逐个调用 `XMLHttpRequest.getResponseHeader()` 试探 `et
 - Enhancer 并发下的 payload 误归属风险已从架构上消除；请求竞争是否完全可接受尚未验证。
 - 全量 exact scoped 扫描仍作为回退路径存在；最近一次 9930 球员、含 3 次 401 重试的首次新格式扫描耗时 86.236 秒。快速缓存复验为 8.446 秒且没有 Club 分页请求。后续优化不能以牺牲实体级正确性为代价。
 - FSU-P1 和 FSU-C1 已关闭：Enhancer 开启时 40/40 exact scoped、9825/9825、无 403/status 0/timeout，completed 52.072 秒，较约 65 秒基线下降约 19.9%。C2 转为证据触发的 Monitoring，不在当前成功基线上主动增加跨插件互斥。
+
+### 18.3 定向校验的权威空响应
+
+FSU Local `26.09.2` 修复了 provisional Club 定向校验的一种误判。某张缓存球员已经被出售、转移或删除时，EA 可以对按 definition ID 发起的 Club 查询返回 HTTP 2xx 和明确的空 `items`、`players` 或 `entries` 集合；这表示请求成功完成，但目标 item 已不存在。旧逻辑只看捕获到的玩家 payload 数量，会把该结果误报为 `captured no scoped Club payloads`，导致本来可以安全清理 stale 缓存的 SBC 提交被阻断。
+
+现在只有以下条件全部成立时，定向校验才接受 `scoped-empty`：
+
+1. 当前 capture session 精确 claim 了该 XHR，且已完成。
+2. HTTP 状态为 2xx，JSON 解析成功，没有 parse error。
+3. 响应明确包含 `items`、`players` 或 `entries` 中至少一个已知 Club 集合，且该集合为空。
+4. 响应中没有其它非空顶层数组，避免把未知的玩家集合误当成空结果。
+
+全量 Club 分页没有启用该放宽规则，仍然要求每个非空页面有 scoped player payload；未知响应形状、空字符串、解析失败、非 2xx 或没有已知集合时仍会重试并失败。接受空响应后，Runner 会按 item ID + definition ID 判定请求的缓存实体缺失并移除它，不会静默提交旧实体。该行为由 `tests/unit/fsu-club-response.test.js` 锁定。

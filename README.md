@@ -65,6 +65,7 @@ Tampermonkey 按自身的更新检查间隔读取 `releases/latest`。只有 `@v
 - `Default`：可编辑、跟随当前内置基线的 Profile。
 - `Bronze/Silver Inventory Only`：Daily Bronze、Silver、Common 等铜银材料阶段只使用库存。
 - `Daily + Rare Pack Recycling`：四步 Daily 后追加 Rare Pack 回收，优先使用当前 Rare Gold Premium，否则使用 Rare Gold Baseline。
+- `Daily + Rare Pack to 5x80+`：四步 Daily 后追加 quantity-first Common Gold Premium 回收，但只允许 Rare Gold 填阵；当前目标是允许不限稀有度金卡的 `5x 80+ Upgrade`。
 
 未修改的官方 Profile 会随新的内置基线安全更新；用户修改过的同字段冲突必须在 Builder 中明确选择保留哪一侧。
 

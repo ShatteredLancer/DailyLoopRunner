@@ -1,5 +1,5 @@
 diff --git a/FSU.user.js b/FSU.user.js
-index dd554ab..159f732 100644
+index dd554ab..90ed836 100644
 --- a/FSU.user.js
 +++ b/FSU.user.js
 @@ -1,7 +1,10 @@
@@ -10,7 +10,7 @@ index dd554ab..159f732 100644
 -// @description  EAFCFUT模式SBC任务便捷操作增强器👍👍👍，模拟开包、额外信息展示、近期低价自动查询、一键挂出球员、跳转FUTBIN、快捷搜索、拍卖行优化等等...👍👍👍
 +// @name         【FSU Local】EAFC FUT WEB 增强器
 +// @namespace    https://github.com/ShatteredLancer/DailyLoopRunner/FSU_mod
-+// @version      26.09.1
++// @version      26.09.2
 +// @description  Local maintained FSU 26.09 build with validated Club cache and scoped payload optimizations.
  // @author       Futcd_kcka
 +// @contributor  ShatteredLancer
@@ -115,7 +115,7 @@ index dd554ab..159f732 100644
 +                                console.error("[FSU club load] manual reload failed", error);
 +                            });
                          });
-@@ -6848,74 +6898,2139 @@
+@@ -6848,74 +6898,2181 @@
          };
 -        events.reloadPlayers = async(e) =>{
 -            GM_setValue("players",JSON.stringify({}));
@@ -969,9 +969,17 @@ index dd554ab..159f732 100644
 +                if(!source) return {};
 +                const scalarKeys = [];
 +                const deltaCandidates = {};
++                const collectionCounts = {};
++                const arrayCounts = {};
 +                Object.keys(source).slice(0, 80).forEach(key => {
-+                    if(key === "items" || key === "players" || key === "entries") return;
 +                    const value = source[key];
++                    if(Array.isArray(value)){
++                        arrayCounts[key] = value.length;
++                        if(key === "items" || key === "players" || key === "entries"){
++                            collectionCounts[key] = value.length;
++                        }
++                        return;
++                    }
 +                    if(value === null || value === undefined || typeof value === "string" || typeof value === "number" || typeof value === "boolean"){
 +                        scalarKeys.push(key);
 +                        if(/etag|revision|version|cursor|sync|modified|updated|timestamp|sequence/i.test(key)){
@@ -979,7 +987,27 @@ index dd554ab..159f732 100644
 +                        }
 +                    }
 +                });
-+                return { scalarKeys, deltaCandidates };
++                return { scalarKeys, deltaCandidates, collectionCounts, arrayCounts };
++            };
++            const isAuthoritativeEmptyClubResponse = session => {
++                const status = Number(session?.responseStatus || 0);
++                const metadata = session?.responseMetadata;
++                const collectionCounts = metadata?.collectionCounts;
++                const arrayCounts = metadata?.arrayCounts;
++                if(session?.claimed !== true
++                    || session?.completed !== true
++                    || session?.responseParsed !== true
++                    || session?.responseParseError
++                    || status < 200
++                    || status >= 300
++                    || !collectionCounts
++                    || !arrayCounts){
++                    return false;
++                }
++                const recognizedCounts = Object.values(collectionCounts);
++                return recognizedCounts.length > 0
++                    && recognizedCounts.every(count => Number(count) === 0)
++                    && Object.values(arrayCounts).every(count => Number(count) === 0);
 +            };
 +            const registerClubPayloadCaptureSession = (criteria, payloads, label) => {
 +                info.base.clubPayloadCaptureSessions ??= [];
@@ -1600,11 +1628,19 @@ index dd554ab..159f732 100644
 +                            45000
 +                        );
 +                        let payloadCaptureMode = "none";
++                        let scopedResponseConfirmed = false;
 +                        if(ownedRequestPayloads.size > 0){
 +                            requestPayloads = ownedRequestPayloads;
 +                            payloadCaptureMode = "scoped";
++                            scopedResponseConfirmed = true;
++                        }else if(options.allowAuthoritativeEmpty === true && isAuthoritativeEmptyClubResponse(captureSession)){
++                            requestPayloads = ownedRequestPayloads;
++                            payloadCaptureMode = "scoped-empty";
++                            scopedResponseConfirmed = true;
++                            console.log(`[FSU club cache] ${label} accepted authoritative empty scoped Club response; stale targeted entities will be removed after ID matching`);
 +                        }else{
-+                            throw new Error(`${label} captured no scoped Club payloads; XHR claimed:${captureSession?.claimed === true}, completed:${captureSession?.completed === true}, status:${captureSession?.responseStatus ?? "unknown"}, parseError:${captureSession?.responseParseError || "none"}, broadCaptured:${broadRequestPayloads.size}`);
++                            const responseMetadata = captureSession?.responseMetadata || {};
++                            throw new Error(`${label} captured no scoped Club payloads; XHR claimed:${captureSession?.claimed === true}, completed:${captureSession?.completed === true}, status:${captureSession?.responseStatus ?? "unknown"}, responseLength:${Number(captureSession?.responseLength || 0)}, parseError:${captureSession?.responseParseError || "none"}, collections:${JSON.stringify(responseMetadata.collectionCounts || {})}, arrays:${JSON.stringify(responseMetadata.arrayCounts || {})}, metadata:${JSON.stringify(responseMetadata)}, broadCaptured:${broadRequestPayloads.size}`);
 +                        }
 +                        const pageSummary = summarizeClubPageResult(result, requestPayloads);
 +                        pageSummary.payloadCapture = {
@@ -1613,6 +1649,7 @@ index dd554ab..159f732 100644
 +                            broadCaptured:broadRequestPayloads.size,
 +                            sessionClaimed:captureSession?.claimed === true,
 +                            sessionCompleted:captureSession?.completed === true,
++                            scopedResponseConfirmed,
 +                            capturePhase:captureSession?.capturePhase || null,
 +                            responseLength:Number(captureSession?.responseLength || 0),
 +                            networkElapsedMs:Number(captureSession?.networkElapsedMs || 0),
@@ -1657,6 +1694,7 @@ index dd554ab..159f732 100644
 +                            responseItems:authoritativeItems.length,
 +                            repositoryViewItems,
 +                            capturedPayloads:requestPayloads.size,
++                            scopedResponseConfirmed,
 +                            responseIds,
 +                            responsePayloads,
 +                            items:authoritativeItems,
@@ -1739,8 +1777,12 @@ index dd554ab..159f732 100644
 +                criteria.count = Math.max(20, criteria.defId.length + 1);
 +                criteria.offset = 0;
 +                logClubSearchCacheMode(criteria, label, true);
-+                const result = await requestClubNetwork(criteria, label, 2, { forceNetwork:true });
-+                const networkConfirmed = result.capturedPayloads > 0
++                const result = await requestClubNetwork(criteria, label, 2, {
++                    forceNetwork:true,
++                    allowAuthoritativeEmpty:true
++                });
++                const networkConfirmed = result.scopedResponseConfirmed === true
++                    || result.capturedPayloads > 0
 +                    || (result.dirtyAfterMark === true && result.dirtyAfterRequest === false);
 +                if(!networkConfirmed){
 +                    throw new Error(`${label} could not confirm a fresh Club response; cached players were preserved`);
@@ -2073,13 +2115,13 @@ index dd554ab..159f732 100644
 +                                        selectedProbeWindow = `${probe.offset}:${pageSize}`;
 +                                        console.log(`[FSU club load] selected supported page size:${pageSize}`);
 +                                        break;
-                                     }
++                                    }
 +                                    if(supportedPageSizes.includes(observedWindow) && observedWindow > 0){
 +                                        pageSize = observedWindow;
 +                                        selectedProbeWindow = `${probe.offset}:${pageSize}`;
 +                                        console.log(`[FSU club load] EA truncated the ${probe.count}-player probe to ${observedWindow}; selected observed page size:${pageSize}`);
 +                                        break;
-+                                    }
+                                     }
 +                                }catch(error){
 +                                    console.warn(`[FSU club load] page-size probe count ${probe.count} failed; trying a smaller size`, error);
                                  }
@@ -2313,27 +2355,27 @@ index dd554ab..159f732 100644
              });
 +            return info.base.reloadPlayersPromise;
          }
-@@ -8254,2 +10369,3 @@
+@@ -8254,2 +10411,3 @@
          events.playerListFillSquad = (challenge,list,type) => {
 +            if(!events.requireClubReady("squad fill")) return false;
              events.showLoader();
-@@ -8293,2 +10409,3 @@
+@@ -8293,2 +10451,3 @@
          events.getTemplate = async function(e,type,sId){
 +            if(!events.requireClubReady("SBC template fill")) return false;
              e.setInteractionState(0);
-@@ -8851,2 +10968,3 @@
+@@ -8851,2 +11010,3 @@
          events.getRatingPlayers = (squad,ratings) => {
 +            if(!events.requireClubReady("rating squad fill")) return [];
              const assignPlayer = (playerlist, shortlist, Exclusionlist, index, pos) => {
-@@ -10012,2 +12130,3 @@
+@@ -10012,2 +12172,3 @@
          events.fastSBC = async (id,cId) => {
 +            if(!events.requireClubReady("Fast SBC")) return false;
              let controller = events.getCurrent(),
-@@ -11813,2 +13932,3 @@
+@@ -11813,2 +13974,3 @@
          UTSBCService.prototype.submitChallenge = function(o, a, i, n) {
 +            events.markClubCacheDirty("SBC submission started");
              let r = originalSubmitChallenge.apply(this, arguments);
-@@ -15733,2 +17853,2 @@
+@@ -15733,2 +17895,2 @@
      main()
 -})();
 \ No newline at end of file

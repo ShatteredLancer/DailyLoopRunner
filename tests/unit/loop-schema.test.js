@@ -103,6 +103,7 @@ describe('loop configuration schema', () => {
         family: 'common-gold-material-upgrade',
         classes: ['premium'],
         preference: 'reward-first',
+        selectionMaterial: 'rare-gold',
         category: 'Upgrades',
         required: true,
       },
@@ -112,15 +113,21 @@ describe('loop configuration schema', () => {
     expect(validateLoopDef(loop)).toEqual([]);
     expect(validateLoopDef({
       ...loop,
-      activityBinding: { ...loop.activityBinding, classes: ['unknown'], preference: 'random' },
+      activityBinding: {
+        ...loop.activityBinding,
+        classes: ['unknown'],
+        preference: 'random',
+        selectionMaterial: 'mixed-gold',
+      },
     })).toEqual(expect.arrayContaining([
       'activityBinding.classes[0] must be one of: premium, baseline, sub-baseline, incomparable',
       'activityBinding.preference must be one of: reward-first, quantity-first, cost-first',
+      'activityBinding.selectionMaterial must be one of: common-gold, rare-gold',
     ]));
     expect(validateLoopDef({
       ...loop,
       activityBinding: { family: 'gold-upgrade', classes: ['baseline'] },
-    })).toContain('activityBinding.classes and preference require a material sink family');
+    })).toContain('activityBinding.classes, preference, and selectionMaterial require a material sink family');
   });
 
   it('preserves the exact invalid-container and field error messages', () => {

@@ -201,21 +201,44 @@ export function resolveSourcePackIdentity(options = {}) {
   const dynamicPackNames = unique(dynamic?.packNames || [], cleanName);
   const staticPackIds = unique(options.sourcePackIds || [], positiveInteger);
   const staticPackNames = unique(options.sourcePackNames || [], cleanName);
-  const candidates = [
+  const producedPackIds = unique([
+    ...(options.producedRewardPackIds || []),
+    ...(options.rewardPackIds || []),
+  ], positiveInteger);
+  const producedPackNames = unique([
+    ...(options.producedRewardPackNames || []),
+    ...(options.rewardPackNames || []),
+  ], cleanName);
+  const excludedIds = new Set(producedPackIds.map((value) => String(value)));
+  const excludedNames = new Set(producedPackNames.map(normalizedName).filter(Boolean));
+  const allCandidates = [
     ...dynamicPackIds.map((value) => ({ type: 'id', value, source: 'catalog' })),
     ...dynamicPackNames.map((value) => ({ type: 'name', value, source: 'catalog' })),
     ...staticPackIds.map((value) => ({ type: 'id', value, source: 'fallback' })),
     ...staticPackNames.map((value) => ({ type: 'name', value, source: 'fallback' })),
   ];
+  const sourceOutputOverlap = allCandidates.filter((candidate) => (
+    candidate.type === 'id'
+      ? excludedIds.has(String(candidate.value))
+      : excludedNames.has(normalizedName(candidate.value))
+  ));
+  const candidates = allCandidates.filter((candidate) => !sourceOutputOverlap.includes(candidate));
+  const availableDynamicPackIds = dynamicPackIds.filter((value) => !excludedIds.has(String(value)));
+  const availableDynamicPackNames = dynamicPackNames.filter((value) => !excludedNames.has(normalizedName(value)));
+  const availableStaticPackIds = staticPackIds.filter((value) => !excludedIds.has(String(value)));
+  const availableStaticPackNames = staticPackNames.filter((value) => !excludedNames.has(normalizedName(value)));
   return {
     rewardOfLoopId: rewardOfLoopId || null,
-    dynamicResolved: dynamicPackIds.length > 0 || dynamicPackNames.length > 0,
-    dynamicPackIds,
-    dynamicPackNames,
-    staticPackIds,
-    staticPackNames,
-    packIds: unique([...dynamicPackIds, ...staticPackIds], positiveInteger),
-    packNames: unique([...dynamicPackNames, ...staticPackNames], cleanName),
+    dynamicResolved: availableDynamicPackIds.length > 0 || availableDynamicPackNames.length > 0,
+    dynamicPackIds: availableDynamicPackIds,
+    dynamicPackNames: availableDynamicPackNames,
+    staticPackIds: availableStaticPackIds,
+    staticPackNames: availableStaticPackNames,
+    producedPackIds,
+    producedPackNames,
+    sourceOutputOverlap,
+    packIds: unique([...availableDynamicPackIds, ...availableStaticPackIds], positiveInteger),
+    packNames: unique([...availableDynamicPackNames, ...availableStaticPackNames], cleanName),
     candidates,
   };
 }
