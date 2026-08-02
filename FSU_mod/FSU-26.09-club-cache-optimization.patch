@@ -1,16 +1,12 @@
 diff --git a/FSU.user.js b/FSU.user.js
-index dd554ab..90ed836 100644
+index dd554ab..00c2b68 100644
 --- a/FSU.user.js
 +++ b/FSU.user.js
-@@ -1,7 +1,10 @@
- // ==UserScript==
--// @name         【FSU】EAFC FUT WEB 增强器
--// @namespace    https://futcd.com/
+@@ -3,5 +3,8 @@
+ // @namespace    https://futcd.com/
 -// @version      26.09
 -// @description  EAFCFUT模式SBC任务便捷操作增强器👍👍👍，模拟开包、额外信息展示、近期低价自动查询、一键挂出球员、跳转FUTBIN、快捷搜索、拍卖行优化等等...👍👍👍
-+// @name         【FSU Local】EAFC FUT WEB 增强器
-+// @namespace    https://github.com/ShatteredLancer/DailyLoopRunner/FSU_mod
-+// @version      26.09.2
++// @version      26.09.4
 +// @description  Local maintained FSU 26.09 build with validated Club cache and scoped payload optimizations.
  // @author       Futcd_kcka
 +// @contributor  ShatteredLancer
@@ -115,7 +111,7 @@ index dd554ab..90ed836 100644
 +                                console.error("[FSU club load] manual reload failed", error);
 +                            });
                          });
-@@ -6848,74 +6898,2181 @@
+@@ -6848,74 +6898,2306 @@
          };
 -        events.reloadPlayers = async(e) =>{
 -            GM_setValue("players",JSON.stringify({}));
@@ -332,6 +328,132 @@ index dd554ab..90ed836 100644
 +                appendClubDiagnostic(level, event, details ?? summary);
 +                const output = info.base.clubDiagnosticConsoleOriginals?.[level] || console[level]?.bind(console);
 +                if(typeof output === "function") output(`[FSU club diagnostic] ${summary}`);
++            };
++            const callFillDiagnosticMethod = (item, method) => {
++                try{
++                    return typeof item?.[method] === "function" ? Boolean(item[method]()) : null;
++                }catch(error){
++                    return null;
++                }
++            };
++            const getFillDiagnosticPile = item => {
++                if(!item) return "unknown";
++                const itemId = Number(item.id || 0);
++                const containsId = values => {
++                    try{ return Array.from(values || []).some(candidate => Number(candidate?.id || 0) === itemId); }catch(error){ return false; }
++                };
++                try{ if(containsId(repositories.Item.getUnassignedItems?.())) return "unassigned"; }catch(error){}
++                try{ if(containsId(repositories.Item.getStorageItems?.())) return "storage"; }catch(error){}
++                try{ if(containsId(repositories.Item.getTransferItems?.())) return "transfer"; }catch(error){}
++                try{ if(containsId(repositories.Item.club?.items?.values?.())) return "club"; }catch(error){}
++                return "unknown";
++            };
++            const summarizeFillDiagnosticItem = item => {
++                if(!item) return null;
++                let name = null;
++                try{
++                    const staticData = item._staticData || repositories.Item.getStaticDataByDefId?.(item.definitionId);
++                    name = staticData?.name || staticData?.commonName || [staticData?.firstName, staticData?.lastName].filter(Boolean).join(" ") || null;
++                }catch(error){}
++                return {
++                    name,
++                    pile:getFillDiagnosticPile(item),
++                    id:Number(item.id || 0),
++                    duplicateId:Number(item.duplicateId || 0),
++                    databaseId:Number(item.databaseId || 0),
++                    definitionId:Number(item.definitionId || 0),
++                    rating:Number(item.rating ?? item._rating ?? 0),
++                    rareflag:Number(item.rareflag ?? item._rareflag ?? -1),
++                    tradable:item.tradable === true,
++                    untradeableCount:Number(item.untradeableCount || 0),
++                    leagueId:Number(item.leagueId || 0),
++                    teamId:Number(item.teamId || 0),
++                    nationId:Number(item.nationId || 0),
++                    loans:Number(item.loans),
++                    endTime:Number(item.endTime),
++                    state:item.state ?? null,
++                    concept:item.concept === true,
++                    upgrades:item.upgrades ?? null,
++                    groups:Array.isArray(item.groups) ? item.groups.slice() : [],
++                    isPlayer:callFillDiagnosticMethod(item, "isPlayer"),
++                    isDuplicate:callFillDiagnosticMethod(item, "isDuplicate"),
++                    isLimitedUse:callFillDiagnosticMethod(item, "isLimitedUse"),
++                    isSpecial:callFillDiagnosticMethod(item, "isSpecial"),
++                    isGoldRating:callFillDiagnosticMethod(item, "isGoldRating"),
++                    isEnrolledInAcademy:callFillDiagnosticMethod(item, "isEnrolledInAcademy")
++                };
++            };
++            const evaluateFillDiagnosticCriteria = (item, criteria = {}) => {
++                const reasons = [];
++                if(!item) return { eligible:false, reasons:["missing item"] };
++                const isPlayer = callFillDiagnosticMethod(item, "isPlayer");
++                const isLimitedUse = callFillDiagnosticMethod(item, "isLimitedUse");
++                const isSpecial = callFillDiagnosticMethod(item, "isSpecial");
++                const isEnrolled = callFillDiagnosticMethod(item, "isEnrolledInAcademy");
++                if(isPlayer !== true) reasons.push("not a player");
++                if(Number(item.loans) !== -1) reasons.push(`loans:${item.loans}`);
++                if(isLimitedUse === true) reasons.push("limited use");
++                if(isEnrolled === true) reasons.push("academy enrolled");
++                if(Number(item.endTime) !== -1) reasons.push(`endTime:${item.endTime}`);
++                Object.entries(criteria || {}).forEach(([key, value]) => {
++                    if(key === "rs"){
++                        const rating = Number(item.rating ?? item._rating ?? 0);
++                        if(value === 0 && !(rating >= 0 && rating <= 64 && (isSpecial !== true || item.leagueId == 1003 || item.leagueId == 1014))) reasons.push("bronze rating/special filter");
++                        if(value === 1 && !(rating >= 65 && rating <= 74 && (isSpecial !== true || item.leagueId == 1003 || item.leagueId == 1014))) reasons.push("silver rating/special filter");
++                        if(value === 2 && !(rating >= 75 && rating <= info.set.goldenrange && (isSpecial !== true || item.leagueId == 1003 || item.leagueId == 1014))) reasons.push(`gold range/special filter:${rating}`);
++                    }else if(key === "gs"){
++                        const groups = Array.isArray(item.groups) ? item.groups : [];
++                        if((groups.includes(4)) !== value) reasons.push(`group 4 mismatch:${groups.join("/")}`);
++                    }else if(key === "rareflag"){
++                        const rareflag = Number(item.rareflag ?? item._rareflag ?? -1);
++                        if(Array.isArray(value) ? !value.includes(rareflag) : rareflag !== value) reasons.push(`rareflag:${rareflag}`);
++                    }else if(key === "tradable"){
++                        if((item.tradable === true) !== value) reasons.push(`tradable:${item.tradable === true}`);
++                    }else if(key === "NEleagueId"){
++                        if(Array.isArray(value) ? value.includes(item.leagueId) : item.leagueId === value) reasons.push(`excluded league:${item.leagueId}`);
++                    }else if(key === "upgrades"){
++                        if(item.upgrades !== value) reasons.push("upgrades mismatch");
++                    }else if(key === "lock"){
++                        const locked = info.lock.includes(item.id);
++                        if(locked !== value) reasons.push(`lock:${locked}`);
++                    }else if(key === "NEdatabaseId"){
++                        if(Array.isArray(value) ? value.includes(item.databaseId) : item.databaseId === value) reasons.push(`excluded databaseId:${item.databaseId}`);
++                    }else if(key === "removeSquad"){
++                        if(value && info.squad.includes(item.id)) reasons.push("already in current squad");
++                    }
++                });
++                return { eligible:reasons.length === 0, reasons };
++            };
++            const collectOneFillDiagnostic = (criteria, candidates, selected, unassigned) => {
++                const candidateIds = new Set((candidates || []).map(item => Number(item?.id || 0)));
++                const selectedIds = new Set((selected || []).map(item => Number(item?.id || 0)));
++                const club = Array.from(repositories.Item.club?.items?.values?.() || []);
++                const storage = Array.from(repositories.Item.getStorageItems?.() || []);
++                return {
++                    criteria,
++                    candidateCount:(candidates || []).length,
++                    selectedCount:(selected || []).length,
++                    selected:(selected || []).map(summarizeFillDiagnosticItem),
++                    candidatePreview:(candidates || []).slice(0, 30).map(summarizeFillDiagnosticItem),
++                    unassigned:(unassigned || []).map(signal => {
++                        const duplicateId = Number(signal?.duplicateId || 0);
++                        const definitionId = Number(signal?.definitionId || 0);
++                        const exactMatches = club.concat(storage).filter(item => Number(item?.id || 0) === duplicateId);
++                        const definitionMatches = club.concat(storage).filter(item => Number(item?.definitionId || 0) === definitionId).slice(0, 10);
++                        const describeMatch = item => ({
++                            item:summarizeFillDiagnosticItem(item),
++                            criteria:evaluateFillDiagnosticCriteria(item, criteria),
++                            returnedByGetItemBy:candidateIds.has(Number(item?.id || 0)),
++                            selected:selectedIds.has(Number(item?.id || 0))
++                        });
++                        return {
++                            signal:summarizeFillDiagnosticItem(signal),
++                            signalCriteria:evaluateFillDiagnosticCriteria(signal, criteria),
++                            exactDuplicateMatches:exactMatches.map(describeMatch),
++                            sameDefinitionMatches:definitionMatches.map(describeMatch)
++                        };
++                    })
++                };
 +            };
 +            const describeDiagnosticObject = (label, target) => {
 +                if(!target) return { label, available:false };
@@ -2181,7 +2303,6 @@ index dd554ab..90ed836 100644
 +                            expectedCount = currentExpectedCount;
 +                            if(info.base.clubCache) info.base.clubCache.expected = expectedCount;
 +                        }
-+
 +                        if(provisionalPlayerIds.size){
 +                            const unverifiedIds = Array.from(provisionalPlayerIds)
 +                                .filter(id => !serverPlayerIds.has(id));
@@ -2355,27 +2476,111 @@ index dd554ab..90ed836 100644
              });
 +            return info.base.reloadPlayersPromise;
          }
-@@ -8254,2 +10411,3 @@
+@@ -8254,2 +10536,11 @@
          events.playerListFillSquad = (challenge,list,type) => {
 +            if(!events.requireClubReady("squad fill")) return false;
++            emitClubDiagnostic("log", "squad-fill-input", `squad fill received ${list?.length || 0} player(s)`, {
++                challenge:{ id:challenge?.id, setId:challenge?.setId, name:challenge?.name, formation:challenge?.formation },
++                type,
++                clubState:Boolean(info.base.state),
++                clubCacheStatus:info.base.clubCache?.status || null,
++                enhancer:Boolean(info.isEnhancer),
++                input:Array.from(list || []).map(summarizeFillDiagnosticItem)
++            });
              events.showLoader();
-@@ -8293,2 +10451,3 @@
+@@ -8285,4 +10576,13 @@
+             })
++            emitClubDiagnostic("log", "squad-fill-mapped", `squad fill mapped ${playerlist.filter(Boolean).length} player(s)`, {
++                challenge:{ id:challenge?.id, setId:challenge?.setId, name:challenge?.name },
++                type,
++                mapped:playerlist.map(summarizeFillDiagnosticItem)
++            });
+             events.loadPlayerInfo(playerlist)
+             events.saveSquad(challenge,challenge.squad,playerlist,[]);
++            emitClubDiagnostic("log", "squad-fill-saved", "squad fill saveSquad returned", {
++                challenge:{ id:challenge?.id, setId:challenge?.setId, name:challenge?.name },
++                squad:Array.from(challenge?.squad?.getPlayers?.() || []).map(slot => summarizeFillDiagnosticItem(slot?.item || slot))
++            });
+             //events.hideLoader();
+@@ -8293,2 +10593,3 @@
          events.getTemplate = async function(e,type,sId){
 +            if(!events.requireClubReady("SBC template fill")) return false;
              e.setInteractionState(0);
-@@ -8851,2 +11010,3 @@
+@@ -8851,2 +11152,3 @@
          events.getRatingPlayers = (squad,ratings) => {
 +            if(!events.requireClubReady("rating squad fill")) return [];
              const assignPlayer = (playerlist, shortlist, Exclusionlist, index, pos) => {
-@@ -10012,2 +12172,3 @@
+@@ -10012,2 +12314,3 @@
          events.fastSBC = async (id,cId) => {
 +            if(!events.requireClubReady("Fast SBC")) return false;
              let controller = events.getCurrent(),
-@@ -11813,2 +13974,3 @@
+@@ -11813,2 +14116,3 @@
          UTSBCService.prototype.submitChallenge = function(o, a, i, n) {
 +            events.markClubCacheDirty("SBC submission started");
              let r = originalSubmitChallenge.apply(this, arguments);
-@@ -15733,2 +17895,2 @@
+@@ -14402,2 +16706,34 @@
+                             (e) => {
++                                const unassigned = Array.from(repositories.Item.getUnassignedItems() || []);
++                                emitClubDiagnostic("log", "one-click-fill-start", `one-click fill started with ${unassigned.length} Unassigned item(s)`, {
++                                    challenge:{ id:thisController?._challenge?.id, setId:thisController?._challenge?.setId, name:thisController?._challenge?.name },
++                                    oneFillCriteria:_.cloneDeep(oneFillCriteria),
++                                    clubState:Boolean(info.base.state),
++                                    clubCacheStatus:info.base.clubCache?.status || null,
++                                    enhancer:Boolean(info.isEnhancer),
++                                    build:{
++                                        league:Boolean(info.build.league),
++                                        flag:Boolean(info.build.flag),
++                                        untradeable:Boolean(info.build.untradeable),
++                                        ignorepos:Boolean(info.build.ignorepos),
++                                        academy:Boolean(info.build.academy),
++                                        strictlypcik:Boolean(info.build.strictlypcik),
++                                        firststorage:Boolean(info.build.firststorage)
++                                    },
++                                    settings:{
++                                        goldenrange:info.set.goldenrange,
++                                        shieldLeagueCount:Array.isArray(info.set.shield_league) ? info.set.shield_league.length : 0,
++                                        shieldLeagueIds:Array.isArray(info.set.shield_league) ? info.set.shield_league.slice() : [],
++                                        shieldFlagIds:Array.isArray(info.set.shield_flag) ? info.set.shield_flag.slice() : [],
++                                        lockedIds:Array.isArray(info.lock) ? info.lock.slice() : []
++                                    },
++                                    unassigned:unassigned.map(summarizeFillDiagnosticItem)
++                                });
++                                if(!events.requireClubReady("one-click squad fill")){
++                                    emitClubDiagnostic("warn", "one-click-fill-blocked", "one-click fill blocked until Club data is ready", {
++                                        clubState:Boolean(info.base.state),
++                                        clubCacheStatus:info.base.clubCache?.status || null
++                                    });
++                                    return false;
++                                }
+                                 let playerList = [], removeIds = [];
+@@ -14408,3 +16744,5 @@
+                                     getCriteria = events.ignorePlayerToCriteria(getCriteria);
+-                                    playerList = events.getItemBy(2,getCriteria,repositories.Item.getUnassignedItems()).slice(0,criteriaNumber);
++                                    const candidates = events.getItemBy(2,getCriteria,unassigned);
++                                    playerList = candidates.slice(0,criteriaNumber);
++                                    emitClubDiagnostic("log", "one-click-fill-criteria", `one-click fill broad criteria selected ${playerList.length}/${criteriaNumber}`, collectOneFillDiagnostic(getCriteria, candidates, playerList, unassigned));
+                                 }else{
+@@ -14417,6 +16755,6 @@
+                                         getCriteria["lock"] = false;
+-                                        let result = events.getItemBy(2, getCriteria, repositories.Item.getUnassignedItems());
+-
++                                        let result = events.getItemBy(2, getCriteria, unassigned);
+                                         let cropping = result.slice(0, i.c);
+                                         console.log(cropping,_.map(cropping,"rating"))
++                                        emitClubDiagnostic("log", "one-click-fill-criteria", `one-click fill criterion selected ${cropping.length}/${i.c}`, collectOneFillDiagnostic(getCriteria, result, cropping, unassigned));
+                                         removeIds = removeIds.concat(cropping.map( i => {return i.databaseId}))
+@@ -14425,2 +16763,6 @@
+                                 }
++                                emitClubDiagnostic("log", "one-click-fill-selected", `one-click fill selected ${playerList.length} player(s)`, {
++                                    challenge:{ id:thisController?._challenge?.id, setId:thisController?._challenge?.setId, name:thisController?._challenge?.name },
++                                    selected:playerList.map(summarizeFillDiagnosticItem)
++                                });
+                                 if(playerList.length){
+@@ -14451,2 +16793,3 @@
+                         (e) => {
++                            if(!events.requireClubReady("duplicate squad fill")) return false;
+                             const dupIds = _.map(
+@@ -15733,2 +18076,2 @@
      main()
 -})();
 \ No newline at end of file

@@ -5,7 +5,7 @@
 适用组件：
 
 - FSU 上游基线：`26.09`
-- FSU Local：`26.09.2`，Release 资产 `FSU-Local.user.js`
+- FSU Local：`26.09.4`，Release 资产 `FSU-Local.user.js`
 - Daily Loop Runner：`0.5.39` 起支持 `trusted-provisional` 快速缓存状态
 - FC26 Enhancer：已观察版本 `26.1.5.7`
 - EA FC Web App：2026-07-21 实际页面模型
@@ -194,7 +194,7 @@ FSU 的总开关是：
 events.requireClubReady(action)
 ```
 
-FSU 原生 squad fill、模板填充、rating fill 和 Fast SBC 都调用该 guard。仅当 Runner 明确开启 scoped provisional access 时，FSU 才会在 `validating`、`trusted-provisional` 或 `validation-failed` 状态临时允许特定填充调用。
+FSU 原生 squad fill、模板填充、rating fill、Fast SBC 和 Duplicate Fill 调用该 guard。手动 One-click Fill 将 Unassigned 作为 duplicate priority signal，但实际候选来自 Club + Storage，因此同样依赖 Club Repository。仅当 Runner 明确开启 scoped provisional access 时，FSU 才会在 `validating`、`trusted-provisional` 或 `validation-failed` 状态临时允许特定填充调用。
 
 注意：`trusted-provisional` 和 `validation-failed` 都不是 ready。保留 provisional 实体是为了允许 Runner 对实际要提交的少量卡做定向恢复，不代表可以信任整个 Club。
 
@@ -375,7 +375,8 @@ beginProvisionalClubAccess()
 | Runner Dry Run | 允许 | 不保存、不提交、不做网络定向校验 |
 | Runner Live SBC，不使用 Club 卡 | 正常继续 | Storage/Transfer/Unassigned 实体不走 Club 定向校验 |
 | Runner Live SBC，使用 Club 卡 | 保存前逐卡定向校验 | 缺失或属性变化即停止 |
-| FSU 原生 Fast SBC/模板/评分填充 | 默认阻止 | 等 `ready`；只有 Runner 的 scoped access 例外 |
+| FSU 手动 One-click Fill | 默认阻止 | Unassigned 只提供 duplicate priority signal；实际 Club/Storage 候选要求 `ready` |
+| FSU 原生 Fast SBC/模板/评分/Duplicate Fill | 默认阻止 | 等 `ready`；只有 Runner 的 scoped access 例外 |
 | 手动浏览页面 | 可继续 | 页面可用不代表全量验证完成 |
 | 手动使用其它插件自动提交 SBC | 取决于该插件自身 | FSU/Runner 的定向保护不会自动覆盖第三方提交代码 |
 
@@ -864,3 +865,9 @@ FSU Local `26.09.2` 修复了 provisional Club 定向校验的一种误判。某
 4. 响应中没有其它非空顶层数组，避免把未知的玩家集合误当成空结果。
 
 全量 Club 分页没有启用该放宽规则，仍然要求每个非空页面有 scoped player payload；未知响应形状、空字符串、解析失败、非 2xx 或没有已知集合时仍会重试并失败。接受空响应后，Runner 会按 item ID + definition ID 判定请求的缓存实体缺失并移除它，不会静默提交旧实体。该行为由 `tests/unit/fsu-club-response.test.js` 锁定。
+
+### 18.4 One-click Fill 的实际数据源
+
+FSU Local `26.09.4` 更正了对手动 One-click Fill 数据流的判断。`events.getItemBy(type, queryOptions, insertData)` 的基础候选来自 Club + Storage；第三个参数中的 Unassigned 卡只用于把对应 `duplicateId` 提升到排序前部，不会把 Unassigned 实体直接写入阵容。因此 One-click Fill 必须等待 Club Repository ready，且排除可交易、排除联赛、Gold Range、Lock 等 `build`/`set` 设置会过滤真实候选。
+
+`playerListFillSquad()` 保留共享 Club readiness guard，One-click Fill 在开始选材前也显式检查 readiness，并输出当前 `build`、`set`、Unassigned signal、候选匹配和排除原因到结构化诊断日志。该边界由 `tests/unit/fsu-squad-fill-guard.test.js` 锁定。

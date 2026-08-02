@@ -14,8 +14,8 @@ function metadataValue(key) {
 }
 
 const expected = {
-  name: '【FSU Local】EAFC FUT WEB 增强器',
-  namespace: 'https://github.com/ShatteredLancer/DailyLoopRunner/FSU_mod',
+  name: '【FSU】EAFC FUT WEB 增强器',
+  namespace: 'https://futcd.com/',
   version: config.localVersion,
   homepageURL: 'https://github.com/ShatteredLancer/DailyLoopRunner/tree/main/FSU_mod',
   supportURL: 'https://github.com/ShatteredLancer/DailyLoopRunner/issues',

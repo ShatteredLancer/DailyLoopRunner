@@ -168,6 +168,8 @@ esbuild, bundle=true, format=iife, target=chrome120
 
 FSU Local 的维护输入是 `FSU_mod/fsu-mod.config.json`。上游 `26.09` 原文件必须保持字节不变，`upstreamVersion` 不得因本地修改变化；本地改动只提升独立的 `localVersion`，并重新生成 patch、manifest、`FSU-Local.user.js` 和 `FSU-Local.meta.js`。`npm run check:fsu-patch` 必须证明 patch 可从 immutable origin 重放到 manifest 记录的 modified SHA256；直接编辑 manifest hash 或发布产物不算修复。
 
+FSU 修改版必须保留上游脚本身份：`@name` 固定为 `【FSU】EAFC FUT WEB 增强器`，`@namespace` 固定为 `https://futcd.com/`。Tampermonkey 以脚本身份隔离 GM 存储；不得为了显示 Local 品牌、切换发布地址或区分本地版本而修改这两个字段，否则会重置 `build`、`set`、Lock 和其它用户配置。维护版只允许通过独立版本号、description、homepage/support URL 和 GitHub update/download URL 表明来源。
+
 DailyLoopRunner、仓库内原创文档/脚本和 FSU Local 修改均按 MIT 发布。第三方代码必须保留其原始作者、许可证和 notice；不得仅因为仓库采用 MIT 就删除第三方归属，也不得把第三方商标或在线服务描述为本项目资产。许可证边界以 `LICENSE`、`FSU_mod/LICENSE` 和 `THIRD_PARTY_NOTICES.md` 为准。
 
 新增或删除 Loop strategy 时，禁止只修改 schema 或只在 entry 注入 runner。`src/domain/strategies.js` 是 strategy 清单来源，必须同步贯通 `src/config/loop-schema.js`、`src/workflows/dispatch.js`、entry runner 注入、strategy dispatch 测试、架构 runner-map 测试和对应 Workflow/contract coverage。凡是 schema 接受但 dispatch 无法执行的 strategy 都属于发布阻断错误。

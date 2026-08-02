@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         【FSU Local】EAFC FUT WEB 增强器
-// @namespace    https://github.com/ShatteredLancer/DailyLoopRunner/FSU_mod
-// @version      26.09.2
+// @name         【FSU】EAFC FUT WEB 增强器
+// @namespace    https://futcd.com/
+// @version      26.09.4
 // @description  Local maintained FSU 26.09 build with validated Club cache and scoped payload optimizations.
 // @author       Futcd_kcka
 // @contributor  ShatteredLancer
@@ -7104,6 +7104,132 @@
                 const output = info.base.clubDiagnosticConsoleOriginals?.[level] || console[level]?.bind(console);
                 if(typeof output === "function") output(`[FSU club diagnostic] ${summary}`);
             };
+            const callFillDiagnosticMethod = (item, method) => {
+                try{
+                    return typeof item?.[method] === "function" ? Boolean(item[method]()) : null;
+                }catch(error){
+                    return null;
+                }
+            };
+            const getFillDiagnosticPile = item => {
+                if(!item) return "unknown";
+                const itemId = Number(item.id || 0);
+                const containsId = values => {
+                    try{ return Array.from(values || []).some(candidate => Number(candidate?.id || 0) === itemId); }catch(error){ return false; }
+                };
+                try{ if(containsId(repositories.Item.getUnassignedItems?.())) return "unassigned"; }catch(error){}
+                try{ if(containsId(repositories.Item.getStorageItems?.())) return "storage"; }catch(error){}
+                try{ if(containsId(repositories.Item.getTransferItems?.())) return "transfer"; }catch(error){}
+                try{ if(containsId(repositories.Item.club?.items?.values?.())) return "club"; }catch(error){}
+                return "unknown";
+            };
+            const summarizeFillDiagnosticItem = item => {
+                if(!item) return null;
+                let name = null;
+                try{
+                    const staticData = item._staticData || repositories.Item.getStaticDataByDefId?.(item.definitionId);
+                    name = staticData?.name || staticData?.commonName || [staticData?.firstName, staticData?.lastName].filter(Boolean).join(" ") || null;
+                }catch(error){}
+                return {
+                    name,
+                    pile:getFillDiagnosticPile(item),
+                    id:Number(item.id || 0),
+                    duplicateId:Number(item.duplicateId || 0),
+                    databaseId:Number(item.databaseId || 0),
+                    definitionId:Number(item.definitionId || 0),
+                    rating:Number(item.rating ?? item._rating ?? 0),
+                    rareflag:Number(item.rareflag ?? item._rareflag ?? -1),
+                    tradable:item.tradable === true,
+                    untradeableCount:Number(item.untradeableCount || 0),
+                    leagueId:Number(item.leagueId || 0),
+                    teamId:Number(item.teamId || 0),
+                    nationId:Number(item.nationId || 0),
+                    loans:Number(item.loans),
+                    endTime:Number(item.endTime),
+                    state:item.state ?? null,
+                    concept:item.concept === true,
+                    upgrades:item.upgrades ?? null,
+                    groups:Array.isArray(item.groups) ? item.groups.slice() : [],
+                    isPlayer:callFillDiagnosticMethod(item, "isPlayer"),
+                    isDuplicate:callFillDiagnosticMethod(item, "isDuplicate"),
+                    isLimitedUse:callFillDiagnosticMethod(item, "isLimitedUse"),
+                    isSpecial:callFillDiagnosticMethod(item, "isSpecial"),
+                    isGoldRating:callFillDiagnosticMethod(item, "isGoldRating"),
+                    isEnrolledInAcademy:callFillDiagnosticMethod(item, "isEnrolledInAcademy")
+                };
+            };
+            const evaluateFillDiagnosticCriteria = (item, criteria = {}) => {
+                const reasons = [];
+                if(!item) return { eligible:false, reasons:["missing item"] };
+                const isPlayer = callFillDiagnosticMethod(item, "isPlayer");
+                const isLimitedUse = callFillDiagnosticMethod(item, "isLimitedUse");
+                const isSpecial = callFillDiagnosticMethod(item, "isSpecial");
+                const isEnrolled = callFillDiagnosticMethod(item, "isEnrolledInAcademy");
+                if(isPlayer !== true) reasons.push("not a player");
+                if(Number(item.loans) !== -1) reasons.push(`loans:${item.loans}`);
+                if(isLimitedUse === true) reasons.push("limited use");
+                if(isEnrolled === true) reasons.push("academy enrolled");
+                if(Number(item.endTime) !== -1) reasons.push(`endTime:${item.endTime}`);
+                Object.entries(criteria || {}).forEach(([key, value]) => {
+                    if(key === "rs"){
+                        const rating = Number(item.rating ?? item._rating ?? 0);
+                        if(value === 0 && !(rating >= 0 && rating <= 64 && (isSpecial !== true || item.leagueId == 1003 || item.leagueId == 1014))) reasons.push("bronze rating/special filter");
+                        if(value === 1 && !(rating >= 65 && rating <= 74 && (isSpecial !== true || item.leagueId == 1003 || item.leagueId == 1014))) reasons.push("silver rating/special filter");
+                        if(value === 2 && !(rating >= 75 && rating <= info.set.goldenrange && (isSpecial !== true || item.leagueId == 1003 || item.leagueId == 1014))) reasons.push(`gold range/special filter:${rating}`);
+                    }else if(key === "gs"){
+                        const groups = Array.isArray(item.groups) ? item.groups : [];
+                        if((groups.includes(4)) !== value) reasons.push(`group 4 mismatch:${groups.join("/")}`);
+                    }else if(key === "rareflag"){
+                        const rareflag = Number(item.rareflag ?? item._rareflag ?? -1);
+                        if(Array.isArray(value) ? !value.includes(rareflag) : rareflag !== value) reasons.push(`rareflag:${rareflag}`);
+                    }else if(key === "tradable"){
+                        if((item.tradable === true) !== value) reasons.push(`tradable:${item.tradable === true}`);
+                    }else if(key === "NEleagueId"){
+                        if(Array.isArray(value) ? value.includes(item.leagueId) : item.leagueId === value) reasons.push(`excluded league:${item.leagueId}`);
+                    }else if(key === "upgrades"){
+                        if(item.upgrades !== value) reasons.push("upgrades mismatch");
+                    }else if(key === "lock"){
+                        const locked = info.lock.includes(item.id);
+                        if(locked !== value) reasons.push(`lock:${locked}`);
+                    }else if(key === "NEdatabaseId"){
+                        if(Array.isArray(value) ? value.includes(item.databaseId) : item.databaseId === value) reasons.push(`excluded databaseId:${item.databaseId}`);
+                    }else if(key === "removeSquad"){
+                        if(value && info.squad.includes(item.id)) reasons.push("already in current squad");
+                    }
+                });
+                return { eligible:reasons.length === 0, reasons };
+            };
+            const collectOneFillDiagnostic = (criteria, candidates, selected, unassigned) => {
+                const candidateIds = new Set((candidates || []).map(item => Number(item?.id || 0)));
+                const selectedIds = new Set((selected || []).map(item => Number(item?.id || 0)));
+                const club = Array.from(repositories.Item.club?.items?.values?.() || []);
+                const storage = Array.from(repositories.Item.getStorageItems?.() || []);
+                return {
+                    criteria,
+                    candidateCount:(candidates || []).length,
+                    selectedCount:(selected || []).length,
+                    selected:(selected || []).map(summarizeFillDiagnosticItem),
+                    candidatePreview:(candidates || []).slice(0, 30).map(summarizeFillDiagnosticItem),
+                    unassigned:(unassigned || []).map(signal => {
+                        const duplicateId = Number(signal?.duplicateId || 0);
+                        const definitionId = Number(signal?.definitionId || 0);
+                        const exactMatches = club.concat(storage).filter(item => Number(item?.id || 0) === duplicateId);
+                        const definitionMatches = club.concat(storage).filter(item => Number(item?.definitionId || 0) === definitionId).slice(0, 10);
+                        const describeMatch = item => ({
+                            item:summarizeFillDiagnosticItem(item),
+                            criteria:evaluateFillDiagnosticCriteria(item, criteria),
+                            returnedByGetItemBy:candidateIds.has(Number(item?.id || 0)),
+                            selected:selectedIds.has(Number(item?.id || 0))
+                        });
+                        return {
+                            signal:summarizeFillDiagnosticItem(signal),
+                            signalCriteria:evaluateFillDiagnosticCriteria(signal, criteria),
+                            exactDuplicateMatches:exactMatches.map(describeMatch),
+                            sameDefinitionMatches:definitionMatches.map(describeMatch)
+                        };
+                    })
+                };
+            };
             const describeDiagnosticObject = (label, target) => {
                 if(!target) return { label, available:false };
                 const levels = [];
@@ -8920,7 +9046,6 @@
                             expectedCount = currentExpectedCount;
                             if(info.base.clubCache) info.base.clubCache.expected = expectedCount;
                         }
-
                         if(provisionalPlayerIds.size){
                             const unverifiedIds = Array.from(provisionalPlayerIds)
                                 .filter(id => !serverPlayerIds.has(id));
@@ -10410,6 +10535,14 @@
         //指定ID填充SBC
         events.playerListFillSquad = (challenge,list,type) => {
             if(!events.requireClubReady("squad fill")) return false;
+            emitClubDiagnostic("log", "squad-fill-input", `squad fill received ${list?.length || 0} player(s)`, {
+                challenge:{ id:challenge?.id, setId:challenge?.setId, name:challenge?.name, formation:challenge?.formation },
+                type,
+                clubState:Boolean(info.base.state),
+                clubCacheStatus:info.base.clubCache?.status || null,
+                enhancer:Boolean(info.isEnhancer),
+                input:Array.from(list || []).map(summarizeFillDiagnosticItem)
+            });
             events.showLoader();
             let playerlist = [],substitute = Array.from(list);
 
@@ -10441,8 +10574,17 @@
                     }
                 }
             })
+            emitClubDiagnostic("log", "squad-fill-mapped", `squad fill mapped ${playerlist.filter(Boolean).length} player(s)`, {
+                challenge:{ id:challenge?.id, setId:challenge?.setId, name:challenge?.name },
+                type,
+                mapped:playerlist.map(summarizeFillDiagnosticItem)
+            });
             events.loadPlayerInfo(playerlist)
             events.saveSquad(challenge,challenge.squad,playerlist,[]);
+            emitClubDiagnostic("log", "squad-fill-saved", "squad fill saveSquad returned", {
+                challenge:{ id:challenge?.id, setId:challenge?.setId, name:challenge?.name },
+                squad:Array.from(challenge?.squad?.getPlayers?.() || []).map(slot => summarizeFillDiagnosticItem(slot?.item || slot))
+            });
             //events.hideLoader();
             events.saveOldSquad(challenge.squad,false);
 
@@ -16562,13 +16704,47 @@
                             new UTStandardButtonControl(),
                             fy("autofill.btntext"),
                             (e) => {
+                                const unassigned = Array.from(repositories.Item.getUnassignedItems() || []);
+                                emitClubDiagnostic("log", "one-click-fill-start", `one-click fill started with ${unassigned.length} Unassigned item(s)`, {
+                                    challenge:{ id:thisController?._challenge?.id, setId:thisController?._challenge?.setId, name:thisController?._challenge?.name },
+                                    oneFillCriteria:_.cloneDeep(oneFillCriteria),
+                                    clubState:Boolean(info.base.state),
+                                    clubCacheStatus:info.base.clubCache?.status || null,
+                                    enhancer:Boolean(info.isEnhancer),
+                                    build:{
+                                        league:Boolean(info.build.league),
+                                        flag:Boolean(info.build.flag),
+                                        untradeable:Boolean(info.build.untradeable),
+                                        ignorepos:Boolean(info.build.ignorepos),
+                                        academy:Boolean(info.build.academy),
+                                        strictlypcik:Boolean(info.build.strictlypcik),
+                                        firststorage:Boolean(info.build.firststorage)
+                                    },
+                                    settings:{
+                                        goldenrange:info.set.goldenrange,
+                                        shieldLeagueCount:Array.isArray(info.set.shield_league) ? info.set.shield_league.length : 0,
+                                        shieldLeagueIds:Array.isArray(info.set.shield_league) ? info.set.shield_league.slice() : [],
+                                        shieldFlagIds:Array.isArray(info.set.shield_flag) ? info.set.shield_flag.slice() : [],
+                                        lockedIds:Array.isArray(info.lock) ? info.lock.slice() : []
+                                    },
+                                    unassigned:unassigned.map(summarizeFillDiagnosticItem)
+                                });
+                                if(!events.requireClubReady("one-click squad fill")){
+                                    emitClubDiagnostic("warn", "one-click-fill-blocked", "one-click fill blocked until Club data is ready", {
+                                        clubState:Boolean(info.base.state),
+                                        clubCacheStatus:info.base.clubCache?.status || null
+                                    });
+                                    return false;
+                                }
                                 let playerList = [], removeIds = [];
                                 //24.16 排除球员配置按钮：一键填充严格模式应用
                                 if(!info.build.strictlypcik && events.isEligibleForOneFill(oneFillCriteria)){
                                     let criteriaNumber = oneFillCriteria[0].c + oneFillCriteria[1].c;
                                     let getCriteria = {rs:JSON.parse(JSON.stringify(oneFillCriteria[0].t.rs))};
                                     getCriteria = events.ignorePlayerToCriteria(getCriteria);
-                                    playerList = events.getItemBy(2,getCriteria,repositories.Item.getUnassignedItems()).slice(0,criteriaNumber);
+                                    const candidates = events.getItemBy(2,getCriteria,unassigned);
+                                    playerList = candidates.slice(0,criteriaNumber);
+                                    emitClubDiagnostic("log", "one-click-fill-criteria", `one-click fill broad criteria selected ${playerList.length}/${criteriaNumber}`, collectOneFillDiagnostic(getCriteria, candidates, playerList, unassigned));
                                 }else{
                                     for (let i of oneFillCriteria) {
                                         let getCriteria = JSON.parse(JSON.stringify(i.t));
@@ -16577,14 +16753,18 @@
                                             getCriteria["NEdatabaseId"] = removeIds;
                                         }
                                         getCriteria["lock"] = false;
-                                        let result = events.getItemBy(2, getCriteria, repositories.Item.getUnassignedItems());
-
+                                        let result = events.getItemBy(2, getCriteria, unassigned);
                                         let cropping = result.slice(0, i.c);
                                         console.log(cropping,_.map(cropping,"rating"))
+                                        emitClubDiagnostic("log", "one-click-fill-criteria", `one-click fill criterion selected ${cropping.length}/${i.c}`, collectOneFillDiagnostic(getCriteria, result, cropping, unassigned));
                                         removeIds = removeIds.concat(cropping.map( i => {return i.databaseId}))
                                         playerList = playerList.concat(cropping)
                                     }
                                 }
+                                emitClubDiagnostic("log", "one-click-fill-selected", `one-click fill selected ${playerList.length} player(s)`, {
+                                    challenge:{ id:thisController?._challenge?.id, setId:thisController?._challenge?.setId, name:thisController?._challenge?.name },
+                                    selected:playerList.map(summarizeFillDiagnosticItem)
+                                });
                                 if(playerList.length){
                                     events.playerListFillSquad(thisController._challenge,playerList,2);
                                 }else{
@@ -16611,6 +16791,7 @@
                         new UTStandardButtonControl(),
                         fy("dupfill.btntext"),
                         (e) => {
+                            if(!events.requireClubReady("duplicate squad fill")) return false;
                             const dupIds = _.map(
                                 _.filter(repositories.Item.getUnassignedItems(),
                                     p => p.isDuplicate() && p.isPlayer() && !p.isLimitedUse()
