@@ -154,11 +154,18 @@ describe('basic Upgrade activity discovery', () => {
   });
 
   it('preserves unrestricted Gold eligibility for Common-first consumers', () => {
+    const commonOnly = set({
+      id: 504,
+      name: '5x 80+ Common Only Upgrade',
+      reward: '5x 80+ Rare Gold Players Pack',
+      players: 8,
+      requirements: [quality('gold', -1), rarity('common', -1)],
+    });
     const unrestricted = set({
       id: 505,
       name: '5x 80+ Upgrade',
       reward: '5x 80+ Rare Gold Players Pack',
-      players: 9,
+      players: 8,
       requirements: [quality('gold', -1)],
     });
     const loop = {
@@ -171,6 +178,7 @@ describe('basic Upgrade activity discovery', () => {
           family: 'common-gold-material-upgrade',
           classes: ['premium'],
           preference: 'quantity-first',
+          selectionMaterial: 'low-rated-gold',
           required: true,
         },
         sbcNames: ['Compatibility'],
@@ -178,13 +186,18 @@ describe('basic Upgrade activity discovery', () => {
       },
     };
 
-    const session = buildActivityBindingSession({ sets: [unrestricted], configuredLoops: [loop] });
+    const session = buildActivityBindingSession({ sets: [commonOnly, unrestricted], configuredLoops: [loop] });
     expect(session.loopOverrides[loop.id].rareUpgrade).toMatchObject({
       name: '5x 80+ Upgrade',
+      sbcSetIds: [505],
       dynamicSbcFamily: 'common-gold-material-upgrade',
-      requirements: [{ tier: 'gold', count: 9, preferCommon: true }],
+      requirements: [{ tier: 'gold', count: 8, preferCommon: true }],
     });
     expect(session.loopOverrides[loop.id].rareUpgrade.requirements[0].rarity).toBeUndefined();
+
+    const rejected = buildActivityBindingSession({ sets: [commonOnly], configuredLoops: [loop] });
+    expect(rejected.loopOverrides).toEqual({});
+    expect(rejected.diagnostics.join(' ')).toContain('selection material low-rated-gold');
   });
 
   it('materializes direct, nested and recovery bindings while preserving safety policy', () => {

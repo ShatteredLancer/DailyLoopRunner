@@ -36,6 +36,7 @@ export const MATERIAL_SINK_PREFERENCES = Object.freeze([
 
 export const MATERIAL_SINK_MATERIALS = Object.freeze([
   'common-gold',
+  'low-rated-gold',
   'rare-gold',
 ]);
 

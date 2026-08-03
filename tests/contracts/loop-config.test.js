@@ -133,6 +133,49 @@ describe('loop configuration contracts', () => {
     }
   });
 
+  it('adds an opt-in low-rated Gold exhaustion Loop without changing Common-only consumers', async () => {
+    const { builtIn, external } = await loadDefinitions();
+    for (const loops of [builtIn, external]) {
+      const loop = byId(loops, 'low-rated-gold-premium-exhaustion');
+      expect(loop).toMatchObject({
+        name: 'Low-rated Gold Premium Exhaustion Loop',
+        strategy: 'inventoryExhaustion',
+        sbcFodderPolicy: { mode: 'low-gold' },
+        openRewardPacksAtEnd: true,
+      });
+      expect(loop).not.toHaveProperty('sourcePackIds');
+      expect(loop).not.toHaveProperty('sourcePackNames');
+      expect(loop.stages).toHaveLength(1);
+      expect(loop.stages[0]).toMatchObject({
+        id: 'low-rated-gold-premium',
+        activityBinding: {
+          family: 'common-gold-material-upgrade',
+          classes: ['premium'],
+          preference: 'reward-first',
+          selectionMaterial: 'low-rated-gold',
+          required: true,
+        },
+        requirements: [{
+          tier: 'gold',
+          count: 9,
+          preferCommon: true,
+          playerOnly: true,
+          allowSpecial: false,
+          priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        }],
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        maxCompletions: 1000,
+      });
+      expect(loop.stages[0].requirements[0]).not.toHaveProperty('rarity');
+      expect(loop.stages[0]).not.toHaveProperty('shortagePacks');
+    }
+
+    expect(byId(builtIn, 'fof-glory-hunters-exhaustion').stages[0].requirements[0])
+      .toMatchObject({ tier: 'gold', rarity: 'common', count: 9 });
+    expect(byId(builtIn, 'provision-crafting').craftingUpgrades[0].requirements[0])
+      .toMatchObject({ tier: 'gold', rarity: 'common', count: 9 });
+  });
+
   it('locks the ordered inventory exhaustion stages and strict card types', async () => {
     const { builtIn, external } = await loadDefinitions();
     for (const loop of [byId(builtIn, 'inventory-fodder-exhaustion'), byId(external, 'inventory-fodder-exhaustion')]) {

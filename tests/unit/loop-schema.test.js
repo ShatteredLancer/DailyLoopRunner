@@ -122,7 +122,7 @@ describe('loop configuration schema', () => {
     })).toEqual(expect.arrayContaining([
       'activityBinding.classes[0] must be one of: premium, baseline, sub-baseline, incomparable',
       'activityBinding.preference must be one of: reward-first, quantity-first, cost-first',
-      'activityBinding.selectionMaterial must be one of: common-gold, rare-gold',
+      'activityBinding.selectionMaterial must be one of: common-gold, low-rated-gold, rare-gold',
     ]));
     expect(validateLoopDef({
       ...loop,

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createFakeInventoryAdapter } from '../../src/adapters/fake/inventory.js';
+import { LOOP_DEFS } from '../../src/config/loops.js';
+import { selectionRequirements } from '../../src/config/selection.js';
 import { selectInventoryPlayers } from '../../src/selection/inventory.js';
 import { makePlayer } from '../helpers/load-userscript.js';
 
@@ -19,6 +21,39 @@ const fsuPolicy = {
 };
 
 describe('pure inventory selector', () => {
+  it('projects the Low-rated Gold exhaustion Loop into capped Common-first selection', () => {
+    const loop = LOOP_DEFS.find((entry) => entry.id === 'low-rated-gold-premium-exhaustion');
+    const stage = loop.stages[0];
+    const [projected] = selectionRequirements(stage, stage.priorityPiles);
+    const requirement = { ...projected, count: 2 };
+    const adapter = createFakeInventoryAdapter({
+      storage: [makePlayer({ id: 2, definitionId: 102, rating: 82, rareflag: 0 })],
+      transfer: [makePlayer({ id: 3, definitionId: 103, rating: 83, rareflag: 0 })],
+      club: [makePlayer({ id: 1, definitionId: 101, rating: 81, rareflag: 1 })],
+    });
+
+    expect(projected).toMatchObject({
+      tier: 'gold',
+      count: 9,
+      preferCommon: true,
+      allowSpecial: false,
+      sbcFodderPolicy: { mode: 'low-gold', lowRatedGoldMaxRating: 82 },
+      lowRatedGoldMaxRating: 82,
+      respectFsuGoldRange: true,
+    });
+    expect(projected.rarity).toBeUndefined();
+
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [requirement],
+      priorityPiles: stage.priorityPiles,
+      fsuPolicy,
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.selected.map((item) => item.id)).toEqual([2, 1]);
+    expect(plan.selected.map((item) => item.rare)).toEqual([false, true]);
+  });
+
   it('allows normal Gold 82 and rejects normal Gold 83 in low-rated mode', () => {
     const adapter = createFakeInventoryAdapter({ storage: [
       makePlayer({ id: 1, definitionId: 101, rating: 82, rareflag: 0 }),

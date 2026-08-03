@@ -127,6 +127,10 @@ Batch Open 每次打开时读取当前 My Packs：
 
 Built-in 默认依次运行 Daily Bronze、Silver、Common、Rare，并按 EA 当前剩余次数执行。`Daily + Rare Pack Recycling` 追加当前 Rare Gold Premium/Baseline；`Daily + Rare Pack to 5x80+` 则追加 quantity-first Common Gold Premium，按 Common-first、Rare-fallback 方式处理 Daily Rare 来源包。两个 Profile 都只在第五步改变消耗方式。
 
+### Gold Inventory Exhaustion
+
+`Common Gold Premium Exhaustion Loop` 只消耗 Common Gold。`Low-rated Gold Premium Exhaustion Loop` 使用当前动态扫描到的 unrestricted-Gold Premium Upgrade（当前为 `5x 80+ Upgrade`），先跨 `Unassigned -> Storage -> Transfer -> Club` 消耗所有符合上限的 Common Gold，然后才使用符合上限的 Rare Gold。特殊卡不会被使用；不足一套时停止。奖励包延迟到阶段结束后再按 `Open reward packs` 设置处理，不会在同一阶段反复投入自身。
+
 ### Provision Crafting
 
 打开 Provision 来源包并按材料类型清理：Common Gold 优先进入当前动态 Pick，再进入 Common Gold Premium Upgrade；Rare Gold 进入当前动态 Rare Gold Premium 或 Baseline。所有路径保持 `Unassigned -> Storage -> Transfer -> Club` 的优先级和 Common-first 规则。

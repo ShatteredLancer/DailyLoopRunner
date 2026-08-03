@@ -349,6 +349,47 @@ export const LOOP_DEFS = [
     ],
   },
   {
+    id: 'low-rated-gold-premium-exhaustion',
+    name: 'Low-rated Gold Premium Exhaustion Loop',
+    strategy: 'inventoryExhaustion',
+    sbcFodderPolicy: { mode: 'low-gold' },
+    openRewardPacksAtEnd: true,
+    rewardPackNames: [
+      '5x 80+ Rare Gold Players Pack',
+      '5 x 80+ Rare Gold Players Pack',
+      'x1 5x 80+ Rare Gold Players Pack',
+      '5x80+ Rare Gold Players Pack',
+      '5x 80+ Rare Gold Players Pack (Untradeable)',
+    ],
+    stages: [
+      {
+        id: 'low-rated-gold-premium',
+        name: 'Low-rated Gold Premium Upgrade',
+        activityBinding: {
+          family: 'common-gold-material-upgrade',
+          classes: ['premium'],
+          preference: 'reward-first',
+          selectionMaterial: 'low-rated-gold',
+          category: 'Upgrades',
+          required: true,
+        },
+        sbcNames: ['5x 80+ Upgrade'],
+        requirements: [
+          {
+            tier: 'gold',
+            count: 9,
+            preferCommon: true,
+            playerOnly: true,
+            allowSpecial: false,
+            priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+          },
+        ],
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+        maxCompletions: 1000,
+      },
+    ],
+  },
+  {
     id: 'provision-crafting',
     name: 'Provision Crafting Loop',
     strategy: 'provisionPackCrafting',

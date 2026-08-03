@@ -60,6 +60,10 @@
     "fof-glory-hunters-exhaustion": {
       "normal": "Repeat the selected Common Gold Premium with its scanned safe common-gold count until fewer than one complete squad remains; when Open reward packs is enabled, open all matching rewards together after the stage.",
       "recovery": "Stop on unsafe selection or submission failure without entering the deferred reward-opening phase; otherwise use the shared pack transaction for the final batch."
+    },
+    "low-rated-gold-premium-exhaustion": {
+      "normal": "Repeat an unrestricted-Gold Premium Upgrade using every eligible Common Gold before low-rated Rare Gold across Unassigned, Storage, Transfer, and Club; matching rewards are deferred until the stage ends.",
+      "recovery": "Stop when fewer than one complete low-rated Gold squad remains or when selection/submission is unsafe; never recycle the deferred reward packs back into the same stage."
     }
   }
 }

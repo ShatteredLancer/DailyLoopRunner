@@ -147,6 +147,7 @@ function renderActivityBinding(path, value, context) {
       ${materialSink ? fieldRow('Preference', selectInput(`${path}.preference`, value.preference, MATERIAL_SINK_PREFERENCES.map((preference) => ({ value: preference, label: preference })), context.readOnly, true)) : ''}
       ${materialSink ? fieldRow('Selection material', selectInput(`${path}.selectionMaterial`, value.selectionMaterial, [
         { value: 'common-gold', label: 'Common Gold only' },
+        { value: 'low-rated-gold', label: 'Low-rated Gold (Common first)' },
         { value: 'rare-gold', label: 'Rare Gold only' },
       ], context.readOnly, true)) : ''}
     </div>

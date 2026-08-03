@@ -391,14 +391,19 @@ function applySelectionMaterial(requirements = [], selectionMaterial = null) {
   ));
 }
 
-function hasUnrestrictedGoldEligibility(eligibilityRequirements = [], configuredRequirement = {}) {
+function hasUnrestrictedGoldEligibility(
+  eligibilityRequirements = [],
+  configuredRequirement = {},
+  selectionMaterial = null,
+) {
   if (configuredRequirement?.tier !== 'gold'
     || configuredRequirement?.rarity !== undefined
     || configuredRequirement?.preferCommon !== true) return false;
   return eligibilityRequirements.some((requirement) => (
     requirement?.tier === 'gold'
       && requirement?.rarity === undefined
-      && Number(requirement?.count || 0) === Number(configuredRequirement?.count || 0)
+      && (selectionMaterial === 'low-rated-gold'
+        || Number(requirement?.count || 0) === Number(configuredRequirement?.count || 0))
   ));
 }
 
@@ -411,10 +416,15 @@ function mergeRequirements(
   const remaining = [...scanned];
   const merged = [];
   for (const configuredRequirement of configured) {
-    if (hasUnrestrictedGoldEligibility(eligibilityRequirements, configuredRequirement)) {
+    if (hasUnrestrictedGoldEligibility(
+      eligibilityRequirements,
+      configuredRequirement,
+      selectionMaterial,
+    )) {
       const index = remaining.findIndex((requirement) => (
         requirement?.tier === 'gold'
-          && Number(requirement?.count || 0) === Number(configuredRequirement?.count || 0)
+          && (selectionMaterial === 'low-rated-gold'
+            || Number(requirement?.count || 0) === Number(configuredRequirement?.count || 0))
       ));
       if (index >= 0) {
         const [requirement] = remaining.splice(index, 1);
@@ -443,6 +453,12 @@ function mergeRequirements(
 }
 
 function activityAcceptsSelectionMaterial(activity, selectionMaterial) {
+  if (selectionMaterial === 'low-rated-gold') {
+    const requirements = activity?.eligibilityRequirements;
+    return Array.isArray(requirements) && requirements.length > 0 && requirements.every((requirement) => (
+      requirement?.tier === 'gold' && requirement.rarity === undefined
+    ));
+  }
   const rarity = selectionMaterialRarity(selectionMaterial);
   if (!rarity) return true;
   const requirements = activity?.eligibilityRequirements;

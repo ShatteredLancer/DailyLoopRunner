@@ -245,6 +245,7 @@ describe('Workflow and Loop Builder view', () => {
     expect(html).toContain('<option value="premium" selected>premium</option>');
     expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.preference"');
     expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.selectionMaterial"');
+    expect(html).toContain('<option value="low-rated-gold">Low-rated Gold (Common first)</option>');
     expect(html).toContain('<option value="rare-gold" selected>Rare Gold only</option>');
   });
 

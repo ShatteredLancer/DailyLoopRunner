@@ -467,6 +467,47 @@
       ]
     },
     {
+      id: "low-rated-gold-premium-exhaustion",
+      name: "Low-rated Gold Premium Exhaustion Loop",
+      strategy: "inventoryExhaustion",
+      sbcFodderPolicy: { mode: "low-gold" },
+      openRewardPacksAtEnd: true,
+      rewardPackNames: [
+        "5x 80+ Rare Gold Players Pack",
+        "5 x 80+ Rare Gold Players Pack",
+        "x1 5x 80+ Rare Gold Players Pack",
+        "5x80+ Rare Gold Players Pack",
+        "5x 80+ Rare Gold Players Pack (Untradeable)"
+      ],
+      stages: [
+        {
+          id: "low-rated-gold-premium",
+          name: "Low-rated Gold Premium Upgrade",
+          activityBinding: {
+            family: "common-gold-material-upgrade",
+            classes: ["premium"],
+            preference: "reward-first",
+            selectionMaterial: "low-rated-gold",
+            category: "Upgrades",
+            required: true
+          },
+          sbcNames: ["5x 80+ Upgrade"],
+          requirements: [
+            {
+              tier: "gold",
+              count: 9,
+              preferCommon: true,
+              playerOnly: true,
+              allowSpecial: false,
+              priorityPiles: ["unassigned", "storage", "transfer", "club"]
+            }
+          ],
+          priorityPiles: ["unassigned", "storage", "transfer", "club"],
+          maxCompletions: 1e3
+        }
+      ]
+    },
+    {
       id: "provision-crafting",
       name: "Provision Crafting Loop",
       strategy: "provisionPackCrafting",
@@ -1504,6 +1545,7 @@
   ]);
   var MATERIAL_SINK_MATERIALS = Object.freeze([
     "common-gold",
+    "low-rated-gold",
     "rare-gold"
   ]);
   var MATERIAL_SINK_BASELINES = Object.freeze({
@@ -1977,16 +2019,20 @@
     if (!rarity) return requirements;
     return requirements.map((requirement2) => requirement2?.tier === "gold" ? { ...requirement2, rarity } : requirement2);
   }
-  function hasUnrestrictedGoldEligibility(eligibilityRequirements = [], configuredRequirement = {}) {
+  function hasUnrestrictedGoldEligibility(eligibilityRequirements = [], configuredRequirement = {}, selectionMaterial = null) {
     if (configuredRequirement?.tier !== "gold" || configuredRequirement?.rarity !== void 0 || configuredRequirement?.preferCommon !== true) return false;
-    return eligibilityRequirements.some((requirement2) => requirement2?.tier === "gold" && requirement2?.rarity === void 0 && Number(requirement2?.count || 0) === Number(configuredRequirement?.count || 0));
+    return eligibilityRequirements.some((requirement2) => requirement2?.tier === "gold" && requirement2?.rarity === void 0 && (selectionMaterial === "low-rated-gold" || Number(requirement2?.count || 0) === Number(configuredRequirement?.count || 0)));
   }
   function mergeRequirements(scanned = [], configured = [], selectionMaterial = null, eligibilityRequirements = []) {
     const remaining = [...scanned];
     const merged = [];
     for (const configuredRequirement of configured) {
-      if (hasUnrestrictedGoldEligibility(eligibilityRequirements, configuredRequirement)) {
-        const index2 = remaining.findIndex((requirement3) => requirement3?.tier === "gold" && Number(requirement3?.count || 0) === Number(configuredRequirement?.count || 0));
+      if (hasUnrestrictedGoldEligibility(
+        eligibilityRequirements,
+        configuredRequirement,
+        selectionMaterial
+      )) {
+        const index2 = remaining.findIndex((requirement3) => requirement3?.tier === "gold" && (selectionMaterial === "low-rated-gold" || Number(requirement3?.count || 0) === Number(configuredRequirement?.count || 0)));
         if (index2 >= 0) {
           const [requirement3] = remaining.splice(index2, 1);
           merged.push({ ...clone(configuredRequirement), count: Number(requirement3.count || configuredRequirement.count) });
@@ -2010,6 +2056,10 @@
     ];
   }
   function activityAcceptsSelectionMaterial(activity, selectionMaterial) {
+    if (selectionMaterial === "low-rated-gold") {
+      const requirements2 = activity?.eligibilityRequirements;
+      return Array.isArray(requirements2) && requirements2.length > 0 && requirements2.every((requirement2) => requirement2?.tier === "gold" && requirement2.rarity === void 0);
+    }
     const rarity = selectionMaterialRarity(selectionMaterial);
     if (!rarity) return true;
     const requirements = activity?.eligibilityRequirements;
@@ -13672,6 +13722,7 @@
       ${materialSink ? fieldRow("Preference", selectInput(`${path}.preference`, value.preference, MATERIAL_SINK_PREFERENCES.map((preference) => ({ value: preference, label: preference })), context.readOnly, true)) : ""}
       ${materialSink ? fieldRow("Selection material", selectInput(`${path}.selectionMaterial`, value.selectionMaterial, [
       { value: "common-gold", label: "Common Gold only" },
+      { value: "low-rated-gold", label: "Low-rated Gold (Common first)" },
       { value: "rare-gold", label: "Rare Gold only" }
     ], context.readOnly, true)) : ""}
     </div>
