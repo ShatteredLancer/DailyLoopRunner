@@ -53,6 +53,13 @@ export async function resolveUnassigned(options = {}) {
         });
       }
       if (afterFingerprint === fingerprint) {
+        await options.onActionNoProgress?.({
+          action: plan.action,
+          attempts: actionProgressAttempts,
+          iteration,
+          beforeSnapshot: snapshot,
+          afterSnapshot: after,
+        });
         return { status: 'blocked', reason: `Unassigned action made no progress: ${plan.action.description}`, iterations: iteration, plan, snapshot: after };
       }
       previousFingerprint = afterFingerprint;

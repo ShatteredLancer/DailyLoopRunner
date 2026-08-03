@@ -176,6 +176,13 @@ import { hasPlayerPickRecapCards } from './reward/player-pick-recap.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
 import {
+  captureDefinitionPileState,
+  captureMoveResult,
+  captureRuntimeInventoryItem,
+  createRuntimeObjectIdentityTracker,
+  diagnosticJson,
+} from './unassigned/diagnostics.js';
+import {
   createRecoveryOverflowResolvers,
   evaluateRecoveryTriggerSelection,
   selectionConsumesSignalRefs,
@@ -266,6 +273,7 @@ const RUNNER_VERSION = packageInfo.version;
   const fsuAdapter = () => adapters.fsu();
   const localizationAdapter = adapters.localization;
   const pageRuntime = adapters.page;
+  const identifyRuntimeInventoryItem = createRuntimeObjectIdentityTracker();
 
 
 const state = {
@@ -1079,13 +1087,32 @@ function updateLoopControls() {
 
   async function moveItems(items, pile, allowStorage = true) {
     if (!items?.length) return null;
-    const result = await observeOnce(
-      eaInventoryAdapter().move(items, pile, allowStorage),
-      ctrl(),
-      25000,
-      `moveItems(${pile})`,
-    );
-    if (!result?.success) fail(`Move failed: ${result?.error?.code || result?.status || 'unknown'}`);
+    let result;
+    try {
+      result = await observeOnce(
+        eaInventoryAdapter().move(items, pile, allowStorage),
+        ctrl(),
+        25000,
+        `moveItems(${pile})`,
+      );
+    } catch (error) {
+      log(`Item move diagnostic exception: ${diagnosticJson({
+        pile,
+        allowStorage,
+        items: items.map((item) => captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })),
+        error: captureMoveResult(error),
+      })}`);
+      throw error;
+    }
+    if (!result?.success) {
+      log(`Item move diagnostic failure: ${diagnosticJson({
+        pile,
+        allowStorage,
+        items: items.map((item) => captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })),
+        result: captureMoveResult(result),
+      })}`);
+      fail(`Move failed: ${result?.error?.code || result?.status || 'unknown'}`);
+    }
     await waitLoadingEnd();
     return result;
   }
@@ -1823,7 +1850,51 @@ function updateLoopControls() {
     await refreshUnassigned();
     let reservedIds = new Set();
     let initialLogged = false;
+    let activeActionItems = [];
     const adapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
+    const diagnosticPiles = () => ({
+      unassigned: getUnassignedItems(),
+      storage: getStorageItems(),
+      transfer: getTransferItems(),
+      club: getClubItems(),
+    });
+    const captureActionState = (action, attemptedItems = activeActionItems) => {
+      try {
+        const piles = diagnosticPiles();
+        const refs = action?.itemRefs || [];
+        const definitions = [...new Set(refs.map((ref) => Number(ref?.definitionId || 0)).filter(Boolean))];
+        return {
+          action: {
+            type: action?.type || null,
+            destination: action?.destination || null,
+            description: action?.description || null,
+            itemRefs: refs,
+          },
+          attemptedItems: attemptedItems.map((item) => captureRuntimeInventoryItem(item, {
+            identify: identifyRuntimeInventoryItem,
+          })),
+          exactLocations: refs.map((ref) => ({
+            ref,
+            piles: Object.fromEntries(Object.entries(piles).map(([pileName, items]) => [
+              pileName,
+              items
+                .filter((item) => Number(item?.id || 0) === Number(ref?.id || 0))
+                .map((item) => captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })),
+            ])),
+          })),
+          definitions: Object.fromEntries(definitions.map((definitionId) => [
+            String(definitionId),
+            captureDefinitionPileState(piles, definitionId, { identify: identifyRuntimeInventoryItem }),
+          ])),
+          capacity: {
+            storageFree: storageSpaceLeft(),
+            transferFree: transferSpaceLeft(),
+          },
+        };
+      } catch (error) {
+        return { diagnosticError: error?.message || String(error) };
+      }
+    };
     const getSnapshot = async () => {
       await options.beforeSnapshot?.();
       const liveItems = getUnassignedItems();
@@ -1867,7 +1938,11 @@ function updateLoopControls() {
         if (attempt === 1) {
           log(`Unassigned ${action.description} move is waiting for EA repository settlement (${attempt + 1}/${maxAttempts})`);
         }
+        log(`Unassigned move diagnostic settlement ${attempt + 1}/${maxAttempts}: ${diagnosticJson(captureActionState(action))}`);
         await sleep(Math.min(1800, 500 + attempt * 250));
+      },
+      onActionNoProgress: async ({ action, attempts }) => {
+        log(`Unassigned move diagnostic no progress after ${attempts} check(s): ${diagnosticJson(captureActionState(action))}`);
       },
       executeAction: async (action) => {
         stopPoint();
@@ -1875,22 +1950,30 @@ function updateLoopControls() {
         if (items.length !== action.itemRefs.length) {
           fail(`Unassigned ${action.description} action could resolve only ${items.length}/${action.itemRefs.length} item(s)`);
         }
+        activeActionItems = items;
+        log(`Unassigned move diagnostic before: ${diagnosticJson(captureActionState(action, items))}`);
+        let moveResult;
         if (action.type === 'swap') {
           log(`Swapping ${items.length} untradeable duplicate(s) with tradeable club version(s)`);
-          await moveItems(items, inventoryPile('club'), true);
+          moveResult = await moveItems(items, inventoryPile('club'), true);
         } else if (action.destination === 'club') {
           log(`Moving ${items.length} non-duplicate unassigned item(s) to club`);
-          await moveItems(items, inventoryPile('club'), true);
+          moveResult = await moveItems(items, inventoryPile('club'), true);
         } else if (action.destination === 'transfer') {
           log(`Moving ${items.length} tradeable duplicate(s) to transfer list`);
-          await moveItems(items, inventoryPile('transfer'), false);
+          moveResult = await moveItems(items, inventoryPile('transfer'), false);
         } else if (action.destination === 'storage') {
           log(`Moving ${items.length} untradeable duplicate(s) to SBC storage`);
-          await moveItems(items, inventoryPile('storage'), true);
+          moveResult = await moveItems(items, inventoryPile('storage'), true);
         } else {
           fail(`Unsupported Unassigned action destination: ${action.destination}`);
         }
-        await refreshUnassigned();
+        log(`Unassigned move diagnostic result: ${diagnosticJson(captureMoveResult(moveResult))}`);
+        const refreshResult = await refreshUnassigned();
+        log(`Unassigned move diagnostic after refresh: ${diagnosticJson({
+          refresh: captureMoveResult(refreshResult),
+          state: captureActionState(action, items),
+        })}`);
       },
     });
 
@@ -1989,13 +2072,33 @@ function updateLoopControls() {
     const restore = (item, responseItem) => {
       if (!responseItem) return;
       const clubDuplicate = findClubDuplicate(item) || findClubDuplicate(responseItem);
+      const before = captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem });
       const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
+      const duplicateIdSource = Number(item?.duplicateId || 0)
+        ? 'live'
+        : Number(responseItem?.duplicateId || 0)
+          ? 'pack-response'
+          : Number(clubDuplicate?.id || 0)
+            ? 'club-match'
+            : 'none';
       if (duplicateId && !Number(item?.duplicateId || 0)) {
         item.duplicateId = duplicateId;
         if (item._duplicateId !== undefined) item._duplicateId = duplicateId;
         restored++;
       }
       eaInventoryAdapter().preparePurchasedItem(item);
+      const after = captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem });
+      if (diagnosticJson(before) !== diagnosticJson(after)) {
+        log(`${label}: live Unassigned metadata mutation: ${diagnosticJson({
+          duplicateIdSource,
+          sameAsPackResponse: item === responseItem,
+          sameAsClubDuplicate: item === clubDuplicate,
+          before,
+          packResponse: captureRuntimeInventoryItem(responseItem, { identify: identifyRuntimeInventoryItem }),
+          clubDuplicate: captureRuntimeInventoryItem(clubDuplicate, { identify: identifyRuntimeInventoryItem }),
+          after,
+        })}`);
+      }
     };
     for (const item of unassignedItems) {
       const responseItem = responseById.get(Number(item?.id || 0));

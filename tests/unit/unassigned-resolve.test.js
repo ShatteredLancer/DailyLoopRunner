@@ -54,6 +54,27 @@ describe('resolveUnassigned', () => {
     expect(onActionProgressRetry).toHaveBeenCalledTimes(2);
   });
 
+  it('reports final action no-progress diagnostics without changing the blocked result', async () => {
+    const items = [duplicate(1)];
+    const onActionNoProgress = vi.fn(async () => {});
+    const result = await resolveUnassigned({
+      getSnapshot: async () => stateSnapshot(items, 100),
+      executeAction: async () => {},
+      actionProgressAttempts: 2,
+      onActionNoProgress,
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reason: 'Unassigned action made no progress: untradeable duplicate',
+    });
+    expect(onActionNoProgress).toHaveBeenCalledOnce();
+    expect(onActionNoProgress).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 2,
+      action: expect.objectContaining({ destination: 'storage' }),
+    }));
+  });
+
   it('runs ordered overflow resolvers and verifies actual progress', async () => {
     let items = [duplicate(1)];
     const first = vi.fn(async () => ({ status: 'unavailable' }));

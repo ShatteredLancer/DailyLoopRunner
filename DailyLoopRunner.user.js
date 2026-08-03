@@ -8977,6 +8977,13 @@
           });
         }
         if (afterFingerprint === fingerprint) {
+          await options.onActionNoProgress?.({
+            action: plan.action,
+            attempts: actionProgressAttempts,
+            iteration,
+            beforeSnapshot: snapshot,
+            afterSnapshot: after
+          });
           return { status: "blocked", reason: `Unassigned action made no progress: ${plan.action.description}`, iterations: iteration, plan, snapshot: after };
         }
         previousFingerprint = afterFingerprint;
@@ -9102,6 +9109,123 @@
     }
     log(`Unassigned confirmation (${reason}): empty after ${stableEmptyReads} stable read(s)`);
     return [];
+  }
+
+  // src/unassigned/diagnostics.js
+  function numberOrNull(value) {
+    if (value === null || value === void 0 || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  function primitiveOrNull(value) {
+    if (value === null || value === void 0) return null;
+    if (["string", "number", "boolean"].includes(typeof value)) return value;
+    return String(value);
+  }
+  function callBoolean2(item, methodName) {
+    try {
+      if (typeof item?.[methodName] === "function") return item[methodName]() === true;
+    } catch {
+    }
+    return null;
+  }
+  function resultLayer(value) {
+    if (!value || typeof value !== "object") return primitiveOrNull(value);
+    try {
+      return {
+        type: value?.constructor?.name || "Object",
+        keys: Object.keys(value).sort().slice(0, 40),
+        success: typeof value.success === "boolean" ? value.success : null,
+        status: primitiveOrNull(value.status),
+        statusCode: primitiveOrNull(value.statusCode),
+        code: primitiveOrNull(value.code),
+        message: primitiveOrNull(value.message)
+      };
+    } catch (error) {
+      return { diagnosticError: error?.message || String(error) };
+    }
+  }
+  function createRuntimeObjectIdentityTracker(prefix = "ea-item") {
+    const identities = /* @__PURE__ */ new WeakMap();
+    let sequence = 0;
+    return (value) => {
+      if (!value || typeof value !== "object" && typeof value !== "function") return null;
+      try {
+        if (!identities.has(value)) identities.set(value, `${prefix}-${++sequence}`);
+        return identities.get(value);
+      } catch {
+        return null;
+      }
+    };
+  }
+  function captureRuntimeInventoryItem(item, options = {}) {
+    if (!item || typeof item !== "object") return null;
+    try {
+      const identify = typeof options.identify === "function" ? options.identify : () => null;
+      return {
+        objectRef: identify(item),
+        type: primitiveOrNull(item.type),
+        id: numberOrNull(item.id ?? item.itemId ?? item._data?.id),
+        definitionId: numberOrNull(item.definitionId ?? item.defId ?? item._data?.definitionId),
+        rating: numberOrNull(item.rating ?? item._data?.rating),
+        rareflag: numberOrNull(item.rareflag ?? item.rareFlag ?? item._data?.rareflag),
+        pile: primitiveOrNull(item.pile),
+        privatePile: primitiveOrNull(item._pile),
+        dataPile: primitiveOrNull(item._data?.pile),
+        duplicateId: numberOrNull(item.duplicateId),
+        privateDuplicateId: numberOrNull(item._duplicateId),
+        dataDuplicateId: numberOrNull(item._data?.duplicateId),
+        isDuplicate: callBoolean2(item, "isDuplicate"),
+        isUntradeable: callBoolean2(item, "isUntradeable"),
+        rawUntradeable: typeof item.untradeable === "boolean" ? item.untradeable : null,
+        rawTradeable: typeof item.tradeable === "boolean" ? item.tradeable : null,
+        injuryType: primitiveOrNull(item.injuryType),
+        dataInjuryType: primitiveOrNull(item._data?.injuryType)
+      };
+    } catch (error) {
+      return { diagnosticError: error?.message || String(error) };
+    }
+  }
+  function captureDefinitionPileState(piles = {}, definitionId2, options = {}) {
+    try {
+      const target = numberOrNull(definitionId2);
+      const identify = typeof options.identify === "function" ? options.identify : () => null;
+      const maxItems = Math.max(1, Math.min(100, Number(options.maxItems || 20) || 20));
+      return Object.fromEntries(["unassigned", "storage", "transfer", "club"].map((pileName) => {
+        const matches = (piles[pileName] || []).filter(
+          (item) => numberOrNull(item?.definitionId ?? item?.defId ?? item?._data?.definitionId) === target
+        );
+        return [pileName, {
+          count: matches.length,
+          items: matches.slice(0, maxItems).map((item) => captureRuntimeInventoryItem(item, { identify })),
+          truncated: matches.length > maxItems
+        }];
+      }));
+    } catch (error) {
+      return { diagnosticError: error?.message || String(error) };
+    }
+  }
+  function captureMoveResult(result) {
+    try {
+      if (!result || typeof result !== "object") {
+        return { result: primitiveOrNull(result) };
+      }
+      return {
+        result: resultLayer(result),
+        error: resultLayer(result.error),
+        response: resultLayer(result.response),
+        data: resultLayer(result.data ?? result._data)
+      };
+    } catch (error) {
+      return { diagnosticError: error?.message || String(error) };
+    }
+  }
+  function diagnosticJson(value) {
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      return JSON.stringify({ serializationError: error?.message || String(error) });
+    }
   }
 
   // src/unassigned/recovery.js
@@ -16430,6 +16554,7 @@
     const fsuAdapter = () => adapters.fsu();
     const localizationAdapter = adapters.localization;
     const pageRuntime = adapters.page;
+    const identifyRuntimeInventoryItem = createRuntimeObjectIdentityTracker();
     const state = {
       running: false,
       stopping: false,
@@ -17127,13 +17252,32 @@
     }
     async function moveItems(items, pile, allowStorage = true) {
       if (!items?.length) return null;
-      const result = await observeOnce(
-        eaInventoryAdapter().move(items, pile, allowStorage),
-        ctrl(),
-        25e3,
-        `moveItems(${pile})`
-      );
-      if (!result?.success) fail2(`Move failed: ${result?.error?.code || result?.status || "unknown"}`);
+      let result;
+      try {
+        result = await observeOnce(
+          eaInventoryAdapter().move(items, pile, allowStorage),
+          ctrl(),
+          25e3,
+          `moveItems(${pile})`
+        );
+      } catch (error) {
+        log(`Item move diagnostic exception: ${diagnosticJson({
+          pile,
+          allowStorage,
+          items: items.map((item) => captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })),
+          error: captureMoveResult(error)
+        })}`);
+        throw error;
+      }
+      if (!result?.success) {
+        log(`Item move diagnostic failure: ${diagnosticJson({
+          pile,
+          allowStorage,
+          items: items.map((item) => captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })),
+          result: captureMoveResult(result)
+        })}`);
+        fail2(`Move failed: ${result?.error?.code || result?.status || "unknown"}`);
+      }
       await waitLoadingEnd();
       return result;
     }
@@ -17817,7 +17961,49 @@
       await refreshUnassigned();
       let reservedIds = /* @__PURE__ */ new Set();
       let initialLogged = false;
+      let activeActionItems = [];
       const adapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
+      const diagnosticPiles = () => ({
+        unassigned: getUnassignedItems(),
+        storage: getStorageItems(),
+        transfer: getTransferItems(),
+        club: getClubItems()
+      });
+      const captureActionState = (action2, attemptedItems = activeActionItems) => {
+        try {
+          const piles = diagnosticPiles();
+          const refs = action2?.itemRefs || [];
+          const definitions = [...new Set(refs.map((ref) => Number(ref?.definitionId || 0)).filter(Boolean))];
+          return {
+            action: {
+              type: action2?.type || null,
+              destination: action2?.destination || null,
+              description: action2?.description || null,
+              itemRefs: refs
+            },
+            attemptedItems: attemptedItems.map((item) => captureRuntimeInventoryItem(item, {
+              identify: identifyRuntimeInventoryItem
+            })),
+            exactLocations: refs.map((ref) => ({
+              ref,
+              piles: Object.fromEntries(Object.entries(piles).map(([pileName, items]) => [
+                pileName,
+                items.filter((item) => Number(item?.id || 0) === Number(ref?.id || 0)).map((item) => captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem }))
+              ]))
+            })),
+            definitions: Object.fromEntries(definitions.map((definitionId2) => [
+              String(definitionId2),
+              captureDefinitionPileState(piles, definitionId2, { identify: identifyRuntimeInventoryItem })
+            ])),
+            capacity: {
+              storageFree: storageSpaceLeft(),
+              transferFree: transferSpaceLeft()
+            }
+          };
+        } catch (error) {
+          return { diagnosticError: error?.message || String(error) };
+        }
+      };
       const getSnapshot = async () => {
         await options.beforeSnapshot?.();
         const liveItems = getUnassignedItems();
@@ -17852,7 +18038,11 @@
           if (attempt === 1) {
             log(`Unassigned ${action2.description} move is waiting for EA repository settlement (${attempt + 1}/${maxAttempts})`);
           }
+          log(`Unassigned move diagnostic settlement ${attempt + 1}/${maxAttempts}: ${diagnosticJson(captureActionState(action2))}`);
           await sleep(Math.min(1800, 500 + attempt * 250));
+        },
+        onActionNoProgress: async ({ action: action2, attempts }) => {
+          log(`Unassigned move diagnostic no progress after ${attempts} check(s): ${diagnosticJson(captureActionState(action2))}`);
         },
         executeAction: async (action2) => {
           stopPoint();
@@ -17860,22 +18050,30 @@
           if (items.length !== action2.itemRefs.length) {
             fail2(`Unassigned ${action2.description} action could resolve only ${items.length}/${action2.itemRefs.length} item(s)`);
           }
+          activeActionItems = items;
+          log(`Unassigned move diagnostic before: ${diagnosticJson(captureActionState(action2, items))}`);
+          let moveResult;
           if (action2.type === "swap") {
             log(`Swapping ${items.length} untradeable duplicate(s) with tradeable club version(s)`);
-            await moveItems(items, inventoryPile("club"), true);
+            moveResult = await moveItems(items, inventoryPile("club"), true);
           } else if (action2.destination === "club") {
             log(`Moving ${items.length} non-duplicate unassigned item(s) to club`);
-            await moveItems(items, inventoryPile("club"), true);
+            moveResult = await moveItems(items, inventoryPile("club"), true);
           } else if (action2.destination === "transfer") {
             log(`Moving ${items.length} tradeable duplicate(s) to transfer list`);
-            await moveItems(items, inventoryPile("transfer"), false);
+            moveResult = await moveItems(items, inventoryPile("transfer"), false);
           } else if (action2.destination === "storage") {
             log(`Moving ${items.length} untradeable duplicate(s) to SBC storage`);
-            await moveItems(items, inventoryPile("storage"), true);
+            moveResult = await moveItems(items, inventoryPile("storage"), true);
           } else {
             fail2(`Unsupported Unassigned action destination: ${action2.destination}`);
           }
-          await refreshUnassigned();
+          log(`Unassigned move diagnostic result: ${diagnosticJson(captureMoveResult(moveResult))}`);
+          const refreshResult = await refreshUnassigned();
+          log(`Unassigned move diagnostic after refresh: ${diagnosticJson({
+            refresh: captureMoveResult(refreshResult),
+            state: captureActionState(action2, items)
+          })}`);
         }
       });
       if (result.status === "blocked") {
@@ -17965,13 +18163,27 @@
       const restore = (item, responseItem) => {
         if (!responseItem) return;
         const clubDuplicate = findClubDuplicate2(item) || findClubDuplicate2(responseItem);
+        const before = captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem });
         const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
+        const duplicateIdSource = Number(item?.duplicateId || 0) ? "live" : Number(responseItem?.duplicateId || 0) ? "pack-response" : Number(clubDuplicate?.id || 0) ? "club-match" : "none";
         if (duplicateId && !Number(item?.duplicateId || 0)) {
           item.duplicateId = duplicateId;
           if (item._duplicateId !== void 0) item._duplicateId = duplicateId;
           restored++;
         }
         eaInventoryAdapter().preparePurchasedItem(item);
+        const after = captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem });
+        if (diagnosticJson(before) !== diagnosticJson(after)) {
+          log(`${label}: live Unassigned metadata mutation: ${diagnosticJson({
+            duplicateIdSource,
+            sameAsPackResponse: item === responseItem,
+            sameAsClubDuplicate: item === clubDuplicate,
+            before,
+            packResponse: captureRuntimeInventoryItem(responseItem, { identify: identifyRuntimeInventoryItem }),
+            clubDuplicate: captureRuntimeInventoryItem(clubDuplicate, { identify: identifyRuntimeInventoryItem }),
+            after
+          })}`);
+        }
       };
       for (const item of unassignedItems) {
         const responseItem = responseById.get(Number(item?.id || 0));
