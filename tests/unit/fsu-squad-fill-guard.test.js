@@ -30,6 +30,25 @@ describe('FSU native squad fill Club readiness guards', () => {
     expect(section).toContain('events.getItemBy(2,getCriteria,unassigned)');
     expect(section).toContain('events.playerListFillSquad');
     expect(section).toContain('events.requireClubReady("one-click squad fill")');
+    expect(section).toContain('events.emitClubDiagnostic?.(');
+    expect(section).toContain('events.collectOneFillDiagnostic?.(');
+    expect(section).not.toMatch(/(?<![.\w])emitClubDiagnostic\s*\(/);
+    expect(section).not.toMatch(/(?<![.\w])collectOneFillDiagnostic\s*\(/);
+  });
+
+  it('exports fail-safe fill diagnostics beyond reloadPlayers local scope', () => {
+    expect(fsuSource).toContain('events.emitClubDiagnostic = (level, event, summary, details = null) => {');
+    expect(fsuSource).toContain('events.summarizeFillDiagnosticItem = item => {');
+    expect(fsuSource).toContain('events.collectOneFillDiagnostic = (criteria, candidates, selected, unassigned) => {');
+
+    const section = sourceSection(
+      '        events.playerListFillSquad = (challenge,list,type) => {',
+      '        //阵容智能填充',
+    );
+    expect(section).toContain('events.emitClubDiagnostic?.(');
+    expect(section).toContain('events.summarizeFillDiagnosticItem?.(');
+    expect(section).not.toMatch(/(?<![.\w])emitClubDiagnostic\s*\(/);
+    expect(section).not.toMatch(/(?<![.\w])summarizeFillDiagnosticItem\s*\(/);
   });
 
   it('guards Duplicate Fill before it resolves matching Club players', () => {

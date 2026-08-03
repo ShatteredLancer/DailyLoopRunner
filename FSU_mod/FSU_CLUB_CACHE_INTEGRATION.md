@@ -5,7 +5,7 @@
 适用组件：
 
 - FSU 上游基线：`26.09`
-- FSU Local：`26.09.4`，Release 资产 `FSU-Local.user.js`
+- FSU Local：`26.09.5`，Release 资产 `FSU-Local.user.js`
 - Daily Loop Runner：`0.5.39` 起支持 `trusted-provisional` 快速缓存状态
 - FC26 Enhancer：已观察版本 `26.1.5.7`
 - EA FC Web App：2026-07-21 实际页面模型
@@ -868,6 +868,6 @@ FSU Local `26.09.2` 修复了 provisional Club 定向校验的一种误判。某
 
 ### 18.4 One-click Fill 的实际数据源
 
-FSU Local `26.09.4` 更正了对手动 One-click Fill 数据流的判断。`events.getItemBy(type, queryOptions, insertData)` 的基础候选来自 Club + Storage；第三个参数中的 Unassigned 卡只用于把对应 `duplicateId` 提升到排序前部，不会把 Unassigned 实体直接写入阵容。因此 One-click Fill 必须等待 Club Repository ready，且排除可交易、排除联赛、Gold Range、Lock 等 `build`/`set` 设置会过滤真实候选。
+FSU Local `26.09.4` 更正了对手动 One-click Fill 数据流的判断。`events.getItemBy(type, queryOptions, insertData)` 的基础候选来自 Club + Storage；第三个参数中的 Unassigned 卡只用于把对应 `duplicateId` 提升到排序前部，不会把 Unassigned 实体直接写入阵容。因此 One-click Fill 必须等待 Club Repository ready，且排除可交易、排除联赛、Gold Range、Lock 等 `build`/`set` 设置会过滤真实候选。FSU Local `26.09.5` 将该路径的诊断 API 显式导出到共享 `events` 对象，修复了局部 `reloadPlayers()` 作用域之外调用 `emitClubDiagnostic` 导致所有 SBC 一键填充中断的问题；诊断失败现在不会阻断填充主流程。
 
 `playerListFillSquad()` 保留共享 Club readiness guard，One-click Fill 在开始选材前也显式检查 readiness，并输出当前 `build`、`set`、Unassigned signal、候选匹配和排除原因到结构化诊断日志。该边界由 `tests/unit/fsu-squad-fill-guard.test.js` 锁定。

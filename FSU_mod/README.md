@@ -1,6 +1,6 @@
-# FSU Local 26.09.4
+# FSU Local 26.09.5
 
-本目录维护基于上游 FSU `26.09` 的本地版本 `26.09.4`。上游原版保持字节不变，本地版本通过可重放 Git patch 生成并保留原作者和 MIT 许可证。普通用户只需要阅读本文；修改缓存、XHR capture、状态机或 Runner 集成时，继续阅读同目录的 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
+本目录维护基于上游 FSU `26.09` 的本地版本 `26.09.5`。上游原版保持字节不变，本地版本通过可重放 Git patch 生成并保留原作者和 MIT 许可证。普通用户只需要阅读本文；修改缓存、XHR capture、状态机或 Runner 集成时，继续阅读同目录的 [FSU_CLUB_CACHE_INTEGRATION.md](FSU_CLUB_CACHE_INTEGRATION.md)。
 
 ## 文件说明
 
@@ -24,7 +24,7 @@
 https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/FSU-Local.user.js
 ```
 
-维护版保留原版的 `@name` 和 `@namespace`，必须作为原版 FSU 的就地更新安装。Tampermonkey 中只应存在一个启用的 `【FSU】EAFC FUT WEB 增强器`；安装确认页应显示版本升级到 `26.09.4`，而不是新增第二个 FSU 脚本。
+维护版保留原版的 `@name` 和 `@namespace`，必须作为原版 FSU 的就地更新安装。Tampermonkey 中只应存在一个启用的 `【FSU】EAFC FUT WEB 增强器`；安装确认页应显示版本升级到 `26.09.5`，而不是新增第二个 FSU 脚本。
 
 本地版本使用 DailyLoopRunner GitHub Release 的独立 `@downloadURL` 和 `@updateURL`，不会被上游 Greasy Fork 自动覆盖。上游更新不会自动进入本地版本；必须先更新不可变基线、重放或重建补丁并完成真实页面验证。
 
@@ -49,7 +49,7 @@ https://github.com/ShatteredLancer/DailyLoopRunner/releases/latest/download/FSU-
 ## 本地维护模型
 
 - `26.09` 表示不可变上游版本。
-- `26.09.4` 的最后一位表示本地修订号；本地行为变化必须递增。
+- `26.09.5` 的最后一位表示本地修订号；本地行为变化必须递增。
 - 上游升级到新版本时新增对应 origin/mod 基线，不直接覆盖已发布的 `26.09` 文件。
 - `fsu-mod.config.json` 是维护输入，`fsu-mod-manifest.json` 是生成后的 hash 证明。
 - Release 中使用稳定文件名 `FSU-Local.user.js` 和 `FSU-Local.meta.js`，Tampermonkey 按本地版本号更新。

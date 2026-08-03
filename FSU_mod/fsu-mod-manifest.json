@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "upstreamVersion": "26.09",
-  "localVersion": "26.09.4",
+  "localVersion": "26.09.5",
   "upstreamSource": "https://update.greasyfork.org/scripts/431044/%E3%80%90FSU%E3%80%91EAFC%20FUT%20WEB%20%E5%A2%9E%E5%BC%BA%E5%99%A8.user.js",
   "upstreamLicense": "MIT",
   "originFile": "【FSU】EAFC FUT WEB 增强器-26.09_origin.user.js",
@@ -11,7 +11,7 @@
   "releaseUserFile": "FSU-Local.user.js",
   "releaseMetaFile": "FSU-Local.meta.js",
   "originSha256": "A2E0BEB018921CDD334D68BD4AF9BEE843F9F391A98E01E3B27D67E74D6B9634",
-  "modifiedSha256": "D2E2B69AC04A90A6E738B6AF33534CD1C7C9403148DF64C212DBEDE6EF6CB766",
-  "patchSha256": "AFED744A85B0BBD513FA9420CAE1D03EAADCCE77ED2B2FF2CE6EA4FFBE257569",
+  "modifiedSha256": "E3809EE23C3BC362ACE9AD7A29FF46F73DCC7B75A9954AE06EFA7D87ED81ADD0",
+  "patchSha256": "3F34DB945DF02F545395C2714161D3B0ABE6D11D624259719CE530E19CE008D5",
   "generator": "scripts/generate-fsu-patch.mjs"
 }

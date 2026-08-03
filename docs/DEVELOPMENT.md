@@ -80,7 +80,7 @@ Use `Reload Loop` in the Web App. Only the dedicated Hot Reload userscript has `
 FSU Local uses two versions:
 
 - `upstreamVersion`: immutable upstream baseline, currently `26.09`.
-- `localVersion`: local derivative revision, currently `26.09.4`.
+- `localVersion`: local derivative revision, currently `26.09.5`.
 
 The maintained build must keep the upstream userscript identity exactly: `@name 【FSU】EAFC FUT WEB 增强器` and `@namespace https://futcd.com/`. Tampermonkey isolates GM storage by script identity, so changing either field creates a separate settings scope and resets the user's SBC exclusions, ranges, locks, and related preferences. GitHub release ownership is expressed through the version, description, homepage/support URL, and update/download URL instead.
 

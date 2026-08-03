@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         【FSU】EAFC FUT WEB 增强器
 // @namespace    https://futcd.com/
-// @version      26.09.4
+// @version      26.09.5
 // @description  Local maintained FSU 26.09 build with validated Club cache and scoped payload optimizations.
 // @author       Futcd_kcka
 // @contributor  ShatteredLancer
@@ -7230,6 +7230,23 @@
                     })
                 };
             };
+            events.emitClubDiagnostic = (level, event, summary, details = null) => {
+                try{
+                    emitClubDiagnostic(level, event, summary, details);
+                    return true;
+                }catch(error){
+                    try{ console.warn("[FSU club diagnostic] emit failed", error); }catch(ignore){}
+                    return false;
+                }
+            };
+            events.summarizeFillDiagnosticItem = item => {
+                try{ return summarizeFillDiagnosticItem(item); }catch(error){ return null; }
+            };
+            events.collectOneFillDiagnostic = (criteria, candidates, selected, unassigned) => {
+                try{ return collectOneFillDiagnostic(criteria, candidates, selected, unassigned); }catch(error){
+                    return { diagnosticError:String(error?.message || error) };
+                }
+            };
             const describeDiagnosticObject = (label, target) => {
                 if(!target) return { label, available:false };
                 const levels = [];
@@ -10535,13 +10552,13 @@
         //指定ID填充SBC
         events.playerListFillSquad = (challenge,list,type) => {
             if(!events.requireClubReady("squad fill")) return false;
-            emitClubDiagnostic("log", "squad-fill-input", `squad fill received ${list?.length || 0} player(s)`, {
+            events.emitClubDiagnostic?.("log", "squad-fill-input", `squad fill received ${list?.length || 0} player(s)`, {
                 challenge:{ id:challenge?.id, setId:challenge?.setId, name:challenge?.name, formation:challenge?.formation },
                 type,
                 clubState:Boolean(info.base.state),
                 clubCacheStatus:info.base.clubCache?.status || null,
                 enhancer:Boolean(info.isEnhancer),
-                input:Array.from(list || []).map(summarizeFillDiagnosticItem)
+                input:Array.from(list || []).map(item => events.summarizeFillDiagnosticItem?.(item))
             });
             events.showLoader();
             let playerlist = [],substitute = Array.from(list);
@@ -10574,16 +10591,16 @@
                     }
                 }
             })
-            emitClubDiagnostic("log", "squad-fill-mapped", `squad fill mapped ${playerlist.filter(Boolean).length} player(s)`, {
+            events.emitClubDiagnostic?.("log", "squad-fill-mapped", `squad fill mapped ${playerlist.filter(Boolean).length} player(s)`, {
                 challenge:{ id:challenge?.id, setId:challenge?.setId, name:challenge?.name },
                 type,
-                mapped:playerlist.map(summarizeFillDiagnosticItem)
+                mapped:playerlist.map(item => events.summarizeFillDiagnosticItem?.(item))
             });
             events.loadPlayerInfo(playerlist)
             events.saveSquad(challenge,challenge.squad,playerlist,[]);
-            emitClubDiagnostic("log", "squad-fill-saved", "squad fill saveSquad returned", {
+            events.emitClubDiagnostic?.("log", "squad-fill-saved", "squad fill saveSquad returned", {
                 challenge:{ id:challenge?.id, setId:challenge?.setId, name:challenge?.name },
-                squad:Array.from(challenge?.squad?.getPlayers?.() || []).map(slot => summarizeFillDiagnosticItem(slot?.item || slot))
+                squad:Array.from(challenge?.squad?.getPlayers?.() || []).map(slot => events.summarizeFillDiagnosticItem?.(slot?.item || slot))
             });
             //events.hideLoader();
             events.saveOldSquad(challenge.squad,false);
@@ -16705,7 +16722,7 @@
                             fy("autofill.btntext"),
                             (e) => {
                                 const unassigned = Array.from(repositories.Item.getUnassignedItems() || []);
-                                emitClubDiagnostic("log", "one-click-fill-start", `one-click fill started with ${unassigned.length} Unassigned item(s)`, {
+                                events.emitClubDiagnostic?.("log", "one-click-fill-start", `one-click fill started with ${unassigned.length} Unassigned item(s)`, {
                                     challenge:{ id:thisController?._challenge?.id, setId:thisController?._challenge?.setId, name:thisController?._challenge?.name },
                                     oneFillCriteria:_.cloneDeep(oneFillCriteria),
                                     clubState:Boolean(info.base.state),
@@ -16727,10 +16744,10 @@
                                         shieldFlagIds:Array.isArray(info.set.shield_flag) ? info.set.shield_flag.slice() : [],
                                         lockedIds:Array.isArray(info.lock) ? info.lock.slice() : []
                                     },
-                                    unassigned:unassigned.map(summarizeFillDiagnosticItem)
+                                    unassigned:unassigned.map(item => events.summarizeFillDiagnosticItem?.(item))
                                 });
                                 if(!events.requireClubReady("one-click squad fill")){
-                                    emitClubDiagnostic("warn", "one-click-fill-blocked", "one-click fill blocked until Club data is ready", {
+                                    events.emitClubDiagnostic?.("warn", "one-click-fill-blocked", "one-click fill blocked until Club data is ready", {
                                         clubState:Boolean(info.base.state),
                                         clubCacheStatus:info.base.clubCache?.status || null
                                     });
@@ -16744,7 +16761,7 @@
                                     getCriteria = events.ignorePlayerToCriteria(getCriteria);
                                     const candidates = events.getItemBy(2,getCriteria,unassigned);
                                     playerList = candidates.slice(0,criteriaNumber);
-                                    emitClubDiagnostic("log", "one-click-fill-criteria", `one-click fill broad criteria selected ${playerList.length}/${criteriaNumber}`, collectOneFillDiagnostic(getCriteria, candidates, playerList, unassigned));
+                                    events.emitClubDiagnostic?.("log", "one-click-fill-criteria", `one-click fill broad criteria selected ${playerList.length}/${criteriaNumber}`, events.collectOneFillDiagnostic?.(getCriteria, candidates, playerList, unassigned));
                                 }else{
                                     for (let i of oneFillCriteria) {
                                         let getCriteria = JSON.parse(JSON.stringify(i.t));
@@ -16756,14 +16773,14 @@
                                         let result = events.getItemBy(2, getCriteria, unassigned);
                                         let cropping = result.slice(0, i.c);
                                         console.log(cropping,_.map(cropping,"rating"))
-                                        emitClubDiagnostic("log", "one-click-fill-criteria", `one-click fill criterion selected ${cropping.length}/${i.c}`, collectOneFillDiagnostic(getCriteria, result, cropping, unassigned));
+                                        events.emitClubDiagnostic?.("log", "one-click-fill-criteria", `one-click fill criterion selected ${cropping.length}/${i.c}`, events.collectOneFillDiagnostic?.(getCriteria, result, cropping, unassigned));
                                         removeIds = removeIds.concat(cropping.map( i => {return i.databaseId}))
                                         playerList = playerList.concat(cropping)
                                     }
                                 }
-                                emitClubDiagnostic("log", "one-click-fill-selected", `one-click fill selected ${playerList.length} player(s)`, {
+                                events.emitClubDiagnostic?.("log", "one-click-fill-selected", `one-click fill selected ${playerList.length} player(s)`, {
                                     challenge:{ id:thisController?._challenge?.id, setId:thisController?._challenge?.setId, name:thisController?._challenge?.name },
-                                    selected:playerList.map(summarizeFillDiagnosticItem)
+                                    selected:playerList.map(item => events.summarizeFillDiagnosticItem?.(item))
                                 });
                                 if(playerList.length){
                                     events.playerListFillSquad(thisController._challenge,playerList,2);
