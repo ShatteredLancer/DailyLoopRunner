@@ -315,7 +315,7 @@ function dailyRarePack80x5StarterConfig(baseConfig) {
         ...goldRequirement,
         tier: 'gold',
         count: 9,
-        preferCommon: true,
+        goldConsumption: 'common-first',
       }],
     },
     sourceExhaustedFallbackActivityFamily: 'common-gold-material-upgrade',

@@ -1,3 +1,5 @@
+import { readPlayerRareFlag } from '../domain/player-rarity.js';
+
 function itemId(item) {
   return Number(item?.id || item?.ref?.id || 0);
 }
@@ -15,7 +17,7 @@ function itemRoutingSignature(item) {
   if (!definition) return null;
   const type = String(item?.type || item?._itemType || item?._type || 'unknown').toLowerCase();
   const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
-  const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+  const rareflag = readPlayerRareFlag(item);
   let untradeable = 'unknown';
   try {
     if (typeof item?.isUntradeable === 'function') untradeable = item.isUntradeable() ? 'yes' : 'no';
@@ -35,7 +37,7 @@ function itemStaticRoutingSignature(item) {
   if (!definition) return null;
   const type = String(item?.type || item?._itemType || item?._type || 'unknown').toLowerCase();
   const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
-  const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+  const rareflag = readPlayerRareFlag(item);
   return `${type}:${definition}:${rating}:${rareflag}`;
 }
 

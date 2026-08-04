@@ -1,4 +1,8 @@
 import { createSelectionPlan, INVENTORY_PILES } from '../domain/contracts.js';
+import {
+  goldConsumptionOrder,
+  runtimeGoldConsumptionMode,
+} from '../domain/gold-consumption.js';
 
 function numberSet(values = []) {
   return new Set((values || []).map(Number).filter((value) => Number.isFinite(value) && value > 0));
@@ -45,6 +49,8 @@ function itemMatchesRequirement(item, requirement = {}) {
   if (requirement.tier && item.tier !== requirement.tier) return false;
   if (requirement.rarity === 'rare' && !item.rare) return false;
   if (requirement.rarity === 'common' && item.rare) return false;
+  if (requirement.selectionRarity === 'rare' && !item.rare) return false;
+  if (requirement.selectionRarity === 'common' && item.rare) return false;
   return true;
 }
 
@@ -120,14 +126,24 @@ function findSubmissionItem(signal, snapshot, usedIds, requirement, fsuPolicy, p
 }
 
 function requirementSelectionPhases(requirement = {}, hasPreferredSignals = false) {
-  const preferCommon = requirement.preferCommon === true
-    && requirement.tier === 'gold'
-    && requirement.rarity === undefined;
-  if (!preferCommon) return [{ requirement, preferredOnly: false }];
+  const mode = runtimeGoldConsumptionMode(requirement);
+  const configuredOrder = goldConsumptionOrder(mode);
+  if (!configuredOrder.length) return [{ requirement, preferredOnly: false }];
+  const rarityOrder = configuredOrder
+    .filter((rarity) => requirement.rarity === undefined || requirement.rarity === rarity);
+  if (!rarityOrder.length) {
+    return [{
+      requirement: { ...requirement, selectionRarity: configuredOrder[0] },
+      preferredOnly: false,
+    }];
+  }
+  const fallbackMode = ['common-first', 'rare-first'].includes(mode);
   return [
-    ...(hasPreferredSignals ? [{ requirement, preferredOnly: true }] : []),
-    { requirement: { ...requirement, rarity: 'common' }, preferredOnly: false },
-    { requirement: { ...requirement, rarity: 'rare' }, preferredOnly: false },
+    ...(hasPreferredSignals && fallbackMode ? [{ requirement, preferredOnly: true }] : []),
+    ...rarityOrder.map((rarity) => ({
+      requirement: { ...requirement, selectionRarity: rarity },
+      preferredOnly: false,
+    })),
   ];
 }
 

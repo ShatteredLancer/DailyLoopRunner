@@ -219,12 +219,11 @@ describe('Workflow and Loop Builder view', () => {
           family: 'common-gold-material-upgrade',
           classes: ['premium'],
           preference: 'reward-first',
-          selectionMaterial: 'rare-gold',
           category: 'Upgrades',
           required: true,
         },
         sbcNames: ['Compatibility Upgrade'],
-        requirements: [{ tier: 'gold', rarity: 'common', count: 9 }],
+        requirements: [{ tier: 'gold', count: 9, goldConsumption: 'rare-only' }],
       }],
     };
     const html = workflowLoopBuilderHtml(model({
@@ -244,9 +243,9 @@ describe('Workflow and Loop Builder view', () => {
     expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.classes"');
     expect(html).toContain('<option value="premium" selected>premium</option>');
     expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.preference"');
-    expect(html).toContain('data-builder-field="craftingUpgrades.0.activityBinding.selectionMaterial"');
-    expect(html).toContain('<option value="low-rated-gold">Low-rated Gold (Common first)</option>');
-    expect(html).toContain('<option value="rare-gold" selected>Rare Gold only</option>');
+    expect(html).not.toContain('data-builder-field="craftingUpgrades.0.activityBinding.selectionMaterial"');
+    expect(html).toContain('data-builder-field="craftingUpgrades.0.requirements.0.goldConsumption"');
+    expect(html).toContain('<option value="rare-only" selected>Rare only</option>');
   });
 
   it('renders a dynamic activity family selector for source-exhausted fallback', () => {

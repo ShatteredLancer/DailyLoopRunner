@@ -1,3 +1,5 @@
+import { readPlayerRareFlag } from '../domain/player-rarity.js';
+
 function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
@@ -58,7 +60,7 @@ export function captureRuntimeInventoryItem(item, options = {}) {
       id: numberOrNull(item.id ?? item.itemId ?? item._data?.id),
       definitionId: numberOrNull(item.definitionId ?? item.defId ?? item._data?.definitionId),
       rating: numberOrNull(item.rating ?? item._data?.rating),
-      rareflag: numberOrNull(item.rareflag ?? item.rareFlag ?? item._data?.rareflag),
+      rareflag: readPlayerRareFlag(item),
       pile: primitiveOrNull(item.pile),
       privatePile: primitiveOrNull(item._pile),
       dataPile: primitiveOrNull(item._data?.pile),

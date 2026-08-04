@@ -62,7 +62,7 @@ describe('basic Upgrade activity discovery', () => {
     expect(parsed.diagnostics.join(' ')).toContain('CHEMISTRY_POINTS');
   });
 
-  it('uses the Set name when EA omits Pack text and keeps unrestricted Gold sinks common-only', () => {
+  it('uses the Set name when EA omits Pack text and preserves unrestricted Gold eligibility', () => {
     const common = parseBasicUpgradeActivitySnapshot({
       set: set({
         id: 501,
@@ -78,7 +78,8 @@ describe('basic Upgrade activity discovery', () => {
         expect.objectContaining({ familyId: 'common-gold-crafting-upgrade' }),
         expect.objectContaining({
           familyId: 'common-gold-material-upgrade',
-          requirements: [{ tier: 'gold', rarity: 'common', count: 9 }],
+          requirements: [{ tier: 'gold', count: 9 }],
+          eligibilityRequirements: [{ tier: 'gold', count: 9 }],
           materialSink: expect.objectContaining({
             material: 'common-gold',
             className: 'premium',
@@ -145,7 +146,7 @@ describe('basic Upgrade activity discovery', () => {
       sbcSetIds: [503],
       dynamicSbcFamily: 'common-gold-material-upgrade',
       materialSinkClass: 'premium',
-      requirements: [{ tier: 'gold', rarity: 'rare', count: 9, maxRating: 81 }],
+      requirements: [{ tier: 'gold', count: 9, maxRating: 81, goldConsumption: 'rare-only' }],
     });
 
     const rejected = buildActivityBindingSession({ sets: [commonOnly], configuredLoops: [loop] });
@@ -178,11 +179,10 @@ describe('basic Upgrade activity discovery', () => {
           family: 'common-gold-material-upgrade',
           classes: ['premium'],
           preference: 'quantity-first',
-          selectionMaterial: 'low-rated-gold',
           required: true,
         },
         sbcNames: ['Compatibility'],
-        requirements: [{ tier: 'gold', count: 9, preferCommon: true }],
+        requirements: [{ tier: 'gold', count: 9, goldConsumption: 'common-first' }],
       },
     };
 
@@ -191,13 +191,13 @@ describe('basic Upgrade activity discovery', () => {
       name: '5x 80+ Upgrade',
       sbcSetIds: [505],
       dynamicSbcFamily: 'common-gold-material-upgrade',
-      requirements: [{ tier: 'gold', count: 8, preferCommon: true }],
+      requirements: [{ tier: 'gold', count: 8, goldConsumption: 'common-first' }],
     });
     expect(session.loopOverrides[loop.id].rareUpgrade.requirements[0].rarity).toBeUndefined();
 
     const rejected = buildActivityBindingSession({ sets: [commonOnly], configuredLoops: [loop] });
     expect(rejected.loopOverrides).toEqual({});
-    expect(rejected.diagnostics.join(' ')).toContain('selection material low-rated-gold');
+    expect(rejected.diagnostics.join(' ')).toContain('has no candidate');
   });
 
   it('materializes direct, nested and recovery bindings while preserving safety policy', () => {

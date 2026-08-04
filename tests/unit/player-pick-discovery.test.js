@@ -134,7 +134,7 @@ describe('dynamic Player Pick SBC discovery', () => {
     });
     result.loop.challengeRequirements.forEach((requirements) => {
       expect(requirements).toEqual([
-        expect.objectContaining({ tier: 'gold', count: 10, preferCommon: true }),
+        expect.objectContaining({ tier: 'gold', count: 10, goldConsumption: 'common-first' }),
       ]);
       expect(requirements[0]).not.toHaveProperty('rarity');
     });
@@ -176,7 +176,7 @@ describe('dynamic Player Pick SBC discovery', () => {
     expect(result.loop.challengeRequirements).toHaveLength(2);
     result.loop.challengeRequirements.forEach((requirements) => {
       expect(requirements).toEqual([
-        expect.objectContaining({ tier: 'gold', count: 10, preferCommon: true }),
+        expect.objectContaining({ tier: 'gold', count: 10, goldConsumption: 'common-first' }),
       ]);
     });
     expect(result.diagnostics).toEqual([
@@ -471,7 +471,7 @@ describe('dynamic Player Pick SBC discovery', () => {
       discovered: true,
       sbcSetIds: [1],
       pickItemResourceIds: [10],
-      requirements: [{ tier: 'gold', count: 10, preferCommon: true }],
+      requirements: [{ tier: 'gold', count: 10, goldConsumption: 'common-first' }],
     };
     const rareRequired = {
       id: 'rare',

@@ -23,7 +23,9 @@ describe('generic Loop recap', () => {
   it('requires a Rare Gold or Special player before creating a recap', () => {
     expect(isRecapRareGoldOrAbove(item())).toBe(false);
     expect(isRecapRareGoldOrAbove(item({ rare: true }))).toBe(true);
+    expect(isRecapRareGoldOrAbove(item({ _staticData: { rareflag: 1 } }))).toBe(true);
     expect(isRecapRareGoldOrAbove(item({ special: true, rareflag: 7 }))).toBe(true);
+    expect(isRecapRareGoldOrAbove(item({ _data: { rareFlag: 7 } }))).toBe(true);
     expect(hasRecapRareGoldOrAbove([{ type: 'non-player' }, item({ rare: true })])).toBe(true);
     expect(createLoopRecapModel({ name: 'Bronze Loop', openedItems: [item()] })).toBeNull();
   });

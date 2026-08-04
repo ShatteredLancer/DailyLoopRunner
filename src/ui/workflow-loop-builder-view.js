@@ -145,11 +145,6 @@ function renderActivityBinding(path, value, context) {
       ${enabled ? fieldRow('Category', textInput(`${path}.category`, value.category || 'Upgrades', 'text', true)) : ''}
       ${materialSink ? fieldRow('Accepted classes', `<select multiple size="4" data-builder-field="${path}.classes" data-builder-value-type="string-list"${disabled(context.readOnly)}>${MATERIAL_SINK_CLASSES.map((className) => `<option value="${className}"${classes.includes(className) ? ' selected' : ''}>${className}</option>`).join('')}</select>`) : ''}
       ${materialSink ? fieldRow('Preference', selectInput(`${path}.preference`, value.preference, MATERIAL_SINK_PREFERENCES.map((preference) => ({ value: preference, label: preference })), context.readOnly, true)) : ''}
-      ${materialSink ? fieldRow('Selection material', selectInput(`${path}.selectionMaterial`, value.selectionMaterial, [
-        { value: 'common-gold', label: 'Common Gold only' },
-        { value: 'low-rated-gold', label: 'Low-rated Gold (Common first)' },
-        { value: 'rare-gold', label: 'Rare Gold only' },
-      ], context.readOnly, true)) : ''}
     </div>
   </section>`;
 }
@@ -180,8 +175,15 @@ function renderCardSpec(path, spec = {}, context, options = {}) {
     ${fieldRow('Tier', selectInput(`${prefix}tier`, spec.tier, [
       { value: '', label: 'Any' }, { value: 'bronze', label: 'Bronze' }, { value: 'silver', label: 'Silver' }, { value: 'gold', label: 'Gold' },
     ], context.readOnly))}
-    ${fieldRow('Rarity', selectInput(`${prefix}rarity`, spec.rarity, [
+    ${fieldRow('SBC rarity eligibility', selectInput(`${prefix}rarity`, spec.rarity, [
       { value: '', label: 'Any' }, { value: 'common', label: 'Common' }, { value: 'rare', label: 'Rare' },
+    ], context.readOnly))}
+    ${fieldRow('Gold consumption', selectInput(`${prefix}goldConsumption`, spec.goldConsumption || (spec.preferCommon === true ? 'common-first' : 'eligibility'), [
+      { value: 'eligibility', label: 'Follow SBC eligibility' },
+      { value: 'common-only', label: 'Common only' },
+      { value: 'rare-only', label: 'Rare only' },
+      { value: 'common-first', label: 'Common first, then Rare' },
+      { value: 'rare-first', label: 'Rare first, then Common' },
     ], context.readOnly))}
     ${options.withCount !== false ? fieldRow('Count', textInput(`${prefix}count`, spec.count ?? 1, 'number', context.readOnly)) : ''}
     ${fieldRow('Min rating', textInput(`${prefix}minRating`, spec.minRating, 'number', context.readOnly))}
@@ -189,7 +191,6 @@ function renderCardSpec(path, spec = {}, context, options = {}) {
     ${fieldRow('Special cards', `<select data-builder-field="${escapeHtml(`${prefix}allowSpecial`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.allowSpecial)}</select>`)}
     ${fieldRow('Player only', `<select data-builder-field="${escapeHtml(`${prefix}playerOnly`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.playerOnly)}</select>`)}
     ${fieldRow('Require special', `<select data-builder-field="${escapeHtml(`${prefix}special`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.special)}</select>`)}
-    ${fieldRow('Prefer Common', `<select data-builder-field="${escapeHtml(`${prefix}preferCommon`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.preferCommon)}</select>`)}
     <div class="wide">${renderPileList(`${prefix}priorityPiles`, 'Pile order', spec.priorityPiles, context)}</div>
     ${options.removable ? `<button class="dlr-builder-remove-inline" data-builder-action="remove-list" data-path="${escapeHtml(options.listPath)}" data-index="${options.index}"${disabled(context.readOnly)}>Remove</button>` : ''}
   </div>`;

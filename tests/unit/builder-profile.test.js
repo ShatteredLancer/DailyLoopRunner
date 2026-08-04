@@ -153,7 +153,7 @@ describe('Builder profiles', () => {
           preference: 'quantity-first',
           required: true,
         },
-        requirements: [expect.objectContaining({ tier: 'gold', count: 9, preferCommon: true })],
+        requirements: [expect.objectContaining({ tier: 'gold', count: 9, goldConsumption: 'common-first' })],
       },
     });
     const quantityLoop = quantityProfile.savedConfig.loops.find((loop) => loop.id === 'daily-rare-pack-80x5');

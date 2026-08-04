@@ -82,7 +82,7 @@ describe('Rare Pack recycling preflight', () => {
         rewardPackIds: [30060],
         rewardPackNames: ['5x 80+ Rare Gold Players Pack'],
         sbcNames: ['5x 80+ Upgrade'],
-        requirements: [{ tier: 'gold', count: 9, preferCommon: true }],
+        requirements: [{ tier: 'gold', count: 9, goldConsumption: 'common-first' }],
       },
     });
 

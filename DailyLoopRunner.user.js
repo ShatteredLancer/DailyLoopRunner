@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.10
+// @version      0.7.20
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -28,7 +28,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.10",
+    version: "0.7.20",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -487,7 +487,6 @@
             family: "common-gold-material-upgrade",
             classes: ["premium"],
             preference: "reward-first",
-            selectionMaterial: "low-rated-gold",
             category: "Upgrades",
             required: true
           },
@@ -496,7 +495,7 @@
             {
               tier: "gold",
               count: 9,
-              preferCommon: true,
+              goldConsumption: "common-first",
               playerOnly: true,
               allowSpecial: false,
               priorityPiles: ["unassigned", "storage", "transfer", "club"]
@@ -875,6 +874,78 @@
       total: limits.reduce((sum, step) => sum + step.limit, 0),
       text: limits.map((step) => `${step.name}: ${step.policy}`).join("; ")
     };
+  }
+
+  // src/domain/gold-consumption.js
+  var GOLD_CONSUMPTION_MODES = Object.freeze([
+    "eligibility",
+    "common-only",
+    "rare-only",
+    "common-first",
+    "rare-first"
+  ]);
+  var SELECTION_MATERIAL_MODES = Object.freeze({
+    "common-gold": "common-only",
+    "rare-gold": "rare-only",
+    "low-rated-gold": "common-first"
+  });
+  function selectionMaterialGoldConsumptionMode(selectionMaterial) {
+    return SELECTION_MATERIAL_MODES[String(selectionMaterial || "")] || null;
+  }
+  function normalizeGoldConsumptionMode(value, fallback = "eligibility") {
+    const normalized = String(value || "").trim();
+    return GOLD_CONSUMPTION_MODES.includes(normalized) ? normalized : fallback;
+  }
+  function runtimeGoldConsumptionMode(requirement2 = {}) {
+    if (requirement2.tier !== "gold") return "eligibility";
+    if (requirement2.goldConsumption !== void 0) {
+      return normalizeGoldConsumptionMode(requirement2.goldConsumption);
+    }
+    if (requirement2.preferCommon === true) return "common-first";
+    return "eligibility";
+  }
+  function configuredGoldConsumptionMode(requirement2 = {}, selectionMaterial = null) {
+    if (requirement2.tier !== "gold") return "eligibility";
+    if (requirement2.goldConsumption !== void 0) {
+      return normalizeGoldConsumptionMode(requirement2.goldConsumption);
+    }
+    const materialMode = selectionMaterialGoldConsumptionMode(selectionMaterial);
+    if (materialMode) return materialMode;
+    if (requirement2.preferCommon === true) return "common-first";
+    if (requirement2.rarity === "common") return "common-only";
+    if (requirement2.rarity === "rare") return "rare-only";
+    return "eligibility";
+  }
+  function goldEligibilityRarities(requirement2 = {}) {
+    if (requirement2.tier !== "gold") return [];
+    if (requirement2.rarity === "common") return ["common"];
+    if (requirement2.rarity === "rare") return ["rare"];
+    return ["common", "rare"];
+  }
+  function goldConsumptionRarities(mode = "eligibility") {
+    const normalized = normalizeGoldConsumptionMode(mode);
+    if (normalized === "common-only") return ["common"];
+    if (normalized === "rare-only") return ["rare"];
+    return ["common", "rare"];
+  }
+  function goldConsumptionCompatible(requirement2 = {}, mode = "eligibility", options = {}) {
+    if (requirement2.tier !== "gold") return true;
+    const eligible = new Set(goldEligibilityRarities(requirement2));
+    const normalized = normalizeGoldConsumptionMode(mode);
+    if (normalized === "eligibility") return eligible.size > 0;
+    const desired = goldConsumptionRarities(normalized);
+    if (options.requireFallback === true && ["common-first", "rare-first"].includes(normalized)) {
+      return desired.every((rarity) => eligible.has(rarity));
+    }
+    return desired.some((rarity) => eligible.has(rarity));
+  }
+  function goldConsumptionOrder(mode = "eligibility") {
+    const normalized = normalizeGoldConsumptionMode(mode);
+    if (normalized === "common-only") return ["common"];
+    if (normalized === "rare-only") return ["rare"];
+    if (normalized === "common-first") return ["common", "rare"];
+    if (normalized === "rare-first") return ["rare", "common"];
+    return [];
   }
 
   // src/domain/strategies.js
@@ -1296,6 +1367,36 @@
     return Math.floor(Math.round(adjustedTotal) / count);
   }
 
+  // src/domain/player-rarity.js
+  function callBoolean(item, method) {
+    try {
+      const value = item?.[method]?.();
+      return typeof value === "boolean" ? value : null;
+    } catch {
+      return null;
+    }
+  }
+  function readPlayerRareFlag(item = {}) {
+    const values = [
+      item.rareflag,
+      item.rareFlag,
+      item._rareflag,
+      item._data?.rareflag,
+      item._data?.rareFlag,
+      item._staticData?.rareflag,
+      item._staticData?.rareFlag
+    ].map(Number).filter(Number.isFinite);
+    if (item.special === true || callBoolean(item, "isSpecial") === true) values.push(2);
+    if (item.rare === true || callBoolean(item, "isRare") === true) values.push(1);
+    return values.length ? Math.max(0, ...values) : 0;
+  }
+  function isRarePlayerCard(item = {}) {
+    return readPlayerRareFlag(item) > 0;
+  }
+  function isSpecialPlayerCard(item = {}) {
+    return readPlayerRareFlag(item) > 1;
+  }
+
   // src/selection/rating-model.js
   var PLAYER_REQUIREMENT_KEYS = /* @__PURE__ */ new Set([
     "PLAYER_QUALITY",
@@ -1359,9 +1460,6 @@
       };
     });
   }
-  function rareFlag(item) {
-    return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
-  }
   function matchesDynamicRequirement(item, requirement2, keyName, rawValues, matchers) {
     try {
       if (typeof requirement2?.meetsRequirements === "function") {
@@ -1379,7 +1477,7 @@
           (value) => value === 1 && matchers.isBronze(item) || value === 2 && matchers.isSilver(item) || value === 3 && matchers.isGold(item) || value === 4 && matchers.isSpecialItem(item)
         );
       case "PLAYER_RARITY":
-        return values.includes(rareFlag(item));
+        return values.includes(readPlayerRareFlag(item));
       case "PLAYER_RARITY_GROUP":
         return values.some((value) => matchers.itemGroupNumbers(item).includes(value));
       case "PLAYER_MIN_OVR":
@@ -1887,7 +1985,7 @@
     if (requirements[0].rarity === "rare") return MATERIAL_SINK_FAMILIES.rareGold;
     return MATERIAL_SINK_FAMILIES.commonGold;
   }
-  function materialSinkSelectionRequirements(requirements = [], familyId) {
+  function materialSinkFamilyRequirements(requirements = [], familyId) {
     if (familyId !== MATERIAL_SINK_FAMILIES.commonGold) return requirements;
     return requirements.map((requirement2) => requirement2.tier === "gold" && !requirement2.rarity ? { ...requirement2, rarity: "common" } : requirement2);
   }
@@ -1935,8 +2033,8 @@
     if (diagnostics.length) return { status: "unsupported", setId, diagnostics: unique(diagnostics) };
     const identityText = activityIdentityText(set, rewards);
     const sinkFamilyId = materialSinkFamily(parsedChallenge.requirements);
-    const sinkRequirements = materialSinkSelectionRequirements(parsedChallenge.requirements, sinkFamilyId);
-    const family = FAMILY_DEFS.find((candidate) => (requirementsEqual(candidate.requirements, parsedChallenge.requirements) || requirementsEqual(candidate.requirements, sinkRequirements)) && (!candidate.identityPattern || candidate.identityPattern.test(identityText)));
+    const familyRequirements = materialSinkFamilyRequirements(parsedChallenge.requirements, sinkFamilyId);
+    const family = FAMILY_DEFS.find((candidate) => (requirementsEqual(candidate.requirements, parsedChallenge.requirements) || requirementsEqual(candidate.requirements, familyRequirements)) && (!candidate.identityPattern || candidate.identityPattern.test(identityText)));
     const sinkBaseline = MATERIAL_SINK_BASELINES[sinkFamilyId];
     const sinkReward = sinkFamilyId ? parseMaterialSinkReward(rewards.packs[0], { fallbackText: setName, fallbackRarity: "rare" }) : null;
     const sinkClassification = sinkBaseline && sinkReward ? classifyMaterialSinkCandidate({
@@ -1978,7 +2076,7 @@
         familyId: sinkFamilyId,
         setId,
         setName,
-        requirements: sinkRequirements,
+        requirements: parsedChallenge.requirements,
         eligibilityRequirements: parsedChallenge.requirements,
         rewards,
         remaining,
@@ -2002,69 +2100,58 @@
       diagnostics: []
     };
   }
-  function selectionMaterialRarity(selectionMaterial) {
-    if (selectionMaterial === "common-gold") return "common";
-    if (selectionMaterial === "rare-gold") return "rare";
-    return null;
+  function requirementAcceptsConfiguredConsumption(eligibilityRequirement = {}, configuredRequirement = {}, selectionMaterial = null) {
+    if (eligibilityRequirement.tier !== configuredRequirement.tier) return false;
+    if (eligibilityRequirement.tier !== "gold") {
+      return (eligibilityRequirement.rarity || null) === (configuredRequirement.rarity || null);
+    }
+    const mode = configuredGoldConsumptionMode(configuredRequirement, selectionMaterial);
+    return goldConsumptionCompatible(eligibilityRequirement, mode, {
+      requireFallback: ["common-first", "rare-first"].includes(mode)
+    });
   }
-  function requirementPolicyMatch(requirement2, configured = [], selectionMaterial = null) {
-    const exact = configured.find((candidate) => candidate?.tier === requirement2.tier && (candidate?.rarity || null) === (requirement2.rarity || null));
-    if (exact) return exact;
-    const selectionRarity = selectionMaterialRarity(selectionMaterial);
-    if (!selectionRarity || requirement2?.tier !== "gold") return null;
-    return configured.find((candidate) => candidate?.tier === "gold" && candidate?.rarity === selectionRarity) || null;
+  function configuredRequirementPolicy(requirement2 = {}, selectionMaterial = null) {
+    const policy = clone(requirement2);
+    delete policy.tier;
+    delete policy.rarity;
+    delete policy.count;
+    delete policy.preferCommon;
+    delete policy.goldConsumption;
+    const mode = configuredGoldConsumptionMode(requirement2, selectionMaterial);
+    if (requirement2.tier === "gold" && mode !== "eligibility") policy.goldConsumption = mode;
+    return policy;
   }
-  function applySelectionMaterial(requirements = [], selectionMaterial = null) {
-    const rarity = selectionMaterialRarity(selectionMaterial);
-    if (!rarity) return requirements;
-    return requirements.map((requirement2) => requirement2?.tier === "gold" ? { ...requirement2, rarity } : requirement2);
-  }
-  function hasUnrestrictedGoldEligibility(eligibilityRequirements = [], configuredRequirement = {}, selectionMaterial = null) {
-    if (configuredRequirement?.tier !== "gold" || configuredRequirement?.rarity !== void 0 || configuredRequirement?.preferCommon !== true) return false;
-    return eligibilityRequirements.some((requirement2) => requirement2?.tier === "gold" && requirement2?.rarity === void 0 && (selectionMaterial === "low-rated-gold" || Number(requirement2?.count || 0) === Number(configuredRequirement?.count || 0)));
-  }
-  function mergeRequirements(scanned = [], configured = [], selectionMaterial = null, eligibilityRequirements = []) {
+  function mergeRequirements(scanned = [], configured = [], selectionMaterial = null) {
     const remaining = [...scanned];
     const merged = [];
     for (const configuredRequirement of configured) {
-      if (hasUnrestrictedGoldEligibility(
-        eligibilityRequirements,
+      const index = remaining.findIndex((requirement3) => requirementAcceptsConfiguredConsumption(
+        requirement3,
         configuredRequirement,
         selectionMaterial
-      )) {
-        const index2 = remaining.findIndex((requirement3) => requirement3?.tier === "gold" && (selectionMaterial === "low-rated-gold" || Number(requirement3?.count || 0) === Number(configuredRequirement?.count || 0)));
-        if (index2 >= 0) {
-          const [requirement3] = remaining.splice(index2, 1);
-          merged.push({ ...clone(configuredRequirement), count: Number(requirement3.count || configuredRequirement.count) });
-          continue;
-        }
-      }
-      let index = remaining.findIndex((requirement3) => requirement3.tier === configuredRequirement?.tier && (requirement3.rarity || null) === (configuredRequirement?.rarity || null));
-      if (index < 0 && selectionMaterialRarity(selectionMaterial) === configuredRequirement?.rarity) {
-        index = remaining.findIndex((requirement3) => requirement3?.tier === configuredRequirement?.tier);
-      }
+      ));
       if (index < 0) continue;
       const [requirement2] = remaining.splice(index, 1);
-      merged.push({ ...clone(configuredRequirement), ...clone(requirement2) });
+      merged.push({
+        ...configuredRequirementPolicy(configuredRequirement, selectionMaterial),
+        ...clone(requirement2)
+      });
     }
     return [
       ...merged,
-      ...remaining.map((requirement2) => ({
-        ...clone(requirementPolicyMatch(requirement2, configured, selectionMaterial) || {}),
-        ...clone(requirement2)
-      }))
+      ...remaining.map(clone)
     ];
   }
-  function activityAcceptsSelectionMaterial(activity, selectionMaterial) {
-    if (selectionMaterial === "low-rated-gold") {
-      const requirements2 = activity?.eligibilityRequirements;
-      return Array.isArray(requirements2) && requirements2.length > 0 && requirements2.every((requirement2) => requirement2?.tier === "gold" && requirement2.rarity === void 0);
-    }
-    const rarity = selectionMaterialRarity(selectionMaterial);
-    if (!rarity) return true;
-    const requirements = activity?.eligibilityRequirements;
-    if (!Array.isArray(requirements) || !requirements.length) return false;
-    return requirements.every((requirement2) => requirement2?.tier === "gold" && (!requirement2.rarity || requirement2.rarity === rarity));
+  function activityAcceptsConfiguredConsumption(activity, target = {}) {
+    const eligibilityRequirements = activity?.eligibilityRequirements || activity?.requirements;
+    const configuredRequirements = target.requirements || [];
+    if (!Array.isArray(eligibilityRequirements) || !eligibilityRequirements.length) return false;
+    if (!configuredRequirements.length) return true;
+    return configuredRequirements.every((configuredRequirement) => eligibilityRequirements.some((requirement2) => requirementAcceptsConfiguredConsumption(
+      requirement2,
+      configuredRequirement,
+      target.activityBinding?.selectionMaterial
+    )));
   }
   function mergeScannedActivityMetadata(target = {}, activity = {}) {
     const merged = {
@@ -2085,13 +2172,9 @@
       } : {}
     };
     if (Array.isArray(target.requirements)) {
-      merged.requirements = applySelectionMaterial(
-        mergeRequirements(
-          activity.requirements,
-          target.requirements,
-          target.activityBinding?.selectionMaterial,
-          activity.eligibilityRequirements
-        ),
+      merged.requirements = mergeRequirements(
+        activity.eligibilityRequirements || activity.requirements,
+        target.requirements,
         target.activityBinding?.selectionMaterial
       );
     }
@@ -2102,7 +2185,7 @@
     const family = target.activityBinding.family;
     const matches = activitiesByFamily.get(family) || [];
     if (MATERIAL_SINK_BASELINES[family]) {
-      const compatibleMatches = matches.filter((activity) => activityAcceptsSelectionMaterial(activity, target.activityBinding.selectionMaterial));
+      const compatibleMatches = matches.filter((activity) => activityAcceptsConfiguredConsumption(activity, target));
       const resolution = selectMaterialSinkCandidate(compatibleMatches, target.activityBinding);
       if (resolution.status === "resolved") {
         return mergeScannedActivityMetadata(target, resolution.candidate);
@@ -2330,6 +2413,19 @@
     }
     if (spec.rarity !== void 0 && !["common", "rare"].includes(spec.rarity)) {
       errors.push(`${path}.rarity must be common or rare`);
+    }
+    if (spec.goldConsumption !== void 0 && !GOLD_CONSUMPTION_MODES.includes(spec.goldConsumption)) {
+      errors.push(`${path}.goldConsumption must be one of: ${GOLD_CONSUMPTION_MODES.join(", ")}`);
+    }
+    if (spec.goldConsumption !== void 0 && spec.tier !== "gold") {
+      errors.push(`${path}.goldConsumption requires tier gold`);
+    }
+    if (spec.goldConsumption !== void 0 && !goldConsumptionCompatible(
+      spec,
+      spec.goldConsumption,
+      { requireFallback: true }
+    )) {
+      errors.push(`${path}.goldConsumption ${spec.goldConsumption} conflicts with SBC rarity eligibility ${spec.rarity || "any"}`);
     }
     ["minRating", "maxRating"].forEach((field2) => {
       if (spec[field2] === void 0) return;
@@ -3653,7 +3749,7 @@
     if (!rarityEntries.length) {
       const unrestricted = requirement2(void 0, requiredPlayerCount);
       delete unrestricted.rarity;
-      unrestricted.preferCommon = true;
+      unrestricted.goldConsumption = "common-first";
       requirements.push(unrestricted);
     } else {
       if (rarityCounts.rare > 0) requirements.push(requirement2("rare", rarityCounts.rare));
@@ -3918,7 +4014,7 @@
   function commonGoldMaterialPick(loop = {}) {
     const groups = playerPickRequirementGroups(loop);
     if (!groups.length) return false;
-    return groups.every((requirements) => Array.isArray(requirements) && requirements.length > 0 && requirements.every((requirement2) => requirement2?.tier === "gold" && requirement2?.rarity !== "rare" && (requirement2?.rarity === "common" || requirement2?.preferCommon === true) && Number(requirement2?.count || 0) > 0));
+    return groups.every((requirements) => Array.isArray(requirements) && requirements.length > 0 && requirements.every((requirement2) => requirement2?.tier === "gold" && requirement2?.rarity !== "rare" && (requirement2?.rarity === "common" || ["common-only", "common-first"].includes(runtimeGoldConsumptionMode(requirement2))) && Number(requirement2?.count || 0) > 0));
   }
   function resolvePlayerPickLoopSelector(selector = {}, loops = []) {
     if (selector?.material !== "common-gold") {
@@ -5373,7 +5469,7 @@
   }
   function createItemSnapshot(item = {}, pile = item.pile || "unknown") {
     const rating = finiteNumber(item.rating);
-    const rareflag = finiteNumber(item.rareflag ?? item.rareFlag);
+    const rareflag = readPlayerRareFlag(item);
     const groups = uniqueNumbers(item.groups);
     const tier = item.tier || (rating > 0 && rating <= 64 ? "bronze" : rating >= 65 && rating <= 74 ? "silver" : rating >= 75 ? "gold" : null);
     const special = item.special === true || rareflag > 1;
@@ -5471,7 +5567,7 @@
     if (Array.isArray(collection)) return collection;
     return [];
   }
-  function callBoolean(item, method, fallback = false) {
+  function callBoolean2(item, method, fallback = false) {
     try {
       if (typeof item?.[method] === "function") return item[method]() === true;
     } catch {
@@ -5486,11 +5582,6 @@
     const values = [item?.leagueId, item?.league, item?._leagueId, item?._data?.leagueId, item?._staticData?.leagueId];
     const value = values.map(Number).find((entry) => Number.isFinite(entry) && entry > 0);
     return value || 0;
-  }
-  function itemRareFlag(item) {
-    return Number(
-      item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._data?.rareflag ?? item?._data?.rareFlag ?? item?._staticData?.rareflag ?? item?._staticData?.rareFlag ?? 0
-    );
   }
   var IDENTITY_FIELDS = [
     "id",
@@ -5535,10 +5626,10 @@
   function isLimitedUse(item) {
     const loans = Number(item?.loans ?? item?._data?.loans);
     if (Number.isFinite(loans) && loans >= 0) return true;
-    return callBoolean(item, "isLoan") || callBoolean(item, "isLimitedUse");
+    return callBoolean2(item, "isLoan") || callBoolean2(item, "isLimitedUse");
   }
   function isConcept(item) {
-    return callBoolean(item, "isConcept") || callBoolean(item, "isConceptItem") || item?.concept === true;
+    return callBoolean2(item, "isConcept") || callBoolean2(item, "isConceptItem") || item?.concept === true;
   }
   function isActiveTrade(item) {
     try {
@@ -5551,13 +5642,13 @@
     return false;
   }
   function isAcademyEnrolled(item) {
-    return callBoolean(item, "isEnrolledInAcademy");
+    return callBoolean2(item, "isEnrolledInAcademy");
   }
   function toSnapshot(item, pile) {
     const rating = Number(item?.rating || 0);
-    const rareflag = itemRareFlag(item);
+    const rareflag = readPlayerRareFlag(item);
     const duplicateId = Number(item?.duplicateId || 0);
-    const tradeable = typeof item?.isUntradeable === "function" ? !callBoolean(item, "isUntradeable", true) : item?.untradeable === false;
+    const tradeable = typeof item?.isUntradeable === "function" ? !callBoolean2(item, "isUntradeable", true) : item?.untradeable === false;
     let fullName = "";
     try {
       fullName = String(item?._staticData?.getFullName?.() || item?.getFullName?.() || "").trim();
@@ -5566,18 +5657,18 @@
     return createItemSnapshot({
       id: item?.id,
       definitionId: item?.definitionId,
-      type: item?.type || (callBoolean(item, "isPlayer") ? "player" : "unknown"),
+      type: item?.type || (callBoolean2(item, "isPlayer") ? "player" : "unknown"),
       name: fullName || item?.name || item?.commonName || item?.lastName || item?._staticData?.name,
       rating,
       rareflag,
-      rare: callBoolean(item, "isRare", rareflag > 0),
-      special: callBoolean(item, "isSpecial", rareflag > 1),
-      duplicate: callBoolean(item, "isDuplicate", duplicateId > 0),
+      rare: callBoolean2(item, "isRare", rareflag > 0),
+      special: callBoolean2(item, "isSpecial", rareflag > 1),
+      duplicate: callBoolean2(item, "isDuplicate", duplicateId > 0),
       duplicateId,
       tradeable,
       leagueId: itemLeagueId(item),
       identityIds: identityIds(item),
-      evolution: callBoolean(item, "isEvolution") || callBoolean(item, "isEvo") || Number(item?.evolutionId || 0) > 0,
+      evolution: callBoolean2(item, "isEvolution") || callBoolean2(item, "isEvo") || Number(item?.evolutionId || 0) > 0,
       limitedUse: isLimitedUse(item),
       concept: isConcept(item),
       academyEnrolled: isAcademyEnrolled(item),
@@ -5924,7 +6015,7 @@
   function createEaRarityAdapter(runtime) {
     const repository = safeRead3(safeRead3(runtime, "repositories"), "Rarity");
     function playerTheme(item = {}) {
-      const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? 0);
+      const rareflag = readPlayerRareFlag(item);
       if (!repository || rareflag <= 1) return null;
       const rarity = call(repository, "get", rareflag);
       if (!rarity) return null;
@@ -6537,6 +6628,8 @@
     if (requirement2.tier && item.tier !== requirement2.tier) return false;
     if (requirement2.rarity === "rare" && !item.rare) return false;
     if (requirement2.rarity === "common" && item.rare) return false;
+    if (requirement2.selectionRarity === "rare" && !item.rare) return false;
+    if (requirement2.selectionRarity === "common" && item.rare) return false;
     return true;
   }
   function rejectionReasons(item, requirement2, fsuPolicy, protection) {
@@ -6599,12 +6692,23 @@
     return sortCandidates(candidates, requirement2, fsuPolicy).find((item) => item.definitionId === signal.definitionId) || null;
   }
   function requirementSelectionPhases(requirement2 = {}, hasPreferredSignals = false) {
-    const preferCommon = requirement2.preferCommon === true && requirement2.tier === "gold" && requirement2.rarity === void 0;
-    if (!preferCommon) return [{ requirement: requirement2, preferredOnly: false }];
+    const mode = runtimeGoldConsumptionMode(requirement2);
+    const configuredOrder = goldConsumptionOrder(mode);
+    if (!configuredOrder.length) return [{ requirement: requirement2, preferredOnly: false }];
+    const rarityOrder = configuredOrder.filter((rarity) => requirement2.rarity === void 0 || requirement2.rarity === rarity);
+    if (!rarityOrder.length) {
+      return [{
+        requirement: { ...requirement2, selectionRarity: configuredOrder[0] },
+        preferredOnly: false
+      }];
+    }
+    const fallbackMode = ["common-first", "rare-first"].includes(mode);
     return [
-      ...hasPreferredSignals ? [{ requirement: requirement2, preferredOnly: true }] : [],
-      { requirement: { ...requirement2, rarity: "common" }, preferredOnly: false },
-      { requirement: { ...requirement2, rarity: "rare" }, preferredOnly: false }
+      ...hasPreferredSignals && fallbackMode ? [{ requirement: requirement2, preferredOnly: true }] : [],
+      ...rarityOrder.map((rarity) => ({
+        requirement: { ...requirement2, selectionRarity: rarity },
+        preferredOnly: false
+      }))
     ];
   }
   function selectInventoryPlayers(input = {}) {
@@ -8421,7 +8525,7 @@
     return String(item.type || "").toLowerCase() === "player";
   }
   function isRecapSpecial(item = {}) {
-    return item.special === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 1;
+    return isSpecialPlayerCard(item);
   }
   function recapPlayerTier(item = {}) {
     const explicit = String(item.tier || "").toLowerCase();
@@ -8435,7 +8539,7 @@
   function isRecapRareGoldOrAbove(item = {}) {
     if (!isRecapPlayer(item)) return false;
     if (isRecapSpecial(item)) return true;
-    return recapPlayerTier(item) === "gold" && (item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0);
+    return recapPlayerTier(item) === "gold" && isRarePlayerCard(item);
   }
   function hasRecapRareGoldOrAbove(items = []) {
     return (items || []).some(isRecapRareGoldOrAbove);
@@ -8464,7 +8568,7 @@
       const rating = Number(item.rating || 0);
       const special = isRecapSpecial(item);
       const tier = recapPlayerTier(item);
-      const rare = item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0;
+      const rare = isRarePlayerCard(item);
       if (special) specialCount++;
       else if (tier === "gold" && rare) rareGoldCount++;
       else if (tier === "gold") normalGoldCount++;
@@ -8540,7 +8644,7 @@
       const rating = Number(item.rating || 0);
       const special = isRecapSpecial(item);
       const tier = recapPlayerTier(item);
-      const rare = item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0;
+      const rare = isRarePlayerCard(item);
       if (special) specialCount++;
       else if (tier === "gold") normalGoldCount++;
       else if (tier === "silver") normalSilverCount++;
@@ -8824,10 +8928,8 @@
         name: itemName3(item, options.itemDisplayName),
         rating: Number(card.rating || item.rating || 0),
         tier: item.tier,
-        rare: card.rare === true || item.rare === true || Number(
-          item.rareflag ?? item.rareFlag ?? item._rareflag ?? item._staticData?.rareflag ?? 0
-        ) > 0,
-        special: card.special === true,
+        rare: card.rare === true || isRarePlayerCard(item),
+        special: card.special === true || isSpecialPlayerCard(item),
         duplicate: card.duplicate === true,
         tradeable: typeof card.tradeable === "boolean" ? card.tradeable : item.tradeable,
         price: card.price ?? null,
@@ -9146,7 +9248,7 @@
     if (["string", "number", "boolean"].includes(typeof value)) return value;
     return String(value);
   }
-  function callBoolean2(item, methodName) {
+  function callBoolean3(item, methodName) {
     try {
       if (typeof item?.[methodName] === "function") return item[methodName]() === true;
     } catch {
@@ -9192,15 +9294,15 @@
         id: numberOrNull(item.id ?? item.itemId ?? item._data?.id),
         definitionId: numberOrNull(item.definitionId ?? item.defId ?? item._data?.definitionId),
         rating: numberOrNull(item.rating ?? item._data?.rating),
-        rareflag: numberOrNull(item.rareflag ?? item.rareFlag ?? item._data?.rareflag),
+        rareflag: readPlayerRareFlag(item),
         pile: primitiveOrNull(item.pile),
         privatePile: primitiveOrNull(item._pile),
         dataPile: primitiveOrNull(item._data?.pile),
         duplicateId: numberOrNull(item.duplicateId),
         privateDuplicateId: numberOrNull(item._duplicateId),
         dataDuplicateId: numberOrNull(item._data?.duplicateId),
-        isDuplicate: callBoolean2(item, "isDuplicate"),
-        isUntradeable: callBoolean2(item, "isUntradeable"),
+        isDuplicate: callBoolean3(item, "isDuplicate"),
+        isUntradeable: callBoolean3(item, "isUntradeable"),
         rawUntradeable: typeof item.untradeable === "boolean" ? item.untradeable : null,
         rawTradeable: typeof item.tradeable === "boolean" ? item.tradeable : null,
         injuryType: primitiveOrNull(item.injuryType),
@@ -9499,7 +9601,7 @@
     if (!definition) return null;
     const type = String(item?.type || item?._itemType || item?._type || "unknown").toLowerCase();
     const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
-    const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+    const rareflag = readPlayerRareFlag(item);
     let untradeable = "unknown";
     try {
       if (typeof item?.isUntradeable === "function") untradeable = item.isUntradeable() ? "yes" : "no";
@@ -9517,7 +9619,7 @@
     if (!definition) return null;
     const type = String(item?.type || item?._itemType || item?._type || "unknown").toLowerCase();
     const rating = Number(item?.rating ?? item?._rating ?? item?._staticData?.rating ?? 0);
-    const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+    const rareflag = readPlayerRareFlag(item);
     return `${type}:${definition}:${rating}:${rareflag}`;
   }
   function destinationEntries(piles = {}) {
@@ -12769,7 +12871,7 @@
           ...goldRequirement,
           tier: "gold",
           count: 9,
-          preferCommon: true
+          goldConsumption: "common-first"
         }]
       },
       sourceExhaustedFallbackActivityFamily: "common-gold-material-upgrade"
@@ -13877,11 +13979,6 @@
       ${enabled ? fieldRow("Category", textInput(`${path}.category`, value.category || "Upgrades", "text", true)) : ""}
       ${materialSink ? fieldRow("Accepted classes", `<select multiple size="4" data-builder-field="${path}.classes" data-builder-value-type="string-list"${disabled(context.readOnly)}>${MATERIAL_SINK_CLASSES.map((className) => `<option value="${className}"${classes.includes(className) ? " selected" : ""}>${className}</option>`).join("")}</select>`) : ""}
       ${materialSink ? fieldRow("Preference", selectInput(`${path}.preference`, value.preference, MATERIAL_SINK_PREFERENCES.map((preference) => ({ value: preference, label: preference })), context.readOnly, true)) : ""}
-      ${materialSink ? fieldRow("Selection material", selectInput(`${path}.selectionMaterial`, value.selectionMaterial, [
-      { value: "common-gold", label: "Common Gold only" },
-      { value: "low-rated-gold", label: "Low-rated Gold (Common first)" },
-      { value: "rare-gold", label: "Rare Gold only" }
-    ], context.readOnly, true)) : ""}
     </div>
   </section>`;
   }
@@ -13913,10 +14010,17 @@
       { value: "silver", label: "Silver" },
       { value: "gold", label: "Gold" }
     ], context.readOnly))}
-    ${fieldRow("Rarity", selectInput(`${prefix}rarity`, spec.rarity, [
+    ${fieldRow("SBC rarity eligibility", selectInput(`${prefix}rarity`, spec.rarity, [
       { value: "", label: "Any" },
       { value: "common", label: "Common" },
       { value: "rare", label: "Rare" }
+    ], context.readOnly))}
+    ${fieldRow("Gold consumption", selectInput(`${prefix}goldConsumption`, spec.goldConsumption || (spec.preferCommon === true ? "common-first" : "eligibility"), [
+      { value: "eligibility", label: "Follow SBC eligibility" },
+      { value: "common-only", label: "Common only" },
+      { value: "rare-only", label: "Rare only" },
+      { value: "common-first", label: "Common first, then Rare" },
+      { value: "rare-first", label: "Rare first, then Common" }
     ], context.readOnly))}
     ${options.withCount !== false ? fieldRow("Count", textInput(`${prefix}count`, spec.count ?? 1, "number", context.readOnly)) : ""}
     ${fieldRow("Min rating", textInput(`${prefix}minRating`, spec.minRating, "number", context.readOnly))}
@@ -13924,7 +14028,6 @@
     ${fieldRow("Special cards", `<select data-builder-field="${escapeHtml(`${prefix}allowSpecial`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.allowSpecial)}</select>`)}
     ${fieldRow("Player only", `<select data-builder-field="${escapeHtml(`${prefix}playerOnly`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.playerOnly)}</select>`)}
     ${fieldRow("Require special", `<select data-builder-field="${escapeHtml(`${prefix}special`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.special)}</select>`)}
-    ${fieldRow("Prefer Common", `<select data-builder-field="${escapeHtml(`${prefix}preferCommon`)}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(spec.preferCommon)}</select>`)}
     <div class="wide">${renderPileList(`${prefix}priorityPiles`, "Pile order", spec.priorityPiles, context)}</div>
     ${options.removable ? `<button class="dlr-builder-remove-inline" data-builder-action="remove-list" data-path="${escapeHtml(options.listPath)}" data-index="${options.index}"${disabled(context.readOnly)}>Remove</button>` : ""}
   </div>`;
@@ -17349,22 +17452,13 @@
       return Math.max(2, Math.min(99, Number.isFinite(value) && value > 0 ? value : 82));
     }
     function isRare(item) {
-      try {
-        return !!item?.isRare?.();
-      } catch {
-      }
-      return Number(item?.rareflag || item?.rareFlag || 0) > 0;
+      return isRarePlayerCard(item);
     }
-    function itemRareFlag2(item) {
-      return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+    function itemRareFlag(item) {
+      return readPlayerRareFlag(item);
     }
     function isSpecial(item) {
-      try {
-        return !!item?.isSpecial?.();
-      } catch {
-      }
-      const rareflag = Number(item?.rareflag || item?.rareFlag || item?._rareflag || 0);
-      return rareflag > 1;
+      return isSpecialPlayerCard(item);
     }
     function isNormalGoldFodder(item) {
       return isGold(item) && !isSbcSpecialItem(item);
@@ -17384,6 +17478,9 @@
       if (spec.tier === "gold" && !isGold(item)) return false;
       if (spec.rarity === "rare" && !isRare(item)) return false;
       if (spec.rarity === "common" && isRare(item)) return false;
+      const goldConsumption = runtimeGoldConsumptionMode(spec);
+      if (goldConsumption === "rare-only" && !isRare(item)) return false;
+      if (goldConsumption === "common-only" && isRare(item)) return false;
       return true;
     }
     function isTargetDuplicate(item, loopDef) {
@@ -19109,12 +19206,12 @@
       renderLoopSelect(selectedId);
       const pickDuplicateCount = pickSession.results.filter((result) => result.status === "duplicate").length;
       for (const [loopId, loopDef] of Object.entries(pickSession.loopOverrides)) {
-        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
+        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.goldConsumption && requirement2.goldConsumption !== "eligibility" ? ` (${requirement2.goldConsumption})` : requirement2.preferCommon ? " (common-first legacy)" : ""}`).join(" + ")}`).join("; ");
         log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
       }
       for (const diagnostic of pickSession.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
       for (const loopDef of pickSession.discoveredLoops) {
-        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.preferCommon ? " (common first)" : ""}`).join(" + ")}`).join("; ");
+        const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.goldConsumption && requirement2.goldConsumption !== "eligibility" ? ` (${requirement2.goldConsumption})` : requirement2.preferCommon ? " (common-first legacy)" : ""}`).join(" + ")}`).join("; ");
         log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? "; reported completed, one runtime probe" : ""})`);
       }
       for (const [loopId, loopDef] of Object.entries(upgradeSession.loopOverrides)) {
@@ -19356,7 +19453,7 @@
         `rating:${Number(item?.rating || 0) || "?"}`,
         itemTierLabel(item),
         isRare(item) ? "rare" : "common",
-        `rareflag:${itemRareFlag2(item)}`,
+        `rareflag:${itemRareFlag(item)}`,
         isTradeable(item) ? "tradeable" : "untradeable",
         `from:${entry?.pileName || "unknown"}`,
         `id:${Number(item?.id || 0) || "?"}`,
@@ -19391,6 +19488,7 @@
         requirement2.count ? `${requirement2.count}x` : "",
         requirement2.tier || "any-tier",
         requirement2.rarity || "",
+        requirement2.goldConsumption && requirement2.goldConsumption !== "eligibility" ? `consume:${requirement2.goldConsumption}` : "",
         requirement2.minRating ? `min${requirement2.minRating}` : "",
         requirement2.maxRating ? `max${requirement2.maxRating}` : "",
         requirement2.playerOnly ? "player" : "",
@@ -19569,7 +19667,7 @@
         duplicateId,
         name: itemDisplayName(signal),
         rating: Number(signal?.rating || 0),
-        rareflag: itemRareFlag2(signal),
+        rareflag: itemRareFlag(signal),
         tradeable: isTradeable(signal),
         leagueId: itemLeagueId2(signal),
         evolution: isEvolutionItem(signal),
@@ -19783,7 +19881,7 @@
         type: isPlayer(item) ? "player" : item?.type,
         name: itemDisplayName(item),
         rating: item?.rating,
-        rareflag: itemRareFlag2(item),
+        rareflag: itemRareFlag(item),
         rare: isRare(item),
         special: isSbcSpecialItem(item),
         duplicate: isDuplicate(item),
@@ -23949,10 +24047,10 @@
       return String(Math.round(value));
     }
     function isPlayerPickRare(item) {
-      return isRare(item) || itemRareFlag2(item) > 0;
+      return isRare(item) || itemRareFlag(item) > 0;
     }
     function isPlayerPickSpecial(item) {
-      return isSpecial(item) || itemRareFlag2(item) > 1;
+      return isSpecial(item) || itemRareFlag(item) > 1;
     }
     async function redeemAndSelectPlayerPick(pickItem, loopDef, options = {}) {
       log(`${loopDef.name}: redeeming ${playerPickItemName(pickItem)}`);
@@ -24646,7 +24744,7 @@
       return showBatchRecapModal(createBatchOpenRecapPreviewModel());
     }
     async function getSpecialCardPrices(items, label2 = "Recap") {
-      const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
+      const specialItems = (items || []).filter(isSpecialPlayerCard);
       if (!specialItems.length) return /* @__PURE__ */ new Map();
       let result;
       try {

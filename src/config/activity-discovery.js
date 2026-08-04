@@ -1,4 +1,8 @@
 import { cloneLoopDef } from '../domain/objects.js';
+import {
+  configuredGoldConsumptionMode,
+  goldConsumptionCompatible,
+} from '../domain/gold-consumption.js';
 import { readEligibilityRequirements } from '../selection/rating-model.js';
 import {
   classifyMaterialSinkCandidate,
@@ -228,7 +232,7 @@ function materialSinkFamily(requirements = []) {
   return MATERIAL_SINK_FAMILIES.commonGold;
 }
 
-function materialSinkSelectionRequirements(requirements = [], familyId) {
+function materialSinkFamilyRequirements(requirements = [], familyId) {
   if (familyId !== MATERIAL_SINK_FAMILIES.commonGold) return requirements;
   return requirements.map((requirement) => (
     requirement.tier === 'gold' && !requirement.rarity
@@ -287,10 +291,10 @@ export function parseBasicUpgradeActivitySnapshot(input = {}) {
 
   const identityText = activityIdentityText(set, rewards);
   const sinkFamilyId = materialSinkFamily(parsedChallenge.requirements);
-  const sinkRequirements = materialSinkSelectionRequirements(parsedChallenge.requirements, sinkFamilyId);
+  const familyRequirements = materialSinkFamilyRequirements(parsedChallenge.requirements, sinkFamilyId);
   const family = FAMILY_DEFS.find((candidate) => (
     (requirementsEqual(candidate.requirements, parsedChallenge.requirements)
-      || requirementsEqual(candidate.requirements, sinkRequirements))
+      || requirementsEqual(candidate.requirements, familyRequirements))
       && (!candidate.identityPattern || candidate.identityPattern.test(identityText))
   ));
   const sinkBaseline = MATERIAL_SINK_BASELINES[sinkFamilyId];
@@ -339,7 +343,7 @@ export function parseBasicUpgradeActivitySnapshot(input = {}) {
       familyId: sinkFamilyId,
       setId,
       setName,
-      requirements: sinkRequirements,
+      requirements: parsedChallenge.requirements,
       eligibilityRequirements: parsedChallenge.requirements,
       rewards,
       remaining,
@@ -364,108 +368,70 @@ export function parseBasicUpgradeActivitySnapshot(input = {}) {
   };
 }
 
-function selectionMaterialRarity(selectionMaterial) {
-  if (selectionMaterial === 'common-gold') return 'common';
-  if (selectionMaterial === 'rare-gold') return 'rare';
-  return null;
-}
-
-function requirementPolicyMatch(requirement, configured = [], selectionMaterial = null) {
-  const exact = configured.find((candidate) => (
-    candidate?.tier === requirement.tier
-      && (candidate?.rarity || null) === (requirement.rarity || null)
-  ));
-  if (exact) return exact;
-  const selectionRarity = selectionMaterialRarity(selectionMaterial);
-  if (!selectionRarity || requirement?.tier !== 'gold') return null;
-  return configured.find((candidate) => (
-    candidate?.tier === 'gold' && candidate?.rarity === selectionRarity
-  )) || null;
-}
-
-function applySelectionMaterial(requirements = [], selectionMaterial = null) {
-  const rarity = selectionMaterialRarity(selectionMaterial);
-  if (!rarity) return requirements;
-  return requirements.map((requirement) => (
-    requirement?.tier === 'gold' ? { ...requirement, rarity } : requirement
-  ));
-}
-
-function hasUnrestrictedGoldEligibility(
-  eligibilityRequirements = [],
+function requirementAcceptsConfiguredConsumption(
+  eligibilityRequirement = {},
   configuredRequirement = {},
   selectionMaterial = null,
 ) {
-  if (configuredRequirement?.tier !== 'gold'
-    || configuredRequirement?.rarity !== undefined
-    || configuredRequirement?.preferCommon !== true) return false;
-  return eligibilityRequirements.some((requirement) => (
-    requirement?.tier === 'gold'
-      && requirement?.rarity === undefined
-      && (selectionMaterial === 'low-rated-gold'
-        || Number(requirement?.count || 0) === Number(configuredRequirement?.count || 0))
-  ));
+  if (eligibilityRequirement.tier !== configuredRequirement.tier) return false;
+  if (eligibilityRequirement.tier !== 'gold') {
+    return (eligibilityRequirement.rarity || null) === (configuredRequirement.rarity || null);
+  }
+  const mode = configuredGoldConsumptionMode(configuredRequirement, selectionMaterial);
+  return goldConsumptionCompatible(eligibilityRequirement, mode, {
+    requireFallback: ['common-first', 'rare-first'].includes(mode),
+  });
+}
+
+function configuredRequirementPolicy(requirement = {}, selectionMaterial = null) {
+  const policy = clone(requirement);
+  delete policy.tier;
+  delete policy.rarity;
+  delete policy.count;
+  delete policy.preferCommon;
+  delete policy.goldConsumption;
+  const mode = configuredGoldConsumptionMode(requirement, selectionMaterial);
+  if (requirement.tier === 'gold' && mode !== 'eligibility') policy.goldConsumption = mode;
+  return policy;
 }
 
 function mergeRequirements(
   scanned = [],
   configured = [],
   selectionMaterial = null,
-  eligibilityRequirements = [],
 ) {
   const remaining = [...scanned];
   const merged = [];
   for (const configuredRequirement of configured) {
-    if (hasUnrestrictedGoldEligibility(
-      eligibilityRequirements,
+    const index = remaining.findIndex((requirement) => requirementAcceptsConfiguredConsumption(
+      requirement,
       configuredRequirement,
       selectionMaterial,
-    )) {
-      const index = remaining.findIndex((requirement) => (
-        requirement?.tier === 'gold'
-          && (selectionMaterial === 'low-rated-gold'
-            || Number(requirement?.count || 0) === Number(configuredRequirement?.count || 0))
-      ));
-      if (index >= 0) {
-        const [requirement] = remaining.splice(index, 1);
-        merged.push({ ...clone(configuredRequirement), count: Number(requirement.count || configuredRequirement.count) });
-        continue;
-      }
-    }
-    let index = remaining.findIndex((requirement) => (
-      requirement.tier === configuredRequirement?.tier
-        && (requirement.rarity || null) === (configuredRequirement?.rarity || null)
     ));
-    if (index < 0 && selectionMaterialRarity(selectionMaterial) === configuredRequirement?.rarity) {
-      index = remaining.findIndex((requirement) => requirement?.tier === configuredRequirement?.tier);
-    }
     if (index < 0) continue;
     const [requirement] = remaining.splice(index, 1);
-    merged.push({ ...clone(configuredRequirement), ...clone(requirement) });
+    merged.push({
+      ...configuredRequirementPolicy(configuredRequirement, selectionMaterial),
+      ...clone(requirement),
+    });
   }
   return [
     ...merged,
-    ...remaining.map((requirement) => ({
-      ...(clone(requirementPolicyMatch(requirement, configured, selectionMaterial) || {})),
-      ...clone(requirement),
-    })),
+    ...remaining.map(clone),
   ];
 }
 
-function activityAcceptsSelectionMaterial(activity, selectionMaterial) {
-  if (selectionMaterial === 'low-rated-gold') {
-    const requirements = activity?.eligibilityRequirements;
-    return Array.isArray(requirements) && requirements.length > 0 && requirements.every((requirement) => (
-      requirement?.tier === 'gold' && requirement.rarity === undefined
-    ));
-  }
-  const rarity = selectionMaterialRarity(selectionMaterial);
-  if (!rarity) return true;
-  const requirements = activity?.eligibilityRequirements;
-  if (!Array.isArray(requirements) || !requirements.length) return false;
-  return requirements.every((requirement) => (
-    requirement?.tier === 'gold'
-      && (!requirement.rarity || requirement.rarity === rarity)
+function activityAcceptsConfiguredConsumption(activity, target = {}) {
+  const eligibilityRequirements = activity?.eligibilityRequirements || activity?.requirements;
+  const configuredRequirements = target.requirements || [];
+  if (!Array.isArray(eligibilityRequirements) || !eligibilityRequirements.length) return false;
+  if (!configuredRequirements.length) return true;
+  return configuredRequirements.every((configuredRequirement) => (
+    eligibilityRequirements.some((requirement) => requirementAcceptsConfiguredConsumption(
+      requirement,
+      configuredRequirement,
+      target.activityBinding?.selectionMaterial,
+    ))
   ));
 }
 
@@ -488,13 +454,9 @@ export function mergeScannedActivityMetadata(target = {}, activity = {}) {
     } : {}),
   };
   if (Array.isArray(target.requirements)) {
-    merged.requirements = applySelectionMaterial(
-      mergeRequirements(
-        activity.requirements,
-        target.requirements,
-        target.activityBinding?.selectionMaterial,
-        activity.eligibilityRequirements,
-      ),
+    merged.requirements = mergeRequirements(
+      activity.eligibilityRequirements || activity.requirements,
+      target.requirements,
       target.activityBinding?.selectionMaterial,
     );
   }
@@ -507,7 +469,7 @@ function materializeBoundTarget(target, activitiesByFamily, diagnostics, path) {
   const matches = activitiesByFamily.get(family) || [];
   if (MATERIAL_SINK_BASELINES[family]) {
     const compatibleMatches = matches.filter((activity) => (
-      activityAcceptsSelectionMaterial(activity, target.activityBinding.selectionMaterial)
+      activityAcceptsConfiguredConsumption(activity, target)
     ));
     const resolution = selectMaterialSinkCandidate(compatibleMatches, target.activityBinding);
     if (resolution.status === 'resolved') {

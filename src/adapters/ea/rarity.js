@@ -1,3 +1,5 @@
+import { readPlayerRareFlag } from '../../domain/player-rarity.js';
+
 function safeRead(holder, key) {
   try { return holder?.[key]; } catch { return undefined; }
 }
@@ -35,7 +37,7 @@ export function createEaRarityAdapter(runtime) {
   const repository = safeRead(safeRead(runtime, 'repositories'), 'Rarity');
 
   function playerTheme(item = {}) {
-    const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? 0);
+    const rareflag = readPlayerRareFlag(item);
     if (!repository || rareflag <= 1) return null;
     const rarity = call(repository, 'get', rareflag);
     if (!rarity) return null;

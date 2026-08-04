@@ -72,6 +72,18 @@ describe('Player Pick recap UI', () => {
     expect(model.rows[0]).toMatchObject({ rare: true, tierLabel: 'Rare Gold' });
   });
 
+  it('uses the canonical nested EA rarity metadata for Pick recap cards', () => {
+    const model = createPlayerPickRecapModel([{
+      pickedCards: [{
+        item: { name: 'Nested Special', rating: 95, tier: 'gold', _data: { rareFlag: 7 } },
+        rating: 95,
+        duplicate: false,
+        destination: 'club',
+      }],
+    }]);
+    expect(model.rows[0]).toMatchObject({ rare: true, special: true, tierLabel: 'Special 95-97' });
+  });
+
   it('renders a confirmed Pick as blocked when post-selection cleanup fails', () => {
     const harness = createUiHarness();
     void showPlayerPickRecap({

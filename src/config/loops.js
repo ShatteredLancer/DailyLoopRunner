@@ -369,7 +369,6 @@ export const LOOP_DEFS = [
           family: 'common-gold-material-upgrade',
           classes: ['premium'],
           preference: 'reward-first',
-          selectionMaterial: 'low-rated-gold',
           category: 'Upgrades',
           required: true,
         },
@@ -378,7 +377,7 @@ export const LOOP_DEFS = [
           {
             tier: 'gold',
             count: 9,
-            preferCommon: true,
+            goldConsumption: 'common-first',
             playerOnly: true,
             allowSpecial: false,
             priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],

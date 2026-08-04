@@ -1,4 +1,5 @@
 import { createInventorySnapshot, createItemSnapshot, INVENTORY_PILES } from '../../domain/contracts.js';
+import { readPlayerRareFlag } from '../../domain/player-rarity.js';
 
 function collectionValues(collection) {
   if (!collection) return [];
@@ -25,19 +26,6 @@ function itemLeagueId(item) {
   const values = [item?.leagueId, item?.league, item?._leagueId, item?._data?.leagueId, item?._staticData?.leagueId];
   const value = values.map(Number).find((entry) => Number.isFinite(entry) && entry > 0);
   return value || 0;
-}
-
-function itemRareFlag(item) {
-  return Number(
-    item?.rareflag
-      ?? item?.rareFlag
-      ?? item?._rareflag
-      ?? item?._data?.rareflag
-      ?? item?._data?.rareFlag
-      ?? item?._staticData?.rareflag
-      ?? item?._staticData?.rareFlag
-      ?? 0
-  );
 }
 
 const IDENTITY_FIELDS = [
@@ -86,7 +74,7 @@ function isAcademyEnrolled(item) {
 
 function toSnapshot(item, pile) {
   const rating = Number(item?.rating || 0);
-  const rareflag = itemRareFlag(item);
+  const rareflag = readPlayerRareFlag(item);
   const duplicateId = Number(item?.duplicateId || 0);
   const tradeable = typeof item?.isUntradeable === 'function'
     ? !callBoolean(item, 'isUntradeable', true)

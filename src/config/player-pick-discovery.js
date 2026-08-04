@@ -1,4 +1,5 @@
 import { readEligibilityRequirements } from '../selection/rating-model.js';
+import { runtimeGoldConsumptionMode } from '../domain/gold-consumption.js';
 
 const DEFAULT_PRIORITY_PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 const SUPPORTED_REQUIREMENT_KEYS = new Set([
@@ -183,7 +184,7 @@ function parseChallengeRequirements(challenge, challengeIndex, options = {}) {
   if (!rarityEntries.length) {
     const unrestricted = requirement(undefined, requiredPlayerCount);
     delete unrestricted.rarity;
-    unrestricted.preferCommon = true;
+    unrestricted.goldConsumption = 'common-first';
     requirements.push(unrestricted);
   } else {
     if (rarityCounts.rare > 0) requirements.push(requirement('rare', rarityCounts.rare));
@@ -489,7 +490,8 @@ function commonGoldMaterialPick(loop = {}) {
       && requirements.every((requirement) => (
         requirement?.tier === 'gold'
           && requirement?.rarity !== 'rare'
-          && (requirement?.rarity === 'common' || requirement?.preferCommon === true)
+          && (requirement?.rarity === 'common'
+            || ['common-only', 'common-first'].includes(runtimeGoldConsumptionMode(requirement)))
           && Number(requirement?.count || 0) > 0
       ))
   ));

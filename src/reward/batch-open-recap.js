@@ -5,6 +5,7 @@ import {
   isRecapSpecial,
   recapPlayerTier,
 } from './loop-recap.js';
+import { isRarePlayerCard } from '../domain/player-rarity.js';
 
 function itemName(item = {}) {
   return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || 'Unknown player');
@@ -29,7 +30,7 @@ export function createBatchOpenRecapModel(input = {}) {
     const rating = Number(item.rating || 0);
     const special = isRecapSpecial(item);
     const tier = recapPlayerTier(item);
-    const rare = item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0;
+    const rare = isRarePlayerCard(item);
     if (special) specialCount++;
     else if (tier === 'gold') normalGoldCount++;
     else if (tier === 'silver') normalSilverCount++;

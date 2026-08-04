@@ -1,4 +1,8 @@
 import { createRecapModel, recapCardTypeLabel, resolveRecapCardTheme } from './recap.js';
+import {
+  isRarePlayerCard,
+  isSpecialPlayerCard,
+} from '../domain/player-rarity.js';
 
 function itemName(item, displayName) {
   if (typeof displayName === 'function') return String(displayName(item));
@@ -24,10 +28,8 @@ export function createPlayerPickRecapModel(pickResults = [], options = {}) {
       name: itemName(item, options.itemDisplayName),
       rating: Number(card.rating || item.rating || 0),
       tier: item.tier,
-      rare: card.rare === true || item.rare === true || Number(
-        item.rareflag ?? item.rareFlag ?? item._rareflag ?? item._staticData?.rareflag ?? 0,
-      ) > 0,
-      special: card.special === true,
+      rare: card.rare === true || isRarePlayerCard(item),
+      special: card.special === true || isSpecialPlayerCard(item),
       duplicate: card.duplicate === true,
       tradeable: typeof card.tradeable === 'boolean' ? card.tradeable : item.tradeable,
       price: card.price ?? null,

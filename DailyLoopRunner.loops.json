@@ -1308,7 +1308,6 @@
               "premium"
             ],
             "preference": "reward-first",
-            "selectionMaterial": "low-rated-gold",
             "category": "Upgrades",
             "required": true
           },
@@ -1319,7 +1318,7 @@
             {
               "tier": "gold",
               "count": 9,
-              "preferCommon": true,
+              "goldConsumption": "common-first",
               "playerOnly": true,
               "allowSpecial": false,
               "priorityPiles": [

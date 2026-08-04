@@ -1,5 +1,9 @@
 import { isPlainObject } from '../domain/objects.js';
 import {
+  GOLD_CONSUMPTION_MODES,
+  goldConsumptionCompatible,
+} from '../domain/gold-consumption.js';
+import {
   getLoopStrategyCapabilities,
   INVENTORY_ONLY_CAPABILITIES,
   LOOP_STRATEGIES,
@@ -161,6 +165,19 @@ function validateCardSpec(spec, path, errors) {
   }
   if (spec.rarity !== undefined && !['common', 'rare'].includes(spec.rarity)) {
     errors.push(`${path}.rarity must be common or rare`);
+  }
+  if (spec.goldConsumption !== undefined && !GOLD_CONSUMPTION_MODES.includes(spec.goldConsumption)) {
+    errors.push(`${path}.goldConsumption must be one of: ${GOLD_CONSUMPTION_MODES.join(', ')}`);
+  }
+  if (spec.goldConsumption !== undefined && spec.tier !== 'gold') {
+    errors.push(`${path}.goldConsumption requires tier gold`);
+  }
+  if (spec.goldConsumption !== undefined && !goldConsumptionCompatible(
+    spec,
+    spec.goldConsumption,
+    { requireFallback: true },
+  )) {
+    errors.push(`${path}.goldConsumption ${spec.goldConsumption} conflicts with SBC rarity eligibility ${spec.rarity || 'any'}`);
   }
   ['minRating', 'maxRating'].forEach((field) => {
     if (spec[field] === undefined) return;

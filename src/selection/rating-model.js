@@ -1,4 +1,5 @@
 import { calculateEaSquadRating } from '../domain/rating.js';
+import { readPlayerRareFlag } from '../domain/player-rarity.js';
 
 const PLAYER_REQUIREMENT_KEYS = new Set([
   'PLAYER_QUALITY',
@@ -62,10 +63,6 @@ export function readEligibilityRequirements(challenge, options = {}) {
   });
 }
 
-function rareFlag(item) {
-  return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
-}
-
 function matchesDynamicRequirement(item, requirement, keyName, rawValues, matchers) {
   try {
     if (typeof requirement?.meetsRequirements === 'function') {
@@ -86,7 +83,7 @@ function matchesDynamicRequirement(item, requirement, keyName, rawValues, matche
         (value === 4 && matchers.isSpecialItem(item))
       );
     case 'PLAYER_RARITY':
-      return values.includes(rareFlag(item));
+      return values.includes(readPlayerRareFlag(item));
     case 'PLAYER_RARITY_GROUP':
       return values.some((value) => matchers.itemGroupNumbers(item).includes(value));
     case 'PLAYER_MIN_OVR':

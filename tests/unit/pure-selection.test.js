@@ -35,7 +35,7 @@ describe('pure inventory selector', () => {
     expect(projected).toMatchObject({
       tier: 'gold',
       count: 9,
-      preferCommon: true,
+      goldConsumption: 'common-first',
       allowSpecial: false,
       sbcFodderPolicy: { mode: 'low-gold', lowRatedGoldMaxRating: 82 },
       lowRatedGoldMaxRating: 82,
@@ -337,7 +337,7 @@ describe('pure inventory selector', () => {
       requirements: [{
         tier: 'gold',
         count: 3,
-        preferCommon: true,
+        goldConsumption: 'common-first',
         playerOnly: true,
         allowSpecial: false,
       }],
@@ -370,7 +370,7 @@ describe('pure inventory selector', () => {
       requirements: [{
         tier: 'gold',
         count: 9,
-        preferCommon: true,
+        goldConsumption: 'common-first',
         playerOnly: true,
         allowSpecial: false,
       }],
@@ -412,7 +412,7 @@ describe('pure inventory selector', () => {
       requirements: [{
         tier: 'gold',
         count: 5,
-        preferCommon: true,
+        goldConsumption: 'common-first',
         playerOnly: true,
         allowSpecial: false,
       }],
@@ -445,7 +445,7 @@ describe('pure inventory selector', () => {
       requirements: [{
         tier: 'gold',
         count: 2,
-        preferCommon: true,
+        goldConsumption: 'common-first',
         playerOnly: true,
         allowSpecial: false,
       }],

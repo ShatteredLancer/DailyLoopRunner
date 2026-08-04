@@ -112,6 +112,12 @@ import { cloneLoopDef, isPlainObject } from './domain/objects.js';
 import { calculateEaSquadRating } from './domain/rating.js';
 import { createRuntimeAdapters } from './adapters/index.js';
 import { createItemSnapshot } from './domain/contracts.js';
+import { runtimeGoldConsumptionMode } from './domain/gold-consumption.js';
+import {
+  isRarePlayerCard,
+  isSpecialPlayerCard,
+  readPlayerRareFlag,
+} from './domain/player-rarity.js';
 import { selectInventoryPlayers as selectInventoryPlayersPure } from './selection/index.js';
 import {
   buildRatingCandidateEntries,
@@ -1149,18 +1155,15 @@ function updateLoopControls() {
   }
 
   function isRare(item) {
-    try { return !!item?.isRare?.(); } catch { }
-    return Number(item?.rareflag || item?.rareFlag || 0) > 0;
+    return isRarePlayerCard(item);
   }
 
   function itemRareFlag(item) {
-    return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
+    return readPlayerRareFlag(item);
   }
 
   function isSpecial(item) {
-    try { return !!item?.isSpecial?.(); } catch { }
-    const rareflag = Number(item?.rareflag || item?.rareFlag || item?._rareflag || 0);
-    return rareflag > 1;
+    return isSpecialPlayerCard(item);
   }
 
   function isNormalGoldFodder(item) {
@@ -1182,6 +1185,9 @@ function updateLoopControls() {
     if (spec.tier === 'gold' && !isGold(item)) return false;
     if (spec.rarity === 'rare' && !isRare(item)) return false;
     if (spec.rarity === 'common' && isRare(item)) return false;
+    const goldConsumption = runtimeGoldConsumptionMode(spec);
+    if (goldConsumption === 'rare-only' && !isRare(item)) return false;
+    if (goldConsumption === 'common-only' && isRare(item)) return false;
     return true;
   }
 
@@ -3084,14 +3090,14 @@ function updateLoopControls() {
     const pickDuplicateCount = pickSession.results.filter((result) => result.status === 'duplicate').length;
     for (const [loopId, loopDef] of Object.entries(pickSession.loopOverrides)) {
       const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []])
-        .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? ' (common first)' : ''}`).join(' + ')}`)
+        .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.goldConsumption && requirement.goldConsumption !== 'eligibility' ? ` (${requirement.goldConsumption})` : requirement.preferCommon ? ' (common-first legacy)' : ''}`).join(' + ')}`)
         .join('; ');
       log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
     }
     for (const diagnostic of pickSession.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
     for (const loopDef of pickSession.discoveredLoops) {
       const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []])
-        .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.preferCommon ? ' (common first)' : ''}`).join(' + ')}`)
+        .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.goldConsumption && requirement.goldConsumption !== 'eligibility' ? ` (${requirement.goldConsumption})` : requirement.preferCommon ? ' (common-first legacy)' : ''}`).join(' + ')}`)
         .join('; ');
       log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? '; reported completed, one runtime probe' : ''})`);
     }
@@ -3421,6 +3427,9 @@ function updateLoopControls() {
       requirement.count ? `${requirement.count}x` : '',
       requirement.tier || 'any-tier',
       requirement.rarity || '',
+      requirement.goldConsumption && requirement.goldConsumption !== 'eligibility'
+        ? `consume:${requirement.goldConsumption}`
+        : '',
       requirement.minRating ? `min${requirement.minRating}` : '',
       requirement.maxRating ? `max${requirement.maxRating}` : '',
       requirement.playerOnly ? 'player' : '',
@@ -9300,7 +9309,7 @@ function updateLoopControls() {
   }
 
   async function getSpecialCardPrices(items, label = 'Recap') {
-    const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
+    const specialItems = (items || []).filter(isSpecialPlayerCard);
     if (!specialItems.length) return new Map();
     let result;
     try {

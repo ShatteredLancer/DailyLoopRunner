@@ -3,6 +3,10 @@ import {
   recapCardTypeLabel,
   resolveRecapCardTheme,
 } from './recap.js';
+import {
+  isRarePlayerCard,
+  isSpecialPlayerCard,
+} from '../domain/player-rarity.js';
 
 function itemName(item = {}) {
   return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || 'Unknown player');
@@ -13,7 +17,7 @@ export function isRecapPlayer(item = {}) {
 }
 
 export function isRecapSpecial(item = {}) {
-  return item.special === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 1;
+  return isSpecialPlayerCard(item);
 }
 
 export function recapPlayerTier(item = {}) {
@@ -29,8 +33,7 @@ export function recapPlayerTier(item = {}) {
 export function isRecapRareGoldOrAbove(item = {}) {
   if (!isRecapPlayer(item)) return false;
   if (isRecapSpecial(item)) return true;
-  return recapPlayerTier(item) === 'gold'
-    && (item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0);
+  return recapPlayerTier(item) === 'gold' && isRarePlayerCard(item);
 }
 
 export function hasRecapRareGoldOrAbove(items = []) {
@@ -65,7 +68,7 @@ export function createLoopRecapModel(input = {}) {
     const rating = Number(item.rating || 0);
     const special = isRecapSpecial(item);
     const tier = recapPlayerTier(item);
-    const rare = item.rare === true || Number(item.rareflag ?? item.rareFlag ?? 0) > 0;
+    const rare = isRarePlayerCard(item);
     if (special) specialCount++;
     else if (tier === 'gold' && rare) rareGoldCount++;
     else if (tier === 'gold') normalGoldCount++;

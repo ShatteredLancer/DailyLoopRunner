@@ -1,3 +1,5 @@
+import { readPlayerRareFlag } from './player-rarity.js';
+
 export const INVENTORY_PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 
 function finiteNumber(value, fallback = 0) {
@@ -23,7 +25,7 @@ export function createItemRef(item = {}, pile = item.pile || 'unknown') {
 
 export function createItemSnapshot(item = {}, pile = item.pile || 'unknown') {
   const rating = finiteNumber(item.rating);
-  const rareflag = finiteNumber(item.rareflag ?? item.rareFlag);
+  const rareflag = readPlayerRareFlag(item);
   const groups = uniqueNumbers(item.groups);
   const tier = item.tier || (rating > 0 && rating <= 64 ? 'bronze' : rating >= 65 && rating <= 74 ? 'silver' : rating >= 75 ? 'gold' : null);
   const special = item.special === true || rareflag > 1;
