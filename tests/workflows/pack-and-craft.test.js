@@ -28,6 +28,21 @@ describe('runPackAndCraftWorkflow', () => {
     expect(result.stageCompletions).toEqual({ rare: 1 });
   });
 
+  it('does not clean up or open a pack after resume stages are blocked', async () => {
+    const afterStages = vi.fn();
+    const options = baseOptions({
+      resume: async () => ({ hasItems: true }),
+      runStages: async () => ({ status: 'blocked', reason: 'duplicate signal not selected', completions: { rare: 0 } }),
+      afterStages,
+    });
+
+    const result = await runPackAndCraftWorkflow(options);
+
+    expect(result).toMatchObject({ status: 'blocked', packsOpened: 0, reason: 'duplicate signal not selected' });
+    expect(afterStages).not.toHaveBeenCalled();
+    expect(options.findPack).not.toHaveBeenCalled();
+  });
+
   it('continues after a stale pack without counting it', async () => {
     let opens = 0;
     const result = await runPackAndCraftWorkflow(baseOptions({

@@ -54,8 +54,9 @@ export async function runPackAndCraftWorkflow(options = {}) {
     if (stageResult?.status === 'blocked' || stageResult?.status === 'planned') {
       result.status = stageResult.status;
       result.reason = stageResult.reason || `resume stages ${stageResult.status}`;
+    } else {
+      await options.afterStages?.({ result, phase: 'resume', stageResult, context: resumed });
     }
-    await options.afterStages?.({ result, phase: 'resume', stageResult, context: resumed });
   }
 
   while (

@@ -102,11 +102,21 @@ export function captureMoveResult(result) {
     if (!result || typeof result !== 'object') {
       return { result: primitiveOrNull(result) };
     }
+    const data = result.data ?? result._data;
     return {
       result: resultLayer(result),
       error: resultLayer(result.error),
       response: resultLayer(result.response),
-      data: resultLayer(result.data ?? result._data),
+      data: resultLayer(data),
+      dataValues: data && typeof data === 'object' ? {
+        sourcePile: primitiveOrNull(data.sourcePile),
+        destinationPile: primitiveOrNull(data.destinationPile),
+        itemIds: Array.isArray(data.itemIds) ? data.itemIds.map(numberOrNull) : primitiveOrNull(data.itemIds),
+        clubDuplicates: Array.isArray(data.clubDuplicates)
+          ? data.clubDuplicates.map((item) => numberOrNull(item?.id ?? item?.itemId ?? item))
+          : primitiveOrNull(data.clubDuplicates),
+        untradeableSwap: primitiveOrNull(data.untradeableSwap),
+      } : null,
     };
   } catch (error) {
     return { diagnosticError: error?.message || String(error) };

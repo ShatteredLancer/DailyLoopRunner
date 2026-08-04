@@ -3379,6 +3379,7 @@ function updateLoopControls() {
       `rating:${Number(item?.rating || 0) || '?'}`,
       itemTierLabel(item),
       isRare(item) ? 'rare' : 'common',
+      `rareflag:${itemRareFlag(item)}`,
       isTradeable(item) ? 'tradeable' : 'untradeable',
       `from:${entry?.pileName || 'unknown'}`,
       `id:${Number(item?.id || 0) || '?'}`,
@@ -5583,7 +5584,10 @@ function updateLoopControls() {
       failIfSbcSubmitError(set.name);
     }
 
-    await claimSbcRewardsIfPresent(set.name, { set, beforePackCounts, beforeProgress });
+    const claimConfirmed = await claimSbcRewardsIfPresent(set.name, { set, beforePackCounts, beforeProgress });
+    if (!claimConfirmed) {
+      fail(`${set.name}: SBC submission could not be confirmed by reward, progress, or My Packs state; preserving inventory state`);
+    }
     await waitLoadingEnd(900, 45000);
     await refreshStorePacks().catch(() => null);
 
@@ -6021,10 +6025,18 @@ function updateLoopControls() {
           }]
         : [],
       isSubmitReady: async () => !!findSubmitButton(),
-      submitTransport: async ({ set }) => ({
-        submitted: true,
-        rewardPackId: await submitSbcAndGetAwardPackId(set),
-      }),
+      submitTransport: async ({ set, players, savedPlayers }) => {
+        const submittedPlayers = savedPlayers?.length ? savedPlayers : players || [];
+        const signalCount = selectedUnassignedSignalRefs(selection).length;
+        if (signalCount) {
+          const refs = submittedPlayers.map((item) => `${Number(item?.id || 0) || '?'}/def:${Number(item?.definitionId || 0) || '?'}`);
+          log(`${label}: submit squad for ${signalCount} Unassigned signal(s): ${refs.join(', ')}`);
+        }
+        return {
+          submitted: true,
+          rewardPackId: await submitSbcAndGetAwardPackId(set),
+        };
+      },
       afterSubmit: selection
         ? async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
             squadPlan?.selection || selection,
@@ -7497,7 +7509,18 @@ function updateLoopControls() {
               ? 'fallback'
               : `after ${shortageSourceLabel(payload.supply?.source) || 'source'} source check`;
           if (dryRun) logDryRunSelection(`${loopDef.name} ${label}`, selection, { priorityPiles: phase === 'fallback' ? fallbackPiles : primaryPiles });
-          else log(`${loopDef.name}: ${label} selected ${selection.selected.length} player(s) (${formatSelectionStats(selection.stats)})`);
+          else {
+            const requirements = (loopDef.requirements || []).map(describeRequirement).join(' + ') || 'unspecified';
+            log(`${loopDef.name}: ${label} selected ${selection.selected.length} player(s) (${formatSelectionStats(selection.stats)}); requirements:${requirements}`);
+            if (
+              selection.selected.length
+              && (loopDef.dynamicSbcFamily === 'daily-rare-gold-upgrade'
+                || loopDef.activityBinding?.family === 'daily-rare-gold-upgrade')
+            ) {
+              const entries = selection.entries || selection.selected.map((item) => ({ item, pileName: 'unknown' }));
+              entries.forEach((entry, index) => log(`${loopDef.name}: ${label} pick ${formatDryRunItem(entry, index)}`));
+            }
+          }
         } else if (event === 'supply-skipped') {
           log(`${loopDef.name}: unassigned duplicates are reserved for this SBC; skipping additional shortage packs`);
         } else if (event === 'selection-insufficient') {
@@ -7972,10 +7995,15 @@ function updateLoopControls() {
         if (!duplicateCount && !forceAttempt) return { status: 'done', reason: 'no challenge-matching duplicate remains' };
 
         const fallbackPiles = challengeDef.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'];
+        const repositorySignals = getUnassignedItems().filter(activeDuplicatePredicate);
+        const signalById = new Map([...repositorySignals, ...transientSignals]
+          .map((signal) => [Number(signal?.id || signal?.ref?.id || 0), signal])
+          .filter(([id]) => id));
         const transientSignalRefs = transientSignals.map((signal) => signal.ref || signal);
+        const signalRefs = [...signalById.values()].map((signal) => signal.ref || signal);
         const selectionOptions = {
           transientUnassignedSignals: transientSignals,
-          preferredSignalRefs: transientSignalRefs,
+          preferredSignalRefs: signalRefs,
         };
         const duplicateOnlySelection = fallbackPiles.includes('unassigned')
           ? selectInventoryPlayers(challengeDef, ['unassigned'], selectionOptions)
@@ -7984,16 +8012,11 @@ function updateLoopControls() {
         const selection = selectInventoryPlayers(challengeDef, piles, selectionOptions);
         log(`${loopDef.name}: ${label} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
 
-        const repositorySignals = getUnassignedItems().filter(activeDuplicatePredicate);
-        const signalById = new Map([...repositorySignals, ...transientSignals]
-          .map((signal) => [Number(signal?.id || signal?.ref?.id || 0), signal])
-          .filter(([id]) => id));
         const selectedSignalCount = (selection.entries || [])
           .filter((entry) => entry.pileName === 'unassigned' && entry.signal).length;
-        if (transientSignals.length) {
+        if (signalById.size) {
           log(`${loopDef.name}: ${label} duplicate signal sources response:${transientSignals.length}, repository:${repositorySignals.length}, unique:${signalById.size}, selected:${selectedSignalCount}`);
         }
-        const signalRefs = [...signalById.values()].map((signal) => signal.ref || signal);
         const signalCoverage = evaluateUnassignedSignalCoverage(selection, signalById.size, countNeeded);
         const expectedSelectedSignalCount = signalCoverage.expectedCount;
         const missedTransientSignal = !selectionConsumesAllSignalRefs(selection, transientSignalRefs);
@@ -8375,7 +8398,7 @@ function updateLoopControls() {
             rareUpgradeDef,
             isEligibleLowRareGoldDuplicate,
             `${rareUpgradeLabel} ${phase === 'resume' ? 'resumed ' : ''}low rare gold`,
-            { maxCompletions: 1 },
+            { maxCompletions: 1, requireFullSignalCoverage: true },
           );
           return { status: 'planned', completions: { rare: 0 }, reason: `would submit ${rareUpgradeLabel} stage` };
         }
@@ -8388,9 +8411,16 @@ function updateLoopControls() {
             maxCompletions: remainingCompletions ?? 100,
             forceAttempts: phase === 'pack' && Number(context?.lowRare || 0) > 0 ? 1 : 0,
             transientUnassignedSignals: phase === 'pack' ? context?.transientUnassignedSignals || [] : [],
+            requireFullSignalCoverage: true,
           },
         );
-        return { status: 'completed', completions: { rare: stageResult.completions } };
+        return {
+          status: stageResult.status === 'blocked' || stageResult.status === 'planned'
+            ? stageResult.status
+            : 'completed',
+          completions: { rare: stageResult.completions },
+          reason: stageResult.reason || null,
+        };
       },
       afterStages: async ({ phase }) => {
         if (dryRun) return;

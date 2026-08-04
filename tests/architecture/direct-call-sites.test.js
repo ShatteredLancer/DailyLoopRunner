@@ -111,6 +111,8 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('selectedSignalCount < expectedSelectedSignalCount');
     expect(source).toContain('refusing a fallback that skips Unassigned cards');
     expect(source).toContain('options.requireFullSignalCoverage === true');
+    expect(source).toMatch(/const repositorySignals[\s\S]*?const signalById[\s\S]*?preferredSignalRefs:\s*signalRefs/);
+    expect(source).toMatch(/runRarePackCraftLoop[\s\S]*?requireFullSignalCoverage:\s*true/);
     expect(source).toMatch(/runProvisionCraftLoop[\s\S]*?runReservedDuplicateCraftingStage\([\s\S]*?requireFullSignalCoverage:\s*true/);
     expect(source).toMatch(/const runProvisionMaterialStages[\s\S]*?runProvisionPreCraftPlayerPick\([\s\S]*?for \(let index = 0; index < craftingUpgrades\.length; index\+\+\)/);
     expect(source).toMatch(/runProvisionCraftLoop[\s\S]*?afterStages:[\s\S]*?enableRecovery:\s*false[\s\S]*?reserveItem:\s*isReservedDuplicate/);

@@ -350,6 +350,44 @@ describe('pure inventory selector', () => {
     expect(plan.selected.every((item) => item.rare === false)).toBe(true);
   });
 
+  it('consumes a preferred rare duplicate before common-first fills the remaining slots', () => {
+    const adapter = createFakeInventoryAdapter({
+      unassigned: [
+        makePlayer({ id: 10, definitionId: 110, duplicate: true, duplicateId: 20, rating: 78, rareflag: 1 }),
+      ],
+      club: [
+        makePlayer({ id: 20, definitionId: 110, rating: 78, rareflag: 1 }),
+        ...Array.from({ length: 9 }, (_, index) => makePlayer({
+          id: 30 + index,
+          definitionId: 130 + index,
+          rating: 75 + (index % 3),
+          rareflag: 0,
+        })),
+      ],
+    });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{
+        tier: 'gold',
+        count: 9,
+        preferCommon: true,
+        playerOnly: true,
+        allowSpecial: false,
+      }],
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      preferredSignalRefs: [{ id: 10, definitionId: 110, pile: 'unassigned' }],
+      fsuPolicy: { ...fsuPolicy, priorityRareWithinGoldRange: true },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.selected).toHaveLength(9);
+    expect(plan.selected[0].id).toBe(20);
+    expect(plan.selected.filter((item) => item.rare)).toHaveLength(1);
+    expect(plan.duplicateSignals).toEqual([
+      expect.objectContaining({ signalRef: expect.objectContaining({ id: 10 }), itemRef: expect.objectContaining({ id: 20 }) }),
+    ]);
+  });
+
   it('preserves pile order within the common phase before restarting at unassigned for rare fallback', () => {
     const adapter = createFakeInventoryAdapter({
       unassigned: [

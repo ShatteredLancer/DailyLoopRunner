@@ -72,6 +72,48 @@ describe('Inventory Adapter contract', () => {
     expect(fake.capacity('storage')).toEqual({ used: 1, max: 100, free: 99 });
   });
 
+  it('reads rarity metadata from nested EA item data', () => {
+    const nestedRare = {
+      id: 10,
+      definitionId: 110,
+      type: 'player',
+      rating: 78,
+      _staticData: { rareflag: 1 },
+    };
+    const nestedSpecial = {
+      id: 11,
+      definitionId: 111,
+      type: 'player',
+      rating: 90,
+      _data: { rareFlag: 2 },
+    };
+    const ea = createEaInventoryAdapter(createRuntime({ club: [nestedRare, nestedSpecial] }));
+
+    expect(ea.snapshot().piles.club).toEqual([
+      expect.objectContaining({ id: 10, rareflag: 1, rare: true, special: false }),
+      expect.objectContaining({ id: 11, rareflag: 2, rare: true, special: true }),
+    ]);
+  });
+
+  it('restores latent Unassigned duplicate metadata from matching Club or Storage definitions', () => {
+    const unassigned = makePlayer({
+      id: 30,
+      definitionId: 130,
+      rating: 78,
+      rareflag: 1,
+      duplicate: false,
+      duplicateId: 0,
+    });
+    const club = makePlayer({ id: 40, definitionId: 130, rating: 78, rareflag: 1 });
+    const ea = createEaInventoryAdapter(createRuntime({ unassigned: [unassigned], club: [club] }));
+
+    expect(ea.snapshot().piles.unassigned[0]).toMatchObject({
+      id: 30,
+      duplicate: true,
+      duplicateId: 40,
+    });
+  });
+
   it('preserves legacy storage and transfer collection fallbacks', () => {
     const storageItem = makePlayer({ id: 20, definitionId: 120, rating: 76 });
     const transferItem = makePlayer({ id: 21, definitionId: 121, rating: 77 });

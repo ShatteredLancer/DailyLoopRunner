@@ -104,9 +104,13 @@ describe('SBC reward claim completion signals', () => {
     );
   });
 
-  it('uses the AltRight fallback when the reward context is present but not clickable', async () => {
+  it('uses AltRight as an attempt and waits for independent submission confirmation', async () => {
     let currentTime = 0;
+    let progress = 2;
     const harness = rewardHarness({
+      beforeProgress: { setComplete: false, setTimesCompleted: 2, challenges: [] },
+      getProgress: vi.fn(() => ({ setComplete: false, setTimesCompleted: progress, challenges: [] })),
+      keyStroke: vi.fn(() => { progress = 3; }),
       now: () => {
         currentTime += 1000;
         return currentTime;
@@ -118,6 +122,28 @@ describe('SBC reward claim completion signals', () => {
     expect(harness.keyStroke).toHaveBeenNthCalledWith(1, 'Alt', 'AltRight', { altKey: true, location: 2 });
     expect(harness.keyStroke).toHaveBeenNthCalledWith(2, 'AltRight', 'AltRight', { altKey: true, location: 2 });
     expect(harness.waitLoadingEnd).toHaveBeenCalledWith(500, 12000);
+    expect(harness.log).toHaveBeenCalledWith(
+      'Test SBC: rewards already granted (SBC progress advanced); skipping Claim Rewards wait',
+    );
+  });
+
+  it('does not treat AltRight alone as proof that an SBC was submitted', async () => {
+    let currentTime = 0;
+    const harness = rewardHarness({
+      beforeProgress: { setComplete: false, setTimesCompleted: 2, challenges: [] },
+      getProgress: vi.fn(() => ({ setComplete: false, setTimesCompleted: 2, challenges: [] })),
+      now: () => {
+        currentTime += 1000;
+        return currentTime;
+      },
+    });
+    harness.overlay.findClaimContext.mockReturnValue({ text: 'Rewards Player Pack' });
+
+    await expect(claimSbcRewards(harness)).resolves.toBe(false);
+    expect(harness.keyStroke).toHaveBeenCalled();
+    expect(harness.log).toHaveBeenCalledWith(
+      'Test SBC: Claim Rewards button not detected; modal text: Rewards Player Pack; continuing',
+    );
   });
 
   it('logs the modal context and continues after the 25 second limit', async () => {

@@ -119,6 +119,45 @@ describe('current inventory selection behavior', () => {
     expect(selection.entries.filter((entry) => entry.signal).map((entry) => entry.signal.id)).toEqual([1001, 1002, 1003]);
   });
 
+  it('keeps a preferred rare duplicate in an unrestricted common-first Gold squad', async () => {
+    const rareClubItem = makePlayer({ id: 251, definitionId: 551, rating: 78, rareflag: 1 });
+    const commonClubItems = Array.from({ length: 9 }, (_, index) => makePlayer({
+      id: 260 + index,
+      definitionId: 560 + index,
+      rating: 75 + (index % 3),
+      rareflag: 0,
+    }));
+    const responseSignal = {
+      id: 1251,
+      definitionId: rareClubItem.definitionId,
+      type: 'player',
+      rating: rareClubItem.rating,
+      rareflag: 1,
+      rare: true,
+      special: false,
+      duplicate: true,
+      duplicateId: rareClubItem.id,
+      pile: 'unassigned',
+    };
+    const { api } = await loadUserscript({ club: [rareClubItem, ...commonClubItems], unassigned: [] });
+    const selection = api.selectInventoryPlayers([{
+      tier: 'gold',
+      count: 9,
+      preferCommon: true,
+      playerOnly: true,
+      allowSpecial: false,
+    }], ['unassigned', 'storage', 'transfer', 'club'], {
+      transientUnassignedSignals: [responseSignal],
+      preferredSignalRefs: [responseSignal],
+    });
+
+    expect(selection.ok).toBe(true);
+    expect(selection.selected).toHaveLength(9);
+    expect(selection.selected[0].id).toBe(rareClubItem.id);
+    expect(selection.selected.filter((item) => item.rareflag > 0)).toHaveLength(1);
+    expect(selection.entries.filter((entry) => entry.signal).map((entry) => entry.signal.id)).toEqual([responseSignal.id]);
+  });
+
   it('consumes all four response duplicates when the EA repository has materialized only three', async () => {
     const club = [
       makePlayer({ id: 221, definitionId: 521, rating: 75, rareflag: 1 }),

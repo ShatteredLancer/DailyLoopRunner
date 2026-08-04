@@ -27,6 +27,19 @@ function itemLeagueId(item) {
   return value || 0;
 }
 
+function itemRareFlag(item) {
+  return Number(
+    item?.rareflag
+      ?? item?.rareFlag
+      ?? item?._rareflag
+      ?? item?._data?.rareflag
+      ?? item?._data?.rareFlag
+      ?? item?._staticData?.rareflag
+      ?? item?._staticData?.rareFlag
+      ?? 0
+  );
+}
+
 const IDENTITY_FIELDS = [
   'id', 'itemId', 'instanceId', 'resourceId', 'cardId', 'playerId', 'guidAssetId',
   'definitionId', 'defId', 'assetId', '_assetId', 'baseId', 'baseResourceId',
@@ -73,7 +86,7 @@ function isAcademyEnrolled(item) {
 
 function toSnapshot(item, pile) {
   const rating = Number(item?.rating || 0);
-  const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? 0);
+  const rareflag = itemRareFlag(item);
   const duplicateId = Number(item?.duplicateId || 0);
   const tradeable = typeof item?.isUntradeable === 'function'
     ? !callBoolean(item, 'isUntradeable', true)
@@ -207,8 +220,27 @@ export function createEaInventoryAdapter(runtime, options = {}) {
 
   function snapshot() {
     const rawPiles = Object.fromEntries(INVENTORY_PILES.map((pile) => [pile, readPile(pile)]));
+    const piles = Object.fromEntries(INVENTORY_PILES.map((pile) => [
+      pile,
+      rawPiles[pile].map((item) => toSnapshot(item, pile)),
+    ]));
+    const submissionItems = [...piles.storage, ...piles.club];
+    piles.unassigned = piles.unassigned.map((item) => {
+      if (item.duplicate && item.duplicateId) return item;
+      const matching = submissionItems.find((candidate) => (
+        candidate.definitionId > 0
+          && candidate.definitionId === item.definitionId
+          && candidate.id !== item.id
+      ));
+      if (!matching) return item;
+      return createItemSnapshot({
+        ...item,
+        duplicate: true,
+        duplicateId: Number(item.duplicateId || matching.id || 0),
+      }, 'unassigned');
+    });
     return createInventorySnapshot({
-      piles: Object.fromEntries(INVENTORY_PILES.map((pile) => [pile, rawPiles[pile].map((item) => toSnapshot(item, pile))])),
+      piles,
       capacities: Object.fromEntries(INVENTORY_PILES.map((pile) => [pile, capacity(pile, rawPiles[pile])])),
     });
   }

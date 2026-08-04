@@ -86,12 +86,12 @@ export async function claimSbcRewards(options = {}) {
     const currentTime = now();
     if (context && currentTime - lastHotkeyAt > 2500) {
       lastHotkeyAt = currentTime;
-      log(`${label}: Claim Rewards button not clickable; trying AltRight reward hotkey`);
+      log(`${label}: Claim Rewards button not clickable; trying AltRight reward hotkey; confirmation still required`);
       keyStroke('Alt', 'AltRight', { altKey: true, location: 2 });
       keyStroke('AltRight', 'AltRight', { altKey: true, location: 2 });
       await waitLoadingEnd(500, 12000);
       await sleep(1200);
-      return true;
+      continue;
     }
     await sleep(500);
   }

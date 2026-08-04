@@ -79,13 +79,28 @@ describe('Unassigned runtime diagnostics', () => {
       success: true,
       status: 200,
       response: { statusCode: 200, message: 'accepted', payload: { ignored: true } },
-      _data: { code: 'settled', privatePayload: { ignored: true } },
+      _data: {
+        code: 'settled',
+        sourcePile: 6,
+        destinationPile: 7,
+        itemIds: [101, 102],
+        clubDuplicates: [{ id: 201 }, 202],
+        untradeableSwap: false,
+        privatePayload: { ignored: true },
+      },
     });
 
     expect(result).toMatchObject({
       result: { success: true, status: 200 },
       response: { statusCode: 200, message: 'accepted' },
       data: { code: 'settled' },
+      dataValues: {
+        sourcePile: 6,
+        destinationPile: 7,
+        itemIds: [101, 102],
+        clubDuplicates: [201, 202],
+        untradeableSwap: false,
+      },
     });
     expect(diagnosticJson(result)).toContain('privatePayload');
     expect(diagnosticJson(result)).not.toContain('"ignored":true');

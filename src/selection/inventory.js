@@ -119,14 +119,15 @@ function findSubmissionItem(signal, snapshot, usedIds, requirement, fsuPolicy, p
   return sortCandidates(candidates, requirement, fsuPolicy).find((item) => item.definitionId === signal.definitionId) || null;
 }
 
-function requirementSelectionPhases(requirement = {}) {
+function requirementSelectionPhases(requirement = {}, hasPreferredSignals = false) {
   const preferCommon = requirement.preferCommon === true
     && requirement.tier === 'gold'
     && requirement.rarity === undefined;
-  if (!preferCommon) return [requirement];
+  if (!preferCommon) return [{ requirement, preferredOnly: false }];
   return [
-    { ...requirement, rarity: 'common' },
-    { ...requirement, rarity: 'rare' },
+    ...(hasPreferredSignals ? [{ requirement, preferredOnly: true }] : []),
+    { requirement: { ...requirement, rarity: 'common' }, preferredOnly: false },
+    { requirement: { ...requirement, rarity: 'rare' }, preferredOnly: false },
   ];
 }
 
@@ -160,16 +161,19 @@ export function selectInventoryPlayers(input = {}) {
     };
     const piles = applyPilePriority(requirement.priorityPiles || defaultPiles, fsuPolicy)
       .filter((pile) => INVENTORY_PILES.includes(pile));
-    for (const phaseRequirement of requirementSelectionPhases(requirement)) {
+    for (const phase of requirementSelectionPhases(requirement, preferredSignalRefs.length > 0)) {
       if (need <= 0) break;
+      const phaseRequirement = phase.requirement;
       for (const pileName of piles) {
         if (need <= 0) break;
+        if (phase.preferredOnly && pileName !== 'unassigned' && pileName !== 'transfer') continue;
         const preferredRefs = pileName === 'unassigned' || pileName === 'transfer'
           ? preferredSignalRefs
           : [];
         const candidates = sortCandidates(snapshot.piles[pileName] || [], phaseRequirement, fsuPolicy, preferredRefs);
         for (const candidate of candidates) {
           if (need <= 0) break;
+          if (phase.preferredOnly && !isPreferredItem(candidate, preferredSignalRefs)) continue;
           if (selectedIds.has(candidate.id) || selectedDefinitionIds.has(candidate.definitionId)) continue;
           const reasons = rejectionReasons(candidate, phaseRequirement, fsuPolicy, requirementProtection);
           if (reasons.length) {

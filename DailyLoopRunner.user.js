@@ -1441,10 +1441,10 @@
     const configuredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
     if (configuredSpecialCount) {
       const minimumRating = Math.max(0, Number(loopDef.requiredSpecialMinRating || 0) || 0);
-      const label = input.requiredSpecialLabel?.(loopDef) || "special";
+      const label2 = input.requiredSpecialLabel?.(loopDef) || "special";
       constraints.push({
         id: "runner-required-special",
-        label: `${label} rating >= ${minimumRating} x${configuredSpecialCount}`,
+        label: `${label2} rating >= ${minimumRating} x${configuredSpecialCount}`,
         count: configuredSpecialCount,
         matches: (item) => input.isRequiredSpecialItem?.(item, loopDef) === true && Number(item?.rating || 0) >= minimumRating
       });
@@ -2528,9 +2528,9 @@
       errors.push(`${path}.label must be a non-empty string`);
     }
   }
-  function validateLoopDef(loopDef, label = "loop") {
+  function validateLoopDef(loopDef, label2 = "loop") {
     const errors = [];
-    if (!isPlainObject(loopDef)) return [`${label} must be an object`];
+    if (!isPlainObject(loopDef)) return [`${label2} must be an object`];
     if (typeof loopDef.name !== "string" || !loopDef.name.trim()) {
       errors.push("name is required");
     }
@@ -2844,32 +2844,32 @@
     }
     return errors;
   }
-  function assertValidLoopDef(loopDef, label = "Loop JSON") {
-    const errors = validateLoopDef(loopDef, label);
-    if (errors.length) fail(`${label} validation failed:
+  function assertValidLoopDef(loopDef, label2 = "Loop JSON") {
+    const errors = validateLoopDef(loopDef, label2);
+    if (errors.length) fail(`${label2} validation failed:
 - ${errors.join("\n- ")}`);
   }
-  function validateLoopDefList(loopDefs, label = "Loop config") {
+  function validateLoopDefList(loopDefs, label2 = "Loop config") {
     if (!Array.isArray(loopDefs) || !loopDefs.length) {
-      fail(`${label} must be a non-empty array or an object with a loops array`);
+      fail(`${label2} must be a non-empty array or an object with a loops array`);
     }
     const seen = /* @__PURE__ */ new Set();
     loopDefs.forEach((loopDef, index) => {
-      assertValidLoopDef(loopDef, `${label}[${index}]`);
+      assertValidLoopDef(loopDef, `${label2}[${index}]`);
       if (typeof loopDef.id !== "string" || !loopDef.id.trim()) {
-        fail(`${label}[${index}].id is required`);
+        fail(`${label2}[${index}].id is required`);
       }
       if (loopDef.id) {
-        if (seen.has(loopDef.id)) fail(`${label} has duplicate id: ${loopDef.id}`);
+        if (seen.has(loopDef.id)) fail(`${label2} has duplicate id: ${loopDef.id}`);
         seen.add(loopDef.id);
       }
     });
     const byId = new Map(loopDefs.map((loopDef) => [loopDef.id, loopDef]));
     loopDefs.forEach((loopDef, index) => {
       const references = [
-        { path: `${label}[${index}].sourcePackRef`, value: loopDef.sourcePackRef },
+        { path: `${label2}[${index}].sourcePackRef`, value: loopDef.sourcePackRef },
         ...(loopDef.shortagePacks || []).map((source, sourceIndex) => ({
-          path: `${label}[${index}].shortagePacks[${sourceIndex}].sourcePackRef`,
+          path: `${label2}[${index}].shortagePacks[${sourceIndex}].sourcePackRef`,
           value: source?.sourcePackRef
         }))
       ];
@@ -2887,33 +2887,33 @@
     loopDefs.forEach((loopDef, index) => {
       if (!loopDef.preCraftPlayerPickLoopId) return;
       const target = loopDefs.find((candidate) => candidate.id === loopDef.preCraftPlayerPickLoopId);
-      if (!target) fail(`${label}[${index}].preCraftPlayerPickLoopId not found: ${loopDef.preCraftPlayerPickLoopId}`);
+      if (!target) fail(`${label2}[${index}].preCraftPlayerPickLoopId not found: ${loopDef.preCraftPlayerPickLoopId}`);
       if (target.strategy !== "playerPickSbc") {
-        fail(`${label}[${index}].preCraftPlayerPickLoopId must reference a playerPickSbc loop`);
+        fail(`${label2}[${index}].preCraftPlayerPickLoopId must reference a playerPickSbc loop`);
       }
     });
     loopDefs.forEach((loopDef, index) => {
       if (["dailyRoutine", "workflowRoutine"].includes(loopDef.strategy) && isPlainObject(loopDef.stepOverrides)) {
         const stepIds = new Set((loopDef.steps || []).map(normalizeRoutineStepId).filter(Boolean));
         Object.keys(loopDef.stepOverrides).forEach((stepId) => {
-          if (!stepIds.has(stepId)) fail(`${label}[${index}].stepOverrides references a non-step loop: ${stepId}`);
+          if (!stepIds.has(stepId)) fail(`${label2}[${index}].stepOverrides references a non-step loop: ${stepId}`);
         });
       }
       if (!loopDef.sourceExhaustedFallbackLoopId) return;
       const target = loopDefs.find((candidate) => candidate.id === loopDef.sourceExhaustedFallbackLoopId);
-      if (!target) fail(`${label}[${index}].sourceExhaustedFallbackLoopId not found: ${loopDef.sourceExhaustedFallbackLoopId}`);
+      if (!target) fail(`${label2}[${index}].sourceExhaustedFallbackLoopId not found: ${loopDef.sourceExhaustedFallbackLoopId}`);
       if (target.strategy !== "fillAndVerifySbc") {
-        fail(`${label}[${index}].sourceExhaustedFallbackLoopId must reference a fillAndVerifySbc loop`);
+        fail(`${label2}[${index}].sourceExhaustedFallbackLoopId must reference a fillAndVerifySbc loop`);
       }
     });
   }
-  function validateRoutineReferences(loopDefs, label) {
+  function validateRoutineReferences(loopDefs, label2) {
     const byId = new Map(loopDefs.map((loopDef) => [loopDef.id, loopDef]));
     loopDefs.forEach((loopDef, loopIndex) => {
       if (!["dailyRoutine", "workflowRoutine"].includes(loopDef.strategy)) return;
       (loopDef.steps || []).forEach((step, stepIndex) => {
         const stepId = normalizeRoutineStepId(step);
-        const path = `${label}.loops[${loopIndex}].steps[${stepIndex}]`;
+        const path = `${label2}.loops[${loopIndex}].steps[${stepIndex}]`;
         if (!stepId || !byId.has(stepId)) fail(`${path} loop not found: ${stepId || "?"}`);
         if (stepId === loopDef.id) fail(`${path} cannot reference itself`);
         const target = byId.get(stepId);
@@ -2928,15 +2928,15 @@
       errors.push(`${path} must be continue or stop`);
     }
   }
-  function validateRecoveryRecipeList(recipes, label = "recoveryRecipes") {
-    if (!Array.isArray(recipes)) fail(`${label} must be an array`);
+  function validateRecoveryRecipeList(recipes, label2 = "recoveryRecipes") {
+    if (!Array.isArray(recipes)) fail(`${label2} must be an array`);
     const seen = /* @__PURE__ */ new Set();
     recipes.forEach((recipe2, index) => {
-      const path = `${label}[${index}]`;
+      const path = `${label2}[${index}]`;
       const errors = [];
       if (!isPlainObject(recipe2)) fail(`${path} must be an object`);
       if (typeof recipe2.id !== "string" || !recipe2.id.trim()) errors.push(`${path}.id is required`);
-      if (seen.has(recipe2.id)) errors.push(`${label} has duplicate id: ${recipe2.id}`);
+      if (seen.has(recipe2.id)) errors.push(`${label2} has duplicate id: ${recipe2.id}`);
       seen.add(recipe2.id);
       validateUpgradeDef(recipe2, path, errors);
       if (recipe2.maxSubmissions !== void 0 && Number(recipe2.maxSubmissions) !== 1) {
@@ -2954,16 +2954,16 @@
 - ${errors.join("\n- ")}`);
     });
   }
-  function validateRecoveryPolicyList(policies, recipes, label = "unassignedRecoveryPolicies") {
-    if (!Array.isArray(policies)) fail(`${label} must be an array`);
+  function validateRecoveryPolicyList(policies, recipes, label2 = "unassignedRecoveryPolicies") {
+    if (!Array.isArray(policies)) fail(`${label2} must be an array`);
     const recipeIds = new Set(recipes.map((recipe2) => recipe2.id));
     const seen = /* @__PURE__ */ new Set();
     policies.forEach((policy, index) => {
-      const path = `${label}[${index}]`;
+      const path = `${label2}[${index}]`;
       const errors = [];
       if (!isPlainObject(policy)) fail(`${path} must be an object`);
       if (typeof policy.id !== "string" || !policy.id.trim()) errors.push(`${path}.id is required`);
-      if (seen.has(policy.id)) errors.push(`${label} has duplicate id: ${policy.id}`);
+      if (seen.has(policy.id)) errors.push(`${label2} has duplicate id: ${policy.id}`);
       seen.add(policy.id);
       validateCardSpec(policy.match, `${path}.match`, errors);
       if (!Array.isArray(policy.steps) || !policy.steps.length) {
@@ -3009,26 +3009,26 @@
       defaultUnassignedRecoveryPolicyIds: input.defaultUnassignedRecoveryPolicyIds === void 0 ? DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS : input.defaultUnassignedRecoveryPolicyIds
     };
   }
-  function validateLoopConfig(config, label = "Loop config") {
+  function validateLoopConfig(config, label2 = "Loop config") {
     const normalized = normalizeLoopConfig(config);
-    validateLoopDefList(normalized.loops, `${label}.loops`);
-    validateRecoveryRecipeList(normalized.recoveryRecipes, `${label}.recoveryRecipes`);
+    validateLoopDefList(normalized.loops, `${label2}.loops`);
+    validateRecoveryRecipeList(normalized.recoveryRecipes, `${label2}.recoveryRecipes`);
     validateRecoveryPolicyList(
       normalized.unassignedRecoveryPolicies,
       normalized.recoveryRecipes,
-      `${label}.unassignedRecoveryPolicies`
+      `${label2}.unassignedRecoveryPolicies`
     );
     validateRecoveryPolicyIds(
       normalized.defaultUnassignedRecoveryPolicyIds,
       normalized.unassignedRecoveryPolicies,
-      `${label}.defaultUnassignedRecoveryPolicyIds`
+      `${label2}.defaultUnassignedRecoveryPolicyIds`
     );
     normalized.loops.forEach((loopDef, index) => {
       if (loopDef.unassignedRecoveryPolicyIds === void 0) return;
       validateRecoveryPolicyIds(
         loopDef.unassignedRecoveryPolicyIds,
         normalized.unassignedRecoveryPolicies,
-        `${label}.loops[${index}].unassignedRecoveryPolicyIds`
+        `${label2}.loops[${index}].unassignedRecoveryPolicyIds`
       );
     });
     normalized.loops.forEach((loopDef, index) => {
@@ -3037,7 +3037,7 @@
       validateRecoveryPolicyIds(
         flowPolicies,
         normalized.unassignedRecoveryPolicies,
-        `${label}.loops[${index}].rewardFlow.unassignedRecoveryPolicyIds`
+        `${label2}.loops[${index}].rewardFlow.unassignedRecoveryPolicyIds`
       );
     });
     normalized.loops.forEach((loopDef, loopIndex) => {
@@ -3048,11 +3048,11 @@
         validateRecoveryPolicyIds(
           flowPolicies,
           normalized.unassignedRecoveryPolicies,
-          `${label}.loops[${loopIndex}].steps[${stepIndex}].rewardFlow.unassignedRecoveryPolicyIds`
+          `${label2}.loops[${loopIndex}].steps[${stepIndex}].rewardFlow.unassignedRecoveryPolicyIds`
         );
       });
     });
-    validateRoutineReferences(normalized.loops, label);
+    validateRoutineReferences(normalized.loops, label2);
     return normalized;
   }
   function parseLoopConfig(text) {
@@ -3376,7 +3376,7 @@
     if (sourceLabel) base.source = base.source && base.source !== "compat-defaults" ? `${base.source}+${sourceLabel}` : sourceLabel;
     return base;
   }
-  function readFsuSettingsFromStorage(storage, label) {
+  function readFsuSettingsFromStorage(storage, label2) {
     if (!storage) return null;
     const exactKeys = [
       "sbcIgnorePlayerConfiguration",
@@ -3393,24 +3393,24 @@
       const value = storage.get(key, null);
       if (value === null || value === void 0) continue;
       const parsed = parseJsonMaybe(value);
-      const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label}:${key}`);
+      const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label2}:${key}`);
       if (settings) return settings;
     }
     for (const [key, value] of storage.entries(250)) {
       if (!key || !likelyFsuStorageKey(key)) continue;
       const parsed = parseJsonMaybe(value);
-      const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label}:${key}`);
+      const settings = normalizeFsuSettings(parsed || { [key]: value }, `${label2}:${key}`);
       if (settings) return settings;
     }
     return null;
   }
-  function readFsuLockedPlayersFromStorage(storage, label) {
+  function readFsuLockedPlayersFromStorage(storage, label2) {
     const combined = { itemIds: [], definitionIds: [], sources: [] };
     if (!storage) return combined;
     for (const [key, value] of storage.entries(250)) {
       if (!key || !isLikelyLockedPlayerPath(key)) continue;
       const parsed = parseJsonMaybe(value);
-      const locked = normalizeLockedPlayerIds(parsed || { [key]: value }, `${label}:${key}`);
+      const locked = normalizeLockedPlayerIds(parsed || { [key]: value }, `${label2}:${key}`);
       combined.itemIds.push(...locked.itemIds);
       combined.definitionIds.push(...locked.definitionIds);
       combined.sources.push(...locked.sources);
@@ -4981,7 +4981,7 @@
     });
     if (typeof sleep !== "function") throw new TypeError("sleep is required");
     if (typeof stopPoint !== "function") throw new TypeError("stopPoint is required");
-    async function until(predicate, timeoutMs = 15e3, label = "condition") {
+    async function until(predicate, timeoutMs = 15e3, label2 = "condition") {
       const start = now();
       while (now() - start < timeoutMs) {
         stopPoint();
@@ -4992,7 +4992,7 @@
         }
         await sleep(250);
       }
-      throw new Error(`Timed out waiting for ${label}`);
+      throw new Error(`Timed out waiting for ${label2}`);
     }
     async function appReady() {
       return until(() => pageRuntime?.isReady?.(), 3e4, "FUT main UI");
@@ -5010,13 +5010,13 @@
       log("Loading shield wait timed out; continuing");
       return false;
     }
-    function observableOnce(observable, controller, timeoutMs = 2e4, label = "observable") {
+    function observableOnce(observable, controller, timeoutMs = 2e4, label2 = "observable") {
       return new Promise((resolve, reject) => {
         let done = false;
         const timeoutId = setTimeout(() => {
           if (done) return;
           done = true;
-          reject(new Error(`${label} timed out`));
+          reject(new Error(`${label2} timed out`));
         }, timeoutMs);
         try {
           const observedController = controller || pageRuntime?.currentController?.();
@@ -5487,6 +5487,11 @@
     const value = values.map(Number).find((entry) => Number.isFinite(entry) && entry > 0);
     return value || 0;
   }
+  function itemRareFlag(item) {
+    return Number(
+      item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._data?.rareflag ?? item?._data?.rareFlag ?? item?._staticData?.rareflag ?? item?._staticData?.rareFlag ?? 0
+    );
+  }
   var IDENTITY_FIELDS = [
     "id",
     "itemId",
@@ -5550,7 +5555,7 @@
   }
   function toSnapshot(item, pile) {
     const rating = Number(item?.rating || 0);
-    const rareflag = Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? 0);
+    const rareflag = itemRareFlag(item);
     const duplicateId = Number(item?.duplicateId || 0);
     const tradeable = typeof item?.isUntradeable === "function" ? !callBoolean(item, "isUntradeable", true) : item?.untradeable === false;
     let fullName = "";
@@ -5684,8 +5689,23 @@
     }
     function snapshot() {
       const rawPiles = Object.fromEntries(INVENTORY_PILES2.map((pile) => [pile, readPile(pile)]));
+      const piles = Object.fromEntries(INVENTORY_PILES2.map((pile) => [
+        pile,
+        rawPiles[pile].map((item) => toSnapshot(item, pile))
+      ]));
+      const submissionItems = [...piles.storage, ...piles.club];
+      piles.unassigned = piles.unassigned.map((item) => {
+        if (item.duplicate && item.duplicateId) return item;
+        const matching = submissionItems.find((candidate) => candidate.definitionId > 0 && candidate.definitionId === item.definitionId && candidate.id !== item.id);
+        if (!matching) return item;
+        return createItemSnapshot({
+          ...item,
+          duplicate: true,
+          duplicateId: Number(item.duplicateId || matching.id || 0)
+        }, "unassigned");
+      });
       return createInventorySnapshot({
-        piles: Object.fromEntries(INVENTORY_PILES2.map((pile) => [pile, rawPiles[pile].map((item) => toSnapshot(item, pile))])),
+        piles,
         capacities: Object.fromEntries(INVENTORY_PILES2.map((pile) => [pile, capacity(pile, rawPiles[pile])]))
       });
     }
@@ -6578,12 +6598,13 @@
     }
     return sortCandidates(candidates, requirement2, fsuPolicy).find((item) => item.definitionId === signal.definitionId) || null;
   }
-  function requirementSelectionPhases(requirement2 = {}) {
+  function requirementSelectionPhases(requirement2 = {}, hasPreferredSignals = false) {
     const preferCommon = requirement2.preferCommon === true && requirement2.tier === "gold" && requirement2.rarity === void 0;
-    if (!preferCommon) return [requirement2];
+    if (!preferCommon) return [{ requirement: requirement2, preferredOnly: false }];
     return [
-      { ...requirement2, rarity: "common" },
-      { ...requirement2, rarity: "rare" }
+      ...hasPreferredSignals ? [{ requirement: requirement2, preferredOnly: true }] : [],
+      { requirement: { ...requirement2, rarity: "common" }, preferredOnly: false },
+      { requirement: { ...requirement2, rarity: "rare" }, preferredOnly: false }
     ];
   }
   function selectInventoryPlayers(input = {}) {
@@ -6614,14 +6635,17 @@
         protectedDefinitionIds: /* @__PURE__ */ new Set([...protection.protectedDefinitionIds, ...numberSet(requirement2.protectedDefinitionIds)])
       };
       const piles = applyPilePriority(requirement2.priorityPiles || defaultPiles, fsuPolicy).filter((pile) => INVENTORY_PILES2.includes(pile));
-      for (const phaseRequirement of requirementSelectionPhases(requirement2)) {
+      for (const phase of requirementSelectionPhases(requirement2, preferredSignalRefs.length > 0)) {
         if (need <= 0) break;
+        const phaseRequirement = phase.requirement;
         for (const pileName of piles) {
           if (need <= 0) break;
+          if (phase.preferredOnly && pileName !== "unassigned" && pileName !== "transfer") continue;
           const preferredRefs = pileName === "unassigned" || pileName === "transfer" ? preferredSignalRefs : [];
           const candidates = sortCandidates(snapshot.piles[pileName] || [], phaseRequirement, fsuPolicy, preferredRefs);
           for (const candidate of candidates) {
             if (need <= 0) break;
+            if (phase.preferredOnly && !isPreferredItem(candidate, preferredSignalRefs)) continue;
             if (selectedIds.has(candidate.id) || selectedDefinitionIds.has(candidate.definitionId)) continue;
             const reasons = rejectionReasons(candidate, phaseRequirement, fsuPolicy, requirementProtection);
             if (reasons.length) {
@@ -7377,14 +7401,14 @@
     const itemRefs = Array.isArray(options.itemRefs) ? options.itemRefs : [];
     const clubEntries = itemRefs.map((ref, index) => ({ ref, index, player: players[index] })).filter((entry) => entry.ref?.pile === "club");
     if (!clubEntries.length) return { ok: true };
-    const label = options.label || "SBC";
+    const label2 = options.label || "SBC";
     const snapshotItem = options.snapshotItem;
     if (typeof snapshotItem !== "function") throw new TypeError("snapshotItem is required");
     if (typeof options.validateClubPlayers !== "function") throw new TypeError("validateClubPlayers is required");
     const clubRefs = clubEntries.map((entry) => entry.ref);
-    options.log?.(`${label}: validating ${clubRefs.length} provisional Club player(s) against EA before save`);
+    options.log?.(`${label2}: validating ${clubRefs.length} provisional Club player(s) against EA before save`);
     const validation = await options.validateClubPlayers(clubRefs, {
-      label: `${label} targeted Club validation`
+      label: `${label2} targeted Club validation`
     });
     if (!validation?.ok) {
       const missing2 = (validation?.missing || []).map(describeRef).join(", ");
@@ -7420,7 +7444,7 @@
       const ref = itemRefs[index];
       return ref?.pile === "club" ? validatedByRef.get(itemRefKey(ref)) : player;
     });
-    options.log?.(`${label}: provisional Club validation passed in ${Number(validation.elapsed || 0)}ms`);
+    options.log?.(`${label2}: provisional Club validation passed in ${Number(validation.elapsed || 0)}ms`);
     return {
       ok: true,
       players: refreshedPlayers,
@@ -7438,7 +7462,7 @@
     return /^UTSBC/i.test(String(name || ""));
   }
   async function unwindSbcSquadControllers(options = {}) {
-    const label = String(options.label || "SBC navigation");
+    const label2 = String(options.label || "SBC navigation");
     const maxPops = Math.max(0, Number(options.maxPops ?? 20) || 0);
     const currentController = options.currentController;
     const currentControllerName = options.currentControllerName;
@@ -7456,24 +7480,24 @@
     while (isSbcSquadControllerName(currentControllerName()) && popped < maxPops) {
       const controller = currentController();
       if (popController(true) !== true) {
-        log(`${label}: cannot exit ${currentControllerName() || "SBC squad"}; navigation pop method is unavailable`);
+        log(`${label2}: cannot exit ${currentControllerName() || "SBC squad"}; navigation pop method is unavailable`);
         break;
       }
       popped++;
       await waitLoadingEnd(350, 1e4).catch(() => null);
       for (let wait = 0; wait < 12 && currentController() === controller; wait++) await sleep(250);
       if (currentController() === controller) {
-        log(`${label}: SBC squad controller did not change after navigation pop ${popped}`);
+        log(`${label2}: SBC squad controller did not change after navigation pop ${popped}`);
         break;
       }
     }
     if (popped) {
-      log(`${label}: removed ${popped} stale SBC squad view(s); current controller ${currentControllerName() || "unknown"}`);
+      log(`${label2}: removed ${popped} stale SBC squad view(s); current controller ${currentControllerName() || "unknown"}`);
     }
     return popped;
   }
   async function synchronizeAfterSbcSubmit(options = {}) {
-    const label = String(options.label || "SBC submit");
+    const label2 = String(options.label || "SBC submit");
     const currentControllerName = options.currentControllerName;
     const unwind = options.unwind;
     const showUnassigned = options.showUnassigned;
@@ -7485,22 +7509,22 @@
     if (typeof showUnassigned !== "function") throw new TypeError("showUnassigned is required");
     if (typeof openStorePacks !== "function") throw new TypeError("openStorePacks is required");
     const before = currentControllerName() || "unknown";
-    await unwind(`${label} post-submit`);
-    await showUnassigned(`${label} post-submit navigation sync`);
+    await unwind(`${label2} post-submit`);
+    await showUnassigned(`${label2} post-submit navigation sync`);
     let after = currentControllerName() || "unknown";
     if (isSbcSquadControllerName(after)) {
-      await unwind(`${label} post-unassigned`);
+      await unwind(`${label2} post-unassigned`);
       after = currentControllerName() || "unknown";
     }
     if (isSbcControllerName(after)) {
-      log(`${label}: controller is still ${after} in the SBC area after navigation cleanup; opening Store Packs as a final fallback`);
-      await openStorePacks(`${label} post-submit Store sync`).catch((error) => {
-        log(`${label}: post-submit Store sync skipped: ${error?.message || error}`);
+      log(`${label2}: controller is still ${after} in the SBC area after navigation cleanup; opening Store Packs as a final fallback`);
+      await openStorePacks(`${label2} post-submit Store sync`).catch((error) => {
+        log(`${label2}: post-submit Store sync skipped: ${error?.message || error}`);
         return false;
       });
       after = currentControllerName() || "unknown";
     }
-    log(`${label}: post-submit controller ${before} -> ${after}`);
+    log(`${label2}: post-submit controller ${before} -> ${after}`);
     return { before, after };
   }
 
@@ -7905,7 +7929,7 @@
   }
   async function claimSbcRewards(options = {}) {
     const {
-      label = "SBC submit",
+      label: label2 = "SBC submit",
       beforePackCounts,
       beforeProgress,
       overlay,
@@ -7927,11 +7951,11 @@
     let lastPackRefreshAt = 0;
     while (now() - startedAt < 25e3) {
       stopPoint();
-      failIfSubmitError(label);
-      if (await overlay.dismiss(label)) continue;
+      failIfSubmitError(label2);
+      if (await overlay.dismiss(label2)) continue;
       const button3 = overlay.findClaimButton();
       if (button3) {
-        log(`${label}: claiming rewards`);
+        log(`${label2}: claiming rewards`);
         click(button3);
         await waitLoadingEnd(900, 45e3);
         await sleep(1200);
@@ -7947,7 +7971,7 @@
           packGranted = hasPackCountIncrease(beforePackCounts, getPackCounts());
         }
         if ((progressAdvanced || packGranted) && !overlay.isVisible() && !popupShieldShowing()) {
-          log(`${label}: rewards already granted (${packGranted ? "My Packs increased" : "SBC progress advanced"}); skipping Claim Rewards wait`);
+          log(`${label2}: rewards already granted (${packGranted ? "My Packs increased" : "SBC progress advanced"}); skipping Claim Rewards wait`);
           return true;
         }
       }
@@ -7955,18 +7979,18 @@
       const currentTime = now();
       if (context2 && currentTime - lastHotkeyAt > 2500) {
         lastHotkeyAt = currentTime;
-        log(`${label}: Claim Rewards button not clickable; trying AltRight reward hotkey`);
+        log(`${label2}: Claim Rewards button not clickable; trying AltRight reward hotkey; confirmation still required`);
         keyStroke("Alt", "AltRight", { altKey: true, location: 2 });
         keyStroke("AltRight", "AltRight", { altKey: true, location: 2 });
         await waitLoadingEnd(500, 12e3);
         await sleep(1200);
-        return true;
+        continue;
       }
       await sleep(500);
     }
     const context = overlay.findClaimContext();
     const contextText = context?.text ? `; modal text: ${context.text.slice(0, 180)}` : "";
-    log(`${label}: Claim Rewards button not detected${contextText}; continuing`);
+    log(`${label2}: Claim Rewards button not detected${contextText}; continuing`);
     return false;
   }
 
@@ -9210,11 +9234,19 @@
       if (!result || typeof result !== "object") {
         return { result: primitiveOrNull(result) };
       }
+      const data = result.data ?? result._data;
       return {
         result: resultLayer(result),
         error: resultLayer(result.error),
         response: resultLayer(result.response),
-        data: resultLayer(result.data ?? result._data)
+        data: resultLayer(data),
+        dataValues: data && typeof data === "object" ? {
+          sourcePile: primitiveOrNull(data.sourcePile),
+          destinationPile: primitiveOrNull(data.destinationPile),
+          itemIds: Array.isArray(data.itemIds) ? data.itemIds.map(numberOrNull) : primitiveOrNull(data.itemIds),
+          clubDuplicates: Array.isArray(data.clubDuplicates) ? data.clubDuplicates.map((item) => numberOrNull(item?.id ?? item?.itemId ?? item)) : primitiveOrNull(data.clubDuplicates),
+          untradeableSwap: primitiveOrNull(data.untradeableSwap)
+        } : null
       };
     } catch (error) {
       return { diagnosticError: error?.message || String(error) };
@@ -9796,18 +9828,18 @@
     return normalizedCode(code) === "471";
   }
   async function recoverPackOpenRetry(options = {}) {
-    const label = String(options.label || "Pack open");
+    const label2 = String(options.label || "Pack open");
     const code = normalizedCode(options.code) || "unknown";
     const pack = options.pack || null;
     const packId2 = Number(pack?.id ?? pack?.packId ?? pack?.packDefinitionId ?? pack?.packAssetId ?? 0) || null;
     const log = typeof options.log === "function" ? options.log : () => {
     };
-    log(`${label}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
+    log(`${label2}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
     if (shouldDiscardFailedPack(code)) {
       options.markFailedPack?.(pack);
-      log(`${label}: excluding failed pack instance${packId2 ? ` #${packId2}` : ""} before retry`);
+      log(`${label2}: excluding failed pack instance${packId2 ? ` #${packId2}` : ""} before retry`);
     }
-    log(`${label}: retrying pack open after navigation and unassigned recovery`);
+    log(`${label2}: retrying pack open after navigation and unassigned recovery`);
     await options.sleep?.(Math.max(0, Number(options.pauseMs || 0)));
     await options.unwind?.();
     await options.showUnassigned?.();
@@ -9816,10 +9848,10 @@
     try {
       storeRefreshed = await options.openStorePacks?.() === true;
     } catch (error) {
-      log(`${label}: pack-open Store recovery skipped: ${error?.message || error}`);
+      log(`${label2}: pack-open Store recovery skipped: ${error?.message || error}`);
     }
     if (!storeRefreshed) {
-      log(`${label}: Store Packs view refresh unavailable; continuing with repository refresh`);
+      log(`${label2}: Store Packs view refresh unavailable; continuing with repository refresh`);
     }
     await options.sleep?.(Math.max(0, Number(options.settleMs ?? 700)));
     await options.refreshInventory?.({ storeRefreshed });
@@ -9829,7 +9861,7 @@
   // src/pack/source-lookup.js
   async function findPackWithRecovery(options = {}) {
     if (typeof options.findCached !== "function") throw new TypeError("findCached is required");
-    const label = String(options.label || "Pack lookup");
+    const label2 = String(options.label || "Pack lookup");
     const attempts = Math.max(1, Math.min(10, Number(options.attempts || 3) || 3));
     const delayMs = Math.max(0, Number(options.delayMs || 0) || 0);
     const log = typeof options.log === "function" ? options.log : () => {
@@ -9839,7 +9871,7 @@
       try {
         await options.refresh?.({ attempt, attempts });
       } catch (error) {
-        if (attempt === attempts) log(`${label}: final repository refresh failed: ${error?.message || error}`);
+        if (attempt === attempts) log(`${label2}: final repository refresh failed: ${error?.message || error}`);
       }
       let pack = options.findCached();
       if (pack) return pack;
@@ -9854,7 +9886,7 @@
             if (pack) return pack;
           }
         } catch (error) {
-          log(`${label}: Store Packs fallback skipped: ${error?.message || error}`);
+          log(`${label2}: Store Packs fallback skipped: ${error?.message || error}`);
         }
       }
       await options.onWait?.({ attempt, attempts, storeFallbackTried });
@@ -10528,8 +10560,9 @@
       if (stageResult?.status === "blocked" || stageResult?.status === "planned") {
         result.status = stageResult.status;
         result.reason = stageResult.reason || `resume stages ${stageResult.status}`;
+      } else {
+        await options.afterStages?.({ result, phase: "resume", stageResult, context: resumed });
       }
-      await options.afterStages?.({ result, phase: "resume", stageResult, context: resumed });
     }
     while (result.status === "completed" && result.packsOpened < maxPacks && (!targetReached() || options.requireSourceExhaustion === true)) {
       await options.stopPoint?.();
@@ -12016,11 +12049,11 @@
       applyStyles(heading, { color: "#b8c3d2", fontSize: "12px", fontWeight: "700", margin: "12px 0 6px" });
       const list = dom.create("div");
       applyStyles(list, { display: "flex", flexDirection: "column", gap: "6px" });
-      for (const [label, description] of section.items) {
+      for (const [label2, description] of section.items) {
         const row = dom.create("div");
         applyStyles(row, { padding: "7px 8px", background: "#1d2229", lineHeight: "17px" });
         const name = dom.create("span");
-        name.textContent = `${label}: `;
+        name.textContent = `${label2}: `;
         applyStyles(name, { color: "#f4f6f8", fontWeight: "700" });
         const detail = dom.create("span");
         detail.textContent = description;
@@ -12087,9 +12120,9 @@
     }
     if (display === "none") return;
     const quantity = options.quantity || {};
-    const label = query(panel, "#bronze-loop-rounds-label");
+    const label2 = query(panel, "#bronze-loop-rounds-label");
     const input = query(panel, "#bronze-loop-rounds");
-    if (label) label.textContent = quantity.label || "Rounds";
+    if (label2) label2.textContent = quantity.label || "Rounds";
     if (!input) return;
     input.min = String(quantity.min || 1);
     input.max = String(quantity.max || 50);
@@ -12123,8 +12156,8 @@
     const recap = options.recap;
     button3.style.display = recap ? "" : "none";
     if (recap) {
-      const label = recap.type === "batch" ? "Batch Open" : recap.type === "loop" ? "Loop" : "Player Pick";
-      button3.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
+      const label2 = recap.type === "batch" ? "Batch Open" : recap.type === "loop" ? "Loop" : "Player Pick";
+      button3.title = `Last ${label2} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
     }
   }
   function renderRewardAlertSummary(options = {}) {
@@ -12156,13 +12189,13 @@
     const determinate = scanning && total > 0;
     const boundedCompleted = determinate ? Math.min(completed, total) : completed;
     const percentage = determinate ? Math.round(boundedCompleted / total * 100) : 0;
-    const label = query(panel, "#bronze-loop-scan-progress-label");
+    const label2 = query(panel, "#bronze-loop-scan-progress-label");
     const count = query(panel, "#bronze-loop-scan-progress-count");
     const track = query(panel, "#bronze-loop-scan-progress-track");
     const bar = query(panel, "#bronze-loop-scan-progress-bar");
     container.style.display = scanning ? "block" : "none";
     container.dataset.mode = determinate ? "determinate" : "indeterminate";
-    if (label) label.textContent = progress.label || "Scanning dynamic SBCs";
+    if (label2) label2.textContent = progress.label || "Scanning dynamic SBCs";
     if (count) count.textContent = determinate ? `${boundedCompleted} / ${total}` : "";
     if (bar) bar.style.width = determinate ? `${percentage}%` : "35%";
     track?.setAttribute?.("aria-valuemin", "0");
@@ -13562,8 +13595,8 @@
     }),
     Object.freeze({ path: "sbcFodderPolicy", label: "SBC fodder policy", type: "sbc-fodder-policy" })
   ]);
-  function descriptor(strategy, label, fields, options = {}) {
-    return Object.freeze({ strategy, label, fields: Object.freeze(fields), ...options });
+  function descriptor(strategy, label2, fields, options = {}) {
+    return Object.freeze({ strategy, label: label2, fields: Object.freeze(fields), ...options });
   }
   var BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
     validationBronzeUpgrade: descriptor("validationBronzeUpgrade", "Validation recycle", [
@@ -13750,9 +13783,9 @@
       { value: "false", label: "Disabled" }
     ], value === void 0 ? void 0 : String(value), true);
   }
-  function fieldRow(label, control, options = {}) {
+  function fieldRow(label2, control, options = {}) {
     return `<label class="dlr-builder-field${options.wide ? " wide" : ""}">
-    <span>${escapeHtml(label)}${options.required ? " *" : ""}</span>
+    <span>${escapeHtml(label2)}${options.required ? " *" : ""}</span>
     ${control}
   </label>`;
   }
@@ -13812,7 +13845,7 @@
         return fieldRow(field2.label, textInput(field2.path, value, "text", readOnly), { required: field2.required });
     }
   }
-  function renderList(path, label, values, itemType, context) {
+  function renderList(path, label2, values, itemType, context) {
     const rows = (values || []).map((value, index) => `<div class="dlr-builder-list-row">
     ${textInput(`${path}.${index}`, value, itemType === "number" ? "number" : "text", context.readOnly)}
     <button data-builder-action="move-list" data-path="${escapeHtml(path)}" data-index="${index}" data-delta="-1" title="Move up"${disabled(context.readOnly || index === 0)}>Up</button>
@@ -13820,12 +13853,12 @@
     <button data-builder-action="remove-list" data-path="${escapeHtml(path)}" data-index="${index}" title="Remove"${disabled(context.readOnly)}>Remove</button>
   </div>`).join("");
     return `<section class="dlr-builder-form-section">
-    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-list" data-path="${escapeHtml(path)}" data-item-type="${itemType}"${disabled(context.readOnly)}>Add</button></div>
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label2)}</h3><button data-builder-action="add-list" data-path="${escapeHtml(path)}" data-item-type="${itemType}"${disabled(context.readOnly)}>Add</button></div>
     ${rows || '<div class="dlr-builder-empty">No entries</div>'}
   </section>`;
   }
-  function renderSourcePackRef(path, label, value = {}, context) {
-    return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3><div class="dlr-builder-form-grid">
+  function renderSourcePackRef(path, label2, value = {}, context) {
+    return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label2)}</h3><div class="dlr-builder-form-grid">
     ${fieldRow("Reward produced by Loop", selectInput(`${path}.rewardOfLoopId`, value?.rewardOfLoopId, [
       { value: "", label: "Use pack ID/name fallback only" },
       ...context.rewardSourceLoops.map((loop) => ({ value: loop.id, label: `${loop.name} (${loop.id})` }))
@@ -13852,7 +13885,7 @@
     </div>
   </section>`;
   }
-  function renderPileList(path, label, values, context) {
+  function renderPileList(path, label2, values, context) {
     const piles = Array.isArray(values) ? values : [];
     const rows = piles.map((pile, index) => `<div class="dlr-builder-pile-row">
     <span class="dlr-builder-pile-order">${index + 1}</span><strong>${escapeHtml(pile)}</strong>
@@ -13862,7 +13895,7 @@
   </div>`).join("");
     const available = PILES.filter((pile) => !piles.includes(pile));
     return `<section class="dlr-builder-form-section">
-    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3></div>
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label2)}</h3></div>
     ${rows || '<div class="dlr-builder-empty">Inherit strategy default</div>'}
     <div class="dlr-builder-add-row">
       <select data-builder-add-select="${escapeHtml(path)}"${disabled(context.readOnly || !available.length)}>${available.map((pile) => `<option value="${pile}">${pile}</option>`).join("")}</select>
@@ -13896,15 +13929,15 @@
     ${options.removable ? `<button class="dlr-builder-remove-inline" data-builder-action="remove-list" data-path="${escapeHtml(options.listPath)}" data-index="${options.index}"${disabled(context.readOnly)}>Remove</button>` : ""}
   </div>`;
   }
-  function renderRequirements(path, label, requirements, context) {
+  function renderRequirements(path, label2, requirements, context) {
     return `<section class="dlr-builder-form-section">
-    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-requirement" data-path="${escapeHtml(path)}"${disabled(context.readOnly)}>Add</button></div>
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label2)}</h3><button data-builder-action="add-requirement" data-path="${escapeHtml(path)}"${disabled(context.readOnly)}>Add</button></div>
     ${(requirements || []).map((spec, index) => renderCardSpec(`${path}.${index}`, spec, context, { index, removable: true, listPath: path })).join("") || '<div class="dlr-builder-empty">No requirements</div>'}
   </section>`;
   }
-  function renderChallengeRequirements(path, label, groups, context) {
+  function renderChallengeRequirements(path, label2, groups, context) {
     return `<section class="dlr-builder-form-section">
-    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-challenge-group" data-path="${escapeHtml(path)}"${disabled(context.readOnly)}>Add challenge</button></div>
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label2)}</h3><button data-builder-action="add-challenge-group" data-path="${escapeHtml(path)}"${disabled(context.readOnly)}>Add challenge</button></div>
     ${(groups || []).map((requirements, index) => `<div class="dlr-builder-subsection">
       <div class="dlr-builder-section-head"><h4>Challenge ${index + 1}</h4><button data-builder-action="remove-list" data-path="${escapeHtml(path)}" data-index="${index}"${disabled(context.readOnly)}>Remove</button></div>
       ${renderRequirements(`${path}.${index}`, "Materials", requirements, context)}
@@ -13951,7 +13984,7 @@
       ["openPicksAtEnd", "Open Picks at end", "boolean-inherit"],
       ["preferScannedMetadata", "Prefer scanned metadata", "boolean-inherit"]
     ];
-    return `<section class="dlr-builder-form-section"><h3>Player Pick options</h3><div class="dlr-builder-form-grid">${fields.map(([key, label, type]) => type === "boolean-inherit" ? fieldRow(label, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value[key])}</select>`) : fieldRow(label, textInput(`${path}.${key}`, value[key], type, context.readOnly))).join("")}</div></section>`;
+    return `<section class="dlr-builder-form-section"><h3>Player Pick options</h3><div class="dlr-builder-form-grid">${fields.map(([key, label2, type]) => type === "boolean-inherit" ? fieldRow(label2, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value[key])}</select>`) : fieldRow(label2, textInput(`${path}.${key}`, value[key], type, context.readOnly))).join("")}</div></section>`;
   }
   function renderSbcFodderPolicy(path, value = {}, context) {
     return `<section class="dlr-builder-form-section"><h3>SBC fodder policy</h3><div class="dlr-builder-form-grid">
@@ -13997,15 +14030,15 @@
     ${renderPileList(`${path}.priorityPiles`, "Pile order", value.priorityPiles, context)}
   </div>`;
   }
-  function renderUpgradeList(path, label, values, context, stage = false) {
+  function renderUpgradeList(path, label2, values, context, stage = false) {
     return `<section class="dlr-builder-form-section">
-    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-upgrade" data-path="${escapeHtml(path)}" data-stage="${stage}"${disabled(context.readOnly)}>Add</button></div>
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label2)}</h3><button data-builder-action="add-upgrade" data-path="${escapeHtml(path)}" data-stage="${stage}"${disabled(context.readOnly)}>Add</button></div>
     ${(values || []).map((value, index) => renderUpgrade(`${path}.${index}`, value, context, { label: stage ? `Stage ${index + 1}` : `Upgrade ${index + 1}`, removable: true, listPath: path, index })).join("") || '<div class="dlr-builder-empty">No upgrades</div>'}
   </section>`;
   }
-  function renderShortagePacks(path, label, values, context) {
+  function renderShortagePacks(path, label2, values, context) {
     return `<section class="dlr-builder-form-section">
-    <div class="dlr-builder-section-head"><h3>${escapeHtml(label)}</h3><button data-builder-action="add-shortage" data-path="${escapeHtml(path)}"${disabled(context.readOnly)}>Add</button></div>
+    <div class="dlr-builder-section-head"><h3>${escapeHtml(label2)}</h3><button data-builder-action="add-shortage" data-path="${escapeHtml(path)}"${disabled(context.readOnly)}>Add</button></div>
     ${(values || []).map((source, index) => `<div class="dlr-builder-subsection">
       <div class="dlr-builder-section-head"><h4>Source ${index + 1}</h4><button data-builder-action="remove-list" data-path="${escapeHtml(path)}" data-index="${index}"${disabled(context.readOnly)}>Remove</button></div>
       ${renderCardSpec(`${path}.${index}.requirement`, source.requirement, context, { withCount: false })}
@@ -14037,12 +14070,12 @@
     ${fieldRow("Yield every nodes", textInput(`${path}.yieldEveryNodes`, value.yieldEveryNodes, "number", context.readOnly))}
   </div>${renderPileList(`${path}.priorityPiles`, "Pile order", value.priorityPiles, context)}</section>`;
   }
-  function renderGenericObject(path, label, value, context) {
+  function renderGenericObject(path, label2, value, context) {
     if (value === void 0 || value === null || value === false) {
-      return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3>${fieldRow("Enabled", `<select data-builder-field="${path}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value=""${selected(value, void 0)}>Inherit</option><option value="false"${selected(value, false)}>Disabled</option><option value="true"${selected(Boolean(value), true)}>Enabled</option></select>`)}</section>`;
+      return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label2)}</h3>${fieldRow("Enabled", `<select data-builder-field="${path}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value=""${selected(value, void 0)}>Inherit</option><option value="false"${selected(value, false)}>Disabled</option><option value="true"${selected(Boolean(value), true)}>Enabled</option></select>`)}</section>`;
     }
     const fields = Object.entries(value).filter(([, entry]) => ["string", "number", "boolean"].includes(typeof entry));
-    return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3><div class="dlr-builder-form-grid">
+    return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label2)}</h3><div class="dlr-builder-form-grid">
     ${fieldRow("Enabled", `<select data-builder-field="${path}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value="true" selected>Enabled</option><option value="false">Disabled</option></select>`)}
     ${fields.map(([key, entry]) => typeof entry === "boolean" ? fieldRow(key, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(entry)}</select>`) : fieldRow(key, textInput(`${path}.${key}`, entry, typeof entry === "number" ? "number" : "text", context.readOnly))).join("")}
   </div></section>`;
@@ -14057,11 +14090,11 @@
     ${renderList(`${path}.buttonTexts`, "Add button labels", value.buttonTexts, "text", context)}
   </section>`;
   }
-  function renderAutomaticFillRecovery(path, label, value, context, options = {}) {
+  function renderAutomaticFillRecovery(path, label2, value, context, options = {}) {
     if (value === void 0 || value === null || value === false) {
-      return renderGenericObject(path, label, value, context);
+      return renderGenericObject(path, label2, value, context);
     }
-    return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label)}</h3>
+    return `<section class="dlr-builder-form-section"><h3>${escapeHtml(label2)}</h3>
     ${renderActivityBinding(`${path}.activityBinding`, value.activityBinding, context)}
     <div class="dlr-builder-form-grid">
       ${fieldRow("Enabled", `<select data-builder-field="${path}" data-builder-value-type="object-toggle"${disabled(context.readOnly)}><option value="true" selected>Enabled</option><option value="false">Disabled</option></select>`)}
@@ -14488,7 +14521,7 @@
     <button data-builder-action="export-json">Export</button>
     <button data-builder-action="close-builder">Close</button>
   </header>
-  <div class="dlr-builder-body"><nav class="dlr-builder-tabs">${tabs.map(([id, label]) => `<button class="${model.tab === id ? "active" : ""}" data-builder-action="select-tab" data-tab="${id}">${label}</button>`).join("")}</nav>${editor}</div>
+  <div class="dlr-builder-body"><nav class="dlr-builder-tabs">${tabs.map(([id, label2]) => `<button class="${model.tab === id ? "active" : ""}" data-builder-action="select-tab" data-tab="${id}">${label2}</button>`).join("")}</nav>${editor}</div>
   <footer class="dlr-builder-status"><span>${model.validation.valid ? "Valid" : `${model.validation.errors.length} error(s)`}</span><span>${model.validation.conflicts.length} conflict(s)</span><span>${model.validation.unavailableBindings.length} unavailable binding(s)</span><span>Active: ${escapeHtml(model.store.activeProfileId || "Built-in")}</span></footer>`;
   }
   function mountWorkflowLoopBuilder(options = {}) {
@@ -15933,10 +15966,10 @@
     function isVisible() {
       return !!activeController() || !!findDomRoot() || !!findClaimContext();
     }
-    async function dismiss(label) {
+    async function dismiss(label2) {
       const controller = activeController();
       if (controller && typeof controller.onBackButton === "function") {
-        log(`${label}: closing ${pageRuntime.controllerName(controller) || "SBC reward"} overlay`);
+        log(`${label2}: closing ${pageRuntime.controllerName(controller) || "SBC reward"} overlay`);
         controller.onBackButton();
         await sleep(700);
         return true;
@@ -15945,7 +15978,7 @@
       const action2 = root?.querySelector?.(REWARD_ACTION_SELECTOR);
       if (!action2) return false;
       const actionText = compactText(action2);
-      log(`${label}: advancing SBC reward overlay${actionText ? ` (${actionText})` : ""}`);
+      log(`${label2}: advancing SBC reward overlay${actionText ? ` (${actionText})` : ""}`);
       click(action2);
       await sleep(700);
       return true;
@@ -16099,17 +16132,17 @@
     return input;
   }
   function field(dom, labelText, input) {
-    const label = dom.create("label");
-    applyStyles5(label, { display: "grid", gridTemplateColumns: "140px minmax(0, 1fr)", alignItems: "center", gap: "10px" });
+    const label2 = dom.create("label");
+    applyStyles5(label2, { display: "grid", gridTemplateColumns: "140px minmax(0, 1fr)", alignItems: "center", gap: "10px" });
     const text = dom.create("span");
     text.textContent = labelText;
     applyStyles5(text, { color: "#b8c3d2", fontSize: "12px" });
-    label.append(text, input);
-    return label;
+    label2.append(text, input);
+    return label2;
   }
   function checkbox(dom, id, labelText, checked) {
-    const label = dom.create("label");
-    applyStyles5(label, { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" });
+    const label2 = dom.create("label");
+    applyStyles5(label2, { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" });
     const input = dom.create("input");
     input.id = id;
     input.type = "checkbox";
@@ -16117,8 +16150,8 @@
     input.style.accentColor = "#78a6ff";
     const text = dom.create("span");
     text.textContent = labelText;
-    label.append(input, text);
-    return { label, input };
+    label2.append(input, text);
+    return { label: label2, input };
   }
   function validNtfyTopic(value) {
     return /^[-_A-Za-z0-9]{1,64}$/.test(String(value || "").trim());
@@ -16366,9 +16399,9 @@
       for (const group of snapshot.groups || []) {
         const row = dom.create("div");
         applyStyles6(row, { position: "relative", display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
-        const label = dom.create("span");
-        label.textContent = `${group.name} (#${group.id || "?"}) x${group.count}`;
-        applyStyles6(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        const label2 = dom.create("span");
+        label2.textContent = `${group.name} (#${group.id || "?"}) x${group.count}`;
+        applyStyles6(label2, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
         const selected2 = selectedKeys.has(batchOpenEntryKey({ packId: group.id, packName: group.name }));
         const addMenu = dom.create("div");
         applyStyles6(addMenu, { position: "relative", flex: "0 0 auto" });
@@ -16411,7 +16444,7 @@
         });
         menu.append(addOne, addAll);
         addMenu.append(add, menu);
-        row.append(label, addMenu);
+        row.append(label2, addMenu);
         availableList.appendChild(row);
       }
       if (!(snapshot.groups || []).length) {
@@ -16428,9 +16461,9 @@
         row.dataset.packName = entry.packName;
         row.dataset.quantityMode = entry.quantityMode;
         applyStyles6(row, { display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
-        const label = dom.create("span");
-        label.textContent = `${entry.packName || `Pack #${entry.packId}`} (#${entry.packId || "?"})`;
-        applyStyles6(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+        const label2 = dom.create("span");
+        label2.textContent = `${entry.packName || `Pack #${entry.packId}`} (#${entry.packId || "?"})`;
+        applyStyles6(label2, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
         const availability = dom.create("span");
         availability.textContent = entry.available ? `${entry.quantityMode === "all" ? "all: " : ""}${entry.available} available` : "unavailable";
         applyStyles6(availability, { color: entry.available ? "#8fd19e" : "#e3a7a7", fontSize: "11px", flex: "0 0 auto" });
@@ -16450,7 +16483,7 @@
           notifyPlanChange();
           render();
         });
-        row.append(label, availability, quantity, remove);
+        row.append(label2, availability, quantity, remove);
         planList.appendChild(row);
       }
       if (!rows.length) {
@@ -16718,20 +16751,20 @@
     function getLoopDefById(id) {
       return findLoopDefById(id) || getLoopDefs()[0] || LOOP_DEFS[0];
     }
-    function validateLoopDef2(loopDef, label = "loop") {
-      return validateLoopDef(loopDef, label);
+    function validateLoopDef2(loopDef, label2 = "loop") {
+      return validateLoopDef(loopDef, label2);
     }
-    function assertValidLoopDef2(loopDef, label = "Loop JSON") {
-      return assertValidLoopDef(loopDef, label);
+    function assertValidLoopDef2(loopDef, label2 = "Loop JSON") {
+      return assertValidLoopDef(loopDef, label2);
     }
-    function validateLoopDefList2(loopDefs, label = "Loop config") {
-      return validateLoopDefList(loopDefs, label);
+    function validateLoopDefList2(loopDefs, label2 = "Loop config") {
+      return validateLoopDefList(loopDefs, label2);
     }
     function normalizeLoopConfig2(config) {
       return normalizeLoopConfig(config);
     }
-    function validateLoopConfig2(config, label = "Loop config") {
-      return validateLoopConfig(config, label);
+    function validateLoopConfig2(config, label2 = "Loop config") {
+      return validateLoopConfig(config, label2);
     }
     function setLoopConfig(config, source = "custom", options = {}) {
       const normalized = validateLoopConfig2(config, source);
@@ -16901,14 +16934,14 @@
       }
       return out;
     }
-    function observeOnce(observable, controller, timeoutMs = 2e4, label = "observable") {
-      return waitAdapter.observableOnce(observable, controller, timeoutMs, label);
+    function observeOnce(observable, controller, timeoutMs = 2e4, label2 = "observable") {
+      return waitAdapter.observableOnce(observable, controller, timeoutMs, label2);
     }
     function ctrl() {
       return pageRuntime.currentController();
     }
-    async function waitFor(predicate, timeoutMs = 15e3, label = "condition") {
-      return waitAdapter.until(predicate, timeoutMs, label);
+    async function waitFor(predicate, timeoutMs = 15e3, label2 = "condition") {
+      return waitAdapter.until(predicate, timeoutMs, label2);
     }
     async function waitAppReady() {
       return waitAdapter.appReady();
@@ -16949,12 +16982,12 @@
       syncPackCatalogInventory();
       return packs.length;
     }
-    async function openStorePacksViewForRefresh(label = "reward pack lookup") {
+    async function openStorePacksViewForRefresh(label2 = "reward pack lookup") {
       const before = currentControllerName();
       if (before !== "UTStorePackViewController") {
         const storeTab = document.querySelector(".ut-tab-bar-item.icon-store");
         if (!storeTab) return false;
-        log(`${label}: opening Store to refresh visible packs`);
+        log(`${label2}: opening Store to refresh visible packs`);
         simulateClick(storeTab);
         await waitLoadingEnd(700, 15e3);
         await sleep(800);
@@ -16966,7 +16999,7 @@
           return /packs-tile|store-pack|tile\.packs/i.test(classes) || matchesAny(text, ["Packs", "My Packs", "\u5305"]);
         });
         if (packTile) {
-          log(`${label}: opening Store Packs view`);
+          log(`${label2}: opening Store Packs view`);
           simulateClick(packTile);
           await waitLoadingEnd(700, 15e3);
           await sleep(900);
@@ -16981,7 +17014,7 @@
         }
         await refreshStorePacks().catch(() => null);
         const count = mergeStorePacksFromController(controller);
-        log(`${label}: Store Packs view refreshed; visible pack cache ${count || getMyPacks().length}`);
+        log(`${label2}: Store Packs view refreshed; visible pack cache ${count || getMyPacks().length}`);
         return true;
       }
       return false;
@@ -17043,29 +17076,29 @@
         `club:${getClubItems().length}`
       ].join(", ");
     }
-    async function awaitMaybeObservable(value, label, timeoutMs = 2e4) {
+    async function awaitMaybeObservable(value, label2, timeoutMs = 2e4) {
       if (!value) return { success: true, skipped: true };
       if (typeof value.observe === "function") {
-        return observeOnce(value, ctrl(), timeoutMs, label);
+        return observeOnce(value, ctrl(), timeoutMs, label2);
       }
       if (typeof value.then === "function") {
         return value;
       }
       return value;
     }
-    async function tryOptionalRefresh(label, action2, options = {}) {
+    async function tryOptionalRefresh(label2, action2, options = {}) {
       const quiet = options.quiet === true;
       try {
-        const result = await awaitMaybeObservable(action2(), label, options.timeoutMs || 2e4);
+        const result = await awaitMaybeObservable(action2(), label2, options.timeoutMs || 2e4);
         if (result?.success === false) {
           const code = result?.error?.code || result?.status || "unknown";
-          if (!quiet) log(`${label} refresh failed: ${code}`);
+          if (!quiet) log(`${label2} refresh failed: ${code}`);
           return false;
         }
-        if (!quiet) log(`${label} refreshed`);
+        if (!quiet) log(`${label2} refreshed`);
         return true;
       } catch (e) {
-        if (!quiet) log(`${label} refresh skipped: ${e.message || e}`);
+        if (!quiet) log(`${label2} refresh skipped: ${e.message || e}`);
         return false;
       }
     }
@@ -17322,7 +17355,7 @@
       }
       return Number(item?.rareflag || item?.rareFlag || 0) > 0;
     }
-    function itemRareFlag(item) {
+    function itemRareFlag2(item) {
       return Number(item?.rareflag ?? item?.rareFlag ?? item?._rareflag ?? item?._staticData?.rareflag ?? 0);
     }
     function isSpecial(item) {
@@ -17799,7 +17832,7 @@
       }
       return null;
     }
-    function resolveRecentRewardItems(label = "recent reward item resolution") {
+    function resolveRecentRewardItems(label2 = "recent reward item resolution") {
       if (!state.recentRewardItems?.length) return 0;
       let resolved = 0;
       const seen = /* @__PURE__ */ new Set();
@@ -17810,7 +17843,7 @@
         if (!live || live.item === item) return item;
         resolved++;
         if (!seen.has(id)) {
-          log(`${label}: resolved recent reward item ${itemDisplayName(item)} rating:${Number(item?.rating || 0) || "?"} id:${id} to ${live.pileName}`);
+          log(`${label2}: resolved recent reward item ${itemDisplayName(item)} rating:${Number(item?.rating || 0) || "?"} id:${id} to ${live.pileName}`);
           seen.add(id);
         }
         return live.item;
@@ -18130,18 +18163,18 @@
         blocked: storage.blocked
       };
     }
-    async function tryMoveOpenedRewardItems(items, pile, allowStorage, label, description) {
+    async function tryMoveOpenedRewardItems(items, pile, allowStorage, label2, description) {
       if (!items?.length) return 0;
       try {
-        log(`${label}: moving ${items.length} ${description} opened reward item(s)`);
+        log(`${label2}: moving ${items.length} ${description} opened reward item(s)`);
         await moveItems(items, pile, allowStorage);
         return items.length;
       } catch (e) {
-        log(`${label}: direct ${description} reward move skipped: ${e.message || e}`);
+        log(`${label2}: direct ${description} reward move skipped: ${e.message || e}`);
         return 0;
       }
     }
-    function materializeOpenedResponsePlayerDuplicates(items, label = "opened reward pack") {
+    function materializeOpenedResponsePlayerDuplicates(items, label2 = "opened reward pack") {
       const result = materializeOpenedPlayerDuplicates({
         items,
         clubItems: getClubItems(),
@@ -18150,11 +18183,11 @@
         preparePurchasedItem: (item) => eaInventoryAdapter().preparePurchasedItem(item)
       });
       if (result.inferredDuplicates.length) {
-        log(`${label}: restored delayed duplicate metadata for ${result.inferredDuplicates.length} opened player(s) from matching Club entities`);
+        log(`${label2}: restored delayed duplicate metadata for ${result.inferredDuplicates.length} opened player(s) from matching Club entities`);
       }
       return result;
     }
-    function restoreOpenedUnassignedDuplicateMetadata(items, label = "opened reward pack", options = {}) {
+    function restoreOpenedUnassignedDuplicateMetadata(items, label2 = "opened reward pack", options = {}) {
       const unassignedItems = getUnassignedItems();
       const responseDuplicates = (items || []).filter((item) => isDuplicate(item));
       const responseById = new Map((items || []).map((item) => [Number(item?.id || 0), item]).filter(([id]) => id));
@@ -18174,7 +18207,7 @@
         eaInventoryAdapter().preparePurchasedItem(item);
         const after = captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem });
         if (diagnosticJson(before) !== diagnosticJson(after)) {
-          log(`${label}: live Unassigned metadata mutation: ${diagnosticJson({
+          log(`${label2}: live Unassigned metadata mutation: ${diagnosticJson({
             duplicateIdSource,
             sameAsPackResponse: item === responseItem,
             sameAsClubDuplicate: item === clubDuplicate,
@@ -18202,38 +18235,38 @@
         if (restored > before) remapped++;
       }
       if (restored) {
-        log(`${label}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)${remapped ? ` (${remapped} remapped response id(s))` : ""}`);
+        log(`${label2}: restored delayed duplicate metadata on ${restored} live Unassigned item(s)${remapped ? ` (${remapped} remapped response id(s))` : ""}`);
       } else if (responseDuplicates.length) {
         const describe = (item) => `id:${Number(item?.id || 0) || "?"} def:${Number(item?.definitionId || 0) || "?"} rating:${Number(item?.rating || 0) || "?"} dup:${Number(item?.duplicateId || 0) || "?"}`;
-        log(`${label}: duplicate metadata restore snapshot response:${responseDuplicates.length} [${responseDuplicates.map(describe).join("; ")}] liveUnassigned:${unassignedItems.length} [${unassignedItems.map(describe).join("; ")}] baselineUnassigned:${Array.isArray(baselineUnassignedIds) ? baselineUnassignedIds.length : "?"}`);
+        log(`${label2}: duplicate metadata restore snapshot response:${responseDuplicates.length} [${responseDuplicates.map(describe).join("; ")}] liveUnassigned:${unassignedItems.length} [${unassignedItems.map(describe).join("; ")}] baselineUnassigned:${Array.isArray(baselineUnassignedIds) ? baselineUnassignedIds.length : "?"}`);
       }
       return restored;
     }
-    async function materializeOpenedPlayerRewards(items, label = "opened reward pack") {
+    async function materializeOpenedPlayerRewards(items, label2 = "opened reward pack") {
       const players = uniqueItems((items || []).filter((item) => isPlayer(item)));
       if (!players.length) return { moved: 0, deferredDuplicates: [] };
-      const materialized = materializeOpenedResponsePlayerDuplicates(players, label);
+      const materialized = materializeOpenedResponsePlayerDuplicates(players, label2);
       const moved = await tryMoveOpenedRewardItems(
         materialized.directItems,
         inventoryPile("club"),
         true,
-        label,
+        label2,
         "non-duplicate"
       );
       if (materialized.deferredDuplicates.length) {
-        log(`${label}: waiting for ${materialized.deferredDuplicates.length} duplicate opened reward item(s) to materialize in Unassigned`);
+        log(`${label2}: waiting for ${materialized.deferredDuplicates.length} duplicate opened reward item(s) to materialize in Unassigned`);
       }
       if (needsUnassignedViewMaterialization(materialized)) {
-        log(`${label}: all opened player item(s) are duplicates; opening Unassigned to materialize live EA entities`);
-        await showUnassignedIfAny(`${label} all-duplicate materialization`, {
+        log(`${label2}: all opened player item(s) are duplicates; opening Unassigned to materialize live EA entities`);
+        await showUnassignedIfAny(`${label2} all-duplicate materialization`, {
           stableEmptyReads: 3,
           emptyReadDelayMs: 450,
           diagnostic: true
         });
       }
       if (moved) {
-        await refreshInventoryCaches(`${label} direct reward move`, { includePacks: false, quiet: true });
-        resolveRecentRewardItems(`${label} direct reward move`);
+        await refreshInventoryCaches(`${label2} direct reward move`, { includePacks: false, quiet: true });
+        resolveRecentRewardItems(`${label2} direct reward move`);
       }
       return { ...materialized, moved };
     }
@@ -18241,13 +18274,13 @@
       openedItems,
       materialized,
       routing,
-      label,
+      label: label2,
       routingBaseline
     }) {
       const pendingIds = new Set((routing?.pendingItems || []).map((item) => Number(item?.id || 0)).filter(Boolean));
       const duplicates = uniqueItems((materialized?.deferredDuplicates || []).filter((item) => pendingIds.has(Number(item?.id || 0))));
       if (!duplicates.length) return null;
-      await refreshInventoryCaches(`${label} direct duplicate fallback preflight`, { includePacks: false, quiet: true });
+      await refreshInventoryCaches(`${label2} direct duplicate fallback preflight`, { includePacks: false, quiet: true });
       const materialization = partitionOpenedItemsByLiveUnassigned({
         items: duplicates,
         pileItems: getUnassignedItems(),
@@ -18255,11 +18288,11 @@
       });
       const unresolvedDuplicates = materialization.unresolvedItems;
       if (!unresolvedDuplicates.length) {
-        log(`${label}: direct duplicate fallback skipped because every pending duplicate has a live Unassigned entity`);
+        log(`${label2}: direct duplicate fallback skipped because every pending duplicate has a live Unassigned entity`);
         return null;
       }
       if (materialization.materializedItems.length) {
-        log(`${label}: direct duplicate fallback preserving ${materialization.materializedItems.length} live Unassigned duplicate response item(s); routing ${unresolvedDuplicates.length} unmaterialized duplicate response item(s)`);
+        log(`${label2}: direct duplicate fallback preserving ${materialization.materializedItems.length} live Unassigned duplicate response item(s); routing ${unresolvedDuplicates.length} unmaterialized duplicate response item(s)`);
       }
       const fallbackPlan = planUnmaterializedDuplicateFallback({
         items: unresolvedDuplicates,
@@ -18273,7 +18306,7 @@
       if (fallbackPlan.status === "blocked") {
         const blocked2 = fallbackPlan.blocked;
         const reason = `direct duplicate fallback blocked: ${blocked2.destination} has only ${blocked2.free} slot(s) for ${blocked2.required} item(s)`;
-        log(`${label}: ${reason}`);
+        log(`${label2}: ${reason}`);
         return {
           status: "preserved",
           reason,
@@ -18282,23 +18315,23 @@
           moved: 0
         };
       }
-      log(`${label}: no matching live Unassigned entity for ${unresolvedDuplicates.length} unmaterialized duplicate response item(s) after bounded settlement; attempting direct routing`);
+      log(`${label2}: no matching live Unassigned entity for ${unresolvedDuplicates.length} unmaterialized duplicate response item(s) after bounded settlement; attempting direct routing`);
       let moved = 0;
       for (const group of fallbackPlan.groups) {
         moved += await tryMoveOpenedRewardItems(
           group.items,
           inventoryPile(group.key),
           group.allowStorage,
-          label,
+          label2,
           group.description
         );
       }
       if (moved !== unresolvedDuplicates.length) {
-        log(`${label}: direct duplicate fallback moved ${moved}/${unresolvedDuplicates.length}; preserving unresolved response item(s)`);
+        log(`${label2}: direct duplicate fallback moved ${moved}/${unresolvedDuplicates.length}; preserving unresolved response item(s)`);
         return null;
       }
       await sleep(CFG.pauseMs);
-      await refreshInventoryCaches(`${label} direct duplicate fallback`, { includePacks: false, quiet: true });
+      await refreshInventoryCaches(`${label2} direct duplicate fallback`, { includePacks: false, quiet: true });
       const postMoveMaterialization = partitionOpenedItemsByLiveUnassigned({
         items: unresolvedDuplicates,
         responseItems: duplicates,
@@ -18307,7 +18340,7 @@
       });
       if (postMoveMaterialization.materializedItems.length) {
         const pending = openedItemRoutingResult(openedItems, null, {}, routingBaseline);
-        log(`${label}: direct duplicate fallback detected a new live Unassigned entity after move; preserving it to avoid a second route`);
+        log(`${label2}: direct duplicate fallback detected a new live Unassigned entity after move; preserving it to avoid a second route`);
         return {
           status: "preserved",
           reason: "direct duplicate fallback left a live Unassigned entity for manual resolution",
@@ -18316,12 +18349,12 @@
           moved
         };
       }
-      const confirmed = await confirmOpenedItemRouting(openedItems, label, { routingBaseline });
+      const confirmed = await confirmOpenedItemRouting(openedItems, label2, { routingBaseline });
       if (confirmed.pendingItems.length) {
-        log(`${label}: direct duplicate fallback moved ${moved} item(s), but EA did not confirm every destination; preserving`);
+        log(`${label2}: direct duplicate fallback moved ${moved} item(s), but EA did not confirm every destination; preserving`);
         return { status: "pending", cleanup: null, routing: confirmed, moved };
       }
-      log(`${label}: direct duplicate fallback confirmed ${moved} routed response item(s)`);
+      log(`${label2}: direct duplicate fallback confirmed ${moved} routed response item(s)`);
       return { status: "resolved", cleanup: { status: "resolved" }, routing: confirmed, moved };
     }
     function openedItemRoutingResult(items, reserveItem = null, details = {}, routingBaseline = null) {
@@ -18340,7 +18373,7 @@
         details
       };
     }
-    async function confirmOpenedItemRouting(items, label, options = {}) {
+    async function confirmOpenedItemRouting(items, label2, options = {}) {
       const attempts = Math.max(1, Math.min(8, Number(options.attempts || 4) || 4));
       const delayMs = Math.max(0, Number(options.delayMs ?? 500));
       let routing = openedItemRoutingResult(items, options.reserveItem || null, {}, options.routingBaseline || null);
@@ -18353,14 +18386,14 @@
         await sleep(delayMs);
       }
       for (const route of routing.aliasRoutes || []) {
-        log(`${label}: confirmed opened item via new ${route.destination.pile} entity ${Number(route.destination.item?.id || 0) || "?"} for response id:${Number(route.item?.id || 0) || "?"} def:${Number(route.item?.definitionId || 0) || "?"}`);
+        log(`${label2}: confirmed opened item via new ${route.destination.pile} entity ${Number(route.destination.item?.id || 0) || "?"} for response id:${Number(route.item?.id || 0) || "?"} def:${Number(route.item?.definitionId || 0) || "?"}`);
       }
       if (routing.pendingItems.length) {
         const ids = routing.pendingItems.map((item) => Number(item?.id || 0) || "?").join(", ");
-        log(`${label}: ${routing.pendingItems.length} opened item(s) still have no confirmed destination after ${attempts} check(s); ids:${ids}`);
+        log(`${label2}: ${routing.pendingItems.length} opened item(s) still have no confirmed destination after ${attempts} check(s); ids:${ids}`);
         const describe = (item) => `id:${Number(item?.id || 0) || "?"} def:${Number(item?.definitionId || 0) || "?"} rating:${Number(item?.rating || 0) || "?"} dup:${Number(item?.duplicateId || 0) || "?"}`;
         const baseline = options.routingBaseline || {};
-        log(`${label}: routing snapshot pending:[${routing.pendingItems.map(describe).join("; ")}]; piles unassigned:${getUnassignedItems().length} storage:${getStorageItems().length} transfer:${getTransferItems().length} club:${getClubItems().length}; baseline destinations:${Array.isArray(baseline.destinationIds) ? baseline.destinationIds.length : "?"} unassigned:${Array.isArray(baseline.unassignedIds) ? baseline.unassignedIds.length : "?"}`);
+        log(`${label2}: routing snapshot pending:[${routing.pendingItems.map(describe).join("; ")}]; piles unassigned:${getUnassignedItems().length} storage:${getStorageItems().length} transfer:${getTransferItems().length} club:${getClubItems().length}; baseline destinations:${Array.isArray(baseline.destinationIds) ? baseline.destinationIds.length : "?"} unassigned:${Array.isArray(baseline.unassignedIds) ? baseline.unassignedIds.length : "?"}`);
       }
       return routing;
     }
@@ -18538,12 +18571,12 @@
     function getSbcSets() {
       return eaSbcAdapter().listSets();
     }
-    async function findSbcSet(names, label = "SBC") {
+    async function findSbcSet(names, label2 = "SBC") {
       await ensureSbcSetsLoaded();
       const set = getSbcSets().find((s) => matchesAny(s?.name, names));
       if (!set) {
         const names2 = getSbcSets().map((s) => `${s?.name || "?"} (#${s?.id})`).slice(0, 80).join(", ");
-        fail2(`${label} SBC not found. First loaded SBCs: ${names2}`);
+        fail2(`${label2} SBC not found. First loaded SBCs: ${names2}`);
       }
       return set;
     }
@@ -18553,15 +18586,15 @@
       if (byId) return byId;
       return getSbcSets().find((set) => matchesAny(set?.name, definition.sbcNames)) || null;
     }
-    async function findSbcSetForLoopDef(loopDef, label = loopDef?.name || "SBC") {
+    async function findSbcSetForLoopDef(loopDef, label2 = loopDef?.name || "SBC") {
       await ensureSbcSetsLoaded();
       const setIds = [...new Set((loopDef?.sbcSetIds || []).map(Number).filter(Boolean))];
       if (setIds.length) {
         const byId = findSbcSetByPreferredId(getSbcSets(), setIds);
         if (byId) return byId;
-        fail2(`${label} SBC not found by configured Set id(s): ${setIds.join(", ")}`);
+        fail2(`${label2} SBC not found by configured Set id(s): ${setIds.join(", ")}`);
       }
-      return findSbcSet(loopDef?.sbcNames, label);
+      return findSbcSet(loopDef?.sbcNames, label2);
     }
     function navController() {
       return pageRuntime.navigationController();
@@ -18585,35 +18618,35 @@
     function hasRatingSbcChallengeRequirements(challenge) {
       return Array.isArray(challenge?.eligibilityRequirements) && challenge.eligibilityRequirements.length > 0;
     }
-    async function requestRatingSbcChallenges(set, label = set?.name || "rating SBC", options = {}) {
+    async function requestRatingSbcChallenges(set, label2 = set?.name || "rating SBC", options = {}) {
       const cached = getCachedSbcChallenges(set);
       const cachedAvailable = cached.find(
         (challenge) => !isCompletedChallenge(challenge) && hasRatingSbcChallengeRequirements(challenge)
       );
       if (options.force !== true && (cachedAvailable || cached.length && isSbcSetComplete(set))) {
-        log(`${label}: using ${cached.length} cached challenge(s); bypassed requestChallengesForSet`);
+        log(`${label2}: using ${cached.length} cached challenge(s); bypassed requestChallengesForSet`);
         return cached;
       }
       if (!eaSbcAdapter().hasDaoGetChallengesForSet()) {
-        fail2(`${label}: direct SBC challenge DAO is unavailable`);
+        fail2(`${label2}: direct SBC challenge DAO is unavailable`);
       }
-      log(`${label}: loading challenges directly through sbcDAO; bypassing requestChallengesForSet`);
+      log(`${label2}: loading challenges directly through sbcDAO; bypassing requestChallengesForSet`);
       const result = await observeOnce(
         eaSbcAdapter().getChallengesForSet(set?.id),
         ctrl(),
         2e4,
-        `sbcDAO.getChallengesForSet ${label}`
+        `sbcDAO.getChallengesForSet ${label2}`
       );
       if (!result?.success || !Array.isArray(result?.response?.challenges)) {
         const detail = serviceResultErrorText(result) || "no challenge data returned";
-        fail2(`${label}: direct SBC challenge load failed: ${detail}`);
+        fail2(`${label2}: direct SBC challenge load failed: ${detail}`);
       }
       const received = result.response.challenges;
-      log(`${label}: direct SBC challenge load returned ${received.length} challenge(s)`);
+      log(`${label2}: direct SBC challenge load returned ${received.length} challenge(s)`);
       return received;
     }
-    async function findAvailableRatingSbcChallengeContext(set, label = set?.name || "rating SBC", options = {}) {
-      const challenges = await requestRatingSbcChallenges(set, label, options);
+    async function findAvailableRatingSbcChallengeContext(set, label2 = set?.name || "rating SBC", options = {}) {
+      const challenges = await requestRatingSbcChallenges(set, label2, options);
       const available = challenges.filter((challenge) => !isCompletedChallenge(challenge));
       return {
         challenge: available[0] || null,
@@ -18621,8 +18654,8 @@
         incompleteCount: available.length
       };
     }
-    async function findAvailableRatingSbcChallenge(set, label = set?.name || "rating SBC") {
-      const context = await findAvailableRatingSbcChallengeContext(set, label);
+    async function findAvailableRatingSbcChallenge(set, label2 = set?.name || "rating SBC") {
+      const context = await findAvailableRatingSbcChallengeContext(set, label2);
       const { challenges } = context;
       const available = context.challenge;
       if (!available && challenges.length) {
@@ -18630,38 +18663,38 @@
           const status = String(challenge?.status || challenge?.state || "unknown").toUpperCase();
           return `#${challenge?.id || "?"} (${index + 1}/${challenges.length}) status:${status} completed:${isCompletedChallenge(challenge) ? "yes" : "no"}`;
         });
-        log(`${label}: no incomplete direct rating challenge; ${states.join("; ")}`);
+        log(`${label2}: no incomplete direct rating challenge; ${states.join("; ")}`);
       }
       return available;
     }
-    async function loadRatingSbcChallenge(challenge, label = "rating SBC", options = {}) {
+    async function loadRatingSbcChallenge(challenge, label2 = "rating SBC", options = {}) {
       if (!challenge) return null;
       if (challenge.squad && options.force !== true) return challenge;
       if (!eaSbcAdapter().hasDaoLoadChallenge()) {
-        fail2(`${label}: direct SBC challenge loader is unavailable`);
+        fail2(`${label2}: direct SBC challenge loader is unavailable`);
       }
       let inProgress = false;
       try {
         inProgress = challenge.isInProgress?.() === true;
       } catch {
       }
-      log(`${label}: loading challenge squad directly through sbcDAO`);
+      log(`${label2}: loading challenge squad directly through sbcDAO`);
       const result = await observeOnce(
         eaSbcAdapter().loadDaoChallenge(challenge.id, inProgress),
         ctrl(),
         2e4,
-        `sbcDAO.loadChallenge ${label}`
+        `sbcDAO.loadChallenge ${label2}`
       );
       const squad = result?.response?.squad;
       if (!result?.success || !squad) {
         const detail = serviceResultErrorText(result) || "no squad data returned";
-        fail2(`${label}: direct challenge squad load failed: ${detail}`);
+        fail2(`${label2}: direct challenge squad load failed: ${detail}`);
       }
       challenge.squad = squad;
-      log(`${label}: direct challenge squad loaded`);
+      log(`${label2}: direct challenge squad loaded`);
       return challenge;
     }
-    async function requestSbcChallenges(set, label = set?.name || "SBC", options = {}) {
+    async function requestSbcChallenges(set, label2 = set?.name || "SBC", options = {}) {
       const attempts = Math.max(1, Math.min(3, Number(options.attempts || 3)));
       let lastResult = null;
       let lastError = null;
@@ -18673,9 +18706,9 @@
             eaSbcAdapter().requestChallengesForSet(set),
             ctrl(),
             3e4,
-            `requestChallengesForSet ${label}`
+            `requestChallengesForSet ${label2}`
           );
-          const result = options.runRequest ? await options.runRequest(`standard Challenges ${label}`, request) : await request();
+          const result = options.runRequest ? await options.runRequest(`standard Challenges ${label2}`, request) : await request();
           lastResult = result;
           if (result?.success && result?.data?.challenges?.length) return result.data.challenges;
           lastError = new Error(serviceResultErrorText(result) || "no challenge data returned");
@@ -18683,21 +18716,21 @@
           lastError = error;
         }
         if (attempt < attempts) {
-          log(`${label}: challenge request failed (${lastError?.message || lastError}); retrying ${attempt + 1}/${attempts}`);
+          log(`${label2}: challenge request failed (${lastError?.message || lastError}); retrying ${attempt + 1}/${attempts}`);
           await sleep(1500 * attempt);
         }
       }
       if (options.allowEmpty) return [];
       const detail = lastError?.message || lastResult?.error?.code || lastResult?.status || "unknown";
-      fail2(`No challenge loaded for ${label} after ${attempts} attempt(s): ${detail}`);
+      fail2(`No challenge loaded for ${label2} after ${attempts} attempt(s): ${detail}`);
     }
     async function loadDynamicSbcDiscoveryChallenges(set, index = {}, context = {}) {
-      const label = `Dynamic SBC scan ${set?.name || `#${set?.id || "?"}`}`;
+      const label2 = `Dynamic SBC scan ${set?.name || `#${set?.id || "?"}`}`;
       const repositoryChallenges = getCachedSbcChallenges(set);
       const repositorySnapshot = eaSbcAdapter().snapshotDiscoverySet(set, repositoryChallenges);
       const repositoryMetadataComplete = repositoryChallenges.length > 0 && repositoryChallenges.length === (index.challengeIds?.length || repositoryChallenges.length) && repositorySnapshot.challenges.every((challenge) => Number(challenge?.requiredPlayerCount || 0) > 0 && Array.isArray(challenge?.eligibilityRequirements) && challenge.eligibilityRequirements.length > 0);
       if (!context.cachedSnapshot && repositoryMetadataComplete) {
-        log(`${label}: using ${repositoryChallenges.length} complete repository Challenge metadata snapshot(s)`);
+        log(`${label2}: using ${repositoryChallenges.length} complete repository Challenge metadata snapshot(s)`);
         return repositoryChallenges;
       }
       let challenges = null;
@@ -18706,9 +18739,9 @@
           eaSbcAdapter().getChallengesForSet(set?.id),
           ctrl(),
           2e4,
-          `sbcDAO.getChallengesForSet ${label}`
+          `sbcDAO.getChallengesForSet ${label2}`
         );
-        const result = context.runRequest ? await context.runRequest(`DAO Challenges ${label}`, request) : await request();
+        const result = context.runRequest ? await context.runRequest(`DAO Challenges ${label2}`, request) : await request();
         if (result?.success && Array.isArray(result?.response?.challenges)) {
           challenges = result.response.challenges;
         } else {
@@ -18716,7 +18749,7 @@
           throw new Error(`direct Challenge metadata unavailable: ${detail}`);
         }
       }
-      if (!challenges) challenges = await requestSbcChallenges(set, label, {
+      if (!challenges) challenges = await requestSbcChallenges(set, label2, {
         attempts: 1,
         runRequest: context.runRequest
       });
@@ -18738,16 +18771,16 @@
             eaSbcAdapter().loadDaoChallenge(challenge.id, inProgress),
             ctrl(),
             2e4,
-            `sbcDAO.loadChallenge ${label} #${challenge.id || "?"}`
+            `sbcDAO.loadChallenge ${label2} #${challenge.id || "?"}`
           );
-          const result = context.runRequest ? await context.runRequest(`DAO Challenge squad ${label} #${challenge.id || "?"}`, request) : await request();
+          const result = context.runRequest ? await context.runRequest(`DAO Challenge squad ${label2} #${challenge.id || "?"}`, request) : await request();
           const squad = result?.response?.squad;
           if (!result?.success || !squad) throw new Error(serviceResultErrorText(result) || "squad unavailable");
           challenge.squad = squad;
         } catch (error) {
           if (dynamicSbcLoadErrorCode(error) === 429) throw error;
           const completed = isCompletedChallenge(challenge);
-          log(`${label}: Challenge #${challenge?.id || "?"} squad metadata unavailable (${error?.message || error}); player count ${completed ? "may be inferred only from consistent sibling Challenge metadata" : "will remain unsupported"}`);
+          log(`${label2}: Challenge #${challenge?.id || "?"} squad metadata unavailable (${error?.message || error}); player count ${completed ? "may be inferred only from consistent sibling Challenge metadata" : "will remain unsupported"}`);
         }
         loaded.push(challenge);
       }
@@ -18805,14 +18838,14 @@
         initialGapMs: gapMs,
         previous,
         metrics,
-        async run(label, request) {
+        async run(label2, request) {
           const waitMs = Math.max(0, gapMs - (Date.now() - lastStartedAt));
           if (waitMs) await sleep(waitMs);
           lastStartedAt = Date.now();
           metrics.requestCount++;
           try {
             const result = await request();
-            if (!result?.success) recordFailure(new Error(serviceResultErrorText(result) || `${label} failed`));
+            if (!result?.success) recordFailure(new Error(serviceResultErrorText(result) || `${label2} failed`));
             return result;
           } catch (error) {
             recordFailure(error);
@@ -18936,7 +18969,7 @@
         snapshotSet: (set, challenges, refreshResult) => eaSbcAdapter().snapshotDiscoverySet(set, challenges, refreshResult),
         loadChallenges: (set, index, context) => loadDynamicSbcDiscoveryChallenges(set, index, {
           ...context,
-          runRequest: (label, request) => requestPacer.run(label, request)
+          runRequest: (label2, request) => requestPacer.run(label2, request)
         }),
         loadAttempts: 3,
         loadRetryDelayMs: 1500,
@@ -18955,8 +18988,8 @@
           const completed = Math.max(0, Number(progress.completed || 0) || 0);
           const total = Math.max(0, Number(progress.total || 0) || 0);
           const currentName = String(progress.index?.name || "").trim();
-          const label = total > 0 && completed >= total ? "Dynamic SBC metadata validated" : currentName ? `Checking ${currentName}` : total === 0 ? "No matching dynamic SBCs found" : "Validating dynamic SBC metadata";
-          return reportProgress({ ...progress, label });
+          const label2 = total > 0 && completed >= total ? "Dynamic SBC metadata validated" : currentName ? `Checking ${currentName}` : total === 0 ? "No matching dynamic SBCs found" : "Validating dynamic SBC metadata";
+          return reportProgress({ ...progress, label: label2 });
         },
         onResult: async ({ snapshot, loadError, cacheStatus }) => {
           if (cacheStatus === "load-failed-compatible-cache") {
@@ -19115,8 +19148,8 @@
       });
       return summary;
     }
-    async function findAvailableSbcChallenge(set, label = set?.name || "SBC") {
-      const challenges = await requestSbcChallenges(set, label);
+    async function findAvailableSbcChallenge(set, label2 = set?.name || "SBC") {
+      const challenges = await requestSbcChallenges(set, label2);
       return challenges.find((c) => !isCompletedChallenge(c)) || null;
     }
     async function openSbcSet(set, options = {}) {
@@ -19178,7 +19211,7 @@
     function simulateKeyStroke(key = "Alt", code = "AltRight", options = {}) {
       adapters.dom.keyStroke(key, code, options);
     }
-    function closeFsuStuckOverlay(label = "FSU stuck overlay") {
+    function closeFsuStuckOverlay(label2 = "FSU stuck overlay") {
       const patterns = [
         "If you encounter stuck",
         "click here to close",
@@ -19188,7 +19221,7 @@
       const target = candidates[0];
       if (!target) return false;
       const clickTarget = target.closest?.('button,[role="button"],a') || target;
-      log(`Closing ${label}`);
+      log(`Closing ${label2}`);
       simulateClick(clickTarget);
       return true;
     }
@@ -19207,9 +19240,9 @@
         const controls = Array.from(row.querySelectorAll('button, [role="button"], a, span, div')).filter(isClickableElement);
         const addControl = controls.find((el) => {
           const text = compactText(el);
-          const label = String(el.getAttribute?.("aria-label") || el.getAttribute?.("title") || "");
+          const label2 = String(el.getAttribute?.("aria-label") || el.getAttribute?.("title") || "");
           const classes = String(el.className || "");
-          return matchesAny(text, buttonTexts) || matchesAny(label, buttonTexts) || /\badd\b/i.test(classes);
+          return matchesAny(text, buttonTexts) || matchesAny(label2, buttonTexts) || /\badd\b/i.test(classes);
         });
         if (addControl) {
           return addControl.closest?.('button,[role="button"],a') || addControl;
@@ -19217,12 +19250,12 @@
       }
       return null;
     }
-    async function clickRequirementAddControl(config = {}, label = "SBC requirement") {
+    async function clickRequirementAddControl(config = {}, label2 = "SBC requirement") {
       const patterns = config.patterns || [];
       if (!patterns.length) return false;
       const btn = findRequirementAddControl(patterns, config.buttonTexts || ["Add"]);
       if (!btn) return false;
-      log(`Clicked requirement Add for ${label}`);
+      log(`Clicked requirement Add for ${label2}`);
       simulateClick(btn);
       await waitLoadingEnd();
       await sleep(CFG.pauseMs);
@@ -19323,6 +19356,7 @@
         `rating:${Number(item?.rating || 0) || "?"}`,
         itemTierLabel(item),
         isRare(item) ? "rare" : "common",
+        `rareflag:${itemRareFlag2(item)}`,
         isTradeable(item) ? "tradeable" : "untradeable",
         `from:${entry?.pileName || "unknown"}`,
         `id:${Number(item?.id || 0) || "?"}`,
@@ -19333,16 +19367,16 @@
       }
       return parts.join(" | ");
     }
-    function logDryRunSelection(label, selection, options = {}) {
+    function logDryRunSelection(label2, selection, options = {}) {
       const maxItems = Number(options.maxItems || 30);
-      log(`${label}: dry-run selected ${selection?.selected?.length || 0} item(s) (${formatSelectionStats(selection?.stats)})`);
+      log(`${label2}: dry-run selected ${selection?.selected?.length || 0} item(s) (${formatSelectionStats(selection?.stats)})`);
       const entries = selection?.entries || (selection?.selected || []).map((item) => ({ item, pileName: "unknown" }));
       entries.slice(0, maxItems).forEach((entry, index) => log(`dry-run pick ${formatDryRunItem(entry, index)}`));
       if (entries.length > maxItems) log(`dry-run pick list truncated: ${entries.length - maxItems} more item(s)`);
       if (!selection?.ok && selection?.missing) {
         const missing = selection.missing;
-        log(`${label}: dry-run missing ${missing.count} ${missing.tier || "any"} ${missing.rarity || ""} item(s)`);
-        logSelectionDiagnostics(label, selection, options.priorityPiles);
+        log(`${label2}: dry-run missing ${missing.count} ${missing.tier || "any"} ${missing.rarity || ""} item(s)`);
+        logSelectionDiagnostics(label2, selection, options.priorityPiles);
       }
     }
     function addCount(counts, key) {
@@ -19450,22 +19484,22 @@
       result.uniqueDefinitions = Array.from(matchingDefinitions).filter(Boolean).length;
       return result;
     }
-    function logRequirementDiagnostics(label, requirement2, fallbackPriorityPiles) {
+    function logRequirementDiagnostics(label2, requirement2, fallbackPriorityPiles) {
       const settings = getFsuSettings();
       const piles = applyFsuPilePriority(requirement2?.priorityPiles || fallbackPriorityPiles || ["storage", "transfer", "club"], settings);
       const diagnostics = [];
-      log(`${label}: diagnostics for ${describeRequirement(requirement2)} across ${piles.join(" > ")}`);
+      log(`${label2}: diagnostics for ${describeRequirement(requirement2)} across ${piles.join(" > ")}`);
       for (const pileName of piles) {
         const diag = diagnosePileForRequirement(pileName, requirement2, settings);
         diagnostics.push({ pileName, ...diag });
         const signalText = pileNeedsDuplicateSignalResolution(pileName) ? `, duplicate signals:${diag.duplicateSignals}, resolved:${diag.resolvedSignals}` : "";
-        log(`${label}: ${pileName} total:${diag.total}, matching:${diag.matching}, unique defs:${diag.uniqueDefinitions}${signalText}`);
+        log(`${label2}: ${pileName} total:${diag.total}, matching:${diag.matching}, unique defs:${diag.uniqueDefinitions}${signalText}`);
         const rejectText = formatCounts(diag.reasons);
-        if (rejectText) log(`${label}: ${pileName} rejects ${rejectText}`);
+        if (rejectText) log(`${label2}: ${pileName} rejects ${rejectText}`);
       }
       return diagnostics;
     }
-    function logActiveFsuSelectionGuards(label, diagnostics = [], settings = getFsuSettings()) {
+    function logActiveFsuSelectionGuards(label2, diagnostics = [], settings = getFsuSettings()) {
       const fsuRejects = {};
       diagnostics.forEach((diag) => {
         Object.entries(diag?.reasons || {}).forEach(([reason, count]) => {
@@ -19492,14 +19526,14 @@
         ...settings.lockedDefinitionIds || []
       ]).length;
       if (lockedCount) active.push(`Lock player (${lockedCount})`);
-      log(`${label}: active FSU filters affected this selection: ${formatCounts(fsuRejects, 20)}`);
-      if (active.length) log(`${label}: FSU guards in force: ${active.join("; ")}`);
-      log(`${label}: Runner will not bypass FSU filters; adjust FSU SBC ignore player configuration and retry if these cards should be usable`);
+      log(`${label2}: active FSU filters affected this selection: ${formatCounts(fsuRejects, 20)}`);
+      if (active.length) log(`${label2}: FSU guards in force: ${active.join("; ")}`);
+      log(`${label2}: Runner will not bypass FSU filters; adjust FSU SBC ignore player configuration and retry if these cards should be usable`);
     }
-    function logSelectionDiagnostics(label, selection, fallbackPriorityPiles) {
+    function logSelectionDiagnostics(label2, selection, fallbackPriorityPiles) {
       if (!selection?.missing) return [];
-      const diagnostics = logRequirementDiagnostics(label, selection.missing, fallbackPriorityPiles);
-      logActiveFsuSelectionGuards(label, diagnostics);
+      const diagnostics = logRequirementDiagnostics(label2, selection.missing, fallbackPriorityPiles);
+      logActiveFsuSelectionGuards(label2, diagnostics);
       return diagnostics;
     }
     function getSubmissionCacheItems() {
@@ -19535,7 +19569,7 @@
         duplicateId,
         name: itemDisplayName(signal),
         rating: Number(signal?.rating || 0),
-        rareflag: itemRareFlag(signal),
+        rareflag: itemRareFlag2(signal),
         tradeable: isTradeable(signal),
         leagueId: itemLeagueId2(signal),
         evolution: isEvolutionItem(signal),
@@ -19544,20 +19578,20 @@
         candidates
       };
     }
-    function logDuplicateSignalDiagnostics(label, signals = [], requirement2 = {}, selection = null) {
+    function logDuplicateSignalDiagnostics(label2, signals = [], requirement2 = {}, selection = null) {
       if (!signals.length) return [];
       const selectedSignalIds = new Set((selection?.entries || []).filter((entry) => entry.pileName === "unassigned" && entry.signal).map((entry) => Number(entry.signal?.id || 0)).filter(Boolean));
       const settings = getFsuSettings();
       const diagnostics = signals.map((signal) => duplicateSignalDiagnostic(signal, requirement2, settings));
-      log(`${label}: duplicate resolution diagnostics ${selectedSignalIds.size}/${diagnostics.length} signal(s) selected; ${formatFsuSettings(settings)}; consumed cache:${state.consumedItemIds.size}`);
+      log(`${label2}: duplicate resolution diagnostics ${selectedSignalIds.size}/${diagnostics.length} signal(s) selected; ${formatFsuSettings(settings)}; consumed cache:${state.consumedItemIds.size}`);
       diagnostics.forEach((diag, index) => {
-        log(`${label}: signal ${index + 1}/${diagnostics.length} selected:${selectedSignalIds.has(diag.signalId) ? "yes" : "no"} name:${diag.name} id:${diag.signalId || "?"} def:${diag.definitionId || "?"} duplicateId:${diag.duplicateId || "?"} rating:${diag.rating || "?"} rareflag:${diag.rareflag} tradeable:${diag.tradeable ? "yes" : "no"} league:${diag.leagueId || "?"} evo:${diag.evolution ? "yes" : "no"} signal rejects:${diag.signalReasons.join("/") || "none"} resolved:${diag.resolvedId || "none"}`);
+        log(`${label2}: signal ${index + 1}/${diagnostics.length} selected:${selectedSignalIds.has(diag.signalId) ? "yes" : "no"} name:${diag.name} id:${diag.signalId || "?"} def:${diag.definitionId || "?"} duplicateId:${diag.duplicateId || "?"} rating:${diag.rating || "?"} rareflag:${diag.rareflag} tradeable:${diag.tradeable ? "yes" : "no"} league:${diag.leagueId || "?"} evo:${diag.evolution ? "yes" : "no"} signal rejects:${diag.signalReasons.join("/") || "none"} resolved:${diag.resolvedId || "none"}`);
         if (!diag.candidates.length) {
-          log(`${label}: signal ${index + 1} candidate cache: none in Club/Storage`);
+          log(`${label2}: signal ${index + 1} candidate cache: none in Club/Storage`);
           return;
         }
         diag.candidates.forEach((candidate) => {
-          log(`${label}: signal ${index + 1} candidate id:${candidate.id || "?"} def:${candidate.definitionId || "?"} pile:${candidate.pile} rating:${candidate.rating || "?"} tradeable:${candidate.tradeable ? "yes" : "no"} consumed:${candidate.consumed ? "yes" : "no"} rejects:${candidate.reasons.join("/") || "none"}`);
+          log(`${label2}: signal ${index + 1} candidate id:${candidate.id || "?"} def:${candidate.definitionId || "?"} pile:${candidate.pile} rating:${candidate.rating || "?"} tradeable:${candidate.tradeable ? "yes" : "no"} consumed:${candidate.consumed ? "yes" : "no"} rejects:${candidate.reasons.join("/") || "none"}`);
         });
       });
       return diagnostics;
@@ -19673,15 +19707,15 @@
         isSpecialItem: isSbcSpecialItem
       });
     }
-    function logRatingSbcValidation(loopDef, label, validation, model) {
-      log(`${loopDef.name}: ${label} rating ${validation.rating}/${model.targetRating}, players ${validation.players.length}/${model.requiredPlayerCount}, special ${validation.specialCount}/${model.maxSpecialCount}, unique definitions ${validation.uniqueDefinitionCount}/${validation.players.length}`);
+    function logRatingSbcValidation(loopDef, label2, validation, model) {
+      log(`${loopDef.name}: ${label2} rating ${validation.rating}/${model.targetRating}, players ${validation.players.length}/${model.requiredPlayerCount}, special ${validation.specialCount}/${model.maxSpecialCount}, unique definitions ${validation.uniqueDefinitionCount}/${validation.players.length}`);
       validation.constraintResults.forEach(({ constraint, matched, required: required2 }) => {
-        log(`${loopDef.name}: ${label} constraint ${constraint.label}: ${matched}/${required2}`);
+        log(`${loopDef.name}: ${label2} constraint ${constraint.label}: ${matched}/${required2}`);
       });
       if (validation.challengeReady !== null) {
-        log(`${loopDef.name}: ${label} local challenge.meetsRequirements(): ${validation.challengeReady ? "true" : "false"}`);
+        log(`${loopDef.name}: ${label2} local challenge.meetsRequirements(): ${validation.challengeReady ? "true" : "false"}`);
       }
-      validation.errors.forEach((error) => log(`${loopDef.name}: ${label} validation failed: ${error}`));
+      validation.errors.forEach((error) => log(`${loopDef.name}: ${label2} validation failed: ${error}`));
     }
     function isRatingSbcCandidateSafe(item, loopDef, model = null, context = null) {
       const allowedSpecialCount = model ? model.maxSpecialCount : Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
@@ -19749,7 +19783,7 @@
         type: isPlayer(item) ? "player" : item?.type,
         name: itemDisplayName(item),
         rating: item?.rating,
-        rareflag: itemRareFlag(item),
+        rareflag: itemRareFlag2(item),
         rare: isRare(item),
         special: isSbcSpecialItem(item),
         duplicate: isDuplicate(item),
@@ -19838,9 +19872,9 @@
       }
       return result;
     }
-    async function saveChallengeSquad(challenge, players, label = "SBC", options = {}) {
+    async function saveChallengeSquad(challenge, players, label2 = "SBC", options = {}) {
       const squad = challenge?.squad || ctrl()?._squad;
-      if (!squad) fail2(`${label}: squad object not found`);
+      if (!squad) fail2(`${label2}: squad object not found`);
       const playerList = buildSquadPlayerList(challenge, players);
       try {
         squad.removeAllItems?.();
@@ -19851,7 +19885,7 @@
         eaSbcAdapter().saveChallenge(challenge),
         ctrl(),
         3e4,
-        `saveChallenge ${label}`
+        `saveChallenge ${label2}`
       );
       if (!save?.success) {
         const code = save?.error?.code || save?.status || "unknown";
@@ -19859,7 +19893,7 @@
         const playerSummary = (players || []).slice(0, 11).map(
           (item, index) => `${index + 1}.${itemDisplayName(item)} r:${Number(item?.rating || 0) || "?"} id:${Number(item?.id || 0) || "?"} def:${Number(item?.definitionId || 0) || "?"}`
         ).join("; ");
-        fail2(`${label}: saveChallenge failed: ${code}${msg ? ` ${msg}` : ""}${playerSummary ? `; players ${playerSummary}` : ""}`);
+        fail2(`${label2}: saveChallenge failed: ${code}${msg ? ` ${msg}` : ""}${playerSummary ? `; players ${playerSummary}` : ""}`);
       }
       if (eaSbcAdapter().canLoadChallengeData()) {
         try {
@@ -19867,24 +19901,24 @@
             eaSbcAdapter().loadChallengeData(challenge),
             ctrl(),
             3e4,
-            `loadChallengeData ${label}`
+            `loadChallengeData ${label2}`
           );
           const loadedSquad = loaded?.response?.squad;
           const loadedPlayers = loadedSquad?._players?.map((p) => p?._item).filter(Boolean);
           if (loadedPlayers?.length) challenge.squad?.setPlayers?.(loadedPlayers, true);
         } catch (e) {
-          log(`${label}: loadChallengeData skipped: ${e.message || e}`);
+          log(`${label2}: loadChallengeData skipped: ${e.message || e}`);
         }
       }
       await waitLoadingEnd(250, Math.max(1e3, Number(options.loadingTimeoutMs || 3e4) || 3e4));
       await sleep(700);
     }
-    async function prepareSbcSquad(challenge, players, label = "SBC", options = {}) {
+    async function prepareSbcSquad(challenge, players, label2 = "SBC", options = {}) {
       const result = await submitSbcAttempt({
-        label,
+        label: label2,
         prepareOnly: true,
         challengeProvider: async () => ({
-          set: options.set || { id: null, name: label },
+          set: options.set || { id: null, name: label2 },
           challenge
         }),
         squadProvider: createExistingSquadProvider({
@@ -19895,12 +19929,12 @@
         prepareRuntimeAccess: prepareFsuRuntimeAccess,
         preSaveValidators: options.preSaveValidators || [],
         saveSquad: async ({ challenge: targetChallenge, players: targetPlayers }) => {
-          await saveChallengeSquad(targetChallenge, targetPlayers, label, options);
+          await saveChallengeSquad(targetChallenge, targetPlayers, label2, options);
         },
         readSavedPlayers: async ({ challenge: targetChallenge }) => getSquadItems(targetChallenge?.squad || ctrl()?._squad),
         postSaveValidators: options.postSaveValidators || []
       });
-      if (result.status !== "prepared") fail2(`${label}: squad preparation failed: ${result.reason || result.status}`);
+      if (result.status !== "prepared") fail2(`${label2}: squad preparation failed: ${result.reason || result.status}`);
       return result;
     }
     async function showUnassignedIfAny(reason = "final confirmation", options = {}) {
@@ -19926,9 +19960,9 @@
         log
       });
     }
-    async function unwindSbcSquadControllers2(label, maxPops = 20) {
+    async function unwindSbcSquadControllers2(label2, maxPops = 20) {
       return unwindSbcSquadControllers({
-        label,
+        label: label2,
         maxPops,
         currentController: ctrl,
         currentControllerName,
@@ -19938,9 +19972,9 @@
         log
       });
     }
-    async function syncAfterSbcSubmit(label) {
+    async function syncAfterSbcSubmit(label2) {
       return synchronizeAfterSbcSubmit({
-        label,
+        label: label2,
         currentControllerName,
         unwind: unwindSbcSquadControllers2,
         showUnassigned: showUnassignedIfAny,
@@ -19948,7 +19982,7 @@
         log
       });
     }
-    async function waitAfterSbcFillAction(label, squad, timeoutMs = 1e4) {
+    async function waitAfterSbcFillAction(label2, squad, timeoutMs = 1e4) {
       const start = Date.now();
       const initialFilled = getFilledSquadSlots(squad);
       let closedStuckOverlay = false;
@@ -19957,10 +19991,10 @@
         const filled = getFilledSquadSlots(squad);
         if (findSubmitButton()) {
           await sleep(700);
-          log(`${label}: submit button detected after fill action`);
+          log(`${label2}: submit button detected after fill action`);
           return true;
         }
-        if (!closedStuckOverlay && closeFsuStuckOverlay(`${label} stuck overlay`)) {
+        if (!closedStuckOverlay && closeFsuStuckOverlay(`${label2} stuck overlay`)) {
           closedStuckOverlay = true;
           await sleep(1e3);
           continue;
@@ -19968,21 +20002,21 @@
         const shieldShowing = pageRuntime.loadingShieldShowing();
         if (!shieldShowing && filled > initialFilled) {
           await sleep(700);
-          log(`${label}: fill action settled; slots ${initialFilled} -> ${filled}`);
+          log(`${label2}: fill action settled; slots ${initialFilled} -> ${filled}`);
           return true;
         }
         await sleep(250);
       }
-      log(`${label}: no fill progress after wait; slots ${initialFilled} -> ${getFilledSquadSlots(squad)}, submit ${findSubmitButton() ? "ready" : "not ready"}`);
+      log(`${label2}: no fill progress after wait; slots ${initialFilled} -> ${getFilledSquadSlots(squad)}, submit ${findSubmitButton() ? "ready" : "not ready"}`);
       return false;
     }
-    async function fillSbcSquad(label = "SBC", options = {}) {
+    async function fillSbcSquad(label2 = "SBC", options = {}) {
       const provisionalAccess = fsuAdapter().readiness().state === "provisional";
       if (provisionalAccess) fsuAdapter().beginProvisionalClubAccess();
       try {
         const requireSubmitReady = options.requireSubmitReady !== false;
         const squad = await waitFor(() => ctrl()?._squad, 15e3, "SBC squad object");
-        patchFsuLengthSafePlayerMetadata(`${label} before FSU fill`);
+        patchFsuLengthSafePlayerMetadata(`${label2} before FSU fill`);
         const fsuRepeatFillTexts = ["\u91CD\u590D\u7403\u5458\u586B\u5145\u9635\u5BB9", "\u91CD\u8907\u7403\u54E1\u586B\u5145\u9663\u5BB9", "Repeat player fill squad"];
         const fsuOneClickFillTexts = ["\u4E00\u952E\u5B8C\u6210", "\u4E00\u9375\u5B8C\u6210", "\u4E00\u952E\u586B\u5145", "\u4E00\u9375\u586B\u5145", "One-click fill"];
         const existingItems = getSquadItems(squad);
@@ -19992,8 +20026,8 @@
         }
         await sleep(500);
         if (options.specialRequirementAdd) {
-          const clicked = await clickRequirementAddControl(options.specialRequirementAdd, `${label} special requirement`);
-          if (!clicked) log(`${label}: special requirement Add button not found; continuing with FSU fill`);
+          const clicked = await clickRequirementAddControl(options.specialRequirementAdd, `${label2} special requirement`);
+          if (!clicked) log(`${label2}: special requirement Add button not found; continuing with FSU fill`);
         }
         if (clickButtonByText(fsuRepeatFillTexts)) {
           log("Clicked duplicate fill");
@@ -20002,12 +20036,12 @@
         }
         if (clickButtonByText(fsuOneClickFillTexts)) {
           log("Clicked FSU one-click fill/complete");
-          await waitAfterSbcFillAction(`${label} FSU one-click`, squad);
+          await waitAfterSbcFillAction(`${label2} FSU one-click`, squad);
           await sleep(CFG.pauseMs);
         }
         if (!findSubmitButton() && clickButtonByText(["Completion", "\u5B8C\u6210", "\u88DC\u5168", "\u8865\u5168"])) {
           log("Clicked FSU completion");
-          await waitAfterSbcFillAction(`${label} FSU completion`, squad);
+          await waitAfterSbcFillAction(`${label2} FSU completion`, squad);
           await sleep(CFG.pauseMs);
         }
         if (clickButtonByText(["\u9635\u5BB9\u8865\u5168", "\u9663\u5BB9\u88DC\u5168", "Squad completion"])) {
@@ -20019,7 +20053,7 @@
         }
         if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && clickButtonByText(fsuOneClickFillTexts)) {
           log("Retrying FSU one-click fill after no progress");
-          await waitAfterSbcFillAction(`${label} FSU one-click retry`, squad);
+          await waitAfterSbcFillAction(`${label2} FSU one-click retry`, squad);
           await sleep(CFG.pauseMs);
         }
         if (!findSubmitButton() && getFilledSquadSlots(squad) === 0 && existingItems.length) {
@@ -20028,19 +20062,19 @@
             await sleep(350);
             const restored = getFilledSquadSlots(squad);
             if (restored) {
-              log(`${label}: FSU made no fill progress; restored ${restored} existing squad item(s) for safe repair`);
+              log(`${label2}: FSU made no fill progress; restored ${restored} existing squad item(s) for safe repair`);
             }
           } catch (error) {
-            log(`${label}: could not restore existing squad after FSU made no fill progress: ${error?.message || error}`);
+            log(`${label2}: could not restore existing squad after FSU made no fill progress: ${error?.message || error}`);
           }
         }
         const filled = getFilledSquadSlots(squad);
         const submitReady = !!findSubmitButton();
-        log(`${label} squad filled slots detected: ${filled}; submit ${submitReady ? "ready" : "not ready"}`);
+        log(`${label2} squad filled slots detected: ${filled}; submit ${submitReady ? "ready" : "not ready"}`);
         if (!submitReady && filled === 0) {
-          log(`${label}: FSU did not place any players after the supported fill attempts; no squad was saved and no SBC was submitted. Check the FSU fill overlay and its lock/rarity/range settings.`);
+          log(`${label2}: FSU did not place any players after the supported fill attempts; no squad was saved and no SBC was submitted. Check the FSU fill overlay and its lock/rarity/range settings.`);
         }
-        if (!submitReady && requireSubmitReady) fail2(`${label} squad is not complete`);
+        if (!submitReady && requireSubmitReady) fail2(`${label2} squad is not complete`);
         return { squad, filled, submitReady };
       } finally {
         if (provisionalAccess) fsuAdapter().endProvisionalClubAccess();
@@ -20186,15 +20220,15 @@
         ({ item, pileName }) => `${itemDisplayName(item)} rating:${Number(item?.rating || 0) || "?"} ${requiredSpecialTypeLabel(item)} from:${pileName} id:${Number(item?.id || 0) || "?"}`
       ).join("; ");
     }
-    async function waitForSubmittableRequiredSpecialEntries(loopDef = {}, required2 = 1, label = "required special cache sync") {
+    async function waitForSubmittableRequiredSpecialEntries(loopDef = {}, required2 = 1, label2 = "required special cache sync") {
       const attempts = 4;
       let entries = [];
       for (let attempt = 1; attempt <= attempts; attempt++) {
         if (attempt > 1) {
           await sleep(900 * attempt);
-          await refreshInventoryCaches(`${loopDef.name} ${label} ${attempt}/${attempts}`, { includePacks: false, quiet: true });
+          await refreshInventoryCaches(`${loopDef.name} ${label2} ${attempt}/${attempts}`, { includePacks: false, quiet: true });
         }
-        resolveRecentRewardItems(`${loopDef.name} ${label} ${attempt}/${attempts}`);
+        resolveRecentRewardItems(`${loopDef.name} ${label2} ${attempt}/${attempts}`);
         entries = sortRequiredSpecialEntriesForSubmit(getSubmittableRequiredSpecialEntries(loopDef), loopDef);
         if (entries.length >= required2) return entries;
         const recentEntries = sortRequiredSpecialEntriesForSubmit(
@@ -20279,7 +20313,7 @@
       if (groups.length) parts.push(`groups:${groups.join("/")}`);
       return parts.join(" ");
     }
-    function markAssumedTotwRewardItems(items = [], label = "TOTW reward pack") {
+    function markAssumedTotwRewardItems(items = [], label2 = "TOTW reward pack") {
       const marked = [];
       for (const item of items || []) {
         if (!item || !isPlayer(item)) continue;
@@ -20298,11 +20332,11 @@
       }
       state.recentRewardItems = state.recentRewardItems.slice(0, 20);
       marked.slice(0, 5).forEach((item) => {
-        log(`${label}: marked assumed TOTW reward item: ${rewardItemSummary(item)}`);
+        log(`${label2}: marked assumed TOTW reward item: ${rewardItemSummary(item)}`);
       });
-      if (marked.length > 5) log(`${label}: marked ${marked.length - 5} more assumed TOTW reward item(s)`);
+      if (marked.length > 5) log(`${label2}: marked ${marked.length - 5} more assumed TOTW reward item(s)`);
     }
-    function markSbcItemsConsumed(items = [], label = "SBC submit") {
+    function markSbcItemsConsumed(items = [], label2 = "SBC submit") {
       const ids = [...new Set((items || []).map((item) => Number(item?.id || 0)).filter(Boolean))];
       if (!ids.length) return;
       for (const id of ids) {
@@ -20313,7 +20347,7 @@
       state.recentRewardItems = (state.recentRewardItems || []).filter((item) => !state.consumedItemIds.has(Number(item?.id || 0)));
       const removedRecent = beforeRecent - state.recentRewardItems.length;
       if (removedRecent) {
-        log(`${label}: cleared ${removedRecent} consumed recent reward item reference(s)`);
+        log(`${label2}: cleared ${removedRecent} consumed recent reward item reference(s)`);
       }
     }
     function needsRequiredTotwInjection(loopDef, inspection) {
@@ -21168,11 +21202,11 @@
       const summary = inspection.blocked.slice(0, 10).map(({ item, index, reasons }) => `${index + 1}. ${itemDisplayName(item)} rating:${Number(item?.rating || 0) || "?"} (${reasons.join(",")})`).join("; ");
       fail2(`${loopDef.name}: protected squad item(s) detected; stop before submit: ${summary}`);
     }
-    function failIfSbcSubmitError(label = "SBC submit") {
+    function failIfSbcSubmitError(label2 = "SBC submit") {
       const error = sbcRewardOverlay.findSubmitError();
       if (!error) return false;
       sbcRewardOverlay.dismissSubmitError(error);
-      fail2(`${label}: submit blocked by EA modal: ${error.text}`);
+      fail2(`${label2}: submit blocked by EA modal: ${error.text}`);
     }
     async function fillBronzeUpgradeSquad() {
       await fillSbcSquad("Bronze Upgrade");
@@ -21188,9 +21222,9 @@
         }))
       };
     }
-    async function claimSbcRewardsIfPresent(label = "SBC submit", options = {}) {
+    async function claimSbcRewardsIfPresent(label2 = "SBC submit", options = {}) {
       return claimSbcRewards({
-        label,
+        label: label2,
         beforePackCounts: options.beforePackCounts,
         beforeProgress: options.beforeProgress,
         overlay: sbcRewardOverlay,
@@ -21237,7 +21271,10 @@
         await sleep(900);
         failIfSbcSubmitError(set.name);
       }
-      await claimSbcRewardsIfPresent(set.name, { set, beforePackCounts, beforeProgress });
+      const claimConfirmed = await claimSbcRewardsIfPresent(set.name, { set, beforePackCounts, beforeProgress });
+      if (!claimConfirmed) {
+        fail2(`${set.name}: SBC submission could not be confirmed by reward, progress, or My Packs state; preserving inventory state`);
+      }
       await waitLoadingEnd(900, 45e3);
       await refreshStorePacks().catch(() => null);
       const awardId = Number(set?.awards?.[0]?.value) || null;
@@ -21278,11 +21315,11 @@
       }
       return options.allowSetFallback === true ? Number(set?.awards?.[0]?.value) || null : null;
     }
-    async function applyPlayersToRatingChallenge(challenge, players, label = "rating SBC") {
+    async function applyPlayersToRatingChallenge(challenge, players, label2 = "rating SBC") {
       const squad = challenge?.squad;
-      if (!squad) fail2(`${label}: challenge squad missing while applying background players`);
+      if (!squad) fail2(`${label2}: challenge squad missing while applying background players`);
       const list = Array.isArray(players) ? players.filter(Boolean) : [];
-      if (!list.length) fail2(`${label}: no players available to apply before background submit`);
+      if (!list.length) fail2(`${label2}: no players available to apply before background submit`);
       const playerList = buildSquadPlayerList(challenge, list);
       try {
         squad.removeAllItems?.();
@@ -21291,7 +21328,7 @@
       squad.setPlayers(playerList, true);
       return list;
     }
-    async function submitRatingSbcInBackground(set, challenge, label = set?.name || "rating SBC", options = {}) {
+    async function submitRatingSbcInBackground(set, challenge, label2 = set?.name || "rating SBC", options = {}) {
       const beforePackCounts = getPackCountsById();
       const players = Array.isArray(options.players) ? options.players.filter(Boolean) : [];
       const maxAttempts = Math.max(1, Math.min(5, Number(options.maxAttempts || 3) || 3));
@@ -21301,16 +21338,16 @@
         let canSubmit = true;
         if (players.length) {
           try {
-            await applyPlayersToRatingChallenge(currentChallenge, players, `${label} attempt ${attempt}`);
+            await applyPlayersToRatingChallenge(currentChallenge, players, `${label2} attempt ${attempt}`);
           } catch (error) {
             lastDetail = error?.message || String(error);
-            if (attempt >= maxAttempts) fail2(`${label}: ${lastDetail}`);
-            log(`${label}: could not apply background squad before submit attempt ${attempt}/${maxAttempts}: ${lastDetail}`);
+            if (attempt >= maxAttempts) fail2(`${label2}: ${lastDetail}`);
+            log(`${label2}: could not apply background squad before submit attempt ${attempt}/${maxAttempts}: ${lastDetail}`);
             await sleep(Math.min(3e3, (Number(CFG.pauseMs) || 800) + attempt * 500));
             try {
-              currentChallenge = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, { force: true }) || currentChallenge;
+              currentChallenge = await loadRatingSbcChallenge(currentChallenge, `${label2} submit-retry`, { force: true }) || currentChallenge;
             } catch (reloadError) {
-              log(`${label}: challenge reload after apply failure: ${reloadError?.message || reloadError}`);
+              log(`${label2}: challenge reload after apply failure: ${reloadError?.message || reloadError}`);
             }
             continue;
           }
@@ -21321,8 +21358,8 @@
         }
         if (!canSubmit) {
           lastDetail = "challenge model rejected the background squad before submit";
-          if (attempt >= maxAttempts) fail2(`${label}: ${lastDetail}`);
-          log(`${label}: ${lastDetail}; reloading before retry (${attempt}/${maxAttempts})`);
+          if (attempt >= maxAttempts) fail2(`${label2}: ${lastDetail}`);
+          log(`${label2}: ${lastDetail}; reloading before retry (${attempt}/${maxAttempts})`);
         } else {
           const { skipValidation, chemistryEnabled } = eaSbcAdapter().submissionOptions();
           log(`Submitting SBC in background: ${set.name}${attempt > 1 ? ` (retry ${attempt}/${maxAttempts})` : ""}`);
@@ -21330,7 +21367,7 @@
             eaSbcAdapter().submitChallenge(currentChallenge, set, { skipValidation, chemistryEnabled }),
             ctrl(),
             45e3,
-            `submitChallenge ${label}`
+            `submitChallenge ${label2}`
           );
           if (result?.success) {
             const directRewardPackId = rewardPackIdFromSubmitResult(result, set);
@@ -21352,7 +21389,7 @@
             const usedKnownFallback = !rewardObserved && options.allowKnownRewardFallback === true;
             const rewardPackId = directRewardPackId || newPackId || (usedKnownFallback ? rewardPackIdFromSubmitResult(result, set, { allowSetFallback: true }) : null);
             recordObservedPackCatalogReward(set, rewardPackId);
-            log(`${label}: background submit complete; reward pack ${rewardPackId || "not granted for this Challenge"}${usedKnownFallback ? " (single-Challenge identity fallback)" : ""}`);
+            log(`${label2}: background submit complete; reward pack ${rewardPackId || "not granted for this Challenge"}${usedKnownFallback ? " (single-Challenge identity fallback)" : ""}`);
             return {
               rewardPackId,
               rewardObserved,
@@ -21367,28 +21404,28 @@
             baseDelayMs: Number(CFG.pauseMs) || 800
           });
           if (!plan.retry) {
-            fail2(`${label}: background submit failed: ${lastDetail}`);
+            fail2(`${label2}: background submit failed: ${lastDetail}`);
           }
-          log(`${label}: background submit returned ${lastDetail}; reloading challenge before retry (${attempt}/${maxAttempts})`);
+          log(`${label2}: background submit returned ${lastDetail}; reloading challenge before retry (${attempt}/${maxAttempts})`);
           await sleep(plan.delayMs);
         }
         try {
-          const reloaded = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, { force: true });
+          const reloaded = await loadRatingSbcChallenge(currentChallenge, `${label2} submit-retry`, { force: true });
           if (reloaded) currentChallenge = reloaded;
           else {
-            const next = await findAvailableRatingSbcChallenge(set, `${label} submit-retry`);
+            const next = await findAvailableRatingSbcChallenge(set, `${label2} submit-retry`);
             if (next) {
-              currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, { force: true }) || next;
+              currentChallenge = await loadRatingSbcChallenge(next, `${label2} submit-retry`, { force: true }) || next;
             }
           }
         } catch (error) {
-          log(`${label}: challenge reload after submit conflict failed: ${error?.message || error}`);
+          log(`${label2}: challenge reload after submit conflict failed: ${error?.message || error}`);
         }
         if (!canSubmit && attempt < maxAttempts) {
           await sleep(Math.min(3e3, (Number(CFG.pauseMs) || 800) + attempt * 500));
         }
       }
-      fail2(`${label}: background submit failed after ${maxAttempts} attempt(s): ${lastDetail}`);
+      fail2(`${label2}: background submit failed after ${maxAttempts} attempt(s): ${lastDetail}`);
     }
     async function openRewardSilverPack(packId2) {
       await refreshStorePacks();
@@ -21543,18 +21580,18 @@
     }
     const warnedSourcePackIdentityMismatches = /* @__PURE__ */ new Set();
     const warnedSourceOutputOverlaps = /* @__PURE__ */ new Set();
-    function sourcePackIdentityBlocked(loopDef, label) {
+    function sourcePackIdentityBlocked(loopDef, label2) {
       const identity = resolvedSourcePackIdentity(loopDef);
       if (!identity.sourceOutputOverlap.length) return false;
       const overlap = identity.sourceOutputOverlap.map((candidate) => `${candidate.type}:${candidate.value} (${candidate.source})`).join(", ");
-      const warningKey = `${loopDef?.id || label}:${overlap}`;
+      const warningKey = `${loopDef?.id || label2}:${overlap}`;
       if (!warnedSourceOutputOverlaps.has(warningKey)) {
         warnedSourceOutputOverlaps.add(warningKey);
-        log(`${label}: source/output pack identity overlap detected; refusing to open matching source pack(s): ${overlap}`);
+        log(`${label2}: source/output pack identity overlap detected; refusing to open matching source pack(s): ${overlap}`);
       }
       return true;
     }
-    function warnSourcePackIdentityMismatch(loopDef, pack, label) {
+    function warnSourcePackIdentityMismatch(loopDef, pack, label2) {
       const identity = resolvedSourcePackIdentity(loopDef);
       const ids = new Set(identity.packIds.map(packIdKey).filter(Boolean));
       const names = identity.packNames;
@@ -21564,32 +21601,32 @@
       const warningKey = `${id}:${name}`;
       if (warnedSourcePackIdentityMismatches.has(warningKey)) return;
       warnedSourcePackIdentityMismatches.add(warningKey);
-      log(`${label}: pack #${id} matched a resolved source ID, but its name "${name || "?"}" did not match Catalog or fallback aliases; accepting the ID and retaining name fallback for future pack IDs`);
+      log(`${label2}: pack #${id} matched a resolved source ID, but its name "${name || "?"}" did not match Catalog or fallback aliases; accepting the ID and retaining name fallback for future pack IDs`);
     }
     async function findSourcePack(loopDef, options = {}) {
-      const label = String(options.label || `${loopDef.name}: source pack lookup`);
-      if (sourcePackIdentityBlocked(loopDef, label)) return null;
+      const label2 = String(options.label || `${loopDef.name}: source pack lookup`);
+      if (sourcePackIdentityBlocked(loopDef, label2)) return null;
       const pack = await findPackWithRecovery({
-        label,
+        label: label2,
         attempts: options.attempts || 3,
         delayMs: options.delayMs ?? 900,
         openStoreFallback: options.openStoreFallback !== false,
         refresh: () => refreshStorePacks(),
         findCached: () => findSourcePackInCache(loopDef),
-        openStorePacks: () => openStorePacksViewForRefresh(label),
+        openStorePacks: () => openStorePacksViewForRefresh(label2),
         onStoreOpened: options.onStoreOpened,
         sleep,
         log,
         onWait: ({ attempt, attempts }) => {
           if (options.logWait === true || attempt === attempts) {
-            log(`${label}: waiting for ${sourcePackExpectation(loopDef)} (${attempt}/${attempts}); current packs: ${summarizePacks() || "none"}`);
+            log(`${label2}: waiting for ${sourcePackExpectation(loopDef)} (${attempt}/${attempts}); current packs: ${summarizePacks() || "none"}`);
           }
         },
         onExhausted: ({ attempts }) => {
-          log(`${label}: confirmed unavailable after ${attempts} refresh attempt(s); expected ${sourcePackExpectation(loopDef)}; current packs: ${summarizePacks() || "none"}`);
+          log(`${label2}: confirmed unavailable after ${attempts} refresh attempt(s); expected ${sourcePackExpectation(loopDef)}; current packs: ${summarizePacks() || "none"}`);
         }
       });
-      if (pack) warnSourcePackIdentityMismatch(loopDef, pack, label);
+      if (pack) warnSourcePackIdentityMismatch(loopDef, pack, label2);
       return pack;
     }
     async function submitConfiguredSbc(loopDef, options = {}) {
@@ -21631,10 +21668,18 @@
           return true;
         }] : [],
         isSubmitReady: async () => !!findSubmitButton(),
-        submitTransport: async ({ set }) => ({
-          submitted: true,
-          rewardPackId: await submitSbcAndGetAwardPackId(set)
-        }),
+        submitTransport: async ({ set, players, savedPlayers }) => {
+          const submittedPlayers = savedPlayers?.length ? savedPlayers : players || [];
+          const signalCount = selectedUnassignedSignalRefs(selection).length;
+          if (signalCount) {
+            const refs = submittedPlayers.map((item) => `${Number(item?.id || 0) || "?"}/def:${Number(item?.definitionId || 0) || "?"}`);
+            log(`${label}: submit squad for ${signalCount} Unassigned signal(s): ${refs.join(", ")}`);
+          }
+          return {
+            submitted: true,
+            rewardPackId: await submitSbcAndGetAwardPackId(set)
+          };
+        },
         afterSubmit: selection ? async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
           squadPlan?.selection || selection,
           loopDef.name,
@@ -21689,7 +21734,7 @@
         });
       }
     }
-    function clearConsumedDuplicateSignals(triggerRefs, label, options = {}) {
+    function clearConsumedDuplicateSignals(triggerRefs, label2, options = {}) {
       let cleared = 0;
       let resolved = 0;
       for (const item of getUnassignedItems()) {
@@ -21711,82 +21756,82 @@
         state.pendingConsumedDuplicateSignals.delete(key);
         cleared++;
       }
-      if (cleared && options.quiet !== true) log(`${label}: cleared ${cleared} consumed duplicate signal(s) after recovery`);
-      if (resolved && options.quiet !== true) log(`${label}: confirmed ${resolved} duplicate signal(s) already resolved`);
+      if (cleared && options.quiet !== true) log(`${label2}: cleared ${cleared} consumed duplicate signal(s) after recovery`);
+      if (resolved && options.quiet !== true) log(`${label2}: confirmed ${resolved} duplicate signal(s) already resolved`);
       return cleared;
     }
-    async function reconcileSubmittedDuplicateSignals(selection, label, submittedItems = []) {
+    async function reconcileSubmittedDuplicateSignals(selection, label2, submittedItems = []) {
       const selectedSignalRefs = selectedUnassignedSignalRefs(selection);
       if (!selectedSignalRefs.length) return 0;
       const submittedIds = (submittedItems || []).map((item) => Number(item?.id || item?.ref?.id || 0)).filter(Boolean);
       if (!submittedIds.length) {
-        log(`${label}: could not confirm submitted item IDs for ${selectedSignalRefs.length} Unassigned duplicate signal(s); preserving them for the next inventory refresh`);
+        log(`${label2}: could not confirm submitted item IDs for ${selectedSignalRefs.length} Unassigned duplicate signal(s); preserving them for the next inventory refresh`);
         return 0;
       }
       const consumedSignalRefs = submittedUnassignedSignalRefs(selection, submittedItems);
       if (!consumedSignalRefs.length) return 0;
       rememberConsumedDuplicateSignals(consumedSignalRefs);
-      log(`${label}: consumed ${consumedSignalRefs.length} Unassigned duplicate signal(s) by submitting their matching Club/Storage item(s)`);
-      await refreshInventoryCaches(`${label} post-submit duplicate sync`, { includePacks: false, quiet: true });
-      clearConsumedDuplicateSignals(consumedSignalRefs, label);
+      log(`${label2}: consumed ${consumedSignalRefs.length} Unassigned duplicate signal(s) by submitting their matching Club/Storage item(s)`);
+      await refreshInventoryCaches(`${label2} post-submit duplicate sync`, { includePacks: false, quiet: true });
+      clearConsumedDuplicateSignals(consumedSignalRefs, label2);
       return consumedSignalRefs.length;
     }
-    async function finalizeSubmittedInventorySelection(selection, label, players = []) {
+    async function finalizeSubmittedInventorySelection(selection, label2, players = []) {
       const submittedPlayers = (players || []).filter((item) => Number(item?.id || 0));
       if (!submittedPlayers.length) {
-        log(`${label}: submitted squad item IDs are unavailable; preserving inventory and Unassigned duplicate state for refresh`);
+        log(`${label2}: submitted squad item IDs are unavailable; preserving inventory and Unassigned duplicate state for refresh`);
         return;
       }
-      markSbcItemsConsumed(submittedPlayers, label);
-      await reconcileSubmittedDuplicateSignals(selection, label, submittedPlayers);
+      markSbcItemsConsumed(submittedPlayers, label2);
+      await reconcileSubmittedDuplicateSignals(selection, label2, submittedPlayers);
     }
     async function trySubmitUnassignedRecoveryRecipe({ policy, recipe: recipe2, triggerRefs }) {
       const parentLoopDef = state.loopStack[state.loopStack.length - 1] || null;
       recipe2 = inheritSbcFodderPolicy(cloneLoopDef(recipe2), parentLoopDef || {});
-      const label = `Unassigned ${policy.id} -> ${recipe2.name}`;
+      const label2 = `Unassigned ${policy.id} -> ${recipe2.name}`;
       let set;
       try {
         set = await findSbcSetForDefIfPresent(recipe2);
       } catch (error) {
-        log(`${label}: SBC lookup failed: ${error?.message || error}`);
+        log(`${label2}: SBC lookup failed: ${error?.message || error}`);
         return { status: "blocked", reason: error?.message || String(error) };
       }
       if (!set) {
-        log(`${label}: SBC is not currently available; trying the next configured recipe`);
+        log(`${label2}: SBC is not currently available; trying the next configured recipe`);
         return { status: "unavailable", reason: "SBC is not currently available" };
       }
       if (isSbcSetComplete(set)) {
-        log(`${label}: SBC set is complete; trying the next configured recipe`);
+        log(`${label2}: SBC set is complete; trying the next configured recipe`);
         return { status: "unavailable", reason: "SBC set is complete" };
       }
       let challenge;
       try {
-        const challenges = await requestSbcChallenges(set, label, { allowEmpty: true, attempts: 2 });
+        const challenges = await requestSbcChallenges(set, label2, { allowEmpty: true, attempts: 2 });
         challenge = challenges.find((candidate) => !isCompletedChallenge(candidate)) || null;
       } catch (error) {
-        log(`${label}: Challenge availability check failed: ${error?.message || error}`);
+        log(`${label2}: Challenge availability check failed: ${error?.message || error}`);
         return { status: "blocked", reason: error?.message || String(error) };
       }
       if (!challenge) {
-        log(`${label}: no available Challenge remains; trying the next configured recipe`);
+        log(`${label2}: no available Challenge remains; trying the next configured recipe`);
         return { status: "unavailable", reason: "no available Challenge remains" };
       }
-      await refreshInventoryCaches(`${label} pre-selection`, { includePacks: false, quiet: true });
+      await refreshInventoryCaches(`${label2} pre-selection`, { includePacks: false, quiet: true });
       const piles = recipe2.priorityPiles || ["unassigned", "storage", "transfer", "club"];
       const selection = selectInventoryPlayers3(recipe2, piles, { preferredSignalRefs: triggerRefs });
       if (!selection.ok) {
-        log(`${label}: inventory cannot satisfy the configured recipe (${selection.missing?.count || "?"} missing)`);
+        log(`${label2}: inventory cannot satisfy the configured recipe (${selection.missing?.count || "?"} missing)`);
         return { status: "insufficient", reason: "inventory cannot satisfy recipe" };
       }
       if (!selectionConsumesSignalRefs(selection, triggerRefs)) {
-        log(`${label}: selected squad does not consume a blocked Unassigned duplicate; trying the next configured recipe`);
+        log(`${label2}: selected squad does not consume a blocked Unassigned duplicate; trying the next configured recipe`);
         return { status: "insufficient", reason: "selection does not consume trigger" };
       }
       const triggerCoverage = evaluateRecoveryTriggerSelection(recipe2, policy, selection, triggerRefs);
       if (!triggerCoverage.sufficient) {
         const triggerItems = triggerRefs.map((ref) => getUnassignedItems().find((item) => itemRefMatchesAny(item, [ref]))).filter(Boolean);
         logDuplicateSignalDiagnostics(
-          label,
+          label2,
           triggerItems,
           selectionRequirements(recipe2, piles)[0] || {},
           selection
@@ -21800,28 +21845,28 @@
       try {
         opened = await openSbcSet(set, { challenge, returnNullIfComplete: true });
       } catch (error) {
-        log(`${label}: Challenge load failed: ${error?.message || error}`);
+        log(`${label2}: Challenge load failed: ${error?.message || error}`);
         return { status: "blocked", reason: error?.message || String(error) };
       }
       if (!opened) {
-        log(`${label}: SBC has no available challenge; trying the next configured recipe`);
+        log(`${label2}: SBC has no available challenge; trying the next configured recipe`);
         return { status: "unavailable", reason: "SBC has no available challenge" };
       }
-      log(`${label}: submitting one recovery squad; selected ${selection.selected.length} player(s) (${formatSelectionStats(selection.stats)})`);
+      log(`${label2}: submitting one recovery squad; selected ${selection.selected.length} player(s) (${formatSelectionStats(selection.stats)})`);
       let attempt;
       try {
         attempt = await submitInventorySbcAttempt(recipe2, selection, {
-          label,
+          label: label2,
           handleReward: false,
           opened
         });
       } catch (error) {
-        log(`${label}: recovery save/submit failed: ${error?.message || error}`);
+        log(`${label2}: recovery save/submit failed: ${error?.message || error}`);
         return { status: "blocked", reason: error?.message || String(error) };
       }
       if (!attempt.result.submitted) {
         const status = attempt.result.status === "unavailable" ? "unavailable" : "blocked";
-        log(`${label}: recovery submit ${status}: ${attempt.result.reason || attempt.result.status}`);
+        log(`${label2}: recovery submit ${status}: ${attempt.result.reason || attempt.result.status}`);
         return { status, reason: attempt.result.reason || attempt.result.status };
       }
       return { status: "progress", consumedItemIds: attempt.result.consumedItemRefs.map((ref) => ref.id) };
@@ -22216,12 +22261,12 @@
     function shouldUseRatingSbcFill(loopDef = {}) {
       return isPlainObject(loopDef.ratingSbcFill);
     }
-    function logInventorySelection(label, selection, options = {}) {
+    function logInventorySelection(label2, selection, options = {}) {
       const maxItems = Number(options.maxItems || 20);
-      log(`${label}: inventory selected ${selection?.selected?.length || 0} item(s) (${formatSelectionStats(selection?.stats)})`);
+      log(`${label2}: inventory selected ${selection?.selected?.length || 0} item(s) (${formatSelectionStats(selection?.stats)})`);
       const entries = selection?.entries || (selection?.selected || []).map((item) => ({ item, pileName: "unknown" }));
       entries.slice(0, maxItems).forEach((entry, index) => log(`inventory pick ${formatDryRunItem(entry, index)}`));
-      if (entries.length > maxItems) log(`${label}: inventory pick list truncated: ${entries.length - maxItems} more item(s)`);
+      if (entries.length > maxItems) log(`${label2}: inventory pick list truncated: ${entries.length - maxItems} more item(s)`);
     }
     function logRatingSbcModel(loopDef, model) {
       log(`${loopDef.name}: rating SBC model players:${model.requiredPlayerCount}, target:${model.targetRating}, max special:${model.maxSpecialCount}`);
@@ -22711,13 +22756,13 @@
         (pack) => ids.size && ids.has(packIdKey(pack)) || identity.packNames.length && matchesAny(packName(pack), identity.packNames)
       ).length;
     }
-    function createMaterializeAndResolvePolicy(label, cleanupReason, cleanupOptions = {}) {
+    function createMaterializeAndResolvePolicy(label2, cleanupReason, cleanupOptions = {}) {
       return createOpenedItemPolicy(async (openedItems, context = {}) => {
         const { directDuplicateFallback = false, ...unassignedCleanupOptions } = cleanupOptions;
         const settlement = await settleOpenedItems({
           attempts: 3,
           materialize: async () => {
-            const materialized = await materializeOpenedPlayerRewards(openedItems, label);
+            const materialized = await materializeOpenedPlayerRewards(openedItems, label2);
             await sleep(CFG.pauseMs);
             return materialized;
           },
@@ -22725,18 +22770,18 @@
             attempt === 1 ? cleanupReason : `${cleanupReason} delayed response retry ${attempt}/3`,
             {
               ...unassignedCleanupOptions,
-              beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
+              beforeSnapshot: () => restoreOpenedUnassignedDuplicateMetadata(openedItems, label2, {
                 routingBaseline: context.routingBaseline || null
               })
             }
           ),
-          confirmRouting: async () => confirmOpenedItemRouting(openedItems, label, {
+          confirmRouting: async () => confirmOpenedItemRouting(openedItems, label2, {
             routingBaseline: context.routingBaseline || null
           }),
           onRetry: async ({ attempt, routing: routing2 }) => {
-            log(`${label}: ${routing2.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
+            log(`${label2}: ${routing2.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
             await sleep(CFG.pauseMs);
-            await showUnassignedIfAny(`${label} delayed materialization retry ${attempt + 1}/3`, {
+            await showUnassignedIfAny(`${label2} delayed materialization retry ${attempt + 1}/3`, {
               stableEmptyReads: 3,
               emptyReadDelayMs: 450,
               diagnostic: true
@@ -22747,7 +22792,7 @@
           openedItems,
           materialized: settlement.materialized,
           routing: settlement.routing,
-          label,
+          label: label2,
           routingBaseline: context.routingBaseline || null
         }) : null;
         const finalSettlement = fallback ? { ...settlement, ...fallback } : settlement;
@@ -22797,7 +22842,7 @@
       });
     }
     async function tryOpenMixedUpgradeShortagePacks(loopDef, source, primaryPiles) {
-      const label = shortageSourceLabel(source);
+      const label2 = shortageSourceLabel(source);
       const maxOpens = Math.max(1, Math.min(10, Number(source?.maxOpensPerAttempt || 1) || 1));
       let openedCount = 0;
       let lookupAttempts = 0;
@@ -22807,27 +22852,27 @@
         stopPoint();
         const shortage = getShortageForSource(loopDef, source, primaryPiles);
         const pack = await findSourcePack({
-          name: `${loopDef.name} ${label} shortage`,
+          name: `${loopDef.name} ${label2} shortage`,
           sourcePackRef: source?.sourcePackRef,
           sourcePackIds: source?.packIds || [],
           sourcePackNames: source?.packNames || []
         }, {
-          label: `${loopDef.name}: ${label} shortage source pack lookup`,
+          label: `${loopDef.name}: ${label2} shortage source pack lookup`,
           onStoreOpened: () => {
             challengeInvalidated = true;
           }
         });
         if (!pack) {
-          log(`${loopDef.name}: missing ${shortage} ${label} player(s); no matching source pack available, skipping`);
+          log(`${loopDef.name}: missing ${shortage} ${label2} player(s); no matching source pack available, skipping`);
           break;
         }
         const availableCount = countShortageSourcePacks(source);
-        log(`${loopDef.name}: missing ${shortage} ${label} player(s); opening ${packName(pack)} (#${packIdKey(pack) || "?"}, available:${availableCount || "?"})`);
-        const receipt = await openPack(pack, `${loopDef.name} ${label} shortage`, {
+        log(`${loopDef.name}: missing ${shortage} ${label2} player(s); opening ${packName(pack)} (#${packIdKey(pack) || "?"}, available:${availableCount || "?"})`);
+        const receipt = await openPack(pack, `${loopDef.name} ${label2} shortage`, {
           allowGone: true,
           openedItemPolicy: source.routingPolicy === "reserveMatchingDuplicates" ? createReserveMatchingDuplicatePackPolicy(loopDef, source) : createMaterializeAndResolvePolicy(
-            `${loopDef.name} ${label} shortage pack`,
-            `${loopDef.name} ${label} shortage pack handling`,
+            `${loopDef.name} ${label2} shortage pack`,
+            `${loopDef.name} ${label2} shortage pack handling`,
             { blockedPolicy: "preserve" }
           )
         });
@@ -22962,9 +23007,16 @@
           if (event === "selection") {
             const phase = payload.phase;
             const selection = payload.selection;
-            const label = phase === "primary" ? "primary" : phase === "fallback" ? "fallback" : `after ${shortageSourceLabel(payload.supply?.source) || "source"} source check`;
-            if (dryRun) logDryRunSelection(`${loopDef.name} ${label}`, selection, { priorityPiles: phase === "fallback" ? fallbackPiles : primaryPiles });
-            else log(`${loopDef.name}: ${label} selected ${selection.selected.length} player(s) (${formatSelectionStats(selection.stats)})`);
+            const label2 = phase === "primary" ? "primary" : phase === "fallback" ? "fallback" : `after ${shortageSourceLabel(payload.supply?.source) || "source"} source check`;
+            if (dryRun) logDryRunSelection(`${loopDef.name} ${label2}`, selection, { priorityPiles: phase === "fallback" ? fallbackPiles : primaryPiles });
+            else {
+              const requirements = (loopDef.requirements || []).map(describeRequirement).join(" + ") || "unspecified";
+              log(`${loopDef.name}: ${label2} selected ${selection.selected.length} player(s) (${formatSelectionStats(selection.stats)}); requirements:${requirements}`);
+              if (selection.selected.length && (loopDef.dynamicSbcFamily === "daily-rare-gold-upgrade" || loopDef.activityBinding?.family === "daily-rare-gold-upgrade")) {
+                const entries = selection.entries || selection.selected.map((item) => ({ item, pileName: "unknown" }));
+                entries.forEach((entry, index) => log(`${loopDef.name}: ${label2} pick ${formatDryRunItem(entry, index)}`));
+              }
+            }
           } else if (event === "supply-skipped") {
             log(`${loopDef.name}: unassigned duplicates are reserved for this SBC; skipping additional shortage packs`);
           } else if (event === "selection-insufficient") {
@@ -23113,9 +23165,9 @@
     }
     async function submitInventorySbcAttempt(loopDef, selection, options = {}) {
       let openedContext = null;
-      const label = options.label || loopDef.name;
+      const label2 = options.label || loopDef.name;
       const result = await submitSbcAttempt({
-        label,
+        label: label2,
         dryRun: options.dryRun === true || loopDef.dryRun === true,
         challengeProvider: async () => {
           if (options.opened) {
@@ -23136,18 +23188,18 @@
         prepareRuntimeAccess: prepareFsuRuntimeAccess,
         preSaveValidators: options.preSaveValidators || [],
         saveSquad: async ({ challenge, players }) => {
-          await saveChallengeSquad(challenge, players, label);
+          await saveChallengeSquad(challenge, players, label2);
         },
         readSavedPlayers: async ({ challenge }) => getSquadItems(challenge?.squad || ctrl()?._squad),
         postSaveValidators: options.postSaveValidators || [],
         isSubmitReady: async () => {
           const ready = !!findSubmitButton();
-          log(`${label}: inventory squad saved; submit ${ready ? "ready" : "not ready"}`);
+          log(`${label2}: inventory squad saved; submit ${ready ? "ready" : "not ready"}`);
           return ready;
         },
         submitReadyAttempts: 3,
         onSubmitNotReady: async ({ attempt, maxAttempts }) => {
-          log(`${label}: submit button not ready after saved squad; waiting before recheck (${attempt}/${maxAttempts})`);
+          log(`${label2}: submit button not ready after saved squad; waiting before recheck (${attempt}/${maxAttempts})`);
           await waitLoadingEnd(250, attempt === 1 ? 6e3 : 12e3).catch(() => null);
           await sleep(Math.min(1500, Math.max(500, Number(CFG.pauseMs) || 800)));
         },
@@ -23158,7 +23210,7 @@
         afterSubmit: async ({ result: submissionResult, players, savedPlayers, squadPlan }) => {
           await finalizeSubmittedInventorySelection(
             squadPlan?.selection || selection,
-            label,
+            label2,
             savedPlayers?.length ? savedPlayers : players
           );
           if (options.handleReward === false) return;
@@ -23354,7 +23406,7 @@
         };
       });
     }
-    async function runReservedDuplicateCraftingStage(loopDef, upgradeDef, duplicatePredicate, label, options = {}) {
+    async function runReservedDuplicateCraftingStage(loopDef, upgradeDef, duplicatePredicate, label2, options = {}) {
       const dryRun = loopDef.dryRun === true;
       const broadDuplicatePredicate = options.dynamicPredicate === false ? duplicatePredicate : (item) => getChallengeMaterialDefs(upgradeDef).some((challengeDef) => isDuplicateForLoopRequirements(item, challengeDef));
       const workflowResult = await runReservedDuplicateCraftingWorkflow({
@@ -23363,15 +23415,15 @@
         transientSignals: options.transientUnassignedSignals,
         stopPoint: () => stopPoint(),
         planAttempt: async ({ forceAttempt, transientSignals }) => {
-          await refreshInventoryCaches(`${loopDef.name} ${label} pre-selection`, { includePacks: false, quiet: true });
+          await refreshInventoryCaches(`${loopDef.name} ${label2} pre-selection`, { includePacks: false, quiet: true });
           const broadDuplicateCount = countUnassignedMatching(broadDuplicatePredicate) + transientSignals.length;
           if (!broadDuplicateCount && !forceAttempt) return { status: "done", reason: "no reserved duplicate remains" };
-          const set = await findSbcSetForLoopDef(upgradeDef, upgradeDef.name || label);
-          const challenges = await requestSbcChallenges(set, upgradeDef.name || label, { attempts: 3, allowEmpty: true });
+          const set = await findSbcSetForLoopDef(upgradeDef, upgradeDef.name || label2);
+          const challenges = await requestSbcChallenges(set, upgradeDef.name || label2, { attempts: 3, allowEmpty: true });
           const challengeIndex = challenges.findIndex((challenge) => !isCompletedChallenge(challenge));
           if (challengeIndex < 0) {
             if (transientSignals.length) {
-              fail2(`${loopDef.name}: ${label} has no available challenge for ${transientSignals.length} just-opened duplicate(s)`);
+              fail2(`${loopDef.name}: ${label2} has no available challenge for ${transientSignals.length} just-opened duplicate(s)`);
             }
             return { status: "done", reason: "no available challenge remains" };
           }
@@ -23379,7 +23431,7 @@
           const countNeeded = sumRequirementPlayerCount(challengeDef);
           if (countNeeded <= 0) {
             if (transientSignals.length) {
-              fail2(`${loopDef.name}: ${label} has no usable player requirement for ${transientSignals.length} just-opened duplicate(s)`);
+              fail2(`${loopDef.name}: ${label2} has no usable player requirement for ${transientSignals.length} just-opened duplicate(s)`);
             }
             return { status: "done", reason: "challenge has no usable player requirement" };
           }
@@ -23387,28 +23439,28 @@
           const duplicateCount = countUnassignedMatching(activeDuplicatePredicate) + transientSignals.length;
           if (!duplicateCount && !forceAttempt) return { status: "done", reason: "no challenge-matching duplicate remains" };
           const fallbackPiles = challengeDef.priorityPiles || ["unassigned", "storage", "transfer", "club"];
+          const repositorySignals = getUnassignedItems().filter(activeDuplicatePredicate);
+          const signalById = new Map([...repositorySignals, ...transientSignals].map((signal) => [Number(signal?.id || signal?.ref?.id || 0), signal]).filter(([id]) => id));
           const transientSignalRefs = transientSignals.map((signal) => signal.ref || signal);
+          const signalRefs = [...signalById.values()].map((signal) => signal.ref || signal);
           const selectionOptions = {
             transientUnassignedSignals: transientSignals,
-            preferredSignalRefs: transientSignalRefs
+            preferredSignalRefs: signalRefs
           };
           const duplicateOnlySelection = fallbackPiles.includes("unassigned") ? selectInventoryPlayers3(challengeDef, ["unassigned"], selectionOptions) : { ok: false };
           const piles = duplicateOnlySelection.ok ? ["unassigned"] : fallbackPiles;
           const selection = selectInventoryPlayers3(challengeDef, piles, selectionOptions);
-          log(`${loopDef.name}: ${label} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
-          const repositorySignals = getUnassignedItems().filter(activeDuplicatePredicate);
-          const signalById = new Map([...repositorySignals, ...transientSignals].map((signal) => [Number(signal?.id || signal?.ref?.id || 0), signal]).filter(([id]) => id));
+          log(`${loopDef.name}: ${label2} selected ${selection.selected.length}/${countNeeded} (${formatSelectionStats(selection.stats)})`);
           const selectedSignalCount = (selection.entries || []).filter((entry) => entry.pileName === "unassigned" && entry.signal).length;
-          if (transientSignals.length) {
-            log(`${loopDef.name}: ${label} duplicate signal sources response:${transientSignals.length}, repository:${repositorySignals.length}, unique:${signalById.size}, selected:${selectedSignalCount}`);
+          if (signalById.size) {
+            log(`${loopDef.name}: ${label2} duplicate signal sources response:${transientSignals.length}, repository:${repositorySignals.length}, unique:${signalById.size}, selected:${selectedSignalCount}`);
           }
-          const signalRefs = [...signalById.values()].map((signal) => signal.ref || signal);
           const signalCoverage = evaluateUnassignedSignalCoverage(selection, signalById.size, countNeeded);
           const expectedSelectedSignalCount = signalCoverage.expectedCount;
           const missedTransientSignal = !selectionConsumesAllSignalRefs(selection, transientSignalRefs);
           if (selectedSignalCount < expectedSelectedSignalCount || missedTransientSignal) {
             logDuplicateSignalDiagnostics(
-              `${loopDef.name} ${label}`,
+              `${loopDef.name} ${label2}`,
               [...signalById.values()],
               selectionRequirements(challengeDef, piles)[0] || {},
               selection
@@ -23417,20 +23469,20 @@
           if (options.requireFullSignalCoverage === true && selection.ok && !signalCoverage.sufficient) {
             return {
               status: "blocked",
-              reason: `${label} found ${signalRefs.length} matching Unassigned duplicate signal(s), but the selected squad would consume only ${selectedSignalCount}/${expectedSelectedSignalCount}; refusing a fallback that skips Unassigned cards`
+              reason: `${label2} found ${signalRefs.length} matching Unassigned duplicate signal(s), but the selected squad would consume only ${selectedSignalCount}/${expectedSelectedSignalCount}; refusing a fallback that skips Unassigned cards`
             };
           }
           if (!selection.ok) {
             const missing = selection.missing;
-            log(`${loopDef.name}: ${label} missing ${missing.count} player(s) after fallback; stopping ${label}`);
-            logSelectionDiagnostics(`${loopDef.name} ${label}`, selection, piles);
+            log(`${loopDef.name}: ${label2} missing ${missing.count} player(s) after fallback; stopping ${label2}`);
+            logSelectionDiagnostics(`${loopDef.name} ${label2}`, selection, piles);
             if (transientSignalRefs.length) {
-              fail2(`${loopDef.name}: ${label} cannot consume ${transientSignalRefs.length} just-opened duplicate(s); stopping before Unassigned cleanup or another pack open`);
+              fail2(`${loopDef.name}: ${label2} cannot consume ${transientSignalRefs.length} just-opened duplicate(s); stopping before Unassigned cleanup or another pack open`);
             }
             return { status: "done", reason: "inventory selection is insufficient" };
           }
           if (!selectionConsumesAllSignalRefs(selection, transientSignalRefs)) {
-            fail2(`${loopDef.name}: ${label} cannot resolve every just-opened duplicate to a Club/Storage submit item; stopping before another pack is opened`);
+            fail2(`${loopDef.name}: ${label2} cannot resolve every just-opened duplicate to a Club/Storage submit item; stopping before another pack is opened`);
           }
           return {
             status: "ready",
@@ -23442,14 +23494,14 @@
         },
         executeAttempt: async ({ plan }) => {
           if (dryRun) {
-            logDryRunSelection(`${loopDef.name} ${label}`, plan.selection);
-            log(`${loopDef.name}: dry-run would submit ${label} selection`);
-            return { status: "planned", reason: `would submit ${label}` };
+            logDryRunSelection(`${loopDef.name} ${label2}`, plan.selection);
+            log(`${loopDef.name}: dry-run would submit ${label2} selection`);
+            return { status: "planned", reason: `would submit ${label2}` };
           }
           const submitted = await submitInventorySelection(plan.challengeDef, plan.selection);
           if (!submitted) {
             if (plan.transientSignalCount) {
-              fail2(`${loopDef.name}: ${label} did not submit; preserving ${plan.transientSignalCount} just-opened duplicate(s) and stopping`);
+              fail2(`${loopDef.name}: ${label2} did not submit; preserving ${plan.transientSignalCount} just-opened duplicate(s) and stopping`);
             }
             return { status: "done", reason: "SBC was not submitted" };
           }
@@ -23457,7 +23509,7 @@
           return { status: "submitted", submitted: true, transientSignals: [] };
         }
       });
-      log(`${loopDef.name}: ${dryRun ? "dry-run planned" : "submitted"} ${workflowResult.completions} ${label} SBC(s)`);
+      log(`${loopDef.name}: ${dryRun ? "dry-run planned" : "submitted"} ${workflowResult.completions} ${label2} SBC(s)`);
       return workflowResult;
     }
     async function runProvisionCraftLoop(loopDef) {
@@ -23518,13 +23570,13 @@
         const completions = {};
         for (let index = 0; index < craftingUpgrades.length; index++) {
           const upgradeDef = craftingUpgrades[index];
-          const label = `${phase === "resume" ? "resumed " : ""}${upgradeDef.name}`;
+          const label2 = `${phase === "resume" ? "resumed " : ""}${upgradeDef.name}`;
           if (dryRun) {
             await runReservedDuplicateCraftingStage(
               loopDef,
               upgradeDef,
               (item) => isDuplicateForLoopRequirements(item, upgradeDef),
-              label,
+              label2,
               { maxCompletions: 1, requireFullSignalCoverage: true }
             );
             completions[`stage-${index}`] = 0;
@@ -23533,7 +23585,7 @@
               loopDef,
               upgradeDef,
               (item) => isDuplicateForLoopRequirements(item, upgradeDef),
-              label,
+              label2,
               { requireFullSignalCoverage: true }
             );
             completions[`stage-${index}`] = stageResult.completions;
@@ -23541,7 +23593,7 @@
               return {
                 status: stageResult.status,
                 completions,
-                reason: stageResult.reason || `${label} ${stageResult.status}`
+                reason: stageResult.reason || `${label2} ${stageResult.status}`
               };
             }
           }
@@ -23757,7 +23809,7 @@
               rareUpgradeDef,
               isEligibleLowRareGoldDuplicate,
               `${rareUpgradeLabel} ${phase === "resume" ? "resumed " : ""}low rare gold`,
-              { maxCompletions: 1 }
+              { maxCompletions: 1, requireFullSignalCoverage: true }
             );
             return { status: "planned", completions: { rare: 0 }, reason: `would submit ${rareUpgradeLabel} stage` };
           }
@@ -23769,10 +23821,15 @@
             {
               maxCompletions: remainingCompletions4 ?? 100,
               forceAttempts: phase === "pack" && Number(context?.lowRare || 0) > 0 ? 1 : 0,
-              transientUnassignedSignals: phase === "pack" ? context?.transientUnassignedSignals || [] : []
+              transientUnassignedSignals: phase === "pack" ? context?.transientUnassignedSignals || [] : [],
+              requireFullSignalCoverage: true
             }
           );
-          return { status: "completed", completions: { rare: stageResult.completions } };
+          return {
+            status: stageResult.status === "blocked" || stageResult.status === "planned" ? stageResult.status : "completed",
+            completions: { rare: stageResult.completions },
+            reason: stageResult.reason || null
+          };
         },
         afterStages: async ({ phase }) => {
           if (dryRun) return;
@@ -23892,10 +23949,10 @@
       return String(Math.round(value));
     }
     function isPlayerPickRare(item) {
-      return isRare(item) || itemRareFlag(item) > 0;
+      return isRare(item) || itemRareFlag2(item) > 0;
     }
     function isPlayerPickSpecial(item) {
-      return isSpecial(item) || itemRareFlag(item) > 1;
+      return isSpecial(item) || itemRareFlag2(item) > 1;
     }
     async function redeemAndSelectPlayerPick(pickItem, loopDef, options = {}) {
       log(`${loopDef.name}: redeeming ${playerPickItemName(pickItem)}`);
@@ -24174,9 +24231,9 @@
         });
         return { status: "planned", submitted: false, selection };
       }
-      const label = `${loopDef.name} challenge ${challengeNo}/${challengeTotal}`;
+      const label2 = `${loopDef.name} challenge ${challengeNo}/${challengeTotal}`;
       const attempt = await submitInventorySbcAttempt(challengeDef, selection, {
-        label,
+        label: label2,
         handleReward: false,
         preSaveValidators: [({ players }) => {
           assertPlayerPickFodderProtection(challengeDef, players);
@@ -24192,7 +24249,7 @@
         return { status: "unavailable", submitted: false, reason: "no available SBC challenge remains" };
       }
       if (!attempt.result.submitted) {
-        log(`${label}: submit blocked: ${attempt.result.reason || attempt.result.status}`);
+        log(`${label2}: submit blocked: ${attempt.result.reason || attempt.result.status}`);
         return { status: "blocked", submitted: false, reason: attempt.result.reason || attempt.result.status };
       }
       return { status: "submitted", submitted: true, rewardPackId: attempt.result.rewardPackId };
@@ -24479,7 +24536,7 @@
         return byDefinitionId.get(recapDefinitionId(item)) || item;
       };
     }
-    async function resolveRecapFutbinPlayerIds(items, label) {
+    async function resolveRecapFutbinPlayerIds(items, label2) {
       const fsu = fsuAdapter();
       const hydrateItem = createRecapFutbinItemHydrator();
       const resolved = await resolveFutbinCardIds({
@@ -24495,15 +24552,15 @@
       if (resolved.resolved > 0) {
         try {
           adapters.userscriptStorage.set(FUTBIN_CARD_ID_CACHE_KEY, resolved.cache);
-          log(`${label}: FUTBIN direct links resolved for ${resolved.resolved} card(s) and cached`);
+          log(`${label2}: FUTBIN direct links resolved for ${resolved.resolved} card(s) and cached`);
         } catch {
-          log(`${label}: FUTBIN direct links resolved for ${resolved.resolved} card(s); local cache unavailable`);
+          log(`${label2}: FUTBIN direct links resolved for ${resolved.resolved} card(s); local cache unavailable`);
         }
       }
       if (resolved.failed > 0) {
-        log(`${label}: FUTBIN card lookup unavailable for ${resolved.failed} card(s); those links stay hidden`);
+        log(`${label2}: FUTBIN card lookup unavailable for ${resolved.failed} card(s); those links stay hidden`);
       } else if (resolved.unmatched > 0) {
-        log(`${label}: FUTBIN returned no exact card ID for ${resolved.unmatched} card(s); those links stay hidden`);
+        log(`${label2}: FUTBIN returned no exact card ID for ${resolved.unmatched} card(s); those links stay hidden`);
       }
       return (item) => resolved.ids.get(recapDefinitionId(item)) || fsu.getFutbinPlayerId(hydrateItem(item));
     }
@@ -24588,7 +24645,7 @@
     function previewBatchOpenRecap() {
       return showBatchRecapModal(createBatchOpenRecapPreviewModel());
     }
-    async function getSpecialCardPrices(items, label = "Recap") {
+    async function getSpecialCardPrices(items, label2 = "Recap") {
       const specialItems = (items || []).filter((item) => item?.special === true || Number(item?.rareflag ?? item?.rareFlag ?? 0) > 1);
       if (!specialItems.length) return /* @__PURE__ */ new Map();
       let result;
@@ -24600,16 +24657,16 @@
           requestText: adapters.http.getText
         });
       } catch (error) {
-        log(`${label}: special card price lookup failed (${error?.message || error}); recap will show price:?`);
+        log(`${label2}: special card price lookup failed (${error?.message || error}); recap will show price:?`);
         return /* @__PURE__ */ new Map();
       }
       for (const attempt of result.attempts) {
         if (attempt.status === "loaded") {
-          log(`${label}: ${attempt.source} prices loaded for ${result.prices.size}/${result.ids.length} special card(s)`);
+          log(`${label2}: ${attempt.source} prices loaded for ${result.prices.size}/${result.ids.length} special card(s)`);
         } else if (attempt.source === "FUT.GG") {
-          log(`${label}: FUT.GG price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; trying FUTNext`);
+          log(`${label2}: FUT.GG price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; trying FUTNext`);
         } else {
-          log(`${label}: FUTNext price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; unavailable prices will show as ?`);
+          log(`${label2}: FUTNext price lookup ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}; unavailable prices will show as ?`);
         }
       }
       return result.prices;
