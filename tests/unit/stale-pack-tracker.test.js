@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { createStalePackTracker } from '../../src/pack/stale-pack-tracker.js';
+import { createStalePackTracker, findFreshPackInstance } from '../../src/pack/stale-pack-tracker.js';
 
 describe('stale pack tracker', () => {
+  it('selects a different live object for an ambiguous same-id retry', () => {
+    const failed = { id: 20059, instance: 1 };
+    const fresh = { id: 20059, instance: 2 };
+    expect(findFreshPackInstance(failed, [failed, { id: 42 }, fresh])).toBe(fresh);
+    expect(findFreshPackInstance(failed, [failed, { id: 42 }])).toBeNull();
+  });
+
   it('marks object refs as stale after successful open semantics', () => {
     const tracker = createStalePackTracker();
     const pack = { id: 20441, name: 'TOTW Provision Refresh' };

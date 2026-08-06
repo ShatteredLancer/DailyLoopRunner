@@ -111,6 +111,7 @@ import {
 import { cloneLoopDef, isPlainObject } from './domain/objects.js';
 import { calculateEaSquadRating } from './domain/rating.js';
 import { createRuntimeAdapters } from './adapters/index.js';
+import { emitDiagnostic } from './diagnostics/safe-log.js';
 import { createItemSnapshot } from './domain/contracts.js';
 import { runtimeGoldConsumptionMode } from './domain/gold-consumption.js';
 import {
@@ -193,7 +194,11 @@ import {
   evaluateRecoveryTriggerSelection,
   selectionConsumesSignalRefs,
 } from './unassigned/recovery.js';
-import { openPackTransaction } from './pack/open-transaction.js';
+import {
+  DEFAULT_PACK_OPEN_RETRY_CODES,
+  isAmbiguousPackOpenFailure,
+  openPackTransaction,
+} from './pack/open-transaction.js';
 import {
   classifyOpenedItemRouting,
   createOpenedItemRoutingBaseline,
@@ -214,7 +219,7 @@ import {
   resolveSourcePackIdentity,
   updatePackCatalogInventory,
 } from './pack/catalog.js';
-import { createStalePackTracker } from './pack/stale-pack-tracker.js';
+import { createStalePackTracker, findFreshPackInstance } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import { planBackgroundSubmitRetry } from './sbc/background-submit-retry.js';
 import { classifyOpenedUpgradeDuplicates } from './pack/upgrade-duplicate-routing.js';
@@ -2323,7 +2328,10 @@ function updateLoopControls() {
     const inventoryAdapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
     let currentPack = pack;
     let routingBaseline = null;
-    const retryCodes = options.retryCodes || (options.retryOn471 === true ? ['471'] : []);
+    const retryCodes = [...new Set([
+      ...(options.retryCodes || (options.retryOn471 === true ? ['471'] : [])).map(String),
+      ...DEFAULT_PACK_OPEN_RETRY_CODES,
+    ])];
     const preOpenUnassignedOptions = options.preOpenUnassignedOptions || {};
     const dryRun = isDryRunEffectGuarded(options);
     const receipt = await openPackTransaction({
@@ -2337,6 +2345,8 @@ function updateLoopControls() {
         const reuseCurrentPack = String(lastReason || '') === '471' && options.reusePackOn471 === true;
         if (!reuseCurrentPack && typeof options.resolveRetryPack === 'function') {
           currentPack = await options.resolveRetryPack();
+        } else if (!reuseCurrentPack && isAmbiguousPackOpenFailure(lastReason)) {
+          currentPack = findFreshPackInstance(currentPack, getAvailableRepositoryMyPacks());
         }
         return currentPack;
       },
@@ -2351,7 +2361,7 @@ function updateLoopControls() {
         const name = packName(selectedPack);
         const attempts = retryCodes.length ? 2 : 1;
         log(`Opening pack: ${name} (#${selectedPack.id})${attempt > 1 ? ` retry ${attempt}/${attempts}` : ''}`);
-        return observeOnce(packAdapter.open(selectedPack), ctrl(), 30000, `open ${name}`);
+        return await observeOnce(packAdapter.open(selectedPack), ctrl(), 30000, `open ${name}`);
       },
       normalizeItems: async (items, { pack: selectedPack }) => {
         markStalePack(selectedPack);
@@ -2368,12 +2378,23 @@ function updateLoopControls() {
         assumeSpecialPlayers: options.assumeSpecialPlayers === true,
       }),
       onItemsOpenedError: (error) => log(`${purpose}: reward highlight failed: ${error?.message || error}`),
+      onTransportFailure: ({ attempt, code, packRef, result }) => {
+        emitDiagnostic(log, () => {
+          const matchingPacks = getAvailableRepositoryMyPacks()
+            .filter((candidate) => packIdKey(candidate) === packIdKey(packRef?.id)).length;
+          return `${purpose}: pack open transport attempt ${attempt} failed; pack:${packRef?.name || '?'} (#${packRef?.id || '?'}); reason:${code}; matching packs:${matchingPacks}; unassigned:${getUnassignedItems().length}; controller:${currentControllerName() || '?'}; result:${diagnosticJson(captureMoveResult(result))}`;
+        });
+      },
       openedItemPolicy: (openedItems, context) => options.openedItemPolicy(openedItems, {
         ...context,
         routingBaseline,
       }),
       retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
       beforeRetry: async ({ code, pack: failedPack }) => {
+        if (isAmbiguousPackOpenFailure(code)) {
+          markStalePack(failedPack);
+          log(`${purpose}: excluding ambiguous pack instance #${Number(failedPack?.id || 0) || '?'} before retry`);
+        }
         if (String(code) === '471') {
           log(`${purpose}: pack open returned 471; rechecking delayed Unassigned state before retry`);
           await sleep(CFG.pauseMs);
@@ -6035,12 +6056,13 @@ function updateLoopControls() {
         : [],
       isSubmitReady: async () => !!findSubmitButton(),
       submitTransport: async ({ set, players, savedPlayers }) => {
-        const submittedPlayers = savedPlayers?.length ? savedPlayers : players || [];
-        const signalCount = selectedUnassignedSignalRefs(selection).length;
-        if (signalCount) {
+        emitDiagnostic(log, () => {
+          const submittedPlayers = savedPlayers?.length ? savedPlayers : players || [];
+          const signalCount = selectedUnassignedSignalRefs(selection).length;
+          if (!signalCount) return null;
           const refs = submittedPlayers.map((item) => `${Number(item?.id || 0) || '?'}/def:${Number(item?.definitionId || 0) || '?'}`);
-          log(`${label}: submit squad for ${signalCount} Unassigned signal(s): ${refs.join(', ')}`);
-        }
+          return `${loopDef.name}: submit squad for ${signalCount} Unassigned signal(s): ${refs.join(', ')}`;
+        });
         return {
           submitted: true,
           rewardPackId: await submitSbcAndGetAwardPackId(set),

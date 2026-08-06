@@ -1,0 +1,96 @@
+{
+  "source": "sanitized EA pack-open response and production failure shapes",
+  "cases": [
+    {
+      "name": "gone pack",
+      "first": { "success": false, "error": { "code": 404 } },
+      "allowGone": true,
+      "expectedStatus": "stale",
+      "expectedReason": "404",
+      "expectedAttempts": 1
+    },
+    {
+      "name": "rate limited",
+      "first": { "success": false, "error": { "code": 429 } },
+      "expectedStatus": "blocked",
+      "expectedReason": "429",
+      "expectedAttempts": 1
+    },
+    {
+      "name": "unassigned conflict",
+      "first": { "success": false, "error": { "code": 471 } },
+      "second": { "success": true, "response": { "items": [] } },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "temporary server error",
+      "first": { "success": false, "status": 500 },
+      "second": { "success": true, "items": [] },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "ea 512",
+      "first": { "success": false, "error": { "code": 512 } },
+      "second": { "success": true, "items": [] },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "ea 521",
+      "first": { "success": false, "error": { "code": 521 } },
+      "second": { "success": true, "items": [] },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "undefined observable callback",
+      "firstKind": "undefined",
+      "second": { "success": true, "data": { "items": [] } },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "null observable callback",
+      "firstKind": "null",
+      "second": { "response": { "success": true, "data": { "items": [] } } },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "successful response missing items",
+      "first": { "success": true, "status": 200 },
+      "second": { "success": true, "items": [] },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "observable timeout",
+      "first": { "success": false, "error": { "code": "transport-timeout" } },
+      "second": { "success": true, "items": [] },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "transport exception",
+      "first": { "success": false, "error": { "code": "transport-error", "message": "network connection failed" } },
+      "second": { "success": true, "items": [] },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "unknown response",
+      "first": { "success": false },
+      "second": { "success": true, "items": [] },
+      "expectedStatus": "opened",
+      "expectedAttempts": 2
+    },
+    {
+      "name": "nested response items",
+      "first": { "response": { "success": true, "data": { "items": [{ "id": 1 }] } } },
+      "expectedStatus": "opened",
+      "expectedAttempts": 1
+    }
+  ]
+}

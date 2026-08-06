@@ -1,5 +1,73 @@
 import { createOpenPackReceipt } from '../domain/contracts.js';
 
+export const DEFAULT_PACK_OPEN_RETRY_CODES = Object.freeze([
+  '471',
+  '500',
+  '512',
+  '521',
+  'empty-result',
+  'missing-items',
+  'transport-error',
+  'transport-timeout',
+  'unknown',
+]);
+
+const AMBIGUOUS_PACK_OPEN_FAILURES = new Set([
+  'empty-result',
+  'missing-items',
+  'transport-error',
+  'transport-timeout',
+  'unknown',
+]);
+
+function firstReason(values = []) {
+  const value = values.find((entry) => entry !== undefined && entry !== null && String(entry).trim());
+  return value === undefined ? null : String(value).trim();
+}
+
+export function packTransportFailureResult(error) {
+  const message = error?.message || String(error || 'pack transport failed');
+  const explicitCode = firstReason([error?.code, error?.statusCode, error?.status]);
+  const code = explicitCode
+    || (error?.name === 'AbortError' ? 'cancelled' : null)
+    || (/timed out|timeout/i.test(message) ? 'transport-timeout' : 'transport-error');
+  return { success: false, error: { code, message } };
+}
+
+export function openedPackItems(result) {
+  const candidates = [
+    result?.items,
+    result?.response?.items,
+    result?.data?.items,
+    result?.response?.data?.items,
+  ];
+  return candidates.find(Array.isArray) || null;
+}
+
+export function packOpenFailureReason(result) {
+  if (result === undefined || result === null) return 'empty-result';
+  if ((result?.success === true || result?.response?.success === true) && !openedPackItems(result)) {
+    return 'missing-items';
+  }
+  const reason = firstReason([
+    result?.error?.code,
+    result?.response?.error?.code,
+    result?.data?.error?.code,
+    result?.statusCode,
+    result?.status,
+    result?.code,
+    result?.error?.message,
+    result?.response?.error?.message,
+    result?.message,
+  ]);
+  if (reason) return reason;
+  return 'unknown';
+}
+
+export function isAmbiguousPackOpenFailure(code) {
+  return AMBIGUOUS_PACK_OPEN_FAILURES.has(String(code ?? '').trim());
+}
+
 export async function openPackTransaction(options = {}) {
   const attempts = Math.max(1, Math.min(10, Number(options.retryPolicy?.attempts || 1) || 1));
   const retryCodes = new Set((options.retryPolicy?.retryCodes || []).map(String));
@@ -40,9 +108,15 @@ export async function openPackTransaction(options = {}) {
       });
     }
     const packRef = options.packRef ? options.packRef(pack) : { id: Number(pack.id || 0), name: String(pack.name || '') };
-    const result = await options.openTransport(pack, { attempt, packRef });
-    if (result?.success && Array.isArray(result?.items || result?.response?.items)) {
-      const rawItems = result.items || result.response.items || [];
+    let result;
+    try {
+      result = await options.openTransport(pack, { attempt, packRef });
+    } catch (error) {
+      result = packTransportFailureResult(error);
+    }
+    const rawItems = openedPackItems(result);
+    const succeeded = result?.success === true || result?.response?.success === true;
+    if (succeeded && rawItems) {
       const normalized = options.normalizeItems
         ? await options.normalizeItems(rawItems, { pack, packRef, attempt, result })
         : rawItems;
@@ -76,8 +150,11 @@ export async function openPackTransaction(options = {}) {
       });
     }
 
-    const code = String(result?.error?.code || result?.status || 'unknown');
+    const code = packOpenFailureReason(result);
     lastReason = code;
+    if (typeof options.onTransportFailure === 'function') {
+      try { await options.onTransportFailure({ attempt, code, pack, packRef, result }); } catch { }
+    }
     if (options.allowGone === true && code === '404') {
       if (options.onGone) await options.onGone(pack, { attempt, packRef, result });
       return createOpenPackReceipt({ status: 'stale', packRef, reason: '404', attempts: attempt });

@@ -1,6 +1,6 @@
 {
   "name": "fc26-daily-loop-runner",
-  "version": "0.7.20",
+  "version": "0.7.21",
   "description": "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
   "private": true,
   "license": "MIT",
@@ -24,14 +24,17 @@
     "check:config": "node scripts/check-loop-config.mjs",
     "check:architecture": "node scripts/audit-architecture.mjs --check",
     "lint:syntax": "node scripts/check-syntax.mjs",
+    "lint:undef": "eslint src scripts tests DailyLoopRunnerHotReload.user.js eslint.config.js vitest.config.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:contracts": "vitest run tests/contracts",
     "test:architecture": "vitest run tests/architecture",
-    "verify": "npm run lint:syntax && npm run check:config && npm run check:profiles && npm run check:architecture && npm run check:fsu-patch && npm test && npm run build && npm run check:dist && npm run check:fsu-release"
+    "verify": "npm run lint:syntax && npm run lint:undef && npm run check:config && npm run check:profiles && npm run check:architecture && npm run check:fsu-patch && npm test && npm run build && npm run check:dist && npm run check:fsu-release"
   },
   "devDependencies": {
     "esbuild": "^0.28.1",
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0",
     "vitest": "^4.1.10"
   }
 }

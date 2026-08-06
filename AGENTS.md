@@ -92,6 +92,7 @@ npm run verify
 ```powershell
 npm ci
 npm test
+npm run lint:undef
 npm run test:contracts
 npm run test:architecture
 npm run build
@@ -347,6 +348,10 @@ EA objects
 - 全重复包可能没有任何 direct move 来触发 EA 的 Purchased/Unassigned 页面模型；当 response 全是 duplicate 且 Repository 仍为空时，必须主动打开 Unassigned 页面并进行连续空读确认，再让通用 resolver 处理 live 实体。pending settlement 的后续尝试也必须执行页面同步，不能只重复调用 Item service。
 - 不得把“先清理旧 Unassigned”和“开包成功后的 response materialization”混为同一步。开包后的 response 处理必须先于该奖励产生的残留 Unassigned cleanup，否则下一轮会误报缺料或遗留重复卡。
 - 471、500、404 和 stale pack 的重试必须有界。
+- `open-transaction.js` 必须显式标准化 `items`、`response.items`、`data.items` 和 `response.data.items`；`undefined`/`null` callback、成功但缺少 items、Observable timeout 和 transport exception 必须有独立 reason，禁止统一压缩为无诊断价值的 `unknown`。
+- 默认开包恢复只允许一次有界重试。`471/500/512/521` 和空响应、缺失 items、transport error/timeout 可以在完成 Unassigned、导航和 Pack Repository 同步后重试；`404` 仅在调用方允许 gone 语义时作为 stale；`429` 不得立即增加请求压力，必须保留明确 blocked reason。
+- 空响应、缺失 items、transport error/timeout 和未知响应属于 ambiguous Pack instance；重试前必须排除当前对象引用并重新解析同类型 live instance，不能直接再次调用同一对象。
+- 开包故障处理必须由 `tests/fixtures/packs` 中的脱敏响应矩阵覆盖。新增生产响应形状或错误码时，先增加 fixture 和失败测试，再修改标准化或重试策略。
 - 开第二包前必须重新检查 Unassigned 和容量。
 
 任何共享事务改动都需要 pack unit tests、受影响 workflow tests，并在真实页面验证多包流程。
@@ -732,6 +737,11 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 - 真实 EA/FSU/Pack 数据：`tests/fixtures` 中新增脱敏 fixture。
 
 Bug 回归测试应描述原始失败场景，不要只把旧断言改成新结果。
+
+- `npm run lint:undef` 是和语法检查同级的发布门禁。不得用关闭 `no-undef`、扩大 ignore 范围或添加虚假 global 的方式掩盖作用域错误；新增 browser、Node、Tampermonkey 或 EA global 必须有真实运行时来源并在 ESLint 配置中最小声明。
+- 诊断日志不得成为业务控制流的失败源。关键提交、开包、移动和恢复路径中的诊断字段读取及格式化必须使用异常隔离 helper；诊断失败最多丢失该条日志，不得阻止真实操作。
+- 多步骤生产 Bug 必须增加跨步骤 workflow test，至少覆盖前一步副作用、阶段处理/清理和下一次动作的顺序；只测试单个纯函数不足以证明流程回归已锁定。
+- 用户日志中首次出现的新 EA/FSU/Pack 响应形状必须脱敏后保存到 `tests/fixtures`，并加入 unit、workflow 或 contract replay。fixture 中不得包含账号、token、完整卡库或可识别用户的数据。
 
 ### 8.6 实现和验证
 

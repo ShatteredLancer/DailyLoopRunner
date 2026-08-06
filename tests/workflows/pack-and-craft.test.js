@@ -96,6 +96,41 @@ describe('runPackAndCraftWorkflow', () => {
     expect(options.openPack).toHaveBeenCalledTimes(3);
   });
 
+  it('finishes crafting and cleanup before selecting the next same-id pack instance', async () => {
+    const calls = [];
+    const packs = [{ id: 20059, instance: 1 }, { id: 20059, instance: 2 }];
+    const result = await runPackAndCraftWorkflow(baseOptions({
+      maxPacks: 5,
+      completionTarget: { id: 'rare', max: 2 },
+      requireSourceExhaustion: true,
+      beforePack: async ({ result: current }) => {
+        calls.push(`before:${current.packsOpened + 1}`);
+        return { status: 'ready' };
+      },
+      findPack: async () => {
+        const pack = packs.shift() || null;
+        calls.push(pack ? `find:${pack.instance}` : 'find:none');
+        return pack;
+      },
+      openPack: async ({ pack }) => {
+        calls.push(`open:${pack.instance}`);
+        return { status: 'opened', details: { instance: pack.instance } };
+      },
+      runStages: async ({ pack }) => {
+        calls.push(`stage:${pack.instance}`);
+        return { status: 'completed', completions: { rare: 1 } };
+      },
+      afterStages: async ({ pack }) => calls.push(`cleanup:${pack.instance}`),
+    }));
+
+    expect(result).toMatchObject({ status: 'completed', packsOpened: 2, stageCompletions: { rare: 2 } });
+    expect(calls).toEqual([
+      'before:1', 'find:1', 'open:1', 'stage:1', 'cleanup:1',
+      'before:2', 'find:2', 'open:2', 'stage:2', 'cleanup:2',
+      'before:3', 'find:none',
+    ]);
+  });
+
   it('runs a generic fallback after the source packs are exhausted', async () => {
     const onSourceExhausted = vi.fn(async ({ remainingCompletions }) => ({
       status: 'completed',

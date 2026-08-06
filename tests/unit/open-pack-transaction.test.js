@@ -1,7 +1,93 @@
 import { describe, expect, it, vi } from 'vitest';
-import { openPackTransaction } from '../../src/pack/open-transaction.js';
+import {
+  DEFAULT_PACK_OPEN_RETRY_CODES,
+  isAmbiguousPackOpenFailure,
+  openPackTransaction,
+  openedPackItems,
+  packOpenFailureReason,
+  packTransportFailureResult,
+} from '../../src/pack/open-transaction.js';
+import { loadFixture } from '../helpers/fixtures.js';
 
 describe('openPackTransaction', () => {
+  it('normalizes empty, malformed and nested EA pack responses', () => {
+    expect(packOpenFailureReason(undefined)).toBe('empty-result');
+    expect(packOpenFailureReason({ success: true })).toBe('missing-items');
+    expect(packOpenFailureReason({ success: true, status: 200 })).toBe('missing-items');
+    expect(packOpenFailureReason({ response: { error: { code: 512 } } })).toBe('512');
+    expect(openedPackItems({ success: true, data: { items: [{ id: 1 }] } })).toEqual([{ id: 1 }]);
+    expect(openedPackItems({ response: { success: true, data: { items: [{ id: 2 }] } } })).toEqual([{ id: 2 }]);
+    expect(isAmbiguousPackOpenFailure('empty-result')).toBe(true);
+    expect(isAmbiguousPackOpenFailure('transport-timeout')).toBe(true);
+    expect(isAmbiguousPackOpenFailure('500')).toBe(false);
+    expect(packTransportFailureResult(new Error('socket closed'))).toMatchObject({
+      error: { code: 'transport-error', message: 'socket closed' },
+    });
+    expect(packTransportFailureResult(new Error('observable timed out'))).toMatchObject({
+      error: { code: 'transport-timeout' },
+    });
+  });
+
+  it('normalizes a thrown transport exception inside the transaction and retries once', async () => {
+    let calls = 0;
+    const receipt = await openPackTransaction({
+      packSelector: async ({ attempt }) => ({ id: 20059, instance: attempt }),
+      openTransport: async () => {
+        calls++;
+        if (calls === 1) throw new Error('network connection failed');
+        return { success: true, items: [] };
+      },
+      retryPolicy: { attempts: 2, retryCodes: ['transport-error'] },
+      beforeRetry: async () => {},
+      openedItemPolicy: async () => ({}),
+    });
+
+    expect(receipt).toMatchObject({ status: 'opened', attempts: 2 });
+    expect(calls).toBe(2);
+  });
+
+  it('reports and retries an empty EA callback with a newly selected pack', async () => {
+    const failures = [];
+    const selector = vi.fn(async ({ attempt }) => ({ id: 20059, instance: attempt }));
+    const receipt = await openPackTransaction({
+      packSelector: selector,
+      openTransport: async (_pack, { attempt }) => attempt === 1
+        ? undefined
+        : { success: true, data: { items: [{ id: 7 }] } },
+      retryPolicy: { attempts: 2, retryCodes: ['empty-result'] },
+      beforeRetry: async () => {},
+      onTransportFailure: async (failure) => failures.push(failure),
+      openedItemPolicy: async () => ({}),
+    });
+
+    expect(receipt).toMatchObject({ status: 'opened', attempts: 2, openedItems: [{ id: 7 }] });
+    expect(selector).toHaveBeenCalledTimes(2);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ attempt: 1, code: 'empty-result', packRef: { id: 20059 } });
+  });
+
+  it('replays the sanitized EA failure matrix with bounded retry behavior', async () => {
+    const fixture = await loadFixture('packs/open-failure-matrix.json');
+    for (const scenario of fixture.cases) {
+      const first = scenario.firstKind === 'undefined'
+        ? undefined
+        : scenario.firstKind === 'null' ? null : scenario.first;
+      let calls = 0;
+      const receipt = await openPackTransaction({
+        packSelector: async () => ({ id: 20059, instance: calls + 1 }),
+        openTransport: async () => ++calls === 1 ? first : scenario.second,
+        openedItemPolicy: async () => ({}),
+        retryPolicy: { attempts: 2, retryCodes: DEFAULT_PACK_OPEN_RETRY_CODES },
+        beforeRetry: async () => {},
+        allowGone: scenario.allowGone === true,
+      });
+      expect(receipt.status, scenario.name).toBe(scenario.expectedStatus);
+      expect(receipt.attempts, scenario.name).toBe(scenario.expectedAttempts);
+      if (scenario.expectedReason) expect(receipt.reason, scenario.name).toBe(scenario.expectedReason);
+      expect(calls, scenario.name).toBe(scenario.expectedAttempts);
+    }
+  });
+
   it('publishes normalized opened items before routing without letting observer failures block the policy', async () => {
     const calls = [];
     const receipt = await openPackTransaction({

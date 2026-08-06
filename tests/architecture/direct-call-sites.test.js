@@ -104,6 +104,8 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toMatch(/function\s+finalizeSubmittedInventorySelection\s*\(/);
     expect(source).toContain('await reconcileSubmittedDuplicateSignals(selection, label, submittedPlayers);');
     expect(source).toMatch(/submitConfiguredSbc[\s\S]*?finalizeSubmittedInventorySelection\(\s*squadPlan\?\.selection \|\| selection,\s*loopDef\.name,\s*savedPlayers\?\.length \? savedPlayers : players,\s*\)/);
+    expect(source).toMatch(/submitTransport:[\s\S]*?emitDiagnostic\(log, \(\) => \{[\s\S]*?return `\$\{loopDef\.name\}: submit squad for/);
+    expect(source).not.toContain('`${label}: submit squad for ${signalCount} Unassigned signal(s)');
     expect(source).toMatch(/consumeTarget[\s\S]*?selectInventoryPlayers\([\s\S]*?priorityPiles:\s*\['unassigned'\][\s\S]*?submitConfiguredSbc\(loopDef, \{ returnNullIfComplete: true, selection \}\)/);
     expect(source).toMatch(/runFillAndVerifyLoop[\s\S]*?finalizeSubmittedInventorySelection\([\s\S]*?configuredFill\.selection/);
     expect(source).toMatch(/submitInventorySbcAttempt[\s\S]*?finalizeSubmittedInventorySelection\(\s*squadPlan\?\.selection \|\| selection/);
@@ -234,6 +236,9 @@ describe('current direct side-effect call baseline', () => {
     expect(source).not.toMatch(/const\s+items\s*=\s*await\s+openPack\s*\(/);
     expect(source).not.toMatch(/function\s+handle(?:Recycle|Provision|RarePackTo84|RareSource)PackItems\s*\(/);
     expect(source).toContain('Opened item policy is required for');
+    expect(source).toMatch(/const retryCodes = \[\.\.\.new Set\(\[[\s\S]*?\.\.\.DEFAULT_PACK_OPEN_RETRY_CODES/);
+    expect(source).toMatch(/onTransportFailure:[\s\S]*?emitDiagnostic\(log[\s\S]*?pack open transport attempt[\s\S]*?beforeRetry:[\s\S]*?isAmbiguousPackOpenFailure\(code\)/);
+    expect(source).toMatch(/packSelector:[\s\S]*?isAmbiguousPackOpenFailure\(lastReason\)[\s\S]*?findFreshPackInstance\(currentPack, getAvailableRepositoryMyPacks\(\)\)/);
     const packCalls = source.match(/await\s+openPack\s*\(/g) || [];
     const explicitPolicies = source.split(/\r?\n/).filter((line) =>
       line.includes('openedItemPolicy:') && !line.includes('options.openedItemPolicy')
