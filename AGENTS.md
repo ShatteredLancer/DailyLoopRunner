@@ -445,6 +445,8 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `main-panel-bindings.js`：选项回填和 UI command 事件转发。
 - `main-panel-commands.js`：刷新、配置加载、Stop、复制和下载日志等主面板 command 编排。
 - `main-panel-state.js`：Loop 列表、rounds、recap 和 disabled 状态投影。
+- `responsive-layout.js`：共享 Desktop/Tablet/Mobile 布局与 pointer/touch 输入判定、持久化覆盖和 viewport 监听。
+- `responsive-dialog.js`：Batch Open、Player Pick、recap、Reward Alert 和 Help 共用的移动全屏、安全区与触摸目标样式。
 - `workflow-loop-builder-view.js`：全屏 Builder 的结构化 Workflow、Loop、Recovery、Dynamic SBC、Preview 和 JSON validation UI。
 - `workflow-loop-builder.js`：Builder Profile 生命周期、Undo/Redo、事件编排、持久化和经过验证的 runtime activation。
 - `player-pick-modal.js`：人工 Player Pick 选择。
@@ -466,6 +468,19 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `sbc-reward-overlay.js`：中高，影响页面型 SBC 奖励覆盖层识别和关闭；25 秒等待、Pack 增量和 SBC 进度确认位于 `src/reward/sbc-claim.js`。
 
 UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文本、日志高频更新和 Pick recap。Options 展开后设置控件可以在独立区域滚动，但日志必须始终保留独立的可视滚动区域，不能因为配置变长而被 flex 压缩或裁掉。
+
+响应式 UI 必须遵守以下约束：
+
+- 布局只能由可视区域、pointer/hover media query 和用户保存的 `Auto | Desktop | Mobile` 覆盖决定；禁止使用 User-Agent 分叉实现。
+- `layout` 与 `input` 是两个独立维度。Desktop 可以使用 touch target，Mobile 也可以由精确 pointer 操作；不得用其中一个暗示另一个。
+- 用户手动覆盖必须优先于自动断点。旧 `@media(max-width)` 规则不得绕过 `data-dlr-layout` 重新启用另一套主面板或 Builder 结构。
+- Desktop、Tablet 和 Mobile 必须共享同一个 runtime、Profile、日志和 command 状态；resize、旋转和 Layout 切换不得重建或停止运行会话。
+- Mobile 使用独立底部面板几何，不能覆盖保存的 Desktop 位置、尺寸或完整日志高度。Mobile 禁止拖动和 resize，运行开始后必须回到保留 Stop 的紧凑 Run 控制器。
+- 触摸输入的交互目标最小 44px；文本输入在触摸布局中不得低于 16px，避免移动浏览器自动缩放。
+- Mobile 面板和对话框必须使用 `dvh`、`env(safe-area-inset-*)`、稳定滚动区域和不被底部手势区域遮挡的操作栏。
+- Builder Mobile 必须保持 Library、Editor、Details 单视图导航，选择对象进入 Editor、选择 Workflow step 进入 Details；Save、Activate、Close 在长表单中始终可达。
+- Batch Open、Player Pick、通用 recap、Reward Alert、Help 和 Pack Highlight 必须读取共享响应式状态，不得分别引入宽度判断或另一套业务状态。
+- 移动浏览器后台/锁屏可能暂停页面，UI 不得声称后台可靠运行；相关限制必须保留在用户文档和发布验收中。
 
 Workflow/Loop Builder 的完整设计与阶段状态见 `docs/WORKFLOW_LOOP_BUILDER.md`。Builder Profile、草稿、override、冲突和动态绑定只能存在于 `src/config/builder-*` 与 `src/ui/workflow-loop-builder*`；runner、workflow 和 EA Adapter 仍只接受 `loop-schema.js` 的物化配置。Raw JSON 只允许验证、导入和导出，不得恢复主面板直接执行 JSON 的入口。Draft 可以处于暂时无效状态并跨重载保留，但启动和 Activate 只能使用完整验证的 last-known-good。Dynamic SBC 持久化后必须先标记 unavailable，只有本次只读扫描按稳定 Set/Reward identity 刷新成功才可物化；禁止把上次快照作为静态 Loop 静默执行。
 

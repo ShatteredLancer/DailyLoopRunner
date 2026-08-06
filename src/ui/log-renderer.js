@@ -39,7 +39,9 @@ export function createLogRenderer(options = {}) {
   let fullLogDirty = true;
 
   function fullLogVisible(panel) {
-    return !!panel && panel.classList?.contains('options-open') && !panel.classList?.contains('icon-only');
+    if (!panel || panel.classList?.contains('icon-only')) return false;
+    if (panel.dataset?.layout === 'mobile') return panel.dataset?.mobileTab === 'log';
+    return panel.classList?.contains('options-open');
   }
 
   function flush() {

@@ -127,6 +127,19 @@ export function renderMainPanelScanProgress(options = {}) {
 export function renderMainPanelRuntimeState(options = {}) {
   const panel = options.panel;
   const state = options.state || {};
+  if (!panel) return;
+  const wasRunning = panel.dataset?.running === 'true';
+  panel.classList?.toggle?.('is-running', state.running === true);
+  panel.classList?.toggle?.('is-stopping', state.running === true && state.stopping === true);
+  if (panel.dataset) panel.dataset.running = state.running === true ? 'true' : 'false';
+  if (state.running === true && !wasRunning && panel.dataset?.layout === 'mobile') options.setMobileTab?.('run');
+  const status = query(panel, '#bronze-loop-run-status');
+  const name = query(panel, '#bronze-loop-run-name');
+  if (status) status.textContent = state.stopping === true ? 'Stopping' : 'Running';
+  if (name) {
+    const selected = query(panel, '#bronze-loop-select');
+    name.textContent = selected?.selectedOptions?.[0]?.textContent || selected?.value || '';
+  }
   const busy = state.running === true
     || state.refreshing === true
     || state.scanningPicks === true

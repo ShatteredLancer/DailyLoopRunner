@@ -15,9 +15,22 @@ function element(id) {
 
 function harness(ids = []) {
   const controls = new Map(ids.map((id) => [id, element(id)]));
+  const classes = new Set();
   return {
     controls,
-    panel: { querySelector: (selector) => controls.get(selector.replace(/^#/, '')) || null },
+    panel: {
+      dataset: {},
+      classList: {
+        contains: (value) => classes.has(value),
+        toggle(value, force) {
+          if (force === true) classes.add(value);
+          else if (force === false) classes.delete(value);
+          else if (classes.has(value)) classes.delete(value);
+          else classes.add(value);
+        },
+      },
+      querySelector: (selector) => controls.get(selector.replace(/^#/, '')) || null,
+    },
   };
 }
 
@@ -174,5 +187,31 @@ describe('main panel state rendering', () => {
     for (const id of ids.filter((id) => !['bronze-loop-stop'].includes(id))) {
       expect(controls.get(id).disabled, id).toBe(id !== 'bronze-loop-reward-alert-enabled');
     }
+  });
+
+  it('projects running and stopping state and returns a new mobile run to the Run tab', () => {
+    const { panel, controls } = harness([
+      'bronze-loop-run-status', 'bronze-loop-run-name', 'bronze-loop-select',
+    ]);
+    panel.dataset.layout = 'mobile';
+    controls.get('bronze-loop-select').selectedOptions = [{ textContent: 'One-click Daily Loop' }];
+    const selectedTabs = [];
+
+    renderMainPanelRuntimeState({ panel, state: { running: true }, setMobileTab: (tab) => selectedTabs.push(tab) });
+    expect(panel.classList.contains('is-running')).toBe(true);
+    expect(panel.classList.contains('is-stopping')).toBe(false);
+    expect(panel.dataset.running).toBe('true');
+    expect(controls.get('bronze-loop-run-status').textContent).toBe('Running');
+    expect(controls.get('bronze-loop-run-name').textContent).toBe('One-click Daily Loop');
+    expect(selectedTabs).toEqual(['run']);
+
+    renderMainPanelRuntimeState({ panel, state: { running: true, stopping: true }, setMobileTab: (tab) => selectedTabs.push(tab) });
+    expect(panel.classList.contains('is-stopping')).toBe(true);
+    expect(controls.get('bronze-loop-run-status').textContent).toBe('Stopping');
+    expect(selectedTabs).toEqual(['run']);
+
+    renderMainPanelRuntimeState({ panel, state: { running: false } });
+    expect(panel.classList.contains('is-running')).toBe(false);
+    expect(panel.classList.contains('is-stopping')).toBe(false);
   });
 });

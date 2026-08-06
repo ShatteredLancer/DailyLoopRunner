@@ -1,3 +1,5 @@
+import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
+
 function applyStyles(element, styles) {
   Object.assign(element.style, styles);
 }
@@ -11,6 +13,7 @@ export function waitForManualPlayerPickSelection(options = {}) {
   const ranked = options.ranked || [];
   const pickCount = Math.max(1, Number(options.pickCount || 1) || 1);
   const reason = String(options.reason || 'manual selection required');
+  const mode = readResponsiveUiMode(options.dom);
 
   return new Promise((resolve, reject) => {
     let stopTimer = null;
@@ -38,13 +41,13 @@ export function waitForManualPlayerPickSelection(options = {}) {
     hint.textContent = `Select exactly ${pickCount} player(s), then confirm.`;
     applyStyles(hint, { color: '#b7c2d0', marginBottom: '12px' });
     const list = options.dom.create('div');
-    applyStyles(list, { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' });
+    applyStyles(list, { display: 'grid', gridTemplateColumns: mode.mobile ? '1fr' : 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' });
     const selected = new Set();
     const cards = [];
     const confirm = options.dom.create('button');
     confirm.textContent = 'Confirm selection';
     confirm.disabled = true;
-    applyStyles(confirm, { marginTop: '14px', minHeight: '34px', padding: '0 14px' });
+    applyStyles(confirm, { marginTop: '14px', minHeight: responsiveControlHeight(mode, 34), padding: '0 14px' });
 
     const refresh = () => {
       cards.forEach(({ card, candidate }) => {
@@ -75,6 +78,7 @@ export function waitForManualPlayerPickSelection(options = {}) {
       finish(resolve, [...selected].map((candidate) => candidate.item));
     });
     dialog.append(title, hint, list, confirm);
+    applyResponsiveDialogLayout({ dom: options.dom, mode, overlay, dialog, title, actions: confirm, controls: [confirm, ...cards.map((entry) => entry.card)] });
     overlay.appendChild(dialog);
     options.dom.appendToBody(overlay);
     refresh();

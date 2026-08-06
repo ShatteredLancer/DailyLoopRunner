@@ -3,9 +3,19 @@ function applyStyles(element, styles) {
 }
 
 function positionStack(stack, panel, viewport = {}) {
+  const mobile = panel?.dataset?.layout === 'mobile';
   const rect = panel?.getBoundingClientRect?.();
   const viewportWidth = Math.max(0, Number(viewport.width || 0));
   const viewportHeight = Math.max(0, Number(viewport.height || 0));
+  if (mobile) {
+    stack.style.left = 'max(10px, env(safe-area-inset-left, 0px))';
+    stack.style.right = 'max(10px, env(safe-area-inset-right, 0px))';
+    stack.style.top = 'max(10px, env(safe-area-inset-top, 0px))';
+    stack.style.bottom = 'auto';
+    stack.style.width = 'auto';
+    return;
+  }
+  stack.style.left = 'auto';
   const width = Math.max(220, Math.min(420, viewportWidth > 0 ? viewportWidth - 20 : 360));
   stack.style.width = `${width}px`;
   if (!rect) {
@@ -40,11 +50,12 @@ export function showPackHighlightToast(options = {}) {
   }
   positionStack(stack, options.panel, options.viewport?.() || {});
 
+  const touchTarget = options.panel?.dataset?.layout === 'mobile' || options.panel?.dataset?.input === 'touch';
   const toast = dom.create('div');
   applyStyles(toast, {
     position: 'relative', overflow: 'hidden', isolation: 'isolate', pointerEvents: 'auto',
     background: 'rgba(20, 24, 30, 0.97)', color: '#f4f6f8', border: '1px solid #d4af37',
-    borderLeft: '4px solid #ffd54a', boxShadow: '0 8px 24px rgba(0,0,0,.42)', padding: '10px 34px 10px 12px',
+    borderLeft: '4px solid #ffd54a', boxShadow: '0 8px 24px rgba(0,0,0,.42)', padding: `10px ${touchTarget ? 54 : 34}px 10px 12px`,
     boxSizing: 'border-box', opacity: '1', transition: 'opacity .25s ease, transform .25s ease',
   });
   const title = dom.create('div');
@@ -71,8 +82,9 @@ export function showPackHighlightToast(options = {}) {
   close.type = 'button';
   close.textContent = 'x';
   close.title = 'Dismiss highlight';
+  const closeSize = touchTarget ? '44px' : '24px';
   applyStyles(close, {
-    position: 'absolute', top: '4px', right: '5px', width: '24px', height: '24px', padding: '0',
+    position: 'absolute', top: '4px', right: '5px', width: closeSize, height: closeSize, padding: '0',
     border: '0', background: 'transparent', color: '#d7e2f0', cursor: 'pointer', fontSize: '18px',
   });
 

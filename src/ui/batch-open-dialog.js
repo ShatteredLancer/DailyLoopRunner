@@ -3,30 +3,31 @@ import {
   createBatchOpenAvailability,
   normalizeBatchOpenPlan,
 } from '../config/batch-open.js';
+import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 function applyStyles(element, styles) {
   Object.assign(element.style, styles);
 }
 
-function button(dom, text, primary = false) {
+function button(dom, text, primary = false, mode = null) {
   const value = dom.create('button');
   value.type = 'button';
   value.textContent = text;
   applyStyles(value, {
-    minHeight: '30px', padding: '0 12px', cursor: 'pointer', color: '#fff',
+    minHeight: responsiveControlHeight(mode), padding: '0 12px', cursor: 'pointer', color: '#fff',
     background: primary ? '#2f6fde' : '#222832', border: `1px solid ${primary ? '#4f8cff' : '#607089'}`,
   });
   return value;
 }
 
-function quantityInput(dom, quantity) {
+function quantityInput(dom, quantity, mode = null) {
   const input = dom.create('input');
   input.type = 'number';
   input.min = '1';
   input.max = '999';
   input.value = String(quantity);
   applyStyles(input, {
-    width: '70px', height: '30px', boxSizing: 'border-box', background: '#222832', color: '#fff',
+    width: mode?.touchTargets ? '84px' : '70px', height: responsiveControlHeight(mode), fontSize: mode?.touchTargets ? '16px' : '', boxSizing: 'border-box', background: '#222832', color: '#fff',
     border: '1px solid #607089', padding: '0 6px',
   });
   return input;
@@ -36,6 +37,7 @@ export function showBatchOpenDialog(options = {}) {
   const dom = options.dom;
   if (!dom?.create || !dom?.appendToBody) throw new TypeError('dom adapter is required');
   dom.query?.('#bronze-loop-batch-open-modal')?.remove?.();
+  const mode = readResponsiveUiMode(dom);
 
   const overlay = dom.create('div');
   overlay.id = 'bronze-loop-batch-open-modal';
@@ -93,7 +95,7 @@ export function showBatchOpenDialog(options = {}) {
       const selected = selectedKeys.has(batchOpenEntryKey({ packId: group.id, packName: group.name }));
       const addMenu = dom.create('div');
       applyStyles(addMenu, { position: 'relative', flex: '0 0 auto' });
-      const add = button(dom, selected ? 'Added v' : 'Add v');
+      const add = button(dom, selected ? 'Added v' : 'Add v', false, mode);
       add.setAttribute?.('aria-label', `Add ${group.name} to batch`);
       add.setAttribute?.('aria-expanded', 'false');
       const menu = dom.create('div');
@@ -114,8 +116,8 @@ export function showBatchOpenDialog(options = {}) {
         notifyPlanChange();
         render();
       };
-      const addOne = button(dom, selected ? 'Set to 1' : 'Add 1');
-      const addAll = button(dom, `${selected ? 'Set to all' : 'Add all'} (${group.count})`);
+      const addOne = button(dom, selected ? 'Set to 1' : 'Add 1', false, mode);
+      const addAll = button(dom, `${selected ? 'Set to all' : 'Add all'} (${group.count})`, false, mode);
       for (const option of [addOne, addAll]) {
         applyStyles(option, { display: 'block', width: '100%', minWidth: '0', textAlign: 'left', border: '0' });
       }
@@ -145,7 +147,7 @@ export function showBatchOpenDialog(options = {}) {
       row.dataset.packId = entry.packId ? String(entry.packId) : '';
       row.dataset.packName = entry.packName;
       row.dataset.quantityMode = entry.quantityMode;
-      applyStyles(row, { display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 7px', background: '#1d2229' });
+      applyStyles(row, { display: 'flex', alignItems: 'center', flexWrap: mode.mobile ? 'wrap' : 'nowrap', gap: '8px', padding: '5px 7px', background: '#1d2229' });
       const label = dom.create('span');
       label.textContent = `${entry.packName || `Pack #${entry.packId}`} (#${entry.packId || '?'})`;
       applyStyles(label, { flex: '1 1 auto', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
@@ -154,7 +156,7 @@ export function showBatchOpenDialog(options = {}) {
         ? `${entry.quantityMode === 'all' ? 'all: ' : ''}${entry.available} available`
         : 'unavailable';
       applyStyles(availability, { color: entry.available ? '#8fd19e' : '#e3a7a7', fontSize: '11px', flex: '0 0 auto' });
-      const quantity = quantityInput(dom, entry.effectiveQuantity);
+      const quantity = quantityInput(dom, entry.effectiveQuantity, mode);
       quantity.setAttribute?.('aria-label', `Quantity for ${entry.packName}`);
       quantity.disabled = entry.quantityMode === 'all';
       quantity.title = entry.quantityMode === 'all'
@@ -165,7 +167,7 @@ export function showBatchOpenDialog(options = {}) {
         plan = currentPlan();
         notifyPlanChange();
       });
-      const remove = button(dom, 'Remove');
+      const remove = button(dom, 'Remove', false, mode);
       remove.addEventListener('click', () => {
         const key = batchOpenEntryKey(entry);
         plan = normalizeBatchOpenPlan({ entries: currentPlan().entries.filter((candidate) => batchOpenEntryKey(candidate) !== key) });
@@ -185,13 +187,13 @@ export function showBatchOpenDialog(options = {}) {
 
   const toolbar = dom.create('div');
   applyStyles(toolbar, { display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' });
-  const scan = button(dom, 'Scan My Packs');
-  const preview = button(dom, 'Preview recap');
+  const scan = button(dom, 'Scan My Packs', false, mode);
+  const preview = button(dom, 'Preview recap', false, mode);
   toolbar.append(scan, preview);
   const actions = dom.create('div');
   applyStyles(actions, { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' });
-  const cancel = button(dom, 'Cancel');
-  const start = button(dom, 'Start batch', true);
+  const cancel = button(dom, 'Cancel', false, mode);
+  const start = button(dom, 'Start batch', true, mode);
   actions.append(cancel, start);
 
   const setPending = (pending) => {
@@ -233,6 +235,7 @@ export function showBatchOpenDialog(options = {}) {
     }
   });
   overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+  applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title, actions, controls: [scan, preview, cancel, start] });
   dialog.append(title, note, toolbar, availableTitle, availableList, planTitle, planList, status, actions);
   overlay.appendChild(dialog);
   dom.appendToBody(overlay);

@@ -41,8 +41,16 @@ export function createMainPanelGeometry(options = {}) {
   const loadLogHeight = options.loadLogHeight || (() => null);
   const onModeChange = options.onModeChange || (() => {});
   const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
+  const saveMobileTab = options.saveMobileTab || (() => {});
+  const loadedMobileTab = String(options.loadMobileTab?.() || 'run');
+  let mobileTab = ['run', 'options', 'log'].includes(loadedMobileTab) ? loadedMobileTab : 'run';
+
+  function isMobileLayout() {
+    return panel.dataset?.layout === 'mobile';
+  }
 
   function persistPosition() {
+    if (isMobileLayout()) return;
     try {
       const rect = panel.getBoundingClientRect();
       savePosition({
@@ -55,6 +63,11 @@ export function createMainPanelGeometry(options = {}) {
   }
 
   function resetSize() {
+    if (isMobileLayout()) {
+      panel.style.width = '';
+      panel.style.height = '';
+      return { width: 0, height: 0 };
+    }
     const size = getMainPanelDefaultSize(panel.classList.contains('options-open'));
     const clamped = clampMainPanelDefaultSize(size, viewportSize(getViewport));
     panel.dataset.minWidth = String(clamped.width);
@@ -82,9 +95,10 @@ export function createMainPanelGeometry(options = {}) {
   function updateOptionsButton() {
     const button = panel.querySelector('#bronze-loop-options-toggle');
     if (!button) return;
-    const open = panel.classList.contains('options-open');
-    button.textContent = open ? 'Hide' : 'Options';
-    button.title = open ? 'Hide advanced options' : 'Show advanced options';
+    const mobile = isMobileLayout();
+    const open = mobile ? mobileTab !== 'run' : panel.classList.contains('options-open');
+    button.textContent = open ? (mobile ? 'Run' : 'Hide') : (panel.classList.contains('is-running') ? 'Details' : 'Options');
+    button.title = open ? 'Return to Run view' : 'Show advanced options';
   }
 
   function updateCollapseButton() {
@@ -100,7 +114,46 @@ export function createMainPanelGeometry(options = {}) {
     onModeChange({
       iconOnly: panel.classList.contains('icon-only'),
       optionsOpen: panel.classList.contains('options-open'),
+      mobileTab,
+      layout: panel.dataset?.layout || 'desktop',
     });
+  }
+
+  function setMobileTab(nextTab, persist = true) {
+    const normalized = ['run', 'options', 'log'].includes(String(nextTab)) ? String(nextTab) : 'run';
+    mobileTab = normalized;
+    if (panel.dataset) panel.dataset.mobileTab = mobileTab;
+    if (persist) saveMobileTab(mobileTab);
+    notifyModeChange();
+    return mobileTab;
+  }
+
+  function setResponsiveMode(snapshot = {}) {
+    const previous = panel.dataset?.layout || 'desktop';
+    const layout = ['desktop', 'tablet', 'mobile'].includes(snapshot.layout) ? snapshot.layout : 'desktop';
+    if (previous !== 'mobile' && layout === 'mobile') persistPosition();
+    if (panel.dataset) {
+      panel.dataset.layout = layout;
+      panel.dataset.input = snapshot.input === 'touch' ? 'touch' : 'pointer';
+    }
+    if (layout === 'mobile') {
+      panel.classList.remove('options-open');
+      panel.style.left = '';
+      panel.style.top = '';
+      panel.style.right = '';
+      panel.style.bottom = '';
+      panel.style.width = '';
+      panel.style.height = '';
+      setMobileTab(mobileTab, false);
+    } else if (previous === 'mobile') {
+      panel.classList.remove('icon-only');
+      resetSize();
+      restoreSavedPosition();
+      notifyModeChange();
+    } else {
+      notifyModeChange();
+    }
+    return layout;
   }
 
   function restorePanel() {
@@ -129,6 +182,10 @@ export function createMainPanelGeometry(options = {}) {
   }
 
   function toggleOptions() {
+    if (isMobileLayout()) {
+      setMobileTab(mobileTab === 'run' ? 'options' : 'run');
+      return;
+    }
     panel.classList.toggle('options-open');
     resetSize();
     notifyModeChange();
@@ -156,6 +213,7 @@ export function createMainPanelGeometry(options = {}) {
     let moved = false;
 
     handle.addEventListener('pointerdown', (event) => {
+      if (isMobileLayout()) return;
       if (!panel.classList.contains('icon-only') && event.target?.closest?.('button,select,input,textarea')) return;
       dragging = true;
       moved = false;
@@ -260,7 +318,7 @@ export function createMainPanelGeometry(options = {}) {
       const element = panel.querySelector(`#bronze-loop-resize-${dir}`);
       if (!element) return;
       element.addEventListener('pointerdown', (event) => {
-        if (panel.classList.contains('icon-only')) return;
+        if (panel.classList.contains('icon-only') || isMobileLayout()) return;
         const rect = panel.getBoundingClientRect();
         panel.style.left = `${rect.left}px`;
         panel.style.top = `${rect.top}px`;
@@ -305,6 +363,7 @@ export function createMainPanelGeometry(options = {}) {
     };
 
     handle.addEventListener('pointerdown', (event) => {
+      if (isMobileLayout()) return;
       const startHeight = Number(log.getBoundingClientRect?.().height || Number.parseFloat(log.style?.height));
       if (!Number.isFinite(startHeight)) return;
       resizing = { startY: event.clientY, startHeight };
@@ -319,12 +378,25 @@ export function createMainPanelGeometry(options = {}) {
   restoreSavedPosition();
   resetSize();
   restoreLogHeight();
+  if (panel.dataset) panel.dataset.mobileTab = mobileTab;
   makeDraggable();
   makeResizable();
   makeLogResizable();
   panel.querySelector('#bronze-loop-collapse')?.addEventListener('click', toggleIconOnly);
   panel.querySelector('#bronze-loop-options-toggle')?.addEventListener('click', toggleOptions);
+  for (const tab of ['run', 'options', 'log']) {
+    panel.querySelector(`#bronze-loop-mobile-tab-${tab}`)?.addEventListener('click', () => setMobileTab(tab));
+  }
   notifyModeChange();
 
-  return Object.freeze({ resetSize, restorePanel, toggleIconOnly, toggleOptions, persistPosition, persistLogHeight });
+  return Object.freeze({
+    resetSize,
+    restorePanel,
+    toggleIconOnly,
+    toggleOptions,
+    setMobileTab,
+    setResponsiveMode,
+    persistPosition,
+    persistLogHeight,
+  });
 }

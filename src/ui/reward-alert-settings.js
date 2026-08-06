@@ -1,20 +1,21 @@
 import { normalizeRewardAlertSettings } from '../reward/pack-highlight.js';
+import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 function applyStyles(element, styles) {
   Object.assign(element.style, styles);
 }
 
-function inputStyles(input) {
+function inputStyles(input, mode) {
   applyStyles(input, {
-    width: '100%', minWidth: '0', height: '30px', boxSizing: 'border-box', background: '#222832',
+    width: '100%', minWidth: '0', height: responsiveControlHeight(mode), fontSize: mode?.touchTargets ? '16px' : '', boxSizing: 'border-box', background: '#222832',
     color: '#f4f6f8', border: '1px solid #607089', padding: '0 8px',
   });
   return input;
 }
 
-function field(dom, labelText, input) {
+function field(dom, labelText, input, mode) {
   const label = dom.create('label');
-  applyStyles(label, { display: 'grid', gridTemplateColumns: '140px minmax(0, 1fr)', alignItems: 'center', gap: '10px' });
+  applyStyles(label, { display: 'grid', gridTemplateColumns: mode?.mobile ? '1fr' : '140px minmax(0, 1fr)', alignItems: 'center', gap: '10px' });
   const text = dom.create('span');
   text.textContent = labelText;
   applyStyles(text, { color: '#b8c3d2', fontSize: '12px' });
@@ -45,6 +46,7 @@ export function showRewardAlertSettings(options = {}) {
   if (!dom?.create || !dom?.appendToBody) throw new TypeError('dom adapter is required');
   dom.query?.('#bronze-loop-reward-alert-modal')?.remove?.();
   const initial = normalizeRewardAlertSettings(options.settings);
+  const mode = readResponsiveUiMode(dom);
   const overlay = dom.create('div');
   overlay.id = 'bronze-loop-reward-alert-modal';
   applyStyles(overlay, {
@@ -65,18 +67,18 @@ export function showRewardAlertSettings(options = {}) {
   const highlight = checkbox(dom, 'bronze-loop-alert-highlight-enabled', 'Show pack highlight', initial.highlightEnabled);
   const desktop = checkbox(dom, 'bronze-loop-alert-desktop-enabled', 'Desktop notification', initial.desktopEnabled);
   const ntfy = checkbox(dom, 'bronze-loop-alert-ntfy-enabled', 'ntfy remote notification', initial.ntfyEnabled);
-  const threshold = inputStyles(dom.create('input'));
+  const threshold = inputStyles(dom.create('input'), mode);
   threshold.id = 'bronze-loop-alert-minimum-rating';
   threshold.type = 'number';
   threshold.min = '1';
   threshold.max = '99';
   threshold.value = String(initial.minimumRating);
-  const topic = inputStyles(dom.create('input'));
+  const topic = inputStyles(dom.create('input'), mode);
   topic.id = 'bronze-loop-alert-ntfy-topic';
   topic.type = 'text';
   topic.value = initial.ntfyTopic;
   topic.autocomplete = 'off';
-  const token = inputStyles(dom.create('input'));
+  const token = inputStyles(dom.create('input'), mode);
   token.id = 'bronze-loop-alert-ntfy-token';
   token.type = 'password';
   token.value = initial.ntfyToken;
@@ -84,11 +86,11 @@ export function showRewardAlertSettings(options = {}) {
   form.append(
     enabled.label,
     highlight.label,
-    field(dom, 'Minimum rating', threshold),
+    field(dom, 'Minimum rating', threshold, mode),
     desktop.label,
     ntfy.label,
-    field(dom, 'ntfy topic', topic),
-    field(dom, 'ntfy token', token),
+    field(dom, 'ntfy topic', topic, mode),
+    field(dom, 'ntfy token', token, mode),
   );
 
   const status = dom.create('div');
@@ -103,7 +105,7 @@ export function showRewardAlertSettings(options = {}) {
     value.type = 'button';
     value.textContent = text;
     applyStyles(value, {
-      minHeight: '30px', padding: '0 12px', cursor: 'pointer', color: '#fff',
+      minHeight: responsiveControlHeight(mode), padding: '0 12px', cursor: 'pointer', color: '#fff',
       background: primary ? '#2f6fde' : '#222832', border: `1px solid ${primary ? '#4f8cff' : '#607089'}`,
     });
     return value;
@@ -161,6 +163,15 @@ export function showRewardAlertSettings(options = {}) {
     }
   });
   overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+  applyResponsiveDialogLayout({
+    dom,
+    mode,
+    overlay,
+    dialog,
+    title,
+    actions,
+    controls: [threshold, topic, token, preview, desktopTest, ntfyTest, cancel, save],
+  });
   dialog.append(title, form, tests, status, actions);
   overlay.appendChild(dialog);
   dom.appendToBody(overlay);

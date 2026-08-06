@@ -24,6 +24,7 @@ describe('main panel help topics', () => {
     expect(getMainPanelHelpTopics('overview')).toHaveLength(4);
     expect(getMainPanelHelpTopics('run-options')[0].items.map(([label]) => label)).toContain('Open reward packs');
     expect(getMainPanelHelpTopics('config')[0].items.map(([label]) => label)).toContain('Open Builder');
+    expect(getMainPanelHelpTopics('config')[0].items.map(([label]) => label)).toContain('Layout');
     expect(getMainPanelHelpTopics('log')[0].items.map(([label]) => label)).toContain('Resize log');
   });
 
@@ -45,5 +46,20 @@ describe('main panel help topics', () => {
     expect(body).toEqual([overlay]);
     const dialog = overlay.children[0];
     expect(dialog.children[0].textContent).toBe('Log');
+  });
+
+  it('uses the shared mobile dialog layout', () => {
+    const body = [];
+    const root = { getAttribute: (name) => name.endsWith('layout') ? 'mobile' : 'touch' };
+    const dom = {
+      query: (selector) => selector === ':root' ? root : null,
+      create: element,
+      appendToBody: (item) => body.push(item),
+    };
+    const overlay = showMainPanelHelp({ dom, topic: 'overview' });
+    const dialog = overlay.children[0];
+    expect(dialog.style).toMatchObject({ width: '100%', height: '100dvh', maxHeight: '100dvh' });
+    const actions = dialog.children.at(-1);
+    expect(actions.style.position).toBe('sticky');
   });
 });

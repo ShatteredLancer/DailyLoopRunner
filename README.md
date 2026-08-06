@@ -57,7 +57,7 @@ Tampermonkey 按自身的更新检查间隔读取 `releases/latest`。只有 `@v
 - Rare Gold/Special recap、价格查询和可选 Reward Alerts
 - FSU Lock、不可交易、联赛、Evolution、高分和特殊卡保护兼容
 
-详细界面和 Loop 行为见 [用户手册](docs/USER_GUIDE_ZH.md)。Builder 的图示操作见 [Workflow/Loop Builder 中文指南](docs/WORKFLOW_LOOP_BUILDER_GUIDE_ZH.md)。
+详细界面和 Loop 行为见 [用户手册](docs/USER_GUIDE_ZH.md)。Builder 的图示操作见 [Workflow/Loop Builder 中文指南](docs/WORKFLOW_LOOP_BUILDER_GUIDE_ZH.md)。手机、平板和触摸屏布局见 [响应式与触摸界面](docs/RESPONSIVE_UI_ZH.md)。
 
 ## 官方 Profile
 
@@ -100,6 +100,7 @@ ntfy token 保存在 Tampermonkey 的 GM 隔离存储中，不写入 EA 页面 l
 - [开发与发布](docs/DEVELOPMENT.md)
 - [Workflow/Loop Builder 中文指南](docs/WORKFLOW_LOOP_BUILDER_GUIDE_ZH.md)
 - [Builder 模型和边界](docs/WORKFLOW_LOOP_BUILDER.md)
+- [响应式与触摸界面](docs/RESPONSIVE_UI_ZH.md)
 - [FSU Local 使用说明](FSU_mod/README.md)
 - [FSU Club Cache 集成](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)
 - [重构里程碑](docs/REFACTORING_MILESTONES.md)

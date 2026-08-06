@@ -105,6 +105,14 @@ describe('main panel command orchestration', () => {
     expect(updateLoopControls).toHaveBeenCalledOnce();
   });
 
+  it('applies a manual responsive layout override', () => {
+    const setLayoutMode = vi.fn();
+    const current = harness({ setLayoutMode });
+    expect(current.commands.setLayoutMode('mobile')).toBe(true);
+    expect(setLayoutMode).toHaveBeenCalledWith('mobile');
+    expect(current.setPanelState).toHaveBeenCalledOnce();
+  });
+
   it('opens the visual Builder with the busy guard', () => {
     const success = harness();
     expect(success.commands.openBuilder()).toBe(true);

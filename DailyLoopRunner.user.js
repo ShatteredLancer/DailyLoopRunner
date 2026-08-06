@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.21
+// @version      0.7.30
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -28,7 +28,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.21",
+    version: "0.7.30",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -11615,7 +11615,9 @@
     let pendingHandle = null;
     let fullLogDirty = true;
     function fullLogVisible(panel) {
-      return !!panel && panel.classList?.contains("options-open") && !panel.classList?.contains("icon-only");
+      if (!panel || panel.classList?.contains("icon-only")) return false;
+      if (panel.dataset?.layout === "mobile") return panel.dataset?.mobileTab === "log";
+      return panel.classList?.contains("options-open");
     }
     function flush() {
       pendingHandle = null;
@@ -11686,6 +11688,7 @@
     const select = required(panel, "#bronze-loop-select");
     select.addEventListener("change", (event) => commands.selectLoop?.(event.target?.value, event));
     required(panel, "#bronze-loop-profile-select").addEventListener("change", (event) => commands.selectProfile?.(event.target?.value, event));
+    required(panel, "#bronze-loop-layout-mode").addEventListener("change", (event) => commands.setLayoutMode?.(event.target?.value, event));
     required(panel, "#bronze-loop-open-builder").addEventListener("click", (event) => commands.openBuilder?.(event));
     Object.entries(HELP_BUTTON_TOPICS).forEach(([id, topic]) => {
       required(panel, `#${id}`).addEventListener("click", (event) => commands.openHelp?.(topic, event));
@@ -11723,6 +11726,7 @@
     required(panel, "#bronze-loop-low-rated-gold-max").value = sbcFodderOptions.lowRatedGoldMaxRating ?? 82;
     required(panel, "#bronze-loop-rating-sbc-max-card").value = sbcFodderOptions.ratingSbcMaxCardRating ?? 88;
     required(panel, "#bronze-loop-reward-alert-enabled").checked = rewardAlertSettings.enabled !== false;
+    required(panel, "#bronze-loop-layout-mode").value = options.layoutMode || "auto";
   }
 
   // src/ui/main-panel-commands.js
@@ -11762,6 +11766,11 @@
       },
       savePickOptions(event) {
         options.savePickOptions?.(event);
+        return true;
+      },
+      setLayoutMode(layoutMode) {
+        options.setLayoutMode?.(layoutMode);
+        setPanelState();
         return true;
       },
       saveSbcFodderOptions(event) {
@@ -11882,7 +11891,15 @@
     const onModeChange = options.onModeChange || (() => {
     });
     const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
+    const saveMobileTab = options.saveMobileTab || (() => {
+    });
+    const loadedMobileTab = String(options.loadMobileTab?.() || "run");
+    let mobileTab = ["run", "options", "log"].includes(loadedMobileTab) ? loadedMobileTab : "run";
+    function isMobileLayout() {
+      return panel.dataset?.layout === "mobile";
+    }
     function persistPosition() {
+      if (isMobileLayout()) return;
       try {
         const rect = panel.getBoundingClientRect();
         savePosition({
@@ -11895,6 +11912,11 @@
       }
     }
     function resetSize() {
+      if (isMobileLayout()) {
+        panel.style.width = "";
+        panel.style.height = "";
+        return { width: 0, height: 0 };
+      }
       const size = getMainPanelDefaultSize(panel.classList.contains("options-open"));
       const clamped = clampMainPanelDefaultSize(size, viewportSize(getViewport));
       panel.dataset.minWidth = String(clamped.width);
@@ -11919,9 +11941,10 @@
     function updateOptionsButton() {
       const button3 = panel.querySelector("#bronze-loop-options-toggle");
       if (!button3) return;
-      const open = panel.classList.contains("options-open");
-      button3.textContent = open ? "Hide" : "Options";
-      button3.title = open ? "Hide advanced options" : "Show advanced options";
+      const mobile = isMobileLayout();
+      const open = mobile ? mobileTab !== "run" : panel.classList.contains("options-open");
+      button3.textContent = open ? mobile ? "Run" : "Hide" : panel.classList.contains("is-running") ? "Details" : "Options";
+      button3.title = open ? "Return to Run view" : "Show advanced options";
     }
     function updateCollapseButton() {
       const button3 = panel.querySelector("#bronze-loop-collapse");
@@ -11934,8 +11957,45 @@
       updateCollapseButton();
       onModeChange({
         iconOnly: panel.classList.contains("icon-only"),
-        optionsOpen: panel.classList.contains("options-open")
+        optionsOpen: panel.classList.contains("options-open"),
+        mobileTab,
+        layout: panel.dataset?.layout || "desktop"
       });
+    }
+    function setMobileTab(nextTab, persist = true) {
+      const normalized = ["run", "options", "log"].includes(String(nextTab)) ? String(nextTab) : "run";
+      mobileTab = normalized;
+      if (panel.dataset) panel.dataset.mobileTab = mobileTab;
+      if (persist) saveMobileTab(mobileTab);
+      notifyModeChange();
+      return mobileTab;
+    }
+    function setResponsiveMode(snapshot = {}) {
+      const previous = panel.dataset?.layout || "desktop";
+      const layout = ["desktop", "tablet", "mobile"].includes(snapshot.layout) ? snapshot.layout : "desktop";
+      if (previous !== "mobile" && layout === "mobile") persistPosition();
+      if (panel.dataset) {
+        panel.dataset.layout = layout;
+        panel.dataset.input = snapshot.input === "touch" ? "touch" : "pointer";
+      }
+      if (layout === "mobile") {
+        panel.classList.remove("options-open");
+        panel.style.left = "";
+        panel.style.top = "";
+        panel.style.right = "";
+        panel.style.bottom = "";
+        panel.style.width = "";
+        panel.style.height = "";
+        setMobileTab(mobileTab, false);
+      } else if (previous === "mobile") {
+        panel.classList.remove("icon-only");
+        resetSize();
+        restoreSavedPosition();
+        notifyModeChange();
+      } else {
+        notifyModeChange();
+      }
+      return layout;
     }
     function restorePanel() {
       panel.classList.remove("icon-only");
@@ -11961,6 +12021,10 @@
       persistPosition();
     }
     function toggleOptions() {
+      if (isMobileLayout()) {
+        setMobileTab(mobileTab === "run" ? "options" : "run");
+        return;
+      }
       panel.classList.toggle("options-open");
       resetSize();
       notifyModeChange();
@@ -11985,6 +12049,7 @@
       let startTop = 0;
       let moved = false;
       handle.addEventListener("pointerdown", (event) => {
+        if (isMobileLayout()) return;
         if (!panel.classList.contains("icon-only") && event.target?.closest?.("button,select,input,textarea")) return;
         dragging = true;
         moved = false;
@@ -12087,7 +12152,7 @@
         const element = panel.querySelector(`#bronze-loop-resize-${dir}`);
         if (!element) return;
         element.addEventListener("pointerdown", (event) => {
-          if (panel.classList.contains("icon-only")) return;
+          if (panel.classList.contains("icon-only") || isMobileLayout()) return;
           const rect = panel.getBoundingClientRect();
           panel.style.left = `${rect.left}px`;
           panel.style.top = `${rect.top}px`;
@@ -12129,6 +12194,7 @@
         persistLogHeight();
       };
       handle.addEventListener("pointerdown", (event) => {
+        if (isMobileLayout()) return;
         const startHeight = Number(log.getBoundingClientRect?.().height || Number.parseFloat(log.style?.height));
         if (!Number.isFinite(startHeight)) return;
         resizing = { startY: event.clientY, startHeight };
@@ -12142,13 +12208,179 @@
     restoreSavedPosition();
     resetSize();
     restoreLogHeight();
+    if (panel.dataset) panel.dataset.mobileTab = mobileTab;
     makeDraggable();
     makeResizable();
     makeLogResizable();
     panel.querySelector("#bronze-loop-collapse")?.addEventListener("click", toggleIconOnly);
     panel.querySelector("#bronze-loop-options-toggle")?.addEventListener("click", toggleOptions);
+    for (const tab of ["run", "options", "log"]) {
+      panel.querySelector(`#bronze-loop-mobile-tab-${tab}`)?.addEventListener("click", () => setMobileTab(tab));
+    }
     notifyModeChange();
-    return Object.freeze({ resetSize, restorePanel, toggleIconOnly, toggleOptions, persistPosition, persistLogHeight });
+    return Object.freeze({
+      resetSize,
+      restorePanel,
+      toggleIconOnly,
+      toggleOptions,
+      setMobileTab,
+      setResponsiveMode,
+      persistPosition,
+      persistLogHeight
+    });
+  }
+
+  // src/ui/responsive-layout.js
+  var RESPONSIVE_LAYOUT_OVERRIDES = Object.freeze(["auto", "desktop", "mobile"]);
+  function normalizeLayoutOverride(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return RESPONSIVE_LAYOUT_OVERRIDES.includes(normalized) ? normalized : "auto";
+  }
+  function resolveResponsiveLayout(metrics = {}, override = "auto") {
+    const normalizedOverride = normalizeLayoutOverride(override);
+    const width = Math.max(0, Number(metrics.width || 0));
+    const height = Math.max(0, Number(metrics.height || 0));
+    const touchInput = metrics.coarsePointer === true || metrics.hoverNone === true;
+    let layout;
+    if (normalizedOverride !== "auto") {
+      layout = normalizedOverride;
+    } else if (width <= 620 || touchInput && height <= 620) {
+      layout = "mobile";
+    } else if (width <= 1024) {
+      layout = "tablet";
+    } else {
+      layout = "desktop";
+    }
+    return Object.freeze({
+      layout,
+      input: touchInput ? "touch" : "pointer",
+      override: normalizedOverride,
+      width,
+      height
+    });
+  }
+  function setRootSnapshot(root, snapshot) {
+    if (!root?.setAttribute) return;
+    root.setAttribute("data-dlr-layout", snapshot.layout);
+    root.setAttribute("data-dlr-input", snapshot.input);
+    root.setAttribute("data-dlr-layout-override", snapshot.override);
+  }
+  function createResponsiveLayoutController(options = {}) {
+    const windowObject = options.windowObject;
+    const root = options.root;
+    const loadOverride = options.loadOverride || (() => "auto");
+    const saveOverride = options.saveOverride || (() => {
+    });
+    const onChange = options.onChange || (() => {
+    });
+    const coarseQuery = windowObject?.matchMedia?.("(pointer: coarse)") || null;
+    const hoverQuery = windowObject?.matchMedia?.("(hover: none)") || null;
+    let override = normalizeLayoutOverride(loadOverride());
+    let snapshot = null;
+    function readMetrics() {
+      const viewport = windowObject?.visualViewport;
+      return {
+        width: Number(viewport?.width || windowObject?.innerWidth || 0),
+        height: Number(viewport?.height || windowObject?.innerHeight || 0),
+        coarsePointer: coarseQuery?.matches === true,
+        hoverNone: hoverQuery?.matches === true
+      };
+    }
+    function refresh() {
+      const next = resolveResponsiveLayout(readMetrics(), override);
+      const changed = !snapshot || snapshot.layout !== next.layout || snapshot.input !== next.input || snapshot.override !== next.override || snapshot.width !== next.width || snapshot.height !== next.height;
+      snapshot = next;
+      setRootSnapshot(root, snapshot);
+      if (changed) onChange(snapshot);
+      return snapshot;
+    }
+    function setOverride(value) {
+      override = normalizeLayoutOverride(value);
+      saveOverride(override);
+      return refresh();
+    }
+    const listeners = [
+      [windowObject, "resize"],
+      [windowObject, "orientationchange"],
+      [windowObject?.visualViewport, "resize"],
+      [coarseQuery, "change"],
+      [hoverQuery, "change"]
+    ].filter(([target]) => target?.addEventListener);
+    listeners.forEach(([target, event]) => target.addEventListener(event, refresh));
+    refresh();
+    function destroy() {
+      listeners.forEach(([target, event]) => target.removeEventListener?.(event, refresh));
+    }
+    return Object.freeze({
+      destroy,
+      refresh,
+      setOverride,
+      getSnapshot: () => snapshot
+    });
+  }
+
+  // src/ui/responsive-dialog.js
+  function rootAttribute(root, attribute, datasetKey) {
+    return root?.getAttribute?.(attribute) || root?.dataset?.[datasetKey] || "";
+  }
+  function readResponsiveUiMode(dom) {
+    const root = dom?.query?.(":root") || null;
+    const layout = rootAttribute(root, "data-dlr-layout", "dlrLayout") || "desktop";
+    const input = rootAttribute(root, "data-dlr-input", "dlrInput") || "pointer";
+    return Object.freeze({
+      layout,
+      input,
+      mobile: layout === "mobile",
+      touchTargets: layout === "mobile" || input === "touch"
+    });
+  }
+  function responsiveControlHeight(mode, desktopHeight = 30) {
+    return `${mode?.touchTargets ? 44 : Math.max(24, Number(desktopHeight || 30))}px`;
+  }
+  function applyResponsiveDialogLayout(options = {}) {
+    const mode = options.mode || readResponsiveUiMode(options.dom);
+    const overlay = options.overlay;
+    const dialog = options.dialog;
+    if (mode.mobile) {
+      Object.assign(overlay?.style || {}, {
+        alignItems: "stretch",
+        justifyContent: "stretch",
+        padding: "0"
+      });
+      Object.assign(dialog?.style || {}, {
+        width: "100%",
+        height: "100dvh",
+        maxHeight: "100dvh",
+        overflow: "auto",
+        overscrollBehavior: "contain",
+        border: "0",
+        padding: "max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px))"
+      });
+      Object.assign(options.title?.style || {}, {
+        position: "sticky",
+        top: "0",
+        zIndex: "2",
+        background: "#171b21",
+        padding: "6px 0 10px"
+      });
+      Object.assign(options.actions?.style || {}, {
+        position: "sticky",
+        bottom: "0",
+        zIndex: "2",
+        background: "#171b21",
+        padding: "10px 0 max(4px, env(safe-area-inset-bottom, 0px))"
+      });
+    }
+    if (mode.touchTargets) {
+      for (const control of options.controls || []) {
+        if (!control?.style) continue;
+        control.style.minHeight = "44px";
+        if (["INPUT", "SELECT", "TEXTAREA"].includes(String(control.tagName || "").toUpperCase())) {
+          control.style.fontSize = "16px";
+        }
+      }
+    }
+    return mode;
   }
 
   // src/ui/main-panel-help.js
@@ -12159,8 +12391,9 @@
       items: Object.freeze([
         Object.freeze(["Start and Stop", "Start runs the selected Loop. Stop waits for the next safe point before ending the run."]),
         Object.freeze(["Batch Open", "Choose pack types from My Packs, save a batch, and open only the saved selection."]),
+        Object.freeze(["Mobile views", "Use Run, Options, and Log to switch views. Starting a Loop returns to the compact Run controller so Stop remains available."]),
         Object.freeze(["Options", "Show run settings, Builder Profiles, Dynamic SBC scan controls, and the full log."]),
-        Object.freeze(["Move and resize", "Drag the title bar to move the panel. Drag any panel edge or corner to resize the panel."])
+        Object.freeze(["Move and resize", "On Desktop layout, drag the title bar to move the panel and drag any edge or corner to resize it."])
       ])
     }),
     Object.freeze({
@@ -12180,6 +12413,7 @@
       title: "Config",
       items: Object.freeze([
         Object.freeze(["Profile", "Load a saved Builder Profile or switch back to the built-in Loop set."]),
+        Object.freeze(["Layout", "Auto follows the viewport. Desktop and Mobile manually override the layout without changing the active run or Profile."]),
         Object.freeze(["Open Builder", "Edit Workflows and Loops, including their steps, run settings, pack handling, and recovery rules."]),
         Object.freeze(["Refresh caches", "Refresh available EA and FSU inventory data after changes made outside the Runner."]),
         Object.freeze(["SBC scan", "Discover supported dynamic Player Pick and Upgrade SBCs. Incremental reuses cache, Full refreshes Challenge data, and Clear cache + scan rebuilds it."])
@@ -12189,9 +12423,9 @@
       id: "log",
       title: "Log",
       items: Object.freeze([
-        Object.freeze(["Latest log", "The compact panel shows the newest status messages. Options shows the complete session log."]),
+        Object.freeze(["Latest log", "The compact panel shows the newest status messages. Desktop Options and the mobile Log view show the complete session log."]),
         Object.freeze(["Copy, Clear, Save", "Copy the session log, clear the on-screen history, or download it as a log file."]),
-        Object.freeze(["Resize log", "Drag the horizontal resize bar below the full log up or down. The chosen height is saved locally for the next Web App visit."])
+        Object.freeze(["Resize log", "On Desktop layout, drag the horizontal resize bar below the full log. The chosen height is saved locally for the next Web App visit."])
       ])
     })
   ]);
@@ -12208,6 +12442,7 @@
     const dom = options.dom;
     if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
     dom.query?.("#bronze-loop-help-modal")?.remove?.();
+    const mode = readResponsiveUiMode(dom);
     const overlay = dom.create("div");
     overlay.id = "bronze-loop-help-modal";
     applyStyles(overlay, {
@@ -12263,7 +12498,7 @@
     close.type = "button";
     close.textContent = "Close";
     applyStyles(close, {
-      minHeight: "30px",
+      minHeight: responsiveControlHeight(mode),
       padding: "0 12px",
       cursor: "pointer",
       color: "#fff",
@@ -12275,6 +12510,7 @@
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) dismiss();
     });
+    applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title, actions, controls: [close] });
     actions.appendChild(close);
     dialog.appendChild(actions);
     overlay.appendChild(dialog);
@@ -12404,6 +12640,19 @@
   function renderMainPanelRuntimeState(options = {}) {
     const panel = options.panel;
     const state = options.state || {};
+    if (!panel) return;
+    const wasRunning = panel.dataset?.running === "true";
+    panel.classList?.toggle?.("is-running", state.running === true);
+    panel.classList?.toggle?.("is-stopping", state.running === true && state.stopping === true);
+    if (panel.dataset) panel.dataset.running = state.running === true ? "true" : "false";
+    if (state.running === true && !wasRunning && panel.dataset?.layout === "mobile") options.setMobileTab?.("run");
+    const status = query(panel, "#bronze-loop-run-status");
+    const name = query(panel, "#bronze-loop-run-name");
+    if (status) status.textContent = state.stopping === true ? "Stopping" : "Running";
+    if (name) {
+      const selected2 = query(panel, "#bronze-loop-select");
+      name.textContent = selected2?.selectedOptions?.[0]?.textContent || selected2?.value || "";
+    }
     const busy = state.running === true || state.refreshing === true || state.scanningPicks === true || state.loadingLoops === true;
     const disabled2 = {
       "bronze-loop-start": busy,
@@ -12460,6 +12709,8 @@
     pointer-events: none;
   }
   #bronze-loop-panel .panel-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  #bronze-loop-run-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  #bronze-loop-mobile-tabs, #bronze-loop-run-summary { display: none; }
   .bronze-loop-resize { position: absolute; z-index: 2; touch-action: none; }
   #bronze-loop-resize-n { top: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
   #bronze-loop-resize-s { bottom: -3px; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
@@ -12540,6 +12791,7 @@
   }
   #bronze-loop-options { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid #303946; }
   #bronze-loop-panel.options-open #bronze-loop-options { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  #bronze-loop-panel.options-open #bronze-loop-run-view,
   #bronze-loop-panel.options-open #bronze-loop-latest { display: none; }
   #bronze-loop-options-scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
   .bronze-loop-section-heading { display: flex; align-items: center; gap: 4px; margin: 8px 0 6px; }
@@ -12581,6 +12833,70 @@
   }
   #bronze-loop-log-resize:hover::before { background: #9fb2c9; }
   #bronze-loop-log .bronze-loop-log-high-rated { color: #ffd54a; font-weight: 700; }
+  #bronze-loop-panel[data-input="touch"] button,
+  #bronze-loop-panel[data-input="touch"] select,
+  #bronze-loop-panel[data-input="touch"] input:not([type="checkbox"]) { min-height: 44px; font-size: 16px; }
+  #bronze-loop-panel[data-input="touch"] button { height: 44px; }
+  #bronze-loop-panel[data-input="touch"] .bronze-loop-help-button { min-width: 44px; width: 44px; height: 44px; font-size: 14px; }
+  #bronze-loop-panel[data-input="touch"] input[type="checkbox"] { width: 22px; height: 22px; }
+  #bronze-loop-panel[data-input="touch"] label { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+  #bronze-loop-panel[data-layout="mobile"] {
+    left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important;
+    width: 100% !important; min-width: 0; height: min(72dvh, 620px) !important; min-height: 260px;
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px));
+    padding: 10px max(10px, env(safe-area-inset-right, 0px)) max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+    border-width: 1px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.42);
+  }
+  #bronze-loop-panel[data-layout="mobile"] .bronze-loop-resize,
+  #bronze-loop-panel[data-layout="mobile"] #bronze-loop-log-resize { display: none; }
+  #bronze-loop-panel[data-layout="mobile"] #bronze-loop-drag { cursor: default; touch-action: pan-y; }
+  #bronze-loop-panel[data-layout="mobile"] #bronze-loop-mobile-tabs {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0 0 8px;
+    border-bottom: 1px solid #303946;
+  }
+  #bronze-loop-panel[data-layout="mobile"] #bronze-loop-mobile-tabs button { min-width: 0; border-width: 0 0 2px; background: transparent; }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="run"] #bronze-loop-mobile-tab-run,
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="options"] #bronze-loop-mobile-tab-options,
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="log"] #bronze-loop-mobile-tab-log { border-color: #78a6ff; color: #b8d1ff; }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="run"] #bronze-loop-run-view { display: flex; }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="run"] #bronze-loop-options { display: none; }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="options"] #bronze-loop-run-view,
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="log"] #bronze-loop-run-view { display: none; }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="options"] #bronze-loop-options,
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="log"] #bronze-loop-options {
+    display: flex; flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; border: 0; overflow: hidden;
+  }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="options"] #bronze-loop-log-section { display: none; }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="log"] #bronze-loop-options-config { display: none; }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="log"] #bronze-loop-options-scroll,
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="log"] #bronze-loop-log-section { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="log"] #bronze-loop-log { flex: 1 1 auto; height: auto !important; min-height: 0; touch-action: pan-y; }
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="options"],
+  #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="log"] { height: min(88dvh, 760px) !important; }
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] { height: 154px !important; min-height: 154px; }
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-mobile-tabs,
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] .bronze-loop-loop-row,
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-start,
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-batch-open,
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-recap-reopen,
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-scan-progress { display: none !important; }
+  #bronze-loop-panel[data-layout="mobile"].is-running #bronze-loop-run-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; min-width: 0; }
+  #bronze-loop-panel[data-layout="mobile"].is-running #bronze-loop-run-indicator { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #58c58a; }
+  #bronze-loop-panel[data-layout="mobile"].is-stopping #bronze-loop-run-indicator { background: #ffcf66; }
+  #bronze-loop-panel[data-layout="mobile"].is-running #bronze-loop-run-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c8d5e5; }
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] .bronze-loop-run-actions { margin: 0; }
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-stop { flex: 1 1 auto; }
+  #bronze-loop-panel[data-layout="mobile"].icon-only {
+    left: auto !important; right: max(10px, env(safe-area-inset-right, 0px)) !important;
+    bottom: max(10px, env(safe-area-inset-bottom, 0px)) !important;
+    width: 48px !important; height: 48px !important; min-height: 0; border: 1px solid #78a6ff; padding: 0;
+  }
+  #bronze-loop-panel[data-layout="mobile"].icon-only #bronze-loop-drag,
+  #bronze-loop-panel[data-layout="mobile"].icon-only #bronze-loop-collapse { width: 46px; height: 46px; }
+  @media (max-height: 520px) {
+    #bronze-loop-panel[data-layout="mobile"] { height: calc(100dvh - env(safe-area-inset-top, 0px)) !important; }
+    #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] { height: 142px !important; }
+  }
 `;
   function mainPanelHtml(maxRounds = 3, version = "") {
     const rounds = Math.max(1, Number(maxRounds) || 3);
@@ -12595,9 +12911,16 @@
         <button id="bronze-loop-collapse" title="Compact">L</button>
       </div>
     </div>
+    <nav id="bronze-loop-mobile-tabs" aria-label="Loop Runner views">
+      <button id="bronze-loop-mobile-tab-run" type="button" data-mobile-tab="run">Run</button>
+      <button id="bronze-loop-mobile-tab-options" type="button" data-mobile-tab="options">Options</button>
+      <button id="bronze-loop-mobile-tab-log" type="button" data-mobile-tab="log">Log</button>
+    </nav>
     <div class="panel-body">
-      <div class="row"><select id="bronze-loop-select"></select></div>
-      <div class="row">
+      <div id="bronze-loop-run-view">
+      <div id="bronze-loop-run-summary"><span id="bronze-loop-run-indicator"></span><strong id="bronze-loop-run-status">Running</strong><span id="bronze-loop-run-name"></span></div>
+      <div class="row bronze-loop-loop-row"><select id="bronze-loop-select"></select></div>
+      <div class="row bronze-loop-run-actions">
         <button id="bronze-loop-start">Start</button>
         <button id="bronze-loop-stop" disabled>Stop</button>
         <button id="bronze-loop-batch-open" title="Scan My Packs and open a saved batch">Batch Open</button>
@@ -12608,8 +12931,10 @@
         <div id="bronze-loop-scan-progress-track" role="progressbar" aria-label="Dynamic SBC scan progress"><div id="bronze-loop-scan-progress-bar"></div></div>
       </div>
       <div id="bronze-loop-latest">Ready.</div>
+      </div>
       <div id="bronze-loop-options">
         <div id="bronze-loop-options-scroll">
+        <div id="bronze-loop-options-config">
         <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Run options</div><button id="bronze-loop-help-run-options" class="bronze-loop-help-button" type="button" title="Explain run options" aria-label="Explain run options">?</button></div>
         <div class="row">
           <label title="Open reward packs automatically when a loop supports it">
@@ -12651,11 +12976,15 @@
           <div class="row bronze-loop-profile-row"><span>Profile</span><select id="bronze-loop-profile-select" title="Load a saved Builder Profile or restore built-in loops"></select></div>
           <div class="row"><button id="bronze-loop-open-builder" title="Open the visual Workflow and Loop Builder">Open Builder</button><button id="bronze-loop-refresh" title="Refresh EA and FSU inventory caches after external changes">Refresh caches</button></div>
           <div class="row"><span class="bronze-loop-option-summary">SBC scan</span><select id="bronze-loop-scan-mode" title="Choose incremental validation, a full Challenge refresh, or cache rebuild"><option value="incremental">Incremental scan</option><option value="full">Full rescan</option><option value="clear">Clear cache + scan</option></select><button id="bronze-loop-scan-picks" title="Scan supported dynamic Player Pick and Upgrade SBCs">Scan SBCs</button></div>
+          <div class="row"><span class="bronze-loop-option-summary">Layout</span><select id="bronze-loop-layout-mode" title="Automatically choose a responsive layout or force Desktop/Mobile"><option value="auto">Auto</option><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></div>
         </div>
+        <div id="bronze-loop-log-section">
         <div class="bronze-loop-section-heading"><div class="bronze-loop-section">Log</div><button id="bronze-loop-help-log" class="bronze-loop-help-button" type="button" title="Explain log controls and resizing" aria-label="Explain log controls and resizing">?</button></div>
         <div class="row"><button id="bronze-loop-copy">Copy log</button><button id="bronze-loop-clear">Clear log</button><button id="bronze-loop-download">Save log</button></div>
         <div id="bronze-loop-log"></div>
         <div id="bronze-loop-log-resize" role="separator" aria-orientation="horizontal" title="Drag up or down to resize the log"></div>
+        </div>
+        </div>
       </div>
     </div>
     ${resizeHandles}
@@ -14581,6 +14910,8 @@
   .dlr-builder-toolbar h1 { margin: 0 12px 0 0; font-size: 16px; white-space: nowrap; }
   .dlr-builder-toolbar select { max-width: 210px; }
   .dlr-builder-toolbar .spacer { flex: 1; }
+  .dlr-builder-profile-controls, .dlr-builder-secondary-actions, .dlr-builder-primary-actions { display: flex; align-items: center; gap: 8px; }
+  .dlr-builder-mobile-more, .dlr-builder-mobile-sections { display: none; }
   .dlr-builder-dirty { color: #ffcf66; min-width: 56px; }
   .dlr-builder-workspace { min-height: 0; display: grid; grid-template-columns: 260px minmax(420px, 1fr) 340px; }
   .dlr-builder-library, .dlr-builder-inspector { min-width: 0; overflow: auto; background: #171a1d; }
@@ -14666,15 +14997,57 @@
     .dlr-builder-requirement { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
     .dlr-builder-preview-workflow li, .dlr-builder-preview-table > div { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
   }
-  @media (max-width: 620px) {
-    #dlr-workflow-builder.open { grid-template-rows: auto minmax(0, 1fr) 28px; }
-    .dlr-builder-workspace { grid-template-columns: 1fr; }
-    .dlr-builder-library { max-height: 34vh; border-right: 0; border-bottom: 1px solid #394047; }
-    .dlr-builder-editor { padding: 12px 10px 50px; }
-    .dlr-builder-form-grid, .dlr-builder-form-grid.common, .dlr-builder-json-grid { grid-template-columns: 1fr; }
-    .dlr-builder-step { grid-template-columns: 24px 1fr auto auto; }
-    .dlr-builder-step button:nth-of-type(3), .dlr-builder-step button:nth-of-type(4) { grid-row: 2; }
+  :root[data-dlr-input="touch"] #dlr-workflow-builder button,
+  :root[data-dlr-input="touch"] #dlr-workflow-builder input,
+  :root[data-dlr-input="touch"] #dlr-workflow-builder select { min-height: 44px; font-size: 16px; }
+  :root[data-dlr-layout="mobile"] #dlr-workflow-builder.open { grid-template-rows: auto minmax(0, 1fr) 28px; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-toolbar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px 10px;
   }
+  :root[data-dlr-layout="mobile"] .dlr-builder-toolbar h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-toolbar .spacer { display: none; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-profile-controls { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-profile-controls select,
+  :root[data-dlr-layout="mobile"] .dlr-builder-profile-controls input { width: 100%; min-width: 0; max-width: none; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-mobile-more { display: block; grid-column: 2; grid-row: 1; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-secondary-actions { display: none; grid-column: 1 / -1; flex-wrap: wrap; padding-top: 2px; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-toolbar.mobile-actions-open .dlr-builder-secondary-actions { display: flex; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-primary-actions {
+    position: fixed; left: 0; right: 0; bottom: 28px; z-index: 4; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px; padding: 8px max(10px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+    background: #171a1d; border-top: 1px solid #394047;
+  }
+  :root[data-dlr-layout="mobile"] .dlr-builder-body { grid-template-rows: auto auto minmax(0, 1fr); padding-bottom: 60px; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-tabs { overflow-x: auto; padding-left: 0; scrollbar-width: thin; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-tabs button { flex: 0 0 auto; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-mobile-sections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid #394047; background: #131619; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-mobile-sections button { border-width: 0 0 2px; background: transparent; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-mobile-sections button.active { border-color: #58a6ff; color: #a9d2ff; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace { grid-template-columns: minmax(0, 1fr); }
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace > .dlr-builder-library,
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace > .dlr-builder-editor,
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace > .dlr-builder-inspector { display: none; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace[data-mobile-section="library"] > .dlr-builder-library,
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace[data-mobile-section="editor"] > .dlr-builder-editor,
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace[data-mobile-section="details"] > .dlr-builder-inspector { display: block; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-library { max-height: none; border: 0; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-editor,
+  :root[data-dlr-layout="mobile"] .dlr-builder-inspector { overflow: auto; padding: 12px 10px 72px; border: 0; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-form-grid,
+  :root[data-dlr-layout="mobile"] .dlr-builder-form-grid.common,
+  :root[data-dlr-layout="mobile"] .dlr-builder-json-grid { grid-template-columns: minmax(0, 1fr); }
+  :root[data-dlr-layout="mobile"] .dlr-builder-requirement { grid-template-columns: minmax(0, 1fr); }
+  :root[data-dlr-layout="mobile"] .dlr-builder-step { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-status { overflow-x: auto; white-space: nowrap; gap: 12px; padding-bottom: max(5px, env(safe-area-inset-bottom, 0px)); }
+  :root[data-dlr-layout="desktop"] .dlr-builder-workspace { grid-template-columns: 260px minmax(420px, 1fr) 340px; }
+  :root[data-dlr-layout="desktop"] .dlr-builder-inspector { display: block; }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-toolbar { flex-wrap: nowrap; }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-form-grid.common { grid-template-columns: repeat(3, minmax(160px, 1fr)); }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-requirement { grid-template-columns: 30px repeat(4, minmax(100px, 1fr)); }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-preview-workflow li { grid-template-columns: minmax(160px, 1fr) 150px 180px minmax(180px, 1fr); }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-preview-table > div { grid-template-columns: minmax(160px, 1fr) 150px 170px 180px 160px minmax(180px, 1fr); }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-body { overflow: auto; }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-workspace { min-width: 1020px; }
 `;
   function workflowLoopBuilderHtml(model) {
     const profileOptions = model.store.profiles.map((profile) => ({ value: profile.id, label: profile.name }));
@@ -14697,26 +15070,36 @@
       recoveryRecipes: model.config.recoveryRecipes,
       defaultRecoveryPolicyIds: model.config.defaultUnassignedRecoveryPolicyIds || []
     };
-    const editor = model.previewOpen ? renderPreview(model) : model.tab === "json" ? renderJson(model) : `<div class="dlr-builder-workspace">${renderLibrary(model)}<main class="dlr-builder-editor">${model.selectedKind === "loops" || model.selectedKind === "dynamic" ? renderLoopEditor(model.selectedObject, context) : renderRecoveryEditor(model.selectedObject, model.selectedKind, context)}</main>${renderInspector(model, selected2)}</div>`;
-    return `<header class="dlr-builder-toolbar">
+    const editor = model.previewOpen ? renderPreview(model) : model.tab === "json" ? renderJson(model) : `<div class="dlr-builder-workspace" data-mobile-section="${escapeHtml(model.mobileSection || "library")}">${renderLibrary(model)}<main class="dlr-builder-editor">${model.selectedKind === "loops" || model.selectedKind === "dynamic" ? renderLoopEditor(model.selectedObject, context) : renderRecoveryEditor(model.selectedObject, model.selectedKind, context)}</main>${renderInspector(model, selected2)}</div>`;
+    const mobileSections = model.previewOpen || model.tab === "json" ? "" : `<nav class="dlr-builder-mobile-sections" aria-label="Builder workspace">
+    ${[["library", "Library"], ["editor", "Editor"], ["details", "Details"]].map(([id, label]) => `<button class="${model.mobileSection === id ? "active" : ""}" data-builder-action="select-mobile-section" data-section="${id}">${label}</button>`).join("")}
+  </nav>`;
+    return `<header class="dlr-builder-toolbar${model.mobileActionsOpen ? " mobile-actions-open" : ""}">
     <h1>Workflow Builder</h1>
-    <select data-builder-action="select-profile">${optionList(profileOptions, model.profile.id)}</select>
-    <input id="dlr-builder-profile-name" value="${escapeHtml(model.profile.name)}" aria-label="Profile name">
-    <button data-builder-action="new-profile">New profile</button>
-    <button data-builder-action="delete-profile"${disabled(model.store.profiles.length <= 1)}>Delete profile</button>
-    <span class="dlr-builder-dirty">${model.profile.draftRevision !== model.profile.savedRevision ? "Unsaved" : "Saved"}</span>
+    <div class="dlr-builder-profile-controls">
+      <select data-builder-action="select-profile">${optionList(profileOptions, model.profile.id)}</select>
+      <input id="dlr-builder-profile-name" value="${escapeHtml(model.profile.name)}" aria-label="Profile name">
+      <span class="dlr-builder-dirty">${model.profile.draftRevision !== model.profile.savedRevision ? "Unsaved" : "Saved"}</span>
+    </div>
     <span class="spacer"></span>
-    <button data-builder-action="undo-draft" title="Undo"${disabled(!model.canUndo)}>Undo</button>
-    <button data-builder-action="redo-draft" title="Redo"${disabled(!model.canRedo)}>Redo</button>
-    <button data-builder-action="validate-profile">Validate</button>
-    <button data-builder-action="preview-profile">Preview</button>
-    <button data-builder-action="save-profile">Save</button>
-    <button class="primary" data-builder-action="activate-profile">Activate</button>
-    <button data-builder-action="show-import">Import</button>
-    <button data-builder-action="export-json">Export</button>
-    <button data-builder-action="close-builder">Close</button>
+    <button class="dlr-builder-mobile-more" data-builder-action="toggle-mobile-actions" aria-expanded="${model.mobileActionsOpen ? "true" : "false"}">More</button>
+    <div class="dlr-builder-secondary-actions">
+      <button data-builder-action="new-profile">New profile</button>
+      <button data-builder-action="delete-profile"${disabled(model.store.profiles.length <= 1)}>Delete profile</button>
+      <button data-builder-action="undo-draft" title="Undo"${disabled(!model.canUndo)}>Undo</button>
+      <button data-builder-action="redo-draft" title="Redo"${disabled(!model.canRedo)}>Redo</button>
+      <button data-builder-action="validate-profile">Validate</button>
+      <button data-builder-action="preview-profile">Preview</button>
+      <button data-builder-action="show-import">Import</button>
+      <button data-builder-action="export-json">Export</button>
+    </div>
+    <div class="dlr-builder-primary-actions">
+      <button data-builder-action="save-profile">Save</button>
+      <button class="primary" data-builder-action="activate-profile">Activate</button>
+      <button data-builder-action="close-builder">Close</button>
+    </div>
   </header>
-  <div class="dlr-builder-body"><nav class="dlr-builder-tabs">${tabs.map(([id, label]) => `<button class="${model.tab === id ? "active" : ""}" data-builder-action="select-tab" data-tab="${id}">${label}</button>`).join("")}</nav>${editor}</div>
+  <div class="dlr-builder-body"><nav class="dlr-builder-tabs">${tabs.map(([id, label]) => `<button class="${model.tab === id ? "active" : ""}" data-builder-action="select-tab" data-tab="${id}">${label}</button>`).join("")}</nav>${mobileSections}${editor}</div>
   <footer class="dlr-builder-status"><span>${model.validation.valid ? "Valid" : `${model.validation.errors.length} error(s)`}</span><span>${model.validation.conflicts.length} conflict(s)</span><span>${model.validation.unavailableBindings.length} unavailable binding(s)</span><span>Active: ${escapeHtml(model.store.activeProfileId || "Built-in")}</span></footer>`;
   }
   function mountWorkflowLoopBuilder(options = {}) {
@@ -14811,6 +15194,8 @@
     let jsonValid = false;
     let importedProfile = null;
     let previewOpen = false;
+    let mobileSection = "library";
+    let mobileActionsOpen = false;
     const editableBuiltIns = /* @__PURE__ */ new Set();
     const profileHistory = /* @__PURE__ */ new Map();
     function now() {
@@ -14950,6 +15335,8 @@
         jsonMessage,
         jsonValid,
         previewOpen,
+        mobileSection,
+        mobileActionsOpen,
         canUndo: history().undo.length > 0,
         canRedo: history().redo.length > 0
       };
@@ -14963,6 +15350,8 @@
       selectedKind = null;
       selectedId = null;
       selectedStep = null;
+      mobileSection = "library";
+      mobileActionsOpen = false;
       const refreshed = refreshBuilderDynamicBindings(profile(), discoveredLoops(), now());
       setProfile(refreshed, false);
       root.classList.add("open");
@@ -15325,6 +15714,16 @@
       const action2 = button3.dataset.builderAction;
       if (!action2) return;
       if (action2 === "close-builder") return close();
+      if (action2 === "toggle-mobile-actions") {
+        mobileActionsOpen = !mobileActionsOpen;
+        render();
+        return;
+      }
+      if (action2 === "select-mobile-section") {
+        mobileSection = ["library", "editor", "details"].includes(button3.dataset.section) ? button3.dataset.section : "library";
+        render();
+        return;
+      }
       if (action2 === "undo-draft") return undoDraft();
       if (action2 === "redo-draft") return redoDraft();
       if (action2 === "preview-profile") {
@@ -15352,6 +15751,7 @@
         selectedKind = null;
         selectedId = null;
         selectedStep = null;
+        mobileSection = "library";
         render();
         return;
       }
@@ -15359,6 +15759,7 @@
         selectedKind = button3.dataset.kind;
         selectedId = button3.dataset.id;
         selectedStep = null;
+        mobileSection = "editor";
         render();
         return;
       }
@@ -15410,6 +15811,7 @@
       }
       if (action2 === "select-step") {
         selectedStep = Number(button3.dataset.index);
+        mobileSection = "details";
         render();
         return;
       }
@@ -15433,6 +15835,7 @@
         selectedId = result.loop.id;
         tab = "loops";
         selectedStep = null;
+        mobileSection = "editor";
         render();
         return;
       }
@@ -15621,6 +16024,7 @@
     const ranked = options.ranked || [];
     const pickCount = Math.max(1, Number(options.pickCount || 1) || 1);
     const reason = String(options.reason || "manual selection required");
+    const mode = readResponsiveUiMode(options.dom);
     return new Promise((resolve, reject) => {
       let stopTimer = null;
       const overlay = options.dom.create("div");
@@ -15660,13 +16064,13 @@
       hint.textContent = `Select exactly ${pickCount} player(s), then confirm.`;
       applyStyles2(hint, { color: "#b7c2d0", marginBottom: "12px" });
       const list = options.dom.create("div");
-      applyStyles2(list, { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px" });
+      applyStyles2(list, { display: "grid", gridTemplateColumns: mode.mobile ? "1fr" : "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px" });
       const selected2 = /* @__PURE__ */ new Set();
       const cards = [];
       const confirm = options.dom.create("button");
       confirm.textContent = "Confirm selection";
       confirm.disabled = true;
-      applyStyles2(confirm, { marginTop: "14px", minHeight: "34px", padding: "0 14px" });
+      applyStyles2(confirm, { marginTop: "14px", minHeight: responsiveControlHeight(mode, 34), padding: "0 14px" });
       const refresh = () => {
         cards.forEach(({ card, candidate }) => {
           card.style.borderColor = selected2.has(candidate) ? "#64d77a" : "#536171";
@@ -15701,6 +16105,7 @@
         finish(resolve, [...selected2].map((candidate) => candidate.item));
       });
       dialog.append(title, hint, list, confirm);
+      applyResponsiveDialogLayout({ dom: options.dom, mode, overlay, dialog, title, actions: confirm, controls: [confirm, ...cards.map((entry) => entry.card)] });
       overlay.appendChild(dialog);
       options.dom.appendToBody(overlay);
       refresh();
@@ -15723,13 +16128,13 @@
   function applyStyles3(element, styles) {
     Object.assign(element.style, styles);
   }
-  function button(dom, text, title) {
+  function button(dom, text, title, mode) {
     const element = dom.create("button");
     element.type = "button";
     element.textContent = text;
     if (title) element.title = title;
     applyStyles3(element, {
-      minHeight: "30px",
+      minHeight: responsiveControlHeight(mode),
       padding: "0 12px",
       background: "#2F6FDE",
       color: "#FFF",
@@ -15754,11 +16159,11 @@
     if (row.showPrice === true || price) tags.push(`price:${price || "?"}`);
     return tags.filter(Boolean).join(", ");
   }
-  function renderCardRow(dom, row, formatPrice) {
+  function renderCardRow(dom, row, formatPrice, mode) {
     const theme = row.theme || {};
     const element = dom.create("div");
     applyStyles3(element, {
-      minHeight: "38px",
+      minHeight: mode?.touchTargets ? "44px" : "38px",
       padding: "6px 8px",
       boxSizing: "border-box",
       display: "flex",
@@ -15853,6 +16258,7 @@
     if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
     if (!model) return Promise.resolve(false);
     dom.query?.(`#${model.modalId}`)?.remove?.();
+    const mode = readResponsiveUiMode(dom);
     return new Promise((resolve) => {
       let stopTimer = null;
       let currentPage = 1;
@@ -15912,11 +16318,11 @@
         gap: "8px",
         marginTop: "12px"
       });
-      const previous = button(dom, "Previous", "Previous recap page");
+      const previous = button(dom, "Previous", "Previous recap page", mode);
       const pageLabel = dom.create("span");
       applyStyles3(pageLabel, { color: "#AAB4C2", fontSize: "12px", flex: "1 1 auto", textAlign: "center" });
-      const next = button(dom, "Next", "Next recap page");
-      const close = button(dom, "Close");
+      const next = button(dom, "Next", "Next recap page", mode);
+      const close = button(dom, "Close", null, mode);
       const renderPage = () => {
         const page = getRecapPage(model, currentPage);
         currentPage = page.page;
@@ -15927,7 +16333,7 @@
           applyStyles3(empty, { padding: "10px", color: "#9AA6B8", background: "#1D2229" });
           list.appendChild(empty);
         } else {
-          page.rows.forEach((row) => list.appendChild(renderCardRow(dom, row, options.formatPrice)));
+          page.rows.forEach((row) => list.appendChild(renderCardRow(dom, row, options.formatPrice, mode)));
         }
         pageLabel.textContent = page.totalRows ? `Page ${page.page}/${page.pageCount} | ${page.start}-${page.end} of ${page.totalRows}` : "Page 1/1 | 0 cards";
         setButtonEnabled(previous, page.hasPrevious);
@@ -15960,6 +16366,7 @@
         if (event.target === overlay) finish();
       });
       footer.append(previous, pageLabel, next, close);
+      applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title, actions: footer, controls: [previous, next, close] });
       dialog.append(title, summary);
       if (reason) dialog.appendChild(reason);
       dialog.append(list, footer);
@@ -16196,9 +16603,19 @@
     Object.assign(element.style, styles);
   }
   function positionStack(stack, panel, viewport = {}) {
+    const mobile = panel?.dataset?.layout === "mobile";
     const rect = panel?.getBoundingClientRect?.();
     const viewportWidth = Math.max(0, Number(viewport.width || 0));
     const viewportHeight = Math.max(0, Number(viewport.height || 0));
+    if (mobile) {
+      stack.style.left = "max(10px, env(safe-area-inset-left, 0px))";
+      stack.style.right = "max(10px, env(safe-area-inset-right, 0px))";
+      stack.style.top = "max(10px, env(safe-area-inset-top, 0px))";
+      stack.style.bottom = "auto";
+      stack.style.width = "auto";
+      return;
+    }
+    stack.style.left = "auto";
     const width = Math.max(220, Math.min(420, viewportWidth > 0 ? viewportWidth - 20 : 360));
     stack.style.width = `${width}px`;
     if (!rect) {
@@ -16237,6 +16654,7 @@
       dom.appendToBody(stack);
     }
     positionStack(stack, options.panel, options.viewport?.() || {});
+    const touchTarget = options.panel?.dataset?.layout === "mobile" || options.panel?.dataset?.input === "touch";
     const toast = dom.create("div");
     applyStyles4(toast, {
       position: "relative",
@@ -16248,7 +16666,7 @@
       border: "1px solid #d4af37",
       borderLeft: "4px solid #ffd54a",
       boxShadow: "0 8px 24px rgba(0,0,0,.42)",
-      padding: "10px 34px 10px 12px",
+      padding: `10px ${touchTarget ? 54 : 34}px 10px 12px`,
       boxSizing: "border-box",
       opacity: "1",
       transition: "opacity .25s ease, transform .25s ease"
@@ -16277,12 +16695,13 @@
     close.type = "button";
     close.textContent = "x";
     close.title = "Dismiss highlight";
+    const closeSize = touchTarget ? "44px" : "24px";
     applyStyles4(close, {
       position: "absolute",
       top: "4px",
       right: "5px",
-      width: "24px",
-      height: "24px",
+      width: closeSize,
+      height: closeSize,
       padding: "0",
       border: "0",
       background: "transparent",
@@ -16313,11 +16732,12 @@
   function applyStyles5(element, styles) {
     Object.assign(element.style, styles);
   }
-  function inputStyles(input) {
+  function inputStyles(input, mode) {
     applyStyles5(input, {
       width: "100%",
       minWidth: "0",
-      height: "30px",
+      height: responsiveControlHeight(mode),
+      fontSize: mode?.touchTargets ? "16px" : "",
       boxSizing: "border-box",
       background: "#222832",
       color: "#f4f6f8",
@@ -16326,9 +16746,9 @@
     });
     return input;
   }
-  function field(dom, labelText, input) {
+  function field(dom, labelText, input, mode) {
     const label = dom.create("label");
-    applyStyles5(label, { display: "grid", gridTemplateColumns: "140px minmax(0, 1fr)", alignItems: "center", gap: "10px" });
+    applyStyles5(label, { display: "grid", gridTemplateColumns: mode?.mobile ? "1fr" : "140px minmax(0, 1fr)", alignItems: "center", gap: "10px" });
     const text = dom.create("span");
     text.textContent = labelText;
     applyStyles5(text, { color: "#b8c3d2", fontSize: "12px" });
@@ -16356,6 +16776,7 @@
     if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
     dom.query?.("#bronze-loop-reward-alert-modal")?.remove?.();
     const initial = normalizeRewardAlertSettings(options.settings);
+    const mode = readResponsiveUiMode(dom);
     const overlay = dom.create("div");
     overlay.id = "bronze-loop-reward-alert-modal";
     applyStyles5(overlay, {
@@ -16390,18 +16811,18 @@
     const highlight = checkbox(dom, "bronze-loop-alert-highlight-enabled", "Show pack highlight", initial.highlightEnabled);
     const desktop = checkbox(dom, "bronze-loop-alert-desktop-enabled", "Desktop notification", initial.desktopEnabled);
     const ntfy = checkbox(dom, "bronze-loop-alert-ntfy-enabled", "ntfy remote notification", initial.ntfyEnabled);
-    const threshold = inputStyles(dom.create("input"));
+    const threshold = inputStyles(dom.create("input"), mode);
     threshold.id = "bronze-loop-alert-minimum-rating";
     threshold.type = "number";
     threshold.min = "1";
     threshold.max = "99";
     threshold.value = String(initial.minimumRating);
-    const topic = inputStyles(dom.create("input"));
+    const topic = inputStyles(dom.create("input"), mode);
     topic.id = "bronze-loop-alert-ntfy-topic";
     topic.type = "text";
     topic.value = initial.ntfyTopic;
     topic.autocomplete = "off";
-    const token = inputStyles(dom.create("input"));
+    const token = inputStyles(dom.create("input"), mode);
     token.id = "bronze-loop-alert-ntfy-token";
     token.type = "password";
     token.value = initial.ntfyToken;
@@ -16409,11 +16830,11 @@
     form.append(
       enabled.label,
       highlight.label,
-      field(dom, "Minimum rating", threshold),
+      field(dom, "Minimum rating", threshold, mode),
       desktop.label,
       ntfy.label,
-      field(dom, "ntfy topic", topic),
-      field(dom, "ntfy token", token)
+      field(dom, "ntfy topic", topic, mode),
+      field(dom, "ntfy token", token, mode)
     );
     const status = dom.create("div");
     applyStyles5(status, { minHeight: "16px", marginTop: "10px", color: "#9fb2c9", fontSize: "11px" });
@@ -16427,7 +16848,7 @@
       value.type = "button";
       value.textContent = text;
       applyStyles5(value, {
-        minHeight: "30px",
+        minHeight: responsiveControlHeight(mode),
         padding: "0 12px",
         cursor: "pointer",
         color: "#fff",
@@ -16489,6 +16910,15 @@
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) close();
     });
+    applyResponsiveDialogLayout({
+      dom,
+      mode,
+      overlay,
+      dialog,
+      title,
+      actions,
+      controls: [threshold, topic, token, preview, desktopTest, ntfyTest, cancel, save]
+    });
     dialog.append(title, form, tests, status, actions);
     overlay.appendChild(dialog);
     dom.appendToBody(overlay);
@@ -16499,12 +16929,12 @@
   function applyStyles6(element, styles) {
     Object.assign(element.style, styles);
   }
-  function button2(dom, text, primary = false) {
+  function button2(dom, text, primary = false, mode = null) {
     const value = dom.create("button");
     value.type = "button";
     value.textContent = text;
     applyStyles6(value, {
-      minHeight: "30px",
+      minHeight: responsiveControlHeight(mode),
       padding: "0 12px",
       cursor: "pointer",
       color: "#fff",
@@ -16513,15 +16943,16 @@
     });
     return value;
   }
-  function quantityInput(dom, quantity) {
+  function quantityInput(dom, quantity, mode = null) {
     const input = dom.create("input");
     input.type = "number";
     input.min = "1";
     input.max = "999";
     input.value = String(quantity);
     applyStyles6(input, {
-      width: "70px",
-      height: "30px",
+      width: mode?.touchTargets ? "84px" : "70px",
+      height: responsiveControlHeight(mode),
+      fontSize: mode?.touchTargets ? "16px" : "",
       boxSizing: "border-box",
       background: "#222832",
       color: "#fff",
@@ -16534,6 +16965,7 @@
     const dom = options.dom;
     if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
     dom.query?.("#bronze-loop-batch-open-modal")?.remove?.();
+    const mode = readResponsiveUiMode(dom);
     const overlay = dom.create("div");
     overlay.id = "bronze-loop-batch-open-modal";
     applyStyles6(overlay, {
@@ -16600,7 +17032,7 @@
         const selected2 = selectedKeys.has(batchOpenEntryKey({ packId: group.id, packName: group.name }));
         const addMenu = dom.create("div");
         applyStyles6(addMenu, { position: "relative", flex: "0 0 auto" });
-        const add = button2(dom, selected2 ? "Added v" : "Add v");
+        const add = button2(dom, selected2 ? "Added v" : "Add v", false, mode);
         add.setAttribute?.("aria-label", `Add ${group.name} to batch`);
         add.setAttribute?.("aria-expanded", "false");
         const menu = dom.create("div");
@@ -16625,8 +17057,8 @@
           notifyPlanChange();
           render();
         };
-        const addOne = button2(dom, selected2 ? "Set to 1" : "Add 1");
-        const addAll = button2(dom, `${selected2 ? "Set to all" : "Add all"} (${group.count})`);
+        const addOne = button2(dom, selected2 ? "Set to 1" : "Add 1", false, mode);
+        const addAll = button2(dom, `${selected2 ? "Set to all" : "Add all"} (${group.count})`, false, mode);
         for (const option of [addOne, addAll]) {
           applyStyles6(option, { display: "block", width: "100%", minWidth: "0", textAlign: "left", border: "0" });
         }
@@ -16655,14 +17087,14 @@
         row.dataset.packId = entry.packId ? String(entry.packId) : "";
         row.dataset.packName = entry.packName;
         row.dataset.quantityMode = entry.quantityMode;
-        applyStyles6(row, { display: "flex", alignItems: "center", gap: "8px", padding: "5px 7px", background: "#1d2229" });
+        applyStyles6(row, { display: "flex", alignItems: "center", flexWrap: mode.mobile ? "wrap" : "nowrap", gap: "8px", padding: "5px 7px", background: "#1d2229" });
         const label = dom.create("span");
         label.textContent = `${entry.packName || `Pack #${entry.packId}`} (#${entry.packId || "?"})`;
         applyStyles6(label, { flex: "1 1 auto", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
         const availability = dom.create("span");
         availability.textContent = entry.available ? `${entry.quantityMode === "all" ? "all: " : ""}${entry.available} available` : "unavailable";
         applyStyles6(availability, { color: entry.available ? "#8fd19e" : "#e3a7a7", fontSize: "11px", flex: "0 0 auto" });
-        const quantity = quantityInput(dom, entry.effectiveQuantity);
+        const quantity = quantityInput(dom, entry.effectiveQuantity, mode);
         quantity.setAttribute?.("aria-label", `Quantity for ${entry.packName}`);
         quantity.disabled = entry.quantityMode === "all";
         quantity.title = entry.quantityMode === "all" ? `All available packs (${entry.available || "currently unavailable"})` : "Fixed quantity";
@@ -16671,7 +17103,7 @@
           plan = currentPlan();
           notifyPlanChange();
         });
-        const remove = button2(dom, "Remove");
+        const remove = button2(dom, "Remove", false, mode);
         remove.addEventListener("click", () => {
           const key = batchOpenEntryKey(entry);
           plan = normalizeBatchOpenPlan({ entries: currentPlan().entries.filter((candidate) => batchOpenEntryKey(candidate) !== key) });
@@ -16690,13 +17122,13 @@
     };
     const toolbar = dom.create("div");
     applyStyles6(toolbar, { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
-    const scan = button2(dom, "Scan My Packs");
-    const preview = button2(dom, "Preview recap");
+    const scan = button2(dom, "Scan My Packs", false, mode);
+    const preview = button2(dom, "Preview recap", false, mode);
     toolbar.append(scan, preview);
     const actions = dom.create("div");
     applyStyles6(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
-    const cancel = button2(dom, "Cancel");
-    const start = button2(dom, "Start batch", true);
+    const cancel = button2(dom, "Cancel", false, mode);
+    const start = button2(dom, "Start batch", true, mode);
     actions.append(cancel, start);
     const setPending = (pending) => {
       scan.disabled = pending;
@@ -16739,6 +17171,7 @@
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) close();
     });
+    applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title, actions, controls: [scan, preview, cancel, start] });
     dialog.append(title, note, toolbar, availableTitle, availableList, planTitle, planList, status, actions);
     overlay.appendChild(dialog);
     dom.appendToBody(overlay);
@@ -16819,6 +17252,8 @@
       loopStack: [],
       logRenderer: null,
       workflowBuilder: null,
+      panelGeometry: null,
+      layoutController: null,
       sbcLoadLogKeys: /* @__PURE__ */ new Set(),
       rewardAlertSettings: normalizeRewardAlertSettings()
     };
@@ -16826,6 +17261,7 @@
       state.stopping = true;
       if (state.bootTimer) clearInterval(state.bootTimer);
       state.logRenderer?.destroy?.();
+      state.layoutController?.destroy?.();
       state.workflowBuilder?.destroy?.();
       document.querySelector("#bronze-loop-panel")?.remove();
       document.querySelector("#bronze-loop-pick-modal")?.remove();
@@ -25277,12 +25713,14 @@
         panel: document.querySelector("#bronze-loop-panel"),
         state: {
           running: state.running,
+          stopping: state.stopping,
           refreshing: state.refreshing,
           scanningPicks: state.scanningPicks,
           dynamicSbcScanProgress: state.dynamicSbcScanProgress,
           loadingLoops: state.loadingLoops,
           usingBuiltIn: state.loopConfigSource === "built-in" && !state.workflowBuilder?.getStore?.().activeProfileId
-        }
+        },
+        setMobileTab: (tab) => state.panelGeometry?.setMobileTab?.(tab)
       });
       updateLoopControls();
     }
@@ -25314,6 +25752,7 @@
       });
       const savedLoopUiOptions = loadLoopUiOptions();
       const savedPickOptions = loadPickRuntimeOptions();
+      const savedLayoutMode = normalizeLayoutOverride(adapters.localStorage.get("fc-loop-layout-mode", "auto"));
       state.sbcFodderOptions = loadSbcFodderOptions();
       state.rewardAlertSettings = loadRewardAlertSettings();
       hydrateMainPanelOptions({
@@ -25321,10 +25760,11 @@
         loopOptions: savedLoopUiOptions,
         pickOptions: savedPickOptions,
         sbcFodderOptions: state.sbcFodderOptions,
-        rewardAlertSettings: state.rewardAlertSettings
+        rewardAlertSettings: state.rewardAlertSettings,
+        layoutMode: savedLayoutMode
       });
       renderRewardAlertSummary({ panel, settings: state.rewardAlertSettings });
-      createMainPanelGeometry({
+      state.panelGeometry = createMainPanelGeometry({
         panel,
         getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
         loadPosition: () => {
@@ -25353,6 +25793,19 @@
           } catch {
           }
         },
+        loadMobileTab: () => {
+          try {
+            return adapters.localStorage.get("fc-loop-panel-mobile-tab", "run");
+          } catch {
+            return "run";
+          }
+        },
+        saveMobileTab: (tab) => {
+          try {
+            adapters.localStorage.set("fc-loop-panel-mobile-tab", tab);
+          } catch {
+          }
+        },
         onModeChange: renderLog
       });
       state.workflowBuilder = createWorkflowLoopBuilder({
@@ -25373,6 +25826,23 @@
         exportText: (text, filename) => adapters.userEffects.downloadText(text, filename),
         log,
         now: Date.now
+      });
+      state.layoutController = createResponsiveLayoutController({
+        windowObject: window,
+        root: document.documentElement,
+        loadOverride: () => savedLayoutMode,
+        saveOverride: (layoutMode) => {
+          try {
+            adapters.localStorage.set("fc-loop-layout-mode", layoutMode);
+          } catch {
+          }
+          const select = document.querySelector("#bronze-loop-layout-mode");
+          if (select) select.value = layoutMode;
+        },
+        onChange: (snapshot) => {
+          state.panelGeometry?.setResponsiveMode?.(snapshot);
+          renderLog();
+        }
       });
       const restoredProfile = state.workflowBuilder.restoreActiveProfile();
       if (restoredProfile.status === "blocked") {
@@ -25395,6 +25865,7 @@
         openBuilder: (tab) => state.workflowBuilder?.open(tab),
         openHelp: (topic) => showMainPanelHelp({ dom: adapters.dom, topic }),
         selectProfile: (profileId) => state.workflowBuilder?.selectRuntimeProfile(profileId),
+        setLayoutMode: (layoutMode) => state.layoutController?.setOverride?.(layoutMode),
         renderProfiles: renderProfileSelect,
         updateLoopControls,
         savePickOptions: savePickRuntimeOptions,

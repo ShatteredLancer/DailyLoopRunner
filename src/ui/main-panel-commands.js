@@ -35,6 +35,11 @@ export function createMainPanelCommands(options = {}) {
       options.savePickOptions?.(event);
       return true;
     },
+    setLayoutMode(layoutMode) {
+      options.setLayoutMode?.(layoutMode);
+      setPanelState();
+      return true;
+    },
     saveSbcFodderOptions(event) {
       options.saveSbcFodderOptions?.(event);
       return true;

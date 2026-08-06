@@ -55,6 +55,27 @@ describe('log renderer', () => {
     expect(fullBox.innerHTML).toBe('one|two');
   });
 
+  it('renders the full log only on the mobile Log tab', () => {
+    const panel = { classList: classList(), dataset: { layout: 'mobile', mobileTab: 'run' } };
+    const fullBox = { innerHTML: '', scrollHeight: 100, scrollTop: 0, clientHeight: 100 };
+    const formatFullLog = vi.fn((lines) => lines.join('|'));
+    const renderer = createLogRenderer({
+      schedule: (callback) => { callback(); return 1; },
+      cancel: vi.fn(),
+      getLines: () => ['one', 'two'],
+      getPanel: () => panel,
+      getLatestBox: () => ({ textContent: '' }),
+      getFullBox: () => fullBox,
+      formatFullLog,
+    });
+
+    renderer.request();
+    expect(formatFullLog).not.toHaveBeenCalled();
+    panel.dataset.mobileTab = 'log';
+    renderer.flushNow();
+    expect(fullBox.innerHTML).toBe('one|two');
+  });
+
   it('keeps a full log pinned to the bottom without forcing a scrolled-up log down', () => {
     const panel = { classList: classList(['options-open']) };
     const fullBox = { innerHTML: '', scrollHeight: 100, scrollTop: 50, clientHeight: 50 };

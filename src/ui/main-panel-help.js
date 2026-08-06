@@ -1,3 +1,5 @@
+import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
+
 export const MAIN_PANEL_HELP_TOPICS = Object.freeze([
   Object.freeze({
     id: 'overview',
@@ -5,8 +7,9 @@ export const MAIN_PANEL_HELP_TOPICS = Object.freeze([
     items: Object.freeze([
       Object.freeze(['Start and Stop', 'Start runs the selected Loop. Stop waits for the next safe point before ending the run.']),
       Object.freeze(['Batch Open', 'Choose pack types from My Packs, save a batch, and open only the saved selection.']),
+      Object.freeze(['Mobile views', 'Use Run, Options, and Log to switch views. Starting a Loop returns to the compact Run controller so Stop remains available.']),
       Object.freeze(['Options', 'Show run settings, Builder Profiles, Dynamic SBC scan controls, and the full log.']),
-      Object.freeze(['Move and resize', 'Drag the title bar to move the panel. Drag any panel edge or corner to resize the panel.']),
+      Object.freeze(['Move and resize', 'On Desktop layout, drag the title bar to move the panel and drag any edge or corner to resize it.']),
     ]),
   }),
   Object.freeze({
@@ -26,6 +29,7 @@ export const MAIN_PANEL_HELP_TOPICS = Object.freeze([
     title: 'Config',
     items: Object.freeze([
       Object.freeze(['Profile', 'Load a saved Builder Profile or switch back to the built-in Loop set.']),
+      Object.freeze(['Layout', 'Auto follows the viewport. Desktop and Mobile manually override the layout without changing the active run or Profile.']),
       Object.freeze(['Open Builder', 'Edit Workflows and Loops, including their steps, run settings, pack handling, and recovery rules.']),
       Object.freeze(['Refresh caches', 'Refresh available EA and FSU inventory data after changes made outside the Runner.']),
       Object.freeze(['SBC scan', 'Discover supported dynamic Player Pick and Upgrade SBCs. Incremental reuses cache, Full refreshes Challenge data, and Clear cache + scan rebuilds it.']),
@@ -35,9 +39,9 @@ export const MAIN_PANEL_HELP_TOPICS = Object.freeze([
     id: 'log',
     title: 'Log',
     items: Object.freeze([
-      Object.freeze(['Latest log', 'The compact panel shows the newest status messages. Options shows the complete session log.']),
+      Object.freeze(['Latest log', 'The compact panel shows the newest status messages. Desktop Options and the mobile Log view show the complete session log.']),
       Object.freeze(['Copy, Clear, Save', 'Copy the session log, clear the on-screen history, or download it as a log file.']),
-      Object.freeze(['Resize log', 'Drag the horizontal resize bar below the full log up or down. The chosen height is saved locally for the next Web App visit.']),
+      Object.freeze(['Resize log', 'On Desktop layout, drag the horizontal resize bar below the full log. The chosen height is saved locally for the next Web App visit.']),
     ]),
   }),
 ]);
@@ -57,6 +61,7 @@ export function showMainPanelHelp(options = {}) {
   const dom = options.dom;
   if (!dom?.create || !dom?.appendToBody) throw new TypeError('dom adapter is required');
   dom.query?.('#bronze-loop-help-modal')?.remove?.();
+  const mode = readResponsiveUiMode(dom);
 
   const overlay = dom.create('div');
   overlay.id = 'bronze-loop-help-modal';
@@ -103,11 +108,12 @@ export function showMainPanelHelp(options = {}) {
   close.type = 'button';
   close.textContent = 'Close';
   applyStyles(close, {
-    minHeight: '30px', padding: '0 12px', cursor: 'pointer', color: '#fff', background: '#2f6fde', border: '1px solid #4f8cff',
+    minHeight: responsiveControlHeight(mode), padding: '0 12px', cursor: 'pointer', color: '#fff', background: '#2f6fde', border: '1px solid #4f8cff',
   });
   const dismiss = () => overlay.remove?.();
   close.addEventListener('click', dismiss);
   overlay.addEventListener('click', (event) => { if (event.target === overlay) dismiss(); });
+  applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title, actions, controls: [close] });
   actions.appendChild(close);
   dialog.appendChild(actions);
   overlay.appendChild(dialog);

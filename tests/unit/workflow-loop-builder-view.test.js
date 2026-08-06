@@ -66,6 +66,9 @@ describe('Workflow and Loop Builder view', () => {
     expect(html).toContain('data-builder-action="preview-profile"');
     expect(html).toContain('data-builder-action="show-import"');
     expect(html).toContain('data-builder-action="export-json"');
+    expect(html).toContain('data-builder-action="select-mobile-section"');
+    expect(html).toContain('data-mobile-section="library"');
+    expect(html).toContain('data-builder-action="toggle-mobile-actions"');
   });
 
   it('renders every major structured editor instead of a raw Loop JSON input', () => {
@@ -336,7 +339,11 @@ describe('Workflow and Loop Builder view', () => {
     expect(WORKFLOW_LOOP_BUILDER_STYLE).toContain('grid-template-columns: 260px minmax(420px, 1fr) 340px');
     expect(WORKFLOW_LOOP_BUILDER_STYLE).toContain('.dlr-builder-body { min-height: 0;');
     expect(WORKFLOW_LOOP_BUILDER_STYLE).toContain('@media (max-width: 900px)');
-    expect(WORKFLOW_LOOP_BUILDER_STYLE).toContain('@media (max-width: 620px)');
+    expect(WORKFLOW_LOOP_BUILDER_STYLE).not.toContain('@media (max-width: 620px)');
+    expect(WORKFLOW_LOOP_BUILDER_STYLE).toContain(':root[data-dlr-layout="mobile"] .dlr-builder-mobile-sections');
+    expect(WORKFLOW_LOOP_BUILDER_STYLE).toContain('.dlr-builder-workspace[data-mobile-section="editor"]');
+    expect(WORKFLOW_LOOP_BUILDER_STYLE).toContain(':root[data-dlr-layout-override="desktop"] .dlr-builder-body { overflow: auto; }');
+    expect(WORKFLOW_LOOP_BUILDER_STYLE).toContain('min-height: 44px; font-size: 16px;');
     expect(WORKFLOW_LOOP_BUILDER_STYLE).not.toContain('letter-spacing: -');
   });
 

@@ -664,6 +664,8 @@ export const WORKFLOW_LOOP_BUILDER_STYLE = `
   .dlr-builder-toolbar h1 { margin: 0 12px 0 0; font-size: 16px; white-space: nowrap; }
   .dlr-builder-toolbar select { max-width: 210px; }
   .dlr-builder-toolbar .spacer { flex: 1; }
+  .dlr-builder-profile-controls, .dlr-builder-secondary-actions, .dlr-builder-primary-actions { display: flex; align-items: center; gap: 8px; }
+  .dlr-builder-mobile-more, .dlr-builder-mobile-sections { display: none; }
   .dlr-builder-dirty { color: #ffcf66; min-width: 56px; }
   .dlr-builder-workspace { min-height: 0; display: grid; grid-template-columns: 260px minmax(420px, 1fr) 340px; }
   .dlr-builder-library, .dlr-builder-inspector { min-width: 0; overflow: auto; background: #171a1d; }
@@ -749,15 +751,57 @@ export const WORKFLOW_LOOP_BUILDER_STYLE = `
     .dlr-builder-requirement { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
     .dlr-builder-preview-workflow li, .dlr-builder-preview-table > div { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
   }
-  @media (max-width: 620px) {
-    #dlr-workflow-builder.open { grid-template-rows: auto minmax(0, 1fr) 28px; }
-    .dlr-builder-workspace { grid-template-columns: 1fr; }
-    .dlr-builder-library { max-height: 34vh; border-right: 0; border-bottom: 1px solid #394047; }
-    .dlr-builder-editor { padding: 12px 10px 50px; }
-    .dlr-builder-form-grid, .dlr-builder-form-grid.common, .dlr-builder-json-grid { grid-template-columns: 1fr; }
-    .dlr-builder-step { grid-template-columns: 24px 1fr auto auto; }
-    .dlr-builder-step button:nth-of-type(3), .dlr-builder-step button:nth-of-type(4) { grid-row: 2; }
+  :root[data-dlr-input="touch"] #dlr-workflow-builder button,
+  :root[data-dlr-input="touch"] #dlr-workflow-builder input,
+  :root[data-dlr-input="touch"] #dlr-workflow-builder select { min-height: 44px; font-size: 16px; }
+  :root[data-dlr-layout="mobile"] #dlr-workflow-builder.open { grid-template-rows: auto minmax(0, 1fr) 28px; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-toolbar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px 10px;
   }
+  :root[data-dlr-layout="mobile"] .dlr-builder-toolbar h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-toolbar .spacer { display: none; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-profile-controls { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-profile-controls select,
+  :root[data-dlr-layout="mobile"] .dlr-builder-profile-controls input { width: 100%; min-width: 0; max-width: none; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-mobile-more { display: block; grid-column: 2; grid-row: 1; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-secondary-actions { display: none; grid-column: 1 / -1; flex-wrap: wrap; padding-top: 2px; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-toolbar.mobile-actions-open .dlr-builder-secondary-actions { display: flex; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-primary-actions {
+    position: fixed; left: 0; right: 0; bottom: 28px; z-index: 4; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px; padding: 8px max(10px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+    background: #171a1d; border-top: 1px solid #394047;
+  }
+  :root[data-dlr-layout="mobile"] .dlr-builder-body { grid-template-rows: auto auto minmax(0, 1fr); padding-bottom: 60px; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-tabs { overflow-x: auto; padding-left: 0; scrollbar-width: thin; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-tabs button { flex: 0 0 auto; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-mobile-sections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid #394047; background: #131619; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-mobile-sections button { border-width: 0 0 2px; background: transparent; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-mobile-sections button.active { border-color: #58a6ff; color: #a9d2ff; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace { grid-template-columns: minmax(0, 1fr); }
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace > .dlr-builder-library,
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace > .dlr-builder-editor,
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace > .dlr-builder-inspector { display: none; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace[data-mobile-section="library"] > .dlr-builder-library,
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace[data-mobile-section="editor"] > .dlr-builder-editor,
+  :root[data-dlr-layout="mobile"] .dlr-builder-workspace[data-mobile-section="details"] > .dlr-builder-inspector { display: block; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-library { max-height: none; border: 0; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-editor,
+  :root[data-dlr-layout="mobile"] .dlr-builder-inspector { overflow: auto; padding: 12px 10px 72px; border: 0; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-form-grid,
+  :root[data-dlr-layout="mobile"] .dlr-builder-form-grid.common,
+  :root[data-dlr-layout="mobile"] .dlr-builder-json-grid { grid-template-columns: minmax(0, 1fr); }
+  :root[data-dlr-layout="mobile"] .dlr-builder-requirement { grid-template-columns: minmax(0, 1fr); }
+  :root[data-dlr-layout="mobile"] .dlr-builder-step { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  :root[data-dlr-layout="mobile"] .dlr-builder-status { overflow-x: auto; white-space: nowrap; gap: 12px; padding-bottom: max(5px, env(safe-area-inset-bottom, 0px)); }
+  :root[data-dlr-layout="desktop"] .dlr-builder-workspace { grid-template-columns: 260px minmax(420px, 1fr) 340px; }
+  :root[data-dlr-layout="desktop"] .dlr-builder-inspector { display: block; }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-toolbar { flex-wrap: nowrap; }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-form-grid.common { grid-template-columns: repeat(3, minmax(160px, 1fr)); }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-requirement { grid-template-columns: 30px repeat(4, minmax(100px, 1fr)); }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-preview-workflow li { grid-template-columns: minmax(160px, 1fr) 150px 180px minmax(180px, 1fr); }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-preview-table > div { grid-template-columns: minmax(160px, 1fr) 150px 170px 180px 160px minmax(180px, 1fr); }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-body { overflow: auto; }
+  :root[data-dlr-layout-override="desktop"] .dlr-builder-workspace { min-width: 1020px; }
 `;
 
 export function workflowLoopBuilderHtml(model) {
@@ -786,30 +830,40 @@ export function workflowLoopBuilderHtml(model) {
     ? renderPreview(model)
     : model.tab === 'json'
       ? renderJson(model)
-      : `<div class="dlr-builder-workspace">${renderLibrary(model)}<main class="dlr-builder-editor">${
+      : `<div class="dlr-builder-workspace" data-mobile-section="${escapeHtml(model.mobileSection || 'library')}">${renderLibrary(model)}<main class="dlr-builder-editor">${
       model.selectedKind === 'loops' || model.selectedKind === 'dynamic'
         ? renderLoopEditor(model.selectedObject, context)
         : renderRecoveryEditor(model.selectedObject, model.selectedKind, context)
     }</main>${renderInspector(model, selected)}</div>`;
-  return `<header class="dlr-builder-toolbar">
+  const mobileSections = model.previewOpen || model.tab === 'json' ? '' : `<nav class="dlr-builder-mobile-sections" aria-label="Builder workspace">
+    ${[['library', 'Library'], ['editor', 'Editor'], ['details', 'Details']].map(([id, label]) => `<button class="${model.mobileSection === id ? 'active' : ''}" data-builder-action="select-mobile-section" data-section="${id}">${label}</button>`).join('')}
+  </nav>`;
+  return `<header class="dlr-builder-toolbar${model.mobileActionsOpen ? ' mobile-actions-open' : ''}">
     <h1>Workflow Builder</h1>
-    <select data-builder-action="select-profile">${optionList(profileOptions, model.profile.id)}</select>
-    <input id="dlr-builder-profile-name" value="${escapeHtml(model.profile.name)}" aria-label="Profile name">
-    <button data-builder-action="new-profile">New profile</button>
-    <button data-builder-action="delete-profile"${disabled(model.store.profiles.length <= 1)}>Delete profile</button>
-    <span class="dlr-builder-dirty">${model.profile.draftRevision !== model.profile.savedRevision ? 'Unsaved' : 'Saved'}</span>
+    <div class="dlr-builder-profile-controls">
+      <select data-builder-action="select-profile">${optionList(profileOptions, model.profile.id)}</select>
+      <input id="dlr-builder-profile-name" value="${escapeHtml(model.profile.name)}" aria-label="Profile name">
+      <span class="dlr-builder-dirty">${model.profile.draftRevision !== model.profile.savedRevision ? 'Unsaved' : 'Saved'}</span>
+    </div>
     <span class="spacer"></span>
-    <button data-builder-action="undo-draft" title="Undo"${disabled(!model.canUndo)}>Undo</button>
-    <button data-builder-action="redo-draft" title="Redo"${disabled(!model.canRedo)}>Redo</button>
-    <button data-builder-action="validate-profile">Validate</button>
-    <button data-builder-action="preview-profile">Preview</button>
-    <button data-builder-action="save-profile">Save</button>
-    <button class="primary" data-builder-action="activate-profile">Activate</button>
-    <button data-builder-action="show-import">Import</button>
-    <button data-builder-action="export-json">Export</button>
-    <button data-builder-action="close-builder">Close</button>
+    <button class="dlr-builder-mobile-more" data-builder-action="toggle-mobile-actions" aria-expanded="${model.mobileActionsOpen ? 'true' : 'false'}">More</button>
+    <div class="dlr-builder-secondary-actions">
+      <button data-builder-action="new-profile">New profile</button>
+      <button data-builder-action="delete-profile"${disabled(model.store.profiles.length <= 1)}>Delete profile</button>
+      <button data-builder-action="undo-draft" title="Undo"${disabled(!model.canUndo)}>Undo</button>
+      <button data-builder-action="redo-draft" title="Redo"${disabled(!model.canRedo)}>Redo</button>
+      <button data-builder-action="validate-profile">Validate</button>
+      <button data-builder-action="preview-profile">Preview</button>
+      <button data-builder-action="show-import">Import</button>
+      <button data-builder-action="export-json">Export</button>
+    </div>
+    <div class="dlr-builder-primary-actions">
+      <button data-builder-action="save-profile">Save</button>
+      <button class="primary" data-builder-action="activate-profile">Activate</button>
+      <button data-builder-action="close-builder">Close</button>
+    </div>
   </header>
-  <div class="dlr-builder-body"><nav class="dlr-builder-tabs">${tabs.map(([id, label]) => `<button class="${model.tab === id ? 'active' : ''}" data-builder-action="select-tab" data-tab="${id}">${label}</button>`).join('')}</nav>${editor}</div>
+  <div class="dlr-builder-body"><nav class="dlr-builder-tabs">${tabs.map(([id, label]) => `<button class="${model.tab === id ? 'active' : ''}" data-builder-action="select-tab" data-tab="${id}">${label}</button>`).join('')}</nav>${mobileSections}${editor}</div>
   <footer class="dlr-builder-status"><span>${model.validation.valid ? 'Valid' : `${model.validation.errors.length} error(s)`}</span><span>${model.validation.conflicts.length} conflict(s)</span><span>${model.validation.unavailableBindings.length} unavailable binding(s)</span><span>Active: ${escapeHtml(model.store.activeProfileId || 'Built-in')}</span></footer>`;
 }
 

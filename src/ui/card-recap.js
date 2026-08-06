@@ -1,4 +1,5 @@
 import { getRecapPage } from '../reward/recap.js';
+import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 const DESTINATION_LABELS = Object.freeze({
   club: '->CLUB',
@@ -13,13 +14,13 @@ function applyStyles(element, styles) {
   Object.assign(element.style, styles);
 }
 
-function button(dom, text, title) {
+function button(dom, text, title, mode) {
   const element = dom.create('button');
   element.type = 'button';
   element.textContent = text;
   if (title) element.title = title;
   applyStyles(element, {
-    minHeight: '30px', padding: '0 12px', background: '#2F6FDE', color: '#FFF', border: 'none',
+    minHeight: responsiveControlHeight(mode), padding: '0 12px', background: '#2F6FDE', color: '#FFF', border: 'none',
     borderRadius: '3px', cursor: 'pointer', fontSize: '13px',
   });
   return element;
@@ -41,11 +42,11 @@ function rowTags(row, formatPrice) {
   return tags.filter(Boolean).join(', ');
 }
 
-function renderCardRow(dom, row, formatPrice) {
+function renderCardRow(dom, row, formatPrice, mode) {
   const theme = row.theme || {};
   const element = dom.create('div');
   applyStyles(element, {
-    minHeight: '38px', padding: '6px 8px', boxSizing: 'border-box', display: 'flex', alignItems: 'center',
+    minHeight: mode?.touchTargets ? '44px' : '38px', padding: '6px 8px', boxSizing: 'border-box', display: 'flex', alignItems: 'center',
     flexWrap: 'wrap', gap: '8px',
     color: theme.foreground || '#F4F6F8', background: theme.background || '#1D2229',
     borderLeft: `4px solid ${theme.accent || '#64748B'}`,
@@ -109,6 +110,7 @@ export function showCardRecap(options = {}) {
   if (!dom?.create || !dom?.appendToBody) throw new TypeError('dom adapter is required');
   if (!model) return Promise.resolve(false);
   dom.query?.(`#${model.modalId}`)?.remove?.();
+  const mode = readResponsiveUiMode(dom);
 
   return new Promise((resolve) => {
     let stopTimer = null;
@@ -145,11 +147,11 @@ export function showCardRecap(options = {}) {
     applyStyles(footer, {
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginTop: '12px',
     });
-    const previous = button(dom, 'Previous', 'Previous recap page');
+    const previous = button(dom, 'Previous', 'Previous recap page', mode);
     const pageLabel = dom.create('span');
     applyStyles(pageLabel, { color: '#AAB4C2', fontSize: '12px', flex: '1 1 auto', textAlign: 'center' });
-    const next = button(dom, 'Next', 'Next recap page');
-    const close = button(dom, 'Close');
+    const next = button(dom, 'Next', 'Next recap page', mode);
+    const close = button(dom, 'Close', null, mode);
 
     const renderPage = () => {
       const page = getRecapPage(model, currentPage);
@@ -161,7 +163,7 @@ export function showCardRecap(options = {}) {
         applyStyles(empty, { padding: '10px', color: '#9AA6B8', background: '#1D2229' });
         list.appendChild(empty);
       } else {
-        page.rows.forEach((row) => list.appendChild(renderCardRow(dom, row, options.formatPrice)));
+        page.rows.forEach((row) => list.appendChild(renderCardRow(dom, row, options.formatPrice, mode)));
       }
       pageLabel.textContent = page.totalRows
         ? `Page ${page.page}/${page.pageCount} | ${page.start}-${page.end} of ${page.totalRows}`
@@ -185,6 +187,7 @@ export function showCardRecap(options = {}) {
     close.addEventListener('click', finish);
     overlay.addEventListener('click', (event) => { if (event.target === overlay) finish(); });
     footer.append(previous, pageLabel, next, close);
+    applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title, actions: footer, controls: [previous, next, close] });
     dialog.append(title, summary);
     if (reason) dialog.appendChild(reason);
     dialog.append(list, footer);

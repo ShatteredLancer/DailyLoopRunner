@@ -124,6 +124,8 @@ export function createWorkflowLoopBuilder(options = {}) {
   let jsonValid = false;
   let importedProfile = null;
   let previewOpen = false;
+  let mobileSection = 'library';
+  let mobileActionsOpen = false;
   const editableBuiltIns = new Set();
   const profileHistory = new Map();
 
@@ -287,6 +289,8 @@ export function createWorkflowLoopBuilder(options = {}) {
       jsonMessage,
       jsonValid,
       previewOpen,
+      mobileSection,
+      mobileActionsOpen,
       canUndo: history().undo.length > 0,
       canRedo: history().redo.length > 0,
     };
@@ -302,6 +306,8 @@ export function createWorkflowLoopBuilder(options = {}) {
     selectedKind = null;
     selectedId = null;
     selectedStep = null;
+    mobileSection = 'library';
+    mobileActionsOpen = false;
     const refreshed = refreshBuilderDynamicBindings(profile(), discoveredLoops(), now());
     setProfile(refreshed, false);
     root.classList.add('open');
@@ -694,6 +700,18 @@ export function createWorkflowLoopBuilder(options = {}) {
     const action = button.dataset.builderAction;
     if (!action) return;
     if (action === 'close-builder') return close();
+    if (action === 'toggle-mobile-actions') {
+      mobileActionsOpen = !mobileActionsOpen;
+      render();
+      return;
+    }
+    if (action === 'select-mobile-section') {
+      mobileSection = ['library', 'editor', 'details'].includes(button.dataset.section)
+        ? button.dataset.section
+        : 'library';
+      render();
+      return;
+    }
     if (action === 'undo-draft') return undoDraft();
     if (action === 'redo-draft') return redoDraft();
     if (action === 'preview-profile') {
@@ -721,6 +739,7 @@ export function createWorkflowLoopBuilder(options = {}) {
       selectedKind = null;
       selectedId = null;
       selectedStep = null;
+      mobileSection = 'library';
       render();
       return;
     }
@@ -728,6 +747,7 @@ export function createWorkflowLoopBuilder(options = {}) {
       selectedKind = button.dataset.kind;
       selectedId = button.dataset.id;
       selectedStep = null;
+      mobileSection = 'editor';
       render();
       return;
     }
@@ -780,6 +800,7 @@ export function createWorkflowLoopBuilder(options = {}) {
     }
     if (action === 'select-step') {
       selectedStep = Number(button.dataset.index);
+      mobileSection = 'details';
       render();
       return;
     }
@@ -803,6 +824,7 @@ export function createWorkflowLoopBuilder(options = {}) {
       selectedId = result.loop.id;
       tab = 'loops';
       selectedStep = null;
+      mobileSection = 'editor';
       render();
       return;
     }

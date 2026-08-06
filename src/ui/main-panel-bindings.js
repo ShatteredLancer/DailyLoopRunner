@@ -31,6 +31,7 @@ export function bindMainPanelCommands(options = {}) {
 
   select.addEventListener('change', (event) => commands.selectLoop?.(event.target?.value, event));
   required(panel, '#bronze-loop-profile-select').addEventListener('change', (event) => commands.selectProfile?.(event.target?.value, event));
+  required(panel, '#bronze-loop-layout-mode').addEventListener('change', (event) => commands.setLayoutMode?.(event.target?.value, event));
   required(panel, '#bronze-loop-open-builder').addEventListener('click', (event) => commands.openBuilder?.(event));
   Object.entries(HELP_BUTTON_TOPICS).forEach(([id, topic]) => {
     required(panel, `#${id}`).addEventListener('click', (event) => commands.openHelp?.(topic, event));
@@ -70,4 +71,5 @@ export function hydrateMainPanelOptions(options = {}) {
   required(panel, '#bronze-loop-low-rated-gold-max').value = sbcFodderOptions.lowRatedGoldMaxRating ?? 82;
   required(panel, '#bronze-loop-rating-sbc-max-card').value = sbcFodderOptions.ratingSbcMaxCardRating ?? 88;
   required(panel, '#bronze-loop-reward-alert-enabled').checked = rewardAlertSettings.enabled !== false;
+  required(panel, '#bronze-loop-layout-mode').value = options.layoutMode || 'auto';
 }

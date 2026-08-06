@@ -371,7 +371,7 @@ The following enhancements are intentionally deferred and do not change the runt
 - Show field-level effective inheritance sources and disabled-pile provenance in the Inspector.
 - Add Draft-versus-Active and Active-versus-Built-in visual diffs.
 - Link normalized schema error paths directly to focused visual controls.
-- Replace the current narrow responsive stack with dedicated Library, Editor, and Inspector mobile tabs.
+- Add field-level breadcrumbs and back navigation beyond the delivered Library, Editor, and Details mobile tabs.
 - Surface preserved unknown valid fields in an Advanced diagnostics editor; the first release preserves them during structured edits and export but does not expose arbitrary raw-field mutation.
 
 Release verification must explicitly cover startup with a valid Active Profile, an invalid autosaved Draft, an unavailable Dynamic SBC binding, a built-in update conflict, Built-in reset, and development-server JSON import. Until real EA-page validation is recorded, the Builder is considered implemented but not live-validated for SBC/Pack selector ergonomics.

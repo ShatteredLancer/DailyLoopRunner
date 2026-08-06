@@ -39,6 +39,9 @@ function harness(options = {}) {
     ['#bronze-loop-options-toggle', element()],
     ['#bronze-loop-collapse', element()],
     ['#bronze-loop-drag', element()],
+    ['#bronze-loop-mobile-tab-run', element()],
+    ['#bronze-loop-mobile-tab-options', element()],
+    ['#bronze-loop-mobile-tab-log', element()],
     ...['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map((dir) => [`#bronze-loop-resize-${dir}`, element()]),
   ]);
   const log = element();
@@ -64,6 +67,7 @@ function harness(options = {}) {
   const savedLogHeights = [];
   const modes = [];
   const scheduled = [];
+  const savedMobileTabs = [];
   const geometry = createMainPanelGeometry({
     panel,
     getViewport: () => ({ width: 1200, height: 800 }),
@@ -71,10 +75,12 @@ function harness(options = {}) {
     savePosition: (position) => saved.push(position),
     loadLogHeight: () => options.savedLogHeight ?? null,
     saveLogHeight: (height) => savedLogHeights.push(height),
+    loadMobileTab: () => options.mobileTab || 'run',
+    saveMobileTab: (tab) => savedMobileTabs.push(tab),
     onModeChange: (mode) => modes.push(mode),
     schedule: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; },
   });
-  return { panel, controls, geometry, saved, savedLogHeights, modes, scheduled };
+  return { panel, controls, geometry, saved, savedLogHeights, savedMobileTabs, modes, scheduled };
 }
 
 function pointerEvent(values = {}) {
@@ -178,5 +184,23 @@ describe('main panel geometry', () => {
     expect(savedLogHeights).toEqual([284]);
     expect(normalizeMainPanelLogHeight(10)).toBe(64);
     expect(normalizeMainPanelLogHeight(9999)).toBe(720);
+  });
+
+  it('switches to a non-draggable mobile sheet and persists mobile tabs separately', () => {
+    const { panel, controls, geometry, savedMobileTabs } = harness();
+    geometry.setResponsiveMode({ layout: 'mobile', input: 'touch' });
+    expect(panel.dataset).toMatchObject({ layout: 'mobile', input: 'touch', mobileTab: 'run' });
+    expect(panel.style).toMatchObject({ left: '', top: '', width: '', height: '' });
+
+    controls.get('#bronze-loop-drag').emit('pointerdown', pointerEvent({ clientX: 100, clientY: 80 }));
+    controls.get('#bronze-loop-drag').emit('pointermove', pointerEvent({ clientX: 200, clientY: 180 }));
+    expect(panel.style.left).toBe('');
+    controls.get('#bronze-loop-mobile-tab-log').emit('click');
+    expect(panel.dataset.mobileTab).toBe('log');
+    expect(savedMobileTabs).toEqual(['log']);
+
+    geometry.setResponsiveMode({ layout: 'desktop', input: 'pointer' });
+    expect(panel.dataset.layout).toBe('desktop');
+    expect(panel.style.width).toBe('300px');
   });
 });

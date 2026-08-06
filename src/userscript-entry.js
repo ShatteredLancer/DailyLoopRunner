@@ -238,6 +238,7 @@ import { createLogRenderer, formatLogHtml } from './ui/log-renderer.js';
 import { bindMainPanelCommands, hydrateMainPanelOptions } from './ui/main-panel-bindings.js';
 import { createMainPanelCommands } from './ui/main-panel-commands.js';
 import { createMainPanelGeometry } from './ui/main-panel-geometry.js';
+import { createResponsiveLayoutController, normalizeLayoutOverride } from './ui/responsive-layout.js';
 import { showMainPanelHelp } from './ui/main-panel-help.js';
 import {
   renderMainPanelLoopOptions,
@@ -323,6 +324,8 @@ const state = {
     loopStack: [],
     logRenderer: null,
     workflowBuilder: null,
+    panelGeometry: null,
+    layoutController: null,
     sbcLoadLogKeys: new Set(),
     rewardAlertSettings: normalizeRewardAlertSettings(),
   };
@@ -331,6 +334,7 @@ const state = {
     state.stopping = true;
     if (state.bootTimer) clearInterval(state.bootTimer);
     state.logRenderer?.destroy?.();
+    state.layoutController?.destroy?.();
     state.workflowBuilder?.destroy?.();
     document.querySelector('#bronze-loop-panel')?.remove();
     document.querySelector('#bronze-loop-pick-modal')?.remove();
@@ -9780,6 +9784,7 @@ function updateLoopControls() {
       panel: document.querySelector('#bronze-loop-panel'),
         state: {
           running: state.running,
+          stopping: state.stopping,
           refreshing: state.refreshing,
           scanningPicks: state.scanningPicks,
           dynamicSbcScanProgress: state.dynamicSbcScanProgress,
@@ -9787,6 +9792,7 @@ function updateLoopControls() {
         usingBuiltIn: state.loopConfigSource === 'built-in'
           && !state.workflowBuilder?.getStore?.().activeProfileId,
       },
+      setMobileTab: (tab) => state.panelGeometry?.setMobileTab?.(tab),
     });
     updateLoopControls();
   }
@@ -9820,6 +9826,7 @@ function updateLoopControls() {
     });
     const savedLoopUiOptions = loadLoopUiOptions();
     const savedPickOptions = loadPickRuntimeOptions();
+    const savedLayoutMode = normalizeLayoutOverride(adapters.localStorage.get('fc-loop-layout-mode', 'auto'));
     state.sbcFodderOptions = loadSbcFodderOptions();
     state.rewardAlertSettings = loadRewardAlertSettings();
     hydrateMainPanelOptions({
@@ -9828,9 +9835,10 @@ function updateLoopControls() {
       pickOptions: savedPickOptions,
       sbcFodderOptions: state.sbcFodderOptions,
       rewardAlertSettings: state.rewardAlertSettings,
+      layoutMode: savedLayoutMode,
     });
     renderRewardAlertSummary({ panel, settings: state.rewardAlertSettings });
-    createMainPanelGeometry({
+    state.panelGeometry = createMainPanelGeometry({
       panel,
       getViewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
       loadPosition: () => {
@@ -9844,6 +9852,12 @@ function updateLoopControls() {
       },
       saveLogHeight: (height) => {
         try { adapters.localStorage.set('fc-loop-panel-log-height', height); } catch { }
+      },
+      loadMobileTab: () => {
+        try { return adapters.localStorage.get('fc-loop-panel-mobile-tab', 'run'); } catch { return 'run'; }
+      },
+      saveMobileTab: (tab) => {
+        try { adapters.localStorage.set('fc-loop-panel-mobile-tab', tab); } catch { }
       },
       onModeChange: renderLog,
     });
@@ -9861,6 +9875,20 @@ function updateLoopControls() {
       exportText: (text, filename) => adapters.userEffects.downloadText(text, filename),
       log,
       now: Date.now,
+    });
+    state.layoutController = createResponsiveLayoutController({
+      windowObject: window,
+      root: document.documentElement,
+      loadOverride: () => savedLayoutMode,
+      saveOverride: (layoutMode) => {
+        try { adapters.localStorage.set('fc-loop-layout-mode', layoutMode); } catch { }
+        const select = document.querySelector('#bronze-loop-layout-mode');
+        if (select) select.value = layoutMode;
+      },
+      onChange: (snapshot) => {
+        state.panelGeometry?.setResponsiveMode?.(snapshot);
+        renderLog();
+      },
     });
     const restoredProfile = state.workflowBuilder.restoreActiveProfile();
     if (restoredProfile.status === 'blocked') {
@@ -9883,6 +9911,7 @@ function updateLoopControls() {
       openBuilder: (tab) => state.workflowBuilder?.open(tab),
       openHelp: (topic) => showMainPanelHelp({ dom: adapters.dom, topic }),
       selectProfile: (profileId) => state.workflowBuilder?.selectRuntimeProfile(profileId),
+      setLayoutMode: (layoutMode) => state.layoutController?.setOverride?.(layoutMode),
       renderProfiles: renderProfileSelect,
       updateLoopControls,
       savePickOptions: savePickRuntimeOptions,

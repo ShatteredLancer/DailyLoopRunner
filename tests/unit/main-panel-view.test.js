@@ -23,6 +23,11 @@ describe('main panel view template', () => {
       'bronze-loop-latest',
       'bronze-loop-options',
       'bronze-loop-options-scroll',
+      'bronze-loop-mobile-tabs',
+      'bronze-loop-mobile-tab-run',
+      'bronze-loop-mobile-tab-options',
+      'bronze-loop-mobile-tab-log',
+      'bronze-loop-run-summary',
       'bronze-loop-scan-progress',
       'bronze-loop-scan-progress-label',
       'bronze-loop-scan-progress-count',
@@ -54,6 +59,7 @@ describe('main panel view template', () => {
       'bronze-loop-refresh',
       'bronze-loop-scan-mode',
       'bronze-loop-scan-picks',
+      'bronze-loop-layout-mode',
       'bronze-loop-open-builder',
       'bronze-loop-copy',
       'bronze-loop-clear',
@@ -116,6 +122,9 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('overscroll-behavior: contain;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-scan-progress[data-mode="indeterminate"]');
     expect(MAIN_PANEL_STYLE).toContain('@keyframes bronze-loop-scan-slide');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel[data-layout="mobile"]');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel[data-input="touch"] button');
+    expect(MAIN_PANEL_STYLE).toContain('height: min(72dvh, 620px)');
   });
 
   it('mounts style and panel once through the DOM adapter', () => {

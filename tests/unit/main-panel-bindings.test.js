@@ -4,6 +4,7 @@ import { bindMainPanelCommands, hydrateMainPanelOptions } from '../../src/ui/mai
 const IDS = [
   'bronze-loop-select',
   'bronze-loop-profile-select',
+  'bronze-loop-layout-mode',
   'bronze-loop-open-builder',
   'bronze-loop-help-overview',
   'bronze-loop-help-run-options',
@@ -79,7 +80,7 @@ describe('main panel bindings', () => {
   it('binds every command control and forwards the selected loop id', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
-      'selectLoop', 'selectProfile', 'openBuilder', 'openHelp', 'savePickOptions', 'saveSbcFodderOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
+      'selectLoop', 'selectProfile', 'setLayoutMode', 'openBuilder', 'openHelp', 'savePickOptions', 'saveSbcFodderOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
       'refresh', 'scanPicks', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
@@ -91,6 +92,9 @@ describe('main panel bindings', () => {
     controls.get('bronze-loop-profile-select').value = 'inventory-only';
     controls.get('bronze-loop-profile-select').emit('change');
     expect(commands.selectProfile).toHaveBeenCalledWith('inventory-only', expect.any(Object));
+    controls.get('bronze-loop-layout-mode').value = 'mobile';
+    controls.get('bronze-loop-layout-mode').emit('change');
+    expect(commands.setLayoutMode).toHaveBeenCalledWith('mobile', expect.any(Object));
 
     for (const [id, event, command] of [
       ['bronze-loop-open-builder', 'click', 'openBuilder'],
@@ -148,6 +152,7 @@ describe('main panel bindings', () => {
         ratingSbcMaxCardRating: 88,
       },
       rewardAlertSettings: { enabled: true },
+      layoutMode: 'mobile',
     });
     expect(controls.get('bronze-loop-daily-inventory-only').checked).toBe(true);
     expect(controls.get('bronze-loop-low-rated-gold-max').value).toBe(82);
@@ -156,5 +161,6 @@ describe('main panel bindings', () => {
     expect(controls.get('bronze-loop-pick-open-at-end').checked).toBe(true);
     expect(controls.get('bronze-loop-pick-auto-threshold').value).toBe(91);
     expect(controls.get('bronze-loop-reward-alert-enabled').checked).toBe(true);
+    expect(controls.get('bronze-loop-layout-mode').value).toBe('mobile');
   });
 });

@@ -77,6 +77,18 @@ describe('Workflow and Loop Builder controller', () => {
     expect(root.classList.contains('open')).toBe(false);
   });
 
+  it('moves the mobile workspace from Library to Editor and Details as context changes', () => {
+    const { builder, root } = harness();
+    builder.open('workflows');
+    expect(root.innerHTML).toContain('data-mobile-section="library"');
+    click(root, { builderAction: 'select-object', kind: 'loops', id: 'flow' });
+    expect(root.innerHTML).toContain('data-mobile-section="editor"');
+    click(root, { builderAction: 'select-step', index: '0' });
+    expect(root.innerHTML).toContain('data-mobile-section="details"');
+    click(root, { builderAction: 'select-mobile-section', section: 'library' });
+    expect(root.innerHTML).toContain('data-mobile-section="library"');
+  });
+
   it('shows an unbound scanned Pick in the Dynamic Picks library', () => {
     const dynamic = {
       id: 'dynamic-pick',

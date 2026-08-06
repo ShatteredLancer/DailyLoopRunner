@@ -80,6 +80,29 @@ describe('pack reward highlight UI', () => {
     expect(ui.body[0].style.bottom).toBe('auto');
   });
 
+  it('positions at the mobile safe area and uses a touch-sized close control', () => {
+    const ui = harness();
+    showPackHighlightToast({
+      dom: ui.dom,
+      panel: {
+        dataset: { layout: 'mobile', input: 'touch' },
+        getBoundingClientRect: () => ({ right: 390, top: 650, bottom: 844 }),
+      },
+      viewport: () => ({ width: 390, height: 844 }),
+      model: { pack: { name: 'Pack' }, maxRating: 96, cards: [{ name: 'A', rating: 96 }] },
+      schedule: () => 1,
+    });
+    expect(ui.body[0].style).toMatchObject({
+      left: 'max(10px, env(safe-area-inset-left, 0px))',
+      right: 'max(10px, env(safe-area-inset-right, 0px))',
+      top: 'max(10px, env(safe-area-inset-top, 0px))',
+      bottom: 'auto',
+      width: 'auto',
+    });
+    const close = ui.created.find((item) => item.title === 'Dismiss highlight');
+    expect(close.style).toMatchObject({ width: '44px', height: '44px' });
+  });
+
   it('does nothing when there are no matching cards', () => {
     expect(showPackHighlightToast({ dom: harness().dom, model: { cards: [] } })).toBe(false);
   });
