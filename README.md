@@ -101,6 +101,7 @@ ntfy token 保存在 Tampermonkey 的 GM 隔离存储中，不写入 EA 页面 l
 - [Workflow/Loop Builder 中文指南](docs/WORKFLOW_LOOP_BUILDER_GUIDE_ZH.md)
 - [Builder 模型和边界](docs/WORKFLOW_LOOP_BUILDER.md)
 - [响应式与触摸界面](docs/RESPONSIVE_UI_ZH.md)
+- [Trade Scheduler 设计与实施跟踪](docs/TRADE_SCHEDULER_DESIGN_ZH.md)
 - [FSU Local 使用说明](FSU_mod/README.md)
 - [FSU Club Cache 集成](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)
 - [重构里程碑](docs/REFACTORING_MILESTONES.md)
