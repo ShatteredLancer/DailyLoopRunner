@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.30
+// @version      0.7.31
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -28,7 +28,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.30",
+    version: "0.7.31",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -11857,6 +11857,8 @@
   var DEFAULT_LOG_HEIGHT = 110;
   var MIN_LOG_HEIGHT = 64;
   var MAX_LOG_HEIGHT = 720;
+  var MOBILE_ICON_SIZE = 48;
+  var MOBILE_ICON_EDGE = 6;
   function viewportSize(getViewport) {
     const value = getViewport?.() || {};
     return {
@@ -11878,6 +11880,17 @@
     if (!Number.isFinite(height)) return DEFAULT_LOG_HEIGHT;
     return Math.max(MIN_LOG_HEIGHT, Math.min(MAX_LOG_HEIGHT, Math.round(height)));
   }
+  function normalizeMobileIconPosition(value, viewport) {
+    const left = Number(value?.left);
+    const top = Number(value?.top);
+    const width = Math.max(0, Number(viewport?.width || 0));
+    const height = Math.max(0, Number(viewport?.height || 0));
+    if (!Number.isFinite(left) || !Number.isFinite(top) || width <= 0 || height <= 0) return null;
+    return Object.freeze({
+      left: Math.round(Math.max(MOBILE_ICON_EDGE, Math.min(Math.max(MOBILE_ICON_EDGE, width - MOBILE_ICON_SIZE - MOBILE_ICON_EDGE), left))),
+      top: Math.round(Math.max(MOBILE_ICON_EDGE, Math.min(Math.max(MOBILE_ICON_EDGE, height - MOBILE_ICON_SIZE - MOBILE_ICON_EDGE), top)))
+    });
+  }
   function createMainPanelGeometry(options = {}) {
     const panel = options.panel;
     if (!panel?.querySelector || !panel?.classList) throw new TypeError("panel element is required");
@@ -11893,10 +11906,41 @@
     const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
     const saveMobileTab = options.saveMobileTab || (() => {
     });
+    const saveMobileIconPosition = options.saveMobileIconPosition || (() => {
+    });
     const loadedMobileTab = String(options.loadMobileTab?.() || "run");
     let mobileTab = ["run", "options", "log"].includes(loadedMobileTab) ? loadedMobileTab : "run";
+    let mobileIconPosition = options.loadMobileIconPosition?.() || null;
     function isMobileLayout() {
       return panel.dataset?.layout === "mobile";
+    }
+    function setPanelStyleProperty(name, value) {
+      if (typeof panel.style?.setProperty === "function") panel.style.setProperty(name, value);
+      else if (panel.style) panel.style[name] = value;
+    }
+    function clearPanelStyleProperty(name) {
+      if (typeof panel.style?.removeProperty === "function") panel.style.removeProperty(name);
+      else if (panel.style) delete panel.style[name];
+    }
+    function applyMobileIconPosition(value = mobileIconPosition) {
+      const normalized = normalizeMobileIconPosition(value, viewportSize(getViewport));
+      const properties = [
+        "--dlr-mobile-icon-left",
+        "--dlr-mobile-icon-right",
+        "--dlr-mobile-icon-top",
+        "--dlr-mobile-icon-bottom"
+      ];
+      if (!normalized) {
+        properties.forEach(clearPanelStyleProperty);
+        mobileIconPosition = null;
+        return null;
+      }
+      mobileIconPosition = normalized;
+      setPanelStyleProperty("--dlr-mobile-icon-left", `${normalized.left}px`);
+      setPanelStyleProperty("--dlr-mobile-icon-right", "auto");
+      setPanelStyleProperty("--dlr-mobile-icon-top", `${normalized.top}px`);
+      setPanelStyleProperty("--dlr-mobile-icon-bottom", "auto");
+      return normalized;
     }
     function persistPosition() {
       if (isMobileLayout()) return;
@@ -11986,6 +12030,7 @@
         panel.style.bottom = "";
         panel.style.width = "";
         panel.style.height = "";
+        applyMobileIconPosition();
         setMobileTab(mobileTab, false);
       } else if (previous === "mobile") {
         panel.classList.remove("icon-only");
@@ -12014,6 +12059,7 @@
         panel.classList.remove("options-open");
         panel.style.width = "";
         panel.style.height = "";
+        if (isMobileLayout()) applyMobileIconPosition();
       } else {
         resetSize();
       }
@@ -12048,8 +12094,10 @@
       let startLeft = 0;
       let startTop = 0;
       let moved = false;
+      let mobileIconDrag = false;
       handle.addEventListener("pointerdown", (event) => {
-        if (isMobileLayout()) return;
+        mobileIconDrag = isMobileLayout() && panel.classList.contains("icon-only");
+        if (isMobileLayout() && !mobileIconDrag) return;
         if (!panel.classList.contains("icon-only") && event.target?.closest?.("button,select,input,textarea")) return;
         dragging = true;
         moved = false;
@@ -12058,10 +12106,12 @@
         startY = event.clientY;
         startLeft = rect.left;
         startTop = rect.top;
-        panel.style.left = `${rect.left}px`;
-        panel.style.top = `${rect.top}px`;
-        panel.style.right = "auto";
-        panel.style.bottom = "auto";
+        if (!mobileIconDrag) {
+          panel.style.left = `${rect.left}px`;
+          panel.style.top = `${rect.top}px`;
+          panel.style.right = "auto";
+          panel.style.bottom = "auto";
+        }
         handle.setPointerCapture?.(event.pointerId);
         event.preventDefault?.();
       });
@@ -12071,6 +12121,11 @@
         const deltaY = event.clientY - startY;
         if (Math.abs(deltaX) + Math.abs(deltaY) > 3) moved = true;
         const viewport = viewportSize(getViewport);
+        if (mobileIconDrag) {
+          applyMobileIconPosition({ left: startLeft + deltaX, top: startTop + deltaY });
+          event.preventDefault?.();
+          return;
+        }
         panel.style.left = `${Math.max(0, Math.min(viewport.width - 36, startLeft + deltaX))}px`;
         panel.style.top = `${Math.max(0, Math.min(viewport.height - 36, startTop + deltaY))}px`;
         event.preventDefault?.();
@@ -12092,7 +12147,12 @@
             delete panel.dataset.dragJustEnded;
           }, 150);
         }
-        persistPosition();
+        if (mobileIconDrag) {
+          if (mobileIconPosition) saveMobileIconPosition(mobileIconPosition);
+        } else {
+          persistPosition();
+        }
+        mobileIconDrag = false;
       };
       handle.addEventListener("pointerup", stopDrag);
       handle.addEventListener("pointercancel", stopDrag);
@@ -12392,6 +12452,7 @@
         Object.freeze(["Start and Stop", "Start runs the selected Loop. Stop waits for the next safe point before ending the run."]),
         Object.freeze(["Batch Open", "Choose pack types from My Packs, save a batch, and open only the saved selection."]),
         Object.freeze(["Mobile views", "Use Run, Options, and Log to switch views. Starting a Loop returns to the compact Run controller so Stop remains available."]),
+        Object.freeze(["Mobile icon", "After collapsing with L, drag the icon away from EA controls. Its mobile position is saved separately from the Desktop panel."]),
         Object.freeze(["Options", "Show run settings, Builder Profiles, Dynamic SBC scan controls, and the full log."]),
         Object.freeze(["Move and resize", "On Desktop layout, drag the title bar to move the panel and drag any edge or corner to resize it."])
       ])
@@ -12887,12 +12948,15 @@
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] .bronze-loop-run-actions { margin: 0; }
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-stop { flex: 1 1 auto; }
   #bronze-loop-panel[data-layout="mobile"].icon-only {
-    left: auto !important; right: max(10px, env(safe-area-inset-right, 0px)) !important;
-    bottom: max(10px, env(safe-area-inset-bottom, 0px)) !important;
+    left: var(--dlr-mobile-icon-left, auto) !important;
+    right: var(--dlr-mobile-icon-right, max(10px, env(safe-area-inset-right, 0px))) !important;
+    top: var(--dlr-mobile-icon-top, auto) !important;
+    bottom: var(--dlr-mobile-icon-bottom, max(10px, env(safe-area-inset-bottom, 0px))) !important;
     width: 48px !important; height: 48px !important; min-height: 0; border: 1px solid #78a6ff; padding: 0;
   }
   #bronze-loop-panel[data-layout="mobile"].icon-only #bronze-loop-drag,
   #bronze-loop-panel[data-layout="mobile"].icon-only #bronze-loop-collapse { width: 46px; height: 46px; }
+  #bronze-loop-panel[data-layout="mobile"].icon-only #bronze-loop-drag { cursor: move; touch-action: none; }
   @media (max-height: 520px) {
     #bronze-loop-panel[data-layout="mobile"] { height: calc(100dvh - env(safe-area-inset-top, 0px)) !important; }
     #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] { height: 142px !important; }
@@ -25803,6 +25867,19 @@
         saveMobileTab: (tab) => {
           try {
             adapters.localStorage.set("fc-loop-panel-mobile-tab", tab);
+          } catch {
+          }
+        },
+        loadMobileIconPosition: () => {
+          try {
+            return adapters.localStorage.getJson("fc-loop-panel-mobile-icon-pos", null);
+          } catch {
+            return null;
+          }
+        },
+        saveMobileIconPosition: (position) => {
+          try {
+            adapters.localStorage.setJson("fc-loop-panel-mobile-icon-pos", position);
           } catch {
           }
         },

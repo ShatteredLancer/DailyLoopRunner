@@ -9859,6 +9859,12 @@ function updateLoopControls() {
       saveMobileTab: (tab) => {
         try { adapters.localStorage.set('fc-loop-panel-mobile-tab', tab); } catch { }
       },
+      loadMobileIconPosition: () => {
+        try { return adapters.localStorage.getJson('fc-loop-panel-mobile-icon-pos', null); } catch { return null; }
+      },
+      saveMobileIconPosition: (position) => {
+        try { adapters.localStorage.setJson('fc-loop-panel-mobile-icon-pos', position); } catch { }
+      },
       onModeChange: renderLog,
     });
     state.workflowBuilder = createWorkflowLoopBuilder({

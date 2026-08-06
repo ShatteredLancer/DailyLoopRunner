@@ -5,6 +5,8 @@ const DEFAULT_SIZES = Object.freeze({
 const DEFAULT_LOG_HEIGHT = 110;
 const MIN_LOG_HEIGHT = 64;
 const MAX_LOG_HEIGHT = 720;
+const MOBILE_ICON_SIZE = 48;
+const MOBILE_ICON_EDGE = 6;
 
 function viewportSize(getViewport) {
   const value = getViewport?.() || {};
@@ -31,6 +33,18 @@ export function normalizeMainPanelLogHeight(value) {
   return Math.max(MIN_LOG_HEIGHT, Math.min(MAX_LOG_HEIGHT, Math.round(height)));
 }
 
+export function normalizeMobileIconPosition(value, viewport) {
+  const left = Number(value?.left);
+  const top = Number(value?.top);
+  const width = Math.max(0, Number(viewport?.width || 0));
+  const height = Math.max(0, Number(viewport?.height || 0));
+  if (!Number.isFinite(left) || !Number.isFinite(top) || width <= 0 || height <= 0) return null;
+  return Object.freeze({
+    left: Math.round(Math.max(MOBILE_ICON_EDGE, Math.min(Math.max(MOBILE_ICON_EDGE, width - MOBILE_ICON_SIZE - MOBILE_ICON_EDGE), left))),
+    top: Math.round(Math.max(MOBILE_ICON_EDGE, Math.min(Math.max(MOBILE_ICON_EDGE, height - MOBILE_ICON_SIZE - MOBILE_ICON_EDGE), top))),
+  });
+}
+
 export function createMainPanelGeometry(options = {}) {
   const panel = options.panel;
   if (!panel?.querySelector || !panel?.classList) throw new TypeError('panel element is required');
@@ -42,11 +56,42 @@ export function createMainPanelGeometry(options = {}) {
   const onModeChange = options.onModeChange || (() => {});
   const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
   const saveMobileTab = options.saveMobileTab || (() => {});
+  const saveMobileIconPosition = options.saveMobileIconPosition || (() => {});
   const loadedMobileTab = String(options.loadMobileTab?.() || 'run');
   let mobileTab = ['run', 'options', 'log'].includes(loadedMobileTab) ? loadedMobileTab : 'run';
+  let mobileIconPosition = options.loadMobileIconPosition?.() || null;
 
   function isMobileLayout() {
     return panel.dataset?.layout === 'mobile';
+  }
+
+  function setPanelStyleProperty(name, value) {
+    if (typeof panel.style?.setProperty === 'function') panel.style.setProperty(name, value);
+    else if (panel.style) panel.style[name] = value;
+  }
+
+  function clearPanelStyleProperty(name) {
+    if (typeof panel.style?.removeProperty === 'function') panel.style.removeProperty(name);
+    else if (panel.style) delete panel.style[name];
+  }
+
+  function applyMobileIconPosition(value = mobileIconPosition) {
+    const normalized = normalizeMobileIconPosition(value, viewportSize(getViewport));
+    const properties = [
+      '--dlr-mobile-icon-left', '--dlr-mobile-icon-right',
+      '--dlr-mobile-icon-top', '--dlr-mobile-icon-bottom',
+    ];
+    if (!normalized) {
+      properties.forEach(clearPanelStyleProperty);
+      mobileIconPosition = null;
+      return null;
+    }
+    mobileIconPosition = normalized;
+    setPanelStyleProperty('--dlr-mobile-icon-left', `${normalized.left}px`);
+    setPanelStyleProperty('--dlr-mobile-icon-right', 'auto');
+    setPanelStyleProperty('--dlr-mobile-icon-top', `${normalized.top}px`);
+    setPanelStyleProperty('--dlr-mobile-icon-bottom', 'auto');
+    return normalized;
   }
 
   function persistPosition() {
@@ -144,6 +189,7 @@ export function createMainPanelGeometry(options = {}) {
       panel.style.bottom = '';
       panel.style.width = '';
       panel.style.height = '';
+      applyMobileIconPosition();
       setMobileTab(mobileTab, false);
     } else if (previous === 'mobile') {
       panel.classList.remove('icon-only');
@@ -174,6 +220,7 @@ export function createMainPanelGeometry(options = {}) {
       panel.classList.remove('options-open');
       panel.style.width = '';
       panel.style.height = '';
+      if (isMobileLayout()) applyMobileIconPosition();
     } else {
       resetSize();
     }
@@ -211,9 +258,11 @@ export function createMainPanelGeometry(options = {}) {
     let startLeft = 0;
     let startTop = 0;
     let moved = false;
+    let mobileIconDrag = false;
 
     handle.addEventListener('pointerdown', (event) => {
-      if (isMobileLayout()) return;
+      mobileIconDrag = isMobileLayout() && panel.classList.contains('icon-only');
+      if (isMobileLayout() && !mobileIconDrag) return;
       if (!panel.classList.contains('icon-only') && event.target?.closest?.('button,select,input,textarea')) return;
       dragging = true;
       moved = false;
@@ -222,10 +271,12 @@ export function createMainPanelGeometry(options = {}) {
       startY = event.clientY;
       startLeft = rect.left;
       startTop = rect.top;
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.right = 'auto';
-      panel.style.bottom = 'auto';
+      if (!mobileIconDrag) {
+        panel.style.left = `${rect.left}px`;
+        panel.style.top = `${rect.top}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+      }
       handle.setPointerCapture?.(event.pointerId);
       event.preventDefault?.();
     });
@@ -236,6 +287,11 @@ export function createMainPanelGeometry(options = {}) {
       const deltaY = event.clientY - startY;
       if (Math.abs(deltaX) + Math.abs(deltaY) > 3) moved = true;
       const viewport = viewportSize(getViewport);
+      if (mobileIconDrag) {
+        applyMobileIconPosition({ left: startLeft + deltaX, top: startTop + deltaY });
+        event.preventDefault?.();
+        return;
+      }
       panel.style.left = `${Math.max(0, Math.min(viewport.width - 36, startLeft + deltaX))}px`;
       panel.style.top = `${Math.max(0, Math.min(viewport.height - 36, startTop + deltaY))}px`;
       event.preventDefault?.();
@@ -254,7 +310,12 @@ export function createMainPanelGeometry(options = {}) {
         panel.dataset.dragJustEnded = '1';
         schedule(() => { delete panel.dataset.dragJustEnded; }, 150);
       }
-      persistPosition();
+      if (mobileIconDrag) {
+        if (mobileIconPosition) saveMobileIconPosition(mobileIconPosition);
+      } else {
+        persistPosition();
+      }
+      mobileIconDrag = false;
     };
     handle.addEventListener('pointerup', stopDrag);
     handle.addEventListener('pointercancel', stopDrag);

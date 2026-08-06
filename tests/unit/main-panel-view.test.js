@@ -125,6 +125,8 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel[data-layout="mobile"]');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel[data-input="touch"] button');
     expect(MAIN_PANEL_STYLE).toContain('height: min(72dvh, 620px)');
+    expect(MAIN_PANEL_STYLE).toContain('left: var(--dlr-mobile-icon-left, auto) !important;');
+    expect(MAIN_PANEL_STYLE).toContain('.icon-only #bronze-loop-drag { cursor: move; touch-action: none; }');
   });
 
   it('mounts style and panel once through the DOM adapter', () => {

@@ -475,7 +475,7 @@ UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文
 - `layout` 与 `input` 是两个独立维度。Desktop 可以使用 touch target，Mobile 也可以由精确 pointer 操作；不得用其中一个暗示另一个。
 - 用户手动覆盖必须优先于自动断点。旧 `@media(max-width)` 规则不得绕过 `data-dlr-layout` 重新启用另一套主面板或 Builder 结构。
 - Desktop、Tablet 和 Mobile 必须共享同一个 runtime、Profile、日志和 command 状态；resize、旋转和 Layout 切换不得重建或停止运行会话。
-- Mobile 使用独立底部面板几何，不能覆盖保存的 Desktop 位置、尺寸或完整日志高度。Mobile 禁止拖动和 resize，运行开始后必须回到保留 Stop 的紧凑 Run 控制器。
+- Mobile 使用独立底部面板几何，不能覆盖保存的 Desktop 位置、尺寸或完整日志高度。Mobile 底部面板禁止拖动和 resize，但折叠图标必须可拖动、限制在可视区域并使用独立持久化位置；运行开始后必须回到保留 Stop 的紧凑 Run 控制器。
 - 触摸输入的交互目标最小 44px；文本输入在触摸布局中不得低于 16px，避免移动浏览器自动缩放。
 - Mobile 面板和对话框必须使用 `dvh`、`env(safe-area-inset-*)`、稳定滚动区域和不被底部手势区域遮挡的操作栏。
 - Builder Mobile 必须保持 Library、Editor、Details 单视图导航，选择对象进入 Editor、选择 Workflow step 进入 Details；Save、Activate、Close 在长表单中始终可达。

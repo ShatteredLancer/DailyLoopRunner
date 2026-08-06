@@ -4,6 +4,7 @@ import {
   createMainPanelGeometry,
   getMainPanelDefaultSize,
   normalizeMainPanelLogHeight,
+  normalizeMobileIconPosition,
 } from '../../src/ui/main-panel-geometry.js';
 
 function classList(initial = []) {
@@ -35,6 +36,7 @@ function element() {
 }
 
 function harness(options = {}) {
+  const viewport = options.viewport || { width: 1200, height: 800 };
   const controls = new Map([
     ['#bronze-loop-options-toggle', element()],
     ['#bronze-loop-collapse', element()],
@@ -55,6 +57,14 @@ function harness(options = {}) {
     style: {},
     querySelector: (selector) => controls.get(selector) || null,
     getBoundingClientRect() {
+      if (panel.dataset.layout === 'mobile' && panel.classList.contains('icon-only')) {
+        return {
+          left: Number.parseFloat(panel.style['--dlr-mobile-icon-left']) || viewport.width - 58,
+          top: Number.parseFloat(panel.style['--dlr-mobile-icon-top']) || viewport.height - 58,
+          width: 48,
+          height: 48,
+        };
+      }
       return {
         left: Number.parseFloat(panel.style.left) || 100,
         top: Number.parseFloat(panel.style.top) || 80,
@@ -68,19 +78,33 @@ function harness(options = {}) {
   const modes = [];
   const scheduled = [];
   const savedMobileTabs = [];
+  const savedMobileIconPositions = [];
   const geometry = createMainPanelGeometry({
     panel,
-    getViewport: () => ({ width: 1200, height: 800 }),
+    getViewport: () => viewport,
     loadPosition: () => options.savedPosition || null,
     savePosition: (position) => saved.push(position),
     loadLogHeight: () => options.savedLogHeight ?? null,
     saveLogHeight: (height) => savedLogHeights.push(height),
     loadMobileTab: () => options.mobileTab || 'run',
     saveMobileTab: (tab) => savedMobileTabs.push(tab),
+    loadMobileIconPosition: () => options.savedMobileIconPosition || null,
+    saveMobileIconPosition: (position) => savedMobileIconPositions.push(position),
     onModeChange: (mode) => modes.push(mode),
     schedule: (callback, delay) => { scheduled.push({ callback, delay }); return scheduled.length; },
   });
-  return { panel, controls, geometry, saved, savedLogHeights, savedMobileTabs, modes, scheduled };
+  return {
+    panel,
+    controls,
+    geometry,
+    saved,
+    savedLogHeights,
+    savedMobileTabs,
+    savedMobileIconPositions,
+    modes,
+    scheduled,
+    viewport,
+  };
 }
 
 function pointerEvent(values = {}) {
@@ -101,6 +125,9 @@ describe('main panel geometry', () => {
     expect(getMainPanelDefaultSize(true)).toEqual({ width: 360, height: 620 });
     expect(clampMainPanelDefaultSize({ width: 360, height: 620 }, { width: 340, height: 500 }))
       .toEqual({ width: 320, height: 480 });
+    expect(normalizeMobileIconPosition({ left: 500, top: -20 }, { width: 390, height: 844 }))
+      .toEqual({ left: 336, top: 6 });
+    expect(normalizeMobileIconPosition(null, { width: 390, height: 844 })).toBeNull();
   });
 
   it('starts compact, toggles Options/Hide, and resets each mode to its full default size', () => {
@@ -202,5 +229,33 @@ describe('main panel geometry', () => {
     geometry.setResponsiveMode({ layout: 'desktop', input: 'pointer' });
     expect(panel.dataset.layout).toBe('desktop');
     expect(panel.style.width).toBe('300px');
+  });
+
+  it('drags and persists the collapsed mobile icon without overwriting Desktop geometry', () => {
+    const { panel, controls, geometry, saved, savedMobileIconPositions, scheduled } = harness();
+    geometry.setResponsiveMode({ layout: 'mobile', input: 'touch' });
+    const desktopSaveCount = saved.length;
+    controls.get('#bronze-loop-collapse').emit('click', pointerEvent());
+    expect(panel.classList.contains('icon-only')).toBe(true);
+
+    const drag = controls.get('#bronze-loop-drag');
+    drag.emit('pointerdown', pointerEvent({ clientX: 1150, clientY: 750 }));
+    drag.emit('pointermove', pointerEvent({ clientX: 250, clientY: 180 }));
+    drag.emit('pointerup', pointerEvent({ clientX: 250, clientY: 180 }));
+
+    expect(panel.style).toMatchObject({
+      '--dlr-mobile-icon-left': '242px',
+      '--dlr-mobile-icon-right': 'auto',
+      '--dlr-mobile-icon-top': '172px',
+      '--dlr-mobile-icon-bottom': 'auto',
+    });
+    expect(savedMobileIconPositions).toEqual([{ left: 242, top: 172 }]);
+    expect(saved).toHaveLength(desktopSaveCount);
+
+    const click = pointerEvent();
+    controls.get('#bronze-loop-collapse').emit('click', click);
+    expect(panel.classList.contains('icon-only')).toBe(true);
+    expect(click.preventDefault).toHaveBeenCalled();
+    expect(scheduled).toHaveLength(1);
   });
 });

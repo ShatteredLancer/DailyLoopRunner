@@ -8,6 +8,7 @@ export const MAIN_PANEL_HELP_TOPICS = Object.freeze([
       Object.freeze(['Start and Stop', 'Start runs the selected Loop. Stop waits for the next safe point before ending the run.']),
       Object.freeze(['Batch Open', 'Choose pack types from My Packs, save a batch, and open only the saved selection.']),
       Object.freeze(['Mobile views', 'Use Run, Options, and Log to switch views. Starting a Loop returns to the compact Run controller so Stop remains available.']),
+      Object.freeze(['Mobile icon', 'After collapsing with L, drag the icon away from EA controls. Its mobile position is saved separately from the Desktop panel.']),
       Object.freeze(['Options', 'Show run settings, Builder Profiles, Dynamic SBC scan controls, and the full log.']),
       Object.freeze(['Move and resize', 'On Desktop layout, drag the title bar to move the panel and drag any edge or corner to resize it.']),
     ]),
