@@ -1,7 +1,7 @@
 # Trade Scheduler 设计与实施跟踪
 
-> 文档状态：Approved design，尚未开始实现  
-> 最后更新：2026-08-06  
+> 文档状态：Implementation in progress
+> 最后更新：2026-08-07
 > 适用仓库：DailyLoopRunner  
 > 功能边界：定时自动买入、定时批量挂牌、交易任务调度、逐项回执与诊断
 
@@ -129,6 +129,10 @@ Enhancer 的评分搜索实际流程为：从 FUTNext 获取指定评分的 defi
 | D10 | 不依赖 Enhancer 或 FSU 执行交易，也不复制 Enhancer 私有源码。 | Resolved |
 | D11 | 未登录时不自动登录、不保存 EA 凭证、不把访问令牌交给外部后台。 | Resolved |
 | D12 | 首个可写阶段先实现手动 Bulk Listing，再实现自动买入。 | Resolved |
+| D13 | Buy Job 必须显式配置 `cardClass`，不提供隐式默认卡类。 | Resolved |
+| D14 | Price Provider 的 `auto` 顺序固定为 FUT.GG，再回退 FUTNext。 | Resolved |
+| D15 | FUTNext rating catalog 默认缓存 24 小时；platform、season 或 parser version 变化时立即失效，刷新失败后不使用已过期数据。 | Resolved |
+| D16 | `common-gold`、`rare-gold` 和 `special` 精确区分卡类；`normal-gold` 匹配普金与稀有金但排除特殊卡，兼容别名 `gold` 等同 `normal-gold`。 | Resolved |
 
 ## 5. 非目标
 
@@ -371,7 +375,7 @@ Preflight
 ```json
 {
   "sources": ["transfer", "club"],
-  "cardClass": "gold",
+  "cardClass": "normal-gold",
   "ratingRules": [
     { "min": 75, "max": 82, "buyNow": 700 },
     { "min": 83, "max": 83, "buyNow": 900 },
@@ -389,6 +393,14 @@ Preflight
   "expiredPolicy": "reprice"
 }
 ```
+
+`cardClass` 不允许从评分推断卡种：
+
+- `common-gold`：非特殊普金。
+- `rare-gold`：非特殊稀有金。
+- `normal-gold`：普金和稀有金，但排除特殊卡。
+- `special`：仅特殊卡。
+- `gold`：仅作为 `normal-gold` 的兼容别名；新 UI 和新配置不应继续生成该值。
 
 ### 9.2 候选过滤
 
@@ -724,42 +736,69 @@ Next: 解决第 19 节首轮 Open decisions，然后开始 TS1。
 
 ### TS1 合同、Provider 和只读诊断
 
-Status: Not started
+Status: Complete
 
 Scope:
 
-- [ ] Trade contracts 和 Job schema。
-- [ ] Fake Trade Adapter。
-- [ ] EA Trade Adapter readiness 和只读 DTO/能力诊断。
-- [ ] Player Catalog Provider 和缓存。
-- [ ] 通用 Price Quote Provider，保持现有 Recap 回归行为。
-- [ ] Error classification 和纯 Circuit Breaker。
-- [ ] Architecture tests。
+- [x] Trade contracts 和 Job schema。
+- [x] Fake Trade Adapter。
+- [x] EA Trade Adapter readiness 和只读 DTO/能力诊断。
+- [x] Player Catalog Provider 和缓存。
+- [x] 通用 Price Quote Provider，保持现有 Recap 回归行为。
+- [x] Error classification 和纯 Circuit Breaker。
+- [x] Architecture tests。
 
-Tests: Pending。
+Tests: `npm run verify` 通过；115 个测试文件、744 个测试通过，syntax、ESLint、配置/Profile、架构、构建产物和 FSU release 检查全部通过。
 
-Live validation: 只读导出 `UTSearchCriteriaDTO`、Trade Access、价格限制和 Transfer capacity；不得买入或挂牌。
+Live validation: Complete。EA Web App PC 实测确认 capability、criteria、Trade Access、金币、Transfer capacity、外部 Provider 回退和 item price limits 均可读取，且诊断中不包含认证信息。以下命令保留用于后续兼容性复核；不得将其扩展为买入、移动或挂牌操作。
 
-Exit criteria: Provider、schema、错误策略和 Adapter 能力探测通过完整测试，真实页面诊断不包含认证数据。
+```js
+__FCLoopRunner.inspectTradeCapabilities()
+
+__FCLoopRunner.loadTradePlayerCatalog({
+  ratings: [84, 85],
+  platform: "pc"
+})
+
+__FCLoopRunner.loadTradePriceQuotes({
+  definitionIds: [123456],
+  platform: "pc",
+  provider: "auto"
+})
+
+__FCLoopRunner.inspectTradePriceLimits(
+  { id: 123456789, pile: "club" },
+  { refresh: true }
+)
+```
+
+其中 `definitionIds` 应替换为 catalog 返回的真实低价值卡 definition ID；`id` 应替换为 Club 或 Transfer List 中一张低价值卡的真实 item ID。`inspectTradePriceLimits(..., { refresh: true })` 只调用 EA `requestMarketData()` 读取价格限制。
+
+Exit criteria: Met。Provider、schema、错误策略、Adapter 能力探测、完整测试和真实页面只读诊断均通过；可以开始 TS2。
 
 ### TS2 手动 Bulk Listing
 
-Status: Not started
+Status: In progress（TS2a 只读验证通过；TS2b Club 单卡事务已通过真实挂牌验证）
 
 Scope:
 
-- [ ] Listing Planner。
-- [ ] Listing Transaction 和对账。
-- [ ] Preview/Confirm/Stop。
-- [ ] Club/Transfer 候选过滤。
-- [ ] 固定价格、market override、duration 和容量处理。
-- [ ] Listing Recap 和 diagnostics。
+- [x] Listing Planner。
+- [x] Listing Transaction 和对账核心。
+- [x] Preview model 和只读运行时入口。
+- [x] 一次性确认 token、显式确认和 Stop 核心。
+- [ ] Bulk Listing UI 的 Confirm/Stop 交互。
+- [x] Club 候选过滤和 Active Transfer 排除的真实字段验证。
+- [ ] Expired/Inactive Transfer reprice 真实字段验证。
+- [x] 固定价格、market override、EA 价格步进和 duration Preview。
+- [x] Price limits、容量和逐卡事务重检。
+- [x] 可序列化逐项 Listing run receipt。
+- [ ] Listing Recap UI 和 diagnostics 导出。
 
-Tests: Pending。
+Tests: TS2b core 后 `npm run verify` 通过；119 个测试文件、763 个测试通过。Architecture audit 确认 `requestMarketData()`、`list()` 和 `requestTransferItems()` 各一个 EA Trade Adapter 调用点，`searchTransferMarket()` 和 `bid()` 均为零调用点。
 
-Live validation: 按第 17.5 节完成一张 Club 卡、一张 Transfer 卡和停止/容量验证。
+Live validation: TS2a 已确认 Club `inactive` 和 Transfer `active` 字段、common/rare/special 分类、Active Trade 排除和报价回退。TS2b 已对一张低价值 Club common Gold 完成独立 Prepare、人工复核、显式确认、一次挂牌、Transfer 刷新和精确回读。Expired/Inactive Transfer、Bulk UI、连续多卡 Stop/节流和容量仍需按第 17.5 节完成真实验证。
 
-Exit criteria: 没有 ambiguous 重复挂牌，所有写操作有逐项回执。
+Exit criteria: Not met。仍需真实候选字段验证、Listing Transaction、显式确认、Stop、容量处理、对账、Recap 和真实单卡挂牌。
 
 ### TS3 Scheduler 和定时挂牌
 
@@ -840,16 +879,16 @@ Exit criteria: 形成独立发布说明、真实风险清单和可恢复运行�
 
 以下事项在进入对应实现阶段前必须明确记录结论：
 
-| ID | 问题 | 建议默认 | 决定阶段 |
-| --- | --- | --- | --- |
-| O1 | Buy Job 默认 `cardClass` 是 rare-gold、normal-gold 还是必须显式选择？ | 必须显式选择 | TS1 |
-| O2 | Price Provider 默认顺序。 | Auto: FUT.GG -> FUTNext | TS1 |
-| O3 | FUTNext rating catalog TTL 和 last-known-good 最长允许时间。 | 24 小时，版本变化立即失效 | TS1 |
-| O4 | 默认 Misfire Policy 和 grace window。 | grace-window，15 分钟 | TS3 |
-| O5 | 最低金币余额是否为所有 Buy Job 的全局硬限制。 | 全局硬限制，可被 Job 提高但不能降低 | TS4 |
-| O6 | Listing expired 默认跳过还是重新报价。 | reprice | TS2 |
-| O7 | 是否允许同一 rating rule 同时匹配普通金和特殊卡。 | 不允许；card class 必须明确 | TS2 |
-| O8 | 是否需要高价值卡 EA 最低 BIN 复核。 | 首版不实现 | TS6 |
+| ID | 问题 | 建议默认 | 决定阶段 | 状态 |
+| --- | --- | --- | --- | --- |
+| O1 | Buy Job 默认 `cardClass` 是 rare-gold、normal-gold 还是必须显式选择？ | 必须显式选择 | TS1 | Resolved: D13 |
+| O2 | Price Provider 默认顺序。 | Auto: FUT.GG -> FUTNext | TS1 | Resolved: D14 |
+| O3 | FUTNext rating catalog TTL 和 last-known-good 最长允许时间。 | 24 小时，版本变化立即失效 | TS1 | Resolved: D15 |
+| O4 | 默认 Misfire Policy 和 grace window。 | grace-window，15 分钟 | TS3 | Open |
+| O5 | 最低金币余额是否为所有 Buy Job 的全局硬限制。 | 全局硬限制，可被 Job 提高但不能降低 | TS4 | Open |
+| O6 | Listing expired 默认跳过还是重新报价。 | reprice | TS2 | Open |
+| O7 | 是否允许同一 rating rule 同时匹配普通金和特殊卡。 | 不允许；card class 必须明确 | TS2 | Open |
+| O8 | 是否需要高价值卡 EA 最低 BIN 复核。 | 首版不实现 | TS6 | Open |
 
 ## 20. 决策与验证日志
 
@@ -884,3 +923,111 @@ Diagnostics: No EA transaction was executed.
 Remaining risk: EA internal DTO and response fields still require TS1 live capability capture; external rating catalog is undocumented.
 
 Next: Resolve O1-O3 and implement TS1 without write operations.
+
+### 2026-08-06 / TS1 / Read-only foundation
+
+Status: In progress; implementation and automated verification complete, live EA-page validation pending.
+
+Commit/Version: Uncommitted working tree on repository version `0.7.31`.
+
+Automated tests: `npm run verify` passed: 115 test files and 743 tests; syntax, ESLint, config/Profile validation, architecture audit, build, dist and FSU release checks also passed.
+
+Live setup: Pending. The Console commands in TS1 must be run after EA Web App and DailyLoopRunner are ready.
+
+Observed result: Trade contracts, disarmed import behavior, explicit card class, Fake/EA adapters, FUTNext rating catalog, platform-isolated price quotes, error classification and circuit breaker are implemented. Existing Player Pick price-loading behavior remains covered by compatibility tests.
+
+Diagnostics: Runtime exposes `inspectTradeCapabilities`, `inspectTradePriceLimits`, `loadTradePlayerCatalog`, `clearTradePlayerCatalogCache`, `loadTradePriceQuotes` and `clearTradePriceQuoteCache`. The only implemented EA Trade service invocation is read-only `requestMarketData()`; market search, bid, move and list have zero call sites.
+
+Remaining risk: Real FC26 page objects may expose different DTO, Trade Access, coin, capacity or item price-limit shapes. These fields must be captured through the allowlisted diagnostics before TS2.
+
+Next: Collect and review the TS1 Console outputs; mark TS1 complete only after confirming the diagnostics contain no authentication data and the read-only values match the live account.
+
+### 2026-08-06 / TS1 / Live read-only validation round 1
+
+Status: Partial pass; one compatibility fix implemented and awaiting a one-command retest.
+
+Commit/Version: Uncommitted working tree on repository version `0.7.31`.
+
+Automated tests: After the live-shape fix, `npm run verify` passed: 115 test files and 744 tests; all other verification stages passed.
+
+Live setup: EA Web App on PC with DailyLoopRunner `0.7.31`; artifact `trade-ts1-diagnostics-2026-08-06T12-10-47-903Z.json`; Console reported no errors.
+
+Observed result: `runtimeReady` and `canTrade` were true; Trade Access was allowed; all required EA methods and 13 allowlisted search criteria fields were present; Transfer List was 11/100. FUTNext returned 50 definition IDs for each of ratings 84 and 85. FUT.GG returned HTTP 403 and Auto correctly fell back to five FUTNext quotes. A Club item resolved successfully and read-only `requestMarketData()` returned HTTP 200 with price limits 700-10000.
+
+Diagnostics: No token, auth, cookie, persona, email, session, password, secret or credential field/string was present. The only mismatch was `coins: null`.
+
+Remaining risk: Live `getCurrency(GameCurrency.COINS)` returns an object with an `amount` field, while the initial Adapter expected a directly numeric value. The Adapter now accepts both shapes and has a contract test ensuring private currency/user fields are not serialized. The live coin value still requires confirmation after reloading the rebuilt userscript.
+
+Next: Run `__FCLoopRunner.inspectTradeCapabilities()` once with the rebuilt userscript and confirm `coins` is a finite value. No catalog, quote or price-limit rerun is required.
+
+### 2026-08-06 / TS1 / Live coin validation round 2
+
+Status: Complete.
+
+Commit/Version: Uncommitted working tree on repository version `0.7.31`.
+
+Automated tests: Unchanged from round 1: 115 test files and 744 tests passed.
+
+Live setup: EA Web App on PC after reloading the rebuilt DailyLoopRunner `0.7.31` userscript.
+
+Observed result: `runtimeReady: true`, `canTrade: true`, Trade Access allowed at level 2, coins read as a finite value, and Transfer List remained 11/100 with 89 free slots. The 13 criteria fields and required Trade methods remained available.
+
+Diagnostics: The compatibility reader extracted only the numeric `amount` from the live EA currency object; no user or currency object was serialized.
+
+Remaining risk: TS1 has no known blocker. EA internal APIs remain unstable and continue to require Adapter-level allowlisting and versioned live validation in later write stages.
+
+Next: Start TS2 manual Bulk Listing implementation. Do not perform a real listing until Planner preview, explicit confirmation, stop behavior and per-item receipts pass automated tests.
+
+### 2026-08-06 / TS2a / Listing candidate and preview foundation
+
+Status: In progress; automated implementation complete, live read-only candidate validation pending.
+
+Commit/Version: Uncommitted working tree on repository version `0.7.31`.
+
+Automated tests: `npm run verify` passed: 117 test files and 752 tests; all syntax, ESLint, config/Profile, architecture, build, dist and FSU release checks passed.
+
+Live setup: Pending. Reload the rebuilt userscript and export the read-only candidate/preview artifact before implementing `list()`.
+
+Observed result: The EA Trade Adapter now exports allowlisted Club/Transfer candidate snapshots; the pure Planner filters non-player, untradeable, limited-use, concept, Academy, evolution, Active/Closed/unknown Trade, card-class and rating-rule mismatches. Preview applies source/rating/item ordering, `maxListings`, fixed price, fresh market override, stale/unavailable fallback, EA price increments and duration.
+
+Diagnostics: Runtime exposes `inspectTradeListingCandidates()` and `previewTradeListings()`. Preview returns aggregate scan counts, selected entries, rejection counts and at most 20 rejection samples; it does not return raw EA items or the complete Club. Architecture audit keeps `services.Item.list()` at zero call sites.
+
+Remaining risk: Live EA auction methods and tradeability fields may differ from fixtures. Transfer expired items in particular must be observed as `inactive`, `closed`, `active` or `unknown` before defining write eligibility and reconciliation.
+
+Next: Collect one read-only Preview artifact covering both Club and Transfer sources. Review it before adding Listing Transaction or UI confirmation.
+
+### 2026-08-07 / TS2a / Live listing preview validation
+
+Status: Complete for Club candidates and Active Transfer exclusion; Expired Transfer shape remains pending under TS2.
+
+Commit/Version: Uncommitted working tree on repository version `0.7.31`.
+
+Automated tests: At artifact generation time, 117 test files and 752 tests passed.
+
+Live setup: EA Web App on PC; artifact `trade-ts2a-preview-2026-08-06T22-54-02-815Z.json`; Console reported no errors.
+
+Observed result: The scan returned all 2706 unique entities: 2679 Club and 27 Transfer. All 27 Transfer items were tradeable active auctions and were rejected as `active-trade`. Club filtering found 88 common Gold, 32 rare Gold and 13 Special eligible items without cross-class selection. FUT.GG returned HTTP 403 and Auto fell back to FUTNext for all 10 requested rare-Gold quotes; nine were below configured price and one higher quote applied 5% markup plus EA increments, producing start/buy-now 2600/2700.
+
+Diagnostics: No authentication or user identity fields were present. Non-player, untradeable, card-class and active-trade rejection totals reconciled with all scanned entities. Preview remained read-only.
+
+Remaining risk: No expired or inactive Transfer item existed during capture, so Transfer reprice eligibility and post-list state cannot yet be considered live-validated.
+
+Next: Implement and validate the guarded Club single-item transaction before enabling bulk execution or Transfer reprice.
+
+### 2026-08-07 / TS2b / Guarded Club listing transaction core
+
+Status: Complete for the guarded Club single-item transaction; bulk execution and Transfer reprice remain gated.
+
+Commit/Version: Uncommitted working tree on repository version `0.7.31`.
+
+Automated tests: `npm run verify` passed: 119 test files and 763 tests; all other verification stages passed.
+
+Live setup: EA Web App on PC; prepared artifact `trade-ts2b-prepared-2026-08-06T23-12-53-842Z.json` and run receipt `trade-ts2b-receipt-2026-08-07T01-34-29-467Z.json`. Runtime remained hard-limited to one Club item and rejected Transfer sources.
+
+Observed result: Preparation selected one 77-rated common Gold Club item with EA limits 300-10000 and final prices 650/700. The write returned HTTP 200, Transfer refresh returned HTTP 200, and reconciliation found the same item ID and definition ID in the Transfer pile with an Active auction, trade ID, start price 650, buy-now 700 and about 3598 seconds remaining. The receipt completed with requested 1, succeeded 1, failed 0 and skipped 0.
+
+Diagnostics: `services.Item.list()` and `requestTransferItems()` each have one audited Adapter call site. No retry exists after an accepted or ambiguous write. The receipt contains no authentication or user identity fields. Console separately reported an unhandled HTTP 500 through EA `trackUserTransaction` after the verified listing; neither the list response nor Transfer refresh recorded that failure. It is classified as non-blocking external telemetry and deferred unless it later affects a Trade receipt or reconciliation result.
+
+Remaining risk: Expired/Inactive Transfer shape, Transfer reprice, bulk pacing, Stop between real writes and capacity races are not live-validated. Keep the Club single-item and Transfer-source gates until the corresponding next-stage validation is complete.
+
+Next: Implement the Bulk Listing UI and multi-item execution behind conservative limits; do not enable Transfer reprice until an expired/inactive Transfer candidate is captured and validated.

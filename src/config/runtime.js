@@ -7,6 +7,7 @@ export const BATCH_OPEN_PLAN_KEY = 'fc-loop-runner-batch-open-plan';
 export const BUILDER_PROFILE_KEY = 'fc-loop-runner-builder-profiles-v1';
 export const DYNAMIC_SBC_CACHE_KEY = 'fc-loop-runner-dynamic-sbc-cache-v1';
 export const FUTBIN_CARD_ID_CACHE_KEY = 'fc-loop-runner-futbin-card-id-cache-v1';
+export const TRADE_PLAYER_CATALOG_CACHE_KEY = 'fc-loop-runner-trade-player-catalog-v1';
 
 export const CFG = Object.freeze({
   sourcePackIds: [105],

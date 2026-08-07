@@ -20,6 +20,7 @@
 // @connect      www.fut.gg
 // @connect      www.futbin.org
 // @connect      enhancer-api.futnext.com
+// @connect      rest.futnext.com
 // @connect      ntfy.sh
 // @run-at       document-end
 // ==/UserScript==
@@ -77,6 +78,7 @@
   var BUILDER_PROFILE_KEY = "fc-loop-runner-builder-profiles-v1";
   var DYNAMIC_SBC_CACHE_KEY = "fc-loop-runner-dynamic-sbc-cache-v1";
   var FUTBIN_CARD_ID_CACHE_KEY = "fc-loop-runner-futbin-card-id-cache-v1";
+  var TRADE_PLAYER_CATALOG_CACHE_KEY = "fc-loop-runner-trade-player-catalog-v1";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -5803,7 +5805,7 @@
         capacities: Object.fromEntries(INVENTORY_PILES2.map((pile) => [pile, capacity(pile, rawPiles[pile])]))
       });
     }
-    function resolveItem(ref, preferredPiles = INVENTORY_PILES2) {
+    function resolveItem2(ref, preferredPiles = INVENTORY_PILES2) {
       const id = Number(ref?.id || 0);
       const definitionId2 = Number(ref?.definitionId || 0);
       const piles = [...new Set([ref?.pile, ...preferredPiles || []].filter((pile) => INVENTORY_PILES2.includes(pile)))];
@@ -5818,7 +5820,7 @@
     }
     return Object.freeze({
       snapshot,
-      resolveItem,
+      resolveItem: resolveItem2,
       readPile,
       pileValue,
       preparePurchasedItem,
@@ -5886,7 +5888,7 @@
   function createEaPlayerPickAdapter(runtime) {
     const service = runtime?.services?.Item;
     if (!service) throw new Error("EA Item service is unavailable");
-    function collectionValues3(collection) {
+    function collectionValues4(collection) {
       if (!collection) return [];
       if (typeof collection.values === "function") return Array.from(collection.values());
       if (Array.isArray(collection._collection)) return collection._collection;
@@ -5910,11 +5912,11 @@
       }
       try {
         if (typeof runtime?.repositories?.Item?.getStorage === "function") {
-          return collectionValues3(runtime.repositories.Item.getStorage());
+          return collectionValues4(runtime.repositories.Item.getStorage());
         }
       } catch {
       }
-      return collectionValues3(runtime?.repositories?.Item?.storage);
+      return collectionValues4(runtime?.repositories?.Item?.storage);
     }
     function transferItems() {
       try {
@@ -5923,10 +5925,10 @@
         }
       } catch {
       }
-      return collectionValues3(runtime?.repositories?.Item?.transfer);
+      return collectionValues4(runtime?.repositories?.Item?.transfer);
     }
     function clubItems() {
-      return collectionValues3(runtime?.repositories?.Item?.club?.items).concat(collectionValues3(service?.itemDao?.itemRepo?.club?.items));
+      return collectionValues4(runtime?.repositories?.Item?.club?.items).concat(collectionValues4(service?.itemDao?.itemRepo?.club?.items));
     }
     function uniqueOwnedItems() {
       const seen = /* @__PURE__ */ new Set();
@@ -6043,7 +6045,7 @@
   function createEaSbcAdapter(runtime) {
     const service = runtime?.services?.SBC;
     if (!service) throw new Error("EA SBC service is unavailable");
-    function collectionValues3(collection) {
+    function collectionValues4(collection) {
       if (!collection) return [];
       if (typeof collection.values === "function") return Array.from(collection.values());
       if (Array.isArray(collection._collection)) return collection._collection;
@@ -6053,7 +6055,7 @@
       return [];
     }
     function listSets() {
-      return collectionValues3(service?.repository?.sets?._collection);
+      return collectionValues4(service?.repository?.sets?._collection);
     }
     function requestSets() {
       if (typeof service.requestSets !== "function") throw new Error("EA SBC set request is unavailable");
@@ -6135,7 +6137,7 @@
         return [];
       }
     }
-    function positiveInteger11(value) {
+    function positiveInteger12(value) {
       const number = Number(value);
       return Number.isInteger(number) && number > 0 ? number : null;
     }
@@ -6146,7 +6148,7 @@
     }
     function firstPositiveInteger(values = []) {
       for (const value of values) {
-        const number = positiveInteger11(value);
+        const number = positiveInteger12(value);
         if (number) return number;
       }
       return null;
@@ -6201,7 +6203,7 @@
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId2 = positiveInteger11(item?.id);
+      const itemId2 = positiveInteger12(item?.id);
       return {
         type: "PLAYER_PICK",
         name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
@@ -6317,26 +6319,26 @@
     function categoriesFromRoot(root) {
       const candidates = [];
       try {
-        if (typeof root?.getCategories === "function") candidates.push(...collectionValues3(root.getCategories()));
+        if (typeof root?.getCategories === "function") candidates.push(...collectionValues4(root.getCategories()));
       } catch {
       }
       try {
-        candidates.push(...collectionValues3(root?.categoriesIterator));
+        candidates.push(...collectionValues4(root?.categoriesIterator));
       } catch {
       }
       try {
-        candidates.push(...collectionValues3(root?.categories));
+        candidates.push(...collectionValues4(root?.categories));
       } catch {
       }
-      candidates.push(...collectionValues3(root));
+      candidates.push(...collectionValues4(root));
       return candidates;
     }
     function normalizeDiscoveryCategory(category) {
-      const setIds = collectionValues3(
+      const setIds = collectionValues4(
         category?.setIds || category?.sets || category?.data?.setIds || category?.data?.sets
-      ).map((entry) => positiveInteger11(entry?.id || entry)).filter(Boolean);
+      ).map((entry) => positiveInteger12(entry?.id || entry)).filter(Boolean);
       return {
-        id: positiveInteger11(category?.id || category?.categoryId || category?.data?.id),
+        id: positiveInteger12(category?.id || category?.categoryId || category?.data?.id),
         name: String(
           category?.name || category?.description || category?.displayName || category?.data?.name || category?.data?.description || ""
         ).trim(),
@@ -6360,12 +6362,12 @@
       return [...byKey.values()];
     }
     function discoveryCategoryMembership(set, refreshResult = null) {
-      const setId = positiveInteger11(set?.id);
-      const directCategories = collectionValues3(
+      const setId = positiveInteger12(set?.id);
+      const directCategories = collectionValues4(
         set?.categoryIds || set?.categories || set?.data?.categoryIds || set?.data?.categories
-      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger11(entry), name: "", setIds: [] });
+      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger12(entry), name: "", setIds: [] });
       const directIds = directCategories.map((category) => category.id).filter(Boolean);
-      const directCategoryId = positiveInteger11(set?.categoryId || set?.data?.categoryId);
+      const directCategoryId = positiveInteger12(set?.categoryId || set?.data?.categoryId);
       if (directCategoryId) directIds.push(directCategoryId);
       const categories = listDiscoveryCategories(refreshResult);
       const matching = [
@@ -6388,7 +6390,7 @@
         set?.challenges,
         set?._challenges
       ];
-      return [...new Set(sources.flatMap((source) => collectionValues3(source)).map((entry) => positiveInteger11(entry?.id || entry)).filter(Boolean))];
+      return [...new Set(sources.flatMap((source) => collectionValues4(source)).map((entry) => positiveInteger12(entry?.id || entry)).filter(Boolean))];
     }
     function discoveryRequiredPlayerCount(challenge) {
       const explicit = firstPositiveInteger([
@@ -6398,13 +6400,13 @@
       ]);
       if (explicit) return explicit;
       try {
-        const squadCount = positiveInteger11(challenge?.squad?.getNumOfRequiredPlayers?.());
+        const squadCount = positiveInteger12(challenge?.squad?.getNumOfRequiredPlayers?.());
         if (squadCount) return squadCount;
       } catch {
       }
       if (!challenge?.squad) return null;
       const challengeFormation = formation(challenge?.formation);
-      const formationCount = positiveInteger11(challengeFormation?.generalPositions?.length);
+      const formationCount = positiveInteger12(challengeFormation?.generalPositions?.length);
       if (!formationCount) return null;
       try {
         const brickCount = challenge.squad.getAllBrickIndices?.()?.length;
@@ -6421,7 +6423,7 @@
     }
     function normalizeDiscoveryChallenge(challenge) {
       return {
-        id: positiveInteger11(challenge?.id),
+        id: positiveInteger12(challenge?.id),
         status: String(challenge?.status || challenge?.state || ""),
         completed: challenge?.completed === true || (() => {
           try {
@@ -6442,10 +6444,10 @@
       };
     }
     function snapshotDiscoveryIndex(set, refreshResult = null) {
-      const rawAwards = collectionValues3(set?.awards || set?.data?.awards);
+      const rawAwards = collectionValues4(set?.awards || set?.data?.awards);
       const category = discoveryCategoryMembership(set, refreshResult);
       return {
-        id: positiveInteger11(set?.id),
+        id: positiveInteger12(set?.id),
         name: String(set?.name || set?.data?.name || "").trim(),
         status: String(set?.status || set?.state || ""),
         complete: (() => {
@@ -6467,7 +6469,7 @@
     }
     function snapshotDiscoverySet(set, challenges = null, refreshResult = null) {
       const index = snapshotDiscoveryIndex(set, refreshResult);
-      const rawChallenges = challenges === null ? collectionValues3(set?.challenges || set?._challenges) : collectionValues3(challenges);
+      const rawChallenges = challenges === null ? collectionValues4(set?.challenges || set?._challenges) : collectionValues4(challenges);
       return {
         ...index,
         challenges: rawChallenges.map(normalizeDiscoveryChallenge)
@@ -6555,6 +6557,850 @@
     });
   }
 
+  // src/trade/contracts.js
+  var TRADE_SCHEMA_VERSION = 1;
+  var TRADE_JOB_TYPES = Object.freeze(["buy", "listing"]);
+  var TRADE_CARD_CLASSES = Object.freeze(["common-gold", "normal-gold", "rare-gold", "special", "gold"]);
+  var TRADE_SCHEDULE_TYPES = Object.freeze(["manual", "once", "daily", "interval", "window"]);
+  var TRADE_MISFIRE_POLICIES = Object.freeze(["skip", "grace-window", "next-login"]);
+  var TRADE_PRICE_PROVIDERS = Object.freeze(["auto", "futgg", "futnext"]);
+  var TOP_LEVEL_FIELDS = /* @__PURE__ */ new Set([
+    "schemaVersion",
+    "id",
+    "name",
+    "type",
+    "enabled",
+    "armed",
+    "schedule",
+    "misfirePolicy",
+    "policy",
+    "createdAt",
+    "updatedAt"
+  ]);
+  function cloneSerializable2(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  }
+  function finiteNumber2(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function nullableFiniteNumber(value) {
+    if (value === void 0 || value === null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  function positiveInteger7(value, fallback) {
+    const number = Math.floor(Number(value));
+    return Number.isFinite(number) && number > 0 ? number : fallback;
+  }
+  function normalizeRange(value, fallback) {
+    const values = Array.isArray(value) ? value : fallback;
+    const first = positiveInteger7(values?.[0], fallback[0]);
+    const second = positiveInteger7(values?.[1], fallback[1]);
+    return [Math.min(first, second), Math.max(first, second)];
+  }
+  function pushRequiredString(value, path, errors) {
+    if (typeof value !== "string" || !value.trim()) errors.push(`${path} is required`);
+  }
+  function pushPositiveNumber(value, path, errors) {
+    if (!Number.isFinite(Number(value)) || Number(value) <= 0) errors.push(`${path} must be a positive number`);
+  }
+  function validateSchedule(schedule, path, errors) {
+    if (!isPlainObject(schedule)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (!TRADE_SCHEDULE_TYPES.includes(schedule.type)) {
+      errors.push(`${path}.type must be one of: ${TRADE_SCHEDULE_TYPES.join(", ")}`);
+      return;
+    }
+    if (schedule.type === "once") pushPositiveNumber(schedule.runAt, `${path}.runAt`, errors);
+    if (schedule.type === "daily") {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(schedule.time || ""))) {
+        errors.push(`${path}.time must use HH:mm`);
+      }
+      pushRequiredString(schedule.timezone, `${path}.timezone`, errors);
+    }
+    if (schedule.type === "interval") pushPositiveNumber(schedule.everyMinutes, `${path}.everyMinutes`, errors);
+    if (schedule.type === "window") {
+      pushPositiveNumber(schedule.startAt, `${path}.startAt`, errors);
+      pushPositiveNumber(schedule.endAt, `${path}.endAt`, errors);
+      if (Number(schedule.endAt) <= Number(schedule.startAt)) errors.push(`${path}.endAt must be after startAt`);
+    }
+  }
+  function validateMisfirePolicy(policy, path, errors) {
+    if (!isPlainObject(policy)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    if (!TRADE_MISFIRE_POLICIES.includes(policy.type)) {
+      errors.push(`${path}.type must be one of: ${TRADE_MISFIRE_POLICIES.join(", ")}`);
+    }
+    if (policy.type === "grace-window") pushPositiveNumber(policy.graceMinutes, `${path}.graceMinutes`, errors);
+  }
+  function validateCardClass(value, path, errors) {
+    if (!TRADE_CARD_CLASSES.includes(value)) {
+      errors.push(`${path} must be explicitly set to one of: ${TRADE_CARD_CLASSES.join(", ")}`);
+    }
+  }
+  function validateDelayRange(value, path, errors) {
+    if (!Array.isArray(value) || value.length !== 2 || value.some((entry) => !Number.isFinite(Number(entry)) || Number(entry) <= 0)) {
+      errors.push(`${path} must contain two positive numbers`);
+      return;
+    }
+    if (Number(value[1]) < Number(value[0])) errors.push(`${path}[1] must be greater than or equal to ${path}[0]`);
+  }
+  function validateBuyPolicy(policy, path, errors) {
+    if (!isPlainObject(policy)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    validateCardClass(policy.cardClass, `${path}.cardClass`, errors);
+    for (const field2 of ["ratingMin", "ratingMax"]) {
+      const rating = Number(policy[field2]);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 99) errors.push(`${path}.${field2} must be an integer between 1 and 99`);
+    }
+    if (Number(policy.ratingMax) < Number(policy.ratingMin)) errors.push(`${path}.ratingMax must be greater than or equal to ratingMin`);
+    for (const field2 of ["maxBuyNow", "quantity", "totalBudget", "maxRuntimeMinutes", "maxConsecutiveEmptySearches"]) {
+      pushPositiveNumber(policy[field2], `${path}.${field2}`, errors);
+    }
+    if (Number(policy.maxPurchasesPerSearch) !== 1) errors.push(`${path}.maxPurchasesPerSearch must be 1`);
+    validateDelayRange(policy.searchDelaySeconds, `${path}.searchDelaySeconds`, errors);
+    if (!isPlainObject(policy.ratingPriceOverrides)) {
+      errors.push(`${path}.ratingPriceOverrides must be an object`);
+    } else {
+      for (const [ratingText, price] of Object.entries(policy.ratingPriceOverrides)) {
+        const rating = Number(ratingText);
+        if (!Number.isInteger(rating) || rating < Number(policy.ratingMin) || rating > Number(policy.ratingMax)) {
+          errors.push(`${path}.ratingPriceOverrides.${ratingText} must target a rating inside the job range`);
+        }
+        pushPositiveNumber(price, `${path}.ratingPriceOverrides.${ratingText}`, errors);
+      }
+    }
+  }
+  function validateRatingRules(rules, path, errors) {
+    if (!Array.isArray(rules) || !rules.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    const covered = /* @__PURE__ */ new Set();
+    rules.forEach((rule, index) => {
+      const rulePath = `${path}[${index}]`;
+      if (!isPlainObject(rule)) {
+        errors.push(`${rulePath} must be an object`);
+        return;
+      }
+      const min = Number(rule.min);
+      const max = Number(rule.max);
+      if (!Number.isInteger(min) || min < 1 || min > 99) errors.push(`${rulePath}.min must be an integer between 1 and 99`);
+      if (!Number.isInteger(max) || max < min || max > 99) errors.push(`${rulePath}.max must be between min and 99`);
+      pushPositiveNumber(rule.buyNow, `${rulePath}.buyNow`, errors);
+      if (Number.isInteger(min) && Number.isInteger(max) && max >= min) {
+        for (let rating = min; rating <= max; rating += 1) {
+          if (covered.has(rating)) errors.push(`${rulePath} overlaps another rating rule at ${rating}`);
+          covered.add(rating);
+        }
+      }
+    });
+  }
+  function validateListingPolicy(policy, path, errors) {
+    if (!isPlainObject(policy)) {
+      errors.push(`${path} must be an object`);
+      return;
+    }
+    validateCardClass(policy.cardClass, `${path}.cardClass`, errors);
+    if (!Array.isArray(policy.sources) || !policy.sources.length || policy.sources.some((source) => !["club", "transfer"].includes(source))) {
+      errors.push(`${path}.sources must contain club and/or transfer`);
+    }
+    validateRatingRules(policy.ratingRules, `${path}.ratingRules`, errors);
+    if (!isPlainObject(policy.marketOverride)) {
+      errors.push(`${path}.marketOverride must be an object`);
+    } else {
+      if (typeof policy.marketOverride.enabled !== "boolean") errors.push(`${path}.marketOverride.enabled must be boolean`);
+      if (!Number.isFinite(Number(policy.marketOverride.markupPercent)) || Number(policy.marketOverride.markupPercent) < 0) {
+        errors.push(`${path}.marketOverride.markupPercent must be zero or greater`);
+      }
+      pushPositiveNumber(policy.marketOverride.maxQuoteAgeMinutes, `${path}.marketOverride.maxQuoteAgeMinutes`, errors);
+    }
+    if (!["one-step-below", "same"].includes(policy.startPricePolicy)) {
+      errors.push(`${path}.startPricePolicy must be one-step-below or same`);
+    }
+    if (!["skip", "reprice"].includes(policy.expiredPolicy)) errors.push(`${path}.expiredPolicy must be skip or reprice`);
+    for (const field2 of ["durationSeconds", "maxListings"]) pushPositiveNumber(policy[field2], `${path}.${field2}`, errors);
+    validateDelayRange(policy.listingDelaySeconds, `${path}.listingDelaySeconds`, errors);
+  }
+  function validateTradeJob(job, label = "Trade job") {
+    const errors = [];
+    if (!isPlainObject(job)) return [`${label} must be an object`];
+    for (const field2 of Object.keys(job)) {
+      if (!TOP_LEVEL_FIELDS.has(field2)) errors.push(`${label}.${field2} is not supported`);
+    }
+    if (Number(job.schemaVersion) !== TRADE_SCHEMA_VERSION) errors.push(`${label}.schemaVersion must be ${TRADE_SCHEMA_VERSION}`);
+    pushRequiredString(job.id, `${label}.id`, errors);
+    pushRequiredString(job.name, `${label}.name`, errors);
+    if (!TRADE_JOB_TYPES.includes(job.type)) errors.push(`${label}.type must be one of: ${TRADE_JOB_TYPES.join(", ")}`);
+    for (const field2 of ["enabled", "armed"]) {
+      if (typeof job[field2] !== "boolean") errors.push(`${label}.${field2} must be boolean`);
+    }
+    validateSchedule(job.schedule, `${label}.schedule`, errors);
+    validateMisfirePolicy(job.misfirePolicy, `${label}.misfirePolicy`, errors);
+    if (job.type === "buy") validateBuyPolicy(job.policy, `${label}.policy`, errors);
+    if (job.type === "listing") validateListingPolicy(job.policy, `${label}.policy`, errors);
+    for (const field2 of ["createdAt", "updatedAt"]) {
+      if (!Number.isFinite(Number(job[field2])) || Number(job[field2]) < 0) errors.push(`${label}.${field2} must be a non-negative epoch value`);
+    }
+    return errors;
+  }
+  function assertValidTradeJob(job, label = "Trade job") {
+    const errors = validateTradeJob(job, label);
+    if (errors.length) throw new Error(`${label} validation failed:
+- ${errors.join("\n- ")}`);
+    return job;
+  }
+  function normalizeSchedule(value = {}) {
+    const type = TRADE_SCHEDULE_TYPES.includes(value.type) ? value.type : "manual";
+    const schedule = { type };
+    if (type === "once") schedule.runAt = finiteNumber2(value.runAt);
+    if (type === "daily") {
+      schedule.time = String(value.time || "00:00");
+      schedule.timezone = String(value.timezone || "UTC");
+    }
+    if (type === "interval") {
+      schedule.everyMinutes = positiveInteger7(value.everyMinutes, 60);
+      if (value.anchorAt !== void 0) schedule.anchorAt = finiteNumber2(value.anchorAt);
+    }
+    if (type === "window") {
+      schedule.startAt = finiteNumber2(value.startAt);
+      schedule.endAt = finiteNumber2(value.endAt);
+    }
+    return schedule;
+  }
+  function normalizeMisfirePolicy(value = {}) {
+    const type = TRADE_MISFIRE_POLICIES.includes(value.type) ? value.type : "grace-window";
+    return type === "grace-window" ? { type, graceMinutes: positiveInteger7(value.graceMinutes, 15) } : { type };
+  }
+  function normalizeBuyPolicy(value = {}) {
+    const ratingMin = positiveInteger7(value.ratingMin, 84);
+    const ratingMax = positiveInteger7(value.ratingMax, ratingMin);
+    return {
+      ratingMin: Math.min(99, Math.min(ratingMin, ratingMax)),
+      ratingMax: Math.min(99, Math.max(ratingMin, ratingMax)),
+      cardClass: String(value.cardClass || ""),
+      maxBuyNow: positiveInteger7(value.maxBuyNow, 1e3),
+      ratingPriceOverrides: Object.fromEntries(Object.entries(value.ratingPriceOverrides || {}).map(([rating, price]) => [String(Number(rating)), positiveInteger7(price, 0)]).filter(([, price]) => price > 0)),
+      quantity: positiveInteger7(value.quantity, 10),
+      totalBudget: positiveInteger7(value.totalBudget, 1e4),
+      maxRuntimeMinutes: positiveInteger7(value.maxRuntimeMinutes, 30),
+      searchDelaySeconds: normalizeRange(value.searchDelaySeconds, [8, 15]),
+      maxPurchasesPerSearch: 1,
+      maxConsecutiveEmptySearches: positiveInteger7(value.maxConsecutiveEmptySearches, 30)
+    };
+  }
+  function normalizeListingPolicy(value = {}) {
+    return {
+      sources: [...new Set((value.sources || ["transfer", "club"]).map(String))],
+      cardClass: String(value.cardClass || ""),
+      ratingRules: (value.ratingRules || []).map((rule) => ({
+        min: positiveInteger7(rule?.min, 0),
+        max: positiveInteger7(rule?.max, 0),
+        buyNow: positiveInteger7(rule?.buyNow, 0)
+      })),
+      marketOverride: {
+        enabled: value.marketOverride?.enabled === true,
+        markupPercent: Math.max(0, finiteNumber2(value.marketOverride?.markupPercent, 5)),
+        maxQuoteAgeMinutes: positiveInteger7(value.marketOverride?.maxQuoteAgeMinutes, 10)
+      },
+      startPricePolicy: String(value.startPricePolicy || "one-step-below"),
+      durationSeconds: positiveInteger7(value.durationSeconds, 3600),
+      listingDelaySeconds: normalizeRange(value.listingDelaySeconds, [4, 8]),
+      maxListings: positiveInteger7(value.maxListings, 50),
+      expiredPolicy: String(value.expiredPolicy || "reprice")
+    };
+  }
+  function normalizeTradeJob(input = {}, options = {}) {
+    const now = Math.max(0, finiteNumber2(options.now, Date.now()));
+    const type = TRADE_JOB_TYPES.includes(input.type) ? input.type : String(input.type || "");
+    const normalized = {
+      schemaVersion: TRADE_SCHEMA_VERSION,
+      id: String(input.id || "").trim(),
+      name: String(input.name || "").trim(),
+      type,
+      enabled: input.enabled === true,
+      armed: options.imported === true ? false : input.armed === true,
+      schedule: normalizeSchedule(input.schedule),
+      misfirePolicy: normalizeMisfirePolicy(input.misfirePolicy),
+      policy: type === "buy" ? normalizeBuyPolicy(input.policy) : normalizeListingPolicy(input.policy),
+      createdAt: Math.max(0, finiteNumber2(input.createdAt, now)),
+      updatedAt: Math.max(0, finiteNumber2(input.updatedAt, now))
+    };
+    assertValidTradeJob(normalized);
+    return normalized;
+  }
+  function createTradeRunReceipt(input = {}) {
+    return {
+      runId: String(input.runId || ""),
+      jobId: String(input.jobId || ""),
+      jobType: String(input.jobType || ""),
+      scheduledFor: Math.max(0, finiteNumber2(input.scheduledFor)),
+      startedAt: Math.max(0, finiteNumber2(input.startedAt)),
+      finishedAt: Math.max(0, finiteNumber2(input.finishedAt)),
+      status: String(input.status || "blocked"),
+      reason: input.reason === void 0 || input.reason === null ? null : String(input.reason),
+      requested: Math.max(0, positiveInteger7(input.requested, 0)),
+      succeeded: Math.max(0, positiveInteger7(input.succeeded, 0)),
+      failed: Math.max(0, positiveInteger7(input.failed, 0)),
+      skipped: Math.max(0, positiveInteger7(input.skipped, 0)),
+      coinsBefore: nullableFiniteNumber(input.coinsBefore),
+      coinsAfter: nullableFiniteNumber(input.coinsAfter),
+      receipts: cloneSerializable2(input.receipts || [])
+    };
+  }
+  function createTradeCapabilitySnapshot(input = {}) {
+    const capacity = input.transferCapacity || {};
+    const max = nullableFiniteNumber(capacity.max);
+    const used = nullableFiniteNumber(capacity.used);
+    return {
+      schemaVersion: TRADE_SCHEMA_VERSION,
+      capturedAt: Math.max(0, finiteNumber2(input.capturedAt, Date.now())),
+      runtimeReady: input.runtimeReady === true,
+      canTrade: input.canTrade === true,
+      tradeAccess: {
+        available: input.tradeAccess?.available === true,
+        allowed: typeof input.tradeAccess?.allowed === "boolean" ? input.tradeAccess.allowed : null,
+        level: ["string", "number", "boolean"].includes(typeof input.tradeAccess?.level) ? input.tradeAccess.level : null
+      },
+      coins: nullableFiniteNumber(input.coins),
+      transferCapacity: {
+        used,
+        max,
+        free: used !== null && max !== null ? Math.max(0, max - used) : null
+      },
+      criteria: {
+        constructorAvailable: input.criteria?.constructorAvailable === true,
+        fields: [...new Set((input.criteria?.fields || []).map(String))].sort(),
+        defaults: cloneSerializable2(input.criteria?.defaults || {})
+      },
+      methods: Object.fromEntries(Object.entries(input.methods || {}).map(([name, available]) => [String(name), available === true])),
+      warnings: [...new Set((input.warnings || []).map(String).filter(Boolean))]
+    };
+  }
+
+  // src/trade/error-policy.js
+  var DEFAULT_CIRCUIT_CONFIG = Object.freeze({
+    failureThreshold: 3,
+    windowMs: 6e4,
+    cooldownMs: 15 * 6e4
+  });
+  function errorCode(error) {
+    const candidates = [error?.code, error?.status, error?.statusCode, error?.error?.code, error?.response?.status];
+    for (const value of candidates) {
+      const number = Number(value);
+      if (Number.isFinite(number) && number > 0) return number;
+    }
+    const match = String(error?.message || error || "").match(/(?:HTTP|status|code)?\s*[:#]?\s*(\d{3,5})/i);
+    return match ? Number(match[1]) : null;
+  }
+  function messageText(error) {
+    return String(error?.message || error?.reason || error?.error?.message || error || "").trim().slice(0, 500);
+  }
+  function classifyTradeError(error = {}) {
+    const code = errorCode(error);
+    const message = messageText(error);
+    const text = `${String(error?.kind || "")} ${message}`.toLowerCase();
+    if (code === 429 || /too many requests|rate.?limit/.test(text)) {
+      return { kind: "rate-limit", code, action: "stop-and-cooldown", retryable: false, opensCircuit: true, disarm: false, ambiguous: false };
+    }
+    if (code === 401 || /session expired|not authenticated|unauthori[sz]ed/.test(text)) {
+      return { kind: "session-expired", code, action: "wait-session", retryable: false, opensCircuit: true, disarm: false, ambiguous: false };
+    }
+    if (/captcha/.test(text)) {
+      return { kind: "captcha", code, action: "stop-and-disarm", retryable: false, opensCircuit: true, disarm: true, ambiguous: false };
+    }
+    if (code === 403 || /permission denied|trade access/.test(text)) {
+      return { kind: "permission-denied", code, action: "block", retryable: false, opensCircuit: true, disarm: false, ambiguous: false };
+    }
+    if (/destination full|trade pile full|transfer.*full/.test(text)) {
+      return { kind: "destination-full", code, action: "stop", retryable: false, opensCircuit: false, disarm: false, ambiguous: false };
+    }
+    if (/card.*(?:in trade|already listed)|item.*trade offer/.test(text)) {
+      return { kind: "card-in-trade", code, action: "refresh-and-skip", retryable: true, opensCircuit: false, disarm: false, ambiguous: false };
+    }
+    if (/lost bid|already purchased|outbid|auction.*expired/.test(text)) {
+      return { kind: "competition-lost", code, action: "continue-after-delay", retryable: true, opensCircuit: false, disarm: false, ambiguous: false };
+    }
+    if ([426, 512, 521].includes(code)) {
+      return { kind: "transient-service", code, action: "bounded-backoff", retryable: true, opensCircuit: false, disarm: false, ambiguous: false };
+    }
+    if (/timeout|network|transport|connection|failed to fetch/.test(text) || code === null) {
+      return { kind: "ambiguous-transport", code, action: "reconcile-and-stop-if-unknown", retryable: false, opensCircuit: false, disarm: false, ambiguous: true };
+    }
+    return { kind: "service-error", code, action: "stop", retryable: false, opensCircuit: false, disarm: false, ambiguous: false };
+  }
+
+  // src/adapters/ea/trade.js
+  var CRITERIA_FIELDS = Object.freeze([
+    "type",
+    "category",
+    "defId",
+    "maskedDefId",
+    "rarities",
+    "position",
+    "nation",
+    "league",
+    "club",
+    "minBid",
+    "maxBid",
+    "minBuy",
+    "maxBuy"
+  ]);
+  var ITEM_SERVICE_METHODS = Object.freeze([
+    "searchTransferMarket",
+    "clearTransferMarketCache",
+    "bid",
+    "move",
+    "requestMarketData",
+    "list",
+    "relistExpiredAuctions",
+    "requestTransferItems"
+  ]);
+  function collectionValues3(collection) {
+    if (!collection) return [];
+    if (typeof collection.values === "function") return Array.from(collection.values());
+    if (Array.isArray(collection._collection)) return collection._collection;
+    if (collection._collection && typeof collection._collection === "object") return Object.values(collection._collection);
+    if (Array.isArray(collection)) return collection;
+    return [];
+  }
+  function safePrimitive(value) {
+    if (value === null || ["string", "number", "boolean"].includes(typeof value)) return value;
+    if (Array.isArray(value)) return value.filter((entry) => entry === null || ["string", "number", "boolean"].includes(typeof entry));
+    return null;
+  }
+  function callBoolean3(value, method) {
+    try {
+      return typeof value?.[method] === "function" ? value[method]() === true : null;
+    } catch {
+      return null;
+    }
+  }
+  function listingTradeable(item, snapshot) {
+    if (typeof item?.isUntradeable === "function") return snapshot.tradeable === true;
+    if (typeof item?.tradeable === "boolean") return item.tradeable;
+    if (typeof item?.untradeable === "boolean") return !item.untradeable;
+    const untradeableCount = Number(item?.untradeableCount ?? item?._data?.untradeableCount);
+    return Number.isFinite(untradeableCount) ? untradeableCount === 0 : snapshot.tradeable === true;
+  }
+  function auctionSnapshot(item) {
+    let auction = null;
+    try {
+      auction = item?.getAuctionData?.() || item?._auction || null;
+    } catch {
+    }
+    if (!auction) {
+      return {
+        present: false,
+        state: "none",
+        tradeId: null,
+        startingBid: null,
+        currentBid: null,
+        buyNowPrice: null,
+        expires: null
+      };
+    }
+    const active = callBoolean3(auction, "isActiveTrade");
+    const closed = callBoolean3(auction, "isClosedTrade");
+    const inactive = callBoolean3(auction, "isInactive");
+    const primitiveState = safePrimitive(auction.tradeState ?? auction.state ?? auction.bidState);
+    const state = active === true ? "active" : closed === true ? "closed" : inactive === true ? "inactive" : "unknown";
+    const numberOrNull2 = (value) => {
+      if (value === null || value === void 0 || value === "") return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    };
+    return {
+      present: true,
+      state,
+      rawState: primitiveState,
+      tradeId: numberOrNull2(auction.tradeId ?? auction.id),
+      startingBid: numberOrNull2(auction.startingBid ?? auction.startPrice),
+      currentBid: numberOrNull2(auction.currentBid),
+      buyNowPrice: numberOrNull2(auction.buyNowPrice),
+      expires: numberOrNull2(auction.expires ?? auction.endTime ?? item?.endTime)
+    };
+  }
+  function listingCandidateSnapshot(inventory, item, pile) {
+    const snapshot = inventory.snapshotItem(item, pile);
+    return {
+      item: { id: snapshot.id, definitionId: snapshot.definitionId, pile: snapshot.pile },
+      name: snapshot.name,
+      type: snapshot.type,
+      rating: snapshot.rating,
+      tier: snapshot.tier,
+      rare: snapshot.rare,
+      special: snapshot.special,
+      rareflag: snapshot.rareflag,
+      tradeable: listingTradeable(item, snapshot),
+      evolution: snapshot.evolution,
+      limitedUse: snapshot.limitedUse,
+      concept: snapshot.concept,
+      academyEnrolled: snapshot.academyEnrolled,
+      auction: auctionSnapshot(item)
+    };
+  }
+  function inspectCriteria(runtime) {
+    if (typeof runtime?.UTSearchCriteriaDTO !== "function") {
+      return { constructorAvailable: false, fields: [], defaults: {} };
+    }
+    try {
+      const criteria = new runtime.UTSearchCriteriaDTO();
+      const fields = CRITERIA_FIELDS.filter((field2) => field2 in criteria);
+      return {
+        constructorAvailable: true,
+        fields,
+        defaults: Object.fromEntries(fields.map((field2) => [field2, safePrimitive(criteria[field2])]))
+      };
+    } catch {
+      return { constructorAvailable: false, fields: [], defaults: {} };
+    }
+  }
+  function readUser(runtime) {
+    try {
+      return runtime?.services?.User?.getUser?.() || null;
+    } catch {
+      return null;
+    }
+  }
+  function readTradeAccess(runtime, user) {
+    if (!user || user.tradeAccess === void 0 || user.tradeAccess === null) {
+      return { available: false, allowed: null, level: null };
+    }
+    const level = safePrimitive(user.tradeAccess);
+    const allowedValue = runtime?.TradeAccessLevel?.ALLOWED;
+    let allowed = null;
+    if (allowedValue !== void 0) allowed = user.tradeAccess === allowedValue;
+    else if (typeof user.tradeAccess === "string") allowed = user.tradeAccess.toLowerCase() === "allowed";
+    return { available: true, allowed, level };
+  }
+  function currencyAmount(value) {
+    if (value === null || value === void 0 || value === "") return null;
+    const candidate = typeof value === "object" ? value.amount : value;
+    if (candidate === null || candidate === void 0 || candidate === "") return null;
+    const amount = Number(candidate);
+    return Number.isFinite(amount) ? amount : null;
+  }
+  function readCoins(runtime, user) {
+    const direct = currencyAmount(user?.coins);
+    if (direct !== null) return direct;
+    try {
+      return currencyAmount(user?.getCurrency?.(runtime?.GameCurrency?.COINS));
+    } catch {
+      return null;
+    }
+  }
+  function readTransferCapacity(runtime) {
+    const repository = runtime?.repositories?.Item;
+    const pile = runtime?.ItemPile?.TRANSFER ?? "transfer";
+    let max = null;
+    let used = null;
+    try {
+      const value = Number(repository?.getPileSize?.(pile));
+      if (Number.isFinite(value)) max = value;
+    } catch {
+    }
+    try {
+      const value = Number(repository?.numItemsInCache?.(pile));
+      if (Number.isFinite(value)) used = value;
+    } catch {
+    }
+    if (used === null && repository) {
+      try {
+        used = collectionValues3(repository?.transfer).length;
+      } catch {
+      }
+    }
+    return { max, used };
+  }
+  function repositoryPile(runtime, pile) {
+    const repository = runtime?.repositories?.Item;
+    if (!repository) return [];
+    if (pile === "unassigned") {
+      try {
+        return Array.from(repository.getUnassignedItems?.() || []);
+      } catch {
+        return [];
+      }
+    }
+    if (pile === "storage") {
+      try {
+        return Array.from(repository.getStorageItems?.() || []);
+      } catch {
+        return collectionValues3(repository.storage);
+      }
+    }
+    if (pile === "transfer") {
+      try {
+        return Array.from(repository.getTransferItems?.() || []);
+      } catch {
+        return collectionValues3(repository.transfer);
+      }
+    }
+    return collectionValues3(repository.club?.items).concat(collectionValues3(runtime?.services?.Item?.itemDao?.itemRepo?.club?.items));
+  }
+  function resolveItem(runtime, ref = {}) {
+    const id = Number(ref.id || 0);
+    const definitionId2 = Number(ref.definitionId || 0);
+    const piles = [...new Set([ref.pile, "unassigned", "storage", "transfer", "club"].filter(Boolean))];
+    for (const pile of piles) {
+      const item = repositoryPile(runtime, pile).find((candidate) => id > 0 && Number(candidate?.id || 0) === id || !id && definitionId2 > 0 && Number(candidate?.definitionId || 0) === definitionId2);
+      if (item) return { item, pile };
+    }
+    return null;
+  }
+  function itemPriceLimitSnapshot(resolved) {
+    if (!resolved) return { found: false, item: null, hasPriceLimits: false, minimum: null, maximum: null };
+    const { item, pile } = resolved;
+    let hasPriceLimits = false;
+    try {
+      hasPriceLimits = item?.hasPriceLimits?.() === true;
+    } catch {
+    }
+    const limits = item?._itemPriceLimits || item?.itemPriceLimits || null;
+    const minimum = Number(limits?.minimum);
+    const maximum = Number(limits?.maximum);
+    hasPriceLimits = hasPriceLimits || Number.isFinite(minimum) && Number.isFinite(maximum);
+    return {
+      found: true,
+      item: {
+        id: Number(item?.id || 0),
+        definitionId: Number(item?.definitionId || 0),
+        pile: String(pile)
+      },
+      hasPriceLimits,
+      minimum: Number.isFinite(minimum) ? minimum : null,
+      maximum: Number.isFinite(maximum) ? maximum : null
+    };
+  }
+  function responseSummary(response) {
+    return {
+      success: response?.success === true,
+      status: Number.isFinite(Number(response?.status)) ? Number(response.status) : null,
+      code: Number.isFinite(Number(response?.error?.code ?? response?.code)) ? Number(response?.error?.code ?? response?.code) : null
+    };
+  }
+  function observeResult(value, context = {}) {
+    if (value && typeof value.then === "function") return Promise.resolve(value);
+    if (!value || typeof value.observe !== "function") return Promise.resolve(value);
+    return new Promise((resolve, reject) => {
+      try {
+        value.observe(context, (sender, response) => {
+          try {
+            sender?.unobserve?.(context);
+          } catch {
+          }
+          resolve(response);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+  function createEaTradeAdapter(runtime) {
+    function inspectCapabilities() {
+      const service = runtime?.services?.Item;
+      const repository = runtime?.repositories?.Item;
+      const user = readUser(runtime);
+      const criteria = inspectCriteria(runtime);
+      const methods = Object.fromEntries(ITEM_SERVICE_METHODS.map((name) => [name, typeof service?.[name] === "function"]));
+      const tradeAccess = readTradeAccess(runtime, user);
+      const transferCapacity = readTransferCapacity(runtime);
+      const warnings = [];
+      if (!service) warnings.push("EA Item service is unavailable");
+      if (!repository) warnings.push("EA Item repository is unavailable");
+      if (!user) warnings.push("EA user session is unavailable");
+      if (!criteria.constructorAvailable) warnings.push("UTSearchCriteriaDTO is unavailable");
+      const requiredMethods = ["searchTransferMarket", "clearTransferMarketCache", "bid", "move", "requestMarketData", "list"];
+      const missingMethods = requiredMethods.filter((name) => !methods[name]);
+      if (missingMethods.length) warnings.push(`EA Trade methods unavailable: ${missingMethods.join(", ")}`);
+      if (tradeAccess.available && tradeAccess.allowed === false) warnings.push("EA Trade Access is not allowed");
+      if (transferCapacity.max === null || transferCapacity.used === null) warnings.push("Transfer List capacity is unavailable");
+      const runtimeReady = Boolean(service && repository && user && criteria.constructorAvailable);
+      return createTradeCapabilitySnapshot({
+        runtimeReady,
+        canTrade: runtimeReady && tradeAccess.allowed === true && missingMethods.length === 0,
+        tradeAccess,
+        coins: readCoins(runtime, user),
+        transferCapacity,
+        criteria,
+        methods,
+        warnings
+      });
+    }
+    async function inspectPriceLimits(ref = {}, options = {}) {
+      const service = runtime?.services?.Item;
+      const resolved = resolveItem(runtime, ref);
+      const before = itemPriceLimitSnapshot(resolved);
+      if (!resolved) return { status: "not-found", before, after: before, response: null, error: null };
+      if (options.refresh !== true) return { status: before.hasPriceLimits ? "loaded" : "unavailable", before, after: before, response: null, error: null };
+      if (typeof service?.requestMarketData !== "function") {
+        return { status: "unsupported", before, after: before, response: null, error: null };
+      }
+      try {
+        const response = await observeResult(service.requestMarketData(resolved.item), options.observerContext || {});
+        const after = itemPriceLimitSnapshot(resolveItem(runtime, before.item));
+        return {
+          status: after.hasPriceLimits ? "loaded" : "unavailable",
+          before,
+          after,
+          response: responseSummary(response),
+          error: null
+        };
+      } catch (error) {
+        const classification = classifyTradeError(error);
+        return {
+          status: "error",
+          before,
+          after: itemPriceLimitSnapshot(resolveItem(runtime, before.item)),
+          response: null,
+          error: { kind: classification.kind, code: classification.code, message: error?.message || String(error) }
+        };
+      }
+    }
+    function inspectListingCandidates(options = {}) {
+      const requestedSources = Array.isArray(options.sources) ? options.sources : ["transfer", "club"];
+      const sources = [...new Set(requestedSources.map(String).filter((pile) => ["club", "transfer"].includes(pile)))];
+      const requestedLimit = Number(options.limit);
+      const limit = options.limit === 0 ? Number.POSITIVE_INFINITY : Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(5e3, Math.floor(requestedLimit)) : 50;
+      try {
+        const inventory = createEaInventoryAdapter(runtime);
+        const seen = /* @__PURE__ */ new Set();
+        const candidates = [];
+        const counts = {};
+        for (const pile of sources) {
+          const rawItems = inventory.readPile(pile);
+          let sourceCount = 0;
+          for (const item of rawItems) {
+            const id = Number(item?.id || 0);
+            const definitionId2 = Number(item?.definitionId || 0);
+            const key = id > 0 ? `${pile}:${id}` : `${pile}:definition:${definitionId2}:index:${sourceCount}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            sourceCount += 1;
+            if (candidates.length < limit) candidates.push(listingCandidateSnapshot(inventory, item, pile));
+          }
+          counts[pile] = sourceCount;
+        }
+        const total = Object.values(counts).reduce((sum, count) => sum + Number(count || 0), 0);
+        return {
+          schemaVersion: 1,
+          capturedAt: Date.now(),
+          sources,
+          counts,
+          total,
+          returned: candidates.length,
+          truncated: candidates.length < total,
+          candidates,
+          error: null
+        };
+      } catch (error) {
+        return {
+          schemaVersion: 1,
+          capturedAt: Date.now(),
+          sources,
+          counts: {},
+          total: 0,
+          returned: 0,
+          truncated: false,
+          candidates: [],
+          error: { message: error?.message || String(error) }
+        };
+      }
+    }
+    function inspectListingItem(ref = {}) {
+      const resolved = resolveItem(runtime, ref);
+      if (!resolved) return { status: "not-found", candidate: null };
+      try {
+        const inventory = createEaInventoryAdapter(runtime);
+        return { status: "loaded", candidate: listingCandidateSnapshot(inventory, resolved.item, resolved.pile) };
+      } catch (error) {
+        return { status: "error", candidate: null, error: { message: error?.message || String(error) } };
+      }
+    }
+    async function listItem(ref = {}, listing = {}, options = {}) {
+      const service = runtime?.services?.Item;
+      const resolved = resolveItem(runtime, ref);
+      const requested = {
+        startPrice: Number(listing.startPrice),
+        buyNow: Number(listing.buyNow),
+        durationSeconds: Number(listing.durationSeconds)
+      };
+      if (!resolved || Number(ref.id || 0) <= 0) {
+        return { status: "not-found", item: null, requested, response: null, error: null };
+      }
+      const item = { id: Number(resolved.item?.id || 0), definitionId: Number(resolved.item?.definitionId || 0), pile: resolved.pile };
+      if (String(resolved.pile) !== String(ref.pile || resolved.pile)) {
+        return { status: "moved", item, requested, response: null, error: null };
+      }
+      if (typeof service?.list !== "function") {
+        return { status: "unsupported", item, requested, response: null, error: null };
+      }
+      if (!Number.isFinite(requested.startPrice) || requested.startPrice <= 0 || !Number.isFinite(requested.buyNow) || requested.buyNow < requested.startPrice || !Number.isFinite(requested.durationSeconds) || requested.durationSeconds <= 0) {
+        return { status: "invalid-request", item, requested, response: null, error: null };
+      }
+      try {
+        const response = await observeResult(service.list(
+          resolved.item,
+          requested.startPrice,
+          requested.buyNow,
+          requested.durationSeconds
+        ), options.observerContext || {});
+        const summary = responseSummary(response);
+        if (summary.success) return { status: "accepted", item, requested, response: summary, error: null };
+        const classification = classifyTradeError(response?.error || response || {});
+        return {
+          status: "rejected",
+          item,
+          requested,
+          response: summary,
+          error: { kind: classification.kind, code: classification.code, action: classification.action }
+        };
+      } catch (error) {
+        const classification = classifyTradeError(error);
+        return {
+          status: classification.ambiguous ? "ambiguous" : "error",
+          item,
+          requested,
+          response: null,
+          error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) }
+        };
+      }
+    }
+    async function refreshTransferItems(options = {}) {
+      const service = runtime?.services?.Item;
+      if (typeof service?.requestTransferItems !== "function") {
+        return { status: "unsupported", response: null, error: null };
+      }
+      try {
+        const response = await observeResult(service.requestTransferItems(), options.observerContext || {});
+        return { status: "completed", response: responseSummary(response), error: null };
+      } catch (error) {
+        const classification = classifyTradeError(error);
+        return {
+          status: classification.ambiguous ? "ambiguous" : "error",
+          response: null,
+          error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) }
+        };
+      }
+    }
+    return Object.freeze({
+      inspectCapabilities,
+      inspectListingCandidates,
+      inspectListingItem,
+      inspectPriceLimits,
+      listItem,
+      refreshTransferItems
+    });
+  }
+
   // src/adapters/index.js
   function createRuntimeAdapters(runtime, documentObject = runtime?.document || globalThis.document, options = {}) {
     const userscriptApi = options.userscriptApi || runtime?.__FCLoopRunnerUserscriptApi || {};
@@ -6574,6 +7420,7 @@
       playerPick: () => createEaPlayerPickAdapter(runtime),
       rarity: createEaRarityAdapter(runtime),
       sbc: () => createEaSbcAdapter(runtime),
+      trade: () => createEaTradeAdapter(runtime),
       fsu: () => createFsuAdapter(runtime, { documentObject, localStorage, sessionStorage }),
       dom,
       page,
@@ -7735,7 +8582,7 @@
   function clone4(value) {
     return cloneLoopDef(value);
   }
-  function positiveInteger7(value) {
+  function positiveInteger8(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -7756,12 +8603,12 @@
   function rewardFingerprint(reward = {}) {
     return {
       type: String(reward.type || ""),
-      resourceId: positiveInteger7(reward.resourceId),
-      definitionId: positiveInteger7(reward.definitionId),
-      packId: positiveInteger7(reward.packId),
-      candidateCount: positiveInteger7(reward.candidateCount),
-      selectionCount: positiveInteger7(reward.selectionCount),
-      count: positiveInteger7(reward.count),
+      resourceId: positiveInteger8(reward.resourceId),
+      definitionId: positiveInteger8(reward.definitionId),
+      packId: positiveInteger8(reward.packId),
+      candidateCount: positiveInteger8(reward.candidateCount),
+      selectionCount: positiveInteger8(reward.selectionCount),
+      count: positiveInteger8(reward.count),
       name: String(reward.name || ""),
       description: String(reward.description || "")
     };
@@ -7770,14 +8617,14 @@
     return [...new Set([
       ...value.challengeIds || [],
       ...(value.challenges || []).map((challenge) => challenge?.id)
-    ].map(positiveInteger7).filter(Boolean))].sort((a, b) => a - b);
+    ].map(positiveInteger8).filter(Boolean))].sort((a, b) => a - b);
   }
   function cachedChallengeSnapshotUsable(cached, index = {}) {
     return index?.complete === true || Array.isArray(cached?.snapshot?.challenges) && cached.snapshot.challenges.length > 0;
   }
   function compatibleIndexCore(value = {}) {
     return {
-      id: positiveInteger7(value.id),
+      id: positiveInteger8(value.id),
       name: String(value.name || ""),
       repeats: value.repeats ?? null,
       startTime: value.startTime ?? null,
@@ -7795,7 +8642,7 @@
   }
   function dynamicSbcIndexFingerprint(index = {}) {
     return fingerprintDynamicSbcValue({
-      id: positiveInteger7(index.id),
+      id: positiveInteger8(index.id),
       name: String(index.name || ""),
       repeats: index.repeats ?? null,
       startTime: index.startTime ?? null,
@@ -7822,7 +8669,7 @@
     }
     const sets = {};
     for (const [key, entry] of Object.entries(cache.sets)) {
-      const setId = positiveInteger7(entry?.setId || key);
+      const setId = positiveInteger8(entry?.setId || key);
       if (!setId || !entry?.fingerprint || !isPlainObject(entry?.snapshot)) continue;
       sets[String(setId)] = {
         setId,
@@ -7895,7 +8742,7 @@
     for (const set of sets) {
       const index = options.snapshotIndex(set, refreshResult);
       if (!options.isCandidate(index, set)) continue;
-      const setId = positiveInteger7(index?.id);
+      const setId = positiveInteger8(index?.id);
       if (!setId) continue;
       currentCandidateIds.add(String(setId));
       stats.candidates++;
@@ -8022,7 +8869,7 @@
   }
 
   // src/reward/sbc-claim.js
-  function finiteNumber2(value) {
+  function finiteNumber3(value) {
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   }
@@ -8034,16 +8881,16 @@
   }
   function hasSbcProgressAdvanced(before = {}, after = {}) {
     if (after.setComplete === true && before.setComplete !== true) return true;
-    const beforeSetCount = finiteNumber2(before.setTimesCompleted);
-    const afterSetCount = finiteNumber2(after.setTimesCompleted);
+    const beforeSetCount = finiteNumber3(before.setTimesCompleted);
+    const afterSetCount = finiteNumber3(after.setTimesCompleted);
     if (beforeSetCount !== null && afterSetCount !== null && afterSetCount > beforeSetCount) return true;
     const beforeChallenges = new Map((before.challenges || []).map((challenge) => [Number(challenge.id || 0), challenge]));
     return (after.challenges || []).some((challenge) => {
       const previous = beforeChallenges.get(Number(challenge.id || 0));
       if (!previous) return challenge.completed === true;
       if (challenge.completed === true && previous.completed !== true) return true;
-      const beforeCount = finiteNumber2(previous.timesCompleted);
-      const afterCount = finiteNumber2(challenge.timesCompleted);
+      const beforeCount = finiteNumber3(previous.timesCompleted);
+      const afterCount = finiteNumber3(challenge.timesCompleted);
       return beforeCount !== null && afterCount !== null && afterCount > beforeCount;
     });
   }
@@ -8208,10 +9055,9 @@
     return "";
   }
 
-  // src/reward/player-prices.js
-  function definitionIds(items) {
-    return [...new Set((items || []).map((item) => Number(item?.definitionId || 0)).filter(Boolean))];
-  }
+  // src/trade/price-quotes.js
+  var PRICE_QUOTE_SCHEMA_VERSION = 1;
+  var DEFAULT_PRICE_QUOTE_TTL_MS = 10 * 6e4;
   function parseJson(text, source) {
     try {
       return JSON.parse(text);
@@ -8219,69 +9065,842 @@
       throw new Error(`${source} returned invalid JSON`);
     }
   }
-  function futGgPrices(text) {
-    const prices = /* @__PURE__ */ new Map();
+  function normalizeDefinitionIds(values = []) {
+    return [...new Set((values || []).map(Number).filter((value) => Number.isInteger(value) && value > 0))];
+  }
+  function normalizeProvider(value) {
+    const provider = String(value || "auto").trim().toLowerCase().replace(".", "");
+    if (!TRADE_PRICE_PROVIDERS.includes(provider)) throw new Error(`Unsupported price provider: ${value}`);
+    return provider;
+  }
+  function quote(definitionId2, price, source, platform, quotedAt, ttlMs) {
+    return {
+      schemaVersion: PRICE_QUOTE_SCHEMA_VERSION,
+      definitionId: definitionId2,
+      price,
+      source,
+      platform,
+      quotedAt,
+      expiresAt: quotedAt + ttlMs
+    };
+  }
+  function parseFutGgPriceResponse(text) {
     const response = parseJson(text, "FUT.GG");
+    const prices = [];
     for (const entry of response?.data || []) {
       const definitionId2 = Number(entry?.eaId || entry?.definitionId || 0);
       const price = Number(entry?.price);
-      if (definitionId2 && Number.isFinite(price) && price > 0) prices.set(definitionId2, price);
+      if (Number.isInteger(definitionId2) && definitionId2 > 0 && Number.isFinite(price) && price > 0) {
+        prices.push({ definitionId: definitionId2, price });
+      }
     }
-    return prices;
+    return [...new Map(prices.map((entry) => [entry.definitionId, entry])).values()];
   }
-  function futNextPrices(text) {
-    const prices = /* @__PURE__ */ new Map();
+  function parseFutNextPriceResponse(text) {
     const response = parseJson(text, "FUTNext");
+    const prices = [];
     for (const entry of Array.isArray(response) ? response : []) {
       const definitionId2 = Number(entry?.definitionId || entry?.eaId || 0);
       const price = Number(entry?.prices?.[0]);
-      if (definitionId2 && Number.isFinite(price) && price > 0) prices.set(definitionId2, price);
-    }
-    return prices;
-  }
-  async function loadPlayerPickPrices(options = {}) {
-    if (typeof options.requestText !== "function") throw new TypeError("requestText is required");
-    const ids = definitionIds(options.items);
-    const platform = String(options.platform || "pc").toLowerCase();
-    const result = {
-      prices: /* @__PURE__ */ new Map(),
-      ids,
-      source: null,
-      attempts: []
-    };
-    if (!ids.length) return result;
-    const futGgUrl = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(","))}&platform=${encodeURIComponent(platform)}`;
-    try {
-      const text = await options.requestText(futGgUrl, {
-        sendCookies: true,
-        headers: {
-          Accept: "application/json, text/plain, */*",
-          Referer: options.referer || "",
-          "X-Requested-With": "XMLHttpRequest"
-        }
-      });
-      result.prices = futGgPrices(text);
-      result.attempts.push({ source: "FUT.GG", status: result.prices.size ? "loaded" : "empty" });
-      if (result.prices.size) {
-        result.source = "FUT.GG";
-        return result;
+      if (Number.isInteger(definitionId2) && definitionId2 > 0 && Number.isFinite(price) && price > 0) {
+        prices.push({ definitionId: definitionId2, price });
       }
-    } catch (error) {
-      result.attempts.push({ source: "FUT.GG", status: "error", reason: error?.message || String(error) });
     }
-    const futNextUrl = `https://enhancer-api.futnext.com/players/prices?ids=${encodeURIComponent(ids.join("_"))}&platform=${encodeURIComponent(platform)}`;
-    try {
-      const text = await options.requestText(futNextUrl, {
-        sendCookies: false,
-        headers: { Accept: "application/json, text/plain, */*" }
-      });
-      result.prices = futNextPrices(text);
-      result.attempts.push({ source: "FUTNext", status: result.prices.size ? "loaded" : "empty" });
-      if (result.prices.size) result.source = "FUTNext";
-    } catch (error) {
-      result.attempts.push({ source: "FUTNext", status: "error", reason: error?.message || String(error) });
+    return [...new Map(prices.map((entry) => [entry.definitionId, entry])).values()];
+  }
+  async function requestFutGg(options, ids) {
+    const url = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(","))}&platform=${encodeURIComponent(options.platform)}`;
+    const text = await options.requestText(url, {
+      sendCookies: true,
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        Referer: options.referer || "",
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    });
+    return parseFutGgPriceResponse(text);
+  }
+  async function requestFutNext(options, ids) {
+    const url = `https://enhancer-api.futnext.com/players/prices?ids=${encodeURIComponent(ids.join("_"))}&platform=${encodeURIComponent(options.platform)}`;
+    const text = await options.requestText(url, {
+      sendCookies: false,
+      headers: { Accept: "application/json, text/plain, */*" }
+    });
+    return parseFutNextPriceResponse(text);
+  }
+  async function loadPriceQuotes(options = {}) {
+    if (typeof options.requestText !== "function") throw new TypeError("requestText is required");
+    const ids = normalizeDefinitionIds(options.definitionIds);
+    const provider = normalizeProvider(options.provider);
+    const platform = String(options.platform || "pc").trim().toLowerCase();
+    const quotedAt = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
+    const ttlMs = Math.max(1, Number(options.ttlMs || DEFAULT_PRICE_QUOTE_TTL_MS));
+    const result = { quotes: [], ids, source: null, attempts: [] };
+    if (!ids.length) return result;
+    const loaded = /* @__PURE__ */ new Map();
+    const providerSteps = provider === "auto" ? ["futgg", "futnext"] : [provider];
+    for (const source of providerSteps) {
+      const missingIds = ids.filter((id) => !loaded.has(id));
+      if (!missingIds.length) break;
+      if (source === "futnext" && provider === "auto" && loaded.size && options.fallbackOnPartial === false) break;
+      try {
+        const entries = source === "futgg" ? await requestFutGg({ ...options, platform }, missingIds) : await requestFutNext({ ...options, platform }, missingIds);
+        const sourceName = source === "futgg" ? "FUT.GG" : "FUTNext";
+        let accepted = 0;
+        for (const entry of entries) {
+          if (!missingIds.includes(entry.definitionId)) continue;
+          loaded.set(entry.definitionId, quote(entry.definitionId, entry.price, sourceName, platform, quotedAt, ttlMs));
+          accepted += 1;
+        }
+        result.attempts.push({ source: sourceName, status: accepted ? "loaded" : "empty" });
+        if (provider !== "auto") break;
+      } catch (error) {
+        result.attempts.push({
+          source: source === "futgg" ? "FUT.GG" : "FUTNext",
+          status: "error",
+          reason: error?.message || String(error)
+        });
+      }
     }
+    result.quotes = ids.map((id) => loaded.get(id)).filter(Boolean);
+    const sources = [...new Set(result.quotes.map((entry) => entry.source))];
+    result.source = sources.length === 1 ? sources[0] : sources.length > 1 ? "mixed" : null;
     return result;
+  }
+  function quoteMatchesProvider(entry, provider) {
+    if (provider === "auto") return true;
+    if (provider === "futgg") return entry.source === "FUT.GG";
+    return entry.source === "FUTNext";
+  }
+  function createPriceQuoteProvider(options = {}) {
+    if (typeof options.requestText !== "function") throw new TypeError("requestText is required");
+    const cache = /* @__PURE__ */ new Map();
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const cacheKey = (platform, definitionId2) => `${platform}:${definitionId2}`;
+    async function load(request = {}) {
+      const provider = normalizeProvider(request.provider || options.provider);
+      const ids = normalizeDefinitionIds(request.definitionIds);
+      const platform = String(request.platform || options.platform || "pc").trim().toLowerCase();
+      const currentTime = Number(now());
+      const fresh = request.forceRefresh === true ? [] : ids.map((id) => cache.get(cacheKey(platform, id))).filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
+      const freshIds = new Set(fresh.map((entry) => entry.definitionId));
+      const missingIds = ids.filter((id) => !freshIds.has(id));
+      const loaded = missingIds.length ? await loadPriceQuotes({
+        ...options,
+        ...request,
+        provider,
+        platform,
+        definitionIds: missingIds,
+        now: currentTime
+      }) : { quotes: [], ids: [], source: null, attempts: [] };
+      for (const entry of loaded.quotes) cache.set(cacheKey(entry.platform, entry.definitionId), entry);
+      const quotes = ids.map((id) => cache.get(cacheKey(platform, id))).filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
+      const sources = [...new Set(quotes.map((entry) => entry.source))];
+      return {
+        quotes,
+        ids,
+        source: sources.length === 1 ? sources[0] : sources.length > 1 ? "mixed" : null,
+        attempts: [
+          ...fresh.length ? [{ source: "cache", status: "loaded", count: fresh.length }] : [],
+          ...loaded.attempts
+        ]
+      };
+    }
+    function clear() {
+      cache.clear();
+    }
+    function snapshot() {
+      return [...cache.values()].sort((left, right) => left.definitionId - right.definitionId);
+    }
+    return Object.freeze({ clear, load, snapshot });
+  }
+
+  // src/reward/player-prices.js
+  async function loadPlayerPickPrices(options = {}) {
+    const ids = [...new Set((options.items || []).map((item) => Number(item?.definitionId || 0)).filter(Boolean))];
+    const loaded = await loadPriceQuotes({
+      ...options,
+      definitionIds: ids,
+      provider: "auto",
+      fallbackOnPartial: false
+    });
+    return {
+      prices: new Map(loaded.quotes.map((entry) => [entry.definitionId, entry.price])),
+      ids: loaded.ids,
+      source: loaded.source,
+      attempts: loaded.attempts
+    };
+  }
+
+  // src/trade/player-catalog.js
+  var PLAYER_CATALOG_SCHEMA_VERSION = 1;
+  var PLAYER_CATALOG_PARSER_VERSION = 1;
+  var DEFAULT_PLAYER_CATALOG_TTL_MS = 24 * 60 * 6e4;
+  function parseJson2(text) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error("FUTNext player catalog returned invalid JSON");
+    }
+  }
+  function definitionIds(values = []) {
+    return [...new Set((values || []).map(Number).filter((value) => Number.isInteger(value) && value > 0))].sort((a, b) => a - b);
+  }
+  function normalizeRatings(input = {}) {
+    const explicit = Array.isArray(input.ratings) ? input.ratings : [];
+    if (explicit.length) return [...new Set(explicit.map(Number).filter((rating) => Number.isInteger(rating) && rating >= 1 && rating <= 99))].sort((a, b) => a - b);
+    const min = Number(input.ratingMin ?? input.rating);
+    const max = Number(input.ratingMax ?? input.rating);
+    if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max > 99 || max < min) {
+      throw new Error("Player catalog requires ratings or a valid ratingMin/ratingMax range");
+    }
+    return Array.from({ length: max - min + 1 }, (_, index) => min + index);
+  }
+  function parseCache(value) {
+    if (typeof value !== "string") return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  function createEmptyPlayerCatalogCache(options = {}) {
+    return {
+      schemaVersion: PLAYER_CATALOG_SCHEMA_VERSION,
+      parserVersion: Number(options.parserVersion || PLAYER_CATALOG_PARSER_VERSION),
+      season: String(options.season || "26"),
+      platform: String(options.platform || "pc").toLowerCase(),
+      lanes: {}
+    };
+  }
+  function normalizePlayerCatalogCache(value, options = {}) {
+    const expected = createEmptyPlayerCatalogCache(options);
+    const cache = parseCache(value);
+    if (!cache || Number(cache.schemaVersion) !== PLAYER_CATALOG_SCHEMA_VERSION) return expected;
+    if (Number(cache.parserVersion) !== expected.parserVersion) return expected;
+    if (String(cache.season) !== expected.season || String(cache.platform).toLowerCase() !== expected.platform) return expected;
+    const lanes = {};
+    for (const [ratingText, lane] of Object.entries(cache.lanes || {})) {
+      const rating = Number(ratingText);
+      const ids = definitionIds(lane?.definitionIds);
+      const fetchedAt = Number(lane?.fetchedAt);
+      const expiresAt = Number(lane?.expiresAt);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 99 || !ids.length) continue;
+      if (!Number.isFinite(fetchedAt) || !Number.isFinite(expiresAt) || expiresAt <= fetchedAt) continue;
+      lanes[rating] = { rating, definitionIds: ids, fetchedAt, expiresAt };
+    }
+    return { ...expected, lanes };
+  }
+  function parseFutNextPlayerCatalogResponse(text) {
+    const response = parseJson2(text);
+    const ids = definitionIds(response?.ids || response?.data?.ids);
+    if (!ids.length) throw new Error("FUTNext player catalog returned no definition IDs");
+    return ids;
+  }
+  function createPlayerCatalogProvider(options = {}) {
+    if (typeof options.requestText !== "function") throw new TypeError("requestText is required");
+    const storage = options.storage;
+    const cacheKey = String(options.cacheKey || "fc-loop-runner-trade-player-catalog-v1");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    function readCache(request) {
+      const raw = storage?.get?.(cacheKey, null);
+      return normalizePlayerCatalogCache(raw, request);
+    }
+    function writeCache(cache) {
+      storage?.set?.(cacheKey, cache);
+    }
+    async function load(request = {}) {
+      const ratings = normalizeRatings(request);
+      const platform = String(request.platform || options.platform || "pc").trim().toLowerCase();
+      const season = String(request.season || options.season || "26");
+      const parserVersion = Number(request.parserVersion || options.parserVersion || PLAYER_CATALOG_PARSER_VERSION);
+      const ttlMs = Math.max(1, Number(request.ttlMs || options.ttlMs || DEFAULT_PLAYER_CATALOG_TTL_MS));
+      const currentTime = Number(now());
+      const cacheOptions = { platform, season, parserVersion };
+      const cache = readCache(cacheOptions);
+      const lanes = [];
+      const attempts = [];
+      const missingRatings = [];
+      let circuitOpen = false;
+      for (const rating of ratings) {
+        const cached = cache.lanes[rating];
+        if (request.forceRefresh !== true && cached?.expiresAt > currentTime) {
+          lanes.push({ ...cached, source: "cache" });
+          attempts.push({ rating, source: "cache", status: "loaded", count: cached.definitionIds.length });
+          continue;
+        }
+        if (circuitOpen) {
+          missingRatings.push(rating);
+          attempts.push({ rating, source: "FUTNext", status: "skipped", reason: "request circuit open" });
+          continue;
+        }
+        const url = `https://rest.futnext.com/players/filter?rating=${encodeURIComponent(rating)}&platform=${encodeURIComponent(platform)}`;
+        try {
+          const text = await options.requestText(url, {
+            sendCookies: false,
+            headers: { Accept: "application/json, text/plain, */*" }
+          });
+          const ids = parseFutNextPlayerCatalogResponse(text);
+          const lane = { rating, definitionIds: ids, fetchedAt: currentTime, expiresAt: currentTime + ttlMs };
+          cache.lanes[rating] = lane;
+          lanes.push({ ...lane, source: "FUTNext" });
+          attempts.push({ rating, source: "FUTNext", status: "loaded", count: ids.length });
+        } catch (error) {
+          const classification = classifyTradeError(error);
+          missingRatings.push(rating);
+          attempts.push({
+            rating,
+            source: "FUTNext",
+            status: "error",
+            reason: error?.message || String(error),
+            errorKind: classification.kind
+          });
+          if (classification.kind === "rate-limit") circuitOpen = true;
+        }
+      }
+      writeCache(cache);
+      return {
+        schemaVersion: PLAYER_CATALOG_SCHEMA_VERSION,
+        ok: missingRatings.length === 0,
+        platform,
+        season,
+        parserVersion,
+        ratings,
+        lanes: lanes.sort((left, right) => left.rating - right.rating),
+        missingRatings,
+        attempts,
+        cache
+      };
+    }
+    function clear() {
+      storage?.remove?.(cacheKey);
+    }
+    function snapshot(request = {}) {
+      const platform = String(request.platform || options.platform || "pc").trim().toLowerCase();
+      const season = String(request.season || options.season || "26");
+      const parserVersion = Number(request.parserVersion || options.parserVersion || PLAYER_CATALOG_PARSER_VERSION);
+      return readCache({ platform, season, parserVersion });
+    }
+    return Object.freeze({ clear, load, snapshot });
+  }
+
+  // src/trade/listing-plan.js
+  var MIN_EA_LISTING_PRICE = 150;
+  var REJECTION_SAMPLE_LIMIT = 20;
+  function finiteNumber4(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function priceStep(value) {
+    const price = Math.max(0, finiteNumber4(value));
+    if (price <= 1e3) return 50;
+    if (price <= 1e4) return 100;
+    if (price <= 5e4) return 250;
+    if (price <= 1e5) return 500;
+    return 1e3;
+  }
+  function roundEaListingPrice(value) {
+    const price = Math.max(MIN_EA_LISTING_PRICE, finiteNumber4(value, MIN_EA_LISTING_PRICE));
+    const step = priceStep(price);
+    return Math.ceil(price / step) * step;
+  }
+  function eaListingPriceBelow(value) {
+    const price = roundEaListingPrice(value);
+    return Math.max(MIN_EA_LISTING_PRICE, price - priceStep(price));
+  }
+  function matchesTradeCardClass(candidate, cardClass) {
+    const gold = candidate?.tier === "gold" || Number(candidate?.rating) >= 75 && Number(candidate?.rating) <= 99;
+    const special = candidate?.special === true || Number(candidate?.rareflag || 0) > 1;
+    const rare = candidate?.rare === true || Number(candidate?.rareflag || 0) > 0;
+    if (cardClass === "common-gold") return gold && !special && !rare;
+    if (cardClass === "rare-gold") return gold && !special && rare;
+    if (cardClass === "special") return special;
+    if (cardClass === "normal-gold" || cardClass === "gold") return gold && !special;
+    return false;
+  }
+  function matchingRatingRule(rules, rating) {
+    return rules.find((rule) => rating >= Number(rule.min) && rating <= Number(rule.max)) || null;
+  }
+  function listingCandidateRejection(candidate, policy) {
+    const pile = String(candidate?.item?.pile || "unknown");
+    if (!policy.sources.includes(pile)) return "source-not-allowed";
+    if (String(candidate?.type || "").toLowerCase() !== "player") return "not-player";
+    if (candidate?.tradeable !== true) return "untradeable";
+    if (candidate?.limitedUse === true) return "limited-use";
+    if (candidate?.concept === true) return "concept";
+    if (candidate?.academyEnrolled === true) return "academy-enrolled";
+    if (candidate?.evolution === true) return "evolution";
+    const auctionState = String(candidate?.auction?.state || "none");
+    if (auctionState === "active") return "active-trade";
+    if (auctionState === "closed") return "closed-trade";
+    if (candidate?.auction?.present === true && auctionState === "unknown") return "unknown-trade-state";
+    if (!matchesTradeCardClass(candidate, policy.cardClass)) return "card-class-mismatch";
+    if (!matchingRatingRule(policy.ratingRules, Number(candidate?.rating || 0))) return "rating-rule-mismatch";
+    if (!Number.isFinite(Number(candidate?.item?.id)) || Number(candidate.item.id) <= 0) return "missing-item-id";
+    if (!Number.isFinite(Number(candidate?.item?.definitionId)) || Number(candidate.item.definitionId) <= 0) return "missing-definition-id";
+    return null;
+  }
+  function applyListingPriceLimits(entry, limitResult = {}) {
+    const limits = limitResult.after || limitResult;
+    const minimum = Number(limits.minimum);
+    const maximum = Number(limits.maximum);
+    if (limitResult.status && limitResult.status !== "loaded") {
+      return { ok: false, reason: `price-limits-${limitResult.status}`, entry: { ...entry } };
+    }
+    if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum <= 0 || maximum < minimum) {
+      return { ok: false, reason: "invalid-price-limits", entry: { ...entry } };
+    }
+    const buyNow = Math.min(maximum, Math.max(minimum, Number(entry.buyNow)));
+    const startPrice = Math.min(buyNow, Math.min(maximum, Math.max(minimum, Number(entry.startPrice))));
+    return {
+      ok: true,
+      reason: null,
+      changed: buyNow !== Number(entry.buyNow) || startPrice !== Number(entry.startPrice),
+      entry: {
+        ...entry,
+        startPrice,
+        buyNow,
+        priceLimitStatus: "loaded",
+        priceLimits: { minimum, maximum }
+      }
+    };
+  }
+  function confirmationHash(text) {
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+  function createListingConfirmation(plan, options = {}) {
+    const createdAt = Math.max(0, finiteNumber4(options.now, Date.now()));
+    const ttlMs = Math.max(1, finiteNumber4(options.ttlMs, 10 * 6e4));
+    const entries = (plan.entries || []).map((entry) => ({
+      item: entry.item,
+      startPrice: entry.startPrice,
+      buyNow: entry.buyNow,
+      durationSeconds: entry.durationSeconds,
+      priceLimits: entry.priceLimits
+    }));
+    const token = `listing-${confirmationHash(JSON.stringify({ job: plan.job, entries, createdAt }))}`;
+    return {
+      token,
+      createdAt,
+      expiresAt: createdAt + ttlMs,
+      itemCount: entries.length,
+      requiredText: `LIST ${entries.length}`
+    };
+  }
+  function quoteForCandidate(candidate, quotesByDefinitionId, policy, now) {
+    if (policy.marketOverride.enabled !== true) {
+      return { status: "disabled", quote: null };
+    }
+    const quote2 = quotesByDefinitionId.get(Number(candidate.item.definitionId));
+    if (!quote2 || !Number.isFinite(Number(quote2.price)) || Number(quote2.price) <= 0) {
+      return { status: "unavailable", quote: null };
+    }
+    const maxAgeMs = Number(policy.marketOverride.maxQuoteAgeMinutes) * 6e4;
+    const quotedAt = Number(quote2.quotedAt);
+    const expiresAt = Number(quote2.expiresAt);
+    if (!Number.isFinite(quotedAt) || quotedAt < now - maxAgeMs || !Number.isFinite(expiresAt) || expiresAt <= now) {
+      return { status: "stale", quote: quote2 };
+    }
+    return {
+      status: Number(quote2.price) > Number(candidate.rule.buyNow) ? "applied" : "below-configured",
+      quote: quote2
+    };
+  }
+  function plannedPrice(candidate, quotesByDefinitionId, policy, now) {
+    const configuredPrice = Number(candidate.rule.buyNow);
+    const quoteResult = quoteForCandidate(candidate, quotesByDefinitionId, policy, now);
+    const markedUp = quoteResult.status === "applied" ? Number(quoteResult.quote.price) * (1 + Number(policy.marketOverride.markupPercent) / 100) : configuredPrice;
+    const buyNow = roundEaListingPrice(markedUp);
+    const startPrice = policy.startPricePolicy === "same" ? buyNow : eaListingPriceBelow(buyNow);
+    return {
+      configuredPrice,
+      quotedPrice: quoteResult.quote ? Number(quoteResult.quote.price) : null,
+      quoteSource: quoteResult.quote ? String(quoteResult.quote.source || "unknown") : null,
+      quoteStatus: quoteResult.status,
+      startPrice,
+      buyNow
+    };
+  }
+  function sourceOrder(policy, pile) {
+    const index = policy.sources.indexOf(pile);
+    return index >= 0 ? index : policy.sources.length;
+  }
+  function buildListingPlan(input = {}) {
+    const job = input.job;
+    assertValidTradeJob(job, "Listing job");
+    if (job.type !== "listing") throw new Error("Listing job.type must be listing");
+    const now = Math.max(0, finiteNumber4(input.now, Date.now()));
+    const candidates = Array.isArray(input.candidates) ? input.candidates : [];
+    const quotesByDefinitionId = new Map((input.quotes || []).map((quote2) => [Number(quote2.definitionId), quote2]));
+    const rejectionCounts = {};
+    const rejectionSamples = [];
+    const eligible = [];
+    for (const candidate of candidates) {
+      const reason = listingCandidateRejection(candidate, job.policy);
+      if (reason) {
+        rejectionCounts[reason] = Number(rejectionCounts[reason] || 0) + 1;
+        if (rejectionSamples.length < REJECTION_SAMPLE_LIMIT) {
+          rejectionSamples.push({ item: { ...candidate?.item }, reason });
+        }
+        continue;
+      }
+      eligible.push({
+        ...candidate,
+        rule: matchingRatingRule(job.policy.ratingRules, Number(candidate.rating))
+      });
+    }
+    eligible.sort((left, right) => sourceOrder(job.policy, left.item.pile) - sourceOrder(job.policy, right.item.pile) || Number(left.rating) - Number(right.rating) || Number(left.item.id) - Number(right.item.id));
+    const selected2 = eligible.slice(0, Number(job.policy.maxListings));
+    const entries = selected2.map((candidate, index) => ({
+      index: index + 1,
+      item: { ...candidate.item },
+      name: String(candidate.name || candidate.item.definitionId),
+      rating: Number(candidate.rating),
+      cardClass: job.policy.cardClass,
+      auctionState: String(candidate.auction?.state || "none"),
+      ...plannedPrice(candidate, quotesByDefinitionId, job.policy, now),
+      durationSeconds: Number(job.policy.durationSeconds),
+      priceLimitStatus: "pending"
+    }));
+    const quoteWarnings = entries.filter((entry) => ["unavailable", "stale"].includes(entry.quoteStatus)).length;
+    return {
+      schemaVersion: 1,
+      createdAt: now,
+      job: { id: job.id, name: job.name, type: job.type },
+      policy: {
+        sources: [...job.policy.sources],
+        cardClass: job.policy.cardClass,
+        durationSeconds: job.policy.durationSeconds,
+        maxListings: job.policy.maxListings,
+        marketOverride: { ...job.policy.marketOverride }
+      },
+      counts: {
+        scanned: candidates.length,
+        eligible: eligible.length,
+        selected: entries.length,
+        deferred: Math.max(0, eligible.length - entries.length),
+        rejected: candidates.length - eligible.length
+      },
+      entries,
+      rejectionCounts,
+      rejectionSamples,
+      warnings: [
+        ...quoteWarnings ? [`${quoteWarnings} selected item(s) have unavailable or stale market quotes`] : [],
+        ...entries.length ? ["EA price limits will be refreshed and applied immediately before listing"] : []
+      ]
+    };
+  }
+
+  // src/trade/listing-preparation.js
+  function createListingPreparation(options = {}) {
+    if (typeof options.listingPreview?.preview !== "function") throw new TypeError("listingPreview.preview is required");
+    if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    async function prepare(input = {}, request = {}) {
+      const requestedMax = Math.max(1, Math.floor(Number(request.maxListings || input.policy?.maxListings || 1)));
+      const previewInput = {
+        ...input,
+        policy: {
+          ...input.policy || {},
+          maxListings: requestedMax
+        }
+      };
+      const preview = await options.listingPreview.preview(previewInput, request);
+      const adapter = options.getTradeAdapter();
+      const blockers = [];
+      const priceLimitChecks = [];
+      const entries = [];
+      const adjustedNames = [];
+      if (preview.capabilities?.canTrade !== true) blockers.push({ reason: "trade-capability-unavailable" });
+      if (preview.scan?.error) blockers.push({ reason: "candidate-scan-failed", detail: preview.scan.error.message });
+      if (!preview.plan?.entries?.length) blockers.push({ reason: "no-eligible-listing-candidates" });
+      for (const entry of preview.plan?.entries || []) {
+        const result = await adapter.inspectPriceLimits(entry.item, { refresh: true });
+        const applied = applyListingPriceLimits(entry, result);
+        priceLimitChecks.push({
+          item: { ...entry.item },
+          status: result.status,
+          response: result.response,
+          error: result.error,
+          minimum: result.after?.minimum ?? null,
+          maximum: result.after?.maximum ?? null,
+          changed: applied.ok ? applied.changed : null
+        });
+        if (!applied.ok) {
+          blockers.push({ item: { ...entry.item }, reason: applied.reason });
+          continue;
+        }
+        entries.push(applied.entry);
+        if (applied.changed) adjustedNames.push(applied.entry.name);
+      }
+      const preparedAt = Number(now());
+      const plan = {
+        ...preview.plan,
+        createdAt: preparedAt,
+        entries,
+        counts: {
+          ...preview.plan.counts,
+          selected: entries.length
+        },
+        warnings: [
+          ...(preview.plan.warnings || []).filter((warning) => !/price limits will be refreshed/i.test(warning)),
+          ...adjustedNames.map((name) => `${name} listing prices were adjusted to EA limits`)
+        ]
+      };
+      const ready = blockers.length === 0 && entries.length > 0;
+      const confirmation = ready ? createListingConfirmation(plan, { now: preparedAt }) : null;
+      return {
+        ...preview,
+        mode: "prepared",
+        preparedAt,
+        ready,
+        blockers,
+        priceLimitChecks,
+        plan,
+        confirmation
+      };
+    }
+    return Object.freeze({ prepare });
+  }
+
+  // src/trade/listing-preview.js
+  function createListingPreview(options = {}) {
+    if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
+    if (typeof options.priceQuoteProvider?.load !== "function") throw new TypeError("priceQuoteProvider.load is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    async function preview(input = {}, request = {}) {
+      const timestamp = Number(now());
+      const job = normalizeTradeJob({
+        ...input,
+        id: input.id || "manual-listing-preview",
+        name: input.name || "Manual Listing Preview",
+        type: "listing",
+        enabled: true,
+        armed: false
+      }, { now: timestamp });
+      const adapter = options.getTradeAdapter();
+      const capabilities = adapter.inspectCapabilities();
+      const scan = adapter.inspectListingCandidates({ sources: job.policy.sources, limit: 0 });
+      const initialPlan = buildListingPlan({ job, candidates: scan.candidates, now: timestamp });
+      const definitionIds2 = [...new Set(initialPlan.entries.map((entry) => entry.item.definitionId))];
+      const quoteResult = job.policy.marketOverride.enabled && definitionIds2.length ? await options.priceQuoteProvider.load({
+        definitionIds: definitionIds2,
+        platform: request.platform || "pc",
+        provider: request.provider || "auto",
+        forceRefresh: request.forceRefresh === true
+      }) : { quotes: [], source: null, attempts: [] };
+      const plan = buildListingPlan({ job, candidates: scan.candidates, quotes: quoteResult.quotes, now: timestamp });
+      return {
+        schemaVersion: 1,
+        mode: "preview-only",
+        job,
+        capabilities,
+        scan: {
+          capturedAt: scan.capturedAt,
+          sources: scan.sources,
+          counts: scan.counts,
+          total: scan.total,
+          returned: scan.returned,
+          truncated: scan.truncated,
+          error: scan.error
+        },
+        quotes: {
+          requested: definitionIds2.length,
+          loaded: quoteResult.quotes.length,
+          source: quoteResult.source,
+          attempts: quoteResult.attempts
+        },
+        plan
+      };
+    }
+    return Object.freeze({ preview });
+  }
+
+  // src/trade/listing-transaction.js
+  function sameNumber(left, right) {
+    return Number(left) === Number(right);
+  }
+  function verificationMatches(entry, candidate) {
+    return candidate && Number(candidate.item?.id) === Number(entry.item.id) && Number(candidate.item?.definitionId) === Number(entry.item.definitionId) && candidate.item?.pile === "transfer" && candidate.auction?.state === "active" && sameNumber(candidate.auction?.startingBid, entry.startPrice) && sameNumber(candidate.auction?.buyNowPrice, entry.buyNow);
+  }
+  function randomDelayMs(range, random) {
+    const minimum = Math.max(0, Number(range?.[0] || 0));
+    const maximum = Math.max(minimum, Number(range?.[1] || minimum));
+    return Math.round((minimum + (maximum - minimum) * random()) * 1e3);
+  }
+  function createListingTransaction(options = {}) {
+    const adapter = options.tradeAdapter;
+    if (!adapter) throw new TypeError("tradeAdapter is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const sleep = typeof options.sleep === "function" ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const random = typeof options.random === "function" ? options.random : Math.random;
+    const createRunId = typeof options.createRunId === "function" ? options.createRunId : () => `listing-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    async function run(input = {}) {
+      const startedAt = Number(now());
+      const job = input.job;
+      const prepared = input.prepared;
+      assertValidTradeJob(job, "Listing job");
+      if (job.type !== "listing") throw new Error("Listing job.type must be listing");
+      const entries = prepared?.plan?.entries || [];
+      const confirmation = prepared?.confirmation;
+      const receipts = [];
+      let status = "completed";
+      let reason = null;
+      let succeeded = 0;
+      let failed = 0;
+      if (prepared?.mode !== "prepared" || prepared?.ready !== true || !confirmation || !entries.length) {
+        status = "blocked";
+        reason = "listing-plan-not-prepared";
+      } else if (entries.length > Number(job.policy.maxListings)) {
+        status = "blocked";
+        reason = "listing-plan-exceeds-job-limit";
+      } else if (String(input.confirmationToken || "") !== confirmation.token || String(input.confirmationText || "") !== confirmation.requiredText) {
+        status = "blocked";
+        reason = "listing-confirmation-mismatch";
+      } else if (startedAt > Number(confirmation.expiresAt)) {
+        status = "blocked";
+        reason = "listing-confirmation-expired";
+      }
+      const beforeCapabilities = adapter.inspectCapabilities();
+      if (!reason && beforeCapabilities.canTrade !== true) {
+        status = "blocked";
+        reason = "trade-capability-unavailable";
+      }
+      for (let index = 0; !reason && index < entries.length; index += 1) {
+        const entry = entries[index];
+        if (input.shouldStop?.() === true) {
+          status = "stopped";
+          reason = "stopped-by-user";
+          break;
+        }
+        const live = adapter.inspectListingItem(entry.item);
+        if (live.status !== "loaded" || !live.candidate) {
+          failed += 1;
+          status = "blocked";
+          reason = `listing-item-${live.status}`;
+          receipts.push({ index: index + 1, item: { ...entry.item }, status: "blocked", reason });
+          break;
+        }
+        if (live.candidate.item.pile !== entry.item.pile || Number(live.candidate.item.definitionId) !== Number(entry.item.definitionId)) {
+          failed += 1;
+          status = "blocked";
+          reason = "listing-item-identity-changed";
+          receipts.push({ index: index + 1, item: { ...entry.item }, status: "blocked", reason, live: live.candidate.item });
+          break;
+        }
+        const eligibilityReason = listingCandidateRejection(live.candidate, job.policy);
+        if (eligibilityReason) {
+          failed += 1;
+          status = "blocked";
+          reason = `listing-item-${eligibilityReason}`;
+          receipts.push({ index: index + 1, item: { ...entry.item }, status: "blocked", reason });
+          break;
+        }
+        const capabilities = adapter.inspectCapabilities();
+        if (entry.item.pile === "club" && Number(capabilities.transferCapacity?.free) <= 0) {
+          failed += 1;
+          status = "blocked";
+          reason = "transfer-list-full";
+          receipts.push({ index: index + 1, item: { ...entry.item }, status: "blocked", reason });
+          break;
+        }
+        const priceLimitResult = await adapter.inspectPriceLimits(entry.item, { refresh: true });
+        const finalPrice = applyListingPriceLimits(entry, priceLimitResult);
+        if (!finalPrice.ok) {
+          failed += 1;
+          status = "blocked";
+          reason = finalPrice.reason;
+          receipts.push({ index: index + 1, item: { ...entry.item }, status: "blocked", reason, priceLimits: priceLimitResult.after });
+          break;
+        }
+        if (!sameNumber(finalPrice.entry.startPrice, entry.startPrice) || !sameNumber(finalPrice.entry.buyNow, entry.buyNow)) {
+          failed += 1;
+          status = "blocked";
+          reason = "listing-price-changed-after-confirmation";
+          receipts.push({
+            index: index + 1,
+            item: { ...entry.item },
+            status: "blocked",
+            reason,
+            confirmed: { startPrice: entry.startPrice, buyNow: entry.buyNow },
+            current: { startPrice: finalPrice.entry.startPrice, buyNow: finalPrice.entry.buyNow }
+          });
+          break;
+        }
+        const listed = await adapter.listItem(entry.item, entry);
+        const receipt = {
+          index: index + 1,
+          item: { ...entry.item },
+          listing: { startPrice: entry.startPrice, buyNow: entry.buyNow, durationSeconds: entry.durationSeconds },
+          priceLimits: { ...entry.priceLimits },
+          adapterStatus: listed.status,
+          response: listed.response,
+          error: listed.error
+        };
+        if (listed.status !== "accepted") {
+          failed += 1;
+          status = listed.status === "ambiguous" ? "ambiguous" : "failed";
+          reason = `listing-${listed.status}`;
+          receipts.push({ ...receipt, status, reason });
+          break;
+        }
+        const refresh = await adapter.refreshTransferItems();
+        const verification = adapter.inspectListingItem({ ...entry.item, pile: "transfer" });
+        if (refresh.status !== "completed" || verification.status !== "loaded" || !verificationMatches(entry, verification.candidate)) {
+          failed += 1;
+          status = "ambiguous";
+          reason = "listing-accepted-but-not-verified";
+          receipts.push({
+            ...receipt,
+            status: "ambiguous",
+            reason,
+            refresh,
+            verification: verification.candidate || null
+          });
+          break;
+        }
+        succeeded += 1;
+        receipts.push({
+          ...receipt,
+          status: "listed",
+          reason: null,
+          refresh,
+          verification: {
+            item: { ...verification.candidate.item },
+            auction: { ...verification.candidate.auction }
+          }
+        });
+        if (index < entries.length - 1 && input.shouldStop?.() !== true) {
+          await sleep(randomDelayMs(job.policy.listingDelaySeconds, random));
+        }
+      }
+      const finishedAt = Number(now());
+      const afterCapabilities = adapter.inspectCapabilities();
+      const skipped = Math.max(0, entries.length - succeeded - failed);
+      return createTradeRunReceipt({
+        runId: createRunId(),
+        jobId: job.id,
+        jobType: job.type,
+        scheduledFor: startedAt,
+        startedAt,
+        finishedAt,
+        status,
+        reason,
+        requested: entries.length,
+        succeeded,
+        failed,
+        skipped,
+        coinsBefore: beforeCapabilities.coins,
+        coinsAfter: afterCapabilities.coins,
+        receipts
+      });
+    }
+    return Object.freeze({ run });
   }
 
   // src/reward/pack-highlight.js
@@ -8755,7 +10374,7 @@
   // src/reward/futbin-card-id.js
   var CACHE_VERSION = 1;
   var MAX_CACHE_ENTRIES = 2e3;
-  function positiveInteger8(value) {
+  function positiveInteger9(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -8768,9 +10387,9 @@
   }
   function cacheEntryKey(context = {}) {
     const source = safeContext(context);
-    const season = positiveInteger8(source.season);
+    const season = positiveInteger9(source.season);
     const platform = normalizedPlatform(source.platform);
-    const definitionId2 = positiveInteger8(source.definitionId);
+    const definitionId2 = positiveInteger9(source.definitionId);
     if (!season || !platform || !definitionId2) return null;
     return `${season}:${platform}:${definitionId2}`;
   }
@@ -8779,7 +10398,7 @@
     const rawEntries = rawCache?.version === CACHE_VERSION && rawCache?.entries && typeof rawCache.entries === "object" ? rawCache.entries : {};
     for (const [key, value] of Object.entries(rawEntries)) {
       if (!/^\d{2}:(?:PC|PS):\d+$/.test(key)) continue;
-      const futbinPlayerId = positiveInteger8(value);
+      const futbinPlayerId = positiveInteger9(value);
       if (futbinPlayerId) entries[key] = futbinPlayerId;
       if (Object.keys(entries).length >= MAX_CACHE_ENTRIES) break;
     }
@@ -8787,11 +10406,11 @@
   }
   function getCachedFutbinPlayerId(cache, context = {}) {
     const key = cacheEntryKey(context);
-    return key ? positiveInteger8(cache?.entries?.[key]) : null;
+    return key ? positiveInteger9(cache?.entries?.[key]) : null;
   }
   function cacheFutbinPlayerId(cache, context = {}, futbinPlayerId) {
     const key = cacheEntryKey(context);
-    const id = positiveInteger8(futbinPlayerId);
+    const id = positiveInteger9(futbinPlayerId);
     if (!key || !id) return false;
     if (!cache.entries || typeof cache.entries !== "object") cache.entries = {};
     cache.entries[key] = id;
@@ -8803,12 +10422,12 @@
   }
   function createFutbinFilteredPlayersUrl(context = {}) {
     const source = safeContext(context);
-    const season = positiveInteger8(source.season);
+    const season = positiveInteger9(source.season);
     const platform = normalizedPlatform(source.platform);
-    const nationId = positiveInteger8(source.nationId);
-    const leagueId = positiveInteger8(source.leagueId);
-    const teamId = positiveInteger8(source.teamId);
-    const rating = positiveInteger8(source.rating);
+    const nationId = positiveInteger9(source.nationId);
+    const leagueId = positiveInteger9(source.leagueId);
+    const teamId = positiveInteger9(source.teamId);
+    const rating = positiveInteger9(source.rating);
     const position = String(source.position || "").trim();
     if (!season || !platform || !nationId || !leagueId || !teamId || !rating || !position) return null;
     const query2 = new URLSearchParams({
@@ -8825,7 +10444,7 @@
     return `https://www.futbin.org/futbin/api/${season}/getFilteredPlayers?${query2.toString()}`;
   }
   function parseFutbinFilteredPlayerId(responseText, definitionId2) {
-    const targetDefinitionId = positiveInteger8(definitionId2);
+    const targetDefinitionId = positiveInteger9(definitionId2);
     if (!targetDefinitionId || typeof responseText !== "string") return null;
     let response;
     try {
@@ -8834,8 +10453,8 @@
       return null;
     }
     const entries = Array.isArray(response?.data) ? response.data : [];
-    const exactMatch = entries.find((entry) => positiveInteger8(entry?.resource_id) === targetDefinitionId);
-    return positiveInteger8(exactMatch?.ID);
+    const exactMatch = entries.find((entry) => positiveInteger9(entry?.resource_id) === targetDefinitionId);
+    return positiveInteger9(exactMatch?.ID);
   }
   async function mapWithConcurrency(entries, limit, callback) {
     const results = [];
@@ -8861,7 +10480,7 @@
     const queued = /* @__PURE__ */ new Map();
     let cacheHits = 0;
     for (const originalItem of items) {
-      const definitionId2 = positiveInteger8(originalItem?.definitionId);
+      const definitionId2 = positiveInteger9(originalItem?.definitionId);
       if (!definitionId2 || ids.has(definitionId2)) continue;
       let item = originalItem;
       try {
@@ -8869,7 +10488,7 @@
       } catch {
         item = originalItem;
       }
-      const knownId = positiveInteger8(resolveKnownId(item)) || positiveInteger8(resolveKnownId(originalItem));
+      const knownId = positiveInteger9(resolveKnownId(item)) || positiveInteger9(resolveKnownId(originalItem));
       if (knownId) {
         ids.set(definitionId2, knownId);
         continue;
@@ -9264,7 +10883,7 @@
     if (["string", "number", "boolean"].includes(typeof value)) return value;
     return String(value);
   }
-  function callBoolean3(item, methodName) {
+  function callBoolean4(item, methodName) {
     try {
       if (typeof item?.[methodName] === "function") return item[methodName]() === true;
     } catch {
@@ -9317,8 +10936,8 @@
         duplicateId: numberOrNull(item.duplicateId),
         privateDuplicateId: numberOrNull(item._duplicateId),
         dataDuplicateId: numberOrNull(item._data?.duplicateId),
-        isDuplicate: callBoolean3(item, "isDuplicate"),
-        isUntradeable: callBoolean3(item, "isUntradeable"),
+        isDuplicate: callBoolean4(item, "isDuplicate"),
+        isUntradeable: callBoolean4(item, "isUntradeable"),
         rawUntradeable: typeof item.untradeable === "boolean" ? item.untradeable : null,
         rawTradeable: typeof item.tradeable === "boolean" ? item.tradeable : null,
         injuryType: primitiveOrNull(item.injuryType),
@@ -10086,7 +11705,7 @@
   }
 
   // src/pack/catalog.js
-  function positiveInteger9(value) {
+  function positiveInteger10(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -10110,13 +11729,13 @@
     return cleanName(value).toLowerCase().replace(/\s+/g, " ");
   }
   function packIdFromReward(reward = {}) {
-    return positiveInteger9(reward.packId) || positiveInteger9(reward.resourceId) || positiveInteger9(reward.definitionId);
+    return positiveInteger10(reward.packId) || positiveInteger10(reward.resourceId) || positiveInteger10(reward.definitionId);
   }
   function normalizeInventory(packs = []) {
     const groups = /* @__PURE__ */ new Map();
     for (const pack of packs || []) {
       if (!pack) continue;
-      const id = positiveInteger9(pack.id ?? pack.packId ?? pack.packDefinitionId ?? pack.packAssetId);
+      const id = positiveInteger10(pack.id ?? pack.packId ?? pack.packDefinitionId ?? pack.packAssetId);
       const name = cleanName(pack.name ?? pack.packName ?? pack.displayName);
       if (!id && !name) continue;
       const countValue = Number(pack.count);
@@ -10134,17 +11753,17 @@
     const metadataPackIds = unique4([
       ...index.packIds || [],
       ...rewards.map(packIdFromReward)
-    ], positiveInteger9);
+    ], positiveInteger10);
     const metadataPackNames = unique4([
       ...index.packNames || [],
       ...rewards.flatMap((reward) => [reward?.name, reward?.description])
     ], cleanName);
-    const observedPackIds = unique4(previousEntry?.observedPackIds || [], positiveInteger9);
+    const observedPackIds = unique4(previousEntry?.observedPackIds || [], positiveInteger10);
     const observedPackNames = unique4(previousEntry?.observedPackNames || [], cleanName);
     return {
-      setId: positiveInteger9(index.setId ?? index.id),
+      setId: positiveInteger10(index.setId ?? index.id),
       setName: cleanName(index.setName ?? index.name),
-      packIds: unique4([...observedPackIds, ...metadataPackIds], positiveInteger9),
+      packIds: unique4([...observedPackIds, ...metadataPackIds], positiveInteger10),
       packNames: unique4([...observedPackNames, ...metadataPackNames], cleanName),
       observedPackIds,
       observedPackNames
@@ -10176,7 +11795,7 @@
     });
   }
   function matchLoopRewardSets(loopDef = {}, sbcRewards = []) {
-    const setIds = new Set((loopDef.sbcSetIds || []).map(positiveInteger9).filter(Boolean));
+    const setIds = new Set((loopDef.sbcSetIds || []).map(positiveInteger10).filter(Boolean));
     if (setIds.size) {
       const idMatches = sbcRewards.filter((entry) => setIds.has(entry.setId));
       if (idMatches.length) return { matches: idMatches, matchSource: "set-id", ambiguous: false };
@@ -10212,11 +11831,11 @@
         });
         continue;
       }
-      const packIds = unique4(match.matches.flatMap((entry) => entry.packIds || []), positiveInteger9);
+      const packIds = unique4(match.matches.flatMap((entry) => entry.packIds || []), positiveInteger10);
       const packNames = unique4(match.matches.flatMap((entry) => entry.packNames || []), cleanName);
       loopRewards[loopId] = {
         loopId,
-        setIds: unique4(match.matches.map((entry) => entry.setId), positiveInteger9),
+        setIds: unique4(match.matches.map((entry) => entry.setId), positiveInteger10),
         setNames: unique4(match.matches.map((entry) => entry.setName), cleanName),
         packIds,
         packNames,
@@ -10260,14 +11879,14 @@
     const sourcePackRef = isPlainObject(options.sourcePackRef) ? options.sourcePackRef : {};
     const rewardOfLoopId = cleanName(sourcePackRef.rewardOfLoopId);
     const dynamic = rewardOfLoopId ? options.catalog?.loopRewards?.[rewardOfLoopId] : null;
-    const dynamicPackIds = unique4(dynamic?.packIds || [], positiveInteger9);
+    const dynamicPackIds = unique4(dynamic?.packIds || [], positiveInteger10);
     const dynamicPackNames = unique4(dynamic?.packNames || [], cleanName);
-    const staticPackIds = unique4(options.sourcePackIds || [], positiveInteger9);
+    const staticPackIds = unique4(options.sourcePackIds || [], positiveInteger10);
     const staticPackNames = unique4(options.sourcePackNames || [], cleanName);
     const producedPackIds = unique4([
       ...options.producedRewardPackIds || [],
       ...options.rewardPackIds || []
-    ], positiveInteger9);
+    ], positiveInteger10);
     const producedPackNames = unique4([
       ...options.producedRewardPackNames || [],
       ...options.rewardPackNames || []
@@ -10296,17 +11915,17 @@
       producedPackIds,
       producedPackNames,
       sourceOutputOverlap,
-      packIds: unique4([...availableDynamicPackIds, ...availableStaticPackIds], positiveInteger9),
+      packIds: unique4([...availableDynamicPackIds, ...availableStaticPackIds], positiveInteger10),
       packNames: unique4([...availableDynamicPackNames, ...availableStaticPackNames], cleanName),
       candidates
     };
   }
   function recordObservedSbcReward(catalog = {}, observation = {}, now = Date.now()) {
-    const setId = positiveInteger9(observation.setId);
+    const setId = positiveInteger10(observation.setId);
     const setName = cleanName(observation.setName);
     const key = setId ? `id:${setId}` : setName ? `name:${normalizedName(setName)}` : "";
     if (!key) return catalog;
-    const packId2 = positiveInteger9(observation.packId);
+    const packId2 = positiveInteger10(observation.packId);
     const packName = cleanName(observation.packName);
     if (!packId2 && !packName) return catalog;
     const entries = new Map((catalog.sbcRewards || []).map((entry) => [sbcRewardKey(entry), { ...entry }]));
@@ -10320,9 +11939,9 @@
     };
     current.setId ||= setId;
     current.setName ||= setName;
-    current.observedPackIds = unique4([packId2, ...current.observedPackIds || []], positiveInteger9);
+    current.observedPackIds = unique4([packId2, ...current.observedPackIds || []], positiveInteger10);
     current.observedPackNames = unique4([packName, ...current.observedPackNames || []], cleanName);
-    current.packIds = unique4([...current.observedPackIds, ...current.packIds || []], positiveInteger9);
+    current.packIds = unique4([...current.observedPackIds, ...current.packIds || []], positiveInteger10);
     current.packNames = unique4([...current.observedPackNames, ...current.packNames || []], cleanName);
     entries.set(key, current);
     return {
@@ -10485,7 +12104,7 @@
   }
 
   // src/workflows/supply-and-craft.js
-  function positiveInteger10(value, fallback = 1, max = 1e3) {
+  function positiveInteger11(value, fallback = 1, max = 1e3) {
     const number = Number(value);
     return Math.max(1, Math.min(max, Number.isFinite(number) ? Math.floor(number) : fallback));
   }
@@ -10496,7 +12115,7 @@
     if (typeof options.challengeProvider !== "function") throw new TypeError("challengeProvider is required");
     if (typeof options.selectPrimary !== "function") throw new TypeError("selectPrimary is required");
     if (typeof options.submit !== "function") throw new TypeError("submit is required");
-    const maxCompletions = positiveInteger10(options.maxCompletions, 1);
+    const maxCompletions = positiveInteger11(options.maxCompletions, 1);
     const result = {
       status: "completed",
       completions: 0,
@@ -10526,7 +12145,7 @@
       let supplied = false;
       if (!selection?.ok && !preserveSupply) {
         for (const supply of options.supplies || []) {
-          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger10(supply.maxRuns, 100, 1e3) : 1;
+          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger11(supply.maxRuns, 100, 1e3) : 1;
           for (let run = 1; run <= maxRuns && !selection?.ok && !preserveSupply; run++) {
             await options.stopPoint?.();
             const supplyResult = await supply.provide({
@@ -17276,10 +18895,29 @@
     const eaPlayerPickAdapter = () => adapters.playerPick();
     const eaRarityAdapter = adapters.rarity;
     const eaSbcAdapter = () => adapters.sbc();
+    const eaTradeAdapter = () => adapters.trade();
     const fsuAdapter = () => adapters.fsu();
     const localizationAdapter = adapters.localization;
     const pageRuntime = adapters.page;
     const identifyRuntimeInventoryItem = createRuntimeObjectIdentityTracker();
+    const tradePlayerCatalogProvider = createPlayerCatalogProvider({
+      requestText: adapters.http.getText,
+      storage: adapters.userscriptStorage,
+      cacheKey: TRADE_PLAYER_CATALOG_CACHE_KEY,
+      season: "26"
+    });
+    const tradePriceQuoteProvider = createPriceQuoteProvider({
+      requestText: adapters.http.getText,
+      provider: "auto"
+    });
+    const tradeListingPreview = createListingPreview({
+      getTradeAdapter: eaTradeAdapter,
+      priceQuoteProvider: tradePriceQuoteProvider
+    });
+    const tradeListingPreparation = createListingPreparation({
+      getTradeAdapter: eaTradeAdapter,
+      listingPreview: tradeListingPreview
+    });
     const state = {
       running: false,
       stopping: false,
@@ -17311,6 +18949,8 @@
       lastPickRecap: null,
       lastBatchRecap: null,
       lastLoopRecap: null,
+      preparedTradeListing: null,
+      tradeListingRunning: false,
       lastRecapType: null,
       loopRecapSession: null,
       loopStack: [],
@@ -17350,10 +18990,72 @@
       scanPlayerPicks: () => scanAvailableDynamicSbcs(),
       scanDynamicSbcs: (options = {}) => scanAvailableDynamicSbcs(options),
       previewPackHighlight: (input = {}) => previewPackHighlight(input),
-      previewBatchOpenRecap: () => previewBatchOpenRecap()
+      previewBatchOpenRecap: () => previewBatchOpenRecap(),
+      inspectTradeCapabilities: () => eaTradeAdapter().inspectCapabilities(),
+      inspectTradeListingCandidates: (options = {}) => eaTradeAdapter().inspectListingCandidates(options),
+      inspectTradePriceLimits: (ref = {}, options = {}) => eaTradeAdapter().inspectPriceLimits(ref, {
+        refresh: options.refresh === true
+      }),
+      previewTradeListings: (input = {}, options = {}) => tradeListingPreview.preview(input, options),
+      prepareTradeListing,
+      executePreparedTradeListing,
+      stopTradeListing,
+      loadTradePlayerCatalog: (options = {}) => tradePlayerCatalogProvider.load(options),
+      clearTradePlayerCatalogCache: () => tradePlayerCatalogProvider.clear(),
+      loadTradePriceQuotes: (options = {}) => tradePriceQuoteProvider.load(options),
+      clearTradePriceQuoteCache: () => tradePriceQuoteProvider.clear()
     };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const now = () => (/* @__PURE__ */ new Date()).toLocaleTimeString();
+    async function prepareTradeListing(input = {}, options = {}) {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
+        throw new Error("Another Runner operation is active; listing preparation is unavailable");
+      }
+      const requestedSources = input.policy?.sources || ["club"];
+      if (requestedSources.length !== 1 || requestedSources[0] !== "club") {
+        throw new Error("TS2b live gate currently allows Club listing preparation only");
+      }
+      state.preparedTradeListing = null;
+      const prepared = await tradeListingPreparation.prepare({
+        ...input,
+        policy: { ...input.policy || {}, sources: ["club"], maxListings: 1 }
+      }, { ...options, maxListings: 1 });
+      if (prepared.ready) state.preparedTradeListing = prepared;
+      return prepared;
+    }
+    async function executePreparedTradeListing(input = {}) {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
+        throw new Error("Another Runner operation is active; listing execution is unavailable");
+      }
+      const prepared = state.preparedTradeListing;
+      if (!prepared) throw new Error("No prepared Trade listing is available");
+      state.preparedTradeListing = null;
+      state.tradeListingRunning = true;
+      state.running = true;
+      state.stopping = false;
+      try {
+        const transaction = createListingTransaction({
+          tradeAdapter: eaTradeAdapter(),
+          sleep
+        });
+        return await transaction.run({
+          job: prepared.job,
+          prepared,
+          confirmationToken: input.confirmationToken,
+          confirmationText: input.confirmationText,
+          shouldStop: () => state.stopping
+        });
+      } finally {
+        state.tradeListingRunning = false;
+        state.running = false;
+        state.stopping = false;
+      }
+    }
+    function stopTradeListing() {
+      if (!state.tradeListingRunning) return false;
+      state.stopping = true;
+      return true;
+    }
     function log(msg) {
       const line = `[${now()}] ${msg}`;
       console.log("[BronzeLoop]", msg);
@@ -18470,7 +20172,7 @@
       const rating = Number(item?.rating || 0);
       return isGold(item) && rating >= Number(range[0] || 75) && rating <= Number(range[1] || 83);
     }
-    function collectionValues3(collection) {
+    function collectionValues4(collection) {
       if (!collection) return [];
       if (typeof collection.values === "function") return Array.from(collection.values());
       if (Array.isArray(collection._collection)) return collection._collection;
@@ -19309,8 +21011,8 @@
     }
     function getCachedSbcChallenges(set) {
       const sources = [];
-      sources.push(...collectionValues3(set?.challenges));
-      sources.push(...collectionValues3(set?._challenges));
+      sources.push(...collectionValues4(set?.challenges));
+      sources.push(...collectionValues4(set?._challenges));
       const byId = /* @__PURE__ */ new Map();
       for (const challenge of sources) {
         const id = Number(challenge?.id || 0);
@@ -21999,12 +23701,12 @@
     }
     function rewardPackIdFromSubmitResult(result, set, options = {}) {
       const awards = [
-        ...collectionValues3(result?.data?.grantedChallengeAwards),
-        ...collectionValues3(result?.response?.grantedChallengeAwards),
-        ...collectionValues3(result?.data?.grantedSetAwards),
-        ...collectionValues3(result?.response?.grantedSetAwards),
-        ...collectionValues3(result?.data?.awards),
-        ...collectionValues3(result?.response?.awards)
+        ...collectionValues4(result?.data?.grantedChallengeAwards),
+        ...collectionValues4(result?.response?.grantedChallengeAwards),
+        ...collectionValues4(result?.data?.grantedSetAwards),
+        ...collectionValues4(result?.response?.grantedSetAwards),
+        ...collectionValues4(result?.data?.awards),
+        ...collectionValues4(result?.response?.awards)
       ];
       for (const award of awards) {
         const values = [

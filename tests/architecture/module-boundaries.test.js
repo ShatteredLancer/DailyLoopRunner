@@ -59,4 +59,14 @@ describe('module boundaries', () => {
       expect(file.source, file.name).not.toMatch(/from\s+['"][^'"]*\/adapters(?:\/|['"])/);
     }
   });
+
+  it('keeps Trade modules independent from runtime globals and Adapter implementations', async () => {
+    const files = await readJavaScriptFiles('src/trade');
+    for (const file of files) {
+      expect(file.source, file.name).not.toMatch(/\b(?:window|document|unsafeWindow)\s*[.[]/);
+      expect(file.source, file.name).not.toMatch(/\bW\s*\./);
+      expect(file.source, file.name).not.toMatch(/\b(?:repositories|services)\s*\./);
+      expect(file.source, file.name).not.toMatch(/from\s+['"][^'"]*\/adapters(?:\/|['"])/);
+    }
+  });
 });

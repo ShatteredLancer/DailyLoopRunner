@@ -8,6 +8,22 @@ import { STRATEGY_RUNNER_KEYS } from '../../src/workflows/dispatch.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 describe('current direct side-effect call baseline', () => {
+  it('keeps every Trade service call inside the EA Trade Adapter', async () => {
+    const tradeAdapter = await readFile(path.join(root, 'src', 'adapters', 'ea', 'trade.js'), 'utf8');
+    const tradeFiles = await Promise.all([
+      'contracts.js', 'error-policy.js', 'listing-plan.js', 'listing-preparation.js',
+      'listing-preview.js', 'listing-transaction.js', 'player-catalog.js', 'price-quotes.js',
+    ].map((name) => readFile(path.join(root, 'src', 'trade', name), 'utf8')));
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    for (const checked of [source, ...tradeFiles]) {
+      expect(checked).not.toMatch(/\bservices\.Item\.(?:searchTransferMarket|bid|list|requestMarketData|relistExpiredAuctions)\s*\(/);
+    }
+    expect(tradeAdapter.match(/\bservice\.requestMarketData\s*\(/g) || []).toHaveLength(1);
+    expect(tradeAdapter.match(/\bservice\.list\s*\(/g) || []).toHaveLength(1);
+    expect(tradeAdapter.match(/\bservice\.requestTransferItems\s*\(/g) || []).toHaveLength(1);
+    expect(tradeAdapter.match(/\bservice\.(?:searchTransferMarket|bid|relistExpiredAuctions)\s*\(/g) || []).toHaveLength(0);
+  });
+
   it('keeps pack.open and low-level SBC save/submit calls inside EA Adapters', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     const packAdapter = await readFile(path.join(root, 'src', 'adapters', 'ea', 'pack.js'), 'utf8');

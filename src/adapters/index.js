@@ -12,6 +12,7 @@ import { createEaPackAdapter } from './ea/pack.js';
 import { createEaPlayerPickAdapter } from './ea/player-pick.js';
 import { createEaRarityAdapter } from './ea/rarity.js';
 import { createEaSbcAdapter } from './ea/sbc.js';
+import { createEaTradeAdapter } from './ea/trade.js';
 
 export function createRuntimeAdapters(runtime, documentObject = runtime?.document || globalThis.document, options = {}) {
   const userscriptApi = options.userscriptApi || runtime?.__FCLoopRunnerUserscriptApi || {};
@@ -31,6 +32,7 @@ export function createRuntimeAdapters(runtime, documentObject = runtime?.documen
     playerPick: () => createEaPlayerPickAdapter(runtime),
     rarity: createEaRarityAdapter(runtime),
     sbc: () => createEaSbcAdapter(runtime),
+    trade: () => createEaTradeAdapter(runtime),
     fsu: () => createFsuAdapter(runtime, { documentObject, localStorage, sessionStorage }),
     dom,
     page,

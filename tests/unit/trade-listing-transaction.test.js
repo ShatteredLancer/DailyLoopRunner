@@ -1,0 +1,206 @@
+import { describe, expect, it } from 'vitest';
+import { createFakeTradeAdapter } from '../../src/adapters/fake/trade.js';
+import { normalizeTradeJob } from '../../src/trade/contracts.js';
+import { createListingConfirmation } from '../../src/trade/listing-plan.js';
+import { createListingTransaction } from '../../src/trade/listing-transaction.js';
+
+function job(overrides = {}) {
+  return normalizeTradeJob({
+    id: 'listing-run',
+    name: 'Listing Run',
+    type: 'listing',
+    policy: {
+      sources: ['club'],
+      cardClass: 'common-gold',
+      ratingRules: [{ min: 75, max: 82, buyNow: 700 }],
+      maxListings: 1,
+      listingDelaySeconds: [1, 1],
+      marketOverride: { enabled: false, markupPercent: 5, maxQuoteAgeMinutes: 10 },
+      ...overrides,
+    },
+  }, { now: 1 });
+}
+
+function prepared(entries, now = 1000) {
+  const plan = {
+    job: { id: 'listing-run', name: 'Listing Run', type: 'listing' },
+    entries,
+  };
+  return {
+    mode: 'prepared',
+    ready: true,
+    plan,
+    confirmation: createListingConfirmation(plan, { now }),
+  };
+}
+
+function entry(id = 1) {
+  return {
+    index: 1,
+    item: { id, definitionId: id + 100, pile: 'club' },
+    name: `Player ${id}`,
+    rating: 80,
+    cardClass: 'common-gold',
+    auctionState: 'none',
+    startPrice: 700,
+    buyNow: 700,
+    durationSeconds: 3600,
+    priceLimitStatus: 'loaded',
+    priceLimits: { minimum: 700, maximum: 10_000 },
+  };
+}
+
+function transaction(adapter, times = [1100, 1200]) {
+  let index = 0;
+  return createListingTransaction({
+    tradeAdapter: adapter,
+    now: () => times[Math.min(index++, times.length - 1)],
+    sleep: async () => {},
+    random: () => 0,
+    createRunId: () => 'run-1',
+  });
+}
+
+describe('Trade listing transaction', () => {
+  it('lists one exact Club item and verifies the active Transfer auction', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 100_000,
+      transferCapacity: { used: 10, max: 100 },
+      items: [{
+        id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+      }],
+    });
+    const plan = prepared([entry()]);
+    const result = await transaction(adapter).run({
+      job: job(),
+      prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+    expect(result).toMatchObject({
+      runId: 'run-1',
+      status: 'completed',
+      reason: null,
+      requested: 1,
+      succeeded: 1,
+      failed: 0,
+      skipped: 0,
+      coinsBefore: 100_000,
+      coinsAfter: 100_000,
+      receipts: [{
+        status: 'listed',
+        item: { id: 1, definitionId: 101, pile: 'club' },
+        verification: {
+          item: { id: 1, definitionId: 101, pile: 'transfer' },
+          auction: { state: 'active', startingBid: 700, buyNowPrice: 700 },
+        },
+      }],
+    });
+    expect(adapter.inspectCapabilities().transferCapacity).toEqual({ used: 11, max: 100, free: 89 });
+    expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
+  });
+
+  it('blocks before every write when confirmation does not match', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],
+    });
+    const plan = prepared([entry()]);
+    const result = await transaction(adapter).run({
+      job: job(),
+      prepared: plan,
+      confirmationToken: 'wrong',
+      confirmationText: 'LIST 1',
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'listing-confirmation-mismatch', succeeded: 0, skipped: 1 });
+    expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
+  });
+
+  it('blocks expired confirmations and plans above the configured item limit', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [1, 2].map((id) => ({
+        id, definitionId: id + 100, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+      })),
+    });
+    const expired = prepared([entry()]);
+    const expiredResult = await transaction(adapter, [700_000, 700_001]).run({
+      job: job(), prepared: expired,
+      confirmationToken: expired.confirmation.token,
+      confirmationText: expired.confirmation.requiredText,
+    });
+    expect(expiredResult).toMatchObject({ status: 'blocked', reason: 'listing-confirmation-expired' });
+
+    const oversized = prepared([entry(1), { ...entry(2), index: 2 }]);
+    const oversizedResult = await transaction(adapter).run({
+      job: job(), prepared: oversized,
+      confirmationToken: oversized.confirmation.token,
+      confirmationText: oversized.confirmation.requiredText,
+    });
+    expect(oversizedResult).toMatchObject({ status: 'blocked', reason: 'listing-plan-exceeds-job-limit' });
+    expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
+  });
+
+  it('blocks when Transfer capacity is full', async () => {
+    const adapter = createFakeTradeAdapter({
+      transferCapacity: { used: 100, max: 100 },
+      items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],
+    });
+    const plan = prepared([entry()]);
+    const result = await transaction(adapter).run({
+      job: job(), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'transfer-list-full', failed: 1 });
+    expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
+  });
+
+  it('requires a new confirmation when live price limits change the listing price', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 800, maximum: 10_000 }],
+    });
+    const plan = prepared([entry()]);
+    const result = await transaction(adapter).run({
+      job: job(), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'listing-price-changed-after-confirmation', failed: 1 });
+    expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
+  });
+
+  it('honors Stop between items without issuing another list call', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [1, 2].map((id) => ({
+        id, definitionId: id + 100, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+      })),
+    });
+    const entries = [entry(1), { ...entry(2), index: 2 }];
+    const plan = prepared(entries);
+    const result = await transaction(adapter).run({
+      job: job({ maxListings: 2 }), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+      shouldStop: () => adapter.calls.filter((call) => call.method === 'listItem').length >= 1,
+    });
+    expect(result).toMatchObject({ status: 'stopped', reason: 'stopped-by-user', succeeded: 1, failed: 0, skipped: 1 });
+    expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
+  });
+
+  it('stops as ambiguous instead of retrying when an accepted listing cannot be refreshed', async () => {
+    const adapter = createFakeTradeAdapter({
+      refreshTransferResult: { status: 'ambiguous', response: null, error: { kind: 'ambiguous-transport' } },
+      items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],
+    });
+    const plan = prepared([entry()]);
+    const result = await transaction(adapter).run({
+      job: job(), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+    expect(result).toMatchObject({ status: 'ambiguous', reason: 'listing-accepted-but-not-verified', succeeded: 0, failed: 1 });
+    expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
+  });
+});

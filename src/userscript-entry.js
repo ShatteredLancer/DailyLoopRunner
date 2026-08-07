@@ -20,6 +20,7 @@
 // @connect      www.fut.gg
 // @connect      www.futbin.org
 // @connect      enhancer-api.futnext.com
+// @connect      rest.futnext.com
 // @connect      ntfy.sh
 // @run-at       document-end
 // ==/UserScript==
@@ -37,6 +38,7 @@ import {
   PICK_OPTIONS_KEY,
   REWARD_ALERT_SETTINGS_KEY,
   SBC_FODDER_OPTIONS_KEY,
+  TRADE_PLAYER_CATALOG_CACHE_KEY,
 } from './config/runtime.js';
 import { LOOP_DEFS } from './config/loops.js';
 import {
@@ -165,6 +167,11 @@ import {
   rankPlayerPickCandidates,
 } from './reward/player-pick.js';
 import { loadPlayerPickPrices } from './reward/player-prices.js';
+import { createPlayerCatalogProvider } from './trade/player-catalog.js';
+import { createPriceQuoteProvider } from './trade/price-quotes.js';
+import { createListingPreparation } from './trade/listing-preparation.js';
+import { createListingPreview } from './trade/listing-preview.js';
+import { createListingTransaction } from './trade/listing-transaction.js';
 import {
   createPackHighlightModel,
   formatPackHighlightNotification,
@@ -282,10 +289,29 @@ const RUNNER_VERSION = packageInfo.version;
   const eaPlayerPickAdapter = () => adapters.playerPick();
   const eaRarityAdapter = adapters.rarity;
   const eaSbcAdapter = () => adapters.sbc();
+  const eaTradeAdapter = () => adapters.trade();
   const fsuAdapter = () => adapters.fsu();
   const localizationAdapter = adapters.localization;
   const pageRuntime = adapters.page;
   const identifyRuntimeInventoryItem = createRuntimeObjectIdentityTracker();
+  const tradePlayerCatalogProvider = createPlayerCatalogProvider({
+    requestText: adapters.http.getText,
+    storage: adapters.userscriptStorage,
+    cacheKey: TRADE_PLAYER_CATALOG_CACHE_KEY,
+    season: '26',
+  });
+  const tradePriceQuoteProvider = createPriceQuoteProvider({
+    requestText: adapters.http.getText,
+    provider: 'auto',
+  });
+  const tradeListingPreview = createListingPreview({
+    getTradeAdapter: eaTradeAdapter,
+    priceQuoteProvider: tradePriceQuoteProvider,
+  });
+  const tradeListingPreparation = createListingPreparation({
+    getTradeAdapter: eaTradeAdapter,
+    listingPreview: tradeListingPreview,
+  });
 
 
 const state = {
@@ -319,6 +345,8 @@ const state = {
     lastPickRecap: null,
     lastBatchRecap: null,
     lastLoopRecap: null,
+    preparedTradeListing: null,
+    tradeListingRunning: false,
     lastRecapType: null,
     loopRecapSession: null,
     loopStack: [],
@@ -361,10 +389,75 @@ const state = {
     scanDynamicSbcs: (options = {}) => scanAvailableDynamicSbcs(options),
     previewPackHighlight: (input = {}) => previewPackHighlight(input),
     previewBatchOpenRecap: () => previewBatchOpenRecap(),
+    inspectTradeCapabilities: () => eaTradeAdapter().inspectCapabilities(),
+    inspectTradeListingCandidates: (options = {}) => eaTradeAdapter().inspectListingCandidates(options),
+    inspectTradePriceLimits: (ref = {}, options = {}) => eaTradeAdapter().inspectPriceLimits(ref, {
+      refresh: options.refresh === true,
+    }),
+    previewTradeListings: (input = {}, options = {}) => tradeListingPreview.preview(input, options),
+    prepareTradeListing,
+    executePreparedTradeListing,
+    stopTradeListing,
+    loadTradePlayerCatalog: (options = {}) => tradePlayerCatalogProvider.load(options),
+    clearTradePlayerCatalogCache: () => tradePlayerCatalogProvider.clear(),
+    loadTradePriceQuotes: (options = {}) => tradePriceQuoteProvider.load(options),
+    clearTradePriceQuoteCache: () => tradePriceQuoteProvider.clear(),
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const now = () => new Date().toLocaleTimeString();
+
+  async function prepareTradeListing(input = {}, options = {}) {
+    if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
+      throw new Error('Another Runner operation is active; listing preparation is unavailable');
+    }
+    const requestedSources = input.policy?.sources || ['club'];
+    if (requestedSources.length !== 1 || requestedSources[0] !== 'club') {
+      throw new Error('TS2b live gate currently allows Club listing preparation only');
+    }
+    state.preparedTradeListing = null;
+    const prepared = await tradeListingPreparation.prepare({
+      ...input,
+      policy: { ...(input.policy || {}), sources: ['club'], maxListings: 1 },
+    }, { ...options, maxListings: 1 });
+    if (prepared.ready) state.preparedTradeListing = prepared;
+    return prepared;
+  }
+
+  async function executePreparedTradeListing(input = {}) {
+    if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
+      throw new Error('Another Runner operation is active; listing execution is unavailable');
+    }
+    const prepared = state.preparedTradeListing;
+    if (!prepared) throw new Error('No prepared Trade listing is available');
+    state.preparedTradeListing = null;
+    state.tradeListingRunning = true;
+    state.running = true;
+    state.stopping = false;
+    try {
+      const transaction = createListingTransaction({
+        tradeAdapter: eaTradeAdapter(),
+        sleep,
+      });
+      return await transaction.run({
+        job: prepared.job,
+        prepared,
+        confirmationToken: input.confirmationToken,
+        confirmationText: input.confirmationText,
+        shouldStop: () => state.stopping,
+      });
+    } finally {
+      state.tradeListingRunning = false;
+      state.running = false;
+      state.stopping = false;
+    }
+  }
+
+  function stopTradeListing() {
+    if (!state.tradeListingRunning) return false;
+    state.stopping = true;
+    return true;
+  }
 
   function log(msg) {
     const line = `[${now()}] ${msg}`;

@@ -78,6 +78,19 @@ for (const [name, regex] of [
   if (process.argv.includes('--check') && count !== 1) failed = true;
 }
 
+const tradeAdapter = await readFile(path.join(root, 'src', 'adapters', 'ea', 'trade.js'), 'utf8');
+for (const [name, regex, expected] of [
+  ['Trade Adapter requestMarketData', /\bservice\.requestMarketData\s*\(/g, 1],
+  ['Trade Adapter searchTransferMarket', /\bservice\.searchTransferMarket\s*\(/g, 0],
+  ['Trade Adapter bid', /\bservice\.bid\s*\(/g, 0],
+  ['Trade Adapter list', /\bservice\.list\s*\(/g, 1],
+  ['Trade Adapter requestTransferItems', /\bservice\.requestTransferItems\s*\(/g, 1],
+]) {
+  const count = tradeAdapter.match(regex)?.length || 0;
+  console.log(`${name}: ${count} direct call site(s), baseline ${expected}`);
+  if (process.argv.includes('--check') && count !== expected) failed = true;
+}
+
 const runFunctions = [...source.matchAll(/^\s*(?:async\s+)?function\s+(run[A-Za-z0-9_]+)\s*\(/gm)].map((match) => match[1]);
 console.log(`Workflow functions: ${runFunctions.length} (${runFunctions.join(', ')})`);
 

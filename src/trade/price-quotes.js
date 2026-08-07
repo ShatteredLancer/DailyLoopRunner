@@ -1,0 +1,177 @@
+import { TRADE_PRICE_PROVIDERS } from './contracts.js';
+
+export const PRICE_QUOTE_SCHEMA_VERSION = 1;
+export const DEFAULT_PRICE_QUOTE_TTL_MS = 10 * 60_000;
+
+function parseJson(text, source) {
+  try { return JSON.parse(text); } catch { throw new Error(`${source} returned invalid JSON`); }
+}
+
+function normalizeDefinitionIds(values = []) {
+  return [...new Set((values || []).map(Number).filter((value) => Number.isInteger(value) && value > 0))];
+}
+
+function normalizeProvider(value) {
+  const provider = String(value || 'auto').trim().toLowerCase().replace('.', '');
+  if (!TRADE_PRICE_PROVIDERS.includes(provider)) throw new Error(`Unsupported price provider: ${value}`);
+  return provider;
+}
+
+function quote(definitionId, price, source, platform, quotedAt, ttlMs) {
+  return {
+    schemaVersion: PRICE_QUOTE_SCHEMA_VERSION,
+    definitionId,
+    price,
+    source,
+    platform,
+    quotedAt,
+    expiresAt: quotedAt + ttlMs,
+  };
+}
+
+export function parseFutGgPriceResponse(text) {
+  const response = parseJson(text, 'FUT.GG');
+  const prices = [];
+  for (const entry of response?.data || []) {
+    const definitionId = Number(entry?.eaId || entry?.definitionId || 0);
+    const price = Number(entry?.price);
+    if (Number.isInteger(definitionId) && definitionId > 0 && Number.isFinite(price) && price > 0) {
+      prices.push({ definitionId, price });
+    }
+  }
+  return [...new Map(prices.map((entry) => [entry.definitionId, entry])).values()];
+}
+
+export function parseFutNextPriceResponse(text) {
+  const response = parseJson(text, 'FUTNext');
+  const prices = [];
+  for (const entry of Array.isArray(response) ? response : []) {
+    const definitionId = Number(entry?.definitionId || entry?.eaId || 0);
+    const price = Number(entry?.prices?.[0]);
+    if (Number.isInteger(definitionId) && definitionId > 0 && Number.isFinite(price) && price > 0) {
+      prices.push({ definitionId, price });
+    }
+  }
+  return [...new Map(prices.map((entry) => [entry.definitionId, entry])).values()];
+}
+
+async function requestFutGg(options, ids) {
+  const url = `https://www.fut.gg/api/fut/player-prices/26/?ids=${encodeURIComponent(ids.join(','))}&platform=${encodeURIComponent(options.platform)}`;
+  const text = await options.requestText(url, {
+    sendCookies: true,
+    headers: {
+      Accept: 'application/json, text/plain, */*',
+      Referer: options.referer || '',
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+  });
+  return parseFutGgPriceResponse(text);
+}
+
+async function requestFutNext(options, ids) {
+  const url = `https://enhancer-api.futnext.com/players/prices?ids=${encodeURIComponent(ids.join('_'))}&platform=${encodeURIComponent(options.platform)}`;
+  const text = await options.requestText(url, {
+    sendCookies: false,
+    headers: { Accept: 'application/json, text/plain, */*' },
+  });
+  return parseFutNextPriceResponse(text);
+}
+
+export async function loadPriceQuotes(options = {}) {
+  if (typeof options.requestText !== 'function') throw new TypeError('requestText is required');
+  const ids = normalizeDefinitionIds(options.definitionIds);
+  const provider = normalizeProvider(options.provider);
+  const platform = String(options.platform || 'pc').trim().toLowerCase();
+  const quotedAt = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
+  const ttlMs = Math.max(1, Number(options.ttlMs || DEFAULT_PRICE_QUOTE_TTL_MS));
+  const result = { quotes: [], ids, source: null, attempts: [] };
+  if (!ids.length) return result;
+
+  const loaded = new Map();
+  const providerSteps = provider === 'auto' ? ['futgg', 'futnext'] : [provider];
+  for (const source of providerSteps) {
+    const missingIds = ids.filter((id) => !loaded.has(id));
+    if (!missingIds.length) break;
+    if (source === 'futnext' && provider === 'auto' && loaded.size && options.fallbackOnPartial === false) break;
+    try {
+      const entries = source === 'futgg'
+        ? await requestFutGg({ ...options, platform }, missingIds)
+        : await requestFutNext({ ...options, platform }, missingIds);
+      const sourceName = source === 'futgg' ? 'FUT.GG' : 'FUTNext';
+      let accepted = 0;
+      for (const entry of entries) {
+        if (!missingIds.includes(entry.definitionId)) continue;
+        loaded.set(entry.definitionId, quote(entry.definitionId, entry.price, sourceName, platform, quotedAt, ttlMs));
+        accepted += 1;
+      }
+      result.attempts.push({ source: sourceName, status: accepted ? 'loaded' : 'empty' });
+      if (provider !== 'auto') break;
+    } catch (error) {
+      result.attempts.push({
+        source: source === 'futgg' ? 'FUT.GG' : 'FUTNext',
+        status: 'error',
+        reason: error?.message || String(error),
+      });
+    }
+  }
+  result.quotes = ids.map((id) => loaded.get(id)).filter(Boolean);
+  const sources = [...new Set(result.quotes.map((entry) => entry.source))];
+  result.source = sources.length === 1 ? sources[0] : sources.length > 1 ? 'mixed' : null;
+  return result;
+}
+
+function quoteMatchesProvider(entry, provider) {
+  if (provider === 'auto') return true;
+  if (provider === 'futgg') return entry.source === 'FUT.GG';
+  return entry.source === 'FUTNext';
+}
+
+export function createPriceQuoteProvider(options = {}) {
+  if (typeof options.requestText !== 'function') throw new TypeError('requestText is required');
+  const cache = new Map();
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  const cacheKey = (platform, definitionId) => `${platform}:${definitionId}`;
+
+  async function load(request = {}) {
+    const provider = normalizeProvider(request.provider || options.provider);
+    const ids = normalizeDefinitionIds(request.definitionIds);
+    const platform = String(request.platform || options.platform || 'pc').trim().toLowerCase();
+    const currentTime = Number(now());
+    const fresh = request.forceRefresh === true ? [] : ids
+      .map((id) => cache.get(cacheKey(platform, id)))
+      .filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
+    const freshIds = new Set(fresh.map((entry) => entry.definitionId));
+    const missingIds = ids.filter((id) => !freshIds.has(id));
+    const loaded = missingIds.length ? await loadPriceQuotes({
+      ...options,
+      ...request,
+      provider,
+      platform,
+      definitionIds: missingIds,
+      now: currentTime,
+    }) : { quotes: [], ids: [], source: null, attempts: [] };
+    for (const entry of loaded.quotes) cache.set(cacheKey(entry.platform, entry.definitionId), entry);
+    const quotes = ids.map((id) => cache.get(cacheKey(platform, id)))
+      .filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
+    const sources = [...new Set(quotes.map((entry) => entry.source))];
+    return {
+      quotes,
+      ids,
+      source: sources.length === 1 ? sources[0] : sources.length > 1 ? 'mixed' : null,
+      attempts: [
+        ...(fresh.length ? [{ source: 'cache', status: 'loaded', count: fresh.length }] : []),
+        ...loaded.attempts,
+      ],
+    };
+  }
+
+  function clear() {
+    cache.clear();
+  }
+
+  function snapshot() {
+    return [...cache.values()].sort((left, right) => left.definitionId - right.definitionId);
+  }
+
+  return Object.freeze({ clear, load, snapshot });
+}

@@ -213,6 +213,7 @@ EA objects
 
 - `domain`、`selection` 和 `workflows` 不得访问 `window`、`document`、`unsafeWindow`、`W`、EA repositories 或 services。
 - `config`、`pack`、`sbc`、`unassigned` 和 `ui` 共享模块也不得直接访问运行时全局。
+- `trade` 中的合同、Provider、Planner、Transaction 和 Scheduler 必须保持运行时无关，只能通过注入的 HTTP、Storage 和 Trade Adapter 工作；不得读取 Enhancer/FSU 私有全局或设置。
 - 低层 EA 调用应集中在 `src/adapters/ea`。
 - Workflow 通过回调编排行为，不直接 import EA Adapter 实现。
 - Selection 只决定材料计划，不打开页面、保存或提交 SBC。
@@ -276,6 +277,7 @@ EA objects
 - `ea/sbc.js`：SBC Set/Challenge/DAO/formation 读取、Squad Controller 构造、后台提交设置和底层 save/submit Adapter；同时提供只读 Player Pick discovery snapshot，未知字段保持为空交由纯解析层拒绝。
 - `ea/player-pick.js`：Player Pick 待领取物品读取、跨 pile 重复检查、领取与确认选择。
 - `ea/rarity.js`：只读 EA `repositories.Rarity`，按 `rareflag` 尝试取得特殊卡 card color map；只返回可序列化颜色候选，不决定 UI tier 或直接访问 DOM。
+- `ea/trade.js`：Trade Access、金币、Transfer 容量、`UTSearchCriteriaDTO` 和 Item price limits 的白名单诊断边界；后续所有 `searchTransferMarket`、`bid`、`list`、`requestMarketData` 和交易对账调用只能在该 Adapter 内增加，并必须同步 Fake Adapter、contract 和 architecture tests。
 - `ea/fsu.js`：按 `window.info`、命名/动态 window root、localStorage、sessionStorage 的既有优先级发现 FSU 策略，并合并所有来源的锁卡信息；同时投影 FSU Club 的 loading/provisional/ready 状态，转发定向 Club 校验和 scoped provisional access。完整契约、安全边界及与 Enhancer 的交互见 [FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md](FSU_mod/FSU_CLUB_CACHE_INTEGRATION.md)。
 - `browser/dom.js`、`browser/storage.js`：DOM 查询/创建/事件构造和浏览器存储接口适配。
 - `browser/http.js`：GM/fetch GET transport、Cookie/Header/timeout 和本地热加载 fallback。
@@ -293,6 +295,10 @@ EA objects
 2. 检查 fake adapter 和 contract tests。
 3. 列出依赖该 Adapter 的所有共享事务和 Loop。
 4. 不在 Adapter 中加入具体 Loop 名称或业务策略。
+
+Trade Scheduler 的详细边界、阶段状态和真实页面验证顺序见 [docs/TRADE_SCHEDULER_DESIGN_ZH.md](docs/TRADE_SCHEDULER_DESIGN_ZH.md)。挂牌只能由 EA Trade Adapter 的单一 `services.Item.list()` 调用点执行，且必须经过 Prepared Plan、一次性 token、显式确认、item ID 重解析、价格限制二次刷新和逐项回执。TS2b 首次真实验证完成前，运行时入口必须硬限制为 Club 单卡；Transfer reprice 和批量数量不得提前开放。
+
+Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`rare-gold` 只匹配非特殊稀有金，`normal-gold` 匹配两者但排除特殊卡，`special` 只匹配特殊卡；兼容别名 `gold` 等同 `normal-gold`，不得借此把特殊卡混入普通金卡规则。
 
 ### 5.4 `src/selection`
 
