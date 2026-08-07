@@ -98,6 +98,8 @@ describe('main panel view template', () => {
   it('keeps compact/options/icon visibility and overflow rules in CSS', () => {
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-options { display: none;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.options-open #bronze-loop-options { display: flex;');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.options-open #bronze-loop-run-view { flex: 0 0 auto; min-height: auto; }');
+    expect(MAIN_PANEL_STYLE).not.toContain('#bronze-loop-panel.options-open #bronze-loop-run-view,');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.options-open #bronze-loop-latest { display: none; }');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-options-scroll { flex: 1 1 auto;');
     expect(MAIN_PANEL_STYLE).toContain('overflow-y: auto;');

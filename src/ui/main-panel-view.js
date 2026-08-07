@@ -105,7 +105,7 @@ export const MAIN_PANEL_STYLE = `
   }
   #bronze-loop-options { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid #303946; }
   #bronze-loop-panel.options-open #bronze-loop-options { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
-  #bronze-loop-panel.options-open #bronze-loop-run-view,
+  #bronze-loop-panel.options-open #bronze-loop-run-view { flex: 0 0 auto; min-height: auto; }
   #bronze-loop-panel.options-open #bronze-loop-latest { display: none; }
   #bronze-loop-options-scroll { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; padding-right: 4px; }
   .bronze-loop-section-heading { display: flex; align-items: center; gap: 4px; margin: 8px 0 6px; }

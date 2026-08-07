@@ -1,6 +1,6 @@
 # Trade Scheduler 设计与实施跟踪
 
-> 文档状态：Implementation in progress
+> 文档状态：Paused after TS2b; resume only on explicit user instruction
 > 最后更新：2026-08-07
 > 适用仓库：DailyLoopRunner  
 > 功能边界：定时自动买入、定时批量挂牌、交易任务调度、逐项回执与诊断
@@ -778,7 +778,7 @@ Exit criteria: Met。Provider、schema、错误策略、Adapter 能力探测、�
 
 ### TS2 手动 Bulk Listing
 
-Status: In progress（TS2a 只读验证通过；TS2b Club 单卡事务已通过真实挂牌验证）
+Status: Paused after TS2b（TS2a 只读验证通过；TS2b Club 单卡事务已通过真实挂牌验证；等待明确指令恢复）
 
 Scope:
 
