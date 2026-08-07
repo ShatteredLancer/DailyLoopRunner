@@ -71,12 +71,6 @@ export function createHighRatedUpgradePolicy(overrides = {}) {
     ratingSbcFill: { priorityPiles: [...ALL_INVENTORY_PILES] },
     requiredSpecialCount: 0,
     allowedSpecialCount: 0,
-    requiredSpecialKind: 'totw-tots-fof',
-    requiredSpecialMinRating: 84,
-    specialRequirementAdd: {
-      patterns: ['Any TOTW/TOTS/FOF', 'TOTW/TOTS/FOF', 'TOTW', 'TOTS', 'FOF'],
-      buttonTexts: ['Add', '\u6dfb\u52a0', '\u52a0\u5165', '\u65b0\u589e'],
-    },
     autoTotwUpgrade: {
       name: 'Scanned TOTW Upgrade',
       activityBinding: { family: 'totw-upgrade', category: 'Upgrades', required: true },

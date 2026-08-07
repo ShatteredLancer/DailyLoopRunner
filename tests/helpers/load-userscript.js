@@ -95,6 +95,8 @@ export async function loadUserscript(options = {}) {
       isSbcUsablePlayer,
       selectInventoryPlayers,
       calculateEaSquadRating,
+      parseRatingSbcChallenge,
+      buildRatingSbcCandidateEntries,
       findOptimalRatingSbcSelection,
       validateRatingSbcModelAgainstItems,
       getDailyChallengeRemaining,

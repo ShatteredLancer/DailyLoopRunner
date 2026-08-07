@@ -71,6 +71,10 @@ function matchesDynamicRequirement(item, requirement, keyName, rawValues, matche
     }
   } catch { }
 
+  // Rarity groups are EA-maintained aggregate sets. Item group arrays do not
+  // reliably expose the aggregate id, so only the live EA matcher is valid.
+  if (keyName === 'PLAYER_RARITY_GROUP') return false;
+
   const values = rawValues.map(Number).filter(Number.isFinite);
   const rating = Number(item?.rating || 0);
   switch (keyName) {
@@ -84,8 +88,6 @@ function matchesDynamicRequirement(item, requirement, keyName, rawValues, matche
       );
     case 'PLAYER_RARITY':
       return values.includes(readPlayerRareFlag(item));
-    case 'PLAYER_RARITY_GROUP':
-      return values.some((value) => matchers.itemGroupNumbers(item).includes(value));
     case 'PLAYER_MIN_OVR':
       return values.length > 0 && rating >= Math.min(...values);
     case 'PLAYER_EXACT_OVR':
@@ -137,16 +139,26 @@ export function parseRatingSbcChallenge(input = {}) {
       unsupported.push(`${keyName}(count:${requirement?.count ?? '?'}, values:${values.join('/') || '?'})`);
       continue;
     }
+    if (keyName === 'PLAYER_RARITY_GROUP' && typeof requirement?.meetsRequirements !== 'function') {
+      unsupported.push(`${keyName}(live EA matcher unavailable)`);
+      continue;
+    }
     constraints.push({
       id: `challenge-${constraints.length}`,
       label: `${keyName} ${values.join('/')} x${count}`,
+      source: 'ea',
+      keyName,
+      values: [...values],
       count,
       matches: (item) => matchesDynamicRequirement(item, requirement, keyName, values, matchers),
     });
   }
 
   const configuredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
-  if (configuredSpecialCount) {
+  const hasDynamicPlayerGroup = (loopDef.dynamicActiveEligibilityRequirements || []).some((requirement) => (
+    String(requirement?.key || '') === 'PLAYER_RARITY_GROUP'
+  ));
+  if (configuredSpecialCount && !hasDynamicPlayerGroup) {
     const minimumRating = Math.max(0, Number(loopDef.requiredSpecialMinRating || 0) || 0);
     const label = input.requiredSpecialLabel?.(loopDef) || 'special';
     constraints.push({
@@ -160,14 +172,21 @@ export function parseRatingSbcChallenge(input = {}) {
   const configuredAllowedSpecial = loopDef.allowedSpecialCount !== undefined
     ? Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0)
     : null;
+  const dynamicPlayerGroupSpecialLimit = hasDynamicPlayerGroup
+    ? constraints
+      .filter((constraint) => constraint.keyName === 'PLAYER_RARITY_GROUP')
+      .reduce((total, constraint) => total + Math.max(0, Number(constraint.count || 0) || 0), 0)
+    : null;
   return {
     requiredPlayerCount,
     targetRating,
     constraints,
     unsupported: [...new Set(unsupported)],
-    maxSpecialCount: configuredAllowedSpecial === null
-      ? (loopDef.blockSpecial === false ? requiredPlayerCount : 0)
-      : configuredAllowedSpecial,
+    maxSpecialCount: dynamicPlayerGroupSpecialLimit !== null
+      ? dynamicPlayerGroupSpecialLimit
+      : configuredAllowedSpecial === null
+        ? (loopDef.blockSpecial === false ? requiredPlayerCount : 0)
+        : configuredAllowedSpecial,
   };
 }
 

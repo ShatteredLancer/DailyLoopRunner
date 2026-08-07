@@ -337,6 +337,55 @@ function validatePickOptions(value, path, errors) {
   });
 }
 
+function validateEligibilityRequirementSnapshots(value, path, errors) {
+  if (value === undefined || value === null) return;
+  if (!Array.isArray(value) || !value.length) {
+    errors.push(`${path} must be a non-empty array`);
+    return;
+  }
+  value.forEach((requirement, index) => {
+    const requirementPath = `${path}[${index}]`;
+    if (!isPlainObject(requirement)) {
+      errors.push(`${requirementPath} must be an object`);
+      return;
+    }
+    if (typeof requirement.key !== 'string' || !requirement.key.trim()) {
+      errors.push(`${requirementPath}.key must be a non-empty string`);
+    }
+    if (!Array.isArray(requirement.values) || !requirement.values.length) {
+      errors.push(`${requirementPath}.values must be a non-empty array`);
+    } else if (requirement.values.some((entry) => entry === undefined || entry === null || entry === '')) {
+      errors.push(`${requirementPath}.values must not contain empty values`);
+    }
+    if (!Number.isInteger(Number(requirement.count)) || Number(requirement.count) < 1) {
+      errors.push(`${requirementPath}.count must be a positive integer`);
+    }
+  });
+}
+
+function validateDynamicChallenges(value, path, errors) {
+  if (value === undefined || value === null) return;
+  if (!Array.isArray(value) || !value.length) {
+    errors.push(`${path} must be a non-empty array`);
+    return;
+  }
+  value.forEach((challenge, index) => {
+    const challengePath = `${path}[${index}]`;
+    if (!isPlainObject(challenge)) {
+      errors.push(`${challengePath} must be an object`);
+      return;
+    }
+    if (!Number.isInteger(Number(challenge.challengeId)) || Number(challenge.challengeId) < 1) {
+      errors.push(`${challengePath}.challengeId must be a positive integer`);
+    }
+    validateEligibilityRequirementSnapshots(
+      challenge.eligibilityRequirements,
+      `${challengePath}.eligibilityRequirements`,
+      errors,
+    );
+  });
+}
+
 function validateSbcFodderPolicy(value, path, errors) {
   if (value === undefined) return;
   if (!isPlainObject(value)) {
@@ -410,6 +459,12 @@ export function validateLoopDef(loopDef, label = 'loop') {
   validatePickOptions(loopDef.pickOptions, 'pickOptions', errors);
   validateSbcFodderPolicy(loopDef.sbcFodderPolicy, 'sbcFodderPolicy', errors);
   validateRuntimeQuantity(loopDef.runtimeQuantity, 'runtimeQuantity', errors);
+  validateDynamicChallenges(loopDef.dynamicChallenges, 'dynamicChallenges', errors);
+  validateEligibilityRequirementSnapshots(
+    loopDef.dynamicActiveEligibilityRequirements,
+    'dynamicActiveEligibilityRequirements',
+    errors,
+  );
   if (loopDef.inventoryMode !== undefined && !INVENTORY_MODES.includes(loopDef.inventoryMode)) {
     errors.push(`inventoryMode must be one of: ${INVENTORY_MODES.join(', ')}`);
   }

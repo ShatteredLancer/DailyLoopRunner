@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.32
+// @version      0.7.33
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.32",
+    version: "0.7.33",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -1473,6 +1473,7 @@
       }
     } catch {
     }
+    if (keyName === "PLAYER_RARITY_GROUP") return false;
     const values = rawValues.map(Number).filter(Number.isFinite);
     const rating = Number(item?.rating || 0);
     switch (keyName) {
@@ -1483,8 +1484,6 @@
         );
       case "PLAYER_RARITY":
         return values.includes(readPlayerRareFlag(item));
-      case "PLAYER_RARITY_GROUP":
-        return values.some((value) => matchers.itemGroupNumbers(item).includes(value));
       case "PLAYER_MIN_OVR":
         return values.length > 0 && rating >= Math.min(...values);
       case "PLAYER_EXACT_OVR":
@@ -1534,15 +1533,23 @@
         unsupported.push(`${keyName}(count:${requirement2?.count ?? "?"}, values:${values.join("/") || "?"})`);
         continue;
       }
+      if (keyName === "PLAYER_RARITY_GROUP" && typeof requirement2?.meetsRequirements !== "function") {
+        unsupported.push(`${keyName}(live EA matcher unavailable)`);
+        continue;
+      }
       constraints.push({
         id: `challenge-${constraints.length}`,
         label: `${keyName} ${values.join("/")} x${count}`,
+        source: "ea",
+        keyName,
+        values: [...values],
         count,
         matches: (item) => matchesDynamicRequirement(item, requirement2, keyName, values, matchers)
       });
     }
     const configuredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
-    if (configuredSpecialCount) {
+    const hasDynamicPlayerGroup = (loopDef.dynamicActiveEligibilityRequirements || []).some((requirement2) => String(requirement2?.key || "") === "PLAYER_RARITY_GROUP");
+    if (configuredSpecialCount && !hasDynamicPlayerGroup) {
       const minimumRating = Math.max(0, Number(loopDef.requiredSpecialMinRating || 0) || 0);
       const label = input.requiredSpecialLabel?.(loopDef) || "special";
       constraints.push({
@@ -1553,12 +1560,13 @@
       });
     }
     const configuredAllowedSpecial = loopDef.allowedSpecialCount !== void 0 ? Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0) : null;
+    const dynamicPlayerGroupSpecialLimit = hasDynamicPlayerGroup ? constraints.filter((constraint) => constraint.keyName === "PLAYER_RARITY_GROUP").reduce((total, constraint) => total + Math.max(0, Number(constraint.count || 0) || 0), 0) : null;
     return {
       requiredPlayerCount,
       targetRating,
       constraints,
       unsupported: [...new Set(unsupported)],
-      maxSpecialCount: configuredAllowedSpecial === null ? loopDef.blockSpecial === false ? requiredPlayerCount : 0 : configuredAllowedSpecial
+      maxSpecialCount: dynamicPlayerGroupSpecialLimit !== null ? dynamicPlayerGroupSpecialLimit : configuredAllowedSpecial === null ? loopDef.blockSpecial === false ? requiredPlayerCount : 0 : configuredAllowedSpecial
     };
   }
   function validateRatingSbcModelAgainstItems(model, items = [], challenge = null, options = {}) {
@@ -2582,6 +2590,53 @@
       }
     });
   }
+  function validateEligibilityRequirementSnapshots(value, path, errors) {
+    if (value === void 0 || value === null) return;
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((requirement2, index) => {
+      const requirementPath = `${path}[${index}]`;
+      if (!isPlainObject(requirement2)) {
+        errors.push(`${requirementPath} must be an object`);
+        return;
+      }
+      if (typeof requirement2.key !== "string" || !requirement2.key.trim()) {
+        errors.push(`${requirementPath}.key must be a non-empty string`);
+      }
+      if (!Array.isArray(requirement2.values) || !requirement2.values.length) {
+        errors.push(`${requirementPath}.values must be a non-empty array`);
+      } else if (requirement2.values.some((entry) => entry === void 0 || entry === null || entry === "")) {
+        errors.push(`${requirementPath}.values must not contain empty values`);
+      }
+      if (!Number.isInteger(Number(requirement2.count)) || Number(requirement2.count) < 1) {
+        errors.push(`${requirementPath}.count must be a positive integer`);
+      }
+    });
+  }
+  function validateDynamicChallenges(value, path, errors) {
+    if (value === void 0 || value === null) return;
+    if (!Array.isArray(value) || !value.length) {
+      errors.push(`${path} must be a non-empty array`);
+      return;
+    }
+    value.forEach((challenge, index) => {
+      const challengePath = `${path}[${index}]`;
+      if (!isPlainObject(challenge)) {
+        errors.push(`${challengePath} must be an object`);
+        return;
+      }
+      if (!Number.isInteger(Number(challenge.challengeId)) || Number(challenge.challengeId) < 1) {
+        errors.push(`${challengePath}.challengeId must be a positive integer`);
+      }
+      validateEligibilityRequirementSnapshots(
+        challenge.eligibilityRequirements,
+        `${challengePath}.eligibilityRequirements`,
+        errors
+      );
+    });
+  }
   function validateSbcFodderPolicy(value, path, errors) {
     if (value === void 0) return;
     if (!isPlainObject(value)) {
@@ -2651,6 +2706,12 @@
     validatePickOptions(loopDef.pickOptions, "pickOptions", errors);
     validateSbcFodderPolicy(loopDef.sbcFodderPolicy, "sbcFodderPolicy", errors);
     validateRuntimeQuantity(loopDef.runtimeQuantity, "runtimeQuantity", errors);
+    validateDynamicChallenges(loopDef.dynamicChallenges, "dynamicChallenges", errors);
+    validateEligibilityRequirementSnapshots(
+      loopDef.dynamicActiveEligibilityRequirements,
+      "dynamicActiveEligibilityRequirements",
+      errors
+    );
     if (loopDef.inventoryMode !== void 0 && !INVENTORY_MODES.includes(loopDef.inventoryMode)) {
       errors.push(`inventoryMode must be one of: ${INVENTORY_MODES.join(", ")}`);
     }
@@ -4113,12 +4174,6 @@
       ratingSbcFill: { priorityPiles: [...ALL_INVENTORY_PILES2] },
       requiredSpecialCount: 0,
       allowedSpecialCount: 0,
-      requiredSpecialKind: "totw-tots-fof",
-      requiredSpecialMinRating: 84,
-      specialRequirementAdd: {
-        patterns: ["Any TOTW/TOTS/FOF", "TOTW/TOTS/FOF", "TOTW", "TOTS", "FOF"],
-        buttonTexts: ["Add", "\u6DFB\u52A0", "\u52A0\u5165", "\u65B0\u589E"]
-      },
       autoTotwUpgrade: {
         name: "Scanned TOTW Upgrade",
         activityBinding: { family: "totw-upgrade", category: "Upgrades", required: true },
@@ -4224,6 +4279,13 @@
   function requirementSummary3(entry = {}) {
     return `${entry.keyName || "?"}(count:${entry.count || "?"}, values:${entry.values?.join("/") || "?"})`;
   }
+  function eligibilityRequirementSnapshot(entry = {}) {
+    return {
+      key: String(entry.keyName || ""),
+      values: [...entry.values || []],
+      count: Math.max(0, Number(entry.count || 0) || 0)
+    };
+  }
   function parseUpgradeChallenge(challenge, family) {
     const requiredPlayerCount = positiveInteger4(challenge?.requiredPlayerCount);
     const diagnostics = [];
@@ -4254,16 +4316,10 @@
         continue;
       }
       if (entry.keyName === "PLAYER_RARITY_GROUP") {
-        const values = entry.values.map(Number).filter(Number.isFinite);
-        const unknown = values.filter((value) => ![4, 83].includes(value));
-        if (unknown.length) diagnostics.push(`unknown PLAYER_RARITY_GROUP encoding ${unknown.join("/")}`);
-        if (values.includes(83)) specialCount = Math.max(specialCount, entry.count);
+        specialCount += entry.count;
       }
     }
     if (teamRatings.length !== 1) diagnostics.push("exactly one TEAM_RATING condition is required");
-    if (isHighRatedUpgradeFamily(family) && specialCount > 1) {
-      diagnostics.push(`more than one required special card is unsupported (${specialCount})`);
-    }
     if (family.id === "totw-upgrade" && specialCount) {
       diagnostics.push("TOTW Upgrade unexpectedly requires a special card");
     }
@@ -4272,7 +4328,8 @@
       diagnostics: unique3(diagnostics),
       requiredPlayerCount,
       targetRating: teamRatings[0] || null,
-      specialCount
+      specialCount,
+      eligibilityRequirements: entries.map(eligibilityRequirementSnapshot)
     };
   }
   function rewardPackIdentity2(set = {}) {
@@ -4302,6 +4359,7 @@
     result.expectedPlayerCount = positiveInteger4(metadata.requiredPlayerCount) || result.expectedPlayerCount;
     result.requiredSpecialCount = Math.max(0, Number(metadata.specialCount || 0) || 0);
     result.allowedSpecialCount = result.requiredSpecialCount;
+    result.dynamicActiveEligibilityRequirements = clone3(metadata.eligibilityRequirements || []);
     result.ratingSbcFill = { ...clone3(result.ratingSbcFill) || {} };
     if (positiveInteger4(metadata.targetRating)) result.ratingSbcFill.targetRating = Number(metadata.targetRating);
     else delete result.ratingSbcFill.targetRating;
@@ -4336,7 +4394,8 @@
         requiredPlayerCount: parsed.requiredPlayerCount,
         targetRating: parsed.targetRating,
         specialCount: parsed.specialCount,
-        requirements: parsed.requirements || []
+        requirements: parsed.requirements || [],
+        eligibilityRequirements: parsed.eligibilityRequirements || []
       };
     });
     const parsedChallenge = parsedChallenges[0] || {
@@ -4392,7 +4451,8 @@
         challengeId: challenge.challengeId,
         requiredPlayerCount: challenge.requiredPlayerCount,
         targetRating: challenge.targetRating,
-        specialCount: challenge.specialCount
+        specialCount: challenge.specialCount,
+        eligibilityRequirements: clone3(challenge.eligibilityRequirements || [])
       }))
     };
     if (family.id === "2x84-upgrade") {
@@ -4405,9 +4465,10 @@
     if (isHighRatedUpgradeFamily(family)) {
       loop.requiredSpecialCount = maximumSpecialCount;
       loop.allowedSpecialCount = maximumSpecialCount;
+      delete loop.requiredSpecialKind;
+      delete loop.requiredSpecialMinRating;
+      delete loop.specialRequirementAdd;
       if (!maximumSpecialCount) {
-        delete loop.requiredSpecialKind;
-        delete loop.requiredSpecialMinRating;
         loop.autoTotwUpgrade = false;
       }
     }
@@ -4469,14 +4530,15 @@
     if (discoveredLoop.ratingSbcFill?.targetRating === void 0) {
       delete merged.ratingSbcFill.targetRating;
     }
-    if (discoveredLoop.requiredSpecialCount) {
+    const hasDynamicPlayerGroup = (discoveredLoop.dynamicChallenges || []).some((challenge) => (challenge.eligibilityRequirements || []).some((requirement2) => requirement2.key === "PLAYER_RARITY_GROUP"));
+    if (discoveredLoop.requiredSpecialCount && !hasDynamicPlayerGroup) {
       merged.requiredSpecialKind = discoveredLoop.requiredSpecialKind || configuredLoop.requiredSpecialKind;
       merged.requiredSpecialMinRating = discoveredLoop.requiredSpecialMinRating || configuredLoop.requiredSpecialMinRating;
     } else {
       delete merged.requiredSpecialKind;
       delete merged.requiredSpecialMinRating;
       delete merged.specialRequirementAdd;
-      merged.autoTotwUpgrade = false;
+      if (!discoveredLoop.requiredSpecialCount) merged.autoTotwUpgrade = false;
     }
     return merged;
   }
@@ -8497,7 +8559,7 @@
 
   // src/sbc/dynamic-sbc-cache.js
   var DYNAMIC_SBC_CACHE_SCHEMA_VERSION = 1;
-  var DYNAMIC_SBC_PARSER_VERSION = 3;
+  var DYNAMIC_SBC_PARSER_VERSION = 4;
   var DYNAMIC_SBC_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
   var DYNAMIC_SBC_SCAN_HEALTH_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
   var BOUNDED_RETRY_LOAD_CODES = /* @__PURE__ */ new Set([426, 512, 521]);
@@ -22130,6 +22192,16 @@
       if (isSbcSpecialItem(item)) {
         if (!allowedSpecialCount) return false;
         if (requiredSpecialKind(loopDef) && !isRequiredSpecialItem(item, loopDef)) return false;
+        if (model && hasDynamicPlayerGroupRequirement(loopDef)) {
+          const matchesActivePlayerGroup = eaPlayerGroupConstraints(model).some(({ constraint }) => {
+            try {
+              return constraint.matches(item) === true;
+            } catch {
+              return false;
+            }
+          });
+          if (!matchesActivePlayerGroup) return false;
+        }
       }
       return getSbcProtectionReasons(item, loopDef, {
         ...context || {},
@@ -22568,10 +22640,19 @@
     function requiredSpecialKind(loopDef = {}) {
       return String(loopDef.requiredSpecialKind || "").trim().toLowerCase();
     }
+    function dynamicPlayerGroupRequirements(loopDef = {}) {
+      return (loopDef.dynamicActiveEligibilityRequirements || []).filter((requirement2) => String(requirement2?.key || "") === "PLAYER_RARITY_GROUP");
+    }
+    function hasDynamicPlayerGroupRequirement(loopDef = {}) {
+      return dynamicPlayerGroupRequirements(loopDef).length > 0;
+    }
     function requiredSpecialLabel(loopDef = {}) {
+      const groupValues = [...new Set(dynamicPlayerGroupRequirements(loopDef).flatMap((requirement2) => requirement2.values || []).map(Number).filter(Number.isFinite))];
+      if (groupValues.length) return `EA player group ${groupValues.join("/")}`;
       return requiredSpecialKind(loopDef) === "totw-tots-fof" ? "TOTW/TOTS/FOF" : "TOTW";
     }
     function isRequiredSpecialItem(item, loopDef = {}) {
+      if (hasDynamicPlayerGroupRequirement(loopDef)) return false;
       const kind = requiredSpecialKind(loopDef);
       if (kind === "totw-tots-fof") return isTotwItem(item) || isTotsItem(item) || isFofItem(item);
       return isTotwItem(item);
@@ -23356,6 +23437,120 @@
       }
       return { ok: true };
     }
+    function eaPlayerGroupConstraints(model = {}) {
+      return (model.constraints || []).map((constraint, index) => ({ constraint, index })).filter(({ constraint }) => constraint.source === "ea" && constraint.keyName === "PLAYER_RARITY_GROUP");
+    }
+    function evaluateDynamicPlayerGroupAvailability(loopDef, model) {
+      const candidates = buildRatingSbcCandidateEntries(loopDef, model);
+      const requirements = eaPlayerGroupConstraints(model).map(({ constraint, index }) => {
+        const matches = candidates.entries.filter((entry) => entry.requirementMatches[index] === true);
+        return {
+          constraint,
+          index,
+          matches,
+          required: Math.max(0, Number(constraint.count || 0) || 0)
+        };
+      });
+      return {
+        ok: requirements.length > 0 && requirements.every((entry) => entry.matches.length >= entry.required),
+        candidates,
+        requirements
+      };
+    }
+    function logDynamicPlayerGroupAvailability(loopDef, availability, label = "EA player-group preflight") {
+      for (const entry of availability.requirements || []) {
+        log(`${loopDef.name}: ${label} ${entry.constraint.label}: ${entry.matches.length}/${entry.required} safe candidate(s)`);
+        entry.matches.slice(0, 3).forEach(({ item, pileName }, index) => {
+          log(`${loopDef.name}: ${label} candidate ${index + 1}. ${itemDisplayName(item)} rating:${Number(item?.rating || 0) || "?"} from:${pileName} id:${Number(item?.id || 0) || "?"}`);
+        });
+        if (entry.matches.length > 3) {
+          log(`${loopDef.name}: ${label} candidate list truncated: ${entry.matches.length - 3} more`);
+        }
+      }
+    }
+    async function waitForDynamicPlayerGroupAvailability(loopDef, model, label) {
+      const attempts = 4;
+      let availability = { ok: false, requirements: [], candidates: null };
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        if (attempt > 1) await sleep(900 * attempt);
+        await refreshInventoryCaches(`${loopDef.name} ${label} ${attempt}/${attempts}`, { includePacks: false, quiet: true });
+        resolveRecentRewardItems(`${loopDef.name} ${label} ${attempt}/${attempts}`);
+        availability = evaluateDynamicPlayerGroupAvailability(loopDef, model);
+        if (availability.ok) return availability;
+      }
+      return availability;
+    }
+    async function ensureDynamicPlayerGroupForFillAndVerify(loopDef, model) {
+      await refreshInventoryCaches(`${loopDef.name} EA player-group preflight`, { includePacks: false, quiet: true });
+      resolveRecentRewardItems(`${loopDef.name} EA player-group preflight`);
+      let availability = evaluateDynamicPlayerGroupAvailability(loopDef, model);
+      logDynamicPlayerGroupAvailability(loopDef, availability);
+      if (availability.ok) return { ready: true, inventoryRefreshed: true };
+      const upgradeDef = getAutoTotwUpgradeDef(loopDef);
+      if (loopDef.dryRun) {
+        await refreshStorePacks().catch(() => null);
+        const existingPack = findRewardPackInCache(upgradeDef, null);
+        if (existingPack) {
+          log(`${loopDef.name}: dry-run found unopened ${upgradeDef.name} reward pack ${packName(existingPack)} (#${existingPack.id}); live run would open it and verify the reward against the live EA player-group matcher`);
+          return { ready: true, inventoryRefreshed: true };
+        }
+        const set = await findSbcSetForLoopDef(upgradeDef, upgradeDef.name);
+        const challenge = shouldUseRatingSbcFill(upgradeDef) ? await findAvailableRatingSbcChallenge(set, upgradeDef.name) : await findAvailableSbcChallenge(set, upgradeDef.name);
+        if (challenge) {
+          log(`${loopDef.name}: dry-run found no matching EA player-group card; live run would submit ${upgradeDef.name} (#${set.id || "?"}) and verify its reward`);
+        } else {
+          log(`${loopDef.name}: dry-run found no matching EA player-group card and no available ${upgradeDef.name} challenge remains`);
+        }
+        return { ready: true, inventoryRefreshed: true };
+      }
+      const maximumRecoveries = Math.max(1, Math.min(5, ...availability.requirements.map((entry) => Math.max(0, entry.required - entry.matches.length))));
+      for (let attempt = 1; attempt <= maximumRecoveries; attempt++) {
+        const openedExistingPack = await openExistingAutoTotwPackIfAvailable(loopDef, upgradeDef);
+        if (!openedExistingPack) {
+          const crafted = await craftAutoTotwUpgrade(loopDef);
+          if (!crafted?.ok) {
+            const reason = `EA player-group recovery unavailable: ${crafted?.reason || "auto craft failed"}`;
+            log(`${loopDef.name}: stopping before SBC fill because ${reason}`);
+            return { ready: false, inventoryRefreshed: true, reason };
+          }
+        }
+        availability = await waitForDynamicPlayerGroupAvailability(
+          loopDef,
+          model,
+          `post EA player-group recovery ${attempt}/${maximumRecoveries}`
+        );
+        logDynamicPlayerGroupAvailability(loopDef, availability, "post-recovery EA player-group check");
+        if (availability.ok) return { ready: true, inventoryRefreshed: true };
+      }
+      return {
+        ready: false,
+        inventoryRefreshed: true,
+        reason: `${upgradeDef.name} reward did not satisfy the live EA player-group requirement`
+      };
+    }
+    async function ensureRequiredEligibilityForFillAndVerify(loopDef, challenge) {
+      if (!hasDynamicPlayerGroupRequirement(loopDef)) {
+        const legacyPreflight = needsAutoTotwPreflight(loopDef);
+        const ready = await ensureTotwForFillAndVerify(loopDef);
+        return {
+          ready,
+          inventoryRefreshed: legacyPreflight,
+          reason: ready ? "" : "required legacy special-card preflight is unavailable"
+        };
+      }
+      const model = parseRatingSbcChallenge2(loopDef, challenge);
+      const groupMatcherErrors = (model.unsupported || []).filter((entry) => String(entry).startsWith("PLAYER_RARITY_GROUP"));
+      const groupConstraints = eaPlayerGroupConstraints(model);
+      if (groupMatcherErrors.length || !groupConstraints.length) {
+        const reason = groupMatcherErrors.length ? `live EA player-group matcher unavailable: ${groupMatcherErrors.join(", ")}` : "live EA player-group requirement could not be bound to the active Challenge";
+        log(`${loopDef.name}: ${reason}`);
+        return { ready: false, inventoryRefreshed: false, reason };
+      }
+      if (loopDef.autoTotwUpgrade === false) {
+        return { ready: true, inventoryRefreshed: false };
+      }
+      return ensureDynamicPlayerGroupForFillAndVerify(loopDef, model);
+    }
     async function ensureTotwForFillAndVerify(loopDef) {
       if (!needsAutoTotwPreflight(loopDef)) return true;
       const required2 = Math.max(1, Number(loopDef.requiredSpecialCount || 1) || 1);
@@ -23467,7 +23662,7 @@
       const blocked2 = [];
       const entries = [];
       let specialCount = 0;
-      const requiredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
+      const requiredSpecialCount = hasDynamicPlayerGroupRequirement(loopDef) ? 0 : Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
       const expectedPlayerCount = Math.max(
         0,
         Number(options.expectedPlayerCount || 0) || Number(loopDef.expectedPlayerCount || 0) || (loopDef.inventoryFillFirst === true ? sumRequirementPlayerCount(loopDef) : 0) || 0
@@ -23497,7 +23692,7 @@
     }
     function logSbcSquadInspection(loopDef, inspection, options = {}) {
       const maxItems = Number(options.maxItems || 20);
-      const requiredPart = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0) ? `, ${requiredSpecialLabel(loopDef)} ${inspection.requiredSpecialMetCount || 0}/${Number(loopDef.requiredSpecialCount || 0)}` : "";
+      const requiredPart = !hasDynamicPlayerGroupRequirement(loopDef) && Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0) ? `, ${requiredSpecialLabel(loopDef)} ${inspection.requiredSpecialMetCount || 0}/${Number(loopDef.requiredSpecialCount || 0)}` : "";
       const playerCountPart = inspection.expectedPlayerCount ? `${inspection.items.length}/${inspection.expectedPlayerCount}` : String(inspection.items.length);
       log(`${loopDef.name}: squad inspection ${playerCountPart} item(s), special ${inspection.specialCount || 0}${requiredPart}, blocked ${inspection.blocked.length}`);
       (inspection.entries || []).slice(0, maxItems).forEach(({ item, index, reasons }) => {
@@ -23513,7 +23708,7 @@
     function getManualSbcFixHints(loopDef, inspection) {
       const hints = [];
       const allowedSpecialCount = Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
-      const requiredSpecialCount = Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
+      const requiredSpecialCount = hasDynamicPlayerGroupRequirement(loopDef) ? 0 : Math.max(0, Number(loopDef.requiredSpecialCount || 0) || 0);
       for (const { item, index, reasons } of inspection.blocked || []) {
         const name = itemDisplayName(item);
         const rating = Number(item?.rating || 0) || "?";
@@ -24930,13 +25125,18 @@
             return { status: "unavailable", reason: "no available SBC challenge remains" };
           }
           const activeLoopDef = shouldUseRatingSbcFill(loopDef) ? materializeDynamicUpgradeChallengeLoopDef(loopDef, opened.challenge) : loopDef;
-          const preflightReady = await ensureTotwForFillAndVerify(activeLoopDef);
-          if (preflightReady === false) return { status: "unavailable", reason: "required TOTW preflight is unavailable" };
+          const eligibilityPreflight = await ensureRequiredEligibilityForFillAndVerify(activeLoopDef, opened.challenge);
+          if (!eligibilityPreflight.ready) {
+            return {
+              status: "unavailable",
+              reason: eligibilityPreflight.reason || "required eligibility preflight is unavailable"
+            };
+          }
           const expectedPlayerCount = expectedSbcPlayerCount(activeLoopDef, opened.challenge);
           const configuredFill = await fillConfiguredSbcSquad(activeLoopDef, opened, {
             dryRun: loopDef.dryRun,
             stopOnMissingSelection: true,
-            skipInventoryRefresh: needsAutoTotwPreflight(activeLoopDef)
+            skipInventoryRefresh: eligibilityPreflight.inventoryRefreshed === true
           });
           if (loopDef.dryRun) {
             if (!configuredFill.ok) {

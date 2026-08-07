@@ -161,6 +161,33 @@ describe('loop configuration schema', () => {
     expect(validateLoopDef({ ...loop, sbcNames: [] })).toContain('sbcNames must be a non-empty array');
   });
 
+  it('validates dynamic EA eligibility snapshots without interpreting group ids', () => {
+    const loop = {
+      id: 'dynamic-upgrade',
+      name: 'Dynamic Upgrade',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['Dynamic Upgrade'],
+      dynamicChallenges: [{
+        challengeId: 1234,
+        eligibilityRequirements: [
+          { key: 'TEAM_RATING', values: [84], count: 11 },
+          { key: 'PLAYER_RARITY_GROUP', values: [999], count: 1 },
+        ],
+      }],
+    };
+
+    expect(validateLoopDef(loop)).toEqual([]);
+    expect(validateLoopDef({
+      ...loop,
+      dynamicChallenges: [{ challengeId: 0, eligibilityRequirements: [{ key: '', values: [], count: 0 }] }],
+    })).toEqual(expect.arrayContaining([
+      'dynamicChallenges[0].challengeId must be a positive integer',
+      'dynamicChallenges[0].eligibilityRequirements[0].key must be a non-empty string',
+      'dynamicChallenges[0].eligibilityRequirements[0].values must be a non-empty array',
+      'dynamicChallenges[0].eligibilityRequirements[0].count must be a positive integer',
+    ]));
+  });
+
   it('preserves list reference and duplicate-id validation', () => {
     expect(() => validateLoopDefList([validLoop(), validLoop()], 'loops'))
       .toThrow('loops has duplicate id: daily-sequence');

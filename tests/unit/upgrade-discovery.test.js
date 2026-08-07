@@ -72,12 +72,63 @@ describe('dynamic Upgrade discovery', () => {
       expectedPlayerCount: 11,
       sbcFodderPolicy: { mode: 'rating-constrained' },
       requiredSpecialCount: 1,
-      requiredSpecialKind: 'totw-tots-fof',
       maxCompletions: 5,
       autoTotwUpgrade: { activityBinding: { family: 'totw-upgrade', required: true } },
       autoFodderUpgrade: { activityBinding: { family: 'rare-gold-material-upgrade', required: false } },
     });
     expect(result.loop.ratingSbcFill.targetRating).toBe(88);
+    expect(result.loop).not.toHaveProperty('requiredSpecialKind');
+    expect(result.loop).not.toHaveProperty('requiredSpecialMinRating');
+    expect(result.loop.dynamicChallenges[0].eligibilityRequirements).toEqual([
+      { key: 'TEAM_RATING', values: [88], count: 11 },
+      { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+    ]);
+  });
+
+  it('preserves an EA player-group count greater than one without expanding the group into card names', () => {
+    const result = parseDynamicUpgradeSbcSnapshot({
+      set: set({
+        challenges: [{
+          ...set().challenges[0],
+          eligibilityRequirements: [
+            { key: 'TEAM_RATING', values: [88], count: -1 },
+            { key: 'PLAYER_RARITY_GROUP', values: [83], count: 2 },
+          ],
+        }],
+      }),
+    });
+
+    expect(result.status).toBe('supported');
+    expect(result.loop.requiredSpecialCount).toBe(2);
+    expect(result.loop.allowedSpecialCount).toBe(2);
+    expect(result.loop.dynamicChallenges[0].eligibilityRequirements).toContainEqual({
+      key: 'PLAYER_RARITY_GROUP',
+      values: [83],
+      count: 2,
+    });
+    expect(result.loop).not.toHaveProperty('requiredSpecialKind');
+  });
+
+  it('accepts an unknown EA player-group id as opaque runtime metadata', () => {
+    const result = parseDynamicUpgradeSbcSnapshot({
+      set: set({
+        challenges: [{
+          ...set().challenges[0],
+          eligibilityRequirements: [
+            { key: 'TEAM_RATING', values: [88], count: -1 },
+            { key: 'PLAYER_RARITY_GROUP', values: [999], count: 1 },
+          ],
+        }],
+      }),
+    });
+
+    expect(result.status).toBe('supported');
+    expect(result.loop.dynamicChallenges[0].eligibilityRequirements).toContainEqual({
+      key: 'PLAYER_RARITY_GROUP',
+      values: [999],
+      count: 1,
+    });
+    expect(result.diagnostics).toEqual([]);
   });
 
   it('creates a safe dynamic high-rated xN Loop for 7x 87+', () => {
@@ -132,6 +183,10 @@ describe('dynamic Upgrade discovery', () => {
       requiredSpecialCount: 1,
       allowedSpecialCount: 1,
       ratingSbcFill: { targetRating: 83 },
+      dynamicActiveEligibilityRequirements: [
+        { key: 'TEAM_RATING', values: [83], count: 11 },
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
     });
     expect(materializeDynamicUpgradeChallengeLoopDef(result.loop, { id: 3721 }).ratingSbcFill.targetRating).toBe(84);
   });
@@ -237,6 +292,7 @@ describe('dynamic Upgrade discovery', () => {
       dynamicSbcFamily: 'high-rated-x10',
       scannedMetadata: true,
     });
+    expect(session.loopOverrides['84x10']).not.toHaveProperty('requiredSpecialKind');
   });
 
   it('collects supported Upgrade metadata as activity bindings', () => {

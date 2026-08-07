@@ -34,6 +34,7 @@ Daily Loop Runner 是 EA FC Web App 的 Tampermonkey 自动化脚本，运行时
 - FSU 全量 Club payload 必须绑定到确切 XHR。不得恢复 broad capture fallback，不得把 Enhancer 或其它插件的 Club 响应归属给 FSU；`clubRepo.hasAllItems()` bypass 只能影响当前 FSU criteria 并立即恢复。
 - 同一 SBC squad 的 `definitionId` 必须唯一；Unassigned/Transfer duplicate signal 只能解析到 Club/Storage 中真实可提交的对应卡。
 - 84x10 只能使用 Challenge 要求数量和类型的 requirement special。额外特殊卡、错误特殊卡、超出提交上限的卡和 protected id 必须在保存前、保存后和提交前拦截。
+- 动态 SBC 的 EA eligibility group（例如 `PLAYER_RARITY_GROUP=83`）必须按原始 group id、values 和 count 保存。不得把动态 group 展开或固化为 TOTW/TOTS/FOF/FUTTIES 等卡种名称；运行时必须使用当前 Challenge requirement 的 `meetsRequirements(item)` 判断，并在 live matcher 不可用时停止提交。
 
 ## 2. 运行环境与依赖
 
@@ -645,6 +646,7 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 - Loop 级 `forceOpenRewardPacks`：仅当同一流程的后续步骤必须立即消费该奖励时才可强制开包，例如 84x10 的 TOTW 前置；普通独立/兜底 2x84+ 和最终 FOF 奖励必须服从 UI `Open reward packs`。
 - `maxRating`、`allowSpecial`：单条 requirement 的业务条件，不得代替统一材料策略。
 - `ratingSbcFill`、`requiredSpecialCount`、`requiredSpecialKind`：评分 SBC 参数。
+- `dynamicChallenges[].eligibilityRequirements`：动态扫描保存的 EA eligibility 快照，只用于绑定当前 Challenge 和诊断；`PLAYER_RARITY_GROUP` 等聚合分组的真实选卡必须在运行时重新绑定当前 EA requirement matcher，不能根据 item 的本地 group 数组猜测。
 - `activityBinding`：内置/自定义 Loop、嵌套 stage、自动恢复和 Recovery recipe 对当前动态 SBC family 的声明式绑定。扫描只可覆盖 Set/Challenge/Reward identity、当前显示名、requirements 事实和剩余次数；不得覆盖高卡/特殊卡/可交易卡保护、pile 顺序、评分策略、fallback、Workflow 顺序或运行上限。每个嵌套消费者和 Recovery recipe 必须显式声明自己的 binding，不能依赖父对象名称或顶层 binding 传播。
 - `preCraftPlayerPick`：Provision 显式动态前置 Pick 引用兼容字段，使用稳定 `sbcSetIds` / `pickItemResourceIds` 匹配扫描会话 Loop；扫描缺失时跳过该 stage，不得回退到过期活动。内置轮换优先使用语义 selector。
 - `preCraftPlayerPickSelector`：Provision 内置活动轮换的语义选择器。当前仅支持 `material: "common-gold"`，只接受所有 Challenge 都已证明为全 Gold、无 Rare 最低要求且可按 Common-first 填充的当前扫描 Pick；无匹配时跳过，多匹配时停止并记录歧义，不得猜 Set ID。

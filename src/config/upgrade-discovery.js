@@ -95,6 +95,14 @@ function requirementSummary(entry = {}) {
   return `${entry.keyName || '?'}(count:${entry.count || '?'}, values:${entry.values?.join('/') || '?'})`;
 }
 
+function eligibilityRequirementSnapshot(entry = {}) {
+  return {
+    key: String(entry.keyName || ''),
+    values: [...(entry.values || [])],
+    count: Math.max(0, Number(entry.count || 0) || 0),
+  };
+}
+
 function parseUpgradeChallenge(challenge, family) {
   const requiredPlayerCount = positiveInteger(challenge?.requiredPlayerCount);
   const diagnostics = [];
@@ -126,17 +134,11 @@ function parseUpgradeChallenge(challenge, family) {
       continue;
     }
     if (entry.keyName === 'PLAYER_RARITY_GROUP') {
-      const values = entry.values.map(Number).filter(Number.isFinite);
-      const unknown = values.filter((value) => ![4, 83].includes(value));
-      if (unknown.length) diagnostics.push(`unknown PLAYER_RARITY_GROUP encoding ${unknown.join('/')}`);
-      if (values.includes(83)) specialCount = Math.max(specialCount, entry.count);
+      specialCount += entry.count;
     }
   }
 
   if (teamRatings.length !== 1) diagnostics.push('exactly one TEAM_RATING condition is required');
-  if (isHighRatedUpgradeFamily(family) && specialCount > 1) {
-    diagnostics.push(`more than one required special card is unsupported (${specialCount})`);
-  }
   if (family.id === 'totw-upgrade' && specialCount) {
     diagnostics.push('TOTW Upgrade unexpectedly requires a special card');
   }
@@ -146,6 +148,7 @@ function parseUpgradeChallenge(challenge, family) {
     requiredPlayerCount,
     targetRating: teamRatings[0] || null,
     specialCount,
+    eligibilityRequirements: entries.map(eligibilityRequirementSnapshot),
   };
 }
 
@@ -180,6 +183,7 @@ export function materializeDynamicUpgradeChallengeLoopDef(loopDef = {}, challeng
   result.expectedPlayerCount = positiveInteger(metadata.requiredPlayerCount) || result.expectedPlayerCount;
   result.requiredSpecialCount = Math.max(0, Number(metadata.specialCount || 0) || 0);
   result.allowedSpecialCount = result.requiredSpecialCount;
+  result.dynamicActiveEligibilityRequirements = clone(metadata.eligibilityRequirements || []);
   result.ratingSbcFill = { ...(clone(result.ratingSbcFill) || {}) };
   if (positiveInteger(metadata.targetRating)) result.ratingSbcFill.targetRating = Number(metadata.targetRating);
   else delete result.ratingSbcFill.targetRating;
@@ -222,6 +226,7 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
       targetRating: parsed.targetRating,
       specialCount: parsed.specialCount,
       requirements: parsed.requirements || [],
+      eligibilityRequirements: parsed.eligibilityRequirements || [],
     };
   });
   const parsedChallenge = parsedChallenges[0] || {
@@ -280,6 +285,7 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
       requiredPlayerCount: challenge.requiredPlayerCount,
       targetRating: challenge.targetRating,
       specialCount: challenge.specialCount,
+      eligibilityRequirements: clone(challenge.eligibilityRequirements || []),
     })),
   };
   if (family.id === '2x84-upgrade') {
@@ -292,9 +298,10 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
   if (isHighRatedUpgradeFamily(family)) {
     loop.requiredSpecialCount = maximumSpecialCount;
     loop.allowedSpecialCount = maximumSpecialCount;
+    delete loop.requiredSpecialKind;
+    delete loop.requiredSpecialMinRating;
+    delete loop.specialRequirementAdd;
     if (!maximumSpecialCount) {
-      delete loop.requiredSpecialKind;
-      delete loop.requiredSpecialMinRating;
       loop.autoTotwUpgrade = false;
     }
   }
@@ -358,14 +365,17 @@ export function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
   if (discoveredLoop.ratingSbcFill?.targetRating === undefined) {
     delete merged.ratingSbcFill.targetRating;
   }
-  if (discoveredLoop.requiredSpecialCount) {
+  const hasDynamicPlayerGroup = (discoveredLoop.dynamicChallenges || []).some((challenge) => (
+    (challenge.eligibilityRequirements || []).some((requirement) => requirement.key === 'PLAYER_RARITY_GROUP')
+  ));
+  if (discoveredLoop.requiredSpecialCount && !hasDynamicPlayerGroup) {
     merged.requiredSpecialKind = discoveredLoop.requiredSpecialKind || configuredLoop.requiredSpecialKind;
     merged.requiredSpecialMinRating = discoveredLoop.requiredSpecialMinRating || configuredLoop.requiredSpecialMinRating;
   } else {
     delete merged.requiredSpecialKind;
     delete merged.requiredSpecialMinRating;
     delete merged.specialRequirementAdd;
-    merged.autoTotwUpgrade = false;
+    if (!discoveredLoop.requiredSpecialCount) merged.autoTotwUpgrade = false;
   }
   return merged;
 }

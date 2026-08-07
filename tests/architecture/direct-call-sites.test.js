@@ -321,4 +321,15 @@ describe('current direct side-effect call baseline', () => {
     const autoTotwDefinition = source.slice(autoTotwStart, autoFodderStart);
     expect(autoTotwDefinition).toMatch(/\.\.\.createTotwUpgradePolicy\(\),[\s\S]*?\.\.\.override,/);
   });
+
+  it('keeps dynamic EA player groups opaque instead of expanding named card types', async () => {
+    const discoverySource = await readFile(path.join(root, 'src', 'config', 'upgrade-discovery.js'), 'utf8');
+    const policySource = await readFile(path.join(root, 'src', 'config', 'upgrade-policies.js'), 'utf8');
+    const ratingSource = await readFile(path.join(root, 'src', 'selection', 'rating-model.js'), 'utf8');
+
+    expect(discoverySource).not.toMatch(/unknown PLAYER_RARITY_GROUP encoding/);
+    expect(policySource).not.toMatch(/requiredSpecialKind:\s*'totw-tots-fof'/);
+    expect(ratingSource).toContain("if (keyName === 'PLAYER_RARITY_GROUP') return false;");
+    expect(ratingSource).toContain('live EA matcher unavailable');
+  });
 });

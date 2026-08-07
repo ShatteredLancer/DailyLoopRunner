@@ -55,6 +55,61 @@ describe('rating SBC model parsing and validation', () => {
     expect(model.constraints[0].matches({ rating: 99, accepted: false })).toBe(false);
   });
 
+  it('uses the live EA matcher as the only authority for a dynamic player rarity group', () => {
+    const playerGroup = requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => item.eaGroup83 === true);
+    const model = parseRatingSbcChallenge({
+      loopDef: {
+        dynamicActiveEligibilityRequirements: [{ key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 }],
+        requiredSpecialCount: 1,
+        allowedSpecialCount: 1,
+      },
+      challenge: {
+        eligibilityRequirements: [
+          requirement('TEAM_RATING', [84]),
+          playerGroup,
+        ],
+      },
+      requiredPlayerCount: 11,
+      eligibilityKeyName: (key) => key,
+      isRequiredSpecialItem: () => false,
+      requiredSpecialLabel: () => 'legacy hardcoded special',
+    });
+
+    expect(model.unsupported).toEqual([]);
+    expect(model.maxSpecialCount).toBe(1);
+    expect(model.constraints).toHaveLength(1);
+    expect(model.constraints[0]).toMatchObject({
+      keyName: 'PLAYER_RARITY_GROUP',
+      values: [83],
+      count: 1,
+      source: 'ea',
+    });
+    expect(model.constraints[0].matches({ name: 'FUTTIES', eaGroup83: true })).toBe(true);
+    expect(model.constraints[0].matches({ name: 'Unrelated special', groups: [83] })).toBe(false);
+  });
+
+  it('fails closed when a dynamic player rarity group has no live EA matcher', () => {
+    const model = parseRatingSbcChallenge({
+      loopDef: {
+        dynamicActiveEligibilityRequirements: [{ key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 }],
+        requiredSpecialCount: 1,
+        allowedSpecialCount: 1,
+      },
+      challenge: {
+        eligibilityRequirements: [
+          requirement('TEAM_RATING', [84]),
+          requirement('PLAYER_RARITY_GROUP', [83], 1),
+        ],
+      },
+      requiredPlayerCount: 11,
+      eligibilityKeyName: (key) => key,
+    });
+
+    expect(model.constraints).toEqual([]);
+    expect(model.unsupported).toEqual(['PLAYER_RARITY_GROUP(live EA matcher unavailable)']);
+    expect(model.maxSpecialCount).toBe(0);
+  });
+
   it('validates rating, unique definitions, constraints, special count, and EA challenge readiness', () => {
     const players = [
       { id: 1, definitionId: 10, rating: 84, special: true },

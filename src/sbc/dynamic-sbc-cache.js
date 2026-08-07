@@ -1,7 +1,7 @@
 import { cloneLoopDef, isPlainObject } from '../domain/objects.js';
 
 export const DYNAMIC_SBC_CACHE_SCHEMA_VERSION = 1;
-export const DYNAMIC_SBC_PARSER_VERSION = 3;
+export const DYNAMIC_SBC_PARSER_VERSION = 4;
 export const DYNAMIC_SBC_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const DYNAMIC_SBC_SCAN_HEALTH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
