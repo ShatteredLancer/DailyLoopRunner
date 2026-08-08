@@ -1,4 +1,5 @@
 import { assertValidTradeJob, createTradeRunReceipt } from './contracts.js';
+import { classifyTradeError } from './error-policy.js';
 import { applyListingPriceLimits, listingCandidateRejection } from './listing-plan.js';
 
 function sameNumber(left, right) {
@@ -33,6 +34,7 @@ export function createListingTransaction(options = {}) {
 
   async function run(input = {}) {
     const startedAt = Number(now());
+    const runId = createRunId();
     const job = input.job;
     const prepared = input.prepared;
     assertValidTradeJob(job, 'Listing job');
@@ -45,7 +47,13 @@ export function createListingTransaction(options = {}) {
     let succeeded = 0;
     let failed = 0;
 
-    if (prepared?.mode !== 'prepared' || prepared?.ready !== true || !confirmation || !entries.length) {
+    const circuitAvailability = options.circuitBreaker?.availability?.();
+    if (circuitAvailability && circuitAvailability.allowed !== true) {
+      status = 'blocked';
+      reason = 'trade-circuit-open';
+    }
+
+    if (!reason && (prepared?.mode !== 'prepared' || prepared?.ready !== true || !confirmation || !entries.length)) {
       status = 'blocked';
       reason = 'listing-plan-not-prepared';
     } else if (entries.length > Number(job.policy.maxListings)) {
@@ -140,10 +148,20 @@ export function createListingTransaction(options = {}) {
         error: listed.error,
       };
       if (listed.status !== 'accepted') {
+        const classification = classifyTradeError(listed.error || listed.response || { status: listed.status });
+        options.circuitBreaker?.recordFailure?.(listed.error || listed.response || {}, {
+          action: 'list',
+          endpoint: '/auctionhouse',
+          jobId: job.id,
+          runId,
+          classification,
+          response: listed.response,
+          capabilities: adapter.inspectCapabilities(),
+        });
         failed += 1;
-        status = listed.status === 'ambiguous' ? 'ambiguous' : 'failed';
-        reason = `listing-${listed.status}`;
-        receipts.push({ ...receipt, status, reason });
+        status = listed.status === 'ambiguous' ? 'ambiguous' : classification.opensCircuit ? 'blocked' : 'failed';
+        reason = classification.opensCircuit ? `trade-${classification.kind}` : `listing-${listed.status}`;
+        receipts.push({ ...receipt, status, reason, classification });
         break;
       }
 
@@ -163,6 +181,7 @@ export function createListingTransaction(options = {}) {
         break;
       }
       succeeded += 1;
+      options.circuitBreaker?.recordSuccess?.({ action: 'list', jobId: job.id, runId });
       receipts.push({
         ...receipt,
         status: 'listed',
@@ -182,7 +201,7 @@ export function createListingTransaction(options = {}) {
     const afterCapabilities = adapter.inspectCapabilities();
     const skipped = Math.max(0, entries.length - succeeded - failed);
     return createTradeRunReceipt({
-      runId: createRunId(),
+      runId,
       jobId: job.id,
       jobType: job.type,
       scheduledFor: startedAt,

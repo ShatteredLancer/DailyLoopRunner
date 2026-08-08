@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.33
+// @version      0.7.34
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.33",
+    version: "0.7.34",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -79,6 +79,9 @@
   var DYNAMIC_SBC_CACHE_KEY = "fc-loop-runner-dynamic-sbc-cache-v1";
   var FUTBIN_CARD_ID_CACHE_KEY = "fc-loop-runner-futbin-card-id-cache-v1";
   var TRADE_PLAYER_CATALOG_CACHE_KEY = "fc-loop-runner-trade-player-catalog-v1";
+  var TRADE_CIRCUIT_KEY = "fc-loop-runner-trade-circuit-v1";
+  var TRADE_JOB_STORE_KEY = "fc-loop-runner-trade-jobs-v1";
+  var TRADE_RUN_LEASE_KEY = "fc-loop-runner-trade-run-lease-v1";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -579,12 +582,12 @@
     const parsed = Number(value);
     return Math.max(1, Math.min(99, Number.isFinite(parsed) ? parsed : fallback));
   }
-  function policyObject(input = {}) {
-    if (!isPlainObject(input)) return {};
-    return isPlainObject(input.sbcFodderPolicy) ? input.sbcFodderPolicy : input;
+  function policyObject(input2 = {}) {
+    if (!isPlainObject(input2)) return {};
+    return isPlainObject(input2.sbcFodderPolicy) ? input2.sbcFodderPolicy : input2;
   }
-  function configuredMode(input = {}) {
-    const value = String(policyObject(input).mode || "").trim();
+  function configuredMode(input2 = {}) {
+    const value = String(policyObject(input2).mode || "").trim();
     return SBC_FODDER_MODES.includes(value) ? value : "inherit";
   }
   function inferSbcFodderMode(loopDef = {}) {
@@ -597,21 +600,21 @@
     if (Number(loopDef.ratingSbcFill?.targetRating || 0) > 0) return "rating-constrained";
     return "low-gold";
   }
-  function legacyLowGoldMaxRating(input = {}) {
-    if (!isPlainObject(input)) return void 0;
-    const nestedPick = isPlainObject(input.pickOptions) ? input.pickOptions : {};
-    const directMax = input.maxNormalGoldSubmittedRating;
+  function legacyLowGoldMaxRating(input2 = {}) {
+    if (!isPlainObject(input2)) return void 0;
+    const nestedPick = isPlainObject(input2.pickOptions) ? input2.pickOptions : {};
+    const directMax = input2.maxNormalGoldSubmittedRating;
     if (directMax !== void 0) return boundedRating(directMax, DEFAULT_SBC_FODDER_POLICY.lowRatedGoldMaxRating);
-    const protect = nestedPick.protectHighGold ?? input.protectHighGold;
+    const protect = nestedPick.protectHighGold ?? input2.protectHighGold;
     if (protect !== true) return void 0;
-    const threshold = nestedPick.highGoldThreshold ?? input.pickHighGoldThreshold ?? input.highGoldThreshold ?? 82;
+    const threshold = nestedPick.highGoldThreshold ?? input2.pickHighGoldThreshold ?? input2.highGoldThreshold ?? 82;
     return Math.max(1, boundedRating(threshold, 82) - 1);
   }
-  function policyOverrides(input = {}) {
-    if (!isPlainObject(input)) return {};
-    const nested = policyObject(input);
+  function policyOverrides(input2 = {}) {
+    if (!isPlainObject(input2)) return {};
+    const nested = policyObject(input2);
     const result = {};
-    const mode = configuredMode(input);
+    const mode = configuredMode(input2);
     if (mode !== "inherit") result.mode = mode;
     if (nested.lowRatedGoldMaxRating !== void 0) {
       result.lowRatedGoldMaxRating = boundedRating(
@@ -619,7 +622,7 @@
         DEFAULT_SBC_FODDER_POLICY.lowRatedGoldMaxRating
       );
     } else {
-      const legacy = legacyLowGoldMaxRating(input);
+      const legacy = legacyLowGoldMaxRating(input2);
       if (legacy !== void 0) result.lowRatedGoldMaxRating = legacy;
     }
     if (nested.ratingSbcMaxCardRating !== void 0) {
@@ -627,21 +630,21 @@
         nested.ratingSbcMaxCardRating,
         DEFAULT_SBC_FODDER_POLICY.ratingSbcMaxCardRating
       );
-    } else if (input.maxSubmittedRating !== void 0 && inferSbcFodderMode(input) === "rating-constrained") {
+    } else if (input2.maxSubmittedRating !== void 0 && inferSbcFodderMode(input2) === "rating-constrained") {
       result.ratingSbcMaxCardRating = boundedRating(
-        input.maxSubmittedRating,
+        input2.maxSubmittedRating,
         DEFAULT_SBC_FODDER_POLICY.ratingSbcMaxCardRating
       );
     }
     return result;
   }
-  function normalizeSbcFodderPolicy(input = {}) {
-    return resolveSbcFodderPolicy(DEFAULT_SBC_FODDER_POLICY, input);
+  function normalizeSbcFodderPolicy(input2 = {}) {
+    return resolveSbcFodderPolicy(DEFAULT_SBC_FODDER_POLICY, input2);
   }
   function resolveSbcFodderPolicy(globalPolicy = {}, ...overrides) {
     const resolved = { ...DEFAULT_SBC_FODDER_POLICY };
-    for (const input of [globalPolicy, ...overrides]) {
-      Object.assign(resolved, policyOverrides(input));
+    for (const input2 of [globalPolicy, ...overrides]) {
+      Object.assign(resolved, policyOverrides(input2));
     }
     return {
       mode: resolved.mode === "inherit" ? "auto" : resolved.mode,
@@ -1053,26 +1056,26 @@
     const parsed = Number(value);
     return Math.max(min, Math.min(max, Number.isFinite(parsed) ? parsed : fallback));
   }
-  function pickOptionOverrides(input = {}) {
-    if (!isPlainObject(input)) return {};
-    const nested = isPlainObject(input.pickOptions) ? input.pickOptions : {};
+  function pickOptionOverrides(input2 = {}) {
+    if (!isPlainObject(input2)) return {};
+    const nested = isPlainObject(input2.pickOptions) ? input2.pickOptions : {};
     const result = {};
     const assign = (target, ...sources) => {
       const value = sources.find((entry) => entry !== void 0);
       if (value !== void 0) result[target] = value;
     };
-    assign("autoSelectBelow90", nested.autoSelectBelow90, nested.autoSelect, input.autoSelectBelow90);
-    assign("preferScannedMetadata", nested.preferScannedMetadata, input.preferScannedMetadata);
-    assign("openPicksAtEnd", nested.openPicksAtEnd, nested.openAtEnd, input.openPicksAtEnd);
-    assign("autoPickThreshold", nested.autoPickThreshold, input.autoPickRatingThreshold, input.autoPickThreshold);
+    assign("autoSelectBelow90", nested.autoSelectBelow90, nested.autoSelect, input2.autoSelectBelow90);
+    assign("preferScannedMetadata", nested.preferScannedMetadata, input2.preferScannedMetadata);
+    assign("openPicksAtEnd", nested.openPicksAtEnd, nested.openAtEnd, input2.openPicksAtEnd);
+    assign("autoPickThreshold", nested.autoPickThreshold, input2.autoPickRatingThreshold, input2.autoPickThreshold);
     return result;
   }
-  function normalizePickRuntimeOptions(input = {}) {
-    const autoPickThreshold = Number(input.autoPickThreshold);
+  function normalizePickRuntimeOptions(input2 = {}) {
+    const autoPickThreshold = Number(input2.autoPickThreshold);
     return {
-      autoSelectBelow90: input.autoSelectBelow90 !== false,
-      preferScannedMetadata: input.preferScannedMetadata === true,
-      openPicksAtEnd: input.openPicksAtEnd === true,
+      autoSelectBelow90: input2.autoSelectBelow90 !== false,
+      preferScannedMetadata: input2.preferScannedMetadata === true,
+      openPicksAtEnd: input2.openPicksAtEnd === true,
       autoPickThreshold: boundedNumber(autoPickThreshold > 0 ? autoPickThreshold : 90, 90, 1, 99)
     };
   }
@@ -1216,15 +1219,15 @@
 
   // src/config/recovery.js
   var ALL_INVENTORY_PILES = Object.freeze(["unassigned", "storage", "transfer", "club"]);
-  function lowFodderRequirement(input) {
+  function lowFodderRequirement(input2) {
     return Object.freeze({
       playerOnly: true,
       allowSpecial: false,
       priorityPiles: ALL_INVENTORY_PILES,
-      ...input
+      ...input2
     });
   }
-  function recipe(input) {
+  function recipe(input2) {
     return Object.freeze({
       priorityPiles: ALL_INVENTORY_PILES,
       sbcFodderPolicy: Object.freeze({ mode: "low-gold" }),
@@ -1233,7 +1236,7 @@
       onUnavailable: "continue",
       onInsufficient: "continue",
       onBlocked: "stop",
-      ...input
+      ...input2
     });
   }
   var RECOVERY_RECIPES = Object.freeze([
@@ -1498,18 +1501,18 @@
         return false;
     }
   }
-  function parseRatingSbcChallenge(input = {}) {
-    const loopDef = input.loopDef || {};
-    const challenge = input.challenge || null;
-    const requiredPlayerCount = Math.max(0, Number(input.requiredPlayerCount || 0) || 0);
-    const eligibilityKeyName = input.eligibilityKeyName || ((key) => String(key || ""));
+  function parseRatingSbcChallenge(input2 = {}) {
+    const loopDef = input2.loopDef || {};
+    const challenge = input2.challenge || null;
+    const requiredPlayerCount = Math.max(0, Number(input2.requiredPlayerCount || 0) || 0);
+    const eligibilityKeyName = input2.eligibilityKeyName || ((key) => String(key || ""));
     const matchers = {
-      isBronze: input.isBronze || (() => false),
-      isSilver: input.isSilver || (() => false),
-      isGold: input.isGold || (() => false),
-      isSpecialItem: input.isSpecialItem || (() => false),
-      itemGroupNumbers: input.itemGroupNumbers || (() => []),
-      itemLeagueId: input.itemLeagueId || (() => 0)
+      isBronze: input2.isBronze || (() => false),
+      isSilver: input2.isSilver || (() => false),
+      isGold: input2.isGold || (() => false),
+      isSpecialItem: input2.isSpecialItem || (() => false),
+      itemGroupNumbers: input2.itemGroupNumbers || (() => []),
+      itemLeagueId: input2.itemLeagueId || (() => 0)
     };
     const constraints = [];
     const unsupported = [];
@@ -1551,12 +1554,12 @@
     const hasDynamicPlayerGroup = (loopDef.dynamicActiveEligibilityRequirements || []).some((requirement2) => String(requirement2?.key || "") === "PLAYER_RARITY_GROUP");
     if (configuredSpecialCount && !hasDynamicPlayerGroup) {
       const minimumRating = Math.max(0, Number(loopDef.requiredSpecialMinRating || 0) || 0);
-      const label = input.requiredSpecialLabel?.(loopDef) || "special";
+      const label = input2.requiredSpecialLabel?.(loopDef) || "special";
       constraints.push({
         id: "runner-required-special",
         label: `${label} rating >= ${minimumRating} x${configuredSpecialCount}`,
         count: configuredSpecialCount,
-        matches: (item) => input.isRequiredSpecialItem?.(item, loopDef) === true && Number(item?.rating || 0) >= minimumRating
+        matches: (item) => input2.isRequiredSpecialItem?.(item, loopDef) === true && Number(item?.rating || 0) >= minimumRating
       });
     }
     const configuredAllowedSpecial = loopDef.allowedSpecialCount !== void 0 ? Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0) : null;
@@ -1722,11 +1725,11 @@
     if (values.every((value) => value <= 0)) return values.some((value) => value < 0) ? -1 : 0;
     return null;
   }
-  function classifyMaterialSinkCandidate(input = {}) {
-    const familyId = String(input.familyId || "");
+  function classifyMaterialSinkCandidate(input2 = {}) {
+    const familyId = String(input2.familyId || "");
     const baseline = MATERIAL_SINK_BASELINES[familyId];
-    const cost = positiveInteger(input.cost);
-    const reward = input.reward || null;
+    const cost = positiveInteger(input2.cost);
+    const reward = input2.reward || null;
     if (!baseline || !cost || !reward) return { className: "incomparable", relation: null };
     const rewardVsBaseline = rewardRelation(reward, baseline.reward);
     const baselineVsReward = rewardRelation(baseline.reward, reward);
@@ -1779,9 +1782,9 @@
     }
     return [["minimumRating", "desc"], ["guaranteedCount", "desc"], ["cost", "asc"]];
   }
-  function preferenceValue(candidate, field2) {
-    if (field2 === "cost") return candidate.materialSink?.cost;
-    return candidate.materialSink?.reward?.[field2];
+  function preferenceValue(candidate, field4) {
+    if (field4 === "cost") return candidate.materialSink?.cost;
+    return candidate.materialSink?.reward?.[field4];
   }
   function selectMaterialSinkCandidate(candidates = [], binding = {}) {
     const allowedClasses = Array.isArray(binding.classes) && binding.classes.length ? binding.classes : ["premium", "baseline"];
@@ -1796,8 +1799,8 @@
     if (!preference) return { status: "ambiguous", candidate: null, matches: topLayer };
     const fields = preferenceFields(preference);
     const ranked = [...topLayer].sort((left, right) => {
-      for (const [field2, direction] of fields) {
-        const compared = compareNumbers(preferenceValue(left, field2), preferenceValue(right, field2), direction);
+      for (const [field4, direction] of fields) {
+        const compared = compareNumbers(preferenceValue(left, field4), preferenceValue(right, field4), direction);
         if (compared) return compared;
       }
       return Number(left.setId || 0) - Number(right.setId || 0);
@@ -2026,8 +2029,8 @@
       ...materialSink ? { materialSink } : {}
     };
   }
-  function parseBasicUpgradeActivitySnapshot(input = {}) {
-    const set = input.set || {};
+  function parseBasicUpgradeActivitySnapshot(input2 = {}) {
+    const set = input2.set || {};
     const setId = positiveInteger2(set.id);
     const setName = normalizedText2(set.name);
     if (set.inUpgradesCategory !== true) {
@@ -2221,22 +2224,22 @@
   }
   function materializeLoop(loop, activitiesByFamily, diagnostics) {
     let result = materializeBoundTarget(loop, activitiesByFamily, diagnostics, `Loop ${loop.id || loop.name || "?"}`);
-    for (const field2 of ["stages", "craftingUpgrades"]) {
-      if (!Array.isArray(result[field2])) continue;
-      result[field2] = result[field2].map((entry, index) => materializeBoundTarget(
+    for (const field4 of ["stages", "craftingUpgrades"]) {
+      if (!Array.isArray(result[field4])) continue;
+      result[field4] = result[field4].map((entry, index) => materializeBoundTarget(
         entry,
         activitiesByFamily,
         diagnostics,
-        `Loop ${loop.id || loop.name || "?"}.${field2}[${index}]`
+        `Loop ${loop.id || loop.name || "?"}.${field4}[${index}]`
       ));
     }
-    for (const field2 of ["commonUpgrade", "rareUpgrade", "autoTotwUpgrade", "autoFodderUpgrade"]) {
-      if (!result[field2] || typeof result[field2] !== "object") continue;
-      result[field2] = materializeBoundTarget(
-        result[field2],
+    for (const field4 of ["commonUpgrade", "rareUpgrade", "autoTotwUpgrade", "autoFodderUpgrade"]) {
+      if (!result[field4] || typeof result[field4] !== "object") continue;
+      result[field4] = materializeBoundTarget(
+        result[field4],
         activitiesByFamily,
         diagnostics,
-        `Loop ${loop.id || loop.name || "?"}.${field2}`
+        `Loop ${loop.id || loop.name || "?"}.${field4}`
       );
     }
     return result;
@@ -2253,12 +2256,12 @@
       ...Object.values(recoveryRecipeOverrides).filter((recipe2) => containsResolvedActivity(recipe2, activity.familyId, activity.setId)).map((recipe2) => `Recovery:${recipe2.id}`)
     ]);
   }
-  function buildActivityBindingSession(input = {}) {
-    const results = (input.sets || []).map((set) => parseBasicUpgradeActivitySnapshot({ set }));
+  function buildActivityBindingSession(input2 = {}) {
+    const results = (input2.sets || []).map((set) => parseBasicUpgradeActivitySnapshot({ set }));
     const activitiesByFamily = /* @__PURE__ */ new Map();
     const activities = [
       ...results.filter((result) => result.status === "supported").flatMap((result) => result.activities || (result.activity ? [result.activity] : [])),
-      ...input.additionalActivities || []
+      ...input2.additionalActivities || []
     ];
     const seenActivities = /* @__PURE__ */ new Set();
     for (const activity of activities) {
@@ -2271,12 +2274,12 @@
     }
     const diagnostics = [];
     const loopOverrides = {};
-    for (const loop of input.configuredLoops || []) {
+    for (const loop of input2.configuredLoops || []) {
       const materialized = materializeLoop(loop, activitiesByFamily, diagnostics);
       if (JSON.stringify(materialized) !== JSON.stringify(loop)) loopOverrides[loop.id] = materialized;
     }
     const recoveryRecipeOverrides = {};
-    for (const recipe2 of input.recoveryRecipes || []) {
+    for (const recipe2 of input2.recoveryRecipes || []) {
       const materialized = materializeBoundTarget(
         recipe2,
         activitiesByFamily,
@@ -2349,8 +2352,8 @@
       return;
     }
     const allowedFields = /* @__PURE__ */ new Set(["rewardOfLoopId"]);
-    Object.keys(value).forEach((field2) => {
-      if (!allowedFields.has(field2)) errors.push(`${path}.${field2} is not supported`);
+    Object.keys(value).forEach((field4) => {
+      if (!allowedFields.has(field4)) errors.push(`${path}.${field4} is not supported`);
     });
     if (typeof value.rewardOfLoopId !== "string" || !value.rewardOfLoopId.trim()) {
       errors.push(`${path}.rewardOfLoopId is required`);
@@ -2366,8 +2369,8 @@
       return;
     }
     const allowedFields = /* @__PURE__ */ new Set(["family", "category", "required", "classes", "preference", "selectionMaterial"]);
-    Object.keys(value).forEach((field2) => {
-      if (!allowedFields.has(field2)) errors.push(`${path}.${field2} is not supported`);
+    Object.keys(value).forEach((field4) => {
+      if (!allowedFields.has(field4)) errors.push(`${path}.${field4} is not supported`);
     });
     if (typeof value.family !== "string" || !value.family.trim()) {
       errors.push(`${path}.family is required`);
@@ -2440,16 +2443,16 @@
     )) {
       errors.push(`${path}.goldConsumption ${spec.goldConsumption} conflicts with SBC rarity eligibility ${spec.rarity || "any"}`);
     }
-    ["minRating", "maxRating"].forEach((field2) => {
-      if (spec[field2] === void 0) return;
-      const rating = Number(spec[field2]);
+    ["minRating", "maxRating"].forEach((field4) => {
+      if (spec[field4] === void 0) return;
+      const rating = Number(spec[field4]);
       if (!Number.isFinite(rating) || rating < 1 || rating > 99) {
-        errors.push(`${path}.${field2} must be a number between 1 and 99`);
+        errors.push(`${path}.${field4} must be a number between 1 and 99`);
       }
     });
-    ["playerOnly", "allowSpecial", "special", "protectHighGold", "preferCommon"].forEach((field2) => {
-      if (spec[field2] !== void 0 && typeof spec[field2] !== "boolean") {
-        errors.push(`${path}.${field2} must be boolean`);
+    ["playerOnly", "allowSpecial", "special", "protectHighGold", "preferCommon"].forEach((field4) => {
+      if (spec[field4] !== void 0 && typeof spec[field4] !== "boolean") {
+        errors.push(`${path}.${field4} must be boolean`);
       }
     });
   }
@@ -2494,9 +2497,9 @@
       }
     }
     validatePileList(upgradeDef.priorityPiles, `${path}.priorityPiles`, errors);
-    ["openRewardPacks", "forceOpenRewardPacks"].forEach((field2) => {
-      if (upgradeDef[field2] !== void 0 && typeof upgradeDef[field2] !== "boolean") {
-        errors.push(`${path}.${field2} must be boolean`);
+    ["openRewardPacks", "forceOpenRewardPacks"].forEach((field4) => {
+      if (upgradeDef[field4] !== void 0 && typeof upgradeDef[field4] !== "boolean") {
+        errors.push(`${path}.${field4} must be boolean`);
       }
     });
   }
@@ -2552,8 +2555,8 @@
       if (step.name !== void 0 && (typeof step.name !== "string" || !step.name.trim())) {
         errors.push(`${stepPath}.name must be a non-empty string`);
       }
-      Object.keys(step).forEach((field2) => {
-        if (!allowedFields.has(field2)) errors.push(`${stepPath}.${field2} belongs on the referenced child loop definition`);
+      Object.keys(step).forEach((field4) => {
+        if (!allowedFields.has(field4)) errors.push(`${stepPath}.${field4} belongs on the referenced child loop definition`);
       });
       validateRewardFlow(step.rewardFlow, `${stepPath}.rewardFlow`, errors);
     });
@@ -2574,19 +2577,19 @@
       "openPicksAtEnd",
       "preferScannedMetadata"
     ]);
-    Object.keys(value).forEach((field2) => {
-      if (!allowedFields.has(field2)) errors.push(`${path}.${field2} is not supported`);
+    Object.keys(value).forEach((field4) => {
+      if (!allowedFields.has(field4)) errors.push(`${path}.${field4} is not supported`);
     });
-    ["protectHighGold", "autoSelect", "autoSelectBelow90", "openAtEnd", "openPicksAtEnd", "preferScannedMetadata"].forEach((field2) => {
-      if (value[field2] !== void 0 && typeof value[field2] !== "boolean") {
-        errors.push(`${path}.${field2} must be boolean`);
+    ["protectHighGold", "autoSelect", "autoSelectBelow90", "openAtEnd", "openPicksAtEnd", "preferScannedMetadata"].forEach((field4) => {
+      if (value[field4] !== void 0 && typeof value[field4] !== "boolean") {
+        errors.push(`${path}.${field4} must be boolean`);
       }
     });
-    ["highGoldThreshold", "autoPickThreshold"].forEach((field2) => {
-      if (value[field2] === void 0) return;
-      const number = Number(value[field2]);
+    ["highGoldThreshold", "autoPickThreshold"].forEach((field4) => {
+      if (value[field4] === void 0) return;
+      const number = Number(value[field4]);
       if (!Number.isFinite(number) || number < 1 || number > 99) {
-        errors.push(`${path}.${field2} must be a number between 1 and 99`);
+        errors.push(`${path}.${field4} must be a number between 1 and 99`);
       }
     });
   }
@@ -2644,17 +2647,17 @@
       return;
     }
     const allowedFields = /* @__PURE__ */ new Set(["mode", "lowRatedGoldMaxRating", "ratingSbcMaxCardRating"]);
-    Object.keys(value).forEach((field2) => {
-      if (!allowedFields.has(field2)) errors.push(`${path}.${field2} is not supported`);
+    Object.keys(value).forEach((field4) => {
+      if (!allowedFields.has(field4)) errors.push(`${path}.${field4} is not supported`);
     });
     if (value.mode !== void 0 && !SBC_FODDER_MODES.includes(value.mode)) {
       errors.push(`${path}.mode must be one of: ${SBC_FODDER_MODES.join(", ")}`);
     }
-    ["lowRatedGoldMaxRating", "ratingSbcMaxCardRating"].forEach((field2) => {
-      if (value[field2] === void 0) return;
-      const rating = Number(value[field2]);
+    ["lowRatedGoldMaxRating", "ratingSbcMaxCardRating"].forEach((field4) => {
+      if (value[field4] === void 0) return;
+      const rating = Number(value[field4]);
       if (!Number.isFinite(rating) || rating < 1 || rating > 99) {
-        errors.push(`${path}.${field2} must be a number between 1 and 99`);
+        errors.push(`${path}.${field4} must be a number between 1 and 99`);
       }
     });
   }
@@ -2670,11 +2673,11 @@
     if (value.target !== void 0 && !RUNTIME_QUANTITY_TARGETS.includes(value.target)) {
       errors.push(`${path}.target must be one of: ${RUNTIME_QUANTITY_TARGETS.join(", ")}`);
     }
-    ["default", "min", "max"].forEach((field2) => {
-      if (value[field2] === void 0) return;
-      const number = Number(value[field2]);
+    ["default", "min", "max"].forEach((field4) => {
+      if (value[field4] === void 0) return;
+      const number = Number(value[field4]);
       if (!Number.isInteger(number) || number < 1 || number > 1e3) {
-        errors.push(`${path}.${field2} must be an integer between 1 and 1000`);
+        errors.push(`${path}.${field4} must be an integer between 1 and 1000`);
       }
     });
     if (Number.isFinite(Number(value.min)) && Number.isFinite(Number(value.max)) && Number(value.min) > Number(value.max)) {
@@ -2698,9 +2701,9 @@
     if (loopDef.dryRun !== void 0 && typeof loopDef.dryRun !== "boolean") {
       errors.push("dryRun must be boolean");
     }
-    ["hidden", "mvp", "openRewardPacks", "openRewardPacksAtEnd", "blockSpecial", "blockTradeable", "inventoryFillFirst", "consumeAllSourcePacks", "exhaustSbcSet", "discoveryReportedCompleted", "respectFsuGoldRange"].forEach((field2) => {
-      if (loopDef[field2] !== void 0 && typeof loopDef[field2] !== "boolean") {
-        errors.push(`${field2} must be boolean`);
+    ["hidden", "mvp", "openRewardPacks", "openRewardPacksAtEnd", "blockSpecial", "blockTradeable", "inventoryFillFirst", "consumeAllSourcePacks", "exhaustSbcSet", "discoveryReportedCompleted", "respectFsuGoldRange"].forEach((field4) => {
+      if (loopDef[field4] !== void 0 && typeof loopDef[field4] !== "boolean") {
+        errors.push(`${field4} must be boolean`);
       }
     });
     validatePickOptions(loopDef.pickOptions, "pickOptions", errors);
@@ -2804,8 +2807,8 @@
         errors.push("preCraftPlayerPickSelector must be an object");
       } else {
         const allowedFields = /* @__PURE__ */ new Set(["material"]);
-        Object.keys(loopDef.preCraftPlayerPickSelector).forEach((field2) => {
-          if (!allowedFields.has(field2)) errors.push(`preCraftPlayerPickSelector.${field2} is not supported`);
+        Object.keys(loopDef.preCraftPlayerPickSelector).forEach((field4) => {
+          if (!allowedFields.has(field4)) errors.push(`preCraftPlayerPickSelector.${field4} is not supported`);
         });
         if (loopDef.preCraftPlayerPickSelector.material !== "common-gold") {
           errors.push("preCraftPlayerPickSelector.material must be common-gold");
@@ -3160,15 +3163,15 @@
     });
   }
   function normalizeLoopConfig(config) {
-    const input = Array.isArray(config) ? { loops: config } : config;
-    if (!isPlainObject(input) || !Array.isArray(input.loops)) {
+    const input2 = Array.isArray(config) ? { loops: config } : config;
+    if (!isPlainObject(input2) || !Array.isArray(input2.loops)) {
       fail("Loop config JSON must be an array or an object with a loops array");
     }
     return {
-      loops: input.loops,
-      recoveryRecipes: input.recoveryRecipes === void 0 ? RECOVERY_RECIPES : input.recoveryRecipes,
-      unassignedRecoveryPolicies: input.unassignedRecoveryPolicies === void 0 ? UNASSIGNED_RECOVERY_POLICIES : input.unassignedRecoveryPolicies,
-      defaultUnassignedRecoveryPolicyIds: input.defaultUnassignedRecoveryPolicyIds === void 0 ? DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS : input.defaultUnassignedRecoveryPolicyIds
+      loops: input2.loops,
+      recoveryRecipes: input2.recoveryRecipes === void 0 ? RECOVERY_RECIPES : input2.recoveryRecipes,
+      unassignedRecoveryPolicies: input2.unassignedRecoveryPolicies === void 0 ? UNASSIGNED_RECOVERY_POLICIES : input2.unassignedRecoveryPolicies,
+      defaultUnassignedRecoveryPolicyIds: input2.defaultUnassignedRecoveryPolicyIds === void 0 ? DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS : input2.defaultUnassignedRecoveryPolicyIds
     };
   }
   function validateLoopConfig(config, label = "Loop config") {
@@ -3423,9 +3426,9 @@
     return /(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)/i.test(text) && /player|card|item|resource|definition|asset|info[._\-\s]*lock|(^|[._\-\s])lock([._\-\s]|$)/i.test(text);
   }
   function isLikelyLockedIdValuePath(path = "", key = "") {
-    const field2 = String(key || "").replace(/^_+/, "");
-    if (/^\d+$/.test(field2)) return true;
-    if (/^(id|itemid|instanceid|resourceid|cardid|playerid|definitionid|defid|assetid|baseid|baseresourceid|guidassetid)$/i.test(field2)) return true;
+    const field4 = String(key || "").replace(/^_+/, "");
+    if (/^\d+$/.test(field4)) return true;
+    if (/^(id|itemid|instanceid|resourceid|cardid|playerid|definitionid|defid|assetid|baseid|baseresourceid|guidassetid)$/i.test(field4)) return true;
     return /(^|[._\-\s])(lock|locked|protect|protected)([._\-\s]|$)$/i.test(String(path || ""));
   }
   function addLockedPlayerValue(result, value, path = "", key = "") {
@@ -3458,8 +3461,8 @@
         addLockedPlayerValue(result, child, nextPath, key);
         if (!result.sources.includes(nextPath)) result.sources.push(nextPath);
       } else if (childLockContext && isInspectableObject(child)) {
-        ITEM_ID_FIELDS.forEach((field2) => addLockedPlayerValue(result, safeRead(child, field2), nextPath, field2));
-        DEFINITION_ID_FIELDS.forEach((field2) => addLockedPlayerValue(result, safeRead(child, field2), nextPath, field2));
+        ITEM_ID_FIELDS.forEach((field4) => addLockedPlayerValue(result, safeRead(child, field4), nextPath, field4));
+        DEFINITION_ID_FIELDS.forEach((field4) => addLockedPlayerValue(result, safeRead(child, field4), nextPath, field4));
       }
       if (isInspectableObject(child)) collectLockedPlayerIds(child, nextPath, result, depth + 1, seen, childLockContext);
     }
@@ -3493,10 +3496,10 @@
     const rows = flattenConfigValues(raw);
     const settings = { ...FSU_COMPAT_DEFAULTS, detected: true, source };
     let matched = false;
-    for (const [field2, aliases] of Object.entries(FSU_SETTING_ALIASES)) {
+    for (const [field4, aliases] of Object.entries(FSU_SETTING_ALIASES)) {
       const row = rows.find((entry) => aliases.some((pattern) => pattern.test(entry.path)) && boolFromAny(entry.value) !== null);
       if (!row) continue;
-      settings[field2] = boolFromAny(row.value);
+      settings[field4] = boolFromAny(row.value);
       matched = true;
     }
     const excludedLeagueRows = rows.filter(
@@ -3613,10 +3616,10 @@
       quantityMode: entry.quantityMode === "all" ? "all" : "fixed"
     });
   }
-  function normalizeBatchOpenPlan(input = {}) {
+  function normalizeBatchOpenPlan(input2 = {}) {
     const entries = [];
     const indexes = /* @__PURE__ */ new Map();
-    for (const rawEntry of input?.entries || []) {
+    for (const rawEntry of input2?.entries || []) {
       const entry = normalizeBatchOpenEntry(rawEntry);
       if (!entry) continue;
       const key = batchOpenEntryKey(entry);
@@ -3837,8 +3840,8 @@
       rewardIdentityValues: Object.freeze(rewardIdentityValues(reward))
     });
   }
-  function parsePlayerPickSbcSnapshot(input = {}) {
-    const set = input.set || {};
+  function parsePlayerPickSbcSnapshot(input2 = {}) {
+    const set = input2.set || {};
     const setId = positiveInteger3(set.id);
     const setName = normalizedText4(set.name);
     const diagnostics = [];
@@ -3882,7 +3885,7 @@
         const challengeLabel = `challenge ${index + 1}${challenge?.id ? ` (#${challenge.id})` : ""}`;
         challengeWarnings.push(`${challengeLabel}: inferred completed Challenge player count ${inferredCompletedChallengePlayerCount} from consistent sibling metadata`);
       }
-      const parsed = parseChallengeRequirements(challengeForParsing, index, input);
+      const parsed = parseChallengeRequirements(challengeForParsing, index, input2);
       if (parsed.ok) challengeRequirements.push(parsed.requirements);
       else diagnostics.push(...parsed.diagnostics);
     }
@@ -3896,7 +3899,7 @@
         diagnostics: unique2(diagnostics)
       };
     }
-    const priorityPiles = [...input.priorityPiles || DEFAULT_PRIORITY_PILES];
+    const priorityPiles = [...input2.priorityPiles || DEFAULT_PRIORITY_PILES];
     const loop = {
       id: `discovered-player-pick-${setId}-${identity.rewardIdentityValues[0]}`,
       name: setName,
@@ -3916,7 +3919,7 @@
       maxCompletions: 1,
       useRoundsAsCompletions: !reportedCompleted && !boundedSet,
       discoveryReportedCompleted: reportedCompleted,
-      pricePlatform: normalizedText4(input.pricePlatform || "pc").toLowerCase(),
+      pricePlatform: normalizedText4(input2.pricePlatform || "pc").toLowerCase(),
       discoveryIdentity: identity
     };
     if (loop.useRoundsAsCompletions) {
@@ -3980,12 +3983,12 @@
       matches
     };
   }
-  function discoverPlayerPickSbcLoops(input = {}) {
+  function discoverPlayerPickSbcLoops(input2 = {}) {
     const loops = [];
     const results = [];
-    const existingLoops = [...input.existingLoops || []];
-    for (const set of input.sets || []) {
-      const result = parsePlayerPickSbcSnapshot({ ...input, set });
+    const existingLoops = [...input2.existingLoops || []];
+    for (const set of input2.sets || []) {
+      const result = parsePlayerPickSbcSnapshot({ ...input2, set });
       const matches = result.status === "supported" ? matchingPlayerPickLoops(result.loop, [...existingLoops, ...loops]) : [];
       if (matches.length) {
         results.push({
@@ -4034,15 +4037,15 @@
     }
     return merged;
   }
-  function buildPlayerPickDiscoverySession(input = {}) {
-    const configuredLoops = [...input.configuredLoops || []];
+  function buildPlayerPickDiscoverySession(input2 = {}) {
+    const configuredLoops = [...input2.configuredLoops || []];
     const discovery = discoverPlayerPickSbcLoops({
-      ...input,
+      ...input2,
       existingLoops: configuredLoops
     });
     const loopOverrides = {};
     const overrideDiagnostics = [];
-    if (input.preferScannedMetadata === true) {
+    if (input2.preferScannedMetadata === true) {
       for (const result of discovery.results) {
         if (result.status !== "duplicate" || !result.discoveredLoop) continue;
         const matches = matchingPlayerPickLoops(result.discoveredLoop, configuredLoops).filter((loop) => loop?.strategy === "playerPickSbc");
@@ -4059,7 +4062,7 @@
     const configuredSessionLoops = configuredLoops.map((loop) => loopOverrides[loop?.id] || loop);
     const discoveredLoops = [...discovery.loops];
     const loopDefs = [...configuredSessionLoops, ...discoveredLoops];
-    const requestedSelection = normalizedText4(input.selectedId);
+    const requestedSelection = normalizedText4(input2.selectedId);
     const selectedId = requestedSelection === "custom" || loopDefs.some((loop) => loop?.id === requestedSelection) ? requestedSelection : loopDefs[0]?.id || null;
     return {
       ...discovery,
@@ -4366,8 +4369,8 @@
     result.dynamicActiveChallengeId = challengeId;
     return result;
   }
-  function parseDynamicUpgradeSbcSnapshot(input = {}) {
-    const set = input.set || {};
+  function parseDynamicUpgradeSbcSnapshot(input2 = {}) {
+    const set = input2.set || {};
     const setId = positiveInteger4(set.id);
     const setName = normalizedText5(set.name);
     const family = detectDynamicUpgradeFamily(set);
@@ -4542,12 +4545,12 @@
     }
     return merged;
   }
-  function buildUpgradeDiscoverySession(input = {}) {
-    const configuredLoops = [...input.configuredLoops || []];
+  function buildUpgradeDiscoverySession(input2 = {}) {
+    const configuredLoops = [...input2.configuredLoops || []];
     const discoveredLoops = [];
     const loopOverrides = {};
     const results = [];
-    for (const set of input.sets || []) {
+    for (const set of input2.sets || []) {
       const parsed = parseDynamicUpgradeSbcSnapshot({
         set
       });
@@ -4713,7 +4716,7 @@
     }
     function findButtonByText(patterns, matches) {
       return queryAll("button").find(
-        (button3) => matches(compactText(button3), patterns) && isClickable(button3)
+        (button5) => matches(compactText(button5), patterns) && isClickable(button5)
       ) || null;
     }
     function findClickableByText(patterns, matches, root = documentObject) {
@@ -5567,61 +5570,61 @@
       pile: String(pile || "unknown")
     });
   }
-  function createInventorySnapshot(input = {}) {
+  function createInventorySnapshot(input2 = {}) {
     const piles = {};
     for (const pile of INVENTORY_PILES2) {
-      piles[pile] = Object.freeze((input.piles?.[pile] || []).map(
+      piles[pile] = Object.freeze((input2.piles?.[pile] || []).map(
         (item) => item?.ref ? Object.freeze({ ...cloneSerializable(item), pile, ref: createItemRef(item.ref, pile) }) : createItemSnapshot(item, pile)
       ));
     }
     const capacities = {};
     for (const pile of INVENTORY_PILES2) {
-      const capacity = input.capacities?.[pile] || {};
+      const capacity = input2.capacities?.[pile] || {};
       const used = finiteNumber(capacity.used, piles[pile].length);
       const max = Number.isFinite(Number(capacity.max)) ? Number(capacity.max) : null;
       capacities[pile] = Object.freeze({ used, max, free: max === null ? null : Math.max(0, max - used) });
     }
     return Object.freeze({
       version: 1,
-      capturedAt: String(input.capturedAt || (/* @__PURE__ */ new Date()).toISOString()),
+      capturedAt: String(input2.capturedAt || (/* @__PURE__ */ new Date()).toISOString()),
       piles: Object.freeze(piles),
       capacities: Object.freeze(capacities)
     });
   }
-  function createSelectionPlan(input = {}) {
+  function createSelectionPlan(input2 = {}) {
     return Object.freeze({
-      ok: input.ok === true,
-      mode: String(input.mode || "requirements"),
-      entries: Object.freeze(cloneSerializable(input.entries || [])),
-      selected: Object.freeze(cloneSerializable(input.selected || [])),
-      missing: cloneSerializable(input.missing ?? null),
-      pileCounts: Object.freeze({ ...input.pileCounts || {} }),
-      duplicateSignals: Object.freeze(cloneSerializable(input.duplicateSignals || [])),
-      diagnostics: Object.freeze(cloneSerializable(input.diagnostics || [])),
-      details: Object.freeze(cloneSerializable(input.details || {}))
+      ok: input2.ok === true,
+      mode: String(input2.mode || "requirements"),
+      entries: Object.freeze(cloneSerializable(input2.entries || [])),
+      selected: Object.freeze(cloneSerializable(input2.selected || [])),
+      missing: cloneSerializable(input2.missing ?? null),
+      pileCounts: Object.freeze({ ...input2.pileCounts || {} }),
+      duplicateSignals: Object.freeze(cloneSerializable(input2.duplicateSignals || [])),
+      diagnostics: Object.freeze(cloneSerializable(input2.diagnostics || [])),
+      details: Object.freeze(cloneSerializable(input2.details || {}))
     });
   }
-  function createSubmissionResult(input = {}) {
+  function createSubmissionResult(input2 = {}) {
     return Object.freeze({
-      status: String(input.status || "blocked"),
-      submitted: input.submitted === true,
-      challengeRef: cloneSerializable(input.challengeRef ?? null),
-      consumedItemRefs: Object.freeze(cloneSerializable(input.consumedItemRefs || [])),
-      rewardPackId: input.rewardPackId === void 0 || input.rewardPackId === null ? null : finiteNumber(input.rewardPackId),
-      reason: input.reason ? String(input.reason) : null
+      status: String(input2.status || "blocked"),
+      submitted: input2.submitted === true,
+      challengeRef: cloneSerializable(input2.challengeRef ?? null),
+      consumedItemRefs: Object.freeze(cloneSerializable(input2.consumedItemRefs || [])),
+      rewardPackId: input2.rewardPackId === void 0 || input2.rewardPackId === null ? null : finiteNumber(input2.rewardPackId),
+      reason: input2.reason ? String(input2.reason) : null
     });
   }
-  function createOpenPackReceipt(input = {}) {
+  function createOpenPackReceipt(input2 = {}) {
     return Object.freeze({
-      status: String(input.status || "blocked"),
-      packRef: cloneSerializable(input.packRef ?? null),
-      openedItems: Object.freeze(cloneSerializable(input.openedItems || [])),
-      reservedItemRefs: Object.freeze(cloneSerializable(input.reservedItemRefs || [])),
-      routedItemRefs: Object.freeze(cloneSerializable(input.routedItemRefs || [])),
-      pendingItemRefs: Object.freeze(cloneSerializable(input.pendingItemRefs || [])),
-      attempts: Math.max(0, finiteNumber(input.attempts)),
-      reason: input.reason ? String(input.reason) : null,
-      details: Object.freeze(cloneSerializable(input.details || {}))
+      status: String(input2.status || "blocked"),
+      packRef: cloneSerializable(input2.packRef ?? null),
+      openedItems: Object.freeze(cloneSerializable(input2.openedItems || [])),
+      reservedItemRefs: Object.freeze(cloneSerializable(input2.reservedItemRefs || [])),
+      routedItemRefs: Object.freeze(cloneSerializable(input2.routedItemRefs || [])),
+      pendingItemRefs: Object.freeze(cloneSerializable(input2.pendingItemRefs || [])),
+      attempts: Math.max(0, finiteNumber(input2.attempts)),
+      reason: input2.reason ? String(input2.reason) : null,
+      details: Object.freeze(cloneSerializable(input2.details || {}))
     });
   }
 
@@ -5681,9 +5684,9 @@
     "_rawData"
   ];
   function identityIds(item) {
-    const holders = [item, ...IDENTITY_HOLDERS.map((field2) => item?.[field2])].filter((holder) => holder && typeof holder === "object");
-    const values = holders.flatMap((holder) => IDENTITY_FIELDS.flatMap((field2) => {
-      const value = holder?.[field2];
+    const holders = [item, ...IDENTITY_HOLDERS.map((field4) => item?.[field4])].filter((holder) => holder && typeof holder === "object");
+    const values = holders.flatMap((holder) => IDENTITY_FIELDS.flatMap((field4) => {
+      const value = holder?.[field4];
       if (Array.isArray(value)) return value;
       if (typeof value === "string") return value.match(/\d+/g) || [];
       return [value];
@@ -6199,7 +6202,7 @@
         return [];
       }
     }
-    function positiveInteger12(value) {
+    function positiveInteger14(value) {
       const number = Number(value);
       return Number.isInteger(number) && number > 0 ? number : null;
     }
@@ -6210,7 +6213,7 @@
     }
     function firstPositiveInteger(values = []) {
       for (const value of values) {
-        const number = positiveInteger12(value);
+        const number = positiveInteger14(value);
         if (number) return number;
       }
       return null;
@@ -6245,14 +6248,14 @@
       const values = {};
       for (const key of keys) {
         if (!/(pick|choice|select|count|amount|option|resource|definition|asset|item|name|description|id)/i.test(key)) continue;
-        let field2;
+        let field4;
         try {
-          field2 = value[key];
+          field4 = value[key];
         } catch {
           continue;
         }
-        if (!["string", "number", "boolean"].includes(typeof field2)) continue;
-        values[key] = typeof field2 === "string" ? field2.slice(0, 160) : field2;
+        if (!["string", "number", "boolean"].includes(typeof field4)) continue;
+        values[key] = typeof field4 === "string" ? field4.slice(0, 160) : field4;
       }
       return { keys, prototypeKeys, values };
     }
@@ -6265,7 +6268,7 @@
         item?._data?.definitionId,
         staticData?.definitionId
       ]);
-      const itemId2 = positiveInteger12(item?.id);
+      const itemId2 = positiveInteger14(item?.id);
       return {
         type: "PLAYER_PICK",
         name: String(item?.name || staticData?.name || staticData?.description || "").trim(),
@@ -6398,9 +6401,9 @@
     function normalizeDiscoveryCategory(category) {
       const setIds = collectionValues4(
         category?.setIds || category?.sets || category?.data?.setIds || category?.data?.sets
-      ).map((entry) => positiveInteger12(entry?.id || entry)).filter(Boolean);
+      ).map((entry) => positiveInteger14(entry?.id || entry)).filter(Boolean);
       return {
-        id: positiveInteger12(category?.id || category?.categoryId || category?.data?.id),
+        id: positiveInteger14(category?.id || category?.categoryId || category?.data?.id),
         name: String(
           category?.name || category?.description || category?.displayName || category?.data?.name || category?.data?.description || ""
         ).trim(),
@@ -6424,12 +6427,12 @@
       return [...byKey.values()];
     }
     function discoveryCategoryMembership(set, refreshResult = null) {
-      const setId = positiveInteger12(set?.id);
+      const setId = positiveInteger14(set?.id);
       const directCategories = collectionValues4(
         set?.categoryIds || set?.categories || set?.data?.categoryIds || set?.data?.categories
-      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger12(entry), name: "", setIds: [] });
+      ).map((entry) => typeof entry === "object" ? normalizeDiscoveryCategory(entry) : { id: positiveInteger14(entry), name: "", setIds: [] });
       const directIds = directCategories.map((category) => category.id).filter(Boolean);
-      const directCategoryId = positiveInteger12(set?.categoryId || set?.data?.categoryId);
+      const directCategoryId = positiveInteger14(set?.categoryId || set?.data?.categoryId);
       if (directCategoryId) directIds.push(directCategoryId);
       const categories = listDiscoveryCategories(refreshResult);
       const matching = [
@@ -6452,7 +6455,7 @@
         set?.challenges,
         set?._challenges
       ];
-      return [...new Set(sources.flatMap((source) => collectionValues4(source)).map((entry) => positiveInteger12(entry?.id || entry)).filter(Boolean))];
+      return [...new Set(sources.flatMap((source) => collectionValues4(source)).map((entry) => positiveInteger14(entry?.id || entry)).filter(Boolean))];
     }
     function discoveryRequiredPlayerCount(challenge) {
       const explicit = firstPositiveInteger([
@@ -6462,13 +6465,13 @@
       ]);
       if (explicit) return explicit;
       try {
-        const squadCount = positiveInteger12(challenge?.squad?.getNumOfRequiredPlayers?.());
+        const squadCount = positiveInteger14(challenge?.squad?.getNumOfRequiredPlayers?.());
         if (squadCount) return squadCount;
       } catch {
       }
       if (!challenge?.squad) return null;
       const challengeFormation = formation(challenge?.formation);
-      const formationCount = positiveInteger12(challengeFormation?.generalPositions?.length);
+      const formationCount = positiveInteger14(challengeFormation?.generalPositions?.length);
       if (!formationCount) return null;
       try {
         const brickCount = challenge.squad.getAllBrickIndices?.()?.length;
@@ -6485,7 +6488,7 @@
     }
     function normalizeDiscoveryChallenge(challenge) {
       return {
-        id: positiveInteger12(challenge?.id),
+        id: positiveInteger14(challenge?.id),
         status: String(challenge?.status || challenge?.state || ""),
         completed: challenge?.completed === true || (() => {
           try {
@@ -6509,7 +6512,7 @@
       const rawAwards = collectionValues4(set?.awards || set?.data?.awards);
       const category = discoveryCategoryMembership(set, refreshResult);
       return {
-        id: positiveInteger12(set?.id),
+        id: positiveInteger14(set?.id),
         name: String(set?.name || set?.data?.name || "").trim(),
         status: String(set?.status || set?.state || ""),
         complete: (() => {
@@ -6667,6 +6670,14 @@
   function pushPositiveNumber(value, path, errors) {
     if (!Number.isFinite(Number(value)) || Number(value) <= 0) errors.push(`${path} must be a positive number`);
   }
+  function validTimeZone(value) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: String(value || "") }).format(/* @__PURE__ */ new Date(0));
+      return true;
+    } catch {
+      return false;
+    }
+  }
   function validateSchedule(schedule, path, errors) {
     if (!isPlainObject(schedule)) {
       errors.push(`${path} must be an object`);
@@ -6682,6 +6693,9 @@
         errors.push(`${path}.time must use HH:mm`);
       }
       pushRequiredString(schedule.timezone, `${path}.timezone`, errors);
+      if (typeof schedule.timezone === "string" && schedule.timezone.trim() && !validTimeZone(schedule.timezone)) {
+        errors.push(`${path}.timezone must be a valid IANA timezone`);
+      }
     }
     if (schedule.type === "interval") pushPositiveNumber(schedule.everyMinutes, `${path}.everyMinutes`, errors);
     if (schedule.type === "window") {
@@ -6718,13 +6732,13 @@
       return;
     }
     validateCardClass(policy.cardClass, `${path}.cardClass`, errors);
-    for (const field2 of ["ratingMin", "ratingMax"]) {
-      const rating = Number(policy[field2]);
-      if (!Number.isInteger(rating) || rating < 1 || rating > 99) errors.push(`${path}.${field2} must be an integer between 1 and 99`);
+    for (const field4 of ["ratingMin", "ratingMax"]) {
+      const rating = Number(policy[field4]);
+      if (!Number.isInteger(rating) || rating < 1 || rating > 99) errors.push(`${path}.${field4} must be an integer between 1 and 99`);
     }
     if (Number(policy.ratingMax) < Number(policy.ratingMin)) errors.push(`${path}.ratingMax must be greater than or equal to ratingMin`);
-    for (const field2 of ["maxBuyNow", "quantity", "totalBudget", "maxRuntimeMinutes", "maxConsecutiveEmptySearches"]) {
-      pushPositiveNumber(policy[field2], `${path}.${field2}`, errors);
+    for (const field4 of ["maxBuyNow", "quantity", "totalBudget", "maxRuntimeMinutes", "maxConsecutiveEmptySearches"]) {
+      pushPositiveNumber(policy[field4], `${path}.${field4}`, errors);
     }
     if (Number(policy.maxPurchasesPerSearch) !== 1) errors.push(`${path}.maxPurchasesPerSearch must be 1`);
     validateDelayRange(policy.searchDelaySeconds, `${path}.searchDelaySeconds`, errors);
@@ -6788,28 +6802,28 @@
       errors.push(`${path}.startPricePolicy must be one-step-below or same`);
     }
     if (!["skip", "reprice"].includes(policy.expiredPolicy)) errors.push(`${path}.expiredPolicy must be skip or reprice`);
-    for (const field2 of ["durationSeconds", "maxListings"]) pushPositiveNumber(policy[field2], `${path}.${field2}`, errors);
+    for (const field4 of ["durationSeconds", "maxListings"]) pushPositiveNumber(policy[field4], `${path}.${field4}`, errors);
     validateDelayRange(policy.listingDelaySeconds, `${path}.listingDelaySeconds`, errors);
   }
   function validateTradeJob(job, label = "Trade job") {
     const errors = [];
     if (!isPlainObject(job)) return [`${label} must be an object`];
-    for (const field2 of Object.keys(job)) {
-      if (!TOP_LEVEL_FIELDS.has(field2)) errors.push(`${label}.${field2} is not supported`);
+    for (const field4 of Object.keys(job)) {
+      if (!TOP_LEVEL_FIELDS.has(field4)) errors.push(`${label}.${field4} is not supported`);
     }
     if (Number(job.schemaVersion) !== TRADE_SCHEMA_VERSION) errors.push(`${label}.schemaVersion must be ${TRADE_SCHEMA_VERSION}`);
     pushRequiredString(job.id, `${label}.id`, errors);
     pushRequiredString(job.name, `${label}.name`, errors);
     if (!TRADE_JOB_TYPES.includes(job.type)) errors.push(`${label}.type must be one of: ${TRADE_JOB_TYPES.join(", ")}`);
-    for (const field2 of ["enabled", "armed"]) {
-      if (typeof job[field2] !== "boolean") errors.push(`${label}.${field2} must be boolean`);
+    for (const field4 of ["enabled", "armed"]) {
+      if (typeof job[field4] !== "boolean") errors.push(`${label}.${field4} must be boolean`);
     }
     validateSchedule(job.schedule, `${label}.schedule`, errors);
     validateMisfirePolicy(job.misfirePolicy, `${label}.misfirePolicy`, errors);
     if (job.type === "buy") validateBuyPolicy(job.policy, `${label}.policy`, errors);
     if (job.type === "listing") validateListingPolicy(job.policy, `${label}.policy`, errors);
-    for (const field2 of ["createdAt", "updatedAt"]) {
-      if (!Number.isFinite(Number(job[field2])) || Number(job[field2]) < 0) errors.push(`${label}.${field2} must be a non-negative epoch value`);
+    for (const field4 of ["createdAt", "updatedAt"]) {
+      if (!Number.isFinite(Number(job[field4])) || Number(job[field4]) < 0) errors.push(`${label}.${field4} must be a non-negative epoch value`);
     }
     return errors;
   }
@@ -6879,71 +6893,71 @@
       expiredPolicy: String(value.expiredPolicy || "reprice")
     };
   }
-  function normalizeTradeJob(input = {}, options = {}) {
+  function normalizeTradeJob(input2 = {}, options = {}) {
     const now = Math.max(0, finiteNumber2(options.now, Date.now()));
-    const type = TRADE_JOB_TYPES.includes(input.type) ? input.type : String(input.type || "");
+    const type = TRADE_JOB_TYPES.includes(input2.type) ? input2.type : String(input2.type || "");
     const normalized = {
       schemaVersion: TRADE_SCHEMA_VERSION,
-      id: String(input.id || "").trim(),
-      name: String(input.name || "").trim(),
+      id: String(input2.id || "").trim(),
+      name: String(input2.name || "").trim(),
       type,
-      enabled: input.enabled === true,
-      armed: options.imported === true ? false : input.armed === true,
-      schedule: normalizeSchedule(input.schedule),
-      misfirePolicy: normalizeMisfirePolicy(input.misfirePolicy),
-      policy: type === "buy" ? normalizeBuyPolicy(input.policy) : normalizeListingPolicy(input.policy),
-      createdAt: Math.max(0, finiteNumber2(input.createdAt, now)),
-      updatedAt: Math.max(0, finiteNumber2(input.updatedAt, now))
+      enabled: input2.enabled === true,
+      armed: options.imported === true ? false : input2.armed === true,
+      schedule: normalizeSchedule(input2.schedule),
+      misfirePolicy: normalizeMisfirePolicy(input2.misfirePolicy),
+      policy: type === "buy" ? normalizeBuyPolicy(input2.policy) : normalizeListingPolicy(input2.policy),
+      createdAt: Math.max(0, finiteNumber2(input2.createdAt, now)),
+      updatedAt: Math.max(0, finiteNumber2(input2.updatedAt, now))
     };
     assertValidTradeJob(normalized);
     return normalized;
   }
-  function createTradeRunReceipt(input = {}) {
+  function createTradeRunReceipt(input2 = {}) {
     return {
-      runId: String(input.runId || ""),
-      jobId: String(input.jobId || ""),
-      jobType: String(input.jobType || ""),
-      scheduledFor: Math.max(0, finiteNumber2(input.scheduledFor)),
-      startedAt: Math.max(0, finiteNumber2(input.startedAt)),
-      finishedAt: Math.max(0, finiteNumber2(input.finishedAt)),
-      status: String(input.status || "blocked"),
-      reason: input.reason === void 0 || input.reason === null ? null : String(input.reason),
-      requested: Math.max(0, positiveInteger7(input.requested, 0)),
-      succeeded: Math.max(0, positiveInteger7(input.succeeded, 0)),
-      failed: Math.max(0, positiveInteger7(input.failed, 0)),
-      skipped: Math.max(0, positiveInteger7(input.skipped, 0)),
-      coinsBefore: nullableFiniteNumber(input.coinsBefore),
-      coinsAfter: nullableFiniteNumber(input.coinsAfter),
-      receipts: cloneSerializable2(input.receipts || [])
+      runId: String(input2.runId || ""),
+      jobId: String(input2.jobId || ""),
+      jobType: String(input2.jobType || ""),
+      scheduledFor: Math.max(0, finiteNumber2(input2.scheduledFor)),
+      startedAt: Math.max(0, finiteNumber2(input2.startedAt)),
+      finishedAt: Math.max(0, finiteNumber2(input2.finishedAt)),
+      status: String(input2.status || "blocked"),
+      reason: input2.reason === void 0 || input2.reason === null ? null : String(input2.reason),
+      requested: Math.max(0, positiveInteger7(input2.requested, 0)),
+      succeeded: Math.max(0, positiveInteger7(input2.succeeded, 0)),
+      failed: Math.max(0, positiveInteger7(input2.failed, 0)),
+      skipped: Math.max(0, positiveInteger7(input2.skipped, 0)),
+      coinsBefore: nullableFiniteNumber(input2.coinsBefore),
+      coinsAfter: nullableFiniteNumber(input2.coinsAfter),
+      receipts: cloneSerializable2(input2.receipts || [])
     };
   }
-  function createTradeCapabilitySnapshot(input = {}) {
-    const capacity = input.transferCapacity || {};
+  function createTradeCapabilitySnapshot(input2 = {}) {
+    const capacity = input2.transferCapacity || {};
     const max = nullableFiniteNumber(capacity.max);
     const used = nullableFiniteNumber(capacity.used);
     return {
       schemaVersion: TRADE_SCHEMA_VERSION,
-      capturedAt: Math.max(0, finiteNumber2(input.capturedAt, Date.now())),
-      runtimeReady: input.runtimeReady === true,
-      canTrade: input.canTrade === true,
+      capturedAt: Math.max(0, finiteNumber2(input2.capturedAt, Date.now())),
+      runtimeReady: input2.runtimeReady === true,
+      canTrade: input2.canTrade === true,
       tradeAccess: {
-        available: input.tradeAccess?.available === true,
-        allowed: typeof input.tradeAccess?.allowed === "boolean" ? input.tradeAccess.allowed : null,
-        level: ["string", "number", "boolean"].includes(typeof input.tradeAccess?.level) ? input.tradeAccess.level : null
+        available: input2.tradeAccess?.available === true,
+        allowed: typeof input2.tradeAccess?.allowed === "boolean" ? input2.tradeAccess.allowed : null,
+        level: ["string", "number", "boolean"].includes(typeof input2.tradeAccess?.level) ? input2.tradeAccess.level : null
       },
-      coins: nullableFiniteNumber(input.coins),
+      coins: nullableFiniteNumber(input2.coins),
       transferCapacity: {
         used,
         max,
         free: used !== null && max !== null ? Math.max(0, max - used) : null
       },
       criteria: {
-        constructorAvailable: input.criteria?.constructorAvailable === true,
-        fields: [...new Set((input.criteria?.fields || []).map(String))].sort(),
-        defaults: cloneSerializable2(input.criteria?.defaults || {})
+        constructorAvailable: input2.criteria?.constructorAvailable === true,
+        fields: [...new Set((input2.criteria?.fields || []).map(String))].sort(),
+        defaults: cloneSerializable2(input2.criteria?.defaults || {})
       },
-      methods: Object.fromEntries(Object.entries(input.methods || {}).map(([name, available]) => [String(name), available === true])),
-      warnings: [...new Set((input.warnings || []).map(String).filter(Boolean))]
+      methods: Object.fromEntries(Object.entries(input2.methods || {}).map(([name, available]) => [String(name), available === true])),
+      warnings: [...new Set((input2.warnings || []).map(String).filter(Boolean))]
     };
   }
 
@@ -6953,8 +6967,22 @@
     windowMs: 6e4,
     cooldownMs: 15 * 6e4
   });
+  function finiteNumber3(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
   function errorCode(error) {
-    const candidates = [error?.code, error?.status, error?.statusCode, error?.error?.code, error?.response?.status];
+    const candidates = [
+      error?.code,
+      error?.status,
+      error?.statusCode,
+      error?.error?.code,
+      error?.error?.status,
+      error?.error?.statusCode,
+      error?.response?.status,
+      error?.response?.statusCode,
+      error?.response?.error?.code
+    ];
     for (const value of candidates) {
       const number = Number(value);
       if (Number.isFinite(number) && number > 0) return number;
@@ -6969,6 +6997,18 @@
     const code = errorCode(error);
     const message = messageText(error);
     const text = `${String(error?.kind || "")} ${message}`.toLowerCase();
+    if (code === 427) {
+      return {
+        kind: "auction-operation-blocked",
+        code,
+        action: "stop-and-require-manual-reset",
+        retryable: false,
+        opensCircuit: true,
+        persistent: true,
+        disarm: true,
+        ambiguous: false
+      };
+    }
     if (code === 429 || /too many requests|rate.?limit/.test(text)) {
       return { kind: "rate-limit", code, action: "stop-and-cooldown", retryable: false, opensCircuit: true, disarm: false, ambiguous: false };
     }
@@ -6997,6 +7037,53 @@
       return { kind: "ambiguous-transport", code, action: "reconcile-and-stop-if-unknown", retryable: false, opensCircuit: false, disarm: false, ambiguous: true };
     }
     return { kind: "service-error", code, action: "stop", retryable: false, opensCircuit: false, disarm: false, ambiguous: false };
+  }
+  function createTradeCircuitState(input2 = {}) {
+    return {
+      state: ["closed", "open", "half-open"].includes(input2.state) ? input2.state : "closed",
+      failureTimes: (input2.failureTimes || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b),
+      openedAt: Number.isFinite(Number(input2.openedAt)) ? Number(input2.openedAt) : null,
+      retryAt: Number.isFinite(Number(input2.retryAt)) ? Number(input2.retryAt) : null,
+      reason: input2.reason ? String(input2.reason) : null,
+      persistent: input2.persistent === true
+    };
+  }
+  function tradeCircuitAvailability(stateInput = {}, nowInput = Date.now()) {
+    const state = createTradeCircuitState(stateInput);
+    const now = finiteNumber3(nowInput, Date.now());
+    if (state.state === "open" && state.persistent) {
+      return { allowed: false, probe: false, state };
+    }
+    if (state.state === "open" && state.retryAt !== null && now >= state.retryAt) {
+      return { allowed: true, probe: true, state: { ...state, state: "half-open" } };
+    }
+    return { allowed: state.state !== "open", probe: state.state === "half-open", state };
+  }
+  function reduceTradeCircuit(stateInput, event = {}, configInput = {}) {
+    const config = { ...DEFAULT_CIRCUIT_CONFIG, ...configInput };
+    const now = finiteNumber3(event.at, Date.now());
+    const state = createTradeCircuitState(stateInput);
+    if (event.type === "success") return createTradeCircuitState();
+    if (event.type === "reset") return createTradeCircuitState();
+    if (event.type === "tick") return tradeCircuitAvailability(state, now).state;
+    if (event.type !== "failure") return state;
+    const classification = event.classification || classifyTradeError(event.error);
+    const windowStart = now - Math.max(1, finiteNumber3(config.windowMs, DEFAULT_CIRCUIT_CONFIG.windowMs));
+    const failureTimes = [...state.failureTimes.filter((time) => time >= windowStart), now];
+    const threshold = Math.max(1, Math.floor(finiteNumber3(config.failureThreshold, DEFAULT_CIRCUIT_CONFIG.failureThreshold)));
+    if (classification.opensCircuit === true || state.state === "half-open" || failureTimes.length >= threshold) {
+      const cooldownMs = Math.max(1, finiteNumber3(config.cooldownMs, DEFAULT_CIRCUIT_CONFIG.cooldownMs));
+      const persistent = classification.persistent === true;
+      return {
+        state: "open",
+        failureTimes,
+        openedAt: now,
+        retryAt: persistent ? null : now + cooldownMs,
+        reason: classification.kind || "failure-threshold",
+        persistent
+      };
+    }
+    return { ...state, state: "closed", failureTimes };
   }
 
   // src/adapters/ea/trade.js
@@ -7115,11 +7202,11 @@
     }
     try {
       const criteria = new runtime.UTSearchCriteriaDTO();
-      const fields = CRITERIA_FIELDS.filter((field2) => field2 in criteria);
+      const fields = CRITERIA_FIELDS.filter((field4) => field4 in criteria);
       return {
         constructorAvailable: true,
         fields,
-        defaults: Object.fromEntries(fields.map((field2) => [field2, safePrimitive(criteria[field2])]))
+        defaults: Object.fromEntries(fields.map((field4) => [field4, safePrimitive(criteria[field4])]))
       };
     } catch {
       return { constructorAvailable: false, fields: [], defaults: {} };
@@ -7243,11 +7330,14 @@
     };
   }
   function responseSummary(response) {
-    return {
+    const summary = {
       success: response?.success === true,
       status: Number.isFinite(Number(response?.status)) ? Number(response.status) : null,
       code: Number.isFinite(Number(response?.error?.code ?? response?.code)) ? Number(response?.error?.code ?? response?.code) : null
     };
+    const message = String(response?.error?.message || response?.message || response?.reason || "").trim();
+    if (message) summary.message = message.slice(0, 200);
+    return summary;
   }
   function observeResult(value, context = {}) {
     if (value && typeof value.then === "function") return Promise.resolve(value);
@@ -7267,6 +7357,18 @@
     });
   }
   function createEaTradeAdapter(runtime) {
+    const marketItems = /* @__PURE__ */ new Map();
+    function marketItemKey(ref = {}) {
+      const id = Number(ref.id || 0);
+      const tradeId = Number(ref.tradeId ?? ref.auction?.tradeId ?? 0);
+      return id > 0 && tradeId > 0 ? `${id}:${tradeId}` : null;
+    }
+    function rememberMarketItem(item) {
+      const auction = auctionSnapshot(item);
+      const key = marketItemKey({ id: item?.id, tradeId: auction.tradeId });
+      if (key) marketItems.set(key, item);
+      return auction;
+    }
     function inspectCapabilities() {
       const service = runtime?.services?.Item;
       const repository = runtime?.repositories?.Item;
@@ -7417,7 +7519,7 @@
         ), options.observerContext || {});
         const summary = responseSummary(response);
         if (summary.success) return { status: "accepted", item, requested, response: summary, error: null };
-        const classification = classifyTradeError(response?.error || response || {});
+        const classification = classifyTradeError(response || {});
         return {
           status: "rejected",
           item,
@@ -7453,13 +7555,249 @@
         };
       }
     }
+    async function searchMarket(request = {}, options = {}) {
+      const service = runtime?.services?.Item;
+      const definitionId2 = Number(request.definitionId);
+      const maxBuyNow = Number(request.maxBuyNow);
+      const page = Math.max(1, Math.floor(Number(request.page || 1)));
+      const normalizedRequest = { definitionId: definitionId2, maxBuyNow, page };
+      if (!Number.isInteger(definitionId2) || definitionId2 <= 0 || !Number.isFinite(maxBuyNow) || maxBuyNow <= 0) {
+        return { status: "invalid-request", request: normalizedRequest, response: null, candidates: [], error: null };
+      }
+      if (typeof runtime?.UTSearchCriteriaDTO !== "function" || typeof service?.searchTransferMarket !== "function") {
+        return { status: "unsupported", request: normalizedRequest, response: null, candidates: [], error: null };
+      }
+      try {
+        const criteria = new runtime.UTSearchCriteriaDTO();
+        criteria.defId = [definitionId2];
+        criteria.type = runtime?.SearchType?.PLAYER ?? "player";
+        criteria.category = runtime?.SearchCategory?.ANY ?? "any";
+        criteria.maxBuy = maxBuyNow;
+        marketItems.clear();
+        service.clearTransferMarketCache?.();
+        const response = await observeResult(
+          service.searchTransferMarket(criteria, page),
+          options.observerContext || {}
+        );
+        const summary = responseSummary(response);
+        if (!summary.success) {
+          const classification = classifyTradeError(response || {});
+          return {
+            status: "rejected",
+            request: normalizedRequest,
+            response: summary,
+            candidates: [],
+            error: { kind: classification.kind, code: classification.code, action: classification.action }
+          };
+        }
+        const inventory = createEaInventoryAdapter(runtime);
+        const candidates = Array.from(response?.data?.items || []).map((item) => {
+          rememberMarketItem(item);
+          return listingCandidateSnapshot(inventory, item, "market");
+        });
+        return { status: "completed", request: normalizedRequest, response: summary, candidates, error: null };
+      } catch (error) {
+        const classification = classifyTradeError(error);
+        return {
+          status: classification.ambiguous ? "ambiguous" : "error",
+          request: normalizedRequest,
+          response: null,
+          candidates: [],
+          error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) }
+        };
+      }
+    }
+    async function buyNowItem(ref = {}, priceInput = 0, options = {}) {
+      const service = runtime?.services?.Item;
+      const price = Number(priceInput);
+      const key = marketItemKey(ref);
+      const liveItem = key ? marketItems.get(key) : null;
+      const item = liveItem ? {
+        id: Number(liveItem.id || 0),
+        definitionId: Number(liveItem.definitionId || 0),
+        pile: "market"
+      } : null;
+      if (!liveItem) return { status: "not-found", item: null, tradeId: Number(ref.tradeId || 0), price, response: null, error: null };
+      if (Number(ref.definitionId || 0) !== Number(liveItem.definitionId || 0)) {
+        return {
+          status: "mismatch",
+          item,
+          tradeId: Number(ref.tradeId),
+          price,
+          response: null,
+          error: { kind: "definition-mismatch", code: null, action: "stop" }
+        };
+      }
+      if (typeof service?.bid !== "function") {
+        return { status: "unsupported", item, tradeId: Number(ref.tradeId), price, response: null, error: null };
+      }
+      const auction = auctionSnapshot(liveItem);
+      if (!Number.isFinite(price) || price <= 0 || price !== Number(auction.buyNowPrice)) {
+        return {
+          status: "rejected",
+          item,
+          tradeId: Number(ref.tradeId),
+          price,
+          response: null,
+          error: { kind: "price-changed", code: null, action: "refresh-and-skip" }
+        };
+      }
+      try {
+        const response = await observeResult(service.bid(liveItem, price), options.observerContext || {});
+        const summary = responseSummary(response);
+        if (summary.success) return { status: "accepted", item, tradeId: Number(ref.tradeId), price, response: summary, error: null };
+        const classification = classifyTradeError(response || {});
+        return {
+          status: "rejected",
+          item,
+          tradeId: Number(ref.tradeId),
+          price,
+          response: summary,
+          error: { kind: classification.kind, code: classification.code, action: classification.action }
+        };
+      } catch (error) {
+        const classification = classifyTradeError(error);
+        return {
+          status: classification.ambiguous ? "ambiguous" : "error",
+          item,
+          tradeId: Number(ref.tradeId),
+          price,
+          response: null,
+          error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) }
+        };
+      }
+    }
+    async function refreshPurchaseState(options = {}) {
+      const service = runtime?.services?.Item;
+      const methods = options.ambiguity === true ? ["requestUnassignedItems", "requestTransferItems", "requestClubItems", "requestWatchlist", "requestWatchedItems"] : options.destination === "transfer" ? ["requestTransferItems"] : options.destination === "club" ? ["requestClubItems"] : ["requestUnassignedItems"];
+      const available = [...new Set(methods)].filter((method) => typeof service?.[method] === "function");
+      if (!available.length) return { status: "unsupported", response: null, steps: [], error: null };
+      try {
+        const steps = [];
+        for (const method of available) {
+          const response = await observeResult(service[method](), options.observerContext || {});
+          const summary = responseSummary(response);
+          steps.push({ method, response: summary });
+          if (!summary.success) {
+            const classification = classifyTradeError(response || {});
+            return {
+              status: "rejected",
+              response: summary,
+              steps,
+              error: { kind: classification.kind, code: classification.code, action: classification.action }
+            };
+          }
+        }
+        return { status: "completed", response: steps[0]?.response || null, steps, error: null };
+      } catch (error) {
+        const classification = classifyTradeError(error);
+        return {
+          status: classification.ambiguous ? "ambiguous" : "error",
+          response: null,
+          steps: [],
+          error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) }
+        };
+      }
+    }
+    function inspectPurchase(ref = {}) {
+      const resolved = resolveItem(runtime, ref);
+      if (!resolved) return { status: "not-found", candidate: null, purchasePrice: null };
+      try {
+        const inventory = createEaInventoryAdapter(runtime);
+        const purchasePrice = Number(
+          resolved.item?.purchasePrice ?? resolved.item?._data?.purchasePrice ?? resolved.item?.lastSalePrice
+        );
+        return {
+          status: "loaded",
+          candidate: listingCandidateSnapshot(inventory, resolved.item, resolved.pile),
+          purchasePrice: Number.isFinite(purchasePrice) && purchasePrice > 0 ? purchasePrice : null
+        };
+      } catch (error) {
+        return { status: "error", candidate: null, purchasePrice: null, error: { message: error?.message || String(error) } };
+      }
+    }
+    function inspectDefinitionOwnership(definitionIdInput) {
+      const definitionId2 = Number(definitionIdInput);
+      const counts = { club: 0, transfer: 0, unassigned: 0, storage: 0 };
+      if (!Number.isInteger(definitionId2) || definitionId2 <= 0) return { definitionId: definitionId2, ...counts };
+      for (const pile of Object.keys(counts)) {
+        const seen = /* @__PURE__ */ new Set();
+        for (const item of repositoryPile(runtime, pile)) {
+          if (Number(item?.definitionId || 0) !== definitionId2) continue;
+          const id = Number(item?.id || 0);
+          const key = id > 0 ? id : item;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          counts[pile] += 1;
+        }
+      }
+      return { definitionId: definitionId2, ...counts };
+    }
+    function inspectUnassignedReadiness() {
+      const items = repositoryPile(runtime, "unassigned");
+      return {
+        ready: items.length === 0,
+        count: items.length,
+        reason: items.length ? "unassigned-not-empty" : null
+      };
+    }
+    async function routePurchasedItem(ref = {}, destinationInput = "club", options = {}) {
+      const service = runtime?.services?.Item;
+      const destination = String(destinationInput);
+      if (!["club", "transfer"].includes(destination)) {
+        return { status: "invalid-destination", item: null, destination, response: null, error: null };
+      }
+      const resolved = resolveItem(runtime, ref);
+      const key = marketItemKey(ref);
+      const liveItem = resolved?.item || (key ? marketItems.get(key) : null);
+      const item = liveItem ? {
+        id: Number(liveItem.id || 0),
+        definitionId: Number(liveItem.definitionId || 0),
+        pile: String(resolved?.pile || "unassigned")
+      } : null;
+      if (!liveItem) return { status: "not-found", item: null, destination, response: null, error: null };
+      if (typeof service?.move !== "function") return { status: "unsupported", item, destination, response: null, error: null };
+      const pile = runtime?.ItemPile?.[destination.toUpperCase()] ?? destination;
+      try {
+        const response = await observeResult(service.move(liveItem, pile), options.observerContext || {});
+        const summary = responseSummary(response);
+        if (summary.success) {
+          if (key) marketItems.delete(key);
+          return { status: "completed", item: { ...item, pile: destination }, destination, response: summary, error: null };
+        }
+        const classification = classifyTradeError(response || {});
+        return {
+          status: classification.kind === "destination-full" ? "destination-full" : classification.kind === "card-in-trade" ? "moved" : "rejected",
+          item,
+          destination,
+          response: summary,
+          error: { kind: classification.kind, code: classification.code, action: classification.action }
+        };
+      } catch (error) {
+        const classification = classifyTradeError(error);
+        return {
+          status: classification.ambiguous ? "ambiguous" : "error",
+          item,
+          destination,
+          response: null,
+          error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) }
+        };
+      }
+    }
     return Object.freeze({
       inspectCapabilities,
       inspectListingCandidates,
       inspectListingItem,
       inspectPriceLimits,
       listItem,
-      refreshTransferItems
+      refreshTransferItems,
+      searchMarket,
+      buyNowItem,
+      refreshPurchaseState,
+      inspectPurchase,
+      inspectDefinitionOwnership,
+      inspectUnassignedReadiness,
+      routePurchasedItem
     });
   }
 
@@ -7636,16 +7974,16 @@
       }))
     ];
   }
-  function selectInventoryPlayers(input = {}) {
-    const snapshot = input.inventorySnapshot;
+  function selectInventoryPlayers(input2 = {}) {
+    const snapshot = input2.inventorySnapshot;
     if (!snapshot?.piles) throw new Error("inventorySnapshot is required");
-    const requirements = input.requirements || [];
-    const defaultPiles = input.priorityPiles || ["storage", "transfer", "club"];
-    const fsuPolicy = input.fsuPolicy || {};
+    const requirements = input2.requirements || [];
+    const defaultPiles = input2.priorityPiles || ["storage", "transfer", "club"];
+    const fsuPolicy = input2.fsuPolicy || {};
     const protection = {
-      consumedItemIds: numberSet(input.consumedItemIds),
-      protectedItemIds: numberSet(input.protectedItemIds),
-      protectedDefinitionIds: numberSet(input.protectedDefinitionIds)
+      consumedItemIds: numberSet(input2.consumedItemIds),
+      protectedItemIds: numberSet(input2.protectedItemIds),
+      protectedDefinitionIds: numberSet(input2.protectedDefinitionIds)
     };
     const selectedIds = /* @__PURE__ */ new Set();
     const selectedDefinitionIds = /* @__PURE__ */ new Set();
@@ -7655,7 +7993,7 @@
     const pileCounts = {};
     const duplicateSignals = [];
     const diagnostics = [];
-    const preferredSignalRefs = preferredItemRefs(input.preferredSignalRefs);
+    const preferredSignalRefs = preferredItemRefs(input2.preferredSignalRefs);
     for (const requirement2 of requirements) {
       let need = Number(requirement2.count || 0);
       const requirementProtection = {
@@ -7705,7 +8043,7 @@
       if (need > 0) {
         return createSelectionPlan({
           ok: false,
-          mode: input.mode || "requirements",
+          mode: input2.mode || "requirements",
           entries,
           selected: selected2,
           missing: { ...requirement2, count: need },
@@ -7717,7 +8055,7 @@
     }
     return createSelectionPlan({
       ok: true,
-      mode: input.mode || "requirements",
+      mode: input2.mode || "requirements",
       entries,
       selected: selected2,
       missing: null,
@@ -7824,18 +8162,18 @@
       if (!options.length) return null;
       const next = /* @__PURE__ */ new Map();
       for (const base of combined.values()) {
-        for (const option of options) {
-          const specialCount = base.specialCount + option.specialCount;
+        for (const option2 of options) {
+          const specialCount = base.specialCount + option2.specialCount;
           if (specialCount > model.maxSpecialCount) continue;
           const progress = base.progress.map((value, index) => Math.min(
             model.constraints[index].count,
-            value + option.progress[index]
+            value + option2.progress[index]
           ));
           const candidate = {
-            entries: [...base.entries, ...option.entries],
+            entries: [...base.entries, ...option2.entries],
             progress,
             specialCount,
-            pileCounts: mergePileCounts(base.pileCounts, option.pileCounts)
+            pileCounts: mergePileCounts(base.pileCounts, option2.pileCounts)
           };
           const key = `${specialCount}|${progress.join(".")}`;
           const existing = next.get(key);
@@ -7857,11 +8195,11 @@
       special: entry.special === true
     }));
   }
-  async function selectRatingPlayers(input = {}) {
-    const candidateEntries = input.candidateEntries || [];
-    const model = input.ratingModel;
-    const piles = input.priorityPiles || [];
-    const options = input.searchOptions || {};
+  async function selectRatingPlayers(input2 = {}) {
+    const candidateEntries = input2.candidateEntries || [];
+    const model = input2.ratingModel;
+    const piles = input2.priorityPiles || [];
+    const options = input2.searchOptions || {};
     const requiredCount = Number(model?.requiredPlayerCount || 0);
     if (!model || requiredCount <= 0) throw new Error("ratingModel with requiredPlayerCount is required");
     if (candidateEntries.length < requiredCount) {
@@ -7887,9 +8225,9 @@
     const maxNodes = Math.max(1e4, Math.min(2e6, Number(options.maxSearchNodes || 5e5) || 5e5));
     const maxSearchMs = Math.max(1e3, Math.min(6e4, Number(options.maxSearchMs || 15e3) || 15e3));
     const yieldEveryNodes = Math.max(50, Math.min(5e3, Number(options.yieldEveryNodes || 500) || 500));
-    const now = input.control?.now || Date.now;
-    const yieldControl = input.control?.yieldControl || (() => Promise.resolve());
-    const shouldStop = input.control?.shouldStop || (() => false);
+    const now = input2.control?.now || Date.now;
+    const yieldControl = input2.control?.yieldControl || (() => Promise.resolve());
+    const shouldStop = input2.control?.shouldStop || (() => false);
     const deadline = now() + maxSearchMs;
     const materializationContext = buildMaterializationContext(candidateEntries, model, piles);
     let nodes = 0;
@@ -7979,9 +8317,9 @@
   }
 
   // src/selection/index.js
-  function selectInventoryPlayers2(input = {}) {
-    if (input.mode === "rating") return selectRatingPlayers(input);
-    return selectInventoryPlayers({ ...input, mode: input.mode || "requirements" });
+  function selectInventoryPlayers2(input2 = {}) {
+    if (input2.mode === "rating") return selectRatingPlayers(input2);
+    return selectInventoryPlayers({ ...input2, mode: input2.mode || "requirements" });
   }
 
   // src/selection/rating-candidates.js
@@ -8088,7 +8426,7 @@
       searchOptions = {},
       createSnapshot,
       selectPlayers,
-      control
+      control: control2
     } = options;
     const liveById = /* @__PURE__ */ new Map();
     const snapshotEntries = candidateEntries.map((entry) => {
@@ -8111,7 +8449,7 @@
       ratingModel: model,
       priorityPiles: piles,
       searchOptions,
-      control
+      control: control2
     });
     if (!plan.ok) {
       return {
@@ -8418,7 +8756,7 @@
   }
   function criticalSnapshotSignature(snapshot = {}) {
     const critical = Object.fromEntries(
-      CRITICAL_SNAPSHOT_FIELDS.map((field2) => [field2, snapshot[field2]])
+      CRITICAL_SNAPSHOT_FIELDS.map((field4) => [field4, snapshot[field4]])
     );
     critical.groups = [...snapshot.groups || []].map(Number).sort((a, b) => a - b);
     return JSON.stringify(critical);
@@ -8931,7 +9269,7 @@
   }
 
   // src/reward/sbc-claim.js
-  function finiteNumber3(value) {
+  function finiteNumber4(value) {
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   }
@@ -8943,16 +9281,16 @@
   }
   function hasSbcProgressAdvanced(before = {}, after = {}) {
     if (after.setComplete === true && before.setComplete !== true) return true;
-    const beforeSetCount = finiteNumber3(before.setTimesCompleted);
-    const afterSetCount = finiteNumber3(after.setTimesCompleted);
+    const beforeSetCount = finiteNumber4(before.setTimesCompleted);
+    const afterSetCount = finiteNumber4(after.setTimesCompleted);
     if (beforeSetCount !== null && afterSetCount !== null && afterSetCount > beforeSetCount) return true;
     const beforeChallenges = new Map((before.challenges || []).map((challenge) => [Number(challenge.id || 0), challenge]));
     return (after.challenges || []).some((challenge) => {
       const previous = beforeChallenges.get(Number(challenge.id || 0));
       if (!previous) return challenge.completed === true;
       if (challenge.completed === true && previous.completed !== true) return true;
-      const beforeCount = finiteNumber3(previous.timesCompleted);
-      const afterCount = finiteNumber3(challenge.timesCompleted);
+      const beforeCount = finiteNumber4(previous.timesCompleted);
+      const afterCount = finiteNumber4(challenge.timesCompleted);
       return beforeCount !== null && afterCount !== null && afterCount > beforeCount;
     });
   }
@@ -8982,10 +9320,10 @@
       stopPoint();
       failIfSubmitError(label);
       if (await overlay.dismiss(label)) continue;
-      const button3 = overlay.findClaimButton();
-      if (button3) {
+      const button5 = overlay.findClaimButton();
+      if (button5) {
         log(`${label}: claiming rewards`);
-        click(button3);
+        click(button5);
         await waitLoadingEnd(900, 45e3);
         await sleep(1200);
         return true;
@@ -9308,11 +9646,11 @@
   function definitionIds(values = []) {
     return [...new Set((values || []).map(Number).filter((value) => Number.isInteger(value) && value > 0))].sort((a, b) => a - b);
   }
-  function normalizeRatings(input = {}) {
-    const explicit = Array.isArray(input.ratings) ? input.ratings : [];
+  function normalizeRatings(input2 = {}) {
+    const explicit = Array.isArray(input2.ratings) ? input2.ratings : [];
     if (explicit.length) return [...new Set(explicit.map(Number).filter((rating) => Number.isInteger(rating) && rating >= 1 && rating <= 99))].sort((a, b) => a - b);
-    const min = Number(input.ratingMin ?? input.rating);
-    const max = Number(input.ratingMax ?? input.rating);
+    const min = Number(input2.ratingMin ?? input2.rating);
+    const max = Number(input2.ratingMax ?? input2.rating);
     if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max > 99 || max < min) {
       throw new Error("Player catalog requires ratings or a valid ratingMin/ratingMax range");
     }
@@ -9449,12 +9787,12 @@
   // src/trade/listing-plan.js
   var MIN_EA_LISTING_PRICE = 150;
   var REJECTION_SAMPLE_LIMIT = 20;
-  function finiteNumber4(value, fallback = 0) {
+  function finiteNumber5(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
   function priceStep(value) {
-    const price = Math.max(0, finiteNumber4(value));
+    const price = Math.max(0, finiteNumber5(value));
     if (price <= 1e3) return 50;
     if (price <= 1e4) return 100;
     if (price <= 5e4) return 250;
@@ -9462,7 +9800,7 @@
     return 1e3;
   }
   function roundEaListingPrice(value) {
-    const price = Math.max(MIN_EA_LISTING_PRICE, finiteNumber4(value, MIN_EA_LISTING_PRICE));
+    const price = Math.max(MIN_EA_LISTING_PRICE, finiteNumber5(value, MIN_EA_LISTING_PRICE));
     const step = priceStep(price);
     return Math.ceil(price / step) * step;
   }
@@ -9536,8 +9874,8 @@
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
   function createListingConfirmation(plan, options = {}) {
-    const createdAt = Math.max(0, finiteNumber4(options.now, Date.now()));
-    const ttlMs = Math.max(1, finiteNumber4(options.ttlMs, 10 * 6e4));
+    const createdAt = Math.max(0, finiteNumber5(options.now, Date.now()));
+    const ttlMs = Math.max(1, finiteNumber5(options.ttlMs, 10 * 6e4));
     const entries = (plan.entries || []).map((entry) => ({
       item: entry.item,
       startPrice: entry.startPrice,
@@ -9592,13 +9930,13 @@
     const index = policy.sources.indexOf(pile);
     return index >= 0 ? index : policy.sources.length;
   }
-  function buildListingPlan(input = {}) {
-    const job = input.job;
+  function buildListingPlan(input2 = {}) {
+    const job = input2.job;
     assertValidTradeJob(job, "Listing job");
     if (job.type !== "listing") throw new Error("Listing job.type must be listing");
-    const now = Math.max(0, finiteNumber4(input.now, Date.now()));
-    const candidates = Array.isArray(input.candidates) ? input.candidates : [];
-    const quotesByDefinitionId = new Map((input.quotes || []).map((quote2) => [Number(quote2.definitionId), quote2]));
+    const now = Math.max(0, finiteNumber5(input2.now, Date.now()));
+    const candidates = Array.isArray(input2.candidates) ? input2.candidates : [];
+    const quotesByDefinitionId = new Map((input2.quotes || []).map((quote2) => [Number(quote2.definitionId), quote2]));
     const rejectionCounts = {};
     const rejectionSamples = [];
     const eligible = [];
@@ -9663,12 +10001,30 @@
     if (typeof options.listingPreview?.preview !== "function") throw new TypeError("listingPreview.preview is required");
     if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
     const now = typeof options.now === "function" ? options.now : () => Date.now();
-    async function prepare(input = {}, request = {}) {
-      const requestedMax = Math.max(1, Math.floor(Number(request.maxListings || input.policy?.maxListings || 1)));
+    async function prepare(input2 = {}, request = {}) {
+      const circuit = options.circuitBreaker?.availability?.();
+      if (circuit && circuit.allowed !== true) {
+        return {
+          mode: "prepared",
+          preparedAt: Number(now()),
+          ready: false,
+          blockers: [{ reason: "trade-circuit-open", detail: circuit.state?.reason || "unknown" }],
+          priceLimitChecks: [],
+          plan: {
+            createdAt: Number(now()),
+            entries: [],
+            counts: { selected: 0, eligible: 0, rejected: 0 },
+            warnings: []
+          },
+          confirmation: null,
+          circuit: circuit.record
+        };
+      }
+      const requestedMax = Math.max(1, Math.floor(Number(request.maxListings || input2.policy?.maxListings || 1)));
       const previewInput = {
-        ...input,
+        ...input2,
         policy: {
-          ...input.policy || {},
+          ...input2.policy || {},
           maxListings: requestedMax
         }
       };
@@ -9735,12 +10091,12 @@
     if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
     if (typeof options.priceQuoteProvider?.load !== "function") throw new TypeError("priceQuoteProvider.load is required");
     const now = typeof options.now === "function" ? options.now : () => Date.now();
-    async function preview(input = {}, request = {}) {
+    async function preview(input2 = {}, request = {}) {
       const timestamp = Number(now());
       const job = normalizeTradeJob({
-        ...input,
-        id: input.id || "manual-listing-preview",
-        name: input.name || "Manual Listing Preview",
+        ...input2,
+        id: input2.id || "manual-listing-preview",
+        name: input2.name || "Manual Listing Preview",
         type: "listing",
         enabled: true,
         armed: false
@@ -9802,10 +10158,11 @@
     const sleep = typeof options.sleep === "function" ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const random = typeof options.random === "function" ? options.random : Math.random;
     const createRunId = typeof options.createRunId === "function" ? options.createRunId : () => `listing-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    async function run(input = {}) {
+    async function run(input2 = {}) {
       const startedAt = Number(now());
-      const job = input.job;
-      const prepared = input.prepared;
+      const runId = createRunId();
+      const job = input2.job;
+      const prepared = input2.prepared;
       assertValidTradeJob(job, "Listing job");
       if (job.type !== "listing") throw new Error("Listing job.type must be listing");
       const entries = prepared?.plan?.entries || [];
@@ -9815,13 +10172,18 @@
       let reason = null;
       let succeeded = 0;
       let failed = 0;
-      if (prepared?.mode !== "prepared" || prepared?.ready !== true || !confirmation || !entries.length) {
+      const circuitAvailability = options.circuitBreaker?.availability?.();
+      if (circuitAvailability && circuitAvailability.allowed !== true) {
+        status = "blocked";
+        reason = "trade-circuit-open";
+      }
+      if (!reason && (prepared?.mode !== "prepared" || prepared?.ready !== true || !confirmation || !entries.length)) {
         status = "blocked";
         reason = "listing-plan-not-prepared";
       } else if (entries.length > Number(job.policy.maxListings)) {
         status = "blocked";
         reason = "listing-plan-exceeds-job-limit";
-      } else if (String(input.confirmationToken || "") !== confirmation.token || String(input.confirmationText || "") !== confirmation.requiredText) {
+      } else if (String(input2.confirmationToken || "") !== confirmation.token || String(input2.confirmationText || "") !== confirmation.requiredText) {
         status = "blocked";
         reason = "listing-confirmation-mismatch";
       } else if (startedAt > Number(confirmation.expiresAt)) {
@@ -9835,7 +10197,7 @@
       }
       for (let index = 0; !reason && index < entries.length; index += 1) {
         const entry = entries[index];
-        if (input.shouldStop?.() === true) {
+        if (input2.shouldStop?.() === true) {
           status = "stopped";
           reason = "stopped-by-user";
           break;
@@ -9905,10 +10267,20 @@
           error: listed.error
         };
         if (listed.status !== "accepted") {
+          const classification = classifyTradeError(listed.error || listed.response || { status: listed.status });
+          options.circuitBreaker?.recordFailure?.(listed.error || listed.response || {}, {
+            action: "list",
+            endpoint: "/auctionhouse",
+            jobId: job.id,
+            runId,
+            classification,
+            response: listed.response,
+            capabilities: adapter.inspectCapabilities()
+          });
           failed += 1;
-          status = listed.status === "ambiguous" ? "ambiguous" : "failed";
-          reason = `listing-${listed.status}`;
-          receipts.push({ ...receipt, status, reason });
+          status = listed.status === "ambiguous" ? "ambiguous" : classification.opensCircuit ? "blocked" : "failed";
+          reason = classification.opensCircuit ? `trade-${classification.kind}` : `listing-${listed.status}`;
+          receipts.push({ ...receipt, status, reason, classification });
           break;
         }
         const refresh = await adapter.refreshTransferItems();
@@ -9927,6 +10299,7 @@
           break;
         }
         succeeded += 1;
+        options.circuitBreaker?.recordSuccess?.({ action: "list", jobId: job.id, runId });
         receipts.push({
           ...receipt,
           status: "listed",
@@ -9937,7 +10310,7 @@
             auction: { ...verification.candidate.auction }
           }
         });
-        if (index < entries.length - 1 && input.shouldStop?.() !== true) {
+        if (index < entries.length - 1 && input2.shouldStop?.() !== true) {
           await sleep(randomDelayMs(job.policy.listingDelaySeconds, random));
         }
       }
@@ -9945,7 +10318,7 @@
       const afterCapabilities = adapter.inspectCapabilities();
       const skipped = Math.max(0, entries.length - succeeded - failed);
       return createTradeRunReceipt({
-        runId: createRunId(),
+        runId,
         jobId: job.id,
         jobType: job.type,
         scheduledFor: startedAt,
@@ -9963,6 +10336,744 @@
       });
     }
     return Object.freeze({ run });
+  }
+
+  // src/trade/listing-diagnostics.js
+  function clone5(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  }
+  function sanitizedListingArtifact(artifact) {
+    if (!artifact) return null;
+    const value = clone5(artifact);
+    if (value.confirmation) {
+      value.confirmation = {
+        createdAt: value.confirmation.createdAt,
+        expiresAt: value.confirmation.expiresAt,
+        itemCount: value.confirmation.itemCount,
+        requiredText: value.confirmation.requiredText
+      };
+    }
+    return value;
+  }
+  function sanitizedError(error) {
+    if (!error) return null;
+    const value = {};
+    for (const key of ["name", "message", "code", "status", "stack"]) {
+      if (error[key] !== void 0 && error[key] !== null) value[key] = String(error[key]);
+    }
+    return Object.keys(value).length ? value : { message: String(error) };
+  }
+  function createTradeListingDiagnostics(input2 = {}) {
+    return {
+      schemaVersion: 1,
+      capturedAt: Math.max(0, Number(input2.capturedAt ?? Date.now()) || 0),
+      runner: {
+        version: String(input2.runnerVersion || "unknown"),
+        platform: String(input2.platform || "pc"),
+        userAgent: String(input2.userAgent || "")
+      },
+      operation: {
+        running: input2.operation?.running === true,
+        stopping: input2.operation?.stopping === true,
+        tradeListingRunning: input2.operation?.tradeListingRunning === true
+      },
+      circuit: clone5(input2.circuit) || null,
+      job: clone5(input2.job) || null,
+      preview: sanitizedListingArtifact(input2.preview),
+      prepared: sanitizedListingArtifact(input2.prepared),
+      receipt: clone5(input2.receipt) || null,
+      error: sanitizedError(input2.error)
+    };
+  }
+
+  // src/trade/buy-plan.js
+  function stableHash(value) {
+    let hash = 2166136261;
+    const text = String(value || "");
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+  function rotate(values, offset) {
+    if (!values.length) return [];
+    const index = Math.abs(Math.floor(Number(offset) || 0)) % values.length;
+    return [...values.slice(index), ...values.slice(0, index)];
+  }
+  function ratingLimit(policy, rating) {
+    const override = Number(policy.ratingPriceOverrides?.[String(rating)]);
+    return Number.isFinite(override) && override > 0 ? override : Number(policy.maxBuyNow);
+  }
+  function buildBuyLanePlan(input2 = {}) {
+    const job = input2.job;
+    assertValidTradeJob(job, "Buy job");
+    if (job.type !== "buy") throw new Error("Buy job.type must be buy");
+    const catalog = input2.catalog || {};
+    const runId = String(input2.runId || job.id);
+    const laneMap = new Map((catalog.lanes || []).map((lane) => [Number(lane.rating), lane]));
+    const lanes = [];
+    const missingRatings = [];
+    for (let rating = Number(job.policy.ratingMin); rating <= Number(job.policy.ratingMax); rating += 1) {
+      const lane = laneMap.get(rating);
+      const ids = [...new Set((lane?.definitionIds || []).map(Number).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b);
+      if (!ids.length) {
+        missingRatings.push(rating);
+        continue;
+      }
+      lanes.push({
+        rating,
+        maxBuyNow: ratingLimit(job.policy, rating),
+        definitionIds: rotate(ids, stableHash(`${runId}:${rating}`)),
+        source: String(lane.source || "catalog"),
+        expiresAt: Number.isFinite(Number(lane.expiresAt)) ? Number(lane.expiresAt) : null
+      });
+    }
+    const orderedLanes = rotate(lanes, stableHash(`${runId}:lanes`));
+    return {
+      schemaVersion: 1,
+      ready: missingRatings.length === 0 && orderedLanes.length > 0,
+      job: { id: job.id, name: job.name, type: job.type },
+      cardClass: job.policy.cardClass,
+      lanes: orderedLanes,
+      missingRatings,
+      cursor: { laneIndex: 0, definitionIndexes: Object.fromEntries(orderedLanes.map((lane) => [lane.rating, 0])) }
+    };
+  }
+
+  // src/trade/buy-preview.js
+  function createBuyPreview(options = {}) {
+    if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
+    if (typeof options.playerCatalogProvider?.load !== "function") throw new TypeError("playerCatalogProvider.load is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    async function preview(input2 = {}, request = {}) {
+      const timestamp = Number(now());
+      const job = normalizeTradeJob({
+        ...input2,
+        id: input2.id || "manual-buy-preview",
+        name: input2.name || "Manual Buy Preview",
+        type: "buy",
+        enabled: true,
+        armed: false
+      }, { now: timestamp });
+      const catalog = await options.playerCatalogProvider.load({
+        ratingMin: job.policy.ratingMin,
+        ratingMax: job.policy.ratingMax,
+        platform: request.platform || "pc",
+        forceRefresh: request.forceRefresh === true
+      });
+      const plan = buildBuyLanePlan({ job, catalog, runId: `preview:${job.id}:${timestamp}` });
+      return {
+        schemaVersion: 1,
+        mode: "preview-only",
+        liveExecutionAllowed: false,
+        job,
+        capabilities: options.getTradeAdapter().inspectCapabilities(),
+        catalog: {
+          ok: catalog.ok === true,
+          platform: String(catalog.platform || request.platform || "pc"),
+          ratings: [...catalog.ratings || []],
+          missingRatings: [...catalog.missingRatings || []],
+          attempts: (catalog.attempts || []).map((attempt) => ({ ...attempt }))
+        },
+        plan,
+        summary: {
+          ratings: plan.lanes.length,
+          definitions: plan.lanes.reduce((sum, lane) => sum + lane.definitionIds.length, 0),
+          missingRatings: plan.missingRatings.length,
+          maxQuantity: Number(job.policy.quantity),
+          totalBudget: Number(job.policy.totalBudget)
+        }
+      };
+    }
+    return Object.freeze({ preview });
+  }
+
+  // src/trade/buy-diagnostics.js
+  function safeNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  function safeError(error) {
+    if (!error) return null;
+    const value = {};
+    for (const key of ["name", "message", "code", "status", "stack"]) {
+      if (error[key] !== void 0 && error[key] !== null) value[key] = String(error[key]);
+    }
+    return Object.keys(value).length ? value : { message: String(error) };
+  }
+  function safeRef(item) {
+    if (!item) return null;
+    return {
+      id: safeNumber(item.id),
+      definitionId: safeNumber(item.definitionId),
+      pile: String(item.pile || "unknown")
+    };
+  }
+  function safeReceipt(receipt) {
+    if (!receipt) return null;
+    return {
+      schemaVersion: safeNumber(receipt.schemaVersion),
+      runId: String(receipt.runId || ""),
+      jobId: String(receipt.jobId || ""),
+      jobType: String(receipt.jobType || ""),
+      scheduledFor: safeNumber(receipt.scheduledFor),
+      startedAt: safeNumber(receipt.startedAt),
+      finishedAt: safeNumber(receipt.finishedAt),
+      status: String(receipt.status || "unknown"),
+      reason: receipt.reason ? String(receipt.reason) : null,
+      requested: Math.max(0, Number(receipt.requested || 0) || 0),
+      succeeded: Math.max(0, Number(receipt.succeeded || 0) || 0),
+      failed: Math.max(0, Number(receipt.failed || 0) || 0),
+      skipped: Math.max(0, Number(receipt.skipped || 0) || 0),
+      coinsBefore: safeNumber(receipt.coinsBefore),
+      coinsAfter: safeNumber(receipt.coinsAfter),
+      receipts: (receipt.receipts || []).map((entry) => ({
+        index: Math.max(0, Number(entry.index || 0) || 0),
+        status: String(entry.status || "unknown"),
+        reason: entry.reason ? String(entry.reason) : null,
+        item: safeRef(entry.item),
+        tradeId: safeNumber(entry.tradeId),
+        rating: safeNumber(entry.rating),
+        price: safeNumber(entry.price),
+        priceLimit: safeNumber(entry.priceLimit),
+        coinsBefore: safeNumber(entry.coinsBefore),
+        coinsAfter: safeNumber(entry.coinsAfter),
+        destination: entry.destination ? String(entry.destination) : null,
+        searches: safeNumber(entry.searches),
+        spent: safeNumber(entry.spent),
+        search: entry.search ? {
+          rating: safeNumber(entry.search.rating),
+          definitionId: safeNumber(entry.search.definitionId),
+          maxBuyNow: safeNumber(entry.search.maxBuyNow)
+        } : null
+      }))
+    };
+  }
+  function createTradeBuyDiagnostics(input2 = {}) {
+    return {
+      schemaVersion: 1,
+      capturedAt: Math.max(0, Number(input2.capturedAt ?? Date.now()) || 0),
+      runner: {
+        version: String(input2.runnerVersion || "unknown"),
+        platform: String(input2.platform || "pc"),
+        userAgent: String(input2.userAgent || "")
+      },
+      operation: {
+        running: input2.operation?.running === true,
+        stopping: input2.operation?.stopping === true,
+        tradeBuyRunning: input2.operation?.tradeBuyRunning === true
+      },
+      circuit: input2.circuit ? JSON.parse(JSON.stringify(input2.circuit)) : null,
+      job: input2.job ? JSON.parse(JSON.stringify(input2.job)) : null,
+      preview: input2.preview ? JSON.parse(JSON.stringify(input2.preview)) : null,
+      receipt: safeReceipt(input2.receipt),
+      error: safeError(input2.error)
+    };
+  }
+
+  // src/trade/circuit-breaker.js
+  var TRADE_CIRCUIT_SCHEMA_VERSION = 1;
+  function clone6(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  }
+  function finiteNumber6(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function safeCapabilities(value = {}) {
+    return {
+      runtimeReady: value.runtimeReady === true,
+      canTrade: value.canTrade === true,
+      tradeAccess: {
+        available: value.tradeAccess?.available === true,
+        allowed: typeof value.tradeAccess?.allowed === "boolean" ? value.tradeAccess.allowed : null,
+        level: ["string", "number", "boolean"].includes(typeof value.tradeAccess?.level) ? value.tradeAccess.level : null
+      },
+      transferCapacity: {
+        used: Number.isFinite(Number(value.transferCapacity?.used)) ? Number(value.transferCapacity.used) : null,
+        max: Number.isFinite(Number(value.transferCapacity?.max)) ? Number(value.transferCapacity.max) : null,
+        free: Number.isFinite(Number(value.transferCapacity?.free)) ? Number(value.transferCapacity.free) : null
+      }
+    };
+  }
+  function safeResponse(value = {}) {
+    const status = Number(value.status ?? value.statusCode);
+    const code = Number(value.code ?? value.error?.code);
+    const result = {
+      success: value.success === true,
+      status: Number.isFinite(status) ? status : null,
+      code: Number.isFinite(code) ? code : null
+    };
+    const message = String(value.message || value.reason || "").trim();
+    if (message) result.message = message.slice(0, 200);
+    return result;
+  }
+  function safeEvent(input2 = {}, classification = {}) {
+    return {
+      at: Math.max(0, finiteNumber6(input2.at, Date.now())),
+      action: String(input2.action || "unknown"),
+      endpoint: String(input2.endpoint || ""),
+      jobId: input2.jobId ? String(input2.jobId) : null,
+      runId: input2.runId ? String(input2.runId) : null,
+      classification: {
+        kind: String(classification.kind || "service-error"),
+        code: Number.isFinite(Number(classification.code)) ? Number(classification.code) : null,
+        action: String(classification.action || "stop"),
+        retryable: classification.retryable === true,
+        persistent: classification.persistent === true
+      },
+      response: safeResponse(input2.response),
+      capabilities: safeCapabilities(input2.capabilities)
+    };
+  }
+  function normalizeTradeCircuitRecord(input2 = {}) {
+    return {
+      schemaVersion: TRADE_CIRCUIT_SCHEMA_VERSION,
+      circuit: createTradeCircuitState(input2.circuit),
+      recentEvents: (Array.isArray(input2.recentEvents) ? input2.recentEvents : []).slice(-20).map((event) => safeEvent(event, event.classification)),
+      updatedAt: Math.max(0, finiteNumber6(input2.updatedAt, 0)),
+      reset: input2.reset ? {
+        at: Math.max(0, finiteNumber6(input2.reset.at, 0)),
+        reason: String(input2.reset.reason || "manual")
+      } : null
+    };
+  }
+  function createTradeCircuitBreaker(options = {}) {
+    const storage = options.storage;
+    const key = String(options.key || "fc-loop-runner-trade-circuit-v1");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const config = options.config || {};
+    let memory = normalizeTradeCircuitRecord();
+    function read() {
+      const stored = storage?.get?.(key, null);
+      if (stored && typeof stored === "object") memory = normalizeTradeCircuitRecord(stored);
+      return normalizeTradeCircuitRecord(memory);
+    }
+    function write(record) {
+      memory = normalizeTradeCircuitRecord(record);
+      storage?.set?.(key, clone6(memory));
+      return read();
+    }
+    function snapshot() {
+      const record = read();
+      const availability2 = tradeCircuitAvailability(record.circuit, now());
+      if (JSON.stringify(availability2.state) !== JSON.stringify(record.circuit)) {
+        return write({ ...record, circuit: availability2.state, updatedAt: now() });
+      }
+      return record;
+    }
+    function availability() {
+      const record = snapshot();
+      const result = tradeCircuitAvailability(record.circuit, now());
+      return { ...result, record };
+    }
+    function recordFailure(error = {}, context = {}) {
+      const at = Math.max(0, finiteNumber6(context.at, now()));
+      const classification = context.classification || classifyTradeError(error);
+      const record = read();
+      const event = safeEvent({ ...context, at }, classification);
+      return write({
+        ...record,
+        circuit: reduceTradeCircuit(record.circuit, { type: "failure", at, classification }, config),
+        recentEvents: [...record.recentEvents, event].slice(-20),
+        updatedAt: at,
+        reset: null
+      });
+    }
+    function recordSuccess(context = {}) {
+      const record = read();
+      if (record.circuit.persistent) return record;
+      const at = Math.max(0, finiteNumber6(context.at, now()));
+      return write({
+        ...record,
+        circuit: reduceTradeCircuit(record.circuit, { type: "success", at }, config),
+        updatedAt: at
+      });
+    }
+    function reset(reason = "manual") {
+      const at = Math.max(0, finiteNumber6(now(), Date.now()));
+      return write({
+        schemaVersion: TRADE_CIRCUIT_SCHEMA_VERSION,
+        circuit: createTradeCircuitState(),
+        recentEvents: read().recentEvents,
+        updatedAt: at,
+        reset: { at, reason: String(reason || "manual") }
+      });
+    }
+    return Object.freeze({ availability, recordFailure, recordSuccess, reset, snapshot });
+  }
+
+  // src/trade/schedule.js
+  var RUNTIME_STATES = /* @__PURE__ */ new Set([
+    "disabled",
+    "armed",
+    "waiting-time",
+    "waiting-session",
+    "waiting-operation",
+    "running",
+    "cooldown",
+    "completed",
+    "missed",
+    "blocked"
+  ]);
+  function finiteNumber7(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function positiveInteger9(value, fallback = 0) {
+    const number = Math.floor(Number(value));
+    return Number.isFinite(number) && number > 0 ? number : fallback;
+  }
+  function nullableEpoch(value) {
+    if (value === void 0 || value === null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, number) : null;
+  }
+  function formatter(timezone) {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    });
+  }
+  function zonedParts(epoch, timezone) {
+    const values = Object.fromEntries(formatter(timezone).formatToParts(new Date(epoch)).filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+    return {
+      year: values.year,
+      month: values.month,
+      day: values.day,
+      hour: values.hour,
+      minute: values.minute,
+      second: values.second
+    };
+  }
+  function localPartsEpoch(parts) {
+    return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour || 0, parts.minute || 0, parts.second || 0);
+  }
+  function zonedDateToEpoch(parts, timezone) {
+    const target = localPartsEpoch(parts);
+    let candidate = target;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const represented = localPartsEpoch(zonedParts(candidate, timezone));
+      const difference = target - represented;
+      if (difference === 0) return candidate;
+      candidate += difference;
+    }
+    return candidate;
+  }
+  function dailyTime(schedule = {}) {
+    const match = String(schedule.time || "00:00").match(/^(\d{2}):(\d{2})$/);
+    return { hour: Number(match?.[1] || 0), minute: Number(match?.[2] || 0) };
+  }
+  function shiftedDate(parts, days) {
+    const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+    return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+  }
+  function nextDailyRunAt(schedule, referenceAt, inclusive) {
+    const timezone = String(schedule.timezone || "UTC");
+    formatter(timezone).format(new Date(referenceAt));
+    const local = zonedParts(referenceAt, timezone);
+    const time = dailyTime(schedule);
+    const today = zonedDateToEpoch({ ...shiftedDate(local, 0), ...time, second: 0 }, timezone);
+    if (today > referenceAt || inclusive && today === referenceAt) return today;
+    return zonedDateToEpoch({ ...shiftedDate(local, 1), ...time, second: 0 }, timezone);
+  }
+  function nextTradeRunAt(job = {}, referenceAtInput = Date.now(), options = {}) {
+    const referenceAt = Math.max(0, finiteNumber7(referenceAtInput, Date.now()));
+    const inclusive = options.inclusive !== false;
+    const schedule = job.schedule || {};
+    if (schedule.type === "manual") return null;
+    if (schedule.type === "once") {
+      const runAt = Math.max(0, finiteNumber7(schedule.runAt));
+      return runAt > referenceAt || inclusive && runAt === referenceAt ? runAt : null;
+    }
+    if (schedule.type === "daily") return nextDailyRunAt(schedule, referenceAt, inclusive);
+    if (schedule.type === "interval") {
+      const period = positiveInteger9(schedule.everyMinutes, 60) * 6e4;
+      const anchorAt = Math.max(0, finiteNumber7(schedule.anchorAt, job.createdAt));
+      if (referenceAt < anchorAt || inclusive && referenceAt === anchorAt) return anchorAt;
+      const elapsed = referenceAt - anchorAt;
+      const steps = inclusive ? Math.ceil(elapsed / period) : Math.floor(elapsed / period) + 1;
+      return anchorAt + Math.max(0, steps) * period;
+    }
+    if (schedule.type === "window") {
+      const startAt = Math.max(0, finiteNumber7(schedule.startAt));
+      const endAt = Math.max(startAt, finiteNumber7(schedule.endAt, startAt));
+      if (referenceAt > endAt || !inclusive && referenceAt === endAt) return null;
+      return Math.max(startAt, referenceAt);
+    }
+    return null;
+  }
+  function createTradeJobRuntime(job = {}, options = {}) {
+    const now = Math.max(0, finiteNumber7(options.now, Date.now()));
+    return normalizeTradeJobRuntime({
+      jobId: job.id,
+      status: job.enabled === true && job.armed === true ? "waiting-time" : "disabled",
+      reason: job.enabled === true && job.armed === true ? null : job.enabled === true ? "not-armed" : "job-disabled",
+      nextRunAt: nextTradeRunAt(job, now),
+      updatedAt: now
+    });
+  }
+  function normalizeTradeJobRuntime(input2 = {}) {
+    return {
+      jobId: String(input2.jobId || ""),
+      status: RUNTIME_STATES.has(input2.status) ? input2.status : "disabled",
+      reason: input2.reason === void 0 || input2.reason === null ? null : String(input2.reason),
+      nextRunAt: nullableEpoch(input2.nextRunAt),
+      lastScheduledFor: nullableEpoch(input2.lastScheduledFor),
+      lastStartedAt: nullableEpoch(input2.lastStartedAt),
+      lastFinishedAt: nullableEpoch(input2.lastFinishedAt),
+      lastRunId: input2.lastRunId ? String(input2.lastRunId) : null,
+      runCount: Math.max(0, Math.floor(finiteNumber7(input2.runCount))),
+      updatedAt: Math.max(0, finiteNumber7(input2.updatedAt))
+    };
+  }
+
+  // src/trade/job-store.js
+  var TRADE_JOB_STORE_SCHEMA_VERSION = 1;
+  var TRADE_HISTORY_LIMIT = 100;
+  function clone7(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  }
+  function finiteNumber8(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function normalizeTradeJobStore(input2 = {}, options = {}) {
+    const now = Math.max(0, finiteNumber8(options.now, Date.now()));
+    const jobs = [];
+    for (const raw of Array.isArray(input2.jobs) ? input2.jobs : []) {
+      try {
+        jobs.push(normalizeTradeJob(raw, { now: raw?.updatedAt ?? now }));
+      } catch {
+      }
+    }
+    const runtimes = {};
+    for (const job of jobs) {
+      const persisted = input2.runtimes?.[job.id];
+      runtimes[job.id] = persisted ? normalizeTradeJobRuntime({ ...persisted, jobId: job.id }) : createTradeJobRuntime(job, { now });
+    }
+    return {
+      schemaVersion: TRADE_JOB_STORE_SCHEMA_VERSION,
+      paused: input2.paused !== false,
+      liveExecutionEnabled: input2.liveExecutionEnabled === true,
+      jobs,
+      runtimes,
+      history: (Array.isArray(input2.history) ? input2.history : []).slice(-TRADE_HISTORY_LIMIT).map(clone7),
+      updatedAt: Math.max(0, finiteNumber8(input2.updatedAt, now))
+    };
+  }
+  function createTradeJobStore(options = {}) {
+    const storage = options.storage;
+    const key = String(options.key || "fc-loop-runner-trade-jobs-v1");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    let memory = normalizeTradeJobStore({}, { now: now() });
+    function read() {
+      const value = storage?.get?.(key, null);
+      if (value && typeof value === "object") memory = normalizeTradeJobStore(value, { now: now() });
+      return clone7(memory);
+    }
+    function write(value) {
+      memory = normalizeTradeJobStore({ ...value, updatedAt: now() }, { now: now() });
+      storage?.set?.(key, clone7(memory));
+      return read();
+    }
+    function upsert(input2, normalizeOptions = {}) {
+      const snapshot = read();
+      const existing = snapshot.jobs.find((job2) => job2.id === String(input2?.id || ""));
+      const job = normalizeTradeJob({
+        ...input2,
+        createdAt: existing?.createdAt ?? input2?.createdAt ?? now(),
+        updatedAt: now()
+      }, { ...normalizeOptions, now: now() });
+      const jobs = snapshot.jobs.filter((entry) => entry.id !== job.id);
+      jobs.push(job);
+      const scheduleChanged = !existing || JSON.stringify(existing.schedule) !== JSON.stringify(job.schedule);
+      const runtimes = {
+        ...snapshot.runtimes,
+        [job.id]: scheduleChanged ? createTradeJobRuntime(job, { now: now() }) : normalizeTradeJobRuntime({ ...snapshot.runtimes[job.id], jobId: job.id })
+      };
+      return { job: clone7(job), snapshot: write({ ...snapshot, jobs, runtimes }) };
+    }
+    function remove(jobId) {
+      const id = String(jobId || "");
+      const snapshot = read();
+      const runtimes = { ...snapshot.runtimes };
+      delete runtimes[id];
+      return write({ ...snapshot, jobs: snapshot.jobs.filter((job) => job.id !== id), runtimes });
+    }
+    function updateRuntime(jobId, runtime) {
+      const id = String(jobId || "");
+      const snapshot = read();
+      if (!snapshot.jobs.some((job) => job.id === id)) throw new Error(`Trade Job ${id} does not exist`);
+      return write({
+        ...snapshot,
+        runtimes: { ...snapshot.runtimes, [id]: normalizeTradeJobRuntime({ ...runtime, jobId: id }) }
+      });
+    }
+    function addHistory(receipt) {
+      const snapshot = read();
+      return write({ ...snapshot, history: [...snapshot.history, clone7(receipt)].slice(-TRADE_HISTORY_LIMIT) });
+    }
+    function setPaused(value) {
+      return write({ ...read(), paused: value !== false });
+    }
+    function setLiveExecutionEnabled(value) {
+      return write({ ...read(), liveExecutionEnabled: value === true });
+    }
+    return Object.freeze({ read, upsert, remove, updateRuntime, addHistory, setPaused, setLiveExecutionEnabled });
+  }
+
+  // src/trade/run-lease.js
+  var TRADE_RUN_LEASE_SCHEMA_VERSION = 1;
+  function finiteNumber9(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function normalizeLease(input2 = {}) {
+    if (!input2 || typeof input2 !== "object" || !input2.ownerId || !input2.runId) return null;
+    return {
+      schemaVersion: TRADE_RUN_LEASE_SCHEMA_VERSION,
+      ownerId: String(input2.ownerId),
+      runId: String(input2.runId),
+      jobId: String(input2.jobId || ""),
+      token: String(input2.token || ""),
+      acquiredAt: Math.max(0, finiteNumber9(input2.acquiredAt)),
+      heartbeatAt: Math.max(0, finiteNumber9(input2.heartbeatAt)),
+      expiresAt: Math.max(0, finiteNumber9(input2.expiresAt))
+    };
+  }
+  function createTradeRunLease(options = {}) {
+    const storage = options.storage;
+    const key = String(options.key || "fc-loop-runner-trade-run-lease-v1");
+    const ownerId = String(options.ownerId || "unknown-owner");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const ttlMs = Math.max(5e3, finiteNumber9(options.ttlMs, 3e4));
+    const createToken = typeof options.createToken === "function" ? options.createToken : () => `${ownerId}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    function read() {
+      return normalizeLease(storage?.get?.(key, null));
+    }
+    function write(value) {
+      storage?.set?.(key, value);
+    }
+    function inspect() {
+      const lease = read();
+      const at = Number(now());
+      return {
+        lease,
+        active: Boolean(lease && lease.expiresAt > at),
+        owned: Boolean(lease && lease.ownerId === ownerId && lease.expiresAt > at),
+        expired: Boolean(lease && lease.expiresAt <= at)
+      };
+    }
+    function acquire(input2 = {}) {
+      const at = Number(now());
+      const before = inspect();
+      if (before.active && !before.owned) return { acquired: false, reason: "lease-held", ...before };
+      const lease = normalizeLease({
+        ownerId,
+        runId: input2.runId,
+        jobId: input2.jobId,
+        token: createToken(),
+        acquiredAt: at,
+        heartbeatAt: at,
+        expiresAt: at + ttlMs
+      });
+      write(lease);
+      const confirmed = read();
+      const acquired = Boolean(confirmed && confirmed.ownerId === ownerId && confirmed.token === lease.token);
+      return {
+        acquired,
+        reason: acquired ? null : "lease-race-lost",
+        lease: confirmed,
+        recoveryRequired: acquired && before.expired,
+        previousLease: before.expired ? before.lease : null
+      };
+    }
+    function heartbeat(runId) {
+      const current = read();
+      const at = Number(now());
+      if (!current || current.ownerId !== ownerId || current.runId !== String(runId) || current.expiresAt <= at) return false;
+      write({ ...current, heartbeatAt: at, expiresAt: at + ttlMs });
+      return true;
+    }
+    function release(runId) {
+      const current = read();
+      if (!current || current.ownerId !== ownerId || current.runId !== String(runId)) return false;
+      storage?.remove?.(key);
+      if (read()) write(null);
+      return read() === null;
+    }
+    return Object.freeze({ acquire, heartbeat, inspect, release });
+  }
+
+  // src/trade/operation-coordinator.js
+  var WRITE_OPERATIONS = /* @__PURE__ */ new Set(["loop", "batch-open", "trade-listing", "trade-buy", "dynamic-sbc-live-scan"]);
+  function finiteNumber10(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function normalizeOperation(input2 = {}) {
+    if (!input2 || !input2.id || !input2.type) return null;
+    return {
+      id: String(input2.id),
+      type: String(input2.type),
+      label: String(input2.label || input2.type),
+      ownerId: String(input2.ownerId || ""),
+      startedAt: Math.max(0, finiteNumber10(input2.startedAt)),
+      write: input2.write !== false
+    };
+  }
+  function createOperationCoordinator(options = {}) {
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const externalBusy = typeof options.externalBusy === "function" ? options.externalBusy : () => null;
+    let active = null;
+    function inspect() {
+      const external = externalBusy();
+      return {
+        active: normalizeOperation(active),
+        external: external ? {
+          busy: external.busy === true,
+          type: external.type ? String(external.type) : null,
+          reason: external.reason ? String(external.reason) : null
+        } : { busy: false, type: null, reason: null }
+      };
+    }
+    function acquire(input2 = {}) {
+      const operation = normalizeOperation({
+        ...input2,
+        write: input2.write !== false,
+        startedAt: now(),
+        id: input2.id || `${input2.type || "operation"}-${now()}`
+      });
+      if (!operation) return { acquired: false, reason: "invalid-operation", operation: null };
+      const state = inspect();
+      if (state.active) return { acquired: false, reason: "operation-active", operation: state.active };
+      if (operation.write && state.external.busy) {
+        return { acquired: false, reason: state.external.reason || "external-operation-active", operation: null, external: state.external };
+      }
+      active = operation;
+      return { acquired: true, reason: null, operation: normalizeOperation(active) };
+    }
+    function release(operationId) {
+      if (!active || active.id !== String(operationId || "")) return false;
+      active = null;
+      return true;
+    }
+    function availability(type, optionsInput = {}) {
+      const state = inspect();
+      const write = optionsInput.write !== false || WRITE_OPERATIONS.has(String(type || ""));
+      if (state.active) return { allowed: false, reason: "operation-active", state };
+      if (write && state.external.busy) return { allowed: false, reason: state.external.reason || "external-operation-active", state };
+      return { allowed: true, reason: null, state };
+    }
+    return Object.freeze({ acquire, availability, inspect, release });
   }
 
   // src/reward/pack-highlight.js
@@ -9983,16 +11094,16 @@
   function normalizedText6(value) {
     return String(value || "").trim();
   }
-  function normalizeRewardAlertSettings(input = {}) {
+  function normalizeRewardAlertSettings(input2 = {}) {
     return Object.freeze({
-      enabled: input.enabled !== false,
-      minimumRating: boundedRating2(input.minimumRating, DEFAULT_REWARD_ALERT_SETTINGS.minimumRating),
-      highlightEnabled: input.highlightEnabled !== false,
-      desktopEnabled: input.desktopEnabled === true,
-      ntfyEnabled: input.ntfyEnabled === true,
+      enabled: input2.enabled !== false,
+      minimumRating: boundedRating2(input2.minimumRating, DEFAULT_REWARD_ALERT_SETTINGS.minimumRating),
+      highlightEnabled: input2.highlightEnabled !== false,
+      desktopEnabled: input2.desktopEnabled === true,
+      ntfyEnabled: input2.ntfyEnabled === true,
       ntfyServer: DEFAULT_REWARD_ALERT_SETTINGS.ntfyServer,
-      ntfyTopic: normalizedText6(input.ntfyTopic),
-      ntfyToken: normalizedText6(input.ntfyToken)
+      ntfyTopic: normalizedText6(input2.ntfyTopic),
+      ntfyToken: normalizedText6(input2.ntfyToken)
     });
   }
   function displayName(item = {}) {
@@ -10170,29 +11281,29 @@
       rating: contrastForeground(accent)
     });
   }
-  function createRecapModel(input = {}) {
-    const rows = (input.rows || []).map((row, index) => Object.freeze({
+  function createRecapModel(input2 = {}) {
+    const rows = (input2.rows || []).map((row, index) => Object.freeze({
       ...row,
-      futbinUrl: row.futbinUrl || createFutbinPlayerUrl(row.futbinPlayerId, input.futbinSeason),
+      futbinUrl: row.futbinUrl || createFutbinPlayerUrl(row.futbinPlayerId, input2.futbinSeason),
       order: Number(row.order ?? index)
     }));
     rows.sort(
       (a, b) => Number(b.rating || 0) - Number(a.rating || 0) || Number(b.special === true) - Number(a.special === true) || a.order - b.order
     );
-    const status = String(input.status || "completed");
+    const status = String(input2.status || "completed");
     return Object.freeze({
-      kind: String(input.kind || "recap"),
-      title: String(input.title || "Recap"),
-      modalId: String(input.modalId || "bronze-loop-recap-modal"),
+      kind: String(input2.kind || "recap"),
+      title: String(input2.title || "Recap"),
+      modalId: String(input2.modalId || "bronze-loop-recap-modal"),
       status,
-      reason: input.reason ? String(input.reason) : null,
-      summary: String(input.summary || ""),
+      reason: input2.reason ? String(input2.reason) : null,
+      summary: String(input2.summary || ""),
       rows: Object.freeze(rows),
       totalRows: rows.length,
       pageSize: RECAP_PAGE_SIZE,
       pageCount: Math.max(1, Math.ceil(rows.length / RECAP_PAGE_SIZE)),
       specialCount: rows.filter((row) => row.special === true).length,
-      meta: Object.freeze({ ...input.meta || {} })
+      meta: Object.freeze({ ...input2.meta || {} })
     });
   }
   function getRecapPage(model, requestedPage = 1) {
@@ -10248,14 +11359,14 @@
       packName: receipt?.packRef?.name || null
     })));
   }
-  function createLoopRecapModel(input = {}) {
-    const receipts = input.receipts || [];
-    const entries = flattenReceiptItems(receipts, input.openedItems);
+  function createLoopRecapModel(input2 = {}) {
+    const receipts = input2.receipts || [];
+    const entries = flattenReceiptItems(receipts, input2.openedItems);
     const items = entries.map(({ item }) => item);
     const players = entries.filter(({ item }) => isRecapPlayer(item));
     const qualifyingCount = players.filter(({ item }) => isRecapRareGoldOrAbove(item)).length;
-    if (input.requireQualifying !== false && qualifyingCount === 0) return null;
-    const prices = input.prices instanceof Map ? input.prices : new Map(Object.entries(input.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
+    if (input2.requireQualifying !== false && qualifyingCount === 0) return null;
+    const prices = input2.prices instanceof Map ? input2.prices : new Map(Object.entries(input2.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
     let specialCount = 0;
     let rareGoldCount = 0;
     let normalGoldCount = 0;
@@ -10282,24 +11393,24 @@
         price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
         showPrice: special,
         sourceLabel: item.packName || packName || null,
-        futbinPlayerId: input.resolveFutbinPlayerId?.(item) ?? null,
+        futbinPlayerId: input2.resolveFutbinPlayerId?.(item) ?? null,
         item,
         order: index
       };
-      row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(item));
+      row.theme = resolveRecapCardTheme(row, input2.resolveNativeTheme?.(item));
       row.tierLabel = recapCardTypeLabel(row, row.theme);
       return row;
     });
-    const status = String(input.status || "completed");
-    const name = String(input.name || "Loop");
-    const requestedPacks = Number(input.requestedPacks || receipts.length);
-    const packsOpened = Number(input.packsOpened ?? receipts.filter((receipt) => receipt?.status === "opened").length);
+    const status = String(input2.status || "completed");
+    const name = String(input2.name || "Loop");
+    const requestedPacks = Number(input2.requestedPacks || receipts.length);
+    const packsOpened = Number(input2.packsOpened ?? receipts.filter((receipt) => receipt?.status === "opened").length);
     const model = createRecapModel({
       kind: "loop",
       title: `${name} Recap`,
       modalId: "bronze-loop-loop-recap-modal",
       status,
-      reason: input.reason,
+      reason: input2.reason,
       summary: `${packsOpened}/${requestedPacks} pack(s) opened, ${items.length} item(s), ${qualifyingCount} rare gold+ card(s), ${specialCount} special, ${rareGoldCount} rare gold${normalGoldCount || normalSilverCount || normalBronzeCount ? `, ${normalGoldCount} common gold, ${normalSilverCount} silver, ${normalBronzeCount} bronze` : ""}`,
       rows
     });
@@ -10325,10 +11436,10 @@
   function itemName2(item = {}) {
     return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || "Unknown player");
   }
-  function createBatchOpenRecapModel(input = {}) {
-    const receipts = input.receipts || [];
-    const items = input.openedItems || receipts.flatMap((receipt) => receipt?.openedItems || []);
-    const prices = input.prices instanceof Map ? input.prices : new Map(Object.entries(input.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
+  function createBatchOpenRecapModel(input2 = {}) {
+    const receipts = input2.receipts || [];
+    const items = input2.openedItems || receipts.flatMap((receipt) => receipt?.openedItems || []);
+    const prices = input2.prices instanceof Map ? input2.prices : new Map(Object.entries(input2.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
     let playerCount = 0;
     let specialCount = 0;
     let normalGoldCount = 0;
@@ -10357,24 +11468,24 @@
         price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
         showPrice: special,
         sourceLabel: item.packName || item.sourceLabel || null,
-        futbinPlayerId: input.resolveFutbinPlayerId?.(item) ?? null,
+        futbinPlayerId: input2.resolveFutbinPlayerId?.(item) ?? null,
         item
       };
-      row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(item));
+      row.theme = resolveRecapCardTheme(row, input2.resolveNativeTheme?.(item));
       row.tierLabel = recapCardTypeLabel(row, row.theme);
       rows.push(row);
     }
-    const status = String(input.status || "completed");
-    const requestedPacks = Number(input.requestedPacks || receipts.length);
-    const packsOpened = Number(input.packsOpened ?? receipts.length);
-    const skippedPacks = Number(input.skippedPacks || 0);
+    const status = String(input2.status || "completed");
+    const requestedPacks = Number(input2.requestedPacks || receipts.length);
+    const packsOpened = Number(input2.packsOpened ?? receipts.length);
+    const skippedPacks = Number(input2.skippedPacks || 0);
     const omittedCount = Math.max(0, items.length - playerCount);
     const model = createRecapModel({
       kind: "batch",
       title: status === "preview" ? "Batch Open Recap Preview" : "Batch Open Recap",
       modalId: "bronze-loop-batch-recap-modal",
       status,
-      reason: input.reason,
+      reason: input2.reason,
       summary: `${packsOpened}/${requestedPacks} pack(s) opened, ${items.length} item(s), ${specialCount} special, ${normalGoldCount} gold, ${normalSilverCount} silver, ${normalBronzeCount} bronze${skippedPacks ? `, ${skippedPacks} skipped` : ""}${omittedCount ? `, ${omittedCount} other item(s)` : ""}`,
       rows
     });
@@ -10436,7 +11547,7 @@
   // src/reward/futbin-card-id.js
   var CACHE_VERSION = 1;
   var MAX_CACHE_ENTRIES = 2e3;
-  function positiveInteger9(value) {
+  function positiveInteger10(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -10449,9 +11560,9 @@
   }
   function cacheEntryKey(context = {}) {
     const source = safeContext(context);
-    const season = positiveInteger9(source.season);
+    const season = positiveInteger10(source.season);
     const platform = normalizedPlatform(source.platform);
-    const definitionId2 = positiveInteger9(source.definitionId);
+    const definitionId2 = positiveInteger10(source.definitionId);
     if (!season || !platform || !definitionId2) return null;
     return `${season}:${platform}:${definitionId2}`;
   }
@@ -10460,7 +11571,7 @@
     const rawEntries = rawCache?.version === CACHE_VERSION && rawCache?.entries && typeof rawCache.entries === "object" ? rawCache.entries : {};
     for (const [key, value] of Object.entries(rawEntries)) {
       if (!/^\d{2}:(?:PC|PS):\d+$/.test(key)) continue;
-      const futbinPlayerId = positiveInteger9(value);
+      const futbinPlayerId = positiveInteger10(value);
       if (futbinPlayerId) entries[key] = futbinPlayerId;
       if (Object.keys(entries).length >= MAX_CACHE_ENTRIES) break;
     }
@@ -10468,11 +11579,11 @@
   }
   function getCachedFutbinPlayerId(cache, context = {}) {
     const key = cacheEntryKey(context);
-    return key ? positiveInteger9(cache?.entries?.[key]) : null;
+    return key ? positiveInteger10(cache?.entries?.[key]) : null;
   }
   function cacheFutbinPlayerId(cache, context = {}, futbinPlayerId) {
     const key = cacheEntryKey(context);
-    const id = positiveInteger9(futbinPlayerId);
+    const id = positiveInteger10(futbinPlayerId);
     if (!key || !id) return false;
     if (!cache.entries || typeof cache.entries !== "object") cache.entries = {};
     cache.entries[key] = id;
@@ -10484,12 +11595,12 @@
   }
   function createFutbinFilteredPlayersUrl(context = {}) {
     const source = safeContext(context);
-    const season = positiveInteger9(source.season);
+    const season = positiveInteger10(source.season);
     const platform = normalizedPlatform(source.platform);
-    const nationId = positiveInteger9(source.nationId);
-    const leagueId = positiveInteger9(source.leagueId);
-    const teamId = positiveInteger9(source.teamId);
-    const rating = positiveInteger9(source.rating);
+    const nationId = positiveInteger10(source.nationId);
+    const leagueId = positiveInteger10(source.leagueId);
+    const teamId = positiveInteger10(source.teamId);
+    const rating = positiveInteger10(source.rating);
     const position = String(source.position || "").trim();
     if (!season || !platform || !nationId || !leagueId || !teamId || !rating || !position) return null;
     const query2 = new URLSearchParams({
@@ -10506,7 +11617,7 @@
     return `https://www.futbin.org/futbin/api/${season}/getFilteredPlayers?${query2.toString()}`;
   }
   function parseFutbinFilteredPlayerId(responseText, definitionId2) {
-    const targetDefinitionId = positiveInteger9(definitionId2);
+    const targetDefinitionId = positiveInteger10(definitionId2);
     if (!targetDefinitionId || typeof responseText !== "string") return null;
     let response;
     try {
@@ -10515,8 +11626,8 @@
       return null;
     }
     const entries = Array.isArray(response?.data) ? response.data : [];
-    const exactMatch = entries.find((entry) => positiveInteger9(entry?.resource_id) === targetDefinitionId);
-    return positiveInteger9(exactMatch?.ID);
+    const exactMatch = entries.find((entry) => positiveInteger10(entry?.resource_id) === targetDefinitionId);
+    return positiveInteger10(exactMatch?.ID);
   }
   async function mapWithConcurrency(entries, limit, callback) {
     const results = [];
@@ -10542,7 +11653,7 @@
     const queued = /* @__PURE__ */ new Map();
     let cacheHits = 0;
     for (const originalItem of items) {
-      const definitionId2 = positiveInteger9(originalItem?.definitionId);
+      const definitionId2 = positiveInteger10(originalItem?.definitionId);
       if (!definitionId2 || ids.has(definitionId2)) continue;
       let item = originalItem;
       try {
@@ -10550,7 +11661,7 @@
       } catch {
         item = originalItem;
       }
-      const knownId = positiveInteger9(resolveKnownId(item)) || positiveInteger9(resolveKnownId(originalItem));
+      const knownId = positiveInteger10(resolveKnownId(item)) || positiveInteger10(resolveKnownId(originalItem));
       if (knownId) {
         ids.set(definitionId2, knownId);
         continue;
@@ -11767,7 +12878,7 @@
   }
 
   // src/pack/catalog.js
-  function positiveInteger10(value) {
+  function positiveInteger11(value) {
     const number = Number(value);
     return Number.isInteger(number) && number > 0 ? number : null;
   }
@@ -11791,13 +12902,13 @@
     return cleanName(value).toLowerCase().replace(/\s+/g, " ");
   }
   function packIdFromReward(reward = {}) {
-    return positiveInteger10(reward.packId) || positiveInteger10(reward.resourceId) || positiveInteger10(reward.definitionId);
+    return positiveInteger11(reward.packId) || positiveInteger11(reward.resourceId) || positiveInteger11(reward.definitionId);
   }
   function normalizeInventory(packs = []) {
     const groups = /* @__PURE__ */ new Map();
     for (const pack of packs || []) {
       if (!pack) continue;
-      const id = positiveInteger10(pack.id ?? pack.packId ?? pack.packDefinitionId ?? pack.packAssetId);
+      const id = positiveInteger11(pack.id ?? pack.packId ?? pack.packDefinitionId ?? pack.packAssetId);
       const name = cleanName(pack.name ?? pack.packName ?? pack.displayName);
       if (!id && !name) continue;
       const countValue = Number(pack.count);
@@ -11815,17 +12926,17 @@
     const metadataPackIds = unique4([
       ...index.packIds || [],
       ...rewards.map(packIdFromReward)
-    ], positiveInteger10);
+    ], positiveInteger11);
     const metadataPackNames = unique4([
       ...index.packNames || [],
       ...rewards.flatMap((reward) => [reward?.name, reward?.description])
     ], cleanName);
-    const observedPackIds = unique4(previousEntry?.observedPackIds || [], positiveInteger10);
+    const observedPackIds = unique4(previousEntry?.observedPackIds || [], positiveInteger11);
     const observedPackNames = unique4(previousEntry?.observedPackNames || [], cleanName);
     return {
-      setId: positiveInteger10(index.setId ?? index.id),
+      setId: positiveInteger11(index.setId ?? index.id),
       setName: cleanName(index.setName ?? index.name),
-      packIds: unique4([...observedPackIds, ...metadataPackIds], positiveInteger10),
+      packIds: unique4([...observedPackIds, ...metadataPackIds], positiveInteger11),
       packNames: unique4([...observedPackNames, ...metadataPackNames], cleanName),
       observedPackIds,
       observedPackNames
@@ -11857,7 +12968,7 @@
     });
   }
   function matchLoopRewardSets(loopDef = {}, sbcRewards = []) {
-    const setIds = new Set((loopDef.sbcSetIds || []).map(positiveInteger10).filter(Boolean));
+    const setIds = new Set((loopDef.sbcSetIds || []).map(positiveInteger11).filter(Boolean));
     if (setIds.size) {
       const idMatches = sbcRewards.filter((entry) => setIds.has(entry.setId));
       if (idMatches.length) return { matches: idMatches, matchSource: "set-id", ambiguous: false };
@@ -11893,11 +13004,11 @@
         });
         continue;
       }
-      const packIds = unique4(match.matches.flatMap((entry) => entry.packIds || []), positiveInteger10);
+      const packIds = unique4(match.matches.flatMap((entry) => entry.packIds || []), positiveInteger11);
       const packNames = unique4(match.matches.flatMap((entry) => entry.packNames || []), cleanName);
       loopRewards[loopId] = {
         loopId,
-        setIds: unique4(match.matches.map((entry) => entry.setId), positiveInteger10),
+        setIds: unique4(match.matches.map((entry) => entry.setId), positiveInteger11),
         setNames: unique4(match.matches.map((entry) => entry.setName), cleanName),
         packIds,
         packNames,
@@ -11941,14 +13052,14 @@
     const sourcePackRef = isPlainObject(options.sourcePackRef) ? options.sourcePackRef : {};
     const rewardOfLoopId = cleanName(sourcePackRef.rewardOfLoopId);
     const dynamic = rewardOfLoopId ? options.catalog?.loopRewards?.[rewardOfLoopId] : null;
-    const dynamicPackIds = unique4(dynamic?.packIds || [], positiveInteger10);
+    const dynamicPackIds = unique4(dynamic?.packIds || [], positiveInteger11);
     const dynamicPackNames = unique4(dynamic?.packNames || [], cleanName);
-    const staticPackIds = unique4(options.sourcePackIds || [], positiveInteger10);
+    const staticPackIds = unique4(options.sourcePackIds || [], positiveInteger11);
     const staticPackNames = unique4(options.sourcePackNames || [], cleanName);
     const producedPackIds = unique4([
       ...options.producedRewardPackIds || [],
       ...options.rewardPackIds || []
-    ], positiveInteger10);
+    ], positiveInteger11);
     const producedPackNames = unique4([
       ...options.producedRewardPackNames || [],
       ...options.rewardPackNames || []
@@ -11977,17 +13088,17 @@
       producedPackIds,
       producedPackNames,
       sourceOutputOverlap,
-      packIds: unique4([...availableDynamicPackIds, ...availableStaticPackIds], positiveInteger10),
+      packIds: unique4([...availableDynamicPackIds, ...availableStaticPackIds], positiveInteger11),
       packNames: unique4([...availableDynamicPackNames, ...availableStaticPackNames], cleanName),
       candidates
     };
   }
   function recordObservedSbcReward(catalog = {}, observation = {}, now = Date.now()) {
-    const setId = positiveInteger10(observation.setId);
+    const setId = positiveInteger11(observation.setId);
     const setName = cleanName(observation.setName);
     const key = setId ? `id:${setId}` : setName ? `name:${normalizedName(setName)}` : "";
     if (!key) return catalog;
-    const packId2 = positiveInteger10(observation.packId);
+    const packId2 = positiveInteger11(observation.packId);
     const packName = cleanName(observation.packName);
     if (!packId2 && !packName) return catalog;
     const entries = new Map((catalog.sbcRewards || []).map((entry) => [sbcRewardKey(entry), { ...entry }]));
@@ -12001,9 +13112,9 @@
     };
     current.setId ||= setId;
     current.setName ||= setName;
-    current.observedPackIds = unique4([packId2, ...current.observedPackIds || []], positiveInteger10);
+    current.observedPackIds = unique4([packId2, ...current.observedPackIds || []], positiveInteger11);
     current.observedPackNames = unique4([packName, ...current.observedPackNames || []], cleanName);
-    current.packIds = unique4([...current.observedPackIds, ...current.packIds || []], positiveInteger10);
+    current.packIds = unique4([...current.observedPackIds, ...current.packIds || []], positiveInteger11);
     current.packNames = unique4([...current.observedPackNames, ...current.packNames || []], cleanName);
     entries.set(key, current);
     return {
@@ -12166,7 +13277,7 @@
   }
 
   // src/workflows/supply-and-craft.js
-  function positiveInteger11(value, fallback = 1, max = 1e3) {
+  function positiveInteger12(value, fallback = 1, max = 1e3) {
     const number = Number(value);
     return Math.max(1, Math.min(max, Number.isFinite(number) ? Math.floor(number) : fallback));
   }
@@ -12177,7 +13288,7 @@
     if (typeof options.challengeProvider !== "function") throw new TypeError("challengeProvider is required");
     if (typeof options.selectPrimary !== "function") throw new TypeError("selectPrimary is required");
     if (typeof options.submit !== "function") throw new TypeError("submit is required");
-    const maxCompletions = positiveInteger11(options.maxCompletions, 1);
+    const maxCompletions = positiveInteger12(options.maxCompletions, 1);
     const result = {
       status: "completed",
       completions: 0,
@@ -12207,7 +13318,7 @@
       let supplied = false;
       if (!selection?.ok && !preserveSupply) {
         for (const supply of options.supplies || []) {
-          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger11(supply.maxRuns, 100, 1e3) : 1;
+          const maxRuns = supply.repeatUntilSatisfied === true ? positiveInteger12(supply.maxRuns, 100, 1e3) : 1;
           for (let run = 1; run <= maxRuns && !selection?.ok && !preserveSupply; run++) {
             await options.stopPoint?.();
             const supplyResult = await supply.provide({
@@ -12994,16 +14105,16 @@
   }
 
   // src/workflows/batch-open.js
-  function createResult(input = {}) {
+  function createResult(input2 = {}) {
     return Object.freeze({
-      status: String(input.status || "completed"),
-      reason: input.reason ? String(input.reason) : null,
-      requestedPacks: Number(input.requestedPacks || 0),
-      packsOpened: Number(input.packsOpened || 0),
-      skippedPacks: Number(input.skippedPacks || 0),
-      openedItems: Object.freeze([...input.openedItems || []]),
-      receipts: Object.freeze([...input.receipts || []]),
-      entries: Object.freeze((input.entries || []).map((entry) => Object.freeze({ ...entry })))
+      status: String(input2.status || "completed"),
+      reason: input2.reason ? String(input2.reason) : null,
+      requestedPacks: Number(input2.requestedPacks || 0),
+      packsOpened: Number(input2.packsOpened || 0),
+      skippedPacks: Number(input2.skippedPacks || 0),
+      openedItems: Object.freeze([...input2.openedItems || []]),
+      receipts: Object.freeze([...input2.receipts || []]),
+      entries: Object.freeze((input2.entries || []).map((entry) => Object.freeze({ ...entry })))
     });
   }
   async function runBatchOpenWorkflow(options = {}) {
@@ -13366,8 +14477,8 @@
     const panel = options.panel;
     const commands = options.commands || {};
     if (!panel?.querySelector) throw new TypeError("panel element is required");
-    const select = required(panel, "#bronze-loop-select");
-    select.addEventListener("change", (event) => commands.selectLoop?.(event.target?.value, event));
+    const select2 = required(panel, "#bronze-loop-select");
+    select2.addEventListener("change", (event) => commands.selectLoop?.(event.target?.value, event));
     required(panel, "#bronze-loop-profile-select").addEventListener("change", (event) => commands.selectProfile?.(event.target?.value, event));
     required(panel, "#bronze-loop-layout-mode").addEventListener("change", (event) => commands.setLayoutMode?.(event.target?.value, event));
     required(panel, "#bronze-loop-open-builder").addEventListener("click", (event) => commands.openBuilder?.(event));
@@ -13385,6 +14496,7 @@
     required(panel, "#bronze-loop-reward-alert-settings").addEventListener("click", (event) => commands.openRewardAlertSettings?.(event));
     required(panel, "#bronze-loop-start").addEventListener("click", (event) => commands.start?.(event));
     required(panel, "#bronze-loop-batch-open").addEventListener("click", (event) => commands.openBatch?.(event));
+    required(panel, "#bronze-loop-trade").addEventListener("click", (event) => commands.openTrade?.(event));
     required(panel, "#bronze-loop-recap-reopen").addEventListener("click", (event) => commands.reopenRecap?.(event));
     required(panel, "#bronze-loop-refresh").addEventListener("click", (event) => commands.refresh?.(event));
     required(panel, "#bronze-loop-scan-picks").addEventListener("click", (event) => commands.scanPicks?.(event));
@@ -13469,6 +14581,11 @@
       openBatch() {
         if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
         options.openBatch?.();
+        return true;
+      },
+      openTrade() {
+        if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+        options.openTrade?.();
         return true;
       },
       reopenRecap: options.reopenRecap,
@@ -13664,18 +14781,18 @@
       log.style.height = `${normalizeMainPanelLogHeight(saved)}px`;
     }
     function updateOptionsButton() {
-      const button3 = panel.querySelector("#bronze-loop-options-toggle");
-      if (!button3) return;
+      const button5 = panel.querySelector("#bronze-loop-options-toggle");
+      if (!button5) return;
       const mobile = isMobileLayout();
       const open = mobile ? mobileTab !== "run" : panel.classList.contains("options-open");
-      button3.textContent = open ? mobile ? "Run" : "Hide" : panel.classList.contains("is-running") ? "Details" : "Options";
-      button3.title = open ? "Return to Run view" : "Show advanced options";
+      button5.textContent = open ? mobile ? "Run" : "Hide" : panel.classList.contains("is-running") ? "Details" : "Options";
+      button5.title = open ? "Return to Run view" : "Show advanced options";
     }
     function updateCollapseButton() {
-      const button3 = panel.querySelector("#bronze-loop-collapse");
-      if (!button3) return;
-      button3.textContent = "L";
-      button3.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
+      const button5 = panel.querySelector("#bronze-loop-collapse");
+      if (!button5) return;
+      button5.textContent = "L";
+      button5.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
     }
     function notifyModeChange() {
       updateOptionsButton();
@@ -14067,12 +15184,12 @@
   function readResponsiveUiMode(dom) {
     const root = dom?.query?.(":root") || null;
     const layout = rootAttribute(root, "data-dlr-layout", "dlrLayout") || "desktop";
-    const input = rootAttribute(root, "data-dlr-input", "dlrInput") || "pointer";
+    const input2 = rootAttribute(root, "data-dlr-input", "dlrInput") || "pointer";
     return Object.freeze({
       layout,
-      input,
+      input: input2,
       mobile: layout === "mobile",
-      touchTargets: layout === "mobile" || input === "touch"
+      touchTargets: layout === "mobile" || input2 === "touch"
     });
   }
   function responsiveControlHeight(mode, desktopHeight = 30) {
@@ -14113,11 +15230,11 @@
       });
     }
     if (mode.touchTargets) {
-      for (const control of options.controls || []) {
-        if (!control?.style) continue;
-        control.style.minHeight = "44px";
-        if (["INPUT", "SELECT", "TEXTAREA"].includes(String(control.tagName || "").toUpperCase())) {
-          control.style.fontSize = "16px";
+      for (const control2 of options.controls || []) {
+        if (!control2?.style) continue;
+        control2.style.minHeight = "44px";
+        if (["INPUT", "SELECT", "TEXTAREA"].includes(String(control2.tagName || "").toUpperCase())) {
+          control2.style.fontSize = "16px";
         }
       }
     }
@@ -14171,8 +15288,8 @@
       ])
     })
   ]);
-  function applyStyles(element, styles) {
-    Object.assign(element.style, styles);
+  function applyStyles(element, styles2) {
+    Object.assign(element.style, styles2);
   }
   function getMainPanelHelpTopics(topic = "overview") {
     const requested = String(topic || "overview");
@@ -14214,13 +15331,13 @@
     title.textContent = options.topic && options.topic !== "overview" ? getMainPanelHelpTopics(options.topic)[0]?.title || "Loop Runner guide" : "Loop Runner guide";
     applyStyles(title, { fontSize: "16px", fontWeight: "700", marginBottom: "12px" });
     dialog.appendChild(title);
-    for (const section of getMainPanelHelpTopics(options.topic)) {
+    for (const section2 of getMainPanelHelpTopics(options.topic)) {
       const heading = dom.create("div");
-      heading.textContent = section.title;
+      heading.textContent = section2.title;
       applyStyles(heading, { color: "#b8c3d2", fontSize: "12px", fontWeight: "700", margin: "12px 0 6px" });
       const list = dom.create("div");
       applyStyles(list, { display: "flex", flexDirection: "column", gap: "6px" });
-      for (const [label, description] of section.items) {
+      for (const [label, description] of section2.items) {
         const row = dom.create("div");
         applyStyles(row, { padding: "7px 8px", background: "#1d2229", lineHeight: "17px" });
         const name = dom.create("span");
@@ -14267,21 +15384,21 @@
   function renderMainPanelLoopOptions(options = {}) {
     const panel = options.panel;
     const createOption = options.createOption;
-    const select = query(panel, "#bronze-loop-select");
-    if (!select || typeof createOption !== "function") return null;
+    const select2 = query(panel, "#bronze-loop-select");
+    if (!select2 || typeof createOption !== "function") return null;
     const loops = options.loops || [];
-    const previous = String(options.selectedId || select.value || "");
-    select.textContent = "";
+    const previous = String(options.selectedId || select2.value || "");
+    select2.textContent = "";
     for (const loop of loops) {
-      const option = createOption();
-      option.value = loop.id;
-      option.textContent = loop.name;
-      select.appendChild(option);
+      const option2 = createOption();
+      option2.value = loop.id;
+      option2.textContent = loop.name;
+      select2.appendChild(option2);
     }
-    const values = Array.from(select.options || []).map((option) => option.value);
+    const values = Array.from(select2.options || []).map((option2) => option2.value);
     const nextValue = values.includes(previous) ? previous : loops[0]?.id;
-    if (nextValue) select.value = nextValue;
-    return select.value || null;
+    if (nextValue) select2.value = nextValue;
+    return select2.value || null;
   }
   function renderMainPanelRounds(options = {}) {
     const panel = options.panel;
@@ -14293,43 +15410,43 @@
     if (display === "none") return;
     const quantity = options.quantity || {};
     const label = query(panel, "#bronze-loop-rounds-label");
-    const input = query(panel, "#bronze-loop-rounds");
+    const input2 = query(panel, "#bronze-loop-rounds");
     if (label) label.textContent = quantity.label || "Rounds";
-    if (!input) return;
-    input.min = String(quantity.min || 1);
-    input.max = String(quantity.max || 50);
+    if (!input2) return;
+    input2.min = String(quantity.min || 1);
+    input2.max = String(quantity.max || 50);
     const quantityKey = String(options.quantityKey || "");
-    if (input.dataset?.quantityKey !== quantityKey) {
-      input.value = String(quantity.default || 1);
-      if (input.dataset) input.dataset.quantityKey = quantityKey;
+    if (input2.dataset?.quantityKey !== quantityKey) {
+      input2.value = String(quantity.default || 1);
+      if (input2.dataset) input2.dataset.quantityKey = quantityKey;
     }
   }
   function renderMainPanelProfileOptions(options = {}) {
     const panel = options.panel;
     const createOption = options.createOption;
-    const select = query(panel, "#bronze-loop-profile-select");
-    if (!select || typeof createOption !== "function") return null;
+    const select2 = query(panel, "#bronze-loop-profile-select");
+    if (!select2 || typeof createOption !== "function") return null;
     const profiles = options.profiles || [];
-    select.textContent = "";
+    select2.textContent = "";
     for (const profile of profiles) {
-      const option = createOption();
-      option.value = profile.id;
-      option.textContent = profile.name;
-      select.appendChild(option);
+      const option2 = createOption();
+      option2.value = profile.id;
+      option2.textContent = profile.name;
+      select2.appendChild(option2);
     }
-    const values = Array.from(select.options || []).map((option) => option.value);
+    const values = Array.from(select2.options || []).map((option2) => option2.value);
     const selectedId = String(options.selectedId || "");
-    select.value = values.includes(selectedId) ? selectedId : values[0] || "";
-    return select.value || null;
+    select2.value = values.includes(selectedId) ? selectedId : values[0] || "";
+    return select2.value || null;
   }
   function renderMainPanelRecap(options = {}) {
-    const button3 = query(options.panel, "#bronze-loop-recap-reopen");
-    if (!button3) return;
+    const button5 = query(options.panel, "#bronze-loop-recap-reopen");
+    if (!button5) return;
     const recap = options.recap;
-    button3.style.display = recap ? "" : "none";
+    button5.style.display = recap ? "" : "none";
     if (recap) {
       const label = recap.type === "batch" ? "Batch Open" : recap.type === "loop" ? "Loop" : "Player Pick";
-      button3.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
+      button5.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
     }
   }
   function renderRewardAlertSummary(options = {}) {
@@ -14399,6 +15516,7 @@
     const disabled2 = {
       "bronze-loop-start": busy,
       "bronze-loop-batch-open": busy,
+      "bronze-loop-trade": busy,
       "bronze-loop-stop": state.running !== true,
       "bronze-loop-select": state.running === true || state.scanningPicks === true || state.loadingLoops === true,
       "bronze-loop-profile-select": busy,
@@ -14620,6 +15738,7 @@
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] .bronze-loop-loop-row,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-start,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-batch-open,
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-trade,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-recap-reopen,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-scan-progress { display: none !important; }
   #bronze-loop-panel[data-layout="mobile"].is-running #bronze-loop-run-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; min-width: 0; }
@@ -14669,6 +15788,7 @@
         <button id="bronze-loop-start">Start</button>
         <button id="bronze-loop-stop" disabled>Stop</button>
         <button id="bronze-loop-batch-open" title="Scan My Packs and open a saved batch">Batch Open</button>
+        <button id="bronze-loop-trade" title="Trade Scheduler and manual listings">Trade</button>
         <button id="bronze-loop-recap-reopen" style="display:none" title="View last Player Pick recap">View recap</button>
       </div>
       <div id="bronze-loop-scan-progress" role="status" aria-live="polite" data-mode="indeterminate">
@@ -14780,7 +15900,7 @@
     "recoveryRecipes",
     "unassignedRecoveryPolicies"
   ]);
-  function clone5(value) {
+  function clone8(value) {
     return cloneLoopDef(value);
   }
   function stableValue2(value) {
@@ -14800,8 +15920,8 @@
     return current;
   }
   function setValueAt(value, path, nextValue) {
-    if (!path.length) return clone5(nextValue);
-    const result = isPlainObject(value) ? clone5(value) : {};
+    if (!path.length) return clone8(nextValue);
+    const result = isPlainObject(value) ? clone8(value) : {};
     let current = result;
     for (const key2 of path.slice(0, -1)) {
       if (!isPlainObject(current[key2])) current[key2] = {};
@@ -14809,7 +15929,7 @@
     }
     const key = path.at(-1);
     if (nextValue === void 0) delete current[key];
-    else current[key] = clone5(nextValue);
+    else current[key] = clone8(nextValue);
     return result;
   }
   function replaceEntity(items, id, entity) {
@@ -14817,27 +15937,27 @@
     let replaced = false;
     for (const item of items || []) {
       if (String(item?.id || "") !== String(id)) {
-        result.push(clone5(item));
+        result.push(clone8(item));
         continue;
       }
       replaced = true;
-      if (entity) result.push(clone5(entity));
+      if (entity) result.push(clone8(entity));
     }
-    if (!replaced && entity) result.push(clone5(entity));
+    if (!replaced && entity) result.push(clone8(entity));
     return result;
   }
   function mergePatch(base, patch) {
-    if (!isPlainObject(patch)) return clone5(patch);
-    const result = isPlainObject(base) ? clone5(base) : {};
+    if (!isPlainObject(patch)) return clone8(patch);
+    const result = isPlainObject(base) ? clone8(base) : {};
     for (const [key, value] of Object.entries(patch)) {
       if (value === null) delete result[key];
-      else result[key] = isPlainObject(value) ? mergePatch(result[key], value) : clone5(value);
+      else result[key] = isPlainObject(value) ? mergePatch(result[key], value) : clone8(value);
     }
     return result;
   }
   function createPatch(base, target) {
     if (sameValue(base, target)) return void 0;
-    if (!isPlainObject(base) || !isPlainObject(target)) return clone5(target);
+    if (!isPlainObject(base) || !isPlainObject(target)) return clone8(target);
     const patch = {};
     const keys = /* @__PURE__ */ new Set([...Object.keys(base), ...Object.keys(target)]);
     for (const key of keys) {
@@ -14846,7 +15966,7 @@
         continue;
       }
       if (!Object.hasOwn(base, key)) {
-        patch[key] = clone5(target[key]);
+        patch[key] = clone8(target[key]);
         continue;
       }
       const child = createPatch(base[key], target[key]);
@@ -14879,23 +15999,23 @@
       const targetEntity = target.get(id);
       const currentEntity = current.get(id);
       if (!targetEntity) {
-        if (!baseEntity && currentEntity) entities.push(clone5(currentEntity));
+        if (!baseEntity && currentEntity) entities.push(clone8(currentEntity));
         continue;
       }
       if (!baseEntity) {
         if (currentEntity && !sameValue(currentEntity, targetEntity)) {
           conflicts.push({ collection, id, path: "", reason: "custom-id-collision" });
         }
-        entities.push(clone5(targetEntity));
+        entities.push(clone8(targetEntity));
         continue;
       }
       if (!currentEntity) {
         conflicts.push({ collection, id, path: "", reason: "built-in-removed" });
-        entities.push(clone5(targetEntity));
+        entities.push(clone8(targetEntity));
         continue;
       }
       if (sameValue(baseEntity, targetEntity)) {
-        entities.push(clone5(currentEntity));
+        entities.push(clone8(currentEntity));
         continue;
       }
       const patch = createPatch(baseEntity, targetEntity);
@@ -14909,9 +16029,9 @@
             id,
             path: path.join("."),
             reason: "both-changed",
-            base: clone5(before),
-            builtIn: clone5(upstream),
-            profile: clone5(desired)
+            base: clone8(before),
+            builtIn: clone8(upstream),
+            profile: clone8(desired)
           });
         }
       }
@@ -14920,26 +16040,26 @@
     return { entities, conflicts };
   }
   function rebaseDefaultPolicies(baseConfig, targetConfig, currentConfig) {
-    const field2 = "defaultUnassignedRecoveryPolicyIds";
-    const base = baseConfig[field2];
-    const target = targetConfig[field2];
-    const current = currentConfig[field2];
-    if (sameValue(base, target)) return { value: clone5(current), conflicts: [] };
+    const field4 = "defaultUnassignedRecoveryPolicyIds";
+    const base = baseConfig[field4];
+    const target = targetConfig[field4];
+    const current = currentConfig[field4];
+    if (sameValue(base, target)) return { value: clone8(current), conflicts: [] };
     if (!sameValue(base, current) && !sameValue(current, target)) {
       return {
-        value: clone5(target),
+        value: clone8(target),
         conflicts: [{
-          collection: field2,
-          id: field2,
+          collection: field4,
+          id: field4,
           path: "",
           reason: "both-changed",
-          base: clone5(base),
-          builtIn: clone5(current),
-          profile: clone5(target)
+          base: clone8(base),
+          builtIn: clone8(current),
+          profile: clone8(target)
         }]
       };
     }
-    return { value: clone5(target), conflicts: [] };
+    return { value: clone8(target), conflicts: [] };
   }
   function normalizeDynamicBinding(binding = {}) {
     return {
@@ -14950,7 +16070,7 @@
       rewardPackIds: [...new Set((binding.rewardPackIds || binding.definition?.rewardPackIds || []).map(Number).filter(Number.isFinite))],
       discoveryKind: String(binding.discoveryKind || binding.definition?.discoveryKind || ""),
       available: binding.available === true,
-      definition: binding.definition ? clone5(binding.definition) : null,
+      definition: binding.definition ? clone8(binding.definition) : null,
       lastSeenAt: Number(binding.lastSeenAt || 0) || 0
     };
   }
@@ -14965,7 +16085,7 @@
     return binding.rewardPackIds.some((id) => packIds.has(id));
   }
   function legacyInventoryOnlyStarterConfig(baseConfig) {
-    const config = clone5(normalizeLoopConfig(baseConfig));
+    const config = clone8(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => getLoopStrategyCapabilities(loop.strategy).inventoryOnly === INVENTORY_ONLY_CAPABILITIES.container ? { ...loop, inventoryMode: "inventory-only" } : loop);
     return validateLoopConfig(config, "Legacy Inventory Only starter profile");
   }
@@ -14978,7 +16098,7 @@
     return (loop.challengeRequirements || []).some((requirements) => (requirements || []).some(requirementUsesBronzeOrSilver));
   }
   function bronzeSilverInventoryOnlyStarterConfig(baseConfig) {
-    const config = clone5(normalizeLoopConfig(baseConfig));
+    const config = clone8(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => {
       const capability = getLoopStrategyCapabilities(loop.strategy).inventoryOnly;
       if (![INVENTORY_ONLY_CAPABILITIES.supported, INVENTORY_ONLY_CAPABILITIES.container].includes(capability)) {
@@ -14992,7 +16112,7 @@
     return validateLoopConfig(config, "Bronze/Silver Inventory Only starter profile");
   }
   function dailyRarePack2x84StarterConfig(baseConfig) {
-    const config = clone5(normalizeLoopConfig(baseConfig));
+    const config = clone8(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => {
       if (loop.id !== "one-click-daily") return loop;
       const steps = (loop.steps || []).filter((step) => String(typeof step === "object" ? step?.loopId || "" : step) !== "daily-rare-pack-84");
@@ -15011,19 +16131,19 @@
     return validateLoopConfig(config, "Daily Rare Pack Recycling starter profile");
   }
   function dailyRarePack80x5StarterConfig(baseConfig) {
-    const config = clone5(normalizeLoopConfig(baseConfig));
+    const config = clone8(normalizeLoopConfig(baseConfig));
     const template = config.loops.find((loop) => loop.id === "daily-rare-pack-84");
     if (!template) return validateLoopConfig(config, "Daily Rare Pack to 5x80+ starter profile");
-    const templateRequirement = clone5(template.rareUpgrade?.requirements?.[0] || {});
+    const templateRequirement = clone8(template.rareUpgrade?.requirements?.[0] || {});
     const { rarity: _templateRarity, ...goldRequirement } = templateRequirement;
     const sourcePackNames = (template.sourcePackNames || []).filter((name) => !/\b80\s*\+/i.test(String(name)));
     const recyclingLoop = {
-      ...clone5(template),
+      ...clone8(template),
       id: DAILY_RARE_PACK_80X5_LOOP_ID,
       name: "Daily Rare Pack to 5x80+ Loop",
       sourcePackNames,
       rareUpgrade: {
-        ...clone5(template.rareUpgrade),
+        ...clone8(template.rareUpgrade),
         name: "5x80+ Rare Gold Recycling Upgrade",
         activityBinding: {
           family: "common-gold-material-upgrade",
@@ -15073,7 +16193,7 @@
     if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), expected))) {
       return profile;
     }
-    return { ...clone5(profile), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
+    return { ...clone8(profile), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
   }
   function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
     if (profile?.preset !== "inventory-only" || profile?.id !== LEGACY_INVENTORY_ONLY_PROFILE_ID || profile?.name !== "Inventory Only") return false;
@@ -15083,7 +16203,7 @@
   function officialStarterConfig(profile, baseConfig) {
     const id = String(profile?.id || "");
     const preset = String(profile?.preset || "");
-    const normalizedBase = clone5(normalizeLoopConfig(baseConfig));
+    const normalizedBase = clone8(normalizeLoopConfig(baseConfig));
     if (id === BUILDER_STARTER_PROFILE_IDS.default && preset === "default") return normalizedBase;
     if (id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly && preset === "bronze-silver-inventory-only") {
       return bronzeSilverInventoryOnlyStarterConfig(normalizedBase);
@@ -15118,7 +16238,7 @@
       now
     });
     return {
-      ...clone5(profile),
+      ...clone8(profile),
       ...refreshed,
       createdAt: Number(profile.createdAt || refreshed.createdAt),
       updatedAt: Number(now),
@@ -15127,7 +16247,7 @@
     };
   }
   function createBuilderStarterProfiles(baseConfig, options = {}) {
-    const normalizedBase = clone5(validateLoopConfig(baseConfig, "Builder starter profile base"));
+    const normalizedBase = clone8(validateLoopConfig(baseConfig, "Builder starter profile base"));
     return [
       createBuilderProfile({
         id: BUILDER_STARTER_PROFILE_IDS.default,
@@ -15173,8 +16293,8 @@
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
   function createBuilderProfile(options = {}) {
-    const baseConfig = clone5(normalizeLoopConfig(options.baseConfig || options.config));
-    const config = clone5(normalizeLoopConfig(options.config || baseConfig));
+    const baseConfig = clone8(normalizeLoopConfig(options.baseConfig || options.config));
+    const config = clone8(normalizeLoopConfig(options.config || baseConfig));
     const now = Number(options.now || Date.now());
     return {
       schemaVersion: BUILDER_SCHEMA_VERSION,
@@ -15184,8 +16304,8 @@
       baseFingerprint: fingerprintBuilderValue(baseConfig),
       baseConfig,
       draftConfig: config,
-      savedConfig: clone5(config),
-      lastKnownGood: clone5(validateLoopConfig(config, "Builder profile")),
+      savedConfig: clone8(config),
+      lastKnownGood: clone8(validateLoopConfig(config, "Builder profile")),
       dynamicBindings: (options.dynamicBindings || []).map(normalizeDynamicBinding),
       draftRevision: 1,
       savedRevision: 1,
@@ -15197,20 +16317,20 @@
     if (!isPlainObject(profile)) return createBuilderProfile({ baseConfig, ...options });
     let normalizedBase;
     try {
-      normalizedBase = clone5(validateLoopConfig(profile.baseConfig || baseConfig, "Builder profile base"));
+      normalizedBase = clone8(validateLoopConfig(profile.baseConfig || baseConfig, "Builder profile base"));
     } catch {
-      normalizedBase = clone5(validateLoopConfig(baseConfig, "Current built-in config"));
+      normalizedBase = clone8(validateLoopConfig(baseConfig, "Current built-in config"));
     }
     let lastKnownGood = null;
     for (const candidate of [profile.lastKnownGood, profile.savedConfig, normalizedBase]) {
       if (!candidate) continue;
       try {
-        lastKnownGood = clone5(validateLoopConfig(candidate, "Builder last known good"));
+        lastKnownGood = clone8(validateLoopConfig(candidate, "Builder last known good"));
         break;
       } catch {
       }
     }
-    const draftConfig = clone5(normalizeLoopConfig(profile.draftConfig || lastKnownGood));
+    const draftConfig = clone8(normalizeLoopConfig(profile.draftConfig || lastKnownGood));
     const result = {
       ...createBuilderProfile({
         id: profile.id || options.id,
@@ -15219,12 +16339,12 @@
         config: lastKnownGood,
         now: profile.createdAt || options.now
       }),
-      ...clone5(profile),
+      ...clone8(profile),
       schemaVersion: BUILDER_SCHEMA_VERSION,
-      baseConfig: clone5(normalizedBase),
+      baseConfig: clone8(normalizedBase),
       draftConfig,
-      savedConfig: clone5(lastKnownGood),
-      lastKnownGood: clone5(lastKnownGood),
+      savedConfig: clone8(lastKnownGood),
+      lastKnownGood: clone8(lastKnownGood),
       dynamicBindings: (profile.dynamicBindings || []).map((binding) => ({
         ...normalizeDynamicBinding(binding),
         available: false
@@ -15295,25 +16415,25 @@
         available: false
       })),
       profiles,
-      lastKnownGood: migratedLegacyActive || activeStarterRefreshed ? clone5(activeProfile?.lastKnownGood || null) : store.lastKnownGood ? clone5(store.lastKnownGood) : null
+      lastKnownGood: migratedLegacyActive || activeStarterRefreshed ? clone8(activeProfile?.lastKnownGood || null) : store.lastKnownGood ? clone8(store.lastKnownGood) : null
     };
   }
   function updateBuilderProfileDraft(profile, config, now = Date.now()) {
     return {
-      ...clone5(profile),
-      draftConfig: clone5(normalizeLoopConfig(config)),
+      ...clone8(profile),
+      draftConfig: clone8(normalizeLoopConfig(config)),
       draftRevision: Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1,
       updatedAt: Number(now)
     };
   }
   function refreshBuilderDynamicBindings(profile, discoveredLoops = [], now = Date.now()) {
-    const result = clone5(profile);
+    const result = clone8(profile);
     result.dynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).map((binding) => {
       const definition = discoveredLoops.find((loop) => dynamicLoopMatch(binding, loop));
       return {
         ...binding,
         available: Boolean(definition),
-        definition: definition ? clone5(definition) : binding.definition,
+        definition: definition ? clone8(definition) : binding.definition,
         lastSeenAt: definition ? Number(now) : binding.lastSeenAt
       };
     });
@@ -15345,7 +16465,7 @@
         unavailableBindings.push({ id: binding.id, loopId: binding.loopId });
         continue;
       }
-      config.loops.push(clone5(binding.definition));
+      config.loops.push(clone8(binding.definition));
     }
     return {
       config,
@@ -15368,15 +16488,15 @@
   }
   function resolveBuilderProfileConflict(profile, currentBuiltInConfig, conflict, choice, now = Date.now()) {
     if (!["built-in", "profile"].includes(choice)) throw new Error(`Unsupported conflict choice: ${choice}`);
-    const result = clone5(profile);
+    const result = clone8(profile);
     const currentConfig = normalizeLoopConfig(currentBuiltInConfig);
     const path = String(conflict?.path || "").split(".").filter(Boolean);
     const collection = String(conflict?.collection || "");
     if (collection === "defaultUnassignedRecoveryPolicyIds") {
       if (choice === "built-in") {
-        result.draftConfig[collection] = clone5(currentConfig[collection]);
+        result.draftConfig[collection] = clone8(currentConfig[collection]);
       } else {
-        result.baseConfig[collection] = clone5(currentConfig[collection]);
+        result.baseConfig[collection] = clone8(currentConfig[collection]);
       }
     } else if (ENTITY_COLLECTIONS.includes(collection)) {
       const id = String(conflict?.id || "");
@@ -15410,14 +16530,14 @@
     const validation = validateBuilderProfile(profile, currentBuiltInConfig);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
     const revision = Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1;
-    const currentBase = clone5(normalizeLoopConfig(currentBuiltInConfig));
+    const currentBase = clone8(normalizeLoopConfig(currentBuiltInConfig));
     return {
-      ...clone5(profile),
+      ...clone8(profile),
       baseConfig: currentBase,
       baseFingerprint: fingerprintBuilderValue(currentBase),
-      draftConfig: clone5(validation.config),
-      savedConfig: clone5(validation.config),
-      lastKnownGood: clone5(validation.config),
+      draftConfig: clone8(validation.config),
+      savedConfig: clone8(validation.config),
+      lastKnownGood: clone8(validation.config),
       draftRevision: revision,
       savedRevision: revision,
       updatedAt: Number(now)
@@ -15426,9 +16546,9 @@
   function upsertBuilderProfile(store, profile) {
     const profiles = [...store.profiles || []];
     const index = profiles.findIndex((entry) => entry.id === profile.id);
-    if (index >= 0) profiles[index] = clone5(profile);
-    else profiles.push(clone5(profile));
-    return { ...clone5(store), profiles };
+    if (index >= 0) profiles[index] = clone8(profile);
+    else profiles.push(clone8(profile));
+    return { ...clone8(store), profiles };
   }
   function activateBuilderProfile(store, profile, currentBuiltInConfig) {
     const saved = saveBuilderProfile(profile, currentBuiltInConfig);
@@ -15437,43 +16557,43 @@
       store: {
         ...nextStore,
         activeProfileId: saved.id,
-        activeDynamicBindings: clone5(saved.dynamicBindings || []),
-        lastKnownGood: clone5(saved.lastKnownGood)
+        activeDynamicBindings: clone8(saved.dynamicBindings || []),
+        lastKnownGood: clone8(saved.lastKnownGood)
       },
       profile: saved,
-      config: clone5(saved.lastKnownGood)
+      config: clone8(saved.lastKnownGood)
     };
   }
   function activateSavedBuilderProfile(store, profileId, currentBuiltInConfig) {
     const profile = (store.profiles || []).find((entry) => String(entry.id) === String(profileId));
     if (!profile) throw new Error(`Builder profile not found: ${profileId}`);
-    const savedConfig = clone5(profile.lastKnownGood || profile.savedConfig);
+    const savedConfig = clone8(profile.lastKnownGood || profile.savedConfig);
     if (!savedConfig) throw new Error(`Builder profile has no saved configuration: ${profile.name || profile.id}`);
     const savedLoopIds = new Set((savedConfig.loops || []).map((loop) => String(loop.id || "")));
     const savedDynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).filter((binding) => savedLoopIds.has(binding.loopId));
     const savedProfile = {
-      ...clone5(profile),
-      draftConfig: clone5(savedConfig),
-      savedConfig: clone5(savedConfig),
-      lastKnownGood: clone5(savedConfig),
+      ...clone8(profile),
+      draftConfig: clone8(savedConfig),
+      savedConfig: clone8(savedConfig),
+      lastKnownGood: clone8(savedConfig),
       dynamicBindings: savedDynamicBindings
     };
     const validation = validateBuilderProfile(savedProfile, currentBuiltInConfig);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
     return {
       store: {
-        ...clone5(store),
+        ...clone8(store),
         activeProfileId: profile.id,
-        activeDynamicBindings: clone5(savedDynamicBindings),
-        lastKnownGood: clone5(validation.config)
+        activeDynamicBindings: clone8(savedDynamicBindings),
+        lastKnownGood: clone8(validation.config)
       },
-      profile: clone5(profile),
-      config: clone5(validation.config)
+      profile: clone8(profile),
+      config: clone8(validation.config)
     };
   }
   function deactivateBuilderProfile(store) {
     return {
-      ...clone5(store),
+      ...clone8(store),
       activeProfileId: null,
       activeDynamicBindings: []
     };
@@ -15514,7 +16634,7 @@
   }
 
   // src/config/builder-editor.js
-  function clone6(value) {
+  function clone9(value) {
     return cloneLoopDef(value);
   }
   function slug(value) {
@@ -15566,17 +16686,17 @@
     }
   }
   function addBuilderLoop(config, strategy, options = {}) {
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const template = createLoopTemplate(strategy, options);
     template.id = uniqueId(normalized, template.id);
     normalized.loops.push(template);
     return { config: normalized, loop: template };
   }
   function duplicateBuilderLoop(config, loopId, options = {}) {
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const source = normalized.loops.find((loop) => String(loop.id) === String(loopId));
     if (!source) throw new Error(`Loop not found: ${loopId}`);
-    const copy = clone6(source);
+    const copy = clone9(source);
     copy.id = uniqueId(normalized, options.id || `${source.id}-copy`);
     copy.name = String(options.name || `${source.name} Copy`);
     delete copy.discoveryReportedCompleted;
@@ -15609,7 +16729,7 @@
     return references;
   }
   function removeBuilderLoop(config, loopId) {
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const references = findBuilderReferences(normalized, loopId);
     if (references.length) throw new Error(`Loop ${loopId} is referenced by ${references.length} configuration location(s)`);
     const previousLength = normalized.loops.length;
@@ -15618,7 +16738,7 @@
     return normalized;
   }
   function renameBuilderLoopId(config, oldId, requestedId) {
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const nextId = slug(requestedId);
     const target = normalized.loops.find((loop) => String(loop.id) === String(oldId));
     if (!target) throw new Error(`Loop not found: ${oldId}`);
@@ -15686,7 +16806,7 @@
     if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(kind)) {
       throw new Error(`Unsupported recovery collection: ${kind}`);
     }
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const nextId = slug(requestedId);
     const target = normalized[kind].find((item) => String(item.id) === String(oldId));
     if (!target) throw new Error(`Recovery object not found: ${oldId}`);
@@ -15718,7 +16838,7 @@
     return { config: normalized, id: nextId };
   }
   function removeBuilderRecovery(config, kind, id) {
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const references = findBuilderRecoveryReferences(normalized, kind, id);
     if (references.length) throw new Error(`Recovery object ${id} is referenced by ${references.length} configuration location(s)`);
     const previousLength = normalized[kind]?.length;
@@ -15728,18 +16848,18 @@
     return normalized;
   }
   function addBuilderWorkflowStep(config, workflowId, loopId, options = {}) {
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const child = normalized.loops.find((loop) => String(loop.id) === String(loopId));
     if (!workflow || !["dailyRoutine", "workflowRoutine"].includes(workflow.strategy)) throw new Error(`Workflow not found: ${workflowId}`);
     if (!child) throw new Error(`Child Loop not found: ${loopId}`);
     if (["dailyRoutine", "workflowRoutine"].includes(child.strategy)) throw new Error("Nested workflows are not supported");
-    const step = options.name || options.rewardFlow ? { loopId: child.id, ...options.name ? { name: options.name } : {}, ...options.rewardFlow ? { rewardFlow: clone6(options.rewardFlow) } : {} } : child.id;
+    const step = options.name || options.rewardFlow ? { loopId: child.id, ...options.name ? { name: options.name } : {}, ...options.rewardFlow ? { rewardFlow: clone9(options.rewardFlow) } : {} } : child.id;
     workflow.steps = [...workflow.steps || [], step];
     return normalized;
   }
   function moveBuilderWorkflowStep(config, workflowId, fromIndex, toIndex) {
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
     const from = Number(fromIndex);
@@ -15750,7 +16870,7 @@
     return normalized;
   }
   function removeBuilderWorkflowStep(config, workflowId, index) {
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
     if (!Number.isInteger(Number(index)) || Number(index) < 0 || Number(index) >= workflow.steps.length) {
@@ -15760,7 +16880,7 @@
     return normalized;
   }
   function setBuilderWorkflowStepPath(config, workflowId, index, path, value) {
-    const normalized = clone6(normalizeLoopConfig(config));
+    const normalized = clone9(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const stepIndex = Number(index);
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
@@ -15768,13 +16888,13 @@
       throw new Error(`Invalid Workflow step index: ${index}`);
     }
     const rawStep = workflow.steps[stepIndex];
-    const step = typeof rawStep === "string" ? { loopId: rawStep } : clone6(rawStep);
+    const step = typeof rawStep === "string" ? { loopId: rawStep } : clone9(rawStep);
     if (!step?.loopId) throw new Error(`Workflow step has no Loop reference: ${workflowId}[${index}]`);
     workflow.steps[stepIndex] = setBuilderPath(step, path, value);
     return normalized;
   }
   function createBuilderStepVariant(config, workflowId, stepIndex) {
-    let normalized = clone6(normalizeLoopConfig(config));
+    let normalized = clone9(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const rawStep = workflow?.steps?.[Number(stepIndex)];
     const sourceId = typeof rawStep === "string" ? rawStep : rawStep?.loopId;
@@ -15788,12 +16908,12 @@
     normalized = result.config;
     result.loop.hidden = true;
     const nextWorkflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
-    const step = typeof rawStep === "string" ? { loopId: result.loop.id } : { ...clone6(rawStep), loopId: result.loop.id };
+    const step = typeof rawStep === "string" ? { loopId: result.loop.id } : { ...clone9(rawStep), loopId: result.loop.id };
     nextWorkflow.steps[Number(stepIndex)] = step;
     return { config: normalized, loop: result.loop };
   }
   function setBuilderPath(object, path, value) {
-    const result = clone6(object);
+    const result = clone9(object);
     const parts = Array.isArray(path) ? path : String(path).split(".").filter(Boolean);
     let target = result;
     const parents = [];
@@ -15805,7 +16925,7 @@
     }
     const finalKey = parts.at(-1);
     if (value === void 0) delete target[finalKey];
-    else target[finalKey] = clone6(value);
+    else target[finalKey] = clone9(value);
     if (value === void 0) {
       for (let index = parents.length - 1; index >= 0; index--) {
         const parent = parents[index];
@@ -16026,7 +17146,7 @@
     return BUILDER_STRATEGY_DESCRIPTORS[strategy] || null;
   }
   function getBuilderLoopFields(loopDef = {}) {
-    const common = BUILDER_COMMON_FIELDS.filter((field2) => !field2.strategies || field2.strategies.includes(loopDef.strategy));
+    const common = BUILDER_COMMON_FIELDS.filter((field4) => !field4.strategies || field4.strategies.includes(loopDef.strategy));
     return [...common, ...getBuilderStrategyDescriptor(loopDef.strategy)?.fields || []];
   }
 
@@ -16043,7 +17163,7 @@
   }
   function optionList(options, value, includeInherit = false) {
     const inherit = includeInherit ? `<option value=""${selected(value, void 0)}>Inherit</option>` : "";
-    return `${inherit}${options.map((option) => `<option value="${escapeHtml(option.value)}"${selected(value, option.value)}>${escapeHtml(option.label)}</option>`).join("")}`;
+    return `${inherit}${options.map((option2) => `<option value="${escapeHtml(option2.value)}"${selected(value, option2.value)}>${escapeHtml(option2.label)}</option>`).join("")}`;
   }
   function boolOptions(value) {
     return optionList([
@@ -16051,10 +17171,10 @@
       { value: "false", label: "Disabled" }
     ], value === void 0 ? void 0 : String(value), true);
   }
-  function fieldRow(label, control, options = {}) {
+  function fieldRow(label, control2, options = {}) {
     return `<label class="dlr-builder-field${options.wide ? " wide" : ""}">
     <span>${escapeHtml(label)}${options.required ? " *" : ""}</span>
-    ${control}
+    ${control2}
   </label>`;
   }
   function textInput(path, value, type = "text", readOnly = false, placeholder = "") {
@@ -16063,54 +17183,54 @@
   function selectInput(path, value, options, readOnly = false, includeInherit = false) {
     return `<select data-builder-field="${escapeHtml(path)}"${disabled(readOnly)}>${optionList(options, value, includeInherit)}</select>`;
   }
-  function renderScalarField(field2, value, context) {
-    const readOnly = context.readOnly || field2.path === "strategy" && context.source !== "custom" || field2.path === "id" && context.source !== "custom";
-    switch (field2.type) {
+  function renderScalarField(field4, value, context) {
+    const readOnly = context.readOnly || field4.path === "strategy" && context.source !== "custom" || field4.path === "id" && context.source !== "custom";
+    switch (field4.type) {
       case "id":
-        return fieldRow(field2.label, textInput(field2.path, value, "id", readOnly), { required: field2.required });
+        return fieldRow(field4.label, textInput(field4.path, value, "id", readOnly), { required: field4.required });
       case "integer":
       case "rating":
-        return fieldRow(field2.label, textInput(field2.path, value, "number", readOnly), { required: field2.required });
+        return fieldRow(field4.label, textInput(field4.path, value, "number", readOnly), { required: field4.required });
       case "boolean-inherit":
-        return fieldRow(field2.label, `<select data-builder-field="${escapeHtml(field2.path)}" data-builder-value-type="boolean-inherit"${disabled(readOnly)}>${boolOptions(value)}</select>`);
+        return fieldRow(field4.label, `<select data-builder-field="${escapeHtml(field4.path)}" data-builder-value-type="boolean-inherit"${disabled(readOnly)}>${boolOptions(value)}</select>`);
       case "strategy":
-        return fieldRow(field2.label, selectInput(field2.path, value, BUILDER_STRATEGY_OPTIONS, readOnly), { required: true });
+        return fieldRow(field4.label, selectInput(field4.path, value, BUILDER_STRATEGY_OPTIONS, readOnly), { required: true });
       case "inventory-mode":
-        return fieldRow(field2.label, selectInput(field2.path, value, [
+        return fieldRow(field4.label, selectInput(field4.path, value, [
           { value: "inherit", label: "Inherit" },
           { value: "normal", label: "Normal" },
           { value: "inventory-only", label: "Inventory only" }
         ], readOnly));
       case "special-kind":
-        return fieldRow(field2.label, selectInput(field2.path, value, [
+        return fieldRow(field4.label, selectInput(field4.path, value, [
           { value: "", label: "None" },
           { value: "totw", label: "TOTW" },
           { value: "totw-tots-fof", label: "TOTW / TOTS / FOF" }
         ], readOnly));
       case "loop-reference":
-        return fieldRow(field2.label, selectInput(field2.path, value, [
+        return fieldRow(field4.label, selectInput(field4.path, value, [
           { value: "", label: "None" },
           ...context.atomicLoops.map((loop) => ({ value: loop.id, label: loop.name }))
         ], readOnly));
       case "activity-family":
-        return fieldRow(field2.label, selectInput(field2.path, value, [
+        return fieldRow(field4.label, selectInput(field4.path, value, [
           { value: "", label: "None" },
           ...SBC_ACTIVITY_FAMILY_IDS.map((family) => ({ value: family, label: family }))
         ], readOnly));
       case "pick-loop-reference":
-        return fieldRow(field2.label, selectInput(field2.path, value, [
+        return fieldRow(field4.label, selectInput(field4.path, value, [
           { value: "", label: "None" },
           ...context.playerPickLoops.map((loop) => ({ value: loop.id, label: loop.name }))
         ], readOnly));
       case "price-platform":
-        return fieldRow(field2.label, selectInput(field2.path, value, [
+        return fieldRow(field4.label, selectInput(field4.path, value, [
           { value: "", label: "Runtime default" },
           { value: "pc", label: "PC" },
           { value: "ps", label: "PlayStation" },
           { value: "xbox", label: "Xbox" }
         ], readOnly));
       default:
-        return fieldRow(field2.label, textInput(field2.path, value, "text", readOnly), { required: field2.required });
+        return fieldRow(field4.label, textInput(field4.path, value, "text", readOnly), { required: field4.required });
     }
   }
   function renderList(path, label, values, itemType, context) {
@@ -16400,63 +17520,63 @@
     </div></div>`).join("") || '<div class="dlr-builder-empty">No legacy overrides</div>'}
   </section>`;
   }
-  function renderField(field2, loop, context) {
-    const value = loop[field2.path];
-    switch (field2.type) {
+  function renderField(field4, loop, context) {
+    const value = loop[field4.path];
+    switch (field4.type) {
       case "string-list":
-        return renderList(field2.path, field2.label, value, "text", context);
+        return renderList(field4.path, field4.label, value, "text", context);
       case "number-list":
-        return renderList(field2.path, field2.label, value, "number", context);
+        return renderList(field4.path, field4.label, value, "number", context);
       case "pile-list":
-        return renderPileList(field2.path, field2.label, value, context);
+        return renderPileList(field4.path, field4.label, value, context);
       case "policy-list":
-        return renderList(field2.path, field2.label, value, "text", context);
+        return renderList(field4.path, field4.label, value, "text", context);
       case "card-spec":
-        return `<section class="dlr-builder-form-section"><h3>${escapeHtml(field2.label)}</h3>${renderCardSpec(field2.path, value, context, { withCount: false })}</section>`;
+        return `<section class="dlr-builder-form-section"><h3>${escapeHtml(field4.label)}</h3>${renderCardSpec(field4.path, value, context, { withCount: false })}</section>`;
       case "requirements":
-        return renderRequirements(field2.path, field2.label, value, context);
+        return renderRequirements(field4.path, field4.label, value, context);
       case "challenge-requirements":
-        return renderChallengeRequirements(field2.path, field2.label, value, context);
+        return renderChallengeRequirements(field4.path, field4.label, value, context);
       case "runtime-quantity":
-        return renderRuntimeQuantity(field2.path, value, context);
+        return renderRuntimeQuantity(field4.path, value, context);
       case "reward-flow":
-        return renderRewardFlow(field2.path, value, context);
+        return renderRewardFlow(field4.path, value, context);
       case "pick-options":
-        return renderPickOptions(field2.path, value, context);
+        return renderPickOptions(field4.path, value, context);
       case "sbc-fodder-policy":
-        return renderSbcFodderPolicy(field2.path, value, context);
+        return renderSbcFodderPolicy(field4.path, value, context);
       case "pick-binding":
-        return renderPickBinding(field2.path, value, context);
+        return renderPickBinding(field4.path, value, context);
       case "pick-selector":
-        return renderPickSelector(field2.path, value, context);
+        return renderPickSelector(field4.path, value, context);
       case "activity-binding":
-        return renderActivityBinding(field2.path, value, context);
+        return renderActivityBinding(field4.path, value, context);
       case "upgrade":
-        return `<section class="dlr-builder-form-section"><h3>${escapeHtml(field2.label)}</h3>${renderUpgrade(field2.path, value, context)}</section>`;
+        return `<section class="dlr-builder-form-section"><h3>${escapeHtml(field4.label)}</h3>${renderUpgrade(field4.path, value, context)}</section>`;
       case "upgrade-list":
-        return renderUpgradeList(field2.path, field2.label, value, context);
+        return renderUpgradeList(field4.path, field4.label, value, context);
       case "stage-list":
-        return renderUpgradeList(field2.path, field2.label, value, context, true);
+        return renderUpgradeList(field4.path, field4.label, value, context, true);
       case "shortage-packs":
-        return renderShortagePacks(field2.path, field2.label, value, context);
+        return renderShortagePacks(field4.path, field4.label, value, context);
       case "source-pack-ref":
-        return renderSourcePackRef(field2.path, field2.label, value, context);
+        return renderSourcePackRef(field4.path, field4.label, value, context);
       case "rating-fill":
-        return renderRatingFill(field2.path, value, context);
+        return renderRatingFill(field4.path, value, context);
       case "auto-totw-upgrade":
-        return renderAutoTotwUpgrade(field2.path, value, context);
+        return renderAutoTotwUpgrade(field4.path, value, context);
       case "auto-fodder-upgrade":
-        return renderAutoFodderUpgrade(field2.path, value, context);
+        return renderAutoFodderUpgrade(field4.path, value, context);
       case "special-requirement-control":
-        return renderSpecialRequirementControl(field2.path, value, context);
+        return renderSpecialRequirementControl(field4.path, value, context);
       case "object-toggle":
-        return renderGenericObject(field2.path, field2.label, value, context);
+        return renderGenericObject(field4.path, field4.label, value, context);
       case "legacy-step-overrides":
-        return renderLegacyOverrides(field2.path, value, context);
+        return renderLegacyOverrides(field4.path, value, context);
       case "workflow-steps":
         return "";
       default:
-        return renderScalarField(field2, value, context);
+        return renderScalarField(field4, value, context);
     }
   }
   function renderWorkflow(loop, context) {
@@ -16495,8 +17615,8 @@
     </div>
   </div>
   ${descriptor2?.routine ? renderWorkflow(loop, context) : ""}
-  <div class="dlr-builder-form-grid common">${fields.filter((field2) => ["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "activity-family", "pick-loop-reference", "price-platform"].includes(field2.type)).map((field2) => renderField(field2, loop, context)).join("")}</div>
-  ${fields.filter((field2) => !["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "activity-family", "pick-loop-reference", "price-platform", "workflow-steps"].includes(field2.type)).map((field2) => renderField(field2, loop, context)).join("")}`;
+  <div class="dlr-builder-form-grid common">${fields.filter((field4) => ["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "activity-family", "pick-loop-reference", "price-platform"].includes(field4.type)).map((field4) => renderField(field4, loop, context)).join("")}</div>
+  ${fields.filter((field4) => !["text", "id", "strategy", "integer", "rating", "boolean-inherit", "inventory-mode", "special-kind", "loop-reference", "activity-family", "pick-loop-reference", "price-platform", "workflow-steps"].includes(field4.type)).map((field4) => renderField(field4, loop, context)).join("")}`;
   }
   function renderRecoveryEditor(object, kind, context) {
     if (!object) return '<div class="dlr-builder-empty large">Select a recovery recipe or policy</div>';
@@ -16604,8 +17724,8 @@
     }
     if (loop.consumeAllSourcePacks) return "all matching source packs";
     if (loop.exhaustSbcSet) return "all EA remaining completions";
-    for (const field2 of ["maxCompletions", "rounds", "maxPacks", "maxRounds"]) {
-      if (loop[field2] !== void 0) return `${field2}: ${loop[field2]}`;
+    for (const field4 of ["maxCompletions", "rounds", "maxPacks", "maxRounds"]) {
+      if (loop[field4] !== void 0) return `${field4}: ${loop[field4]}`;
     }
     return "strategy default";
   }
@@ -16866,7 +17986,7 @@
   }
 
   // src/ui/workflow-loop-builder.js
-  function clone7(value) {
+  function clone10(value) {
     return cloneLoopDef(value);
   }
   function pathValue(object, path) {
@@ -16908,7 +18028,7 @@
       return raw === "true" ? {} : false;
     }
     if (valueType === "string-list") {
-      return [...element?.selectedOptions || []].map((option) => option.value).filter(Boolean);
+      return [...element?.selectedOptions || []].map((option2) => option2.value).filter(Boolean);
     }
     if (valueType === "number") return raw === "" ? void 0 : Number(raw);
     if (element?.tagName === "SELECT" && raw === "") return void 0;
@@ -16924,7 +18044,7 @@
   }
   function createWorkflowLoopBuilder(options = {}) {
     const dom = options.dom;
-    const builtInConfig = () => clone7(normalizeLoopConfig(options.getBuiltInConfig?.()));
+    const builtInConfig = () => clone10(normalizeLoopConfig(options.getBuiltInConfig?.()));
     const mounted = mountWorkflowLoopBuilder({ dom });
     const root = mounted.root;
     let store = normalizeBuilderStore(options.loadStore?.(), builtInConfig(), { now: options.now?.() });
@@ -16947,13 +18067,13 @@
       return Number(options.now?.() || Date.now());
     }
     function discoveredLoops() {
-      return clone7(options.getDiscoveredLoops?.() || []);
+      return clone10(options.getDiscoveredLoops?.() || []);
     }
     function profile() {
       return store.profiles.find((entry) => entry.id === profileId) || store.profiles[0];
     }
     function persist() {
-      const snapshot = clone7(store);
+      const snapshot = clone10(store);
       options.saveStore?.(snapshot);
       options.onStoreChange?.(snapshot);
     }
@@ -16970,7 +18090,7 @@
       const current = profile();
       if (JSON.stringify(current) === JSON.stringify(nextProfile)) return false;
       const currentHistory = history();
-      currentHistory.undo.push(clone7(current));
+      currentHistory.undo.push(clone10(current));
       if (currentHistory.undo.length > 50) currentHistory.undo.shift();
       currentHistory.redo = [];
       setProfile(nextProfile);
@@ -16983,7 +18103,7 @@
       const currentHistory = history();
       const previous = currentHistory.undo.pop();
       if (!previous) return false;
-      currentHistory.redo.push(clone7(profile()));
+      currentHistory.redo.push(clone10(profile()));
       setProfile(previous);
       selectedKind = null;
       selectedId = null;
@@ -16995,7 +18115,7 @@
       const currentHistory = history();
       const next = currentHistory.redo.pop();
       if (!next) return false;
-      currentHistory.undo.push(clone7(profile()));
+      currentHistory.undo.push(clone10(profile()));
       setProfile(next);
       selectedKind = null;
       selectedId = null;
@@ -17027,24 +18147,24 @@
       return `${profileId}:${kind}:${id}`;
     }
     function displayConfig(currentProfile, validation, sources) {
-      const config = clone7(normalizeLoopConfig(currentProfile.draftConfig));
+      const config = clone10(normalizeLoopConfig(currentProfile.draftConfig));
       for (const collection of BUILDER_COLLECTIONS) {
         const effective = new Map((validation.config[collection] || []).map((item) => [String(item.id), item]));
         const sourceMap = new Map((sources[collection] || []).map((entry) => [String(entry.id), entry.source]));
         config[collection] = (config[collection] || []).map((item) => {
           const source = sourceMap.get(String(item.id));
-          return ["built-in", "override", "dynamic"].includes(source) && effective.has(String(item.id)) ? clone7(effective.get(String(item.id))) : item;
+          return ["built-in", "override", "dynamic"].includes(source) && effective.has(String(item.id)) ? clone10(effective.get(String(item.id))) : item;
         });
         const ids = new Set(config[collection].map((item) => String(item.id)));
         for (const item of validation.config[collection] || []) {
           const id = String(item.id);
           if (ids.has(id)) continue;
-          config[collection].push(clone7(item));
+          config[collection].push(clone10(item));
           sources[collection] = [...sources[collection] || [], { id, source: "built-in", current: true }];
           ids.add(id);
         }
       }
-      config.defaultUnassignedRecoveryPolicyIds = clone7(validation.config.defaultUnassignedRecoveryPolicyIds);
+      config.defaultUnassignedRecoveryPolicyIds = clone10(validation.config.defaultUnassignedRecoveryPolicyIds);
       return config;
     }
     function buildModel() {
@@ -17111,10 +18231,10 @@
       return true;
     }
     function updateSelectedObject(mutator) {
-      const config = clone7(profile().draftConfig);
+      const config = clone10(profile().draftConfig);
       const object = selectedObject(config);
       if (!object || selectedKind === "dynamic") return false;
-      const updated = mutator(clone7(object));
+      const updated = mutator(clone10(object));
       if (!updated) return false;
       config[selectedKind] = replaceById(config[selectedKind], object.id, updated);
       setDraftConfig(config);
@@ -17180,7 +18300,7 @@
     function toggleDefaultRecoveryPolicy(element) {
       const policyId = String(element?.dataset?.policyId || "");
       if (!policyId) return;
-      const config = clone7(profile().draftConfig);
+      const config = clone10(profile().draftConfig);
       const ids = new Set(config.defaultUnassignedRecoveryPolicyIds || []);
       if (element.value === "true") ids.add(policyId);
       else ids.delete(policyId);
@@ -17189,7 +18309,7 @@
       render();
     }
     function newObject() {
-      const config = clone7(profile().draftConfig);
+      const config = clone10(profile().draftConfig);
       if (tab === "workflows") {
         const result = addBuilderLoop(config, "workflowRoutine", { name: "Custom Workflow" });
         setDraftConfig(result.config);
@@ -17237,12 +18357,12 @@
     }
     function duplicateObject() {
       if (selectedKind === "loops") {
-        const config2 = clone7(profile().draftConfig);
+        const config2 = clone10(profile().draftConfig);
         const hadSource = config2.loops.some((loop) => String(loop.id) === String(selectedId));
         if (!hadSource) {
           const effective = validateBuilderProfile(profile(), builtInConfig()).config.loops.find((loop) => String(loop.id) === String(selectedId));
           if (!effective) throw new Error(`Loop not found: ${selectedId}`);
-          config2.loops.push(clone7(effective));
+          config2.loops.push(clone10(effective));
         }
         const result = duplicateBuilderLoop(config2, selectedId);
         if (!hadSource) result.config.loops = result.config.loops.filter((loop) => String(loop.id) !== String(selectedId));
@@ -17253,7 +18373,7 @@
         return;
       }
       if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(selectedKind)) return;
-      const config = clone7(profile().draftConfig);
+      const config = clone10(profile().draftConfig);
       let source = config[selectedKind].find((item) => String(item.id) === String(selectedId));
       if (!source) {
         source = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind].find((item) => String(item.id) === String(selectedId));
@@ -17263,17 +18383,17 @@
       let index = 2;
       let id = `${source.id}-copy`;
       while (ids.has(id)) id = `${source.id}-copy-${index++}`;
-      const copy = { ...clone7(source), id, ...source.name ? { name: `${source.name} Copy` } : {} };
+      const copy = { ...clone10(source), id, ...source.name ? { name: `${source.name} Copy` } : {} };
       config[selectedKind].push(copy);
       setDraftConfig(config);
       selectedId = id;
       render();
     }
     function resetObject() {
-      const config = clone7(profile().draftConfig);
+      const config = clone10(profile().draftConfig);
       const current = builtInConfig()[selectedKind]?.find((item) => String(item.id) === String(selectedId));
       if (!current) return;
-      config[selectedKind] = replaceById(config[selectedKind], selectedId, clone7(current));
+      config[selectedKind] = replaceById(config[selectedKind], selectedId, clone10(current));
       editableBuiltIns.delete(editableKey());
       setDraftConfig(config);
       render();
@@ -17295,21 +18415,21 @@
       if (selectedKind !== "dynamic") return;
       const definition = selectedObject(profile().draftConfig);
       if (!definition) return;
-      const currentProfile = clone7(profile());
-      const config = clone7(currentProfile.draftConfig);
+      const currentProfile = clone10(profile());
+      const config = clone10(currentProfile.draftConfig);
       const existing = config.loops.findIndex((loop) => String(loop.id) === String(definition.id));
-      if (existing >= 0) config.loops[existing] = clone7(definition);
-      else config.loops.push(clone7(definition));
+      if (existing >= 0) config.loops[existing] = clone10(definition);
+      else config.loops.push(clone10(definition));
       currentProfile.dynamicBindings = [
         ...(currentProfile.dynamicBindings || []).filter((binding) => binding.loopId !== definition.id),
         {
           id: definition.id,
           loopId: definition.id,
-          sbcSetIds: clone7(definition.sbcSetIds || []),
-          pickItemResourceIds: clone7(definition.pickItemResourceIds || []),
-          rewardPackIds: clone7(definition.rewardPackIds || []),
+          sbcSetIds: clone10(definition.sbcSetIds || []),
+          pickItemResourceIds: clone10(definition.pickItemResourceIds || []),
+          rewardPackIds: clone10(definition.rewardPackIds || []),
           discoveryKind: String(definition.discoveryKind || ""),
-          definition: clone7(definition),
+          definition: clone10(definition),
           available: true,
           lastSeenAt: now()
         }
@@ -17323,14 +18443,14 @@
     }
     function unbindDynamic() {
       if (selectedKind !== "loops") return;
-      const currentProfile = clone7(profile());
+      const currentProfile = clone10(profile());
       const binding = (currentProfile.dynamicBindings || []).find((entry) => String(entry.loopId) === String(selectedId));
       if (!binding) return;
       const references = findBuilderReferences(currentProfile.draftConfig, binding.loopId);
       if (references.length) {
         throw new Error(`Dynamic SBC ${binding.loopId} is referenced by ${references.length} Workflow location(s); remove those steps first`);
       }
-      const config = clone7(currentProfile.draftConfig);
+      const config = clone10(currentProfile.draftConfig);
       config.loops = config.loops.filter((loop) => String(loop.id) !== String(binding.loopId));
       currentProfile.dynamicBindings = currentProfile.dynamicBindings.filter((entry) => String(entry.loopId) !== String(binding.loopId));
       setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
@@ -17364,7 +18484,7 @@
         store = activated.store;
         profileId = activated.profile.id;
         persist();
-        options.applyConfig?.(clone7(activated.config), `Builder profile: ${activated.profile.name}`);
+        options.applyConfig?.(clone10(activated.config), `Builder profile: ${activated.profile.name}`);
         jsonMessage = "Profile activated";
         jsonValid = true;
       } catch (error) {
@@ -17392,7 +18512,7 @@
     }
     function importedDynamicBindings(currentProfile, config) {
       const loops = new Map((config.loops || []).map((loop) => [String(loop.id || ""), loop]));
-      return clone7((currentProfile.dynamicBindings || []).filter((binding) => {
+      return clone10((currentProfile.dynamicBindings || []).filter((binding) => {
         const loop = loops.get(String(binding.loopId || ""));
         return ["playerPickSbc", "fillAndVerifySbc"].includes(loop?.strategy);
       }));
@@ -17455,8 +18575,8 @@
       if (deletedActiveProfile) options.useBuiltIn?.();
       render();
     }
-    function handleAction(button3) {
-      const action2 = button3.dataset.builderAction;
+    function handleAction(button5) {
+      const action2 = button5.dataset.builderAction;
       if (!action2) return;
       if (action2 === "close-builder") return close();
       if (action2 === "toggle-mobile-actions") {
@@ -17465,7 +18585,7 @@
         return;
       }
       if (action2 === "select-mobile-section") {
-        mobileSection = ["library", "editor", "details"].includes(button3.dataset.section) ? button3.dataset.section : "library";
+        mobileSection = ["library", "editor", "details"].includes(button5.dataset.section) ? button5.dataset.section : "library";
         render();
         return;
       }
@@ -17491,7 +18611,7 @@
         return;
       }
       if (action2 === "select-tab") {
-        tab = button3.dataset.tab;
+        tab = button5.dataset.tab;
         previewOpen = false;
         selectedKind = null;
         selectedId = null;
@@ -17501,8 +18621,8 @@
         return;
       }
       if (action2 === "select-object") {
-        selectedKind = button3.dataset.kind;
-        selectedId = button3.dataset.id;
+        selectedKind = button5.dataset.kind;
+        selectedId = button5.dataset.id;
         selectedStep = null;
         mobileSection = "editor";
         render();
@@ -17511,13 +18631,13 @@
       if (action2 === "new-object") return newObject();
       if (action2 === "duplicate-object") return duplicateObject();
       if (action2 === "override-object") {
-        const config = clone7(profile().draftConfig);
+        const config = clone10(profile().draftConfig);
         if (!config[selectedKind]?.some((item) => String(item.id) === String(selectedId))) {
           const effective = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind]?.find((item) => String(item.id) === String(selectedId));
           if (!effective) throw new Error(`Built-in object not found: ${selectedKind}.${selectedId}`);
-          config[selectedKind].push(clone7(effective));
-          const currentProfile = clone7(profile());
-          currentProfile.baseConfig[selectedKind].push(clone7(effective));
+          config[selectedKind].push(clone10(effective));
+          const currentProfile = clone10(profile());
+          currentProfile.baseConfig[selectedKind].push(clone10(effective));
           currentProfile.baseFingerprint = fingerprintBuilderValue(currentProfile.baseConfig);
           setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
         }
@@ -17529,24 +18649,24 @@
       if (action2 === "delete-object") return deleteObject();
       if (action2 === "bind-dynamic") return bindDynamic();
       if (action2 === "unbind-dynamic") return unbindDynamic();
-      if (action2 === "add-list") return updateList(button3.dataset.path, (items) => [...items, button3.dataset.itemType === "number" ? 0 : ""]);
+      if (action2 === "add-list") return updateList(button5.dataset.path, (items) => [...items, button5.dataset.itemType === "number" ? 0 : ""]);
       if (action2 === "add-selected-list") {
-        const select = root.querySelector(`[data-builder-add-select="${button3.dataset.path}"]`);
-        if (select?.value) updateList(button3.dataset.path, (items) => [...items, select.value]);
+        const select2 = root.querySelector(`[data-builder-add-select="${button5.dataset.path}"]`);
+        if (select2?.value) updateList(button5.dataset.path, (items) => [...items, select2.value]);
         return;
       }
-      if (action2 === "remove-list") return updateList(button3.dataset.path, (items) => items.filter((_, index) => index !== Number(button3.dataset.index)));
-      if (action2 === "move-list") return updateList(button3.dataset.path, (items) => {
-        const from = Number(button3.dataset.index);
-        const to = Math.max(0, Math.min(items.length - 1, from + Number(button3.dataset.delta)));
+      if (action2 === "remove-list") return updateList(button5.dataset.path, (items) => items.filter((_, index) => index !== Number(button5.dataset.index)));
+      if (action2 === "move-list") return updateList(button5.dataset.path, (items) => {
+        const from = Number(button5.dataset.index);
+        const to = Math.max(0, Math.min(items.length - 1, from + Number(button5.dataset.delta)));
         const [item] = items.splice(from, 1);
         items.splice(to, 0, item);
         return items;
       });
-      if (action2 === "add-requirement") return updateList(button3.dataset.path, (items) => [...items, defaultRequirement()]);
-      if (action2 === "add-challenge-group") return updateList(button3.dataset.path, (items) => [...items, [defaultRequirement()]]);
-      if (action2 === "add-shortage") return updateList(button3.dataset.path, (items) => [...items, { requirement: { tier: "gold", playerOnly: true, allowSpecial: false }, packNames: ["Source pack"], maxOpensPerAttempt: 1 }]);
-      if (action2 === "add-upgrade") return updateList(button3.dataset.path, (items) => [...items, defaultUpgrade(button3.dataset.stage === "true", items.length)]);
+      if (action2 === "add-requirement") return updateList(button5.dataset.path, (items) => [...items, defaultRequirement()]);
+      if (action2 === "add-challenge-group") return updateList(button5.dataset.path, (items) => [...items, [defaultRequirement()]]);
+      if (action2 === "add-shortage") return updateList(button5.dataset.path, (items) => [...items, { requirement: { tier: "gold", playerOnly: true, allowSpecial: false }, packNames: ["Source pack"], maxOpensPerAttempt: 1 }]);
+      if (action2 === "add-upgrade") return updateList(button5.dataset.path, (items) => [...items, defaultUpgrade(button5.dataset.stage === "true", items.length)]);
       if (action2 === "add-recovery-step") return updateList("steps", (items) => [...items, { recipeId: profile().draftConfig.recoveryRecipes[0]?.id || "" }]);
       if (action2 === "add-step") {
         const loopId = root.querySelector("#dlr-builder-add-step-select")?.value;
@@ -17555,26 +18675,26 @@
         return;
       }
       if (action2 === "select-step") {
-        selectedStep = Number(button3.dataset.index);
+        selectedStep = Number(button5.dataset.index);
         mobileSection = "details";
         render();
         return;
       }
       if (action2 === "move-step") {
-        const index = Number(button3.dataset.index);
-        setDraftConfig(moveBuilderWorkflowStep(profile().draftConfig, selectedId, index, index + Number(button3.dataset.delta)));
-        selectedStep = Math.max(0, index + Number(button3.dataset.delta));
+        const index = Number(button5.dataset.index);
+        setDraftConfig(moveBuilderWorkflowStep(profile().draftConfig, selectedId, index, index + Number(button5.dataset.delta)));
+        selectedStep = Math.max(0, index + Number(button5.dataset.delta));
         render();
         return;
       }
       if (action2 === "remove-step") {
-        setDraftConfig(removeBuilderWorkflowStep(profile().draftConfig, selectedId, Number(button3.dataset.index)));
+        setDraftConfig(removeBuilderWorkflowStep(profile().draftConfig, selectedId, Number(button5.dataset.index)));
         selectedStep = null;
         render();
         return;
       }
       if (action2 === "variant-step") {
-        const result = createBuilderStepVariant(profile().draftConfig, selectedId, Number(button3.dataset.index));
+        const result = createBuilderStepVariant(profile().draftConfig, selectedId, Number(button5.dataset.index));
         setDraftConfig(result.config);
         selectedKind = "loops";
         selectedId = result.loop.id;
@@ -17591,7 +18711,7 @@
         render();
         return;
       }
-      if (action2 === "resolve-conflict") return resolveConflict(button3.dataset.index, button3.dataset.choice);
+      if (action2 === "resolve-conflict") return resolveConflict(button5.dataset.index, button5.dataset.choice);
       if (action2 === "save-profile") return saveProfile();
       if (action2 === "activate-profile") return activateProfile();
       if (action2 === "validate-json") return validateJson();
@@ -17601,10 +18721,10 @@
       if (action2 === "delete-profile") return deleteProfile();
     }
     function onClick(event) {
-      const button3 = event.target?.closest?.("[data-builder-action]");
-      if (!button3 || !root.contains(button3)) return;
+      const button5 = event.target?.closest?.("[data-builder-action]");
+      if (!button5 || !root.contains(button5)) return;
       try {
-        handleAction(button3);
+        handleAction(button5);
       } catch (error) {
         jsonMessage = error?.message || String(error);
         jsonValid = false;
@@ -17628,7 +18748,7 @@
           return;
         }
         if (element?.id === "dlr-builder-profile-name") {
-          const next = { ...clone7(profile()), name: String(element.value || "").trim() || profile().name, updatedAt: now() };
+          const next = { ...clone10(profile()), name: String(element.value || "").trim() || profile().name, updatedAt: now() };
           setEditedProfile(next);
           render();
           return;
@@ -17672,10 +18792,10 @@
       jsonMessage = `Imported ${importedProfile.draftConfig.loops.length} Loop(s)`;
       jsonValid = true;
       if (importOptions.open !== false) open("json");
-      return clone7(importedProfile.draftConfig);
+      return clone10(importedProfile.draftConfig);
     }
     function refreshDynamic(nextDiscoveredLoops = discoveredLoops()) {
-      const loops = clone7(nextDiscoveredLoops);
+      const loops = clone10(nextDiscoveredLoops);
       const activeBindingSnapshot = refreshBuilderDynamicBindings({
         dynamicBindings: store.activeDynamicBindings || []
       }, loops, now()).dynamicBindings;
@@ -17686,7 +18806,7 @@
       };
       persist();
       if (root.classList.contains("open")) render();
-      return clone7(store);
+      return clone10(store);
     }
     function restoreActiveProfile() {
       if (!store.activeProfileId) return { status: "built-in", config: null };
@@ -17694,15 +18814,15 @@
       if (!active) return { status: "missing", config: null };
       const activeConfig = store.lastKnownGood || active.lastKnownGood || active.savedConfig;
       const startupProfile = {
-        ...clone7(active),
-        draftConfig: clone7(activeConfig),
-        savedConfig: clone7(activeConfig),
-        dynamicBindings: clone7(store.activeDynamicBindings || [])
+        ...clone10(active),
+        draftConfig: clone10(activeConfig),
+        savedConfig: clone10(activeConfig),
+        dynamicBindings: clone10(store.activeDynamicBindings || [])
       };
       const validation = validateBuilderProfile(startupProfile, builtInConfig());
       if (!validation.valid) return { status: "blocked", errors: validation.errors, config: null };
-      options.applyConfig?.(clone7(validation.config), `Builder profile: ${active.name}`);
-      return { status: "applied", config: clone7(validation.config) };
+      options.applyConfig?.(clone10(validation.config), `Builder profile: ${active.name}`);
+      return { status: "applied", config: clone10(validation.config) };
     }
     function selectRuntimeProfile(nextProfileId) {
       if (String(nextProfileId) === BUILDER_BUILT_IN_PROFILE_ID) {
@@ -17713,12 +18833,12 @@
       store = activated.store;
       profileId = activated.profile.id;
       persist();
-      options.applyConfig?.(clone7(activated.config), `Builder profile: ${activated.profile.name}`);
+      options.applyConfig?.(clone10(activated.config), `Builder profile: ${activated.profile.name}`);
       if (root.classList.contains("open")) render();
       return {
         status: "applied",
         profileId: activated.profile.id,
-        config: clone7(activated.config)
+        config: clone10(activated.config)
       };
     }
     function useBuiltIn() {
@@ -17751,15 +18871,15 @@
         ...store.profiles.map((entry) => ({ id: entry.id, name: entry.name, preset: entry.preset || null }))
       ],
       getSelectedRuntimeProfileId: () => store.activeProfileId || BUILDER_BUILT_IN_PROFILE_ID,
-      getStore: () => clone7(store),
+      getStore: () => clone10(store),
       isOpen: () => root.classList.contains("open"),
       root
     });
   }
 
   // src/ui/player-pick-modal.js
-  function applyStyles2(element, styles) {
-    Object.assign(element.style, styles);
+  function applyStyles2(element, styles2) {
+    Object.assign(element.style, styles2);
   }
   function waitForManualPlayerPickSelection(options = {}) {
     if (!options.dom?.create || !options.dom?.appendToBody) throw new TypeError("dom adapter is required");
@@ -17870,8 +18990,8 @@
     blocked: "->BLOCKED",
     unknown: "->?"
   });
-  function applyStyles3(element, styles) {
-    Object.assign(element.style, styles);
+  function applyStyles3(element, styles2) {
+    Object.assign(element.style, styles2);
   }
   function button(dom, text, title, mode) {
     const element = dom.create("button");
@@ -18285,9 +19405,9 @@
       const modal = error?.modal;
       if (!modal) return false;
       const buttons = Array.from(modal.querySelectorAll?.("button") || []);
-      const button3 = buttons.find((candidate) => /^(ok|okay|确定|確定)$/i.test(String(candidate?.textContent || "").trim())) || buttons.find((candidate) => !candidate?.disabled);
-      if (!button3) return false;
-      click(button3);
+      const button5 = buttons.find((candidate) => /^(ok|okay|确定|確定)$/i.test(String(candidate?.textContent || "").trim())) || buttons.find((candidate) => !candidate?.disabled);
+      if (!button5) return false;
+      click(button5);
       return true;
     }
     function findClaimContext() {
@@ -18344,8 +19464,8 @@
   }
 
   // src/ui/reward-highlight.js
-  function applyStyles4(element, styles) {
-    Object.assign(element.style, styles);
+  function applyStyles4(element, styles2) {
+    Object.assign(element.style, styles2);
   }
   function positionStack(stack, panel, viewport = {}) {
     const mobile = panel?.dataset?.layout === "mobile";
@@ -18474,11 +19594,11 @@
   }
 
   // src/ui/reward-alert-settings.js
-  function applyStyles5(element, styles) {
-    Object.assign(element.style, styles);
+  function applyStyles5(element, styles2) {
+    Object.assign(element.style, styles2);
   }
-  function inputStyles(input, mode) {
-    applyStyles5(input, {
+  function inputStyles(input2, mode) {
+    applyStyles5(input2, {
       width: "100%",
       minWidth: "0",
       height: responsiveControlHeight(mode),
@@ -18489,29 +19609,29 @@
       border: "1px solid #607089",
       padding: "0 8px"
     });
-    return input;
+    return input2;
   }
-  function field(dom, labelText, input, mode) {
+  function field(dom, labelText, input2, mode) {
     const label = dom.create("label");
     applyStyles5(label, { display: "grid", gridTemplateColumns: mode?.mobile ? "1fr" : "140px minmax(0, 1fr)", alignItems: "center", gap: "10px" });
     const text = dom.create("span");
     text.textContent = labelText;
     applyStyles5(text, { color: "#b8c3d2", fontSize: "12px" });
-    label.append(text, input);
+    label.append(text, input2);
     return label;
   }
   function checkbox(dom, id, labelText, checked) {
     const label = dom.create("label");
     applyStyles5(label, { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" });
-    const input = dom.create("input");
-    input.id = id;
-    input.type = "checkbox";
-    input.checked = checked === true;
-    input.style.accentColor = "#78a6ff";
+    const input2 = dom.create("input");
+    input2.id = id;
+    input2.type = "checkbox";
+    input2.checked = checked === true;
+    input2.style.accentColor = "#78a6ff";
     const text = dom.create("span");
     text.textContent = labelText;
-    label.append(input, text);
-    return { label, input };
+    label.append(input2, text);
+    return { label, input: input2 };
   }
   function validNtfyTopic(value) {
     return /^[-_A-Za-z0-9]{1,64}$/.test(String(value || "").trim());
@@ -18587,7 +19707,7 @@
     applyStyles5(tests, { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" });
     const actions = dom.create("div");
     applyStyles5(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
-    const button3 = (id, text, primary = false) => {
+    const button5 = (id, text, primary = false) => {
       const value = dom.create("button");
       value.id = id;
       value.type = "button";
@@ -18602,11 +19722,11 @@
       });
       return value;
     };
-    const preview = button3("bronze-loop-alert-preview", "Preview highlight");
-    const desktopTest = button3("bronze-loop-alert-test-desktop", "Send desktop test");
-    const ntfyTest = button3("bronze-loop-alert-test-ntfy", "Send ntfy test");
-    const cancel = button3("bronze-loop-alert-cancel", "Cancel");
-    const save = button3("bronze-loop-alert-save", "Save", true);
+    const preview = button5("bronze-loop-alert-preview", "Preview highlight");
+    const desktopTest = button5("bronze-loop-alert-test-desktop", "Send desktop test");
+    const ntfyTest = button5("bronze-loop-alert-test-ntfy", "Send ntfy test");
+    const cancel = button5("bronze-loop-alert-cancel", "Cancel");
+    const save = button5("bronze-loop-alert-save", "Save", true);
     tests.append(preview, desktopTest, ntfyTest);
     actions.append(cancel, save);
     const updateNtfyTestState = () => {
@@ -18671,8 +19791,8 @@
   }
 
   // src/ui/batch-open-dialog.js
-  function applyStyles6(element, styles) {
-    Object.assign(element.style, styles);
+  function applyStyles6(element, styles2) {
+    Object.assign(element.style, styles2);
   }
   function button2(dom, text, primary = false, mode = null) {
     const value = dom.create("button");
@@ -18689,12 +19809,12 @@
     return value;
   }
   function quantityInput(dom, quantity, mode = null) {
-    const input = dom.create("input");
-    input.type = "number";
-    input.min = "1";
-    input.max = "999";
-    input.value = String(quantity);
-    applyStyles6(input, {
+    const input2 = dom.create("input");
+    input2.type = "number";
+    input2.min = "1";
+    input2.max = "999";
+    input2.value = String(quantity);
+    applyStyles6(input2, {
       width: mode?.touchTargets ? "84px" : "70px",
       height: responsiveControlHeight(mode),
       fontSize: mode?.touchTargets ? "16px" : "",
@@ -18704,7 +19824,7 @@
       border: "1px solid #607089",
       padding: "0 6px"
     });
-    return input;
+    return input2;
   }
   function showBatchOpenDialog(options = {}) {
     const dom = options.dom;
@@ -18804,8 +19924,8 @@
         };
         const addOne = button2(dom, selected2 ? "Set to 1" : "Add 1", false, mode);
         const addAll = button2(dom, `${selected2 ? "Set to all" : "Add all"} (${group.count})`, false, mode);
-        for (const option of [addOne, addAll]) {
-          applyStyles6(option, { display: "block", width: "100%", minWidth: "0", textAlign: "left", border: "0" });
+        for (const option2 of [addOne, addAll]) {
+          applyStyles6(option2, { display: "block", width: "100%", minWidth: "0", textAlign: "left", border: "0" });
         }
         addOne.addEventListener("click", () => setQuantity(1, "fixed"));
         addAll.addEventListener("click", () => setQuantity(Math.max(1, Number(group.count) || 1), "all"));
@@ -18934,6 +20054,1223 @@
     return showCardRecap(options);
   }
 
+  // src/trade/manual-listing.js
+  var MANUAL_LISTING_LIVE_LIMIT = 1;
+  function positiveInteger13(value, fallback) {
+    const number = Math.floor(Number(value));
+    return Number.isFinite(number) && number > 0 ? number : fallback;
+  }
+  function createManualListingJob(input2 = {}, options = {}) {
+    const now = Math.max(0, Number(options.now ?? Date.now()) || 0);
+    const rules = Array.isArray(input2.ratingRules) && input2.ratingRules.length ? input2.ratingRules : [{ min: 75, max: 82, buyNow: 700 }];
+    return normalizeTradeJob({
+      schemaVersion: 1,
+      id: String(input2.id || "manual-club-listing"),
+      name: String(input2.name || "Manual Club Listing"),
+      type: "listing",
+      enabled: true,
+      armed: false,
+      schedule: { type: "manual" },
+      misfirePolicy: { type: "skip" },
+      policy: {
+        sources: ["club"],
+        cardClass: String(input2.cardClass || "common-gold"),
+        ratingRules: rules.map((rule) => ({
+          min: positiveInteger13(rule?.min, 75),
+          max: positiveInteger13(rule?.max, positiveInteger13(rule?.min, 75)),
+          buyNow: positiveInteger13(rule?.buyNow, 700)
+        })),
+        marketOverride: {
+          enabled: input2.marketOverride?.enabled === true,
+          markupPercent: Math.max(0, Number(input2.marketOverride?.markupPercent ?? 5) || 0),
+          maxQuoteAgeMinutes: positiveInteger13(input2.marketOverride?.maxQuoteAgeMinutes, 10)
+        },
+        startPricePolicy: String(input2.startPricePolicy || "one-step-below"),
+        durationSeconds: positiveInteger13(input2.durationSeconds, 3600),
+        listingDelaySeconds: [4, 8],
+        maxListings: MANUAL_LISTING_LIVE_LIMIT,
+        expiredPolicy: "skip"
+      },
+      createdAt: now,
+      updatedAt: now
+    }, { now });
+  }
+
+  // src/trade/listing-recap.js
+  var TRADE_RECAP_PAGE_SIZE = 15;
+  function createTradeListingRecap(receipt = {}, options = {}) {
+    const items = Array.isArray(receipt.receipts) ? receipt.receipts : [];
+    const pageSize = Math.max(1, Math.floor(Number(options.pageSize || TRADE_RECAP_PAGE_SIZE)));
+    const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+    const page = Math.max(1, Math.min(pageCount, Math.floor(Number(options.page || 1))));
+    const start = (page - 1) * pageSize;
+    return {
+      title: "Listing recap",
+      status: String(receipt.status || "unknown"),
+      reason: receipt.reason ? String(receipt.reason) : null,
+      counts: {
+        requested: Math.max(0, Number(receipt.requested || 0) || 0),
+        succeeded: Math.max(0, Number(receipt.succeeded || 0) || 0),
+        failed: Math.max(0, Number(receipt.failed || 0) || 0),
+        skipped: Math.max(0, Number(receipt.skipped || 0) || 0)
+      },
+      coins: {
+        before: Number.isFinite(Number(receipt.coinsBefore)) ? Number(receipt.coinsBefore) : null,
+        after: Number.isFinite(Number(receipt.coinsAfter)) ? Number(receipt.coinsAfter) : null
+      },
+      page,
+      pageSize,
+      pageCount,
+      totalItems: items.length,
+      items: items.slice(start, start + pageSize).map((entry) => ({
+        index: Math.max(1, Number(entry.index || 0) || 1),
+        status: String(entry.status || "unknown"),
+        reason: entry.reason ? String(entry.reason) : null,
+        item: {
+          id: Number(entry.item?.id || 0) || null,
+          definitionId: Number(entry.item?.definitionId || 0) || null,
+          pile: String(entry.item?.pile || "unknown")
+        },
+        listing: entry.listing ? {
+          startPrice: Number(entry.listing.startPrice || 0) || null,
+          buyNow: Number(entry.listing.buyNow || 0) || null,
+          durationSeconds: Number(entry.listing.durationSeconds || 0) || null
+        } : null,
+        auction: entry.verification?.auction ? {
+          state: String(entry.verification.auction.state || "unknown"),
+          tradeId: Number(entry.verification.auction.tradeId || 0) || null,
+          startingBid: Number(entry.verification.auction.startingBid || 0) || null,
+          buyNowPrice: Number(entry.verification.auction.buyNowPrice || 0) || null,
+          expires: Number(entry.verification.auction.expires || 0) || null
+        } : null
+      }))
+    };
+  }
+
+  // src/ui/trade-listing-dialog.js
+  function applyStyles7(element, styles2) {
+    Object.assign(element.style, styles2);
+  }
+  function clone11(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  }
+  function button3(dom, text, options = {}) {
+    const value = dom.create("button");
+    value.type = "button";
+    value.textContent = text;
+    if (options.id) value.id = options.id;
+    applyStyles7(value, {
+      minHeight: responsiveControlHeight(options.mode),
+      padding: "0 12px",
+      cursor: "pointer",
+      color: "#fff",
+      background: options.primary ? "#2f6fde" : options.danger ? "#8f2d36" : "#222832",
+      border: `1px solid ${options.primary ? "#4f8cff" : options.danger ? "#c44d58" : "#607089"}`
+    });
+    return value;
+  }
+  function control(dom, type, value, mode, options = {}) {
+    const input2 = dom.create(type === "select" ? "select" : "input");
+    if (type !== "select") input2.type = type;
+    if (options.id) input2.id = options.id;
+    if (options.min !== void 0) input2.min = String(options.min);
+    if (options.max !== void 0) input2.max = String(options.max);
+    if (options.step !== void 0) input2.step = String(options.step);
+    input2.value = String(value ?? "");
+    applyStyles7(input2, {
+      width: "100%",
+      minWidth: "0",
+      height: responsiveControlHeight(mode),
+      boxSizing: "border-box",
+      fontSize: mode?.touchTargets ? "16px" : "",
+      background: "#222832",
+      color: "#f4f6f8",
+      border: "1px solid #607089",
+      padding: "0 8px"
+    });
+    return input2;
+  }
+  function option(dom, value, text) {
+    const item = dom.create("option");
+    item.value = value;
+    item.textContent = text;
+    return item;
+  }
+  function selectControl(dom, value, items, mode, options = {}) {
+    const select2 = control(dom, "select", value, mode, options);
+    items.forEach((item) => select2.appendChild(option(dom, item.value, item.text)));
+    select2.value = String(value);
+    return select2;
+  }
+  function field2(dom, labelText, input2, mode) {
+    const label = dom.create("label");
+    applyStyles7(label, {
+      display: "grid",
+      gridTemplateColumns: mode?.mobile ? "1fr" : "150px minmax(0, 1fr)",
+      alignItems: "center",
+      gap: "8px",
+      minWidth: "0"
+    });
+    const text = dom.create("span");
+    text.textContent = labelText;
+    applyStyles7(text, { color: "#b8c3d2", fontSize: "12px" });
+    label.append(text, input2);
+    return label;
+  }
+  function sectionTitle(dom, text) {
+    const title = dom.create("div");
+    title.textContent = text;
+    applyStyles7(title, { color: "#d9e1eb", fontSize: "12px", fontWeight: "700", margin: "4px 0 2px" });
+    return title;
+  }
+  function defaultDraft(input2 = {}) {
+    return {
+      cardClass: String(input2.cardClass || "common-gold"),
+      ratingRules: clone11(input2.ratingRules?.length ? input2.ratingRules : [{ min: 75, max: 82, buyNow: 700 }]),
+      marketOverride: {
+        enabled: input2.marketOverride?.enabled === true,
+        markupPercent: Number(input2.marketOverride?.markupPercent ?? 5),
+        maxQuoteAgeMinutes: Number(input2.marketOverride?.maxQuoteAgeMinutes ?? 10)
+      },
+      startPricePolicy: String(input2.startPricePolicy || "one-step-below"),
+      durationSeconds: Number(input2.durationSeconds || 3600),
+      provider: String(input2.provider || "auto"),
+      platform: String(input2.platform || "pc")
+    };
+  }
+  function formatCoins(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString("en-US") : "?";
+  }
+  function showTradeListingDialog(options = {}) {
+    const dom = options.dom;
+    if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
+    dom.query?.("#bronze-loop-trade-listing-modal")?.remove?.();
+    const mode = readResponsiveUiMode(dom);
+    const draft = defaultDraft(options.draft);
+    let previewResult = null;
+    let preparedResult = null;
+    let receipt = null;
+    let currentJob = null;
+    let lastError = null;
+    let recapPage = 1;
+    let busy = false;
+    let running = false;
+    const editableControls = [];
+    const overlay = dom.create("div");
+    overlay.id = "bronze-loop-trade-listing-modal";
+    applyStyles7(overlay, {
+      position: "fixed",
+      inset: "0",
+      zIndex: "1000001",
+      background: "rgba(0,0,0,.74)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: mode.mobile ? "0" : "20px",
+      boxSizing: "border-box"
+    });
+    const dialog = dom.create("div");
+    applyStyles7(dialog, {
+      width: "min(900px, 100%)",
+      maxHeight: mode.mobile ? "100dvh" : "92vh",
+      overflow: "auto",
+      background: "#171b21",
+      color: "#f4f6f8",
+      border: "1px solid #65758a",
+      padding: "14px",
+      boxSizing: "border-box",
+      fontFamily: "Arial, sans-serif"
+    });
+    const heading = dom.create("div");
+    applyStyles7(heading, { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "12px" });
+    const title = dom.create("div");
+    title.textContent = "Trade Listings";
+    applyStyles7(title, { fontSize: "17px", fontWeight: "700" });
+    const gate = dom.create("span");
+    gate.textContent = `Club / ${MANUAL_LISTING_LIVE_LIMIT} item`;
+    applyStyles7(gate, { color: "#9fb2c9", fontSize: "11px", border: "1px solid #536276", padding: "4px 7px" });
+    heading.append(title, gate);
+    const workspace = dom.create("div");
+    applyStyles7(workspace, {
+      display: "grid",
+      gridTemplateColumns: mode.mobile ? "1fr" : "minmax(280px, 360px) minmax(0, 1fr)",
+      gap: "16px",
+      alignItems: "start"
+    });
+    const editor = dom.create("div");
+    applyStyles7(editor, { display: "flex", flexDirection: "column", gap: "9px", minWidth: "0" });
+    const output = dom.create("div");
+    applyStyles7(output, { minWidth: "0", minHeight: mode.mobile ? "180px" : "420px", borderLeft: mode.mobile ? "0" : "1px solid #35404e", paddingLeft: mode.mobile ? "0" : "16px" });
+    const source = control(dom, "text", "Club", mode, { id: "bronze-loop-trade-source" });
+    source.disabled = true;
+    const cardClass = selectControl(dom, draft.cardClass, [
+      { value: "common-gold", text: "Common Gold" },
+      { value: "rare-gold", text: "Rare Gold" },
+      { value: "normal-gold", text: "All normal Gold" },
+      { value: "special", text: "Special" }
+    ], mode, { id: "bronze-loop-trade-card-class" });
+    const provider = selectControl(dom, draft.provider, [
+      { value: "auto", text: "Auto: FUT.GG -> FUTNext" },
+      { value: "futgg", text: "FUT.GG" },
+      { value: "futnext", text: "FUTNext" }
+    ], mode, { id: "bronze-loop-trade-provider" });
+    const duration = selectControl(dom, draft.durationSeconds, [
+      { value: "3600", text: "1 hour" },
+      { value: "10800", text: "3 hours" },
+      { value: "21600", text: "6 hours" },
+      { value: "43200", text: "12 hours" },
+      { value: "86400", text: "1 day" },
+      { value: "259200", text: "3 days" }
+    ], mode, { id: "bronze-loop-trade-duration" });
+    const startPolicy = selectControl(dom, draft.startPricePolicy, [
+      { value: "one-step-below", text: "One step below Buy Now" },
+      { value: "same", text: "Same as Buy Now" }
+    ], mode, { id: "bronze-loop-trade-start-policy" });
+    const marketLabel = dom.create("label");
+    applyStyles7(marketLabel, { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", minHeight: responsiveControlHeight(mode) });
+    const marketEnabled = dom.create("input");
+    marketEnabled.id = "bronze-loop-trade-market-enabled";
+    marketEnabled.type = "checkbox";
+    marketEnabled.checked = draft.marketOverride.enabled;
+    marketEnabled.style.accentColor = "#78a6ff";
+    const marketText = dom.create("span");
+    marketText.textContent = "Use market quote when higher";
+    marketLabel.append(marketEnabled, marketText);
+    const markup = control(dom, "number", draft.marketOverride.markupPercent, mode, { id: "bronze-loop-trade-markup", min: 0, max: 100, step: 1 });
+    const quoteAge = control(dom, "number", draft.marketOverride.maxQuoteAgeMinutes, mode, { id: "bronze-loop-trade-quote-age", min: 1, max: 1440, step: 1 });
+    editor.append(
+      sectionTitle(dom, "Selection"),
+      field2(dom, "Source", source, mode),
+      field2(dom, "Card class", cardClass, mode)
+    );
+    const rulesHeader = dom.create("div");
+    applyStyles7(rulesHeader, { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" });
+    rulesHeader.appendChild(sectionTitle(dom, "Rating rules"));
+    const addRule = button3(dom, "+", { mode, id: "bronze-loop-trade-add-rule" });
+    addRule.title = "Add rating rule";
+    addRule.setAttribute?.("aria-label", "Add rating rule");
+    applyStyles7(addRule, { width: responsiveControlHeight(mode), padding: "0" });
+    rulesHeader.appendChild(addRule);
+    const rules = dom.create("div");
+    rules.id = "bronze-loop-trade-rules";
+    applyStyles7(rules, { display: "flex", flexDirection: "column", gap: "6px" });
+    editor.append(rulesHeader, rules, sectionTitle(dom, "Pricing"), marketLabel, field2(dom, "Quote provider", provider, mode), field2(dom, "Markup %", markup, mode), field2(dom, "Quote max age", quoteAge, mode), field2(dom, "Start price", startPolicy, mode), field2(dom, "Duration", duration, mode));
+    const status = dom.create("div");
+    status.id = "bronze-loop-trade-status";
+    status.setAttribute?.("role", "status");
+    status.setAttribute?.("aria-live", "polite");
+    applyStyles7(status, { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "12px" });
+    const confirmation = control(dom, "text", "", mode, { id: "bronze-loop-trade-confirmation" });
+    confirmation.autocomplete = "off";
+    confirmation.placeholder = "Confirmation";
+    confirmation.style.display = "none";
+    const actions = dom.create("div");
+    applyStyles7(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", marginTop: "12px" });
+    const previewButton = button3(dom, "Preview", { mode, id: "bronze-loop-trade-preview" });
+    const prepareButton = button3(dom, "Prepare", { mode, id: "bronze-loop-trade-prepare", primary: true });
+    const executeButton = button3(dom, "List item", { mode, id: "bronze-loop-trade-execute", primary: true });
+    const stopButton = button3(dom, "Stop", { mode, id: "bronze-loop-trade-stop", danger: true });
+    const diagnosticsButton = button3(dom, "Save diagnostics", { mode, id: "bronze-loop-trade-diagnostics" });
+    const closeButton = button3(dom, "Close", { mode, id: "bronze-loop-trade-close" });
+    executeButton.style.display = "none";
+    stopButton.style.display = "none";
+    actions.append(previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton);
+    function latestArtifact() {
+      return receipt || preparedResult || previewResult || lastError;
+    }
+    function updateActionState() {
+      editableControls.forEach((item) => {
+        item.disabled = busy || running;
+      });
+      addRule.disabled = busy || running;
+      previewButton.disabled = busy || running;
+      prepareButton.disabled = busy || running;
+      closeButton.disabled = running;
+      diagnosticsButton.disabled = !latestArtifact() || busy || running;
+      const requiredText = preparedResult?.confirmation?.requiredText || "";
+      confirmation.style.display = preparedResult?.ready && !receipt ? "" : "none";
+      executeButton.style.display = preparedResult?.ready && !receipt ? "" : "none";
+      executeButton.disabled = busy || running || !requiredText || confirmation.value !== requiredText;
+      stopButton.style.display = running ? "" : "none";
+      stopButton.disabled = !running;
+      markup.disabled = busy || running || !marketEnabled.checked;
+      quoteAge.disabled = busy || running || !marketEnabled.checked;
+      provider.disabled = busy || running || !marketEnabled.checked;
+    }
+    function clearPrepared() {
+      if (preparedResult) options.onCancelPrepared?.();
+      preparedResult = null;
+      receipt = null;
+      confirmation.value = "";
+    }
+    function invalidate() {
+      clearPrepared();
+      previewResult = null;
+      currentJob = null;
+      lastError = null;
+      output.textContent = "";
+      status.textContent = "Configuration changed";
+      updateActionState();
+    }
+    function onDraftChange() {
+      draft.cardClass = cardClass.value;
+      draft.provider = provider.value;
+      draft.durationSeconds = Number(duration.value);
+      draft.startPricePolicy = startPolicy.value;
+      draft.marketOverride.enabled = marketEnabled.checked;
+      draft.marketOverride.markupPercent = Number(markup.value);
+      draft.marketOverride.maxQuoteAgeMinutes = Number(quoteAge.value);
+      invalidate();
+    }
+    for (const item of [cardClass, provider, duration, startPolicy, marketEnabled, markup, quoteAge]) {
+      editableControls.push(item);
+      item.addEventListener("change", onDraftChange);
+    }
+    function renderRules() {
+      rules.textContent = "";
+      draft.ratingRules.forEach((rule, index) => {
+        const row = dom.create("div");
+        applyStyles7(row, {
+          display: "grid",
+          gridTemplateColumns: mode.mobile ? "1fr 1fr" : "1fr 1fr 1.25fr auto",
+          gap: "6px",
+          alignItems: "end",
+          padding: "7px",
+          background: "#1d2229"
+        });
+        const min = control(dom, "number", rule.min, mode, { min: 1, max: 99 });
+        const max = control(dom, "number", rule.max, mode, { min: 1, max: 99 });
+        const buyNow = control(dom, "number", rule.buyNow, mode, { min: 150, max: 15e6, step: 50 });
+        min.setAttribute?.("aria-label", `Rule ${index + 1} minimum rating`);
+        max.setAttribute?.("aria-label", `Rule ${index + 1} maximum rating`);
+        buyNow.setAttribute?.("aria-label", `Rule ${index + 1} Buy Now`);
+        const minField = field2(dom, "Min", min, { mobile: true });
+        const maxField = field2(dom, "Max", max, { mobile: true });
+        const priceField = field2(dom, "Buy Now", buyNow, { mobile: true });
+        const remove = button3(dom, "x", { mode });
+        remove.title = "Remove rating rule";
+        remove.setAttribute?.("aria-label", `Remove rating rule ${index + 1}`);
+        applyStyles7(remove, { width: responsiveControlHeight(mode), padding: "0" });
+        const changed = () => {
+          rule.min = Number(min.value);
+          rule.max = Number(max.value);
+          rule.buyNow = Number(buyNow.value);
+          invalidate();
+        };
+        [min, max, buyNow].forEach((item) => {
+          editableControls.push(item);
+          item.addEventListener("change", changed);
+        });
+        remove.addEventListener("click", () => {
+          if (draft.ratingRules.length <= 1) return;
+          draft.ratingRules.splice(index, 1);
+          invalidate();
+          renderRules();
+        });
+        editableControls.push(remove);
+        row.append(minField, maxField, priceField, remove);
+        rules.appendChild(row);
+      });
+      updateActionState();
+    }
+    addRule.addEventListener("click", () => {
+      const last = draft.ratingRules[draft.ratingRules.length - 1] || { min: 75, max: 82, buyNow: 700 };
+      const nextRating = Math.min(99, Number(last.max || 74) + 1);
+      draft.ratingRules.push({ min: nextRating, max: nextRating, buyNow: Number(last.buyNow || 700) });
+      invalidate();
+      renderRules();
+    });
+    function planName(entry) {
+      const entries = preparedResult?.plan?.entries || previewResult?.plan?.entries || [];
+      return entries.find((candidate) => Number(candidate.item?.id) === Number(entry.item?.id))?.name || `Item #${entry.item?.id || "?"}`;
+    }
+    function renderPlan(result, label) {
+      output.textContent = "";
+      output.appendChild(sectionTitle(dom, label));
+      const plan = result?.plan;
+      const summary = dom.create("div");
+      summary.textContent = plan ? `${Number(plan.counts?.selected || 0)} selected / ${Number(plan.counts?.eligible || 0)} eligible / ${Number(plan.counts?.rejected || 0)} rejected` : "No plan";
+      applyStyles7(summary, { color: "#9fb2c9", fontSize: "12px", margin: "6px 0 10px" });
+      output.appendChild(summary);
+      for (const entry of plan?.entries || []) {
+        const row = dom.create("div");
+        applyStyles7(row, { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "8px", padding: "9px", marginBottom: "6px", background: "#1d2229", border: "1px solid #344152" });
+        const identity = dom.create("div");
+        identity.textContent = `${entry.name} | ${entry.rating} OVR | ${entry.item.pile}`;
+        applyStyles7(identity, { overflowWrap: "anywhere" });
+        const price = dom.create("strong");
+        price.textContent = `${formatCoins(entry.startPrice)} / ${formatCoins(entry.buyNow)}`;
+        const detail = dom.create("small");
+        detail.textContent = `Quote: ${entry.quoteStatus}${entry.quotedPrice ? ` ${formatCoins(entry.quotedPrice)}` : ""} | Limits: ${entry.priceLimitStatus || "pending"}`;
+        applyStyles7(detail, { gridColumn: "1 / -1", color: "#9aa6b8" });
+        row.append(identity, price, detail);
+        output.appendChild(row);
+      }
+      for (const warning of plan?.warnings || []) {
+        const item = dom.create("div");
+        item.textContent = warning;
+        applyStyles7(item, { color: "#d4b66f", fontSize: "11px", marginTop: "5px" });
+        output.appendChild(item);
+      }
+      if (result?.blockers?.length) {
+        result.blockers.forEach((blocker) => {
+          const item = dom.create("div");
+          item.textContent = `Blocked: ${blocker.reason}${blocker.detail ? ` (${blocker.detail})` : ""}`;
+          applyStyles7(item, { color: "#e3a7a7", fontSize: "11px", marginTop: "5px" });
+          output.appendChild(item);
+        });
+      }
+    }
+    function renderRecap() {
+      output.textContent = "";
+      const model = createTradeListingRecap(receipt, { page: recapPage });
+      output.appendChild(sectionTitle(dom, model.title));
+      const summary = dom.create("div");
+      summary.textContent = `${model.status} | ${model.counts.succeeded} listed | ${model.counts.failed} failed | ${model.counts.skipped} skipped`;
+      applyStyles7(summary, { color: model.status === "completed" ? "#8fd19e" : "#e3a7a7", margin: "7px 0" });
+      output.appendChild(summary);
+      if (model.reason) {
+        const reason = dom.create("div");
+        reason.textContent = `Reason: ${model.reason}`;
+        applyStyles7(reason, { color: "#e3a7a7", fontSize: "11px", marginBottom: "8px" });
+        output.appendChild(reason);
+      }
+      const coins = dom.create("div");
+      coins.textContent = `Coins: ${formatCoins(model.coins.before)} -> ${formatCoins(model.coins.after)}`;
+      applyStyles7(coins, { color: "#9fb2c9", fontSize: "11px", marginBottom: "8px" });
+      output.appendChild(coins);
+      for (const entry of model.items) {
+        const row = dom.create("div");
+        applyStyles7(row, { padding: "9px", marginBottom: "6px", background: "#1d2229", border: "1px solid #344152" });
+        const name = dom.create("div");
+        name.textContent = `${entry.index}. ${planName(entry)} | ${entry.status}`;
+        const price = dom.create("small");
+        price.textContent = entry.listing ? `${formatCoins(entry.listing.startPrice)} / ${formatCoins(entry.listing.buyNow)} | ${entry.item.pile} -> ${entry.auction?.state || "?"}` : `${entry.item.pile}${entry.reason ? ` | ${entry.reason}` : ""}`;
+        applyStyles7(price, { color: "#9aa6b8" });
+        row.append(name, price);
+        output.appendChild(row);
+      }
+      if (model.pageCount > 1) {
+        const pages = dom.create("div");
+        applyStyles7(pages, { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "8px", marginTop: "8px" });
+        const previous = button3(dom, "<", { mode });
+        const next = button3(dom, ">", { mode });
+        const count = dom.create("span");
+        count.textContent = `${model.page}/${model.pageCount}`;
+        previous.disabled = model.page <= 1;
+        next.disabled = model.page >= model.pageCount;
+        previous.addEventListener("click", () => {
+          recapPage -= 1;
+          renderRecap();
+        });
+        next.addEventListener("click", () => {
+          recapPage += 1;
+          renderRecap();
+        });
+        pages.append(previous, count, next);
+        output.appendChild(pages);
+      }
+    }
+    function buildJob() {
+      currentJob = createManualListingJob(draft, { now: options.now?.() ?? Date.now() });
+      return currentJob;
+    }
+    async function runAction(pendingText, action2, success) {
+      busy = true;
+      lastError = null;
+      status.textContent = pendingText;
+      updateActionState();
+      try {
+        await action2();
+        status.textContent = success();
+      } catch (error) {
+        lastError = error;
+        status.textContent = `Failed: ${error?.message || error}`;
+      } finally {
+        busy = false;
+        updateActionState();
+      }
+    }
+    previewButton.addEventListener("click", () => runAction("Building preview...", async () => {
+      clearPrepared();
+      receipt = null;
+      const job = buildJob();
+      previewResult = await options.onPreview?.(job, { platform: draft.platform, provider: draft.provider });
+      renderPlan(previewResult, "Preview");
+    }, () => `${Number(previewResult?.plan?.counts?.selected || 0)} item(s) selected`));
+    prepareButton.addEventListener("click", () => runAction("Preparing listing...", async () => {
+      clearPrepared();
+      previewResult = null;
+      receipt = null;
+      const job = buildJob();
+      preparedResult = await options.onPrepare?.(job, { platform: draft.platform, provider: draft.provider });
+      renderPlan(preparedResult, "Prepared listing");
+    }, () => preparedResult?.ready ? `Prepared. Enter ${preparedResult.confirmation.requiredText}` : `Preparation blocked (${preparedResult?.blockers?.length || 0})`));
+    confirmation.addEventListener("input", updateActionState);
+    executeButton.addEventListener("click", async () => {
+      const requiredText = preparedResult?.confirmation?.requiredText || "";
+      if (!preparedResult?.ready || confirmation.value !== requiredText) return;
+      busy = true;
+      running = true;
+      lastError = null;
+      status.textContent = "Listing item...";
+      updateActionState();
+      try {
+        receipt = await options.onExecute?.({
+          confirmationToken: preparedResult.confirmation.token,
+          confirmationText: confirmation.value
+        });
+        recapPage = 1;
+        renderRecap();
+        status.textContent = `Run ${receipt?.status || "unknown"}: ${Number(receipt?.succeeded || 0)} listed`;
+      } catch (error) {
+        preparedResult = null;
+        lastError = error;
+        status.textContent = `Listing failed: ${error?.message || error}`;
+      } finally {
+        busy = false;
+        running = false;
+        updateActionState();
+      }
+    });
+    stopButton.addEventListener("click", () => {
+      if (!running) return;
+      const accepted = options.onStop?.() === true;
+      status.textContent = accepted ? "Stop requested" : "Stop is not available";
+    });
+    diagnosticsButton.addEventListener("click", async () => {
+      try {
+        await options.onDownloadDiagnostics?.({
+          job: currentJob,
+          preview: previewResult,
+          prepared: preparedResult,
+          receipt,
+          error: lastError,
+          platform: draft.platform
+        });
+        status.textContent = "Diagnostics saved";
+      } catch (error) {
+        status.textContent = `Diagnostics failed: ${error?.message || error}`;
+      }
+    });
+    const close = () => {
+      if (running) return false;
+      clearPrepared();
+      options.onClose?.();
+      overlay.remove?.();
+      return true;
+    };
+    closeButton.addEventListener("click", close);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close();
+    });
+    renderRules();
+    updateActionState();
+    output.appendChild(sectionTitle(dom, "Preview"));
+    const empty = dom.create("div");
+    empty.textContent = "No listing preview";
+    applyStyles7(empty, { color: "#738196", fontSize: "12px", marginTop: "8px" });
+    output.appendChild(empty);
+    workspace.append(editor, output);
+    applyResponsiveDialogLayout({
+      dom,
+      mode,
+      overlay,
+      dialog,
+      title,
+      actions,
+      controls: [cardClass, provider, duration, startPolicy, marketEnabled, markup, quoteAge, previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton]
+    });
+    dialog.append(heading, workspace, status, actions);
+    overlay.appendChild(dialog);
+    dom.appendToBody(overlay);
+    return overlay;
+  }
+
+  // src/ui/trade-scheduler-dialog.js
+  var PAGE_SIZE = 15;
+  var RANGE_SCHEDULE = ["win", "dow"].join("");
+  var GRACE_MISFIRE = ["grace", "win", "dow"].join("-");
+  function clone12(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  }
+  function styles(element, values) {
+    Object.assign(element.style, values);
+    return element;
+  }
+  function button4(dom, text, mode, id = "") {
+    const value = dom.create("button");
+    value.type = "button";
+    value.textContent = text;
+    if (id) value.id = id;
+    styles(value, {
+      minHeight: responsiveControlHeight(mode),
+      padding: "0 12px",
+      cursor: "pointer",
+      color: "#f4f6f8",
+      background: "#222832",
+      border: "1px solid #607089"
+    });
+    return value;
+  }
+  function input(dom, type, value, mode, id = "") {
+    const control2 = dom.create(type === "select" ? "select" : "input");
+    if (type !== "select") control2.type = type;
+    if (id) control2.id = id;
+    if (type === "checkbox") control2.checked = value === true;
+    else control2.value = String(value ?? "");
+    styles(control2, {
+      minHeight: type === "checkbox" ? "auto" : responsiveControlHeight(mode),
+      minWidth: "0",
+      width: type === "checkbox" ? "auto" : "100%",
+      boxSizing: "border-box",
+      background: "#222832",
+      color: "#f4f6f8",
+      border: type === "checkbox" ? "0" : "1px solid #607089",
+      padding: type === "checkbox" ? "0" : "0 8px",
+      fontSize: mode.touchTargets && type !== "checkbox" ? "16px" : ""
+    });
+    return control2;
+  }
+  function select(dom, value, entries, mode, id = "") {
+    const control2 = input(dom, "select", value, mode, id);
+    for (const entry of entries) {
+      const option2 = dom.create("option");
+      option2.value = String(entry.value);
+      option2.textContent = entry.text;
+      control2.appendChild(option2);
+    }
+    control2.value = String(value);
+    return control2;
+  }
+  function field3(dom, text, control2, mode) {
+    const label = styles(dom.create("label"), {
+      display: "grid",
+      gridTemplateColumns: mode.mobile ? "1fr" : "145px minmax(0, 1fr)",
+      alignItems: "center",
+      gap: "8px",
+      minWidth: "0"
+    });
+    const title = dom.create("span");
+    title.textContent = text;
+    styles(title, { color: "#b8c3d2", fontSize: "12px" });
+    label.append(title, control2);
+    return label;
+  }
+  function section(dom, text) {
+    const value = dom.create("div");
+    value.textContent = text;
+    styles(value, { color: "#d9e1eb", fontWeight: "700", marginTop: "8px" });
+    return value;
+  }
+  function epochInputValue(value) {
+    if (!Number.isFinite(Number(value))) return "";
+    const date = new Date(Number(value));
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 6e4);
+    return local.toISOString().slice(0, 16);
+  }
+  function readEpochInput(value) {
+    const epoch = new Date(String(value || "")).getTime();
+    return Number.isFinite(epoch) ? epoch : 0;
+  }
+  function uniqueJobId(type, now) {
+    return `${type}-${Math.max(0, Number(now) || Date.now())}`;
+  }
+  function createTradeJobDraft(type = "listing", options = {}) {
+    const now = Math.max(0, Number(options.now ?? Date.now()) || 0);
+    if (options.job) return clone12(options.job);
+    const common = {
+      id: uniqueJobId(type, now),
+      name: type === "buy" ? "Buy Job" : "Listing Job",
+      type,
+      enabled: true,
+      armed: false,
+      schedule: { type: "manual" },
+      misfirePolicy: { type: GRACE_MISFIRE, graceMinutes: 15 },
+      createdAt: now,
+      updatedAt: now
+    };
+    return type === "buy" ? {
+      ...common,
+      policy: {
+        cardClass: "rare-gold",
+        ratingMin: 84,
+        ratingMax: 84,
+        maxBuyNow: 1e3,
+        ratingPriceOverrides: {},
+        quantity: 1,
+        totalBudget: 1e3,
+        maxRuntimeMinutes: 15,
+        searchDelaySeconds: [8, 15],
+        maxPurchasesPerSearch: 1,
+        maxConsecutiveEmptySearches: 20
+      }
+    } : {
+      ...common,
+      policy: {
+        sources: ["club"],
+        cardClass: "common-gold",
+        ratingRules: [{ min: 75, max: 82, buyNow: 700 }],
+        marketOverride: { enabled: false, markupPercent: 5, maxQuoteAgeMinutes: 10 },
+        startPricePolicy: "one-step-below",
+        durationSeconds: 3600,
+        listingDelaySeconds: [4, 8],
+        maxListings: 1,
+        expiredPolicy: "skip"
+      }
+    };
+  }
+  function tradeScheduleSummary(job = {}) {
+    const schedule = job.schedule || {};
+    if (schedule.type === "once") return `Once ${new Date(Number(schedule.runAt)).toLocaleString()}`;
+    if (schedule.type === "daily") return `Daily ${schedule.time} ${schedule.timezone}`;
+    if (schedule.type === "interval") return `Every ${schedule.everyMinutes} min`;
+    if (schedule.type === RANGE_SCHEDULE) return `${new Date(Number(schedule.startAt)).toLocaleString()} - ${new Date(Number(schedule.endAt)).toLocaleString()}`;
+    return "Manual";
+  }
+  function normalizeTradeJobEditorValue(value, options = {}) {
+    return normalizeTradeJob(value, { now: options.now ?? Date.now() });
+  }
+  function showTradeSchedulerDialog(options = {}) {
+    const dom = options.dom;
+    if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
+    dom.query?.("#bronze-loop-trade-scheduler-modal")?.remove?.();
+    const mode = readResponsiveUiMode(dom);
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    let snapshot = clone12(options.getSnapshot?.() || options.snapshot || {});
+    let view = "jobs";
+    let historyPage = 1;
+    let editing = null;
+    let statusText = "";
+    const buyPreviews = /* @__PURE__ */ new Map();
+    const overlay = styles(dom.create("div"), {
+      position: "fixed",
+      inset: "0",
+      zIndex: "1000000",
+      background: "rgba(0,0,0,.74)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: mode.mobile ? "0" : "20px",
+      boxSizing: "border-box"
+    });
+    overlay.id = "bronze-loop-trade-scheduler-modal";
+    const dialog = styles(dom.create("div"), {
+      width: "min(980px, 100%)",
+      maxHeight: mode.mobile ? "100dvh" : "92vh",
+      overflow: "auto",
+      background: "#171b21",
+      color: "#f4f6f8",
+      border: "1px solid #65758a",
+      padding: "14px",
+      boxSizing: "border-box",
+      fontFamily: "Arial, sans-serif"
+    });
+    const heading = styles(dom.create("div"), { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" });
+    const title = dom.create("div");
+    title.textContent = "Trade Scheduler";
+    styles(title, { fontSize: "17px", fontWeight: "700" });
+    const close = button4(dom, "Close", mode, "bronze-loop-trade-scheduler-close");
+    heading.append(title, close);
+    const tabs = styles(dom.create("div"), { display: "flex", gap: "8px", margin: "12px 0", flexWrap: "wrap" });
+    const jobsTab = button4(dom, "Jobs", mode, "bronze-loop-trade-jobs-tab");
+    const historyTab = button4(dom, "History", mode, "bronze-loop-trade-history-tab");
+    tabs.append(jobsTab, historyTab);
+    const banner = styles(dom.create("div"), { padding: "9px", border: "1px solid #47576b", background: "#1d2229", marginBottom: "10px", fontSize: "12px" });
+    const content = dom.create("div");
+    const status = styles(dom.create("div"), { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
+    status.id = "bronze-loop-trade-scheduler-status";
+    function refreshSnapshot() {
+      snapshot = clone12(options.getSnapshot?.() || snapshot || {});
+    }
+    function setStatus(value) {
+      statusText = String(value || "");
+      status.textContent = statusText;
+    }
+    function renderBanner() {
+      const circuit = options.getCircuit?.() || null;
+      const circuitState = circuit?.circuit?.state || "closed";
+      const scheduler = snapshot.paused ? "paused" : "running";
+      const execution = snapshot.liveExecutionEnabled ? "enabled" : "locked";
+      banner.textContent = `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}`;
+      banner.style.color = circuitState === "open" ? "#e3a7a7" : "#b8c3d2";
+    }
+    function checkboxLabel(text, control2) {
+      const label = styles(dom.create("label"), { display: "flex", alignItems: "center", gap: "7px", minHeight: responsiveControlHeight(mode) });
+      label.append(control2, dom.create("span"));
+      label.children[1].textContent = text;
+      return label;
+    }
+    function renderEditor() {
+      content.textContent = "";
+      const draft = editing;
+      content.appendChild(section(dom, draft.type === "buy" ? "Buy Job" : "Listing Job"));
+      const form = styles(dom.create("div"), { display: "flex", flexDirection: "column", gap: "8px", maxWidth: "720px", marginTop: "8px" });
+      const name = input(dom, "text", draft.name, mode, "bronze-loop-trade-job-name");
+      const enabled = input(dom, "checkbox", draft.enabled, mode, "bronze-loop-trade-job-enabled");
+      const armed = input(dom, "checkbox", draft.armed, mode, "bronze-loop-trade-job-armed");
+      form.append(field3(dom, "Name", name, mode), checkboxLabel("Enabled", enabled), checkboxLabel("Armed", armed));
+      const scheduleType = select(dom, draft.schedule?.type || "manual", [
+        { value: "manual", text: "Manual" },
+        { value: "once", text: "Once" },
+        { value: "daily", text: "Daily" },
+        { value: "interval", text: "Interval" },
+        { value: RANGE_SCHEDULE, text: "Window" }
+      ], mode, "bronze-loop-trade-job-schedule");
+      form.append(section(dom, "Schedule"), field3(dom, "Type", scheduleType, mode));
+      const scheduleFields = dom.create("div");
+      form.appendChild(scheduleFields);
+      const misfire = select(dom, draft.misfirePolicy?.type || GRACE_MISFIRE, [
+        { value: "skip", text: "Skip" },
+        { value: GRACE_MISFIRE, text: "Grace interval" },
+        { value: "next-login", text: "Next login" }
+      ], mode, "bronze-loop-trade-job-misfire");
+      const grace = input(dom, "number", draft.misfirePolicy?.graceMinutes || 15, mode, "bronze-loop-trade-job-grace");
+      form.append(field3(dom, "Misfire", misfire, mode), field3(dom, "Grace minutes", grace, mode));
+      const cardClass = select(dom, draft.policy.cardClass, [
+        { value: "common-gold", text: "Common Gold" },
+        { value: "rare-gold", text: "Rare Gold" },
+        { value: "normal-gold", text: "All normal Gold" },
+        { value: "special", text: "Special" },
+        { value: "gold", text: "All Gold" }
+      ], mode, "bronze-loop-trade-job-card-class");
+      form.append(section(dom, "Policy"), field3(dom, "Card class", cardClass, mode));
+      const policyFields = dom.create("div");
+      styles(policyFields, { display: "flex", flexDirection: "column", gap: "8px" });
+      form.appendChild(policyFields);
+      const controls = { name, enabled, armed, scheduleType, misfire, grace, cardClass };
+      function renderScheduleFields() {
+        scheduleFields.textContent = "";
+        const type = scheduleType.value;
+        if (type === "once") {
+          controls.runAt = input(dom, "datetime-local", epochInputValue(draft.schedule?.runAt || now()), mode, "bronze-loop-trade-job-run-at");
+          scheduleFields.appendChild(field3(dom, "Run at", controls.runAt, mode));
+        } else if (type === "daily") {
+          controls.dailyTime = input(dom, "time", draft.schedule?.time || "09:00", mode, "bronze-loop-trade-job-daily-time");
+          controls.timezone = input(dom, "text", draft.schedule?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", mode, "bronze-loop-trade-job-timezone");
+          scheduleFields.append(field3(dom, "Time", controls.dailyTime, mode), field3(dom, "Timezone", controls.timezone, mode));
+        } else if (type === "interval") {
+          controls.everyMinutes = input(dom, "number", draft.schedule?.everyMinutes || 60, mode, "bronze-loop-trade-job-interval");
+          scheduleFields.appendChild(field3(dom, "Every minutes", controls.everyMinutes, mode));
+        } else if (type === RANGE_SCHEDULE) {
+          controls.startAt = input(dom, "datetime-local", epochInputValue(draft.schedule?.startAt || now()), mode, "bronze-loop-trade-job-range-start");
+          controls.endAt = input(dom, "datetime-local", epochInputValue(draft.schedule?.endAt || now() + 60 * 6e4), mode, "bronze-loop-trade-job-range-end");
+          scheduleFields.append(field3(dom, "Start", controls.startAt, mode), field3(dom, "End", controls.endAt, mode));
+        }
+      }
+      if (draft.type === "buy") {
+        for (const [key, label, fallback] of [
+          ["ratingMin", "Rating min", 84],
+          ["ratingMax", "Rating max", 84],
+          ["maxBuyNow", "Max Buy Now", 1e3],
+          ["quantity", "Quantity", 1],
+          ["totalBudget", "Total budget", 1e3],
+          ["maxRuntimeMinutes", "Max runtime min", 15],
+          ["maxConsecutiveEmptySearches", "Empty search limit", 20]
+        ]) {
+          controls[key] = input(dom, "number", draft.policy[key] ?? fallback, mode, `bronze-loop-trade-job-${key}`);
+          policyFields.appendChild(field3(dom, label, controls[key], mode));
+        }
+        controls.ratingPriceOverrides = input(dom, "text", Object.entries(draft.policy.ratingPriceOverrides || {}).map(([rating, price]) => `${rating}=${price}`).join(", "), mode, "bronze-loop-trade-job-rating-prices");
+        controls.searchDelayMin = input(dom, "number", draft.policy.searchDelaySeconds?.[0] || 8, mode, "bronze-loop-trade-job-search-delay-min");
+        controls.searchDelayMax = input(dom, "number", draft.policy.searchDelaySeconds?.[1] || 15, mode, "bronze-loop-trade-job-search-delay-max");
+        policyFields.append(field3(dom, "Rating prices", controls.ratingPriceOverrides, mode), field3(dom, "Search delay min", controls.searchDelayMin, mode), field3(dom, "Search delay max", controls.searchDelayMax, mode));
+      } else {
+        controls.clubSource = input(dom, "checkbox", draft.policy.sources?.includes("club"), mode, "bronze-loop-trade-job-source-club");
+        controls.transferSource = input(dom, "checkbox", draft.policy.sources?.includes("transfer"), mode, "bronze-loop-trade-job-source-transfer");
+        policyFields.append(checkboxLabel("Club source", controls.clubSource), checkboxLabel("Transfer source", controls.transferSource));
+        controls.rules = [];
+        const rules = dom.create("div");
+        const renderRules = () => {
+          rules.textContent = "";
+          controls.rules = draft.policy.ratingRules.map((rule, index) => {
+            const row = styles(dom.create("div"), { display: "grid", gridTemplateColumns: mode.mobile ? "1fr" : "1fr 1fr 1.2fr auto", gap: "6px", marginBottom: "6px" });
+            const min = input(dom, "number", rule.min, mode);
+            const max = input(dom, "number", rule.max, mode);
+            const price = input(dom, "number", rule.buyNow, mode);
+            const remove = button4(dom, "x", mode);
+            remove.addEventListener("click", () => {
+              if (draft.policy.ratingRules.length > 1) {
+                draft.policy.ratingRules.splice(index, 1);
+                renderRules();
+              }
+            });
+            row.append(field3(dom, "Min", min, { mobile: true }), field3(dom, "Max", max, { mobile: true }), field3(dom, "Buy Now", price, { mobile: true }), remove);
+            rules.appendChild(row);
+            return { min, max, price };
+          });
+        };
+        const addRule = button4(dom, "+", mode, "bronze-loop-trade-job-add-rule");
+        addRule.addEventListener("click", () => {
+          draft.policy.ratingRules.push({ min: 83, max: 83, buyNow: 1e3 });
+          renderRules();
+        });
+        policyFields.append(rules, addRule);
+        renderRules();
+        controls.marketEnabled = input(dom, "checkbox", draft.policy.marketOverride?.enabled, mode, "bronze-loop-trade-job-market-enabled");
+        controls.markupPercent = input(dom, "number", draft.policy.marketOverride?.markupPercent || 5, mode, "bronze-loop-trade-job-markup");
+        controls.quoteAge = input(dom, "number", draft.policy.marketOverride?.maxQuoteAgeMinutes || 10, mode, "bronze-loop-trade-job-quote-age");
+        controls.startPricePolicy = select(dom, draft.policy.startPricePolicy || "one-step-below", [{ value: "one-step-below", text: "One step below" }, { value: "same", text: "Same as Buy Now" }], mode, "bronze-loop-trade-job-start-price");
+        controls.durationSeconds = select(dom, draft.policy.durationSeconds || 3600, [{ value: 3600, text: "1 hour" }, { value: 10800, text: "3 hours" }, { value: 21600, text: "6 hours" }, { value: 86400, text: "1 day" }], mode, "bronze-loop-trade-job-duration");
+        controls.maxListings = input(dom, "number", draft.policy.maxListings || 1, mode, "bronze-loop-trade-job-max-listings");
+        controls.listingDelayMin = input(dom, "number", draft.policy.listingDelaySeconds?.[0] || 4, mode, "bronze-loop-trade-job-list-delay-min");
+        controls.listingDelayMax = input(dom, "number", draft.policy.listingDelaySeconds?.[1] || 8, mode, "bronze-loop-trade-job-list-delay-max");
+        controls.expiredPolicy = select(dom, draft.policy.expiredPolicy || "skip", [{ value: "skip", text: "Skip expired" }, { value: "reprice", text: "Reprice expired" }], mode, "bronze-loop-trade-job-expired");
+        policyFields.append(
+          checkboxLabel("Use higher market quote", controls.marketEnabled),
+          field3(dom, "Markup %", controls.markupPercent, mode),
+          field3(dom, "Quote max age", controls.quoteAge, mode),
+          field3(dom, "Start price", controls.startPricePolicy, mode),
+          field3(dom, "Duration", controls.durationSeconds, mode),
+          field3(dom, "Max listings", controls.maxListings, mode),
+          field3(dom, "Listing delay min", controls.listingDelayMin, mode),
+          field3(dom, "Listing delay max", controls.listingDelayMax, mode),
+          field3(dom, "Expired items", controls.expiredPolicy, mode)
+        );
+      }
+      renderScheduleFields();
+      scheduleType.addEventListener("change", renderScheduleFields);
+      const actions = styles(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" });
+      const save = button4(dom, "Save", mode, "bronze-loop-trade-job-save");
+      const cancel = button4(dom, "Cancel", mode, "bronze-loop-trade-job-cancel");
+      actions.append(save, cancel);
+      form.appendChild(actions);
+      content.appendChild(form);
+      save.addEventListener("click", () => {
+        try {
+          draft.name = name.value;
+          draft.enabled = enabled.checked;
+          draft.armed = armed.checked;
+          draft.schedule = { type: scheduleType.value };
+          if (scheduleType.value === "once") draft.schedule.runAt = readEpochInput(controls.runAt.value);
+          if (scheduleType.value === "daily") draft.schedule = { type: "daily", time: controls.dailyTime.value, timezone: controls.timezone.value };
+          if (scheduleType.value === "interval") draft.schedule = { type: "interval", everyMinutes: Number(controls.everyMinutes.value), anchorAt: now() };
+          if (scheduleType.value === RANGE_SCHEDULE) draft.schedule = { type: RANGE_SCHEDULE, startAt: readEpochInput(controls.startAt.value), endAt: readEpochInput(controls.endAt.value) };
+          draft.misfirePolicy = misfire.value === GRACE_MISFIRE ? { type: GRACE_MISFIRE, graceMinutes: Number(grace.value) } : { type: misfire.value };
+          draft.policy.cardClass = cardClass.value;
+          if (draft.type === "buy") {
+            for (const key of ["ratingMin", "ratingMax", "maxBuyNow", "quantity", "totalBudget", "maxRuntimeMinutes", "maxConsecutiveEmptySearches"]) draft.policy[key] = Number(controls[key].value);
+            draft.policy.ratingPriceOverrides = Object.fromEntries(String(controls.ratingPriceOverrides.value || "").split(",").map((entry) => entry.trim().split("=").map((part) => part.trim())).filter(([rating, price]) => rating && Number(price) > 0));
+            draft.policy.searchDelaySeconds = [Number(controls.searchDelayMin.value), Number(controls.searchDelayMax.value)];
+            draft.policy.maxPurchasesPerSearch = 1;
+          } else {
+            draft.policy.sources = [["club", controls.clubSource], ["transfer", controls.transferSource]].filter(([, control2]) => control2.checked).map(([source]) => source);
+            draft.policy.ratingRules = controls.rules.map((rule) => ({ min: Number(rule.min.value), max: Number(rule.max.value), buyNow: Number(rule.price.value) }));
+            draft.policy.marketOverride = { enabled: controls.marketEnabled.checked, markupPercent: Number(controls.markupPercent.value), maxQuoteAgeMinutes: Number(controls.quoteAge.value) };
+            draft.policy.startPricePolicy = controls.startPricePolicy.value;
+            draft.policy.durationSeconds = Number(controls.durationSeconds.value);
+            draft.policy.maxListings = Number(controls.maxListings.value);
+            draft.policy.listingDelaySeconds = [Number(controls.listingDelayMin.value), Number(controls.listingDelayMax.value)];
+            draft.policy.expiredPolicy = controls.expiredPolicy.value;
+          }
+          const normalized = normalizeTradeJobEditorValue(draft, { now: now() });
+          options.onSaveJob?.(normalized);
+          refreshSnapshot();
+          editing = null;
+          view = "jobs";
+          setStatus("Job saved");
+          render();
+        } catch (error) {
+          setStatus(`Save failed: ${error?.message || error}`);
+        }
+      });
+      cancel.addEventListener("click", () => {
+        editing = null;
+        view = "jobs";
+        render();
+      });
+    }
+    function renderJobs() {
+      content.textContent = "";
+      const toolbar = styles(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
+      const manual = button4(dom, "Manual listing", mode, "bronze-loop-trade-manual-listing");
+      const addListing = button4(dom, "New listing Job", mode, "bronze-loop-trade-new-listing");
+      const addBuy = button4(dom, "New Buy Job", mode, "bronze-loop-trade-new-buy");
+      const pause = button4(dom, snapshot.paused ? "Resume" : "Pause", mode, "bronze-loop-trade-scheduler-pause");
+      const diagnostics = button4(dom, "Save diagnostics", mode, "bronze-loop-trade-scheduler-diagnostics");
+      const circuit = options.getCircuit?.();
+      const resetCircuit = button4(dom, "Reset trade block", mode, "bronze-loop-trade-circuit-reset");
+      resetCircuit.style.display = circuit?.circuit?.state === "open" ? "" : "none";
+      pause.disabled = snapshot.paused && snapshot.liveExecutionEnabled !== true;
+      pause.title = pause.disabled ? "Automatic execution is locked pending live validation" : "";
+      toolbar.append(manual, addListing, addBuy, pause, diagnostics, resetCircuit);
+      content.appendChild(toolbar);
+      manual.addEventListener("click", () => options.onOpenManualListing?.());
+      addListing.addEventListener("click", () => {
+        editing = createTradeJobDraft("listing", { now: now() });
+        renderEditor();
+      });
+      addBuy.addEventListener("click", () => {
+        editing = createTradeJobDraft("buy", { now: now() });
+        renderEditor();
+      });
+      pause.addEventListener("click", () => {
+        options.onSetPaused?.(!snapshot.paused);
+        refreshSnapshot();
+        render();
+      });
+      diagnostics.addEventListener("click", () => options.onDownloadDiagnostics?.());
+      resetCircuit.addEventListener("click", () => {
+        options.onResetCircuit?.();
+        refreshSnapshot();
+        setStatus("Trade block reset manually");
+        render();
+      });
+      if (!snapshot.jobs?.length) {
+        const empty = dom.create("div");
+        empty.textContent = "No Trade Jobs";
+        styles(empty, { color: "#8795a8", padding: "18px 0" });
+        content.appendChild(empty);
+        return;
+      }
+      for (const job of snapshot.jobs) {
+        const runtime = snapshot.runtimes?.[job.id] || {};
+        const card = styles(dom.create("div"), { border: "1px solid #3e4b5d", background: "#1d2229", padding: "10px", marginBottom: "8px" });
+        const head = styles(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "start" });
+        const identity = dom.create("div");
+        identity.textContent = job.name;
+        styles(identity, { fontWeight: "700", overflowWrap: "anywhere" });
+        const state = dom.create("span");
+        state.textContent = runtime.status || (job.armed ? "armed" : "disabled");
+        styles(state, { color: runtime.status === "blocked" ? "#e3a7a7" : "#9fb2c9" });
+        head.append(identity, state);
+        const detail = dom.create("div");
+        detail.textContent = `${job.type} | ${tradeScheduleSummary(job)}${runtime.nextRunAt !== null && runtime.nextRunAt !== void 0 ? ` | Next ${new Date(runtime.nextRunAt).toLocaleString()}` : ""}`;
+        styles(detail, { color: "#9aa6b8", fontSize: "11px", margin: "6px 0" });
+        const buyPreview = buyPreviews.get(job.id);
+        const previewDetail = job.type === "buy" && buyPreview ? styles(dom.create("div"), {
+          color: buyPreview.plan?.ready ? "#a9d7b5" : "#e3a7a7",
+          fontSize: "11px",
+          margin: "6px 0",
+          lineHeight: "1.45",
+          overflowWrap: "anywhere"
+        }) : null;
+        if (previewDetail) {
+          const lanes = (buyPreview.plan?.lanes || []).map((lane) => `${lane.rating}: ${lane.definitionIds.length} player ID(s), max ${Number(lane.maxBuyNow).toLocaleString()}`).join(" | ");
+          const missing = buyPreview.plan?.missingRatings?.length ? ` | Missing ratings: ${buyPreview.plan.missingRatings.join(", ")}` : "";
+          previewDetail.textContent = `Preview only | ${lanes || "No search lanes"}${missing} | Live Buy locked`;
+        }
+        const actions = styles(dom.create("div"), { display: "flex", gap: "6px", flexWrap: "wrap" });
+        const run = button4(dom, job.type === "buy" ? "Preview" : "Run now", mode);
+        const edit = button4(dom, "Edit", mode);
+        const duplicate = button4(dom, "Duplicate", mode);
+        const remove = button4(dom, "Delete", mode);
+        run.addEventListener("click", async () => {
+          if (job.type !== "buy") {
+            options.onOpenManualListing?.(job);
+            return;
+          }
+          run.disabled = true;
+          setStatus(`Loading Buy preview for ${job.name}`);
+          try {
+            const preview = await options.onPreviewBuyJob?.(job);
+            if (!preview) throw new Error("Buy preview is unavailable");
+            buyPreviews.set(job.id, preview);
+            setStatus(preview.plan?.ready ? `Buy preview ready: ${preview.summary?.ratings || 0} rating lane(s), ${preview.summary?.definitions || 0} player definition(s); execution remains locked` : `Buy preview blocked: missing rating lane(s) ${(preview.plan?.missingRatings || []).join(", ") || "unknown"}`);
+            render();
+          } catch (error) {
+            setStatus(`Buy preview failed: ${error?.message || error}`);
+            run.disabled = false;
+          }
+        });
+        edit.addEventListener("click", () => {
+          editing = createTradeJobDraft(job.type, { job, now: now() });
+          renderEditor();
+        });
+        duplicate.addEventListener("click", () => {
+          const copy = createTradeJobDraft(job.type, { job, now: now() });
+          copy.id = uniqueJobId(job.type, now());
+          copy.name = `${job.name} copy`;
+          copy.armed = false;
+          editing = copy;
+          renderEditor();
+        });
+        remove.addEventListener("click", () => {
+          options.onDeleteJob?.(job.id);
+          refreshSnapshot();
+          render();
+        });
+        actions.append(run, edit, duplicate, remove);
+        card.append(head, detail);
+        if (previewDetail) card.appendChild(previewDetail);
+        card.appendChild(actions);
+        content.appendChild(card);
+      }
+    }
+    function renderHistory() {
+      content.textContent = "";
+      const history = [...snapshot.history || []].reverse();
+      const pageCount = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
+      historyPage = Math.min(pageCount, Math.max(1, historyPage));
+      const entries = history.slice((historyPage - 1) * PAGE_SIZE, historyPage * PAGE_SIZE);
+      if (!entries.length) {
+        const empty = dom.create("div");
+        empty.textContent = "No Trade history";
+        content.appendChild(empty);
+      }
+      for (const receipt of entries) {
+        const row = styles(dom.create("div"), { borderBottom: "1px solid #35404e", padding: "9px 0" });
+        const line = dom.create("div");
+        line.textContent = `${receipt.jobType || "trade"} | ${receipt.status} | ${Number(receipt.succeeded || 0)}/${Number(receipt.requested || 0)}`;
+        const detail = dom.create("small");
+        detail.textContent = `${new Date(Number(receipt.startedAt || 0)).toLocaleString()}${receipt.reason ? ` | ${receipt.reason}` : ""}`;
+        styles(detail, { color: "#9aa6b8" });
+        row.append(line, detail);
+        content.appendChild(row);
+      }
+      if (pageCount > 1) {
+        const pages = styles(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", alignItems: "center", marginTop: "10px" });
+        const previous = button4(dom, "<", mode);
+        const next = button4(dom, ">", mode);
+        const count = dom.create("span");
+        count.textContent = `${historyPage}/${pageCount}`;
+        previous.disabled = historyPage <= 1;
+        next.disabled = historyPage >= pageCount;
+        previous.addEventListener("click", () => {
+          historyPage -= 1;
+          renderHistory();
+        });
+        next.addEventListener("click", () => {
+          historyPage += 1;
+          renderHistory();
+        });
+        pages.append(previous, count, next);
+        content.appendChild(pages);
+      }
+    }
+    function render() {
+      refreshSnapshot();
+      renderBanner();
+      jobsTab.style.background = view === "jobs" ? "#315d9b" : "#222832";
+      historyTab.style.background = view === "history" ? "#315d9b" : "#222832";
+      if (editing) renderEditor();
+      else if (view === "history") renderHistory();
+      else renderJobs();
+      status.textContent = statusText;
+    }
+    jobsTab.addEventListener("click", () => {
+      editing = null;
+      view = "jobs";
+      render();
+    });
+    historyTab.addEventListener("click", () => {
+      editing = null;
+      view = "history";
+      render();
+    });
+    close.addEventListener("click", () => overlay.remove?.());
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) overlay.remove?.();
+    });
+    dialog.append(heading, tabs, banner, content, status);
+    overlay.appendChild(dialog);
+    dom.appendToBody(overlay);
+    applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, historyTab, close] });
+    render();
+    return overlay;
+  }
+
   // src/userscript-entry.js
   var RUNNER_VERSION = package_default.version;
   (function() {
@@ -18972,13 +21309,32 @@
       requestText: adapters.http.getText,
       provider: "auto"
     });
+    const tradeCircuitBreaker = createTradeCircuitBreaker({
+      storage: adapters.userscriptStorage,
+      key: TRADE_CIRCUIT_KEY
+    });
+    const tradeJobStore = createTradeJobStore({
+      storage: adapters.userscriptStorage,
+      key: TRADE_JOB_STORE_KEY
+    });
+    const tradeTabOwnerId = `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const tradeRunLease = createTradeRunLease({
+      storage: adapters.userscriptStorage,
+      key: TRADE_RUN_LEASE_KEY,
+      ownerId: tradeTabOwnerId
+    });
     const tradeListingPreview = createListingPreview({
       getTradeAdapter: eaTradeAdapter,
       priceQuoteProvider: tradePriceQuoteProvider
     });
     const tradeListingPreparation = createListingPreparation({
       getTradeAdapter: eaTradeAdapter,
-      listingPreview: tradeListingPreview
+      listingPreview: tradeListingPreview,
+      circuitBreaker: tradeCircuitBreaker
+    });
+    const tradeBuyPreview = createBuyPreview({
+      getTradeAdapter: eaTradeAdapter,
+      playerCatalogProvider: tradePlayerCatalogProvider
     });
     const state = {
       running: false,
@@ -19012,6 +21368,8 @@
       lastBatchRecap: null,
       lastLoopRecap: null,
       preparedTradeListing: null,
+      lastTradeListingReceipt: null,
+      lastTradeBuyPreview: null,
       tradeListingRunning: false,
       lastRecapType: null,
       loopRecapSession: null,
@@ -19023,6 +21381,13 @@
       sbcLoadLogKeys: /* @__PURE__ */ new Set(),
       rewardAlertSettings: normalizeRewardAlertSettings()
     };
+    const tradeOperationCoordinator = createOperationCoordinator({
+      externalBusy: () => ({
+        busy: state.running || state.refreshing || state.scanningPicks || state.loadingLoops,
+        type: state.tradeListingRunning ? "trade-listing" : state.running ? "loop-or-batch" : null,
+        reason: "runner-operation-active"
+      })
+    });
     function destroyRunner() {
       state.stopping = true;
       if (state.bootTimer) clearInterval(state.bootTimer);
@@ -19036,6 +21401,8 @@
       document.querySelector("#bronze-loop-batch-open-modal")?.remove();
       document.querySelector("#bronze-loop-batch-recap-modal")?.remove();
       document.querySelector("#bronze-loop-loop-recap-modal")?.remove();
+      document.querySelector("#bronze-loop-trade-listing-modal")?.remove();
+      document.querySelector("#bronze-loop-trade-scheduler-modal")?.remove();
       document.querySelector("#bronze-loop-reward-highlight-stack")?.remove();
       document.querySelector("#bronze-loop-style")?.remove();
     }
@@ -19051,16 +21418,25 @@
       solveRatingSbcCandidates: findOptimalRatingSbcSelection,
       scanPlayerPicks: () => scanAvailableDynamicSbcs(),
       scanDynamicSbcs: (options = {}) => scanAvailableDynamicSbcs(options),
-      previewPackHighlight: (input = {}) => previewPackHighlight(input),
+      previewPackHighlight: (input2 = {}) => previewPackHighlight(input2),
       previewBatchOpenRecap: () => previewBatchOpenRecap(),
       inspectTradeCapabilities: () => eaTradeAdapter().inspectCapabilities(),
       inspectTradeListingCandidates: (options = {}) => eaTradeAdapter().inspectListingCandidates(options),
       inspectTradePriceLimits: (ref = {}, options = {}) => eaTradeAdapter().inspectPriceLimits(ref, {
         refresh: options.refresh === true
       }),
-      previewTradeListings: (input = {}, options = {}) => tradeListingPreview.preview(input, options),
+      inspectTradeCircuit: () => tradeCircuitBreaker.snapshot(),
+      resetTradeCircuit: (reason = "manual-console-reset") => tradeCircuitBreaker.reset(reason),
+      getTradeSchedulerState: () => tradeJobStore.read(),
+      saveTradeJob: (job, options = {}) => tradeJobStore.upsert(job, options),
+      deleteTradeJob: (jobId) => tradeJobStore.remove(jobId),
+      pauseTradeScheduler: () => tradeJobStore.setPaused(true),
+      inspectOperationCoordinator: () => tradeOperationCoordinator.inspect(),
+      previewTradeListings: (input2 = {}, options = {}) => tradeListingPreview.preview(input2, options),
+      previewTradeBuys: previewTradeBuyJob,
       prepareTradeListing,
       executePreparedTradeListing,
+      cancelPreparedTradeListing,
       stopTradeListing,
       loadTradePlayerCatalog: (options = {}) => tradePlayerCatalogProvider.load(options),
       clearTradePlayerCatalogCache: () => tradePlayerCatalogProvider.clear(),
@@ -19069,28 +21445,31 @@
     };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const now = () => (/* @__PURE__ */ new Date()).toLocaleTimeString();
-    async function prepareTradeListing(input = {}, options = {}) {
+    async function prepareTradeListing(input2 = {}, options = {}) {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
         throw new Error("Another Runner operation is active; listing preparation is unavailable");
       }
-      const requestedSources = input.policy?.sources || ["club"];
+      const requestedSources = input2.policy?.sources || ["club"];
       if (requestedSources.length !== 1 || requestedSources[0] !== "club") {
         throw new Error("TS2b live gate currently allows Club listing preparation only");
       }
       state.preparedTradeListing = null;
       const prepared = await tradeListingPreparation.prepare({
-        ...input,
-        policy: { ...input.policy || {}, sources: ["club"], maxListings: 1 }
+        ...input2,
+        policy: { ...input2.policy || {}, sources: ["club"], maxListings: 1 }
       }, { ...options, maxListings: 1 });
       if (prepared.ready) state.preparedTradeListing = prepared;
       return prepared;
     }
-    async function executePreparedTradeListing(input = {}) {
+    async function executePreparedTradeListing(input2 = {}) {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
         throw new Error("Another Runner operation is active; listing execution is unavailable");
       }
       const prepared = state.preparedTradeListing;
       if (!prepared) throw new Error("No prepared Trade listing is available");
+      const operationId = `trade-listing-${Date.now()}`;
+      const operation = tradeOperationCoordinator.acquire({ id: operationId, type: "trade-listing", ownerId: tradeTabOwnerId });
+      if (!operation.acquired) throw new Error(`Trade listing is blocked by ${operation.reason}`);
       state.preparedTradeListing = null;
       state.tradeListingRunning = true;
       state.running = true;
@@ -19098,25 +21477,187 @@
       try {
         const transaction = createListingTransaction({
           tradeAdapter: eaTradeAdapter(),
+          circuitBreaker: tradeCircuitBreaker,
           sleep
         });
-        return await transaction.run({
+        const receipt = await transaction.run({
           job: prepared.job,
           prepared,
-          confirmationToken: input.confirmationToken,
-          confirmationText: input.confirmationText,
+          confirmationToken: input2.confirmationToken,
+          confirmationText: input2.confirmationText,
           shouldStop: () => state.stopping
         });
+        state.lastTradeListingReceipt = receipt;
+        tradeJobStore.addHistory(receipt);
+        return receipt;
       } finally {
         state.tradeListingRunning = false;
         state.running = false;
         state.stopping = false;
+        tradeOperationCoordinator.release(operationId);
       }
+    }
+    function cancelPreparedTradeListing() {
+      const cancelled = state.preparedTradeListing !== null;
+      state.preparedTradeListing = null;
+      return cancelled;
     }
     function stopTradeListing() {
       if (!state.tradeListingRunning) return false;
       state.stopping = true;
       return true;
+    }
+    function tradeDiagnosticsFilename(timestamp = Date.now()) {
+      const value = new Date(Number(timestamp) || Date.now()).toISOString().replace(/[:.]/g, "-");
+      return `trade-listing-diagnostics-${value}.json`;
+    }
+    function listingDialogDraft(job = null) {
+      const policy = job?.policy || job || {};
+      return {
+        cardClass: policy.cardClass,
+        ratingRules: policy.ratingRules,
+        marketOverride: policy.marketOverride,
+        startPricePolicy: policy.startPricePolicy,
+        durationSeconds: policy.durationSeconds,
+        provider: "auto",
+        platform: "pc"
+      };
+    }
+    function openTradeListingDialogModal(job = null) {
+      cancelPreparedTradeListing();
+      return showTradeListingDialog({
+        dom: adapters.dom,
+        now: Date.now,
+        draft: listingDialogDraft(job),
+        onPreview: async (job2, request) => {
+          log("Trade Listings: building read-only Club preview");
+          const preview = await tradeListingPreview.preview(job2, request);
+          log(`Trade Listings: preview selected ${Number(preview?.plan?.counts?.selected || 0)} of ${Number(preview?.plan?.counts?.eligible || 0)} eligible item(s)`);
+          return preview;
+        },
+        onPrepare: async (job2, request) => {
+          log("Trade Listings: refreshing EA price limits and preparing one Club item");
+          const prepared = await prepareTradeListing(job2, request);
+          log(prepared.ready ? `Trade Listings: one item prepared; confirmation ${prepared.confirmation.requiredText} is required` : `Trade Listings: preparation blocked (${prepared.blockers?.map((entry) => entry.reason).join(", ") || "unknown"})`);
+          return prepared;
+        },
+        onCancelPrepared: cancelPreparedTradeListing,
+        onExecute: async (confirmation) => {
+          log("Trade Listings: confirmed single-item listing started");
+          const execution = executePreparedTradeListing(confirmation);
+          setPanelState();
+          try {
+            const receipt = await execution;
+            log(`Trade Listings: ${receipt.status}${receipt.reason ? ` (${receipt.reason})` : ""}; listed ${receipt.succeeded}/${receipt.requested}`);
+            return receipt;
+          } catch (error) {
+            log(`Trade Listings failed: ${error?.message || error}`);
+            throw error;
+          } finally {
+            setPanelState();
+          }
+        },
+        onStop: () => {
+          const accepted = stopTradeListing();
+          if (accepted) {
+            log("Trade Listings: Stop requested; waiting for the current transaction safe point");
+            setPanelState();
+          }
+          return accepted;
+        },
+        onDownloadDiagnostics: (snapshot = {}) => {
+          const capturedAt = Date.now();
+          const diagnostics = createTradeListingDiagnostics({
+            ...snapshot,
+            capturedAt,
+            runnerVersion: RUNNER_VERSION,
+            userAgent: navigator?.userAgent || "",
+            operation: {
+              running: state.running,
+              stopping: state.stopping,
+              tradeListingRunning: state.tradeListingRunning
+            },
+            circuit: tradeCircuitBreaker.snapshot()
+          });
+          adapters.userEffects.downloadText(
+            JSON.stringify(diagnostics, null, 2),
+            tradeDiagnosticsFilename(capturedAt)
+          );
+          log("Trade Listings: diagnostics saved");
+        }
+      });
+    }
+    function tradeSchedulerDiagnostics() {
+      const operation = {
+        running: state.running,
+        stopping: state.stopping,
+        refreshing: state.refreshing,
+        scanningDynamicSbcs: state.scanningPicks,
+        loadingLoops: state.loadingLoops,
+        tradeListingRunning: state.tradeListingRunning,
+        tradeBuyRunning: false
+      };
+      return {
+        schemaVersion: 1,
+        capturedAt: Date.now(),
+        runner: { version: RUNNER_VERSION, userAgent: navigator?.userAgent || "" },
+        scheduler: tradeJobStore.read(),
+        circuit: tradeCircuitBreaker.snapshot(),
+        lease: tradeRunLease.inspect(),
+        coordinator: tradeOperationCoordinator.inspect(),
+        capabilities: eaTradeAdapter().inspectCapabilities(),
+        operation,
+        buy: createTradeBuyDiagnostics({
+          capturedAt: Date.now(),
+          runnerVersion: RUNNER_VERSION,
+          userAgent: navigator?.userAgent || "",
+          operation,
+          circuit: tradeCircuitBreaker.snapshot(),
+          job: state.lastTradeBuyPreview?.job || null,
+          preview: state.lastTradeBuyPreview
+        })
+      };
+    }
+    async function previewTradeBuyJob(job = {}, request = {}) {
+      log(`Trade Buy: building preview-only search lanes for ${job.name || job.id || "Buy Job"}`);
+      const preview = await tradeBuyPreview.preview(job, request);
+      state.lastTradeBuyPreview = preview;
+      log(preview.plan?.ready ? `Trade Buy: preview ready with ${preview.summary.ratings} rating lane(s) and ${preview.summary.definitions} player definition(s); live execution remains locked` : `Trade Buy: preview blocked; missing rating lane(s) ${preview.plan?.missingRatings?.join(", ") || "unknown"}`);
+      return preview;
+    }
+    function openTradeSchedulerDialogModal() {
+      return showTradeSchedulerDialog({
+        dom: adapters.dom,
+        now: Date.now,
+        getSnapshot: () => tradeJobStore.read(),
+        getCircuit: () => tradeCircuitBreaker.snapshot(),
+        onSaveJob: (job) => {
+          tradeJobStore.upsert(job);
+          log(`Trade Scheduler: saved ${job.type} Job ${job.name}${job.armed ? " (armed)" : ""}`);
+        },
+        onDeleteJob: (jobId) => {
+          tradeJobStore.remove(jobId);
+          log(`Trade Scheduler: deleted Job ${jobId}`);
+        },
+        onSetPaused: (paused) => {
+          tradeJobStore.setPaused(paused);
+          log(`Trade Scheduler: ${paused ? "paused" : "resumed"}`);
+        },
+        onOpenManualListing: (job = null) => openTradeListingDialogModal(job),
+        onPreviewBuyJob: (job) => previewTradeBuyJob(job),
+        onResetCircuit: () => {
+          tradeCircuitBreaker.reset("manual-ui-reset");
+          log("Trade Scheduler: persistent trade block reset manually");
+        },
+        onDownloadDiagnostics: () => {
+          const capturedAt = Date.now();
+          adapters.userEffects.downloadText(
+            JSON.stringify(tradeSchedulerDiagnostics(), null, 2),
+            `trade-scheduler-diagnostics-${new Date(capturedAt).toISOString().replace(/[:.]/g, "-")}.json`
+          );
+          log("Trade Scheduler: diagnostics saved");
+        }
+      });
     }
     function log(msg) {
       const line = `[${now()}] ${msg}`;
@@ -19262,8 +21803,8 @@
       return parseLoopConfig(text);
     }
     function getSelectedLoopDef() {
-      const select = document.querySelector("#bronze-loop-select");
-      const selectedId = select?.value || getVisibleLoopDefs()[0]?.id || LOOP_DEFS[0].id;
+      const select2 = document.querySelector("#bronze-loop-select");
+      const selectedId = select2?.value || getVisibleLoopDefs()[0]?.id || LOOP_DEFS[0].id;
       const loopDef = cloneLoopDef(getLoopDefById(selectedId));
       assertValidLoopDef2(loopDef, loopDef.name || selectedId);
       return applyDisabledPiles(loopDef);
@@ -20116,7 +22657,7 @@
     function itemIdentityHolders(item) {
       const holders = [
         item,
-        ...ITEM_IDENTITY_HOLDER_FIELDS.map((field2) => safeReadField(item, field2))
+        ...ITEM_IDENTITY_HOLDER_FIELDS.map((field4) => safeReadField(item, field4))
       ];
       const seen = /* @__PURE__ */ new Set();
       return holders.filter((holder) => {
@@ -20146,7 +22687,7 @@
     function itemIdentifierNumbers(item, keys = []) {
       const fields = Array.isArray(keys) && keys.length ? keys : ITEM_IDENTITY_FIELD_ALIASES;
       return uniqueNumberList(itemIdentityHolders(item).flatMap(
-        (holder) => fields.flatMap((field2) => numberListFromAny3(safeReadField(holder, field2)))
+        (holder) => fields.flatMap((field4) => numberListFromAny3(safeReadField(holder, field4)))
       ));
     }
     function isFsuLockedItem(item, settings = getFsuSettings(), lockContext = null) {
@@ -23714,11 +26255,11 @@
         const rating = Number(item?.rating || 0) || "?";
         const itemId2 = Number(item?.id || 0) || "?";
         const definitionId2 = Number(item?.definitionId || 0) || "?";
-        const ratingLimit = getSubmittedRatingLimit(item, loopDef);
+        const ratingLimit2 = getSubmittedRatingLimit(item, loopDef);
         const prefix = `slot ${index + 1} ${name} rating:${rating} id:${itemId2} def:${definitionId2}`;
         if (reasons.some((reason) => reason.startsWith("rating-over-"))) {
           const replacement = isNormalGoldFodder(item) ? "normal gold card" : "untradeable card";
-          hints.push(`${prefix}: replace with rating <= ${ratingLimit || "limit"} ${replacement}`);
+          hints.push(`${prefix}: replace with rating <= ${ratingLimit2 || "limit"} ${replacement}`);
         }
         if (reasons.includes("special-blocked")) {
           hints.push(`${prefix}: replace extra special card with a normal/rare gold card`);
@@ -25329,7 +27870,7 @@
     function shortageSourceMatchesRequirement(source, requirement2) {
       const target = source?.requirement || {};
       return ["tier", "rarity", "special", "playerOnly", "allowSpecial"].every(
-        (field2) => target[field2] === void 0 || target[field2] === requirement2?.[field2]
+        (field4) => target[field4] === void 0 || target[field4] === requirement2?.[field4]
       );
     }
     function getShortageForSource(loopDef, source, piles) {
@@ -26668,9 +29209,9 @@
       });
       return state.rewardAlertSettings;
     }
-    function previewPackHighlight(input = {}) {
-      const rating = Math.max(1, Math.min(99, Number(input.rating || input.cards?.[0]?.rating || 96) || 96));
-      const cards = input.cards || [{
+    function previewPackHighlight(input2 = {}) {
+      const rating = Math.max(1, Math.min(99, Number(input2.rating || input2.cards?.[0]?.rating || 96) || 96));
+      const cards = input2.cards || [{
         id: 1,
         definitionId: 1,
         type: "player",
@@ -26681,9 +29222,9 @@
         tradeable: false
       }];
       const model = createPackHighlightModel({
-        packRef: { id: 0, name: input.packName || "Preview Pack" },
+        packRef: { id: 0, name: input2.packName || "Preview Pack" },
         openedItems: cards
-      }, { ...state.rewardAlertSettings, ...input.settings, enabled: true, highlightEnabled: true });
+      }, { ...state.rewardAlertSettings, ...input2.settings, enabled: true, highlightEnabled: true });
       if (!model) return false;
       return showPackHighlightToast({
         dom: adapters.dom,
@@ -27607,8 +30148,8 @@
       try {
         loopDef = getSelectedLoopDef();
         const quantity = resolveRuntimeQuantity(loopDef);
-        const input = document.querySelector("#bronze-loop-rounds");
-        rounds = quantity?.mode === "user" ? Math.max(quantity.min, Math.min(quantity.max, Number(input?.value || quantity.default) || quantity.default)) : 1;
+        const input2 = document.querySelector("#bronze-loop-rounds");
+        rounds = quantity?.mode === "user" ? Math.max(quantity.min, Math.min(quantity.max, Number(input2?.value || quantity.default) || quantity.default)) : 1;
         applyLoopRuntimeOptions(loopDef, {
           rounds,
           openRewardPacks: isOpenRewardPacksEnabled(),
@@ -27815,8 +30356,8 @@
             adapters.localStorage.set("fc-loop-layout-mode", layoutMode);
           } catch {
           }
-          const select = document.querySelector("#bronze-loop-layout-mode");
-          if (select) select.value = layoutMode;
+          const select2 = document.querySelector("#bronze-loop-layout-mode");
+          if (select2) select2.value = layoutMode;
         },
         onChange: (snapshot) => {
           state.panelGeometry?.setResponsiveMode?.(snapshot);
@@ -27854,6 +30395,7 @@
         openRewardAlertSettings: openRewardAlertSettingsModal,
         start: startLoop,
         openBatch: openBatchOpenDialogModal,
+        openTrade: openTradeSchedulerDialogModal,
         reopenRecap: reopenLastRecap,
         refreshInventoryCaches,
         scanDynamicSbcs: scanDynamicSbcsWithProgress,
@@ -27866,8 +30408,8 @@
           };
         },
         resetDynamicSbcScanMode: () => {
-          const select = document.querySelector("#bronze-loop-scan-mode");
-          if (select) select.value = "incremental";
+          const select2 = document.querySelector("#bronze-loop-scan-mode");
+          if (select2) select2.value = "incremental";
         },
         userEffects: adapters.userEffects,
         getLogText: () => state.logLines.join("\n"),

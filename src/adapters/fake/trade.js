@@ -4,6 +4,8 @@ import { readPlayerRareFlag } from '../../domain/player-rarity.js';
 export function createFakeTradeAdapter(initial = {}) {
   const calls = [];
   const items = new Map((initial.items || []).map((entry) => [Number(entry.id || 0), { ...entry }]));
+  const marketItems = new Map((initial.marketItems || []).map((entry) => [Number(entry.id || 0), { ...entry, pile: 'market' }]));
+  let coins = Number(initial.coins ?? 100000);
   let transferUsed = Number(initial.transferCapacity?.used);
   if (!Number.isFinite(transferUsed)) transferUsed = [...items.values()].filter((item) => item.pile === 'transfer').length;
 
@@ -41,7 +43,7 @@ export function createFakeTradeAdapter(initial = {}) {
       runtimeReady: initial.runtimeReady !== false,
       canTrade: initial.canTrade !== false,
       tradeAccess: initial.tradeAccess || { available: true, allowed: true, level: 'ALLOWED' },
-      coins: initial.coins ?? 100000,
+      coins,
       transferCapacity: { used: transferUsed, max: Number(initial.transferCapacity?.max ?? 100) },
       criteria: initial.criteria || {
         constructorAvailable: true,
@@ -169,6 +171,105 @@ export function createFakeTradeAdapter(initial = {}) {
     };
   }
 
+  async function searchMarket(request = {}) {
+    calls.push({ method: 'searchMarket', request: { ...request } });
+    const configured = initial.searchResults?.[Number(request.definitionId)];
+    if (configured && configured.status && configured.status !== 'completed') return { ...configured };
+    const source = Array.isArray(configured?.items)
+      ? configured.items.map((entry) => ({ ...entry, pile: 'market' }))
+      : [...marketItems.values()];
+    const candidates = source
+      .filter((item) => Number(item.definitionId) === Number(request.definitionId))
+      .map(listingCandidate);
+    return {
+      status: 'completed',
+      request: { definitionId: Number(request.definitionId), maxBuyNow: Number(request.maxBuyNow), page: Number(request.page || 1) },
+      response: { success: true, status: 200, code: null },
+      candidates,
+      error: null,
+    };
+  }
+
+  async function buyNowItem(ref = {}, priceInput = 0) {
+    const price = Number(priceInput);
+    calls.push({ method: 'buyNowItem', ref: { ...ref }, price });
+    const item = [...marketItems.values()].find((entry) => (
+      Number(entry.id) === Number(ref.id)
+      && Number(entry.auction?.tradeId) === Number(ref.tradeId)
+    ));
+    if (!item) return { status: 'not-found', item: null, price, response: null, error: null };
+    const configured = initial.buyResults?.[Number(ref.tradeId)] || initial.buyResults?.[Number(item.id)];
+    if (configured && configured.status !== 'accepted' && configured.materialize !== true) {
+      return { status: configured.status, item: listingCandidate(item).item, price, response: configured.response || null, error: configured.error || null };
+    }
+    if (price !== Number(item.auction?.buyNowPrice)) {
+      return { status: 'rejected', item: listingCandidate(item).item, price, response: null, error: { kind: 'price-changed' } };
+    }
+    if (coins < price) return { status: 'rejected', item: listingCandidate(item).item, price, response: null, error: { kind: 'insufficient-coins' } };
+    if (configured?.preserveCoins !== true) coins -= price;
+    marketItems.delete(Number(item.id));
+    const purchased = { ...item, pile: 'unassigned', auction: { ...item.auction, state: 'closed' }, purchasePrice: price };
+    items.set(Number(item.id), purchased);
+    return {
+      status: configured?.status || 'accepted',
+      item: { id: Number(item.id), definitionId: Number(item.definitionId), pile: 'market' },
+      tradeId: Number(item.auction?.tradeId),
+      price,
+      response: configured?.response || { success: true, status: 200, code: null },
+      error: configured?.error || null,
+    };
+  }
+
+  async function refreshPurchaseState(options = {}) {
+    calls.push({ method: 'refreshPurchaseState', options: { ...options } });
+    return initial.refreshPurchaseResult || { status: 'completed', response: { success: true, status: 200, code: null }, error: null };
+  }
+
+  function inspectPurchase(ref = {}) {
+    calls.push({ method: 'inspectPurchase', ref: { ...ref } });
+    const item = [...items.values()].find((entry) => Number(ref.id) > 0
+      ? Number(entry.id) === Number(ref.id)
+      : Number(entry.definitionId) === Number(ref.definitionId) && Number(entry.purchasePrice) === Number(ref.price));
+    return item ? { status: 'loaded', candidate: listingCandidate(item), purchasePrice: Number(item.purchasePrice || 0) || null } : { status: 'not-found', candidate: null, purchasePrice: null };
+  }
+
+  function inspectDefinitionOwnership(definitionId) {
+    calls.push({ method: 'inspectDefinitionOwnership', definitionId: Number(definitionId) });
+    const owned = [...items.values()].filter((item) => Number(item.definitionId) === Number(definitionId));
+    return {
+      definitionId: Number(definitionId),
+      club: owned.filter((item) => item.pile === 'club').length,
+      transfer: owned.filter((item) => item.pile === 'transfer').length,
+      unassigned: owned.filter((item) => item.pile === 'unassigned').length,
+    };
+  }
+
+  function inspectUnassignedReadiness() {
+    calls.push({ method: 'inspectUnassignedReadiness' });
+    const unassigned = [...items.values()].filter((item) => item.pile === 'unassigned');
+    const forced = initial.unassignedReady;
+    return {
+      ready: forced === undefined ? unassigned.length === 0 : forced === true,
+      count: unassigned.length,
+      reason: forced === false || (forced === undefined && unassigned.length) ? 'unassigned-not-empty' : null,
+    };
+  }
+
+  async function routePurchasedItem(ref = {}, destination = 'club') {
+    calls.push({ method: 'routePurchasedItem', ref: { ...ref }, destination: String(destination) });
+    const item = items.get(Number(ref.id || 0));
+    if (!item || item.pile !== 'unassigned') return { status: 'not-found', item: null, destination, response: null, error: null };
+    if (destination === 'transfer' && transferUsed >= Number(initial.transferCapacity?.max ?? 100)) {
+      return { status: 'destination-full', item: listingCandidate(item).item, destination, response: null, error: { kind: 'destination-full' } };
+    }
+    if (destination === 'club' && [...items.values()].some((entry) => entry.pile === 'club' && Number(entry.definitionId) === Number(item.definitionId))) {
+      return { status: 'duplicate', item: listingCandidate(item).item, destination, response: null, error: { kind: 'duplicate' } };
+    }
+    item.pile = destination;
+    if (destination === 'transfer') transferUsed += 1;
+    return { status: 'completed', item: listingCandidate(item).item, destination, response: { success: true, status: 200, code: null }, error: null };
+  }
+
   return Object.freeze({
     calls,
     inspectCapabilities,
@@ -177,5 +278,12 @@ export function createFakeTradeAdapter(initial = {}) {
     inspectPriceLimits,
     listItem,
     refreshTransferItems,
+    searchMarket,
+    buyNowItem,
+    refreshPurchaseState,
+    inspectPurchase,
+    inspectDefinitionOwnership,
+    inspectUnassignedReadiness,
+    routePurchasedItem,
   });
 }

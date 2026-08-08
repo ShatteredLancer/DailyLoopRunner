@@ -228,11 +228,14 @@ function itemPriceLimitSnapshot(resolved) {
 }
 
 function responseSummary(response) {
-  return {
+  const summary = {
     success: response?.success === true,
     status: Number.isFinite(Number(response?.status)) ? Number(response.status) : null,
     code: Number.isFinite(Number(response?.error?.code ?? response?.code)) ? Number(response?.error?.code ?? response?.code) : null,
   };
+  const message = String(response?.error?.message || response?.message || response?.reason || '').trim();
+  if (message) summary.message = message.slice(0, 200);
+  return summary;
 }
 
 function observeResult(value, context = {}) {
@@ -251,6 +254,21 @@ function observeResult(value, context = {}) {
 }
 
 export function createEaTradeAdapter(runtime) {
+  const marketItems = new Map();
+
+  function marketItemKey(ref = {}) {
+    const id = Number(ref.id || 0);
+    const tradeId = Number(ref.tradeId ?? ref.auction?.tradeId ?? 0);
+    return id > 0 && tradeId > 0 ? `${id}:${tradeId}` : null;
+  }
+
+  function rememberMarketItem(item) {
+    const auction = auctionSnapshot(item);
+    const key = marketItemKey({ id: item?.id, tradeId: auction.tradeId });
+    if (key) marketItems.set(key, item);
+    return auction;
+  }
+
   function inspectCapabilities() {
     const service = runtime?.services?.Item;
     const repository = runtime?.repositories?.Item;
@@ -411,7 +429,7 @@ export function createEaTradeAdapter(runtime) {
       ), options.observerContext || {});
       const summary = responseSummary(response);
       if (summary.success) return { status: 'accepted', item, requested, response: summary, error: null };
-      const classification = classifyTradeError(response?.error || response || {});
+      const classification = classifyTradeError(response || {});
       return {
         status: 'rejected',
         item,
@@ -449,6 +467,235 @@ export function createEaTradeAdapter(runtime) {
     }
   }
 
+  async function searchMarket(request = {}, options = {}) {
+    const service = runtime?.services?.Item;
+    const definitionId = Number(request.definitionId);
+    const maxBuyNow = Number(request.maxBuyNow);
+    const page = Math.max(1, Math.floor(Number(request.page || 1)));
+    const normalizedRequest = { definitionId, maxBuyNow, page };
+    if (!Number.isInteger(definitionId) || definitionId <= 0
+      || !Number.isFinite(maxBuyNow) || maxBuyNow <= 0) {
+      return { status: 'invalid-request', request: normalizedRequest, response: null, candidates: [], error: null };
+    }
+    if (typeof runtime?.UTSearchCriteriaDTO !== 'function'
+      || typeof service?.searchTransferMarket !== 'function') {
+      return { status: 'unsupported', request: normalizedRequest, response: null, candidates: [], error: null };
+    }
+    try {
+      const criteria = new runtime.UTSearchCriteriaDTO();
+      criteria.defId = [definitionId];
+      criteria.type = runtime?.SearchType?.PLAYER ?? 'player';
+      criteria.category = runtime?.SearchCategory?.ANY ?? 'any';
+      criteria.maxBuy = maxBuyNow;
+      marketItems.clear();
+      service.clearTransferMarketCache?.();
+      const response = await observeResult(
+        service.searchTransferMarket(criteria, page),
+        options.observerContext || {},
+      );
+      const summary = responseSummary(response);
+      if (!summary.success) {
+        const classification = classifyTradeError(response || {});
+        return {
+          status: 'rejected', request: normalizedRequest, response: summary, candidates: [],
+          error: { kind: classification.kind, code: classification.code, action: classification.action },
+        };
+      }
+      const inventory = createEaInventoryAdapter(runtime);
+      const candidates = Array.from(response?.data?.items || []).map((item) => {
+        rememberMarketItem(item);
+        return listingCandidateSnapshot(inventory, item, 'market');
+      });
+      return { status: 'completed', request: normalizedRequest, response: summary, candidates, error: null };
+    } catch (error) {
+      const classification = classifyTradeError(error);
+      return {
+        status: classification.ambiguous ? 'ambiguous' : 'error',
+        request: normalizedRequest,
+        response: null,
+        candidates: [],
+        error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) },
+      };
+    }
+  }
+
+  async function buyNowItem(ref = {}, priceInput = 0, options = {}) {
+    const service = runtime?.services?.Item;
+    const price = Number(priceInput);
+    const key = marketItemKey(ref);
+    const liveItem = key ? marketItems.get(key) : null;
+    const item = liveItem ? {
+      id: Number(liveItem.id || 0),
+      definitionId: Number(liveItem.definitionId || 0),
+      pile: 'market',
+    } : null;
+    if (!liveItem) return { status: 'not-found', item: null, tradeId: Number(ref.tradeId || 0), price, response: null, error: null };
+    if (Number(ref.definitionId || 0) !== Number(liveItem.definitionId || 0)) {
+      return {
+        status: 'mismatch', item, tradeId: Number(ref.tradeId), price, response: null,
+        error: { kind: 'definition-mismatch', code: null, action: 'stop' },
+      };
+    }
+    if (typeof service?.bid !== 'function') {
+      return { status: 'unsupported', item, tradeId: Number(ref.tradeId), price, response: null, error: null };
+    }
+    const auction = auctionSnapshot(liveItem);
+    if (!Number.isFinite(price) || price <= 0 || price !== Number(auction.buyNowPrice)) {
+      return {
+        status: 'rejected', item, tradeId: Number(ref.tradeId), price, response: null,
+        error: { kind: 'price-changed', code: null, action: 'refresh-and-skip' },
+      };
+    }
+    try {
+      const response = await observeResult(service.bid(liveItem, price), options.observerContext || {});
+      const summary = responseSummary(response);
+      if (summary.success) return { status: 'accepted', item, tradeId: Number(ref.tradeId), price, response: summary, error: null };
+      const classification = classifyTradeError(response || {});
+      return {
+        status: 'rejected', item, tradeId: Number(ref.tradeId), price, response: summary,
+        error: { kind: classification.kind, code: classification.code, action: classification.action },
+      };
+    } catch (error) {
+      const classification = classifyTradeError(error);
+      return {
+        status: classification.ambiguous ? 'ambiguous' : 'error',
+        item,
+        tradeId: Number(ref.tradeId),
+        price,
+        response: null,
+        error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) },
+      };
+    }
+  }
+
+  async function refreshPurchaseState(options = {}) {
+    const service = runtime?.services?.Item;
+    const methods = options.ambiguity === true
+      ? ['requestUnassignedItems', 'requestTransferItems', 'requestClubItems', 'requestWatchlist', 'requestWatchedItems']
+      : options.destination === 'transfer'
+        ? ['requestTransferItems']
+        : options.destination === 'club'
+          ? ['requestClubItems']
+          : ['requestUnassignedItems'];
+    const available = [...new Set(methods)].filter((method) => typeof service?.[method] === 'function');
+    if (!available.length) return { status: 'unsupported', response: null, steps: [], error: null };
+    try {
+      const steps = [];
+      for (const method of available) {
+        const response = await observeResult(service[method](), options.observerContext || {});
+        const summary = responseSummary(response);
+        steps.push({ method, response: summary });
+        if (!summary.success) {
+          const classification = classifyTradeError(response || {});
+          return {
+            status: 'rejected', response: summary, steps,
+            error: { kind: classification.kind, code: classification.code, action: classification.action },
+          };
+        }
+      }
+      return { status: 'completed', response: steps[0]?.response || null, steps, error: null };
+    } catch (error) {
+      const classification = classifyTradeError(error);
+      return {
+        status: classification.ambiguous ? 'ambiguous' : 'error',
+        response: null,
+        steps: [],
+        error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) },
+      };
+    }
+  }
+
+  function inspectPurchase(ref = {}) {
+    const resolved = resolveItem(runtime, ref);
+    if (!resolved) return { status: 'not-found', candidate: null, purchasePrice: null };
+    try {
+      const inventory = createEaInventoryAdapter(runtime);
+      const purchasePrice = Number(
+        resolved.item?.purchasePrice
+        ?? resolved.item?._data?.purchasePrice
+        ?? resolved.item?.lastSalePrice,
+      );
+      return {
+        status: 'loaded',
+        candidate: listingCandidateSnapshot(inventory, resolved.item, resolved.pile),
+        purchasePrice: Number.isFinite(purchasePrice) && purchasePrice > 0 ? purchasePrice : null,
+      };
+    } catch (error) {
+      return { status: 'error', candidate: null, purchasePrice: null, error: { message: error?.message || String(error) } };
+    }
+  }
+
+  function inspectDefinitionOwnership(definitionIdInput) {
+    const definitionId = Number(definitionIdInput);
+    const counts = { club: 0, transfer: 0, unassigned: 0, storage: 0 };
+    if (!Number.isInteger(definitionId) || definitionId <= 0) return { definitionId, ...counts };
+    for (const pile of Object.keys(counts)) {
+      const seen = new Set();
+      for (const item of repositoryPile(runtime, pile)) {
+        if (Number(item?.definitionId || 0) !== definitionId) continue;
+        const id = Number(item?.id || 0);
+        const key = id > 0 ? id : item;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        counts[pile] += 1;
+      }
+    }
+    return { definitionId, ...counts };
+  }
+
+  function inspectUnassignedReadiness() {
+    const items = repositoryPile(runtime, 'unassigned');
+    return {
+      ready: items.length === 0,
+      count: items.length,
+      reason: items.length ? 'unassigned-not-empty' : null,
+    };
+  }
+
+  async function routePurchasedItem(ref = {}, destinationInput = 'club', options = {}) {
+    const service = runtime?.services?.Item;
+    const destination = String(destinationInput);
+    if (!['club', 'transfer'].includes(destination)) {
+      return { status: 'invalid-destination', item: null, destination, response: null, error: null };
+    }
+    const resolved = resolveItem(runtime, ref);
+    const key = marketItemKey(ref);
+    const liveItem = resolved?.item || (key ? marketItems.get(key) : null);
+    const item = liveItem ? {
+      id: Number(liveItem.id || 0),
+      definitionId: Number(liveItem.definitionId || 0),
+      pile: String(resolved?.pile || 'unassigned'),
+    } : null;
+    if (!liveItem) return { status: 'not-found', item: null, destination, response: null, error: null };
+    if (typeof service?.move !== 'function') return { status: 'unsupported', item, destination, response: null, error: null };
+    const pile = runtime?.ItemPile?.[destination.toUpperCase()] ?? destination;
+    try {
+      const response = await observeResult(service.move(liveItem, pile), options.observerContext || {});
+      const summary = responseSummary(response);
+      if (summary.success) {
+        if (key) marketItems.delete(key);
+        return { status: 'completed', item: { ...item, pile: destination }, destination, response: summary, error: null };
+      }
+      const classification = classifyTradeError(response || {});
+      return {
+        status: classification.kind === 'destination-full' ? 'destination-full' : classification.kind === 'card-in-trade' ? 'moved' : 'rejected',
+        item,
+        destination,
+        response: summary,
+        error: { kind: classification.kind, code: classification.code, action: classification.action },
+      };
+    } catch (error) {
+      const classification = classifyTradeError(error);
+      return {
+        status: classification.ambiguous ? 'ambiguous' : 'error',
+        item,
+        destination,
+        response: null,
+        error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) },
+      };
+    }
+  }
+
   return Object.freeze({
     inspectCapabilities,
     inspectListingCandidates,
@@ -456,5 +703,12 @@ export function createEaTradeAdapter(runtime) {
     inspectPriceLimits,
     listItem,
     refreshTransferItems,
+    searchMarket,
+    buyNowItem,
+    refreshPurchaseState,
+    inspectPurchase,
+    inspectDefinitionOwnership,
+    inspectUnassignedReadiness,
+    routePurchasedItem,
   });
 }

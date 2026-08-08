@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createFakeTradeAdapter } from '../../src/adapters/fake/trade.js';
 import { normalizeTradeJob } from '../../src/trade/contracts.js';
 import { createListingConfirmation } from '../../src/trade/listing-plan.js';
@@ -202,5 +202,58 @@ describe('Trade listing transaction', () => {
     });
     expect(result).toMatchObject({ status: 'ambiguous', reason: 'listing-accepted-but-not-verified', succeeded: 0, failed: 1 });
     expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
+  });
+
+  it('opens the persistent circuit and never retries an EA 427 listing rejection', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],
+      listResults: {
+        1: { status: 'rejected', response: { success: false, status: 427 }, error: { kind: 'auction-operation-blocked', code: 427 } },
+      },
+    });
+    const circuit = {
+      availability: () => ({ allowed: true }),
+      recordFailure: vi.fn(),
+      recordSuccess: vi.fn(),
+    };
+    const plan = prepared([entry()]);
+    const result = await createListingTransaction({
+      tradeAdapter: adapter,
+      circuitBreaker: circuit,
+      now: () => 1100,
+      createRunId: () => 'run-427',
+    }).run({
+      job: job(), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+    expect(result).toMatchObject({
+      runId: 'run-427', status: 'blocked', reason: 'trade-auction-operation-blocked',
+      failed: 1, succeeded: 0,
+    });
+    expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
+    expect(circuit.recordFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 427 }),
+      expect.objectContaining({ action: 'list', endpoint: '/auctionhouse', jobId: 'listing-run', runId: 'run-427' }),
+    );
+    expect(circuit.recordSuccess).not.toHaveBeenCalled();
+  });
+
+  it('blocks before any EA write when the trade circuit is open', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],
+    });
+    const plan = prepared([entry()]);
+    const result = await createListingTransaction({
+      tradeAdapter: adapter,
+      circuitBreaker: { availability: () => ({ allowed: false, state: { reason: 'auction-operation-blocked' } }) },
+      now: () => 1100,
+    }).run({
+      job: job(), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-circuit-open', skipped: 1 });
+    expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
   });
 });

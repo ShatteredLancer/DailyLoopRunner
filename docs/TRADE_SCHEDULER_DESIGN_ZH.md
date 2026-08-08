@@ -1,7 +1,7 @@
 # Trade Scheduler 设计与实施跟踪
 
-> 文档状态：Paused after TS2b; resume only on explicit user instruction
-> 最后更新：2026-08-07
+> 文档状态：TS2c/TS3 offline implementation complete; production automation locked by EA 427 live-validation gate
+> 最后更新：2026-08-08
 > 适用仓库：DailyLoopRunner  
 > 功能边界：定时自动买入、定时批量挂牌、交易任务调度、逐项回执与诊断
 
@@ -588,6 +588,7 @@ Enhancer Trader、Enhancer Auto Buy、FSU Bulk Auction 与 Trade Scheduler 不�
 | 429 / Too Many Requests | 立即停止当前 Trade Run，设置长冷却并通知 | 当前 Run 不恢复 |
 | 401 / Session expired | 停止并进入 `waiting-session` | 重新登录后按 Misfire Policy |
 | 403 / Permission denied | 阻断任务 | 否 |
+| 427 / Auction operation blocked（EA 未公开） | 立即停止、持久熔断全部 Trade mutation、要求人工清除 | 否 |
 | Captcha required | 停止所有自动交易并解除 armed 状态 | 否 |
 | 512 / 521 | 有限次数退避；仍失败则停止 | 有界 |
 | Lost bid / 已被购买 | 记录为竞争失败，等待后继续 | 是 |
@@ -778,7 +779,7 @@ Exit criteria: Met。Provider、schema、错误策略、Adapter 能力探测、�
 
 ### TS2 手动 Bulk Listing
 
-Status: Paused after TS2b（TS2a 只读验证通过；TS2b Club 单卡事务已通过真实挂牌验证；等待明确指令恢复）
+Status: TS2c in progress（手动 Listing UI 与自动化验证完成；保持 Club 单卡门禁，等待真实 UI 验证）
 
 Scope:
 
@@ -786,58 +787,60 @@ Scope:
 - [x] Listing Transaction 和对账核心。
 - [x] Preview model 和只读运行时入口。
 - [x] 一次性确认 token、显式确认和 Stop 核心。
-- [ ] Bulk Listing UI 的 Confirm/Stop 交互。
+- [x] 手动 Listing UI 的 Preview/Prepare/Confirm/Stop 交互。
 - [x] Club 候选过滤和 Active Transfer 排除的真实字段验证。
 - [ ] Expired/Inactive Transfer reprice 真实字段验证。
 - [x] 固定价格、market override、EA 价格步进和 duration Preview。
 - [x] Price limits、容量和逐卡事务重检。
 - [x] 可序列化逐项 Listing run receipt。
-- [ ] Listing Recap UI 和 diagnostics 导出。
+- [x] Listing Recap UI 和 diagnostics 导出。
 
-Tests: TS2b core 后 `npm run verify` 通过；119 个测试文件、763 个测试通过。Architecture audit 确认 `requestMarketData()`、`list()` 和 `requestTransferItems()` 各一个 EA Trade Adapter 调用点，`searchTransferMarket()` 和 `bid()` 均为零调用点。
+Tests: TS2c UI 后 `npm run verify` 通过；124 个测试文件、777 个测试通过。新增覆盖手动 Job 的 Club 单卡硬门禁、主面板互斥、Preview/Prepared 状态隔离、配置变更撤销确认、精确确认、Stop、失败诊断、确认 token 脱敏和每页 15 项的 Recap。Architecture audit 确认 `requestMarketData()`、`list()` 和 `requestTransferItems()` 各一个 EA Trade Adapter 调用点，`searchTransferMarket()` 和 `bid()` 均为零调用点。
 
-Live validation: TS2a 已确认 Club `inactive` 和 Transfer `active` 字段、common/rare/special 分类、Active Trade 排除和报价回退。TS2b 已对一张低价值 Club common Gold 完成独立 Prepare、人工复核、显式确认、一次挂牌、Transfer 刷新和精确回读。Expired/Inactive Transfer、Bulk UI、连续多卡 Stop/节流和容量仍需按第 17.5 节完成真实验证。
+Live validation: TS2a 已确认 Club `inactive` 和 Transfer `active` 字段、common/rare/special 分类、Active Trade 排除和报价回退。TS2b 已对一张低价值 Club common Gold 完成独立 Prepare、人工复核、显式确认、一次挂牌、Transfer 刷新和精确回读。TS2c 新 UI 尚需用一张低价值 Club 卡完成 Preview、Prepare、确认、挂牌、Recap 和 diagnostics 导出验证。Expired/Inactive Transfer、连续多卡 Stop/节流和容量仍需按第 17.5 节完成真实验证。
 
-Exit criteria: Not met。仍需真实候选字段验证、Listing Transaction、显式确认、Stop、容量处理、对账、Recap 和真实单卡挂牌。
+Exit criteria: Not met。Club 单卡 Planner/Transaction/确认/对账已通过核心真实验证，UI 自动化已完成；仍需 TS2c UI 真实单卡验证，以及后续单独评审和验证多卡节流、Stop、容量竞争与 Transfer reprice 后才能结束 TS2。
 
 ### TS3 Scheduler 和定时挂牌
 
-Status: Not started
+Status: Offline implementation complete; production execution locked
 
 Scope:
 
-- [ ] 持久化 Job Store。
-- [ ] once/daily/interval/window/manual。
-- [ ] misfire policy。
-- [ ] Operation Coordinator。
-- [ ] 跨标签页 lease 和恢复对账。
-- [ ] Trade Scheduler UI 和 History。
+- [x] 持久化 Job Store。
+- [x] once/daily/interval/window/manual。
+- [x] misfire policy。
+- [x] Operation Coordinator compatibility bridge。
+- [x] 跨标签页 lease 和过期 lease 强制恢复对账门禁。
+- [x] Trade Scheduler UI、可视化 Buy/Listing Job Editor 和 History。
+- [x] 默认 paused、自动执行锁定、导入 Job disarm。
+- [x] HTTP 427 持久 Circuit Breaker、人工 reset 和脱敏 diagnostics。
 
-Tests: Pending。
+Tests: Fake clock、IANA timezone/DST、misfire、Job Store、History 上限、双 owner lease、过期 lease、Coordinator、427、响应脱敏和响应式 UI 已覆盖；完整 `npm run verify` 结果见下方实施记录。
 
-Live validation: 调度一张低价值卡挂牌；验证页面后台恢复、未登录等待和错过任务。
+Live validation: Blocked。当前账号的 EA 原生 `/auctionhouse`、`/auctionhouse/relist` 和 `/watchlist` 返回非标准状态 `427`。生产 `liveExecutionEnabled=false` 且 Scheduler 保持 paused；不得用自动重试探测。EA 恢复后先完成 TS2c UI 单卡，再调度一张低价值卡并验证页面后台恢复、未登录等待和错过任务。
 
-Exit criteria: 重载、双标签页和被 Loop 占用时不重复执行。
+Exit criteria: Not met。离线核心和 UI 已完成；仍需真实页面证明重载、双标签页和被 Loop 占用时不重复执行，并完成一张低价值卡的定时挂牌和对账。
 
 ### TS4 手动 Auto Buy
 
-Status: Not started
+Status: Offline implementation complete; production entry and live validation intentionally blocked.
 
 Scope:
 
-- [ ] Buy Planner 和评分通道轮换。
-- [ ] FUTNext rating catalog 物化。
-- [ ] 当前响应最低 Buy Now 选择。
-- [ ] Buy Transaction 和 ambiguous reconciliation。
-- [ ] 固定 Club/重复 Transfer 路由。
-- [ ] 数量、预算、金币余额、时长和空搜索上限。
-- [ ] Buy Recap 和 diagnostics。
+- [x] Buy Planner 和评分通道轮换。
+- [x] FUTNext rating catalog 物化。
+- [x] 当前响应最低 Buy Now 选择。
+- [x] Buy Transaction 和 ambiguous reconciliation 的离线实现。
+- [x] 固定 Club/重复 Transfer 路由。
+- [x] 数量、预算、金币余额、时长和空搜索上限。
+- [x] Preview、15 项分页 Buy Recap 和 allowlisted diagnostics。
 
-Tests: Pending。
+Tests: Fake Adapter、伪 EA Observable、Planner、Transaction、Preview、Recap、diagnostics 和架构边界测试通过。覆盖精确 definition/rating/card-class/价格筛选、当前响应最低价、Club/重复 Transfer 路由、Transfer 满、Unassigned gate、Stop/预算/空搜索、427、运行中 circuit 变化、ambiguous item+金币双证据和禁止二次购买。单元测试不解除生产门禁。
 
-Live validation: 一张低价值非重复卡进入 Club；一张重复卡进入 Transfer；Transfer 满时停止。
+Live validation: Blocked by current EA status `427`. Recovery order remains: read-only Preview, one low-value non-duplicate card to Club, one duplicate to Transfer, then Transfer-full stop. EA refresh method names, repository materialization timing and coin update timing remain live assumptions.
 
-Exit criteria: 任何网络不明确场景都不会触发未经对账的第二次购买。
+Exit criteria: Offline criterion met: no ambiguous path triggers a second purchase. TS4 is not production-complete until the three live cases above reconcile with exported diagnostics.
 
 ### TS5 定时 Auto Buy
 
@@ -845,7 +848,8 @@ Status: Not started
 
 Scope:
 
-- [ ] Buy Job 接入 Scheduler。
+- [x] Buy Job 配置、Editor 和只读评分通道 Preview 接入 Scheduler UI。
+- [ ] Buy Job 定时执行器接入 Scheduler；生产入口保持不存在。
 - [ ] 429 长冷却、401 waiting-session 和 Captcha disarm。
 - [ ] 定时 Buy 运行状态和通知。
 - [ ] 页面恢复和 Misfire Policy。
@@ -1031,3 +1035,53 @@ Diagnostics: `services.Item.list()` and `requestTransferItems()` each have one a
 Remaining risk: Expired/Inactive Transfer shape, Transfer reprice, bulk pacing, Stop between real writes and capacity races are not live-validated. Keep the Club single-item and Transfer-source gates until the corresponding next-stage validation is complete.
 
 Next: Implement the Bulk Listing UI and multi-item execution behind conservative limits; do not enable Transfer reprice until an expired/inactive Transfer candidate is captured and validated.
+
+### 2026-08-07 / TS2c / Manual Listing UI and diagnostics
+
+Status: Automated implementation complete; live UI validation pending.
+
+Commit/Version: Uncommitted working tree on repository version `0.7.33`.
+
+Automated tests: `npm run verify` passed: 124 test files and 777 tests; syntax, ESLint, config/Profile validation, architecture audit, build, dist and FSU release checks also passed.
+
+Live setup: Blocked by EA status 427. After EA recovers, reload the rebuilt userscript, open `Trade` from the main panel, choose `Manual listing`, and use only one low-value Club item for the validation round.
+
+Observed result: The independent responsive dialog supports card class, rating/price rules, quote provider, market override, duration, read-only Preview, price-limit Prepare, exact confirmation, one-item execution, Stop, Recap and diagnostics export. Main-panel operations share the existing busy state. Editing or closing invalidates the prepared confirmation. Opening, Previewing and Preparing do not write to EA.
+
+Diagnostics: Export includes allowlisted runner/operation state, Job, Preview, sanitized Prepared plan, receipt and sanitized errors. Confirmation tokens and raw error responses are excluded. Recap pages contain at most 15 item receipts.
+
+Remaining risk: The UI callbacks and responsive presentation have not yet been exercised on the EA page. The runtime remains hard-limited to `Club + max 1 item`; Transfer sources, Transfer reprice, multi-item execution and Auto Buy remain unavailable. Scheduler configuration is available, but production automatic execution is locked and paused.
+
+Next: Perform one low-value Club listing through the UI and export `trade-listing-diagnostics-<timestamp>.json`. Review the receipt and UI behavior before considering a separately reviewed multi-item gate change.
+
+### 2026-08-08 / TS3 offline Scheduler, persistent circuit and Job UI
+
+Status: Offline implementation complete; live execution intentionally locked.
+
+Commit/Version: Uncommitted working tree on repository version `0.7.33`.
+
+Automated tests: `npm run verify` passed with 131 test files and 797 tests. Syntax, ESLint, config/Profile validation, architecture audit, FSU patch replay, generated userscript/dist equality and FSU release assets all passed. The focused Trade/Main Panel suite passed with 26 test files and 105 tests.
+
+Observed result: Job configuration is persisted independently from Loop/Workflow config. Pure scheduling supports manual, once, daily IANA timezone, interval and one-shot window schedules; fake-clock coverage includes DST, skip/grace-window/next-login decisions, session/operation waits and absolute advancement. The store persists bounded History and defaults to paused with `liveExecutionEnabled=false`. The responsive Trade Scheduler dialog exposes visual Buy/Listing editors, Jobs, state, History, manual Listing entry, diagnostics and explicit circuit reset. Buy Jobs remain configuration-only.
+
+Safety: EA status `427` is classified as `auction-operation-blocked`, stops the current transaction without retry, and opens a GM-storage-backed persistent circuit. Preparation and every Listing mutation check the same circuit. The circuit never enters half-open by elapsed time and blocks until explicit manual reset. Stored diagnostics retain only allowlisted operation, endpoint, status/code, Job/Run, Trade Access and capacity fields. Operation Coordinator bridges existing Runner busy state, and the cross-tab lease fails closed when an expired run has not been reconciled.
+
+Live blocker: The account currently receives `427` from EA-native auction/watchlist endpoints with Runner, FSU and Enhancer disabled. Historical TS2b HTTP 200 proves the implementation previously listed successfully but does not clear the current account/backend state. No live Listing, relist, bid, buy or high-frequency market validation may run while this persists.
+
+Next: Wait for EA-native manual Listing to recover. Then validate TS2c UI with one low-value Club card, inspect the receipt/diagnostics, and only afterward temporarily unlock a single scheduled Listing for TS3 page-resume, lease and reconciliation validation.
+
+### 2026-08-08 / TS4 offline Buy core and preview UI
+
+Status: Offline implementation complete; no production Buy entry exists.
+
+Commit/Version: Uncommitted working tree targeting repository version `0.7.34`.
+
+Automated tests: `npm run verify` passes with 136 test files and 817 tests. Syntax, ESLint, config/Profile validation, architecture audit, FSU patch replay, generated userscript/dist equality and FSU release assets also pass. The focused Trade suite covers the EA/Fake Adapter contract, exact rating/definition lane rotation, candidate sorting, transaction limits, persistent circuit checks, ambiguous reconciliation, Preview, 15-item Recap, diagnostics and Scheduler UI.
+
+Observed result: FUTNext catalog data is materialized into one exact search lane per rating and definition ID. A new search invalidates the previous EA live-item map. Candidates are revalidated and sorted by Buy Now, expiry and trade ID; at most one current-response item can reach Buy Now. Non-duplicate purchases target Club and Club duplicates target Transfer. Preview is available from Buy Job cards and public runtime diagnostics, but it performs no EA market search and always reports live execution locked.
+
+Safety: Search, Buy, refresh and move are normalized by the EA Trade Adapter and expose allowlisted snapshots only. Every search and Buy mutation rechecks the shared circuit. An ambiguous response can proceed only when the exact item materializes and the coin delta equals the requested Buy Now; refresh uncertainty, missing evidence, route uncertainty and 427 stop the run without another purchase. Automatic Buy remains absent from the Scheduler executor, `liveExecutionEnabled=false`, and Scheduler remains paused.
+
+Remaining risk: EA `requestUnassignedItems` and optional Transfer/Club/Watchlist refresh behavior, post-Buy repository timing, exact coin update timing, duplicate routing and Transfer capacity races are only fixture-validated. The current account/backend status 427 makes a real Buy probe unsafe. The global minimum retained coin balance decision remains open and is not silently defaulted.
+
+Next: Run the full repository verification. Then stop TS4/TS5 production work until EA native Listing and market endpoints recover; resume with read-only preview diagnostics before one explicitly confirmed low-value purchase.

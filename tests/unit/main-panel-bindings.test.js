@@ -20,6 +20,7 @@ const IDS = [
   'bronze-loop-reward-alert-settings',
   'bronze-loop-start',
   'bronze-loop-batch-open',
+  'bronze-loop-trade',
   'bronze-loop-recap-reopen',
   'bronze-loop-refresh',
   'bronze-loop-scan-picks',
@@ -80,7 +81,7 @@ describe('main panel bindings', () => {
   it('binds every command control and forwards the selected loop id', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
-      'selectLoop', 'selectProfile', 'setLayoutMode', 'openBuilder', 'openHelp', 'savePickOptions', 'saveSbcFodderOptions', 'saveLoopOptions', 'start', 'openBatch', 'reopenRecap',
+      'selectLoop', 'selectProfile', 'setLayoutMode', 'openBuilder', 'openHelp', 'savePickOptions', 'saveSbcFodderOptions', 'saveLoopOptions', 'start', 'openBatch', 'openTrade', 'reopenRecap',
       'refresh', 'scanPicks', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
@@ -103,6 +104,7 @@ describe('main panel bindings', () => {
       ['bronze-loop-reward-alert-settings', 'click', 'openRewardAlertSettings'],
       ['bronze-loop-start', 'click', 'start'],
       ['bronze-loop-batch-open', 'click', 'openBatch'],
+      ['bronze-loop-trade', 'click', 'openTrade'],
       ['bronze-loop-recap-reopen', 'click', 'reopenRecap'],
       ['bronze-loop-refresh', 'click', 'refresh'],
       ['bronze-loop-scan-picks', 'click', 'scanPicks'],

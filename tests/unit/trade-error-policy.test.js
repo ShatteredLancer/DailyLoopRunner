@@ -8,12 +8,34 @@ import {
 
 describe('Trade error policy', () => {
   it('classifies hard stops, bounded failures and ambiguous transport results', () => {
+    expect(classifyTradeError({ status: 427 })).toMatchObject({
+      kind: 'auction-operation-blocked',
+      action: 'stop-and-require-manual-reset',
+      persistent: true,
+      retryable: false,
+    });
     expect(classifyTradeError(new Error('HTTP 429'))).toMatchObject({ kind: 'rate-limit', action: 'stop-and-cooldown', retryable: false });
     expect(classifyTradeError({ status: 401 })).toMatchObject({ kind: 'session-expired', action: 'wait-session' });
     expect(classifyTradeError(new Error('Captcha required'))).toMatchObject({ kind: 'captcha', disarm: true });
     expect(classifyTradeError({ code: 512 })).toMatchObject({ kind: 'transient-service', retryable: true });
     expect(classifyTradeError(new Error('request timed out'))).toMatchObject({ kind: 'ambiguous-transport', ambiguous: true });
     expect(classifyTradeError(new Error('Destination full'))).toMatchObject({ kind: 'destination-full', ambiguous: false });
+  });
+
+  it('keeps an EA 427 circuit open until an explicit reset', () => {
+    const open = reduceTradeCircuit(createTradeCircuitState(), {
+      type: 'failure',
+      at: 1000,
+      classification: classifyTradeError({ status: 427 }),
+    }, { cooldownMs: 1 });
+    expect(open).toMatchObject({
+      state: 'open',
+      retryAt: null,
+      reason: 'auction-operation-blocked',
+      persistent: true,
+    });
+    expect(tradeCircuitAvailability(open, 999999)).toMatchObject({ allowed: false, probe: false });
+    expect(reduceTradeCircuit(open, { type: 'reset', at: 1000000 })).toEqual(createTradeCircuitState());
   });
 
   it('opens immediately for a hard stop and permits one probe after cooldown', () => {

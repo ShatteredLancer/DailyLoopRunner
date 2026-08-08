@@ -133,20 +133,25 @@ describe('main panel command orchestration', () => {
   it('does not start or overlap panel operations while another operation is active', async () => {
     const start = vi.fn();
     const openBatch = vi.fn();
-    const current = harness({ start, openBatch });
+    const openTrade = vi.fn();
+    const current = harness({ start, openBatch, openTrade });
     current.state.scanningPicks = true;
     expect(current.commands.start()).toBe(false);
     expect(current.commands.openBatch()).toBe(false);
+    expect(current.commands.openTrade()).toBe(false);
     await expect(current.commands.refresh()).resolves.toBe(false);
     expect(current.commands.selectProfile('default')).toBe(false);
     expect(start).not.toHaveBeenCalled();
     expect(openBatch).not.toHaveBeenCalled();
+    expect(openTrade).not.toHaveBeenCalled();
 
     current.state.scanningPicks = false;
     expect(current.commands.start()).toBe(true);
     expect(start).toHaveBeenCalledOnce();
     expect(current.commands.openBatch()).toBe(true);
     expect(openBatch).toHaveBeenCalledOnce();
+    expect(current.commands.openTrade()).toBe(true);
+    expect(openTrade).toHaveBeenCalledOnce();
   });
 
   it('saves Player Pick options without starting an SBC scan', () => {

@@ -14,6 +14,7 @@ describe('main panel view template', () => {
       'bronze-loop-start',
       'bronze-loop-stop',
       'bronze-loop-batch-open',
+      'bronze-loop-trade',
       'bronze-loop-options-toggle',
       'bronze-loop-collapse',
       'bronze-loop-help-overview',
@@ -68,6 +69,7 @@ describe('main panel view template', () => {
       'bronze-loop-reward-alert-enabled',
       'bronze-loop-reward-alert-summary',
       'bronze-loop-reward-alert-settings',
+      'bronze-loop-trade',
     ]) {
       expect(html, id).toContain(`id="${id}"`);
     }

@@ -8,6 +8,9 @@ export const BUILDER_PROFILE_KEY = 'fc-loop-runner-builder-profiles-v1';
 export const DYNAMIC_SBC_CACHE_KEY = 'fc-loop-runner-dynamic-sbc-cache-v1';
 export const FUTBIN_CARD_ID_CACHE_KEY = 'fc-loop-runner-futbin-card-id-cache-v1';
 export const TRADE_PLAYER_CATALOG_CACHE_KEY = 'fc-loop-runner-trade-player-catalog-v1';
+export const TRADE_CIRCUIT_KEY = 'fc-loop-runner-trade-circuit-v1';
+export const TRADE_JOB_STORE_KEY = 'fc-loop-runner-trade-jobs-v1';
+export const TRADE_RUN_LEASE_KEY = 'fc-loop-runner-trade-run-lease-v1';
 
 export const CFG = Object.freeze({
   sourcePackIds: [105],

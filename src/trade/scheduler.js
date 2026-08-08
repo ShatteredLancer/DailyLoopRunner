@@ -1,0 +1,146 @@
+import { createTradeRunReceipt } from './contracts.js';
+import { advanceTradeJobRuntime, evaluateTradeJob, normalizeTradeJobRuntime } from './schedule.js';
+
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+export function createTradeScheduler(options = {}) {
+  const store = options.store;
+  const lease = options.lease;
+  if (!store?.read || !store?.updateRuntime || !store?.addHistory) throw new TypeError('Trade Job Store is required');
+  if (!lease?.acquire || !lease?.release) throw new TypeError('Trade Run Lease is required');
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  const executeJob = options.executeJob;
+  const getContext = typeof options.getContext === 'function' ? options.getContext : () => ({});
+  const createRunId = typeof options.createRunId === 'function'
+    ? options.createRunId
+    : () => `trade-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let ticking = false;
+
+  function schedulerContext(snapshot, extra = {}) {
+    const circuit = options.circuitBreaker?.availability?.();
+    return {
+      ...getContext(),
+      ...extra,
+      now: Number(now()),
+      liveExecutionEnabled: snapshot.liveExecutionEnabled === true,
+      circuitAllowed: circuit ? circuit.allowed === true : true,
+      circuitReason: circuit?.state?.reason || null,
+    };
+  }
+
+  function missedReceipt(job, runtime, decision, at) {
+    return createTradeRunReceipt({
+      runId: createRunId(), jobId: job.id, jobType: job.type,
+      scheduledFor: runtime.nextRunAt, startedAt: at, finishedAt: at,
+      status: 'missed', reason: decision.reason,
+    });
+  }
+
+  async function execute(job, runtime, context) {
+    const startedAt = Number(now());
+    const runId = createRunId();
+    const acquired = lease.acquire({ runId, jobId: job.id });
+    if (!acquired.acquired) {
+      const waiting = normalizeTradeJobRuntime({
+        ...runtime, status: 'waiting-operation', reason: acquired.reason || 'lease-held', updatedAt: startedAt,
+      });
+      store.updateRuntime(job.id, waiting);
+      return { status: 'waiting-operation', jobId: job.id, runtime: waiting };
+    }
+    if (acquired.recoveryRequired) {
+      const recovery = await options.reconcileExpiredLease?.(acquired.previousLease);
+      if (recovery?.status !== 'reconciled') {
+        const blocked = normalizeTradeJobRuntime({
+          ...runtime, status: 'blocked', reason: 'expired-lease-reconciliation-required', updatedAt: Number(now()),
+        });
+        store.updateRuntime(job.id, blocked);
+        lease.release(runId);
+        return { status: 'blocked', jobId: job.id, runtime: blocked, previousLease: acquired.previousLease };
+      }
+    }
+
+    store.updateRuntime(job.id, {
+      ...runtime, status: 'running', reason: null, lastScheduledFor: runtime.nextRunAt,
+      lastStartedAt: startedAt, lastRunId: runId, updatedAt: startedAt,
+    });
+    let receipt;
+    try {
+      if (typeof executeJob !== 'function') throw new Error('Trade Scheduler executor is unavailable');
+      receipt = await executeJob({
+        job,
+        runId,
+        scheduledFor: runtime.nextRunAt,
+        startedAt,
+        context,
+        heartbeat: () => lease.heartbeat(runId),
+      });
+      receipt = createTradeRunReceipt({
+        ...receipt,
+        runId,
+        jobId: job.id,
+        jobType: job.type,
+        scheduledFor: runtime.nextRunAt,
+        startedAt,
+        finishedAt: receipt?.finishedAt ?? now(),
+      });
+    } catch (error) {
+      receipt = createTradeRunReceipt({
+        runId, jobId: job.id, jobType: job.type, scheduledFor: runtime.nextRunAt,
+        startedAt, finishedAt: now(), status: 'blocked',
+        reason: error?.message || String(error),
+      });
+    } finally {
+      lease.release(runId);
+    }
+    store.addHistory(receipt);
+    const advanced = advanceTradeJobRuntime(job, runtime, {
+      at: receipt.finishedAt,
+      scheduledFor: runtime.nextRunAt,
+      startedAt,
+      finishedAt: receipt.finishedAt,
+      runId,
+      reason: receipt.status === 'completed' ? null : receipt.reason,
+    });
+    store.updateRuntime(job.id, advanced);
+    return { status: receipt.status, jobId: job.id, receipt, runtime: advanced };
+  }
+
+  async function tick(extraContext = {}) {
+    if (ticking) return { status: 'busy' };
+    ticking = true;
+    try {
+      const snapshot = store.read();
+      if (snapshot.paused) return { status: 'paused' };
+      const context = schedulerContext(snapshot, extraContext);
+      const jobs = [...snapshot.jobs].sort((left, right) => {
+        const leftAt = snapshot.runtimes[left.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
+        const rightAt = snapshot.runtimes[right.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
+        return leftAt - rightAt || left.id.localeCompare(right.id);
+      });
+      for (const job of jobs) {
+        const runtime = snapshot.runtimes[job.id] || {};
+        const decision = evaluateTradeJob(job, runtime, context);
+        store.updateRuntime(job.id, decision.runtime);
+        if (decision.action === 'advance') {
+          const receipt = missedReceipt(job, runtime, decision, context.now);
+          store.addHistory(receipt);
+          const advanced = advanceTradeJobRuntime(job, runtime, {
+            at: context.now, scheduledFor: runtime.nextRunAt, runId: receipt.runId,
+            reason: decision.reason, countRun: false,
+          });
+          store.updateRuntime(job.id, advanced);
+          return { status: 'missed', jobId: job.id, receipt, runtime: advanced };
+        }
+        if (decision.action === 'run') return execute(job, runtime, context);
+      }
+      return { status: 'idle' };
+    } finally {
+      ticking = false;
+    }
+  }
+
+  return Object.freeze({ tick });
+}

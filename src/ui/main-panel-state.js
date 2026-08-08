@@ -147,6 +147,7 @@ export function renderMainPanelRuntimeState(options = {}) {
   const disabled = {
     'bronze-loop-start': busy,
     'bronze-loop-batch-open': busy,
+    'bronze-loop-trade': busy,
     'bronze-loop-stop': state.running !== true,
     'bronze-loop-select': state.running === true || state.scanningPicks === true || state.loadingLoops === true,
     'bronze-loop-profile-select': busy,

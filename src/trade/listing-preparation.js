@@ -6,6 +6,24 @@ export function createListingPreparation(options = {}) {
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
 
   async function prepare(input = {}, request = {}) {
+    const circuit = options.circuitBreaker?.availability?.();
+    if (circuit && circuit.allowed !== true) {
+      return {
+        mode: 'prepared',
+        preparedAt: Number(now()),
+        ready: false,
+        blockers: [{ reason: 'trade-circuit-open', detail: circuit.state?.reason || 'unknown' }],
+        priceLimitChecks: [],
+        plan: {
+          createdAt: Number(now()),
+          entries: [],
+          counts: { selected: 0, eligible: 0, rejected: 0 },
+          warnings: [],
+        },
+        confirmation: null,
+        circuit: circuit.record,
+      };
+    }
     const requestedMax = Math.max(1, Math.floor(Number(request.maxListings || input.policy?.maxListings || 1)));
     const previewInput = {
       ...input,

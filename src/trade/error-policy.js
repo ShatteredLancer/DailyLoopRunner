@@ -10,7 +10,17 @@ function finiteNumber(value, fallback = 0) {
 }
 
 function errorCode(error) {
-  const candidates = [error?.code, error?.status, error?.statusCode, error?.error?.code, error?.response?.status];
+  const candidates = [
+    error?.code,
+    error?.status,
+    error?.statusCode,
+    error?.error?.code,
+    error?.error?.status,
+    error?.error?.statusCode,
+    error?.response?.status,
+    error?.response?.statusCode,
+    error?.response?.error?.code,
+  ];
   for (const value of candidates) {
     const number = Number(value);
     if (Number.isFinite(number) && number > 0) return number;
@@ -27,6 +37,18 @@ export function classifyTradeError(error = {}) {
   const code = errorCode(error);
   const message = messageText(error);
   const text = `${String(error?.kind || '')} ${message}`.toLowerCase();
+  if (code === 427) {
+    return {
+      kind: 'auction-operation-blocked',
+      code,
+      action: 'stop-and-require-manual-reset',
+      retryable: false,
+      opensCircuit: true,
+      persistent: true,
+      disarm: true,
+      ambiguous: false,
+    };
+  }
   if (code === 429 || /too many requests|rate.?limit/.test(text)) {
     return { kind: 'rate-limit', code, action: 'stop-and-cooldown', retryable: false, opensCircuit: true, disarm: false, ambiguous: false };
   }
@@ -64,12 +86,16 @@ export function createTradeCircuitState(input = {}) {
     openedAt: Number.isFinite(Number(input.openedAt)) ? Number(input.openedAt) : null,
     retryAt: Number.isFinite(Number(input.retryAt)) ? Number(input.retryAt) : null,
     reason: input.reason ? String(input.reason) : null,
+    persistent: input.persistent === true,
   };
 }
 
 export function tradeCircuitAvailability(stateInput = {}, nowInput = Date.now()) {
   const state = createTradeCircuitState(stateInput);
   const now = finiteNumber(nowInput, Date.now());
+  if (state.state === 'open' && state.persistent) {
+    return { allowed: false, probe: false, state };
+  }
   if (state.state === 'open' && state.retryAt !== null && now >= state.retryAt) {
     return { allowed: true, probe: true, state: { ...state, state: 'half-open' } };
   }
@@ -91,12 +117,14 @@ export function reduceTradeCircuit(stateInput, event = {}, configInput = {}) {
   const threshold = Math.max(1, Math.floor(finiteNumber(config.failureThreshold, DEFAULT_CIRCUIT_CONFIG.failureThreshold)));
   if (classification.opensCircuit === true || state.state === 'half-open' || failureTimes.length >= threshold) {
     const cooldownMs = Math.max(1, finiteNumber(config.cooldownMs, DEFAULT_CIRCUIT_CONFIG.cooldownMs));
+    const persistent = classification.persistent === true;
     return {
       state: 'open',
       failureTimes,
       openedAt: now,
-      retryAt: now + cooldownMs,
+      retryAt: persistent ? null : now + cooldownMs,
       reason: classification.kind || 'failure-threshold',
+      persistent,
     };
   }
   return { ...state, state: 'closed', failureTimes };

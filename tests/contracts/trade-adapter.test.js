@@ -178,12 +178,153 @@ describe('Trade Adapter contracts', () => {
     const capability = fake.inspectCapabilities();
     const limits = await fake.inspectPriceLimits({ id: 10 }, { refresh: true });
     expect(Object.keys(fake).sort()).toEqual([
-      'calls', 'inspectCapabilities', 'inspectListingCandidates', 'inspectListingItem',
-      'inspectPriceLimits', 'listItem', 'refreshTransferItems',
+      'buyNowItem', 'calls', 'inspectCapabilities', 'inspectDefinitionOwnership',
+      'inspectListingCandidates', 'inspectListingItem', 'inspectPriceLimits', 'inspectPurchase',
+      'inspectUnassignedReadiness', 'listItem', 'refreshPurchaseState', 'refreshTransferItems',
+      'routePurchasedItem', 'searchMarket',
     ]);
     expect(capability).toMatchObject({ runtimeReady: true, canTrade: true });
     expect(limits).toMatchObject({ status: 'loaded', after: { minimum: 300, maximum: 10000 } });
     expect(JSON.parse(JSON.stringify({ capability, limits }))).toEqual({ capability, limits });
+  });
+
+  it('keeps Fake market search, Buy Now and routing serializable', async () => {
+    const fake = createFakeTradeAdapter({
+      coins: 5000,
+      transferCapacity: { used: 10, max: 100 },
+      marketItems: [{
+        id: 70, definitionId: 8401, type: 'player', rating: 84, tier: 'gold', rare: true,
+        auction: { present: true, state: 'active', tradeId: 700, buyNowPrice: 900, expires: 120 },
+      }],
+    });
+    const search = await fake.searchMarket({ definitionId: 8401, maxBuyNow: 1000, page: 1 });
+    expect(search).toMatchObject({ status: 'completed', candidates: [{ item: { id: 70, definitionId: 8401, pile: 'market' }, auction: { tradeId: 700, buyNowPrice: 900 } }] });
+    const bought = await fake.buyNowItem({ id: 70, definitionId: 8401, tradeId: 700 }, 900);
+    expect(bought).toMatchObject({ status: 'accepted', tradeId: 700, price: 900 });
+    expect(fake.inspectCapabilities().coins).toBe(4100);
+    expect(fake.inspectPurchase({ id: 70, definitionId: 8401, price: 900 })).toMatchObject({ status: 'loaded', candidate: { item: { pile: 'unassigned' } } });
+    await expect(fake.routePurchasedItem({ id: 70 }, 'club')).resolves.toMatchObject({ status: 'completed', item: { pile: 'club' } });
+    expect(JSON.parse(JSON.stringify({ search, bought }))).toEqual({ search, bought });
+  });
+
+  it('normalizes exact EA market search, Buy Now reconciliation and routing without leaking live items', async () => {
+    const marketItem = {
+      id: 70,
+      definitionId: 8401,
+      type: 'player',
+      rating: 84,
+      rareflag: 1,
+      purchasePrice: 900,
+      privateMarketToken: 'must-not-leak',
+      _auction: {
+        tradeId: 700,
+        buyNowPrice: 900,
+        expires: 120,
+        isActiveTrade: () => true,
+        privateAuctionToken: 'must-not-leak',
+      },
+    };
+    const runtime = eaRuntime({ id: 10, definitionId: 20 });
+    const club = [];
+    const unassigned = [];
+    let cleared = 0;
+    runtime.SearchType = { PLAYER: 'player' };
+    runtime.SearchCategory = { ANY: 'any' };
+    runtime.ItemPile = { TRANSFER: 'transfer', UNASSIGNED: 'unassigned', CLUB: 'club' };
+    runtime.repositories.Item.club = { items: { _collection: club } };
+    runtime.repositories.Item.getUnassignedItems = () => unassigned;
+    runtime.services.Item.clearTransferMarketCache = () => { cleared += 1; };
+    runtime.services.Item.searchTransferMarket = (criteria, page) => ({
+      observe(context, callback) {
+        expect(criteria).toMatchObject({ defId: [8401], type: 'player', category: 'any', maxBuy: 1000 });
+        expect(page).toBe(1);
+        callback({ unobserve() {} }, { success: true, status: 200, data: { items: [marketItem] }, privateResponse: 'must-not-leak' });
+      },
+    });
+    runtime.services.Item.bid = (target, price) => ({
+      observe(context, callback) {
+        expect(target).toBe(marketItem);
+        expect(price).toBe(900);
+        unassigned.push(target);
+        callback({ unobserve() {} }, { success: true, status: 200, privateBid: 'must-not-leak' });
+      },
+    });
+    runtime.services.Item.requestUnassignedItems = () => ({
+      observe(context, callback) {
+        callback({ unobserve() {} }, { success: true, status: 200, privatePile: 'must-not-leak' });
+      },
+    });
+    runtime.services.Item.move = (target, pile) => ({
+      observe(context, callback) {
+        expect(target).toBe(marketItem);
+        expect(pile).toBe('club');
+        unassigned.splice(unassigned.indexOf(target), 1);
+        club.push(target);
+        callback({ unobserve() {} }, { success: true, status: 200, privateMove: 'must-not-leak' });
+      },
+    });
+
+    const adapter = createEaTradeAdapter(runtime);
+    expect(adapter.inspectUnassignedReadiness()).toEqual({ ready: true, count: 0, reason: null });
+    const search = await adapter.searchMarket({ definitionId: 8401, maxBuyNow: 1000, page: 1 });
+    expect(cleared).toBe(1);
+    expect(search).toMatchObject({
+      status: 'completed',
+      request: { definitionId: 8401, maxBuyNow: 1000, page: 1 },
+      candidates: [{
+        item: { id: 70, definitionId: 8401, pile: 'market' },
+        rating: 84,
+        auction: { state: 'active', tradeId: 700, buyNowPrice: 900 },
+      }],
+    });
+    const bought = await adapter.buyNowItem({ id: 70, definitionId: 8401, tradeId: 700 }, 900);
+    expect(bought).toMatchObject({ status: 'accepted', tradeId: 700, price: 900 });
+    await expect(adapter.refreshPurchaseState()).resolves.toMatchObject({ status: 'completed' });
+    expect(adapter.inspectPurchase({ id: 70 })).toMatchObject({
+      status: 'loaded', candidate: { item: { id: 70, definitionId: 8401, pile: 'unassigned' } }, purchasePrice: 900,
+    });
+    expect(adapter.inspectDefinitionOwnership(8401)).toEqual({ definitionId: 8401, club: 0, transfer: 0, unassigned: 1, storage: 0 });
+    expect(adapter.inspectUnassignedReadiness()).toEqual({ ready: false, count: 1, reason: 'unassigned-not-empty' });
+    await expect(adapter.routePurchasedItem({ id: 70, definitionId: 8401, tradeId: 700 }, 'club'))
+      .resolves.toMatchObject({ status: 'completed', item: { pile: 'club' }, destination: 'club' });
+    expect(adapter.inspectPurchase({ id: 70, pile: 'club' })).toMatchObject({ status: 'loaded', candidate: { item: { pile: 'club' } } });
+    expect(adapter.inspectUnassignedReadiness()).toEqual({ ready: true, count: 0, reason: null });
+
+    const serialized = JSON.stringify({ search, bought });
+    expect(serialized).not.toContain('must-not-leak');
+    expect(JSON.parse(serialized)).toEqual({ search, bought });
+  });
+
+  it('fails closed when an EA Buy Now reference was not returned by the exact adapter search', async () => {
+    const adapter = createEaTradeAdapter(eaRuntime({ id: 10, definitionId: 20 }));
+    await expect(adapter.buyNowItem({ id: 70, definitionId: 8401, tradeId: 700 }, 900)).resolves.toEqual({
+      status: 'not-found', item: null, tradeId: 700, price: 900, response: null, error: null,
+    });
+  });
+
+  it('rejects a mismatched definition and invalidates live items after the next market response', async () => {
+    const first = {
+      id: 70, definitionId: 8401, type: 'player', rating: 84, rareflag: 1,
+      _auction: { tradeId: 700, buyNowPrice: 900, isActiveTrade: () => true },
+    };
+    const second = {
+      id: 71, definitionId: 8402, type: 'player', rating: 84, rareflag: 1,
+      _auction: { tradeId: 701, buyNowPrice: 950, isActiveTrade: () => true },
+    };
+    const runtime = eaRuntime({ id: 10, definitionId: 20 });
+    runtime.services.Item.clearTransferMarketCache = () => {};
+    runtime.services.Item.searchTransferMarket = (criteria) => ({
+      observe(context, callback) {
+        callback({ unobserve() {} }, { success: true, data: { items: criteria.defId[0] === 8401 ? [first] : [second] } });
+      },
+    });
+    const adapter = createEaTradeAdapter(runtime);
+    await adapter.searchMarket({ definitionId: 8401, maxBuyNow: 1000 });
+    await expect(adapter.buyNowItem({ id: 70, definitionId: 9999, tradeId: 700 }, 900))
+      .resolves.toMatchObject({ status: 'mismatch', error: { kind: 'definition-mismatch' } });
+    await adapter.searchMarket({ definitionId: 8402, maxBuyNow: 1000 });
+    await expect(adapter.buyNowItem({ id: 70, definitionId: 8401, tradeId: 700 }, 900))
+      .resolves.toMatchObject({ status: 'not-found' });
   });
 
   it('normalizes the EA list observable without exposing the live item', async () => {
@@ -208,6 +349,30 @@ describe('Trade Adapter contracts', () => {
       error: null,
     });
     expect(JSON.stringify(result)).not.toContain('privateItem');
+  });
+
+  it('preserves a top-level EA 427 status when the nested error has no code', async () => {
+    const item = { id: 10, definitionId: 20 };
+    const runtime = eaRuntime(item);
+    runtime.services.Item.list = () => ({
+      observe(context, callback) {
+        callback({ unobserve() {} }, {
+          success: false,
+          status: 427,
+          error: { message: 'Auction operation blocked', privateToken: 'secret' },
+        });
+      },
+    });
+    const result = await createEaTradeAdapter(runtime).listItem(
+      { id: 10, definitionId: 20, pile: 'transfer' },
+      { startPrice: 700, buyNow: 750, durationSeconds: 3600 },
+    );
+    expect(result).toMatchObject({
+      status: 'rejected',
+      response: { success: false, status: 427, code: null, message: 'Auction operation blocked' },
+      error: { kind: 'auction-operation-blocked', code: 427, action: 'stop-and-require-manual-reset' },
+    });
+    expect(JSON.stringify(result)).not.toContain('secret');
   });
 
   it('reports missing runtime capabilities without throwing', () => {

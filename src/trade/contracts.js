@@ -47,6 +47,15 @@ function pushPositiveNumber(value, path, errors) {
   if (!Number.isFinite(Number(value)) || Number(value) <= 0) errors.push(`${path} must be a positive number`);
 }
 
+function validTimeZone(value) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: String(value || '') }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function validateSchedule(schedule, path, errors) {
   if (!isPlainObject(schedule)) {
     errors.push(`${path} must be an object`);
@@ -62,6 +71,9 @@ function validateSchedule(schedule, path, errors) {
       errors.push(`${path}.time must use HH:mm`);
     }
     pushRequiredString(schedule.timezone, `${path}.timezone`, errors);
+    if (typeof schedule.timezone === 'string' && schedule.timezone.trim() && !validTimeZone(schedule.timezone)) {
+      errors.push(`${path}.timezone must be a valid IANA timezone`);
+    }
   }
   if (schedule.type === 'interval') pushPositiveNumber(schedule.everyMinutes, `${path}.everyMinutes`, errors);
   if (schedule.type === 'window') {

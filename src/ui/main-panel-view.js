@@ -192,6 +192,7 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] .bronze-loop-loop-row,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-start,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-batch-open,
+  #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-trade,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-recap-reopen,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-scan-progress { display: none !important; }
   #bronze-loop-panel[data-layout="mobile"].is-running #bronze-loop-run-summary { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; min-width: 0; }
@@ -244,6 +245,7 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
         <button id="bronze-loop-start">Start</button>
         <button id="bronze-loop-stop" disabled>Stop</button>
         <button id="bronze-loop-batch-open" title="Scan My Packs and open a saved batch">Batch Open</button>
+        <button id="bronze-loop-trade" title="Trade Scheduler and manual listings">Trade</button>
         <button id="bronze-loop-recap-reopen" style="display:none" title="View last Player Pick recap">View recap</button>
       </div>
       <div id="bronze-loop-scan-progress" role="status" aria-live="polite" data-mode="indeterminate">

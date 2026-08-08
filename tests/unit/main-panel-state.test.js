@@ -159,7 +159,7 @@ describe('main panel state rendering', () => {
 
   it('applies the complete runtime disabled-state matrix', () => {
     const ids = [
-      'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-select',
+      'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-trade', 'bronze-loop-select',
       'bronze-loop-profile-select', 'bronze-loop-open-builder',
       'bronze-loop-refresh', 'bronze-loop-scan-mode', 'bronze-loop-scan-picks',
       'bronze-loop-open-rewards', 'bronze-loop-low-rated-gold-max', 'bronze-loop-rating-sbc-max-card', 'bronze-loop-pick-auto-below-90',

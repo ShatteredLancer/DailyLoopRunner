@@ -57,6 +57,11 @@ export function createMainPanelCommands(options = {}) {
       options.openBatch?.();
       return true;
     },
+    openTrade() {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;
+      options.openTrade?.();
+      return true;
+    },
     reopenRecap: options.reopenRecap,
     async refresh() {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops) return false;

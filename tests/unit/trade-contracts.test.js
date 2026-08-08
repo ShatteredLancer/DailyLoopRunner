@@ -93,6 +93,14 @@ describe('Trade contracts', () => {
         ],
       },
     }, { now: 1 })).toThrow(/overlaps another rating rule at 80/);
+
+    expect(() => normalizeTradeJob({
+      id: 'bad-timezone',
+      name: 'Bad timezone',
+      type: 'listing',
+      schedule: { type: 'daily', time: '09:30', timezone: 'Not/A_Zone' },
+      policy: { cardClass: 'common-gold', ratingRules: [{ min: 75, max: 82, buyNow: 700 }] },
+    }, { now: 1 })).toThrow(/timezone must be a valid IANA timezone/);
   });
 
   it('creates a serializable run receipt without retaining input objects', () => {

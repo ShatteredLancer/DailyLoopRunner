@@ -81,8 +81,8 @@ for (const [name, regex] of [
 const tradeAdapter = await readFile(path.join(root, 'src', 'adapters', 'ea', 'trade.js'), 'utf8');
 for (const [name, regex, expected] of [
   ['Trade Adapter requestMarketData', /\bservice\.requestMarketData\s*\(/g, 1],
-  ['Trade Adapter searchTransferMarket', /\bservice\.searchTransferMarket\s*\(/g, 0],
-  ['Trade Adapter bid', /\bservice\.bid\s*\(/g, 0],
+  ['Trade Adapter searchTransferMarket', /\bservice\.searchTransferMarket\s*\(/g, 1],
+  ['Trade Adapter bid', /\bservice\.bid\s*\(/g, 1],
   ['Trade Adapter list', /\bservice\.list\s*\(/g, 1],
   ['Trade Adapter requestTransferItems', /\bservice\.requestTransferItems\s*\(/g, 1],
 ]) {

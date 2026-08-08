@@ -38,7 +38,10 @@ import {
   PICK_OPTIONS_KEY,
   REWARD_ALERT_SETTINGS_KEY,
   SBC_FODDER_OPTIONS_KEY,
+  TRADE_CIRCUIT_KEY,
+  TRADE_JOB_STORE_KEY,
   TRADE_PLAYER_CATALOG_CACHE_KEY,
+  TRADE_RUN_LEASE_KEY,
 } from './config/runtime.js';
 import { LOOP_DEFS } from './config/loops.js';
 import {
@@ -172,6 +175,13 @@ import { createPriceQuoteProvider } from './trade/price-quotes.js';
 import { createListingPreparation } from './trade/listing-preparation.js';
 import { createListingPreview } from './trade/listing-preview.js';
 import { createListingTransaction } from './trade/listing-transaction.js';
+import { createTradeListingDiagnostics } from './trade/listing-diagnostics.js';
+import { createBuyPreview } from './trade/buy-preview.js';
+import { createTradeBuyDiagnostics } from './trade/buy-diagnostics.js';
+import { createTradeCircuitBreaker } from './trade/circuit-breaker.js';
+import { createTradeJobStore } from './trade/job-store.js';
+import { createTradeRunLease } from './trade/run-lease.js';
+import { createOperationCoordinator } from './trade/operation-coordinator.js';
 import {
   createPackHighlightModel,
   formatPackHighlightNotification,
@@ -266,6 +276,8 @@ import { showRewardAlertSettings } from './ui/reward-alert-settings.js';
 import { showBatchOpenDialog } from './ui/batch-open-dialog.js';
 import { showBatchOpenRecap } from './ui/batch-open-recap.js';
 import { showLoopRecap } from './ui/loop-recap.js';
+import { showTradeListingDialog } from './ui/trade-listing-dialog.js';
+import { showTradeSchedulerDialog } from './ui/trade-scheduler-dialog.js';
 
 const RUNNER_VERSION = packageInfo.version;
 
@@ -304,6 +316,20 @@ const RUNNER_VERSION = packageInfo.version;
     requestText: adapters.http.getText,
     provider: 'auto',
   });
+  const tradeCircuitBreaker = createTradeCircuitBreaker({
+    storage: adapters.userscriptStorage,
+    key: TRADE_CIRCUIT_KEY,
+  });
+  const tradeJobStore = createTradeJobStore({
+    storage: adapters.userscriptStorage,
+    key: TRADE_JOB_STORE_KEY,
+  });
+  const tradeTabOwnerId = `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const tradeRunLease = createTradeRunLease({
+    storage: adapters.userscriptStorage,
+    key: TRADE_RUN_LEASE_KEY,
+    ownerId: tradeTabOwnerId,
+  });
   const tradeListingPreview = createListingPreview({
     getTradeAdapter: eaTradeAdapter,
     priceQuoteProvider: tradePriceQuoteProvider,
@@ -311,6 +337,11 @@ const RUNNER_VERSION = packageInfo.version;
   const tradeListingPreparation = createListingPreparation({
     getTradeAdapter: eaTradeAdapter,
     listingPreview: tradeListingPreview,
+    circuitBreaker: tradeCircuitBreaker,
+  });
+  const tradeBuyPreview = createBuyPreview({
+    getTradeAdapter: eaTradeAdapter,
+    playerCatalogProvider: tradePlayerCatalogProvider,
   });
 
 
@@ -346,6 +377,8 @@ const state = {
     lastBatchRecap: null,
     lastLoopRecap: null,
     preparedTradeListing: null,
+    lastTradeListingReceipt: null,
+    lastTradeBuyPreview: null,
     tradeListingRunning: false,
     lastRecapType: null,
     loopRecapSession: null,
@@ -357,6 +390,13 @@ const state = {
     sbcLoadLogKeys: new Set(),
     rewardAlertSettings: normalizeRewardAlertSettings(),
   };
+  const tradeOperationCoordinator = createOperationCoordinator({
+    externalBusy: () => ({
+      busy: state.running || state.refreshing || state.scanningPicks || state.loadingLoops,
+      type: state.tradeListingRunning ? 'trade-listing' : state.running ? 'loop-or-batch' : null,
+      reason: 'runner-operation-active',
+    }),
+  });
 
   function destroyRunner() {
     state.stopping = true;
@@ -371,6 +411,8 @@ const state = {
     document.querySelector('#bronze-loop-batch-open-modal')?.remove();
     document.querySelector('#bronze-loop-batch-recap-modal')?.remove();
     document.querySelector('#bronze-loop-loop-recap-modal')?.remove();
+    document.querySelector('#bronze-loop-trade-listing-modal')?.remove();
+    document.querySelector('#bronze-loop-trade-scheduler-modal')?.remove();
     document.querySelector('#bronze-loop-reward-highlight-stack')?.remove();
     document.querySelector('#bronze-loop-style')?.remove();
   }
@@ -394,9 +436,18 @@ const state = {
     inspectTradePriceLimits: (ref = {}, options = {}) => eaTradeAdapter().inspectPriceLimits(ref, {
       refresh: options.refresh === true,
     }),
+    inspectTradeCircuit: () => tradeCircuitBreaker.snapshot(),
+    resetTradeCircuit: (reason = 'manual-console-reset') => tradeCircuitBreaker.reset(reason),
+    getTradeSchedulerState: () => tradeJobStore.read(),
+    saveTradeJob: (job, options = {}) => tradeJobStore.upsert(job, options),
+    deleteTradeJob: (jobId) => tradeJobStore.remove(jobId),
+    pauseTradeScheduler: () => tradeJobStore.setPaused(true),
+    inspectOperationCoordinator: () => tradeOperationCoordinator.inspect(),
     previewTradeListings: (input = {}, options = {}) => tradeListingPreview.preview(input, options),
+    previewTradeBuys: previewTradeBuyJob,
     prepareTradeListing,
     executePreparedTradeListing,
+    cancelPreparedTradeListing,
     stopTradeListing,
     loadTradePlayerCatalog: (options = {}) => tradePlayerCatalogProvider.load(options),
     clearTradePlayerCatalogCache: () => tradePlayerCatalogProvider.clear(),
@@ -430,6 +481,9 @@ const state = {
     }
     const prepared = state.preparedTradeListing;
     if (!prepared) throw new Error('No prepared Trade listing is available');
+    const operationId = `trade-listing-${Date.now()}`;
+    const operation = tradeOperationCoordinator.acquire({ id: operationId, type: 'trade-listing', ownerId: tradeTabOwnerId });
+    if (!operation.acquired) throw new Error(`Trade listing is blocked by ${operation.reason}`);
     state.preparedTradeListing = null;
     state.tradeListingRunning = true;
     state.running = true;
@@ -437,26 +491,199 @@ const state = {
     try {
       const transaction = createListingTransaction({
         tradeAdapter: eaTradeAdapter(),
+        circuitBreaker: tradeCircuitBreaker,
         sleep,
       });
-      return await transaction.run({
+      const receipt = await transaction.run({
         job: prepared.job,
         prepared,
         confirmationToken: input.confirmationToken,
         confirmationText: input.confirmationText,
         shouldStop: () => state.stopping,
       });
+      state.lastTradeListingReceipt = receipt;
+      tradeJobStore.addHistory(receipt);
+      return receipt;
     } finally {
       state.tradeListingRunning = false;
       state.running = false;
       state.stopping = false;
+      tradeOperationCoordinator.release(operationId);
     }
+  }
+
+  function cancelPreparedTradeListing() {
+    const cancelled = state.preparedTradeListing !== null;
+    state.preparedTradeListing = null;
+    return cancelled;
   }
 
   function stopTradeListing() {
     if (!state.tradeListingRunning) return false;
     state.stopping = true;
     return true;
+  }
+
+  function tradeDiagnosticsFilename(timestamp = Date.now()) {
+    const value = new Date(Number(timestamp) || Date.now()).toISOString().replace(/[:.]/g, '-');
+    return `trade-listing-diagnostics-${value}.json`;
+  }
+
+  function listingDialogDraft(job = null) {
+    const policy = job?.policy || job || {};
+    return {
+      cardClass: policy.cardClass,
+      ratingRules: policy.ratingRules,
+      marketOverride: policy.marketOverride,
+      startPricePolicy: policy.startPricePolicy,
+      durationSeconds: policy.durationSeconds,
+      provider: 'auto',
+      platform: 'pc',
+    };
+  }
+
+  function openTradeListingDialogModal(job = null) {
+    cancelPreparedTradeListing();
+    return showTradeListingDialog({
+      dom: adapters.dom,
+      now: Date.now,
+      draft: listingDialogDraft(job),
+      onPreview: async (job, request) => {
+        log('Trade Listings: building read-only Club preview');
+        const preview = await tradeListingPreview.preview(job, request);
+        log(`Trade Listings: preview selected ${Number(preview?.plan?.counts?.selected || 0)} of ${Number(preview?.plan?.counts?.eligible || 0)} eligible item(s)`);
+        return preview;
+      },
+      onPrepare: async (job, request) => {
+        log('Trade Listings: refreshing EA price limits and preparing one Club item');
+        const prepared = await prepareTradeListing(job, request);
+        log(prepared.ready
+          ? `Trade Listings: one item prepared; confirmation ${prepared.confirmation.requiredText} is required`
+          : `Trade Listings: preparation blocked (${prepared.blockers?.map((entry) => entry.reason).join(', ') || 'unknown'})`);
+        return prepared;
+      },
+      onCancelPrepared: cancelPreparedTradeListing,
+      onExecute: async (confirmation) => {
+        log('Trade Listings: confirmed single-item listing started');
+        const execution = executePreparedTradeListing(confirmation);
+        setPanelState();
+        try {
+          const receipt = await execution;
+          log(`Trade Listings: ${receipt.status}${receipt.reason ? ` (${receipt.reason})` : ''}; listed ${receipt.succeeded}/${receipt.requested}`);
+          return receipt;
+        } catch (error) {
+          log(`Trade Listings failed: ${error?.message || error}`);
+          throw error;
+        } finally {
+          setPanelState();
+        }
+      },
+      onStop: () => {
+        const accepted = stopTradeListing();
+        if (accepted) {
+          log('Trade Listings: Stop requested; waiting for the current transaction safe point');
+          setPanelState();
+        }
+        return accepted;
+      },
+      onDownloadDiagnostics: (snapshot = {}) => {
+        const capturedAt = Date.now();
+        const diagnostics = createTradeListingDiagnostics({
+          ...snapshot,
+          capturedAt,
+          runnerVersion: RUNNER_VERSION,
+          userAgent: navigator?.userAgent || '',
+          operation: {
+            running: state.running,
+            stopping: state.stopping,
+            tradeListingRunning: state.tradeListingRunning,
+          },
+          circuit: tradeCircuitBreaker.snapshot(),
+        });
+        adapters.userEffects.downloadText(
+          JSON.stringify(diagnostics, null, 2),
+          tradeDiagnosticsFilename(capturedAt),
+        );
+        log('Trade Listings: diagnostics saved');
+      },
+    });
+  }
+
+  function tradeSchedulerDiagnostics() {
+    const operation = {
+      running: state.running,
+      stopping: state.stopping,
+      refreshing: state.refreshing,
+      scanningDynamicSbcs: state.scanningPicks,
+      loadingLoops: state.loadingLoops,
+      tradeListingRunning: state.tradeListingRunning,
+      tradeBuyRunning: false,
+    };
+    return {
+      schemaVersion: 1,
+      capturedAt: Date.now(),
+      runner: { version: RUNNER_VERSION, userAgent: navigator?.userAgent || '' },
+      scheduler: tradeJobStore.read(),
+      circuit: tradeCircuitBreaker.snapshot(),
+      lease: tradeRunLease.inspect(),
+      coordinator: tradeOperationCoordinator.inspect(),
+      capabilities: eaTradeAdapter().inspectCapabilities(),
+      operation,
+      buy: createTradeBuyDiagnostics({
+        capturedAt: Date.now(),
+        runnerVersion: RUNNER_VERSION,
+        userAgent: navigator?.userAgent || '',
+        operation,
+        circuit: tradeCircuitBreaker.snapshot(),
+        job: state.lastTradeBuyPreview?.job || null,
+        preview: state.lastTradeBuyPreview,
+      }),
+    };
+  }
+
+  async function previewTradeBuyJob(job = {}, request = {}) {
+    log(`Trade Buy: building preview-only search lanes for ${job.name || job.id || 'Buy Job'}`);
+    const preview = await tradeBuyPreview.preview(job, request);
+    state.lastTradeBuyPreview = preview;
+    log(preview.plan?.ready
+      ? `Trade Buy: preview ready with ${preview.summary.ratings} rating lane(s) and ${preview.summary.definitions} player definition(s); live execution remains locked`
+      : `Trade Buy: preview blocked; missing rating lane(s) ${preview.plan?.missingRatings?.join(', ') || 'unknown'}`);
+    return preview;
+  }
+
+  function openTradeSchedulerDialogModal() {
+    return showTradeSchedulerDialog({
+      dom: adapters.dom,
+      now: Date.now,
+      getSnapshot: () => tradeJobStore.read(),
+      getCircuit: () => tradeCircuitBreaker.snapshot(),
+      onSaveJob: (job) => {
+        tradeJobStore.upsert(job);
+        log(`Trade Scheduler: saved ${job.type} Job ${job.name}${job.armed ? ' (armed)' : ''}`);
+      },
+      onDeleteJob: (jobId) => {
+        tradeJobStore.remove(jobId);
+        log(`Trade Scheduler: deleted Job ${jobId}`);
+      },
+      onSetPaused: (paused) => {
+        tradeJobStore.setPaused(paused);
+        log(`Trade Scheduler: ${paused ? 'paused' : 'resumed'}`);
+      },
+      onOpenManualListing: (job = null) => openTradeListingDialogModal(job),
+      onPreviewBuyJob: (job) => previewTradeBuyJob(job),
+      onResetCircuit: () => {
+        tradeCircuitBreaker.reset('manual-ui-reset');
+        log('Trade Scheduler: persistent trade block reset manually');
+      },
+      onDownloadDiagnostics: () => {
+        const capturedAt = Date.now();
+        adapters.userEffects.downloadText(
+          JSON.stringify(tradeSchedulerDiagnostics(), null, 2),
+          `trade-scheduler-diagnostics-${new Date(capturedAt).toISOString().replace(/[:.]/g, '-')}.json`,
+        );
+        log('Trade Scheduler: diagnostics saved');
+      },
+    });
   }
 
   function log(msg) {
@@ -10185,6 +10412,7 @@ function updateLoopControls() {
       openRewardAlertSettings: openRewardAlertSettingsModal,
       start: startLoop,
       openBatch: openBatchOpenDialogModal,
+      openTrade: openTradeSchedulerDialogModal,
       reopenRecap: reopenLastRecap,
       refreshInventoryCaches,
       scanDynamicSbcs: scanDynamicSbcsWithProgress,
