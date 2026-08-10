@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         【FSU】EAFC FUT WEB 增强器
 // @namespace    https://futcd.com/
-// @version      26.09.5
+// @version      26.09.6
 // @description  Local maintained FSU 26.09 build with validated Club cache and scoped payload optimizations.
 // @author       Futcd_kcka
 // @contributor  ShatteredLancer
@@ -12548,9 +12548,36 @@
 
             /** 25.18 珍贵球员提示 **/
             function valuablePlayerTips(left,controller,e) {
-                
-                const preciousCount = left.getView().slotViews.slice(0, 11).reduce((acc, view) => {
-                    return acc + (view?.getItemView()?._fsu?.priceItem.classList.contains('precious') ? 1 : 0);
+                const preciousCount = Array.from(left?.getView?.()?.slotViews || []).slice(0, 11).reduce((acc, view, index) => {
+                    const itemView = view?.getItemView?.();
+                    const priceItem = itemView?._fsu?.priceItem;
+                    const hasPreciousMarker = typeof priceItem?.classList?.contains === "function";
+
+                    if (!hasPreciousMarker) {
+                        let item = itemView?._item || itemView?.item || null;
+                        if (item) {
+                            let player = null;
+                            try {
+                                player = events.summarizeFillDiagnosticItem?.(item) || null;
+                            } catch (error) {}
+                            events.emitClubDiagnostic?.(
+                                "warn",
+                                "valuable-player-price-missing",
+                                `valuable player check skipped missing price marker at slot ${index + 1}`,
+                                {
+                                    slotIndex: index,
+                                    player,
+                                    hasItemView: true,
+                                    hasFsuState: Boolean(itemView?._fsu),
+                                    hasPriceItem: Boolean(priceItem),
+                                    hasClassList: Boolean(priceItem?.classList)
+                                }
+                            );
+                        }
+                        return acc;
+                    }
+
+                    return acc + (priceItem.classList.contains("precious") ? 1 : 0);
                 }, 0);
 
                 if(preciousCount > 0){

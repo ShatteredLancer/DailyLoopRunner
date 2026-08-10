@@ -1,12 +1,12 @@
 diff --git a/FSU.user.js b/FSU.user.js
-index dd554ab..ba08e02 100644
+index dd554ab..086e6c3 100644
 --- a/FSU.user.js
 +++ b/FSU.user.js
 @@ -3,5 +3,8 @@
  // @namespace    https://futcd.com/
 -// @version      26.09
 -// @description  EAFCFUT模式SBC任务便捷操作增强器👍👍👍，模拟开包、额外信息展示、近期低价自动查询、一键挂出球员、跳转FUTBIN、快捷搜索、拍卖行优化等等...👍👍👍
-+// @version      26.09.5
++// @version      26.09.6
 +// @description  Local maintained FSU 26.09 build with validated Club cache and scoped payload optimizations.
  // @author       Futcd_kcka
 +// @contributor  ShatteredLancer
@@ -2531,11 +2531,47 @@ index dd554ab..ba08e02 100644
          events.fastSBC = async (id,cId) => {
 +            if(!events.requireClubReady("Fast SBC")) return false;
              let controller = events.getCurrent(),
-@@ -11813,2 +14133,3 @@
+@@ -10230,5 +12550,32 @@
+             function valuablePlayerTips(left,controller,e) {
+-                
+-                const preciousCount = left.getView().slotViews.slice(0, 11).reduce((acc, view) => {
+-                    return acc + (view?.getItemView()?._fsu?.priceItem.classList.contains('precious') ? 1 : 0);
++                const preciousCount = Array.from(left?.getView?.()?.slotViews || []).slice(0, 11).reduce((acc, view, index) => {
++                    const itemView = view?.getItemView?.();
++                    const priceItem = itemView?._fsu?.priceItem;
++                    const hasPreciousMarker = typeof priceItem?.classList?.contains === "function";
++
++                    if (!hasPreciousMarker) {
++                        let item = itemView?._item || itemView?.item || null;
++                        if (item) {
++                            let player = null;
++                            try {
++                                player = events.summarizeFillDiagnosticItem?.(item) || null;
++                            } catch (error) {}
++                            events.emitClubDiagnostic?.(
++                                "warn",
++                                "valuable-player-price-missing",
++                                `valuable player check skipped missing price marker at slot ${index + 1}`,
++                                {
++                                    slotIndex: index,
++                                    player,
++                                    hasItemView: true,
++                                    hasFsuState: Boolean(itemView?._fsu),
++                                    hasPriceItem: Boolean(priceItem),
++                                    hasClassList: Boolean(priceItem?.classList)
++                                }
++                            );
++                        }
++                        return acc;
++                    }
++
++                    return acc + (priceItem.classList.contains("precious") ? 1 : 0);
+                 }, 0);
+@@ -11813,2 +14160,3 @@
          UTSBCService.prototype.submitChallenge = function(o, a, i, n) {
 +            events.markClubCacheDirty("SBC submission started");
              let r = originalSubmitChallenge.apply(this, arguments);
-@@ -14402,2 +16723,34 @@
+@@ -14402,2 +16750,34 @@
                              (e) => {
 +                                const unassigned = Array.from(repositories.Item.getUnassignedItems() || []);
 +                                events.emitClubDiagnostic?.("log", "one-click-fill-start", `one-click fill started with ${unassigned.length} Unassigned item(s)`, {
@@ -2570,14 +2606,14 @@ index dd554ab..ba08e02 100644
 +                                    return false;
 +                                }
                                  let playerList = [], removeIds = [];
-@@ -14408,3 +16761,5 @@
+@@ -14408,3 +16788,5 @@
                                      getCriteria = events.ignorePlayerToCriteria(getCriteria);
 -                                    playerList = events.getItemBy(2,getCriteria,repositories.Item.getUnassignedItems()).slice(0,criteriaNumber);
 +                                    const candidates = events.getItemBy(2,getCriteria,unassigned);
 +                                    playerList = candidates.slice(0,criteriaNumber);
 +                                    events.emitClubDiagnostic?.("log", "one-click-fill-criteria", `one-click fill broad criteria selected ${playerList.length}/${criteriaNumber}`, events.collectOneFillDiagnostic?.(getCriteria, candidates, playerList, unassigned));
                                  }else{
-@@ -14417,6 +16772,6 @@
+@@ -14417,6 +16799,6 @@
                                          getCriteria["lock"] = false;
 -                                        let result = events.getItemBy(2, getCriteria, repositories.Item.getUnassignedItems());
 -
@@ -2586,18 +2622,18 @@ index dd554ab..ba08e02 100644
                                          console.log(cropping,_.map(cropping,"rating"))
 +                                        events.emitClubDiagnostic?.("log", "one-click-fill-criteria", `one-click fill criterion selected ${cropping.length}/${i.c}`, events.collectOneFillDiagnostic?.(getCriteria, result, cropping, unassigned));
                                          removeIds = removeIds.concat(cropping.map( i => {return i.databaseId}))
-@@ -14425,2 +16780,6 @@
+@@ -14425,2 +16807,6 @@
                                  }
 +                                events.emitClubDiagnostic?.("log", "one-click-fill-selected", `one-click fill selected ${playerList.length} player(s)`, {
 +                                    challenge:{ id:thisController?._challenge?.id, setId:thisController?._challenge?.setId, name:thisController?._challenge?.name },
 +                                    selected:playerList.map(item => events.summarizeFillDiagnosticItem?.(item))
 +                                });
                                  if(playerList.length){
-@@ -14451,2 +16810,3 @@
+@@ -14451,2 +16837,3 @@
                          (e) => {
 +                            if(!events.requireClubReady("duplicate squad fill")) return false;
                              const dupIds = _.map(
-@@ -15733,2 +18093,2 @@
+@@ -15733,2 +18120,2 @@
      main()
 -})();
 \ No newline at end of file
