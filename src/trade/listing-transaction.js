@@ -82,6 +82,51 @@ export function createListingTransaction(options = {}) {
         reason = 'stopped-by-user';
         break;
       }
+      let transferPreflight = null;
+      if (entry.item.pile === 'club') {
+        transferPreflight = await adapter.refreshTransferItems();
+        if (transferPreflight.status !== 'completed') {
+          failed += 1;
+          status = 'blocked';
+          reason = `listing-transfer-preflight-${transferPreflight.status || 'unavailable'}`;
+          receipts.push({
+            index: index + 1,
+            item: { ...entry.item },
+            status: 'blocked',
+            reason,
+            transferPreflight,
+          });
+          break;
+        }
+        const transferItem = adapter.inspectListingItem({ ...entry.item, pile: 'transfer' });
+        if (transferItem.status === 'loaded' && transferItem.candidate?.item?.pile === 'transfer') {
+          failed += 1;
+          status = 'blocked';
+          reason = 'listing-item-already-in-transfer';
+          receipts.push({
+            index: index + 1,
+            item: { ...entry.item },
+            status: 'blocked',
+            reason,
+            transferPreflight,
+            live: transferItem.candidate.item,
+          });
+          break;
+        }
+        if (transferItem.status === 'error') {
+          failed += 1;
+          status = 'blocked';
+          reason = 'listing-transfer-state-error';
+          receipts.push({
+            index: index + 1,
+            item: { ...entry.item },
+            status: 'blocked',
+            reason,
+            transferPreflight,
+          });
+          break;
+        }
+      }
       const live = adapter.inspectListingItem(entry.item);
       if (live.status !== 'loaded' || !live.candidate) {
         failed += 1;

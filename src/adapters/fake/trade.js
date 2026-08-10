@@ -3,6 +3,7 @@ import { readPlayerRareFlag } from '../../domain/player-rarity.js';
 
 export function createFakeTradeAdapter(initial = {}) {
   const calls = [];
+  let transferRefreshIndex = 0;
   const items = new Map((initial.items || []).map((entry) => [Number(entry.id || 0), { ...entry }]));
   const marketItems = new Map((initial.marketItems || []).map((entry) => [Number(entry.id || 0), { ...entry, pile: 'market' }]));
   let coins = Number(initial.coins ?? 100000);
@@ -173,7 +174,10 @@ export function createFakeTradeAdapter(initial = {}) {
 
   async function refreshTransferItems() {
     calls.push({ method: 'refreshTransferItems' });
-    return initial.refreshTransferResult || {
+    const sequenced = Array.isArray(initial.refreshTransferResults)
+      ? initial.refreshTransferResults[Math.min(transferRefreshIndex++, initial.refreshTransferResults.length - 1)]
+      : null;
+    return sequenced || initial.refreshTransferResult || {
       status: 'completed',
       response: { success: true, status: 200, code: null },
       error: null,
@@ -244,13 +248,24 @@ export function createFakeTradeAdapter(initial = {}) {
 
   function inspectDefinitionOwnership(definitionId) {
     calls.push({ method: 'inspectDefinitionOwnership', definitionId: Number(definitionId) });
-    const owned = [...items.values()].filter((item) => Number(item.definitionId) === Number(definitionId));
+    return definitionOwnershipSnapshot(Number(definitionId));
+  }
+
+  function definitionOwnershipSnapshot(definitionId) {
+    const owned = [...items.values()].filter((item) => Number(item.definitionId) === definitionId);
     return {
-      definitionId: Number(definitionId),
+      definitionId,
       club: owned.filter((item) => item.pile === 'club').length,
       transfer: owned.filter((item) => item.pile === 'transfer').length,
       unassigned: owned.filter((item) => item.pile === 'unassigned').length,
+      storage: owned.filter((item) => item.pile === 'storage').length,
     };
+  }
+
+  function inspectDefinitionOwnerships(definitionIds = []) {
+    const ids = [...new Set((definitionIds || []).map(Number).filter((value) => Number.isInteger(value) && value > 0))];
+    calls.push({ method: 'inspectDefinitionOwnerships', definitionIds: [...ids] });
+    return Object.fromEntries(ids.map((definitionId) => [definitionId, definitionOwnershipSnapshot(definitionId)]));
   }
 
   function inspectUnassignedReadiness() {
@@ -292,6 +307,7 @@ export function createFakeTradeAdapter(initial = {}) {
     refreshPurchaseState,
     inspectPurchase,
     inspectDefinitionOwnership,
+    inspectDefinitionOwnerships,
     inspectUnassignedReadiness,
     routePurchasedItem,
   });

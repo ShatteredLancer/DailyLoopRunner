@@ -73,4 +73,41 @@ describe('Trade Player Catalog Provider', () => {
     ]);
     expect(requestText).toHaveBeenCalledTimes(1);
   });
+
+  it('exposes network-free allowlisted health and explicit cache invalidation', async () => {
+    let time = 1000;
+    const storage = memoryStorage();
+    const requestText = vi.fn(async () => JSON.stringify({ ids: [8401, 8402] }));
+    const provider = createPlayerCatalogProvider({ requestText, storage, now: () => time });
+    expect(provider.inspect()).toMatchObject({
+      schemaVersion: 1,
+      provider: 'FUTNext',
+      status: 'empty',
+      cache: { lanes: 0, definitions: 0 },
+      activity: { loadCount: 0, lastLoad: null, lastClearedAt: null },
+    });
+    expect(requestText).not.toHaveBeenCalled();
+    await provider.load({ rating: 84, platform: 'pc', ttlMs: 100 });
+    const health = provider.inspect();
+    expect(health).toMatchObject({
+      status: 'fresh',
+      cache: { lanes: 1, freshLanes: 1, expiredLanes: 0, definitions: 2 },
+      activity: {
+        loadCount: 1,
+        lastLoad: { platform: 'pc', ratings: [84], ok: true, lanes: 1, missing: 0 },
+      },
+    });
+    expect(JSON.stringify(health)).not.toContain('definitionId');
+    expect(JSON.stringify(health)).not.toContain('8401');
+    expect(requestText).toHaveBeenCalledTimes(1);
+    time = 1200;
+    expect(provider.inspect()).toMatchObject({ status: 'stale', cache: { freshLanes: 0, expiredLanes: 1 } });
+    expect(requestText).toHaveBeenCalledTimes(1);
+    provider.clear();
+    expect(provider.inspect()).toMatchObject({
+      status: 'empty',
+      cache: { lanes: 0 },
+      activity: { loadCount: 1, lastClearedAt: 1200 },
+    });
+  });
 });

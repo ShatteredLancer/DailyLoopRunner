@@ -1,8 +1,13 @@
 import { normalizeTradeJob } from './contracts.js';
 import { createTradeJobRuntime, normalizeTradeJobRuntime } from './schedule.js';
 
-export const TRADE_JOB_STORE_SCHEMA_VERSION = 1;
+export const TRADE_JOB_STORE_SCHEMA_VERSION = 2;
 export const TRADE_HISTORY_LIMIT = 100;
+export const TRADE_METRICS_SCHEMA_VERSION = 1;
+export const TRADE_METRICS_REASON_LIMIT = 20;
+
+const TRADE_METRIC_STATUSES = ['completed', 'blocked', 'missed', 'stopped', 'failed', 'error', 'unknown'];
+const TRADE_METRIC_JOB_TYPES = ['listing', 'buy', 'unknown'];
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -11,6 +16,139 @@ function clone(value) {
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function nullableNonNegativeInteger(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Math.floor(Number(value));
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function nonNegativeInteger(value) {
+  const number = Math.floor(Number(value));
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function nullableTimestamp(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function normalizedCounterMap(input, keys) {
+  return Object.fromEntries(keys.map((key) => [key, nonNegativeInteger(input?.[key])]));
+}
+
+function normalizeMetricReasons(input = []) {
+  const merged = new Map();
+  for (const entry of Array.isArray(input) ? input : []) {
+    const reason = String(entry?.reason || '').slice(0, 120);
+    if (!reason) continue;
+    const previous = merged.get(reason) || { reason, count: 0, lastAt: null };
+    merged.set(reason, {
+      reason,
+      count: previous.count + nonNegativeInteger(entry?.count),
+      lastAt: Math.max(previous.lastAt || 0, nullableTimestamp(entry?.lastAt) || 0) || null,
+    });
+  }
+  return [...merged.values()]
+    .sort((left, right) => right.count - left.count || (right.lastAt || 0) - (left.lastAt || 0) || left.reason.localeCompare(right.reason))
+    .slice(0, TRADE_METRICS_REASON_LIMIT);
+}
+
+export function normalizeTradeMetrics(input = {}) {
+  return {
+    schemaVersion: TRADE_METRICS_SCHEMA_VERSION,
+    firstRecordedAt: nullableTimestamp(input.firstRecordedAt),
+    lastRecordedAt: nullableTimestamp(input.lastRecordedAt),
+    lastRun: input.lastRun && typeof input.lastRun === 'object' ? {
+      runId: String(input.lastRun.runId || ''),
+      jobId: String(input.lastRun.jobId || ''),
+      jobType: TRADE_METRIC_JOB_TYPES.includes(input.lastRun.jobType) ? input.lastRun.jobType : 'unknown',
+      status: TRADE_METRIC_STATUSES.includes(input.lastRun.status) ? input.lastRun.status : 'unknown',
+      reason: input.lastRun.reason ? String(input.lastRun.reason).slice(0, 120) : null,
+      finishedAt: nullableTimestamp(input.lastRun.finishedAt),
+    } : null,
+    runs: {
+      total: nonNegativeInteger(input.runs?.total),
+      byStatus: normalizedCounterMap(input.runs?.byStatus, TRADE_METRIC_STATUSES),
+      byJobType: normalizedCounterMap(input.runs?.byJobType, TRADE_METRIC_JOB_TYPES),
+    },
+    outcomes: {
+      requested: nonNegativeInteger(input.outcomes?.requested),
+      succeeded: nonNegativeInteger(input.outcomes?.succeeded),
+      failed: nonNegativeInteger(input.outcomes?.failed),
+      skipped: nonNegativeInteger(input.outcomes?.skipped),
+    },
+    buy: {
+      purchases: nonNegativeInteger(input.buy?.purchases),
+      searches: nonNegativeInteger(input.buy?.searches),
+      attempts: nonNegativeInteger(input.buy?.attempts),
+      spent: nonNegativeInteger(input.buy?.spent),
+    },
+    listing: {
+      listed: nonNegativeInteger(input.listing?.listed),
+    },
+    reasons: normalizeMetricReasons(input.reasons),
+  };
+}
+
+function receiptSummary(receipt = {}) {
+  return (Array.isArray(receipt.receipts) ? receipt.receipts : [])
+    .find((entry) => entry?.status === 'run-summary') || null;
+}
+
+export function recordTradeMetrics(input = {}, receipt = {}, options = {}) {
+  const metrics = normalizeTradeMetrics(input);
+  const at = nullableTimestamp(receipt.finishedAt)
+    ?? nullableTimestamp(receipt.startedAt)
+    ?? nullableTimestamp(options.now)
+    ?? Date.now();
+  const status = TRADE_METRIC_STATUSES.includes(receipt.status) ? receipt.status : 'unknown';
+  const jobType = TRADE_METRIC_JOB_TYPES.includes(receipt.jobType) ? receipt.jobType : 'unknown';
+  const summary = receiptSummary(receipt);
+  const reason = receipt.reason ? String(receipt.reason).slice(0, 120) : null;
+  const reasons = reason
+    ? normalizeMetricReasons([...metrics.reasons, { reason, count: 1, lastAt: at }])
+    : metrics.reasons;
+  return normalizeTradeMetrics({
+    ...metrics,
+    firstRecordedAt: metrics.firstRecordedAt ?? at,
+    lastRecordedAt: at,
+    lastRun: {
+      runId: String(receipt.runId || ''),
+      jobId: String(receipt.jobId || ''),
+      jobType,
+      status,
+      reason,
+      finishedAt: at,
+    },
+    runs: {
+      total: metrics.runs.total + 1,
+      byStatus: { ...metrics.runs.byStatus, [status]: metrics.runs.byStatus[status] + 1 },
+      byJobType: { ...metrics.runs.byJobType, [jobType]: metrics.runs.byJobType[jobType] + 1 },
+    },
+    outcomes: {
+      requested: metrics.outcomes.requested + nonNegativeInteger(receipt.requested),
+      succeeded: metrics.outcomes.succeeded + nonNegativeInteger(receipt.succeeded),
+      failed: metrics.outcomes.failed + nonNegativeInteger(receipt.failed),
+      skipped: metrics.outcomes.skipped + nonNegativeInteger(receipt.skipped),
+    },
+    buy: {
+      purchases: metrics.buy.purchases + (jobType === 'buy' ? nonNegativeInteger(receipt.succeeded) : 0),
+      searches: metrics.buy.searches + (jobType === 'buy' ? nonNegativeInteger(summary?.searches) : 0),
+      attempts: metrics.buy.attempts + (jobType === 'buy' ? nonNegativeInteger(summary?.buyAttempts) : 0),
+      spent: metrics.buy.spent + (jobType === 'buy' ? nonNegativeInteger(summary?.spent) : 0),
+    },
+    listing: {
+      listed: metrics.listing.listed + (jobType === 'listing' ? nonNegativeInteger(receipt.succeeded) : 0),
+    },
+    reasons,
+  });
+}
+
+function metricsFromHistory(history, now) {
+  return history.reduce((metrics, receipt) => recordTradeMetrics(metrics, receipt, { now }), normalizeTradeMetrics());
 }
 
 function relockedSnapshot(snapshot, at) {
@@ -42,13 +180,21 @@ export function normalizeTradeJobStore(input = {}, options = {}) {
       ? normalizeTradeJobRuntime({ ...persisted, jobId: job.id })
       : createTradeJobRuntime(job, { now });
   }
+  const history = (Array.isArray(input.history) ? input.history : []).slice(-TRADE_HISTORY_LIMIT).map(clone);
+  const metrics = input.metrics?.schemaVersion === TRADE_METRICS_SCHEMA_VERSION
+    ? normalizeTradeMetrics(input.metrics)
+    : metricsFromHistory(history, now);
   return {
     schemaVersion: TRADE_JOB_STORE_SCHEMA_VERSION,
     paused: input.paused !== false,
     liveExecutionEnabled: input.liveExecutionEnabled === true,
+    safety: {
+      minimumRetainedCoins: nullableNonNegativeInteger(input.safety?.minimumRetainedCoins),
+    },
     jobs,
     runtimes,
-    history: (Array.isArray(input.history) ? input.history : []).slice(-TRADE_HISTORY_LIMIT).map(clone),
+    history,
+    metrics,
     updatedAt: Math.max(0, finiteNumber(input.updatedAt, now)),
   };
 }
@@ -117,7 +263,25 @@ export function createTradeJobStore(options = {}) {
 
   function addHistory(receipt) {
     const snapshot = read();
-    return write({ ...snapshot, history: [...snapshot.history, clone(receipt)].slice(-TRADE_HISTORY_LIMIT) });
+    return write({
+      ...snapshot,
+      history: [...snapshot.history, clone(receipt)].slice(-TRADE_HISTORY_LIMIT),
+      metrics: recordTradeMetrics(snapshot.metrics, receipt, { now: now() }),
+    });
+  }
+
+  function replaceJobs(inputs = []) {
+    if (!Array.isArray(inputs)) throw new TypeError('Trade Jobs must be an array');
+    const at = Number(now());
+    const jobs = inputs.map((input) => normalizeTradeJob({ ...input, armed: false, updatedAt: at }, { imported: true, now: at }));
+    const ids = new Set();
+    for (const job of jobs) {
+      if (ids.has(job.id)) throw new Error(`Duplicate Trade Job id: ${job.id}`);
+      ids.add(job.id);
+    }
+    const snapshot = relockedSnapshot(read(), at);
+    const runtimes = Object.fromEntries(jobs.map((job) => [job.id, createTradeJobRuntime(job, { now: at })]));
+    return write({ ...snapshot, jobs, runtimes });
   }
 
   function setPaused(value) {
@@ -128,9 +292,30 @@ export function createTradeJobStore(options = {}) {
     return write({ ...read(), liveExecutionEnabled: value === true });
   }
 
+  function setMinimumRetainedCoins(value) {
+    let snapshot = read();
+    if (snapshot.liveExecutionEnabled === true) snapshot = relockedSnapshot(snapshot, Number(now()));
+    const minimumRetainedCoins = nullableNonNegativeInteger(value);
+    if (value !== null && value !== undefined && value !== '' && minimumRetainedCoins === null) {
+      throw new TypeError('Minimum retained coins must be a non-negative integer or null');
+    }
+    return write({ ...snapshot, safety: { ...snapshot.safety, minimumRetainedCoins } });
+  }
+
   function relock() {
     return write(relockedSnapshot(read(), Number(now())));
   }
 
-  return Object.freeze({ read, upsert, remove, updateRuntime, addHistory, setPaused, setLiveExecutionEnabled, relock });
+  return Object.freeze({
+    read,
+    upsert,
+    remove,
+    updateRuntime,
+    addHistory,
+    replaceJobs,
+    setPaused,
+    setLiveExecutionEnabled,
+    setMinimumRetainedCoins,
+    relock,
+  });
 }

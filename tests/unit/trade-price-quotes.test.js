@@ -58,4 +58,39 @@ describe('Trade Price Quote Provider', () => {
     expect(requestText).toHaveBeenCalledTimes(2);
     expect(provider.snapshot()).toHaveLength(2);
   });
+
+  it('exposes network-free allowlisted health and explicit cache invalidation', async () => {
+    let time = 1000;
+    const requestText = vi.fn(async () => JSON.stringify({ data: [{ eaId: 10, price: 1000 }] }));
+    const provider = createPriceQuoteProvider({ requestText, now: () => time, ttlMs: 100 });
+    expect(provider.inspect()).toMatchObject({
+      schemaVersion: 1,
+      status: 'empty',
+      cache: { entries: 0, freshEntries: 0, expiredEntries: 0, bySource: {}, byPlatform: {} },
+      activity: { loadCount: 0, lastLoad: null, lastClearedAt: null },
+    });
+    expect(requestText).not.toHaveBeenCalled();
+    await provider.load({ definitionIds: [10], provider: 'futgg', platform: 'pc' });
+    const health = provider.inspect();
+    expect(health).toMatchObject({
+      status: 'fresh',
+      cache: { entries: 1, freshEntries: 1, expiredEntries: 0, bySource: { 'FUT.GG': 1 }, byPlatform: { pc: 1 } },
+      activity: {
+        loadCount: 1,
+        lastLoad: { provider: 'futgg', platform: 'pc', requested: 1, returned: 1 },
+      },
+    });
+    expect(JSON.stringify(health)).not.toContain('definitionId');
+    expect(JSON.stringify(health)).not.toContain('"price"');
+    expect(requestText).toHaveBeenCalledTimes(1);
+    time = 1200;
+    expect(provider.inspect()).toMatchObject({ status: 'stale', cache: { freshEntries: 0, expiredEntries: 1 } });
+    expect(requestText).toHaveBeenCalledTimes(1);
+    provider.clear();
+    expect(provider.inspect()).toMatchObject({
+      status: 'empty',
+      cache: { entries: 0 },
+      activity: { loadCount: 1, lastClearedAt: 1200 },
+    });
+  });
 });

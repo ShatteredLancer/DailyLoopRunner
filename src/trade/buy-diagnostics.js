@@ -1,4 +1,5 @@
 function safeNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -21,7 +22,13 @@ function safeRef(item) {
   };
 }
 
-function safeReceipt(receipt) {
+function safeExpectedDestination(value) {
+  return ['auto', 'club', 'transfer'].includes(String(value || '').toLowerCase())
+    ? String(value).toLowerCase()
+    : null;
+}
+
+export function sanitizeTradeBuyReceipt(receipt) {
   if (!receipt) return null;
   return {
     schemaVersion: safeNumber(receipt.schemaVersion),
@@ -52,7 +59,10 @@ function safeReceipt(receipt) {
       coinsAfter: safeNumber(entry.coinsAfter),
       destination: entry.destination ? String(entry.destination) : null,
       searches: safeNumber(entry.searches),
+      buyAttempts: safeNumber(entry.buyAttempts),
       spent: safeNumber(entry.spent),
+      expectedDestination: entry.expectedDestination ? String(entry.expectedDestination) : null,
+      minimumRetainedCoins: safeNumber(entry.minimumRetainedCoins),
       search: entry.search ? {
         rating: safeNumber(entry.search.rating),
         definitionId: safeNumber(entry.search.definitionId),
@@ -77,9 +87,45 @@ export function createTradeBuyDiagnostics(input = {}) {
       tradeBuyRunning: input.operation?.tradeBuyRunning === true,
     },
     circuit: input.circuit ? JSON.parse(JSON.stringify(input.circuit)) : null,
+    validation: {
+      expectedDestination: safeExpectedDestination(
+        input.expectedDestination ?? input.preview?.validationDestination?.expected,
+      ),
+    },
     job: input.job ? JSON.parse(JSON.stringify(input.job)) : null,
     preview: input.preview ? JSON.parse(JSON.stringify(input.preview)) : null,
-    receipt: safeReceipt(input.receipt),
+    journal: input.journal ? {
+      schemaVersion: safeNumber(input.journal.schemaVersion),
+      runId: String(input.journal.runId || ''),
+      jobId: String(input.journal.jobId || ''),
+      expectedDestination: safeExpectedDestination(input.journal.expectedDestination),
+      status: String(input.journal.status || 'unknown'),
+      phase: String(input.journal.phase || 'unknown'),
+      startedAt: safeNumber(input.journal.startedAt),
+      updatedAt: safeNumber(input.journal.updatedAt),
+      events: (input.journal.events || []).map((entry) => ({
+        at: safeNumber(entry.at),
+        phase: String(entry.phase || 'unknown'),
+        status: entry.status ? String(entry.status) : null,
+        reason: entry.reason ? String(entry.reason).slice(0, 160) : null,
+        destination: entry.destination ? String(entry.destination) : null,
+        item: safeRef(entry.item),
+        tradeId: safeNumber(entry.tradeId),
+        price: safeNumber(entry.price),
+        search: entry.search ? {
+          rating: safeNumber(entry.search.rating),
+          definitionId: safeNumber(entry.search.definitionId),
+          maxBuyNow: safeNumber(entry.search.maxBuyNow),
+          page: safeNumber(entry.search.page),
+        } : null,
+        response: entry.response ? {
+          success: entry.response.success === true,
+          status: safeNumber(entry.response.status),
+          code: safeNumber(entry.response.code),
+        } : null,
+      })),
+    } : null,
+    receipt: sanitizeTradeBuyReceipt(input.receipt),
     error: safeError(input.error),
   };
 }

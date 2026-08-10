@@ -39,6 +39,7 @@ describe('Trade listing preparation', () => {
       mode: 'prepared',
       ready: true,
       blockers: [],
+      transferPreflight: { status: 'completed' },
       confirmation: { createdAt: 1000, expiresAt: 601000, itemCount: 1, requiredText: 'LIST 1' },
     });
     expect(result.plan.entries[0]).toMatchObject({
@@ -55,6 +56,25 @@ describe('Trade listing preparation', () => {
     })]);
     expect(result.plan.warnings).toContain('101 listing prices were adjusted to EA limits');
     expect(result.confirmation.token).toMatch(/^listing-[0-9a-f]{8}$/);
+  });
+
+  it('fails closed before price-limit reads when Transfer cannot be refreshed', async () => {
+    const adapter = createFakeTradeAdapter({
+      refreshTransferResult: { status: 'ambiguous', response: null, error: { kind: 'ambiguous-transport' } },
+      items: [{
+        id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+      }],
+    });
+    const result = await preparation(adapter).prepare(job(), { maxListings: 1 });
+    expect(result).toMatchObject({
+      ready: false,
+      blockers: [{ reason: 'listing-transfer-preflight-ambiguous', detail: 'ambiguous-transport' }],
+      transferPreflight: { status: 'ambiguous' },
+      plan: { entries: [], counts: { selected: 0 } },
+    });
+    expect(result.confirmation).toBeNull();
+    expect(adapter.calls.some((call) => call.method === 'inspectPriceLimits')).toBe(false);
   });
 
   it('does not produce a confirmation when price limits are unavailable', async () => {

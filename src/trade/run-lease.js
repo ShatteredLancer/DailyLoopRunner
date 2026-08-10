@@ -102,5 +102,14 @@ export function createTradeRunLease(options = {}) {
     return read() === null;
   }
 
-  return Object.freeze({ acquire, heartbeat, inspect, release });
+  function clearExpired(runId) {
+    const current = read();
+    const at = Number(now());
+    if (!current || current.runId !== String(runId) || current.expiresAt > at) return false;
+    storage?.remove?.(key);
+    if (read()) write(null);
+    return read() === null;
+  }
+
+  return Object.freeze({ acquire, clearExpired, heartbeat, inspect, release });
 }

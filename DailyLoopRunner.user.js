@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.39
+// @version      0.7.48
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.39",
+    version: "0.7.48",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -82,6 +82,7 @@
   var TRADE_CIRCUIT_KEY = "fc-loop-runner-trade-circuit-v1";
   var TRADE_JOB_STORE_KEY = "fc-loop-runner-trade-jobs-v1";
   var TRADE_RUN_LEASE_KEY = "fc-loop-runner-trade-run-lease-v1";
+  var TRADE_BUY_JOURNAL_KEY = "fc-loop-runner-trade-buy-journal-v1";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -4716,7 +4717,7 @@
     }
     function findButtonByText(patterns, matches) {
       return queryAll("button").find(
-        (button5) => matches(compactText(button5), patterns) && isClickable(button5)
+        (button6) => matches(compactText(button6), patterns) && isClickable(button6)
       ) || null;
     }
     function findClickableByText(patterns, matches, root = documentObject) {
@@ -6740,6 +6741,9 @@
     for (const field4 of ["maxBuyNow", "quantity", "totalBudget", "maxRuntimeMinutes", "maxConsecutiveEmptySearches"]) {
       pushPositiveNumber(policy[field4], `${path}.${field4}`, errors);
     }
+    if (policy.minimumRetainedCoins !== null && policy.minimumRetainedCoins !== void 0 && (!Number.isInteger(Number(policy.minimumRetainedCoins)) || Number(policy.minimumRetainedCoins) < 0)) {
+      errors.push(`${path}.minimumRetainedCoins must be null or a non-negative integer`);
+    }
     if (Number(policy.maxPurchasesPerSearch) !== 1) errors.push(`${path}.maxPurchasesPerSearch must be 1`);
     validateDelayRange(policy.searchDelaySeconds, `${path}.searchDelaySeconds`, errors);
     if (!isPlainObject(policy.ratingPriceOverrides)) {
@@ -6866,6 +6870,7 @@
       ratingPriceOverrides: Object.fromEntries(Object.entries(value.ratingPriceOverrides || {}).map(([rating, price]) => [String(Number(rating)), positiveInteger7(price, 0)]).filter(([, price]) => price > 0)),
       quantity: positiveInteger7(value.quantity, 10),
       totalBudget: positiveInteger7(value.totalBudget, 1e4),
+      minimumRetainedCoins: value.minimumRetainedCoins === null || value.minimumRetainedCoins === void 0 || value.minimumRetainedCoins === "" ? null : Number.isFinite(Number(value.minimumRetainedCoins)) ? Math.floor(Number(value.minimumRetainedCoins)) : -1,
       maxRuntimeMinutes: positiveInteger7(value.maxRuntimeMinutes, 30),
       searchDelaySeconds: normalizeRange(value.searchDelaySeconds, [8, 15]),
       maxPurchasesPerSearch: 1,
@@ -7027,7 +7032,7 @@
     if (/card.*(?:in trade|already listed)|item.*trade offer/.test(text)) {
       return { kind: "card-in-trade", code, action: "refresh-and-skip", retryable: true, opensCircuit: false, disarm: false, ambiguous: false };
     }
-    if (/lost bid|already purchased|outbid|auction.*expired/.test(text)) {
+    if (/competition[- ]lost|lost bid|already purchased|outbid|auction.*expired/.test(text)) {
       return { kind: "competition-lost", code, action: "continue-after-delay", retryable: true, opensCircuit: false, disarm: false, ambiguous: false };
     }
     if ([426, 512, 521].includes(code)) {
@@ -7269,7 +7274,7 @@
     }
     return { max, used };
   }
-  function repositoryPile(runtime, pile) {
+  function rawRepositoryPile(runtime, pile) {
     const repository = runtime?.repositories?.Item;
     if (!repository) return [];
     if (pile === "unassigned") {
@@ -7294,6 +7299,14 @@
       }
     }
     return collectionValues3(repository.club?.items).concat(collectionValues3(runtime?.services?.Item?.itemDao?.itemRepo?.club?.items));
+  }
+  function repositoryPile(runtime, pile) {
+    const items = rawRepositoryPile(runtime, pile);
+    if (pile !== "club") return items;
+    const occupiedIds = new Set(
+      ["unassigned", "storage", "transfer"].flatMap((otherPile) => rawRepositoryPile(runtime, otherPile)).map((item) => Number(item?.id || 0)).filter((id) => id > 0)
+    );
+    return items.filter((item) => !occupiedIds.has(Number(item?.id || 0)));
   }
   function resolveItem(runtime, ref = {}) {
     const id = Number(ref.id || 0);
@@ -7471,6 +7484,9 @@
       const limit = options.limit === 0 ? Number.POSITIVE_INFINITY : Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.min(5e3, Math.floor(requestedLimit)) : 50;
       try {
         const inventory = createEaInventoryAdapter(runtime);
+        const occupiedClubItemIds = new Set(
+          ["unassigned", "storage", "transfer"].flatMap((pile) => rawRepositoryPile(runtime, pile)).map((item) => Number(item?.id || 0)).filter((id) => id > 0)
+        );
         const seen = /* @__PURE__ */ new Set();
         const candidates = [];
         const counts = {};
@@ -7480,6 +7496,7 @@
           for (const item of rawItems) {
             const id = Number(item?.id || 0);
             const definitionId2 = Number(item?.definitionId || 0);
+            if (pile === "club" && id > 0 && occupiedClubItemIds.has(id)) continue;
             const key = id > 0 ? `${pile}:${id}` : `${pile}:definition:${definitionId2}:index:${sourceCount}`;
             if (seen.has(key)) continue;
             seen.add(key);
@@ -7580,7 +7597,16 @@
       }
       try {
         const response = await observeResult(service.requestTransferItems(), options.observerContext || {});
-        return { status: "completed", response: responseSummary(response), error: null };
+        const summary = responseSummary(response);
+        if (summary.success === false) {
+          const classification = classifyTradeError(response || {});
+          return {
+            status: "rejected",
+            response: summary,
+            error: { kind: classification.kind, code: classification.code, action: classification.action }
+          };
+        }
+        return { status: "completed", response: summary, error: null };
       } catch (error) {
         const classification = classifyTradeError(error);
         return {
@@ -7753,20 +7779,46 @@
     }
     function inspectDefinitionOwnership(definitionIdInput) {
       const definitionId2 = Number(definitionIdInput);
-      const counts = { club: 0, transfer: 0, unassigned: 0, storage: 0 };
-      if (!Number.isInteger(definitionId2) || definitionId2 <= 0) return { definitionId: definitionId2, ...counts };
-      for (const pile of Object.keys(counts)) {
+      const empty = { definitionId: definitionId2, club: 0, transfer: 0, unassigned: 0, storage: 0 };
+      if (!Number.isInteger(definitionId2) || definitionId2 <= 0) return empty;
+      return inspectDefinitionOwnerships([definitionId2])[definitionId2] || empty;
+    }
+    function inspectDefinitionOwnerships(definitionIdsInput = []) {
+      const definitionIds2 = [...new Set(
+        (definitionIdsInput || []).map(Number).filter((value) => Number.isInteger(value) && value > 0)
+      )];
+      const requested = new Set(definitionIds2);
+      const ownerships = Object.fromEntries(definitionIds2.map((definitionId2) => [definitionId2, {
+        definitionId: definitionId2,
+        club: 0,
+        transfer: 0,
+        unassigned: 0,
+        storage: 0
+      }]));
+      if (!definitionIds2.length) return ownerships;
+      const rawPiles = {
+        unassigned: rawRepositoryPile(runtime, "unassigned"),
+        storage: rawRepositoryPile(runtime, "storage"),
+        transfer: rawRepositoryPile(runtime, "transfer"),
+        club: rawRepositoryPile(runtime, "club")
+      };
+      const occupiedIds = new Set(
+        ["unassigned", "storage", "transfer"].flatMap((pile) => rawPiles[pile]).map((item) => Number(item?.id || 0)).filter((id) => id > 0)
+      );
+      for (const [pile, items] of Object.entries(rawPiles)) {
         const seen = /* @__PURE__ */ new Set();
-        for (const item of repositoryPile(runtime, pile)) {
-          if (Number(item?.definitionId || 0) !== definitionId2) continue;
+        for (const item of items) {
+          const definitionId2 = Number(item?.definitionId || 0);
+          if (!requested.has(definitionId2)) continue;
           const id = Number(item?.id || 0);
-          const key = id > 0 ? id : item;
+          if (pile === "club" && id > 0 && occupiedIds.has(id)) continue;
+          const key = id > 0 ? `${pile}:${id}` : item;
           if (seen.has(key)) continue;
           seen.add(key);
-          counts[pile] += 1;
+          ownerships[definitionId2][pile] += 1;
         }
       }
-      return { definitionId: definitionId2, ...counts };
+      return ownerships;
     }
     function inspectUnassignedReadiness() {
       const items = repositoryPile(runtime, "unassigned");
@@ -7831,6 +7883,7 @@
       refreshPurchaseState,
       inspectPurchase,
       inspectDefinitionOwnership,
+      inspectDefinitionOwnerships,
       inspectUnassignedReadiness,
       routePurchasedItem
     });
@@ -9355,10 +9408,10 @@
       stopPoint();
       failIfSubmitError(label);
       if (await overlay.dismiss(label)) continue;
-      const button5 = overlay.findClaimButton();
-      if (button5) {
+      const button6 = overlay.findClaimButton();
+      if (button6) {
         log(`${label}: claiming rewards`);
-        click(button5);
+        click(button6);
         await waitLoadingEnd(900, 45e3);
         await sleep(1200);
         return true;
@@ -9493,6 +9546,7 @@
   // src/trade/price-quotes.js
   var PRICE_QUOTE_SCHEMA_VERSION = 1;
   var DEFAULT_PRICE_QUOTE_TTL_MS = 10 * 6e4;
+  var PRICE_QUOTE_HEALTH_SCHEMA_VERSION = 1;
   function parseJson(text, source) {
     try {
       return JSON.parse(text);
@@ -9612,6 +9666,9 @@
     const cache = /* @__PURE__ */ new Map();
     const now = typeof options.now === "function" ? options.now : () => Date.now();
     const cacheKey = (platform, definitionId2) => `${platform}:${definitionId2}`;
+    let loadCount = 0;
+    let lastLoad = null;
+    let lastClearedAt = null;
     async function load(request = {}) {
       const provider = normalizeProvider(request.provider || options.provider);
       const ids = normalizeDefinitionIds(request.definitionIds);
@@ -9631,7 +9688,7 @@
       for (const entry of loaded.quotes) cache.set(cacheKey(entry.platform, entry.definitionId), entry);
       const quotes = ids.map((id) => cache.get(cacheKey(platform, id))).filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
       const sources = [...new Set(quotes.map((entry) => entry.source))];
-      return {
+      const result = {
         quotes,
         ids,
         source: sources.length === 1 ? sources[0] : sources.length > 1 ? "mixed" : null,
@@ -9640,14 +9697,61 @@
           ...loaded.attempts
         ]
       };
+      loadCount += 1;
+      lastLoad = {
+        at: currentTime,
+        provider,
+        platform,
+        requested: ids.length,
+        returned: quotes.length,
+        attempts: result.attempts.map((attempt) => ({
+          source: String(attempt.source || "unknown"),
+          status: String(attempt.status || "unknown"),
+          count: Math.max(0, Number(attempt.count || 0) || 0),
+          reason: attempt.reason ? String(attempt.reason).slice(0, 160) : null
+        }))
+      };
+      return result;
     }
     function clear() {
       cache.clear();
+      lastClearedAt = Number(now());
     }
     function snapshot() {
       return [...cache.values()].sort((left, right) => left.definitionId - right.definitionId);
     }
-    return Object.freeze({ clear, load, snapshot });
+    function inspect() {
+      const currentTime = Number(now());
+      const entries = snapshot();
+      const fresh = entries.filter((entry) => Number(entry.expiresAt) > currentTime);
+      const expired = entries.length - fresh.length;
+      const countBy = (field4) => Object.fromEntries([...new Set(entries.map((entry) => String(entry[field4] || "unknown")))].sort().map((key) => [key, entries.filter((entry) => String(entry[field4] || "unknown") === key).length]));
+      const quotedAt = entries.map((entry) => Number(entry.quotedAt)).filter(Number.isFinite);
+      const expiresAt = entries.map((entry) => Number(entry.expiresAt)).filter(Number.isFinite);
+      return {
+        schemaVersion: PRICE_QUOTE_HEALTH_SCHEMA_VERSION,
+        capturedAt: currentTime,
+        providers: ["FUT.GG", "FUTNext"],
+        status: !entries.length ? "empty" : !expired ? "fresh" : !fresh.length ? "stale" : "partial",
+        cache: {
+          entries: entries.length,
+          freshEntries: fresh.length,
+          expiredEntries: expired,
+          bySource: countBy("source"),
+          byPlatform: countBy("platform"),
+          oldestQuotedAt: quotedAt.length ? Math.min(...quotedAt) : null,
+          newestQuotedAt: quotedAt.length ? Math.max(...quotedAt) : null,
+          earliestExpiresAt: expiresAt.length ? Math.min(...expiresAt) : null,
+          latestExpiresAt: expiresAt.length ? Math.max(...expiresAt) : null
+        },
+        activity: {
+          loadCount,
+          lastLoad: lastLoad ? JSON.parse(JSON.stringify(lastLoad)) : null,
+          lastClearedAt
+        }
+      };
+    }
+    return Object.freeze({ clear, inspect, load, snapshot });
   }
 
   // src/reward/player-prices.js
@@ -9671,6 +9775,7 @@
   var PLAYER_CATALOG_SCHEMA_VERSION = 1;
   var PLAYER_CATALOG_PARSER_VERSION = 1;
   var DEFAULT_PLAYER_CATALOG_TTL_MS = 24 * 60 * 6e4;
+  var PLAYER_CATALOG_HEALTH_SCHEMA_VERSION = 1;
   function parseJson2(text) {
     try {
       return JSON.parse(text);
@@ -9737,6 +9842,9 @@
     const storage = options.storage;
     const cacheKey = String(options.cacheKey || "fc-loop-runner-trade-player-catalog-v1");
     const now = typeof options.now === "function" ? options.now : () => Date.now();
+    let loadCount = 0;
+    let lastLoad = null;
+    let lastClearedAt = null;
     function readCache(request) {
       const raw = storage?.get?.(cacheKey, null);
       return normalizePlayerCatalogCache(raw, request);
@@ -9794,7 +9902,7 @@
         }
       }
       writeCache(cache);
-      return {
+      const result = {
         schemaVersion: PLAYER_CATALOG_SCHEMA_VERSION,
         ok: missingRatings.length === 0,
         platform,
@@ -9806,9 +9914,29 @@
         attempts,
         cache
       };
+      loadCount += 1;
+      lastLoad = {
+        at: currentTime,
+        platform,
+        season,
+        ratings: [...ratings],
+        ok: result.ok,
+        lanes: result.lanes.length,
+        missing: result.missingRatings.length,
+        attempts: attempts.map((attempt) => ({
+          rating: Number(attempt.rating),
+          source: String(attempt.source || "unknown"),
+          status: String(attempt.status || "unknown"),
+          count: Math.max(0, Number(attempt.count || 0) || 0),
+          errorKind: attempt.errorKind ? String(attempt.errorKind) : null,
+          reason: attempt.reason ? String(attempt.reason).slice(0, 160) : null
+        }))
+      };
+      return result;
     }
     function clear() {
       storage?.remove?.(cacheKey);
+      lastClearedAt = Number(now());
     }
     function snapshot(request = {}) {
       const platform = String(request.platform || options.platform || "pc").trim().toLowerCase();
@@ -9816,7 +9944,43 @@
       const parserVersion = Number(request.parserVersion || options.parserVersion || PLAYER_CATALOG_PARSER_VERSION);
       return readCache({ platform, season, parserVersion });
     }
-    return Object.freeze({ clear, load, snapshot });
+    function inspect(request = {}) {
+      const currentTime = Number(now());
+      const cache = snapshot(request);
+      const lanes = Object.values(cache.lanes || {});
+      const fresh = lanes.filter((lane) => Number(lane.expiresAt) > currentTime);
+      const expired = lanes.length - fresh.length;
+      const status = !lanes.length ? "empty" : !expired ? "fresh" : !fresh.length ? "stale" : "partial";
+      const timestamps = (field4) => lanes.map((lane) => Number(lane[field4])).filter(Number.isFinite);
+      const fetched = timestamps("fetchedAt");
+      const expires = timestamps("expiresAt");
+      return {
+        schemaVersion: PLAYER_CATALOG_HEALTH_SCHEMA_VERSION,
+        capturedAt: currentTime,
+        provider: "FUTNext",
+        status,
+        cache: {
+          schemaVersion: cache.schemaVersion,
+          parserVersion: cache.parserVersion,
+          platform: cache.platform,
+          season: cache.season,
+          lanes: lanes.length,
+          freshLanes: fresh.length,
+          expiredLanes: expired,
+          definitions: lanes.reduce((sum, lane) => sum + lane.definitionIds.length, 0),
+          oldestFetchedAt: fetched.length ? Math.min(...fetched) : null,
+          newestFetchedAt: fetched.length ? Math.max(...fetched) : null,
+          earliestExpiresAt: expires.length ? Math.min(...expires) : null,
+          latestExpiresAt: expires.length ? Math.max(...expires) : null
+        },
+        activity: {
+          loadCount,
+          lastLoad: lastLoad ? JSON.parse(JSON.stringify(lastLoad)) : null,
+          lastClearedAt
+        }
+      };
+    }
+    return Object.freeze({ clear, inspect, load, snapshot });
   }
 
   // src/trade/listing-plan.js
@@ -10063,16 +10227,23 @@
           maxListings: requestedMax
         }
       };
-      const preview = await options.listingPreview.preview(previewInput, request);
       const adapter = options.getTradeAdapter();
+      const requiresTransferPreflight = previewInput.policy.sources?.includes("club") === true;
+      const transferPreflight = requiresTransferPreflight ? await adapter.refreshTransferItems() : null;
+      const transferReady = !requiresTransferPreflight || transferPreflight?.status === "completed";
+      const preview = await options.listingPreview.preview(previewInput, request);
       const blockers = [];
       const priceLimitChecks = [];
       const entries = [];
       const adjustedNames = [];
       if (preview.capabilities?.canTrade !== true) blockers.push({ reason: "trade-capability-unavailable" });
+      if (!transferReady) blockers.push({
+        reason: `listing-transfer-preflight-${transferPreflight?.status || "unavailable"}`,
+        detail: transferPreflight?.error?.kind || null
+      });
       if (preview.scan?.error) blockers.push({ reason: "candidate-scan-failed", detail: preview.scan.error.message });
       if (!preview.plan?.entries?.length) blockers.push({ reason: "no-eligible-listing-candidates" });
-      for (const entry of preview.plan?.entries || []) {
+      for (const entry of transferReady ? preview.plan?.entries || [] : []) {
         const result = await adapter.inspectPriceLimits(entry.item, { refresh: true });
         const applied = applyListingPriceLimits(entry, result);
         priceLimitChecks.push({
@@ -10115,6 +10286,7 @@
         preparedAt,
         ready,
         blockers,
+        transferPreflight,
         priceLimitChecks,
         plan,
         confirmation
@@ -10239,6 +10411,51 @@
           status = "stopped";
           reason = "stopped-by-user";
           break;
+        }
+        let transferPreflight = null;
+        if (entry.item.pile === "club") {
+          transferPreflight = await adapter.refreshTransferItems();
+          if (transferPreflight.status !== "completed") {
+            failed += 1;
+            status = "blocked";
+            reason = `listing-transfer-preflight-${transferPreflight.status || "unavailable"}`;
+            receipts.push({
+              index: index + 1,
+              item: { ...entry.item },
+              status: "blocked",
+              reason,
+              transferPreflight
+            });
+            break;
+          }
+          const transferItem = adapter.inspectListingItem({ ...entry.item, pile: "transfer" });
+          if (transferItem.status === "loaded" && transferItem.candidate?.item?.pile === "transfer") {
+            failed += 1;
+            status = "blocked";
+            reason = "listing-item-already-in-transfer";
+            receipts.push({
+              index: index + 1,
+              item: { ...entry.item },
+              status: "blocked",
+              reason,
+              transferPreflight,
+              live: transferItem.candidate.item
+            });
+            break;
+          }
+          if (transferItem.status === "error") {
+            failed += 1;
+            status = "blocked";
+            reason = "listing-transfer-state-error";
+            receipts.push({
+              index: index + 1,
+              item: { ...entry.item },
+              status: "blocked",
+              reason,
+              transferPreflight
+            });
+            break;
+          }
         }
         const live = adapter.inspectListingItem(entry.item);
         if (live.status !== "loaded" || !live.candidate) {
@@ -10439,6 +10656,10 @@
   }
 
   // src/trade/buy-plan.js
+  function finiteNumber6(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
   function stableHash(value) {
     let hash = 2166136261;
     const text = String(value || "");
@@ -10492,6 +10713,59 @@
       cursor: { laneIndex: 0, definitionIndexes: Object.fromEntries(orderedLanes.map((lane) => [lane.rating, 0])) }
     };
   }
+  function nextBuySearch(lanePlan = {}, cursorInput = null) {
+    const lanes = lanePlan.lanes || [];
+    if (lanePlan.ready !== true || !lanes.length) return { search: null, cursor: cursorInput || lanePlan.cursor || null };
+    const cursor = {
+      laneIndex: Math.max(0, Math.floor(finiteNumber6(cursorInput?.laneIndex, lanePlan.cursor?.laneIndex))),
+      definitionIndexes: { ...lanePlan.cursor?.definitionIndexes || {}, ...cursorInput?.definitionIndexes || {} }
+    };
+    const laneIndex = cursor.laneIndex % lanes.length;
+    const lane = lanes[laneIndex];
+    const definitionIndex = Math.max(0, Math.floor(finiteNumber6(cursor.definitionIndexes[lane.rating]))) % lane.definitionIds.length;
+    const search = {
+      laneIndex,
+      rating: lane.rating,
+      definitionIndex,
+      definitionId: lane.definitionIds[definitionIndex],
+      maxBuyNow: lane.maxBuyNow
+    };
+    cursor.definitionIndexes[lane.rating] = (definitionIndex + 1) % lane.definitionIds.length;
+    cursor.laneIndex = (laneIndex + 1) % lanes.length;
+    return { search, cursor };
+  }
+  function buyCandidateRejection(candidate = {}, search = {}, job = {}, limits = {}) {
+    if (String(candidate.type || "").toLowerCase() !== "player") return "not-player";
+    if (Number(candidate.item?.definitionId) !== Number(search.definitionId)) return "definition-mismatch";
+    if (Number(candidate.rating) !== Number(search.rating)) return "rating-mismatch";
+    if (!matchesTradeCardClass(candidate, job.policy?.cardClass)) return "card-class-mismatch";
+    const auction = candidate.auction || {};
+    if (auction.present !== true || auction.state !== "active") return "auction-not-active";
+    if (!Number.isFinite(Number(auction.tradeId)) || Number(auction.tradeId) <= 0) return "missing-trade-id";
+    const buyNow = Number(auction.buyNowPrice);
+    if (!Number.isFinite(buyNow) || buyNow <= 0) return "invalid-buy-now";
+    if (buyNow > Number(search.maxBuyNow)) return "rating-price-limit";
+    if (Number.isFinite(Number(limits.remainingBudget)) && buyNow > Number(limits.remainingBudget)) return "remaining-budget";
+    if (Number.isFinite(Number(limits.coins)) && buyNow > Number(limits.coins)) return "insufficient-coins";
+    return null;
+  }
+  function selectBuyCandidate(input2 = {}) {
+    const candidates = Array.isArray(input2.candidates) ? input2.candidates : [];
+    const rejectionCounts = {};
+    const eligible = [];
+    for (const candidate of candidates) {
+      const reason = buyCandidateRejection(candidate, input2.search, input2.job, input2.limits);
+      if (reason) rejectionCounts[reason] = Number(rejectionCounts[reason] || 0) + 1;
+      else eligible.push(candidate);
+    }
+    eligible.sort((left, right) => Number(left.auction.buyNowPrice) - Number(right.auction.buyNowPrice) || finiteNumber6(left.auction.expires, Number.POSITIVE_INFINITY) - finiteNumber6(right.auction.expires, Number.POSITIVE_INFINITY) || Number(left.auction.tradeId) - Number(right.auction.tradeId));
+    return {
+      selected: eligible[0] || null,
+      eligibleCount: eligible.length,
+      rejectedCount: candidates.length - eligible.length,
+      rejectionCounts
+    };
+  }
 
   // src/trade/buy-preview.js
   function createBuyPreview(options = {}) {
@@ -10543,6 +10817,7 @@
 
   // src/trade/buy-diagnostics.js
   function safeNumber(value) {
+    if (value === null || value === void 0 || value === "") return null;
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
   }
@@ -10562,7 +10837,10 @@
       pile: String(item.pile || "unknown")
     };
   }
-  function safeReceipt(receipt) {
+  function safeExpectedDestination(value) {
+    return ["auto", "club", "transfer"].includes(String(value || "").toLowerCase()) ? String(value).toLowerCase() : null;
+  }
+  function sanitizeTradeBuyReceipt(receipt) {
     if (!receipt) return null;
     return {
       schemaVersion: safeNumber(receipt.schemaVersion),
@@ -10593,7 +10871,10 @@
         coinsAfter: safeNumber(entry.coinsAfter),
         destination: entry.destination ? String(entry.destination) : null,
         searches: safeNumber(entry.searches),
+        buyAttempts: safeNumber(entry.buyAttempts),
         spent: safeNumber(entry.spent),
+        expectedDestination: entry.expectedDestination ? String(entry.expectedDestination) : null,
+        minimumRetainedCoins: safeNumber(entry.minimumRetainedCoins),
         search: entry.search ? {
           rating: safeNumber(entry.search.rating),
           definitionId: safeNumber(entry.search.definitionId),
@@ -10617,19 +10898,1283 @@
         tradeBuyRunning: input2.operation?.tradeBuyRunning === true
       },
       circuit: input2.circuit ? JSON.parse(JSON.stringify(input2.circuit)) : null,
+      validation: {
+        expectedDestination: safeExpectedDestination(
+          input2.expectedDestination ?? input2.preview?.validationDestination?.expected
+        )
+      },
       job: input2.job ? JSON.parse(JSON.stringify(input2.job)) : null,
       preview: input2.preview ? JSON.parse(JSON.stringify(input2.preview)) : null,
-      receipt: safeReceipt(input2.receipt),
+      journal: input2.journal ? {
+        schemaVersion: safeNumber(input2.journal.schemaVersion),
+        runId: String(input2.journal.runId || ""),
+        jobId: String(input2.journal.jobId || ""),
+        expectedDestination: safeExpectedDestination(input2.journal.expectedDestination),
+        status: String(input2.journal.status || "unknown"),
+        phase: String(input2.journal.phase || "unknown"),
+        startedAt: safeNumber(input2.journal.startedAt),
+        updatedAt: safeNumber(input2.journal.updatedAt),
+        events: (input2.journal.events || []).map((entry) => ({
+          at: safeNumber(entry.at),
+          phase: String(entry.phase || "unknown"),
+          status: entry.status ? String(entry.status) : null,
+          reason: entry.reason ? String(entry.reason).slice(0, 160) : null,
+          destination: entry.destination ? String(entry.destination) : null,
+          item: safeRef(entry.item),
+          tradeId: safeNumber(entry.tradeId),
+          price: safeNumber(entry.price),
+          search: entry.search ? {
+            rating: safeNumber(entry.search.rating),
+            definitionId: safeNumber(entry.search.definitionId),
+            maxBuyNow: safeNumber(entry.search.maxBuyNow),
+            page: safeNumber(entry.search.page)
+          } : null,
+          response: entry.response ? {
+            success: entry.response.success === true,
+            status: safeNumber(entry.response.status),
+            code: safeNumber(entry.response.code)
+          } : null
+        }))
+      } : null,
+      receipt: sanitizeTradeBuyReceipt(input2.receipt),
       error: safeError(input2.error)
+    };
+  }
+
+  // src/trade/job-config.js
+  var TRADE_JOB_CONFIG_KIND = "daily-loop-runner-trade-jobs";
+  var TRADE_JOB_CONFIG_SCHEMA_VERSION = 1;
+  var TRADE_JOB_CONFIG_MAX_JOBS = 100;
+  var TRADE_JOB_CONFIG_MAX_TEXT_LENGTH = 1e6;
+  var CONFIG_FIELDS = /* @__PURE__ */ new Set(["kind", "schemaVersion", "exportedAt", "runnerVersion", "jobs"]);
+  var JOB_FIELDS = /* @__PURE__ */ new Set(["schemaVersion", "id", "name", "type", "enabled", "schedule", "misfirePolicy", "policy"]);
+  function clone6(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  }
+  function assertPlainObject(value, label) {
+    if (!isPlainObject(value)) throw new Error(`${label} must be an object`);
+  }
+  function assertOnlyFields(value, fields, label) {
+    for (const key of Object.keys(value)) {
+      if (!fields.has(key)) throw new Error(`${label}.${key} is not supported`);
+    }
+  }
+  function exportJob(input2, now) {
+    const job = normalizeTradeJob(input2, { now });
+    const policy = clone6(job.policy);
+    if (job.type === "buy") delete policy.minimumRetainedCoins;
+    return clone6({
+      schemaVersion: job.schemaVersion,
+      id: job.id,
+      name: job.name,
+      type: job.type,
+      enabled: job.enabled,
+      schedule: job.schedule,
+      misfirePolicy: job.misfirePolicy,
+      policy
+    });
+  }
+  function createTradeJobConfig(snapshot = {}, options = {}) {
+    const exportedAt = Math.max(0, Number(options.exportedAt ?? Date.now()) || 0);
+    const jobs = Array.isArray(snapshot.jobs) ? snapshot.jobs : [];
+    if (jobs.length > TRADE_JOB_CONFIG_MAX_JOBS) {
+      throw new Error(`Trade Job configuration exceeds ${TRADE_JOB_CONFIG_MAX_JOBS} Jobs`);
+    }
+    return {
+      kind: TRADE_JOB_CONFIG_KIND,
+      schemaVersion: TRADE_JOB_CONFIG_SCHEMA_VERSION,
+      exportedAt,
+      runnerVersion: String(options.runnerVersion || "unknown"),
+      jobs: jobs.map((job) => exportJob(job, exportedAt))
+    };
+  }
+  function exportTradeJobConfigJson(snapshot = {}, options = {}) {
+    return JSON.stringify(createTradeJobConfig(snapshot, options), null, 2);
+  }
+  function parseInput(input2) {
+    if (typeof input2 !== "string") return clone6(input2);
+    if (input2.length > TRADE_JOB_CONFIG_MAX_TEXT_LENGTH) {
+      throw new Error(`Trade Job configuration exceeds ${TRADE_JOB_CONFIG_MAX_TEXT_LENGTH} characters`);
+    }
+    try {
+      return JSON.parse(input2);
+    } catch (error) {
+      throw new Error(`Trade Job configuration JSON is invalid: ${error?.message || error}`);
+    }
+  }
+  function parseTradeJobConfig(input2, options = {}) {
+    const value = parseInput(input2);
+    assertPlainObject(value, "Trade Job configuration");
+    assertOnlyFields(value, CONFIG_FIELDS, "Trade Job configuration");
+    if (value.kind !== TRADE_JOB_CONFIG_KIND) throw new Error(`Trade Job configuration kind must be ${TRADE_JOB_CONFIG_KIND}`);
+    if (Number(value.schemaVersion) !== TRADE_JOB_CONFIG_SCHEMA_VERSION) {
+      throw new Error(`Trade Job configuration schemaVersion must be ${TRADE_JOB_CONFIG_SCHEMA_VERSION}`);
+    }
+    if (!Array.isArray(value.jobs)) throw new Error("Trade Job configuration.jobs must be an array");
+    if (value.jobs.length > TRADE_JOB_CONFIG_MAX_JOBS) {
+      throw new Error(`Trade Job configuration exceeds ${TRADE_JOB_CONFIG_MAX_JOBS} Jobs`);
+    }
+    const now = Math.max(0, Number(options.now ?? Date.now()) || 0);
+    const ids = /* @__PURE__ */ new Set();
+    const jobs = value.jobs.map((raw, index) => {
+      const label = `Trade Job configuration.jobs[${index}]`;
+      assertPlainObject(raw, label);
+      assertOnlyFields(raw, JOB_FIELDS, label);
+      if (raw.type === "buy" && Object.prototype.hasOwnProperty.call(raw.policy || {}, "minimumRetainedCoins")) {
+        throw new Error(`${label}.policy.minimumRetainedCoins is account-specific and is not supported`);
+      }
+      const job = normalizeTradeJob({ ...raw, armed: false, createdAt: now, updatedAt: now }, { imported: true, now });
+      if (ids.has(job.id)) throw new Error(`Trade Job configuration contains duplicate id: ${job.id}`);
+      ids.add(job.id);
+      return job;
+    });
+    return {
+      kind: TRADE_JOB_CONFIG_KIND,
+      schemaVersion: TRADE_JOB_CONFIG_SCHEMA_VERSION,
+      exportedAt: Math.max(0, Number(value.exportedAt) || 0),
+      runnerVersion: String(value.runnerVersion || "unknown"),
+      jobs
+    };
+  }
+
+  // src/trade/buy-destination.js
+  var BUY_DESTINATION_MODES = Object.freeze(["auto", "club", "transfer"]);
+  function normalizeExpectedBuyDestination(value = "auto") {
+    const destination = String(value || "auto").toLowerCase();
+    return BUY_DESTINATION_MODES.includes(destination) ? destination : null;
+  }
+  function destinationForOwnership(ownership = {}) {
+    return Number(ownership.club || 0) > 0 ? "transfer" : "club";
+  }
+  function filterBuyCatalogForDestination(catalog = {}, adapter, expectedDestination = "auto") {
+    const expected = normalizeExpectedBuyDestination(expectedDestination);
+    if (!expected) throw new Error("Buy validation destination must be auto, club, or transfer");
+    const lanes = (catalog.lanes || []).map((lane) => ({
+      ...lane,
+      definitionIds: [...lane.definitionIds || []]
+    }));
+    const before = lanes.reduce((sum, lane) => sum + lane.definitionIds.length, 0);
+    if (expected === "auto") {
+      return { catalog: { ...catalog, lanes }, expectedDestination: expected, before, matched: before };
+    }
+    if (typeof adapter?.inspectDefinitionOwnership !== "function") {
+      return { catalog: { ...catalog, lanes: [] }, expectedDestination: expected, before, matched: 0, reason: "ownership-inspection-unavailable" };
+    }
+    const requestedDefinitionIds = [...new Set(lanes.flatMap((lane) => lane.definitionIds))];
+    const ownerships = typeof adapter.inspectDefinitionOwnerships === "function" ? adapter.inspectDefinitionOwnerships(requestedDefinitionIds) : null;
+    const ownershipFor = (definitionId2) => ownerships?.[definitionId2] || ownerships?.[String(definitionId2)] || adapter.inspectDefinitionOwnership(definitionId2);
+    const filtered = lanes.map((lane) => ({
+      ...lane,
+      definitionIds: lane.definitionIds.filter((definitionId2) => destinationForOwnership(ownershipFor(definitionId2)) === expected)
+    }));
+    const matched = filtered.reduce((sum, lane) => sum + lane.definitionIds.length, 0);
+    return {
+      catalog: { ...catalog, lanes: filtered },
+      expectedDestination: expected,
+      before,
+      matched,
+      reason: matched ? null : `buy-${expected}-definitions-unavailable`
+    };
+  }
+
+  // src/trade/buy-transaction.js
+  function finiteNumber7(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function randomDelayMs2(range, random) {
+    const minimum = Math.max(0, finiteNumber7(range?.[0]));
+    const maximum = Math.max(minimum, finiteNumber7(range?.[1], minimum));
+    return Math.round((minimum + (maximum - minimum) * random()) * 1e3);
+  }
+  function safeItem(candidate = {}) {
+    return {
+      id: Number(candidate.item?.id || 0),
+      definitionId: Number(candidate.item?.definitionId || 0),
+      pile: String(candidate.item?.pile || "market")
+    };
+  }
+  function createBuyTransaction(options = {}) {
+    const adapter = options.tradeAdapter;
+    const catalogProvider = options.playerCatalogProvider;
+    if (!adapter) throw new TypeError("tradeAdapter is required");
+    if (typeof catalogProvider?.load !== "function") throw new TypeError("playerCatalogProvider.load is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const sleep = typeof options.sleep === "function" ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const random = typeof options.random === "function" ? options.random : Math.random;
+    const createRunId = typeof options.createRunId === "function" ? options.createRunId : () => `buy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    async function run(input2 = {}) {
+      const job = input2.job;
+      assertValidTradeJob(job, "Buy job");
+      if (job.type !== "buy") throw new Error("Buy job.type must be buy");
+      const runId = String(input2.runId || createRunId());
+      const startedAt = Number(now());
+      const requested = Number(job.policy.quantity);
+      const receipts = [];
+      let succeeded = 0;
+      let failed = 0;
+      let spent = 0;
+      let emptySearches = 0;
+      let searches = 0;
+      let buyAttempts = 0;
+      let status = "completed";
+      let reason = null;
+      let cursor = null;
+      const expectedDestination = normalizeExpectedBuyDestination(input2.expectedDestination || "auto");
+      const minimumRetainedCoins = Math.max(0, Math.floor(finiteNumber7(input2.minimumRetainedCoins)));
+      const checkpoint = (phase, detail = {}) => {
+        try {
+          options.onCheckpoint?.({ phase, at: Number(now()), ...detail });
+        } catch {
+        }
+      };
+      const beforeCapabilities = adapter.inspectCapabilities();
+      checkpoint("transaction-start", { destination: expectedDestination });
+      const stop = (nextStatus, nextReason) => {
+        status = nextStatus;
+        reason = nextReason;
+      };
+      const circuit = options.circuitBreaker?.availability?.();
+      if (!expectedDestination) stop("blocked", "buy-validation-destination-invalid");
+      else if (circuit && circuit.allowed !== true) stop("blocked", "trade-circuit-open");
+      else if (beforeCapabilities.canTrade !== true) stop("blocked", "trade-capability-unavailable");
+      else if (!Number.isFinite(Number(beforeCapabilities.coins))) stop("blocked", "trade-coins-unavailable");
+      else if (Number(beforeCapabilities.coins) < minimumRetainedCoins) stop("blocked", "minimum-retained-coins");
+      else if (expectedDestination === "transfer" && Number(beforeCapabilities.transferCapacity?.free) <= 0) {
+        stop("blocked", "transfer-list-full");
+      } else {
+        const readiness = adapter.inspectUnassignedReadiness();
+        if (readiness.ready !== true) stop("blocked", readiness.reason || "unassigned-not-ready");
+      }
+      let lanePlan = null;
+      if (!reason) {
+        const catalog = await catalogProvider.load({
+          ratingMin: job.policy.ratingMin,
+          ratingMax: job.policy.ratingMax,
+          platform: input2.platform || "pc"
+        });
+        checkpoint("catalog-loaded", { status: catalog.ok ? "completed" : "blocked" });
+        const destinationCatalog = filterBuyCatalogForDestination(catalog, adapter, expectedDestination);
+        checkpoint("destination-filtered", {
+          status: destinationCatalog.reason ? "blocked" : "completed",
+          reason: destinationCatalog.reason,
+          destination: expectedDestination
+        });
+        lanePlan = buildBuyLanePlan({ job, catalog: destinationCatalog.catalog, runId });
+        cursor = lanePlan.cursor;
+        if (destinationCatalog.reason) stop("blocked", destinationCatalog.reason);
+        else if (!catalog.ok || !lanePlan.ready) stop("blocked", `catalog-ratings-unavailable:${lanePlan.missingRatings.join(",")}`);
+      }
+      while (!reason && succeeded < requested) {
+        if (input2.shouldStop?.() === true) {
+          stop("stopped", "stopped-by-user");
+          break;
+        }
+        if (Number(now()) - startedAt >= Number(job.policy.maxRuntimeMinutes) * 6e4) {
+          stop("stopped", "runtime-limit");
+          break;
+        }
+        const remainingBudget = Number(job.policy.totalBudget) - spent;
+        if (remainingBudget <= 0) {
+          stop("stopped", "budget-limit");
+          break;
+        }
+        const readiness = adapter.inspectUnassignedReadiness();
+        if (readiness.ready !== true) {
+          stop("blocked", readiness.reason || "unassigned-not-ready");
+          break;
+        }
+        const searchCircuit = options.circuitBreaker?.availability?.();
+        if (searchCircuit && searchCircuit.allowed !== true) {
+          stop("blocked", "trade-circuit-open");
+          break;
+        }
+        const next = nextBuySearch(lanePlan, cursor);
+        cursor = next.cursor;
+        const search = next.search;
+        if (!search) {
+          stop("blocked", "buy-search-plan-unavailable");
+          break;
+        }
+        searches += 1;
+        checkpoint("market-search-started", { search });
+        const searchResult = await adapter.searchMarket({ ...search, page: 1 });
+        checkpoint("market-search-finished", {
+          search,
+          status: searchResult.status,
+          response: searchResult.response
+        });
+        if (searchResult.status !== "completed") {
+          const classification = classifyTradeError(searchResult.error || searchResult.response || {});
+          options.circuitBreaker?.recordFailure?.(searchResult.error || searchResult.response || {}, {
+            action: "search",
+            endpoint: "/transfermarket",
+            jobId: job.id,
+            runId,
+            classification,
+            response: searchResult.response,
+            capabilities: adapter.inspectCapabilities()
+          });
+          stop(classification.opensCircuit ? "blocked" : classification.ambiguous ? "ambiguous" : "failed", `trade-${classification.kind}`);
+          break;
+        }
+        const capabilities = adapter.inspectCapabilities();
+        const selected2 = selectBuyCandidate({
+          job,
+          search,
+          candidates: searchResult.candidates,
+          limits: { remainingBudget, coins: Number(capabilities.coins) - minimumRetainedCoins }
+        });
+        if (!selected2.selected) {
+          emptySearches += 1;
+          receipts.push({
+            index: receipts.length + 1,
+            status: "empty-search",
+            search: { ...search },
+            candidates: searchResult.candidates?.length || 0,
+            rejectionCounts: selected2.rejectionCounts
+          });
+          if (emptySearches >= Number(job.policy.maxConsecutiveEmptySearches)) {
+            stop("stopped", "empty-search-limit");
+            break;
+          }
+          await sleep(randomDelayMs2(job.policy.searchDelaySeconds, random));
+          continue;
+        }
+        emptySearches = 0;
+        const candidate = selected2.selected;
+        const price = Number(candidate.auction.buyNowPrice);
+        checkpoint("candidate-selected", {
+          item: candidate.item,
+          tradeId: candidate.auction.tradeId,
+          price,
+          search
+        });
+        const ownership = adapter.inspectDefinitionOwnership(candidate.item.definitionId);
+        const destination = destinationForOwnership(ownership);
+        const liveCapabilities = adapter.inspectCapabilities();
+        if (expectedDestination !== "auto" && destination !== expectedDestination) {
+          stop("blocked", "buy-destination-changed");
+          break;
+        }
+        if (price > Number(job.policy.totalBudget) - spent) {
+          stop("stopped", "budget-limit");
+          break;
+        }
+        if (!Number.isFinite(Number(liveCapabilities.coins)) || price > Number(liveCapabilities.coins)) {
+          stop("blocked", "insufficient-coins");
+          break;
+        }
+        if (Number(liveCapabilities.coins) - price < minimumRetainedCoins) {
+          stop("blocked", "minimum-retained-coins");
+          break;
+        }
+        if (destination === "transfer" && Number(liveCapabilities.transferCapacity?.free) <= 0) {
+          stop("blocked", "transfer-list-full");
+          break;
+        }
+        if (input2.shouldStop?.() === true) {
+          stop("stopped", "stopped-by-user");
+          break;
+        }
+        const maxBuyAttempts = Math.max(1, Math.floor(Number(input2.maxBuyAttempts || Number.MAX_SAFE_INTEGER)));
+        if (buyAttempts >= maxBuyAttempts) {
+          stop("stopped", "buy-attempt-limit");
+          break;
+        }
+        const buyCircuit = options.circuitBreaker?.availability?.();
+        if (buyCircuit && buyCircuit.allowed !== true) {
+          stop("blocked", "trade-circuit-open");
+          break;
+        }
+        if (input2.beforeBuy && await input2.beforeBuy() !== true) {
+          stop("blocked", "buy-execution-lease-lost");
+          break;
+        }
+        const item = safeItem(candidate);
+        const purchaseRef = { ...item, tradeId: Number(candidate.auction.tradeId), price };
+        const coinsBeforePurchase = Number(liveCapabilities.coins);
+        buyAttempts += 1;
+        checkpoint("buy-request-started", {
+          item,
+          tradeId: purchaseRef.tradeId,
+          price,
+          destination,
+          search
+        });
+        const bought = await adapter.buyNowItem(purchaseRef, price);
+        checkpoint("buy-response-received", {
+          item,
+          tradeId: purchaseRef.tradeId,
+          price,
+          destination,
+          status: bought.status,
+          response: bought.response
+        });
+        let purchase = null;
+        let refresh = null;
+        let afterPurchaseCapabilities = adapter.inspectCapabilities();
+        if (["accepted", "ambiguous"].includes(bought.status)) {
+          checkpoint("purchase-reconciliation-started", { item, tradeId: purchaseRef.tradeId, price, destination });
+          refresh = await adapter.refreshPurchaseState({ ambiguity: bought.status === "ambiguous" });
+          afterPurchaseCapabilities = adapter.inspectCapabilities();
+          purchase = adapter.inspectPurchase(purchaseRef);
+          checkpoint("purchase-reconciliation-finished", {
+            item: purchase?.candidate?.item || item,
+            tradeId: purchaseRef.tradeId,
+            price,
+            destination,
+            status: refresh.status,
+            response: refresh.response
+          });
+        }
+        if (refresh && refresh.status !== "completed") {
+          const classification = classifyTradeError(refresh.error || refresh.response || { kind: refresh.status });
+          options.circuitBreaker?.recordFailure?.(refresh.error || refresh.response || {}, {
+            action: "buy-reconciliation",
+            endpoint: "/purchased-state",
+            jobId: job.id,
+            runId,
+            classification,
+            response: refresh.response,
+            capabilities: afterPurchaseCapabilities
+          });
+          failed += 1;
+          stop(classification.opensCircuit ? "blocked" : "ambiguous", classification.opensCircuit ? `trade-${classification.kind}` : "purchase-refresh-not-reconciled");
+          receipts.push({
+            index: receipts.length + 1,
+            status,
+            reason,
+            item,
+            tradeId: purchaseRef.tradeId,
+            price,
+            priceLimit: Number(search.maxBuyNow),
+            coinsBefore: coinsBeforePurchase,
+            coinsAfter: Number(afterPurchaseCapabilities.coins),
+            search: { ...search },
+            refresh
+          });
+          break;
+        }
+        const coinDelta = coinsBeforePurchase - Number(afterPurchaseCapabilities.coins);
+        const ambiguousPurchaseProven = bought.status !== "ambiguous" || purchase?.status === "loaded" && Number.isFinite(coinDelta) && coinDelta === price;
+        if (purchase?.status !== "loaded") {
+          const classification = classifyTradeError(bought.error || bought.response || { kind: bought.status });
+          if (bought.status !== "accepted") {
+            options.circuitBreaker?.recordFailure?.(bought.error || bought.response || {}, {
+              action: "buy",
+              endpoint: "/auctionhouse",
+              jobId: job.id,
+              runId,
+              classification,
+              response: bought.response,
+              capabilities: adapter.inspectCapabilities()
+            });
+          }
+          if (classification.kind === "competition-lost") {
+            receipts.push({ index: receipts.length + 1, status: "competition-lost", item, tradeId: purchaseRef.tradeId, price, search: { ...search } });
+            if (buyAttempts >= maxBuyAttempts) {
+              stop("stopped", "buy-attempt-limit");
+              break;
+            }
+            await sleep(randomDelayMs2(job.policy.searchDelaySeconds, random));
+            continue;
+          }
+          failed += 1;
+          const ambiguous = bought.status === "accepted" || bought.status === "ambiguous" || classification.ambiguous;
+          stop(classification.opensCircuit ? "blocked" : ambiguous ? "ambiguous" : "failed", classification.opensCircuit ? `trade-${classification.kind}` : "purchase-not-reconciled");
+          receipts.push({
+            index: receipts.length + 1,
+            status,
+            reason,
+            item,
+            tradeId: purchaseRef.tradeId,
+            price,
+            priceLimit: Number(search.maxBuyNow),
+            coinsBefore: coinsBeforePurchase,
+            coinsAfter: Number(afterPurchaseCapabilities.coins),
+            search: { ...search },
+            adapterStatus: bought.status,
+            response: bought.response,
+            error: bought.error
+          });
+          break;
+        }
+        if (!ambiguousPurchaseProven) {
+          failed += 1;
+          stop("ambiguous", "purchase-coin-change-not-reconciled");
+          receipts.push({
+            index: receipts.length + 1,
+            status: "ambiguous",
+            reason,
+            item,
+            tradeId: purchaseRef.tradeId,
+            price,
+            priceLimit: Number(search.maxBuyNow),
+            coinsBefore: coinsBeforePurchase,
+            coinsAfter: Number(afterPurchaseCapabilities.coins),
+            search: { ...search },
+            adapterStatus: bought.status
+          });
+          break;
+        }
+        const purchasedRef = { ...purchase.candidate.item, tradeId: purchaseRef.tradeId, price };
+        checkpoint("purchase-route-started", { item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination });
+        const routed = await adapter.routePurchasedItem(purchasedRef, destination);
+        checkpoint("purchase-route-finished", {
+          item: routed.item || purchasedRef,
+          tradeId: purchaseRef.tradeId,
+          price,
+          destination,
+          status: routed.status,
+          response: routed.response
+        });
+        if (routed.status !== "completed") {
+          failed += 1;
+          stop("blocked", routed.status === "destination-full" ? "transfer-list-full" : `purchase-route-${routed.status}`);
+          receipts.push({
+            index: receipts.length + 1,
+            status: "blocked",
+            reason,
+            item: purchasedRef,
+            tradeId: purchaseRef.tradeId,
+            price,
+            priceLimit: Number(search.maxBuyNow),
+            coinsBefore: coinsBeforePurchase,
+            coinsAfter: Number(afterPurchaseCapabilities.coins),
+            destination,
+            route: routed
+          });
+          break;
+        }
+        checkpoint("route-verification-refresh-started", { item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination });
+        const routeRefresh = await adapter.refreshPurchaseState({ destination });
+        checkpoint("route-verification-refresh-finished", {
+          item: purchasedRef,
+          tradeId: purchaseRef.tradeId,
+          price,
+          destination,
+          status: routeRefresh.status,
+          response: routeRefresh.response
+        });
+        const verified = adapter.inspectPurchase({ ...purchasedRef, pile: destination });
+        checkpoint("route-verification-inspected", {
+          item: verified.candidate?.item || purchasedRef,
+          tradeId: purchaseRef.tradeId,
+          price,
+          destination,
+          status: verified.status
+        });
+        if (verified.status !== "loaded" || verified.candidate?.item?.pile !== destination) {
+          failed += 1;
+          stop("ambiguous", "purchase-routed-but-not-verified");
+          receipts.push({
+            index: receipts.length + 1,
+            status: "ambiguous",
+            reason,
+            item: purchasedRef,
+            tradeId: purchaseRef.tradeId,
+            price,
+            priceLimit: Number(search.maxBuyNow),
+            coinsBefore: coinsBeforePurchase,
+            coinsAfter: Number(afterPurchaseCapabilities.coins),
+            destination,
+            route: routed,
+            verification: verified
+          });
+          break;
+        }
+        succeeded += 1;
+        spent += price;
+        options.circuitBreaker?.recordSuccess?.({ action: "buy", jobId: job.id, runId });
+        receipts.push({
+          index: receipts.length + 1,
+          status: "purchased",
+          item,
+          tradeId: purchaseRef.tradeId,
+          rating: Number(candidate.rating),
+          price,
+          priceLimit: Number(search.maxBuyNow),
+          coinsBefore: coinsBeforePurchase,
+          coinsAfter: Number(afterPurchaseCapabilities.coins),
+          destination,
+          search: { ...search },
+          verification: { item: { ...verified.candidate.item }, purchasePrice: verified.purchasePrice }
+        });
+        if (succeeded < requested && input2.shouldStop?.() !== true) {
+          await sleep(randomDelayMs2(job.policy.searchDelaySeconds, random));
+        }
+      }
+      const finishedAt = Number(now());
+      const afterCapabilities = adapter.inspectCapabilities();
+      return createTradeRunReceipt({
+        runId,
+        jobId: job.id,
+        jobType: job.type,
+        scheduledFor: input2.scheduledFor ?? startedAt,
+        startedAt,
+        finishedAt,
+        status,
+        reason,
+        requested,
+        succeeded,
+        failed,
+        skipped: Math.max(0, requested - succeeded - failed),
+        coinsBefore: beforeCapabilities.coins,
+        coinsAfter: afterCapabilities.coins,
+        receipts: [{
+          status: "run-summary",
+          searches,
+          buyAttempts,
+          spent,
+          expectedDestination,
+          minimumRetainedCoins,
+          cursor
+        }, ...receipts]
+      });
+    }
+    return Object.freeze({ run });
+  }
+
+  // src/trade/manual-buy-validation.js
+  var MANUAL_BUY_VALIDATION_MAX_PRICE = 2e3;
+  var MANUAL_BUY_VALIDATION_MAX_RUNTIME_MINUTES = 5;
+  var MANUAL_BUY_VALIDATION_MAX_EMPTY_SEARCHES = 5;
+  function manualBuyValidationConfirmation(maxPrice, expectedDestination = "auto") {
+    const destination = normalizeExpectedBuyDestination(expectedDestination);
+    if (!destination) throw new Error("Buy validation destination must be auto, club, or transfer");
+    return destination === "auto" ? `BUY 1 MAX ${maxPrice}` : `BUY 1 TO ${destination.toUpperCase()} MAX ${maxPrice}`;
+  }
+  function effectiveRatingLimit(job) {
+    const rating = Number(job.policy.ratingMin);
+    const override = Number(job.policy.ratingPriceOverrides?.[String(rating)]);
+    return Number.isFinite(override) && override > 0 ? override : Number(job.policy.maxBuyNow);
+  }
+  function inspectManualBuyValidationJob(input2 = {}, options = {}) {
+    let job;
+    try {
+      job = normalizeTradeJob(input2, { now: options.now ?? Date.now() });
+    } catch (error) {
+      return { ready: false, reason: "manual-buy-job-invalid", error: error?.message || String(error), job: null };
+    }
+    let reason = null;
+    if (job.type !== "buy") reason = "manual-buy-validation-buy-only";
+    else if (job.enabled !== true) reason = "manual-buy-validation-job-disabled";
+    else if (job.armed === true) reason = "manual-buy-validation-job-must-be-unarmed";
+    else if (job.schedule?.type !== "manual") reason = "manual-buy-validation-manual-only";
+    else if (job.policy.cardClass !== "rare-gold") reason = "manual-buy-validation-rare-gold-only";
+    else if (Number(job.policy.ratingMin) !== Number(job.policy.ratingMax)) reason = "manual-buy-validation-single-rating-only";
+    else if (Number(job.policy.quantity) !== 1) reason = "manual-buy-validation-one-item-only";
+    else if (Number(job.policy.maxBuyNow) > MANUAL_BUY_VALIDATION_MAX_PRICE) reason = "manual-buy-validation-price-cap";
+    else if (Number(job.policy.totalBudget) > MANUAL_BUY_VALIDATION_MAX_PRICE) reason = "manual-buy-validation-budget-cap";
+    const maxPrice = effectiveRatingLimit(job);
+    if (!reason && maxPrice > MANUAL_BUY_VALIDATION_MAX_PRICE) reason = "manual-buy-validation-rating-price-cap";
+    if (!reason && maxPrice > Number(job.policy.totalBudget)) reason = "manual-buy-validation-budget-below-price-limit";
+    if (reason) return { ready: false, reason, job, maxPrice };
+    const guardedJob = {
+      ...job,
+      armed: false,
+      schedule: { type: "manual" },
+      policy: {
+        ...job.policy,
+        quantity: 1,
+        maxRuntimeMinutes: Math.min(
+          Number(job.policy.maxRuntimeMinutes),
+          MANUAL_BUY_VALIDATION_MAX_RUNTIME_MINUTES
+        ),
+        maxPurchasesPerSearch: 1,
+        maxConsecutiveEmptySearches: Math.min(
+          Number(job.policy.maxConsecutiveEmptySearches),
+          MANUAL_BUY_VALIDATION_MAX_EMPTY_SEARCHES
+        )
+      }
+    };
+    return {
+      ready: true,
+      reason: null,
+      job: guardedJob,
+      maxPrice,
+      requiredText: manualBuyValidationConfirmation(maxPrice)
+    };
+  }
+
+  // src/trade/guarded-manual-buy.js
+  function createGuardedManualBuyExecutor(options = {}) {
+    const operationCoordinator = options.operationCoordinator;
+    const lease = options.lease;
+    const buyPreview = options.buyPreview;
+    const journal = options.journal;
+    if (!operationCoordinator?.acquire || !operationCoordinator?.release) throw new TypeError("Operation Coordinator is required");
+    if (!lease?.acquire || !lease?.heartbeat || !lease?.release) throw new TypeError("Trade Run Lease is required");
+    if (typeof buyPreview?.preview !== "function") throw new TypeError("Buy Preview is required");
+    if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const sleep = typeof options.sleep === "function" ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const createRunId = typeof options.createRunId === "function" ? options.createRunId : () => `manual-buy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const transactionFactory = typeof options.transactionFactory === "function" ? options.transactionFactory : (transactionOptions) => createBuyTransaction(transactionOptions);
+    function blockedReceipt(job, runId, reason, startedAt = Number(now())) {
+      return createTradeRunReceipt({
+        runId,
+        jobId: job?.id,
+        jobType: job?.type,
+        scheduledFor: startedAt,
+        startedAt,
+        finishedAt: Number(now()),
+        status: "blocked",
+        reason,
+        requested: 0
+      });
+    }
+    async function execute(input2 = {}) {
+      const startedAt = Number(now());
+      const runId = createRunId();
+      const gate = inspectManualBuyValidationJob(input2.job, { now: startedAt });
+      if (!gate.ready) return blockedReceipt(input2.job, runId, gate.reason, startedAt);
+      const expectedDestination = normalizeExpectedBuyDestination(input2.expectedDestination || "auto");
+      if (!expectedDestination) return blockedReceipt(gate.job, runId, "buy-validation-destination-invalid", startedAt);
+      const requiredText = manualBuyValidationConfirmation(gate.maxPrice, expectedDestination);
+      if (String(input2.confirmationText || "") !== requiredText) {
+        throw new Error(`Confirmation must exactly match ${requiredText}`);
+      }
+      const scheduler = options.getSchedulerState?.() || {};
+      if (scheduler.paused !== true || scheduler.liveExecutionEnabled === true) {
+        return blockedReceipt(gate.job, runId, "manual-buy-scheduler-must-be-locked", startedAt);
+      }
+      const circuit = options.circuitBreaker?.availability?.();
+      if (circuit && circuit.allowed !== true) return blockedReceipt(gate.job, runId, "trade-circuit-open", startedAt);
+      const operationId = `manual-buy:${runId}`;
+      const operation = operationCoordinator.acquire({
+        id: operationId,
+        type: "trade-buy",
+        ownerId: options.ownerId || "",
+        label: gate.job.name
+      });
+      if (!operation.acquired) return blockedReceipt(gate.job, runId, operation.reason || "operation-unavailable", startedAt);
+      const acquired = lease.acquire({ runId, jobId: gate.job.id });
+      if (!acquired.acquired || acquired.recoveryRequired) {
+        if (acquired.acquired) lease.release(runId);
+        operationCoordinator.release(operationId);
+        return blockedReceipt(
+          gate.job,
+          runId,
+          acquired.recoveryRequired ? "expired-lease-reconciliation-required" : acquired.reason || "lease-unavailable",
+          startedAt
+        );
+      }
+      journal?.begin?.({
+        runId,
+        jobId: gate.job.id,
+        expectedDestination,
+        at: startedAt
+      });
+      const finishReceipt = (receipt, context = {}, phase = "receipt-recorded") => {
+        journal?.finish?.(runId, {
+          phase,
+          status: receipt.status,
+          reason: receipt.reason
+        });
+        options.onReceipt?.(receipt, { job: gate.job, input: input2, ...context });
+        return receipt;
+      };
+      options.onRunningChange?.(true, { ...input2, job: gate.job, runId });
+      try {
+        let preview;
+        try {
+          journal?.checkpoint?.(runId, { phase: "preview-started" });
+          preview = await buyPreview.preview(gate.job, { platform: input2.platform || "pc" });
+          journal?.checkpoint?.(runId, { phase: "preview-finished", status: preview?.plan?.ready ? "completed" : "blocked" });
+        } catch (error) {
+          const receipt2 = blockedReceipt(gate.job, runId, "buy-preview-failed", startedAt);
+          return finishReceipt(receipt2, { preview: null, error }, "preview-failed");
+        }
+        if (preview?.plan?.ready !== true || preview?.liveExecutionAllowed !== false) {
+          const receipt2 = blockedReceipt(gate.job, runId, "buy-preview-not-ready", startedAt);
+          return finishReceipt(receipt2, { preview }, "preview-blocked");
+        }
+        const adapter = options.getTradeAdapter();
+        journal?.checkpoint?.(runId, { phase: "validation-destination-filter-started", destination: expectedDestination });
+        const destinationPlan = filterBuyCatalogForDestination({ lanes: preview.plan.lanes }, adapter, expectedDestination);
+        journal?.checkpoint?.(runId, {
+          phase: "validation-destination-filter-finished",
+          destination: expectedDestination,
+          status: destinationPlan.reason ? "blocked" : "completed",
+          reason: destinationPlan.reason
+        });
+        preview = {
+          ...preview,
+          validationDestination: {
+            expected: expectedDestination,
+            definitionsBefore: destinationPlan.before,
+            matchingDefinitions: destinationPlan.matched,
+            ready: !destinationPlan.reason,
+            reason: destinationPlan.reason || null
+          }
+        };
+        if (destinationPlan.reason) {
+          const receipt2 = blockedReceipt(gate.job, runId, destinationPlan.reason, startedAt);
+          return finishReceipt(receipt2, { preview }, "validation-destination-blocked");
+        }
+        const transaction = transactionFactory({
+          tradeAdapter: adapter,
+          playerCatalogProvider: options.playerCatalogProvider,
+          circuitBreaker: options.circuitBreaker,
+          sleep,
+          onCheckpoint: (checkpoint) => journal?.checkpoint?.(runId, checkpoint)
+        });
+        const receipt = await transaction.run({
+          job: gate.job,
+          runId,
+          scheduledFor: startedAt,
+          platform: input2.platform || "pc",
+          expectedDestination,
+          maxBuyAttempts: 1,
+          beforeBuy: () => {
+            const renewed = lease.heartbeat(runId) === true;
+            journal?.checkpoint?.(runId, {
+              phase: renewed ? "buy-lease-heartbeat-completed" : "buy-lease-heartbeat-failed",
+              status: renewed ? "completed" : "blocked"
+            });
+            return renewed;
+          },
+          shouldStop: () => options.shouldStop?.() === true
+        });
+        return finishReceipt(receipt, { preview });
+      } catch (error) {
+        journal?.finish?.(runId, {
+          phase: "executor-error",
+          status: "error",
+          reason: error?.message || String(error)
+        });
+        throw error;
+      } finally {
+        options.onRunningChange?.(false, { ...input2, job: gate.job, runId });
+        lease.release(runId);
+        operationCoordinator.release(operationId);
+      }
+    }
+    return Object.freeze({ execute });
+  }
+
+  // src/trade/scheduled-buy-validation.js
+  var SCHEDULED_BUY_VALIDATION_MAX_PRICE = 2e3;
+  var SCHEDULED_BUY_VALIDATION_MAX_RUNTIME_MINUTES = 5;
+  var SCHEDULED_BUY_VALIDATION_MAX_EMPTY_SEARCHES = 5;
+  function effectiveRatingLimit2(job) {
+    const rating = Number(job.policy.ratingMin);
+    const override = Number(job.policy.ratingPriceOverrides?.[String(rating)]);
+    return Number.isFinite(override) && override > 0 ? override : Number(job.policy.maxBuyNow);
+  }
+  function explicitMinimumRetainedCoins(value) {
+    if (value === null || value === void 0 || value === "") return null;
+    const number = Number(value);
+    return Number.isInteger(number) && number >= 0 ? number : null;
+  }
+  function scheduledBuyValidationConfirmation(minimumRetainedCoins) {
+    const minimum = explicitMinimumRetainedCoins(minimumRetainedCoins);
+    if (minimum === null) throw new Error("Scheduled Buy minimum retained coins must be explicit");
+    return `RUN BUY ONCE 1 RESERVE ${minimum}`;
+  }
+  function inspectScheduledBuyValidationJob(input2 = {}, options = {}) {
+    let job;
+    try {
+      job = normalizeTradeJob(input2, { now: options.now ?? Date.now() });
+    } catch (error) {
+      return { ready: false, reason: "scheduled-buy-job-invalid", error: error?.message || String(error), job: null };
+    }
+    const globalMinimum = explicitMinimumRetainedCoins(options.minimumRetainedCoins);
+    const jobMinimum = explicitMinimumRetainedCoins(job.policy.minimumRetainedCoins);
+    let reason = null;
+    if (job.type !== "buy") reason = "scheduled-buy-validation-buy-only";
+    else if (job.enabled !== true) reason = "scheduled-buy-validation-job-disabled";
+    else if (job.armed !== true) reason = "scheduled-buy-validation-job-not-armed";
+    else if (job.schedule?.type !== "once") reason = "scheduled-buy-validation-once-only";
+    else if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) reason = "scheduled-buy-validation-run-at-invalid";
+    else if (!["skip", "grace-window"].includes(job.misfirePolicy?.type)) reason = "scheduled-buy-validation-next-login-disabled";
+    else if (job.misfirePolicy?.type === "grace-window" && Number(job.misfirePolicy.graceMinutes) > 15) reason = "scheduled-buy-validation-grace-too-long";
+    else if (job.policy.cardClass !== "rare-gold") reason = "scheduled-buy-validation-rare-gold-only";
+    else if (Number(job.policy.ratingMin) !== Number(job.policy.ratingMax)) reason = "scheduled-buy-validation-single-rating-only";
+    else if (Number(job.policy.quantity) !== 1) reason = "scheduled-buy-validation-one-item-only";
+    else if (Number(job.policy.maxBuyNow) > SCHEDULED_BUY_VALIDATION_MAX_PRICE) reason = "scheduled-buy-validation-price-cap";
+    else if (Number(job.policy.totalBudget) > SCHEDULED_BUY_VALIDATION_MAX_PRICE) reason = "scheduled-buy-validation-budget-cap";
+    else if (globalMinimum === null) reason = "scheduled-buy-validation-global-reserve-required";
+    const maxPrice = effectiveRatingLimit2(job);
+    if (!reason && maxPrice > SCHEDULED_BUY_VALIDATION_MAX_PRICE) reason = "scheduled-buy-validation-rating-price-cap";
+    if (!reason && maxPrice > Number(job.policy.totalBudget)) reason = "scheduled-buy-validation-budget-below-price-limit";
+    if (reason) return { ready: false, reason, job, maxPrice, minimumRetainedCoins: globalMinimum };
+    const minimumRetainedCoins = Math.max(globalMinimum, jobMinimum ?? 0);
+    const guardedJob = {
+      ...job,
+      policy: {
+        ...job.policy,
+        quantity: 1,
+        minimumRetainedCoins,
+        maxRuntimeMinutes: Math.min(
+          Number(job.policy.maxRuntimeMinutes),
+          SCHEDULED_BUY_VALIDATION_MAX_RUNTIME_MINUTES
+        ),
+        maxPurchasesPerSearch: 1,
+        maxConsecutiveEmptySearches: Math.min(
+          Number(job.policy.maxConsecutiveEmptySearches),
+          SCHEDULED_BUY_VALIDATION_MAX_EMPTY_SEARCHES
+        )
+      }
+    };
+    return {
+      ready: true,
+      reason: null,
+      job: guardedJob,
+      maxPrice,
+      minimumRetainedCoins,
+      requiredText: scheduledBuyValidationConfirmation(minimumRetainedCoins)
+    };
+  }
+
+  // src/trade/guarded-scheduled-buy.js
+  function createGuardedScheduledBuyExecutor(options = {}) {
+    const store = options.store;
+    const operationCoordinator = options.operationCoordinator;
+    const buyPreview = options.buyPreview;
+    const journal = options.journal;
+    if (typeof store?.read !== "function" || typeof store?.relock !== "function") throw new TypeError("Trade Job Store is required");
+    if (!operationCoordinator?.acquire || !operationCoordinator?.release) throw new TypeError("Operation Coordinator is required");
+    if (typeof buyPreview?.preview !== "function") throw new TypeError("Buy Preview is required");
+    if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const sleep = typeof options.sleep === "function" ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const transactionFactory = typeof options.transactionFactory === "function" ? options.transactionFactory : (transactionOptions) => createBuyTransaction(transactionOptions);
+    function blockedReceipt(input2, reason, startedAt = Number(now())) {
+      return createTradeRunReceipt({
+        runId: input2.runId,
+        jobId: input2.job?.id,
+        jobType: input2.job?.type,
+        scheduledFor: input2.scheduledFor,
+        startedAt,
+        finishedAt: Number(now()),
+        status: "blocked",
+        reason,
+        requested: 0
+      });
+    }
+    async function execute(input2 = {}) {
+      const startedAt = Number(now());
+      const minimumRetainedCoins = store.read().safety?.minimumRetainedCoins;
+      store.relock();
+      const finish = (receipt, context = {}, phase = "receipt-recorded") => {
+        const safeReceipt = sanitizeTradeBuyReceipt(receipt);
+        journal?.finish?.(input2.runId, { phase, status: safeReceipt.status, reason: safeReceipt.reason });
+        options.onReceipt?.(safeReceipt, { job: context.job || input2.job, input: input2, ...context });
+        return safeReceipt;
+      };
+      if (options.validationGateEnabled !== true) return finish(blockedReceipt(input2, "scheduled-buy-validation-gate-disabled", startedAt));
+      if (input2.context?.liveExecutionEnabled !== true) return finish(blockedReceipt(input2, "live-execution-disabled", startedAt));
+      const gate = inspectScheduledBuyValidationJob(input2.job, { minimumRetainedCoins, now: startedAt });
+      if (!gate.ready) return finish(blockedReceipt(input2, gate.reason, startedAt), { gate });
+      const circuit = options.circuitBreaker?.availability?.();
+      if (circuit && circuit.allowed !== true) return finish(blockedReceipt(input2, "trade-circuit-open", startedAt), { gate });
+      const adapter = options.getTradeAdapter();
+      const capabilities = adapter.inspectCapabilities();
+      if (!Number.isFinite(Number(capabilities.coins))) {
+        return finish(blockedReceipt(input2, "scheduled-buy-coins-unavailable", startedAt), { gate });
+      }
+      if (Number(capabilities.coins) - Number(gate.maxPrice) < Number(gate.minimumRetainedCoins)) {
+        return finish(blockedReceipt(input2, "scheduled-buy-minimum-coins-not-met", startedAt), { gate });
+      }
+      const operationId = `scheduled-buy:${input2.runId}`;
+      const operation = operationCoordinator.acquire({
+        id: operationId,
+        type: "trade-buy",
+        ownerId: options.ownerId || "",
+        label: gate.job.name
+      });
+      if (!operation.acquired) return finish(blockedReceipt(input2, operation.reason || "operation-unavailable", startedAt), { gate });
+      journal?.begin?.({
+        runId: input2.runId,
+        jobId: gate.job.id,
+        expectedDestination: "auto",
+        at: startedAt
+      });
+      options.onRunningChange?.(true, { ...input2, job: gate.job });
+      try {
+        let preview;
+        try {
+          journal?.checkpoint?.(input2.runId, { phase: "preview-started" });
+          preview = await buyPreview.preview(gate.job, { platform: input2.platform || "pc" });
+          journal?.checkpoint?.(input2.runId, {
+            phase: "preview-finished",
+            status: preview?.plan?.ready ? "completed" : "blocked"
+          });
+        } catch (error) {
+          return finish(blockedReceipt(input2, "buy-preview-failed", startedAt), { gate, preview: null, error }, "preview-failed");
+        }
+        if (preview?.plan?.ready !== true || preview?.liveExecutionAllowed !== false) {
+          return finish(blockedReceipt(input2, "buy-preview-not-ready", startedAt), { gate, preview }, "preview-blocked");
+        }
+        journal?.checkpoint?.(input2.runId, { phase: "validation-destination-filter-started", destination: "auto" });
+        const destinationPlan = filterBuyCatalogForDestination({ lanes: preview.plan.lanes }, adapter, "auto");
+        journal?.checkpoint?.(input2.runId, {
+          phase: "validation-destination-filter-finished",
+          destination: "auto",
+          status: destinationPlan.reason ? "blocked" : "completed",
+          reason: destinationPlan.reason
+        });
+        if (destinationPlan.reason) {
+          return finish(blockedReceipt(input2, destinationPlan.reason, startedAt), { gate, preview }, "validation-destination-blocked");
+        }
+        const transaction = transactionFactory({
+          tradeAdapter: adapter,
+          playerCatalogProvider: options.playerCatalogProvider,
+          circuitBreaker: options.circuitBreaker,
+          sleep,
+          onCheckpoint: (checkpoint) => journal?.checkpoint?.(input2.runId, checkpoint)
+        });
+        const receipt = await transaction.run({
+          job: gate.job,
+          runId: input2.runId,
+          scheduledFor: input2.scheduledFor,
+          platform: input2.platform || "pc",
+          expectedDestination: "auto",
+          minimumRetainedCoins: gate.minimumRetainedCoins,
+          maxBuyAttempts: 1,
+          beforeBuy: () => input2.heartbeat?.() === true,
+          shouldStop: () => options.shouldStop?.() === true
+        });
+        return finish(receipt, { gate, preview });
+      } catch (error) {
+        journal?.finish?.(input2.runId, {
+          phase: "executor-error",
+          status: "error",
+          reason: error?.message || String(error)
+        });
+        throw error;
+      } finally {
+        options.onRunningChange?.(false, { ...input2, job: gate.job });
+        operationCoordinator.release(operationId);
+      }
+    }
+    return Object.freeze({ execute });
+  }
+
+  // src/trade/guarded-scheduled-listing.js
+  var GUARDED_SCHEDULE_CONFIRMATION = "RUN ONCE 1";
+  function guardedTradeSessionReadiness(input2 = {}) {
+    if (input2.pageReady !== true) return { ready: false, reason: "ea-session-unavailable" };
+    const fsu = input2.fsuReadiness || {};
+    if (fsu.detected !== true) return { ready: true, reason: null };
+    if (fsu.ready !== true) return { ready: false, reason: `fsu-club-${fsu.state || "not-ready"}` };
+    return { ready: true, reason: null };
+  }
+  function itemRef(ref = {}) {
+    return {
+      id: Number(ref.id || 0),
+      definitionId: Number(ref.definitionId || 0),
+      pile: String(ref.pile || "")
+    };
+  }
+  function sameItemRef(left = {}, right = {}) {
+    return Number(left.id || 0) > 0 && Number(left.id) === Number(right.id) && Number(left.definitionId) === Number(right.definitionId);
+  }
+  async function validateProvisionalClubEntry(options, input2, prepared) {
+    const readiness = input2.context?.fsuReadiness || {};
+    const entry = prepared?.plan?.entries?.[0];
+    const ref = itemRef(entry?.item);
+    if (readiness.detected !== true || readiness.fullyValidated !== false) {
+      return { ok: true, required: false, status: "not-required", item: ref };
+    }
+    if (ref.pile !== "club" || !ref.id || !ref.definitionId) {
+      return { ok: false, required: true, status: "invalid-item", item: ref };
+    }
+    if (typeof options.validateClubPlayers !== "function") {
+      return { ok: false, required: true, status: "unavailable", item: ref };
+    }
+    try {
+      const validation = await options.validateClubPlayers([ref], {
+        label: `${input2.job?.name || "Trade Scheduler"} targeted Club validation`
+      });
+      const returned = (validation?.items || []).map(itemRef);
+      const missing = (validation?.missing || []).map(itemRef);
+      const matched = returned.some((candidate) => sameItemRef(candidate, ref));
+      return {
+        ok: validation?.ok === true && matched,
+        required: true,
+        status: validation?.ok !== true ? "failed" : matched ? "passed" : "item-not-returned",
+        item: ref,
+        returned,
+        missing,
+        elapsed: Number(validation?.elapsed || 0),
+        reason: validation?.reason ? String(validation.reason) : null,
+        fsuState: String(readiness.state || ""),
+        cacheStatus: String(readiness.cacheStatus || "")
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        required: true,
+        status: "error",
+        item: ref,
+        error: { message: error?.message || String(error) },
+        fsuState: String(readiness.state || ""),
+        cacheStatus: String(readiness.cacheStatus || "")
+      };
+    }
+  }
+  function guardedScheduledListingReason(job = {}) {
+    if (job.type !== "listing") return "validation-gate-listing-only";
+    if (job.enabled !== true) return "validation-gate-job-disabled";
+    if (job.armed !== true) return "validation-gate-job-not-armed";
+    if (job.schedule?.type !== "once") return "validation-gate-once-only";
+    if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) return "validation-gate-run-at-invalid";
+    if (!["skip", "grace-window"].includes(job.misfirePolicy?.type)) return "validation-gate-next-login-disabled";
+    if (job.misfirePolicy?.type === "grace-window" && Number(job.misfirePolicy.graceMinutes) > 15) {
+      return "validation-gate-grace-too-long";
+    }
+    if (!Array.isArray(job.policy?.sources) || job.policy.sources.length !== 1 || job.policy.sources[0] !== "club") return "validation-gate-club-only";
+    if (Number(job.policy?.maxListings) !== 1) return "validation-gate-one-item-only";
+    return null;
+  }
+  function selectGuardedScheduledListingJob(snapshot = {}) {
+    const armed = (snapshot.jobs || []).filter((job) => job.enabled === true && job.armed === true);
+    if (armed.length !== 1) {
+      return { ready: false, reason: armed.length ? "validation-gate-multiple-armed-jobs" : "validation-gate-no-armed-job", job: null };
+    }
+    const reason = guardedScheduledListingReason(armed[0]);
+    const runtime = snapshot.runtimes?.[armed[0].id];
+    if (!reason && runtime && runtime.nextRunAt === null) {
+      return { ready: false, reason: "validation-gate-no-pending-run", job: null };
+    }
+    return { ready: reason === null, reason, job: reason === null ? armed[0] : null };
+  }
+  function createGuardedScheduledListingExecutor(options = {}) {
+    const store = options.store;
+    const listingPreparation = options.listingPreparation;
+    const operationCoordinator = options.operationCoordinator;
+    if (typeof store?.relock !== "function") throw new TypeError("Trade Job Store with relock is required");
+    if (typeof listingPreparation?.prepare !== "function") throw new TypeError("Listing Preparation is required");
+    if (!operationCoordinator?.acquire || !operationCoordinator?.release) throw new TypeError("Operation Coordinator is required");
+    if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const sleep = typeof options.sleep === "function" ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const transactionFactory = typeof options.transactionFactory === "function" ? options.transactionFactory : (transactionOptions) => createListingTransaction(transactionOptions);
+    function blockedReceipt(input2, reason, startedAt = Number(now())) {
+      return createTradeRunReceipt({
+        runId: input2.runId,
+        jobId: input2.job?.id,
+        jobType: input2.job?.type,
+        scheduledFor: input2.scheduledFor,
+        startedAt,
+        finishedAt: Number(now()),
+        status: "blocked",
+        reason,
+        requested: 0
+      });
+    }
+    async function execute(input2 = {}) {
+      const startedAt = Number(now());
+      store.relock();
+      if (options.validationGateEnabled !== true) return blockedReceipt(input2, "scheduled-listing-validation-gate-disabled", startedAt);
+      if (input2.context?.liveExecutionEnabled !== true) return blockedReceipt(input2, "live-execution-disabled", startedAt);
+      const reason = guardedScheduledListingReason(input2.job);
+      if (reason) return blockedReceipt(input2, reason, startedAt);
+      const availability = options.circuitBreaker?.availability?.();
+      if (availability && availability.allowed !== true) return blockedReceipt(input2, "trade-circuit-open", startedAt);
+      const operationId = `scheduled-listing:${input2.runId}`;
+      const operation = operationCoordinator.acquire({
+        id: operationId,
+        type: "trade-listing",
+        ownerId: options.ownerId || "",
+        label: input2.job.name
+      });
+      if (!operation.acquired) return blockedReceipt(input2, operation.reason || "operation-unavailable", startedAt);
+      options.onRunningChange?.(true, input2);
+      try {
+        const job = {
+          ...input2.job,
+          policy: { ...input2.job.policy, sources: ["club"], maxListings: 1 }
+        };
+        const prepared = await listingPreparation.prepare(job, { maxListings: 1 });
+        if (prepared?.ready !== true || prepared?.plan?.entries?.length !== 1) {
+          const receipt2 = blockedReceipt(input2, prepared?.blockers?.[0]?.reason || "scheduled-listing-not-prepared", startedAt);
+          options.onReceipt?.(receipt2, { job, prepared, input: input2 });
+          return receipt2;
+        }
+        const clubValidation = await validateProvisionalClubEntry(options, input2, prepared);
+        if (!clubValidation.ok) {
+          const receipt2 = blockedReceipt(input2, `fsu-targeted-club-validation-${clubValidation.status}`, startedAt);
+          options.onReceipt?.(receipt2, { job, prepared, clubValidation, input: input2 });
+          return receipt2;
+        }
+        const transaction = transactionFactory({
+          tradeAdapter: options.getTradeAdapter(),
+          circuitBreaker: options.circuitBreaker,
+          sleep
+        });
+        const receipt = await transaction.run({
+          job: prepared.job,
+          prepared,
+          runId: input2.runId,
+          confirmationToken: prepared.confirmation.token,
+          confirmationText: prepared.confirmation.requiredText,
+          scheduledFor: input2.scheduledFor,
+          beforeMutation: () => input2.heartbeat?.() === true,
+          shouldStop: () => options.shouldStop?.() === true
+        });
+        options.onReceipt?.(receipt, { job, prepared, clubValidation, input: input2 });
+        return receipt;
+      } finally {
+        options.onRunningChange?.(false, input2);
+        operationCoordinator.release(operationId);
+      }
+    }
+    return Object.freeze({ execute });
+  }
+
+  // src/trade/guarded-scheduled-job.js
+  function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
+    const armed = (snapshot.jobs || []).filter((job2) => job2.enabled === true && job2.armed === true);
+    if (armed.length !== 1) {
+      return {
+        ready: false,
+        reason: armed.length ? "validation-gate-multiple-armed-jobs" : "validation-gate-no-armed-job",
+        job: null,
+        gate: null,
+        requiredText: null
+      };
+    }
+    const job = armed[0];
+    let gate;
+    if (job.type === "listing") {
+      const reason = guardedScheduledListingReason(job);
+      gate = { ready: reason === null, reason, job, requiredText: GUARDED_SCHEDULE_CONFIRMATION };
+    } else if (job.type === "buy") {
+      if (options.scheduledBuyEnabled !== true) {
+        gate = { ready: false, reason: "scheduled-buy-validation-gate-disabled", job, requiredText: null };
+      } else {
+        gate = inspectScheduledBuyValidationJob(job, {
+          minimumRetainedCoins: options.minimumRetainedCoins ?? snapshot.safety?.minimumRetainedCoins,
+          now: options.now
+        });
+      }
+    } else {
+      gate = { ready: false, reason: "validation-gate-job-type-unsupported", job, requiredText: null };
+    }
+    const runtime = snapshot.runtimes?.[job.id];
+    if (gate.ready && runtime && runtime.nextRunAt === null) {
+      return { ready: false, reason: "validation-gate-no-pending-run", job: null, gate, requiredText: null };
+    }
+    return {
+      ready: gate.ready === true,
+      reason: gate.reason || null,
+      job: gate.ready ? job : null,
+      gate,
+      requiredText: gate.ready ? gate.requiredText : null
     };
   }
 
   // src/trade/circuit-breaker.js
   var TRADE_CIRCUIT_SCHEMA_VERSION = 1;
-  function clone6(value) {
+  function clone7(value) {
     return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
   }
-  function finiteNumber6(value, fallback = 0) {
+  function finiteNumber8(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -10663,7 +12208,7 @@
   }
   function safeEvent(input2 = {}, classification = {}) {
     return {
-      at: Math.max(0, finiteNumber6(input2.at, Date.now())),
+      at: Math.max(0, finiteNumber8(input2.at, Date.now())),
       action: String(input2.action || "unknown"),
       endpoint: String(input2.endpoint || ""),
       jobId: input2.jobId ? String(input2.jobId) : null,
@@ -10684,9 +12229,9 @@
       schemaVersion: TRADE_CIRCUIT_SCHEMA_VERSION,
       circuit: createTradeCircuitState(input2.circuit),
       recentEvents: (Array.isArray(input2.recentEvents) ? input2.recentEvents : []).slice(-20).map((event) => safeEvent(event, event.classification)),
-      updatedAt: Math.max(0, finiteNumber6(input2.updatedAt, 0)),
+      updatedAt: Math.max(0, finiteNumber8(input2.updatedAt, 0)),
       reset: input2.reset ? {
-        at: Math.max(0, finiteNumber6(input2.reset.at, 0)),
+        at: Math.max(0, finiteNumber8(input2.reset.at, 0)),
         reason: String(input2.reset.reason || "manual")
       } : null
     };
@@ -10704,7 +12249,7 @@
     }
     function write(record) {
       memory = normalizeTradeCircuitRecord(record);
-      storage?.set?.(key, clone6(memory));
+      storage?.set?.(key, clone7(memory));
       return read();
     }
     function snapshot() {
@@ -10721,7 +12266,7 @@
       return { ...result, record };
     }
     function recordFailure(error = {}, context = {}) {
-      const at = Math.max(0, finiteNumber6(context.at, now()));
+      const at = Math.max(0, finiteNumber8(context.at, now()));
       const classification = context.classification || classifyTradeError(error);
       const record = read();
       const event = safeEvent({ ...context, at }, classification);
@@ -10736,7 +12281,7 @@
     function recordSuccess(context = {}) {
       const record = read();
       if (record.circuit.persistent) return record;
-      const at = Math.max(0, finiteNumber6(context.at, now()));
+      const at = Math.max(0, finiteNumber8(context.at, now()));
       return write({
         ...record,
         circuit: reduceTradeCircuit(record.circuit, { type: "success", at }, config),
@@ -10744,7 +12289,7 @@
       });
     }
     function reset(reason = "manual") {
-      const at = Math.max(0, finiteNumber6(now(), Date.now()));
+      const at = Math.max(0, finiteNumber8(now(), Date.now()));
       return write({
         schemaVersion: TRADE_CIRCUIT_SCHEMA_VERSION,
         circuit: createTradeCircuitState(),
@@ -10769,7 +12314,7 @@
     "missed",
     "blocked"
   ]);
-  function finiteNumber7(value, fallback = 0) {
+  function finiteNumber9(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -10837,33 +12382,33 @@
     return zonedDateToEpoch({ ...shiftedDate(local, 1), ...time, second: 0 }, timezone);
   }
   function nextTradeRunAt(job = {}, referenceAtInput = Date.now(), options = {}) {
-    const referenceAt = Math.max(0, finiteNumber7(referenceAtInput, Date.now()));
+    const referenceAt = Math.max(0, finiteNumber9(referenceAtInput, Date.now()));
     const inclusive = options.inclusive !== false;
     const schedule = job.schedule || {};
     if (schedule.type === "manual") return null;
     if (schedule.type === "once") {
-      const runAt = Math.max(0, finiteNumber7(schedule.runAt));
+      const runAt = Math.max(0, finiteNumber9(schedule.runAt));
       return runAt > referenceAt || inclusive && runAt === referenceAt ? runAt : null;
     }
     if (schedule.type === "daily") return nextDailyRunAt(schedule, referenceAt, inclusive);
     if (schedule.type === "interval") {
       const period = positiveInteger9(schedule.everyMinutes, 60) * 6e4;
-      const anchorAt = Math.max(0, finiteNumber7(schedule.anchorAt, job.createdAt));
+      const anchorAt = Math.max(0, finiteNumber9(schedule.anchorAt, job.createdAt));
       if (referenceAt < anchorAt || inclusive && referenceAt === anchorAt) return anchorAt;
       const elapsed = referenceAt - anchorAt;
       const steps = inclusive ? Math.ceil(elapsed / period) : Math.floor(elapsed / period) + 1;
       return anchorAt + Math.max(0, steps) * period;
     }
     if (schedule.type === "window") {
-      const startAt = Math.max(0, finiteNumber7(schedule.startAt));
-      const endAt = Math.max(startAt, finiteNumber7(schedule.endAt, startAt));
+      const startAt = Math.max(0, finiteNumber9(schedule.startAt));
+      const endAt = Math.max(startAt, finiteNumber9(schedule.endAt, startAt));
       if (referenceAt > endAt || !inclusive && referenceAt === endAt) return null;
       return Math.max(startAt, referenceAt);
     }
     return null;
   }
   function createTradeJobRuntime(job = {}, options = {}) {
-    const now = Math.max(0, finiteNumber7(options.now, Date.now()));
+    const now = Math.max(0, finiteNumber9(options.now, Date.now()));
     return normalizeTradeJobRuntime({
       jobId: job.id,
       status: job.enabled === true && job.armed === true ? "waiting-time" : "disabled",
@@ -10882,13 +12427,13 @@
       lastStartedAt: nullableEpoch(input2.lastStartedAt),
       lastFinishedAt: nullableEpoch(input2.lastFinishedAt),
       lastRunId: input2.lastRunId ? String(input2.lastRunId) : null,
-      runCount: Math.max(0, Math.floor(finiteNumber7(input2.runCount))),
-      updatedAt: Math.max(0, finiteNumber7(input2.updatedAt))
+      runCount: Math.max(0, Math.floor(finiteNumber9(input2.runCount))),
+      updatedAt: Math.max(0, finiteNumber9(input2.updatedAt))
     };
   }
   function evaluateTradeJob(job = {}, runtimeInput = {}, context = {}) {
     const runtime = normalizeTradeJobRuntime({ ...runtimeInput, jobId: job.id });
-    const now = Math.max(0, finiteNumber7(context.now, Date.now()));
+    const now = Math.max(0, finiteNumber9(context.now, Date.now()));
     const result = (status, reason, action2 = "wait") => ({
       status,
       reason,
@@ -10906,7 +12451,7 @@
     if (context.sessionReady !== true) return result("waiting-session", context.sessionReason || "ea-session-unavailable");
     if (context.operationBusy === true) return result("waiting-operation", context.operationReason || "another-operation-active");
     const lateness = Math.max(0, now - runtime.nextRunAt);
-    const tolerance = Math.max(0, finiteNumber7(context.tickToleranceMs, 3e4));
+    const tolerance = Math.max(0, finiteNumber9(context.tickToleranceMs, 3e4));
     if (job.misfirePolicy?.type === "skip" && lateness > tolerance) {
       return result("missed", "misfire-skip", "advance");
     }
@@ -10918,8 +12463,8 @@
   }
   function advanceTradeJobRuntime(job = {}, runtimeInput = {}, input2 = {}) {
     const runtime = normalizeTradeJobRuntime(runtimeInput);
-    const at = Math.max(0, finiteNumber7(input2.at, Date.now()));
-    const scheduledFor = Math.max(0, finiteNumber7(input2.scheduledFor, runtime.nextRunAt));
+    const at = Math.max(0, finiteNumber9(input2.at, Date.now()));
+    const scheduledFor = Math.max(0, finiteNumber9(input2.scheduledFor, runtime.nextRunAt));
     const nextRunAt = nextTradeRunAt(job, Math.max(at, scheduledFor + 1), { inclusive: true });
     return normalizeTradeJobRuntime({
       ...runtime,
@@ -10936,14 +12481,134 @@
   }
 
   // src/trade/job-store.js
-  var TRADE_JOB_STORE_SCHEMA_VERSION = 1;
+  var TRADE_JOB_STORE_SCHEMA_VERSION = 2;
   var TRADE_HISTORY_LIMIT = 100;
-  function clone7(value) {
+  var TRADE_METRICS_SCHEMA_VERSION = 1;
+  var TRADE_METRICS_REASON_LIMIT = 20;
+  var TRADE_METRIC_STATUSES = ["completed", "blocked", "missed", "stopped", "failed", "error", "unknown"];
+  var TRADE_METRIC_JOB_TYPES = ["listing", "buy", "unknown"];
+  function clone8(value) {
     return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
   }
-  function finiteNumber8(value, fallback = 0) {
+  function finiteNumber10(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
+  }
+  function nullableNonNegativeInteger(value) {
+    if (value === null || value === void 0 || value === "") return null;
+    const number = Math.floor(Number(value));
+    return Number.isFinite(number) && number >= 0 ? number : null;
+  }
+  function nonNegativeInteger(value) {
+    const number = Math.floor(Number(value));
+    return Number.isFinite(number) && number >= 0 ? number : 0;
+  }
+  function nullableTimestamp(value) {
+    if (value === null || value === void 0 || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : null;
+  }
+  function normalizedCounterMap(input2, keys) {
+    return Object.fromEntries(keys.map((key) => [key, nonNegativeInteger(input2?.[key])]));
+  }
+  function normalizeMetricReasons(input2 = []) {
+    const merged = /* @__PURE__ */ new Map();
+    for (const entry of Array.isArray(input2) ? input2 : []) {
+      const reason = String(entry?.reason || "").slice(0, 120);
+      if (!reason) continue;
+      const previous = merged.get(reason) || { reason, count: 0, lastAt: null };
+      merged.set(reason, {
+        reason,
+        count: previous.count + nonNegativeInteger(entry?.count),
+        lastAt: Math.max(previous.lastAt || 0, nullableTimestamp(entry?.lastAt) || 0) || null
+      });
+    }
+    return [...merged.values()].sort((left, right) => right.count - left.count || (right.lastAt || 0) - (left.lastAt || 0) || left.reason.localeCompare(right.reason)).slice(0, TRADE_METRICS_REASON_LIMIT);
+  }
+  function normalizeTradeMetrics(input2 = {}) {
+    return {
+      schemaVersion: TRADE_METRICS_SCHEMA_VERSION,
+      firstRecordedAt: nullableTimestamp(input2.firstRecordedAt),
+      lastRecordedAt: nullableTimestamp(input2.lastRecordedAt),
+      lastRun: input2.lastRun && typeof input2.lastRun === "object" ? {
+        runId: String(input2.lastRun.runId || ""),
+        jobId: String(input2.lastRun.jobId || ""),
+        jobType: TRADE_METRIC_JOB_TYPES.includes(input2.lastRun.jobType) ? input2.lastRun.jobType : "unknown",
+        status: TRADE_METRIC_STATUSES.includes(input2.lastRun.status) ? input2.lastRun.status : "unknown",
+        reason: input2.lastRun.reason ? String(input2.lastRun.reason).slice(0, 120) : null,
+        finishedAt: nullableTimestamp(input2.lastRun.finishedAt)
+      } : null,
+      runs: {
+        total: nonNegativeInteger(input2.runs?.total),
+        byStatus: normalizedCounterMap(input2.runs?.byStatus, TRADE_METRIC_STATUSES),
+        byJobType: normalizedCounterMap(input2.runs?.byJobType, TRADE_METRIC_JOB_TYPES)
+      },
+      outcomes: {
+        requested: nonNegativeInteger(input2.outcomes?.requested),
+        succeeded: nonNegativeInteger(input2.outcomes?.succeeded),
+        failed: nonNegativeInteger(input2.outcomes?.failed),
+        skipped: nonNegativeInteger(input2.outcomes?.skipped)
+      },
+      buy: {
+        purchases: nonNegativeInteger(input2.buy?.purchases),
+        searches: nonNegativeInteger(input2.buy?.searches),
+        attempts: nonNegativeInteger(input2.buy?.attempts),
+        spent: nonNegativeInteger(input2.buy?.spent)
+      },
+      listing: {
+        listed: nonNegativeInteger(input2.listing?.listed)
+      },
+      reasons: normalizeMetricReasons(input2.reasons)
+    };
+  }
+  function receiptSummary(receipt = {}) {
+    return (Array.isArray(receipt.receipts) ? receipt.receipts : []).find((entry) => entry?.status === "run-summary") || null;
+  }
+  function recordTradeMetrics(input2 = {}, receipt = {}, options = {}) {
+    const metrics = normalizeTradeMetrics(input2);
+    const at = nullableTimestamp(receipt.finishedAt) ?? nullableTimestamp(receipt.startedAt) ?? nullableTimestamp(options.now) ?? Date.now();
+    const status = TRADE_METRIC_STATUSES.includes(receipt.status) ? receipt.status : "unknown";
+    const jobType = TRADE_METRIC_JOB_TYPES.includes(receipt.jobType) ? receipt.jobType : "unknown";
+    const summary = receiptSummary(receipt);
+    const reason = receipt.reason ? String(receipt.reason).slice(0, 120) : null;
+    const reasons = reason ? normalizeMetricReasons([...metrics.reasons, { reason, count: 1, lastAt: at }]) : metrics.reasons;
+    return normalizeTradeMetrics({
+      ...metrics,
+      firstRecordedAt: metrics.firstRecordedAt ?? at,
+      lastRecordedAt: at,
+      lastRun: {
+        runId: String(receipt.runId || ""),
+        jobId: String(receipt.jobId || ""),
+        jobType,
+        status,
+        reason,
+        finishedAt: at
+      },
+      runs: {
+        total: metrics.runs.total + 1,
+        byStatus: { ...metrics.runs.byStatus, [status]: metrics.runs.byStatus[status] + 1 },
+        byJobType: { ...metrics.runs.byJobType, [jobType]: metrics.runs.byJobType[jobType] + 1 }
+      },
+      outcomes: {
+        requested: metrics.outcomes.requested + nonNegativeInteger(receipt.requested),
+        succeeded: metrics.outcomes.succeeded + nonNegativeInteger(receipt.succeeded),
+        failed: metrics.outcomes.failed + nonNegativeInteger(receipt.failed),
+        skipped: metrics.outcomes.skipped + nonNegativeInteger(receipt.skipped)
+      },
+      buy: {
+        purchases: metrics.buy.purchases + (jobType === "buy" ? nonNegativeInteger(receipt.succeeded) : 0),
+        searches: metrics.buy.searches + (jobType === "buy" ? nonNegativeInteger(summary?.searches) : 0),
+        attempts: metrics.buy.attempts + (jobType === "buy" ? nonNegativeInteger(summary?.buyAttempts) : 0),
+        spent: metrics.buy.spent + (jobType === "buy" ? nonNegativeInteger(summary?.spent) : 0)
+      },
+      listing: {
+        listed: metrics.listing.listed + (jobType === "listing" ? nonNegativeInteger(receipt.succeeded) : 0)
+      },
+      reasons
+    });
+  }
+  function metricsFromHistory(history, now) {
+    return history.reduce((metrics, receipt) => recordTradeMetrics(metrics, receipt, { now }), normalizeTradeMetrics());
   }
   function relockedSnapshot(snapshot, at) {
     const jobs = snapshot.jobs.map((job) => job.armed === true ? { ...job, armed: false, updatedAt: at } : job);
@@ -10961,7 +12626,7 @@
     return { ...snapshot, paused: true, liveExecutionEnabled: false, jobs, runtimes };
   }
   function normalizeTradeJobStore(input2 = {}, options = {}) {
-    const now = Math.max(0, finiteNumber8(options.now, Date.now()));
+    const now = Math.max(0, finiteNumber10(options.now, Date.now()));
     const jobs = [];
     for (const raw of Array.isArray(input2.jobs) ? input2.jobs : []) {
       try {
@@ -10974,14 +12639,20 @@
       const persisted = input2.runtimes?.[job.id];
       runtimes[job.id] = persisted ? normalizeTradeJobRuntime({ ...persisted, jobId: job.id }) : createTradeJobRuntime(job, { now });
     }
+    const history = (Array.isArray(input2.history) ? input2.history : []).slice(-TRADE_HISTORY_LIMIT).map(clone8);
+    const metrics = input2.metrics?.schemaVersion === TRADE_METRICS_SCHEMA_VERSION ? normalizeTradeMetrics(input2.metrics) : metricsFromHistory(history, now);
     return {
       schemaVersion: TRADE_JOB_STORE_SCHEMA_VERSION,
       paused: input2.paused !== false,
       liveExecutionEnabled: input2.liveExecutionEnabled === true,
+      safety: {
+        minimumRetainedCoins: nullableNonNegativeInteger(input2.safety?.minimumRetainedCoins)
+      },
       jobs,
       runtimes,
-      history: (Array.isArray(input2.history) ? input2.history : []).slice(-TRADE_HISTORY_LIMIT).map(clone7),
-      updatedAt: Math.max(0, finiteNumber8(input2.updatedAt, now))
+      history,
+      metrics,
+      updatedAt: Math.max(0, finiteNumber10(input2.updatedAt, now))
     };
   }
   function createTradeJobStore(options = {}) {
@@ -10992,11 +12663,11 @@
     function read() {
       const value = storage?.get?.(key, null);
       if (value && typeof value === "object") memory = normalizeTradeJobStore(value, { now: now() });
-      return clone7(memory);
+      return clone8(memory);
     }
     function write(value) {
       memory = normalizeTradeJobStore({ ...value, updatedAt: now() }, { now: now() });
-      storage?.set?.(key, clone7(memory));
+      storage?.set?.(key, clone8(memory));
       return read();
     }
     function upsert(input2, normalizeOptions = {}) {
@@ -11017,7 +12688,7 @@
         ...snapshot.runtimes,
         [job.id]: scheduleChanged ? createTradeJobRuntime(job, { now: now() }) : normalizeTradeJobRuntime({ ...snapshot.runtimes[job.id], jobId: job.id })
       };
-      return { job: clone7(job), snapshot: write({ ...snapshot, jobs, runtimes }) };
+      return { job: clone8(job), snapshot: write({ ...snapshot, jobs, runtimes }) };
     }
     function remove(jobId) {
       const id = String(jobId || "");
@@ -11038,7 +12709,24 @@
     }
     function addHistory(receipt) {
       const snapshot = read();
-      return write({ ...snapshot, history: [...snapshot.history, clone7(receipt)].slice(-TRADE_HISTORY_LIMIT) });
+      return write({
+        ...snapshot,
+        history: [...snapshot.history, clone8(receipt)].slice(-TRADE_HISTORY_LIMIT),
+        metrics: recordTradeMetrics(snapshot.metrics, receipt, { now: now() })
+      });
+    }
+    function replaceJobs(inputs = []) {
+      if (!Array.isArray(inputs)) throw new TypeError("Trade Jobs must be an array");
+      const at = Number(now());
+      const jobs = inputs.map((input2) => normalizeTradeJob({ ...input2, armed: false, updatedAt: at }, { imported: true, now: at }));
+      const ids = /* @__PURE__ */ new Set();
+      for (const job of jobs) {
+        if (ids.has(job.id)) throw new Error(`Duplicate Trade Job id: ${job.id}`);
+        ids.add(job.id);
+      }
+      const snapshot = relockedSnapshot(read(), at);
+      const runtimes = Object.fromEntries(jobs.map((job) => [job.id, createTradeJobRuntime(job, { now: at })]));
+      return write({ ...snapshot, jobs, runtimes });
     }
     function setPaused(value) {
       return write({ ...read(), paused: value !== false });
@@ -11046,15 +12734,35 @@
     function setLiveExecutionEnabled(value) {
       return write({ ...read(), liveExecutionEnabled: value === true });
     }
+    function setMinimumRetainedCoins(value) {
+      let snapshot = read();
+      if (snapshot.liveExecutionEnabled === true) snapshot = relockedSnapshot(snapshot, Number(now()));
+      const minimumRetainedCoins = nullableNonNegativeInteger(value);
+      if (value !== null && value !== void 0 && value !== "" && minimumRetainedCoins === null) {
+        throw new TypeError("Minimum retained coins must be a non-negative integer or null");
+      }
+      return write({ ...snapshot, safety: { ...snapshot.safety, minimumRetainedCoins } });
+    }
     function relock() {
       return write(relockedSnapshot(read(), Number(now())));
     }
-    return Object.freeze({ read, upsert, remove, updateRuntime, addHistory, setPaused, setLiveExecutionEnabled, relock });
+    return Object.freeze({
+      read,
+      upsert,
+      remove,
+      updateRuntime,
+      addHistory,
+      replaceJobs,
+      setPaused,
+      setLiveExecutionEnabled,
+      setMinimumRetainedCoins,
+      relock
+    });
   }
 
   // src/trade/run-lease.js
   var TRADE_RUN_LEASE_SCHEMA_VERSION = 1;
-  function finiteNumber9(value, fallback = 0) {
+  function finiteNumber11(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -11066,9 +12774,9 @@
       runId: String(input2.runId),
       jobId: String(input2.jobId || ""),
       token: String(input2.token || ""),
-      acquiredAt: Math.max(0, finiteNumber9(input2.acquiredAt)),
-      heartbeatAt: Math.max(0, finiteNumber9(input2.heartbeatAt)),
-      expiresAt: Math.max(0, finiteNumber9(input2.expiresAt))
+      acquiredAt: Math.max(0, finiteNumber11(input2.acquiredAt)),
+      heartbeatAt: Math.max(0, finiteNumber11(input2.heartbeatAt)),
+      expiresAt: Math.max(0, finiteNumber11(input2.expiresAt))
     };
   }
   function leaseSnapshot(lease) {
@@ -11088,7 +12796,7 @@
     const key = String(options.key || "fc-loop-runner-trade-run-lease-v1");
     const ownerId = String(options.ownerId || "unknown-owner");
     const now = typeof options.now === "function" ? options.now : () => Date.now();
-    const ttlMs = Math.max(5e3, finiteNumber9(options.ttlMs, 3e4));
+    const ttlMs = Math.max(5e3, finiteNumber11(options.ttlMs, 3e4));
     const createToken = typeof options.createToken === "function" ? options.createToken : () => `${ownerId}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     function read() {
       return normalizeLease(storage?.get?.(key, null));
@@ -11144,12 +12852,70 @@
       if (read()) write(null);
       return read() === null;
     }
-    return Object.freeze({ acquire, heartbeat, inspect, release });
+    function clearExpired(runId) {
+      const current = read();
+      const at = Number(now());
+      if (!current || current.runId !== String(runId) || current.expiresAt > at) return false;
+      storage?.remove?.(key);
+      if (read()) write(null);
+      return read() === null;
+    }
+    return Object.freeze({ acquire, clearExpired, heartbeat, inspect, release });
+  }
+
+  // src/trade/expired-lease-validation.js
+  var EXPIRED_LEASE_VALIDATION_CONFIRMATION = "EXPIRE LEASE 1";
+  function requireCondition(condition, message) {
+    if (!condition) throw new Error(message);
+  }
+  function stageExpiredTradeLeaseValidation(options = {}) {
+    requireCondition(
+      String(options.confirmationText || "") === EXPIRED_LEASE_VALIDATION_CONFIRMATION,
+      `Confirmation must exactly match ${EXPIRED_LEASE_VALIDATION_CONFIRMATION}`
+    );
+    const snapshot = options.snapshot || {};
+    requireCondition(snapshot.paused === true, "Trade Scheduler must be paused");
+    requireCondition(snapshot.liveExecutionEnabled !== true, "Trade Scheduler live execution must be disabled");
+    const selected2 = selectGuardedScheduledListingJob(snapshot);
+    requireCondition(selected2.ready === true, selected2.reason || "Exactly one eligible armed Job is required");
+    const inspectLease = options.inspectLease;
+    const writeLease = options.writeLease;
+    requireCondition(typeof inspectLease === "function", "Trade Run Lease inspection is required");
+    requireCondition(typeof writeLease === "function", "Trade Run Lease storage is required");
+    const before = inspectLease();
+    requireCondition(!before?.lease, "A Trade Run Lease already exists; reconcile or clear it before validation");
+    const now = Number(options.now ?? Date.now());
+    const runAt = Number(selected2.job.schedule?.runAt || 0);
+    requireCondition(runAt >= now + 15e3, "The once Job must be scheduled at least 15 seconds in the future");
+    requireCondition(runAt <= now + 15 * 6e4, "The validation Job must run within 15 minutes");
+    const runId = `expired-lease-validation-${now}`;
+    const expiredAt = Math.max(0, now - 1e3);
+    writeLease({
+      schemaVersion: 1,
+      ownerId: `expired-validation-owner-${now}`,
+      runId,
+      jobId: selected2.job.id,
+      token: String(options.createToken?.() || `${runId}-internal-token`),
+      acquiredAt: Math.max(0, now - 6e4),
+      heartbeatAt: Math.max(0, now - 31e3),
+      expiresAt: expiredAt
+    });
+    const confirmed = inspectLease();
+    requireCondition(
+      confirmed?.expired === true && confirmed?.lease?.runId === runId,
+      "Expired Trade Run Lease validation setup could not be confirmed"
+    );
+    return {
+      staged: true,
+      jobId: selected2.job.id,
+      runAt,
+      lease: confirmed.lease
+    };
   }
 
   // src/trade/operation-coordinator.js
   var WRITE_OPERATIONS = /* @__PURE__ */ new Set(["loop", "batch-open", "trade-listing", "trade-buy", "dynamic-sbc-live-scan"]);
-  function finiteNumber10(value, fallback = 0) {
+  function finiteNumber12(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -11160,7 +12926,7 @@
       type: String(input2.type),
       label: String(input2.label || input2.type),
       ownerId: String(input2.ownerId || ""),
-      startedAt: Math.max(0, finiteNumber10(input2.startedAt)),
+      startedAt: Math.max(0, finiteNumber12(input2.startedAt)),
       write: input2.write !== false
     };
   }
@@ -11394,32 +13160,126 @@
     return Object.freeze({ tick });
   }
 
+  // src/trade/scheduler-events.js
+  var TRADE_SCHEDULER_EVENT_LIMIT = 100;
+  var RUNTIME_STATUS_PRIORITY = [
+    "running",
+    "waiting-operation",
+    "waiting-session",
+    "waiting-time",
+    "armed",
+    "blocked",
+    "completed",
+    "missed",
+    "disabled"
+  ];
+  function finiteNumber13(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function optionalString(value) {
+    return value === void 0 || value === null || value === "" ? null : String(value);
+  }
+  function normalizeEvent(input2 = {}, at = Date.now()) {
+    const timestamp = Math.max(0, finiteNumber13(input2.at, at));
+    return {
+      firstAt: Math.max(0, finiteNumber13(input2.firstAt, timestamp)),
+      at: timestamp,
+      count: Math.max(1, Math.floor(finiteNumber13(input2.count, 1))),
+      trigger: optionalString(input2.trigger) || "unknown",
+      status: optionalString(input2.status) || "unknown",
+      reason: optionalString(input2.reason),
+      jobId: optionalString(input2.jobId),
+      runId: optionalString(input2.runId),
+      runtimeStatus: optionalString(input2.runtimeStatus),
+      runtimeReason: optionalString(input2.runtimeReason),
+      runtimeNextRunAt: input2.runtimeNextRunAt === void 0 || input2.runtimeNextRunAt === null ? null : Math.max(0, finiteNumber13(input2.runtimeNextRunAt))
+    };
+  }
+  function eventSignature(event = {}) {
+    return JSON.stringify([
+      event.trigger,
+      event.status,
+      event.reason,
+      event.jobId,
+      event.runId,
+      event.runtimeStatus,
+      event.runtimeReason,
+      event.runtimeNextRunAt
+    ]);
+  }
+  function createTradeSchedulerEventLog(options = {}) {
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const limit = Math.max(1, Math.floor(finiteNumber13(options.limit, TRADE_SCHEDULER_EVENT_LIMIT)));
+    let events = [];
+    function record(input2 = {}) {
+      const event = normalizeEvent(input2, Number(now()));
+      const previous = events.at(-1);
+      if (previous && eventSignature(previous) === eventSignature(event)) {
+        const merged = {
+          ...event,
+          firstAt: previous.firstAt,
+          count: previous.count + 1
+        };
+        events = [...events.slice(0, -1), merged];
+        return { ...merged };
+      }
+      events = [...events, event].slice(-limit);
+      return { ...event };
+    }
+    function snapshot() {
+      return events.map((event) => ({ ...event }));
+    }
+    return Object.freeze({ record, snapshot });
+  }
+  function summarizeTradeSchedulerRuntime(snapshot = {}, preferredJobId = null) {
+    const runtimes = snapshot?.runtimes && typeof snapshot.runtimes === "object" ? snapshot.runtimes : {};
+    const entries = Object.entries(runtimes);
+    let selected2 = preferredJobId && runtimes[String(preferredJobId)] ? [String(preferredJobId), runtimes[String(preferredJobId)]] : null;
+    if (!selected2) {
+      for (const status of RUNTIME_STATUS_PRIORITY) {
+        selected2 = entries.find(([, runtime2]) => runtime2?.status === status);
+        if (selected2) break;
+      }
+    }
+    if (!selected2) return {};
+    const [jobId, runtime] = selected2;
+    return {
+      jobId,
+      runtimeStatus: optionalString(runtime?.status),
+      runtimeReason: optionalString(runtime?.reason),
+      runtimeNextRunAt: runtime?.nextRunAt ?? null
+    };
+  }
+
   // src/trade/scheduler-wakeups.js
   function createTradeSchedulerWakeups(options = {}) {
     const windowTarget = options.windowTarget;
     const documentTarget = options.documentTarget;
     if (typeof options.tick !== "function") throw new TypeError("tick is required");
     let started = false;
-    const wake = () => {
-      void options.tick();
+    const wake = (trigger) => {
+      void options.tick({ trigger });
     };
     const onVisibilityChange = () => {
-      if (documentTarget?.visibilityState === "visible" || documentTarget?.hidden === false) wake();
+      if (documentTarget?.visibilityState === "visible" || documentTarget?.hidden === false) wake("visibility");
     };
+    const onFocus = () => wake("focus");
+    const onOnline = () => wake("online");
     function start() {
       if (started) return false;
       started = true;
       documentTarget?.addEventListener?.("visibilitychange", onVisibilityChange);
-      windowTarget?.addEventListener?.("focus", wake);
-      windowTarget?.addEventListener?.("online", wake);
+      windowTarget?.addEventListener?.("focus", onFocus);
+      windowTarget?.addEventListener?.("online", onOnline);
       return true;
     }
     function stop() {
       if (!started) return false;
       started = false;
       documentTarget?.removeEventListener?.("visibilitychange", onVisibilityChange);
-      windowTarget?.removeEventListener?.("focus", wake);
-      windowTarget?.removeEventListener?.("online", wake);
+      windowTarget?.removeEventListener?.("focus", onFocus);
+      windowTarget?.removeEventListener?.("online", onOnline);
       return true;
     }
     return Object.freeze({ start, stop });
@@ -11439,179 +13299,6 @@
       return { name, supported: typeof lockManager?.request === "function" };
     }
     return Object.freeze({ run, inspect });
-  }
-
-  // src/trade/guarded-scheduled-listing.js
-  var GUARDED_SCHEDULE_CONFIRMATION = "RUN ONCE 1";
-  function guardedTradeSessionReadiness(input2 = {}) {
-    if (input2.pageReady !== true) return { ready: false, reason: "ea-session-unavailable" };
-    const fsu = input2.fsuReadiness || {};
-    if (fsu.detected !== true) return { ready: true, reason: null };
-    if (fsu.ready !== true) return { ready: false, reason: `fsu-club-${fsu.state || "not-ready"}` };
-    return { ready: true, reason: null };
-  }
-  function itemRef(ref = {}) {
-    return {
-      id: Number(ref.id || 0),
-      definitionId: Number(ref.definitionId || 0),
-      pile: String(ref.pile || "")
-    };
-  }
-  function sameItemRef(left = {}, right = {}) {
-    return Number(left.id || 0) > 0 && Number(left.id) === Number(right.id) && Number(left.definitionId) === Number(right.definitionId);
-  }
-  async function validateProvisionalClubEntry(options, input2, prepared) {
-    const readiness = input2.context?.fsuReadiness || {};
-    const entry = prepared?.plan?.entries?.[0];
-    const ref = itemRef(entry?.item);
-    if (readiness.detected !== true || readiness.fullyValidated !== false) {
-      return { ok: true, required: false, status: "not-required", item: ref };
-    }
-    if (ref.pile !== "club" || !ref.id || !ref.definitionId) {
-      return { ok: false, required: true, status: "invalid-item", item: ref };
-    }
-    if (typeof options.validateClubPlayers !== "function") {
-      return { ok: false, required: true, status: "unavailable", item: ref };
-    }
-    try {
-      const validation = await options.validateClubPlayers([ref], {
-        label: `${input2.job?.name || "Trade Scheduler"} targeted Club validation`
-      });
-      const returned = (validation?.items || []).map(itemRef);
-      const missing = (validation?.missing || []).map(itemRef);
-      const matched = returned.some((candidate) => sameItemRef(candidate, ref));
-      return {
-        ok: validation?.ok === true && matched,
-        required: true,
-        status: validation?.ok !== true ? "failed" : matched ? "passed" : "item-not-returned",
-        item: ref,
-        returned,
-        missing,
-        elapsed: Number(validation?.elapsed || 0),
-        reason: validation?.reason ? String(validation.reason) : null,
-        fsuState: String(readiness.state || ""),
-        cacheStatus: String(readiness.cacheStatus || "")
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        required: true,
-        status: "error",
-        item: ref,
-        error: { message: error?.message || String(error) },
-        fsuState: String(readiness.state || ""),
-        cacheStatus: String(readiness.cacheStatus || "")
-      };
-    }
-  }
-  function guardedScheduledListingReason(job = {}) {
-    if (job.type !== "listing") return "validation-gate-listing-only";
-    if (job.enabled !== true) return "validation-gate-job-disabled";
-    if (job.armed !== true) return "validation-gate-job-not-armed";
-    if (job.schedule?.type !== "once") return "validation-gate-once-only";
-    if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) return "validation-gate-run-at-invalid";
-    if (!["skip", "grace-window"].includes(job.misfirePolicy?.type)) return "validation-gate-next-login-disabled";
-    if (job.misfirePolicy?.type === "grace-window" && Number(job.misfirePolicy.graceMinutes) > 15) {
-      return "validation-gate-grace-too-long";
-    }
-    if (!Array.isArray(job.policy?.sources) || job.policy.sources.length !== 1 || job.policy.sources[0] !== "club") return "validation-gate-club-only";
-    if (Number(job.policy?.maxListings) !== 1) return "validation-gate-one-item-only";
-    return null;
-  }
-  function selectGuardedScheduledListingJob(snapshot = {}) {
-    const armed = (snapshot.jobs || []).filter((job) => job.enabled === true && job.armed === true);
-    if (armed.length !== 1) {
-      return { ready: false, reason: armed.length ? "validation-gate-multiple-armed-jobs" : "validation-gate-no-armed-job", job: null };
-    }
-    const reason = guardedScheduledListingReason(armed[0]);
-    const runtime = snapshot.runtimes?.[armed[0].id];
-    if (!reason && runtime && runtime.nextRunAt === null) {
-      return { ready: false, reason: "validation-gate-no-pending-run", job: null };
-    }
-    return { ready: reason === null, reason, job: reason === null ? armed[0] : null };
-  }
-  function createGuardedScheduledListingExecutor(options = {}) {
-    const store = options.store;
-    const listingPreparation = options.listingPreparation;
-    const operationCoordinator = options.operationCoordinator;
-    if (typeof store?.relock !== "function") throw new TypeError("Trade Job Store with relock is required");
-    if (typeof listingPreparation?.prepare !== "function") throw new TypeError("Listing Preparation is required");
-    if (!operationCoordinator?.acquire || !operationCoordinator?.release) throw new TypeError("Operation Coordinator is required");
-    if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
-    const now = typeof options.now === "function" ? options.now : () => Date.now();
-    const sleep = typeof options.sleep === "function" ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const transactionFactory = typeof options.transactionFactory === "function" ? options.transactionFactory : (transactionOptions) => createListingTransaction(transactionOptions);
-    function blockedReceipt(input2, reason, startedAt = Number(now())) {
-      return createTradeRunReceipt({
-        runId: input2.runId,
-        jobId: input2.job?.id,
-        jobType: input2.job?.type,
-        scheduledFor: input2.scheduledFor,
-        startedAt,
-        finishedAt: Number(now()),
-        status: "blocked",
-        reason,
-        requested: 0
-      });
-    }
-    async function execute(input2 = {}) {
-      const startedAt = Number(now());
-      store.relock();
-      if (options.validationGateEnabled !== true) return blockedReceipt(input2, "scheduled-listing-validation-gate-disabled", startedAt);
-      if (input2.context?.liveExecutionEnabled !== true) return blockedReceipt(input2, "live-execution-disabled", startedAt);
-      const reason = guardedScheduledListingReason(input2.job);
-      if (reason) return blockedReceipt(input2, reason, startedAt);
-      const availability = options.circuitBreaker?.availability?.();
-      if (availability && availability.allowed !== true) return blockedReceipt(input2, "trade-circuit-open", startedAt);
-      const operationId = `scheduled-listing:${input2.runId}`;
-      const operation = operationCoordinator.acquire({
-        id: operationId,
-        type: "trade-listing",
-        ownerId: options.ownerId || "",
-        label: input2.job.name
-      });
-      if (!operation.acquired) return blockedReceipt(input2, operation.reason || "operation-unavailable", startedAt);
-      options.onRunningChange?.(true, input2);
-      try {
-        const job = {
-          ...input2.job,
-          policy: { ...input2.job.policy, sources: ["club"], maxListings: 1 }
-        };
-        const prepared = await listingPreparation.prepare(job, { maxListings: 1 });
-        if (prepared?.ready !== true || prepared?.plan?.entries?.length !== 1) {
-          const receipt2 = blockedReceipt(input2, prepared?.blockers?.[0]?.reason || "scheduled-listing-not-prepared", startedAt);
-          options.onReceipt?.(receipt2, { job, prepared, input: input2 });
-          return receipt2;
-        }
-        const clubValidation = await validateProvisionalClubEntry(options, input2, prepared);
-        if (!clubValidation.ok) {
-          const receipt2 = blockedReceipt(input2, `fsu-targeted-club-validation-${clubValidation.status}`, startedAt);
-          options.onReceipt?.(receipt2, { job, prepared, clubValidation, input: input2 });
-          return receipt2;
-        }
-        const transaction = transactionFactory({
-          tradeAdapter: options.getTradeAdapter(),
-          circuitBreaker: options.circuitBreaker,
-          sleep
-        });
-        const receipt = await transaction.run({
-          job: prepared.job,
-          prepared,
-          runId: input2.runId,
-          confirmationToken: prepared.confirmation.token,
-          confirmationText: prepared.confirmation.requiredText,
-          scheduledFor: input2.scheduledFor,
-          beforeMutation: () => input2.heartbeat?.() === true,
-          shouldStop: () => options.shouldStop?.() === true
-        });
-        options.onReceipt?.(receipt, { job, prepared, clubValidation, input: input2 });
-        return receipt;
-      } finally {
-        options.onRunningChange?.(false, input2);
-        operationCoordinator.release(operationId);
-      }
-    }
-    return Object.freeze({ execute });
   }
 
   // src/reward/pack-highlight.js
@@ -15319,18 +17006,18 @@
       log.style.height = `${normalizeMainPanelLogHeight(saved)}px`;
     }
     function updateOptionsButton() {
-      const button5 = panel.querySelector("#bronze-loop-options-toggle");
-      if (!button5) return;
+      const button6 = panel.querySelector("#bronze-loop-options-toggle");
+      if (!button6) return;
       const mobile = isMobileLayout();
       const open = mobile ? mobileTab !== "run" : panel.classList.contains("options-open");
-      button5.textContent = open ? mobile ? "Run" : "Hide" : panel.classList.contains("is-running") ? "Details" : "Options";
-      button5.title = open ? "Return to Run view" : "Show advanced options";
+      button6.textContent = open ? mobile ? "Run" : "Hide" : panel.classList.contains("is-running") ? "Details" : "Options";
+      button6.title = open ? "Return to Run view" : "Show advanced options";
     }
     function updateCollapseButton() {
-      const button5 = panel.querySelector("#bronze-loop-collapse");
-      if (!button5) return;
-      button5.textContent = "L";
-      button5.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
+      const button6 = panel.querySelector("#bronze-loop-collapse");
+      if (!button6) return;
+      button6.textContent = "L";
+      button6.title = panel.classList.contains("icon-only") ? "Restore panel" : "Collapse to icon";
     }
     function notifyModeChange() {
       updateOptionsButton();
@@ -15826,8 +17513,8 @@
       ])
     })
   ]);
-  function applyStyles(element, styles2) {
-    Object.assign(element.style, styles2);
+  function applyStyles(element, styles3) {
+    Object.assign(element.style, styles3);
   }
   function getMainPanelHelpTopics(topic = "overview") {
     const requested = String(topic || "overview");
@@ -15978,13 +17665,13 @@
     return select2.value || null;
   }
   function renderMainPanelRecap(options = {}) {
-    const button5 = query(options.panel, "#bronze-loop-recap-reopen");
-    if (!button5) return;
+    const button6 = query(options.panel, "#bronze-loop-recap-reopen");
+    if (!button6) return;
     const recap = options.recap;
-    button5.style.display = recap ? "" : "none";
+    button6.style.display = recap ? "" : "none";
     if (recap) {
       const label = recap.type === "batch" ? "Batch Open" : recap.type === "loop" ? "Loop" : "Player Pick";
-      button5.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
+      button6.title = `Last ${label} recap: ${recap.name} (${Number(recap.totalCards || 0)} card(s))`;
     }
   }
   function renderRewardAlertSummary(options = {}) {
@@ -16438,7 +18125,7 @@
     "recoveryRecipes",
     "unassignedRecoveryPolicies"
   ]);
-  function clone8(value) {
+  function clone9(value) {
     return cloneLoopDef(value);
   }
   function stableValue2(value) {
@@ -16458,8 +18145,8 @@
     return current;
   }
   function setValueAt(value, path, nextValue) {
-    if (!path.length) return clone8(nextValue);
-    const result = isPlainObject(value) ? clone8(value) : {};
+    if (!path.length) return clone9(nextValue);
+    const result = isPlainObject(value) ? clone9(value) : {};
     let current = result;
     for (const key2 of path.slice(0, -1)) {
       if (!isPlainObject(current[key2])) current[key2] = {};
@@ -16467,7 +18154,7 @@
     }
     const key = path.at(-1);
     if (nextValue === void 0) delete current[key];
-    else current[key] = clone8(nextValue);
+    else current[key] = clone9(nextValue);
     return result;
   }
   function replaceEntity(items, id, entity) {
@@ -16475,27 +18162,27 @@
     let replaced = false;
     for (const item of items || []) {
       if (String(item?.id || "") !== String(id)) {
-        result.push(clone8(item));
+        result.push(clone9(item));
         continue;
       }
       replaced = true;
-      if (entity) result.push(clone8(entity));
+      if (entity) result.push(clone9(entity));
     }
-    if (!replaced && entity) result.push(clone8(entity));
+    if (!replaced && entity) result.push(clone9(entity));
     return result;
   }
   function mergePatch(base, patch) {
-    if (!isPlainObject(patch)) return clone8(patch);
-    const result = isPlainObject(base) ? clone8(base) : {};
+    if (!isPlainObject(patch)) return clone9(patch);
+    const result = isPlainObject(base) ? clone9(base) : {};
     for (const [key, value] of Object.entries(patch)) {
       if (value === null) delete result[key];
-      else result[key] = isPlainObject(value) ? mergePatch(result[key], value) : clone8(value);
+      else result[key] = isPlainObject(value) ? mergePatch(result[key], value) : clone9(value);
     }
     return result;
   }
   function createPatch(base, target) {
     if (sameValue(base, target)) return void 0;
-    if (!isPlainObject(base) || !isPlainObject(target)) return clone8(target);
+    if (!isPlainObject(base) || !isPlainObject(target)) return clone9(target);
     const patch = {};
     const keys = /* @__PURE__ */ new Set([...Object.keys(base), ...Object.keys(target)]);
     for (const key of keys) {
@@ -16504,7 +18191,7 @@
         continue;
       }
       if (!Object.hasOwn(base, key)) {
-        patch[key] = clone8(target[key]);
+        patch[key] = clone9(target[key]);
         continue;
       }
       const child = createPatch(base[key], target[key]);
@@ -16537,23 +18224,23 @@
       const targetEntity = target.get(id);
       const currentEntity = current.get(id);
       if (!targetEntity) {
-        if (!baseEntity && currentEntity) entities.push(clone8(currentEntity));
+        if (!baseEntity && currentEntity) entities.push(clone9(currentEntity));
         continue;
       }
       if (!baseEntity) {
         if (currentEntity && !sameValue(currentEntity, targetEntity)) {
           conflicts.push({ collection, id, path: "", reason: "custom-id-collision" });
         }
-        entities.push(clone8(targetEntity));
+        entities.push(clone9(targetEntity));
         continue;
       }
       if (!currentEntity) {
         conflicts.push({ collection, id, path: "", reason: "built-in-removed" });
-        entities.push(clone8(targetEntity));
+        entities.push(clone9(targetEntity));
         continue;
       }
       if (sameValue(baseEntity, targetEntity)) {
-        entities.push(clone8(currentEntity));
+        entities.push(clone9(currentEntity));
         continue;
       }
       const patch = createPatch(baseEntity, targetEntity);
@@ -16567,9 +18254,9 @@
             id,
             path: path.join("."),
             reason: "both-changed",
-            base: clone8(before),
-            builtIn: clone8(upstream),
-            profile: clone8(desired)
+            base: clone9(before),
+            builtIn: clone9(upstream),
+            profile: clone9(desired)
           });
         }
       }
@@ -16582,22 +18269,22 @@
     const base = baseConfig[field4];
     const target = targetConfig[field4];
     const current = currentConfig[field4];
-    if (sameValue(base, target)) return { value: clone8(current), conflicts: [] };
+    if (sameValue(base, target)) return { value: clone9(current), conflicts: [] };
     if (!sameValue(base, current) && !sameValue(current, target)) {
       return {
-        value: clone8(target),
+        value: clone9(target),
         conflicts: [{
           collection: field4,
           id: field4,
           path: "",
           reason: "both-changed",
-          base: clone8(base),
-          builtIn: clone8(current),
-          profile: clone8(target)
+          base: clone9(base),
+          builtIn: clone9(current),
+          profile: clone9(target)
         }]
       };
     }
-    return { value: clone8(target), conflicts: [] };
+    return { value: clone9(target), conflicts: [] };
   }
   function normalizeDynamicBinding(binding = {}) {
     return {
@@ -16608,7 +18295,7 @@
       rewardPackIds: [...new Set((binding.rewardPackIds || binding.definition?.rewardPackIds || []).map(Number).filter(Number.isFinite))],
       discoveryKind: String(binding.discoveryKind || binding.definition?.discoveryKind || ""),
       available: binding.available === true,
-      definition: binding.definition ? clone8(binding.definition) : null,
+      definition: binding.definition ? clone9(binding.definition) : null,
       lastSeenAt: Number(binding.lastSeenAt || 0) || 0
     };
   }
@@ -16623,7 +18310,7 @@
     return binding.rewardPackIds.some((id) => packIds.has(id));
   }
   function legacyInventoryOnlyStarterConfig(baseConfig) {
-    const config = clone8(normalizeLoopConfig(baseConfig));
+    const config = clone9(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => getLoopStrategyCapabilities(loop.strategy).inventoryOnly === INVENTORY_ONLY_CAPABILITIES.container ? { ...loop, inventoryMode: "inventory-only" } : loop);
     return validateLoopConfig(config, "Legacy Inventory Only starter profile");
   }
@@ -16636,7 +18323,7 @@
     return (loop.challengeRequirements || []).some((requirements) => (requirements || []).some(requirementUsesBronzeOrSilver));
   }
   function bronzeSilverInventoryOnlyStarterConfig(baseConfig) {
-    const config = clone8(normalizeLoopConfig(baseConfig));
+    const config = clone9(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => {
       const capability = getLoopStrategyCapabilities(loop.strategy).inventoryOnly;
       if (![INVENTORY_ONLY_CAPABILITIES.supported, INVENTORY_ONLY_CAPABILITIES.container].includes(capability)) {
@@ -16650,7 +18337,7 @@
     return validateLoopConfig(config, "Bronze/Silver Inventory Only starter profile");
   }
   function dailyRarePack2x84StarterConfig(baseConfig) {
-    const config = clone8(normalizeLoopConfig(baseConfig));
+    const config = clone9(normalizeLoopConfig(baseConfig));
     config.loops = config.loops.map((loop) => {
       if (loop.id !== "one-click-daily") return loop;
       const steps = (loop.steps || []).filter((step) => String(typeof step === "object" ? step?.loopId || "" : step) !== "daily-rare-pack-84");
@@ -16669,19 +18356,19 @@
     return validateLoopConfig(config, "Daily Rare Pack Recycling starter profile");
   }
   function dailyRarePack80x5StarterConfig(baseConfig) {
-    const config = clone8(normalizeLoopConfig(baseConfig));
+    const config = clone9(normalizeLoopConfig(baseConfig));
     const template = config.loops.find((loop) => loop.id === "daily-rare-pack-84");
     if (!template) return validateLoopConfig(config, "Daily Rare Pack to 5x80+ starter profile");
-    const templateRequirement = clone8(template.rareUpgrade?.requirements?.[0] || {});
+    const templateRequirement = clone9(template.rareUpgrade?.requirements?.[0] || {});
     const { rarity: _templateRarity, ...goldRequirement } = templateRequirement;
     const sourcePackNames = (template.sourcePackNames || []).filter((name) => !/\b80\s*\+/i.test(String(name)));
     const recyclingLoop = {
-      ...clone8(template),
+      ...clone9(template),
       id: DAILY_RARE_PACK_80X5_LOOP_ID,
       name: "Daily Rare Pack to 5x80+ Loop",
       sourcePackNames,
       rareUpgrade: {
-        ...clone8(template.rareUpgrade),
+        ...clone9(template.rareUpgrade),
         name: "5x80+ Rare Gold Recycling Upgrade",
         activityBinding: {
           family: "common-gold-material-upgrade",
@@ -16731,7 +18418,7 @@
     if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), expected))) {
       return profile;
     }
-    return { ...clone8(profile), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
+    return { ...clone9(profile), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
   }
   function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
     if (profile?.preset !== "inventory-only" || profile?.id !== LEGACY_INVENTORY_ONLY_PROFILE_ID || profile?.name !== "Inventory Only") return false;
@@ -16741,7 +18428,7 @@
   function officialStarterConfig(profile, baseConfig) {
     const id = String(profile?.id || "");
     const preset = String(profile?.preset || "");
-    const normalizedBase = clone8(normalizeLoopConfig(baseConfig));
+    const normalizedBase = clone9(normalizeLoopConfig(baseConfig));
     if (id === BUILDER_STARTER_PROFILE_IDS.default && preset === "default") return normalizedBase;
     if (id === BUILDER_STARTER_PROFILE_IDS.bronzeSilverInventoryOnly && preset === "bronze-silver-inventory-only") {
       return bronzeSilverInventoryOnlyStarterConfig(normalizedBase);
@@ -16776,7 +18463,7 @@
       now
     });
     return {
-      ...clone8(profile),
+      ...clone9(profile),
       ...refreshed,
       createdAt: Number(profile.createdAt || refreshed.createdAt),
       updatedAt: Number(now),
@@ -16785,7 +18472,7 @@
     };
   }
   function createBuilderStarterProfiles(baseConfig, options = {}) {
-    const normalizedBase = clone8(validateLoopConfig(baseConfig, "Builder starter profile base"));
+    const normalizedBase = clone9(validateLoopConfig(baseConfig, "Builder starter profile base"));
     return [
       createBuilderProfile({
         id: BUILDER_STARTER_PROFILE_IDS.default,
@@ -16831,8 +18518,8 @@
     return (hash >>> 0).toString(16).padStart(8, "0");
   }
   function createBuilderProfile(options = {}) {
-    const baseConfig = clone8(normalizeLoopConfig(options.baseConfig || options.config));
-    const config = clone8(normalizeLoopConfig(options.config || baseConfig));
+    const baseConfig = clone9(normalizeLoopConfig(options.baseConfig || options.config));
+    const config = clone9(normalizeLoopConfig(options.config || baseConfig));
     const now = Number(options.now || Date.now());
     return {
       schemaVersion: BUILDER_SCHEMA_VERSION,
@@ -16842,8 +18529,8 @@
       baseFingerprint: fingerprintBuilderValue(baseConfig),
       baseConfig,
       draftConfig: config,
-      savedConfig: clone8(config),
-      lastKnownGood: clone8(validateLoopConfig(config, "Builder profile")),
+      savedConfig: clone9(config),
+      lastKnownGood: clone9(validateLoopConfig(config, "Builder profile")),
       dynamicBindings: (options.dynamicBindings || []).map(normalizeDynamicBinding),
       draftRevision: 1,
       savedRevision: 1,
@@ -16855,20 +18542,20 @@
     if (!isPlainObject(profile)) return createBuilderProfile({ baseConfig, ...options });
     let normalizedBase;
     try {
-      normalizedBase = clone8(validateLoopConfig(profile.baseConfig || baseConfig, "Builder profile base"));
+      normalizedBase = clone9(validateLoopConfig(profile.baseConfig || baseConfig, "Builder profile base"));
     } catch {
-      normalizedBase = clone8(validateLoopConfig(baseConfig, "Current built-in config"));
+      normalizedBase = clone9(validateLoopConfig(baseConfig, "Current built-in config"));
     }
     let lastKnownGood = null;
     for (const candidate of [profile.lastKnownGood, profile.savedConfig, normalizedBase]) {
       if (!candidate) continue;
       try {
-        lastKnownGood = clone8(validateLoopConfig(candidate, "Builder last known good"));
+        lastKnownGood = clone9(validateLoopConfig(candidate, "Builder last known good"));
         break;
       } catch {
       }
     }
-    const draftConfig = clone8(normalizeLoopConfig(profile.draftConfig || lastKnownGood));
+    const draftConfig = clone9(normalizeLoopConfig(profile.draftConfig || lastKnownGood));
     const result = {
       ...createBuilderProfile({
         id: profile.id || options.id,
@@ -16877,12 +18564,12 @@
         config: lastKnownGood,
         now: profile.createdAt || options.now
       }),
-      ...clone8(profile),
+      ...clone9(profile),
       schemaVersion: BUILDER_SCHEMA_VERSION,
-      baseConfig: clone8(normalizedBase),
+      baseConfig: clone9(normalizedBase),
       draftConfig,
-      savedConfig: clone8(lastKnownGood),
-      lastKnownGood: clone8(lastKnownGood),
+      savedConfig: clone9(lastKnownGood),
+      lastKnownGood: clone9(lastKnownGood),
       dynamicBindings: (profile.dynamicBindings || []).map((binding) => ({
         ...normalizeDynamicBinding(binding),
         available: false
@@ -16953,25 +18640,25 @@
         available: false
       })),
       profiles,
-      lastKnownGood: migratedLegacyActive || activeStarterRefreshed ? clone8(activeProfile?.lastKnownGood || null) : store.lastKnownGood ? clone8(store.lastKnownGood) : null
+      lastKnownGood: migratedLegacyActive || activeStarterRefreshed ? clone9(activeProfile?.lastKnownGood || null) : store.lastKnownGood ? clone9(store.lastKnownGood) : null
     };
   }
   function updateBuilderProfileDraft(profile, config, now = Date.now()) {
     return {
-      ...clone8(profile),
-      draftConfig: clone8(normalizeLoopConfig(config)),
+      ...clone9(profile),
+      draftConfig: clone9(normalizeLoopConfig(config)),
       draftRevision: Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1,
       updatedAt: Number(now)
     };
   }
   function refreshBuilderDynamicBindings(profile, discoveredLoops = [], now = Date.now()) {
-    const result = clone8(profile);
+    const result = clone9(profile);
     result.dynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).map((binding) => {
       const definition = discoveredLoops.find((loop) => dynamicLoopMatch(binding, loop));
       return {
         ...binding,
         available: Boolean(definition),
-        definition: definition ? clone8(definition) : binding.definition,
+        definition: definition ? clone9(definition) : binding.definition,
         lastSeenAt: definition ? Number(now) : binding.lastSeenAt
       };
     });
@@ -17003,7 +18690,7 @@
         unavailableBindings.push({ id: binding.id, loopId: binding.loopId });
         continue;
       }
-      config.loops.push(clone8(binding.definition));
+      config.loops.push(clone9(binding.definition));
     }
     return {
       config,
@@ -17026,15 +18713,15 @@
   }
   function resolveBuilderProfileConflict(profile, currentBuiltInConfig, conflict, choice, now = Date.now()) {
     if (!["built-in", "profile"].includes(choice)) throw new Error(`Unsupported conflict choice: ${choice}`);
-    const result = clone8(profile);
+    const result = clone9(profile);
     const currentConfig = normalizeLoopConfig(currentBuiltInConfig);
     const path = String(conflict?.path || "").split(".").filter(Boolean);
     const collection = String(conflict?.collection || "");
     if (collection === "defaultUnassignedRecoveryPolicyIds") {
       if (choice === "built-in") {
-        result.draftConfig[collection] = clone8(currentConfig[collection]);
+        result.draftConfig[collection] = clone9(currentConfig[collection]);
       } else {
-        result.baseConfig[collection] = clone8(currentConfig[collection]);
+        result.baseConfig[collection] = clone9(currentConfig[collection]);
       }
     } else if (ENTITY_COLLECTIONS.includes(collection)) {
       const id = String(conflict?.id || "");
@@ -17068,14 +18755,14 @@
     const validation = validateBuilderProfile(profile, currentBuiltInConfig);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
     const revision = Math.max(Number(profile?.draftRevision || 0), Number(profile?.savedRevision || 0)) + 1;
-    const currentBase = clone8(normalizeLoopConfig(currentBuiltInConfig));
+    const currentBase = clone9(normalizeLoopConfig(currentBuiltInConfig));
     return {
-      ...clone8(profile),
+      ...clone9(profile),
       baseConfig: currentBase,
       baseFingerprint: fingerprintBuilderValue(currentBase),
-      draftConfig: clone8(validation.config),
-      savedConfig: clone8(validation.config),
-      lastKnownGood: clone8(validation.config),
+      draftConfig: clone9(validation.config),
+      savedConfig: clone9(validation.config),
+      lastKnownGood: clone9(validation.config),
       draftRevision: revision,
       savedRevision: revision,
       updatedAt: Number(now)
@@ -17084,9 +18771,9 @@
   function upsertBuilderProfile(store, profile) {
     const profiles = [...store.profiles || []];
     const index = profiles.findIndex((entry) => entry.id === profile.id);
-    if (index >= 0) profiles[index] = clone8(profile);
-    else profiles.push(clone8(profile));
-    return { ...clone8(store), profiles };
+    if (index >= 0) profiles[index] = clone9(profile);
+    else profiles.push(clone9(profile));
+    return { ...clone9(store), profiles };
   }
   function activateBuilderProfile(store, profile, currentBuiltInConfig) {
     const saved = saveBuilderProfile(profile, currentBuiltInConfig);
@@ -17095,43 +18782,43 @@
       store: {
         ...nextStore,
         activeProfileId: saved.id,
-        activeDynamicBindings: clone8(saved.dynamicBindings || []),
-        lastKnownGood: clone8(saved.lastKnownGood)
+        activeDynamicBindings: clone9(saved.dynamicBindings || []),
+        lastKnownGood: clone9(saved.lastKnownGood)
       },
       profile: saved,
-      config: clone8(saved.lastKnownGood)
+      config: clone9(saved.lastKnownGood)
     };
   }
   function activateSavedBuilderProfile(store, profileId, currentBuiltInConfig) {
     const profile = (store.profiles || []).find((entry) => String(entry.id) === String(profileId));
     if (!profile) throw new Error(`Builder profile not found: ${profileId}`);
-    const savedConfig = clone8(profile.lastKnownGood || profile.savedConfig);
+    const savedConfig = clone9(profile.lastKnownGood || profile.savedConfig);
     if (!savedConfig) throw new Error(`Builder profile has no saved configuration: ${profile.name || profile.id}`);
     const savedLoopIds = new Set((savedConfig.loops || []).map((loop) => String(loop.id || "")));
     const savedDynamicBindings = (profile.dynamicBindings || []).map(normalizeDynamicBinding).filter((binding) => savedLoopIds.has(binding.loopId));
     const savedProfile = {
-      ...clone8(profile),
-      draftConfig: clone8(savedConfig),
-      savedConfig: clone8(savedConfig),
-      lastKnownGood: clone8(savedConfig),
+      ...clone9(profile),
+      draftConfig: clone9(savedConfig),
+      savedConfig: clone9(savedConfig),
+      lastKnownGood: clone9(savedConfig),
       dynamicBindings: savedDynamicBindings
     };
     const validation = validateBuilderProfile(savedProfile, currentBuiltInConfig);
     if (!validation.valid) throw new Error(validation.errors.join("; "));
     return {
       store: {
-        ...clone8(store),
+        ...clone9(store),
         activeProfileId: profile.id,
-        activeDynamicBindings: clone8(savedDynamicBindings),
-        lastKnownGood: clone8(validation.config)
+        activeDynamicBindings: clone9(savedDynamicBindings),
+        lastKnownGood: clone9(validation.config)
       },
-      profile: clone8(profile),
-      config: clone8(validation.config)
+      profile: clone9(profile),
+      config: clone9(validation.config)
     };
   }
   function deactivateBuilderProfile(store) {
     return {
-      ...clone8(store),
+      ...clone9(store),
       activeProfileId: null,
       activeDynamicBindings: []
     };
@@ -17172,7 +18859,7 @@
   }
 
   // src/config/builder-editor.js
-  function clone9(value) {
+  function clone10(value) {
     return cloneLoopDef(value);
   }
   function slug(value) {
@@ -17224,17 +18911,17 @@
     }
   }
   function addBuilderLoop(config, strategy, options = {}) {
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const template = createLoopTemplate(strategy, options);
     template.id = uniqueId(normalized, template.id);
     normalized.loops.push(template);
     return { config: normalized, loop: template };
   }
   function duplicateBuilderLoop(config, loopId, options = {}) {
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const source = normalized.loops.find((loop) => String(loop.id) === String(loopId));
     if (!source) throw new Error(`Loop not found: ${loopId}`);
-    const copy = clone9(source);
+    const copy = clone10(source);
     copy.id = uniqueId(normalized, options.id || `${source.id}-copy`);
     copy.name = String(options.name || `${source.name} Copy`);
     delete copy.discoveryReportedCompleted;
@@ -17267,7 +18954,7 @@
     return references;
   }
   function removeBuilderLoop(config, loopId) {
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const references = findBuilderReferences(normalized, loopId);
     if (references.length) throw new Error(`Loop ${loopId} is referenced by ${references.length} configuration location(s)`);
     const previousLength = normalized.loops.length;
@@ -17276,7 +18963,7 @@
     return normalized;
   }
   function renameBuilderLoopId(config, oldId, requestedId) {
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const nextId = slug(requestedId);
     const target = normalized.loops.find((loop) => String(loop.id) === String(oldId));
     if (!target) throw new Error(`Loop not found: ${oldId}`);
@@ -17344,7 +19031,7 @@
     if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(kind)) {
       throw new Error(`Unsupported recovery collection: ${kind}`);
     }
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const nextId = slug(requestedId);
     const target = normalized[kind].find((item) => String(item.id) === String(oldId));
     if (!target) throw new Error(`Recovery object not found: ${oldId}`);
@@ -17376,7 +19063,7 @@
     return { config: normalized, id: nextId };
   }
   function removeBuilderRecovery(config, kind, id) {
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const references = findBuilderRecoveryReferences(normalized, kind, id);
     if (references.length) throw new Error(`Recovery object ${id} is referenced by ${references.length} configuration location(s)`);
     const previousLength = normalized[kind]?.length;
@@ -17386,18 +19073,18 @@
     return normalized;
   }
   function addBuilderWorkflowStep(config, workflowId, loopId, options = {}) {
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const child = normalized.loops.find((loop) => String(loop.id) === String(loopId));
     if (!workflow || !["dailyRoutine", "workflowRoutine"].includes(workflow.strategy)) throw new Error(`Workflow not found: ${workflowId}`);
     if (!child) throw new Error(`Child Loop not found: ${loopId}`);
     if (["dailyRoutine", "workflowRoutine"].includes(child.strategy)) throw new Error("Nested workflows are not supported");
-    const step = options.name || options.rewardFlow ? { loopId: child.id, ...options.name ? { name: options.name } : {}, ...options.rewardFlow ? { rewardFlow: clone9(options.rewardFlow) } : {} } : child.id;
+    const step = options.name || options.rewardFlow ? { loopId: child.id, ...options.name ? { name: options.name } : {}, ...options.rewardFlow ? { rewardFlow: clone10(options.rewardFlow) } : {} } : child.id;
     workflow.steps = [...workflow.steps || [], step];
     return normalized;
   }
   function moveBuilderWorkflowStep(config, workflowId, fromIndex, toIndex) {
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
     const from = Number(fromIndex);
@@ -17408,7 +19095,7 @@
     return normalized;
   }
   function removeBuilderWorkflowStep(config, workflowId, index) {
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
     if (!Number.isInteger(Number(index)) || Number(index) < 0 || Number(index) >= workflow.steps.length) {
@@ -17418,7 +19105,7 @@
     return normalized;
   }
   function setBuilderWorkflowStepPath(config, workflowId, index, path, value) {
-    const normalized = clone9(normalizeLoopConfig(config));
+    const normalized = clone10(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const stepIndex = Number(index);
     if (!workflow || !Array.isArray(workflow.steps)) throw new Error(`Workflow not found: ${workflowId}`);
@@ -17426,13 +19113,13 @@
       throw new Error(`Invalid Workflow step index: ${index}`);
     }
     const rawStep = workflow.steps[stepIndex];
-    const step = typeof rawStep === "string" ? { loopId: rawStep } : clone9(rawStep);
+    const step = typeof rawStep === "string" ? { loopId: rawStep } : clone10(rawStep);
     if (!step?.loopId) throw new Error(`Workflow step has no Loop reference: ${workflowId}[${index}]`);
     workflow.steps[stepIndex] = setBuilderPath(step, path, value);
     return normalized;
   }
   function createBuilderStepVariant(config, workflowId, stepIndex) {
-    let normalized = clone9(normalizeLoopConfig(config));
+    let normalized = clone10(normalizeLoopConfig(config));
     const workflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
     const rawStep = workflow?.steps?.[Number(stepIndex)];
     const sourceId = typeof rawStep === "string" ? rawStep : rawStep?.loopId;
@@ -17446,12 +19133,12 @@
     normalized = result.config;
     result.loop.hidden = true;
     const nextWorkflow = normalized.loops.find((loop) => String(loop.id) === String(workflowId));
-    const step = typeof rawStep === "string" ? { loopId: result.loop.id } : { ...clone9(rawStep), loopId: result.loop.id };
+    const step = typeof rawStep === "string" ? { loopId: result.loop.id } : { ...clone10(rawStep), loopId: result.loop.id };
     nextWorkflow.steps[Number(stepIndex)] = step;
     return { config: normalized, loop: result.loop };
   }
   function setBuilderPath(object, path, value) {
-    const result = clone9(object);
+    const result = clone10(object);
     const parts = Array.isArray(path) ? path : String(path).split(".").filter(Boolean);
     let target = result;
     const parents = [];
@@ -17463,7 +19150,7 @@
     }
     const finalKey = parts.at(-1);
     if (value === void 0) delete target[finalKey];
-    else target[finalKey] = clone9(value);
+    else target[finalKey] = clone10(value);
     if (value === void 0) {
       for (let index = parents.length - 1; index >= 0; index--) {
         const parent = parents[index];
@@ -18524,7 +20211,7 @@
   }
 
   // src/ui/workflow-loop-builder.js
-  function clone10(value) {
+  function clone11(value) {
     return cloneLoopDef(value);
   }
   function pathValue(object, path) {
@@ -18582,7 +20269,7 @@
   }
   function createWorkflowLoopBuilder(options = {}) {
     const dom = options.dom;
-    const builtInConfig = () => clone10(normalizeLoopConfig(options.getBuiltInConfig?.()));
+    const builtInConfig = () => clone11(normalizeLoopConfig(options.getBuiltInConfig?.()));
     const mounted = mountWorkflowLoopBuilder({ dom });
     const root = mounted.root;
     let store = normalizeBuilderStore(options.loadStore?.(), builtInConfig(), { now: options.now?.() });
@@ -18605,13 +20292,13 @@
       return Number(options.now?.() || Date.now());
     }
     function discoveredLoops() {
-      return clone10(options.getDiscoveredLoops?.() || []);
+      return clone11(options.getDiscoveredLoops?.() || []);
     }
     function profile() {
       return store.profiles.find((entry) => entry.id === profileId) || store.profiles[0];
     }
     function persist() {
-      const snapshot = clone10(store);
+      const snapshot = clone11(store);
       options.saveStore?.(snapshot);
       options.onStoreChange?.(snapshot);
     }
@@ -18628,7 +20315,7 @@
       const current = profile();
       if (JSON.stringify(current) === JSON.stringify(nextProfile)) return false;
       const currentHistory = history();
-      currentHistory.undo.push(clone10(current));
+      currentHistory.undo.push(clone11(current));
       if (currentHistory.undo.length > 50) currentHistory.undo.shift();
       currentHistory.redo = [];
       setProfile(nextProfile);
@@ -18641,7 +20328,7 @@
       const currentHistory = history();
       const previous = currentHistory.undo.pop();
       if (!previous) return false;
-      currentHistory.redo.push(clone10(profile()));
+      currentHistory.redo.push(clone11(profile()));
       setProfile(previous);
       selectedKind = null;
       selectedId = null;
@@ -18653,7 +20340,7 @@
       const currentHistory = history();
       const next = currentHistory.redo.pop();
       if (!next) return false;
-      currentHistory.undo.push(clone10(profile()));
+      currentHistory.undo.push(clone11(profile()));
       setProfile(next);
       selectedKind = null;
       selectedId = null;
@@ -18685,24 +20372,24 @@
       return `${profileId}:${kind}:${id}`;
     }
     function displayConfig(currentProfile, validation, sources) {
-      const config = clone10(normalizeLoopConfig(currentProfile.draftConfig));
+      const config = clone11(normalizeLoopConfig(currentProfile.draftConfig));
       for (const collection of BUILDER_COLLECTIONS) {
         const effective = new Map((validation.config[collection] || []).map((item) => [String(item.id), item]));
         const sourceMap = new Map((sources[collection] || []).map((entry) => [String(entry.id), entry.source]));
         config[collection] = (config[collection] || []).map((item) => {
           const source = sourceMap.get(String(item.id));
-          return ["built-in", "override", "dynamic"].includes(source) && effective.has(String(item.id)) ? clone10(effective.get(String(item.id))) : item;
+          return ["built-in", "override", "dynamic"].includes(source) && effective.has(String(item.id)) ? clone11(effective.get(String(item.id))) : item;
         });
         const ids = new Set(config[collection].map((item) => String(item.id)));
         for (const item of validation.config[collection] || []) {
           const id = String(item.id);
           if (ids.has(id)) continue;
-          config[collection].push(clone10(item));
+          config[collection].push(clone11(item));
           sources[collection] = [...sources[collection] || [], { id, source: "built-in", current: true }];
           ids.add(id);
         }
       }
-      config.defaultUnassignedRecoveryPolicyIds = clone10(validation.config.defaultUnassignedRecoveryPolicyIds);
+      config.defaultUnassignedRecoveryPolicyIds = clone11(validation.config.defaultUnassignedRecoveryPolicyIds);
       return config;
     }
     function buildModel() {
@@ -18769,10 +20456,10 @@
       return true;
     }
     function updateSelectedObject(mutator) {
-      const config = clone10(profile().draftConfig);
+      const config = clone11(profile().draftConfig);
       const object = selectedObject(config);
       if (!object || selectedKind === "dynamic") return false;
-      const updated = mutator(clone10(object));
+      const updated = mutator(clone11(object));
       if (!updated) return false;
       config[selectedKind] = replaceById(config[selectedKind], object.id, updated);
       setDraftConfig(config);
@@ -18838,7 +20525,7 @@
     function toggleDefaultRecoveryPolicy(element) {
       const policyId = String(element?.dataset?.policyId || "");
       if (!policyId) return;
-      const config = clone10(profile().draftConfig);
+      const config = clone11(profile().draftConfig);
       const ids = new Set(config.defaultUnassignedRecoveryPolicyIds || []);
       if (element.value === "true") ids.add(policyId);
       else ids.delete(policyId);
@@ -18847,7 +20534,7 @@
       render();
     }
     function newObject() {
-      const config = clone10(profile().draftConfig);
+      const config = clone11(profile().draftConfig);
       if (tab === "workflows") {
         const result = addBuilderLoop(config, "workflowRoutine", { name: "Custom Workflow" });
         setDraftConfig(result.config);
@@ -18895,12 +20582,12 @@
     }
     function duplicateObject() {
       if (selectedKind === "loops") {
-        const config2 = clone10(profile().draftConfig);
+        const config2 = clone11(profile().draftConfig);
         const hadSource = config2.loops.some((loop) => String(loop.id) === String(selectedId));
         if (!hadSource) {
           const effective = validateBuilderProfile(profile(), builtInConfig()).config.loops.find((loop) => String(loop.id) === String(selectedId));
           if (!effective) throw new Error(`Loop not found: ${selectedId}`);
-          config2.loops.push(clone10(effective));
+          config2.loops.push(clone11(effective));
         }
         const result = duplicateBuilderLoop(config2, selectedId);
         if (!hadSource) result.config.loops = result.config.loops.filter((loop) => String(loop.id) !== String(selectedId));
@@ -18911,7 +20598,7 @@
         return;
       }
       if (!["recoveryRecipes", "unassignedRecoveryPolicies"].includes(selectedKind)) return;
-      const config = clone10(profile().draftConfig);
+      const config = clone11(profile().draftConfig);
       let source = config[selectedKind].find((item) => String(item.id) === String(selectedId));
       if (!source) {
         source = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind].find((item) => String(item.id) === String(selectedId));
@@ -18921,17 +20608,17 @@
       let index = 2;
       let id = `${source.id}-copy`;
       while (ids.has(id)) id = `${source.id}-copy-${index++}`;
-      const copy = { ...clone10(source), id, ...source.name ? { name: `${source.name} Copy` } : {} };
+      const copy = { ...clone11(source), id, ...source.name ? { name: `${source.name} Copy` } : {} };
       config[selectedKind].push(copy);
       setDraftConfig(config);
       selectedId = id;
       render();
     }
     function resetObject() {
-      const config = clone10(profile().draftConfig);
+      const config = clone11(profile().draftConfig);
       const current = builtInConfig()[selectedKind]?.find((item) => String(item.id) === String(selectedId));
       if (!current) return;
-      config[selectedKind] = replaceById(config[selectedKind], selectedId, clone10(current));
+      config[selectedKind] = replaceById(config[selectedKind], selectedId, clone11(current));
       editableBuiltIns.delete(editableKey());
       setDraftConfig(config);
       render();
@@ -18953,21 +20640,21 @@
       if (selectedKind !== "dynamic") return;
       const definition = selectedObject(profile().draftConfig);
       if (!definition) return;
-      const currentProfile = clone10(profile());
-      const config = clone10(currentProfile.draftConfig);
+      const currentProfile = clone11(profile());
+      const config = clone11(currentProfile.draftConfig);
       const existing = config.loops.findIndex((loop) => String(loop.id) === String(definition.id));
-      if (existing >= 0) config.loops[existing] = clone10(definition);
-      else config.loops.push(clone10(definition));
+      if (existing >= 0) config.loops[existing] = clone11(definition);
+      else config.loops.push(clone11(definition));
       currentProfile.dynamicBindings = [
         ...(currentProfile.dynamicBindings || []).filter((binding) => binding.loopId !== definition.id),
         {
           id: definition.id,
           loopId: definition.id,
-          sbcSetIds: clone10(definition.sbcSetIds || []),
-          pickItemResourceIds: clone10(definition.pickItemResourceIds || []),
-          rewardPackIds: clone10(definition.rewardPackIds || []),
+          sbcSetIds: clone11(definition.sbcSetIds || []),
+          pickItemResourceIds: clone11(definition.pickItemResourceIds || []),
+          rewardPackIds: clone11(definition.rewardPackIds || []),
           discoveryKind: String(definition.discoveryKind || ""),
-          definition: clone10(definition),
+          definition: clone11(definition),
           available: true,
           lastSeenAt: now()
         }
@@ -18981,14 +20668,14 @@
     }
     function unbindDynamic() {
       if (selectedKind !== "loops") return;
-      const currentProfile = clone10(profile());
+      const currentProfile = clone11(profile());
       const binding = (currentProfile.dynamicBindings || []).find((entry) => String(entry.loopId) === String(selectedId));
       if (!binding) return;
       const references = findBuilderReferences(currentProfile.draftConfig, binding.loopId);
       if (references.length) {
         throw new Error(`Dynamic SBC ${binding.loopId} is referenced by ${references.length} Workflow location(s); remove those steps first`);
       }
-      const config = clone10(currentProfile.draftConfig);
+      const config = clone11(currentProfile.draftConfig);
       config.loops = config.loops.filter((loop) => String(loop.id) !== String(binding.loopId));
       currentProfile.dynamicBindings = currentProfile.dynamicBindings.filter((entry) => String(entry.loopId) !== String(binding.loopId));
       setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
@@ -19022,7 +20709,7 @@
         store = activated.store;
         profileId = activated.profile.id;
         persist();
-        options.applyConfig?.(clone10(activated.config), `Builder profile: ${activated.profile.name}`);
+        options.applyConfig?.(clone11(activated.config), `Builder profile: ${activated.profile.name}`);
         jsonMessage = "Profile activated";
         jsonValid = true;
       } catch (error) {
@@ -19050,7 +20737,7 @@
     }
     function importedDynamicBindings(currentProfile, config) {
       const loops = new Map((config.loops || []).map((loop) => [String(loop.id || ""), loop]));
-      return clone10((currentProfile.dynamicBindings || []).filter((binding) => {
+      return clone11((currentProfile.dynamicBindings || []).filter((binding) => {
         const loop = loops.get(String(binding.loopId || ""));
         return ["playerPickSbc", "fillAndVerifySbc"].includes(loop?.strategy);
       }));
@@ -19113,8 +20800,8 @@
       if (deletedActiveProfile) options.useBuiltIn?.();
       render();
     }
-    function handleAction(button5) {
-      const action2 = button5.dataset.builderAction;
+    function handleAction(button6) {
+      const action2 = button6.dataset.builderAction;
       if (!action2) return;
       if (action2 === "close-builder") return close();
       if (action2 === "toggle-mobile-actions") {
@@ -19123,7 +20810,7 @@
         return;
       }
       if (action2 === "select-mobile-section") {
-        mobileSection = ["library", "editor", "details"].includes(button5.dataset.section) ? button5.dataset.section : "library";
+        mobileSection = ["library", "editor", "details"].includes(button6.dataset.section) ? button6.dataset.section : "library";
         render();
         return;
       }
@@ -19149,7 +20836,7 @@
         return;
       }
       if (action2 === "select-tab") {
-        tab = button5.dataset.tab;
+        tab = button6.dataset.tab;
         previewOpen = false;
         selectedKind = null;
         selectedId = null;
@@ -19159,8 +20846,8 @@
         return;
       }
       if (action2 === "select-object") {
-        selectedKind = button5.dataset.kind;
-        selectedId = button5.dataset.id;
+        selectedKind = button6.dataset.kind;
+        selectedId = button6.dataset.id;
         selectedStep = null;
         mobileSection = "editor";
         render();
@@ -19169,13 +20856,13 @@
       if (action2 === "new-object") return newObject();
       if (action2 === "duplicate-object") return duplicateObject();
       if (action2 === "override-object") {
-        const config = clone10(profile().draftConfig);
+        const config = clone11(profile().draftConfig);
         if (!config[selectedKind]?.some((item) => String(item.id) === String(selectedId))) {
           const effective = validateBuilderProfile(profile(), builtInConfig()).config[selectedKind]?.find((item) => String(item.id) === String(selectedId));
           if (!effective) throw new Error(`Built-in object not found: ${selectedKind}.${selectedId}`);
-          config[selectedKind].push(clone10(effective));
-          const currentProfile = clone10(profile());
-          currentProfile.baseConfig[selectedKind].push(clone10(effective));
+          config[selectedKind].push(clone11(effective));
+          const currentProfile = clone11(profile());
+          currentProfile.baseConfig[selectedKind].push(clone11(effective));
           currentProfile.baseFingerprint = fingerprintBuilderValue(currentProfile.baseConfig);
           setEditedProfile(updateBuilderProfileDraft(currentProfile, config, now()));
         }
@@ -19187,24 +20874,24 @@
       if (action2 === "delete-object") return deleteObject();
       if (action2 === "bind-dynamic") return bindDynamic();
       if (action2 === "unbind-dynamic") return unbindDynamic();
-      if (action2 === "add-list") return updateList(button5.dataset.path, (items) => [...items, button5.dataset.itemType === "number" ? 0 : ""]);
+      if (action2 === "add-list") return updateList(button6.dataset.path, (items) => [...items, button6.dataset.itemType === "number" ? 0 : ""]);
       if (action2 === "add-selected-list") {
-        const select2 = root.querySelector(`[data-builder-add-select="${button5.dataset.path}"]`);
-        if (select2?.value) updateList(button5.dataset.path, (items) => [...items, select2.value]);
+        const select2 = root.querySelector(`[data-builder-add-select="${button6.dataset.path}"]`);
+        if (select2?.value) updateList(button6.dataset.path, (items) => [...items, select2.value]);
         return;
       }
-      if (action2 === "remove-list") return updateList(button5.dataset.path, (items) => items.filter((_, index) => index !== Number(button5.dataset.index)));
-      if (action2 === "move-list") return updateList(button5.dataset.path, (items) => {
-        const from = Number(button5.dataset.index);
-        const to = Math.max(0, Math.min(items.length - 1, from + Number(button5.dataset.delta)));
+      if (action2 === "remove-list") return updateList(button6.dataset.path, (items) => items.filter((_, index) => index !== Number(button6.dataset.index)));
+      if (action2 === "move-list") return updateList(button6.dataset.path, (items) => {
+        const from = Number(button6.dataset.index);
+        const to = Math.max(0, Math.min(items.length - 1, from + Number(button6.dataset.delta)));
         const [item] = items.splice(from, 1);
         items.splice(to, 0, item);
         return items;
       });
-      if (action2 === "add-requirement") return updateList(button5.dataset.path, (items) => [...items, defaultRequirement()]);
-      if (action2 === "add-challenge-group") return updateList(button5.dataset.path, (items) => [...items, [defaultRequirement()]]);
-      if (action2 === "add-shortage") return updateList(button5.dataset.path, (items) => [...items, { requirement: { tier: "gold", playerOnly: true, allowSpecial: false }, packNames: ["Source pack"], maxOpensPerAttempt: 1 }]);
-      if (action2 === "add-upgrade") return updateList(button5.dataset.path, (items) => [...items, defaultUpgrade(button5.dataset.stage === "true", items.length)]);
+      if (action2 === "add-requirement") return updateList(button6.dataset.path, (items) => [...items, defaultRequirement()]);
+      if (action2 === "add-challenge-group") return updateList(button6.dataset.path, (items) => [...items, [defaultRequirement()]]);
+      if (action2 === "add-shortage") return updateList(button6.dataset.path, (items) => [...items, { requirement: { tier: "gold", playerOnly: true, allowSpecial: false }, packNames: ["Source pack"], maxOpensPerAttempt: 1 }]);
+      if (action2 === "add-upgrade") return updateList(button6.dataset.path, (items) => [...items, defaultUpgrade(button6.dataset.stage === "true", items.length)]);
       if (action2 === "add-recovery-step") return updateList("steps", (items) => [...items, { recipeId: profile().draftConfig.recoveryRecipes[0]?.id || "" }]);
       if (action2 === "add-step") {
         const loopId = root.querySelector("#dlr-builder-add-step-select")?.value;
@@ -19213,26 +20900,26 @@
         return;
       }
       if (action2 === "select-step") {
-        selectedStep = Number(button5.dataset.index);
+        selectedStep = Number(button6.dataset.index);
         mobileSection = "details";
         render();
         return;
       }
       if (action2 === "move-step") {
-        const index = Number(button5.dataset.index);
-        setDraftConfig(moveBuilderWorkflowStep(profile().draftConfig, selectedId, index, index + Number(button5.dataset.delta)));
-        selectedStep = Math.max(0, index + Number(button5.dataset.delta));
+        const index = Number(button6.dataset.index);
+        setDraftConfig(moveBuilderWorkflowStep(profile().draftConfig, selectedId, index, index + Number(button6.dataset.delta)));
+        selectedStep = Math.max(0, index + Number(button6.dataset.delta));
         render();
         return;
       }
       if (action2 === "remove-step") {
-        setDraftConfig(removeBuilderWorkflowStep(profile().draftConfig, selectedId, Number(button5.dataset.index)));
+        setDraftConfig(removeBuilderWorkflowStep(profile().draftConfig, selectedId, Number(button6.dataset.index)));
         selectedStep = null;
         render();
         return;
       }
       if (action2 === "variant-step") {
-        const result = createBuilderStepVariant(profile().draftConfig, selectedId, Number(button5.dataset.index));
+        const result = createBuilderStepVariant(profile().draftConfig, selectedId, Number(button6.dataset.index));
         setDraftConfig(result.config);
         selectedKind = "loops";
         selectedId = result.loop.id;
@@ -19249,7 +20936,7 @@
         render();
         return;
       }
-      if (action2 === "resolve-conflict") return resolveConflict(button5.dataset.index, button5.dataset.choice);
+      if (action2 === "resolve-conflict") return resolveConflict(button6.dataset.index, button6.dataset.choice);
       if (action2 === "save-profile") return saveProfile();
       if (action2 === "activate-profile") return activateProfile();
       if (action2 === "validate-json") return validateJson();
@@ -19259,10 +20946,10 @@
       if (action2 === "delete-profile") return deleteProfile();
     }
     function onClick(event) {
-      const button5 = event.target?.closest?.("[data-builder-action]");
-      if (!button5 || !root.contains(button5)) return;
+      const button6 = event.target?.closest?.("[data-builder-action]");
+      if (!button6 || !root.contains(button6)) return;
       try {
-        handleAction(button5);
+        handleAction(button6);
       } catch (error) {
         jsonMessage = error?.message || String(error);
         jsonValid = false;
@@ -19286,7 +20973,7 @@
           return;
         }
         if (element?.id === "dlr-builder-profile-name") {
-          const next = { ...clone10(profile()), name: String(element.value || "").trim() || profile().name, updatedAt: now() };
+          const next = { ...clone11(profile()), name: String(element.value || "").trim() || profile().name, updatedAt: now() };
           setEditedProfile(next);
           render();
           return;
@@ -19330,10 +21017,10 @@
       jsonMessage = `Imported ${importedProfile.draftConfig.loops.length} Loop(s)`;
       jsonValid = true;
       if (importOptions.open !== false) open("json");
-      return clone10(importedProfile.draftConfig);
+      return clone11(importedProfile.draftConfig);
     }
     function refreshDynamic(nextDiscoveredLoops = discoveredLoops()) {
-      const loops = clone10(nextDiscoveredLoops);
+      const loops = clone11(nextDiscoveredLoops);
       const activeBindingSnapshot = refreshBuilderDynamicBindings({
         dynamicBindings: store.activeDynamicBindings || []
       }, loops, now()).dynamicBindings;
@@ -19344,7 +21031,7 @@
       };
       persist();
       if (root.classList.contains("open")) render();
-      return clone10(store);
+      return clone11(store);
     }
     function restoreActiveProfile() {
       if (!store.activeProfileId) return { status: "built-in", config: null };
@@ -19352,15 +21039,15 @@
       if (!active) return { status: "missing", config: null };
       const activeConfig = store.lastKnownGood || active.lastKnownGood || active.savedConfig;
       const startupProfile = {
-        ...clone10(active),
-        draftConfig: clone10(activeConfig),
-        savedConfig: clone10(activeConfig),
-        dynamicBindings: clone10(store.activeDynamicBindings || [])
+        ...clone11(active),
+        draftConfig: clone11(activeConfig),
+        savedConfig: clone11(activeConfig),
+        dynamicBindings: clone11(store.activeDynamicBindings || [])
       };
       const validation = validateBuilderProfile(startupProfile, builtInConfig());
       if (!validation.valid) return { status: "blocked", errors: validation.errors, config: null };
-      options.applyConfig?.(clone10(validation.config), `Builder profile: ${active.name}`);
-      return { status: "applied", config: clone10(validation.config) };
+      options.applyConfig?.(clone11(validation.config), `Builder profile: ${active.name}`);
+      return { status: "applied", config: clone11(validation.config) };
     }
     function selectRuntimeProfile(nextProfileId) {
       if (String(nextProfileId) === BUILDER_BUILT_IN_PROFILE_ID) {
@@ -19371,12 +21058,12 @@
       store = activated.store;
       profileId = activated.profile.id;
       persist();
-      options.applyConfig?.(clone10(activated.config), `Builder profile: ${activated.profile.name}`);
+      options.applyConfig?.(clone11(activated.config), `Builder profile: ${activated.profile.name}`);
       if (root.classList.contains("open")) render();
       return {
         status: "applied",
         profileId: activated.profile.id,
-        config: clone10(activated.config)
+        config: clone11(activated.config)
       };
     }
     function useBuiltIn() {
@@ -19409,15 +21096,15 @@
         ...store.profiles.map((entry) => ({ id: entry.id, name: entry.name, preset: entry.preset || null }))
       ],
       getSelectedRuntimeProfileId: () => store.activeProfileId || BUILDER_BUILT_IN_PROFILE_ID,
-      getStore: () => clone10(store),
+      getStore: () => clone11(store),
       isOpen: () => root.classList.contains("open"),
       root
     });
   }
 
   // src/ui/player-pick-modal.js
-  function applyStyles2(element, styles2) {
-    Object.assign(element.style, styles2);
+  function applyStyles2(element, styles3) {
+    Object.assign(element.style, styles3);
   }
   function waitForManualPlayerPickSelection(options = {}) {
     if (!options.dom?.create || !options.dom?.appendToBody) throw new TypeError("dom adapter is required");
@@ -19528,8 +21215,8 @@
     blocked: "->BLOCKED",
     unknown: "->?"
   });
-  function applyStyles3(element, styles2) {
-    Object.assign(element.style, styles2);
+  function applyStyles3(element, styles3) {
+    Object.assign(element.style, styles3);
   }
   function button(dom, text, title, mode) {
     const element = dom.create("button");
@@ -19943,9 +21630,9 @@
       const modal = error?.modal;
       if (!modal) return false;
       const buttons = Array.from(modal.querySelectorAll?.("button") || []);
-      const button5 = buttons.find((candidate) => /^(ok|okay|确定|確定)$/i.test(String(candidate?.textContent || "").trim())) || buttons.find((candidate) => !candidate?.disabled);
-      if (!button5) return false;
-      click(button5);
+      const button6 = buttons.find((candidate) => /^(ok|okay|确定|確定)$/i.test(String(candidate?.textContent || "").trim())) || buttons.find((candidate) => !candidate?.disabled);
+      if (!button6) return false;
+      click(button6);
       return true;
     }
     function findClaimContext() {
@@ -20002,8 +21689,8 @@
   }
 
   // src/ui/reward-highlight.js
-  function applyStyles4(element, styles2) {
-    Object.assign(element.style, styles2);
+  function applyStyles4(element, styles3) {
+    Object.assign(element.style, styles3);
   }
   function positionStack(stack, panel, viewport = {}) {
     const mobile = panel?.dataset?.layout === "mobile";
@@ -20132,8 +21819,8 @@
   }
 
   // src/ui/reward-alert-settings.js
-  function applyStyles5(element, styles2) {
-    Object.assign(element.style, styles2);
+  function applyStyles5(element, styles3) {
+    Object.assign(element.style, styles3);
   }
   function inputStyles(input2, mode) {
     applyStyles5(input2, {
@@ -20245,7 +21932,7 @@
     applyStyles5(tests, { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" });
     const actions = dom.create("div");
     applyStyles5(actions, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "14px" });
-    const button5 = (id, text, primary = false) => {
+    const button6 = (id, text, primary = false) => {
       const value = dom.create("button");
       value.id = id;
       value.type = "button";
@@ -20260,11 +21947,11 @@
       });
       return value;
     };
-    const preview = button5("bronze-loop-alert-preview", "Preview highlight");
-    const desktopTest = button5("bronze-loop-alert-test-desktop", "Send desktop test");
-    const ntfyTest = button5("bronze-loop-alert-test-ntfy", "Send ntfy test");
-    const cancel = button5("bronze-loop-alert-cancel", "Cancel");
-    const save = button5("bronze-loop-alert-save", "Save", true);
+    const preview = button6("bronze-loop-alert-preview", "Preview highlight");
+    const desktopTest = button6("bronze-loop-alert-test-desktop", "Send desktop test");
+    const ntfyTest = button6("bronze-loop-alert-test-ntfy", "Send ntfy test");
+    const cancel = button6("bronze-loop-alert-cancel", "Cancel");
+    const save = button6("bronze-loop-alert-save", "Save", true);
     tests.append(preview, desktopTest, ntfyTest);
     actions.append(cancel, save);
     const updateNtfyTestState = () => {
@@ -20329,8 +22016,8 @@
   }
 
   // src/ui/batch-open-dialog.js
-  function applyStyles6(element, styles2) {
-    Object.assign(element.style, styles2);
+  function applyStyles6(element, styles3) {
+    Object.assign(element.style, styles3);
   }
   function button2(dom, text, primary = false, mode = null) {
     const value = dom.create("button");
@@ -20686,10 +22373,10 @@
   }
 
   // src/ui/trade-listing-dialog.js
-  function applyStyles7(element, styles2) {
-    Object.assign(element.style, styles2);
+  function applyStyles7(element, styles3) {
+    Object.assign(element.style, styles3);
   }
-  function clone11(value) {
+  function clone12(value) {
     return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
   }
   function button3(dom, text, options = {}) {
@@ -20764,7 +22451,7 @@
   function defaultDraft(input2 = {}) {
     return {
       cardClass: String(input2.cardClass || "common-gold"),
-      ratingRules: clone11(input2.ratingRules?.length ? input2.ratingRules : [{ min: 75, max: 82, buyNow: 700 }]),
+      ratingRules: clone12(input2.ratingRules?.length ? input2.ratingRules : [{ min: 75, max: 82, buyNow: 700 }]),
       marketOverride: {
         enabled: input2.marketOverride?.enabled === true,
         markupPercent: Number(input2.marketOverride?.markupPercent ?? 5),
@@ -21226,23 +22913,328 @@
     return overlay;
   }
 
-  // src/ui/trade-scheduler-dialog.js
-  var PAGE_SIZE = 15;
-  var RANGE_SCHEDULE = ["win", "dow"].join("");
-  var GRACE_MISFIRE = ["grace", "win", "dow"].join("-");
-  function clone12(value) {
-    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  // src/trade/buy-recap.js
+  function finiteOrNull(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
   }
-  function styles(element, values) {
-    Object.assign(element.style, values);
+  function recapEntry(entry = {}) {
+    return {
+      index: Math.max(0, Number(entry.index || 0) || 0),
+      status: String(entry.status || "unknown"),
+      reason: entry.reason ? String(entry.reason) : null,
+      item: entry.item ? {
+        id: finiteOrNull(entry.item.id),
+        definitionId: finiteOrNull(entry.item.definitionId),
+        pile: String(entry.item.pile || "unknown")
+      } : null,
+      tradeId: finiteOrNull(entry.tradeId),
+      rating: finiteOrNull(entry.rating),
+      price: finiteOrNull(entry.price),
+      priceLimit: finiteOrNull(entry.priceLimit),
+      coinsBefore: finiteOrNull(entry.coinsBefore),
+      coinsAfter: finiteOrNull(entry.coinsAfter),
+      destination: entry.destination ? String(entry.destination) : null,
+      search: entry.search ? {
+        rating: finiteOrNull(entry.search.rating),
+        definitionId: finiteOrNull(entry.search.definitionId),
+        maxBuyNow: finiteOrNull(entry.search.maxBuyNow)
+      } : null,
+      candidates: finiteOrNull(entry.candidates),
+      rejectionCounts: entry.rejectionCounts && typeof entry.rejectionCounts === "object" ? Object.fromEntries(Object.entries(entry.rejectionCounts).map(([key, value]) => [String(key), Math.max(0, Number(value || 0) || 0)])) : {}
+    };
+  }
+  function createTradeBuyRecap(receipt = {}, options = {}) {
+    const entries = (Array.isArray(receipt.receipts) ? receipt.receipts : []).filter((entry) => entry?.status !== "run-summary");
+    const runSummary = (receipt.receipts || []).find((entry) => entry?.status === "run-summary") || {};
+    const pageSize = Math.max(1, Math.floor(Number(options.pageSize || TRADE_RECAP_PAGE_SIZE)));
+    const pageCount = Math.max(1, Math.ceil(entries.length / pageSize));
+    const page = Math.max(1, Math.min(pageCount, Math.floor(Number(options.page || 1))));
+    const start = (page - 1) * pageSize;
+    return {
+      title: "Buy recap",
+      status: String(receipt.status || "unknown"),
+      reason: receipt.reason ? String(receipt.reason) : null,
+      counts: {
+        requested: Math.max(0, Number(receipt.requested || 0) || 0),
+        succeeded: Math.max(0, Number(receipt.succeeded || 0) || 0),
+        failed: Math.max(0, Number(receipt.failed || 0) || 0),
+        skipped: Math.max(0, Number(receipt.skipped || 0) || 0),
+        searches: Math.max(0, Number(runSummary.searches || 0) || 0)
+      },
+      coins: {
+        before: finiteOrNull(receipt.coinsBefore),
+        after: finiteOrNull(receipt.coinsAfter),
+        spent: Math.max(0, Number(runSummary.spent || 0) || 0)
+      },
+      page,
+      pageSize,
+      pageCount,
+      totalItems: entries.length,
+      items: entries.slice(start, start + pageSize).map(recapEntry)
+    };
+  }
+
+  // src/ui/trade-buy-dialog.js
+  function styles(element, value) {
+    Object.assign(element.style, value);
     return element;
   }
-  function button4(dom, text, mode, id = "") {
+  function button4(dom, text, mode, id, primary = false) {
     const value = dom.create("button");
     value.type = "button";
     value.textContent = text;
     if (id) value.id = id;
-    styles(value, {
+    return styles(value, {
+      minHeight: responsiveControlHeight(mode),
+      padding: "0 12px",
+      cursor: "pointer",
+      color: "#fff",
+      background: primary ? "#2f6fde" : "#222832",
+      border: `1px solid ${primary ? "#4f8cff" : "#607089"}`
+    });
+  }
+  function formatCoins2(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString("en-US") : "?";
+  }
+  function textRow(dom, label, value) {
+    const row = styles(dom.create("div"), {
+      display: "grid",
+      gridTemplateColumns: "minmax(110px, .7fr) minmax(0, 1.3fr)",
+      gap: "8px",
+      padding: "7px 0",
+      borderBottom: "1px solid #303a47",
+      minWidth: "0"
+    });
+    const name = styles(dom.create("span"), { color: "#9fb2c9", fontSize: "12px" });
+    name.textContent = label;
+    const detail = styles(dom.create("span"), { overflowWrap: "anywhere" });
+    detail.textContent = value;
+    row.append(name, detail);
+    return row;
+  }
+  function controlRow(dom, label, control2) {
+    const row = styles(dom.create("div"), {
+      display: "grid",
+      gridTemplateColumns: "minmax(110px, .7fr) minmax(0, 1.3fr)",
+      gap: "8px",
+      padding: "7px 0",
+      borderBottom: "1px solid #303a47",
+      minWidth: "0",
+      alignItems: "center"
+    });
+    const name = styles(dom.create("span"), { color: "#9fb2c9", fontSize: "12px" });
+    name.textContent = label;
+    row.append(name, control2);
+    return row;
+  }
+  function showTradeBuyDialog(options = {}) {
+    const dom = options.dom;
+    if (!dom?.create || !dom?.appendToBody) throw new TypeError("dom adapter is required");
+    dom.query?.("#bronze-loop-trade-buy-modal")?.remove?.();
+    const mode = readResponsiveUiMode(dom);
+    const gate = inspectManualBuyValidationJob(options.job || {});
+    const preview = options.preview || null;
+    let receipt = null;
+    let error = null;
+    let running = false;
+    let recapPage = 1;
+    let expectedDestination = "auto";
+    const overlay = styles(dom.create("div"), {
+      position: "fixed",
+      inset: "0",
+      zIndex: "1000002",
+      background: "rgba(0,0,0,.74)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: mode.mobile ? "0" : "20px",
+      boxSizing: "border-box"
+    });
+    overlay.id = "bronze-loop-trade-buy-modal";
+    const dialog = styles(dom.create("div"), {
+      width: "min(760px, 100%)",
+      maxHeight: mode.mobile ? "100dvh" : "92vh",
+      overflow: "auto",
+      background: "#171b21",
+      color: "#f4f6f8",
+      border: "1px solid #65758a",
+      padding: "14px",
+      boxSizing: "border-box",
+      fontFamily: "Arial, sans-serif"
+    });
+    const heading = styles(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center" });
+    const title = styles(dom.create("div"), { fontSize: "17px", fontWeight: "700" });
+    title.textContent = "Single Buy Validation";
+    const badge = styles(dom.create("span"), { color: "#9fb2c9", fontSize: "11px", border: "1px solid #536276", padding: "4px 7px" });
+    badge.textContent = "Manual / 1 item";
+    heading.append(title, badge);
+    const destination = dom.create("select");
+    destination.id = "bronze-loop-trade-buy-destination";
+    for (const entry of [
+      { value: "auto", text: "Auto route" },
+      { value: "club", text: "Club only" },
+      { value: "transfer", text: "Transfer only" }
+    ]) {
+      const option2 = dom.create("option");
+      option2.value = entry.value;
+      option2.textContent = entry.text;
+      destination.appendChild(option2);
+    }
+    destination.value = expectedDestination;
+    styles(destination, {
+      minWidth: "0",
+      width: "100%",
+      height: responsiveControlHeight(mode),
+      boxSizing: "border-box",
+      background: "#222832",
+      color: "#f4f6f8",
+      border: "1px solid #607089",
+      padding: "0 8px"
+    });
+    const summary = styles(dom.create("div"), { marginTop: "12px" });
+    summary.append(
+      textRow(dom, "Job", String(gate.job?.name || options.job?.name || "?")),
+      textRow(dom, "Selection", `${gate.job?.policy?.ratingMin || "?"} OVR ${gate.job?.policy?.cardClass || "?"}`),
+      textRow(dom, "Maximum", formatCoins2(gate.maxPrice)),
+      textRow(dom, "Definitions", String(preview?.summary?.definitions ?? "?")),
+      controlRow(dom, "Expected route", destination)
+    );
+    const output = styles(dom.create("div"), { marginTop: "12px" });
+    const status = styles(dom.create("div"), { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
+    status.id = "bronze-loop-trade-buy-status";
+    status.textContent = gate.ready && preview?.plan?.ready ? "Ready for single-item validation" : `Blocked: ${gate.reason || "buy-preview-not-ready"}`;
+    const confirmation = dom.create("input");
+    confirmation.id = "bronze-loop-trade-buy-confirmation";
+    confirmation.type = "text";
+    confirmation.value = "";
+    const requiredText = () => manualBuyValidationConfirmation(gate.maxPrice, expectedDestination);
+    confirmation.placeholder = gate.ready ? requiredText() : "Confirmation";
+    confirmation.autocomplete = "off";
+    styles(confirmation, {
+      width: "100%",
+      minWidth: "0",
+      height: responsiveControlHeight(mode),
+      boxSizing: "border-box",
+      marginTop: "12px",
+      fontSize: mode.touchTargets ? "16px" : "",
+      background: "#222832",
+      color: "#f4f6f8",
+      border: "1px solid #607089",
+      padding: "0 8px"
+    });
+    const actions = styles(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", marginTop: "12px" });
+    const execute = button4(dom, "Buy one", mode, "bronze-loop-trade-buy-execute", true);
+    const stop = button4(dom, "Stop", mode, "bronze-loop-trade-buy-stop");
+    const diagnostics = button4(dom, "Save diagnostics", mode, "bronze-loop-trade-buy-diagnostics");
+    const close = button4(dom, "Close", mode, "bronze-loop-trade-buy-close");
+    stop.style.display = "none";
+    actions.append(confirmation, execute, stop, diagnostics, close);
+    function renderRecap() {
+      output.textContent = "";
+      const recap = createTradeBuyRecap(receipt, { page: recapPage });
+      const recapTitle = styles(dom.create("div"), { fontSize: "13px", fontWeight: "700", marginBottom: "7px" });
+      recapTitle.textContent = recap.title;
+      const recapSummary = styles(dom.create("div"), { color: recap.status === "completed" ? "#8fd19e" : "#e3a7a7", marginBottom: "7px" });
+      recapSummary.textContent = `${recap.status} | ${recap.counts.succeeded} purchased | ${recap.counts.failed} failed | ${recap.counts.searches} searches`;
+      output.append(recapTitle, recapSummary);
+      if (recap.reason) {
+        const reason = styles(dom.create("div"), { color: "#e3a7a7", fontSize: "11px", marginBottom: "7px" });
+        reason.textContent = `Reason: ${recap.reason}`;
+        output.appendChild(reason);
+      }
+      const coins = styles(dom.create("div"), { color: "#9fb2c9", fontSize: "11px", marginBottom: "7px" });
+      coins.textContent = `Coins: ${formatCoins2(recap.coins.before)} -> ${formatCoins2(recap.coins.after)} | Spent ${formatCoins2(recap.coins.spent)}`;
+      output.appendChild(coins);
+      for (const entry of recap.items) {
+        const row = styles(dom.create("div"), { padding: "8px", marginBottom: "6px", background: "#1d2229", border: "1px solid #344152" });
+        row.textContent = `${entry.index}. ${entry.status} | ${entry.rating || "?"} OVR | ${formatCoins2(entry.price)} | ${entry.destination || entry.reason || "?"}`;
+        output.appendChild(row);
+      }
+    }
+    function update() {
+      const ready = gate.ready && preview?.plan?.ready === true && confirmation.value === requiredText();
+      execute.disabled = running || receipt !== null || !ready;
+      destination.disabled = running || receipt !== null || !gate.ready;
+      confirmation.disabled = running || receipt !== null || !gate.ready;
+      close.disabled = running;
+      diagnostics.disabled = running || !preview && !receipt && !error;
+      stop.style.display = running ? "" : "none";
+      stop.disabled = !running;
+    }
+    destination.addEventListener("change", () => {
+      expectedDestination = String(destination.value || "auto");
+      confirmation.value = "";
+      confirmation.placeholder = requiredText();
+      status.textContent = expectedDestination === "auto" ? "Ready for single-item validation" : `Ready to validate ${expectedDestination === "transfer" ? "duplicate Transfer" : "non-duplicate Club"} routing`;
+      update();
+    });
+    confirmation.addEventListener("input", update);
+    execute.addEventListener("click", async () => {
+      if (execute.disabled) return;
+      running = true;
+      error = null;
+      status.textContent = "Single Buy validation running";
+      update();
+      try {
+        receipt = await options.onExecute?.({
+          confirmationText: confirmation.value,
+          expectedDestination,
+          platform: "pc"
+        });
+        if (!receipt) throw new Error("Buy receipt is unavailable");
+        status.textContent = `${receipt.status}${receipt.reason ? ` (${receipt.reason})` : ""}`;
+        renderRecap();
+      } catch (caught) {
+        error = caught;
+        status.textContent = `Buy validation failed: ${caught?.message || caught}`;
+      } finally {
+        running = false;
+        update();
+      }
+    });
+    stop.addEventListener("click", () => {
+      if (!running) return;
+      if (options.onStop?.() === true) status.textContent = "Stop requested";
+    });
+    diagnostics.addEventListener("click", () => options.onDownloadDiagnostics?.({
+      job: gate.job || options.job,
+      preview,
+      receipt,
+      error,
+      expectedDestination
+    }));
+    close.addEventListener("click", () => {
+      if (!running) overlay.remove();
+    });
+    dialog.append(heading, summary, output, status, actions);
+    overlay.appendChild(dialog);
+    dom.appendToBody(overlay);
+    applyResponsiveDialogLayout({ overlay, dialog, mode, controls: [destination, confirmation, execute, stop, diagnostics, close] });
+    update();
+    return { close: () => {
+      if (!running) overlay.remove();
+    } };
+  }
+
+  // src/ui/trade-scheduler-dialog.js
+  var PAGE_SIZE = 15;
+  var RANGE_SCHEDULE = ["win", "dow"].join("");
+  var GRACE_MISFIRE = ["grace", "win", "dow"].join("-");
+  function clone13(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  }
+  function styles2(element, values) {
+    Object.assign(element.style, values);
+    return element;
+  }
+  function button5(dom, text, mode, id = "") {
+    const value = dom.create("button");
+    value.type = "button";
+    value.textContent = text;
+    if (id) value.id = id;
+    styles2(value, {
       minHeight: responsiveControlHeight(mode),
       padding: "0 12px",
       cursor: "pointer",
@@ -21258,7 +23250,7 @@
     if (id) control2.id = id;
     if (type === "checkbox") control2.checked = value === true;
     else control2.value = String(value ?? "");
-    styles(control2, {
+    styles2(control2, {
       minHeight: type === "checkbox" ? "auto" : responsiveControlHeight(mode),
       minWidth: "0",
       width: type === "checkbox" ? "auto" : "100%",
@@ -21283,7 +23275,7 @@
     return control2;
   }
   function field3(dom, text, control2, mode) {
-    const label = styles(dom.create("label"), {
+    const label = styles2(dom.create("label"), {
       display: "grid",
       gridTemplateColumns: mode.mobile ? "1fr" : "145px minmax(0, 1fr)",
       alignItems: "center",
@@ -21292,14 +23284,14 @@
     });
     const title = dom.create("span");
     title.textContent = text;
-    styles(title, { color: "#b8c3d2", fontSize: "12px" });
+    styles2(title, { color: "#b8c3d2", fontSize: "12px" });
     label.append(title, control2);
     return label;
   }
   function section(dom, text) {
     const value = dom.create("div");
     value.textContent = text;
-    styles(value, { color: "#d9e1eb", fontWeight: "700", marginTop: "8px" });
+    styles2(value, { color: "#d9e1eb", fontWeight: "700", marginTop: "8px" });
     return value;
   }
   function epochInputValue(value) {
@@ -21317,7 +23309,7 @@
   }
   function createTradeJobDraft(type = "listing", options = {}) {
     const now = Math.max(0, Number(options.now ?? Date.now()) || 0);
-    if (options.job) return clone12(options.job);
+    if (options.job) return clone13(options.job);
     const common = {
       id: uniqueJobId(type, now),
       name: type === "buy" ? "Buy Job" : "Listing Job",
@@ -21339,6 +23331,7 @@
         ratingPriceOverrides: {},
         quantity: 1,
         totalBudget: 1e3,
+        minimumRetainedCoins: null,
         maxRuntimeMinutes: 15,
         searchDelaySeconds: [8, 15],
         maxPurchasesPerSearch: 1,
@@ -21376,13 +23369,14 @@
     dom.query?.("#bronze-loop-trade-scheduler-modal")?.remove?.();
     const mode = readResponsiveUiMode(dom);
     const now = typeof options.now === "function" ? options.now : () => Date.now();
-    let snapshot = clone12(options.getSnapshot?.() || options.snapshot || {});
+    let snapshot = clone13(options.getSnapshot?.() || options.snapshot || {});
     let view = "jobs";
     let historyPage = 1;
     let editing = null;
     let statusText = "";
+    let validatedImportText = null;
     const buyPreviews = /* @__PURE__ */ new Map();
-    const overlay = styles(dom.create("div"), {
+    const overlay = styles2(dom.create("div"), {
       position: "fixed",
       inset: "0",
       zIndex: "1000000",
@@ -21394,7 +23388,7 @@
       boxSizing: "border-box"
     });
     overlay.id = "bronze-loop-trade-scheduler-modal";
-    const dialog = styles(dom.create("div"), {
+    const dialog = styles2(dom.create("div"), {
       width: "min(980px, 100%)",
       maxHeight: mode.mobile ? "100dvh" : "92vh",
       overflow: "auto",
@@ -21405,26 +23399,36 @@
       boxSizing: "border-box",
       fontFamily: "Arial, sans-serif"
     });
-    const heading = styles(dom.create("div"), { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" });
+    const heading = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" });
     const title = dom.create("div");
     title.textContent = "Trade Scheduler";
-    styles(title, { fontSize: "17px", fontWeight: "700" });
-    const close = button4(dom, "Close", mode, "bronze-loop-trade-scheduler-close");
+    styles2(title, { fontSize: "17px", fontWeight: "700" });
+    const close = button5(dom, "Close", mode, "bronze-loop-trade-scheduler-close");
     heading.append(title, close);
-    const tabs = styles(dom.create("div"), { display: "flex", gap: "8px", margin: "12px 0", flexWrap: "wrap" });
-    const jobsTab = button4(dom, "Jobs", mode, "bronze-loop-trade-jobs-tab");
-    const historyTab = button4(dom, "History", mode, "bronze-loop-trade-history-tab");
-    tabs.append(jobsTab, historyTab);
-    const banner = styles(dom.create("div"), { padding: "9px", border: "1px solid #47576b", background: "#1d2229", marginBottom: "10px", fontSize: "12px" });
+    const tabs = styles2(dom.create("div"), { display: "flex", gap: "8px", margin: "12px 0", flexWrap: "wrap" });
+    const jobsTab = button5(dom, "Jobs", mode, "bronze-loop-trade-jobs-tab");
+    const summaryTab = button5(dom, "Summary", mode, "bronze-loop-trade-summary-tab");
+    const providersTab = button5(dom, "Providers", mode, "bronze-loop-trade-providers-tab");
+    const historyTab = button5(dom, "History", mode, "bronze-loop-trade-history-tab");
+    tabs.append(jobsTab, summaryTab, providersTab, historyTab);
+    const banner = styles2(dom.create("div"), { padding: "9px", border: "1px solid #47576b", background: "#1d2229", marginBottom: "10px", fontSize: "12px" });
     const content = dom.create("div");
-    const status = styles(dom.create("div"), { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
+    const status = styles2(dom.create("div"), { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
     status.id = "bronze-loop-trade-scheduler-status";
     function refreshSnapshot() {
-      snapshot = clone12(options.getSnapshot?.() || snapshot || {});
+      snapshot = clone13(options.getSnapshot?.() || snapshot || {});
     }
     function setStatus(value) {
       statusText = String(value || "");
       status.textContent = statusText;
+    }
+    function buyValidationAvailability(job, preview) {
+      if (preview?.plan?.ready !== true) return { ready: false, reason: "buy-preview-not-ready" };
+      if (snapshot.paused !== true || snapshot.liveExecutionEnabled === true) {
+        return { ready: false, reason: "scheduler-must-be-paused-and-live-disabled" };
+      }
+      const gate = inspectManualBuyValidationJob(job);
+      return gate.ready ? { ready: true, reason: null, gate } : { ready: false, reason: gate.reason, gate };
     }
     function renderBanner() {
       const circuit = options.getCircuit?.() || null;
@@ -21435,7 +23439,7 @@
       banner.style.color = circuitState === "open" ? "#e3a7a7" : "#b8c3d2";
     }
     function checkboxLabel(text, control2) {
-      const label = styles(dom.create("label"), { display: "flex", alignItems: "center", gap: "7px", minHeight: responsiveControlHeight(mode) });
+      const label = styles2(dom.create("label"), { display: "flex", alignItems: "center", gap: "7px", minHeight: responsiveControlHeight(mode) });
       label.append(control2, dom.create("span"));
       label.children[1].textContent = text;
       return label;
@@ -21444,7 +23448,7 @@
       content.textContent = "";
       const draft = editing;
       content.appendChild(section(dom, draft.type === "buy" ? "Buy Job" : "Listing Job"));
-      const form = styles(dom.create("div"), { display: "flex", flexDirection: "column", gap: "8px", maxWidth: "720px", marginTop: "8px" });
+      const form = styles2(dom.create("div"), { display: "flex", flexDirection: "column", gap: "8px", maxWidth: "720px", marginTop: "8px" });
       const name = input(dom, "text", draft.name, mode, "bronze-loop-trade-job-name");
       const enabled = input(dom, "checkbox", draft.enabled, mode, "bronze-loop-trade-job-enabled");
       const armed = input(dom, "checkbox", draft.armed, mode, "bronze-loop-trade-job-armed");
@@ -21475,7 +23479,7 @@
       ], mode, "bronze-loop-trade-job-card-class");
       form.append(section(dom, "Policy"), field3(dom, "Card class", cardClass, mode));
       const policyFields = dom.create("div");
-      styles(policyFields, { display: "flex", flexDirection: "column", gap: "8px" });
+      styles2(policyFields, { display: "flex", flexDirection: "column", gap: "8px" });
       form.appendChild(policyFields);
       const controls = { name, enabled, armed, scheduleType, misfire, grace, cardClass };
       function renderScheduleFields() {
@@ -21510,10 +23514,22 @@
           controls[key] = input(dom, "number", draft.policy[key] ?? fallback, mode, `bronze-loop-trade-job-${key}`);
           policyFields.appendChild(field3(dom, label, controls[key], mode));
         }
+        controls.minimumRetainedCoins = input(
+          dom,
+          "number",
+          draft.policy.minimumRetainedCoins ?? "",
+          mode,
+          "bronze-loop-trade-job-minimum-retained-coins"
+        );
         controls.ratingPriceOverrides = input(dom, "text", Object.entries(draft.policy.ratingPriceOverrides || {}).map(([rating, price]) => `${rating}=${price}`).join(", "), mode, "bronze-loop-trade-job-rating-prices");
         controls.searchDelayMin = input(dom, "number", draft.policy.searchDelaySeconds?.[0] || 8, mode, "bronze-loop-trade-job-search-delay-min");
         controls.searchDelayMax = input(dom, "number", draft.policy.searchDelaySeconds?.[1] || 15, mode, "bronze-loop-trade-job-search-delay-max");
-        policyFields.append(field3(dom, "Rating prices", controls.ratingPriceOverrides, mode), field3(dom, "Search delay min", controls.searchDelayMin, mode), field3(dom, "Search delay max", controls.searchDelayMax, mode));
+        policyFields.append(
+          field3(dom, "Job minimum retained coins", controls.minimumRetainedCoins, mode),
+          field3(dom, "Rating prices", controls.ratingPriceOverrides, mode),
+          field3(dom, "Search delay min", controls.searchDelayMin, mode),
+          field3(dom, "Search delay max", controls.searchDelayMax, mode)
+        );
       } else {
         controls.clubSource = input(dom, "checkbox", draft.policy.sources?.includes("club"), mode, "bronze-loop-trade-job-source-club");
         controls.transferSource = input(dom, "checkbox", draft.policy.sources?.includes("transfer"), mode, "bronze-loop-trade-job-source-transfer");
@@ -21523,11 +23539,11 @@
         const renderRules = () => {
           rules.textContent = "";
           controls.rules = draft.policy.ratingRules.map((rule, index) => {
-            const row = styles(dom.create("div"), { display: "grid", gridTemplateColumns: mode.mobile ? "1fr" : "1fr 1fr 1.2fr auto", gap: "6px", marginBottom: "6px" });
+            const row = styles2(dom.create("div"), { display: "grid", gridTemplateColumns: mode.mobile ? "1fr" : "1fr 1fr 1.2fr auto", gap: "6px", marginBottom: "6px" });
             const min = input(dom, "number", rule.min, mode);
             const max = input(dom, "number", rule.max, mode);
             const price = input(dom, "number", rule.buyNow, mode);
-            const remove = button4(dom, "x", mode);
+            const remove = button5(dom, "x", mode);
             remove.addEventListener("click", () => {
               if (draft.policy.ratingRules.length > 1) {
                 draft.policy.ratingRules.splice(index, 1);
@@ -21539,7 +23555,7 @@
             return { min, max, price };
           });
         };
-        const addRule = button4(dom, "+", mode, "bronze-loop-trade-job-add-rule");
+        const addRule = button5(dom, "+", mode, "bronze-loop-trade-job-add-rule");
         addRule.addEventListener("click", () => {
           draft.policy.ratingRules.push({ min: 83, max: 83, buyNow: 1e3 });
           renderRules();
@@ -21569,9 +23585,9 @@
       }
       renderScheduleFields();
       scheduleType.addEventListener("change", renderScheduleFields);
-      const actions = styles(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" });
-      const save = button4(dom, "Save", mode, "bronze-loop-trade-job-save");
-      const cancel = button4(dom, "Cancel", mode, "bronze-loop-trade-job-cancel");
+      const actions = styles2(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" });
+      const save = button5(dom, "Save", mode, "bronze-loop-trade-job-save");
+      const cancel = button5(dom, "Cancel", mode, "bronze-loop-trade-job-cancel");
       actions.append(save, cancel);
       form.appendChild(actions);
       content.appendChild(form);
@@ -21589,6 +23605,7 @@
           draft.policy.cardClass = cardClass.value;
           if (draft.type === "buy") {
             for (const key of ["ratingMin", "ratingMax", "maxBuyNow", "quantity", "totalBudget", "maxRuntimeMinutes", "maxConsecutiveEmptySearches"]) draft.policy[key] = Number(controls[key].value);
+            draft.policy.minimumRetainedCoins = controls.minimumRetainedCoins.value === "" ? null : Number(controls.minimumRetainedCoins.value);
             draft.policy.ratingPriceOverrides = Object.fromEntries(String(controls.ratingPriceOverrides.value || "").split(",").map((entry) => entry.trim().split("=").map((part) => part.trim())).filter(([rating, price]) => rating && Number(price) > 0));
             draft.policy.searchDelaySeconds = [Number(controls.searchDelayMin.value), Number(controls.searchDelayMax.value)];
             draft.policy.maxPurchasesPerSearch = 1;
@@ -21603,6 +23620,7 @@
             draft.policy.expiredPolicy = controls.expiredPolicy.value;
           }
           const normalized = normalizeTradeJobEditorValue(draft, { now: now() });
+          buyPreviews.delete(normalized.id);
           options.onSaveJob?.(normalized);
           refreshSnapshot();
           editing = null;
@@ -21621,15 +23639,17 @@
     }
     function renderJobs() {
       content.textContent = "";
-      const toolbar = styles(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
-      const manual = button4(dom, "Manual listing", mode, "bronze-loop-trade-manual-listing");
-      const addListing = button4(dom, "New listing Job", mode, "bronze-loop-trade-new-listing");
-      const addBuy = button4(dom, "New Buy Job", mode, "bronze-loop-trade-new-buy");
-      const diagnostics = button4(dom, "Save diagnostics", mode, "bronze-loop-trade-scheduler-diagnostics");
+      const toolbar = styles2(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
+      const manual = button5(dom, "Manual listing", mode, "bronze-loop-trade-manual-listing");
+      const addListing = button5(dom, "New listing Job", mode, "bronze-loop-trade-new-listing");
+      const addBuy = button5(dom, "New Buy Job", mode, "bronze-loop-trade-new-buy");
+      const exportConfig = button5(dom, "Export config", mode, "bronze-loop-trade-export-config");
+      const importConfig = button5(dom, "Import config", mode, "bronze-loop-trade-import-config");
+      const diagnostics = button5(dom, "Save diagnostics", mode, "bronze-loop-trade-scheduler-diagnostics");
       const circuit = options.getCircuit?.();
-      const resetCircuit = button4(dom, "Reset trade block", mode, "bronze-loop-trade-circuit-reset");
+      const resetCircuit = button5(dom, "Reset trade block", mode, "bronze-loop-trade-circuit-reset");
       resetCircuit.style.display = circuit?.circuit?.state === "open" ? "" : "none";
-      toolbar.append(manual, addListing, addBuy, diagnostics, resetCircuit);
+      toolbar.append(manual, addListing, addBuy, exportConfig, importConfig, diagnostics, resetCircuit);
       content.appendChild(toolbar);
       manual.addEventListener("click", () => options.onOpenManualListing?.());
       addListing.addEventListener("click", () => {
@@ -21640,6 +23660,20 @@
         editing = createTradeJobDraft("buy", { now: now() });
         renderEditor();
       });
+      exportConfig.addEventListener("click", () => {
+        try {
+          options.onExportJobConfig?.();
+          setStatus(`Exported ${(snapshot.jobs || []).length} Job(s)`);
+        } catch (error) {
+          setStatus(`Export failed: ${error?.message || error}`);
+        }
+      });
+      importConfig.addEventListener("click", () => {
+        validatedImportText = null;
+        editing = null;
+        view = "import";
+        render();
+      });
       diagnostics.addEventListener("click", () => options.onDownloadDiagnostics?.());
       resetCircuit.addEventListener("click", () => {
         options.onResetCircuit?.();
@@ -21647,7 +23681,38 @@
         setStatus("Trade block reset manually");
         render();
       });
-      const validationGate = styles(dom.create("div"), {
+      const safety = styles2(dom.create("div"), {
+        display: "grid",
+        gridTemplateColumns: mode.mobile ? "1fr" : "minmax(0, 1fr) auto",
+        gap: "8px",
+        alignItems: "end",
+        padding: "9px",
+        marginBottom: "10px",
+        border: "1px solid #47576b",
+        background: "#1a2028"
+      });
+      const globalReserve = input(
+        dom,
+        "number",
+        snapshot.safety?.minimumRetainedCoins ?? "",
+        mode,
+        "bronze-loop-trade-global-minimum-retained-coins"
+      );
+      const saveReserve = button5(dom, "Save reserve", mode, "bronze-loop-trade-save-global-reserve");
+      saveReserve.addEventListener("click", () => {
+        try {
+          const value = globalReserve.value === "" ? null : Number(globalReserve.value);
+          options.onSetMinimumRetainedCoins?.(value);
+          refreshSnapshot();
+          setStatus(value === null ? "Scheduled Buy global reserve cleared" : `Scheduled Buy global reserve set to ${value.toLocaleString()}`);
+          render();
+        } catch (error) {
+          setStatus(`Reserve update failed: ${error?.message || error}`);
+        }
+      });
+      safety.append(field3(dom, "Global minimum retained coins", globalReserve, mode), saveReserve);
+      content.appendChild(safety);
+      const validationGate = styles2(dom.create("div"), {
         display: "flex",
         gap: "8px",
         flexWrap: "wrap",
@@ -21657,12 +23722,14 @@
         border: "1px solid #47576b",
         background: "#1a2028"
       });
-      const guarded = selectGuardedScheduledListingJob(snapshot);
+      const guarded = selectGuardedScheduledTradeJob(snapshot, {
+        scheduledBuyEnabled: options.scheduledBuyEnabled === true
+      });
       if (snapshot.liveExecutionEnabled === true) {
         const gateState = dom.create("span");
         gateState.textContent = `One-card schedule enabled${guarded.job ? `: ${guarded.job.name}` : ""}`;
-        styles(gateState, { color: "#e3c98d", flex: "1 1 260px", fontSize: "12px" });
-        const disableGate = button4(dom, "Disable scheduling", mode, "bronze-loop-trade-disable-guarded-schedule");
+        styles2(gateState, { color: "#e3c98d", flex: "1 1 260px", fontSize: "12px" });
+        const disableGate = button5(dom, "Disable scheduling", mode, "bronze-loop-trade-disable-guarded-schedule");
         disableGate.addEventListener("click", () => {
           options.onDisableGuardedScheduling?.();
           refreshSnapshot();
@@ -21672,14 +23739,14 @@
         validationGate.append(gateState, disableGate);
       } else {
         const gateInput = input(dom, "text", "", mode, "bronze-loop-trade-guarded-confirmation");
-        gateInput.placeholder = GUARDED_SCHEDULE_CONFIRMATION;
-        styles(gateInput, { flex: "1 1 220px" });
-        const enableGate = button4(dom, "Enable one-card schedule", mode, "bronze-loop-trade-enable-guarded-schedule");
+        gateInput.placeholder = guarded.requiredText || "No eligible one-card schedule";
+        styles2(gateInput, { flex: "1 1 220px" });
+        const enableGate = button5(dom, "Enable one-card schedule", mode, "bronze-loop-trade-enable-guarded-schedule");
         enableGate.disabled = guarded.ready !== true;
-        enableGate.title = guarded.ready ? `Type ${GUARDED_SCHEDULE_CONFIRMATION}` : guarded.reason || "One armed Job is required";
+        enableGate.title = guarded.ready ? `Type ${guarded.requiredText}` : guarded.reason || "One armed Job is required";
         enableGate.addEventListener("click", async () => {
-          if (gateInput.value !== GUARDED_SCHEDULE_CONFIRMATION) {
-            setStatus(`Confirmation must exactly match ${GUARDED_SCHEDULE_CONFIRMATION}`);
+          if (gateInput.value !== guarded.requiredText) {
+            setStatus(`Confirmation must exactly match ${guarded.requiredText}`);
             return;
           }
           enableGate.disabled = true;
@@ -21699,26 +23766,27 @@
       if (!snapshot.jobs?.length) {
         const empty = dom.create("div");
         empty.textContent = "No Trade Jobs";
-        styles(empty, { color: "#8795a8", padding: "18px 0" });
+        styles2(empty, { color: "#8795a8", padding: "18px 0" });
         content.appendChild(empty);
         return;
       }
       for (const job of snapshot.jobs) {
         const runtime = snapshot.runtimes?.[job.id] || {};
-        const card = styles(dom.create("div"), { border: "1px solid #3e4b5d", background: "#1d2229", padding: "10px", marginBottom: "8px" });
-        const head = styles(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "start" });
+        const card = styles2(dom.create("div"), { border: "1px solid #3e4b5d", background: "#1d2229", padding: "10px", marginBottom: "8px" });
+        const head = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "start" });
         const identity = dom.create("div");
         identity.textContent = job.name;
-        styles(identity, { fontWeight: "700", overflowWrap: "anywhere" });
+        styles2(identity, { fontWeight: "700", overflowWrap: "anywhere" });
         const state = dom.create("span");
         state.textContent = runtime.status || (job.armed ? "armed" : "disabled");
-        styles(state, { color: runtime.status === "blocked" ? "#e3a7a7" : "#9fb2c9" });
+        styles2(state, { color: runtime.status === "blocked" ? "#e3a7a7" : "#9fb2c9" });
         head.append(identity, state);
         const detail = dom.create("div");
         detail.textContent = `${job.type} | ${tradeScheduleSummary(job)}${runtime.nextRunAt !== null && runtime.nextRunAt !== void 0 ? ` | Next ${new Date(runtime.nextRunAt).toLocaleString()}` : ""}`;
-        styles(detail, { color: "#9aa6b8", fontSize: "11px", margin: "6px 0" });
+        styles2(detail, { color: "#9aa6b8", fontSize: "11px", margin: "6px 0" });
         const buyPreview = buyPreviews.get(job.id);
-        const previewDetail = job.type === "buy" && buyPreview ? styles(dom.create("div"), {
+        const buyAvailability = job.type === "buy" ? buyValidationAvailability(job, buyPreview) : null;
+        const previewDetail = job.type === "buy" && buyPreview ? styles2(dom.create("div"), {
           color: buyPreview.plan?.ready ? "#a9d7b5" : "#e3a7a7",
           fontSize: "11px",
           margin: "6px 0",
@@ -21728,31 +23796,37 @@
         if (previewDetail) {
           const lanes = (buyPreview.plan?.lanes || []).map((lane) => `${lane.rating}: ${lane.definitionIds.length} player ID(s), max ${Number(lane.maxBuyNow).toLocaleString()}`).join(" | ");
           const missing = buyPreview.plan?.missingRatings?.length ? ` | Missing ratings: ${buyPreview.plan.missingRatings.join(", ")}` : "";
-          previewDetail.textContent = `Preview only | ${lanes || "No search lanes"}${missing} | Live Buy locked`;
+          previewDetail.textContent = `Preview only | ${lanes || "No search lanes"}${missing} | ${buyAvailability.ready ? "Buy one ready" : `Buy one unavailable: ${buyAvailability.reason}`}`;
         }
-        const actions = styles(dom.create("div"), { display: "flex", gap: "6px", flexWrap: "wrap" });
-        const run = button4(dom, job.type === "buy" ? "Preview" : "Run now", mode);
-        const edit = button4(dom, "Edit", mode);
-        const duplicate = button4(dom, "Duplicate", mode);
-        const remove = button4(dom, "Delete", mode);
+        const actions = styles2(dom.create("div"), { display: "flex", gap: "6px", flexWrap: "wrap" });
+        const run = button5(dom, job.type === "buy" ? "Preview" : "Run now", mode);
+        const validateBuy = job.type === "buy" && buyAvailability.ready ? button5(dom, "Buy one", mode, `bronze-loop-trade-buy-one-${job.id}`) : null;
+        const edit = button5(dom, "Edit", mode);
+        const duplicate = button5(dom, "Duplicate", mode);
+        const remove = button5(dom, "Delete", mode);
         run.addEventListener("click", async () => {
           if (job.type !== "buy") {
             options.onOpenManualListing?.(job);
             return;
           }
           run.disabled = true;
+          if (validateBuy) validateBuy.disabled = true;
+          buyPreviews.delete(job.id);
           setStatus(`Loading Buy preview for ${job.name}`);
           try {
             const preview = await options.onPreviewBuyJob?.(job);
             if (!preview) throw new Error("Buy preview is unavailable");
             buyPreviews.set(job.id, preview);
-            setStatus(preview.plan?.ready ? `Buy preview ready: ${preview.summary?.ratings || 0} rating lane(s), ${preview.summary?.definitions || 0} player definition(s); execution remains locked` : `Buy preview blocked: missing rating lane(s) ${(preview.plan?.missingRatings || []).join(", ") || "unknown"}`);
+            refreshSnapshot();
+            const availability = buyValidationAvailability(job, preview);
+            setStatus(preview.plan?.ready ? `Buy preview ready: ${preview.summary?.ratings || 0} rating lane(s), ${preview.summary?.definitions || 0} player definition(s); ${availability.ready ? "Buy one is available" : `Buy one unavailable (${availability.reason})`}` : `Buy preview blocked: missing rating lane(s) ${(preview.plan?.missingRatings || []).join(", ") || "unknown"}`);
             render();
           } catch (error) {
             setStatus(`Buy preview failed: ${error?.message || error}`);
-            run.disabled = false;
+            render();
           }
         });
+        validateBuy?.addEventListener("click", () => options.onOpenManualBuy?.(job, buyPreview));
         edit.addEventListener("click", () => {
           editing = createTradeJobDraft(job.type, { job, now: now() });
           renderEditor();
@@ -21766,11 +23840,14 @@
           renderEditor();
         });
         remove.addEventListener("click", () => {
+          buyPreviews.delete(job.id);
           options.onDeleteJob?.(job.id);
           refreshSnapshot();
           render();
         });
-        actions.append(run, edit, duplicate, remove);
+        actions.append(run);
+        if (validateBuy) actions.append(validateBuy);
+        actions.append(edit, duplicate, remove);
         card.append(head, detail);
         if (previewDetail) card.appendChild(previewDetail);
         card.appendChild(actions);
@@ -21789,19 +23866,19 @@
         content.appendChild(empty);
       }
       for (const receipt of entries) {
-        const row = styles(dom.create("div"), { borderBottom: "1px solid #35404e", padding: "9px 0" });
+        const row = styles2(dom.create("div"), { borderBottom: "1px solid #35404e", padding: "9px 0" });
         const line = dom.create("div");
         line.textContent = `${receipt.jobType || "trade"} | ${receipt.status} | ${Number(receipt.succeeded || 0)}/${Number(receipt.requested || 0)}`;
         const detail = dom.create("small");
         detail.textContent = `${new Date(Number(receipt.startedAt || 0)).toLocaleString()}${receipt.reason ? ` | ${receipt.reason}` : ""}`;
-        styles(detail, { color: "#9aa6b8" });
+        styles2(detail, { color: "#9aa6b8" });
         row.append(line, detail);
         content.appendChild(row);
       }
       if (pageCount > 1) {
-        const pages = styles(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", alignItems: "center", marginTop: "10px" });
-        const previous = button4(dom, "<", mode);
-        const next = button4(dom, ">", mode);
+        const pages = styles2(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", alignItems: "center", marginTop: "10px" });
+        const previous = button5(dom, "<", mode);
+        const next = button5(dom, ">", mode);
         const count = dom.create("span");
         count.textContent = `${historyPage}/${pageCount}`;
         previous.disabled = historyPage <= 1;
@@ -21818,12 +23895,259 @@
         content.appendChild(pages);
       }
     }
+    function renderSummary() {
+      content.textContent = "";
+      const metrics = snapshot.metrics || {};
+      const runs = metrics.runs || {};
+      const statuses = runs.byStatus || {};
+      const outcomes = metrics.outcomes || {};
+      const buy = metrics.buy || {};
+      const listing = metrics.listing || {};
+      const groups = [
+        ["Runs", [
+          ["Total", runs.total],
+          ["Completed", statuses.completed],
+          ["Blocked", statuses.blocked],
+          ["Missed", statuses.missed],
+          ["Stopped", statuses.stopped],
+          ["Failed", Number(statuses.failed || 0) + Number(statuses.error || 0)]
+        ]],
+        ["Outcomes", [
+          ["Requested", outcomes.requested],
+          ["Succeeded", outcomes.succeeded],
+          ["Failed", outcomes.failed],
+          ["Skipped", outcomes.skipped]
+        ]],
+        ["Buy", [
+          ["Purchased", buy.purchases],
+          ["Searches", buy.searches],
+          ["Attempts", buy.attempts],
+          ["Spent", Number(buy.spent || 0).toLocaleString()]
+        ]],
+        ["Listing", [["Listed", listing.listed]]]
+      ];
+      const grid = styles2(dom.create("div"), {
+        display: "grid",
+        gridTemplateColumns: mode.mobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+        gap: "12px"
+      });
+      for (const [label, values] of groups) {
+        const group = styles2(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", minWidth: "0" });
+        const heading2 = dom.create("div");
+        heading2.textContent = label;
+        styles2(heading2, { fontWeight: "700", marginBottom: "6px" });
+        group.appendChild(heading2);
+        for (const [name, rawValue] of values) {
+          const row = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "12px", padding: "3px 0" });
+          const key = dom.create("span");
+          const value = dom.create("span");
+          key.textContent = name;
+          value.textContent = String(rawValue ?? 0);
+          styles2(key, { color: "#aeb8c6" });
+          styles2(value, { fontVariantNumeric: "tabular-nums" });
+          row.append(key, value);
+          group.appendChild(row);
+        }
+        grid.appendChild(group);
+      }
+      content.appendChild(grid);
+      const period = styles2(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px", color: "#aeb8c6", fontSize: "12px" });
+      const firstAt = Number(metrics.firstRecordedAt || 0);
+      const lastAt = Number(metrics.lastRecordedAt || 0);
+      period.textContent = firstAt ? `Tracked ${new Date(firstAt).toLocaleString()} - ${new Date(lastAt || firstAt).toLocaleString()}` : "No recorded Trade runs";
+      content.appendChild(period);
+      const reasons = Array.isArray(metrics.reasons) ? metrics.reasons : [];
+      if (reasons.length) {
+        const reasonGroup = styles2(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px" });
+        const reasonHeading = dom.create("div");
+        reasonHeading.textContent = "Stop reasons";
+        styles2(reasonHeading, { fontWeight: "700", marginBottom: "6px" });
+        reasonGroup.appendChild(reasonHeading);
+        for (const entry of reasons) {
+          const row = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "12px", padding: "3px 0" });
+          const reason = dom.create("span");
+          const count = dom.create("span");
+          reason.textContent = String(entry.reason || "unknown");
+          count.textContent = String(Number(entry.count || 0));
+          styles2(reason, { overflowWrap: "anywhere", color: "#aeb8c6" });
+          styles2(count, { fontVariantNumeric: "tabular-nums" });
+          row.append(reason, count);
+          reasonGroup.appendChild(row);
+        }
+        content.appendChild(reasonGroup);
+      }
+    }
+    function renderImport() {
+      content.textContent = "";
+      const heading2 = section(dom, "Import Trade Jobs");
+      const textarea = dom.create("textarea");
+      textarea.id = "bronze-loop-trade-import-json";
+      textarea.value = "";
+      textarea.spellcheck = false;
+      styles2(textarea, {
+        width: "100%",
+        minHeight: mode.mobile ? "42dvh" : "320px",
+        boxSizing: "border-box",
+        resize: "vertical",
+        border: "1px solid #596a7e",
+        background: "#0d1117",
+        color: "#eef2f6",
+        padding: "10px",
+        font: "12px Consolas, monospace",
+        lineHeight: "1.45",
+        overflowWrap: "normal",
+        whiteSpace: "pre"
+      });
+      const actions = styles2(dom.create("div"), { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" });
+      const validate = button5(dom, "Validate", mode, "bronze-loop-trade-import-validate");
+      const replace = button5(dom, "Replace jobs", mode, "bronze-loop-trade-import-apply");
+      const cancel = button5(dom, "Cancel", mode, "bronze-loop-trade-import-cancel");
+      replace.disabled = true;
+      const invalidate = () => {
+        validatedImportText = null;
+        replace.disabled = true;
+        replace.textContent = "Replace jobs";
+      };
+      textarea.addEventListener("input", invalidate);
+      textarea.addEventListener("change", invalidate);
+      validate.addEventListener("click", () => {
+        try {
+          const result = options.onValidateJobConfig?.(textarea.value);
+          if (!result || !Array.isArray(result.jobs)) throw new Error("Trade Job configuration validator is unavailable");
+          validatedImportText = textarea.value;
+          replace.disabled = false;
+          replace.textContent = `Replace with ${result.jobs.length} Job(s)`;
+          setStatus(`Valid configuration: ${result.jobs.length} Job(s)`);
+        } catch (error) {
+          invalidate();
+          setStatus(`Validation failed: ${error?.message || error}`);
+        }
+      });
+      replace.addEventListener("click", () => {
+        if (textarea.value !== validatedImportText) {
+          invalidate();
+          setStatus("Configuration changed; validate again");
+          return;
+        }
+        try {
+          const result = options.onImportJobConfig?.(textarea.value);
+          if (!result || !Array.isArray(result.jobs)) throw new Error("Trade Job configuration importer is unavailable");
+          buyPreviews.clear();
+          validatedImportText = null;
+          refreshSnapshot();
+          view = "jobs";
+          setStatus(`Imported ${result.jobs.length} Job(s); all Jobs are unarmed`);
+          render();
+        } catch (error) {
+          setStatus(`Import failed: ${error?.message || error}`);
+        }
+      });
+      cancel.addEventListener("click", () => {
+        validatedImportText = null;
+        view = "jobs";
+        render();
+      });
+      actions.append(validate, replace, cancel);
+      content.append(heading2, textarea, actions);
+    }
+    function renderProviders() {
+      content.textContent = "";
+      const health = options.getProviderHealth?.() || {};
+      const catalog = health.playerCatalog || {};
+      const quotes = health.priceQuotes || {};
+      function appendRows(group, values) {
+        for (const [name, rawValue] of values) {
+          const row = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "12px", padding: "3px 0" });
+          const key = dom.create("span");
+          const value = dom.create("span");
+          key.textContent = name;
+          value.textContent = String(rawValue ?? 0);
+          styles2(key, { color: "#aeb8c6" });
+          styles2(value, { textAlign: "right", overflowWrap: "anywhere", fontVariantNumeric: "tabular-nums" });
+          row.append(key, value);
+          group.appendChild(row);
+        }
+      }
+      const grid = styles2(dom.create("div"), {
+        display: "grid",
+        gridTemplateColumns: mode.mobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+        gap: "14px"
+      });
+      const catalogGroup = styles2(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", minWidth: "0" });
+      const catalogHeading = dom.create("div");
+      catalogHeading.textContent = "Player catalog";
+      styles2(catalogHeading, { fontWeight: "700", marginBottom: "6px" });
+      catalogGroup.appendChild(catalogHeading);
+      appendRows(catalogGroup, [
+        ["Provider", catalog.provider || "FUTNext"],
+        ["Status", catalog.status || "unavailable"],
+        ["Platform", catalog.cache?.platform || "pc"],
+        ["Season", catalog.cache?.season || "26"],
+        ["Lanes", catalog.cache?.lanes],
+        ["Fresh / expired", `${Number(catalog.cache?.freshLanes || 0)} / ${Number(catalog.cache?.expiredLanes || 0)}`],
+        ["Definitions", catalog.cache?.definitions],
+        ["Loads", catalog.activity?.loadCount],
+        ["Last load", catalog.activity?.lastLoad?.at ? new Date(catalog.activity.lastLoad.at).toLocaleString() : "none"]
+      ]);
+      const clearCatalog = button5(dom, "Clear player catalog", mode, "bronze-loop-trade-clear-player-catalog");
+      clearCatalog.disabled = !Number(catalog.cache?.lanes || 0);
+      clearCatalog.addEventListener("click", () => {
+        try {
+          options.onClearPlayerCatalogCache?.();
+          refreshSnapshot();
+          setStatus("Player catalog cache cleared; Scheduler relocked and all Jobs disarmed");
+          render();
+        } catch (error) {
+          setStatus(`Player catalog clear failed: ${error?.message || error}`);
+        }
+      });
+      styles2(clearCatalog, { marginTop: "8px" });
+      catalogGroup.appendChild(clearCatalog);
+      const quoteGroup = styles2(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", minWidth: "0" });
+      const quoteHeading = dom.create("div");
+      quoteHeading.textContent = "Price quotes";
+      styles2(quoteHeading, { fontWeight: "700", marginBottom: "6px" });
+      quoteGroup.appendChild(quoteHeading);
+      const sources = Object.entries(quotes.cache?.bySource || {}).map(([source, count]) => `${source}:${count}`).join(", ") || "none";
+      const platforms = Object.entries(quotes.cache?.byPlatform || {}).map(([platform, count]) => `${platform}:${count}`).join(", ") || "none";
+      appendRows(quoteGroup, [
+        ["Providers", (quotes.providers || ["FUT.GG", "FUTNext"]).join(" / ")],
+        ["Status", quotes.status || "unavailable"],
+        ["Entries", quotes.cache?.entries],
+        ["Fresh / expired", `${Number(quotes.cache?.freshEntries || 0)} / ${Number(quotes.cache?.expiredEntries || 0)}`],
+        ["Sources", sources],
+        ["Platforms", platforms],
+        ["Loads", quotes.activity?.loadCount],
+        ["Last load", quotes.activity?.lastLoad?.at ? new Date(quotes.activity.lastLoad.at).toLocaleString() : "none"]
+      ]);
+      const clearQuotes = button5(dom, "Clear price quotes", mode, "bronze-loop-trade-clear-price-quotes");
+      clearQuotes.disabled = !Number(quotes.cache?.entries || 0);
+      clearQuotes.addEventListener("click", () => {
+        try {
+          options.onClearPriceQuoteCache?.();
+          refreshSnapshot();
+          setStatus("Price quote cache cleared; Scheduler relocked and all Jobs disarmed");
+          render();
+        } catch (error) {
+          setStatus(`Price quote clear failed: ${error?.message || error}`);
+        }
+      });
+      styles2(clearQuotes, { marginTop: "8px" });
+      quoteGroup.appendChild(clearQuotes);
+      grid.append(catalogGroup, quoteGroup);
+      content.appendChild(grid);
+    }
     function render() {
       refreshSnapshot();
       renderBanner();
-      jobsTab.style.background = view === "jobs" ? "#315d9b" : "#222832";
+      jobsTab.style.background = ["jobs", "import"].includes(view) ? "#315d9b" : "#222832";
+      summaryTab.style.background = view === "summary" ? "#315d9b" : "#222832";
+      providersTab.style.background = view === "providers" ? "#315d9b" : "#222832";
       historyTab.style.background = view === "history" ? "#315d9b" : "#222832";
       if (editing) renderEditor();
+      else if (view === "import") renderImport();
+      else if (view === "summary") renderSummary();
+      else if (view === "providers") renderProviders();
       else if (view === "history") renderHistory();
       else renderJobs();
       status.textContent = statusText;
@@ -21831,6 +24155,16 @@
     jobsTab.addEventListener("click", () => {
       editing = null;
       view = "jobs";
+      render();
+    });
+    summaryTab.addEventListener("click", () => {
+      editing = null;
+      view = "summary";
+      render();
+    });
+    providersTab.addEventListener("click", () => {
+      editing = null;
+      view = "providers";
       render();
     });
     historyTab.addEventListener("click", () => {
@@ -21845,13 +24179,181 @@
     dialog.append(heading, tabs, banner, content, status);
     overlay.appendChild(dialog);
     dom.appendToBody(overlay);
-    applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, historyTab, close] });
+    applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, summaryTab, providersTab, historyTab, close] });
     render();
     return overlay;
   }
 
+  // src/trade/buy-journal.js
+  var TRADE_BUY_JOURNAL_SCHEMA_VERSION = 1;
+  var TRADE_BUY_JOURNAL_EVENT_LIMIT = 50;
+  function clone14(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
+  }
+  function safeNumber2(value) {
+    if (value === null || value === void 0 || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  function safeRef2(value) {
+    if (!value) return null;
+    return {
+      id: safeNumber2(value.id),
+      definitionId: safeNumber2(value.definitionId),
+      pile: value.pile ? String(value.pile) : null
+    };
+  }
+  function safeResponse2(value) {
+    if (!value) return null;
+    return {
+      success: value.success === true,
+      status: safeNumber2(value.status),
+      code: safeNumber2(value.code ?? value.error?.code)
+    };
+  }
+  function safeEvent2(input2 = {}) {
+    return {
+      at: Math.max(0, safeNumber2(input2.at) ?? Date.now()),
+      phase: String(input2.phase || "unknown"),
+      status: input2.status ? String(input2.status) : null,
+      reason: input2.reason ? String(input2.reason).slice(0, 160) : null,
+      destination: input2.destination ? String(input2.destination) : null,
+      item: safeRef2(input2.item),
+      tradeId: safeNumber2(input2.tradeId),
+      price: safeNumber2(input2.price),
+      search: input2.search ? {
+        rating: safeNumber2(input2.search.rating),
+        definitionId: safeNumber2(input2.search.definitionId),
+        maxBuyNow: safeNumber2(input2.search.maxBuyNow),
+        page: safeNumber2(input2.search.page)
+      } : null,
+      response: safeResponse2(input2.response)
+    };
+  }
+  function normalizeTradeBuyJournal(input2 = {}) {
+    if (!input2 || typeof input2 !== "object" || !input2.runId) return null;
+    return {
+      schemaVersion: TRADE_BUY_JOURNAL_SCHEMA_VERSION,
+      runId: String(input2.runId),
+      jobId: String(input2.jobId || ""),
+      expectedDestination: ["auto", "club", "transfer"].includes(String(input2.expectedDestination || "")) ? String(input2.expectedDestination) : null,
+      status: String(input2.status || "active"),
+      phase: String(input2.phase || "started"),
+      startedAt: Math.max(0, safeNumber2(input2.startedAt) ?? 0),
+      updatedAt: Math.max(0, safeNumber2(input2.updatedAt) ?? 0),
+      events: (Array.isArray(input2.events) ? input2.events : []).slice(-TRADE_BUY_JOURNAL_EVENT_LIMIT).map(safeEvent2)
+    };
+  }
+  function createTradeBuyJournal(options = {}) {
+    const storage = options.storage;
+    const key = String(options.key || "fc-loop-runner-trade-buy-journal-v1");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    let memory = null;
+    function read() {
+      const stored = storage?.get?.(key, null);
+      if (stored && typeof stored === "object") memory = normalizeTradeBuyJournal(stored);
+      return normalizeTradeBuyJournal(memory);
+    }
+    function write(value) {
+      memory = normalizeTradeBuyJournal(value);
+      if (memory) storage?.set?.(key, clone14(memory));
+      else storage?.remove?.(key);
+      return read();
+    }
+    function begin(input2 = {}) {
+      const at = Math.max(0, safeNumber2(input2.at) ?? Number(now()));
+      const event = safeEvent2({ at, phase: "started", destination: input2.expectedDestination });
+      return write({
+        runId: input2.runId,
+        jobId: input2.jobId,
+        expectedDestination: input2.expectedDestination,
+        status: "active",
+        phase: event.phase,
+        startedAt: at,
+        updatedAt: at,
+        events: [event]
+      });
+    }
+    function checkpoint(runId, input2 = {}) {
+      const current = read();
+      if (!current || current.runId !== String(runId || "")) return current;
+      const event = safeEvent2({ ...input2, at: input2.at ?? now() });
+      return write({
+        ...current,
+        status: "active",
+        phase: event.phase,
+        updatedAt: event.at,
+        events: [...current.events, event].slice(-TRADE_BUY_JOURNAL_EVENT_LIMIT)
+      });
+    }
+    function finish(runId, input2 = {}) {
+      const current = read();
+      if (!current || current.runId !== String(runId || "")) return current;
+      const event = safeEvent2({ ...input2, phase: input2.phase || "finished", at: input2.at ?? now() });
+      return write({
+        ...current,
+        status: String(input2.status || "completed"),
+        phase: event.phase,
+        updatedAt: event.at,
+        events: [...current.events, event].slice(-TRADE_BUY_JOURNAL_EVENT_LIMIT)
+      });
+    }
+    return Object.freeze({ begin, checkpoint, finish, snapshot: read });
+  }
+
+  // src/trade/buy-lease-recovery.js
+  function reconcileExpiredPreBuyLease(options = {}) {
+    const lease = options.lease;
+    const store = options.store;
+    if (!lease?.inspect || !lease?.clearExpired || !store?.read || !store?.addHistory) {
+      throw new TypeError("Trade lease and Job Store are required");
+    }
+    const inspected = lease.inspect();
+    const previous = inspected.lease;
+    if (!inspected.expired || !previous) return { status: "not-needed", reason: null, receipt: null };
+    if (Number(previous.heartbeatAt) !== Number(previous.acquiredAt)) {
+      return { status: "blocked", reason: "expired-lease-crossed-buy-boundary", receipt: null };
+    }
+    const snapshot = store.read();
+    const job = (snapshot.jobs || []).find((entry) => entry.id === previous.jobId);
+    if (!job || job.type !== "buy") return { status: "blocked", reason: "expired-lease-job-unavailable", receipt: null };
+    if ((snapshot.history || []).some((entry) => entry.runId === previous.runId)) {
+      const cleared = lease.clearExpired(previous.runId);
+      return { status: cleared ? "already-recorded" : "blocked", reason: cleared ? null : "expired-lease-clear-failed", receipt: null };
+    }
+    if (!lease.clearExpired(previous.runId)) {
+      return { status: "blocked", reason: "expired-lease-clear-failed", receipt: null };
+    }
+    const finishedAt = Number(options.now?.() ?? Date.now());
+    const receipt = createTradeRunReceipt({
+      runId: previous.runId,
+      jobId: previous.jobId,
+      jobType: "buy",
+      scheduledFor: previous.acquiredAt,
+      startedAt: previous.acquiredAt,
+      finishedAt,
+      status: "blocked",
+      reason: "browser-terminated-before-buy-heartbeat",
+      requested: 0,
+      receipts: [{
+        status: "blocked",
+        reason: "browser-terminated-before-buy-heartbeat",
+        previousLease: {
+          runId: previous.runId,
+          jobId: previous.jobId,
+          acquiredAt: previous.acquiredAt,
+          heartbeatAt: previous.heartbeatAt,
+          expiresAt: previous.expiresAt
+        }
+      }]
+    });
+    store.addHistory(receipt);
+    return { status: "reconciled", reason: receipt.reason, receipt };
+  }
+
   // src/userscript-entry.js
   var RUNNER_VERSION = package_default.version;
+  var SCHEDULED_BUY_LIVE_GATE_ENABLED = true;
   (function() {
     "use strict";
     const W = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
@@ -21888,6 +24390,12 @@
       requestText: adapters.http.getText,
       provider: "auto"
     });
+    const inspectTradeProviders = () => ({
+      schemaVersion: 1,
+      capturedAt: Date.now(),
+      playerCatalog: tradePlayerCatalogProvider.inspect({ platform: "pc", season: "26" }),
+      priceQuotes: tradePriceQuoteProvider.inspect()
+    });
     const tradeCircuitBreaker = createTradeCircuitBreaker({
       storage: adapters.userscriptStorage,
       key: TRADE_CIRCUIT_KEY
@@ -21895,6 +24403,10 @@
     const tradeJobStore = createTradeJobStore({
       storage: adapters.userscriptStorage,
       key: TRADE_JOB_STORE_KEY
+    });
+    const tradeBuyJournal = createTradeBuyJournal({
+      storage: adapters.userscriptStorage,
+      key: TRADE_BUY_JOURNAL_KEY
     });
     const tradeTabOwnerId = `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const tradeRunLease = createTradeRunLease({
@@ -21917,6 +24429,7 @@
     });
     let tradeScheduler = null;
     const tradeSchedulerTickLock = createTradeSchedulerTickLock({ lockManager: navigator?.locks });
+    const tradeSchedulerEvents = createTradeSchedulerEventLog();
     function inspectGuardedTradeSession() {
       let pageReady = false;
       try {
@@ -21969,7 +24482,11 @@
       lastTradeListingReceipt: null,
       lastScheduledTradeListing: null,
       lastTradeBuyPreview: null,
+      lastTradeBuyJob: null,
+      lastTradeBuyReceipt: null,
+      lastTradeBuyError: null,
       tradeListingRunning: false,
+      tradeBuyRunning: false,
       lastRecapType: null,
       loopRecapSession: null,
       loopStack: [],
@@ -21983,7 +24500,7 @@
     const tradeOperationCoordinator = createOperationCoordinator({
       externalBusy: () => ({
         busy: state.running || state.refreshing || state.scanningPicks || state.loadingLoops,
-        type: state.tradeListingRunning ? "trade-listing" : state.running ? "loop-or-batch" : null,
+        type: state.tradeBuyRunning ? "trade-buy" : state.tradeListingRunning ? "trade-listing" : state.running ? "loop-or-batch" : null,
         reason: "runner-operation-active"
       })
     });
@@ -22003,6 +24520,7 @@
       document.querySelector("#bronze-loop-batch-recap-modal")?.remove();
       document.querySelector("#bronze-loop-loop-recap-modal")?.remove();
       document.querySelector("#bronze-loop-trade-listing-modal")?.remove();
+      document.querySelector("#bronze-loop-trade-buy-modal")?.remove();
       document.querySelector("#bronze-loop-trade-scheduler-modal")?.remove();
       document.querySelector("#bronze-loop-reward-highlight-stack")?.remove();
       document.querySelector("#bronze-loop-style")?.remove();
@@ -22034,18 +24552,23 @@
       pauseTradeScheduler: () => disableGuardedTradeScheduling("manual-console-pause"),
       enableGuardedTradeScheduling,
       disableGuardedTradeScheduling,
+      setTradeMinimumRetainedCoins: (value) => tradeJobStore.setMinimumRetainedCoins(value),
+      stageExpiredTradeLeaseValidation: stageExpiredTradeLeaseValidationFromConsole,
       tickTradeScheduler,
       inspectOperationCoordinator: () => tradeOperationCoordinator.inspect(),
       previewTradeListings: (input2 = {}, options = {}) => tradeListingPreview.preview(input2, options),
       previewTradeBuys: previewTradeBuyJob,
+      executeManualTradeBuy,
       prepareTradeListing,
       executePreparedTradeListing,
       cancelPreparedTradeListing,
       stopTradeListing,
+      stopTradeBuy,
       loadTradePlayerCatalog: (options = {}) => tradePlayerCatalogProvider.load(options),
       clearTradePlayerCatalogCache: () => tradePlayerCatalogProvider.clear(),
       loadTradePriceQuotes: (options = {}) => tradePriceQuoteProvider.load(options),
-      clearTradePriceQuoteCache: () => tradePriceQuoteProvider.clear()
+      clearTradePriceQuoteCache: () => tradePriceQuoteProvider.clear(),
+      inspectTradeProviders
     };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const now = () => (/* @__PURE__ */ new Date()).toLocaleTimeString();
@@ -22077,11 +24600,67 @@
         };
       }
     });
+    const guardedManualBuyExecutor = createGuardedManualBuyExecutor({
+      operationCoordinator: tradeOperationCoordinator,
+      lease: tradeRunLease,
+      buyPreview: tradeBuyPreview,
+      journal: tradeBuyJournal,
+      getTradeAdapter: eaTradeAdapter,
+      playerCatalogProvider: tradePlayerCatalogProvider,
+      circuitBreaker: tradeCircuitBreaker,
+      getSchedulerState: () => tradeJobStore.read(),
+      ownerId: tradeTabOwnerId,
+      sleep,
+      shouldStop: () => state.stopping,
+      onRunningChange: (running, input2) => {
+        state.tradeBuyRunning = running;
+        state.running = running;
+        if (!running) state.stopping = false;
+        log(running ? `Trade Buy: guarded single-item validation started for ${input2.job?.name || input2.job?.id}` : `Trade Buy: guarded single-item validation ${input2.job?.name || input2.job?.id} left the execution state`);
+        setPanelState();
+      },
+      onReceipt: (receipt, context) => {
+        state.lastTradeBuyJob = context.job;
+        state.lastTradeBuyPreview = context.preview || state.lastTradeBuyPreview;
+        state.lastTradeBuyReceipt = receipt;
+        state.lastTradeBuyError = context.error || null;
+      }
+    });
+    const guardedScheduledBuyExecutor = createGuardedScheduledBuyExecutor({
+      store: tradeJobStore,
+      operationCoordinator: tradeOperationCoordinator,
+      buyPreview: tradeBuyPreview,
+      journal: tradeBuyJournal,
+      getTradeAdapter: eaTradeAdapter,
+      playerCatalogProvider: tradePlayerCatalogProvider,
+      circuitBreaker: tradeCircuitBreaker,
+      ownerId: tradeTabOwnerId,
+      validationGateEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+      sleep,
+      shouldStop: () => state.stopping,
+      onRunningChange: (running, input2) => {
+        state.tradeBuyRunning = running;
+        state.running = running;
+        if (!running) state.stopping = false;
+        log(running ? `Trade Scheduler: guarded Buy Job ${input2.job?.name || input2.job?.id} started; scheduler automatically relocked` : `Trade Scheduler: guarded Buy Job ${input2.job?.name || input2.job?.id} left the execution state`);
+        setPanelState();
+      },
+      onReceipt: (receipt, context) => {
+        state.lastTradeBuyJob = context.job;
+        state.lastTradeBuyPreview = context.preview || state.lastTradeBuyPreview;
+        state.lastTradeBuyReceipt = receipt;
+        state.lastTradeBuyError = context.error || null;
+      }
+    });
     tradeScheduler = createTradeScheduler({
       store: tradeJobStore,
       lease: tradeRunLease,
       circuitBreaker: tradeCircuitBreaker,
-      executeJob: guardedScheduledListingExecutor.execute,
+      executeJob: (input2) => {
+        if (input2.job?.type === "listing") return guardedScheduledListingExecutor.execute(input2);
+        if (input2.job?.type === "buy") return guardedScheduledBuyExecutor.execute(input2);
+        throw new Error(`Unsupported scheduled Trade Job type ${input2.job?.type || "unknown"}`);
+      },
       getContext: () => {
         const operation = tradeOperationCoordinator.inspect();
         const session = inspectGuardedTradeSession();
@@ -22162,14 +24741,41 @@
       state.stopping = true;
       return true;
     }
-    function enableGuardedTradeScheduling(input2 = {}) {
-      if (String(input2.confirmationText || "") !== GUARDED_SCHEDULE_CONFIRMATION) {
-        throw new Error(`Confirmation must exactly match ${GUARDED_SCHEDULE_CONFIRMATION}`);
+    async function executeManualTradeBuy(job, input2 = {}) {
+      if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning || state.tradeBuyRunning) {
+        throw new Error("Another Runner operation is active; Buy execution is unavailable");
       }
+      state.lastTradeBuyJob = job;
+      state.lastTradeBuyReceipt = null;
+      state.lastTradeBuyError = null;
+      state.stopping = false;
+      try {
+        const receipt = await guardedManualBuyExecutor.execute({ ...input2, job });
+        state.lastTradeBuyReceipt = receipt;
+        tradeJobStore.addHistory(sanitizeTradeBuyReceipt(receipt));
+        return receipt;
+      } catch (error) {
+        state.lastTradeBuyError = error;
+        throw error;
+      } finally {
+        setPanelState();
+      }
+    }
+    function stopTradeBuy() {
+      if (!state.tradeBuyRunning) return false;
+      state.stopping = true;
+      return true;
+    }
+    function enableGuardedTradeScheduling(input2 = {}) {
       const snapshot = tradeJobStore.read();
       if (snapshot.liveExecutionEnabled) throw new Error("Guarded scheduling is already enabled");
-      const selected2 = selectGuardedScheduledListingJob(snapshot);
+      const selected2 = selectGuardedScheduledTradeJob(snapshot, {
+        scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED
+      });
       if (!selected2.ready) throw new Error(selected2.reason || "Exactly one eligible armed Job is required");
+      if (String(input2.confirmationText || "") !== selected2.requiredText) {
+        throw new Error(`Confirmation must exactly match ${selected2.requiredText}`);
+      }
       if (input2.jobId && String(input2.jobId) !== selected2.job.id) throw new Error("The armed Job changed before confirmation");
       const currentTime = Date.now();
       const runAt = Number(selected2.job.schedule.runAt);
@@ -22177,12 +24783,12 @@
       if (runAt > currentTime + 15 * 6e4) throw new Error("The validation Job must run within 15 minutes");
       const circuit = tradeCircuitBreaker.availability();
       if (circuit.allowed !== true) throw new Error(`Trade circuit is open (${circuit.state?.reason || "unknown"})`);
-      const operation = tradeOperationCoordinator.availability("trade-listing");
+      const operation = tradeOperationCoordinator.availability(selected2.job.type === "buy" ? "trade-buy" : "trade-listing");
       if (!operation.allowed) throw new Error(`Another Runner operation is active (${operation.reason})`);
       tradeJobStore.setLiveExecutionEnabled(true);
       const enabled = tradeJobStore.setPaused(false);
-      log(`Trade Scheduler: one-card validation enabled for ${selected2.job.name} at ${new Date(runAt).toLocaleString()}`);
-      void tickTradeScheduler();
+      log(`Trade Scheduler: one-card ${selected2.job.type} validation enabled for ${selected2.job.name} at ${new Date(runAt).toLocaleString()}`);
+      void tickTradeScheduler({ trigger: "enable" });
       return enabled;
     }
     function disableGuardedTradeScheduling(reason = "manual-ui-disable") {
@@ -22190,22 +24796,41 @@
       log(`Trade Scheduler: guarded scheduling disabled (${reason})`);
       return disabled2;
     }
-    async function tickTradeScheduler() {
+    function stageExpiredTradeLeaseValidationFromConsole(input2 = {}) {
+      const operation = tradeOperationCoordinator.availability("trade-listing");
+      if (!operation.allowed) throw new Error(`Another Runner operation is active (${operation.reason})`);
+      const staged = stageExpiredTradeLeaseValidation({
+        confirmationText: input2.confirmationText,
+        snapshot: tradeJobStore.read(),
+        inspectLease: () => tradeRunLease.inspect(),
+        writeLease: (value) => adapters.userscriptStorage.set(TRADE_RUN_LEASE_KEY, value)
+      });
+      log(`Trade Scheduler: expired lease validation staged for ${staged.jobId}; enable the existing one-card gate to verify fail-closed recovery`);
+      return staged;
+    }
+    async function tickTradeScheduler(input2 = {}) {
       if (!tradeScheduler) return { status: "unavailable" };
+      const trigger = typeof input2 === "string" ? input2 : String(input2?.trigger || "manual");
       const recordTick = (result) => {
-        state.lastTradeSchedulerTick = {
-          at: Date.now(),
-          status: String(result?.status || "unknown"),
-          reason: result?.reason ? String(result.reason) : null,
-          jobId: result?.jobId ? String(result.jobId) : null,
-          runId: result?.receipt?.runId ? String(result.receipt.runId) : null
-        };
+        const runtime = summarizeTradeSchedulerRuntime(tradeJobStore.read(), result?.jobId);
+        state.lastTradeSchedulerTick = tradeSchedulerEvents.record({
+          trigger,
+          status: result?.status,
+          reason: result?.reason,
+          jobId: result?.jobId || runtime.jobId,
+          runId: result?.receipt?.runId,
+          runtimeStatus: runtime.runtimeStatus,
+          runtimeReason: runtime.runtimeReason,
+          runtimeNextRunAt: runtime.runtimeNextRunAt
+        });
         return result;
       };
       try {
         const snapshot = tradeJobStore.read();
         if (snapshot.liveExecutionEnabled) {
-          const selected2 = selectGuardedScheduledListingJob(snapshot);
+          const selected2 = selectGuardedScheduledTradeJob(snapshot, {
+            scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED
+          });
           const circuit = tradeCircuitBreaker.availability();
           if (!selected2.ready || circuit.allowed !== true) {
             disableGuardedTradeScheduling(!selected2.ready ? selected2.reason : `circuit-${circuit.state?.reason || "open"}`);
@@ -22220,7 +24845,7 @@
         }
         if (["completed", "blocked", "failed", "ambiguous", "stopped", "missed"].includes(result.status)) {
           const receipt = result.receipt;
-          log(`Trade Scheduler: ${result.status}${receipt?.reason ? ` (${receipt.reason})` : ""}${receipt ? `; listed ${receipt.succeeded}/${receipt.requested}` : ""}`);
+          log(`Trade Scheduler: ${result.status}${receipt?.reason ? ` (${receipt.reason})` : ""}${receipt ? `; processed ${receipt.succeeded}/${receipt.requested}` : ""}`);
           setPanelState();
         }
         return recordTick(result);
@@ -22318,7 +24943,7 @@
         scanningDynamicSbcs: state.scanningPicks,
         loadingLoops: state.loadingLoops,
         tradeListingRunning: state.tradeListingRunning,
-        tradeBuyRunning: false
+        tradeBuyRunning: state.tradeBuyRunning
       };
       return {
         schemaVersion: 1,
@@ -22329,11 +24954,17 @@
           ownerId: tradeTabOwnerId,
           webLock: tradeSchedulerTickLock.inspect(),
           lastTick: state.lastTradeSchedulerTick,
-          session: inspectGuardedTradeSession()
+          events: tradeSchedulerEvents.snapshot(),
+          session: inspectGuardedTradeSession(),
+          validationGates: {
+            scheduledListing: true,
+            scheduledBuy: SCHEDULED_BUY_LIVE_GATE_ENABLED
+          }
         },
         circuit: tradeCircuitBreaker.snapshot(),
         lease: tradeRunLease.inspect(),
         coordinator: tradeOperationCoordinator.inspect(),
+        providers: inspectTradeProviders(),
         capabilities: eaTradeAdapter().inspectCapabilities(),
         operation,
         buy: createTradeBuyDiagnostics({
@@ -22342,8 +24973,11 @@
           userAgent: navigator?.userAgent || "",
           operation,
           circuit: tradeCircuitBreaker.snapshot(),
-          job: state.lastTradeBuyPreview?.job || null,
-          preview: state.lastTradeBuyPreview
+          journal: tradeBuyJournal.snapshot(),
+          job: state.lastTradeBuyJob || state.lastTradeBuyPreview?.job || null,
+          preview: state.lastTradeBuyPreview,
+          receipt: state.lastTradeBuyReceipt,
+          error: state.lastTradeBuyError
         }),
         guardedValidation: createTradeListingDiagnostics({
           capturedAt: Date.now(),
@@ -22361,9 +24995,60 @@
     async function previewTradeBuyJob(job = {}, request = {}) {
       log(`Trade Buy: building preview-only search lanes for ${job.name || job.id || "Buy Job"}`);
       const preview = await tradeBuyPreview.preview(job, request);
+      state.lastTradeBuyJob = job;
       state.lastTradeBuyPreview = preview;
+      state.lastTradeBuyReceipt = null;
+      state.lastTradeBuyError = null;
       log(preview.plan?.ready ? `Trade Buy: preview ready with ${preview.summary.ratings} rating lane(s) and ${preview.summary.definitions} player definition(s); live execution remains locked` : `Trade Buy: preview blocked; missing rating lane(s) ${preview.plan?.missingRatings?.join(", ") || "unknown"}`);
       return preview;
+    }
+    function openTradeBuyDialogModal(job, preview) {
+      return showTradeBuyDialog({
+        dom: adapters.dom,
+        job,
+        preview,
+        onExecute: async (input2) => {
+          log(`Trade Buy: manual confirmation accepted for one ${job.policy?.ratingMin || "?"} OVR item at max ${job.policy?.maxBuyNow || "?"} coins`);
+          try {
+            const receipt = await executeManualTradeBuy(job, input2);
+            log(`Trade Buy: ${receipt.status}${receipt.reason ? ` (${receipt.reason})` : ""}; purchased ${receipt.succeeded}/${receipt.requested}`);
+            return receipt;
+          } catch (error) {
+            log(`Trade Buy failed: ${error?.message || error}`);
+            throw error;
+          }
+        },
+        onStop: () => {
+          const accepted = stopTradeBuy();
+          if (accepted) log("Trade Buy: Stop requested; waiting for the current transaction safe point");
+          return accepted;
+        },
+        onDownloadDiagnostics: (snapshot = {}) => {
+          const capturedAt = Date.now();
+          const diagnostics = createTradeBuyDiagnostics({
+            ...snapshot,
+            job: state.lastTradeBuyJob || snapshot.job,
+            preview: state.lastTradeBuyPreview || snapshot.preview,
+            receipt: state.lastTradeBuyReceipt || snapshot.receipt,
+            error: state.lastTradeBuyError || snapshot.error,
+            capturedAt,
+            runnerVersion: RUNNER_VERSION,
+            userAgent: navigator?.userAgent || "",
+            operation: {
+              running: state.running,
+              stopping: state.stopping,
+              tradeBuyRunning: state.tradeBuyRunning
+            },
+            circuit: tradeCircuitBreaker.snapshot(),
+            journal: tradeBuyJournal.snapshot()
+          });
+          adapters.userEffects.downloadText(
+            JSON.stringify(diagnostics, null, 2),
+            `trade-buy-diagnostics-${new Date(capturedAt).toISOString().replace(/[:.]/g, "-")}.json`
+          );
+          log("Trade Buy: diagnostics saved");
+        }
+      });
     }
     function openTradeSchedulerDialogModal() {
       return showTradeSchedulerDialog({
@@ -22379,10 +25064,45 @@
           tradeJobStore.remove(jobId);
           log(`Trade Scheduler: deleted Job ${jobId}`);
         },
+        onExportJobConfig: () => {
+          const exportedAt = Date.now();
+          const snapshot = tradeJobStore.read();
+          adapters.userEffects.downloadText(
+            exportTradeJobConfigJson(snapshot, { exportedAt, runnerVersion: RUNNER_VERSION }),
+            `trade-jobs-${new Date(exportedAt).toISOString().replace(/[:.]/g, "-")}.json`
+          );
+          log(`Trade Scheduler: exported ${snapshot.jobs.length} Job configuration(s)`);
+        },
+        onValidateJobConfig: (text) => parseTradeJobConfig(text, { now: Date.now() }),
+        onImportJobConfig: (text) => {
+          const imported = parseTradeJobConfig(text, { now: Date.now() });
+          const snapshot = tradeJobStore.replaceJobs(imported.jobs);
+          log(`Trade Scheduler: imported ${snapshot.jobs.length} Job configuration(s); scheduler relocked and all Jobs disarmed`);
+          return { ...imported, jobs: snapshot.jobs };
+        },
         onEnableGuardedScheduling: (input2) => enableGuardedTradeScheduling(input2),
         onDisableGuardedScheduling: () => disableGuardedTradeScheduling("manual-ui-disable"),
+        scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+        onSetMinimumRetainedCoins: (value) => {
+          tradeJobStore.setMinimumRetainedCoins(value);
+          log(value === null ? "Trade Scheduler: scheduled Buy global reserve cleared" : `Trade Scheduler: scheduled Buy global reserve set to ${Number(value).toLocaleString()} coins`);
+        },
+        getProviderHealth: inspectTradeProviders,
+        onClearPlayerCatalogCache: () => {
+          tradeJobStore.relock();
+          tradePlayerCatalogProvider.clear();
+          log("Trade Scheduler: player catalog cache cleared; scheduler relocked and all Jobs disarmed");
+          return inspectTradeProviders();
+        },
+        onClearPriceQuoteCache: () => {
+          tradeJobStore.relock();
+          tradePriceQuoteProvider.clear();
+          log("Trade Scheduler: price quote cache cleared; scheduler relocked and all Jobs disarmed");
+          return inspectTradeProviders();
+        },
         onOpenManualListing: (job = null) => openTradeListingDialogModal(job),
         onPreviewBuyJob: (job) => previewTradeBuyJob(job),
+        onOpenManualBuy: (job, preview) => openTradeBuyDialogModal(job, preview),
         onResetCircuit: () => {
           tradeCircuitBreaker.reset("manual-ui-reset");
           log("Trade Scheduler: persistent trade block reset manually");
@@ -30988,6 +33708,16 @@
       });
       if (!mounted.created) return;
       const { panel } = mounted;
+      const buyLeaseRecovery = reconcileExpiredPreBuyLease({
+        lease: tradeRunLease,
+        store: tradeJobStore,
+        now: Date.now
+      });
+      if (buyLeaseRecovery.status === "reconciled") {
+        log(`Trade Buy: reconciled crashed Run ${buyLeaseRecovery.receipt.runId} before the Buy mutation boundary; expired Lease cleared`);
+      } else if (buyLeaseRecovery.status === "blocked") {
+        log(`Trade Buy: expired Lease requires manual investigation (${buyLeaseRecovery.reason})`);
+      }
       state.logRenderer = createLogRenderer({
         getLines: () => state.logLines,
         getPanel: () => document.querySelector("#bronze-loop-panel"),
@@ -31162,7 +33892,7 @@
       log(`Ready v${W[APP_KEY]?.version || "unknown"}. Keep FSU enabled before starting; FC26 Enhancer may remain enabled.`);
       if (!state.tradeSchedulerTimer) {
         state.tradeSchedulerTimer = setInterval(() => {
-          void tickTradeScheduler();
+          void tickTradeScheduler({ trigger: "interval" });
         }, 5e3);
         state.tradeSchedulerWakeups = createTradeSchedulerWakeups({
           windowTarget: window,
@@ -31170,7 +33900,7 @@
           tick: tickTradeScheduler
         });
         state.tradeSchedulerWakeups.start();
-        void tickTradeScheduler();
+        void tickTradeScheduler({ trigger: "startup" });
       }
       setTimeout(async () => {
         try {

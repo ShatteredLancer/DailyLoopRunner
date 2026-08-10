@@ -309,9 +309,29 @@ Trade Scheduler 回锁必须通过 Job Store 的单次 `relock()` 同时完成 p
 
 Trade Scheduler tick 在支持 Web Locks 的浏览器中必须先获取同源独占锁，未获取时只能返回 busy；GM storage lease 继续作为跨重载持久层和无 Web Locks fallback。Guarded Listing 在每个 `services.Item.list()` 前必须重新 heartbeat/验证 lease，验证失败时不得发出该次写请求；写请求一旦已接受或结果不明，仍必须完成原有 Transfer 对账，不得因后续 lease 状态跳过对账。
 
+过期 lease 真实页验证只能通过精确确认文本 `EXPIRE LEASE 1` 准备一条已过期的测试 lease；准备入口必须要求 Scheduler 已暂停、live execution 已关闭、恰好一个合规 armed 单次 Job、当前无任何 lease 且没有 Runner 操作。该入口只允许写测试 lease，不得开启 Scheduler 或调用 EA；随后仍必须通过原有 `RUN ONCE 1` 门禁触发，并以回锁、blocked History 和零 EA mutation 为唯一合格结果。
+
+Scheduler diagnostics 必须保留当前页面生命周期内有上限的脱敏 tick 事件时间线，至少能区分 interval、startup、manual、focus、online、visibility 触发，以及 browser-lock-held、waiting-operation、waiting-session、completed、missed 和 blocked 状态。事件只能保存时间、状态/原因、Job/Run 与 runtime 摘要，不得保存 lease token、EA 原始响应或任意输入字段；后续 tick 不得覆盖掉用于判断双标签竞争和 Loop 占用的最近证据。
+
+Club Listing 的 Prepare 必须先刷新 Transfer，并排除同时出现在 Unassigned、Storage 或 Transfer 的同一 item ID；Transaction 在每次 `services.Item.list()` 前必须再次刷新 Transfer 并复核该 item ID 尚未进入 Transfer。刷新失败、pile 冲突或实体位置不明确时必须在 EA 写请求前阻断。该约束同时适用于手动和定时 Listing，不得依赖 FSU Club 缓存是否声明 fully validated。
+
 Guarded Listing 页面恢复时，如果检测到 FSU，`loading/not-ready` 必须保持 `waiting-session`。`trusted-provisional`、`validating` 或 `validation-failed` 是 FSU 的定向校验模式，不得等待其自动变成 fully validated；允许 Prepared 选出唯一 Club 候选后，必须在创建 Listing Transaction 前通过注入的 FSU Adapter 按 item ID + definition ID 向 EA 定向校验该卡。接口不可用、请求失败、缺卡或未返回同一实体都必须阻断且不得调用 `services.Item.list()`。FSU 未检测到时仍通过 EA Trade Adapter 独立运行。Scheduler diagnostics 必须记录脱敏的 page/FSU readiness、Prepared/scan/blockers 和定向校验摘要，即使 Transaction 从未创建。
 
 Auto Buy 必须按精确评分通道和单个 definition ID 搜索，不得跨评分或跨 definition 比价后购买。每个 EA 市场响应最多购买一张，候选必须重新校验 definition、rating、card class、Buy Now、剩余预算和金币；EA 活对象只能保存在 `src/adapters/ea/trade.js` 的当前响应闭包中，新搜索必须废弃旧引用。每次搜索和 Buy Now 前都要重新检查共享 circuit。Buy 响应不明确时不得重试；只有精确 item ID 已物化且金币扣减与 Buy Now 完全一致才能继续路由，否则以 `ambiguous` 停止。购买状态刷新失败、路由无法验证、Transfer 满或 EA `427` 都必须在下一次市场操作前停止。
+
+TS4 真实购买只能经临时手动单卡验证门进入：Job 必须 enabled、unarmed、manual、Rare Gold、单一评分、`quantity=1`，单卡价格和总预算都不得超过 2000，Scheduler 必须保持 paused 且 `liveExecutionEnabled=false`。用户必须输入精确的 `BUY 1 MAX <price>`，执行前重新生成只读 Preview，并在同一 Operation Coordinator 与跨 Tab lease 下运行；每次确认最多调用一次 `buyNowItem()`，Buy 前必须 heartbeat lease。竞争失败、lease 丢失、circuit 变化或任何不明确结果都必须停止且不得以同一确认重试。该门禁不得扩展到 scheduled Buy、多评分、数量大于 1、Common/Special 或超过 2000 的价格/预算。
+
+TS4 可以提供仅作用于本次手动验证的预期去向 `Auto/Club/Transfer`，但不得写入 Job 或改变生产自动路由规则。`Club` 只能搜索当前 Club 未持有的 definition，`Transfer` 只能搜索当前 Club 已持有的 definition，并分别要求 `BUY 1 TO CLUB MAX <price>` 或 `BUY 1 TO TRANSFER MAX <price>`；搜索前和 Buy 前必须重新核对 ownership。没有匹配 definition、ownership 变化或 ownership 检查不可用时必须在 Buy 前阻断。选择 Transfer 且 Transfer List 已满时必须在市场搜索前停止。
+
+手动 Buy 的 History 和 diagnostics 必须各保留最终脱敏回执，包括搜索次数、`buyAttempts`、价格、金币变化、目标 pile 和停止原因；不得导出 lease token、EA 原始 response 或活动实体。一个确认只能写入一条 History Run，UI 关闭、重复点击和错误处理不得重复记账。
+
+TS5 定时 Buy 只能通过独立真实验证门开放；实现存在、Fake Adapter 或完整测试通过都不能扩大门禁。已验证门禁只允许恰好一个 enabled+armed 的 `once` Buy Job，Rare Gold、单一评分、`quantity=1`，单卡价格和总预算都不得超过 2000，misfire 仅允许 skip 或不超过 15 分钟的 grace-window。激活前必须显式持久化全局 `minimumRetainedCoins`，不得提供静默默认值；Job 局部值只能提高有效底线，不能降低全局值，并要求精确确认 `RUN BUY ONCE 1 RESERVE <effective reserve>`。执行器必须在任何 Preview、搜索或 Buy 前通过 Job Store 单次 `relock()` 原子暂停、关闭 live execution 并解除全部 armed；Scheduler 继续拥有跨 Tab lease，Buy 执行器不得另取第二条 lease。每次计划授权最多一次 `buyNowItem()`，写 History 前必须走 Buy allowlist sanitizer，诊断必须记录计划 Buy live gate 是否实际开启。`0.7.45` 的低价值实机证据已通过复核；在独立 TS6 设计、测试和实机门禁完成前仍不得开放 recurring schedule、rating range、其它 card class、quantity > 1 或更高价格/预算。
+
+Trade Scheduler 长期指标必须由 Job Store 在写入脱敏 History 的同一操作中累计，不得重新读取 EA 实体或增加网络请求。指标 schema 必须可从现有有界 History 回填，累计计数不得随 History 淘汰而丢失；status/job type 使用固定桶，停止原因必须截断、合并并限制条数，禁止持久化原始 response、错误对象、卡片详情或无界事件数组。UI 和 diagnostics 只读取这一脱敏快照。
+
+Trade Job 配置导入/导出必须使用独立版本化格式，只包含 `id/name/type/enabled/schedule/misfirePolicy/policy` 等可移植 Job 字段。不得导出或接受 `armed`、History、metrics、runtime、paused/live 状态、确认文本/授权或全局及 Job reserve。导入必须限制文本大小和 Job 数量，拒绝未知字段、重复 ID 和不兼容 schema；所有 Job 完整验证成功后，才能通过 Job Store 单次原子替换，且该写入必须回锁 Scheduler、解除全部 Armed，同时保留本地 History、metrics 和全局 reserve。UI 必须先验证当前文本，再明确执行替换；文本变化后原验证立即失效。
+
+Trade Provider 健康 UI 和 diagnostics 只能调用 Provider 自身的无网络 `inspect()`，不得通过 Preview、报价加载、球员目录加载或 EA Adapter 探测健康状态。健康快照只允许聚合 cache 状态、TTL、条目/通道数量、来源/平台计数和最近一次脱敏加载摘要；不得导出 definition ID、价格、URL 或原始错误。显式清除 Player Catalog 或 Price Quote cache 前必须先通过 Job Store `relock()` 暂停、关闭 live execution 并解除所有 Armed；清除本身不得发网络请求、写 Trade History 或改变 metrics/reserve。
 
 Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`rare-gold` 只匹配非特殊稀有金，`normal-gold` 匹配两者但排除特殊卡，`special` 只匹配特殊卡；兼容别名 `gold` 等同 `normal-gold`，不得借此把特殊卡混入普通金卡规则。
 

@@ -1,8 +1,6 @@
 import { normalizeTradeJob } from '../trade/contracts.js';
-import {
-  GUARDED_SCHEDULE_CONFIRMATION,
-  selectGuardedScheduledListingJob,
-} from '../trade/guarded-scheduled-listing.js';
+import { inspectManualBuyValidationJob } from '../trade/manual-buy-validation.js';
+import { selectGuardedScheduledTradeJob } from '../trade/guarded-scheduled-job.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 const PAGE_SIZE = 15;
@@ -108,7 +106,8 @@ export function createTradeJobDraft(type = 'listing', options = {}) {
     ...common,
     policy: {
       cardClass: 'rare-gold', ratingMin: 84, ratingMax: 84, maxBuyNow: 1000,
-      ratingPriceOverrides: {}, quantity: 1, totalBudget: 1000, maxRuntimeMinutes: 15,
+      ratingPriceOverrides: {}, quantity: 1, totalBudget: 1000, minimumRetainedCoins: null,
+      maxRuntimeMinutes: 15,
       searchDelaySeconds: [8, 15], maxPurchasesPerSearch: 1, maxConsecutiveEmptySearches: 20,
     },
   } : {
@@ -146,6 +145,7 @@ export function showTradeSchedulerDialog(options = {}) {
   let historyPage = 1;
   let editing = null;
   let statusText = '';
+  let validatedImportText = null;
   const buyPreviews = new Map();
 
   const overlay = styles(dom.create('div'), {
@@ -165,8 +165,10 @@ export function showTradeSchedulerDialog(options = {}) {
   heading.append(title, close);
   const tabs = styles(dom.create('div'), { display: 'flex', gap: '8px', margin: '12px 0', flexWrap: 'wrap' });
   const jobsTab = button(dom, 'Jobs', mode, 'bronze-loop-trade-jobs-tab');
+  const summaryTab = button(dom, 'Summary', mode, 'bronze-loop-trade-summary-tab');
+  const providersTab = button(dom, 'Providers', mode, 'bronze-loop-trade-providers-tab');
   const historyTab = button(dom, 'History', mode, 'bronze-loop-trade-history-tab');
-  tabs.append(jobsTab, historyTab);
+  tabs.append(jobsTab, summaryTab, providersTab, historyTab);
   const banner = styles(dom.create('div'), { padding: '9px', border: '1px solid #47576b', background: '#1d2229', marginBottom: '10px', fontSize: '12px' });
   const content = dom.create('div');
   const status = styles(dom.create('div'), { minHeight: '18px', color: '#9fb2c9', fontSize: '11px', marginTop: '10px' });
@@ -179,6 +181,15 @@ export function showTradeSchedulerDialog(options = {}) {
   function setStatus(value) {
     statusText = String(value || '');
     status.textContent = statusText;
+  }
+
+  function buyValidationAvailability(job, preview) {
+    if (preview?.plan?.ready !== true) return { ready: false, reason: 'buy-preview-not-ready' };
+    if (snapshot.paused !== true || snapshot.liveExecutionEnabled === true) {
+      return { ready: false, reason: 'scheduler-must-be-paused-and-live-disabled' };
+    }
+    const gate = inspectManualBuyValidationJob(job);
+    return gate.ready ? { ready: true, reason: null, gate } : { ready: false, reason: gate.reason, gate };
   }
 
   function renderBanner() {
@@ -259,10 +270,22 @@ export function showTradeSchedulerDialog(options = {}) {
         controls[key] = input(dom, 'number', draft.policy[key] ?? fallback, mode, `bronze-loop-trade-job-${key}`);
         policyFields.appendChild(field(dom, label, controls[key], mode));
       }
+      controls.minimumRetainedCoins = input(
+        dom,
+        'number',
+        draft.policy.minimumRetainedCoins ?? '',
+        mode,
+        'bronze-loop-trade-job-minimum-retained-coins',
+      );
       controls.ratingPriceOverrides = input(dom, 'text', Object.entries(draft.policy.ratingPriceOverrides || {}).map(([rating, price]) => `${rating}=${price}`).join(', '), mode, 'bronze-loop-trade-job-rating-prices');
       controls.searchDelayMin = input(dom, 'number', draft.policy.searchDelaySeconds?.[0] || 8, mode, 'bronze-loop-trade-job-search-delay-min');
       controls.searchDelayMax = input(dom, 'number', draft.policy.searchDelaySeconds?.[1] || 15, mode, 'bronze-loop-trade-job-search-delay-max');
-      policyFields.append(field(dom, 'Rating prices', controls.ratingPriceOverrides, mode), field(dom, 'Search delay min', controls.searchDelayMin, mode), field(dom, 'Search delay max', controls.searchDelayMax, mode));
+      policyFields.append(
+        field(dom, 'Job minimum retained coins', controls.minimumRetainedCoins, mode),
+        field(dom, 'Rating prices', controls.ratingPriceOverrides, mode),
+        field(dom, 'Search delay min', controls.searchDelayMin, mode),
+        field(dom, 'Search delay max', controls.searchDelayMax, mode),
+      );
     } else {
       controls.clubSource = input(dom, 'checkbox', draft.policy.sources?.includes('club'), mode, 'bronze-loop-trade-job-source-club');
       controls.transferSource = input(dom, 'checkbox', draft.policy.sources?.includes('transfer'), mode, 'bronze-loop-trade-job-source-transfer');
@@ -328,6 +351,9 @@ export function showTradeSchedulerDialog(options = {}) {
         draft.policy.cardClass = cardClass.value;
         if (draft.type === 'buy') {
           for (const key of ['ratingMin', 'ratingMax', 'maxBuyNow', 'quantity', 'totalBudget', 'maxRuntimeMinutes', 'maxConsecutiveEmptySearches']) draft.policy[key] = Number(controls[key].value);
+          draft.policy.minimumRetainedCoins = controls.minimumRetainedCoins.value === ''
+            ? null
+            : Number(controls.minimumRetainedCoins.value);
           draft.policy.ratingPriceOverrides = Object.fromEntries(String(controls.ratingPriceOverrides.value || '').split(',').map((entry) => entry.trim().split('=').map((part) => part.trim())).filter(([rating, price]) => rating && Number(price) > 0));
           draft.policy.searchDelaySeconds = [Number(controls.searchDelayMin.value), Number(controls.searchDelayMax.value)];
           draft.policy.maxPurchasesPerSearch = 1;
@@ -342,6 +368,7 @@ export function showTradeSchedulerDialog(options = {}) {
           draft.policy.expiredPolicy = controls.expiredPolicy.value;
         }
         const normalized = normalizeTradeJobEditorValue(draft, { now: now() });
+        buyPreviews.delete(normalized.id);
         options.onSaveJob?.(normalized);
         refreshSnapshot();
         editing = null;
@@ -361,23 +388,67 @@ export function showTradeSchedulerDialog(options = {}) {
     const manual = button(dom, 'Manual listing', mode, 'bronze-loop-trade-manual-listing');
     const addListing = button(dom, 'New listing Job', mode, 'bronze-loop-trade-new-listing');
     const addBuy = button(dom, 'New Buy Job', mode, 'bronze-loop-trade-new-buy');
+    const exportConfig = button(dom, 'Export config', mode, 'bronze-loop-trade-export-config');
+    const importConfig = button(dom, 'Import config', mode, 'bronze-loop-trade-import-config');
     const diagnostics = button(dom, 'Save diagnostics', mode, 'bronze-loop-trade-scheduler-diagnostics');
     const circuit = options.getCircuit?.();
     const resetCircuit = button(dom, 'Reset trade block', mode, 'bronze-loop-trade-circuit-reset');
     resetCircuit.style.display = circuit?.circuit?.state === 'open' ? '' : 'none';
-    toolbar.append(manual, addListing, addBuy, diagnostics, resetCircuit);
+    toolbar.append(manual, addListing, addBuy, exportConfig, importConfig, diagnostics, resetCircuit);
     content.appendChild(toolbar);
     manual.addEventListener('click', () => options.onOpenManualListing?.());
     addListing.addEventListener('click', () => { editing = createTradeJobDraft('listing', { now: now() }); renderEditor(); });
     addBuy.addEventListener('click', () => { editing = createTradeJobDraft('buy', { now: now() }); renderEditor(); });
+    exportConfig.addEventListener('click', () => {
+      try {
+        options.onExportJobConfig?.();
+        setStatus(`Exported ${(snapshot.jobs || []).length} Job(s)`);
+      } catch (error) {
+        setStatus(`Export failed: ${error?.message || error}`);
+      }
+    });
+    importConfig.addEventListener('click', () => {
+      validatedImportText = null;
+      editing = null;
+      view = 'import';
+      render();
+    });
     diagnostics.addEventListener('click', () => options.onDownloadDiagnostics?.());
     resetCircuit.addEventListener('click', () => { options.onResetCircuit?.(); refreshSnapshot(); setStatus('Trade block reset manually'); render(); });
+
+    const safety = styles(dom.create('div'), {
+      display: 'grid', gridTemplateColumns: mode.mobile ? '1fr' : 'minmax(0, 1fr) auto', gap: '8px',
+      alignItems: 'end', padding: '9px', marginBottom: '10px', border: '1px solid #47576b', background: '#1a2028',
+    });
+    const globalReserve = input(
+      dom,
+      'number',
+      snapshot.safety?.minimumRetainedCoins ?? '',
+      mode,
+      'bronze-loop-trade-global-minimum-retained-coins',
+    );
+    const saveReserve = button(dom, 'Save reserve', mode, 'bronze-loop-trade-save-global-reserve');
+    saveReserve.addEventListener('click', () => {
+      try {
+        const value = globalReserve.value === '' ? null : Number(globalReserve.value);
+        options.onSetMinimumRetainedCoins?.(value);
+        refreshSnapshot();
+        setStatus(value === null ? 'Scheduled Buy global reserve cleared' : `Scheduled Buy global reserve set to ${value.toLocaleString()}`);
+        render();
+      } catch (error) {
+        setStatus(`Reserve update failed: ${error?.message || error}`);
+      }
+    });
+    safety.append(field(dom, 'Global minimum retained coins', globalReserve, mode), saveReserve);
+    content.appendChild(safety);
 
     const validationGate = styles(dom.create('div'), {
       display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', padding: '9px',
       marginBottom: '10px', border: '1px solid #47576b', background: '#1a2028',
     });
-    const guarded = selectGuardedScheduledListingJob(snapshot);
+    const guarded = selectGuardedScheduledTradeJob(snapshot, {
+      scheduledBuyEnabled: options.scheduledBuyEnabled === true,
+    });
     if (snapshot.liveExecutionEnabled === true) {
       const gateState = dom.create('span');
       gateState.textContent = `One-card schedule enabled${guarded.job ? `: ${guarded.job.name}` : ''}`;
@@ -392,14 +463,14 @@ export function showTradeSchedulerDialog(options = {}) {
       validationGate.append(gateState, disableGate);
     } else {
       const gateInput = input(dom, 'text', '', mode, 'bronze-loop-trade-guarded-confirmation');
-      gateInput.placeholder = GUARDED_SCHEDULE_CONFIRMATION;
+      gateInput.placeholder = guarded.requiredText || 'No eligible one-card schedule';
       styles(gateInput, { flex: '1 1 220px' });
       const enableGate = button(dom, 'Enable one-card schedule', mode, 'bronze-loop-trade-enable-guarded-schedule');
       enableGate.disabled = guarded.ready !== true;
-      enableGate.title = guarded.ready ? `Type ${GUARDED_SCHEDULE_CONFIRMATION}` : guarded.reason || 'One armed Job is required';
+      enableGate.title = guarded.ready ? `Type ${guarded.requiredText}` : guarded.reason || 'One armed Job is required';
       enableGate.addEventListener('click', async () => {
-        if (gateInput.value !== GUARDED_SCHEDULE_CONFIRMATION) {
-          setStatus(`Confirmation must exactly match ${GUARDED_SCHEDULE_CONFIRMATION}`);
+        if (gateInput.value !== guarded.requiredText) {
+          setStatus(`Confirmation must exactly match ${guarded.requiredText}`);
           return;
         }
         enableGate.disabled = true;
@@ -439,6 +510,7 @@ export function showTradeSchedulerDialog(options = {}) {
       detail.textContent = `${job.type} | ${tradeScheduleSummary(job)}${runtime.nextRunAt !== null && runtime.nextRunAt !== undefined ? ` | Next ${new Date(runtime.nextRunAt).toLocaleString()}` : ''}`;
       styles(detail, { color: '#9aa6b8', fontSize: '11px', margin: '6px 0' });
       const buyPreview = buyPreviews.get(job.id);
+      const buyAvailability = job.type === 'buy' ? buyValidationAvailability(job, buyPreview) : null;
       const previewDetail = job.type === 'buy' && buyPreview ? styles(dom.create('div'), {
         color: buyPreview.plan?.ready ? '#a9d7b5' : '#e3a7a7', fontSize: '11px', margin: '6px 0', lineHeight: '1.45', overflowWrap: 'anywhere',
       }) : null;
@@ -449,10 +521,13 @@ export function showTradeSchedulerDialog(options = {}) {
         const missing = buyPreview.plan?.missingRatings?.length
           ? ` | Missing ratings: ${buyPreview.plan.missingRatings.join(', ')}`
           : '';
-        previewDetail.textContent = `Preview only | ${lanes || 'No search lanes'}${missing} | Live Buy locked`;
+        previewDetail.textContent = `Preview only | ${lanes || 'No search lanes'}${missing} | ${buyAvailability.ready ? 'Buy one ready' : `Buy one unavailable: ${buyAvailability.reason}`}`;
       }
       const actions = styles(dom.create('div'), { display: 'flex', gap: '6px', flexWrap: 'wrap' });
       const run = button(dom, job.type === 'buy' ? 'Preview' : 'Run now', mode);
+      const validateBuy = job.type === 'buy' && buyAvailability.ready
+        ? button(dom, 'Buy one', mode, `bronze-loop-trade-buy-one-${job.id}`)
+        : null;
       const edit = button(dom, 'Edit', mode);
       const duplicate = button(dom, 'Duplicate', mode);
       const remove = button(dom, 'Delete', mode);
@@ -462,20 +537,25 @@ export function showTradeSchedulerDialog(options = {}) {
           return;
         }
         run.disabled = true;
+        if (validateBuy) validateBuy.disabled = true;
+        buyPreviews.delete(job.id);
         setStatus(`Loading Buy preview for ${job.name}`);
         try {
           const preview = await options.onPreviewBuyJob?.(job);
           if (!preview) throw new Error('Buy preview is unavailable');
           buyPreviews.set(job.id, preview);
+          refreshSnapshot();
+          const availability = buyValidationAvailability(job, preview);
           setStatus(preview.plan?.ready
-            ? `Buy preview ready: ${preview.summary?.ratings || 0} rating lane(s), ${preview.summary?.definitions || 0} player definition(s); execution remains locked`
+            ? `Buy preview ready: ${preview.summary?.ratings || 0} rating lane(s), ${preview.summary?.definitions || 0} player definition(s); ${availability.ready ? 'Buy one is available' : `Buy one unavailable (${availability.reason})`}`
             : `Buy preview blocked: missing rating lane(s) ${(preview.plan?.missingRatings || []).join(', ') || 'unknown'}`);
           render();
         } catch (error) {
           setStatus(`Buy preview failed: ${error?.message || error}`);
-          run.disabled = false;
+          render();
         }
       });
+      validateBuy?.addEventListener('click', () => options.onOpenManualBuy?.(job, buyPreview));
       edit.addEventListener('click', () => { editing = createTradeJobDraft(job.type, { job, now: now() }); renderEditor(); });
       duplicate.addEventListener('click', () => {
         const copy = createTradeJobDraft(job.type, { job, now: now() });
@@ -485,8 +565,15 @@ export function showTradeSchedulerDialog(options = {}) {
         editing = copy;
         renderEditor();
       });
-      remove.addEventListener('click', () => { options.onDeleteJob?.(job.id); refreshSnapshot(); render(); });
-      actions.append(run, edit, duplicate, remove);
+      remove.addEventListener('click', () => {
+        buyPreviews.delete(job.id);
+        options.onDeleteJob?.(job.id);
+        refreshSnapshot();
+        render();
+      });
+      actions.append(run);
+      if (validateBuy) actions.append(validateBuy);
+      actions.append(edit, duplicate, remove);
       card.append(head, detail);
       if (previewDetail) card.appendChild(previewDetail);
       card.appendChild(actions);
@@ -530,25 +617,256 @@ export function showTradeSchedulerDialog(options = {}) {
     }
   }
 
+  function renderSummary() {
+    content.textContent = '';
+    const metrics = snapshot.metrics || {};
+    const runs = metrics.runs || {};
+    const statuses = runs.byStatus || {};
+    const outcomes = metrics.outcomes || {};
+    const buy = metrics.buy || {};
+    const listing = metrics.listing || {};
+    const groups = [
+      ['Runs', [
+        ['Total', runs.total], ['Completed', statuses.completed], ['Blocked', statuses.blocked],
+        ['Missed', statuses.missed], ['Stopped', statuses.stopped], ['Failed', Number(statuses.failed || 0) + Number(statuses.error || 0)],
+      ]],
+      ['Outcomes', [
+        ['Requested', outcomes.requested], ['Succeeded', outcomes.succeeded],
+        ['Failed', outcomes.failed], ['Skipped', outcomes.skipped],
+      ]],
+      ['Buy', [
+        ['Purchased', buy.purchases], ['Searches', buy.searches],
+        ['Attempts', buy.attempts], ['Spent', Number(buy.spent || 0).toLocaleString()],
+      ]],
+      ['Listing', [['Listed', listing.listed]]],
+    ];
+    const grid = styles(dom.create('div'), {
+      display: 'grid', gridTemplateColumns: mode.mobile ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: '12px',
+    });
+    for (const [label, values] of groups) {
+      const group = styles(dom.create('div'), { borderTop: '1px solid #47576b', paddingTop: '8px', minWidth: '0' });
+      const heading = dom.create('div');
+      heading.textContent = label;
+      styles(heading, { fontWeight: '700', marginBottom: '6px' });
+      group.appendChild(heading);
+      for (const [name, rawValue] of values) {
+        const row = styles(dom.create('div'), { display: 'flex', justifyContent: 'space-between', gap: '12px', padding: '3px 0' });
+        const key = dom.create('span');
+        const value = dom.create('span');
+        key.textContent = name;
+        value.textContent = String(rawValue ?? 0);
+        styles(key, { color: '#aeb8c6' });
+        styles(value, { fontVariantNumeric: 'tabular-nums' });
+        row.append(key, value);
+        group.appendChild(row);
+      }
+      grid.appendChild(group);
+    }
+    content.appendChild(grid);
+
+    const period = styles(dom.create('div'), { borderTop: '1px solid #47576b', marginTop: '12px', paddingTop: '8px', color: '#aeb8c6', fontSize: '12px' });
+    const firstAt = Number(metrics.firstRecordedAt || 0);
+    const lastAt = Number(metrics.lastRecordedAt || 0);
+    period.textContent = firstAt
+      ? `Tracked ${new Date(firstAt).toLocaleString()} - ${new Date(lastAt || firstAt).toLocaleString()}`
+      : 'No recorded Trade runs';
+    content.appendChild(period);
+
+    const reasons = Array.isArray(metrics.reasons) ? metrics.reasons : [];
+    if (reasons.length) {
+      const reasonGroup = styles(dom.create('div'), { borderTop: '1px solid #47576b', marginTop: '12px', paddingTop: '8px' });
+      const reasonHeading = dom.create('div');
+      reasonHeading.textContent = 'Stop reasons';
+      styles(reasonHeading, { fontWeight: '700', marginBottom: '6px' });
+      reasonGroup.appendChild(reasonHeading);
+      for (const entry of reasons) {
+        const row = styles(dom.create('div'), { display: 'flex', justifyContent: 'space-between', gap: '12px', padding: '3px 0' });
+        const reason = dom.create('span');
+        const count = dom.create('span');
+        reason.textContent = String(entry.reason || 'unknown');
+        count.textContent = String(Number(entry.count || 0));
+        styles(reason, { overflowWrap: 'anywhere', color: '#aeb8c6' });
+        styles(count, { fontVariantNumeric: 'tabular-nums' });
+        row.append(reason, count);
+        reasonGroup.appendChild(row);
+      }
+      content.appendChild(reasonGroup);
+    }
+  }
+
+  function renderImport() {
+    content.textContent = '';
+    const heading = section(dom, 'Import Trade Jobs');
+    const textarea = dom.create('textarea');
+    textarea.id = 'bronze-loop-trade-import-json';
+    textarea.value = '';
+    textarea.spellcheck = false;
+    styles(textarea, {
+      width: '100%', minHeight: mode.mobile ? '42dvh' : '320px', boxSizing: 'border-box', resize: 'vertical',
+      border: '1px solid #596a7e', background: '#0d1117', color: '#eef2f6', padding: '10px',
+      font: '12px Consolas, monospace', lineHeight: '1.45', overflowWrap: 'normal', whiteSpace: 'pre',
+    });
+    const actions = styles(dom.create('div'), { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' });
+    const validate = button(dom, 'Validate', mode, 'bronze-loop-trade-import-validate');
+    const replace = button(dom, 'Replace jobs', mode, 'bronze-loop-trade-import-apply');
+    const cancel = button(dom, 'Cancel', mode, 'bronze-loop-trade-import-cancel');
+    replace.disabled = true;
+    const invalidate = () => {
+      validatedImportText = null;
+      replace.disabled = true;
+      replace.textContent = 'Replace jobs';
+    };
+    textarea.addEventListener('input', invalidate);
+    textarea.addEventListener('change', invalidate);
+    validate.addEventListener('click', () => {
+      try {
+        const result = options.onValidateJobConfig?.(textarea.value);
+        if (!result || !Array.isArray(result.jobs)) throw new Error('Trade Job configuration validator is unavailable');
+        validatedImportText = textarea.value;
+        replace.disabled = false;
+        replace.textContent = `Replace with ${result.jobs.length} Job(s)`;
+        setStatus(`Valid configuration: ${result.jobs.length} Job(s)`);
+      } catch (error) {
+        invalidate();
+        setStatus(`Validation failed: ${error?.message || error}`);
+      }
+    });
+    replace.addEventListener('click', () => {
+      if (textarea.value !== validatedImportText) {
+        invalidate();
+        setStatus('Configuration changed; validate again');
+        return;
+      }
+      try {
+        const result = options.onImportJobConfig?.(textarea.value);
+        if (!result || !Array.isArray(result.jobs)) throw new Error('Trade Job configuration importer is unavailable');
+        buyPreviews.clear();
+        validatedImportText = null;
+        refreshSnapshot();
+        view = 'jobs';
+        setStatus(`Imported ${result.jobs.length} Job(s); all Jobs are unarmed`);
+        render();
+      } catch (error) {
+        setStatus(`Import failed: ${error?.message || error}`);
+      }
+    });
+    cancel.addEventListener('click', () => {
+      validatedImportText = null;
+      view = 'jobs';
+      render();
+    });
+    actions.append(validate, replace, cancel);
+    content.append(heading, textarea, actions);
+  }
+
+  function renderProviders() {
+    content.textContent = '';
+    const health = options.getProviderHealth?.() || {};
+    const catalog = health.playerCatalog || {};
+    const quotes = health.priceQuotes || {};
+
+    function appendRows(group, values) {
+      for (const [name, rawValue] of values) {
+        const row = styles(dom.create('div'), { display: 'flex', justifyContent: 'space-between', gap: '12px', padding: '3px 0' });
+        const key = dom.create('span');
+        const value = dom.create('span');
+        key.textContent = name;
+        value.textContent = String(rawValue ?? 0);
+        styles(key, { color: '#aeb8c6' });
+        styles(value, { textAlign: 'right', overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' });
+        row.append(key, value);
+        group.appendChild(row);
+      }
+    }
+
+    const grid = styles(dom.create('div'), {
+      display: 'grid', gridTemplateColumns: mode.mobile ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: '14px',
+    });
+    const catalogGroup = styles(dom.create('div'), { borderTop: '1px solid #47576b', paddingTop: '8px', minWidth: '0' });
+    const catalogHeading = dom.create('div');
+    catalogHeading.textContent = 'Player catalog';
+    styles(catalogHeading, { fontWeight: '700', marginBottom: '6px' });
+    catalogGroup.appendChild(catalogHeading);
+    appendRows(catalogGroup, [
+      ['Provider', catalog.provider || 'FUTNext'], ['Status', catalog.status || 'unavailable'],
+      ['Platform', catalog.cache?.platform || 'pc'], ['Season', catalog.cache?.season || '26'],
+      ['Lanes', catalog.cache?.lanes], ['Fresh / expired', `${Number(catalog.cache?.freshLanes || 0)} / ${Number(catalog.cache?.expiredLanes || 0)}`],
+      ['Definitions', catalog.cache?.definitions], ['Loads', catalog.activity?.loadCount],
+      ['Last load', catalog.activity?.lastLoad?.at ? new Date(catalog.activity.lastLoad.at).toLocaleString() : 'none'],
+    ]);
+    const clearCatalog = button(dom, 'Clear player catalog', mode, 'bronze-loop-trade-clear-player-catalog');
+    clearCatalog.disabled = !Number(catalog.cache?.lanes || 0);
+    clearCatalog.addEventListener('click', () => {
+      try {
+        options.onClearPlayerCatalogCache?.();
+        refreshSnapshot();
+        setStatus('Player catalog cache cleared; Scheduler relocked and all Jobs disarmed');
+        render();
+      } catch (error) {
+        setStatus(`Player catalog clear failed: ${error?.message || error}`);
+      }
+    });
+    styles(clearCatalog, { marginTop: '8px' });
+    catalogGroup.appendChild(clearCatalog);
+
+    const quoteGroup = styles(dom.create('div'), { borderTop: '1px solid #47576b', paddingTop: '8px', minWidth: '0' });
+    const quoteHeading = dom.create('div');
+    quoteHeading.textContent = 'Price quotes';
+    styles(quoteHeading, { fontWeight: '700', marginBottom: '6px' });
+    quoteGroup.appendChild(quoteHeading);
+    const sources = Object.entries(quotes.cache?.bySource || {}).map(([source, count]) => `${source}:${count}`).join(', ') || 'none';
+    const platforms = Object.entries(quotes.cache?.byPlatform || {}).map(([platform, count]) => `${platform}:${count}`).join(', ') || 'none';
+    appendRows(quoteGroup, [
+      ['Providers', (quotes.providers || ['FUT.GG', 'FUTNext']).join(' / ')], ['Status', quotes.status || 'unavailable'],
+      ['Entries', quotes.cache?.entries], ['Fresh / expired', `${Number(quotes.cache?.freshEntries || 0)} / ${Number(quotes.cache?.expiredEntries || 0)}`],
+      ['Sources', sources], ['Platforms', platforms], ['Loads', quotes.activity?.loadCount],
+      ['Last load', quotes.activity?.lastLoad?.at ? new Date(quotes.activity.lastLoad.at).toLocaleString() : 'none'],
+    ]);
+    const clearQuotes = button(dom, 'Clear price quotes', mode, 'bronze-loop-trade-clear-price-quotes');
+    clearQuotes.disabled = !Number(quotes.cache?.entries || 0);
+    clearQuotes.addEventListener('click', () => {
+      try {
+        options.onClearPriceQuoteCache?.();
+        refreshSnapshot();
+        setStatus('Price quote cache cleared; Scheduler relocked and all Jobs disarmed');
+        render();
+      } catch (error) {
+        setStatus(`Price quote clear failed: ${error?.message || error}`);
+      }
+    });
+    styles(clearQuotes, { marginTop: '8px' });
+    quoteGroup.appendChild(clearQuotes);
+
+    grid.append(catalogGroup, quoteGroup);
+    content.appendChild(grid);
+  }
+
   function render() {
     refreshSnapshot();
     renderBanner();
-    jobsTab.style.background = view === 'jobs' ? '#315d9b' : '#222832';
+    jobsTab.style.background = ['jobs', 'import'].includes(view) ? '#315d9b' : '#222832';
+    summaryTab.style.background = view === 'summary' ? '#315d9b' : '#222832';
+    providersTab.style.background = view === 'providers' ? '#315d9b' : '#222832';
     historyTab.style.background = view === 'history' ? '#315d9b' : '#222832';
     if (editing) renderEditor();
+    else if (view === 'import') renderImport();
+    else if (view === 'summary') renderSummary();
+    else if (view === 'providers') renderProviders();
     else if (view === 'history') renderHistory();
     else renderJobs();
     status.textContent = statusText;
   }
 
   jobsTab.addEventListener('click', () => { editing = null; view = 'jobs'; render(); });
+  summaryTab.addEventListener('click', () => { editing = null; view = 'summary'; render(); });
+  providersTab.addEventListener('click', () => { editing = null; view = 'providers'; render(); });
   historyTab.addEventListener('click', () => { editing = null; view = 'history'; render(); });
   close.addEventListener('click', () => overlay.remove?.());
   overlay.addEventListener('click', (event) => { if (event.target === overlay) overlay.remove?.(); });
   dialog.append(heading, tabs, banner, content, status);
   overlay.appendChild(dialog);
   dom.appendToBody(overlay);
-  applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, historyTab, close] });
+  applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, summaryTab, providersTab, historyTab, close] });
   render();
   return overlay;
 }

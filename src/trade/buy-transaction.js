@@ -1,5 +1,10 @@
 import { assertValidTradeJob, createTradeRunReceipt } from './contracts.js';
 import { buildBuyLanePlan, nextBuySearch, selectBuyCandidate } from './buy-plan.js';
+import {
+  destinationForOwnership,
+  filterBuyCatalogForDestination,
+  normalizeExpectedBuyDestination,
+} from './buy-destination.js';
 import { classifyTradeError } from './error-policy.js';
 
 function finiteNumber(value, fallback = 0) {
@@ -37,7 +42,7 @@ export function createBuyTransaction(options = {}) {
     const job = input.job;
     assertValidTradeJob(job, 'Buy job');
     if (job.type !== 'buy') throw new Error('Buy job.type must be buy');
-    const runId = createRunId();
+    const runId = String(input.runId || createRunId());
     const startedAt = Number(now());
     const requested = Number(job.policy.quantity);
     const receipts = [];
@@ -46,18 +51,31 @@ export function createBuyTransaction(options = {}) {
     let spent = 0;
     let emptySearches = 0;
     let searches = 0;
+    let buyAttempts = 0;
     let status = 'completed';
     let reason = null;
     let cursor = null;
+    const expectedDestination = normalizeExpectedBuyDestination(input.expectedDestination || 'auto');
+    const minimumRetainedCoins = Math.max(0, Math.floor(finiteNumber(input.minimumRetainedCoins)));
+    const checkpoint = (phase, detail = {}) => {
+      try { options.onCheckpoint?.({ phase, at: Number(now()), ...detail }); } catch { }
+    };
 
     const beforeCapabilities = adapter.inspectCapabilities();
+    checkpoint('transaction-start', { destination: expectedDestination });
     const stop = (nextStatus, nextReason) => {
       status = nextStatus;
       reason = nextReason;
     };
     const circuit = options.circuitBreaker?.availability?.();
-    if (circuit && circuit.allowed !== true) stop('blocked', 'trade-circuit-open');
+    if (!expectedDestination) stop('blocked', 'buy-validation-destination-invalid');
+    else if (circuit && circuit.allowed !== true) stop('blocked', 'trade-circuit-open');
     else if (beforeCapabilities.canTrade !== true) stop('blocked', 'trade-capability-unavailable');
+    else if (!Number.isFinite(Number(beforeCapabilities.coins))) stop('blocked', 'trade-coins-unavailable');
+    else if (Number(beforeCapabilities.coins) < minimumRetainedCoins) stop('blocked', 'minimum-retained-coins');
+    else if (expectedDestination === 'transfer' && Number(beforeCapabilities.transferCapacity?.free) <= 0) {
+      stop('blocked', 'transfer-list-full');
+    }
     else {
       const readiness = adapter.inspectUnassignedReadiness();
       if (readiness.ready !== true) stop('blocked', readiness.reason || 'unassigned-not-ready');
@@ -70,9 +88,17 @@ export function createBuyTransaction(options = {}) {
         ratingMax: job.policy.ratingMax,
         platform: input.platform || 'pc',
       });
-      lanePlan = buildBuyLanePlan({ job, catalog, runId });
+      checkpoint('catalog-loaded', { status: catalog.ok ? 'completed' : 'blocked' });
+      const destinationCatalog = filterBuyCatalogForDestination(catalog, adapter, expectedDestination);
+      checkpoint('destination-filtered', {
+        status: destinationCatalog.reason ? 'blocked' : 'completed',
+        reason: destinationCatalog.reason,
+        destination: expectedDestination,
+      });
+      lanePlan = buildBuyLanePlan({ job, catalog: destinationCatalog.catalog, runId });
       cursor = lanePlan.cursor;
-      if (!catalog.ok || !lanePlan.ready) stop('blocked', `catalog-ratings-unavailable:${lanePlan.missingRatings.join(',')}`);
+      if (destinationCatalog.reason) stop('blocked', destinationCatalog.reason);
+      else if (!catalog.ok || !lanePlan.ready) stop('blocked', `catalog-ratings-unavailable:${lanePlan.missingRatings.join(',')}`);
     }
 
     while (!reason && succeeded < requested) {
@@ -107,7 +133,13 @@ export function createBuyTransaction(options = {}) {
         break;
       }
       searches += 1;
+      checkpoint('market-search-started', { search });
       const searchResult = await adapter.searchMarket({ ...search, page: 1 });
+      checkpoint('market-search-finished', {
+        search,
+        status: searchResult.status,
+        response: searchResult.response,
+      });
       if (searchResult.status !== 'completed') {
         const classification = classifyTradeError(searchResult.error || searchResult.response || {});
         options.circuitBreaker?.recordFailure?.(searchResult.error || searchResult.response || {}, {
@@ -122,7 +154,7 @@ export function createBuyTransaction(options = {}) {
         job,
         search,
         candidates: searchResult.candidates,
-        limits: { remainingBudget, coins: capabilities.coins },
+        limits: { remainingBudget, coins: Number(capabilities.coins) - minimumRetainedCoins },
       });
       if (!selected.selected) {
         emptySearches += 1;
@@ -141,15 +173,29 @@ export function createBuyTransaction(options = {}) {
       emptySearches = 0;
       const candidate = selected.selected;
       const price = Number(candidate.auction.buyNowPrice);
+      checkpoint('candidate-selected', {
+        item: candidate.item,
+        tradeId: candidate.auction.tradeId,
+        price,
+        search,
+      });
       const ownership = adapter.inspectDefinitionOwnership(candidate.item.definitionId);
-      const destination = Number(ownership.club || 0) > 0 ? 'transfer' : 'club';
+      const destination = destinationForOwnership(ownership);
       const liveCapabilities = adapter.inspectCapabilities();
+      if (expectedDestination !== 'auto' && destination !== expectedDestination) {
+        stop('blocked', 'buy-destination-changed');
+        break;
+      }
       if (price > Number(job.policy.totalBudget) - spent) {
         stop('stopped', 'budget-limit');
         break;
       }
       if (!Number.isFinite(Number(liveCapabilities.coins)) || price > Number(liveCapabilities.coins)) {
         stop('blocked', 'insufficient-coins');
+        break;
+      }
+      if (Number(liveCapabilities.coins) - price < minimumRetainedCoins) {
+        stop('blocked', 'minimum-retained-coins');
         break;
       }
       if (destination === 'transfer' && Number(liveCapabilities.transferCapacity?.free) <= 0) {
@@ -160,23 +206,57 @@ export function createBuyTransaction(options = {}) {
         stop('stopped', 'stopped-by-user');
         break;
       }
+      const maxBuyAttempts = Math.max(1, Math.floor(Number(input.maxBuyAttempts || Number.MAX_SAFE_INTEGER)));
+      if (buyAttempts >= maxBuyAttempts) {
+        stop('stopped', 'buy-attempt-limit');
+        break;
+      }
       const buyCircuit = options.circuitBreaker?.availability?.();
       if (buyCircuit && buyCircuit.allowed !== true) {
         stop('blocked', 'trade-circuit-open');
+        break;
+      }
+      if (input.beforeBuy && await input.beforeBuy() !== true) {
+        stop('blocked', 'buy-execution-lease-lost');
         break;
       }
 
       const item = safeItem(candidate);
       const purchaseRef = { ...item, tradeId: Number(candidate.auction.tradeId), price };
       const coinsBeforePurchase = Number(liveCapabilities.coins);
+      buyAttempts += 1;
+      checkpoint('buy-request-started', {
+        item,
+        tradeId: purchaseRef.tradeId,
+        price,
+        destination,
+        search,
+      });
       const bought = await adapter.buyNowItem(purchaseRef, price);
+      checkpoint('buy-response-received', {
+        item,
+        tradeId: purchaseRef.tradeId,
+        price,
+        destination,
+        status: bought.status,
+        response: bought.response,
+      });
       let purchase = null;
       let refresh = null;
       let afterPurchaseCapabilities = adapter.inspectCapabilities();
       if (['accepted', 'ambiguous'].includes(bought.status)) {
+        checkpoint('purchase-reconciliation-started', { item, tradeId: purchaseRef.tradeId, price, destination });
         refresh = await adapter.refreshPurchaseState({ ambiguity: bought.status === 'ambiguous' });
         afterPurchaseCapabilities = adapter.inspectCapabilities();
         purchase = adapter.inspectPurchase(purchaseRef);
+        checkpoint('purchase-reconciliation-finished', {
+          item: purchase?.candidate?.item || item,
+          tradeId: purchaseRef.tradeId,
+          price,
+          destination,
+          status: refresh.status,
+          response: refresh.response,
+        });
       }
       if (refresh && refresh.status !== 'completed') {
         const classification = classifyTradeError(refresh.error || refresh.response || { kind: refresh.status });
@@ -206,6 +286,10 @@ export function createBuyTransaction(options = {}) {
         }
         if (classification.kind === 'competition-lost') {
           receipts.push({ index: receipts.length + 1, status: 'competition-lost', item, tradeId: purchaseRef.tradeId, price, search: { ...search } });
+          if (buyAttempts >= maxBuyAttempts) {
+            stop('stopped', 'buy-attempt-limit');
+            break;
+          }
           await sleep(randomDelayMs(job.policy.searchDelaySeconds, random));
           continue;
         }
@@ -232,7 +316,16 @@ export function createBuyTransaction(options = {}) {
       }
 
       const purchasedRef = { ...purchase.candidate.item, tradeId: purchaseRef.tradeId, price };
+      checkpoint('purchase-route-started', { item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination });
       const routed = await adapter.routePurchasedItem(purchasedRef, destination);
+      checkpoint('purchase-route-finished', {
+        item: routed.item || purchasedRef,
+        tradeId: purchaseRef.tradeId,
+        price,
+        destination,
+        status: routed.status,
+        response: routed.response,
+      });
       if (routed.status !== 'completed') {
         failed += 1;
         stop('blocked', routed.status === 'destination-full' ? 'transfer-list-full' : `purchase-route-${routed.status}`);
@@ -243,8 +336,24 @@ export function createBuyTransaction(options = {}) {
         });
         break;
       }
-      await adapter.refreshPurchaseState();
+      checkpoint('route-verification-refresh-started', { item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination });
+      const routeRefresh = await adapter.refreshPurchaseState({ destination });
+      checkpoint('route-verification-refresh-finished', {
+        item: purchasedRef,
+        tradeId: purchaseRef.tradeId,
+        price,
+        destination,
+        status: routeRefresh.status,
+        response: routeRefresh.response,
+      });
       const verified = adapter.inspectPurchase({ ...purchasedRef, pile: destination });
+      checkpoint('route-verification-inspected', {
+        item: verified.candidate?.item || purchasedRef,
+        tradeId: purchaseRef.tradeId,
+        price,
+        destination,
+        status: verified.status,
+      });
       if (verified.status !== 'loaded' || verified.candidate?.item?.pile !== destination) {
         failed += 1;
         stop('ambiguous', 'purchase-routed-but-not-verified');
@@ -288,7 +397,9 @@ export function createBuyTransaction(options = {}) {
       skipped: Math.max(0, requested - succeeded - failed),
       coinsBefore: beforeCapabilities.coins,
       coinsAfter: afterCapabilities.coins,
-      receipts: [{ status: 'run-summary', searches, spent, cursor }, ...receipts],
+      receipts: [{
+        status: 'run-summary', searches, buyAttempts, spent, expectedDestination, minimumRetainedCoins, cursor,
+      }, ...receipts],
     });
   }
 

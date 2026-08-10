@@ -32,17 +32,26 @@ export function createListingPreparation(options = {}) {
         maxListings: requestedMax,
       },
     };
-    const preview = await options.listingPreview.preview(previewInput, request);
     const adapter = options.getTradeAdapter();
+    const requiresTransferPreflight = previewInput.policy.sources?.includes('club') === true;
+    const transferPreflight = requiresTransferPreflight
+      ? await adapter.refreshTransferItems()
+      : null;
+    const transferReady = !requiresTransferPreflight || transferPreflight?.status === 'completed';
+    const preview = await options.listingPreview.preview(previewInput, request);
     const blockers = [];
     const priceLimitChecks = [];
     const entries = [];
     const adjustedNames = [];
     if (preview.capabilities?.canTrade !== true) blockers.push({ reason: 'trade-capability-unavailable' });
+    if (!transferReady) blockers.push({
+      reason: `listing-transfer-preflight-${transferPreflight?.status || 'unavailable'}`,
+      detail: transferPreflight?.error?.kind || null,
+    });
     if (preview.scan?.error) blockers.push({ reason: 'candidate-scan-failed', detail: preview.scan.error.message });
     if (!preview.plan?.entries?.length) blockers.push({ reason: 'no-eligible-listing-candidates' });
 
-    for (const entry of preview.plan?.entries || []) {
+    for (const entry of transferReady ? (preview.plan?.entries || []) : []) {
       const result = await adapter.inspectPriceLimits(entry.item, { refresh: true });
       const applied = applyListingPriceLimits(entry, result);
       priceLimitChecks.push({
@@ -86,6 +95,7 @@ export function createListingPreparation(options = {}) {
       preparedAt,
       ready,
       blockers,
+      transferPreflight,
       priceLimitChecks,
       plan,
       confirmation,

@@ -67,7 +67,7 @@ export function classifyTradeError(error = {}) {
   if (/card.*(?:in trade|already listed)|item.*trade offer/.test(text)) {
     return { kind: 'card-in-trade', code, action: 'refresh-and-skip', retryable: true, opensCircuit: false, disarm: false, ambiguous: false };
   }
-  if (/lost bid|already purchased|outbid|auction.*expired/.test(text)) {
+  if (/competition[- ]lost|lost bid|already purchased|outbid|auction.*expired/.test(text)) {
     return { kind: 'competition-lost', code, action: 'continue-after-delay', retryable: true, opensCircuit: false, disarm: false, ambiguous: false };
   }
   if ([426, 512, 521].includes(code)) {

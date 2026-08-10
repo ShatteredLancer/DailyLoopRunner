@@ -2,6 +2,7 @@ import { TRADE_PRICE_PROVIDERS } from './contracts.js';
 
 export const PRICE_QUOTE_SCHEMA_VERSION = 1;
 export const DEFAULT_PRICE_QUOTE_TTL_MS = 10 * 60_000;
+export const PRICE_QUOTE_HEALTH_SCHEMA_VERSION = 1;
 
 function parseJson(text, source) {
   try { return JSON.parse(text); } catch { throw new Error(`${source} returned invalid JSON`); }
@@ -131,6 +132,9 @@ export function createPriceQuoteProvider(options = {}) {
   const cache = new Map();
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const cacheKey = (platform, definitionId) => `${platform}:${definitionId}`;
+  let loadCount = 0;
+  let lastLoad = null;
+  let lastClearedAt = null;
 
   async function load(request = {}) {
     const provider = normalizeProvider(request.provider || options.provider);
@@ -154,7 +158,7 @@ export function createPriceQuoteProvider(options = {}) {
     const quotes = ids.map((id) => cache.get(cacheKey(platform, id)))
       .filter((entry) => entry && entry.expiresAt > currentTime && quoteMatchesProvider(entry, provider));
     const sources = [...new Set(quotes.map((entry) => entry.source))];
-    return {
+    const result = {
       quotes,
       ids,
       source: sources.length === 1 ? sources[0] : sources.length > 1 ? 'mixed' : null,
@@ -163,15 +167,65 @@ export function createPriceQuoteProvider(options = {}) {
         ...loaded.attempts,
       ],
     };
+    loadCount += 1;
+    lastLoad = {
+      at: currentTime,
+      provider,
+      platform,
+      requested: ids.length,
+      returned: quotes.length,
+      attempts: result.attempts.map((attempt) => ({
+        source: String(attempt.source || 'unknown'),
+        status: String(attempt.status || 'unknown'),
+        count: Math.max(0, Number(attempt.count || 0) || 0),
+        reason: attempt.reason ? String(attempt.reason).slice(0, 160) : null,
+      })),
+    };
+    return result;
   }
 
   function clear() {
     cache.clear();
+    lastClearedAt = Number(now());
   }
 
   function snapshot() {
     return [...cache.values()].sort((left, right) => left.definitionId - right.definitionId);
   }
 
-  return Object.freeze({ clear, load, snapshot });
+  function inspect() {
+    const currentTime = Number(now());
+    const entries = snapshot();
+    const fresh = entries.filter((entry) => Number(entry.expiresAt) > currentTime);
+    const expired = entries.length - fresh.length;
+    const countBy = (field) => Object.fromEntries([...new Set(entries.map((entry) => String(entry[field] || 'unknown')))]
+      .sort()
+      .map((key) => [key, entries.filter((entry) => String(entry[field] || 'unknown') === key).length]));
+    const quotedAt = entries.map((entry) => Number(entry.quotedAt)).filter(Number.isFinite);
+    const expiresAt = entries.map((entry) => Number(entry.expiresAt)).filter(Number.isFinite);
+    return {
+      schemaVersion: PRICE_QUOTE_HEALTH_SCHEMA_VERSION,
+      capturedAt: currentTime,
+      providers: ['FUT.GG', 'FUTNext'],
+      status: !entries.length ? 'empty' : !expired ? 'fresh' : !fresh.length ? 'stale' : 'partial',
+      cache: {
+        entries: entries.length,
+        freshEntries: fresh.length,
+        expiredEntries: expired,
+        bySource: countBy('source'),
+        byPlatform: countBy('platform'),
+        oldestQuotedAt: quotedAt.length ? Math.min(...quotedAt) : null,
+        newestQuotedAt: quotedAt.length ? Math.max(...quotedAt) : null,
+        earliestExpiresAt: expiresAt.length ? Math.min(...expiresAt) : null,
+        latestExpiresAt: expiresAt.length ? Math.max(...expiresAt) : null,
+      },
+      activity: {
+        loadCount,
+        lastLoad: lastLoad ? JSON.parse(JSON.stringify(lastLoad)) : null,
+        lastClearedAt,
+      },
+    };
+  }
+
+  return Object.freeze({ clear, inspect, load, snapshot });
 }

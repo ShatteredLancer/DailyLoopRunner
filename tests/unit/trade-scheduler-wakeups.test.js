@@ -27,7 +27,7 @@ describe('Trade Scheduler wakeups', () => {
     documentTarget.dispatch('visibilitychange');
     windowTarget.dispatch('focus');
     windowTarget.dispatch('online');
-    expect(tick).toHaveBeenCalledTimes(3);
+    expect(tick.mock.calls.map(([input]) => input.trigger)).toEqual(['visibility', 'focus', 'online']);
     expect(wakeups.stop()).toBe(true);
     expect(wakeups.stop()).toBe(false);
     expect(windowTarget.listenerCount()).toBe(0);

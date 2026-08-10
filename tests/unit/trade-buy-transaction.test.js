@@ -69,6 +69,64 @@ describe('Trade Buy Transaction', () => {
     expect(full.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
   });
 
+  it('filters manual validation searches by the expected destination', async () => {
+    const owned = { id: 1, definitionId: 8401, pile: 'club', type: 'player', rating: 84, tier: 'gold', rare: true };
+    const transferAdapter = createFakeTradeAdapter({
+      coins: 5000,
+      items: [owned],
+      marketItems: [marketItem(70, 8401), marketItem(71, 8402)],
+    });
+    const transferResult = await transaction(transferAdapter, catalog([8401, 8402])).run({
+      job: job(),
+      expectedDestination: 'transfer',
+    });
+    expect(transferResult).toMatchObject({
+      status: 'completed',
+      receipts: [
+        expect.objectContaining({ expectedDestination: 'transfer', buyAttempts: 1 }),
+        expect.objectContaining({ destination: 'transfer', search: expect.objectContaining({ definitionId: 8401 }) }),
+      ],
+    });
+    expect(transferAdapter.calls.filter((call) => call.method === 'inspectDefinitionOwnerships')).toHaveLength(1);
+    expect(transferAdapter.calls.filter((call) => call.method === 'inspectDefinitionOwnership')).toHaveLength(1);
+
+    const clubAdapter = createFakeTradeAdapter({
+      coins: 5000,
+      items: [owned],
+      marketItems: [marketItem(70, 8401), marketItem(71, 8402)],
+    });
+    const clubResult = await transaction(clubAdapter, catalog([8401, 8402])).run({
+      job: job(),
+      expectedDestination: 'club',
+    });
+    expect(clubResult).toMatchObject({
+      status: 'completed',
+      receipts: [expect.anything(), expect.objectContaining({ destination: 'club', search: expect.objectContaining({ definitionId: 8402 }) })],
+    });
+  });
+
+  it('blocks before a market search when no definition matches the expected destination', async () => {
+    const adapter = createFakeTradeAdapter({ coins: 5000, marketItems: [marketItem()] });
+    const result = await transaction(adapter, catalog()).run({ job: job(), expectedDestination: 'transfer' });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'buy-transfer-definitions-unavailable', succeeded: 0 });
+    expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
+    expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
+  });
+
+  it('blocks a controlled Transfer validation before search when Transfer is full', async () => {
+    const owned = { id: 1, definitionId: 8401, pile: 'club', type: 'player', rating: 84, tier: 'gold', rare: true };
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      transferCapacity: { used: 100, max: 100 },
+      items: [owned],
+      marketItems: [marketItem()],
+    });
+    const result = await transaction(adapter, catalog()).run({ job: job(), expectedDestination: 'transfer' });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'transfer-list-full', requested: 1, succeeded: 0 });
+    expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
+    expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
+  });
+
   it('stops before search when Unassigned is not ready', async () => {
     const adapter = createFakeTradeAdapter({ coins: 5000, unassignedReady: false, marketItems: [marketItem()] });
     const result = await transaction(adapter, catalog()).run({ job: job() });
@@ -171,5 +229,92 @@ describe('Trade Buy Transaction', () => {
     expect(result).toMatchObject({ status: 'stopped', reason: 'empty-search-limit', succeeded: 0, skipped: 1 });
     expect(adapter.calls.filter((call) => call.method === 'searchMarket')).toHaveLength(2);
     expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
+  });
+
+  it('allows a guarded caller to authorize at most one Buy Now mutation', async () => {
+    const first = marketItem();
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      marketItems: [first],
+      buyResults: { 1070: { status: 'rejected', error: { kind: 'competition-lost' } } },
+    });
+    const result = await transaction(adapter, catalog()).run({
+      job: job({ maxConsecutiveEmptySearches: 5 }),
+      maxBuyAttempts: 1,
+    });
+    expect(result).toMatchObject({
+      status: 'stopped', reason: 'buy-attempt-limit', succeeded: 0,
+      receipts: [expect.objectContaining({ buyAttempts: 1 }), expect.objectContaining({ status: 'competition-lost' })],
+    });
+    expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(1);
+  });
+
+  it('checks the guarded lease immediately before Buy Now', async () => {
+    const adapter = createFakeTradeAdapter({ coins: 5000, marketItems: [marketItem()] });
+    const result = await transaction(adapter, catalog()).run({
+      job: job(),
+      maxBuyAttempts: 1,
+      beforeBuy: () => false,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'buy-execution-lease-lost', succeeded: 0 });
+    expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(0);
+  });
+
+  it('preserves the scheduled Buy minimum coin floor before Buy Now', async () => {
+    const adapter = createFakeTradeAdapter({ coins: 5000, marketItems: [marketItem()] });
+    const result = await transaction(adapter, catalog()).run({
+      job: job(),
+      minimumRetainedCoins: 4200,
+      maxBuyAttempts: 1,
+      beforeBuy: () => true,
+    });
+    expect(result).toMatchObject({
+      status: 'stopped',
+      reason: 'empty-search-limit',
+      succeeded: 0,
+    });
+    expect(result.receipts[0]).toMatchObject({ minimumRetainedCoins: 4200, buyAttempts: 0 });
+    expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(0);
+  });
+
+  it('refreshes the actual destination before route verification', async () => {
+    const adapter = createFakeTradeAdapter({ coins: 5000, marketItems: [marketItem()] });
+    const result = await transaction(adapter, catalog()).run({ job: job(), maxBuyAttempts: 1 });
+    expect(result).toMatchObject({ status: 'completed', succeeded: 1 });
+    expect(adapter.calls.filter((call) => call.method === 'refreshPurchaseState').at(-1)).toMatchObject({
+      options: { destination: 'club' },
+    });
+  });
+
+  it('checkpoints every mutation boundary before and after Buy and routing', async () => {
+    const adapter = createFakeTradeAdapter({ coins: 5000, marketItems: [marketItem()] });
+    const phases = [];
+    const result = await createBuyTransaction({
+      tradeAdapter: adapter,
+      playerCatalogProvider: catalog(),
+      now: () => 1000,
+      sleep: async () => {},
+      createRunId: () => 'buy-run-checkpoints',
+      onCheckpoint: (entry) => phases.push(entry.phase),
+    }).run({ job: job(), maxBuyAttempts: 1, beforeBuy: () => true });
+
+    expect(result.status).toBe('completed');
+    expect(phases).toEqual([
+      'transaction-start',
+      'catalog-loaded',
+      'destination-filtered',
+      'market-search-started',
+      'market-search-finished',
+      'candidate-selected',
+      'buy-request-started',
+      'buy-response-received',
+      'purchase-reconciliation-started',
+      'purchase-reconciliation-finished',
+      'purchase-route-started',
+      'purchase-route-finished',
+      'route-verification-refresh-started',
+      'route-verification-refresh-finished',
+      'route-verification-inspected',
+    ]);
   });
 });

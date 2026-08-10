@@ -81,6 +81,31 @@ describe('Trade Adapter contracts', () => {
     expect(JSON.stringify(result)).not.toContain('personaId');
   });
 
+  it('indexes destination ownership with one read per inventory pile', () => {
+    const runtime = eaRuntime({ id: 2, definitionId: 8402 });
+    const reads = { unassigned: 0, storage: 0, transfer: 0 };
+    const unassigned = [{ id: 3, definitionId: 8403 }];
+    const storage = [{ id: 4, definitionId: 8404 }];
+    const transfer = [{ id: 5, definitionId: 8405 }];
+    const club = Array.from({ length: 20_000 }, (_, index) => ({
+      id: 10_000 + index,
+      definitionId: 8400 + (index % 50),
+    }));
+    runtime.repositories.Item.getUnassignedItems = () => { reads.unassigned += 1; return unassigned; };
+    runtime.repositories.Item.getStorageItems = () => { reads.storage += 1; return storage; };
+    runtime.repositories.Item.getTransferItems = () => { reads.transfer += 1; return transfer; };
+    runtime.repositories.Item.club = { items: { _collection: club } };
+
+    const definitionIds = Array.from({ length: 50 }, (_, index) => 8400 + index);
+    const ownerships = createEaTradeAdapter(runtime).inspectDefinitionOwnerships(definitionIds);
+
+    expect(reads).toEqual({ unassigned: 1, storage: 1, transfer: 1 });
+    expect(Object.keys(ownerships)).toHaveLength(50);
+    expect(ownerships[8403]).toMatchObject({ club: 400, unassigned: 1 });
+    expect(ownerships[8404]).toMatchObject({ club: 400, storage: 1 });
+    expect(ownerships[8405]).toMatchObject({ club: 400, transfer: 1 });
+  });
+
   it('EA price-limit diagnostics resolve an exact item and only make the requested read call', async () => {
     const item = { id: 10, definitionId: 20 };
     const adapter = createEaTradeAdapter(eaRuntime(item));
@@ -192,6 +217,30 @@ describe('Trade Adapter contracts', () => {
     expect(createEaInventoryAdapter(runtime).snapshot().piles.transfer[0]).toMatchObject({ tradeable: false });
   });
 
+  it('excludes a stale Club entity when the same item ID is present in another pile', () => {
+    const transferItem = {
+      id: 12, definitionId: 22, type: 'player', rating: 80, rareflag: 0,
+      untradeableCount: 0, loans: -1,
+    };
+    const staleClubItem = { ...transferItem };
+    const runtime = eaRuntime(transferItem);
+    runtime.repositories.Item.club = { items: { _collection: [staleClubItem] } };
+    runtime.services.Item.itemDao = { itemRepo: { club: { items: { _collection: [staleClubItem] } } } };
+
+    expect(createEaTradeAdapter(runtime).inspectListingCandidates({ sources: ['club'], limit: 0 }))
+      .toMatchObject({ counts: { club: 0 }, total: 0, returned: 0, candidates: [] });
+  });
+
+  it('classifies a rejected Transfer refresh instead of reporting it completed', async () => {
+    const runtime = eaRuntime({ id: 13, definitionId: 23 });
+    runtime.services.Item.requestTransferItems = () => ({ success: false, status: 403, code: 403 });
+    await expect(createEaTradeAdapter(runtime).refreshTransferItems()).resolves.toMatchObject({
+      status: 'rejected',
+      response: { success: false, status: 403, code: 403 },
+      error: { code: 403 },
+    });
+  });
+
   it('Fake and EA adapters expose the same TS1 methods and serializable result shapes', async () => {
     const fake = createFakeTradeAdapter({
       items: [{ id: 10, definitionId: 20, pile: 'transfer' }],
@@ -201,7 +250,7 @@ describe('Trade Adapter contracts', () => {
     const capability = fake.inspectCapabilities();
     const limits = await fake.inspectPriceLimits({ id: 10 }, { refresh: true });
     expect(Object.keys(fake).sort()).toEqual([
-      'buyNowItem', 'calls', 'inspectCapabilities', 'inspectDefinitionOwnership',
+      'buyNowItem', 'calls', 'inspectCapabilities', 'inspectDefinitionOwnership', 'inspectDefinitionOwnerships',
       'inspectListingCandidates', 'inspectListingItem', 'inspectPriceLimits', 'inspectPurchase',
       'inspectUnassignedReadiness', 'listItem', 'refreshPurchaseState', 'refreshTransferItems',
       'routePurchasedItem', 'searchMarket',
@@ -307,6 +356,10 @@ describe('Trade Adapter contracts', () => {
       status: 'loaded', candidate: { item: { id: 70, definitionId: 8401, pile: 'unassigned' } }, purchasePrice: 900,
     });
     expect(adapter.inspectDefinitionOwnership(8401)).toEqual({ definitionId: 8401, club: 0, transfer: 0, unassigned: 1, storage: 0 });
+    expect(adapter.inspectDefinitionOwnerships([8401, 9999])).toEqual({
+      8401: { definitionId: 8401, club: 0, transfer: 0, unassigned: 1, storage: 0 },
+      9999: { definitionId: 9999, club: 0, transfer: 0, unassigned: 0, storage: 0 },
+    });
     expect(adapter.inspectUnassignedReadiness()).toEqual({ ready: false, count: 1, reason: 'unassigned-not-empty' });
     await expect(adapter.routePurchasedItem({ id: 70, definitionId: 8401, tradeId: 700 }, 'club'))
       .resolves.toMatchObject({ status: 'completed', item: { pile: 'club' }, destination: 'club' });

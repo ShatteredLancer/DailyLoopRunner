@@ -175,7 +175,7 @@ function readTransferCapacity(runtime) {
   return { max, used };
 }
 
-function repositoryPile(runtime, pile) {
+function rawRepositoryPile(runtime, pile) {
   const repository = runtime?.repositories?.Item;
   if (!repository) return [];
   if (pile === 'unassigned') {
@@ -189,6 +189,18 @@ function repositoryPile(runtime, pile) {
   }
   return collectionValues(repository.club?.items)
     .concat(collectionValues(runtime?.services?.Item?.itemDao?.itemRepo?.club?.items));
+}
+
+function repositoryPile(runtime, pile) {
+  const items = rawRepositoryPile(runtime, pile);
+  if (pile !== 'club') return items;
+  const occupiedIds = new Set(
+    ['unassigned', 'storage', 'transfer']
+      .flatMap((otherPile) => rawRepositoryPile(runtime, otherPile))
+      .map((item) => Number(item?.id || 0))
+      .filter((id) => id > 0),
+  );
+  return items.filter((item) => !occupiedIds.has(Number(item?.id || 0)));
 }
 
 function resolveItem(runtime, ref = {}) {
@@ -370,6 +382,12 @@ export function createEaTradeAdapter(runtime) {
         : 50;
     try {
       const inventory = createEaInventoryAdapter(runtime);
+      const occupiedClubItemIds = new Set(
+        ['unassigned', 'storage', 'transfer']
+          .flatMap((pile) => rawRepositoryPile(runtime, pile))
+          .map((item) => Number(item?.id || 0))
+          .filter((id) => id > 0),
+      );
       const seen = new Set();
       const candidates = [];
       const counts = {};
@@ -379,6 +397,7 @@ export function createEaTradeAdapter(runtime) {
         for (const item of rawItems) {
           const id = Number(item?.id || 0);
           const definitionId = Number(item?.definitionId || 0);
+          if (pile === 'club' && id > 0 && occupiedClubItemIds.has(id)) continue;
           const key = id > 0 ? `${pile}:${id}` : `${pile}:definition:${definitionId}:index:${sourceCount}`;
           if (seen.has(key)) continue;
           seen.add(key);
@@ -484,7 +503,15 @@ export function createEaTradeAdapter(runtime) {
     }
     try {
       const response = await observeResult(service.requestTransferItems(), options.observerContext || {});
-      return { status: 'completed', response: responseSummary(response), error: null };
+      const summary = responseSummary(response);
+      if (summary.success === false) {
+        const classification = classifyTradeError(response || {});
+        return {
+          status: 'rejected', response: summary,
+          error: { kind: classification.kind, code: classification.code, action: classification.action },
+        };
+      }
+      return { status: 'completed', response: summary, error: null };
     } catch (error) {
       const classification = classifyTradeError(error);
       return {
@@ -655,20 +682,47 @@ export function createEaTradeAdapter(runtime) {
 
   function inspectDefinitionOwnership(definitionIdInput) {
     const definitionId = Number(definitionIdInput);
-    const counts = { club: 0, transfer: 0, unassigned: 0, storage: 0 };
-    if (!Number.isInteger(definitionId) || definitionId <= 0) return { definitionId, ...counts };
-    for (const pile of Object.keys(counts)) {
+    const empty = { definitionId, club: 0, transfer: 0, unassigned: 0, storage: 0 };
+    if (!Number.isInteger(definitionId) || definitionId <= 0) return empty;
+    return inspectDefinitionOwnerships([definitionId])[definitionId] || empty;
+  }
+
+  function inspectDefinitionOwnerships(definitionIdsInput = []) {
+    const definitionIds = [...new Set(
+      (definitionIdsInput || []).map(Number).filter((value) => Number.isInteger(value) && value > 0),
+    )];
+    const requested = new Set(definitionIds);
+    const ownerships = Object.fromEntries(definitionIds.map((definitionId) => [definitionId, {
+      definitionId, club: 0, transfer: 0, unassigned: 0, storage: 0,
+    }]));
+    if (!definitionIds.length) return ownerships;
+
+    const rawPiles = {
+      unassigned: rawRepositoryPile(runtime, 'unassigned'),
+      storage: rawRepositoryPile(runtime, 'storage'),
+      transfer: rawRepositoryPile(runtime, 'transfer'),
+      club: rawRepositoryPile(runtime, 'club'),
+    };
+    const occupiedIds = new Set(
+      ['unassigned', 'storage', 'transfer']
+        .flatMap((pile) => rawPiles[pile])
+        .map((item) => Number(item?.id || 0))
+        .filter((id) => id > 0),
+    );
+    for (const [pile, items] of Object.entries(rawPiles)) {
       const seen = new Set();
-      for (const item of repositoryPile(runtime, pile)) {
-        if (Number(item?.definitionId || 0) !== definitionId) continue;
+      for (const item of items) {
+        const definitionId = Number(item?.definitionId || 0);
+        if (!requested.has(definitionId)) continue;
         const id = Number(item?.id || 0);
-        const key = id > 0 ? id : item;
+        if (pile === 'club' && id > 0 && occupiedIds.has(id)) continue;
+        const key = id > 0 ? `${pile}:${id}` : item;
         if (seen.has(key)) continue;
         seen.add(key);
-        counts[pile] += 1;
+        ownerships[definitionId][pile] += 1;
       }
     }
-    return { definitionId, ...counts };
+    return ownerships;
   }
 
   function inspectUnassignedReadiness() {
@@ -736,6 +790,7 @@ export function createEaTradeAdapter(runtime) {
     refreshPurchaseState,
     inspectPurchase,
     inspectDefinitionOwnership,
+    inspectDefinitionOwnerships,
     inspectUnassignedReadiness,
     routePurchasedItem,
   });

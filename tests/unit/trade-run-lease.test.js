@@ -24,4 +24,16 @@ describe('Trade Run Lease', () => {
     expect(first.release('run-a')).toBe(false);
     expect(second.release('run-b')).toBe(true);
   });
+
+  it('clears only an expired matching Run', () => {
+    const storage = memoryStorage();
+    let time = 1000;
+    const lease = createTradeRunLease({ storage, key: 'lease', ownerId: 'tab-a', now: () => time, ttlMs: 5000, createToken: () => 'token-a' });
+    lease.acquire({ runId: 'run-a', jobId: 'job-a' });
+    expect(lease.clearExpired('run-a')).toBe(false);
+    time = 7000;
+    expect(lease.clearExpired('other-run')).toBe(false);
+    expect(lease.clearExpired('run-a')).toBe(true);
+    expect(lease.inspect().lease).toBeNull();
+  });
 });

@@ -164,6 +164,32 @@ describe('Trade listing transaction', () => {
     expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
   });
 
+  it('refreshes Transfer and blocks a stale Club plan for an item already in Transfer', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{
+        id: 1, definitionId: 101, pile: 'transfer', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+        auction: { present: true, state: 'active', tradeId: 1001, startingBid: 700, buyNowPrice: 700 },
+      }],
+    });
+    const plan = prepared([entry()]);
+    const result = await transaction(adapter).run({
+      job: job(), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+    expect(result).toMatchObject({
+      status: 'blocked', reason: 'listing-item-already-in-transfer', failed: 1, succeeded: 0,
+      receipts: [{
+        status: 'blocked', reason: 'listing-item-already-in-transfer',
+        transferPreflight: { status: 'completed' },
+        live: { id: 1, definitionId: 101, pile: 'transfer' },
+      }],
+    });
+    expect(adapter.calls.filter((call) => call.method === 'refreshTransferItems')).toHaveLength(1);
+    expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
+  });
+
   it('blocks expired confirmations and plans above the configured item limit', async () => {
     const adapter = createFakeTradeAdapter({
       items: [1, 2].map((id) => ({
@@ -239,7 +265,10 @@ describe('Trade listing transaction', () => {
 
   it('stops as ambiguous instead of retrying when an accepted listing cannot be refreshed', async () => {
     const adapter = createFakeTradeAdapter({
-      refreshTransferResult: { status: 'ambiguous', response: null, error: { kind: 'ambiguous-transport' } },
+      refreshTransferResults: [
+        { status: 'completed', response: { success: true, status: 200, code: null }, error: null },
+        { status: 'ambiguous', response: null, error: { kind: 'ambiguous-transport' } },
+      ],
       items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],
     });
     const plan = prepared([entry()]);

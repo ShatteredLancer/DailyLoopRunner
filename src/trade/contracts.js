@@ -122,6 +122,11 @@ function validateBuyPolicy(policy, path, errors) {
   for (const field of ['maxBuyNow', 'quantity', 'totalBudget', 'maxRuntimeMinutes', 'maxConsecutiveEmptySearches']) {
     pushPositiveNumber(policy[field], `${path}.${field}`, errors);
   }
+  if (policy.minimumRetainedCoins !== null
+    && policy.minimumRetainedCoins !== undefined
+    && (!Number.isInteger(Number(policy.minimumRetainedCoins)) || Number(policy.minimumRetainedCoins) < 0)) {
+    errors.push(`${path}.minimumRetainedCoins must be null or a non-negative integer`);
+  }
   if (Number(policy.maxPurchasesPerSearch) !== 1) errors.push(`${path}.maxPurchasesPerSearch must be 1`);
   validateDelayRange(policy.searchDelaySeconds, `${path}.searchDelaySeconds`, errors);
   if (!isPlainObject(policy.ratingPriceOverrides)) {
@@ -258,6 +263,13 @@ function normalizeBuyPolicy(value = {}) {
       .filter(([, price]) => price > 0)),
     quantity: positiveInteger(value.quantity, 10),
     totalBudget: positiveInteger(value.totalBudget, 10000),
+    minimumRetainedCoins: value.minimumRetainedCoins === null
+      || value.minimumRetainedCoins === undefined
+      || value.minimumRetainedCoins === ''
+      ? null
+      : Number.isFinite(Number(value.minimumRetainedCoins))
+        ? Math.floor(Number(value.minimumRetainedCoins))
+        : -1,
     maxRuntimeMinutes: positiveInteger(value.maxRuntimeMinutes, 30),
     searchDelaySeconds: normalizeRange(value.searchDelaySeconds, [8, 15]),
     maxPurchasesPerSearch: 1,

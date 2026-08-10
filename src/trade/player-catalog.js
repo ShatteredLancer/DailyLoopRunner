@@ -3,6 +3,7 @@ import { classifyTradeError } from './error-policy.js';
 export const PLAYER_CATALOG_SCHEMA_VERSION = 1;
 export const PLAYER_CATALOG_PARSER_VERSION = 1;
 export const DEFAULT_PLAYER_CATALOG_TTL_MS = 24 * 60 * 60_000;
+export const PLAYER_CATALOG_HEALTH_SCHEMA_VERSION = 1;
 
 function parseJson(text) {
   try { return JSON.parse(text); } catch { throw new Error('FUTNext player catalog returned invalid JSON'); }
@@ -69,6 +70,9 @@ export function createPlayerCatalogProvider(options = {}) {
   const storage = options.storage;
   const cacheKey = String(options.cacheKey || 'fc-loop-runner-trade-player-catalog-v1');
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  let loadCount = 0;
+  let lastLoad = null;
+  let lastClearedAt = null;
 
   function readCache(request) {
     const raw = storage?.get?.(cacheKey, null);
@@ -130,7 +134,7 @@ export function createPlayerCatalogProvider(options = {}) {
       }
     }
     writeCache(cache);
-    return {
+    const result = {
       schemaVersion: PLAYER_CATALOG_SCHEMA_VERSION,
       ok: missingRatings.length === 0,
       platform,
@@ -142,10 +146,30 @@ export function createPlayerCatalogProvider(options = {}) {
       attempts,
       cache,
     };
+    loadCount += 1;
+    lastLoad = {
+      at: currentTime,
+      platform,
+      season,
+      ratings: [...ratings],
+      ok: result.ok,
+      lanes: result.lanes.length,
+      missing: result.missingRatings.length,
+      attempts: attempts.map((attempt) => ({
+        rating: Number(attempt.rating),
+        source: String(attempt.source || 'unknown'),
+        status: String(attempt.status || 'unknown'),
+        count: Math.max(0, Number(attempt.count || 0) || 0),
+        errorKind: attempt.errorKind ? String(attempt.errorKind) : null,
+        reason: attempt.reason ? String(attempt.reason).slice(0, 160) : null,
+      })),
+    };
+    return result;
   }
 
   function clear() {
     storage?.remove?.(cacheKey);
+    lastClearedAt = Number(now());
   }
 
   function snapshot(request = {}) {
@@ -155,5 +179,42 @@ export function createPlayerCatalogProvider(options = {}) {
     return readCache({ platform, season, parserVersion });
   }
 
-  return Object.freeze({ clear, load, snapshot });
+  function inspect(request = {}) {
+    const currentTime = Number(now());
+    const cache = snapshot(request);
+    const lanes = Object.values(cache.lanes || {});
+    const fresh = lanes.filter((lane) => Number(lane.expiresAt) > currentTime);
+    const expired = lanes.length - fresh.length;
+    const status = !lanes.length ? 'empty' : !expired ? 'fresh' : !fresh.length ? 'stale' : 'partial';
+    const timestamps = (field) => lanes.map((lane) => Number(lane[field])).filter(Number.isFinite);
+    const fetched = timestamps('fetchedAt');
+    const expires = timestamps('expiresAt');
+    return {
+      schemaVersion: PLAYER_CATALOG_HEALTH_SCHEMA_VERSION,
+      capturedAt: currentTime,
+      provider: 'FUTNext',
+      status,
+      cache: {
+        schemaVersion: cache.schemaVersion,
+        parserVersion: cache.parserVersion,
+        platform: cache.platform,
+        season: cache.season,
+        lanes: lanes.length,
+        freshLanes: fresh.length,
+        expiredLanes: expired,
+        definitions: lanes.reduce((sum, lane) => sum + lane.definitionIds.length, 0),
+        oldestFetchedAt: fetched.length ? Math.min(...fetched) : null,
+        newestFetchedAt: fetched.length ? Math.max(...fetched) : null,
+        earliestExpiresAt: expires.length ? Math.min(...expires) : null,
+        latestExpiresAt: expires.length ? Math.max(...expires) : null,
+      },
+      activity: {
+        loadCount,
+        lastLoad: lastLoad ? JSON.parse(JSON.stringify(lastLoad)) : null,
+        lastClearedAt,
+      },
+    };
+  }
+
+  return Object.freeze({ clear, inspect, load, snapshot });
 }
