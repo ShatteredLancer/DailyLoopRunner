@@ -13,11 +13,13 @@ describe('Trade Run Lease', () => {
     const first = createTradeRunLease({ storage, key: 'lease', ownerId: 'tab-a', now: () => time, ttlMs: 5000, createToken: () => 'token-a' });
     const second = createTradeRunLease({ storage, key: 'lease', ownerId: 'tab-b', now: () => time, ttlMs: 5000, createToken: () => 'token-b' });
     expect(first.acquire({ runId: 'run-a', jobId: 'job-a' })).toMatchObject({ acquired: true, recoveryRequired: false });
+    expect(JSON.stringify(first.inspect())).not.toContain('token-a');
     expect(second.acquire({ runId: 'run-b', jobId: 'job-b' })).toMatchObject({ acquired: false, reason: 'lease-held' });
     time = 7000;
     expect(second.acquire({ runId: 'run-b', jobId: 'job-b' })).toMatchObject({
       acquired: true, recoveryRequired: true, previousLease: { runId: 'run-a', ownerId: 'tab-a' },
     });
+    expect(JSON.stringify(second.inspect())).not.toContain('token-b');
     expect(second.heartbeat('run-b')).toBe(true);
     expect(first.release('run-a')).toBe(false);
     expect(second.release('run-b')).toBe(true);

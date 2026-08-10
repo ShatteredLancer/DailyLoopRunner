@@ -48,6 +48,8 @@ export function createListingPreparation(options = {}) {
       priceLimitChecks.push({
         item: { ...entry.item },
         status: result.status,
+        refreshStatus: result.refreshStatus,
+        limitsSource: result.limitsSource,
         response: result.response,
         error: result.error,
         minimum: result.after?.minimum ?? null,

@@ -53,12 +53,43 @@ export function createTradeScheduler(options = {}) {
     if (acquired.recoveryRequired) {
       const recovery = await options.reconcileExpiredLease?.(acquired.previousLease);
       if (recovery?.status !== 'reconciled') {
+        const finishedAt = Number(now());
+        const reason = 'expired-lease-reconciliation-required';
+        const receipt = createTradeRunReceipt({
+          runId,
+          jobId: job.id,
+          jobType: job.type,
+          scheduledFor: runtime.nextRunAt,
+          startedAt,
+          finishedAt,
+          status: 'blocked',
+          reason,
+          receipts: [{
+            status: 'blocked',
+            reason,
+            previousLease: acquired.previousLease ? {
+              runId: acquired.previousLease.runId,
+              jobId: acquired.previousLease.jobId,
+              acquiredAt: acquired.previousLease.acquiredAt,
+              heartbeatAt: acquired.previousLease.heartbeatAt,
+              expiresAt: acquired.previousLease.expiresAt,
+            } : null,
+          }],
+        });
         const blocked = normalizeTradeJobRuntime({
-          ...runtime, status: 'blocked', reason: 'expired-lease-reconciliation-required', updatedAt: Number(now()),
+          ...runtime,
+          status: 'blocked',
+          reason,
+          lastScheduledFor: runtime.nextRunAt,
+          lastStartedAt: startedAt,
+          lastFinishedAt: finishedAt,
+          lastRunId: runId,
+          updatedAt: finishedAt,
         });
         store.updateRuntime(job.id, blocked);
+        store.addHistory(receipt);
         lease.release(runId);
-        return { status: 'blocked', jobId: job.id, runtime: blocked, previousLease: acquired.previousLease };
+        return { status: 'blocked', jobId: job.id, receipt, runtime: blocked, previousLease: acquired.previousLease };
       }
     }
 

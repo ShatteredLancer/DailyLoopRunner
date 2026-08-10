@@ -43,6 +43,7 @@ export function createTradeListingDiagnostics(input = {}) {
     job: clone(input.job) || null,
     preview: sanitizedListingArtifact(input.preview),
     prepared: sanitizedListingArtifact(input.prepared),
+    clubValidation: clone(input.clubValidation) || null,
     receipt: clone(input.receipt) || null,
     error: sanitizedError(input.error),
   };

@@ -13,6 +13,22 @@ function finiteNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function relockedSnapshot(snapshot, at) {
+  const jobs = snapshot.jobs.map((job) => job.armed === true ? { ...job, armed: false, updatedAt: at } : job);
+  const runtimes = { ...snapshot.runtimes };
+  for (const job of snapshot.jobs) {
+    const runtime = runtimes[job.id];
+    if (job.armed !== true || !runtime || !['armed', 'waiting-time', 'waiting-session', 'waiting-operation', 'running'].includes(runtime.status)) continue;
+    runtimes[job.id] = normalizeTradeJobRuntime({
+      ...runtime,
+      status: 'disabled',
+      reason: 'not-armed',
+      updatedAt: at,
+    });
+  }
+  return { ...snapshot, paused: true, liveExecutionEnabled: false, jobs, runtimes };
+}
+
 export function normalizeTradeJobStore(input = {}, options = {}) {
   const now = Math.max(0, finiteNumber(options.now, Date.now()));
   const jobs = [];
@@ -56,10 +72,13 @@ export function createTradeJobStore(options = {}) {
   }
 
   function upsert(input, normalizeOptions = {}) {
-    const snapshot = read();
+    let snapshot = read();
+    const relockedForChange = snapshot.liveExecutionEnabled === true;
+    if (relockedForChange) snapshot = relockedSnapshot(snapshot, Number(now()));
     const existing = snapshot.jobs.find((job) => job.id === String(input?.id || ''));
     const job = normalizeTradeJob({
       ...input,
+      armed: relockedForChange ? false : input?.armed,
       createdAt: existing?.createdAt ?? input?.createdAt ?? now(),
       updatedAt: now(),
     }, { ...normalizeOptions, now: now() });
@@ -77,7 +96,10 @@ export function createTradeJobStore(options = {}) {
 
   function remove(jobId) {
     const id = String(jobId || '');
-    const snapshot = read();
+    const current = read();
+    const snapshot = current.liveExecutionEnabled === true
+      ? relockedSnapshot(current, Number(now()))
+      : current;
     const runtimes = { ...snapshot.runtimes };
     delete runtimes[id];
     return write({ ...snapshot, jobs: snapshot.jobs.filter((job) => job.id !== id), runtimes });
@@ -106,5 +128,9 @@ export function createTradeJobStore(options = {}) {
     return write({ ...read(), liveExecutionEnabled: value === true });
   }
 
-  return Object.freeze({ read, upsert, remove, updateRuntime, addHistory, setPaused, setLiveExecutionEnabled });
+  function relock() {
+    return write(relockedSnapshot(read(), Number(now())));
+  }
+
+  return Object.freeze({ read, upsert, remove, updateRuntime, addHistory, setPaused, setLiveExecutionEnabled, relock });
 }

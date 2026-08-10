@@ -77,7 +77,12 @@ export function createFakeTradeAdapter(initial = {}) {
       minimum: Number.isFinite(Number(item.minimum)) ? Number(item.minimum) : null,
       maximum: Number.isFinite(Number(item.maximum)) ? Number(item.maximum) : null,
     } : { found: false, item: null, hasPriceLimits: false, minimum: null, maximum: null };
-    if (!item) return { status: 'not-found', before: snapshot, after: snapshot, response: null, error: null };
+    if (!item) {
+      return {
+        status: 'not-found', refreshStatus: 'not-requested', limitsSource: 'none',
+        before: snapshot, after: snapshot, response: null, error: null,
+      };
+    }
     if (options.refresh === true && initial.refreshedLimits?.[item.id]) Object.assign(item, initial.refreshedLimits[item.id]);
     const after = {
       ...snapshot,
@@ -87,6 +92,10 @@ export function createFakeTradeAdapter(initial = {}) {
     };
     return {
       status: after.hasPriceLimits ? 'loaded' : 'unavailable',
+      refreshStatus: options.refresh === true ? 'completed' : 'not-requested',
+      limitsSource: after.hasPriceLimits
+        ? (options.refresh === true ? 'refreshed' : 'existing-cache')
+        : 'none',
       before: snapshot,
       after,
       response: options.refresh === true ? { success: true, status: null, code: null } : null,

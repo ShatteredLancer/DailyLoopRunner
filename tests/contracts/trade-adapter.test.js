@@ -87,6 +87,8 @@ describe('Trade Adapter contracts', () => {
     const result = await adapter.inspectPriceLimits({ id: 10, pile: 'transfer' }, { refresh: true });
     expect(result).toEqual({
       status: 'loaded',
+      refreshStatus: 'completed',
+      limitsSource: 'refreshed',
       before: {
         found: true,
         item: { id: 10, definitionId: 20, pile: 'transfer' },
@@ -103,6 +105,27 @@ describe('Trade Adapter contracts', () => {
       },
       response: { success: true, status: null, code: null },
       error: null,
+    });
+  });
+
+  it('distinguishes rejected price-limit refreshes from usable existing limits', async () => {
+    const item = { id: 10, definitionId: 20, _itemPriceLimits: { minimum: 300, maximum: 10000 } };
+    const runtime = eaRuntime(item);
+    runtime.services.Item.requestMarketData = () => ({
+      observe(context, callback) {
+        callback({ unobserve() {} }, { success: false, status: 403, code: 403 });
+      },
+    });
+    const result = await createEaTradeAdapter(runtime).inspectPriceLimits(
+      { id: 10, pile: 'transfer' },
+      { refresh: true },
+    );
+    expect(result).toMatchObject({
+      status: 'loaded',
+      refreshStatus: 'rejected',
+      limitsSource: 'existing-cache',
+      response: { success: false, status: 403, code: 403 },
+      after: { hasPriceLimits: true, minimum: 300, maximum: 10000 },
     });
   });
 

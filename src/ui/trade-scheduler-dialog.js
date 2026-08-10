@@ -1,4 +1,8 @@
 import { normalizeTradeJob } from '../trade/contracts.js';
+import {
+  GUARDED_SCHEDULE_CONFIRMATION,
+  selectGuardedScheduledListingJob,
+} from '../trade/guarded-scheduled-listing.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 const PAGE_SIZE = 15;
@@ -357,21 +361,61 @@ export function showTradeSchedulerDialog(options = {}) {
     const manual = button(dom, 'Manual listing', mode, 'bronze-loop-trade-manual-listing');
     const addListing = button(dom, 'New listing Job', mode, 'bronze-loop-trade-new-listing');
     const addBuy = button(dom, 'New Buy Job', mode, 'bronze-loop-trade-new-buy');
-    const pause = button(dom, snapshot.paused ? 'Resume' : 'Pause', mode, 'bronze-loop-trade-scheduler-pause');
     const diagnostics = button(dom, 'Save diagnostics', mode, 'bronze-loop-trade-scheduler-diagnostics');
     const circuit = options.getCircuit?.();
     const resetCircuit = button(dom, 'Reset trade block', mode, 'bronze-loop-trade-circuit-reset');
     resetCircuit.style.display = circuit?.circuit?.state === 'open' ? '' : 'none';
-    pause.disabled = snapshot.paused && snapshot.liveExecutionEnabled !== true;
-    pause.title = pause.disabled ? 'Automatic execution is locked pending live validation' : '';
-    toolbar.append(manual, addListing, addBuy, pause, diagnostics, resetCircuit);
+    toolbar.append(manual, addListing, addBuy, diagnostics, resetCircuit);
     content.appendChild(toolbar);
     manual.addEventListener('click', () => options.onOpenManualListing?.());
     addListing.addEventListener('click', () => { editing = createTradeJobDraft('listing', { now: now() }); renderEditor(); });
     addBuy.addEventListener('click', () => { editing = createTradeJobDraft('buy', { now: now() }); renderEditor(); });
-    pause.addEventListener('click', () => { options.onSetPaused?.(!snapshot.paused); refreshSnapshot(); render(); });
     diagnostics.addEventListener('click', () => options.onDownloadDiagnostics?.());
     resetCircuit.addEventListener('click', () => { options.onResetCircuit?.(); refreshSnapshot(); setStatus('Trade block reset manually'); render(); });
+
+    const validationGate = styles(dom.create('div'), {
+      display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', padding: '9px',
+      marginBottom: '10px', border: '1px solid #47576b', background: '#1a2028',
+    });
+    const guarded = selectGuardedScheduledListingJob(snapshot);
+    if (snapshot.liveExecutionEnabled === true) {
+      const gateState = dom.create('span');
+      gateState.textContent = `One-card schedule enabled${guarded.job ? `: ${guarded.job.name}` : ''}`;
+      styles(gateState, { color: '#e3c98d', flex: '1 1 260px', fontSize: '12px' });
+      const disableGate = button(dom, 'Disable scheduling', mode, 'bronze-loop-trade-disable-guarded-schedule');
+      disableGate.addEventListener('click', () => {
+        options.onDisableGuardedScheduling?.();
+        refreshSnapshot();
+        setStatus('Guarded scheduling disabled');
+        render();
+      });
+      validationGate.append(gateState, disableGate);
+    } else {
+      const gateInput = input(dom, 'text', '', mode, 'bronze-loop-trade-guarded-confirmation');
+      gateInput.placeholder = GUARDED_SCHEDULE_CONFIRMATION;
+      styles(gateInput, { flex: '1 1 220px' });
+      const enableGate = button(dom, 'Enable one-card schedule', mode, 'bronze-loop-trade-enable-guarded-schedule');
+      enableGate.disabled = guarded.ready !== true;
+      enableGate.title = guarded.ready ? `Type ${GUARDED_SCHEDULE_CONFIRMATION}` : guarded.reason || 'One armed Job is required';
+      enableGate.addEventListener('click', async () => {
+        if (gateInput.value !== GUARDED_SCHEDULE_CONFIRMATION) {
+          setStatus(`Confirmation must exactly match ${GUARDED_SCHEDULE_CONFIRMATION}`);
+          return;
+        }
+        enableGate.disabled = true;
+        try {
+          await options.onEnableGuardedScheduling?.({ confirmationText: gateInput.value, jobId: guarded.job?.id });
+          refreshSnapshot();
+          setStatus(`One-card schedule enabled for ${guarded.job?.name || guarded.job?.id}`);
+          render();
+        } catch (error) {
+          enableGate.disabled = false;
+          setStatus(`Enable failed: ${error?.message || error}`);
+        }
+      });
+      validationGate.append(gateInput, enableGate);
+    }
+    content.appendChild(validationGate);
 
     if (!snapshot.jobs?.length) {
       const empty = dom.create('div');

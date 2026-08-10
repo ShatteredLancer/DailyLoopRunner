@@ -34,7 +34,8 @@ export function createListingTransaction(options = {}) {
 
   async function run(input = {}) {
     const startedAt = Number(now());
-    const runId = createRunId();
+    const runId = input.runId ? String(input.runId) : createRunId();
+    const scheduledFor = Number.isFinite(Number(input.scheduledFor)) ? Number(input.scheduledFor) : startedAt;
     const job = input.job;
     const prepared = input.prepared;
     assertValidTradeJob(job, 'Listing job');
@@ -137,12 +138,26 @@ export function createListingTransaction(options = {}) {
         break;
       }
 
+      if (typeof input.beforeMutation === 'function' && await input.beforeMutation(entry) !== true) {
+        failed += 1;
+        status = 'blocked';
+        reason = 'listing-execution-lease-lost';
+        receipts.push({ index: index + 1, item: { ...entry.item }, status: 'blocked', reason });
+        break;
+      }
+
       const listed = await adapter.listItem(entry.item, entry);
       const receipt = {
         index: index + 1,
         item: { ...entry.item },
         listing: { startPrice: entry.startPrice, buyNow: entry.buyNow, durationSeconds: entry.durationSeconds },
         priceLimits: { ...entry.priceLimits },
+        priceLimitRefresh: {
+          status: priceLimitResult.refreshStatus,
+          limitsSource: priceLimitResult.limitsSource,
+          response: priceLimitResult.response,
+          error: priceLimitResult.error,
+        },
         adapterStatus: listed.status,
         response: listed.response,
         error: listed.error,
@@ -204,7 +219,7 @@ export function createListingTransaction(options = {}) {
       runId,
       jobId: job.id,
       jobType: job.type,
-      scheduledFor: startedAt,
+      scheduledFor,
       startedAt,
       finishedAt,
       status,

@@ -1,7 +1,7 @@
 # Trade Scheduler 设计与实施跟踪
 
-> 文档状态：TS2c/TS3 offline implementation complete; production automation locked by EA 427 live-validation gate
-> 最后更新：2026-08-08
+> 文档状态：TS2c 与 TS3 guarded single-run live validation complete; broader production automation remains locked
+> 最后更新：2026-08-09
 > 适用仓库：DailyLoopRunner  
 > 功能边界：定时自动买入、定时批量挂牌、交易任务调度、逐项回执与诊断
 
@@ -797,13 +797,13 @@ Scope:
 
 Tests: TS2c UI 后 `npm run verify` 通过；124 个测试文件、777 个测试通过。新增覆盖手动 Job 的 Club 单卡硬门禁、主面板互斥、Preview/Prepared 状态隔离、配置变更撤销确认、精确确认、Stop、失败诊断、确认 token 脱敏和每页 15 项的 Recap。Architecture audit 确认 `requestMarketData()`、`list()` 和 `requestTransferItems()` 各一个 EA Trade Adapter 调用点，`searchTransferMarket()` 和 `bid()` 均为零调用点。
 
-Live validation: TS2a 已确认 Club `inactive` 和 Transfer `active` 字段、common/rare/special 分类、Active Trade 排除和报价回退。TS2b 已对一张低价值 Club common Gold 完成独立 Prepare、人工复核、显式确认、一次挂牌、Transfer 刷新和精确回读。TS2c 新 UI 尚需用一张低价值 Club 卡完成 Preview、Prepare、确认、挂牌、Recap 和 diagnostics 导出验证。Expired/Inactive Transfer、连续多卡 Stop/节流和容量仍需按第 17.5 节完成真实验证。
+Live validation: TS2a 已确认 Club `inactive` 和 Transfer `active` 字段、common/rare/special 分类、Active Trade 排除和报价回退。TS2b 已对一张低价值 Club common Gold 完成独立 Prepare、人工复核、显式确认、一次挂牌、Transfer 刷新和精确回读。TS2c 新 UI 已于 2026-08-09 用一张低价值 Club 卡完成 Preview、Prepare、确认、挂牌、Recap 和 diagnostics 导出验证。Expired/Inactive Transfer、连续多卡 Stop/节流和容量仍需按第 17.5 节完成真实验证。
 
-Exit criteria: Not met。Club 单卡 Planner/Transaction/确认/对账已通过核心真实验证，UI 自动化已完成；仍需 TS2c UI 真实单卡验证，以及后续单独评审和验证多卡节流、Stop、容量竞争与 Transfer reprice 后才能结束 TS2。
+Exit criteria: Not met。Club 单卡 Planner/Transaction/确认/UI/对账已通过真实验证；仍需后续单独评审和验证多卡节流、Stop、容量竞争与 Transfer reprice 后才能结束 TS2。
 
 ### TS3 Scheduler 和定时挂牌
 
-Status: Offline implementation complete; production execution locked
+Status: In progress; guarded single scheduled Club item live validation complete.
 
 Scope:
 
@@ -815,12 +815,13 @@ Scope:
 - [x] Trade Scheduler UI、可视化 Buy/Listing Job Editor 和 History。
 - [x] 默认 paused、自动执行锁定、导入 Job disarm。
 - [x] HTTP 427 持久 Circuit Breaker、人工 reset 和脱敏 diagnostics。
+- [x] `once + Club + maxListings=1` 显式确认、启动即自动回锁的 TS3 验证执行器。
 
 Tests: Fake clock、IANA timezone/DST、misfire、Job Store、History 上限、双 owner lease、过期 lease、Coordinator、427、响应脱敏和响应式 UI 已覆盖；完整 `npm run verify` 结果见下方实施记录。
 
-Live validation: Blocked。当前账号的 EA 原生 `/auctionhouse`、`/auctionhouse/relist` 和 `/watchlist` 返回非标准状态 `427`。生产 `liveExecutionEnabled=false` 且 Scheduler 保持 paused；不得用自动重试探测。EA 恢复后先完成 TS2c UI 单卡，再调度一张低价值卡并验证页面后台恢复、未登录等待和错过任务。
+Live validation: EA 原生挂牌已恢复，TS2c 手动单卡和 TS3 定时单卡均于 2026-08-09 验证通过。TS3 Job 按计划触发，只挂牌一张 Club 卡，History、Transfer 精确对账及启动即自动回锁均符合预期；完整证据见下方 2026-08-09 实施记录。不得据此开放批量、Transfer reprice 或 Buy。
 
-Exit criteria: Not met。离线核心和 UI 已完成；仍需真实页面证明重载、双标签页和被 Loop 占用时不重复执行，并完成一张低价值卡的定时挂牌和对账。
+Exit criteria: Not met。离线核心、UI、定时单卡和 skip misfire 已完成；仍需真实页面证明 grace 内重载/恢复、双标签页和被 Loop 占用时不重复执行，并验证 expired lease 的回锁行为。
 
 ### TS4 手动 Auto Buy
 
@@ -1038,37 +1039,37 @@ Next: Implement the Bulk Listing UI and multi-item execution behind conservative
 
 ### 2026-08-07 / TS2c / Manual Listing UI and diagnostics
 
-Status: Automated implementation complete; live UI validation pending.
+Status: Complete for the guarded Club single-item UI flow.
 
 Commit/Version: Uncommitted working tree on repository version `0.7.33`.
 
 Automated tests: `npm run verify` passed: 124 test files and 777 tests; syntax, ESLint, config/Profile validation, architecture audit, build, dist and FSU release checks also passed.
 
-Live setup: Blocked by EA status 427. After EA recovers, reload the rebuilt userscript, open `Trade` from the main panel, choose `Manual listing`, and use only one low-value Club item for the validation round.
+Live setup: EA Web App on PC, Runner `0.7.34`; artifact `trade-listing-diagnostics-2026-08-09T14-35-50-291Z.json`. Enhancer Trader/Auto Buy and FSU Bulk Auction were not part of the transaction.
 
-Observed result: The independent responsive dialog supports card class, rating/price rules, quote provider, market override, duration, read-only Preview, price-limit Prepare, exact confirmation, one-item execution, Stop, Recap and diagnostics export. Main-panel operations share the existing busy state. Editing or closing invalidates the prepared confirmation. Opening, Previewing and Preparing do not write to EA.
+Observed result: The independent responsive dialog supports card class, rating/price rules, quote provider, market override, duration, read-only Preview, price-limit Prepare, exact confirmation, one-item execution, Stop, Recap and diagnostics export. The live run scanned 2950 Club entities, found 94 eligible common Gold cards and prepared exactly one item. EA price limits loaded as 300-10000; `list()` returned HTTP 200 for start/buy-now 650/700 and one-hour duration. Transfer refresh completed and reconciliation found the exact item/definition in Transfer with an Active auction and trade ID. The receipt completed requested 1, succeeded 1, failed 0, skipped 0; circuit remained closed and no error was recorded.
 
 Diagnostics: Export includes allowlisted runner/operation state, Job, Preview, sanitized Prepared plan, receipt and sanitized errors. Confirmation tokens and raw error responses are excluded. Recap pages contain at most 15 item receipts.
 
-Remaining risk: The UI callbacks and responsive presentation have not yet been exercised on the EA page. The runtime remains hard-limited to `Club + max 1 item`; Transfer sources, Transfer reprice, multi-item execution and Auto Buy remain unavailable. Scheduler configuration is available, but production automatic execution is locked and paused.
+Remaining risk: Transfer sources, Transfer reprice, multi-item execution and Auto Buy remain unavailable. One scheduled Club single-item run, page resume, expired-lease reconciliation and misfire behavior still require live validation.
 
-Next: Perform one low-value Club listing through the UI and export `trade-listing-diagnostics-<timestamp>.json`. Review the receipt and UI behavior before considering a separately reviewed multi-item gate change.
+Next: Validate exactly one scheduled Club item through the TS3 auto-relocking gate. Do not broaden the gate after that run without a separate review.
 
 ### 2026-08-08 / TS3 offline Scheduler, persistent circuit and Job UI
 
-Status: Offline implementation complete; live execution intentionally locked.
+Status: Guarded single-run validation gate implemented; one live scheduled Club item pending.
 
 Commit/Version: Uncommitted working tree on repository version `0.7.33`.
 
-Automated tests: `npm run verify` passed with 131 test files and 797 tests. Syntax, ESLint, config/Profile validation, architecture audit, FSU patch replay, generated userscript/dist equality and FSU release assets all passed. The focused Trade/Main Panel suite passed with 26 test files and 105 tests.
+Automated tests: The guarded validation implementation passes `npm run verify` with 137 test files and 823 tests. Syntax, ESLint, config/Profile validation, architecture audit, FSU patch replay, generated userscript/dist equality and FSU release assets all pass.
 
-Observed result: Job configuration is persisted independently from Loop/Workflow config. Pure scheduling supports manual, once, daily IANA timezone, interval and one-shot window schedules; fake-clock coverage includes DST, skip/grace-window/next-login decisions, session/operation waits and absolute advancement. The store persists bounded History and defaults to paused with `liveExecutionEnabled=false`. The responsive Trade Scheduler dialog exposes visual Buy/Listing editors, Jobs, state, History, manual Listing entry, diagnostics and explicit circuit reset. Buy Jobs remain configuration-only.
+Observed result: Job configuration is persisted independently from Loop/Workflow config. Pure scheduling supports manual, once, daily IANA timezone, interval and one-shot window schedules; fake-clock coverage includes DST, skip/grace-window/next-login decisions, session/operation waits and absolute advancement. The store persists bounded History and defaults to paused with `liveExecutionEnabled=false`. After TS2c passed live validation, a separate validation executor now accepts only one armed `once + Club + maxListings=1` Job. Exact confirmation `RUN ONCE 1` enables the wait; execution start immediately pauses, disables live execution and disarms the Job. Misfire, stale lease, circuit/config changes and tick errors also relock. Buy Jobs remain configuration-only.
 
 Safety: EA status `427` is classified as `auction-operation-blocked`, stops the current transaction without retry, and opens a GM-storage-backed persistent circuit. Preparation and every Listing mutation check the same circuit. The circuit never enters half-open by elapsed time and blocks until explicit manual reset. Stored diagnostics retain only allowlisted operation, endpoint, status/code, Job/Run, Trade Access and capacity fields. Operation Coordinator bridges existing Runner busy state, and the cross-tab lease fails closed when an expired run has not been reconciled.
 
 Live blocker: The account currently receives `427` from EA-native auction/watchlist endpoints with Runner, FSU and Enhancer disabled. Historical TS2b HTTP 200 proves the implementation previously listed successfully but does not clear the current account/backend state. No live Listing, relist, bid, buy or high-frequency market validation may run while this persists.
 
-Next: Wait for EA-native manual Listing to recover. Then validate TS2c UI with one low-value Club card, inspect the receipt/diagnostics, and only afterward temporarily unlock a single scheduled Listing for TS3 page-resume, lease and reconciliation validation.
+Next: Schedule one low-value Club card 2-3 minutes ahead, enable the guarded gate, keep the page logged in for the first run, and export Scheduler plus Listing diagnostics. Review auto-relock, History and Transfer reconciliation before testing page resume or any broader schedule.
 
 ### 2026-08-08 / TS4 offline Buy core and preview UI
 
@@ -1085,3 +1086,37 @@ Safety: Search, Buy, refresh and move are normalized by the EA Trade Adapter and
 Remaining risk: EA `requestUnassignedItems` and optional Transfer/Club/Watchlist refresh behavior, post-Buy repository timing, exact coin update timing, duplicate routing and Transfer capacity races are only fixture-validated. The current account/backend status 427 makes a real Buy probe unsafe. The global minimum retained coin balance decision remains open and is not silently defaulted.
 
 Next: Run the full repository verification. Then stop TS4/TS5 production work until EA native Listing and market endpoints recover; resume with read-only preview diagnostics before one explicitly confirmed low-value purchase.
+
+### 2026-08-09 / TS3 guarded scheduled Listing validation gate
+
+Status: Complete for the guarded single scheduled Club item flow.
+
+Commit/Version: Uncommitted working tree targeting repository version `0.7.35`.
+
+Automated tests: `npm run verify` passes with 139 test files and 837 tests. New coverage verifies exact gate eligibility, confirmation, atomic pause/live-off/disarm, Scheduler-to-executor integration, one History receipt, lease, Web Lock and Coordinator compatibility, recovery wakeups, page resume, FSU Club readiness and misfire behavior, delayed EA session readiness, disabled production paths, and rejected price-limit refresh diagnostics with usable existing limits.
+
+Observed result: The main Trade Scheduler permits one temporary validation run only when exactly one enabled+armed Job is a `once` Listing from Club with `maxListings=1`. The run must be 15 seconds to 15 minutes ahead and use skip or at most a 15-minute grace window. Exact input `RUN ONCE 1` enables waiting. At execution start the executor pauses the Scheduler, disables live execution and disarms the Job before Prepare or `list()`; a missed run, stale lease, circuit/config change or tick exception also relocks. Scheduler diagnostics include a sanitized Prepared plan and receipt without the confirmation token.
+
+Live validation: EA Web App on PC, Runner `0.7.35`; artifact `trade-scheduler-diagnostics-2026-08-09T14-59-47-540Z.json`. The Job was scheduled for `1786287480000` and started 1.702 seconds later. It immediately relocked the Scheduler (`paused=true`, `liveExecutionEnabled=false`, `armed=false`), completed one run and cleared `nextRunAt`. The exact Club item `913454790934` / definition `265850` was listed at 650/700 for one hour. `list()` and Transfer refresh returned HTTP 200; reconciliation found an Active Transfer auction with trade ID `607251201956` and about 3598 seconds remaining. The receipt recorded requested 1, succeeded 1, failed 0, skipped 0; the circuit remained closed and the lease and Coordinator were idle after completion.
+
+Misfire live validation: EA Web App on PC, Runner `0.7.36`; artifact `trade-scheduler-diagnostics-2026-08-09T15-25-49-566Z.json`. A `once + skip` Job scheduled for `1786289040000` was first evaluated after page restart at `1786289119476`, 79.476 seconds late and outside the 15-second tick tolerance. History recorded exactly one `missed / misfire-skip` receipt with requested 0, succeeded 0 and no item receipts. Runtime retained `lastStartedAt=null` and `runCount=0`, proving the Listing Executor and EA mutation transaction did not start. The Scheduler finished paused and live-disabled, the Job was disarmed, and Circuit, Lease and Coordinator were inactive.
+
+Diagnostic note: The Prepared price-limit refresh returned HTTP 403 while the EA Item still exposed valid existing limits 300-10000. This did not invalidate the confirmed price or the subsequently verified Listing. Price-limit diagnostics now report data availability separately from refresh outcome (`status`, `refreshStatus`, `limitsSource`), and the final transaction receipt retains the same refresh evidence. A rejected read-only refresh alone does not open the mutation circuit when valid limits remain available.
+
+Post-validation hardening (`0.7.36`): Scheduler relock is now one Job Store operation that pauses, disables live execution and disarms every pending Job. Misfire, expired lease, circuit/config changes, manual disable and unexpected tick errors all use this path. Any Job create/edit/delete while live execution is enabled also relocks before persisting the change. The generic Pause/Resume UI was removed so a changed Job cannot reuse an earlier `RUN ONCE 1` confirmation. Scheduler and Listing transactions share one `runId` and `scheduledFor`; expired-lease takeover writes a sanitized blocked History receipt without the lease token. Integration tests cover one execution after an in-grace page resume, zero execution after skip/grace expiry, delayed EA session readiness, repeated ticks and expired-lease takeover.
+
+Resume wakeups (`0.7.37`): In addition to the fixed five-second absolute-time tick, visible `visibilitychange`, window `focus` and browser `online` now trigger an immediate idempotent Scheduler tick. Hidden visibility changes do nothing, listeners are removed on Runner destroy, and the Scheduler's existing in-flight guard collapses overlapping wakeups. Same-tab Runner operation coverage confirms a due Trade Job remains `waiting-operation` and executes at most once only if the operation clears inside grace.
+
+Cross-tab hardening: When `navigator.locks` is available, every Scheduler tick runs under the same-origin exclusive `fc-loop-runner-trade-scheduler-v1` Web Lock with `ifAvailable`; a second tab returns busy without evaluating or executing the Job. GM storage lease remains the persistent crash/reload layer and fallback for browsers without Web Locks. The guarded Listing transaction now renews and verifies that lease immediately before each `listItem()` mutation; a lost or expired lease produces `listing-execution-lease-lost` with zero list calls. An accepted mutation still proceeds to Transfer reconciliation even if later state becomes uncertain.
+
+Cross-tab diagnostics expose only the random tab owner ID, Web Lock support/name and the latest tick status/reason/Job/Run. Lease snapshots retain owner, Run/Job and timing fields but always remove the internal token, including while a lease is active or expired.
+
+Club readiness after restart (`0.7.38`): Artifact `trade-scheduler-diagnostics-2026-08-09T15-45-38-727Z.json` from live `0.7.37` reached Scheduler execution 151.054 seconds after its due time but blocked in 14ms with `no-eligible-listing-candidates`, requested 0 and no EA mutation. The page session and Trade capability were ready, but the scheduled Prepare snapshot was not retained. `0.7.38` therefore held an FSU-backed Job in `waiting-session` until Club data was fully validated and retained blocked Prepared scans for diagnostics.
+
+FSU provisional correction (`0.7.39`): Artifact `trade-scheduler-diagnostics-2026-08-09T15-57-17-878Z.json` proved that the `0.7.38` gate was too strict. At 23:57:15 the armed Job scheduled for 23:55 remained `waiting-session / fsu-club-provisional`; no new History, Prepare or mutation existed. This was not an incomplete startup: `trusted-provisional` is the optimized FSU fast path and intentionally skips a full Club scan, so it does not automatically become fully validated. Guarded scheduling now waits only for FSU `loading/not-ready`. A provisional cache may select exactly one Club candidate, but before the Listing Transaction is created the executor must call FSU targeted Club validation for that exact item ID and definition ID. Failure, missing identity or an unavailable validator blocks with requested 0 and no `list()` call. The transaction still reloads the live item, eligibility and EA price limits and validates the lease immediately before mutation. Scheduler diagnostics now include page/FSU readiness, cache status and the sanitized targeted-validation result. FSU remains optional; without it the EA Trade Adapter path is unchanged.
+
+In-grace restart live validation: EA Web App on PC, Runner `0.7.39`; artifact `trade-scheduler-diagnostics-2026-08-10T05-21-24-757Z.json`. The `once` Job was scheduled for 13:16:00 and first executed after a full page restart at 13:19:32.517, 212.517 seconds late but inside its 15-minute grace window. FSU was intentionally still `provisional / trusted-provisional / fullyValidated:false`. The executor prepared one Club common Gold, then targeted the exact item `913459392327` / definition `267680` through FSU; the same identity returned after 2814ms with no missing item. EA price limits refreshed to 300-10000, `list()` returned HTTP 200, Transfer refresh returned HTTP 200, and reconciliation found active trade `607277852375` at 650/700 with 3598 seconds remaining. History recorded exactly one completed run with requested 1, succeeded 1 and runCount 1. The Scheduler atomically ended paused, live-disabled and disarmed; lease and Coordinator were empty and the circuit remained closed. An older expired Job separately recorded `misfire-grace-expired` with requested 0, confirming restart did not revive it or issue another mutation.
+
+Remaining risk: Expired lease reconciliation, dual-tab races and Loop/Trade mutual exclusion have not yet been observed on the live page. Normal scheduled execution, skip misfire, grace expiry and in-grace full page restart are now verified. The gate intentionally cannot run a second Job, daily/interval/window schedules, next-login, Transfer sources, reprice, bulk Listing or Buy.
+
+Next: Validate dual-tab/operation-busy and expired-lease fail-closed behavior without broadening the mutation limit. Then resume TS4 with the existing read-only Buy preview before adding one explicitly confirmed low-value purchase gate. Keep Transfer sources, reprice, bulk Listing and scheduled Buy disabled until their separate staged validations.

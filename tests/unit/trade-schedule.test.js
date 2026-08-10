@@ -38,6 +38,9 @@ describe('Trade schedule', () => {
     const job = listingJob({ type: 'once', runAt: 1000 });
     const runtime = createTradeJobRuntime(job, { now: 0 });
     expect(evaluateTradeJob(job, runtime, { now: 1000, sessionReady: false, liveExecutionEnabled: true })).toMatchObject({ status: 'waiting-session' });
+    expect(evaluateTradeJob(job, runtime, {
+      now: 1000, sessionReady: false, sessionReason: 'fsu-club-loading', liveExecutionEnabled: true,
+    })).toMatchObject({ status: 'waiting-session', reason: 'fsu-club-loading' });
     expect(evaluateTradeJob(job, runtime, { now: 1000, sessionReady: true, operationBusy: true, liveExecutionEnabled: true })).toMatchObject({ status: 'waiting-operation' });
     expect(evaluateTradeJob(job, runtime, { now: 1000, sessionReady: true, circuitAllowed: false, liveExecutionEnabled: true })).toMatchObject({ status: 'blocked', reason: 'trade-circuit-open' });
     expect(evaluateTradeJob(job, runtime, { now: 1000, sessionReady: true, liveExecutionEnabled: false })).toMatchObject({ status: 'blocked', reason: 'live-execution-disabled' });

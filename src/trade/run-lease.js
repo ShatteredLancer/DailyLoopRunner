@@ -19,6 +19,19 @@ function normalizeLease(input = {}) {
   };
 }
 
+function leaseSnapshot(lease) {
+  if (!lease) return null;
+  return {
+    schemaVersion: lease.schemaVersion,
+    ownerId: lease.ownerId,
+    runId: lease.runId,
+    jobId: lease.jobId,
+    acquiredAt: lease.acquiredAt,
+    heartbeatAt: lease.heartbeatAt,
+    expiresAt: lease.expiresAt,
+  };
+}
+
 export function createTradeRunLease(options = {}) {
   const storage = options.storage;
   const key = String(options.key || 'fc-loop-runner-trade-run-lease-v1');
@@ -41,7 +54,7 @@ export function createTradeRunLease(options = {}) {
     const lease = read();
     const at = Number(now());
     return {
-      lease,
+      lease: leaseSnapshot(lease),
       active: Boolean(lease && lease.expiresAt > at),
       owned: Boolean(lease && lease.ownerId === ownerId && lease.expiresAt > at),
       expired: Boolean(lease && lease.expiresAt <= at),
@@ -67,7 +80,7 @@ export function createTradeRunLease(options = {}) {
     return {
       acquired,
       reason: acquired ? null : 'lease-race-lost',
-      lease: confirmed,
+      lease: leaseSnapshot(confirmed),
       recoveryRequired: acquired && before.expired,
       previousLease: before.expired ? before.lease : null,
     };

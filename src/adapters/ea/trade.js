@@ -304,27 +304,55 @@ export function createEaTradeAdapter(runtime) {
     const service = runtime?.services?.Item;
     const resolved = resolveItem(runtime, ref);
     const before = itemPriceLimitSnapshot(resolved);
-    if (!resolved) return { status: 'not-found', before, after: before, response: null, error: null };
-    if (options.refresh !== true) return { status: before.hasPriceLimits ? 'loaded' : 'unavailable', before, after: before, response: null, error: null };
+    if (!resolved) {
+      return {
+        status: 'not-found', refreshStatus: 'not-requested', limitsSource: 'none',
+        before, after: before, response: null, error: null,
+      };
+    }
+    if (options.refresh !== true) {
+      return {
+        status: before.hasPriceLimits ? 'loaded' : 'unavailable',
+        refreshStatus: 'not-requested',
+        limitsSource: before.hasPriceLimits ? 'existing-cache' : 'none',
+        before,
+        after: before,
+        response: null,
+        error: null,
+      };
+    }
     if (typeof service?.requestMarketData !== 'function') {
-      return { status: 'unsupported', before, after: before, response: null, error: null };
+      return {
+        status: 'unsupported', refreshStatus: 'unsupported',
+        limitsSource: before.hasPriceLimits ? 'existing-cache' : 'none',
+        before, after: before, response: null, error: null,
+      };
     }
     try {
       const response = await observeResult(service.requestMarketData(resolved.item), options.observerContext || {});
       const after = itemPriceLimitSnapshot(resolveItem(runtime, before.item));
+      const responseSnapshot = responseSummary(response);
+      const refreshStatus = responseSnapshot.success === false ? 'rejected' : 'completed';
       return {
         status: after.hasPriceLimits ? 'loaded' : 'unavailable',
+        refreshStatus,
+        limitsSource: after.hasPriceLimits
+          ? (refreshStatus === 'completed' ? 'refreshed' : before.hasPriceLimits ? 'existing-cache' : 'runtime-cache')
+          : 'none',
         before,
         after,
-        response: responseSummary(response),
+        response: responseSnapshot,
         error: null,
       };
     } catch (error) {
       const classification = classifyTradeError(error);
+      const after = itemPriceLimitSnapshot(resolveItem(runtime, before.item));
       return {
         status: 'error',
+        refreshStatus: 'error',
+        limitsSource: after.hasPriceLimits ? (before.hasPriceLimits ? 'existing-cache' : 'runtime-cache') : 'none',
         before,
-        after: itemPriceLimitSnapshot(resolveItem(runtime, before.item)),
+        after,
         response: null,
         error: { kind: classification.kind, code: classification.code, message: error?.message || String(error) },
       };

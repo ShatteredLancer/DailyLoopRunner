@@ -182,6 +182,15 @@ import { createTradeCircuitBreaker } from './trade/circuit-breaker.js';
 import { createTradeJobStore } from './trade/job-store.js';
 import { createTradeRunLease } from './trade/run-lease.js';
 import { createOperationCoordinator } from './trade/operation-coordinator.js';
+import { createTradeScheduler } from './trade/scheduler.js';
+import { createTradeSchedulerWakeups } from './trade/scheduler-wakeups.js';
+import { createTradeSchedulerTickLock } from './trade/scheduler-tick-lock.js';
+import {
+  createGuardedScheduledListingExecutor,
+  GUARDED_SCHEDULE_CONFIRMATION,
+  guardedTradeSessionReadiness,
+  selectGuardedScheduledListingJob,
+} from './trade/guarded-scheduled-listing.js';
 import {
   createPackHighlightModel,
   formatPackHighlightNotification,
@@ -343,6 +352,17 @@ const RUNNER_VERSION = packageInfo.version;
     getTradeAdapter: eaTradeAdapter,
     playerCatalogProvider: tradePlayerCatalogProvider,
   });
+  let tradeScheduler = null;
+  const tradeSchedulerTickLock = createTradeSchedulerTickLock({ lockManager: navigator?.locks });
+
+  function inspectGuardedTradeSession() {
+    let pageReady = false;
+    try { pageReady = pageRuntime.isReady(); } catch { }
+    let fsuReadiness = { detected: false, ready: true, state: 'not-detected' };
+    try { fsuReadiness = fsuAdapter().readiness(); } catch { }
+    const session = guardedTradeSessionReadiness({ pageReady, fsuReadiness });
+    return { pageReady, fsuReadiness, ready: session.ready, reason: session.reason };
+  }
 
 
 const state = {
@@ -370,6 +390,9 @@ const state = {
     recentRewardItems: [],
     logLines: [],
     bootTimer: null,
+    tradeSchedulerTimer: null,
+    tradeSchedulerWakeups: null,
+    lastTradeSchedulerTick: null,
     fsuSettingsOverride: null,
     fsuSettingsCache: { at: 0, settings: null },
     lastOpenPackReceipt: null,
@@ -378,6 +401,7 @@ const state = {
     lastLoopRecap: null,
     preparedTradeListing: null,
     lastTradeListingReceipt: null,
+    lastScheduledTradeListing: null,
     lastTradeBuyPreview: null,
     tradeListingRunning: false,
     lastRecapType: null,
@@ -401,6 +425,8 @@ const state = {
   function destroyRunner() {
     state.stopping = true;
     if (state.bootTimer) clearInterval(state.bootTimer);
+    if (state.tradeSchedulerTimer) clearInterval(state.tradeSchedulerTimer);
+    state.tradeSchedulerWakeups?.stop?.();
     state.logRenderer?.destroy?.();
     state.layoutController?.destroy?.();
     state.workflowBuilder?.destroy?.();
@@ -441,7 +467,10 @@ const state = {
     getTradeSchedulerState: () => tradeJobStore.read(),
     saveTradeJob: (job, options = {}) => tradeJobStore.upsert(job, options),
     deleteTradeJob: (jobId) => tradeJobStore.remove(jobId),
-    pauseTradeScheduler: () => tradeJobStore.setPaused(true),
+    pauseTradeScheduler: () => disableGuardedTradeScheduling('manual-console-pause'),
+    enableGuardedTradeScheduling,
+    disableGuardedTradeScheduling,
+    tickTradeScheduler,
     inspectOperationCoordinator: () => tradeOperationCoordinator.inspect(),
     previewTradeListings: (input = {}, options = {}) => tradeListingPreview.preview(input, options),
     previewTradeBuys: previewTradeBuyJob,
@@ -457,6 +486,59 @@ const state = {
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const now = () => new Date().toLocaleTimeString();
+  const guardedScheduledListingExecutor = createGuardedScheduledListingExecutor({
+    store: tradeJobStore,
+    listingPreparation: tradeListingPreparation,
+    operationCoordinator: tradeOperationCoordinator,
+    getTradeAdapter: eaTradeAdapter,
+    validateClubPlayers: (refs, options) => fsuAdapter().validateClubPlayers(refs, options),
+    circuitBreaker: tradeCircuitBreaker,
+    ownerId: tradeTabOwnerId,
+    validationGateEnabled: true,
+    sleep,
+    shouldStop: () => state.stopping,
+    onRunningChange: (running, input) => {
+      state.tradeListingRunning = running;
+      state.running = running;
+      if (!running) state.stopping = false;
+      log(running
+        ? `Trade Scheduler: guarded Job ${input.job?.name || input.job?.id} started; scheduler automatically relocked`
+        : `Trade Scheduler: guarded Job ${input.job?.name || input.job?.id} left the execution state`);
+      setPanelState();
+    },
+    onReceipt: (receipt, context) => {
+      state.lastTradeListingReceipt = receipt;
+      state.lastScheduledTradeListing = {
+        job: context.job,
+        prepared: context.prepared,
+        clubValidation: context.clubValidation,
+        receipt,
+      };
+    },
+  });
+  tradeScheduler = createTradeScheduler({
+    store: tradeJobStore,
+    lease: tradeRunLease,
+    circuitBreaker: tradeCircuitBreaker,
+    executeJob: guardedScheduledListingExecutor.execute,
+    getContext: () => {
+      const operation = tradeOperationCoordinator.inspect();
+      const session = inspectGuardedTradeSession();
+      return {
+        sessionReady: session.ready,
+        sessionReason: session.reason,
+        fsuReadiness: session.fsuReadiness,
+        operationBusy: Boolean(operation.active || operation.external?.busy),
+        operationReason: operation.active ? 'operation-active' : operation.external?.reason,
+        tickToleranceMs: 15_000,
+      };
+    },
+    reconcileExpiredLease: async (previousLease) => {
+      tradeJobStore.relock();
+      log(`Trade Scheduler: expired lease ${previousLease?.runId || 'unknown'} requires manual reconciliation; scheduler relocked`);
+      return { status: 'blocked' };
+    },
+  });
 
   async function prepareTradeListing(input = {}, options = {}) {
     if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
@@ -522,6 +604,77 @@ const state = {
     if (!state.tradeListingRunning) return false;
     state.stopping = true;
     return true;
+  }
+
+  function enableGuardedTradeScheduling(input = {}) {
+    if (String(input.confirmationText || '') !== GUARDED_SCHEDULE_CONFIRMATION) {
+      throw new Error(`Confirmation must exactly match ${GUARDED_SCHEDULE_CONFIRMATION}`);
+    }
+    const snapshot = tradeJobStore.read();
+    if (snapshot.liveExecutionEnabled) throw new Error('Guarded scheduling is already enabled');
+    const selected = selectGuardedScheduledListingJob(snapshot);
+    if (!selected.ready) throw new Error(selected.reason || 'Exactly one eligible armed Job is required');
+    if (input.jobId && String(input.jobId) !== selected.job.id) throw new Error('The armed Job changed before confirmation');
+    const currentTime = Date.now();
+    const runAt = Number(selected.job.schedule.runAt);
+    if (runAt < currentTime + 15_000) throw new Error('The once Job must be scheduled at least 15 seconds in the future');
+    if (runAt > currentTime + 15 * 60_000) throw new Error('The validation Job must run within 15 minutes');
+    const circuit = tradeCircuitBreaker.availability();
+    if (circuit.allowed !== true) throw new Error(`Trade circuit is open (${circuit.state?.reason || 'unknown'})`);
+    const operation = tradeOperationCoordinator.availability('trade-listing');
+    if (!operation.allowed) throw new Error(`Another Runner operation is active (${operation.reason})`);
+    tradeJobStore.setLiveExecutionEnabled(true);
+    const enabled = tradeJobStore.setPaused(false);
+    log(`Trade Scheduler: one-card validation enabled for ${selected.job.name} at ${new Date(runAt).toLocaleString()}`);
+    void tickTradeScheduler();
+    return enabled;
+  }
+
+  function disableGuardedTradeScheduling(reason = 'manual-ui-disable') {
+    const disabled = tradeJobStore.relock();
+    log(`Trade Scheduler: guarded scheduling disabled (${reason})`);
+    return disabled;
+  }
+
+  async function tickTradeScheduler() {
+    if (!tradeScheduler) return { status: 'unavailable' };
+    const recordTick = (result) => {
+      state.lastTradeSchedulerTick = {
+        at: Date.now(),
+        status: String(result?.status || 'unknown'),
+        reason: result?.reason ? String(result.reason) : null,
+        jobId: result?.jobId ? String(result.jobId) : null,
+        runId: result?.receipt?.runId ? String(result.receipt.runId) : null,
+      };
+      return result;
+    };
+    try {
+      const snapshot = tradeJobStore.read();
+      if (snapshot.liveExecutionEnabled) {
+        const selected = selectGuardedScheduledListingJob(snapshot);
+        const circuit = tradeCircuitBreaker.availability();
+        if (!selected.ready || circuit.allowed !== true) {
+          disableGuardedTradeScheduling(!selected.ready ? selected.reason : `circuit-${circuit.state?.reason || 'open'}`);
+          return recordTick({ status: 'blocked', reason: !selected.ready ? selected.reason : 'trade-circuit-open' });
+        }
+      }
+      const result = await tradeSchedulerTickLock.run(() => tradeScheduler.tick());
+      if (result.status === 'missed') disableGuardedTradeScheduling('scheduled-run-missed');
+      if (result.receipt && state.lastScheduledTradeListing?.job?.id === result.jobId) {
+        state.lastTradeListingReceipt = result.receipt;
+        state.lastScheduledTradeListing.receipt = result.receipt;
+      }
+      if (['completed', 'blocked', 'failed', 'ambiguous', 'stopped', 'missed'].includes(result.status)) {
+        const receipt = result.receipt;
+        log(`Trade Scheduler: ${result.status}${receipt?.reason ? ` (${receipt.reason})` : ''}${receipt ? `; listed ${receipt.succeeded}/${receipt.requested}` : ''}`);
+        setPanelState();
+      }
+      return recordTick(result);
+    } catch (error) {
+      disableGuardedTradeScheduling('unexpected-tick-error');
+      log(`Trade Scheduler failed closed: ${error?.message || error}`);
+      return recordTick({ status: 'blocked', reason: error?.message || String(error) });
+    }
   }
 
   function tradeDiagnosticsFilename(timestamp = Date.now()) {
@@ -624,6 +777,12 @@ const state = {
       capturedAt: Date.now(),
       runner: { version: RUNNER_VERSION, userAgent: navigator?.userAgent || '' },
       scheduler: tradeJobStore.read(),
+      schedulerRuntime: {
+        ownerId: tradeTabOwnerId,
+        webLock: tradeSchedulerTickLock.inspect(),
+        lastTick: state.lastTradeSchedulerTick,
+        session: inspectGuardedTradeSession(),
+      },
       circuit: tradeCircuitBreaker.snapshot(),
       lease: tradeRunLease.inspect(),
       coordinator: tradeOperationCoordinator.inspect(),
@@ -637,6 +796,17 @@ const state = {
         circuit: tradeCircuitBreaker.snapshot(),
         job: state.lastTradeBuyPreview?.job || null,
         preview: state.lastTradeBuyPreview,
+      }),
+      guardedValidation: createTradeListingDiagnostics({
+        capturedAt: Date.now(),
+        runnerVersion: RUNNER_VERSION,
+        userAgent: navigator?.userAgent || '',
+        operation,
+        circuit: tradeCircuitBreaker.snapshot(),
+        job: state.lastScheduledTradeListing?.job || null,
+        prepared: state.lastScheduledTradeListing?.prepared || null,
+        clubValidation: state.lastScheduledTradeListing?.clubValidation || null,
+        receipt: state.lastScheduledTradeListing?.receipt || null,
       }),
     };
   }
@@ -665,10 +835,8 @@ const state = {
         tradeJobStore.remove(jobId);
         log(`Trade Scheduler: deleted Job ${jobId}`);
       },
-      onSetPaused: (paused) => {
-        tradeJobStore.setPaused(paused);
-        log(`Trade Scheduler: ${paused ? 'paused' : 'resumed'}`);
-      },
+      onEnableGuardedScheduling: (input) => enableGuardedTradeScheduling(input),
+      onDisableGuardedScheduling: () => disableGuardedTradeScheduling('manual-ui-disable'),
       onOpenManualListing: (job = null) => openTradeListingDialogModal(job),
       onPreviewBuyJob: (job) => previewTradeBuyJob(job),
       onResetCircuit: () => {
@@ -10439,6 +10607,16 @@ function updateLoopControls() {
     });
     updateRecapButton();
     log(`Ready v${W[APP_KEY]?.version || 'unknown'}. Keep FSU enabled before starting; FC26 Enhancer may remain enabled.`);
+    if (!state.tradeSchedulerTimer) {
+      state.tradeSchedulerTimer = setInterval(() => { void tickTradeScheduler(); }, 5000);
+      state.tradeSchedulerWakeups = createTradeSchedulerWakeups({
+        windowTarget: window,
+        documentTarget: document,
+        tick: tickTradeScheduler,
+      });
+      state.tradeSchedulerWakeups.start();
+      void tickTradeScheduler();
+    }
     setTimeout(async () => {
       try {
         await scanAvailableDynamicSbcs({ cacheOnly: true });

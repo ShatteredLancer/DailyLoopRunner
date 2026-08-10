@@ -144,7 +144,7 @@ export function evaluateTradeJob(job = {}, runtimeInput = {}, context = {}) {
   if (job.schedule?.type === 'manual') return result('armed', null);
   if (runtime.nextRunAt === null) return result('completed', null);
   if (runtime.nextRunAt > now) return result('waiting-time', null);
-  if (context.sessionReady !== true) return result('waiting-session', 'ea-session-unavailable');
+  if (context.sessionReady !== true) return result('waiting-session', context.sessionReason || 'ea-session-unavailable');
   if (context.operationBusy === true) return result('waiting-operation', context.operationReason || 'another-operation-active');
 
   const lateness = Math.max(0, now - runtime.nextRunAt);

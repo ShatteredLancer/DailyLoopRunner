@@ -303,6 +303,14 @@ EA Trade mutation 返回 HTTP/status `427` 时，必须分类为原因未知的 
 
 Trade Scheduler Job Store、时区/misfire 计算、lease、Coordinator 和 UI 可以在自动执行关闭时开发和测试，但生产 `liveExecutionEnabled` 必须默认且持续为 `false`，Scheduler 默认 paused，导入 Job 必须解除 armed。EA `427` 恢复并完成 TS2c UI 单卡及 TS3 定时单卡真实验证前，不得开放后台自动 Listing、Transfer reprice、multi-item execution 或 Auto Buy；单元/Fake 测试不能替代该门禁。
 
+TS2c Club 单卡 UI 已于 2026-08-09 真实验证通过后，TS3 仅允许一个临时验证门：必须恰好一个 enabled+armed 的 `once` Listing Job，来源严格为 Club、`maxListings=1`、runAt 在未来 15 秒至 15 分钟内、misfire 仅允许 skip 或不超过 15 分钟的 grace-window，并由用户输入 `RUN ONCE 1` 显式开启。Job 启动前必须立即设置 paused、关闭 `liveExecutionEnabled` 并解除 armed；任务错过、过期 lease、circuit 变化、配置变化或 tick 异常同样必须回锁。该验证门不得扩展到 daily/interval/window、next-login、Transfer 来源、第二个 armed Job、批量 Listing、reprice 或 Auto Buy。
+
+Trade Scheduler 回锁必须通过 Job Store 的单次 `relock()` 同时完成 paused、`liveExecutionEnabled=false` 和所有 Job disarm；不得分别写入而留下可恢复的中间状态。Live Execution 开启期间的 Job 新增、编辑或删除必须先回锁，验证阶段不得提供绕过 `RUN ONCE 1` 的通用 Resume 操作。Scheduler 外层和 Listing Transaction 必须共用同一 `runId` 与 `scheduledFor`；过期 lease 阻断必须写入脱敏 History，且不得保存 lease token。
+
+Trade Scheduler tick 在支持 Web Locks 的浏览器中必须先获取同源独占锁，未获取时只能返回 busy；GM storage lease 继续作为跨重载持久层和无 Web Locks fallback。Guarded Listing 在每个 `services.Item.list()` 前必须重新 heartbeat/验证 lease，验证失败时不得发出该次写请求；写请求一旦已接受或结果不明，仍必须完成原有 Transfer 对账，不得因后续 lease 状态跳过对账。
+
+Guarded Listing 页面恢复时，如果检测到 FSU，`loading/not-ready` 必须保持 `waiting-session`。`trusted-provisional`、`validating` 或 `validation-failed` 是 FSU 的定向校验模式，不得等待其自动变成 fully validated；允许 Prepared 选出唯一 Club 候选后，必须在创建 Listing Transaction 前通过注入的 FSU Adapter 按 item ID + definition ID 向 EA 定向校验该卡。接口不可用、请求失败、缺卡或未返回同一实体都必须阻断且不得调用 `services.Item.list()`。FSU 未检测到时仍通过 EA Trade Adapter 独立运行。Scheduler diagnostics 必须记录脱敏的 page/FSU readiness、Prepared/scan/blockers 和定向校验摘要，即使 Transaction 从未创建。
+
 Auto Buy 必须按精确评分通道和单个 definition ID 搜索，不得跨评分或跨 definition 比价后购买。每个 EA 市场响应最多购买一张，候选必须重新校验 definition、rating、card class、Buy Now、剩余预算和金币；EA 活对象只能保存在 `src/adapters/ea/trade.js` 的当前响应闭包中，新搜索必须废弃旧引用。每次搜索和 Buy Now 前都要重新检查共享 circuit。Buy 响应不明确时不得重试；只有精确 item ID 已物化且金币扣减与 Buy Now 完全一致才能继续路由，否则以 `ambiguous` 停止。购买状态刷新失败、路由无法验证、Transfer 满或 EA `427` 都必须在下一次市场操作前停止。
 
 Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`rare-gold` 只匹配非特殊稀有金，`normal-gold` 匹配两者但排除特殊卡，`special` 只匹配特殊卡；兼容别名 `gold` 等同 `normal-gold`，不得借此把特殊卡混入普通金卡规则。

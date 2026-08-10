@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.34
+// @version      0.7.39
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.34",
+    version: "0.7.39",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -7403,27 +7403,62 @@
       const service = runtime?.services?.Item;
       const resolved = resolveItem(runtime, ref);
       const before = itemPriceLimitSnapshot(resolved);
-      if (!resolved) return { status: "not-found", before, after: before, response: null, error: null };
-      if (options.refresh !== true) return { status: before.hasPriceLimits ? "loaded" : "unavailable", before, after: before, response: null, error: null };
+      if (!resolved) {
+        return {
+          status: "not-found",
+          refreshStatus: "not-requested",
+          limitsSource: "none",
+          before,
+          after: before,
+          response: null,
+          error: null
+        };
+      }
+      if (options.refresh !== true) {
+        return {
+          status: before.hasPriceLimits ? "loaded" : "unavailable",
+          refreshStatus: "not-requested",
+          limitsSource: before.hasPriceLimits ? "existing-cache" : "none",
+          before,
+          after: before,
+          response: null,
+          error: null
+        };
+      }
       if (typeof service?.requestMarketData !== "function") {
-        return { status: "unsupported", before, after: before, response: null, error: null };
+        return {
+          status: "unsupported",
+          refreshStatus: "unsupported",
+          limitsSource: before.hasPriceLimits ? "existing-cache" : "none",
+          before,
+          after: before,
+          response: null,
+          error: null
+        };
       }
       try {
         const response = await observeResult(service.requestMarketData(resolved.item), options.observerContext || {});
         const after = itemPriceLimitSnapshot(resolveItem(runtime, before.item));
+        const responseSnapshot = responseSummary(response);
+        const refreshStatus = responseSnapshot.success === false ? "rejected" : "completed";
         return {
           status: after.hasPriceLimits ? "loaded" : "unavailable",
+          refreshStatus,
+          limitsSource: after.hasPriceLimits ? refreshStatus === "completed" ? "refreshed" : before.hasPriceLimits ? "existing-cache" : "runtime-cache" : "none",
           before,
           after,
-          response: responseSummary(response),
+          response: responseSnapshot,
           error: null
         };
       } catch (error) {
         const classification = classifyTradeError(error);
+        const after = itemPriceLimitSnapshot(resolveItem(runtime, before.item));
         return {
           status: "error",
+          refreshStatus: "error",
+          limitsSource: after.hasPriceLimits ? before.hasPriceLimits ? "existing-cache" : "runtime-cache" : "none",
           before,
-          after: itemPriceLimitSnapshot(resolveItem(runtime, before.item)),
+          after,
           response: null,
           error: { kind: classification.kind, code: classification.code, message: error?.message || String(error) }
         };
@@ -8686,19 +8721,19 @@
       if (options.releaseRuntimeAccess) await options.releaseRuntimeAccess({ ...context, token: accessToken });
     }
   }
-  function createInventorySquadProvider({ prepareSelection, selection, itemRef: itemRef2 }) {
+  function createInventorySquadProvider({ prepareSelection, selection, itemRef: itemRef3 }) {
     return async (context) => {
       const prepared = await prepareSelection(context, selection);
       if (!prepared?.ok) return { ok: false, reason: prepared?.missing ? `missing ${prepared.missing.count} player(s)` : "inventory preparation failed" };
       return {
         ok: true,
         players: prepared.selected || [],
-        itemRefs: (prepared.selected || []).map(itemRef2),
+        itemRefs: (prepared.selected || []).map(itemRef3),
         selection: prepared
       };
     };
   }
-  function createExistingSquadProvider({ getPlayers, itemRef: itemRef2, source = "existing-squad" }) {
+  function createExistingSquadProvider({ getPlayers, itemRef: itemRef3, source = "existing-squad" }) {
     return async (context) => {
       const players = await getPlayers(context);
       if (!Array.isArray(players) || !players.length) {
@@ -8707,12 +8742,12 @@
       return {
         ok: true,
         players,
-        itemRefs: players.map(itemRef2),
+        itemRefs: players.map(itemRef3),
         source
       };
     };
   }
-  function createFsuFillProvider({ fill, getPlayers, itemRef: itemRef2 }) {
+  function createFsuFillProvider({ fill, getPlayers, itemRef: itemRef3 }) {
     return async (context) => {
       const fillResult = await fill(context);
       const players = await getPlayers({ ...context, fillResult });
@@ -8722,7 +8757,7 @@
       return {
         ok: true,
         players,
-        itemRefs: players.map(itemRef2),
+        itemRefs: players.map(itemRef3),
         fillResult,
         source: "fsu-fill"
       };
@@ -10043,6 +10078,8 @@
         priceLimitChecks.push({
           item: { ...entry.item },
           status: result.status,
+          refreshStatus: result.refreshStatus,
+          limitsSource: result.limitsSource,
           response: result.response,
           error: result.error,
           minimum: result.after?.minimum ?? null,
@@ -10160,7 +10197,8 @@
     const createRunId = typeof options.createRunId === "function" ? options.createRunId : () => `listing-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     async function run(input2 = {}) {
       const startedAt = Number(now());
-      const runId = createRunId();
+      const runId = input2.runId ? String(input2.runId) : createRunId();
+      const scheduledFor = Number.isFinite(Number(input2.scheduledFor)) ? Number(input2.scheduledFor) : startedAt;
       const job = input2.job;
       const prepared = input2.prepared;
       assertValidTradeJob(job, "Listing job");
@@ -10256,12 +10294,25 @@
           });
           break;
         }
+        if (typeof input2.beforeMutation === "function" && await input2.beforeMutation(entry) !== true) {
+          failed += 1;
+          status = "blocked";
+          reason = "listing-execution-lease-lost";
+          receipts.push({ index: index + 1, item: { ...entry.item }, status: "blocked", reason });
+          break;
+        }
         const listed = await adapter.listItem(entry.item, entry);
         const receipt = {
           index: index + 1,
           item: { ...entry.item },
           listing: { startPrice: entry.startPrice, buyNow: entry.buyNow, durationSeconds: entry.durationSeconds },
           priceLimits: { ...entry.priceLimits },
+          priceLimitRefresh: {
+            status: priceLimitResult.refreshStatus,
+            limitsSource: priceLimitResult.limitsSource,
+            response: priceLimitResult.response,
+            error: priceLimitResult.error
+          },
           adapterStatus: listed.status,
           response: listed.response,
           error: listed.error
@@ -10321,7 +10372,7 @@
         runId,
         jobId: job.id,
         jobType: job.type,
-        scheduledFor: startedAt,
+        scheduledFor,
         startedAt,
         finishedAt,
         status,
@@ -10381,6 +10432,7 @@
       job: clone5(input2.job) || null,
       preview: sanitizedListingArtifact(input2.preview),
       prepared: sanitizedListingArtifact(input2.prepared),
+      clubValidation: clone5(input2.clubValidation) || null,
       receipt: clone5(input2.receipt) || null,
       error: sanitizedError(input2.error)
     };
@@ -10834,6 +10886,54 @@
       updatedAt: Math.max(0, finiteNumber7(input2.updatedAt))
     };
   }
+  function evaluateTradeJob(job = {}, runtimeInput = {}, context = {}) {
+    const runtime = normalizeTradeJobRuntime({ ...runtimeInput, jobId: job.id });
+    const now = Math.max(0, finiteNumber7(context.now, Date.now()));
+    const result = (status, reason, action2 = "wait") => ({
+      status,
+      reason,
+      action: action2,
+      scheduledFor: runtime.nextRunAt,
+      runtime: { ...runtime, status, reason, updatedAt: now }
+    });
+    if (job.enabled !== true) return result("disabled", "job-disabled");
+    if (job.armed !== true) return result("disabled", "not-armed");
+    if (context.circuitAllowed === false) return result("blocked", context.circuitReason || "trade-circuit-open");
+    if (context.liveExecutionEnabled === false) return result("blocked", "live-execution-disabled");
+    if (job.schedule?.type === "manual") return result("armed", null);
+    if (runtime.nextRunAt === null) return result("completed", null);
+    if (runtime.nextRunAt > now) return result("waiting-time", null);
+    if (context.sessionReady !== true) return result("waiting-session", context.sessionReason || "ea-session-unavailable");
+    if (context.operationBusy === true) return result("waiting-operation", context.operationReason || "another-operation-active");
+    const lateness = Math.max(0, now - runtime.nextRunAt);
+    const tolerance = Math.max(0, finiteNumber7(context.tickToleranceMs, 3e4));
+    if (job.misfirePolicy?.type === "skip" && lateness > tolerance) {
+      return result("missed", "misfire-skip", "advance");
+    }
+    if (job.misfirePolicy?.type === "grace-window") {
+      const graceMs = positiveInteger9(job.misfirePolicy.graceMinutes, 15) * 6e4;
+      if (lateness > graceMs) return result("missed", "misfire-grace-expired", "advance");
+    }
+    return result("running", null, "run");
+  }
+  function advanceTradeJobRuntime(job = {}, runtimeInput = {}, input2 = {}) {
+    const runtime = normalizeTradeJobRuntime(runtimeInput);
+    const at = Math.max(0, finiteNumber7(input2.at, Date.now()));
+    const scheduledFor = Math.max(0, finiteNumber7(input2.scheduledFor, runtime.nextRunAt));
+    const nextRunAt = nextTradeRunAt(job, Math.max(at, scheduledFor + 1), { inclusive: true });
+    return normalizeTradeJobRuntime({
+      ...runtime,
+      status: nextRunAt === null ? "completed" : "waiting-time",
+      reason: input2.reason || null,
+      nextRunAt,
+      lastScheduledFor: scheduledFor,
+      lastStartedAt: input2.startedAt ?? runtime.lastStartedAt,
+      lastFinishedAt: input2.finishedAt ?? at,
+      lastRunId: input2.runId ?? runtime.lastRunId,
+      runCount: runtime.runCount + (input2.countRun === false ? 0 : 1),
+      updatedAt: at
+    });
+  }
 
   // src/trade/job-store.js
   var TRADE_JOB_STORE_SCHEMA_VERSION = 1;
@@ -10844,6 +10944,21 @@
   function finiteNumber8(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
+  }
+  function relockedSnapshot(snapshot, at) {
+    const jobs = snapshot.jobs.map((job) => job.armed === true ? { ...job, armed: false, updatedAt: at } : job);
+    const runtimes = { ...snapshot.runtimes };
+    for (const job of snapshot.jobs) {
+      const runtime = runtimes[job.id];
+      if (job.armed !== true || !runtime || !["armed", "waiting-time", "waiting-session", "waiting-operation", "running"].includes(runtime.status)) continue;
+      runtimes[job.id] = normalizeTradeJobRuntime({
+        ...runtime,
+        status: "disabled",
+        reason: "not-armed",
+        updatedAt: at
+      });
+    }
+    return { ...snapshot, paused: true, liveExecutionEnabled: false, jobs, runtimes };
   }
   function normalizeTradeJobStore(input2 = {}, options = {}) {
     const now = Math.max(0, finiteNumber8(options.now, Date.now()));
@@ -10885,10 +11000,13 @@
       return read();
     }
     function upsert(input2, normalizeOptions = {}) {
-      const snapshot = read();
+      let snapshot = read();
+      const relockedForChange = snapshot.liveExecutionEnabled === true;
+      if (relockedForChange) snapshot = relockedSnapshot(snapshot, Number(now()));
       const existing = snapshot.jobs.find((job2) => job2.id === String(input2?.id || ""));
       const job = normalizeTradeJob({
         ...input2,
+        armed: relockedForChange ? false : input2?.armed,
         createdAt: existing?.createdAt ?? input2?.createdAt ?? now(),
         updatedAt: now()
       }, { ...normalizeOptions, now: now() });
@@ -10903,7 +11021,8 @@
     }
     function remove(jobId) {
       const id = String(jobId || "");
-      const snapshot = read();
+      const current = read();
+      const snapshot = current.liveExecutionEnabled === true ? relockedSnapshot(current, Number(now())) : current;
       const runtimes = { ...snapshot.runtimes };
       delete runtimes[id];
       return write({ ...snapshot, jobs: snapshot.jobs.filter((job) => job.id !== id), runtimes });
@@ -10927,7 +11046,10 @@
     function setLiveExecutionEnabled(value) {
       return write({ ...read(), liveExecutionEnabled: value === true });
     }
-    return Object.freeze({ read, upsert, remove, updateRuntime, addHistory, setPaused, setLiveExecutionEnabled });
+    function relock() {
+      return write(relockedSnapshot(read(), Number(now())));
+    }
+    return Object.freeze({ read, upsert, remove, updateRuntime, addHistory, setPaused, setLiveExecutionEnabled, relock });
   }
 
   // src/trade/run-lease.js
@@ -10949,6 +11071,18 @@
       expiresAt: Math.max(0, finiteNumber9(input2.expiresAt))
     };
   }
+  function leaseSnapshot(lease) {
+    if (!lease) return null;
+    return {
+      schemaVersion: lease.schemaVersion,
+      ownerId: lease.ownerId,
+      runId: lease.runId,
+      jobId: lease.jobId,
+      acquiredAt: lease.acquiredAt,
+      heartbeatAt: lease.heartbeatAt,
+      expiresAt: lease.expiresAt
+    };
+  }
   function createTradeRunLease(options = {}) {
     const storage = options.storage;
     const key = String(options.key || "fc-loop-runner-trade-run-lease-v1");
@@ -10966,7 +11100,7 @@
       const lease = read();
       const at = Number(now());
       return {
-        lease,
+        lease: leaseSnapshot(lease),
         active: Boolean(lease && lease.expiresAt > at),
         owned: Boolean(lease && lease.ownerId === ownerId && lease.expiresAt > at),
         expired: Boolean(lease && lease.expiresAt <= at)
@@ -10991,7 +11125,7 @@
       return {
         acquired,
         reason: acquired ? null : "lease-race-lost",
-        lease: confirmed,
+        lease: leaseSnapshot(confirmed),
         recoveryRequired: acquired && before.expired,
         previousLease: before.expired ? before.lease : null
       };
@@ -11074,6 +11208,410 @@
       return { allowed: true, reason: null, state };
     }
     return Object.freeze({ acquire, availability, inspect, release });
+  }
+
+  // src/trade/scheduler.js
+  function createTradeScheduler(options = {}) {
+    const store = options.store;
+    const lease = options.lease;
+    if (!store?.read || !store?.updateRuntime || !store?.addHistory) throw new TypeError("Trade Job Store is required");
+    if (!lease?.acquire || !lease?.release) throw new TypeError("Trade Run Lease is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const executeJob = options.executeJob;
+    const getContext = typeof options.getContext === "function" ? options.getContext : () => ({});
+    const createRunId = typeof options.createRunId === "function" ? options.createRunId : () => `trade-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let ticking = false;
+    function schedulerContext(snapshot, extra = {}) {
+      const circuit = options.circuitBreaker?.availability?.();
+      return {
+        ...getContext(),
+        ...extra,
+        now: Number(now()),
+        liveExecutionEnabled: snapshot.liveExecutionEnabled === true,
+        circuitAllowed: circuit ? circuit.allowed === true : true,
+        circuitReason: circuit?.state?.reason || null
+      };
+    }
+    function missedReceipt(job, runtime, decision, at) {
+      return createTradeRunReceipt({
+        runId: createRunId(),
+        jobId: job.id,
+        jobType: job.type,
+        scheduledFor: runtime.nextRunAt,
+        startedAt: at,
+        finishedAt: at,
+        status: "missed",
+        reason: decision.reason
+      });
+    }
+    async function execute(job, runtime, context) {
+      const startedAt = Number(now());
+      const runId = createRunId();
+      const acquired = lease.acquire({ runId, jobId: job.id });
+      if (!acquired.acquired) {
+        const waiting = normalizeTradeJobRuntime({
+          ...runtime,
+          status: "waiting-operation",
+          reason: acquired.reason || "lease-held",
+          updatedAt: startedAt
+        });
+        store.updateRuntime(job.id, waiting);
+        return { status: "waiting-operation", jobId: job.id, runtime: waiting };
+      }
+      if (acquired.recoveryRequired) {
+        const recovery = await options.reconcileExpiredLease?.(acquired.previousLease);
+        if (recovery?.status !== "reconciled") {
+          const finishedAt = Number(now());
+          const reason = "expired-lease-reconciliation-required";
+          const receipt2 = createTradeRunReceipt({
+            runId,
+            jobId: job.id,
+            jobType: job.type,
+            scheduledFor: runtime.nextRunAt,
+            startedAt,
+            finishedAt,
+            status: "blocked",
+            reason,
+            receipts: [{
+              status: "blocked",
+              reason,
+              previousLease: acquired.previousLease ? {
+                runId: acquired.previousLease.runId,
+                jobId: acquired.previousLease.jobId,
+                acquiredAt: acquired.previousLease.acquiredAt,
+                heartbeatAt: acquired.previousLease.heartbeatAt,
+                expiresAt: acquired.previousLease.expiresAt
+              } : null
+            }]
+          });
+          const blocked2 = normalizeTradeJobRuntime({
+            ...runtime,
+            status: "blocked",
+            reason,
+            lastScheduledFor: runtime.nextRunAt,
+            lastStartedAt: startedAt,
+            lastFinishedAt: finishedAt,
+            lastRunId: runId,
+            updatedAt: finishedAt
+          });
+          store.updateRuntime(job.id, blocked2);
+          store.addHistory(receipt2);
+          lease.release(runId);
+          return { status: "blocked", jobId: job.id, receipt: receipt2, runtime: blocked2, previousLease: acquired.previousLease };
+        }
+      }
+      store.updateRuntime(job.id, {
+        ...runtime,
+        status: "running",
+        reason: null,
+        lastScheduledFor: runtime.nextRunAt,
+        lastStartedAt: startedAt,
+        lastRunId: runId,
+        updatedAt: startedAt
+      });
+      let receipt;
+      try {
+        if (typeof executeJob !== "function") throw new Error("Trade Scheduler executor is unavailable");
+        receipt = await executeJob({
+          job,
+          runId,
+          scheduledFor: runtime.nextRunAt,
+          startedAt,
+          context,
+          heartbeat: () => lease.heartbeat(runId)
+        });
+        receipt = createTradeRunReceipt({
+          ...receipt,
+          runId,
+          jobId: job.id,
+          jobType: job.type,
+          scheduledFor: runtime.nextRunAt,
+          startedAt,
+          finishedAt: receipt?.finishedAt ?? now()
+        });
+      } catch (error) {
+        receipt = createTradeRunReceipt({
+          runId,
+          jobId: job.id,
+          jobType: job.type,
+          scheduledFor: runtime.nextRunAt,
+          startedAt,
+          finishedAt: now(),
+          status: "blocked",
+          reason: error?.message || String(error)
+        });
+      } finally {
+        lease.release(runId);
+      }
+      store.addHistory(receipt);
+      const advanced = advanceTradeJobRuntime(job, runtime, {
+        at: receipt.finishedAt,
+        scheduledFor: runtime.nextRunAt,
+        startedAt,
+        finishedAt: receipt.finishedAt,
+        runId,
+        reason: receipt.status === "completed" ? null : receipt.reason
+      });
+      store.updateRuntime(job.id, advanced);
+      return { status: receipt.status, jobId: job.id, receipt, runtime: advanced };
+    }
+    async function tick(extraContext = {}) {
+      if (ticking) return { status: "busy" };
+      ticking = true;
+      try {
+        const snapshot = store.read();
+        if (snapshot.paused) return { status: "paused" };
+        const context = schedulerContext(snapshot, extraContext);
+        const jobs = [...snapshot.jobs].sort((left, right) => {
+          const leftAt = snapshot.runtimes[left.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
+          const rightAt = snapshot.runtimes[right.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
+          return leftAt - rightAt || left.id.localeCompare(right.id);
+        });
+        for (const job of jobs) {
+          const runtime = snapshot.runtimes[job.id] || {};
+          const decision = evaluateTradeJob(job, runtime, context);
+          store.updateRuntime(job.id, decision.runtime);
+          if (decision.action === "advance") {
+            const receipt = missedReceipt(job, runtime, decision, context.now);
+            store.addHistory(receipt);
+            const advanced = advanceTradeJobRuntime(job, runtime, {
+              at: context.now,
+              scheduledFor: runtime.nextRunAt,
+              runId: receipt.runId,
+              reason: decision.reason,
+              countRun: false
+            });
+            store.updateRuntime(job.id, advanced);
+            return { status: "missed", jobId: job.id, receipt, runtime: advanced };
+          }
+          if (decision.action === "run") return execute(job, runtime, context);
+        }
+        return { status: "idle" };
+      } finally {
+        ticking = false;
+      }
+    }
+    return Object.freeze({ tick });
+  }
+
+  // src/trade/scheduler-wakeups.js
+  function createTradeSchedulerWakeups(options = {}) {
+    const windowTarget = options.windowTarget;
+    const documentTarget = options.documentTarget;
+    if (typeof options.tick !== "function") throw new TypeError("tick is required");
+    let started = false;
+    const wake = () => {
+      void options.tick();
+    };
+    const onVisibilityChange = () => {
+      if (documentTarget?.visibilityState === "visible" || documentTarget?.hidden === false) wake();
+    };
+    function start() {
+      if (started) return false;
+      started = true;
+      documentTarget?.addEventListener?.("visibilitychange", onVisibilityChange);
+      windowTarget?.addEventListener?.("focus", wake);
+      windowTarget?.addEventListener?.("online", wake);
+      return true;
+    }
+    function stop() {
+      if (!started) return false;
+      started = false;
+      documentTarget?.removeEventListener?.("visibilitychange", onVisibilityChange);
+      windowTarget?.removeEventListener?.("focus", wake);
+      windowTarget?.removeEventListener?.("online", wake);
+      return true;
+    }
+    return Object.freeze({ start, stop });
+  }
+
+  // src/trade/scheduler-tick-lock.js
+  var TRADE_SCHEDULER_WEB_LOCK = "fc-loop-runner-trade-scheduler-v1";
+  function createTradeSchedulerTickLock(options = {}) {
+    const lockManager = options.lockManager;
+    const name = String(options.name || TRADE_SCHEDULER_WEB_LOCK);
+    async function run(task) {
+      if (typeof task !== "function") throw new TypeError("task is required");
+      if (typeof lockManager?.request !== "function") return task();
+      return lockManager.request(name, { mode: "exclusive", ifAvailable: true }, (lock) => lock ? task() : { status: "busy", reason: "browser-lock-held" });
+    }
+    function inspect() {
+      return { name, supported: typeof lockManager?.request === "function" };
+    }
+    return Object.freeze({ run, inspect });
+  }
+
+  // src/trade/guarded-scheduled-listing.js
+  var GUARDED_SCHEDULE_CONFIRMATION = "RUN ONCE 1";
+  function guardedTradeSessionReadiness(input2 = {}) {
+    if (input2.pageReady !== true) return { ready: false, reason: "ea-session-unavailable" };
+    const fsu = input2.fsuReadiness || {};
+    if (fsu.detected !== true) return { ready: true, reason: null };
+    if (fsu.ready !== true) return { ready: false, reason: `fsu-club-${fsu.state || "not-ready"}` };
+    return { ready: true, reason: null };
+  }
+  function itemRef(ref = {}) {
+    return {
+      id: Number(ref.id || 0),
+      definitionId: Number(ref.definitionId || 0),
+      pile: String(ref.pile || "")
+    };
+  }
+  function sameItemRef(left = {}, right = {}) {
+    return Number(left.id || 0) > 0 && Number(left.id) === Number(right.id) && Number(left.definitionId) === Number(right.definitionId);
+  }
+  async function validateProvisionalClubEntry(options, input2, prepared) {
+    const readiness = input2.context?.fsuReadiness || {};
+    const entry = prepared?.plan?.entries?.[0];
+    const ref = itemRef(entry?.item);
+    if (readiness.detected !== true || readiness.fullyValidated !== false) {
+      return { ok: true, required: false, status: "not-required", item: ref };
+    }
+    if (ref.pile !== "club" || !ref.id || !ref.definitionId) {
+      return { ok: false, required: true, status: "invalid-item", item: ref };
+    }
+    if (typeof options.validateClubPlayers !== "function") {
+      return { ok: false, required: true, status: "unavailable", item: ref };
+    }
+    try {
+      const validation = await options.validateClubPlayers([ref], {
+        label: `${input2.job?.name || "Trade Scheduler"} targeted Club validation`
+      });
+      const returned = (validation?.items || []).map(itemRef);
+      const missing = (validation?.missing || []).map(itemRef);
+      const matched = returned.some((candidate) => sameItemRef(candidate, ref));
+      return {
+        ok: validation?.ok === true && matched,
+        required: true,
+        status: validation?.ok !== true ? "failed" : matched ? "passed" : "item-not-returned",
+        item: ref,
+        returned,
+        missing,
+        elapsed: Number(validation?.elapsed || 0),
+        reason: validation?.reason ? String(validation.reason) : null,
+        fsuState: String(readiness.state || ""),
+        cacheStatus: String(readiness.cacheStatus || "")
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        required: true,
+        status: "error",
+        item: ref,
+        error: { message: error?.message || String(error) },
+        fsuState: String(readiness.state || ""),
+        cacheStatus: String(readiness.cacheStatus || "")
+      };
+    }
+  }
+  function guardedScheduledListingReason(job = {}) {
+    if (job.type !== "listing") return "validation-gate-listing-only";
+    if (job.enabled !== true) return "validation-gate-job-disabled";
+    if (job.armed !== true) return "validation-gate-job-not-armed";
+    if (job.schedule?.type !== "once") return "validation-gate-once-only";
+    if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) return "validation-gate-run-at-invalid";
+    if (!["skip", "grace-window"].includes(job.misfirePolicy?.type)) return "validation-gate-next-login-disabled";
+    if (job.misfirePolicy?.type === "grace-window" && Number(job.misfirePolicy.graceMinutes) > 15) {
+      return "validation-gate-grace-too-long";
+    }
+    if (!Array.isArray(job.policy?.sources) || job.policy.sources.length !== 1 || job.policy.sources[0] !== "club") return "validation-gate-club-only";
+    if (Number(job.policy?.maxListings) !== 1) return "validation-gate-one-item-only";
+    return null;
+  }
+  function selectGuardedScheduledListingJob(snapshot = {}) {
+    const armed = (snapshot.jobs || []).filter((job) => job.enabled === true && job.armed === true);
+    if (armed.length !== 1) {
+      return { ready: false, reason: armed.length ? "validation-gate-multiple-armed-jobs" : "validation-gate-no-armed-job", job: null };
+    }
+    const reason = guardedScheduledListingReason(armed[0]);
+    const runtime = snapshot.runtimes?.[armed[0].id];
+    if (!reason && runtime && runtime.nextRunAt === null) {
+      return { ready: false, reason: "validation-gate-no-pending-run", job: null };
+    }
+    return { ready: reason === null, reason, job: reason === null ? armed[0] : null };
+  }
+  function createGuardedScheduledListingExecutor(options = {}) {
+    const store = options.store;
+    const listingPreparation = options.listingPreparation;
+    const operationCoordinator = options.operationCoordinator;
+    if (typeof store?.relock !== "function") throw new TypeError("Trade Job Store with relock is required");
+    if (typeof listingPreparation?.prepare !== "function") throw new TypeError("Listing Preparation is required");
+    if (!operationCoordinator?.acquire || !operationCoordinator?.release) throw new TypeError("Operation Coordinator is required");
+    if (typeof options.getTradeAdapter !== "function") throw new TypeError("getTradeAdapter is required");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const sleep = typeof options.sleep === "function" ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const transactionFactory = typeof options.transactionFactory === "function" ? options.transactionFactory : (transactionOptions) => createListingTransaction(transactionOptions);
+    function blockedReceipt(input2, reason, startedAt = Number(now())) {
+      return createTradeRunReceipt({
+        runId: input2.runId,
+        jobId: input2.job?.id,
+        jobType: input2.job?.type,
+        scheduledFor: input2.scheduledFor,
+        startedAt,
+        finishedAt: Number(now()),
+        status: "blocked",
+        reason,
+        requested: 0
+      });
+    }
+    async function execute(input2 = {}) {
+      const startedAt = Number(now());
+      store.relock();
+      if (options.validationGateEnabled !== true) return blockedReceipt(input2, "scheduled-listing-validation-gate-disabled", startedAt);
+      if (input2.context?.liveExecutionEnabled !== true) return blockedReceipt(input2, "live-execution-disabled", startedAt);
+      const reason = guardedScheduledListingReason(input2.job);
+      if (reason) return blockedReceipt(input2, reason, startedAt);
+      const availability = options.circuitBreaker?.availability?.();
+      if (availability && availability.allowed !== true) return blockedReceipt(input2, "trade-circuit-open", startedAt);
+      const operationId = `scheduled-listing:${input2.runId}`;
+      const operation = operationCoordinator.acquire({
+        id: operationId,
+        type: "trade-listing",
+        ownerId: options.ownerId || "",
+        label: input2.job.name
+      });
+      if (!operation.acquired) return blockedReceipt(input2, operation.reason || "operation-unavailable", startedAt);
+      options.onRunningChange?.(true, input2);
+      try {
+        const job = {
+          ...input2.job,
+          policy: { ...input2.job.policy, sources: ["club"], maxListings: 1 }
+        };
+        const prepared = await listingPreparation.prepare(job, { maxListings: 1 });
+        if (prepared?.ready !== true || prepared?.plan?.entries?.length !== 1) {
+          const receipt2 = blockedReceipt(input2, prepared?.blockers?.[0]?.reason || "scheduled-listing-not-prepared", startedAt);
+          options.onReceipt?.(receipt2, { job, prepared, input: input2 });
+          return receipt2;
+        }
+        const clubValidation = await validateProvisionalClubEntry(options, input2, prepared);
+        if (!clubValidation.ok) {
+          const receipt2 = blockedReceipt(input2, `fsu-targeted-club-validation-${clubValidation.status}`, startedAt);
+          options.onReceipt?.(receipt2, { job, prepared, clubValidation, input: input2 });
+          return receipt2;
+        }
+        const transaction = transactionFactory({
+          tradeAdapter: options.getTradeAdapter(),
+          circuitBreaker: options.circuitBreaker,
+          sleep
+        });
+        const receipt = await transaction.run({
+          job: prepared.job,
+          prepared,
+          runId: input2.runId,
+          confirmationToken: prepared.confirmation.token,
+          confirmationText: prepared.confirmation.requiredText,
+          scheduledFor: input2.scheduledFor,
+          beforeMutation: () => input2.heartbeat?.() === true,
+          shouldStop: () => options.shouldStop?.() === true
+        });
+        options.onReceipt?.(receipt, { job, prepared, clubValidation, input: input2 });
+        return receipt;
+      } finally {
+        options.onRunningChange?.(false, input2);
+        operationCoordinator.release(operationId);
+      }
+    }
+    return Object.freeze({ execute });
   }
 
   // src/reward/pack-highlight.js
@@ -11782,7 +12320,7 @@
   }
 
   // src/unassigned/plan.js
-  function itemRef(item) {
+  function itemRef2(item) {
     return item?.ref || { id: Number(item?.id || 0), definitionId: Number(item?.definitionId || 0), pile: "unassigned" };
   }
   function findClubDuplicate(item, clubItems) {
@@ -11798,7 +12336,7 @@
       action: {
         type,
         destination,
-        itemRefs: items.map(itemRef),
+        itemRefs: items.map(itemRef2),
         description
       }
     };
@@ -11810,7 +12348,7 @@
         destination,
         required: items.length,
         free,
-        itemRefs: items.map(itemRef),
+        itemRefs: items.map(itemRef2),
         description
       }
     };
@@ -11824,7 +12362,7 @@
     if (!items.length) {
       return {
         status: reserved.length ? "preserved" : "empty",
-        reservedItemRefs: reserved.map(itemRef)
+        reservedItemRefs: reserved.map(itemRef2)
       };
     }
     const nonDuplicates = items.filter((item) => !item.duplicate);
@@ -11855,8 +12393,8 @@
     }
     return {
       status: "unclassified",
-      itemRefs: items.map(itemRef),
-      reservedItemRefs: reserved.map(itemRef)
+      itemRefs: items.map(itemRef2),
+      reservedItemRefs: reserved.map(itemRef2)
     };
   }
   function unassignedFingerprint(snapshot) {
@@ -21087,14 +21625,11 @@
       const manual = button4(dom, "Manual listing", mode, "bronze-loop-trade-manual-listing");
       const addListing = button4(dom, "New listing Job", mode, "bronze-loop-trade-new-listing");
       const addBuy = button4(dom, "New Buy Job", mode, "bronze-loop-trade-new-buy");
-      const pause = button4(dom, snapshot.paused ? "Resume" : "Pause", mode, "bronze-loop-trade-scheduler-pause");
       const diagnostics = button4(dom, "Save diagnostics", mode, "bronze-loop-trade-scheduler-diagnostics");
       const circuit = options.getCircuit?.();
       const resetCircuit = button4(dom, "Reset trade block", mode, "bronze-loop-trade-circuit-reset");
       resetCircuit.style.display = circuit?.circuit?.state === "open" ? "" : "none";
-      pause.disabled = snapshot.paused && snapshot.liveExecutionEnabled !== true;
-      pause.title = pause.disabled ? "Automatic execution is locked pending live validation" : "";
-      toolbar.append(manual, addListing, addBuy, pause, diagnostics, resetCircuit);
+      toolbar.append(manual, addListing, addBuy, diagnostics, resetCircuit);
       content.appendChild(toolbar);
       manual.addEventListener("click", () => options.onOpenManualListing?.());
       addListing.addEventListener("click", () => {
@@ -21105,11 +21640,6 @@
         editing = createTradeJobDraft("buy", { now: now() });
         renderEditor();
       });
-      pause.addEventListener("click", () => {
-        options.onSetPaused?.(!snapshot.paused);
-        refreshSnapshot();
-        render();
-      });
       diagnostics.addEventListener("click", () => options.onDownloadDiagnostics?.());
       resetCircuit.addEventListener("click", () => {
         options.onResetCircuit?.();
@@ -21117,6 +21647,55 @@
         setStatus("Trade block reset manually");
         render();
       });
+      const validationGate = styles(dom.create("div"), {
+        display: "flex",
+        gap: "8px",
+        flexWrap: "wrap",
+        alignItems: "center",
+        padding: "9px",
+        marginBottom: "10px",
+        border: "1px solid #47576b",
+        background: "#1a2028"
+      });
+      const guarded = selectGuardedScheduledListingJob(snapshot);
+      if (snapshot.liveExecutionEnabled === true) {
+        const gateState = dom.create("span");
+        gateState.textContent = `One-card schedule enabled${guarded.job ? `: ${guarded.job.name}` : ""}`;
+        styles(gateState, { color: "#e3c98d", flex: "1 1 260px", fontSize: "12px" });
+        const disableGate = button4(dom, "Disable scheduling", mode, "bronze-loop-trade-disable-guarded-schedule");
+        disableGate.addEventListener("click", () => {
+          options.onDisableGuardedScheduling?.();
+          refreshSnapshot();
+          setStatus("Guarded scheduling disabled");
+          render();
+        });
+        validationGate.append(gateState, disableGate);
+      } else {
+        const gateInput = input(dom, "text", "", mode, "bronze-loop-trade-guarded-confirmation");
+        gateInput.placeholder = GUARDED_SCHEDULE_CONFIRMATION;
+        styles(gateInput, { flex: "1 1 220px" });
+        const enableGate = button4(dom, "Enable one-card schedule", mode, "bronze-loop-trade-enable-guarded-schedule");
+        enableGate.disabled = guarded.ready !== true;
+        enableGate.title = guarded.ready ? `Type ${GUARDED_SCHEDULE_CONFIRMATION}` : guarded.reason || "One armed Job is required";
+        enableGate.addEventListener("click", async () => {
+          if (gateInput.value !== GUARDED_SCHEDULE_CONFIRMATION) {
+            setStatus(`Confirmation must exactly match ${GUARDED_SCHEDULE_CONFIRMATION}`);
+            return;
+          }
+          enableGate.disabled = true;
+          try {
+            await options.onEnableGuardedScheduling?.({ confirmationText: gateInput.value, jobId: guarded.job?.id });
+            refreshSnapshot();
+            setStatus(`One-card schedule enabled for ${guarded.job?.name || guarded.job?.id}`);
+            render();
+          } catch (error) {
+            enableGate.disabled = false;
+            setStatus(`Enable failed: ${error?.message || error}`);
+          }
+        });
+        validationGate.append(gateInput, enableGate);
+      }
+      content.appendChild(validationGate);
       if (!snapshot.jobs?.length) {
         const empty = dom.create("div");
         empty.textContent = "No Trade Jobs";
@@ -21336,6 +21915,22 @@
       getTradeAdapter: eaTradeAdapter,
       playerCatalogProvider: tradePlayerCatalogProvider
     });
+    let tradeScheduler = null;
+    const tradeSchedulerTickLock = createTradeSchedulerTickLock({ lockManager: navigator?.locks });
+    function inspectGuardedTradeSession() {
+      let pageReady = false;
+      try {
+        pageReady = pageRuntime.isReady();
+      } catch {
+      }
+      let fsuReadiness = { detected: false, ready: true, state: "not-detected" };
+      try {
+        fsuReadiness = fsuAdapter().readiness();
+      } catch {
+      }
+      const session = guardedTradeSessionReadiness({ pageReady, fsuReadiness });
+      return { pageReady, fsuReadiness, ready: session.ready, reason: session.reason };
+    }
     const state = {
       running: false,
       stopping: false,
@@ -21361,6 +21956,9 @@
       recentRewardItems: [],
       logLines: [],
       bootTimer: null,
+      tradeSchedulerTimer: null,
+      tradeSchedulerWakeups: null,
+      lastTradeSchedulerTick: null,
       fsuSettingsOverride: null,
       fsuSettingsCache: { at: 0, settings: null },
       lastOpenPackReceipt: null,
@@ -21369,6 +21967,7 @@
       lastLoopRecap: null,
       preparedTradeListing: null,
       lastTradeListingReceipt: null,
+      lastScheduledTradeListing: null,
       lastTradeBuyPreview: null,
       tradeListingRunning: false,
       lastRecapType: null,
@@ -21391,6 +21990,8 @@
     function destroyRunner() {
       state.stopping = true;
       if (state.bootTimer) clearInterval(state.bootTimer);
+      if (state.tradeSchedulerTimer) clearInterval(state.tradeSchedulerTimer);
+      state.tradeSchedulerWakeups?.stop?.();
       state.logRenderer?.destroy?.();
       state.layoutController?.destroy?.();
       state.workflowBuilder?.destroy?.();
@@ -21430,7 +22031,10 @@
       getTradeSchedulerState: () => tradeJobStore.read(),
       saveTradeJob: (job, options = {}) => tradeJobStore.upsert(job, options),
       deleteTradeJob: (jobId) => tradeJobStore.remove(jobId),
-      pauseTradeScheduler: () => tradeJobStore.setPaused(true),
+      pauseTradeScheduler: () => disableGuardedTradeScheduling("manual-console-pause"),
+      enableGuardedTradeScheduling,
+      disableGuardedTradeScheduling,
+      tickTradeScheduler,
       inspectOperationCoordinator: () => tradeOperationCoordinator.inspect(),
       previewTradeListings: (input2 = {}, options = {}) => tradeListingPreview.preview(input2, options),
       previewTradeBuys: previewTradeBuyJob,
@@ -21445,6 +22049,57 @@
     };
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const now = () => (/* @__PURE__ */ new Date()).toLocaleTimeString();
+    const guardedScheduledListingExecutor = createGuardedScheduledListingExecutor({
+      store: tradeJobStore,
+      listingPreparation: tradeListingPreparation,
+      operationCoordinator: tradeOperationCoordinator,
+      getTradeAdapter: eaTradeAdapter,
+      validateClubPlayers: (refs, options) => fsuAdapter().validateClubPlayers(refs, options),
+      circuitBreaker: tradeCircuitBreaker,
+      ownerId: tradeTabOwnerId,
+      validationGateEnabled: true,
+      sleep,
+      shouldStop: () => state.stopping,
+      onRunningChange: (running, input2) => {
+        state.tradeListingRunning = running;
+        state.running = running;
+        if (!running) state.stopping = false;
+        log(running ? `Trade Scheduler: guarded Job ${input2.job?.name || input2.job?.id} started; scheduler automatically relocked` : `Trade Scheduler: guarded Job ${input2.job?.name || input2.job?.id} left the execution state`);
+        setPanelState();
+      },
+      onReceipt: (receipt, context) => {
+        state.lastTradeListingReceipt = receipt;
+        state.lastScheduledTradeListing = {
+          job: context.job,
+          prepared: context.prepared,
+          clubValidation: context.clubValidation,
+          receipt
+        };
+      }
+    });
+    tradeScheduler = createTradeScheduler({
+      store: tradeJobStore,
+      lease: tradeRunLease,
+      circuitBreaker: tradeCircuitBreaker,
+      executeJob: guardedScheduledListingExecutor.execute,
+      getContext: () => {
+        const operation = tradeOperationCoordinator.inspect();
+        const session = inspectGuardedTradeSession();
+        return {
+          sessionReady: session.ready,
+          sessionReason: session.reason,
+          fsuReadiness: session.fsuReadiness,
+          operationBusy: Boolean(operation.active || operation.external?.busy),
+          operationReason: operation.active ? "operation-active" : operation.external?.reason,
+          tickToleranceMs: 15e3
+        };
+      },
+      reconcileExpiredLease: async (previousLease) => {
+        tradeJobStore.relock();
+        log(`Trade Scheduler: expired lease ${previousLease?.runId || "unknown"} requires manual reconciliation; scheduler relocked`);
+        return { status: "blocked" };
+      }
+    });
     async function prepareTradeListing(input2 = {}, options = {}) {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
         throw new Error("Another Runner operation is active; listing preparation is unavailable");
@@ -21506,6 +22161,74 @@
       if (!state.tradeListingRunning) return false;
       state.stopping = true;
       return true;
+    }
+    function enableGuardedTradeScheduling(input2 = {}) {
+      if (String(input2.confirmationText || "") !== GUARDED_SCHEDULE_CONFIRMATION) {
+        throw new Error(`Confirmation must exactly match ${GUARDED_SCHEDULE_CONFIRMATION}`);
+      }
+      const snapshot = tradeJobStore.read();
+      if (snapshot.liveExecutionEnabled) throw new Error("Guarded scheduling is already enabled");
+      const selected2 = selectGuardedScheduledListingJob(snapshot);
+      if (!selected2.ready) throw new Error(selected2.reason || "Exactly one eligible armed Job is required");
+      if (input2.jobId && String(input2.jobId) !== selected2.job.id) throw new Error("The armed Job changed before confirmation");
+      const currentTime = Date.now();
+      const runAt = Number(selected2.job.schedule.runAt);
+      if (runAt < currentTime + 15e3) throw new Error("The once Job must be scheduled at least 15 seconds in the future");
+      if (runAt > currentTime + 15 * 6e4) throw new Error("The validation Job must run within 15 minutes");
+      const circuit = tradeCircuitBreaker.availability();
+      if (circuit.allowed !== true) throw new Error(`Trade circuit is open (${circuit.state?.reason || "unknown"})`);
+      const operation = tradeOperationCoordinator.availability("trade-listing");
+      if (!operation.allowed) throw new Error(`Another Runner operation is active (${operation.reason})`);
+      tradeJobStore.setLiveExecutionEnabled(true);
+      const enabled = tradeJobStore.setPaused(false);
+      log(`Trade Scheduler: one-card validation enabled for ${selected2.job.name} at ${new Date(runAt).toLocaleString()}`);
+      void tickTradeScheduler();
+      return enabled;
+    }
+    function disableGuardedTradeScheduling(reason = "manual-ui-disable") {
+      const disabled2 = tradeJobStore.relock();
+      log(`Trade Scheduler: guarded scheduling disabled (${reason})`);
+      return disabled2;
+    }
+    async function tickTradeScheduler() {
+      if (!tradeScheduler) return { status: "unavailable" };
+      const recordTick = (result) => {
+        state.lastTradeSchedulerTick = {
+          at: Date.now(),
+          status: String(result?.status || "unknown"),
+          reason: result?.reason ? String(result.reason) : null,
+          jobId: result?.jobId ? String(result.jobId) : null,
+          runId: result?.receipt?.runId ? String(result.receipt.runId) : null
+        };
+        return result;
+      };
+      try {
+        const snapshot = tradeJobStore.read();
+        if (snapshot.liveExecutionEnabled) {
+          const selected2 = selectGuardedScheduledListingJob(snapshot);
+          const circuit = tradeCircuitBreaker.availability();
+          if (!selected2.ready || circuit.allowed !== true) {
+            disableGuardedTradeScheduling(!selected2.ready ? selected2.reason : `circuit-${circuit.state?.reason || "open"}`);
+            return recordTick({ status: "blocked", reason: !selected2.ready ? selected2.reason : "trade-circuit-open" });
+          }
+        }
+        const result = await tradeSchedulerTickLock.run(() => tradeScheduler.tick());
+        if (result.status === "missed") disableGuardedTradeScheduling("scheduled-run-missed");
+        if (result.receipt && state.lastScheduledTradeListing?.job?.id === result.jobId) {
+          state.lastTradeListingReceipt = result.receipt;
+          state.lastScheduledTradeListing.receipt = result.receipt;
+        }
+        if (["completed", "blocked", "failed", "ambiguous", "stopped", "missed"].includes(result.status)) {
+          const receipt = result.receipt;
+          log(`Trade Scheduler: ${result.status}${receipt?.reason ? ` (${receipt.reason})` : ""}${receipt ? `; listed ${receipt.succeeded}/${receipt.requested}` : ""}`);
+          setPanelState();
+        }
+        return recordTick(result);
+      } catch (error) {
+        disableGuardedTradeScheduling("unexpected-tick-error");
+        log(`Trade Scheduler failed closed: ${error?.message || error}`);
+        return recordTick({ status: "blocked", reason: error?.message || String(error) });
+      }
     }
     function tradeDiagnosticsFilename(timestamp = Date.now()) {
       const value = new Date(Number(timestamp) || Date.now()).toISOString().replace(/[:.]/g, "-");
@@ -21602,6 +22325,12 @@
         capturedAt: Date.now(),
         runner: { version: RUNNER_VERSION, userAgent: navigator?.userAgent || "" },
         scheduler: tradeJobStore.read(),
+        schedulerRuntime: {
+          ownerId: tradeTabOwnerId,
+          webLock: tradeSchedulerTickLock.inspect(),
+          lastTick: state.lastTradeSchedulerTick,
+          session: inspectGuardedTradeSession()
+        },
         circuit: tradeCircuitBreaker.snapshot(),
         lease: tradeRunLease.inspect(),
         coordinator: tradeOperationCoordinator.inspect(),
@@ -21615,6 +22344,17 @@
           circuit: tradeCircuitBreaker.snapshot(),
           job: state.lastTradeBuyPreview?.job || null,
           preview: state.lastTradeBuyPreview
+        }),
+        guardedValidation: createTradeListingDiagnostics({
+          capturedAt: Date.now(),
+          runnerVersion: RUNNER_VERSION,
+          userAgent: navigator?.userAgent || "",
+          operation,
+          circuit: tradeCircuitBreaker.snapshot(),
+          job: state.lastScheduledTradeListing?.job || null,
+          prepared: state.lastScheduledTradeListing?.prepared || null,
+          clubValidation: state.lastScheduledTradeListing?.clubValidation || null,
+          receipt: state.lastScheduledTradeListing?.receipt || null
         })
       };
     }
@@ -21639,10 +22379,8 @@
           tradeJobStore.remove(jobId);
           log(`Trade Scheduler: deleted Job ${jobId}`);
         },
-        onSetPaused: (paused) => {
-          tradeJobStore.setPaused(paused);
-          log(`Trade Scheduler: ${paused ? "paused" : "resumed"}`);
-        },
+        onEnableGuardedScheduling: (input2) => enableGuardedTradeScheduling(input2),
+        onDisableGuardedScheduling: () => disableGuardedTradeScheduling("manual-ui-disable"),
         onOpenManualListing: (job = null) => openTradeListingDialogModal(job),
         onPreviewBuyJob: (job) => previewTradeBuyJob(job),
         onResetCircuit: () => {
@@ -30422,6 +31160,18 @@
       });
       updateRecapButton();
       log(`Ready v${W[APP_KEY]?.version || "unknown"}. Keep FSU enabled before starting; FC26 Enhancer may remain enabled.`);
+      if (!state.tradeSchedulerTimer) {
+        state.tradeSchedulerTimer = setInterval(() => {
+          void tickTradeScheduler();
+        }, 5e3);
+        state.tradeSchedulerWakeups = createTradeSchedulerWakeups({
+          windowTarget: window,
+          documentTarget: document,
+          tick: tickTradeScheduler
+        });
+        state.tradeSchedulerWakeups.start();
+        void tickTradeScheduler();
+      }
       setTimeout(async () => {
         try {
           await scanAvailableDynamicSbcs({ cacheOnly: true });

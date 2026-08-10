@@ -91,6 +91,12 @@ describe('Trade listing transaction', () => {
       receipts: [{
         status: 'listed',
         item: { id: 1, definitionId: 101, pile: 'club' },
+        priceLimitRefresh: {
+          status: 'completed',
+          limitsSource: 'refreshed',
+          response: { success: true, status: null, code: null },
+          error: null,
+        },
         verification: {
           item: { id: 1, definitionId: 101, pile: 'transfer' },
           auction: { state: 'active', startingBid: 700, buyNowPrice: 700 },
@@ -99,6 +105,48 @@ describe('Trade listing transaction', () => {
     });
     expect(adapter.inspectCapabilities().transferCapacity).toEqual({ used: 11, max: 100, free: 89 });
     expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
+  });
+
+  it('uses the Scheduler run identity and scheduled time when provided', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{
+        id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+      }],
+    });
+    const plan = prepared([entry()]);
+    const result = await transaction(adapter).run({
+      job: job(),
+      prepared: plan,
+      runId: 'scheduler-run-1',
+      scheduledFor: 900,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+    expect(result).toMatchObject({ runId: 'scheduler-run-1', scheduledFor: 900, status: 'completed' });
+  });
+
+  it('blocks before listItem when the scheduled execution lease is lost', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{
+        id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+      }],
+    });
+    const plan = prepared([entry()]);
+    const beforeMutation = vi.fn(() => false);
+    const result = await transaction(adapter).run({
+      job: job(),
+      prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+      beforeMutation,
+    });
+    expect(result).toMatchObject({
+      status: 'blocked', reason: 'listing-execution-lease-lost', succeeded: 0, failed: 1,
+    });
+    expect(beforeMutation).toHaveBeenCalledOnce();
+    expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(0);
   });
 
   it('blocks before every write when confirmation does not match', async () => {

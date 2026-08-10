@@ -48,6 +48,11 @@ describe('Trade listing preparation', () => {
       priceLimitStatus: 'loaded',
       priceLimits: { minimum: 700, maximum: 10_000 },
     });
+    expect(result.priceLimitChecks).toEqual([expect.objectContaining({
+      status: 'loaded',
+      refreshStatus: 'completed',
+      limitsSource: 'refreshed',
+    })]);
     expect(result.plan.warnings).toContain('101 listing prices were adjusted to EA limits');
     expect(result.confirmation.token).toMatch(/^listing-[0-9a-f]{8}$/);
   });

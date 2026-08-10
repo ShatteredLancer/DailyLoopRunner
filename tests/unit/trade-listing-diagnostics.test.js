@@ -19,6 +19,7 @@ describe('Trade listing diagnostics', () => {
       circuit: { circuit: { state: 'open', reason: 'auction-operation-blocked' }, token: 'not-a-token-field' },
       preview: { mode: 'prepared', confirmation },
       prepared: { mode: 'prepared', confirmation },
+      clubValidation: { required: true, status: 'passed', item: { id: 1, definitionId: 2, pile: 'club' } },
       error: Object.assign(new Error('EA listing failed'), { code: 'LIST_FAILED', response: { token: 'private' } }),
     });
 
@@ -29,6 +30,7 @@ describe('Trade listing diagnostics', () => {
       requiredText: 'LIST 1',
     });
     expect(diagnostics.prepared.confirmation).toEqual(diagnostics.preview.confirmation);
+    expect(diagnostics.clubValidation).toMatchObject({ required: true, status: 'passed' });
     expect(diagnostics.error).toMatchObject({ name: 'Error', message: 'EA listing failed', code: 'LIST_FAILED' });
     expect(diagnostics.circuit).toMatchObject({ circuit: { state: 'open', reason: 'auction-operation-blocked' } });
     expect(JSON.stringify(diagnostics)).not.toContain('listing-secret-token');

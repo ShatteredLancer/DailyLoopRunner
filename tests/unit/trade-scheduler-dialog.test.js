@@ -100,7 +100,7 @@ describe('Trade Scheduler dialog', () => {
       onSaveJob: (saved) => { onSaveJob(saved); snapshot = schedulerSnapshot(saved); },
     });
 
-    expect(ui.byId('bronze-loop-trade-scheduler-pause').disabled).toBe(true);
+    expect(ui.byId('bronze-loop-trade-scheduler-pause')).toBeUndefined();
     ui.byId('bronze-loop-trade-manual-listing').click();
     expect(onOpenManualListing).toHaveBeenCalledWith();
     const runButtons = ui.created.filter((element) => element.textContent === 'Run now');
@@ -146,5 +146,53 @@ describe('Trade Scheduler dialog', () => {
     expect(onPreviewBuyJob).toHaveBeenCalledWith(job);
     expect(ui.created.some((element) => element.textContent.includes('Preview only | 84: 2 player ID(s), max 1,000'))).toBe(true);
     expect(ui.byId('bronze-loop-trade-scheduler-status').textContent).toContain('execution remains locked');
+  });
+
+  it('requires exact confirmation and one eligible armed Job for guarded scheduling', async () => {
+    const ui = uiHarness();
+    const eligible = normalizeTradeJobEditorValue({
+      ...createTradeJobDraft('listing', { now: 1000 }),
+      armed: true,
+      schedule: { type: 'once', runAt: 120000 },
+    }, { now: 1000 });
+    let snapshot = schedulerSnapshot(eligible);
+    const onEnableGuardedScheduling = vi.fn(async () => {
+      snapshot = { ...snapshot, paused: false, liveExecutionEnabled: true };
+    });
+    const onDisableGuardedScheduling = vi.fn(() => {
+      snapshot = {
+        ...snapshot,
+        paused: true,
+        liveExecutionEnabled: false,
+        jobs: snapshot.jobs.map((job) => ({ ...job, armed: false })),
+      };
+    });
+    showTradeSchedulerDialog({
+      dom: ui.dom,
+      getSnapshot: () => snapshot,
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      onEnableGuardedScheduling,
+      onDisableGuardedScheduling,
+    });
+    const confirmation = ui.byId('bronze-loop-trade-guarded-confirmation');
+    const enable = ui.byId('bronze-loop-trade-enable-guarded-schedule');
+    expect(enable.disabled).toBe(false);
+    confirmation.value = 'RUN ONCE';
+    await enable.click();
+    expect(onEnableGuardedScheduling).not.toHaveBeenCalled();
+    expect(ui.byId('bronze-loop-trade-scheduler-status').textContent).toContain('RUN ONCE 1');
+    confirmation.value = 'RUN ONCE 1';
+    await enable.click();
+    expect(onEnableGuardedScheduling).toHaveBeenCalledWith({ confirmationText: 'RUN ONCE 1', jobId: eligible.id });
+    expect(ui.byId('bronze-loop-trade-disable-guarded-schedule')).toBeTruthy();
+    ui.byId('bronze-loop-trade-disable-guarded-schedule').click();
+    expect(onDisableGuardedScheduling).toHaveBeenCalledOnce();
+    expect(snapshot.jobs[0].armed).toBe(false);
+  });
+
+  it('disables guarded scheduling when no eligible armed Job exists', () => {
+    const ui = uiHarness();
+    showTradeSchedulerDialog({ dom: ui.dom, snapshot: schedulerSnapshot(), getCircuit: () => ({ circuit: { state: 'closed' } }) });
+    expect(ui.byId('bronze-loop-trade-enable-guarded-schedule').disabled).toBe(true);
   });
 });
