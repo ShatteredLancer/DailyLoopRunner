@@ -8,6 +8,33 @@ function finiteNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function diagnosticNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function diagnosticAuction(auction) {
+  if (!auction || typeof auction !== 'object') return null;
+  return {
+    present: auction.present === true,
+    state: String(auction.state || 'none'),
+    stateSource: String(auction.stateSource || 'unknown'),
+    rawState: auction.rawState === null || ['string', 'number', 'boolean'].includes(typeof auction.rawState)
+      ? auction.rawState
+      : null,
+    signals: {
+      active: auction.signals?.active === true ? true : auction.signals?.active === false ? false : null,
+      closed: auction.signals?.closed === true ? true : auction.signals?.closed === false ? false : null,
+      inactive: auction.signals?.inactive === true ? true : auction.signals?.inactive === false ? false : null,
+    },
+    tradeId: diagnosticNumber(auction.tradeId),
+    startingBid: diagnosticNumber(auction.startingBid),
+    currentBid: diagnosticNumber(auction.currentBid),
+    buyNowPrice: diagnosticNumber(auction.buyNowPrice),
+    expires: diagnosticNumber(auction.expires),
+  };
+}
+
 function priceStep(value) {
   const price = Math.max(0, finiteNumber(value));
   if (price <= 1000) return 50;
@@ -26,6 +53,11 @@ export function roundEaListingPrice(value) {
 export function eaListingPriceBelow(value) {
   const price = roundEaListingPrice(value);
   return Math.max(MIN_EA_LISTING_PRICE, price - priceStep(price));
+}
+
+export function eaListingPriceAbove(value) {
+  const price = roundEaListingPrice(value);
+  return roundEaListingPrice(price + priceStep(price));
 }
 
 export function matchesTradeCardClass(candidate, cardClass) {
@@ -56,6 +88,9 @@ export function listingCandidateRejection(candidate, policy) {
   if (auctionState === 'active') return 'active-trade';
   if (auctionState === 'closed') return 'closed-trade';
   if (candidate?.auction?.present === true && auctionState === 'unknown') return 'unknown-trade-state';
+  if (pile === 'transfer' && auctionState === 'inactive' && policy.expiredPolicy !== 'reprice') {
+    return 'expired-trade-skipped';
+  }
   if (!matchesTradeCardClass(candidate, policy.cardClass)) return 'card-class-mismatch';
   if (!matchingRatingRule(policy.ratingRules, Number(candidate?.rating || 0))) return 'rating-rule-mismatch';
   if (!Number.isFinite(Number(candidate?.item?.id)) || Number(candidate.item.id) <= 0) return 'missing-item-id';
@@ -65,16 +100,41 @@ export function listingCandidateRejection(candidate, policy) {
 
 export function applyListingPriceLimits(entry, limitResult = {}) {
   const limits = limitResult.after || limitResult;
-  const minimum = Number(limits.minimum);
+  const bidMinimum = Number(limits.minimum);
   const maximum = Number(limits.maximum);
   if (limitResult.status && limitResult.status !== 'loaded') {
     return { ok: false, reason: `price-limits-${limitResult.status}`, entry: { ...entry } };
   }
-  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum <= 0 || maximum < minimum) {
+  if (!Number.isFinite(bidMinimum) || !Number.isFinite(maximum) || bidMinimum <= 0 || maximum < bidMinimum) {
     return { ok: false, reason: 'invalid-price-limits', entry: { ...entry } };
   }
-  const buyNow = Math.min(maximum, Math.max(minimum, Number(entry.buyNow)));
-  const startPrice = Math.min(buyNow, Math.min(maximum, Math.max(minimum, Number(entry.startPrice))));
+  const requestedStart = Number(entry.startPrice);
+  const requestedBuyNow = Number(entry.buyNow);
+  if (!Number.isFinite(requestedStart) || !Number.isFinite(requestedBuyNow)) {
+    return { ok: false, reason: 'invalid-listing-prices', entry: { ...entry } };
+  }
+  const buyNowMinimum = eaListingPriceAbove(bidMinimum);
+  if (buyNowMinimum > maximum) {
+    return { ok: false, reason: 'price-limits-no-valid-buy-now', entry: { ...entry } };
+  }
+  const requiresLowerStart = requestedStart < requestedBuyNow;
+  let buyNow = Math.min(maximum, Math.max(buyNowMinimum, requestedBuyNow));
+  let startPrice = requiresLowerStart
+    ? Math.min(buyNow, Math.min(maximum, Math.max(bidMinimum, requestedStart)))
+    : buyNow;
+  if (requiresLowerStart && startPrice >= buyNow) {
+    const lower = eaListingPriceBelow(buyNow);
+    if (lower >= bidMinimum) {
+      startPrice = lower;
+    } else {
+      const higher = eaListingPriceAbove(buyNow);
+      if (higher > maximum) {
+        return { ok: false, reason: 'price-limits-no-valid-buy-now', entry: { ...entry } };
+      }
+      startPrice = buyNow;
+      buyNow = higher;
+    }
+  }
   return {
     ok: true,
     reason: null,
@@ -84,7 +144,12 @@ export function applyListingPriceLimits(entry, limitResult = {}) {
       startPrice,
       buyNow,
       priceLimitStatus: 'loaded',
-      priceLimits: { minimum, maximum },
+      priceLimits: {
+        minimum: bidMinimum,
+        maximum,
+        bidMinimum,
+        buyNowMinimum,
+      },
     },
   };
 }
@@ -108,13 +173,16 @@ export function createListingConfirmation(plan, options = {}) {
     durationSeconds: entry.durationSeconds,
     priceLimits: entry.priceLimits,
   }));
+  const action = entries.length > 0 && entries.every((entry) => entry.item?.pile === 'transfer')
+    ? 'REPRICE'
+    : 'LIST';
   const token = `listing-${confirmationHash(JSON.stringify({ job: plan.job, entries, createdAt }))}`;
   return {
     token,
     createdAt,
     expiresAt: createdAt + ttlMs,
     itemCount: entries.length,
-    requiredText: `LIST ${entries.length}`,
+    requiredText: `${action} ${entries.length}`,
   };
 }
 
@@ -177,7 +245,7 @@ export function buildListingPlan(input = {}) {
     if (reason) {
       rejectionCounts[reason] = Number(rejectionCounts[reason] || 0) + 1;
       if (rejectionSamples.length < REJECTION_SAMPLE_LIMIT) {
-        rejectionSamples.push({ item: { ...candidate?.item }, reason });
+        rejectionSamples.push({ item: { ...candidate?.item }, reason, auction: diagnosticAuction(candidate?.auction) });
       }
       continue;
     }
@@ -215,6 +283,7 @@ export function buildListingPlan(input = {}) {
       cardClass: job.policy.cardClass,
       durationSeconds: job.policy.durationSeconds,
       maxListings: job.policy.maxListings,
+      expiredPolicy: job.policy.expiredPolicy,
       marketOverride: { ...job.policy.marketOverride },
     },
     counts: {

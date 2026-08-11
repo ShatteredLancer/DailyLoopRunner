@@ -17,6 +17,21 @@ function job() {
   };
 }
 
+function transferJob() {
+  return {
+    ...job(),
+    id: 'prepare-reprice',
+    name: 'Prepare Reprice',
+    policy: {
+      ...job().policy,
+      sources: ['transfer'],
+      cardClass: 'rare-gold',
+      ratingRules: [{ min: 85, max: 85, buyNow: 700 }],
+      expiredPolicy: 'reprice',
+    },
+  };
+}
+
 function preparation(adapter, now = 1000) {
   const listingPreview = createListingPreview({
     getTradeAdapter: () => adapter,
@@ -45,14 +60,21 @@ describe('Trade listing preparation', () => {
     expect(result.plan.entries[0]).toMatchObject({
       item: { id: 1 },
       startPrice: 700,
-      buyNow: 700,
+      buyNow: 750,
       priceLimitStatus: 'loaded',
-      priceLimits: { minimum: 700, maximum: 10_000 },
+      priceLimits: {
+        minimum: 700,
+        maximum: 10_000,
+        bidMinimum: 700,
+        buyNowMinimum: 750,
+      },
     });
     expect(result.priceLimitChecks).toEqual([expect.objectContaining({
       status: 'loaded',
       refreshStatus: 'completed',
       limitsSource: 'refreshed',
+      bidMinimum: 700,
+      buyNowMinimum: 750,
     })]);
     expect(result.plan.warnings).toContain('101 listing prices were adjusted to EA limits');
     expect(result.confirmation.token).toMatch(/^listing-[0-9a-f]{8}$/);
@@ -85,5 +107,33 @@ describe('Trade listing preparation', () => {
     expect(result.ready).toBe(false);
     expect(result.confirmation).toBeNull();
     expect(result.blockers).toEqual([{ item: { id: 1, definitionId: 101, pile: 'club' }, reason: 'price-limits-unavailable' }]);
+  });
+
+  it('refreshes Transfer before preparing one expired item with separate confirmation text', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{
+        id: 2, definitionId: 102, pile: 'transfer', type: 'player', rating: 85, tier: 'gold', rare: true,
+        tradeable: true, minimum: 700, maximum: 10_000,
+        auction: { present: true, state: 'inactive', tradeId: 2002, buyNowPrice: 1900 },
+      }],
+    });
+
+    const result = await preparation(adapter).prepare(transferJob(), { maxListings: 1 });
+
+    expect(result).toMatchObject({
+      mode: 'prepared',
+      ready: true,
+      blockers: [],
+      transferPreflight: { status: 'completed' },
+      confirmation: { requiredText: 'REPRICE 1', itemCount: 1 },
+      plan: {
+        entries: [{
+          item: { id: 2, pile: 'transfer' }, auctionState: 'inactive', startPrice: 700, buyNow: 750,
+        }],
+      },
+    });
+    const methods = adapter.calls.map((call) => call.method);
+    expect(methods.indexOf('refreshTransferItems')).toBeLessThan(methods.indexOf('inspectListingCandidates'));
+    expect(methods.indexOf('inspectListingCandidates')).toBeLessThan(methods.indexOf('inspectPriceLimits'));
   });
 });

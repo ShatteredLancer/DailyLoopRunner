@@ -35,6 +35,14 @@ function callBoolean(value, method) {
   }
 }
 
+function primitiveAuctionState(value) {
+  const state = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (state === 'expired' || state === 'inactive') return 'inactive';
+  if (state === 'active') return 'active';
+  if (state === 'closed') return 'closed';
+  return null;
+}
+
 function listingTradeable(item, snapshot) {
   if (typeof item?.isUntradeable === 'function') return snapshot.tradeable === true;
   if (typeof item?.tradeable === 'boolean') return item.tradeable;
@@ -50,6 +58,8 @@ function auctionSnapshot(item) {
     return {
       present: false,
       state: 'none',
+      stateSource: 'none',
+      signals: { active: null, closed: null, inactive: null },
       tradeId: null,
       startingBid: null,
       currentBid: null,
@@ -61,13 +71,23 @@ function auctionSnapshot(item) {
   const closed = callBoolean(auction, 'isClosedTrade');
   const inactive = callBoolean(auction, 'isInactive');
   const primitiveState = safePrimitive(auction.tradeState ?? auction.state ?? auction.bidState);
+  const mappedPrimitiveState = primitiveAuctionState(primitiveState);
   const state = active === true
     ? 'active'
     : closed === true
       ? 'closed'
       : inactive === true
         ? 'inactive'
-        : 'unknown';
+        : mappedPrimitiveState || 'unknown';
+  const stateSource = active === true
+    ? 'isActiveTrade'
+    : closed === true
+      ? 'isClosedTrade'
+      : inactive === true
+        ? 'isInactive'
+        : mappedPrimitiveState !== null
+          ? 'primitive-state'
+          : 'none';
   const numberOrNull = (value) => {
     if (value === null || value === undefined || value === '') return null;
     const number = Number(value);
@@ -76,6 +96,8 @@ function auctionSnapshot(item) {
   return {
     present: true,
     state,
+    stateSource,
+    signals: { active, closed, inactive },
     rawState: primitiveState,
     tradeId: numberOrNull(auction.tradeId ?? auction.id),
     startingBid: numberOrNull(auction.startingBid ?? auction.startPrice),

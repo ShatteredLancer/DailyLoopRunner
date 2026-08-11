@@ -49,6 +49,7 @@ describe('Trade contracts', () => {
       },
     }, { imported: true, now: 2000 });
     expect(imported.armed).toBe(false);
+    expect(imported.policy).toMatchObject({ sources: ['club'], expiredPolicy: 'skip' });
 
     const commonGold = normalizeTradeJob({
       id: 'listing-common-gold',

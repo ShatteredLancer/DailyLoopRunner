@@ -33,7 +33,8 @@ export function createListingPreparation(options = {}) {
       },
     };
     const adapter = options.getTradeAdapter();
-    const requiresTransferPreflight = previewInput.policy.sources?.includes('club') === true;
+    const requiresTransferPreflight = previewInput.policy.sources
+      ?.some((source) => source === 'club' || source === 'transfer') === true;
     const transferPreflight = requiresTransferPreflight
       ? await adapter.refreshTransferItems()
       : null;
@@ -63,6 +64,8 @@ export function createListingPreparation(options = {}) {
         error: result.error,
         minimum: result.after?.minimum ?? null,
         maximum: result.after?.maximum ?? null,
+        bidMinimum: applied.ok ? applied.entry.priceLimits.bidMinimum : null,
+        buyNowMinimum: applied.ok ? applied.entry.priceLimits.buyNowMinimum : null,
         changed: applied.ok ? applied.changed : null,
       });
       if (!applied.ok) {

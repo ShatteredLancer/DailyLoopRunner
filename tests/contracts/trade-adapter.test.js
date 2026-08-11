@@ -191,13 +191,53 @@ describe('Trade Adapter contracts', () => {
         special: false,
         tradeable: true,
         limitedUse: false,
-        auction: { present: true, state: 'inactive', tradeId: 30, buyNowPrice: 900 },
+        auction: {
+          present: true,
+          state: 'inactive',
+          stateSource: 'isInactive',
+          signals: { active: false, closed: false, inactive: true },
+          tradeId: 30,
+          buyNowPrice: 900,
+        },
       }],
       error: null,
     });
     expect(JSON.stringify(result)).not.toContain('privateToken');
     expect(JSON.stringify(result)).not.toContain('privateAuctionData');
     expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+  });
+
+  it('maps the observed EA expired trade state to an inactive Transfer candidate', () => {
+    const item = {
+      id: 11,
+      definitionId: 21,
+      type: 'player',
+      rating: 84,
+      rareflag: 1,
+      untradeableCount: 0,
+      loans: -1,
+      _auction: {
+        tradeState: 'expired',
+        tradeId: 31,
+        expires: -1,
+        isActiveTrade: () => false,
+        isClosedTrade: () => false,
+        isInactive: () => false,
+      },
+    };
+
+    const result = createEaTradeAdapter(eaRuntime(item))
+      .inspectListingCandidates({ sources: ['transfer'], limit: 10 });
+
+    expect(result.candidates[0].auction).toMatchObject({
+      present: true,
+      state: 'inactive',
+      stateSource: 'primitive-state',
+      rawState: 'expired',
+      signals: { active: false, closed: false, inactive: false },
+      tradeId: 31,
+      expires: -1,
+    });
   });
 
   it('keeps listing-only tradeability fallbacks out of the shared inventory contract', () => {

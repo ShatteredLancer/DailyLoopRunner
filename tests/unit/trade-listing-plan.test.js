@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { normalizeTradeJob } from '../../src/trade/contracts.js';
 import {
   buildListingPlan,
+  applyListingPriceLimits,
+  eaListingPriceAbove,
   eaListingPriceBelow,
   matchesTradeCardClass,
   roundEaListingPrice,
@@ -59,7 +61,7 @@ describe('Trade listing preview planner', () => {
   });
 
   it('filters unsafe entities and orders eligible items by configured source then rating', () => {
-    const job = listingJob({ maxListings: 2 });
+    const job = listingJob({ maxListings: 2, expiredPolicy: 'reprice' });
     const plan = buildListingPlan({
       job,
       now: 1000,
@@ -78,6 +80,56 @@ describe('Trade listing preview planner', () => {
       untradeable: 1,
       'card-class-mismatch': 1,
     });
+  });
+
+  it('skips expired Transfer items unless the read-only reprice policy includes them', () => {
+    const expired = candidate(1, {
+      pile: 'transfer',
+      auction: { present: true, state: 'inactive' },
+    });
+    const skipped = buildListingPlan({
+      job: listingJob({ sources: ['transfer'], expiredPolicy: 'skip' }),
+      candidates: [expired],
+      now: 100,
+    });
+    const included = buildListingPlan({
+      job: listingJob({ sources: ['transfer'], expiredPolicy: 'reprice' }),
+      candidates: [expired],
+      now: 100,
+    });
+
+    expect(skipped.entries).toEqual([]);
+    expect(skipped.rejectionCounts).toEqual({ 'expired-trade-skipped': 1 });
+    expect(skipped.rejectionSamples[0]).toMatchObject({
+      reason: 'expired-trade-skipped',
+      auction: {
+        present: true,
+        state: 'inactive',
+        stateSource: 'unknown',
+        signals: { active: null, closed: null, inactive: null },
+      },
+    });
+    expect(skipped.policy.expiredPolicy).toBe('skip');
+    expect(included.entries).toHaveLength(1);
+    expect(included.entries[0]).toMatchObject({
+      item: { id: 1, pile: 'transfer' },
+      auctionState: 'inactive',
+    });
+    expect(included.policy.expiredPolicy).toBe('reprice');
+  });
+
+  it('always rejects active Transfer items even when expired items are included', () => {
+    const plan = buildListingPlan({
+      job: listingJob({ sources: ['transfer'], expiredPolicy: 'reprice' }),
+      candidates: [candidate(1, {
+        pile: 'transfer',
+        auction: { present: true, state: 'active' },
+      })],
+      now: 100,
+    });
+
+    expect(plan.entries).toEqual([]);
+    expect(plan.rejectionCounts).toEqual({ 'active-trade': 1 });
   });
 
   it('applies a fresh higher quote with markup and falls back for stale quotes', () => {
@@ -123,6 +175,40 @@ describe('Trade listing preview planner', () => {
     expect(eaListingPriceBelow(1000)).toBe(950);
     expect(eaListingPriceBelow(10_000)).toBe(9900);
     expect(eaListingPriceBelow(100_000)).toBe(99_500);
+    expect(eaListingPriceAbove(700)).toBe(750);
+    expect(eaListingPriceAbove(1000)).toBe(1100);
+    expect(eaListingPriceAbove(10_000)).toBe(10_250);
+  });
+
+  it('treats the EA minimum as the Bid floor and derives the next-step Buy Now floor', () => {
+    expect(applyListingPriceLimits({ startPrice: 650, buyNow: 700 }, {
+      status: 'loaded', after: { minimum: 650, maximum: 10_000 },
+    })).toMatchObject({
+      ok: true,
+      changed: false,
+      entry: {
+        startPrice: 650,
+        buyNow: 700,
+        priceLimits: { bidMinimum: 650, buyNowMinimum: 700 },
+      },
+    });
+    expect(applyListingPriceLimits({ startPrice: 650, buyNow: 700 }, {
+      status: 'loaded', after: { minimum: 700, maximum: 10_000 },
+    })).toMatchObject({
+      ok: true,
+      changed: true,
+      entry: { startPrice: 700, buyNow: 750 },
+    });
+    expect(applyListingPriceLimits({ startPrice: 700, buyNow: 700 }, {
+      status: 'loaded', after: { minimum: 700, maximum: 10_000 },
+    })).toMatchObject({
+      ok: true,
+      changed: true,
+      entry: { startPrice: 750, buyNow: 750 },
+    });
+    expect(applyListingPriceLimits({ startPrice: 650, buyNow: 700 }, {
+      status: 'loaded', after: { minimum: 700, maximum: 700 },
+    })).toMatchObject({ ok: false, reason: 'price-limits-no-valid-buy-now' });
   });
 
   it('limits selected entries and returns detached serializable output', () => {

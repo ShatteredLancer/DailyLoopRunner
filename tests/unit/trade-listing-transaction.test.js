@@ -43,10 +43,23 @@ function entry(id = 1) {
     cardClass: 'common-gold',
     auctionState: 'none',
     startPrice: 700,
-    buyNow: 700,
+    buyNow: 750,
     durationSeconds: 3600,
     priceLimitStatus: 'loaded',
     priceLimits: { minimum: 700, maximum: 10_000 },
+  };
+}
+
+function transferEntry(id = 2) {
+  return {
+    ...entry(id),
+    item: { id, definitionId: id + 100, pile: 'transfer' },
+    name: `Transfer Player ${id}`,
+    rating: 85,
+    cardClass: 'rare-gold',
+    auctionState: 'inactive',
+    startPrice: 700,
+    buyNow: 750,
   };
 }
 
@@ -99,12 +112,77 @@ describe('Trade listing transaction', () => {
         },
         verification: {
           item: { id: 1, definitionId: 101, pile: 'transfer' },
-          auction: { state: 'active', startingBid: 700, buyNowPrice: 700 },
+          auction: { state: 'active', startingBid: 700, buyNowPrice: 750 },
         },
       }],
     });
     expect(adapter.inspectCapabilities().transferCapacity).toEqual({ used: 11, max: 100, free: 89 });
     expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
+  });
+
+  it('reprices one exact inactive Transfer item and verifies the active auction', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 100_000,
+      transferCapacity: { used: 10, max: 100 },
+      items: [{
+        id: 2, definitionId: 102, pile: 'transfer', type: 'player', rating: 85, tier: 'gold', rare: true,
+        tradeable: true, minimum: 300, maximum: 10_000,
+        auction: { present: true, state: 'inactive', tradeId: 2002, startingBid: 1800, buyNowPrice: 1900 },
+      }],
+    });
+    const plan = prepared([transferEntry()]);
+    expect(plan.confirmation.requiredText).toBe('REPRICE 1');
+
+    const result = await transaction(adapter).run({
+      job: job({
+        sources: ['transfer'],
+        cardClass: 'rare-gold',
+        ratingRules: [{ min: 85, max: 85, buyNow: 700 }],
+        expiredPolicy: 'reprice',
+      }),
+      prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      succeeded: 1,
+      failed: 0,
+      receipts: [{
+        status: 'listed',
+        item: { id: 2, definitionId: 102, pile: 'transfer' },
+        verification: { auction: { state: 'active', startingBid: 700, buyNowPrice: 750 } },
+      }],
+    });
+    expect(adapter.inspectCapabilities().transferCapacity).toEqual({ used: 10, max: 100, free: 90 });
+    expect(adapter.calls.filter((call) => call.method === 'refreshTransferItems')).toHaveLength(2);
+    expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
+  });
+
+  it('blocks a stale Transfer reprice when the live auction is no longer inactive', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{
+        id: 2, definitionId: 102, pile: 'transfer', type: 'player', rating: 85, tier: 'gold', rare: true,
+        tradeable: true, minimum: 300, maximum: 10_000,
+        auction: { present: true, state: 'active', tradeId: 2002, startingBid: 700, buyNowPrice: 700 },
+      }],
+    });
+    const plan = prepared([transferEntry()]);
+    const result = await transaction(adapter).run({
+      job: job({
+        sources: ['transfer'],
+        cardClass: 'rare-gold',
+        ratingRules: [{ min: 85, max: 85, buyNow: 700 }],
+        expiredPolicy: 'reprice',
+      }),
+      prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+
+    expect(result).toMatchObject({ status: 'blocked', reason: 'listing-item-active-trade', failed: 1 });
+    expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(0);
   });
 
   it('uses the Scheduler run identity and scheduled time when provided', async () => {

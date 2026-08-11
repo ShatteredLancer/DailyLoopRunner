@@ -663,13 +663,19 @@ const state = {
       throw new Error('Another Runner operation is active; listing preparation is unavailable');
     }
     const requestedSources = input.policy?.sources || ['club'];
-    if (requestedSources.length !== 1 || requestedSources[0] !== 'club') {
-      throw new Error('TS2b live gate currently allows Club listing preparation only');
-    }
+    const source = requestedSources.length === 1 ? requestedSources[0] : null;
+    const clubListing = source === 'club';
+    const transferReprice = source === 'transfer' && input.policy?.expiredPolicy === 'reprice';
+    if (!clubListing && !transferReprice) throw new Error('Live preparation allows one Club listing or one expired Transfer reprice only');
     state.preparedTradeListing = null;
     const prepared = await tradeListingPreparation.prepare({
       ...input,
-      policy: { ...(input.policy || {}), sources: ['club'], maxListings: 1 },
+      policy: {
+        ...(input.policy || {}),
+        sources: [source],
+        maxListings: 1,
+        expiredPolicy: transferReprice ? 'reprice' : 'skip',
+      },
     }, { ...options, maxListings: 1 });
     if (prepared.ready) state.preparedTradeListing = prepared;
     return prepared;
@@ -864,11 +870,15 @@ const state = {
   function listingDialogDraft(job = null) {
     const policy = job?.policy || job || {};
     return {
+      id: job?.id,
+      name: job?.name,
+      sources: policy.sources,
       cardClass: policy.cardClass,
       ratingRules: policy.ratingRules,
       marketOverride: policy.marketOverride,
       startPricePolicy: policy.startPricePolicy,
       durationSeconds: policy.durationSeconds,
+      expiredPolicy: policy.expiredPolicy,
       provider: 'auto',
       platform: 'pc',
     };
@@ -881,13 +891,14 @@ const state = {
       now: Date.now,
       draft: listingDialogDraft(job),
       onPreview: async (job, request) => {
-        log('Trade Listings: building read-only Club preview');
+        log(`Trade Listings: building read-only ${job.policy.sources.join('/')} preview`);
         const preview = await tradeListingPreview.preview(job, request);
         log(`Trade Listings: preview selected ${Number(preview?.plan?.counts?.selected || 0)} of ${Number(preview?.plan?.counts?.eligible || 0)} eligible item(s)`);
         return preview;
       },
       onPrepare: async (job, request) => {
-        log('Trade Listings: refreshing EA price limits and preparing one Club item');
+        const reprice = job.policy.sources[0] === 'transfer';
+        log(`Trade Listings: refreshing Transfer and EA price limits; preparing one ${reprice ? 'expired Transfer reprice' : 'Club listing'}`);
         const prepared = await prepareTradeListing(job, request);
         log(prepared.ready
           ? `Trade Listings: one item prepared; confirmation ${prepared.confirmation.requiredText} is required`

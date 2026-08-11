@@ -83,7 +83,7 @@ export function createListingTransaction(options = {}) {
         break;
       }
       let transferPreflight = null;
-      if (entry.item.pile === 'club') {
+      if (entry.item.pile === 'club' || entry.item.pile === 'transfer') {
         transferPreflight = await adapter.refreshTransferItems();
         if (transferPreflight.status !== 'completed') {
           failed += 1;
@@ -100,33 +100,35 @@ export function createListingTransaction(options = {}) {
           });
           break;
         }
-        const transferItem = adapter.inspectListingItem({ ...entry.item, pile: 'transfer' });
-        if (transferItem.status === 'loaded' && transferItem.candidate?.item?.pile === 'transfer') {
-          failed += 1;
-          status = 'blocked';
-          reason = 'listing-item-already-in-transfer';
-          receipts.push({
-            index: index + 1,
-            item: { ...entry.item },
-            status: 'blocked',
-            reason,
-            transferPreflight,
-            live: transferItem.candidate.item,
-          });
-          break;
-        }
-        if (transferItem.status === 'error') {
-          failed += 1;
-          status = 'blocked';
-          reason = 'listing-transfer-state-error';
-          receipts.push({
-            index: index + 1,
-            item: { ...entry.item },
-            status: 'blocked',
-            reason,
-            transferPreflight,
-          });
-          break;
+        if (entry.item.pile === 'club') {
+          const transferItem = adapter.inspectListingItem({ ...entry.item, pile: 'transfer' });
+          if (transferItem.status === 'loaded' && transferItem.candidate?.item?.pile === 'transfer') {
+            failed += 1;
+            status = 'blocked';
+            reason = 'listing-item-already-in-transfer';
+            receipts.push({
+              index: index + 1,
+              item: { ...entry.item },
+              status: 'blocked',
+              reason,
+              transferPreflight,
+              live: transferItem.candidate.item,
+            });
+            break;
+          }
+          if (transferItem.status === 'error') {
+            failed += 1;
+            status = 'blocked';
+            reason = 'listing-transfer-state-error';
+            receipts.push({
+              index: index + 1,
+              item: { ...entry.item },
+              status: 'blocked',
+              reason,
+              transferPreflight,
+            });
+            break;
+          }
         }
       }
       const live = adapter.inspectListingItem(entry.item);

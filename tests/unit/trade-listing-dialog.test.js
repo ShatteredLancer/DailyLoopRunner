@@ -165,4 +165,98 @@ describe('Trade listing dialog', () => {
     await ui.byId('bronze-loop-trade-diagnostics').click();
     expect(onDownloadDiagnostics).toHaveBeenCalledWith(expect.objectContaining({ error: failure }));
   });
+
+  it('gates one Transfer reprice behind preparation and exact confirmation', async () => {
+    const ui = createUiHarness();
+    const preview = plan();
+    const prepared = {
+      ...plan('prepared'),
+      ready: true,
+      blockers: [],
+      job: { policy: { sources: ['transfer'] } },
+      plan: {
+        ...plan('prepared').plan,
+        entries: [{
+          ...plan('prepared').plan.entries[0],
+          item: { id: 1, definitionId: 101, pile: 'transfer' },
+          auctionState: 'inactive',
+        }],
+      },
+      confirmation: { token: 'reprice-secret', requiredText: 'REPRICE 1', createdAt: 1, expiresAt: 2, itemCount: 1 },
+    };
+    const onPreview = vi.fn(async () => preview);
+    const onPrepare = vi.fn(async () => prepared);
+    const onExecute = vi.fn(async () => ({ status: 'completed', requested: 1, succeeded: 1, failed: 0, skipped: 0, receipts: [] }));
+    const onDownloadDiagnostics = vi.fn();
+    showTradeListingDialog({
+      dom: ui.dom,
+      now: () => 123,
+      draft: {
+        id: 'transfer-observation',
+        name: 'Transfer Observation',
+        sources: ['transfer'],
+        expiredPolicy: 'reprice',
+      },
+      onPreview,
+      onPrepare,
+      onExecute,
+      onDownloadDiagnostics,
+    });
+
+    const source = ui.byId('bronze-loop-trade-source');
+    const prepare = ui.byId('bronze-loop-trade-prepare');
+    expect(source.value).toBe('transfer');
+    expect(ui.byId('bronze-loop-trade-expired-policy').value).toBe('reprice');
+    expect(prepare.disabled).toBe(false);
+    expect(prepare.textContent).toBe('Prepare reprice');
+
+    await ui.byId('bronze-loop-trade-preview').click();
+    expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'transfer-observation',
+      name: 'Transfer Observation',
+      policy: expect.objectContaining({
+        sources: ['transfer'],
+        expiredPolicy: 'reprice',
+      }),
+    }), { platform: 'pc', provider: 'auto' });
+
+    await ui.byId('bronze-loop-trade-diagnostics').click();
+    expect(onDownloadDiagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      job: expect.objectContaining({
+        id: 'transfer-observation',
+        policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice' }),
+      }),
+      preview,
+      prepared: null,
+      receipt: null,
+    }));
+
+    await prepare.click();
+    expect(onPrepare).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'transfer-observation',
+      policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice', maxListings: 1 }),
+    }), { platform: 'pc', provider: 'auto' });
+    const confirmation = ui.byId('bronze-loop-trade-confirmation');
+    confirmation.value = 'REPRICE 1';
+    confirmation.input();
+    expect(ui.byId('bronze-loop-trade-execute').disabled).toBe(false);
+    expect(ui.byId('bronze-loop-trade-execute').textContent).toBe('Reprice item');
+    await ui.byId('bronze-loop-trade-execute').click();
+    expect(onExecute).toHaveBeenCalledWith({ confirmationToken: 'reprice-secret', confirmationText: 'REPRICE 1' });
+
+    source.value = 'club,transfer';
+    source.change();
+    expect(prepare.disabled).toBe(true);
+    await prepare.click();
+    expect(onPrepare).toHaveBeenCalledTimes(1);
+
+    source.value = 'transfer';
+    source.change();
+    const expiredPolicy = ui.byId('bronze-loop-trade-expired-policy');
+    expiredPolicy.value = 'skip';
+    expiredPolicy.change();
+    expect(prepare.disabled).toBe(true);
+    await prepare.click();
+    expect(onPrepare).toHaveBeenCalledTimes(1);
+  });
 });

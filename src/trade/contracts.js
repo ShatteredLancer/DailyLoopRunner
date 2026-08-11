@@ -282,7 +282,7 @@ function normalizeBuyPolicy(value = {}) {
 
 function normalizeListingPolicy(value = {}) {
   return {
-    sources: [...new Set((value.sources || ['transfer', 'club']).map(String))],
+    sources: [...new Set((value.sources || ['club']).map(String))],
     cardClass: String(value.cardClass || ''),
     ratingRules: (value.ratingRules || []).map((rule) => ({
       min: positiveInteger(rule?.min, 0),
@@ -298,7 +298,7 @@ function normalizeListingPolicy(value = {}) {
     durationSeconds: positiveInteger(value.durationSeconds, 3600),
     listingDelaySeconds: normalizeRange(value.listingDelaySeconds, [4, 8]),
     maxListings: positiveInteger(value.maxListings, 50),
-    expiredPolicy: String(value.expiredPolicy || 'reprice'),
+    expiredPolicy: String(value.expiredPolicy || 'skip'),
   };
 }
 

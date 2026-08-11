@@ -297,11 +297,11 @@ EA objects
 3. 列出依赖该 Adapter 的所有共享事务和 Loop。
 4. 不在 Adapter 中加入具体 Loop 名称或业务策略。
 
-Trade Scheduler 的详细边界、阶段状态和真实页面验证顺序见 [docs/TRADE_SCHEDULER_DESIGN_ZH.md](docs/TRADE_SCHEDULER_DESIGN_ZH.md)。挂牌只能由 EA Trade Adapter 的单一 `services.Item.list()` 调用点执行，且必须经过 Prepared Plan、一次性 token、显式确认、item ID 重解析、价格限制二次刷新和逐项回执。TS2c UI 真实验证和后续独立门禁评审完成前，运行时入口必须继续硬限制为 Club 单卡；Transfer reprice 和批量数量不得提前开放。Listing diagnostics 不得导出确认 token、原始 EA runtime 对象或原始错误 response。
+Trade Scheduler 的详细边界、阶段状态和真实页面验证顺序见 [docs/TRADE_SCHEDULER_DESIGN_ZH.md](docs/TRADE_SCHEDULER_DESIGN_ZH.md)。挂牌只能由 EA Trade Adapter 的单一 `services.Item.list()` 调用点执行，且必须经过 Prepared Plan、一次性 token、显式确认、item ID 重解析、价格限制二次刷新和逐项回执。当前手动门禁只允许一张 Club 卡使用 `LIST 1`，或一张 Transfer `inactive` 卡使用 `REPRICE 1`；Transfer reprice 必须在 Prepare 和 mutation 前刷新 Transfer、复核同一 item ID/definition ID/pile，挂牌后按同一 item 和精确价格回读 Active。混合来源、批量数量、Scheduled Transfer、周期 reprice 和 `relistExpiredAuctions()` 仍不得开放。Listing diagnostics 不得导出确认 token、原始 EA runtime 对象或原始错误 response。
 
 EA Trade mutation 返回 HTTP/status `427` 时，必须分类为原因未知的 `auction-operation-blocked`：立即停止当前 Run，不重试，并在 GM storage 打开持久 Circuit Breaker。该熔断必须阻止后续 list/relist/bid/buy 等 Trade mutation，不能按普通 cooldown 自动 half-open；只有明确的人工 UI/API reset 才能清除。诊断仅允许记录 action、endpoint、status/code、安全 message、Job/Run ID、Trade Access 和容量摘要，不得记录请求头、Cookie、Token、原始 response body 或 EA 对象。
 
-Trade Scheduler Job Store、时区/misfire 计算、lease、Coordinator 和 UI 可以在自动执行关闭时开发和测试，但生产 `liveExecutionEnabled` 必须默认且持续为 `false`，Scheduler 默认 paused，导入 Job 必须解除 armed。EA `427` 恢复并完成 TS2c UI 单卡及 TS3 定时单卡真实验证前，不得开放后台自动 Listing、Transfer reprice、multi-item execution 或 Auto Buy；单元/Fake 测试不能替代该门禁。
+Trade Scheduler Job Store、时区/misfire 计算、lease、Coordinator 和 UI 可以在自动执行关闭时开发和测试；Scheduler 必须默认 paused、`liveExecutionEnabled=false`，导入 Job 必须解除 armed。当前已验证自动门禁仅包括一个 `once` Club 单卡 Listing 或一个受限 `once` Rare Gold 单卡 Buy，并且启动时立即回锁；手动 Transfer reprice 的实机验证不得被解释为允许 Scheduled Transfer、multi-item execution、recurring schedule 或更宽 Buy。单元/Fake 测试不能替代新的独立门禁。
 
 TS2c Club 单卡 UI 已于 2026-08-09 真实验证通过后，TS3 仅允许一个临时验证门：必须恰好一个 enabled+armed 的 `once` Listing Job，来源严格为 Club、`maxListings=1`、runAt 在未来 15 秒至 15 分钟内、misfire 仅允许 skip 或不超过 15 分钟的 grace-window，并由用户输入 `RUN ONCE 1` 显式开启。Job 启动前必须立即设置 paused、关闭 `liveExecutionEnabled` 并解除 armed；任务错过、过期 lease、circuit 变化、配置变化或 tick 异常同样必须回锁。该验证门不得扩展到 daily/interval/window、next-login、Transfer 来源、第二个 armed Job、批量 Listing、reprice 或 Auto Buy。
 

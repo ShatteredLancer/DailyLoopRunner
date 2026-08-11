@@ -7,6 +7,8 @@
 当前实现按门禁逐步开放，以下能力已经通过自动化测试和对应的实机验证：
 
 - 手动单卡 Listing：Club 来源、Transfer 刷新、价格限制、挂牌后 Transfer 回执核验。
+- 只读 Listing Preview：可观察 Club、Transfer List 或两者；Transfer 中 `inactive` 的过期卡可选择跳过或纳入 Preview。
+- 手动单卡 Transfer reprice：仅限 Transfer-only、`inactive` 过期卡、一次一张及精确输入 `REPRICE 1`；挂牌前后均刷新并核对同一 item。
 - 定时单卡 Listing：`once` 任务、页面恢复、跨标签页互斥、Loop/Trade operation 互斥和过期租约 fail-closed。
 - 手动单卡 Buy：Rare Gold、固定单评分、数量 1、Club 路由，以及重复卡发 Transfer 路由。
 - 定时单卡 Buy：`once` 任务、单评分 Rare Gold、数量 1、Buy Now 和总预算不超过 2000、显式最低保留金币。
@@ -16,6 +18,7 @@
 
 - Buy 数量大于 1、评分范围、其它卡类、周期/窗口/下次登录任务。
 - Bulk Buy、Bulk Listing、自动改价、自动刷新 Provider、后台 Companion。
+- Transfer 多卡、定时/周期改价、Bulk relist，以及 Club + Transfer 混合来源的 Prepare/执行。
 - 任何没有明确候选、身份、价格或库存去向的交易动作。
 
 ## 运行前检查

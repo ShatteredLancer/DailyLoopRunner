@@ -779,7 +779,7 @@ Exit criteria: Met。Provider、schema、错误策略、Adapter 能力探测、�
 
 ### TS2 手动 Bulk Listing
 
-Status: TS2c in progress（手动 Listing UI 与自动化验证完成；保持 Club 单卡门禁，等待真实 UI 验证）
+Status: Guarded manual single-item Club Listing and Transfer reprice complete; multi-item Bulk Listing remains gated.
 
 Scope:
 
@@ -789,7 +789,7 @@ Scope:
 - [x] 一次性确认 token、显式确认和 Stop 核心。
 - [x] 手动 Listing UI 的 Preview/Prepare/Confirm/Stop 交互。
 - [x] Club 候选过滤和 Active Transfer 排除的真实字段验证。
-- [ ] Expired/Inactive Transfer reprice 真实字段验证。
+- [x] Expired/Inactive Transfer reprice 真实字段验证。
 - [x] 固定价格、market override、EA 价格步进和 duration Preview。
 - [x] Price limits、容量和逐卡事务重检。
 - [x] 可序列化逐项 Listing run receipt。
@@ -797,9 +797,9 @@ Scope:
 
 Tests: TS2c UI 后 `npm run verify` 通过；124 个测试文件、777 个测试通过。新增覆盖手动 Job 的 Club 单卡硬门禁、主面板互斥、Preview/Prepared 状态隔离、配置变更撤销确认、精确确认、Stop、失败诊断、确认 token 脱敏和每页 15 项的 Recap。Architecture audit 确认 `requestMarketData()`、`list()` 和 `requestTransferItems()` 各一个 EA Trade Adapter 调用点，`searchTransferMarket()` 和 `bid()` 均为零调用点。
 
-Live validation: TS2a 已确认 Club `inactive` 和 Transfer `active` 字段、common/rare/special 分类、Active Trade 排除和报价回退。TS2b 已对一张低价值 Club common Gold 完成独立 Prepare、人工复核、显式确认、一次挂牌、Transfer 刷新和精确回读。TS2c 新 UI 已于 2026-08-09 用一张低价值 Club 卡完成 Preview、Prepare、确认、挂牌、Recap 和 diagnostics 导出验证。Expired/Inactive Transfer、连续多卡 Stop/节流和容量仍需按第 17.5 节完成真实验证。
+Live validation: TS2a 已确认 Club `inactive` 和 Transfer `active` 字段、common/rare/special 分类、Active Trade 排除和报价回退。TS2b 已对一张低价值 Club common Gold 完成独立 Prepare、人工复核、显式确认、一次挂牌、Transfer 刷新和精确回读。TS2c 新 UI 已于 2026-08-09 用一张低价值 Club 卡完成 Preview、Prepare、确认、挂牌、Recap 和 diagnostics 导出验证。TS7.1/TS7.2 又完成了 Transfer `expired -> inactive` 字段映射、手动单卡 `REPRICE 1`、EA Bid/Buy Now 下限和挂牌后 Active 精确回读验证。连续多卡 Stop/节流和容量竞争仍未开放或实机验证。
 
-Exit criteria: Not met。Club 单卡 Planner/Transaction/确认/UI/对账已通过真实验证；仍需后续单独评审和验证多卡节流、Stop、容量竞争与 Transfer reprice 后才能结束 TS2。
+Exit criteria: Met for the guarded single-item subset. Overall Bulk Listing criteria remain not met; multi-item pacing, Stop between real writes and capacity races require a separate design and staged gate.
 
 ### TS3 Scheduler 和定时挂牌
 
@@ -894,8 +894,8 @@ Exit criteria: 形成独立发布说明、真实风险清单和可恢复运行�
 | O3 | FUTNext rating catalog TTL 和 last-known-good 最长允许时间。 | 24 小时，版本变化立即失效 | TS1 | Resolved: D15 |
 | O4 | 默认 Misfire Policy 和 grace window。 | grace-window，15 分钟 | TS3 | Open |
 | O5 | 最低金币余额是否为所有 Buy Job 的全局硬限制。 | 全局硬限制，可被 Job 提高但不能降低 | TS4 | Resolved: TS5 explicit reserve gate |
-| O6 | Listing expired 默认跳过还是重新报价。 | reprice | TS2 | Open |
-| O7 | 是否允许同一 rating rule 同时匹配普通金和特殊卡。 | 不允许；card class 必须明确 | TS2 | Open |
+| O6 | Listing expired 默认跳过还是重新报价。 | skip；reprice 必须显式选择 | TS2 | Resolved: TS7.2 explicit manual gate |
+| O7 | 是否允许同一 rating rule 同时匹配普通金和特殊卡。 | 不允许；card class 必须明确 | TS2 | Resolved: explicit card-class contract |
 | O8 | 是否需要高价值卡 EA 最低 BIN 复核。 | 首版不实现 | TS6 | Open |
 
 ## 20. 决策与验证日志
@@ -1297,3 +1297,50 @@ Boundary: Manual Listing and Buy still use their existing `Run now` Preview/Prep
 Automated evidence: Contract, Job Store migration, schedule evaluation, guarded selector, dialog and Coordinator tests cover the invariant, legacy repair and idle external-state sanitization. Full repository verification is required for candidate `0.7.51` before the final diagnostics-only retest.
 
 Live validation: Artifact `trade-scheduler-diagnostics-2026-08-11T01-44-42-236Z.json` on `0.7.50` proved the retained manual Listing Job `listing-1786408835948` migrated from `armed=true / waiting-time` to `armed=false / disabled / manual-only` with `nextRunAt=null`; the separate once Buy Job remained unarmed and disabled. Scheduler remained paused/live-disabled with zero armed Jobs, History and aggregate Summary remained 18, dispatch remained 0, request budget reported 0/30 used with no actions, Lease and all Runner/Trade operation flags were idle, and Circuit remained closed. The follow-up `0.7.51` artifact `trade-scheduler-diagnostics-2026-08-11T01-51-07-366Z.json` reported `coordinator.external={busy:false,type:null,reason:null}` with the same zero-request, zero-dispatch, paused and closed-circuit state. No credential, URL, lease token or reservation ID was exported. This closes TS6.6 without enabling any additional Trade execution.
+
+### 2026-08-11 / TS7.1 / Transfer Listing read-only observation
+
+Status: Implemented and covered by focused automated tests. Live Transfer observation is required before any Transfer mutation is considered.
+
+Purpose: Collect real EA shapes for Transfer items in `active`, `inactive`, `closed` and `unknown` states without widening the production Listing gate. This stage is observation-only; it does not implement reprice, bulk Listing or recurring execution.
+
+Implementation:
+
+- Listing Preview now accepts `club`, `transfer` or `club + transfer` sources and preserves the selected source list in the Preview Job and diagnostics.
+- `expiredPolicy=skip` rejects Transfer candidates whose EA auction state is `inactive` with `expired-trade-skipped`. `expiredPolicy=reprice` keeps those candidates in the read-only plan so their identity, state and pricing shape can be reviewed.
+- `active` Transfer candidates remain rejected as `active-trade`, and `closed`/`unknown` states retain their existing fail-closed rejection behavior.
+- Preview rejection samples now retain only a bounded, allowlisted auction snapshot: normalized state, state source, primitive EA state, the three boolean state signals, tradeId and numeric price/time fields. Raw EA auction objects and methods are never exported.
+- The UI exposes source and expired-item choices, but disables Prepare for Transfer and mixed-source drafts. The Prepare callback repeats the Club-only gate, so a synthetic or stale click cannot call the live preparation path.
+- `createManualListingJob()` remains Club-only, skips expired items and limits live work to one item. Transfer support exists only in `createManualListingPreviewJob()`; no `list()` call, confirmation token or Listing receipt is produced by Preview.
+
+Boundary: This stage does not add Transfer reprice, moving Club items, bulk Listing, multiple production Jobs, scheduled Transfer work or automatic market-price mutation. The next evidence must be a saved Transfer-only Preview diagnostic with no Prepare, confirmation or receipt fields populated. Only after the EA state shapes and stale/expired behavior are understood should a separate design for Transfer mutation be proposed.
+
+Automated evidence: Manual Listing tests verify that the live factory strips Transfer/reprice settings while the Preview factory preserves them. Listing-plan tests verify expired Transfer skip/reprice and unconditional active-trade rejection. Dialog tests verify Transfer Preview, disabled Prepare, synthetic-click fail-closed behavior, diagnostic Job preservation and switching back to Club. Adapter tests verify the allowlisted auction-state signals, observed `expired` mapping and no raw EA object leakage. Full `npm run verify` is required for the `0.7.54` correction candidate.
+
+Live finding and correction: `0.7.52` artifact `trade-listing-diagnostics-2026-08-11T02-12-16-979Z.json` scanned all 14 Transfer items but rejected every item as `unknown-trade-state`; the first diagnostic schema did not preserve enough state evidence. `0.7.53` artifact `trade-listing-diagnostics-2026-08-11T02-22-16-794Z.json` again scanned all 14 without Prepare or receipt and proved a single consistent EA shape: primitive `tradeState="expired"`, all three legacy boolean methods false, valid tradeId/prices and `expires=-1`. The Adapter now maps only the observed primitive `expired` value to normalized `inactive`; unknown primitive values remain fail-closed. `expiredPolicy=skip` therefore rejects these items, while `expiredPolicy=reprice` may include them in Preview. Transfer Prepare and all Transfer mutation remain disabled. The correction candidate is `0.7.54`.
+
+Live validation (`0.7.54`): Artifact `trade-listing-diagnostics-2026-08-11T02-34-21-845Z.json` scanned all 14 Transfer items with `expiredPolicy=reprice`. Nine Rare Gold players in the configured 75-85 range were eligible, one was selected and eight were deferred by the one-item limit. The selected Kim Little item was normalized to `auctionState=inactive`; the other five items were rejected only as `rating-rule-mismatch`, and `unknown-trade-state` disappeared completely. The Preview remained read-only: operation flags were false, the Job was manual and unarmed, and Prepared, Club validation, receipt and error were all null. The circuit remained closed. This closes TS7.1 state observation and primitive `expired` mapping without enabling Transfer mutation.
+
+### 2026-08-11 / TS7.2 / Guarded single-item Transfer reprice
+
+Status: Implementation, automated validation and one-card live mutation validation complete. Broader Transfer automation remains locked.
+
+Implementation:
+
+- A separate manual factory creates exactly one Transfer-only Job with `expiredPolicy=reprice`, manual schedule and `armed=false`. The existing live Club factory remains Club-only with `expiredPolicy=skip`.
+- Listing Preparation refreshes Transfer before scanning either Club or Transfer sources, then resolves one exact item and refreshes its EA price limits. A Transfer plan produces the distinct confirmation text `REPRICE 1`; Club remains `LIST 1`.
+- Immediately before mutation, the transaction refreshes Transfer again, resolves the same item ID/definition ID/pile and reruns eligibility. The item must still be `inactive`; Active, Closed, unknown, moved, missing or changed items stop before `list()`.
+- The existing single-entity `service.list(item, startPrice, buyNow, duration)` Adapter path is reused. The implementation never calls the bulk `relistExpiredAuctions()` method. After an accepted request, Transfer is refreshed and the same item must be Active at the exact confirmed prices or the receipt becomes ambiguous.
+- The operation Coordinator, 12-request transaction reservation, Circuit, Stop handling, exact confirmation and History/diagnostic paths are unchanged. Transfer reprice does not consume an additional Transfer slot.
+
+Boundary: Only Manual + Transfer-only + expired reprice + one item is admitted. Mixed sources, `expiredPolicy=skip`, multiple items, Scheduled Transfer, recurring Jobs and bulk relist remain blocked. The Scheduled Listing selector and executor still require and force Club-only.
+
+Automated evidence: Manual factory, Preparation, Transaction and dialog tests cover the separate reprice Job, Transfer refresh before scan and before mutation, `REPRICE 1`, exact inactive identity, Active stale-state rejection, post-list Active reconciliation, unchanged Transfer capacity and disabled mixed/skip UI paths. Club Listing and Scheduled Club gates remain covered. Full `npm run verify` is required for candidate `0.7.55`.
+
+First live procedure: Install `0.7.55`, keep the Scheduler paused/live-disabled, select Transfer-only with `Include expired in Preview`, use one low-value rating/price rule and click `Prepare reprice` once. Do not type `REPRICE 1` and do not click Reprice item. Save Listing diagnostics immediately. The artifact must show one Prepared inactive Transfer entry, a completed Transfer preflight, loaded price limits, confirmation metadata without its token, no receipt, no active operation and a closed Circuit. Only after reviewing that artifact may the one-card mutation be attempted.
+
+Prepare-only live validation (`0.7.55`): Artifact `trade-listing-diagnostics-2026-08-11T03-08-54-338Z.json` selected the same Transfer item `914773859871` / definition `245872` (`Kim Little`) after a successful Transfer refresh. The Prepared plan contained exactly one `inactive` entry and price-limit refresh returned HTTP 200 with EA `_itemPriceLimits.minimum=700` and `maximum=10000`. At this stage the Runner incorrectly treated `minimum` as a common floor and prepared 700/700; confirmation was sanitized to `REPRICE 1`. The Job remained manual/unarmed, operation flags were false, receipt and error were null, and Circuit remained closed, so the read-only gate passed while the price semantics still required live clarification.
+
+Live mutation validation and price-floor correction (`0.7.55` -> `0.7.56`): Artifact `trade-listing-diagnostics-2026-08-11T03-36-45-677Z.json` exposed the EA price-limit semantic error. EA's `_itemPriceLimits.minimum` is the Bid minimum; the Buy Now minimum is the next legal EA price step. For this item the floors were therefore 700 Bid and 750 Buy Now, so the prepared 700/700 request placed Buy Now below its floor and EA rejected `list()` with HTTP 400. Artifact `trade-listing-diagnostics-2026-08-11T03-37-31-443Z.json` then repriced the same item at 1700/1800 successfully: EA returned HTTP 200, the post-list Transfer refresh resolved the same item as `active` with tradeId `607316016267`, exact 1700/1800 prices and 3598 seconds remaining, Transfer capacity was unchanged and Circuit stayed closed. This validates the guarded single-card Transfer mutation path.
+
+Correction and follow-up evidence: `0.7.57` explicitly models `bidMinimum=minimum` and derives `buyNowMinimum` as the next legal EA price step. With `one-step-below`, floors 650/700 preserve 650/700, while floors 700/750 adjust a configured 650/700 pair to 700/750. `startPricePolicy=same` preserves equal actual prices only after both reach the Buy Now floor; if no valid Buy Now price fits below EA's maximum, Prepare fails closed with `price-limits-no-valid-buy-now`. Prepared diagnostics retain both derived floors alongside EA's original minimum/maximum. Artifact `trade-listing-diagnostics-2026-08-11T04-18-14-770Z.json` on `0.7.56` successfully repriced one item at 700/750 with EA Bid minimum 650, and post-list verification found the exact item Active at those prices. Artifact `trade-listing-diagnostics-2026-08-11T04-21-38-876Z.json` then configured Buy Now 700 against the same 650 Bid / 700 Buy Now floors and correctly prepared 650/700 without executing a mutation. Manual one-card Transfer reprice is live-validated, but mixed sources, multiple items, Scheduled Transfer, recurring Jobs and bulk relist remain blocked.

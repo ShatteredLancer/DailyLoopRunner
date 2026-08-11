@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.51
+// @version      0.7.57
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.51",
+    version: "0.7.57",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -6883,7 +6883,7 @@
   }
   function normalizeListingPolicy(value = {}) {
     return {
-      sources: [...new Set((value.sources || ["transfer", "club"]).map(String))],
+      sources: [...new Set((value.sources || ["club"]).map(String))],
       cardClass: String(value.cardClass || ""),
       ratingRules: (value.ratingRules || []).map((rule) => ({
         min: positiveInteger7(rule?.min, 0),
@@ -6899,7 +6899,7 @@
       durationSeconds: positiveInteger7(value.durationSeconds, 3600),
       listingDelaySeconds: normalizeRange(value.listingDelaySeconds, [4, 8]),
       maxListings: positiveInteger7(value.maxListings, 50),
-      expiredPolicy: String(value.expiredPolicy || "reprice")
+      expiredPolicy: String(value.expiredPolicy || "skip")
     };
   }
   function normalizeTradeJob(input2 = {}, options = {}) {
@@ -7145,6 +7145,13 @@
       return null;
     }
   }
+  function primitiveAuctionState(value) {
+    const state = typeof value === "string" ? value.trim().toLowerCase() : "";
+    if (state === "expired" || state === "inactive") return "inactive";
+    if (state === "active") return "active";
+    if (state === "closed") return "closed";
+    return null;
+  }
   function listingTradeable(item, snapshot) {
     if (typeof item?.isUntradeable === "function") return snapshot.tradeable === true;
     if (typeof item?.tradeable === "boolean") return item.tradeable;
@@ -7162,6 +7169,8 @@
       return {
         present: false,
         state: "none",
+        stateSource: "none",
+        signals: { active: null, closed: null, inactive: null },
         tradeId: null,
         startingBid: null,
         currentBid: null,
@@ -7173,7 +7182,9 @@
     const closed = callBoolean3(auction, "isClosedTrade");
     const inactive = callBoolean3(auction, "isInactive");
     const primitiveState = safePrimitive(auction.tradeState ?? auction.state ?? auction.bidState);
-    const state = active === true ? "active" : closed === true ? "closed" : inactive === true ? "inactive" : "unknown";
+    const mappedPrimitiveState = primitiveAuctionState(primitiveState);
+    const state = active === true ? "active" : closed === true ? "closed" : inactive === true ? "inactive" : mappedPrimitiveState || "unknown";
+    const stateSource = active === true ? "isActiveTrade" : closed === true ? "isClosedTrade" : inactive === true ? "isInactive" : mappedPrimitiveState !== null ? "primitive-state" : "none";
     const numberOrNull2 = (value) => {
       if (value === null || value === void 0 || value === "") return null;
       const number = Number(value);
@@ -7182,6 +7193,8 @@
     return {
       present: true,
       state,
+      stateSource,
+      signals: { active, closed, inactive },
       rawState: primitiveState,
       tradeId: numberOrNull2(auction.tradeId ?? auction.id),
       startingBid: numberOrNull2(auction.startingBid ?? auction.startPrice),
@@ -10037,6 +10050,29 @@
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
+  function diagnosticNumber(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  function diagnosticAuction(auction) {
+    if (!auction || typeof auction !== "object") return null;
+    return {
+      present: auction.present === true,
+      state: String(auction.state || "none"),
+      stateSource: String(auction.stateSource || "unknown"),
+      rawState: auction.rawState === null || ["string", "number", "boolean"].includes(typeof auction.rawState) ? auction.rawState : null,
+      signals: {
+        active: auction.signals?.active === true ? true : auction.signals?.active === false ? false : null,
+        closed: auction.signals?.closed === true ? true : auction.signals?.closed === false ? false : null,
+        inactive: auction.signals?.inactive === true ? true : auction.signals?.inactive === false ? false : null
+      },
+      tradeId: diagnosticNumber(auction.tradeId),
+      startingBid: diagnosticNumber(auction.startingBid),
+      currentBid: diagnosticNumber(auction.currentBid),
+      buyNowPrice: diagnosticNumber(auction.buyNowPrice),
+      expires: diagnosticNumber(auction.expires)
+    };
+  }
   function priceStep(value) {
     const price = Math.max(0, finiteNumber5(value));
     if (price <= 1e3) return 50;
@@ -10053,6 +10089,10 @@
   function eaListingPriceBelow(value) {
     const price = roundEaListingPrice(value);
     return Math.max(MIN_EA_LISTING_PRICE, price - priceStep(price));
+  }
+  function eaListingPriceAbove(value) {
+    const price = roundEaListingPrice(value);
+    return roundEaListingPrice(price + priceStep(price));
   }
   function matchesTradeCardClass(candidate, cardClass) {
     const gold = candidate?.tier === "gold" || Number(candidate?.rating) >= 75 && Number(candidate?.rating) <= 99;
@@ -10080,6 +10120,9 @@
     if (auctionState === "active") return "active-trade";
     if (auctionState === "closed") return "closed-trade";
     if (candidate?.auction?.present === true && auctionState === "unknown") return "unknown-trade-state";
+    if (pile === "transfer" && auctionState === "inactive" && policy.expiredPolicy !== "reprice") {
+      return "expired-trade-skipped";
+    }
     if (!matchesTradeCardClass(candidate, policy.cardClass)) return "card-class-mismatch";
     if (!matchingRatingRule(policy.ratingRules, Number(candidate?.rating || 0))) return "rating-rule-mismatch";
     if (!Number.isFinite(Number(candidate?.item?.id)) || Number(candidate.item.id) <= 0) return "missing-item-id";
@@ -10088,16 +10131,39 @@
   }
   function applyListingPriceLimits(entry, limitResult = {}) {
     const limits = limitResult.after || limitResult;
-    const minimum = Number(limits.minimum);
+    const bidMinimum = Number(limits.minimum);
     const maximum = Number(limits.maximum);
     if (limitResult.status && limitResult.status !== "loaded") {
       return { ok: false, reason: `price-limits-${limitResult.status}`, entry: { ...entry } };
     }
-    if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum <= 0 || maximum < minimum) {
+    if (!Number.isFinite(bidMinimum) || !Number.isFinite(maximum) || bidMinimum <= 0 || maximum < bidMinimum) {
       return { ok: false, reason: "invalid-price-limits", entry: { ...entry } };
     }
-    const buyNow = Math.min(maximum, Math.max(minimum, Number(entry.buyNow)));
-    const startPrice = Math.min(buyNow, Math.min(maximum, Math.max(minimum, Number(entry.startPrice))));
+    const requestedStart = Number(entry.startPrice);
+    const requestedBuyNow = Number(entry.buyNow);
+    if (!Number.isFinite(requestedStart) || !Number.isFinite(requestedBuyNow)) {
+      return { ok: false, reason: "invalid-listing-prices", entry: { ...entry } };
+    }
+    const buyNowMinimum = eaListingPriceAbove(bidMinimum);
+    if (buyNowMinimum > maximum) {
+      return { ok: false, reason: "price-limits-no-valid-buy-now", entry: { ...entry } };
+    }
+    const requiresLowerStart = requestedStart < requestedBuyNow;
+    let buyNow = Math.min(maximum, Math.max(buyNowMinimum, requestedBuyNow));
+    let startPrice = requiresLowerStart ? Math.min(buyNow, Math.min(maximum, Math.max(bidMinimum, requestedStart))) : buyNow;
+    if (requiresLowerStart && startPrice >= buyNow) {
+      const lower = eaListingPriceBelow(buyNow);
+      if (lower >= bidMinimum) {
+        startPrice = lower;
+      } else {
+        const higher = eaListingPriceAbove(buyNow);
+        if (higher > maximum) {
+          return { ok: false, reason: "price-limits-no-valid-buy-now", entry: { ...entry } };
+        }
+        startPrice = buyNow;
+        buyNow = higher;
+      }
+    }
     return {
       ok: true,
       reason: null,
@@ -10107,7 +10173,12 @@
         startPrice,
         buyNow,
         priceLimitStatus: "loaded",
-        priceLimits: { minimum, maximum }
+        priceLimits: {
+          minimum: bidMinimum,
+          maximum,
+          bidMinimum,
+          buyNowMinimum
+        }
       }
     };
   }
@@ -10129,13 +10200,14 @@
       durationSeconds: entry.durationSeconds,
       priceLimits: entry.priceLimits
     }));
+    const action2 = entries.length > 0 && entries.every((entry) => entry.item?.pile === "transfer") ? "REPRICE" : "LIST";
     const token = `listing-${confirmationHash(JSON.stringify({ job: plan.job, entries, createdAt }))}`;
     return {
       token,
       createdAt,
       expiresAt: createdAt + ttlMs,
       itemCount: entries.length,
-      requiredText: `LIST ${entries.length}`
+      requiredText: `${action2} ${entries.length}`
     };
   }
   function quoteForCandidate(candidate, quotesByDefinitionId, policy, now) {
@@ -10191,7 +10263,7 @@
       if (reason) {
         rejectionCounts[reason] = Number(rejectionCounts[reason] || 0) + 1;
         if (rejectionSamples.length < REJECTION_SAMPLE_LIMIT) {
-          rejectionSamples.push({ item: { ...candidate?.item }, reason });
+          rejectionSamples.push({ item: { ...candidate?.item }, reason, auction: diagnosticAuction(candidate?.auction) });
         }
         continue;
       }
@@ -10223,6 +10295,7 @@
         cardClass: job.policy.cardClass,
         durationSeconds: job.policy.durationSeconds,
         maxListings: job.policy.maxListings,
+        expiredPolicy: job.policy.expiredPolicy,
         marketOverride: { ...job.policy.marketOverride }
       },
       counts: {
@@ -10275,7 +10348,7 @@
         }
       };
       const adapter = options.getTradeAdapter();
-      const requiresTransferPreflight = previewInput.policy.sources?.includes("club") === true;
+      const requiresTransferPreflight = previewInput.policy.sources?.some((source) => source === "club" || source === "transfer") === true;
       const transferPreflight = requiresTransferPreflight ? await adapter.refreshTransferItems() : null;
       const transferReady = !requiresTransferPreflight || transferPreflight?.status === "completed";
       const preview = await options.listingPreview.preview(previewInput, request);
@@ -10302,6 +10375,8 @@
           error: result.error,
           minimum: result.after?.minimum ?? null,
           maximum: result.after?.maximum ?? null,
+          bidMinimum: applied.ok ? applied.entry.priceLimits.bidMinimum : null,
+          buyNowMinimum: applied.ok ? applied.entry.priceLimits.buyNowMinimum : null,
           changed: applied.ok ? applied.changed : null
         });
         if (!applied.ok) {
@@ -10460,7 +10535,7 @@
           break;
         }
         let transferPreflight = null;
-        if (entry.item.pile === "club") {
+        if (entry.item.pile === "club" || entry.item.pile === "transfer") {
           transferPreflight = await adapter.refreshTransferItems();
           if (transferPreflight.status !== "completed") {
             failed += 1;
@@ -10475,33 +10550,35 @@
             });
             break;
           }
-          const transferItem = adapter.inspectListingItem({ ...entry.item, pile: "transfer" });
-          if (transferItem.status === "loaded" && transferItem.candidate?.item?.pile === "transfer") {
-            failed += 1;
-            status = "blocked";
-            reason = "listing-item-already-in-transfer";
-            receipts.push({
-              index: index + 1,
-              item: { ...entry.item },
-              status: "blocked",
-              reason,
-              transferPreflight,
-              live: transferItem.candidate.item
-            });
-            break;
-          }
-          if (transferItem.status === "error") {
-            failed += 1;
-            status = "blocked";
-            reason = "listing-transfer-state-error";
-            receipts.push({
-              index: index + 1,
-              item: { ...entry.item },
-              status: "blocked",
-              reason,
-              transferPreflight
-            });
-            break;
+          if (entry.item.pile === "club") {
+            const transferItem = adapter.inspectListingItem({ ...entry.item, pile: "transfer" });
+            if (transferItem.status === "loaded" && transferItem.candidate?.item?.pile === "transfer") {
+              failed += 1;
+              status = "blocked";
+              reason = "listing-item-already-in-transfer";
+              receipts.push({
+                index: index + 1,
+                item: { ...entry.item },
+                status: "blocked",
+                reason,
+                transferPreflight,
+                live: transferItem.candidate.item
+              });
+              break;
+            }
+            if (transferItem.status === "error") {
+              failed += 1;
+              status = "blocked";
+              reason = "listing-transfer-state-error";
+              receipts.push({
+                index: index + 1,
+                item: { ...entry.item },
+                status: "blocked",
+                reason,
+                transferPreflight
+              });
+              break;
+            }
           }
         }
         const live = adapter.inspectListingItem(entry.item);
@@ -22653,6 +22730,10 @@
     const number = Math.floor(Number(value));
     return Number.isFinite(number) && number > 0 ? number : fallback;
   }
+  function previewSources(value) {
+    const sources = [...new Set((Array.isArray(value) ? value : ["club"]).map(String).filter((source) => source === "club" || source === "transfer"))];
+    return sources.length ? sources : ["club"];
+  }
   function createManualListingJob(input2 = {}, options = {}) {
     const now = Math.max(0, Number(options.now ?? Date.now()) || 0);
     const rules = Array.isArray(input2.ratingRules) && input2.ratingRules.length ? input2.ratingRules : [{ min: 75, max: 82, buyNow: 700 }];
@@ -22687,6 +22768,32 @@
       createdAt: now,
       updatedAt: now
     }, { now });
+  }
+  function createManualListingPreviewJob(input2 = {}, options = {}) {
+    const job = createManualListingJob(input2, options);
+    return normalizeTradeJob({
+      ...job,
+      id: String(input2.id || "manual-listing-preview"),
+      name: String(input2.name || "Manual Listing Preview"),
+      policy: {
+        ...job.policy,
+        sources: previewSources(input2.sources),
+        expiredPolicy: input2.expiredPolicy === "reprice" ? "reprice" : "skip"
+      }
+    }, { now: options.now });
+  }
+  function createManualTransferRepriceJob(input2 = {}, options = {}) {
+    const job = createManualListingJob(input2, options);
+    return normalizeTradeJob({
+      ...job,
+      id: String(input2.id || "manual-transfer-reprice"),
+      name: String(input2.name || "Manual Transfer Reprice"),
+      policy: {
+        ...job.policy,
+        sources: ["transfer"],
+        expiredPolicy: "reprice"
+      }
+    }, { now: options.now });
   }
 
   // src/trade/listing-recap.js
@@ -22817,7 +22924,12 @@
     return title;
   }
   function defaultDraft(input2 = {}) {
+    const requestedSources = new Set((Array.isArray(input2.sources) ? input2.sources : ["club"]).map(String));
+    const sources = ["club", "transfer"].filter((source) => requestedSources.has(source));
     return {
+      id: input2.id ? String(input2.id) : void 0,
+      name: input2.name ? String(input2.name) : void 0,
+      sources: sources.length ? sources : ["club"],
       cardClass: String(input2.cardClass || "common-gold"),
       ratingRules: clone12(input2.ratingRules?.length ? input2.ratingRules : [{ min: 75, max: 82, buyNow: 700 }]),
       marketOverride: {
@@ -22827,6 +22939,7 @@
       },
       startPricePolicy: String(input2.startPricePolicy || "one-step-below"),
       durationSeconds: Number(input2.durationSeconds || 3600),
+      expiredPolicy: input2.expiredPolicy === "reprice" ? "reprice" : "skip",
       provider: String(input2.provider || "auto"),
       platform: String(input2.platform || "pc")
     };
@@ -22881,7 +22994,7 @@
     title.textContent = "Trade Listings";
     applyStyles7(title, { fontSize: "17px", fontWeight: "700" });
     const gate = dom.create("span");
-    gate.textContent = `Club / ${MANUAL_LISTING_LIVE_LIMIT} item`;
+    gate.textContent = `Live gate: ${MANUAL_LISTING_LIVE_LIMIT} item`;
     applyStyles7(gate, { color: "#9fb2c9", fontSize: "11px", border: "1px solid #536276", padding: "4px 7px" });
     heading.append(title, gate);
     const workspace = dom.create("div");
@@ -22895,8 +23008,11 @@
     applyStyles7(editor, { display: "flex", flexDirection: "column", gap: "9px", minWidth: "0" });
     const output = dom.create("div");
     applyStyles7(output, { minWidth: "0", minHeight: mode.mobile ? "180px" : "420px", borderLeft: mode.mobile ? "0" : "1px solid #35404e", paddingLeft: mode.mobile ? "0" : "16px" });
-    const source = control(dom, "text", "Club", mode, { id: "bronze-loop-trade-source" });
-    source.disabled = true;
+    const source = selectControl(dom, draft.sources.join(","), [
+      { value: "club", text: "Club" },
+      { value: "transfer", text: "Transfer List" },
+      { value: "club,transfer", text: "Club + Transfer List" }
+    ], mode, { id: "bronze-loop-trade-source" });
     const cardClass = selectControl(dom, draft.cardClass, [
       { value: "common-gold", text: "Common Gold" },
       { value: "rare-gold", text: "Rare Gold" },
@@ -22920,6 +23036,10 @@
       { value: "one-step-below", text: "One step below Buy Now" },
       { value: "same", text: "Same as Buy Now" }
     ], mode, { id: "bronze-loop-trade-start-policy" });
+    const expiredPolicy = selectControl(dom, draft.expiredPolicy, [
+      { value: "skip", text: "Skip expired" },
+      { value: "reprice", text: "Include expired in Preview" }
+    ], mode, { id: "bronze-loop-trade-expired-policy" });
     const marketLabel = dom.create("label");
     applyStyles7(marketLabel, { display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", minHeight: responsiveControlHeight(mode) });
     const marketEnabled = dom.create("input");
@@ -22948,7 +23068,18 @@
     const rules = dom.create("div");
     rules.id = "bronze-loop-trade-rules";
     applyStyles7(rules, { display: "flex", flexDirection: "column", gap: "6px" });
-    editor.append(rulesHeader, rules, sectionTitle(dom, "Pricing"), marketLabel, field2(dom, "Quote provider", provider, mode), field2(dom, "Markup %", markup, mode), field2(dom, "Quote max age", quoteAge, mode), field2(dom, "Start price", startPolicy, mode), field2(dom, "Duration", duration, mode));
+    editor.append(
+      rulesHeader,
+      rules,
+      sectionTitle(dom, "Pricing"),
+      marketLabel,
+      field2(dom, "Quote provider", provider, mode),
+      field2(dom, "Markup %", markup, mode),
+      field2(dom, "Quote max age", quoteAge, mode),
+      field2(dom, "Start price", startPolicy, mode),
+      field2(dom, "Duration", duration, mode),
+      field2(dom, "Expired Transfer items", expiredPolicy, mode)
+    );
     const status = dom.create("div");
     status.id = "bronze-loop-trade-status";
     status.setAttribute?.("role", "status");
@@ -22978,7 +23109,11 @@
       });
       addRule.disabled = busy || running;
       previewButton.disabled = busy || running;
-      prepareButton.disabled = busy || running;
+      const sourceAction = draft.sources.length === 1 && draft.sources[0] === "club" ? "list" : draft.sources.length === 1 && draft.sources[0] === "transfer" && draft.expiredPolicy === "reprice" ? "reprice" : null;
+      prepareButton.textContent = sourceAction === "reprice" ? "Prepare reprice" : "Prepare";
+      executeButton.textContent = sourceAction === "reprice" ? "Reprice item" : "List item";
+      prepareButton.disabled = busy || running || sourceAction === null;
+      prepareButton.title = sourceAction === null ? "Mixed sources and skipped expired items are Preview-only" : "";
       closeButton.disabled = running;
       diagnosticsButton.disabled = !latestArtifact() || busy || running;
       const requiredText = preparedResult?.confirmation?.requiredText || "";
@@ -23007,16 +23142,18 @@
       updateActionState();
     }
     function onDraftChange() {
+      draft.sources = String(source.value || "club").split(",").filter(Boolean);
       draft.cardClass = cardClass.value;
       draft.provider = provider.value;
       draft.durationSeconds = Number(duration.value);
       draft.startPricePolicy = startPolicy.value;
+      draft.expiredPolicy = expiredPolicy.value;
       draft.marketOverride.enabled = marketEnabled.checked;
       draft.marketOverride.markupPercent = Number(markup.value);
       draft.marketOverride.maxQuoteAgeMinutes = Number(quoteAge.value);
       invalidate();
     }
-    for (const item of [cardClass, provider, duration, startPolicy, marketEnabled, markup, quoteAge]) {
+    for (const item of [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge]) {
       editableControls.push(item);
       item.addEventListener("change", onDraftChange);
     }
@@ -23165,8 +23302,12 @@
         output.appendChild(pages);
       }
     }
-    function buildJob() {
-      currentJob = createManualListingJob(draft, { now: options.now?.() ?? Date.now() });
+    function buildPreviewJob() {
+      currentJob = createManualListingPreviewJob(draft, { now: options.now?.() ?? Date.now() });
+      return currentJob;
+    }
+    function buildLiveJob() {
+      currentJob = draft.sources.length === 1 && draft.sources[0] === "transfer" ? createManualTransferRepriceJob(draft, { now: options.now?.() ?? Date.now() }) : createManualListingJob(draft, { now: options.now?.() ?? Date.now() });
       return currentJob;
     }
     async function runAction(pendingText, action2, success) {
@@ -23188,18 +23329,22 @@
     previewButton.addEventListener("click", () => runAction("Building preview...", async () => {
       clearPrepared();
       receipt = null;
-      const job = buildJob();
+      const job = buildPreviewJob();
       previewResult = await options.onPreview?.(job, { platform: draft.platform, provider: draft.provider });
       renderPlan(previewResult, "Preview");
     }, () => `${Number(previewResult?.plan?.counts?.selected || 0)} item(s) selected`));
-    prepareButton.addEventListener("click", () => runAction("Preparing listing...", async () => {
-      clearPrepared();
-      previewResult = null;
-      receipt = null;
-      const job = buildJob();
-      preparedResult = await options.onPrepare?.(job, { platform: draft.platform, provider: draft.provider });
-      renderPlan(preparedResult, "Prepared listing");
-    }, () => preparedResult?.ready ? `Prepared. Enter ${preparedResult.confirmation.requiredText}` : `Preparation blocked (${preparedResult?.blockers?.length || 0})`));
+    prepareButton.addEventListener("click", () => {
+      const sourceAction = draft.sources.length === 1 && draft.sources[0] === "club" ? "list" : draft.sources.length === 1 && draft.sources[0] === "transfer" && draft.expiredPolicy === "reprice" ? "reprice" : null;
+      if (!sourceAction) return void 0;
+      return runAction(sourceAction === "reprice" ? "Preparing reprice..." : "Preparing listing...", async () => {
+        clearPrepared();
+        previewResult = null;
+        receipt = null;
+        const job = buildLiveJob();
+        preparedResult = await options.onPrepare?.(job, { platform: draft.platform, provider: draft.provider });
+        renderPlan(preparedResult, sourceAction === "reprice" ? "Prepared reprice" : "Prepared listing");
+      }, () => preparedResult?.ready ? `Prepared. Enter ${preparedResult.confirmation.requiredText}` : `Preparation blocked (${preparedResult?.blockers?.length || 0})`);
+    });
     confirmation.addEventListener("input", updateActionState);
     executeButton.addEventListener("click", async () => {
       const requiredText = preparedResult?.confirmation?.requiredText || "";
@@ -23207,7 +23352,7 @@
       busy = true;
       running = true;
       lastError = null;
-      status.textContent = "Listing item...";
+      status.textContent = preparedResult?.job?.policy?.sources?.[0] === "transfer" ? "Repricing item..." : "Listing item...";
       updateActionState();
       try {
         receipt = await options.onExecute?.({
@@ -23273,7 +23418,7 @@
       dialog,
       title,
       actions,
-      controls: [cardClass, provider, duration, startPolicy, marketEnabled, markup, quoteAge, previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton]
+      controls: [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge, previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton]
     });
     dialog.append(heading, workspace, status, actions);
     overlay.appendChild(dialog);
@@ -25090,13 +25235,19 @@
         throw new Error("Another Runner operation is active; listing preparation is unavailable");
       }
       const requestedSources = input2.policy?.sources || ["club"];
-      if (requestedSources.length !== 1 || requestedSources[0] !== "club") {
-        throw new Error("TS2b live gate currently allows Club listing preparation only");
-      }
+      const source = requestedSources.length === 1 ? requestedSources[0] : null;
+      const clubListing = source === "club";
+      const transferReprice = source === "transfer" && input2.policy?.expiredPolicy === "reprice";
+      if (!clubListing && !transferReprice) throw new Error("Live preparation allows one Club listing or one expired Transfer reprice only");
       state.preparedTradeListing = null;
       const prepared = await tradeListingPreparation.prepare({
         ...input2,
-        policy: { ...input2.policy || {}, sources: ["club"], maxListings: 1 }
+        policy: {
+          ...input2.policy || {},
+          sources: [source],
+          maxListings: 1,
+          expiredPolicy: transferReprice ? "reprice" : "skip"
+        }
       }, { ...options, maxListings: 1 });
       if (prepared.ready) state.preparedTradeListing = prepared;
       return prepared;
@@ -25283,11 +25434,15 @@
     function listingDialogDraft(job = null) {
       const policy = job?.policy || job || {};
       return {
+        id: job?.id,
+        name: job?.name,
+        sources: policy.sources,
         cardClass: policy.cardClass,
         ratingRules: policy.ratingRules,
         marketOverride: policy.marketOverride,
         startPricePolicy: policy.startPricePolicy,
         durationSeconds: policy.durationSeconds,
+        expiredPolicy: policy.expiredPolicy,
         provider: "auto",
         platform: "pc"
       };
@@ -25299,13 +25454,14 @@
         now: Date.now,
         draft: listingDialogDraft(job),
         onPreview: async (job2, request) => {
-          log("Trade Listings: building read-only Club preview");
+          log(`Trade Listings: building read-only ${job2.policy.sources.join("/")} preview`);
           const preview = await tradeListingPreview.preview(job2, request);
           log(`Trade Listings: preview selected ${Number(preview?.plan?.counts?.selected || 0)} of ${Number(preview?.plan?.counts?.eligible || 0)} eligible item(s)`);
           return preview;
         },
         onPrepare: async (job2, request) => {
-          log("Trade Listings: refreshing EA price limits and preparing one Club item");
+          const reprice = job2.policy.sources[0] === "transfer";
+          log(`Trade Listings: refreshing Transfer and EA price limits; preparing one ${reprice ? "expired Transfer reprice" : "Club listing"}`);
           const prepared = await prepareTradeListing(job2, request);
           log(prepared.ready ? `Trade Listings: one item prepared; confirmation ${prepared.confirmation.requiredText} is required` : `Trade Listings: preparation blocked (${prepared.blockers?.map((entry) => entry.reason).join(", ") || "unknown"})`);
           return prepared;

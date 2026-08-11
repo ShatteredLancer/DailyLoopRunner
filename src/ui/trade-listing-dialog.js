@@ -1,4 +1,9 @@
-import { createManualListingJob, MANUAL_LISTING_LIVE_LIMIT } from '../trade/manual-listing.js';
+import {
+  createManualListingJob,
+  createManualListingPreviewJob,
+  createManualTransferRepriceJob,
+  MANUAL_LISTING_LIVE_LIMIT,
+} from '../trade/manual-listing.js';
 import { createTradeListingRecap } from '../trade/listing-recap.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
@@ -74,7 +79,12 @@ function sectionTitle(dom, text) {
 }
 
 function defaultDraft(input = {}) {
+  const requestedSources = new Set((Array.isArray(input.sources) ? input.sources : ['club']).map(String));
+  const sources = ['club', 'transfer'].filter((source) => requestedSources.has(source));
   return {
+    id: input.id ? String(input.id) : undefined,
+    name: input.name ? String(input.name) : undefined,
+    sources: sources.length ? sources : ['club'],
     cardClass: String(input.cardClass || 'common-gold'),
     ratingRules: clone(input.ratingRules?.length ? input.ratingRules : [{ min: 75, max: 82, buyNow: 700 }]),
     marketOverride: {
@@ -84,6 +94,7 @@ function defaultDraft(input = {}) {
     },
     startPricePolicy: String(input.startPricePolicy || 'one-step-below'),
     durationSeconds: Number(input.durationSeconds || 3600),
+    expiredPolicy: input.expiredPolicy === 'reprice' ? 'reprice' : 'skip',
     provider: String(input.provider || 'auto'),
     platform: String(input.platform || 'pc'),
   };
@@ -128,7 +139,7 @@ export function showTradeListingDialog(options = {}) {
   title.textContent = 'Trade Listings';
   applyStyles(title, { fontSize: '17px', fontWeight: '700' });
   const gate = dom.create('span');
-  gate.textContent = `Club / ${MANUAL_LISTING_LIVE_LIMIT} item`;
+  gate.textContent = `Live gate: ${MANUAL_LISTING_LIVE_LIMIT} item`;
   applyStyles(gate, { color: '#9fb2c9', fontSize: '11px', border: '1px solid #536276', padding: '4px 7px' });
   heading.append(title, gate);
 
@@ -142,8 +153,11 @@ export function showTradeListingDialog(options = {}) {
   const output = dom.create('div');
   applyStyles(output, { minWidth: '0', minHeight: mode.mobile ? '180px' : '420px', borderLeft: mode.mobile ? '0' : '1px solid #35404e', paddingLeft: mode.mobile ? '0' : '16px' });
 
-  const source = control(dom, 'text', 'Club', mode, { id: 'bronze-loop-trade-source' });
-  source.disabled = true;
+  const source = selectControl(dom, draft.sources.join(','), [
+    { value: 'club', text: 'Club' },
+    { value: 'transfer', text: 'Transfer List' },
+    { value: 'club,transfer', text: 'Club + Transfer List' },
+  ], mode, { id: 'bronze-loop-trade-source' });
   const cardClass = selectControl(dom, draft.cardClass, [
     { value: 'common-gold', text: 'Common Gold' },
     { value: 'rare-gold', text: 'Rare Gold' },
@@ -167,6 +181,10 @@ export function showTradeListingDialog(options = {}) {
     { value: 'one-step-below', text: 'One step below Buy Now' },
     { value: 'same', text: 'Same as Buy Now' },
   ], mode, { id: 'bronze-loop-trade-start-policy' });
+  const expiredPolicy = selectControl(dom, draft.expiredPolicy, [
+    { value: 'skip', text: 'Skip expired' },
+    { value: 'reprice', text: 'Include expired in Preview' },
+  ], mode, { id: 'bronze-loop-trade-expired-policy' });
   const marketLabel = dom.create('label');
   applyStyles(marketLabel, { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', minHeight: responsiveControlHeight(mode) });
   const marketEnabled = dom.create('input');
@@ -196,7 +214,18 @@ export function showTradeListingDialog(options = {}) {
   const rules = dom.create('div');
   rules.id = 'bronze-loop-trade-rules';
   applyStyles(rules, { display: 'flex', flexDirection: 'column', gap: '6px' });
-  editor.append(rulesHeader, rules, sectionTitle(dom, 'Pricing'), marketLabel, field(dom, 'Quote provider', provider, mode), field(dom, 'Markup %', markup, mode), field(dom, 'Quote max age', quoteAge, mode), field(dom, 'Start price', startPolicy, mode), field(dom, 'Duration', duration, mode));
+  editor.append(
+    rulesHeader,
+    rules,
+    sectionTitle(dom, 'Pricing'),
+    marketLabel,
+    field(dom, 'Quote provider', provider, mode),
+    field(dom, 'Markup %', markup, mode),
+    field(dom, 'Quote max age', quoteAge, mode),
+    field(dom, 'Start price', startPolicy, mode),
+    field(dom, 'Duration', duration, mode),
+    field(dom, 'Expired Transfer items', expiredPolicy, mode),
+  );
 
   const status = dom.create('div');
   status.id = 'bronze-loop-trade-status';
@@ -228,7 +257,15 @@ export function showTradeListingDialog(options = {}) {
     editableControls.forEach((item) => { item.disabled = busy || running; });
     addRule.disabled = busy || running;
     previewButton.disabled = busy || running;
-    prepareButton.disabled = busy || running;
+    const sourceAction = draft.sources.length === 1 && draft.sources[0] === 'club'
+      ? 'list'
+      : draft.sources.length === 1 && draft.sources[0] === 'transfer' && draft.expiredPolicy === 'reprice'
+        ? 'reprice'
+        : null;
+    prepareButton.textContent = sourceAction === 'reprice' ? 'Prepare reprice' : 'Prepare';
+    executeButton.textContent = sourceAction === 'reprice' ? 'Reprice item' : 'List item';
+    prepareButton.disabled = busy || running || sourceAction === null;
+    prepareButton.title = sourceAction === null ? 'Mixed sources and skipped expired items are Preview-only' : '';
     closeButton.disabled = running;
     diagnosticsButton.disabled = !latestArtifact() || busy || running;
     const requiredText = preparedResult?.confirmation?.requiredText || '';
@@ -260,17 +297,19 @@ export function showTradeListingDialog(options = {}) {
   }
 
   function onDraftChange() {
+    draft.sources = String(source.value || 'club').split(',').filter(Boolean);
     draft.cardClass = cardClass.value;
     draft.provider = provider.value;
     draft.durationSeconds = Number(duration.value);
     draft.startPricePolicy = startPolicy.value;
+    draft.expiredPolicy = expiredPolicy.value;
     draft.marketOverride.enabled = marketEnabled.checked;
     draft.marketOverride.markupPercent = Number(markup.value);
     draft.marketOverride.maxQuoteAgeMinutes = Number(quoteAge.value);
     invalidate();
   }
 
-  for (const item of [cardClass, provider, duration, startPolicy, marketEnabled, markup, quoteAge]) {
+  for (const item of [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge]) {
     editableControls.push(item);
     item.addEventListener('change', onDraftChange);
   }
@@ -419,8 +458,15 @@ export function showTradeListingDialog(options = {}) {
     }
   }
 
-  function buildJob() {
-    currentJob = createManualListingJob(draft, { now: options.now?.() ?? Date.now() });
+  function buildPreviewJob() {
+    currentJob = createManualListingPreviewJob(draft, { now: options.now?.() ?? Date.now() });
+    return currentJob;
+  }
+
+  function buildLiveJob() {
+    currentJob = draft.sources.length === 1 && draft.sources[0] === 'transfer'
+      ? createManualTransferRepriceJob(draft, { now: options.now?.() ?? Date.now() })
+      : createManualListingJob(draft, { now: options.now?.() ?? Date.now() });
     return currentJob;
   }
 
@@ -444,21 +490,29 @@ export function showTradeListingDialog(options = {}) {
   previewButton.addEventListener('click', () => runAction('Building preview...', async () => {
     clearPrepared();
     receipt = null;
-    const job = buildJob();
+    const job = buildPreviewJob();
     previewResult = await options.onPreview?.(job, { platform: draft.platform, provider: draft.provider });
     renderPlan(previewResult, 'Preview');
   }, () => `${Number(previewResult?.plan?.counts?.selected || 0)} item(s) selected`));
 
-  prepareButton.addEventListener('click', () => runAction('Preparing listing...', async () => {
-    clearPrepared();
-    previewResult = null;
-    receipt = null;
-    const job = buildJob();
-    preparedResult = await options.onPrepare?.(job, { platform: draft.platform, provider: draft.provider });
-    renderPlan(preparedResult, 'Prepared listing');
-  }, () => preparedResult?.ready
-    ? `Prepared. Enter ${preparedResult.confirmation.requiredText}`
-    : `Preparation blocked (${preparedResult?.blockers?.length || 0})`));
+  prepareButton.addEventListener('click', () => {
+    const sourceAction = draft.sources.length === 1 && draft.sources[0] === 'club'
+      ? 'list'
+      : draft.sources.length === 1 && draft.sources[0] === 'transfer' && draft.expiredPolicy === 'reprice'
+        ? 'reprice'
+        : null;
+    if (!sourceAction) return undefined;
+    return runAction(sourceAction === 'reprice' ? 'Preparing reprice...' : 'Preparing listing...', async () => {
+      clearPrepared();
+      previewResult = null;
+      receipt = null;
+      const job = buildLiveJob();
+      preparedResult = await options.onPrepare?.(job, { platform: draft.platform, provider: draft.provider });
+      renderPlan(preparedResult, sourceAction === 'reprice' ? 'Prepared reprice' : 'Prepared listing');
+    }, () => preparedResult?.ready
+      ? `Prepared. Enter ${preparedResult.confirmation.requiredText}`
+      : `Preparation blocked (${preparedResult?.blockers?.length || 0})`);
+  });
 
   confirmation.addEventListener('input', updateActionState);
   executeButton.addEventListener('click', async () => {
@@ -467,7 +521,9 @@ export function showTradeListingDialog(options = {}) {
     busy = true;
     running = true;
     lastError = null;
-    status.textContent = 'Listing item...';
+    status.textContent = preparedResult?.job?.policy?.sources?.[0] === 'transfer'
+      ? 'Repricing item...'
+      : 'Listing item...';
     updateActionState();
     try {
       receipt = await options.onExecute?.({
@@ -533,7 +589,7 @@ export function showTradeListingDialog(options = {}) {
     dialog,
     title,
     actions,
-    controls: [cardClass, provider, duration, startPolicy, marketEnabled, markup, quoteAge, previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton],
+    controls: [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge, previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton],
   });
   dialog.append(heading, workspace, status, actions);
   overlay.appendChild(dialog);
