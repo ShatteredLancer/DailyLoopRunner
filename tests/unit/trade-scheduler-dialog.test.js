@@ -389,6 +389,43 @@ describe('Trade Scheduler dialog', () => {
     expect(snapshot.jobs[0].armed).toBe(false);
   });
 
+  it('requires the separate Transfer reprice confirmation when its live gate is enabled', async () => {
+    const ui = uiHarness();
+    const draft = createTradeJobDraft('listing', { now: 1000 });
+    const eligible = normalizeTradeJobEditorValue({
+      ...draft,
+      armed: true,
+      schedule: { type: 'once', runAt: 120000 },
+      policy: {
+        ...draft.policy,
+        sources: ['transfer'],
+        maxListings: 1,
+        expiredPolicy: 'reprice',
+      },
+    }, { now: 1000 });
+    const onEnableGuardedScheduling = vi.fn();
+    showTradeSchedulerDialog({
+      dom: ui.dom,
+      snapshot: schedulerSnapshot(eligible),
+      scheduledTransferRepriceEnabled: true,
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      onEnableGuardedScheduling,
+    });
+    const confirmation = ui.byId('bronze-loop-trade-guarded-confirmation');
+    const enable = ui.byId('bronze-loop-trade-enable-guarded-schedule');
+    expect(enable.disabled).toBe(false);
+    expect(confirmation.placeholder).toBe('RUN REPRICE ONCE 1');
+    confirmation.value = 'RUN ONCE 1';
+    await enable.click();
+    expect(onEnableGuardedScheduling).not.toHaveBeenCalled();
+    confirmation.value = 'RUN REPRICE ONCE 1';
+    await enable.click();
+    expect(onEnableGuardedScheduling).toHaveBeenCalledWith({
+      confirmationText: 'RUN REPRICE ONCE 1',
+      jobId: eligible.id,
+    });
+  });
+
   it('disables guarded scheduling when no eligible armed Job exists', () => {
     const ui = uiHarness();
     showTradeSchedulerDialog({ dom: ui.dom, snapshot: schedulerSnapshot(), getCircuit: () => ({ circuit: { state: 'closed' } }) });

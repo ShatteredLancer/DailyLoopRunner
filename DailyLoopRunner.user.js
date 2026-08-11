@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.57
+// @version      0.7.60
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.57",
+    version: "0.7.60",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -12317,6 +12317,7 @@
 
   // src/trade/guarded-scheduled-listing.js
   var GUARDED_SCHEDULE_CONFIRMATION = "RUN ONCE 1";
+  var GUARDED_TRANSFER_REPRICE_CONFIRMATION = "RUN REPRICE ONCE 1";
   function guardedTradeSessionReadiness(input2 = {}) {
     if (input2.pageReady !== true) return { ready: false, reason: "ea-session-unavailable" };
     const fsu = input2.fsuReadiness || {};
@@ -12338,6 +12339,9 @@
     const readiness = input2.context?.fsuReadiness || {};
     const entry = prepared?.plan?.entries?.[0];
     const ref = itemRef(entry?.item);
+    if (ref.pile === "transfer") {
+      return { ok: true, required: false, status: "not-required-transfer", item: ref };
+    }
     if (readiness.detected !== true || readiness.fullyValidated !== false) {
       return { ok: true, required: false, status: "not-required", item: ref };
     }
@@ -12378,26 +12382,61 @@
       };
     }
   }
-  function guardedScheduledListingReason(job = {}) {
-    if (job.type !== "listing") return "validation-gate-listing-only";
-    if (job.enabled !== true) return "validation-gate-job-disabled";
-    if (job.armed !== true) return "validation-gate-job-not-armed";
-    if (job.schedule?.type !== "once") return "validation-gate-once-only";
-    if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) return "validation-gate-run-at-invalid";
-    if (!["skip", "grace-window"].includes(job.misfirePolicy?.type)) return "validation-gate-next-login-disabled";
-    if (job.misfirePolicy?.type === "grace-window" && Number(job.misfirePolicy.graceMinutes) > 15) {
-      return "validation-gate-grace-too-long";
+  function inspectGuardedScheduledListingJob(job = {}, options = {}) {
+    let reason = null;
+    if (job.type !== "listing") {
+      return {
+        ready: false,
+        reason: "validation-gate-listing-only",
+        job,
+        mode: null,
+        requiredText: null
+      };
     }
-    if (!Array.isArray(job.policy?.sources) || job.policy.sources.length !== 1 || job.policy.sources[0] !== "club") return "validation-gate-club-only";
-    if (Number(job.policy?.maxListings) !== 1) return "validation-gate-one-item-only";
-    return null;
+    if (job.enabled !== true) reason = "validation-gate-job-disabled";
+    else if (job.armed !== true) reason = "validation-gate-job-not-armed";
+    else if (job.schedule?.type !== "once") reason = "validation-gate-once-only";
+    else if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) reason = "validation-gate-run-at-invalid";
+    else if (!["skip", "grace-window"].includes(job.misfirePolicy?.type)) reason = "validation-gate-next-login-disabled";
+    if (job.misfirePolicy?.type === "grace-window" && Number(job.misfirePolicy.graceMinutes) > 15) {
+      reason ||= "validation-gate-grace-too-long";
+    }
+    if (Number(job.policy?.maxListings) !== 1) reason ||= "validation-gate-one-item-only";
+    const sources = Array.isArray(job.policy?.sources) ? job.policy.sources : [];
+    const source = sources.length === 1 ? sources[0] : null;
+    let mode = null;
+    let requiredText = null;
+    if (!source) {
+      reason ||= "validation-gate-single-source-only";
+    } else if (source === "club") {
+      mode = "club-listing";
+      requiredText = GUARDED_SCHEDULE_CONFIRMATION;
+      if (job.policy?.expiredPolicy !== "skip") reason ||= "validation-gate-club-skip-expired-only";
+    } else if (source === "transfer") {
+      mode = "transfer-reprice";
+      requiredText = GUARDED_TRANSFER_REPRICE_CONFIRMATION;
+      if (job.policy?.expiredPolicy !== "reprice") reason ||= "validation-gate-transfer-reprice-required";
+      else if (options.scheduledTransferRepriceEnabled !== true) {
+        reason ||= "scheduled-transfer-reprice-validation-gate-disabled";
+      }
+    } else {
+      reason ||= "validation-gate-source-unsupported";
+    }
+    return {
+      ready: reason === null,
+      reason,
+      job,
+      mode,
+      requiredText: reason === null ? requiredText : null
+    };
   }
-  function selectGuardedScheduledListingJob(snapshot = {}) {
+  function selectGuardedScheduledListingJob(snapshot = {}, options = {}) {
     const armed = (snapshot.jobs || []).filter((job) => job.enabled === true && job.armed === true);
     if (armed.length !== 1) {
       return { ready: false, reason: armed.length ? "validation-gate-multiple-armed-jobs" : "validation-gate-no-armed-job", job: null };
     }
-    const reason = guardedScheduledListingReason(armed[0]);
+    const gate = inspectGuardedScheduledListingJob(armed[0], options);
+    const reason = gate.reason;
     const runtime = snapshot.runtimes?.[armed[0].id];
     if (!reason && runtime && runtime.nextRunAt === null) {
       return { ready: false, reason: "validation-gate-no-pending-run", job: null };
@@ -12434,7 +12473,10 @@
       store.relock();
       if (options.validationGateEnabled !== true) return blockedReceipt(input2, "scheduled-listing-validation-gate-disabled", startedAt);
       if (input2.context?.liveExecutionEnabled !== true) return blockedReceipt(input2, "live-execution-disabled", startedAt);
-      const reason = guardedScheduledListingReason(input2.job);
+      const gate = inspectGuardedScheduledListingJob(input2.job, {
+        scheduledTransferRepriceEnabled: options.scheduledTransferRepriceEnabled === true
+      });
+      const reason = gate.reason;
       if (reason) return blockedReceipt(input2, reason, startedAt);
       const availability = options.circuitBreaker?.availability?.();
       if (availability && availability.allowed !== true) return blockedReceipt(input2, "trade-circuit-open", startedAt);
@@ -12454,7 +12496,12 @@
       try {
         const job = {
           ...input2.job,
-          policy: { ...input2.job.policy, sources: ["club"], maxListings: 1 }
+          policy: {
+            ...input2.job.policy,
+            sources: [gate.mode === "transfer-reprice" ? "transfer" : "club"],
+            maxListings: 1,
+            expiredPolicy: gate.mode === "transfer-reprice" ? "reprice" : "skip"
+          }
         };
         const prepared = await listingPreparation.prepare(job, { maxListings: 1 });
         if (prepared?.ready !== true || prepared?.plan?.entries?.length !== 1) {
@@ -12522,8 +12569,16 @@
     const job = armed[0];
     let gate;
     if (job.type === "listing") {
-      const reason = guardedScheduledListingReason(job);
-      gate = { ready: reason === null, reason, job, requiredText: GUARDED_SCHEDULE_CONFIRMATION };
+      const inspected = inspectGuardedScheduledListingJob(job, {
+        scheduledTransferRepriceEnabled: options.scheduledTransferRepriceEnabled === true
+      });
+      const reason = inspected.reason;
+      gate = {
+        ready: reason === null,
+        reason,
+        job,
+        requiredText: reason === null ? inspected.requiredText || GUARDED_SCHEDULE_CONFIRMATION : null
+      };
     } else if (job.type === "buy") {
       if (options.scheduledBuyEnabled !== true) {
         gate = { ready: false, reason: "scheduled-buy-validation-gate-disabled", job, requiredText: null };
@@ -12546,6 +12601,17 @@
       job: gate.ready ? job : null,
       gate,
       requiredText: gate.ready ? gate.requiredText : null
+    };
+  }
+  function summarizeGuardedScheduledTradeSelection(snapshot = {}, options = {}) {
+    const selected2 = selectGuardedScheduledTradeJob(snapshot, options);
+    const job = selected2.job || selected2.gate?.job || null;
+    return {
+      ready: selected2.ready === true,
+      reason: selected2.reason || null,
+      jobId: job?.id ? String(job.id) : null,
+      jobType: job?.type ? String(job.type) : null,
+      requiredText: selected2.requiredText || null
     };
   }
 
@@ -24245,7 +24311,8 @@
         background: "#1a2028"
       });
       const guarded = selectGuardedScheduledTradeJob(snapshot, {
-        scheduledBuyEnabled: options.scheduledBuyEnabled === true
+        scheduledBuyEnabled: options.scheduledBuyEnabled === true,
+        scheduledTransferRepriceEnabled: options.scheduledTransferRepriceEnabled === true
       });
       if (snapshot.liveExecutionEnabled === true) {
         const gateState = dom.create("span");
@@ -24891,6 +24958,7 @@
   // src/userscript-entry.js
   var RUNNER_VERSION = package_default.version;
   var SCHEDULED_BUY_LIVE_GATE_ENABLED = true;
+  var SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
   (function() {
     "use strict";
     const W = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
@@ -25127,6 +25195,7 @@
       requestBudget: tradeRequestBudget,
       ownerId: tradeTabOwnerId,
       validationGateEnabled: true,
+      scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
       sleep,
       shouldStop: () => state.stopping,
       onRunningChange: (running, input2) => {
@@ -25342,7 +25411,8 @@
       const snapshot = tradeJobStore.read();
       if (snapshot.liveExecutionEnabled) throw new Error("Guarded scheduling is already enabled");
       const selected2 = selectGuardedScheduledTradeJob(snapshot, {
-        scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED
+        scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+        scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED
       });
       if (!selected2.ready) throw new Error(selected2.reason || "Exactly one eligible armed Job is required");
       if (String(input2.confirmationText || "") !== selected2.requiredText) {
@@ -25401,7 +25471,8 @@
         const snapshot = tradeJobStore.read();
         if (snapshot.liveExecutionEnabled) {
           const selected2 = selectGuardedScheduledTradeJob(snapshot, {
-            scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED
+            scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+            scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED
           });
           const circuit = tradeCircuitBreaker.availability();
           if (!selected2.ready || circuit.allowed !== true) {
@@ -25513,6 +25584,7 @@
       });
     }
     function tradeSchedulerDiagnostics() {
+      const scheduler = tradeJobStore.read();
       const operation = {
         running: state.running,
         stopping: state.stopping,
@@ -25526,7 +25598,7 @@
         schemaVersion: 1,
         capturedAt: Date.now(),
         runner: { version: RUNNER_VERSION, userAgent: navigator?.userAgent || "" },
-        scheduler: tradeJobStore.read(),
+        scheduler,
         schedulerRuntime: {
           ownerId: tradeTabOwnerId,
           webLock: tradeSchedulerTickLock.inspect(),
@@ -25535,8 +25607,13 @@
           session: inspectGuardedTradeSession(),
           validationGates: {
             scheduledListing: true,
+            scheduledTransferReprice: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
             scheduledBuy: SCHEDULED_BUY_LIVE_GATE_ENABLED
-          }
+          },
+          selection: summarizeGuardedScheduledTradeSelection(scheduler, {
+            scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+            scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED
+          })
         },
         circuit: tradeCircuitBreaker.snapshot(),
         lease: tradeRunLease.inspect(),
@@ -25661,6 +25738,7 @@
         onEnableGuardedScheduling: (input2) => enableGuardedTradeScheduling(input2),
         onDisableGuardedScheduling: () => disableGuardedTradeScheduling("manual-ui-disable"),
         scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+        scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
         getRequestBudget: () => tradeRequestBudget.inspect(),
         onSetMinimumRetainedCoins: (value) => {
           tradeJobStore.setMinimumRetainedCoins(value);

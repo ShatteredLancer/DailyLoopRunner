@@ -3,6 +3,7 @@ import { createListingTransaction } from './listing-transaction.js';
 import { inspectTradeRequestCapacity } from './request-budget.js';
 
 export const GUARDED_SCHEDULE_CONFIRMATION = 'RUN ONCE 1';
+export const GUARDED_TRANSFER_REPRICE_CONFIRMATION = 'RUN REPRICE ONCE 1';
 
 export function guardedTradeSessionReadiness(input = {}) {
   if (input.pageReady !== true) return { ready: false, reason: 'ea-session-unavailable' };
@@ -30,6 +31,9 @@ async function validateProvisionalClubEntry(options, input, prepared) {
   const readiness = input.context?.fsuReadiness || {};
   const entry = prepared?.plan?.entries?.[0];
   const ref = itemRef(entry?.item);
+  if (ref.pile === 'transfer') {
+    return { ok: true, required: false, status: 'not-required-transfer', item: ref };
+  }
   if (readiness.detected !== true || readiness.fullyValidated !== false) {
     return { ok: true, required: false, status: 'not-required', item: ref };
   }
@@ -71,29 +75,68 @@ async function validateProvisionalClubEntry(options, input, prepared) {
   }
 }
 
-export function guardedScheduledListingReason(job = {}) {
-  if (job.type !== 'listing') return 'validation-gate-listing-only';
-  if (job.enabled !== true) return 'validation-gate-job-disabled';
-  if (job.armed !== true) return 'validation-gate-job-not-armed';
-  if (job.schedule?.type !== 'once') return 'validation-gate-once-only';
-  if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) return 'validation-gate-run-at-invalid';
-  if (!['skip', 'grace-window'].includes(job.misfirePolicy?.type)) return 'validation-gate-next-login-disabled';
-  if (job.misfirePolicy?.type === 'grace-window' && Number(job.misfirePolicy.graceMinutes) > 15) {
-    return 'validation-gate-grace-too-long';
+export function inspectGuardedScheduledListingJob(job = {}, options = {}) {
+  let reason = null;
+  if (job.type !== 'listing') {
+    return {
+      ready: false,
+      reason: 'validation-gate-listing-only',
+      job,
+      mode: null,
+      requiredText: null,
+    };
   }
-  if (!Array.isArray(job.policy?.sources)
-    || job.policy.sources.length !== 1
-    || job.policy.sources[0] !== 'club') return 'validation-gate-club-only';
-  if (Number(job.policy?.maxListings) !== 1) return 'validation-gate-one-item-only';
-  return null;
+  if (job.enabled !== true) reason = 'validation-gate-job-disabled';
+  else if (job.armed !== true) reason = 'validation-gate-job-not-armed';
+  else if (job.schedule?.type !== 'once') reason = 'validation-gate-once-only';
+  else if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) reason = 'validation-gate-run-at-invalid';
+  else if (!['skip', 'grace-window'].includes(job.misfirePolicy?.type)) reason = 'validation-gate-next-login-disabled';
+  if (job.misfirePolicy?.type === 'grace-window' && Number(job.misfirePolicy.graceMinutes) > 15) {
+    reason ||= 'validation-gate-grace-too-long';
+  }
+  if (Number(job.policy?.maxListings) !== 1) reason ||= 'validation-gate-one-item-only';
+
+  const sources = Array.isArray(job.policy?.sources) ? job.policy.sources : [];
+  const source = sources.length === 1 ? sources[0] : null;
+  let mode = null;
+  let requiredText = null;
+  if (!source) {
+    reason ||= 'validation-gate-single-source-only';
+  } else if (source === 'club') {
+    mode = 'club-listing';
+    requiredText = GUARDED_SCHEDULE_CONFIRMATION;
+    if (job.policy?.expiredPolicy !== 'skip') reason ||= 'validation-gate-club-skip-expired-only';
+  } else if (source === 'transfer') {
+    mode = 'transfer-reprice';
+    requiredText = GUARDED_TRANSFER_REPRICE_CONFIRMATION;
+    if (job.policy?.expiredPolicy !== 'reprice') reason ||= 'validation-gate-transfer-reprice-required';
+    else if (options.scheduledTransferRepriceEnabled !== true) {
+      reason ||= 'scheduled-transfer-reprice-validation-gate-disabled';
+    }
+  } else {
+    reason ||= 'validation-gate-source-unsupported';
+  }
+
+  return {
+    ready: reason === null,
+    reason,
+    job,
+    mode,
+    requiredText: reason === null ? requiredText : null,
+  };
 }
 
-export function selectGuardedScheduledListingJob(snapshot = {}) {
+export function guardedScheduledListingReason(job = {}, options = {}) {
+  return inspectGuardedScheduledListingJob(job, options).reason;
+}
+
+export function selectGuardedScheduledListingJob(snapshot = {}, options = {}) {
   const armed = (snapshot.jobs || []).filter((job) => job.enabled === true && job.armed === true);
   if (armed.length !== 1) {
     return { ready: false, reason: armed.length ? 'validation-gate-multiple-armed-jobs' : 'validation-gate-no-armed-job', job: null };
   }
-  const reason = guardedScheduledListingReason(armed[0]);
+  const gate = inspectGuardedScheduledListingJob(armed[0], options);
+  const reason = gate.reason;
   const runtime = snapshot.runtimes?.[armed[0].id];
   if (!reason && runtime && runtime.nextRunAt === null) {
     return { ready: false, reason: 'validation-gate-no-pending-run', job: null };
@@ -135,7 +178,10 @@ export function createGuardedScheduledListingExecutor(options = {}) {
     store.relock();
     if (options.validationGateEnabled !== true) return blockedReceipt(input, 'scheduled-listing-validation-gate-disabled', startedAt);
     if (input.context?.liveExecutionEnabled !== true) return blockedReceipt(input, 'live-execution-disabled', startedAt);
-    const reason = guardedScheduledListingReason(input.job);
+    const gate = inspectGuardedScheduledListingJob(input.job, {
+      scheduledTransferRepriceEnabled: options.scheduledTransferRepriceEnabled === true,
+    });
+    const reason = gate.reason;
     if (reason) return blockedReceipt(input, reason, startedAt);
     const availability = options.circuitBreaker?.availability?.();
     if (availability && availability.allowed !== true) return blockedReceipt(input, 'trade-circuit-open', startedAt);
@@ -157,7 +203,12 @@ export function createGuardedScheduledListingExecutor(options = {}) {
     try {
       const job = {
         ...input.job,
-        policy: { ...input.job.policy, sources: ['club'], maxListings: 1 },
+        policy: {
+          ...input.job.policy,
+          sources: [gate.mode === 'transfer-reprice' ? 'transfer' : 'club'],
+          maxListings: 1,
+          expiredPolicy: gate.mode === 'transfer-reprice' ? 'reprice' : 'skip',
+        },
       };
       const prepared = await listingPreparation.prepare(job, { maxListings: 1 });
       if (prepared?.ready !== true || prepared?.plan?.entries?.length !== 1) {

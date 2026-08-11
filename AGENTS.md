@@ -297,7 +297,8 @@ EA objects
 3. 列出依赖该 Adapter 的所有共享事务和 Loop。
 4. 不在 Adapter 中加入具体 Loop 名称或业务策略。
 
-Trade Scheduler 的详细边界、阶段状态和真实页面验证顺序见 [docs/TRADE_SCHEDULER_DESIGN_ZH.md](docs/TRADE_SCHEDULER_DESIGN_ZH.md)。挂牌只能由 EA Trade Adapter 的单一 `services.Item.list()` 调用点执行，且必须经过 Prepared Plan、一次性 token、显式确认、item ID 重解析、价格限制二次刷新和逐项回执。当前手动门禁只允许一张 Club 卡使用 `LIST 1`，或一张 Transfer `inactive` 卡使用 `REPRICE 1`；Transfer reprice 必须在 Prepare 和 mutation 前刷新 Transfer、复核同一 item ID/definition ID/pile，挂牌后按同一 item 和精确价格回读 Active。混合来源、批量数量、Scheduled Transfer、周期 reprice 和 `relistExpiredAuctions()` 仍不得开放。Listing diagnostics 不得导出确认 token、原始 EA runtime 对象或原始错误 response。
+Trade Scheduler 的详细边界、阶段状态和真实页面验证顺序见 [docs/TRADE_SCHEDULER_DESIGN_ZH.md](docs/TRADE_SCHEDULER_DESIGN_ZH.md)。挂牌只能由 EA Trade Adapter 的单一 `services.Item.list()` 调用点执行，且必须经过 Prepared Plan、一次性 token、显式确认、item ID 重解析、价格限制二次刷新和逐项回执。当前手动门禁只允许一张 Club 卡使用 `LIST 1`，或一张 Transfer `inactive` 卡使用 `REPRICE 1`；Transfer reprice 必须在 Prepare 和 mutation 前刷新 Transfer、复核同一 item ID/definition ID/pile，挂牌后按同一 item 和精确价格回读 Active。除下一条明确允许的单卡 `once` Scheduled Transfer reprice 外，混合来源、批量数量、周期 reprice 和 `relistExpiredAuctions()` 仍不得开放。Listing diagnostics 不得导出确认 token、原始 EA runtime 对象或原始错误 response。
+Scheduled Transfer reprice 只能接受 Transfer-only、`once`、`expiredPolicy=reprice`、`maxListings=1` Job，并要求未来 15 秒至 15 分钟内的运行时间和精确 `RUN REPRICE ONCE 1` 人工确认。执行器必须在 Prepare 前自动 relock，继续使用单卡 `REPRICE 1` transaction、同一 item 身份与价格回读，并在结束后保持 Scheduler 暂停、live disabled、Job disarmed；混合来源、多卡、周期 reprice、批量 relist 和 `relistExpiredAuctions()` 仍必须 fail-closed。
 
 EA Trade mutation 返回 HTTP/status `427` 时，必须分类为原因未知的 `auction-operation-blocked`：立即停止当前 Run，不重试，并在 GM storage 打开持久 Circuit Breaker。该熔断必须阻止后续 list/relist/bid/buy 等 Trade mutation，不能按普通 cooldown 自动 half-open；只有明确的人工 UI/API reset 才能清除。诊断仅允许记录 action、endpoint、status/code、安全 message、Job/Run ID、Trade Access 和容量摘要，不得记录请求头、Cookie、Token、原始 response body 或 EA 对象。
 

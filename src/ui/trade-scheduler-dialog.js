@@ -460,6 +460,7 @@ export function showTradeSchedulerDialog(options = {}) {
     });
     const guarded = selectGuardedScheduledTradeJob(snapshot, {
       scheduledBuyEnabled: options.scheduledBuyEnabled === true,
+      scheduledTransferRepriceEnabled: options.scheduledTransferRepriceEnabled === true,
     });
     if (snapshot.liveExecutionEnabled === true) {
       const gateState = dom.create('span');

@@ -26,7 +26,7 @@ function snapshot(now = 1_000_000) {
       armed: true,
       schedule: { type: 'once', runAt: now + 60_000 },
       misfirePolicy: { type: 'grace-window', graceMinutes: 15 },
-      policy: { sources: ['club'], maxListings: 1 },
+      policy: { sources: ['club'], maxListings: 1, expiredPolicy: 'skip' },
     }],
     runtimes: { 'listing-1': { nextRunAt: now + 60_000 } },
   };

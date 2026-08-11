@@ -1,6 +1,6 @@
 import {
   GUARDED_SCHEDULE_CONFIRMATION,
-  guardedScheduledListingReason,
+  inspectGuardedScheduledListingJob,
 } from './guarded-scheduled-listing.js';
 import {
   inspectScheduledBuyValidationJob,
@@ -23,8 +23,18 @@ export function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
   const job = armed[0];
   let gate;
   if (job.type === 'listing') {
-    const reason = guardedScheduledListingReason(job);
-    gate = { ready: reason === null, reason, job, requiredText: GUARDED_SCHEDULE_CONFIRMATION };
+    const inspected = inspectGuardedScheduledListingJob(job, {
+      scheduledTransferRepriceEnabled: options.scheduledTransferRepriceEnabled === true,
+    });
+    const reason = inspected.reason;
+    gate = {
+      ready: reason === null,
+      reason,
+      job,
+      requiredText: reason === null
+        ? (inspected.requiredText || GUARDED_SCHEDULE_CONFIRMATION)
+        : null,
+    };
   } else if (job.type === 'buy') {
     if (options.scheduledBuyEnabled !== true) {
       gate = { ready: false, reason: 'scheduled-buy-validation-gate-disabled', job, requiredText: null };
@@ -48,5 +58,17 @@ export function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
     job: gate.ready ? job : null,
     gate,
     requiredText: gate.ready ? gate.requiredText : null,
+  };
+}
+
+export function summarizeGuardedScheduledTradeSelection(snapshot = {}, options = {}) {
+  const selected = selectGuardedScheduledTradeJob(snapshot, options);
+  const job = selected.job || selected.gate?.job || null;
+  return {
+    ready: selected.ready === true,
+    reason: selected.reason || null,
+    jobId: job?.id ? String(job.id) : null,
+    jobType: job?.type ? String(job.type) : null,
+    requiredText: selected.requiredText || null,
   };
 }

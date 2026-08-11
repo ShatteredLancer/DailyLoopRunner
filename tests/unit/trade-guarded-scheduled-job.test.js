@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeTradeJob } from '../../src/trade/contracts.js';
-import { selectGuardedScheduledTradeJob } from '../../src/trade/guarded-scheduled-job.js';
+import {
+  selectGuardedScheduledTradeJob,
+  summarizeGuardedScheduledTradeSelection,
+} from '../../src/trade/guarded-scheduled-job.js';
 
 function buyJob() {
   return normalizeTradeJob({
@@ -28,6 +31,19 @@ function listingJob() {
   }, { now: 1 });
 }
 
+function transferRepriceJob() {
+  return normalizeTradeJob({
+    id: 'transfer-reprice-once', name: 'Transfer reprice once', type: 'listing', enabled: true, armed: true,
+    schedule: { type: 'once', runAt: 60_000 },
+    misfirePolicy: { type: 'skip' },
+    policy: {
+      sources: ['transfer'], cardClass: 'rare-gold',
+      ratingRules: [{ min: 75, max: 82, buyNow: 700 }],
+      maxListings: 1, expiredPolicy: 'reprice',
+    },
+  }, { now: 1 });
+}
+
 describe('Guarded scheduled Trade Job selection', () => {
   it('keeps scheduled Buy unavailable unless its separate gate is enabled', () => {
     const job = buyJob();
@@ -44,6 +60,45 @@ describe('Guarded scheduled Trade Job selection', () => {
       ready: true,
       job,
       requiredText: 'RUN BUY ONCE 1 RESERVE 100000',
+    });
+  });
+
+  it('keeps Scheduled Transfer reprice disabled until its separate gate is enabled', () => {
+    const job = transferRepriceJob();
+    const snapshot = {
+      jobs: [job],
+      runtimes: { [job.id]: { nextRunAt: job.schedule.runAt } },
+    };
+    expect(selectGuardedScheduledTradeJob(snapshot)).toMatchObject({
+      ready: false,
+      reason: 'scheduled-transfer-reprice-validation-gate-disabled',
+      requiredText: null,
+    });
+    expect(summarizeGuardedScheduledTradeSelection(snapshot)).toEqual({
+      ready: false,
+      reason: 'scheduled-transfer-reprice-validation-gate-disabled',
+      jobId: job.id,
+      jobType: 'listing',
+      requiredText: null,
+    });
+    expect(selectGuardedScheduledTradeJob(snapshot, { scheduledTransferRepriceEnabled: true })).toMatchObject({
+      ready: true,
+      job,
+      requiredText: 'RUN REPRICE ONCE 1',
+    });
+    expect(summarizeGuardedScheduledTradeSelection(snapshot, { scheduledTransferRepriceEnabled: true })).toEqual({
+      ready: true,
+      reason: null,
+      jobId: job.id,
+      jobType: 'listing',
+      requiredText: 'RUN REPRICE ONCE 1',
+    });
+    expect(selectGuardedScheduledTradeJob({
+      ...snapshot,
+      jobs: [{ ...job, policy: { ...job.policy, expiredPolicy: 'skip' } }],
+    }, { scheduledTransferRepriceEnabled: true })).toMatchObject({
+      ready: false,
+      reason: 'validation-gate-transfer-reprice-required',
     });
   });
 

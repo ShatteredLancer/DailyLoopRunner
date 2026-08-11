@@ -35,6 +35,20 @@ function job(overrides = {}) {
   }, { now: 1000 });
 }
 
+function transferRepriceJob(overrides = {}) {
+  return normalizeTradeJob({
+    id: 'once-transfer-reprice', name: 'One guarded Transfer reprice', type: 'listing', enabled: true, armed: true,
+    schedule: { type: 'once', runAt: 2000 }, misfirePolicy: { type: 'grace-window', graceMinutes: 15 },
+    policy: {
+      sources: ['transfer'], cardClass: 'rare-gold', ratingRules: [{ min: 75, max: 82, buyNow: 700 }],
+      startPricePolicy: 'one-step-below', durationSeconds: 3600, listingDelaySeconds: [4, 8],
+      maxListings: 1, expiredPolicy: 'reprice',
+      ...overrides.policy,
+    },
+    ...overrides,
+  }, { now: 1000 });
+}
+
 function store() {
   return {
     relock: vi.fn(),
@@ -134,6 +148,51 @@ describe('Guarded scheduled Listing validation executor', () => {
     expect(getTradeAdapter).toHaveBeenCalledWith({ requestBudget: reservation });
     expect(transactionFactory).toHaveBeenCalledWith(expect.objectContaining({ tradeAdapter: scopedAdapter }));
     expect(reservation.release).toHaveBeenCalledOnce();
+  });
+
+  it('supports the offline Scheduled Transfer reprice branch without Club validation', async () => {
+    const jobStore = store();
+    const prepared = {
+      ready: true,
+      job: transferRepriceJob(),
+      plan: { entries: [{ item: { id: 9, definitionId: 10, pile: 'transfer' } }] },
+      confirmation: { token: 'secret', requiredText: 'REPRICE 1' },
+    };
+    const listingPreparation = { prepare: vi.fn(async (preparedJob) => ({ ...prepared, job: preparedJob })) };
+    const transaction = { run: vi.fn(async () => ({ status: 'completed', requested: 1, succeeded: 1, receipts: [] })) };
+    const transactionFactory = vi.fn(() => transaction);
+    const validateClubPlayers = vi.fn();
+    const result = await createGuardedScheduledListingExecutor({
+      store: jobStore,
+      listingPreparation,
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      getTradeAdapter: () => createFakeTradeAdapter(),
+      transactionFactory,
+      validateClubPlayers,
+      validationGateEnabled: true,
+      scheduledTransferRepriceEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: transferRepriceJob(),
+      runId: 'transfer-reprice-run',
+      scheduledFor: 2000,
+      context: {
+        liveExecutionEnabled: true,
+        fsuReadiness: { detected: true, ready: true, fullyValidated: false, state: 'provisional' },
+      },
+      heartbeat: () => true,
+    });
+
+    expect(result).toMatchObject({ status: 'completed', requested: 1, succeeded: 1 });
+    expect(listingPreparation.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice' }) }),
+      { maxListings: 1 },
+    );
+    expect(transaction.run).toHaveBeenCalledWith(expect.objectContaining({
+      confirmationText: 'REPRICE 1',
+      prepared: expect.objectContaining({ job: expect.objectContaining({ policy: expect.objectContaining({ sources: ['transfer'] }) }) }),
+    }));
+    expect(validateClubPlayers).not.toHaveBeenCalled();
   });
 
   it('blocks after preparation when another tab takes the inspected request capacity', async () => {
@@ -368,5 +427,63 @@ describe('Guarded scheduled Listing validation executor', () => {
       runtimes: { 'once-listing': { status: 'completed', nextRunAt: null, runCount: 1 } },
       history: [{ runId: 'scheduled-run-1', status: 'completed', succeeded: 1 }],
     });
+  });
+
+  it('runs one Transfer reprice through the Scheduler and cannot repeat', async () => {
+    const storage = memoryStorage();
+    let time = 1000;
+    const jobStore = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    const scheduledJob = transferRepriceJob();
+    jobStore.upsert(scheduledJob);
+    jobStore.setLiveExecutionEnabled(true);
+    jobStore.setPaused(false);
+    time = 2000;
+    const transaction = { run: vi.fn(async () => ({ status: 'completed', requested: 1, succeeded: 1, receipts: [] })) };
+    const executor = createGuardedScheduledListingExecutor({
+      store: jobStore,
+      listingPreparation: {
+        prepare: async (preparedJob) => ({
+          ready: true,
+          job: preparedJob,
+          plan: { entries: [{ item: { id: 9, definitionId: 10, pile: 'transfer' } }] },
+          confirmation: { token: 'token', requiredText: 'REPRICE 1' },
+        }),
+      },
+      operationCoordinator: createOperationCoordinator({ now: () => time }),
+      getTradeAdapter: () => createFakeTradeAdapter(),
+      transactionFactory: () => transaction,
+      validationGateEnabled: true,
+      scheduledTransferRepriceEnabled: true,
+      now: () => time,
+    });
+    const scheduler = createTradeScheduler({
+      store: jobStore,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'tab-a', now: () => time, createToken: () => 'lease-token' }),
+      now: () => time,
+      createRunId: () => 'scheduled-transfer-reprice-run',
+      getContext: () => ({ sessionReady: true, operationBusy: false }),
+      executeJob: executor.execute,
+    });
+
+    const result = await scheduler.tick();
+    expect(result).toMatchObject({
+      status: 'completed',
+      receipt: { runId: 'scheduled-transfer-reprice-run', succeeded: 1 },
+    });
+    expect(transaction.run).toHaveBeenCalledWith(expect.objectContaining({
+      confirmationText: 'REPRICE 1',
+      prepared: expect.objectContaining({
+        job: expect.objectContaining({ policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice' }) }),
+      }),
+    }));
+    expect(jobStore.read()).toMatchObject({
+      paused: true,
+      liveExecutionEnabled: false,
+      jobs: [{ id: scheduledJob.id, armed: false }],
+      runtimes: { [scheduledJob.id]: { status: 'completed', nextRunAt: null, runCount: 1 } },
+      history: [{ runId: 'scheduled-transfer-reprice-run', status: 'completed', succeeded: 1 }],
+    });
+    expect(await scheduler.tick()).toMatchObject({ status: 'paused' });
+    expect(transaction.run).toHaveBeenCalledOnce();
   });
 });

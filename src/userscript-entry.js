@@ -183,7 +183,10 @@ import { createTradeBuyDiagnostics, sanitizeTradeBuyReceipt } from './trade/buy-
 import { exportTradeJobConfigJson, parseTradeJobConfig } from './trade/job-config.js';
 import { createGuardedManualBuyExecutor } from './trade/guarded-manual-buy.js';
 import { createGuardedScheduledBuyExecutor } from './trade/guarded-scheduled-buy.js';
-import { selectGuardedScheduledTradeJob } from './trade/guarded-scheduled-job.js';
+import {
+  selectGuardedScheduledTradeJob,
+  summarizeGuardedScheduledTradeSelection,
+} from './trade/guarded-scheduled-job.js';
 import { createTradeCircuitBreaker } from './trade/circuit-breaker.js';
 import { createTradeJobStore } from './trade/job-store.js';
 import { createTradeRunLease } from './trade/run-lease.js';
@@ -306,6 +309,7 @@ import { reconcileExpiredPreBuyLease } from './trade/buy-lease-recovery.js';
 
 const RUNNER_VERSION = packageInfo.version;
 const SCHEDULED_BUY_LIVE_GATE_ENABLED = true;
+const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
 
 (function () {
   'use strict';
@@ -548,6 +552,7 @@ const state = {
     requestBudget: tradeRequestBudget,
     ownerId: tradeTabOwnerId,
     validationGateEnabled: true,
+    scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
     sleep,
     shouldStop: () => state.stopping,
     onRunningChange: (running, input) => {
@@ -774,6 +779,7 @@ const state = {
     if (snapshot.liveExecutionEnabled) throw new Error('Guarded scheduling is already enabled');
     const selected = selectGuardedScheduledTradeJob(snapshot, {
       scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+      scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
     });
     if (!selected.ready) throw new Error(selected.reason || 'Exactly one eligible armed Job is required');
     if (String(input.confirmationText || '') !== selected.requiredText) {
@@ -836,6 +842,7 @@ const state = {
       if (snapshot.liveExecutionEnabled) {
         const selected = selectGuardedScheduledTradeJob(snapshot, {
           scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+          scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
         });
         const circuit = tradeCircuitBreaker.availability();
         if (!selected.ready || circuit.allowed !== true) {
@@ -953,6 +960,7 @@ const state = {
   }
 
   function tradeSchedulerDiagnostics() {
+    const scheduler = tradeJobStore.read();
     const operation = {
       running: state.running,
       stopping: state.stopping,
@@ -966,7 +974,7 @@ const state = {
       schemaVersion: 1,
       capturedAt: Date.now(),
       runner: { version: RUNNER_VERSION, userAgent: navigator?.userAgent || '' },
-      scheduler: tradeJobStore.read(),
+      scheduler,
       schedulerRuntime: {
         ownerId: tradeTabOwnerId,
         webLock: tradeSchedulerTickLock.inspect(),
@@ -975,8 +983,13 @@ const state = {
         session: inspectGuardedTradeSession(),
         validationGates: {
           scheduledListing: true,
+          scheduledTransferReprice: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
           scheduledBuy: SCHEDULED_BUY_LIVE_GATE_ENABLED,
         },
+        selection: summarizeGuardedScheduledTradeSelection(scheduler, {
+          scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+          scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
+        }),
       },
       circuit: tradeCircuitBreaker.snapshot(),
       lease: tradeRunLease.inspect(),
@@ -1106,6 +1119,7 @@ const state = {
       onEnableGuardedScheduling: (input) => enableGuardedTradeScheduling(input),
       onDisableGuardedScheduling: () => disableGuardedTradeScheduling('manual-ui-disable'),
       scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+      scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
       getRequestBudget: () => tradeRequestBudget.inspect(),
       onSetMinimumRetainedCoins: (value) => {
         tradeJobStore.setMinimumRetainedCoins(value);
