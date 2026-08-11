@@ -35,8 +35,8 @@ export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
   let reason = null;
   if (job.type !== 'buy') reason = 'scheduled-buy-validation-buy-only';
   else if (job.enabled !== true) reason = 'scheduled-buy-validation-job-disabled';
-  else if (job.armed !== true) reason = 'scheduled-buy-validation-job-not-armed';
   else if (job.schedule?.type !== 'once') reason = 'scheduled-buy-validation-once-only';
+  else if (job.armed !== true) reason = 'scheduled-buy-validation-job-not-armed';
   else if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) reason = 'scheduled-buy-validation-run-at-invalid';
   else if (!['skip', 'grace-window'].includes(job.misfirePolicy?.type)) reason = 'scheduled-buy-validation-next-login-disabled';
   else if (job.misfirePolicy?.type === 'grace-window' && Number(job.misfirePolicy.graceMinutes) > 15) reason = 'scheduled-buy-validation-grace-too-long';

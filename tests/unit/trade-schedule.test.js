@@ -52,6 +52,18 @@ describe('Trade schedule', () => {
     })).toMatchObject({ status: 'missed', reason: 'misfire-skip', action: 'advance' });
   });
 
+  it('keeps manual Jobs outside the armed Scheduler lifecycle', () => {
+    const job = listingJob({ type: 'manual' });
+    const runtime = createTradeJobRuntime(job, { now: 1000 });
+    expect(job.armed).toBe(false);
+    expect(runtime).toMatchObject({ status: 'disabled', reason: 'manual-only', nextRunAt: null });
+    expect(evaluateTradeJob({ ...job, armed: true }, runtime, {
+      now: 1000,
+      sessionReady: true,
+      liveExecutionEnabled: true,
+    })).toMatchObject({ status: 'disabled', reason: 'manual-only', action: 'wait' });
+  });
+
   it('advances recurring schedules from an absolute scheduled time', () => {
     const job = listingJob({ type: 'interval', everyMinutes: 10, anchorAt: 1000 });
     const runtime = createTradeJobRuntime(job, { now: 0 });

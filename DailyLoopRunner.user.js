@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.49
+// @version      0.7.51
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.49",
+    version: "0.7.51",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -6824,6 +6824,9 @@
       if (typeof job[field4] !== "boolean") errors.push(`${label}.${field4} must be boolean`);
     }
     validateSchedule(job.schedule, `${label}.schedule`, errors);
+    if (job.schedule?.type === "manual" && job.armed === true) {
+      errors.push(`${label}.armed must be false for a manual schedule`);
+    }
     validateMisfirePolicy(job.misfirePolicy, `${label}.misfirePolicy`, errors);
     if (job.type === "buy") validateBuyPolicy(job.policy, `${label}.policy`, errors);
     if (job.type === "listing") validateListingPolicy(job.policy, `${label}.policy`, errors);
@@ -6902,14 +6905,15 @@
   function normalizeTradeJob(input2 = {}, options = {}) {
     const now = Math.max(0, finiteNumber2(options.now, Date.now()));
     const type = TRADE_JOB_TYPES.includes(input2.type) ? input2.type : String(input2.type || "");
+    const schedule = normalizeSchedule(input2.schedule);
     const normalized = {
       schemaVersion: TRADE_SCHEMA_VERSION,
       id: String(input2.id || "").trim(),
       name: String(input2.name || "").trim(),
       type,
       enabled: input2.enabled === true,
-      armed: options.imported === true ? false : input2.armed === true,
-      schedule: normalizeSchedule(input2.schedule),
+      armed: options.imported === true || schedule.type === "manual" ? false : input2.armed === true,
+      schedule,
       misfirePolicy: normalizeMisfirePolicy(input2.misfirePolicy),
       policy: type === "buy" ? normalizeBuyPolicy(input2.policy) : normalizeListingPolicy(input2.policy),
       createdAt: Math.max(0, finiteNumber2(input2.createdAt, now)),
@@ -11625,6 +11629,7 @@
     return Number.isFinite(override) && override > 0 ? override : Number(job.policy.maxBuyNow);
   }
   function inspectManualBuyValidationJob(input2 = {}, options = {}) {
+    const explicitlyArmed = input2?.armed === true;
     let job;
     try {
       job = normalizeTradeJob(input2, { now: options.now ?? Date.now() });
@@ -11634,7 +11639,7 @@
     let reason = null;
     if (job.type !== "buy") reason = "manual-buy-validation-buy-only";
     else if (job.enabled !== true) reason = "manual-buy-validation-job-disabled";
-    else if (job.armed === true) reason = "manual-buy-validation-job-must-be-unarmed";
+    else if (explicitlyArmed) reason = "manual-buy-validation-job-must-be-unarmed";
     else if (job.schedule?.type !== "manual") reason = "manual-buy-validation-manual-only";
     else if (job.policy.cardClass !== "rare-gold") reason = "manual-buy-validation-rare-gold-only";
     else if (Number(job.policy.ratingMin) !== Number(job.policy.ratingMax)) reason = "manual-buy-validation-single-rating-only";
@@ -12045,8 +12050,8 @@
     let reason = null;
     if (job.type !== "buy") reason = "scheduled-buy-validation-buy-only";
     else if (job.enabled !== true) reason = "scheduled-buy-validation-job-disabled";
-    else if (job.armed !== true) reason = "scheduled-buy-validation-job-not-armed";
     else if (job.schedule?.type !== "once") reason = "scheduled-buy-validation-once-only";
+    else if (job.armed !== true) reason = "scheduled-buy-validation-job-not-armed";
     else if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) reason = "scheduled-buy-validation-run-at-invalid";
     else if (!["skip", "grace-window"].includes(job.misfirePolicy?.type)) reason = "scheduled-buy-validation-next-login-disabled";
     else if (job.misfirePolicy?.type === "grace-window" && Number(job.misfirePolicy.graceMinutes) > 15) reason = "scheduled-buy-validation-grace-too-long";
@@ -12427,7 +12432,7 @@
 
   // src/trade/guarded-scheduled-job.js
   function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
-    const armed = (snapshot.jobs || []).filter((job2) => job2.enabled === true && job2.armed === true);
+    const armed = (snapshot.jobs || []).filter((job2) => job2.enabled === true && job2.armed === true && job2.schedule?.type !== "manual");
     if (armed.length !== 1) {
       return {
         ready: false,
@@ -12707,10 +12712,11 @@
   }
   function createTradeJobRuntime(job = {}, options = {}) {
     const now = Math.max(0, finiteNumber10(options.now, Date.now()));
+    const manual = job.schedule?.type === "manual";
     return normalizeTradeJobRuntime({
       jobId: job.id,
-      status: job.enabled === true && job.armed === true ? "waiting-time" : "disabled",
-      reason: job.enabled === true && job.armed === true ? null : job.enabled === true ? "not-armed" : "job-disabled",
+      status: !manual && job.enabled === true && job.armed === true ? "waiting-time" : "disabled",
+      reason: manual ? "manual-only" : job.enabled === true && job.armed === true ? null : job.enabled === true ? "not-armed" : "job-disabled",
       nextRunAt: nextTradeRunAt(job, now),
       updatedAt: now
     });
@@ -12740,10 +12746,10 @@
       runtime: { ...runtime, status, reason, updatedAt: now }
     });
     if (job.enabled !== true) return result("disabled", "job-disabled");
+    if (job.schedule?.type === "manual") return result("disabled", "manual-only");
     if (job.armed !== true) return result("disabled", "not-armed");
     if (context.circuitAllowed === false) return result("blocked", context.circuitReason || "trade-circuit-open");
     if (context.liveExecutionEnabled === false) return result("blocked", "live-execution-disabled");
-    if (job.schedule?.type === "manual") return result("armed", null);
     if (runtime.nextRunAt === null) return result("completed", null);
     if (runtime.nextRunAt > now) return result("waiting-time", null);
     if (context.sessionReady !== true) return result("waiting-session", context.sessionReason || "ea-session-unavailable");
@@ -12975,7 +12981,17 @@
     const runtimes = {};
     for (const job of jobs) {
       const persisted = input2.runtimes?.[job.id];
-      runtimes[job.id] = persisted ? normalizeTradeJobRuntime({ ...persisted, jobId: job.id }) : createTradeJobRuntime(job, { now });
+      if (job.schedule?.type === "manual" && persisted) {
+        runtimes[job.id] = normalizeTradeJobRuntime({
+          ...persisted,
+          jobId: job.id,
+          status: "disabled",
+          reason: "manual-only",
+          nextRunAt: null
+        });
+      } else {
+        runtimes[job.id] = persisted ? normalizeTradeJobRuntime({ ...persisted, jobId: job.id }) : createTradeJobRuntime(job, { now });
+      }
     }
     const history = (Array.isArray(input2.history) ? input2.history : []).slice(-TRADE_HISTORY_LIMIT).map(clone8);
     const metrics = input2.metrics?.schemaVersion === TRADE_METRICS_SCHEMA_VERSION ? normalizeTradeMetrics(input2.metrics) : metricsFromHistory(history, now);
@@ -13283,12 +13299,13 @@
     let active = null;
     function inspect() {
       const external = externalBusy();
+      const busy = external?.busy === true;
       return {
         active: normalizeOperation(active),
         external: external ? {
-          busy: external.busy === true,
-          type: external.type ? String(external.type) : null,
-          reason: external.reason ? String(external.reason) : null
+          busy,
+          type: busy && external.type ? String(external.type) : null,
+          reason: busy && external.reason ? String(external.reason) : null
         } : { busy: false, type: null, reason: null }
       };
     }
@@ -23835,9 +23852,16 @@
       styles2(policyFields, { display: "flex", flexDirection: "column", gap: "8px" });
       form.appendChild(policyFields);
       const controls = { name, enabled, armed, scheduleType, misfire, grace, cardClass };
+      function syncArmedState() {
+        const manual = scheduleType.value === "manual";
+        if (manual) armed.checked = false;
+        armed.disabled = manual;
+        armed.title = manual ? "Manual Jobs run only through Run now" : "";
+      }
       function renderScheduleFields() {
         scheduleFields.textContent = "";
         const type = scheduleType.value;
+        syncArmedState();
         if (type === "once") {
           controls.runAt = input(dom, "datetime-local", epochInputValue(draft.schedule?.runAt || now()), mode, "bronze-loop-trade-job-run-at");
           scheduleFields.appendChild(field3(dom, "Run at", controls.runAt, mode));
@@ -23948,7 +23972,7 @@
         try {
           draft.name = name.value;
           draft.enabled = enabled.checked;
-          draft.armed = armed.checked;
+          draft.armed = scheduleType.value === "manual" ? false : armed.checked;
           draft.schedule = { type: scheduleType.value };
           if (scheduleType.value === "once") draft.schedule.runAt = readEpochInput(controls.runAt.value);
           if (scheduleType.value === "daily") draft.schedule = { type: "daily", time: controls.dailyTime.value, timezone: controls.timezone.value };

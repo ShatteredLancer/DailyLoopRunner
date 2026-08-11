@@ -45,6 +45,32 @@ describe('Trade Job Store', () => {
     expect(store.read().history[0].runId).toBe('run-5');
   });
 
+  it('migrates legacy armed manual Jobs to a manual-only runtime', () => {
+    const storage = memoryStorage();
+    storage.set('jobs', {
+      jobs: [{
+        ...job('manual-listing'),
+        schedule: { type: 'manual' },
+      }],
+      runtimes: {
+        'manual-listing': {
+          jobId: 'manual-listing',
+          status: 'waiting-time',
+          reason: null,
+          nextRunAt: null,
+          updatedAt: 900,
+        },
+      },
+    });
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => 1000 });
+    expect(store.read()).toMatchObject({
+      jobs: [{ id: 'manual-listing', armed: false, schedule: { type: 'manual' } }],
+      runtimes: {
+        'manual-listing': { status: 'disabled', reason: 'manual-only', nextRunAt: null },
+      },
+    });
+  });
+
   it('atomically pauses, disables live execution and disarms pending jobs', () => {
     const store = createTradeJobStore({ storage: memoryStorage(), now: () => 1000 });
     store.upsert(job());

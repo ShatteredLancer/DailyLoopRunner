@@ -245,9 +245,17 @@ export function showTradeSchedulerDialog(options = {}) {
     form.appendChild(policyFields);
     const controls = { name, enabled, armed, scheduleType, misfire, grace, cardClass };
 
+    function syncArmedState() {
+      const manual = scheduleType.value === 'manual';
+      if (manual) armed.checked = false;
+      armed.disabled = manual;
+      armed.title = manual ? 'Manual Jobs run only through Run now' : '';
+    }
+
     function renderScheduleFields() {
       scheduleFields.textContent = '';
       const type = scheduleType.value;
+      syncArmedState();
       if (type === 'once') {
         controls.runAt = input(dom, 'datetime-local', epochInputValue(draft.schedule?.runAt || now()), mode, 'bronze-loop-trade-job-run-at');
         scheduleFields.appendChild(field(dom, 'Run at', controls.runAt, mode));
@@ -345,7 +353,7 @@ export function showTradeSchedulerDialog(options = {}) {
       try {
         draft.name = name.value;
         draft.enabled = enabled.checked;
-        draft.armed = armed.checked;
+        draft.armed = scheduleType.value === 'manual' ? false : armed.checked;
         draft.schedule = { type: scheduleType.value };
         if (scheduleType.value === 'once') draft.schedule.runAt = readEpochInput(controls.runAt.value);
         if (scheduleType.value === 'daily') draft.schedule = { type: 'daily', time: controls.dailyTime.value, timezone: controls.timezone.value };

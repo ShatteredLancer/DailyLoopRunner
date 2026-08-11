@@ -63,4 +63,25 @@ describe('Guarded scheduled Trade Job selection', () => {
       job: null,
     });
   });
+
+  it('ignores a legacy armed manual Job when selecting the scheduled gate', () => {
+    const listing = listingJob();
+    const legacyManual = {
+      ...listing,
+      id: 'legacy-manual',
+      armed: true,
+      schedule: { type: 'manual' },
+    };
+    expect(selectGuardedScheduledTradeJob({
+      jobs: [legacyManual, listing],
+      runtimes: {
+        [legacyManual.id]: { nextRunAt: null },
+        [listing.id]: { nextRunAt: listing.schedule.runAt },
+      },
+    })).toMatchObject({
+      ready: true,
+      job: listing,
+      requiredText: 'RUN ONCE 1',
+    });
+  });
 });

@@ -209,6 +209,9 @@ export function validateTradeJob(job, label = 'Trade job') {
     if (typeof job[field] !== 'boolean') errors.push(`${label}.${field} must be boolean`);
   }
   validateSchedule(job.schedule, `${label}.schedule`, errors);
+  if (job.schedule?.type === 'manual' && job.armed === true) {
+    errors.push(`${label}.armed must be false for a manual schedule`);
+  }
   validateMisfirePolicy(job.misfirePolicy, `${label}.misfirePolicy`, errors);
   if (job.type === 'buy') validateBuyPolicy(job.policy, `${label}.policy`, errors);
   if (job.type === 'listing') validateListingPolicy(job.policy, `${label}.policy`, errors);
@@ -302,14 +305,15 @@ function normalizeListingPolicy(value = {}) {
 export function normalizeTradeJob(input = {}, options = {}) {
   const now = Math.max(0, finiteNumber(options.now, Date.now()));
   const type = TRADE_JOB_TYPES.includes(input.type) ? input.type : String(input.type || '');
+  const schedule = normalizeSchedule(input.schedule);
   const normalized = {
     schemaVersion: TRADE_SCHEMA_VERSION,
     id: String(input.id || '').trim(),
     name: String(input.name || '').trim(),
     type,
     enabled: input.enabled === true,
-    armed: options.imported === true ? false : input.armed === true,
-    schedule: normalizeSchedule(input.schedule),
+    armed: options.imported === true || schedule.type === 'manual' ? false : input.armed === true,
+    schedule,
     misfirePolicy: normalizeMisfirePolicy(input.misfirePolicy),
     policy: type === 'buy' ? normalizeBuyPolicy(input.policy) : normalizeListingPolicy(input.policy),
     createdAt: Math.max(0, finiteNumber(input.createdAt, now)),

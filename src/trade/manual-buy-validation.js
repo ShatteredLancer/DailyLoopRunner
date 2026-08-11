@@ -20,6 +20,7 @@ function effectiveRatingLimit(job) {
 }
 
 export function inspectManualBuyValidationJob(input = {}, options = {}) {
+  const explicitlyArmed = input?.armed === true;
   let job;
   try {
     job = normalizeTradeJob(input, { now: options.now ?? Date.now() });
@@ -30,7 +31,7 @@ export function inspectManualBuyValidationJob(input = {}, options = {}) {
   let reason = null;
   if (job.type !== 'buy') reason = 'manual-buy-validation-buy-only';
   else if (job.enabled !== true) reason = 'manual-buy-validation-job-disabled';
-  else if (job.armed === true) reason = 'manual-buy-validation-job-must-be-unarmed';
+  else if (explicitlyArmed) reason = 'manual-buy-validation-job-must-be-unarmed';
   else if (job.schedule?.type !== 'manual') reason = 'manual-buy-validation-manual-only';
   else if (job.policy.cardClass !== 'rare-gold') reason = 'manual-buy-validation-rare-gold-only';
   else if (Number(job.policy.ratingMin) !== Number(job.policy.ratingMax)) reason = 'manual-buy-validation-single-rating-only';

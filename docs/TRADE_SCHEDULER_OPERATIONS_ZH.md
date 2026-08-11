@@ -33,6 +33,7 @@
 - `paused`：调度器不执行到期任务；已经开始的安全收尾仍可能完成。
 - `liveExecutionEnabled=false`：只允许 Preview/诊断，不会发送 Buy 或 Listing mutation。
 - `armed=false`：Job 配置仍保留，但不会被调度器执行。
+- `manual-only`：Manual Job 只能通过 `Run now` 进入人工确认流程，不能 Armed，也不占用自动调度门禁。
 - `waiting-session`：页面、EA 或 FSU 状态没有达到交易所需的就绪条件。
 - `waiting-operation`：Loop、SBC、开包或其它写操作占用共享 Coordinator；调度器应等待，而不是并行发送请求。
 - `browser-lock-held`：另一个同源标签页持有 Web Lock；这是跨标签页互斥的正常证据。

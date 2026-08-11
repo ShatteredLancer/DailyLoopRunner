@@ -24,12 +24,13 @@ export function createOperationCoordinator(options = {}) {
 
   function inspect() {
     const external = externalBusy();
+    const busy = external?.busy === true;
     return {
       active: normalizeOperation(active),
       external: external ? {
-        busy: external.busy === true,
-        type: external.type ? String(external.type) : null,
-        reason: external.reason ? String(external.reason) : null,
+        busy,
+        type: busy && external.type ? String(external.type) : null,
+        reason: busy && external.reason ? String(external.reason) : null,
       } : { busy: false, type: null, reason: null },
     };
   }

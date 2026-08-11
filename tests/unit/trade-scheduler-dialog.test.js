@@ -86,6 +86,35 @@ describe('Trade Scheduler dialog', () => {
     expect(tradeScheduleSummary(normalized)).toBe('Daily 09:30 Asia/Shanghai');
   });
 
+  it('keeps the Armed control unavailable for Manual Jobs', () => {
+    const ui = uiHarness();
+    const onSaveJob = vi.fn();
+    showTradeSchedulerDialog({
+      dom: ui.dom,
+      snapshot: schedulerSnapshot(),
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      onSaveJob,
+    });
+
+    ui.byId('bronze-loop-trade-new-listing').click();
+    const armed = ui.byId('bronze-loop-trade-job-armed');
+    const schedule = ui.byId('bronze-loop-trade-job-schedule');
+    expect(armed.disabled).toBe(true);
+    expect(armed.checked).toBe(false);
+
+    schedule.value = 'once';
+    schedule.change();
+    expect(armed.disabled).toBe(false);
+    armed.checked = true;
+
+    schedule.value = 'manual';
+    schedule.change();
+    expect(armed.disabled).toBe(true);
+    expect(armed.checked).toBe(false);
+    ui.byId('bronze-loop-trade-job-save').click();
+    expect(onSaveJob).toHaveBeenCalledWith(expect.objectContaining({ armed: false, schedule: { type: 'manual' } }));
+  });
+
   it('keeps automatic execution locked while allowing Jobs and manual Listing entry', () => {
     const ui = uiHarness();
     const job = normalizeTradeJobEditorValue({

@@ -7,7 +7,9 @@ import {
 } from './scheduled-buy-validation.js';
 
 export function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
-  const armed = (snapshot.jobs || []).filter((job) => job.enabled === true && job.armed === true);
+  const armed = (snapshot.jobs || []).filter((job) => (
+    job.enabled === true && job.armed === true && job.schedule?.type !== 'manual'
+  ));
   if (armed.length !== 1) {
     return {
       ready: false,

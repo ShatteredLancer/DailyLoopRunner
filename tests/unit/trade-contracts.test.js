@@ -6,7 +6,7 @@ import {
 } from '../../src/trade/contracts.js';
 
 describe('Trade contracts', () => {
-  it('normalizes a Buy Job with conservative schedule and request defaults', () => {
+  it('keeps manual Buy Jobs unarmed with conservative request defaults', () => {
     const job = normalizeTradeJob({
       id: 'buy-84-85',
       name: 'Buy 84-85 Rare Gold',
@@ -19,7 +19,7 @@ describe('Trade contracts', () => {
     expect(job).toMatchObject({
       schemaVersion: 1,
       enabled: true,
-      armed: true,
+      armed: false,
       schedule: { type: 'manual' },
       misfirePolicy: { type: 'grace-window', graceMinutes: 15 },
       policy: {
@@ -33,6 +33,7 @@ describe('Trade contracts', () => {
       updatedAt: 1000,
     });
     expect(validateTradeJob(job)).toEqual([]);
+    expect(validateTradeJob({ ...job, armed: true })).toContain('Trade job.armed must be false for a manual schedule');
   });
 
   it('never arms an imported job and requires an explicit card class', () => {

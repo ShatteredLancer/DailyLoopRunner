@@ -177,9 +177,19 @@ export function normalizeTradeJobStore(input = {}, options = {}) {
   const runtimes = {};
   for (const job of jobs) {
     const persisted = input.runtimes?.[job.id];
-    runtimes[job.id] = persisted
-      ? normalizeTradeJobRuntime({ ...persisted, jobId: job.id })
-      : createTradeJobRuntime(job, { now });
+    if (job.schedule?.type === 'manual' && persisted) {
+      runtimes[job.id] = normalizeTradeJobRuntime({
+        ...persisted,
+        jobId: job.id,
+        status: 'disabled',
+        reason: 'manual-only',
+        nextRunAt: null,
+      });
+    } else {
+      runtimes[job.id] = persisted
+        ? normalizeTradeJobRuntime({ ...persisted, jobId: job.id })
+        : createTradeJobRuntime(job, { now });
+    }
   }
   const history = (Array.isArray(input.history) ? input.history : []).slice(-TRADE_HISTORY_LIMIT).map(clone);
   const metrics = input.metrics?.schemaVersion === TRADE_METRICS_SCHEMA_VERSION

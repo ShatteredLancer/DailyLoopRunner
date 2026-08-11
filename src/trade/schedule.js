@@ -107,10 +107,11 @@ export function nextTradeRunAt(job = {}, referenceAtInput = Date.now(), options 
 
 export function createTradeJobRuntime(job = {}, options = {}) {
   const now = Math.max(0, finiteNumber(options.now, Date.now()));
+  const manual = job.schedule?.type === 'manual';
   return normalizeTradeJobRuntime({
     jobId: job.id,
-    status: job.enabled === true && job.armed === true ? 'waiting-time' : 'disabled',
-    reason: job.enabled === true && job.armed === true ? null : job.enabled === true ? 'not-armed' : 'job-disabled',
+    status: !manual && job.enabled === true && job.armed === true ? 'waiting-time' : 'disabled',
+    reason: manual ? 'manual-only' : job.enabled === true && job.armed === true ? null : job.enabled === true ? 'not-armed' : 'job-disabled',
     nextRunAt: nextTradeRunAt(job, now),
     updatedAt: now,
   });
@@ -138,10 +139,10 @@ export function evaluateTradeJob(job = {}, runtimeInput = {}, context = {}) {
     status, reason, action, scheduledFor: runtime.nextRunAt, runtime: { ...runtime, status, reason, updatedAt: now },
   });
   if (job.enabled !== true) return result('disabled', 'job-disabled');
+  if (job.schedule?.type === 'manual') return result('disabled', 'manual-only');
   if (job.armed !== true) return result('disabled', 'not-armed');
   if (context.circuitAllowed === false) return result('blocked', context.circuitReason || 'trade-circuit-open');
   if (context.liveExecutionEnabled === false) return result('blocked', 'live-execution-disabled');
-  if (job.schedule?.type === 'manual') return result('armed', null);
   if (runtime.nextRunAt === null) return result('completed', null);
   if (runtime.nextRunAt > now) return result('waiting-time', null);
   if (context.sessionReady !== true) return result('waiting-session', context.sessionReason || 'ea-session-unavailable');

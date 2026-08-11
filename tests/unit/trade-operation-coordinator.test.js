@@ -15,11 +15,12 @@ describe('Trade Operation Coordinator', () => {
   it('honors legacy Runner activity without owning its mutable state', () => {
     let running = true;
     const coordinator = createOperationCoordinator({
-      externalBusy: () => running ? { busy: true, type: 'loop', reason: 'runner-operation-active' } : { busy: false },
+      externalBusy: () => ({ busy: running, type: 'loop', reason: 'runner-operation-active' }),
     });
     expect(coordinator.availability('trade-listing')).toMatchObject({ allowed: false, reason: 'runner-operation-active' });
     expect(coordinator.acquire({ id: 'trade-1', type: 'trade-listing' })).toMatchObject({ acquired: false, reason: 'runner-operation-active' });
     running = false;
+    expect(coordinator.inspect().external).toEqual({ busy: false, type: null, reason: null });
     expect(coordinator.acquire({ id: 'trade-1', type: 'trade-listing' })).toMatchObject({ acquired: true });
   });
 });
