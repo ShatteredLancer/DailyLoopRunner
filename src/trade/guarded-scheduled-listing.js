@@ -1,5 +1,6 @@
 import { createTradeRunReceipt } from './contracts.js';
 import { createListingTransaction } from './listing-transaction.js';
+import { inspectTradeRequestCapacity } from './request-budget.js';
 
 export const GUARDED_SCHEDULE_CONFIRMATION = 'RUN ONCE 1';
 
@@ -130,6 +131,7 @@ export function createGuardedScheduledListingExecutor(options = {}) {
 
   async function execute(input = {}) {
     const startedAt = Number(now());
+    let requestReservation = null;
     store.relock();
     if (options.validationGateEnabled !== true) return blockedReceipt(input, 'scheduled-listing-validation-gate-disabled', startedAt);
     if (input.context?.liveExecutionEnabled !== true) return blockedReceipt(input, 'live-execution-disabled', startedAt);
@@ -137,6 +139,10 @@ export function createGuardedScheduledListingExecutor(options = {}) {
     if (reason) return blockedReceipt(input, reason, startedAt);
     const availability = options.circuitBreaker?.availability?.();
     if (availability && availability.allowed !== true) return blockedReceipt(input, 'trade-circuit-open', startedAt);
+    if (typeof options.requestBudget?.inspect === 'function') {
+      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect());
+      if (!requestCapacity.ready) return blockedReceipt(input, requestCapacity.reason, startedAt);
+    }
 
     const operationId = `scheduled-listing:${input.runId}`;
     const operation = operationCoordinator.acquire({
@@ -165,8 +171,18 @@ export function createGuardedScheduledListingExecutor(options = {}) {
         options.onReceipt?.(receipt, { job, prepared, clubValidation, input });
         return receipt;
       }
+      let adapter = options.getTradeAdapter();
+      if (typeof options.requestBudget?.reserve === 'function') {
+        requestReservation = await options.requestBudget.reserve();
+        if (!requestReservation.ready) {
+          const receipt = blockedReceipt(input, 'trade-request-budget-insufficient', startedAt);
+          options.onReceipt?.(receipt, { job, prepared, clubValidation, input });
+          return receipt;
+        }
+        adapter = options.getTradeAdapter({ requestBudget: requestReservation });
+      }
       const transaction = transactionFactory({
-        tradeAdapter: options.getTradeAdapter(),
+        tradeAdapter: adapter,
         circuitBreaker: options.circuitBreaker,
         sleep,
       });
@@ -183,8 +199,9 @@ export function createGuardedScheduledListingExecutor(options = {}) {
       options.onReceipt?.(receipt, { job, prepared, clubValidation, input });
       return receipt;
     } finally {
-      options.onRunningChange?.(false, input);
       operationCoordinator.release(operationId);
+      try { await requestReservation?.release?.(); } catch { }
+      options.onRunningChange?.(false, input);
     }
   }
 

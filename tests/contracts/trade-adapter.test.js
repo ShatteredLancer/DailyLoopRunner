@@ -465,6 +465,28 @@ describe('Trade Adapter contracts', () => {
     ]));
   });
 
+  it('blocks a network request before the EA service when the shared budget is exhausted', async () => {
+    const runtime = eaRuntime({ id: 10, definitionId: 20 });
+    let calls = 0;
+    runtime.services.Item.requestTransferItems = () => { calls += 1; return { success: true }; };
+    const requestBudget = {
+      take: async (action) => ({ allowed: false, action, remaining: 0, retryAt: 5000 }),
+    };
+    const adapter = createEaTradeAdapter(runtime, { requestBudget });
+    expect(adapter.inspectCapabilities().runtimeReady).toBe(true);
+    await expect(adapter.refreshTransferItems()).resolves.toEqual({
+      status: 'blocked',
+      response: null,
+      error: {
+        kind: 'request-budget-exhausted',
+        code: null,
+        action: 'wait-until-budget-reset',
+        retryAt: 5000,
+      },
+    });
+    expect(calls).toBe(0);
+  });
+
   it('is composed lazily by the Runtime Adapter factory', () => {
     const storage = { getItem: () => null, setItem() {}, removeItem() {}, get length() { return 0; } };
     const adapters = createRuntimeAdapters({ localStorage: storage, sessionStorage: storage, document: {} });

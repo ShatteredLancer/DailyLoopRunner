@@ -15,6 +15,19 @@ function buyJob() {
   }, { now: 1 });
 }
 
+function listingJob() {
+  return normalizeTradeJob({
+    id: 'listing-once', name: 'List once', type: 'listing', enabled: true, armed: true,
+    schedule: { type: 'once', runAt: 60_000 },
+    misfirePolicy: { type: 'skip' },
+    policy: {
+      sources: ['club'], cardClass: 'common-gold',
+      ratingRules: [{ min: 75, max: 82, buyNow: 700 }],
+      maxListings: 1,
+    },
+  }, { now: 1 });
+}
+
 describe('Guarded scheduled Trade Job selection', () => {
   it('keeps scheduled Buy unavailable unless its separate gate is enabled', () => {
     const job = buyJob();
@@ -31,6 +44,23 @@ describe('Guarded scheduled Trade Job selection', () => {
       ready: true,
       job,
       requiredText: 'RUN BUY ONCE 1 RESERVE 100000',
+    });
+  });
+
+  it('rejects mixed Buy and Listing Jobs when more than one is armed', () => {
+    const buy = buyJob();
+    const listing = listingJob();
+    expect(selectGuardedScheduledTradeJob({
+      jobs: [buy, listing],
+      runtimes: {
+        [buy.id]: { nextRunAt: buy.schedule.runAt },
+        [listing.id]: { nextRunAt: listing.schedule.runAt },
+      },
+      safety: { minimumRetainedCoins: 100000 },
+    }, { scheduledBuyEnabled: true })).toMatchObject({
+      ready: false,
+      reason: 'validation-gate-multiple-armed-jobs',
+      job: null,
     });
   });
 });

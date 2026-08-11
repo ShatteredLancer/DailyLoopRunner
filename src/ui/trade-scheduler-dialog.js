@@ -194,10 +194,14 @@ export function showTradeSchedulerDialog(options = {}) {
 
   function renderBanner() {
     const circuit = options.getCircuit?.() || null;
+    const requestBudget = options.getRequestBudget?.() || null;
     const circuitState = circuit?.circuit?.state || 'closed';
     const scheduler = snapshot.paused ? 'paused' : 'running';
     const execution = snapshot.liveExecutionEnabled ? 'enabled' : 'locked';
-    banner.textContent = `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}`;
+    const budgetText = requestBudget
+      ? ` | Requests: ${Number(requestBudget.remaining || 0)}/${Number(requestBudget.limit || 0)} available | Single-card reserve: ${requestBudget.runCapacity?.ready === false ? 'cooldown' : 'ready'}`
+      : '';
+    banner.textContent = `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}${budgetText}`;
     banner.style.color = circuitState === 'open' ? '#e3a7a7' : '#b8c3d2';
   }
 
@@ -625,6 +629,7 @@ export function showTradeSchedulerDialog(options = {}) {
     const outcomes = metrics.outcomes || {};
     const buy = metrics.buy || {};
     const listing = metrics.listing || {};
+    const requestBudget = options.getRequestBudget?.() || {};
     const groups = [
       ['Runs', [
         ['Total', runs.total], ['Completed', statuses.completed], ['Blocked', statuses.blocked],
@@ -639,6 +644,12 @@ export function showTradeSchedulerDialog(options = {}) {
         ['Attempts', buy.attempts], ['Spent', Number(buy.spent || 0).toLocaleString()],
       ]],
       ['Listing', [['Listed', listing.listed]]],
+      ['Request budget', [
+        ['Used', requestBudget.used], ['Remaining', requestBudget.remaining],
+        ['Limit', requestBudget.limit], ['Window', requestBudget.windowMs ? `${Math.round(Number(requestBudget.windowMs) / 60_000)} min` : 'Unavailable'],
+        ['Single-card reserve', requestBudget.runCapacity?.ready === false ? 'Cooldown' : 'Ready'],
+        ['Required slots', requestBudget.runCapacity?.required],
+      ]],
     ];
     const grid = styles(dom.create('div'), {
       display: 'grid', gridTemplateColumns: mode.mobile ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: '12px',
@@ -663,6 +674,15 @@ export function showTradeSchedulerDialog(options = {}) {
       grid.appendChild(group);
     }
     content.appendChild(grid);
+
+    const requestRetryAt = requestBudget.runCapacity?.ready === false
+      ? requestBudget.runCapacity.retryAt
+      : requestBudget.status === 'cooldown' ? requestBudget.retryAt : null;
+    if (Number(requestRetryAt || 0) > 0) {
+      const cooldown = styles(dom.create('div'), { borderTop: '1px solid #47576b', marginTop: '12px', paddingTop: '8px', color: '#e3c39d', fontSize: '12px' });
+      cooldown.textContent = `Single-card Trade capacity resumes after ${new Date(Number(requestRetryAt)).toLocaleString()}`;
+      content.appendChild(cooldown);
+    }
 
     const period = styles(dom.create('div'), { borderTop: '1px solid #47576b', marginTop: '12px', paddingTop: '8px', color: '#aeb8c6', fontSize: '12px' });
     const firstAt = Number(metrics.firstRecordedAt || 0);

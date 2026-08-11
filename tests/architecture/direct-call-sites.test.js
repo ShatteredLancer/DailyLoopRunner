@@ -25,6 +25,7 @@ describe('current direct side-effect call baseline', () => {
     expect(tradeAdapter.match(/\bservice\.bid\s*\(/g) || []).toHaveLength(1);
     expect(tradeAdapter.match(/\bservice\.move\s*\(/g) || []).toHaveLength(1);
     expect(tradeAdapter.match(/\bservice\[method\]\s*\(/g) || []).toHaveLength(1);
+    expect(tradeAdapter.match(/requestBudgetError\('(?:price-limits|list|transfer-refresh|market-search|buy|purchase-refresh|purchase-route)'\)/g) || []).toHaveLength(7);
     expect(tradeAdapter).toContain("['requestUnassignedItems', 'requestTransferItems', 'requestClubItems', 'requestWatchlist', 'requestWatchedItems']");
     expect(tradeAdapter.match(/\bservice\.relistExpiredAuctions\s*\(/g) || []).toHaveLength(0);
   });

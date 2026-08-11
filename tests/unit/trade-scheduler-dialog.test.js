@@ -167,11 +167,21 @@ describe('Trade Scheduler dialog', () => {
         },
       },
       getCircuit: () => ({ circuit: { state: 'closed' } }),
+      getRequestBudget: () => ({
+        status: 'available', used: 19, remaining: 11, limit: 30, windowMs: 300000, retryAt: null,
+        runCapacity: { required: 12, ready: false, retryAt: 6000 },
+      }),
     });
+    expect(ui.byId('bronze-loop-trade-scheduler-modal').children[0].children[2].textContent)
+      .toContain('Requests: 11/30 available | Single-card reserve: cooldown');
     ui.byId('bronze-loop-trade-summary-tab').click();
     expect(ui.byText('Summary')).toBeTruthy();
     expect(ui.byText('1,200')).toBeTruthy();
     expect(ui.byText('trade-circuit-open')).toBeTruthy();
+    expect(ui.byText('Request budget')).toBeTruthy();
+    expect(ui.byText('5 min')).toBeTruthy();
+    expect(ui.byText('Cooldown')).toBeTruthy();
+    expect(ui.created.some((element) => element.textContent.startsWith('Single-card Trade capacity resumes after'))).toBe(true);
     expect(ui.created.some((element) => element.textContent.startsWith('Tracked '))).toBe(true);
   });
 

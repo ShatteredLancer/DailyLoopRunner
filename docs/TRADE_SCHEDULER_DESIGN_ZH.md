@@ -856,7 +856,7 @@ Scope:
 - [x] 定时 Buy 运行状态、脱敏 History、持久 Journal 和 diagnostics 接线。
 - [x] 页面恢复、Misfire Policy、Web Lock、GM lease 和 Loop/Trade Coordinator 复用。
 - [x] 显式全局最低保留金币；Job 只能提高、不能降低该底线。
-- [ ] 与 Listing Job 公平排队和全局请求预算。
+- [x] 与 Listing Job 公平排队和全局请求预算；不扩大当前单 Armed Job 门禁。
 
 Tests: 新增 strict gate、确认文本、全局/Job 金币底线、启动即回锁、低金币零请求、生产开关关闭、in-grace 页面恢复、一次 Buy、一次 History、lease 释放和 UI 状态覆盖；完整仓库验证结果见下方实施记录。
 
@@ -875,6 +875,7 @@ Scope:
 - [x] Provider 健康状态和缓存管理 UI。
 - [x] 文档、故障排查和安全说明。
 - [x] 评估仅用于 alarm/notification/open-tab 的 Companion Extension；当前决定暂缓实现。
+- [x] 跨标签页 EA Trade 请求预算、单卡事务容量 reservation 和 Buy/Listing 公平选择核心。
 
 Tests: TS6.1 Job Store migration、累计计数、History 淘汰后保留、停止原因聚合/定长和 responsive Summary UI 已有单元测试；完整仓库结果见实施记录。
 
@@ -1264,3 +1265,21 @@ Rationale: A separate extension would add host permissions、a second release/up
 Boundary: No Companion code, permissions or background credential handling are added. Recurring/range/bulk Buy, broader Listing and automatic provider refresh remain outside the validated production boundary.
 
 Next: Prepare the TS4-TS6 implementation as one reviewable commit set and release candidate without broadening any live execution gate.
+
+### 2026-08-11 / TS6.5 / Shared request budget and fair dispatch
+
+Status: Implementation and automated validation complete; guarded production execution boundaries unchanged.
+
+Implementation: 所有七类 EA Trade 网络调用统一在 EA Trade Adapter 取得请求许可，包括价格限制、挂牌、Transfer 刷新、市场搜索、Buy、购买后刷新和购买后路由。预算固定为跨标签页共享的 5 分钟 30 次滑动窗口；支持 Web Locks 时，读取、占用和释放均在独占锁内完成。Local repository/capability inspect 与 FUTNext/FUT.GG Provider HTTP 不计入该预算。UI 和 diagnostics 仅显示聚合使用量、剩余量、动作计数、恢复时间及锁支持状态，不提供清空或提高上限入口。
+
+Transaction reservation: 单卡 Buy/Listing 在进入 mutation 事务前必须原子占用 12 个请求槽。事务 Adapter 只能消费自身 reservation；其它标签页不能占用这些槽，事务结束后只释放未使用槽，已经转化为真实 EA 请求的槽继续计入窗口。页面崩溃遗留的 reservation 最迟随 5 分钟窗口到期。容量不足进入 `trade-request-budget-insufficient`，不计为 EA Circuit failure。
+
+Fair dispatch: Scheduler 会评估全部到期候选；Buy 与 Listing 同时到期时优先选择与上次实际 dispatch 不同的类型，同类型内按最早 `nextRunAt`、再按稳定 Job ID 排序。只有取得 lease 并通过过期 lease 恢复门禁后才记录 dispatch；misfire、waiting、cooldown 和 lease 获取失败均不改变公平状态。Job Store schema 3 只持久化最后 Job ID/type/time 和累计 dispatch 次数，状态保持有界。
+
+Boundary: 公平选择核心不允许绕过 `selectGuardedScheduledTradeJob()`。生产 UI 仍要求恰好一个 enabled+armed Job，执行器仍仅接受已验证的 once/one-card Listing 或 once/single-rating/one-card Rare Gold Buy，并在启动时立即 relock。Recurring、rating range、quantity > 1、其它 card class、更高价格/预算、Bulk Buy/Listing 和自动改价均未开放。
+
+Automated evidence: 请求预算覆盖滑动窗口、Web Lock 串行化、原子 reservation、跨调用方隔离、scoped 消费、未使用槽释放、已发送请求保留、崩溃后过期恢复和容量恢复时间。Scheduler/Job Store 覆盖 schema migration、公平交替、稳定排序、cooldown 不 dispatch，以及 scheduled Buy/Listing 在事务前 reserve 并在退出时 release。`npm run verify` 通过：152 个测试文件、938 项测试，syntax、ESLint、配置/Profile、架构、FSU patch、userscript 构建、dist equality 和 FSU release 检查全部成功。
+
+Live validation: 本阶段不要求新增 EA mutation。安装候选版本后可在 `Trade Scheduler -> Summary` 和 Scheduler diagnostics 中只读确认 `limit=30`、`windowMs=300000`、single-card reserve required 12、Web Lock 支持状态和动作聚合；不得为了填满预算而重复发送 EA 请求。
+
+Next: 先发布并观察真实页面中的预算聚合和 cooldown 诊断。任何 recurring、multi-job 或 bulk 工作必须另立门禁，不得把本阶段的公平调度测试当作生产授权。

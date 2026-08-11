@@ -6,6 +6,7 @@ import {
 } from './buy-destination.js';
 import { inspectManualBuyValidationJob } from './manual-buy-validation.js';
 import { manualBuyValidationConfirmation } from './manual-buy-validation.js';
+import { inspectTradeRequestCapacity } from './request-budget.js';
 
 export function createGuardedManualBuyExecutor(options = {}) {
   const operationCoordinator = options.operationCoordinator;
@@ -56,6 +57,10 @@ export function createGuardedManualBuyExecutor(options = {}) {
     }
     const circuit = options.circuitBreaker?.availability?.();
     if (circuit && circuit.allowed !== true) return blockedReceipt(gate.job, runId, 'trade-circuit-open', startedAt);
+    if (typeof options.requestBudget?.inspect === 'function') {
+      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect());
+      if (!requestCapacity.ready) return blockedReceipt(gate.job, runId, requestCapacity.reason, startedAt);
+    }
 
     const operationId = `manual-buy:${runId}`;
     const operation = operationCoordinator.acquire({
@@ -94,6 +99,7 @@ export function createGuardedManualBuyExecutor(options = {}) {
       return receipt;
     };
     options.onRunningChange?.(true, { ...input, job: gate.job, runId });
+    let requestReservation = null;
     try {
       let preview;
       try {
@@ -109,7 +115,7 @@ export function createGuardedManualBuyExecutor(options = {}) {
         return finishReceipt(receipt, { preview }, 'preview-blocked');
       }
 
-      const adapter = options.getTradeAdapter();
+      let adapter = options.getTradeAdapter();
       journal?.checkpoint?.(runId, { phase: 'validation-destination-filter-started', destination: expectedDestination });
       const destinationPlan = filterBuyCatalogForDestination({ lanes: preview.plan.lanes }, adapter, expectedDestination);
       journal?.checkpoint?.(runId, {
@@ -131,6 +137,15 @@ export function createGuardedManualBuyExecutor(options = {}) {
       if (destinationPlan.reason) {
         const receipt = blockedReceipt(gate.job, runId, destinationPlan.reason, startedAt);
         return finishReceipt(receipt, { preview }, 'validation-destination-blocked');
+      }
+
+      if (typeof options.requestBudget?.reserve === 'function') {
+        requestReservation = await options.requestBudget.reserve();
+        if (!requestReservation.ready) {
+          const receipt = blockedReceipt(gate.job, runId, 'trade-request-budget-insufficient', startedAt);
+          return finishReceipt(receipt, { preview }, 'request-budget-blocked');
+        }
+        adapter = options.getTradeAdapter({ requestBudget: requestReservation });
       }
 
       const transaction = transactionFactory({
@@ -166,9 +181,10 @@ export function createGuardedManualBuyExecutor(options = {}) {
       });
       throw error;
     } finally {
-      options.onRunningChange?.(false, { ...input, job: gate.job, runId });
       lease.release(runId);
       operationCoordinator.release(operationId);
+      try { await requestReservation?.release?.(); } catch { }
+      options.onRunningChange?.(false, { ...input, job: gate.job, runId });
     }
   }
 

@@ -1,5 +1,6 @@
 import { createTradeRunReceipt } from './contracts.js';
 import { advanceTradeJobRuntime, evaluateTradeJob, normalizeTradeJobRuntime } from './schedule.js';
+import { selectFairTradeCandidate } from './scheduler-fairness.js';
 
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
@@ -97,6 +98,7 @@ export function createTradeScheduler(options = {}) {
       ...runtime, status: 'running', reason: null, lastScheduledFor: runtime.nextRunAt,
       lastStartedAt: startedAt, lastRunId: runId, updatedAt: startedAt,
     });
+    store.recordDispatch?.(job.id);
     let receipt;
     try {
       if (typeof executeJob !== 'function') throw new Error('Trade Scheduler executor is unavailable');
@@ -151,6 +153,7 @@ export function createTradeScheduler(options = {}) {
         const rightAt = snapshot.runtimes[right.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
         return leftAt - rightAt || left.id.localeCompare(right.id);
       });
+      const runnable = [];
       for (const job of jobs) {
         const runtime = snapshot.runtimes[job.id] || {};
         const decision = evaluateTradeJob(job, runtime, context);
@@ -165,8 +168,10 @@ export function createTradeScheduler(options = {}) {
           store.updateRuntime(job.id, advanced);
           return { status: 'missed', jobId: job.id, receipt, runtime: advanced };
         }
-        if (decision.action === 'run') return execute(job, runtime, context);
+        if (decision.action === 'run') runnable.push({ job, runtime, decision });
       }
+      const selected = selectFairTradeCandidate(runnable, snapshot.dispatch);
+      if (selected) return execute(selected.job, selected.runtime, context);
       return { status: 'idle' };
     } finally {
       ticking = false;

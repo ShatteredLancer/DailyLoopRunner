@@ -47,14 +47,26 @@ function readyPreview() {
 describe('Guarded scheduled Buy executor', () => {
   it('atomically relocks and passes one attempt plus the global reserve to the transaction', async () => {
     const jobStore = store();
+    const baseAdapter = createFakeTradeAdapter({ coins: 6000 });
+    const scopedAdapter = createFakeTradeAdapter({ coins: 6000 });
+    const reservation = { ready: true, take: vi.fn(), release: vi.fn(async () => {}) };
+    const requestBudget = {
+      inspect: () => ({ remaining: 30 }),
+      reserve: vi.fn(async () => reservation),
+    };
+    const getTradeAdapter = vi.fn((options = {}) => (
+      options.requestBudget === reservation ? scopedAdapter : baseAdapter
+    ));
     const transaction = { run: vi.fn(async () => ({ status: 'completed', requested: 1, succeeded: 1, receipts: [] })) };
+    const transactionFactory = vi.fn(() => transaction);
     const heartbeat = vi.fn(() => true);
     const result = await createGuardedScheduledBuyExecutor({
       store: jobStore,
       operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
       buyPreview: { preview: vi.fn(async () => readyPreview()) },
-      getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
-      transactionFactory: () => transaction,
+      getTradeAdapter,
+      transactionFactory,
+      requestBudget,
       validationGateEnabled: true,
       now: () => 2000,
     }).execute({
@@ -77,6 +89,36 @@ describe('Guarded scheduled Buy executor', () => {
     }));
     expect(transaction.run.mock.calls[0][0].beforeBuy()).toBe(true);
     expect(heartbeat).toHaveBeenCalledOnce();
+    expect(requestBudget.reserve).toHaveBeenCalledOnce();
+    expect(getTradeAdapter).toHaveBeenCalledWith({ requestBudget: reservation });
+    expect(transactionFactory).toHaveBeenCalledWith(expect.objectContaining({ tradeAdapter: scopedAdapter }));
+    expect(reservation.release).toHaveBeenCalledOnce();
+  });
+
+  it('blocks after Preview when another tab takes the inspected request capacity', async () => {
+    const transactionFactory = vi.fn();
+    const buyPreview = { preview: vi.fn(async () => readyPreview()) };
+    const requestBudget = {
+      inspect: () => ({ remaining: 12 }),
+      reserve: vi.fn(async () => ({ ready: false, required: 12, remaining: 11, retryAt: 5000 })),
+    };
+    const result = await createGuardedScheduledBuyExecutor({
+      store: store(),
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      buyPreview,
+      getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
+      transactionFactory,
+      requestBudget,
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: job(), runId: 'scheduled-buy-reservation-race', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0 });
+    expect(buyPreview.preview).toHaveBeenCalledOnce();
+    expect(requestBudget.reserve).toHaveBeenCalledOnce();
+    expect(transactionFactory).not.toHaveBeenCalled();
   });
 
   it('blocks below the reserve plus maximum price before Preview or market work', async () => {
@@ -98,6 +140,28 @@ describe('Guarded scheduled Buy executor', () => {
     expect(buyPreview.preview).not.toHaveBeenCalled();
     expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
     expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
+  });
+
+  it('relocks and blocks before Preview when the shared request reserve is unavailable', async () => {
+    const jobStore = store();
+    const buyPreview = { preview: vi.fn() };
+    const adapter = createFakeTradeAdapter({ coins: 6000 });
+    const result = await createGuardedScheduledBuyExecutor({
+      store: jobStore,
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      buyPreview,
+      getTradeAdapter: () => adapter,
+      requestBudget: { inspect: () => ({ remaining: 11, retryAt: 5000 }) },
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: job(), runId: 'scheduled-buy-budget', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0 });
+    expect(jobStore.read()).toMatchObject({ paused: true, liveExecutionEnabled: false, jobs: [{ armed: false }] });
+    expect(buyPreview.preview).not.toHaveBeenCalled();
+    expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
   });
 
   it('relocks but refuses execution while the production validation gate is disabled', async () => {

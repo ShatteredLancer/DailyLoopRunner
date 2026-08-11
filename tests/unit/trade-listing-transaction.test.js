@@ -281,6 +281,46 @@ describe('Trade listing transaction', () => {
     expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
   });
 
+  it('keeps an accepted listing ambiguous when local budget blocks verification without opening Circuit', async () => {
+    const base = createFakeTradeAdapter({
+      items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],
+    });
+    let refreshCount = 0;
+    const adapter = {
+      ...base,
+      refreshTransferItems: vi.fn(async () => {
+        refreshCount += 1;
+        return refreshCount === 1
+          ? { status: 'completed', response: { success: true, status: 200, code: null }, error: null }
+          : {
+            status: 'blocked', response: null,
+            error: { kind: 'request-budget-exhausted', action: 'wait-until-budget-reset', retryAt: 6000 },
+          };
+      }),
+    };
+    const circuit = { availability: () => ({ allowed: true }), recordFailure: vi.fn(), recordSuccess: vi.fn() };
+    const plan = prepared([entry()]);
+    const result = await createListingTransaction({
+      tradeAdapter: adapter,
+      circuitBreaker: circuit,
+      now: () => 1100,
+      createRunId: () => 'listing-run-budget-verification',
+    }).run({
+      job: job(), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+    expect(result).toMatchObject({
+      status: 'ambiguous',
+      reason: 'listing-accepted-request-budget-exhausted-before-verification',
+      succeeded: 0,
+      failed: 1,
+    });
+    expect(base.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
+    expect(circuit.recordFailure).not.toHaveBeenCalled();
+    expect(circuit.recordSuccess).not.toHaveBeenCalled();
+  });
+
   it('opens the persistent circuit and never retries an EA 427 listing rejection', async () => {
     const adapter = createFakeTradeAdapter({
       items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],

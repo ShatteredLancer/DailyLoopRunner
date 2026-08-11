@@ -83,6 +83,7 @@
   var TRADE_JOB_STORE_KEY = "fc-loop-runner-trade-jobs-v1";
   var TRADE_RUN_LEASE_KEY = "fc-loop-runner-trade-run-lease-v1";
   var TRADE_BUY_JOURNAL_KEY = "fc-loop-runner-trade-buy-journal-v1";
+  var TRADE_REQUEST_BUDGET_KEY = "fc-loop-runner-trade-request-budget-v1";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -7002,6 +7003,9 @@
     const code = errorCode(error);
     const message = messageText(error);
     const text = `${String(error?.kind || "")} ${message}`.toLowerCase();
+    if (/request-budget-exhausted/.test(text)) {
+      return { kind: "request-budget-exhausted", code, action: "wait-until-budget-reset", retryable: false, opensCircuit: false, disarm: false, ambiguous: false };
+    }
     if (code === 427) {
       return {
         kind: "auction-operation-blocked",
@@ -7369,8 +7373,19 @@
       }
     });
   }
-  function createEaTradeAdapter(runtime) {
+  function createEaTradeAdapter(runtime, adapterOptions = {}) {
     const marketItems = /* @__PURE__ */ new Map();
+    async function requestBudgetError(action2) {
+      if (typeof adapterOptions.requestBudget?.take !== "function") return null;
+      const permit = await adapterOptions.requestBudget.take(action2);
+      if (permit?.allowed === true) return null;
+      return {
+        kind: "request-budget-exhausted",
+        code: null,
+        action: "wait-until-budget-reset",
+        retryAt: permit?.retryAt ?? null
+      };
+    }
     function marketItemKey(ref = {}) {
       const id = Number(ref.id || 0);
       const tradeId = Number(ref.tradeId ?? ref.auction?.tradeId ?? 0);
@@ -7447,6 +7462,18 @@
           after: before,
           response: null,
           error: null
+        };
+      }
+      const budgetError = await requestBudgetError("price-limits");
+      if (budgetError) {
+        return {
+          status: "blocked",
+          refreshStatus: "blocked",
+          limitsSource: before.hasPriceLimits ? "existing-cache" : "none",
+          before,
+          after: before,
+          response: null,
+          error: budgetError
         };
       }
       try {
@@ -7562,6 +7589,8 @@
       if (!Number.isFinite(requested.startPrice) || requested.startPrice <= 0 || !Number.isFinite(requested.buyNow) || requested.buyNow < requested.startPrice || !Number.isFinite(requested.durationSeconds) || requested.durationSeconds <= 0) {
         return { status: "invalid-request", item, requested, response: null, error: null };
       }
+      const budgetError = await requestBudgetError("list");
+      if (budgetError) return { status: "blocked", item, requested, response: null, error: budgetError };
       try {
         const response = await observeResult(service.list(
           resolved.item,
@@ -7595,6 +7624,8 @@
       if (typeof service?.requestTransferItems !== "function") {
         return { status: "unsupported", response: null, error: null };
       }
+      const budgetError = await requestBudgetError("transfer-refresh");
+      if (budgetError) return { status: "blocked", response: null, error: budgetError };
       try {
         const response = await observeResult(service.requestTransferItems(), options.observerContext || {});
         const summary = responseSummary(response);
@@ -7627,6 +7658,10 @@
       }
       if (typeof runtime?.UTSearchCriteriaDTO !== "function" || typeof service?.searchTransferMarket !== "function") {
         return { status: "unsupported", request: normalizedRequest, response: null, candidates: [], error: null };
+      }
+      const budgetError = await requestBudgetError("market-search");
+      if (budgetError) {
+        return { status: "blocked", request: normalizedRequest, response: null, candidates: [], error: budgetError };
       }
       try {
         const criteria = new runtime.UTSearchCriteriaDTO();
@@ -7703,6 +7738,10 @@
           error: { kind: "price-changed", code: null, action: "refresh-and-skip" }
         };
       }
+      const budgetError = await requestBudgetError("buy");
+      if (budgetError) {
+        return { status: "blocked", item, tradeId: Number(ref.tradeId), price, response: null, error: budgetError };
+      }
       try {
         const response = await observeResult(service.bid(liveItem, price), options.observerContext || {});
         const summary = responseSummary(response);
@@ -7736,6 +7775,8 @@
       try {
         const steps = [];
         for (const method of available) {
+          const budgetError = await requestBudgetError("purchase-refresh");
+          if (budgetError) return { status: "blocked", response: null, steps, error: budgetError };
           const response = await observeResult(service[method](), options.observerContext || {});
           const summary = responseSummary(response);
           steps.push({ method, response: summary });
@@ -7845,6 +7886,8 @@
       if (!liveItem) return { status: "not-found", item: null, destination, response: null, error: null };
       if (typeof service?.move !== "function") return { status: "unsupported", item, destination, response: null, error: null };
       const pile = runtime?.ItemPile?.[destination.toUpperCase()] ?? destination;
+      const budgetError = await requestBudgetError("purchase-route");
+      if (budgetError) return { status: "blocked", item, destination, response: null, error: budgetError };
       try {
         const response = await observeResult(service.move(liveItem, pile), options.observerContext || {});
         const summary = responseSummary(response);
@@ -7908,7 +7951,7 @@
       playerPick: () => createEaPlayerPickAdapter(runtime),
       rarity: createEaRarityAdapter(runtime),
       sbc: () => createEaSbcAdapter(runtime),
-      trade: () => createEaTradeAdapter(runtime),
+      trade: (tradeOptions = {}) => createEaTradeAdapter(runtime, tradeOptions),
       fsu: () => createFsuAdapter(runtime, { documentObject, localStorage, sessionStorage }),
       dom,
       page,
@@ -10418,7 +10461,7 @@
           if (transferPreflight.status !== "completed") {
             failed += 1;
             status = "blocked";
-            reason = `listing-transfer-preflight-${transferPreflight.status || "unavailable"}`;
+            reason = transferPreflight.error?.kind === "request-budget-exhausted" ? "trade-request-budget-exhausted" : `listing-transfer-preflight-${transferPreflight.status || "unavailable"}`;
             receipts.push({
               index: index + 1,
               item: { ...entry.item },
@@ -10489,6 +10532,13 @@
           break;
         }
         const priceLimitResult = await adapter.inspectPriceLimits(entry.item, { refresh: true });
+        if (priceLimitResult.error?.kind === "request-budget-exhausted") {
+          failed += 1;
+          status = "blocked";
+          reason = "trade-request-budget-exhausted";
+          receipts.push({ index: index + 1, item: { ...entry.item }, status, reason, requestBudget: priceLimitResult.error });
+          break;
+        }
         const finalPrice = applyListingPriceLimits(entry, priceLimitResult);
         if (!finalPrice.ok) {
           failed += 1;
@@ -10536,18 +10586,20 @@
         };
         if (listed.status !== "accepted") {
           const classification = classifyTradeError(listed.error || listed.response || { status: listed.status });
-          options.circuitBreaker?.recordFailure?.(listed.error || listed.response || {}, {
-            action: "list",
-            endpoint: "/auctionhouse",
-            jobId: job.id,
-            runId,
-            classification,
-            response: listed.response,
-            capabilities: adapter.inspectCapabilities()
-          });
+          if (classification.kind !== "request-budget-exhausted") {
+            options.circuitBreaker?.recordFailure?.(listed.error || listed.response || {}, {
+              action: "list",
+              endpoint: "/auctionhouse",
+              jobId: job.id,
+              runId,
+              classification,
+              response: listed.response,
+              capabilities: adapter.inspectCapabilities()
+            });
+          }
           failed += 1;
-          status = listed.status === "ambiguous" ? "ambiguous" : classification.opensCircuit ? "blocked" : "failed";
-          reason = classification.opensCircuit ? `trade-${classification.kind}` : `listing-${listed.status}`;
+          status = classification.kind === "request-budget-exhausted" ? "blocked" : listed.status === "ambiguous" ? "ambiguous" : classification.opensCircuit ? "blocked" : "failed";
+          reason = classification.kind === "request-budget-exhausted" ? "trade-request-budget-exhausted" : classification.opensCircuit ? `trade-${classification.kind}` : `listing-${listed.status}`;
           receipts.push({ ...receipt, status, reason, classification });
           break;
         }
@@ -10556,7 +10608,7 @@
         if (refresh.status !== "completed" || verification.status !== "loaded" || !verificationMatches(entry, verification.candidate)) {
           failed += 1;
           status = "ambiguous";
-          reason = "listing-accepted-but-not-verified";
+          reason = refresh.error?.kind === "request-budget-exhausted" ? "listing-accepted-request-budget-exhausted-before-verification" : "listing-accepted-but-not-verified";
           receipts.push({
             ...receipt,
             status: "ambiguous",
@@ -11206,16 +11258,21 @@
         });
         if (searchResult.status !== "completed") {
           const classification = classifyTradeError(searchResult.error || searchResult.response || {});
-          options.circuitBreaker?.recordFailure?.(searchResult.error || searchResult.response || {}, {
-            action: "search",
-            endpoint: "/transfermarket",
-            jobId: job.id,
-            runId,
-            classification,
-            response: searchResult.response,
-            capabilities: adapter.inspectCapabilities()
-          });
-          stop(classification.opensCircuit ? "blocked" : classification.ambiguous ? "ambiguous" : "failed", `trade-${classification.kind}`);
+          if (classification.kind !== "request-budget-exhausted") {
+            options.circuitBreaker?.recordFailure?.(searchResult.error || searchResult.response || {}, {
+              action: "search",
+              endpoint: "/transfermarket",
+              jobId: job.id,
+              runId,
+              classification,
+              response: searchResult.response,
+              capabilities: adapter.inspectCapabilities()
+            });
+          }
+          stop(
+            classification.kind === "request-budget-exhausted" || classification.opensCircuit ? "blocked" : classification.ambiguous ? "ambiguous" : "failed",
+            `trade-${classification.kind}`
+          );
           break;
         }
         const capabilities = adapter.inspectCapabilities();
@@ -11330,17 +11387,23 @@
         }
         if (refresh && refresh.status !== "completed") {
           const classification = classifyTradeError(refresh.error || refresh.response || { kind: refresh.status });
-          options.circuitBreaker?.recordFailure?.(refresh.error || refresh.response || {}, {
-            action: "buy-reconciliation",
-            endpoint: "/purchased-state",
-            jobId: job.id,
-            runId,
-            classification,
-            response: refresh.response,
-            capabilities: afterPurchaseCapabilities
-          });
+          const requestBudgetExhausted = classification.kind === "request-budget-exhausted";
+          if (classification.kind !== "request-budget-exhausted") {
+            options.circuitBreaker?.recordFailure?.(refresh.error || refresh.response || {}, {
+              action: "buy-reconciliation",
+              endpoint: "/purchased-state",
+              jobId: job.id,
+              runId,
+              classification,
+              response: refresh.response,
+              capabilities: afterPurchaseCapabilities
+            });
+          }
           failed += 1;
-          stop(classification.opensCircuit ? "blocked" : "ambiguous", classification.opensCircuit ? `trade-${classification.kind}` : "purchase-refresh-not-reconciled");
+          stop(
+            classification.opensCircuit ? "blocked" : "ambiguous",
+            requestBudgetExhausted ? "purchase-accepted-request-budget-exhausted-before-verification" : classification.opensCircuit ? `trade-${classification.kind}` : "purchase-refresh-not-reconciled"
+          );
           receipts.push({
             index: receipts.length + 1,
             status,
@@ -11361,15 +11424,17 @@
         if (purchase?.status !== "loaded") {
           const classification = classifyTradeError(bought.error || bought.response || { kind: bought.status });
           if (bought.status !== "accepted") {
-            options.circuitBreaker?.recordFailure?.(bought.error || bought.response || {}, {
-              action: "buy",
-              endpoint: "/auctionhouse",
-              jobId: job.id,
-              runId,
-              classification,
-              response: bought.response,
-              capabilities: adapter.inspectCapabilities()
-            });
+            if (classification.kind !== "request-budget-exhausted") {
+              options.circuitBreaker?.recordFailure?.(bought.error || bought.response || {}, {
+                action: "buy",
+                endpoint: "/auctionhouse",
+                jobId: job.id,
+                runId,
+                classification,
+                response: bought.response,
+                capabilities: adapter.inspectCapabilities()
+              });
+            }
           }
           if (classification.kind === "competition-lost") {
             receipts.push({ index: receipts.length + 1, status: "competition-lost", item, tradeId: purchaseRef.tradeId, price, search: { ...search } });
@@ -11382,7 +11447,10 @@
           }
           failed += 1;
           const ambiguous = bought.status === "accepted" || bought.status === "ambiguous" || classification.ambiguous;
-          stop(classification.opensCircuit ? "blocked" : ambiguous ? "ambiguous" : "failed", classification.opensCircuit ? `trade-${classification.kind}` : "purchase-not-reconciled");
+          stop(
+            classification.kind === "request-budget-exhausted" || classification.opensCircuit ? "blocked" : ambiguous ? "ambiguous" : "failed",
+            classification.kind === "request-budget-exhausted" || classification.opensCircuit ? `trade-${classification.kind}` : "purchase-not-reconciled"
+          );
           receipts.push({
             index: receipts.length + 1,
             status,
@@ -11431,7 +11499,10 @@
         });
         if (routed.status !== "completed") {
           failed += 1;
-          stop("blocked", routed.status === "destination-full" ? "transfer-list-full" : `purchase-route-${routed.status}`);
+          stop(
+            "blocked",
+            routed.error?.kind === "request-budget-exhausted" ? "trade-request-budget-exhausted" : routed.status === "destination-full" ? "transfer-list-full" : `purchase-route-${routed.status}`
+          );
           receipts.push({
             index: receipts.length + 1,
             status: "blocked",
@@ -11467,7 +11538,10 @@
         });
         if (verified.status !== "loaded" || verified.candidate?.item?.pile !== destination) {
           failed += 1;
-          stop("ambiguous", "purchase-routed-but-not-verified");
+          stop(
+            "ambiguous",
+            routeRefresh.error?.kind === "request-budget-exhausted" ? "purchase-routed-request-budget-exhausted-before-verification" : "purchase-routed-but-not-verified"
+          );
           receipts.push({
             index: receipts.length + 1,
             status: "ambiguous",
@@ -11598,6 +11672,174 @@
     };
   }
 
+  // src/trade/request-budget.js
+  var TRADE_REQUEST_BUDGET_SCHEMA_VERSION = 1;
+  var TRADE_REQUEST_BUDGET_LIMIT = 30;
+  var TRADE_REQUEST_BUDGET_WINDOW_MS = 5 * 6e4;
+  var TRADE_RUN_REQUEST_RESERVE = 12;
+  var TRADE_REQUEST_BUDGET_LOCK = "fc-loop-runner-trade-request-budget-v1";
+  var ACTIONS = /* @__PURE__ */ new Set([
+    "reserved",
+    "price-limits",
+    "list",
+    "transfer-refresh",
+    "market-search",
+    "buy",
+    "purchase-refresh",
+    "purchase-route"
+  ]);
+  function finiteNumber8(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : fallback;
+  }
+  function actionName(value) {
+    const action2 = String(value || "unknown");
+    return ACTIONS.has(action2) ? action2 : "unknown";
+  }
+  function normalizeRequests(input2, now, windowMs, limit) {
+    const windowStart = now - windowMs;
+    return (Array.isArray(input2) ? input2 : []).map((entry) => ({
+      at: Math.max(0, finiteNumber8(entry?.at)),
+      action: actionName(entry?.action),
+      reservationId: entry?.reservationId ? String(entry.reservationId) : null
+    })).filter((entry) => entry.at > windowStart && entry.at <= now).sort((left, right) => left.at - right.at).slice(-limit);
+  }
+  function inspectTradeRequestCapacity(snapshot = {}, requiredInput = TRADE_RUN_REQUEST_RESERVE) {
+    const required2 = Math.max(1, Math.floor(finiteNumber8(requiredInput, TRADE_RUN_REQUEST_RESERVE)));
+    const remaining = Math.max(0, Math.floor(finiteNumber8(snapshot.remaining)));
+    const runCapacity = snapshot.runCapacity?.required === required2 ? snapshot.runCapacity : null;
+    return {
+      ready: remaining >= required2,
+      required: required2,
+      remaining,
+      retryAt: (runCapacity?.retryAt ?? snapshot.retryAt) === null || (runCapacity?.retryAt ?? snapshot.retryAt) === void 0 ? null : Math.max(0, finiteNumber8(runCapacity?.retryAt ?? snapshot.retryAt)),
+      reason: remaining >= required2 ? null : "trade-request-budget-insufficient"
+    };
+  }
+  function createTradeRequestBudget(options = {}) {
+    const storage = options.storage;
+    const key = String(options.key || "fc-loop-runner-trade-request-budget-v1");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    const limit = Math.max(1, Math.floor(finiteNumber8(options.limit, TRADE_REQUEST_BUDGET_LIMIT)));
+    const windowMs = Math.max(1e3, Math.floor(finiteNumber8(options.windowMs, TRADE_REQUEST_BUDGET_WINDOW_MS)));
+    const lockManager = options.lockManager;
+    const lockName = String(options.lockName || TRADE_REQUEST_BUDGET_LOCK);
+    const createReservationId = typeof options.createReservationId === "function" ? options.createReservationId : () => `request-reservation-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let memory = { schemaVersion: TRADE_REQUEST_BUDGET_SCHEMA_VERSION, requests: [] };
+    function readRequests(at) {
+      const stored = storage?.get?.(key, null);
+      if (stored && typeof stored === "object") memory = stored;
+      return normalizeRequests(memory.requests, at, windowMs, limit);
+    }
+    function writeRequests(requests) {
+      memory = { schemaVersion: TRADE_REQUEST_BUDGET_SCHEMA_VERSION, requests };
+      storage?.set?.(key, memory);
+    }
+    function snapshotFrom(requests, at) {
+      const used = requests.length;
+      const remaining = Math.max(0, limit - used);
+      const retryAt = used >= limit && requests.length ? requests[0].at + windowMs : null;
+      const runRequired = Math.min(limit, TRADE_RUN_REQUEST_RESERVE);
+      const runSlotsToRecover = Math.max(0, runRequired - remaining);
+      const runRetryAt = runSlotsToRecover > 0 ? requests[runSlotsToRecover - 1]?.at + windowMs : null;
+      const byAction = {};
+      for (const request of requests) byAction[request.action] = (byAction[request.action] || 0) + 1;
+      return {
+        schemaVersion: TRADE_REQUEST_BUDGET_SCHEMA_VERSION,
+        capturedAt: at,
+        status: remaining > 0 ? "available" : "cooldown",
+        limit,
+        windowMs,
+        used,
+        remaining,
+        retryAt,
+        runCapacity: {
+          required: runRequired,
+          ready: remaining >= runRequired,
+          retryAt: runRetryAt || null
+        },
+        byAction,
+        lastRequestAt: requests.length ? requests[requests.length - 1].at : null,
+        lock: { name: lockName, supported: typeof lockManager?.request === "function" }
+      };
+    }
+    function inspect() {
+      const at = Math.max(0, finiteNumber8(now(), Date.now()));
+      return snapshotFrom(readRequests(at), at);
+    }
+    async function withLock(task) {
+      if (typeof lockManager?.request !== "function") return task();
+      return lockManager.request(lockName, { mode: "exclusive" }, task);
+    }
+    function takeWithoutLock(actionInput, reservationId = null) {
+      const action2 = actionName(actionInput);
+      const at = Math.max(0, finiteNumber8(now(), Date.now()));
+      const requests = readRequests(at);
+      if (reservationId) {
+        const reservedIndex = requests.findIndex((entry) => entry.reservationId === reservationId && entry.action === "reserved");
+        if (reservedIndex >= 0) {
+          requests[reservedIndex] = { at, action: action2, reservationId: null };
+          writeRequests(requests);
+          const snapshot3 = snapshotFrom(requests, at);
+          return { allowed: true, action: action2, remaining: snapshot3.remaining, retryAt: snapshot3.retryAt, reserved: true };
+        }
+        const snapshot2 = snapshotFrom(requests, at);
+        return { allowed: false, action: action2, remaining: snapshot2.remaining, retryAt: snapshot2.retryAt, reserved: false };
+      }
+      if (requests.length >= limit) {
+        const snapshot2 = snapshotFrom(requests, at);
+        return { allowed: false, action: action2, remaining: snapshot2.remaining, retryAt: snapshot2.retryAt, reserved: false };
+      }
+      requests.push({ at, action: action2, reservationId: null });
+      writeRequests(requests);
+      const snapshot = snapshotFrom(requests, at);
+      return { allowed: true, action: action2, remaining: snapshot.remaining, retryAt: snapshot.retryAt, reserved: false };
+    }
+    async function take(actionInput) {
+      return withLock(() => takeWithoutLock(actionInput));
+    }
+    async function reserve(countInput = TRADE_RUN_REQUEST_RESERVE) {
+      const count = Math.max(1, Math.floor(finiteNumber8(countInput, TRADE_RUN_REQUEST_RESERVE)));
+      const reservationId = String(createReservationId());
+      const acquired = await withLock(() => {
+        const at = Math.max(0, finiteNumber8(now(), Date.now()));
+        const requests = readRequests(at);
+        if (requests.length + count > limit) {
+          const snapshot2 = snapshotFrom(requests, at);
+          const slotsToRecover = Math.max(0, count - snapshot2.remaining);
+          const retryAt = slotsToRecover > 0 ? requests[slotsToRecover - 1]?.at + windowMs : null;
+          return { ready: false, required: count, remaining: snapshot2.remaining, retryAt: retryAt || null };
+        }
+        for (let index = 0; index < count; index += 1) {
+          requests.push({ at, action: "reserved", reservationId });
+        }
+        writeRequests(requests);
+        const snapshot = snapshotFrom(requests, at);
+        return { ready: true, required: count, remaining: snapshot.remaining, retryAt: snapshot.retryAt };
+      });
+      if (!acquired.ready) return acquired;
+      let released = false;
+      return Object.freeze({
+        ...acquired,
+        async take(action2) {
+          if (released) return { allowed: false, action: actionName(action2), remaining: inspect().remaining, retryAt: inspect().retryAt, reserved: false };
+          return withLock(() => takeWithoutLock(action2, reservationId));
+        },
+        async release() {
+          if (released) return inspect();
+          released = true;
+          return withLock(() => {
+            const at = Math.max(0, finiteNumber8(now(), Date.now()));
+            const requests = readRequests(at).filter((entry) => entry.reservationId !== reservationId);
+            writeRequests(requests);
+            return snapshotFrom(requests, at);
+          });
+        }
+      });
+    }
+    return Object.freeze({ inspect, take, reserve });
+  }
+
   // src/trade/guarded-manual-buy.js
   function createGuardedManualBuyExecutor(options = {}) {
     const operationCoordinator = options.operationCoordinator;
@@ -11642,6 +11884,10 @@
       }
       const circuit = options.circuitBreaker?.availability?.();
       if (circuit && circuit.allowed !== true) return blockedReceipt(gate.job, runId, "trade-circuit-open", startedAt);
+      if (typeof options.requestBudget?.inspect === "function") {
+        const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect());
+        if (!requestCapacity.ready) return blockedReceipt(gate.job, runId, requestCapacity.reason, startedAt);
+      }
       const operationId = `manual-buy:${runId}`;
       const operation = operationCoordinator.acquire({
         id: operationId,
@@ -11677,6 +11923,7 @@
         return receipt;
       };
       options.onRunningChange?.(true, { ...input2, job: gate.job, runId });
+      let requestReservation = null;
       try {
         let preview;
         try {
@@ -11691,7 +11938,7 @@
           const receipt2 = blockedReceipt(gate.job, runId, "buy-preview-not-ready", startedAt);
           return finishReceipt(receipt2, { preview }, "preview-blocked");
         }
-        const adapter = options.getTradeAdapter();
+        let adapter = options.getTradeAdapter();
         journal?.checkpoint?.(runId, { phase: "validation-destination-filter-started", destination: expectedDestination });
         const destinationPlan = filterBuyCatalogForDestination({ lanes: preview.plan.lanes }, adapter, expectedDestination);
         journal?.checkpoint?.(runId, {
@@ -11713,6 +11960,14 @@
         if (destinationPlan.reason) {
           const receipt2 = blockedReceipt(gate.job, runId, destinationPlan.reason, startedAt);
           return finishReceipt(receipt2, { preview }, "validation-destination-blocked");
+        }
+        if (typeof options.requestBudget?.reserve === "function") {
+          requestReservation = await options.requestBudget.reserve();
+          if (!requestReservation.ready) {
+            const receipt2 = blockedReceipt(gate.job, runId, "trade-request-budget-insufficient", startedAt);
+            return finishReceipt(receipt2, { preview }, "request-budget-blocked");
+          }
+          adapter = options.getTradeAdapter({ requestBudget: requestReservation });
         }
         const transaction = transactionFactory({
           tradeAdapter: adapter,
@@ -11747,9 +12002,13 @@
         });
         throw error;
       } finally {
-        options.onRunningChange?.(false, { ...input2, job: gate.job, runId });
         lease.release(runId);
         operationCoordinator.release(operationId);
+        try {
+          await requestReservation?.release?.();
+        } catch {
+        }
+        options.onRunningChange?.(false, { ...input2, job: gate.job, runId });
       }
     }
     return Object.freeze({ execute });
@@ -11871,7 +12130,11 @@
       if (!gate.ready) return finish(blockedReceipt(input2, gate.reason, startedAt), { gate });
       const circuit = options.circuitBreaker?.availability?.();
       if (circuit && circuit.allowed !== true) return finish(blockedReceipt(input2, "trade-circuit-open", startedAt), { gate });
-      const adapter = options.getTradeAdapter();
+      if (typeof options.requestBudget?.inspect === "function") {
+        const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect());
+        if (!requestCapacity.ready) return finish(blockedReceipt(input2, requestCapacity.reason, startedAt), { gate });
+      }
+      let adapter = options.getTradeAdapter();
       const capabilities = adapter.inspectCapabilities();
       if (!Number.isFinite(Number(capabilities.coins))) {
         return finish(blockedReceipt(input2, "scheduled-buy-coins-unavailable", startedAt), { gate });
@@ -11894,6 +12157,7 @@
         at: startedAt
       });
       options.onRunningChange?.(true, { ...input2, job: gate.job });
+      let requestReservation = null;
       try {
         let preview;
         try {
@@ -11919,6 +12183,17 @@
         });
         if (destinationPlan.reason) {
           return finish(blockedReceipt(input2, destinationPlan.reason, startedAt), { gate, preview }, "validation-destination-blocked");
+        }
+        if (typeof options.requestBudget?.reserve === "function") {
+          requestReservation = await options.requestBudget.reserve();
+          if (!requestReservation.ready) {
+            return finish(
+              blockedReceipt(input2, "trade-request-budget-insufficient", startedAt),
+              { gate, preview },
+              "request-budget-blocked"
+            );
+          }
+          adapter = options.getTradeAdapter({ requestBudget: requestReservation });
         }
         const transaction = transactionFactory({
           tradeAdapter: adapter,
@@ -11947,8 +12222,12 @@
         });
         throw error;
       } finally {
-        options.onRunningChange?.(false, { ...input2, job: gate.job });
         operationCoordinator.release(operationId);
+        try {
+          await requestReservation?.release?.();
+        } catch {
+        }
+        options.onRunningChange?.(false, { ...input2, job: gate.job });
       }
     }
     return Object.freeze({ execute });
@@ -12069,6 +12348,7 @@
     }
     async function execute(input2 = {}) {
       const startedAt = Number(now());
+      let requestReservation = null;
       store.relock();
       if (options.validationGateEnabled !== true) return blockedReceipt(input2, "scheduled-listing-validation-gate-disabled", startedAt);
       if (input2.context?.liveExecutionEnabled !== true) return blockedReceipt(input2, "live-execution-disabled", startedAt);
@@ -12076,6 +12356,10 @@
       if (reason) return blockedReceipt(input2, reason, startedAt);
       const availability = options.circuitBreaker?.availability?.();
       if (availability && availability.allowed !== true) return blockedReceipt(input2, "trade-circuit-open", startedAt);
+      if (typeof options.requestBudget?.inspect === "function") {
+        const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect());
+        if (!requestCapacity.ready) return blockedReceipt(input2, requestCapacity.reason, startedAt);
+      }
       const operationId = `scheduled-listing:${input2.runId}`;
       const operation = operationCoordinator.acquire({
         id: operationId,
@@ -12102,8 +12386,18 @@
           options.onReceipt?.(receipt2, { job, prepared, clubValidation, input: input2 });
           return receipt2;
         }
+        let adapter = options.getTradeAdapter();
+        if (typeof options.requestBudget?.reserve === "function") {
+          requestReservation = await options.requestBudget.reserve();
+          if (!requestReservation.ready) {
+            const receipt2 = blockedReceipt(input2, "trade-request-budget-insufficient", startedAt);
+            options.onReceipt?.(receipt2, { job, prepared, clubValidation, input: input2 });
+            return receipt2;
+          }
+          adapter = options.getTradeAdapter({ requestBudget: requestReservation });
+        }
         const transaction = transactionFactory({
-          tradeAdapter: options.getTradeAdapter(),
+          tradeAdapter: adapter,
           circuitBreaker: options.circuitBreaker,
           sleep
         });
@@ -12120,8 +12414,12 @@
         options.onReceipt?.(receipt, { job, prepared, clubValidation, input: input2 });
         return receipt;
       } finally {
-        options.onRunningChange?.(false, input2);
         operationCoordinator.release(operationId);
+        try {
+          await requestReservation?.release?.();
+        } catch {
+        }
+        options.onRunningChange?.(false, input2);
       }
     }
     return Object.freeze({ execute });
@@ -12174,7 +12472,7 @@
   function clone7(value) {
     return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
   }
-  function finiteNumber8(value, fallback = 0) {
+  function finiteNumber9(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -12208,7 +12506,7 @@
   }
   function safeEvent(input2 = {}, classification = {}) {
     return {
-      at: Math.max(0, finiteNumber8(input2.at, Date.now())),
+      at: Math.max(0, finiteNumber9(input2.at, Date.now())),
       action: String(input2.action || "unknown"),
       endpoint: String(input2.endpoint || ""),
       jobId: input2.jobId ? String(input2.jobId) : null,
@@ -12229,9 +12527,9 @@
       schemaVersion: TRADE_CIRCUIT_SCHEMA_VERSION,
       circuit: createTradeCircuitState(input2.circuit),
       recentEvents: (Array.isArray(input2.recentEvents) ? input2.recentEvents : []).slice(-20).map((event) => safeEvent(event, event.classification)),
-      updatedAt: Math.max(0, finiteNumber8(input2.updatedAt, 0)),
+      updatedAt: Math.max(0, finiteNumber9(input2.updatedAt, 0)),
       reset: input2.reset ? {
-        at: Math.max(0, finiteNumber8(input2.reset.at, 0)),
+        at: Math.max(0, finiteNumber9(input2.reset.at, 0)),
         reason: String(input2.reset.reason || "manual")
       } : null
     };
@@ -12266,7 +12564,7 @@
       return { ...result, record };
     }
     function recordFailure(error = {}, context = {}) {
-      const at = Math.max(0, finiteNumber8(context.at, now()));
+      const at = Math.max(0, finiteNumber9(context.at, now()));
       const classification = context.classification || classifyTradeError(error);
       const record = read();
       const event = safeEvent({ ...context, at }, classification);
@@ -12281,7 +12579,7 @@
     function recordSuccess(context = {}) {
       const record = read();
       if (record.circuit.persistent) return record;
-      const at = Math.max(0, finiteNumber8(context.at, now()));
+      const at = Math.max(0, finiteNumber9(context.at, now()));
       return write({
         ...record,
         circuit: reduceTradeCircuit(record.circuit, { type: "success", at }, config),
@@ -12289,7 +12587,7 @@
       });
     }
     function reset(reason = "manual") {
-      const at = Math.max(0, finiteNumber8(now(), Date.now()));
+      const at = Math.max(0, finiteNumber9(now(), Date.now()));
       return write({
         schemaVersion: TRADE_CIRCUIT_SCHEMA_VERSION,
         circuit: createTradeCircuitState(),
@@ -12314,7 +12612,7 @@
     "missed",
     "blocked"
   ]);
-  function finiteNumber9(value, fallback = 0) {
+  function finiteNumber10(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -12382,33 +12680,33 @@
     return zonedDateToEpoch({ ...shiftedDate(local, 1), ...time, second: 0 }, timezone);
   }
   function nextTradeRunAt(job = {}, referenceAtInput = Date.now(), options = {}) {
-    const referenceAt = Math.max(0, finiteNumber9(referenceAtInput, Date.now()));
+    const referenceAt = Math.max(0, finiteNumber10(referenceAtInput, Date.now()));
     const inclusive = options.inclusive !== false;
     const schedule = job.schedule || {};
     if (schedule.type === "manual") return null;
     if (schedule.type === "once") {
-      const runAt = Math.max(0, finiteNumber9(schedule.runAt));
+      const runAt = Math.max(0, finiteNumber10(schedule.runAt));
       return runAt > referenceAt || inclusive && runAt === referenceAt ? runAt : null;
     }
     if (schedule.type === "daily") return nextDailyRunAt(schedule, referenceAt, inclusive);
     if (schedule.type === "interval") {
       const period = positiveInteger9(schedule.everyMinutes, 60) * 6e4;
-      const anchorAt = Math.max(0, finiteNumber9(schedule.anchorAt, job.createdAt));
+      const anchorAt = Math.max(0, finiteNumber10(schedule.anchorAt, job.createdAt));
       if (referenceAt < anchorAt || inclusive && referenceAt === anchorAt) return anchorAt;
       const elapsed = referenceAt - anchorAt;
       const steps = inclusive ? Math.ceil(elapsed / period) : Math.floor(elapsed / period) + 1;
       return anchorAt + Math.max(0, steps) * period;
     }
     if (schedule.type === "window") {
-      const startAt = Math.max(0, finiteNumber9(schedule.startAt));
-      const endAt = Math.max(startAt, finiteNumber9(schedule.endAt, startAt));
+      const startAt = Math.max(0, finiteNumber10(schedule.startAt));
+      const endAt = Math.max(startAt, finiteNumber10(schedule.endAt, startAt));
       if (referenceAt > endAt || !inclusive && referenceAt === endAt) return null;
       return Math.max(startAt, referenceAt);
     }
     return null;
   }
   function createTradeJobRuntime(job = {}, options = {}) {
-    const now = Math.max(0, finiteNumber9(options.now, Date.now()));
+    const now = Math.max(0, finiteNumber10(options.now, Date.now()));
     return normalizeTradeJobRuntime({
       jobId: job.id,
       status: job.enabled === true && job.armed === true ? "waiting-time" : "disabled",
@@ -12427,13 +12725,13 @@
       lastStartedAt: nullableEpoch(input2.lastStartedAt),
       lastFinishedAt: nullableEpoch(input2.lastFinishedAt),
       lastRunId: input2.lastRunId ? String(input2.lastRunId) : null,
-      runCount: Math.max(0, Math.floor(finiteNumber9(input2.runCount))),
-      updatedAt: Math.max(0, finiteNumber9(input2.updatedAt))
+      runCount: Math.max(0, Math.floor(finiteNumber10(input2.runCount))),
+      updatedAt: Math.max(0, finiteNumber10(input2.updatedAt))
     };
   }
   function evaluateTradeJob(job = {}, runtimeInput = {}, context = {}) {
     const runtime = normalizeTradeJobRuntime({ ...runtimeInput, jobId: job.id });
-    const now = Math.max(0, finiteNumber9(context.now, Date.now()));
+    const now = Math.max(0, finiteNumber10(context.now, Date.now()));
     const result = (status, reason, action2 = "wait") => ({
       status,
       reason,
@@ -12450,8 +12748,9 @@
     if (runtime.nextRunAt > now) return result("waiting-time", null);
     if (context.sessionReady !== true) return result("waiting-session", context.sessionReason || "ea-session-unavailable");
     if (context.operationBusy === true) return result("waiting-operation", context.operationReason || "another-operation-active");
+    if (context.requestBudgetReady === false) return result("cooldown", "trade-request-budget-insufficient");
     const lateness = Math.max(0, now - runtime.nextRunAt);
-    const tolerance = Math.max(0, finiteNumber9(context.tickToleranceMs, 3e4));
+    const tolerance = Math.max(0, finiteNumber10(context.tickToleranceMs, 3e4));
     if (job.misfirePolicy?.type === "skip" && lateness > tolerance) {
       return result("missed", "misfire-skip", "advance");
     }
@@ -12463,8 +12762,8 @@
   }
   function advanceTradeJobRuntime(job = {}, runtimeInput = {}, input2 = {}) {
     const runtime = normalizeTradeJobRuntime(runtimeInput);
-    const at = Math.max(0, finiteNumber9(input2.at, Date.now()));
-    const scheduledFor = Math.max(0, finiteNumber9(input2.scheduledFor, runtime.nextRunAt));
+    const at = Math.max(0, finiteNumber10(input2.at, Date.now()));
+    const scheduledFor = Math.max(0, finiteNumber10(input2.scheduledFor, runtime.nextRunAt));
     const nextRunAt = nextTradeRunAt(job, Math.max(at, scheduledFor + 1), { inclusive: true });
     return normalizeTradeJobRuntime({
       ...runtime,
@@ -12480,8 +12779,47 @@
     });
   }
 
+  // src/trade/scheduler-fairness.js
+  function scheduledAt(candidate = {}) {
+    const value = Number(candidate.runtime?.nextRunAt ?? candidate.decision?.scheduledFor);
+    return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+  }
+  function sortedCandidates(input2 = []) {
+    return [...input2].sort((left, right) => scheduledAt(left) - scheduledAt(right) || String(left.job?.id || "").localeCompare(String(right.job?.id || "")));
+  }
+  function selectFairTradeCandidate(input2 = [], dispatch = {}) {
+    const candidates = sortedCandidates(input2).filter((candidate) => candidate.decision?.action === "run");
+    if (candidates.length < 2) return candidates[0] || null;
+    const lastType = ["buy", "listing"].includes(dispatch.lastJobType) ? dispatch.lastJobType : null;
+    if (!lastType) return candidates[0];
+    const alternate = candidates.find((candidate) => candidate.job?.type !== lastType);
+    return alternate || candidates[0];
+  }
+  function normalizeTradeDispatchState(input2 = {}) {
+    const lastJobType = ["buy", "listing"].includes(input2.lastJobType) ? input2.lastJobType : null;
+    const lastDispatchedAt = Number(input2.lastDispatchedAt);
+    return {
+      schemaVersion: 1,
+      total: Math.max(0, Math.floor(Number(input2.total) || 0)),
+      lastJobId: input2.lastJobId ? String(input2.lastJobId) : null,
+      lastJobType,
+      lastDispatchedAt: Number.isFinite(lastDispatchedAt) && lastDispatchedAt >= 0 ? lastDispatchedAt : null
+    };
+  }
+  function recordTradeDispatch(input2 = {}, job = {}, atInput = Date.now()) {
+    const state = normalizeTradeDispatchState(input2);
+    const at = Number(atInput);
+    return normalizeTradeDispatchState({
+      ...state,
+      total: state.total + 1,
+      lastJobId: job.id,
+      lastJobType: job.type,
+      lastDispatchedAt: Number.isFinite(at) ? Math.max(0, at) : Date.now()
+    });
+  }
+
   // src/trade/job-store.js
-  var TRADE_JOB_STORE_SCHEMA_VERSION = 2;
+  var TRADE_JOB_STORE_SCHEMA_VERSION = 3;
   var TRADE_HISTORY_LIMIT = 100;
   var TRADE_METRICS_SCHEMA_VERSION = 1;
   var TRADE_METRICS_REASON_LIMIT = 20;
@@ -12490,7 +12828,7 @@
   function clone8(value) {
     return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
   }
-  function finiteNumber10(value, fallback = 0) {
+  function finiteNumber11(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -12626,7 +12964,7 @@
     return { ...snapshot, paused: true, liveExecutionEnabled: false, jobs, runtimes };
   }
   function normalizeTradeJobStore(input2 = {}, options = {}) {
-    const now = Math.max(0, finiteNumber10(options.now, Date.now()));
+    const now = Math.max(0, finiteNumber11(options.now, Date.now()));
     const jobs = [];
     for (const raw of Array.isArray(input2.jobs) ? input2.jobs : []) {
       try {
@@ -12652,7 +12990,8 @@
       runtimes,
       history,
       metrics,
-      updatedAt: Math.max(0, finiteNumber10(input2.updatedAt, now))
+      dispatch: normalizeTradeDispatchState(input2.dispatch),
+      updatedAt: Math.max(0, finiteNumber11(input2.updatedAt, now))
     };
   }
   function createTradeJobStore(options = {}) {
@@ -12715,6 +13054,13 @@
         metrics: recordTradeMetrics(snapshot.metrics, receipt, { now: now() })
       });
     }
+    function recordDispatch(jobId) {
+      const id = String(jobId || "");
+      const snapshot = read();
+      const job = snapshot.jobs.find((entry) => entry.id === id);
+      if (!job) throw new Error(`Trade Job ${id} does not exist`);
+      return write({ ...snapshot, dispatch: recordTradeDispatch(snapshot.dispatch, job, Number(now())) });
+    }
     function replaceJobs(inputs = []) {
       if (!Array.isArray(inputs)) throw new TypeError("Trade Jobs must be an array");
       const at = Number(now());
@@ -12752,6 +13098,7 @@
       remove,
       updateRuntime,
       addHistory,
+      recordDispatch,
       replaceJobs,
       setPaused,
       setLiveExecutionEnabled,
@@ -12762,7 +13109,7 @@
 
   // src/trade/run-lease.js
   var TRADE_RUN_LEASE_SCHEMA_VERSION = 1;
-  function finiteNumber11(value, fallback = 0) {
+  function finiteNumber12(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -12774,9 +13121,9 @@
       runId: String(input2.runId),
       jobId: String(input2.jobId || ""),
       token: String(input2.token || ""),
-      acquiredAt: Math.max(0, finiteNumber11(input2.acquiredAt)),
-      heartbeatAt: Math.max(0, finiteNumber11(input2.heartbeatAt)),
-      expiresAt: Math.max(0, finiteNumber11(input2.expiresAt))
+      acquiredAt: Math.max(0, finiteNumber12(input2.acquiredAt)),
+      heartbeatAt: Math.max(0, finiteNumber12(input2.heartbeatAt)),
+      expiresAt: Math.max(0, finiteNumber12(input2.expiresAt))
     };
   }
   function leaseSnapshot(lease) {
@@ -12796,7 +13143,7 @@
     const key = String(options.key || "fc-loop-runner-trade-run-lease-v1");
     const ownerId = String(options.ownerId || "unknown-owner");
     const now = typeof options.now === "function" ? options.now : () => Date.now();
-    const ttlMs = Math.max(5e3, finiteNumber11(options.ttlMs, 3e4));
+    const ttlMs = Math.max(5e3, finiteNumber12(options.ttlMs, 3e4));
     const createToken = typeof options.createToken === "function" ? options.createToken : () => `${ownerId}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     function read() {
       return normalizeLease(storage?.get?.(key, null));
@@ -12915,7 +13262,7 @@
 
   // src/trade/operation-coordinator.js
   var WRITE_OPERATIONS = /* @__PURE__ */ new Set(["loop", "batch-open", "trade-listing", "trade-buy", "dynamic-sbc-live-scan"]);
-  function finiteNumber12(value, fallback = 0) {
+  function finiteNumber13(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -12926,7 +13273,7 @@
       type: String(input2.type),
       label: String(input2.label || input2.type),
       ownerId: String(input2.ownerId || ""),
-      startedAt: Math.max(0, finiteNumber12(input2.startedAt)),
+      startedAt: Math.max(0, finiteNumber13(input2.startedAt)),
       write: input2.write !== false
     };
   }
@@ -13075,6 +13422,7 @@
         lastRunId: runId,
         updatedAt: startedAt
       });
+      store.recordDispatch?.(job.id);
       let receipt;
       try {
         if (typeof executeJob !== "function") throw new Error("Trade Scheduler executor is unavailable");
@@ -13133,6 +13481,7 @@
           const rightAt = snapshot.runtimes[right.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
           return leftAt - rightAt || left.id.localeCompare(right.id);
         });
+        const runnable = [];
         for (const job of jobs) {
           const runtime = snapshot.runtimes[job.id] || {};
           const decision = evaluateTradeJob(job, runtime, context);
@@ -13150,8 +13499,10 @@
             store.updateRuntime(job.id, advanced);
             return { status: "missed", jobId: job.id, receipt, runtime: advanced };
           }
-          if (decision.action === "run") return execute(job, runtime, context);
+          if (decision.action === "run") runnable.push({ job, runtime, decision });
         }
+        const selected2 = selectFairTradeCandidate(runnable, snapshot.dispatch);
+        if (selected2) return execute(selected2.job, selected2.runtime, context);
         return { status: "idle" };
       } finally {
         ticking = false;
@@ -13173,7 +13524,7 @@
     "missed",
     "disabled"
   ];
-  function finiteNumber13(value, fallback = 0) {
+  function finiteNumber14(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
   }
@@ -13181,11 +13532,11 @@
     return value === void 0 || value === null || value === "" ? null : String(value);
   }
   function normalizeEvent(input2 = {}, at = Date.now()) {
-    const timestamp = Math.max(0, finiteNumber13(input2.at, at));
+    const timestamp = Math.max(0, finiteNumber14(input2.at, at));
     return {
-      firstAt: Math.max(0, finiteNumber13(input2.firstAt, timestamp)),
+      firstAt: Math.max(0, finiteNumber14(input2.firstAt, timestamp)),
       at: timestamp,
-      count: Math.max(1, Math.floor(finiteNumber13(input2.count, 1))),
+      count: Math.max(1, Math.floor(finiteNumber14(input2.count, 1))),
       trigger: optionalString(input2.trigger) || "unknown",
       status: optionalString(input2.status) || "unknown",
       reason: optionalString(input2.reason),
@@ -13193,7 +13544,7 @@
       runId: optionalString(input2.runId),
       runtimeStatus: optionalString(input2.runtimeStatus),
       runtimeReason: optionalString(input2.runtimeReason),
-      runtimeNextRunAt: input2.runtimeNextRunAt === void 0 || input2.runtimeNextRunAt === null ? null : Math.max(0, finiteNumber13(input2.runtimeNextRunAt))
+      runtimeNextRunAt: input2.runtimeNextRunAt === void 0 || input2.runtimeNextRunAt === null ? null : Math.max(0, finiteNumber14(input2.runtimeNextRunAt))
     };
   }
   function eventSignature(event = {}) {
@@ -13210,7 +13561,7 @@
   }
   function createTradeSchedulerEventLog(options = {}) {
     const now = typeof options.now === "function" ? options.now : () => Date.now();
-    const limit = Math.max(1, Math.floor(finiteNumber13(options.limit, TRADE_SCHEDULER_EVENT_LIMIT)));
+    const limit = Math.max(1, Math.floor(finiteNumber14(options.limit, TRADE_SCHEDULER_EVENT_LIMIT)));
     let events = [];
     function record(input2 = {}) {
       const event = normalizeEvent(input2, Number(now()));
@@ -23432,10 +23783,12 @@
     }
     function renderBanner() {
       const circuit = options.getCircuit?.() || null;
+      const requestBudget = options.getRequestBudget?.() || null;
       const circuitState = circuit?.circuit?.state || "closed";
       const scheduler = snapshot.paused ? "paused" : "running";
       const execution = snapshot.liveExecutionEnabled ? "enabled" : "locked";
-      banner.textContent = `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}`;
+      const budgetText = requestBudget ? ` | Requests: ${Number(requestBudget.remaining || 0)}/${Number(requestBudget.limit || 0)} available | Single-card reserve: ${requestBudget.runCapacity?.ready === false ? "cooldown" : "ready"}` : "";
+      banner.textContent = `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}${budgetText}`;
       banner.style.color = circuitState === "open" ? "#e3a7a7" : "#b8c3d2";
     }
     function checkboxLabel(text, control2) {
@@ -23903,6 +24256,7 @@
       const outcomes = metrics.outcomes || {};
       const buy = metrics.buy || {};
       const listing = metrics.listing || {};
+      const requestBudget = options.getRequestBudget?.() || {};
       const groups = [
         ["Runs", [
           ["Total", runs.total],
@@ -23924,7 +24278,15 @@
           ["Attempts", buy.attempts],
           ["Spent", Number(buy.spent || 0).toLocaleString()]
         ]],
-        ["Listing", [["Listed", listing.listed]]]
+        ["Listing", [["Listed", listing.listed]]],
+        ["Request budget", [
+          ["Used", requestBudget.used],
+          ["Remaining", requestBudget.remaining],
+          ["Limit", requestBudget.limit],
+          ["Window", requestBudget.windowMs ? `${Math.round(Number(requestBudget.windowMs) / 6e4)} min` : "Unavailable"],
+          ["Single-card reserve", requestBudget.runCapacity?.ready === false ? "Cooldown" : "Ready"],
+          ["Required slots", requestBudget.runCapacity?.required]
+        ]]
       ];
       const grid = styles2(dom.create("div"), {
         display: "grid",
@@ -23951,6 +24313,12 @@
         grid.appendChild(group);
       }
       content.appendChild(grid);
+      const requestRetryAt = requestBudget.runCapacity?.ready === false ? requestBudget.runCapacity.retryAt : requestBudget.status === "cooldown" ? requestBudget.retryAt : null;
+      if (Number(requestRetryAt || 0) > 0) {
+        const cooldown = styles2(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px", color: "#e3c39d", fontSize: "12px" });
+        cooldown.textContent = `Single-card Trade capacity resumes after ${new Date(Number(requestRetryAt)).toLocaleString()}`;
+        content.appendChild(cooldown);
+      }
       const period = styles2(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px", color: "#aeb8c6", fontSize: "12px" });
       const firstAt = Number(metrics.firstRecordedAt || 0);
       const lastAt = Number(metrics.lastRecordedAt || 0);
@@ -24375,7 +24743,14 @@
     const eaPlayerPickAdapter = () => adapters.playerPick();
     const eaRarityAdapter = adapters.rarity;
     const eaSbcAdapter = () => adapters.sbc();
-    const eaTradeAdapter = () => adapters.trade();
+    const tradeRequestBudget = createTradeRequestBudget({
+      storage: adapters.userscriptStorage,
+      key: TRADE_REQUEST_BUDGET_KEY,
+      lockManager: navigator?.locks
+    });
+    const eaTradeAdapter = (tradeOptions = {}) => adapters.trade({
+      requestBudget: tradeOptions.requestBudget || tradeRequestBudget
+    });
     const fsuAdapter = () => adapters.fsu();
     const localizationAdapter = adapters.localization;
     const pageRuntime = adapters.page;
@@ -24545,6 +24920,7 @@
         refresh: options.refresh === true
       }),
       inspectTradeCircuit: () => tradeCircuitBreaker.snapshot(),
+      inspectTradeRequestBudget: () => tradeRequestBudget.inspect(),
       resetTradeCircuit: (reason = "manual-console-reset") => tradeCircuitBreaker.reset(reason),
       getTradeSchedulerState: () => tradeJobStore.read(),
       saveTradeJob: (job, options = {}) => tradeJobStore.upsert(job, options),
@@ -24579,6 +24955,7 @@
       getTradeAdapter: eaTradeAdapter,
       validateClubPlayers: (refs, options) => fsuAdapter().validateClubPlayers(refs, options),
       circuitBreaker: tradeCircuitBreaker,
+      requestBudget: tradeRequestBudget,
       ownerId: tradeTabOwnerId,
       validationGateEnabled: true,
       sleep,
@@ -24608,6 +24985,7 @@
       getTradeAdapter: eaTradeAdapter,
       playerCatalogProvider: tradePlayerCatalogProvider,
       circuitBreaker: tradeCircuitBreaker,
+      requestBudget: tradeRequestBudget,
       getSchedulerState: () => tradeJobStore.read(),
       ownerId: tradeTabOwnerId,
       sleep,
@@ -24634,6 +25012,7 @@
       getTradeAdapter: eaTradeAdapter,
       playerCatalogProvider: tradePlayerCatalogProvider,
       circuitBreaker: tradeCircuitBreaker,
+      requestBudget: tradeRequestBudget,
       ownerId: tradeTabOwnerId,
       validationGateEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
       sleep,
@@ -24664,12 +25043,15 @@
       getContext: () => {
         const operation = tradeOperationCoordinator.inspect();
         const session = inspectGuardedTradeSession();
+        const requestCapacity = inspectTradeRequestCapacity(tradeRequestBudget.inspect());
         return {
           sessionReady: session.ready,
           sessionReason: session.reason,
           fsuReadiness: session.fsuReadiness,
           operationBusy: Boolean(operation.active || operation.external?.busy),
           operationReason: operation.active ? "operation-active" : operation.external?.reason,
+          requestBudgetReady: requestCapacity.ready,
+          requestBudgetRetryAt: requestCapacity.retryAt,
           tickToleranceMs: 15e3
         };
       },
@@ -24701,16 +25083,27 @@
       }
       const prepared = state.preparedTradeListing;
       if (!prepared) throw new Error("No prepared Trade listing is available");
+      const requestCapacity = inspectTradeRequestCapacity(tradeRequestBudget.inspect());
+      if (!requestCapacity.ready) {
+        throw new Error(`Trade request budget needs ${requestCapacity.required} request slots; ${requestCapacity.remaining} remain`);
+      }
+      const requestReservation = await tradeRequestBudget.reserve(requestCapacity.required);
+      if (!requestReservation.ready) {
+        throw new Error(`Trade request budget needs ${requestReservation.required} request slots; ${requestReservation.remaining} remain`);
+      }
       const operationId = `trade-listing-${Date.now()}`;
       const operation = tradeOperationCoordinator.acquire({ id: operationId, type: "trade-listing", ownerId: tradeTabOwnerId });
-      if (!operation.acquired) throw new Error(`Trade listing is blocked by ${operation.reason}`);
+      if (!operation.acquired) {
+        await requestReservation.release();
+        throw new Error(`Trade listing is blocked by ${operation.reason}`);
+      }
       state.preparedTradeListing = null;
       state.tradeListingRunning = true;
       state.running = true;
       state.stopping = false;
       try {
         const transaction = createListingTransaction({
-          tradeAdapter: eaTradeAdapter(),
+          tradeAdapter: eaTradeAdapter({ requestBudget: requestReservation }),
           circuitBreaker: tradeCircuitBreaker,
           sleep
         });
@@ -24729,6 +25122,10 @@
         state.running = false;
         state.stopping = false;
         tradeOperationCoordinator.release(operationId);
+        try {
+          await requestReservation.release();
+        } catch {
+        }
       }
     }
     function cancelPreparedTradeListing() {
@@ -24965,6 +25362,7 @@
         lease: tradeRunLease.inspect(),
         coordinator: tradeOperationCoordinator.inspect(),
         providers: inspectTradeProviders(),
+        requestBudget: tradeRequestBudget.inspect(),
         capabilities: eaTradeAdapter().inspectCapabilities(),
         operation,
         buy: createTradeBuyDiagnostics({
@@ -25083,6 +25481,7 @@
         onEnableGuardedScheduling: (input2) => enableGuardedTradeScheduling(input2),
         onDisableGuardedScheduling: () => disableGuardedTradeScheduling("manual-ui-disable"),
         scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+        getRequestBudget: () => tradeRequestBudget.inspect(),
         onSetMinimumRetainedCoins: (value) => {
           tradeJobStore.setMinimumRetainedCoins(value);
           log(value === null ? "Trade Scheduler: scheduled Buy global reserve cleared" : `Trade Scheduler: scheduled Buy global reserve set to ${Number(value).toLocaleString()} coins`);

@@ -142,11 +142,18 @@ export function createBuyTransaction(options = {}) {
       });
       if (searchResult.status !== 'completed') {
         const classification = classifyTradeError(searchResult.error || searchResult.response || {});
-        options.circuitBreaker?.recordFailure?.(searchResult.error || searchResult.response || {}, {
-          action: 'search', endpoint: '/transfermarket', jobId: job.id, runId,
-          classification, response: searchResult.response, capabilities: adapter.inspectCapabilities(),
-        });
-        stop(classification.opensCircuit ? 'blocked' : classification.ambiguous ? 'ambiguous' : 'failed', `trade-${classification.kind}`);
+        if (classification.kind !== 'request-budget-exhausted') {
+          options.circuitBreaker?.recordFailure?.(searchResult.error || searchResult.response || {}, {
+            action: 'search', endpoint: '/transfermarket', jobId: job.id, runId,
+            classification, response: searchResult.response, capabilities: adapter.inspectCapabilities(),
+          });
+        }
+        stop(
+          classification.kind === 'request-budget-exhausted' || classification.opensCircuit
+            ? 'blocked'
+            : classification.ambiguous ? 'ambiguous' : 'failed',
+          `trade-${classification.kind}`,
+        );
         break;
       }
       const capabilities = adapter.inspectCapabilities();
@@ -260,12 +267,20 @@ export function createBuyTransaction(options = {}) {
       }
       if (refresh && refresh.status !== 'completed') {
         const classification = classifyTradeError(refresh.error || refresh.response || { kind: refresh.status });
-        options.circuitBreaker?.recordFailure?.(refresh.error || refresh.response || {}, {
-          action: 'buy-reconciliation', endpoint: '/purchased-state', jobId: job.id, runId,
-          classification, response: refresh.response, capabilities: afterPurchaseCapabilities,
-        });
+        const requestBudgetExhausted = classification.kind === 'request-budget-exhausted';
+        if (classification.kind !== 'request-budget-exhausted') {
+          options.circuitBreaker?.recordFailure?.(refresh.error || refresh.response || {}, {
+            action: 'buy-reconciliation', endpoint: '/purchased-state', jobId: job.id, runId,
+            classification, response: refresh.response, capabilities: afterPurchaseCapabilities,
+          });
+        }
         failed += 1;
-        stop(classification.opensCircuit ? 'blocked' : 'ambiguous', classification.opensCircuit ? `trade-${classification.kind}` : 'purchase-refresh-not-reconciled');
+        stop(
+          classification.opensCircuit ? 'blocked' : 'ambiguous',
+          requestBudgetExhausted
+            ? 'purchase-accepted-request-budget-exhausted-before-verification'
+            : classification.opensCircuit ? `trade-${classification.kind}` : 'purchase-refresh-not-reconciled',
+        );
         receipts.push({
           index: receipts.length + 1, status, reason, item, tradeId: purchaseRef.tradeId, price,
           priceLimit: Number(search.maxBuyNow), coinsBefore: coinsBeforePurchase,
@@ -279,10 +294,12 @@ export function createBuyTransaction(options = {}) {
       if (purchase?.status !== 'loaded') {
         const classification = classifyTradeError(bought.error || bought.response || { kind: bought.status });
         if (bought.status !== 'accepted') {
-          options.circuitBreaker?.recordFailure?.(bought.error || bought.response || {}, {
-            action: 'buy', endpoint: '/auctionhouse', jobId: job.id, runId,
-            classification, response: bought.response, capabilities: adapter.inspectCapabilities(),
-          });
+          if (classification.kind !== 'request-budget-exhausted') {
+            options.circuitBreaker?.recordFailure?.(bought.error || bought.response || {}, {
+              action: 'buy', endpoint: '/auctionhouse', jobId: job.id, runId,
+              classification, response: bought.response, capabilities: adapter.inspectCapabilities(),
+            });
+          }
         }
         if (classification.kind === 'competition-lost') {
           receipts.push({ index: receipts.length + 1, status: 'competition-lost', item, tradeId: purchaseRef.tradeId, price, search: { ...search } });
@@ -295,7 +312,14 @@ export function createBuyTransaction(options = {}) {
         }
         failed += 1;
         const ambiguous = bought.status === 'accepted' || bought.status === 'ambiguous' || classification.ambiguous;
-        stop(classification.opensCircuit ? 'blocked' : ambiguous ? 'ambiguous' : 'failed', classification.opensCircuit ? `trade-${classification.kind}` : 'purchase-not-reconciled');
+        stop(
+          classification.kind === 'request-budget-exhausted' || classification.opensCircuit
+            ? 'blocked'
+            : ambiguous ? 'ambiguous' : 'failed',
+          classification.kind === 'request-budget-exhausted' || classification.opensCircuit
+            ? `trade-${classification.kind}`
+            : 'purchase-not-reconciled',
+        );
         receipts.push({
           index: receipts.length + 1, status, reason, item, tradeId: purchaseRef.tradeId, price,
           priceLimit: Number(search.maxBuyNow), coinsBefore: coinsBeforePurchase,
@@ -328,7 +352,12 @@ export function createBuyTransaction(options = {}) {
       });
       if (routed.status !== 'completed') {
         failed += 1;
-        stop('blocked', routed.status === 'destination-full' ? 'transfer-list-full' : `purchase-route-${routed.status}`);
+        stop(
+          'blocked',
+          routed.error?.kind === 'request-budget-exhausted'
+            ? 'trade-request-budget-exhausted'
+            : routed.status === 'destination-full' ? 'transfer-list-full' : `purchase-route-${routed.status}`,
+        );
         receipts.push({
           index: receipts.length + 1, status: 'blocked', reason, item: purchasedRef,
           tradeId: purchaseRef.tradeId, price, priceLimit: Number(search.maxBuyNow),
@@ -356,7 +385,12 @@ export function createBuyTransaction(options = {}) {
       });
       if (verified.status !== 'loaded' || verified.candidate?.item?.pile !== destination) {
         failed += 1;
-        stop('ambiguous', 'purchase-routed-but-not-verified');
+        stop(
+          'ambiguous',
+          routeRefresh.error?.kind === 'request-budget-exhausted'
+            ? 'purchase-routed-request-budget-exhausted-before-verification'
+            : 'purchase-routed-but-not-verified',
+        );
         receipts.push({
           index: receipts.length + 1, status: 'ambiguous', reason, item: purchasedRef,
           tradeId: purchaseRef.tradeId, price, priceLimit: Number(search.maxBuyNow),

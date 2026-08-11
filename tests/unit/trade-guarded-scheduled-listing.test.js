@@ -93,13 +93,25 @@ describe('Guarded scheduled Listing validation executor', () => {
       order.push('transaction');
       return { status: 'completed', requested: 1, succeeded: 1, receipts: [] };
     }) };
+    const baseAdapter = createFakeTradeAdapter();
+    const scopedAdapter = createFakeTradeAdapter();
+    const reservation = { ready: true, take: vi.fn(), release: vi.fn(async () => {}) };
+    const requestBudget = {
+      inspect: () => ({ remaining: 30 }),
+      reserve: vi.fn(async () => reservation),
+    };
+    const getTradeAdapter = vi.fn((options = {}) => (
+      options.requestBudget === reservation ? scopedAdapter : baseAdapter
+    ));
+    const transactionFactory = vi.fn(() => transaction);
     const onRunningChange = vi.fn();
     const executor = createGuardedScheduledListingExecutor({
       store: jobStore,
       listingPreparation,
       operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
-      getTradeAdapter: () => createFakeTradeAdapter(),
-      transactionFactory: () => transaction,
+      getTradeAdapter,
+      transactionFactory,
+      requestBudget,
       circuitBreaker: { availability: () => ({ allowed: true }) },
       validationGateEnabled: true,
       now: () => 2000,
@@ -118,6 +130,62 @@ describe('Guarded scheduled Listing validation executor', () => {
     expect(transaction.run.mock.calls[0][0].beforeMutation()).toBe(true);
     expect(heartbeat).toHaveBeenCalledOnce();
     expect(onRunningChange.mock.calls.map((call) => call[0])).toEqual([true, false]);
+    expect(requestBudget.reserve).toHaveBeenCalledOnce();
+    expect(getTradeAdapter).toHaveBeenCalledWith({ requestBudget: reservation });
+    expect(transactionFactory).toHaveBeenCalledWith(expect.objectContaining({ tradeAdapter: scopedAdapter }));
+    expect(reservation.release).toHaveBeenCalledOnce();
+  });
+
+  it('blocks after preparation when another tab takes the inspected request capacity', async () => {
+    const prepared = {
+      ready: true,
+      job: job(),
+      plan: { entries: [{ item: { id: 1, definitionId: 2, pile: 'club' } }] },
+      confirmation: { token: 'secret', requiredText: 'LIST 1' },
+    };
+    const listingPreparation = { prepare: vi.fn(async () => prepared) };
+    const transactionFactory = vi.fn();
+    const requestBudget = {
+      inspect: () => ({ remaining: 12 }),
+      reserve: vi.fn(async () => ({ ready: false, required: 12, remaining: 11, retryAt: 5000 })),
+    };
+    const result = await createGuardedScheduledListingExecutor({
+      store: store(),
+      listingPreparation,
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      getTradeAdapter: () => createFakeTradeAdapter(),
+      transactionFactory,
+      requestBudget,
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: job(), runId: 'listing-reservation-race', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0 });
+    expect(listingPreparation.prepare).toHaveBeenCalledOnce();
+    expect(requestBudget.reserve).toHaveBeenCalledOnce();
+    expect(transactionFactory).not.toHaveBeenCalled();
+  });
+
+  it('relocks and blocks before preparation when the shared request reserve is unavailable', async () => {
+    const jobStore = store();
+    const listingPreparation = { prepare: vi.fn() };
+    const result = await createGuardedScheduledListingExecutor({
+      store: jobStore,
+      listingPreparation,
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      getTradeAdapter: () => createFakeTradeAdapter(),
+      requestBudget: { inspect: () => ({ remaining: 11, retryAt: 5000 }) },
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: job(), runId: 'budget-blocked', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0 });
+    expect(jobStore.relock).toHaveBeenCalledOnce();
+    expect(listingPreparation.prepare).not.toHaveBeenCalled();
   });
 
   it('target-validates the selected Club item when FSU is provisional', async () => {

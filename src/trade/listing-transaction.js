@@ -88,7 +88,9 @@ export function createListingTransaction(options = {}) {
         if (transferPreflight.status !== 'completed') {
           failed += 1;
           status = 'blocked';
-          reason = `listing-transfer-preflight-${transferPreflight.status || 'unavailable'}`;
+          reason = transferPreflight.error?.kind === 'request-budget-exhausted'
+            ? 'trade-request-budget-exhausted'
+            : `listing-transfer-preflight-${transferPreflight.status || 'unavailable'}`;
           receipts.push({
             index: index + 1,
             item: { ...entry.item },
@@ -160,6 +162,13 @@ export function createListingTransaction(options = {}) {
         break;
       }
       const priceLimitResult = await adapter.inspectPriceLimits(entry.item, { refresh: true });
+      if (priceLimitResult.error?.kind === 'request-budget-exhausted') {
+        failed += 1;
+        status = 'blocked';
+        reason = 'trade-request-budget-exhausted';
+        receipts.push({ index: index + 1, item: { ...entry.item }, status, reason, requestBudget: priceLimitResult.error });
+        break;
+      }
       const finalPrice = applyListingPriceLimits(entry, priceLimitResult);
       if (!finalPrice.ok) {
         failed += 1;
@@ -209,18 +218,26 @@ export function createListingTransaction(options = {}) {
       };
       if (listed.status !== 'accepted') {
         const classification = classifyTradeError(listed.error || listed.response || { status: listed.status });
-        options.circuitBreaker?.recordFailure?.(listed.error || listed.response || {}, {
-          action: 'list',
-          endpoint: '/auctionhouse',
-          jobId: job.id,
-          runId,
-          classification,
-          response: listed.response,
-          capabilities: adapter.inspectCapabilities(),
-        });
+        if (classification.kind !== 'request-budget-exhausted') {
+          options.circuitBreaker?.recordFailure?.(listed.error || listed.response || {}, {
+            action: 'list',
+            endpoint: '/auctionhouse',
+            jobId: job.id,
+            runId,
+            classification,
+            response: listed.response,
+            capabilities: adapter.inspectCapabilities(),
+          });
+        }
         failed += 1;
-        status = listed.status === 'ambiguous' ? 'ambiguous' : classification.opensCircuit ? 'blocked' : 'failed';
-        reason = classification.opensCircuit ? `trade-${classification.kind}` : `listing-${listed.status}`;
+        status = classification.kind === 'request-budget-exhausted'
+          ? 'blocked'
+          : listed.status === 'ambiguous'
+            ? 'ambiguous'
+            : classification.opensCircuit ? 'blocked' : 'failed';
+        reason = classification.kind === 'request-budget-exhausted'
+          ? 'trade-request-budget-exhausted'
+          : classification.opensCircuit ? `trade-${classification.kind}` : `listing-${listed.status}`;
         receipts.push({ ...receipt, status, reason, classification });
         break;
       }
@@ -230,7 +247,9 @@ export function createListingTransaction(options = {}) {
       if (refresh.status !== 'completed' || verification.status !== 'loaded' || !verificationMatches(entry, verification.candidate)) {
         failed += 1;
         status = 'ambiguous';
-        reason = 'listing-accepted-but-not-verified';
+        reason = refresh.error?.kind === 'request-budget-exhausted'
+          ? 'listing-accepted-request-budget-exhausted-before-verification'
+          : 'listing-accepted-but-not-verified';
         receipts.push({
           ...receipt,
           status: 'ambiguous',

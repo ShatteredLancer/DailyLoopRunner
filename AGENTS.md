@@ -333,6 +333,10 @@ Trade Job 配置导入/导出必须使用独立版本化格式，只包含 `id/n
 
 Trade Provider 健康 UI 和 diagnostics 只能调用 Provider 自身的无网络 `inspect()`，不得通过 Preview、报价加载、球员目录加载或 EA Adapter 探测健康状态。健康快照只允许聚合 cache 状态、TTL、条目/通道数量、来源/平台计数和最近一次脱敏加载摘要；不得导出 definition ID、价格、URL 或原始错误。显式清除 Player Catalog 或 Price Quote cache 前必须先通过 Job Store `relock()` 暂停、关闭 live execution 并解除所有 Armed；清除本身不得发网络请求、写 Trade History 或改变 metrics/reserve。
 
+所有 EA Trade 网络调用必须在 `ea/trade.js` 的唯一调用点取得共享请求预算许可；本地 capability/repository inspect 和第三方 Provider HTTP 不计入该 EA 预算。默认预算固定为跨标签页共享的 5 分钟 30 次滑动窗口，支持 Web Locks 时许可写入必须通过独占锁串行化。单卡 Buy/Listing 执行前至少保留 12 次余量，用于覆盖 mutation 后的 Unassigned/Club/Transfer 对账；余额不足只能进入 `cooldown` 或在 Preview/mutation 前阻断。预算耗尽不得记为 EA Circuit failure，也不得提供清空、提高上限或跳过许可的 UI/API。诊断只允许输出窗口、使用/剩余数量、动作聚合、恢复时间和锁支持状态，不得输出持久事件明细、卡片/definition、价格、URL 或原始响应。
+
+Scheduler 公平选择状态必须持久化且保持有界，只记录最后实际 dispatch 的 Job ID/type/time 和累计次数。Buy 与 Listing 同时到期时优先选择与上次 dispatch 不同的类型，同类型内继续按最早 `nextRunAt` 和稳定 ID 排序；lease 未取得、misfire advance、waiting/cooldown 不得计为 dispatch。该公平核心不得绕过当前“恰好一个 enabled+armed Job”的 guarded 生产入口，也不得据此开放 recurring、multi-item、rating range 或其它 card class。
+
 Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`rare-gold` 只匹配非特殊稀有金，`normal-gold` 匹配两者但排除特殊卡，`special` 只匹配特殊卡；兼容别名 `gold` 等同 `normal-gold`，不得借此把特殊卡混入普通金卡规则。
 
 ### 5.4 `src/selection`

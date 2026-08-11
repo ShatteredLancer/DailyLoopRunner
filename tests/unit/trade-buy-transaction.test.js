@@ -202,6 +202,58 @@ describe('Trade Buy Transaction', () => {
     expect(adapter.calls.some((call) => call.method === 'routePurchasedItem')).toBe(false);
   });
 
+  it('keeps an accepted purchase ambiguous when local budget blocks reconciliation without opening Circuit', async () => {
+    const base = createFakeTradeAdapter({ coins: 5000, marketItems: [marketItem()] });
+    const adapter = {
+      ...base,
+      refreshPurchaseState: vi.fn(async () => ({
+        status: 'blocked', response: null,
+        error: { kind: 'request-budget-exhausted', action: 'wait-until-budget-reset', retryAt: 6000 },
+      })),
+    };
+    const circuit = { availability: () => ({ allowed: true }), recordFailure: vi.fn(), recordSuccess: vi.fn() };
+    const result = await createBuyTransaction({
+      tradeAdapter: adapter,
+      playerCatalogProvider: catalog(),
+      circuitBreaker: circuit,
+      now: () => 1000,
+      sleep: async () => {},
+      createRunId: () => 'buy-run-budget-reconciliation',
+    }).run({ job: job() });
+    expect(result).toMatchObject({
+      status: 'ambiguous',
+      reason: 'purchase-accepted-request-budget-exhausted-before-verification',
+      succeeded: 0,
+      failed: 1,
+    });
+    expect(base.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(1);
+    expect(base.calls.some((call) => call.method === 'routePurchasedItem')).toBe(false);
+    expect(circuit.recordFailure).not.toHaveBeenCalled();
+    expect(circuit.recordSuccess).not.toHaveBeenCalled();
+  });
+
+  it('blocks before Buy when local budget stops the market search without opening Circuit', async () => {
+    const base = createFakeTradeAdapter({ coins: 5000 });
+    const adapter = {
+      ...base,
+      searchMarket: vi.fn(async () => ({
+        status: 'blocked', response: null, candidates: [],
+        error: { kind: 'request-budget-exhausted', action: 'wait-until-budget-reset', retryAt: 6000 },
+      })),
+    };
+    const circuit = { availability: () => ({ allowed: true }), recordFailure: vi.fn(), recordSuccess: vi.fn() };
+    const result = await createBuyTransaction({
+      tradeAdapter: adapter,
+      playerCatalogProvider: catalog(),
+      circuitBreaker: circuit,
+      now: () => 1000,
+      sleep: async () => {},
+    }).run({ job: job() });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-exhausted', succeeded: 0 });
+    expect(base.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
+    expect(circuit.recordFailure).not.toHaveBeenCalled();
+  });
+
   it('opens the circuit and stops without retrying an EA 427 Buy rejection', async () => {
     const adapter = createFakeTradeAdapter({
       coins: 5000,

@@ -36,8 +36,18 @@
 - `waiting-session`：页面、EA 或 FSU 状态没有达到交易所需的就绪条件。
 - `waiting-operation`：Loop、SBC、开包或其它写操作占用共享 Coordinator；调度器应等待，而不是并行发送请求。
 - `browser-lock-held`：另一个同源标签页持有 Web Lock；这是跨标签页互斥的正常证据。
+- `cooldown / trade-request-budget-insufficient`：最近 5 分钟内不足以为单卡事务保留 12 个 EA Trade 请求槽；等待 Summary 显示的恢复时间，不要重复 Preview、Arm 或 Start。
 - `blocked`：安全门禁拒绝了本次运行，通常会写入一条 History 回执并解除 Job 武装。
 - `completed`：请求、金币/库存对账和目标位置核验完成；仍应检查最终回执。
+
+## 请求预算与调度顺序
+
+- EA Trade 请求预算固定为每 5 分钟 30 次，并通过 Tampermonkey 存储在标签页之间共享。支持 Web Locks 的浏览器会串行化预算占用。
+- 单卡 Buy/Listing 在 mutation 前原子保留 12 个槽，用于搜索/挂牌、刷新和 Unassigned/Club/Transfer 对账。事务结束后未使用槽会释放，已经发送的 EA 请求仍保留到窗口到期。
+- EA capability/repository 的本地读取以及 FUTNext/FUT.GG Provider HTTP 不计入该预算。Summary 中 `Used/Remaining` 是 EA Trade Adapter 请求聚合，不是全部网络流量。
+- `Single-card reserve: cooldown` 不代表 EA Circuit 已打开。它是本地限流，等待 `Single-card Trade capacity resumes after ...`；不要清 Tampermonkey 存储，也没有提高或跳过预算的入口。
+- 若 Buy 与 Listing 同时到期，内部选择器会交替类型；同类型按最早计划时间和 Job ID 排序。但当前生产门禁仍只允许恰好一个 armed Job，因此该规则不会开放多个 Job 同时自动交易。
+- 浏览器异常关闭时，未释放 reservation 会在最长 5 分钟后自然过期。恢复页面后先查看 Summary/diagnostics，不要立即重复发起交易。
 
 ## 诊断文件
 
@@ -49,6 +59,7 @@
 - Lease、Web Lock、Coordinator、Circuit、页面和 FSU readiness 的脱敏状态。
 - Buy/Listing Preview、Prepared、Receipt 和有限的运行时间线。
 - Player Catalog 和 Price Quote 的健康状态、缓存聚合数量、TTL 和活动计数。
+- EA Trade 请求预算的窗口、使用/剩余数量、动作聚合、单卡容量恢复时间和 Web Lock 支持状态。
 
 诊断不会包含 EA 认证信息、Lease token、完整 definition ID 列表、价格、URL 或原始异常对象。上传前仍应检查文件内容，账号标识、用户名或第三方日志中的个人信息应自行删除。
 
@@ -67,6 +78,7 @@
 | `waiting-session` 持续存在 | 保持页面登录，等待 FSU Club readiness；保存诊断后再刷新一次 | 不要连续 Arm、刷新或重复创建 Job |
 | `waiting-operation` | 等 Loop/SBC/开包完成；确认 Runner operation 已恢复 false | 不要在另一个标签页强行运行交易 |
 | `browser-lock-held` | 在两个标签页都导出诊断，关闭不用的标签页后等待下一次 tick | 不要手工重复发送 Buy/Listing |
+| `trade-request-budget-insufficient` | 查看 Summary 的单卡容量恢复时间，保持 Job 不再重复 Arm，等待窗口自然恢复 | 不要清 Tampermonkey 存储、刷新多个标签页或绕过预算 |
 | `expired-lease-reconciliation-required` | 停止并刷新登录，确认 Transfer/Club 状态后重新建立一次性 Job | 不要绕过回锁或直接重试原请求 |
 | `circuit=open` | 按 `retryAt` 等待，检查 429/401/Captcha/EA service error 原因 | 不要清空 History 或反复点击 Start |
 | Provider 为 `stale`/`empty` | 先保存诊断；确认网络和 Provider 配置，必要时显式清除对应缓存，再重新 Preview | 不要在旧 Preview 上 Arm 或执行 |
@@ -100,4 +112,3 @@ Price Quote 是当前页面内存缓存，刷新页面后为空是正常现象�
 发布前运行 `npm run verify`，确认版本、测试文件数、测试数量、userscript 构建结果和 FSU 资源检查均通过。正式版通过 GitHub Release 的 `DailyLoopRunner.user.js` 安装；不要混用旧 Validation 脚本。
 
 出现交易行为异常时，先在 UI 中 Stop、关闭实时执行并解除 Job 武装，再安装上一份已验证版本或等待诊断调查。不要用回滚掩盖未确认的 EA 状态；首先保存最小证据包。
-

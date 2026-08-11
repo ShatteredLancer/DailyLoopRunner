@@ -22,6 +22,18 @@ describe('Trade error policy', () => {
     expect(classifyTradeError(new Error('Destination full'))).toMatchObject({ kind: 'destination-full', ambiguous: false });
   });
 
+  it('classifies local request-budget exhaustion without opening the EA circuit', () => {
+    expect(classifyTradeError({ kind: 'request-budget-exhausted' })).toEqual({
+      kind: 'request-budget-exhausted',
+      code: null,
+      action: 'wait-until-budget-reset',
+      retryable: false,
+      opensCircuit: false,
+      disarm: false,
+      ambiguous: false,
+    });
+  });
+
   it('keeps an EA 427 circuit open until an explicit reset', () => {
     const open = reduceTradeCircuit(createTradeCircuitState(), {
       type: 'failure',

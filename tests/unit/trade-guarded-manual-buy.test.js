@@ -127,4 +127,15 @@ describe('Guarded manual one-card Buy executor', () => {
     expect(buyPreview.preview).not.toHaveBeenCalled();
     expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
   });
+
+  it('blocks before Preview when fewer than the reconciliation reserve slots remain', async () => {
+    const { executor, buyPreview, adapter } = setup({
+      options: { requestBudget: { inspect: () => ({ remaining: 11, retryAt: 5000 }) } },
+    });
+    await expect(executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' })).resolves.toMatchObject({
+      status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0,
+    });
+    expect(buyPreview.preview).not.toHaveBeenCalled();
+    expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
+  });
 });

@@ -19,6 +19,21 @@ function scheduledJob(overrides = {}) {
   };
 }
 
+function scheduledBuyJob(overrides = {}) {
+  return {
+    id: 'buy-1', name: 'Scheduled Buy', type: 'buy', enabled: true, armed: true,
+    schedule: { type: 'once', runAt: 1000 },
+    misfirePolicy: { type: 'grace-window', graceMinutes: 15 },
+    policy: {
+      ratingMin: 84, ratingMax: 84, cardClass: 'rare-gold', maxBuyNow: 1000,
+      ratingPriceOverrides: {}, quantity: 1, totalBudget: 1000,
+      maxRuntimeMinutes: 5, searchDelaySeconds: [8, 15],
+      maxPurchasesPerSearch: 1, maxConsecutiveEmptySearches: 5,
+    },
+    ...overrides,
+  };
+}
+
 describe('Trade Scheduler', () => {
   it('executes one due Fake job under a lease and persists history', async () => {
     const storage = memoryStorage();
@@ -210,5 +225,80 @@ describe('Trade Scheduler', () => {
     expect(await scheduler.tick()).toMatchObject({ status: 'completed', receipt: { runId: 'operation-run', succeeded: 1 } });
     expect(await scheduler.tick()).toMatchObject({ status: 'idle' });
     expect(executeJob).toHaveBeenCalledOnce();
+  });
+
+  it('enters cooldown without a lease or execution until the global request reserve is available', async () => {
+    const storage = memoryStorage();
+    let time = 1000;
+    let requestBudgetReady = false;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob());
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    const executeJob = vi.fn(async ({ runId }) => createTradeRunReceipt({ runId, status: 'completed', requested: 1, succeeded: 1, finishedAt: time }));
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'budget-tab', now: () => time }),
+      now: () => time,
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestBudgetReady }),
+      executeJob,
+    });
+    expect(await scheduler.tick()).toMatchObject({ status: 'idle' });
+    expect(store.read().runtimes['listing-1']).toMatchObject({ status: 'cooldown', reason: 'trade-request-budget-insufficient' });
+    expect(store.read().dispatch.total).toBe(0);
+    expect(executeJob).not.toHaveBeenCalled();
+    requestBudgetReady = true;
+    time = 2000;
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: 'listing-1' });
+    expect(store.read().dispatch).toMatchObject({ total: 1, lastJobId: 'listing-1', lastJobType: 'listing' });
+  });
+
+  it('does not record a dispatch when another tab holds the run lease', async () => {
+    const storage = memoryStorage();
+    const time = 1000;
+    const holder = createTradeRunLease({ storage, key: 'lease', ownerId: 'holder-tab', now: () => time });
+    holder.acquire({ runId: 'holder-run', jobId: 'other-job' });
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob());
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    const executeJob = vi.fn();
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'waiting-tab', now: () => time }),
+      now: () => time,
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestBudgetReady: true }),
+      executeJob,
+    });
+    expect(await scheduler.tick()).toMatchObject({ status: 'waiting-operation', jobId: 'listing-1' });
+    expect(store.read().dispatch.total).toBe(0);
+    expect(executeJob).not.toHaveBeenCalled();
+  });
+
+  it('alternates Buy and Listing dispatch when both types remain due', async () => {
+    const storage = memoryStorage();
+    const time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob({ id: 'listing-a' }));
+    store.upsert(scheduledJob({ id: 'listing-b' }));
+    store.upsert(scheduledBuyJob({ id: 'z-buy' }));
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    const dispatched = [];
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'fair-tab', now: () => time }),
+      now: () => time,
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestBudgetReady: true }),
+      executeJob: async ({ job, runId }) => {
+        dispatched.push(job.type);
+        return createTradeRunReceipt({ runId, status: 'completed', requested: 1, succeeded: 1, finishedAt: time });
+      },
+    });
+    await scheduler.tick();
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(dispatched).toEqual(['listing', 'buy', 'listing']);
+    expect(store.read().dispatch).toMatchObject({ total: 3, lastJobType: 'listing', lastJobId: 'listing-b' });
   });
 });

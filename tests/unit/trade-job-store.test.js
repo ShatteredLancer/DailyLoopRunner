@@ -111,7 +111,7 @@ describe('Trade Job Store', () => {
     });
     const store = createTradeJobStore({ storage, key: 'jobs', now: () => 1000 });
     expect(store.read()).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       metrics: {
         firstRecordedAt: 200,
         lastRecordedAt: 400,
@@ -138,6 +138,25 @@ describe('Trade Job Store', () => {
     expect(reloaded.history).toHaveLength(TRADE_HISTORY_LIMIT);
     expect(reloaded.metrics.runs.total).toBe(TRADE_HISTORY_LIMIT + 7);
     expect(reloaded.metrics.listing.listed).toBe(TRADE_HISTORY_LIMIT + 5);
+  });
+
+  it('persists bounded dispatch metadata without changing Job runtime or History', () => {
+    let time = 1000;
+    const storage = memoryStorage();
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(job('listing-job'));
+    time = 2000;
+    const snapshot = store.recordDispatch('listing-job');
+    expect(snapshot.dispatch).toEqual({
+      schemaVersion: 1,
+      total: 1,
+      lastJobId: 'listing-job',
+      lastJobType: 'listing',
+      lastDispatchedAt: 2000,
+    });
+    expect(snapshot.history).toEqual([]);
+    expect(snapshot.runtimes['listing-job'].runCount).toBe(0);
+    expect(createTradeJobStore({ storage, key: 'jobs', now: () => 3000 }).read().dispatch).toEqual(snapshot.dispatch);
   });
 
   it('bounds and aggregates diagnostic stop reasons', () => {

@@ -42,6 +42,7 @@ import {
   TRADE_BUY_JOURNAL_KEY,
   TRADE_JOB_STORE_KEY,
   TRADE_PLAYER_CATALOG_CACHE_KEY,
+  TRADE_REQUEST_BUDGET_KEY,
   TRADE_RUN_LEASE_KEY,
 } from './config/runtime.js';
 import { LOOP_DEFS } from './config/loops.js';
@@ -186,6 +187,10 @@ import { selectGuardedScheduledTradeJob } from './trade/guarded-scheduled-job.js
 import { createTradeCircuitBreaker } from './trade/circuit-breaker.js';
 import { createTradeJobStore } from './trade/job-store.js';
 import { createTradeRunLease } from './trade/run-lease.js';
+import {
+  createTradeRequestBudget,
+  inspectTradeRequestCapacity,
+} from './trade/request-budget.js';
 import { stageExpiredTradeLeaseValidation } from './trade/expired-lease-validation.js';
 import { createOperationCoordinator } from './trade/operation-coordinator.js';
 import { createTradeScheduler } from './trade/scheduler.js';
@@ -322,7 +327,14 @@ const SCHEDULED_BUY_LIVE_GATE_ENABLED = true;
   const eaPlayerPickAdapter = () => adapters.playerPick();
   const eaRarityAdapter = adapters.rarity;
   const eaSbcAdapter = () => adapters.sbc();
-  const eaTradeAdapter = () => adapters.trade();
+  const tradeRequestBudget = createTradeRequestBudget({
+    storage: adapters.userscriptStorage,
+    key: TRADE_REQUEST_BUDGET_KEY,
+    lockManager: navigator?.locks,
+  });
+  const eaTradeAdapter = (tradeOptions = {}) => adapters.trade({
+    requestBudget: tradeOptions.requestBudget || tradeRequestBudget,
+  });
   const fsuAdapter = () => adapters.fsu();
   const localizationAdapter = adapters.localization;
   const pageRuntime = adapters.page;
@@ -497,6 +509,7 @@ const state = {
       refresh: options.refresh === true,
     }),
     inspectTradeCircuit: () => tradeCircuitBreaker.snapshot(),
+    inspectTradeRequestBudget: () => tradeRequestBudget.inspect(),
     resetTradeCircuit: (reason = 'manual-console-reset') => tradeCircuitBreaker.reset(reason),
     getTradeSchedulerState: () => tradeJobStore.read(),
     saveTradeJob: (job, options = {}) => tradeJobStore.upsert(job, options),
@@ -532,6 +545,7 @@ const state = {
     getTradeAdapter: eaTradeAdapter,
     validateClubPlayers: (refs, options) => fsuAdapter().validateClubPlayers(refs, options),
     circuitBreaker: tradeCircuitBreaker,
+    requestBudget: tradeRequestBudget,
     ownerId: tradeTabOwnerId,
     validationGateEnabled: true,
     sleep,
@@ -563,6 +577,7 @@ const state = {
     getTradeAdapter: eaTradeAdapter,
     playerCatalogProvider: tradePlayerCatalogProvider,
     circuitBreaker: tradeCircuitBreaker,
+    requestBudget: tradeRequestBudget,
     getSchedulerState: () => tradeJobStore.read(),
     ownerId: tradeTabOwnerId,
     sleep,
@@ -591,6 +606,7 @@ const state = {
     getTradeAdapter: eaTradeAdapter,
     playerCatalogProvider: tradePlayerCatalogProvider,
     circuitBreaker: tradeCircuitBreaker,
+    requestBudget: tradeRequestBudget,
     ownerId: tradeTabOwnerId,
     validationGateEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
     sleep,
@@ -623,12 +639,15 @@ const state = {
     getContext: () => {
       const operation = tradeOperationCoordinator.inspect();
       const session = inspectGuardedTradeSession();
+      const requestCapacity = inspectTradeRequestCapacity(tradeRequestBudget.inspect());
       return {
         sessionReady: session.ready,
         sessionReason: session.reason,
         fsuReadiness: session.fsuReadiness,
         operationBusy: Boolean(operation.active || operation.external?.busy),
         operationReason: operation.active ? 'operation-active' : operation.external?.reason,
+        requestBudgetReady: requestCapacity.ready,
+        requestBudgetRetryAt: requestCapacity.retryAt,
         tickToleranceMs: 15_000,
       };
     },
@@ -662,16 +681,27 @@ const state = {
     }
     const prepared = state.preparedTradeListing;
     if (!prepared) throw new Error('No prepared Trade listing is available');
+    const requestCapacity = inspectTradeRequestCapacity(tradeRequestBudget.inspect());
+    if (!requestCapacity.ready) {
+      throw new Error(`Trade request budget needs ${requestCapacity.required} request slots; ${requestCapacity.remaining} remain`);
+    }
+    const requestReservation = await tradeRequestBudget.reserve(requestCapacity.required);
+    if (!requestReservation.ready) {
+      throw new Error(`Trade request budget needs ${requestReservation.required} request slots; ${requestReservation.remaining} remain`);
+    }
     const operationId = `trade-listing-${Date.now()}`;
     const operation = tradeOperationCoordinator.acquire({ id: operationId, type: 'trade-listing', ownerId: tradeTabOwnerId });
-    if (!operation.acquired) throw new Error(`Trade listing is blocked by ${operation.reason}`);
+    if (!operation.acquired) {
+      await requestReservation.release();
+      throw new Error(`Trade listing is blocked by ${operation.reason}`);
+    }
     state.preparedTradeListing = null;
     state.tradeListingRunning = true;
     state.running = true;
     state.stopping = false;
     try {
       const transaction = createListingTransaction({
-        tradeAdapter: eaTradeAdapter(),
+        tradeAdapter: eaTradeAdapter({ requestBudget: requestReservation }),
         circuitBreaker: tradeCircuitBreaker,
         sleep,
       });
@@ -690,6 +720,7 @@ const state = {
       state.running = false;
       state.stopping = false;
       tradeOperationCoordinator.release(operationId);
+      try { await requestReservation.release(); } catch { }
     }
   }
 
@@ -940,6 +971,7 @@ const state = {
       lease: tradeRunLease.inspect(),
       coordinator: tradeOperationCoordinator.inspect(),
       providers: inspectTradeProviders(),
+      requestBudget: tradeRequestBudget.inspect(),
       capabilities: eaTradeAdapter().inspectCapabilities(),
       operation,
       buy: createTradeBuyDiagnostics({
@@ -1063,6 +1095,7 @@ const state = {
       onEnableGuardedScheduling: (input) => enableGuardedTradeScheduling(input),
       onDisableGuardedScheduling: () => disableGuardedTradeScheduling('manual-ui-disable'),
       scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+      getRequestBudget: () => tradeRequestBudget.inspect(),
       onSetMinimumRetainedCoins: (value) => {
         tradeJobStore.setMinimumRetainedCoins(value);
         log(value === null

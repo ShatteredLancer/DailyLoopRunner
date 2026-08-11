@@ -3,6 +3,7 @@ import { createBuyTransaction } from './buy-transaction.js';
 import { filterBuyCatalogForDestination } from './buy-destination.js';
 import { sanitizeTradeBuyReceipt } from './buy-diagnostics.js';
 import { inspectScheduledBuyValidationJob } from './scheduled-buy-validation.js';
+import { inspectTradeRequestCapacity } from './request-budget.js';
 
 export function createGuardedScheduledBuyExecutor(options = {}) {
   const store = options.store;
@@ -49,8 +50,12 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
     if (!gate.ready) return finish(blockedReceipt(input, gate.reason, startedAt), { gate });
     const circuit = options.circuitBreaker?.availability?.();
     if (circuit && circuit.allowed !== true) return finish(blockedReceipt(input, 'trade-circuit-open', startedAt), { gate });
+    if (typeof options.requestBudget?.inspect === 'function') {
+      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect());
+      if (!requestCapacity.ready) return finish(blockedReceipt(input, requestCapacity.reason, startedAt), { gate });
+    }
 
-    const adapter = options.getTradeAdapter();
+    let adapter = options.getTradeAdapter();
     const capabilities = adapter.inspectCapabilities();
     if (!Number.isFinite(Number(capabilities.coins))) {
       return finish(blockedReceipt(input, 'scheduled-buy-coins-unavailable', startedAt), { gate });
@@ -75,6 +80,7 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
       at: startedAt,
     });
     options.onRunningChange?.(true, { ...input, job: gate.job });
+    let requestReservation = null;
     try {
       let preview;
       try {
@@ -101,6 +107,18 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
       });
       if (destinationPlan.reason) {
         return finish(blockedReceipt(input, destinationPlan.reason, startedAt), { gate, preview }, 'validation-destination-blocked');
+      }
+
+      if (typeof options.requestBudget?.reserve === 'function') {
+        requestReservation = await options.requestBudget.reserve();
+        if (!requestReservation.ready) {
+          return finish(
+            blockedReceipt(input, 'trade-request-budget-insufficient', startedAt),
+            { gate, preview },
+            'request-budget-blocked',
+          );
+        }
+        adapter = options.getTradeAdapter({ requestBudget: requestReservation });
       }
 
       const transaction = transactionFactory({
@@ -130,8 +148,9 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
       });
       throw error;
     } finally {
-      options.onRunningChange?.(false, { ...input, job: gate.job });
       operationCoordinator.release(operationId);
+      try { await requestReservation?.release?.(); } catch { }
+      options.onRunningChange?.(false, { ...input, job: gate.job });
     }
   }
 

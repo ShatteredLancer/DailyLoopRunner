@@ -32,7 +32,7 @@ export function createRuntimeAdapters(runtime, documentObject = runtime?.documen
     playerPick: () => createEaPlayerPickAdapter(runtime),
     rarity: createEaRarityAdapter(runtime),
     sbc: () => createEaSbcAdapter(runtime),
-    trade: () => createEaTradeAdapter(runtime),
+    trade: (tradeOptions = {}) => createEaTradeAdapter(runtime, tradeOptions),
     fsu: () => createFsuAdapter(runtime, { documentObject, localStorage, sessionStorage }),
     dom,
     page,

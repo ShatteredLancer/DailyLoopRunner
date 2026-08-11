@@ -146,6 +146,7 @@ export function evaluateTradeJob(job = {}, runtimeInput = {}, context = {}) {
   if (runtime.nextRunAt > now) return result('waiting-time', null);
   if (context.sessionReady !== true) return result('waiting-session', context.sessionReason || 'ea-session-unavailable');
   if (context.operationBusy === true) return result('waiting-operation', context.operationReason || 'another-operation-active');
+  if (context.requestBudgetReady === false) return result('cooldown', 'trade-request-budget-insufficient');
 
   const lateness = Math.max(0, now - runtime.nextRunAt);
   const tolerance = Math.max(0, finiteNumber(context.tickToleranceMs, 30_000));

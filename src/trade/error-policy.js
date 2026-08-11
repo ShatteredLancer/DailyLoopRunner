@@ -37,6 +37,9 @@ export function classifyTradeError(error = {}) {
   const code = errorCode(error);
   const message = messageText(error);
   const text = `${String(error?.kind || '')} ${message}`.toLowerCase();
+  if (/request-budget-exhausted/.test(text)) {
+    return { kind: 'request-budget-exhausted', code, action: 'wait-until-budget-reset', retryable: false, opensCircuit: false, disarm: false, ambiguous: false };
+  }
   if (code === 427) {
     return {
       kind: 'auction-operation-blocked',

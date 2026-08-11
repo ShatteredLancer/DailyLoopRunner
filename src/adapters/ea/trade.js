@@ -265,8 +265,20 @@ function observeResult(value, context = {}) {
   });
 }
 
-export function createEaTradeAdapter(runtime) {
+export function createEaTradeAdapter(runtime, adapterOptions = {}) {
   const marketItems = new Map();
+
+  async function requestBudgetError(action) {
+    if (typeof adapterOptions.requestBudget?.take !== 'function') return null;
+    const permit = await adapterOptions.requestBudget.take(action);
+    if (permit?.allowed === true) return null;
+    return {
+      kind: 'request-budget-exhausted',
+      code: null,
+      action: 'wait-until-budget-reset',
+      retryAt: permit?.retryAt ?? null,
+    };
+  }
 
   function marketItemKey(ref = {}) {
     const id = Number(ref.id || 0);
@@ -338,6 +350,14 @@ export function createEaTradeAdapter(runtime) {
         status: 'unsupported', refreshStatus: 'unsupported',
         limitsSource: before.hasPriceLimits ? 'existing-cache' : 'none',
         before, after: before, response: null, error: null,
+      };
+    }
+    const budgetError = await requestBudgetError('price-limits');
+    if (budgetError) {
+      return {
+        status: 'blocked', refreshStatus: 'blocked',
+        limitsSource: before.hasPriceLimits ? 'existing-cache' : 'none',
+        before, after: before, response: null, error: budgetError,
       };
     }
     try {
@@ -467,6 +487,8 @@ export function createEaTradeAdapter(runtime) {
       || !Number.isFinite(requested.durationSeconds) || requested.durationSeconds <= 0) {
       return { status: 'invalid-request', item, requested, response: null, error: null };
     }
+    const budgetError = await requestBudgetError('list');
+    if (budgetError) return { status: 'blocked', item, requested, response: null, error: budgetError };
     try {
       const response = await observeResult(service.list(
         resolved.item,
@@ -501,6 +523,8 @@ export function createEaTradeAdapter(runtime) {
     if (typeof service?.requestTransferItems !== 'function') {
       return { status: 'unsupported', response: null, error: null };
     }
+    const budgetError = await requestBudgetError('transfer-refresh');
+    if (budgetError) return { status: 'blocked', response: null, error: budgetError };
     try {
       const response = await observeResult(service.requestTransferItems(), options.observerContext || {});
       const summary = responseSummary(response);
@@ -535,6 +559,10 @@ export function createEaTradeAdapter(runtime) {
     if (typeof runtime?.UTSearchCriteriaDTO !== 'function'
       || typeof service?.searchTransferMarket !== 'function') {
       return { status: 'unsupported', request: normalizedRequest, response: null, candidates: [], error: null };
+    }
+    const budgetError = await requestBudgetError('market-search');
+    if (budgetError) {
+      return { status: 'blocked', request: normalizedRequest, response: null, candidates: [], error: budgetError };
     }
     try {
       const criteria = new runtime.UTSearchCriteriaDTO();
@@ -601,6 +629,10 @@ export function createEaTradeAdapter(runtime) {
         error: { kind: 'price-changed', code: null, action: 'refresh-and-skip' },
       };
     }
+    const budgetError = await requestBudgetError('buy');
+    if (budgetError) {
+      return { status: 'blocked', item, tradeId: Number(ref.tradeId), price, response: null, error: budgetError };
+    }
     try {
       const response = await observeResult(service.bid(liveItem, price), options.observerContext || {});
       const summary = responseSummary(response);
@@ -637,6 +669,8 @@ export function createEaTradeAdapter(runtime) {
     try {
       const steps = [];
       for (const method of available) {
+        const budgetError = await requestBudgetError('purchase-refresh');
+        if (budgetError) return { status: 'blocked', response: null, steps, error: budgetError };
         const response = await observeResult(service[method](), options.observerContext || {});
         const summary = responseSummary(response);
         steps.push({ method, response: summary });
@@ -751,6 +785,8 @@ export function createEaTradeAdapter(runtime) {
     if (!liveItem) return { status: 'not-found', item: null, destination, response: null, error: null };
     if (typeof service?.move !== 'function') return { status: 'unsupported', item, destination, response: null, error: null };
     const pile = runtime?.ItemPile?.[destination.toUpperCase()] ?? destination;
+    const budgetError = await requestBudgetError('purchase-route');
+    if (budgetError) return { status: 'blocked', item, destination, response: null, error: budgetError };
     try {
       const response = await observeResult(service.move(liveItem, pile), options.observerContext || {});
       const summary = responseSummary(response);

@@ -1,7 +1,8 @@
 import { normalizeTradeJob } from './contracts.js';
 import { createTradeJobRuntime, normalizeTradeJobRuntime } from './schedule.js';
+import { normalizeTradeDispatchState, recordTradeDispatch } from './scheduler-fairness.js';
 
-export const TRADE_JOB_STORE_SCHEMA_VERSION = 2;
+export const TRADE_JOB_STORE_SCHEMA_VERSION = 3;
 export const TRADE_HISTORY_LIMIT = 100;
 export const TRADE_METRICS_SCHEMA_VERSION = 1;
 export const TRADE_METRICS_REASON_LIMIT = 20;
@@ -195,6 +196,7 @@ export function normalizeTradeJobStore(input = {}, options = {}) {
     runtimes,
     history,
     metrics,
+    dispatch: normalizeTradeDispatchState(input.dispatch),
     updatedAt: Math.max(0, finiteNumber(input.updatedAt, now)),
   };
 }
@@ -270,6 +272,14 @@ export function createTradeJobStore(options = {}) {
     });
   }
 
+  function recordDispatch(jobId) {
+    const id = String(jobId || '');
+    const snapshot = read();
+    const job = snapshot.jobs.find((entry) => entry.id === id);
+    if (!job) throw new Error(`Trade Job ${id} does not exist`);
+    return write({ ...snapshot, dispatch: recordTradeDispatch(snapshot.dispatch, job, Number(now())) });
+  }
+
   function replaceJobs(inputs = []) {
     if (!Array.isArray(inputs)) throw new TypeError('Trade Jobs must be an array');
     const at = Number(now());
@@ -312,6 +322,7 @@ export function createTradeJobStore(options = {}) {
     remove,
     updateRuntime,
     addHistory,
+    recordDispatch,
     replaceJobs,
     setPaused,
     setLiveExecutionEnabled,
