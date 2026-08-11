@@ -1268,7 +1268,7 @@ Next: Prepare the TS4-TS6 implementation as one reviewable commit set and releas
 
 ### 2026-08-11 / TS6.5 / Shared request budget and fair dispatch
 
-Status: Implementation and automated validation complete; guarded production execution boundaries unchanged.
+Status: Implementation, automated validation and read-only live validation complete; guarded production execution boundaries unchanged.
 
 Implementation: 所有七类 EA Trade 网络调用统一在 EA Trade Adapter 取得请求许可，包括价格限制、挂牌、Transfer 刷新、市场搜索、Buy、购买后刷新和购买后路由。预算固定为跨标签页共享的 5 分钟 30 次滑动窗口；支持 Web Locks 时，读取、占用和释放均在独占锁内完成。Local repository/capability inspect 与 FUTNext/FUT.GG Provider HTTP 不计入该预算。UI 和 diagnostics 仅显示聚合使用量、剩余量、动作计数、恢复时间及锁支持状态，不提供清空或提高上限入口。
 
@@ -1280,6 +1280,6 @@ Boundary: 公平选择核心不允许绕过 `selectGuardedScheduledTradeJob()`�
 
 Automated evidence: 请求预算覆盖滑动窗口、Web Lock 串行化、原子 reservation、跨调用方隔离、scoped 消费、未使用槽释放、已发送请求保留、崩溃后过期恢复和容量恢复时间。Scheduler/Job Store 覆盖 schema migration、公平交替、稳定排序、cooldown 不 dispatch，以及 scheduled Buy/Listing 在事务前 reserve 并在退出时 release。`npm run verify` 通过：152 个测试文件、938 项测试，syntax、ESLint、配置/Profile、架构、FSU patch、userscript 构建、dist equality 和 FSU release 检查全部成功。
 
-Live validation: 本阶段不要求新增 EA mutation。安装候选版本后可在 `Trade Scheduler -> Summary` 和 Scheduler diagnostics 中只读确认 `limit=30`、`windowMs=300000`、single-card reserve required 12、Web Lock 支持状态和动作聚合；不得为了填满预算而重复发送 EA 请求。
+Live validation (`0.7.49`): Artifacts `trade-scheduler-diagnostics-2026-08-11T00-36-02-194Z.json`, `trade-listing-diagnostics-2026-08-11T00-41-47-157Z.json` and `trade-scheduler-diagnostics-2026-08-11T00-41-55-061Z.json`. The baseline export reported `limit=30`, `windowMs=300000`, `used=0`, `remaining=30`, single-card reserve required 12/ready and Web Lock support. A manual Club common-Gold Listing was then prepared without entering `LIST 1` or invoking `list()`: it refreshed Transfer once, loaded EA price limits once and produced a ready one-card plan, while Listing receipt and error remained null. The second Scheduler export attributed exactly two requests as `transfer-refresh:1` and `price-limits:1`, leaving 28 slots and single-card reserve ready. Coins remained 1,213,094 and Transfer usage remained 24/100. History and aggregate Summary remained 18, dispatch remained 0, Scheduler remained paused/live-disabled, no Lease or Runner/Trade operation existed, and Circuit remained closed. The newly created manual Listing Job was armed but could not execute while paused/live-disabled. The exports contained no authorization/cookie/token, URL, lease token, reservation ID or raw request-event list. This validates real Adapter accounting, cross-dialog persistence and sanitized diagnostics without an EA mutation.
 
 Next: 先发布并观察真实页面中的预算聚合和 cooldown 诊断。任何 recurring、multi-job 或 bulk 工作必须另立门禁，不得把本阶段的公平调度测试当作生产授权。
