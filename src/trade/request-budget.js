@@ -54,6 +54,22 @@ export function inspectTradeRequestCapacity(snapshot = {}, requiredInput = TRADE
   };
 }
 
+export function tradeListingRequestReserve(input = {}) {
+  const value = typeof input === 'number' ? input : input.policy?.maxListings ?? input.maxListings;
+  const quantity = Math.min(2, Math.max(1, Math.floor(finiteNumber(value, 1))));
+  return Math.max(TRADE_RUN_REQUEST_RESERVE, 1 + quantity * 5);
+}
+
+export function tradeBuyRequestReserve(input = {}) {
+  const policy = input.policy || input;
+  const quantity = Math.min(2, Math.max(1, Math.floor(finiteNumber(policy.quantity, 1))));
+  const emptySearches = Math.min(5, Math.max(1, Math.floor(finiteNumber(policy.maxConsecutiveEmptySearches, 5))));
+  // Each item can consume empty searches, one successful search, Buy, broad ambiguity refresh,
+  // route and route verification. Reserving the worst case prevents a partial mutation from
+  // becoming unverifiable because another tab consumed the remaining shared budget.
+  return Math.min(TRADE_REQUEST_BUDGET_LIMIT, quantity * (emptySearches + 9));
+}
+
 export function createTradeRequestBudget(options = {}) {
   const storage = options.storage;
   const key = String(options.key || 'fc-loop-runner-trade-request-budget-v1');

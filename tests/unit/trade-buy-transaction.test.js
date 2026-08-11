@@ -53,6 +53,65 @@ describe('Trade Buy Transaction', () => {
     expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(1);
   });
 
+  it('buys two adjacent rating lanes and preserves per-item routing receipts', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      marketItems: [marketItem(70, 8401, 900), { ...marketItem(71, 8501, 1000), rating: 85 }],
+    });
+    const provider = {
+      load: vi.fn(async () => ({
+        ok: true,
+        lanes: [
+          { rating: 84, definitionIds: [8401], source: 'cache' },
+          { rating: 85, definitionIds: [8501], source: 'cache' },
+        ],
+      })),
+    };
+    const result = await transaction(adapter, provider).run({
+      job: job({ ratingMax: 85, quantity: 2, totalBudget: 2000 }),
+      platform: 'pc',
+      maxBuyAttempts: 2,
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed', requested: 2, succeeded: 2, failed: 0, skipped: 0,
+      coinsBefore: 5000, coinsAfter: 3100,
+    });
+    expect(result.receipts.filter((entry) => entry.status === 'purchased')).toEqual([
+      expect.objectContaining({ rating: expect.any(Number), destination: 'club' }),
+      expect.objectContaining({ rating: expect.any(Number), destination: 'club' }),
+    ]);
+    expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(2);
+  });
+
+  it('preserves one purchase and never attempts beyond an ambiguous second Buy', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      marketItems: [marketItem(70, 8401, 900), marketItem(71, 8401, 900)],
+      buyResults: { 1071: { status: 'ambiguous', error: { kind: 'ambiguous-transport' } } },
+    });
+    const phases = [];
+    const result = await createBuyTransaction({
+      tradeAdapter: adapter,
+      playerCatalogProvider: catalog([8401]),
+      now: () => 1000,
+      sleep: async () => {},
+      random: () => 0,
+      createRunId: () => 'buy-two-partial',
+      onCheckpoint: (entry) => phases.push(entry),
+    }).run({
+      job: job({ quantity: 2, totalBudget: 2000 }),
+      maxBuyAttempts: 2,
+    });
+
+    expect(result).toMatchObject({ status: 'ambiguous', succeeded: 1, failed: 1, skipped: 0 });
+    expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(2);
+    expect(phases.filter((entry) => entry.phase === 'buy-request-started')).toEqual([
+      expect.objectContaining({ itemIndex: 1, mutationBoundaryCrossed: true }),
+      expect.objectContaining({ itemIndex: 2, mutationBoundaryCrossed: true }),
+    ]);
+  });
+
   it('routes a duplicate to Transfer and blocks before buying when Transfer is full', async () => {
     const base = { id: 1, definitionId: 8401, pile: 'club', type: 'player', rating: 84, tier: 'gold', rare: true };
     const adapter = createFakeTradeAdapter({
@@ -367,6 +426,7 @@ describe('Trade Buy Transaction', () => {
       'route-verification-refresh-started',
       'route-verification-refresh-finished',
       'route-verification-inspected',
+      'item-finished',
     ]);
   });
 });

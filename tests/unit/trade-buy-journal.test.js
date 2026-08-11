@@ -60,4 +60,63 @@ describe('Trade Buy persistent journal', () => {
       response: { success: false, status: null, code: null },
     });
   });
+
+  it('retains bounded phases for two mutation attempts and blocks superseding an uncertain Run', () => {
+    const journal = createTradeBuyJournal({ storage: memoryStorage(), key: 'journal-two', now: () => 1000 });
+    journal.begin({ runId: 'buy-two', jobId: 'buy-job', expectedDestination: 'auto', requested: 2 });
+    journal.checkpoint('buy-two', {
+      phase: 'buy-request-started', itemIndex: 1, item: { id: 70, definitionId: 8401, pile: 'market' },
+      tradeId: 1070, price: 900, destination: 'club', mutationBoundaryCrossed: true,
+    });
+    journal.checkpoint('buy-two', {
+      phase: 'item-finished', itemIndex: 1, status: 'purchased', mutationBoundaryCrossed: true,
+    });
+    journal.checkpoint('buy-two', {
+      phase: 'buy-request-started', itemIndex: 2, item: { id: 71, definitionId: 8501, pile: 'market' },
+      tradeId: 1071, price: 1000, destination: 'transfer', mutationBoundaryCrossed: true,
+    });
+
+    expect(journal.snapshot()).toMatchObject({
+      requested: 2,
+      items: [
+        { index: 1, status: 'purchased', mutationBoundaryCrossed: true, price: 900 },
+        { index: 2, status: 'pending', mutationBoundaryCrossed: true, price: 1000 },
+      ],
+    });
+    expect(journal.inspectRecovery()).toMatchObject({ active: true, canSupersede: false, mutationBoundaryCrossed: true });
+  });
+
+  it('blocks a terminal uncertain second purchase but supersedes a terminal two-item success', () => {
+    const journal = createTradeBuyJournal({ storage: memoryStorage(), key: 'journal-terminal', now: () => 1000 });
+    journal.begin({ runId: 'buy-two', jobId: 'buy-job', expectedDestination: 'auto', requested: 2 });
+    journal.checkpoint('buy-two', {
+      phase: 'item-finished', itemIndex: 1, status: 'purchased', mutationBoundaryCrossed: true,
+    });
+    journal.checkpoint('buy-two', {
+      phase: 'buy-request-started', itemIndex: 2, status: 'mutation-pending', mutationBoundaryCrossed: true,
+    });
+    journal.finish('buy-two', { phase: 'receipt-recorded', status: 'ambiguous' });
+    expect(journal.inspectRecovery()).toMatchObject({
+      active: false, uncertainMutation: true, canSupersede: false,
+      reason: 'buy-journal-mutation-review-required',
+    });
+    expect(() => journal.begin({
+      runId: 'must-not-overwrite', jobId: 'buy-job', expectedDestination: 'auto', requested: 2,
+    })).toThrow('buy-journal-mutation-review-required');
+
+    const completed = createTradeBuyJournal({ storage: memoryStorage(), key: 'journal-success', now: () => 1000 });
+    completed.begin({ runId: 'buy-success', jobId: 'buy-job', expectedDestination: 'auto', requested: 2 });
+    for (const itemIndex of [1, 2]) {
+      completed.checkpoint('buy-success', {
+        phase: 'item-finished', itemIndex, status: 'purchased', mutationBoundaryCrossed: true,
+      });
+    }
+    completed.finish('buy-success', { phase: 'receipt-recorded', status: 'completed' });
+    expect(completed.inspectRecovery()).toMatchObject({
+      active: false, uncertainMutation: false, canSupersede: true,
+    });
+    expect(() => completed.begin({
+      runId: 'buy-next', jobId: 'buy-job', expectedDestination: 'auto', requested: 2,
+    })).not.toThrow();
+  });
 });

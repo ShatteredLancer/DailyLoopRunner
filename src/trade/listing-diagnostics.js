@@ -40,6 +40,7 @@ export function createTradeListingDiagnostics(input = {}) {
       tradeListingRunning: input.operation?.tradeListingRunning === true,
     },
     circuit: clone(input.circuit) || null,
+    journal: input.journal ? clone(input.journal) : null,
     job: clone(input.job) || null,
     preview: sanitizedListingArtifact(input.preview),
     prepared: sanitizedListingArtifact(input.prepared),

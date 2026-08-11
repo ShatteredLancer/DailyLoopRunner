@@ -35,7 +35,7 @@ function job(overrides = {}) {
   }, { now: 1 });
 }
 
-describe('Scheduled one-card Buy validation gate', () => {
+describe('Scheduled guarded Buy validation gate', () => {
   it('requires an explicit global reserve and clamps one scheduled Buy', () => {
     expect(inspectScheduledBuyValidationJob(job())).toMatchObject({
       ready: false,
@@ -72,12 +72,27 @@ describe('Scheduled one-card Buy validation gate', () => {
     })).toMatchObject({ ready: false, reason: 'scheduled-buy-job-invalid' });
   });
 
+  it('accepts a once-scheduled two-rating, two-item Rare Gold Buy', () => {
+    expect(inspectScheduledBuyValidationJob(job({ policy: {
+      ratingMax: 85,
+      ratingPriceOverrides: { 85: 1500 },
+      quantity: 2,
+      totalBudget: 2500,
+    } }), { minimumRetainedCoins: 100000 })).toMatchObject({
+      ready: true,
+      maxPrice: 1500,
+      maxSpend: 2500,
+      requiredText: 'RUN BUY ONCE 2 RESERVE 100000',
+      job: { policy: { ratingMin: 84, ratingMax: 85, quantity: 2 } },
+    });
+  });
+
   it.each([
     [{ schedule: { type: 'manual' } }, 'scheduled-buy-validation-once-only'],
     [{ armed: false }, 'scheduled-buy-validation-job-not-armed'],
     [{ policy: { cardClass: 'common-gold' } }, 'scheduled-buy-validation-rare-gold-only'],
-    [{ policy: { ratingMax: 85 } }, 'scheduled-buy-validation-single-rating-only'],
-    [{ policy: { quantity: 2 } }, 'scheduled-buy-validation-one-item-only'],
+    [{ policy: { ratingMax: 86 } }, 'scheduled-buy-validation-adjacent-ratings-only'],
+    [{ policy: { quantity: 3 } }, 'scheduled-buy-validation-quantity-cap'],
     [{ policy: { maxBuyNow: 2050, totalBudget: 2050 } }, 'scheduled-buy-validation-price-cap'],
     [{ misfirePolicy: { type: 'next-login' } }, 'scheduled-buy-validation-next-login-disabled'],
     [{ misfirePolicy: { type: 'grace-window', graceMinutes: 16 } }, 'scheduled-buy-validation-grace-too-long'],

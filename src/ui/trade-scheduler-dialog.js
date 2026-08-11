@@ -137,7 +137,9 @@ export function normalizeTradeJobEditorValue(value, options = {}) {
 export function showTradeSchedulerDialog(options = {}) {
   const dom = options.dom;
   if (!dom?.create || !dom?.appendToBody) throw new TypeError('dom adapter is required');
-  dom.query?.('#bronze-loop-trade-scheduler-modal')?.remove?.();
+  const existing = dom.query?.('#bronze-loop-trade-scheduler-modal');
+  existing?.__disposeTradeSchedulerDialog?.();
+  existing?.remove?.();
   const mode = readResponsiveUiMode(dom);
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   let snapshot = clone(options.getSnapshot?.() || options.snapshot || {});
@@ -147,6 +149,12 @@ export function showTradeSchedulerDialog(options = {}) {
   let statusText = '';
   let validatedImportText = null;
   const buyPreviews = new Map();
+  const scheduleRefresh = typeof options.scheduleRefresh === 'function' ? options.scheduleRefresh : null;
+  const cancelRefresh = typeof options.cancelRefresh === 'function' ? options.cancelRefresh : null;
+  const refreshIntervalMs = Math.max(250, Number(options.refreshIntervalMs || 1000));
+  let refreshHandle = null;
+  let disposed = false;
+  let snapshotSignature = JSON.stringify(snapshot);
 
   const overlay = styles(dom.create('div'), {
     position: 'fixed', inset: '0', zIndex: '1000000', background: 'rgba(0,0,0,.74)', display: 'flex',
@@ -176,6 +184,7 @@ export function showTradeSchedulerDialog(options = {}) {
 
   function refreshSnapshot() {
     snapshot = clone(options.getSnapshot?.() || snapshot || {});
+    snapshotSignature = JSON.stringify(snapshot);
   }
 
   function setStatus(value) {
@@ -199,7 +208,7 @@ export function showTradeSchedulerDialog(options = {}) {
     const scheduler = snapshot.paused ? 'paused' : 'running';
     const execution = snapshot.liveExecutionEnabled ? 'enabled' : 'locked';
     const budgetText = requestBudget
-      ? ` | Requests: ${Number(requestBudget.remaining || 0)}/${Number(requestBudget.limit || 0)} available | Single-card reserve: ${requestBudget.runCapacity?.ready === false ? 'cooldown' : 'ready'}`
+      ? ` | Requests: ${Number(requestBudget.remaining || 0)}/${Number(requestBudget.limit || 0)} available | Base guarded reserve: ${requestBudget.runCapacity?.ready === false ? 'cooldown' : 'ready'}`
       : '';
     banner.textContent = `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}${budgetText}`;
     banner.style.color = circuitState === 'open' ? '#e3a7a7' : '#b8c3d2';
@@ -464,7 +473,7 @@ export function showTradeSchedulerDialog(options = {}) {
     });
     if (snapshot.liveExecutionEnabled === true) {
       const gateState = dom.create('span');
-      gateState.textContent = `One-card schedule enabled${guarded.job ? `: ${guarded.job.name}` : ''}`;
+      gateState.textContent = `Guarded schedule enabled${guarded.job ? `: ${guarded.job.name}` : ''}`;
       styles(gateState, { color: '#e3c98d', flex: '1 1 260px', fontSize: '12px' });
       const disableGate = button(dom, 'Disable scheduling', mode, 'bronze-loop-trade-disable-guarded-schedule');
       disableGate.addEventListener('click', () => {
@@ -476,9 +485,9 @@ export function showTradeSchedulerDialog(options = {}) {
       validationGate.append(gateState, disableGate);
     } else {
       const gateInput = input(dom, 'text', '', mode, 'bronze-loop-trade-guarded-confirmation');
-      gateInput.placeholder = guarded.requiredText || 'No eligible one-card schedule';
+      gateInput.placeholder = guarded.requiredText || 'No eligible guarded schedule';
       styles(gateInput, { flex: '1 1 220px' });
-      const enableGate = button(dom, 'Enable one-card schedule', mode, 'bronze-loop-trade-enable-guarded-schedule');
+      const enableGate = button(dom, 'Enable guarded schedule', mode, 'bronze-loop-trade-enable-guarded-schedule');
       enableGate.disabled = guarded.ready !== true;
       enableGate.title = guarded.ready ? `Type ${guarded.requiredText}` : guarded.reason || 'One armed Job is required';
       enableGate.addEventListener('click', async () => {
@@ -490,7 +499,7 @@ export function showTradeSchedulerDialog(options = {}) {
         try {
           await options.onEnableGuardedScheduling?.({ confirmationText: gateInput.value, jobId: guarded.job?.id });
           refreshSnapshot();
-          setStatus(`One-card schedule enabled for ${guarded.job?.name || guarded.job?.id}`);
+          setStatus(`Guarded schedule enabled for ${guarded.job?.name || guarded.job?.id}`);
           render();
         } catch (error) {
           enableGate.disabled = false;
@@ -534,12 +543,13 @@ export function showTradeSchedulerDialog(options = {}) {
         const missing = buyPreview.plan?.missingRatings?.length
           ? ` | Missing ratings: ${buyPreview.plan.missingRatings.join(', ')}`
           : '';
-        previewDetail.textContent = `Preview only | ${lanes || 'No search lanes'}${missing} | ${buyAvailability.ready ? 'Buy one ready' : `Buy one unavailable: ${buyAvailability.reason}`}`;
+        const quantity = Number(job.policy.quantity || 1);
+        previewDetail.textContent = `Preview only | ${lanes || 'No search lanes'}${missing} | ${buyAvailability.ready ? `Buy ${quantity} ready` : `Buy unavailable: ${buyAvailability.reason}`}`;
       }
       const actions = styles(dom.create('div'), { display: 'flex', gap: '6px', flexWrap: 'wrap' });
       const run = button(dom, job.type === 'buy' ? 'Preview' : 'Run now', mode);
       const validateBuy = job.type === 'buy' && buyAvailability.ready
-        ? button(dom, 'Buy one', mode, `bronze-loop-trade-buy-one-${job.id}`)
+        ? button(dom, `Buy ${Number(job.policy.quantity || 1)}`, mode, `bronze-loop-trade-buy-one-${job.id}`)
         : null;
       const edit = button(dom, 'Edit', mode);
       const duplicate = button(dom, 'Duplicate', mode);
@@ -560,7 +570,7 @@ export function showTradeSchedulerDialog(options = {}) {
           refreshSnapshot();
           const availability = buyValidationAvailability(job, preview);
           setStatus(preview.plan?.ready
-            ? `Buy preview ready: ${preview.summary?.ratings || 0} rating lane(s), ${preview.summary?.definitions || 0} player definition(s); ${availability.ready ? 'Buy one is available' : `Buy one unavailable (${availability.reason})`}`
+            ? `Buy preview ready: ${preview.summary?.ratings || 0} rating lane(s), ${preview.summary?.definitions || 0} player definition(s); ${availability.ready ? `Buy ${Number(job.policy.quantity || 1)} is available` : `Buy unavailable (${availability.reason})`}`
             : `Buy preview blocked: missing rating lane(s) ${(preview.plan?.missingRatings || []).join(', ') || 'unknown'}`);
           render();
         } catch (error) {
@@ -656,7 +666,7 @@ export function showTradeSchedulerDialog(options = {}) {
       ['Request budget', [
         ['Used', requestBudget.used], ['Remaining', requestBudget.remaining],
         ['Limit', requestBudget.limit], ['Window', requestBudget.windowMs ? `${Math.round(Number(requestBudget.windowMs) / 60_000)} min` : 'Unavailable'],
-        ['Single-card reserve', requestBudget.runCapacity?.ready === false ? 'Cooldown' : 'Ready'],
+        ['Base guarded reserve', requestBudget.runCapacity?.ready === false ? 'Cooldown' : 'Ready'],
         ['Required slots', requestBudget.runCapacity?.required],
       ]],
     ];
@@ -689,7 +699,7 @@ export function showTradeSchedulerDialog(options = {}) {
       : requestBudget.status === 'cooldown' ? requestBudget.retryAt : null;
     if (Number(requestRetryAt || 0) > 0) {
       const cooldown = styles(dom.create('div'), { borderTop: '1px solid #47576b', marginTop: '12px', paddingTop: '8px', color: '#e3c39d', fontSize: '12px' });
-      cooldown.textContent = `Single-card Trade capacity resumes after ${new Date(Number(requestRetryAt)).toLocaleString()}`;
+      cooldown.textContent = `Base guarded Trade capacity resumes after ${new Date(Number(requestRetryAt)).toLocaleString()}`;
       content.appendChild(cooldown);
     }
 
@@ -870,8 +880,8 @@ export function showTradeSchedulerDialog(options = {}) {
     content.appendChild(grid);
   }
 
-  function render() {
-    refreshSnapshot();
+  function render(input = {}) {
+    if (input.refresh !== false) refreshSnapshot();
     renderBanner();
     jobsTab.style.background = ['jobs', 'import'].includes(view) ? '#315d9b' : '#222832';
     summaryTab.style.background = view === 'summary' ? '#315d9b' : '#222832';
@@ -886,16 +896,48 @@ export function showTradeSchedulerDialog(options = {}) {
     status.textContent = statusText;
   }
 
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    if (refreshHandle !== null && refreshHandle !== undefined) cancelRefresh?.(refreshHandle);
+    refreshHandle = null;
+  }
+
+  function closeDialog() {
+    dispose();
+    overlay.remove?.();
+  }
+
+  function refreshFromExternalState() {
+    if (disposed) return;
+    if (overlay.isConnected === false) {
+      dispose();
+      return;
+    }
+    const next = clone(options.getSnapshot?.() || snapshot || {});
+    const nextSignature = JSON.stringify(next);
+    const changed = nextSignature !== snapshotSignature;
+    snapshot = next;
+    snapshotSignature = nextSignature;
+    renderBanner();
+    if (!changed || editing || view === 'import') return;
+    const scrollTop = Number(dialog.scrollTop || 0);
+    render({ refresh: false });
+    dialog.scrollTop = scrollTop;
+  }
+
   jobsTab.addEventListener('click', () => { editing = null; view = 'jobs'; render(); });
   summaryTab.addEventListener('click', () => { editing = null; view = 'summary'; render(); });
   providersTab.addEventListener('click', () => { editing = null; view = 'providers'; render(); });
   historyTab.addEventListener('click', () => { editing = null; view = 'history'; render(); });
-  close.addEventListener('click', () => overlay.remove?.());
-  overlay.addEventListener('click', (event) => { if (event.target === overlay) overlay.remove?.(); });
+  close.addEventListener('click', closeDialog);
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) closeDialog(); });
   dialog.append(heading, tabs, banner, content, status);
   overlay.appendChild(dialog);
   dom.appendToBody(overlay);
   applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, summaryTab, providersTab, historyTab, close] });
   render();
+  overlay.__disposeTradeSchedulerDialog = dispose;
+  if (scheduleRefresh) refreshHandle = scheduleRefresh(refreshFromExternalState, refreshIntervalMs);
   return overlay;
 }

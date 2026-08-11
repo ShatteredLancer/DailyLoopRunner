@@ -1,13 +1,19 @@
 import { normalizeTradeJob } from './contracts.js';
 
 export const SCHEDULED_BUY_VALIDATION_MAX_PRICE = 2_000;
+export const SCHEDULED_BUY_VALIDATION_MAX_TOTAL_BUDGET = 4_000;
+export const SCHEDULED_BUY_VALIDATION_MAX_QUANTITY = 2;
+export const SCHEDULED_BUY_VALIDATION_MAX_RATING_SPAN = 1;
 export const SCHEDULED_BUY_VALIDATION_MAX_RUNTIME_MINUTES = 5;
 export const SCHEDULED_BUY_VALIDATION_MAX_EMPTY_SEARCHES = 5;
 
 function effectiveRatingLimit(job) {
-  const rating = Number(job.policy.ratingMin);
-  const override = Number(job.policy.ratingPriceOverrides?.[String(rating)]);
-  return Number.isFinite(override) && override > 0 ? override : Number(job.policy.maxBuyNow);
+  const limits = [];
+  for (let rating = Number(job.policy.ratingMin); rating <= Number(job.policy.ratingMax); rating += 1) {
+    const override = Number(job.policy.ratingPriceOverrides?.[String(rating)]);
+    limits.push(Number.isFinite(override) && override > 0 ? override : Number(job.policy.maxBuyNow));
+  }
+  return Math.max(...limits);
 }
 
 function explicitMinimumRetainedCoins(value) {
@@ -16,10 +22,11 @@ function explicitMinimumRetainedCoins(value) {
   return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
-export function scheduledBuyValidationConfirmation(minimumRetainedCoins) {
+export function scheduledBuyValidationConfirmation(minimumRetainedCoins, quantity = 1) {
   const minimum = explicitMinimumRetainedCoins(minimumRetainedCoins);
   if (minimum === null) throw new Error('Scheduled Buy minimum retained coins must be explicit');
-  return `RUN BUY ONCE 1 RESERVE ${minimum}`;
+  const count = Math.min(SCHEDULED_BUY_VALIDATION_MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)));
+  return `RUN BUY ONCE ${count} RESERVE ${minimum}`;
 }
 
 export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
@@ -41,10 +48,14 @@ export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
   else if (!['skip', 'grace-window'].includes(job.misfirePolicy?.type)) reason = 'scheduled-buy-validation-next-login-disabled';
   else if (job.misfirePolicy?.type === 'grace-window' && Number(job.misfirePolicy.graceMinutes) > 15) reason = 'scheduled-buy-validation-grace-too-long';
   else if (job.policy.cardClass !== 'rare-gold') reason = 'scheduled-buy-validation-rare-gold-only';
-  else if (Number(job.policy.ratingMin) !== Number(job.policy.ratingMax)) reason = 'scheduled-buy-validation-single-rating-only';
-  else if (Number(job.policy.quantity) !== 1) reason = 'scheduled-buy-validation-one-item-only';
+  else if (Number(job.policy.ratingMax) - Number(job.policy.ratingMin) > SCHEDULED_BUY_VALIDATION_MAX_RATING_SPAN) {
+    reason = 'scheduled-buy-validation-adjacent-ratings-only';
+  }
+  else if (Number(job.policy.quantity) < 1 || Number(job.policy.quantity) > SCHEDULED_BUY_VALIDATION_MAX_QUANTITY) {
+    reason = 'scheduled-buy-validation-quantity-cap';
+  }
   else if (Number(job.policy.maxBuyNow) > SCHEDULED_BUY_VALIDATION_MAX_PRICE) reason = 'scheduled-buy-validation-price-cap';
-  else if (Number(job.policy.totalBudget) > SCHEDULED_BUY_VALIDATION_MAX_PRICE) reason = 'scheduled-buy-validation-budget-cap';
+  else if (Number(job.policy.totalBudget) > SCHEDULED_BUY_VALIDATION_MAX_TOTAL_BUDGET) reason = 'scheduled-buy-validation-budget-cap';
   else if (globalMinimum === null) reason = 'scheduled-buy-validation-global-reserve-required';
 
   const maxPrice = effectiveRatingLimit(job);
@@ -57,7 +68,7 @@ export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
     ...job,
     policy: {
       ...job.policy,
-      quantity: 1,
+      quantity: Number(job.policy.quantity),
       minimumRetainedCoins,
       maxRuntimeMinutes: Math.min(
         Number(job.policy.maxRuntimeMinutes),
@@ -76,6 +87,7 @@ export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
     job: guardedJob,
     maxPrice,
     minimumRetainedCoins,
-    requiredText: scheduledBuyValidationConfirmation(minimumRetainedCoins),
+    maxSpend: Number(job.policy.totalBudget),
+    requiredText: scheduledBuyValidationConfirmation(minimumRetainedCoins, job.policy.quantity),
   };
 }

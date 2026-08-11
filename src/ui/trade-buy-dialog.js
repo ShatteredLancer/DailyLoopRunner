@@ -76,9 +76,10 @@ export function showTradeBuyDialog(options = {}) {
   });
   const heading = styles(dom.create('div'), { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' });
   const title = styles(dom.create('div'), { fontSize: '17px', fontWeight: '700' });
-  title.textContent = 'Single Buy Validation';
+  const quantity = Number(gate.job?.policy?.quantity || 1);
+  title.textContent = 'Guarded Buy Validation';
   const badge = styles(dom.create('span'), { color: '#9fb2c9', fontSize: '11px', border: '1px solid #536276', padding: '4px 7px' });
-  badge.textContent = 'Manual / 1 item';
+  badge.textContent = `Manual / max ${quantity} item${quantity === 1 ? '' : 's'}`;
   heading.append(title, badge);
 
   const destination = dom.create('select');
@@ -102,8 +103,10 @@ export function showTradeBuyDialog(options = {}) {
   const summary = styles(dom.create('div'), { marginTop: '12px' });
   summary.append(
     textRow(dom, 'Job', String(gate.job?.name || options.job?.name || '?')),
-    textRow(dom, 'Selection', `${gate.job?.policy?.ratingMin || '?'} OVR ${gate.job?.policy?.cardClass || '?'}`),
-    textRow(dom, 'Maximum', formatCoins(gate.maxPrice)),
+    textRow(dom, 'Selection', `${gate.job?.policy?.ratingMin || '?'}-${gate.job?.policy?.ratingMax || '?'} OVR ${gate.job?.policy?.cardClass || '?'}`),
+    textRow(dom, 'Quantity', String(quantity)),
+    textRow(dom, 'Per-card maximum', formatCoins(gate.maxPrice)),
+    textRow(dom, 'Total budget', formatCoins(gate.job?.policy?.totalBudget)),
     textRow(dom, 'Definitions', String(preview?.summary?.definitions ?? '?')),
     controlRow(dom, 'Expected route', destination),
   );
@@ -112,14 +115,14 @@ export function showTradeBuyDialog(options = {}) {
   const status = styles(dom.create('div'), { minHeight: '18px', color: '#9fb2c9', fontSize: '11px', marginTop: '10px' });
   status.id = 'bronze-loop-trade-buy-status';
   status.textContent = gate.ready && preview?.plan?.ready
-    ? 'Ready for single-item validation'
+    ? `Ready for guarded ${quantity}-item validation`
     : `Blocked: ${gate.reason || 'buy-preview-not-ready'}`;
 
   const confirmation = dom.create('input');
   confirmation.id = 'bronze-loop-trade-buy-confirmation';
   confirmation.type = 'text';
   confirmation.value = '';
-  const requiredText = () => manualBuyValidationConfirmation(gate.maxPrice, expectedDestination);
+  const requiredText = () => manualBuyValidationConfirmation(gate.maxPrice, expectedDestination, quantity);
   confirmation.placeholder = gate.ready ? requiredText() : 'Confirmation';
   confirmation.autocomplete = 'off';
   styles(confirmation, {
@@ -129,7 +132,7 @@ export function showTradeBuyDialog(options = {}) {
   });
 
   const actions = styles(dom.create('div'), { display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap', marginTop: '12px' });
-  const execute = button(dom, 'Buy one', mode, 'bronze-loop-trade-buy-execute', true);
+  const execute = button(dom, `Buy ${quantity}`, mode, 'bronze-loop-trade-buy-execute', true);
   const stop = button(dom, 'Stop', mode, 'bronze-loop-trade-buy-stop');
   const diagnostics = button(dom, 'Save diagnostics', mode, 'bronze-loop-trade-buy-diagnostics');
   const close = button(dom, 'Close', mode, 'bronze-loop-trade-buy-close');
@@ -175,7 +178,7 @@ export function showTradeBuyDialog(options = {}) {
     confirmation.value = '';
     confirmation.placeholder = requiredText();
     status.textContent = expectedDestination === 'auto'
-      ? 'Ready for single-item validation'
+      ? `Ready for guarded ${quantity}-item validation`
       : `Ready to validate ${expectedDestination === 'transfer' ? 'duplicate Transfer' : 'non-duplicate Club'} routing`;
     update();
   });
@@ -184,7 +187,7 @@ export function showTradeBuyDialog(options = {}) {
     if (execute.disabled) return;
     running = true;
     error = null;
-    status.textContent = 'Single Buy validation running';
+    status.textContent = `Guarded Buy validation running for up to ${quantity} items`;
     update();
     try {
       receipt = await options.onExecute?.({

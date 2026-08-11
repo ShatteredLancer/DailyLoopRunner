@@ -28,6 +28,21 @@ function job() {
   }, { now: 1 });
 }
 
+function dualJob() {
+  const base = job();
+  return normalizeTradeJob({
+    ...base,
+    id: 'buy-once-dual',
+    name: 'Buy adjacent ratings once',
+    policy: {
+      ...base.policy,
+      ratingMax: 85,
+      quantity: 2,
+      totalBudget: 2000,
+    },
+  }, { now: 1 });
+}
+
 function store() {
   const value = createTradeJobStore({ storage: memoryStorage(), now: () => 2000 });
   value.upsert(job());
@@ -89,7 +104,7 @@ describe('Guarded scheduled Buy executor', () => {
     }));
     expect(transaction.run.mock.calls[0][0].beforeBuy()).toBe(true);
     expect(heartbeat).toHaveBeenCalledOnce();
-    expect(requestBudget.reserve).toHaveBeenCalledOnce();
+    expect(requestBudget.reserve).toHaveBeenCalledWith(14);
     expect(getTradeAdapter).toHaveBeenCalledWith({ requestBudget: reservation });
     expect(transactionFactory).toHaveBeenCalledWith(expect.objectContaining({ tradeAdapter: scopedAdapter }));
     expect(reservation.release).toHaveBeenCalledOnce();
@@ -99,8 +114,8 @@ describe('Guarded scheduled Buy executor', () => {
     const transactionFactory = vi.fn();
     const buyPreview = { preview: vi.fn(async () => readyPreview()) };
     const requestBudget = {
-      inspect: () => ({ remaining: 12 }),
-      reserve: vi.fn(async () => ({ ready: false, required: 12, remaining: 11, retryAt: 5000 })),
+      inspect: () => ({ remaining: 14 }),
+      reserve: vi.fn(async () => ({ ready: false, required: 14, remaining: 13, retryAt: 5000 })),
     };
     const result = await createGuardedScheduledBuyExecutor({
       store: store(),
@@ -179,6 +194,67 @@ describe('Guarded scheduled Buy executor', () => {
     expect(result).toMatchObject({ status: 'blocked', reason: 'scheduled-buy-validation-gate-disabled' });
     expect(jobStore.read()).toMatchObject({ paused: true, liveExecutionEnabled: false, jobs: [{ armed: false }] });
     expect(buyPreview.preview).not.toHaveBeenCalled();
+  });
+
+  it('relocks and authorizes exactly two scheduled Buy attempts with a 28-slot reserve', async () => {
+    const jobStore = store();
+    jobStore.upsert(dualJob());
+    const reservation = { ready: true, release: vi.fn(async () => {}) };
+    const requestBudget = {
+      inspect: () => ({ remaining: 30 }),
+      reserve: vi.fn(async () => reservation),
+    };
+    const lanes = [
+      { rating: 84, maxBuyNow: 1000, definitionIds: [8401] },
+      { rating: 85, maxBuyNow: 1000, definitionIds: [8501] },
+    ];
+    const transaction = { run: vi.fn(async () => ({ status: 'completed', requested: 2, succeeded: 2, receipts: [] })) };
+    const result = await createGuardedScheduledBuyExecutor({
+      store: jobStore,
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      buyPreview: { preview: vi.fn(async () => ({ liveExecutionAllowed: false, plan: { ready: true, lanes } })) },
+      getTradeAdapter: () => createFakeTradeAdapter({ coins: 7000 }),
+      transactionFactory: () => transaction,
+      requestBudget,
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: dualJob(), runId: 'scheduled-buy-dual', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+
+    expect(result).toMatchObject({ status: 'completed', requested: 2, succeeded: 2 });
+    expect(requestBudget.reserve).toHaveBeenCalledWith(28);
+    expect(transaction.run).toHaveBeenCalledWith(expect.objectContaining({ maxBuyAttempts: 2 }));
+  });
+
+  it('releases the Coordinator when Journal begin detects a cross-tab conflict', async () => {
+    const operationCoordinator = createOperationCoordinator({ now: () => 2000 });
+    const buyPreview = { preview: vi.fn() };
+    const onRunningChange = vi.fn();
+    const journal = {
+      inspectRecovery: vi.fn(() => ({ canSupersede: true })),
+      begin: vi.fn(() => { throw new Error('buy-journal-mutation-review-required'); }),
+      finish: vi.fn(),
+    };
+
+    await expect(createGuardedScheduledBuyExecutor({
+      store: store(),
+      operationCoordinator,
+      buyPreview,
+      journal,
+      getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
+      validationGateEnabled: true,
+      now: () => 2000,
+      onRunningChange,
+    }).execute({
+      job: job(), runId: 'scheduled-buy-journal-race', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    })).rejects.toThrow('buy-journal-mutation-review-required');
+
+    expect(operationCoordinator.inspect().active).toBeNull();
+    expect(buyPreview.preview).not.toHaveBeenCalled();
+    expect(onRunningChange).not.toHaveBeenCalled();
   });
 
   it('executes exactly once after an in-grace page resume and persists one safe History receipt', async () => {

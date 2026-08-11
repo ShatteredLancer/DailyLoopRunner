@@ -20,7 +20,7 @@ function job(overrides = {}) {
   }, { now: 1 });
 }
 
-describe('Manual one-card Buy validation gate', () => {
+describe('Manual guarded Buy validation gate', () => {
   it('accepts one low-value manual lane and clamps the live validation run', () => {
     expect(inspectManualBuyValidationJob(job())).toMatchObject({
       ready: true,
@@ -43,15 +43,31 @@ describe('Manual one-card Buy validation gate', () => {
     expect(manualBuyValidationConfirmation(1000, 'club')).toBe('BUY 1 TO CLUB MAX 1000');
     expect(manualBuyValidationConfirmation(1000, 'transfer')).toBe('BUY 1 TO TRANSFER MAX 1000');
     expect(() => manualBuyValidationConfirmation(1000, 'discard')).toThrow('auto, club, or transfer');
+    expect(manualBuyValidationConfirmation(2000, 'auto', 2)).toBe('BUY 2 MAX 2000');
+    expect(manualBuyValidationConfirmation(2000, 'transfer', 2)).toBe('BUY 2 TO TRANSFER MAX 2000');
+  });
+
+  it('accepts two adjacent ratings and two purchases within per-card and total caps', () => {
+    expect(inspectManualBuyValidationJob(job({
+      ratingMax: 85,
+      ratingPriceOverrides: { 85: 1500 },
+      quantity: 2,
+      totalBudget: 2500,
+    }))).toMatchObject({
+      ready: true,
+      maxPrice: 1500,
+      requiredText: 'BUY 2 MAX 1500',
+      job: { policy: { ratingMin: 84, ratingMax: 85, quantity: 2 } },
+    });
   });
 
   it.each([
     [{ cardClass: 'common-gold' }, 'manual-buy-validation-rare-gold-only'],
-    [{ ratingMax: 85 }, 'manual-buy-validation-single-rating-only'],
-    [{ quantity: 2 }, 'manual-buy-validation-one-item-only'],
+    [{ ratingMax: 86 }, 'manual-buy-validation-adjacent-ratings-only'],
+    [{ quantity: 3 }, 'manual-buy-validation-quantity-cap'],
     [{ maxBuyNow: 2050, totalBudget: 2050 }, 'manual-buy-validation-price-cap'],
-    [{ totalBudget: 2050 }, 'manual-buy-validation-budget-cap'],
-    [{ ratingPriceOverrides: { 84: 2050 }, totalBudget: 2050 }, 'manual-buy-validation-budget-cap'],
+    [{ totalBudget: 4050 }, 'manual-buy-validation-budget-cap'],
+    [{ ratingPriceOverrides: { 84: 2050 }, totalBudget: 2050 }, 'manual-buy-validation-rating-price-cap'],
     [{ ratingPriceOverrides: { 84: 1500 }, totalBudget: 1000 }, 'manual-buy-validation-budget-below-price-limit'],
   ])('rejects unsafe policy %#', (policy, reason) => {
     expect(inspectManualBuyValidationJob(job(policy))).toMatchObject({ ready: false, reason });

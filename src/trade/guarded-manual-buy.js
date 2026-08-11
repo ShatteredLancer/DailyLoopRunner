@@ -6,7 +6,7 @@ import {
 } from './buy-destination.js';
 import { inspectManualBuyValidationJob } from './manual-buy-validation.js';
 import { manualBuyValidationConfirmation } from './manual-buy-validation.js';
-import { inspectTradeRequestCapacity } from './request-budget.js';
+import { inspectTradeRequestCapacity, tradeBuyRequestReserve } from './request-budget.js';
 
 export function createGuardedManualBuyExecutor(options = {}) {
   const operationCoordinator = options.operationCoordinator;
@@ -47,7 +47,7 @@ export function createGuardedManualBuyExecutor(options = {}) {
     if (!gate.ready) return blockedReceipt(input.job, runId, gate.reason, startedAt);
     const expectedDestination = normalizeExpectedBuyDestination(input.expectedDestination || 'auto');
     if (!expectedDestination) return blockedReceipt(gate.job, runId, 'buy-validation-destination-invalid', startedAt);
-    const requiredText = manualBuyValidationConfirmation(gate.maxPrice, expectedDestination);
+    const requiredText = manualBuyValidationConfirmation(gate.maxPrice, expectedDestination, gate.job.policy.quantity);
     if (String(input.confirmationText || '') !== requiredText) {
       throw new Error(`Confirmation must exactly match ${requiredText}`);
     }
@@ -57,8 +57,13 @@ export function createGuardedManualBuyExecutor(options = {}) {
     }
     const circuit = options.circuitBreaker?.availability?.();
     if (circuit && circuit.allowed !== true) return blockedReceipt(gate.job, runId, 'trade-circuit-open', startedAt);
+    const journalRecovery = journal?.inspectRecovery?.();
+    if (journalRecovery?.canSupersede === false) {
+      return blockedReceipt(gate.job, runId, journalRecovery.reason || 'buy-journal-recovery-required', startedAt);
+    }
+    const requestReserve = tradeBuyRequestReserve(gate.job);
     if (typeof options.requestBudget?.inspect === 'function') {
-      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect());
+      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect(), requestReserve);
       if (!requestCapacity.ready) return blockedReceipt(gate.job, runId, requestCapacity.reason, startedAt);
     }
 
@@ -83,12 +88,6 @@ export function createGuardedManualBuyExecutor(options = {}) {
       );
     }
 
-    journal?.begin?.({
-      runId,
-      jobId: gate.job.id,
-      expectedDestination,
-      at: startedAt,
-    });
     const finishReceipt = (receipt, context = {}, phase = 'receipt-recorded') => {
       journal?.finish?.(runId, {
         phase,
@@ -98,9 +97,18 @@ export function createGuardedManualBuyExecutor(options = {}) {
       options.onReceipt?.(receipt, { job: gate.job, input, ...context });
       return receipt;
     };
-    options.onRunningChange?.(true, { ...input, job: gate.job, runId });
+    let runningNotified = false;
     let requestReservation = null;
     try {
+      journal?.begin?.({
+        runId,
+        jobId: gate.job.id,
+        expectedDestination,
+        requested: gate.job.policy.quantity,
+        at: startedAt,
+      });
+      options.onRunningChange?.(true, { ...input, job: gate.job, runId });
+      runningNotified = true;
       let preview;
       try {
         journal?.checkpoint?.(runId, { phase: 'preview-started' });
@@ -140,7 +148,7 @@ export function createGuardedManualBuyExecutor(options = {}) {
       }
 
       if (typeof options.requestBudget?.reserve === 'function') {
-        requestReservation = await options.requestBudget.reserve();
+        requestReservation = await options.requestBudget.reserve(requestReserve);
         if (!requestReservation.ready) {
           const receipt = blockedReceipt(gate.job, runId, 'trade-request-budget-insufficient', startedAt);
           return finishReceipt(receipt, { preview }, 'request-budget-blocked');
@@ -161,7 +169,7 @@ export function createGuardedManualBuyExecutor(options = {}) {
         scheduledFor: startedAt,
         platform: input.platform || 'pc',
         expectedDestination,
-        maxBuyAttempts: 1,
+        maxBuyAttempts: Number(gate.job.policy.quantity),
         beforeBuy: () => {
           const renewed = lease.heartbeat(runId) === true;
           journal?.checkpoint?.(runId, {
@@ -184,7 +192,7 @@ export function createGuardedManualBuyExecutor(options = {}) {
       lease.release(runId);
       operationCoordinator.release(operationId);
       try { await requestReservation?.release?.(); } catch { }
-      options.onRunningChange?.(false, { ...input, job: gate.job, runId });
+      if (runningNotified) options.onRunningChange?.(false, { ...input, job: gate.job, runId });
     }
   }
 

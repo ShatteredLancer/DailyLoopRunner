@@ -3,7 +3,7 @@ import { createBuyTransaction } from './buy-transaction.js';
 import { filterBuyCatalogForDestination } from './buy-destination.js';
 import { sanitizeTradeBuyReceipt } from './buy-diagnostics.js';
 import { inspectScheduledBuyValidationJob } from './scheduled-buy-validation.js';
-import { inspectTradeRequestCapacity } from './request-budget.js';
+import { inspectTradeRequestCapacity, tradeBuyRequestReserve } from './request-budget.js';
 
 export function createGuardedScheduledBuyExecutor(options = {}) {
   const store = options.store;
@@ -50,8 +50,13 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
     if (!gate.ready) return finish(blockedReceipt(input, gate.reason, startedAt), { gate });
     const circuit = options.circuitBreaker?.availability?.();
     if (circuit && circuit.allowed !== true) return finish(blockedReceipt(input, 'trade-circuit-open', startedAt), { gate });
+    const journalRecovery = journal?.inspectRecovery?.();
+    if (journalRecovery?.canSupersede === false) {
+      return finish(blockedReceipt(input, journalRecovery.reason || 'buy-journal-recovery-required', startedAt), { gate });
+    }
+    const requestReserve = tradeBuyRequestReserve(gate.job);
     if (typeof options.requestBudget?.inspect === 'function') {
-      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect());
+      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect(), requestReserve);
       if (!requestCapacity.ready) return finish(blockedReceipt(input, requestCapacity.reason, startedAt), { gate });
     }
 
@@ -60,7 +65,7 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
     if (!Number.isFinite(Number(capabilities.coins))) {
       return finish(blockedReceipt(input, 'scheduled-buy-coins-unavailable', startedAt), { gate });
     }
-    if (Number(capabilities.coins) - Number(gate.maxPrice) < Number(gate.minimumRetainedCoins)) {
+    if (Number(capabilities.coins) - Number(gate.maxSpend) < Number(gate.minimumRetainedCoins)) {
       return finish(blockedReceipt(input, 'scheduled-buy-minimum-coins-not-met', startedAt), { gate });
     }
 
@@ -73,15 +78,18 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
     });
     if (!operation.acquired) return finish(blockedReceipt(input, operation.reason || 'operation-unavailable', startedAt), { gate });
 
-    journal?.begin?.({
-      runId: input.runId,
-      jobId: gate.job.id,
-      expectedDestination: 'auto',
-      at: startedAt,
-    });
-    options.onRunningChange?.(true, { ...input, job: gate.job });
+    let runningNotified = false;
     let requestReservation = null;
     try {
+      journal?.begin?.({
+        runId: input.runId,
+        jobId: gate.job.id,
+        expectedDestination: 'auto',
+        requested: gate.job.policy.quantity,
+        at: startedAt,
+      });
+      options.onRunningChange?.(true, { ...input, job: gate.job });
+      runningNotified = true;
       let preview;
       try {
         journal?.checkpoint?.(input.runId, { phase: 'preview-started' });
@@ -110,7 +118,7 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
       }
 
       if (typeof options.requestBudget?.reserve === 'function') {
-        requestReservation = await options.requestBudget.reserve();
+        requestReservation = await options.requestBudget.reserve(requestReserve);
         if (!requestReservation.ready) {
           return finish(
             blockedReceipt(input, 'trade-request-budget-insufficient', startedAt),
@@ -135,7 +143,7 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
         platform: input.platform || 'pc',
         expectedDestination: 'auto',
         minimumRetainedCoins: gate.minimumRetainedCoins,
-        maxBuyAttempts: 1,
+        maxBuyAttempts: Number(gate.job.policy.quantity),
         beforeBuy: () => input.heartbeat?.() === true,
         shouldStop: () => options.shouldStop?.() === true,
       });
@@ -150,7 +158,7 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
     } finally {
       operationCoordinator.release(operationId);
       try { await requestReservation?.release?.(); } catch { }
-      options.onRunningChange?.(false, { ...input, job: gate.job });
+      if (runningNotified) options.onRunningChange?.(false, { ...input, job: gate.job });
     }
   }
 

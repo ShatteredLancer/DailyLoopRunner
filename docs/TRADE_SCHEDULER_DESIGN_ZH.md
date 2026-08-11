@@ -1,6 +1,6 @@
 # Trade Scheduler 设计与实施跟踪
 
-> 文档状态：TS2c through TS6 gated implementation and live validation complete; broader production automation remains locked
+> 文档状态：TS8 bounded two-item implementation、full automated verification and ordered EA live validation complete on candidate `0.7.70`; TS9-TS15 roadmap is defined and later production gates remain locked
 > 最后更新：2026-08-11
 > 适用仓库：DailyLoopRunner  
 > 功能边界：定时自动买入、定时批量挂牌、交易任务调度、逐项回执与诊断
@@ -714,6 +714,59 @@ Trade diagnostics JSON 至少包含：
 
 ## 18. 实施里程碑
 
+### 18.1 路线图总览
+
+本路线图以 TS15 为终点。TS8 之后不再使用笼统的“生产化待办”，而是拆成可独立验收的 TS9-TS15。表中的四个进度列必须分别更新；实现或自动测试完成，不代表真实 EA 写操作已经获准，也不代表可以发布对应生产门禁。
+
+| Milestone | 目标 | Depends on | Implementation | Automated verification | Live validation | Release state |
+| --- | --- | --- | --- | --- | --- | --- |
+| TS0 | 设计冻结 | - | Complete | N/A | Complete | Closed |
+| TS1 | 合同、Provider、只读诊断 | TS0 | Complete | Complete | Complete | Closed |
+| TS2 | 手动 Listing 基础 | TS1 | Complete for guarded subset | Complete | Single-card complete | Guarded path released |
+| TS3 | Scheduler 与定时 Listing 基础 | TS1-TS2 | Complete for guarded subset | Complete | Once/single-card complete | Guarded path released |
+| TS4 | 手动 Buy 基础 | TS1 | Complete for guarded subset | Complete | Single-card complete | Guarded path released |
+| TS5 | 定时 Buy 基础 | TS3-TS4 | Complete for guarded subset | Complete | Once/single-card complete | Guarded path released |
+| TS6 | 可观测性、配置迁移和共享预算 | TS1-TS5 | Complete for guarded scope | Complete | Complete for guarded scope | Guarded infrastructure released |
+| TS7 | Transfer reprice 单卡门禁 | TS2-TS3-TS6 | Complete | Complete | Complete | Guarded path released |
+| TS8 | 有界双卡 Trade 候选 | TS4-TS7 | Complete | Complete | Complete | Guarded two-item path validated in `0.7.70` |
+| TS9 | 有界手动多卡事务 | TS8 Complete | Not started | Not started | Not started | Locked |
+| TS10 | 循环调度生产门禁 | TS9 Complete | Not started | Not started | Not started | Locked |
+| TS11 | Buy 策略生产扩展 | TS10 Complete | Not started | Not started | Not started | Locked |
+| TS12 | Listing/Reprice 策略生产扩展 | TS11 Complete | Not started | Not started | Not started | Locked |
+| TS13 | 多 Job、长期运行与恢复 | TS12 Complete | Not started | Not started | Not started | Locked |
+| TS14 | 可选 Companion 最终决策 | TS13 Complete | Not started | Not started | Not started | Locked |
+| TS15 | 生产发布与路线图关闭 | TS14 Complete | Not started | Not started | Not started | Locked |
+
+进度维护规则：
+
+1. TS8 的有序实机验证 campaign 已完成；当前实现入口是 TS9，但在 TS9 的实现、自动验证和实机验证分别完成前不得扩大已验证的两项生产写门禁。
+2. 可以提前实现后续阶段的纯函数、Fake Adapter 和关闭状态 UI，但必须保持默认禁用，并在表中分别记录实现、自动验证和实机验证状态。
+3. 每次推进必须同时更新本表、对应里程碑的 `Status`/checkbox、第 20 节验证记录和运维文档；仅修改版本号或提交信息不算推进。
+4. 实机 campaign 可以合并验证多个已经通过自动门禁的场景，但必须按风险从低到高执行；前一场景出现 `ambiguous`、身份不一致、价格不一致、页面崩溃或未知 Journal 时立即终止整个 campaign。
+5. TS15 完成后进入维护模式。自动出价、套利、自动 Quick Sell、后台服务器代交易、保存 EA 凭证、自动处理 Captcha 和 `relistExpiredAuctions()` 不会自动成为 TS16；任何此类扩展都需要新的独立设计评审。
+
+### 18.2 人工介入与合并验证计划
+
+从当前 TS8 到 TS15，正常情况下只安排三轮必须由用户参与的真实 EA 验证。后续阶段可以先批量完成编码和离线测试，再安装一次候选版按顺序验证多个门禁；不要求每完成一个内部模块就单独收一次日志。只有前序场景失败、候选版在验证后修改了 mutation/recovery 逻辑，或 EA 页面接口发生变化时，才增加补充轮次。
+
+| Campaign | 覆盖里程碑 | 用户必须执行的操作 | 预计人工占用 | 需要交付的证据 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| V8 双卡门禁 | TS8 | 安装/刷新一次候选版；选择低价值卡；依次确认手动双卡 Club Listing、Transfer reprice、双评分 Buy、一次定时 Listing/Reprice/Buy；保持登录并在异常时停止 | 约 30-60 分钟；不含等待合适 expired 卡 | 最终 Listing、Buy、Scheduler diagnostics 各一份；失败时立即导出当前日志 | Complete；六项 `0.7.70` 实机证据已复核 |
+| V9-12 生产策略合并 campaign | TS9-TS12 | 安装一次已通过完整测试且默认回锁的候选版；验证手动多卡与 Stop；验证 daily/interval/window；执行低价多评分 Buy；验证 Club Listing、市场报价 fallback 和一次 expired reprice；按脚本要求切后台、刷新并重新登录 | 约 60-90 分钟主动操作，外加至少 1 小时 expiry/调度观察 | 一个按 `runId` 关联的合并 diagnostics 包；若全部通过，不需要逐阶段发送 | Not started；等待 TS9-TS12 编码和自动验证完成 |
+| V13-15 长期运行与最终 canary | TS13、TS15；TS14 若选择暂缓 | 安装一次最终候选版；配置少量 Buy/Listing/Reprice Jobs；触发一次 Loop/Trade 互斥；让标签页后台运行，执行一次刷新/重登或系统休眠恢复；最后确认发布 | 约 20-40 分钟主动操作，建议 4-8 小时低频观察 | 最终 Scheduler diagnostics、相关 Listing/Buy diagnostics 和 Runner log；通过后作为 TS15 发布证据 | Not started |
+| VC Companion 可选验证 | 仅在 TS14 决定实现时 | 安装最小扩展、授权通知，验证 alarm/notification/open/focus；交易仍在已登录页面内确认和执行 | 约 15-30 分钟 | 扩展诊断和页面 Scheduler diagnostics；不要求页面关闭时成交 | Optional；若 TS14 决定暂缓则不执行 |
+
+三轮必须验证中，不能由本地自动测试替代的人工动作只有：
+
+1. 在真实 EA Web App 登录并安装/刷新候选 userscript。
+2. 选择账户中真实存在的低价值卡、自然产生的 inactive/expired 卡和可接受的 Buy 价格；测试不会人为填满 Transfer List 或制造 429/427。
+3. 对真实挂牌、重挂和购买输入精确确认文本并触发 mutation。Codex 不代替用户承担金币或卡片处置决定。
+4. 执行浏览器环境动作，例如切到后台标签、刷新、重新登录、休眠后恢复，以及等待挂牌自然到期。
+5. 在每轮结束时导出 diagnostics；正常通过时只需交付最终文件，发生异常时立即停止并交付当时文件。
+6. 最终确认是否发布稳定版；构建、版本更新、测试、tag 和 release 操作仍可由 Codex 执行。
+
+其余工作，包括实现、单元/合同/架构测试、Fake clock、崩溃恢复矩阵、构建、版本迁移、文档和日志分析，均不要求用户逐步介入。O4、O8-O15 默认采用表中的建议值；只有用户要改变默认决策时才需要额外讨论，不增加实机验证轮次。
+
 ### TS0 设计冻结
 
 Status: Complete
@@ -883,6 +936,292 @@ Live validation: TS6.1/TS6.2/TS6.3 的迁移、导入导出、Provider 检查和
 
 Exit criteria: 形成独立发布说明、真实风险清单和可恢复运行手册。
 
+### TS7 Transfer reprice 分阶段门禁
+
+Status: Complete for guarded manual and once-scheduled one-card Transfer reprice; broader Transfer automation remains locked.
+
+Scope:
+
+- [x] 只读识别 EA Transfer `expired` 状态并标准化为 `inactive`；未知状态继续 fail closed。
+- [x] 手动 Transfer-only 单卡 Prepare、`REPRICE 1` 精确确认、执行和 Active 状态精确回读。
+- [x] 区分 EA Bid 最低价和 Buy Now 最低价，并按 EA 合法价格步长报价。
+- [x] 定时 Transfer reprice 的独立关闭门禁、诊断证据和单次启用门禁。
+- [x] `once + Transfer-only + expiredPolicy=reprice + maxListings=1` 实机执行、自动回锁和不重复验证。
+- [x] 明确禁止 `relistExpiredAuctions()`、混合来源、循环计划和多卡执行。
+
+Tests: TS7.1-TS7.4 已覆盖 Transfer 状态映射、只读 Preview、手动 reprice、价格下限、变更前精确实体复核、定时选择器、关闭门禁和单次执行。各阶段完整验证结果见第 20 节实施记录。
+
+Live validation: `0.7.54` 至 `0.7.60` 已依次完成 expired 状态观察、手动单卡重挂、生产关闭门禁和一次定时单卡重挂；挂牌后同一 item 以确认价格进入 Active，Transfer 容量不增加，Scheduler 自动暂停、关闭 live execution、解除 armed 且没有重复执行。
+
+Exit criteria: Met for guarded one-card manual and once-scheduled Transfer reprice. Multi-item、mixed-source、recurring 和 bulk relist 仍未开放。
+
+### TS8 有界双卡 Trade 候选
+
+Status: Complete. Implementation、full automated verification and the ordered six-scenario EA live campaign passed on candidate `0.7.70`.
+
+Scope:
+
+- [x] 手动 Club Listing 或 Transfer reprice 扩展为单一来源、最多两张卡。
+- [x] 单次定时 Listing/reprice 扩展为 `maxListings=1..2`，继续禁止 recurring、mixed-source 和多 Job 执行。
+- [x] 手动和单次定时 Buy 扩展为 Rare Gold、一个评分或两个相邻评分、数量最多两张。
+- [x] 保留每卡 2000、总 Buy 预算 4000、定时 Buy 最低保留金币和最多两次 Buy mutation 的硬门禁。
+- [x] Listing Journal 与 Buy Journal 记录两项状态及逐项 mutation boundary；未知写入结果阻止后续项和新 Run。
+- [x] 手动 Listing 接入共享跨标签页 Lease；Listing/Buy 每次写入前续租并校验。
+- [x] 按任务规模原子预留请求预算：Listing 12；单卡 Buy 14；双卡 Buy 28。
+- [x] 补齐崩溃恢复、终态 Journal 替换和双卡确认文本的边界测试。
+- [x] 通过完整 `npm run verify` 并生成唯一候选版本 `0.7.70`。
+- [x] 按第 20 节 TS8 顺序完成手动双卡挂牌/重挂、多项 Journal、单次定时双卡和双评分数量二 Buy 实机验证。
+
+Tests: 全部 Trade 聚焦测试为 41 个文件、250 个测试通过；完整 `npm run verify` 为 153 个测试文件、983 个测试通过，并通过 325 个 JavaScript 文件语法检查、ESLint、配置/Profile、架构审计、FSU patch replay、userscript 构建和发行产物一致性检查。
+
+Live validation: Complete on `0.7.70`. 六份 2026-08-11 diagnostics 依次证明手动双卡 Club Listing、手动双卡 Transfer reprice、手动相邻评分数量二 Buy、单次定时双卡 Club Listing、单次定时双卡 Transfer reprice 和单次定时相邻评分数量二 Buy 全部到达 terminal `completed`。所有 Listing/Buy 均为 requested 2、succeeded 2、failed 0、skipped 0；每个 item 只跨过一次 mutation boundary，并在 Journal `receipt-recorded` 前完成精确身份、价格、Active/目标 pile 对账。
+
+定时三个 Job 均只有一个 matching History Run，`runCount=1`、`nextRunAt=null`，随后保持 `armed=false`、Scheduler paused、live execution disabled。Lease 和 Coordinator 均释放，Circuit closed，后续 ticks 没有重复执行。Transfer reprice 前后容量不增加；Club Listing 后容量按两张增长。手动 Buy 以两次搜索和两次 mutation 分别买入 85/84 各一张并按 duplicate-to-Transfer/Club 路由；定时 Buy 在两次 85 lane 空搜索后以两次 mutation 买入两张 84，证明相邻 lane 会轮换而不保证每个评分各成交一张。
+
+定时 Buy 的交易回执记录 spent 1600，而账户净余额从 1212872 变为 1211890。982 的净减少与同期一笔 650 售出扣除 5% EA 税后的 618 入账完全相符；两笔 800 Buy 均有独立 trade/item 和 Club 路由核验，最终余额仍高于 1092184 的全局和 Job retained-coins floor，因此不构成 Buy 歧义。最终请求预算均回到 available，Listing/Buy 实际动作已按 action 聚合，且没有活动 reservation、Lease 或 mutation Journal 阻止下一次 Run。六份文件未发现 Authorization、Cookie、Token、reservation identifier、raw response body 或其它禁止字段。
+
+Exit criteria: Met for the guarded two-item scope. TS9 可以开始实现；第三张及更多卡、非相邻评分、非 Rare Gold、循环计划、自动 Journal acknowledgement 和 unattended startup 仍保持关闭，直到对应后续里程碑独立完成。
+
+### TS9 有界手动多卡事务
+
+Status: Not started.
+
+Depends on: TS8 必须完成全部双卡实机验证并标记为 `Complete`；O9 必须先确定首轮 Run cap 和 chunk cap。
+
+Scope:
+
+- [ ] 把当前固定两项的 Listing/Buy Journal 扩展为有上限的多项 Journal，保留逐项 Prepare、mutation boundary、对账、终态和脱敏证据。
+- [ ] 新增通用 chunk coordinator；每个 chunk 单独取得共享请求预算，未取得预算时进入有截止时间的等待状态，不轮询轰炸 EA。
+- [ ] 手动 Club Listing 和手动 Transfer reprice 继续保持来源互斥，并在确认文本中包含准确数量和动作类型。
+- [ ] 手动 Buy 首轮仍限 Rare Gold、显式价格/总预算/最低保留金币和已验证评分通道；只扩大有界数量，不同时扩大卡类。
+- [ ] 在每张卡和每个 chunk 之间响应 Stop；已经成功的卡保留成功回执，未跨 mutation boundary 的卡可安全取消。
+- [ ] 容量、金币、价格限制、卡片身份、active/inactive 状态和 Club duplicate 路由必须在每次写入前重新检查。
+- [ ] 任一未知写入结果停止整个 Run；不得跳过未知项继续处理，也不得自动 acknowledge 或自动重试。
+
+Automated tests:
+
+- Fake Adapter 覆盖跨 chunk 成功、预算等待、Stop、容量竞争、金币变化、首项成功后后项失败和中途重载。
+- Journal 覆盖有界序列化、schema migration、逐项 checkpoint、终态替换条件和未知事务阻止新 Run。
+- 请求预算测试证明任一时刻不超过共享 `30 requests / 5 minutes`，且取消或失败会释放未使用 reservation。
+- 完整 `npm run verify`、architecture audit、构建和 root/dist 一致性必须通过。
+
+Live validation:
+
+- 在一个合并 campaign 中依次验证手动多卡 Club Listing、Transfer reprice 和 Rare Gold Buy；每种只提高一个数量级，并保存操作前后 diagnostics。
+- 验证中主动执行一次安全 Stop，但不故意制造 429、427、断网或浏览器崩溃。
+- 证明部分成功、剩余未执行、请求预算恢复、Lease/Coordinator 释放以及 Journal 可解释。
+
+Exit criteria: 三种手动多卡路径均在确定的 cap 内通过自动测试和低价值实机验证；无无限队列、无不明重试、无跨来源执行，TS10 可以复用同一 chunk/Journaling 核心。
+
+Out of scope: 循环计划、多 Job 同时 armed、非 Rare Gold Buy、混合 Club/Transfer、自动 Journal acknowledgement、无上限 bulk 操作。
+
+Next: TS10 循环调度生产门禁。
+
+### TS10 循环调度生产门禁
+
+Status: Not started.
+
+Depends on: TS9 Complete；O4、O10 和 O11 必须形成明确决策。
+
+Scope:
+
+- [ ] 首先开放单一 armed Job 的 `daily`，再依次开放 `interval` 和 `window`；每种 schedule 使用独立 production gate 和精确确认。
+- [ ] 继续复用启动即回锁、跨标签页 Lease、Operation Coordinator、Circuit Breaker、请求预算和逐项 Journal。
+- [ ] 明确页面后台化、系统休眠、刷新、延迟登录、超过 grace window 和时区/DST 变化时的确定性行为。
+- [ ] 页面关闭或 EA 未登录时不执行交易；恢复页面后只按已批准的 Misfire Policy 计算一次，不补跑队列。
+- [ ] Loop Runner 运行时 Trade Job 必须等待；Trade Run 持有 Coordinator 时 Loop 不得开始，双方均显示阻塞原因和下一次评估时间。
+- [ ] 每次 recurring Run 都生成独立 `runId`；同一个计划时间不得因 reload、双标签页或 tick 重入执行两次。
+- [ ] `next-login` 必须在 O11 中显式批准后才能实现；没有决议时继续拒绝。
+
+Automated tests:
+
+- Fake clock 覆盖 daily/interval/window、DST、grace、skip、休眠唤醒、reload、双 owner 和同一 due time 去重。
+- 覆盖 Loop/Trade 互斥、Lease 失效、预算不足等待、Circuit 打开、登录未就绪和启动后回锁。
+- Scheduler History、Journal 和 diagnostics 必须能关联 schedule occurrence、dispatch 和最终 Run。
+- 完整仓库验证通过，所有 once/manual 行为保持回归覆盖。
+
+Live validation:
+
+- 使用两项以内的低风险 Job，按 daily -> interval -> window 顺序验证；不与 TS11/TS12 的数量或策略扩展混合。
+- 合并验证前台标签、后台标签、刷新后重登、短时休眠、双标签页和 Loop 占用场景。
+- 每个计划时间最多一个 History Run；页面关闭期间无 EA 请求，恢复后行为与 Misfire Policy 一致。
+
+Exit criteria: 三种循环计划在单 armed Job 限制下可预测运行，无重复 mutation、无页面关闭交易、无越过 Loop/Trade 互斥；运维文档给出恢复和暂停流程。
+
+Out of scope: 多个 armed Job 的生产调度、后台扩展直接交易、自动登录、扩大 Buy/List 策略。
+
+Next: TS11 Buy 策略生产扩展。
+
+### TS11 Buy 策略生产扩展
+
+Status: Not started.
+
+Depends on: TS10 Complete；O14 必须确认支持的 Buy card class 边界。
+
+Scope:
+
+- [ ] 把评分范围扩展为多个精确 rating lane；每个 lane 仍按 definition ID 分解 EA 搜索，不向 EA 发送不存在的评分范围条件。
+- [ ] 支持每评分价格上限、每评分数量配额、Job 总数量、Job 总预算、最低保留金币和最大运行时间。
+- [ ] lane 调度保持公平，单个低价或空结果 definition 不得永久饿死其它评分；每个响应仍只购买当前响应中最低合格 Buy Now。
+- [ ] 数量大于 TS9 单 chunk 时复用 chunk coordinator，预算恢复前暂停；不得通过提高共享 30/5 分钟上限来换取吞吐。
+- [ ] 为连续空搜索、报价过期、价格越界、金币不足、Transfer 满、Unassigned 阻塞和 429/427/Captcha 定义明确停止阈值。
+- [ ] Preview 显示 lane、definition 数量、配额、最坏请求成本、最高支出和停止条件；确认文本包含总数量和最大支出。
+- [ ] Rare Gold 之外的 card class 只有在 O14 单独批准并完成匹配/路由测试后才能增加。
+
+Automated tests:
+
+- 覆盖三种及以上评分、非相邻评分、per-rating override、lane fairness、数量配额、总预算和最低金币底线。
+- 覆盖跨 chunk 搜索、空结果退避、同价 tie-break、重复卡路由、容量竞争和部分完成后停止。
+- Property/contract tests 证明任何购买都满足精确 definition、rating、card class、价格和预算约束。
+- 完整仓库验证和构建产物检查通过。
+
+Live validation:
+
+- 先验证多评分 Preview，再以低价 Rare Gold 进行一个有界手动 Run 和一个已通过 TS10 的循环 Run。
+- diagnostics 必须显示每个 lane 的搜索/命中/购买计数、实际支出、停止原因和未使用预算，且不包含原始 EA 响应。
+- 不通过制造请求风暴验证 429；只验证已有 Circuit/退避路径在正常流量下保持关闭和可观测。
+
+Exit criteria: Rare Gold 多评分、多数量 Buy 在手动和循环调度下通过有界验证，任何购买都可追溯到配置 lane 和精确回执；其它卡类保持锁定或已有独立批准记录。
+
+Out of scope: Bid、竞价追踪、利润保证、自动套利、未知 card class、跨账号策略。
+
+Next: TS12 Listing/Reprice 策略生产扩展。
+
+### TS12 Listing/Reprice 策略生产扩展
+
+Status: Not started.
+
+Depends on: TS11 Complete；O8 和 O12 必须形成结论。
+
+Scope:
+
+- [ ] Club Listing 与 Transfer reprice 继续作为两个来源互斥的 Job；不提供同一 Run 混合来源。
+- [ ] 支持有界多卡和分评分规则，明确固定价格、评分 override、市场报价 override、markup、EA 最低/最高价格和合法步进的优先级。
+- [ ] 市场报价必须带 provider、获取时间和 freshness；过期、缺失或异常报价按显式 fallback/skip 策略处理，不能静默使用旧报价。
+- [ ] 明确 1 小时、3 小时等挂牌 duration，以及未售出超时后的 `skip` 或显式 `reprice` 策略。
+- [ ] Reprice 每次只操作本 Run 精确读取并确认仍为 inactive/expired 的 item；sold、active、未知状态一律跳过并停止不确定 Run。
+- [ ] 每张卡写入前刷新 EA Bid/Buy Now 价格下限并分别校验；高价值卡是否增加额外最低 BIN 复核由 O8 决定。
+- [ ] 保持禁止 `relistExpiredAuctions()`，不通过 DOM 点击或 Enhancer/FSU 私有状态执行批量挂牌。
+
+Automated tests:
+
+- 价格策略矩阵覆盖固定价、评分 override、provider quote、markup、stale quote、EA 双下限、步进和 fallback。
+- 覆盖 Club/Transfer 来源隔离、duration、expired timeout、sold/active race、容量竞争和部分成功 Journal。
+- Architecture test 继续保证 EA mutation 只有 Adapter 允许的精确 `list()` 调用点，`relistExpiredAuctions()` 调用点为零。
+- 完整仓库验证和发行产物一致性通过。
+
+Live validation:
+
+- 使用低价值卡分别验证多卡 Club Listing、1 小时到期后的显式 reprice、3 小时 duration 和 provider quote/固定价 fallback。
+- 对每张卡核对 Bid、Buy Now、duration、item ID、trade ID、前后状态和 Transfer 容量；任何身份或状态不一致立即停止。
+- 不填满 Transfer List 来制造容量错误，也不使用高价值卡测试未批准策略。
+
+Exit criteria: Listing 和 Reprice 的定价、超时及来源策略在手动和循环 Job 中一致，低价值实机结果与 Preview 完全相符，任何 expired 处理均为精确逐项操作。
+
+Out of scope: 混合来源、自动 relist all、低价抢挂、利润保证、自动 Quick Sell。
+
+Next: TS13 多 Job、长期运行与恢复。
+
+### TS13 多 Job、长期运行与恢复
+
+Status: Not started.
+
+Depends on: TS12 Complete；O13 必须确认未知 Journal 的人工处理政策，O10 必须确认多 armed Job 上限。
+
+Scope:
+
+- [ ] 从单 armed Job 扩展为有限数量的 armed Jobs，但全局同时只允许一个 Trade mutation Run；公平调度按 due time、Job type 和稳定 tie-break 决定。
+- [ ] History、Listing Journal、Buy Journal、Lease 和 request budget 使用统一 correlation ID，支持跨 reload 和跨多次 schedule occurrence 对账。
+- [ ] 对长期 cooldown、预算恢复、Provider 暂时不可用、登录未就绪和 Loop 占用显示明确状态、预计恢复时间和人工 Stop。
+- [ ] 过期 Lease 恢复必须先做只读对账；跨过 mutation boundary 或结果不明时保持全局阻塞，要求人工导出和处理。
+- [ ] 未知 Journal 默认不自动 acknowledge；人工解除必须展示证据摘要、风险说明并留下本地审计记录。
+- [ ] 长期 diagnostics 只保留有界聚合和脱敏事件，定义 History/Journal 淘汰、导出和 schema migration 规则。
+- [ ] 验证多个 Buy/Listing Job 与 Loop Runner 共存时的公平性、无饥饿和请求预算共享。
+
+Automated tests:
+
+- Fake clock 长时间推进覆盖多 Job 公平、同一 due time、预算耗尽/恢复、休眠、reload、跨标签 lease 和 Circuit cooldown。
+- Crash/recovery matrix 覆盖 mutation 前、请求已发出、EA 响应后、对账中和 History 写入前后的每个 checkpoint。
+- Migration/retention tests 覆盖旧 Job Store、旧 Journal、上限淘汰和诊断脱敏。
+- 完整仓库验证通过，并增加固定时长的 soak test；测试不得依赖真实 EA。
+
+Live validation:
+
+- 在低频、低数量条件下运行一个包含 Buy、Club Listing、Transfer reprice 和 Loop 互斥的合并长时 campaign。
+- 验证后台标签、页面刷新、重新登录、系统休眠和双标签页；不主动断网或终止浏览器来制造未知写入。
+- 证明没有并发 mutation、没有重复 schedule occurrence、没有绕过预算，所有等待和恢复均可从 UI/diagnostics 解释。
+
+Exit criteria: 有限多 Job 可长时间运行且始终串行写入；恢复、阻塞、人工处理和日志保留均有确定协议，运维人员无需读取原始 EA 对象即可定位状态。
+
+Out of scope: 自动确认未知交易、远程后台代执行、无限 History、无限 armed Jobs、保存 EA 凭证。
+
+Next: TS14 可选 Companion 最终决策。
+
+### TS14 可选 Companion 最终决策
+
+Status: Not started.
+
+Depends on: TS13 Complete；O15 必须记录实现或永久暂缓的依据。
+
+Scope:
+
+- [ ] 用 TS10-TS13 的实测数据判断浏览器后台 timer 是否仍需要扩展 alarm；不能仅因“可能更稳定”而增加扩展。
+- [ ] 若不实现，记录理由、已知限制和用户在页面关闭/未登录时的预期行为，随后直接关闭本里程碑。
+- [ ] 若实现，Companion 只允许 alarm、通知以及打开/聚焦 EA 页面；实际到期判断、登录检查、确认和 EA 写操作仍由页面内 Runner 完成。
+- [ ] Companion 不保存 Cookie、Token、账号密码、EA Item 或交易响应，不在 Service Worker 调用 EA 接口，也不自动登录。
+- [ ] 定义 userscript 与 extension 的版本/消息协议、权限最小化、卸载降级和诊断边界。
+
+Automated tests:
+
+- 若暂缓实现：完成决策审查和文档一致性检查即可，运行时测试为 N/A。
+- 若实现：覆盖消息 schema、来源校验、alarm 去重、页面缺失/未登录、通知、版本不兼容和无扩展降级；静态审计证明扩展无 EA mutation 与凭证存储。
+- 两种结论都必须保持 `npm run verify` 通过。
+
+Live validation:
+
+- 若实现，只验证 alarm/notification/open/focus 和页面内接管，不以页面关闭时成交作为成功标准。
+- 若暂缓实现，确认无扩展安装时完整 Trade Scheduler 行为不变。
+
+Exit criteria: Companion 已被明确拒绝/暂缓，或以最小权限完成验证；不存在“扩展稍后也许会后台交易”的模糊边界。
+
+Out of scope: Service Worker 交易、远程服务器交易、自动登录、凭证同步、绕过浏览器/EA 限制。
+
+Next: TS15 生产发布与路线图关闭。
+
+### TS15 生产发布与路线图关闭
+
+Status: Not started.
+
+Depends on: TS14 Complete；所有仍会影响生产默认值的 Open decisions 必须 Resolved 或明确 Deferred with reason。
+
+Scope:
+
+- [ ] 冻结生产 Job schema、默认安全参数、迁移路径、导入/导出格式和回滚版本。
+- [ ] 为 Manual、Once、Recurring、Buy、Club Listing、Transfer reprice、Stop、Circuit、Journal recovery 和 Loop/Trade 互斥建立最终能力矩阵。
+- [ ] 完成 UI 可访问性、触摸屏/手机布局、长列表、确认文案、状态提示和错误恢复审查。
+- [ ] 更新 README、设计文档、运维手册、发布说明、隐私边界、故障排查和低风险首次运行流程。
+- [ ] 执行完整自动验证、迁移验证、离线 soak、候选构建一致性检查和有界真实页面 canary。
+- [ ] 明确 GA 生产门禁与仍然禁用的能力；所有隐藏/调试 live gate 要么删除，要么转为有文档的正式 gate。
+- [ ] 发布最终候选和稳定版本，并在第 20 节记录版本、测试数量、实机证据、剩余风险和回滚点。
+
+Automated tests:
+
+- `npm run verify`、architecture audit、schema/Profile 校验、构建、root/dist equality、发行资产和安装更新路径全部通过。
+- 使用旧版本 Job/Journal/History fixture 完成迁移与回滚测试；敏感信息扫描不得发现 Token、Cookie、凭证或原始 EA 响应。
+- 完成至少一次固定时长的离线多 Job soak 和确定性重放。
+
+Live validation:
+
+- 候选版只用低价值、低数量 Job 做最终 canary，覆盖一个完整 recurring 周期和一次 reload/relogin 恢复。
+- 核对无重复交易、无超预算、无并发 Loop/Trade、无未知 Journal、diagnostics 可导出且隐私合规。
+- canary 失败必须回锁相关 gate，而不是只补日志后继续发布。
+
+Exit criteria: 能力矩阵中所有标为 supported 的路径均有自动测试和真实证据；所有 unsupported 路径均 fail closed；稳定版本、运维手册和回滚点已发布。Trade Scheduler 路线图至此结束并转入维护模式。
+
+Out of scope: 第 5 节非目标，以及未通过独立设计评审的新交易类型或规避 EA 限制的功能。
+
+Next: Maintenance only；新范围必须新建设计文档，不沿用未定义的 TS16。
+
 ## 19. Open decisions
 
 以下事项在进入对应实现阶段前必须明确记录结论：
@@ -892,11 +1231,18 @@ Exit criteria: 形成独立发布说明、真实风险清单和可恢复运行�
 | O1 | Buy Job 默认 `cardClass` 是 rare-gold、normal-gold 还是必须显式选择？ | 必须显式选择 | TS1 | Resolved: D13 |
 | O2 | Price Provider 默认顺序。 | Auto: FUT.GG -> FUTNext | TS1 | Resolved: D14 |
 | O3 | FUTNext rating catalog TTL 和 last-known-good 最长允许时间。 | 24 小时，版本变化立即失效 | TS1 | Resolved: D15 |
-| O4 | 默认 Misfire Policy 和 grace window。 | grace-window，15 分钟 | TS3 | Open |
+| O4 | 默认 Misfire Policy 和 grace window。 | grace-window，15 分钟 | TS10 | Open |
 | O5 | 最低金币余额是否为所有 Buy Job 的全局硬限制。 | 全局硬限制，可被 Job 提高但不能降低 | TS4 | Resolved: TS5 explicit reserve gate |
 | O6 | Listing expired 默认跳过还是重新报价。 | skip；reprice 必须显式选择 | TS2 | Resolved: TS7.2 explicit manual gate |
 | O7 | 是否允许同一 rating rule 同时匹配普通金和特殊卡。 | 不允许；card class 必须明确 | TS2 | Resolved: explicit card-class contract |
-| O8 | 是否需要高价值卡 EA 最低 BIN 复核。 | 首版不实现 | TS6 | Open |
+| O8 | 是否需要高价值卡 EA 最低 BIN 复核。 | 首版不实现，高价值卡继续排除 | TS12 | Open |
+| O9 | 手动 Run 和单个 chunk 的 Listing/Buy 数量上限。 | 首次只提高一个数量级；chunk 不超过 TS8 已验证的两项，Run cap 由最坏请求成本决定 | TS9 | Open |
+| O10 | Recurring 阶段允许多少 armed Jobs，以及何时开放多 Job。 | TS10 只允许一个；TS13 通过长时验证后才允许有限多 Job | TS10/TS13 | Open |
+| O11 | 是否支持 `next-login`。 | 默认拒绝；只有能证明不补跑旧 occurrence 且不会无确认交易时才开放 | TS10 | Open |
+| O12 | 未售出超时后的默认行为。 | 默认 `skip`；1/3 小时后 `reprice` 必须由 Job 显式配置 | TS12 | Open |
+| O13 | 未知或跨 mutation boundary 的 Journal 是否允许自动 acknowledge。 | 不允许，只能人工查看证据后解除 | TS13 | Open |
+| O14 | Buy 是否扩展到 Rare Gold 之外的 card class。 | TS11 保持 Rare Gold；其它卡类逐类评审 | TS11 | Open |
+| O15 | 是否实现 Companion Extension。 | 默认暂缓；只有页面 timer 的实测限制无法由 userscript 解决时才实现最小 Companion | TS14 | Open |
 
 ## 20. 决策与验证日志
 
@@ -1386,3 +1732,85 @@ Live validation: Artifact `trade-scheduler-diagnostics-2026-08-11T05-22-01-641Z.
 The Scheduler recorded one completed History receipt with requested 1, succeeded 1 and failed 0. Request budget accounted for exactly six calls: three Transfer refreshes, two price-limit requests and one list mutation. Execution then left the Scheduler paused, live execution disabled, the Job disarmed, `nextRunAt=null`, `runCount=1`, no Lease or Coordinator operation, and a closed Circuit. Later ticks remained paused and did not repeat the transaction. This closes the guarded once/one-card Scheduled Transfer reprice path.
 
 Next: Preserve `maxListings=1` and `once` for the production scheduler until a separate bounded multi-item design is reviewed. The safest expansion order is manual bounded multi-item Listing/reprice first, then one-time scheduled bounded work, and recurring schedules last. Mixed Club/Transfer sources and `relistExpiredAuctions()` remain out of scope throughout.
+
+### 2026-08-11 / TS8 / Bounded two-item Trade candidate
+
+Status: Complete in candidate `0.7.70`. Implementation、full automated validation and all six ordered two-item EA live scenarios passed.
+
+Scope:
+
+- Manual Listing/reprice accepts one source and at most two cards. Club requires `expiredPolicy=skip`; Transfer requires `expiredPolicy=reprice`. Mixed sources remain Preview-only.
+- Once-scheduled Listing/reprice accepts the same two source-specific modes with `maxListings=1..2`. Daily, interval, window, next-login and more than one armed Job remain blocked.
+- Manual and once-scheduled Buy remain Rare Gold only, accept one rating or two adjacent ratings, and cap quantity at two. Per-card price remains at most 2000, total budget at most 4000, and scheduled Buy still requires an explicit retained-coins floor.
+- `relistExpiredAuctions()` is never called. Buy still searches one exact rating and one definition per request and buys at most one card from a response.
+
+Persistence and recovery:
+
+- Listing now has a GM-backed bounded Journal; Buy Journal schema records the same two-item state shape. Each item retains Prepare/search, exact sanitized identity, mutation boundary, allowlisted response summary, reconciliation and terminal state.
+- Manual Listing now uses the shared cross-tab Lease during execution. Scheduled Listing and Buy continue using the Scheduler-owned Lease. Every Listing and Buy mutation heartbeats immediately before the EA write.
+- A browser termination before a mutation boundary may be reconciled as a blocked Run. Once any item crossed a mutation boundary, an active or uncertain Journal blocks all later Runs and prevents automatic retry. A first-item success remains visible when the second item fails, is stopped or becomes ambiguous.
+- Diagnostics export only item/definition/trade IDs, pile, prices, primitive response status/code and bounded phases. Tokens, cookies, reservation IDs, raw EA objects and response bodies are excluded.
+
+Request budget:
+
+- Listing reserves atomically before Prepare and shares the reservation through Transaction. The two-item worst case is 11 EA calls, retained under a 12-slot reservation.
+- Buy reserves the bounded worst case, including repeated empty searches and broad ambiguity reconciliation: 14 slots for one item and 28 for two. Unused slots are released. A two-item Buy therefore starts only when nearly the full 30-request window is available.
+
+Automated exit criteria:
+
+- Two-item Listing success, Stop between items, first success plus uncertain second item, per-item journal boundaries and no retry after ambiguity.
+- Two adjacent Buy lanes with quantity two, first success plus uncertain second item, retained-coins floor, total budget, destination routing, two-attempt cap and 28-slot reservation.
+- Once Scheduler relocks/disarms before Prepare, validates every provisional FSU Club candidate, dispatches only once and leaves recurring/mixed/third-item paths fail-closed.
+- Full repository syntax, lint, architecture, unit, build and distribution verification must pass before assigning the candidate version.
+
+Automated evidence: All 41 focused Trade test files and 250 Trade tests pass. Full `npm run verify` passes with 153 test files and 983 tests, 325 JavaScript files syntax-checked, plus ESLint, config/Profile validation, architecture audit, FSU patch replay, userscript build, root/dist equality and FSU release asset checks. Candidate version: `0.7.70`.
+
+Ordered live-validation campaign:
+
+1. Install the final candidate, leave Scheduler paused/live-disabled, save baseline Scheduler diagnostics and confirm Circuit closed, Lease empty and request budget at 30/30.
+2. Prepare two low-value Club cards without confirmation. Save Listing diagnostics and verify two Prepared items, sanitized Journal entries, one shared reservation and no Listing receipt. After review, enter `LIST 2` once. Stop and export immediately on any blocked/ambiguous result.
+3. Prepare two inactive low-value Transfer cards and repeat the same review before entering `REPRICE 2`. Verify both exact items become Active at their confirmed prices and Transfer capacity does not increase.
+4. Create a manual Rare Gold Buy Job for adjacent ratings such as 84-85, quantity 2, per-rating limits at or below 2000 and total budget at or below 4000. Run Preview, enter `BUY 2 MAX <max>` once, then export Buy and Scheduler diagnostics.
+5. Create one once-scheduled dual Club Listing and validate `RUN ONCE 2`; after completion verify paused/live-disabled/disarmed, one History Run and no repeat tick. Repeat with Transfer-only reprice and `RUN REPRICE ONCE 2` only if two suitable inactive low-value items exist.
+6. Create one once-scheduled adjacent-rating quantity-two Buy with an explicit retained-coins floor. Enable it with `RUN BUY ONCE 2 RESERVE <floor>`, then verify at most two Buy attempts, floor preservation, one History Run and no repeat tick.
+7. Export all diagnostics before reload. If any step is blocked, ambiguous, crashes the page or produces an identity/price/destination mismatch, stop the campaign immediately and do not retry from the same page.
+
+Live evidence: The six artifacts captured from 07:20 through 09:00 on 2026-08-11 completed in the required order. Manual Club Listing listed two items at 650/700; manual Transfer reprice relisted two inactive items at 650/700 without consuming Transfer capacity; manual Buy completed two 800 purchases across the configured 84-85 lanes and routed one duplicate to Transfer and one item to Club. The three `once` Jobs then completed two-item Club Listing、Transfer reprice and Buy exactly once, automatically relocked/disarmed, persisted one matching History Run each and remained paused on later ticks. Every terminal Journal is `completed / receipt-recorded`, all item mutation boundaries reconciled, Circuit remained closed, and no active Lease/Coordinator state remained.
+
+The scheduled Buy searched both adjacent lanes, recorded two empty 85 searches and bought two 84 items. This is expected: adjacent lanes define the eligible and rotating search range, not a one-card-per-rating quota. Its 1600 receipt spend and 982 net coin decrease differ because a concurrent 650 sale contributed the expected post-tax 618; exact purchased item/trade reconciliation and the 1092184 retained floor both passed. Diagnostics prove the persisted Scheduler/History state and later no-repeat ticks. They cannot by themselves prove whether the operator kept the same dialog DOM open, so the separate in-place UI refresh remains an observational browser check rather than a Trade mutation blocker.
+
+Still out of scope: recurring work, mixed Club/Transfer execution, quantity above two, non-adjacent or three-rating Buy, non-Rare-Gold Buy, price/budget cap increases, automatic Journal acknowledgement, unattended browser startup and bulk relist APIs.
+
+### 2026-08-11 / Roadmap / TS9-TS15 finite production plan
+
+Status: Complete for roadmap definition; no TS9+ implementation or production gate is approved.
+
+Commit/Version: Documentation update on candidate `0.7.70` worktree.
+
+Automated tests: The roadmap addition itself is documentation-only. The current TS8 candidate evidence, including the later Scheduler dialog refresh regression fix, is 41 focused Trade test files / 250 Trade tests and 153 files / 983 tests in full `npm run verify`.
+
+Observed result: The post-TS8 work is now finite and split into TS9 bounded manual batches, TS10 recurring schedules, TS11 Buy strategy expansion, TS12 Listing/Reprice policy expansion, TS13 multi-Job long-running recovery, TS14 the final Companion decision and TS15 production release closure. Each milestone has dependencies, scope checkboxes, automated requirements, live-validation requirements, exit criteria, exclusions and a named next stage. User-operated EA validation is consolidated into three mandatory campaigns: V8, V9-12 and V13-15; the Companion campaign is optional and omitted when TS14 remains deferred.
+
+Diagnostics: No EA request or mutation was performed.
+
+Remaining risk: TS8 live validation is complete. TS9-TS15 remain plans only; their caps and production defaults must be resolved through O4 and O8-O15 before the corresponding implementation stage.
+
+Next: Start TS9 bounded manual multi-item implementation while preserving the validated TS8 two-item production cap until TS9 has its own automated and live evidence.
+
+### 2026-08-11 / TS8 / Scheduler dialog external-state refresh
+
+Status: Implementation and focused automated validation complete; live confirmation is folded into the existing V8 scheduled scenarios.
+
+Commit/Version: Candidate `0.7.70` worktree.
+
+Observed issue: A guarded once Job reached its scheduled time and executed, but an already open Trade Scheduler dialog continued to show the pre-run Job/runtime state. Closing and reopening the dialog loaded the correct completed state. The Scheduler, transaction and persisted History were not reported as failed; the stale view came from the dialog retaining its initial snapshot until a local UI action called `render()`.
+
+Implementation: The page entry now supplies a one-second refresh scheduler. The dialog reads the latest Job Store and refreshes the banner every interval, but rebuilds Jobs/Summary/History only when the persisted snapshot changes. Active Job editing and JSON import are not rebuilt, so unsaved operator input remains intact. Closing, backdrop dismissal or replacing an existing Scheduler dialog disposes the refresh timer.
+
+Automated tests: `tests/unit/trade-scheduler-dialog.test.js` passes 19 tests. New coverage proves an external once-Job completion changes the open banner from running/enabled to paused/locked, exposes the new `listing | completed | 2/2` History without reopening, cancels the timer on close and preserves an active editor's unsaved name during refresh. All 41 focused Trade files / 250 tests pass; full `npm run verify` passes with 153 files / 983 tests, plus syntax, ESLint, architecture, build and release-asset checks.
+
+Diagnostics: No EA request or mutation was needed for this UI fix.
+
+Remaining risk: Real browser timer throttling may delay the one-second poll while the tab is backgrounded. Returning to the visible tab must still refresh without closing the dialog; D/E/F of V8 will provide this evidence. Polling does not alter Scheduler timing or execute Jobs.
+
+Next: Rebuild and run full repository verification, then use the same `0.7.70` V8 campaign to confirm in-place updates during scheduled Listing, reprice and Buy.

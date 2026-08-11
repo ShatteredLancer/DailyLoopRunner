@@ -1,6 +1,6 @@
 import { normalizeTradeJob } from './contracts.js';
 
-export const MANUAL_LISTING_LIVE_LIMIT = 1;
+export const MANUAL_LISTING_LIVE_LIMIT = 2;
 
 function positiveInteger(value, fallback) {
   const number = Math.floor(Number(value));

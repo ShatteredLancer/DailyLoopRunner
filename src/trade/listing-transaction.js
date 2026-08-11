@@ -47,8 +47,12 @@ export function createListingTransaction(options = {}) {
     let reason = null;
     let succeeded = 0;
     let failed = 0;
+    const checkpoint = (phase, detail = {}) => {
+      try { options.onCheckpoint?.({ phase, at: Number(now()), ...detail }); } catch { }
+    };
 
     const circuitAvailability = options.circuitBreaker?.availability?.();
+    checkpoint('transaction-started', { status: 'active' });
     if (circuitAvailability && circuitAvailability.allowed !== true) {
       status = 'blocked';
       reason = 'trade-circuit-open';
@@ -77,6 +81,13 @@ export function createListingTransaction(options = {}) {
 
     for (let index = 0; !reason && index < entries.length; index += 1) {
       const entry = entries[index];
+      const itemIndex = index + 1;
+      const listing = {
+        startPrice: entry.startPrice,
+        buyNow: entry.buyNow,
+        durationSeconds: entry.durationSeconds,
+      };
+      checkpoint('item-preflight-started', { itemIndex, item: entry.item, listing });
       if (input.shouldStop?.() === true) {
         status = 'stopped';
         reason = 'stopped-by-user';
@@ -84,7 +95,11 @@ export function createListingTransaction(options = {}) {
       }
       let transferPreflight = null;
       if (entry.item.pile === 'club' || entry.item.pile === 'transfer') {
+        checkpoint('transfer-refresh-started', { itemIndex, item: entry.item, listing });
         transferPreflight = await adapter.refreshTransferItems();
+        checkpoint('transfer-refresh-finished', {
+          itemIndex, item: entry.item, listing, status: transferPreflight.status, response: transferPreflight.response,
+        });
         if (transferPreflight.status !== 'completed') {
           failed += 1;
           status = 'blocked';
@@ -163,7 +178,11 @@ export function createListingTransaction(options = {}) {
         receipts.push({ index: index + 1, item: { ...entry.item }, status: 'blocked', reason });
         break;
       }
+      checkpoint('price-limits-refresh-started', { itemIndex, item: entry.item, listing });
       const priceLimitResult = await adapter.inspectPriceLimits(entry.item, { refresh: true });
+      checkpoint('price-limits-refresh-finished', {
+        itemIndex, item: entry.item, listing, status: priceLimitResult.status, response: priceLimitResult.response,
+      });
       if (priceLimitResult.error?.kind === 'request-budget-exhausted') {
         failed += 1;
         status = 'blocked';
@@ -202,7 +221,22 @@ export function createListingTransaction(options = {}) {
         break;
       }
 
+      checkpoint('listing-request-started', {
+        itemIndex,
+        item: entry.item,
+        listing,
+        status: 'mutation-pending',
+        mutationBoundaryCrossed: true,
+      });
       const listed = await adapter.listItem(entry.item, entry);
+      checkpoint('listing-response-received', {
+        itemIndex,
+        item: entry.item,
+        listing,
+        status: listed.status,
+        response: listed.response,
+        mutationBoundaryCrossed: true,
+      });
       const receipt = {
         index: index + 1,
         item: { ...entry.item },
@@ -241,11 +275,25 @@ export function createListingTransaction(options = {}) {
           ? 'trade-request-budget-exhausted'
           : classification.opensCircuit ? `trade-${classification.kind}` : `listing-${listed.status}`;
         receipts.push({ ...receipt, status, reason, classification });
+        checkpoint('item-finished', {
+          itemIndex, item: entry.item, listing, status, reason, mutationBoundaryCrossed: true,
+        });
         break;
       }
 
+      checkpoint('listing-reconciliation-started', {
+        itemIndex, item: entry.item, listing, status: 'accepted', mutationBoundaryCrossed: true,
+      });
       const refresh = await adapter.refreshTransferItems();
       const verification = adapter.inspectListingItem({ ...entry.item, pile: 'transfer' });
+      checkpoint('listing-reconciliation-finished', {
+        itemIndex,
+        item: verification.candidate?.item || entry.item,
+        listing,
+        status: refresh.status === 'completed' && verificationMatches(entry, verification.candidate) ? 'listed' : 'ambiguous',
+        response: refresh.response,
+        mutationBoundaryCrossed: true,
+      });
       if (refresh.status !== 'completed' || verification.status !== 'loaded' || !verificationMatches(entry, verification.candidate)) {
         failed += 1;
         status = 'ambiguous';
@@ -258,6 +306,9 @@ export function createListingTransaction(options = {}) {
           reason,
           refresh,
           verification: verification.candidate || null,
+        });
+        checkpoint('item-finished', {
+          itemIndex, item: entry.item, listing, status: 'ambiguous', reason, mutationBoundaryCrossed: true,
         });
         break;
       }
@@ -273,6 +324,13 @@ export function createListingTransaction(options = {}) {
           auction: { ...verification.candidate.auction },
         },
       });
+      checkpoint('item-finished', {
+        itemIndex,
+        item: verification.candidate.item,
+        listing,
+        status: 'listed',
+        mutationBoundaryCrossed: true,
+      });
       if (index < entries.length - 1 && input.shouldStop?.() !== true) {
         await sleep(randomDelayMs(job.policy.listingDelaySeconds, random));
       }
@@ -281,6 +339,7 @@ export function createListingTransaction(options = {}) {
     const finishedAt = Number(now());
     const afterCapabilities = adapter.inspectCapabilities();
     const skipped = Math.max(0, entries.length - succeeded - failed);
+    checkpoint('transaction-finished', { status, reason });
     return createTradeRunReceipt({
       runId,
       jobId: job.id,

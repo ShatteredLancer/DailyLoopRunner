@@ -14,7 +14,7 @@ function storage() {
   };
 }
 
-function job() {
+function job(overrides = {}) {
   return normalizeTradeJob({
     id: 'buy-84', name: 'Buy 84', type: 'buy', enabled: true, armed: false,
     schedule: { type: 'manual' },
@@ -22,6 +22,7 @@ function job() {
       cardClass: 'rare-gold', ratingMin: 84, ratingMax: 84, maxBuyNow: 1000,
       quantity: 1, totalBudget: 1000, maxRuntimeMinutes: 15,
       searchDelaySeconds: [8, 15], maxPurchasesPerSearch: 1, maxConsecutiveEmptySearches: 20,
+      ...overrides,
     },
   }, { now: 1 });
 }
@@ -48,9 +49,10 @@ function setup(overrides = {}) {
   const lease = overrides.lease || createTradeRunLease({
     storage: memory, key: 'lease', ownerId: 'tab-a', now: () => 1000, createToken: () => 'token',
   });
+  const operationCoordinator = overrides.options?.operationCoordinator || createOperationCoordinator();
   const onReceipt = vi.fn();
   const executor = createGuardedManualBuyExecutor({
-    operationCoordinator: createOperationCoordinator(),
+    operationCoordinator,
     lease,
     buyPreview,
     playerCatalogProvider,
@@ -62,10 +64,10 @@ function setup(overrides = {}) {
     onReceipt,
     ...overrides.options,
   });
-  return { adapter, buyPreview, executor, lease, onReceipt };
+  return { adapter, buyPreview, executor, lease, operationCoordinator, onReceipt };
 }
 
-describe('Guarded manual one-card Buy executor', () => {
+describe('Guarded manual Buy executor', () => {
   it('freshens Preview and completes exactly one confirmed purchase', async () => {
     const { adapter, buyPreview, executor, onReceipt } = setup();
     const receipt = await executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' });
@@ -137,5 +139,68 @@ describe('Guarded manual one-card Buy executor', () => {
     });
     expect(buyPreview.preview).not.toHaveBeenCalled();
     expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
+  });
+
+  it('executes two adjacent rating lanes under one confirmation and one Lease', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      marketItems: [
+        marketItem(),
+        {
+          ...marketItem(), id: 71, definitionId: 8501, rating: 85,
+          auction: { ...marketItem().auction, tradeId: 1071, buyNowPrice: 1000 },
+        },
+      ],
+    });
+    const dualJob = job({ ratingMax: 85, quantity: 2, totalBudget: 2000 });
+    const lanes = [
+      { rating: 84, definitionIds: [8401], source: 'cache' },
+      { rating: 85, definitionIds: [8501], source: 'cache' },
+    ];
+    const requestBudget = {
+      inspect: () => ({ remaining: 30 }),
+      reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
+    };
+    const { executor } = setup({
+      adapter,
+      options: {
+        requestBudget,
+        playerCatalogProvider: { load: vi.fn(async () => ({ ok: true, lanes })) },
+        buyPreview: {
+          preview: vi.fn(async (input) => ({
+            mode: 'preview-only', liveExecutionAllowed: false, job: input,
+            plan: { ready: true, missingRatings: [], lanes },
+          })),
+        },
+        getTradeAdapter: () => adapter,
+      },
+    });
+
+    const receipt = await executor.execute({ job: dualJob, confirmationText: 'BUY 2 MAX 1000' });
+
+    expect(receipt).toMatchObject({ status: 'completed', requested: 2, succeeded: 2 });
+    expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(2);
+    expect(requestBudget.reserve).toHaveBeenCalledWith(28);
+  });
+
+  it('releases the Lease and Coordinator when Journal begin detects a cross-tab conflict', async () => {
+    const journal = {
+      inspectRecovery: vi.fn(() => ({ canSupersede: true })),
+      begin: vi.fn(() => { throw new Error('buy-journal-mutation-review-required'); }),
+      finish: vi.fn(),
+    };
+    const onRunningChange = vi.fn();
+    const { executor, lease, operationCoordinator, buyPreview } = setup({
+      options: { journal, onRunningChange },
+    });
+
+    await expect(executor.execute({
+      job: job(), confirmationText: 'BUY 1 MAX 1000',
+    })).rejects.toThrow('buy-journal-mutation-review-required');
+
+    expect(lease.inspect().lease).toBeNull();
+    expect(operationCoordinator.inspect().active).toBeNull();
+    expect(buyPreview.preview).not.toHaveBeenCalled();
+    expect(onRunningChange).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createTradeRequestBudget,
   inspectTradeRequestCapacity,
+  tradeBuyRequestReserve,
+  tradeListingRequestReserve,
 } from '../../src/trade/request-budget.js';
 
 function memoryStorage() {
@@ -27,6 +29,15 @@ function serialLockManager() {
 }
 
 describe('Trade request budget', () => {
+  it('computes bounded worst-case reserves for one/two-card Listing and Buy Runs', () => {
+    expect(tradeListingRequestReserve({ maxListings: 1 })).toBe(12);
+    expect(tradeListingRequestReserve({ maxListings: 2 })).toBe(12);
+    expect(tradeBuyRequestReserve({ quantity: 1, maxConsecutiveEmptySearches: 5 })).toBe(14);
+    expect(tradeBuyRequestReserve({ quantity: 2, maxConsecutiveEmptySearches: 5 })).toBe(28);
+    expect(inspectTradeRequestCapacity({ remaining: 27 }, 28)).toMatchObject({
+      ready: false, required: 28, reason: 'trade-request-budget-insufficient',
+    });
+  });
   it('counts actual attempts in a fixed sliding window and recovers only after expiry', async () => {
     let time = 1000;
     const budget = createTradeRequestBudget({ storage: memoryStorage(), now: () => time, limit: 3, windowMs: 5000 });

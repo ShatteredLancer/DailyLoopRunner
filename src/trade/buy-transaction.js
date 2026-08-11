@@ -233,36 +233,44 @@ export function createBuyTransaction(options = {}) {
       const coinsBeforePurchase = Number(liveCapabilities.coins);
       buyAttempts += 1;
       checkpoint('buy-request-started', {
+        itemIndex: buyAttempts,
         item,
         tradeId: purchaseRef.tradeId,
         price,
         destination,
         search,
+        mutationBoundaryCrossed: true,
       });
       const bought = await adapter.buyNowItem(purchaseRef, price);
       checkpoint('buy-response-received', {
+        itemIndex: buyAttempts,
         item,
         tradeId: purchaseRef.tradeId,
         price,
         destination,
         status: bought.status,
         response: bought.response,
+        mutationBoundaryCrossed: true,
       });
       let purchase = null;
       let refresh = null;
       let afterPurchaseCapabilities = adapter.inspectCapabilities();
       if (['accepted', 'ambiguous'].includes(bought.status)) {
-        checkpoint('purchase-reconciliation-started', { item, tradeId: purchaseRef.tradeId, price, destination });
+        checkpoint('purchase-reconciliation-started', {
+          itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination, mutationBoundaryCrossed: true,
+        });
         refresh = await adapter.refreshPurchaseState({ ambiguity: bought.status === 'ambiguous' });
         afterPurchaseCapabilities = adapter.inspectCapabilities();
         purchase = adapter.inspectPurchase(purchaseRef);
         checkpoint('purchase-reconciliation-finished', {
+          itemIndex: buyAttempts,
           item: purchase?.candidate?.item || item,
           tradeId: purchaseRef.tradeId,
           price,
           destination,
           status: refresh.status,
           response: refresh.response,
+          mutationBoundaryCrossed: true,
         });
       }
       if (refresh && refresh.status !== 'completed') {
@@ -286,6 +294,10 @@ export function createBuyTransaction(options = {}) {
           priceLimit: Number(search.maxBuyNow), coinsBefore: coinsBeforePurchase,
           coinsAfter: Number(afterPurchaseCapabilities.coins), search: { ...search }, refresh,
         });
+        checkpoint('item-finished', {
+          itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination,
+          status, reason, mutationBoundaryCrossed: true,
+        });
         break;
       }
       const coinDelta = coinsBeforePurchase - Number(afterPurchaseCapabilities.coins);
@@ -303,6 +315,10 @@ export function createBuyTransaction(options = {}) {
         }
         if (classification.kind === 'competition-lost') {
           receipts.push({ index: receipts.length + 1, status: 'competition-lost', item, tradeId: purchaseRef.tradeId, price, search: { ...search } });
+          checkpoint('item-finished', {
+            itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination,
+            status: 'competition-lost', reason: classification.kind, mutationBoundaryCrossed: true,
+          });
           if (buyAttempts >= maxBuyAttempts) {
             stop('stopped', 'buy-attempt-limit');
             break;
@@ -326,6 +342,10 @@ export function createBuyTransaction(options = {}) {
           coinsAfter: Number(afterPurchaseCapabilities.coins), search: { ...search }, adapterStatus: bought.status,
           response: bought.response, error: bought.error,
         });
+        checkpoint('item-finished', {
+          itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination,
+          status, reason, mutationBoundaryCrossed: true,
+        });
         break;
       }
       if (!ambiguousPurchaseProven) {
@@ -336,19 +356,28 @@ export function createBuyTransaction(options = {}) {
           priceLimit: Number(search.maxBuyNow), coinsBefore: coinsBeforePurchase,
           coinsAfter: Number(afterPurchaseCapabilities.coins), search: { ...search }, adapterStatus: bought.status,
         });
+        checkpoint('item-finished', {
+          itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination,
+          status: 'ambiguous', reason, mutationBoundaryCrossed: true,
+        });
         break;
       }
 
       const purchasedRef = { ...purchase.candidate.item, tradeId: purchaseRef.tradeId, price };
-      checkpoint('purchase-route-started', { item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination });
+      checkpoint('purchase-route-started', {
+        itemIndex: buyAttempts, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+        mutationBoundaryCrossed: true,
+      });
       const routed = await adapter.routePurchasedItem(purchasedRef, destination);
       checkpoint('purchase-route-finished', {
+        itemIndex: buyAttempts,
         item: routed.item || purchasedRef,
         tradeId: purchaseRef.tradeId,
         price,
         destination,
         status: routed.status,
         response: routed.response,
+        mutationBoundaryCrossed: true,
       });
       if (routed.status !== 'completed') {
         failed += 1;
@@ -363,25 +392,36 @@ export function createBuyTransaction(options = {}) {
           tradeId: purchaseRef.tradeId, price, priceLimit: Number(search.maxBuyNow),
           coinsBefore: coinsBeforePurchase, coinsAfter: Number(afterPurchaseCapabilities.coins), destination, route: routed,
         });
+        checkpoint('item-finished', {
+          itemIndex: buyAttempts, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+          status: 'blocked', reason, mutationBoundaryCrossed: true,
+        });
         break;
       }
-      checkpoint('route-verification-refresh-started', { item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination });
+      checkpoint('route-verification-refresh-started', {
+        itemIndex: buyAttempts, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+        mutationBoundaryCrossed: true,
+      });
       const routeRefresh = await adapter.refreshPurchaseState({ destination });
       checkpoint('route-verification-refresh-finished', {
+        itemIndex: buyAttempts,
         item: purchasedRef,
         tradeId: purchaseRef.tradeId,
         price,
         destination,
         status: routeRefresh.status,
         response: routeRefresh.response,
+        mutationBoundaryCrossed: true,
       });
       const verified = adapter.inspectPurchase({ ...purchasedRef, pile: destination });
       checkpoint('route-verification-inspected', {
+        itemIndex: buyAttempts,
         item: verified.candidate?.item || purchasedRef,
         tradeId: purchaseRef.tradeId,
         price,
         destination,
         status: verified.status,
+        mutationBoundaryCrossed: true,
       });
       if (verified.status !== 'loaded' || verified.candidate?.item?.pile !== destination) {
         failed += 1;
@@ -396,6 +436,10 @@ export function createBuyTransaction(options = {}) {
           tradeId: purchaseRef.tradeId, price, priceLimit: Number(search.maxBuyNow),
           coinsBefore: coinsBeforePurchase, coinsAfter: Number(afterPurchaseCapabilities.coins),
           destination, route: routed, verification: verified,
+        });
+        checkpoint('item-finished', {
+          itemIndex: buyAttempts, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+          status: 'ambiguous', reason, mutationBoundaryCrossed: true,
         });
         break;
       }
@@ -415,6 +459,15 @@ export function createBuyTransaction(options = {}) {
         destination,
         search: { ...search },
         verification: { item: { ...verified.candidate.item }, purchasePrice: verified.purchasePrice },
+      });
+      checkpoint('item-finished', {
+        itemIndex: buyAttempts,
+        item: { ...purchasedRef, pile: destination },
+        tradeId: purchaseRef.tradeId,
+        price,
+        destination,
+        status: 'purchased',
+        mutationBoundaryCrossed: true,
       });
       if (succeeded < requested && input.shouldStop?.() !== true) {
         await sleep(randomDelayMs(job.policy.searchDelaySeconds, random));

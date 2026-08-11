@@ -166,7 +166,7 @@ describe('Trade listing dialog', () => {
     expect(onDownloadDiagnostics).toHaveBeenCalledWith(expect.objectContaining({ error: failure }));
   });
 
-  it('gates one Transfer reprice behind preparation and exact confirmation', async () => {
+  it('gates two Transfer reprices behind preparation and exact confirmation', async () => {
     const ui = createUiHarness();
     const preview = plan();
     const prepared = {
@@ -176,17 +176,17 @@ describe('Trade listing dialog', () => {
       job: { policy: { sources: ['transfer'] } },
       plan: {
         ...plan('prepared').plan,
-        entries: [{
+        entries: [1, 2].map((id) => ({
           ...plan('prepared').plan.entries[0],
-          item: { id: 1, definitionId: 101, pile: 'transfer' },
+          item: { id, definitionId: 100 + id, pile: 'transfer' },
           auctionState: 'inactive',
-        }],
+        })),
       },
-      confirmation: { token: 'reprice-secret', requiredText: 'REPRICE 1', createdAt: 1, expiresAt: 2, itemCount: 1 },
+      confirmation: { token: 'reprice-secret', requiredText: 'REPRICE 2', createdAt: 1, expiresAt: 2, itemCount: 2 },
     };
     const onPreview = vi.fn(async () => preview);
     const onPrepare = vi.fn(async () => prepared);
-    const onExecute = vi.fn(async () => ({ status: 'completed', requested: 1, succeeded: 1, failed: 0, skipped: 0, receipts: [] }));
+    const onExecute = vi.fn(async () => ({ status: 'completed', requested: 2, succeeded: 2, failed: 0, skipped: 0, receipts: [] }));
     const onDownloadDiagnostics = vi.fn();
     showTradeListingDialog({
       dom: ui.dom,
@@ -234,15 +234,18 @@ describe('Trade listing dialog', () => {
     await prepare.click();
     expect(onPrepare).toHaveBeenCalledWith(expect.objectContaining({
       id: 'transfer-observation',
-      policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice', maxListings: 1 }),
+      policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice', maxListings: 2 }),
     }), { platform: 'pc', provider: 'auto' });
     const confirmation = ui.byId('bronze-loop-trade-confirmation');
     confirmation.value = 'REPRICE 1';
     confirmation.input();
+    expect(ui.byId('bronze-loop-trade-execute').disabled).toBe(true);
+    confirmation.value = 'REPRICE 2';
+    confirmation.input();
     expect(ui.byId('bronze-loop-trade-execute').disabled).toBe(false);
-    expect(ui.byId('bronze-loop-trade-execute').textContent).toBe('Reprice item');
+    expect(ui.byId('bronze-loop-trade-execute').textContent).toBe('Reprice 2');
     await ui.byId('bronze-loop-trade-execute').click();
-    expect(onExecute).toHaveBeenCalledWith({ confirmationToken: 'reprice-secret', confirmationText: 'REPRICE 1' });
+    expect(onExecute).toHaveBeenCalledWith({ confirmationToken: 'reprice-secret', confirmationText: 'REPRICE 2' });
 
     source.value = 'club,transfer';
     source.change();

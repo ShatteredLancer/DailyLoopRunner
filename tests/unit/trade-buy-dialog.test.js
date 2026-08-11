@@ -39,7 +39,7 @@ function uiHarness() {
   };
 }
 
-function buyJob() {
+function buyJob(policy = {}) {
   return normalizeTradeJob({
     id: 'buy-1', name: '84 Rare Gold', type: 'buy', enabled: true, armed: false,
     schedule: { type: 'manual' }, misfirePolicy: { type: 'grace-window', graceMinutes: 15 },
@@ -47,6 +47,7 @@ function buyJob() {
       ratingMin: 84, ratingMax: 84, cardClass: 'rare-gold', maxBuyNow: 1000,
       ratingPriceOverrides: {}, quantity: 1, totalBudget: 1000, maxRuntimeMinutes: 5,
       searchDelaySeconds: [8, 15], maxPurchasesPerSearch: 1, maxConsecutiveEmptySearches: 5,
+      ...policy,
     },
     createdAt: 1, updatedAt: 1,
   });
@@ -138,5 +139,37 @@ describe('Trade Buy dialog', () => {
       receipt: expect.objectContaining({ status: 'blocked', reason: 'trade-circuit-open' }),
     }));
     expect(ui.byId('bronze-loop-trade-buy-execute').disabled).toBe(true);
+  });
+
+  it('requires the exact quantity-two confirmation for adjacent rating lanes', async () => {
+    const ui = uiHarness();
+    const onExecute = vi.fn().mockResolvedValue({
+      status: 'completed', requested: 2, succeeded: 2, failed: 0, skipped: 0,
+      receipts: [
+        { status: 'run-summary', searches: 2, buyAttempts: 2, spent: 1900 },
+        { index: 1, status: 'purchased', rating: 84, price: 900, destination: 'club' },
+        { index: 2, status: 'purchased', rating: 85, price: 1000, destination: 'club' },
+      ],
+    });
+    showTradeBuyDialog({
+      dom: ui.dom,
+      job: buyJob({ ratingMax: 85, quantity: 2, totalBudget: 2000 }),
+      preview: { plan: { ready: true }, summary: { definitions: 100 } },
+      onExecute,
+    });
+
+    const confirmation = ui.byId('bronze-loop-trade-buy-confirmation');
+    const execute = ui.byId('bronze-loop-trade-buy-execute');
+    expect(execute.textContent).toBe('Buy 2');
+    expect(confirmation.placeholder).toBe('BUY 2 MAX 1000');
+    confirmation.value = 'BUY 1 MAX 1000';
+    confirmation.input();
+    expect(execute.disabled).toBe(true);
+    confirmation.value = 'BUY 2 MAX 1000';
+    confirmation.input();
+    await execute.click();
+    expect(onExecute).toHaveBeenCalledWith({
+      confirmationText: 'BUY 2 MAX 1000', expectedDestination: 'auto', platform: 'pc',
+    });
   });
 });

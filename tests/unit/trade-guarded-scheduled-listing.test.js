@@ -144,10 +144,54 @@ describe('Guarded scheduled Listing validation executor', () => {
     expect(transaction.run.mock.calls[0][0].beforeMutation()).toBe(true);
     expect(heartbeat).toHaveBeenCalledOnce();
     expect(onRunningChange.mock.calls.map((call) => call[0])).toEqual([true, false]);
-    expect(requestBudget.reserve).toHaveBeenCalledOnce();
+    expect(requestBudget.reserve).toHaveBeenCalledWith(12);
     expect(getTradeAdapter).toHaveBeenCalledWith({ requestBudget: reservation });
     expect(transactionFactory).toHaveBeenCalledWith(expect.objectContaining({ tradeAdapter: scopedAdapter }));
     expect(reservation.release).toHaveBeenCalledOnce();
+  });
+
+  it('prepares, target-validates and executes two Club items under the dual-card gate', async () => {
+    const dual = job({
+      id: 'once-listing-dual',
+      name: 'Two guarded listings',
+      policy: { ...job().policy, maxListings: 2 },
+    });
+    const entries = [1, 2].map((id) => ({ item: { id, definitionId: id + 100, pile: 'club' } }));
+    const prepared = {
+      ready: true,
+      job: dual,
+      plan: { entries },
+      confirmation: { token: 'secret', requiredText: 'LIST 2' },
+    };
+    const validateClubPlayers = vi.fn(async () => ({ ok: true, items: entries.map((entry) => entry.item), missing: [] }));
+    const transaction = { run: vi.fn(async () => ({ status: 'completed', requested: 2, succeeded: 2, receipts: [] })) };
+    const requestBudget = {
+      inspect: () => ({ remaining: 30 }),
+      reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
+    };
+    const result = await createGuardedScheduledListingExecutor({
+      store: store(),
+      listingPreparation: { prepare: vi.fn(async () => prepared) },
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      getTradeAdapter: () => createFakeTradeAdapter(),
+      transactionFactory: () => transaction,
+      validateClubPlayers,
+      requestBudget,
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: dual, runId: 'scheduled-listing-dual', scheduledFor: 2000,
+      context: {
+        liveExecutionEnabled: true,
+        fsuReadiness: { detected: true, ready: true, fullyValidated: false, state: 'provisional' },
+      },
+      heartbeat: () => true,
+    });
+
+    expect(result).toMatchObject({ status: 'completed', requested: 2, succeeded: 2 });
+    expect(validateClubPlayers).toHaveBeenCalledWith(entries.map((entry) => entry.item), expect.any(Object));
+    expect(transaction.run).toHaveBeenCalledWith(expect.objectContaining({ confirmationText: 'LIST 2' }));
+    expect(requestBudget.reserve).toHaveBeenCalledWith(12);
   });
 
   it('supports the offline Scheduled Transfer reprice branch without Club validation', async () => {
@@ -186,7 +230,7 @@ describe('Guarded scheduled Listing validation executor', () => {
     expect(result).toMatchObject({ status: 'completed', requested: 1, succeeded: 1 });
     expect(listingPreparation.prepare).toHaveBeenCalledWith(
       expect.objectContaining({ policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice' }) }),
-      { maxListings: 1 },
+      expect.objectContaining({ maxListings: 1 }),
     );
     expect(transaction.run).toHaveBeenCalledWith(expect.objectContaining({
       confirmationText: 'REPRICE 1',
@@ -195,7 +239,7 @@ describe('Guarded scheduled Listing validation executor', () => {
     expect(validateClubPlayers).not.toHaveBeenCalled();
   });
 
-  it('blocks after preparation when another tab takes the inspected request capacity', async () => {
+  it('reserves before preparation and blocks when another tab takes the inspected request capacity', async () => {
     const prepared = {
       ready: true,
       job: job(),
@@ -222,7 +266,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       context: { liveExecutionEnabled: true }, heartbeat: () => true,
     });
     expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0 });
-    expect(listingPreparation.prepare).toHaveBeenCalledOnce();
+    expect(listingPreparation.prepare).not.toHaveBeenCalled();
     expect(requestBudget.reserve).toHaveBeenCalledOnce();
     expect(transactionFactory).not.toHaveBeenCalled();
   });
@@ -349,10 +393,10 @@ describe('Guarded scheduled Listing validation executor', () => {
     });
     expect(disabled).toMatchObject({ status: 'blocked', reason: 'scheduled-listing-validation-gate-disabled' });
     const invalid = await createGuardedScheduledListingExecutor({ ...base, validationGateEnabled: true }).execute({
-      job: job({ policy: { ...job().policy, maxListings: 2 } }),
+      job: job({ policy: { ...job().policy, maxListings: 3 } }),
       runId: 'run-invalid', scheduledFor: 2000, context: { liveExecutionEnabled: true },
     });
-    expect(invalid).toMatchObject({ status: 'blocked', reason: 'validation-gate-one-item-only' });
+    expect(invalid).toMatchObject({ status: 'blocked', reason: 'validation-gate-listing-quantity-cap' });
     expect(listingPreparation.prepare).not.toHaveBeenCalled();
     expect(jobStore.relock).toHaveBeenCalledTimes(2);
   });

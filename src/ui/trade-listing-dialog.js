@@ -139,7 +139,7 @@ export function showTradeListingDialog(options = {}) {
   title.textContent = 'Trade Listings';
   applyStyles(title, { fontSize: '17px', fontWeight: '700' });
   const gate = dom.create('span');
-  gate.textContent = `Live gate: ${MANUAL_LISTING_LIVE_LIMIT} item`;
+  gate.textContent = `Live gate: up to ${MANUAL_LISTING_LIVE_LIMIT} items`;
   applyStyles(gate, { color: '#9fb2c9', fontSize: '11px', border: '1px solid #536276', padding: '4px 7px' });
   heading.append(title, gate);
 
@@ -241,7 +241,7 @@ export function showTradeListingDialog(options = {}) {
   applyStyles(actions, { display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap', marginTop: '12px' });
   const previewButton = button(dom, 'Preview', { mode, id: 'bronze-loop-trade-preview' });
   const prepareButton = button(dom, 'Prepare', { mode, id: 'bronze-loop-trade-prepare', primary: true });
-  const executeButton = button(dom, 'List item', { mode, id: 'bronze-loop-trade-execute', primary: true });
+  const executeButton = button(dom, 'List items', { mode, id: 'bronze-loop-trade-execute', primary: true });
   const stopButton = button(dom, 'Stop', { mode, id: 'bronze-loop-trade-stop', danger: true });
   const diagnosticsButton = button(dom, 'Save diagnostics', { mode, id: 'bronze-loop-trade-diagnostics' });
   const closeButton = button(dom, 'Close', { mode, id: 'bronze-loop-trade-close' });
@@ -263,7 +263,10 @@ export function showTradeListingDialog(options = {}) {
         ? 'reprice'
         : null;
     prepareButton.textContent = sourceAction === 'reprice' ? 'Prepare reprice' : 'Prepare';
-    executeButton.textContent = sourceAction === 'reprice' ? 'Reprice item' : 'List item';
+    const preparedCount = Number(preparedResult?.plan?.entries?.length || MANUAL_LISTING_LIVE_LIMIT);
+    executeButton.textContent = sourceAction === 'reprice'
+      ? `Reprice ${preparedCount}`
+      : `List ${preparedCount}`;
     prepareButton.disabled = busy || running || sourceAction === null;
     prepareButton.title = sourceAction === null ? 'Mixed sources and skipped expired items are Preview-only' : '';
     closeButton.disabled = running;
@@ -521,9 +524,10 @@ export function showTradeListingDialog(options = {}) {
     busy = true;
     running = true;
     lastError = null;
+    const preparedCount = Number(preparedResult?.plan?.entries?.length || 1);
     status.textContent = preparedResult?.job?.policy?.sources?.[0] === 'transfer'
-      ? 'Repricing item...'
-      : 'Listing item...';
+      ? `Repricing ${preparedCount} item${preparedCount === 1 ? '' : 's'}...`
+      : `Listing ${preparedCount} item${preparedCount === 1 ? '' : 's'}...`;
     updateActionState();
     try {
       receipt = await options.onExecute?.({

@@ -32,7 +32,7 @@ export function createListingPreparation(options = {}) {
         maxListings: requestedMax,
       },
     };
-    const adapter = options.getTradeAdapter();
+    const adapter = request.tradeAdapter || options.getTradeAdapter({ requestBudget: request.requestBudget });
     const requiresTransferPreflight = previewInput.policy.sources
       ?.some((source) => source === 'club' || source === 'transfer') === true;
     const transferPreflight = requiresTransferPreflight

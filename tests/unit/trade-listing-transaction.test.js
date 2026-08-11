@@ -341,6 +341,63 @@ describe('Trade listing transaction', () => {
     expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
   });
 
+  it('preserves the first listed item and stops after an uncertain second mutation', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [1, 2].map((id) => ({
+        id, definitionId: id + 100, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+      })),
+      listResults: {
+        2: { status: 'ambiguous', response: null, error: { kind: 'ambiguous-transport' } },
+      },
+    });
+    const entries = [entry(1), { ...entry(2), index: 2 }];
+    const plan = prepared(entries);
+    const result = await transaction(adapter).run({
+      job: job({ maxListings: 2 }), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+
+    expect(result).toMatchObject({
+      status: 'ambiguous', succeeded: 1, failed: 1, skipped: 0,
+      receipts: [{ status: 'listed' }, { status: 'ambiguous' }],
+    });
+    expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(2);
+  });
+
+  it('checkpoints both item mutation boundaries and terminal states', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [1, 2].map((id) => ({
+        id, definitionId: id + 100, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+      })),
+    });
+    const entries = [entry(1), { ...entry(2), index: 2 }];
+    const plan = prepared(entries);
+    const checkpoints = [];
+    const result = await createListingTransaction({
+      tradeAdapter: adapter,
+      now: () => 1100,
+      sleep: async () => {},
+      onCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+    }).run({
+      job: job({ maxListings: 2 }), prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+
+    expect(result).toMatchObject({ status: 'completed', succeeded: 2 });
+    expect(checkpoints.filter((entry) => entry.phase === 'listing-request-started')).toEqual([
+      expect.objectContaining({ itemIndex: 1, mutationBoundaryCrossed: true }),
+      expect.objectContaining({ itemIndex: 2, mutationBoundaryCrossed: true }),
+    ]);
+    expect(checkpoints.filter((entry) => entry.phase === 'item-finished')).toEqual([
+      expect.objectContaining({ itemIndex: 1, status: 'listed' }),
+      expect.objectContaining({ itemIndex: 2, status: 'listed' }),
+    ]);
+  });
+
   it('stops as ambiguous instead of retrying when an accepted listing cannot be refreshed', async () => {
     const adapter = createFakeTradeAdapter({
       refreshTransferResults: [

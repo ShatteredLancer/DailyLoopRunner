@@ -139,4 +139,32 @@ describe('Guarded scheduled Trade Job selection', () => {
       requiredText: 'RUN ONCE 1',
     });
   });
+
+  it('derives exact two-item confirmations for Club, Transfer, and Buy Jobs', () => {
+    const club = { ...listingJob(), policy: { ...listingJob().policy, maxListings: 2 } };
+    const transfer = { ...transferRepriceJob(), policy: { ...transferRepriceJob().policy, maxListings: 2 } };
+    const buy = {
+      ...buyJob(),
+      policy: {
+        ...buyJob().policy,
+        ratingMax: 85,
+        ratingPriceOverrides: { 85: 1500 },
+        quantity: 2,
+        totalBudget: 2500,
+      },
+    };
+    const selection = (job, options = {}) => selectGuardedScheduledTradeJob({
+      jobs: [job],
+      runtimes: { [job.id]: { nextRunAt: job.schedule.runAt } },
+      safety: { minimumRetainedCoins: 100000 },
+    }, options);
+
+    expect(selection(club)).toMatchObject({ ready: true, requiredText: 'RUN ONCE 2' });
+    expect(selection(transfer, { scheduledTransferRepriceEnabled: true })).toMatchObject({
+      ready: true, requiredText: 'RUN REPRICE ONCE 2',
+    });
+    expect(selection(buy, { scheduledBuyEnabled: true })).toMatchObject({
+      ready: true, requiredText: 'RUN BUY ONCE 2 RESERVE 100000',
+    });
+  });
 });
