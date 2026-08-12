@@ -47,9 +47,15 @@ function store() {
   const value = createTradeJobStore({ storage: memoryStorage(), now: () => 2000 });
   value.upsert(job());
   value.setMinimumRetainedCoins(4000);
-  value.setLiveExecutionEnabled(true);
-  value.setPaused(false);
+  value.authorize('buy-once');
   return value;
+}
+
+function safeRequestBudget() {
+  return {
+    inspect: () => ({ remaining: 30 }),
+    reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
+  };
 }
 
 function readyPreview() {
@@ -60,7 +66,7 @@ function readyPreview() {
 }
 
 describe('Guarded scheduled Buy executor', () => {
-  it('atomically relocks and passes one attempt plus the global reserve to the transaction', async () => {
+  it('consumes the one-run authorization and passes one attempt plus the global reserve to the transaction', async () => {
     const jobStore = store();
     const baseAdapter = createFakeTradeAdapter({ coins: 6000 });
     const scopedAdapter = createFakeTradeAdapter({ coins: 6000 });
@@ -103,19 +109,20 @@ describe('Guarded scheduled Buy executor', () => {
       beforeBuy: expect.any(Function),
     }));
     expect(transaction.run.mock.calls[0][0].beforeBuy()).toBe(true);
-    expect(heartbeat).toHaveBeenCalledOnce();
+    expect(heartbeat).toHaveBeenCalledTimes(2);
     expect(requestBudget.reserve).toHaveBeenCalledWith(14);
     expect(getTradeAdapter).toHaveBeenCalledWith({ requestBudget: reservation });
     expect(transactionFactory).toHaveBeenCalledWith(expect.objectContaining({ tradeAdapter: scopedAdapter }));
     expect(reservation.release).toHaveBeenCalledOnce();
   });
 
-  it('blocks after Preview when another tab takes the inspected request capacity', async () => {
+  it('waits locally and blocks without market work when request capacity stays unavailable', async () => {
+    let time = 2000;
     const transactionFactory = vi.fn();
     const buyPreview = { preview: vi.fn(async () => readyPreview()) };
     const requestBudget = {
       inspect: () => ({ remaining: 14 }),
-      reserve: vi.fn(async () => ({ ready: false, required: 14, remaining: 13, retryAt: 5000 })),
+      reserve: vi.fn(async () => ({ ready: false, required: 14, remaining: 13, retryAt: time + 60_000 })),
     };
     const result = await createGuardedScheduledBuyExecutor({
       store: store(),
@@ -125,12 +132,15 @@ describe('Guarded scheduled Buy executor', () => {
       transactionFactory,
       requestBudget,
       validationGateEnabled: true,
-      now: () => 2000,
+      now: () => time,
+      sleep: async () => { time = 902_000; },
     }).execute({
       job: job(), runId: 'scheduled-buy-reservation-race', scheduledFor: 2000,
       context: { liveExecutionEnabled: true }, heartbeat: () => true,
     });
-    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0 });
+    expect(result).toMatchObject({
+      status: 'stopped', reason: 'runtime-limit', requested: 1, skipped: 1,
+    });
     expect(buyPreview.preview).toHaveBeenCalledOnce();
     expect(requestBudget.reserve).toHaveBeenCalledOnce();
     expect(transactionFactory).not.toHaveBeenCalled();
@@ -144,6 +154,7 @@ describe('Guarded scheduled Buy executor', () => {
       operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
       buyPreview,
       getTradeAdapter: () => adapter,
+      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => 2000,
     }).execute({
@@ -157,29 +168,37 @@ describe('Guarded scheduled Buy executor', () => {
     expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
   });
 
-  it('relocks and blocks before Preview when the shared request reserve is unavailable', async () => {
+  it('previews first, then waits for the shared request reserve without market writes', async () => {
+    let time = 2000;
     const jobStore = store();
-    const buyPreview = { preview: vi.fn() };
+    const buyPreview = { preview: vi.fn(async () => readyPreview()) };
     const adapter = createFakeTradeAdapter({ coins: 6000 });
+    const reserve = vi.fn(async () => ({
+      ready: false, required: 14, remaining: 11, retryAt: time + 60_000,
+    }));
     const result = await createGuardedScheduledBuyExecutor({
       store: jobStore,
       operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
       buyPreview,
       getTradeAdapter: () => adapter,
-      requestBudget: { inspect: () => ({ remaining: 11, retryAt: 5000 }) },
+      requestBudget: { inspect: () => ({ remaining: 11, retryAt: 5000 }), reserve },
       validationGateEnabled: true,
-      now: () => 2000,
+      now: () => time,
+      sleep: async () => { time = 902_000; },
     }).execute({
       job: job(), runId: 'scheduled-buy-budget', scheduledFor: 2000,
       context: { liveExecutionEnabled: true }, heartbeat: () => true,
     });
-    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0 });
+    expect(result).toMatchObject({
+      status: 'stopped', reason: 'runtime-limit', requested: 1, skipped: 1,
+    });
     expect(jobStore.read()).toMatchObject({ paused: true, liveExecutionEnabled: false, jobs: [{ armed: false }] });
-    expect(buyPreview.preview).not.toHaveBeenCalled();
+    expect(buyPreview.preview).toHaveBeenCalledOnce();
+    expect(reserve).toHaveBeenCalledOnce();
     expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
   });
 
-  it('relocks but refuses execution while the production validation gate is disabled', async () => {
+  it('refuses execution without consuming authorization while the production validation gate is disabled', async () => {
     const jobStore = store();
     const buyPreview = { preview: vi.fn() };
     const result = await createGuardedScheduledBuyExecutor({
@@ -187,18 +206,26 @@ describe('Guarded scheduled Buy executor', () => {
       operationCoordinator: createOperationCoordinator(),
       buyPreview,
       getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
+      requestBudget: safeRequestBudget(),
     }).execute({
       job: job(), runId: 'scheduled-buy-disabled', scheduledFor: 2000,
       context: { liveExecutionEnabled: true }, heartbeat: () => true,
     });
     expect(result).toMatchObject({ status: 'blocked', reason: 'scheduled-buy-validation-gate-disabled' });
-    expect(jobStore.read()).toMatchObject({ paused: true, liveExecutionEnabled: false, jobs: [{ armed: false }] });
+    expect(jobStore.read()).toMatchObject({
+      paused: false,
+      liveExecutionEnabled: true,
+      jobs: [{ armed: true }],
+      authorization: { jobId: 'buy-once', remainingRuns: 1 },
+    });
     expect(buyPreview.preview).not.toHaveBeenCalled();
   });
 
   it('relocks and authorizes exactly two scheduled Buy attempts with a 28-slot reserve', async () => {
-    const jobStore = store();
+    const jobStore = createTradeJobStore({ storage: memoryStorage(), now: () => 2000 });
     jobStore.upsert(dualJob());
+    jobStore.setMinimumRetainedCoins(4000);
+    jobStore.authorize('buy-once-dual');
     const reservation = { ready: true, release: vi.fn(async () => {}) };
     const requestBudget = {
       inspect: () => ({ remaining: 30 }),
@@ -244,6 +271,7 @@ describe('Guarded scheduled Buy executor', () => {
       buyPreview,
       journal,
       getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
+      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => 2000,
       onRunningChange,
@@ -264,8 +292,7 @@ describe('Guarded scheduled Buy executor', () => {
     const jobStore = createTradeJobStore({ storage, key: 'jobs', now: () => time });
     jobStore.upsert(scheduledJob);
     jobStore.setMinimumRetainedCoins(4000);
-    jobStore.setLiveExecutionEnabled(true);
-    jobStore.setPaused(false);
+    jobStore.authorize(scheduledJob.id);
     const adapter = createFakeTradeAdapter({
       coins: 6000,
       marketItems: [{
@@ -278,6 +305,7 @@ describe('Guarded scheduled Buy executor', () => {
       operationCoordinator: createOperationCoordinator({ now: () => time }),
       buyPreview: { preview: vi.fn(async () => readyPreview()) },
       getTradeAdapter: () => adapter,
+      requestBudget: safeRequestBudget(),
       playerCatalogProvider: {
         load: vi.fn(async () => ({ ok: true, lanes: [{ rating: 84, definitionIds: [8401] }] })),
       },

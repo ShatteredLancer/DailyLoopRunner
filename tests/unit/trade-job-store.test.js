@@ -85,6 +85,42 @@ describe('Trade Job Store', () => {
     });
   });
 
+  it('persists and consumes a bounded recurring authorization before relocking', () => {
+    let time = 1000;
+    const store = createTradeJobStore({ storage: memoryStorage(), now: () => time });
+    store.upsert(job());
+    expect(store.authorize('job-1')).toMatchObject({
+      paused: false,
+      liveExecutionEnabled: true,
+      authorization: { jobId: 'job-1', totalRuns: 2, remainingRuns: 2 },
+    });
+    time = 2000;
+    expect(store.consumeAuthorization('job-1', 'run-1')).toMatchObject({ consumed: true, remainingRuns: 1 });
+    expect(store.read()).toMatchObject({
+      paused: false,
+      liveExecutionEnabled: true,
+      jobs: [{ armed: true }],
+      authorization: { remainingRuns: 1, lastRunId: 'run-1' },
+    });
+    expect(store.consumeAuthorization('job-1', 'run-1')).toMatchObject({
+      consumed: false,
+      reason: 'schedule-authorization-run-already-consumed',
+    });
+    expect(store.read()).toMatchObject({
+      paused: false,
+      liveExecutionEnabled: true,
+      authorization: { remainingRuns: 1, lastRunId: 'run-1' },
+    });
+    time = 3000;
+    expect(store.consumeAuthorization('job-1', 'run-2')).toMatchObject({ consumed: true, remainingRuns: 0 });
+    expect(store.read()).toMatchObject({
+      paused: true,
+      liveExecutionEnabled: false,
+      jobs: [{ armed: false }],
+      authorization: null,
+    });
+  });
+
   it('relocks and disarms all jobs when configuration changes during live execution', () => {
     const store = createTradeJobStore({ storage: memoryStorage(), now: () => 1000 });
     store.upsert(job('job-1'));
@@ -98,6 +134,33 @@ describe('Trade Job Store', () => {
       { id: 'job-2', armed: false },
       { id: 'job-1', armed: false },
     ]);
+  });
+
+  it('invalidates persisted authorization on edit, delete, and import', () => {
+    let time = 1000;
+    const store = createTradeJobStore({ storage: memoryStorage(), now: () => time });
+    store.upsert(job('authorized'));
+    store.authorize('authorized');
+    time = 2000;
+    expect(store.upsert({ ...job('authorized'), name: 'Edited' }).snapshot).toMatchObject({
+      paused: true, liveExecutionEnabled: false, authorization: null,
+      jobs: [{ id: 'authorized', armed: false }],
+    });
+
+    store.upsert({ ...job('authorized'), name: 'Edited', armed: true });
+    store.authorize('authorized');
+    time = 3000;
+    expect(store.remove('authorized')).toMatchObject({
+      paused: true, liveExecutionEnabled: false, authorization: null, jobs: [],
+    });
+
+    store.upsert(job('before-import'));
+    store.authorize('before-import');
+    time = 4000;
+    expect(store.replaceJobs([job('imported')])).toMatchObject({
+      paused: true, liveExecutionEnabled: false, authorization: null,
+      jobs: [{ id: 'imported', armed: false }],
+    });
   });
 
   it('persists an explicit global Buy reserve and relocks when it changes during live execution', () => {
@@ -137,7 +200,7 @@ describe('Trade Job Store', () => {
     });
     const store = createTradeJobStore({ storage, key: 'jobs', now: () => 1000 });
     expect(store.read()).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       metrics: {
         firstRecordedAt: 200,
         lastRecordedAt: 400,

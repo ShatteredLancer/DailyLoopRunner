@@ -87,12 +87,28 @@ describe('Scheduled guarded Buy validation gate', () => {
     });
   });
 
+  it('requires an explicit two-run confirmation for recurring schedules', () => {
+    expect(inspectScheduledBuyValidationJob(job({
+      schedule: { type: 'daily', time: '09:00', timezone: 'UTC' },
+    }), { minimumRetainedCoins: 100000, authorizationRuns: 2 })).toMatchObject({
+      ready: true,
+      requiredText: 'RUN BUY DAILY 1 RESERVE 100000 FOR 2 RUNS',
+    });
+    expect(inspectScheduledBuyValidationJob(job({
+      schedule: { type: 'window', startAt: 2000, endAt: 60_000 },
+    }), { minimumRetainedCoins: 100000 })).toMatchObject({
+      ready: true,
+      requiredText: 'RUN BUY WINDOW 1 RESERVE 100000',
+    });
+  });
+
   it.each([
-    [{ schedule: { type: 'manual' } }, 'scheduled-buy-validation-once-only'],
+    [{ schedule: { type: 'manual' } }, 'scheduled-buy-validation-schedule-unsupported'],
     [{ armed: false }, 'scheduled-buy-validation-job-not-armed'],
     [{ policy: { cardClass: 'common-gold' } }, 'scheduled-buy-validation-rare-gold-only'],
-    [{ policy: { ratingMax: 86 } }, 'scheduled-buy-validation-adjacent-ratings-only'],
-    [{ policy: { quantity: 3 } }, 'scheduled-buy-validation-quantity-cap'],
+    [{ policy: { ratingMax: 88 } }, 'scheduled-buy-validation-adjacent-ratings-only'],
+    [{ policy: { quantity: 5 } }, 'scheduled-buy-validation-quantity-cap'],
+    [{ policy: { totalBudget: 8050 } }, 'scheduled-buy-validation-budget-cap'],
     [{ policy: { maxBuyNow: 2050, totalBudget: 2050 } }, 'scheduled-buy-validation-price-cap'],
     [{ misfirePolicy: { type: 'next-login' } }, 'scheduled-buy-validation-next-login-disabled'],
     [{ misfirePolicy: { type: 'grace-window', graceMinutes: 16 } }, 'scheduled-buy-validation-grace-too-long'],

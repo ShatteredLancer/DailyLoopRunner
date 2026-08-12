@@ -29,11 +29,13 @@ function serialLockManager() {
 }
 
 describe('Trade request budget', () => {
-  it('computes bounded worst-case reserves for one/two-card Listing and Buy Runs', () => {
+  it('computes bounded worst-case reserves per one/two-card chunk, including four-item Runs', () => {
     expect(tradeListingRequestReserve({ maxListings: 1 })).toBe(12);
     expect(tradeListingRequestReserve({ maxListings: 2 })).toBe(12);
     expect(tradeBuyRequestReserve({ quantity: 1, maxConsecutiveEmptySearches: 5 })).toBe(14);
     expect(tradeBuyRequestReserve({ quantity: 2, maxConsecutiveEmptySearches: 5 })).toBe(28);
+    expect(tradeListingRequestReserve({ maxListings: 4 })).toBe(12);
+    expect(tradeBuyRequestReserve({ quantity: 4, maxConsecutiveEmptySearches: 5 })).toBe(28);
     expect(inspectTradeRequestCapacity({ remaining: 27 }, 28)).toMatchObject({
       ready: false, required: 28, reason: 'trade-request-budget-insufficient',
     });

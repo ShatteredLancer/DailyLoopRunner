@@ -91,6 +91,7 @@ function defaultDraft(input = {}) {
       enabled: input.marketOverride?.enabled === true,
       markupPercent: Number(input.marketOverride?.markupPercent ?? 5),
       maxQuoteAgeMinutes: Number(input.marketOverride?.maxQuoteAgeMinutes ?? 10),
+      fallbackPolicy: input.marketOverride?.fallbackPolicy === 'skip' ? 'skip' : 'configured',
     },
     startPricePolicy: String(input.startPricePolicy || 'one-step-below'),
     durationSeconds: Number(input.durationSeconds || 3600),
@@ -197,6 +198,10 @@ export function showTradeListingDialog(options = {}) {
   marketLabel.append(marketEnabled, marketText);
   const markup = control(dom, 'number', draft.marketOverride.markupPercent, mode, { id: 'bronze-loop-trade-markup', min: 0, max: 100, step: 1 });
   const quoteAge = control(dom, 'number', draft.marketOverride.maxQuoteAgeMinutes, mode, { id: 'bronze-loop-trade-quote-age', min: 1, max: 1440, step: 1 });
+  const quoteFallback = selectControl(dom, draft.marketOverride.fallbackPolicy, [
+    { value: 'configured', text: 'Use configured price' },
+    { value: 'skip', text: 'Skip item' },
+  ], mode, { id: 'bronze-loop-trade-quote-fallback' });
 
   editor.append(
     sectionTitle(dom, 'Selection'),
@@ -222,6 +227,7 @@ export function showTradeListingDialog(options = {}) {
     field(dom, 'Quote provider', provider, mode),
     field(dom, 'Markup %', markup, mode),
     field(dom, 'Quote max age', quoteAge, mode),
+    field(dom, 'Quote fallback', quoteFallback, mode),
     field(dom, 'Start price', startPolicy, mode),
     field(dom, 'Duration', duration, mode),
     field(dom, 'Expired Transfer items', expiredPolicy, mode),
@@ -279,6 +285,7 @@ export function showTradeListingDialog(options = {}) {
     stopButton.disabled = !running;
     markup.disabled = busy || running || !marketEnabled.checked;
     quoteAge.disabled = busy || running || !marketEnabled.checked;
+    quoteFallback.disabled = busy || running || !marketEnabled.checked;
     provider.disabled = busy || running || !marketEnabled.checked;
   }
 
@@ -309,10 +316,11 @@ export function showTradeListingDialog(options = {}) {
     draft.marketOverride.enabled = marketEnabled.checked;
     draft.marketOverride.markupPercent = Number(markup.value);
     draft.marketOverride.maxQuoteAgeMinutes = Number(quoteAge.value);
+    draft.marketOverride.fallbackPolicy = quoteFallback.value;
     invalidate();
   }
 
-  for (const item of [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge]) {
+  for (const item of [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge, quoteFallback]) {
     editableControls.push(item);
     item.addEventListener('change', onDraftChange);
   }
@@ -593,7 +601,7 @@ export function showTradeListingDialog(options = {}) {
     dialog,
     title,
     actions,
-    controls: [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge, previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton],
+    controls: [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge, quoteFallback, previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton],
   });
   dialog.append(heading, workspace, status, actions);
   overlay.appendChild(dialog);

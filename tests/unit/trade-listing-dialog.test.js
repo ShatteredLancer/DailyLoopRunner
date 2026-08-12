@@ -234,7 +234,7 @@ describe('Trade listing dialog', () => {
     await prepare.click();
     expect(onPrepare).toHaveBeenCalledWith(expect.objectContaining({
       id: 'transfer-observation',
-      policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice', maxListings: 2 }),
+      policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice', maxListings: 4 }),
     }), { platform: 'pc', provider: 'auto' });
     const confirmation = ui.byId('bronze-loop-trade-confirmation');
     confirmation.value = 'REPRICE 1';

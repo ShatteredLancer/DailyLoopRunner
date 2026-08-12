@@ -1,5 +1,9 @@
 import { normalizeTradeJob } from './contracts.js';
-import { buildListingPlan } from './listing-plan.js';
+import {
+  buildListingCandidatePool,
+  buildListingPlan,
+  listingQuoteCandidatePoolLimit,
+} from './listing-plan.js';
 
 export function createListingPreview(options = {}) {
   if (typeof options.getTradeAdapter !== 'function') throw new TypeError('getTradeAdapter is required');
@@ -19,8 +23,12 @@ export function createListingPreview(options = {}) {
     const adapter = options.getTradeAdapter();
     const capabilities = adapter.inspectCapabilities();
     const scan = adapter.inspectListingCandidates({ sources: job.policy.sources, limit: 0 });
-    const initialPlan = buildListingPlan({ job, candidates: scan.candidates, now: timestamp });
-    const definitionIds = [...new Set(initialPlan.entries.map((entry) => entry.item.definitionId))];
+    const candidatePool = buildListingCandidatePool({
+      job,
+      candidates: scan.candidates,
+      limit: listingQuoteCandidatePoolLimit(job.policy.maxListings),
+    });
+    const definitionIds = candidatePool.definitionIds;
     const quoteResult = job.policy.marketOverride.enabled && definitionIds.length
       ? await options.priceQuoteProvider.load({
         definitionIds,
@@ -29,7 +37,7 @@ export function createListingPreview(options = {}) {
         forceRefresh: request.forceRefresh === true,
       })
       : { quotes: [], source: null, attempts: [] };
-    const plan = buildListingPlan({ job, candidates: scan.candidates, quotes: quoteResult.quotes, now: timestamp });
+    const plan = buildListingPlan({ job, candidatePool, quotes: quoteResult.quotes, now: timestamp });
     return {
       schemaVersion: 1,
       mode: 'preview-only',
@@ -45,7 +53,11 @@ export function createListingPreview(options = {}) {
         error: scan.error,
       },
       quotes: {
-        requested: definitionIds.length,
+        requested: job.policy.marketOverride.enabled ? definitionIds.length : 0,
+        candidateDefinitions: definitionIds.length,
+        candidatePoolSize: candidatePool.candidates.length,
+        candidatePoolLimit: candidatePool.limit,
+        candidatePoolTruncated: candidatePool.truncated,
         loaded: quoteResult.quotes.length,
         source: quoteResult.source,
         attempts: quoteResult.attempts,

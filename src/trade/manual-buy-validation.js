@@ -2,10 +2,10 @@ import { normalizeTradeJob } from './contracts.js';
 import { normalizeExpectedBuyDestination } from './buy-destination.js';
 
 export const MANUAL_BUY_VALIDATION_MAX_PRICE = 2_000;
-export const MANUAL_BUY_VALIDATION_MAX_TOTAL_BUDGET = 4_000;
-export const MANUAL_BUY_VALIDATION_MAX_QUANTITY = 2;
-export const MANUAL_BUY_VALIDATION_MAX_RATING_SPAN = 1;
-export const MANUAL_BUY_VALIDATION_MAX_RUNTIME_MINUTES = 5;
+export const MANUAL_BUY_VALIDATION_MAX_TOTAL_BUDGET = 8_000;
+export const MANUAL_BUY_VALIDATION_MAX_QUANTITY = 4;
+export const MANUAL_BUY_VALIDATION_MAX_RATING_SPAN = 3;
+export const MANUAL_BUY_VALIDATION_MAX_RUNTIME_MINUTES = 15;
 export const MANUAL_BUY_VALIDATION_MAX_EMPTY_SEARCHES = 5;
 
 export function manualBuyValidationConfirmation(maxPrice, expectedDestination = 'auto', quantity = 1) {

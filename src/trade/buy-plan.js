@@ -27,6 +27,11 @@ function ratingLimit(policy, rating) {
   return Number.isFinite(override) && override > 0 ? override : Number(policy.maxBuyNow);
 }
 
+function ratingQuantity(policy, rating) {
+  const override = Number(policy.ratingQuantityOverrides?.[String(rating)]);
+  return Number.isInteger(override) && override > 0 ? override : null;
+}
+
 export function buildBuyLanePlan(input = {}) {
   const job = input.job;
   assertValidTradeJob(job, 'Buy job');
@@ -46,6 +51,7 @@ export function buildBuyLanePlan(input = {}) {
     lanes.push({
       rating,
       maxBuyNow: ratingLimit(job.policy, rating),
+      quantityLimit: ratingQuantity(job.policy, rating),
       definitionIds: rotate(ids, stableHash(`${runId}:${rating}`)),
       source: String(lane.source || 'catalog'),
       expiresAt: Number.isFinite(Number(lane.expiresAt)) ? Number(lane.expiresAt) : null,
@@ -63,15 +69,25 @@ export function buildBuyLanePlan(input = {}) {
   };
 }
 
-export function nextBuySearch(lanePlan = {}, cursorInput = null) {
+export function nextBuySearch(lanePlan = {}, cursorInput = null, options = {}) {
   const lanes = lanePlan.lanes || [];
   if (lanePlan.ready !== true || !lanes.length) return { search: null, cursor: cursorInput || lanePlan.cursor || null };
   const cursor = {
     laneIndex: Math.max(0, Math.floor(finiteNumber(cursorInput?.laneIndex, lanePlan.cursor?.laneIndex))),
     definitionIndexes: { ...(lanePlan.cursor?.definitionIndexes || {}), ...(cursorInput?.definitionIndexes || {}) },
   };
-  const laneIndex = cursor.laneIndex % lanes.length;
-  const lane = lanes[laneIndex];
+  const excludedRatings = new Set((options.excludedRatings || []).map(Number));
+  let laneIndex = cursor.laneIndex % lanes.length;
+  let lane = null;
+  for (let attempt = 0; attempt < lanes.length; attempt += 1) {
+    const candidate = lanes[laneIndex];
+    if (!excludedRatings.has(Number(candidate.rating))) {
+      lane = candidate;
+      break;
+    }
+    laneIndex = (laneIndex + 1) % lanes.length;
+  }
+  if (!lane) return { search: null, cursor };
   const definitionIndex = Math.max(0, Math.floor(finiteNumber(cursor.definitionIndexes[lane.rating]))) % lane.definitionIds.length;
   const search = {
     laneIndex,

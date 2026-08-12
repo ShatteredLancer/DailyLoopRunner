@@ -140,6 +140,19 @@ function validateBuyPolicy(policy, path, errors) {
       pushPositiveNumber(price, `${path}.ratingPriceOverrides.${ratingText}`, errors);
     }
   }
+  if (!isPlainObject(policy.ratingQuantityOverrides)) {
+    errors.push(`${path}.ratingQuantityOverrides must be an object`);
+  } else {
+    for (const [ratingText, quantity] of Object.entries(policy.ratingQuantityOverrides)) {
+      const rating = Number(ratingText);
+      if (!Number.isInteger(rating) || rating < Number(policy.ratingMin) || rating > Number(policy.ratingMax)) {
+        errors.push(`${path}.ratingQuantityOverrides.${ratingText} must target a rating inside the job range`);
+      }
+      if (!Number.isInteger(Number(quantity)) || Number(quantity) <= 0) {
+        errors.push(`${path}.ratingQuantityOverrides.${ratingText} must be a positive integer`);
+      }
+    }
+  }
 }
 
 function validateRatingRules(rules, path, errors) {
@@ -186,6 +199,9 @@ function validateListingPolicy(policy, path, errors) {
       errors.push(`${path}.marketOverride.markupPercent must be zero or greater`);
     }
     pushPositiveNumber(policy.marketOverride.maxQuoteAgeMinutes, `${path}.marketOverride.maxQuoteAgeMinutes`, errors);
+    if (!['configured', 'skip'].includes(policy.marketOverride.fallbackPolicy)) {
+      errors.push(`${path}.marketOverride.fallbackPolicy must be configured or skip`);
+    }
   }
   if (!['one-step-below', 'same'].includes(policy.startPricePolicy)) {
     errors.push(`${path}.startPricePolicy must be one-step-below or same`);
@@ -264,6 +280,9 @@ function normalizeBuyPolicy(value = {}) {
     ratingPriceOverrides: Object.fromEntries(Object.entries(value.ratingPriceOverrides || {})
       .map(([rating, price]) => [String(Number(rating)), positiveInteger(price, 0)])
       .filter(([, price]) => price > 0)),
+    ratingQuantityOverrides: Object.fromEntries(Object.entries(value.ratingQuantityOverrides || {})
+      .map(([rating, quantity]) => [String(Number(rating)), positiveInteger(quantity, 0)])
+      .filter(([, quantity]) => quantity > 0)),
     quantity: positiveInteger(value.quantity, 10),
     totalBudget: positiveInteger(value.totalBudget, 10000),
     minimumRetainedCoins: value.minimumRetainedCoins === null
@@ -293,6 +312,7 @@ function normalizeListingPolicy(value = {}) {
       enabled: value.marketOverride?.enabled === true,
       markupPercent: Math.max(0, finiteNumber(value.marketOverride?.markupPercent, 5)),
       maxQuoteAgeMinutes: positiveInteger(value.marketOverride?.maxQuoteAgeMinutes, 10),
+      fallbackPolicy: value.marketOverride?.fallbackPolicy === 'skip' ? 'skip' : 'configured',
     },
     startPricePolicy: String(value.startPricePolicy || 'one-step-below'),
     durationSeconds: positiveInteger(value.durationSeconds, 3600),

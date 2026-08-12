@@ -74,7 +74,7 @@ describe('Trade listing preview planner', () => {
       ],
     });
     expect(plan.entries.map((entry) => entry.item.id)).toEqual([3, 4]);
-    expect(plan.counts).toEqual({ scanned: 5, eligible: 2, selected: 2, deferred: 0, rejected: 3 });
+    expect(plan.counts).toEqual({ scanned: 5, eligible: 2, evaluated: 2, selected: 2, deferred: 0, rejected: 3 });
     expect(plan.rejectionCounts).toEqual({
       'active-trade': 1,
       untradeable: 1,
@@ -151,6 +151,9 @@ describe('Trade listing preview planner', () => {
     expect(plan.entries[0]).toMatchObject({
       configuredPrice: 700,
       quotedPrice: 800,
+      quoteSource: 'FUTNext',
+      quoteQuotedAt: now - 1000,
+      quoteExpiresAt: now + 1000,
       quoteStatus: 'applied',
       buyNow: 850,
       startPrice: 800,
@@ -163,6 +166,107 @@ describe('Trade listing preview planner', () => {
       startPrice: 650,
     });
     expect(plan.warnings[0]).toMatch(/1 selected item/);
+  });
+
+  it('skips stale or unavailable quotes only when the explicit fallback policy says skip', () => {
+    const now = 1_000_000;
+    const candidates = [candidate(1), candidate(2)];
+    const quotes = [{
+      definitionId: 1001,
+      price: 800,
+      source: 'FUTNext',
+      quotedAt: now - 700_000,
+      expiresAt: now + 1000,
+    }];
+    const skipped = buildListingPlan({
+      job: listingJob({
+        maxListings: 2,
+        marketOverride: { enabled: true, markupPercent: 5, maxQuoteAgeMinutes: 10, fallbackPolicy: 'skip' },
+      }),
+      candidates,
+      quotes,
+      now,
+    });
+    const configured = buildListingPlan({
+      job: listingJob({
+        maxListings: 2,
+        marketOverride: { enabled: true, markupPercent: 5, maxQuoteAgeMinutes: 10, fallbackPolicy: 'configured' },
+      }),
+      candidates,
+      quotes,
+      now,
+    });
+
+    expect(skipped.entries).toEqual([]);
+    expect(skipped.rejectionCounts).toMatchObject({
+      'market-quote-stale': 1,
+      'market-quote-unavailable': 1,
+    });
+    expect(configured.entries).toHaveLength(2);
+    expect(configured.entries.map((entry) => entry.buyNow)).toEqual([700, 700]);
+  });
+
+  it('excludes configured or quoted Buy Now prices above the guarded 10000 cap', () => {
+    const configured = buildListingPlan({
+      job: listingJob({ ratingRules: [{ min: 75, max: 84, buyNow: 10_001 }], maxListings: 1 }),
+      candidates: [candidate(1)],
+      now: 1000,
+    });
+    const quoted = buildListingPlan({
+      job: listingJob({
+        maxListings: 1,
+        marketOverride: { enabled: true, markupPercent: 5, maxQuoteAgeMinutes: 10, fallbackPolicy: 'configured' },
+      }),
+      candidates: [candidate(1)],
+      quotes: [{ definitionId: 1001, price: 10_000, source: 'FUTNext', quotedAt: 999, expiresAt: 2000 }],
+      now: 1000,
+    });
+
+    expect(configured.entries).toEqual([]);
+    expect(configured.rejectionCounts).toEqual({ 'high-value-listing-excluded': 1 });
+    expect(quoted.entries).toEqual([]);
+    expect(quoted.rejectionCounts).toEqual({ 'high-value-listing-excluded': 1 });
+  });
+
+  it('backfills the final selection after leading high-value candidates are rejected', () => {
+    const now = 1000;
+    const plan = buildListingPlan({
+      job: listingJob({
+        maxListings: 2,
+        marketOverride: { enabled: true, markupPercent: 0, maxQuoteAgeMinutes: 10, fallbackPolicy: 'configured' },
+      }),
+      candidates: [candidate(1), candidate(2), candidate(3), candidate(4)],
+      quotes: [
+        { definitionId: 1001, price: 10_100, quotedAt: 999, expiresAt: 2000 },
+        { definitionId: 1002, price: 10_100, quotedAt: 999, expiresAt: 2000 },
+        { definitionId: 1003, price: 800, quotedAt: 999, expiresAt: 2000 },
+        { definitionId: 1004, price: 850, quotedAt: 999, expiresAt: 2000 },
+      ],
+      now,
+    });
+
+    expect(plan.entries.map((entry) => entry.item.id)).toEqual([3, 4]);
+    expect(plan.counts).toEqual({
+      scanned: 4, eligible: 4, evaluated: 4, selected: 2, deferred: 0, rejected: 2,
+    });
+    expect(plan.rejectionCounts).toEqual({ 'high-value-listing-excluded': 2 });
+  });
+
+  it('backfills after a skipped unavailable quote instead of consuming the listing slot', () => {
+    const now = 1000;
+    const plan = buildListingPlan({
+      job: listingJob({
+        maxListings: 1,
+        marketOverride: { enabled: true, markupPercent: 0, maxQuoteAgeMinutes: 10, fallbackPolicy: 'skip' },
+      }),
+      candidates: [candidate(1), candidate(2)],
+      quotes: [{ definitionId: 1002, price: 800, quotedAt: 999, expiresAt: 2000 }],
+      now,
+    });
+
+    expect(plan.entries.map((entry) => entry.item.id)).toEqual([2]);
+    expect(plan.counts).toMatchObject({ evaluated: 2, selected: 1, deferred: 0, rejected: 1 });
+    expect(plan.rejectionCounts).toEqual({ 'market-quote-unavailable': 1 });
   });
 
   it('uses EA listing price increments at each threshold', () => {

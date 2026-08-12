@@ -21,7 +21,10 @@ describe('Trade listing recap model', () => {
       skipped: 1,
       coinsBefore: 1000,
       coinsAfter: 2000,
-      receipts: Array.from({ length: 31 }, (_, index) => receiptEntry(index + 1)),
+      receipts: [
+        { status: 'chunk-summary', chunkIndex: 1, requested: 2, succeeded: 2 },
+        ...Array.from({ length: 31 }, (_, index) => receiptEntry(index + 1)),
+      ],
     };
     const recap = createTradeListingRecap(receipt, { page: 2 });
 

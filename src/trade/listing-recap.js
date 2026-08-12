@@ -1,7 +1,8 @@
 export const TRADE_RECAP_PAGE_SIZE = 15;
 
 export function createTradeListingRecap(receipt = {}, options = {}) {
-  const items = Array.isArray(receipt.receipts) ? receipt.receipts : [];
+  const items = (Array.isArray(receipt.receipts) ? receipt.receipts : [])
+    .filter((entry) => entry?.status !== 'chunk-summary');
   const pageSize = Math.max(1, Math.floor(Number(options.pageSize || TRADE_RECAP_PAGE_SIZE)));
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
   const page = Math.max(1, Math.min(pageCount, Math.floor(Number(options.page || 1))));

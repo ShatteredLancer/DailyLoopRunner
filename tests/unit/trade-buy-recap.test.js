@@ -13,6 +13,7 @@ describe('Trade Buy recap model', () => {
       coinsAfter: 73000,
       receipts: [
         { status: 'run-summary', searches: 35, spent: 27000 },
+        { status: 'chunk-summary', chunkIndex: 1, requested: 2, succeeded: 2 },
         ...Array.from({ length: 31 }, (_, offset) => ({
           index: offset + 1,
           status: 'purchased',

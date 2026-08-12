@@ -1,6 +1,6 @@
 import { normalizeTradeJob } from './contracts.js';
 
-export const MANUAL_LISTING_LIVE_LIMIT = 2;
+export const MANUAL_LISTING_LIVE_LIMIT = 4;
 
 function positiveInteger(value, fallback) {
   const number = Math.floor(Number(value));
@@ -40,6 +40,7 @@ export function createManualListingJob(input = {}, options = {}) {
         enabled: input.marketOverride?.enabled === true,
         markupPercent: Math.max(0, Number(input.marketOverride?.markupPercent ?? 5) || 0),
         maxQuoteAgeMinutes: positiveInteger(input.marketOverride?.maxQuoteAgeMinutes, 10),
+        fallbackPolicy: input.marketOverride?.fallbackPolicy === 'skip' ? 'skip' : 'configured',
       },
       startPricePolicy: String(input.startPricePolicy || 'one-step-below'),
       durationSeconds: positiveInteger(input.durationSeconds, 3600),

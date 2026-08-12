@@ -11,16 +11,26 @@
 - 手动有界 Transfer reprice：仅限 Transfer-only、1-2 张 `inactive` 过期卡及精确输入 `REPRICE N`；挂牌前后均刷新并核对同一 item。
 - 定时有界 Listing/reprice：单个 `once` 任务、单一来源、1-2 张、页面恢复、跨标签页互斥、Loop/Trade operation 互斥和过期租约 fail-closed。
 - 手动和定时有界 Buy：Rare Gold、一个评分或两个相邻评分、数量 1-2、每卡不超过 2000、总预算不超过 4000；支持 Club 和重复卡 Transfer 路由，定时 Buy 还要求显式最低保留金币。
-- Listing/Buy bounded Journal：逐项记录 mutation boundary 和终态；第一项成功后第二项失败或不明确时保留部分成功并停止剩余项。
+- Listing/Buy bounded Journal：最多记录四项的 mutation boundary 和终态；任一项成功后后续项失败或不明确时保留部分成功并停止剩余项。
 - Summary、History、Job-only 配置导入/导出、Provider 健康状态和显式缓存清理。
 
 TS8 的 `0.7.70` 六项有序实机 campaign 已完成；上述 1-2 项门禁仍是硬上限，不代表 Bulk 或 recurring 自动交易已开放。
 
+TS9-TS12 候选实现已经完成本地专项验证，但尚未完成真实 EA V9-12 campaign。候选版新增能力如下，V9-12 通过前不能视为稳定生产边界：
+
+- 单个 Run 最多 4 项，固定拆成最多两个 2 项 chunk；每个 chunk 独立保留请求预算，等待期间不轮询 EA。
+- 手动和定时 Listing/reprice 均保持 Club-only 或 Transfer-only；绝不在同一 Run 混合来源。
+- Buy 仍只允许 Rare Gold，但可覆盖最多 4 个连续评分的逐评分 lane，并设置每评分价格与数量配额；每卡上限仍为 2000，总预算上限为 8000。
+- `daily` 和 `interval` 每次人工确认只授权两个 occurrence；`window` 和 `once` 只授权一个。页面关闭时不执行、不排队，`next-login` 不支持。
+- Listing 市场报价可显式选择陈旧/缺失时使用配置价或跳过；Buy Now 超过 10000 的卡在 Preview、Prepare 和最终写入前均排除。
+- Stop、未知结果、运行时间上限、预算等待 deadline、配置变化和授权耗尽都会停止或回锁；不会自动重试未知 mutation。
+
 以下能力仍受门禁或未完成独立实机验证，不应通过修改配置绕过：
 
-- 第三张及更多卡、Buy 非相邻或三个评分、其它 Buy 卡类、周期/窗口/下次登录任务。
+- TS9-TS12 候选的第三/第四张卡、多评分配额和 recurring/window，在 V9-12 完成前仍属于待实机验证能力。
+- 第五张及更多卡、跨度超过 3 的 Buy 评分范围、稀有金以外 Buy 卡类和 `next-login`。
 - 无上限 Bulk Buy/Bulk Listing、自动改价、自动刷新 Provider、后台 Companion。
-- 周期 Transfer 改价、Bulk relist，以及 Club + Transfer 混合来源的 Prepare/执行。
+- 多个 armed Job、Bulk relist，以及 Club + Transfer 混合来源的 Prepare/执行。
 - 任何没有明确候选、身份、价格或库存去向的交易动作。
 
 ## 运行前检查
@@ -207,6 +217,95 @@ Scheduler 对话框会每秒读取一次最新 Job Store；定时任务到点、
 
 任何步骤出现 `ambiguous`、Journal review required、身份/价格/去向不一致、页面崩溃、未知 EA 状态或非预期重复 Run，都立即停止，不继续后面的步骤，不清 Tampermonkey 存储，也不重试同一交易。保存当时的 Runner log、Scheduler diagnostics 和相关 Trade diagnostics 后再调查。
 
+## V9-12 候选合并验证
+
+本节用于候选 `0.7.84` 的实机 campaign。`0.7.80` 已完成第一轮步骤 1-7，当前只需按文末“补充验证”重跑未闭合场景。开始前先确认 `npm run verify` 对应的构建已经通过；同一轮只安装一次脚本。任一步出现 `ambiguous`、未知 Journal、身份/价格/去向不一致、页面崩溃、427、429、Captcha 或非预期重复 Run，立即停止整个 campaign，不重试、不清存储，并导出当前证据。
+
+### 共同准备
+
+1. 刷新 EA Web App，确认 `Ready v0.7.84`，关闭 Enhancer Trader 和其它市场自动化，停止全部 Loop/Batch/SBC/开包操作。
+2. Trade Scheduler 保持 locked；Circuit 必须 closed，Lease/Coordinator/Listing Journal/Buy Journal 必须为空或为可覆盖的 completed 终态。
+3. Transfer List 预留至少 10 个空位；Unassigned 为空；设置明确的 Global minimum retained coins。
+4. 等 Request Summary 自然恢复。不要通过刷新、多标签并发或清 Tampermonkey 存储制造容量。
+5. 保存基线 Scheduler diagnostics。后续文件按步骤命名；一个步骤正常完成后再进入下一步。
+
+### 1. 手动四卡 Club Listing
+
+1. 准备 4 张愿意挂牌的低价值可交易 Common Gold，规则尽量只覆盖这 4 张。
+2. 打开 Manual listing：Source=`Club`，market quote 关闭，Duration=`1 hour`，Expired=`skip`。候选版 Manual listing 上限固定为 4，没有单独的 Max listings 输入框。
+3. 先 Preview，再 Prepare；必须恰好看到 4 张及 `LIST 4`。逐项核对 item、definition、Bid、Buy Now 和 duration。
+4. 输入 `LIST 4` 一次并等待完成。正常结果是两个 chunk、索引 1-4、4 个 exact item 均 Active；不要因为第二 chunk 等请求预算而重复点击。
+5. 保存 Listing diagnostics。确认 recap 不显示内部 `chunk-summary`，但 diagnostics/Journal 能看到两个 chunk。
+
+### 2. 手动四卡 Transfer Reprice 与 Stop
+
+1. 等步骤 1 的 4 张卡自然到期并在 EA Transfer List 显示 inactive；不要调用批量 relist。
+2. Source=`Transfer`，Expired=`reprice`；固定候选上限仍为 4，执行 Preview/Prepare 并确认文本为 `REPRICE 4`。
+3. 输入 `REPRICE 4` 后，在第一或第二张完成后的安全间隔点一次 Stop。不要追求精确制造“两个成功”，任何 1-3 个已核验成功且其余 skipped 都可作为 Stop 证据。
+4. 等 recap 进入 `stopped`；已成功项必须 Active，未执行项保持 inactive，Transfer 容量不增加，Journal 不得为 unknown/ambiguous。
+5. 保存 Listing diagnostics。剩余 inactive 卡不要在同一页面立即重试；后续需要 reprice 候选时可另建新 Job、重新 Preview 和确认。
+
+### 3. 手动四卡多评分 Rare Gold Buy
+
+1. 选择 3 个连续低风险评分，例如 84-86，调查愿意支付的每评分上限 `P84/P85/P86`，每个必须 `<=2000`。
+2. 创建 Manual Buy：Rating 84-86，Quantity=`4`，Rating quantities=`84=2, 85=1, 86=1`，Rating prices 填对应上限，总预算不超过 8000，Max runtime 建议 15，Empty limit 不超过 5。
+3. Preview 必须显示三个逐评分 lane、配额、总预算、Runtime、Chunk 2 和 reserve。Expected destination 保持 Auto。
+4. 输入窗口给出的 `BUY 4 MAX <最高评分上限>` 一次。第二 chunk 可能等待 5 分钟请求窗口恢复；等待期间不应发送 EA market 请求，UI/Journal 应显示 budget waiting。
+5. 完成后必须正好按 2/1/1 购买，索引为 1-4，金币不低于 floor，重复卡去 Transfer、非重复卡去 Club。保存 Buy diagnostics 和 Scheduler diagnostics。
+
+### 4. Daily 单次观察与人工回锁
+
+1. 创建低价值 Club Listing Job，Max listings=`1`，Schedule=`daily`，时间设为当天未来 2-5 分钟，Timezone 使用当前有效 IANA 时区，Grace=`15`，只保留这一个 armed Job。
+2. 输入 `RUN DAILY 1 FOR 2 RUNS`。UI 必须显示授权 `2/2` 及 expiry。
+3. 保持前台登录直到第一次 occurrence 完成；History 只能增加一个 Run，授权应变为 `1/2`，Job 保持等待下一天。
+4. 点击 Disable scheduling 人工回锁；确认 authorization 清空、Job disarmed，等待后续 tick 不重复。保存 Scheduler diagnostics。
+
+### 5. Interval 两次 occurrence 与 UI 原地刷新
+
+1. 准备至少 4 张低价值 Club 可交易卡。创建 Club Listing，Max listings=`2`，Schedule=`interval`，Every minutes 建议 `5`，Grace=`15`，只 armed 该 Job。
+2. 输入 `RUN INTERVAL 2 FOR 2 RUNS`。保持页面登录，不操作其它市场功能。
+3. 第一次应挂牌 2 张并把授权降到 1；第二次应挂牌另外 2 张并耗尽授权。第二次结束后自动 paused、locked、disarmed。
+4. Scheduler 对话框必须无需关闭重开即可更新授权、runtime 和两条不同 runId 的 History；第三个间隔不得执行。
+5. 保存 Scheduler diagnostics。若第一轮用完候选导致第二轮 `no-eligible`，保存证据并停止，不通过扩大评分范围临时补救。
+
+### 6. Window occurrence、后台恢复与 Loop 互斥
+
+1. 创建 Quantity=`1` 的低价 Rare Gold Buy 或 Max listings=`1` 的 Club Listing，Schedule=`window`，窗口从未来 2 分钟开始、持续 10 分钟，Grace=`15`。
+2. 输入对应的 `RUN BUY WINDOW 1 RESERVE <floor>` 或 `RUN WINDOW 1`；window 只授权一次。
+3. 在窗口开始前切到其它普通网页标签 2-3 分钟，但不要关闭 EA 标签和浏览器。返回 EA 后确认任务至多执行一次。
+4. 若要验证 Loop 互斥，在窗口开始前运行一个只读或低风险、预计数分钟结束的 Loop；Trade 应显示 waiting-operation，Loop 结束且仍在窗口/grace 内才执行。不要让 Loop 留下 Unassigned 或未知写入。
+5. 完成后刷新 EA 页面并重新登录。History 仍只能有一个该 window run，Job 不得补跑。保存刷新前后 Scheduler diagnostics和完整 Runner log。
+
+### 7. Listing 报价 fallback 与高价排除
+
+1. 使用低价值 Club 卡打开 Manual listing，开启 market quote。先选择 Quote fallback=`Use configured price`，Preview 中核对 `quoteSource/quotedAt/expiresAt/quoteStatus`；若当前自然出现 stale/unavailable，应看到使用配置价。
+2. 改为 Quote fallback=`Skip item` 并重新 Preview。只有在报价自然 stale/unavailable 时才要求该项被跳过；不要断网或高频刷新来制造 Provider 失败。
+3. 用只读 Preview 检查一个配置价或报价计算后 Buy Now 高于 10000 的规则，目标项必须显示 `high-value-listing-excluded`，不得进入 Prepare 或 `listItem`。如果所有候选都高于 10000，`selected=0` 和 Prepare 显示 `no-eligible-listing-candidates` 正是预期结果，不应为了选中卡片而提高阈值。
+4. 本步骤不要求真实挂牌高价值卡。保存 Listing diagnostics；若当前没有自然 stale/unavailable quote，记录为“fallback 分支未触发”，不算 mutation 失败。
+
+### 一次性交付
+
+全部可执行步骤结束后统一提供：完整 Runner log、步骤 1/2/7 的 Listing diagnostics、步骤 3 的 Buy diagnostics，以及步骤 3-6 的 Scheduler diagnostics。文件名保留原始时间戳并注明步骤号。V9-12 通过前不打 release tag，不把 4 项或 recurring 描述为已实机验证的稳定能力。
+
+### 2026-08-11 第一轮结果与补充验证
+
+- 步骤 1 通过：手动 Club Listing 完成 `4/4`，两个 chunk 均完成，四张卡均核验为 Active。
+- 步骤 2 通过：Transfer reprice 在 Stop 后为 `2 succeeded / 2 skipped`，未越过后两张卡的 mutation boundary。
+- 步骤 3 通过：`0.7.83` 使用实际保存的非均匀配额 `84=1, 85=1, 86=2` 完成 `4/4`。第一 chunk 将 85/1100、84/800 路由到 Club；第二 chunk 在需要 28 个请求槽而仅剩 21 个时本地等待约 298 秒，恢复后将两张重复 86（1400、1100）路由到 Transfer。最终 failed/skipped 均为 0、总花费 4400、Journal 为 `completed / receipt-recorded`、Circuit closed。该组合与 Preview/Job 配置完全一致，足以验证三评分、非均匀配额和跨 chunk 状态继承。
+- 步骤 4 通过：Daily 只执行一次，人工回锁后 authorization 清空、paused/locked/disarmed。
+- 步骤 5 交易部分通过：两个 occurrence 各完成 `2/2`，且没有第三次 Run；但 `0.7.80` 在授权耗尽后把旧 `waiting-time/nextRunAt` 覆盖回 Store。`0.7.81` 已修正并增加执行中删除/编辑 Job 的保护。
+- 步骤 6 通过：Trade 在 Loop 占用期间持续 `waiting-operation`，Loop 结束后在窗口内只执行一次；后台、刷新和重登后没有补跑。
+- 步骤 7 发现 Planner 缺陷：9 个初筛候选先按 `maxListings=4` 截取前 4 个 definition 取得报价，这 4 个都因报价加 markup 后超过 10,000 而触发 `high-value-listing-excluded`。保护门禁本身正确且没有 Prepare、receipt 或 mutation，但 Planner 没有继续检查后 5 个 deferred 候选，因此 `selected=0` 不能视为完整正确结果。自然 stale/unavailable 报价未出现；fallback 分支由自动测试作为发布门禁，实机证据改为可选。
+
+`0.7.84` 的补充 Interval 终态验证已经闭合：
+
+1. `Interval terminal 0.7.84` 在 10:17 和 10:22 完成两次独立 `2/2` Listing，最终为 `completed`、`nextRunAt=null`、`runCount=2`、authorization 为空、paused/locked/disarmed。
+2. 诊断在理论第三次到点后继续观察约 296 秒；期间 115 次 tick 均保持 paused，未出现第三次运行。证据文件为 `trade-scheduler-diagnostics-2026-08-12T02-32-18-075Z.json`。
+
+Step 7 的候选回填已在 `0.7.84` 修复：Planner 最多报价 16 个已排序候选，高价或 fallback-skip 候选计为 rejected 后继续查找，池外候选保持 deferred。真实页面只读 Preview 属于可选兼容性观察，不要求挂牌，也不影响剩余 Interval 发布门禁。
+
+报价 fallback 不再要求继续人工制造或等待 stale/unavailable。现有自动测试分别锁住 `Use configured price` 和 `Skip item`；真实页面若自然出现该状态，再保存只读 Listing diagnostics 作为补充证据即可。不要通过断网、高频请求、清 Tampermonkey 存储或修改系统时间制造失败。
+
 ## 交易运行时的状态
 
 - `paused`：调度器不执行到期任务；已经开始的安全收尾仍可能完成。
@@ -223,7 +322,7 @@ Scheduler 对话框会每秒读取一次最新 Job Store；定时任务到点、
 ## 请求预算与调度顺序
 
 - EA Trade 请求预算固定为每 5 分钟 30 次，并通过 Tampermonkey 存储在标签页之间共享。支持 Web Locks 的浏览器会串行化预算占用。
-- Listing 在 Prepare 前原子保留 12 个槽并让 Prepare/Transaction 共用同一 reservation；Buy 按最坏搜索和对账路径预留，单张 14 个槽、双张 28 个槽。事务结束后未使用槽会释放，已经发送的 EA 请求仍保留到窗口到期。
+- 每个 chunk 最多处理两项并独立取得预算；Listing chunk 在 Prepare 前原子保留 12 个槽并让 Prepare/Transaction 共用该 reservation，Buy chunk 按最坏搜索和对账路径预留，单张 14 个槽、双张 28 个槽。四项 Run 的第二个 chunk 必须等新的预算可用；等待期间不轮询 EA。事务结束后未使用槽会释放，已经发送的 EA 请求仍保留到窗口到期。
 - EA capability/repository 的本地读取以及 FUTNext/FUT.GG Provider HTTP 不计入该预算。Summary 中 `Used/Remaining` 是 EA Trade Adapter 请求聚合，不是全部网络流量。
 - `Trade capacity: cooldown` 不代表 EA Circuit 已打开。它是本地限流，等待界面显示的恢复时间；不要清 Tampermonkey 存储，也没有提高或跳过预算的入口。
 - 若 Buy 与 Listing 同时到期，内部选择器会交替类型；同类型按最早计划时间和 Job ID 排序。但当前生产门禁仍只允许恰好一个 armed Job，因此该规则不会开放多个 Job 同时自动交易。
@@ -240,7 +339,7 @@ Scheduler 对话框会每秒读取一次最新 Job Store；定时任务到点、
 - Buy/Listing Preview、Prepared、Receipt 和有限的运行时间线。
 - Player Catalog 和 Price Quote 的健康状态、缓存聚合数量、TTL 和活动计数。
 - EA Trade 请求预算的窗口、使用/剩余数量、动作聚合、当前任务容量恢复时间和 Web Lock 支持状态。
-- Listing/Buy Journal 的最多两个逐项状态、mutation boundary 和脱敏响应摘要。
+- Listing/Buy Journal 的最多四个逐项状态、chunk 边界、mutation boundary 和脱敏响应摘要。
 
 诊断不会包含 EA 认证信息、Lease token、完整 definition ID 列表、价格、URL 或原始异常对象。上传前仍应检查文件内容，账号标识、用户名或第三方日志中的个人信息应自行删除。
 

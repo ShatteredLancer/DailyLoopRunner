@@ -34,6 +34,9 @@ describe('Trade Listing persistent journal', () => {
       mutationBoundaryCrossed: true,
     });
     journal.checkpoint('listing-run', {
+      phase: 'chunk-started', chunkIndex: 2, offset: 2, quantity: 2, required: 12,
+    });
+    journal.checkpoint('listing-run', {
       phase: 'item-finished',
       itemIndex: 1,
       status: 'listed',
@@ -48,6 +51,9 @@ describe('Trade Listing persistent journal', () => {
         { index: 1, status: 'listed', mutationBoundaryCrossed: true, item: { id: 1, definitionId: 101, pile: 'club' } },
         { index: 2, status: 'pending', mutationBoundaryCrossed: false, item: { id: 2, definitionId: 102, pile: 'club' } },
       ],
+      events: expect.arrayContaining([
+        expect.objectContaining({ phase: 'chunk-started', chunkIndex: 2, offset: 2, quantity: 2, required: 12 }),
+      ]),
     });
     expect(reloaded.inspectRecovery()).toMatchObject({
       active: true, mutationBoundaryCrossed: true, canSupersede: false,

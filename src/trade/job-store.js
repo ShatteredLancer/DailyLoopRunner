@@ -1,8 +1,12 @@
 import { normalizeTradeJob } from './contracts.js';
 import { createTradeJobRuntime, normalizeTradeJobRuntime } from './schedule.js';
 import { normalizeTradeDispatchState, recordTradeDispatch } from './scheduler-fairness.js';
+import {
+  createTradeScheduleAuthorization,
+  normalizeTradeScheduleAuthorization,
+} from './schedule-authorization.js';
 
-export const TRADE_JOB_STORE_SCHEMA_VERSION = 3;
+export const TRADE_JOB_STORE_SCHEMA_VERSION = 4;
 export const TRADE_HISTORY_LIMIT = 100;
 export const TRADE_METRICS_SCHEMA_VERSION = 1;
 export const TRADE_METRICS_REASON_LIMIT = 20;
@@ -165,7 +169,7 @@ function relockedSnapshot(snapshot, at) {
       updatedAt: at,
     });
   }
-  return { ...snapshot, paused: true, liveExecutionEnabled: false, jobs, runtimes };
+  return { ...snapshot, paused: true, liveExecutionEnabled: false, authorization: null, jobs, runtimes };
 }
 
 export function normalizeTradeJobStore(input = {}, options = {}) {
@@ -207,6 +211,7 @@ export function normalizeTradeJobStore(input = {}, options = {}) {
     history,
     metrics,
     dispatch: normalizeTradeDispatchState(input.dispatch),
+    authorization: normalizeTradeScheduleAuthorization(input.authorization, jobs, { now }),
     updatedAt: Math.max(0, finiteNumber(input.updatedAt, now)),
   };
 }
@@ -231,7 +236,7 @@ export function createTradeJobStore(options = {}) {
 
   function upsert(input, normalizeOptions = {}) {
     let snapshot = read();
-    const relockedForChange = snapshot.liveExecutionEnabled === true;
+    const relockedForChange = snapshot.liveExecutionEnabled === true || snapshot.authorization !== null;
     if (relockedForChange) snapshot = relockedSnapshot(snapshot, Number(now()));
     const existing = snapshot.jobs.find((job) => job.id === String(input?.id || ''));
     const job = normalizeTradeJob({
@@ -255,7 +260,7 @@ export function createTradeJobStore(options = {}) {
   function remove(jobId) {
     const id = String(jobId || '');
     const current = read();
-    const snapshot = current.liveExecutionEnabled === true
+    const snapshot = current.liveExecutionEnabled === true || current.authorization !== null
       ? relockedSnapshot(current, Number(now()))
       : current;
     const runtimes = { ...snapshot.runtimes };
@@ -312,9 +317,51 @@ export function createTradeJobStore(options = {}) {
     return write({ ...read(), liveExecutionEnabled: value === true });
   }
 
+  function authorize(jobId) {
+    const snapshot = read();
+    const id = String(jobId || '');
+    const job = snapshot.jobs.find((entry) => entry.id === id);
+    if (!job) throw new Error(`Trade Job ${id} does not exist`);
+    const armed = snapshot.jobs.filter((entry) => entry.enabled === true && entry.armed === true && entry.schedule?.type !== 'manual');
+    if (armed.length !== 1 || armed[0].id !== id) throw new Error('Exactly one armed Trade Job is required');
+    return write({
+      ...snapshot,
+      paused: false,
+      liveExecutionEnabled: true,
+      authorization: createTradeScheduleAuthorization(job, { now: now() }),
+    });
+  }
+
+  function consumeAuthorization(jobId, runId) {
+    const snapshot = read();
+    const id = String(jobId || '');
+    const authorization = normalizeTradeScheduleAuthorization(snapshot.authorization, snapshot.jobs, { now: now() });
+    if (!authorization || authorization.jobId !== id) {
+      return { consumed: false, reason: 'schedule-authorization-missing-or-expired', snapshot: relock() };
+    }
+    if (authorization.lastRunId && authorization.lastRunId === String(runId || '')) {
+      return {
+        consumed: false,
+        reason: 'schedule-authorization-run-already-consumed',
+        snapshot,
+      };
+    }
+    const remainingRuns = authorization.remainingRuns - 1;
+    const next = {
+      ...authorization,
+      remainingRuns,
+      lastRunId: String(runId || ''),
+      lastConsumedAt: Number(now()),
+    };
+    if (remainingRuns < 1) {
+      return { consumed: true, remainingRuns: 0, snapshot: write(relockedSnapshot(snapshot, Number(now()))) };
+    }
+    return { consumed: true, remainingRuns, snapshot: write({ ...snapshot, authorization: next }) };
+  }
+
   function setMinimumRetainedCoins(value) {
     let snapshot = read();
-    if (snapshot.liveExecutionEnabled === true) snapshot = relockedSnapshot(snapshot, Number(now()));
+    if (snapshot.liveExecutionEnabled === true || snapshot.authorization !== null) snapshot = relockedSnapshot(snapshot, Number(now()));
     const minimumRetainedCoins = nullableNonNegativeInteger(value);
     if (value !== null && value !== undefined && value !== '' && minimumRetainedCoins === null) {
       throw new TypeError('Minimum retained coins must be a non-negative integer or null');
@@ -336,6 +383,8 @@ export function createTradeJobStore(options = {}) {
     replaceJobs,
     setPaused,
     setLiveExecutionEnabled,
+    authorize,
+    consumeAuthorization,
     setMinimumRetainedCoins,
     relock,
   });

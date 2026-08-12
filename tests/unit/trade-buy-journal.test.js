@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createTradeBuyJournal } from '../../src/trade/buy-journal.js';
+import { createFakeTradeAdapter } from '../../src/adapters/fake/trade.js';
+import {
+  createTradeBuyJournal,
+  reconcileResolvedTradeBuyJournal,
+} from '../../src/trade/buy-journal.js';
 
 function memoryStorage() {
   const values = new Map();
@@ -23,6 +27,10 @@ describe('Trade Buy persistent journal', () => {
       response: { success: true, status: 200, privatePayload: 'secret' },
       privateContext: 'secret',
     });
+    first.checkpoint('buy-run-1', {
+      phase: 'chunk-budget-waiting', chunkIndex: 2, offset: 2, quantity: 2,
+      required: 28, remaining: 20, retryAt: 6000,
+    });
 
     const reloaded = createTradeBuyJournal({ storage, key: 'journal', now: () => 2000 });
     expect(reloaded.snapshot()).toMatchObject({
@@ -30,10 +38,11 @@ describe('Trade Buy persistent journal', () => {
       jobId: 'buy-job-1',
       expectedDestination: 'transfer',
       status: 'active',
-      phase: 'buy-request-started',
+      phase: 'chunk-budget-waiting',
       events: [
         { phase: 'started' },
         { phase: 'buy-request-started', item: { id: 70, definitionId: 8401, pile: 'market' }, tradeId: 700, price: 900 },
+        { phase: 'chunk-budget-waiting', chunkIndex: 2, offset: 2, quantity: 2, required: 28, remaining: 20, retryAt: 6000 },
       ],
     });
     expect(JSON.stringify(reloaded.snapshot())).not.toContain('secret');
@@ -118,5 +127,46 @@ describe('Trade Buy persistent journal', () => {
     expect(() => completed.begin({
       runId: 'buy-next', jobId: 'buy-job', expectedDestination: 'auto', requested: 2,
     })).not.toThrow();
+  });
+
+  it('reconciles only an exact uncertain item already present at its recorded destination', () => {
+    const journal = createTradeBuyJournal({ storage: memoryStorage(), key: 'journal-reconcile', now: () => 1000 });
+    journal.begin({ runId: 'buy-uncertain', jobId: 'buy-job', expectedDestination: 'transfer', requested: 1 });
+    journal.checkpoint('buy-uncertain', {
+      phase: 'item-finished', itemIndex: 1, status: 'ambiguous', reason: 'purchase-not-reconciled',
+      item: { id: 70, definitionId: 8401, pile: 'market' }, tradeId: 1070, price: 900,
+      destination: 'transfer', mutationBoundaryCrossed: true,
+    });
+    journal.finish('buy-uncertain', { phase: 'receipt-recorded', status: 'ambiguous' });
+
+    const unresolved = reconcileResolvedTradeBuyJournal({
+      journal,
+      adapter: createFakeTradeAdapter({
+        items: [{ id: 70, definitionId: 8401, pile: 'unassigned', purchasePrice: 900 }],
+      }),
+      now: () => 2000,
+    });
+    expect(unresolved).toMatchObject({
+      status: 'blocked', reason: 'buy-journal-item-destination-unconfirmed',
+      items: [{ item: { id: 70, pile: 'unassigned' }, destination: 'transfer', resolved: false }],
+    });
+    expect(journal.inspectRecovery()).toMatchObject({ canSupersede: false });
+
+    const reconciled = reconcileResolvedTradeBuyJournal({
+      journal,
+      adapter: createFakeTradeAdapter({
+        items: [{ id: 70, definitionId: 8401, pile: 'transfer', purchasePrice: 900 }],
+      }),
+      now: () => 3000,
+    });
+    expect(reconciled).toMatchObject({
+      status: 'reconciled', reason: 'buy-journal-reconciled-retry-required',
+      items: [{ item: { id: 70, pile: 'transfer' }, resolved: true }],
+    });
+    expect(journal.snapshot()).toMatchObject({
+      status: 'completed', phase: 'journal-reconciliation-completed',
+      items: [{ index: 1, status: 'purchased', mutationBoundaryCrossed: true }],
+    });
+    expect(journal.inspectRecovery()).toMatchObject({ canSupersede: true, uncertainMutation: false });
   });
 });

@@ -83,7 +83,10 @@ describe('Trade Buy dialog', () => {
     expect(execute.disabled).toBe(false);
     await execute.click();
 
-    expect(onExecute).toHaveBeenCalledWith({ confirmationText: 'BUY 1 MAX 1000', expectedDestination: 'auto', platform: 'pc' });
+    expect(onExecute).toHaveBeenCalledWith(
+      { confirmationText: 'BUY 1 MAX 1000', expectedDestination: 'auto', platform: 'pc' },
+      expect.any(Function),
+    );
     expect(ui.byId('bronze-loop-trade-buy-status').textContent).toBe('completed');
     expect(ui.created.some((element) => element.textContent.includes('1 purchased'))).toBe(true);
     expect(execute.disabled).toBe(true);
@@ -113,11 +116,14 @@ describe('Trade Buy dialog', () => {
     confirmation.value = 'BUY 1 TO TRANSFER MAX 1000';
     confirmation.input();
     await execute.click();
-    expect(onExecute).toHaveBeenCalledWith({
-      confirmationText: 'BUY 1 TO TRANSFER MAX 1000',
-      expectedDestination: 'transfer',
-      platform: 'pc',
-    });
+    expect(onExecute).toHaveBeenCalledWith(
+      {
+        confirmationText: 'BUY 1 TO TRANSFER MAX 1000',
+        expectedDestination: 'transfer',
+        platform: 'pc',
+      },
+      expect.any(Function),
+    );
   });
 
   it('exports Preview and receipt diagnostics without allowing a second execution', async () => {
@@ -168,8 +174,88 @@ describe('Trade Buy dialog', () => {
     confirmation.value = 'BUY 2 MAX 1000';
     confirmation.input();
     await execute.click();
-    expect(onExecute).toHaveBeenCalledWith({
-      confirmationText: 'BUY 2 MAX 1000', expectedDestination: 'auto', platform: 'pc',
+    expect(onExecute).toHaveBeenCalledWith(
+      { confirmationText: 'BUY 2 MAX 1000', expectedDestination: 'auto', platform: 'pc' },
+      expect.any(Function),
+    );
+  });
+
+  it('allows a newly confirmed Run in the same dialog after exact Journal reconciliation', async () => {
+    const ui = uiHarness();
+    const onExecute = vi.fn()
+      .mockResolvedValueOnce({
+        status: 'blocked', reason: 'buy-journal-reconciled-retry-required',
+        requested: 0, succeeded: 0, failed: 0, skipped: 0, receipts: [],
+      })
+      .mockResolvedValueOnce({
+        status: 'completed', reason: null,
+        requested: 1, succeeded: 1, failed: 0, skipped: 0,
+        receipts: [{ status: 'purchased', index: 1, rating: 84, price: 900, destination: 'club' }],
+      });
+    showTradeBuyDialog({
+      dom: ui.dom,
+      job: buyJob(),
+      preview: { plan: { ready: true }, summary: { definitions: 50 } },
+      onExecute,
     });
+    const confirmation = ui.byId('bronze-loop-trade-buy-confirmation');
+    const execute = ui.byId('bronze-loop-trade-buy-execute');
+    confirmation.value = 'BUY 1 MAX 1000';
+    confirmation.input();
+    await execute.click();
+
+    expect(ui.byId('bronze-loop-trade-buy-status').textContent).toContain('No new Buy was sent');
+    expect(confirmation.value).toBe('');
+    expect(execute.disabled).toBe(true);
+
+    confirmation.value = 'BUY 1 MAX 1000';
+    confirmation.input();
+    expect(execute.disabled).toBe(false);
+    await execute.click();
+    expect(onExecute).toHaveBeenCalledTimes(2);
+    expect(ui.byId('bronze-loop-trade-buy-status').textContent).toBe('completed');
+  });
+
+  it('shows completed-item and request-capacity progress while a later chunk waits locally', async () => {
+    const ui = uiHarness();
+    let finishRun;
+    const onExecute = vi.fn((_input, onProgress) => {
+      onProgress({ phase: 'chunk-started', at: 1000, chunkIndex: 1, quantity: 2, required: 28 });
+      onProgress({
+        phase: 'item-finished', at: 1200, chunkIndex: 1, itemIndex: 1,
+        status: 'purchased', destination: 'club',
+      });
+      onProgress({ phase: 'chunk-started', at: 1500, chunkIndex: 2, quantity: 2, required: 28 });
+      onProgress({
+        phase: 'chunk-budget-waiting', at: 2000, chunkIndex: 2,
+        required: 28, remaining: 21, retryAt: 6000,
+      });
+      return new Promise((resolve) => { finishRun = resolve; });
+    });
+    showTradeBuyDialog({
+      dom: ui.dom,
+      job: buyJob({ ratingMax: 86, quantity: 4, totalBudget: 4000 }),
+      preview: { plan: { ready: true }, summary: { definitions: 150 } },
+      onExecute,
+      now: () => 2000,
+      setInterval: vi.fn(() => 1),
+      clearInterval: vi.fn(),
+    });
+    const confirmation = ui.byId('bronze-loop-trade-buy-confirmation');
+    confirmation.value = 'BUY 4 MAX 1000';
+    confirmation.input();
+    const execution = ui.byId('bronze-loop-trade-buy-execute').click();
+
+    expect(ui.byId('bronze-loop-trade-buy-status').textContent).toBe(
+      'Chunk 2 waiting for request capacity: needs 28, 21 remaining; retry in about 4s | 1/4 item(s) finished',
+    );
+    expect(ui.byId('bronze-loop-trade-buy-stop').style.display).toBe('');
+
+    finishRun({
+      status: 'stopped', reason: 'stopped-by-user', requested: 4,
+      succeeded: 1, failed: 0, skipped: 3, receipts: [],
+    });
+    await execution;
+    expect(ui.byId('bronze-loop-trade-buy-status').textContent).toBe('stopped (stopped-by-user)');
   });
 });

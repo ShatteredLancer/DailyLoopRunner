@@ -115,6 +115,52 @@ describe('Trade Scheduler dialog', () => {
     expect(onSaveJob).toHaveBeenCalledWith(expect.objectContaining({ armed: false, schedule: { type: 'manual' } }));
   });
 
+  it('saves per-rating Buy quantities and Listing quote fallback from the editor', () => {
+    const buyUi = uiHarness();
+    const onSaveBuy = vi.fn();
+    showTradeSchedulerDialog({
+      dom: buyUi.dom,
+      snapshot: schedulerSnapshot(),
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      onSaveJob: onSaveBuy,
+    });
+    buyUi.byId('bronze-loop-trade-new-buy').click();
+    buyUi.byId('bronze-loop-trade-job-ratingMax').value = '86';
+    buyUi.byId('bronze-loop-trade-job-quantity').value = '4';
+    buyUi.byId('bronze-loop-trade-job-totalBudget').value = '4000';
+    buyUi.byId('bronze-loop-trade-job-rating-quantities').value = '84=2, 85=1, 86=1';
+    buyUi.byId('bronze-loop-trade-job-save').click();
+    expect(onSaveBuy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'buy',
+      policy: expect.objectContaining({
+        ratingMin: 84,
+        ratingMax: 86,
+        quantity: 4,
+        totalBudget: 4000,
+        ratingQuantityOverrides: { 84: 2, 85: 1, 86: 1 },
+      }),
+    }));
+
+    const listingUi = uiHarness();
+    const onSaveListing = vi.fn();
+    showTradeSchedulerDialog({
+      dom: listingUi.dom,
+      snapshot: schedulerSnapshot(),
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      onSaveJob: onSaveListing,
+    });
+    listingUi.byId('bronze-loop-trade-new-listing').click();
+    listingUi.byId('bronze-loop-trade-job-market-enabled').checked = true;
+    listingUi.byId('bronze-loop-trade-job-quote-fallback').value = 'skip';
+    listingUi.byId('bronze-loop-trade-job-save').click();
+    expect(onSaveListing).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'listing',
+      policy: expect.objectContaining({
+        marketOverride: expect.objectContaining({ enabled: true, fallbackPolicy: 'skip' }),
+      }),
+    }));
+  });
+
   it('keeps automatic execution locked while allowing Jobs and manual Listing entry', () => {
     const ui = uiHarness();
     const job = normalizeTradeJobEditorValue({
@@ -400,7 +446,8 @@ describe('Trade Scheduler dialog', () => {
     expect(ui.created.filter((element) => element.textContent === 'Buy one')).toHaveLength(0);
     await ui.created.find((element) => element.textContent === 'Preview').click();
     expect(onPreviewBuyJob).toHaveBeenCalledWith(job);
-    expect(ui.created.some((element) => element.textContent.includes('Preview only | 84: 2 player ID(s), max 1,000'))).toBe(true);
+    expect(ui.created.some((element) => element.textContent.includes('Preview only | 84: 2 player ID(s), max 1,000, quota Run cap'))).toBe(true);
+    expect(ui.created.some((element) => element.textContent.includes('Budget 1,000 | Runtime 15 min | Chunk 2 / reserve up to 14'))).toBe(true);
     expect(ui.byId('bronze-loop-trade-scheduler-status').textContent).toContain('Buy 1 is available');
     const buy = ui.byId(`bronze-loop-trade-buy-one-${job.id}`);
     expect(buy).toBeTruthy();

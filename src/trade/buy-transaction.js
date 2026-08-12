@@ -37,6 +37,10 @@ export function createBuyTransaction(options = {}) {
   const createRunId = typeof options.createRunId === 'function'
     ? options.createRunId
     : () => `buy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const purchaseReconciliationAttempts = Math.min(
+    3,
+    Math.max(1, Math.floor(Number(options.purchaseReconciliationAttempts || 3))),
+  );
 
   async function run(input = {}) {
     const job = input.job;
@@ -45,6 +49,7 @@ export function createBuyTransaction(options = {}) {
     const runId = String(input.runId || createRunId());
     const startedAt = Number(now());
     const requested = Number(job.policy.quantity);
+    const itemIndexOffset = Math.max(0, Math.floor(Number(input.itemIndexOffset || 0)));
     const receipts = [];
     let succeeded = 0;
     let failed = 0;
@@ -55,6 +60,8 @@ export function createBuyTransaction(options = {}) {
     let status = 'completed';
     let reason = null;
     let cursor = null;
+    const purchasedByRating = Object.fromEntries(Object.entries(input.purchasedByRating || {})
+      .map(([rating, count]) => [String(Number(rating)), Math.max(0, Math.floor(Number(count) || 0))]));
     const expectedDestination = normalizeExpectedBuyDestination(input.expectedDestination || 'auto');
     const minimumRetainedCoins = Math.max(0, Math.floor(finiteNumber(input.minimumRetainedCoins)));
     const checkpoint = (phase, detail = {}) => {
@@ -76,10 +83,6 @@ export function createBuyTransaction(options = {}) {
     else if (expectedDestination === 'transfer' && Number(beforeCapabilities.transferCapacity?.free) <= 0) {
       stop('blocked', 'transfer-list-full');
     }
-    else {
-      const readiness = adapter.inspectUnassignedReadiness();
-      if (readiness.ready !== true) stop('blocked', readiness.reason || 'unassigned-not-ready');
-    }
 
     let lanePlan = null;
     if (!reason) {
@@ -96,7 +99,7 @@ export function createBuyTransaction(options = {}) {
         destination: expectedDestination,
       });
       lanePlan = buildBuyLanePlan({ job, catalog: destinationCatalog.catalog, runId });
-      cursor = lanePlan.cursor;
+      cursor = input.cursor ? { ...lanePlan.cursor, ...input.cursor } : lanePlan.cursor;
       if (destinationCatalog.reason) stop('blocked', destinationCatalog.reason);
       else if (!catalog.ok || !lanePlan.ready) stop('blocked', `catalog-ratings-unavailable:${lanePlan.missingRatings.join(',')}`);
     }
@@ -115,21 +118,20 @@ export function createBuyTransaction(options = {}) {
         stop('stopped', 'budget-limit');
         break;
       }
-      const readiness = adapter.inspectUnassignedReadiness();
-      if (readiness.ready !== true) {
-        stop('blocked', readiness.reason || 'unassigned-not-ready');
-        break;
-      }
       const searchCircuit = options.circuitBreaker?.availability?.();
       if (searchCircuit && searchCircuit.allowed !== true) {
         stop('blocked', 'trade-circuit-open');
         break;
       }
-      const next = nextBuySearch(lanePlan, cursor);
+      const excludedRatings = lanePlan.lanes
+        .filter((lane) => lane.quantityLimit !== null
+          && Number(purchasedByRating[String(lane.rating)] || 0) >= Number(lane.quantityLimit))
+        .map((lane) => lane.rating);
+      const next = nextBuySearch(lanePlan, cursor, { excludedRatings });
       cursor = next.cursor;
       const search = next.search;
       if (!search) {
-        stop('blocked', 'buy-search-plan-unavailable');
+        stop('stopped', excludedRatings.length === lanePlan.lanes.length ? 'rating-quantity-limit' : 'buy-search-plan-unavailable');
         break;
       }
       searches += 1;
@@ -166,7 +168,7 @@ export function createBuyTransaction(options = {}) {
       if (!selected.selected) {
         emptySearches += 1;
         receipts.push({
-          index: receipts.length + 1, status: 'empty-search', search: { ...search },
+          index: itemIndexOffset + receipts.length + 1, status: 'empty-search', search: { ...search },
           candidates: searchResult.candidates?.length || 0, rejectionCounts: selected.rejectionCounts,
         });
         if (emptySearches >= Number(job.policy.maxConsecutiveEmptySearches)) {
@@ -232,8 +234,9 @@ export function createBuyTransaction(options = {}) {
       const purchaseRef = { ...item, tradeId: Number(candidate.auction.tradeId), price };
       const coinsBeforePurchase = Number(liveCapabilities.coins);
       buyAttempts += 1;
+      const itemIndex = itemIndexOffset + buyAttempts;
       checkpoint('buy-request-started', {
-        itemIndex: buyAttempts,
+        itemIndex,
         item,
         tradeId: purchaseRef.tradeId,
         price,
@@ -243,7 +246,7 @@ export function createBuyTransaction(options = {}) {
       });
       const bought = await adapter.buyNowItem(purchaseRef, price);
       checkpoint('buy-response-received', {
-        itemIndex: buyAttempts,
+        itemIndex,
         item,
         tradeId: purchaseRef.tradeId,
         price,
@@ -256,22 +259,30 @@ export function createBuyTransaction(options = {}) {
       let refresh = null;
       let afterPurchaseCapabilities = adapter.inspectCapabilities();
       if (['accepted', 'ambiguous'].includes(bought.status)) {
-        checkpoint('purchase-reconciliation-started', {
-          itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination, mutationBoundaryCrossed: true,
-        });
-        refresh = await adapter.refreshPurchaseState({ ambiguity: bought.status === 'ambiguous' });
-        afterPurchaseCapabilities = adapter.inspectCapabilities();
-        purchase = adapter.inspectPurchase(purchaseRef);
-        checkpoint('purchase-reconciliation-finished', {
-          itemIndex: buyAttempts,
-          item: purchase?.candidate?.item || item,
-          tradeId: purchaseRef.tradeId,
-          price,
-          destination,
-          status: refresh.status,
-          response: refresh.response,
-          mutationBoundaryCrossed: true,
-        });
+        for (let attempt = 1; attempt <= purchaseReconciliationAttempts; attempt += 1) {
+          checkpoint('purchase-reconciliation-started', {
+            itemIndex, item, tradeId: purchaseRef.tradeId, price, destination,
+            reason: `attempt-${attempt}`, mutationBoundaryCrossed: true,
+          });
+          refresh = await adapter.refreshPurchaseState({
+            ambiguity: bought.status === 'ambiguous' || attempt === purchaseReconciliationAttempts,
+          });
+          afterPurchaseCapabilities = adapter.inspectCapabilities();
+          purchase = adapter.inspectPurchase(purchaseRef);
+          checkpoint('purchase-reconciliation-finished', {
+            itemIndex,
+            item: purchase?.candidate?.item || item,
+            tradeId: purchaseRef.tradeId,
+            price,
+            destination,
+            status: refresh.status,
+            reason: purchase?.status === 'loaded' ? `materialized-attempt-${attempt}` : `pending-attempt-${attempt}`,
+            response: refresh.response,
+            mutationBoundaryCrossed: true,
+          });
+          if (refresh.status !== 'completed' || purchase?.status === 'loaded') break;
+          if (attempt < purchaseReconciliationAttempts) await sleep(attempt * 750);
+        }
       }
       if (refresh && refresh.status !== 'completed') {
         const classification = classifyTradeError(refresh.error || refresh.response || { kind: refresh.status });
@@ -290,12 +301,12 @@ export function createBuyTransaction(options = {}) {
             : classification.opensCircuit ? `trade-${classification.kind}` : 'purchase-refresh-not-reconciled',
         );
         receipts.push({
-          index: receipts.length + 1, status, reason, item, tradeId: purchaseRef.tradeId, price,
+          index: itemIndex, status, reason, item, tradeId: purchaseRef.tradeId, price,
           priceLimit: Number(search.maxBuyNow), coinsBefore: coinsBeforePurchase,
           coinsAfter: Number(afterPurchaseCapabilities.coins), search: { ...search }, refresh,
         });
         checkpoint('item-finished', {
-          itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination,
+          itemIndex, item, tradeId: purchaseRef.tradeId, price, destination,
           status, reason, mutationBoundaryCrossed: true,
         });
         break;
@@ -314,9 +325,9 @@ export function createBuyTransaction(options = {}) {
           }
         }
         if (classification.kind === 'competition-lost') {
-          receipts.push({ index: receipts.length + 1, status: 'competition-lost', item, tradeId: purchaseRef.tradeId, price, search: { ...search } });
+          receipts.push({ index: itemIndex, status: 'competition-lost', item, tradeId: purchaseRef.tradeId, price, search: { ...search } });
           checkpoint('item-finished', {
-            itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination,
+            itemIndex, item, tradeId: purchaseRef.tradeId, price, destination,
             status: 'competition-lost', reason: classification.kind, mutationBoundaryCrossed: true,
           });
           if (buyAttempts >= maxBuyAttempts) {
@@ -337,13 +348,13 @@ export function createBuyTransaction(options = {}) {
             : 'purchase-not-reconciled',
         );
         receipts.push({
-          index: receipts.length + 1, status, reason, item, tradeId: purchaseRef.tradeId, price,
+          index: itemIndex, status, reason, item, tradeId: purchaseRef.tradeId, price,
           priceLimit: Number(search.maxBuyNow), coinsBefore: coinsBeforePurchase,
           coinsAfter: Number(afterPurchaseCapabilities.coins), search: { ...search }, adapterStatus: bought.status,
           response: bought.response, error: bought.error,
         });
         checkpoint('item-finished', {
-          itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination,
+          itemIndex, item, tradeId: purchaseRef.tradeId, price, destination,
           status, reason, mutationBoundaryCrossed: true,
         });
         break;
@@ -352,12 +363,12 @@ export function createBuyTransaction(options = {}) {
         failed += 1;
         stop('ambiguous', 'purchase-coin-change-not-reconciled');
         receipts.push({
-          index: receipts.length + 1, status: 'ambiguous', reason, item, tradeId: purchaseRef.tradeId, price,
+          index: itemIndex, status: 'ambiguous', reason, item, tradeId: purchaseRef.tradeId, price,
           priceLimit: Number(search.maxBuyNow), coinsBefore: coinsBeforePurchase,
           coinsAfter: Number(afterPurchaseCapabilities.coins), search: { ...search }, adapterStatus: bought.status,
         });
         checkpoint('item-finished', {
-          itemIndex: buyAttempts, item, tradeId: purchaseRef.tradeId, price, destination,
+          itemIndex, item, tradeId: purchaseRef.tradeId, price, destination,
           status: 'ambiguous', reason, mutationBoundaryCrossed: true,
         });
         break;
@@ -365,12 +376,12 @@ export function createBuyTransaction(options = {}) {
 
       const purchasedRef = { ...purchase.candidate.item, tradeId: purchaseRef.tradeId, price };
       checkpoint('purchase-route-started', {
-        itemIndex: buyAttempts, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+        itemIndex, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
         mutationBoundaryCrossed: true,
       });
       const routed = await adapter.routePurchasedItem(purchasedRef, destination);
       checkpoint('purchase-route-finished', {
-        itemIndex: buyAttempts,
+        itemIndex,
         item: routed.item || purchasedRef,
         tradeId: purchaseRef.tradeId,
         price,
@@ -388,23 +399,23 @@ export function createBuyTransaction(options = {}) {
             : routed.status === 'destination-full' ? 'transfer-list-full' : `purchase-route-${routed.status}`,
         );
         receipts.push({
-          index: receipts.length + 1, status: 'blocked', reason, item: purchasedRef,
+          index: itemIndex, status: 'blocked', reason, item: purchasedRef,
           tradeId: purchaseRef.tradeId, price, priceLimit: Number(search.maxBuyNow),
           coinsBefore: coinsBeforePurchase, coinsAfter: Number(afterPurchaseCapabilities.coins), destination, route: routed,
         });
         checkpoint('item-finished', {
-          itemIndex: buyAttempts, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+          itemIndex, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
           status: 'blocked', reason, mutationBoundaryCrossed: true,
         });
         break;
       }
       checkpoint('route-verification-refresh-started', {
-        itemIndex: buyAttempts, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+        itemIndex, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
         mutationBoundaryCrossed: true,
       });
       const routeRefresh = await adapter.refreshPurchaseState({ destination });
       checkpoint('route-verification-refresh-finished', {
-        itemIndex: buyAttempts,
+        itemIndex,
         item: purchasedRef,
         tradeId: purchaseRef.tradeId,
         price,
@@ -415,7 +426,7 @@ export function createBuyTransaction(options = {}) {
       });
       const verified = adapter.inspectPurchase({ ...purchasedRef, pile: destination });
       checkpoint('route-verification-inspected', {
-        itemIndex: buyAttempts,
+        itemIndex,
         item: verified.candidate?.item || purchasedRef,
         tradeId: purchaseRef.tradeId,
         price,
@@ -432,22 +443,23 @@ export function createBuyTransaction(options = {}) {
             : 'purchase-routed-but-not-verified',
         );
         receipts.push({
-          index: receipts.length + 1, status: 'ambiguous', reason, item: purchasedRef,
+          index: itemIndex, status: 'ambiguous', reason, item: purchasedRef,
           tradeId: purchaseRef.tradeId, price, priceLimit: Number(search.maxBuyNow),
           coinsBefore: coinsBeforePurchase, coinsAfter: Number(afterPurchaseCapabilities.coins),
           destination, route: routed, verification: verified,
         });
         checkpoint('item-finished', {
-          itemIndex: buyAttempts, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+          itemIndex, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
           status: 'ambiguous', reason, mutationBoundaryCrossed: true,
         });
         break;
       }
       succeeded += 1;
       spent += price;
+      purchasedByRating[String(candidate.rating)] = Number(purchasedByRating[String(candidate.rating)] || 0) + 1;
       options.circuitBreaker?.recordSuccess?.({ action: 'buy', jobId: job.id, runId });
       receipts.push({
-        index: receipts.length + 1,
+        index: itemIndex,
         status: 'purchased',
         item,
         tradeId: purchaseRef.tradeId,
@@ -461,7 +473,7 @@ export function createBuyTransaction(options = {}) {
         verification: { item: { ...verified.candidate.item }, purchasePrice: verified.purchasePrice },
       });
       checkpoint('item-finished', {
-        itemIndex: buyAttempts,
+        itemIndex,
         item: { ...purchasedRef, pile: destination },
         tradeId: purchaseRef.tradeId,
         price,
@@ -486,6 +498,7 @@ export function createBuyTransaction(options = {}) {
       coinsAfter: afterCapabilities.coins,
       receipts: [{
         status: 'run-summary', searches, buyAttempts, spent, expectedDestination, minimumRetainedCoins, cursor,
+        purchasedByRating,
       }, ...receipts],
     });
   }

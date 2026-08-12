@@ -56,6 +56,7 @@ describe('Trade Buy Transaction', () => {
   it('buys two adjacent rating lanes and preserves per-item routing receipts', async () => {
     const adapter = createFakeTradeAdapter({
       coins: 5000,
+      items: [{ id: 5, definitionId: 9999, pile: 'unassigned', type: 'player', rating: 75, tier: 'gold', rare: false }],
       marketItems: [marketItem(70, 8401, 900), { ...marketItem(71, 8501, 1000), rating: 85 }],
     });
     const provider = {
@@ -82,6 +83,7 @@ describe('Trade Buy Transaction', () => {
       expect.objectContaining({ rating: expect.any(Number), destination: 'club' }),
     ]);
     expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(2);
+    expect(adapter.inspectUnassignedReadiness()).toMatchObject({ ready: false, count: 1, reason: 'unassigned-not-empty' });
   });
 
   it('preserves one purchase and never attempts beyond an ambiguous second Buy', async () => {
@@ -186,11 +188,19 @@ describe('Trade Buy Transaction', () => {
     expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
   });
 
-  it('stops before search when Unassigned is not ready', async () => {
-    const adapter = createFakeTradeAdapter({ coins: 5000, unassignedReady: false, marketItems: [marketItem()] });
+  it('allows an unrelated Unassigned item while routing the exact purchase', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      items: [{ id: 5, definitionId: 9999, pile: 'unassigned', type: 'player', rating: 75, tier: 'gold', rare: false }],
+      marketItems: [marketItem()],
+    });
     const result = await transaction(adapter, catalog()).run({ job: job() });
-    expect(result).toMatchObject({ status: 'blocked', reason: 'unassigned-not-empty', succeeded: 0 });
-    expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
+    expect(result).toMatchObject({
+      status: 'completed', reason: null, succeeded: 1,
+      receipts: [expect.anything(), expect.objectContaining({ status: 'purchased', destination: 'club' })],
+    });
+    expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(1);
+    expect(adapter.inspectUnassignedReadiness()).toMatchObject({ ready: false, count: 1, reason: 'unassigned-not-empty' });
   });
 
   it('reconciles an ambiguous response once and never repeats a successful purchase', async () => {
@@ -202,6 +212,35 @@ describe('Trade Buy Transaction', () => {
     const result = await transaction(adapter, catalog()).run({ job: job() });
     expect(result).toMatchObject({ status: 'completed', succeeded: 1, coinsAfter: 4100 });
     expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(1);
+  });
+
+  it('waits for an accepted purchase to materialize before routing it', async () => {
+    const base = createFakeTradeAdapter({ coins: 5000, marketItems: [marketItem()] });
+    let inspections = 0;
+    const adapter = {
+      ...base,
+      inspectPurchase: vi.fn((ref) => {
+        inspections += 1;
+        return inspections < 3
+          ? { status: 'not-found', candidate: null, purchasePrice: null }
+          : base.inspectPurchase(ref);
+      }),
+    };
+    const sleeps = [];
+    const result = await createBuyTransaction({
+      tradeAdapter: adapter,
+      playerCatalogProvider: catalog(),
+      now: () => 1000,
+      sleep: async (ms) => sleeps.push(ms),
+      random: () => 0,
+      createRunId: () => 'buy-delayed-materialization',
+    }).run({ job: job() });
+
+    expect(result).toMatchObject({ status: 'completed', succeeded: 1, failed: 0 });
+    expect(adapter.calls.filter((call) => call.method === 'refreshPurchaseState')).toHaveLength(4);
+    expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(1);
+    expect(adapter.calls.filter((call) => call.method === 'routePurchasedItem')).toHaveLength(1);
+    expect(sleeps).toEqual([750, 1500]);
   });
 
   it('stops ambiguous when a materialized item has no matching coin debit evidence', async () => {

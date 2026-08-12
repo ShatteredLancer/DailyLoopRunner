@@ -1,6 +1,6 @@
 export const TRADE_LISTING_JOURNAL_SCHEMA_VERSION = 1;
 export const TRADE_LISTING_JOURNAL_EVENT_LIMIT = 80;
-export const TRADE_LISTING_JOURNAL_ITEM_LIMIT = 2;
+export const TRADE_LISTING_JOURNAL_ITEM_LIMIT = 4;
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -35,6 +35,12 @@ function safeEvent(input = {}) {
     at: Math.max(0, safeNumber(input.at) ?? Date.now()),
     phase: String(input.phase || 'unknown'),
     itemIndex: safeNumber(input.itemIndex),
+    chunkIndex: safeNumber(input.chunkIndex),
+    offset: safeNumber(input.offset),
+    quantity: safeNumber(input.quantity),
+    required: safeNumber(input.required),
+    remaining: safeNumber(input.remaining),
+    retryAt: safeNumber(input.retryAt),
     status: input.status ? String(input.status) : null,
     reason: input.reason ? String(input.reason).slice(0, 160) : null,
     mutationBoundaryCrossed: input.mutationBoundaryCrossed === true,

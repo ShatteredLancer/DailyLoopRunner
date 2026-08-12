@@ -27,6 +27,49 @@ function formatCoins(value) {
   return Number.isFinite(number) ? number.toLocaleString('en-US') : '?';
 }
 
+function formatProgress(checkpoint, progress, now) {
+  const phase = String(checkpoint?.phase || 'running');
+  const chunkIndex = Number(checkpoint?.chunkIndex || progress.chunkIndex || 1);
+  const completed = progress.completedItems.size;
+  const suffix = `${completed}/${progress.quantity} item(s) finished`;
+  if (phase === 'preview-started') return `Refreshing Buy preview | ${suffix}`;
+  if (phase === 'validation-destination-filter-started') return `Checking ${checkpoint.destination || 'auto'} routing | ${suffix}`;
+  if (phase === 'chunk-started') {
+    return `Chunk ${chunkIndex}: reserving capacity for ${checkpoint.quantity || '?'} item(s) | ${suffix}`;
+  }
+  if (phase === 'chunk-budget-waiting') {
+    const retryAt = Number(checkpoint.retryAt || 0);
+    const waitSeconds = retryAt > 0 ? Math.max(0, Math.ceil((retryAt - Number(now())) / 1000)) : null;
+    const wait = waitSeconds === null ? 'retry time unavailable' : `retry in about ${waitSeconds}s`;
+    return `Chunk ${chunkIndex} waiting for request capacity: needs ${checkpoint.required || '?'}, ${checkpoint.remaining ?? '?'} remaining; ${wait} | ${suffix}`;
+  }
+  if (phase === 'market-search-started') {
+    return `Chunk ${chunkIndex}: searching ${checkpoint.search?.rating || '?'} OVR up to ${formatCoins(checkpoint.search?.maxBuyNow)} | ${suffix}`;
+  }
+  if (phase === 'buy-request-started') {
+    return `Item ${checkpoint.itemIndex || '?'}: sending Buy Now at ${formatCoins(checkpoint.price)} | ${suffix}`;
+  }
+  if (phase === 'purchase-reconciliation-started') {
+    return `Item ${checkpoint.itemIndex || '?'}: confirming EA purchase (${checkpoint.reason || 'pending'}) | ${suffix}`;
+  }
+  if (phase === 'purchase-route-started') {
+    return `Item ${checkpoint.itemIndex || '?'}: routing to ${checkpoint.destination || 'inventory'} | ${suffix}`;
+  }
+  if (phase === 'route-verification-refresh-started') {
+    return `Item ${checkpoint.itemIndex || '?'}: verifying ${checkpoint.destination || 'inventory'} destination | ${suffix}`;
+  }
+  if (phase === 'item-finished') {
+    const result = checkpoint.status === 'purchased'
+      ? `purchased and verified in ${checkpoint.destination || 'inventory'}`
+      : `${checkpoint.status || 'finished'}${checkpoint.reason ? ` (${checkpoint.reason})` : ''}`;
+    return `Item ${checkpoint.itemIndex || '?'} ${result} | ${suffix}`;
+  }
+  if (phase === 'chunk-finished') {
+    return `Chunk ${chunkIndex} ${checkpoint.status || 'finished'}${checkpoint.reason ? ` (${checkpoint.reason})` : ''} | ${suffix}`;
+  }
+  return `Guarded Buy: ${phase} | ${suffix}`;
+}
+
 function textRow(dom, label, value) {
   const row = styles(dom.create('div'), {
     display: 'grid', gridTemplateColumns: 'minmax(110px, .7fr) minmax(0, 1.3fr)', gap: '8px',
@@ -58,11 +101,19 @@ export function showTradeBuyDialog(options = {}) {
   const mode = readResponsiveUiMode(dom);
   const gate = inspectManualBuyValidationJob(options.job || {});
   const preview = options.preview || null;
+  const quantity = Number(gate.job?.policy?.quantity || 1);
   let receipt = null;
   let error = null;
   let running = false;
   let recapPage = 1;
   let expectedDestination = 'auto';
+  let executionLocked = false;
+  let progressTimer = null;
+  let waitingCheckpoint = null;
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  const scheduleInterval = typeof options.setInterval === 'function' ? options.setInterval : globalThis.setInterval;
+  const cancelInterval = typeof options.clearInterval === 'function' ? options.clearInterval : globalThis.clearInterval;
+  const progress = { chunkIndex: 0, completedItems: new Set(), quantity };
 
   const overlay = styles(dom.create('div'), {
     position: 'fixed', inset: '0', zIndex: '1000002', background: 'rgba(0,0,0,.74)', display: 'flex',
@@ -76,7 +127,6 @@ export function showTradeBuyDialog(options = {}) {
   });
   const heading = styles(dom.create('div'), { display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' });
   const title = styles(dom.create('div'), { fontSize: '17px', fontWeight: '700' });
-  const quantity = Number(gate.job?.policy?.quantity || 1);
   title.textContent = 'Guarded Buy Validation';
   const badge = styles(dom.create('span'), { color: '#9fb2c9', fontSize: '11px', border: '1px solid #536276', padding: '4px 7px' });
   badge.textContent = `Manual / max ${quantity} item${quantity === 1 ? '' : 's'}`;
@@ -164,13 +214,37 @@ export function showTradeBuyDialog(options = {}) {
 
   function update() {
     const ready = gate.ready && preview?.plan?.ready === true && confirmation.value === requiredText();
-    execute.disabled = running || receipt !== null || !ready;
-    destination.disabled = running || receipt !== null || !gate.ready;
-    confirmation.disabled = running || receipt !== null || !gate.ready;
+    execute.disabled = running || executionLocked || !ready;
+    destination.disabled = running || executionLocked || !gate.ready;
+    confirmation.disabled = running || executionLocked || !gate.ready;
     close.disabled = running;
     diagnostics.disabled = running || (!preview && !receipt && !error);
     stop.style.display = running ? '' : 'none';
     stop.disabled = !running;
+  }
+
+  function stopProgressTimer() {
+    if (progressTimer !== null) cancelInterval?.(progressTimer);
+    progressTimer = null;
+  }
+
+  function renderProgress(checkpoint) {
+    if (!running || !checkpoint) return;
+    status.textContent = formatProgress(checkpoint, progress, now);
+  }
+
+  function handleProgress(checkpoint = {}) {
+    if (!running) return;
+    if (Number(checkpoint.chunkIndex) > 0) progress.chunkIndex = Number(checkpoint.chunkIndex);
+    if (checkpoint.phase === 'item-finished' && Number(checkpoint.itemIndex) > 0) {
+      progress.completedItems.add(Number(checkpoint.itemIndex));
+    }
+    waitingCheckpoint = checkpoint.phase === 'chunk-budget-waiting' ? { ...checkpoint } : null;
+    stopProgressTimer();
+    renderProgress(checkpoint);
+    if (waitingCheckpoint && typeof scheduleInterval === 'function') {
+      progressTimer = scheduleInterval(() => renderProgress(waitingCheckpoint), 1000);
+    }
   }
 
   destination.addEventListener('change', () => {
@@ -186,29 +260,51 @@ export function showTradeBuyDialog(options = {}) {
   execute.addEventListener('click', async () => {
     if (execute.disabled) return;
     running = true;
+    executionLocked = false;
+    receipt = null;
     error = null;
+    output.textContent = '';
+    waitingCheckpoint = null;
+    progress.chunkIndex = 0;
+    progress.completedItems.clear();
     status.textContent = `Guarded Buy validation running for up to ${quantity} items`;
     update();
     try {
-      receipt = await options.onExecute?.({
-        confirmationText: confirmation.value,
-        expectedDestination,
-        platform: 'pc',
-      });
+      receipt = await options.onExecute?.(
+        {
+          confirmationText: confirmation.value,
+          expectedDestination,
+          platform: 'pc',
+        },
+        handleProgress,
+      );
       if (!receipt) throw new Error('Buy receipt is unavailable');
-      status.textContent = `${receipt.status}${receipt.reason ? ` (${receipt.reason})` : ''}`;
       renderRecap();
+      if (receipt.reason === 'buy-journal-reconciled-retry-required') {
+        executionLocked = false;
+        confirmation.value = '';
+        status.textContent = 'Previous Buy was reconciled. No new Buy was sent; enter the confirmation again to start a new Run.';
+      } else {
+        executionLocked = true;
+        status.textContent = `${receipt.status}${receipt.reason ? ` (${receipt.reason})` : ''}`;
+      }
     } catch (caught) {
       error = caught;
+      executionLocked = true;
       status.textContent = `Buy validation failed: ${caught?.message || caught}`;
     } finally {
+      stopProgressTimer();
+      waitingCheckpoint = null;
       running = false;
       update();
     }
   });
   stop.addEventListener('click', () => {
     if (!running) return;
-    if (options.onStop?.() === true) status.textContent = 'Stop requested';
+    if (options.onStop?.() === true) {
+      stopProgressTimer();
+      status.textContent = 'Stop requested';
+    }
   });
   diagnostics.addEventListener('click', () => options.onDownloadDiagnostics?.({
     job: gate.job || options.job,
@@ -218,7 +314,10 @@ export function showTradeBuyDialog(options = {}) {
     expectedDestination,
   }));
   close.addEventListener('click', () => {
-    if (!running) overlay.remove();
+    if (!running) {
+      stopProgressTimer();
+      overlay.remove();
+    }
   });
 
   dialog.append(heading, summary, output, status, actions);
@@ -226,5 +325,5 @@ export function showTradeBuyDialog(options = {}) {
   dom.appendToBody(overlay);
   applyResponsiveDialogLayout({ overlay, dialog, mode, controls: [destination, confirmation, execute, stop, diagnostics, close] });
   update();
-  return { close: () => { if (!running) overlay.remove(); } };
+  return { close: () => { if (!running) { stopProgressTimer(); overlay.remove(); } } };
 }

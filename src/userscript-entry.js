@@ -206,6 +206,8 @@ import {
 } from './trade/scheduler-events.js';
 import { createTradeSchedulerWakeups } from './trade/scheduler-wakeups.js';
 import { createTradeSchedulerTickLock } from './trade/scheduler-tick-lock.js';
+import { createTradeChunkCoordinator } from './trade/chunk-coordinator.js';
+import { inspectTradeScheduleAuthorization } from './trade/schedule-authorization.js';
 import {
   createGuardedScheduledListingExecutor,
   guardedTradeSessionReadiness,
@@ -448,7 +450,6 @@ const state = {
     lastLoopRecap: null,
     preparedTradeListing: null,
     preparedTradeListingRunId: null,
-    preparedTradeListingReservation: null,
     lastTradeListingReceipt: null,
     lastScheduledTradeListing: null,
     lastTradeBuyPreview: null,
@@ -571,7 +572,7 @@ const state = {
       state.running = running;
       if (!running) state.stopping = false;
       log(running
-        ? `Trade Scheduler: guarded Listing Job ${input.job?.name || input.job?.id} started; scheduler automatically relocked`
+        ? `Trade Scheduler: guarded Listing Job ${input.job?.name || input.job?.id} started; one authorization consumed`
         : `Trade Scheduler: guarded Job ${input.job?.name || input.job?.id} left the execution state`);
       setPanelState();
     },
@@ -632,7 +633,7 @@ const state = {
       state.running = running;
       if (!running) state.stopping = false;
       log(running
-        ? `Trade Scheduler: guarded Buy Job ${input.job?.name || input.job?.id} started; scheduler automatically relocked`
+        ? `Trade Scheduler: guarded Buy Job ${input.job?.name || input.job?.id} started; one authorization consumed`
         : `Trade Scheduler: guarded Buy Job ${input.job?.name || input.job?.id} left the execution state`);
       setPanelState();
     },
@@ -691,13 +692,9 @@ const state = {
     if (!clubListing && !transferReprice) throw new Error('Live preparation allows Club listing or expired Transfer reprice only');
     const journalRecovery = tradeListingJournal.inspectRecovery();
     if (!journalRecovery.canSupersede) throw new Error(journalRecovery.reason);
-    if (state.preparedTradeListingReservation) {
-      try { await state.preparedTradeListingReservation.release(); } catch { }
-    }
     state.preparedTradeListing = null;
     state.preparedTradeListingRunId = null;
-    state.preparedTradeListingReservation = null;
-    const maxListings = Math.min(2, Math.max(1, Math.floor(Number(input.policy?.maxListings || 2))));
+    const maxListings = Math.min(4, Math.max(1, Math.floor(Number(input.policy?.maxListings || 4))));
     const requestReserve = tradeListingRequestReserve(maxListings);
     const requestCapacity = inspectTradeRequestCapacity(tradeRequestBudget.inspect(), requestReserve);
     if (!requestCapacity.ready) {
@@ -735,13 +732,13 @@ const state = {
       if (prepared.ready) {
         state.preparedTradeListing = prepared;
         state.preparedTradeListingRunId = runId;
-        state.preparedTradeListingReservation = requestReservation;
       } else {
         tradeListingJournal.finish(runId, {
           phase: 'prepare-blocked', status: 'blocked', reason: prepared.blockers?.[0]?.reason,
         });
         await requestReservation.release();
       }
+      if (prepared.ready) await requestReservation.release();
       return prepared;
     } catch (error) {
       tradeListingJournal.finish(runId, { phase: 'prepare-error', status: 'error', reason: error?.message || String(error) });
@@ -757,8 +754,7 @@ const state = {
     const prepared = state.preparedTradeListing;
     if (!prepared) throw new Error('No prepared Trade listing is available');
     const runId = state.preparedTradeListingRunId;
-    const requestReservation = state.preparedTradeListingReservation;
-    if (!runId || !requestReservation?.ready) throw new Error('Prepared Trade request reservation is unavailable');
+    if (!runId) throw new Error('Prepared Trade Run is unavailable');
     const operationId = `trade-listing-${Date.now()}`;
     const operation = tradeOperationCoordinator.acquire({ id: operationId, type: 'trade-listing', ownerId: tradeTabOwnerId });
     if (!operation.acquired) {
@@ -777,25 +773,45 @@ const state = {
     }
     state.preparedTradeListing = null;
     state.preparedTradeListingRunId = null;
-    state.preparedTradeListingReservation = null;
     state.tradeListingRunning = true;
     state.running = true;
     state.stopping = false;
     try {
-      const transaction = createListingTransaction({
-        tradeAdapter: eaTradeAdapter({ requestBudget: requestReservation }),
-        circuitBreaker: tradeCircuitBreaker,
+      const coordinator = createTradeChunkCoordinator({
+        requestBudget: tradeRequestBudget,
         sleep,
         onCheckpoint: (checkpoint) => tradeListingJournal.checkpoint(runId, checkpoint),
       });
-      const receipt = await transaction.run({
-        job: prepared.job,
-        prepared,
-        confirmationToken: input.confirmationToken,
-        confirmationText: input.confirmationText,
+      const receipt = await coordinator.run({
         runId,
-        beforeMutation: () => tradeRunLease.heartbeat(runId) === true,
+        jobId: prepared.job.id,
+        jobType: prepared.job.type,
+        requested: prepared.plan.entries.length,
+        requestReserve: (quantity) => tradeListingRequestReserve(quantity),
+        heartbeat: () => tradeRunLease.heartbeat(runId) === true,
         shouldStop: () => state.stopping,
+        executeChunk: async ({ offset, quantity, reservation }) => {
+          const chunkPrepared = {
+            ...prepared,
+            plan: { ...prepared.plan, entries: prepared.plan.entries.slice(offset, offset + quantity) },
+          };
+          const transaction = createListingTransaction({
+            tradeAdapter: eaTradeAdapter({ requestBudget: reservation }),
+            circuitBreaker: tradeCircuitBreaker,
+            sleep,
+            onCheckpoint: (checkpoint) => tradeListingJournal.checkpoint(runId, checkpoint),
+          });
+          return transaction.run({
+            job: prepared.job,
+            prepared: chunkPrepared,
+            confirmationToken: input.confirmationToken,
+            confirmationText: input.confirmationText,
+            runId,
+            itemIndexOffset: offset,
+            beforeMutation: () => tradeRunLease.heartbeat(runId) === true,
+            shouldStop: () => state.stopping,
+          });
+        },
       });
       tradeListingJournal.finish(runId, {
         phase: 'receipt-recorded', status: receipt.status, reason: receipt.reason,
@@ -809,19 +825,15 @@ const state = {
       state.stopping = false;
       tradeRunLease.release(runId);
       tradeOperationCoordinator.release(operationId);
-      try { await requestReservation.release(); } catch { }
     }
   }
 
   function cancelPreparedTradeListing() {
     const cancelled = state.preparedTradeListing !== null;
     const runId = state.preparedTradeListingRunId;
-    const reservation = state.preparedTradeListingReservation;
     state.preparedTradeListing = null;
     state.preparedTradeListingRunId = null;
-    state.preparedTradeListingReservation = null;
     if (runId) tradeListingJournal.finish(runId, { phase: 'cancelled', status: 'cancelled', reason: 'cancelled-by-user' });
-    void reservation?.release?.();
     return cancelled;
   }
 
@@ -871,16 +883,22 @@ const state = {
     }
     if (input.jobId && String(input.jobId) !== selected.job.id) throw new Error('The armed Job changed before confirmation');
     const currentTime = Date.now();
-    const runAt = Number(selected.job.schedule.runAt);
-    if (runAt < currentTime + 15_000) throw new Error('The once Job must be scheduled at least 15 seconds in the future');
-    if (runAt > currentTime + 15 * 60_000) throw new Error('The validation Job must run within 15 minutes');
+    const scheduleType = selected.job.schedule.type;
+    if (scheduleType === 'once') {
+      const runAt = Number(selected.job.schedule.runAt);
+      if (runAt < currentTime + 15_000) throw new Error('The once Job must be scheduled at least 15 seconds in the future');
+      if (runAt > currentTime + 15 * 60_000) throw new Error('The once Job must run within 15 minutes');
+    }
+    if (scheduleType === 'window' && Number(selected.job.schedule.endAt) <= currentTime) {
+      throw new Error('The schedule window has already ended');
+    }
     const circuit = tradeCircuitBreaker.availability();
     if (circuit.allowed !== true) throw new Error(`Trade circuit is open (${circuit.state?.reason || 'unknown'})`);
     const operation = tradeOperationCoordinator.availability(selected.job.type === 'buy' ? 'trade-buy' : 'trade-listing');
     if (!operation.allowed) throw new Error(`Another Runner operation is active (${operation.reason})`);
-    tradeJobStore.setLiveExecutionEnabled(true);
-    const enabled = tradeJobStore.setPaused(false);
-    log(`Trade Scheduler: guarded ${selected.job.type} validation enabled for ${selected.job.name} at ${new Date(runAt).toLocaleString()}`);
+    const enabled = tradeJobStore.authorize(selected.job.id);
+    const authorization = enabled.authorization;
+    log(`Trade Scheduler: guarded ${selected.job.type} schedule enabled for ${selected.job.name}; ${authorization.remainingRuns} authorized Run(s), expires ${new Date(authorization.expiresAt).toLocaleString()}`);
     void tickTradeScheduler({ trigger: 'enable' });
     return enabled;
   }
@@ -929,13 +947,21 @@ const state = {
           scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
         });
         const circuit = tradeCircuitBreaker.availability();
-        if (!selected.ready || circuit.allowed !== true) {
-          disableGuardedTradeScheduling(!selected.ready ? selected.reason : `circuit-${circuit.state?.reason || 'open'}`);
-          return recordTick({ status: 'blocked', reason: !selected.ready ? selected.reason : 'trade-circuit-open' });
+        const authorization = inspectTradeScheduleAuthorization(snapshot, selected.job, { now: Date.now() });
+        if (!selected.ready || !authorization.ready || circuit.allowed !== true) {
+          const reason = !selected.ready
+            ? selected.reason
+            : !authorization.ready
+              ? authorization.reason
+              : `circuit-${circuit.state?.reason || 'open'}`;
+          disableGuardedTradeScheduling(reason);
+          return recordTick({ status: 'blocked', reason });
         }
       }
       const result = await tradeSchedulerTickLock.run(() => tradeScheduler.tick());
-      if (result.status === 'missed') disableGuardedTradeScheduling('scheduled-run-missed');
+      if (['blocked', 'failed', 'ambiguous', 'stopped'].includes(result.status)) {
+        disableGuardedTradeScheduling(`scheduled-run-${result.status}`);
+      }
       if (result.receipt && state.lastScheduledTradeListing?.job?.id === result.jobId) {
         state.lastTradeListingReceipt = result.receipt;
         state.lastScheduledTradeListing.receipt = result.receipt;
@@ -1128,10 +1154,10 @@ const state = {
       dom: adapters.dom,
       job,
       preview,
-      onExecute: async (input) => {
+      onExecute: async (input, onProgress) => {
         log(`Trade Buy: manual confirmation accepted for up to ${job.policy?.quantity || 1} item(s), ratings ${job.policy?.ratingMin || '?'}-${job.policy?.ratingMax || '?'}, max ${job.policy?.maxBuyNow || '?'} coins each`);
         try {
-          const receipt = await executeManualTradeBuy(job, input);
+          const receipt = await executeManualTradeBuy(job, { ...input, onProgress });
           log(`Trade Buy: ${receipt.status}${receipt.reason ? ` (${receipt.reason})` : ''}; purchased ${receipt.succeeded}/${receipt.requested}`);
           return receipt;
         } catch (error) {

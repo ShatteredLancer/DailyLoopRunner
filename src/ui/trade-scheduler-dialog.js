@@ -1,6 +1,7 @@
 import { normalizeTradeJob } from '../trade/contracts.js';
 import { inspectManualBuyValidationJob } from '../trade/manual-buy-validation.js';
 import { selectGuardedScheduledTradeJob } from '../trade/guarded-scheduled-job.js';
+import { tradeBuyRequestReserve } from '../trade/request-budget.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 const PAGE_SIZE = 15;
@@ -239,7 +240,7 @@ export function showTradeSchedulerDialog(options = {}) {
     const scheduleFields = dom.create('div');
     form.appendChild(scheduleFields);
     const misfire = select(dom, draft.misfirePolicy?.type || GRACE_MISFIRE, [
-      { value: 'skip', text: 'Skip' }, { value: GRACE_MISFIRE, text: 'Grace interval' }, { value: 'next-login', text: 'Next login' },
+      { value: 'skip', text: 'Skip' }, { value: GRACE_MISFIRE, text: 'Grace interval' },
     ], mode, 'bronze-loop-trade-job-misfire');
     const grace = input(dom, 'number', draft.misfirePolicy?.graceMinutes || 15, mode, 'bronze-loop-trade-job-grace');
     form.append(field(dom, 'Misfire', misfire, mode), field(dom, 'Grace minutes', grace, mode));
@@ -299,11 +300,13 @@ export function showTradeSchedulerDialog(options = {}) {
         'bronze-loop-trade-job-minimum-retained-coins',
       );
       controls.ratingPriceOverrides = input(dom, 'text', Object.entries(draft.policy.ratingPriceOverrides || {}).map(([rating, price]) => `${rating}=${price}`).join(', '), mode, 'bronze-loop-trade-job-rating-prices');
+      controls.ratingQuantityOverrides = input(dom, 'text', Object.entries(draft.policy.ratingQuantityOverrides || {}).map(([rating, quantity]) => `${rating}=${quantity}`).join(', '), mode, 'bronze-loop-trade-job-rating-quantities');
       controls.searchDelayMin = input(dom, 'number', draft.policy.searchDelaySeconds?.[0] || 8, mode, 'bronze-loop-trade-job-search-delay-min');
       controls.searchDelayMax = input(dom, 'number', draft.policy.searchDelaySeconds?.[1] || 15, mode, 'bronze-loop-trade-job-search-delay-max');
       policyFields.append(
         field(dom, 'Job minimum retained coins', controls.minimumRetainedCoins, mode),
         field(dom, 'Rating prices', controls.ratingPriceOverrides, mode),
+        field(dom, 'Rating quantities', controls.ratingQuantityOverrides, mode),
         field(dom, 'Search delay min', controls.searchDelayMin, mode),
         field(dom, 'Search delay max', controls.searchDelayMax, mode),
       );
@@ -334,6 +337,7 @@ export function showTradeSchedulerDialog(options = {}) {
       controls.marketEnabled = input(dom, 'checkbox', draft.policy.marketOverride?.enabled, mode, 'bronze-loop-trade-job-market-enabled');
       controls.markupPercent = input(dom, 'number', draft.policy.marketOverride?.markupPercent || 5, mode, 'bronze-loop-trade-job-markup');
       controls.quoteAge = input(dom, 'number', draft.policy.marketOverride?.maxQuoteAgeMinutes || 10, mode, 'bronze-loop-trade-job-quote-age');
+      controls.quoteFallback = select(dom, draft.policy.marketOverride?.fallbackPolicy || 'configured', [{ value: 'configured', text: 'Use configured price' }, { value: 'skip', text: 'Skip item' }], mode, 'bronze-loop-trade-job-quote-fallback');
       controls.startPricePolicy = select(dom, draft.policy.startPricePolicy || 'one-step-below', [{ value: 'one-step-below', text: 'One step below' }, { value: 'same', text: 'Same as Buy Now' }], mode, 'bronze-loop-trade-job-start-price');
       controls.durationSeconds = select(dom, draft.policy.durationSeconds || 3600, [{ value: 3600, text: '1 hour' }, { value: 10800, text: '3 hours' }, { value: 21600, text: '6 hours' }, { value: 86400, text: '1 day' }], mode, 'bronze-loop-trade-job-duration');
       controls.maxListings = input(dom, 'number', draft.policy.maxListings || 1, mode, 'bronze-loop-trade-job-max-listings');
@@ -342,7 +346,8 @@ export function showTradeSchedulerDialog(options = {}) {
       controls.expiredPolicy = select(dom, draft.policy.expiredPolicy || 'skip', [{ value: 'skip', text: 'Skip expired' }, { value: 'reprice', text: 'Reprice expired' }], mode, 'bronze-loop-trade-job-expired');
       policyFields.append(
         checkboxLabel('Use higher market quote', controls.marketEnabled), field(dom, 'Markup %', controls.markupPercent, mode),
-        field(dom, 'Quote max age', controls.quoteAge, mode), field(dom, 'Start price', controls.startPricePolicy, mode),
+        field(dom, 'Quote max age', controls.quoteAge, mode), field(dom, 'Quote fallback', controls.quoteFallback, mode),
+        field(dom, 'Start price', controls.startPricePolicy, mode),
         field(dom, 'Duration', controls.durationSeconds, mode), field(dom, 'Max listings', controls.maxListings, mode),
         field(dom, 'Listing delay min', controls.listingDelayMin, mode), field(dom, 'Listing delay max', controls.listingDelayMax, mode),
         field(dom, 'Expired items', controls.expiredPolicy, mode),
@@ -376,12 +381,13 @@ export function showTradeSchedulerDialog(options = {}) {
             ? null
             : Number(controls.minimumRetainedCoins.value);
           draft.policy.ratingPriceOverrides = Object.fromEntries(String(controls.ratingPriceOverrides.value || '').split(',').map((entry) => entry.trim().split('=').map((part) => part.trim())).filter(([rating, price]) => rating && Number(price) > 0));
+          draft.policy.ratingQuantityOverrides = Object.fromEntries(String(controls.ratingQuantityOverrides.value || '').split(',').map((entry) => entry.trim().split('=').map((part) => part.trim())).filter(([rating, quantity]) => rating && Number.isInteger(Number(quantity)) && Number(quantity) > 0));
           draft.policy.searchDelaySeconds = [Number(controls.searchDelayMin.value), Number(controls.searchDelayMax.value)];
           draft.policy.maxPurchasesPerSearch = 1;
         } else {
           draft.policy.sources = [['club', controls.clubSource], ['transfer', controls.transferSource]].filter(([, control]) => control.checked).map(([source]) => source);
           draft.policy.ratingRules = controls.rules.map((rule) => ({ min: Number(rule.min.value), max: Number(rule.max.value), buyNow: Number(rule.price.value) }));
-          draft.policy.marketOverride = { enabled: controls.marketEnabled.checked, markupPercent: Number(controls.markupPercent.value), maxQuoteAgeMinutes: Number(controls.quoteAge.value) };
+          draft.policy.marketOverride = { enabled: controls.marketEnabled.checked, markupPercent: Number(controls.markupPercent.value), maxQuoteAgeMinutes: Number(controls.quoteAge.value), fallbackPolicy: controls.quoteFallback.value };
           draft.policy.startPricePolicy = controls.startPricePolicy.value;
           draft.policy.durationSeconds = Number(controls.durationSeconds.value);
           draft.policy.maxListings = Number(controls.maxListings.value);
@@ -473,7 +479,8 @@ export function showTradeSchedulerDialog(options = {}) {
     });
     if (snapshot.liveExecutionEnabled === true) {
       const gateState = dom.create('span');
-      gateState.textContent = `Guarded schedule enabled${guarded.job ? `: ${guarded.job.name}` : ''}`;
+      const authorization = snapshot.authorization;
+      gateState.textContent = `Guarded schedule enabled${guarded.job ? `: ${guarded.job.name}` : ''}${authorization ? ` | ${authorization.remainingRuns}/${authorization.totalRuns} Run(s) left | expires ${new Date(Number(authorization.expiresAt)).toLocaleString()}` : ''}`;
       styles(gateState, { color: '#e3c98d', flex: '1 1 260px', fontSize: '12px' });
       const disableGate = button(dom, 'Disable scheduling', mode, 'bronze-loop-trade-disable-guarded-schedule');
       disableGate.addEventListener('click', () => {
@@ -538,13 +545,14 @@ export function showTradeSchedulerDialog(options = {}) {
       }) : null;
       if (previewDetail) {
         const lanes = (buyPreview.plan?.lanes || [])
-          .map((lane) => `${lane.rating}: ${lane.definitionIds.length} player ID(s), max ${Number(lane.maxBuyNow).toLocaleString()}`)
+          .map((lane) => `${lane.rating}: ${lane.definitionIds.length} player ID(s), max ${Number(lane.maxBuyNow).toLocaleString()}, quota ${lane.quantityLimit ?? 'Run cap'}`)
           .join(' | ');
         const missing = buyPreview.plan?.missingRatings?.length
           ? ` | Missing ratings: ${buyPreview.plan.missingRatings.join(', ')}`
           : '';
         const quantity = Number(job.policy.quantity || 1);
-        previewDetail.textContent = `Preview only | ${lanes || 'No search lanes'}${missing} | ${buyAvailability.ready ? `Buy ${quantity} ready` : `Buy unavailable: ${buyAvailability.reason}`}`;
+        const reserve = tradeBuyRequestReserve(job);
+        previewDetail.textContent = `Preview only | ${lanes || 'No search lanes'}${missing} | Budget ${Number(job.policy.totalBudget || 0).toLocaleString()} | Runtime ${Number(job.policy.maxRuntimeMinutes || 0)} min | Chunk 2 / reserve up to ${reserve} | ${buyAvailability.ready ? `Buy ${quantity} ready` : `Buy unavailable: ${buyAvailability.reason}`}`;
       }
       const actions = styles(dom.create('div'), { display: 'flex', gap: '6px', flexWrap: 'wrap' });
       const run = button(dom, job.type === 'buy' ? 'Preview' : 'Run now', mode);

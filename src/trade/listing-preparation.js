@@ -1,4 +1,4 @@
-import { applyListingPriceLimits, createListingConfirmation } from './listing-plan.js';
+import { applyListingPriceLimits, createListingConfirmation, TRADE_LISTING_MAX_BUY_NOW } from './listing-plan.js';
 
 export function createListingPreparation(options = {}) {
   if (typeof options.listingPreview?.preview !== 'function') throw new TypeError('listingPreview.preview is required');
@@ -70,6 +70,10 @@ export function createListingPreparation(options = {}) {
       });
       if (!applied.ok) {
         blockers.push({ item: { ...entry.item }, reason: applied.reason });
+        continue;
+      }
+      if (Number(applied.entry.buyNow) > TRADE_LISTING_MAX_BUY_NOW) {
+        blockers.push({ item: { ...entry.item }, reason: 'high-value-listing-excluded' });
         continue;
       }
       entries.push(applied.entry);

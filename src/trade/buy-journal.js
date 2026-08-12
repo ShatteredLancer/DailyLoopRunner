@@ -1,6 +1,6 @@
 export const TRADE_BUY_JOURNAL_SCHEMA_VERSION = 2;
 export const TRADE_BUY_JOURNAL_EVENT_LIMIT = 80;
-export const TRADE_BUY_JOURNAL_ITEM_LIMIT = 2;
+export const TRADE_BUY_JOURNAL_ITEM_LIMIT = 4;
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -35,6 +35,12 @@ function safeEvent(input = {}) {
     at: Math.max(0, safeNumber(input.at) ?? Date.now()),
     phase: String(input.phase || 'unknown'),
     itemIndex: safeNumber(input.itemIndex),
+    chunkIndex: safeNumber(input.chunkIndex),
+    offset: safeNumber(input.offset),
+    quantity: safeNumber(input.quantity),
+    required: safeNumber(input.required),
+    remaining: safeNumber(input.remaining),
+    retryAt: safeNumber(input.retryAt),
     mutationBoundaryCrossed: input.mutationBoundaryCrossed === true,
     status: input.status ? String(input.status) : null,
     reason: input.reason ? String(input.reason).slice(0, 160) : null,
@@ -113,6 +119,67 @@ export function normalizeTradeBuyJournal(input = {}) {
       .slice(-TRADE_BUY_JOURNAL_EVENT_LIMIT)
       .map(safeEvent),
   };
+}
+
+export function reconcileResolvedTradeBuyJournal(options = {}) {
+  const journal = options.journal;
+  const adapter = options.adapter;
+  const recovery = journal?.inspectRecovery?.();
+  if (!recovery || recovery.canSupersede !== false) {
+    return { status: 'not-needed', reason: null, items: [] };
+  }
+  if (typeof adapter?.inspectPurchase !== 'function') {
+    return { status: 'blocked', reason: 'buy-journal-inspection-unavailable', items: [] };
+  }
+  const snapshot = journal.snapshot?.();
+  const uncertain = (snapshot?.items || []).filter((entry) => (
+    entry.mutationBoundaryCrossed === true
+    && !['purchased', 'competition-lost', 'failed'].includes(entry.status)
+  ));
+  if (!snapshot?.runId || !uncertain.length) {
+    return { status: 'blocked', reason: recovery.reason || 'buy-journal-mutation-review-required', items: [] };
+  }
+  const items = uncertain.map((entry) => {
+    const inspected = adapter.inspectPurchase({
+      ...entry.item,
+      pile: entry.destination,
+      tradeId: entry.tradeId,
+      price: entry.price,
+    });
+    const actual = inspected?.candidate?.item || null;
+    const exactId = Number(actual?.id || 0) > 0 && Number(actual.id) === Number(entry.item?.id || 0);
+    const atDestination = exactId && String(actual?.pile || '') === String(entry.destination || '');
+    return {
+      index: entry.index,
+      status: inspected?.status || 'not-found',
+      item: actual,
+      destination: entry.destination,
+      resolved: atDestination,
+    };
+  });
+  if (!items.every((entry) => entry.resolved)) {
+    return { status: 'blocked', reason: 'buy-journal-item-destination-unconfirmed', items };
+  }
+  const at = Math.max(0, Number(options.now?.() ?? Date.now()));
+  for (const entry of items) {
+    journal.checkpoint(snapshot.runId, {
+      at,
+      phase: 'journal-destination-reconciled',
+      itemIndex: entry.index,
+      item: entry.item,
+      destination: entry.destination,
+      status: 'purchased',
+      reason: 'journal-destination-reconciled',
+      mutationBoundaryCrossed: true,
+    });
+  }
+  journal.finish(snapshot.runId, {
+    at,
+    phase: 'journal-reconciliation-completed',
+    status: 'completed',
+    reason: 'journal-destination-reconciled',
+  });
+  return { status: 'reconciled', reason: 'buy-journal-reconciled-retry-required', items };
 }
 
 export function createTradeBuyJournal(options = {}) {

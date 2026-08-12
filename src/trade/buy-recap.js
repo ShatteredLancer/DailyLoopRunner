@@ -36,7 +36,7 @@ function recapEntry(entry = {}) {
 
 export function createTradeBuyRecap(receipt = {}, options = {}) {
   const entries = (Array.isArray(receipt.receipts) ? receipt.receipts : [])
-    .filter((entry) => entry?.status !== 'run-summary');
+    .filter((entry) => !['run-summary', 'chunk-summary'].includes(entry?.status));
   const runSummary = (receipt.receipts || []).find((entry) => entry?.status === 'run-summary') || {};
   const pageSize = Math.max(1, Math.floor(Number(options.pageSize || TRADE_RECAP_PAGE_SIZE)));
   const pageCount = Math.max(1, Math.ceil(entries.length / pageSize));

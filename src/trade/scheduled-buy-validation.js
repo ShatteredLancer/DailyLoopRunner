@@ -1,10 +1,10 @@
 import { normalizeTradeJob } from './contracts.js';
 
 export const SCHEDULED_BUY_VALIDATION_MAX_PRICE = 2_000;
-export const SCHEDULED_BUY_VALIDATION_MAX_TOTAL_BUDGET = 4_000;
-export const SCHEDULED_BUY_VALIDATION_MAX_QUANTITY = 2;
-export const SCHEDULED_BUY_VALIDATION_MAX_RATING_SPAN = 1;
-export const SCHEDULED_BUY_VALIDATION_MAX_RUNTIME_MINUTES = 5;
+export const SCHEDULED_BUY_VALIDATION_MAX_TOTAL_BUDGET = 8_000;
+export const SCHEDULED_BUY_VALIDATION_MAX_QUANTITY = 4;
+export const SCHEDULED_BUY_VALIDATION_MAX_RATING_SPAN = 3;
+export const SCHEDULED_BUY_VALIDATION_MAX_RUNTIME_MINUTES = 15;
 export const SCHEDULED_BUY_VALIDATION_MAX_EMPTY_SEARCHES = 5;
 
 function effectiveRatingLimit(job) {
@@ -22,11 +22,12 @@ function explicitMinimumRetainedCoins(value) {
   return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
-export function scheduledBuyValidationConfirmation(minimumRetainedCoins, quantity = 1) {
+export function scheduledBuyValidationConfirmation(minimumRetainedCoins, quantity = 1, scheduleType = 'once', runs = 1) {
   const minimum = explicitMinimumRetainedCoins(minimumRetainedCoins);
   if (minimum === null) throw new Error('Scheduled Buy minimum retained coins must be explicit');
   const count = Math.min(SCHEDULED_BUY_VALIDATION_MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)));
-  return `RUN BUY ONCE ${count} RESERVE ${minimum}`;
+  const prefix = `RUN BUY ${String(scheduleType || 'once').toUpperCase()} ${count} RESERVE ${minimum}`;
+  return scheduleType === 'once' || scheduleType === 'window' ? prefix : `${prefix} FOR ${runs} RUNS`;
 }
 
 export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
@@ -42,9 +43,9 @@ export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
   let reason = null;
   if (job.type !== 'buy') reason = 'scheduled-buy-validation-buy-only';
   else if (job.enabled !== true) reason = 'scheduled-buy-validation-job-disabled';
-  else if (job.schedule?.type !== 'once') reason = 'scheduled-buy-validation-once-only';
+  else if (!['once', 'daily', 'interval', 'window'].includes(job.schedule?.type)) reason = 'scheduled-buy-validation-schedule-unsupported';
   else if (job.armed !== true) reason = 'scheduled-buy-validation-job-not-armed';
-  else if (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0) reason = 'scheduled-buy-validation-run-at-invalid';
+  else if (job.schedule?.type === 'once' && (!Number.isFinite(Number(job.schedule?.runAt)) || Number(job.schedule.runAt) <= 0)) reason = 'scheduled-buy-validation-run-at-invalid';
   else if (!['skip', 'grace-window'].includes(job.misfirePolicy?.type)) reason = 'scheduled-buy-validation-next-login-disabled';
   else if (job.misfirePolicy?.type === 'grace-window' && Number(job.misfirePolicy.graceMinutes) > 15) reason = 'scheduled-buy-validation-grace-too-long';
   else if (job.policy.cardClass !== 'rare-gold') reason = 'scheduled-buy-validation-rare-gold-only';
@@ -88,6 +89,11 @@ export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
     maxPrice,
     minimumRetainedCoins,
     maxSpend: Number(job.policy.totalBudget),
-    requiredText: scheduledBuyValidationConfirmation(minimumRetainedCoins, job.policy.quantity),
+    requiredText: scheduledBuyValidationConfirmation(
+      minimumRetainedCoins,
+      job.policy.quantity,
+      job.schedule.type,
+      options.authorizationRuns || 2,
+    ),
   };
 }

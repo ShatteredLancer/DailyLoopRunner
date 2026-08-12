@@ -1,6 +1,6 @@
 import { assertValidTradeJob, createTradeRunReceipt } from './contracts.js';
 import { classifyTradeError } from './error-policy.js';
-import { applyListingPriceLimits, listingCandidateRejection } from './listing-plan.js';
+import { applyListingPriceLimits, listingCandidateRejection, TRADE_LISTING_MAX_BUY_NOW } from './listing-plan.js';
 
 function sameNumber(left, right) {
   return Number(left) === Number(right);
@@ -38,6 +38,7 @@ export function createListingTransaction(options = {}) {
     const scheduledFor = Number.isFinite(Number(input.scheduledFor)) ? Number(input.scheduledFor) : startedAt;
     const job = input.job;
     const prepared = input.prepared;
+    const itemIndexOffset = Math.max(0, Math.floor(Number(input.itemIndexOffset || 0)));
     assertValidTradeJob(job, 'Listing job');
     if (job.type !== 'listing') throw new Error('Listing job.type must be listing');
     const entries = prepared?.plan?.entries || [];
@@ -81,7 +82,7 @@ export function createListingTransaction(options = {}) {
 
     for (let index = 0; !reason && index < entries.length; index += 1) {
       const entry = entries[index];
-      const itemIndex = index + 1;
+      const itemIndex = itemIndexOffset + index + 1;
       const listing = {
         startPrice: entry.startPrice,
         buyNow: entry.buyNow,
@@ -107,7 +108,7 @@ export function createListingTransaction(options = {}) {
             ? 'trade-request-budget-exhausted'
             : `listing-transfer-preflight-${transferPreflight.status || 'unavailable'}`;
           receipts.push({
-            index: index + 1,
+            index: itemIndex,
             item: { ...entry.item },
             status: 'blocked',
             reason,
@@ -122,7 +123,7 @@ export function createListingTransaction(options = {}) {
             status = 'blocked';
             reason = 'listing-item-already-in-transfer';
             receipts.push({
-              index: index + 1,
+              index: itemIndex,
               item: { ...entry.item },
               status: 'blocked',
               reason,
@@ -136,7 +137,7 @@ export function createListingTransaction(options = {}) {
             status = 'blocked';
             reason = 'listing-transfer-state-error';
             receipts.push({
-              index: index + 1,
+              index: itemIndex,
               item: { ...entry.item },
               status: 'blocked',
               reason,
@@ -151,7 +152,7 @@ export function createListingTransaction(options = {}) {
         failed += 1;
         status = 'blocked';
         reason = `listing-item-${live.status}`;
-        receipts.push({ index: index + 1, item: { ...entry.item }, status: 'blocked', reason });
+        receipts.push({ index: itemIndex, item: { ...entry.item }, status: 'blocked', reason });
         break;
       }
       if (live.candidate.item.pile !== entry.item.pile
@@ -159,7 +160,7 @@ export function createListingTransaction(options = {}) {
         failed += 1;
         status = 'blocked';
         reason = 'listing-item-identity-changed';
-        receipts.push({ index: index + 1, item: { ...entry.item }, status: 'blocked', reason, live: live.candidate.item });
+        receipts.push({ index: itemIndex, item: { ...entry.item }, status: 'blocked', reason, live: live.candidate.item });
         break;
       }
       const eligibilityReason = listingCandidateRejection(live.candidate, job.policy);
@@ -167,7 +168,7 @@ export function createListingTransaction(options = {}) {
         failed += 1;
         status = 'blocked';
         reason = `listing-item-${eligibilityReason}`;
-        receipts.push({ index: index + 1, item: { ...entry.item }, status: 'blocked', reason });
+        receipts.push({ index: itemIndex, item: { ...entry.item }, status: 'blocked', reason });
         break;
       }
       const capabilities = adapter.inspectCapabilities();
@@ -175,7 +176,7 @@ export function createListingTransaction(options = {}) {
         failed += 1;
         status = 'blocked';
         reason = 'transfer-list-full';
-        receipts.push({ index: index + 1, item: { ...entry.item }, status: 'blocked', reason });
+        receipts.push({ index: itemIndex, item: { ...entry.item }, status: 'blocked', reason });
         break;
       }
       checkpoint('price-limits-refresh-started', { itemIndex, item: entry.item, listing });
@@ -187,7 +188,7 @@ export function createListingTransaction(options = {}) {
         failed += 1;
         status = 'blocked';
         reason = 'trade-request-budget-exhausted';
-        receipts.push({ index: index + 1, item: { ...entry.item }, status, reason, requestBudget: priceLimitResult.error });
+        receipts.push({ index: itemIndex, item: { ...entry.item }, status, reason, requestBudget: priceLimitResult.error });
         break;
       }
       const finalPrice = applyListingPriceLimits(entry, priceLimitResult);
@@ -195,7 +196,14 @@ export function createListingTransaction(options = {}) {
         failed += 1;
         status = 'blocked';
         reason = finalPrice.reason;
-        receipts.push({ index: index + 1, item: { ...entry.item }, status: 'blocked', reason, priceLimits: priceLimitResult.after });
+        receipts.push({ index: itemIndex, item: { ...entry.item }, status: 'blocked', reason, priceLimits: priceLimitResult.after });
+        break;
+      }
+      if (Number(finalPrice.entry.buyNow) > TRADE_LISTING_MAX_BUY_NOW) {
+        failed += 1;
+        status = 'blocked';
+        reason = 'high-value-listing-excluded';
+        receipts.push({ index: itemIndex, item: { ...entry.item }, status: 'blocked', reason });
         break;
       }
       if (!sameNumber(finalPrice.entry.startPrice, entry.startPrice) || !sameNumber(finalPrice.entry.buyNow, entry.buyNow)) {
@@ -203,7 +211,7 @@ export function createListingTransaction(options = {}) {
         status = 'blocked';
         reason = 'listing-price-changed-after-confirmation';
         receipts.push({
-          index: index + 1,
+          index: itemIndex,
           item: { ...entry.item },
           status: 'blocked',
           reason,
@@ -217,7 +225,7 @@ export function createListingTransaction(options = {}) {
         failed += 1;
         status = 'blocked';
         reason = 'listing-execution-lease-lost';
-        receipts.push({ index: index + 1, item: { ...entry.item }, status: 'blocked', reason });
+        receipts.push({ index: itemIndex, item: { ...entry.item }, status: 'blocked', reason });
         break;
       }
 
@@ -238,7 +246,7 @@ export function createListingTransaction(options = {}) {
         mutationBoundaryCrossed: true,
       });
       const receipt = {
-        index: index + 1,
+        index: itemIndex,
         item: { ...entry.item },
         listing: { startPrice: entry.startPrice, buyNow: entry.buyNow, durationSeconds: entry.durationSeconds },
         priceLimits: { ...entry.priceLimits },

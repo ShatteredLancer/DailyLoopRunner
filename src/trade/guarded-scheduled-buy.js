@@ -3,17 +3,20 @@ import { createBuyTransaction } from './buy-transaction.js';
 import { filterBuyCatalogForDestination } from './buy-destination.js';
 import { sanitizeTradeBuyReceipt } from './buy-diagnostics.js';
 import { inspectScheduledBuyValidationJob } from './scheduled-buy-validation.js';
-import { inspectTradeRequestCapacity, tradeBuyRequestReserve } from './request-budget.js';
+import { tradeBuyRequestReserve } from './request-budget.js';
+import { createTradeChunkCoordinator } from './chunk-coordinator.js';
+import { finalizeChunkedBuyReceipt } from './buy-chunk-receipt.js';
 
 export function createGuardedScheduledBuyExecutor(options = {}) {
   const store = options.store;
   const operationCoordinator = options.operationCoordinator;
   const buyPreview = options.buyPreview;
   const journal = options.journal;
-  if (typeof store?.read !== 'function' || typeof store?.relock !== 'function') throw new TypeError('Trade Job Store is required');
+  if (typeof store?.read !== 'function' || typeof store?.consumeAuthorization !== 'function') throw new TypeError('Trade Job Store authorization is required');
   if (!operationCoordinator?.acquire || !operationCoordinator?.release) throw new TypeError('Operation Coordinator is required');
   if (typeof buyPreview?.preview !== 'function') throw new TypeError('Buy Preview is required');
   if (typeof options.getTradeAdapter !== 'function') throw new TypeError('getTradeAdapter is required');
+  if (typeof options.requestBudget?.reserve !== 'function') throw new TypeError('Trade request budget is required');
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const sleep = typeof options.sleep === 'function' ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const transactionFactory = typeof options.transactionFactory === 'function'
@@ -37,7 +40,6 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
   async function execute(input = {}) {
     const startedAt = Number(now());
     const minimumRetainedCoins = store.read().safety?.minimumRetainedCoins;
-    store.relock();
     const finish = (receipt, context = {}, phase = 'receipt-recorded') => {
       const safeReceipt = sanitizeTradeBuyReceipt(receipt);
       journal?.finish?.(input.runId, { phase, status: safeReceipt.status, reason: safeReceipt.reason });
@@ -48,18 +50,16 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
     if (input.context?.liveExecutionEnabled !== true) return finish(blockedReceipt(input, 'live-execution-disabled', startedAt));
     const gate = inspectScheduledBuyValidationJob(input.job, { minimumRetainedCoins, now: startedAt });
     if (!gate.ready) return finish(blockedReceipt(input, gate.reason, startedAt), { gate });
+    const authorization = store.consumeAuthorization(input.job.id, input.runId);
+    if (authorization.consumed !== true) {
+      return finish(blockedReceipt(input, authorization.reason || 'schedule-authorization-missing-or-expired', startedAt), { gate });
+    }
     const circuit = options.circuitBreaker?.availability?.();
     if (circuit && circuit.allowed !== true) return finish(blockedReceipt(input, 'trade-circuit-open', startedAt), { gate });
     const journalRecovery = journal?.inspectRecovery?.();
     if (journalRecovery?.canSupersede === false) {
       return finish(blockedReceipt(input, journalRecovery.reason || 'buy-journal-recovery-required', startedAt), { gate });
     }
-    const requestReserve = tradeBuyRequestReserve(gate.job);
-    if (typeof options.requestBudget?.inspect === 'function') {
-      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect(), requestReserve);
-      if (!requestCapacity.ready) return finish(blockedReceipt(input, requestCapacity.reason, startedAt), { gate });
-    }
-
     let adapter = options.getTradeAdapter();
     const capabilities = adapter.inspectCapabilities();
     if (!Number.isFinite(Number(capabilities.coins))) {
@@ -79,7 +79,6 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
     if (!operation.acquired) return finish(blockedReceipt(input, operation.reason || 'operation-unavailable', startedAt), { gate });
 
     let runningNotified = false;
-    let requestReservation = null;
     try {
       journal?.begin?.({
         runId: input.runId,
@@ -117,37 +116,72 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
         return finish(blockedReceipt(input, destinationPlan.reason, startedAt), { gate, preview }, 'validation-destination-blocked');
       }
 
-      if (typeof options.requestBudget?.reserve === 'function') {
-        requestReservation = await options.requestBudget.reserve(requestReserve);
-        if (!requestReservation.ready) {
-          return finish(
-            blockedReceipt(input, 'trade-request-budget-insufficient', startedAt),
-            { gate, preview },
-            'request-budget-blocked',
-          );
-        }
-        adapter = options.getTradeAdapter({ requestBudget: requestReservation });
-      }
-
-      const transaction = transactionFactory({
-        tradeAdapter: adapter,
-        playerCatalogProvider: options.playerCatalogProvider,
-        circuitBreaker: options.circuitBreaker,
+      const coordinator = createTradeChunkCoordinator({
+        requestBudget: options.requestBudget,
+        now,
         sleep,
         onCheckpoint: (checkpoint) => journal?.checkpoint?.(input.runId, checkpoint),
       });
-      const receipt = await transaction.run({
-        job: gate.job,
+      let spent = 0;
+      let cursor = null;
+      let purchasedByRating = {};
+      const deadlineAt = startedAt + Number(gate.job.policy.maxRuntimeMinutes) * 60_000;
+      const receipt = await coordinator.run({
         runId: input.runId,
+        jobId: gate.job.id,
+        jobType: gate.job.type,
         scheduledFor: input.scheduledFor,
-        platform: input.platform || 'pc',
-        expectedDestination: 'auto',
-        minimumRetainedCoins: gate.minimumRetainedCoins,
-        maxBuyAttempts: Number(gate.job.policy.quantity),
-        beforeBuy: () => input.heartbeat?.() === true,
+        startedAt,
+        deadlineAt,
+        deadlineReason: 'runtime-limit',
+        requested: gate.job.policy.quantity,
+        requestReserve: (quantity) => tradeBuyRequestReserve({
+          ...gate.job,
+          policy: { ...gate.job.policy, quantity },
+        }),
+        heartbeat: () => input.heartbeat?.() === true,
         shouldStop: () => options.shouldStop?.() === true,
+        executeChunk: async ({ offset, quantity, reservation }) => {
+          adapter = options.getTradeAdapter({ requestBudget: reservation });
+          const remainingRuntimeMinutes = Math.max(1 / 60_000, (deadlineAt - Number(now())) / 60_000);
+          const chunkJob = {
+            ...gate.job,
+            policy: {
+              ...gate.job.policy,
+              quantity,
+              totalBudget: Math.max(1, Number(gate.job.policy.totalBudget) - spent),
+              maxRuntimeMinutes: Math.min(Number(gate.job.policy.maxRuntimeMinutes), remainingRuntimeMinutes),
+            },
+          };
+          const transaction = transactionFactory({
+            tradeAdapter: adapter,
+            playerCatalogProvider: options.playerCatalogProvider,
+            circuitBreaker: options.circuitBreaker,
+            sleep,
+            onCheckpoint: (checkpoint) => journal?.checkpoint?.(input.runId, checkpoint),
+          });
+          const chunkReceipt = await transaction.run({
+            job: chunkJob,
+            runId: input.runId,
+            scheduledFor: input.scheduledFor,
+            platform: input.platform || 'pc',
+            expectedDestination: 'auto',
+            minimumRetainedCoins: gate.minimumRetainedCoins,
+            itemIndexOffset: offset,
+            cursor,
+            purchasedByRating,
+            maxBuyAttempts: quantity,
+            beforeBuy: () => input.heartbeat?.() === true,
+            shouldStop: () => options.shouldStop?.() === true,
+          });
+          const summary = (chunkReceipt.receipts || []).find((entry) => entry.status === 'run-summary') || {};
+          spent += Number(summary.spent || 0);
+          cursor = summary.cursor || cursor;
+          purchasedByRating = { ...purchasedByRating, ...(summary.purchasedByRating || {}) };
+          return chunkReceipt;
+        },
       });
-      return finish(receipt, { gate, preview });
+      return finish(finalizeChunkedBuyReceipt(receipt), { gate, preview });
     } catch (error) {
       journal?.finish?.(input.runId, {
         phase: 'executor-error',
@@ -157,7 +191,6 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
       throw error;
     } finally {
       operationCoordinator.release(operationId);
-      try { await requestReservation?.release?.(); } catch { }
       if (runningNotified) options.onRunningChange?.(false, { ...input, job: gate.job });
     }
   }

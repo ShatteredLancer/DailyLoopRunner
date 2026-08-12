@@ -70,4 +70,13 @@ describe('Trade schedule', () => {
     const advanced = advanceTradeJobRuntime(job, runtime, { at: 1000, scheduledFor: 1000, runId: 'run-1' });
     expect(advanced).toMatchObject({ nextRunAt: 601000, lastRunId: 'run-1', runCount: 1, status: 'waiting-time' });
   });
+
+  it('treats a schedule window as one terminal occurrence', () => {
+    const job = listingJob({ type: 'window', startAt: 1000, endAt: 60_000 });
+    const runtime = createTradeJobRuntime(job, { now: 0 });
+    expect(runtime.nextRunAt).toBe(1000);
+    expect(advanceTradeJobRuntime(job, runtime, {
+      at: 2000, scheduledFor: 1000, runId: 'window-run',
+    })).toMatchObject({ nextRunAt: null, runCount: 1, status: 'completed' });
+  });
 });

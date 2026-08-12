@@ -105,6 +105,41 @@ describe('Trade contracts', () => {
     }, { now: 1 })).toThrow(/timezone must be a valid IANA timezone/);
   });
 
+  it('normalizes per-rating Buy quotas and explicit Listing quote fallback policies', () => {
+    const buy = normalizeTradeJob({
+      id: 'buy-quota',
+      name: 'Buy quota',
+      type: 'buy',
+      policy: {
+        cardClass: 'rare-gold',
+        ratingMin: 84,
+        ratingMax: 86,
+        ratingQuantityOverrides: { 84: 2, 85: 1, 86: 1 },
+      },
+    }, { now: 1 });
+    expect(buy.policy.ratingQuantityOverrides).toEqual({ 84: 2, 85: 1, 86: 1 });
+    expect(validateTradeJob({
+      ...buy,
+      policy: { ...buy.policy, ratingQuantityOverrides: { 87: 1 } },
+    })).toContain('Trade job.policy.ratingQuantityOverrides.87 must target a rating inside the job range');
+    expect(validateTradeJob({
+      ...buy,
+      policy: { ...buy.policy, ratingQuantityOverrides: { 84: 0 } },
+    })).toContain('Trade job.policy.ratingQuantityOverrides.84 must be a positive integer');
+
+    const listing = normalizeTradeJob({
+      id: 'listing-quote-skip',
+      name: 'Listing quote skip',
+      type: 'listing',
+      policy: {
+        cardClass: 'common-gold',
+        ratingRules: [{ min: 75, max: 82, buyNow: 700 }],
+        marketOverride: { enabled: true, fallbackPolicy: 'skip' },
+      },
+    }, { now: 1 });
+    expect(listing.policy.marketOverride.fallbackPolicy).toBe('skip');
+  });
+
   it('creates a serializable run receipt without retaining input objects', () => {
     const raw = { item: { id: 10 }, status: 'listed' };
     const receipt = createTradeRunReceipt({

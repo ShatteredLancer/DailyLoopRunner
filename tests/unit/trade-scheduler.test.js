@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createTradeRunReceipt } from '../../src/trade/contracts.js';
+import { createTradeRunReceipt, normalizeTradeJob } from '../../src/trade/contracts.js';
 import { createTradeJobStore } from '../../src/trade/job-store.js';
 import { createTradeRunLease } from '../../src/trade/run-lease.js';
 import { createTradeScheduler } from '../../src/trade/scheduler.js';
@@ -167,9 +167,119 @@ describe('Trade Scheduler', () => {
       receipt: { runId: 'missed-run', scheduledFor: 1000, status: 'missed', reason: 'misfire-skip' },
       runtime: { nextRunAt: null, runCount: 0 },
     });
-    expect(await scheduler.tick()).toMatchObject({ status: 'idle' });
+    expect(await scheduler.tick()).toMatchObject({ status: 'paused' });
     expect(executeJob).not.toHaveBeenCalled();
     expect(store.read().history).toEqual([expect.objectContaining({ status: 'missed', reason: 'misfire-skip' })]);
+    expect(store.read()).toMatchObject({ paused: true, liveExecutionEnabled: false, jobs: [{ armed: false }] });
+  });
+
+  it('runs exactly two authorized interval occurrences and cannot dispatch a third', async () => {
+    const storage = memoryStorage();
+    let time = 1000;
+    const recurring = normalizeTradeJob({
+      ...scheduledJob(),
+      id: 'recurring-two',
+      schedule: { type: 'interval', everyMinutes: 1, anchorAt: 1000 },
+    }, { now: 0 });
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(recurring);
+    store.authorize(recurring.id);
+    let runNumber = 0;
+    const executeJob = vi.fn(async ({ job, runId }) => {
+      runNumber += 1;
+      expect(store.consumeAuthorization(job.id, runId)).toMatchObject({
+        consumed: true,
+        remainingRuns: 2 - runNumber,
+      });
+      return createTradeRunReceipt({
+        runId, jobId: job.id, jobType: job.type, status: 'completed',
+        requested: 1, succeeded: 1, finishedAt: time,
+      });
+    });
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'recurring-tab', now: () => time }),
+      now: () => time,
+      createRunId: () => `recurring-run-${runNumber + 1}`,
+      getContext: () => ({ sessionReady: true, operationBusy: false, tickToleranceMs: 15_000 }),
+      executeJob,
+    });
+
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed' });
+    time = 61_000;
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed' });
+    time = 121_000;
+    expect(await scheduler.tick()).toMatchObject({ status: 'paused' });
+    expect(executeJob).toHaveBeenCalledTimes(2);
+    expect(store.read()).toMatchObject({
+      paused: true,
+      liveExecutionEnabled: false,
+      jobs: [{ id: 'recurring-two', armed: false }],
+      runtimes: {
+        'recurring-two': {
+          status: 'completed',
+          reason: null,
+          nextRunAt: null,
+          runCount: 2,
+          lastRunId: 'recurring-run-2',
+        },
+      },
+      authorization: null,
+    });
+    expect(store.read().history).toHaveLength(2);
+  });
+
+  it('does not restore a Job runtime after the Job is deleted during execution', async () => {
+    const storage = memoryStorage();
+    const time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob());
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'delete-tab', now: () => time }),
+      now: () => time,
+      createRunId: () => 'deleted-run',
+      getContext: () => ({ sessionReady: true, operationBusy: false }),
+      executeJob: async ({ job, runId }) => {
+        store.remove(job.id);
+        return createTradeRunReceipt({ runId, status: 'completed', requested: 1, succeeded: 1, finishedAt: time });
+      },
+    });
+
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed', receipt: { runId: 'deleted-run' } });
+    expect(store.read()).toMatchObject({ jobs: [], runtimes: {}, history: [{ runId: 'deleted-run' }] });
+  });
+
+  it('does not overwrite an edited schedule with an in-flight Run runtime', async () => {
+    const storage = memoryStorage();
+    const time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob());
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'edit-tab', now: () => time }),
+      now: () => time,
+      createRunId: () => 'edited-run',
+      getContext: () => ({ sessionReady: true, operationBusy: false }),
+      executeJob: async ({ job, runId }) => {
+        store.upsert({ ...job, armed: false, schedule: { type: 'once', runAt: 5000 } });
+        return createTradeRunReceipt({ runId, status: 'completed', requested: 1, succeeded: 1, finishedAt: time });
+      },
+    });
+
+    expect(await scheduler.tick()).toMatchObject({
+      status: 'completed',
+      runtime: { status: 'disabled', reason: 'not-armed', nextRunAt: 5000, runCount: 0 },
+    });
+    expect(store.read()).toMatchObject({
+      jobs: [{ schedule: { type: 'once', runAt: 5000 }, armed: false }],
+      runtimes: { 'listing-1': { status: 'disabled', reason: 'not-armed', nextRunAt: 5000, runCount: 0 } },
+      history: [{ runId: 'edited-run' }],
+    });
   });
 
   it('waits for the EA session but expires instead of executing outside the grace window', async () => {

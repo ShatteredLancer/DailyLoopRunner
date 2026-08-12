@@ -2,6 +2,9 @@ import { assertValidTradeJob } from './contracts.js';
 
 const MIN_EA_LISTING_PRICE = 150;
 const REJECTION_SAMPLE_LIMIT = 20;
+export const TRADE_LISTING_MAX_BUY_NOW = 10_000;
+export const TRADE_LISTING_QUOTE_POOL_MULTIPLIER = 4;
+export const TRADE_LISTING_QUOTE_POOL_MAX = 16;
 
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
@@ -215,9 +218,23 @@ function plannedPrice(candidate, quotesByDefinitionId, policy, now) {
   const buyNow = roundEaListingPrice(markedUp);
   const startPrice = policy.startPricePolicy === 'same' ? buyNow : eaListingPriceBelow(buyNow);
   return {
+    ok: !(
+      policy.marketOverride.enabled === true
+      && ['unavailable', 'stale'].includes(quoteResult.status)
+      && policy.marketOverride.fallbackPolicy === 'skip'
+    ) && buyNow <= TRADE_LISTING_MAX_BUY_NOW,
+    reason: buyNow > TRADE_LISTING_MAX_BUY_NOW
+      ? 'high-value-listing-excluded'
+      : policy.marketOverride.enabled === true
+        && ['unavailable', 'stale'].includes(quoteResult.status)
+        && policy.marketOverride.fallbackPolicy === 'skip'
+        ? `market-quote-${quoteResult.status}`
+        : null,
     configuredPrice,
     quotedPrice: quoteResult.quote ? Number(quoteResult.quote.price) : null,
     quoteSource: quoteResult.quote ? String(quoteResult.quote.source || 'unknown') : null,
+    quoteQuotedAt: quoteResult.quote && Number.isFinite(Number(quoteResult.quote.quotedAt)) ? Number(quoteResult.quote.quotedAt) : null,
+    quoteExpiresAt: quoteResult.quote && Number.isFinite(Number(quoteResult.quote.expiresAt)) ? Number(quoteResult.quote.expiresAt) : null,
     quoteStatus: quoteResult.status,
     startPrice,
     buyNow,
@@ -229,13 +246,22 @@ function sourceOrder(policy, pile) {
   return index >= 0 ? index : policy.sources.length;
 }
 
-export function buildListingPlan(input = {}) {
+export function listingQuoteCandidatePoolLimit(maxListings) {
+  const requested = Math.max(1, Math.floor(finiteNumber(maxListings, 1)));
+  return Math.min(
+    TRADE_LISTING_QUOTE_POOL_MAX,
+    requested * TRADE_LISTING_QUOTE_POOL_MULTIPLIER,
+  );
+}
+
+export function buildListingCandidatePool(input = {}) {
   const job = input.job;
   assertValidTradeJob(job, 'Listing job');
   if (job.type !== 'listing') throw new Error('Listing job.type must be listing');
-  const now = Math.max(0, finiteNumber(input.now, Date.now()));
   const candidates = Array.isArray(input.candidates) ? input.candidates : [];
-  const quotesByDefinitionId = new Map((input.quotes || []).map((quote) => [Number(quote.definitionId), quote]));
+  const requestedLimit = Number.isFinite(Number(input.limit))
+    ? Math.max(0, Math.floor(Number(input.limit)))
+    : candidates.length;
   const rejectionCounts = {};
   const rejectionSamples = [];
   const eligible = [];
@@ -261,18 +287,68 @@ export function buildListingPlan(input = {}) {
     || Number(left.item.id) - Number(right.item.id)
   ));
 
-  const selected = eligible.slice(0, Number(job.policy.maxListings));
-  const entries = selected.map((candidate, index) => ({
-    index: index + 1,
-    item: { ...candidate.item },
-    name: String(candidate.name || candidate.item.definitionId),
-    rating: Number(candidate.rating),
-    cardClass: job.policy.cardClass,
-    auctionState: String(candidate.auction?.state || 'none'),
-    ...plannedPrice(candidate, quotesByDefinitionId, job.policy, now),
-    durationSeconds: Number(job.policy.durationSeconds),
-    priceLimitStatus: 'pending',
-  }));
+  const poolCandidates = eligible.slice(0, requestedLimit);
+  return {
+    schemaVersion: 1,
+    limit: requestedLimit,
+    truncated: eligible.length > poolCandidates.length,
+    candidates: poolCandidates,
+    definitionIds: [...new Set(poolCandidates.map((candidate) => Number(candidate.item.definitionId)))],
+    counts: {
+      scanned: candidates.length,
+      eligible: eligible.length,
+      pooled: poolCandidates.length,
+      deferred: Math.max(0, eligible.length - poolCandidates.length),
+      rejected: candidates.length - eligible.length,
+    },
+    rejectionCounts,
+    rejectionSamples,
+  };
+}
+
+export function buildListingPlan(input = {}) {
+  const job = input.job;
+  assertValidTradeJob(job, 'Listing job');
+  if (job.type !== 'listing') throw new Error('Listing job.type must be listing');
+  const now = Math.max(0, finiteNumber(input.now, Date.now()));
+  const candidates = Array.isArray(input.candidates) ? input.candidates : [];
+  const quotesByDefinitionId = new Map((input.quotes || []).map((quote) => [Number(quote.definitionId), quote]));
+  const candidatePool = input.candidatePool || buildListingCandidatePool({
+    job,
+    candidates,
+    limit: input.candidatePoolLimit,
+  });
+  const rejectionCounts = { ...candidatePool.rejectionCounts };
+  const rejectionSamples = [...candidatePool.rejectionSamples];
+  const maxListings = Number(job.policy.maxListings);
+  const entries = [];
+  let evaluated = 0;
+  let priceRejected = 0;
+  for (const candidate of candidatePool.candidates) {
+    if (entries.length >= maxListings) break;
+    evaluated += 1;
+    const price = plannedPrice(candidate, quotesByDefinitionId, job.policy, now);
+    if (!price.ok) {
+      priceRejected += 1;
+      rejectionCounts[price.reason] = Number(rejectionCounts[price.reason] || 0) + 1;
+      if (rejectionSamples.length < REJECTION_SAMPLE_LIMIT) {
+        rejectionSamples.push({ item: { ...candidate.item }, reason: price.reason, auction: diagnosticAuction(candidate.auction) });
+      }
+      continue;
+    }
+    const { ok: _priceReady, reason: _priceReason, ...priceFields } = price;
+    entries.push({
+      index: entries.length + 1,
+      item: { ...candidate.item },
+      name: String(candidate.name || candidate.item.definitionId),
+      rating: Number(candidate.rating),
+      cardClass: job.policy.cardClass,
+      auctionState: String(candidate.auction?.state || 'none'),
+      ...priceFields,
+      durationSeconds: Number(job.policy.durationSeconds),
+      priceLimitStatus: 'pending',
+    });
+  }
   const quoteWarnings = entries.filter((entry) => ['unavailable', 'stale'].includes(entry.quoteStatus)).length;
   return {
     schemaVersion: 1,
@@ -287,11 +363,17 @@ export function buildListingPlan(input = {}) {
       marketOverride: { ...job.policy.marketOverride },
     },
     counts: {
-      scanned: candidates.length,
-      eligible: eligible.length,
+      scanned: candidatePool.counts.scanned,
+      eligible: candidatePool.counts.eligible,
+      evaluated,
       selected: entries.length,
-      deferred: Math.max(0, eligible.length - entries.length),
-      rejected: candidates.length - eligible.length,
+      deferred: Math.max(0, candidatePool.counts.eligible - evaluated),
+      rejected: candidatePool.counts.rejected + priceRejected,
+    },
+    candidatePool: {
+      limit: candidatePool.limit,
+      size: candidatePool.candidates.length,
+      truncated: candidatePool.truncated,
     },
     entries,
     rejectionCounts,

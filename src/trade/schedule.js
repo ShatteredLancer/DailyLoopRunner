@@ -165,7 +165,9 @@ export function advanceTradeJobRuntime(job = {}, runtimeInput = {}, input = {}) 
   const runtime = normalizeTradeJobRuntime(runtimeInput);
   const at = Math.max(0, finiteNumber(input.at, Date.now()));
   const scheduledFor = Math.max(0, finiteNumber(input.scheduledFor, runtime.nextRunAt));
-  const nextRunAt = nextTradeRunAt(job, Math.max(at, scheduledFor + 1), { inclusive: true });
+  const nextRunAt = job.schedule?.type === 'window'
+    ? null
+    : nextTradeRunAt(job, Math.max(at, scheduledFor + 1), { inclusive: true });
   return normalizeTradeJobRuntime({
     ...runtime,
     status: nextRunAt === null ? 'completed' : 'waiting-time',

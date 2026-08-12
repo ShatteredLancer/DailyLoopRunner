@@ -25,6 +25,15 @@ describe('Trade Buy diagnostics', () => {
           tradeId: 700,
           price: 900,
           response: { success: true, status: 200, privatePayload: 'must-not-leak' },
+        }, {
+          at: 120,
+          phase: 'chunk-budget-waiting',
+          chunkIndex: 2,
+          offset: 2,
+          quantity: 2,
+          required: 28,
+          remaining: 20,
+          retryAt: 6000,
         }],
       },
       receipt: {
@@ -35,6 +44,10 @@ describe('Trade Buy diagnostics', () => {
         reason: 'trade-auction-operation-blocked',
         receipts: [{
           status: 'run-summary', searches: 1, buyAttempts: 1, spent: 900, expectedDestination: 'transfer',
+          purchasedByRating: { 84: 1 },
+        }, {
+          status: 'chunk-summary', chunkIndex: 1, offset: 0,
+          requested: 1, succeeded: 1, failed: 0, skipped: 0, resultStatus: 'completed',
         }, {
           index: 1,
           status: 'blocked',
@@ -46,6 +59,8 @@ describe('Trade Buy diagnostics', () => {
           coinsBefore: 5000,
           coinsAfter: 4100,
           destination: 'club',
+          candidates: 3,
+          rejectionCounts: { 'rating-mismatch': 2 },
           response: { status: 427, token: 'must-not-leak' },
           error: { message: 'private response', accessToken: 'must-not-leak' },
         }],
@@ -57,16 +72,24 @@ describe('Trade Buy diagnostics', () => {
       validation: { expectedDestination: 'transfer' },
       journal: {
         runId: 'journal-run', phase: 'buy-request-started',
-        events: [{ phase: 'buy-request-started', item: { id: 70, definitionId: 8401, pile: 'market' }, tradeId: 700, price: 900 }],
+        events: [
+          { phase: 'buy-request-started', item: { id: 70, definitionId: 8401, pile: 'market' }, tradeId: 700, price: 900 },
+          { phase: 'chunk-budget-waiting', chunkIndex: 2, offset: 2, quantity: 2, required: 28, remaining: 20, retryAt: 6000 },
+        ],
       },
       receipt: {
         runId: 'run-1',
         status: 'blocked',
         receipts: [{
-          status: 'run-summary', searches: 1, buyAttempts: 1, spent: 900, expectedDestination: 'transfer',
+          status: 'run-summary', searches: 1, buyAttempts: 1, spent: 900,
+          expectedDestination: 'transfer', purchasedByRating: { 84: 1 },
+        }, {
+          status: 'chunk-summary', chunkIndex: 1, offset: 0,
+          requested: 1, succeeded: 1, failed: 0, skipped: 0, resultStatus: 'completed',
         }, {
           item: { id: 70, definitionId: 8401, pile: 'market' }, tradeId: 700,
           price: 900, priceLimit: 1000, coinsBefore: 5000, coinsAfter: 4100,
+          candidates: 3, rejectionCounts: { 'rating-mismatch': 2 },
         }],
       },
       error: { name: 'Error', message: 'Buy stopped', code: '427' },

@@ -63,10 +63,10 @@ describe('Manual guarded Buy validation gate', () => {
 
   it.each([
     [{ cardClass: 'common-gold' }, 'manual-buy-validation-rare-gold-only'],
-    [{ ratingMax: 86 }, 'manual-buy-validation-adjacent-ratings-only'],
-    [{ quantity: 3 }, 'manual-buy-validation-quantity-cap'],
+    [{ ratingMax: 88 }, 'manual-buy-validation-adjacent-ratings-only'],
+    [{ quantity: 5 }, 'manual-buy-validation-quantity-cap'],
     [{ maxBuyNow: 2050, totalBudget: 2050 }, 'manual-buy-validation-price-cap'],
-    [{ totalBudget: 4050 }, 'manual-buy-validation-budget-cap'],
+    [{ totalBudget: 8050 }, 'manual-buy-validation-budget-cap'],
     [{ ratingPriceOverrides: { 84: 2050 }, totalBudget: 2050 }, 'manual-buy-validation-rating-price-cap'],
     [{ ratingPriceOverrides: { 84: 1500 }, totalBudget: 1000 }, 'manual-buy-validation-budget-below-price-limit'],
   ])('rejects unsafe policy %#', (policy, reason) => {

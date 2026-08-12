@@ -1,12 +1,15 @@
 import { createTradeRunReceipt } from './contracts.js';
 import { createBuyTransaction } from './buy-transaction.js';
+import { reconcileResolvedTradeBuyJournal } from './buy-journal.js';
 import {
   filterBuyCatalogForDestination,
   normalizeExpectedBuyDestination,
 } from './buy-destination.js';
 import { inspectManualBuyValidationJob } from './manual-buy-validation.js';
 import { manualBuyValidationConfirmation } from './manual-buy-validation.js';
-import { inspectTradeRequestCapacity, tradeBuyRequestReserve } from './request-budget.js';
+import { tradeBuyRequestReserve } from './request-budget.js';
+import { createTradeChunkCoordinator } from './chunk-coordinator.js';
+import { finalizeChunkedBuyReceipt } from './buy-chunk-receipt.js';
 
 export function createGuardedManualBuyExecutor(options = {}) {
   const operationCoordinator = options.operationCoordinator;
@@ -17,6 +20,7 @@ export function createGuardedManualBuyExecutor(options = {}) {
   if (!lease?.acquire || !lease?.heartbeat || !lease?.release) throw new TypeError('Trade Run Lease is required');
   if (typeof buyPreview?.preview !== 'function') throw new TypeError('Buy Preview is required');
   if (typeof options.getTradeAdapter !== 'function') throw new TypeError('getTradeAdapter is required');
+  if (typeof options.requestBudget?.reserve !== 'function') throw new TypeError('Trade request budget is required');
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const sleep = typeof options.sleep === 'function' ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const createRunId = typeof options.createRunId === 'function'
@@ -43,6 +47,11 @@ export function createGuardedManualBuyExecutor(options = {}) {
   async function execute(input = {}) {
     const startedAt = Number(now());
     const runId = createRunId();
+    const reportProgress = typeof input.onProgress === 'function' ? input.onProgress : null;
+    const recordCheckpoint = (checkpoint) => {
+      journal?.checkpoint?.(runId, checkpoint);
+      try { reportProgress?.(checkpoint); } catch { }
+    };
     const gate = inspectManualBuyValidationJob(input.job, { now: startedAt });
     if (!gate.ready) return blockedReceipt(input.job, runId, gate.reason, startedAt);
     const expectedDestination = normalizeExpectedBuyDestination(input.expectedDestination || 'auto');
@@ -59,14 +68,21 @@ export function createGuardedManualBuyExecutor(options = {}) {
     if (circuit && circuit.allowed !== true) return blockedReceipt(gate.job, runId, 'trade-circuit-open', startedAt);
     const journalRecovery = journal?.inspectRecovery?.();
     if (journalRecovery?.canSupersede === false) {
-      return blockedReceipt(gate.job, runId, journalRecovery.reason || 'buy-journal-recovery-required', startedAt);
+      const reconciliation = reconcileResolvedTradeBuyJournal({
+        journal,
+        adapter: options.getTradeAdapter(),
+        now,
+      });
+      if (reconciliation.status === 'reconciled') {
+        return blockedReceipt(gate.job, runId, reconciliation.reason, startedAt);
+      }
+      return blockedReceipt(
+        gate.job,
+        runId,
+        reconciliation.reason || journalRecovery.reason || 'buy-journal-recovery-required',
+        startedAt,
+      );
     }
-    const requestReserve = tradeBuyRequestReserve(gate.job);
-    if (typeof options.requestBudget?.inspect === 'function') {
-      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect(), requestReserve);
-      if (!requestCapacity.ready) return blockedReceipt(gate.job, runId, requestCapacity.reason, startedAt);
-    }
-
     const operationId = `manual-buy:${runId}`;
     const operation = operationCoordinator.acquire({
       id: operationId,
@@ -98,7 +114,6 @@ export function createGuardedManualBuyExecutor(options = {}) {
       return receipt;
     };
     let runningNotified = false;
-    let requestReservation = null;
     try {
       journal?.begin?.({
         runId,
@@ -111,9 +126,13 @@ export function createGuardedManualBuyExecutor(options = {}) {
       runningNotified = true;
       let preview;
       try {
-        journal?.checkpoint?.(runId, { phase: 'preview-started' });
+        recordCheckpoint({ phase: 'preview-started', at: Number(now()) });
         preview = await buyPreview.preview(gate.job, { platform: input.platform || 'pc' });
-        journal?.checkpoint?.(runId, { phase: 'preview-finished', status: preview?.plan?.ready ? 'completed' : 'blocked' });
+        recordCheckpoint({
+          phase: 'preview-finished',
+          at: Number(now()),
+          status: preview?.plan?.ready ? 'completed' : 'blocked',
+        });
       } catch (error) {
         const receipt = blockedReceipt(gate.job, runId, 'buy-preview-failed', startedAt);
         return finishReceipt(receipt, { preview: null, error }, 'preview-failed');
@@ -124,10 +143,15 @@ export function createGuardedManualBuyExecutor(options = {}) {
       }
 
       let adapter = options.getTradeAdapter();
-      journal?.checkpoint?.(runId, { phase: 'validation-destination-filter-started', destination: expectedDestination });
+      recordCheckpoint({
+        phase: 'validation-destination-filter-started',
+        at: Number(now()),
+        destination: expectedDestination,
+      });
       const destinationPlan = filterBuyCatalogForDestination({ lanes: preview.plan.lanes }, adapter, expectedDestination);
-      journal?.checkpoint?.(runId, {
+      recordCheckpoint({
         phase: 'validation-destination-filter-finished',
+        at: Number(now()),
         destination: expectedDestination,
         status: destinationPlan.reason ? 'blocked' : 'completed',
         reason: destinationPlan.reason,
@@ -147,40 +171,79 @@ export function createGuardedManualBuyExecutor(options = {}) {
         return finishReceipt(receipt, { preview }, 'validation-destination-blocked');
       }
 
-      if (typeof options.requestBudget?.reserve === 'function') {
-        requestReservation = await options.requestBudget.reserve(requestReserve);
-        if (!requestReservation.ready) {
-          const receipt = blockedReceipt(gate.job, runId, 'trade-request-budget-insufficient', startedAt);
-          return finishReceipt(receipt, { preview }, 'request-budget-blocked');
-        }
-        adapter = options.getTradeAdapter({ requestBudget: requestReservation });
-      }
-
-      const transaction = transactionFactory({
-        tradeAdapter: adapter,
-        playerCatalogProvider: options.playerCatalogProvider,
-        circuitBreaker: options.circuitBreaker,
+      const coordinator = createTradeChunkCoordinator({
+        requestBudget: options.requestBudget,
+        now,
         sleep,
-        onCheckpoint: (checkpoint) => journal?.checkpoint?.(runId, checkpoint),
+        onCheckpoint: recordCheckpoint,
       });
-      const receipt = await transaction.run({
-        job: gate.job,
+      let spent = 0;
+      let cursor = null;
+      let purchasedByRating = {};
+      const deadlineAt = startedAt + Number(gate.job.policy.maxRuntimeMinutes) * 60_000;
+      const receipt = await coordinator.run({
         runId,
+        jobId: gate.job.id,
+        jobType: gate.job.type,
         scheduledFor: startedAt,
-        platform: input.platform || 'pc',
-        expectedDestination,
-        maxBuyAttempts: Number(gate.job.policy.quantity),
-        beforeBuy: () => {
-          const renewed = lease.heartbeat(runId) === true;
-          journal?.checkpoint?.(runId, {
-            phase: renewed ? 'buy-lease-heartbeat-completed' : 'buy-lease-heartbeat-failed',
-            status: renewed ? 'completed' : 'blocked',
-          });
-          return renewed;
-        },
+        startedAt,
+        deadlineAt,
+        deadlineReason: 'runtime-limit',
+        requested: gate.job.policy.quantity,
+        requestReserve: (quantity) => tradeBuyRequestReserve({
+          ...gate.job,
+          policy: { ...gate.job.policy, quantity },
+        }),
+        heartbeat: () => lease.heartbeat(runId) === true,
         shouldStop: () => options.shouldStop?.() === true,
+        executeChunk: async ({ offset, quantity, reservation }) => {
+          adapter = options.getTradeAdapter({ requestBudget: reservation });
+          const remainingRuntimeMinutes = Math.max(1 / 60_000, (deadlineAt - Number(now())) / 60_000);
+          const chunkJob = {
+            ...gate.job,
+            policy: {
+              ...gate.job.policy,
+              quantity,
+              totalBudget: Math.max(1, Number(gate.job.policy.totalBudget) - spent),
+              maxRuntimeMinutes: Math.min(Number(gate.job.policy.maxRuntimeMinutes), remainingRuntimeMinutes),
+            },
+          };
+          const transaction = transactionFactory({
+            tradeAdapter: adapter,
+            playerCatalogProvider: options.playerCatalogProvider,
+            circuitBreaker: options.circuitBreaker,
+            sleep,
+            onCheckpoint: recordCheckpoint,
+          });
+          const chunkReceipt = await transaction.run({
+            job: chunkJob,
+            runId,
+            scheduledFor: startedAt,
+            platform: input.platform || 'pc',
+            expectedDestination,
+            itemIndexOffset: offset,
+            cursor,
+            purchasedByRating,
+            maxBuyAttempts: quantity,
+            beforeBuy: () => {
+              const renewed = lease.heartbeat(runId) === true;
+              recordCheckpoint({
+                phase: renewed ? 'buy-lease-heartbeat-completed' : 'buy-lease-heartbeat-failed',
+                at: Number(now()),
+                status: renewed ? 'completed' : 'blocked',
+              });
+              return renewed;
+            },
+            shouldStop: () => options.shouldStop?.() === true,
+          });
+          const summary = (chunkReceipt.receipts || []).find((entry) => entry.status === 'run-summary') || {};
+          spent += Number(summary.spent || 0);
+          cursor = summary.cursor || cursor;
+          purchasedByRating = { ...purchasedByRating, ...(summary.purchasedByRating || {}) };
+          return chunkReceipt;
+        },
       });
-      return finishReceipt(receipt, { preview });
+      return finishReceipt(finalizeChunkedBuyReceipt(receipt), { preview });
     } catch (error) {
       journal?.finish?.(runId, {
         phase: 'executor-error',
@@ -191,7 +254,6 @@ export function createGuardedManualBuyExecutor(options = {}) {
     } finally {
       lease.release(runId);
       operationCoordinator.release(operationId);
-      try { await requestReservation?.release?.(); } catch { }
       if (runningNotified) options.onRunningChange?.(false, { ...input, job: gate.job, runId });
     }
   }

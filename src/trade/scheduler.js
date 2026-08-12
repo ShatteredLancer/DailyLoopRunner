@@ -1,5 +1,6 @@
 import { createTradeRunReceipt } from './contracts.js';
 import { advanceTradeJobRuntime, evaluateTradeJob, normalizeTradeJobRuntime } from './schedule.js';
+import { tradeScheduleFingerprint } from './schedule-authorization.js';
 import { selectFairTradeCandidate } from './scheduler-fairness.js';
 
 function finiteNumber(value, fallback = 0) {
@@ -38,6 +39,24 @@ export function createTradeScheduler(options = {}) {
       scheduledFor: runtime.nextRunAt, startedAt: at, finishedAt: at,
       status: 'missed', reason: decision.reason,
     });
+  }
+
+  function persistAdvancedRuntime(job, advanced, terminalStatus, terminalReason = null) {
+    const latest = store.read();
+    const latestJob = latest.jobs.find((entry) => entry.id === job.id);
+    if (!latestJob || tradeScheduleFingerprint(latestJob) !== tradeScheduleFingerprint(job)) {
+      return latest.runtimes[job.id] || advanced;
+    }
+    const finalized = latestJob.armed === true
+      ? advanced
+      : normalizeTradeJobRuntime({
+        ...advanced,
+        status: terminalStatus,
+        reason: terminalReason,
+        nextRunAt: null,
+      });
+    store.updateRuntime(job.id, finalized);
+    return finalized;
   }
 
   async function execute(job, runtime, context) {
@@ -137,8 +156,13 @@ export function createTradeScheduler(options = {}) {
       runId,
       reason: receipt.status === 'completed' ? null : receipt.reason,
     });
-    store.updateRuntime(job.id, advanced);
-    return { status: receipt.status, jobId: job.id, receipt, runtime: advanced };
+    const finalized = persistAdvancedRuntime(
+      job,
+      advanced,
+      receipt.status === 'completed' ? 'completed' : 'blocked',
+      receipt.status === 'completed' ? null : receipt.reason,
+    );
+    return { status: receipt.status, jobId: job.id, receipt, runtime: finalized };
   }
 
   async function tick(extraContext = {}) {
@@ -166,7 +190,9 @@ export function createTradeScheduler(options = {}) {
             reason: decision.reason, countRun: false,
           });
           store.updateRuntime(job.id, advanced);
-          return { status: 'missed', jobId: job.id, receipt, runtime: advanced };
+          store.consumeAuthorization?.(job.id, receipt.runId);
+          const finalized = persistAdvancedRuntime(job, advanced, 'missed', decision.reason);
+          return { status: 'missed', jobId: job.id, receipt, runtime: finalized };
         }
         if (decision.action === 'run') runnable.push({ job, runtime, decision });
       }

@@ -52,6 +52,14 @@ function transferRepriceJob(overrides = {}) {
 function store() {
   return {
     relock: vi.fn(),
+    consumeAuthorization: vi.fn(() => ({ consumed: true, remainingRuns: 0 })),
+  };
+}
+
+function safeRequestBudget() {
+  return {
+    inspect: () => ({ remaining: 30 }),
+    reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
   };
 }
 
@@ -82,7 +90,7 @@ describe('Guarded scheduled Listing validation executor', () => {
     expect(selectGuardedScheduledListingJob({ jobs: [valid, job({ id: 'second' })] }))
       .toMatchObject({ ready: false, reason: 'validation-gate-multiple-armed-jobs' });
     expect(guardedScheduledListingReason(job({ schedule: { type: 'daily', time: '09:00', timezone: 'UTC' } })))
-      .toBe('validation-gate-once-only');
+      .toBeNull();
     expect(guardedScheduledListingReason(job({ misfirePolicy: { type: 'next-login' } })))
       .toBe('validation-gate-next-login-disabled');
     expect(guardedScheduledListingReason(job({ misfirePolicy: { type: 'grace-window', graceMinutes: 30 } })))
@@ -90,9 +98,12 @@ describe('Guarded scheduled Listing validation executor', () => {
     expect(selectGuardedScheduledListingJob({
       jobs: [valid], runtimes: { [valid.id]: { nextRunAt: null } },
     })).toMatchObject({ ready: false, reason: 'validation-gate-no-pending-run' });
+    const recurring = job({ schedule: { type: 'interval', everyMinutes: 60, anchorAt: 2000 } });
+    expect(selectGuardedScheduledListingJob({ jobs: [recurring] }, { authorizationRuns: 2 }))
+      .toMatchObject({ ready: true, job: { id: 'once-listing' } });
   });
 
-  it('relocks and disarms before preparing and executing one item', async () => {
+  it('consumes one bounded authorization before preparing and executing one item', async () => {
     const jobStore = store();
     const order = [];
     jobStore.relock.mockImplementation(() => order.push('relock'));
@@ -136,18 +147,20 @@ describe('Guarded scheduled Listing validation executor', () => {
       job: job(), runId: 'run-1', scheduledFor: 2000, context: { liveExecutionEnabled: true }, heartbeat,
     });
     expect(result).toMatchObject({ status: 'completed', requested: 1, succeeded: 1 });
-    expect(order).toEqual(['relock', 'prepare', 'transaction']);
-    expect(jobStore.relock).toHaveBeenCalledOnce();
+    expect(order).toEqual(['prepare', 'transaction']);
+    expect(jobStore.consumeAuthorization).toHaveBeenCalledWith('once-listing', 'run-1');
     expect(transaction.run).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'run-1', confirmationToken: 'secret', confirmationText: 'LIST 1', scheduledFor: 2000,
     }));
     expect(transaction.run.mock.calls[0][0].beforeMutation()).toBe(true);
-    expect(heartbeat).toHaveBeenCalledOnce();
+    expect(heartbeat).toHaveBeenCalledTimes(2);
     expect(onRunningChange.mock.calls.map((call) => call[0])).toEqual([true, false]);
-    expect(requestBudget.reserve).toHaveBeenCalledWith(12);
+    expect(requestBudget.reserve).toHaveBeenCalledTimes(2);
+    expect(requestBudget.reserve).toHaveBeenNthCalledWith(1, 12);
+    expect(requestBudget.reserve).toHaveBeenNthCalledWith(2, 12);
     expect(getTradeAdapter).toHaveBeenCalledWith({ requestBudget: reservation });
     expect(transactionFactory).toHaveBeenCalledWith(expect.objectContaining({ tradeAdapter: scopedAdapter }));
-    expect(reservation.release).toHaveBeenCalledOnce();
+    expect(reservation.release).toHaveBeenCalledTimes(2);
   });
 
   it('prepares, target-validates and executes two Club items under the dual-card gate', async () => {
@@ -194,6 +207,62 @@ describe('Guarded scheduled Listing validation executor', () => {
     expect(requestBudget.reserve).toHaveBeenCalledWith(12);
   });
 
+  it('executes four prepared Listing items as two independently reserved chunks', async () => {
+    const four = job({
+      id: 'once-listing-four',
+      name: 'Four guarded listings',
+      policy: { ...job().policy, maxListings: 4 },
+    });
+    const entries = [1, 2, 3, 4].map((id) => ({ item: { id, definitionId: id + 100, pile: 'club' } }));
+    const prepared = {
+      ready: true,
+      job: four,
+      plan: { entries },
+      confirmation: { token: 'secret', requiredText: 'LIST 4' },
+    };
+    const requestBudget = {
+      inspect: () => ({ remaining: 30 }),
+      reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
+    };
+    const transaction = { run: vi.fn(async ({ prepared: chunk, itemIndexOffset }) => ({
+      status: 'completed',
+      requested: chunk.plan.entries.length,
+      succeeded: chunk.plan.entries.length,
+      receipts: chunk.plan.entries.map((entry, index) => ({
+        index: itemIndexOffset + index + 1,
+        item: entry.item,
+        status: 'listed',
+      })),
+    })) };
+
+    const receipt = await createGuardedScheduledListingExecutor({
+      store: store(),
+      listingPreparation: { prepare: vi.fn(async () => prepared) },
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      getTradeAdapter: () => createFakeTradeAdapter(),
+      transactionFactory: () => transaction,
+      requestBudget,
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: four,
+      runId: 'scheduled-listing-four',
+      scheduledFor: 2000,
+      context: { liveExecutionEnabled: true },
+      heartbeat: () => true,
+    });
+
+    expect(receipt).toMatchObject({ status: 'completed', requested: 4, succeeded: 4, skipped: 0 });
+    expect(requestBudget.reserve.mock.calls).toEqual([[12], [12], [12]]);
+    expect(transaction.run.mock.calls.map(([input]) => ({
+      offset: input.itemIndexOffset,
+      ids: input.prepared.plan.entries.map((entry) => entry.item.id),
+    }))).toEqual([
+      { offset: 0, ids: [1, 2] },
+      { offset: 2, ids: [3, 4] },
+    ]);
+  });
+
   it('supports the offline Scheduled Transfer reprice branch without Club validation', async () => {
     const jobStore = store();
     const prepared = {
@@ -213,6 +282,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       getTradeAdapter: () => createFakeTradeAdapter(),
       transactionFactory,
       validateClubPlayers,
+      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       scheduledTransferRepriceEnabled: true,
       now: () => 2000,
@@ -271,7 +341,7 @@ describe('Guarded scheduled Listing validation executor', () => {
     expect(transactionFactory).not.toHaveBeenCalled();
   });
 
-  it('relocks and blocks before preparation when the shared request reserve is unavailable', async () => {
+  it('blocks before preparation when the shared request reserve is unavailable', async () => {
     const jobStore = store();
     const listingPreparation = { prepare: vi.fn() };
     const result = await createGuardedScheduledListingExecutor({
@@ -279,7 +349,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       listingPreparation,
       operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
       getTradeAdapter: () => createFakeTradeAdapter(),
-      requestBudget: { inspect: () => ({ remaining: 11, retryAt: 5000 }) },
+      requestBudget: { inspect: () => ({ remaining: 11, retryAt: 5000 }), reserve: vi.fn() },
       validationGateEnabled: true,
       now: () => 2000,
     }).execute({
@@ -287,7 +357,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       context: { liveExecutionEnabled: true }, heartbeat: () => true,
     });
     expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0 });
-    expect(jobStore.relock).toHaveBeenCalledOnce();
+    expect(jobStore.consumeAuthorization).toHaveBeenCalledOnce();
     expect(listingPreparation.prepare).not.toHaveBeenCalled();
   });
 
@@ -317,6 +387,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       getTradeAdapter: () => createFakeTradeAdapter(),
       transactionFactory: () => transaction,
       validateClubPlayers,
+      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => 2000,
       onReceipt,
@@ -335,7 +406,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       [{ id: 10, definitionId: 20, pile: 'club' }],
       { label: 'One guarded listing targeted Club validation' },
     );
-    expect(order).toEqual(['relock', 'prepare', 'validate', 'transaction']);
+    expect(order).toEqual(['prepare', 'validate', 'transaction']);
     expect(onReceipt).toHaveBeenCalledWith(result, expect.objectContaining({
       clubValidation: expect.objectContaining({ status: 'passed', elapsed: 12 }),
     }));
@@ -358,6 +429,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       getTradeAdapter: () => createFakeTradeAdapter(),
       transactionFactory,
       validateClubPlayers: vi.fn(async () => ({ ok: true, items: [], missing: [{ id: 10, definitionId: 20 }] })),
+      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => 2000,
       onReceipt,
@@ -378,7 +450,7 @@ describe('Guarded scheduled Listing validation executor', () => {
     }));
   });
 
-  it('relocks but refuses invalid or disabled validation gates before any preparation', async () => {
+  it('refuses invalid or disabled validation gates before any preparation', async () => {
     const jobStore = store();
     const listingPreparation = { prepare: vi.fn() };
     const base = {
@@ -386,6 +458,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       listingPreparation,
       operationCoordinator: createOperationCoordinator(),
       getTradeAdapter: () => createFakeTradeAdapter(),
+      requestBudget: safeRequestBudget(),
       now: () => 2000,
     };
     const disabled = await createGuardedScheduledListingExecutor(base).execute({
@@ -393,12 +466,12 @@ describe('Guarded scheduled Listing validation executor', () => {
     });
     expect(disabled).toMatchObject({ status: 'blocked', reason: 'scheduled-listing-validation-gate-disabled' });
     const invalid = await createGuardedScheduledListingExecutor({ ...base, validationGateEnabled: true }).execute({
-      job: job({ policy: { ...job().policy, maxListings: 3 } }),
+      job: job({ policy: { ...job().policy, maxListings: 5 } }),
       runId: 'run-invalid', scheduledFor: 2000, context: { liveExecutionEnabled: true },
     });
     expect(invalid).toMatchObject({ status: 'blocked', reason: 'validation-gate-listing-quantity-cap' });
     expect(listingPreparation.prepare).not.toHaveBeenCalled();
-    expect(jobStore.relock).toHaveBeenCalledTimes(2);
+    expect(jobStore.consumeAuthorization).not.toHaveBeenCalled();
   });
 
   it('retains a blocked Prepared scan for diagnostics without starting a transaction', async () => {
@@ -417,6 +490,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       operationCoordinator: createOperationCoordinator(),
       getTradeAdapter: () => createFakeTradeAdapter(),
       transactionFactory,
+      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => 2000,
       onReceipt,
@@ -433,8 +507,7 @@ describe('Guarded scheduled Listing validation executor', () => {
     let time = 1000;
     const jobStore = createTradeJobStore({ storage, key: 'jobs', now: () => time });
     jobStore.upsert(job());
-    jobStore.setLiveExecutionEnabled(true);
-    jobStore.setPaused(false);
+    jobStore.authorize('once-listing');
     time = 2000;
     const transaction = { run: vi.fn(async () => ({ status: 'completed', requested: 1, succeeded: 1, receipts: [] })) };
     const executor = createGuardedScheduledListingExecutor({
@@ -450,6 +523,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       operationCoordinator: createOperationCoordinator({ now: () => time }),
       getTradeAdapter: () => createFakeTradeAdapter(),
       transactionFactory: () => transaction,
+      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => time,
     });
@@ -479,8 +553,7 @@ describe('Guarded scheduled Listing validation executor', () => {
     const jobStore = createTradeJobStore({ storage, key: 'jobs', now: () => time });
     const scheduledJob = transferRepriceJob();
     jobStore.upsert(scheduledJob);
-    jobStore.setLiveExecutionEnabled(true);
-    jobStore.setPaused(false);
+    jobStore.authorize(scheduledJob.id);
     time = 2000;
     const transaction = { run: vi.fn(async () => ({ status: 'completed', requested: 1, succeeded: 1, receipts: [] })) };
     const executor = createGuardedScheduledListingExecutor({
@@ -496,6 +569,7 @@ describe('Guarded scheduled Listing validation executor', () => {
       operationCoordinator: createOperationCoordinator({ now: () => time }),
       getTradeAdapter: () => createFakeTradeAdapter(),
       transactionFactory: () => transaction,
+      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       scheduledTransferRepriceEnabled: true,
       now: () => time,

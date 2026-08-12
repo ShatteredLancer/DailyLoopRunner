@@ -1,7 +1,7 @@
 # Trade Scheduler 设计与实施跟踪
 
-> 文档状态：TS8 bounded two-item implementation、full automated verification and ordered EA live validation complete on candidate `0.7.70`; TS9-TS15 roadmap is defined and later production gates remain locked
-> 最后更新：2026-08-11
+> 文档状态：TS8-TS12 与 V9-12 实机 campaign 完成；TS12 quote fallback/high-value 实机观察保持可选；下一阶段为 TS13 多 Job、长期运行与恢复
+> 最后更新：2026-08-12
 > 适用仓库：DailyLoopRunner  
 > 功能边界：定时自动买入、定时批量挂牌、交易任务调度、逐项回执与诊断
 
@@ -729,17 +729,17 @@ Trade diagnostics JSON 至少包含：
 | TS6 | 可观测性、配置迁移和共享预算 | TS1-TS5 | Complete for guarded scope | Complete | Complete for guarded scope | Guarded infrastructure released |
 | TS7 | Transfer reprice 单卡门禁 | TS2-TS3-TS6 | Complete | Complete | Complete | Guarded path released |
 | TS8 | 有界双卡 Trade 候选 | TS4-TS7 | Complete | Complete | Complete | Guarded two-item path validated in `0.7.70` |
-| TS9 | 有界手动多卡事务 | TS8 Complete | Not started | Not started | Not started | Locked |
-| TS10 | 循环调度生产门禁 | TS9 Complete | Not started | Not started | Not started | Locked |
-| TS11 | Buy 策略生产扩展 | TS10 Complete | Not started | Not started | Not started | Locked |
-| TS12 | Listing/Reprice 策略生产扩展 | TS11 Complete | Not started | Not started | Not started | Locked |
+| TS9 | 有界手动多卡事务 | TS8 Complete | Complete for candidate | Complete locally | Complete | Four-item Listing/Reprice/Buy paths passed |
+| TS10 | 循环调度生产门禁 | TS9 Complete | Complete for single armed Job | Complete locally | Complete | Daily/Interval/Window and terminal relock passed |
+| TS11 | Buy 策略生产扩展 | TS10 Complete | Complete for Rare Gold | Complete locally | Complete | Three-lane non-uniform quota Buy passed |
+| TS12 | Listing/Reprice 策略生产扩展 | TS11 Complete | Complete for candidate | Complete locally | Complete | Listing/Reprice live paths passed; bounded quote backfill automated; live fallback observation optional |
 | TS13 | 多 Job、长期运行与恢复 | TS12 Complete | Not started | Not started | Not started | Locked |
 | TS14 | 可选 Companion 最终决策 | TS13 Complete | Not started | Not started | Not started | Locked |
 | TS15 | 生产发布与路线图关闭 | TS14 Complete | Not started | Not started | Not started | Locked |
 
 进度维护规则：
 
-1. TS8 的有序实机验证 campaign 已完成；当前实现入口是 TS9，但在 TS9 的实现、自动验证和实机验证分别完成前不得扩大已验证的两项生产写门禁。
+1. TS8 与 V9-12 的有序实机 campaign 已完成，TS9-TS12 均满足当前有界范围的实现、自动验证和实机门禁。TS12 的真实 stale/unavailable 或高价回填继续作为可选只读观察，不再阻止下一阶段。
 2. 可以提前实现后续阶段的纯函数、Fake Adapter 和关闭状态 UI，但必须保持默认禁用，并在表中分别记录实现、自动验证和实机验证状态。
 3. 每次推进必须同时更新本表、对应里程碑的 `Status`/checkbox、第 20 节验证记录和运维文档；仅修改版本号或提交信息不算推进。
 4. 实机 campaign 可以合并验证多个已经通过自动门禁的场景，但必须按风险从低到高执行；前一场景出现 `ambiguous`、身份不一致、价格不一致、页面崩溃或未知 Journal 时立即终止整个 campaign。
@@ -752,7 +752,7 @@ Trade diagnostics JSON 至少包含：
 | Campaign | 覆盖里程碑 | 用户必须执行的操作 | 预计人工占用 | 需要交付的证据 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | V8 双卡门禁 | TS8 | 安装/刷新一次候选版；选择低价值卡；依次确认手动双卡 Club Listing、Transfer reprice、双评分 Buy、一次定时 Listing/Reprice/Buy；保持登录并在异常时停止 | 约 30-60 分钟；不含等待合适 expired 卡 | 最终 Listing、Buy、Scheduler diagnostics 各一份；失败时立即导出当前日志 | Complete；六项 `0.7.70` 实机证据已复核 |
-| V9-12 生产策略合并 campaign | TS9-TS12 | 安装一次已通过完整测试且默认回锁的候选版；验证手动多卡与 Stop；验证 daily/interval/window；执行低价多评分 Buy；验证 Club Listing、市场报价 fallback 和一次 expired reprice；按脚本要求切后台、刷新并重新登录 | 约 60-90 分钟主动操作，外加至少 1 小时 expiry/调度观察 | 一个按 `runId` 关联的合并 diagnostics 包；若全部通过，不需要逐阶段发送 | Not started；等待 TS9-TS12 编码和自动验证完成 |
+| V9-12 生产策略合并 campaign | TS9-TS12 | 安装一次已通过完整测试且默认回锁的候选版；验证手动多卡与 Stop；验证 daily/interval/window；执行低价多评分 Buy；验证 Club Listing、市场报价和一次 expired reprice；按脚本要求切后台、刷新并重新登录 | 约 60-90 分钟主动操作，外加至少 1 小时 expiry/调度观察 | 一个按 `runId` 关联的合并 diagnostics 包；若全部通过，不需要逐阶段发送 | Complete on `0.7.84`; live quote fallback/high-value observation remains optional |
 | V13-15 长期运行与最终 canary | TS13、TS15；TS14 若选择暂缓 | 安装一次最终候选版；配置少量 Buy/Listing/Reprice Jobs；触发一次 Loop/Trade 互斥；让标签页后台运行，执行一次刷新/重登或系统休眠恢复；最后确认发布 | 约 20-40 分钟主动操作，建议 4-8 小时低频观察 | 最终 Scheduler diagnostics、相关 Listing/Buy diagnostics 和 Runner log；通过后作为 TS15 发布证据 | Not started |
 | VC Companion 可选验证 | 仅在 TS14 决定实现时 | 安装最小扩展、授权通知，验证 alarm/notification/open/focus；交易仍在已登录页面内确认和执行 | 约 15-30 分钟 | 扩展诊断和页面 Scheduler diagnostics；不要求页面关闭时成交 | Optional；若 TS14 决定暂缓则不执行 |
 
@@ -984,19 +984,19 @@ Exit criteria: Met for the guarded two-item scope. TS9 可以开始实现；第�
 
 ### TS9 有界手动多卡事务
 
-Status: Not started.
+Status: Candidate implementation and automated verification complete; live quote compatibility observation optional.
 
 Depends on: TS8 必须完成全部双卡实机验证并标记为 `Complete`；O9 必须先确定首轮 Run cap 和 chunk cap。
 
 Scope:
 
-- [ ] 把当前固定两项的 Listing/Buy Journal 扩展为有上限的多项 Journal，保留逐项 Prepare、mutation boundary、对账、终态和脱敏证据。
-- [ ] 新增通用 chunk coordinator；每个 chunk 单独取得共享请求预算，未取得预算时进入有截止时间的等待状态，不轮询轰炸 EA。
-- [ ] 手动 Club Listing 和手动 Transfer reprice 继续保持来源互斥，并在确认文本中包含准确数量和动作类型。
-- [ ] 手动 Buy 首轮仍限 Rare Gold、显式价格/总预算/最低保留金币和已验证评分通道；只扩大有界数量，不同时扩大卡类。
-- [ ] 在每张卡和每个 chunk 之间响应 Stop；已经成功的卡保留成功回执，未跨 mutation boundary 的卡可安全取消。
-- [ ] 容量、金币、价格限制、卡片身份、active/inactive 状态和 Club duplicate 路由必须在每次写入前重新检查。
-- [ ] 任一未知写入结果停止整个 Run；不得跳过未知项继续处理，也不得自动 acknowledge 或自动重试。
+- [x] Listing/Buy Journal 上限扩展为 4 项，保留逐项 Prepare、mutation boundary、对账、终态和脱敏证据。
+- [x] 通用 chunk coordinator 将 Run 拆为最多两个 2 项 chunk；每个 chunk 单独取得共享请求预算，未取得时仅本地等待，15 分钟 deadline 后停止。
+- [x] 手动 Club Listing 和手动 Transfer reprice 保持来源互斥，并使用准确的 `LIST N` / `REPRICE N` 确认文本。
+- [x] 手动 Buy 仍限 Rare Gold、每卡不超过 2000、总预算不超过 8000、评分跨度不超过 3、总数量不超过 4。
+- [x] 在每张卡和每个 chunk 之间响应 Stop；已成功项保留回执，剩余项记为 skipped。
+- [x] 容量、金币、价格限制、卡片身份、active/inactive 状态和 Club duplicate 路由在每次写入前重新检查。
+- [x] 任一 unknown/ambiguous/incomplete chunk 停止整个 Run，不跳过、不自动 acknowledge、不自动重试。
 
 Automated tests:
 
@@ -1019,19 +1019,19 @@ Next: TS10 循环调度生产门禁。
 
 ### TS10 循环调度生产门禁
 
-Status: Not started.
+Status: Candidate implementation and focused automated verification complete for exactly one armed Job; V9-12 live validation pending.
 
 Depends on: TS9 Complete；O4、O10 和 O11 必须形成明确决策。
 
 Scope:
 
-- [ ] 首先开放单一 armed Job 的 `daily`，再依次开放 `interval` 和 `window`；每种 schedule 使用独立 production gate 和精确确认。
-- [ ] 继续复用启动即回锁、跨标签页 Lease、Operation Coordinator、Circuit Breaker、请求预算和逐项 Journal。
-- [ ] 明确页面后台化、系统休眠、刷新、延迟登录、超过 grace window 和时区/DST 变化时的确定性行为。
-- [ ] 页面关闭或 EA 未登录时不执行交易；恢复页面后只按已批准的 Misfire Policy 计算一次，不补跑队列。
-- [ ] Loop Runner 运行时 Trade Job 必须等待；Trade Run 持有 Coordinator 时 Loop 不得开始，双方均显示阻塞原因和下一次评估时间。
-- [ ] 每次 recurring Run 都生成独立 `runId`；同一个计划时间不得因 reload、双标签页或 tick 重入执行两次。
-- [ ] `next-login` 必须在 O11 中显式批准后才能实现；没有决议时继续拒绝。
+- [x] 单一 armed Job 支持 `daily`、`interval` 和 `window`；daily/interval 的精确确认只授权两次 occurrence，window 只授权一次。
+- [x] 授权绑定 Job schedule/policy fingerprint；配置编辑、删除、导入、授权过期、次数耗尽或失败终态均回锁并解除武装。
+- [x] 继续复用跨标签页 Web Lock/Lease、Operation Coordinator、Circuit Breaker、共享请求预算和逐项 Journal。
+- [x] 页面关闭或 EA 未登录时不执行也不排队；恢复后只按 `skip` 或最多 15 分钟 `grace-window` 计算当前 occurrence。
+- [x] Loop Runner 与 Trade Run 保持互斥；等待状态不发送 EA mutation。
+- [x] 每个 occurrence 使用独立 `runId`；相同 Run ID 的重复授权消费被拒绝且不会扣减第二次。
+- [x] `next-login` 从 UI 和生产 gate 中移除并继续拒绝。
 
 Automated tests:
 
@@ -1054,23 +1054,23 @@ Next: TS11 Buy 策略生产扩展。
 
 ### TS11 Buy 策略生产扩展
 
-Status: Not started.
+Status: Candidate implementation and focused automated verification complete for bounded Rare Gold ranges; V9-12 live validation pending.
 
 Depends on: TS10 Complete；O14 必须确认支持的 Buy card class 边界。
 
 Scope:
 
-- [ ] 把评分范围扩展为多个精确 rating lane；每个 lane 仍按 definition ID 分解 EA 搜索，不向 EA 发送不存在的评分范围条件。
-- [ ] 支持每评分价格上限、每评分数量配额、Job 总数量、Job 总预算、最低保留金币和最大运行时间。
-- [ ] lane 调度保持公平，单个低价或空结果 definition 不得永久饿死其它评分；每个响应仍只购买当前响应中最低合格 Buy Now。
-- [ ] 数量大于 TS9 单 chunk 时复用 chunk coordinator，预算恢复前暂停；不得通过提高共享 30/5 分钟上限来换取吞吐。
-- [ ] 为连续空搜索、报价过期、价格越界、金币不足、Transfer 满、Unassigned 阻塞和 429/427/Captcha 定义明确停止阈值。
-- [ ] Preview 显示 lane、definition 数量、配额、最坏请求成本、最高支出和停止条件；确认文本包含总数量和最大支出。
-- [ ] Rare Gold 之外的 card class 只有在 O14 单独批准并完成匹配/路由测试后才能增加。
+- [x] 评分范围扩展为最多 4 个逐评分精确 lane；每个 lane 仍按 definition ID 分解 EA 搜索，不发送 EA 评分范围条件。
+- [x] 支持每评分价格上限、每评分数量配额、Job 总数量、总预算、全局/Job 最低保留金币和整个 Run 共用的最大运行时间。
+- [x] lane 与 definition cursor 跨 chunk 保持轮转；已达到评分配额的 lane 被排除，每个响应仍只买最低合格 Buy Now。
+- [x] 数量大于 2 时复用 chunk coordinator；共享上限保持 `30 requests / 5 minutes`，不以提高上限换吞吐。
+- [x] 连续空搜索、价格/预算/金币越界、Transfer 满、Unassigned 阻塞及 429/427/未知响应均有明确停止原因。
+- [x] Preview 显示 lane、definition 数量、评分配额、总预算、运行上限和 chunk reserve；diagnostics 保留脱敏 lane/候选/拒绝/购买计数。
+- [x] O14 决定 TS11 仍只支持 Rare Gold；其它 card class 保持拒绝。
 
 Automated tests:
 
-- 覆盖三种及以上评分、非相邻评分、per-rating override、lane fairness、数量配额、总预算和最低金币底线。
+- 覆盖三种及以上逐评分 lane、per-rating override、跨 chunk fairness、数量配额、总预算和最低金币底线。
 - 覆盖跨 chunk 搜索、空结果退避、同价 tie-break、重复卡路由、容量竞争和部分完成后停止。
 - Property/contract tests 证明任何购买都满足精确 definition、rating、card class、价格和预算约束。
 - 完整仓库验证和构建产物检查通过。
@@ -1089,23 +1089,25 @@ Next: TS12 Listing/Reprice 策略生产扩展。
 
 ### TS12 Listing/Reprice 策略生产扩展
 
-Status: Not started.
+Status: Candidate implementation and focused automated verification complete; V9-12 live validation pending.
 
 Depends on: TS11 Complete；O8 和 O12 必须形成结论。
 
 Scope:
 
-- [ ] Club Listing 与 Transfer reprice 继续作为两个来源互斥的 Job；不提供同一 Run 混合来源。
-- [ ] 支持有界多卡和分评分规则，明确固定价格、评分 override、市场报价 override、markup、EA 最低/最高价格和合法步进的优先级。
-- [ ] 市场报价必须带 provider、获取时间和 freshness；过期、缺失或异常报价按显式 fallback/skip 策略处理，不能静默使用旧报价。
-- [ ] 明确 1 小时、3 小时等挂牌 duration，以及未售出超时后的 `skip` 或显式 `reprice` 策略。
-- [ ] Reprice 每次只操作本 Run 精确读取并确认仍为 inactive/expired 的 item；sold、active、未知状态一律跳过并停止不确定 Run。
-- [ ] 每张卡写入前刷新 EA Bid/Buy Now 价格下限并分别校验；高价值卡是否增加额外最低 BIN 复核由 O8 决定。
-- [ ] 保持禁止 `relistExpiredAuctions()`，不通过 DOM 点击或 Enhancer/FSU 私有状态执行批量挂牌。
+- [x] Club Listing 与 Transfer reprice 保持来源互斥；同一 Run 不执行混合来源。
+- [x] 支持最多 4 项、分评分价格规则、市场报价 markup、EA Bid/Buy Now 双下限和合法步进。
+- [x] 市场报价保留 provider、quotedAt、expiresAt 和 freshness；陈旧/缺失报价按 `configured` 或 `skip` 显式处理。
+- [x] 支持 1/3/6/24 小时 duration；expired 默认 `skip`，只有显式 Transfer Job 可 `reprice`。
+- [x] Reprice 每项写入前确认同一 item 仍为 inactive；sold、active、closed 或 unknown 状态均不写入。
+- [x] 每项写入前重读 EA Bid/Buy Now 下限；O8 决定 Buy Now 超过 10000 的项在 Preview、Prepare 和最终 mutation 前均排除。
+- [x] Preview 对排序后的候选建立最多 16 项的有界报价池；高价或 `fallback=skip` 项不占最终 `maxListings` 名额，继续回填池内后续候选，池外项保持 deferred。
+- [x] 保持禁止 `relistExpiredAuctions()`，不通过 DOM、Enhancer 或 FSU 私有状态执行批量挂牌。
 
 Automated tests:
 
 - 价格策略矩阵覆盖固定价、评分 override、provider quote、markup、stale quote、EA 双下限、步进和 fallback。
+- 覆盖首项及多个前置高价回填、`fallback=skip` 初始报价发现、9 选 4 实际缺陷形状、16 项报价池上限和池外 deferred 语义。
 - 覆盖 Club/Transfer 来源隔离、duration、expired timeout、sold/active race、容量竞争和部分成功 Journal。
 - Architecture test 继续保证 EA mutation 只有 Adapter 允许的精确 `list()` 调用点，`relistExpiredAuctions()` 调用点为零。
 - 完整仓库验证和发行产物一致性通过。
@@ -1231,17 +1233,17 @@ Next: Maintenance only；新范围必须新建设计文档，不沿用未定义�
 | O1 | Buy Job 默认 `cardClass` 是 rare-gold、normal-gold 还是必须显式选择？ | 必须显式选择 | TS1 | Resolved: D13 |
 | O2 | Price Provider 默认顺序。 | Auto: FUT.GG -> FUTNext | TS1 | Resolved: D14 |
 | O3 | FUTNext rating catalog TTL 和 last-known-good 最长允许时间。 | 24 小时，版本变化立即失效 | TS1 | Resolved: D15 |
-| O4 | 默认 Misfire Policy 和 grace window。 | grace-window，15 分钟 | TS10 | Open |
+| O4 | 默认 Misfire Policy 和 grace window。 | grace-window，15 分钟 | TS10 | Resolved: TS10 bounded recurring authorization |
 | O5 | 最低金币余额是否为所有 Buy Job 的全局硬限制。 | 全局硬限制，可被 Job 提高但不能降低 | TS4 | Resolved: TS5 explicit reserve gate |
 | O6 | Listing expired 默认跳过还是重新报价。 | skip；reprice 必须显式选择 | TS2 | Resolved: TS7.2 explicit manual gate |
 | O7 | 是否允许同一 rating rule 同时匹配普通金和特殊卡。 | 不允许；card class 必须明确 | TS2 | Resolved: explicit card-class contract |
-| O8 | 是否需要高价值卡 EA 最低 BIN 复核。 | 首版不实现，高价值卡继续排除 | TS12 | Open |
-| O9 | 手动 Run 和单个 chunk 的 Listing/Buy 数量上限。 | 首次只提高一个数量级；chunk 不超过 TS8 已验证的两项，Run cap 由最坏请求成本决定 | TS9 | Open |
-| O10 | Recurring 阶段允许多少 armed Jobs，以及何时开放多 Job。 | TS10 只允许一个；TS13 通过长时验证后才允许有限多 Job | TS10/TS13 | Open |
-| O11 | 是否支持 `next-login`。 | 默认拒绝；只有能证明不补跑旧 occurrence 且不会无确认交易时才开放 | TS10 | Open |
-| O12 | 未售出超时后的默认行为。 | 默认 `skip`；1/3 小时后 `reprice` 必须由 Job 显式配置 | TS12 | Open |
+| O8 | 是否需要高价值卡 EA 最低 BIN 复核。 | 首版不实现，高价值卡继续排除 | TS12 | Resolved: exclude Buy Now above 10,000 |
+| O9 | 手动 Run 和单个 chunk 的 Listing/Buy 数量上限。 | 首次只提高一个数量级；chunk 不超过 TS8 已验证的两项，Run cap 由最坏请求成本决定 | TS9 | Resolved: Run cap 4, chunk cap 2, 15-minute budget wait deadline |
+| O10 | Recurring 阶段允许多少 armed Jobs，以及何时开放多 Job。 | TS10 只允许一个；TS13 通过长时验证后才允许有限多 Job | TS10/TS13 | Resolved for TS10: exactly one; TS13 multi-Job remains locked |
+| O11 | 是否支持 `next-login`。 | 默认拒绝；只有能证明不补跑旧 occurrence 且不会无确认交易时才开放 | TS10 | Resolved: rejected |
+| O12 | 未售出超时后的默认行为。 | 默认 `skip`；1/3 小时后 `reprice` 必须由 Job 显式配置 | TS12 | Resolved: skip by default; reprice requires explicit Transfer Job |
 | O13 | 未知或跨 mutation boundary 的 Journal 是否允许自动 acknowledge。 | 不允许，只能人工查看证据后解除 | TS13 | Open |
-| O14 | Buy 是否扩展到 Rare Gold 之外的 card class。 | TS11 保持 Rare Gold；其它卡类逐类评审 | TS11 | Open |
+| O14 | Buy 是否扩展到 Rare Gold 之外的 card class。 | TS11 保持 Rare Gold；其它卡类逐类评审 | TS11 | Resolved for TS11: Rare Gold only |
 | O15 | 是否实现 Companion Extension。 | 默认暂缓；只有页面 timer 的实测限制无法由 userscript 解决时才实现最小 Companion | TS14 | Open |
 
 ## 20. 决策与验证日志
@@ -1814,3 +1816,47 @@ Diagnostics: No EA request or mutation was needed for this UI fix.
 Remaining risk: Real browser timer throttling may delay the one-second poll while the tab is backgrounded. Returning to the visible tab must still refresh without closing the dialog; D/E/F of V8 will provide this evidence. Polling does not alter Scheduler timing or execute Jobs.
 
 Next: Rebuild and run full repository verification, then use the same `0.7.70` V8 campaign to confirm in-place updates during scheduled Listing, reprice and Buy.
+
+### 2026-08-11 / TS9-TS12 / Consolidated candidate implementation
+
+Status: Candidate implementation and local automated verification complete; V9-12 real EA campaign pending.
+
+Commit/Version: Uncommitted candidate worktree on version `0.7.84`; no tag or release is approved before the remaining Interval evidence review.
+
+Automated tests: Candidate `0.7.84` passes all 43 focused Trade test files and 284 Trade tests. Full `npm run verify` passes with 155 test files and 1017 tests, 330 JavaScript files syntax-checked, plus ESLint, config/Profile validation, architecture audit, FSU patch replay, userscript build, root/dist equality and FSU release asset checks. Root and dist userscripts both report `0.7.84`; FSU release assets pass at `26.09.6`.
+
+Observed result: TS9 adds a four-item Run cap, two-item chunk cap, independent per-chunk request reservations, bounded local budget waiting, Stop between chunks and fail-closed handling for unknown or incomplete chunks. TS10 adds one armed Job with occurrence-bound authorization: daily/interval allow two confirmed Runs, once/window allow one, and edit/import/delete/expiry/exhaustion relock the Job. TS11 adds up to four contiguous Rare Gold rating lanes, per-rating quantities, an 8000 total budget cap and one Run-wide runtime deadline. TS12 adds explicit quote freshness/fallback handling, source-specific Listing/reprice, and exclusion of Buy Now above 10000 at Preview, Prepare and final pre-mutation checks. Manual and scheduled paths share the same bounded chunk core and retain partial-success Journals.
+
+Diagnostics: Sanitized Listing/Buy Journals and exports include chunk index, offset, quantity, required/remaining budget, retry time, chunk result counts, per-rating purchases and bounded candidate/rejection counts. They do not add raw EA payloads, credentials, request reservation identifiers or confirmation tokens. No real EA request or mutation was performed during this implementation round.
+
+Remaining risk: Naturally unavailable quotes and high-value backfill remain optional read-only observations because their release behavior is locked by automated tests. TS13 multi-Job and long-running recovery, TS14 Companion decision and TS15 release closure remain locked. Do not call `relistExpiredAuctions()` or intentionally manufacture 429/427.
+
+Next: Proceed to TS13 multi-Job and long-running recovery design and implementation; keep all TS13 production gates disabled until its automated and live campaign requirements are met.
+
+### 2026-08-11 / V9-12 / First live campaign and Interval terminal correction
+
+Status: Complete on candidate `0.7.84`. Steps 1-6 passed; the Step 7 Planner defect is corrected and automatically verified. Real stale/unavailable/high-value fallback evidence remains optional.
+
+Commit/Version: Initial live evidence came from candidate `0.7.80`; Buy follow-up evidence came from `0.7.81` and `0.7.82`; the next worktree is `0.7.83` so browser evidence can distinguish visible chunk-budget waiting and same-dialog Journal recovery.
+
+Observed result: Manual Club Listing completed four items in two chunks. Manual Transfer reprice stopped after two verified successes and left two items unmutated. Daily executed once and relocked manually. Window execution waited behind a Loop for 75.630 seconds, executed once inside the allowed window, and did not replay after refresh. High-value Listing Preview rejected every quoted candidate above 10,000; zero selected cards was the required fail-closed result. The first multi-rating Buy used `84=1, 85=1, 86=2` instead of the planned `2/1/1` quotas and an unrealistically low 800 ceiling, so five empty searches ended safely without a Buy attempt. A second run at 2000 bought one exact 84 for 1600 and verified it in Club, then exposed an obsolete whole-Unassigned-empty gate before the next search.
+
+Interval finding: Both authorized occurrences completed two exact Listings and no third Run occurred, but authorization exhaustion relocked the Store before the Scheduler persisted its advanced runtime. The Scheduler then overwrote that relocked snapshot with stale recurring `waiting-time/nextRunAt`. The correction now rereads the Job Store after execution, persists `completed/nextRunAt=null` when authorization has disarmed the unchanged Job, and does not restore runtime for a deleted Job or overwrite a Job whose schedule/policy changed while the Run was active. Focused regression coverage includes all three cases. The current `0.7.83` gate passes 43 Trade files / 279 Trade tests and the full 155 files / 1012 tests.
+
+Diagnostics: The supplied step 1-7 Listing, Buy and Scheduler exports contain complete bounded receipts, journals, request-budget state and run IDs without raw credentials. Step 6 also exposed an unrelated Loop/Unassigned move failure; it does not invalidate Trade mutex evidence and remains a separate Loop investigation.
+
+Interval terminal validation (`0.7.84`): Artifact `trade-scheduler-diagnostics-2026-08-12T02-32-18-075Z.json`. Job `Interval terminal 0.7.84` executed at scheduled times 10:17:21.897 and 10:22:21.897 local time with distinct run IDs. Both receipts completed `2/2`, failed/skipped `0/0`, and all four exact items were verified active in Transfer at Bid 650 / Buy Now 700 for one hour. Final runtime is `completed`, `reason=null`, `nextRunAt=null`, `runCount=2`; authorization is null, Job is disarmed, Scheduler is paused and live execution is locked. The export was captured 576.828 seconds after the second finish and 296.182 seconds after the hypothetical third due time; 115 subsequent interval ticks remained paused with no third Run. Lease, Coordinator and Operation were idle and the page/FSU session was ready.
+
+Remaining risk: Quote fallback and high-value backfill remain opportunistic read-only evidence when those quote states occur naturally. They are no longer V9-12 release gates.
+
+Buy Unassigned and materialization correction: The EA market permits another Buy while unrelated items remain Unassigned. Transaction safety is therefore scoped to the exact purchased item: each accepted Buy must reconcile its item/trade identity, route that item to Club or Transfer, and verify the exact destination before another search. Pre-existing or concurrently arriving unrelated Unassigned items no longer block the Run. Because EA may return accepted before repository materialization and an immediate refresh may return 304, reconciliation now performs at most three budgeted checks with bounded delays and scans all owned piles on the final attempt. A prior ambiguous Journal can be released only when its exact item is later observed at its recorded destination; that reconciliation never starts another Buy in the same action. Ambiguous purchase identity, failed routing, destination mismatch, Transfer capacity, retained coins, request budget and Circuit checks remain fail-closed.
+
+Latest Buy evidence: The `0.7.82` Step 3 export first reconciled the prior exact 86 item at its recorded destination and correctly returned `buy-journal-reconciled-retry-required` without issuing a Buy. The next confirmed Run bought an 84 for 1500 and an 85 for 1300, reconciled and routed both to Club, and completed chunk 1 as `2/2`. Chunk 2 then required 28 request slots while 21 remained and entered bounded local wait until the five-minute window recovered. The operator stopped during that wait, so this is valid first-chunk and wait evidence but not a completed four-item quota run. The backend did not hang and no unrelated Unassigned gate blocked either purchase.
+
+Buy observability correction: Candidate `0.7.83` forwards the existing Journal/checkpoint stream into the open Manual Buy dialog. It shows Preview, chunk number, market search, purchase reconciliation, routing, finished-item count, and request-budget `required/remaining/retry` progress while preserving an active Stop button. The wait countdown is local UI work and sends no EA request. When exact Journal reconciliation returns `buy-journal-reconciled-retry-required`, the same dialog now clears the confirmation and allows a separately confirmed new Run; the reconciliation click itself still cannot buy.
+
+Completed Buy evidence: The `0.7.83` Step 3 export completed four exact purchases across two chunks with the persisted non-uniform quotas `84=1, 85=1, 86=2`. It bought 85/1100 and 84/800 into Club, waited locally for approximately 298 seconds when chunk 2 needed 28 request slots and only 21 remained, then resumed and bought two duplicate 86 cards for 1400 and 1100 into Transfer. Both chunks completed `2/2`; the final receipt is `completed`, requested/succeeded `4/4`, failed/skipped `0/0`, spent 4400, Journal `completed / receipt-recorded`, and Circuit closed. The alternate `1/1/2` quota is sufficient production evidence for the same three-lane non-uniform quota mechanism; diagnostics, Preview and execution all agree, so there is no UI-to-policy mapping discrepancy.
+
+Listing backfill correction (`0.7.84`): Preview now prefilters and sorts candidates before building a quote pool capped at `maxListings * 4` and 16 items. It requests quotes for every unique definition in that pool, then skips high-value, stale-skip or unavailable-skip candidates while continuing until `maxListings` is filled or the pool is exhausted. Candidates outside the pool remain deferred and are never accepted through configured-price fallback without a requested quote. Diagnostics expose pool limit, size, truncation and evaluated/deferred/rejected counts. Five new regressions cover leading high-value candidates, fallback-skip discovery, the observed 9-candidate Step 7 shape and a larger truncated Club pool; the 10,000 guards at Preview, Prepare and mutation remain unchanged. The final gate passes 43 Trade files / 284 Trade tests and 155 total files / 1017 total tests.
+
+Next: V9-12 is closed. Proceed to TS13 multi-Job, long-running recovery and the V13-15 campaign plan; do not enable multiple armed Jobs before the TS13 gates pass.

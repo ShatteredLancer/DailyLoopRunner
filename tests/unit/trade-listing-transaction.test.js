@@ -508,4 +508,31 @@ describe('Trade listing transaction', () => {
     expect(result).toMatchObject({ status: 'blocked', reason: 'trade-circuit-open', skipped: 1 });
     expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
   });
+
+  it('rechecks the high-value cap after EA raises live price limits and before listing', async () => {
+    const adapter = createFakeTradeAdapter({
+      items: [{
+        id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 10_000, maximum: 50_000,
+      }],
+    });
+    const highEntry = {
+      ...entry(),
+      startPrice: 9900,
+      buyNow: 10_000,
+      priceLimits: { minimum: 9900, maximum: 50_000 },
+    };
+    const plan = prepared([highEntry]);
+    const result = await transaction(adapter).run({
+      job: job({ ratingRules: [{ min: 75, max: 82, buyNow: 10_000 }] }),
+      prepared: plan,
+      confirmationToken: plan.confirmation.token,
+      confirmationText: plan.confirmation.requiredText,
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked', reason: 'high-value-listing-excluded', succeeded: 0, failed: 1,
+    });
+    expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
+  });
 });

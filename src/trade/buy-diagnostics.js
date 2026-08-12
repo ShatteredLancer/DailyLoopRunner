@@ -28,6 +28,13 @@ function safeExpectedDestination(value) {
     : null;
 }
 
+function safeRatingCounts(value) {
+  if (!value || typeof value !== 'object') return {};
+  return Object.fromEntries(Object.entries(value)
+    .map(([rating, count]) => [String(Number(rating)), Math.max(0, Math.floor(Number(count) || 0))])
+    .filter(([rating]) => Number.isInteger(Number(rating)) && Number(rating) >= 0));
+}
+
 export function sanitizeTradeBuyReceipt(receipt) {
   if (!receipt) return null;
   return {
@@ -50,6 +57,18 @@ export function sanitizeTradeBuyReceipt(receipt) {
       index: Math.max(0, Number(entry.index || 0) || 0),
       status: String(entry.status || 'unknown'),
       reason: entry.reason ? String(entry.reason) : null,
+      chunkIndex: safeNumber(entry.chunkIndex),
+      offset: safeNumber(entry.offset),
+      requested: safeNumber(entry.requested),
+      succeeded: safeNumber(entry.succeeded),
+      failed: safeNumber(entry.failed),
+      skipped: safeNumber(entry.skipped),
+      resultStatus: entry.resultStatus ? String(entry.resultStatus) : null,
+      candidates: safeNumber(entry.candidates),
+      rejectionCounts: entry.rejectionCounts && typeof entry.rejectionCounts === 'object'
+        ? Object.fromEntries(Object.entries(entry.rejectionCounts)
+          .map(([reason, count]) => [String(reason).slice(0, 80), Math.max(0, Math.floor(Number(count) || 0))]))
+        : {},
       item: safeRef(entry.item),
       tradeId: safeNumber(entry.tradeId),
       rating: safeNumber(entry.rating),
@@ -63,6 +82,7 @@ export function sanitizeTradeBuyReceipt(receipt) {
       spent: safeNumber(entry.spent),
       expectedDestination: entry.expectedDestination ? String(entry.expectedDestination) : null,
       minimumRetainedCoins: safeNumber(entry.minimumRetainedCoins),
+      purchasedByRating: safeRatingCounts(entry.purchasedByRating),
       search: entry.search ? {
         rating: safeNumber(entry.search.rating),
         definitionId: safeNumber(entry.search.definitionId),
@@ -120,6 +140,12 @@ export function createTradeBuyDiagnostics(input = {}) {
         at: safeNumber(entry.at),
         phase: String(entry.phase || 'unknown'),
         itemIndex: safeNumber(entry.itemIndex),
+        chunkIndex: safeNumber(entry.chunkIndex),
+        offset: safeNumber(entry.offset),
+        quantity: safeNumber(entry.quantity),
+        required: safeNumber(entry.required),
+        remaining: safeNumber(entry.remaining),
+        retryAt: safeNumber(entry.retryAt),
         mutationBoundaryCrossed: entry.mutationBoundaryCrossed === true,
         status: entry.status ? String(entry.status) : null,
         reason: entry.reason ? String(entry.reason).slice(0, 160) : null,

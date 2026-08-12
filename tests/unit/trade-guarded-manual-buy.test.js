@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createFakeTradeAdapter } from '../../src/adapters/fake/trade.js';
+import { createTradeBuyJournal } from '../../src/trade/buy-journal.js';
 import { normalizeTradeJob } from '../../src/trade/contracts.js';
 import { createGuardedManualBuyExecutor } from '../../src/trade/guarded-manual-buy.js';
 import { createOperationCoordinator } from '../../src/trade/operation-coordinator.js';
@@ -27,10 +28,10 @@ function job(overrides = {}) {
   }, { now: 1 });
 }
 
-function marketItem() {
+function marketItem(id = 70, definitionId = 8401, buyNowPrice = 900) {
   return {
-    id: 70, definitionId: 8401, type: 'player', rating: 84, tier: 'gold', rare: true,
-    auction: { present: true, state: 'active', tradeId: 1070, buyNowPrice: 900, expires: 100 },
+    id, definitionId, type: 'player', rating: 84, tier: 'gold', rare: true,
+    auction: { present: true, state: 'active', tradeId: id + 1000, buyNowPrice, expires: 100 },
   };
 }
 
@@ -51,6 +52,10 @@ function setup(overrides = {}) {
   });
   const operationCoordinator = overrides.options?.operationCoordinator || createOperationCoordinator();
   const onReceipt = vi.fn();
+  const requestBudget = {
+    inspect: () => ({ remaining: 30 }),
+    reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
+  };
   const executor = createGuardedManualBuyExecutor({
     operationCoordinator,
     lease,
@@ -62,6 +67,7 @@ function setup(overrides = {}) {
     createRunId: () => 'manual-buy-run',
     sleep: async () => {},
     onReceipt,
+    requestBudget,
     ...overrides.options,
   });
   return { adapter, buyPreview, executor, lease, operationCoordinator, onReceipt };
@@ -73,7 +79,11 @@ describe('Guarded manual Buy executor', () => {
     const receipt = await executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' });
     expect(receipt).toMatchObject({
       runId: 'manual-buy-run', status: 'completed', requested: 1, succeeded: 1,
-      receipts: [expect.objectContaining({ status: 'run-summary', buyAttempts: 1 }), expect.objectContaining({ status: 'purchased' })],
+      receipts: expect.arrayContaining([
+        expect.objectContaining({ status: 'run-summary', buyAttempts: 1 }),
+        expect.objectContaining({ status: 'chunk-summary', succeeded: 1 }),
+        expect.objectContaining({ status: 'purchased' }),
+      ]),
     });
     expect(buyPreview.preview).toHaveBeenCalledOnce();
     expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(1);
@@ -96,7 +106,10 @@ describe('Guarded manual Buy executor', () => {
     });
     expect(receipt).toMatchObject({
       status: 'completed',
-      receipts: [expect.objectContaining({ expectedDestination: 'transfer' }), expect.objectContaining({ destination: 'transfer' })],
+      receipts: expect.arrayContaining([
+        expect.objectContaining({ expectedDestination: 'transfer' }),
+        expect.objectContaining({ destination: 'transfer' }),
+      ]),
     });
     expect(onReceipt).toHaveBeenCalledWith(receipt, expect.objectContaining({
       preview: expect.objectContaining({
@@ -117,6 +130,30 @@ describe('Guarded manual Buy executor', () => {
     expect(locked.adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
   });
 
+  it('reconciles an exact prior Buy journal destination without starting another purchase', async () => {
+    const journal = createTradeBuyJournal({ storage: storage(), key: 'buy-journal', now: () => 1000 });
+    journal.begin({ runId: 'prior-buy', jobId: 'buy-84', expectedDestination: 'transfer', requested: 1 });
+    journal.checkpoint('prior-buy', {
+      phase: 'item-finished', itemIndex: 1, status: 'ambiguous', reason: 'purchase-not-reconciled',
+      item: { id: 70, definitionId: 8401, pile: 'market' }, tradeId: 1070, price: 900,
+      destination: 'transfer', mutationBoundaryCrossed: true,
+    });
+    journal.finish('prior-buy', { phase: 'receipt-recorded', status: 'ambiguous' });
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      items: [{ id: 70, definitionId: 8401, pile: 'transfer', purchasePrice: 900 }],
+      marketItems: [marketItem(71)],
+    });
+    const { executor, buyPreview } = setup({ adapter, options: { journal } });
+
+    await expect(executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' })).resolves.toMatchObject({
+      status: 'blocked', reason: 'buy-journal-reconciled-retry-required', requested: 0,
+    });
+    expect(journal.inspectRecovery()).toMatchObject({ canSupersede: true });
+    expect(buyPreview.preview).not.toHaveBeenCalled();
+    expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
+  });
+
   it('blocks before Preview when another tab owns the lease', async () => {
     const memory = storage();
     const oldLease = createTradeRunLease({ storage: memory, key: 'lease', ownerId: 'tab-old', now: () => 1000, createToken: () => 'old' });
@@ -130,15 +167,46 @@ describe('Guarded manual Buy executor', () => {
     expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
   });
 
-  it('blocks before Preview when fewer than the reconciliation reserve slots remain', async () => {
+  it('waits for chunk capacity and then executes without another confirmation', async () => {
+    let time = 1000;
+    const requestBudget = {
+      reserve: vi.fn()
+        .mockResolvedValueOnce({ ready: false, remaining: 11, retryAt: 2000 })
+        .mockResolvedValueOnce({ ready: true, release: vi.fn(async () => {}) }),
+    };
     const { executor, buyPreview, adapter } = setup({
-      options: { requestBudget: { inspect: () => ({ remaining: 11, retryAt: 5000 }) } },
+      options: {
+        requestBudget,
+        now: () => time,
+        sleep: async (ms) => { time += ms; },
+      },
     });
     await expect(executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' })).resolves.toMatchObject({
-      status: 'blocked', reason: 'trade-request-budget-insufficient', requested: 0,
+      status: 'completed', requested: 1, succeeded: 1,
     });
-    expect(buyPreview.preview).not.toHaveBeenCalled();
-    expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
+    expect(buyPreview.preview).toHaveBeenCalledOnce();
+    expect(requestBudget.reserve).toHaveBeenCalledTimes(2);
+    expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(true);
+  });
+
+  it('reports Journal-backed transaction and chunk progress to the caller', async () => {
+    const onProgress = vi.fn();
+    const { executor } = setup();
+    const receipt = await executor.execute({
+      job: job(),
+      confirmationText: 'BUY 1 MAX 1000',
+      onProgress,
+    });
+
+    expect(receipt.status).toBe('completed');
+    expect(onProgress.mock.calls.map(([checkpoint]) => checkpoint.phase)).toEqual(expect.arrayContaining([
+      'preview-started',
+      'chunk-started',
+      'market-search-started',
+      'purchase-reconciliation-started',
+      'item-finished',
+      'chunk-finished',
+    ]));
   });
 
   it('executes two adjacent rating lanes under one confirmation and one Lease', async () => {
@@ -181,6 +249,56 @@ describe('Guarded manual Buy executor', () => {
     expect(receipt).toMatchObject({ status: 'completed', requested: 2, succeeded: 2 });
     expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(2);
     expect(requestBudget.reserve).toHaveBeenCalledWith(28);
+  });
+
+  it('executes four items as two chunks and preserves rating quotas across chunks', async () => {
+    const lanes = [84, 85, 86].map((rating) => ({
+      rating,
+      definitionIds: [rating * 100 + 1],
+      source: 'cache',
+    }));
+    const adapter = createFakeTradeAdapter({
+      coins: 9000,
+      marketItems: [
+        marketItem(70, 8401, 900),
+        marketItem(71, 8401, 900),
+        { ...marketItem(72, 8501, 900), rating: 85 },
+        { ...marketItem(73, 8601, 900), rating: 86 },
+      ],
+    });
+    const requestBudget = {
+      reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
+    };
+    const { executor } = setup({
+      adapter,
+      options: {
+        requestBudget,
+        getTradeAdapter: () => adapter,
+        playerCatalogProvider: { load: vi.fn(async () => ({ ok: true, lanes })) },
+        buyPreview: {
+          preview: vi.fn(async (input) => ({
+            mode: 'preview-only', liveExecutionAllowed: false, job: input,
+            plan: { ready: true, missingRatings: [], lanes },
+          })),
+        },
+      },
+    });
+    const quotaJob = job({
+      ratingMax: 86,
+      ratingQuantityOverrides: { 84: 2, 85: 1, 86: 1 },
+      quantity: 4,
+      totalBudget: 4000,
+    });
+
+    const receipt = await executor.execute({ job: quotaJob, confirmationText: 'BUY 4 MAX 1000' });
+    const purchases = receipt.receipts.filter((entry) => entry.status === 'purchased');
+    expect(receipt).toMatchObject({ status: 'completed', requested: 4, succeeded: 4, skipped: 0 });
+    expect(requestBudget.reserve.mock.calls).toEqual([[28], [28]]);
+    expect(purchases.map((entry) => entry.index)).toEqual([1, 2, 3, 4]);
+    expect(Object.fromEntries([84, 85, 86].map((rating) => [
+      rating,
+      purchases.filter((entry) => entry.rating === rating).length,
+    ]))).toEqual({ 84: 2, 85: 1, 86: 1 });
   });
 
   it('releases the Lease and Coordinator when Journal begin detects a cross-tab conflict', async () => {
