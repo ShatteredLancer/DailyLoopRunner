@@ -4,7 +4,7 @@
 
 ## 当前边界
 
-TS9-TS12 已在 `0.7.84` 完成自动与实机验证。候选 `0.7.91` 在此基础上增加 TS13 多 Job 和恢复协议，完成本地验证但尚未完成 V13-15 最终 canary：
+TS9-TS12 已在 `0.7.84` 完成自动与实机验证。候选 `0.7.91` 在此基础上增加 TS13 多 Job 和恢复协议；V13-15 最终 canary、本地完整验证和远程 Verify 均已通过，当前只等待 tag 与 GitHub Release：
 
 - 手动 Club Listing / Transfer reprice：单一来源、每 Run 1-4 项、每 chunk 最多 2 项；挂牌前后核对同一 item、definition、价格、duration 和 Transfer 状态。
 - 手动和定时 Buy：只允许 Rare Gold、最多 4 个连续评分和 4 项、每卡不超过 2000、总预算不超过 8000；支持逐评分价格/数量配额、Club 和重复卡 Transfer 路由。
@@ -30,7 +30,7 @@ TS9-TS12 已在 `0.7.84` 完成自动与实机验证。候选 `0.7.91` 在此基
 4. 确认没有 Loop、Batch Open、SBC 提交、开包或其它 Runner operation 正在运行。
 5. 检查 Trade Scheduler 的 `Providers`、`Summary` 和 `Jobs`：缓存不是空的，任务参数在当前门禁内，Job 只有在确认后才 Armed。
 6. 为 Buy 设置全局最低保留金币。Job 局部值只能提高该底线，不能降低它。
-7. V13-15 通过前，普通使用继续采用已验证的小额范围；多 Job 只按下文候选 campaign 执行。不得通过导入 JSON 绕过数量、来源、评分、价格或调度门禁。
+7. 即使 V13-15 已通过，普通使用仍应采用已验证的小额范围；不得通过导入 JSON 绕过数量、来源、评分、价格或调度门禁。
 
 ## TS8 一次性双卡验证记录
 
@@ -461,6 +461,6 @@ Price Quote 是当前页面内存缓存，刷新页面后为空是正常现象�
 
 ## 发布与回滚
 
-发布前运行 `npm run verify`，确认版本、测试文件数、测试数量、userscript 构建结果和 FSU 资源检查均通过。正式版通过 GitHub Release 的 `DailyLoopRunner.user.js` 安装；不要混用旧 Validation 脚本。
+发布前运行 `npm run verify`，确认版本、测试文件数、测试数量、userscript 构建结果和 FSU 资源检查均通过。`0.7.91` 的本地结果为 338 个 JavaScript 文件、160 个测试文件和 1055 个测试全部通过；提交 `980d609` 的 GitHub Actions Verify 也已通过。正式版通过 GitHub Release 的 `DailyLoopRunner.user.js` 安装；不要混用旧 Validation 脚本。
 
 出现交易行为异常时，先在 UI 中 Stop、关闭实时执行并解除 Job 武装，再安装上一份已验证版本或等待诊断调查。不要用回滚掩盖未确认的 EA 状态；首先保存最小证据包。

@@ -1,6 +1,6 @@
 # Trade Scheduler 设计与实施跟踪
 
-> 文档状态：TS13 与 V13-15 canary 已完成，TS14 Companion 决策为暂缓；TS15 只剩提交、tag 与 Release
+> 文档状态：TS13 与 V13-15 canary 已完成，TS14 Companion 决策为暂缓；TS15 候选提交与远程 Verify 已完成，只剩 tag 与 Release
 > 最后更新：2026-08-12
 > 适用仓库：DailyLoopRunner  
 > 功能边界：定时自动买入、定时批量挂牌、交易任务调度、逐项回执与诊断
@@ -735,7 +735,7 @@ Trade diagnostics JSON 至少包含：
 | TS12 | Listing/Reprice 策略生产扩展 | TS11 Complete | Complete for candidate | Complete locally | Complete | Listing/Reprice live paths passed; bounded quote backfill automated; live fallback observation optional |
 | TS13 | 多 Job、长期运行与恢复 | TS12 Complete | Complete | Complete | Complete on `0.7.91` | Multi-Job, reload, Loop mutex and two-phase Lease recovery passed |
 | TS14 | 可选 Companion 最终决策 | TS13 candidate complete | Complete: deferred | Complete by review | N/A | Closed as deferred |
-| TS15 | 生产发布与路线图关闭 | TS14 decision closed | In progress | Candidate verification complete | Complete on `0.7.91` | Commit, tag and Release remain |
+| TS15 | 生产发布与路线图关闭 | TS14 decision closed | In progress | Local and remote verification complete | Complete on `0.7.91` | Tag and Release remain |
 
 进度维护规则：
 
@@ -1196,7 +1196,7 @@ Next: TS15 生产发布与路线图关闭。
 
 ### TS15 生产发布与路线图关闭
 
-Status: In progress. Candidate schema, capability matrix, automated verification and V13-15 canary are complete; commit, tag and Release remain.
+Status: In progress. Candidate schema, capability matrix, automated verification, V13-15 canary, commit `980d609` and remote Verify are complete; tag and Release remain.
 
 Depends on: TS14 Complete；所有仍会影响生产默认值的 Open decisions 必须 Resolved 或明确 Deferred with reason。
 
@@ -1881,9 +1881,9 @@ Next: V9-12 is closed. Proceed to TS13 multi-Job, long-running recovery and the 
 
 ### 2026-08-12 / TS13-TS15 / Multi-Job recovery candidate
 
-Status: Candidate implementation, full repository verification and the consolidated V13-15 live campaign are complete. TS14 Companion is explicitly deferred. Commit, tag and Release remain.
+Status: Candidate implementation, full repository verification and the consolidated V13-15 live campaign are complete. TS14 Companion is explicitly deferred. Commit `980d609` and its remote Verify are complete; tag and Release remain.
 
-Commit/Version: Uncommitted corrected candidate targeting `0.7.91`; rollback point is the verified `0.7.84` release state.
+Commit/Version: Corrected candidate `0.7.91` is committed as `980d6094fdb6ce104d3f271d75babb78db7b934c` and synchronized to `origin/main`; rollback point is the verified `0.7.84` release state.
 
 Implemented result: Job Store schema 5 and Authorization collection schema 2 support at most three independently authorized Jobs. Once/window grant one Run, daily/interval grant two Runs, authorization is consumed only by the selected Job, and all Trade writes remain serialized by Coordinator, Web Lock and persistent Lease. Due time has priority; equal due times alternate Buy/Listing with a stable Job-ID tie-break. Legacy single authorization migrates without arming or authorizing extra Jobs.
 
@@ -1901,4 +1901,6 @@ Correction: Recovery, authorization, Circuit, Job selection, execution-result re
 
 `0.7.91` canary result: Prepare diagnostics at 15:27:24 contained three armed Jobs and five authorized Runs. Buy ran at 15:43:11 and 16:03:57, each purchasing one 86 Rare Gold for 900 and routing it to Transfer. Club Listing ran at 15:49:11 and 16:14:13, each listing one Common Gold at 650/700 for one hour and verifying the same item active in Transfer. Reprice was scheduled for 15:54:00, waited while the Player Pick Loop was active, then ran at 15:55:12 and verified the same inactive Transfer item active at 650/700. The page owner changed after F5 from `tab-1786519132017-8002b990356b6` to `tab-1786521462781-15aa0562aa9678`; remaining authorization and next times survived. Final state had all three Jobs disarmed, no authorization, paused/locked Scheduler, closed Circuit and no active Lease or Recovery review. Lease Recovery acknowledgement recorded evidence `12bf5b68` with zero mutation, followed by one successful authorized Club Listing. `log1.txt` and the replacement `log2.txt` cover the complete page timelines and match all seven campaign History records. The bottom-of-dialog text `Guarded schedule enabled for 1 Job(s)` was a stale local action message only; persisted state and Banner were correct, and the UI now clears stale action text on external state transitions.
 
-Next: Re-run the focused UI test and full `npm run verify` after the stale-status UI correction, then prepare the `0.7.91` commit, tag and Release when requested.
+Release preparation: local `npm run verify` passed with 338 JavaScript files, 160 test files and 1055 tests. GitHub Actions Verify also passed for commit `980d609`. `CHANGELOG.md` now contains the bounded capability, safety boundary and rollback notes for `0.7.91`.
+
+Next: Create and push tag `v0.7.91`, wait for the immutable Release workflow, verify all assets and latest update URLs, then record TS15 as Complete.
