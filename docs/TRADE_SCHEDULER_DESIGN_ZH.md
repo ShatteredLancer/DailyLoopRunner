@@ -1,6 +1,6 @@
 # Trade Scheduler 设计与实施跟踪
 
-> 文档状态：TS8-TS12 与 V9-12 实机 campaign 完成；TS12 quote fallback/high-value 实机观察保持可选；下一阶段为 TS13 多 Job、长期运行与恢复
+> 文档状态：TS13 与 V13-15 canary 已完成，TS14 Companion 决策为暂缓；TS15 只剩提交、tag 与 Release
 > 最后更新：2026-08-12
 > 适用仓库：DailyLoopRunner  
 > 功能边界：定时自动买入、定时批量挂牌、交易任务调度、逐项回执与诊断
@@ -733,9 +733,9 @@ Trade diagnostics JSON 至少包含：
 | TS10 | 循环调度生产门禁 | TS9 Complete | Complete for single armed Job | Complete locally | Complete | Daily/Interval/Window and terminal relock passed |
 | TS11 | Buy 策略生产扩展 | TS10 Complete | Complete for Rare Gold | Complete locally | Complete | Three-lane non-uniform quota Buy passed |
 | TS12 | Listing/Reprice 策略生产扩展 | TS11 Complete | Complete for candidate | Complete locally | Complete | Listing/Reprice live paths passed; bounded quote backfill automated; live fallback observation optional |
-| TS13 | 多 Job、长期运行与恢复 | TS12 Complete | Not started | Not started | Not started | Locked |
-| TS14 | 可选 Companion 最终决策 | TS13 Complete | Not started | Not started | Not started | Locked |
-| TS15 | 生产发布与路线图关闭 | TS14 Complete | Not started | Not started | Not started | Locked |
+| TS13 | 多 Job、长期运行与恢复 | TS12 Complete | Complete | Complete | Complete on `0.7.91` | Multi-Job, reload, Loop mutex and two-phase Lease recovery passed |
+| TS14 | 可选 Companion 最终决策 | TS13 candidate complete | Complete: deferred | Complete by review | N/A | Closed as deferred |
+| TS15 | 生产发布与路线图关闭 | TS14 decision closed | In progress | Candidate verification complete | Complete on `0.7.91` | Commit, tag and Release remain |
 
 进度维护规则：
 
@@ -753,8 +753,8 @@ Trade diagnostics JSON 至少包含：
 | --- | --- | --- | --- | --- | --- |
 | V8 双卡门禁 | TS8 | 安装/刷新一次候选版；选择低价值卡；依次确认手动双卡 Club Listing、Transfer reprice、双评分 Buy、一次定时 Listing/Reprice/Buy；保持登录并在异常时停止 | 约 30-60 分钟；不含等待合适 expired 卡 | 最终 Listing、Buy、Scheduler diagnostics 各一份；失败时立即导出当前日志 | Complete；六项 `0.7.70` 实机证据已复核 |
 | V9-12 生产策略合并 campaign | TS9-TS12 | 安装一次已通过完整测试且默认回锁的候选版；验证手动多卡与 Stop；验证 daily/interval/window；执行低价多评分 Buy；验证 Club Listing、市场报价和一次 expired reprice；按脚本要求切后台、刷新并重新登录 | 约 60-90 分钟主动操作，外加至少 1 小时 expiry/调度观察 | 一个按 `runId` 关联的合并 diagnostics 包；若全部通过，不需要逐阶段发送 | Complete on `0.7.84`; live quote fallback/high-value observation remains optional |
-| V13-15 长期运行与最终 canary | TS13、TS15；TS14 若选择暂缓 | 安装一次最终候选版；配置少量 Buy/Listing/Reprice Jobs；触发一次 Loop/Trade 互斥；让标签页后台运行，执行一次刷新/重登或系统休眠恢复；最后确认发布 | 约 20-40 分钟主动操作，建议 4-8 小时低频观察 | 最终 Scheduler diagnostics、相关 Listing/Buy diagnostics 和 Runner log；通过后作为 TS15 发布证据 | Not started |
-| VC Companion 可选验证 | 仅在 TS14 决定实现时 | 安装最小扩展、授权通知，验证 alarm/notification/open/focus；交易仍在已登录页面内确认和执行 | 约 15-30 分钟 | 扩展诊断和页面 Scheduler diagnostics；不要求页面关闭时成交 | Optional；若 TS14 决定暂缓则不执行 |
+| V13-15 长期运行与最终 canary | TS13、TS15 | 安装一次候选版；配置 3 个低数量 Buy/Club Listing/Transfer Reprice Job；触发一次 Loop/Trade 互斥和请求预算等待；让标签页后台运行；执行一次刷新/重登；用 `EXPIRE LEASE 1` 验证只读 Lease 恢复和 Recovery UI；最后确认发布 | 约 45-60 分钟主动操作，外加低频观察 | 最终 Scheduler diagnostics、相关 Listing/Buy diagnostics 和 Runner log；通过后作为 TS13/TS15 发布证据 | Complete on `0.7.91`; natural request-budget cooldown did not occur and remains automated-only evidence |
+| VC Companion 可选验证 | TS14 | 不执行；已有 V9-12 页面后台触发证据，Companion 不改变“页面关闭或未登录时不得交易”的边界 | N/A | 本文 TS14 决策记录 | Deferred and closed |
 
 三轮必须验证中，不能由本地自动测试替代的人工动作只有：
 
@@ -1126,19 +1126,20 @@ Next: TS13 多 Job、长期运行与恢复。
 
 ### TS13 多 Job、长期运行与恢复
 
-Status: Not started.
+Status: Complete on `0.7.91`.
 
 Depends on: TS12 Complete；O13 必须确认未知 Journal 的人工处理政策，O10 必须确认多 armed Job 上限。
 
 Scope:
 
-- [ ] 从单 armed Job 扩展为有限数量的 armed Jobs，但全局同时只允许一个 Trade mutation Run；公平调度按 due time、Job type 和稳定 tie-break 决定。
-- [ ] History、Listing Journal、Buy Journal、Lease 和 request budget 使用统一 correlation ID，支持跨 reload 和跨多次 schedule occurrence 对账。
-- [ ] 对长期 cooldown、预算恢复、Provider 暂时不可用、登录未就绪和 Loop 占用显示明确状态、预计恢复时间和人工 Stop。
-- [ ] 过期 Lease 恢复必须先做只读对账；跨过 mutation boundary 或结果不明时保持全局阻塞，要求人工导出和处理。
-- [ ] 未知 Journal 默认不自动 acknowledge；人工解除必须展示证据摘要、风险说明并留下本地审计记录。
-- [ ] 长期 diagnostics 只保留有界聚合和脱敏事件，定义 History/Journal 淘汰、导出和 schema migration 规则。
-- [ ] 验证多个 Buy/Listing Job 与 Loop Runner 共存时的公平性、无饥饿和请求预算共享。
+- [x] 从单 armed Job 扩展为最多 3 个 armed Jobs，但全局同时只允许一个 Trade mutation Run；公平调度先按 due time，同 due time 再按 Job type 和稳定 tie-break 决定。
+- [x] History、Listing Journal、Buy Journal、Lease、Scheduler event 和 request budget wait 使用统一 `runId` correlation，支持跨 reload 和跨多次 schedule occurrence 对账。
+- [x] 对长期 cooldown、预算恢复、登录未就绪和 Loop 占用显示明确 runtime 状态；Provider 健康和 request retry 时间保持只读。
+- [x] 过期 Lease 使用两阶段接管；先做只读对账，只有匹配终态 History 且无未知 Journal 时才显式清理并获取新 Lease。
+- [x] 未知 Journal 不自动 acknowledge；Recovery UI 展示证据 hash、风险阶段和数量，要求锁定/空闲状态、精确确认和人工原因，并写入有界本地审计。
+- [x] 无 Journal/History 的过期 Lease 提供独立 `LEASE Recovery`；确认只写审计和 blocked History，不清理 Lease、不调用 EA。
+- [x] 长期 diagnostics 只保留有界聚合和脱敏事件；History 100、Scheduler events 100、Journal events 80、Audit 20、correlations 20。
+- [x] Fake-clock soak 覆盖 3 个 Buy/Listing Job、会话/Loop/预算等待、reload、双标签 Lease、公平调度和各自授权耗尽。
 
 Automated tests:
 
@@ -1152,6 +1153,9 @@ Live validation:
 - 在低频、低数量条件下运行一个包含 Buy、Club Listing、Transfer reprice 和 Loop 互斥的合并长时 campaign。
 - 验证后台标签、页面刷新、重新登录、系统休眠和双标签页；不主动断网或终止浏览器来制造未知写入。
 - 证明没有并发 mutation、没有重复 schedule occurrence、没有绕过预算，所有等待和恢复均可从 UI/diagnostics 解释。
+- 使用 `EXPIRE LEASE 1` 只写入受控过期 Lease；全局 Recovery 门禁必须在授权前阻断。人工 Lease acknowledgement 只写 Audit/blocked History，后续重新授权才允许 Scheduler 以终态 History 完成两阶段清理和接管。
+
+Live result: `0.7.91` completed the three-Job campaign with five independently authorized Runs: Buy `2/2`, Club Listing `2/2`, Transfer Reprice `1/1`. A Player Pick Loop occupied the shared Coordinator until 15:55:10 and Reprice started only at 15:55:12. F5 changed the page owner while preserving the two remaining Interval authorizations; the second Buy and Club runs completed afterward, then both Jobs disarmed and the Scheduler relocked without a third occurrence. Controlled Lease `expired-lease-validation-1786523178663` produced a zero-mutation blocked audit receipt, remained unavailable for overwrite until acknowledgement, and was then cleared by the subsequent authorized one-card Listing. No duplicate `runId`, duplicate `scheduledFor`, unknown Journal, concurrent mutation, unexpected terminal state or open Circuit was observed. Request-budget cooldown did not arise naturally and was not manufactured; the automated cooldown/soak coverage remains the evidence for that branch.
 
 Exit criteria: 有限多 Job 可长时间运行且始终串行写入；恢复、阻塞、人工处理和日志保留均有确定协议，运维人员无需读取原始 EA 对象即可定位状态。
 
@@ -1161,14 +1165,14 @@ Next: TS14 可选 Companion 最终决策。
 
 ### TS14 可选 Companion 最终决策
 
-Status: Not started.
+Status: Complete. Companion deferred.
 
 Depends on: TS13 Complete；O15 必须记录实现或永久暂缓的依据。
 
 Scope:
 
-- [ ] 用 TS10-TS13 的实测数据判断浏览器后台 timer 是否仍需要扩展 alarm；不能仅因“可能更稳定”而增加扩展。
-- [ ] 若不实现，记录理由、已知限制和用户在页面关闭/未登录时的预期行为，随后直接关闭本里程碑。
+- [x] V9-12 已证明页面保持打开时，后台标签可由 interval/focus/visibility/online wakeup 触发并正确补充检查；现阶段没有证据证明必须增加扩展 alarm。
+- [x] Companion 暂缓：userscript 只在已登录且页面存在时执行；页面关闭、浏览器退出或未登录时不交易，恢复后按 misfire、Journal 和 Lease 规则处理，不补做未经授权的旧 occurrence。
 - [ ] 若实现，Companion 只允许 alarm、通知以及打开/聚焦 EA 页面；实际到期判断、登录检查、确认和 EA 写操作仍由页面内 Runner 完成。
 - [ ] Companion 不保存 Cookie、Token、账号密码、EA Item 或交易响应，不在 Service Worker 调用 EA 接口，也不自动登录。
 - [ ] 定义 userscript 与 extension 的版本/消息协议、权限最小化、卸载降级和诊断边界。
@@ -1192,19 +1196,33 @@ Next: TS15 生产发布与路线图关闭。
 
 ### TS15 生产发布与路线图关闭
 
-Status: Not started.
+Status: In progress. Candidate schema, capability matrix, automated verification and V13-15 canary are complete; commit, tag and Release remain.
 
 Depends on: TS14 Complete；所有仍会影响生产默认值的 Open decisions 必须 Resolved 或明确 Deferred with reason。
 
 Scope:
 
-- [ ] 冻结生产 Job schema、默认安全参数、迁移路径、导入/导出格式和回滚版本。
-- [ ] 为 Manual、Once、Recurring、Buy、Club Listing、Transfer reprice、Stop、Circuit、Journal recovery 和 Loop/Trade 互斥建立最终能力矩阵。
-- [ ] 完成 UI 可访问性、触摸屏/手机布局、长列表、确认文案、状态提示和错误恢复审查。
-- [ ] 更新 README、设计文档、运维手册、发布说明、隐私边界、故障排查和低风险首次运行流程。
-- [ ] 执行完整自动验证、迁移验证、离线 soak、候选构建一致性检查和有界真实页面 canary。
-- [ ] 明确 GA 生产门禁与仍然禁用的能力；所有隐藏/调试 live gate 要么删除，要么转为有文档的正式 gate。
+- [x] 冻结候选生产 Job Store schema 5、Authorization collection schema 2、默认安全参数、旧单授权迁移和 Job-only schema 1 导入/导出；回滚点为已验证的 `0.7.84`。
+- [x] 为 Manual、Once、Recurring、Buy、Club Listing、Transfer reprice、Stop、Circuit、Journal recovery 和 Loop/Trade 互斥建立最终候选能力矩阵。
+- [x] 完成候选 UI 可访问性、触摸屏/手机布局、长列表、确认文案、状态提示和 Recovery 审查。
+- [x] 更新设计文档和运维手册中的能力边界、隐私边界、故障排查、一次性 V13-15 campaign 和低风险首次运行流程；正式 Release notes 在通过 canary 后生成。
+- [x] 执行完整自动验证、迁移验证、离线 soak 和候选构建一致性检查。
+- [x] 在 `0.7.91` 完成有界真实页面 V13-15 canary，包括多 Job、Loop 互斥、F5/后台恢复、授权耗尽和两阶段 Lease Recovery。
+- [x] 明确候选 GA 生产门禁与仍然禁用的能力；`EXPIRE LEASE 1` 只保留为有文档的只读恢复验证入口。
 - [ ] 发布最终候选和稳定版本，并在第 20 节记录版本、测试数量、实机证据、剩余风险和回滚点。
+
+Candidate capability matrix:
+
+| Path | Candidate support | Hard boundary |
+| --- | --- | --- |
+| Manual Club Listing / Transfer Reprice | Supported | 单一来源，1-4 项，每个 chunk 最多 2 项，逐项身份/价格/Transfer 回读 |
+| Manual Buy | Supported | Rare Gold，最多 4 个连续评分和 4 项，单卡 2000，总预算 8000 |
+| Scheduled Buy / Club Listing / Transfer Reprice | Supported behind explicit authorization | `once/daily/interval/window`；最多 3 个 armed Jobs；once/window 1 Run，daily/interval 2 Runs；全局只允许一个 mutation Run |
+| Stop / request cooldown / Loop mutex | Supported | 只在安全点停止；预算不足本地等待；Runner operation 活跃时不开始 Trade |
+| Circuit / unknown Journal / expired Lease | Supported fail-closed | 未知 mutation 全局阻止写入；Recovery 仅在锁定空闲状态人工审计；Lease 两阶段接管 |
+| Background/reload/relogin | Supported while an authenticated EA page exists | 页面关闭、浏览器退出或未登录时不交易；恢复后只按 misfire/授权处理 |
+| Other Buy card classes, mixed Listing sources, `next-login`, more than 4 items, more than 3 armed Jobs | Unsupported | 必须 fail closed；不得通过 JSON 绕过 |
+| Automatic bid, Quick Sell, relist-all, Companion/server-side trading | Unsupported | 不在本路线图范围；禁止调用 `relistExpiredAuctions()` |
 
 Automated tests:
 
@@ -1239,12 +1257,12 @@ Next: Maintenance only；新范围必须新建设计文档，不沿用未定义�
 | O7 | 是否允许同一 rating rule 同时匹配普通金和特殊卡。 | 不允许；card class 必须明确 | TS2 | Resolved: explicit card-class contract |
 | O8 | 是否需要高价值卡 EA 最低 BIN 复核。 | 首版不实现，高价值卡继续排除 | TS12 | Resolved: exclude Buy Now above 10,000 |
 | O9 | 手动 Run 和单个 chunk 的 Listing/Buy 数量上限。 | 首次只提高一个数量级；chunk 不超过 TS8 已验证的两项，Run cap 由最坏请求成本决定 | TS9 | Resolved: Run cap 4, chunk cap 2, 15-minute budget wait deadline |
-| O10 | Recurring 阶段允许多少 armed Jobs，以及何时开放多 Job。 | TS10 只允许一个；TS13 通过长时验证后才允许有限多 Job | TS10/TS13 | Resolved for TS10: exactly one; TS13 multi-Job remains locked |
+| O10 | Recurring 阶段允许多少 armed Jobs，以及何时开放多 Job。 | TS10 只允许一个；TS13 通过长时验证后才允许有限多 Job | TS10/TS13 | Resolved for TS13 candidate: at most 3 independently authorized Jobs; release pending V13-15 |
 | O11 | 是否支持 `next-login`。 | 默认拒绝；只有能证明不补跑旧 occurrence 且不会无确认交易时才开放 | TS10 | Resolved: rejected |
 | O12 | 未售出超时后的默认行为。 | 默认 `skip`；1/3 小时后 `reprice` 必须由 Job 显式配置 | TS12 | Resolved: skip by default; reprice requires explicit Transfer Job |
-| O13 | 未知或跨 mutation boundary 的 Journal 是否允许自动 acknowledge。 | 不允许，只能人工查看证据后解除 | TS13 | Open |
+| O13 | 未知或跨 mutation boundary 的 Journal 是否允许自动 acknowledge。 | 不允许，只能人工查看证据后解除 | TS13 | Resolved: never automatic; exact manual confirmation plus bounded local audit and blocked History |
 | O14 | Buy 是否扩展到 Rare Gold 之外的 card class。 | TS11 保持 Rare Gold；其它卡类逐类评审 | TS11 | Resolved for TS11: Rare Gold only |
-| O15 | 是否实现 Companion Extension。 | 默认暂缓；只有页面 timer 的实测限制无法由 userscript 解决时才实现最小 Companion | TS14 | Open |
+| O15 | 是否实现 Companion Extension。 | 默认暂缓；只有页面 timer 的实测限制无法由 userscript 解决时才实现最小 Companion | TS14 | Resolved: deferred; page-open userscript wakeups are sufficient for current scope |
 
 ## 20. 决策与验证日志
 
@@ -1860,3 +1878,27 @@ Completed Buy evidence: The `0.7.83` Step 3 export completed four exact purchase
 Listing backfill correction (`0.7.84`): Preview now prefilters and sorts candidates before building a quote pool capped at `maxListings * 4` and 16 items. It requests quotes for every unique definition in that pool, then skips high-value, stale-skip or unavailable-skip candidates while continuing until `maxListings` is filled or the pool is exhausted. Candidates outside the pool remain deferred and are never accepted through configured-price fallback without a requested quote. Diagnostics expose pool limit, size, truncation and evaluated/deferred/rejected counts. Five new regressions cover leading high-value candidates, fallback-skip discovery, the observed 9-candidate Step 7 shape and a larger truncated Club pool; the 10,000 guards at Preview, Prepare and mutation remain unchanged. The final gate passes 43 Trade files / 284 Trade tests and 155 total files / 1017 total tests.
 
 Next: V9-12 is closed. Proceed to TS13 multi-Job, long-running recovery and the V13-15 campaign plan; do not enable multiple armed Jobs before the TS13 gates pass.
+
+### 2026-08-12 / TS13-TS15 / Multi-Job recovery candidate
+
+Status: Candidate implementation, full repository verification and the consolidated V13-15 live campaign are complete. TS14 Companion is explicitly deferred. Commit, tag and Release remain.
+
+Commit/Version: Uncommitted corrected candidate targeting `0.7.91`; rollback point is the verified `0.7.84` release state.
+
+Implemented result: Job Store schema 5 and Authorization collection schema 2 support at most three independently authorized Jobs. Once/window grant one Run, daily/interval grant two Runs, authorization is consumed only by the selected Job, and all Trade writes remain serialized by Coordinator, Web Lock and persistent Lease. Due time has priority; equal due times alternate Buy/Listing with a stable Job-ID tie-break. Legacy single authorization migrates without arming or authorizing extra Jobs.
+
+Recovery result: Unknown Buy or Listing mutation evidence globally blocks Manual and Scheduled Trade before a new mutation starts. Recovery acknowledgement requires a paused/locked Scheduler, idle Runner/Coordinator, no active Lease, exact run-specific confirmation, unchanged evidence hash and an explicit reason. It archives the Journal and writes bounded Audit/blocked History without calling EA. Expired Lease takeover is two-phase: read-only reconciliation accepts only matching terminal History with no uncertain Journal, and an unproven Lease must be acknowledged before a later Scheduler tick can clear it and acquire a new Lease.
+
+Diagnostics and tests: Bounded Recovery Audit and run correlations connect History, Journal, Lease, Scheduler events and request-budget waits by `runId`. Fake-clock soak covers three Jobs, fairness, session/Loop/budget waiting, reload, shared Lease and independent authorization exhaustion. The `0.7.91` correction adds direct same-page and cross-tab overlapping-tick regressions: preflight cannot run without the Scheduler lock, an active Journal matching the current unexpired Lease is in-flight rather than Recovery, and another Job's authorization/armed state remains unchanged. Six focused files / 57 tests pass. Full `npm run verify` passes with 338 JavaScript files syntax-checked and 160 test files / 1055 tests, plus ESLint, config/Profile validation, architecture audit, FSU patch replay, userscript build, root/dist equality and FSU release asset checks. Root and dist userscripts both report `0.7.91`; FSU release assets remain `26.09.6`.
+
+Live gate: Passed on `0.7.91`. The campaign covered three low-quantity Jobs, Loop mutex, background/F5 recovery, authorization exhaustion and controlled `EXPIRE LEASE 1` recovery. Natural request-budget cooldown did not occur and was not forced; automated budget and fake-clock soak tests remain authoritative for that branch.
+
+Remaining risk: Browser background throttling remains browser-dependent. Both pre-F5 and post-F5 Runner logs are available and agree with the final diagnostics; the post-F5 log records the second Interval runs, Lease staging, acknowledgement, two-phase reconciliation and final Listing. Unknown Journal acknowledgement remains deliberately manual; automatic bid, Quick Sell, relist-all, mixed Listing sources, more than four items and more than three armed Jobs remain unsupported.
+
+`0.7.90` canary failure: The 2026-08-12 first round enabled three Jobs and five Runs. `V13 Reprice` completed `1/1`; `V13 Buy` run `trade-1786515232458-b767858b3984e` bought one card for 900 and routed it to Transfer, with terminal Buy Journal `completed / receipt-recorded`. While that Buy was still executing, the five-second interval started an overlapping tick. Recovery and authorization preflight ran before the Scheduler Web Lock, observed the legitimate in-flight mutation Journal, misclassified it as `buy-journal-mutation-review-required`, and globally relocked all Jobs at 14:14:17. The original Buy then completed at 14:14:19. `V13 Club` never started and was disarmed; this persisted state matches the screenshot and was not a UI refresh issue. There was no EA failure or unknown mutation, and the successful Buy must not be retried for recovery.
+
+Correction: Recovery, authorization, Circuit, Job selection, execution-result relocking and unexpected-tick relocking now all execute inside the Scheduler Web Lock. A same-page mutex rejects overlapping ticks even without Web Locks. Recovery partitions only an active Journal whose `runId` and `jobId` exactly match the current unexpired Lease as in-flight; mismatched, missing-Lease and expired-Lease unknown Journals remain fail-closed. Because the erroneous global relock cleared all authorizations, steps five/six of the failed campaign were correctly not run and the next canary must start from preparation.
+
+`0.7.91` canary result: Prepare diagnostics at 15:27:24 contained three armed Jobs and five authorized Runs. Buy ran at 15:43:11 and 16:03:57, each purchasing one 86 Rare Gold for 900 and routing it to Transfer. Club Listing ran at 15:49:11 and 16:14:13, each listing one Common Gold at 650/700 for one hour and verifying the same item active in Transfer. Reprice was scheduled for 15:54:00, waited while the Player Pick Loop was active, then ran at 15:55:12 and verified the same inactive Transfer item active at 650/700. The page owner changed after F5 from `tab-1786519132017-8002b990356b6` to `tab-1786521462781-15aa0562aa9678`; remaining authorization and next times survived. Final state had all three Jobs disarmed, no authorization, paused/locked Scheduler, closed Circuit and no active Lease or Recovery review. Lease Recovery acknowledgement recorded evidence `12bf5b68` with zero mutation, followed by one successful authorized Club Listing. `log1.txt` and the replacement `log2.txt` cover the complete page timelines and match all seven campaign History records. The bottom-of-dialog text `Guarded schedule enabled for 1 Job(s)` was a stale local action message only; persisted state and Banner were correct, and the UI now clears stale action text on external state transitions.
+
+Next: Re-run the focused UI test and full `npm run verify` after the stale-status UI correction, then prepare the `0.7.91` commit, tag and Release when requested.

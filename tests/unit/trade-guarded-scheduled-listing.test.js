@@ -64,6 +64,52 @@ function safeRequestBudget() {
 }
 
 describe('Guarded scheduled Listing validation executor', () => {
+  it('blocks unresolved Journal evidence before consuming authorization', async () => {
+    const jobStore = store();
+    const listingPreparation = { prepare: vi.fn() };
+    const result = await createGuardedScheduledListingExecutor({
+      store: jobStore,
+      listingPreparation,
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      journal: { inspectRecovery: () => ({ canSupersede: false, reason: 'listing-journal-mutation-review-required' }) },
+      getTradeAdapter: () => createFakeTradeAdapter(),
+      requestBudget: safeRequestBudget(),
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: job(), runId: 'blocked-before-auth', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'listing-journal-mutation-review-required' });
+    expect(jobStore.consumeAuthorization).not.toHaveBeenCalled();
+    expect(listingPreparation.prepare).not.toHaveBeenCalled();
+  });
+
+  it('blocks a cross-type recovery race before consuming authorization', async () => {
+    const jobStore = store();
+    const listingPreparation = { prepare: vi.fn() };
+    const result = await createGuardedScheduledListingExecutor({
+      store: jobStore,
+      listingPreparation,
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      journal: { inspectRecovery: () => ({ canSupersede: true }) },
+      inspectRecovery: () => ({
+        reviewRequired: true,
+        reason: 'buy-journal-mutation-review-required',
+      }),
+      getTradeAdapter: () => createFakeTradeAdapter(),
+      requestBudget: safeRequestBudget(),
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: job(), runId: 'cross-type-blocked-before-auth', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'buy-journal-mutation-review-required' });
+    expect(jobStore.consumeAuthorization).not.toHaveBeenCalled();
+    expect(listingPreparation.prepare).not.toHaveBeenCalled();
+  });
+
   it('waits for FSU loading but allows provisional data for targeted validation', () => {
     expect(guardedTradeSessionReadiness({ pageReady: false })).toEqual({ ready: false, reason: 'ea-session-unavailable' });
     expect(guardedTradeSessionReadiness({ pageReady: true, fsuReadiness: { detected: false } }))

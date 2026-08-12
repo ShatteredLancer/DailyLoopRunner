@@ -66,6 +66,55 @@ function readyPreview() {
 }
 
 describe('Guarded scheduled Buy executor', () => {
+  it('blocks unresolved Journal evidence before consuming authorization', async () => {
+    const jobStore = store();
+    const buyPreview = { preview: vi.fn() };
+    const result = await createGuardedScheduledBuyExecutor({
+      store: jobStore,
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      buyPreview,
+      journal: {
+        inspectRecovery: () => ({ canSupersede: false, reason: 'buy-journal-mutation-review-required' }),
+        finish: vi.fn(),
+      },
+      getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
+      requestBudget: safeRequestBudget(),
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: job(), runId: 'blocked-before-auth', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'buy-journal-mutation-review-required' });
+    expect(jobStore.read().authorizations.jobs['buy-once']).toMatchObject({ remainingRuns: 1 });
+    expect(buyPreview.preview).not.toHaveBeenCalled();
+  });
+
+  it('blocks a cross-type recovery race before consuming authorization', async () => {
+    const jobStore = store();
+    const buyPreview = { preview: vi.fn() };
+    const result = await createGuardedScheduledBuyExecutor({
+      store: jobStore,
+      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
+      buyPreview,
+      journal: { inspectRecovery: () => ({ canSupersede: true }), finish: vi.fn() },
+      inspectRecovery: () => ({
+        reviewRequired: true,
+        reason: 'listing-journal-mutation-review-required',
+      }),
+      getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
+      requestBudget: safeRequestBudget(),
+      validationGateEnabled: true,
+      now: () => 2000,
+    }).execute({
+      job: job(), runId: 'cross-type-blocked-before-auth', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'listing-journal-mutation-review-required' });
+    expect(jobStore.read().authorizations.jobs['buy-once']).toMatchObject({ remainingRuns: 1 });
+    expect(buyPreview.preview).not.toHaveBeenCalled();
+  });
+
   it('consumes the one-run authorization and passes one attempt plus the global reserve to the transaction', async () => {
     const jobStore = store();
     const baseAdapter = createFakeTradeAdapter({ coins: 6000 });

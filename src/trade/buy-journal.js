@@ -255,7 +255,9 @@ export function createTradeBuyJournal(options = {}) {
       entry.mutationBoundaryCrossed
       && !['purchased', 'competition-lost', 'failed'].includes(entry.status)
     )));
-    const requiresReview = mutationBoundaryCrossed && (active || uncertainMutation);
+    const requiresReview = current?.status !== 'acknowledged'
+      && mutationBoundaryCrossed
+      && (active || uncertainMutation);
     return {
       active,
       runId: current?.runId || null,
@@ -266,5 +268,25 @@ export function createTradeBuyJournal(options = {}) {
     };
   }
 
-  return Object.freeze({ begin, checkpoint, finish, inspectRecovery, snapshot: read });
+  function acknowledge(input = {}) {
+    const current = read();
+    if (!current || current.runId !== String(input.runId || '')) return current;
+    if (typeof input.evidenceHashFor !== 'function'
+      || input.evidenceHashFor(current) !== String(input.evidenceHash || '')) return current;
+    const at = Math.max(0, safeNumber(input.at) ?? Number(now()));
+    return write({
+      ...current,
+      status: 'acknowledged',
+      phase: 'manual-recovery-acknowledged',
+      updatedAt: at,
+      events: [...current.events, safeEvent({
+        at,
+        phase: 'manual-recovery-acknowledged',
+        status: 'acknowledged',
+        reason: input.reason,
+      })].slice(-TRADE_BUY_JOURNAL_EVENT_LIMIT),
+    });
+  }
+
+  return Object.freeze({ acknowledge, begin, checkpoint, finish, inspectRecovery, snapshot: read });
 }

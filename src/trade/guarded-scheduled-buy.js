@@ -50,16 +50,24 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
     if (input.context?.liveExecutionEnabled !== true) return finish(blockedReceipt(input, 'live-execution-disabled', startedAt));
     const gate = inspectScheduledBuyValidationJob(input.job, { minimumRetainedCoins, now: startedAt });
     if (!gate.ready) return finish(blockedReceipt(input, gate.reason, startedAt), { gate });
+    const globalRecovery = options.inspectRecovery?.();
+    if (globalRecovery?.reviewRequired === true) {
+      return finish(blockedReceipt(
+        input,
+        globalRecovery.reason || 'trade-recovery-review-required',
+        startedAt,
+      ), { gate });
+    }
+    const journalRecovery = journal?.inspectRecovery?.();
+    if (journalRecovery?.canSupersede === false) {
+      return finish(blockedReceipt(input, journalRecovery.reason || 'buy-journal-recovery-required', startedAt), { gate });
+    }
     const authorization = store.consumeAuthorization(input.job.id, input.runId);
     if (authorization.consumed !== true) {
       return finish(blockedReceipt(input, authorization.reason || 'schedule-authorization-missing-or-expired', startedAt), { gate });
     }
     const circuit = options.circuitBreaker?.availability?.();
     if (circuit && circuit.allowed !== true) return finish(blockedReceipt(input, 'trade-circuit-open', startedAt), { gate });
-    const journalRecovery = journal?.inspectRecovery?.();
-    if (journalRecovery?.canSupersede === false) {
-      return finish(blockedReceipt(input, journalRecovery.reason || 'buy-journal-recovery-required', startedAt), { gate });
-    }
     let adapter = options.getTradeAdapter();
     const capabilities = adapter.inspectCapabilities();
     if (!Number.isFinite(Number(capabilities.coins))) {

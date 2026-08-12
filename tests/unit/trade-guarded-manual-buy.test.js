@@ -130,6 +130,25 @@ describe('Guarded manual Buy executor', () => {
     expect(locked.adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
   });
 
+  it('releases the Lease and Coordinator when recovery evidence appears after acquisition', async () => {
+    const inspectRecovery = vi.fn()
+      .mockReturnValueOnce({ reviewRequired: false })
+      .mockReturnValueOnce({ reviewRequired: true, reason: 'listing-journal-mutation-review-required' });
+    const { adapter, buyPreview, executor, lease, operationCoordinator } = setup({
+      options: { inspectRecovery },
+    });
+    await expect(executor.execute({
+      job: job(), confirmationText: 'BUY 1 MAX 1000',
+    })).resolves.toMatchObject({
+      status: 'blocked', reason: 'listing-journal-mutation-review-required', requested: 0,
+    });
+    expect(inspectRecovery).toHaveBeenCalledTimes(2);
+    expect(lease.inspect().lease).toBeNull();
+    expect(operationCoordinator.inspect().active).toBeNull();
+    expect(buyPreview.preview).not.toHaveBeenCalled();
+    expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
+  });
+
   it('reconciles an exact prior Buy journal destination without starting another purchase', async () => {
     const journal = createTradeBuyJournal({ storage: storage(), key: 'buy-journal', now: () => 1000 });
     journal.begin({ runId: 'prior-buy', jobId: 'buy-84', expectedDestination: 'transfer', requested: 1 });

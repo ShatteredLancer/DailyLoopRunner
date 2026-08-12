@@ -121,6 +121,56 @@ describe('Trade Job Store', () => {
     });
   });
 
+  it('authorizes three Jobs and disarms only the Job whose envelope is exhausted', () => {
+    let time = 1000;
+    const store = createTradeJobStore({ storage: memoryStorage(), now: () => time });
+    store.upsert({ ...job('daily-a'), schedule: { type: 'daily', time: '09:30', timezone: 'Asia/Shanghai' } });
+    store.upsert({ ...job('once-b'), schedule: { type: 'once', runAt: 60_000 } });
+    store.upsert({ ...job('window-c'), schedule: { type: 'window', startAt: 2000, endAt: 60_000 } });
+    const enabled = store.authorize(['daily-a', 'once-b', 'window-c']);
+    expect(enabled.authorization).toBeNull();
+    expect(Object.keys(enabled.authorizations.jobs)).toEqual(['daily-a', 'once-b', 'window-c']);
+
+    time = 2000;
+    expect(store.consumeAuthorization('once-b', 'once-run')).toMatchObject({ consumed: true, remainingRuns: 0 });
+    expect(store.read()).toMatchObject({
+      paused: false,
+      liveExecutionEnabled: true,
+      jobs: [
+        { id: 'daily-a', armed: true },
+        { id: 'once-b', armed: false },
+        { id: 'window-c', armed: true },
+      ],
+    });
+    expect(Object.keys(store.read().authorizations.jobs)).toEqual(['daily-a', 'window-c']);
+    expect(store.consumeAuthorization('window-c', 'window-run')).toMatchObject({ consumed: true, remainingRuns: 0 });
+    expect(store.read()).toMatchObject({ paused: false, liveExecutionEnabled: true });
+    expect(store.consumeAuthorization('daily-a', 'daily-run-1')).toMatchObject({ consumed: true, remainingRuns: 1 });
+    expect(store.consumeAuthorization('daily-a', 'daily-run-2')).toMatchObject({ consumed: true, remainingRuns: 0 });
+    expect(store.read()).toMatchObject({ paused: true, liveExecutionEnabled: false });
+  });
+
+  it('migrates a schema 4 singular authorization into schema 5', () => {
+    const storage = memoryStorage();
+    const legacyJob = job('legacy');
+    const source = createTradeJobStore({ storage: memoryStorage(), now: () => 1000 });
+    source.upsert(legacyJob);
+    const legacyAuthorization = source.authorize('legacy').authorization;
+    storage.set('jobs', {
+      schemaVersion: 4,
+      paused: false,
+      liveExecutionEnabled: true,
+      jobs: [legacyJob],
+      authorization: legacyAuthorization,
+    });
+    const migrated = createTradeJobStore({ storage, key: 'jobs', now: () => 2000 }).read();
+    expect(migrated).toMatchObject({
+      schemaVersion: 5,
+      authorization: { jobId: 'legacy' },
+      authorizations: { schemaVersion: 2, jobs: { legacy: { jobId: 'legacy' } } },
+    });
+  });
+
   it('relocks and disarms all jobs when configuration changes during live execution', () => {
     const store = createTradeJobStore({ storage: memoryStorage(), now: () => 1000 });
     store.upsert(job('job-1'));
@@ -200,7 +250,7 @@ describe('Trade Job Store', () => {
     });
     const store = createTradeJobStore({ storage, key: 'jobs', now: () => 1000 });
     expect(store.read()).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       metrics: {
         firstRecordedAt: 200,
         lastRecordedAt: 400,

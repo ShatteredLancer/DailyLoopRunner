@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { normalizeTradeJob } from '../../src/trade/contracts.js';
 import {
   createTradeScheduleAuthorization,
+  createTradeScheduleAuthorizations,
   inspectTradeScheduleAuthorization,
   normalizeTradeScheduleAuthorization,
+  normalizeTradeScheduleAuthorizations,
   tradeScheduleFingerprint,
 } from '../../src/trade/schedule-authorization.js';
 
@@ -39,5 +41,27 @@ describe('Trade schedule authorization', () => {
     expect(normalizeTradeScheduleAuthorization(authorization, [changed], { now: 2000 })).toBeNull();
     expect(normalizeTradeScheduleAuthorization(authorization, [original], { now: authorization.expiresAt + 1 })).toBeNull();
     expect(tradeScheduleFingerprint(changed)).not.toBe(tradeScheduleFingerprint(original));
+  });
+
+  it('normalizes up to three independent Job authorizations and migrates the legacy envelope', () => {
+    const first = job();
+    const second = { ...job({ type: 'once', runAt: 60_000 }), id: 'listing-once' };
+    const authorizations = createTradeScheduleAuthorizations([second, first], { now: 1000 });
+    expect(Object.keys(authorizations.jobs)).toEqual(['listing-once', 'listing-recurring']);
+    expect(authorizations.jobs).toMatchObject({
+      'listing-once': { totalRuns: 1, remainingRuns: 1 },
+      'listing-recurring': { totalRuns: 2, remainingRuns: 2 },
+    });
+    expect(inspectTradeScheduleAuthorization({ jobs: [first, second], authorizations }, second, { now: 2000 }))
+      .toMatchObject({ ready: true, authorization: { jobId: second.id } });
+
+    const legacy = createTradeScheduleAuthorization(first, { now: 1000 });
+    expect(normalizeTradeScheduleAuthorizations(null, [first], {
+      now: 2000,
+      legacyAuthorization: legacy,
+    }).jobs).toMatchObject({ [first.id]: { jobId: first.id } });
+
+    const four = [first, second, { ...first, id: 'third' }, { ...first, id: 'fourth' }];
+    expect(() => createTradeScheduleAuthorizations(four, { now: 1000 })).toThrow('At most 3');
   });
 });

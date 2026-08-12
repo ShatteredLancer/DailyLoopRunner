@@ -13,10 +13,13 @@ function sortedCandidates(input = []) {
 export function selectFairTradeCandidate(input = [], dispatch = {}) {
   const candidates = sortedCandidates(input).filter((candidate) => candidate.decision?.action === 'run');
   if (candidates.length < 2) return candidates[0] || null;
+  const firstDueAt = scheduledAt(candidates[0]);
+  const equallyDue = candidates.filter((candidate) => scheduledAt(candidate) === firstDueAt);
+  if (equallyDue.length < 2) return candidates[0];
   const lastType = ['buy', 'listing'].includes(dispatch.lastJobType) ? dispatch.lastJobType : null;
-  if (!lastType) return candidates[0];
-  const alternate = candidates.find((candidate) => candidate.job?.type !== lastType);
-  return alternate || candidates[0];
+  if (!lastType) return equallyDue[0];
+  const alternate = equallyDue.find((candidate) => candidate.job?.type !== lastType);
+  return alternate || equallyDue[0];
 }
 
 export function normalizeTradeDispatchState(input = {}) {
@@ -42,4 +45,3 @@ export function recordTradeDispatch(input = {}, job = {}, atInput = Date.now()) 
     lastDispatchedAt: Number.isFinite(at) ? Math.max(0, at) : Date.now(),
   });
 }
-

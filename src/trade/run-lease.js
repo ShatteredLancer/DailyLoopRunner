@@ -65,6 +65,15 @@ export function createTradeRunLease(options = {}) {
     const at = Number(now());
     const before = inspect();
     if (before.active && !before.owned) return { acquired: false, reason: 'lease-held', ...before };
+    if (before.expired) {
+      return {
+        acquired: false,
+        reason: 'expired-lease-reconciliation-required',
+        recoveryRequired: true,
+        previousLease: before.lease,
+        ...before,
+      };
+    }
     const lease = normalizeLease({
       ownerId,
       runId: input.runId,
@@ -81,8 +90,8 @@ export function createTradeRunLease(options = {}) {
       acquired,
       reason: acquired ? null : 'lease-race-lost',
       lease: leaseSnapshot(confirmed),
-      recoveryRequired: acquired && before.expired,
-      previousLease: before.expired ? before.lease : null,
+      recoveryRequired: false,
+      previousLease: null,
     };
   }
 

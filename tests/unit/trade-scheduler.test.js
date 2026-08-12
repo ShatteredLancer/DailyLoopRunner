@@ -118,6 +118,68 @@ describe('Trade Scheduler', () => {
     expect(executeJob).not.toHaveBeenCalled();
   });
 
+  it('clears a stale Lease only after read-only terminal History reconciliation', async () => {
+    const storage = memoryStorage();
+    let time = 0;
+    const stale = createTradeRunLease({ storage, key: 'lease', ownerId: 'old-tab', now: () => time, ttlMs: 5000, createToken: () => 'old-token' });
+    stale.acquire({ runId: 'old-run', jobId: 'listing-1' });
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob());
+    store.addHistory({ runId: 'old-run', jobId: 'listing-1', jobType: 'listing', status: 'completed', finishedAt: 5000 });
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    time = 6000;
+    const executeJob = vi.fn(async ({ runId }) => createTradeRunReceipt({
+      runId, status: 'completed', requested: 1, succeeded: 1, finishedAt: time,
+    }));
+    const recovery = vi.fn(() => ({ status: 'reconciled', reason: 'expired-lease-terminal-history-confirmed' }));
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'new-tab', now: () => time, ttlMs: 5000, createToken: () => 'new-token' }),
+      now: () => time,
+      createRunId: () => 'new-run',
+      getContext: () => ({ sessionReady: true, operationBusy: false }),
+      reconcileExpiredLease: recovery,
+      executeJob,
+    });
+    const result = await scheduler.tick();
+    expect(result).toMatchObject({ status: 'completed', receipt: { runId: 'new-run' } });
+    expect(recovery).toHaveBeenCalledWith(expect.objectContaining({ runId: 'old-run' }));
+    expect(executeJob).toHaveBeenCalledOnce();
+    expect(store.read().history).toHaveLength(2);
+  });
+
+  it('keeps an uncertain stale Lease and does not execute or consume authorization', async () => {
+    const storage = memoryStorage();
+    let time = 0;
+    const stale = createTradeRunLease({ storage, key: 'lease', ownerId: 'old-tab', now: () => time, ttlMs: 5000, createToken: () => 'old-token' });
+    stale.acquire({ runId: 'old-run', jobId: 'listing-1' });
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob());
+    store.authorize('listing-1');
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    time = 6000;
+    const executeJob = vi.fn();
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'new-tab', now: () => time, ttlMs: 5000, createToken: () => 'new-token' }),
+      now: () => time,
+      createRunId: () => 'new-run',
+      getContext: () => ({ sessionReady: true, operationBusy: false }),
+      reconcileExpiredLease: () => ({ status: 'blocked', reason: 'expired-lease-journal-mutation-review-required' }),
+      executeJob,
+    });
+    const result = await scheduler.tick();
+    expect(result).toMatchObject({
+      status: 'blocked', receipt: { reason: 'expired-lease-reconciliation-required' },
+    });
+    expect(executeJob).not.toHaveBeenCalled();
+    expect(store.read().history).toHaveLength(1);
+    expect(store.read().history[0]).toMatchObject({ runId: 'new-run', status: 'blocked' });
+    expect(store.read().authorizations.jobs['listing-1']).toMatchObject({ remainingRuns: 1 });
+  });
+
   it('executes exactly once when a page resumes inside the grace window', async () => {
     const storage = memoryStorage();
     let time = 0;
@@ -410,5 +472,76 @@ describe('Trade Scheduler', () => {
     await scheduler.tick();
     expect(dispatched).toEqual(['listing', 'buy', 'listing']);
     expect(store.read().dispatch).toMatchObject({ total: 3, lastJobType: 'listing', lastJobId: 'listing-b' });
+  });
+
+  it('dispatches earlier due time before type fairness and uses candidate-specific request capacity', async () => {
+    const storage = memoryStorage();
+    let time = 0;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledBuyJob({ id: 'buy-earlier', schedule: { type: 'once', runAt: 1000 } }));
+    store.upsert(scheduledJob({ id: 'listing-later', schedule: { type: 'once', runAt: 1500 } }));
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    store.recordDispatch('buy-earlier');
+    time = 2000;
+    const contexts = [];
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'due-tab', now: () => time }),
+      now: () => time,
+      getContext: (job) => {
+        contexts.push(job.id);
+        return {
+          sessionReady: true,
+          operationBusy: false,
+          requestBudgetReady: job.id !== 'listing-later',
+        };
+      },
+      executeJob: async ({ job, runId }) => createTradeRunReceipt({
+        runId, jobId: job.id, jobType: job.type, status: 'completed', requested: 1, succeeded: 1, finishedAt: time,
+      }),
+    });
+
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: 'buy-earlier' });
+    expect(contexts).toEqual(['buy-earlier', 'listing-later']);
+    expect(store.read().runtimes['listing-later']).toMatchObject({
+      status: 'cooldown', reason: 'trade-request-budget-insufficient',
+    });
+  });
+
+  it('continues a second authorized Job after the first one exhausts its envelope', async () => {
+    const storage = memoryStorage();
+    let time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob({ id: 'listing-once' }));
+    store.upsert(scheduledBuyJob({
+      id: 'buy-recurring',
+      schedule: { type: 'interval', everyMinutes: 1, anchorAt: 1000 },
+    }));
+    store.authorize(['listing-once', 'buy-recurring']);
+    const runs = [];
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'multi-tab', now: () => time }),
+      now: () => time,
+      createRunId: () => `multi-${runs.length + 1}`,
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestBudgetReady: true }),
+      executeJob: async ({ job, runId }) => {
+        runs.push(job.id);
+        expect(store.consumeAuthorization(job.id, runId).consumed).toBe(true);
+        return createTradeRunReceipt({
+          runId, jobId: job.id, jobType: job.type, status: 'completed', requested: 1, succeeded: 1, finishedAt: time,
+        });
+      },
+    });
+
+    expect(await scheduler.tick()).toMatchObject({ jobId: 'buy-recurring', status: 'completed' });
+    expect(await scheduler.tick()).toMatchObject({ jobId: 'listing-once', status: 'completed' });
+    expect(store.read()).toMatchObject({ paused: false, liveExecutionEnabled: true });
+    expect(store.read().jobs.find((job) => job.id === 'listing-once')).toMatchObject({ armed: false });
+    time = 61_000;
+    expect(await scheduler.tick()).toMatchObject({ jobId: 'buy-recurring', status: 'completed' });
+    expect(runs).toEqual(['buy-recurring', 'listing-once', 'buy-recurring']);
+    expect(store.read()).toMatchObject({ paused: true, liveExecutionEnabled: false });
   });
 });

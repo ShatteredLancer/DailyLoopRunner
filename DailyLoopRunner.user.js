@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.7.84
+// @version      0.7.91
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.7.84",
+    version: "0.7.91",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -85,6 +85,7 @@
   var TRADE_BUY_JOURNAL_KEY = "fc-loop-runner-trade-buy-journal-v1";
   var TRADE_LISTING_JOURNAL_KEY = "fc-loop-runner-trade-listing-journal-v1";
   var TRADE_REQUEST_BUDGET_KEY = "fc-loop-runner-trade-request-budget-v1";
+  var TRADE_RECOVERY_AUDIT_KEY = "fc-loop-runner-trade-recovery-audit-v1";
   var CFG = Object.freeze({
     sourcePackIds: [105],
     sourcePackNames: [
@@ -12273,7 +12274,7 @@
       const active = current?.status === "active";
       const mutationBoundaryCrossed = Boolean(current?.items.some((entry) => entry.mutationBoundaryCrossed));
       const uncertainMutation = Boolean(current?.items.some((entry) => entry.mutationBoundaryCrossed && !["purchased", "competition-lost", "failed"].includes(entry.status)));
-      const requiresReview = mutationBoundaryCrossed && (active || uncertainMutation);
+      const requiresReview = current?.status !== "acknowledged" && mutationBoundaryCrossed && (active || uncertainMutation);
       return {
         active,
         runId: current?.runId || null,
@@ -12283,7 +12284,25 @@
         reason: requiresReview ? "buy-journal-mutation-review-required" : null
       };
     }
-    return Object.freeze({ begin, checkpoint, finish, inspectRecovery, snapshot: read });
+    function acknowledge(input2 = {}) {
+      const current = read();
+      if (!current || current.runId !== String(input2.runId || "")) return current;
+      if (typeof input2.evidenceHashFor !== "function" || input2.evidenceHashFor(current) !== String(input2.evidenceHash || "")) return current;
+      const at = Math.max(0, safeNumber2(input2.at) ?? Number(now()));
+      return write({
+        ...current,
+        status: "acknowledged",
+        phase: "manual-recovery-acknowledged",
+        updatedAt: at,
+        events: [...current.events, safeEvent({
+          at,
+          phase: "manual-recovery-acknowledged",
+          status: "acknowledged",
+          reason: input2.reason
+        })].slice(-TRADE_BUY_JOURNAL_EVENT_LIMIT)
+      });
+    }
+    return Object.freeze({ acknowledge, begin, checkpoint, finish, inspectRecovery, snapshot: read });
   }
 
   // src/trade/manual-buy-validation.js
@@ -12782,6 +12801,15 @@
           startedAt
         );
       }
+      let globalRecovery = options.inspectRecovery?.();
+      if (globalRecovery?.reviewRequired === true) {
+        return blockedReceipt(
+          gate.job,
+          runId,
+          globalRecovery.reason || "trade-recovery-review-required",
+          startedAt
+        );
+      }
       const operationId = `manual-buy:${runId}`;
       const operation = operationCoordinator.acquire({
         id: operationId,
@@ -12798,6 +12826,17 @@
           gate.job,
           runId,
           acquired.recoveryRequired ? "expired-lease-reconciliation-required" : acquired.reason || "lease-unavailable",
+          startedAt
+        );
+      }
+      globalRecovery = options.inspectRecovery?.();
+      if (globalRecovery?.reviewRequired === true) {
+        lease.release(runId);
+        operationCoordinator.release(operationId);
+        return blockedReceipt(
+          gate.job,
+          runId,
+          globalRecovery.reason || "trade-recovery-review-required",
           startedAt
         );
       }
@@ -13085,16 +13124,24 @@
       if (input2.context?.liveExecutionEnabled !== true) return finish(blockedReceipt(input2, "live-execution-disabled", startedAt));
       const gate = inspectScheduledBuyValidationJob(input2.job, { minimumRetainedCoins, now: startedAt });
       if (!gate.ready) return finish(blockedReceipt(input2, gate.reason, startedAt), { gate });
+      const globalRecovery = options.inspectRecovery?.();
+      if (globalRecovery?.reviewRequired === true) {
+        return finish(blockedReceipt(
+          input2,
+          globalRecovery.reason || "trade-recovery-review-required",
+          startedAt
+        ), { gate });
+      }
+      const journalRecovery = journal?.inspectRecovery?.();
+      if (journalRecovery?.canSupersede === false) {
+        return finish(blockedReceipt(input2, journalRecovery.reason || "buy-journal-recovery-required", startedAt), { gate });
+      }
       const authorization = store.consumeAuthorization(input2.job.id, input2.runId);
       if (authorization.consumed !== true) {
         return finish(blockedReceipt(input2, authorization.reason || "schedule-authorization-missing-or-expired", startedAt), { gate });
       }
       const circuit = options.circuitBreaker?.availability?.();
       if (circuit && circuit.allowed !== true) return finish(blockedReceipt(input2, "trade-circuit-open", startedAt), { gate });
-      const journalRecovery = journal?.inspectRecovery?.();
-      if (journalRecovery?.canSupersede === false) {
-        return finish(blockedReceipt(input2, journalRecovery.reason || "buy-journal-recovery-required", startedAt), { gate });
-      }
       let adapter = options.getTradeAdapter();
       const capabilities = adapter.inspectCapabilities();
       if (!Number.isFinite(Number(capabilities.coins))) {
@@ -13399,6 +13446,14 @@
       });
       const reason = gate.reason;
       if (reason) return blockedReceipt(input2, reason, startedAt);
+      const globalRecovery = options.inspectRecovery?.();
+      if (globalRecovery?.reviewRequired === true) {
+        return blockedReceipt(input2, globalRecovery.reason || "trade-recovery-review-required", startedAt);
+      }
+      const journalRecovery = options.journal?.inspectRecovery?.();
+      if (journalRecovery?.canSupersede === false) {
+        return blockedReceipt(input2, journalRecovery.reason || "listing-journal-recovery-required", startedAt);
+      }
       const authorization = store.consumeAuthorization(input2.job.id, input2.runId);
       if (authorization.consumed !== true) {
         return blockedReceipt(input2, authorization.reason || "schedule-authorization-missing-or-expired", startedAt);
@@ -13409,10 +13464,6 @@
       if (typeof options.requestBudget?.inspect === "function") {
         const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect(), requestReserve);
         if (!requestCapacity.ready) return blockedReceipt(input2, requestCapacity.reason, startedAt);
-      }
-      const journalRecovery = options.journal?.inspectRecovery?.();
-      if (journalRecovery?.canSupersede === false) {
-        return blockedReceipt(input2, journalRecovery.reason || "listing-journal-recovery-required", startedAt);
       }
       const operationId = `scheduled-listing:${input2.runId}`;
       const operation = operationCoordinator.acquire({
@@ -13545,53 +13596,201 @@
     return Object.freeze({ execute });
   }
 
-  // src/trade/guarded-scheduled-job.js
-  function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
-    const armed = (snapshot.jobs || []).filter((job2) => job2.enabled === true && job2.armed === true && job2.schedule?.type !== "manual");
-    if (armed.length !== 1) {
-      return {
-        ready: false,
-        reason: armed.length ? "validation-gate-multiple-armed-jobs" : "validation-gate-no-armed-job",
-        job: null,
-        gate: null,
-        requiredText: null
-      };
+  // src/trade/schedule-authorization.js
+  var TRADE_SCHEDULE_AUTHORIZATION_SCHEMA_VERSION = 1;
+  var TRADE_SCHEDULE_AUTHORIZATIONS_SCHEMA_VERSION = 2;
+  var TRADE_RECURRING_AUTHORIZATION_RUNS = 2;
+  var TRADE_SCHEDULE_AUTHORIZATION_JOB_LIMIT = 3;
+  function stableHash2(value) {
+    let hash = 2166136261;
+    const text = String(value || "");
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
     }
-    const job = armed[0];
-    let gate;
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+  function tradeScheduleFingerprint(job = {}) {
+    return stableHash2(JSON.stringify({
+      id: String(job.id || ""),
+      type: String(job.type || ""),
+      schedule: job.schedule || null,
+      misfirePolicy: job.misfirePolicy || null,
+      policy: job.policy || null
+    }));
+  }
+  function tradeScheduleAuthorizationRuns(job = {}) {
+    return ["daily", "interval"].includes(job.schedule?.type) ? TRADE_RECURRING_AUTHORIZATION_RUNS : 1;
+  }
+  function authorizationExpiry(job, now, runs) {
+    const graceMs = job.misfirePolicy?.type === "grace-window" ? Math.min(15, Math.max(1, Number(job.misfirePolicy.graceMinutes || 15))) * 6e4 : 15e3;
+    if (job.schedule?.type === "once") return Number(job.schedule.runAt) + graceMs;
+    if (job.schedule?.type === "window") return Number(job.schedule.endAt) + graceMs;
+    if (job.schedule?.type === "interval") {
+      const periodMs = Math.max(1, Number(job.schedule.everyMinutes || 60)) * 6e4;
+      return now + Math.min(48 * 60 * 6e4, periodMs * runs + graceMs + 15 * 6e4);
+    }
+    if (job.schedule?.type === "daily") return now + 26 * 60 * 6e4;
+    return now;
+  }
+  function createTradeScheduleAuthorization(job = {}, options = {}) {
+    const now = Math.max(0, Number(options.now ?? Date.now()));
+    const totalRuns = tradeScheduleAuthorizationRuns(job);
+    return {
+      schemaVersion: TRADE_SCHEDULE_AUTHORIZATION_SCHEMA_VERSION,
+      jobId: String(job.id || ""),
+      jobFingerprint: tradeScheduleFingerprint(job),
+      scheduleType: String(job.schedule?.type || ""),
+      grantedAt: now,
+      expiresAt: authorizationExpiry(job, now, totalRuns),
+      totalRuns,
+      remainingRuns: totalRuns,
+      lastRunId: null,
+      lastConsumedAt: null
+    };
+  }
+  function normalizeTradeScheduleAuthorization(input2, jobs = [], options = {}) {
+    if (!input2 || typeof input2 !== "object") return null;
+    const now = Math.max(0, Number(options.now ?? Date.now()));
+    const job = jobs.find((entry) => String(entry.id) === String(input2.jobId || ""));
+    const totalRuns = Math.max(1, Math.floor(Number(input2.totalRuns || 0)));
+    const remainingRuns = Math.min(totalRuns, Math.max(0, Math.floor(Number(input2.remainingRuns || 0))));
+    const expiresAt = Math.max(0, Number(input2.expiresAt || 0));
+    if (!job || job.armed !== true || remainingRuns < 1 || expiresAt <= now) return null;
+    if (String(input2.jobFingerprint || "") !== tradeScheduleFingerprint(job)) return null;
+    return {
+      schemaVersion: TRADE_SCHEDULE_AUTHORIZATION_SCHEMA_VERSION,
+      jobId: String(job.id),
+      jobFingerprint: String(input2.jobFingerprint),
+      scheduleType: String(job.schedule?.type || ""),
+      grantedAt: Math.max(0, Number(input2.grantedAt || 0)),
+      expiresAt,
+      totalRuns,
+      remainingRuns,
+      lastRunId: input2.lastRunId ? String(input2.lastRunId) : null,
+      lastConsumedAt: input2.lastConsumedAt === null || input2.lastConsumedAt === void 0 ? null : Math.max(0, Number(input2.lastConsumedAt || 0))
+    };
+  }
+  function normalizeTradeScheduleAuthorizations(input2, jobs = [], options = {}) {
+    const now = Math.max(0, Number(options.now ?? Date.now()));
+    const rawEntries = input2?.schemaVersion === TRADE_SCHEDULE_AUTHORIZATIONS_SCHEMA_VERSION ? Object.values(input2.jobs || {}) : [];
+    if (!rawEntries.length && options.legacyAuthorization) rawEntries.push(options.legacyAuthorization);
+    const entries = rawEntries.map((entry) => normalizeTradeScheduleAuthorization(entry, jobs, { now })).filter(Boolean).sort((left, right) => left.grantedAt - right.grantedAt || left.jobId.localeCompare(right.jobId)).slice(0, TRADE_SCHEDULE_AUTHORIZATION_JOB_LIMIT);
+    return {
+      schemaVersion: TRADE_SCHEDULE_AUTHORIZATIONS_SCHEMA_VERSION,
+      grantedAt: entries.length ? Math.min(...entries.map((entry) => entry.grantedAt)) : null,
+      jobs: Object.fromEntries(entries.map((entry) => [entry.jobId, entry]))
+    };
+  }
+  function createTradeScheduleAuthorizations(jobs = [], options = {}) {
+    const selected2 = [...jobs].filter((job) => job?.enabled === true && job?.armed === true && job?.schedule?.type !== "manual").sort((left, right) => String(left.id).localeCompare(String(right.id)));
+    if (!selected2.length) throw new Error("At least one armed Trade Job is required");
+    if (selected2.length > TRADE_SCHEDULE_AUTHORIZATION_JOB_LIMIT) {
+      throw new Error(`At most ${TRADE_SCHEDULE_AUTHORIZATION_JOB_LIMIT} armed Trade Jobs are allowed`);
+    }
+    const now = Math.max(0, Number(options.now ?? Date.now()));
+    return normalizeTradeScheduleAuthorizations({
+      schemaVersion: TRADE_SCHEDULE_AUTHORIZATIONS_SCHEMA_VERSION,
+      jobs: Object.fromEntries(selected2.map((job) => [
+        job.id,
+        createTradeScheduleAuthorization(job, { now })
+      ]))
+    }, selected2, { now });
+  }
+  function derivedTradeScheduleAuthorization(authorizations = {}) {
+    const entries = Object.values(authorizations.jobs || {});
+    return entries.length === 1 ? entries[0] : null;
+  }
+  function inspectTradeScheduleAuthorization(snapshot = {}, job = null, options = {}) {
+    const authorizations = normalizeTradeScheduleAuthorizations(snapshot.authorizations, snapshot.jobs || [], {
+      ...options,
+      legacyAuthorization: snapshot.authorization
+    });
+    const selected2 = job || (snapshot.jobs || []).find((entry) => authorizations.jobs?.[entry.id]);
+    const authorization = selected2 ? authorizations.jobs?.[selected2.id] || null : null;
+    if (!authorization) return { ready: false, reason: "schedule-authorization-missing-or-expired", authorization: null };
+    if (!selected2 || selected2.id !== authorization.jobId) {
+      return { ready: false, reason: "schedule-authorization-job-mismatch", authorization };
+    }
+    return { ready: true, reason: null, authorization };
+  }
+
+  // src/trade/guarded-scheduled-job.js
+  function inspectGuardedJob(job, snapshot, options) {
     if (job.type === "listing") {
       const inspected = inspectGuardedScheduledListingJob(job, {
         scheduledTransferRepriceEnabled: options.scheduledTransferRepriceEnabled === true
       });
       const reason = inspected.reason;
-      gate = {
+      return {
         ready: reason === null,
         reason,
         job,
         requiredText: reason === null ? inspected.requiredText || GUARDED_SCHEDULE_CONFIRMATION : null
       };
-    } else if (job.type === "buy") {
+    }
+    if (job.type === "buy") {
       if (options.scheduledBuyEnabled !== true) {
-        gate = { ready: false, reason: "scheduled-buy-validation-gate-disabled", job, requiredText: null };
-      } else {
-        gate = inspectScheduledBuyValidationJob(job, {
-          minimumRetainedCoins: options.minimumRetainedCoins ?? snapshot.safety?.minimumRetainedCoins,
-          now: options.now
-        });
+        return { ready: false, reason: "scheduled-buy-validation-gate-disabled", job, requiredText: null };
       }
-    } else {
-      gate = { ready: false, reason: "validation-gate-job-type-unsupported", job, requiredText: null };
+      return inspectScheduledBuyValidationJob(job, {
+        minimumRetainedCoins: options.minimumRetainedCoins ?? snapshot.safety?.minimumRetainedCoins,
+        now: options.now
+      });
     }
-    const runtime = snapshot.runtimes?.[job.id];
-    if (gate.ready && runtime && runtime.nextRunAt === null) {
-      return { ready: false, reason: "validation-gate-no-pending-run", job: null, gate, requiredText: null };
+    return { ready: false, reason: "validation-gate-job-type-unsupported", job, requiredText: null };
+  }
+  function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
+    const armed = (snapshot.jobs || []).filter((job) => job.enabled === true && job.armed === true && job.schedule?.type !== "manual");
+    if (!armed.length || armed.length > TRADE_SCHEDULE_AUTHORIZATION_JOB_LIMIT) {
+      return {
+        ready: false,
+        reason: armed.length ? "validation-gate-armed-job-limit-exceeded" : "validation-gate-no-armed-job",
+        job: null,
+        jobs: [],
+        gate: null,
+        gates: [],
+        requiredText: null
+      };
     }
+    const gates = armed.map((job) => inspectGuardedJob(job, snapshot, options));
+    for (const gate of gates) {
+      const runtime = snapshot.runtimes?.[gate.job.id];
+      if (gate.ready && runtime && runtime.nextRunAt === null) {
+        return {
+          ready: false,
+          reason: "validation-gate-no-pending-run",
+          job: null,
+          jobs: [],
+          gate,
+          gates,
+          requiredText: null
+        };
+      }
+    }
+    const blocked2 = gates.find((gate) => gate.ready !== true);
+    if (blocked2) {
+      return {
+        ready: false,
+        reason: blocked2.reason || null,
+        job: null,
+        jobs: [],
+        gate: blocked2,
+        gates,
+        requiredText: null
+      };
+    }
+    const totalRuns = armed.reduce((total, job) => total + tradeScheduleAuthorizationRuns(job), 0);
+    const requiredText = armed.length === 1 ? gates[0].requiredText : `ENABLE ${armed.length} TRADE JOBS FOR ${totalRuns} RUNS`;
     return {
-      ready: gate.ready === true,
-      reason: gate.reason || null,
-      job: gate.ready ? job : null,
-      gate,
-      requiredText: gate.ready ? gate.requiredText : null
+      ready: true,
+      reason: null,
+      job: armed.length === 1 ? armed[0] : null,
+      jobs: armed,
+      gate: armed.length === 1 ? gates[0] : null,
+      gates,
+      totalRuns,
+      requiredText
     };
   }
   function summarizeGuardedScheduledTradeSelection(snapshot = {}, options = {}) {
@@ -13602,6 +13801,9 @@
       reason: selected2.reason || null,
       jobId: job?.id ? String(job.id) : null,
       jobType: job?.type ? String(job.type) : null,
+      jobIds: (selected2.jobs || []).map((entry) => String(entry.id)),
+      jobTypes: (selected2.jobs || []).map((entry) => String(entry.type)),
+      totalRuns: Number(selected2.totalRuns || 0),
       requiredText: selected2.requiredText || null
     };
   }
@@ -13884,6 +14086,9 @@
     if (job.armed !== true) return result("disabled", "not-armed");
     if (context.circuitAllowed === false) return result("blocked", context.circuitReason || "trade-circuit-open");
     if (context.liveExecutionEnabled === false) return result("blocked", "live-execution-disabled");
+    if (context.tradeRecoveryReviewRequired === true) {
+      return result("blocked", context.tradeRecoveryReason || "trade-recovery-review-required");
+    }
     if (runtime.nextRunAt === null) return result("completed", null);
     if (runtime.nextRunAt > now) return result("waiting-time", null);
     if (context.sessionReady !== true) return result("waiting-session", context.sessionReason || "ea-session-unavailable");
@@ -13930,10 +14135,13 @@
   function selectFairTradeCandidate(input2 = [], dispatch = {}) {
     const candidates = sortedCandidates(input2).filter((candidate) => candidate.decision?.action === "run");
     if (candidates.length < 2) return candidates[0] || null;
+    const firstDueAt = scheduledAt(candidates[0]);
+    const equallyDue = candidates.filter((candidate) => scheduledAt(candidate) === firstDueAt);
+    if (equallyDue.length < 2) return candidates[0];
     const lastType = ["buy", "listing"].includes(dispatch.lastJobType) ? dispatch.lastJobType : null;
-    if (!lastType) return candidates[0];
-    const alternate = candidates.find((candidate) => candidate.job?.type !== lastType);
-    return alternate || candidates[0];
+    if (!lastType) return equallyDue[0];
+    const alternate = equallyDue.find((candidate) => candidate.job?.type !== lastType);
+    return alternate || equallyDue[0];
   }
   function normalizeTradeDispatchState(input2 = {}) {
     const lastJobType = ["buy", "listing"].includes(input2.lastJobType) ? input2.lastJobType : null;
@@ -13958,91 +14166,8 @@
     });
   }
 
-  // src/trade/schedule-authorization.js
-  var TRADE_SCHEDULE_AUTHORIZATION_SCHEMA_VERSION = 1;
-  var TRADE_RECURRING_AUTHORIZATION_RUNS = 2;
-  function stableHash2(value) {
-    let hash = 2166136261;
-    const text = String(value || "");
-    for (let index = 0; index < text.length; index += 1) {
-      hash ^= text.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-    return (hash >>> 0).toString(16).padStart(8, "0");
-  }
-  function tradeScheduleFingerprint(job = {}) {
-    return stableHash2(JSON.stringify({
-      id: String(job.id || ""),
-      type: String(job.type || ""),
-      schedule: job.schedule || null,
-      misfirePolicy: job.misfirePolicy || null,
-      policy: job.policy || null
-    }));
-  }
-  function tradeScheduleAuthorizationRuns(job = {}) {
-    return ["daily", "interval"].includes(job.schedule?.type) ? TRADE_RECURRING_AUTHORIZATION_RUNS : 1;
-  }
-  function authorizationExpiry(job, now, runs) {
-    const graceMs = job.misfirePolicy?.type === "grace-window" ? Math.min(15, Math.max(1, Number(job.misfirePolicy.graceMinutes || 15))) * 6e4 : 15e3;
-    if (job.schedule?.type === "once") return Number(job.schedule.runAt) + graceMs;
-    if (job.schedule?.type === "window") return Number(job.schedule.endAt) + graceMs;
-    if (job.schedule?.type === "interval") {
-      const periodMs = Math.max(1, Number(job.schedule.everyMinutes || 60)) * 6e4;
-      return now + Math.min(48 * 60 * 6e4, periodMs * runs + graceMs + 15 * 6e4);
-    }
-    if (job.schedule?.type === "daily") return now + 26 * 60 * 6e4;
-    return now;
-  }
-  function createTradeScheduleAuthorization(job = {}, options = {}) {
-    const now = Math.max(0, Number(options.now ?? Date.now()));
-    const totalRuns = tradeScheduleAuthorizationRuns(job);
-    return {
-      schemaVersion: TRADE_SCHEDULE_AUTHORIZATION_SCHEMA_VERSION,
-      jobId: String(job.id || ""),
-      jobFingerprint: tradeScheduleFingerprint(job),
-      scheduleType: String(job.schedule?.type || ""),
-      grantedAt: now,
-      expiresAt: authorizationExpiry(job, now, totalRuns),
-      totalRuns,
-      remainingRuns: totalRuns,
-      lastRunId: null,
-      lastConsumedAt: null
-    };
-  }
-  function normalizeTradeScheduleAuthorization(input2, jobs = [], options = {}) {
-    if (!input2 || typeof input2 !== "object") return null;
-    const now = Math.max(0, Number(options.now ?? Date.now()));
-    const job = jobs.find((entry) => String(entry.id) === String(input2.jobId || ""));
-    const totalRuns = Math.max(1, Math.floor(Number(input2.totalRuns || 0)));
-    const remainingRuns = Math.min(totalRuns, Math.max(0, Math.floor(Number(input2.remainingRuns || 0))));
-    const expiresAt = Math.max(0, Number(input2.expiresAt || 0));
-    if (!job || job.armed !== true || remainingRuns < 1 || expiresAt <= now) return null;
-    if (String(input2.jobFingerprint || "") !== tradeScheduleFingerprint(job)) return null;
-    return {
-      schemaVersion: TRADE_SCHEDULE_AUTHORIZATION_SCHEMA_VERSION,
-      jobId: String(job.id),
-      jobFingerprint: String(input2.jobFingerprint),
-      scheduleType: String(job.schedule?.type || ""),
-      grantedAt: Math.max(0, Number(input2.grantedAt || 0)),
-      expiresAt,
-      totalRuns,
-      remainingRuns,
-      lastRunId: input2.lastRunId ? String(input2.lastRunId) : null,
-      lastConsumedAt: input2.lastConsumedAt === null || input2.lastConsumedAt === void 0 ? null : Math.max(0, Number(input2.lastConsumedAt || 0))
-    };
-  }
-  function inspectTradeScheduleAuthorization(snapshot = {}, job = null, options = {}) {
-    const selected2 = job || (snapshot.jobs || []).find((entry) => entry.id === snapshot.authorization?.jobId);
-    const authorization = normalizeTradeScheduleAuthorization(snapshot.authorization, snapshot.jobs || [], options);
-    if (!authorization) return { ready: false, reason: "schedule-authorization-missing-or-expired", authorization: null };
-    if (!selected2 || selected2.id !== authorization.jobId) {
-      return { ready: false, reason: "schedule-authorization-job-mismatch", authorization };
-    }
-    return { ready: true, reason: null, authorization };
-  }
-
   // src/trade/job-store.js
-  var TRADE_JOB_STORE_SCHEMA_VERSION = 4;
+  var TRADE_JOB_STORE_SCHEMA_VERSION = 5;
   var TRADE_HISTORY_LIMIT = 100;
   var TRADE_METRICS_SCHEMA_VERSION = 1;
   var TRADE_METRICS_REASON_LIMIT = 20;
@@ -14184,7 +14309,15 @@
         updatedAt: at
       });
     }
-    return { ...snapshot, paused: true, liveExecutionEnabled: false, authorization: null, jobs, runtimes };
+    return {
+      ...snapshot,
+      paused: true,
+      liveExecutionEnabled: false,
+      authorization: null,
+      authorizations: normalizeTradeScheduleAuthorizations(null, jobs, { now: at }),
+      jobs,
+      runtimes
+    };
   }
   function normalizeTradeJobStore(input2 = {}, options = {}) {
     const now = Math.max(0, finiteNumber11(options.now, Date.now()));
@@ -14212,6 +14345,10 @@
     }
     const history = (Array.isArray(input2.history) ? input2.history : []).slice(-TRADE_HISTORY_LIMIT).map(clone9);
     const metrics = input2.metrics?.schemaVersion === TRADE_METRICS_SCHEMA_VERSION ? normalizeTradeMetrics(input2.metrics) : metricsFromHistory(history, now);
+    const authorizations = normalizeTradeScheduleAuthorizations(input2.authorizations, jobs, {
+      now,
+      legacyAuthorization: input2.authorization
+    });
     return {
       schemaVersion: TRADE_JOB_STORE_SCHEMA_VERSION,
       paused: input2.paused !== false,
@@ -14224,7 +14361,8 @@
       history,
       metrics,
       dispatch: normalizeTradeDispatchState(input2.dispatch),
-      authorization: normalizeTradeScheduleAuthorization(input2.authorization, jobs, { now }),
+      authorizations,
+      authorization: derivedTradeScheduleAuthorization(authorizations),
       updatedAt: Math.max(0, finiteNumber11(input2.updatedAt, now))
     };
   }
@@ -14245,7 +14383,7 @@
     }
     function upsert(input2, normalizeOptions = {}) {
       let snapshot = read();
-      const relockedForChange = snapshot.liveExecutionEnabled === true || snapshot.authorization !== null;
+      const relockedForChange = snapshot.liveExecutionEnabled === true || Object.keys(snapshot.authorizations?.jobs || {}).length > 0;
       if (relockedForChange) snapshot = relockedSnapshot(snapshot, Number(now()));
       const existing = snapshot.jobs.find((job2) => job2.id === String(input2?.id || ""));
       const job = normalizeTradeJob({
@@ -14266,7 +14404,7 @@
     function remove(jobId) {
       const id = String(jobId || "");
       const current = read();
-      const snapshot = current.liveExecutionEnabled === true || current.authorization !== null ? relockedSnapshot(current, Number(now())) : current;
+      const snapshot = current.liveExecutionEnabled === true || Object.keys(current.authorizations?.jobs || {}).length > 0 ? relockedSnapshot(current, Number(now())) : current;
       const runtimes = { ...snapshot.runtimes };
       delete runtimes[id];
       return write({ ...snapshot, jobs: snapshot.jobs.filter((job) => job.id !== id), runtimes });
@@ -14314,25 +14452,32 @@
     function setLiveExecutionEnabled(value) {
       return write({ ...read(), liveExecutionEnabled: value === true });
     }
-    function authorize(jobId) {
+    function authorize(jobIds) {
       const snapshot = read();
-      const id = String(jobId || "");
-      const job = snapshot.jobs.find((entry) => entry.id === id);
-      if (!job) throw new Error(`Trade Job ${id} does not exist`);
       const armed = snapshot.jobs.filter((entry) => entry.enabled === true && entry.armed === true && entry.schedule?.type !== "manual");
-      if (armed.length !== 1 || armed[0].id !== id) throw new Error("Exactly one armed Trade Job is required");
+      const requestedIds = (Array.isArray(jobIds) ? jobIds : [jobIds]).map((entry) => String(entry || "")).sort();
+      const armedIds = armed.map((entry) => entry.id).sort();
+      if (!armed.length || requestedIds.length !== armedIds.length || requestedIds.some((id, index) => id !== armedIds[index])) {
+        throw new Error("Authorized Trade Jobs must exactly match all armed Trade Jobs");
+      }
+      const authorizations = createTradeScheduleAuthorizations(armed, { now: now() });
       return write({
         ...snapshot,
         paused: false,
         liveExecutionEnabled: true,
-        authorization: createTradeScheduleAuthorization(job, { now: now() })
+        authorizations,
+        authorization: derivedTradeScheduleAuthorization(authorizations)
       });
     }
     function consumeAuthorization(jobId, runId) {
       const snapshot = read();
       const id = String(jobId || "");
-      const authorization = normalizeTradeScheduleAuthorization(snapshot.authorization, snapshot.jobs, { now: now() });
-      if (!authorization || authorization.jobId !== id) {
+      const authorizations = normalizeTradeScheduleAuthorizations(snapshot.authorizations, snapshot.jobs, {
+        now: now(),
+        legacyAuthorization: snapshot.authorization
+      });
+      const authorization = normalizeTradeScheduleAuthorization(authorizations.jobs?.[id], snapshot.jobs, { now: now() });
+      if (!authorization) {
         return { consumed: false, reason: "schedule-authorization-missing-or-expired", snapshot: relock() };
       }
       if (authorization.lastRunId && authorization.lastRunId === String(runId || "")) {
@@ -14349,14 +14494,63 @@
         lastRunId: String(runId || ""),
         lastConsumedAt: Number(now())
       };
-      if (remainingRuns < 1) {
+      const nextJobs = { ...authorizations.jobs };
+      if (remainingRuns < 1) delete nextJobs[id];
+      else nextJobs[id] = next;
+      const nextAuthorizations = normalizeTradeScheduleAuthorizations({
+        ...authorizations,
+        jobs: nextJobs
+      }, snapshot.jobs, { now: now() });
+      if (remainingRuns < 1 && Object.keys(nextAuthorizations.jobs).length < 1) {
         return { consumed: true, remainingRuns: 0, snapshot: write(relockedSnapshot(snapshot, Number(now()))) };
       }
-      return { consumed: true, remainingRuns, snapshot: write({ ...snapshot, authorization: next }) };
+      const jobs = remainingRuns < 1 ? snapshot.jobs.map((job) => job.id === id ? { ...job, armed: false, updatedAt: Number(now()) } : job) : snapshot.jobs;
+      return {
+        consumed: true,
+        remainingRuns,
+        snapshot: write({
+          ...snapshot,
+          jobs,
+          authorizations: nextAuthorizations,
+          authorization: derivedTradeScheduleAuthorization(nextAuthorizations)
+        })
+      };
+    }
+    function revokeAuthorization(jobId, reason = "schedule-authorization-revoked") {
+      const snapshot = read();
+      const id = String(jobId || "");
+      const authorizations = normalizeTradeScheduleAuthorizations(snapshot.authorizations, snapshot.jobs, {
+        now: now(),
+        legacyAuthorization: snapshot.authorization
+      });
+      const nextJobs = { ...authorizations.jobs };
+      delete nextJobs[id];
+      const nextAuthorizations = normalizeTradeScheduleAuthorizations({ ...authorizations, jobs: nextJobs }, snapshot.jobs, { now: now() });
+      if (!Object.keys(nextAuthorizations.jobs).length) return relock();
+      const at = Number(now());
+      const jobs = snapshot.jobs.map((job) => job.id === id ? { ...job, armed: false, updatedAt: at } : job);
+      const runtimes = { ...snapshot.runtimes };
+      if (runtimes[id]) {
+        runtimes[id] = normalizeTradeJobRuntime({
+          ...runtimes[id],
+          status: "disabled",
+          reason: String(reason || "schedule-authorization-revoked"),
+          updatedAt: at
+        });
+      }
+      return write({
+        ...snapshot,
+        jobs,
+        runtimes,
+        authorizations: nextAuthorizations,
+        authorization: derivedTradeScheduleAuthorization(nextAuthorizations)
+      });
     }
     function setMinimumRetainedCoins(value) {
       let snapshot = read();
-      if (snapshot.liveExecutionEnabled === true || snapshot.authorization !== null) snapshot = relockedSnapshot(snapshot, Number(now()));
+      if (snapshot.liveExecutionEnabled === true || Object.keys(snapshot.authorizations?.jobs || {}).length > 0) {
+        snapshot = relockedSnapshot(snapshot, Number(now()));
+      }
       const minimumRetainedCoins = nullableNonNegativeInteger(value);
       if (value !== null && value !== void 0 && value !== "" && minimumRetainedCoins === null) {
         throw new TypeError("Minimum retained coins must be a non-negative integer or null");
@@ -14378,6 +14572,7 @@
       setLiveExecutionEnabled,
       authorize,
       consumeAuthorization,
+      revokeAuthorization,
       setMinimumRetainedCoins,
       relock
     });
@@ -14441,6 +14636,15 @@
       const at = Number(now());
       const before = inspect();
       if (before.active && !before.owned) return { acquired: false, reason: "lease-held", ...before };
+      if (before.expired) {
+        return {
+          acquired: false,
+          reason: "expired-lease-reconciliation-required",
+          recoveryRequired: true,
+          previousLease: before.lease,
+          ...before
+        };
+      }
       const lease = normalizeLease({
         ownerId,
         runId: input2.runId,
@@ -14457,8 +14661,8 @@
         acquired,
         reason: acquired ? null : "lease-race-lost",
         lease: leaseSnapshot(confirmed),
-        recoveryRequired: acquired && before.expired,
-        previousLease: before.expired ? before.lease : null
+        recoveryRequired: false,
+        previousLease: null
       };
     }
     function heartbeat(runId) {
@@ -14536,6 +14740,25 @@
     };
   }
 
+  // src/trade/expired-lease-validation-policy.js
+  function requireExpiredLeaseValidationJob(snapshot = {}) {
+    const armed = (snapshot.jobs || []).filter((job2) => job2.enabled === true && job2.armed === true && job2.schedule?.type !== "manual");
+    if (armed.length !== 1) throw new Error("Exactly one armed Trade Job is required");
+    const job = armed[0];
+    if (job.type !== "listing") throw new Error("Expired Lease validation requires a Listing Job");
+    if (job.schedule?.type !== "once") throw new Error("Expired Lease validation requires a once Job");
+    if (!Array.isArray(job.policy?.sources) || job.policy.sources.length !== 1 || job.policy.sources[0] !== "club") {
+      throw new Error("Expired Lease validation requires a Club-only Job");
+    }
+    if (Number(job.policy?.maxListings) !== 1) {
+      throw new Error("Expired Lease validation requires maxListings=1");
+    }
+    if (job.policy?.expiredPolicy !== "skip") {
+      throw new Error("Expired Lease validation requires expiredPolicy=skip");
+    }
+    return job;
+  }
+
   // src/trade/operation-coordinator.js
   var WRITE_OPERATIONS = /* @__PURE__ */ new Set(["loop", "batch-open", "trade-listing", "trade-buy", "dynamic-sbc-live-scan"]);
   function finiteNumber13(value, fallback = 0) {
@@ -14611,10 +14834,10 @@
     const getContext = typeof options.getContext === "function" ? options.getContext : () => ({});
     const createRunId = typeof options.createRunId === "function" ? options.createRunId : () => `trade-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     let ticking = false;
-    function schedulerContext(snapshot, extra = {}) {
+    function schedulerContext(snapshot, job = null, extra = {}) {
       const circuit = options.circuitBreaker?.availability?.();
       return {
-        ...getContext(),
+        ...getContext(job, snapshot),
         ...extra,
         now: Number(now()),
         liveExecutionEnabled: snapshot.liveExecutionEnabled === true,
@@ -14652,22 +14875,14 @@
     async function execute(job, runtime, context) {
       const startedAt = Number(now());
       const runId = createRunId();
-      const acquired = lease.acquire({ runId, jobId: job.id });
-      if (!acquired.acquired) {
-        const waiting = normalizeTradeJobRuntime({
-          ...runtime,
-          status: "waiting-operation",
-          reason: acquired.reason || "lease-held",
-          updatedAt: startedAt
-        });
-        store.updateRuntime(job.id, waiting);
-        return { status: "waiting-operation", jobId: job.id, runtime: waiting };
-      }
+      let acquired = lease.acquire({ runId, jobId: job.id });
       if (acquired.recoveryRequired) {
         const recovery = await options.reconcileExpiredLease?.(acquired.previousLease);
-        if (recovery?.status !== "reconciled") {
+        const cleared = recovery?.status === "reconciled" && lease.clearExpired?.(acquired.previousLease?.runId) === true;
+        if (cleared) acquired = lease.acquire({ runId, jobId: job.id });
+        else {
           const finishedAt = Number(now());
-          const reason = "expired-lease-reconciliation-required";
+          const reason = recovery?.status === "reconciled" ? "expired-lease-clear-failed" : "expired-lease-reconciliation-required";
           const receipt2 = createTradeRunReceipt({
             runId,
             jobId: job.id,
@@ -14680,6 +14895,7 @@
             receipts: [{
               status: "blocked",
               reason,
+              recoveryReason: recovery?.reason || null,
               previousLease: acquired.previousLease ? {
                 runId: acquired.previousLease.runId,
                 jobId: acquired.previousLease.jobId,
@@ -14701,9 +14917,18 @@
           });
           store.updateRuntime(job.id, blocked2);
           store.addHistory(receipt2);
-          lease.release(runId);
           return { status: "blocked", jobId: job.id, receipt: receipt2, runtime: blocked2, previousLease: acquired.previousLease };
         }
+      }
+      if (!acquired.acquired) {
+        const waiting = normalizeTradeJobRuntime({
+          ...runtime,
+          status: "waiting-operation",
+          reason: acquired.reason || "lease-held",
+          updatedAt: startedAt
+        });
+        store.updateRuntime(job.id, waiting);
+        return { status: "waiting-operation", jobId: job.id, runtime: waiting };
       }
       store.updateRuntime(job.id, {
         ...runtime,
@@ -14772,7 +14997,6 @@
       try {
         const snapshot = store.read();
         if (snapshot.paused) return { status: "paused" };
-        const context = schedulerContext(snapshot, extraContext);
         const jobs = [...snapshot.jobs].sort((left, right) => {
           const leftAt = snapshot.runtimes[left.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
           const rightAt = snapshot.runtimes[right.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
@@ -14780,6 +15004,7 @@
         });
         const runnable = [];
         for (const job of jobs) {
+          const context = schedulerContext(snapshot, job, extraContext);
           const runtime = snapshot.runtimes[job.id] || {};
           const decision = evaluateTradeJob(job, runtime, context);
           store.updateRuntime(job.id, decision.runtime);
@@ -14798,10 +15023,10 @@
             const finalized = persistAdvancedRuntime(job, advanced, "missed", decision.reason);
             return { status: "missed", jobId: job.id, receipt, runtime: finalized };
           }
-          if (decision.action === "run") runnable.push({ job, runtime, decision });
+          if (decision.action === "run") runnable.push({ job, runtime, decision, context });
         }
         const selected2 = selectFairTradeCandidate(runnable, snapshot.dispatch);
-        if (selected2) return execute(selected2.job, selected2.runtime, context);
+        if (selected2) return execute(selected2.job, selected2.runtime, selected2.context);
         return { status: "idle" };
       } finally {
         ticking = false;
@@ -14940,10 +15165,17 @@
   function createTradeSchedulerTickLock(options = {}) {
     const lockManager = options.lockManager;
     const name = String(options.name || TRADE_SCHEDULER_WEB_LOCK);
+    let running = false;
     async function run(task) {
       if (typeof task !== "function") throw new TypeError("task is required");
-      if (typeof lockManager?.request !== "function") return task();
-      return lockManager.request(name, { mode: "exclusive", ifAvailable: true }, (lock) => lock ? task() : { status: "busy", reason: "browser-lock-held" });
+      if (running) return { status: "busy", reason: "local-tick-active" };
+      running = true;
+      try {
+        if (typeof lockManager?.request !== "function") return await task();
+        return await lockManager.request(name, { mode: "exclusive", ifAvailable: true }, (lock) => lock ? task() : { status: "busy", reason: "browser-lock-held" });
+      } finally {
+        running = false;
+      }
     }
     function inspect() {
       return { name, supported: typeof lockManager?.request === "function" };
@@ -25212,6 +25444,7 @@
     let refreshHandle = null;
     let disposed = false;
     let snapshotSignature = JSON.stringify(snapshot);
+    let recoverySignature = JSON.stringify(options.getRecovery?.() || {});
     const overlay = styles2(dom.create("div"), {
       position: "fixed",
       inset: "0",
@@ -25246,7 +25479,8 @@
     const summaryTab = button5(dom, "Summary", mode, "bronze-loop-trade-summary-tab");
     const providersTab = button5(dom, "Providers", mode, "bronze-loop-trade-providers-tab");
     const historyTab = button5(dom, "History", mode, "bronze-loop-trade-history-tab");
-    tabs.append(jobsTab, summaryTab, providersTab, historyTab);
+    const recoveryTab = button5(dom, "Recovery", mode, "bronze-loop-trade-recovery-tab");
+    tabs.append(jobsTab, summaryTab, providersTab, historyTab, recoveryTab);
     const banner = styles2(dom.create("div"), { padding: "9px", border: "1px solid #47576b", background: "#1d2229", marginBottom: "10px", fontSize: "12px" });
     const content = dom.create("div");
     const status = styles2(dom.create("div"), { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
@@ -25254,6 +25488,7 @@
     function refreshSnapshot() {
       snapshot = clone14(options.getSnapshot?.() || snapshot || {});
       snapshotSignature = JSON.stringify(snapshot);
+      recoverySignature = JSON.stringify(options.getRecovery?.() || {});
     }
     function setStatus(value) {
       statusText = String(value || "");
@@ -25273,8 +25508,9 @@
       const circuitState = circuit?.circuit?.state || "closed";
       const scheduler = snapshot.paused ? "paused" : "running";
       const execution = snapshot.liveExecutionEnabled ? "enabled" : "locked";
+      const recovery = options.getRecovery?.() || {};
       const budgetText = requestBudget ? ` | Requests: ${Number(requestBudget.remaining || 0)}/${Number(requestBudget.limit || 0)} available | Base guarded reserve: ${requestBudget.runCapacity?.ready === false ? "cooldown" : "ready"}` : "";
-      banner.textContent = `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}${budgetText}`;
+      banner.textContent = recovery.reviewRequired === true ? `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState} | Recovery review required` : `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}${budgetText}`;
       banner.style.color = circuitState === "open" ? "#e3a7a7" : "#b8c3d2";
     }
     function checkboxLabel(text, control2) {
@@ -25578,8 +25814,11 @@
       });
       if (snapshot.liveExecutionEnabled === true) {
         const gateState = dom.create("span");
-        const authorization = snapshot.authorization;
-        gateState.textContent = `Guarded schedule enabled${guarded.job ? `: ${guarded.job.name}` : ""}${authorization ? ` | ${authorization.remainingRuns}/${authorization.totalRuns} Run(s) left | expires ${new Date(Number(authorization.expiresAt)).toLocaleString()}` : ""}`;
+        const authorizations = Object.values(snapshot.authorizations?.jobs || (snapshot.authorization ? { legacy: snapshot.authorization } : {}));
+        const remainingRuns = authorizations.reduce((total, entry) => total + Number(entry.remainingRuns || 0), 0);
+        const totalRuns = authorizations.reduce((total, entry) => total + Number(entry.totalRuns || 0), 0);
+        const latestExpiry = authorizations.length ? Math.max(...authorizations.map((entry) => Number(entry.expiresAt || 0))) : null;
+        gateState.textContent = `Guarded schedule enabled: ${authorizations.length} Job(s) | ${remainingRuns}/${totalRuns} Run(s) left${latestExpiry ? ` | latest expiry ${new Date(latestExpiry).toLocaleString()}` : ""}`;
         styles2(gateState, { color: "#e3c98d", flex: "1 1 260px", fontSize: "12px" });
         const disableGate = button5(dom, "Disable scheduling", mode, "bronze-loop-trade-disable-guarded-schedule");
         disableGate.addEventListener("click", () => {
@@ -25603,9 +25842,13 @@
           }
           enableGate.disabled = true;
           try {
-            await options.onEnableGuardedScheduling?.({ confirmationText: gateInput.value, jobId: guarded.job?.id });
+            const jobIds = (guarded.jobs || []).map((job) => job.id);
+            await options.onEnableGuardedScheduling?.({
+              confirmationText: gateInput.value,
+              ...jobIds.length > 1 ? { jobIds } : { jobId: guarded.job?.id }
+            });
             refreshSnapshot();
-            setStatus(`Guarded schedule enabled for ${guarded.job?.name || guarded.job?.id}`);
+            setStatus(`Guarded schedule enabled for ${jobIds.length} Job(s)`);
             render();
           } catch (error) {
             enableGate.disabled = false;
@@ -25747,6 +25990,96 @@
         });
         pages.append(previous, count, next);
         content.appendChild(pages);
+      }
+    }
+    function renderRecovery() {
+      content.textContent = "";
+      const recovery = options.getRecovery?.() || {};
+      const reviews = Array.isArray(recovery.reviews) ? recovery.reviews : [];
+      const intro = styles2(dom.create("div"), {
+        color: reviews.length ? "#e3a7a7" : "#a9d7b5",
+        fontSize: "12px",
+        marginBottom: "12px",
+        lineHeight: "1.45"
+      });
+      intro.textContent = reviews.length ? "A mutation boundary is unresolved. Scheduler execution remains locked until the EA state is checked and each Journal is acknowledged." : "No unresolved Trade Journal requires acknowledgement.";
+      content.appendChild(intro);
+      const operation = recovery.operation || {};
+      const lease = recovery.lease || {};
+      const canAcknowledge = recovery.scheduler?.paused === true && recovery.scheduler?.liveExecutionEnabled !== true && !operation.active && operation.external?.busy !== true && lease.active !== true && lease.owned !== true;
+      const gate = styles2(dom.create("div"), {
+        color: canAcknowledge ? "#a9d7b5" : "#e3c39d",
+        fontSize: "12px",
+        marginBottom: "12px"
+      });
+      gate.textContent = canAcknowledge ? "Acknowledgement gate: ready" : "Acknowledgement gate: Scheduler must be locked, Runner idle, and Trade Lease inactive";
+      content.appendChild(gate);
+      for (const review of reviews) {
+        const card = styles2(dom.create("div"), {
+          border: "1px solid #714f55",
+          background: "#241d22",
+          padding: "10px",
+          marginBottom: "10px"
+        });
+        const heading2 = dom.create("div");
+        heading2.textContent = `${String(review.journalType || "trade").toUpperCase()} Recovery | Run ${review.runId}`;
+        styles2(heading2, { fontWeight: "700", color: "#f1c1c1", overflowWrap: "anywhere" });
+        const details = dom.create("div");
+        details.textContent = `Job ${review.jobId || "unknown"} | Status ${review.status} | Phase ${review.phase} | Mutation items ${review.mutationItemCount} | Uncertain items ${review.uncertainItemCount}`;
+        styles2(details, { color: "#c5aeb2", fontSize: "11px", margin: "6px 0", overflowWrap: "anywhere", lineHeight: "1.45" });
+        const hash = dom.create("div");
+        hash.textContent = `Evidence: ${review.evidenceHash}`;
+        styles2(hash, { color: "#9fb2c9", fontSize: "11px", overflowWrap: "anywhere" });
+        const confirmation = input(dom, "text", "", mode, `bronze-loop-trade-recovery-confirm-${review.journalType}`);
+        confirmation.placeholder = review.requiredText || "";
+        const reason = input(dom, "text", "", mode, `bronze-loop-trade-recovery-reason-${review.journalType}`);
+        reason.placeholder = "Reason, at least 8 characters";
+        const acknowledge = button5(dom, "Acknowledge after EA check", mode, `bronze-loop-trade-recovery-ack-${review.journalType}`);
+        acknowledge.disabled = !canAcknowledge;
+        acknowledge.addEventListener("click", () => {
+          try {
+            options.onAcknowledgeRecovery?.({
+              journalType: review.journalType,
+              runId: review.runId,
+              evidenceHash: review.evidenceHash,
+              confirmationText: confirmation.value,
+              reason: reason.value
+            });
+            setStatus(`${String(review.journalType).toUpperCase()} recovery acknowledged`);
+            render();
+          } catch (error) {
+            setStatus(`Recovery acknowledgement failed: ${error?.message || error}`);
+          }
+        });
+        const form = styles2(dom.create("div"), {
+          display: "grid",
+          gridTemplateColumns: mode.mobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr) auto",
+          gap: "8px",
+          alignItems: "end",
+          marginTop: "9px"
+        });
+        form.append(field3(dom, "Exact confirmation", confirmation, mode), field3(dom, "Audit reason", reason, mode), acknowledge);
+        card.append(heading2, details, hash, form);
+        content.appendChild(card);
+      }
+      content.appendChild(section(dom, "Acknowledgement audit"));
+      const entries = Array.isArray(recovery.audit?.entries) ? [...recovery.audit.entries].reverse() : [];
+      if (!entries.length) {
+        const empty = dom.create("div");
+        empty.textContent = "No manual recovery acknowledgements recorded";
+        styles2(empty, { color: "#8795a8", padding: "8px 0" });
+        content.appendChild(empty);
+      } else {
+        for (const entry of entries) {
+          const row = styles2(dom.create("div"), {
+            borderBottom: "1px solid #35404e",
+            padding: "7px 0",
+            fontSize: "11px",
+            overflowWrap: "anywhere"
+          });
+          row.textContent = `${String(entry.journalType || "trade").toUpperCase()} | ${entry.runId} | ${new Date(Number(entry.acknowledgedAt || 0)).toLocaleString()} | ${entry.reason}`;
+          content.appendChild(row);
+        }
       }
     }
     function renderSummary() {
@@ -26013,11 +26346,13 @@
       summaryTab.style.background = view === "summary" ? "#315d9b" : "#222832";
       providersTab.style.background = view === "providers" ? "#315d9b" : "#222832";
       historyTab.style.background = view === "history" ? "#315d9b" : "#222832";
+      recoveryTab.style.background = view === "recovery" ? "#315d9b" : "#222832";
       if (editing) renderEditor();
       else if (view === "import") renderImport();
       else if (view === "summary") renderSummary();
       else if (view === "providers") renderProviders();
       else if (view === "history") renderHistory();
+      else if (view === "recovery") renderRecovery();
       else renderJobs();
       status.textContent = statusText;
     }
@@ -26039,11 +26374,14 @@
       }
       const next = clone14(options.getSnapshot?.() || snapshot || {});
       const nextSignature = JSON.stringify(next);
-      const changed = nextSignature !== snapshotSignature;
+      const nextRecoverySignature = JSON.stringify(options.getRecovery?.() || {});
+      const changed = nextSignature !== snapshotSignature || nextRecoverySignature !== recoverySignature;
       snapshot = next;
       snapshotSignature = nextSignature;
+      recoverySignature = nextRecoverySignature;
       renderBanner();
       if (!changed || editing || view === "import") return;
+      statusText = "";
       const scrollTop = Number(dialog.scrollTop || 0);
       render({ refresh: false });
       dialog.scrollTop = scrollTop;
@@ -26068,6 +26406,11 @@
       view = "history";
       render();
     });
+    recoveryTab.addEventListener("click", () => {
+      editing = null;
+      view = "recovery";
+      render();
+    });
     close.addEventListener("click", closeDialog);
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) closeDialog();
@@ -26075,7 +26418,7 @@
     dialog.append(heading, tabs, banner, content, status);
     overlay.appendChild(dialog);
     dom.appendToBody(overlay);
-    applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, summaryTab, providersTab, historyTab, close] });
+    applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, summaryTab, providersTab, historyTab, recoveryTab, close] });
     render();
     overlay.__disposeTradeSchedulerDialog = dispose;
     if (scheduleRefresh) refreshHandle = scheduleRefresh(refreshFromExternalState, refreshIntervalMs);
@@ -26266,7 +26609,7 @@
       const active = current?.status === "active";
       const mutationBoundaryCrossed = Boolean(current?.items.some((entry) => entry.mutationBoundaryCrossed));
       const uncertainMutation = Boolean(current?.items.some((entry) => entry.mutationBoundaryCrossed && !["listed", "failed"].includes(entry.status)));
-      const requiresReview = mutationBoundaryCrossed && (active || uncertainMutation);
+      const requiresReview = current?.status !== "acknowledged" && mutationBoundaryCrossed && (active || uncertainMutation);
       return {
         active,
         runId: current?.runId || null,
@@ -26276,100 +26619,432 @@
         reason: requiresReview ? "listing-journal-mutation-review-required" : null
       };
     }
-    return Object.freeze({ begin, checkpoint, finish, inspectRecovery, snapshot: read });
+    function acknowledge(input2 = {}) {
+      const current = read();
+      if (!current || current.runId !== String(input2.runId || "")) return current;
+      if (typeof input2.evidenceHashFor !== "function" || input2.evidenceHashFor(current) !== String(input2.evidenceHash || "")) return current;
+      const at = Math.max(0, safeNumber3(input2.at) ?? Number(now()));
+      return write({
+        ...current,
+        status: "acknowledged",
+        phase: "manual-recovery-acknowledged",
+        updatedAt: at,
+        events: [...current.events, safeEvent3({
+          at,
+          phase: "manual-recovery-acknowledged",
+          status: "acknowledged",
+          reason: input2.reason
+        })].slice(-TRADE_LISTING_JOURNAL_EVENT_LIMIT)
+      });
+    }
+    return Object.freeze({ acknowledge, begin, checkpoint, finish, inspectRecovery, snapshot: read });
   }
 
-  // src/trade/buy-lease-recovery.js
-  function journalForRun(journals, runId) {
-    return (Array.isArray(journals) ? journals : []).map((journal) => ({ journal, snapshot: journal?.snapshot?.() })).find((entry) => entry.snapshot?.runId === runId) || null;
+  // src/trade/recovery-audit.js
+  var TRADE_RECOVERY_AUDIT_SCHEMA_VERSION = 1;
+  var TRADE_RECOVERY_AUDIT_LIMIT = 20;
+  var TERMINAL_HISTORY_STATUSES = /* @__PURE__ */ new Set([
+    "completed",
+    "blocked",
+    "missed",
+    "stopped",
+    "failed",
+    "error",
+    "ambiguous"
+  ]);
+  function clone16(value) {
+    return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
   }
-  function terminalItemStatus(kind, status) {
-    if (kind === "listing") return status === "listed";
-    return status === "purchased";
+  function stableHash3(value) {
+    let hash = 2166136261;
+    const text = String(value || "");
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
   }
-  function recoveredReceipt(previous, journal, finishedAt, reason) {
-    const kind = journal?.source ? "listing" : "buy";
-    const items = journal?.items || [];
-    const succeeded = items.filter((entry) => terminalItemStatus(kind, entry.status)).length;
-    const failed = items.filter((entry) => ["failed", "blocked", "ambiguous"].includes(entry.status)).length;
-    const requested = Math.max(Number(journal?.requested || 0), items.length);
+  function evidence(journalType, journal = {}) {
+    const items = (Array.isArray(journal.items) ? journal.items : []).map((item) => ({
+      index: Number(item.index || 0),
+      status: String(item.status || ""),
+      mutationBoundaryCrossed: item.mutationBoundaryCrossed === true,
+      item: item.item ? {
+        id: Number(item.item.id || 0) || null,
+        definitionId: Number(item.item.definitionId || 0) || null,
+        pile: item.item.pile ? String(item.item.pile) : null
+      } : null,
+      destination: item.destination ? String(item.destination) : null
+    }));
+    return {
+      journalType: String(journalType || ""),
+      runId: String(journal.runId || ""),
+      jobId: String(journal.jobId || ""),
+      status: String(journal.status || ""),
+      phase: String(journal.phase || ""),
+      updatedAt: Math.max(0, Number(journal.updatedAt || 0)),
+      items
+    };
+  }
+  function leaseEvidence(leaseState = {}) {
+    const lease = leaseState.lease || {};
+    return {
+      journalType: "lease",
+      runId: String(lease.runId || ""),
+      jobId: String(lease.jobId || ""),
+      ownerId: String(lease.ownerId || ""),
+      acquiredAt: Math.max(0, Number(lease.acquiredAt || 0)),
+      heartbeatAt: Math.max(0, Number(lease.heartbeatAt || 0)),
+      expiresAt: Math.max(0, Number(lease.expiresAt || 0)),
+      expired: leaseState.expired === true
+    };
+  }
+  function tradeRecoveryEvidenceHash(journalType, journal = {}) {
+    return stableHash3(JSON.stringify(evidence(journalType, journal)));
+  }
+  function tradeLeaseRecoveryEvidenceHash(leaseState = {}) {
+    return stableHash3(JSON.stringify(leaseEvidence(leaseState)));
+  }
+  function inspectTradeRecoveryJournal(journalType, journal = null) {
+    if (!journal?.runId) return { reviewRequired: false, reason: null, journalType, journal: null };
+    const mutationItems = (journal.items || []).filter((item) => item.mutationBoundaryCrossed === true);
+    const terminal = journalType === "buy" ? /* @__PURE__ */ new Set(["purchased", "competition-lost", "failed"]) : /* @__PURE__ */ new Set(["listed", "failed"]);
+    const uncertainItems = mutationItems.filter((item) => !terminal.has(item.status));
+    const reviewRequired = journal.status !== "acknowledged" && mutationItems.length > 0 && (journal.status === "active" || uncertainItems.length > 0);
+    const evidenceHash = tradeRecoveryEvidenceHash(journalType, journal);
+    return {
+      reviewRequired,
+      reason: reviewRequired ? `${journalType}-journal-mutation-review-required` : null,
+      journalType,
+      runId: String(journal.runId),
+      jobId: String(journal.jobId || ""),
+      status: String(journal.status || ""),
+      phase: String(journal.phase || ""),
+      mutationItemCount: mutationItems.length,
+      uncertainItemCount: uncertainItems.length,
+      evidenceHash,
+      requiredText: reviewRequired ? `ACKNOWLEDGE ${journalType.toUpperCase()} ${String(journal.runId)}` : null
+    };
+  }
+  function partitionTradeRecoveryReviews(journalReviews = [], leaseState = {}) {
+    const lease = leaseState.active === true ? leaseState.lease : null;
+    const reviews = [];
+    const inFlightReviews = [];
+    for (const review of Array.isArray(journalReviews) ? journalReviews : []) {
+      if (review.reviewRequired !== true) continue;
+      const belongsToActiveLease = review.reviewRequired === true && lease?.runId && String(review.runId || "") === String(lease.runId) && String(review.jobId || "") === String(lease.jobId || "");
+      (belongsToActiveLease ? inFlightReviews : reviews).push(review);
+    }
+    return { reviews, inFlightReviews };
+  }
+  function inspectTradeExpiredLeaseReview(input2 = {}) {
+    const leaseState = input2.leaseState || {};
+    const lease = leaseState.lease || null;
+    if (leaseState.expired !== true || !lease?.runId) {
+      return { reviewRequired: false, reason: null, journalType: "lease", runId: null };
+    }
+    const history = (input2.history || []).find((entry) => String(entry.runId || "") === String(lease.runId) && TERMINAL_HISTORY_STATUSES.has(String(entry.status || "")));
+    const journalReviews = Array.isArray(input2.journalReviews) ? input2.journalReviews : [];
+    const matchingJournalReview = journalReviews.find((review) => review.reviewRequired === true && String(review.runId || "") === String(lease.runId));
+    if (history || matchingJournalReview) {
+      return {
+        reviewRequired: false,
+        reason: matchingJournalReview?.reason || null,
+        journalType: "lease",
+        runId: String(lease.runId)
+      };
+    }
+    const evidenceHash = tradeLeaseRecoveryEvidenceHash(leaseState);
+    return {
+      reviewRequired: true,
+      reason: "expired-lease-terminal-history-missing",
+      journalType: "lease",
+      runId: String(lease.runId),
+      jobId: String(lease.jobId || ""),
+      status: "expired",
+      phase: "terminal-history-missing",
+      mutationItemCount: 0,
+      uncertainItemCount: 0,
+      evidenceHash,
+      requiredText: `ACKNOWLEDGE LEASE ${String(lease.runId)}`
+    };
+  }
+  function validateTradeRecoveryAuditEntry(review = {}, reason = "") {
+    if (review.reviewRequired !== true || !review.runId || !review.evidenceHash) {
+      throw new Error("recovery-audit-review-invalid");
+    }
+    const normalizedReason = String(reason || "").trim().slice(0, 160);
+    if (normalizedReason.length < 8) throw new Error("recovery-audit-reason-too-short");
+    return normalizedReason;
+  }
+  function createTradeRecoveryHistoryReceipt(review = {}, journal = {}, options = {}) {
+    const journalType = String(review.journalType || "");
+    if (!["buy", "listing"].includes(journalType) || !review.runId || !review.evidenceHash) {
+      throw new Error("recovery-history-review-invalid");
+    }
+    const items = Array.isArray(journal.items) ? journal.items : [];
+    const succeeded = items.filter((item) => journalType === "buy" ? item.status === "purchased" : item.status === "listed").length;
+    const failed = items.filter((item) => ["failed", "competition-lost"].includes(item.status)).length;
+    const requested = Math.max(Number(journal.requested || 0), items.length);
+    const finishedAt = Math.max(0, Number(options.now?.() ?? Date.now()));
     return createTradeRunReceipt({
-      runId: previous.runId,
-      jobId: previous.jobId,
-      jobType: kind,
-      scheduledFor: previous.acquiredAt,
-      startedAt: previous.acquiredAt,
+      runId: review.runId,
+      jobId: review.jobId,
+      jobType: journalType,
+      scheduledFor: journal.startedAt,
+      startedAt: journal.startedAt,
       finishedAt,
       status: "blocked",
-      reason,
+      reason: "manual-recovery-acknowledged",
       requested,
       succeeded,
       failed,
       skipped: Math.max(0, requested - succeeded - failed),
-      receipts: items.map((entry) => ({
-        index: entry.index,
-        status: entry.status,
-        reason: entry.reason,
-        item: entry.item,
-        price: entry.price ?? entry.listing?.buyNow ?? null,
-        destination: entry.destination ?? null,
-        mutationBoundaryCrossed: entry.mutationBoundaryCrossed === true
+      receipts: items.map((item) => ({
+        index: Number(item.index || 0),
+        status: String(item.status || ""),
+        mutationBoundaryCrossed: item.mutationBoundaryCrossed === true,
+        item: item.item ? {
+          id: Number(item.item.id || 0) || null,
+          definitionId: Number(item.item.definitionId || 0) || null,
+          pile: item.item.pile ? String(item.item.pile) : null
+        } : null,
+        destination: item.destination ? String(item.destination) : null
       }))
     });
   }
-  function reconcileExpiredTradeLease(options = {}) {
-    const lease = options.lease;
-    const store = options.store;
-    if (!lease?.inspect || !lease?.clearExpired || !store?.read || !store?.addHistory) {
-      throw new TypeError("Trade lease and Job Store are required");
+  function createTradeLeaseRecoveryHistoryReceipt(review = {}, options = {}) {
+    if (review.journalType !== "lease" || !review.runId || !review.evidenceHash) {
+      throw new Error("lease-recovery-history-review-invalid");
     }
-    const inspected = lease.inspect();
-    const previous = inspected.lease;
-    if (!inspected.expired || !previous) return { status: "not-needed", reason: null, receipt: null };
-    const journalEntry = journalForRun(options.journals, previous.runId);
-    const journal = journalEntry?.snapshot || null;
-    const kind = journal?.source ? "listing" : "buy";
-    const crossedJournalBoundary = journal?.items?.some((entry) => entry.mutationBoundaryCrossed === true) === true;
-    const crossedLeaseBoundary = Number(previous.heartbeatAt) !== Number(previous.acquiredAt);
-    const journalTerminal = journal && journal.status !== "active";
-    const knownTerminalStatuses = kind === "listing" ? ["listed", "failed"] : ["purchased", "competition-lost", "failed"];
-    const uncertainJournalMutation = journal?.items?.some((entry) => entry.mutationBoundaryCrossed === true && !knownTerminalStatuses.includes(entry.status)) === true;
-    if ((crossedJournalBoundary || crossedLeaseBoundary) && (!journalTerminal || uncertainJournalMutation)) {
-      return { status: "blocked", reason: `expired-lease-crossed-${kind}-boundary`, receipt: null, journal };
-    }
-    const snapshot = store.read();
-    const job = (snapshot.jobs || []).find((entry) => entry.id === previous.jobId);
-    if (!journal && (!job || !["buy", "listing"].includes(job.type))) {
-      return { status: "blocked", reason: "expired-lease-job-unavailable", receipt: null };
-    }
-    if ((snapshot.history || []).some((entry) => entry.runId === previous.runId)) {
-      const cleared = lease.clearExpired(previous.runId);
-      return { status: cleared ? "already-recorded" : "blocked", reason: cleared ? null : "expired-lease-clear-failed", receipt: null };
-    }
-    if (!lease.clearExpired(previous.runId)) {
-      return { status: "blocked", reason: "expired-lease-clear-failed", receipt: null };
-    }
-    const finishedAt = Number(options.now?.() ?? Date.now());
-    const reason = journalTerminal ? `browser-terminated-after-${kind}-journal-terminal` : `browser-terminated-before-${kind}-mutation-boundary`;
-    const receipt = journal ? recoveredReceipt(previous, journal, finishedAt, reason) : createTradeRunReceipt({
-      runId: previous.runId,
-      jobId: previous.jobId,
-      jobType: job.type,
-      scheduledFor: previous.acquiredAt,
-      startedAt: previous.acquiredAt,
+    const lease = options.leaseState?.lease || {};
+    const jobType = ["buy", "listing"].includes(options.jobType) ? options.jobType : "unknown";
+    const finishedAt = Math.max(0, Number(options.now?.() ?? Date.now()));
+    return createTradeRunReceipt({
+      runId: review.runId,
+      jobId: review.jobId,
+      jobType,
+      scheduledFor: lease.acquiredAt,
+      startedAt: lease.acquiredAt,
       finishedAt,
       status: "blocked",
-      reason,
+      reason: "manual-lease-recovery-acknowledged",
       requested: 0,
-      receipts: [{ status: "blocked", reason }]
+      receipts: [{
+        status: "blocked",
+        reason: "manual-lease-recovery-acknowledged",
+        evidenceHash: review.evidenceHash
+      }]
     });
-    store.addHistory(receipt);
-    journalEntry?.journal?.finish?.(previous.runId, {
-      phase: "expired-lease-reconciled",
-      status: "blocked",
-      reason
+  }
+  function normalizeTradeRecoveryAudit(input2 = {}) {
+    return {
+      schemaVersion: TRADE_RECOVERY_AUDIT_SCHEMA_VERSION,
+      entries: (Array.isArray(input2.entries) ? input2.entries : []).slice(-TRADE_RECOVERY_AUDIT_LIMIT).map((entry) => ({
+        acknowledgedAt: Math.max(0, Number(entry.acknowledgedAt || 0)),
+        journalType: ["buy", "listing", "lease"].includes(entry.journalType) ? entry.journalType : "unknown",
+        runId: String(entry.runId || ""),
+        jobId: String(entry.jobId || ""),
+        status: String(entry.status || ""),
+        phase: String(entry.phase || ""),
+        mutationItemCount: Math.max(0, Math.floor(Number(entry.mutationItemCount || 0))),
+        uncertainItemCount: Math.max(0, Math.floor(Number(entry.uncertainItemCount || 0))),
+        evidenceHash: String(entry.evidenceHash || "").slice(0, 32),
+        reason: String(entry.reason || "").slice(0, 160)
+      }))
+    };
+  }
+  function createTradeRecoveryAudit(options = {}) {
+    const storage = options.storage;
+    const key = String(options.key || "fc-loop-runner-trade-recovery-audit-v1");
+    const now = typeof options.now === "function" ? options.now : () => Date.now();
+    let memory = normalizeTradeRecoveryAudit();
+    function read() {
+      const stored = storage?.get?.(key, null);
+      if (stored && typeof stored === "object") memory = normalizeTradeRecoveryAudit(stored);
+      return clone16(memory);
+    }
+    function record(review = {}, reason = "") {
+      const normalizedReason = validateTradeRecoveryAuditEntry(review, reason);
+      const current = read();
+      memory = normalizeTradeRecoveryAudit({
+        entries: [...current.entries, {
+          acknowledgedAt: Number(now()),
+          journalType: review.journalType,
+          runId: review.runId,
+          jobId: review.jobId,
+          status: review.status,
+          phase: review.phase,
+          mutationItemCount: review.mutationItemCount,
+          uncertainItemCount: review.uncertainItemCount,
+          evidenceHash: review.evidenceHash,
+          reason: normalizedReason
+        }]
+      });
+      storage?.set?.(key, clone16(memory));
+      return read();
+    }
+    return Object.freeze({ record, snapshot: read });
+  }
+  function acknowledgeTradeRecovery(options = {}) {
+    const snapshot = options.schedulerSnapshot || {};
+    if (snapshot.paused !== true || snapshot.liveExecutionEnabled === true) {
+      throw new Error("recovery-acknowledgement-requires-locked-scheduler");
+    }
+    if (options.operation?.active || options.operation?.external?.busy === true) {
+      throw new Error("recovery-acknowledgement-operation-active");
+    }
+    if (options.lease?.active === true || options.lease?.owned === true) {
+      throw new Error("recovery-acknowledgement-lease-active");
+    }
+    const journalType = String(options.journalType || "");
+    const current = options.journal?.snapshot?.();
+    const review = inspectTradeRecoveryJournal(journalType, current);
+    if (!review.reviewRequired) throw new Error("recovery-acknowledgement-not-required");
+    if (String(options.evidenceHash || "") !== review.evidenceHash) {
+      throw new Error("recovery-acknowledgement-evidence-changed");
+    }
+    if (String(options.confirmationText || "") !== review.requiredText) {
+      throw new Error(`Confirmation must exactly match ${review.requiredText}`);
+    }
+    const normalizedReason = validateTradeRecoveryAuditEntry(review, options.reason);
+    const archived = options.journal?.acknowledge?.({
+      runId: review.runId,
+      evidenceHash: review.evidenceHash,
+      evidenceHashFor: (journal) => tradeRecoveryEvidenceHash(journalType, journal),
+      at: Number(options.now?.() ?? Date.now()),
+      reason: normalizedReason
     });
-    return { status: "reconciled", reason: receipt.reason, receipt, journal };
+    if (!archived || archived.status !== "acknowledged") throw new Error("recovery-acknowledgement-journal-changed");
+    options.audit?.record?.(review, normalizedReason);
+    return { status: "acknowledged", review, journal: archived };
+  }
+  function acknowledgeTradeExpiredLeaseRecovery(options = {}) {
+    const snapshot = options.schedulerSnapshot || {};
+    if (snapshot.paused !== true || snapshot.liveExecutionEnabled === true) {
+      throw new Error("recovery-acknowledgement-requires-locked-scheduler");
+    }
+    if (options.operation?.active || options.operation?.external?.busy === true) {
+      throw new Error("recovery-acknowledgement-operation-active");
+    }
+    const review = inspectTradeExpiredLeaseReview({
+      leaseState: options.leaseState,
+      history: options.history,
+      journalReviews: options.journalReviews
+    });
+    if (!review.reviewRequired) throw new Error("recovery-acknowledgement-not-required");
+    if (String(options.evidenceHash || "") !== review.evidenceHash) {
+      throw new Error("recovery-acknowledgement-evidence-changed");
+    }
+    if (String(options.confirmationText || "") !== review.requiredText) {
+      throw new Error(`Confirmation must exactly match ${review.requiredText}`);
+    }
+    const normalizedReason = validateTradeRecoveryAuditEntry(review, options.reason);
+    options.audit?.record?.(review, normalizedReason);
+    return {
+      status: "acknowledged",
+      review,
+      receipt: createTradeLeaseRecoveryHistoryReceipt(review, {
+        leaseState: options.leaseState,
+        jobType: options.jobType,
+        now: options.now
+      })
+    };
+  }
+
+  // src/trade/scheduler-correlation.js
+  var TRADE_CORRELATION_LIMIT = 20;
+  function stringOrNull(value) {
+    return value === void 0 || value === null || value === "" ? null : String(value);
+  }
+  function terminalHistory(receipt = {}) {
+    return ["completed", "blocked", "missed", "stopped", "failed", "error", "ambiguous"].includes(receipt.status);
+  }
+  function inspectExpiredTradeLeaseRecovery(input2 = {}) {
+    const lease = input2.previousLease || null;
+    if (!lease?.runId) return { status: "blocked", reason: "expired-lease-run-id-missing" };
+    const history = (input2.history || []).find((entry) => String(entry.runId || "") === String(lease.runId));
+    const journals = [
+      input2.buyJournal ? { type: "buy", value: input2.buyJournal } : null,
+      input2.listingJournal ? { type: "listing", value: input2.listingJournal } : null
+    ].filter((entry) => entry?.value?.runId && String(entry.value.runId) === String(lease.runId));
+    const uncertainJournal = journals.find((entry) => input2.inspectJournal?.(entry.value, entry.type) === true);
+    if (uncertainJournal) {
+      return {
+        status: "blocked",
+        reason: "expired-lease-journal-mutation-review-required",
+        runId: String(lease.runId),
+        jobId: stringOrNull(lease.jobId)
+      };
+    }
+    if (!history || !terminalHistory(history)) {
+      return {
+        status: "blocked",
+        reason: "expired-lease-terminal-history-missing",
+        runId: String(lease.runId),
+        jobId: stringOrNull(lease.jobId)
+      };
+    }
+    return {
+      status: "reconciled",
+      reason: "expired-lease-terminal-history-confirmed",
+      runId: String(lease.runId),
+      jobId: stringOrNull(lease.jobId),
+      historyStatus: String(history.status)
+    };
+  }
+  function summarizeTradeRunCorrelations(input2 = {}) {
+    const scheduler = input2.scheduler || {};
+    const events = Array.isArray(input2.events) ? input2.events : [];
+    const lease = input2.lease?.lease || input2.lease || null;
+    const journals = [
+      input2.buyJournal ? { type: "buy", value: input2.buyJournal } : null,
+      input2.listingJournal ? { type: "listing", value: input2.listingJournal } : null
+    ].filter(Boolean);
+    const runIds = [];
+    const add = (value) => {
+      const id = stringOrNull(value);
+      if (id && !runIds.includes(id)) runIds.push(id);
+    };
+    [...scheduler.history || []].reverse().forEach((entry) => add(entry.runId));
+    journals.forEach((entry) => add(entry.value.runId));
+    add(lease?.runId);
+    [...events].reverse().forEach((entry) => add(entry.runId));
+    return runIds.slice(0, TRADE_CORRELATION_LIMIT).map((runId) => {
+      const history = (scheduler.history || []).find((entry) => String(entry.runId || "") === runId) || null;
+      const journal = journals.find((entry) => String(entry.value.runId || "") === runId) || null;
+      const matchingEvents = events.filter((entry) => String(entry.runId || "") === runId);
+      const budgetEvents = (journal?.value.events || []).filter((entry) => entry.phase === "chunk-budget-waiting" || entry.retryAt !== null && entry.retryAt !== void 0);
+      return {
+        runId,
+        jobId: stringOrNull(history?.jobId || journal?.value.jobId || (String(lease?.runId || "") === runId ? lease.jobId : null)),
+        jobType: stringOrNull(history?.jobType || journal?.type),
+        history: history ? {
+          status: stringOrNull(history.status),
+          reason: stringOrNull(history.reason),
+          startedAt: Number(history.startedAt || 0) || null,
+          finishedAt: Number(history.finishedAt || 0) || null
+        } : null,
+        journal: journal ? {
+          type: journal.type,
+          status: stringOrNull(journal.value.status),
+          phase: stringOrNull(journal.value.phase),
+          updatedAt: Number(journal.value.updatedAt || 0) || null,
+          mutationBoundaryCrossed: (journal.value.items || []).some((item) => item.mutationBoundaryCrossed === true),
+          uncertainItems: journal.value.status === "acknowledged" ? 0 : (journal.value.items || []).filter((item) => item.mutationBoundaryCrossed === true && !["purchased", "competition-lost", "listed", "failed"].includes(item.status)).length
+        } : null,
+        lease: String(lease?.runId || "") === runId ? {
+          active: input2.lease?.active === true,
+          expired: input2.lease?.expired === true,
+          acquiredAt: Number(lease.acquiredAt || 0) || null,
+          heartbeatAt: Number(lease.heartbeatAt || 0) || null,
+          expiresAt: Number(lease.expiresAt || 0) || null
+        } : null,
+        schedulerEvents: matchingEvents.length,
+        budgetWaits: budgetEvents.length,
+        latestBudgetRetryAt: budgetEvents.length ? Math.max(...budgetEvents.map((entry) => Number(entry.retryAt || 0))) || null : null
+      };
+    });
   }
 
   // src/userscript-entry.js
@@ -26441,6 +27116,10 @@
       storage: adapters.userscriptStorage,
       key: TRADE_LISTING_JOURNAL_KEY
     });
+    const tradeRecoveryAudit = createTradeRecoveryAudit({
+      storage: adapters.userscriptStorage,
+      key: TRADE_RECOVERY_AUDIT_KEY
+    });
     const tradeTabOwnerId = `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const tradeRunLease = createTradeRunLease({
       storage: adapters.userscriptStorage,
@@ -26463,6 +27142,86 @@
     let tradeScheduler = null;
     const tradeSchedulerTickLock = createTradeSchedulerTickLock({ lockManager: navigator?.locks });
     const tradeSchedulerEvents = createTradeSchedulerEventLog();
+    function inspectTradeRecoveryState() {
+      const buyJournal = tradeBuyJournal.snapshot();
+      const listingJournal = tradeListingJournal.snapshot();
+      const journalReviews = [
+        inspectTradeRecoveryJournal("buy", buyJournal),
+        inspectTradeRecoveryJournal("listing", listingJournal)
+      ];
+      const leaseState = tradeRunLease.inspect();
+      const partitioned = partitionTradeRecoveryReviews(journalReviews, leaseState);
+      const leaseReview = inspectTradeExpiredLeaseReview({
+        leaseState,
+        history: tradeJobStore.read().history,
+        journalReviews: partitioned.reviews
+      });
+      const reviews = [...partitioned.reviews, leaseReview].filter((review) => review.reviewRequired === true);
+      return {
+        reviewRequired: reviews.length > 0,
+        reason: reviews[0]?.reason || null,
+        reviews,
+        inFlightReviews: partitioned.inFlightReviews,
+        journals: { buy: buyJournal, listing: listingJournal },
+        audit: tradeRecoveryAudit.snapshot(),
+        scheduler: {
+          paused: tradeJobStore.read().paused === true,
+          liveExecutionEnabled: tradeJobStore.read().liveExecutionEnabled === true
+        },
+        operation: tradeOperationCoordinator.inspect(),
+        lease: leaseState
+      };
+    }
+    function acknowledgeTradeRecoveryFromUi(input2 = {}) {
+      const journalType = String(input2.journalType || "");
+      if (journalType === "lease") {
+        const schedulerSnapshot2 = tradeJobStore.read();
+        const leaseState = tradeRunLease.inspect();
+        const journalReviews = [
+          inspectTradeRecoveryJournal("buy", tradeBuyJournal.snapshot()),
+          inspectTradeRecoveryJournal("listing", tradeListingJournal.snapshot())
+        ];
+        const job = schedulerSnapshot2.jobs.find((entry) => entry.id === leaseState.lease?.jobId);
+        const result2 = acknowledgeTradeExpiredLeaseRecovery({
+          schedulerSnapshot: schedulerSnapshot2,
+          operation: tradeOperationCoordinator.inspect(),
+          leaseState,
+          history: schedulerSnapshot2.history,
+          journalReviews,
+          jobType: job?.type,
+          audit: tradeRecoveryAudit,
+          evidenceHash: input2.evidenceHash,
+          confirmationText: input2.confirmationText,
+          reason: input2.reason
+        });
+        if (!(schedulerSnapshot2.history || []).some((entry) => entry.runId === result2.review.runId)) {
+          tradeJobStore.addHistory(result2.receipt);
+        }
+        log(`Trade Scheduler: expired Lease recovery acknowledged for ${result2.review.runId}`);
+        setPanelState();
+        return inspectTradeRecoveryState();
+      }
+      const journal = journalType === "buy" ? tradeBuyJournal : journalType === "listing" ? tradeListingJournal : null;
+      if (!journal) throw new Error("recovery-acknowledgement-journal-type-invalid");
+      const result = acknowledgeTradeRecovery({
+        schedulerSnapshot: tradeJobStore.read(),
+        operation: tradeOperationCoordinator.inspect(),
+        lease: tradeRunLease.inspect(),
+        journalType,
+        journal,
+        audit: tradeRecoveryAudit,
+        evidenceHash: input2.evidenceHash,
+        confirmationText: input2.confirmationText,
+        reason: input2.reason
+      });
+      const schedulerSnapshot = tradeJobStore.read();
+      if (!(schedulerSnapshot.history || []).some((entry) => entry.runId === result.review.runId)) {
+        tradeJobStore.addHistory(createTradeRecoveryHistoryReceipt(result.review, result.journal));
+      }
+      log(`Trade Scheduler: ${journalType} recovery acknowledged for ${result.review.runId}`);
+      setPanelState();
+      return inspectTradeRecoveryState();
+    }
     function inspectGuardedTradeSession() {
       let pageReady = false;
       try {
@@ -26574,6 +27333,8 @@
       previewPackHighlight: (input2 = {}) => previewPackHighlight(input2),
       previewBatchOpenRecap: () => previewBatchOpenRecap(),
       inspectTradeCapabilities: () => eaTradeAdapter().inspectCapabilities(),
+      inspectTradeRecovery: inspectTradeRecoveryState,
+      acknowledgeTradeRecovery: acknowledgeTradeRecoveryFromUi,
       inspectTradeListingCandidates: (options = {}) => eaTradeAdapter().inspectListingCandidates(options),
       inspectTradePriceLimits: (ref = {}, options = {}) => eaTradeAdapter().inspectPriceLimits(ref, {
         refresh: options.refresh === true
@@ -26616,6 +27377,7 @@
       circuitBreaker: tradeCircuitBreaker,
       requestBudget: tradeRequestBudget,
       journal: tradeListingJournal,
+      inspectRecovery: inspectTradeRecoveryState,
       ownerId: tradeTabOwnerId,
       validationGateEnabled: true,
       scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
@@ -26648,6 +27410,7 @@
       circuitBreaker: tradeCircuitBreaker,
       requestBudget: tradeRequestBudget,
       getSchedulerState: () => tradeJobStore.read(),
+      inspectRecovery: inspectTradeRecoveryState,
       ownerId: tradeTabOwnerId,
       sleep,
       shouldStop: () => state.stopping,
@@ -26674,6 +27437,7 @@
       playerCatalogProvider: tradePlayerCatalogProvider,
       circuitBreaker: tradeCircuitBreaker,
       requestBudget: tradeRequestBudget,
+      inspectRecovery: inspectTradeRecoveryState,
       ownerId: tradeTabOwnerId,
       validationGateEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
       sleep,
@@ -26701,11 +27465,10 @@
         if (input2.job?.type === "buy") return guardedScheduledBuyExecutor.execute(input2);
         throw new Error(`Unsupported scheduled Trade Job type ${input2.job?.type || "unknown"}`);
       },
-      getContext: () => {
+      getContext: (job) => {
         const operation = tradeOperationCoordinator.inspect();
         const session = inspectGuardedTradeSession();
-        const armedJob = tradeJobStore.read().jobs.find((job) => job.enabled === true && job.armed === true);
-        const requiredRequests = armedJob?.type === "buy" ? tradeBuyRequestReserve(armedJob) : armedJob?.type === "listing" ? tradeListingRequestReserve(armedJob) : void 0;
+        const requiredRequests = job?.type === "buy" ? tradeBuyRequestReserve(job) : job?.type === "listing" ? tradeListingRequestReserve(job) : void 0;
         const requestCapacity = inspectTradeRequestCapacity(tradeRequestBudget.inspect(), requiredRequests);
         return {
           sessionReady: session.ready,
@@ -26715,19 +27478,30 @@
           operationReason: operation.active ? "operation-active" : operation.external?.reason,
           requestBudgetReady: requestCapacity.ready,
           requestBudgetRetryAt: requestCapacity.retryAt,
+          tradeRecoveryReviewRequired: inspectTradeRecoveryState().reviewRequired,
+          tradeRecoveryReason: inspectTradeRecoveryState().reason,
           tickToleranceMs: 15e3
         };
       },
       reconcileExpiredLease: async (previousLease) => {
-        tradeJobStore.relock();
-        log(`Trade Scheduler: expired lease ${previousLease?.runId || "unknown"} requires manual reconciliation; scheduler relocked`);
-        return { status: "blocked" };
+        const snapshot = tradeJobStore.read();
+        const recovery = inspectExpiredTradeLeaseRecovery({
+          previousLease,
+          history: snapshot.history,
+          buyJournal: tradeBuyJournal.snapshot(),
+          listingJournal: tradeListingJournal.snapshot(),
+          inspectJournal: (journal, journalType) => inspectTradeRecoveryJournal(journalType, journal).reviewRequired
+        });
+        log(`Trade Scheduler: expired lease ${previousLease?.runId || "unknown"} reconciliation ${recovery.status} (${recovery.reason})`);
+        return recovery;
       }
     });
     async function prepareTradeListing(input2 = {}, options = {}) {
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
         throw new Error("Another Runner operation is active; listing preparation is unavailable");
       }
+      const recovery = inspectTradeRecoveryState();
+      if (recovery.reviewRequired) throw new Error(recovery.reason || "trade-recovery-review-required");
       const requestedSources = input2.policy?.sources || ["club"];
       const source = requestedSources.length === 1 ? requestedSources[0] : null;
       const clubListing = source === "club";
@@ -26798,6 +27572,8 @@
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
         throw new Error("Another Runner operation is active; listing execution is unavailable");
       }
+      const recovery = inspectTradeRecoveryState();
+      if (recovery.reviewRequired) throw new Error(recovery.reason || "trade-recovery-review-required");
       const prepared = state.preparedTradeListing;
       if (!prepared) throw new Error("No prepared Trade listing is available");
       const runId = state.preparedTradeListingRunId;
@@ -26810,13 +27586,19 @@
       const leaseState = tradeRunLease.inspect();
       if (leaseState.expired) {
         tradeOperationCoordinator.release(operationId);
-        throw new Error("expired-lease-reconciliation-required");
+        throw new Error("expired-lease-reconciliation-required; open Trade Scheduler Recovery and acknowledge the previous Run after checking EA state");
       }
       const acquired = tradeRunLease.acquire({ runId, jobId: prepared.job.id });
       if (!acquired.acquired || acquired.recoveryRequired) {
         if (acquired.acquired) tradeRunLease.release(runId);
         tradeOperationCoordinator.release(operationId);
         throw new Error(acquired.recoveryRequired ? "expired-lease-reconciliation-required" : acquired.reason || "lease-unavailable");
+      }
+      const recoveryAfterLease = inspectTradeRecoveryState();
+      if (recoveryAfterLease.reviewRequired) {
+        tradeRunLease.release(runId);
+        tradeOperationCoordinator.release(operationId);
+        throw new Error(recoveryAfterLease.reason || "trade-recovery-review-required");
       }
       state.preparedTradeListing = null;
       state.preparedTradeListingRunId = null;
@@ -26893,6 +27675,8 @@
       if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning || state.tradeBuyRunning) {
         throw new Error("Another Runner operation is active; Buy execution is unavailable");
       }
+      const listingRecovery = inspectTradeRecoveryJournal("listing", tradeListingJournal.snapshot());
+      if (listingRecovery.reviewRequired) throw new Error(listingRecovery.reason || "trade-recovery-review-required");
       state.lastTradeBuyJob = job;
       state.lastTradeBuyReceipt = null;
       state.lastTradeBuyError = null;
@@ -26917,32 +27701,41 @@
     function enableGuardedTradeScheduling(input2 = {}) {
       const snapshot = tradeJobStore.read();
       if (snapshot.liveExecutionEnabled) throw new Error("Guarded scheduling is already enabled");
+      const recovery = inspectTradeRecoveryState();
+      if (recovery.reviewRequired) throw new Error(recovery.reason || "trade-recovery-review-required");
       const selected2 = selectGuardedScheduledTradeJob(snapshot, {
         scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
         scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED
       });
-      if (!selected2.ready) throw new Error(selected2.reason || "Exactly one eligible armed Job is required");
+      if (!selected2.ready) throw new Error(selected2.reason || "One to three eligible armed Jobs are required");
       if (String(input2.confirmationText || "") !== selected2.requiredText) {
         throw new Error(`Confirmation must exactly match ${selected2.requiredText}`);
       }
-      if (input2.jobId && String(input2.jobId) !== selected2.job.id) throw new Error("The armed Job changed before confirmation");
+      const selectedJobs = selected2.jobs || (selected2.job ? [selected2.job] : []);
+      const selectedIds = selectedJobs.map((job) => job.id).sort();
+      const confirmedIds = (Array.isArray(input2.jobIds) ? input2.jobIds : input2.jobId ? [input2.jobId] : []).map(String).sort();
+      if (confirmedIds.length && (confirmedIds.length !== selectedIds.length || confirmedIds.some((id, index) => id !== selectedIds[index]))) throw new Error("The armed Jobs changed before confirmation");
       const currentTime = Date.now();
-      const scheduleType = selected2.job.schedule.type;
-      if (scheduleType === "once") {
-        const runAt = Number(selected2.job.schedule.runAt);
-        if (runAt < currentTime + 15e3) throw new Error("The once Job must be scheduled at least 15 seconds in the future");
-        if (runAt > currentTime + 15 * 6e4) throw new Error("The once Job must run within 15 minutes");
-      }
-      if (scheduleType === "window" && Number(selected2.job.schedule.endAt) <= currentTime) {
-        throw new Error("The schedule window has already ended");
+      for (const job of selectedJobs) {
+        const scheduleType = job.schedule.type;
+        if (scheduleType === "once") {
+          const runAt = Number(job.schedule.runAt);
+          if (runAt < currentTime + 15e3) throw new Error(`${job.name}: once schedule must be at least 15 seconds in the future`);
+          if (runAt > currentTime + 15 * 6e4) throw new Error(`${job.name}: once schedule must run within 15 minutes`);
+        }
+        if (scheduleType === "window" && Number(job.schedule.endAt) <= currentTime) {
+          throw new Error(`${job.name}: schedule window has already ended`);
+        }
       }
       const circuit = tradeCircuitBreaker.availability();
       if (circuit.allowed !== true) throw new Error(`Trade circuit is open (${circuit.state?.reason || "unknown"})`);
-      const operation = tradeOperationCoordinator.availability(selected2.job.type === "buy" ? "trade-buy" : "trade-listing");
+      const operation = tradeOperationCoordinator.availability("trade-scheduler");
       if (!operation.allowed) throw new Error(`Another Runner operation is active (${operation.reason})`);
-      const enabled = tradeJobStore.authorize(selected2.job.id);
-      const authorization = enabled.authorization;
-      log(`Trade Scheduler: guarded ${selected2.job.type} schedule enabled for ${selected2.job.name}; ${authorization.remainingRuns} authorized Run(s), expires ${new Date(authorization.expiresAt).toLocaleString()}`);
+      const enabled = tradeJobStore.authorize(selectedIds);
+      const authorizationEntries = Object.values(enabled.authorizations?.jobs || {});
+      const totalRuns = authorizationEntries.reduce((total, entry) => total + Number(entry.remainingRuns || 0), 0);
+      const expiresAt = Math.max(...authorizationEntries.map((entry) => Number(entry.expiresAt || 0)));
+      log(`Trade Scheduler: guarded schedule enabled for ${selectedJobs.length} Job(s); ${totalRuns} authorized Run(s), latest expiry ${new Date(expiresAt).toLocaleString()}`);
       void tickTradeScheduler({ trigger: "enable" });
       return enabled;
     }
@@ -26954,9 +27747,11 @@
     function stageExpiredTradeLeaseValidationFromConsole(input2 = {}) {
       const operation = tradeOperationCoordinator.availability("trade-listing");
       if (!operation.allowed) throw new Error(`Another Runner operation is active (${operation.reason})`);
+      const snapshot = tradeJobStore.read();
+      requireExpiredLeaseValidationJob(snapshot);
       const staged = stageExpiredTradeLeaseValidation({
         confirmationText: input2.confirmationText,
-        snapshot: tradeJobStore.read(),
+        snapshot,
         inspectLease: () => tradeRunLease.inspect(),
         writeLease: (value) => adapters.userscriptStorage.set(TRADE_RUN_LEASE_KEY, value)
       });
@@ -26981,24 +27776,54 @@
         return result;
       };
       try {
-        const snapshot = tradeJobStore.read();
-        if (snapshot.liveExecutionEnabled) {
-          const selected2 = selectGuardedScheduledTradeJob(snapshot, {
-            scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
-            scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED
-          });
-          const circuit = tradeCircuitBreaker.availability();
-          const authorization = inspectTradeScheduleAuthorization(snapshot, selected2.job, { now: Date.now() });
-          if (!selected2.ready || !authorization.ready || circuit.allowed !== true) {
-            const reason = !selected2.ready ? selected2.reason : !authorization.ready ? authorization.reason : `circuit-${circuit.state?.reason || "open"}`;
-            disableGuardedTradeScheduling(reason);
-            return recordTick({ status: "blocked", reason });
+        const result = await tradeSchedulerTickLock.run(async () => {
+          try {
+            const snapshot = tradeJobStore.read();
+            if (snapshot.liveExecutionEnabled) {
+              const recovery = inspectTradeRecoveryState();
+              if (recovery.reviewRequired) {
+                disableGuardedTradeScheduling(recovery.reason || "trade-recovery-review-required");
+                log(`Trade Scheduler: blocked by unresolved ${recovery.reviews.map((review) => `${review.journalType}:${review.runId}`).join(", ")}`);
+                return {
+                  status: "blocked",
+                  reason: recovery.reason || "trade-recovery-review-required",
+                  failClosedHandled: true
+                };
+              }
+              const selected2 = selectGuardedScheduledTradeJob(snapshot, {
+                scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+                scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED
+              });
+              const circuit = tradeCircuitBreaker.availability();
+              const selectedJobs = selected2.jobs || (selected2.job ? [selected2.job] : []);
+              const invalidAuthorization = selected2.ready ? selectedJobs.find((job) => !inspectTradeScheduleAuthorization(snapshot, job, { now: Date.now() }).ready) : null;
+              if (!selected2.ready || invalidAuthorization || circuit.allowed !== true) {
+                const reason = !selected2.ready ? selected2.reason : invalidAuthorization ? "schedule-authorization-missing-or-expired" : `circuit-${circuit.state?.reason || "open"}`;
+                if (invalidAuthorization && Object.keys(snapshot.authorizations?.jobs || {}).length > 0) {
+                  tradeJobStore.revokeAuthorization(invalidAuthorization.id, reason);
+                  log(`Trade Scheduler: ${invalidAuthorization.name} disabled (${reason}); other authorized Jobs remain active`);
+                  return { status: "authorization-revoked", reason, jobId: invalidAuthorization.id };
+                }
+                disableGuardedTradeScheduling(reason);
+                return { status: "blocked", reason, jobId: invalidAuthorization?.id, failClosedHandled: true };
+              }
+            }
+            const tickResult = await tradeScheduler.tick();
+            if (["blocked", "failed", "ambiguous", "stopped"].includes(tickResult.status)) {
+              disableGuardedTradeScheduling(`scheduled-run-${tickResult.status}`);
+              return { ...tickResult, failClosedHandled: true };
+            }
+            return tickResult;
+          } catch (error) {
+            disableGuardedTradeScheduling("unexpected-tick-error");
+            log(`Trade Scheduler failed closed: ${error?.message || error}`);
+            return {
+              status: "blocked",
+              reason: error?.message || String(error),
+              failClosedHandled: true
+            };
           }
-        }
-        const result = await tradeSchedulerTickLock.run(() => tradeScheduler.tick());
-        if (["blocked", "failed", "ambiguous", "stopped"].includes(result.status)) {
-          disableGuardedTradeScheduling(`scheduled-run-${result.status}`);
-        }
+        });
         if (result.receipt && state.lastScheduledTradeListing?.job?.id === result.jobId) {
           state.lastTradeListingReceipt = result.receipt;
           state.lastScheduledTradeListing.receipt = result.receipt;
@@ -27010,8 +27835,7 @@
         }
         return recordTick(result);
       } catch (error) {
-        disableGuardedTradeScheduling("unexpected-tick-error");
-        log(`Trade Scheduler failed closed: ${error?.message || error}`);
+        log(`Trade Scheduler tick lock failed closed without changing schedule state: ${error?.message || error}`);
         return recordTick({ status: "blocked", reason: error?.message || String(error) });
       }
     }
@@ -27140,6 +27964,14 @@
         requestBudget: tradeRequestBudget.inspect(),
         capabilities: eaTradeAdapter().inspectCapabilities(),
         operation,
+        recovery: inspectTradeRecoveryState(),
+        correlations: summarizeTradeRunCorrelations({
+          scheduler,
+          buyJournal: tradeBuyJournal.snapshot(),
+          listingJournal: tradeListingJournal.snapshot(),
+          lease: tradeRunLease.inspect(),
+          events: tradeSchedulerEvents.snapshot()
+        }),
         buy: createTradeBuyDiagnostics({
           capturedAt: Date.now(),
           runnerVersion: RUNNER_VERSION,
@@ -27231,6 +28063,8 @@
         scheduleRefresh: (callback, intervalMs) => setInterval(callback, intervalMs),
         cancelRefresh: (handle) => clearInterval(handle),
         getSnapshot: () => tradeJobStore.read(),
+        getRecovery: inspectTradeRecoveryState,
+        onAcknowledgeRecovery: acknowledgeTradeRecoveryFromUi,
         getCircuit: () => tradeCircuitBreaker.snapshot(),
         onSaveJob: (job) => {
           tradeJobStore.upsert(job);
@@ -35886,16 +36720,17 @@
       });
       if (!mounted.created) return;
       const { panel } = mounted;
-      const tradeLeaseRecovery = reconcileExpiredTradeLease({
-        lease: tradeRunLease,
-        store: tradeJobStore,
-        journals: [tradeBuyJournal, tradeListingJournal],
-        now: Date.now
-      });
-      if (tradeLeaseRecovery.status === "reconciled") {
-        log(`Trade: reconciled crashed Run ${tradeLeaseRecovery.receipt.runId} without retrying any mutation; expired Lease cleared`);
-      } else if (tradeLeaseRecovery.status === "blocked") {
-        log(`Trade: expired Lease requires manual investigation (${tradeLeaseRecovery.reason})`);
+      const expiredLease = tradeRunLease.inspect();
+      if (expiredLease.expired && expiredLease.lease) {
+        const schedulerSnapshot = tradeJobStore.read();
+        const leaseRecovery = inspectExpiredTradeLeaseRecovery({
+          previousLease: expiredLease.lease,
+          history: schedulerSnapshot.history,
+          buyJournal: tradeBuyJournal.snapshot(),
+          listingJournal: tradeListingJournal.snapshot(),
+          inspectJournal: (journal, journalType) => inspectTradeRecoveryJournal(journalType, journal).reviewRequired
+        });
+        log(`Trade: expired Lease read-only check ${leaseRecovery.status} (${leaseRecovery.reason}); Scheduler will remain fail-closed until reconciliation is confirmed`);
       }
       state.logRenderer = createLogRenderer({
         getLines: () => state.logLines,

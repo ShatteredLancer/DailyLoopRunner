@@ -79,6 +79,9 @@ describe('Guarded scheduled Trade Job selection', () => {
       reason: 'scheduled-transfer-reprice-validation-gate-disabled',
       jobId: job.id,
       jobType: 'listing',
+      jobIds: [],
+      jobTypes: [],
+      totalRuns: 0,
       requiredText: null,
     });
     expect(selectGuardedScheduledTradeJob(snapshot, { scheduledTransferRepriceEnabled: true })).toMatchObject({
@@ -91,6 +94,9 @@ describe('Guarded scheduled Trade Job selection', () => {
       reason: null,
       jobId: job.id,
       jobType: 'listing',
+      jobIds: [job.id],
+      jobTypes: ['listing'],
+      totalRuns: 1,
       requiredText: 'RUN REPRICE ONCE 1',
     });
     expect(selectGuardedScheduledTradeJob({
@@ -102,7 +108,7 @@ describe('Guarded scheduled Trade Job selection', () => {
     });
   });
 
-  it('rejects mixed Buy and Listing Jobs when more than one is armed', () => {
+  it('validates mixed Buy and Listing Jobs under one bounded session confirmation', () => {
     const buy = buyJob();
     const listing = listingJob();
     expect(selectGuardedScheduledTradeJob({
@@ -113,9 +119,11 @@ describe('Guarded scheduled Trade Job selection', () => {
       },
       safety: { minimumRetainedCoins: 100000 },
     }, { scheduledBuyEnabled: true })).toMatchObject({
-      ready: false,
-      reason: 'validation-gate-multiple-armed-jobs',
+      ready: true,
       job: null,
+      jobs: [buy, listing],
+      totalRuns: 2,
+      requiredText: 'ENABLE 2 TRADE JOBS FOR 2 RUNS',
     });
   });
 

@@ -17,11 +17,14 @@ describe('Trade Run Lease', () => {
     expect(second.acquire({ runId: 'run-b', jobId: 'job-b' })).toMatchObject({ acquired: false, reason: 'lease-held' });
     time = 7000;
     expect(second.acquire({ runId: 'run-b', jobId: 'job-b' })).toMatchObject({
-      acquired: true, recoveryRequired: true, previousLease: { runId: 'run-a', ownerId: 'tab-a' },
+      acquired: false, reason: 'expired-lease-reconciliation-required', recoveryRequired: true,
+      previousLease: { runId: 'run-a', ownerId: 'tab-a' },
     });
-    expect(JSON.stringify(second.inspect())).not.toContain('token-b');
-    expect(second.heartbeat('run-b')).toBe(true);
-    expect(first.release('run-a')).toBe(false);
+    expect(second.inspect()).toMatchObject({ expired: true, lease: { runId: 'run-a', ownerId: 'tab-a' } });
+    expect(JSON.stringify(second.inspect())).not.toContain('token-a');
+    expect(second.heartbeat('run-b')).toBe(false);
+    expect(second.clearExpired('run-a')).toBe(true);
+    expect(second.acquire({ runId: 'run-b', jobId: 'job-b' })).toMatchObject({ acquired: true, recoveryRequired: false });
     expect(second.release('run-b')).toBe(true);
   });
 

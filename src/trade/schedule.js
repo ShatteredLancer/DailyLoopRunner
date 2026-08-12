@@ -143,6 +143,9 @@ export function evaluateTradeJob(job = {}, runtimeInput = {}, context = {}) {
   if (job.armed !== true) return result('disabled', 'not-armed');
   if (context.circuitAllowed === false) return result('blocked', context.circuitReason || 'trade-circuit-open');
   if (context.liveExecutionEnabled === false) return result('blocked', 'live-execution-disabled');
+  if (context.tradeRecoveryReviewRequired === true) {
+    return result('blocked', context.tradeRecoveryReason || 'trade-recovery-review-required');
+  }
   if (runtime.nextRunAt === null) return result('completed', null);
   if (runtime.nextRunAt > now) return result('waiting-time', null);
   if (context.sessionReady !== true) return result('waiting-session', context.sessionReason || 'ea-session-unavailable');

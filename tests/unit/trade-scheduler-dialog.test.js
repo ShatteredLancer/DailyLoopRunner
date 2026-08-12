@@ -61,6 +61,61 @@ function schedulerSnapshot(job = null) {
 }
 
 describe('Trade Scheduler dialog', () => {
+  it('shows unresolved recovery evidence and disables acknowledgement while scheduling is unlocked', () => {
+    const ui = uiHarness();
+    showTradeSchedulerDialog({
+      dom: ui.dom,
+      snapshot: schedulerSnapshot(),
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      getRecovery: () => ({
+        reviewRequired: true,
+        scheduler: { paused: false, liveExecutionEnabled: true },
+        operation: { active: null, external: { busy: false } },
+        lease: { active: false, owned: false },
+        reviews: [{
+          journalType: 'buy', runId: 'buy-recovery-1', jobId: 'buy-job', status: 'active',
+          phase: 'buy-request-started', mutationItemCount: 1, uncertainItemCount: 1,
+          evidenceHash: 'abc12345', requiredText: 'ACKNOWLEDGE BUY buy-recovery-1',
+        }],
+        audit: { entries: [] },
+      }),
+    });
+    ui.byId('bronze-loop-trade-recovery-tab').click();
+    expect(ui.byText('BUY Recovery | Run buy-recovery-1')).toBeTruthy();
+    expect(ui.byId('bronze-loop-trade-recovery-ack-buy').disabled).toBe(true);
+    expect(ui.byId('bronze-loop-trade-recovery-confirm-buy').placeholder).toBe('ACKNOWLEDGE BUY buy-recovery-1');
+  });
+
+  it('submits exact recovery evidence and audit reason only from a locked idle state', () => {
+    const ui = uiHarness();
+    const onAcknowledgeRecovery = vi.fn();
+    showTradeSchedulerDialog({
+      dom: ui.dom,
+      snapshot: schedulerSnapshot(),
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      getRecovery: () => ({
+        scheduler: { paused: true, liveExecutionEnabled: false },
+        operation: { active: null, external: { busy: false } },
+        lease: { active: false, owned: false },
+        reviews: [{
+          journalType: 'listing', runId: 'listing-recovery-1', jobId: 'listing-job', status: 'active',
+          phase: 'listing-request-started', mutationItemCount: 1, uncertainItemCount: 1,
+          evidenceHash: 'def67890', requiredText: 'ACKNOWLEDGE LISTING listing-recovery-1',
+        }],
+        audit: { entries: [] },
+      }),
+      onAcknowledgeRecovery,
+    });
+    ui.byId('bronze-loop-trade-recovery-tab').click();
+    ui.byId('bronze-loop-trade-recovery-confirm-listing').value = 'ACKNOWLEDGE LISTING listing-recovery-1';
+    ui.byId('bronze-loop-trade-recovery-reason-listing').value = 'Checked EA state after reload';
+    ui.byId('bronze-loop-trade-recovery-ack-listing').click();
+    expect(onAcknowledgeRecovery).toHaveBeenCalledWith({
+      journalType: 'listing', runId: 'listing-recovery-1', evidenceHash: 'def67890',
+      confirmationText: 'ACKNOWLEDGE LISTING listing-recovery-1', reason: 'Checked EA state after reload',
+    });
+  });
+
   it('creates conservative unarmed Buy and Listing drafts', () => {
     expect(createTradeJobDraft('listing', { now: 1000 })).toMatchObject({
       id: 'listing-1000', type: 'listing', enabled: true, armed: false,
@@ -248,6 +303,42 @@ describe('Trade Scheduler dialog', () => {
     expect(ui.created.some((element) => element.textContent === 'listing | completed | 2/2')).toBe(true);
     ui.byId('bronze-loop-trade-scheduler-close').click();
     expect(cancelRefresh).toHaveBeenCalledWith(41);
+  });
+
+  it('clears stale action status when an external Scheduler transition is rendered', async () => {
+    const ui = uiHarness();
+    const job = normalizeTradeJobEditorValue({
+      ...createTradeJobDraft('listing', { now: 1000 }),
+      armed: true,
+      schedule: { type: 'once', runAt: 120000 },
+    }, { now: 1000 });
+    let snapshot = schedulerSnapshot(job);
+    let refresh;
+    const onEnableGuardedScheduling = vi.fn(async () => {
+      snapshot = { ...snapshot, paused: false, liveExecutionEnabled: true };
+    });
+    showTradeSchedulerDialog({
+      dom: ui.dom,
+      getSnapshot: () => snapshot,
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      onEnableGuardedScheduling,
+      scheduleRefresh: (callback) => { refresh = callback; return 17; },
+      cancelRefresh: vi.fn(),
+    });
+
+    const confirmation = ui.byId('bronze-loop-trade-guarded-confirmation');
+    confirmation.value = 'RUN ONCE 1';
+    await ui.byId('bronze-loop-trade-enable-guarded-schedule').click();
+    expect(ui.byId('bronze-loop-trade-scheduler-status').textContent)
+      .toBe('Guarded schedule enabled for 1 Job(s)');
+
+    snapshot = {
+      ...schedulerSnapshot({ ...job, armed: false }),
+      runtimes: { [job.id]: { status: 'completed', nextRunAt: null, runCount: 1 } },
+    };
+    refresh();
+
+    expect(ui.byId('bronze-loop-trade-scheduler-status').textContent).toBe('');
   });
 
   it('does not rebuild an active Job editor during an external refresh', () => {

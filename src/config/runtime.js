@@ -14,6 +14,7 @@ export const TRADE_RUN_LEASE_KEY = 'fc-loop-runner-trade-run-lease-v1';
 export const TRADE_BUY_JOURNAL_KEY = 'fc-loop-runner-trade-buy-journal-v1';
 export const TRADE_LISTING_JOURNAL_KEY = 'fc-loop-runner-trade-listing-journal-v1';
 export const TRADE_REQUEST_BUDGET_KEY = 'fc-loop-runner-trade-request-budget-v1';
+export const TRADE_RECOVERY_AUDIT_KEY = 'fc-loop-runner-trade-recovery-audit-v1';
 
 export const CFG = Object.freeze({
   sourcePackIds: [105],

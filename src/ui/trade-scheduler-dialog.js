@@ -156,6 +156,7 @@ export function showTradeSchedulerDialog(options = {}) {
   let refreshHandle = null;
   let disposed = false;
   let snapshotSignature = JSON.stringify(snapshot);
+  let recoverySignature = JSON.stringify(options.getRecovery?.() || {});
 
   const overlay = styles(dom.create('div'), {
     position: 'fixed', inset: '0', zIndex: '1000000', background: 'rgba(0,0,0,.74)', display: 'flex',
@@ -177,7 +178,8 @@ export function showTradeSchedulerDialog(options = {}) {
   const summaryTab = button(dom, 'Summary', mode, 'bronze-loop-trade-summary-tab');
   const providersTab = button(dom, 'Providers', mode, 'bronze-loop-trade-providers-tab');
   const historyTab = button(dom, 'History', mode, 'bronze-loop-trade-history-tab');
-  tabs.append(jobsTab, summaryTab, providersTab, historyTab);
+  const recoveryTab = button(dom, 'Recovery', mode, 'bronze-loop-trade-recovery-tab');
+  tabs.append(jobsTab, summaryTab, providersTab, historyTab, recoveryTab);
   const banner = styles(dom.create('div'), { padding: '9px', border: '1px solid #47576b', background: '#1d2229', marginBottom: '10px', fontSize: '12px' });
   const content = dom.create('div');
   const status = styles(dom.create('div'), { minHeight: '18px', color: '#9fb2c9', fontSize: '11px', marginTop: '10px' });
@@ -186,6 +188,7 @@ export function showTradeSchedulerDialog(options = {}) {
   function refreshSnapshot() {
     snapshot = clone(options.getSnapshot?.() || snapshot || {});
     snapshotSignature = JSON.stringify(snapshot);
+    recoverySignature = JSON.stringify(options.getRecovery?.() || {});
   }
 
   function setStatus(value) {
@@ -208,10 +211,13 @@ export function showTradeSchedulerDialog(options = {}) {
     const circuitState = circuit?.circuit?.state || 'closed';
     const scheduler = snapshot.paused ? 'paused' : 'running';
     const execution = snapshot.liveExecutionEnabled ? 'enabled' : 'locked';
+    const recovery = options.getRecovery?.() || {};
     const budgetText = requestBudget
       ? ` | Requests: ${Number(requestBudget.remaining || 0)}/${Number(requestBudget.limit || 0)} available | Base guarded reserve: ${requestBudget.runCapacity?.ready === false ? 'cooldown' : 'ready'}`
       : '';
-    banner.textContent = `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}${budgetText}`;
+    banner.textContent = recovery.reviewRequired === true
+      ? `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState} | Recovery review required`
+      : `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}${budgetText}`;
     banner.style.color = circuitState === 'open' ? '#e3a7a7' : '#b8c3d2';
   }
 
@@ -479,8 +485,11 @@ export function showTradeSchedulerDialog(options = {}) {
     });
     if (snapshot.liveExecutionEnabled === true) {
       const gateState = dom.create('span');
-      const authorization = snapshot.authorization;
-      gateState.textContent = `Guarded schedule enabled${guarded.job ? `: ${guarded.job.name}` : ''}${authorization ? ` | ${authorization.remainingRuns}/${authorization.totalRuns} Run(s) left | expires ${new Date(Number(authorization.expiresAt)).toLocaleString()}` : ''}`;
+      const authorizations = Object.values(snapshot.authorizations?.jobs || (snapshot.authorization ? { legacy: snapshot.authorization } : {}));
+      const remainingRuns = authorizations.reduce((total, entry) => total + Number(entry.remainingRuns || 0), 0);
+      const totalRuns = authorizations.reduce((total, entry) => total + Number(entry.totalRuns || 0), 0);
+      const latestExpiry = authorizations.length ? Math.max(...authorizations.map((entry) => Number(entry.expiresAt || 0))) : null;
+      gateState.textContent = `Guarded schedule enabled: ${authorizations.length} Job(s) | ${remainingRuns}/${totalRuns} Run(s) left${latestExpiry ? ` | latest expiry ${new Date(latestExpiry).toLocaleString()}` : ''}`;
       styles(gateState, { color: '#e3c98d', flex: '1 1 260px', fontSize: '12px' });
       const disableGate = button(dom, 'Disable scheduling', mode, 'bronze-loop-trade-disable-guarded-schedule');
       disableGate.addEventListener('click', () => {
@@ -504,9 +513,13 @@ export function showTradeSchedulerDialog(options = {}) {
         }
         enableGate.disabled = true;
         try {
-          await options.onEnableGuardedScheduling?.({ confirmationText: gateInput.value, jobId: guarded.job?.id });
+          const jobIds = (guarded.jobs || []).map((job) => job.id);
+          await options.onEnableGuardedScheduling?.({
+            confirmationText: gateInput.value,
+            ...(jobIds.length > 1 ? { jobIds } : { jobId: guarded.job?.id }),
+          });
           refreshSnapshot();
-          setStatus(`Guarded schedule enabled for ${guarded.job?.name || guarded.job?.id}`);
+          setStatus(`Guarded schedule enabled for ${jobIds.length} Job(s)`);
           render();
         } catch (error) {
           enableGate.disabled = false;
@@ -645,6 +658,95 @@ export function showTradeSchedulerDialog(options = {}) {
       next.addEventListener('click', () => { historyPage += 1; renderHistory(); });
       pages.append(previous, count, next);
       content.appendChild(pages);
+    }
+  }
+
+  function renderRecovery() {
+    content.textContent = '';
+    const recovery = options.getRecovery?.() || {};
+    const reviews = Array.isArray(recovery.reviews) ? recovery.reviews : [];
+    const intro = styles(dom.create('div'), {
+      color: reviews.length ? '#e3a7a7' : '#a9d7b5', fontSize: '12px', marginBottom: '12px', lineHeight: '1.45',
+    });
+    intro.textContent = reviews.length
+      ? 'A mutation boundary is unresolved. Scheduler execution remains locked until the EA state is checked and each Journal is acknowledged.'
+      : 'No unresolved Trade Journal requires acknowledgement.';
+    content.appendChild(intro);
+
+    const operation = recovery.operation || {};
+    const lease = recovery.lease || {};
+    const canAcknowledge = recovery.scheduler?.paused === true
+      && recovery.scheduler?.liveExecutionEnabled !== true
+      && !operation.active
+      && operation.external?.busy !== true
+      && lease.active !== true
+      && lease.owned !== true;
+    const gate = styles(dom.create('div'), {
+      color: canAcknowledge ? '#a9d7b5' : '#e3c39d', fontSize: '12px', marginBottom: '12px',
+    });
+    gate.textContent = canAcknowledge
+      ? 'Acknowledgement gate: ready'
+      : 'Acknowledgement gate: Scheduler must be locked, Runner idle, and Trade Lease inactive';
+    content.appendChild(gate);
+
+    for (const review of reviews) {
+      const card = styles(dom.create('div'), {
+        border: '1px solid #714f55', background: '#241d22', padding: '10px', marginBottom: '10px',
+      });
+      const heading = dom.create('div');
+      heading.textContent = `${String(review.journalType || 'trade').toUpperCase()} Recovery | Run ${review.runId}`;
+      styles(heading, { fontWeight: '700', color: '#f1c1c1', overflowWrap: 'anywhere' });
+      const details = dom.create('div');
+      details.textContent = `Job ${review.jobId || 'unknown'} | Status ${review.status} | Phase ${review.phase} | Mutation items ${review.mutationItemCount} | Uncertain items ${review.uncertainItemCount}`;
+      styles(details, { color: '#c5aeb2', fontSize: '11px', margin: '6px 0', overflowWrap: 'anywhere', lineHeight: '1.45' });
+      const hash = dom.create('div');
+      hash.textContent = `Evidence: ${review.evidenceHash}`;
+      styles(hash, { color: '#9fb2c9', fontSize: '11px', overflowWrap: 'anywhere' });
+      const confirmation = input(dom, 'text', '', mode, `bronze-loop-trade-recovery-confirm-${review.journalType}`);
+      confirmation.placeholder = review.requiredText || '';
+      const reason = input(dom, 'text', '', mode, `bronze-loop-trade-recovery-reason-${review.journalType}`);
+      reason.placeholder = 'Reason, at least 8 characters';
+      const acknowledge = button(dom, 'Acknowledge after EA check', mode, `bronze-loop-trade-recovery-ack-${review.journalType}`);
+      acknowledge.disabled = !canAcknowledge;
+      acknowledge.addEventListener('click', () => {
+        try {
+          options.onAcknowledgeRecovery?.({
+            journalType: review.journalType,
+            runId: review.runId,
+            evidenceHash: review.evidenceHash,
+            confirmationText: confirmation.value,
+            reason: reason.value,
+          });
+          setStatus(`${String(review.journalType).toUpperCase()} recovery acknowledged`);
+          render();
+        } catch (error) {
+          setStatus(`Recovery acknowledgement failed: ${error?.message || error}`);
+        }
+      });
+      const form = styles(dom.create('div'), {
+        display: 'grid', gridTemplateColumns: mode.mobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr) auto',
+        gap: '8px', alignItems: 'end', marginTop: '9px',
+      });
+      form.append(field(dom, 'Exact confirmation', confirmation, mode), field(dom, 'Audit reason', reason, mode), acknowledge);
+      card.append(heading, details, hash, form);
+      content.appendChild(card);
+    }
+
+    content.appendChild(section(dom, 'Acknowledgement audit'));
+    const entries = Array.isArray(recovery.audit?.entries) ? [...recovery.audit.entries].reverse() : [];
+    if (!entries.length) {
+      const empty = dom.create('div');
+      empty.textContent = 'No manual recovery acknowledgements recorded';
+      styles(empty, { color: '#8795a8', padding: '8px 0' });
+      content.appendChild(empty);
+    } else {
+      for (const entry of entries) {
+        const row = styles(dom.create('div'), {
+          borderBottom: '1px solid #35404e', padding: '7px 0', fontSize: '11px', overflowWrap: 'anywhere',
+        });
+        row.textContent = `${String(entry.journalType || 'trade').toUpperCase()} | ${entry.runId} | ${new Date(Number(entry.acknowledgedAt || 0)).toLocaleString()} | ${entry.reason}`;
+        content.appendChild(row);
+      }
     }
   }
 
@@ -895,11 +997,13 @@ export function showTradeSchedulerDialog(options = {}) {
     summaryTab.style.background = view === 'summary' ? '#315d9b' : '#222832';
     providersTab.style.background = view === 'providers' ? '#315d9b' : '#222832';
     historyTab.style.background = view === 'history' ? '#315d9b' : '#222832';
+    recoveryTab.style.background = view === 'recovery' ? '#315d9b' : '#222832';
     if (editing) renderEditor();
     else if (view === 'import') renderImport();
     else if (view === 'summary') renderSummary();
     else if (view === 'providers') renderProviders();
     else if (view === 'history') renderHistory();
+    else if (view === 'recovery') renderRecovery();
     else renderJobs();
     status.textContent = statusText;
   }
@@ -924,11 +1028,14 @@ export function showTradeSchedulerDialog(options = {}) {
     }
     const next = clone(options.getSnapshot?.() || snapshot || {});
     const nextSignature = JSON.stringify(next);
-    const changed = nextSignature !== snapshotSignature;
+    const nextRecoverySignature = JSON.stringify(options.getRecovery?.() || {});
+    const changed = nextSignature !== snapshotSignature || nextRecoverySignature !== recoverySignature;
     snapshot = next;
     snapshotSignature = nextSignature;
+    recoverySignature = nextRecoverySignature;
     renderBanner();
     if (!changed || editing || view === 'import') return;
+    statusText = '';
     const scrollTop = Number(dialog.scrollTop || 0);
     render({ refresh: false });
     dialog.scrollTop = scrollTop;
@@ -938,12 +1045,13 @@ export function showTradeSchedulerDialog(options = {}) {
   summaryTab.addEventListener('click', () => { editing = null; view = 'summary'; render(); });
   providersTab.addEventListener('click', () => { editing = null; view = 'providers'; render(); });
   historyTab.addEventListener('click', () => { editing = null; view = 'history'; render(); });
+  recoveryTab.addEventListener('click', () => { editing = null; view = 'recovery'; render(); });
   close.addEventListener('click', closeDialog);
   overlay.addEventListener('click', (event) => { if (event.target === overlay) closeDialog(); });
   dialog.append(heading, tabs, banner, content, status);
   overlay.appendChild(dialog);
   dom.appendToBody(overlay);
-  applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, summaryTab, providersTab, historyTab, close] });
+  applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title: heading, controls: [jobsTab, summaryTab, providersTab, historyTab, recoveryTab, close] });
   render();
   overlay.__disposeTradeSchedulerDialog = dispose;
   if (scheduleRefresh) refreshHandle = scheduleRefresh(refreshFromExternalState, refreshIntervalMs);

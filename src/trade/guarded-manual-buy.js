@@ -83,6 +83,15 @@ export function createGuardedManualBuyExecutor(options = {}) {
         startedAt,
       );
     }
+    let globalRecovery = options.inspectRecovery?.();
+    if (globalRecovery?.reviewRequired === true) {
+      return blockedReceipt(
+        gate.job,
+        runId,
+        globalRecovery.reason || 'trade-recovery-review-required',
+        startedAt,
+      );
+    }
     const operationId = `manual-buy:${runId}`;
     const operation = operationCoordinator.acquire({
       id: operationId,
@@ -100,6 +109,18 @@ export function createGuardedManualBuyExecutor(options = {}) {
         gate.job,
         runId,
         acquired.recoveryRequired ? 'expired-lease-reconciliation-required' : acquired.reason || 'lease-unavailable',
+        startedAt,
+      );
+    }
+
+    globalRecovery = options.inspectRecovery?.();
+    if (globalRecovery?.reviewRequired === true) {
+      lease.release(runId);
+      operationCoordinator.release(operationId);
+      return blockedReceipt(
+        gate.job,
+        runId,
+        globalRecovery.reason || 'trade-recovery-review-required',
         startedAt,
       );
     }

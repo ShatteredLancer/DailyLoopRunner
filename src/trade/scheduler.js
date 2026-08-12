@@ -21,10 +21,10 @@ export function createTradeScheduler(options = {}) {
     : () => `trade-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   let ticking = false;
 
-  function schedulerContext(snapshot, extra = {}) {
+  function schedulerContext(snapshot, job = null, extra = {}) {
     const circuit = options.circuitBreaker?.availability?.();
     return {
-      ...getContext(),
+      ...getContext(job, snapshot),
       ...extra,
       now: Number(now()),
       liveExecutionEnabled: snapshot.liveExecutionEnabled === true,
@@ -62,19 +62,17 @@ export function createTradeScheduler(options = {}) {
   async function execute(job, runtime, context) {
     const startedAt = Number(now());
     const runId = createRunId();
-    const acquired = lease.acquire({ runId, jobId: job.id });
-    if (!acquired.acquired) {
-      const waiting = normalizeTradeJobRuntime({
-        ...runtime, status: 'waiting-operation', reason: acquired.reason || 'lease-held', updatedAt: startedAt,
-      });
-      store.updateRuntime(job.id, waiting);
-      return { status: 'waiting-operation', jobId: job.id, runtime: waiting };
-    }
+    let acquired = lease.acquire({ runId, jobId: job.id });
     if (acquired.recoveryRequired) {
       const recovery = await options.reconcileExpiredLease?.(acquired.previousLease);
-      if (recovery?.status !== 'reconciled') {
+      const cleared = recovery?.status === 'reconciled'
+        && lease.clearExpired?.(acquired.previousLease?.runId) === true;
+      if (cleared) acquired = lease.acquire({ runId, jobId: job.id });
+      else {
         const finishedAt = Number(now());
-        const reason = 'expired-lease-reconciliation-required';
+        const reason = recovery?.status === 'reconciled'
+          ? 'expired-lease-clear-failed'
+          : 'expired-lease-reconciliation-required';
         const receipt = createTradeRunReceipt({
           runId,
           jobId: job.id,
@@ -87,6 +85,7 @@ export function createTradeScheduler(options = {}) {
           receipts: [{
             status: 'blocked',
             reason,
+            recoveryReason: recovery?.reason || null,
             previousLease: acquired.previousLease ? {
               runId: acquired.previousLease.runId,
               jobId: acquired.previousLease.jobId,
@@ -108,11 +107,16 @@ export function createTradeScheduler(options = {}) {
         });
         store.updateRuntime(job.id, blocked);
         store.addHistory(receipt);
-        lease.release(runId);
         return { status: 'blocked', jobId: job.id, receipt, runtime: blocked, previousLease: acquired.previousLease };
       }
     }
-
+    if (!acquired.acquired) {
+      const waiting = normalizeTradeJobRuntime({
+        ...runtime, status: 'waiting-operation', reason: acquired.reason || 'lease-held', updatedAt: startedAt,
+      });
+      store.updateRuntime(job.id, waiting);
+      return { status: 'waiting-operation', jobId: job.id, runtime: waiting };
+    }
     store.updateRuntime(job.id, {
       ...runtime, status: 'running', reason: null, lastScheduledFor: runtime.nextRunAt,
       lastStartedAt: startedAt, lastRunId: runId, updatedAt: startedAt,
@@ -171,7 +175,6 @@ export function createTradeScheduler(options = {}) {
     try {
       const snapshot = store.read();
       if (snapshot.paused) return { status: 'paused' };
-      const context = schedulerContext(snapshot, extraContext);
       const jobs = [...snapshot.jobs].sort((left, right) => {
         const leftAt = snapshot.runtimes[left.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
         const rightAt = snapshot.runtimes[right.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
@@ -179,6 +182,7 @@ export function createTradeScheduler(options = {}) {
       });
       const runnable = [];
       for (const job of jobs) {
+        const context = schedulerContext(snapshot, job, extraContext);
         const runtime = snapshot.runtimes[job.id] || {};
         const decision = evaluateTradeJob(job, runtime, context);
         store.updateRuntime(job.id, decision.runtime);
@@ -194,10 +198,10 @@ export function createTradeScheduler(options = {}) {
           const finalized = persistAdvancedRuntime(job, advanced, 'missed', decision.reason);
           return { status: 'missed', jobId: job.id, receipt, runtime: finalized };
         }
-        if (decision.action === 'run') runnable.push({ job, runtime, decision });
+        if (decision.action === 'run') runnable.push({ job, runtime, decision, context });
       }
       const selected = selectFairTradeCandidate(runnable, snapshot.dispatch);
-      if (selected) return execute(selected.job, selected.runtime, context);
+      if (selected) return execute(selected.job, selected.runtime, selected.context);
       return { status: 'idle' };
     } finally {
       ticking = false;

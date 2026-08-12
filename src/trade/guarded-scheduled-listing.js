@@ -194,6 +194,14 @@ export function createGuardedScheduledListingExecutor(options = {}) {
     });
     const reason = gate.reason;
     if (reason) return blockedReceipt(input, reason, startedAt);
+    const globalRecovery = options.inspectRecovery?.();
+    if (globalRecovery?.reviewRequired === true) {
+      return blockedReceipt(input, globalRecovery.reason || 'trade-recovery-review-required', startedAt);
+    }
+    const journalRecovery = options.journal?.inspectRecovery?.();
+    if (journalRecovery?.canSupersede === false) {
+      return blockedReceipt(input, journalRecovery.reason || 'listing-journal-recovery-required', startedAt);
+    }
     const authorization = store.consumeAuthorization(input.job.id, input.runId);
     if (authorization.consumed !== true) {
       return blockedReceipt(input, authorization.reason || 'schedule-authorization-missing-or-expired', startedAt);
@@ -204,10 +212,6 @@ export function createGuardedScheduledListingExecutor(options = {}) {
     if (typeof options.requestBudget?.inspect === 'function') {
       const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect(), requestReserve);
       if (!requestCapacity.ready) return blockedReceipt(input, requestCapacity.reason, startedAt);
-    }
-    const journalRecovery = options.journal?.inspectRecovery?.();
-    if (journalRecovery?.canSupersede === false) {
-      return blockedReceipt(input, journalRecovery.reason || 'listing-journal-recovery-required', startedAt);
     }
 
     const operationId = `scheduled-listing:${input.runId}`;

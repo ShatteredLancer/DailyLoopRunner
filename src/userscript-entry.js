@@ -44,6 +44,7 @@ import {
   TRADE_JOB_STORE_KEY,
   TRADE_PLAYER_CATALOG_CACHE_KEY,
   TRADE_REQUEST_BUDGET_KEY,
+  TRADE_RECOVERY_AUDIT_KEY,
   TRADE_RUN_LEASE_KEY,
 } from './config/runtime.js';
 import { LOOP_DEFS } from './config/loops.js';
@@ -198,6 +199,7 @@ import {
   tradeListingRequestReserve,
 } from './trade/request-budget.js';
 import { stageExpiredTradeLeaseValidation } from './trade/expired-lease-validation.js';
+import { requireExpiredLeaseValidationJob } from './trade/expired-lease-validation-policy.js';
 import { createOperationCoordinator } from './trade/operation-coordinator.js';
 import { createTradeScheduler } from './trade/scheduler.js';
 import {
@@ -311,7 +313,16 @@ import { showTradeBuyDialog } from './ui/trade-buy-dialog.js';
 import { showTradeSchedulerDialog } from './ui/trade-scheduler-dialog.js';
 import { createTradeBuyJournal } from './trade/buy-journal.js';
 import { createTradeListingJournal } from './trade/listing-journal.js';
-import { reconcileExpiredTradeLease } from './trade/buy-lease-recovery.js';
+import {
+  acknowledgeTradeExpiredLeaseRecovery,
+  acknowledgeTradeRecovery,
+  createTradeRecoveryHistoryReceipt,
+  createTradeRecoveryAudit,
+  inspectTradeExpiredLeaseReview,
+  inspectTradeRecoveryJournal,
+  partitionTradeRecoveryReviews,
+} from './trade/recovery-audit.js';
+import { inspectExpiredTradeLeaseRecovery, summarizeTradeRunCorrelations } from './trade/scheduler-correlation.js';
 
 const RUNNER_VERSION = packageInfo.version;
 const SCHEDULED_BUY_LIVE_GATE_ENABLED = true;
@@ -381,6 +392,10 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
     storage: adapters.userscriptStorage,
     key: TRADE_LISTING_JOURNAL_KEY,
   });
+  const tradeRecoveryAudit = createTradeRecoveryAudit({
+    storage: adapters.userscriptStorage,
+    key: TRADE_RECOVERY_AUDIT_KEY,
+  });
   const tradeTabOwnerId = `tab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const tradeRunLease = createTradeRunLease({
     storage: adapters.userscriptStorage,
@@ -403,6 +418,88 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
   let tradeScheduler = null;
   const tradeSchedulerTickLock = createTradeSchedulerTickLock({ lockManager: navigator?.locks });
   const tradeSchedulerEvents = createTradeSchedulerEventLog();
+
+  function inspectTradeRecoveryState() {
+    const buyJournal = tradeBuyJournal.snapshot();
+    const listingJournal = tradeListingJournal.snapshot();
+    const journalReviews = [
+      inspectTradeRecoveryJournal('buy', buyJournal),
+      inspectTradeRecoveryJournal('listing', listingJournal),
+    ];
+    const leaseState = tradeRunLease.inspect();
+    const partitioned = partitionTradeRecoveryReviews(journalReviews, leaseState);
+    const leaseReview = inspectTradeExpiredLeaseReview({
+      leaseState,
+      history: tradeJobStore.read().history,
+      journalReviews: partitioned.reviews,
+    });
+    const reviews = [...partitioned.reviews, leaseReview].filter((review) => review.reviewRequired === true);
+    return {
+      reviewRequired: reviews.length > 0,
+      reason: reviews[0]?.reason || null,
+      reviews,
+      inFlightReviews: partitioned.inFlightReviews,
+      journals: { buy: buyJournal, listing: listingJournal },
+      audit: tradeRecoveryAudit.snapshot(),
+      scheduler: {
+        paused: tradeJobStore.read().paused === true,
+        liveExecutionEnabled: tradeJobStore.read().liveExecutionEnabled === true,
+      },
+      operation: tradeOperationCoordinator.inspect(),
+      lease: leaseState,
+    };
+  }
+
+  function acknowledgeTradeRecoveryFromUi(input = {}) {
+    const journalType = String(input.journalType || '');
+    if (journalType === 'lease') {
+      const schedulerSnapshot = tradeJobStore.read();
+      const leaseState = tradeRunLease.inspect();
+      const journalReviews = [
+        inspectTradeRecoveryJournal('buy', tradeBuyJournal.snapshot()),
+        inspectTradeRecoveryJournal('listing', tradeListingJournal.snapshot()),
+      ];
+      const job = schedulerSnapshot.jobs.find((entry) => entry.id === leaseState.lease?.jobId);
+      const result = acknowledgeTradeExpiredLeaseRecovery({
+        schedulerSnapshot,
+        operation: tradeOperationCoordinator.inspect(),
+        leaseState,
+        history: schedulerSnapshot.history,
+        journalReviews,
+        jobType: job?.type,
+        audit: tradeRecoveryAudit,
+        evidenceHash: input.evidenceHash,
+        confirmationText: input.confirmationText,
+        reason: input.reason,
+      });
+      if (!(schedulerSnapshot.history || []).some((entry) => entry.runId === result.review.runId)) {
+        tradeJobStore.addHistory(result.receipt);
+      }
+      log(`Trade Scheduler: expired Lease recovery acknowledged for ${result.review.runId}`);
+      setPanelState();
+      return inspectTradeRecoveryState();
+    }
+    const journal = journalType === 'buy' ? tradeBuyJournal : journalType === 'listing' ? tradeListingJournal : null;
+    if (!journal) throw new Error('recovery-acknowledgement-journal-type-invalid');
+    const result = acknowledgeTradeRecovery({
+      schedulerSnapshot: tradeJobStore.read(),
+      operation: tradeOperationCoordinator.inspect(),
+      lease: tradeRunLease.inspect(),
+      journalType,
+      journal,
+      audit: tradeRecoveryAudit,
+      evidenceHash: input.evidenceHash,
+      confirmationText: input.confirmationText,
+      reason: input.reason,
+    });
+    const schedulerSnapshot = tradeJobStore.read();
+    if (!(schedulerSnapshot.history || []).some((entry) => entry.runId === result.review.runId)) {
+      tradeJobStore.addHistory(createTradeRecoveryHistoryReceipt(result.review, result.journal));
+    }
+    log(`Trade Scheduler: ${journalType} recovery acknowledged for ${result.review.runId}`);
+    setPanelState();
+    return inspectTradeRecoveryState();
+  }
 
   function inspectGuardedTradeSession() {
     let pageReady = false;
@@ -519,6 +616,8 @@ const state = {
     previewPackHighlight: (input = {}) => previewPackHighlight(input),
     previewBatchOpenRecap: () => previewBatchOpenRecap(),
     inspectTradeCapabilities: () => eaTradeAdapter().inspectCapabilities(),
+    inspectTradeRecovery: inspectTradeRecoveryState,
+    acknowledgeTradeRecovery: acknowledgeTradeRecoveryFromUi,
     inspectTradeListingCandidates: (options = {}) => eaTradeAdapter().inspectListingCandidates(options),
     inspectTradePriceLimits: (ref = {}, options = {}) => eaTradeAdapter().inspectPriceLimits(ref, {
       refresh: options.refresh === true,
@@ -562,6 +661,7 @@ const state = {
     circuitBreaker: tradeCircuitBreaker,
     requestBudget: tradeRequestBudget,
     journal: tradeListingJournal,
+    inspectRecovery: inspectTradeRecoveryState,
     ownerId: tradeTabOwnerId,
     validationGateEnabled: true,
     scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
@@ -596,6 +696,7 @@ const state = {
     circuitBreaker: tradeCircuitBreaker,
     requestBudget: tradeRequestBudget,
     getSchedulerState: () => tradeJobStore.read(),
+    inspectRecovery: inspectTradeRecoveryState,
     ownerId: tradeTabOwnerId,
     sleep,
     shouldStop: () => state.stopping,
@@ -624,6 +725,7 @@ const state = {
     playerCatalogProvider: tradePlayerCatalogProvider,
     circuitBreaker: tradeCircuitBreaker,
     requestBudget: tradeRequestBudget,
+    inspectRecovery: inspectTradeRecoveryState,
     ownerId: tradeTabOwnerId,
     validationGateEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
     sleep,
@@ -653,14 +755,13 @@ const state = {
       if (input.job?.type === 'buy') return guardedScheduledBuyExecutor.execute(input);
       throw new Error(`Unsupported scheduled Trade Job type ${input.job?.type || 'unknown'}`);
     },
-    getContext: () => {
+    getContext: (job) => {
       const operation = tradeOperationCoordinator.inspect();
       const session = inspectGuardedTradeSession();
-      const armedJob = tradeJobStore.read().jobs.find((job) => job.enabled === true && job.armed === true);
-      const requiredRequests = armedJob?.type === 'buy'
-        ? tradeBuyRequestReserve(armedJob)
-        : armedJob?.type === 'listing'
-          ? tradeListingRequestReserve(armedJob)
+      const requiredRequests = job?.type === 'buy'
+        ? tradeBuyRequestReserve(job)
+        : job?.type === 'listing'
+          ? tradeListingRequestReserve(job)
           : undefined;
       const requestCapacity = inspectTradeRequestCapacity(tradeRequestBudget.inspect(), requiredRequests);
       return {
@@ -671,13 +772,22 @@ const state = {
         operationReason: operation.active ? 'operation-active' : operation.external?.reason,
         requestBudgetReady: requestCapacity.ready,
         requestBudgetRetryAt: requestCapacity.retryAt,
+        tradeRecoveryReviewRequired: inspectTradeRecoveryState().reviewRequired,
+        tradeRecoveryReason: inspectTradeRecoveryState().reason,
         tickToleranceMs: 15_000,
       };
     },
     reconcileExpiredLease: async (previousLease) => {
-      tradeJobStore.relock();
-      log(`Trade Scheduler: expired lease ${previousLease?.runId || 'unknown'} requires manual reconciliation; scheduler relocked`);
-      return { status: 'blocked' };
+      const snapshot = tradeJobStore.read();
+      const recovery = inspectExpiredTradeLeaseRecovery({
+        previousLease,
+        history: snapshot.history,
+        buyJournal: tradeBuyJournal.snapshot(),
+        listingJournal: tradeListingJournal.snapshot(),
+        inspectJournal: (journal, journalType) => inspectTradeRecoveryJournal(journalType, journal).reviewRequired,
+      });
+      log(`Trade Scheduler: expired lease ${previousLease?.runId || 'unknown'} reconciliation ${recovery.status} (${recovery.reason})`);
+      return recovery;
     },
   });
 
@@ -685,6 +795,8 @@ const state = {
     if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
       throw new Error('Another Runner operation is active; listing preparation is unavailable');
     }
+    const recovery = inspectTradeRecoveryState();
+    if (recovery.reviewRequired) throw new Error(recovery.reason || 'trade-recovery-review-required');
     const requestedSources = input.policy?.sources || ['club'];
     const source = requestedSources.length === 1 ? requestedSources[0] : null;
     const clubListing = source === 'club';
@@ -751,6 +863,8 @@ const state = {
     if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning) {
       throw new Error('Another Runner operation is active; listing execution is unavailable');
     }
+    const recovery = inspectTradeRecoveryState();
+    if (recovery.reviewRequired) throw new Error(recovery.reason || 'trade-recovery-review-required');
     const prepared = state.preparedTradeListing;
     if (!prepared) throw new Error('No prepared Trade listing is available');
     const runId = state.preparedTradeListingRunId;
@@ -763,13 +877,19 @@ const state = {
     const leaseState = tradeRunLease.inspect();
     if (leaseState.expired) {
       tradeOperationCoordinator.release(operationId);
-      throw new Error('expired-lease-reconciliation-required');
+      throw new Error('expired-lease-reconciliation-required; open Trade Scheduler Recovery and acknowledge the previous Run after checking EA state');
     }
     const acquired = tradeRunLease.acquire({ runId, jobId: prepared.job.id });
     if (!acquired.acquired || acquired.recoveryRequired) {
       if (acquired.acquired) tradeRunLease.release(runId);
       tradeOperationCoordinator.release(operationId);
       throw new Error(acquired.recoveryRequired ? 'expired-lease-reconciliation-required' : acquired.reason || 'lease-unavailable');
+    }
+    const recoveryAfterLease = inspectTradeRecoveryState();
+    if (recoveryAfterLease.reviewRequired) {
+      tradeRunLease.release(runId);
+      tradeOperationCoordinator.release(operationId);
+      throw new Error(recoveryAfterLease.reason || 'trade-recovery-review-required');
     }
     state.preparedTradeListing = null;
     state.preparedTradeListingRunId = null;
@@ -847,6 +967,8 @@ const state = {
     if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning || state.tradeBuyRunning) {
       throw new Error('Another Runner operation is active; Buy execution is unavailable');
     }
+    const listingRecovery = inspectTradeRecoveryJournal('listing', tradeListingJournal.snapshot());
+    if (listingRecovery.reviewRequired) throw new Error(listingRecovery.reason || 'trade-recovery-review-required');
     state.lastTradeBuyJob = job;
     state.lastTradeBuyReceipt = null;
     state.lastTradeBuyError = null;
@@ -873,32 +995,44 @@ const state = {
   function enableGuardedTradeScheduling(input = {}) {
     const snapshot = tradeJobStore.read();
     if (snapshot.liveExecutionEnabled) throw new Error('Guarded scheduling is already enabled');
+    const recovery = inspectTradeRecoveryState();
+    if (recovery.reviewRequired) throw new Error(recovery.reason || 'trade-recovery-review-required');
     const selected = selectGuardedScheduledTradeJob(snapshot, {
       scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
       scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
     });
-    if (!selected.ready) throw new Error(selected.reason || 'Exactly one eligible armed Job is required');
+    if (!selected.ready) throw new Error(selected.reason || 'One to three eligible armed Jobs are required');
     if (String(input.confirmationText || '') !== selected.requiredText) {
       throw new Error(`Confirmation must exactly match ${selected.requiredText}`);
     }
-    if (input.jobId && String(input.jobId) !== selected.job.id) throw new Error('The armed Job changed before confirmation');
+    const selectedJobs = selected.jobs || (selected.job ? [selected.job] : []);
+    const selectedIds = selectedJobs.map((job) => job.id).sort();
+    const confirmedIds = (Array.isArray(input.jobIds) ? input.jobIds : input.jobId ? [input.jobId] : []).map(String).sort();
+    if (confirmedIds.length && (
+      confirmedIds.length !== selectedIds.length
+      || confirmedIds.some((id, index) => id !== selectedIds[index])
+    )) throw new Error('The armed Jobs changed before confirmation');
     const currentTime = Date.now();
-    const scheduleType = selected.job.schedule.type;
-    if (scheduleType === 'once') {
-      const runAt = Number(selected.job.schedule.runAt);
-      if (runAt < currentTime + 15_000) throw new Error('The once Job must be scheduled at least 15 seconds in the future');
-      if (runAt > currentTime + 15 * 60_000) throw new Error('The once Job must run within 15 minutes');
-    }
-    if (scheduleType === 'window' && Number(selected.job.schedule.endAt) <= currentTime) {
-      throw new Error('The schedule window has already ended');
+    for (const job of selectedJobs) {
+      const scheduleType = job.schedule.type;
+      if (scheduleType === 'once') {
+        const runAt = Number(job.schedule.runAt);
+        if (runAt < currentTime + 15_000) throw new Error(`${job.name}: once schedule must be at least 15 seconds in the future`);
+        if (runAt > currentTime + 15 * 60_000) throw new Error(`${job.name}: once schedule must run within 15 minutes`);
+      }
+      if (scheduleType === 'window' && Number(job.schedule.endAt) <= currentTime) {
+        throw new Error(`${job.name}: schedule window has already ended`);
+      }
     }
     const circuit = tradeCircuitBreaker.availability();
     if (circuit.allowed !== true) throw new Error(`Trade circuit is open (${circuit.state?.reason || 'unknown'})`);
-    const operation = tradeOperationCoordinator.availability(selected.job.type === 'buy' ? 'trade-buy' : 'trade-listing');
+    const operation = tradeOperationCoordinator.availability('trade-scheduler');
     if (!operation.allowed) throw new Error(`Another Runner operation is active (${operation.reason})`);
-    const enabled = tradeJobStore.authorize(selected.job.id);
-    const authorization = enabled.authorization;
-    log(`Trade Scheduler: guarded ${selected.job.type} schedule enabled for ${selected.job.name}; ${authorization.remainingRuns} authorized Run(s), expires ${new Date(authorization.expiresAt).toLocaleString()}`);
+    const enabled = tradeJobStore.authorize(selectedIds);
+    const authorizationEntries = Object.values(enabled.authorizations?.jobs || {});
+    const totalRuns = authorizationEntries.reduce((total, entry) => total + Number(entry.remainingRuns || 0), 0);
+    const expiresAt = Math.max(...authorizationEntries.map((entry) => Number(entry.expiresAt || 0)));
+    log(`Trade Scheduler: guarded schedule enabled for ${selectedJobs.length} Job(s); ${totalRuns} authorized Run(s), latest expiry ${new Date(expiresAt).toLocaleString()}`);
     void tickTradeScheduler({ trigger: 'enable' });
     return enabled;
   }
@@ -912,9 +1046,11 @@ const state = {
   function stageExpiredTradeLeaseValidationFromConsole(input = {}) {
     const operation = tradeOperationCoordinator.availability('trade-listing');
     if (!operation.allowed) throw new Error(`Another Runner operation is active (${operation.reason})`);
+    const snapshot = tradeJobStore.read();
+    requireExpiredLeaseValidationJob(snapshot);
     const staged = stageExpiredTradeLeaseValidation({
       confirmationText: input.confirmationText,
-      snapshot: tradeJobStore.read(),
+      snapshot,
       inspectLease: () => tradeRunLease.inspect(),
       writeLease: (value) => adapters.userscriptStorage.set(TRADE_RUN_LEASE_KEY, value),
     });
@@ -940,28 +1076,60 @@ const state = {
       return result;
     };
     try {
-      const snapshot = tradeJobStore.read();
-      if (snapshot.liveExecutionEnabled) {
-        const selected = selectGuardedScheduledTradeJob(snapshot, {
-          scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
-          scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
-        });
-        const circuit = tradeCircuitBreaker.availability();
-        const authorization = inspectTradeScheduleAuthorization(snapshot, selected.job, { now: Date.now() });
-        if (!selected.ready || !authorization.ready || circuit.allowed !== true) {
-          const reason = !selected.ready
-            ? selected.reason
-            : !authorization.ready
-              ? authorization.reason
-              : `circuit-${circuit.state?.reason || 'open'}`;
-          disableGuardedTradeScheduling(reason);
-          return recordTick({ status: 'blocked', reason });
+      const result = await tradeSchedulerTickLock.run(async () => {
+        try {
+          const snapshot = tradeJobStore.read();
+          if (snapshot.liveExecutionEnabled) {
+            const recovery = inspectTradeRecoveryState();
+            if (recovery.reviewRequired) {
+              disableGuardedTradeScheduling(recovery.reason || 'trade-recovery-review-required');
+              log(`Trade Scheduler: blocked by unresolved ${recovery.reviews.map((review) => `${review.journalType}:${review.runId}`).join(', ')}`);
+              return {
+                status: 'blocked',
+                reason: recovery.reason || 'trade-recovery-review-required',
+                failClosedHandled: true,
+              };
+            }
+            const selected = selectGuardedScheduledTradeJob(snapshot, {
+              scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+              scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
+            });
+            const circuit = tradeCircuitBreaker.availability();
+            const selectedJobs = selected.jobs || (selected.job ? [selected.job] : []);
+            const invalidAuthorization = selected.ready
+              ? selectedJobs.find((job) => !inspectTradeScheduleAuthorization(snapshot, job, { now: Date.now() }).ready)
+              : null;
+            if (!selected.ready || invalidAuthorization || circuit.allowed !== true) {
+              const reason = !selected.ready
+                ? selected.reason
+                : invalidAuthorization
+                  ? 'schedule-authorization-missing-or-expired'
+                  : `circuit-${circuit.state?.reason || 'open'}`;
+              if (invalidAuthorization && Object.keys(snapshot.authorizations?.jobs || {}).length > 0) {
+                tradeJobStore.revokeAuthorization(invalidAuthorization.id, reason);
+                log(`Trade Scheduler: ${invalidAuthorization.name} disabled (${reason}); other authorized Jobs remain active`);
+                return { status: 'authorization-revoked', reason, jobId: invalidAuthorization.id };
+              }
+              disableGuardedTradeScheduling(reason);
+              return { status: 'blocked', reason, jobId: invalidAuthorization?.id, failClosedHandled: true };
+            }
+          }
+          const tickResult = await tradeScheduler.tick();
+          if (['blocked', 'failed', 'ambiguous', 'stopped'].includes(tickResult.status)) {
+            disableGuardedTradeScheduling(`scheduled-run-${tickResult.status}`);
+            return { ...tickResult, failClosedHandled: true };
+          }
+          return tickResult;
+        } catch (error) {
+          disableGuardedTradeScheduling('unexpected-tick-error');
+          log(`Trade Scheduler failed closed: ${error?.message || error}`);
+          return {
+            status: 'blocked',
+            reason: error?.message || String(error),
+            failClosedHandled: true,
+          };
         }
-      }
-      const result = await tradeSchedulerTickLock.run(() => tradeScheduler.tick());
-      if (['blocked', 'failed', 'ambiguous', 'stopped'].includes(result.status)) {
-        disableGuardedTradeScheduling(`scheduled-run-${result.status}`);
-      }
+      });
       if (result.receipt && state.lastScheduledTradeListing?.job?.id === result.jobId) {
         state.lastTradeListingReceipt = result.receipt;
         state.lastScheduledTradeListing.receipt = result.receipt;
@@ -973,8 +1141,7 @@ const state = {
       }
       return recordTick(result);
     } catch (error) {
-      disableGuardedTradeScheduling('unexpected-tick-error');
-      log(`Trade Scheduler failed closed: ${error?.message || error}`);
+      log(`Trade Scheduler tick lock failed closed without changing schedule state: ${error?.message || error}`);
       return recordTick({ status: 'blocked', reason: error?.message || String(error) });
     }
   }
@@ -1109,6 +1276,14 @@ const state = {
       requestBudget: tradeRequestBudget.inspect(),
       capabilities: eaTradeAdapter().inspectCapabilities(),
       operation,
+      recovery: inspectTradeRecoveryState(),
+      correlations: summarizeTradeRunCorrelations({
+        scheduler,
+        buyJournal: tradeBuyJournal.snapshot(),
+        listingJournal: tradeListingJournal.snapshot(),
+        lease: tradeRunLease.inspect(),
+        events: tradeSchedulerEvents.snapshot(),
+      }),
       buy: createTradeBuyDiagnostics({
         capturedAt: Date.now(),
         runnerVersion: RUNNER_VERSION,
@@ -1205,6 +1380,8 @@ const state = {
       scheduleRefresh: (callback, intervalMs) => setInterval(callback, intervalMs),
       cancelRefresh: (handle) => clearInterval(handle),
       getSnapshot: () => tradeJobStore.read(),
+      getRecovery: inspectTradeRecoveryState,
+      onAcknowledgeRecovery: acknowledgeTradeRecoveryFromUi,
       getCircuit: () => tradeCircuitBreaker.snapshot(),
       onSaveJob: (job) => {
         tradeJobStore.upsert(job);
@@ -10888,16 +11065,17 @@ function updateLoopControls() {
     });
     if (!mounted.created) return;
     const { panel } = mounted;
-    const tradeLeaseRecovery = reconcileExpiredTradeLease({
-      lease: tradeRunLease,
-      store: tradeJobStore,
-      journals: [tradeBuyJournal, tradeListingJournal],
-      now: Date.now,
-    });
-    if (tradeLeaseRecovery.status === 'reconciled') {
-      log(`Trade: reconciled crashed Run ${tradeLeaseRecovery.receipt.runId} without retrying any mutation; expired Lease cleared`);
-    } else if (tradeLeaseRecovery.status === 'blocked') {
-      log(`Trade: expired Lease requires manual investigation (${tradeLeaseRecovery.reason})`);
+    const expiredLease = tradeRunLease.inspect();
+    if (expiredLease.expired && expiredLease.lease) {
+      const schedulerSnapshot = tradeJobStore.read();
+      const leaseRecovery = inspectExpiredTradeLeaseRecovery({
+        previousLease: expiredLease.lease,
+        history: schedulerSnapshot.history,
+        buyJournal: tradeBuyJournal.snapshot(),
+        listingJournal: tradeListingJournal.snapshot(),
+        inspectJournal: (journal, journalType) => inspectTradeRecoveryJournal(journalType, journal).reviewRequired,
+      });
+      log(`Trade: expired Lease read-only check ${leaseRecovery.status} (${leaseRecovery.reason}); Scheduler will remain fail-closed until reconciliation is confirmed`);
     }
     state.logRenderer = createLogRenderer({
       getLines: () => state.logLines,

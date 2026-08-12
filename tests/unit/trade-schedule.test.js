@@ -44,6 +44,10 @@ describe('Trade schedule', () => {
     expect(evaluateTradeJob(job, runtime, { now: 1000, sessionReady: true, operationBusy: true, liveExecutionEnabled: true })).toMatchObject({ status: 'waiting-operation' });
     expect(evaluateTradeJob(job, runtime, { now: 1000, sessionReady: true, circuitAllowed: false, liveExecutionEnabled: true })).toMatchObject({ status: 'blocked', reason: 'trade-circuit-open' });
     expect(evaluateTradeJob(job, runtime, { now: 1000, sessionReady: true, liveExecutionEnabled: false })).toMatchObject({ status: 'blocked', reason: 'live-execution-disabled' });
+    expect(evaluateTradeJob(job, runtime, {
+      now: 1000, sessionReady: true, liveExecutionEnabled: true,
+      tradeRecoveryReviewRequired: true, tradeRecoveryReason: 'buy-journal-mutation-review-required',
+    })).toMatchObject({ status: 'blocked', reason: 'buy-journal-mutation-review-required' });
     expect(evaluateTradeJob(job, runtime, { now: 1000, sessionReady: true, liveExecutionEnabled: true })).toMatchObject({ status: 'running', action: 'run' });
 
     const skip = listingJob({ type: 'once', runAt: 1000 }, { type: 'skip' });
