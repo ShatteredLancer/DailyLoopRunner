@@ -4,7 +4,7 @@
 
 ## 当前边界
 
-TS9-TS12 已在 `0.7.84` 完成自动与实机验证。候选 `0.7.91` 在此基础上增加 TS13 多 Job 和恢复协议；V13-15 最终 canary、本地完整验证和远程 Verify 均已通过，当前只等待 tag 与 GitHub Release：
+TS9-TS12 已在 `0.7.84` 完成自动与实机验证。正式版 `v0.7.91` 在此基础上增加 TS13 多 Job 和恢复协议；V13-15 最终 canary、本地完整验证、远程 Verify 和不可变 GitHub Release 均已完成：
 
 - 手动 Club Listing / Transfer reprice：单一来源、每 Run 1-4 项、每 chunk 最多 2 项；挂牌前后核对同一 item、definition、价格、duration 和 Transfer 状态。
 - 手动和定时 Buy：只允许 Rare Gold、最多 4 个连续评分和 4 项、每卡不超过 2000、总预算不超过 8000；支持逐评分价格/数量配额、Club 和重复卡 Transfer 路由。
@@ -461,6 +461,8 @@ Price Quote 是当前页面内存缓存，刷新页面后为空是正常现象�
 
 ## 发布与回滚
 
-发布前运行 `npm run verify`，确认版本、测试文件数、测试数量、userscript 构建结果和 FSU 资源检查均通过。`0.7.91` 的本地结果为 338 个 JavaScript 文件、160 个测试文件和 1055 个测试全部通过；提交 `980d609` 的 GitHub Actions Verify 也已通过。正式版通过 GitHub Release 的 `DailyLoopRunner.user.js` 安装；不要混用旧 Validation 脚本。
+发布前运行 `npm run verify`，确认版本、测试文件数、测试数量、userscript 构建结果和 FSU 资源检查均通过。`0.7.91` 的本地结果为 338 个 JavaScript 文件、160 个测试文件和 1055 个测试全部通过；提交 `980d609` 和发布准备提交 `a0ccf3a` 的 GitHub Actions Verify 均已通过。
+
+`v0.7.91` 已于 2026-08-12 发布并设为 latest。Release 包含 Runner/FSU userscript 与 metadata、Loop/Profile 资产和 `SHA256SUMS`；下载后的 `DailyLoopRunner.meta.js` 报告版本 `0.7.91`，`DailyLoopRunner.user.js` 与发布 checksum 一致。正式版通过 GitHub Release 的 `DailyLoopRunner.user.js` 安装；不要混用旧 Validation 脚本。
 
 出现交易行为异常时，先在 UI 中 Stop、关闭实时执行并解除 Job 武装，再安装上一份已验证版本或等待诊断调查。不要用回滚掩盖未确认的 EA 状态；首先保存最小证据包。
