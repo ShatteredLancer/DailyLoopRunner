@@ -25,9 +25,11 @@ describe('current direct side-effect call baseline', () => {
     expect(tradeAdapter.match(/\bservice\.bid\s*\(/g) || []).toHaveLength(1);
     expect(tradeAdapter.match(/\bservice\.move\s*\(/g) || []).toHaveLength(1);
     expect(tradeAdapter.match(/\bservice\[method\]\s*\(/g) || []).toHaveLength(1);
-    expect(tradeAdapter.match(/requestBudgetError\('(?:price-limits|list|transfer-refresh|market-search|buy|purchase-refresh|purchase-route)'\)/g) || []).toHaveLength(7);
+    expect(tradeAdapter.match(/requestPacingError\('(?:price-limits|transfer-refresh|market-search|purchase-refresh)'/g) || []).toHaveLength(4);
+    const tradePermitCallSites = [source, ...tradeFiles].join('\n');
+    expect(tradePermitCallSites.match(/adapter\.acquireRequestPermit\('(buy|list|purchase-route)'/g) || []).toHaveLength(3);
     expect(tradeAdapter).toContain("['requestUnassignedItems', 'requestTransferItems', 'requestClubItems', 'requestWatchlist', 'requestWatchedItems']");
-    expect(tradeAdapter.match(/\bservice\.relistExpiredAuctions\s*\(/g) || []).toHaveLength(0);
+      expect(tradeAdapter.match(/\bservice\.relistExpiredAuctions\s*\(/g) || []).toHaveLength(1);
   });
 
   it('keeps pack.open and low-level SBC save/submit calls inside EA Adapters', async () => {

@@ -45,6 +45,7 @@ export function sanitizeTradeBuyReceipt(receipt) {
     scheduledFor: safeNumber(receipt.scheduledFor),
     startedAt: safeNumber(receipt.startedAt),
     finishedAt: safeNumber(receipt.finishedAt),
+    resumeAt: safeNumber(receipt.resumeAt),
     status: String(receipt.status || 'unknown'),
     reason: receipt.reason ? String(receipt.reason) : null,
     requested: Math.max(0, Number(receipt.requested || 0) || 0),
@@ -53,6 +54,9 @@ export function sanitizeTradeBuyReceipt(receipt) {
     skipped: Math.max(0, Number(receipt.skipped || 0) || 0),
     coinsBefore: safeNumber(receipt.coinsBefore),
     coinsAfter: safeNumber(receipt.coinsAfter),
+    continuation: receipt.continuation && typeof receipt.continuation === 'object'
+      ? JSON.parse(JSON.stringify(receipt.continuation))
+      : null,
     receipts: (receipt.receipts || []).map((entry) => ({
       index: Math.max(0, Number(entry.index || 0) || 0),
       status: String(entry.status || 'unknown'),
@@ -143,8 +147,6 @@ export function createTradeBuyDiagnostics(input = {}) {
         chunkIndex: safeNumber(entry.chunkIndex),
         offset: safeNumber(entry.offset),
         quantity: safeNumber(entry.quantity),
-        required: safeNumber(entry.required),
-        remaining: safeNumber(entry.remaining),
         retryAt: safeNumber(entry.retryAt),
         mutationBoundaryCrossed: entry.mutationBoundaryCrossed === true,
         status: entry.status ? String(entry.status) : null,

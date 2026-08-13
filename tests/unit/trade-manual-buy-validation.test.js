@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { normalizeTradeJob } from '../../src/trade/contracts.js';
 import {
   inspectManualBuyValidationJob,
-  manualBuyValidationConfirmation,
   MANUAL_BUY_VALIDATION_MAX_EMPTY_SEARCHES,
   MANUAL_BUY_VALIDATION_MAX_RUNTIME_MINUTES,
 } from '../../src/trade/manual-buy-validation.js';
@@ -25,7 +24,9 @@ describe('Manual guarded Buy validation gate', () => {
     expect(inspectManualBuyValidationJob(job())).toMatchObject({
       ready: true,
       maxPrice: 1000,
-      requiredText: 'BUY 1 MAX 1000',
+      approval: {
+        risk: 'attention', action: 'buy', quantity: 1, maxPrice: 1000, totalBudget: 1000,
+      },
       job: {
         armed: false,
         schedule: { type: 'manual' },
@@ -38,15 +39,6 @@ describe('Manual guarded Buy validation gate', () => {
     });
   });
 
-  it('uses route-specific confirmation text without changing the Job', () => {
-    expect(manualBuyValidationConfirmation(1000, 'auto')).toBe('BUY 1 MAX 1000');
-    expect(manualBuyValidationConfirmation(1000, 'club')).toBe('BUY 1 TO CLUB MAX 1000');
-    expect(manualBuyValidationConfirmation(1000, 'transfer')).toBe('BUY 1 TO TRANSFER MAX 1000');
-    expect(() => manualBuyValidationConfirmation(1000, 'discard')).toThrow('auto, club, or transfer');
-    expect(manualBuyValidationConfirmation(2000, 'auto', 2)).toBe('BUY 2 MAX 2000');
-    expect(manualBuyValidationConfirmation(2000, 'transfer', 2)).toBe('BUY 2 TO TRANSFER MAX 2000');
-  });
-
   it('accepts two adjacent ratings and two purchases within per-card and total caps', () => {
     expect(inspectManualBuyValidationJob(job({
       ratingMax: 85,
@@ -56,7 +48,7 @@ describe('Manual guarded Buy validation gate', () => {
     }))).toMatchObject({
       ready: true,
       maxPrice: 1500,
-      requiredText: 'BUY 2 MAX 1500',
+      approval: { action: 'buy', quantity: 2, maxPrice: 1500, totalBudget: 2500 },
       job: { policy: { ratingMin: 84, ratingMax: 85, quantity: 2 } },
     });
   });

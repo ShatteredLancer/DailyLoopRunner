@@ -89,7 +89,7 @@ describe('Trade listing transaction', () => {
       job: job(),
       prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
     expect(result).toMatchObject({
       runId: 'run-1',
@@ -131,7 +131,7 @@ describe('Trade listing transaction', () => {
       }],
     });
     const plan = prepared([transferEntry()]);
-    expect(plan.confirmation.requiredText).toBe('REPRICE 1');
+    expect(plan.confirmation.action).toBe('reprice');
 
     const result = await transaction(adapter).run({
       job: job({
@@ -142,7 +142,7 @@ describe('Trade listing transaction', () => {
       }),
       prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
 
     expect(result).toMatchObject({
@@ -178,7 +178,7 @@ describe('Trade listing transaction', () => {
       }),
       prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
 
     expect(result).toMatchObject({ status: 'blocked', reason: 'listing-item-active-trade', failed: 1 });
@@ -199,7 +199,7 @@ describe('Trade listing transaction', () => {
       runId: 'scheduler-run-1',
       scheduledFor: 900,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
     expect(result).toMatchObject({ runId: 'scheduler-run-1', scheduledFor: 900, status: 'completed' });
   });
@@ -217,7 +217,7 @@ describe('Trade listing transaction', () => {
       job: job(),
       prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
       beforeMutation,
     });
     expect(result).toMatchObject({
@@ -227,7 +227,7 @@ describe('Trade listing transaction', () => {
     expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(0);
   });
 
-  it('blocks before every write when confirmation does not match', async () => {
+  it('blocks before every write when the prepared token or approval does not match', async () => {
     const adapter = createFakeTradeAdapter({
       items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],
     });
@@ -236,9 +236,13 @@ describe('Trade listing transaction', () => {
       job: job(),
       prepared: plan,
       confirmationToken: 'wrong',
-      confirmationText: 'LIST 1',
+      approved: true,
     });
-    expect(result).toMatchObject({ status: 'blocked', reason: 'listing-confirmation-mismatch', succeeded: 0, skipped: 1 });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'listing-approval-mismatch', succeeded: 0, skipped: 1 });
+    const unapproved = await transaction(adapter).run({
+      job: job(), prepared: plan, confirmationToken: plan.confirmation.token,
+    });
+    expect(unapproved).toMatchObject({ status: 'blocked', reason: 'listing-approval-mismatch' });
     expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
   });
 
@@ -254,7 +258,7 @@ describe('Trade listing transaction', () => {
     const result = await transaction(adapter).run({
       job: job(), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
     expect(result).toMatchObject({
       status: 'blocked', reason: 'listing-item-already-in-transfer', failed: 1, succeeded: 0,
@@ -279,7 +283,7 @@ describe('Trade listing transaction', () => {
     const expiredResult = await transaction(adapter, [700_000, 700_001]).run({
       job: job(), prepared: expired,
       confirmationToken: expired.confirmation.token,
-      confirmationText: expired.confirmation.requiredText,
+      approved: true,
     });
     expect(expiredResult).toMatchObject({ status: 'blocked', reason: 'listing-confirmation-expired' });
 
@@ -287,7 +291,7 @@ describe('Trade listing transaction', () => {
     const oversizedResult = await transaction(adapter).run({
       job: job(), prepared: oversized,
       confirmationToken: oversized.confirmation.token,
-      confirmationText: oversized.confirmation.requiredText,
+      approved: true,
     });
     expect(oversizedResult).toMatchObject({ status: 'blocked', reason: 'listing-plan-exceeds-job-limit' });
     expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
@@ -302,7 +306,7 @@ describe('Trade listing transaction', () => {
     const result = await transaction(adapter).run({
       job: job(), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
     expect(result).toMatchObject({ status: 'blocked', reason: 'transfer-list-full', failed: 1 });
     expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
@@ -316,7 +320,7 @@ describe('Trade listing transaction', () => {
     const result = await transaction(adapter).run({
       job: job(), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
     expect(result).toMatchObject({ status: 'blocked', reason: 'listing-price-changed-after-confirmation', failed: 1 });
     expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
@@ -334,7 +338,7 @@ describe('Trade listing transaction', () => {
     const result = await transaction(adapter).run({
       job: job({ maxListings: 2 }), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
       shouldStop: () => adapter.calls.filter((call) => call.method === 'listItem').length >= 1,
     });
     expect(result).toMatchObject({ status: 'stopped', reason: 'stopped-by-user', succeeded: 1, failed: 0, skipped: 1 });
@@ -356,7 +360,7 @@ describe('Trade listing transaction', () => {
     const result = await transaction(adapter).run({
       job: job({ maxListings: 2 }), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
 
     expect(result).toMatchObject({
@@ -384,7 +388,7 @@ describe('Trade listing transaction', () => {
     }).run({
       job: job({ maxListings: 2 }), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
 
     expect(result).toMatchObject({ status: 'completed', succeeded: 2 });
@@ -410,13 +414,13 @@ describe('Trade listing transaction', () => {
     const result = await transaction(adapter).run({
       job: job(), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
     expect(result).toMatchObject({ status: 'ambiguous', reason: 'listing-accepted-but-not-verified', succeeded: 0, failed: 1 });
     expect(adapter.calls.filter((call) => call.method === 'listItem')).toHaveLength(1);
   });
 
-  it('keeps an accepted listing ambiguous when local budget blocks verification without opening Circuit', async () => {
+  it('keeps an accepted listing ambiguous when 429 blocks verification without opening Circuit', async () => {
     const base = createFakeTradeAdapter({
       items: [{ id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80, tradeable: true, minimum: 700, maximum: 10_000 }],
     });
@@ -429,7 +433,7 @@ describe('Trade listing transaction', () => {
           ? { status: 'completed', response: { success: true, status: 200, code: null }, error: null }
           : {
             status: 'blocked', response: null,
-            error: { kind: 'request-budget-exhausted', action: 'wait-until-budget-reset', retryAt: 6000 },
+            error: { kind: 'rate-limit', code: 429, action: 'stop-and-cooldown', retryAt: 6000 },
           };
       }),
     };
@@ -439,15 +443,15 @@ describe('Trade listing transaction', () => {
       tradeAdapter: adapter,
       circuitBreaker: circuit,
       now: () => 1100,
-      createRunId: () => 'listing-run-budget-verification',
+      createRunId: () => 'listing-run-rate-limit-verification',
     }).run({
       job: job(), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
     expect(result).toMatchObject({
       status: 'ambiguous',
-      reason: 'listing-accepted-request-budget-exhausted-before-verification',
+      reason: 'listing-accepted-rate-limit-before-verification',
       succeeded: 0,
       failed: 1,
     });
@@ -477,7 +481,7 @@ describe('Trade listing transaction', () => {
     }).run({
       job: job(), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
     expect(result).toMatchObject({
       runId: 'run-427', status: 'blocked', reason: 'trade-auction-operation-blocked',
@@ -503,10 +507,41 @@ describe('Trade listing transaction', () => {
     }).run({
       job: job(), prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
     expect(result).toMatchObject({ status: 'blocked', reason: 'trade-circuit-open', skipped: 1 });
     expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
+  });
+
+  it('does not cross the mutation boundary when the Listing permit is blocked by shared cooldown', async () => {
+    const adapter = createFakeTradeAdapter({
+      requestPermitResults: {
+        list: {
+          status: 'blocked',
+          error: { kind: 'rate-limit', code: 429, action: 'stop-and-cooldown', retryAt: 61000 },
+        },
+      },
+      items: [{
+        id: 1, definitionId: 101, pile: 'club', type: 'player', rating: 80,
+        tradeable: true, minimum: 700, maximum: 10_000,
+      }],
+    });
+    const plan = prepared([entry()]);
+    const checkpoints = [];
+    const result = await createListingTransaction({
+      tradeAdapter: adapter,
+      now: () => 1100,
+      onCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+    }).run({
+      job: job(), prepared: plan, confirmationToken: plan.confirmation.token, approved: true,
+    });
+
+    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-rate-limit', succeeded: 0, failed: 0 });
+    expect(adapter.calls.some((call) => call.method === 'listItem')).toBe(false);
+    expect(checkpoints).toContainEqual(expect.objectContaining({
+      phase: 'listing-request-permit-blocked', mutationBoundaryCrossed: false, retryAt: 61000,
+    }));
+    expect(checkpoints.some((checkpoint) => checkpoint.phase === 'listing-request-started')).toBe(false);
   });
 
   it('rechecks the high-value cap after EA raises live price limits and before listing', async () => {
@@ -527,7 +562,7 @@ describe('Trade listing transaction', () => {
       job: job({ ratingRules: [{ min: 75, max: 82, buyNow: 10_000 }] }),
       prepared: plan,
       confirmationToken: plan.confirmation.token,
-      confirmationText: plan.confirmation.requiredText,
+      approved: true,
     });
 
     expect(result).toMatchObject({

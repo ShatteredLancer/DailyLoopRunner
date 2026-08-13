@@ -20,7 +20,7 @@ describe('Expired Lease validation public policy', () => {
     [[], 'Exactly one armed'],
     [[job(), job({ id: 'second' })], 'Exactly one armed'],
     [[job({ type: 'buy' })], 'Listing Job'],
-    [[job({ schedule: { type: 'interval', everyMinutes: 5 } })], 'once Job'],
+    [[job({ schedule: { type: 'interval', intervalSeconds: 300 } })], 'once Job'],
     [[job({ policy: { sources: ['transfer'], maxListings: 1, expiredPolicy: 'reprice' } })], 'Club-only'],
     [[job({ policy: { sources: ['club'], maxListings: 2, expiredPolicy: 'skip' } })], 'maxListings=1'],
     [[job({ policy: { sources: ['club'], maxListings: 1, expiredPolicy: 'reprice' } })], 'expiredPolicy=skip'],

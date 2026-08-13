@@ -27,12 +27,10 @@ describe('Trade Buy diagnostics', () => {
           response: { success: true, status: 200, privatePayload: 'must-not-leak' },
         }, {
           at: 120,
-          phase: 'chunk-budget-waiting',
+          phase: 'buy-request-permit-waiting',
           chunkIndex: 2,
           offset: 2,
           quantity: 2,
-          required: 28,
-          remaining: 20,
           retryAt: 6000,
         }],
       },
@@ -74,7 +72,7 @@ describe('Trade Buy diagnostics', () => {
         runId: 'journal-run', phase: 'buy-request-started',
         events: [
           { phase: 'buy-request-started', item: { id: 70, definitionId: 8401, pile: 'market' }, tradeId: 700, price: 900 },
-          { phase: 'chunk-budget-waiting', chunkIndex: 2, offset: 2, quantity: 2, required: 28, remaining: 20, retryAt: 6000 },
+          { phase: 'buy-request-permit-waiting', chunkIndex: 2, offset: 2, quantity: 2, retryAt: 6000 },
         ],
       },
       receipt: {

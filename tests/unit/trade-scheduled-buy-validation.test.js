@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { normalizeTradeJob } from '../../src/trade/contracts.js';
 import {
   inspectScheduledBuyValidationJob,
-  scheduledBuyValidationConfirmation,
   SCHEDULED_BUY_VALIDATION_MAX_EMPTY_SEARCHES,
   SCHEDULED_BUY_VALIDATION_MAX_RUNTIME_MINUTES,
 } from '../../src/trade/scheduled-buy-validation.js';
@@ -45,7 +44,10 @@ describe('Scheduled guarded Buy validation gate', () => {
       ready: true,
       maxPrice: 1000,
       minimumRetainedCoins: 100000,
-      requiredText: 'RUN BUY ONCE 1 RESERVE 100000',
+      approval: {
+        action: 'scheduled-buy', quantity: 1, maxPrice: 1000, maxSpend: 1000,
+        minimumRetainedCoins: 100000, scheduleType: 'once', authorizedRuns: 2,
+      },
       job: {
         policy: {
           quantity: 1,
@@ -59,12 +61,10 @@ describe('Scheduled guarded Buy validation gate', () => {
   it('allows a Job to raise but not lower the global reserve', () => {
     expect(inspectScheduledBuyValidationJob(job({ policy: { minimumRetainedCoins: 150000 } }), {
       minimumRetainedCoins: 100000,
-    })).toMatchObject({ minimumRetainedCoins: 150000, requiredText: 'RUN BUY ONCE 1 RESERVE 150000' });
+    })).toMatchObject({ minimumRetainedCoins: 150000, approval: { minimumRetainedCoins: 150000 } });
     expect(inspectScheduledBuyValidationJob(job({ policy: { minimumRetainedCoins: 50000 } }), {
       minimumRetainedCoins: 100000,
-    })).toMatchObject({ minimumRetainedCoins: 100000, requiredText: 'RUN BUY ONCE 1 RESERVE 100000' });
-    expect(scheduledBuyValidationConfirmation(0)).toBe('RUN BUY ONCE 1 RESERVE 0');
-    expect(() => scheduledBuyValidationConfirmation(null)).toThrow('must be explicit');
+    })).toMatchObject({ minimumRetainedCoins: 100000, approval: { minimumRetainedCoins: 100000 } });
     const invalid = job();
     invalid.policy.minimumRetainedCoins = -1;
     expect(inspectScheduledBuyValidationJob(invalid, {
@@ -82,23 +82,23 @@ describe('Scheduled guarded Buy validation gate', () => {
       ready: true,
       maxPrice: 1500,
       maxSpend: 2500,
-      requiredText: 'RUN BUY ONCE 2 RESERVE 100000',
+      approval: { action: 'scheduled-buy', quantity: 2, maxPrice: 1500, maxSpend: 2500 },
       job: { policy: { ratingMin: 84, ratingMax: 85, quantity: 2 } },
     });
   });
 
-  it('requires an explicit two-run confirmation for recurring schedules', () => {
+  it('describes recurring and window approvals without confirmation phrases', () => {
     expect(inspectScheduledBuyValidationJob(job({
       schedule: { type: 'daily', time: '09:00', timezone: 'UTC' },
     }), { minimumRetainedCoins: 100000, authorizationRuns: 2 })).toMatchObject({
       ready: true,
-      requiredText: 'RUN BUY DAILY 1 RESERVE 100000 FOR 2 RUNS',
+      approval: { scheduleType: 'daily', authorizedRuns: 2 },
     });
     expect(inspectScheduledBuyValidationJob(job({
       schedule: { type: 'window', startAt: 2000, endAt: 60_000 },
     }), { minimumRetainedCoins: 100000 })).toMatchObject({
       ready: true,
-      requiredText: 'RUN BUY WINDOW 1 RESERVE 100000',
+      approval: { scheduleType: 'window' },
     });
   });
 

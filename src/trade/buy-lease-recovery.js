@@ -6,13 +6,20 @@ function journalForRun(journals, runId) {
     .find((entry) => entry.snapshot?.runId === runId) || null;
 }
 
+function journalKind(journal) {
+  if (journal?.before && Array.isArray(journal.before.items)) return 'bulk-relist';
+  if (journal?.source) return 'listing';
+  return 'buy';
+}
+
 function terminalItemStatus(kind, status) {
   if (kind === 'listing') return status === 'listed';
+  if (kind === 'bulk-relist') return status === 'relisted';
   return status === 'purchased';
 }
 
 function recoveredReceipt(previous, journal, finishedAt, reason) {
-  const kind = journal?.source ? 'listing' : 'buy';
+  const kind = journalKind(journal);
   const items = journal?.items || [];
   const succeeded = items.filter((entry) => terminalItemStatus(kind, entry.status)).length;
   const failed = items.filter((entry) => ['failed', 'blocked', 'ambiguous'].includes(entry.status)).length;
@@ -53,11 +60,13 @@ export function reconcileExpiredTradeLease(options = {}) {
   if (!inspected.expired || !previous) return { status: 'not-needed', reason: null, receipt: null };
   const journalEntry = journalForRun(options.journals, previous.runId);
   const journal = journalEntry?.snapshot || null;
-  const kind = journal?.source ? 'listing' : 'buy';
+  const kind = journalKind(journal);
   const crossedJournalBoundary = journal?.items?.some((entry) => entry.mutationBoundaryCrossed === true) === true;
   const crossedLeaseBoundary = Number(previous.heartbeatAt) !== Number(previous.acquiredAt);
   const journalTerminal = journal && journal.status !== 'active';
-  const knownTerminalStatuses = kind === 'listing' ? ['listed', 'failed'] : ['purchased', 'competition-lost', 'failed'];
+  const knownTerminalStatuses = kind === 'listing'
+    ? ['listed', 'failed']
+    : kind === 'bulk-relist' ? ['relisted', 'failed'] : ['purchased', 'competition-lost', 'failed'];
   const uncertainJournalMutation = journal?.items?.some((entry) => (
     entry.mutationBoundaryCrossed === true && !knownTerminalStatuses.includes(entry.status)
   )) === true;
@@ -66,7 +75,7 @@ export function reconcileExpiredTradeLease(options = {}) {
   }
   const snapshot = store.read();
   const job = (snapshot.jobs || []).find((entry) => entry.id === previous.jobId);
-  if (!journal && (!job || !['buy', 'listing'].includes(job.type))) {
+  if (!journal && (!job || !['buy', 'listing', 'bulk-relist'].includes(job.type))) {
     return { status: 'blocked', reason: 'expired-lease-job-unavailable', receipt: null };
   }
   if ((snapshot.history || []).some((entry) => entry.runId === previous.runId)) {

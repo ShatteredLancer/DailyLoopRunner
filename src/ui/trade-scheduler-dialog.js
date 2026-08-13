@@ -1,7 +1,6 @@
 import { normalizeTradeJob } from '../trade/contracts.js';
 import { inspectManualBuyValidationJob } from '../trade/manual-buy-validation.js';
 import { selectGuardedScheduledTradeJob } from '../trade/guarded-scheduled-job.js';
-import { tradeBuyRequestReserve } from '../trade/request-budget.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 const PAGE_SIZE = 15;
@@ -94,14 +93,24 @@ export function createTradeJobDraft(type = 'listing', options = {}) {
   if (options.job) return clone(options.job);
   const common = {
     id: uniqueJobId(type, now),
-    name: type === 'buy' ? 'Buy Job' : 'Listing Job',
+    name: type === 'buy' ? 'Buy Job' : type === 'bulk-relist' ? 'Re-list All Job' : 'Listing Job',
     type,
     enabled: true,
     armed: false,
-    schedule: { type: 'manual' },
+    schedule: type === 'bulk-relist'
+      ? { type: 'interval', intervalSeconds: 300, anchorAt: now }
+      : { type: 'manual' },
     misfirePolicy: { type: GRACE_MISFIRE, graceMinutes: 15 },
     createdAt: now,
     updatedAt: now,
+  };
+  if (type === 'bulk-relist') return {
+    ...common,
+    policy: {
+      relistDelaySeconds: [3, 8],
+      initialRateLimitCooldownSeconds: 60,
+      maximumRateLimitCooldownSeconds: 1800,
+    },
   };
   return type === 'buy' ? {
     ...common,
@@ -109,14 +118,18 @@ export function createTradeJobDraft(type = 'listing', options = {}) {
       cardClass: 'rare-gold', ratingMin: 84, ratingMax: 84, maxBuyNow: 1000,
       ratingPriceOverrides: {}, quantity: 1, totalBudget: 1000, minimumRetainedCoins: null,
       maxRuntimeMinutes: 15,
-      searchDelaySeconds: [8, 15], maxPurchasesPerSearch: 1, maxConsecutiveEmptySearches: 20,
+      searchDelaySeconds: [7, 15], buyDelaySeconds: [0, 1], maxPurchasesPerSearch: 1,
+      searchCyclePauseEnabled: true, searchCyclePauseEvery: [10, 15], searchCyclePauseSeconds: [5, 8],
+      initialRateLimitCooldownSeconds: 60, maximumRateLimitCooldownSeconds: 1800,
+      maxConsecutiveEmptySearches: 20,
     },
   } : {
     ...common,
     policy: {
       sources: ['club'], cardClass: 'common-gold', ratingRules: [{ min: 75, max: 82, buyNow: 700 }],
       marketOverride: { enabled: false, markupPercent: 5, maxQuoteAgeMinutes: 10 },
-      startPricePolicy: 'one-step-below', durationSeconds: 3600, listingDelaySeconds: [4, 8],
+      startPricePolicy: 'one-step-below', durationSeconds: 3600, listingDelaySeconds: [3, 8],
+      initialRateLimitCooldownSeconds: 60, maximumRateLimitCooldownSeconds: 1800,
       maxListings: 1, expiredPolicy: 'skip',
     },
   };
@@ -126,9 +139,28 @@ export function tradeScheduleSummary(job = {}) {
   const schedule = job.schedule || {};
   if (schedule.type === 'once') return `Once ${new Date(Number(schedule.runAt)).toLocaleString()}`;
   if (schedule.type === 'daily') return `Daily ${schedule.time} ${schedule.timezone}`;
-  if (schedule.type === 'interval') return `Every ${schedule.everyMinutes} min`;
+  if (schedule.type === 'interval') return `Every ${schedule.intervalSeconds} sec`;
   if (schedule.type === RANGE_SCHEDULE) return `${new Date(Number(schedule.startAt)).toLocaleString()} - ${new Date(Number(schedule.endAt)).toLocaleString()}`;
   return 'Manual';
+}
+
+function guardedJobApprovalSummary(gate = {}) {
+  const job = gate.job || {};
+  const approval = gate.approval || {};
+  const details = [tradeScheduleSummary(job)];
+  if (approval.action === 'scheduled-buy') {
+    details.push(`${approval.quantity} item(s)`);
+    details.push(`max ${Number(approval.maxPrice || 0).toLocaleString('en-US')}/card`);
+    details.push(`spend ${Number(approval.maxSpend || 0).toLocaleString('en-US')}`);
+    details.push(`reserve ${Number(approval.minimumRetainedCoins || 0).toLocaleString('en-US')}`);
+  } else if (approval.action === 'bulk-relist') {
+    details.push('Re-list all Unsold');
+    details.push(`up to ${Number(approval.itemLimit || 100)} item(s)`);
+  } else {
+    details.push(approval.action === 'transfer-reprice' ? 'Transfer reprice' : 'Club listing');
+    details.push(`${approval.quantity} item(s)`);
+  }
+  return `${job.name || job.id || 'Trade Job'} [${details.join(' | ')}]`;
 }
 
 export function normalizeTradeJobEditorValue(value, options = {}) {
@@ -207,17 +239,17 @@ export function showTradeSchedulerDialog(options = {}) {
 
   function renderBanner() {
     const circuit = options.getCircuit?.() || null;
-    const requestBudget = options.getRequestBudget?.() || null;
+    const requestPacing = options.getRequestPacing?.() || null;
     const circuitState = circuit?.circuit?.state || 'closed';
     const scheduler = snapshot.paused ? 'paused' : 'running';
     const execution = snapshot.liveExecutionEnabled ? 'enabled' : 'locked';
     const recovery = options.getRecovery?.() || {};
-    const budgetText = requestBudget
-      ? ` | Requests: ${Number(requestBudget.remaining || 0)}/${Number(requestBudget.limit || 0)} available | Base guarded reserve: ${requestBudget.runCapacity?.ready === false ? 'cooldown' : 'ready'}`
+    const pacingText = requestPacing
+      ? ` | Pacing: ${requestPacing.status || 'available'}${requestPacing.nextAllowedAt ? ` until ${new Date(Number(requestPacing.nextAllowedAt)).toLocaleTimeString()}` : ''}`
       : '';
     banner.textContent = recovery.reviewRequired === true
       ? `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState} | Recovery review required`
-      : `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}${budgetText}`;
+      : `Scheduler: ${scheduler} | Automatic execution: ${execution} | Circuit: ${circuitState}${pacingText}`;
     banner.style.color = circuitState === 'open' ? '#e3a7a7' : '#b8c3d2';
   }
 
@@ -231,17 +263,25 @@ export function showTradeSchedulerDialog(options = {}) {
   function renderEditor() {
     content.textContent = '';
     const draft = editing;
-    content.appendChild(section(dom, draft.type === 'buy' ? 'Buy Job' : 'Listing Job'));
+    content.appendChild(section(dom, draft.type === 'buy' ? 'Buy Job' : draft.type === 'bulk-relist' ? 'Re-list All Job' : 'Listing Job'));
     const form = styles(dom.create('div'), { display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '720px', marginTop: '8px' });
     const name = input(dom, 'text', draft.name, mode, 'bronze-loop-trade-job-name');
     const enabled = input(dom, 'checkbox', draft.enabled, mode, 'bronze-loop-trade-job-enabled');
     const armed = input(dom, 'checkbox', draft.armed, mode, 'bronze-loop-trade-job-armed');
     form.append(field(dom, 'Name', name, mode), checkboxLabel('Enabled', enabled), checkboxLabel('Armed', armed));
 
-    const scheduleType = select(dom, draft.schedule?.type || 'manual', [
-      { value: 'manual', text: 'Manual' }, { value: 'once', text: 'Once' }, { value: 'daily', text: 'Daily' },
+    const scheduleEntries = [
+      { value: 'once', text: 'Once' }, { value: 'daily', text: 'Daily' },
       { value: 'interval', text: 'Interval' }, { value: RANGE_SCHEDULE, text: 'Window' },
-    ], mode, 'bronze-loop-trade-job-schedule');
+    ];
+    if (draft.type !== 'bulk-relist') scheduleEntries.unshift({ value: 'manual', text: 'Manual' });
+    const scheduleType = select(
+      dom,
+      draft.schedule?.type || (draft.type === 'bulk-relist' ? 'interval' : 'manual'),
+      scheduleEntries,
+      mode,
+      'bronze-loop-trade-job-schedule',
+    );
     form.append(section(dom, 'Schedule'), field(dom, 'Type', scheduleType, mode));
     const scheduleFields = dom.create('div');
     form.appendChild(scheduleFields);
@@ -251,11 +291,12 @@ export function showTradeSchedulerDialog(options = {}) {
     const grace = input(dom, 'number', draft.misfirePolicy?.graceMinutes || 15, mode, 'bronze-loop-trade-job-grace');
     form.append(field(dom, 'Misfire', misfire, mode), field(dom, 'Grace minutes', grace, mode));
 
-    const cardClass = select(dom, draft.policy.cardClass, [
+    const cardClass = draft.type === 'bulk-relist' ? null : select(dom, draft.policy.cardClass, [
       { value: 'common-gold', text: 'Common Gold' }, { value: 'rare-gold', text: 'Rare Gold' },
       { value: 'normal-gold', text: 'All normal Gold' }, { value: 'special', text: 'Special' }, { value: 'gold', text: 'All Gold' },
     ], mode, 'bronze-loop-trade-job-card-class');
-    form.append(section(dom, 'Policy'), field(dom, 'Card class', cardClass, mode));
+    form.appendChild(section(dom, 'Policy'));
+    if (cardClass) form.appendChild(field(dom, 'Card class', cardClass, mode));
     const policyFields = dom.create('div');
     styles(policyFields, { display: 'flex', flexDirection: 'column', gap: '8px' });
     form.appendChild(policyFields);
@@ -280,8 +321,18 @@ export function showTradeSchedulerDialog(options = {}) {
         controls.timezone = input(dom, 'text', draft.schedule?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', mode, 'bronze-loop-trade-job-timezone');
         scheduleFields.append(field(dom, 'Time', controls.dailyTime, mode), field(dom, 'Timezone', controls.timezone, mode));
       } else if (type === 'interval') {
-        controls.everyMinutes = input(dom, 'number', draft.schedule?.everyMinutes || 60, mode, 'bronze-loop-trade-job-interval');
-        scheduleFields.appendChild(field(dom, 'Every minutes', controls.everyMinutes, mode));
+        controls.intervalSeconds = input(dom, 'number', draft.schedule?.intervalSeconds || (draft.type === 'bulk-relist' ? 300 : 3600), mode, 'bronze-loop-trade-job-interval');
+        if (draft.type === 'bulk-relist') controls.intervalSeconds.min = '60';
+        scheduleFields.appendChild(field(dom, 'Every seconds', controls.intervalSeconds, mode));
+        if (draft.type === 'bulk-relist') {
+          const presets = styles(dom.create('div'), { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' });
+          for (const [label, seconds] of [['1 min', 60], ['5 min', 300], ['10 min', 600]]) {
+            const preset = button(dom, label, mode, `bronze-loop-trade-job-interval-${seconds}`);
+            preset.addEventListener('click', () => { controls.intervalSeconds.value = String(seconds); });
+            presets.appendChild(preset);
+          }
+          scheduleFields.appendChild(presets);
+        }
       } else if (type === RANGE_SCHEDULE) {
         controls.startAt = input(dom, 'datetime-local', epochInputValue(draft.schedule?.startAt || now()), mode, 'bronze-loop-trade-job-range-start');
         controls.endAt = input(dom, 'datetime-local', epochInputValue(draft.schedule?.endAt || now() + 60 * 60_000), mode, 'bronze-loop-trade-job-range-end');
@@ -289,7 +340,23 @@ export function showTradeSchedulerDialog(options = {}) {
       }
     }
 
-    if (draft.type === 'buy') {
+    if (draft.type === 'bulk-relist') {
+      const scope = styles(dom.create('div'), {
+        border: '1px solid #714f55', background: '#241d22', color: '#f1c1c1', padding: '9px', fontSize: '12px', lineHeight: '1.45',
+      });
+      scope.textContent = 'Each run re-lists every current Unsold item in one EA action, preserving EA prices. The run is limited to a 100-item verified snapshot.';
+      controls.relistDelayMin = input(dom, 'number', draft.policy.relistDelaySeconds?.[0] || 3, mode, 'bronze-loop-trade-job-relist-delay-min');
+      controls.relistDelayMax = input(dom, 'number', draft.policy.relistDelaySeconds?.[1] || 8, mode, 'bronze-loop-trade-job-relist-delay-max');
+      controls.initialRateLimitCooldown = input(dom, 'number', draft.policy.initialRateLimitCooldownSeconds || 60, mode, 'bronze-loop-trade-job-cooldown-initial');
+      controls.maximumRateLimitCooldown = input(dom, 'number', draft.policy.maximumRateLimitCooldownSeconds || 1800, mode, 'bronze-loop-trade-job-cooldown-maximum');
+      policyFields.append(
+        scope,
+        field(dom, 'Re-list delay min', controls.relistDelayMin, mode),
+        field(dom, 'Re-list delay max', controls.relistDelayMax, mode),
+        field(dom, 'Initial 429 cooldown', controls.initialRateLimitCooldown, mode),
+        field(dom, 'Maximum 429 cooldown', controls.maximumRateLimitCooldown, mode),
+      );
+    } else if (draft.type === 'buy') {
       for (const [key, label, fallback] of [
         ['ratingMin', 'Rating min', 84], ['ratingMax', 'Rating max', 84], ['maxBuyNow', 'Max Buy Now', 1000],
         ['quantity', 'Quantity', 1], ['totalBudget', 'Total budget', 1000], ['maxRuntimeMinutes', 'Max runtime min', 15],
@@ -309,12 +376,32 @@ export function showTradeSchedulerDialog(options = {}) {
       controls.ratingQuantityOverrides = input(dom, 'text', Object.entries(draft.policy.ratingQuantityOverrides || {}).map(([rating, quantity]) => `${rating}=${quantity}`).join(', '), mode, 'bronze-loop-trade-job-rating-quantities');
       controls.searchDelayMin = input(dom, 'number', draft.policy.searchDelaySeconds?.[0] || 8, mode, 'bronze-loop-trade-job-search-delay-min');
       controls.searchDelayMax = input(dom, 'number', draft.policy.searchDelaySeconds?.[1] || 15, mode, 'bronze-loop-trade-job-search-delay-max');
+      controls.buyDelayMin = input(dom, 'number', draft.policy.buyDelaySeconds?.[0] ?? 0, mode, 'bronze-loop-trade-job-buy-delay-min');
+      controls.buyDelayMax = input(dom, 'number', draft.policy.buyDelaySeconds?.[1] ?? 1, mode, 'bronze-loop-trade-job-buy-delay-max');
+      controls.maxPurchasesPerSearch = input(dom, 'number', draft.policy.maxPurchasesPerSearch || 1, mode, 'bronze-loop-trade-job-purchases-per-search');
+      controls.searchCyclePauseEnabled = input(dom, 'checkbox', draft.policy.searchCyclePauseEnabled !== false, mode, 'bronze-loop-trade-job-cycle-pause-enabled');
+      controls.searchCycleEveryMin = input(dom, 'number', draft.policy.searchCyclePauseEvery?.[0] || 10, mode, 'bronze-loop-trade-job-cycle-every-min');
+      controls.searchCycleEveryMax = input(dom, 'number', draft.policy.searchCyclePauseEvery?.[1] || 15, mode, 'bronze-loop-trade-job-cycle-every-max');
+      controls.searchCyclePauseMin = input(dom, 'number', draft.policy.searchCyclePauseSeconds?.[0] || 5, mode, 'bronze-loop-trade-job-cycle-pause-min');
+      controls.searchCyclePauseMax = input(dom, 'number', draft.policy.searchCyclePauseSeconds?.[1] || 8, mode, 'bronze-loop-trade-job-cycle-pause-max');
+      controls.initialRateLimitCooldown = input(dom, 'number', draft.policy.initialRateLimitCooldownSeconds || 60, mode, 'bronze-loop-trade-job-cooldown-initial');
+      controls.maximumRateLimitCooldown = input(dom, 'number', draft.policy.maximumRateLimitCooldownSeconds || 1800, mode, 'bronze-loop-trade-job-cooldown-maximum');
       policyFields.append(
         field(dom, 'Job minimum retained coins', controls.minimumRetainedCoins, mode),
         field(dom, 'Rating prices', controls.ratingPriceOverrides, mode),
         field(dom, 'Rating quantities', controls.ratingQuantityOverrides, mode),
         field(dom, 'Search delay min', controls.searchDelayMin, mode),
         field(dom, 'Search delay max', controls.searchDelayMax, mode),
+        field(dom, 'Buy delay min', controls.buyDelayMin, mode),
+        field(dom, 'Buy delay max', controls.buyDelayMax, mode),
+        field(dom, 'Purchases per search', controls.maxPurchasesPerSearch, mode),
+        checkboxLabel('Pause after search cycles', controls.searchCyclePauseEnabled),
+        field(dom, 'Cycle count min', controls.searchCycleEveryMin, mode),
+        field(dom, 'Cycle count max', controls.searchCycleEveryMax, mode),
+        field(dom, 'Cycle pause min', controls.searchCyclePauseMin, mode),
+        field(dom, 'Cycle pause max', controls.searchCyclePauseMax, mode),
+        field(dom, 'Initial 429 cooldown', controls.initialRateLimitCooldown, mode),
+        field(dom, 'Maximum 429 cooldown', controls.maximumRateLimitCooldown, mode),
       );
     } else {
       controls.clubSource = input(dom, 'checkbox', draft.policy.sources?.includes('club'), mode, 'bronze-loop-trade-job-source-club');
@@ -350,6 +437,8 @@ export function showTradeSchedulerDialog(options = {}) {
       controls.listingDelayMin = input(dom, 'number', draft.policy.listingDelaySeconds?.[0] || 4, mode, 'bronze-loop-trade-job-list-delay-min');
       controls.listingDelayMax = input(dom, 'number', draft.policy.listingDelaySeconds?.[1] || 8, mode, 'bronze-loop-trade-job-list-delay-max');
       controls.expiredPolicy = select(dom, draft.policy.expiredPolicy || 'skip', [{ value: 'skip', text: 'Skip expired' }, { value: 'reprice', text: 'Reprice expired' }], mode, 'bronze-loop-trade-job-expired');
+      controls.initialRateLimitCooldown = input(dom, 'number', draft.policy.initialRateLimitCooldownSeconds || 60, mode, 'bronze-loop-trade-job-cooldown-initial');
+      controls.maximumRateLimitCooldown = input(dom, 'number', draft.policy.maximumRateLimitCooldownSeconds || 1800, mode, 'bronze-loop-trade-job-cooldown-maximum');
       policyFields.append(
         checkboxLabel('Use higher market quote', controls.marketEnabled), field(dom, 'Markup %', controls.markupPercent, mode),
         field(dom, 'Quote max age', controls.quoteAge, mode), field(dom, 'Quote fallback', controls.quoteFallback, mode),
@@ -357,6 +446,8 @@ export function showTradeSchedulerDialog(options = {}) {
         field(dom, 'Duration', controls.durationSeconds, mode), field(dom, 'Max listings', controls.maxListings, mode),
         field(dom, 'Listing delay min', controls.listingDelayMin, mode), field(dom, 'Listing delay max', controls.listingDelayMax, mode),
         field(dom, 'Expired items', controls.expiredPolicy, mode),
+        field(dom, 'Initial 429 cooldown', controls.initialRateLimitCooldown, mode),
+        field(dom, 'Maximum 429 cooldown', controls.maximumRateLimitCooldown, mode),
       );
     }
     renderScheduleFields();
@@ -377,10 +468,10 @@ export function showTradeSchedulerDialog(options = {}) {
         draft.schedule = { type: scheduleType.value };
         if (scheduleType.value === 'once') draft.schedule.runAt = readEpochInput(controls.runAt.value);
         if (scheduleType.value === 'daily') draft.schedule = { type: 'daily', time: controls.dailyTime.value, timezone: controls.timezone.value };
-        if (scheduleType.value === 'interval') draft.schedule = { type: 'interval', everyMinutes: Number(controls.everyMinutes.value), anchorAt: now() };
+        if (scheduleType.value === 'interval') draft.schedule = { type: 'interval', intervalSeconds: Number(controls.intervalSeconds.value), anchorAt: now() };
         if (scheduleType.value === RANGE_SCHEDULE) draft.schedule = { type: RANGE_SCHEDULE, startAt: readEpochInput(controls.startAt.value), endAt: readEpochInput(controls.endAt.value) };
         draft.misfirePolicy = misfire.value === GRACE_MISFIRE ? { type: GRACE_MISFIRE, graceMinutes: Number(grace.value) } : { type: misfire.value };
-        draft.policy.cardClass = cardClass.value;
+        if (cardClass) draft.policy.cardClass = cardClass.value;
         if (draft.type === 'buy') {
           for (const key of ['ratingMin', 'ratingMax', 'maxBuyNow', 'quantity', 'totalBudget', 'maxRuntimeMinutes', 'maxConsecutiveEmptySearches']) draft.policy[key] = Number(controls[key].value);
           draft.policy.minimumRetainedCoins = controls.minimumRetainedCoins.value === ''
@@ -389,8 +480,12 @@ export function showTradeSchedulerDialog(options = {}) {
           draft.policy.ratingPriceOverrides = Object.fromEntries(String(controls.ratingPriceOverrides.value || '').split(',').map((entry) => entry.trim().split('=').map((part) => part.trim())).filter(([rating, price]) => rating && Number(price) > 0));
           draft.policy.ratingQuantityOverrides = Object.fromEntries(String(controls.ratingQuantityOverrides.value || '').split(',').map((entry) => entry.trim().split('=').map((part) => part.trim())).filter(([rating, quantity]) => rating && Number.isInteger(Number(quantity)) && Number(quantity) > 0));
           draft.policy.searchDelaySeconds = [Number(controls.searchDelayMin.value), Number(controls.searchDelayMax.value)];
-          draft.policy.maxPurchasesPerSearch = 1;
-        } else {
+          draft.policy.buyDelaySeconds = [Number(controls.buyDelayMin.value), Number(controls.buyDelayMax.value)];
+          draft.policy.maxPurchasesPerSearch = Number(controls.maxPurchasesPerSearch.value);
+          draft.policy.searchCyclePauseEnabled = controls.searchCyclePauseEnabled.checked;
+          draft.policy.searchCyclePauseEvery = [Number(controls.searchCycleEveryMin.value), Number(controls.searchCycleEveryMax.value)];
+          draft.policy.searchCyclePauseSeconds = [Number(controls.searchCyclePauseMin.value), Number(controls.searchCyclePauseMax.value)];
+        } else if (draft.type === 'listing') {
           draft.policy.sources = [['club', controls.clubSource], ['transfer', controls.transferSource]].filter(([, control]) => control.checked).map(([source]) => source);
           draft.policy.ratingRules = controls.rules.map((rule) => ({ min: Number(rule.min.value), max: Number(rule.max.value), buyNow: Number(rule.price.value) }));
           draft.policy.marketOverride = { enabled: controls.marketEnabled.checked, markupPercent: Number(controls.markupPercent.value), maxQuoteAgeMinutes: Number(controls.quoteAge.value), fallbackPolicy: controls.quoteFallback.value };
@@ -399,7 +494,13 @@ export function showTradeSchedulerDialog(options = {}) {
           draft.policy.maxListings = Number(controls.maxListings.value);
           draft.policy.listingDelaySeconds = [Number(controls.listingDelayMin.value), Number(controls.listingDelayMax.value)];
           draft.policy.expiredPolicy = controls.expiredPolicy.value;
+        } else {
+          draft.policy = {
+            relistDelaySeconds: [Number(controls.relistDelayMin.value), Number(controls.relistDelayMax.value)],
+          };
         }
+        draft.policy.initialRateLimitCooldownSeconds = Number(controls.initialRateLimitCooldown.value);
+        draft.policy.maximumRateLimitCooldownSeconds = Number(controls.maximumRateLimitCooldown.value);
         const normalized = normalizeTradeJobEditorValue(draft, { now: now() });
         buyPreviews.delete(normalized.id);
         options.onSaveJob?.(normalized);
@@ -419,19 +520,21 @@ export function showTradeSchedulerDialog(options = {}) {
     content.textContent = '';
     const toolbar = styles(dom.create('div'), { display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px' });
     const manual = button(dom, 'Manual listing', mode, 'bronze-loop-trade-manual-listing');
+    const bulkRelist = button(dom, 'Re-list All', mode, 'bronze-loop-trade-bulk-relist');
     const addListing = button(dom, 'New listing Job', mode, 'bronze-loop-trade-new-listing');
     const addBuy = button(dom, 'New Buy Job', mode, 'bronze-loop-trade-new-buy');
+    const addBulkRelist = button(dom, 'New Re-list All Job', mode, 'bronze-loop-trade-new-bulk-relist');
     const exportConfig = button(dom, 'Export config', mode, 'bronze-loop-trade-export-config');
     const importConfig = button(dom, 'Import config', mode, 'bronze-loop-trade-import-config');
     const diagnostics = button(dom, 'Save diagnostics', mode, 'bronze-loop-trade-scheduler-diagnostics');
     const circuit = options.getCircuit?.();
-    const resetCircuit = button(dom, 'Reset trade block', mode, 'bronze-loop-trade-circuit-reset');
-    resetCircuit.style.display = circuit?.circuit?.state === 'open' ? '' : 'none';
-    toolbar.append(manual, addListing, addBuy, exportConfig, importConfig, diagnostics, resetCircuit);
+    toolbar.append(manual, bulkRelist, addListing, addBuy, addBulkRelist, exportConfig, importConfig, diagnostics);
     content.appendChild(toolbar);
     manual.addEventListener('click', () => options.onOpenManualListing?.());
+    bulkRelist.addEventListener('click', () => options.onOpenBulkRelist?.());
     addListing.addEventListener('click', () => { editing = createTradeJobDraft('listing', { now: now() }); renderEditor(); });
     addBuy.addEventListener('click', () => { editing = createTradeJobDraft('buy', { now: now() }); renderEditor(); });
+    addBulkRelist.addEventListener('click', () => { editing = createTradeJobDraft('bulk-relist', { now: now() }); renderEditor(); });
     exportConfig.addEventListener('click', () => {
       try {
         options.onExportJobConfig?.();
@@ -447,7 +550,30 @@ export function showTradeSchedulerDialog(options = {}) {
       render();
     });
     diagnostics.addEventListener('click', () => options.onDownloadDiagnostics?.());
-    resetCircuit.addEventListener('click', () => { options.onResetCircuit?.(); refreshSnapshot(); setStatus('Trade block reset manually'); render(); });
+    if (circuit?.circuit?.state === 'open') {
+      const circuitRecovery = styles(dom.create('div'), {
+        border: '1px solid #8f3d49', background: '#2a1b20', padding: '10px', marginBottom: '10px',
+      });
+      const circuitWarning = styles(dom.create('div'), {
+        color: '#f1c1c1', fontSize: '12px', lineHeight: '1.45', marginBottom: '8px',
+      });
+      circuitWarning.textContent = `High-risk reset: Trade is blocked (${circuit.circuit.reason || 'unknown reason'}). Reset only after checking EA state; this unlocks future mutations but does not retry the failed action.`;
+      const circuitRisk = input(dom, 'checkbox', false, mode, 'bronze-loop-trade-circuit-risk');
+      const circuitRiskLabel = checkboxLabel('I checked EA state and understand this unlocks future Trade mutations', circuitRisk);
+      const resetCircuit = button(dom, 'Reset trade block', mode, 'bronze-loop-trade-circuit-reset');
+      styles(resetCircuit, { background: '#8f2d36', borderColor: '#c44d58' });
+      resetCircuit.disabled = true;
+      circuitRisk.addEventListener('change', () => { resetCircuit.disabled = circuitRisk.checked !== true; });
+      resetCircuit.addEventListener('click', () => {
+        if (resetCircuit.disabled || circuitRisk.checked !== true) return;
+        options.onResetCircuit?.();
+        refreshSnapshot();
+        setStatus('Trade block reset manually');
+        render();
+      });
+      circuitRecovery.append(circuitWarning, circuitRiskLabel, resetCircuit);
+      content.appendChild(circuitRecovery);
+    }
 
     const safety = styles(dom.create('div'), {
       display: 'grid', gridTemplateColumns: mode.mobile ? '1fr' : 'minmax(0, 1fr) auto', gap: '8px',
@@ -482,7 +608,10 @@ export function showTradeSchedulerDialog(options = {}) {
     const guarded = selectGuardedScheduledTradeJob(snapshot, {
       scheduledBuyEnabled: options.scheduledBuyEnabled === true,
       scheduledTransferRepriceEnabled: options.scheduledTransferRepriceEnabled === true,
+      scheduledBulkRelistEnabled: options.scheduledBulkRelistEnabled === true,
     });
+    const recovery = options.getRecovery?.() || {};
+    const recoveryBlocked = recovery.reviewRequired === true;
     if (snapshot.liveExecutionEnabled === true) {
       const gateState = dom.create('span');
       const authorizations = Object.values(snapshot.authorizations?.jobs || (snapshot.authorization ? { legacy: snapshot.authorization } : {}));
@@ -500,22 +629,34 @@ export function showTradeSchedulerDialog(options = {}) {
       });
       validationGate.append(gateState, disableGate);
     } else {
-      const gateInput = input(dom, 'text', '', mode, 'bronze-loop-trade-guarded-confirmation');
-      gateInput.placeholder = guarded.requiredText || 'No eligible guarded schedule';
-      styles(gateInput, { flex: '1 1 220px' });
+      const gateSummary = dom.create('div');
+      const scheduledJobs = guarded.jobs || [];
+      const idleWithoutArmedJobs = guarded.reason === 'validation-gate-no-armed-job';
+      gateSummary.textContent = recoveryBlocked
+        ? 'Scheduling unavailable: recovery-review-required; open Recovery and verify the previous EA result before another Job'
+        : idleWithoutArmedJobs
+          ? 'Scheduler idle: no armed Job; completed Once Jobs are automatically disarmed'
+        : guarded.ready
+          ? `Enable ${scheduledJobs.length} Job(s) for ${guarded.totalRuns} authorized Run(s): ${guarded.gates.map(guardedJobApprovalSummary).join('; ')}`
+          : `Scheduling unavailable: ${guarded.reason || 'no eligible armed Job'}`;
+      styles(gateSummary, {
+        flex: '1 1 280px',
+        color: guarded.ready && !recoveryBlocked ? '#e3c98d' : idleWithoutArmedJobs && !recoveryBlocked ? '#b8c3d2' : '#e3a7a7',
+        fontSize: '12px', overflowWrap: 'anywhere',
+      });
       const enableGate = button(dom, 'Enable guarded schedule', mode, 'bronze-loop-trade-enable-guarded-schedule');
-      enableGate.disabled = guarded.ready !== true;
-      enableGate.title = guarded.ready ? `Type ${guarded.requiredText}` : guarded.reason || 'One armed Job is required';
+      enableGate.disabled = recoveryBlocked || guarded.ready !== true;
+      enableGate.title = recoveryBlocked
+        ? 'Resolve the previous Trade Journal in Recovery first'
+        : guarded.ready
+          ? 'Approve the displayed Job and Run summary'
+          : idleWithoutArmedJobs ? 'Create or arm a Job before enabling scheduling' : guarded.reason || 'One armed Job is required';
       enableGate.addEventListener('click', async () => {
-        if (gateInput.value !== guarded.requiredText) {
-          setStatus(`Confirmation must exactly match ${guarded.requiredText}`);
-          return;
-        }
         enableGate.disabled = true;
         try {
           const jobIds = (guarded.jobs || []).map((job) => job.id);
           await options.onEnableGuardedScheduling?.({
-            confirmationText: gateInput.value,
+            approved: true,
             ...(jobIds.length > 1 ? { jobIds } : { jobId: guarded.job?.id }),
           });
           refreshSnapshot();
@@ -526,7 +667,7 @@ export function showTradeSchedulerDialog(options = {}) {
           setStatus(`Enable failed: ${error?.message || error}`);
         }
       });
-      validationGate.append(gateInput, enableGate);
+      validationGate.append(gateSummary, enableGate);
     }
     content.appendChild(validationGate);
 
@@ -549,7 +690,16 @@ export function showTradeSchedulerDialog(options = {}) {
       styles(state, { color: runtime.status === 'blocked' ? '#e3a7a7' : '#9fb2c9' });
       head.append(identity, state);
       const detail = dom.create('div');
-      detail.textContent = `${job.type} | ${tradeScheduleSummary(job)}${runtime.nextRunAt !== null && runtime.nextRunAt !== undefined ? ` | Next ${new Date(runtime.nextRunAt).toLocaleString()}` : ''}`;
+      const continuation = runtime.continuation || null;
+      const timing = continuation?.resumeAt
+        ? ` | Resume ${new Date(continuation.resumeAt).toLocaleString()}`
+        : runtime.nextRunAt !== null && runtime.nextRunAt !== undefined
+          ? ` | Next ${new Date(runtime.nextRunAt).toLocaleString()}`
+          : '';
+      const progress = continuation
+        ? ` | Slice ${Number(continuation.sliceCount || 1)} | ${Number(continuation.succeeded || 0)}/${Number(continuation.requested || 0)} complete`
+        : '';
+      detail.textContent = `${job.type} | ${tradeScheduleSummary(job)}${timing}${progress}`;
       styles(detail, { color: '#9aa6b8', fontSize: '11px', margin: '6px 0' });
       const buyPreview = buyPreviews.get(job.id);
       const buyAvailability = job.type === 'buy' ? buyValidationAvailability(job, buyPreview) : null;
@@ -564,11 +714,10 @@ export function showTradeSchedulerDialog(options = {}) {
           ? ` | Missing ratings: ${buyPreview.plan.missingRatings.join(', ')}`
           : '';
         const quantity = Number(job.policy.quantity || 1);
-        const reserve = tradeBuyRequestReserve(job);
-        previewDetail.textContent = `Preview only | ${lanes || 'No search lanes'}${missing} | Budget ${Number(job.policy.totalBudget || 0).toLocaleString()} | Runtime ${Number(job.policy.maxRuntimeMinutes || 0)} min | Chunk 2 / reserve up to ${reserve} | ${buyAvailability.ready ? `Buy ${quantity} ready` : `Buy unavailable: ${buyAvailability.reason}`}`;
+        previewDetail.textContent = `Preview only | ${lanes || 'No search lanes'}${missing} | Budget ${Number(job.policy.totalBudget || 0).toLocaleString()} | Runtime ${Number(job.policy.maxRuntimeMinutes || 0)} min | Chunk 2 | Up to ${Number(job.policy.maxPurchasesPerSearch || 1)} purchase(s) per search | ${buyAvailability.ready ? `Buy ${quantity} ready` : `Buy unavailable: ${buyAvailability.reason}`}`;
       }
       const actions = styles(dom.create('div'), { display: 'flex', gap: '6px', flexWrap: 'wrap' });
-      const run = button(dom, job.type === 'buy' ? 'Preview' : 'Run now', mode);
+      const run = button(dom, job.type === 'buy' ? 'Preview' : job.type === 'bulk-relist' ? 'Open Re-list All' : 'Run now', mode);
       const validateBuy = job.type === 'buy' && buyAvailability.ready
         ? button(dom, `Buy ${Number(job.policy.quantity || 1)}`, mode, `bronze-loop-trade-buy-one-${job.id}`)
         : null;
@@ -576,6 +725,10 @@ export function showTradeSchedulerDialog(options = {}) {
       const duplicate = button(dom, 'Duplicate', mode);
       const remove = button(dom, 'Delete', mode);
       run.addEventListener('click', async () => {
+        if (job.type === 'bulk-relist') {
+          options.onOpenBulkRelist?.();
+          return;
+        }
         if (job.type !== 'buy') {
           options.onOpenManualListing?.(job);
           return;
@@ -702,20 +855,30 @@ export function showTradeSchedulerDialog(options = {}) {
       const hash = dom.create('div');
       hash.textContent = `Evidence: ${review.evidenceHash}`;
       styles(hash, { color: '#9fb2c9', fontSize: '11px', overflowWrap: 'anywhere' });
-      const confirmation = input(dom, 'text', '', mode, `bronze-loop-trade-recovery-confirm-${review.journalType}`);
-      confirmation.placeholder = review.requiredText || '';
-      const reason = input(dom, 'text', '', mode, `bronze-loop-trade-recovery-reason-${review.journalType}`);
-      reason.placeholder = 'Reason, at least 8 characters';
-      const acknowledge = button(dom, 'Acknowledge after EA check', mode, `bronze-loop-trade-recovery-ack-${review.journalType}`);
-      acknowledge.disabled = !canAcknowledge;
+      const resolution = select(dom, '', [
+        { value: '', text: 'Select verified result' },
+        { value: 'confirmed-completed', text: 'Verified completed in EA' },
+        { value: 'confirmed-not-completed', text: 'Verified not completed in EA' },
+        { value: 'archive-unknown', text: 'Archive as unknown and unlock' },
+      ], mode, `bronze-loop-trade-recovery-resolution-${review.journalType}`);
+      const riskAccepted = input(dom, 'checkbox', false, mode, `bronze-loop-trade-recovery-risk-${review.journalType}`);
+      const riskLabel = checkboxLabel('I understand this archives evidence without retrying the transaction', riskAccepted);
+      const acknowledge = button(dom, 'Archive review and unlock', mode, `bronze-loop-trade-recovery-ack-${review.journalType}`);
+      styles(acknowledge, { background: '#8f2d36', borderColor: '#c44d58' });
+      const updateRecoveryAction = () => {
+        acknowledge.disabled = !canAcknowledge || !resolution.value || riskAccepted.checked !== true;
+      };
+      resolution.addEventListener('change', updateRecoveryAction);
+      riskAccepted.addEventListener('change', updateRecoveryAction);
+      updateRecoveryAction();
       acknowledge.addEventListener('click', () => {
         try {
           options.onAcknowledgeRecovery?.({
             journalType: review.journalType,
             runId: review.runId,
             evidenceHash: review.evidenceHash,
-            confirmationText: confirmation.value,
-            reason: reason.value,
+            resolution: resolution.value,
+            riskAccepted: riskAccepted.checked,
           });
           setStatus(`${String(review.journalType).toUpperCase()} recovery acknowledged`);
           render();
@@ -724,10 +887,10 @@ export function showTradeSchedulerDialog(options = {}) {
         }
       });
       const form = styles(dom.create('div'), {
-        display: 'grid', gridTemplateColumns: mode.mobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1fr) auto',
+        display: 'grid', gridTemplateColumns: mode.mobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1.5fr) auto',
         gap: '8px', alignItems: 'end', marginTop: '9px',
       });
-      form.append(field(dom, 'Exact confirmation', confirmation, mode), field(dom, 'Audit reason', reason, mode), acknowledge);
+      form.append(field(dom, 'Verified result', resolution, mode), riskLabel, acknowledge);
       card.append(heading, details, hash, form);
       content.appendChild(card);
     }
@@ -758,7 +921,11 @@ export function showTradeSchedulerDialog(options = {}) {
     const outcomes = metrics.outcomes || {};
     const buy = metrics.buy || {};
     const listing = metrics.listing || {};
-    const requestBudget = options.getRequestBudget?.() || {};
+    const bulkRelist = metrics.bulkRelist || {};
+    const requestPacing = options.getRequestPacing?.() || {};
+    const lastAction = requestPacing.lastAction || {};
+    const cycle = requestPacing.cycle || {};
+    const cooldown = requestPacing.cooldown || {};
     const groups = [
       ['Runs', [
         ['Total', runs.total], ['Completed', statuses.completed], ['Blocked', statuses.blocked],
@@ -773,11 +940,14 @@ export function showTradeSchedulerDialog(options = {}) {
         ['Attempts', buy.attempts], ['Spent', Number(buy.spent || 0).toLocaleString()],
       ]],
       ['Listing', [['Listed', listing.listed]]],
-      ['Request budget', [
-        ['Used', requestBudget.used], ['Remaining', requestBudget.remaining],
-        ['Limit', requestBudget.limit], ['Window', requestBudget.windowMs ? `${Math.round(Number(requestBudget.windowMs) / 60_000)} min` : 'Unavailable'],
-        ['Base guarded reserve', requestBudget.runCapacity?.ready === false ? 'Cooldown' : 'Ready'],
-        ['Required slots', requestBudget.runCapacity?.required],
+      ['Re-list All', [['Relisted', bulkRelist.relisted]]],
+      ['Request pacing', [
+        ['Status', requestPacing.status || 'available'],
+        ['Last action', lastAction.action || 'None'],
+        ['Effective interval', lastAction.delaySeconds === undefined ? 'None' : `${Number(lastAction.delaySeconds)} sec`],
+        ['Next allowed', requestPacing.nextAllowedAt ? new Date(Number(requestPacing.nextAllowedAt)).toLocaleString() : 'Now'],
+        ['Cycle', cycle.threshold ? `${Number(cycle.count || 0)}/${Number(cycle.threshold)}` : 'Inactive'],
+        ['429 cooldown', cooldown.active ? `Level ${Number(cooldown.level || 1)}` : 'Inactive'],
       ]],
     ];
     const grid = styles(dom.create('div'), {
@@ -804,13 +974,10 @@ export function showTradeSchedulerDialog(options = {}) {
     }
     content.appendChild(grid);
 
-    const requestRetryAt = requestBudget.runCapacity?.ready === false
-      ? requestBudget.runCapacity.retryAt
-      : requestBudget.status === 'cooldown' ? requestBudget.retryAt : null;
-    if (Number(requestRetryAt || 0) > 0) {
-      const cooldown = styles(dom.create('div'), { borderTop: '1px solid #47576b', marginTop: '12px', paddingTop: '8px', color: '#e3c39d', fontSize: '12px' });
-      cooldown.textContent = `Base guarded Trade capacity resumes after ${new Date(Number(requestRetryAt)).toLocaleString()}`;
-      content.appendChild(cooldown);
+    if (Number(requestPacing.nextAllowedAt || 0) > Number(now())) {
+      const pacingWait = styles(dom.create('div'), { borderTop: '1px solid #47576b', marginTop: '12px', paddingTop: '8px', color: '#e3c39d', fontSize: '12px' });
+      pacingWait.textContent = `Next Trade action allowed after ${new Date(Number(requestPacing.nextAllowedAt)).toLocaleString()} (${requestPacing.reason || 'pacing'})`;
+      content.appendChild(pacingWait);
     }
 
     const period = styles(dom.create('div'), { borderTop: '1px solid #47576b', marginTop: '12px', paddingTop: '8px', color: '#aeb8c6', fontSize: '12px' });

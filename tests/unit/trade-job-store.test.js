@@ -37,6 +37,21 @@ describe('Trade Job Store', () => {
     });
   });
 
+  it('records manual bulk Re-list All History under its own metrics type without enabling a Job type', () => {
+    const store = createTradeJobStore({ storage: memoryStorage(), now: () => 1000 });
+    const snapshot = store.addHistory({
+      runId: 'bulk-run', jobId: 'manual-bulk-relist', jobType: 'bulk-relist',
+      status: 'completed', requested: 2, succeeded: 2, finishedAt: 1000,
+    });
+    expect(snapshot.metrics).toMatchObject({
+      lastRun: { jobType: 'bulk-relist' },
+      runs: { total: 1, byJobType: { 'bulk-relist': 1, unknown: 0 } },
+      outcomes: { requested: 2, succeeded: 2 },
+      bulkRelist: { relisted: 2 },
+    });
+    expect(snapshot.jobs).toEqual([]);
+  });
+
   it('disarms imported jobs and bounds persisted history', () => {
     const store = createTradeJobStore({ storage: memoryStorage(), now: () => 1000 });
     expect(store.upsert(job(), { imported: true }).job.armed).toBe(false);
@@ -121,6 +136,35 @@ describe('Trade Job Store', () => {
     });
   });
 
+  it('reserves one occurrence across slices and consumes it only at terminal completion', () => {
+    let time = 1000;
+    const store = createTradeJobStore({ storage: memoryStorage(), now: () => time });
+    store.upsert({ ...job('once-sliced'), schedule: { type: 'once', runAt: 1000 } });
+    store.authorize('once-sliced');
+
+    expect(store.beginAuthorization('once-sliced', 'slice-run')).toMatchObject({
+      begun: true, resumed: false, remainingRuns: 1,
+    });
+    expect(store.read()).toMatchObject({
+      paused: false,
+      liveExecutionEnabled: true,
+      jobs: [{ armed: true }],
+      authorization: { remainingRuns: 1, activeRunId: 'slice-run' },
+    });
+    time = 4000;
+    expect(store.beginAuthorization('once-sliced', 'slice-run')).toMatchObject({
+      begun: true, resumed: true, remainingRuns: 1,
+    });
+    expect(store.read().authorization.activeExpiresAt).toBe(3_604_000);
+    expect(store.beginAuthorization('once-sliced', 'other-run')).toMatchObject({
+      begun: false, reason: 'schedule-authorization-run-active',
+    });
+    expect(store.completeAuthorization('once-sliced', 'slice-run')).toMatchObject({
+      completed: true, remainingRuns: 0,
+    });
+    expect(store.read()).toMatchObject({ paused: true, liveExecutionEnabled: false, jobs: [{ armed: false }] });
+  });
+
   it('authorizes three Jobs and disarms only the Job whose envelope is exhausted', () => {
     let time = 1000;
     const store = createTradeJobStore({ storage: memoryStorage(), now: () => time });
@@ -150,7 +194,7 @@ describe('Trade Job Store', () => {
     expect(store.read()).toMatchObject({ paused: true, liveExecutionEnabled: false });
   });
 
-  it('migrates a schema 4 singular authorization into schema 5', () => {
+  it('migrates a schema 4 singular authorization into schema 7 and relocks it', () => {
     const storage = memoryStorage();
     const legacyJob = job('legacy');
     const source = createTradeJobStore({ storage: memoryStorage(), now: () => 1000 });
@@ -165,10 +209,51 @@ describe('Trade Job Store', () => {
     });
     const migrated = createTradeJobStore({ storage, key: 'jobs', now: () => 2000 }).read();
     expect(migrated).toMatchObject({
-      schemaVersion: 5,
-      authorization: { jobId: 'legacy' },
-      authorizations: { schemaVersion: 2, jobs: { legacy: { jobId: 'legacy' } } },
+      schemaVersion: 8,
+      paused: true,
+      liveExecutionEnabled: false,
+      jobs: [{ id: 'legacy', armed: false }],
+      authorization: null,
+      authorizations: { schemaVersion: 3, jobs: {} },
     });
+  });
+
+  it('migrates schema 5 interval minutes to seconds and relocks only on the first read', () => {
+    const storage = memoryStorage();
+    storage.set('jobs', {
+      schemaVersion: 5,
+      paused: false,
+      liveExecutionEnabled: true,
+      jobs: [{
+        ...job('legacy-interval'),
+        schedule: { type: 'interval', everyMinutes: 5, anchorAt: 2000 },
+      }],
+    });
+
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => 3000 });
+    const migrated = store.read();
+    expect(migrated).toMatchObject({
+      schemaVersion: 8,
+      paused: true,
+      liveExecutionEnabled: false,
+      jobs: [{
+        id: 'legacy-interval',
+        schemaVersion: 3,
+        armed: false,
+        schedule: { type: 'interval', intervalSeconds: 300, anchorAt: 2000 },
+      }],
+    });
+    expect(migrated.jobs[0].schedule).not.toHaveProperty('everyMinutes');
+    expect(storage.get('jobs')).toMatchObject({
+      schemaVersion: 8,
+      paused: true,
+      liveExecutionEnabled: false,
+      jobs: [{ schedule: { intervalSeconds: 300 } }],
+    });
+    store.setPaused(false);
+    expect(store.read()).toMatchObject({ paused: false, jobs: [{ schedule: { intervalSeconds: 300 } }] });
+    const reloaded = createTradeJobStore({ storage, key: 'jobs', now: () => 4000 }).read();
+    expect(reloaded).toMatchObject({ paused: false, jobs: [{ schedule: { intervalSeconds: 300 } }] });
   });
 
   it('relocks and disarms all jobs when configuration changes during live execution', () => {
@@ -250,7 +335,7 @@ describe('Trade Job Store', () => {
     });
     const store = createTradeJobStore({ storage, key: 'jobs', now: () => 1000 });
     expect(store.read()).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 8,
       metrics: {
         firstRecordedAt: 200,
         lastRecordedAt: 400,

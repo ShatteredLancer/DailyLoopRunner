@@ -22,14 +22,6 @@ function explicitMinimumRetainedCoins(value) {
   return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
-export function scheduledBuyValidationConfirmation(minimumRetainedCoins, quantity = 1, scheduleType = 'once', runs = 1) {
-  const minimum = explicitMinimumRetainedCoins(minimumRetainedCoins);
-  if (minimum === null) throw new Error('Scheduled Buy minimum retained coins must be explicit');
-  const count = Math.min(SCHEDULED_BUY_VALIDATION_MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)));
-  const prefix = `RUN BUY ${String(scheduleType || 'once').toUpperCase()} ${count} RESERVE ${minimum}`;
-  return scheduleType === 'once' || scheduleType === 'window' ? prefix : `${prefix} FOR ${runs} RUNS`;
-}
-
 export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
   let job;
   try {
@@ -89,11 +81,15 @@ export function inspectScheduledBuyValidationJob(input = {}, options = {}) {
     maxPrice,
     minimumRetainedCoins,
     maxSpend: Number(job.policy.totalBudget),
-    requiredText: scheduledBuyValidationConfirmation(
+    approval: {
+      risk: 'attention',
+      action: 'scheduled-buy',
+      quantity: Number(job.policy.quantity),
+      maxPrice,
+      maxSpend: Number(job.policy.totalBudget),
       minimumRetainedCoins,
-      job.policy.quantity,
-      job.schedule.type,
-      options.authorizationRuns || 2,
-    ),
+      scheduleType: job.schedule.type,
+      authorizedRuns: options.authorizationRuns || 2,
+    },
   };
 }

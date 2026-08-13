@@ -1,8 +1,5 @@
 import { createTradeBuyRecap } from '../trade/buy-recap.js';
-import {
-  inspectManualBuyValidationJob,
-  manualBuyValidationConfirmation,
-} from '../trade/manual-buy-validation.js';
+import { inspectManualBuyValidationJob } from '../trade/manual-buy-validation.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 function styles(element, value) {
@@ -37,11 +34,12 @@ function formatProgress(checkpoint, progress, now) {
   if (phase === 'chunk-started') {
     return `Chunk ${chunkIndex}: reserving capacity for ${checkpoint.quantity || '?'} item(s) | ${suffix}`;
   }
-  if (phase === 'chunk-budget-waiting') {
+  if (phase === 'buy-request-permit-waiting' || phase === 'purchase-route-permit-waiting') {
     const retryAt = Number(checkpoint.retryAt || 0);
     const waitSeconds = retryAt > 0 ? Math.max(0, Math.ceil((retryAt - Number(now())) / 1000)) : null;
     const wait = waitSeconds === null ? 'retry time unavailable' : `retry in about ${waitSeconds}s`;
-    return `Chunk ${chunkIndex} waiting for request capacity: needs ${checkpoint.required || '?'}, ${checkpoint.remaining ?? '?'} remaining; ${wait} | ${suffix}`;
+    const action = phase === 'buy-request-permit-waiting' ? 'Buy' : 'purchase routing';
+    return `${action} waiting for shared pacing: ${wait} | ${suffix}`;
   }
   if (phase === 'market-search-started') {
     return `Chunk ${chunkIndex}: searching ${checkpoint.search?.rating || '?'} OVR up to ${formatCoins(checkpoint.search?.maxBuyNow)} | ${suffix}`;
@@ -168,26 +166,13 @@ export function showTradeBuyDialog(options = {}) {
     ? `Ready for guarded ${quantity}-item validation`
     : `Blocked: ${gate.reason || 'buy-preview-not-ready'}`;
 
-  const confirmation = dom.create('input');
-  confirmation.id = 'bronze-loop-trade-buy-confirmation';
-  confirmation.type = 'text';
-  confirmation.value = '';
-  const requiredText = () => manualBuyValidationConfirmation(gate.maxPrice, expectedDestination, quantity);
-  confirmation.placeholder = gate.ready ? requiredText() : 'Confirmation';
-  confirmation.autocomplete = 'off';
-  styles(confirmation, {
-    width: '100%', minWidth: '0', height: responsiveControlHeight(mode), boxSizing: 'border-box',
-    marginTop: '12px', fontSize: mode.touchTargets ? '16px' : '', background: '#222832', color: '#f4f6f8',
-    border: '1px solid #607089', padding: '0 8px',
-  });
-
   const actions = styles(dom.create('div'), { display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap', marginTop: '12px' });
   const execute = button(dom, `Buy ${quantity}`, mode, 'bronze-loop-trade-buy-execute', true);
   const stop = button(dom, 'Stop', mode, 'bronze-loop-trade-buy-stop');
   const diagnostics = button(dom, 'Save diagnostics', mode, 'bronze-loop-trade-buy-diagnostics');
   const close = button(dom, 'Close', mode, 'bronze-loop-trade-buy-close');
   stop.style.display = 'none';
-  actions.append(confirmation, execute, stop, diagnostics, close);
+  actions.append(execute, stop, diagnostics, close);
 
   function renderRecap() {
     output.textContent = '';
@@ -213,10 +198,9 @@ export function showTradeBuyDialog(options = {}) {
   }
 
   function update() {
-    const ready = gate.ready && preview?.plan?.ready === true && confirmation.value === requiredText();
+    const ready = gate.ready && preview?.plan?.ready === true;
     execute.disabled = running || executionLocked || !ready;
     destination.disabled = running || executionLocked || !gate.ready;
-    confirmation.disabled = running || executionLocked || !gate.ready;
     close.disabled = running;
     diagnostics.disabled = running || (!preview && !receipt && !error);
     stop.style.display = running ? '' : 'none';
@@ -239,7 +223,7 @@ export function showTradeBuyDialog(options = {}) {
     if (checkpoint.phase === 'item-finished' && Number(checkpoint.itemIndex) > 0) {
       progress.completedItems.add(Number(checkpoint.itemIndex));
     }
-    waitingCheckpoint = checkpoint.phase === 'chunk-budget-waiting' ? { ...checkpoint } : null;
+    waitingCheckpoint = String(checkpoint.phase || '').endsWith('-permit-waiting') ? { ...checkpoint } : null;
     stopProgressTimer();
     renderProgress(checkpoint);
     if (waitingCheckpoint && typeof scheduleInterval === 'function') {
@@ -249,14 +233,11 @@ export function showTradeBuyDialog(options = {}) {
 
   destination.addEventListener('change', () => {
     expectedDestination = String(destination.value || 'auto');
-    confirmation.value = '';
-    confirmation.placeholder = requiredText();
     status.textContent = expectedDestination === 'auto'
       ? `Ready for guarded ${quantity}-item validation`
       : `Ready to validate ${expectedDestination === 'transfer' ? 'duplicate Transfer' : 'non-duplicate Club'} routing`;
     update();
   });
-  confirmation.addEventListener('input', update);
   execute.addEventListener('click', async () => {
     if (execute.disabled) return;
     running = true;
@@ -272,7 +253,7 @@ export function showTradeBuyDialog(options = {}) {
     try {
       receipt = await options.onExecute?.(
         {
-          confirmationText: confirmation.value,
+          approved: true,
           expectedDestination,
           platform: 'pc',
         },
@@ -282,8 +263,7 @@ export function showTradeBuyDialog(options = {}) {
       renderRecap();
       if (receipt.reason === 'buy-journal-reconciled-retry-required') {
         executionLocked = false;
-        confirmation.value = '';
-        status.textContent = 'Previous Buy was reconciled. No new Buy was sent; enter the confirmation again to start a new Run.';
+        status.textContent = 'Previous Buy was reconciled. No new Buy was sent; review and click Buy again to start a new Run.';
       } else {
         executionLocked = true;
         status.textContent = `${receipt.status}${receipt.reason ? ` (${receipt.reason})` : ''}`;
@@ -323,7 +303,7 @@ export function showTradeBuyDialog(options = {}) {
   dialog.append(heading, summary, output, status, actions);
   overlay.appendChild(dialog);
   dom.appendToBody(overlay);
-  applyResponsiveDialogLayout({ overlay, dialog, mode, controls: [destination, confirmation, execute, stop, diagnostics, close] });
+  applyResponsiveDialogLayout({ overlay, dialog, mode, controls: [destination, execute, stop, diagnostics, close] });
   update();
   return { close: () => { if (!running) { stopProgressTimer(); overlay.remove(); } } };
 }

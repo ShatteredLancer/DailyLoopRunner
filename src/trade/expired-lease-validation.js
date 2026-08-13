@@ -1,16 +1,12 @@
 import { selectGuardedScheduledListingJob } from './guarded-scheduled-listing.js';
 
-export const EXPIRED_LEASE_VALIDATION_CONFIRMATION = 'EXPIRE LEASE 1';
-
 function requireCondition(condition, message) {
   if (!condition) throw new Error(message);
 }
 
 export function stageExpiredTradeLeaseValidation(options = {}) {
-  requireCondition(
-    String(options.confirmationText || '') === EXPIRED_LEASE_VALIDATION_CONFIRMATION,
-    `Confirmation must exactly match ${EXPIRED_LEASE_VALIDATION_CONFIRMATION}`,
-  );
+  requireCondition(options.approved === true, 'Expired Lease validation requires explicit approval');
+  requireCondition(options.riskAccepted === true, 'Expired Lease validation risk must be accepted');
 
   const snapshot = options.snapshot || {};
   requireCondition(snapshot.paused === true, 'Trade Scheduler must be paused');

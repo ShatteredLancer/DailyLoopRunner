@@ -8,13 +8,14 @@ import {
   normalizeTradeScheduleAuthorizations,
 } from './schedule-authorization.js';
 
-export const TRADE_JOB_STORE_SCHEMA_VERSION = 5;
+export const TRADE_JOB_STORE_SCHEMA_VERSION = 8;
 export const TRADE_HISTORY_LIMIT = 100;
 export const TRADE_METRICS_SCHEMA_VERSION = 1;
 export const TRADE_METRICS_REASON_LIMIT = 20;
+export const TRADE_ACTIVE_AUTHORIZATION_TTL_MS = 60 * 60_000;
 
 const TRADE_METRIC_STATUSES = ['completed', 'blocked', 'missed', 'stopped', 'failed', 'error', 'unknown'];
-const TRADE_METRIC_JOB_TYPES = ['listing', 'buy', 'unknown'];
+const TRADE_METRIC_JOB_TYPES = ['listing', 'buy', 'bulk-relist', 'unknown'];
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -96,6 +97,9 @@ export function normalizeTradeMetrics(input = {}) {
     listing: {
       listed: nonNegativeInteger(input.listing?.listed),
     },
+    bulkRelist: {
+      relisted: nonNegativeInteger(input.bulkRelist?.relisted),
+    },
     reasons: normalizeMetricReasons(input.reasons),
   };
 }
@@ -150,6 +154,9 @@ export function recordTradeMetrics(input = {}, receipt = {}, options = {}) {
     listing: {
       listed: metrics.listing.listed + (jobType === 'listing' ? nonNegativeInteger(receipt.succeeded) : 0),
     },
+    bulkRelist: {
+      relisted: metrics.bulkRelist.relisted + (jobType === 'bulk-relist' ? nonNegativeInteger(receipt.succeeded) : 0),
+    },
     reasons,
   });
 }
@@ -163,11 +170,12 @@ function relockedSnapshot(snapshot, at) {
   const runtimes = { ...snapshot.runtimes };
   for (const job of snapshot.jobs) {
     const runtime = runtimes[job.id];
-    if (job.armed !== true || !runtime || !['armed', 'waiting-time', 'waiting-session', 'waiting-operation', 'running'].includes(runtime.status)) continue;
+    if (job.armed !== true || !runtime || !['armed', 'waiting-time', 'waiting-session', 'waiting-operation', 'waiting-pace', 'running'].includes(runtime.status)) continue;
     runtimes[job.id] = normalizeTradeJobRuntime({
       ...runtime,
       status: 'disabled',
       reason: 'not-armed',
+      continuation: null,
       updatedAt: at,
     });
   }
@@ -184,9 +192,15 @@ function relockedSnapshot(snapshot, at) {
 
 export function normalizeTradeJobStore(input = {}, options = {}) {
   const now = Math.max(0, finiteNumber(options.now, Date.now()));
+  const sourceSchemaVersion = Math.max(0, Math.floor(finiteNumber(input.schemaVersion)));
+  const hasPersistedState = input && typeof input === 'object' && Object.keys(input).length > 0;
+  const requiresV2Relock = hasPersistedState && sourceSchemaVersion < TRADE_JOB_STORE_SCHEMA_VERSION;
   const jobs = [];
   for (const raw of Array.isArray(input.jobs) ? input.jobs : []) {
-    try { jobs.push(normalizeTradeJob(raw, { now: raw?.updatedAt ?? now })); } catch { }
+    try {
+      const job = normalizeTradeJob(raw, { now: raw?.updatedAt ?? now });
+      jobs.push(requiresV2Relock && job.armed ? { ...job, armed: false, updatedAt: now } : job);
+    } catch { }
   }
   const runtimes = {};
   for (const job of jobs) {
@@ -209,14 +223,14 @@ export function normalizeTradeJobStore(input = {}, options = {}) {
   const metrics = input.metrics?.schemaVersion === TRADE_METRICS_SCHEMA_VERSION
     ? normalizeTradeMetrics(input.metrics)
     : metricsFromHistory(history, now);
-  const authorizations = normalizeTradeScheduleAuthorizations(input.authorizations, jobs, {
+  const authorizations = normalizeTradeScheduleAuthorizations(requiresV2Relock ? null : input.authorizations, jobs, {
     now,
-    legacyAuthorization: input.authorization,
+    legacyAuthorization: requiresV2Relock ? null : input.authorization,
   });
   return {
     schemaVersion: TRADE_JOB_STORE_SCHEMA_VERSION,
-    paused: input.paused !== false,
-    liveExecutionEnabled: input.liveExecutionEnabled === true,
+    paused: requiresV2Relock ? true : input.paused !== false,
+    liveExecutionEnabled: requiresV2Relock ? false : input.liveExecutionEnabled === true,
     safety: {
       minimumRetainedCoins: nullableNonNegativeInteger(input.safety?.minimumRetainedCoins),
     },
@@ -239,7 +253,11 @@ export function createTradeJobStore(options = {}) {
 
   function read() {
     const value = storage?.get?.(key, null);
-    if (value && typeof value === 'object') memory = normalizeTradeJobStore(value, { now: now() });
+    if (value && typeof value === 'object') {
+      const sourceSchemaVersion = Math.max(0, Math.floor(finiteNumber(value.schemaVersion)));
+      memory = normalizeTradeJobStore(value, { now: now() });
+      if (sourceSchemaVersion < TRADE_JOB_STORE_SCHEMA_VERSION) storage?.set?.(key, clone(memory));
+    }
     return clone(memory);
   }
 
@@ -266,7 +284,7 @@ export function createTradeJobStore(options = {}) {
     const scheduleChanged = !existing || JSON.stringify(existing.schedule) !== JSON.stringify(job.schedule);
     const runtimes = {
       ...snapshot.runtimes,
-      [job.id]: scheduleChanged
+      [job.id]: scheduleChanged || relockedForChange
         ? createTradeJobRuntime(job, { now: now() })
         : normalizeTradeJobRuntime({ ...snapshot.runtimes[job.id], jobId: job.id }),
     };
@@ -401,6 +419,119 @@ export function createTradeJobStore(options = {}) {
     };
   }
 
+  function beginAuthorization(jobId, runId) {
+    const snapshot = read();
+    const id = String(jobId || '');
+    const selectedRunId = String(runId || '');
+    const authorizations = normalizeTradeScheduleAuthorizations(snapshot.authorizations, snapshot.jobs, {
+      now: now(),
+      legacyAuthorization: snapshot.authorization,
+    });
+    const authorization = normalizeTradeScheduleAuthorization(authorizations.jobs?.[id], snapshot.jobs, { now: now() });
+    if (!authorization) {
+      return { begun: false, resumed: false, reason: 'schedule-authorization-missing-or-expired', snapshot: relock() };
+    }
+    if (!selectedRunId) return { begun: false, resumed: false, reason: 'schedule-authorization-run-id-required', snapshot };
+    if (authorization.activeRunId) {
+      if (authorization.activeRunId !== selectedRunId) {
+        return { begun: false, resumed: false, reason: 'schedule-authorization-run-active', snapshot };
+      }
+      const at = Number(now());
+      const resumed = {
+        ...authorization,
+        activeExpiresAt: Math.max(Number(authorization.activeExpiresAt || 0), at + TRADE_ACTIVE_AUTHORIZATION_TTL_MS),
+      };
+      const nextAuthorizations = normalizeTradeScheduleAuthorizations({
+        ...authorizations,
+        jobs: { ...authorizations.jobs, [id]: resumed },
+      }, snapshot.jobs, { now: at });
+      const nextSnapshot = write({
+        ...snapshot,
+        authorizations: nextAuthorizations,
+        authorization: derivedTradeScheduleAuthorization(nextAuthorizations),
+      });
+      return {
+        begun: true,
+        resumed: true,
+        remainingRuns: resumed.remainingRuns,
+        authorization: nextAuthorizations.jobs[id],
+        snapshot: nextSnapshot,
+      };
+    }
+    const at = Number(now());
+    const active = {
+      ...authorization,
+      activeRunId: selectedRunId,
+      activeStartedAt: at,
+      activeExpiresAt: at + TRADE_ACTIVE_AUTHORIZATION_TTL_MS,
+    };
+    const nextAuthorizations = normalizeTradeScheduleAuthorizations({
+      ...authorizations,
+      jobs: { ...authorizations.jobs, [id]: active },
+    }, snapshot.jobs, { now: at });
+    const nextSnapshot = write({
+      ...snapshot,
+      authorizations: nextAuthorizations,
+      authorization: derivedTradeScheduleAuthorization(nextAuthorizations),
+    });
+    return {
+      begun: true,
+      resumed: false,
+      remainingRuns: active.remainingRuns,
+      authorization: nextAuthorizations.jobs[id],
+      snapshot: nextSnapshot,
+    };
+  }
+
+  function completeAuthorization(jobId, runId) {
+    const snapshot = read();
+    const id = String(jobId || '');
+    const selectedRunId = String(runId || '');
+    const authorizations = normalizeTradeScheduleAuthorizations(snapshot.authorizations, snapshot.jobs, {
+      now: now(),
+      legacyAuthorization: snapshot.authorization,
+    });
+    const authorization = normalizeTradeScheduleAuthorization(authorizations.jobs?.[id], snapshot.jobs, { now: now() });
+    if (!authorization) return { completed: false, reason: 'schedule-authorization-missing-or-expired', snapshot: relock() };
+    if (!authorization.activeRunId || authorization.activeRunId !== selectedRunId) {
+      return { completed: false, reason: 'schedule-authorization-active-run-mismatch', snapshot };
+    }
+    const remainingRuns = authorization.remainingRuns - 1;
+    const nextJobs = { ...authorizations.jobs };
+    if (remainingRuns < 1) delete nextJobs[id];
+    else {
+      nextJobs[id] = {
+        ...authorization,
+        remainingRuns,
+        activeRunId: null,
+        activeStartedAt: null,
+        activeExpiresAt: null,
+        lastRunId: selectedRunId,
+        lastConsumedAt: Number(now()),
+      };
+    }
+    const nextAuthorizations = normalizeTradeScheduleAuthorizations({
+      ...authorizations,
+      jobs: nextJobs,
+    }, snapshot.jobs, { now: now() });
+    if (remainingRuns < 1 && Object.keys(nextAuthorizations.jobs).length < 1) {
+      return { completed: true, remainingRuns: 0, snapshot: write(relockedSnapshot(snapshot, Number(now()))) };
+    }
+    const jobs = remainingRuns < 1
+      ? snapshot.jobs.map((job) => job.id === id ? { ...job, armed: false, updatedAt: Number(now()) } : job)
+      : snapshot.jobs;
+    return {
+      completed: true,
+      remainingRuns,
+      snapshot: write({
+        ...snapshot,
+        jobs,
+        authorizations: nextAuthorizations,
+        authorization: derivedTradeScheduleAuthorization(nextAuthorizations),
+      }),
+    };
+  }
+
   function revokeAuthorization(jobId, reason = 'schedule-authorization-revoked') {
     const snapshot = read();
     const id = String(jobId || '');
@@ -420,6 +551,7 @@ export function createTradeJobStore(options = {}) {
         ...runtimes[id],
         status: 'disabled',
         reason: String(reason || 'schedule-authorization-revoked'),
+        continuation: null,
         updatedAt: at,
       });
     }
@@ -459,6 +591,8 @@ export function createTradeJobStore(options = {}) {
     setPaused,
     setLiveExecutionEnabled,
     authorize,
+    beginAuthorization,
+    completeAuthorization,
     consumeAuthorization,
     revokeAuthorization,
     setMinimumRetainedCoins,

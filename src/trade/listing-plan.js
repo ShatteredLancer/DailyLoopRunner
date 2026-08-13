@@ -177,15 +177,15 @@ export function createListingConfirmation(plan, options = {}) {
     priceLimits: entry.priceLimits,
   }));
   const action = entries.length > 0 && entries.every((entry) => entry.item?.pile === 'transfer')
-    ? 'REPRICE'
-    : 'LIST';
+    ? 'reprice'
+    : 'list';
   const token = `listing-${confirmationHash(JSON.stringify({ job: plan.job, entries, createdAt }))}`;
   return {
     token,
     createdAt,
     expiresAt: createdAt + ttlMs,
     itemCount: entries.length,
-    requiredText: `${action} ${entries.length}`,
+    action,
   };
 }
 

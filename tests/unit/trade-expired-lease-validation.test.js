@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  EXPIRED_LEASE_VALIDATION_CONFIRMATION,
-  stageExpiredTradeLeaseValidation,
-} from '../../src/trade/expired-lease-validation.js';
+import { stageExpiredTradeLeaseValidation } from '../../src/trade/expired-lease-validation.js';
 import { createTradeRunLease } from '../../src/trade/run-lease.js';
 
 function memoryStorage() {
@@ -38,7 +35,8 @@ describe('Expired Trade Run Lease validation setup', () => {
     const storage = memoryStorage();
     const lease = createTradeRunLease({ storage, key: 'lease', ownerId: 'current-tab', now: () => now });
     const result = stageExpiredTradeLeaseValidation({
-      confirmationText: EXPIRED_LEASE_VALIDATION_CONFIRMATION,
+      approved: true,
+      riskAccepted: true,
       snapshot: snapshot(now),
       inspectLease: lease.inspect,
       writeLease: (value) => storage.set('lease', value),
@@ -67,15 +65,18 @@ describe('Expired Trade Run Lease validation setup', () => {
       now,
     };
 
-    expect(() => stageExpiredTradeLeaseValidation(base)).toThrow('EXPIRE LEASE 1');
+    expect(() => stageExpiredTradeLeaseValidation(base)).toThrow('explicit approval');
+    expect(() => stageExpiredTradeLeaseValidation({ ...base, approved: true })).toThrow('risk must be accepted');
     expect(() => stageExpiredTradeLeaseValidation({
       ...base,
-      confirmationText: EXPIRED_LEASE_VALIDATION_CONFIRMATION,
+      approved: true,
+      riskAccepted: true,
       snapshot: { ...valid, paused: false, liveExecutionEnabled: true },
     })).toThrow('must be paused');
     expect(() => stageExpiredTradeLeaseValidation({
       ...base,
-      confirmationText: EXPIRED_LEASE_VALIDATION_CONFIRMATION,
+      approved: true,
+      riskAccepted: true,
       inspectLease: () => ({ lease: { runId: 'existing' }, active: false, expired: true }),
     })).toThrow('already exists');
     expect(writeLease).not.toHaveBeenCalled();

@@ -1,5 +1,5 @@
-export const TRADE_SCHEDULE_AUTHORIZATION_SCHEMA_VERSION = 1;
-export const TRADE_SCHEDULE_AUTHORIZATIONS_SCHEMA_VERSION = 2;
+export const TRADE_SCHEDULE_AUTHORIZATION_SCHEMA_VERSION = 2;
+export const TRADE_SCHEDULE_AUTHORIZATIONS_SCHEMA_VERSION = 3;
 export const TRADE_RECURRING_AUTHORIZATION_RUNS = 2;
 export const TRADE_SCHEDULE_AUTHORIZATION_JOB_LIMIT = 3;
 
@@ -36,7 +36,7 @@ function authorizationExpiry(job, now, runs) {
   if (job.schedule?.type === 'once') return Number(job.schedule.runAt) + graceMs;
   if (job.schedule?.type === 'window') return Number(job.schedule.endAt) + graceMs;
   if (job.schedule?.type === 'interval') {
-    const periodMs = Math.max(1, Number(job.schedule.everyMinutes || 60)) * 60_000;
+    const periodMs = Math.max(1, Number(job.schedule.intervalSeconds || 3600)) * 1000;
     return now + Math.min(48 * 60 * 60_000, periodMs * runs + graceMs + 15 * 60_000);
   }
   if (job.schedule?.type === 'daily') return now + 26 * 60 * 60_000;
@@ -55,6 +55,9 @@ export function createTradeScheduleAuthorization(job = {}, options = {}) {
     expiresAt: authorizationExpiry(job, now, totalRuns),
     totalRuns,
     remainingRuns: totalRuns,
+    activeRunId: null,
+    activeStartedAt: null,
+    activeExpiresAt: null,
     lastRunId: null,
     lastConsumedAt: null,
   };
@@ -67,7 +70,10 @@ export function normalizeTradeScheduleAuthorization(input, jobs = [], options = 
   const totalRuns = Math.max(1, Math.floor(Number(input.totalRuns || 0)));
   const remainingRuns = Math.min(totalRuns, Math.max(0, Math.floor(Number(input.remainingRuns || 0))));
   const expiresAt = Math.max(0, Number(input.expiresAt || 0));
-  if (!job || job.armed !== true || remainingRuns < 1 || expiresAt <= now) return null;
+  const activeExpiresAt = input.activeExpiresAt === null || input.activeExpiresAt === undefined
+    ? null
+    : Math.max(0, Number(input.activeExpiresAt || 0));
+  if (!job || job.armed !== true || remainingRuns < 1 || Math.max(expiresAt, activeExpiresAt || 0) <= now) return null;
   if (String(input.jobFingerprint || '') !== tradeScheduleFingerprint(job)) return null;
   return {
     schemaVersion: TRADE_SCHEDULE_AUTHORIZATION_SCHEMA_VERSION,
@@ -78,6 +84,11 @@ export function normalizeTradeScheduleAuthorization(input, jobs = [], options = 
     expiresAt,
     totalRuns,
     remainingRuns,
+    activeRunId: input.activeRunId ? String(input.activeRunId) : null,
+    activeStartedAt: input.activeStartedAt === null || input.activeStartedAt === undefined
+      ? null
+      : Math.max(0, Number(input.activeStartedAt || 0)),
+    activeExpiresAt,
     lastRunId: input.lastRunId ? String(input.lastRunId) : null,
     lastConsumedAt: input.lastConsumedAt === null || input.lastConsumedAt === undefined
       ? null

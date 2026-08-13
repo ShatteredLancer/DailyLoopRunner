@@ -21,7 +21,7 @@ describe('Trade schedule', () => {
     expect(nextTradeRunAt(once, 1000)).toBe(2000);
     expect(nextTradeRunAt(once, 2001)).toBeNull();
 
-    const interval = listingJob({ type: 'interval', everyMinutes: 10, anchorAt: 1000 });
+    const interval = listingJob({ type: 'interval', intervalSeconds: 600, anchorAt: 1000 });
     expect(nextTradeRunAt(interval, 1000)).toBe(1000);
     expect(nextTradeRunAt(interval, 1001)).toBe(601000);
 
@@ -69,10 +69,20 @@ describe('Trade schedule', () => {
   });
 
   it('advances recurring schedules from an absolute scheduled time', () => {
-    const job = listingJob({ type: 'interval', everyMinutes: 10, anchorAt: 1000 });
+    const job = listingJob({ type: 'interval', intervalSeconds: 600, anchorAt: 1000 });
     const runtime = createTradeJobRuntime(job, { now: 0 });
     const advanced = advanceTradeJobRuntime(job, runtime, { at: 1000, scheduledFor: 1000, runId: 'run-1' });
     expect(advanced).toMatchObject({ nextRunAt: 601000, lastRunId: 'run-1', runCount: 1, status: 'waiting-time' });
+  });
+
+  it('merges elapsed interval occurrences after a long terminal Run', () => {
+    const job = listingJob({ type: 'interval', intervalSeconds: 2, anchorAt: 1000 });
+    const runtime = createTradeJobRuntime(job, { now: 0 });
+    expect(advanceTradeJobRuntime(job, runtime, {
+      at: 7500, scheduledFor: 1000, runId: 'long-run',
+    })).toMatchObject({
+      nextRunAt: 9000, lastScheduledFor: 1000, lastRunId: 'long-run', runCount: 1,
+    });
   });
 
   it('treats a schedule window as one terminal occurrence', () => {
@@ -82,5 +92,22 @@ describe('Trade schedule', () => {
     expect(advanceTradeJobRuntime(job, runtime, {
       at: 2000, scheduledFor: 1000, runId: 'window-run',
     })).toMatchObject({ nextRunAt: null, runCount: 1, status: 'completed' });
+  });
+
+  it('resumes a persisted continuation only after its pacing time without applying misfire again', () => {
+    const job = listingJob({ type: 'once', runAt: 1000 }, { type: 'skip' });
+    const runtime = {
+      ...createTradeJobRuntime(job, { now: 0 }),
+      continuation: {
+        runId: 'sliced-run', scheduledFor: 1000, startedAt: 1000, resumeAt: 5000,
+        requested: 2, succeeded: 1, sliceCount: 1,
+      },
+    };
+    expect(evaluateTradeJob(job, runtime, {
+      now: 4000, sessionReady: true, liveExecutionEnabled: true,
+    })).toMatchObject({ status: 'waiting-pace', reason: 'trade-action-pacing', action: 'wait' });
+    expect(evaluateTradeJob(job, runtime, {
+      now: 5000, sessionReady: true, liveExecutionEnabled: true,
+    })).toMatchObject({ status: 'running', action: 'run' });
   });
 });

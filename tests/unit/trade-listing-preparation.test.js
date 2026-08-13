@@ -55,7 +55,7 @@ describe('Trade listing preparation', () => {
       ready: true,
       blockers: [],
       transferPreflight: { status: 'completed' },
-      confirmation: { createdAt: 1000, expiresAt: 601000, itemCount: 1, requiredText: 'LIST 1' },
+      confirmation: { createdAt: 1000, expiresAt: 601000, itemCount: 1, action: 'list' },
     });
     expect(result.plan.entries[0]).toMatchObject({
       item: { id: 1 },
@@ -109,7 +109,7 @@ describe('Trade listing preparation', () => {
     expect(result.blockers).toEqual([{ item: { id: 1, definitionId: 101, pile: 'club' }, reason: 'price-limits-unavailable' }]);
   });
 
-  it('refreshes Transfer before preparing one expired item with separate confirmation text', async () => {
+  it('refreshes Transfer before preparing one expired item with a reprice approval', async () => {
     const adapter = createFakeTradeAdapter({
       items: [{
         id: 2, definitionId: 102, pile: 'transfer', type: 'player', rating: 85, tier: 'gold', rare: true,
@@ -125,7 +125,7 @@ describe('Trade listing preparation', () => {
       ready: true,
       blockers: [],
       transferPreflight: { status: 'completed' },
-      confirmation: { requiredText: 'REPRICE 1', itemCount: 1 },
+      confirmation: { action: 'reprice', itemCount: 1 },
       plan: {
         entries: [{
           item: { id: 2, pile: 'transfer' }, auctionState: 'inactive', startPrice: 700, buyNow: 750,

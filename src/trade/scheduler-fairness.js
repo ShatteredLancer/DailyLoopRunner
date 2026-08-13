@@ -1,5 +1,9 @@
 function scheduledAt(candidate = {}) {
-  const value = Number(candidate.runtime?.nextRunAt ?? candidate.decision?.scheduledFor);
+  const value = Number(
+    candidate.runtime?.continuation?.resumeAt
+    ?? candidate.runtime?.nextRunAt
+    ?? candidate.decision?.scheduledFor,
+  );
   return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
 }
 
@@ -10,20 +14,27 @@ function sortedCandidates(input = []) {
   ));
 }
 
+const FAIR_JOB_TYPES = Object.freeze(['buy', 'listing', 'bulk-relist']);
+
 export function selectFairTradeCandidate(input = [], dispatch = {}) {
   const candidates = sortedCandidates(input).filter((candidate) => candidate.decision?.action === 'run');
   if (candidates.length < 2) return candidates[0] || null;
   const firstDueAt = scheduledAt(candidates[0]);
   const equallyDue = candidates.filter((candidate) => scheduledAt(candidate) === firstDueAt);
   if (equallyDue.length < 2) return candidates[0];
-  const lastType = ['buy', 'listing'].includes(dispatch.lastJobType) ? dispatch.lastJobType : null;
+  const lastType = FAIR_JOB_TYPES.includes(dispatch.lastJobType) ? dispatch.lastJobType : null;
   if (!lastType) return equallyDue[0];
-  const alternate = equallyDue.find((candidate) => candidate.job?.type !== lastType);
-  return alternate || equallyDue[0];
+  const lastIndex = FAIR_JOB_TYPES.indexOf(lastType);
+  for (let offset = 1; offset <= FAIR_JOB_TYPES.length; offset += 1) {
+    const nextType = FAIR_JOB_TYPES[(lastIndex + offset) % FAIR_JOB_TYPES.length];
+    const selected = equallyDue.find((candidate) => candidate.job?.type === nextType);
+    if (selected) return selected;
+  }
+  return equallyDue[0];
 }
 
 export function normalizeTradeDispatchState(input = {}) {
-  const lastJobType = ['buy', 'listing'].includes(input.lastJobType) ? input.lastJobType : null;
+  const lastJobType = FAIR_JOB_TYPES.includes(input.lastJobType) ? input.lastJobType : null;
   const lastDispatchedAt = Number(input.lastDispatchedAt);
   return {
     schemaVersion: 1,

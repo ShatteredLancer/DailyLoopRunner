@@ -38,8 +38,6 @@ function safeEvent(input = {}) {
     chunkIndex: safeNumber(input.chunkIndex),
     offset: safeNumber(input.offset),
     quantity: safeNumber(input.quantity),
-    required: safeNumber(input.required),
-    remaining: safeNumber(input.remaining),
     retryAt: safeNumber(input.retryAt),
     mutationBoundaryCrossed: input.mutationBoundaryCrossed === true,
     status: input.status ? String(input.status) : null,
@@ -202,8 +200,9 @@ export function createTradeBuyJournal(options = {}) {
   }
 
   function begin(input = {}) {
-    const recovery = inspectRecovery();
+    const recovery = inspectRecovery({ runId: input.runId });
     if (!recovery.canSupersede) throw new Error(recovery.reason);
+    if (recovery.canResume) return read();
     const at = Math.max(0, safeNumber(input.at) ?? Number(now()));
     const event = safeEvent({ at, phase: 'started', destination: input.expectedDestination });
     return write({
@@ -247,9 +246,15 @@ export function createTradeBuyJournal(options = {}) {
     });
   }
 
-  function inspectRecovery() {
+  function inspectRecovery(input = {}) {
     const current = read();
     const active = current?.status === 'active';
+    const deferred = current?.status === 'deferred';
+    const hasContinuationLookup = typeof options.isContinuationActive === 'function';
+    const continuationActive = (deferred && !hasContinuationLookup)
+      || ((active || deferred) && hasContinuationLookup
+        && options.isContinuationActive(current.runId, current.jobId) === true);
+    const matchingRun = String(input.runId || '') === String(current?.runId || '');
     const mutationBoundaryCrossed = Boolean(current?.items.some((entry) => entry.mutationBoundaryCrossed));
     const uncertainMutation = Boolean(current?.items.some((entry) => (
       entry.mutationBoundaryCrossed
@@ -257,14 +262,21 @@ export function createTradeBuyJournal(options = {}) {
     )));
     const requiresReview = current?.status !== 'acknowledged'
       && mutationBoundaryCrossed
-      && (active || uncertainMutation);
+      && ((active && !continuationActive) || uncertainMutation);
+    const reserved = continuationActive && !requiresReview;
+    const canResume = reserved && matchingRun;
     return {
       active,
+      deferred,
+      reserved,
+      canResume,
       runId: current?.runId || null,
       mutationBoundaryCrossed,
       uncertainMutation,
-      canSupersede: !requiresReview,
-      reason: requiresReview ? 'buy-journal-mutation-review-required' : null,
+      canSupersede: canResume || (!requiresReview && !reserved),
+      reason: requiresReview
+        ? 'buy-journal-mutation-review-required'
+        : reserved && !canResume ? 'buy-journal-continuation-reserved' : null,
     };
   }
 

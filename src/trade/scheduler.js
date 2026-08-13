@@ -60,8 +60,10 @@ export function createTradeScheduler(options = {}) {
   }
 
   async function execute(job, runtime, context) {
-    const startedAt = Number(now());
-    const runId = createRunId();
+    const continuation = runtime.continuation || null;
+    const startedAt = Number(continuation?.startedAt ?? now());
+    const scheduledFor = Number(continuation?.scheduledFor ?? runtime.nextRunAt);
+    const runId = continuation?.runId || createRunId();
     let acquired = lease.acquire({ runId, jobId: job.id });
     if (acquired.recoveryRequired) {
       const recovery = await options.reconcileExpiredLease?.(acquired.previousLease);
@@ -77,7 +79,7 @@ export function createTradeScheduler(options = {}) {
           runId,
           jobId: job.id,
           jobType: job.type,
-          scheduledFor: runtime.nextRunAt,
+          scheduledFor,
           startedAt,
           finishedAt,
           status: 'blocked',
@@ -118,19 +120,54 @@ export function createTradeScheduler(options = {}) {
       return { status: 'waiting-operation', jobId: job.id, runtime: waiting };
     }
     store.updateRuntime(job.id, {
-      ...runtime, status: 'running', reason: null, lastScheduledFor: runtime.nextRunAt,
+      ...runtime, status: 'running', reason: null, lastScheduledFor: scheduledFor,
       lastStartedAt: startedAt, lastRunId: runId, updatedAt: startedAt,
     });
     store.recordDispatch?.(job.id);
     let receipt;
+    const persistContinuation = (receiptInput = {}) => {
+      const latest = store.read();
+      const latestJob = latest.jobs.find((entry) => entry.id === job.id);
+      if (!latestJob || tradeScheduleFingerprint(latestJob) !== tradeScheduleFingerprint(job)) return false;
+      const deferredReceipt = createTradeRunReceipt({
+        ...receiptInput,
+        runId,
+        jobId: job.id,
+        jobType: job.type,
+        scheduledFor,
+        startedAt,
+        finishedAt: receiptInput.finishedAt ?? now(),
+      });
+      if (deferredReceipt.status !== 'deferred' || !deferredReceipt.continuation) return false;
+      store.updateRuntime(job.id, normalizeTradeJobRuntime({
+        ...(latest.runtimes[job.id] || runtime),
+        status: 'waiting-pace',
+        reason: deferredReceipt.reason || 'trade-action-pacing',
+        lastScheduledFor: scheduledFor,
+        lastStartedAt: startedAt,
+        lastRunId: runId,
+        continuation: {
+          ...deferredReceipt.continuation,
+          runId,
+          scheduledFor,
+          startedAt,
+          resumeAt: deferredReceipt.resumeAt ?? deferredReceipt.continuation.resumeAt ?? Number(now()),
+          jobFingerprint: tradeScheduleFingerprint(job),
+        },
+        updatedAt: Number(now()),
+      }));
+      return true;
+    };
     try {
       if (typeof executeJob !== 'function') throw new Error('Trade Scheduler executor is unavailable');
       receipt = await executeJob({
         job,
         runId,
-        scheduledFor: runtime.nextRunAt,
+        scheduledFor,
         startedAt,
         context,
+        continuation,
+        persistContinuation,
         heartbeat: () => lease.heartbeat(runId),
       });
       receipt = createTradeRunReceipt({
@@ -138,23 +175,46 @@ export function createTradeScheduler(options = {}) {
         runId,
         jobId: job.id,
         jobType: job.type,
-        scheduledFor: runtime.nextRunAt,
+        scheduledFor,
         startedAt,
         finishedAt: receipt?.finishedAt ?? now(),
       });
     } catch (error) {
-      receipt = createTradeRunReceipt({
-        runId, jobId: job.id, jobType: job.type, scheduledFor: runtime.nextRunAt,
+      const persistedRuntime = store.read().runtimes[job.id];
+      const persistedContinuation = persistedRuntime?.continuation?.runId === runId
+        ? persistedRuntime.continuation
+        : null;
+      receipt = createTradeRunReceipt(persistedContinuation ? {
+        runId, jobId: job.id, jobType: job.type, scheduledFor,
+        startedAt, finishedAt: now(), status: 'deferred',
+        reason: persistedRuntime.reason || 'trade-action-pacing',
+        resumeAt: persistedContinuation.resumeAt,
+        continuation: persistedContinuation,
+      } : {
+        runId, jobId: job.id, jobType: job.type, scheduledFor,
         startedAt, finishedAt: now(), status: 'blocked',
         reason: error?.message || String(error),
       });
     } finally {
       lease.release(runId);
     }
+    if (receipt.status === 'deferred') {
+      if (persistContinuation(receipt)) {
+        const deferred = store.read().runtimes[job.id];
+        return { status: 'deferred', jobId: job.id, receipt, runtime: deferred };
+      }
+      receipt = createTradeRunReceipt({
+        ...receipt,
+        status: 'blocked',
+        reason: 'trade-continuation-persistence-rejected',
+        resumeAt: null,
+        continuation: null,
+      });
+    }
     store.addHistory(receipt);
     const advanced = advanceTradeJobRuntime(job, runtime, {
       at: receipt.finishedAt,
-      scheduledFor: runtime.nextRunAt,
+      scheduledFor,
       startedAt,
       finishedAt: receipt.finishedAt,
       runId,
@@ -180,10 +240,33 @@ export function createTradeScheduler(options = {}) {
         const rightAt = snapshot.runtimes[right.id]?.nextRunAt ?? Number.POSITIVE_INFINITY;
         return leftAt - rightAt || left.id.localeCompare(right.id);
       });
+      const continuationsByType = new Map(Object.entries(snapshot.runtimes || {})
+        .filter(([, runtime]) => runtime?.continuation?.runId)
+        .map(([jobId]) => {
+          const job = snapshot.jobs.find((entry) => entry.id === jobId);
+          return [job?.type, jobId];
+        })
+        .filter(([type]) => type));
       const runnable = [];
       for (const job of jobs) {
+        const pendingSameType = continuationsByType.get(job.type);
+        if (pendingSameType && pendingSameType !== job.id) {
+          store.updateRuntime(job.id, normalizeTradeJobRuntime({
+            ...(snapshot.runtimes[job.id] || {}),
+            jobId: job.id,
+            status: 'waiting-operation',
+            reason: 'same-type-continuation-pending',
+            updatedAt: Number(now()),
+          }));
+          continue;
+        }
         const context = schedulerContext(snapshot, job, extraContext);
         const runtime = snapshot.runtimes[job.id] || {};
+        if (runtime.continuation?.jobFingerprint
+          && runtime.continuation.jobFingerprint !== tradeScheduleFingerprint(job)) {
+          store.relock?.();
+          return { status: 'blocked', jobId: job.id, reason: 'trade-continuation-job-changed' };
+        }
         const decision = evaluateTradeJob(job, runtime, context);
         store.updateRuntime(job.id, decision.runtime);
         if (decision.action === 'advance') {

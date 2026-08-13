@@ -17,6 +17,14 @@ export function finalizeChunkedBuyReceipt(receipt = {}) {
   };
   return createTradeRunReceipt({
     ...receipt,
+    continuation: receipt.continuation ? {
+      ...receipt.continuation,
+      spent: aggregate.spent,
+      searches: aggregate.searches,
+      buyAttempts: aggregate.buyAttempts,
+      cursor: aggregate.cursor,
+      purchasedByRating: aggregate.purchasedByRating,
+    } : null,
     receipts: [aggregate, ...entries.filter((entry) => entry?.status !== 'run-summary')],
   });
 }

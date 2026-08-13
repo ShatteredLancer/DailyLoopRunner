@@ -8,7 +8,7 @@ describe('Trade listing diagnostics', () => {
       createdAt: 100,
       expiresAt: 200,
       itemCount: 1,
-      requiredText: 'LIST 1',
+      action: 'list',
     };
     const diagnostics = createTradeListingDiagnostics({
       capturedAt: 123,
@@ -27,7 +27,7 @@ describe('Trade listing diagnostics', () => {
       createdAt: 100,
       expiresAt: 200,
       itemCount: 1,
-      requiredText: 'LIST 1',
+      action: 'list',
     });
     expect(diagnostics.prepared.confirmation).toEqual(diagnostics.preview.confirmation);
     expect(diagnostics.clubValidation).toMatchObject({ required: true, status: 'passed' });

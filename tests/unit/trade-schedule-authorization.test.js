@@ -9,7 +9,7 @@ import {
   tradeScheduleFingerprint,
 } from '../../src/trade/schedule-authorization.js';
 
-function job(schedule = { type: 'interval', everyMinutes: 5, anchorAt: 2000 }) {
+function job(schedule = { type: 'interval', intervalSeconds: 300, anchorAt: 2000 }) {
   return normalizeTradeJob({
     id: 'listing-recurring', name: 'Recurring listing', type: 'listing', enabled: true, armed: true,
     schedule, misfirePolicy: { type: 'grace-window', graceMinutes: 15 },

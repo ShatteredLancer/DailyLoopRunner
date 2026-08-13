@@ -15,6 +15,7 @@ export function inspectExpiredTradeLeaseRecovery(input = {}) {
   const journals = [
     input.buyJournal ? { type: 'buy', value: input.buyJournal } : null,
     input.listingJournal ? { type: 'listing', value: input.listingJournal } : null,
+    input.bulkRelistJournal ? { type: 'bulk-relist', value: input.bulkRelistJournal } : null,
   ].filter((entry) => entry?.value?.runId && String(entry.value.runId) === String(lease.runId));
   const uncertainJournal = journals.find((entry) => input.inspectJournal?.(entry.value, entry.type) === true);
   if (uncertainJournal) {
@@ -23,6 +24,18 @@ export function inspectExpiredTradeLeaseRecovery(input = {}) {
       reason: 'expired-lease-journal-mutation-review-required',
       runId: String(lease.runId),
       jobId: stringOrNull(lease.jobId),
+    };
+  }
+  const continuation = input.continuation || null;
+  if (continuation?.runId
+    && String(continuation.runId) === String(lease.runId)
+    && (!lease.jobId || !continuation.jobId || String(continuation.jobId) === String(lease.jobId))) {
+    return {
+      status: 'reconciled',
+      reason: 'expired-lease-persisted-continuation-confirmed',
+      runId: String(lease.runId),
+      jobId: stringOrNull(lease.jobId),
+      historyStatus: null,
     };
   }
   if (!history || !terminalHistory(history)) {
@@ -49,6 +62,7 @@ export function summarizeTradeRunCorrelations(input = {}) {
   const journals = [
     input.buyJournal ? { type: 'buy', value: input.buyJournal } : null,
     input.listingJournal ? { type: 'listing', value: input.listingJournal } : null,
+    input.bulkRelistJournal ? { type: 'bulk-relist', value: input.bulkRelistJournal } : null,
   ].filter(Boolean);
   const runIds = [];
   const add = (value) => {
@@ -56,6 +70,7 @@ export function summarizeTradeRunCorrelations(input = {}) {
     if (id && !runIds.includes(id)) runIds.push(id);
   };
   [...(scheduler.history || [])].reverse().forEach((entry) => add(entry.runId));
+  Object.values(scheduler.runtimes || {}).forEach((runtime) => add(runtime?.continuation?.runId));
   journals.forEach((entry) => add(entry.value.runId));
   add(lease?.runId);
   [...events].reverse().forEach((entry) => add(entry.runId));
@@ -64,8 +79,12 @@ export function summarizeTradeRunCorrelations(input = {}) {
     const history = (scheduler.history || []).find((entry) => String(entry.runId || '') === runId) || null;
     const journal = journals.find((entry) => String(entry.value.runId || '') === runId) || null;
     const matchingEvents = events.filter((entry) => String(entry.runId || '') === runId);
-    const budgetEvents = (journal?.value.events || []).filter((entry) => (
-      entry.phase === 'chunk-budget-waiting' || entry.retryAt !== null && entry.retryAt !== undefined
+    const continuation = Object.values(scheduler.runtimes || {})
+      .map((runtime) => runtime?.continuation)
+      .find((entry) => String(entry?.runId || '') === runId) || null;
+    const pacingEvents = (journal?.value.events || []).filter((entry) => (
+      String(entry.phase || '').endsWith('-permit-waiting')
+      || entry.phase === 'request-pacing-cooldown'
     ));
     return {
       runId,
@@ -77,6 +96,15 @@ export function summarizeTradeRunCorrelations(input = {}) {
         startedAt: Number(history.startedAt || 0) || null,
         finishedAt: Number(history.finishedAt || 0) || null,
       } : null,
+      continuation: continuation ? {
+        scheduledFor: Number(continuation.scheduledFor || 0) || null,
+        startedAt: Number(continuation.startedAt || 0) || null,
+        resumeAt: Number(continuation.resumeAt || 0) || null,
+        yieldedAt: Number(continuation.yieldedAt || 0) || null,
+        sliceCount: Math.max(1, Number(continuation.sliceCount || 1)),
+        requested: Math.max(0, Number(continuation.requested || 0)),
+        succeeded: Math.max(0, Number(continuation.succeeded || 0)),
+      } : null,
       journal: journal ? {
         type: journal.type,
         status: stringOrNull(journal.value.status),
@@ -85,7 +113,7 @@ export function summarizeTradeRunCorrelations(input = {}) {
         mutationBoundaryCrossed: (journal.value.items || []).some((item) => item.mutationBoundaryCrossed === true),
         uncertainItems: journal.value.status === 'acknowledged' ? 0 : (journal.value.items || []).filter((item) => (
           item.mutationBoundaryCrossed === true
-          && !['purchased', 'competition-lost', 'listed', 'failed'].includes(item.status)
+          && !['purchased', 'competition-lost', 'listed', 'relisted', 'failed'].includes(item.status)
         )).length,
       } : null,
       lease: String(lease?.runId || '') === runId ? {
@@ -96,9 +124,9 @@ export function summarizeTradeRunCorrelations(input = {}) {
         expiresAt: Number(lease.expiresAt || 0) || null,
       } : null,
       schedulerEvents: matchingEvents.length,
-      budgetWaits: budgetEvents.length,
-      latestBudgetRetryAt: budgetEvents.length
-        ? Math.max(...budgetEvents.map((entry) => Number(entry.retryAt || 0))) || null
+      pacingWaits: pacingEvents.length,
+      latestPacingRetryAt: pacingEvents.length
+        ? Math.max(...pacingEvents.map((entry) => Number(entry.retryAt || 0))) || null
         : null,
     };
   });

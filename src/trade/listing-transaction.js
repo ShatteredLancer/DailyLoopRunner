@@ -16,18 +16,10 @@ function verificationMatches(entry, candidate) {
     && sameNumber(candidate.auction?.buyNowPrice, entry.buyNow);
 }
 
-function randomDelayMs(range, random) {
-  const minimum = Math.max(0, Number(range?.[0] || 0));
-  const maximum = Math.max(minimum, Number(range?.[1] || minimum));
-  return Math.round((minimum + (maximum - minimum) * random()) * 1000);
-}
-
 export function createListingTransaction(options = {}) {
   const adapter = options.tradeAdapter;
   if (!adapter) throw new TypeError('tradeAdapter is required');
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
-  const sleep = typeof options.sleep === 'function' ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const random = typeof options.random === 'function' ? options.random : Math.random;
   const createRunId = typeof options.createRunId === 'function'
     ? options.createRunId
     : () => `listing-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -48,6 +40,7 @@ export function createListingTransaction(options = {}) {
     let reason = null;
     let succeeded = 0;
     let failed = 0;
+    let resumeAt = null;
     const checkpoint = (phase, detail = {}) => {
       try { options.onCheckpoint?.({ phase, at: Number(now()), ...detail }); } catch { }
     };
@@ -66,9 +59,9 @@ export function createListingTransaction(options = {}) {
       status = 'blocked';
       reason = 'listing-plan-exceeds-job-limit';
     } else if (String(input.confirmationToken || '') !== confirmation.token
-      || String(input.confirmationText || '') !== confirmation.requiredText) {
+      || input.approved !== true) {
       status = 'blocked';
-      reason = 'listing-confirmation-mismatch';
+      reason = 'listing-approval-mismatch';
     } else if (startedAt > Number(confirmation.expiresAt)) {
       status = 'blocked';
       reason = 'listing-confirmation-expired';
@@ -97,15 +90,24 @@ export function createListingTransaction(options = {}) {
       let transferPreflight = null;
       if (entry.item.pile === 'club' || entry.item.pile === 'transfer') {
         checkpoint('transfer-refresh-started', { itemIndex, item: entry.item, listing });
-        transferPreflight = await adapter.refreshTransferItems();
+        transferPreflight = await adapter.refreshTransferItems({ wait: input.deferWhenWaiting !== true });
         checkpoint('transfer-refresh-finished', {
           itemIndex, item: entry.item, listing, status: transferPreflight.status, response: transferPreflight.response,
         });
         if (transferPreflight.status !== 'completed') {
+          if (transferPreflight.error?.kind === 'pacing-deferred') {
+            status = 'deferred';
+            reason = 'trade-action-pacing';
+            resumeAt = transferPreflight.error.retryAt ?? null;
+            checkpoint('listing-slice-deferred', {
+              itemIndex, item: entry.item, listing, reason, retryAt: resumeAt, mutationBoundaryCrossed: false,
+            });
+            break;
+          }
           failed += 1;
           status = 'blocked';
-          reason = transferPreflight.error?.kind === 'request-budget-exhausted'
-            ? 'trade-request-budget-exhausted'
+          reason = transferPreflight.error?.kind === 'rate-limit'
+            ? 'trade-rate-limit'
             : `listing-transfer-preflight-${transferPreflight.status || 'unavailable'}`;
           receipts.push({
             index: itemIndex,
@@ -180,15 +182,27 @@ export function createListingTransaction(options = {}) {
         break;
       }
       checkpoint('price-limits-refresh-started', { itemIndex, item: entry.item, listing });
-      const priceLimitResult = await adapter.inspectPriceLimits(entry.item, { refresh: true });
+      const priceLimitResult = await adapter.inspectPriceLimits(entry.item, {
+        refresh: true,
+        wait: input.deferWhenWaiting !== true,
+      });
       checkpoint('price-limits-refresh-finished', {
         itemIndex, item: entry.item, listing, status: priceLimitResult.status, response: priceLimitResult.response,
       });
-      if (priceLimitResult.error?.kind === 'request-budget-exhausted') {
+      if (priceLimitResult.error?.kind === 'rate-limit') {
         failed += 1;
         status = 'blocked';
-        reason = 'trade-request-budget-exhausted';
-        receipts.push({ index: itemIndex, item: { ...entry.item }, status, reason, requestBudget: priceLimitResult.error });
+        reason = 'trade-rate-limit';
+        receipts.push({ index: itemIndex, item: { ...entry.item }, status, reason, requestPacing: priceLimitResult.error });
+        break;
+      }
+      if (priceLimitResult.error?.kind === 'pacing-deferred') {
+        status = 'deferred';
+        reason = 'trade-action-pacing';
+        resumeAt = priceLimitResult.error.retryAt ?? null;
+        checkpoint('listing-slice-deferred', {
+          itemIndex, item: entry.item, listing, reason, retryAt: resumeAt, mutationBoundaryCrossed: false,
+        });
         break;
       }
       const finalPrice = applyListingPriceLimits(entry, priceLimitResult);
@@ -229,6 +243,60 @@ export function createListingTransaction(options = {}) {
         break;
       }
 
+      const requestPermit = await adapter.acquireRequestPermit('list', {
+        wait: input.deferWhenWaiting !== true,
+        onWait: (wait) => checkpoint('listing-request-permit-waiting', {
+          itemIndex, item: entry.item, listing,
+          reason: wait.reason, retryAt: wait.retryAt, mutationBoundaryCrossed: false,
+        }),
+      });
+      if (requestPermit?.status !== 'acquired' || !requestPermit.permit) {
+        if (requestPermit?.error?.kind === 'pacing-deferred') {
+          status = 'deferred';
+          reason = 'trade-action-pacing';
+          resumeAt = requestPermit.error.retryAt ?? null;
+          checkpoint('listing-slice-deferred', {
+            itemIndex, item: entry.item, listing, reason, retryAt: resumeAt, mutationBoundaryCrossed: false,
+          });
+          break;
+        }
+        status = requestPermit?.error?.kind === 'stopped-by-user' ? 'stopped' : 'blocked';
+        reason = requestPermit?.error?.kind === 'stopped-by-user' ? 'stopped-by-user' : 'trade-rate-limit';
+        receipts.push({
+          index: itemIndex,
+          item: { ...entry.item },
+          status,
+          reason,
+          retryAt: requestPermit?.error?.retryAt ?? null,
+        });
+        checkpoint('listing-request-permit-blocked', {
+          itemIndex,
+          item: entry.item,
+          listing,
+          status,
+          reason,
+          retryAt: requestPermit?.error?.retryAt ?? null,
+          mutationBoundaryCrossed: false,
+        });
+        break;
+      }
+      if (input.shouldStop?.() === true) {
+        status = 'stopped';
+        reason = 'stopped-by-user';
+        break;
+      }
+      const permitCircuit = options.circuitBreaker?.availability?.();
+      if (permitCircuit && permitCircuit.allowed !== true) {
+        status = 'blocked';
+        reason = 'trade-circuit-open';
+        break;
+      }
+      if (typeof input.beforeMutation === 'function' && await input.beforeMutation(entry) !== true) {
+        status = 'blocked';
+        reason = 'listing-execution-lease-lost';
+        break;
+      }
+
       checkpoint('listing-request-started', {
         itemIndex,
         item: entry.item,
@@ -236,7 +304,7 @@ export function createListingTransaction(options = {}) {
         status: 'mutation-pending',
         mutationBoundaryCrossed: true,
       });
-      const listed = await adapter.listItem(entry.item, entry);
+      const listed = await adapter.listItem(entry.item, entry, { requestPermit: requestPermit.permit });
       checkpoint('listing-response-received', {
         itemIndex,
         item: entry.item,
@@ -262,7 +330,7 @@ export function createListingTransaction(options = {}) {
       };
       if (listed.status !== 'accepted') {
         const classification = classifyTradeError(listed.error || listed.response || { status: listed.status });
-        if (classification.kind !== 'request-budget-exhausted') {
+        if (classification.kind !== 'rate-limit') {
           options.circuitBreaker?.recordFailure?.(listed.error || listed.response || {}, {
             action: 'list',
             endpoint: '/auctionhouse',
@@ -274,13 +342,11 @@ export function createListingTransaction(options = {}) {
           });
         }
         failed += 1;
-        status = classification.kind === 'request-budget-exhausted'
-          ? 'blocked'
-          : listed.status === 'ambiguous'
+        status = listed.status === 'ambiguous'
             ? 'ambiguous'
-            : classification.opensCircuit ? 'blocked' : 'failed';
-        reason = classification.kind === 'request-budget-exhausted'
-          ? 'trade-request-budget-exhausted'
+            : classification.opensCircuit || classification.kind === 'rate-limit' ? 'blocked' : 'failed';
+        reason = classification.kind === 'rate-limit'
+          ? 'trade-rate-limit'
           : classification.opensCircuit ? `trade-${classification.kind}` : `listing-${listed.status}`;
         receipts.push({ ...receipt, status, reason, classification });
         checkpoint('item-finished', {
@@ -305,8 +371,8 @@ export function createListingTransaction(options = {}) {
       if (refresh.status !== 'completed' || verification.status !== 'loaded' || !verificationMatches(entry, verification.candidate)) {
         failed += 1;
         status = 'ambiguous';
-        reason = refresh.error?.kind === 'request-budget-exhausted'
-          ? 'listing-accepted-request-budget-exhausted-before-verification'
+        reason = refresh.error?.kind === 'rate-limit'
+          ? 'listing-accepted-rate-limit-before-verification'
           : 'listing-accepted-but-not-verified';
         receipts.push({
           ...receipt,
@@ -339,14 +405,11 @@ export function createListingTransaction(options = {}) {
         status: 'listed',
         mutationBoundaryCrossed: true,
       });
-      if (index < entries.length - 1 && input.shouldStop?.() !== true) {
-        await sleep(randomDelayMs(job.policy.listingDelaySeconds, random));
-      }
     }
 
     const finishedAt = Number(now());
     const afterCapabilities = adapter.inspectCapabilities();
-    const skipped = Math.max(0, entries.length - succeeded - failed);
+    const skipped = status === 'deferred' ? 0 : Math.max(0, entries.length - succeeded - failed);
     checkpoint('transaction-finished', { status, reason });
     return createTradeRunReceipt({
       runId,
@@ -355,6 +418,7 @@ export function createListingTransaction(options = {}) {
       scheduledFor,
       startedAt,
       finishedAt,
+      resumeAt,
       status,
       reason,
       requested: entries.length,

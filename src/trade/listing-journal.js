@@ -38,8 +38,6 @@ function safeEvent(input = {}) {
     chunkIndex: safeNumber(input.chunkIndex),
     offset: safeNumber(input.offset),
     quantity: safeNumber(input.quantity),
-    required: safeNumber(input.required),
-    remaining: safeNumber(input.remaining),
     retryAt: safeNumber(input.retryAt),
     status: input.status ? String(input.status) : null,
     reason: input.reason ? String(input.reason).slice(0, 160) : null,
@@ -71,11 +69,11 @@ function safeItemState(input = {}, fallbackIndex = 0) {
   };
 }
 
-function preparedItems(input = []) {
+function preparedItems(input = [], offset = 0) {
   return (Array.isArray(input) ? input : [])
     .slice(0, TRADE_LISTING_JOURNAL_ITEM_LIMIT)
     .map((entry, index) => safeItemState({
-      index: index + 1,
+      index: offset + index + 1,
       phase: 'prepared',
       status: 'pending',
       item: entry.item,
@@ -152,8 +150,9 @@ export function createTradeListingJournal(options = {}) {
   }
 
   function begin(input = {}) {
-    const recovery = inspectRecovery();
+    const recovery = inspectRecovery({ runId: input.runId });
     if (!recovery.canSupersede) throw new Error(recovery.reason);
+    if (recovery.canResume) return read();
     const at = Math.max(0, safeNumber(input.at) ?? Number(now()));
     const event = safeEvent({ at, phase: input.phase || 'prepare-started' });
     return write({
@@ -175,15 +174,21 @@ export function createTradeListingJournal(options = {}) {
     if (!current || current.runId !== String(runId || '')) return current;
     const event = safeEvent({ ...input, at: input.at ?? now() });
     const replacementItems = Array.isArray(input.items)
-      ? preparedItems(input.items).map((entry) => ({ ...entry, updatedAt: event.at }))
+      ? preparedItems(input.items, Math.max(0, Math.floor(safeNumber(input.offset) ?? 0)))
+        .map((entry) => ({ ...entry, updatedAt: event.at }))
+      : null;
+    const mergedItems = replacementItems
+      ? [...current.items.filter((entry) => !replacementItems.some((replacement) => replacement.index === entry.index)), ...replacementItems]
+        .sort((left, right) => left.index - right.index)
+        .slice(0, TRADE_LISTING_JOURNAL_ITEM_LIMIT)
       : null;
     return write({
       ...current,
       status: 'active',
       phase: event.phase,
       updatedAt: event.at,
-      requested: replacementItems ? replacementItems.length : current.requested,
-      items: replacementItems || updateItemStates(current.items, event),
+      requested: replacementItems ? Math.max(current.requested, ...replacementItems.map((entry) => entry.index)) : current.requested,
+      items: mergedItems || updateItemStates(current.items, event),
       events: [...current.events, event].slice(-TRADE_LISTING_JOURNAL_EVENT_LIMIT),
     });
   }
@@ -202,9 +207,15 @@ export function createTradeListingJournal(options = {}) {
     });
   }
 
-  function inspectRecovery() {
+  function inspectRecovery(input = {}) {
     const current = read();
     const active = current?.status === 'active';
+    const deferred = current?.status === 'deferred';
+    const hasContinuationLookup = typeof options.isContinuationActive === 'function';
+    const continuationActive = (deferred && !hasContinuationLookup)
+      || ((active || deferred) && hasContinuationLookup
+        && options.isContinuationActive(current.runId, current.jobId) === true);
+    const matchingRun = String(input.runId || '') === String(current?.runId || '');
     const mutationBoundaryCrossed = Boolean(current?.items.some((entry) => entry.mutationBoundaryCrossed));
     const uncertainMutation = Boolean(current?.items.some((entry) => (
       entry.mutationBoundaryCrossed
@@ -212,14 +223,21 @@ export function createTradeListingJournal(options = {}) {
     )));
     const requiresReview = current?.status !== 'acknowledged'
       && mutationBoundaryCrossed
-      && (active || uncertainMutation);
+      && ((active && !continuationActive) || uncertainMutation);
+    const reserved = continuationActive && !requiresReview;
+    const canResume = reserved && matchingRun;
     return {
       active,
+      deferred,
+      reserved,
+      canResume,
       runId: current?.runId || null,
       mutationBoundaryCrossed,
       uncertainMutation,
-      canSupersede: !requiresReview,
-      reason: requiresReview ? 'listing-journal-mutation-review-required' : null,
+      canSupersede: canResume || (!requiresReview && !reserved),
+      reason: requiresReview
+        ? 'listing-journal-mutation-review-required'
+        : reserved && !canResume ? 'listing-journal-continuation-reserved' : null,
     };
   }
 

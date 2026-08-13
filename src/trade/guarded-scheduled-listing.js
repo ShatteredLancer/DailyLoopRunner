@@ -1,18 +1,8 @@
 import { createTradeRunReceipt } from './contracts.js';
 import { createListingTransaction } from './listing-transaction.js';
-import { inspectTradeRequestCapacity, tradeListingRequestReserve } from './request-budget.js';
 import { createTradeChunkCoordinator, TRADE_RUN_ITEM_LIMIT } from './chunk-coordinator.js';
 
-export const GUARDED_SCHEDULE_CONFIRMATION = 'RUN ONCE 1';
-export const GUARDED_TRANSFER_REPRICE_CONFIRMATION = 'RUN REPRICE ONCE 1';
 export const GUARDED_SCHEDULED_LISTING_LIMIT = TRADE_RUN_ITEM_LIMIT;
-
-export function guardedScheduledListingConfirmation(mode, countInput, scheduleType = 'once', runs = 1) {
-  const count = Math.min(GUARDED_SCHEDULED_LISTING_LIMIT, Math.max(1, Math.floor(Number(countInput) || 1)));
-  const kind = String(scheduleType || 'once').toUpperCase();
-  const prefix = mode === 'transfer-reprice' ? `RUN REPRICE ${kind} ${count}` : `RUN ${kind} ${count}`;
-  return scheduleType === 'once' || scheduleType === 'window' ? prefix : `${prefix} FOR ${runs} RUNS`;
-}
 
 export function guardedTradeSessionReadiness(input = {}) {
   if (input.pageReady !== true) return { ready: false, reason: 'ea-session-unavailable' };
@@ -91,7 +81,7 @@ export function inspectGuardedScheduledListingJob(job = {}, options = {}) {
       reason: 'validation-gate-listing-only',
       job,
       mode: null,
-      requiredText: null,
+      approval: null,
     };
   }
   if (job.enabled !== true) reason = 'validation-gate-job-disabled';
@@ -110,16 +100,13 @@ export function inspectGuardedScheduledListingJob(job = {}, options = {}) {
   const sources = Array.isArray(job.policy?.sources) ? job.policy.sources : [];
   const source = sources.length === 1 ? sources[0] : null;
   let mode = null;
-  let requiredText = null;
   if (!source) {
     reason ||= 'validation-gate-single-source-only';
   } else if (source === 'club') {
     mode = 'club-listing';
-    requiredText = guardedScheduledListingConfirmation(mode, maxListings, job.schedule.type, options.authorizationRuns || 2);
     if (job.policy?.expiredPolicy !== 'skip') reason ||= 'validation-gate-club-skip-expired-only';
   } else if (source === 'transfer') {
     mode = 'transfer-reprice';
-    requiredText = guardedScheduledListingConfirmation(mode, maxListings, job.schedule.type, options.authorizationRuns || 2);
     if (job.policy?.expiredPolicy !== 'reprice') reason ||= 'validation-gate-transfer-reprice-required';
     else if (options.scheduledTransferRepriceEnabled !== true) {
       reason ||= 'scheduled-transfer-reprice-validation-gate-disabled';
@@ -133,7 +120,13 @@ export function inspectGuardedScheduledListingJob(job = {}, options = {}) {
     reason,
     job,
     mode,
-    requiredText: reason === null ? requiredText : null,
+    approval: reason === null ? {
+      risk: 'attention',
+      action: mode,
+      quantity: maxListings,
+      scheduleType: job.schedule.type,
+      authorizedRuns: options.authorizationRuns || 2,
+    } : null,
   };
 }
 
@@ -159,11 +152,12 @@ export function createGuardedScheduledListingExecutor(options = {}) {
   const store = options.store;
   const listingPreparation = options.listingPreparation;
   const operationCoordinator = options.operationCoordinator;
-  if (typeof store?.consumeAuthorization !== 'function') throw new TypeError('Trade Job Store authorization is required');
+  if (typeof store?.beginAuthorization !== 'function' && typeof store?.consumeAuthorization !== 'function') {
+    throw new TypeError('Trade Job Store authorization is required');
+  }
   if (typeof listingPreparation?.prepare !== 'function') throw new TypeError('Listing Preparation is required');
   if (!operationCoordinator?.acquire || !operationCoordinator?.release) throw new TypeError('Operation Coordinator is required');
   if (typeof options.getTradeAdapter !== 'function') throw new TypeError('getTradeAdapter is required');
-  if (typeof options.requestBudget?.reserve !== 'function') throw new TypeError('Trade request budget is required');
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const sleep = typeof options.sleep === 'function' ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const transactionFactory = typeof options.transactionFactory === 'function'
@@ -185,8 +179,8 @@ export function createGuardedScheduledListingExecutor(options = {}) {
   }
 
   async function execute(input = {}) {
-    const startedAt = Number(now());
-    let requestReservation = null;
+    const continuation = input.continuation || null;
+    const startedAt = Number(continuation?.startedAt ?? input.startedAt ?? now());
     if (options.validationGateEnabled !== true) return blockedReceipt(input, 'scheduled-listing-validation-gate-disabled', startedAt);
     if (input.context?.liveExecutionEnabled !== true) return blockedReceipt(input, 'live-execution-disabled', startedAt);
     const gate = inspectGuardedScheduledListingJob(input.job, {
@@ -198,22 +192,28 @@ export function createGuardedScheduledListingExecutor(options = {}) {
     if (globalRecovery?.reviewRequired === true) {
       return blockedReceipt(input, globalRecovery.reason || 'trade-recovery-review-required', startedAt);
     }
-    const journalRecovery = options.journal?.inspectRecovery?.();
+    const journalRecovery = options.journal?.inspectRecovery?.({ runId: input.runId });
     if (journalRecovery?.canSupersede === false) {
       return blockedReceipt(input, journalRecovery.reason || 'listing-journal-recovery-required', startedAt);
     }
-    const authorization = store.consumeAuthorization(input.job.id, input.runId);
-    if (authorization.consumed !== true) {
+    const authorization = typeof store.beginAuthorization === 'function'
+      ? store.beginAuthorization(input.job.id, input.runId)
+      : { begun: store.consumeAuthorization(input.job.id, input.runId)?.consumed === true };
+    if (authorization.begun !== true) {
       return blockedReceipt(input, authorization.reason || 'schedule-authorization-missing-or-expired', startedAt);
     }
+    let authorizationBegun = true;
+    let yielded = false;
+    const completeAuthorization = () => {
+      if (!authorizationBegun) return;
+      store.completeAuthorization?.(input.job.id, input.runId);
+      authorizationBegun = false;
+    };
     const availability = options.circuitBreaker?.availability?.();
-    if (availability && availability.allowed !== true) return blockedReceipt(input, 'trade-circuit-open', startedAt);
-    const requestReserve = tradeListingRequestReserve(input.job);
-    if (typeof options.requestBudget?.inspect === 'function') {
-      const requestCapacity = inspectTradeRequestCapacity(options.requestBudget.inspect(), requestReserve);
-      if (!requestCapacity.ready) return blockedReceipt(input, requestCapacity.reason, startedAt);
+    if (availability && availability.allowed !== true) {
+      completeAuthorization();
+      return blockedReceipt(input, 'trade-circuit-open', startedAt);
     }
-
     const operationId = `scheduled-listing:${input.runId}`;
     const operation = operationCoordinator.acquire({
       id: operationId,
@@ -221,18 +221,13 @@ export function createGuardedScheduledListingExecutor(options = {}) {
       ownerId: options.ownerId || '',
       label: input.job.name,
     });
-    if (!operation.acquired) return blockedReceipt(input, operation.reason || 'operation-unavailable', startedAt);
+    if (!operation.acquired) {
+      completeAuthorization();
+      return blockedReceipt(input, operation.reason || 'operation-unavailable', startedAt);
+    }
 
     options.onRunningChange?.(true, input);
     try {
-      if (typeof options.requestBudget?.reserve === 'function') {
-        requestReservation = await options.requestBudget.reserve(requestReserve);
-        if (!requestReservation.ready) {
-          const receipt = blockedReceipt(input, 'trade-request-budget-insufficient', startedAt);
-          options.onReceipt?.(receipt, { job: input.job, prepared: null, clubValidation: null, input });
-          return receipt;
-        }
-      }
       const maxListings = Number(input.job.policy.maxListings);
       const job = {
         ...input.job,
@@ -243,27 +238,88 @@ export function createGuardedScheduledListingExecutor(options = {}) {
           expiredPolicy: gate.mode === 'transfer-reprice' ? 'reprice' : 'skip',
         },
       };
-      options.journal?.begin?.({
-        runId: input.runId,
+      if (!continuation) {
+        options.journal?.begin?.({
+          runId: input.runId,
+          jobId: job.id,
+          source: job.policy.sources[0],
+          requested: maxListings,
+          at: startedAt,
+        });
+      } else {
+        options.journal?.checkpoint?.(input.runId, {
+          phase: 'slice-resumed',
+          status: 'active',
+          offset: continuation.succeeded + continuation.failed + continuation.skipped,
+        });
+      }
+      const pacingContext = {
+        policy: job.policy,
         jobId: job.id,
-        source: job.policy.sources[0],
-        requested: maxListings,
-        at: startedAt,
-      });
-      const adapter = requestReservation?.ready
-        ? options.getTradeAdapter({ requestBudget: requestReservation })
-        : options.getTradeAdapter();
+        runId: input.runId,
+        ownerId: options.ownerId || '',
+        shouldStop: () => options.shouldStop?.() === true,
+      };
+      const adapter = options.getTradeAdapter({ pacingContext });
+      const completedBefore = Math.max(0, Number(continuation?.succeeded || 0)
+        + Number(continuation?.failed || 0) + Number(continuation?.skipped || 0));
+      const remainingListings = Math.max(1, maxListings - completedBefore);
       const prepared = await listingPreparation.prepare(job, {
-        maxListings,
+        maxListings: remainingListings,
         tradeAdapter: adapter,
-        requestBudget: requestReservation,
+        pacingContext,
+        deferWhenWaiting: true,
       });
       options.journal?.checkpoint?.(input.runId, {
         phase: 'prepare-finished',
         status: prepared?.ready ? 'completed' : 'blocked',
         reason: prepared?.blockers?.[0]?.reason,
         items: prepared?.plan?.entries || [],
+        offset: completedBefore,
       });
+      if (prepared?.deferredAt) {
+        yielded = true;
+        const receipt = createTradeRunReceipt({
+          runId: input.runId,
+          jobId: job.id,
+          jobType: job.type,
+          scheduledFor: input.scheduledFor,
+          startedAt,
+          finishedAt: Number(now()),
+          resumeAt: prepared.deferredAt,
+          status: 'deferred',
+          reason: 'trade-action-pacing',
+          requested: maxListings,
+          succeeded: completedBefore,
+          continuation: {
+            ...(continuation || {}),
+            runId: input.runId,
+            scheduledFor: input.scheduledFor,
+            startedAt,
+            resumeAt: prepared.deferredAt,
+            yieldedAt: Number(now()),
+            sliceCount: Math.max(1, Number(continuation?.sliceCount || 0) + 1),
+            requested: maxListings,
+            succeeded: completedBefore,
+            failed: 0,
+            skipped: 0,
+            receipts: continuation?.receipts || [],
+          },
+        });
+        if (typeof input.persistContinuation === 'function'
+          && input.persistContinuation(receipt) !== true) {
+          receipt.status = 'blocked';
+          receipt.reason = 'trade-continuation-persistence-rejected';
+          receipt.resumeAt = null;
+          receipt.continuation = null;
+          yielded = false;
+        }
+        options.journal?.finish?.(input.runId, {
+          phase: 'slice-deferred', status: 'deferred', reason: receipt.reason, retryAt: receipt.resumeAt,
+        });
+        options.onReceipt?.(receipt, { job, prepared, input });
+        return receipt;
+      }
       if (prepared?.ready !== true || prepared?.plan?.entries?.length < 1 || prepared.plan.entries.length > maxListings) {
         const receipt = blockedReceipt(input, prepared?.blockers?.[0]?.reason || 'scheduled-listing-not-prepared', startedAt);
         options.journal?.finish?.(input.runId, { phase: 'prepare-blocked', status: receipt.status, reason: receipt.reason });
@@ -277,12 +333,8 @@ export function createGuardedScheduledListingExecutor(options = {}) {
         options.onReceipt?.(receipt, { job, prepared, clubValidation, input });
         return receipt;
       }
-      try { await requestReservation?.release?.(); } catch { }
-      requestReservation = null;
       const coordinator = createTradeChunkCoordinator({
-        requestBudget: options.requestBudget,
         now,
-        sleep,
         onCheckpoint: (checkpoint) => options.journal?.checkpoint?.(input.runId, checkpoint),
       });
       const receipt = await coordinator.run({
@@ -291,17 +343,23 @@ export function createGuardedScheduledListingExecutor(options = {}) {
         jobType: prepared.job.type,
         scheduledFor: input.scheduledFor,
         startedAt,
-        requested: prepared.plan.entries.length,
-        requestReserve: (quantity) => tradeListingRequestReserve(quantity),
+        requested: maxListings,
+        continuation,
         heartbeat: () => input.heartbeat?.() === true,
         shouldStop: () => options.shouldStop?.() === true,
-        executeChunk: async ({ offset, quantity, reservation }) => {
+        executeChunk: async ({ offset, quantity }) => {
+          const relativeOffset = Math.max(0, offset - completedBefore);
           const chunkPrepared = {
             ...prepared,
-            plan: { ...prepared.plan, entries: prepared.plan.entries.slice(offset, offset + quantity) },
+            plan: { ...prepared.plan, entries: prepared.plan.entries.slice(relativeOffset, relativeOffset + quantity) },
           };
           const transaction = transactionFactory({
-            tradeAdapter: options.getTradeAdapter({ requestBudget: reservation }),
+            tradeAdapter: options.getTradeAdapter({
+              pacingContext: {
+                ...pacingContext,
+                policy: prepared.job.policy,
+              },
+            }),
             circuitBreaker: options.circuitBreaker,
             sleep,
             onCheckpoint: (checkpoint) => options.journal?.checkpoint?.(input.runId, checkpoint),
@@ -311,16 +369,28 @@ export function createGuardedScheduledListingExecutor(options = {}) {
             prepared: chunkPrepared,
             runId: input.runId,
             confirmationToken: prepared.confirmation.token,
-            confirmationText: prepared.confirmation.requiredText,
+            approved: true,
             scheduledFor: input.scheduledFor,
             itemIndexOffset: offset,
             beforeMutation: () => input.heartbeat?.() === true,
             shouldStop: () => options.shouldStop?.() === true,
+            deferWhenWaiting: true,
           });
         },
       });
+      if (receipt.status === 'deferred' && typeof input.persistContinuation === 'function'
+        && input.persistContinuation(receipt) !== true) {
+        receipt.status = 'blocked';
+        receipt.reason = 'trade-continuation-persistence-rejected';
+        receipt.resumeAt = null;
+        receipt.continuation = null;
+      }
+      yielded = receipt.status === 'deferred';
       options.journal?.finish?.(input.runId, {
-        phase: 'receipt-recorded', status: receipt.status, reason: receipt.reason,
+        phase: receipt.status === 'deferred' ? 'slice-deferred' : 'receipt-recorded',
+        status: receipt.status,
+        reason: receipt.reason,
+        retryAt: receipt.resumeAt,
       });
       options.onReceipt?.(receipt, { job, prepared, clubValidation, input });
       return receipt;
@@ -330,8 +400,10 @@ export function createGuardedScheduledListingExecutor(options = {}) {
       });
       throw error;
     } finally {
+      if (authorizationBegun && !yielded) {
+        completeAuthorization();
+      }
       operationCoordinator.release(operationId);
-      try { await requestReservation?.release?.(); } catch { }
       options.onRunningChange?.(false, input);
     }
   }

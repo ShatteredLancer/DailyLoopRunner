@@ -5,6 +5,7 @@ import {
   reconcileExpiredTradeLease,
 } from '../../src/trade/buy-lease-recovery.js';
 import { createTradeBuyJournal } from '../../src/trade/buy-journal.js';
+import { createTradeBulkRelistJournal } from '../../src/trade/bulk-relist-journal.js';
 import { createTradeJobStore } from '../../src/trade/job-store.js';
 import { createTradeListingJournal } from '../../src/trade/listing-journal.js';
 import { createTradeRunLease } from '../../src/trade/run-lease.js';
@@ -102,7 +103,7 @@ describe('Trade Buy expired pre-mutation lease recovery', () => {
       status: 'reconciled',
       receipt: {
         runId: 'prepare-only-listing', jobType: 'listing', status: 'blocked',
-        reason: 'browser-terminated-before-listing-mutation-boundary', requested: 1, succeeded: 0,
+        reason: 'browser-terminated-before-listing-mutation-boundary', requested: 2, succeeded: 0,
       },
     });
     expect(lease.inspect().lease).toBeNull();
@@ -189,5 +190,45 @@ describe('Trade Buy expired pre-mutation lease recovery', () => {
     expect(lease.inspect().lease).toBeNull();
     expect(journal.inspectRecovery()).toMatchObject({ canSupersede: true, uncertainMutation: false });
     expect(store.read().history).toHaveLength(1);
+  });
+
+  it('recovers a terminal aggregate Re-list All Journal as bulk-relist instead of Buy', () => {
+    const storage = memoryStorage();
+    let time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    const lease = createTradeRunLease({
+      storage, key: 'lease', ownerId: 'old-tab', now: () => time, ttlMs: 5000, createToken: () => 'token',
+    });
+    const journal = createTradeBulkRelistJournal({ storage, key: 'bulk-journal', now: () => time });
+    const items = [1, 2].map((id) => ({
+      item: { id, definitionId: 100 + id, pile: 'transfer' },
+      auction: { state: 'inactive', tradeId: 1000 + id, startingBid: 650, buyNowPrice: 700 },
+    }));
+    lease.acquire({ runId: 'bulk-two', jobId: 'bulk-job' });
+    journal.begin({ runId: 'bulk-two', jobId: 'bulk-job', before: { unsoldCount: 2, items } });
+    journal.checkpoint('bulk-two', {
+      phase: 'bulk-relist-reconciliation-finished', mutationBoundaryCrossed: true,
+      items: items.map((entry) => ({ ...entry, status: 'relisted' })),
+    });
+    journal.finish('bulk-two', { phase: 'receipt-recorded', status: 'completed' });
+    time = 2000;
+    lease.heartbeat('bulk-two');
+    time = 8000;
+
+    const result = reconcileExpiredTradeLease({ lease, store, journals: [journal], now: () => time });
+
+    expect(result).toMatchObject({
+      status: 'reconciled',
+      receipt: {
+        runId: 'bulk-two', jobType: 'bulk-relist', status: 'blocked',
+        reason: 'browser-terminated-after-bulk-relist-journal-terminal',
+        requested: 2, succeeded: 2, failed: 0, skipped: 0,
+      },
+    });
+    expect(lease.inspect().lease).toBeNull();
+    expect(store.read().metrics).toMatchObject({
+      runs: { byJobType: { 'bulk-relist': 1 } },
+      bulkRelist: { relisted: 2 },
+    });
   });
 });

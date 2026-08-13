@@ -51,13 +51,6 @@ function store() {
   return value;
 }
 
-function safeRequestBudget() {
-  return {
-    inspect: () => ({ remaining: 30 }),
-    reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
-  };
-}
-
 function readyPreview() {
   return {
     liveExecutionAllowed: false,
@@ -78,7 +71,6 @@ describe('Guarded scheduled Buy executor', () => {
         finish: vi.fn(),
       },
       getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
-      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => 2000,
     }).execute({
@@ -103,7 +95,6 @@ describe('Guarded scheduled Buy executor', () => {
         reason: 'listing-journal-mutation-review-required',
       }),
       getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
-      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => 2000,
     }).execute({
@@ -115,18 +106,10 @@ describe('Guarded scheduled Buy executor', () => {
     expect(buyPreview.preview).not.toHaveBeenCalled();
   });
 
-  it('consumes the one-run authorization and passes one attempt plus the global reserve to the transaction', async () => {
+  it('consumes one authorization and passes one attempt plus pacing context to the transaction', async () => {
     const jobStore = store();
-    const baseAdapter = createFakeTradeAdapter({ coins: 6000 });
-    const scopedAdapter = createFakeTradeAdapter({ coins: 6000 });
-    const reservation = { ready: true, take: vi.fn(), release: vi.fn(async () => {}) };
-    const requestBudget = {
-      inspect: () => ({ remaining: 30 }),
-      reserve: vi.fn(async () => reservation),
-    };
-    const getTradeAdapter = vi.fn((options = {}) => (
-      options.requestBudget === reservation ? scopedAdapter : baseAdapter
-    ));
+    const adapter = createFakeTradeAdapter({ coins: 6000 });
+    const getTradeAdapter = vi.fn(() => adapter);
     const transaction = { run: vi.fn(async () => ({ status: 'completed', requested: 1, succeeded: 1, receipts: [] })) };
     const transactionFactory = vi.fn(() => transaction);
     const heartbeat = vi.fn(() => true);
@@ -136,8 +119,8 @@ describe('Guarded scheduled Buy executor', () => {
       buyPreview: { preview: vi.fn(async () => readyPreview()) },
       getTradeAdapter,
       transactionFactory,
-      requestBudget,
       validationGateEnabled: true,
+      ownerId: 'scheduled-tab',
       now: () => 2000,
     }).execute({
       job: job(), runId: 'scheduled-buy-run', scheduledFor: 2000,
@@ -159,40 +142,13 @@ describe('Guarded scheduled Buy executor', () => {
     }));
     expect(transaction.run.mock.calls[0][0].beforeBuy()).toBe(true);
     expect(heartbeat).toHaveBeenCalledTimes(2);
-    expect(requestBudget.reserve).toHaveBeenCalledWith(14);
-    expect(getTradeAdapter).toHaveBeenCalledWith({ requestBudget: reservation });
-    expect(transactionFactory).toHaveBeenCalledWith(expect.objectContaining({ tradeAdapter: scopedAdapter }));
-    expect(reservation.release).toHaveBeenCalledOnce();
-  });
-
-  it('waits locally and blocks without market work when request capacity stays unavailable', async () => {
-    let time = 2000;
-    const transactionFactory = vi.fn();
-    const buyPreview = { preview: vi.fn(async () => readyPreview()) };
-    const requestBudget = {
-      inspect: () => ({ remaining: 14 }),
-      reserve: vi.fn(async () => ({ ready: false, required: 14, remaining: 13, retryAt: time + 60_000 })),
-    };
-    const result = await createGuardedScheduledBuyExecutor({
-      store: store(),
-      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
-      buyPreview,
-      getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
-      transactionFactory,
-      requestBudget,
-      validationGateEnabled: true,
-      now: () => time,
-      sleep: async () => { time = 902_000; },
-    }).execute({
-      job: job(), runId: 'scheduled-buy-reservation-race', scheduledFor: 2000,
-      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    expect(getTradeAdapter).toHaveBeenCalledWith({
+      pacingContext: expect.objectContaining({
+        jobId: 'buy-once', runId: 'scheduled-buy-run', ownerId: 'scheduled-tab',
+        policy: expect.objectContaining({ quantity: 1 }), shouldStop: expect.any(Function),
+      }),
     });
-    expect(result).toMatchObject({
-      status: 'stopped', reason: 'runtime-limit', requested: 1, skipped: 1,
-    });
-    expect(buyPreview.preview).toHaveBeenCalledOnce();
-    expect(requestBudget.reserve).toHaveBeenCalledOnce();
-    expect(transactionFactory).not.toHaveBeenCalled();
+    expect(transactionFactory).toHaveBeenCalledWith(expect.objectContaining({ tradeAdapter: adapter }));
   });
 
   it('blocks below the reserve plus maximum price before Preview or market work', async () => {
@@ -203,7 +159,6 @@ describe('Guarded scheduled Buy executor', () => {
       operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
       buyPreview,
       getTradeAdapter: () => adapter,
-      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => 2000,
     }).execute({
@@ -217,36 +172,6 @@ describe('Guarded scheduled Buy executor', () => {
     expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
   });
 
-  it('previews first, then waits for the shared request reserve without market writes', async () => {
-    let time = 2000;
-    const jobStore = store();
-    const buyPreview = { preview: vi.fn(async () => readyPreview()) };
-    const adapter = createFakeTradeAdapter({ coins: 6000 });
-    const reserve = vi.fn(async () => ({
-      ready: false, required: 14, remaining: 11, retryAt: time + 60_000,
-    }));
-    const result = await createGuardedScheduledBuyExecutor({
-      store: jobStore,
-      operationCoordinator: createOperationCoordinator({ now: () => 2000 }),
-      buyPreview,
-      getTradeAdapter: () => adapter,
-      requestBudget: { inspect: () => ({ remaining: 11, retryAt: 5000 }), reserve },
-      validationGateEnabled: true,
-      now: () => time,
-      sleep: async () => { time = 902_000; },
-    }).execute({
-      job: job(), runId: 'scheduled-buy-budget', scheduledFor: 2000,
-      context: { liveExecutionEnabled: true }, heartbeat: () => true,
-    });
-    expect(result).toMatchObject({
-      status: 'stopped', reason: 'runtime-limit', requested: 1, skipped: 1,
-    });
-    expect(jobStore.read()).toMatchObject({ paused: true, liveExecutionEnabled: false, jobs: [{ armed: false }] });
-    expect(buyPreview.preview).toHaveBeenCalledOnce();
-    expect(reserve).toHaveBeenCalledOnce();
-    expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
-  });
-
   it('refuses execution without consuming authorization while the production validation gate is disabled', async () => {
     const jobStore = store();
     const buyPreview = { preview: vi.fn() };
@@ -255,7 +180,6 @@ describe('Guarded scheduled Buy executor', () => {
       operationCoordinator: createOperationCoordinator(),
       buyPreview,
       getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
-      requestBudget: safeRequestBudget(),
     }).execute({
       job: job(), runId: 'scheduled-buy-disabled', scheduledFor: 2000,
       context: { liveExecutionEnabled: true }, heartbeat: () => true,
@@ -270,16 +194,11 @@ describe('Guarded scheduled Buy executor', () => {
     expect(buyPreview.preview).not.toHaveBeenCalled();
   });
 
-  it('relocks and authorizes exactly two scheduled Buy attempts with a 28-slot reserve', async () => {
+  it('relocks and authorizes exactly two scheduled Buy attempts', async () => {
     const jobStore = createTradeJobStore({ storage: memoryStorage(), now: () => 2000 });
     jobStore.upsert(dualJob());
     jobStore.setMinimumRetainedCoins(4000);
     jobStore.authorize('buy-once-dual');
-    const reservation = { ready: true, release: vi.fn(async () => {}) };
-    const requestBudget = {
-      inspect: () => ({ remaining: 30 }),
-      reserve: vi.fn(async () => reservation),
-    };
     const lanes = [
       { rating: 84, maxBuyNow: 1000, definitionIds: [8401] },
       { rating: 85, maxBuyNow: 1000, definitionIds: [8501] },
@@ -291,7 +210,6 @@ describe('Guarded scheduled Buy executor', () => {
       buyPreview: { preview: vi.fn(async () => ({ liveExecutionAllowed: false, plan: { ready: true, lanes } })) },
       getTradeAdapter: () => createFakeTradeAdapter({ coins: 7000 }),
       transactionFactory: () => transaction,
-      requestBudget,
       validationGateEnabled: true,
       now: () => 2000,
     }).execute({
@@ -300,12 +218,88 @@ describe('Guarded scheduled Buy executor', () => {
     });
 
     expect(result).toMatchObject({ status: 'completed', requested: 2, succeeded: 2 });
-    expect(requestBudget.reserve).toHaveBeenCalledWith(28);
     expect(transaction.run).toHaveBeenCalledWith(expect.objectContaining({ maxBuyAttempts: 2 }));
+  });
+
+  it('yields a paced Buy slice and preserves spend, cursor and authorization until resume', async () => {
+    let time = 2000;
+    const storage = memoryStorage();
+    const scheduled = dualJob();
+    const jobStore = createTradeJobStore({ storage, now: () => time });
+    jobStore.upsert(scheduled);
+    jobStore.setMinimumRetainedCoins(4000);
+    jobStore.authorize(scheduled.id);
+    const operationCoordinator = createOperationCoordinator({ now: () => time });
+    let slice = 0;
+    const transaction = { run: vi.fn(async ({ itemIndexOffset, cursor, purchasedByRating }) => {
+      slice += 1;
+      if (slice === 1) {
+        return {
+          status: 'deferred', reason: 'trade-action-pacing', resumeAt: 5000,
+          requested: 2, succeeded: 1, skipped: 0,
+          receipts: [{
+            status: 'run-summary', searches: 1, buyAttempts: 1, spent: 700,
+            cursor: { laneIndex: 1, definitionIndexes: { 84: 1, 85: 0 } },
+            purchasedByRating: { 84: 1 }, expectedDestination: 'auto', minimumRetainedCoins: 4000,
+          }, { index: 1, status: 'purchased', rating: 84, price: 700 }],
+        };
+      }
+      expect(itemIndexOffset).toBe(1);
+      expect(cursor).toMatchObject({ laneIndex: 1 });
+      expect(purchasedByRating).toMatchObject({ 84: 1 });
+      return {
+        status: 'completed', requested: 1, succeeded: 1,
+        receipts: [{
+          status: 'run-summary', searches: 1, buyAttempts: 1, spent: 800,
+          cursor: { laneIndex: 0, definitionIndexes: { 84: 1, 85: 1 } },
+          purchasedByRating: { 84: 1, 85: 1 }, expectedDestination: 'auto', minimumRetainedCoins: 4000,
+        }, { index: 2, status: 'purchased', rating: 85, price: 800 }],
+      };
+    }) };
+    const executor = createGuardedScheduledBuyExecutor({
+      store: jobStore,
+      operationCoordinator,
+      buyPreview: { preview: vi.fn(async () => ({
+        liveExecutionAllowed: false,
+        plan: { ready: true, lanes: [
+          { rating: 84, maxBuyNow: 1000, definitionIds: [8401] },
+          { rating: 85, maxBuyNow: 1000, definitionIds: [8501] },
+        ] },
+      })) },
+      getTradeAdapter: () => createFakeTradeAdapter({ coins: 7000 }),
+      transactionFactory: () => transaction,
+      validationGateEnabled: true,
+      now: () => time,
+    });
+
+    const first = await executor.execute({
+      job: scheduled, runId: 'buy-sliced', scheduledFor: 2000,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(first).toMatchObject({
+      status: 'deferred', resumeAt: 5000, requested: 2, succeeded: 1,
+      continuation: { spent: 700, cursor: { laneIndex: 1 }, purchasedByRating: { 84: 1 } },
+    });
+    expect(operationCoordinator.inspect().active).toBeNull();
+    expect(jobStore.read()).toMatchObject({
+      paused: false,
+      authorization: { activeRunId: 'buy-sliced', remainingRuns: 1 },
+    });
+
+    time = 5000;
+    const second = await executor.execute({
+      job: scheduled, runId: 'buy-sliced', scheduledFor: 2000,
+      continuation: first.continuation,
+      context: { liveExecutionEnabled: true }, heartbeat: () => true,
+    });
+    expect(second).toMatchObject({ status: 'completed', requested: 2, succeeded: 2, skipped: 0 });
+    expect(second.receipts.find((entry) => entry.status === 'run-summary')).toMatchObject({ spent: 1500, buyAttempts: 2 });
+    expect(jobStore.read()).toMatchObject({ paused: true, liveExecutionEnabled: false, jobs: [{ armed: false }] });
   });
 
   it('releases the Coordinator when Journal begin detects a cross-tab conflict', async () => {
     const operationCoordinator = createOperationCoordinator({ now: () => 2000 });
+    const jobStore = store();
     const buyPreview = { preview: vi.fn() };
     const onRunningChange = vi.fn();
     const journal = {
@@ -315,12 +309,11 @@ describe('Guarded scheduled Buy executor', () => {
     };
 
     await expect(createGuardedScheduledBuyExecutor({
-      store: store(),
+      store: jobStore,
       operationCoordinator,
       buyPreview,
       journal,
       getTradeAdapter: () => createFakeTradeAdapter({ coins: 6000 }),
-      requestBudget: safeRequestBudget(),
       validationGateEnabled: true,
       now: () => 2000,
       onRunningChange,
@@ -332,6 +325,7 @@ describe('Guarded scheduled Buy executor', () => {
     expect(operationCoordinator.inspect().active).toBeNull();
     expect(buyPreview.preview).not.toHaveBeenCalled();
     expect(onRunningChange).not.toHaveBeenCalled();
+    expect(jobStore.read()).toMatchObject({ paused: true, liveExecutionEnabled: false, authorization: null });
   });
 
   it('executes exactly once after an in-grace page resume and persists one safe History receipt', async () => {
@@ -354,7 +348,6 @@ describe('Guarded scheduled Buy executor', () => {
       operationCoordinator: createOperationCoordinator({ now: () => time }),
       buyPreview: { preview: vi.fn(async () => readyPreview()) },
       getTradeAdapter: () => adapter,
-      requestBudget: safeRequestBudget(),
       playerCatalogProvider: {
         load: vi.fn(async () => ({ ok: true, lanes: [{ rating: 84, definitionIds: [8401] }] })),
       },

@@ -1,9 +1,10 @@
 # Trade Scheduler 设计与实施跟踪
 
-> 文档状态：TS0-TS15 已完成，`v0.7.91` 已发布；Trade Scheduler 路线图进入维护模式
+> 文档状态：TS0-TS15 已完成，`v0.7.91` 已发布；本文件作为 v1 历史基线保留
 > 最后更新：2026-08-12
 > 适用仓库：DailyLoopRunner  
 > 功能边界：定时自动买入、定时批量挂牌、交易任务调度、逐项回执与诊断
+> 后继设计：已确认的新范围见 [TRADE_SCHEDULER_V2_DESIGN_ZH.md](TRADE_SCHEDULER_V2_DESIGN_ZH.md)，在对应里程碑完成前不代表当前运行行为
 
 ## 1. 文档目的
 
@@ -1905,4 +1906,4 @@ Release result: local `npm run verify` passed with 338 JavaScript files, 160 tes
 
 Rollback and remaining risk: Roll back to the verified `0.7.84` behavior if a Trade regression appears, but preserve diagnostics before changing versions. Browser background throttling remains environment-dependent. Natural request-budget cooldown and quote fallback remain covered by deterministic automated tests rather than manufactured EA failures. Unsupported capabilities remain fail-closed as listed in the candidate capability matrix.
 
-Next: Maintenance only. New Trade scope requires a separate design review and must not be added as an implicit TS16.
+Next: v1 maintenance only. 新的确认交互、Request Pacing、秒级调度、公平时间片和 EA 原生 Re-list All 已转入独立的 [Trade Scheduler v2 设计](TRADE_SCHEDULER_V2_DESIGN_ZH.md)，不得作为隐式 TS16 修改本路线的历史结论。

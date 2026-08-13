@@ -67,14 +67,14 @@ function plan(mode = 'preview-only') {
 }
 
 describe('Trade listing dialog', () => {
-  it('keeps Preview separate, invalidates preparation on edits, and executes exact confirmation', async () => {
+  it('keeps Preview separate, invalidates preparation on edits, and executes direct approval', async () => {
     const ui = createUiHarness();
     const preview = plan();
     const prepared = {
       ...plan('prepared'),
       ready: true,
       blockers: [],
-      confirmation: { token: 'secret', requiredText: 'LIST 1', createdAt: 1, expiresAt: 2, itemCount: 1 },
+      confirmation: { token: 'secret', action: 'list', createdAt: 1, expiresAt: 2, itemCount: 1 },
     };
     const runReceipt = {
       status: 'completed', requested: 1, succeeded: 1, failed: 0, skipped: 0,
@@ -112,12 +112,10 @@ describe('Trade listing dialog', () => {
     expect(ui.byId('bronze-loop-trade-execute').style.display).toBe('none');
 
     await ui.byId('bronze-loop-trade-prepare').click();
-    const confirmation = ui.byId('bronze-loop-trade-confirmation');
-    confirmation.value = 'LIST 1';
-    confirmation.input();
+    expect(ui.byId('bronze-loop-trade-confirmation')).toBeUndefined();
     expect(ui.byId('bronze-loop-trade-execute').disabled).toBe(false);
     await ui.byId('bronze-loop-trade-execute').click();
-    expect(onExecute).toHaveBeenCalledWith({ confirmationToken: 'secret', confirmationText: 'LIST 1' });
+    expect(onExecute).toHaveBeenCalledWith({ confirmationToken: 'secret', approved: true });
     expect(ui.byText('Listing recap')).toBeTruthy();
     expect(ui.byId('bronze-loop-trade-close').disabled).toBe(false);
   });
@@ -131,15 +129,12 @@ describe('Trade listing dialog', () => {
       dom: ui.dom,
       onPrepare: async () => ({
         ...plan('prepared'), ready: true, blockers: [],
-        confirmation: { token: 'secret', requiredText: 'LIST 1' },
+        confirmation: { token: 'secret', action: 'list' },
       }),
       onExecute: () => running,
       onStop,
     });
     await ui.byId('bronze-loop-trade-prepare').click();
-    const confirmation = ui.byId('bronze-loop-trade-confirmation');
-    confirmation.value = 'LIST 1';
-    confirmation.input();
     const execution = ui.byId('bronze-loop-trade-execute').click();
     expect(ui.byId('bronze-loop-trade-close').disabled).toBe(true);
     ui.byId('bronze-loop-trade-stop').click();
@@ -166,7 +161,7 @@ describe('Trade listing dialog', () => {
     expect(onDownloadDiagnostics).toHaveBeenCalledWith(expect.objectContaining({ error: failure }));
   });
 
-  it('gates two Transfer reprices behind preparation and exact confirmation', async () => {
+  it('gates two Transfer reprices behind preparation and direct approval', async () => {
     const ui = createUiHarness();
     const preview = plan();
     const prepared = {
@@ -182,7 +177,7 @@ describe('Trade listing dialog', () => {
           auctionState: 'inactive',
         })),
       },
-      confirmation: { token: 'reprice-secret', requiredText: 'REPRICE 2', createdAt: 1, expiresAt: 2, itemCount: 2 },
+      confirmation: { token: 'reprice-secret', action: 'reprice', createdAt: 1, expiresAt: 2, itemCount: 2 },
     };
     const onPreview = vi.fn(async () => preview);
     const onPrepare = vi.fn(async () => prepared);
@@ -236,16 +231,10 @@ describe('Trade listing dialog', () => {
       id: 'transfer-observation',
       policy: expect.objectContaining({ sources: ['transfer'], expiredPolicy: 'reprice', maxListings: 4 }),
     }), { platform: 'pc', provider: 'auto' });
-    const confirmation = ui.byId('bronze-loop-trade-confirmation');
-    confirmation.value = 'REPRICE 1';
-    confirmation.input();
-    expect(ui.byId('bronze-loop-trade-execute').disabled).toBe(true);
-    confirmation.value = 'REPRICE 2';
-    confirmation.input();
     expect(ui.byId('bronze-loop-trade-execute').disabled).toBe(false);
     expect(ui.byId('bronze-loop-trade-execute').textContent).toBe('Reprice 2');
     await ui.byId('bronze-loop-trade-execute').click();
-    expect(onExecute).toHaveBeenCalledWith({ confirmationToken: 'reprice-secret', confirmationText: 'REPRICE 2' });
+    expect(onExecute).toHaveBeenCalledWith({ confirmationToken: 'reprice-secret', approved: true });
 
     source.value = 'club,transfer';
     source.change();

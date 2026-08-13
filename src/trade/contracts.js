@@ -1,7 +1,8 @@
 import { isPlainObject } from '../domain/objects.js';
 
 export const TRADE_SCHEMA_VERSION = 1;
-export const TRADE_JOB_TYPES = Object.freeze(['buy', 'listing']);
+export const TRADE_JOB_SCHEMA_VERSION = 3;
+export const TRADE_JOB_TYPES = Object.freeze(['buy', 'listing', 'bulk-relist']);
 export const TRADE_CARD_CLASSES = Object.freeze(['common-gold', 'normal-gold', 'rare-gold', 'special', 'gold']);
 export const TRADE_SCHEDULE_TYPES = Object.freeze(['manual', 'once', 'daily', 'interval', 'window']);
 export const TRADE_MISFIRE_POLICIES = Object.freeze(['skip', 'grace-window', 'next-login']);
@@ -36,6 +37,18 @@ function normalizeRange(value, fallback) {
   const values = Array.isArray(value) ? value : fallback;
   const first = positiveInteger(values?.[0], fallback[0]);
   const second = positiveInteger(values?.[1], fallback[1]);
+  return [Math.min(first, second), Math.max(first, second)];
+}
+
+function nonNegativeNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+function normalizeNonNegativeRange(value, fallback) {
+  const values = Array.isArray(value) ? value : fallback;
+  const first = nonNegativeNumber(values?.[0], fallback[0]);
+  const second = nonNegativeNumber(values?.[1], fallback[1]);
   return [Math.min(first, second), Math.max(first, second)];
 }
 
@@ -75,7 +88,7 @@ function validateSchedule(schedule, path, errors) {
       errors.push(`${path}.timezone must be a valid IANA timezone`);
     }
   }
-  if (schedule.type === 'interval') pushPositiveNumber(schedule.everyMinutes, `${path}.everyMinutes`, errors);
+  if (schedule.type === 'interval') pushPositiveNumber(schedule.intervalSeconds, `${path}.intervalSeconds`, errors);
   if (schedule.type === 'window') {
     pushPositiveNumber(schedule.startAt, `${path}.startAt`, errors);
     pushPositiveNumber(schedule.endAt, `${path}.endAt`, errors);
@@ -100,9 +113,10 @@ function validateCardClass(value, path, errors) {
   }
 }
 
-function validateDelayRange(value, path, errors) {
-  if (!Array.isArray(value) || value.length !== 2 || value.some((entry) => !Number.isFinite(Number(entry)) || Number(entry) <= 0)) {
-    errors.push(`${path} must contain two positive numbers`);
+function validateDelayRange(value, path, errors, options = {}) {
+  const minimum = options.allowZero === true ? 0 : Number.MIN_VALUE;
+  if (!Array.isArray(value) || value.length !== 2 || value.some((entry) => !Number.isFinite(Number(entry)) || Number(entry) < minimum)) {
+    errors.push(`${path} must contain two ${options.allowZero === true ? 'non-negative' : 'positive'} numbers`);
     return;
   }
   if (Number(value[1]) < Number(value[0])) errors.push(`${path}[1] must be greater than or equal to ${path}[0]`);
@@ -127,8 +141,22 @@ function validateBuyPolicy(policy, path, errors) {
     && (!Number.isInteger(Number(policy.minimumRetainedCoins)) || Number(policy.minimumRetainedCoins) < 0)) {
     errors.push(`${path}.minimumRetainedCoins must be null or a non-negative integer`);
   }
-  if (Number(policy.maxPurchasesPerSearch) !== 1) errors.push(`${path}.maxPurchasesPerSearch must be 1`);
+  if (!Number.isInteger(Number(policy.maxPurchasesPerSearch))
+    || Number(policy.maxPurchasesPerSearch) < 1
+    || Number(policy.maxPurchasesPerSearch) > 4) {
+    errors.push(`${path}.maxPurchasesPerSearch must be an integer between 1 and 4`);
+  }
   validateDelayRange(policy.searchDelaySeconds, `${path}.searchDelaySeconds`, errors);
+  validateDelayRange(policy.buyDelaySeconds, `${path}.buyDelaySeconds`, errors, { allowZero: true });
+  if (typeof policy.searchCyclePauseEnabled !== 'boolean') errors.push(`${path}.searchCyclePauseEnabled must be boolean`);
+  validateDelayRange(policy.searchCyclePauseEvery, `${path}.searchCyclePauseEvery`, errors);
+  validateDelayRange(policy.searchCyclePauseSeconds, `${path}.searchCyclePauseSeconds`, errors);
+  for (const field of ['initialRateLimitCooldownSeconds', 'maximumRateLimitCooldownSeconds']) {
+    pushPositiveNumber(policy[field], `${path}.${field}`, errors);
+  }
+  if (Number(policy.maximumRateLimitCooldownSeconds) < Number(policy.initialRateLimitCooldownSeconds)) {
+    errors.push(`${path}.maximumRateLimitCooldownSeconds must be greater than or equal to initialRateLimitCooldownSeconds`);
+  }
   if (!isPlainObject(policy.ratingPriceOverrides)) {
     errors.push(`${path}.ratingPriceOverrides must be an object`);
   } else {
@@ -209,6 +237,32 @@ function validateListingPolicy(policy, path, errors) {
   if (!['skip', 'reprice'].includes(policy.expiredPolicy)) errors.push(`${path}.expiredPolicy must be skip or reprice`);
   for (const field of ['durationSeconds', 'maxListings']) pushPositiveNumber(policy[field], `${path}.${field}`, errors);
   validateDelayRange(policy.listingDelaySeconds, `${path}.listingDelaySeconds`, errors);
+  for (const field of ['initialRateLimitCooldownSeconds', 'maximumRateLimitCooldownSeconds']) {
+    pushPositiveNumber(policy[field], `${path}.${field}`, errors);
+  }
+  if (Number(policy.maximumRateLimitCooldownSeconds) < Number(policy.initialRateLimitCooldownSeconds)) {
+    errors.push(`${path}.maximumRateLimitCooldownSeconds must be greater than or equal to initialRateLimitCooldownSeconds`);
+  }
+}
+
+function validateBulkRelistPolicy(policy, path, errors) {
+  if (!isPlainObject(policy)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  const supported = new Set([
+    'relistDelaySeconds', 'initialRateLimitCooldownSeconds', 'maximumRateLimitCooldownSeconds',
+  ]);
+  for (const field of Object.keys(policy)) {
+    if (!supported.has(field)) errors.push(`${path}.${field} is not supported`);
+  }
+  validateDelayRange(policy.relistDelaySeconds, `${path}.relistDelaySeconds`, errors);
+  for (const field of ['initialRateLimitCooldownSeconds', 'maximumRateLimitCooldownSeconds']) {
+    pushPositiveNumber(policy[field], `${path}.${field}`, errors);
+  }
+  if (Number(policy.maximumRateLimitCooldownSeconds) < Number(policy.initialRateLimitCooldownSeconds)) {
+    errors.push(`${path}.maximumRateLimitCooldownSeconds must be greater than or equal to initialRateLimitCooldownSeconds`);
+  }
 }
 
 export function validateTradeJob(job, label = 'Trade job') {
@@ -217,7 +271,7 @@ export function validateTradeJob(job, label = 'Trade job') {
   for (const field of Object.keys(job)) {
     if (!TOP_LEVEL_FIELDS.has(field)) errors.push(`${label}.${field} is not supported`);
   }
-  if (Number(job.schemaVersion) !== TRADE_SCHEMA_VERSION) errors.push(`${label}.schemaVersion must be ${TRADE_SCHEMA_VERSION}`);
+  if (Number(job.schemaVersion) !== TRADE_JOB_SCHEMA_VERSION) errors.push(`${label}.schemaVersion must be ${TRADE_JOB_SCHEMA_VERSION}`);
   pushRequiredString(job.id, `${label}.id`, errors);
   pushRequiredString(job.name, `${label}.name`, errors);
   if (!TRADE_JOB_TYPES.includes(job.type)) errors.push(`${label}.type must be one of: ${TRADE_JOB_TYPES.join(', ')}`);
@@ -228,9 +282,18 @@ export function validateTradeJob(job, label = 'Trade job') {
   if (job.schedule?.type === 'manual' && job.armed === true) {
     errors.push(`${label}.armed must be false for a manual schedule`);
   }
+  if (job.type === 'bulk-relist' && job.schedule?.type === 'manual') {
+    errors.push(`${label}.schedule.type must not be manual for bulk-relist`);
+  }
+  if (job.type === 'bulk-relist'
+    && job.schedule?.type === 'interval'
+    && Number(job.schedule.intervalSeconds) < 60) {
+    errors.push(`${label}.schedule.intervalSeconds must be at least 60 for bulk-relist`);
+  }
   validateMisfirePolicy(job.misfirePolicy, `${label}.misfirePolicy`, errors);
   if (job.type === 'buy') validateBuyPolicy(job.policy, `${label}.policy`, errors);
   if (job.type === 'listing') validateListingPolicy(job.policy, `${label}.policy`, errors);
+  if (job.type === 'bulk-relist') validateBulkRelistPolicy(job.policy, `${label}.policy`, errors);
   for (const field of ['createdAt', 'updatedAt']) {
     if (!Number.isFinite(Number(job[field])) || Number(job[field]) < 0) errors.push(`${label}.${field} must be a non-negative epoch value`);
   }
@@ -252,7 +315,9 @@ function normalizeSchedule(value = {}) {
     schedule.timezone = String(value.timezone || 'UTC');
   }
   if (type === 'interval') {
-    schedule.everyMinutes = positiveInteger(value.everyMinutes, 60);
+    schedule.intervalSeconds = value.intervalSeconds !== undefined
+      ? positiveInteger(value.intervalSeconds, 3600)
+      : positiveInteger(value.everyMinutes, 60) * 60;
     if (value.anchorAt !== undefined) schedule.anchorAt = finiteNumber(value.anchorAt);
   }
   if (type === 'window') {
@@ -293,8 +358,14 @@ function normalizeBuyPolicy(value = {}) {
         ? Math.floor(Number(value.minimumRetainedCoins))
         : -1,
     maxRuntimeMinutes: positiveInteger(value.maxRuntimeMinutes, 30),
-    searchDelaySeconds: normalizeRange(value.searchDelaySeconds, [8, 15]),
-    maxPurchasesPerSearch: 1,
+    searchDelaySeconds: normalizeRange(value.searchDelaySeconds, [7, 15]),
+    buyDelaySeconds: normalizeNonNegativeRange(value.buyDelaySeconds, [0, 1]),
+    maxPurchasesPerSearch: Math.min(4, positiveInteger(value.maxPurchasesPerSearch, 1)),
+    searchCyclePauseEnabled: value.searchCyclePauseEnabled !== false,
+    searchCyclePauseEvery: normalizeRange(value.searchCyclePauseEvery, [10, 15]),
+    searchCyclePauseSeconds: normalizeRange(value.searchCyclePauseSeconds, [5, 8]),
+    initialRateLimitCooldownSeconds: positiveInteger(value.initialRateLimitCooldownSeconds, 60),
+    maximumRateLimitCooldownSeconds: positiveInteger(value.maximumRateLimitCooldownSeconds, 1800),
     maxConsecutiveEmptySearches: positiveInteger(value.maxConsecutiveEmptySearches, 30),
   };
 }
@@ -316,9 +387,24 @@ function normalizeListingPolicy(value = {}) {
     },
     startPricePolicy: String(value.startPricePolicy || 'one-step-below'),
     durationSeconds: positiveInteger(value.durationSeconds, 3600),
-    listingDelaySeconds: normalizeRange(value.listingDelaySeconds, [4, 8]),
+    listingDelaySeconds: normalizeRange(value.listingDelaySeconds, [3, 8]),
+    initialRateLimitCooldownSeconds: positiveInteger(value.initialRateLimitCooldownSeconds, 60),
+    maximumRateLimitCooldownSeconds: positiveInteger(value.maximumRateLimitCooldownSeconds, 1800),
     maxListings: positiveInteger(value.maxListings, 50),
     expiredPolicy: String(value.expiredPolicy || 'skip'),
+  };
+}
+
+function normalizeBulkRelistPolicy(value = {}) {
+  const supported = new Set([
+    'relistDelaySeconds', 'initialRateLimitCooldownSeconds', 'maximumRateLimitCooldownSeconds',
+  ]);
+  const unsupported = Object.fromEntries(Object.entries(value).filter(([field]) => !supported.has(field)));
+  return {
+    ...unsupported,
+    relistDelaySeconds: normalizeRange(value.relistDelaySeconds, [3, 8]),
+    initialRateLimitCooldownSeconds: positiveInteger(value.initialRateLimitCooldownSeconds, 60),
+    maximumRateLimitCooldownSeconds: positiveInteger(value.maximumRateLimitCooldownSeconds, 1800),
   };
 }
 
@@ -327,7 +413,7 @@ export function normalizeTradeJob(input = {}, options = {}) {
   const type = TRADE_JOB_TYPES.includes(input.type) ? input.type : String(input.type || '');
   const schedule = normalizeSchedule(input.schedule);
   const normalized = {
-    schemaVersion: TRADE_SCHEMA_VERSION,
+    schemaVersion: TRADE_JOB_SCHEMA_VERSION,
     id: String(input.id || '').trim(),
     name: String(input.name || '').trim(),
     type,
@@ -335,7 +421,9 @@ export function normalizeTradeJob(input = {}, options = {}) {
     armed: options.imported === true || schedule.type === 'manual' ? false : input.armed === true,
     schedule,
     misfirePolicy: normalizeMisfirePolicy(input.misfirePolicy),
-    policy: type === 'buy' ? normalizeBuyPolicy(input.policy) : normalizeListingPolicy(input.policy),
+    policy: type === 'buy'
+      ? normalizeBuyPolicy(input.policy)
+      : type === 'listing' ? normalizeListingPolicy(input.policy) : normalizeBulkRelistPolicy(input.policy),
     createdAt: Math.max(0, finiteNumber(input.createdAt, now)),
     updatedAt: Math.max(0, finiteNumber(input.updatedAt, now)),
   };
@@ -351,6 +439,7 @@ export function createTradeRunReceipt(input = {}) {
     scheduledFor: Math.max(0, finiteNumber(input.scheduledFor)),
     startedAt: Math.max(0, finiteNumber(input.startedAt)),
     finishedAt: Math.max(0, finiteNumber(input.finishedAt)),
+    resumeAt: nullableFiniteNumber(input.resumeAt),
     status: String(input.status || 'blocked'),
     reason: input.reason === undefined || input.reason === null ? null : String(input.reason),
     requested: Math.max(0, positiveInteger(input.requested, 0)),
@@ -359,6 +448,9 @@ export function createTradeRunReceipt(input = {}) {
     skipped: Math.max(0, positiveInteger(input.skipped, 0)),
     coinsBefore: nullableFiniteNumber(input.coinsBefore),
     coinsAfter: nullableFiniteNumber(input.coinsAfter),
+    continuation: input.continuation && typeof input.continuation === 'object'
+      ? cloneSerializable(input.continuation)
+      : null,
     receipts: cloneSerializable(input.receipts || []),
   };
 }

@@ -61,6 +61,187 @@ describe('Trade Scheduler', () => {
     });
   });
 
+  it('releases the Lease for a deferred slice and resumes the same Run without duplicate History', async () => {
+    const storage = memoryStorage();
+    let time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob());
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    let slice = 0;
+    const executeJob = vi.fn(async ({ runId, continuation }) => {
+      slice += 1;
+      if (slice === 1) {
+        expect(continuation).toBeNull();
+        return createTradeRunReceipt({
+          runId, status: 'deferred', reason: 'trade-action-pacing', requested: 2, succeeded: 1,
+          resumeAt: 4000,
+          continuation: {
+            runId, scheduledFor: 1000, startedAt: 1000, resumeAt: 4000,
+            requested: 2, succeeded: 1, sliceCount: 1,
+          },
+        });
+      }
+      expect(continuation).toMatchObject({ runId: 'sliced-run', succeeded: 1, resumeAt: 4000 });
+      return createTradeRunReceipt({ runId, status: 'completed', requested: 2, succeeded: 2, finishedAt: time });
+    });
+    const lease = createTradeRunLease({ storage, key: 'lease', ownerId: 'slice-tab', now: () => time });
+    const scheduler = createTradeScheduler({
+      store,
+      lease,
+      now: () => time,
+      createRunId: () => 'sliced-run',
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestPacingReady: true }),
+      executeJob,
+    });
+
+    expect(await scheduler.tick()).toMatchObject({ status: 'deferred', receipt: { runId: 'sliced-run' } });
+    expect(lease.inspect().lease).toBeNull();
+    expect(store.read()).toMatchObject({
+      history: [],
+      runtimes: { 'listing-1': { status: 'waiting-pace', continuation: { runId: 'sliced-run' } } },
+    });
+    time = 3000;
+    expect(await scheduler.tick()).toMatchObject({ status: 'idle' });
+    time = 4000;
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed', receipt: { runId: 'sliced-run', succeeded: 2 } });
+    expect(executeJob).toHaveBeenCalledTimes(2);
+    expect(store.read().history).toEqual([expect.objectContaining({ runId: 'sliced-run', status: 'completed' })]);
+    expect(store.read().runtimes['listing-1']).toMatchObject({ continuation: null, runCount: 1 });
+  });
+
+  it('runs the other Job type while a continuation waits and blocks a second same-type Job', async () => {
+    const storage = memoryStorage();
+    let time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledBuyJob({ id: 'buy-continuation' }));
+    store.upsert(scheduledBuyJob({ id: 'buy-second' }));
+    store.upsert(scheduledJob({ id: 'listing-between', schedule: { type: 'once', runAt: 2000 } }));
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    const dispatched = [];
+    const runIds = ['buy-run', 'listing-run'];
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'fair-slice-tab', now: () => time }),
+      now: () => time,
+      createRunId: () => runIds.shift() || 'unexpected-run',
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestPacingReady: true }),
+      executeJob: async ({ job, runId, continuation }) => {
+        dispatched.push(`${job.id}:${continuation ? 'resume' : 'start'}`);
+        if (job.id === 'buy-continuation' && !continuation) {
+          return createTradeRunReceipt({
+            runId, status: 'deferred', reason: 'trade-action-pacing', requested: 2, succeeded: 1,
+            resumeAt: 5000,
+            continuation: {
+              runId, scheduledFor: 1000, startedAt: 1000, resumeAt: 5000,
+              requested: 2, succeeded: 1, sliceCount: 1,
+            },
+          });
+        }
+        return createTradeRunReceipt({
+          runId, status: 'completed', requested: job.id === 'buy-continuation' ? 2 : 1,
+          succeeded: job.id === 'buy-continuation' ? 2 : 1, finishedAt: time,
+        });
+      },
+    });
+
+    expect(await scheduler.tick()).toMatchObject({ status: 'deferred', jobId: 'buy-continuation' });
+    time = 2000;
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: 'listing-between' });
+    expect(store.read().runtimes['buy-second']).toMatchObject({
+      status: 'waiting-operation', reason: 'same-type-continuation-pending',
+    });
+    time = 5000;
+    expect(await scheduler.tick()).toMatchObject({
+      status: 'completed', jobId: 'buy-continuation', receipt: { runId: 'buy-run', succeeded: 2 },
+    });
+    expect(dispatched).toEqual([
+      'buy-continuation:start', 'listing-between:start', 'buy-continuation:resume',
+    ]);
+    expect(store.read().history.filter((entry) => entry.runId === 'buy-run')).toHaveLength(1);
+  });
+
+  it('keeps an early persisted continuation when the executor throws after checkpointing it', async () => {
+    const storage = memoryStorage();
+    const time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob());
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'persist-tab', now: () => time }),
+      now: () => time,
+      createRunId: () => 'persisted-run',
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestPacingReady: true }),
+      executeJob: async ({ runId, persistContinuation }) => {
+        expect(persistContinuation(createTradeRunReceipt({
+          runId, status: 'deferred', reason: 'trade-action-pacing', requested: 2, succeeded: 1,
+          resumeAt: 4000,
+          continuation: {
+            runId, scheduledFor: 1000, startedAt: 1000, resumeAt: 4000,
+            requested: 2, succeeded: 1, sliceCount: 1,
+          },
+        }))).toBe(true);
+        throw new Error('post-persistence-callback-failed');
+      },
+    });
+
+    expect(await scheduler.tick()).toMatchObject({
+      status: 'deferred', receipt: { runId: 'persisted-run', status: 'deferred' },
+      runtime: { status: 'waiting-pace', continuation: { runId: 'persisted-run' } },
+    });
+    expect(store.read().history).toEqual([]);
+  });
+
+  it('merges interval occurrences that pass while one Run is resumed across slices', async () => {
+    const storage = memoryStorage();
+    let time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledJob({
+      id: 'interval-sliced',
+      schedule: { type: 'interval', intervalSeconds: 2, anchorAt: 1000 },
+    }));
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    let executions = 0;
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'interval-tab', now: () => time }),
+      now: () => time,
+      createRunId: () => 'interval-run',
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestPacingReady: true }),
+      executeJob: async ({ runId, continuation }) => {
+        executions += 1;
+        if (!continuation) {
+          return createTradeRunReceipt({
+            runId, status: 'deferred', reason: 'trade-action-pacing', requested: 2, succeeded: 1,
+            resumeAt: 7500,
+            continuation: {
+              runId, scheduledFor: 1000, startedAt: 1000, resumeAt: 7500,
+              requested: 2, succeeded: 1, sliceCount: 1,
+            },
+          });
+        }
+        return createTradeRunReceipt({
+          runId, status: 'completed', requested: 2, succeeded: 2, finishedAt: time,
+        });
+      },
+    });
+
+    expect(await scheduler.tick()).toMatchObject({ status: 'deferred' });
+    time = 7500;
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed', receipt: { runId: 'interval-run' } });
+    expect(store.read()).toMatchObject({
+      history: [{ runId: 'interval-run', scheduledFor: 1000 }],
+      runtimes: {
+        'interval-sliced': { runCount: 1, lastScheduledFor: 1000, nextRunAt: 9000, continuation: null },
+      },
+    });
+    expect(executions).toBe(2);
+  });
+
   it('does not execute while paused, live-disabled, session-blocked or circuit-blocked', async () => {
     const storage = memoryStorage();
     let time = 1000;
@@ -241,7 +422,7 @@ describe('Trade Scheduler', () => {
     const recurring = normalizeTradeJob({
       ...scheduledJob(),
       id: 'recurring-two',
-      schedule: { type: 'interval', everyMinutes: 1, anchorAt: 1000 },
+      schedule: { type: 'interval', intervalSeconds: 60, anchorAt: 1000 },
     }, { now: 0 });
     const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
     store.upsert(recurring);
@@ -399,10 +580,10 @@ describe('Trade Scheduler', () => {
     expect(executeJob).toHaveBeenCalledOnce();
   });
 
-  it('enters cooldown without a lease or execution until the global request reserve is available', async () => {
+  it('enters shared 429 cooldown without a lease or execution until pacing resumes', async () => {
     const storage = memoryStorage();
     let time = 1000;
-    let requestBudgetReady = false;
+    let requestPacingReady = false;
     const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
     store.upsert(scheduledJob());
     store.setPaused(false);
@@ -410,16 +591,16 @@ describe('Trade Scheduler', () => {
     const executeJob = vi.fn(async ({ runId }) => createTradeRunReceipt({ runId, status: 'completed', requested: 1, succeeded: 1, finishedAt: time }));
     const scheduler = createTradeScheduler({
       store,
-      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'budget-tab', now: () => time }),
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'pacing-tab', now: () => time }),
       now: () => time,
-      getContext: () => ({ sessionReady: true, operationBusy: false, requestBudgetReady }),
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestPacingReady }),
       executeJob,
     });
     expect(await scheduler.tick()).toMatchObject({ status: 'idle' });
-    expect(store.read().runtimes['listing-1']).toMatchObject({ status: 'cooldown', reason: 'trade-request-budget-insufficient' });
+    expect(store.read().runtimes['listing-1']).toMatchObject({ status: 'cooldown', reason: 'trade-rate-limit-cooldown' });
     expect(store.read().dispatch.total).toBe(0);
     expect(executeJob).not.toHaveBeenCalled();
-    requestBudgetReady = true;
+    requestPacingReady = true;
     time = 2000;
     expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: 'listing-1' });
     expect(store.read().dispatch).toMatchObject({ total: 1, lastJobId: 'listing-1', lastJobType: 'listing' });
@@ -439,7 +620,7 @@ describe('Trade Scheduler', () => {
       store,
       lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'waiting-tab', now: () => time }),
       now: () => time,
-      getContext: () => ({ sessionReady: true, operationBusy: false, requestBudgetReady: true }),
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestPacingReady: true }),
       executeJob,
     });
     expect(await scheduler.tick()).toMatchObject({ status: 'waiting-operation', jobId: 'listing-1' });
@@ -461,7 +642,7 @@ describe('Trade Scheduler', () => {
       store,
       lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'fair-tab', now: () => time }),
       now: () => time,
-      getContext: () => ({ sessionReady: true, operationBusy: false, requestBudgetReady: true }),
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestPacingReady: true }),
       executeJob: async ({ job, runId }) => {
         dispatched.push(job.type);
         return createTradeRunReceipt({ runId, status: 'completed', requested: 1, succeeded: 1, finishedAt: time });
@@ -474,7 +655,41 @@ describe('Trade Scheduler', () => {
     expect(store.read().dispatch).toMatchObject({ total: 3, lastJobType: 'listing', lastJobId: 'listing-b' });
   });
 
-  it('dispatches earlier due time before type fairness and uses candidate-specific request capacity', async () => {
+  it('rotates Buy, Listing, and Re-list All without starving the aggregate job', async () => {
+    const storage = memoryStorage();
+    const time = 1000;
+    const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
+    store.upsert(scheduledBuyJob({ id: 'a-buy' }));
+    store.upsert(scheduledJob({ id: 'b-listing' }));
+    store.upsert({
+      id: 'c-bulk-relist', name: 'Bulk Re-list', type: 'bulk-relist', enabled: true, armed: true,
+      schedule: { type: 'once', runAt: 1000 },
+      misfirePolicy: { type: 'grace-window', graceMinutes: 15 },
+      policy: { relistDelaySeconds: [3, 8] },
+    });
+    store.setPaused(false);
+    store.setLiveExecutionEnabled(true);
+    const dispatched = [];
+    const scheduler = createTradeScheduler({
+      store,
+      lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'three-type-tab', now: () => time }),
+      now: () => time,
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestPacingReady: true }),
+      executeJob: async ({ job, runId }) => {
+        dispatched.push(job.type);
+        return createTradeRunReceipt({
+          runId, jobId: job.id, jobType: job.type, status: 'completed', requested: 1, succeeded: 1, finishedAt: time,
+        });
+      },
+    });
+    await scheduler.tick();
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(dispatched).toEqual(['buy', 'listing', 'bulk-relist']);
+    expect(store.read().dispatch).toMatchObject({ total: 3, lastJobType: 'bulk-relist', lastJobId: 'c-bulk-relist' });
+  });
+
+  it('dispatches earlier due time before type fairness while another candidate is pacing-blocked', async () => {
     const storage = memoryStorage();
     let time = 0;
     const store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
@@ -494,7 +709,7 @@ describe('Trade Scheduler', () => {
         return {
           sessionReady: true,
           operationBusy: false,
-          requestBudgetReady: job.id !== 'listing-later',
+          requestPacingReady: job.id !== 'listing-later',
         };
       },
       executeJob: async ({ job, runId }) => createTradeRunReceipt({
@@ -505,7 +720,7 @@ describe('Trade Scheduler', () => {
     expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: 'buy-earlier' });
     expect(contexts).toEqual(['buy-earlier', 'listing-later']);
     expect(store.read().runtimes['listing-later']).toMatchObject({
-      status: 'cooldown', reason: 'trade-request-budget-insufficient',
+      status: 'cooldown', reason: 'trade-rate-limit-cooldown',
     });
   });
 
@@ -516,7 +731,7 @@ describe('Trade Scheduler', () => {
     store.upsert(scheduledJob({ id: 'listing-once' }));
     store.upsert(scheduledBuyJob({
       id: 'buy-recurring',
-      schedule: { type: 'interval', everyMinutes: 1, anchorAt: 1000 },
+      schedule: { type: 'interval', intervalSeconds: 60, anchorAt: 1000 },
     }));
     store.authorize(['listing-once', 'buy-recurring']);
     const runs = [];
@@ -525,7 +740,7 @@ describe('Trade Scheduler', () => {
       lease: createTradeRunLease({ storage, key: 'lease', ownerId: 'multi-tab', now: () => time }),
       now: () => time,
       createRunId: () => `multi-${runs.length + 1}`,
-      getContext: () => ({ sessionReady: true, operationBusy: false, requestBudgetReady: true }),
+      getContext: () => ({ sessionReady: true, operationBusy: false, requestPacingReady: true }),
       executeJob: async ({ job, runId }) => {
         runs.push(job.id);
         expect(store.consumeAuthorization(job.id, runId).consumed).toBe(true);

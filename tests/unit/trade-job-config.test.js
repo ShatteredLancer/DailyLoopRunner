@@ -37,7 +37,7 @@ describe('Trade Job configuration', () => {
     }, { exportedAt: 3000, runnerVersion: '0.7.46' });
     expect(value).toEqual({
       kind: TRADE_JOB_CONFIG_KIND,
-      schemaVersion: 1,
+      schemaVersion: 3,
       exportedAt: 3000,
       runnerVersion: '0.7.46',
       jobs: [expect.objectContaining({ id: 'buy-1', enabled: true })],
@@ -49,6 +49,22 @@ describe('Trade Job configuration', () => {
     const text = exportTradeJobConfigJson({ jobs: [buyJob()] }, { exportedAt: 3000, runnerVersion: '0.7.46' });
     expect(text).not.toContain('minimumRetainedCoins\": 900000');
     expect(text).not.toContain('secret-run');
+  });
+
+  it('imports legacy schema 1 interval minutes and exports canonical schema 3 seconds', () => {
+    const portable = createTradeJobConfig({ jobs: [buyJob()] }, { exportedAt: 3000, runnerVersion: '0.7.91' });
+    portable.schemaVersion = 1;
+    portable.jobs[0].schemaVersion = 1;
+    portable.jobs[0].schedule = { type: 'interval', everyMinutes: 5, anchorAt: 2000 };
+
+    const imported = parseTradeJobConfig(portable, { now: 4000 });
+    expect(imported).toMatchObject({
+      schemaVersion: 3,
+      jobs: [{ schemaVersion: 3, armed: false, schedule: { type: 'interval', intervalSeconds: 300, anchorAt: 2000 } }],
+    });
+    const exported = createTradeJobConfig({ jobs: imported.jobs }, { exportedAt: 5000, runnerVersion: 'next' });
+    expect(exported.schemaVersion).toBe(3);
+    expect(exported.jobs[0].schedule).toEqual({ type: 'interval', intervalSeconds: 300, anchorAt: 2000 });
   });
 
   it('strictly validates and disarms every imported Job', () => {
@@ -67,7 +83,7 @@ describe('Trade Job configuration', () => {
       jobs: [{ ...createTradeJobConfig({ jobs: [buyJob()] }, { exportedAt: 3000 }).jobs[0], policy: { ...buyJob().policy, minimumRetainedCoins: 1 } }],
     }, 'minimumRetainedCoins is account-specific'],
     [{ kind: 'other', schemaVersion: 1, jobs: [] }, 'kind must be'],
-    [{ kind: TRADE_JOB_CONFIG_KIND, schemaVersion: 2, jobs: [] }, 'schemaVersion must be 1'],
+    [{ kind: TRADE_JOB_CONFIG_KIND, schemaVersion: 4, jobs: [] }, 'schemaVersion must be 1, 2, or 3'],
   ])('rejects unsafe or incompatible input %#', (input, message) => {
     expect(() => parseTradeJobConfig(input, { now: 4000 })).toThrow(message);
   });
@@ -79,5 +95,23 @@ describe('Trade Job configuration', () => {
       schemaVersion: 1,
       jobs: [first, { ...first, name: 'Duplicate' }],
     }, { now: 4000 })).toThrow('duplicate id: buy-1');
+  });
+
+  it('round-trips scheduled bulk Re-list All and keeps it unarmed on import', () => {
+    const bulk = normalizeTradeJob({
+      id: 'bulk-relist-1', name: 'Re-list every five minutes', type: 'bulk-relist', enabled: true, armed: true,
+      schedule: { type: 'interval', intervalSeconds: 300, anchorAt: 1000 },
+      misfirePolicy: { type: 'grace-window', graceMinutes: 15 },
+      policy: { relistDelaySeconds: [3, 8] },
+    }, { now: 1000 });
+    const exported = createTradeJobConfig({ jobs: [bulk] }, { exportedAt: 2000, runnerVersion: 'next' });
+    expect(exported).toMatchObject({
+      schemaVersion: 3,
+      jobs: [{ schemaVersion: 3, type: 'bulk-relist', policy: { relistDelaySeconds: [3, 8] } }],
+    });
+    expect(exported.jobs[0].policy).not.toHaveProperty('cardClass');
+    expect(parseTradeJobConfig(exported, { now: 3000 })).toMatchObject({
+      jobs: [{ id: 'bulk-relist-1', type: 'bulk-relist', armed: false }],
+    });
   });
 });

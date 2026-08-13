@@ -1,5 +1,4 @@
 import { normalizeTradeJob } from './contracts.js';
-import { normalizeExpectedBuyDestination } from './buy-destination.js';
 
 export const MANUAL_BUY_VALIDATION_MAX_PRICE = 2_000;
 export const MANUAL_BUY_VALIDATION_MAX_TOTAL_BUDGET = 8_000;
@@ -7,15 +6,6 @@ export const MANUAL_BUY_VALIDATION_MAX_QUANTITY = 4;
 export const MANUAL_BUY_VALIDATION_MAX_RATING_SPAN = 3;
 export const MANUAL_BUY_VALIDATION_MAX_RUNTIME_MINUTES = 15;
 export const MANUAL_BUY_VALIDATION_MAX_EMPTY_SEARCHES = 5;
-
-export function manualBuyValidationConfirmation(maxPrice, expectedDestination = 'auto', quantity = 1) {
-  const destination = normalizeExpectedBuyDestination(expectedDestination);
-  if (!destination) throw new Error('Buy validation destination must be auto, club, or transfer');
-  const count = Math.min(MANUAL_BUY_VALIDATION_MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)));
-  return destination === 'auto'
-    ? `BUY ${count} MAX ${maxPrice}`
-    : `BUY ${count} TO ${destination.toUpperCase()} MAX ${maxPrice}`;
-}
 
 function effectiveRatingLimit(job) {
   const limits = [];
@@ -78,6 +68,12 @@ export function inspectManualBuyValidationJob(input = {}, options = {}) {
     reason: null,
     job: guardedJob,
     maxPrice,
-    requiredText: manualBuyValidationConfirmation(maxPrice, 'auto', job.policy.quantity),
+    approval: {
+      risk: 'attention',
+      action: 'buy',
+      quantity: Number(job.policy.quantity),
+      maxPrice,
+      totalBudget: Number(job.policy.totalBudget),
+    },
   };
 }

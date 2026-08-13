@@ -41,9 +41,10 @@ import {
   TRADE_CIRCUIT_KEY,
   TRADE_BUY_JOURNAL_KEY,
   TRADE_LISTING_JOURNAL_KEY,
+  TRADE_BULK_RELIST_JOURNAL_KEY,
   TRADE_JOB_STORE_KEY,
   TRADE_PLAYER_CATALOG_CACHE_KEY,
-  TRADE_REQUEST_BUDGET_KEY,
+  TRADE_REQUEST_PACING_KEY,
   TRADE_RECOVERY_AUDIT_KEY,
   TRADE_RUN_LEASE_KEY,
 } from './config/runtime.js';
@@ -180,6 +181,11 @@ import { createListingPreparation } from './trade/listing-preparation.js';
 import { createListingPreview } from './trade/listing-preview.js';
 import { createListingTransaction } from './trade/listing-transaction.js';
 import { createTradeListingDiagnostics } from './trade/listing-diagnostics.js';
+import { createBulkRelistPreview } from './trade/bulk-relist-preview.js';
+import { createTradeBulkRelistJournal } from './trade/bulk-relist-journal.js';
+import { createGuardedManualBulkRelistExecutor } from './trade/guarded-manual-bulk-relist.js';
+import { createGuardedScheduledBulkRelistExecutor } from './trade/guarded-scheduled-bulk-relist.js';
+import { createBulkRelistDiagnostics } from './trade/bulk-relist-diagnostics.js';
 import { createBuyPreview } from './trade/buy-preview.js';
 import { createTradeBuyDiagnostics, sanitizeTradeBuyReceipt } from './trade/buy-diagnostics.js';
 import { exportTradeJobConfigJson, parseTradeJobConfig } from './trade/job-config.js';
@@ -192,12 +198,7 @@ import {
 import { createTradeCircuitBreaker } from './trade/circuit-breaker.js';
 import { createTradeJobStore } from './trade/job-store.js';
 import { createTradeRunLease } from './trade/run-lease.js';
-import {
-  createTradeRequestBudget,
-  inspectTradeRequestCapacity,
-  tradeBuyRequestReserve,
-  tradeListingRequestReserve,
-} from './trade/request-budget.js';
+import { createTradeRequestPacer } from './trade/request-pacing.js';
 import { stageExpiredTradeLeaseValidation } from './trade/expired-lease-validation.js';
 import { requireExpiredLeaseValidationJob } from './trade/expired-lease-validation-policy.js';
 import { createOperationCoordinator } from './trade/operation-coordinator.js';
@@ -311,6 +312,7 @@ import { showLoopRecap } from './ui/loop-recap.js';
 import { showTradeListingDialog } from './ui/trade-listing-dialog.js';
 import { showTradeBuyDialog } from './ui/trade-buy-dialog.js';
 import { showTradeSchedulerDialog } from './ui/trade-scheduler-dialog.js';
+import { showTradeBulkRelistDialog } from './ui/trade-bulk-relist-dialog.js';
 import { createTradeBuyJournal } from './trade/buy-journal.js';
 import { createTradeListingJournal } from './trade/listing-journal.js';
 import {
@@ -327,6 +329,7 @@ import { inspectExpiredTradeLeaseRecovery, summarizeTradeRunCorrelations } from 
 const RUNNER_VERSION = packageInfo.version;
 const SCHEDULED_BUY_LIVE_GATE_ENABLED = true;
 const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
+const SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED = true;
 
 (function () {
   'use strict';
@@ -348,13 +351,14 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
   const eaPlayerPickAdapter = () => adapters.playerPick();
   const eaRarityAdapter = adapters.rarity;
   const eaSbcAdapter = () => adapters.sbc();
-  const tradeRequestBudget = createTradeRequestBudget({
+  const tradeRequestPacer = createTradeRequestPacer({
     storage: adapters.userscriptStorage,
-    key: TRADE_REQUEST_BUDGET_KEY,
+    key: TRADE_REQUEST_PACING_KEY,
     lockManager: navigator?.locks,
   });
   const eaTradeAdapter = (tradeOptions = {}) => adapters.trade({
-    requestBudget: tradeOptions.requestBudget || tradeRequestBudget,
+    requestPacer: tradeRequestPacer,
+    pacingContext: tradeOptions.pacingContext,
   });
   const fsuAdapter = () => adapters.fsu();
   const localizationAdapter = adapters.localization;
@@ -387,10 +391,20 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
   const tradeBuyJournal = createTradeBuyJournal({
     storage: adapters.userscriptStorage,
     key: TRADE_BUY_JOURNAL_KEY,
+    isContinuationActive: (runId, jobId) => (
+      tradeJobStore.read().runtimes?.[jobId]?.continuation?.runId === runId
+    ),
   });
   const tradeListingJournal = createTradeListingJournal({
     storage: adapters.userscriptStorage,
     key: TRADE_LISTING_JOURNAL_KEY,
+    isContinuationActive: (runId, jobId) => (
+      tradeJobStore.read().runtimes?.[jobId]?.continuation?.runId === runId
+    ),
+  });
+  const tradeBulkRelistJournal = createTradeBulkRelistJournal({
+    storage: adapters.userscriptStorage,
+    key: TRADE_BULK_RELIST_JOURNAL_KEY,
   });
   const tradeRecoveryAudit = createTradeRecoveryAudit({
     storage: adapters.userscriptStorage,
@@ -415,23 +429,39 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
     getTradeAdapter: eaTradeAdapter,
     playerCatalogProvider: tradePlayerCatalogProvider,
   });
+  const tradeBulkRelistPreview = createBulkRelistPreview({
+    getTradeAdapter: eaTradeAdapter,
+  });
   let tradeScheduler = null;
   const tradeSchedulerTickLock = createTradeSchedulerTickLock({ lockManager: navigator?.locks });
   const tradeSchedulerEvents = createTradeSchedulerEventLog();
 
+  function inspectPersistedTradeJournal(journalType, journal, schedulerSnapshot = tradeJobStore.read()) {
+    const continuation = journal?.jobId ? schedulerSnapshot.runtimes?.[journal.jobId]?.continuation : null;
+    return inspectTradeRecoveryJournal(journalType, journal, {
+      continuationActive: Boolean(continuation?.runId && continuation.runId === journal?.runId),
+    });
+  }
+
   function inspectTradeRecoveryState() {
+    const schedulerSnapshot = tradeJobStore.read();
     const buyJournal = tradeBuyJournal.snapshot();
     const listingJournal = tradeListingJournal.snapshot();
+    const bulkRelistJournal = tradeBulkRelistJournal.snapshot();
     const journalReviews = [
-      inspectTradeRecoveryJournal('buy', buyJournal),
-      inspectTradeRecoveryJournal('listing', listingJournal),
+      inspectPersistedTradeJournal('buy', buyJournal, schedulerSnapshot),
+      inspectPersistedTradeJournal('listing', listingJournal, schedulerSnapshot),
+      inspectPersistedTradeJournal('bulk-relist', bulkRelistJournal, schedulerSnapshot),
     ];
     const leaseState = tradeRunLease.inspect();
     const partitioned = partitionTradeRecoveryReviews(journalReviews, leaseState);
     const leaseReview = inspectTradeExpiredLeaseReview({
       leaseState,
-      history: tradeJobStore.read().history,
+      history: schedulerSnapshot.history,
       journalReviews: partitioned.reviews,
+      continuation: leaseState.lease?.jobId && schedulerSnapshot.runtimes?.[leaseState.lease.jobId]?.continuation
+        ? { ...schedulerSnapshot.runtimes[leaseState.lease.jobId].continuation, jobId: leaseState.lease.jobId }
+        : null,
     });
     const reviews = [...partitioned.reviews, leaseReview].filter((review) => review.reviewRequired === true);
     return {
@@ -439,11 +469,11 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
       reason: reviews[0]?.reason || null,
       reviews,
       inFlightReviews: partitioned.inFlightReviews,
-      journals: { buy: buyJournal, listing: listingJournal },
+      journals: { buy: buyJournal, listing: listingJournal, bulkRelist: bulkRelistJournal },
       audit: tradeRecoveryAudit.snapshot(),
       scheduler: {
-        paused: tradeJobStore.read().paused === true,
-        liveExecutionEnabled: tradeJobStore.read().liveExecutionEnabled === true,
+        paused: schedulerSnapshot.paused === true,
+        liveExecutionEnabled: schedulerSnapshot.liveExecutionEnabled === true,
       },
       operation: tradeOperationCoordinator.inspect(),
       lease: leaseState,
@@ -456,8 +486,9 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
       const schedulerSnapshot = tradeJobStore.read();
       const leaseState = tradeRunLease.inspect();
       const journalReviews = [
-        inspectTradeRecoveryJournal('buy', tradeBuyJournal.snapshot()),
-        inspectTradeRecoveryJournal('listing', tradeListingJournal.snapshot()),
+        inspectPersistedTradeJournal('buy', tradeBuyJournal.snapshot(), schedulerSnapshot),
+        inspectPersistedTradeJournal('listing', tradeListingJournal.snapshot(), schedulerSnapshot),
+        inspectPersistedTradeJournal('bulk-relist', tradeBulkRelistJournal.snapshot(), schedulerSnapshot),
       ];
       const job = schedulerSnapshot.jobs.find((entry) => entry.id === leaseState.lease?.jobId);
       const result = acknowledgeTradeExpiredLeaseRecovery({
@@ -469,8 +500,8 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
         jobType: job?.type,
         audit: tradeRecoveryAudit,
         evidenceHash: input.evidenceHash,
-        confirmationText: input.confirmationText,
-        reason: input.reason,
+        resolution: input.resolution,
+        riskAccepted: input.riskAccepted,
       });
       if (!(schedulerSnapshot.history || []).some((entry) => entry.runId === result.review.runId)) {
         tradeJobStore.addHistory(result.receipt);
@@ -479,7 +510,9 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
       setPanelState();
       return inspectTradeRecoveryState();
     }
-    const journal = journalType === 'buy' ? tradeBuyJournal : journalType === 'listing' ? tradeListingJournal : null;
+    const journal = journalType === 'buy'
+      ? tradeBuyJournal
+      : journalType === 'listing' ? tradeListingJournal : journalType === 'bulk-relist' ? tradeBulkRelistJournal : null;
     if (!journal) throw new Error('recovery-acknowledgement-journal-type-invalid');
     const result = acknowledgeTradeRecovery({
       schedulerSnapshot: tradeJobStore.read(),
@@ -489,8 +522,8 @@ const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
       journal,
       audit: tradeRecoveryAudit,
       evidenceHash: input.evidenceHash,
-      confirmationText: input.confirmationText,
-      reason: input.reason,
+      resolution: input.resolution,
+      riskAccepted: input.riskAccepted,
     });
     const schedulerSnapshot = tradeJobStore.read();
     if (!(schedulerSnapshot.history || []).some((entry) => entry.runId === result.review.runId)) {
@@ -555,6 +588,10 @@ const state = {
     lastTradeBuyError: null,
     tradeListingRunning: false,
     tradeBuyRunning: false,
+    tradeBulkRelistRunning: false,
+    lastTradeBulkRelistPreview: null,
+    lastTradeBulkRelistReceipt: null,
+    lastTradeBulkRelistError: null,
     lastRecapType: null,
     loopRecapSession: null,
     loopStack: [],
@@ -597,6 +634,7 @@ const state = {
     document.querySelector('#bronze-loop-trade-listing-modal')?.remove();
     document.querySelector('#bronze-loop-trade-buy-modal')?.remove();
     document.querySelector('#bronze-loop-trade-scheduler-modal')?.remove();
+    document.querySelector('#bronze-loop-trade-bulk-relist-modal')?.remove();
     document.querySelector('#bronze-loop-reward-highlight-stack')?.remove();
     document.querySelector('#bronze-loop-style')?.remove();
   }
@@ -619,11 +657,12 @@ const state = {
     inspectTradeRecovery: inspectTradeRecoveryState,
     acknowledgeTradeRecovery: acknowledgeTradeRecoveryFromUi,
     inspectTradeListingCandidates: (options = {}) => eaTradeAdapter().inspectListingCandidates(options),
+    inspectTradeBulkRelist: (options = {}) => eaTradeAdapter().inspectBulkRelistSnapshot(options),
     inspectTradePriceLimits: (ref = {}, options = {}) => eaTradeAdapter().inspectPriceLimits(ref, {
       refresh: options.refresh === true,
     }),
     inspectTradeCircuit: () => tradeCircuitBreaker.snapshot(),
-    inspectTradeRequestBudget: () => tradeRequestBudget.inspect(),
+    inspectTradeRequestPacing: (context = {}) => tradeRequestPacer.inspect(context),
     resetTradeCircuit: (reason = 'manual-console-reset') => tradeCircuitBreaker.reset(reason),
     getTradeSchedulerState: () => tradeJobStore.read(),
     saveTradeJob: (job, options = {}) => tradeJobStore.upsert(job, options),
@@ -636,6 +675,8 @@ const state = {
     tickTradeScheduler,
     inspectOperationCoordinator: () => tradeOperationCoordinator.inspect(),
     previewTradeListings: (input = {}, options = {}) => tradeListingPreview.preview(input, options),
+    previewTradeBulkRelist: () => previewManualTradeBulkRelist(),
+    executeManualTradeBulkRelist,
     previewTradeBuys: previewTradeBuyJob,
     executeManualTradeBuy,
     prepareTradeListing,
@@ -659,7 +700,6 @@ const state = {
     getTradeAdapter: eaTradeAdapter,
     validateClubPlayers: (refs, options) => fsuAdapter().validateClubPlayers(refs, options),
     circuitBreaker: tradeCircuitBreaker,
-    requestBudget: tradeRequestBudget,
     journal: tradeListingJournal,
     inspectRecovery: inspectTradeRecoveryState,
     ownerId: tradeTabOwnerId,
@@ -694,7 +734,6 @@ const state = {
     getTradeAdapter: eaTradeAdapter,
     playerCatalogProvider: tradePlayerCatalogProvider,
     circuitBreaker: tradeCircuitBreaker,
-    requestBudget: tradeRequestBudget,
     getSchedulerState: () => tradeJobStore.read(),
     inspectRecovery: inspectTradeRecoveryState,
     ownerId: tradeTabOwnerId,
@@ -716,6 +755,29 @@ const state = {
       state.lastTradeBuyError = context.error || null;
     },
   });
+  const guardedManualBulkRelistExecutor = createGuardedManualBulkRelistExecutor({
+    operationCoordinator: tradeOperationCoordinator,
+    lease: tradeRunLease,
+    journal: tradeBulkRelistJournal,
+    getTradeAdapter: eaTradeAdapter,
+    circuitBreaker: tradeCircuitBreaker,
+    getSchedulerState: () => tradeJobStore.read(),
+    inspectRecovery: inspectTradeRecoveryState,
+    ownerId: tradeTabOwnerId,
+    onRunningChange: (running) => {
+      state.tradeBulkRelistRunning = running;
+      state.tradeListingRunning = running;
+      state.running = running;
+      log(running
+        ? 'Trade Re-list All: guarded manual transaction started'
+        : 'Trade Re-list All: guarded manual transaction left the execution state');
+      setPanelState();
+    },
+    onReceipt: (receipt, context) => {
+      state.lastTradeBulkRelistPreview = context.preview;
+      state.lastTradeBulkRelistReceipt = receipt;
+    },
+  });
   const guardedScheduledBuyExecutor = createGuardedScheduledBuyExecutor({
     store: tradeJobStore,
     operationCoordinator: tradeOperationCoordinator,
@@ -724,7 +786,6 @@ const state = {
     getTradeAdapter: eaTradeAdapter,
     playerCatalogProvider: tradePlayerCatalogProvider,
     circuitBreaker: tradeCircuitBreaker,
-    requestBudget: tradeRequestBudget,
     inspectRecovery: inspectTradeRecoveryState,
     ownerId: tradeTabOwnerId,
     validationGateEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
@@ -746,6 +807,33 @@ const state = {
       state.lastTradeBuyError = context.error || null;
     },
   });
+  const guardedScheduledBulkRelistExecutor = createGuardedScheduledBulkRelistExecutor({
+    store: tradeJobStore,
+    bulkRelistPreview: tradeBulkRelistPreview,
+    operationCoordinator: tradeOperationCoordinator,
+    journal: tradeBulkRelistJournal,
+    getTradeAdapter: eaTradeAdapter,
+    circuitBreaker: tradeCircuitBreaker,
+    inspectRecovery: inspectTradeRecoveryState,
+    ownerId: tradeTabOwnerId,
+    validationGateEnabled: SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED,
+    shouldStop: () => state.stopping,
+    onRunningChange: (running, input) => {
+      state.tradeBulkRelistRunning = running;
+      state.tradeListingRunning = running;
+      state.running = running;
+      if (!running) state.stopping = false;
+      log(running
+        ? `Trade Scheduler: guarded Re-list All Job ${input.job?.name || input.job?.id} started`
+        : `Trade Scheduler: guarded Re-list All Job ${input.job?.name || input.job?.id} left the execution state`);
+      setPanelState();
+    },
+    onReceipt: (receipt, context) => {
+      state.lastTradeBulkRelistPreview = context.preview;
+      state.lastTradeBulkRelistReceipt = receipt;
+      state.lastTradeBulkRelistError = null;
+    },
+  });
   tradeScheduler = createTradeScheduler({
     store: tradeJobStore,
     lease: tradeRunLease,
@@ -753,25 +841,21 @@ const state = {
     executeJob: (input) => {
       if (input.job?.type === 'listing') return guardedScheduledListingExecutor.execute(input);
       if (input.job?.type === 'buy') return guardedScheduledBuyExecutor.execute(input);
+      if (input.job?.type === 'bulk-relist') return guardedScheduledBulkRelistExecutor.execute(input);
       throw new Error(`Unsupported scheduled Trade Job type ${input.job?.type || 'unknown'}`);
     },
-    getContext: (job) => {
+    getContext: () => {
       const operation = tradeOperationCoordinator.inspect();
       const session = inspectGuardedTradeSession();
-      const requiredRequests = job?.type === 'buy'
-        ? tradeBuyRequestReserve(job)
-        : job?.type === 'listing'
-          ? tradeListingRequestReserve(job)
-          : undefined;
-      const requestCapacity = inspectTradeRequestCapacity(tradeRequestBudget.inspect(), requiredRequests);
+      const requestPacing = tradeRequestPacer.inspect();
       return {
         sessionReady: session.ready,
         sessionReason: session.reason,
         fsuReadiness: session.fsuReadiness,
         operationBusy: Boolean(operation.active || operation.external?.busy),
         operationReason: operation.active ? 'operation-active' : operation.external?.reason,
-        requestBudgetReady: requestCapacity.ready,
-        requestBudgetRetryAt: requestCapacity.retryAt,
+        requestPacingReady: requestPacing.status !== 'cooldown',
+        requestPacingRetryAt: requestPacing.nextAllowedAt,
         tradeRecoveryReviewRequired: inspectTradeRecoveryState().reviewRequired,
         tradeRecoveryReason: inspectTradeRecoveryState().reason,
         tickToleranceMs: 15_000,
@@ -784,7 +868,11 @@ const state = {
         history: snapshot.history,
         buyJournal: tradeBuyJournal.snapshot(),
         listingJournal: tradeListingJournal.snapshot(),
-        inspectJournal: (journal, journalType) => inspectTradeRecoveryJournal(journalType, journal).reviewRequired,
+        bulkRelistJournal: tradeBulkRelistJournal.snapshot(),
+        inspectJournal: (journal, journalType) => inspectPersistedTradeJournal(journalType, journal, snapshot).reviewRequired,
+        continuation: snapshot.runtimes?.[previousLease?.jobId]?.continuation
+          ? { ...snapshot.runtimes[previousLease.jobId].continuation, jobId: previousLease.jobId }
+          : null,
       });
       log(`Trade Scheduler: expired lease ${previousLease?.runId || 'unknown'} reconciliation ${recovery.status} (${recovery.reason})`);
       return recovery;
@@ -807,15 +895,6 @@ const state = {
     state.preparedTradeListing = null;
     state.preparedTradeListingRunId = null;
     const maxListings = Math.min(4, Math.max(1, Math.floor(Number(input.policy?.maxListings || 4))));
-    const requestReserve = tradeListingRequestReserve(maxListings);
-    const requestCapacity = inspectTradeRequestCapacity(tradeRequestBudget.inspect(), requestReserve);
-    if (!requestCapacity.ready) {
-      throw new Error(`Trade request budget needs ${requestCapacity.required} request slots; ${requestCapacity.remaining} remain`);
-    }
-    const requestReservation = await tradeRequestBudget.reserve(requestReserve);
-    if (!requestReservation.ready) {
-      throw new Error(`Trade request budget needs ${requestReservation.required} request slots; ${requestReservation.remaining} remain`);
-    }
     const runId = `manual-listing-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const job = {
       ...input,
@@ -828,12 +907,19 @@ const state = {
     };
     try {
       tradeListingJournal.begin({ runId, jobId: job.id, source, requested: maxListings });
-      const adapter = eaTradeAdapter({ requestBudget: requestReservation });
+      const pacingContext = {
+        policy: job.policy,
+        jobId: job.id,
+        runId,
+        ownerId: tradeTabOwnerId,
+        shouldStop: () => state.stopping,
+      };
+      const adapter = eaTradeAdapter({ pacingContext });
       const prepared = await tradeListingPreparation.prepare(job, {
         ...options,
         maxListings,
         tradeAdapter: adapter,
-        requestBudget: requestReservation,
+        pacingContext,
       });
       tradeListingJournal.checkpoint(runId, {
         phase: 'prepare-finished',
@@ -848,14 +934,47 @@ const state = {
         tradeListingJournal.finish(runId, {
           phase: 'prepare-blocked', status: 'blocked', reason: prepared.blockers?.[0]?.reason,
         });
-        await requestReservation.release();
       }
-      if (prepared.ready) await requestReservation.release();
       return prepared;
     } catch (error) {
       tradeListingJournal.finish(runId, { phase: 'prepare-error', status: 'error', reason: error?.message || String(error) });
-      try { await requestReservation.release(); } catch { }
       throw error;
+    }
+  }
+
+  async function previewManualTradeBulkRelist() {
+    if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning || state.tradeBuyRunning) {
+      throw new Error('Another Runner operation is active; Re-list All preview is unavailable');
+    }
+    const recovery = inspectTradeRecoveryState();
+    if (recovery.reviewRequired) throw new Error(recovery.reason || 'trade-recovery-review-required');
+    const preview = await tradeBulkRelistPreview.preview({ wait: true });
+    state.lastTradeBulkRelistPreview = preview;
+    state.lastTradeBulkRelistReceipt = null;
+    state.lastTradeBulkRelistError = null;
+    log(preview.ready
+      ? `Trade Re-list All: preview found ${Number(preview.snapshot?.unsoldCount || 0)} Unsold item(s)`
+      : `Trade Re-list All: preview blocked (${preview.blockers?.map((entry) => entry.reason).join(', ') || 'unknown'})`);
+    return preview;
+  }
+
+  async function executeManualTradeBulkRelist(input = {}) {
+    if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning || state.tradeBuyRunning) {
+      throw new Error('Another Runner operation is active; Re-list All execution is unavailable');
+    }
+    state.lastTradeBulkRelistError = null;
+    state.stopping = false;
+    try {
+      const receipt = await guardedManualBulkRelistExecutor.execute(input);
+      state.lastTradeBulkRelistReceipt = receipt;
+      tradeJobStore.addHistory(receipt);
+      return receipt;
+    } catch (error) {
+      state.lastTradeBulkRelistError = error;
+      throw error;
+    } finally {
+      state.stopping = false;
+      setPanelState();
     }
   }
 
@@ -898,8 +1017,6 @@ const state = {
     state.stopping = false;
     try {
       const coordinator = createTradeChunkCoordinator({
-        requestBudget: tradeRequestBudget,
-        sleep,
         onCheckpoint: (checkpoint) => tradeListingJournal.checkpoint(runId, checkpoint),
       });
       const receipt = await coordinator.run({
@@ -907,16 +1024,23 @@ const state = {
         jobId: prepared.job.id,
         jobType: prepared.job.type,
         requested: prepared.plan.entries.length,
-        requestReserve: (quantity) => tradeListingRequestReserve(quantity),
         heartbeat: () => tradeRunLease.heartbeat(runId) === true,
         shouldStop: () => state.stopping,
-        executeChunk: async ({ offset, quantity, reservation }) => {
+        executeChunk: async ({ offset, quantity }) => {
           const chunkPrepared = {
             ...prepared,
             plan: { ...prepared.plan, entries: prepared.plan.entries.slice(offset, offset + quantity) },
           };
           const transaction = createListingTransaction({
-            tradeAdapter: eaTradeAdapter({ requestBudget: reservation }),
+            tradeAdapter: eaTradeAdapter({
+              pacingContext: {
+                policy: prepared.job.policy,
+                jobId: prepared.job.id,
+                runId,
+                ownerId: tradeTabOwnerId,
+                shouldStop: () => state.stopping,
+              },
+            }),
             circuitBreaker: tradeCircuitBreaker,
             sleep,
             onCheckpoint: (checkpoint) => tradeListingJournal.checkpoint(runId, checkpoint),
@@ -925,7 +1049,7 @@ const state = {
             job: prepared.job,
             prepared: chunkPrepared,
             confirmationToken: input.confirmationToken,
-            confirmationText: input.confirmationText,
+            approved: input.approved,
             runId,
             itemIndexOffset: offset,
             beforeMutation: () => tradeRunLease.heartbeat(runId) === true,
@@ -967,7 +1091,7 @@ const state = {
     if (state.running || state.refreshing || state.scanningPicks || state.loadingLoops || state.tradeListingRunning || state.tradeBuyRunning) {
       throw new Error('Another Runner operation is active; Buy execution is unavailable');
     }
-    const listingRecovery = inspectTradeRecoveryJournal('listing', tradeListingJournal.snapshot());
+    const listingRecovery = inspectPersistedTradeJournal('listing', tradeListingJournal.snapshot());
     if (listingRecovery.reviewRequired) throw new Error(listingRecovery.reason || 'trade-recovery-review-required');
     state.lastTradeBuyJob = job;
     state.lastTradeBuyReceipt = null;
@@ -1000,18 +1124,17 @@ const state = {
     const selected = selectGuardedScheduledTradeJob(snapshot, {
       scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
       scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
+      scheduledBulkRelistEnabled: SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED,
     });
     if (!selected.ready) throw new Error(selected.reason || 'One to three eligible armed Jobs are required');
-    if (String(input.confirmationText || '') !== selected.requiredText) {
-      throw new Error(`Confirmation must exactly match ${selected.requiredText}`);
-    }
+    if (input.approved !== true) throw new Error('Guarded scheduling requires explicit approval');
     const selectedJobs = selected.jobs || (selected.job ? [selected.job] : []);
     const selectedIds = selectedJobs.map((job) => job.id).sort();
     const confirmedIds = (Array.isArray(input.jobIds) ? input.jobIds : input.jobId ? [input.jobId] : []).map(String).sort();
-    if (confirmedIds.length && (
-      confirmedIds.length !== selectedIds.length
-      || confirmedIds.some((id, index) => id !== selectedIds[index])
-    )) throw new Error('The armed Jobs changed before confirmation');
+    if (confirmedIds.length !== selectedIds.length
+      || confirmedIds.some((id, index) => id !== selectedIds[index])) {
+      throw new Error('The armed Jobs changed before approval');
+    }
     const currentTime = Date.now();
     for (const job of selectedJobs) {
       const scheduleType = job.schedule.type;
@@ -1049,7 +1172,8 @@ const state = {
     const snapshot = tradeJobStore.read();
     requireExpiredLeaseValidationJob(snapshot);
     const staged = stageExpiredTradeLeaseValidation({
-      confirmationText: input.confirmationText,
+      approved: input.approved,
+      riskAccepted: input.riskAccepted,
       snapshot,
       inspectLease: () => tradeRunLease.inspect(),
       writeLease: (value) => adapters.userscriptStorage.set(TRADE_RUN_LEASE_KEY, value),
@@ -1093,6 +1217,7 @@ const state = {
             const selected = selectGuardedScheduledTradeJob(snapshot, {
               scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
               scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
+              scheduledBulkRelistEnabled: SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED,
             });
             const circuit = tradeCircuitBreaker.availability();
             const selectedJobs = selected.jobs || (selected.job ? [selected.job] : []);
@@ -1185,7 +1310,7 @@ const state = {
         log(`Trade Listings: refreshing Transfer and EA price limits; preparing up to two ${reprice ? 'expired Transfer reprices' : 'Club listings'}`);
         const prepared = await prepareTradeListing(job, request);
         log(prepared.ready
-          ? `Trade Listings: ${prepared.plan.entries.length} item(s) prepared; confirmation ${prepared.confirmation.requiredText} is required`
+          ? `Trade Listings: ${prepared.plan.entries.length} item(s) prepared and ready for explicit approval`
           : `Trade Listings: preparation blocked (${prepared.blockers?.map((entry) => entry.reason).join(', ') || 'unknown'})`);
         return prepared;
       },
@@ -1263,17 +1388,19 @@ const state = {
           scheduledListing: true,
           scheduledTransferReprice: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
           scheduledBuy: SCHEDULED_BUY_LIVE_GATE_ENABLED,
+          scheduledBulkRelist: SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED,
         },
         selection: summarizeGuardedScheduledTradeSelection(scheduler, {
           scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
           scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
+          scheduledBulkRelistEnabled: SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED,
         }),
       },
       circuit: tradeCircuitBreaker.snapshot(),
       lease: tradeRunLease.inspect(),
       coordinator: tradeOperationCoordinator.inspect(),
       providers: inspectTradeProviders(),
-      requestBudget: tradeRequestBudget.inspect(),
+      requestPacing: tradeRequestPacer.inspect(),
       capabilities: eaTradeAdapter().inspectCapabilities(),
       operation,
       recovery: inspectTradeRecoveryState(),
@@ -1281,6 +1408,7 @@ const state = {
         scheduler,
         buyJournal: tradeBuyJournal.snapshot(),
         listingJournal: tradeListingJournal.snapshot(),
+        bulkRelistJournal: tradeBulkRelistJournal.snapshot(),
         lease: tradeRunLease.inspect(),
         events: tradeSchedulerEvents.snapshot(),
       }),
@@ -1307,6 +1435,18 @@ const state = {
         prepared: state.lastScheduledTradeListing?.prepared || null,
         clubValidation: state.lastScheduledTradeListing?.clubValidation || null,
         receipt: state.lastScheduledTradeListing?.receipt || null,
+      }),
+      bulkRelist: createBulkRelistDiagnostics({
+        capturedAt: Date.now(),
+        runnerVersion: RUNNER_VERSION,
+        userAgent: navigator?.userAgent || '',
+        operation,
+        circuit: tradeCircuitBreaker.snapshot(),
+        capabilities: eaTradeAdapter().inspectCapabilities(),
+        journal: tradeBulkRelistJournal.snapshot(),
+        preview: state.lastTradeBulkRelistPreview,
+        receipt: state.lastTradeBulkRelistReceipt,
+        error: state.lastTradeBulkRelistError,
       }),
     };
   }
@@ -1373,6 +1513,52 @@ const state = {
     });
   }
 
+  function openTradeBulkRelistDialogModal() {
+    state.lastTradeBulkRelistPreview = null;
+    state.lastTradeBulkRelistReceipt = null;
+    state.lastTradeBulkRelistError = null;
+    return showTradeBulkRelistDialog({
+      dom: adapters.dom,
+      onPreview: () => previewManualTradeBulkRelist(),
+      onExecute: async (input) => {
+        log('Trade Re-list All: manual approval accepted; starting one aggregate EA mutation');
+        try {
+          const receipt = await executeManualTradeBulkRelist(input);
+          log(`Trade Re-list All: ${receipt.status}${receipt.reason ? ` (${receipt.reason})` : ''}; relisted ${receipt.succeeded}/${receipt.requested}`);
+          return receipt;
+        } catch (error) {
+          log(`Trade Re-list All failed: ${error?.message || error}`);
+          throw error;
+        }
+      },
+      onDownloadDiagnostics: (snapshot = {}) => {
+        const capturedAt = Date.now();
+        const diagnostics = createBulkRelistDiagnostics({
+          ...snapshot,
+          capturedAt,
+          runnerVersion: RUNNER_VERSION,
+          userAgent: navigator?.userAgent || '',
+          operation: {
+            running: state.running,
+            stopping: state.stopping,
+            tradeBulkRelistRunning: state.tradeBulkRelistRunning,
+          },
+          circuit: tradeCircuitBreaker.snapshot(),
+          capabilities: eaTradeAdapter().inspectCapabilities(),
+          journal: tradeBulkRelistJournal.snapshot(),
+          preview: state.lastTradeBulkRelistPreview || snapshot.preview,
+          receipt: state.lastTradeBulkRelistReceipt || snapshot.receipt,
+          error: state.lastTradeBulkRelistError || snapshot.error,
+        });
+        adapters.userEffects.downloadText(
+          JSON.stringify(diagnostics, null, 2),
+          `trade-bulk-relist-diagnostics-${new Date(capturedAt).toISOString().replace(/[:.]/g, '-')}.json`,
+        );
+        log('Trade Re-list All: diagnostics saved');
+      },
+    });
+  }
+
   function openTradeSchedulerDialogModal() {
     return showTradeSchedulerDialog({
       dom: adapters.dom,
@@ -1411,7 +1597,8 @@ const state = {
       onDisableGuardedScheduling: () => disableGuardedTradeScheduling('manual-ui-disable'),
       scheduledBuyEnabled: SCHEDULED_BUY_LIVE_GATE_ENABLED,
       scheduledTransferRepriceEnabled: SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED,
-      getRequestBudget: () => tradeRequestBudget.inspect(),
+      scheduledBulkRelistEnabled: SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED,
+      getRequestPacing: (context = {}) => tradeRequestPacer.inspect(context),
       onSetMinimumRetainedCoins: (value) => {
         tradeJobStore.setMinimumRetainedCoins(value);
         log(value === null
@@ -1432,6 +1619,7 @@ const state = {
         return inspectTradeProviders();
       },
       onOpenManualListing: (job = null) => openTradeListingDialogModal(job),
+      onOpenBulkRelist: () => openTradeBulkRelistDialogModal(),
       onPreviewBuyJob: (job) => previewTradeBuyJob(job),
       onOpenManualBuy: (job, preview) => openTradeBuyDialogModal(job, preview),
       onResetCircuit: () => {
@@ -11073,7 +11261,11 @@ function updateLoopControls() {
         history: schedulerSnapshot.history,
         buyJournal: tradeBuyJournal.snapshot(),
         listingJournal: tradeListingJournal.snapshot(),
-        inspectJournal: (journal, journalType) => inspectTradeRecoveryJournal(journalType, journal).reviewRequired,
+        bulkRelistJournal: tradeBulkRelistJournal.snapshot(),
+        inspectJournal: (journal, journalType) => inspectPersistedTradeJournal(journalType, journal, schedulerSnapshot).reviewRequired,
+        continuation: schedulerSnapshot.runtimes?.[expiredLease.lease.jobId]?.continuation
+          ? { ...schedulerSnapshot.runtimes[expiredLease.lease.jobId].continuation, jobId: expiredLease.lease.jobId }
+          : null,
       });
       log(`Trade: expired Lease read-only check ${leaseRecovery.status} (${leaseRecovery.reason}); Scheduler will remain fail-closed until reconciliation is confirmed`);
     }

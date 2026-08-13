@@ -1,5 +1,7 @@
 # Trade Scheduler 操作、安全与故障排查
 
+> 本文描述 `v0.7.91` 工作区候选行为。当前工作区已完成无文字确认、Request Pacing、可恢复时间片，以及手动和定时 Re-list All 的本地与真实 EA 页面验证。历史 campaign 中的精确确认文字和固定请求预算只用于复盘，不适用于当前代码。
+
 本文描述 Trade Scheduler 当前版本的可用边界、运行前检查、诊断证据和故障恢复方式。它不是 EA 接口说明，也不替代 EA、FSU 或 Enhancer 的使用条款。
 
 ## 当前边界
@@ -8,10 +10,10 @@ TS9-TS12 已在 `0.7.84` 完成自动与实机验证。正式版 `v0.7.91` 在�
 
 - 手动 Club Listing / Transfer reprice：单一来源、每 Run 1-4 项、每 chunk 最多 2 项；挂牌前后核对同一 item、definition、价格、duration 和 Transfer 状态。
 - 手动和定时 Buy：只允许 Rare Gold、最多 4 个连续评分和 4 项、每卡不超过 2000、总预算不超过 8000；支持逐评分价格/数量配额、Club 和重复卡 Transfer 路由。
-- 定时 Buy / Club Listing / Transfer reprice：只允许 `once/daily/interval/window`，最多 3 个 independently authorized armed Jobs；once/window 各授权 1 Run，daily/interval 各授权 2 Runs。
-- 所有 Job 共用一个 Operation Coordinator、Web Lock、持久 Lease 和 EA request budget；全局同时只能有一个 Trade mutation Run，最早 due time 优先，同 due time 才交替 Buy/Listing 类型。
+- 定时 Buy / Club Listing / Transfer reprice / Re-list All：只允许 `once/daily/interval/window`，最多 3 个 independently authorized armed Jobs；once/window 各授权 1 Run，daily/interval 各授权 2 Runs。
+- 所有 Job 共用一个 Operation Coordinator、Web Lock、持久 Lease 和 Request Pacer；全局同时只能有一个 Trade mutation Run，最早 due time 优先，同 due time 按 Buy/Listing/Re-list All 三类型公平轮转。
 - Listing/Buy Journal 最多记录四项的 mutation boundary 和终态；任一未知 mutation 会在授权消费前全局阻止全部新 Trade 写入。
-- Recovery 页只允许在 Scheduler paused/live-disabled、Runner 空闲和无 active Lease 时，用精确文本与至少 8 字符原因人工 acknowledge，并写有界 Audit/blocked History；该操作不调用 EA。
+- Recovery 页只允许在 Scheduler paused/live-disabled、Runner 空闲和无 active Lease 时，选择固定 resolution 并勾选风险确认后人工归档，并写有界 Audit/blocked History；该操作不调用 EA。
 - 过期 Lease 采用两阶段接管：先只读对账；只有匹配终态 History 且无未知 Journal 时，下次 Scheduler 才清理旧 Lease并获取新 Lease。
 - 页面关闭、浏览器退出或未登录时不交易；恢复后只按 misfire、当前授权、Journal 和 Lease 处理，不补做未经授权的旧 occurrence。
 
@@ -19,7 +21,7 @@ TS9-TS12 已在 `0.7.84` 完成自动与实机验证。正式版 `v0.7.91` 在�
 
 - 第五张及更多卡、超过 4 个或不连续的 Buy 评分、稀有金以外 Buy 卡类和 `next-login`。
 - 第四个 armed Job、无限授权、无上限 Bulk Buy/Bulk Listing、自动出价、自动 Quick Sell 和自动套利。
-- Bulk relist、Club + Transfer 混合来源、`relistExpiredAuctions()` 和任何没有明确候选、身份、价格或库存去向的交易动作。
+- 低于 60 秒的 Re-list All Interval、Club + Transfer 混合来源、绕过 Preview/快照/Recovery 门禁直接调用 `relistExpiredAuctions()`，以及任何没有明确候选、身份、价格或库存去向的交易动作。
 - 页面关闭/未登录时交易、自动确认未知 Journal、保存 EA 凭证或由 Companion/服务器直接调用 EA。
 
 ## 运行前检查
@@ -32,14 +34,94 @@ TS9-TS12 已在 `0.7.84` 完成自动与实机验证。正式版 `v0.7.91` 在�
 6. 为 Buy 设置全局最低保留金币。Job 局部值只能提高该底线，不能降低它。
 7. 即使 V13-15 已通过，普通使用仍应采用已验证的小额范围；不得通过导入 JSON 绕过数量、来源、评分、价格或调度门禁。
 
+## V2-5 手动 Re-list All 验证与记录
+
+该入口与 Transfer Reprice 不同：它不筛选卡片、不重新计算价格，而是对 Preview 中的当前全部 Unsold Items 调用一次 EA 原生 Re-list All，并保留 EA 当前 Bid/Buy Now。手动入口和定时 Job 是两个独立入口，但共用相同的聚合事务、对账和 Recovery 规则；结果不明确时都不得重试。
+
+共同前置条件：
+
+1. 安装当前仓库根目录生成的候选 `DailyLoopRunner.user.js`，刷新后确认 Ready 版本与候选一致。
+2. 保持 Scheduler paused 且 Automatic execution locked，所有 Job unarmed；确认 Recovery 为空、Circuit closed、Lease/Coordinator idle。
+3. 停止 Loop/Batch/SBC/开包和其它市场操作，关闭 Enhancer Trader 或其它会改 Transfer 的工具，只保留一个 EA Web App 标签页。
+4. 在整个 Preview、执行和对账期间不要手动领取、挂牌、重挂或清理 Transfer 项。
+
+### A. 空 Unsold 验证
+
+1. 在 EA Transfer List 确认没有 Unsold/Expired 项；Active 和 Sold 项可以存在，但不要在验证期间操作。
+2. 打开 `Trade Scheduler`，点击工具栏 `Re-list All`，再点击 `Preview Unsold`。
+3. 确认摘要为 `0 Unsold`，按钮显示 `Confirm empty check`，且不要求勾选风险复选框。
+4. 点击一次 `Confirm empty check`，等待显示 `completed`、`0/0 relisted` 和 `skipped-empty`。该路径会再次刷新 Transfer，但不得获取 mutation permit或调用 `relistExpiredAuctions()`。
+5. 点击 `Save diagnostics`，保存 `trade-bulk-relist-diagnostics-....json`，同时保存从 Ready 开始的 Runner log。不要为了重复验证而连续点击。
+
+### B. 真实 Unsold 验证
+
+1. 准备 1-2 张已自然到期、愿意按原挂牌价格重新挂牌的低价值卡。确认当前所有 Unsold 项都可以被重挂，因为该功能会处理全部 Unsold，不能只选测试卡。
+2. 打开 `Trade Scheduler > Re-list All`，点击 `Preview Unsold`。逐项核对数量、名称、评分、Bid、Buy Now 和 Trade ID；任何项目不认识或价格不可接受时关闭窗口，不执行。
+3. 确认 Preview 数量不超过 100 且无 blocker。勾选 `Relist every item shown in the current Unsold preview`，点击一次 `Re-list All`。
+4. 保持页面打开且不要操作 Transfer，等待结果。合格结果必须是 `completed`，并显示 `N/N relisted`；EA Transfer List 中相同 item 应全部变为 Active，原 Bid/Buy Now 不变。
+5. 点击 `Save diagnostics`，并保存完整 Runner log。diagnostics 中应有同一 `runId` 的 Preview、单次聚合 mutation、完成对账和终态 Journal，且 Recovery 为空、Circuit closed。
+6. 如果显示 `blocked`、`partial`、`unknown`、`ambiguous`、427，或 EA 页面与结果不一致，立即停止。不要再次 Preview/执行，不要手工确认 Recovery；保存当前截图、Runner log、Bulk Re-list diagnostics 和 Scheduler diagnostics后再调查。
+
+### C. 2026-08-13 验收结果
+
+- 空 Unsold Run `manual-bulk-relist-1786609271826-e9698210401d18`：`completed/skipped-empty`，requested/succeeded/failed=`0/0/0`，没有越过 mutation boundary。
+- 真实 Unsold Run `manual-bulk-relist-1786614438385-9a61acb7c02ba`：实际 Preview 19 项并一次聚合重挂 19 项，requested/succeeded/failed=`19/19/0`；19 个 item/definition 全部匹配，Start Bid `1800`、Buy Now `1900` 全部保持，状态由 inactive 变为 Active。
+- Bulk Re-list 与 Scheduler diagnostics 均显示单一聚合调用、完成 Journal/History、Recovery 为空、Circuit closed、Lease/Coordinator idle；Runner log 和 EA Active Transfers 截图与诊断一致，没有 partial、unknown、ambiguous、427 或 429。
+- 真实步骤使用 19 张卡超过建议的 1-2 张最小测试规模，但没有超过 Preview 的 100 项安全上限；这是一次验收记录，不表示普通验证需要准备 19 张卡。
+
+V2-5 两项实机验证均已通过，手动 Re-list All 可按本节安全边界使用。V2-6 定时门禁也已通过，可通过 `New Re-list All Job` 创建定时任务；它与本节手动入口共用同一聚合事务和 Recovery 规则，仍必须使用有限授权并遵守 60 秒最小 Interval。
+
+## V2-6 定时 Re-list All 集中验证
+
+本节保留 V2-6 集中验收步骤和证据，普通使用不需要重复 campaign。安装仓库根目录最新构建的 `DailyLoopRunner.user.js` 后必须对 EA Web App 执行一次 F5，不能只关闭并重新打开 Runner/Scheduler 窗口；同一版本号下 Tampermonkey 可以覆盖脚本文件，但已打开标签页仍会继续执行旧内存代码。刷新后确认 `Ready v0.7.91`；关闭 Enhancer Trader 和其它交易自动化，并在运行前确认 Recovery 为空、Circuit closed、Lease/Coordinator idle。
+
+### A. 定时空 Unsold
+
+1. 在 EA Transfer List 确认没有 Unsold；Active、Sold 和尚未挂牌的 Available Items 可以存在，但验证期间不要操作。Available Items 不属于 Re-list All 作用域。
+2. 打开 `Trade Scheduler > New Re-list All Job`。Name 填 `V2-6 Empty Once`，Enabled 和 Armed 打开；Schedule 选 `Once`，Run at 设为当前时间后 2-3 分钟；Misfire 保持 Grace、15 分钟；Re-list delay 保持 `3/8`，429 cooldown 保持 `60/1800`。保存。
+3. 点击 `Enable guarded schedule`，核对结构化摘要明确显示作用域为全部 Unsold、最多 100 项、1 个授权 Run，然后批准。不要再打开手动 Re-list All 窗口。
+4. 保持 Scheduler 窗口打开。到点后 Job 状态、banner 和 History 应在约 1 秒内原地刷新；合格结果为 `completed/skipped-empty`、processed `0/0`，Scheduler 自动回锁且 Job 解除 Armed。
+5. 保存 Scheduler diagnostics，文件命名时加前缀 `v2-6-empty`。诊断必须显示 requested/succeeded/failed=`0/0/0`、`mutationBoundaryCrossed=false`，且没有 aggregate mutation；即使 Transfer 中存在 Available Items，也必须保持该结果。
+
+### B. 定时真实 Unsold
+
+1. 准备 1-2 张自然到期、愿意按原价格重挂的低价值卡。确认当前全部 Unsold 都可接受重挂，记录每张卡的名称、Bid 和 Buy Now。
+2. 新建 `V2-6 Real Once` Re-list All Job；除 Run at 设为当前时间后 2-3 分钟外，其余字段与 A 相同。保存并批准这一个 Job 的 1 Run 授权。
+3. 到点后不要触碰 Transfer。合格结果为一条 `completed` History，processed `N/N`；EA 中同一批卡全部变为 Active，Bid/Buy Now 不变。不得出现第二次聚合调用。
+4. 保存 Scheduler diagnostics、Runner log 和一张 EA Active Transfers 截图，文件前缀使用 `v2-6-real`。如出现 partial/unknown/ambiguous/427/429 或价格变化，立即停止，不重试也不归档 Recovery。
+
+### C. Interval、F5 与 occurrence 去重
+
+当前实机状态：60 秒 Interval 的两次 occurrence、不同 runId、有限授权耗尽、自动解除 Armed、零 mutation 和第三轮阻断均已通过。验证 Artifact 为 `trade-scheduler-diagnostics-2026-08-13T14-57-36-653Z.json`；两个 Run 分别为 `trade-1786632969872-6aac7fde6ad14` 与 `trade-1786633027099-a5948440d59d9`，均为 `completed/skipped-empty`、`0/0/0`。本轮未在两次 occurrence 之间执行 F5，F5 恢复证据按验收决定略过并保留为非阻断后续项。
+
+1. 再次确保 Unsold 为空。新建 `V2-6 Empty Interval`，Schedule 选 `Interval`，使用 `60 sec` 快捷值；Enabled/Armed 打开，保存并批准。Interval 会获得 2 个有限 Run 授权。
+2. 等第一条 `completed/skipped-empty` History 出现并确认授权显示 `1/2` Run left。此时按一次 F5，重新登录或等待 Runner Ready；不要重新批准、不编辑 Job。
+3. 等第二个 occurrence 完成。合格结果是两个不同 runId、各一条 `skipped-empty` History，均为零 mutation；第二次完成后授权耗尽、Job 解除 Armed、Scheduler 自动回锁。不得因 F5 重放第一条 runId，也不得产生第三条 History。
+4. 保存前缀为 `v2-6-f5` 的 Scheduler diagnostics 和从 F5 前开始的 Runner log。
+
+### D. 长 Buy continuation 下的公平调度
+
+该场景不需要准备 Unsold，也不应实际购买卡。使用明显不可能成交的低价范围；若 Preview 意外显示可能成交的候选，立即取消并调低价格，不批准执行。
+
+1. 设置一个可接受的 Global minimum retained coins。新建 Rare Gold Buy Job `V2-6 Fair Buy`：评分只选一个低风险常见评分，Quantity `1`、Max Buy Now `150`、Total budget `150`、Max runtime `5` 分钟、Empty searches `30`、Purchases per search `1`、Search delay `20/20` 秒；Schedule 选 Once，Run at 设为时间 T，Enabled/Armed 打开。
+2. 新建 `V2-6 Fair Re-list` Re-list All Once Job，Run at 设为 `T + 1 分钟`，Enabled/Armed 打开。Unsold 必须保持为空，所以该 Job 只能执行空列表零 mutation。
+3. 同时核对并批准这两个 Job。等待 Buy 在无候选搜索后进入 `waiting-pace`/continuation；不要关闭 Scheduler。到 `T + 1 分钟` 后，Re-list All 必须在 Buy continuation 尚未结束时获得执行机会并写入 `completed/skipped-empty` History，UI 应原地刷新。
+4. 一看到 Re-list All 完成，先保存前缀为 `v2-6-fairness` 的 Scheduler diagnostics 和 Runner log，再点击 `Disable guarded schedule` 终止仍在等待的 Buy。确认最终 Recovery 为空、没有购买回执、没有 Trade mutation。
+
+实机结果：Artifact `trade-scheduler-diagnostics-2026-08-13T15-07-19-663Z.json` 中，Buy Run `trade-1786633502150-ded4c83093cd18` 在 `waiting-pace` continuation 内累计 25 个 slice、13 次搜索且没有购买；其授权尚未消费时，Re-list All Run `trade-1786633562151-405528943ed558` 获得执行权并以 `completed/skipped-empty`、`0/0/0` 结束。之后原 Buy Run 继续使用相同 runId 派发，Lease/Coordinator 最终空闲、Recovery 为空、Circuit closed。D 公平调度门禁通过。
+
+### E. 提交证据
+
+A-D 已于 2026-08-13 全部通过。A 覆盖定时空 Unsold，B 覆盖真实 Unsold 聚合重挂，C 覆盖 60 秒 Interval 两次 occurrence/去重/授权耗尽，D 覆盖 Buy continuation 下 Re-list All 公平执行。F5 中途恢复未纳入本轮验收，保留为非阻塞补充项。验收依据包括 aggregate mutation 次数、相同 runId continuation、两阶段授权余量、History 去重、三类型公平分发和最终 Recovery/Circuit/Lease 状态，而不只是 EA 页面显示。
+
 ## TS8 一次性双卡验证记录
 
-以下步骤是候选 `0.7.70` 已完成的 V8 campaign，可用于后续兼容性复核，不需要在普通使用前重复执行。复核前安装仓库根目录的 `DailyLoopRunner.user.js`，刷新并确认日志为 `Ready v0.7.70`。关闭 Enhancer Trader 和其它自动交易工具，清空或处理正常可移动的 Unassigned，停止所有 Loop/Batch/SBC 操作，并保证 Transfer List 有足够空间。
+以下步骤是候选 `0.7.70` 已完成的 V8 campaign，仅作为历史审计材料，不需要在普通使用前重复执行。该章节中的固定请求预算、精确确认口令和旧版 Console 调试入口均已废弃；当前版本请以本文后面的 Request Pacing、结构化审批和 Recovery 说明为准。复核旧 campaign 时安装仓库根目录的 `DailyLoopRunner.user.js`，刷新并确认对应版本日志。关闭 Enhancer Trader 和其它自动交易工具，清空或处理正常可移动的 Unassigned，停止所有 Loop/Batch/SBC 操作，并保证 Transfer List 有足够空间。
 
 ### 基线
 
 1. 打开 Trade Scheduler，确认 `paused`、Automatic execution 为 `locked`、Circuit 为 `closed`，没有 armed Job，也没有未处理的 Listing/Buy Journal。
-2. 在 Summary 确认请求预算为 30/30；如果不足，保持页面不操作并等到窗口自然恢复。
+2. 旧版记录中的 `30/30` 仅是当时版本的请求预算快照；当前版本不再显示或预留固定请求槽。当前验证应检查 Summary/diagnostics 中的 `requestPacing`、`nextAllowedAt` 和 429 cooldown。
 3. 设置可接受的 `Global minimum retained coins`。准备两张低价值 Club 可交易卡；Transfer reprice 可复用自然到期的低价值卡，不要使用高价值卡制造测试条件。
 4. 点击 Trade Scheduler 的 `Save diagnostics` 保存一份基线。正常完成全部步骤后统一提供文件，不需要此时单独发送。
 
@@ -63,7 +145,7 @@ Scheduler 对话框会每秒读取一次最新 Job Store；定时任务到点、
 
 1. 点击 `Manual listing`，Source 选 Club，Card class 和 Rating rules 只覆盖确认愿意挂牌的两张低价值卡；关闭 market quote 或逐项核对其报价。
 2. 先点 `Preview`，再点 `Prepare`。必须看到恰好两张卡，逐项核对名称/评分、item、Buy Now、Start price 和 duration；如果只准备到一张，不执行并调整规则重新 Prepare。
-3. 输入界面要求的精确文本 `LIST 2`，执行一次。完成后点该窗口的 `Save diagnostics`。
+3. 历史版本需要输入 `LIST 2`；当前版本应核对结构化预览摘要后，直接点击带风险摘要的批准按钮，执行一次。完成后点该窗口的 `Save diagnostics`。
 4. 任一 item、价格或状态不符合 Prepare，立即停止整个 campaign。
 
 等待要求：点击执行后保持窗口打开，直到 Recap 显示 `completed | 2 listed | 0 failed | 0 skipped`。通常少于 1 分钟；按钮仍显示运行中时不要关闭、刷新或开始下一步。
@@ -86,13 +168,13 @@ Scheduler 对话框会每秒读取一次最新 Job Store；定时任务到点、
 1. 等 Summary 显示至少 12 个可用请求槽。需要 Transfer List 中恰好两张自然到期且愿意重挂的低价值 inactive/expired 卡。
 2. 打开 `Manual listing`，Source 选 Transfer，Expired Transfer items 选 `Include expired in Preview`；规则只覆盖目标卡。
 3. 依次执行 `Preview`、`Prepare reprice`，核对恰好两张卡和 EA Bid/Buy Now 双下限。
-4. 输入 `REPRICE 2` 并只执行一次。确认同一两个 item 变为 Active，Transfer 容量没有增加，然后保存 Listing diagnostics。
+4. 历史版本需要输入 `REPRICE 2`；当前版本核对结构化预览摘要后，直接点击批准按钮并只执行一次。确认同一两个 item 变为 Active，Transfer 容量没有增加，然后保存 Listing diagnostics。
 
 等待要求：如果开始时没有两张 expired 卡，可等步骤 A 的 1 小时挂牌自然到期；不要连续刷新 Transfer。执行后等待 Recap 为 `completed | 2 listed`，再到 EA Transfer List 确认两张均为 Active。
 
 ### C. 手动双评分、数量二 Buy
 
-先定义价格 `P`：在运行 campaign 前手动了解两个相邻评分的当前低价，选择确实愿意支付且 `P <= 2000` 的上限。之后停止其它市场操作并等本地请求预算恢复。推荐字段：
+先定义价格 `P`：在运行 campaign 前手动了解两个相邻评分的当前低价，选择确实愿意支付且 `P <= 2000` 的上限。之后停止其它市场操作；旧版复盘需等固定请求预算恢复，当前版本则检查 `requestPacing` 没有 429 cooldown。推荐字段：
 
 | 字段 | 值 |
 | --- | --- |
@@ -140,7 +222,7 @@ Scheduler 对话框会每秒读取一次最新 Job Store；定时任务到点、
 1. 等 Summary 至少有 12 个可用请求槽，确认没有其它 armed Job。
 2. 创建一个 `New listing Job`：Schedule 为 Once、时间设在未来 2-5 分钟、Enabled 和 Armed 开、只勾 Club source、Expired items 为 Skip expired、Max listings 为 2；规则仍只覆盖两张低价值卡。若当前没有其它 expired 卡，建议把这两张卡按 EA 合法高价挂牌并把 Start price 设为 Same，使其一小时后成为步骤 E 的候选。
 3. 保存后可点该 Job 的 `Run now`，在 Listing 窗口只做一次 `Preview` 核对将匹配两张低价值卡，然后关闭；不要点 Prepare/List。返回 Scheduler 后再次确认 Job 仍为 Armed。
-4. 确认 guarded gate 要求 `RUN ONCE 2`。输入该文本并点击 `Enable guarded schedule` 一次；这一步会自动把 Scheduler 从 paused 切为 running，不需要再点其它 Start。
+4. 历史版本需要输入 `RUN ONCE 2`；当前版本检查启用摘要中的 Job 数量、类型、授权次数和下次时间，确认无误后点击 `Enable guarded schedule` 一次。这一步会自动把 Scheduler 从 paused 切为 running，不需要再点其它 Start。
 5. 保持页面登录且不运行其它 Loop/Trade 动作。到 `Run at` 时 Job 开始后会立即自动回锁；继续等待 History 写入结果。
 6. 完成后确认 banner 为 `Scheduler: paused | Automatic execution: locked`、Job 已 disarmed、History 只有一个 `listing | completed | 2/2`，再保存一份 Scheduler diagnostics。至少再观察一个 tick，确认没有再次挂牌。
 
@@ -163,7 +245,7 @@ Scheduler 对话框会每秒读取一次最新 Job Store；定时任务到点、
 1. 只在有两张合适的 inactive/expired 低价值卡时执行。候选不必来自步骤 B；优先复用步骤 D 中以合法高价挂牌、自然到期的两张低价值卡。不要修改本地时间、Job JSON、EA 状态或调用未审核接口来强制过期。
 2. 等 Summary 至少有 12 个可用请求槽；创建 Once Listing Job，未来 2-5 分钟、Enabled/Armed 开、只勾 Transfer source、Expired items 为 Reprice expired、Max listings 为 2。
 3. 保存后可通过该 Job 的 `Run now` 打开 Listing 窗口，只做 Preview，确认正是两张目标 expired 卡后关闭。
-4. 输入 `RUN REPRICE ONCE 2` 并启用一次，然后保持页面登录等待到点及执行完成。
+4. 历史版本需要输入 `RUN REPRICE ONCE 2`；当前版本检查结构化启用摘要后直接批准一次，然后保持页面登录等待到点及执行完成。
 5. History 必须为 `listing | completed | 2/2`；核对同一两张 item Active、价格一致、Transfer 容量不增加、Job 自动解除武装且无重复 Run，然后保存 Scheduler diagnostics。
 
 等待要求：任何有效 Scheduled Reprice 实机验证都必须有真实 inactive/expired 卡，因此最短仍需等待 EA 的 1 小时挂牌自然结束。到期后页面可能短暂未刷新，先正常打开 Transfer List 确认 inactive，再回 Scheduler 操作；不要反复调用 Preview。复核 campaign 若暂时没有候选，可以先完成步骤 F，把 E 标记为 Pending，后续获得两张自然 expired 卡时单独补做；该次兼容性复核在 E 完成前不能判定通过。
@@ -223,7 +305,7 @@ Scheduler 对话框会每秒读取一次最新 Job Store；定时任务到点、
 1. 准备 4 张愿意挂牌的低价值可交易 Common Gold，规则尽量只覆盖这 4 张。
 2. 打开 Manual listing：Source=`Club`，market quote 关闭，Duration=`1 hour`，Expired=`skip`。候选版 Manual listing 上限固定为 4，没有单独的 Max listings 输入框。
 3. 先 Preview，再 Prepare；必须恰好看到 4 张及 `LIST 4`。逐项核对 item、definition、Bid、Buy Now 和 duration。
-4. 输入 `LIST 4` 一次并等待完成。正常结果是两个 chunk、索引 1-4、4 个 exact item 均 Active；不要因为第二 chunk 等请求预算而重复点击。
+4. 历史版本需要输入 `LIST 4`；当前版本核对四张 exact item 的结构化摘要后直接批准一次并等待完成。正常结果是两个 chunk、索引 1-4、4 个 exact item 均 Active；不要因为第二 chunk 等待 Pacer 而重复点击。
 5. 保存 Listing diagnostics。确认 recap 不显示内部 `chunk-summary`，但 diagnostics/Journal 能看到两个 chunk。
 
 ### 2. 手动四卡 Transfer Reprice 与 Stop
@@ -324,13 +406,13 @@ Interval 的 anchor 在保存时建立，首轮执行时间是 `anchorAt + Every
 2. Jobs 页确认恰好 3 个非 Manual Job 为 Armed。确认框应显示 `ENABLE 3 TRADE JOBS FOR 5 RUNS`。
 3. 精确输入该文本并点击 `Enable guarded schedule` 一次。Banner 应显示 `3 Job(s) | 5/5 Run(s) left`；不要对每个 Job 分别确认。
 
-### 2. 首轮执行、Loop 互斥与预算等待
+### 2. 首轮执行、Loop 互斥与历史预算等待
 
 1. 启用后保持 EA 标签前台，先等待最早 due 的 Interval Job 完成。Scheduler 必须全程串行，一次只能看到一个 Buy 或 Listing operation。
 2. 第一项完成后不要再次点击 Enable。等待第二个 Interval Job 到达自身显示的 `Next` 后运行；每项各生成一个不同 `runId`，且只扣减对应 Job 的 authorization。
 3. 在 `V13 Reprice` Window 开始前约 1 分钟，运行一个你已熟悉、预计 2-5 分钟完成且不会遗留 Unassigned 的低风险 Loop。不要为了实验临时扩大 SBC 材料保护。
 4. Window 到点时，Trade Scheduler 应显示 `waiting-operation / runner-operation-active`；此时不得发出 Listing mutation。Loop 正常结束后，Trade 才能继续评估。
-5. 前两次 Trade 的真实请求通常会使 Reprice 或后续 occurrence 进入 `cooldown / trade-request-budget-insufficient`。这必须是自然结果：只观察 Summary 的 required/remaining/retry 时间，等待恢复，不反复 Preview、刷新、Arm 或 Enable。若本轮请求数量刚好足够而未出现 cooldown，记录为“未自然触发”，不主动制造失败；Fake-clock/预算测试仍是发布门禁。
+5. `0.7.91` 当时使用固定请求预算，前两次 Trade 可能使后续 occurrence 进入 `trade-request-budget-insufficient`。该观察仅属于历史 campaign；V2-3 已删除此预算。当前版本若出现自然 429，应只观察 Request Pacing 的 action、`nextAllowedAt` 和 cooldown，不反复 Preview、刷新、Arm 或 Enable，也不主动压测 EA。
 6. `V13 Reprice` 必须在 Window/grace 内至多执行一次；若预算直到 Window/grace 结束仍未恢复，应形成一条可解释的 missed/blocked 证据，不得扩大窗口后重试同一授权。
 
 ### 3. 后台标签、刷新/重登和授权终态
@@ -351,13 +433,16 @@ Interval 的 anchor 在保存时建立，首轮执行时间是 `anchorAt + Every
 3. 打开浏览器 Console，只执行下面这一行：
 
 ```javascript
-window.__FCLoopRunner.stageExpiredTradeLeaseValidation({ confirmationText: 'EXPIRE LEASE 1' })
+window.__FCLoopRunner.stageExpiredTradeLeaseValidation({
+  approved: true,
+  riskAccepted: true
+})
 ```
 
 4. 返回 Scheduler。全局 Recovery 门禁应立即阻止 `Enable guarded schedule`，不得先等 Job 到点；打开 `Recovery` 页，应看到 `LEASE Recovery`、测试 Lease `runId` 和 evidence hash。此阶段没有 Prepare、市场请求或 Listing mutation。
-5. 保持 EA 页面状态不变，Exact confirmation 输入界面显示的 `ACKNOWLEDGE LEASE <runId>`；Audit reason 输入 `Confirmed staged lease had no EA mutation`，点击 `Acknowledge after EA check`。
+5. 保持 EA 页面状态不变。在 Recovery 页选择已核验的 Lease resolution，勾选风险确认，再点击红色的归档/解锁按钮。Audit reason 使用界面提供的结构化原因，不输入确认口令。
 6. 确认 Audit 新增同一 `runId`，History 新增同一 `runId` 的 `blocked / manual-lease-recovery-acknowledged` 且 requested/succeeded 均为 0。此时过期 Lease 仍存在是预期行为：acknowledge 只写 Audit 和 blocked History，不直接清 Lease，也不调用 EA。
-7. 回 Jobs 页，把同一测试 Job 的 Run at 改到未来 2-3 分钟并重新 Armed。输入界面显示的 `RUN ONCE 1` 启用；下一次 tick 应先用已确认的终态 History 清理旧 Lease，再获取新 Lease并正常完成这一次单卡 Listing。
+7. 回 Jobs 页，把同一测试 Job 的 Run at 改到未来 2-3 分钟并重新 Armed。检查启用摘要后点击结构化启用按钮；下一次 tick 应先用已确认的终态 History 清理旧 Lease，再获取新 Lease 并正常完成这一次单卡 Listing。
 8. 最终确认 Recovery 不再要求处理、Lease/Coordinator 空闲、Journal 为确定终态、Circuit closed、Scheduler paused/locked、Job disarmed。
 
 ### 一次性交付与通过标准
@@ -365,17 +450,17 @@ window.__FCLoopRunner.stageExpiredTradeLeaseValidation({ confirmationText: 'EXPI
 全部步骤结束后一次性提供：
 
 1. 从 `Ready v0.7.91` 开始到最终 Recovery 完成后的完整 Runner log。
-2. 基线、中间、最终三份 Scheduler diagnostics；最终文件必须包含 Recovery Audit、Buy/Listing Journal、Lease、request budget、Scheduler events 和 `runId` correlations。
+2. 基线、中间、最终三份 Scheduler diagnostics；最终文件必须包含 Recovery Audit、Buy/Listing Journal、Lease、`requestPacing`、Scheduler events 和 `runId` correlations。
 3. 若任何步骤打开了独立 Buy/Listing 对话框并产生 diagnostics，也一并提供；纯 Scheduled Run 不要求为了导出而重复执行手动交易。
 4. 一张最终 Jobs/Recovery 页面截图，显示 paused/locked、0 个待处理 Recovery 和授权终态。
 
-通过标准：三个 Job 独立扣减授权且全局串行；Loop 与 Trade 不并发；预算等待不发送 EA 请求；后台/刷新/重登不重复 occurrence；过期 Lease 在人工审计前不被覆盖，审计本身不调用 EA，后续两阶段接管成功；总计无未知 Journal、无重复 mutation、无超预算和无未解释状态。通过前不打 tag、不发布 Release。
+通过标准：三个 Job 独立扣减授权且全局串行；Loop 与 Trade 不并发；Pacer 等待不发送 EA 请求；后台/刷新/重登不重复 occurrence；过期 Lease 在人工审计前不被覆盖，审计本身不调用 EA，后续两阶段接管成功；总计无未知 Journal、无重复 mutation、无 pacing 之外的未解释状态。通过前不打 tag、不发布 Release。
 
 ### `0.7.91` 实机结果
 
 V13-15 campaign 已于 2026-08-12 完成。Prepare/Mid/End diagnostics 分别记录了五份授权的初始、首轮后和最终状态：Buy `2/2`、Club Listing `2/2`、Transfer Reprice `1/1`，所有 Run 均为 `completed` 且 requested/succeeded=`1/1`。Player Pick Loop 于 15:55:10 结束，Reprice 于 15:55:12 才开始，证明共享 Coordinator 没有并发 mutation。F5 后 page owner 发生变化，但剩余两个 Interval 授权和 `Next` 保留；第二轮完成后 Scheduler 自动 paused/locked，三个 Job 全部 disarmed，未出现第三轮、重复 `runId` 或重复 `scheduledFor`。
 
-受控 Lease `expired-lease-validation-1786523178663` 以 evidence `12bf5b68` 写入零 mutation 的人工 Audit 和 blocked History；随后重新授权的一次 Club Listing 成功，最终 Lease/Coordinator 空闲、Recovery 为空、Circuit closed。请求预算全程没有自然降到 cooldown，不主动制造该状态符合操作要求，其行为继续由自动测试和 fake-clock soak 覆盖。最终截图底部残留的 `Guarded schedule enabled for 1 Job(s)` 是临时 UI status 未清除，Banner 和持久状态已正确显示 paused/locked；该 UI 提示已单独修正。补交的 `log2.txt` 从 F5 后 `Ready v0.7.91` 开始，完整记录第二轮 Buy/Club、Lease staging、acknowledgement、两阶段 reconciliation 和最终 Listing，与 End diagnostics 一致。
+受控 Lease `expired-lease-validation-1786523178663` 以 evidence `12bf5b68` 写入零 mutation 的人工 Audit 和 blocked History；随后重新授权的一次 Club Listing 成功，最终 Lease/Coordinator 空闲、Recovery 为空、Circuit closed。旧版请求预算全程没有耗尽到 cooldown，不主动制造该状态符合操作要求；当前 Request Pacing 与 429 分支继续由自动测试和 fake-clock soak 覆盖。最终截图底部残留的 `Guarded schedule enabled for 1 Job(s)` 是临时 UI status 未清除，Banner 和持久状态已正确显示 paused/locked；该 UI 提示已单独修正。补交的 `log2.txt` 从 F5 后 `Ready v0.7.91` 开始，完整记录第二轮 Buy/Club、Lease staging、acknowledgement、两阶段 reconciliation 和最终 Listing，与 End diagnostics 一致。
 
 ## 交易运行时的状态
 
@@ -386,18 +471,27 @@ V13-15 campaign 已于 2026-08-12 完成。Prepare/Mid/End diagnostics 分别记
 - `waiting-session`：页面、EA 或 FSU 状态没有达到交易所需的就绪条件。
 - `waiting-operation`：Loop、SBC、开包或其它写操作占用共享 Coordinator；调度器应等待，而不是并行发送请求。
 - `browser-lock-held`：另一个同源标签页持有 Web Lock；这是跨标签页互斥的正常证据。
-- `cooldown / trade-request-budget-insufficient`：最近 5 分钟内不足以为当前任务规模保留所需 EA Trade 请求槽；等待 Summary 显示的恢复时间，不要重复 Preview、Arm 或 Start。
+- `waiting-pace`：当前动作尚未达到 Job 配置的秒级间隔，或共享 Pacer 正在等待其它标签页的动作完成；等待 `nextAllowedAt`，不要重复 Preview、Arm 或 Start。若 Job 卡片显示 `Resume`、Slice 和完成数，这是同一 Run 的持久 continuation，不是新的 occurrence。
+- `cooldown-429`：EA 最近返回了 429，Pacer 正在执行共享自适应冷却；等待 cooldown 自然结束，不要重复 Preview、Arm、Enable 或刷新多个标签页。
 - `blocked`：安全门禁拒绝了本次运行，通常会写入一条 History 回执并解除 Job 武装。
 - `completed`：请求、金币/库存对账和目标位置核验完成；仍应检查最终回执。
 
-## 请求预算与调度顺序
+## Request Pacing 与调度顺序
 
-- EA Trade 请求预算固定为每 5 分钟 30 次，并通过 Tampermonkey 存储在标签页之间共享。支持 Web Locks 的浏览器会串行化预算占用。
-- 每个 chunk 最多处理两项并独立取得预算；Listing chunk 在 Prepare 前原子保留 12 个槽并让 Prepare/Transaction 共用该 reservation，Buy chunk 按最坏搜索和对账路径预留，单张 14 个槽、双张 28 个槽。四项 Run 的第二个 chunk 必须等新的预算可用；等待期间不轮询 EA。事务结束后未使用槽会释放，已经发送的 EA 请求仍保留到窗口到期。
-- EA capability/repository 的本地读取以及 FUTNext/FUT.GG Provider HTTP 不计入该预算。Summary 中 `Used/Remaining` 是 EA Trade Adapter 请求聚合，不是全部网络流量。
-- `Trade capacity: cooldown` 不代表 EA Circuit 已打开。它是本地限流，等待界面显示的恢复时间；不要清 Tampermonkey 存储，也没有提高或跳过预算的入口。
+- V2-3 不再使用固定 `30/5 分钟`预算或最坏路径 request reservation。Market Search、Buy 和 Listing 按各 Job 的秒级最小/最大间隔运行；Buy 还可以配置每次搜索响应最多购买 `1..4` 张、搜索周期数量和周期暂停。
+- Request Pacer 通过 Tampermonkey storage 在标签页之间共享；支持 Web Locks 的浏览器会串行化动作许可。Summary/diagnostics 显示最近动作、实际间隔、`nextAllowedAt`、周期暂停和 429 cooldown 级别，不显示 Used/Remaining 请求槽。
+- 发生 EA 429 时当前动作立即停止，Pacer 按 Job 的初始/最大值进入共享自适应 cooldown。429 不打开 427 Circuit，也不会清除 Job、Journal 或授权；等待恢复期间不要反复 Preview、Arm、Enable 或刷新多个标签页。
+- Buy、Listing 和购买后路由必须先取得一次性 mutation permit，再写 Journal mutation boundary 并调用 EA。permit 未取得时不会产生未知 mutation；若 Buy/Listing 已接受后对账被 429 阻断，则保留 `ambiguous` Journal，必须按 Recovery 处理，不能自动重试。
+
+### 可恢复时间片
+
+- `deferred` 只表示正常 pacing 等待，当前 slice 已安全结束；它不会写 History、推进 schedule 或消耗本次授权 occurrence。
+- Scheduler 会显示 `Resume <时间>`、`Slice <序号>` 和 `<已完成>/<目标>`。到达 Resume 时间后由相同 `runId` 继续，已完成的卡不会重复 Buy/List。
+- 等待期间 Lease 与 Operation Coordinator 会释放，因此另一种类型的 Job 可以运行；同类型的其它 Job 会显示 `same-type-continuation-pending` 并等待原 Run 完成。
+- 不要手动开始同类型交易覆盖 deferred Journal。若编辑/删除 Job、点击 Disable、清空 Provider cache 或执行 relock，会清理 continuation 并终止该次授权；未知 mutation 仍进入红色 Recovery，不要按普通 deferred 处理。
+- EA capability/repository 的本地读取以及 FUTNext/FUT.GG Provider HTTP 不经过 EA Trade Pacer。页面关闭、Session 未就绪或浏览器后台冻结时不承诺实时调度。
 - 最多 3 个 independently authorized armed Jobs 可以同时等待，但全局仍只允许一个 Trade mutation Run。选择器先按最早 due time；只有 due time 相同才交替 Buy/Listing 类型，同类型再按 Job ID 稳定排序。每次只消费被选中 Job 的一份授权，其他 Job 保持等待。
-- 浏览器异常关闭时，未释放 reservation 会在最长 5 分钟后自然过期。恢复页面后先查看 Summary/diagnostics，不要立即重复发起交易。
+- 浏览器异常关闭或刷新后先查看 Summary、Journal、Lease 和 diagnostics；未知 mutation 必须先人工归档，不要立即重复交易。
 
 ## 诊断文件
 
@@ -409,7 +503,7 @@ V13-15 campaign 已于 2026-08-12 完成。Prepare/Mid/End diagnostics 分别记
 - Lease、Web Lock、Coordinator、Circuit、页面和 FSU readiness 的脱敏状态。
 - Buy/Listing Preview、Prepared、Receipt 和有限的运行时间线。
 - Player Catalog 和 Price Quote 的健康状态、缓存聚合数量、TTL 和活动计数。
-- EA Trade 请求预算的窗口、使用/剩余数量、动作聚合、当前任务容量恢复时间和 Web Lock 支持状态。
+- Request Pacing 的最近动作、实际间隔、下一允许时间、周期暂停、429 cooldown 和 Web Lock 支持状态。
 - Listing/Buy Journal 的最多四个逐项状态、chunk 边界、mutation boundary 和脱敏响应摘要。
 
 诊断不会包含 EA 认证信息、Lease token、完整 definition ID 列表、价格、URL 或原始异常对象。上传前仍应检查文件内容，账号标识、用户名或第三方日志中的个人信息应自行删除。
@@ -429,7 +523,7 @@ V13-15 campaign 已于 2026-08-12 完成。Prepare/Mid/End diagnostics 分别记
 | `waiting-session` 持续存在 | 保持页面登录，等待 FSU Club readiness；保存诊断后再刷新一次 | 不要连续 Arm、刷新或重复创建 Job |
 | `waiting-operation` | 等 Loop/SBC/开包完成；确认 Runner operation 已恢复 false | 不要在另一个标签页强行运行交易 |
 | `browser-lock-held` | 在两个标签页都导出诊断，关闭不用的标签页后等待下一次 tick | 不要手工重复发送 Buy/Listing |
-| `trade-request-budget-insufficient` | 查看 Summary 的当前任务容量恢复时间，保持 Job 不再重复 Arm，等待窗口自然恢复 | 不要清 Tampermonkey 存储、刷新多个标签页或绕过预算 |
+| `trade-rate-limit` / `trade-rate-limit-cooldown` | 查看 Summary 的 Pacer action、`nextAllowedAt` 和 cooldown，保持 Job 不再重复 Arm，等待自然恢复 | 不要清 Tampermonkey 存储、刷新多个标签页或主动压测 429 |
 | `expired-lease-reconciliation-required` | 停止并刷新登录，确认 Transfer/Club 状态后重新建立一次性 Job | 不要绕过回锁或直接重试原请求 |
 | `listing-journal-mutation-review-required` / `buy-journal-mutation-review-required` | 保存 Scheduler 和对应 Trade diagnostics，逐项核对 EA Transfer/Club/Unassigned 与金币后停止等待代码审查 | 不要覆盖 Journal、清 Tampermonkey 存储或再次确认同一交易 |
 | `circuit=open` | 按 `retryAt` 等待，检查 429/401/Captcha/EA service error 原因 | 不要清空 History 或反复点击 Start |

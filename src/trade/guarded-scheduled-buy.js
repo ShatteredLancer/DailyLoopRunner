@@ -3,7 +3,6 @@ import { createBuyTransaction } from './buy-transaction.js';
 import { filterBuyCatalogForDestination } from './buy-destination.js';
 import { sanitizeTradeBuyReceipt } from './buy-diagnostics.js';
 import { inspectScheduledBuyValidationJob } from './scheduled-buy-validation.js';
-import { tradeBuyRequestReserve } from './request-budget.js';
 import { createTradeChunkCoordinator } from './chunk-coordinator.js';
 import { finalizeChunkedBuyReceipt } from './buy-chunk-receipt.js';
 
@@ -12,11 +11,10 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
   const operationCoordinator = options.operationCoordinator;
   const buyPreview = options.buyPreview;
   const journal = options.journal;
-  if (typeof store?.read !== 'function' || typeof store?.consumeAuthorization !== 'function') throw new TypeError('Trade Job Store authorization is required');
+  if (typeof store?.read !== 'function' || typeof store?.beginAuthorization !== 'function') throw new TypeError('Trade Job Store authorization is required');
   if (!operationCoordinator?.acquire || !operationCoordinator?.release) throw new TypeError('Operation Coordinator is required');
   if (typeof buyPreview?.preview !== 'function') throw new TypeError('Buy Preview is required');
   if (typeof options.getTradeAdapter !== 'function') throw new TypeError('getTradeAdapter is required');
-  if (typeof options.requestBudget?.reserve !== 'function') throw new TypeError('Trade request budget is required');
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const sleep = typeof options.sleep === 'function' ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const transactionFactory = typeof options.transactionFactory === 'function'
@@ -38,10 +36,21 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
   }
 
   async function execute(input = {}) {
-    const startedAt = Number(now());
+    const continuation = input.continuation || null;
+    const startedAt = Number(continuation?.startedAt ?? input.startedAt ?? now());
     const minimumRetainedCoins = store.read().safety?.minimumRetainedCoins;
+    let authorizationBegun = false;
+    let yielded = false;
     const finish = (receipt, context = {}, phase = 'receipt-recorded') => {
       const safeReceipt = sanitizeTradeBuyReceipt(receipt);
+      if (authorizationBegun && safeReceipt.status !== 'deferred') {
+        const completed = store.completeAuthorization?.(input.job.id, input.runId);
+        if (completed && completed.completed !== true) {
+          safeReceipt.status = 'blocked';
+          safeReceipt.reason = completed.reason || 'schedule-authorization-completion-failed';
+        }
+        authorizationBegun = false;
+      }
       journal?.finish?.(input.runId, { phase, status: safeReceipt.status, reason: safeReceipt.reason });
       options.onReceipt?.(safeReceipt, { job: context.job || input.job, input, ...context });
       return safeReceipt;
@@ -58,14 +67,17 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
         startedAt,
       ), { gate });
     }
-    const journalRecovery = journal?.inspectRecovery?.();
+    const journalRecovery = journal?.inspectRecovery?.({ runId: input.runId });
     if (journalRecovery?.canSupersede === false) {
       return finish(blockedReceipt(input, journalRecovery.reason || 'buy-journal-recovery-required', startedAt), { gate });
     }
-    const authorization = store.consumeAuthorization(input.job.id, input.runId);
-    if (authorization.consumed !== true) {
+    const authorization = typeof store.beginAuthorization === 'function'
+      ? store.beginAuthorization(input.job.id, input.runId)
+      : { begun: store.consumeAuthorization?.(input.job.id, input.runId)?.consumed === true };
+    if (authorization.begun !== true) {
       return finish(blockedReceipt(input, authorization.reason || 'schedule-authorization-missing-or-expired', startedAt), { gate });
     }
+    authorizationBegun = true;
     const circuit = options.circuitBreaker?.availability?.();
     if (circuit && circuit.allowed !== true) return finish(blockedReceipt(input, 'trade-circuit-open', startedAt), { gate });
     let adapter = options.getTradeAdapter();
@@ -88,13 +100,21 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
 
     let runningNotified = false;
     try {
-      journal?.begin?.({
-        runId: input.runId,
-        jobId: gate.job.id,
-        expectedDestination: 'auto',
-        requested: gate.job.policy.quantity,
-        at: startedAt,
-      });
+      if (!continuation) {
+        journal?.begin?.({
+          runId: input.runId,
+          jobId: gate.job.id,
+          expectedDestination: 'auto',
+          requested: gate.job.policy.quantity,
+          at: startedAt,
+        });
+      } else {
+        journal?.checkpoint?.(input.runId, {
+          phase: 'slice-resumed',
+          status: 'active',
+          offset: continuation.succeeded + continuation.failed + continuation.skipped,
+        });
+      }
       options.onRunningChange?.(true, { ...input, job: gate.job });
       runningNotified = true;
       let preview;
@@ -125,14 +145,12 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
       }
 
       const coordinator = createTradeChunkCoordinator({
-        requestBudget: options.requestBudget,
         now,
-        sleep,
         onCheckpoint: (checkpoint) => journal?.checkpoint?.(input.runId, checkpoint),
       });
-      let spent = 0;
-      let cursor = null;
-      let purchasedByRating = {};
+      let spent = Math.max(0, Number(continuation?.spent || 0));
+      let cursor = continuation?.cursor || null;
+      let purchasedByRating = { ...(continuation?.purchasedByRating || {}) };
       const deadlineAt = startedAt + Number(gate.job.policy.maxRuntimeMinutes) * 60_000;
       const receipt = await coordinator.run({
         runId: input.runId,
@@ -143,14 +161,10 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
         deadlineAt,
         deadlineReason: 'runtime-limit',
         requested: gate.job.policy.quantity,
-        requestReserve: (quantity) => tradeBuyRequestReserve({
-          ...gate.job,
-          policy: { ...gate.job.policy, quantity },
-        }),
+        continuation,
         heartbeat: () => input.heartbeat?.() === true,
         shouldStop: () => options.shouldStop?.() === true,
-        executeChunk: async ({ offset, quantity, reservation }) => {
-          adapter = options.getTradeAdapter({ requestBudget: reservation });
+        executeChunk: async ({ offset, quantity }) => {
           const remainingRuntimeMinutes = Math.max(1 / 60_000, (deadlineAt - Number(now())) / 60_000);
           const chunkJob = {
             ...gate.job,
@@ -161,6 +175,15 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
               maxRuntimeMinutes: Math.min(Number(gate.job.policy.maxRuntimeMinutes), remainingRuntimeMinutes),
             },
           };
+          adapter = options.getTradeAdapter({
+            pacingContext: {
+              policy: chunkJob.policy,
+              jobId: gate.job.id,
+              runId: input.runId,
+              ownerId: options.ownerId || '',
+              shouldStop: () => options.shouldStop?.() === true,
+            },
+          });
           const transaction = transactionFactory({
             tradeAdapter: adapter,
             playerCatalogProvider: options.playerCatalogProvider,
@@ -181,6 +204,7 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
             maxBuyAttempts: quantity,
             beforeBuy: () => input.heartbeat?.() === true,
             shouldStop: () => options.shouldStop?.() === true,
+            deferWhenWaiting: true,
           });
           const summary = (chunkReceipt.receipts || []).find((entry) => entry.status === 'run-summary') || {};
           spent += Number(summary.spent || 0);
@@ -189,7 +213,31 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
           return chunkReceipt;
         },
       });
-      return finish(finalizeChunkedBuyReceipt(receipt), { gate, preview });
+      const finalized = finalizeChunkedBuyReceipt(receipt);
+      if (finalized.status === 'deferred') {
+        const summary = (finalized.receipts || []).find((entry) => entry.status === 'run-summary') || {};
+        finalized.continuation = {
+          ...(finalized.continuation || {}),
+          spent: Number(summary.spent || spent),
+          searches: Number(summary.searches || 0),
+          buyAttempts: Number(summary.buyAttempts || 0),
+          cursor: summary.cursor || cursor,
+          purchasedByRating: { ...(summary.purchasedByRating || purchasedByRating) },
+        };
+        if (typeof input.persistContinuation === 'function'
+          && input.persistContinuation(finalized) !== true) {
+          finalized.status = 'blocked';
+          finalized.reason = 'trade-continuation-persistence-rejected';
+          finalized.resumeAt = null;
+          finalized.continuation = null;
+        }
+      }
+      yielded = finalized.status === 'deferred';
+      return finish(
+        finalized,
+        { gate, preview },
+        finalized.status === 'deferred' ? 'slice-deferred' : 'receipt-recorded',
+      );
     } catch (error) {
       journal?.finish?.(input.runId, {
         phase: 'executor-error',
@@ -198,6 +246,10 @@ export function createGuardedScheduledBuyExecutor(options = {}) {
       });
       throw error;
     } finally {
+      if (authorizationBegun && !yielded) {
+        store.completeAuthorization?.(input.job.id, input.runId);
+        authorizationBegun = false;
+      }
       operationCoordinator.release(operationId);
       if (runningNotified) options.onRunningChange?.(false, { ...input, job: gate.job });
     }

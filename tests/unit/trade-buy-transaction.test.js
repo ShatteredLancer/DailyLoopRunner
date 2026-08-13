@@ -86,6 +86,40 @@ describe('Trade Buy Transaction', () => {
     expect(adapter.inspectUnassignedReadiness()).toMatchObject({ ready: false, count: 1, reason: 'unassigned-not-empty' });
   });
 
+  it('buys two eligible cards from one search response with full per-item routing checks', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      marketItems: [marketItem(70, 8401, 800), marketItem(71, 8401, 900)],
+    });
+    const result = await transaction(adapter, catalog()).run({
+      job: job({ quantity: 2, totalBudget: 2000, maxPurchasesPerSearch: 2 }),
+      maxBuyAttempts: 2,
+    });
+
+    expect(result).toMatchObject({ status: 'completed', requested: 2, succeeded: 2, coinsAfter: 3300 });
+    expect(result.receipts[0]).toMatchObject({ searches: 1, buyAttempts: 2, spent: 1700 });
+    expect(result.receipts.filter((entry) => entry.status === 'purchased')).toEqual([
+      expect.objectContaining({ tradeId: 1070, price: 800, destination: 'club' }),
+      expect.objectContaining({ tradeId: 1071, price: 900, destination: 'transfer' }),
+    ]);
+    expect(adapter.calls.filter((call) => call.method === 'searchMarket')).toHaveLength(1);
+  });
+
+  it('starts a new search after reaching the configured per-response purchase limit', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      marketItems: [marketItem(70, 8401, 800), marketItem(71, 8401, 900)],
+    });
+    const result = await transaction(adapter, catalog()).run({
+      job: job({ quantity: 2, totalBudget: 2000, maxPurchasesPerSearch: 1 }),
+      maxBuyAttempts: 2,
+    });
+
+    expect(result).toMatchObject({ status: 'completed', requested: 2, succeeded: 2 });
+    expect(result.receipts[0]).toMatchObject({ searches: 2, buyAttempts: 2 });
+    expect(adapter.calls.filter((call) => call.method === 'searchMarket')).toHaveLength(2);
+  });
+
   it('preserves one purchase and never attempts beyond an ambiguous second Buy', async () => {
     const adapter = createFakeTradeAdapter({
       coins: 5000,
@@ -300,13 +334,13 @@ describe('Trade Buy Transaction', () => {
     expect(adapter.calls.some((call) => call.method === 'routePurchasedItem')).toBe(false);
   });
 
-  it('keeps an accepted purchase ambiguous when local budget blocks reconciliation without opening Circuit', async () => {
+  it('keeps an accepted purchase ambiguous when 429 blocks reconciliation without opening Circuit', async () => {
     const base = createFakeTradeAdapter({ coins: 5000, marketItems: [marketItem()] });
     const adapter = {
       ...base,
       refreshPurchaseState: vi.fn(async () => ({
         status: 'blocked', response: null,
-        error: { kind: 'request-budget-exhausted', action: 'wait-until-budget-reset', retryAt: 6000 },
+        error: { kind: 'rate-limit', code: 429, action: 'stop-and-cooldown', retryAt: 6000 },
       })),
     };
     const circuit = { availability: () => ({ allowed: true }), recordFailure: vi.fn(), recordSuccess: vi.fn() };
@@ -316,11 +350,11 @@ describe('Trade Buy Transaction', () => {
       circuitBreaker: circuit,
       now: () => 1000,
       sleep: async () => {},
-      createRunId: () => 'buy-run-budget-reconciliation',
+      createRunId: () => 'buy-run-rate-limit-reconciliation',
     }).run({ job: job() });
     expect(result).toMatchObject({
       status: 'ambiguous',
-      reason: 'purchase-accepted-request-budget-exhausted-before-verification',
+      reason: 'purchase-accepted-rate-limit-before-verification',
       succeeded: 0,
       failed: 1,
     });
@@ -330,13 +364,13 @@ describe('Trade Buy Transaction', () => {
     expect(circuit.recordSuccess).not.toHaveBeenCalled();
   });
 
-  it('blocks before Buy when local budget stops the market search without opening Circuit', async () => {
+  it('blocks before Buy when 429 stops the market search without opening Circuit', async () => {
     const base = createFakeTradeAdapter({ coins: 5000 });
     const adapter = {
       ...base,
       searchMarket: vi.fn(async () => ({
         status: 'blocked', response: null, candidates: [],
-        error: { kind: 'request-budget-exhausted', action: 'wait-until-budget-reset', retryAt: 6000 },
+        error: { kind: 'rate-limit', code: 429, action: 'stop-and-cooldown', retryAt: 6000 },
       })),
     };
     const circuit = { availability: () => ({ allowed: true }), recordFailure: vi.fn(), recordSuccess: vi.fn() };
@@ -347,7 +381,7 @@ describe('Trade Buy Transaction', () => {
       now: () => 1000,
       sleep: async () => {},
     }).run({ job: job() });
-    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-request-budget-exhausted', succeeded: 0 });
+    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-rate-limit', succeeded: 0 });
     expect(base.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
     expect(circuit.recordFailure).not.toHaveBeenCalled();
   });
@@ -408,6 +442,62 @@ describe('Trade Buy Transaction', () => {
     });
     expect(result).toMatchObject({ status: 'blocked', reason: 'buy-execution-lease-lost', succeeded: 0 });
     expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(0);
+  });
+
+  it('does not cross the mutation boundary when the Buy permit is blocked by shared cooldown', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      requestPermitResults: {
+        buy: {
+          status: 'blocked',
+          error: { kind: 'rate-limit', code: 429, action: 'stop-and-cooldown', retryAt: 61000 },
+        },
+      },
+      marketItems: [marketItem()],
+    });
+    const checkpoints = [];
+    const result = await createBuyTransaction({
+      tradeAdapter: adapter,
+      playerCatalogProvider: catalog(),
+      now: () => 1000,
+      onCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+    }).run({ job: job(), expectedDestination: 'auto' });
+
+    expect(result).toMatchObject({ status: 'blocked', reason: 'trade-rate-limit', succeeded: 0, failed: 0 });
+    expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
+    expect(checkpoints).toContainEqual(expect.objectContaining({
+      phase: 'buy-request-permit-blocked', mutationBoundaryCrossed: false, retryAt: 61000,
+    }));
+    expect(checkpoints.some((entry) => entry.phase === 'buy-request-started')).toBe(false);
+  });
+
+  it('stops as ambiguous when 429 blocks routing after a verified purchase', async () => {
+    const adapter = createFakeTradeAdapter({
+      coins: 5000,
+      requestPermitResults: {
+        'purchase-route': {
+          status: 'blocked',
+          error: { kind: 'rate-limit', code: 429, action: 'stop-and-cooldown', retryAt: 61000 },
+        },
+      },
+      marketItems: [marketItem()],
+    });
+    const checkpoints = [];
+    const result = await createBuyTransaction({
+      tradeAdapter: adapter,
+      playerCatalogProvider: catalog(),
+      now: () => 1000,
+      onCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+    }).run({ job: job(), expectedDestination: 'auto' });
+
+    expect(result).toMatchObject({
+      status: 'ambiguous', reason: 'purchase-accepted-rate-limit-before-routing', succeeded: 0, failed: 1,
+    });
+    expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(1);
+    expect(adapter.calls.some((call) => call.method === 'routePurchasedItem')).toBe(false);
+    expect(checkpoints).toContainEqual(expect.objectContaining({
+      phase: 'item-finished', status: 'ambiguous', mutationBoundaryCrossed: true,
+    }));
   });
 
   it('preserves the scheduled Buy minimum coin floor before Buy Now', async () => {

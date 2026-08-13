@@ -16,7 +16,7 @@ function memoryStorage() {
 function listingJob(id) {
   return {
     id, name: id, type: 'listing', enabled: true, armed: true,
-    schedule: { type: 'interval', everyMinutes: 1, anchorAt: 1000 },
+    schedule: { type: 'interval', intervalSeconds: 60, anchorAt: 1000 },
     misfirePolicy: { type: 'grace-window', graceMinutes: 15 },
     policy: {
       sources: ['club'], cardClass: 'common-gold', ratingRules: [{ min: 75, max: 82, buyNow: 700 }],
@@ -30,7 +30,7 @@ function listingJob(id) {
 function buyJob(id) {
   return {
     id, name: id, type: 'buy', enabled: true, armed: true,
-    schedule: { type: 'interval', everyMinutes: 1, anchorAt: 1000 },
+    schedule: { type: 'interval', intervalSeconds: 60, anchorAt: 1000 },
     misfirePolicy: { type: 'grace-window', graceMinutes: 15 },
     policy: {
       cardClass: 'rare-gold', ratingMin: 84, ratingMax: 84, maxBuyNow: 1000,
@@ -47,7 +47,7 @@ describe('Trade Scheduler bounded long-run soak', () => {
     let time = 1000;
     let sessionReady = false;
     let loopBusy = false;
-    let buyBudgetReady = false;
+    let requestPacingReady = true;
     let runSequence = 0;
     const dispatched = [];
     let store = createTradeJobStore({ storage, key: 'jobs', now: () => time });
@@ -68,7 +68,7 @@ describe('Trade Scheduler bounded long-run soak', () => {
       sessionReason: sessionReady ? null : 'ea-session-unavailable',
       operationBusy: loopBusy,
       operationReason: loopBusy ? 'runner-operation-active' : null,
-      requestBudgetReady: job.type !== 'buy' || buyBudgetReady,
+      requestPacingReady,
       tickToleranceMs: 15000,
     });
     const schedulerFor = (ownerId) => createTradeScheduler({
@@ -89,11 +89,16 @@ describe('Trade Scheduler bounded long-run soak', () => {
     expect(Object.values(store.read().runtimes).every((runtime) => runtime.status === 'waiting-operation')).toBe(true);
     loopBusy = false;
 
-    expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: 'listing-a' });
-    expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: 'listing-c' });
-    expect(store.read().runtimes['buy-b']).toMatchObject({ status: 'cooldown', reason: 'trade-request-budget-insufficient' });
-    buyBudgetReady = true;
-    expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: 'buy-b' });
+    const firstRun = await scheduler.tick();
+    expect(firstRun).toMatchObject({ status: 'completed', jobId: expect.any(String) });
+    requestPacingReady = false;
+    expect(await scheduler.tick()).toMatchObject({ status: 'idle' });
+    for (const id of ['listing-a', 'buy-b', 'listing-c'].filter((id) => id !== firstRun.jobId)) {
+      expect(store.read().runtimes[id]).toMatchObject({ status: 'cooldown', reason: 'trade-rate-limit-cooldown' });
+    }
+    requestPacingReady = true;
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: expect.any(String) });
+    expect(await scheduler.tick()).toMatchObject({ status: 'completed', jobId: expect.any(String) });
     expect(new Set(dispatched.slice(0, 3))).toEqual(new Set(['listing-a', 'listing-c', 'buy-b']));
 
     time = 61000;

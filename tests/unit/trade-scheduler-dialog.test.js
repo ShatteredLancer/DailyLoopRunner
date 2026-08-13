@@ -75,18 +75,23 @@ describe('Trade Scheduler dialog', () => {
         reviews: [{
           journalType: 'buy', runId: 'buy-recovery-1', jobId: 'buy-job', status: 'active',
           phase: 'buy-request-started', mutationItemCount: 1, uncertainItemCount: 1,
-          evidenceHash: 'abc12345', requiredText: 'ACKNOWLEDGE BUY buy-recovery-1',
+          evidenceHash: 'abc12345', risk: 'high',
         }],
         audit: { entries: [] },
       }),
     });
+    expect(ui.byText('Scheduling unavailable: recovery-review-required; open Recovery and verify the previous EA result before another Job')).toBeTruthy();
+    expect(ui.byId('bronze-loop-trade-enable-guarded-schedule').disabled).toBe(true);
+    expect(ui.byId('bronze-loop-trade-enable-guarded-schedule').title).toBe('Resolve the previous Trade Journal in Recovery first');
     ui.byId('bronze-loop-trade-recovery-tab').click();
     expect(ui.byText('BUY Recovery | Run buy-recovery-1')).toBeTruthy();
     expect(ui.byId('bronze-loop-trade-recovery-ack-buy').disabled).toBe(true);
-    expect(ui.byId('bronze-loop-trade-recovery-confirm-buy').placeholder).toBe('ACKNOWLEDGE BUY buy-recovery-1');
+    expect(ui.byId('bronze-loop-trade-recovery-confirm-buy')).toBeUndefined();
+    expect(ui.byId('bronze-loop-trade-recovery-resolution-buy')).toBeTruthy();
+    expect(ui.byId('bronze-loop-trade-recovery-risk-buy')).toBeTruthy();
   });
 
-  it('submits exact recovery evidence and audit reason only from a locked idle state', () => {
+  it('submits exact recovery evidence, a fixed resolution and risk acceptance only from a locked idle state', () => {
     const ui = uiHarness();
     const onAcknowledgeRecovery = vi.fn();
     showTradeSchedulerDialog({
@@ -100,19 +105,27 @@ describe('Trade Scheduler dialog', () => {
         reviews: [{
           journalType: 'listing', runId: 'listing-recovery-1', jobId: 'listing-job', status: 'active',
           phase: 'listing-request-started', mutationItemCount: 1, uncertainItemCount: 1,
-          evidenceHash: 'def67890', requiredText: 'ACKNOWLEDGE LISTING listing-recovery-1',
+          evidenceHash: 'def67890', risk: 'high',
         }],
         audit: { entries: [] },
       }),
       onAcknowledgeRecovery,
     });
     ui.byId('bronze-loop-trade-recovery-tab').click();
-    ui.byId('bronze-loop-trade-recovery-confirm-listing').value = 'ACKNOWLEDGE LISTING listing-recovery-1';
-    ui.byId('bronze-loop-trade-recovery-reason-listing').value = 'Checked EA state after reload';
-    ui.byId('bronze-loop-trade-recovery-ack-listing').click();
+    const resolution = ui.byId('bronze-loop-trade-recovery-resolution-listing');
+    const risk = ui.byId('bronze-loop-trade-recovery-risk-listing');
+    const acknowledge = ui.byId('bronze-loop-trade-recovery-ack-listing');
+    expect(acknowledge.disabled).toBe(true);
+    resolution.value = 'confirmed-completed';
+    resolution.change();
+    expect(acknowledge.disabled).toBe(true);
+    risk.checked = true;
+    risk.change();
+    expect(acknowledge.disabled).toBe(false);
+    acknowledge.click();
     expect(onAcknowledgeRecovery).toHaveBeenCalledWith({
       journalType: 'listing', runId: 'listing-recovery-1', evidenceHash: 'def67890',
-      confirmationText: 'ACKNOWLEDGE LISTING listing-recovery-1', reason: 'Checked EA state after reload',
+      resolution: 'confirmed-completed', riskAccepted: true,
     });
   });
 
@@ -127,7 +140,7 @@ describe('Trade Scheduler dialog', () => {
         quantity: 1,
         minimumRetainedCoins: null,
         maxPurchasesPerSearch: 1,
-        searchDelaySeconds: [8, 15],
+        searchDelaySeconds: [7, 15],
       },
     });
   });
@@ -184,6 +197,16 @@ describe('Trade Scheduler dialog', () => {
     buyUi.byId('bronze-loop-trade-job-quantity').value = '4';
     buyUi.byId('bronze-loop-trade-job-totalBudget').value = '4000';
     buyUi.byId('bronze-loop-trade-job-rating-quantities').value = '84=2, 85=1, 86=1';
+    buyUi.byId('bronze-loop-trade-job-purchases-per-search').value = '3';
+    buyUi.byId('bronze-loop-trade-job-buy-delay-min').value = '0.2';
+    buyUi.byId('bronze-loop-trade-job-buy-delay-max').value = '0.5';
+    buyUi.byId('bronze-loop-trade-job-cycle-pause-enabled').checked = false;
+    buyUi.byId('bronze-loop-trade-job-cycle-every-min').value = '12';
+    buyUi.byId('bronze-loop-trade-job-cycle-every-max').value = '18';
+    buyUi.byId('bronze-loop-trade-job-cycle-pause-min').value = '6';
+    buyUi.byId('bronze-loop-trade-job-cycle-pause-max').value = '9';
+    buyUi.byId('bronze-loop-trade-job-cooldown-initial').value = '90';
+    buyUi.byId('bronze-loop-trade-job-cooldown-maximum').value = '900';
     buyUi.byId('bronze-loop-trade-job-save').click();
     expect(onSaveBuy).toHaveBeenCalledWith(expect.objectContaining({
       type: 'buy',
@@ -193,6 +216,13 @@ describe('Trade Scheduler dialog', () => {
         quantity: 4,
         totalBudget: 4000,
         ratingQuantityOverrides: { 84: 2, 85: 1, 86: 1 },
+        maxPurchasesPerSearch: 3,
+        buyDelaySeconds: [0.2, 0.5],
+        searchCyclePauseEnabled: false,
+        searchCyclePauseEvery: [12, 18],
+        searchCyclePauseSeconds: [6, 9],
+        initialRateLimitCooldownSeconds: 90,
+        maximumRateLimitCooldownSeconds: 900,
       }),
     }));
 
@@ -207,11 +237,18 @@ describe('Trade Scheduler dialog', () => {
     listingUi.byId('bronze-loop-trade-new-listing').click();
     listingUi.byId('bronze-loop-trade-job-market-enabled').checked = true;
     listingUi.byId('bronze-loop-trade-job-quote-fallback').value = 'skip';
+    listingUi.byId('bronze-loop-trade-job-list-delay-min').value = '2';
+    listingUi.byId('bronze-loop-trade-job-list-delay-max').value = '5';
+    listingUi.byId('bronze-loop-trade-job-cooldown-initial').value = '45';
+    listingUi.byId('bronze-loop-trade-job-cooldown-maximum').value = '600';
     listingUi.byId('bronze-loop-trade-job-save').click();
     expect(onSaveListing).toHaveBeenCalledWith(expect.objectContaining({
       type: 'listing',
       policy: expect.objectContaining({
         marketOverride: expect.objectContaining({ enabled: true, fallbackPolicy: 'skip' }),
+        listingDelaySeconds: [2, 5],
+        initialRateLimitCooldownSeconds: 45,
+        maximumRateLimitCooldownSeconds: 600,
       }),
     }));
   });
@@ -246,6 +283,28 @@ describe('Trade Scheduler dialog', () => {
     ui.byId('bronze-loop-trade-job-name').value = 'Another listing';
     ui.byId('bronze-loop-trade-job-save').click();
     expect(onSaveJob).toHaveBeenCalledWith(expect.objectContaining({ name: 'Another listing', armed: false, type: 'listing' }));
+  });
+
+  it('keeps manual Re-list All and exposes a separate conservative scheduled Job draft', () => {
+    const ui = uiHarness();
+    const onOpenBulkRelist = vi.fn();
+    showTradeSchedulerDialog({
+      dom: ui.dom,
+      snapshot: schedulerSnapshot(),
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+      onOpenBulkRelist,
+    });
+    ui.byId('bronze-loop-trade-bulk-relist').click();
+    expect(onOpenBulkRelist).toHaveBeenCalledOnce();
+    ui.byId('bronze-loop-trade-new-bulk-relist').click();
+    expect(ui.byId('bronze-loop-trade-job-card-class')).toBeUndefined();
+    expect(ui.byId('bronze-loop-trade-job-interval').value).toBe('300');
+    ui.byId('bronze-loop-trade-job-interval-60').click();
+    expect(ui.byId('bronze-loop-trade-job-interval').value).toBe('60');
+    ui.byId('bronze-loop-trade-job-interval-600').click();
+    expect(ui.byId('bronze-loop-trade-job-interval').value).toBe('600');
+    expect(ui.byId('bronze-loop-trade-job-relist-delay-min').value).toBe('3');
+    expect(ui.byId('bronze-loop-trade-job-relist-delay-max').value).toBe('8');
   });
 
   it('refreshes a scheduled result in-place and disposes the refresh timer on close', () => {
@@ -305,6 +364,45 @@ describe('Trade Scheduler dialog', () => {
     expect(cancelRefresh).toHaveBeenCalledWith(41);
   });
 
+  it('shows persisted pacing resume time and slice progress on a Job card', () => {
+    const ui = uiHarness();
+    const draft = createTradeJobDraft('buy', { now: 1000 });
+    const job = normalizeTradeJobEditorValue({
+      ...draft,
+      armed: true,
+      schedule: { type: 'interval', intervalSeconds: 30, anchorAt: 1000 },
+      policy: { ...draft.policy, quantity: 4, totalBudget: 4000 },
+    }, { now: 1000 });
+    showTradeSchedulerDialog({
+      dom: ui.dom,
+      snapshot: {
+        ...schedulerSnapshot(job),
+        paused: false,
+        liveExecutionEnabled: true,
+        runtimes: {
+          [job.id]: {
+            jobId: job.id,
+            status: 'waiting-pace',
+            reason: 'trade-action-pacing',
+            nextRunAt: 1000,
+            continuation: {
+              runId: 'buy-sliced', scheduledFor: 1000, startedAt: 1000,
+              resumeAt: 5000, sliceCount: 2, requested: 4, succeeded: 2,
+            },
+          },
+        },
+      },
+      getCircuit: () => ({ circuit: { state: 'closed' } }),
+    });
+
+    expect(ui.byText('waiting-pace')).toBeTruthy();
+    expect(ui.created.some((element) => (
+      element.textContent.includes('Resume')
+      && element.textContent.includes('Slice 2')
+      && element.textContent.includes('2/4 complete')
+    ))).toBe(true);
+  });
+
   it('clears stale action status when an external Scheduler transition is rendered', async () => {
     const ui = uiHarness();
     const job = normalizeTradeJobEditorValue({
@@ -326,8 +424,6 @@ describe('Trade Scheduler dialog', () => {
       cancelRefresh: vi.fn(),
     });
 
-    const confirmation = ui.byId('bronze-loop-trade-guarded-confirmation');
-    confirmation.value = 'RUN ONCE 1';
     await ui.byId('bronze-loop-trade-enable-guarded-schedule').click();
     expect(ui.byId('bronze-loop-trade-scheduler-status').textContent)
       .toBe('Guarded schedule enabled for 1 Job(s)');
@@ -363,7 +459,7 @@ describe('Trade Scheduler dialog', () => {
     expect(name.value).toBe('Unsaved operator input');
   });
 
-  it('exposes persistent circuit state and an explicit reset action', () => {
+  it('exposes persistent circuit state and gates reset behind risk acceptance', () => {
     const ui = uiHarness();
     const onResetCircuit = vi.fn();
     showTradeSchedulerDialog({
@@ -372,8 +468,15 @@ describe('Trade Scheduler dialog', () => {
       getCircuit: () => ({ circuit: { state: 'open', reason: 'auction-operation-blocked' } }),
       onResetCircuit,
     });
-    expect(ui.byId('bronze-loop-trade-circuit-reset').style.display).toBe('');
-    ui.byId('bronze-loop-trade-circuit-reset').click();
+    const reset = ui.byId('bronze-loop-trade-circuit-reset');
+    const risk = ui.byId('bronze-loop-trade-circuit-risk');
+    expect(reset.disabled).toBe(true);
+    reset.click();
+    expect(onResetCircuit).not.toHaveBeenCalled();
+    risk.checked = true;
+    risk.change();
+    expect(reset.disabled).toBe(false);
+    reset.click();
     expect(onResetCircuit).toHaveBeenCalledOnce();
   });
 
@@ -399,6 +502,7 @@ describe('Trade Scheduler dialog', () => {
     const ui = uiHarness();
     showTradeSchedulerDialog({
       dom: ui.dom,
+      now: () => 1000,
       snapshot: {
         ...schedulerSnapshot(),
         metrics: {
@@ -408,25 +512,30 @@ describe('Trade Scheduler dialog', () => {
           outcomes: { requested: 3, succeeded: 2, failed: 1, skipped: 0 },
           buy: { purchases: 1, searches: 3, attempts: 1, spent: 1200 },
           listing: { listed: 1 },
+          bulkRelist: { relisted: 7 },
           reasons: [{ reason: 'trade-circuit-open', count: 1 }],
         },
       },
       getCircuit: () => ({ circuit: { state: 'closed' } }),
-      getRequestBudget: () => ({
-        status: 'available', used: 19, remaining: 11, limit: 30, windowMs: 300000, retryAt: null,
-        runCapacity: { required: 12, ready: false, retryAt: 6000 },
+      getRequestPacing: () => ({
+        status: 'cooldown', reason: 'rate-limit', nextAllowedAt: 6000,
+        lastAction: { action: 'market-search', delaySeconds: 7, jobId: 'buy-1' },
+        cycle: { count: 2, threshold: 10 },
+        cooldown: { active: true, level: 2, retryAt: 6000 },
       }),
     });
     expect(ui.byId('bronze-loop-trade-scheduler-modal').children[0].children[2].textContent)
-      .toContain('Requests: 11/30 available | Base guarded reserve: cooldown');
+      .toContain('Pacing: cooldown');
     ui.byId('bronze-loop-trade-summary-tab').click();
     expect(ui.byText('Summary')).toBeTruthy();
     expect(ui.byText('1,200')).toBeTruthy();
     expect(ui.byText('trade-circuit-open')).toBeTruthy();
-    expect(ui.byText('Request budget')).toBeTruthy();
-    expect(ui.byText('5 min')).toBeTruthy();
-    expect(ui.byText('Cooldown')).toBeTruthy();
-    expect(ui.created.some((element) => element.textContent.startsWith('Base guarded Trade capacity resumes after'))).toBe(true);
+    expect(ui.byText('Request pacing')).toBeTruthy();
+    expect(ui.byText('Re-list All')).toBeTruthy();
+    expect(ui.byText('Relisted')).toBeTruthy();
+    expect(ui.byText('market-search')).toBeTruthy();
+    expect(ui.byText('7 sec')).toBeTruthy();
+    expect(ui.created.some((element) => element.textContent.startsWith('Next Trade action allowed after'))).toBe(true);
     expect(ui.created.some((element) => element.textContent.startsWith('Tracked '))).toBe(true);
   });
 
@@ -538,7 +647,7 @@ describe('Trade Scheduler dialog', () => {
     await ui.created.find((element) => element.textContent === 'Preview').click();
     expect(onPreviewBuyJob).toHaveBeenCalledWith(job);
     expect(ui.created.some((element) => element.textContent.includes('Preview only | 84: 2 player ID(s), max 1,000, quota Run cap'))).toBe(true);
-    expect(ui.created.some((element) => element.textContent.includes('Budget 1,000 | Runtime 15 min | Chunk 2 / reserve up to 14'))).toBe(true);
+    expect(ui.created.some((element) => element.textContent.includes('Budget 1,000 | Runtime 15 min | Chunk 2 | Up to 1 purchase(s) per search'))).toBe(true);
     expect(ui.byId('bronze-loop-trade-scheduler-status').textContent).toContain('Buy 1 is available');
     const buy = ui.byId(`bronze-loop-trade-buy-one-${job.id}`);
     expect(buy).toBeTruthy();
@@ -564,7 +673,7 @@ describe('Trade Scheduler dialog', () => {
     expect(ui.byId('bronze-loop-trade-scheduler-status').textContent).toContain('scheduler-must-be-paused-and-live-disabled');
   });
 
-  it('requires exact confirmation and one eligible armed Job for guarded scheduling', async () => {
+  it('uses direct approval for one eligible armed Job', async () => {
     const ui = uiHarness();
     const eligible = normalizeTradeJobEditorValue({
       ...createTradeJobDraft('listing', { now: 1000 }),
@@ -590,23 +699,18 @@ describe('Trade Scheduler dialog', () => {
       onEnableGuardedScheduling,
       onDisableGuardedScheduling,
     });
-    const confirmation = ui.byId('bronze-loop-trade-guarded-confirmation');
     const enable = ui.byId('bronze-loop-trade-enable-guarded-schedule');
     expect(enable.disabled).toBe(false);
-    confirmation.value = 'RUN ONCE';
+    expect(ui.byId('bronze-loop-trade-guarded-confirmation')).toBeUndefined();
     await enable.click();
-    expect(onEnableGuardedScheduling).not.toHaveBeenCalled();
-    expect(ui.byId('bronze-loop-trade-scheduler-status').textContent).toContain('RUN ONCE 1');
-    confirmation.value = 'RUN ONCE 1';
-    await enable.click();
-    expect(onEnableGuardedScheduling).toHaveBeenCalledWith({ confirmationText: 'RUN ONCE 1', jobId: eligible.id });
+    expect(onEnableGuardedScheduling).toHaveBeenCalledWith({ approved: true, jobId: eligible.id });
     expect(ui.byId('bronze-loop-trade-disable-guarded-schedule')).toBeTruthy();
     ui.byId('bronze-loop-trade-disable-guarded-schedule').click();
     expect(onDisableGuardedScheduling).toHaveBeenCalledOnce();
     expect(snapshot.jobs[0].armed).toBe(false);
   });
 
-  it('requires the separate Transfer reprice confirmation when its live gate is enabled', async () => {
+  it('uses direct approval for Transfer reprice when its live gate is enabled', async () => {
     const ui = uiHarness();
     const draft = createTradeJobDraft('listing', { now: 1000 });
     const eligible = normalizeTradeJobEditorValue({
@@ -628,17 +732,11 @@ describe('Trade Scheduler dialog', () => {
       getCircuit: () => ({ circuit: { state: 'closed' } }),
       onEnableGuardedScheduling,
     });
-    const confirmation = ui.byId('bronze-loop-trade-guarded-confirmation');
     const enable = ui.byId('bronze-loop-trade-enable-guarded-schedule');
     expect(enable.disabled).toBe(false);
-    expect(confirmation.placeholder).toBe('RUN REPRICE ONCE 1');
-    confirmation.value = 'RUN ONCE 1';
-    await enable.click();
-    expect(onEnableGuardedScheduling).not.toHaveBeenCalled();
-    confirmation.value = 'RUN REPRICE ONCE 1';
     await enable.click();
     expect(onEnableGuardedScheduling).toHaveBeenCalledWith({
-      confirmationText: 'RUN REPRICE ONCE 1',
+      approved: true,
       jobId: eligible.id,
     });
   });
@@ -646,7 +744,10 @@ describe('Trade Scheduler dialog', () => {
   it('disables guarded scheduling when no eligible armed Job exists', () => {
     const ui = uiHarness();
     showTradeSchedulerDialog({ dom: ui.dom, snapshot: schedulerSnapshot(), getCircuit: () => ({ circuit: { state: 'closed' } }) });
-    expect(ui.byId('bronze-loop-trade-enable-guarded-schedule').disabled).toBe(true);
+    const enable = ui.byId('bronze-loop-trade-enable-guarded-schedule');
+    expect(enable.disabled).toBe(true);
+    expect(enable.title).toBe('Create or arm a Job before enabling scheduling');
+    expect(ui.byText('Scheduler idle: no armed Job; completed Once Jobs are automatically disarmed')).toBeTruthy();
   });
 
   it('shows the separate scheduled Buy gate as disabled during the offline TS5 stage', () => {
@@ -670,7 +771,7 @@ describe('Trade Scheduler dialog', () => {
     expect(enable.title).toBe('scheduled-buy-validation-gate-disabled');
   });
 
-  it('requires the effective reserve in the scheduled Buy live confirmation', async () => {
+  it('shows the effective reserve in the scheduled Buy approval summary', async () => {
     const ui = uiHarness();
     const scheduledBuy = normalizeTradeJobEditorValue({
       ...createTradeJobDraft('buy', { now: 1000 }),
@@ -693,22 +794,17 @@ describe('Trade Scheduler dialog', () => {
       onEnableGuardedScheduling,
     });
 
-    const confirmation = ui.byId('bronze-loop-trade-guarded-confirmation');
     const enable = ui.byId('bronze-loop-trade-enable-guarded-schedule');
     expect(enable.disabled).toBe(false);
-    expect(confirmation.placeholder).toBe('RUN BUY ONCE 1 RESERVE 150000');
-    confirmation.value = 'RUN ONCE 1';
-    await enable.click();
-    expect(onEnableGuardedScheduling).not.toHaveBeenCalled();
-    confirmation.value = 'RUN BUY ONCE 1 RESERVE 150000';
+    expect(ui.created.some((element) => element.textContent.includes('reserve 150,000'))).toBe(true);
     await enable.click();
     expect(onEnableGuardedScheduling).toHaveBeenCalledWith({
-      confirmationText: 'RUN BUY ONCE 1 RESERVE 150000',
+      approved: true,
       jobId: scheduledBuy.id,
     });
   });
 
-  it('passes exact two-item confirmations through the guarded Scheduler UI', async () => {
+  it('passes direct two-item approvals through the guarded Scheduler UI', async () => {
     const listingDraft = createTradeJobDraft('listing', { now: 1000 });
     const buyDraft = createTradeJobDraft('buy', { now: 1000 });
     const cases = [
@@ -718,7 +814,6 @@ describe('Trade Scheduler dialog', () => {
           id: 'club-two', armed: true, schedule: { type: 'once', runAt: 120000 },
           policy: { ...listingDraft.policy, maxListings: 2 },
         }, { now: 1000 }),
-        requiredText: 'RUN ONCE 2',
       },
       {
         job: normalizeTradeJobEditorValue({
@@ -728,7 +823,6 @@ describe('Trade Scheduler dialog', () => {
             ...listingDraft.policy, sources: ['transfer'], expiredPolicy: 'reprice', maxListings: 2,
           },
         }, { now: 1000 }),
-        requiredText: 'RUN REPRICE ONCE 2',
       },
       {
         job: normalizeTradeJobEditorValue({
@@ -738,7 +832,6 @@ describe('Trade Scheduler dialog', () => {
             ...buyDraft.policy, ratingMax: 85, quantity: 2, totalBudget: 2000,
           },
         }, { now: 1000 }),
-        requiredText: 'RUN BUY ONCE 2 RESERVE 100000',
       },
     ];
 
@@ -756,16 +849,11 @@ describe('Trade Scheduler dialog', () => {
         getCircuit: () => ({ circuit: { state: 'closed' } }),
         onEnableGuardedScheduling,
       });
-      const confirmation = ui.byId('bronze-loop-trade-guarded-confirmation');
       const enable = ui.byId('bronze-loop-trade-enable-guarded-schedule');
-      expect(confirmation.placeholder).toBe(entry.requiredText);
-      confirmation.value = entry.requiredText.replace(' 2', ' 1');
-      await enable.click();
-      expect(onEnableGuardedScheduling).not.toHaveBeenCalled();
-      confirmation.value = entry.requiredText;
+      expect(ui.created.some((element) => element.textContent.includes('2 item(s)'))).toBe(true);
       await enable.click();
       expect(onEnableGuardedScheduling).toHaveBeenCalledWith({
-        confirmationText: entry.requiredText,
+        approved: true,
         jobId: entry.job.id,
       });
     }

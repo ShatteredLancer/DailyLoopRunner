@@ -32,28 +32,40 @@ export function createListingPreparation(options = {}) {
         maxListings: requestedMax,
       },
     };
-    const adapter = request.tradeAdapter || options.getTradeAdapter({ requestBudget: request.requestBudget });
+    const adapter = request.tradeAdapter || options.getTradeAdapter({ pacingContext: request.pacingContext });
     const requiresTransferPreflight = previewInput.policy.sources
       ?.some((source) => source === 'club' || source === 'transfer') === true;
     const transferPreflight = requiresTransferPreflight
-      ? await adapter.refreshTransferItems()
+      ? await adapter.refreshTransferItems({ wait: request.deferWhenWaiting !== true })
       : null;
     const transferReady = !requiresTransferPreflight || transferPreflight?.status === 'completed';
     const preview = await options.listingPreview.preview(previewInput, request);
     const blockers = [];
+    let deferredAt = null;
     const priceLimitChecks = [];
     const entries = [];
     const adjustedNames = [];
     if (preview.capabilities?.canTrade !== true) blockers.push({ reason: 'trade-capability-unavailable' });
     if (!transferReady) blockers.push({
-      reason: `listing-transfer-preflight-${transferPreflight?.status || 'unavailable'}`,
+      reason: transferPreflight?.error?.kind === 'pacing-deferred'
+        ? 'trade-action-pacing'
+        : `listing-transfer-preflight-${transferPreflight?.status || 'unavailable'}`,
       detail: transferPreflight?.error?.kind || null,
     });
+    if (transferPreflight?.error?.kind === 'pacing-deferred') deferredAt = transferPreflight.error.retryAt ?? null;
     if (preview.scan?.error) blockers.push({ reason: 'candidate-scan-failed', detail: preview.scan.error.message });
     if (!preview.plan?.entries?.length) blockers.push({ reason: 'no-eligible-listing-candidates' });
 
     for (const entry of transferReady ? (preview.plan?.entries || []) : []) {
-      const result = await adapter.inspectPriceLimits(entry.item, { refresh: true });
+      const result = await adapter.inspectPriceLimits(entry.item, {
+        refresh: true,
+        wait: request.deferWhenWaiting !== true,
+      });
+      if (result.error?.kind === 'pacing-deferred') {
+        deferredAt = result.error.retryAt ?? deferredAt;
+        blockers.push({ item: { ...entry.item }, reason: 'trade-action-pacing' });
+        break;
+      }
       const applied = applyListingPriceLimits(entry, result);
       priceLimitChecks.push({
         item: { ...entry.item },
@@ -101,6 +113,7 @@ export function createListingPreparation(options = {}) {
       mode: 'prepared',
       preparedAt,
       ready,
+      deferredAt,
       blockers,
       transferPreflight,
       priceLimitChecks,

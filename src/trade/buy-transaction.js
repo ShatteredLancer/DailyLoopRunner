@@ -12,12 +12,6 @@ function finiteNumber(value, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function randomDelayMs(range, random) {
-  const minimum = Math.max(0, finiteNumber(range?.[0]));
-  const maximum = Math.max(minimum, finiteNumber(range?.[1], minimum));
-  return Math.round((minimum + (maximum - minimum) * random()) * 1000);
-}
-
 function safeItem(candidate = {}) {
   return {
     id: Number(candidate.item?.id || 0),
@@ -33,7 +27,6 @@ export function createBuyTransaction(options = {}) {
   if (typeof catalogProvider?.load !== 'function') throw new TypeError('playerCatalogProvider.load is required');
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const sleep = typeof options.sleep === 'function' ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const random = typeof options.random === 'function' ? options.random : Math.random;
   const createRunId = typeof options.createRunId === 'function'
     ? options.createRunId
     : () => `buy-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -59,13 +52,22 @@ export function createBuyTransaction(options = {}) {
     let buyAttempts = 0;
     let status = 'completed';
     let reason = null;
+    let resumeAt = null;
     let cursor = null;
+    let activeSearch = null;
+    let activeCandidates = [];
+    let mutationsFromSearch = 0;
     const purchasedByRating = Object.fromEntries(Object.entries(input.purchasedByRating || {})
       .map(([rating, count]) => [String(Number(rating)), Math.max(0, Math.floor(Number(count) || 0))]));
     const expectedDestination = normalizeExpectedBuyDestination(input.expectedDestination || 'auto');
     const minimumRetainedCoins = Math.max(0, Math.floor(finiteNumber(input.minimumRetainedCoins)));
     const checkpoint = (phase, detail = {}) => {
       try { options.onCheckpoint?.({ phase, at: Number(now()), ...detail }); } catch { }
+    };
+    const discardSearchResponse = () => {
+      activeSearch = null;
+      activeCandidates = [];
+      mutationsFromSearch = 0;
     };
 
     const beforeCapabilities = adapter.inspectCapabilities();
@@ -123,64 +125,94 @@ export function createBuyTransaction(options = {}) {
         stop('blocked', 'trade-circuit-open');
         break;
       }
-      const excludedRatings = lanePlan.lanes
-        .filter((lane) => lane.quantityLimit !== null
-          && Number(purchasedByRating[String(lane.rating)] || 0) >= Number(lane.quantityLimit))
-        .map((lane) => lane.rating);
-      const next = nextBuySearch(lanePlan, cursor, { excludedRatings });
-      cursor = next.cursor;
-      const search = next.search;
-      if (!search) {
-        stop('stopped', excludedRatings.length === lanePlan.lanes.length ? 'rating-quantity-limit' : 'buy-search-plan-unavailable');
-        break;
+      const activeLane = activeSearch
+        ? lanePlan.lanes.find((lane) => Number(lane.rating) === Number(activeSearch.rating))
+        : null;
+      if (activeLane && activeLane.quantityLimit !== null
+        && Number(purchasedByRating[String(activeLane.rating)] || 0) >= Number(activeLane.quantityLimit)) {
+        discardSearchResponse();
       }
-      searches += 1;
-      checkpoint('market-search-started', { search });
-      const searchResult = await adapter.searchMarket({ ...search, page: 1 });
-      checkpoint('market-search-finished', {
-        search,
-        status: searchResult.status,
-        response: searchResult.response,
-      });
-      if (searchResult.status !== 'completed') {
-        const classification = classifyTradeError(searchResult.error || searchResult.response || {});
-        if (classification.kind !== 'request-budget-exhausted') {
-          options.circuitBreaker?.recordFailure?.(searchResult.error || searchResult.response || {}, {
-            action: 'search', endpoint: '/transfermarket', jobId: job.id, runId,
-            classification, response: searchResult.response, capabilities: adapter.inspectCapabilities(),
-          });
+      if (!activeSearch) {
+        const excludedRatings = lanePlan.lanes
+          .filter((lane) => lane.quantityLimit !== null
+            && Number(purchasedByRating[String(lane.rating)] || 0) >= Number(lane.quantityLimit))
+          .map((lane) => lane.rating);
+        const cursorBeforeSearch = cursor ? JSON.parse(JSON.stringify(cursor)) : null;
+        const next = nextBuySearch(lanePlan, cursor, { excludedRatings });
+        cursor = next.cursor;
+        const search = next.search;
+        if (!search) {
+          stop('stopped', excludedRatings.length === lanePlan.lanes.length ? 'rating-quantity-limit' : 'buy-search-plan-unavailable');
+          break;
         }
-        stop(
-          classification.kind === 'request-budget-exhausted' || classification.opensCircuit
-            ? 'blocked'
-            : classification.ambiguous ? 'ambiguous' : 'failed',
-          `trade-${classification.kind}`,
+        searches += 1;
+        checkpoint('market-search-started', { search });
+        const searchResult = await adapter.searchMarket(
+          { ...search, page: 1 },
+          { wait: input.deferWhenWaiting !== true },
         );
-        break;
+        checkpoint('market-search-finished', {
+          search,
+          status: searchResult.status,
+          response: searchResult.response,
+        });
+        if (searchResult.status !== 'completed') {
+          if (searchResult.error?.kind === 'pacing-deferred') {
+            cursor = cursorBeforeSearch;
+            searches = Math.max(0, searches - 1);
+            stop('deferred', 'trade-action-pacing');
+            resumeAt = searchResult.error.retryAt ?? null;
+            checkpoint('buy-slice-deferred', {
+              search, reason, retryAt: resumeAt, mutationBoundaryCrossed: false,
+            });
+            break;
+          }
+          const classification = classifyTradeError(searchResult.error || searchResult.response || {});
+          if (classification.kind !== 'rate-limit') {
+            options.circuitBreaker?.recordFailure?.(searchResult.error || searchResult.response || {}, {
+              action: 'search', endpoint: '/transfermarket', jobId: job.id, runId,
+              classification, response: searchResult.response, capabilities: adapter.inspectCapabilities(),
+            });
+          }
+          stop(
+            classification.kind === 'rate-limit' || classification.opensCircuit
+              ? 'blocked'
+              : classification.ambiguous ? 'ambiguous' : 'failed',
+            classification.kind === 'rate-limit' ? 'trade-rate-limit' : `trade-${classification.kind}`,
+          );
+          break;
+        }
+        activeSearch = search;
+        activeCandidates = [...(searchResult.candidates || [])];
+        mutationsFromSearch = 0;
       }
+      const search = activeSearch;
       const capabilities = adapter.inspectCapabilities();
       const selected = selectBuyCandidate({
         job,
         search,
-        candidates: searchResult.candidates,
+        candidates: activeCandidates,
         limits: { remainingBudget, coins: Number(capabilities.coins) - minimumRetainedCoins },
       });
       if (!selected.selected) {
         emptySearches += 1;
         receipts.push({
           index: itemIndexOffset + receipts.length + 1, status: 'empty-search', search: { ...search },
-          candidates: searchResult.candidates?.length || 0, rejectionCounts: selected.rejectionCounts,
+          candidates: activeCandidates.length, rejectionCounts: selected.rejectionCounts,
         });
+        discardSearchResponse();
         if (emptySearches >= Number(job.policy.maxConsecutiveEmptySearches)) {
           stop('stopped', 'empty-search-limit');
           break;
         }
-        await sleep(randomDelayMs(job.policy.searchDelaySeconds, random));
         continue;
       }
 
       emptySearches = 0;
       const candidate = selected.selected;
+      activeCandidates = activeCandidates.filter((entry) => (
+        Number(entry.auction?.tradeId) !== Number(candidate.auction?.tradeId)
+      ));
       const price = Number(candidate.auction.buyNowPrice);
       checkpoint('candidate-selected', {
         item: candidate.item,
@@ -230,10 +262,61 @@ export function createBuyTransaction(options = {}) {
         break;
       }
 
+      const requestPermit = await adapter.acquireRequestPermit('buy', {
+        wait: input.deferWhenWaiting !== true,
+        onWait: (wait) => checkpoint('buy-request-permit-waiting', {
+          item: safeItem(candidate),
+          tradeId: Number(candidate.auction.tradeId),
+          price,
+          reason: wait.reason,
+          retryAt: wait.retryAt,
+          mutationBoundaryCrossed: false,
+        }),
+      });
+      if (requestPermit?.status !== 'acquired' || !requestPermit.permit) {
+        if (requestPermit?.error?.kind === 'pacing-deferred') {
+          stop('deferred', 'trade-action-pacing');
+          resumeAt = requestPermit.error.retryAt ?? null;
+          checkpoint('buy-slice-deferred', {
+            item: safeItem(candidate), tradeId: Number(candidate.auction.tradeId), price,
+            reason, retryAt: resumeAt, mutationBoundaryCrossed: false,
+          });
+          break;
+        }
+        checkpoint('buy-request-permit-blocked', {
+          item: safeItem(candidate),
+          tradeId: Number(candidate.auction.tradeId),
+          price,
+          status: requestPermit?.status || 'blocked',
+          reason: requestPermit?.error?.kind || 'trade-rate-limit',
+          retryAt: requestPermit?.error?.retryAt ?? null,
+          mutationBoundaryCrossed: false,
+        });
+        stop(
+          requestPermit?.error?.kind === 'stopped-by-user' ? 'stopped' : 'blocked',
+          requestPermit?.error?.kind === 'stopped-by-user' ? 'stopped-by-user' : 'trade-rate-limit',
+        );
+        break;
+      }
+      if (input.shouldStop?.() === true) {
+        stop('stopped', 'stopped-by-user');
+        break;
+      }
+      const permitCircuit = options.circuitBreaker?.availability?.();
+      if (permitCircuit && permitCircuit.allowed !== true) {
+        stop('blocked', 'trade-circuit-open');
+        break;
+      }
+      if (input.beforeBuy && await input.beforeBuy() !== true) {
+        stop('blocked', 'buy-execution-lease-lost');
+        break;
+      }
+
       const item = safeItem(candidate);
       const purchaseRef = { ...item, tradeId: Number(candidate.auction.tradeId), price };
       const coinsBeforePurchase = Number(liveCapabilities.coins);
       buyAttempts += 1;
+      mutationsFromSearch += 1;
       const itemIndex = itemIndexOffset + buyAttempts;
       checkpoint('buy-request-started', {
         itemIndex,
@@ -244,7 +327,7 @@ export function createBuyTransaction(options = {}) {
         search,
         mutationBoundaryCrossed: true,
       });
-      const bought = await adapter.buyNowItem(purchaseRef, price);
+      const bought = await adapter.buyNowItem(purchaseRef, price, { requestPermit: requestPermit.permit });
       checkpoint('buy-response-received', {
         itemIndex,
         item,
@@ -286,8 +369,7 @@ export function createBuyTransaction(options = {}) {
       }
       if (refresh && refresh.status !== 'completed') {
         const classification = classifyTradeError(refresh.error || refresh.response || { kind: refresh.status });
-        const requestBudgetExhausted = classification.kind === 'request-budget-exhausted';
-        if (classification.kind !== 'request-budget-exhausted') {
+        if (classification.kind !== 'rate-limit') {
           options.circuitBreaker?.recordFailure?.(refresh.error || refresh.response || {}, {
             action: 'buy-reconciliation', endpoint: '/purchased-state', jobId: job.id, runId,
             classification, response: refresh.response, capabilities: afterPurchaseCapabilities,
@@ -296,8 +378,8 @@ export function createBuyTransaction(options = {}) {
         failed += 1;
         stop(
           classification.opensCircuit ? 'blocked' : 'ambiguous',
-          requestBudgetExhausted
-            ? 'purchase-accepted-request-budget-exhausted-before-verification'
+          classification.kind === 'rate-limit'
+            ? 'purchase-accepted-rate-limit-before-verification'
             : classification.opensCircuit ? `trade-${classification.kind}` : 'purchase-refresh-not-reconciled',
         );
         receipts.push({
@@ -317,7 +399,7 @@ export function createBuyTransaction(options = {}) {
       if (purchase?.status !== 'loaded') {
         const classification = classifyTradeError(bought.error || bought.response || { kind: bought.status });
         if (bought.status !== 'accepted') {
-          if (classification.kind !== 'request-budget-exhausted') {
+          if (classification.kind !== 'rate-limit') {
             options.circuitBreaker?.recordFailure?.(bought.error || bought.response || {}, {
               action: 'buy', endpoint: '/auctionhouse', jobId: job.id, runId,
               classification, response: bought.response, capabilities: adapter.inspectCapabilities(),
@@ -334,17 +416,21 @@ export function createBuyTransaction(options = {}) {
             stop('stopped', 'buy-attempt-limit');
             break;
           }
-          await sleep(randomDelayMs(job.policy.searchDelaySeconds, random));
+          if (mutationsFromSearch >= Number(job.policy.maxPurchasesPerSearch) || !activeCandidates.length) {
+            discardSearchResponse();
+          }
           continue;
         }
         failed += 1;
         const ambiguous = bought.status === 'accepted' || bought.status === 'ambiguous' || classification.ambiguous;
         stop(
-          classification.kind === 'request-budget-exhausted' || classification.opensCircuit
+          classification.opensCircuit
             ? 'blocked'
             : ambiguous ? 'ambiguous' : 'failed',
-          classification.kind === 'request-budget-exhausted' || classification.opensCircuit
-            ? `trade-${classification.kind}`
+          classification.kind === 'rate-limit'
+            ? 'trade-rate-limit'
+            : classification.opensCircuit
+              ? `trade-${classification.kind}`
             : 'purchase-not-reconciled',
         );
         receipts.push({
@@ -375,11 +461,50 @@ export function createBuyTransaction(options = {}) {
       }
 
       const purchasedRef = { ...purchase.candidate.item, tradeId: purchaseRef.tradeId, price };
+      const routePermit = await adapter.acquireRequestPermit('purchase-route', {
+        onWait: (wait) => checkpoint('purchase-route-permit-waiting', {
+          itemIndex, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+          reason: wait.reason, retryAt: wait.retryAt, mutationBoundaryCrossed: true,
+        }),
+      });
+      if (routePermit?.status !== 'acquired' || !routePermit.permit) {
+        failed += 1;
+        stop(
+          routePermit?.error?.kind === 'stopped-by-user' ? 'stopped' : 'ambiguous',
+          routePermit?.error?.kind === 'stopped-by-user'
+            ? 'stopped-by-user'
+            : 'purchase-accepted-rate-limit-before-routing',
+        );
+        receipts.push({
+          index: itemIndex, status, reason, item: purchasedRef,
+          tradeId: purchaseRef.tradeId, price, destination,
+          retryAt: routePermit?.error?.retryAt ?? null,
+        });
+        checkpoint('item-finished', {
+          itemIndex, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
+          status, reason, mutationBoundaryCrossed: true,
+        });
+        break;
+      }
+      if (input.shouldStop?.() === true) {
+        failed += 1;
+        stop('stopped', 'stopped-by-user');
+        break;
+      }
+      if (input.beforeBuy && await input.beforeBuy() !== true) {
+        failed += 1;
+        stop('blocked', 'buy-execution-lease-lost');
+        break;
+      }
       checkpoint('purchase-route-started', {
         itemIndex, item: purchasedRef, tradeId: purchaseRef.tradeId, price, destination,
         mutationBoundaryCrossed: true,
       });
-      const routed = await adapter.routePurchasedItem(purchasedRef, destination);
+      const routed = await adapter.routePurchasedItem(
+        purchasedRef,
+        destination,
+        { requestPermit: routePermit.permit },
+      );
       checkpoint('purchase-route-finished', {
         itemIndex,
         item: routed.item || purchasedRef,
@@ -394,8 +519,8 @@ export function createBuyTransaction(options = {}) {
         failed += 1;
         stop(
           'blocked',
-          routed.error?.kind === 'request-budget-exhausted'
-            ? 'trade-request-budget-exhausted'
+          routed.error?.kind === 'rate-limit'
+            ? 'purchase-route-rate-limited'
             : routed.status === 'destination-full' ? 'transfer-list-full' : `purchase-route-${routed.status}`,
         );
         receipts.push({
@@ -438,8 +563,8 @@ export function createBuyTransaction(options = {}) {
         failed += 1;
         stop(
           'ambiguous',
-          routeRefresh.error?.kind === 'request-budget-exhausted'
-            ? 'purchase-routed-request-budget-exhausted-before-verification'
+          routeRefresh.error?.kind === 'rate-limit'
+            ? 'purchase-routed-rate-limit-before-verification'
             : 'purchase-routed-but-not-verified',
         );
         receipts.push({
@@ -481,8 +606,8 @@ export function createBuyTransaction(options = {}) {
         status: 'purchased',
         mutationBoundaryCrossed: true,
       });
-      if (succeeded < requested && input.shouldStop?.() !== true) {
-        await sleep(randomDelayMs(job.policy.searchDelaySeconds, random));
+      if (mutationsFromSearch >= Number(job.policy.maxPurchasesPerSearch) || !activeCandidates.length) {
+        discardSearchResponse();
       }
     }
 
@@ -491,9 +616,9 @@ export function createBuyTransaction(options = {}) {
     return createTradeRunReceipt({
       runId, jobId: job.id, jobType: job.type,
       scheduledFor: input.scheduledFor ?? startedAt,
-      startedAt, finishedAt, status, reason,
+      startedAt, finishedAt, resumeAt, status, reason,
       requested, succeeded, failed,
-      skipped: Math.max(0, requested - succeeded - failed),
+      skipped: status === 'deferred' ? 0 : Math.max(0, requested - succeeded - failed),
       coinsBefore: beforeCapabilities.coins,
       coinsAfter: afterCapabilities.coins,
       receipts: [{

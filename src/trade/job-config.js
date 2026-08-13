@@ -2,7 +2,8 @@ import { isPlainObject } from '../domain/objects.js';
 import { normalizeTradeJob } from './contracts.js';
 
 export const TRADE_JOB_CONFIG_KIND = 'daily-loop-runner-trade-jobs';
-export const TRADE_JOB_CONFIG_SCHEMA_VERSION = 1;
+export const TRADE_JOB_CONFIG_SCHEMA_VERSION = 3;
+export const TRADE_JOB_CONFIG_LEGACY_SCHEMA_VERSION = 1;
 export const TRADE_JOB_CONFIG_MAX_JOBS = 100;
 export const TRADE_JOB_CONFIG_MAX_TEXT_LENGTH = 1_000_000;
 
@@ -75,8 +76,9 @@ export function parseTradeJobConfig(input, options = {}) {
   assertPlainObject(value, 'Trade Job configuration');
   assertOnlyFields(value, CONFIG_FIELDS, 'Trade Job configuration');
   if (value.kind !== TRADE_JOB_CONFIG_KIND) throw new Error(`Trade Job configuration kind must be ${TRADE_JOB_CONFIG_KIND}`);
-  if (Number(value.schemaVersion) !== TRADE_JOB_CONFIG_SCHEMA_VERSION) {
-    throw new Error(`Trade Job configuration schemaVersion must be ${TRADE_JOB_CONFIG_SCHEMA_VERSION}`);
+  const schemaVersion = Number(value.schemaVersion);
+  if (![TRADE_JOB_CONFIG_LEGACY_SCHEMA_VERSION, 2, TRADE_JOB_CONFIG_SCHEMA_VERSION].includes(schemaVersion)) {
+    throw new Error(`Trade Job configuration schemaVersion must be ${TRADE_JOB_CONFIG_LEGACY_SCHEMA_VERSION}, 2, or ${TRADE_JOB_CONFIG_SCHEMA_VERSION}`);
   }
   if (!Array.isArray(value.jobs)) throw new Error('Trade Job configuration.jobs must be an array');
   if (value.jobs.length > TRADE_JOB_CONFIG_MAX_JOBS) {

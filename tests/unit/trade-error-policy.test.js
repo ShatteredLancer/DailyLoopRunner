@@ -22,18 +22,6 @@ describe('Trade error policy', () => {
     expect(classifyTradeError(new Error('Destination full'))).toMatchObject({ kind: 'destination-full', ambiguous: false });
   });
 
-  it('classifies local request-budget exhaustion without opening the EA circuit', () => {
-    expect(classifyTradeError({ kind: 'request-budget-exhausted' })).toEqual({
-      kind: 'request-budget-exhausted',
-      code: null,
-      action: 'wait-until-budget-reset',
-      retryable: false,
-      opensCircuit: false,
-      disarm: false,
-      ambiguous: false,
-    });
-  });
-
   it('keeps an EA 427 circuit open until an explicit reset', () => {
     const open = reduceTradeCircuit(createTradeCircuitState(), {
       type: 'failure',
@@ -50,15 +38,14 @@ describe('Trade error policy', () => {
     expect(reduceTradeCircuit(open, { type: 'reset', at: 1000000 })).toEqual(createTradeCircuitState());
   });
 
-  it('opens immediately for a hard stop and permits one probe after cooldown', () => {
-    const open = reduceTradeCircuit(createTradeCircuitState(), {
+  it('leaves 429 cooldown ownership to Request Pacing instead of opening Circuit', () => {
+    const state = reduceTradeCircuit(createTradeCircuitState(), {
       type: 'failure',
       at: 1000,
       classification: classifyTradeError({ status: 429 }),
     }, { cooldownMs: 5000 });
-    expect(open).toMatchObject({ state: 'open', retryAt: 6000, reason: 'rate-limit' });
-    expect(tradeCircuitAvailability(open, 5999)).toMatchObject({ allowed: false, probe: false });
-    expect(tradeCircuitAvailability(open, 6000)).toMatchObject({ allowed: true, probe: true, state: { state: 'half-open' } });
+    expect(state).toMatchObject({ state: 'closed', failureTimes: [], persistent: false, reason: null });
+    expect(tradeCircuitAvailability(state, 5999)).toMatchObject({ allowed: true, probe: false });
   });
 
   it('opens at the rolling failure threshold and closes after a successful probe', () => {

@@ -238,11 +238,6 @@ export function showTradeListingDialog(options = {}) {
   status.setAttribute?.('role', 'status');
   status.setAttribute?.('aria-live', 'polite');
   applyStyles(status, { minHeight: '18px', color: '#9fb2c9', fontSize: '11px', marginTop: '12px' });
-  const confirmation = control(dom, 'text', '', mode, { id: 'bronze-loop-trade-confirmation' });
-  confirmation.autocomplete = 'off';
-  confirmation.placeholder = 'Confirmation';
-  confirmation.style.display = 'none';
-
   const actions = dom.create('div');
   applyStyles(actions, { display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap', marginTop: '12px' });
   const previewButton = button(dom, 'Preview', { mode, id: 'bronze-loop-trade-preview' });
@@ -253,7 +248,7 @@ export function showTradeListingDialog(options = {}) {
   const closeButton = button(dom, 'Close', { mode, id: 'bronze-loop-trade-close' });
   executeButton.style.display = 'none';
   stopButton.style.display = 'none';
-  actions.append(previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton);
+  actions.append(previewButton, prepareButton, executeButton, stopButton, diagnosticsButton, closeButton);
 
   function latestArtifact() {
     return receipt || preparedResult || previewResult || lastError;
@@ -277,10 +272,8 @@ export function showTradeListingDialog(options = {}) {
     prepareButton.title = sourceAction === null ? 'Mixed sources and skipped expired items are Preview-only' : '';
     closeButton.disabled = running;
     diagnosticsButton.disabled = !latestArtifact() || busy || running;
-    const requiredText = preparedResult?.confirmation?.requiredText || '';
-    confirmation.style.display = preparedResult?.ready && !receipt ? '' : 'none';
     executeButton.style.display = preparedResult?.ready && !receipt ? '' : 'none';
-    executeButton.disabled = busy || running || !requiredText || confirmation.value !== requiredText;
+    executeButton.disabled = busy || running || !preparedResult?.confirmation?.token;
     stopButton.style.display = running ? '' : 'none';
     stopButton.disabled = !running;
     markup.disabled = busy || running || !marketEnabled.checked;
@@ -293,7 +286,6 @@ export function showTradeListingDialog(options = {}) {
     if (preparedResult) options.onCancelPrepared?.();
     preparedResult = null;
     receipt = null;
-    confirmation.value = '';
   }
 
   function invalidate() {
@@ -521,14 +513,12 @@ export function showTradeListingDialog(options = {}) {
       preparedResult = await options.onPrepare?.(job, { platform: draft.platform, provider: draft.provider });
       renderPlan(preparedResult, sourceAction === 'reprice' ? 'Prepared reprice' : 'Prepared listing');
     }, () => preparedResult?.ready
-      ? `Prepared. Enter ${preparedResult.confirmation.requiredText}`
+      ? `Prepared. Review ${preparedResult.plan.entries.length} item(s), then approve the action`
       : `Preparation blocked (${preparedResult?.blockers?.length || 0})`);
   });
 
-  confirmation.addEventListener('input', updateActionState);
   executeButton.addEventListener('click', async () => {
-    const requiredText = preparedResult?.confirmation?.requiredText || '';
-    if (!preparedResult?.ready || confirmation.value !== requiredText) return;
+    if (!preparedResult?.ready || !preparedResult?.confirmation?.token) return;
     busy = true;
     running = true;
     lastError = null;
@@ -540,7 +530,7 @@ export function showTradeListingDialog(options = {}) {
     try {
       receipt = await options.onExecute?.({
         confirmationToken: preparedResult.confirmation.token,
-        confirmationText: confirmation.value,
+        approved: true,
       });
       recapPage = 1;
       renderRecap();
@@ -601,7 +591,7 @@ export function showTradeListingDialog(options = {}) {
     dialog,
     title,
     actions,
-    controls: [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge, quoteFallback, previewButton, prepareButton, confirmation, executeButton, stopButton, diagnosticsButton, closeButton],
+    controls: [source, cardClass, provider, duration, startPolicy, expiredPolicy, marketEnabled, markup, quoteAge, quoteFallback, previewButton, prepareButton, executeButton, stopButton, diagnosticsButton, closeButton],
   });
   dialog.append(heading, workspace, status, actions);
   overlay.appendChild(dialog);

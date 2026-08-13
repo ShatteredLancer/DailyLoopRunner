@@ -1,10 +1,8 @@
-import {
-  GUARDED_SCHEDULE_CONFIRMATION,
-  inspectGuardedScheduledListingJob,
-} from './guarded-scheduled-listing.js';
+import { inspectGuardedScheduledListingJob } from './guarded-scheduled-listing.js';
 import {
   inspectScheduledBuyValidationJob,
 } from './scheduled-buy-validation.js';
+import { inspectGuardedScheduledBulkRelistJob } from './guarded-scheduled-bulk-relist.js';
 import { TRADE_SCHEDULE_AUTHORIZATION_JOB_LIMIT, tradeScheduleAuthorizationRuns } from './schedule-authorization.js';
 
 function inspectGuardedJob(job, snapshot, options) {
@@ -17,21 +15,24 @@ function inspectGuardedJob(job, snapshot, options) {
       ready: reason === null,
       reason,
       job,
-      requiredText: reason === null
-        ? (inspected.requiredText || GUARDED_SCHEDULE_CONFIRMATION)
-        : null,
+      approval: reason === null ? inspected.approval : null,
     };
   }
   if (job.type === 'buy') {
     if (options.scheduledBuyEnabled !== true) {
-      return { ready: false, reason: 'scheduled-buy-validation-gate-disabled', job, requiredText: null };
+      return { ready: false, reason: 'scheduled-buy-validation-gate-disabled', job, approval: null };
     }
     return inspectScheduledBuyValidationJob(job, {
       minimumRetainedCoins: options.minimumRetainedCoins ?? snapshot.safety?.minimumRetainedCoins,
       now: options.now,
     });
   }
-  return { ready: false, reason: 'validation-gate-job-type-unsupported', job, requiredText: null };
+  if (job.type === 'bulk-relist') {
+    return inspectGuardedScheduledBulkRelistJob(job, {
+      validationGateEnabled: options.scheduledBulkRelistEnabled === true,
+    });
+  }
+  return { ready: false, reason: 'validation-gate-job-type-unsupported', job, approval: null };
 }
 
 export function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
@@ -48,7 +49,7 @@ export function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
       jobs: [],
       gate: null,
       gates: [],
-      requiredText: null,
+      approval: null,
     };
   }
 
@@ -63,7 +64,7 @@ export function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
         jobs: [],
         gate,
         gates,
-        requiredText: null,
+        approval: null,
       };
     }
   }
@@ -76,13 +77,10 @@ export function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
       jobs: [],
       gate: blocked,
       gates,
-      requiredText: null,
+      approval: null,
     };
   }
   const totalRuns = armed.reduce((total, job) => total + tradeScheduleAuthorizationRuns(job), 0);
-  const requiredText = armed.length === 1
-    ? gates[0].requiredText
-    : `ENABLE ${armed.length} TRADE JOBS FOR ${totalRuns} RUNS`;
   return {
     ready: true,
     reason: null,
@@ -91,7 +89,13 @@ export function selectGuardedScheduledTradeJob(snapshot = {}, options = {}) {
     gate: armed.length === 1 ? gates[0] : null,
     gates,
     totalRuns,
-    requiredText,
+    approval: {
+      risk: 'attention',
+      action: 'enable-trade-jobs',
+      jobCount: armed.length,
+      jobIds: armed.map((job) => String(job.id)),
+      totalRuns,
+    },
   };
 }
 
@@ -106,6 +110,6 @@ export function summarizeGuardedScheduledTradeSelection(snapshot = {}, options =
     jobIds: (selected.jobs || []).map((entry) => String(entry.id)),
     jobTypes: (selected.jobs || []).map((entry) => String(entry.type)),
     totalRuns: Number(selected.totalRuns || 0),
-    requiredText: selected.requiredText || null,
+    approval: selected.approval || null,
   };
 }

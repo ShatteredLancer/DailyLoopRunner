@@ -1,5 +1,10 @@
 export const TRADE_RECOVERY_AUDIT_SCHEMA_VERSION = 1;
 export const TRADE_RECOVERY_AUDIT_LIMIT = 20;
+export const TRADE_RECOVERY_RESOLUTIONS = Object.freeze([
+  'confirmed-completed',
+  'confirmed-not-completed',
+  'archive-unknown',
+]);
 
 const TERMINAL_HISTORY_STATUSES = new Set([
   'completed',
@@ -70,16 +75,21 @@ export function tradeLeaseRecoveryEvidenceHash(leaseState = {}) {
   return stableHash(JSON.stringify(leaseEvidence(leaseState)));
 }
 
-export function inspectTradeRecoveryJournal(journalType, journal = null) {
+export function inspectTradeRecoveryJournal(journalType, journal = null, options = {}) {
   if (!journal?.runId) return { reviewRequired: false, reason: null, journalType, journal: null };
   const mutationItems = (journal.items || []).filter((item) => item.mutationBoundaryCrossed === true);
   const terminal = journalType === 'buy'
     ? new Set(['purchased', 'competition-lost', 'failed'])
-    : new Set(['listed', 'failed']);
+    : journalType === 'bulk-relist'
+      ? new Set(['relisted', 'failed'])
+      : new Set(['listed', 'failed']);
   const uncertainItems = mutationItems.filter((item) => !terminal.has(item.status));
+  const continuationReserved = options.continuationActive === true
+    && ['active', 'deferred'].includes(journal.status)
+    && uncertainItems.length === 0;
   const reviewRequired = journal.status !== 'acknowledged'
     && mutationItems.length > 0
-    && (journal.status === 'active' || uncertainItems.length > 0);
+    && ((journal.status === 'active' && !continuationReserved) || uncertainItems.length > 0);
   const evidenceHash = tradeRecoveryEvidenceHash(journalType, journal);
   return {
     reviewRequired,
@@ -91,8 +101,9 @@ export function inspectTradeRecoveryJournal(journalType, journal = null) {
     phase: String(journal.phase || ''),
     mutationItemCount: mutationItems.length,
     uncertainItemCount: uncertainItems.length,
+    continuationReserved,
     evidenceHash,
-    requiredText: reviewRequired ? `ACKNOWLEDGE ${journalType.toUpperCase()} ${String(journal.runId)}` : null,
+    risk: reviewRequired ? 'high' : null,
   };
 }
 
@@ -125,10 +136,15 @@ export function inspectTradeExpiredLeaseReview(input = {}) {
   const matchingJournalReview = journalReviews.find((review) => (
     review.reviewRequired === true && String(review.runId || '') === String(lease.runId)
   ));
-  if (history || matchingJournalReview) {
+  const continuation = input.continuation || null;
+  const matchingContinuation = continuation?.runId
+    && String(continuation.runId) === String(lease.runId)
+    && (!lease.jobId || !continuation.jobId || String(continuation.jobId) === String(lease.jobId));
+  if (history || matchingJournalReview || matchingContinuation) {
     return {
       reviewRequired: false,
-      reason: matchingJournalReview?.reason || null,
+      reason: matchingJournalReview?.reason
+        || (matchingContinuation ? 'expired-lease-persisted-continuation-confirmed' : null),
       journalType: 'lease',
       runId: String(lease.runId),
     };
@@ -145,27 +161,31 @@ export function inspectTradeExpiredLeaseReview(input = {}) {
     mutationItemCount: 0,
     uncertainItemCount: 0,
     evidenceHash,
-    requiredText: `ACKNOWLEDGE LEASE ${String(lease.runId)}`,
+    risk: 'high',
   };
 }
 
-export function validateTradeRecoveryAuditEntry(review = {}, reason = '') {
+export function validateTradeRecoveryAuditEntry(review = {}, resolution = '') {
   if (review.reviewRequired !== true || !review.runId || !review.evidenceHash) {
     throw new Error('recovery-audit-review-invalid');
   }
-  const normalizedReason = String(reason || '').trim().slice(0, 160);
-  if (normalizedReason.length < 8) throw new Error('recovery-audit-reason-too-short');
-  return normalizedReason;
+  const normalizedResolution = String(resolution || '');
+  if (!TRADE_RECOVERY_RESOLUTIONS.includes(normalizedResolution)) {
+    throw new Error('recovery-audit-resolution-invalid');
+  }
+  return normalizedResolution;
 }
 
 export function createTradeRecoveryHistoryReceipt(review = {}, journal = {}, options = {}) {
   const journalType = String(review.journalType || '');
-  if (!['buy', 'listing'].includes(journalType) || !review.runId || !review.evidenceHash) {
+  if (!['buy', 'listing', 'bulk-relist'].includes(journalType) || !review.runId || !review.evidenceHash) {
     throw new Error('recovery-history-review-invalid');
   }
   const items = Array.isArray(journal.items) ? journal.items : [];
   const succeeded = items.filter((item) => (
-    journalType === 'buy' ? item.status === 'purchased' : item.status === 'listed'
+    journalType === 'buy'
+      ? item.status === 'purchased'
+      : journalType === 'bulk-relist' ? item.status === 'relisted' : item.status === 'listed'
   )).length;
   const failed = items.filter((item) => ['failed', 'competition-lost'].includes(item.status)).length;
   const requested = Math.max(Number(journal.requested || 0), items.length);
@@ -202,7 +222,7 @@ export function createTradeLeaseRecoveryHistoryReceipt(review = {}, options = {}
     throw new Error('lease-recovery-history-review-invalid');
   }
   const lease = options.leaseState?.lease || {};
-  const jobType = ['buy', 'listing'].includes(options.jobType) ? options.jobType : 'unknown';
+  const jobType = ['buy', 'listing', 'bulk-relist'].includes(options.jobType) ? options.jobType : 'unknown';
   const finishedAt = Math.max(0, Number(options.now?.() ?? Date.now()));
   return createTradeRunReceipt({
     runId: review.runId,
@@ -229,7 +249,7 @@ export function normalizeTradeRecoveryAudit(input = {}) {
       .slice(-TRADE_RECOVERY_AUDIT_LIMIT)
       .map((entry) => ({
         acknowledgedAt: Math.max(0, Number(entry.acknowledgedAt || 0)),
-        journalType: ['buy', 'listing', 'lease'].includes(entry.journalType) ? entry.journalType : 'unknown',
+        journalType: ['buy', 'listing', 'bulk-relist', 'lease'].includes(entry.journalType) ? entry.journalType : 'unknown',
         runId: String(entry.runId || ''),
         jobId: String(entry.jobId || ''),
         status: String(entry.status || ''),
@@ -237,6 +257,7 @@ export function normalizeTradeRecoveryAudit(input = {}) {
         mutationItemCount: Math.max(0, Math.floor(Number(entry.mutationItemCount || 0))),
         uncertainItemCount: Math.max(0, Math.floor(Number(entry.uncertainItemCount || 0))),
         evidenceHash: String(entry.evidenceHash || '').slice(0, 32),
+        resolution: TRADE_RECOVERY_RESOLUTIONS.includes(entry.resolution) ? entry.resolution : null,
         reason: String(entry.reason || '').slice(0, 160),
       })),
   };
@@ -254,8 +275,8 @@ export function createTradeRecoveryAudit(options = {}) {
     return clone(memory);
   }
 
-  function record(review = {}, reason = '') {
-    const normalizedReason = validateTradeRecoveryAuditEntry(review, reason);
+  function record(review = {}, resolution = '') {
+    const normalizedResolution = validateTradeRecoveryAuditEntry(review, resolution);
     const current = read();
     memory = normalizeTradeRecoveryAudit({
       entries: [...current.entries, {
@@ -268,7 +289,8 @@ export function createTradeRecoveryAudit(options = {}) {
         mutationItemCount: review.mutationItemCount,
         uncertainItemCount: review.uncertainItemCount,
         evidenceHash: review.evidenceHash,
-        reason: normalizedReason,
+        resolution: normalizedResolution,
+        reason: normalizedResolution,
       }],
     });
     storage?.set?.(key, clone(memory));
@@ -296,20 +318,18 @@ export function acknowledgeTradeRecovery(options = {}) {
   if (String(options.evidenceHash || '') !== review.evidenceHash) {
     throw new Error('recovery-acknowledgement-evidence-changed');
   }
-  if (String(options.confirmationText || '') !== review.requiredText) {
-    throw new Error(`Confirmation must exactly match ${review.requiredText}`);
-  }
-  const normalizedReason = validateTradeRecoveryAuditEntry(review, options.reason);
+  if (options.riskAccepted !== true) throw new Error('recovery-acknowledgement-risk-not-accepted');
+  const resolution = validateTradeRecoveryAuditEntry(review, options.resolution);
   const archived = options.journal?.acknowledge?.({
     runId: review.runId,
     evidenceHash: review.evidenceHash,
     evidenceHashFor: (journal) => tradeRecoveryEvidenceHash(journalType, journal),
     at: Number(options.now?.() ?? Date.now()),
-    reason: normalizedReason,
+    reason: resolution,
   });
   if (!archived || archived.status !== 'acknowledged') throw new Error('recovery-acknowledgement-journal-changed');
-  options.audit?.record?.(review, normalizedReason);
-  return { status: 'acknowledged', review, journal: archived };
+  options.audit?.record?.(review, resolution);
+  return { status: 'acknowledged', resolution, review, journal: archived };
 }
 
 export function acknowledgeTradeExpiredLeaseRecovery(options = {}) {
@@ -329,13 +349,12 @@ export function acknowledgeTradeExpiredLeaseRecovery(options = {}) {
   if (String(options.evidenceHash || '') !== review.evidenceHash) {
     throw new Error('recovery-acknowledgement-evidence-changed');
   }
-  if (String(options.confirmationText || '') !== review.requiredText) {
-    throw new Error(`Confirmation must exactly match ${review.requiredText}`);
-  }
-  const normalizedReason = validateTradeRecoveryAuditEntry(review, options.reason);
-  options.audit?.record?.(review, normalizedReason);
+  if (options.riskAccepted !== true) throw new Error('recovery-acknowledgement-risk-not-accepted');
+  const resolution = validateTradeRecoveryAuditEntry(review, options.resolution);
+  options.audit?.record?.(review, resolution);
   return {
     status: 'acknowledged',
+    resolution,
     review,
     receipt: createTradeLeaseRecoveryHistoryReceipt(review, {
       leaseState: options.leaseState,

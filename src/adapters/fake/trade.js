@@ -1,8 +1,10 @@
 import { createTradeCapabilitySnapshot } from '../../trade/contracts.js';
+import { isBulkRelistEligible } from '../../trade/bulk-relist-snapshot.js';
 import { readPlayerRareFlag } from '../../domain/player-rarity.js';
 
 export function createFakeTradeAdapter(initial = {}) {
   const calls = [];
+  const mutationPermits = new WeakMap();
   let transferRefreshIndex = 0;
   const items = new Map((initial.items || []).map((entry) => [Number(entry.id || 0), { ...entry }]));
   const marketItems = new Map((initial.marketItems || []).map((entry) => [Number(entry.id || 0), { ...entry, pile: 'market' }]));
@@ -64,6 +66,30 @@ export function createFakeTradeAdapter(initial = {}) {
       warnings: initial.warnings || [],
       capturedAt: initial.capturedAt,
     });
+  }
+
+  async function acquireRequestPermit(actionInput) {
+    const action = String(actionInput || '');
+    calls.push({ method: 'acquireRequestPermit', action });
+    const configured = initial.requestPermitResults?.[action];
+    if (configured?.status === 'blocked') return { ...configured, action, permit: null };
+    if (!['buy', 'list', 'bulk-relist', 'purchase-route'].includes(action)) {
+      return {
+        status: 'blocked', action, permit: null,
+        error: { kind: 'invalid-request-permit-action', code: null, action: 'stop' },
+      };
+    }
+    const permit = Object.freeze({});
+    mutationPermits.set(permit, action);
+    return { status: 'acquired', action, permit, error: null };
+  }
+
+  function consumeRequestPermit(action, permit) {
+    if (!permit || mutationPermits.get(permit) !== action) {
+      return { kind: 'invalid-request-permit', code: null, action: 'stop' };
+    }
+    mutationPermits.delete(permit);
+    return null;
   }
 
   async function inspectPriceLimits(ref = {}, options = {}) {
@@ -129,7 +155,51 @@ export function createFakeTradeAdapter(initial = {}) {
     return item ? { status: 'loaded', candidate: listingCandidate(item) } : { status: 'not-found', candidate: null };
   }
 
-  async function listItem(ref = {}, listing = {}) {
+  function inspectBulkRelistSnapshot(options = {}) {
+    calls.push({ method: 'inspectBulkRelistSnapshot', options: { ...options } });
+    const transfer = [...items.values()].filter((item) => item.pile === 'transfer');
+    const requestedIds = new Set((options.itemIds || []).map(Number).filter((id) => id > 0));
+    const byState = {};
+    for (const item of transfer) {
+      const state = String(item.auction?.state || 'none');
+      byState[state] = Number(byState[state] || 0) + 1;
+    }
+    const unsold = transfer.filter(isBulkRelistEligible);
+    return {
+      schemaVersion: 1,
+      capturedAt: Number(initial.capturedAt || Date.now()),
+      status: 'loaded',
+      total: transfer.length,
+      unsoldCount: unsold.length,
+      byState,
+      truncated: unsold.length > 100,
+      items: unsold.slice(0, 100).map((item) => {
+        const candidate = listingCandidate(item);
+        return {
+          item: { ...candidate.item, pile: 'transfer' },
+          name: candidate.name,
+          rating: candidate.rating || null,
+          auction: { ...candidate.auction },
+        };
+      }),
+      auctions: (requestedIds.size
+        ? transfer.filter((item) => requestedIds.has(Number(item.id)))
+        : transfer.slice(0, 100))
+        .slice(0, 100)
+        .map((item) => {
+          const candidate = listingCandidate(item);
+          return {
+            item: { ...candidate.item, pile: 'transfer' },
+            name: candidate.name,
+            rating: candidate.rating || null,
+            auction: { ...candidate.auction },
+          };
+        }),
+      error: null,
+    };
+  }
+
+  async function listItem(ref = {}, listing = {}, options = {}) {
     calls.push({ method: 'listItem', ref: { ...ref }, listing: { ...listing } });
     const item = items.get(Number(ref.id || 0));
     const requested = {
@@ -140,6 +210,10 @@ export function createFakeTradeAdapter(initial = {}) {
     if (!item) return { status: 'not-found', item: null, requested, response: null, error: null };
     if (String(item.pile || 'club') !== String(ref.pile || item.pile || 'club')) {
       return { status: 'moved', item: listingCandidate(item).item, requested, response: null, error: null };
+    }
+    const permitError = consumeRequestPermit('list', options.requestPermit);
+    if (permitError) {
+      return { status: 'blocked', item: listingCandidate(item).item, requested, response: null, error: permitError };
     }
     const configured = initial.listResults?.[item.id];
     if (configured && configured.status !== 'accepted') {
@@ -184,6 +258,31 @@ export function createFakeTradeAdapter(initial = {}) {
     };
   }
 
+  async function relistExpiredAuctions(options = {}) {
+    calls.push({ method: 'relistExpiredAuctions' });
+    const permitError = consumeRequestPermit('bulk-relist', options.requestPermit);
+    if (permitError) return { status: 'blocked', response: null, error: permitError };
+    const configured = initial.bulkRelistResult;
+    if (configured && configured.status !== 'accepted') return { ...configured };
+    const selectedIds = Array.isArray(configured?.itemIds)
+      ? new Set(configured.itemIds.map(Number))
+      : null;
+    if (configured?.materialize !== false) {
+      for (const item of items.values()) {
+        if (item.pile !== 'transfer' || !isBulkRelistEligible(item)) continue;
+        if (selectedIds && !selectedIds.has(Number(item.id))) continue;
+        item.auction = { ...item.auction, state: 'active' };
+      }
+    }
+    return {
+      status: 'accepted',
+      response: configured?.response === undefined
+        ? { success: true, status: 200, code: null }
+        : configured.response,
+      error: null,
+    };
+  }
+
   async function searchMarket(request = {}) {
     calls.push({ method: 'searchMarket', request: { ...request } });
     const configured = initial.searchResults?.[Number(request.definitionId)];
@@ -203,7 +302,7 @@ export function createFakeTradeAdapter(initial = {}) {
     };
   }
 
-  async function buyNowItem(ref = {}, priceInput = 0) {
+  async function buyNowItem(ref = {}, priceInput = 0, options = {}) {
     const price = Number(priceInput);
     calls.push({ method: 'buyNowItem', ref: { ...ref }, price });
     const item = [...marketItems.values()].find((entry) => (
@@ -211,6 +310,10 @@ export function createFakeTradeAdapter(initial = {}) {
       && Number(entry.auction?.tradeId) === Number(ref.tradeId)
     ));
     if (!item) return { status: 'not-found', item: null, price, response: null, error: null };
+    const permitError = consumeRequestPermit('buy', options.requestPermit);
+    if (permitError) {
+      return { status: 'blocked', item: listingCandidate(item).item, price, response: null, error: permitError };
+    }
     const configured = initial.buyResults?.[Number(ref.tradeId)] || initial.buyResults?.[Number(item.id)];
     if (configured && configured.status !== 'accepted' && configured.materialize !== true) {
       return { status: configured.status, item: listingCandidate(item).item, price, response: configured.response || null, error: configured.error || null };
@@ -279,10 +382,14 @@ export function createFakeTradeAdapter(initial = {}) {
     };
   }
 
-  async function routePurchasedItem(ref = {}, destination = 'club') {
+  async function routePurchasedItem(ref = {}, destination = 'club', options = {}) {
     calls.push({ method: 'routePurchasedItem', ref: { ...ref }, destination: String(destination) });
     const item = items.get(Number(ref.id || 0));
     if (!item || item.pile !== 'unassigned') return { status: 'not-found', item: null, destination, response: null, error: null };
+    const permitError = consumeRequestPermit('purchase-route', options.requestPermit);
+    if (permitError) {
+      return { status: 'blocked', item: listingCandidate(item).item, destination, response: null, error: permitError };
+    }
     if (destination === 'transfer' && transferUsed >= Number(initial.transferCapacity?.max ?? 100)) {
       return { status: 'destination-full', item: listingCandidate(item).item, destination, response: null, error: { kind: 'destination-full' } };
     }
@@ -296,11 +403,14 @@ export function createFakeTradeAdapter(initial = {}) {
 
   return Object.freeze({
     calls,
+    acquireRequestPermit,
     inspectCapabilities,
     inspectListingCandidates,
     inspectListingItem,
+    inspectBulkRelistSnapshot,
     inspectPriceLimits,
     listItem,
+    relistExpiredAuctions,
     refreshTransferItems,
     searchMarket,
     buyNowItem,

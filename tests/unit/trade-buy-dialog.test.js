@@ -54,7 +54,7 @@ function buyJob(policy = {}) {
 }
 
 describe('Trade Buy dialog', () => {
-  it('requires exact confirmation and renders the single Buy receipt', async () => {
+  it('uses direct approval and renders the single Buy receipt', async () => {
     const ui = uiHarness();
     const receipt = {
       runId: 'buy-run-1', jobId: 'buy-1', jobType: 'buy', status: 'completed', reason: null,
@@ -72,19 +72,13 @@ describe('Trade Buy dialog', () => {
       onExecute,
     });
 
-    const confirmation = ui.byId('bronze-loop-trade-buy-confirmation');
     const execute = ui.byId('bronze-loop-trade-buy-execute');
-    expect(execute.disabled).toBe(true);
-    confirmation.value = 'BUY 1 MAX 999';
-    confirmation.input();
-    expect(execute.disabled).toBe(true);
-    confirmation.value = 'BUY 1 MAX 1000';
-    confirmation.input();
     expect(execute.disabled).toBe(false);
+    expect(ui.byId('bronze-loop-trade-buy-confirmation')).toBeUndefined();
     await execute.click();
 
     expect(onExecute).toHaveBeenCalledWith(
-      { confirmationText: 'BUY 1 MAX 1000', expectedDestination: 'auto', platform: 'pc' },
+      { approved: true, expectedDestination: 'auto', platform: 'pc' },
       expect.any(Function),
     );
     expect(ui.byId('bronze-loop-trade-buy-status').textContent).toBe('completed');
@@ -92,7 +86,7 @@ describe('Trade Buy dialog', () => {
     expect(execute.disabled).toBe(true);
   });
 
-  it('requires route-specific confirmation for controlled Transfer validation', async () => {
+  it('uses direct approval for controlled Transfer validation', async () => {
     const ui = uiHarness();
     const onExecute = vi.fn().mockResolvedValue({
       status: 'completed', reason: null, requested: 1, succeeded: 1, failed: 0, skipped: 0,
@@ -105,20 +99,13 @@ describe('Trade Buy dialog', () => {
       onExecute,
     });
     const destination = ui.byId('bronze-loop-trade-buy-destination');
-    const confirmation = ui.byId('bronze-loop-trade-buy-confirmation');
     const execute = ui.byId('bronze-loop-trade-buy-execute');
     destination.value = 'transfer';
     destination.change();
-    expect(confirmation.placeholder).toBe('BUY 1 TO TRANSFER MAX 1000');
-    confirmation.value = 'BUY 1 MAX 1000';
-    confirmation.input();
-    expect(execute.disabled).toBe(true);
-    confirmation.value = 'BUY 1 TO TRANSFER MAX 1000';
-    confirmation.input();
     await execute.click();
     expect(onExecute).toHaveBeenCalledWith(
       {
-        confirmationText: 'BUY 1 TO TRANSFER MAX 1000',
+        approved: true,
         expectedDestination: 'transfer',
         platform: 'pc',
       },
@@ -136,9 +123,6 @@ describe('Trade Buy dialog', () => {
       onExecute: vi.fn().mockResolvedValue({ status: 'blocked', reason: 'trade-circuit-open', receipts: [] }),
       onDownloadDiagnostics,
     });
-    const confirmation = ui.byId('bronze-loop-trade-buy-confirmation');
-    confirmation.value = 'BUY 1 MAX 1000';
-    confirmation.input();
     await ui.byId('bronze-loop-trade-buy-execute').click();
     await ui.byId('bronze-loop-trade-buy-diagnostics').click();
     expect(onDownloadDiagnostics).toHaveBeenCalledWith(expect.objectContaining({
@@ -147,7 +131,7 @@ describe('Trade Buy dialog', () => {
     expect(ui.byId('bronze-loop-trade-buy-execute').disabled).toBe(true);
   });
 
-  it('requires the exact quantity-two confirmation for adjacent rating lanes', async () => {
+  it('approves the displayed quantity for adjacent rating lanes', async () => {
     const ui = uiHarness();
     const onExecute = vi.fn().mockResolvedValue({
       status: 'completed', requested: 2, succeeded: 2, failed: 0, skipped: 0,
@@ -164,23 +148,16 @@ describe('Trade Buy dialog', () => {
       onExecute,
     });
 
-    const confirmation = ui.byId('bronze-loop-trade-buy-confirmation');
     const execute = ui.byId('bronze-loop-trade-buy-execute');
     expect(execute.textContent).toBe('Buy 2');
-    expect(confirmation.placeholder).toBe('BUY 2 MAX 1000');
-    confirmation.value = 'BUY 1 MAX 1000';
-    confirmation.input();
-    expect(execute.disabled).toBe(true);
-    confirmation.value = 'BUY 2 MAX 1000';
-    confirmation.input();
     await execute.click();
     expect(onExecute).toHaveBeenCalledWith(
-      { confirmationText: 'BUY 2 MAX 1000', expectedDestination: 'auto', platform: 'pc' },
+      { approved: true, expectedDestination: 'auto', platform: 'pc' },
       expect.any(Function),
     );
   });
 
-  it('allows a newly confirmed Run in the same dialog after exact Journal reconciliation', async () => {
+  it('allows a newly approved Run in the same dialog after exact Journal reconciliation', async () => {
     const ui = uiHarness();
     const onExecute = vi.fn()
       .mockResolvedValueOnce({
@@ -198,25 +175,17 @@ describe('Trade Buy dialog', () => {
       preview: { plan: { ready: true }, summary: { definitions: 50 } },
       onExecute,
     });
-    const confirmation = ui.byId('bronze-loop-trade-buy-confirmation');
     const execute = ui.byId('bronze-loop-trade-buy-execute');
-    confirmation.value = 'BUY 1 MAX 1000';
-    confirmation.input();
     await execute.click();
 
     expect(ui.byId('bronze-loop-trade-buy-status').textContent).toContain('No new Buy was sent');
-    expect(confirmation.value).toBe('');
-    expect(execute.disabled).toBe(true);
-
-    confirmation.value = 'BUY 1 MAX 1000';
-    confirmation.input();
     expect(execute.disabled).toBe(false);
     await execute.click();
     expect(onExecute).toHaveBeenCalledTimes(2);
     expect(ui.byId('bronze-loop-trade-buy-status').textContent).toBe('completed');
   });
 
-  it('shows completed-item and request-capacity progress while a later chunk waits locally', async () => {
+  it('shows completed-item and shared pacing progress while a later action waits locally', async () => {
     const ui = uiHarness();
     let finishRun;
     const onExecute = vi.fn((_input, onProgress) => {
@@ -227,8 +196,7 @@ describe('Trade Buy dialog', () => {
       });
       onProgress({ phase: 'chunk-started', at: 1500, chunkIndex: 2, quantity: 2, required: 28 });
       onProgress({
-        phase: 'chunk-budget-waiting', at: 2000, chunkIndex: 2,
-        required: 28, remaining: 21, retryAt: 6000,
+        phase: 'buy-request-permit-waiting', at: 2000, chunkIndex: 2, retryAt: 6000,
       });
       return new Promise((resolve) => { finishRun = resolve; });
     });
@@ -241,13 +209,10 @@ describe('Trade Buy dialog', () => {
       setInterval: vi.fn(() => 1),
       clearInterval: vi.fn(),
     });
-    const confirmation = ui.byId('bronze-loop-trade-buy-confirmation');
-    confirmation.value = 'BUY 4 MAX 1000';
-    confirmation.input();
     const execution = ui.byId('bronze-loop-trade-buy-execute').click();
 
     expect(ui.byId('bronze-loop-trade-buy-status').textContent).toBe(
-      'Chunk 2 waiting for request capacity: needs 28, 21 remaining; retry in about 4s | 1/4 item(s) finished',
+      'Buy waiting for shared pacing: retry in about 4s | 1/4 item(s) finished',
     );
     expect(ui.byId('bronze-loop-trade-buy-stop').style.display).toBe('');
 

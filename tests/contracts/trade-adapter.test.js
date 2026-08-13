@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createEaInventoryAdapter } from '../../src/adapters/ea/inventory.js';
 import { createEaTradeAdapter } from '../../src/adapters/ea/trade.js';
 import { createFakeTradeAdapter } from '../../src/adapters/fake/trade.js';
@@ -240,6 +240,30 @@ describe('Trade Adapter contracts', () => {
     });
   });
 
+  it('excludes inactive Transfer Available Items from the bulk Re-list All snapshot', () => {
+    const available = {
+      id: 12,
+      definitionId: 22,
+      type: 'player',
+      rating: 88,
+      rareflag: 1,
+      untradeableCount: 0,
+      loans: -1,
+      _auction: {
+        isActiveTrade: () => false,
+        isClosedTrade: () => false,
+        isInactive: () => true,
+      },
+    };
+
+    expect(createEaTradeAdapter(eaRuntime(available)).inspectBulkRelistSnapshot()).toMatchObject({
+      total: 1,
+      unsoldCount: 0,
+      byState: { inactive: 1 },
+      items: [],
+    });
+  });
+
   it('keeps listing-only tradeability fallbacks out of the shared inventory contract', () => {
     const sharedItem = {
       id: 11,
@@ -290,9 +314,9 @@ describe('Trade Adapter contracts', () => {
     const capability = fake.inspectCapabilities();
     const limits = await fake.inspectPriceLimits({ id: 10 }, { refresh: true });
     expect(Object.keys(fake).sort()).toEqual([
-      'buyNowItem', 'calls', 'inspectCapabilities', 'inspectDefinitionOwnership', 'inspectDefinitionOwnerships',
+      'acquireRequestPermit', 'buyNowItem', 'calls', 'inspectBulkRelistSnapshot', 'inspectCapabilities', 'inspectDefinitionOwnership', 'inspectDefinitionOwnerships',
       'inspectListingCandidates', 'inspectListingItem', 'inspectPriceLimits', 'inspectPurchase',
-      'inspectUnassignedReadiness', 'listItem', 'refreshPurchaseState', 'refreshTransferItems',
+      'inspectUnassignedReadiness', 'listItem', 'refreshPurchaseState', 'refreshTransferItems', 'relistExpiredAuctions',
       'routePurchasedItem', 'searchMarket',
     ]);
     expect(capability).toMatchObject({ runtimeReady: true, canTrade: true });
@@ -311,11 +335,18 @@ describe('Trade Adapter contracts', () => {
     });
     const search = await fake.searchMarket({ definitionId: 8401, maxBuyNow: 1000, page: 1 });
     expect(search).toMatchObject({ status: 'completed', candidates: [{ item: { id: 70, definitionId: 8401, pile: 'market' }, auction: { tradeId: 700, buyNowPrice: 900 } }] });
-    const bought = await fake.buyNowItem({ id: 70, definitionId: 8401, tradeId: 700 }, 900);
+    const buyPermit = await fake.acquireRequestPermit('buy');
+    const bought = await fake.buyNowItem(
+      { id: 70, definitionId: 8401, tradeId: 700 },
+      900,
+      { requestPermit: buyPermit.permit },
+    );
     expect(bought).toMatchObject({ status: 'accepted', tradeId: 700, price: 900 });
     expect(fake.inspectCapabilities().coins).toBe(4100);
     expect(fake.inspectPurchase({ id: 70, definitionId: 8401, price: 900 })).toMatchObject({ status: 'loaded', candidate: { item: { pile: 'unassigned' } } });
-    await expect(fake.routePurchasedItem({ id: 70 }, 'club')).resolves.toMatchObject({ status: 'completed', item: { pile: 'club' } });
+    const routePermit = await fake.acquireRequestPermit('purchase-route');
+    await expect(fake.routePurchasedItem({ id: 70 }, 'club', { requestPermit: routePermit.permit }))
+      .resolves.toMatchObject({ status: 'completed', item: { pile: 'club' } });
     expect(JSON.parse(JSON.stringify({ search, bought }))).toEqual({ search, bought });
   });
 
@@ -389,7 +420,12 @@ describe('Trade Adapter contracts', () => {
         auction: { state: 'active', tradeId: 700, buyNowPrice: 900 },
       }],
     });
-    const bought = await adapter.buyNowItem({ id: 70, definitionId: 8401, tradeId: 700 }, 900);
+    const buyPermit = await adapter.acquireRequestPermit('buy');
+    const bought = await adapter.buyNowItem(
+      { id: 70, definitionId: 8401, tradeId: 700 },
+      900,
+      { requestPermit: buyPermit.permit },
+    );
     expect(bought).toMatchObject({ status: 'accepted', tradeId: 700, price: 900 });
     await expect(adapter.refreshPurchaseState()).resolves.toMatchObject({ status: 'completed' });
     expect(adapter.inspectPurchase({ id: 70 })).toMatchObject({
@@ -401,7 +437,12 @@ describe('Trade Adapter contracts', () => {
       9999: { definitionId: 9999, club: 0, transfer: 0, unassigned: 0, storage: 0 },
     });
     expect(adapter.inspectUnassignedReadiness()).toEqual({ ready: false, count: 1, reason: 'unassigned-not-empty' });
-    await expect(adapter.routePurchasedItem({ id: 70, definitionId: 8401, tradeId: 700 }, 'club'))
+    const routePermit = await adapter.acquireRequestPermit('purchase-route');
+    await expect(adapter.routePurchasedItem(
+      { id: 70, definitionId: 8401, tradeId: 700 },
+      'club',
+      { requestPermit: routePermit.permit },
+    ))
       .resolves.toMatchObject({ status: 'completed', item: { pile: 'club' }, destination: 'club' });
     expect(adapter.inspectPurchase({ id: 70, pile: 'club' })).toMatchObject({ status: 'loaded', candidate: { item: { pile: 'club' } } });
     expect(adapter.inspectUnassignedReadiness()).toEqual({ ready: true, count: 0, reason: null });
@@ -453,9 +494,12 @@ describe('Trade Adapter contracts', () => {
         callback({ unobserve() {} }, { success: true, status: 200, privateItem: target });
       },
     });
-    const result = await createEaTradeAdapter(runtime).listItem(
+    const adapter = createEaTradeAdapter(runtime);
+    const listPermit = await adapter.acquireRequestPermit('list');
+    const result = await adapter.listItem(
       { id: 10, definitionId: 20, pile: 'transfer' },
       { startPrice: 700, buyNow: 750, durationSeconds: 3600 },
+      { requestPermit: listPermit.permit },
     );
     expect(result).toEqual({
       status: 'accepted',
@@ -479,9 +523,12 @@ describe('Trade Adapter contracts', () => {
         });
       },
     });
-    const result = await createEaTradeAdapter(runtime).listItem(
+    const adapter = createEaTradeAdapter(runtime);
+    const listPermit = await adapter.acquireRequestPermit('list');
+    const result = await adapter.listItem(
       { id: 10, definitionId: 20, pile: 'transfer' },
       { startPrice: 700, buyNow: 750, durationSeconds: 3600 },
+      { requestPermit: listPermit.permit },
     );
     expect(result).toMatchObject({
       status: 'rejected',
@@ -505,26 +552,117 @@ describe('Trade Adapter contracts', () => {
     ]));
   });
 
-  it('blocks a network request before the EA service when the shared budget is exhausted', async () => {
+  it('blocks a network request before the EA service when shared pacing is cooling down', async () => {
     const runtime = eaRuntime({ id: 10, definitionId: 20 });
     let calls = 0;
     runtime.services.Item.requestTransferItems = () => { calls += 1; return { success: true }; };
-    const requestBudget = {
-      take: async (action) => ({ allowed: false, action, remaining: 0, retryAt: 5000 }),
+    const requestPacer = {
+      acquire: async () => ({ allowed: false, reason: 'trade-rate-limit-cooldown', retryAt: 5000 }),
     };
-    const adapter = createEaTradeAdapter(runtime, { requestBudget });
+    const adapter = createEaTradeAdapter(runtime, { requestPacer });
     expect(adapter.inspectCapabilities().runtimeReady).toBe(true);
     await expect(adapter.refreshTransferItems()).resolves.toEqual({
       status: 'blocked',
       response: null,
       error: {
-        kind: 'request-budget-exhausted',
-        code: null,
-        action: 'wait-until-budget-reset',
+        kind: 'rate-limit',
+        code: 429,
+        action: 'stop-and-cooldown',
         retryAt: 5000,
       },
     });
     expect(calls).toBe(0);
+  });
+
+  it('requires an action-bound one-use permit for every EA trade mutation', async () => {
+    const item = { id: 10, definitionId: 20 };
+    const runtime = eaRuntime(item);
+    let listCalls = 0;
+    runtime.services.Item.list = () => {
+      listCalls += 1;
+      return { success: true };
+    };
+    const adapter = createEaTradeAdapter(runtime);
+    const listing = { startPrice: 700, buyNow: 750, durationSeconds: 3600 };
+
+    await expect(adapter.listItem(item, listing)).resolves.toMatchObject({
+      status: 'blocked', error: { kind: 'invalid-request-permit' },
+    });
+    const wrongAction = await adapter.acquireRequestPermit('buy');
+    await expect(adapter.listItem(item, listing, { requestPermit: wrongAction.permit })).resolves.toMatchObject({
+      status: 'blocked', error: { kind: 'invalid-request-permit' },
+    });
+    const permit = await adapter.acquireRequestPermit('list');
+    await expect(adapter.listItem(item, listing, { requestPermit: permit.permit })).resolves.toMatchObject({ status: 'accepted' });
+    await expect(adapter.listItem(item, listing, { requestPermit: permit.permit })).resolves.toMatchObject({
+      status: 'blocked', error: { kind: 'invalid-request-permit' },
+    });
+    expect(listCalls).toBe(1);
+  });
+
+  it('normalizes one aggregate EA Re-list All observable and consumes its permit once', async () => {
+    const runtime = eaRuntime({ id: 10, definitionId: 20 });
+    let relistCalls = 0;
+    runtime.services.Item.relistExpiredAuctions = () => {
+      relistCalls += 1;
+      return {
+        observe(context, callback) {
+          callback({ unobserve() {} }, {
+            success: true,
+            status: 200,
+            privateItems: [{ id: 10, token: 'must-not-leak' }],
+          });
+        },
+      };
+    };
+    const adapter = createEaTradeAdapter(runtime);
+
+    await expect(adapter.relistExpiredAuctions()).resolves.toMatchObject({
+      status: 'blocked', error: { kind: 'invalid-request-permit' },
+    });
+    const wrongAction = await adapter.acquireRequestPermit('list');
+    await expect(adapter.relistExpiredAuctions({ requestPermit: wrongAction.permit })).resolves.toMatchObject({
+      status: 'blocked', error: { kind: 'invalid-request-permit' },
+    });
+    const permit = await adapter.acquireRequestPermit('bulk-relist');
+    const accepted = await adapter.relistExpiredAuctions({ requestPermit: permit.permit });
+    expect(accepted).toEqual({
+      status: 'accepted',
+      response: { success: true, status: 200, code: null },
+      error: null,
+    });
+    expect(JSON.stringify(accepted)).not.toContain('must-not-leak');
+    await expect(adapter.relistExpiredAuctions({ requestPermit: permit.permit })).resolves.toMatchObject({
+      status: 'blocked', error: { kind: 'invalid-request-permit' },
+    });
+    expect(relistCalls).toBe(1);
+  });
+
+  it('records an EA 429 response in shared pacing without retrying the action', async () => {
+    const runtime = eaRuntime({ id: 10, definitionId: 20 });
+    let calls = 0;
+    runtime.services.Item.requestTransferItems = () => { calls += 1; return { success: false, status: 429 }; };
+    const requestPacer = {
+      acquire: vi.fn(async () => ({ allowed: true })),
+      recordRateLimit: vi.fn(async () => ({ status: 'cooldown', retryAt: 61000 })),
+      recordSuccess: vi.fn(),
+    };
+    const adapter = createEaTradeAdapter(runtime, {
+      requestPacer,
+      pacingContext: {
+        policy: { initialRateLimitCooldownSeconds: 60, maximumRateLimitCooldownSeconds: 1800 },
+      },
+    });
+
+    await expect(adapter.refreshTransferItems()).resolves.toMatchObject({
+      status: 'rejected', error: { kind: 'rate-limit', code: 429, action: 'stop-and-cooldown' },
+    });
+    expect(calls).toBe(1);
+    expect(requestPacer.recordRateLimit).toHaveBeenCalledWith('transfer-refresh', {
+      initialCooldownSeconds: 60,
+      maximumCooldownSeconds: 1800,
+    });
+    expect(requestPacer.recordSuccess).not.toHaveBeenCalled();
   });
 
   it('is composed lazily by the Runtime Adapter factory', () => {

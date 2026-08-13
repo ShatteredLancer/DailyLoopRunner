@@ -1,5 +1,7 @@
 import { createTradeCapabilitySnapshot } from '../../trade/contracts.js';
+import { isBulkRelistEligible } from '../../trade/bulk-relist-snapshot.js';
 import { classifyTradeError } from '../../trade/error-policy.js';
+import { tradeActionDelay } from '../../trade/request-pacing.js';
 import { createEaInventoryAdapter } from './inventory.js';
 
 const CRITERIA_FIELDS = Object.freeze([
@@ -124,6 +126,28 @@ function listingCandidateSnapshot(inventory, item, pile) {
     concept: snapshot.concept,
     academyEnrolled: snapshot.academyEnrolled,
     auction: auctionSnapshot(item),
+  };
+}
+
+const BULK_RELIST_SNAPSHOT_ITEM_LIMIT = 100;
+
+function bulkRelistItemSnapshot(candidate) {
+  return {
+    item: {
+      id: Number(candidate?.item?.id || 0) || null,
+      definitionId: Number(candidate?.item?.definitionId || 0) || null,
+      pile: 'transfer',
+    },
+    name: String(candidate?.name || 'unknown').slice(0, 80),
+    rating: Number(candidate?.rating || 0) || null,
+    auction: {
+      state: String(candidate?.auction?.state || 'unknown'),
+      tradeId: Number(candidate?.auction?.tradeId || 0) || null,
+      startingBid: Number(candidate?.auction?.startingBid || 0) || null,
+      currentBid: Number(candidate?.auction?.currentBid || 0) || null,
+      buyNowPrice: Number(candidate?.auction?.buyNowPrice || 0) || null,
+      expires: Number(candidate?.auction?.expires || 0) || null,
+    },
   };
 }
 
@@ -289,17 +313,70 @@ function observeResult(value, context = {}) {
 
 export function createEaTradeAdapter(runtime, adapterOptions = {}) {
   const marketItems = new Map();
+  const mutationPermits = new WeakMap();
 
-  async function requestBudgetError(action) {
-    if (typeof adapterOptions.requestBudget?.take !== 'function') return null;
-    const permit = await adapterOptions.requestBudget.take(action);
+  async function requestPacingError(action, requestContext = {}) {
+    if (typeof adapterOptions.requestPacer?.acquire !== 'function') return null;
+    const context = adapterOptions.pacingContext || {};
+    const permit = await adapterOptions.requestPacer.acquire(action, {
+      ...context,
+      wait: requestContext.wait !== false,
+      delaySeconds: tradeActionDelay(context.policy, action),
+      searchCyclePauseEnabled: context.policy?.searchCyclePauseEnabled,
+      searchCyclePauseEvery: context.policy?.searchCyclePauseEvery,
+      searchCyclePauseSeconds: context.policy?.searchCyclePauseSeconds,
+      onWait: requestContext.onWait,
+    });
     if (permit?.allowed === true) return null;
     return {
-      kind: 'request-budget-exhausted',
-      code: null,
-      action: 'wait-until-budget-reset',
+      kind: permit?.deferred === true && permit?.cooldown !== true
+        ? 'pacing-deferred'
+        : permit?.reason === 'stopped-by-user' ? 'stopped-by-user' : 'rate-limit',
+      code: permit?.reason === 'trade-rate-limit-cooldown' ? 429 : null,
+      action: permit?.deferred === true
+        ? 'yield'
+        : permit?.reason === 'stopped-by-user' ? 'stop' : 'stop-and-cooldown',
       retryAt: permit?.retryAt ?? null,
     };
+  }
+
+  async function acquireRequestPermit(actionInput, options = {}) {
+    const action = String(actionInput || '');
+    if (!['buy', 'list', 'bulk-relist', 'purchase-route'].includes(action)) {
+      return {
+        status: 'blocked', action, permit: null,
+        error: { kind: 'invalid-request-permit-action', code: null, action: 'stop' },
+      };
+    }
+    const error = await requestPacingError(action, options);
+    if (error) return { status: 'blocked', action, permit: null, error };
+    const permit = Object.freeze({});
+    mutationPermits.set(permit, action);
+    return { status: 'acquired', action, permit, error: null };
+  }
+
+  function consumeRequestPermit(action, permit) {
+    if (!permit || mutationPermits.get(permit) !== action) {
+      return { kind: 'invalid-request-permit', code: null, action: 'stop' };
+    }
+    mutationPermits.delete(permit);
+    return null;
+  }
+
+  async function classifyPacingResult(action, value = {}) {
+    const classification = classifyTradeError(value);
+    if (classification.kind === 'rate-limit') {
+      const policy = adapterOptions.pacingContext?.policy || {};
+      await adapterOptions.requestPacer?.recordRateLimit?.(action, {
+        initialCooldownSeconds: policy.initialRateLimitCooldownSeconds,
+        maximumCooldownSeconds: policy.maximumRateLimitCooldownSeconds,
+      });
+    }
+    return classification;
+  }
+
+  async function recordPacingSuccess(action) {
+    await adapterOptions.requestPacer?.recordSuccess?.(action, adapterOptions.pacingContext || {});
   }
 
   function marketItemKey(ref = {}) {
@@ -374,12 +451,12 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
         before, after: before, response: null, error: null,
       };
     }
-    const budgetError = await requestBudgetError('price-limits');
-    if (budgetError) {
+    const pacingError = await requestPacingError('price-limits', { wait: options.wait });
+    if (pacingError) {
       return {
         status: 'blocked', refreshStatus: 'blocked',
         limitsSource: before.hasPriceLimits ? 'existing-cache' : 'none',
-        before, after: before, response: null, error: budgetError,
+        before, after: before, response: null, error: pacingError,
       };
     }
     try {
@@ -387,6 +464,10 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
       const after = itemPriceLimitSnapshot(resolveItem(runtime, before.item));
       const responseSnapshot = responseSummary(response);
       const refreshStatus = responseSnapshot.success === false ? 'rejected' : 'completed';
+      const classification = responseSnapshot.success === false
+        ? await classifyPacingResult('price-limits', response || {})
+        : null;
+      if (refreshStatus === 'completed') await recordPacingSuccess('price-limits');
       return {
         status: after.hasPriceLimits ? 'loaded' : 'unavailable',
         refreshStatus,
@@ -396,10 +477,10 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
         before,
         after,
         response: responseSnapshot,
-        error: null,
+        error: classification ? { kind: classification.kind, code: classification.code, action: classification.action } : null,
       };
     } catch (error) {
-      const classification = classifyTradeError(error);
+      const classification = await classifyPacingResult('price-limits', error);
       const after = itemPriceLimitSnapshot(resolveItem(runtime, before.item));
       return {
         status: 'error',
@@ -475,6 +556,34 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
     }
   }
 
+  function inspectBulkRelistSnapshot(options = {}) {
+    const listing = inspectListingCandidates({ sources: ['transfer'], limit: 0 });
+    const candidates = Array.isArray(listing.candidates) ? listing.candidates : [];
+    const requestedIds = new Set((options.itemIds || []).map(Number).filter((id) => id > 0));
+    const byState = {};
+    for (const candidate of candidates) {
+      const state = String(candidate?.auction?.state || 'unknown');
+      byState[state] = Number(byState[state] || 0) + 1;
+    }
+    const unsold = candidates.filter(isBulkRelistEligible);
+    return {
+      schemaVersion: 1,
+      capturedAt: Date.now(),
+      status: listing.error ? 'error' : 'loaded',
+      total: Number(listing.total || candidates.length),
+      unsoldCount: unsold.length,
+      byState,
+      truncated: unsold.length > BULK_RELIST_SNAPSHOT_ITEM_LIMIT,
+      items: unsold.slice(0, BULK_RELIST_SNAPSHOT_ITEM_LIMIT).map(bulkRelistItemSnapshot),
+      auctions: (requestedIds.size
+        ? candidates.filter((candidate) => requestedIds.has(Number(candidate?.item?.id || 0)))
+        : candidates.slice(0, BULK_RELIST_SNAPSHOT_ITEM_LIMIT))
+        .slice(0, BULK_RELIST_SNAPSHOT_ITEM_LIMIT)
+        .map(bulkRelistItemSnapshot),
+      error: listing.error || null,
+    };
+  }
+
   function inspectListingItem(ref = {}) {
     const resolved = resolveItem(runtime, ref);
     if (!resolved) return { status: 'not-found', candidate: null };
@@ -509,8 +618,8 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
       || !Number.isFinite(requested.durationSeconds) || requested.durationSeconds <= 0) {
       return { status: 'invalid-request', item, requested, response: null, error: null };
     }
-    const budgetError = await requestBudgetError('list');
-    if (budgetError) return { status: 'blocked', item, requested, response: null, error: budgetError };
+    const permitError = consumeRequestPermit('list', options.requestPermit);
+    if (permitError) return { status: 'blocked', item, requested, response: null, error: permitError };
     try {
       const response = await observeResult(service.list(
         resolved.item,
@@ -519,8 +628,11 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
         requested.durationSeconds,
       ), options.observerContext || {});
       const summary = responseSummary(response);
-      if (summary.success) return { status: 'accepted', item, requested, response: summary, error: null };
-      const classification = classifyTradeError(response || {});
+      if (summary.success) {
+        await recordPacingSuccess('list');
+        return { status: 'accepted', item, requested, response: summary, error: null };
+      }
+      const classification = await classifyPacingResult('list', response || {});
       return {
         status: 'rejected',
         item,
@@ -529,7 +641,7 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
         error: { kind: classification.kind, code: classification.code, action: classification.action },
       };
     } catch (error) {
-      const classification = classifyTradeError(error);
+      const classification = await classifyPacingResult('list', error);
       return {
         status: classification.ambiguous ? 'ambiguous' : 'error',
         item,
@@ -545,25 +657,60 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
     if (typeof service?.requestTransferItems !== 'function') {
       return { status: 'unsupported', response: null, error: null };
     }
-    const budgetError = await requestBudgetError('transfer-refresh');
-    if (budgetError) return { status: 'blocked', response: null, error: budgetError };
+    const pacingError = await requestPacingError('transfer-refresh', { wait: options.wait });
+    if (pacingError) return { status: 'blocked', response: null, error: pacingError };
     try {
       const response = await observeResult(service.requestTransferItems(), options.observerContext || {});
       const summary = responseSummary(response);
       if (summary.success === false) {
-        const classification = classifyTradeError(response || {});
+        const classification = await classifyPacingResult('transfer-refresh', response || {});
         return {
           status: 'rejected', response: summary,
           error: { kind: classification.kind, code: classification.code, action: classification.action },
         };
       }
+      await recordPacingSuccess('transfer-refresh');
       return { status: 'completed', response: summary, error: null };
     } catch (error) {
-      const classification = classifyTradeError(error);
+      const classification = await classifyPacingResult('transfer-refresh', error);
       return {
         status: classification.ambiguous ? 'ambiguous' : 'error',
         response: null,
         error: { kind: classification.kind, code: classification.code, action: classification.action, message: error?.message || String(error) },
+      };
+    }
+  }
+
+  async function relistExpiredAuctions(options = {}) {
+    const service = runtime?.services?.Item;
+    if (typeof service?.relistExpiredAuctions !== 'function') {
+      return { status: 'unsupported', response: null, error: null };
+    }
+    const permitError = consumeRequestPermit('bulk-relist', options.requestPermit);
+    if (permitError) return { status: 'blocked', response: null, error: permitError };
+    try {
+      const response = await observeResult(service.relistExpiredAuctions(), options.observerContext || {});
+      const summary = response === undefined || response === null ? null : responseSummary(response);
+      if (summary?.success === false) {
+        const classification = await classifyPacingResult('bulk-relist', response || {});
+        return {
+          status: 'rejected', response: summary,
+          error: { kind: classification.kind, code: classification.code, action: classification.action },
+        };
+      }
+      await recordPacingSuccess('bulk-relist');
+      return { status: 'accepted', response: summary, error: null };
+    } catch (error) {
+      const classification = await classifyPacingResult('bulk-relist', error);
+      return {
+        status: classification.ambiguous ? 'ambiguous' : 'error',
+        response: null,
+        error: {
+          kind: classification.kind,
+          code: classification.code,
+          action: classification.action,
+          message: error?.message || String(error),
+        },
       };
     }
   }
@@ -582,9 +729,9 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
       || typeof service?.searchTransferMarket !== 'function') {
       return { status: 'unsupported', request: normalizedRequest, response: null, candidates: [], error: null };
     }
-    const budgetError = await requestBudgetError('market-search');
-    if (budgetError) {
-      return { status: 'blocked', request: normalizedRequest, response: null, candidates: [], error: budgetError };
+    const pacingError = await requestPacingError('market-search', { wait: options.wait });
+    if (pacingError) {
+      return { status: 'blocked', request: normalizedRequest, response: null, candidates: [], error: pacingError };
     }
     try {
       const criteria = new runtime.UTSearchCriteriaDTO();
@@ -600,12 +747,13 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
       );
       const summary = responseSummary(response);
       if (!summary.success) {
-        const classification = classifyTradeError(response || {});
+        const classification = await classifyPacingResult('market-search', response || {});
         return {
           status: 'rejected', request: normalizedRequest, response: summary, candidates: [],
           error: { kind: classification.kind, code: classification.code, action: classification.action },
         };
       }
+      await recordPacingSuccess('market-search');
       const inventory = createEaInventoryAdapter(runtime);
       const candidates = Array.from(response?.data?.items || []).map((item) => {
         rememberMarketItem(item);
@@ -613,7 +761,7 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
       });
       return { status: 'completed', request: normalizedRequest, response: summary, candidates, error: null };
     } catch (error) {
-      const classification = classifyTradeError(error);
+      const classification = await classifyPacingResult('market-search', error);
       return {
         status: classification.ambiguous ? 'ambiguous' : 'error',
         request: normalizedRequest,
@@ -651,21 +799,24 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
         error: { kind: 'price-changed', code: null, action: 'refresh-and-skip' },
       };
     }
-    const budgetError = await requestBudgetError('buy');
-    if (budgetError) {
-      return { status: 'blocked', item, tradeId: Number(ref.tradeId), price, response: null, error: budgetError };
+    const permitError = consumeRequestPermit('buy', options.requestPermit);
+    if (permitError) {
+      return { status: 'blocked', item, tradeId: Number(ref.tradeId), price, response: null, error: permitError };
     }
     try {
       const response = await observeResult(service.bid(liveItem, price), options.observerContext || {});
       const summary = responseSummary(response);
-      if (summary.success) return { status: 'accepted', item, tradeId: Number(ref.tradeId), price, response: summary, error: null };
-      const classification = classifyTradeError(response || {});
+      if (summary.success) {
+        await recordPacingSuccess('buy');
+        return { status: 'accepted', item, tradeId: Number(ref.tradeId), price, response: summary, error: null };
+      }
+      const classification = await classifyPacingResult('buy', response || {});
       return {
         status: 'rejected', item, tradeId: Number(ref.tradeId), price, response: summary,
         error: { kind: classification.kind, code: classification.code, action: classification.action },
       };
     } catch (error) {
-      const classification = classifyTradeError(error);
+      const classification = await classifyPacingResult('buy', error);
       return {
         status: classification.ambiguous ? 'ambiguous' : 'error',
         item,
@@ -691,22 +842,23 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
     try {
       const steps = [];
       for (const method of available) {
-        const budgetError = await requestBudgetError('purchase-refresh');
-        if (budgetError) return { status: 'blocked', response: null, steps, error: budgetError };
+        const pacingError = await requestPacingError('purchase-refresh');
+        if (pacingError) return { status: 'blocked', response: null, steps, error: pacingError };
         const response = await observeResult(service[method](), options.observerContext || {});
         const summary = responseSummary(response);
         steps.push({ method, response: summary });
         if (!summary.success) {
-          const classification = classifyTradeError(response || {});
+          const classification = await classifyPacingResult('purchase-refresh', response || {});
           return {
             status: 'rejected', response: summary, steps,
             error: { kind: classification.kind, code: classification.code, action: classification.action },
           };
         }
       }
+      await recordPacingSuccess('purchase-refresh');
       return { status: 'completed', response: steps[0]?.response || null, steps, error: null };
     } catch (error) {
-      const classification = classifyTradeError(error);
+      const classification = await classifyPacingResult('purchase-refresh', error);
       return {
         status: classification.ambiguous ? 'ambiguous' : 'error',
         response: null,
@@ -807,16 +959,17 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
     if (!liveItem) return { status: 'not-found', item: null, destination, response: null, error: null };
     if (typeof service?.move !== 'function') return { status: 'unsupported', item, destination, response: null, error: null };
     const pile = runtime?.ItemPile?.[destination.toUpperCase()] ?? destination;
-    const budgetError = await requestBudgetError('purchase-route');
-    if (budgetError) return { status: 'blocked', item, destination, response: null, error: budgetError };
+    const permitError = consumeRequestPermit('purchase-route', options.requestPermit);
+    if (permitError) return { status: 'blocked', item, destination, response: null, error: permitError };
     try {
       const response = await observeResult(service.move(liveItem, pile), options.observerContext || {});
       const summary = responseSummary(response);
       if (summary.success) {
+        await recordPacingSuccess('purchase-route');
         if (key) marketItems.delete(key);
         return { status: 'completed', item: { ...item, pile: destination }, destination, response: summary, error: null };
       }
-      const classification = classifyTradeError(response || {});
+      const classification = await classifyPacingResult('purchase-route', response || {});
       return {
         status: classification.kind === 'destination-full' ? 'destination-full' : classification.kind === 'card-in-trade' ? 'moved' : 'rejected',
         item,
@@ -825,7 +978,7 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
         error: { kind: classification.kind, code: classification.code, action: classification.action },
       };
     } catch (error) {
-      const classification = classifyTradeError(error);
+      const classification = await classifyPacingResult('purchase-route', error);
       return {
         status: classification.ambiguous ? 'ambiguous' : 'error',
         item,
@@ -837,11 +990,14 @@ export function createEaTradeAdapter(runtime, adapterOptions = {}) {
   }
 
   return Object.freeze({
+    acquireRequestPermit,
     inspectCapabilities,
     inspectListingCandidates,
     inspectListingItem,
+    inspectBulkRelistSnapshot,
     inspectPriceLimits,
     listItem,
+    relistExpiredAuctions,
     refreshTransferItems,
     searchMarket,
     buyNowItem,

@@ -44,6 +44,15 @@ function transferRepriceJob() {
   }, { now: 1 });
 }
 
+function bulkRelistJob() {
+  return normalizeTradeJob({
+    id: 'bulk-relist-once', name: 'Re-list all once', type: 'bulk-relist', enabled: true, armed: true,
+    schedule: { type: 'once', runAt: 60_000 },
+    misfirePolicy: { type: 'skip' },
+    policy: { relistDelaySeconds: [3, 8] },
+  }, { now: 1 });
+}
+
 describe('Guarded scheduled Trade Job selection', () => {
   it('keeps scheduled Buy unavailable unless its separate gate is enabled', () => {
     const job = buyJob();
@@ -59,7 +68,7 @@ describe('Guarded scheduled Trade Job selection', () => {
     expect(selectGuardedScheduledTradeJob(snapshot, { scheduledBuyEnabled: true })).toMatchObject({
       ready: true,
       job,
-      requiredText: 'RUN BUY ONCE 1 RESERVE 100000',
+      approval: { action: 'enable-trade-jobs', jobCount: 1, jobIds: [job.id], totalRuns: 1 },
     });
   });
 
@@ -72,7 +81,7 @@ describe('Guarded scheduled Trade Job selection', () => {
     expect(selectGuardedScheduledTradeJob(snapshot)).toMatchObject({
       ready: false,
       reason: 'scheduled-transfer-reprice-validation-gate-disabled',
-      requiredText: null,
+      approval: null,
     });
     expect(summarizeGuardedScheduledTradeSelection(snapshot)).toEqual({
       ready: false,
@@ -82,12 +91,12 @@ describe('Guarded scheduled Trade Job selection', () => {
       jobIds: [],
       jobTypes: [],
       totalRuns: 0,
-      requiredText: null,
+      approval: null,
     });
     expect(selectGuardedScheduledTradeJob(snapshot, { scheduledTransferRepriceEnabled: true })).toMatchObject({
       ready: true,
       job,
-      requiredText: 'RUN REPRICE ONCE 1',
+      approval: { action: 'enable-trade-jobs', jobIds: [job.id] },
     });
     expect(summarizeGuardedScheduledTradeSelection(snapshot, { scheduledTransferRepriceEnabled: true })).toEqual({
       ready: true,
@@ -97,7 +106,9 @@ describe('Guarded scheduled Trade Job selection', () => {
       jobIds: [job.id],
       jobTypes: ['listing'],
       totalRuns: 1,
-      requiredText: 'RUN REPRICE ONCE 1',
+      approval: {
+        risk: 'attention', action: 'enable-trade-jobs', jobCount: 1, jobIds: [job.id], totalRuns: 1,
+      },
     });
     expect(selectGuardedScheduledTradeJob({
       ...snapshot,
@@ -108,7 +119,7 @@ describe('Guarded scheduled Trade Job selection', () => {
     });
   });
 
-  it('validates mixed Buy and Listing Jobs under one bounded session confirmation', () => {
+  it('validates mixed Buy and Listing Jobs under one bounded session approval', () => {
     const buy = buyJob();
     const listing = listingJob();
     expect(selectGuardedScheduledTradeJob({
@@ -123,7 +134,43 @@ describe('Guarded scheduled Trade Job selection', () => {
       job: null,
       jobs: [buy, listing],
       totalRuns: 2,
-      requiredText: 'ENABLE 2 TRADE JOBS FOR 2 RUNS',
+      approval: { action: 'enable-trade-jobs', jobCount: 2, jobIds: [buy.id, listing.id], totalRuns: 2 },
+    });
+  });
+
+  it('requires the scheduled bulk Re-list All gate and describes its aggregate scope', () => {
+    const job = bulkRelistJob();
+    const snapshot = {
+      jobs: [job],
+      runtimes: { [job.id]: { nextRunAt: job.schedule.runAt } },
+    };
+    expect(selectGuardedScheduledTradeJob(snapshot)).toMatchObject({
+      ready: false,
+      reason: 'scheduled-bulk-relist-validation-gate-disabled',
+    });
+    expect(selectGuardedScheduledTradeJob(snapshot, { scheduledBulkRelistEnabled: true })).toMatchObject({
+      ready: true,
+      job,
+      gates: [{ approval: { action: 'bulk-relist', scope: 'all-unsold', itemLimit: 100 } }],
+      approval: { action: 'enable-trade-jobs', jobIds: [job.id], totalRuns: 1 },
+    });
+  });
+
+  it('validates Buy, Listing, and bulk Re-list All under one bounded session approval', () => {
+    const jobs = [buyJob(), listingJob(), bulkRelistJob()];
+    const selection = selectGuardedScheduledTradeJob({
+      jobs,
+      runtimes: Object.fromEntries(jobs.map((job) => [job.id, { nextRunAt: job.schedule.runAt }])),
+      safety: { minimumRetainedCoins: 100000 },
+    }, {
+      scheduledBuyEnabled: true,
+      scheduledBulkRelistEnabled: true,
+    });
+    expect(selection).toMatchObject({
+      ready: true,
+      jobs,
+      totalRuns: 3,
+      approval: { jobCount: 3, jobIds: jobs.map((job) => job.id), totalRuns: 3 },
     });
   });
 
@@ -144,11 +191,11 @@ describe('Guarded scheduled Trade Job selection', () => {
     })).toMatchObject({
       ready: true,
       job: listing,
-      requiredText: 'RUN ONCE 1',
+      approval: { action: 'enable-trade-jobs', jobIds: [listing.id] },
     });
   });
 
-  it('derives exact two-item confirmations for Club, Transfer, and Buy Jobs', () => {
+  it('describes exact two-item approvals for Club, Transfer, and Buy Jobs', () => {
     const club = { ...listingJob(), policy: { ...listingJob().policy, maxListings: 2 } };
     const transfer = { ...transferRepriceJob(), policy: { ...transferRepriceJob().policy, maxListings: 2 } };
     const buy = {
@@ -167,12 +214,12 @@ describe('Guarded scheduled Trade Job selection', () => {
       safety: { minimumRetainedCoins: 100000 },
     }, options);
 
-    expect(selection(club)).toMatchObject({ ready: true, requiredText: 'RUN ONCE 2' });
+    expect(selection(club)).toMatchObject({ ready: true, approval: { jobIds: [club.id], totalRuns: 1 } });
     expect(selection(transfer, { scheduledTransferRepriceEnabled: true })).toMatchObject({
-      ready: true, requiredText: 'RUN REPRICE ONCE 2',
+      ready: true, approval: { jobIds: [transfer.id], totalRuns: 1 },
     });
     expect(selection(buy, { scheduledBuyEnabled: true })).toMatchObject({
-      ready: true, requiredText: 'RUN BUY ONCE 2 RESERVE 100000',
+      ready: true, approval: { jobIds: [buy.id], totalRuns: 1 },
     });
   });
 });

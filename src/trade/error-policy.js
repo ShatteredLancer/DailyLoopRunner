@@ -37,9 +37,6 @@ export function classifyTradeError(error = {}) {
   const code = errorCode(error);
   const message = messageText(error);
   const text = `${String(error?.kind || '')} ${message}`.toLowerCase();
-  if (/request-budget-exhausted/.test(text)) {
-    return { kind: 'request-budget-exhausted', code, action: 'wait-until-budget-reset', retryable: false, opensCircuit: false, disarm: false, ambiguous: false };
-  }
   if (code === 427) {
     return {
       kind: 'auction-operation-blocked',
@@ -53,7 +50,7 @@ export function classifyTradeError(error = {}) {
     };
   }
   if (code === 429 || /too many requests|rate.?limit/.test(text)) {
-    return { kind: 'rate-limit', code, action: 'stop-and-cooldown', retryable: false, opensCircuit: true, disarm: false, ambiguous: false };
+    return { kind: 'rate-limit', code, action: 'stop-and-cooldown', retryable: false, opensCircuit: false, disarm: false, ambiguous: false };
   }
   if (code === 401 || /session expired|not authenticated|unauthori[sz]ed/.test(text)) {
     return { kind: 'session-expired', code, action: 'wait-session', retryable: false, opensCircuit: true, disarm: false, ambiguous: false };
@@ -115,6 +112,7 @@ export function reduceTradeCircuit(stateInput, event = {}, configInput = {}) {
   if (event.type !== 'failure') return state;
 
   const classification = event.classification || classifyTradeError(event.error);
+  if (classification.kind === 'rate-limit') return state;
   const windowStart = now - Math.max(1, finiteNumber(config.windowMs, DEFAULT_CIRCUIT_CONFIG.windowMs));
   const failureTimes = [...state.failureTimes.filter((time) => time >= windowStart), now];
   const threshold = Math.max(1, Math.floor(finiteNumber(config.failureThreshold, DEFAULT_CIRCUIT_CONFIG.failureThreshold)));

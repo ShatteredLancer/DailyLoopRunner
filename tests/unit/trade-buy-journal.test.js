@@ -28,8 +28,7 @@ describe('Trade Buy persistent journal', () => {
       privateContext: 'secret',
     });
     first.checkpoint('buy-run-1', {
-      phase: 'chunk-budget-waiting', chunkIndex: 2, offset: 2, quantity: 2,
-      required: 28, remaining: 20, retryAt: 6000,
+      phase: 'buy-request-permit-waiting', chunkIndex: 2, offset: 2, quantity: 2, retryAt: 6000,
     });
 
     const reloaded = createTradeBuyJournal({ storage, key: 'journal', now: () => 2000 });
@@ -38,11 +37,11 @@ describe('Trade Buy persistent journal', () => {
       jobId: 'buy-job-1',
       expectedDestination: 'transfer',
       status: 'active',
-      phase: 'chunk-budget-waiting',
+      phase: 'buy-request-permit-waiting',
       events: [
         { phase: 'started' },
         { phase: 'buy-request-started', item: { id: 70, definitionId: 8401, pile: 'market' }, tradeId: 700, price: 900 },
-        { phase: 'chunk-budget-waiting', chunkIndex: 2, offset: 2, quantity: 2, required: 28, remaining: 20, retryAt: 6000 },
+        { phase: 'buy-request-permit-waiting', chunkIndex: 2, offset: 2, quantity: 2, retryAt: 6000 },
       ],
     });
     expect(JSON.stringify(reloaded.snapshot())).not.toContain('secret');
@@ -127,6 +126,58 @@ describe('Trade Buy persistent journal', () => {
     expect(() => completed.begin({
       runId: 'buy-next', jobId: 'buy-job', expectedDestination: 'auto', requested: 2,
     })).not.toThrow();
+  });
+
+  it('reserves a deferred Journal for only its persisted continuation Run', () => {
+    let continuationRunId = 'buy-sliced';
+    const journal = createTradeBuyJournal({
+      storage: memoryStorage(),
+      key: 'journal-deferred',
+      now: () => 1000,
+      isContinuationActive: (runId) => runId === continuationRunId,
+    });
+    journal.begin({ runId: 'buy-sliced', jobId: 'buy-job', expectedDestination: 'auto', requested: 2 });
+    journal.checkpoint('buy-sliced', {
+      phase: 'item-finished', itemIndex: 1, status: 'purchased', mutationBoundaryCrossed: true,
+    });
+    journal.finish('buy-sliced', { phase: 'slice-deferred', status: 'deferred' });
+
+    expect(journal.inspectRecovery()).toMatchObject({
+      active: false, deferred: true, reserved: true, canResume: false,
+      canSupersede: false, reason: 'buy-journal-continuation-reserved', uncertainMutation: false,
+    });
+    expect(journal.inspectRecovery({ runId: 'buy-sliced' })).toMatchObject({
+      canResume: true, canSupersede: true,
+    });
+    expect(() => journal.begin({ runId: 'different-run', jobId: 'buy-job' }))
+      .toThrow('buy-journal-continuation-reserved');
+    expect(() => journal.begin({ runId: 'buy-sliced', jobId: 'buy-job' })).not.toThrow();
+    expect(journal.snapshot()).toMatchObject({ runId: 'buy-sliced', status: 'deferred' });
+
+    continuationRunId = null;
+    expect(journal.inspectRecovery()).toMatchObject({ reserved: false, canSupersede: true });
+    expect(() => journal.begin({ runId: 'replacement-run', jobId: 'buy-job' })).not.toThrow();
+  });
+
+  it('resumes an active Journal only when a matching checkpoint was persisted first', () => {
+    let continuationRunId = 'buy-active-sliced';
+    const journal = createTradeBuyJournal({
+      storage: memoryStorage(),
+      key: 'journal-active-continuation',
+      now: () => 1000,
+      isContinuationActive: (runId) => runId === continuationRunId,
+    });
+    journal.begin({ runId: continuationRunId, jobId: 'buy-job', requested: 2 });
+    journal.checkpoint(continuationRunId, {
+      phase: 'item-finished', itemIndex: 1, status: 'purchased', mutationBoundaryCrossed: true,
+    });
+    expect(journal.inspectRecovery({ runId: continuationRunId })).toMatchObject({
+      active: true, reserved: true, canResume: true, canSupersede: true, uncertainMutation: false,
+    });
+    continuationRunId = null;
+    expect(journal.inspectRecovery()).toMatchObject({
+      active: true, reserved: false, canSupersede: false, reason: 'buy-journal-mutation-review-required',
+    });
   });
 
   it('reconciles only an exact uncertain item already present at its recorded destination', () => {

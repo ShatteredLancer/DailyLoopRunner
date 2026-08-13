@@ -52,10 +52,6 @@ function setup(overrides = {}) {
   });
   const operationCoordinator = overrides.options?.operationCoordinator || createOperationCoordinator();
   const onReceipt = vi.fn();
-  const requestBudget = {
-    inspect: () => ({ remaining: 30 }),
-    reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
-  };
   const executor = createGuardedManualBuyExecutor({
     operationCoordinator,
     lease,
@@ -67,16 +63,15 @@ function setup(overrides = {}) {
     createRunId: () => 'manual-buy-run',
     sleep: async () => {},
     onReceipt,
-    requestBudget,
     ...overrides.options,
   });
   return { adapter, buyPreview, executor, lease, operationCoordinator, onReceipt };
 }
 
 describe('Guarded manual Buy executor', () => {
-  it('freshens Preview and completes exactly one confirmed purchase', async () => {
+  it('freshens Preview and completes exactly one approved purchase', async () => {
     const { adapter, buyPreview, executor, onReceipt } = setup();
-    const receipt = await executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' });
+    const receipt = await executor.execute({ job: job(), approved: true });
     expect(receipt).toMatchObject({
       runId: 'manual-buy-run', status: 'completed', requested: 1, succeeded: 1,
       receipts: expect.arrayContaining([
@@ -90,19 +85,14 @@ describe('Guarded manual Buy executor', () => {
     expect(onReceipt).toHaveBeenCalledWith(receipt, expect.objectContaining({ preview: expect.objectContaining({ liveExecutionAllowed: false }) }));
   });
 
-  it('requires the route-specific confirmation and searches only owned definitions for Transfer', async () => {
+  it('uses the approved route and searches only owned definitions for Transfer', async () => {
     const owned = { id: 1, definitionId: 8401, pile: 'club', type: 'player', rating: 84, tier: 'gold', rare: true };
     const adapter = createFakeTradeAdapter({ coins: 5000, items: [owned], marketItems: [marketItem()] });
     const { executor, onReceipt } = setup({ adapter });
-    await expect(executor.execute({
-      job: job(),
-      expectedDestination: 'transfer',
-      confirmationText: 'BUY 1 MAX 1000',
-    })).rejects.toThrow('BUY 1 TO TRANSFER MAX 1000');
     const receipt = await executor.execute({
       job: job(),
       expectedDestination: 'transfer',
-      confirmationText: 'BUY 1 TO TRANSFER MAX 1000',
+      approved: true,
     });
     expect(receipt).toMatchObject({
       status: 'completed',
@@ -120,11 +110,11 @@ describe('Guarded manual Buy executor', () => {
     expect(adapter.calls.filter((call) => call.method === 'inspectDefinitionOwnership')).toHaveLength(1);
   });
 
-  it('requires exact confirmation and a locked Scheduler', async () => {
+  it('requires explicit approval and a locked Scheduler', async () => {
     const { executor } = setup();
-    await expect(executor.execute({ job: job(), confirmationText: 'BUY 1' })).rejects.toThrow('BUY 1 MAX 1000');
+    await expect(executor.execute({ job: job() })).rejects.toThrow('explicit approval');
     const locked = setup({ options: { getSchedulerState: () => ({ paused: false, liveExecutionEnabled: true }) } });
-    await expect(locked.executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' })).resolves.toMatchObject({
+    await expect(locked.executor.execute({ job: job(), approved: true })).resolves.toMatchObject({
       status: 'blocked', reason: 'manual-buy-scheduler-must-be-locked', requested: 0,
     });
     expect(locked.adapter.calls.some((call) => call.method === 'searchMarket')).toBe(false);
@@ -138,7 +128,7 @@ describe('Guarded manual Buy executor', () => {
       options: { inspectRecovery },
     });
     await expect(executor.execute({
-      job: job(), confirmationText: 'BUY 1 MAX 1000',
+      job: job(), approved: true,
     })).resolves.toMatchObject({
       status: 'blocked', reason: 'listing-journal-mutation-review-required', requested: 0,
     });
@@ -165,7 +155,7 @@ describe('Guarded manual Buy executor', () => {
     });
     const { executor, buyPreview } = setup({ adapter, options: { journal } });
 
-    await expect(executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' })).resolves.toMatchObject({
+    await expect(executor.execute({ job: job(), approved: true })).resolves.toMatchObject({
       status: 'blocked', reason: 'buy-journal-reconciled-retry-required', requested: 0,
     });
     expect(journal.inspectRecovery()).toMatchObject({ canSupersede: true });
@@ -179,33 +169,33 @@ describe('Guarded manual Buy executor', () => {
     oldLease.acquire({ runId: 'old-run', jobId: 'old-job' });
     const lease = createTradeRunLease({ storage: memory, key: 'lease', ownerId: 'tab-new', now: () => 1000, createToken: () => 'new' });
     const { executor, buyPreview, adapter } = setup({ lease });
-    await expect(executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' })).resolves.toMatchObject({
+    await expect(executor.execute({ job: job(), approved: true })).resolves.toMatchObject({
       status: 'blocked', reason: 'lease-held', requested: 0,
     });
     expect(buyPreview.preview).not.toHaveBeenCalled();
     expect(adapter.calls.some((call) => call.method === 'buyNowItem')).toBe(false);
   });
 
-  it('waits for chunk capacity and then executes without another confirmation', async () => {
-    let time = 1000;
-    const requestBudget = {
-      reserve: vi.fn()
-        .mockResolvedValueOnce({ ready: false, remaining: 11, retryAt: 2000 })
-        .mockResolvedValueOnce({ ready: true, release: vi.fn(async () => {}) }),
-    };
-    const { executor, buyPreview, adapter } = setup({
+  it('passes Job, Run and Stop state to the shared request pacer context', async () => {
+    const pacedAdapter = createFakeTradeAdapter({ coins: 5000, marketItems: [marketItem()] });
+    const getTradeAdapter = vi.fn(() => pacedAdapter);
+    const { executor, buyPreview } = setup({
+      adapter: pacedAdapter,
       options: {
-        requestBudget,
-        now: () => time,
-        sleep: async (ms) => { time += ms; },
+        getTradeAdapter,
       },
     });
-    await expect(executor.execute({ job: job(), confirmationText: 'BUY 1 MAX 1000' })).resolves.toMatchObject({
+    await expect(executor.execute({ job: job(), approved: true })).resolves.toMatchObject({
       status: 'completed', requested: 1, succeeded: 1,
     });
     expect(buyPreview.preview).toHaveBeenCalledOnce();
-    expect(requestBudget.reserve).toHaveBeenCalledTimes(2);
-    expect(adapter.calls.some((call) => call.method === 'searchMarket')).toBe(true);
+    expect(pacedAdapter.calls.some((call) => call.method === 'searchMarket')).toBe(true);
+    expect(getTradeAdapter).toHaveBeenCalledWith({
+      pacingContext: expect.objectContaining({
+        jobId: 'buy-84', runId: 'manual-buy-run', ownerId: '', policy: expect.objectContaining({ quantity: 1 }),
+        shouldStop: expect.any(Function),
+      }),
+    });
   });
 
   it('reports Journal-backed transaction and chunk progress to the caller', async () => {
@@ -213,7 +203,7 @@ describe('Guarded manual Buy executor', () => {
     const { executor } = setup();
     const receipt = await executor.execute({
       job: job(),
-      confirmationText: 'BUY 1 MAX 1000',
+      approved: true,
       onProgress,
     });
 
@@ -228,7 +218,7 @@ describe('Guarded manual Buy executor', () => {
     ]));
   });
 
-  it('executes two adjacent rating lanes under one confirmation and one Lease', async () => {
+  it('executes two adjacent rating lanes under one approval and one Lease', async () => {
     const adapter = createFakeTradeAdapter({
       coins: 5000,
       marketItems: [
@@ -244,14 +234,9 @@ describe('Guarded manual Buy executor', () => {
       { rating: 84, definitionIds: [8401], source: 'cache' },
       { rating: 85, definitionIds: [8501], source: 'cache' },
     ];
-    const requestBudget = {
-      inspect: () => ({ remaining: 30 }),
-      reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
-    };
     const { executor } = setup({
       adapter,
       options: {
-        requestBudget,
         playerCatalogProvider: { load: vi.fn(async () => ({ ok: true, lanes })) },
         buyPreview: {
           preview: vi.fn(async (input) => ({
@@ -263,11 +248,10 @@ describe('Guarded manual Buy executor', () => {
       },
     });
 
-    const receipt = await executor.execute({ job: dualJob, confirmationText: 'BUY 2 MAX 1000' });
+    const receipt = await executor.execute({ job: dualJob, approved: true });
 
     expect(receipt).toMatchObject({ status: 'completed', requested: 2, succeeded: 2 });
     expect(adapter.calls.filter((call) => call.method === 'buyNowItem')).toHaveLength(2);
-    expect(requestBudget.reserve).toHaveBeenCalledWith(28);
   });
 
   it('executes four items as two chunks and preserves rating quotas across chunks', async () => {
@@ -285,13 +269,9 @@ describe('Guarded manual Buy executor', () => {
         { ...marketItem(73, 8601, 900), rating: 86 },
       ],
     });
-    const requestBudget = {
-      reserve: vi.fn(async () => ({ ready: true, release: vi.fn(async () => {}) })),
-    };
     const { executor } = setup({
       adapter,
       options: {
-        requestBudget,
         getTradeAdapter: () => adapter,
         playerCatalogProvider: { load: vi.fn(async () => ({ ok: true, lanes })) },
         buyPreview: {
@@ -309,10 +289,9 @@ describe('Guarded manual Buy executor', () => {
       totalBudget: 4000,
     });
 
-    const receipt = await executor.execute({ job: quotaJob, confirmationText: 'BUY 4 MAX 1000' });
+    const receipt = await executor.execute({ job: quotaJob, approved: true });
     const purchases = receipt.receipts.filter((entry) => entry.status === 'purchased');
     expect(receipt).toMatchObject({ status: 'completed', requested: 4, succeeded: 4, skipped: 0 });
-    expect(requestBudget.reserve.mock.calls).toEqual([[28], [28]]);
     expect(purchases.map((entry) => entry.index)).toEqual([1, 2, 3, 4]);
     expect(Object.fromEntries([84, 85, 86].map((rating) => [
       rating,
@@ -332,7 +311,7 @@ describe('Guarded manual Buy executor', () => {
     });
 
     await expect(executor.execute({
-      job: job(), confirmationText: 'BUY 1 MAX 1000',
+      job: job(), approved: true,
     })).rejects.toThrow('buy-journal-mutation-review-required');
 
     expect(lease.inspect().lease).toBeNull();

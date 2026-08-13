@@ -34,7 +34,7 @@ describe('Trade Listing persistent journal', () => {
       mutationBoundaryCrossed: true,
     });
     journal.checkpoint('listing-run', {
-      phase: 'chunk-started', chunkIndex: 2, offset: 2, quantity: 2, required: 12,
+      phase: 'listing-request-permit-waiting', chunkIndex: 2, offset: 2, quantity: 2, retryAt: 6000,
     });
     journal.checkpoint('listing-run', {
       phase: 'item-finished',
@@ -52,7 +52,9 @@ describe('Trade Listing persistent journal', () => {
         { index: 2, status: 'pending', mutationBoundaryCrossed: false, item: { id: 2, definitionId: 102, pile: 'club' } },
       ],
       events: expect.arrayContaining([
-        expect.objectContaining({ phase: 'chunk-started', chunkIndex: 2, offset: 2, quantity: 2, required: 12 }),
+        expect.objectContaining({
+          phase: 'listing-request-permit-waiting', chunkIndex: 2, offset: 2, quantity: 2, retryAt: 6000,
+        }),
       ]),
     });
     expect(reloaded.inspectRecovery()).toMatchObject({
@@ -103,5 +105,51 @@ describe('Trade Listing persistent journal', () => {
     expect(() => completed.begin({
       runId: 'listing-next', jobId: 'listing-job', source: 'club', requested: 2,
     })).not.toThrow();
+  });
+
+  it('reserves a deferred Journal for only its persisted continuation Run', () => {
+    let continuationRunId = 'listing-sliced';
+    const journal = createTradeListingJournal({
+      storage: memoryStorage(),
+      key: 'listing-deferred',
+      now: () => 1000,
+      isContinuationActive: (runId) => runId === continuationRunId,
+    });
+    journal.begin({ runId: 'listing-sliced', jobId: 'listing-job', source: 'club', requested: 2 });
+    journal.checkpoint('listing-sliced', {
+      phase: 'item-finished', itemIndex: 1, status: 'listed', mutationBoundaryCrossed: true,
+    });
+    journal.finish('listing-sliced', { phase: 'slice-deferred', status: 'deferred' });
+
+    expect(journal.inspectRecovery()).toMatchObject({
+      active: false, deferred: true, reserved: true, canResume: false,
+      canSupersede: false, reason: 'listing-journal-continuation-reserved', uncertainMutation: false,
+    });
+    expect(journal.inspectRecovery({ runId: 'listing-sliced' })).toMatchObject({
+      canResume: true, canSupersede: true,
+    });
+    expect(() => journal.begin({ runId: 'different-run', jobId: 'listing-job' }))
+      .toThrow('listing-journal-continuation-reserved');
+    expect(() => journal.begin({ runId: 'listing-sliced', jobId: 'listing-job' })).not.toThrow();
+
+    continuationRunId = null;
+    expect(journal.inspectRecovery()).toMatchObject({ reserved: false, canSupersede: true });
+  });
+
+  it('does not let a persisted continuation hide an uncertain active mutation', () => {
+    const journal = createTradeListingJournal({
+      storage: memoryStorage(),
+      key: 'listing-active-uncertain',
+      now: () => 1000,
+      isContinuationActive: (runId) => runId === 'listing-active-sliced',
+    });
+    journal.begin({ runId: 'listing-active-sliced', jobId: 'listing-job', source: 'club', requested: 2 });
+    journal.checkpoint('listing-active-sliced', {
+      phase: 'listing-request-started', itemIndex: 2, status: 'mutation-pending', mutationBoundaryCrossed: true,
+    });
+    expect(journal.inspectRecovery({ runId: 'listing-active-sliced' })).toMatchObject({
+      active: true, reserved: false, canResume: false, uncertainMutation: true,
+      canSupersede: false, reason: 'listing-journal-mutation-review-required',
+    });
   });
 });

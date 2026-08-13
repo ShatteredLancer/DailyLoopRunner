@@ -10,7 +10,7 @@ function sanitizedListingArtifact(artifact) {
       createdAt: value.confirmation.createdAt,
       expiresAt: value.confirmation.expiresAt,
       itemCount: value.confirmation.itemCount,
-      requiredText: value.confirmation.requiredText,
+      action: value.confirmation.action,
     };
   }
   return value;

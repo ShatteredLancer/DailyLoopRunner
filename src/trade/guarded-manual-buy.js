@@ -6,8 +6,6 @@ import {
   normalizeExpectedBuyDestination,
 } from './buy-destination.js';
 import { inspectManualBuyValidationJob } from './manual-buy-validation.js';
-import { manualBuyValidationConfirmation } from './manual-buy-validation.js';
-import { tradeBuyRequestReserve } from './request-budget.js';
 import { createTradeChunkCoordinator } from './chunk-coordinator.js';
 import { finalizeChunkedBuyReceipt } from './buy-chunk-receipt.js';
 
@@ -20,7 +18,6 @@ export function createGuardedManualBuyExecutor(options = {}) {
   if (!lease?.acquire || !lease?.heartbeat || !lease?.release) throw new TypeError('Trade Run Lease is required');
   if (typeof buyPreview?.preview !== 'function') throw new TypeError('Buy Preview is required');
   if (typeof options.getTradeAdapter !== 'function') throw new TypeError('getTradeAdapter is required');
-  if (typeof options.requestBudget?.reserve !== 'function') throw new TypeError('Trade request budget is required');
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
   const sleep = typeof options.sleep === 'function' ? options.sleep : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const createRunId = typeof options.createRunId === 'function'
@@ -56,10 +53,7 @@ export function createGuardedManualBuyExecutor(options = {}) {
     if (!gate.ready) return blockedReceipt(input.job, runId, gate.reason, startedAt);
     const expectedDestination = normalizeExpectedBuyDestination(input.expectedDestination || 'auto');
     if (!expectedDestination) return blockedReceipt(gate.job, runId, 'buy-validation-destination-invalid', startedAt);
-    const requiredText = manualBuyValidationConfirmation(gate.maxPrice, expectedDestination, gate.job.policy.quantity);
-    if (String(input.confirmationText || '') !== requiredText) {
-      throw new Error(`Confirmation must exactly match ${requiredText}`);
-    }
+    if (input.approved !== true) throw new Error('Manual Buy requires explicit approval');
     const scheduler = options.getSchedulerState?.() || {};
     if (scheduler.paused !== true || scheduler.liveExecutionEnabled === true) {
       return blockedReceipt(gate.job, runId, 'manual-buy-scheduler-must-be-locked', startedAt);
@@ -192,12 +186,7 @@ export function createGuardedManualBuyExecutor(options = {}) {
         return finishReceipt(receipt, { preview }, 'validation-destination-blocked');
       }
 
-      const coordinator = createTradeChunkCoordinator({
-        requestBudget: options.requestBudget,
-        now,
-        sleep,
-        onCheckpoint: recordCheckpoint,
-      });
+      const coordinator = createTradeChunkCoordinator({ now, onCheckpoint: recordCheckpoint });
       let spent = 0;
       let cursor = null;
       let purchasedByRating = {};
@@ -211,14 +200,9 @@ export function createGuardedManualBuyExecutor(options = {}) {
         deadlineAt,
         deadlineReason: 'runtime-limit',
         requested: gate.job.policy.quantity,
-        requestReserve: (quantity) => tradeBuyRequestReserve({
-          ...gate.job,
-          policy: { ...gate.job.policy, quantity },
-        }),
         heartbeat: () => lease.heartbeat(runId) === true,
         shouldStop: () => options.shouldStop?.() === true,
-        executeChunk: async ({ offset, quantity, reservation }) => {
-          adapter = options.getTradeAdapter({ requestBudget: reservation });
+        executeChunk: async ({ offset, quantity }) => {
           const remainingRuntimeMinutes = Math.max(1 / 60_000, (deadlineAt - Number(now())) / 60_000);
           const chunkJob = {
             ...gate.job,
@@ -229,6 +213,15 @@ export function createGuardedManualBuyExecutor(options = {}) {
               maxRuntimeMinutes: Math.min(Number(gate.job.policy.maxRuntimeMinutes), remainingRuntimeMinutes),
             },
           };
+          adapter = options.getTradeAdapter({
+            pacingContext: {
+              policy: chunkJob.policy,
+              jobId: gate.job.id,
+              runId,
+              ownerId: options.ownerId || '',
+              shouldStop: () => options.shouldStop?.() === true,
+            },
+          });
           const transaction = transactionFactory({
             tradeAdapter: adapter,
             playerCatalogProvider: options.playerCatalogProvider,

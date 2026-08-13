@@ -1,7 +1,9 @@
 const RUNTIME_STATES = new Set([
   'disabled', 'armed', 'waiting-time', 'waiting-session', 'waiting-operation',
-  'running', 'cooldown', 'completed', 'missed', 'blocked',
+  'waiting-pace', 'running', 'cooldown', 'completed', 'missed', 'blocked',
 ]);
+
+const TRADE_CONTINUATION_RECEIPT_LIMIT = 32;
 
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
@@ -17,6 +19,48 @@ function nullableEpoch(value) {
   if (value === undefined || value === null || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, number) : null;
+}
+
+function safeClone(value, fallback) {
+  try { return JSON.parse(JSON.stringify(value)); } catch { return fallback; }
+}
+
+function normalizeContinuation(input) {
+  if (!input || typeof input !== 'object' || !input.runId) return null;
+  const counts = Object.fromEntries(Object.entries(input.purchasedByRating || {})
+    .slice(0, 8)
+    .map(([rating, count]) => [String(Number(rating)), Math.max(0, Math.floor(finiteNumber(count)))]));
+  const definitionIndexes = Object.fromEntries(Object.entries(input.cursor?.definitionIndexes || {})
+    .slice(0, 8)
+    .map(([rating, index]) => [String(Number(rating)), Math.max(0, Math.floor(finiteNumber(index)))]));
+  return {
+    schemaVersion: 1,
+    runId: String(input.runId),
+    jobFingerprint: input.jobFingerprint ? String(input.jobFingerprint) : null,
+    scheduledFor: nullableEpoch(input.scheduledFor),
+    startedAt: nullableEpoch(input.startedAt),
+    resumeAt: nullableEpoch(input.resumeAt),
+    yieldedAt: nullableEpoch(input.yieldedAt),
+    sliceCount: Math.max(1, Math.floor(finiteNumber(input.sliceCount, 1))),
+    requested: Math.max(0, Math.floor(finiteNumber(input.requested))),
+    succeeded: Math.max(0, Math.floor(finiteNumber(input.succeeded))),
+    failed: Math.max(0, Math.floor(finiteNumber(input.failed))),
+    skipped: Math.max(0, Math.floor(finiteNumber(input.skipped))),
+    chunkIndex: Math.max(0, Math.floor(finiteNumber(input.chunkIndex))),
+    coinsBefore: input.coinsBefore === null || input.coinsBefore === undefined ? null : finiteNumber(input.coinsBefore),
+    coinsAfter: input.coinsAfter === null || input.coinsAfter === undefined ? null : finiteNumber(input.coinsAfter),
+    spent: Math.max(0, finiteNumber(input.spent)),
+    searches: Math.max(0, Math.floor(finiteNumber(input.searches))),
+    buyAttempts: Math.max(0, Math.floor(finiteNumber(input.buyAttempts))),
+    cursor: input.cursor ? {
+      laneIndex: Math.max(0, Math.floor(finiteNumber(input.cursor.laneIndex))),
+      definitionIndexes,
+    } : null,
+    purchasedByRating: counts,
+    receipts: safeClone(Array.isArray(input.receipts)
+      ? input.receipts.slice(-TRADE_CONTINUATION_RECEIPT_LIMIT)
+      : [], []),
+  };
 }
 
 function formatter(timezone) {
@@ -89,7 +133,7 @@ export function nextTradeRunAt(job = {}, referenceAtInput = Date.now(), options 
   }
   if (schedule.type === 'daily') return nextDailyRunAt(schedule, referenceAt, inclusive);
   if (schedule.type === 'interval') {
-    const period = positiveInteger(schedule.everyMinutes, 60) * 60_000;
+    const period = positiveInteger(schedule.intervalSeconds, 3600) * 1000;
     const anchorAt = Math.max(0, finiteNumber(schedule.anchorAt, job.createdAt));
     if (referenceAt < anchorAt || (inclusive && referenceAt === anchorAt)) return anchorAt;
     const elapsed = referenceAt - anchorAt;
@@ -128,6 +172,7 @@ export function normalizeTradeJobRuntime(input = {}) {
     lastFinishedAt: nullableEpoch(input.lastFinishedAt),
     lastRunId: input.lastRunId ? String(input.lastRunId) : null,
     runCount: Math.max(0, Math.floor(finiteNumber(input.runCount))),
+    continuation: normalizeContinuation(input.continuation),
     updatedAt: Math.max(0, finiteNumber(input.updatedAt)),
   };
 }
@@ -146,11 +191,18 @@ export function evaluateTradeJob(job = {}, runtimeInput = {}, context = {}) {
   if (context.tradeRecoveryReviewRequired === true) {
     return result('blocked', context.tradeRecoveryReason || 'trade-recovery-review-required');
   }
+  if (runtime.continuation) {
+    if (context.sessionReady !== true) return result('waiting-session', context.sessionReason || 'ea-session-unavailable');
+    if (context.operationBusy === true) return result('waiting-operation', context.operationReason || 'another-operation-active');
+    if (context.requestPacingReady === false) return result('cooldown', 'trade-rate-limit-cooldown');
+    if (Number(runtime.continuation.resumeAt || 0) > now) return result('waiting-pace', 'trade-action-pacing');
+    return result('running', null, 'run');
+  }
   if (runtime.nextRunAt === null) return result('completed', null);
   if (runtime.nextRunAt > now) return result('waiting-time', null);
   if (context.sessionReady !== true) return result('waiting-session', context.sessionReason || 'ea-session-unavailable');
   if (context.operationBusy === true) return result('waiting-operation', context.operationReason || 'another-operation-active');
-  if (context.requestBudgetReady === false) return result('cooldown', 'trade-request-budget-insufficient');
+  if (context.requestPacingReady === false) return result('cooldown', 'trade-rate-limit-cooldown');
 
   const lateness = Math.max(0, now - runtime.nextRunAt);
   const tolerance = Math.max(0, finiteNumber(context.tickToleranceMs, 30_000));
@@ -170,7 +222,7 @@ export function advanceTradeJobRuntime(job = {}, runtimeInput = {}, input = {}) 
   const scheduledFor = Math.max(0, finiteNumber(input.scheduledFor, runtime.nextRunAt));
   const nextRunAt = job.schedule?.type === 'window'
     ? null
-    : nextTradeRunAt(job, Math.max(at, scheduledFor + 1), { inclusive: true });
+    : nextTradeRunAt(job, Math.max(at + 1, scheduledFor + 1), { inclusive: true });
   return normalizeTradeJobRuntime({
     ...runtime,
     status: nextRunAt === null ? 'completed' : 'waiting-time',
@@ -181,6 +233,7 @@ export function advanceTradeJobRuntime(job = {}, runtimeInput = {}, input = {}) 
     lastFinishedAt: input.finishedAt ?? at,
     lastRunId: input.runId ?? runtime.lastRunId,
     runCount: runtime.runCount + (input.countRun === false ? 0 : 1),
+    continuation: null,
     updatedAt: at,
   });
 }

@@ -3,7 +3,6 @@ import { createTradeRunReceipt } from './contracts.js';
 export const TRADE_RUN_ITEM_LIMIT = 4;
 export const TRADE_CHUNK_ITEM_LIMIT = 2;
 export const TRADE_CHUNK_WAIT_LIMIT_MS = 15 * 60_000;
-export const TRADE_CHUNK_WAIT_SLICE_MS = 1000;
 
 function boundedInteger(value, fallback, maximum) {
   const number = Math.floor(Number(value));
@@ -27,51 +26,10 @@ function summarizeChunkReceipt(receipt = {}, chunkIndex, offset) {
 }
 
 export function createTradeChunkCoordinator(options = {}) {
-  const requestBudget = options.requestBudget;
-  if (typeof requestBudget?.reserve !== 'function') throw new TypeError('Trade request budget is required');
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
-  const sleep = typeof options.sleep === 'function'
-    ? options.sleep
-    : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const waitSliceMs = Math.max(50, Number(options.waitSliceMs || TRADE_CHUNK_WAIT_SLICE_MS));
-
-  async function waitForReservation(required, input, deadlineAt, chunkIndex) {
-    const deadlineReason = String(input.deadlineReason || 'trade-request-budget-wait-timeout');
-    while (true) {
-      if (input.shouldStop?.() === true) return { ready: false, reason: 'stopped-by-user' };
-      if (input.heartbeat && await input.heartbeat() !== true) {
-        return { ready: false, reason: 'trade-run-lease-lost' };
-      }
-      if (Number(now()) >= deadlineAt) {
-        return { ready: false, reason: deadlineReason };
-      }
-      const reservation = await requestBudget.reserve(required);
-      if (reservation.ready) return reservation;
-      const currentTime = Number(now());
-      if (currentTime >= deadlineAt) return { ready: false, reason: deadlineReason };
-      const retryAt = Number(reservation.retryAt || currentTime + waitSliceMs);
-      const waitUntil = Math.min(deadlineAt, Math.max(currentTime + 1, retryAt));
-      options.onCheckpoint?.({
-        phase: 'chunk-budget-waiting',
-        at: currentTime,
-        chunkIndex,
-        required,
-        remaining: Number(reservation.remaining || 0),
-        retryAt: waitUntil,
-      });
-      while (Number(now()) < waitUntil) {
-        if (input.shouldStop?.() === true) return { ready: false, reason: 'stopped-by-user' };
-        if (input.heartbeat && await input.heartbeat() !== true) {
-          return { ready: false, reason: 'trade-run-lease-lost' };
-        }
-        await sleep(Math.min(waitSliceMs, waitUntil - Number(now())));
-      }
-    }
-  }
 
   async function run(input = {}) {
     if (typeof input.executeChunk !== 'function') throw new TypeError('executeChunk is required');
-    if (typeof input.requestReserve !== 'function') throw new TypeError('requestReserve is required');
     const startedAt = Number(input.startedAt ?? now());
     const requested = boundedInteger(input.requested, 1, TRADE_RUN_ITEM_LIMIT);
     const chunkSize = boundedInteger(input.chunkSize, TRADE_CHUNK_ITEM_LIMIT, TRADE_CHUNK_ITEM_LIMIT);
@@ -79,15 +37,17 @@ export function createTradeChunkCoordinator(options = {}) {
       startedAt + 1,
       Number(input.deadlineAt || startedAt + TRADE_CHUNK_WAIT_LIMIT_MS),
     );
-    const receipts = [];
+    const continuation = input.continuation || null;
+    const receipts = Array.isArray(continuation?.receipts) ? [...continuation.receipts] : [];
     let status = 'completed';
     let reason = null;
-    let succeeded = 0;
-    let failed = 0;
-    let skipped = 0;
-    let coinsBefore = null;
-    let coinsAfter = null;
-    let chunkIndex = 0;
+    let resumeAt = null;
+    let succeeded = Math.max(0, Number(continuation?.succeeded || 0));
+    let failed = Math.max(0, Number(continuation?.failed || 0));
+    let skipped = Math.max(0, Number(continuation?.skipped || 0));
+    let coinsBefore = continuation?.coinsBefore ?? null;
+    let coinsAfter = continuation?.coinsAfter ?? null;
+    let chunkIndex = Math.max(0, Number(continuation?.chunkIndex || 0));
 
     while (succeeded + failed + skipped < requested) {
       if (input.shouldStop?.() === true) {
@@ -98,21 +58,19 @@ export function createTradeChunkCoordinator(options = {}) {
       const offset = succeeded + failed + skipped;
       const quantity = Math.min(chunkSize, requested - offset);
       chunkIndex += 1;
-      const required = Math.max(1, Math.floor(Number(input.requestReserve(quantity)) || 1));
-      options.onCheckpoint?.({ phase: 'chunk-started', at: Number(now()), chunkIndex, offset, quantity, required });
-      const reservation = await waitForReservation(required, input, deadlineAt, chunkIndex);
-      if (!reservation.ready) {
-        status = ['stopped-by-user', 'runtime-limit'].includes(reservation.reason) ? 'stopped' : 'blocked';
-        reason = reservation.reason || 'trade-request-budget-insufficient';
+      options.onCheckpoint?.({ phase: 'chunk-started', at: Number(now()), chunkIndex, offset, quantity });
+      if (input.heartbeat && await input.heartbeat() !== true) {
+        status = 'blocked';
+        reason = 'trade-run-lease-lost';
+        break;
+      }
+      if (Number(now()) >= deadlineAt) {
+        status = 'stopped';
+        reason = String(input.deadlineReason || 'runtime-limit');
         break;
       }
 
-      let receipt;
-      try {
-        receipt = await input.executeChunk({ chunkIndex, offset, quantity, reservation });
-      } finally {
-        try { await reservation.release?.(); } catch { }
-      }
+      const receipt = await input.executeChunk({ chunkIndex, offset, quantity });
       const chunkReceipt = createTradeRunReceipt(receipt || {});
       if (coinsBefore === null) coinsBefore = chunkReceipt.coinsBefore;
       coinsAfter = chunkReceipt.coinsAfter;
@@ -126,6 +84,12 @@ export function createTradeChunkCoordinator(options = {}) {
       });
 
       const processed = chunkReceipt.succeeded + chunkReceipt.failed + chunkReceipt.skipped;
+      if (chunkReceipt.status === 'deferred') {
+        status = 'deferred';
+        reason = chunkReceipt.reason || 'trade-action-pacing';
+        resumeAt = chunkReceipt.resumeAt ?? chunkReceipt.continuation?.resumeAt ?? null;
+        break;
+      }
       if (chunkReceipt.status !== 'completed' || processed < quantity) {
         status = chunkReceipt.status || 'blocked';
         reason = chunkReceipt.reason || 'trade-chunk-incomplete';
@@ -147,6 +111,26 @@ export function createTradeChunkCoordinator(options = {}) {
       succeeded,
       failed,
       skipped: skipped + Math.max(0, requested - accounted),
+      ...(status === 'deferred' ? {
+        resumeAt,
+        skipped,
+        continuation: {
+          runId: input.runId,
+          scheduledFor: input.scheduledFor ?? startedAt,
+          startedAt,
+          resumeAt,
+          yieldedAt: Number(now()),
+          sliceCount: Math.max(1, Number(continuation?.sliceCount || 0) + 1),
+          requested,
+          succeeded,
+          failed,
+          skipped,
+          coinsBefore,
+          coinsAfter,
+          chunkIndex,
+          receipts,
+        },
+      } : {}),
       coinsBefore,
       coinsAfter,
       receipts,
