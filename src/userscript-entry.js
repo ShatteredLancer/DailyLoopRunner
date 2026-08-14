@@ -10000,9 +10000,9 @@ function updateLoopControls() {
       } else if (attempt.source === 'FUTNext' && attempt.status === 'loaded') {
         log(`${loopDef.name}: FUTNext prices loaded for ${result.prices.size}/${result.ids.length} Pick candidate(s)`);
       } else if (attempt.source === 'FUTNext' && attempt.status === 'empty') {
-        log(`${loopDef.name}: FUTNext returned no usable Pick prices; price ties require manual selection`);
+        log(`${loopDef.name}: FUTNext returned no usable Pick prices; price-missing ties will use randomized fallback ordering`);
       } else {
-        log(`${loopDef.name}: FUTNext price lookup unavailable (${attempt.reason}); price ties require manual selection`);
+        log(`${loopDef.name}: FUTNext price lookup unavailable (${attempt.reason}); price-missing ties will use randomized fallback ordering`);
       }
     }
     return result.prices;

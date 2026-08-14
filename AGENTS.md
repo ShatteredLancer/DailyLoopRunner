@@ -472,6 +472,8 @@ Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`
 
 Reward 模块不直接访问 EA Service 或 DOM。Claim Rewards 通过注入的 Overlay、Page shield、Pack/SBC 快照、Wait 和输入事件回调保持 25 秒上限及提前确认规则；价格 HTTP transport 由 Browser HTTP Adapter 注入，FUT.GG/FUTNext URL、解析和 fallback 在 Reward service 中。待领取 Pick 名称/Loop 别名分类位于 `src/reward/player-pick.js`；真实待领取物品读取、跨 pile 重复检查、领取和确认选择通过 `src/adapters/ea/player-pick.js`；人工选择弹窗位于 `src/ui/player-pick-modal.js`。
 
+Player Pick 候选先按评分、Special、非重复排序；同组价格完整时再按价格排序，任一价格缺失时随机打散同组。只有并列最高评分的 Special 数量超过 `pickCount` 时才进入人工选择；可选名额足以覆盖全部并列最高 Special 时必须自动选择，普通卡或非最高优先级的缺价并列不得阻塞流程。`Auto-pick below N` 命中时继续跳过人工歧义检查。
+
 ### 5.9 `src/workflows`
 
 Workflow 是无 EA/DOM 依赖的状态机：

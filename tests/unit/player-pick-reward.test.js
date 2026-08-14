@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   capturePlayerPickSelections,
   classifyPendingPlayerPicks,
@@ -55,21 +55,26 @@ describe('Player Pick reward planning', () => {
     expect(ranked.map((entry) => entry.item.id)).toEqual([3, 2, 1, 4]);
   });
 
-  it('requires manual selection for multiple highest-rated special cards', () => {
+  it('requires manual selection only when highest-rated special cards exceed the selection count', () => {
     const ranked = rankPlayerPickCandidates([
       { id: 1, rating: 91, special: true },
       { id: 2, rating: 91, special: true },
       { id: 3, rating: 90 },
-    ], new Map(), { isSpecial: special });
+    ], new Map(), { isSpecial: special, random: () => 0 });
     expect(getManualPlayerPickReason(ranked, 1)).toMatch(/2 special card/);
+    expect(getManualPlayerPickReason(ranked, 2)).toBe('');
   });
 
-  it('requires manual selection when missing price affects a selected tie', () => {
-    const ranked = [
-      { item: { id: 1 }, rating: 89, special: false, duplicate: false, price: null },
-      { item: { id: 2 }, rating: 89, special: false, duplicate: false, price: 10000 },
-    ];
-    expect(getManualPlayerPickReason(ranked, 1)).toMatch(/price data is missing/);
+  it('randomizes a price-missing non-special tie without requiring manual selection', () => {
+    const random = vi.fn(() => 0);
+    const ranked = rankPlayerPickCandidates([
+      { id: 1, definitionId: 1, rating: 95, special: true },
+      { id: 2, definitionId: 2, rating: 89 },
+      { id: 3, definitionId: 3, rating: 89 },
+    ], new Map([[1, 100000]]), { isSpecial: special, random });
+    expect(ranked.map((entry) => entry.item.id)).toEqual([1, 3, 2]);
+    expect(random).toHaveBeenCalledOnce();
+    expect(getManualPlayerPickReason(ranked, 2)).toBe('');
   });
 
   it('captures the EA static rare flag for a selected recap card', () => {

@@ -46,7 +46,7 @@ Loop 的 `inventoryMode: inherit | inventory-only | normal` 可以继承或覆�
 ### Pick 设置
 
 - `Protect Pick fodder >= N`：禁止动态 Pick 使用达到阈值的普通金卡。
-- `Auto-pick below N`：全部候选都低于阈值时自动选择。
+- `Auto-pick below N`：全部候选都低于阈值时自动选择。阈值之外只有并列最高评分的 Special 数量超过可选名额时才要求人工选择；名额足够时自动全选，普通卡或非最高优先级的缺价并列会随机选择。
 - `Open Picks at end`：Pick Loop 完成目标后集中领取；父 Workflow 默认可被子 Pick 覆盖。
 
 这些设置不会删除 SBC 本身的业务评分和特殊卡约束。
