@@ -273,6 +273,67 @@ describe('Builder profiles', () => {
     expect(normalized.lastKnownGood).toEqual(refreshed.lastKnownGood);
   });
 
+  it('migrates an untouched legacy Default profile without a preset before rebasing built-ins', () => {
+    const current = config();
+    const previous = config({
+      loops: [
+        ...current.loops,
+        { id: 'obsolete', name: 'Obsolete', strategy: 'fillAndVerifySbc', sbcNames: ['Obsolete SBC'] },
+      ],
+    });
+    const legacyDefault = createBuilderProfile({
+      id: 'default',
+      name: 'Default',
+      baseConfig: previous,
+      config: previous,
+      now: 1,
+    });
+    const normalized = normalizeBuilderStore({
+      schemaVersion: 1,
+      activeProfileId: null,
+      activeDynamicBindings: [],
+      profiles: [legacyDefault],
+      lastKnownGood: null,
+    }, current, { now: 2 });
+    const migrated = normalized.profiles.find((profile) => profile.id === 'default');
+
+    expect(migrated.preset).toBe('default');
+    expect(migrated.lastKnownGood.loops.some((loop) => loop.id === 'obsolete')).toBe(false);
+    expect(validateBuilderProfile(migrated, current).valid).toBe(true);
+  });
+
+  it('does not migrate a customized legacy Default profile without a preset', () => {
+    const current = config();
+    const previous = config({
+      loops: [
+        ...current.loops,
+        { id: 'obsolete', name: 'Obsolete', strategy: 'fillAndVerifySbc', sbcNames: ['Obsolete SBC'] },
+      ],
+    });
+    const legacyDefault = createBuilderProfile({
+      id: 'default',
+      name: 'Default',
+      baseConfig: previous,
+      config: previous,
+      now: 1,
+    });
+    for (const field of ['draftConfig', 'savedConfig', 'lastKnownGood']) {
+      legacyDefault[field].loops.find((loop) => loop.id === 'base').openRewardPacks = true;
+    }
+    const normalized = normalizeBuilderStore({
+      schemaVersion: 1,
+      activeProfileId: null,
+      activeDynamicBindings: [],
+      profiles: [legacyDefault],
+      lastKnownGood: null,
+    }, current, { now: 2 });
+    const preserved = normalized.profiles.find((profile) => profile.id === 'default');
+
+    expect(preserved.preset).toBeUndefined();
+    expect(preserved.lastKnownGood.loops.some((loop) => loop.id === 'obsolete')).toBe(true);
+    expect(validateBuilderProfile(preserved, current).valid).toBe(false);
+  });
+
   it('does not replace a customized official starter during built-in migration', () => {
     const current = config();
     const previous = config({

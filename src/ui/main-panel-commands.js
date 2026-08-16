@@ -3,6 +3,7 @@ export function createMainPanelCommands(options = {}) {
   if (!state) throw new TypeError('runtime state is required');
   const log = options.log || (() => {});
   const setPanelState = options.setPanelState || (() => {});
+  const wait = options.wait || ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
 
   const commands = {
     selectLoop() {
@@ -89,8 +90,34 @@ export function createMainPanelCommands(options = {}) {
       };
       setPanelState();
       try {
-        const scanOptions = options.getDynamicSbcScanOptions?.() || {};
-        await (options.scanDynamicSbcs || options.scanPlayerPicks)?.(scanOptions);
+        const scan = options.scanDynamicSbcs || options.scanPlayerPicks;
+        const initialScanOptions = options.getDynamicSbcScanOptions?.() || {};
+        let scanOptions = initialScanOptions;
+        let summary = null;
+        for (let pass = 1; pass <= 3; pass++) {
+          summary = await scan?.(scanOptions);
+          const failures = Math.max(0, Number(summary?.stats?.loadFailures || 0) || 0);
+          if (!failures) break;
+          if (pass >= 3) {
+            log(`Dynamic SBC scan remains incomplete after ${pass} pass(es): ${failures} Challenge metadata load(s) unavailable`);
+            break;
+          }
+          const delayMs = Number(summary?.stats?.circuitBreakers || 0) > 0 ? 5000 : 3000;
+          log(`Dynamic SBC scan pass ${pass} left ${failures} Challenge metadata load(s) unavailable; retrying unresolved SBCs automatically in ${delayMs}ms`);
+          state.dynamicSbcScanProgress = {
+            phase: 'retrying',
+            completed: 0,
+            total: 0,
+            label: `Waiting to retry unresolved SBCs (${pass + 1}/3)`,
+          };
+          setPanelState();
+          await wait(delayMs);
+          scanOptions = {
+            ...initialScanOptions,
+            forceFull: false,
+            clearCache: false,
+          };
+        }
         return true;
       } catch (error) {
         log(`Dynamic SBC scan failed: ${error?.message || error}`);

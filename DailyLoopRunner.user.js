@@ -20559,6 +20559,7 @@
     });
     const setPanelState = options.setPanelState || (() => {
     });
+    const wait = options.wait || ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
     const commands = {
       selectLoop() {
         options.updateLoopControls?.();
@@ -20644,8 +20645,34 @@
         };
         setPanelState();
         try {
-          const scanOptions = options.getDynamicSbcScanOptions?.() || {};
-          await (options.scanDynamicSbcs || options.scanPlayerPicks)?.(scanOptions);
+          const scan = options.scanDynamicSbcs || options.scanPlayerPicks;
+          const initialScanOptions = options.getDynamicSbcScanOptions?.() || {};
+          let scanOptions = initialScanOptions;
+          let summary = null;
+          for (let pass = 1; pass <= 3; pass++) {
+            summary = await scan?.(scanOptions);
+            const failures = Math.max(0, Number(summary?.stats?.loadFailures || 0) || 0);
+            if (!failures) break;
+            if (pass >= 3) {
+              log(`Dynamic SBC scan remains incomplete after ${pass} pass(es): ${failures} Challenge metadata load(s) unavailable`);
+              break;
+            }
+            const delayMs = Number(summary?.stats?.circuitBreakers || 0) > 0 ? 5e3 : 3e3;
+            log(`Dynamic SBC scan pass ${pass} left ${failures} Challenge metadata load(s) unavailable; retrying unresolved SBCs automatically in ${delayMs}ms`);
+            state.dynamicSbcScanProgress = {
+              phase: "retrying",
+              completed: 0,
+              total: 0,
+              label: `Waiting to retry unresolved SBCs (${pass + 1}/3)`
+            };
+            setPanelState();
+            await wait(delayMs);
+            scanOptions = {
+              ...initialScanOptions,
+              forceFull: false,
+              clearCache: false
+            };
+          }
           return true;
         } catch (error) {
           log(`Dynamic SBC scan failed: ${error?.message || error}`);
@@ -22215,14 +22242,22 @@
     return validateLoopConfig(config, "Daily Rare Pack to 5x80+ starter profile");
   }
   function migrateOfficialStarterMetadata(profile, baseConfig, now = Date.now()) {
-    if (profile?.id !== BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84 || profile?.preset !== "daily-rare-pack-2x84" || profile?.name !== LEGACY_DAILY_RARE_PACK_PROFILE_NAME || (profile.dynamicBindings || []).length) return profile;
-    const previousBase = normalizeLoopConfig(profile.baseConfig || baseConfig);
-    const expected = dailyRarePack2x84StarterConfig(previousBase);
-    const snapshots = [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean);
-    if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), expected))) {
-      return profile;
+    let result = profile;
+    if (profile?.id === BUILDER_STARTER_PROFILE_IDS.default && !profile?.preset && profile?.name === "Default" && !(profile.dynamicBindings || []).length) {
+      const previousBase2 = normalizeLoopConfig(profile.baseConfig || baseConfig);
+      const snapshots2 = [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean);
+      if (snapshots2.length && snapshots2.every((config) => sameValue(normalizeLoopConfig(config), previousBase2))) {
+        result = { ...clone13(profile), preset: "default", updatedAt: Number(now) };
+      }
     }
-    return { ...clone13(profile), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
+    if (result?.id !== BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84 || result?.preset !== "daily-rare-pack-2x84" || result?.name !== LEGACY_DAILY_RARE_PACK_PROFILE_NAME || (result.dynamicBindings || []).length) return result;
+    const previousBase = normalizeLoopConfig(result.baseConfig || baseConfig);
+    const expected = dailyRarePack2x84StarterConfig(previousBase);
+    const snapshots = [result.draftConfig, result.savedConfig, result.lastKnownGood].filter(Boolean);
+    if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), expected))) {
+      return result;
+    }
+    return { ...clone13(result), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
   }
   function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
     if (profile?.preset !== "inventory-only" || profile?.id !== LEGACY_INVENTORY_ONLY_PROFILE_ID || profile?.name !== "Inventory Only") return false;
@@ -22414,9 +22449,10 @@
           name: index ? `Profile ${index + 1}` : "Default",
           now: options.now
         });
-        const refreshed = refreshUnmodifiedOfficialStarterProfile(normalized, baseConfig, options.now);
+        const migrated = migrateOfficialStarterMetadata(normalized, baseConfig, options.now);
+        const refreshed = refreshUnmodifiedOfficialStarterProfile(migrated, baseConfig, options.now);
         if (refreshed) refreshedStarterIds.add(refreshed.id);
-        return [migrateOfficialStarterMetadata(refreshed || normalized, baseConfig, options.now)];
+        return [migrateOfficialStarterMetadata(refreshed || migrated, baseConfig, options.now)];
       } catch {
         return [];
       }

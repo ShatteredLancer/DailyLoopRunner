@@ -86,6 +86,46 @@ describe('main panel command orchestration', () => {
     expect(resetDynamicSbcScanMode).toHaveBeenCalledOnce();
   });
 
+  it('automatically retries only unresolved Dynamic SBC metadata', async () => {
+    const scanDynamicSbcs = vi.fn()
+      .mockResolvedValueOnce({ stats: { loadFailures: 4, circuitBreakers: 1 } })
+      .mockResolvedValueOnce({ stats: { loadFailures: 1, circuitBreakers: 0 } })
+      .mockResolvedValueOnce({ stats: { loadFailures: 0, circuitBreakers: 0 } });
+    const wait = vi.fn(async () => {});
+    const current = harness({
+      scanDynamicSbcs,
+      getDynamicSbcScanOptions: () => ({ forceFull: true, clearCache: true }),
+      wait,
+    });
+
+    await expect(current.commands.scanPicks()).resolves.toBe(true);
+
+    expect(scanDynamicSbcs).toHaveBeenNthCalledWith(1, { forceFull: true, clearCache: true });
+    expect(scanDynamicSbcs).toHaveBeenNthCalledWith(2, { forceFull: false, clearCache: false });
+    expect(scanDynamicSbcs).toHaveBeenNthCalledWith(3, { forceFull: false, clearCache: false });
+    expect(wait).toHaveBeenNthCalledWith(1, 5000);
+    expect(wait).toHaveBeenNthCalledWith(2, 3000);
+    expect(current.log).toHaveBeenCalledWith(expect.stringContaining('retrying unresolved SBCs automatically'));
+    expect(current.state.scanningPicks).toBe(false);
+    expect(current.state.dynamicSbcScanProgress).toBeNull();
+  });
+
+  it('bounds automatic Dynamic SBC recovery at three passes', async () => {
+    const scanDynamicSbcs = vi.fn(async () => ({
+      stats: { loadFailures: 2, circuitBreakers: 0 },
+    }));
+    const wait = vi.fn(async () => {});
+    const current = harness({ scanDynamicSbcs, wait });
+
+    await expect(current.commands.scanPicks()).resolves.toBe(true);
+
+    expect(scanDynamicSbcs).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledTimes(2);
+    expect(current.log).toHaveBeenCalledWith(
+      'Dynamic SBC scan remains incomplete after 3 pass(es): 2 Challenge metadata load(s) unavailable',
+    );
+  });
+
   it('preserves Stop, copy, and download command effects', async () => {
     const current = harness();
     current.commands.stop();

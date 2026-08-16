@@ -345,17 +345,28 @@ function dailyRarePack80x5StarterConfig(baseConfig) {
 }
 
 function migrateOfficialStarterMetadata(profile, baseConfig, now = Date.now()) {
-  if (profile?.id !== BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84
-    || profile?.preset !== 'daily-rare-pack-2x84'
-    || profile?.name !== LEGACY_DAILY_RARE_PACK_PROFILE_NAME
-    || (profile.dynamicBindings || []).length) return profile;
-  const previousBase = normalizeLoopConfig(profile.baseConfig || baseConfig);
-  const expected = dailyRarePack2x84StarterConfig(previousBase);
-  const snapshots = [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean);
-  if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), expected))) {
-    return profile;
+  let result = profile;
+  if (profile?.id === BUILDER_STARTER_PROFILE_IDS.default
+    && !profile?.preset
+    && profile?.name === 'Default'
+    && !(profile.dynamicBindings || []).length) {
+    const previousBase = normalizeLoopConfig(profile.baseConfig || baseConfig);
+    const snapshots = [profile.draftConfig, profile.savedConfig, profile.lastKnownGood].filter(Boolean);
+    if (snapshots.length && snapshots.every((config) => sameValue(normalizeLoopConfig(config), previousBase))) {
+      result = { ...clone(profile), preset: 'default', updatedAt: Number(now) };
+    }
   }
-  return { ...clone(profile), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
+  if (result?.id !== BUILDER_STARTER_PROFILE_IDS.dailyRarePack2x84
+    || result?.preset !== 'daily-rare-pack-2x84'
+    || result?.name !== LEGACY_DAILY_RARE_PACK_PROFILE_NAME
+    || (result.dynamicBindings || []).length) return result;
+  const previousBase = normalizeLoopConfig(result.baseConfig || baseConfig);
+  const expected = dailyRarePack2x84StarterConfig(previousBase);
+  const snapshots = [result.draftConfig, result.savedConfig, result.lastKnownGood].filter(Boolean);
+  if (!snapshots.length || !snapshots.every((config) => sameValue(normalizeLoopConfig(config), expected))) {
+    return result;
+  }
+  return { ...clone(result), name: DAILY_RARE_PACK_PROFILE_NAME, updatedAt: Number(now) };
 }
 
 function isUnmodifiedLegacyInventoryOnlyProfile(profile, baseConfig) {
@@ -560,9 +571,10 @@ export function normalizeBuilderStore(store, baseConfig, options = {}) {
         name: index ? `Profile ${index + 1}` : 'Default',
         now: options.now,
       });
-      const refreshed = refreshUnmodifiedOfficialStarterProfile(normalized, baseConfig, options.now);
+      const migrated = migrateOfficialStarterMetadata(normalized, baseConfig, options.now);
+      const refreshed = refreshUnmodifiedOfficialStarterProfile(migrated, baseConfig, options.now);
       if (refreshed) refreshedStarterIds.add(refreshed.id);
-      return [migrateOfficialStarterMetadata(refreshed || normalized, baseConfig, options.now)];
+      return [migrateOfficialStarterMetadata(refreshed || migrated, baseConfig, options.now)];
     } catch {
       return [];
     }
