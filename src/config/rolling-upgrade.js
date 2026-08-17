@@ -28,11 +28,12 @@ export function applyRollingAutomaticUseFodderPolicy(activeLoopDef = {}, parentL
   return result;
 }
 
-export const ROLLING_PLAYER_PICK_SELECTOR = Object.freeze({
-  rewardMinRating: 85,
-  candidateCount: 3,
+export const ROLLING_RARE_GOLD_PICK_POLICY = Object.freeze({
+  material: 'gold-with-required-rare',
   selectionCount: 1,
-  rareGoldCost: 6,
+  maxChallenges: 1,
+  repeatability: 'unlimited',
+  preference: 'rare-cost-first',
 });
 
 export const ROLLING_PROVISIONS_RATING_RANGE = Object.freeze({
@@ -265,32 +266,104 @@ function requirementGroups(loop = {}) {
   return Array.isArray(loop.requirements) && loop.requirements.length ? [loop.requirements] : [];
 }
 
-function isMatchingRareGoldPick(loop = {}, selector = ROLLING_PLAYER_PICK_SELECTOR) {
-  if (loop.strategy !== 'playerPickSbc') return false;
-  if (loop.discovered !== true && loop.scannedMetadata !== true) return false;
-  if (Number(loop.dynamicRewardMinRating || 0) !== Number(selector.rewardMinRating)) return false;
-  if (Number(loop.pickCandidateCount || 0) !== Number(selector.candidateCount)) return false;
-  if (Number(loop.pickCount || 0) !== Number(selector.selectionCount)) return false;
+function stablePlayerPickIdentity(loop = {}) {
+  return (loop.sbcSetIds || []).some(positiveInteger)
+    && (loop.pickItemResourceIds || []).some((value) => normalizedText(value));
+}
+
+function rollingRareGoldPickCandidate(loop = {}, policy = ROLLING_RARE_GOLD_PICK_POLICY) {
+  if (loop.strategy !== 'playerPickSbc') return null;
+  if (loop.discovered !== true && loop.scannedMetadata !== true) return null;
+  if (!stablePlayerPickIdentity(loop)) return null;
+  if (loop.repeatability !== policy.repeatability) return null;
+  if (Number(loop.pickCount || 0) !== Number(policy.selectionCount)) return null;
+  const candidateCount = positiveInteger(loop.pickCandidateCount);
+  const rewardMinRating = positiveInteger(loop.dynamicRewardMinRating);
+  if (!candidateCount || !rewardMinRating || candidateCount < Number(policy.selectionCount)) return null;
   const groups = requirementGroups(loop);
-  if (groups.length !== 1 || !groups[0].length) return false;
+  if (groups.length !== Number(policy.maxChallenges) || !groups[0].length) return null;
   const requirements = groups[0];
-  return requirements.every((requirement) => (
-    requirement?.tier === 'gold'
-      && requirement?.rarity === 'rare'
-      && Number(requirement.count || 0) > 0
-  )) && requirements.reduce((total, requirement) => total + Number(requirement.count || 0), 0)
-    === Number(selector.rareGoldCost);
+  let minimumRareGoldCost = 0;
+  let totalGoldCost = 0;
+  for (const requirement of requirements) {
+    const count = positiveInteger(requirement?.count);
+    const rarity = normalizedText(requirement?.rarity).toLowerCase();
+    const consumption = normalizedText(requirement?.goldConsumption).toLowerCase();
+    if (!count
+      || requirement?.tier !== 'gold'
+      || requirement?.playerOnly !== true
+      || requirement?.allowSpecial !== false
+      || !['', 'common', 'rare'].includes(rarity)
+      || (!rarity && consumption !== 'common-first')) return null;
+    totalGoldCost += count;
+    if (rarity === 'rare') minimumRareGoldCost += count;
+  }
+  if (!minimumRareGoldCost || totalGoldCost < minimumRareGoldCost) return null;
+  return {
+    loop,
+    minimumRareGoldCost,
+    totalGoldCost,
+    flexibleGoldCost: totalGoldCost - minimumRareGoldCost,
+    rewardMinRating,
+    candidateCount,
+    selectionCount: Number(loop.pickCount || 0),
+  };
+}
+
+function compareRollingRareGoldPickCandidates(left, right) {
+  return left.minimumRareGoldCost - right.minimumRareGoldCost
+    || left.totalGoldCost - right.totalGoldCost
+    || right.rewardMinRating - left.rewardMinRating
+    || right.candidateCount - left.candidateCount;
+}
+
+function rollingRareGoldPickSelection(candidate) {
+  if (!candidate) return null;
+  return {
+    minimumRareGoldCost: candidate.minimumRareGoldCost,
+    totalGoldCost: candidate.totalGoldCost,
+    flexibleGoldCost: candidate.flexibleGoldCost,
+    rewardMinRating: candidate.rewardMinRating,
+    candidateCount: candidate.candidateCount,
+    selectionCount: candidate.selectionCount,
+  };
 }
 
 export function resolveRollingPlayerPickCapability(
   loops = [],
-  selector = ROLLING_PLAYER_PICK_SELECTOR,
+  policy = ROLLING_RARE_GOLD_PICK_POLICY,
 ) {
-  const matches = (loops || []).filter((loop) => isMatchingRareGoldPick(loop, selector));
-  if (matches.length === 1) return { status: 'resolved', loop: matches[0], matches };
+  const candidates = (loops || [])
+    .map((loop) => rollingRareGoldPickCandidate(loop, policy))
+    .filter(Boolean)
+    .sort(compareRollingRareGoldPickCandidates);
+  const matches = candidates.map((candidate) => candidate.loop);
+  if (candidates.length) {
+    const best = candidates[0];
+    const tied = candidates.filter((candidate) => compareRollingRareGoldPickCandidates(best, candidate) === 0);
+    if (tied.length === 1) {
+      return {
+        status: 'resolved',
+        loop: best.loop,
+        alternatives: candidates.slice(1).map((candidate) => candidate.loop),
+        selection: rollingRareGoldPickSelection(best),
+        candidates: candidates.map((candidate) => ({
+          loop: candidate.loop,
+          selection: rollingRareGoldPickSelection(candidate),
+        })),
+        matches,
+      };
+    }
+  }
   return {
-    status: matches.length ? 'ambiguous' : 'unavailable',
+    status: candidates.length ? 'ambiguous' : 'unavailable',
     loop: null,
+    alternatives: [],
+    selection: null,
+    candidates: candidates.map((candidate) => ({
+      loop: candidate.loop,
+      selection: rollingRareGoldPickSelection(candidate),
+    })),
     matches,
   };
 }
@@ -358,7 +431,7 @@ export function createRollingUpgradeLoopDef(primaryLoop = {}) {
     rollingPlayerPick: {
       status: 'unavailable',
       required: true,
-      selector: clone(ROLLING_PLAYER_PICK_SELECTOR),
+      selector: clone(ROLLING_RARE_GOLD_PICK_POLICY),
     },
     rollingStorageSinkPick: {
       status: 'unavailable',
@@ -398,14 +471,20 @@ export function bindRollingPlayerPickCapability(loopDef = {}, loopDefs = []) {
   const configured = isPlainObject(result.rollingPlayerPick) ? result.rollingPlayerPick : {};
   const selector = isPlainObject(configured.selector)
     ? configured.selector
-    : ROLLING_PLAYER_PICK_SELECTOR;
+    : ROLLING_RARE_GOLD_PICK_POLICY;
   const resolution = resolveRollingPlayerPickCapability(loopDefs, selector);
   result.rollingPlayerPick = {
     ...configured,
     status: resolution.status,
   };
   delete result.rollingPlayerPick.loop;
+  delete result.rollingPlayerPick.alternatives;
+  delete result.rollingPlayerPick.selection;
   if (resolution.loop) result.rollingPlayerPick.loop = clone(resolution.loop);
+  if (resolution.alternatives?.length) {
+    result.rollingPlayerPick.alternatives = resolution.alternatives.map(clone);
+  }
+  if (resolution.selection) result.rollingPlayerPick.selection = clone(resolution.selection);
   return result;
 }
 

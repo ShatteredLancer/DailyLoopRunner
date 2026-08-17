@@ -92,6 +92,7 @@ import {
 import { materializeBatchOpenPlan, normalizeBatchOpenPlan } from './config/batch-open.js';
 import {
   buildPlayerPickDiscoverySession,
+  classifyPlayerPickRepeatability,
   collectScannedPlayerPickLoopDefs,
   parsePlayerPickSbcSnapshot,
   resolvePlayerPickLoopReference,
@@ -324,7 +325,14 @@ import {
 } from './pack/catalog.js';
 import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
-import { planBackgroundSubmitRetry } from './sbc/background-submit-retry.js';
+import {
+  planBackgroundSubmitRetry,
+  planItemViolationOverride,
+} from './sbc/background-submit-retry.js';
+import {
+  planUntradeableDuplicateSwaps,
+  resolveUntradeableDuplicateSwapIds,
+} from './sbc/untradeable-duplicate-swap.js';
 import {
   createBackgroundSubmitTelemetry,
   sanitizeBackgroundSubmitResult,
@@ -3397,13 +3405,30 @@ function updateLoopControls() {
 
     if (result.status === 'blocked') {
       const blocked = result.plan?.blocked;
-      if (blocked?.destination === 'storage') {
-        fail(`SBC storage has only ${blocked.free} slot(s), but ${blocked.required} item(s) need moving`);
+      const reasonCode = blocked?.destination === 'storage'
+        ? 'PROTECTED_STORAGE_BLOCKED'
+        : blocked?.destination === 'transfer'
+          ? 'UNASSIGNED_TRANSFER_BLOCKED'
+          : 'UNASSIGNED_CLEANUP_BLOCKED';
+      const blockedReason = blocked?.destination === 'storage'
+        ? `SBC storage has only ${blocked.free} slot(s), but ${blocked.required} item(s) need moving`
+        : blocked?.destination === 'transfer'
+          ? `Transfer list has only ${blocked.free} slot(s), but ${blocked.required} item(s) need moving`
+          : result.reason || 'Unassigned cleanup blocked';
+      if (options.returnBlockedResult === true) {
+        return {
+          ...result,
+          reason: blockedReason,
+          reasonCode,
+          details: {
+            destination: blocked?.destination || null,
+            free: blocked?.free ?? null,
+            required: blocked?.required ?? null,
+            itemRefs: blocked?.itemRefs || [],
+          },
+        };
       }
-      if (blocked?.destination === 'transfer') {
-        fail(`Transfer list has only ${blocked.free} slot(s), but ${blocked.required} item(s) need moving`);
-      }
-      fail(result.reason || 'Unassigned cleanup blocked');
+      fail(blockedReason);
     }
 
     const reservedCount = result.plan?.reservedItemRefs?.length || reservedIds.size;
@@ -4029,10 +4054,10 @@ function updateLoopControls() {
       return null;
     }
     log(`${purpose}: pack open blocked after ${receipt.attempts} attempt(s); reason:${receipt.reason || 'unknown'}`);
-    if (
-      options.returnBlockedReceipt === true
-      && [PACK_OPEN_RESPONSE_LOST, PACK_OPEN_RESULT_AMBIGUOUS].includes(receipt.reason)
-    ) {
+    if (options.returnBlockedReceipt === true && (
+      receipt.details?.phase === 'pre-open'
+      || [PACK_OPEN_RESPONSE_LOST, PACK_OPEN_RESULT_AMBIGUOUS].includes(receipt.reason)
+    )) {
       return receipt;
     }
     fail(`Open pack failed: ${receipt.reason || 'unknown'}`);
@@ -4726,14 +4751,14 @@ function updateLoopControls() {
       const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []])
         .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.goldConsumption && requirement.goldConsumption !== 'eligibility' ? ` (${requirement.goldConsumption})` : requirement.preferCommon ? ' (common-first legacy)' : ''}`).join(' + ')}`)
         .join('; ');
-      log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
+      log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; repeatability:${loopDef.repeatability || 'unknown'}${loopDef.completionLimit ? `/${loopDef.completionLimit}` : ''}; ${ratios})`);
     }
     for (const diagnostic of pickSession.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
     for (const loopDef of pickSession.discoveredLoops) {
       const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []])
         .map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement) => `${requirement.count} ${requirement.rarity || requirement.tier}${requirement.goldConsumption && requirement.goldConsumption !== 'eligibility' ? ` (${requirement.goldConsumption})` : requirement.preferCommon ? ' (common-first legacy)' : ''}`).join(' + ')}`)
         .join('; ');
-      log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? '; reported completed, one runtime probe' : ''})`);
+      log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.pickItemResourceIds?.[0] || '?'}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; repeatability:${loopDef.repeatability || 'unknown'}${loopDef.completionLimit ? `/${loopDef.completionLimit}` : ''}; ${ratios}${loopDef.discoveryReportedCompleted ? '; reported completed, one runtime probe' : ''})`);
     }
     for (const [loopId, loopDef] of Object.entries(upgradeSession.loopOverrides)) {
       log(`Dynamic SBC scan: using scanned Upgrade metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.rewardPackIds?.[0] || '?'}, target rating:${loopDef.ratingSbcFill?.targetRating || '?'}, players:${loopDef.expectedPlayerCount || '?'})`);
@@ -4742,7 +4767,11 @@ function updateLoopControls() {
       log(`Dynamic SBC scan: added session Upgrade Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.rewardPackIds?.[0] || '?'}, target rating:${loopDef.ratingSbcFill?.targetRating || '?'}, players:${loopDef.expectedPlayerCount || '?'})`);
     }
     for (const loopDef of materializedRollingLoops) {
-      log(`Dynamic SBC scan: added selectable Rolling Loop ${loopDef.name} (primary Set #${loopDef.sbcSetIds?.[0] || '?'}; TOTW:${loopDef.rollingTotwUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Provisions:${loopDef.rollingProvisionsUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Pick:${loopDef.rollingPlayerPick?.status || 'unavailable'}; Storage sink Pick:${loopDef.rollingStorageSinkPick?.status || 'unavailable'}/${pickOptions.rollingStorageSinkEnabled ? 'enabled' : 'disabled'}; Gold sink:${loopDef.rollingGoldSinkUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'})`);
+      const pickSelection = loopDef.rollingPlayerPick?.selection;
+      const pickSummary = pickSelection
+        ? `${loopDef.rollingPlayerPick.status}/${pickSelection.minimumRareGoldCost} rare/${pickSelection.totalGoldCost} gold/${pickSelection.rewardMinRating}+/${loopDef.rollingPlayerPick.alternatives?.length || 0} alternate(s)`
+        : loopDef.rollingPlayerPick?.status || 'unavailable';
+      log(`Dynamic SBC scan: added selectable Rolling Loop ${loopDef.name} (primary Set #${loopDef.sbcSetIds?.[0] || '?'}; TOTW:${loopDef.rollingTotwUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Provisions:${loopDef.rollingProvisionsUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Rare Gold Pick:${pickSummary}; Storage sink Pick:${loopDef.rollingStorageSinkPick?.status || 'unavailable'}/${pickOptions.rollingStorageSinkEnabled ? 'enabled' : 'disabled'}; Gold sink:${loopDef.rollingGoldSinkUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'})`);
     }
     for (const activity of activitySession.activities) {
       const sink = activity.materialSink;
@@ -7641,6 +7670,36 @@ function updateLoopControls() {
     let currentChallenge = challenge;
     let lastDetail = 'unknown';
 
+    const completeSuccessfulSubmit = async (result) => {
+      const directRewardPackId = rewardPackIdFromSubmitResult(result, set);
+      let newPackId = null;
+      const observationAttempts = Math.max(1, Math.min(5, Number(options.rewardObservationAttempts || 3) || 3));
+      for (let observationAttempt = 1; observationAttempt <= observationAttempts; observationAttempt++) {
+        await refreshStorePacks().catch(() => null);
+        const afterPacks = getAvailableRepositoryMyPacks();
+        const afterPackCounts = getPackCountsById(afterPacks);
+        const newPack = afterPacks.find((pack) => {
+          const id = packIdKey(pack);
+          return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
+        });
+        newPackId = Number(packIdKey(newPack)) || null;
+        if (directRewardPackId || newPackId || observationAttempt >= observationAttempts) break;
+        await sleep(Math.min(2000, 500 * observationAttempt));
+      }
+      const rewardObserved = Boolean(directRewardPackId || newPackId);
+      const usedKnownFallback = !rewardObserved && options.allowKnownRewardFallback === true;
+      const rewardPackId = directRewardPackId
+        || newPackId
+        || (usedKnownFallback ? rewardPackIdFromSubmitResult(result, set, { allowSetFallback: true }) : null);
+      recordObservedPackCatalogReward(set, rewardPackId);
+      log(`${label}: background submit complete; reward pack ${rewardPackId || 'not granted for this Challenge'}${usedKnownFallback ? ' (single-Challenge identity fallback)' : ''}`);
+      return {
+        rewardPackId,
+        rewardObserved,
+        usedKnownFallback,
+      };
+    };
+
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       let canSubmit = true;
       let retryEvidence = null;
@@ -7690,6 +7749,7 @@ function updateLoopControls() {
           attempt,
           maxAttempts,
           playerCount: players.length,
+          submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean),
           skipValidation,
           chemistryEnabled,
         });
@@ -7721,33 +7781,7 @@ function updateLoopControls() {
         }
         const submissionDiagnostic = backgroundSubmitTelemetry.complete(submitEvent, result);
         if (result?.success) {
-          const directRewardPackId = rewardPackIdFromSubmitResult(result, set);
-          let newPackId = null;
-          const observationAttempts = Math.max(1, Math.min(5, Number(options.rewardObservationAttempts || 3) || 3));
-          for (let observationAttempt = 1; observationAttempt <= observationAttempts; observationAttempt++) {
-            await refreshStorePacks().catch(() => null);
-            const afterPacks = getAvailableRepositoryMyPacks();
-            const afterPackCounts = getPackCountsById(afterPacks);
-            const newPack = afterPacks.find((pack) => {
-              const id = packIdKey(pack);
-              return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
-            });
-            newPackId = Number(packIdKey(newPack)) || null;
-            if (directRewardPackId || newPackId || observationAttempt >= observationAttempts) break;
-            await sleep(Math.min(2000, 500 * observationAttempt));
-          }
-          const rewardObserved = Boolean(directRewardPackId || newPackId);
-          const usedKnownFallback = !rewardObserved && options.allowKnownRewardFallback === true;
-          const rewardPackId = directRewardPackId
-            || newPackId
-            || (usedKnownFallback ? rewardPackIdFromSubmitResult(result, set, { allowSetFallback: true }) : null);
-          recordObservedPackCatalogReward(set, rewardPackId);
-          log(`${label}: background submit complete; reward pack ${rewardPackId || 'not granted for this Challenge'}${usedKnownFallback ? ' (single-Challenge identity fallback)' : ''}`);
-          return {
-            rewardPackId,
-            rewardObserved,
-            usedKnownFallback,
-          };
+          return completeSuccessfulSubmit(result);
         }
         const stateAfter = currentBackgroundSubmitState(set, currentChallenge, submissionOptions);
         const packInventory = summarizeBackgroundSubmitPackCounts(
@@ -7760,6 +7794,75 @@ function updateLoopControls() {
           packInventory,
         });
         lastDetail = serviceResultErrorText(result) || result?.status || 'unknown';
+        const overridePlan = planItemViolationOverride({
+          allowOverride: options.allowItemViolationOverride === true,
+          attempt,
+          maxAttempts,
+          detail: lastDetail,
+          result,
+          submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean),
+          skipValidation,
+        });
+        if (overridePlan.retry) {
+          const forcedOptions = { skipValidation: true, chemistryEnabled };
+          const names = overridePlan.violationNames.join('/') || 'unnamed warning';
+          log(`${label}: EA rejected ${overridePlan.violationItemIds.length} submitted item(s) with ${names}; confirming the same saved squad once with skipValidation:true`);
+          const forcedSelectedItemsBefore = currentBackgroundSubmitItems(players);
+          const forcedStateBefore = currentBackgroundSubmitState(set, currentChallenge, forcedOptions);
+          const forcedPackCountsBefore = getPackCountsById();
+          const forcedEvent = backgroundSubmitTelemetry.begin({
+            setId: Number(set?.id || 0),
+            challengeId: Number(currentChallenge?.id || 0),
+            attempt: attempt + 1,
+            maxAttempts,
+            playerCount: players.length,
+            submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean),
+            skipValidation: true,
+            chemistryEnabled,
+          });
+          let forcedResult;
+          try {
+            forcedResult = await observeOnce(
+              eaSbcAdapter().submitChallenge(currentChallenge, set, forcedOptions),
+              ctrl(),
+              45000,
+              `submitChallenge ${label} validation override`,
+            );
+          } catch (error) {
+            const forcedSubmission = backgroundSubmitTelemetry.complete(forcedEvent, {
+              success: false,
+              error,
+            });
+            logBackgroundSubmitDiagnostic(label, forcedSubmission, players, options, {
+              selectedItemsBefore: forcedSelectedItemsBefore,
+              state: {
+                before: forcedStateBefore,
+                after: currentBackgroundSubmitState(set, currentChallenge, forcedOptions),
+              },
+              packInventory: summarizeBackgroundSubmitPackCounts(
+                forcedPackCountsBefore,
+                getPackCountsById(),
+              ),
+            });
+            throw error;
+          }
+          const forcedDiagnostic = backgroundSubmitTelemetry.complete(forcedEvent, forcedResult);
+          if (forcedResult?.success) return completeSuccessfulSubmit(forcedResult);
+
+          logBackgroundSubmitDiagnostic(label, forcedDiagnostic, players, options, {
+            selectedItemsBefore: forcedSelectedItemsBefore,
+            state: {
+              before: forcedStateBefore,
+              after: currentBackgroundSubmitState(set, currentChallenge, forcedOptions),
+            },
+            packInventory: summarizeBackgroundSubmitPackCounts(
+              forcedPackCountsBefore,
+              getPackCountsById(),
+            ),
+          });
+          const forcedDetail = serviceResultErrorText(forcedResult) || forcedResult?.status || 'unknown';
+          fail(`${label}: background submit validation override failed: ${forcedDetail}`);
+        }
         const plan = planBackgroundSubmitRetry({
           attempt,
           maxAttempts,
@@ -11899,6 +12002,147 @@ function updateLoopControls() {
     });
   }
 
+  function duplicateSwapSnapshot(item, pile) {
+    return {
+      ...ratingSelectionItemSnapshot(item, pile),
+      tradeable: typeof item?.tradeable === 'boolean' ? item.tradeable : isTradeable(item),
+      pile,
+      ref: liveItemRef(item, pile),
+    };
+  }
+
+  function duplicateSwapSelectionSnapshot(selection, players) {
+    const playerById = new Map((players || [])
+      .map((item) => [Number(item?.id || 0), item])
+      .filter(([id]) => id));
+    return {
+      entries: (selection?.entries || []).map((entry) => {
+        const signal = entry?.signal || entry?.signalRef || null;
+        const plannedItem = entry?.item || entry?.itemRef || null;
+        const selectedItem = playerById.get(Number(plannedItem?.id || plannedItem?.ref?.id || 0)) || plannedItem;
+        return {
+          ...entry,
+          signal: signal ? duplicateSwapSnapshot(signal, 'unassigned') : null,
+          item: selectedItem ? duplicateSwapSnapshot(selectedItem, liveItemRef(selectedItem).pile) : null,
+        };
+      }),
+    };
+  }
+
+  async function prepareRollingUntradeableDuplicateSwaps(context, runtime) {
+    const selection = context?.squadPlan?.selection;
+    const players = Array.isArray(context?.players) ? context.players : [];
+    if (!selection?.entries?.length || !players.length) return { ok: true };
+
+    const originalPlan = planUntradeableDuplicateSwaps({
+      selection: duplicateSwapSelectionSnapshot(selection, players),
+      players: players.map((item) => duplicateSwapSnapshot(item, liveItemRef(item).pile)),
+    });
+    if (!originalPlan.ok || !originalPlan.swaps.length) return originalPlan;
+
+    const signalItems = [];
+    for (const swap of originalPlan.swaps) {
+      const live = findCachedItemById(swap.signalId, ['unassigned'])?.item || null;
+      if (!live) {
+        return { ok: false, reason: `Unassigned duplicate #${swap.signalId} disappeared before tradeable swap` };
+      }
+      signalItems.push(live);
+    }
+    const liveSelection = {
+      entries: originalPlan.swaps.map((swap, index) => {
+        const target = players.find((item) => Number(item?.id || 0) === swap.targetId);
+        return {
+          pileName: 'unassigned',
+          signal: duplicateSwapSnapshot(signalItems[index], 'unassigned'),
+          item: duplicateSwapSnapshot(target, 'club'),
+        };
+      }),
+    };
+    const livePlan = planUntradeableDuplicateSwaps({
+      selection: liveSelection,
+      players: liveSelection.entries.map((entry) => entry.item),
+    });
+    if (!livePlan.ok || livePlan.swaps.length !== originalPlan.swaps.length) {
+      return { ok: false, reason: livePlan.reason || 'duplicate swap eligibility changed before move' };
+    }
+
+    log(`${context.label}: swapping ${signalItems.length} Unassigned untradeable duplicate(s) into Club before SBC submit`);
+    const moveResult = await moveItems(signalItems, inventoryPile('club'), true);
+    const resolution = resolveUntradeableDuplicateSwapIds(livePlan, moveResult);
+    if (!resolution.ok) {
+      log(`${context.label}: duplicate swap response diagnostic ${diagnosticJson(captureMoveResult(moveResult))}`);
+      return resolution;
+    }
+
+    await refreshInventoryCaches(`${context.label} post-untradeable-swap`, {
+      includePacks: false,
+      quiet: true,
+    });
+    const replacementByTargetId = new Map();
+    for (const replacement of resolution.replacements) {
+      const originalSignal = signalItems.find((item) => Number(item?.id || 0) === replacement.signalId);
+      const originalTarget = players.find((item) => Number(item?.id || 0) === replacement.targetId);
+      const newItem = findCachedItemById(replacement.newItemId, ['club'])?.item || null;
+      if (!originalSignal || !originalTarget || !newItem) {
+        return { ok: false, reason: `duplicate swap Club item #${replacement.newItemId} was not materialized` };
+      }
+      if (!isSamePlayerCardVersion(originalSignal, newItem) || isTradeable(newItem)) {
+        return { ok: false, reason: `duplicate swap Club item #${replacement.newItemId} failed same-version untradeable validation` };
+      }
+      replacementByTargetId.set(replacement.targetId, {
+        ...replacement,
+        originalTarget,
+        newItem,
+      });
+    }
+
+    const preparedPlayers = players.map((item) => (
+      replacementByTargetId.get(Number(item?.id || 0))?.newItem || item
+    ));
+    const preparedSelection = {
+      ...selection,
+      entries: (selection.entries || []).map((entry) => {
+        const selected = entry?.item || entry?.itemRef || null;
+        const replacement = replacementByTargetId.get(Number(selected?.id || selected?.ref?.id || 0));
+        if (!replacement) return entry;
+        const swappedOutSignal = {
+          ...duplicateSwapSnapshot(replacement.originalTarget, 'unassigned'),
+          duplicate: true,
+          duplicateSignal: true,
+          duplicateId: replacement.newItemId,
+          duplicateSignalId: replacement.newItemId,
+        };
+        return {
+          ...entry,
+          pileName: 'unassigned',
+          signal: swappedOutSignal,
+          signalRef: swappedOutSignal.ref,
+          item: replacement.newItem,
+          itemRef: liveItemRef(replacement.newItem, 'club'),
+        };
+      }),
+      selected: preparedPlayers,
+    };
+
+    if (runtime?.coordinator) {
+      const reconciliation = await runtime.coordinator.reconcile(
+        `${context.label} post-untradeable-duplicate-swap`,
+        { refreshUnassigned: true },
+      );
+      if (!reconciliation.ok) {
+        return { ok: false, reason: reconciliation.reason || 'inventory reconciliation failed after duplicate swap' };
+      }
+    }
+    log(`${context.label}: replaced ${resolution.replacements.length} selected tradeable Club card(s) with Unassigned untradeable version(s)`);
+    return {
+      ok: true,
+      changed: true,
+      players: preparedPlayers,
+      itemRefs: preparedPlayers.map((item) => liveItemRef(item)),
+      selection: preparedSelection,
+    };
+  }
+
   function rollingRequiredSpecialConstraintIndexes(model = {}) {
     return (model.constraints || [])
       .map((constraint, index) => ({ constraint, index }))
@@ -12375,8 +12619,8 @@ function updateLoopControls() {
     return { status: 'ready', inventoryDelta: runtime.lastMutation?.delta || null };
   }
 
-  async function saveRollingProvisionalClubSquad(challenge, players, runtimeAccess, label) {
-    if (!runtimeAccess?.refreshedClubPlayers) return;
+  async function saveRollingProvisionalClubSquad(challenge, players, runtimeAccess, label, playerPreparation = null) {
+    if (!runtimeAccess?.refreshedClubPlayers && playerPreparation?.changed !== true) return;
     await saveChallengeSquad(challenge, players, label);
   }
 
@@ -12656,15 +12900,18 @@ function updateLoopControls() {
       squadProvider: createExistingSquadProvider({
         getPlayers: async () => players,
         itemRef: liveItemRef,
+        selection: fill.selection,
         source: 'rolling-recovery-rating-squad',
       }),
       prepareRuntimeAccess: prepareFsuRuntimeAccess,
-      saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess }) => {
+      preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
+      saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess, playerPreparation }) => {
         await saveRollingProvisionalClubSquad(
           challenge,
           refreshedPlayers,
           runtimeAccess,
           `${recoveryDef.name} provisional Club refresh`,
+          playerPreparation,
         );
       },
       preSaveValidators: [({ players: validatedPlayers }) => {
@@ -12688,6 +12935,7 @@ function updateLoopControls() {
           recoveryDef.name,
           {
             players: context.players || players,
+            allowItemViolationOverride: true,
             allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
               rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
@@ -12738,6 +12986,7 @@ function updateLoopControls() {
       allowGone: true,
       allowPendingItems: true,
       returnBlockedReceipt: true,
+      preOpenUnassignedOptions: { returnBlockedResult: true },
       assumeSpecialPlayers: options.assumeTotwReward === true,
       retryCodes: ['471', '500'],
       resolveRetryPack: () => findRewardPack(definition, null, {
@@ -12763,7 +13012,7 @@ function updateLoopControls() {
         ...(runtime.recoveryDuplicateRefs || []),
         ...capturedRefs,
       ]);
-      log(`${loopDef.name}: captured ${capturedRefs.length} ${definition.name} duplicate Gold signal(s) for the 85+ Pick -> 5x80 recovery chain`);
+      log(`${loopDef.name}: captured ${capturedRefs.length} ${definition.name} duplicate Gold signal(s) for the Rare Gold Pick -> 5x80 recovery chain`);
     }
     runtime.lastMutation = await runtime.coordinator.recordPackReceipt(receipt, { reconcile: true });
     return { ...receipt, status: 'opened', inventoryDelta: runtime.lastMutation?.delta || null };
@@ -13097,13 +13346,34 @@ function updateLoopControls() {
     });
   }
 
-  async function runRollingPlayerPickRecovery(loopDef, runtime, capability, options = {}) {
-    const pickDef = rollingRecoveryDef(capability?.loop, loopDef, {
+  function rollingPlayerPickCapabilityLoops(capability = {}) {
+    const seen = new Set();
+    return [capability?.loop, ...(capability?.alternatives || [])].filter((loop) => {
+      const key = `${(loop?.sbcSetIds || []).join(',')}|${(loop?.pickItemResourceIds || []).join(',')}`;
+      if (!loop || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  async function findPendingRollingPlayerPickLoop(capability = {}) {
+    for (const pickLoop of rollingPlayerPickCapabilityLoops(capability)) {
+      const pending = await findUnassignedPlayerPick(pickLoop, 1, {
+        quietMissing: true,
+        failOnUnexpected: true,
+      });
+      if (pending) return pickLoop;
+    }
+    return null;
+  }
+
+  async function runRollingPlayerPickCandidate(loopDef, runtime, pickLoop, options = {}) {
+    const pickDef = rollingRecoveryDef(pickLoop, loopDef, {
       inventoryFirst: true,
       priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
     });
-    if (!pickDef || capability?.status !== 'resolved') {
-      return { status: 'unavailable', reason: 'Rolling 85+ Player Pick capability is unavailable' };
+    if (!pickDef) {
+      return { status: 'unavailable', reason: 'Rolling Rare Gold Pick candidate is unavailable' };
     }
     const reserves = rollingRecoveryEntryRefs(runtime, ({ classification }) => classification.provisionsReserve === true);
     const protection = rollingRecoveryProtection(runtime, [
@@ -13136,7 +13406,15 @@ function updateLoopControls() {
       return { status: 'selected', pickedCards };
     }
 
-    const set = await findSbcSetForLoopDef(pickDef, pickDef.name);
+    const set = await findSbcSetForDefIfPresent(pickDef);
+    if (!set) return { status: 'unavailable', reason: `${pickDef.name} Set is no longer available` };
+    const liveRepeatability = classifyPlayerPickRepeatability(set);
+    if (liveRepeatability.repeatability !== 'unlimited') {
+      return {
+        status: 'unavailable',
+        reason: `${pickDef.name} live repeatability is ${liveRepeatability.repeatability}`,
+      };
+    }
     const challenges = await requestSbcChallenges(set, pickDef.name, { attempts: 3 });
     const incomplete = challenges
       .map((challenge, index) => ({ challenge, challengeNo: index + 1 }))
@@ -13183,6 +13461,33 @@ function updateLoopControls() {
     const reconciled = await reconcileRollingRuntime(runtime, `${pickDef.name} selection`);
     if (reconciled.status !== 'ready') return reconciled;
     return { status: 'selected', pickedCards };
+  }
+
+  async function runRollingPlayerPickRecovery(loopDef, runtime, capability, options = {}) {
+    if (capability?.status !== 'resolved') {
+      return { status: 'unavailable', reason: 'Rolling Rare Gold Pick capability is unavailable' };
+    }
+    const candidates = rollingPlayerPickCapabilityLoops(capability);
+    if (!candidates.length) {
+      return { status: 'unavailable', reason: 'Rolling Rare Gold Pick capability has no candidates' };
+    }
+
+    const pendingLoop = await findPendingRollingPlayerPickLoop(capability);
+    if (pendingLoop) {
+      return runRollingPlayerPickCandidate(loopDef, runtime, pendingLoop, options);
+    }
+
+    const unavailable = [];
+    for (const candidate of candidates) {
+      const result = await runRollingPlayerPickCandidate(loopDef, runtime, candidate, options);
+      if (result?.status !== 'unavailable') return result;
+      unavailable.push(`${candidate.name || 'Rare Gold Pick'}: ${result.reason || 'unavailable'}`);
+      log(`${loopDef.name}: ${candidate.name || 'Rare Gold Pick'} unavailable; trying the next dynamic Rare Gold Pick candidate`);
+    }
+    return {
+      status: 'unavailable',
+      reason: unavailable.join('; ') || 'all Rolling Rare Gold Pick candidates are unavailable',
+    };
   }
 
   async function loadRollingStorageSinkContexts(loopDef, pickDef) {
@@ -13525,9 +13830,11 @@ function updateLoopControls() {
       squadProvider: createExistingSquadProvider({
         getPlayers: async () => resolved.players,
         itemRef: liveItemRef,
+        selection: plan.selection,
         source: 'rolling-storage-sink-squad',
       }),
       prepareRuntimeAccess: prepareFsuRuntimeAccess,
+      preparePlayers: (submitContext) => prepareRollingUntradeableDuplicateSwaps(submitContext, runtime),
       saveSquad: async ({ challenge, players }) => {
         await applyPlayersToRatingChallenge(challenge, players, label);
       },
@@ -13544,6 +13851,7 @@ function updateLoopControls() {
           label,
           {
             players: submitContext.players || resolved.players,
+            allowItemViolationOverride: true,
             rewardObservationAttempts: 1,
             allowKnownRewardFallback: false,
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
@@ -14309,14 +14617,11 @@ function updateLoopControls() {
         ));
         const rareDuplicates = goldDuplicates.filter(isRare);
         const pickCapability = loopDef.rollingPlayerPick;
-        const pendingPick = pickCapability?.status === 'resolved'
-          ? await findUnassignedPlayerPick(pickCapability.loop, 1, {
-              quietMissing: true,
-              failOnUnexpected: true,
-            })
+        const pendingPickLoop = pickCapability?.status === 'resolved'
+          ? await findPendingRollingPlayerPickLoop(pickCapability)
           : null;
-        if (pendingPick || rareDuplicates.length) {
-          await reportPhase?.(ROLLING_UPGRADE_PHASES.REDEEM_85_PICK);
+        if (pendingPickLoop || rareDuplicates.length) {
+          await reportPhase?.(ROLLING_UPGRADE_PHASES.REDEEM_RARE_GOLD_PICK);
           const rareDuplicateRefs = rareDuplicates.map((item) => liveItemRef(item, 'unassigned'));
           const protectedDuplicateRefs = rollingProtectedDuplicateRefs(
             unassignedItems,
@@ -14335,7 +14640,7 @@ function updateLoopControls() {
             return pick;
           }
           if (pick?.status !== 'unavailable') return pick;
-          log(`${loopDef.name}: 85+ Pick recovery unavailable; trying the Gold sink for remaining duplicate Gold`);
+          log(`${loopDef.name}: Rare Gold Pick recovery unavailable; trying the Gold sink for remaining duplicate Gold`);
         }
         if (!goldDuplicates.length) return { status: 'skipped' };
 
@@ -14786,15 +15091,18 @@ function updateLoopControls() {
           squadProvider: createExistingSquadProvider({
             getPlayers: async () => players,
             itemRef: liveItemRef,
+            selection: fill.selection,
             source: 'rolling-rating-squad',
           }),
           prepareRuntimeAccess: prepareFsuRuntimeAccess,
-          saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess }) => {
+          preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
+          saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess, playerPreparation }) => {
             await saveRollingProvisionalClubSquad(
               challenge,
               refreshedPlayers,
               runtimeAccess,
               `${loopDef.name} provisional Club refresh`,
+              playerPreparation,
             );
           },
           preSaveValidators: [() => {
@@ -14825,6 +15133,7 @@ function updateLoopControls() {
               loopDef.name,
               {
                 players: context.players || players,
+                allowItemViolationOverride: true,
                 allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
                 failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
                   rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)

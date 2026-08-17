@@ -128,7 +128,17 @@ export async function openPackTransaction(options = {}) {
   if (options.preOpenResolver) {
     const preOpen = await options.preOpenResolver();
     if (preOpen?.status === 'blocked') {
-      return publishReceipt(options, createOpenPackReceipt({ status: 'blocked', reason: preOpen.reason || 'pre-open resolver blocked', attempts: 0 }), { phase: 'pre-open' });
+      const reasonCode = preOpen.reasonCode || preOpen.code || preOpen.details?.reasonCode || null;
+      return publishReceipt(options, createOpenPackReceipt({
+        status: 'blocked',
+        reason: preOpen.reason || 'pre-open resolver blocked',
+        attempts: 0,
+        details: {
+          ...(preOpen.details || {}),
+          phase: 'pre-open',
+          ...(reasonCode ? { reasonCode } : {}),
+        },
+      }), { phase: 'pre-open' });
     }
   }
 

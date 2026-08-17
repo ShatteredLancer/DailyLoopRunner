@@ -191,7 +191,7 @@ describe('runtime telemetry renderer', () => {
     renderRuntimeTelemetry({ panel, running: false, snapshot: { visible: true } });
     expect(controls.get('bronze-loop-runtime-telemetry').style.display).toBe('none');
     expect(panel.classList.contains('has-runtime-telemetry')).toBe(false);
-    expect(runtimeTelemetryPhaseLabel('REDEEM_85_PICK')).toBe('Redeeming 85+ Pick');
+    expect(runtimeTelemetryPhaseLabel('REDEEM_RARE_GOLD_PICK')).toBe('Redeeming Rare Gold Pick');
     expect(runtimeTelemetryPhaseLabel('CRAFT_5X80')).toBe('Crafting 5x80+');
     expect(runtimeTelemetryPhaseLabel('MAINTAIN_STORAGE')).toBe('Maintaining Storage');
   });

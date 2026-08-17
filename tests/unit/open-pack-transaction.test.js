@@ -11,6 +11,36 @@ import {
 import { loadFixture } from '../helpers/fixtures.js';
 
 describe('openPackTransaction', () => {
+  it('preserves a structured pre-open Storage block without selecting or opening a pack', async () => {
+    const packSelector = vi.fn(async () => ({ id: 1082, name: '10x 85+' }));
+    const openTransport = vi.fn(async () => ({ success: true, items: [] }));
+
+    const receipt = await openPackTransaction({
+      preOpenResolver: async () => ({
+        status: 'blocked',
+        reason: 'SBC storage has only 3 slot(s), but 7 item(s) need moving',
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+        details: { free: 3, required: 7 },
+      }),
+      packSelector,
+      openTransport,
+    });
+
+    expect(receipt).toMatchObject({
+      status: 'blocked',
+      attempts: 0,
+      reason: 'SBC storage has only 3 slot(s), but 7 item(s) need moving',
+      details: {
+        phase: 'pre-open',
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+        free: 3,
+        required: 7,
+      },
+    });
+    expect(packSelector).not.toHaveBeenCalled();
+    expect(openTransport).not.toHaveBeenCalled();
+  });
+
   it('normalizes empty, malformed and nested EA pack responses', () => {
     expect(packOpenFailureReason(undefined)).toBe('empty-result');
     expect(packOpenFailureReason({ success: true })).toBe('missing-items');

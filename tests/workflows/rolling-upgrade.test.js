@@ -622,6 +622,65 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.recoverProvisions).not.toHaveBeenCalled();
   });
 
+  it('uses the Storage pressure Pick when Unassigned blocks opening a shortage Provisions reward', async () => {
+    let inventoryVersion = 1;
+    let ready = false;
+    let leftoverAttempts = 0;
+    const calls = [];
+    const options = harness({
+      shortageProvisionsPackLimit: 1,
+      storageSinkEnabled: true,
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => {
+        calls.push('plan');
+        return ready
+          ? { ok: true, itemRefs: [{ id: 1 }] }
+          : { ok: false, missing: { code: 'SQUAD_RATING_EXCESS' } };
+      }),
+      processLeftoverRecoveryReward: vi.fn(async () => {
+        leftoverAttempts++;
+        if (leftoverAttempts === 1) {
+          calls.push('leftover-storage-blocked');
+          return {
+            status: 'blocked',
+            reason: 'SBC storage has only 3 slot(s), but 7 item(s) need moving',
+            reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+          };
+        }
+        calls.push('leftover-opened');
+        ready = true;
+        inventoryVersion++;
+        return { status: 'opened', details: { recoveryFamily: 'provisions-upgrade' } };
+      }),
+      recoverStorageSink: vi.fn(async ({ context }) => {
+        calls.push('storage-sink');
+        expect(context).toMatchObject({
+          trigger: 'storage-pressure',
+          source: 'leftover-recovery-pre-open',
+        });
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+      drainRecoveryDuplicates: vi.fn(async () => ({ status: 'skipped' })),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      recoveries: { reward: 1, storageSink: 1 },
+    });
+    expect(calls).toEqual([
+      'plan',
+      'leftover-storage-blocked',
+      'storage-sink',
+      'leftover-opened',
+      'plan',
+    ]);
+    expect(options.recoverStorageSink).toHaveBeenCalledOnce();
+  });
+
   it('runs one Provisions batch only after primary planning reports a fodder shortage, then replans', async () => {
     let inventoryVersion = 1;
     let ready = false;
@@ -1022,7 +1081,7 @@ describe('10x85+ Rolling workflow', () => {
       drainRecoveryDuplicates: vi.fn(async ({ reportPhase }) => {
         if (drained) return { status: 'skipped' };
         drained = true;
-        await reportPhase(ROLLING_UPGRADE_PHASES.REDEEM_85_PICK);
+        await reportPhase(ROLLING_UPGRADE_PHASES.REDEEM_RARE_GOLD_PICK);
         inventoryVersion++;
         return { status: 'selected' };
       }),
@@ -1032,7 +1091,7 @@ describe('10x85+ Rolling workflow', () => {
 
     expect(result.status).toBe('completed');
     expect(options.onEvent).toHaveBeenCalledWith('phase', expect.objectContaining({
-      phase: ROLLING_UPGRADE_PHASES.REDEEM_85_PICK,
+      phase: ROLLING_UPGRADE_PHASES.REDEEM_RARE_GOLD_PICK,
       recovery: 'goldDrain',
     }));
     expect(options.planPrimarySquad).toHaveBeenCalledOnce();

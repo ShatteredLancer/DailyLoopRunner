@@ -113,6 +113,15 @@ EA 的 duplicate signal 只表示“存在冲突”，真正提交前还必须�
 - 受保护或无法容纳的重复卡转入 Storage。
 - 实体身份无法确认时安全停止，不会用名称或 definitionId 猜测替代卡。
 
+如果主包中的不可交易重复卡对应 Club 中一张可交易的同版本卡，而该卡又被选入本次 Rolling 阵容，Runner 会在提交前执行一次可交易性交换：
+
+1. 再次核对 definition、评分、rareflag、Evolution 和 cosmetic/version 状态，并确认 duplicate ID 指向当前选中的 Club 实体。
+2. 通过 EA move 接口把不可交易版本移入 Club，并要求响应返回原 Club item ID 到新 Club item ID 的完整映射。
+3. 用新的不可交易 Club 实体替换阵容中的可交易实体，重新保存阵容并对账。
+4. 被换出的可交易版本作为新的 Unassigned 项，在提交成功后走正常清理流程。
+
+任何身份、版本、响应映射或对账不一致都会停止本次提交。Runner 不会仅凭球员名称或相同 definition 强行交换，因此不会把 EVO、cosmetic 或其它异版本卡当成同一张卡。
+
 ## 5. 如何控制主阵评分
 
 目标评分来自当前 EA Challenge 元数据，不固定为 84。规划原则是：
@@ -139,7 +148,7 @@ Runner 追求满足 EA 的准确目标评分，但不会为了精确评分牺牲
 | 缺料时新制作的 Provisions 奖励 | 现有恢复包仍不足 | 一包 | 立即打开，因为本次制作就是为解决当前缺料。 |
 | Storage-pressure Provisions 奖励 | 为释放 Storage 而制作 | 一包 | 保留在 My Packs，不立即打开，避免再次增加 Unassigned 压力。 |
 | duplicate-reserve Provisions 奖励 | 开启余量制作，且主包 Reserve 凑够一套 | 一包 | 默认保留；只有启用 `Open duplicate Provisions rewards immediately` 才立即打开。 |
-| `1 of 3 85+ Player Pick` | Provisions 奖励产生 Rare Gold 重复 | 按可完成情况 | 完成后立即领取并使用现有自动 Pick 逻辑。 |
+| 动态 Rare Gold Player Pick | Provisions 奖励产生 Rare Gold 重复 | 按可完成情况 | 仅绑定明确不限次数的单阵、单选 Pick；完成后立即领取并使用现有自动 Pick 逻辑。 |
 | `5x80+` | 恢复奖励产生剩余 Gold 重复 | 按可完成情况 | 作为重复 Gold sink；新奖励进入当前恢复处理，已有遗留奖励只在真实缺料时处理。 |
 | `1 of 3 95+ ... Player Pick` | Storage 压力且显式启用 | 完成两阵后一次 | 两阵都完成后立即领取；不会留下待领取 Pick 再打开主包。 |
 
@@ -163,13 +172,17 @@ Runner 追求满足 EA 的准确目标评分，但不会为了精确评分牺牲
 ```text
 主阵规划确认人数或评分不足
 -> 打开最多 N 包已有 Provisions 奖励
--> Rare Gold 重复优先进入 85+ Pick
+-> Rare Gold 重复优先进入动态 Rare Gold Pick
 -> 其余 Gold 重复进入 5x80+
 -> 重新规划主阵
 -> 仍不足：处理下一批，或制作一套新的 Provisions
 ```
 
 `N` 是 `Provisions packs per shortage`，默认 2。它限制单次缺料批次，不代表启动时清空所有历史 Provisions 包。只有主阵规划实际返回材料不足，才会触发这个流程。
+
+Rare Gold Pick 不绑定固定奖励评分或固定成本。动态扫描只接受明确不限次数、恰好一个 Challenge、只选择一张奖励、全部材料为 Gold 且至少要求一张 Rare Gold 的 Pick。候选按“最低 Rare Gold 数量升序、总 Gold 数量升序、奖励最低评分降序、候选数量降序”排列。例如 `4 Rare` 优先于 `6 Gold/至少 4 Rare`，后者又优先于 `6 Rare`。最佳候选无可用 Challenge 时尝试下一候选；全部不可用才回退到 `5x80+`。
+
+扫描中的 `repeats:0` 才算明确不限次数；正数属于有限次数，缺失或 `null` 属于 unknown。有限或 unknown Pick 仍可作为独立动态 Loop，但不会进入 Rolling 恢复链。实际提交前会再次检查 live Set，防止旧扫描结果误用已经变化的活动。
 
 制作 Provisions 时，材料评分严格限制为配置的 `87-88` 或 `87-89`。不会因为这些评分不足就放宽到 90-95；Required Special 始终排除，符合评分范围的 Club Other Special 也只作为最后候选。
 
@@ -209,7 +222,7 @@ flowchart LR
 
     F{普通材料不足} --> PP[分批打开 Provisions]
     PP --> G[Gold 材料和重复卡]
-    G -->|Rare 重复| Q[85+ Player Pick]
+    G -->|Rare 重复| Q[动态 Rare Gold Pick]
     G -->|剩余 Gold 重复| X[5x80+ Upgrade]
     G --> M
     Q --> U
@@ -254,7 +267,7 @@ Rolling Recap 使用有界聚合，不会无限保存每一轮全部卡片：
 
 - 主 SBC 完成数、迭代数和 bootstrap 次数。
 - 主包和恢复包打开数量。
-- TOTW、Provisions、85+ Pick、5x80+、95+ Storage Pick 次数。
+- TOTW、Provisions、Rare Gold Pick、5x80+、95+ Storage Pick 次数。
 - Common、Rare、Special、重复卡数量和评分分布。
 - 重复卡进入 Primary、Storage、Recovery 的数量。
 - 最高评分卡和命中 Reward Alert 的 Special 卡。
@@ -267,6 +280,8 @@ Rolling Recap 使用有界聚合，不会无限保存每一轮全部卡片：
 - `Stop` 是请求在下一个安全边界停止，不会故意中断已提交但尚未对账的事务。
 - 如果在开包清理阶段停止，已开出的卡可能暂时留在 Unassigned。
 - 下次启动同一个 Rolling Loop 时，先恢复待领取的 95+ Pick 和现有 Unassigned，再决定是否打开下一包主奖励。
+- 如果 EA 以 `409` 返回非空 `itemViolations`，且每个被警告 item ID 都能严格对应当前已保存阵容中的实体，Runner 会对同一阵容执行一次 `skipValidation:true` 确认提交。这用于处理“球员仍在现有阵容”等 EA 可确认警告。
+- 缺少 `itemViolations`、响应结构异常、包含阵容外 item ID、已经确认过一次或确认提交仍失败的 `409` 都保持失败；普通 Loop 不启用该确认路径。
 - 发生错误后不要先手工移动待处理卡；优先使用 `Save log` 保存完整日志。实体状态被手工改变后，Runner 可能因为无法证明原计划仍有效而安全停止。
 - 常见安全停止包括身份/version 不确定、Storage 无可验证空间、目标评分无法安全达到、恢复 capability 缺失和 EA 提交状态无法确认。
 

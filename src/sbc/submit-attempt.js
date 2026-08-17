@@ -90,6 +90,29 @@ export async function submitSbcAttempt(options = {}) {
       accessToken = access?.token;
     }
 
+    if (options.preparePlayers) {
+      const prepared = await options.preparePlayers(context);
+      context.playerPreparation = prepared || null;
+      if (prepared?.ok === false) {
+        return publishResult(options, createSubmissionResult({
+          status: 'blocked',
+          submitted: false,
+          challengeRef: context.challengeRef || { id: context.challenge?.id || null },
+          consumedItemRefs: context.squadPlan.itemRefs || [],
+          reason: prepared.reason || 'SBC player preparation failed',
+        }), { phase: 'player-preparation', context });
+      }
+      if (Array.isArray(prepared?.players)) {
+        context.players = prepared.players;
+        context.squadPlan = {
+          ...context.squadPlan,
+          players: prepared.players,
+          itemRefs: prepared.itemRefs || context.squadPlan.itemRefs,
+          ...(prepared.selection ? { selection: prepared.selection } : {}),
+        };
+      }
+    }
+
     await runValidators(options.preSaveValidators, context, 'pre-save');
     await options.saveSquad?.(context);
     if (options.reloadSquad) await options.reloadSquad(context);
@@ -160,18 +183,20 @@ export function createInventorySquadProvider({ prepareSelection, selection, item
   };
 }
 
-export function createExistingSquadProvider({ getPlayers, itemRef, source = 'existing-squad' }) {
+export function createExistingSquadProvider({ getPlayers, itemRef, selection = null, source = 'existing-squad' }) {
   return async (context) => {
     const players = await getPlayers(context);
     if (!Array.isArray(players) || !players.length) {
       return { ok: false, reason: `${source} did not expose any players` };
     }
-    return {
+    const result = {
       ok: true,
       players,
       itemRefs: players.map(itemRef),
       source,
     };
+    if (selection) result.selection = selection;
+    return result;
   };
 }
 

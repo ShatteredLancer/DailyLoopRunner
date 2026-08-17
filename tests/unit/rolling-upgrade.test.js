@@ -6,6 +6,7 @@ import {
   applyRollingAutomaticUseFodderPolicy,
   bindRollingPlayerPickCapabilities,
   parseRollingStorageSinkPickSnapshot,
+  resolveRollingPlayerPickCapability,
   resolveRollingStorageSinkPickCapability,
   resolveRollingAutomaticUseMaxRating,
   shouldQueueRollingProvisionsReward,
@@ -64,25 +65,36 @@ function goldSinkSet() {
   };
 }
 
-function rareGoldPickSet() {
+function rareGoldPickSet(options = {}) {
+  const id = Number(options.id || 20853);
+  const rating = Number(options.rating || 84);
+  const requiredPlayerCount = Number(options.requiredPlayerCount || 4);
+  const rareGoldCount = Number(options.rareGoldCount || requiredPlayerCount);
+  const candidateCount = Number(options.candidateCount || 3);
+  const selectionCount = Number(options.selectionCount || 1);
+  const name = `${selectionCount} of ${candidateCount} ${rating}+ Player Pick`;
   return {
-    id: 20853,
-    name: '1 of 3 85+ Player Pick',
+    id,
+    name,
     timesCompleted: 0,
-    repeats: null,
+    repeats: Object.hasOwn(options, 'repeats') ? options.repeats : 0,
     rewards: [{
       type: 'PLAYER_PICK',
-      name: '1 of 3 85+ Player Pick',
-      resourceId: 30853,
-      candidateCount: 3,
-      selectionCount: 1,
+      name,
+      resourceId: id + 10000,
+      candidateCount,
+      selectionCount,
     }],
     challenges: [{
-      id: 21853,
-      requiredPlayerCount: 6,
+      id: id + 1000,
+      requiredPlayerCount,
       eligibilityRequirements: [
         { key: 'PLAYER_QUALITY', values: [3], count: -1 },
-        { key: 'PLAYER_RARITY', values: [1], count: -1 },
+        {
+          key: 'PLAYER_RARITY',
+          values: [1],
+          count: rareGoldCount === requiredPlayerCount ? -1 : rareGoldCount,
+        },
       ],
     }],
   };
@@ -170,9 +182,18 @@ describe('Rolling Upgrade configuration contracts', () => {
       },
       rollingPlayerPick: {
         status: 'resolved',
+        selection: {
+          minimumRareGoldCost: 4,
+          totalGoldCost: 4,
+          flexibleGoldCost: 0,
+          rewardMinRating: 84,
+          candidateCount: 3,
+          selectionCount: 1,
+        },
         loop: expect.objectContaining({
           sbcSetIds: [20853],
-          dynamicRewardMinRating: 85,
+          dynamicRewardMinRating: 84,
+          repeatability: 'unlimited',
           pickCandidateCount: 3,
           pickCount: 1,
         }),
@@ -210,7 +231,7 @@ describe('Rolling Upgrade configuration contracts', () => {
     expect(shouldQueueRollingProvisionsReward('unknown', {})).toBe(false);
   });
 
-  it('keeps an unresolved or ambiguous 85+ Pick capability fail-closed', async () => {
+  it('keeps an unresolved or exactly tied Rare Gold Pick capability fail-closed', async () => {
     const fixture = await loadFixture('challenges/rolling-10x85-baseline.json');
     const rolling = buildUpgradeDiscoverySession({ sets: [fixture.set], configuredLoops: [] }).rollingLoops[0];
     expect(bindRollingPlayerPickCapabilities([rolling], [])[0].rollingPlayerPick.status)
@@ -223,6 +244,54 @@ describe('Rolling Upgrade configuration contracts', () => {
     ])[0];
     expect(ambiguous.rollingPlayerPick).toMatchObject({ status: 'ambiguous' });
     expect(ambiguous.rollingPlayerPick).not.toHaveProperty('loop');
+  });
+
+  it('ranks unlimited Gold Picks by minimum Rare cost before total cost and reward', () => {
+    const pureFour = parsePlayerPickSbcSnapshot({
+      set: rareGoldPickSet({ id: 20844, rating: 84, requiredPlayerCount: 4, rareGoldCount: 4 }),
+    }).loop;
+    const mixedFourOfSix = parsePlayerPickSbcSnapshot({
+      set: rareGoldPickSet({ id: 20846, rating: 84, requiredPlayerCount: 6, rareGoldCount: 4 }),
+    }).loop;
+    const pureSix = parsePlayerPickSbcSnapshot({
+      set: rareGoldPickSet({ id: 20856, rating: 85, requiredPlayerCount: 6, rareGoldCount: 6 }),
+    }).loop;
+    const limited = parsePlayerPickSbcSnapshot({
+      set: rareGoldPickSet({ id: 20999, rating: 99, requiredPlayerCount: 2, rareGoldCount: 2, repeats: 1 }),
+    }).loop;
+    const unknown = parsePlayerPickSbcSnapshot({
+      set: rareGoldPickSet({ id: 20998, rating: 98, requiredPlayerCount: 2, rareGoldCount: 2, repeats: null }),
+    }).loop;
+
+    const resolution = resolveRollingPlayerPickCapability([
+      pureSix,
+      unknown,
+      mixedFourOfSix,
+      limited,
+      pureFour,
+    ]);
+
+    expect(resolution).toMatchObject({
+      status: 'resolved',
+      loop: { sbcSetIds: [20844] },
+      selection: {
+        minimumRareGoldCost: 4,
+        totalGoldCost: 4,
+        flexibleGoldCost: 0,
+        rewardMinRating: 84,
+      },
+      alternatives: [
+        { sbcSetIds: [20846] },
+        { sbcSetIds: [20856] },
+      ],
+    });
+    expect(resolution.candidates.map(({ selection }) => selection)).toEqual([
+      expect.objectContaining({ minimumRareGoldCost: 4, totalGoldCost: 4 }),
+      expect.objectContaining({ minimumRareGoldCost: 4, totalGoldCost: 6 }),
+      expect.objectContaining({ minimumRareGoldCost: 6, totalGoldCost: 6 }),
+    ]);
+    expect(resolution.matches).not.toContain(limited);
+    expect(resolution.matches).not.toContain(unknown);
   });
 
   it('parses only the exact dynamic 95+ FOF/FUTTIES 88+89 Storage sink contract', () => {

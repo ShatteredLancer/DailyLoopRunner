@@ -11,7 +11,7 @@ export const ROLLING_UPGRADE_PHASES = Object.freeze({
   RECOVER_STORAGE_SINK: 'RECOVER_STORAGE_SINK',
   RECOVER_REQUIRED_SPECIAL: 'RECOVER_REQUIRED_SPECIAL',
   MAINTAIN_STORAGE: 'MAINTAIN_STORAGE',
-  REDEEM_85_PICK: 'REDEEM_85_PICK',
+  REDEEM_RARE_GOLD_PICK: 'REDEEM_RARE_GOLD_PICK',
   CRAFT_5X80: 'CRAFT_5X80',
   PLAN_PRIMARY_SQUAD: 'PLAN_PRIMARY_SQUAD',
   SUBMIT_PRIMARY: 'SUBMIT_PRIMARY',
@@ -524,6 +524,31 @@ export async function runRollingUpgradeWorkflow(options = {}) {
             }
           }
           continue;
+        }
+        if (isBlocked(leftoverReward) && reasonCode(leftoverReward) === 'PROTECTED_STORAGE_BLOCKED') {
+          if (options.storageSinkEnabled !== true) {
+            return finishRecoveryFailure(
+              leftoverReward,
+              'leftover recovery reward needs more Storage headroom',
+              'PROTECTED_STORAGE_BLOCKED',
+            );
+          }
+          const storageSink = await runRecovery(
+            'storageSink',
+            ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
+            options.recoverStorageSink,
+            {
+              trigger: 'storage-pressure',
+              storage: leftoverReward,
+              source: 'leftover-recovery-pre-open',
+            },
+          );
+          if (isProgressed(storageSink)) continue;
+          return finishRecoveryFailure(
+            storageSink,
+            'Storage pressure Pick could not clear room for the leftover recovery reward',
+            'STORAGE_SINK_RECOVERY_BLOCKED',
+          );
         }
         if (isStopped(leftoverReward) || isBlocked(leftoverReward) || leftoverReward?.status === 'planned') {
           return finishRecoveryFailure(

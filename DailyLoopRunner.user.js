@@ -1692,6 +1692,20 @@
     if (!Number.isFinite(completed) || !Number.isFinite(repeats) || repeats <= 0 || repeats < completed) return null;
     return Math.max(0, Math.floor(repeats - completed));
   }
+  function classifyPlayerPickRepeatability(set = {}) {
+    const rawRepeats = set?.repeats;
+    if (rawRepeats === void 0 || rawRepeats === null || rawRepeats === "") {
+      return { repeatability: "unknown", completionLimit: null };
+    }
+    const repeats = Number(rawRepeats);
+    if (!Number.isInteger(repeats) || repeats < 0) {
+      return { repeatability: "unknown", completionLimit: null };
+    }
+    if (repeats === 0) {
+      return { repeatability: "unlimited", completionLimit: null };
+    }
+    return { repeatability: "bounded", completionLimit: repeats };
+  }
   function discoveryIdentity(set, reward) {
     return Object.freeze({
       setId: positiveInteger(set?.id),
@@ -1732,6 +1746,7 @@
       diagnostics.push("Player Pick selection count exceeds candidate count");
     }
     const setRemaining = remainingCompletions(set);
+    const repeatability = classifyPlayerPickRepeatability(set);
     const reportedCompleted = isCompleted(set) || setRemaining === 0;
     const boundedSet = positiveInteger(set?.repeats) !== null;
     const challenges = Array.isArray(set.challenges) ? set.challenges : [];
@@ -1783,6 +1798,8 @@
       pickCandidateCount: candidateCount,
       pickCount: selectionCount,
       dynamicRewardMinRating: rewardMinRating,
+      repeatability: repeatability.repeatability,
+      completionLimit: repeatability.completionLimit,
       remainingCompletions: setRemaining,
       maxCompletions: 1,
       useRoundsAsCompletions: !reportedCompleted && !boundedSet,
@@ -1816,6 +1833,8 @@
       pickCandidateCount: candidateCount,
       pickCount: selectionCount,
       dynamicRewardMinRating: rewardMinRating,
+      repeatability: repeatability.repeatability,
+      completionLimit: repeatability.completionLimit,
       reportedCompleted,
       remainingCompletions: setRemaining,
       diagnostics: unique(challengeWarnings)
@@ -1888,6 +1907,8 @@
       pickCandidateCount: discoveredLoop.pickCandidateCount,
       pickCount: discoveredLoop.pickCount,
       dynamicRewardMinRating: discoveredLoop.dynamicRewardMinRating,
+      repeatability: discoveredLoop.repeatability,
+      completionLimit: discoveredLoop.completionLimit,
       remainingCompletions: discoveredLoop.remainingCompletions,
       pricePlatform: discoveredLoop.pricePlatform || configuredLoop.pricePlatform,
       discoveryIdentity: discoveredLoop.discoveryIdentity,
@@ -1997,11 +2018,12 @@
     };
     return result;
   }
-  var ROLLING_PLAYER_PICK_SELECTOR = Object.freeze({
-    rewardMinRating: 85,
-    candidateCount: 3,
+  var ROLLING_RARE_GOLD_PICK_POLICY = Object.freeze({
+    material: "gold-with-required-rare",
     selectionCount: 1,
-    rareGoldCost: 6
+    maxChallenges: 1,
+    repeatability: "unlimited",
+    preference: "rare-cost-first"
   });
   var ROLLING_PROVISIONS_RATING_RANGE = Object.freeze({
     min: 87,
@@ -2182,23 +2204,85 @@
     }
     return Array.isArray(loop.requirements) && loop.requirements.length ? [loop.requirements] : [];
   }
-  function isMatchingRareGoldPick(loop = {}, selector = ROLLING_PLAYER_PICK_SELECTOR) {
-    if (loop.strategy !== "playerPickSbc") return false;
-    if (loop.discovered !== true && loop.scannedMetadata !== true) return false;
-    if (Number(loop.dynamicRewardMinRating || 0) !== Number(selector.rewardMinRating)) return false;
-    if (Number(loop.pickCandidateCount || 0) !== Number(selector.candidateCount)) return false;
-    if (Number(loop.pickCount || 0) !== Number(selector.selectionCount)) return false;
-    const groups = requirementGroups(loop);
-    if (groups.length !== 1 || !groups[0].length) return false;
-    const requirements = groups[0];
-    return requirements.every((requirement2) => requirement2?.tier === "gold" && requirement2?.rarity === "rare" && Number(requirement2.count || 0) > 0) && requirements.reduce((total, requirement2) => total + Number(requirement2.count || 0), 0) === Number(selector.rareGoldCost);
+  function stablePlayerPickIdentity(loop = {}) {
+    return (loop.sbcSetIds || []).some(positiveInteger2) && (loop.pickItemResourceIds || []).some((value) => normalizedText2(value));
   }
-  function resolveRollingPlayerPickCapability(loops = [], selector = ROLLING_PLAYER_PICK_SELECTOR) {
-    const matches = (loops || []).filter((loop) => isMatchingRareGoldPick(loop, selector));
-    if (matches.length === 1) return { status: "resolved", loop: matches[0], matches };
+  function rollingRareGoldPickCandidate(loop = {}, policy = ROLLING_RARE_GOLD_PICK_POLICY) {
+    if (loop.strategy !== "playerPickSbc") return null;
+    if (loop.discovered !== true && loop.scannedMetadata !== true) return null;
+    if (!stablePlayerPickIdentity(loop)) return null;
+    if (loop.repeatability !== policy.repeatability) return null;
+    if (Number(loop.pickCount || 0) !== Number(policy.selectionCount)) return null;
+    const candidateCount = positiveInteger2(loop.pickCandidateCount);
+    const rewardMinRating = positiveInteger2(loop.dynamicRewardMinRating);
+    if (!candidateCount || !rewardMinRating || candidateCount < Number(policy.selectionCount)) return null;
+    const groups = requirementGroups(loop);
+    if (groups.length !== Number(policy.maxChallenges) || !groups[0].length) return null;
+    const requirements = groups[0];
+    let minimumRareGoldCost = 0;
+    let totalGoldCost = 0;
+    for (const requirement2 of requirements) {
+      const count = positiveInteger2(requirement2?.count);
+      const rarity = normalizedText2(requirement2?.rarity).toLowerCase();
+      const consumption = normalizedText2(requirement2?.goldConsumption).toLowerCase();
+      if (!count || requirement2?.tier !== "gold" || requirement2?.playerOnly !== true || requirement2?.allowSpecial !== false || !["", "common", "rare"].includes(rarity) || !rarity && consumption !== "common-first") return null;
+      totalGoldCost += count;
+      if (rarity === "rare") minimumRareGoldCost += count;
+    }
+    if (!minimumRareGoldCost || totalGoldCost < minimumRareGoldCost) return null;
     return {
-      status: matches.length ? "ambiguous" : "unavailable",
+      loop,
+      minimumRareGoldCost,
+      totalGoldCost,
+      flexibleGoldCost: totalGoldCost - minimumRareGoldCost,
+      rewardMinRating,
+      candidateCount,
+      selectionCount: Number(loop.pickCount || 0)
+    };
+  }
+  function compareRollingRareGoldPickCandidates(left, right) {
+    return left.minimumRareGoldCost - right.minimumRareGoldCost || left.totalGoldCost - right.totalGoldCost || right.rewardMinRating - left.rewardMinRating || right.candidateCount - left.candidateCount;
+  }
+  function rollingRareGoldPickSelection(candidate) {
+    if (!candidate) return null;
+    return {
+      minimumRareGoldCost: candidate.minimumRareGoldCost,
+      totalGoldCost: candidate.totalGoldCost,
+      flexibleGoldCost: candidate.flexibleGoldCost,
+      rewardMinRating: candidate.rewardMinRating,
+      candidateCount: candidate.candidateCount,
+      selectionCount: candidate.selectionCount
+    };
+  }
+  function resolveRollingPlayerPickCapability(loops = [], policy = ROLLING_RARE_GOLD_PICK_POLICY) {
+    const candidates = (loops || []).map((loop) => rollingRareGoldPickCandidate(loop, policy)).filter(Boolean).sort(compareRollingRareGoldPickCandidates);
+    const matches = candidates.map((candidate) => candidate.loop);
+    if (candidates.length) {
+      const best = candidates[0];
+      const tied = candidates.filter((candidate) => compareRollingRareGoldPickCandidates(best, candidate) === 0);
+      if (tied.length === 1) {
+        return {
+          status: "resolved",
+          loop: best.loop,
+          alternatives: candidates.slice(1).map((candidate) => candidate.loop),
+          selection: rollingRareGoldPickSelection(best),
+          candidates: candidates.map((candidate) => ({
+            loop: candidate.loop,
+            selection: rollingRareGoldPickSelection(candidate)
+          })),
+          matches
+        };
+      }
+    }
+    return {
+      status: candidates.length ? "ambiguous" : "unavailable",
       loop: null,
+      alternatives: [],
+      selection: null,
+      candidates: candidates.map((candidate) => ({
+        loop: candidate.loop,
+        selection: rollingRareGoldPickSelection(candidate)
+      })),
       matches
     };
   }
@@ -2261,7 +2345,7 @@
       rollingPlayerPick: {
         status: "unavailable",
         required: true,
-        selector: clone2(ROLLING_PLAYER_PICK_SELECTOR)
+        selector: clone2(ROLLING_RARE_GOLD_PICK_POLICY)
       },
       rollingStorageSinkPick: {
         status: "unavailable",
@@ -2298,14 +2382,20 @@
     if (loopDef.strategy !== ROLLING_UPGRADE_STRATEGY) return clone2(loopDef);
     const result = clone2(loopDef);
     const configured = isPlainObject(result.rollingPlayerPick) ? result.rollingPlayerPick : {};
-    const selector = isPlainObject(configured.selector) ? configured.selector : ROLLING_PLAYER_PICK_SELECTOR;
+    const selector = isPlainObject(configured.selector) ? configured.selector : ROLLING_RARE_GOLD_PICK_POLICY;
     const resolution = resolveRollingPlayerPickCapability(loopDefs, selector);
     result.rollingPlayerPick = {
       ...configured,
       status: resolution.status
     };
     delete result.rollingPlayerPick.loop;
+    delete result.rollingPlayerPick.alternatives;
+    delete result.rollingPlayerPick.selection;
     if (resolution.loop) result.rollingPlayerPick.loop = clone2(resolution.loop);
+    if (resolution.alternatives?.length) {
+      result.rollingPlayerPick.alternatives = resolution.alternatives.map(clone2);
+    }
+    if (resolution.selection) result.rollingPlayerPick.selection = clone2(resolution.selection);
     return result;
   }
   function bindRollingStorageSinkPickCapability(loopDef = {}, sets = []) {
@@ -3848,19 +3938,31 @@
     if (!isPlainObject(value.selector)) {
       errors.push(`${path}.selector must be an object`);
     } else {
-      const allowedFields = /* @__PURE__ */ new Set(["rewardMinRating", "candidateCount", "selectionCount", "rareGoldCost"]);
+      const allowedFields = /* @__PURE__ */ new Set(["material", "selectionCount", "maxChallenges", "repeatability", "preference"]);
       Object.keys(value.selector).forEach((field5) => {
         if (!allowedFields.has(field5)) errors.push(`${path}.selector.${field5} is not supported`);
       });
-      for (const field5 of allowedFields) {
+      for (const field5 of ["selectionCount", "maxChallenges"]) {
         const number = Number(value.selector[field5]);
         if (!Number.isInteger(number) || number < 1 || number > 99) {
           errors.push(`${path}.selector.${field5} must be an integer between 1 and 99`);
         }
       }
+      if (value.selector.material !== "gold-with-required-rare") {
+        errors.push(`${path}.selector.material must be gold-with-required-rare`);
+      }
+      if (value.selector.repeatability !== "unlimited") {
+        errors.push(`${path}.selector.repeatability must be unlimited`);
+      }
+      if (value.selector.preference !== "rare-cost-first") {
+        errors.push(`${path}.selector.preference must be rare-cost-first`);
+      }
     }
     if (value.status === "resolved" && value.loop?.strategy !== "playerPickSbc") {
       errors.push(`${path}.loop must be a playerPickSbc loop when resolved`);
+    }
+    if (value.alternatives !== void 0 && (!Array.isArray(value.alternatives) || value.alternatives.some((loop) => loop?.strategy !== "playerPickSbc"))) {
+      errors.push(`${path}.alternatives must contain only playerPickSbc loops`);
     }
   }
   function validateRollingStorageSinkPick(value, path, errors) {
@@ -4045,6 +4147,15 @@
       const minRating = Number(loopDef.dynamicRewardMinRating);
       if (!Number.isInteger(minRating) || minRating < 1 || minRating > 99) {
         errors.push("dynamicRewardMinRating must be an integer between 1 and 99");
+      }
+    }
+    if (loopDef.repeatability !== void 0 && !["unlimited", "bounded", "unknown"].includes(loopDef.repeatability)) {
+      errors.push("repeatability must be unlimited, bounded, or unknown");
+    }
+    if (loopDef.completionLimit !== void 0 && loopDef.completionLimit !== null) {
+      const completionLimit5 = Number(loopDef.completionLimit);
+      if (!Number.isInteger(completionLimit5) || completionLimit5 < 1) {
+        errors.push("completionLimit must be null or a positive integer");
       }
     }
     if (loopDef.preCraftPlayerPickSelector !== void 0) {
@@ -12602,6 +12713,28 @@
         }
         accessToken = access?.token;
       }
+      if (options.preparePlayers) {
+        const prepared = await options.preparePlayers(context);
+        context.playerPreparation = prepared || null;
+        if (prepared?.ok === false) {
+          return publishResult(options, createSubmissionResult({
+            status: "blocked",
+            submitted: false,
+            challengeRef: context.challengeRef || { id: context.challenge?.id || null },
+            consumedItemRefs: context.squadPlan.itemRefs || [],
+            reason: prepared.reason || "SBC player preparation failed"
+          }), { phase: "player-preparation", context });
+        }
+        if (Array.isArray(prepared?.players)) {
+          context.players = prepared.players;
+          context.squadPlan = {
+            ...context.squadPlan,
+            players: prepared.players,
+            itemRefs: prepared.itemRefs || context.squadPlan.itemRefs,
+            ...prepared.selection ? { selection: prepared.selection } : {}
+          };
+        }
+      }
       await runValidators(options.preSaveValidators, context, "pre-save");
       await options.saveSquad?.(context);
       if (options.reloadSquad) await options.reloadSquad(context);
@@ -12664,18 +12797,20 @@
       };
     };
   }
-  function createExistingSquadProvider({ getPlayers, itemRef: itemRef4, source = "existing-squad" }) {
+  function createExistingSquadProvider({ getPlayers, itemRef: itemRef4, selection = null, source = "existing-squad" }) {
     return async (context) => {
       const players = await getPlayers(context);
       if (!Array.isArray(players) || !players.length) {
         return { ok: false, reason: `${source} did not expose any players` };
       }
-      return {
+      const result = {
         ok: true,
         players,
         itemRefs: players.map(itemRef4),
         source
       };
+      if (selection) result.selection = selection;
+      return result;
     };
   }
   function createFsuFillProvider({ fill, getPlayers, itemRef: itemRef4 }) {
@@ -21076,7 +21211,7 @@
         value: [
           formatCount(recoveries.totw, "TOTW"),
           formatCount(recoveries.provisions, "Provisions"),
-          formatCount(recoveries.playerPick, "85+ Pick"),
+          formatCount(recoveries.playerPick, "Rare Gold Pick"),
           formatCount(recoveries.storageSink, "95+ Storage Pick"),
           formatCount(recoveries.goldSink, "5x80")
         ].join(" | ")
@@ -22715,7 +22850,17 @@
     if (options.preOpenResolver) {
       const preOpen = await options.preOpenResolver();
       if (preOpen?.status === "blocked") {
-        return publishReceipt(options, createOpenPackReceipt({ status: "blocked", reason: preOpen.reason || "pre-open resolver blocked", attempts: 0 }), { phase: "pre-open" });
+        const reasonCode2 = preOpen.reasonCode || preOpen.code || preOpen.details?.reasonCode || null;
+        return publishReceipt(options, createOpenPackReceipt({
+          status: "blocked",
+          reason: preOpen.reason || "pre-open resolver blocked",
+          attempts: 0,
+          details: {
+            ...preOpen.details || {},
+            phase: "pre-open",
+            ...reasonCode2 ? { reasonCode: reasonCode2 } : {}
+          }
+        }), { phase: "pre-open" });
       }
     }
     for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -23419,6 +23564,155 @@
     const delayMs = Math.min(3e3, base + current * 500);
     return { retry: true, delayMs, reason: code };
   }
+  function positiveItemId(value) {
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : 0;
+  }
+  function rejectedItemViolationOverride(reason) {
+    return {
+      retry: false,
+      reason,
+      skipValidation: false,
+      reloadChallenge: false,
+      violationNames: [],
+      violationItemIds: []
+    };
+  }
+  function planItemViolationOverride({
+    allowOverride = false,
+    attempt = 1,
+    maxAttempts = 3,
+    detail = "",
+    result = null,
+    submittedItemIds = [],
+    skipValidation = false
+  } = {}) {
+    if (allowOverride !== true) return rejectedItemViolationOverride("disabled");
+    if (skipValidation === true) return rejectedItemViolationOverride("validation-already-skipped");
+    const current = Math.max(1, Number(attempt) || 1);
+    const max = Math.max(1, Math.min(5, Number(maxAttempts) || 3));
+    if (current >= max) return rejectedItemViolationOverride("attempts-exhausted");
+    const code = normalizeSubmitErrorCode(detail || result?.status || result?.error?.code || "");
+    if (code !== "409") return rejectedItemViolationOverride("not-item-violation-conflict");
+    const violations = result?.data?.itemViolations;
+    if (!Array.isArray(violations) || !violations.length) {
+      return rejectedItemViolationOverride("missing-item-violations");
+    }
+    const submittedIds = new Set((submittedItemIds || []).map(positiveItemId).filter(Boolean));
+    if (!submittedIds.size) return rejectedItemViolationOverride("missing-submitted-items");
+    const violationItemIds = [];
+    const violationNames = [];
+    for (const violation of violations) {
+      if (!violation || typeof violation !== "object" || !Array.isArray(violation.itemIds) || !violation.itemIds.length) {
+        return rejectedItemViolationOverride("invalid-item-violations");
+      }
+      const ids = violation.itemIds.map(positiveItemId);
+      if (ids.some((id) => !id)) return rejectedItemViolationOverride("invalid-item-violations");
+      if (ids.some((id) => !submittedIds.has(id))) {
+        return rejectedItemViolationOverride("foreign-item-violation");
+      }
+      violationItemIds.push(...ids);
+      const name = String(violation.name || "").trim();
+      if (name) violationNames.push(name);
+    }
+    return {
+      retry: true,
+      reason: "item-violations",
+      skipValidation: true,
+      reloadChallenge: false,
+      violationNames: [...new Set(violationNames)],
+      violationItemIds: [...new Set(violationItemIds)]
+    };
+  }
+
+  // src/sbc/untradeable-duplicate-swap.js
+  function positiveId2(value) {
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : 0;
+  }
+  function entrySignal(entry = {}) {
+    return entry.signal || entry.signalRef || null;
+  }
+  function entryItem(entry = {}) {
+    return entry.item || entry.itemRef || null;
+  }
+  function itemPile(item = {}) {
+    return String(item.pile || item.ref?.pile || "unknown");
+  }
+  function planUntradeableDuplicateSwaps({ selection = null, players = [] } = {}) {
+    const playerById = new Map((players || []).map((player) => [positiveId2(player?.id || player?.ref?.id), player]).filter(([id]) => id));
+    const swaps = [];
+    const seenSignals = /* @__PURE__ */ new Set();
+    const seenTargets = /* @__PURE__ */ new Set();
+    for (const entry of selection?.entries || []) {
+      if (String(entry?.pileName || "") !== "unassigned") continue;
+      const signal = entrySignal(entry);
+      const plannedTarget = entryItem(entry);
+      const signalId = positiveId2(signal?.id || signal?.ref?.id);
+      const targetId = positiveId2(plannedTarget?.id || plannedTarget?.ref?.id);
+      const target = playerById.get(targetId);
+      if (!signalId || !targetId || !target) continue;
+      if (signal?.tradeable === true || target?.tradeable !== true || itemPile(target) !== "club") continue;
+      if (!isSamePlayerCardVersion(signal, target)) continue;
+      const duplicateId = positiveId2(signal?.duplicateId || signal?.duplicateSignalId);
+      if (!duplicateId) {
+        return { ok: false, reason: "duplicate target identity is missing", swaps: [] };
+      }
+      if (duplicateId !== targetId) {
+        return { ok: false, reason: "duplicate target identity changed", swaps: [] };
+      }
+      if (seenSignals.has(signalId) || seenTargets.has(targetId)) {
+        return { ok: false, reason: "duplicate swap plan reused an item identity", swaps: [] };
+      }
+      seenSignals.add(signalId);
+      seenTargets.add(targetId);
+      swaps.push({
+        signalId,
+        targetId,
+        definitionId: positiveId2(signal?.definitionId || signal?.ref?.definitionId)
+      });
+    }
+    return { ok: true, swaps };
+  }
+  function failedResolution(reason) {
+    return { ok: false, reason, replacements: [] };
+  }
+  function resolveUntradeableDuplicateSwapIds(plan = {}, result = null) {
+    const swaps = Array.isArray(plan?.swaps) ? plan.swaps : [];
+    if (!swaps.length) return { ok: true, replacements: [] };
+    if (result?.success !== true) return failedResolution("duplicate swap move failed");
+    const clubDuplicates = result?.data?.clubDuplicates;
+    const itemIds2 = result?.data?.itemIds;
+    if (!Array.isArray(clubDuplicates) || !Array.isArray(itemIds2)) {
+      return failedResolution("duplicate swap response has no identity mapping");
+    }
+    if (!clubDuplicates.length || clubDuplicates.length !== itemIds2.length) {
+      return failedResolution("duplicate swap response mapping is incomplete");
+    }
+    const newIdByOldId = /* @__PURE__ */ new Map();
+    for (let index = 0; index < clubDuplicates.length; index++) {
+      const oldId = positiveId2(clubDuplicates[index]?.id ?? clubDuplicates[index]?.itemId ?? clubDuplicates[index]);
+      const newItemId = positiveId2(itemIds2[index]);
+      if (!oldId || !newItemId || newIdByOldId.has(oldId)) {
+        return failedResolution("duplicate swap response contains invalid identities");
+      }
+      newIdByOldId.set(oldId, newItemId);
+    }
+    const replacements = [];
+    for (const swap of swaps) {
+      const newItemId = newIdByOldId.get(positiveId2(swap.targetId));
+      if (!newItemId) {
+        return failedResolution(`duplicate swap response omitted selected Club item #${positiveId2(swap.targetId) || "?"}`);
+      }
+      replacements.push({
+        signalId: positiveId2(swap.signalId),
+        targetId: positiveId2(swap.targetId),
+        newItemId,
+        definitionId: positiveId2(swap.definitionId)
+      });
+    }
+    return { ok: true, replacements };
+  }
 
   // src/sbc/background-submit-diagnostics.js
   var MAX_VISIBLE_KEYS = 24;
@@ -23426,6 +23720,7 @@
   var MAX_MESSAGE_LENGTH = 240;
   var MAX_STATE_ITEMS = 32;
   var MAX_PACK_CHANGES = 24;
+  var MAX_ITEM_VIOLATIONS = 16;
   var MAX_EVENTS2 = 80;
   var EVENT_WINDOW_MS = 10 * 60 * 1e3;
   var STATE_SCALAR_KEYS = [
@@ -23462,6 +23757,20 @@
     if (typeof value !== "string") return null;
     return value.slice(0, maxLength);
   }
+  function diagnosticValue(value, maxLength = MAX_MESSAGE_LENGTH) {
+    const scalar = diagnosticScalar(value, maxLength);
+    if (scalar !== null) return scalar;
+    if (!value || typeof value !== "object" && typeof value !== "function") return null;
+    const direct = diagnosticScalar(safeRead4(value, "_value"), maxLength) ?? diagnosticScalar(safeRead4(value, "name"), maxLength);
+    if (direct !== null) return direct;
+    const valueMethod = safeRead4(value, "value");
+    if (typeof valueMethod !== "function" || valueMethod.length > 0) return null;
+    try {
+      return diagnosticScalar(valueMethod.call(value), maxLength);
+    } catch {
+      return null;
+    }
+  }
   function visibleKeys(value) {
     try {
       return Object.keys(value || {}).map((key) => String(key).slice(0, 80)).sort().slice(0, MAX_VISIBLE_KEYS);
@@ -23497,21 +23806,159 @@
     }
     return null;
   }
-  function diagnosticLayer(value) {
+  function numericId(value) {
+    if (value === void 0 || value === null || value === "") return null;
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  }
+  function submittedIdSet(values = []) {
+    return new Set((Array.isArray(values) ? values : []).slice(0, MAX_STATE_ITEMS).map(numericId).filter((id) => id !== null));
+  }
+  function looksLikeItemViolation(value) {
+    if (!value || typeof value !== "object" && typeof value !== "function") return false;
+    return [
+      "id",
+      "itemId",
+      "definitionId",
+      "code",
+      "errorCode",
+      "reason",
+      "message",
+      "type",
+      "slot",
+      "index",
+      "status",
+      "value",
+      "name",
+      "itemIds",
+      "item",
+      "player",
+      "resource"
+    ].some((key) => safeRead4(value, key) !== void 0);
+  }
+  function numericIdList(value) {
+    let values = [];
+    if (Array.isArray(value)) values = value;
+    else if (value instanceof Set) values = [...value];
+    else if (value instanceof Map) values = [...value.values()];
+    return [...new Set(values.slice(0, MAX_STATE_ITEMS).map((entry) => numericId(entry?.id ?? entry?.itemId ?? entry)).filter((id) => id !== null))];
+  }
+  function collectionEntries(value) {
+    if (Array.isArray(value)) {
+      return { source: "array", total: value.length, entries: value.map((entry, index) => [String(index), entry]) };
+    }
+    if (value instanceof Map) {
+      return { source: "map", total: value.size, entries: [...value.entries()] };
+    }
+    if (!value || typeof value !== "object" && typeof value !== "function") {
+      return { source: "scalar", total: value === void 0 || value === null ? 0 : 1, entries: [[null, value]] };
+    }
+    for (const key of ["models", "items", "_items", "_array", "list"]) {
+      const nested = safeRead4(value, key);
+      if (!Array.isArray(nested) && !(nested instanceof Map)) continue;
+      const collection = collectionEntries(nested);
+      return { ...collection, source: key };
+    }
+    const toArray = safeRead4(value, "toArray");
+    if (typeof toArray === "function" && toArray.length === 0) {
+      try {
+        const nested = toArray.call(value);
+        if (Array.isArray(nested)) {
+          const collection = collectionEntries(nested);
+          return { ...collection, source: "toArray" };
+        }
+      } catch {
+      }
+    }
+    if (looksLikeItemViolation(value)) return { source: "single", total: 1, entries: [[null, value]] };
+    let keys = [];
+    try {
+      keys = Object.keys(value);
+    } catch {
+    }
+    return {
+      source: "object",
+      total: keys.length,
+      entries: keys.map((key) => [key, safeRead4(value, key)])
+    };
+  }
+  function violationItemReference(value, submittedIds) {
+    if (!value || typeof value !== "object" && typeof value !== "function") return null;
+    const id = numericId(safeRead4(value, "id")) ?? numericId(safeRead4(value, "itemId"));
+    const itemId5 = numericId(safeRead4(value, "itemId")) ?? id;
+    return {
+      id,
+      itemId: itemId5,
+      definitionId: numericId(safeRead4(value, "definitionId")),
+      rating: numericId(safeRead4(value, "rating")),
+      submittedMatch: itemId5 === null ? null : submittedIds.has(itemId5)
+    };
+  }
+  function itemViolation(entryKey, value, submittedIds, ordinal) {
+    const key = entryKey === null || entryKey === void 0 ? null : diagnosticScalar(String(entryKey), 80);
+    const keyItemId = numericId(key);
+    const nestedValue = value && (typeof value === "object" || typeof value === "function") ? value : null;
+    const nestedItem = ["item", "player", "resource"].map((field5) => safeRead4(nestedValue, field5)).find((candidate) => candidate && (typeof candidate === "object" || typeof candidate === "function"));
+    const item = violationItemReference(nestedItem, submittedIds);
+    const id = numericId(safeRead4(nestedValue, "id"));
+    const itemIds2 = numericIdList(safeRead4(nestedValue, "itemIds"));
+    const itemId5 = numericId(safeRead4(nestedValue, "itemId")) ?? item?.itemId ?? keyItemId ?? id ?? (itemIds2.length === 1 ? itemIds2[0] : null);
+    const candidateIds = [...new Set([itemId5, ...itemIds2].filter((candidate) => candidate !== null))];
+    const matchedSubmittedIds = candidateIds.filter((candidate) => submittedIds.has(candidate));
+    return {
+      key,
+      ordinal,
+      id,
+      itemId: itemId5,
+      definitionId: numericId(safeRead4(nestedValue, "definitionId")) ?? item?.definitionId ?? null,
+      name: diagnosticValue(safeRead4(nestedValue, "name"), 120),
+      itemIds: itemIds2,
+      submittedItemIds: matchedSubmittedIds,
+      code: diagnosticValue(safeRead4(nestedValue, "code")),
+      errorCode: diagnosticValue(safeRead4(nestedValue, "errorCode")),
+      reason: diagnosticValue(safeRead4(nestedValue, "reason")),
+      message: diagnosticValue(safeRead4(nestedValue, "message")),
+      type: diagnosticValue(safeRead4(nestedValue, "type"), 80),
+      slot: diagnosticValue(safeRead4(nestedValue, "slot"), 80),
+      index: diagnosticValue(safeRead4(nestedValue, "index"), 80),
+      status: diagnosticValue(safeRead4(nestedValue, "status"), 80),
+      value: nestedValue ? diagnosticValue(safeRead4(nestedValue, "value")) : diagnosticValue(value),
+      submittedMatch: candidateIds.length ? matchedSubmittedIds.length > 0 : null,
+      item,
+      visibleKeys: visibleKeys(nestedValue),
+      prototypeKeys: prototypeKeys(nestedValue)
+    };
+  }
+  function itemViolationsSummary(value, submittedIds) {
+    if (value === void 0 || value === null) return null;
+    const collection = collectionEntries(value);
+    return {
+      type: valueType(value),
+      source: collection.source,
+      count: collection.total,
+      truncated: collection.total > MAX_ITEM_VIOLATIONS,
+      items: collection.entries.slice(0, MAX_ITEM_VIOLATIONS).map(([key, entry], index) => itemViolation(key, entry, submittedIds, index)),
+      visibleKeys: visibleKeys(value),
+      prototypeKeys: prototypeKeys(value)
+    };
+  }
+  function diagnosticLayer(value, options = {}) {
     if (value === void 0 || value === null) return null;
     if (typeof value !== "object" && typeof value !== "function") {
       return { value: diagnosticScalar(value) };
     }
+    const submittedIds = options.submittedIds || /* @__PURE__ */ new Set();
     return {
       type: valueType(value),
-      status: diagnosticScalar(safeRead4(value, "status")),
-      statusCode: diagnosticScalar(safeRead4(value, "statusCode")),
-      httpStatus: diagnosticScalar(safeRead4(value, "httpStatus")),
-      code: diagnosticScalar(safeRead4(value, "code")),
-      errorCode: diagnosticScalar(safeRead4(value, "errorCode")),
-      reason: diagnosticScalar(safeRead4(value, "reason")),
-      message: diagnosticScalar(safeRead4(value, "message")),
-      retryAfter: diagnosticScalar(safeRead4(value, "retryAfter"), 80) ?? retryAfter(safeRead4(value, "headers")),
+      status: diagnosticValue(safeRead4(value, "status")),
+      statusCode: diagnosticValue(safeRead4(value, "statusCode")),
+      httpStatus: diagnosticValue(safeRead4(value, "httpStatus")),
+      code: diagnosticValue(safeRead4(value, "code")),
+      errorCode: diagnosticValue(safeRead4(value, "errorCode")),
+      reason: diagnosticValue(safeRead4(value, "reason")),
+      message: diagnosticValue(safeRead4(value, "message")),
+      retryAfter: diagnosticValue(safeRead4(value, "retryAfter"), 80) ?? retryAfter(safeRead4(value, "headers")),
+      itemViolations: itemViolationsSummary(safeRead4(value, "itemViolations"), submittedIds),
       visibleKeys: visibleKeys(value),
       prototypeKeys: prototypeKeys(value)
     };
@@ -23531,28 +23978,29 @@
       prototypeKeys: []
     };
   }
-  function responseSummary2(response) {
-    const summary = diagnosticLayer(response) || emptyDiagnosticLayer();
+  function responseSummary2(response, options = {}) {
+    const summary = diagnosticLayer(response, options) || emptyDiagnosticLayer();
     return {
       ...summary,
-      data: diagnosticLayer(safeRead4(response, "data")),
-      body: diagnosticLayer(safeRead4(response, "body")),
-      error: diagnosticLayer(safeRead4(response, "error"))
+      data: diagnosticLayer(safeRead4(response, "data"), options),
+      body: diagnosticLayer(safeRead4(response, "body"), options),
+      error: diagnosticLayer(safeRead4(response, "error"), options)
     };
   }
-  function errorSummary(error) {
-    const summary = diagnosticLayer(error) || emptyDiagnosticLayer();
+  function errorSummary(error, options = {}) {
+    const summary = diagnosticLayer(error, options) || emptyDiagnosticLayer();
     return {
       ...summary,
       name: diagnosticScalar(safeRead4(error, "name"), 80),
-      data: diagnosticLayer(safeRead4(error, "data")),
-      body: diagnosticLayer(safeRead4(error, "body"))
+      data: diagnosticLayer(safeRead4(error, "data"), options),
+      body: diagnosticLayer(safeRead4(error, "body"), options)
     };
   }
-  function sanitizeBackgroundSubmitResult(result) {
+  function sanitizeBackgroundSubmitResult(result, options = {}) {
     const error = safeRead4(result, "error");
     const response = safeRead4(result, "response");
     const errorResponse = safeRead4(error, "response");
+    const diagnosticOptions = { submittedIds: submittedIdSet(options.submittedItemIds) };
     return {
       success: safeRead4(result, "success") === true,
       status: diagnosticScalar(safeRead4(result, "status")),
@@ -23560,13 +24008,13 @@
       httpStatus: diagnosticScalar(safeRead4(result, "httpStatus")),
       code: diagnosticScalar(safeRead4(result, "code")),
       errorCode: diagnosticScalar(safeRead4(result, "errorCode")),
-      reason: diagnosticScalar(safeRead4(result, "reason")),
-      message: diagnosticScalar(safeRead4(result, "message")),
-      data: diagnosticLayer(safeRead4(result, "data")),
-      body: diagnosticLayer(safeRead4(result, "body")),
-      error: errorSummary(error),
-      response: responseSummary2(response),
-      errorResponse: responseSummary2(errorResponse),
+      reason: diagnosticValue(safeRead4(result, "reason")),
+      message: diagnosticValue(safeRead4(result, "message")),
+      data: diagnosticLayer(safeRead4(result, "data"), diagnosticOptions),
+      body: diagnosticLayer(safeRead4(result, "body"), diagnosticOptions),
+      error: errorSummary(error, diagnosticOptions),
+      response: responseSummary2(response, diagnosticOptions),
+      errorResponse: responseSummary2(errorResponse, diagnosticOptions),
       visibleKeys: {
         result: visibleKeys(result),
         error: visibleKeys(error),
@@ -23726,6 +24174,7 @@
         startedAt,
         endedAt: null,
         request: normalizeRequest(context),
+        submittedItemIds: [...submittedIdSet(context.submittedItemIds)],
         success: null,
         code: null
       };
@@ -23735,7 +24184,9 @@
     }
     function complete(event, result) {
       const endedAt = Number(now());
-      const summary = sanitizeBackgroundSubmitResult(result);
+      const summary = sanitizeBackgroundSubmitResult(result, {
+        submittedItemIds: event?.submittedItemIds
+      });
       event.endedAt = endedAt;
       event.success = summary.success;
       event.code = resultCode(summary);
@@ -24878,7 +25329,7 @@
     RECOVER_STORAGE_SINK: "RECOVER_STORAGE_SINK",
     RECOVER_REQUIRED_SPECIAL: "RECOVER_REQUIRED_SPECIAL",
     MAINTAIN_STORAGE: "MAINTAIN_STORAGE",
-    REDEEM_85_PICK: "REDEEM_85_PICK",
+    REDEEM_RARE_GOLD_PICK: "REDEEM_RARE_GOLD_PICK",
     CRAFT_5X80: "CRAFT_5X80",
     PLAN_PRIMARY_SQUAD: "PLAN_PRIMARY_SQUAD",
     SUBMIT_PRIMARY: "SUBMIT_PRIMARY",
@@ -25346,6 +25797,31 @@
               }
             }
             continue;
+          }
+          if (isBlocked(leftoverReward) && reasonCode(leftoverReward) === "PROTECTED_STORAGE_BLOCKED") {
+            if (options.storageSinkEnabled !== true) {
+              return finishRecoveryFailure(
+                leftoverReward,
+                "leftover recovery reward needs more Storage headroom",
+                "PROTECTED_STORAGE_BLOCKED"
+              );
+            }
+            const storageSink = await runRecovery(
+              "storageSink",
+              ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
+              options.recoverStorageSink,
+              {
+                trigger: "storage-pressure",
+                storage: leftoverReward,
+                source: "leftover-recovery-pre-open"
+              }
+            );
+            if (isProgressed(storageSink)) continue;
+            return finishRecoveryFailure(
+              storageSink,
+              "Storage pressure Pick could not clear room for the leftover recovery reward",
+              "STORAGE_SINK_RECOVERY_BLOCKED"
+            );
           }
           if (isStopped(leftoverReward) || isBlocked(leftoverReward) || leftoverReward?.status === "planned") {
             return finishRecoveryFailure(
@@ -26736,7 +27212,7 @@
     RECOVER_STORAGE_SINK: "Freeing Storage with 95+ Pick",
     RECOVER_REQUIRED_SPECIAL: "Recovering TOTW",
     MAINTAIN_STORAGE: "Maintaining Storage",
-    REDEEM_85_PICK: "Redeeming 85+ Pick",
+    REDEEM_RARE_GOLD_PICK: "Redeeming Rare Gold Pick",
     CRAFT_5X80: "Crafting 5x80+",
     PLAN_PRIMARY_SQUAD: "Building 10x85+ squad",
     SUBMIT_PRIMARY: "Building 10x85+ squad",
@@ -37921,13 +38397,22 @@
       });
       if (result.status === "blocked") {
         const blocked3 = result.plan?.blocked;
-        if (blocked3?.destination === "storage") {
-          fail2(`SBC storage has only ${blocked3.free} slot(s), but ${blocked3.required} item(s) need moving`);
+        const reasonCode2 = blocked3?.destination === "storage" ? "PROTECTED_STORAGE_BLOCKED" : blocked3?.destination === "transfer" ? "UNASSIGNED_TRANSFER_BLOCKED" : "UNASSIGNED_CLEANUP_BLOCKED";
+        const blockedReason = blocked3?.destination === "storage" ? `SBC storage has only ${blocked3.free} slot(s), but ${blocked3.required} item(s) need moving` : blocked3?.destination === "transfer" ? `Transfer list has only ${blocked3.free} slot(s), but ${blocked3.required} item(s) need moving` : result.reason || "Unassigned cleanup blocked";
+        if (options.returnBlockedResult === true) {
+          return {
+            ...result,
+            reason: blockedReason,
+            reasonCode: reasonCode2,
+            details: {
+              destination: blocked3?.destination || null,
+              free: blocked3?.free ?? null,
+              required: blocked3?.required ?? null,
+              itemRefs: blocked3?.itemRefs || []
+            }
+          };
         }
-        if (blocked3?.destination === "transfer") {
-          fail2(`Transfer list has only ${blocked3.free} slot(s), but ${blocked3.required} item(s) need moving`);
-        }
-        fail2(result.reason || "Unassigned cleanup blocked");
+        fail2(blockedReason);
       }
       const reservedCount = result.plan?.reservedItemRefs?.length || reservedIds.size;
       if (initialLogged && (result.iterations > 1 || reservedCount || result.status === "preserved")) {
@@ -38498,7 +38983,7 @@
         return null;
       }
       log(`${purpose}: pack open blocked after ${receipt.attempts} attempt(s); reason:${receipt.reason || "unknown"}`);
-      if (options.returnBlockedReceipt === true && [PACK_OPEN_RESPONSE_LOST, PACK_OPEN_RESULT_AMBIGUOUS].includes(receipt.reason)) {
+      if (options.returnBlockedReceipt === true && (receipt.details?.phase === "pre-open" || [PACK_OPEN_RESPONSE_LOST, PACK_OPEN_RESULT_AMBIGUOUS].includes(receipt.reason))) {
         return receipt;
       }
       fail2(`Open pack failed: ${receipt.reason || "unknown"}`);
@@ -39122,12 +39607,12 @@
       const pickDuplicateCount = pickSession.results.filter((result) => result.status === "duplicate").length;
       for (const [loopId, loopDef] of Object.entries(pickSession.loopOverrides)) {
         const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.goldConsumption && requirement2.goldConsumption !== "eligibility" ? ` (${requirement2.goldConsumption})` : requirement2.preferCommon ? " (common-first legacy)" : ""}`).join(" + ")}`).join("; ");
-        log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios})`);
+        log(`Player Pick scan: using scanned metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; repeatability:${loopDef.repeatability || "unknown"}${loopDef.completionLimit ? `/${loopDef.completionLimit}` : ""}; ${ratios})`);
       }
       for (const diagnostic of pickSession.overrideDiagnostics) log(`Player Pick scan: override skipped: ${diagnostic}`);
       for (const loopDef of pickSession.discoveredLoops) {
         const ratios = (loopDef.challengeRequirements || [loopDef.requirements || []]).map((requirements, index) => `challenge ${index + 1}: ${(requirements || []).map((requirement2) => `${requirement2.count} ${requirement2.rarity || requirement2.tier}${requirement2.goldConsumption && requirement2.goldConsumption !== "eligibility" ? ` (${requirement2.goldConsumption})` : requirement2.preferCommon ? " (common-first legacy)" : ""}`).join(" + ")}`).join("; ");
-        log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; ${ratios}${loopDef.discoveryReportedCompleted ? "; reported completed, one runtime probe" : ""})`);
+        log(`Player Pick scan: added session Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.pickItemResourceIds?.[0] || "?"}, select ${loopDef.pickCount}/${loopDef.pickCandidateCount}; repeatability:${loopDef.repeatability || "unknown"}${loopDef.completionLimit ? `/${loopDef.completionLimit}` : ""}; ${ratios}${loopDef.discoveryReportedCompleted ? "; reported completed, one runtime probe" : ""})`);
       }
       for (const [loopId, loopDef] of Object.entries(upgradeSession.loopOverrides)) {
         log(`Dynamic SBC scan: using scanned Upgrade metadata for configured Loop ${loopId} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.rewardPackIds?.[0] || "?"}, target rating:${loopDef.ratingSbcFill?.targetRating || "?"}, players:${loopDef.expectedPlayerCount || "?"})`);
@@ -39136,7 +39621,9 @@
         log(`Dynamic SBC scan: added session Upgrade Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || "?"}, reward #${loopDef.rewardPackIds?.[0] || "?"}, target rating:${loopDef.ratingSbcFill?.targetRating || "?"}, players:${loopDef.expectedPlayerCount || "?"})`);
       }
       for (const loopDef of materializedRollingLoops) {
-        log(`Dynamic SBC scan: added selectable Rolling Loop ${loopDef.name} (primary Set #${loopDef.sbcSetIds?.[0] || "?"}; TOTW:${loopDef.rollingTotwUpgrade?.activityResolved === true ? "resolved" : "unavailable"}; Provisions:${loopDef.rollingProvisionsUpgrade?.activityResolved === true ? "resolved" : "unavailable"}; Pick:${loopDef.rollingPlayerPick?.status || "unavailable"}; Storage sink Pick:${loopDef.rollingStorageSinkPick?.status || "unavailable"}/${pickOptions.rollingStorageSinkEnabled ? "enabled" : "disabled"}; Gold sink:${loopDef.rollingGoldSinkUpgrade?.activityResolved === true ? "resolved" : "unavailable"})`);
+        const pickSelection = loopDef.rollingPlayerPick?.selection;
+        const pickSummary = pickSelection ? `${loopDef.rollingPlayerPick.status}/${pickSelection.minimumRareGoldCost} rare/${pickSelection.totalGoldCost} gold/${pickSelection.rewardMinRating}+/${loopDef.rollingPlayerPick.alternatives?.length || 0} alternate(s)` : loopDef.rollingPlayerPick?.status || "unavailable";
+        log(`Dynamic SBC scan: added selectable Rolling Loop ${loopDef.name} (primary Set #${loopDef.sbcSetIds?.[0] || "?"}; TOTW:${loopDef.rollingTotwUpgrade?.activityResolved === true ? "resolved" : "unavailable"}; Provisions:${loopDef.rollingProvisionsUpgrade?.activityResolved === true ? "resolved" : "unavailable"}; Rare Gold Pick:${pickSummary}; Storage sink Pick:${loopDef.rollingStorageSinkPick?.status || "unavailable"}/${pickOptions.rollingStorageSinkEnabled ? "enabled" : "disabled"}; Gold sink:${loopDef.rollingGoldSinkUpgrade?.activityResolved === true ? "resolved" : "unavailable"})`);
       }
       for (const activity of activitySession.activities) {
         const sink = activity.materialSink;
@@ -41664,6 +42151,33 @@
       const maxAttempts = Math.max(1, Math.min(5, Number(options.maxAttempts || 3) || 3));
       let currentChallenge = challenge;
       let lastDetail = "unknown";
+      const completeSuccessfulSubmit = async (result) => {
+        const directRewardPackId = rewardPackIdFromSubmitResult(result, set);
+        let newPackId = null;
+        const observationAttempts = Math.max(1, Math.min(5, Number(options.rewardObservationAttempts || 3) || 3));
+        for (let observationAttempt = 1; observationAttempt <= observationAttempts; observationAttempt++) {
+          await refreshStorePacks().catch(() => null);
+          const afterPacks = getAvailableRepositoryMyPacks();
+          const afterPackCounts = getPackCountsById(afterPacks);
+          const newPack = afterPacks.find((pack) => {
+            const id = packIdKey3(pack);
+            return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
+          });
+          newPackId = Number(packIdKey3(newPack)) || null;
+          if (directRewardPackId || newPackId || observationAttempt >= observationAttempts) break;
+          await sleep(Math.min(2e3, 500 * observationAttempt));
+        }
+        const rewardObserved = Boolean(directRewardPackId || newPackId);
+        const usedKnownFallback = !rewardObserved && options.allowKnownRewardFallback === true;
+        const rewardPackId = directRewardPackId || newPackId || (usedKnownFallback ? rewardPackIdFromSubmitResult(result, set, { allowSetFallback: true }) : null);
+        recordObservedPackCatalogReward(set, rewardPackId);
+        log(`${label}: background submit complete; reward pack ${rewardPackId || "not granted for this Challenge"}${usedKnownFallback ? " (single-Challenge identity fallback)" : ""}`);
+        return {
+          rewardPackId,
+          rewardObserved,
+          usedKnownFallback
+        };
+      };
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         let canSubmit = true;
         let retryEvidence = null;
@@ -41714,6 +42228,7 @@
             attempt,
             maxAttempts,
             playerCount: players.length,
+            submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean),
             skipValidation,
             chemistryEnabled
           });
@@ -41745,31 +42260,7 @@
           }
           const submissionDiagnostic = backgroundSubmitTelemetry.complete(submitEvent, result);
           if (result?.success) {
-            const directRewardPackId = rewardPackIdFromSubmitResult(result, set);
-            let newPackId = null;
-            const observationAttempts = Math.max(1, Math.min(5, Number(options.rewardObservationAttempts || 3) || 3));
-            for (let observationAttempt = 1; observationAttempt <= observationAttempts; observationAttempt++) {
-              await refreshStorePacks().catch(() => null);
-              const afterPacks = getAvailableRepositoryMyPacks();
-              const afterPackCounts = getPackCountsById(afterPacks);
-              const newPack = afterPacks.find((pack) => {
-                const id = packIdKey3(pack);
-                return id && Number(afterPackCounts.get(id) || 0) > Number(beforePackCounts.get(id) || 0);
-              });
-              newPackId = Number(packIdKey3(newPack)) || null;
-              if (directRewardPackId || newPackId || observationAttempt >= observationAttempts) break;
-              await sleep(Math.min(2e3, 500 * observationAttempt));
-            }
-            const rewardObserved = Boolean(directRewardPackId || newPackId);
-            const usedKnownFallback = !rewardObserved && options.allowKnownRewardFallback === true;
-            const rewardPackId = directRewardPackId || newPackId || (usedKnownFallback ? rewardPackIdFromSubmitResult(result, set, { allowSetFallback: true }) : null);
-            recordObservedPackCatalogReward(set, rewardPackId);
-            log(`${label}: background submit complete; reward pack ${rewardPackId || "not granted for this Challenge"}${usedKnownFallback ? " (single-Challenge identity fallback)" : ""}`);
-            return {
-              rewardPackId,
-              rewardObserved,
-              usedKnownFallback
-            };
+            return completeSuccessfulSubmit(result);
           }
           const stateAfter = currentBackgroundSubmitState(set, currentChallenge, submissionOptions);
           const packInventory = summarizeBackgroundSubmitPackCounts(
@@ -41782,6 +42273,74 @@
             packInventory
           });
           lastDetail = serviceResultErrorText(result) || result?.status || "unknown";
+          const overridePlan = planItemViolationOverride({
+            allowOverride: options.allowItemViolationOverride === true,
+            attempt,
+            maxAttempts,
+            detail: lastDetail,
+            result,
+            submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean),
+            skipValidation
+          });
+          if (overridePlan.retry) {
+            const forcedOptions = { skipValidation: true, chemistryEnabled };
+            const names = overridePlan.violationNames.join("/") || "unnamed warning";
+            log(`${label}: EA rejected ${overridePlan.violationItemIds.length} submitted item(s) with ${names}; confirming the same saved squad once with skipValidation:true`);
+            const forcedSelectedItemsBefore = currentBackgroundSubmitItems(players);
+            const forcedStateBefore = currentBackgroundSubmitState(set, currentChallenge, forcedOptions);
+            const forcedPackCountsBefore = getPackCountsById();
+            const forcedEvent = backgroundSubmitTelemetry.begin({
+              setId: Number(set?.id || 0),
+              challengeId: Number(currentChallenge?.id || 0),
+              attempt: attempt + 1,
+              maxAttempts,
+              playerCount: players.length,
+              submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean),
+              skipValidation: true,
+              chemistryEnabled
+            });
+            let forcedResult;
+            try {
+              forcedResult = await observeOnce(
+                eaSbcAdapter().submitChallenge(currentChallenge, set, forcedOptions),
+                ctrl(),
+                45e3,
+                `submitChallenge ${label} validation override`
+              );
+            } catch (error) {
+              const forcedSubmission = backgroundSubmitTelemetry.complete(forcedEvent, {
+                success: false,
+                error
+              });
+              logBackgroundSubmitDiagnostic(label, forcedSubmission, players, options, {
+                selectedItemsBefore: forcedSelectedItemsBefore,
+                state: {
+                  before: forcedStateBefore,
+                  after: currentBackgroundSubmitState(set, currentChallenge, forcedOptions)
+                },
+                packInventory: summarizeBackgroundSubmitPackCounts(
+                  forcedPackCountsBefore,
+                  getPackCountsById()
+                )
+              });
+              throw error;
+            }
+            const forcedDiagnostic = backgroundSubmitTelemetry.complete(forcedEvent, forcedResult);
+            if (forcedResult?.success) return completeSuccessfulSubmit(forcedResult);
+            logBackgroundSubmitDiagnostic(label, forcedDiagnostic, players, options, {
+              selectedItemsBefore: forcedSelectedItemsBefore,
+              state: {
+                before: forcedStateBefore,
+                after: currentBackgroundSubmitState(set, currentChallenge, forcedOptions)
+              },
+              packInventory: summarizeBackgroundSubmitPackCounts(
+                forcedPackCountsBefore,
+                getPackCountsById()
+              )
+            });
+            const forcedDetail = serviceResultErrorText(forcedResult) || forcedResult?.status || "unknown";
+            fail2(`${label}: background submit validation override failed: ${forcedDetail}`);
+          }
           const plan = planBackgroundSubmitRetry({
             attempt,
             maxAttempts,
@@ -45560,6 +46119,134 @@
         }
       });
     }
+    function duplicateSwapSnapshot(item, pile) {
+      return {
+        ...ratingSelectionItemSnapshot(item, pile),
+        tradeable: typeof item?.tradeable === "boolean" ? item.tradeable : isTradeable(item),
+        pile,
+        ref: liveItemRef(item, pile)
+      };
+    }
+    function duplicateSwapSelectionSnapshot(selection, players) {
+      const playerById = new Map((players || []).map((item) => [Number(item?.id || 0), item]).filter(([id]) => id));
+      return {
+        entries: (selection?.entries || []).map((entry) => {
+          const signal = entry?.signal || entry?.signalRef || null;
+          const plannedItem = entry?.item || entry?.itemRef || null;
+          const selectedItem = playerById.get(Number(plannedItem?.id || plannedItem?.ref?.id || 0)) || plannedItem;
+          return {
+            ...entry,
+            signal: signal ? duplicateSwapSnapshot(signal, "unassigned") : null,
+            item: selectedItem ? duplicateSwapSnapshot(selectedItem, liveItemRef(selectedItem).pile) : null
+          };
+        })
+      };
+    }
+    async function prepareRollingUntradeableDuplicateSwaps(context, runtime) {
+      const selection = context?.squadPlan?.selection;
+      const players = Array.isArray(context?.players) ? context.players : [];
+      if (!selection?.entries?.length || !players.length) return { ok: true };
+      const originalPlan = planUntradeableDuplicateSwaps({
+        selection: duplicateSwapSelectionSnapshot(selection, players),
+        players: players.map((item) => duplicateSwapSnapshot(item, liveItemRef(item).pile))
+      });
+      if (!originalPlan.ok || !originalPlan.swaps.length) return originalPlan;
+      const signalItems = [];
+      for (const swap of originalPlan.swaps) {
+        const live = findCachedItemById(swap.signalId, ["unassigned"])?.item || null;
+        if (!live) {
+          return { ok: false, reason: `Unassigned duplicate #${swap.signalId} disappeared before tradeable swap` };
+        }
+        signalItems.push(live);
+      }
+      const liveSelection = {
+        entries: originalPlan.swaps.map((swap, index) => {
+          const target = players.find((item) => Number(item?.id || 0) === swap.targetId);
+          return {
+            pileName: "unassigned",
+            signal: duplicateSwapSnapshot(signalItems[index], "unassigned"),
+            item: duplicateSwapSnapshot(target, "club")
+          };
+        })
+      };
+      const livePlan = planUntradeableDuplicateSwaps({
+        selection: liveSelection,
+        players: liveSelection.entries.map((entry) => entry.item)
+      });
+      if (!livePlan.ok || livePlan.swaps.length !== originalPlan.swaps.length) {
+        return { ok: false, reason: livePlan.reason || "duplicate swap eligibility changed before move" };
+      }
+      log(`${context.label}: swapping ${signalItems.length} Unassigned untradeable duplicate(s) into Club before SBC submit`);
+      const moveResult = await moveItems(signalItems, inventoryPile("club"), true);
+      const resolution = resolveUntradeableDuplicateSwapIds(livePlan, moveResult);
+      if (!resolution.ok) {
+        log(`${context.label}: duplicate swap response diagnostic ${diagnosticJson(captureMoveResult(moveResult))}`);
+        return resolution;
+      }
+      await refreshInventoryCaches(`${context.label} post-untradeable-swap`, {
+        includePacks: false,
+        quiet: true
+      });
+      const replacementByTargetId = /* @__PURE__ */ new Map();
+      for (const replacement of resolution.replacements) {
+        const originalSignal = signalItems.find((item) => Number(item?.id || 0) === replacement.signalId);
+        const originalTarget = players.find((item) => Number(item?.id || 0) === replacement.targetId);
+        const newItem = findCachedItemById(replacement.newItemId, ["club"])?.item || null;
+        if (!originalSignal || !originalTarget || !newItem) {
+          return { ok: false, reason: `duplicate swap Club item #${replacement.newItemId} was not materialized` };
+        }
+        if (!isSamePlayerCardVersion(originalSignal, newItem) || isTradeable(newItem)) {
+          return { ok: false, reason: `duplicate swap Club item #${replacement.newItemId} failed same-version untradeable validation` };
+        }
+        replacementByTargetId.set(replacement.targetId, {
+          ...replacement,
+          originalTarget,
+          newItem
+        });
+      }
+      const preparedPlayers = players.map((item) => replacementByTargetId.get(Number(item?.id || 0))?.newItem || item);
+      const preparedSelection = {
+        ...selection,
+        entries: (selection.entries || []).map((entry) => {
+          const selected2 = entry?.item || entry?.itemRef || null;
+          const replacement = replacementByTargetId.get(Number(selected2?.id || selected2?.ref?.id || 0));
+          if (!replacement) return entry;
+          const swappedOutSignal = {
+            ...duplicateSwapSnapshot(replacement.originalTarget, "unassigned"),
+            duplicate: true,
+            duplicateSignal: true,
+            duplicateId: replacement.newItemId,
+            duplicateSignalId: replacement.newItemId
+          };
+          return {
+            ...entry,
+            pileName: "unassigned",
+            signal: swappedOutSignal,
+            signalRef: swappedOutSignal.ref,
+            item: replacement.newItem,
+            itemRef: liveItemRef(replacement.newItem, "club")
+          };
+        }),
+        selected: preparedPlayers
+      };
+      if (runtime?.coordinator) {
+        const reconciliation = await runtime.coordinator.reconcile(
+          `${context.label} post-untradeable-duplicate-swap`,
+          { refreshUnassigned: true }
+        );
+        if (!reconciliation.ok) {
+          return { ok: false, reason: reconciliation.reason || "inventory reconciliation failed after duplicate swap" };
+        }
+      }
+      log(`${context.label}: replaced ${resolution.replacements.length} selected tradeable Club card(s) with Unassigned untradeable version(s)`);
+      return {
+        ok: true,
+        changed: true,
+        players: preparedPlayers,
+        itemRefs: preparedPlayers.map((item) => liveItemRef(item)),
+        selection: preparedSelection
+      };
+    }
     function rollingRequiredSpecialConstraintIndexes(model = {}) {
       return (model.constraints || []).map((constraint, index) => ({ constraint, index })).filter(({ constraint }) => constraint.source === "ea" && constraint.keyName === "PLAYER_RARITY_GROUP" || constraint.id === "runner-required-special").map(({ index }) => index);
     }
@@ -45952,8 +46639,8 @@
       }
       return { status: "ready", inventoryDelta: runtime.lastMutation?.delta || null };
     }
-    async function saveRollingProvisionalClubSquad(challenge, players, runtimeAccess, label) {
-      if (!runtimeAccess?.refreshedClubPlayers) return;
+    async function saveRollingProvisionalClubSquad(challenge, players, runtimeAccess, label, playerPreparation = null) {
+      if (!runtimeAccess?.refreshedClubPlayers && playerPreparation?.changed !== true) return;
       await saveChallengeSquad(challenge, players, label);
     }
     async function submitRollingRequirementRecovery(loopDef, runtime, definition, options = {}) {
@@ -46215,15 +46902,18 @@
         squadProvider: createExistingSquadProvider({
           getPlayers: async () => players,
           itemRef: liveItemRef,
+          selection: fill.selection,
           source: "rolling-recovery-rating-squad"
         }),
         prepareRuntimeAccess: prepareFsuRuntimeAccess,
-        saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess }) => {
+        preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
+        saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess, playerPreparation }) => {
           await saveRollingProvisionalClubSquad(
             challenge,
             refreshedPlayers,
             runtimeAccess,
-            `${recoveryDef.name} provisional Club refresh`
+            `${recoveryDef.name} provisional Club refresh`,
+            playerPreparation
           );
         },
         preSaveValidators: [({ players: validatedPlayers }) => {
@@ -46247,6 +46937,7 @@
             recoveryDef.name,
             {
               players: context.players || players,
+              allowItemViolationOverride: true,
               allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
               failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
             }
@@ -46294,6 +46985,7 @@
         allowGone: true,
         allowPendingItems: true,
         returnBlockedReceipt: true,
+        preOpenUnassignedOptions: { returnBlockedResult: true },
         assumeSpecialPlayers: options.assumeTotwReward === true,
         retryCodes: ["471", "500"],
         resolveRetryPack: () => findRewardPack(definition, null, {
@@ -46314,7 +47006,7 @@
           ...runtime.recoveryDuplicateRefs || [],
           ...capturedRefs
         ]);
-        log(`${loopDef.name}: captured ${capturedRefs.length} ${definition.name} duplicate Gold signal(s) for the 85+ Pick -> 5x80 recovery chain`);
+        log(`${loopDef.name}: captured ${capturedRefs.length} ${definition.name} duplicate Gold signal(s) for the Rare Gold Pick -> 5x80 recovery chain`);
       }
       runtime.lastMutation = await runtime.coordinator.recordPackReceipt(receipt, { reconcile: true });
       return { ...receipt, status: "opened", inventoryDelta: runtime.lastMutation?.delta || null };
@@ -46603,13 +47295,32 @@
         purpose: `${pickDef.name} result`
       });
     }
-    async function runRollingPlayerPickRecovery(loopDef, runtime, capability, options = {}) {
-      const pickDef = rollingRecoveryDef(capability?.loop, loopDef, {
+    function rollingPlayerPickCapabilityLoops(capability = {}) {
+      const seen = /* @__PURE__ */ new Set();
+      return [capability?.loop, ...capability?.alternatives || []].filter((loop) => {
+        const key = `${(loop?.sbcSetIds || []).join(",")}|${(loop?.pickItemResourceIds || []).join(",")}`;
+        if (!loop || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+    async function findPendingRollingPlayerPickLoop(capability = {}) {
+      for (const pickLoop of rollingPlayerPickCapabilityLoops(capability)) {
+        const pending = await findUnassignedPlayerPick(pickLoop, 1, {
+          quietMissing: true,
+          failOnUnexpected: true
+        });
+        if (pending) return pickLoop;
+      }
+      return null;
+    }
+    async function runRollingPlayerPickCandidate(loopDef, runtime, pickLoop, options = {}) {
+      const pickDef = rollingRecoveryDef(pickLoop, loopDef, {
         inventoryFirst: true,
         priorityPiles: ["unassigned", "storage", "transfer", "club"]
       });
-      if (!pickDef || capability?.status !== "resolved") {
-        return { status: "unavailable", reason: "Rolling 85+ Player Pick capability is unavailable" };
+      if (!pickDef) {
+        return { status: "unavailable", reason: "Rolling Rare Gold Pick candidate is unavailable" };
       }
       const reserves = rollingRecoveryEntryRefs(runtime, ({ classification }) => classification.provisionsReserve === true);
       const protection = rollingRecoveryProtection(runtime, [
@@ -46642,7 +47353,15 @@
         if (reconciled2.status !== "ready") return reconciled2;
         return { status: "selected", pickedCards: pickedCards2 };
       }
-      const set = await findSbcSetForLoopDef(pickDef, pickDef.name);
+      const set = await findSbcSetForDefIfPresent(pickDef);
+      if (!set) return { status: "unavailable", reason: `${pickDef.name} Set is no longer available` };
+      const liveRepeatability = classifyPlayerPickRepeatability(set);
+      if (liveRepeatability.repeatability !== "unlimited") {
+        return {
+          status: "unavailable",
+          reason: `${pickDef.name} live repeatability is ${liveRepeatability.repeatability}`
+        };
+      }
       const challenges = await requestSbcChallenges(set, pickDef.name, { attempts: 3 });
       const incomplete = challenges.map((challenge, index) => ({ challenge, challengeNo: index + 1 })).filter(({ challenge }) => !isCompletedChallenge(challenge));
       if (!incomplete.length) return { status: "unavailable", reason: `${pickDef.name} has no available challenge` };
@@ -46685,6 +47404,30 @@
       const reconciled = await reconcileRollingRuntime(runtime, `${pickDef.name} selection`);
       if (reconciled.status !== "ready") return reconciled;
       return { status: "selected", pickedCards };
+    }
+    async function runRollingPlayerPickRecovery(loopDef, runtime, capability, options = {}) {
+      if (capability?.status !== "resolved") {
+        return { status: "unavailable", reason: "Rolling Rare Gold Pick capability is unavailable" };
+      }
+      const candidates = rollingPlayerPickCapabilityLoops(capability);
+      if (!candidates.length) {
+        return { status: "unavailable", reason: "Rolling Rare Gold Pick capability has no candidates" };
+      }
+      const pendingLoop = await findPendingRollingPlayerPickLoop(capability);
+      if (pendingLoop) {
+        return runRollingPlayerPickCandidate(loopDef, runtime, pendingLoop, options);
+      }
+      const unavailable = [];
+      for (const candidate of candidates) {
+        const result = await runRollingPlayerPickCandidate(loopDef, runtime, candidate, options);
+        if (result?.status !== "unavailable") return result;
+        unavailable.push(`${candidate.name || "Rare Gold Pick"}: ${result.reason || "unavailable"}`);
+        log(`${loopDef.name}: ${candidate.name || "Rare Gold Pick"} unavailable; trying the next dynamic Rare Gold Pick candidate`);
+      }
+      return {
+        status: "unavailable",
+        reason: unavailable.join("; ") || "all Rolling Rare Gold Pick candidates are unavailable"
+      };
     }
     async function loadRollingStorageSinkContexts(loopDef, pickDef) {
       const set = await findSbcSetForLoopDef(pickDef, pickDef.name);
@@ -46991,9 +47734,11 @@
         squadProvider: createExistingSquadProvider({
           getPlayers: async () => resolved.players,
           itemRef: liveItemRef,
+          selection: plan.selection,
           source: "rolling-storage-sink-squad"
         }),
         prepareRuntimeAccess: prepareFsuRuntimeAccess,
+        preparePlayers: (submitContext) => prepareRollingUntradeableDuplicateSwaps(submitContext, runtime),
         saveSquad: async ({ challenge, players }) => {
           await applyPlayersToRatingChallenge(challenge, players, label);
         },
@@ -47014,6 +47759,7 @@
             label,
             {
               players: submitContext.players || resolved.players,
+              allowItemViolationOverride: true,
               rewardObservationAttempts: 1,
               allowKnownRewardFallback: false,
               failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
@@ -47724,12 +48470,9 @@
             runtime.recoveryDuplicateRefs = recoveryRefs.filter((ref) => goldDuplicates.some((item) => rollingItemMatchesRef(item, ref)));
             const rareDuplicates = goldDuplicates.filter(isRare);
             const pickCapability = loopDef.rollingPlayerPick;
-            const pendingPick = pickCapability?.status === "resolved" ? await findUnassignedPlayerPick(pickCapability.loop, 1, {
-              quietMissing: true,
-              failOnUnexpected: true
-            }) : null;
-            if (pendingPick || rareDuplicates.length) {
-              await reportPhase?.(ROLLING_UPGRADE_PHASES.REDEEM_85_PICK);
+            const pendingPickLoop = pickCapability?.status === "resolved" ? await findPendingRollingPlayerPickLoop(pickCapability) : null;
+            if (pendingPickLoop || rareDuplicates.length) {
+              await reportPhase?.(ROLLING_UPGRADE_PHASES.REDEEM_RARE_GOLD_PICK);
               const rareDuplicateRefs = rareDuplicates.map((item) => liveItemRef(item, "unassigned"));
               const protectedDuplicateRefs2 = rollingProtectedDuplicateRefs(
                 unassignedItems,
@@ -47748,7 +48491,7 @@
                 return pick;
               }
               if (pick?.status !== "unavailable") return pick;
-              log(`${loopDef.name}: 85+ Pick recovery unavailable; trying the Gold sink for remaining duplicate Gold`);
+              log(`${loopDef.name}: Rare Gold Pick recovery unavailable; trying the Gold sink for remaining duplicate Gold`);
             }
             if (!goldDuplicates.length) return { status: "skipped" };
             await reportPhase?.(ROLLING_UPGRADE_PHASES.CRAFT_5X80);
@@ -48153,15 +48896,18 @@
               squadProvider: createExistingSquadProvider({
                 getPlayers: async () => players,
                 itemRef: liveItemRef,
+                selection: fill.selection,
                 source: "rolling-rating-squad"
               }),
               prepareRuntimeAccess: prepareFsuRuntimeAccess,
-              saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess }) => {
+              preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
+              saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess, playerPreparation }) => {
                 await saveRollingProvisionalClubSquad(
                   challenge,
                   refreshedPlayers,
                   runtimeAccess,
-                  `${loopDef.name} provisional Club refresh`
+                  `${loopDef.name} provisional Club refresh`,
+                  playerPreparation
                 );
               },
               preSaveValidators: [() => {
@@ -48192,6 +48938,7 @@
                   loopDef.name,
                   {
                     players: context.players || players,
+                    allowItemViolationOverride: true,
                     allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
                     failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
                   }

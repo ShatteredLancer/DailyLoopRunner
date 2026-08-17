@@ -59,6 +59,21 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain("from './sbc/fsu-runtime-access.js'");
   });
 
+  it('keeps item-violation confirmation bounded to Rolling submissions without a Challenge reload', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    expect(source.match(/allowItemViolationOverride:\s*true/g) || []).toHaveLength(3);
+    const overrideStart = source.indexOf('if (overridePlan.retry) {');
+    const ordinaryRetryStart = source.indexOf('const plan = planBackgroundSubmitRetry({', overrideStart);
+    expect(overrideStart).toBeGreaterThan(-1);
+    expect(ordinaryRetryStart).toBeGreaterThan(overrideStart);
+    const overrideBlock = source.slice(overrideStart, ordinaryRetryStart);
+    expect(overrideBlock).toContain('const forcedOptions = { skipValidation: true, chemistryEnabled };');
+    expect(overrideBlock).toContain('eaSbcAdapter().submitChallenge(currentChallenge, set, forcedOptions)');
+    expect(overrideBlock).not.toContain('loadRatingSbcChallenge');
+    expect(overrideBlock).not.toContain('findAvailableRatingSbcChallenge');
+    expect(overrideBlock).toContain('background submit validation override failed');
+  });
+
   it('records the special workflow functions that still require migration', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     expect(source).toContain("from './adapters/index.js'");
@@ -149,6 +164,7 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toMatch(/const preOpenUnassignedOptions = options\.preOpenUnassignedOptions \|\| \{\}/);
     expect(source).toMatch(/preOpenResolver:\s*\(\)\s*=>\s*resolveRuntimeUnassigned\([\s\S]*?preOpenUnassignedOptions/);
     expect(source).toMatch(/pack-open recovery cleanup`,\s*preOpenUnassignedOptions/);
+    expect(source).toMatch(/openRollingRecoveryReward[\s\S]*?preOpenUnassignedOptions:\s*\{\s*returnBlockedResult:\s*true\s*\}/);
     expect(source).toMatch(/runProvisionCraftLoop[\s\S]*?preOpenUnassignedOptions:\s*\{[\s\S]*?enableRecovery:\s*false[\s\S]*?reserveItem:\s*isReservedDuplicate/);
     expect(source).toMatch(/createProvisionPackPolicy[\s\S]*?blockedPolicy:\s*'preserve'[\s\S]*?enableRecovery:\s*false[\s\S]*?isReservedDuplicate/);
     expect(source).toMatch(/if \(stageResult\.status === 'blocked' \|\| stageResult\.status === 'planned'\)/);
@@ -314,6 +330,30 @@ describe('current direct side-effect call baseline', () => {
     expect(postSubmitSelection).toBeGreaterThan(-1);
     expect(protectedStorageRetry).toBeGreaterThan(postSubmitSelection);
     expect(recovery).toContain('pickSelected: true');
+  });
+
+  it('tries ordered unlimited Rare Gold Pick candidates before the Gold sink fallback', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const singleCandidateStart = source.indexOf('async function runRollingPlayerPickCandidate');
+    const candidateStart = source.indexOf('async function runRollingPlayerPickRecovery');
+    const storageSinkStart = source.indexOf('async function loadRollingStorageSinkContexts', candidateStart);
+    const singleCandidateBlock = source.slice(singleCandidateStart, candidateStart);
+    const candidateBlock = source.slice(candidateStart, storageSinkStart);
+    const drainStart = source.indexOf('drainRecoveryDuplicates: async');
+    const drainEnd = source.indexOf('recoverProvisions: async', drainStart);
+    const drainBlock = source.slice(drainStart, drainEnd);
+
+    expect(candidateStart).toBeGreaterThan(-1);
+    expect(singleCandidateStart).toBeGreaterThan(-1);
+    expect(singleCandidateBlock).toContain('findSbcSetForDefIfPresent(pickDef)');
+    expect(singleCandidateBlock).toContain('classifyPlayerPickRepeatability(set)');
+    expect(singleCandidateBlock).toContain("liveRepeatability.repeatability !== 'unlimited'");
+    expect(candidateBlock).toContain('for (const candidate of candidates)');
+    expect(candidateBlock).toContain("if (result?.status !== 'unavailable') return result;");
+    expect(candidateBlock).toContain('trying the next dynamic Rare Gold Pick candidate');
+    expect(drainBlock).toContain('ROLLING_UPGRADE_PHASES.REDEEM_RARE_GOLD_PICK');
+    expect(drainBlock.indexOf('runRollingPlayerPickRecovery')).toBeLessThan(drainBlock.indexOf('submitRollingRequirementRecovery'));
+    expect(drainBlock).not.toContain('85+ Pick');
   });
 
   it('wires startup Storage Sink Pick recovery before generic Unassigned recovery', async () => {

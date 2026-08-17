@@ -16,7 +16,7 @@ describe('Rolling runtime recovery helpers', () => {
     expect(api.rollingDuplicatePlayerCount({ status: 'submitted' })).toBe(0);
   });
 
-  it('does not treat configured Provisions reserve ratings as 85+ Pick triggers', async () => {
+  it('does not treat configured Provisions reserve ratings as Rare Gold Pick triggers', async () => {
     const { api } = await loadUserscript();
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 86, rating: 86, rareflag: 1, duplicate: true }), {})).toBe(true);
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 87, rating: 87, rareflag: 1, duplicate: true }), {})).toBe(false);

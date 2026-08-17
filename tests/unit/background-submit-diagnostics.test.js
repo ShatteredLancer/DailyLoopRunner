@@ -29,6 +29,7 @@ describe('background submit diagnostics', () => {
       attempt: 1,
       maxAttempts: 3,
       playerCount: 11,
+      submittedItemIds: [21],
     });
     currentTime += 900;
     const diagnostic = telemetry.complete(second, {
@@ -36,6 +37,9 @@ describe('background submit diagnostics', () => {
       status: 429,
       message: 'request rejected',
       privateToken: 'must-not-leak',
+      data: {
+        itemViolations: [{ itemId: 21, reason: 'ACTIVE_SQUAD' }],
+      },
       error: {
         code: 429,
         status: 503,
@@ -85,6 +89,11 @@ describe('background submit diagnostics', () => {
     });
     expect(diagnostic.result.visibleKeys.result).toContain('privateToken');
     expect(diagnostic.result.visibleKeys.error).toContain('privatePayload');
+    expect(diagnostic.result.data.itemViolations.items[0]).toMatchObject({
+      itemId: 21,
+      reason: 'ACTIVE_SQUAD',
+      submittedMatch: true,
+    });
     expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
     expect(JSON.stringify(diagnostic).length).toBeLessThan(4000);
   });
@@ -184,6 +193,122 @@ describe('background submit diagnostics', () => {
     expect(diagnostic.data.visibleKeys).toContain('authorization');
     expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
     expect(JSON.stringify(diagnostic).length).toBeLessThan(8000);
+  });
+
+  it('captures bounded item violations and resolves them against submitted item ids', () => {
+    const enumReason = Object.create({
+      value() { return 'ITEM_NOT_ELIGIBLE'; },
+    });
+    const diagnostic = sanitizeBackgroundSubmitResult({
+      success: false,
+      status: 409,
+      data: {
+        itemViolations: {
+          921708501037: {
+            reason: enumReason,
+            code: 466,
+            slot: 0,
+            item: {
+              id: 921708501037,
+              definitionId: 84118660,
+              rating: 96,
+              privatePayload: 'must-not-leak',
+            },
+            privateToken: 'must-not-leak',
+          },
+          unrelated: {
+            itemId: 123,
+            reason: 'ITEM_CHANGED',
+          },
+        },
+      },
+      error: {
+        code: 466,
+        reason: enumReason,
+      },
+    }, {
+      submittedItemIds: [921708501037, 921878765691],
+    });
+
+    expect(diagnostic.error.reason).toBe('ITEM_NOT_ELIGIBLE');
+    expect(diagnostic.data.itemViolations).toMatchObject({
+      type: 'Object',
+      count: 2,
+      truncated: false,
+      items: [
+        {
+          key: '921708501037',
+          itemId: 921708501037,
+          code: 466,
+          reason: 'ITEM_NOT_ELIGIBLE',
+          slot: 0,
+          submittedMatch: true,
+          item: {
+            id: 921708501037,
+            definitionId: 84118660,
+            rating: 96,
+            submittedMatch: true,
+          },
+        },
+        {
+          key: 'unrelated',
+          itemId: 123,
+          reason: 'ITEM_CHANGED',
+          submittedMatch: false,
+        },
+      ],
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
+  });
+
+  it('captures EA item violation names and item id arrays', () => {
+    const diagnostic = sanitizeBackgroundSubmitResult({
+      success: false,
+      status: 409,
+      data: {
+        itemViolations: [{
+          name: 'ACTIVE_SQUAD',
+          itemIds: [911203217502, 123, 'invalid'],
+          privatePayload: 'must-not-leak',
+        }],
+      },
+    }, {
+      submittedItemIds: [911203217502, 921895014553],
+    });
+
+    expect(diagnostic.data.itemViolations.items[0]).toMatchObject({
+      name: 'ACTIVE_SQUAD',
+      itemIds: [911203217502, 123],
+      submittedItemIds: [911203217502],
+      submittedMatch: true,
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
+  });
+
+  it('reads collection-like item violations without retaining the source collection', () => {
+    const collection = {
+      models: [
+        { itemId: 11, errorCode: 'ITEM_MISSING' },
+        { item: { id: 12, definitionId: 112 }, status: 'INVALID' },
+      ],
+      authorization: 'must-not-leak',
+    };
+    const diagnostic = sanitizeBackgroundSubmitResult({
+      success: false,
+      status: 409,
+      data: { itemViolations: collection },
+    }, { submittedItemIds: [12] });
+
+    expect(diagnostic.data.itemViolations).toMatchObject({
+      type: 'Object',
+      count: 2,
+      source: 'models',
+      items: [
+        { itemId: 11, errorCode: 'ITEM_MISSING', submittedMatch: false },
+        { itemId: 12, status: 'INVALID', submittedMatch: true },
+      ],
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
   });
 
   it('snapshots Set, Challenge, cached Challenge and squad identity around a failed submit', () => {

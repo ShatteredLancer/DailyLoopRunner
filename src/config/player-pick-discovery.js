@@ -202,6 +202,21 @@ function remainingCompletions(set) {
   return Math.max(0, Math.floor(repeats - completed));
 }
 
+export function classifyPlayerPickRepeatability(set = {}) {
+  const rawRepeats = set?.repeats;
+  if (rawRepeats === undefined || rawRepeats === null || rawRepeats === '') {
+    return { repeatability: 'unknown', completionLimit: null };
+  }
+  const repeats = Number(rawRepeats);
+  if (!Number.isInteger(repeats) || repeats < 0) {
+    return { repeatability: 'unknown', completionLimit: null };
+  }
+  if (repeats === 0) {
+    return { repeatability: 'unlimited', completionLimit: null };
+  }
+  return { repeatability: 'bounded', completionLimit: repeats };
+}
+
 function discoveryIdentity(set, reward) {
   return Object.freeze({
     setId: positiveInteger(set?.id),
@@ -250,6 +265,7 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
   }
 
   const setRemaining = remainingCompletions(set);
+  const repeatability = classifyPlayerPickRepeatability(set);
   const reportedCompleted = isCompleted(set) || setRemaining === 0;
   const boundedSet = positiveInteger(set?.repeats) !== null;
 
@@ -309,6 +325,8 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     pickCandidateCount: candidateCount,
     pickCount: selectionCount,
     dynamicRewardMinRating: rewardMinRating,
+    repeatability: repeatability.repeatability,
+    completionLimit: repeatability.completionLimit,
     remainingCompletions: setRemaining,
     maxCompletions: 1,
     useRoundsAsCompletions: !reportedCompleted && !boundedSet,
@@ -342,6 +360,8 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     pickCandidateCount: candidateCount,
     pickCount: selectionCount,
     dynamicRewardMinRating: rewardMinRating,
+    repeatability: repeatability.repeatability,
+    completionLimit: repeatability.completionLimit,
     reportedCompleted,
     remainingCompletions: setRemaining,
     diagnostics: unique(challengeWarnings),
@@ -428,6 +448,8 @@ export function mergeScannedPlayerPickMetadata(configuredLoop, discoveredLoop) {
     pickCandidateCount: discoveredLoop.pickCandidateCount,
     pickCount: discoveredLoop.pickCount,
     dynamicRewardMinRating: discoveredLoop.dynamicRewardMinRating,
+    repeatability: discoveredLoop.repeatability,
+    completionLimit: discoveredLoop.completionLimit,
     remainingCompletions: discoveredLoop.remainingCompletions,
     pricePlatform: discoveredLoop.pricePlatform || configuredLoop.pricePlatform,
     discoveryIdentity: discoveredLoop.discoveryIdentity,

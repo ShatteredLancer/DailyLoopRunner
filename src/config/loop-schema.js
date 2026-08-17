@@ -472,19 +472,32 @@ function validateRollingPlayerPick(value, path, errors) {
   if (!isPlainObject(value.selector)) {
     errors.push(`${path}.selector must be an object`);
   } else {
-    const allowedFields = new Set(['rewardMinRating', 'candidateCount', 'selectionCount', 'rareGoldCost']);
+    const allowedFields = new Set(['material', 'selectionCount', 'maxChallenges', 'repeatability', 'preference']);
     Object.keys(value.selector).forEach((field) => {
       if (!allowedFields.has(field)) errors.push(`${path}.selector.${field} is not supported`);
     });
-    for (const field of allowedFields) {
+    for (const field of ['selectionCount', 'maxChallenges']) {
       const number = Number(value.selector[field]);
       if (!Number.isInteger(number) || number < 1 || number > 99) {
         errors.push(`${path}.selector.${field} must be an integer between 1 and 99`);
       }
     }
+    if (value.selector.material !== 'gold-with-required-rare') {
+      errors.push(`${path}.selector.material must be gold-with-required-rare`);
+    }
+    if (value.selector.repeatability !== 'unlimited') {
+      errors.push(`${path}.selector.repeatability must be unlimited`);
+    }
+    if (value.selector.preference !== 'rare-cost-first') {
+      errors.push(`${path}.selector.preference must be rare-cost-first`);
+    }
   }
   if (value.status === 'resolved' && value.loop?.strategy !== 'playerPickSbc') {
     errors.push(`${path}.loop must be a playerPickSbc loop when resolved`);
+  }
+  if (value.alternatives !== undefined && (!Array.isArray(value.alternatives)
+    || value.alternatives.some((loop) => loop?.strategy !== 'playerPickSbc'))) {
+    errors.push(`${path}.alternatives must contain only playerPickSbc loops`);
   }
 }
 
@@ -687,6 +700,16 @@ export function validateLoopDef(loopDef, label = 'loop') {
     const minRating = Number(loopDef.dynamicRewardMinRating);
     if (!Number.isInteger(minRating) || minRating < 1 || minRating > 99) {
       errors.push('dynamicRewardMinRating must be an integer between 1 and 99');
+    }
+  }
+  if (loopDef.repeatability !== undefined
+    && !['unlimited', 'bounded', 'unknown'].includes(loopDef.repeatability)) {
+    errors.push('repeatability must be unlimited, bounded, or unknown');
+  }
+  if (loopDef.completionLimit !== undefined && loopDef.completionLimit !== null) {
+    const completionLimit = Number(loopDef.completionLimit);
+    if (!Number.isInteger(completionLimit) || completionLimit < 1) {
+      errors.push('completionLimit must be null or a positive integer');
     }
   }
   if (loopDef.preCraftPlayerPickSelector !== undefined) {

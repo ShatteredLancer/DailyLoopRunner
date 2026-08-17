@@ -64,6 +64,66 @@ describe('submitSbcAttempt', () => {
     expect(calls).toEqual(['refresh', 'pre', 'save', 'release:access']);
   });
 
+  it('applies a bounded player preparation after runtime refresh and before validation', async () => {
+    const calls = [];
+    const refreshed = { id: 10, rating: 84 };
+    const swapped = { id: 20, rating: 84 };
+    const selection = { entries: [{ item: refreshed }] };
+    const options = baseOptions({
+      squadProvider: async () => ({
+        ok: true,
+        players: [{ id: 1 }],
+        itemRefs: [{ id: 1, definitionId: 101, pile: 'club' }],
+        selection,
+      }),
+      prepareRuntimeAccess: async () => {
+        calls.push('refresh');
+        return { ok: true, players: [refreshed] };
+      },
+      preparePlayers: async ({ players, squadPlan }) => {
+        calls.push('prepare');
+        expect(players).toEqual([refreshed]);
+        expect(squadPlan.selection).toBe(selection);
+        return {
+          ok: true,
+          changed: true,
+          players: [swapped],
+          itemRefs: [{ id: 20, definitionId: 120, pile: 'club' }],
+          selection: { entries: [{ item: swapped }] },
+        };
+      },
+      preSaveValidators: [async ({ players, squadPlan }) => {
+        calls.push('pre');
+        expect(players).toEqual([swapped]);
+        expect(squadPlan.selection.entries[0].item).toBe(swapped);
+      }],
+      saveSquad: async ({ players, playerPreparation }) => {
+        calls.push('save');
+        expect(players).toEqual([swapped]);
+        expect(playerPreparation).toMatchObject({ ok: true, changed: true });
+      },
+    });
+
+    await expect(submitSbcAttempt(options)).resolves.toMatchObject({ submitted: true });
+    expect(calls).toEqual(['refresh', 'prepare', 'pre', 'save']);
+  });
+
+  it('blocks before validation and save when player preparation fails closed', async () => {
+    const options = baseOptions({
+      preparePlayers: async () => ({ ok: false, reason: 'duplicate swap response is incomplete' }),
+      preSaveValidators: [vi.fn(async () => {})],
+    });
+
+    await expect(submitSbcAttempt(options)).resolves.toMatchObject({
+      status: 'blocked',
+      submitted: false,
+      reason: 'duplicate swap response is incomplete',
+    });
+    expect(options.preSaveValidators[0]).not.toHaveBeenCalled();
+    expect(options.saveSquad).not.toHaveBeenCalled();
+    expect(options.submitTransport).not.toHaveBeenCalled();
+  });
+
   it('blocks before save when runtime inventory validation fails', async () => {
     const options = baseOptions({
       prepareRuntimeAccess: async () => ({ ok: false, reason: 'Club item #10 is stale' }),
@@ -200,13 +260,19 @@ describe('submitSbcAttempt', () => {
 
   it('supports existing-squad and FSU providers through the same contract', async () => {
     const itemRef = (item) => ({ id: item.id, definitionId: item.id + 100, pile: 'club' });
-    const existing = createExistingSquadProvider({ getPlayers: async () => [{ id: 1 }], itemRef });
+    const selection = { entries: [{ itemRef: { id: 1 } }] };
+    const existing = createExistingSquadProvider({ getPlayers: async () => [{ id: 1 }], itemRef, selection });
     const fsu = createFsuFillProvider({
       fill: async () => ({ submitReady: true }),
       getPlayers: async () => [{ id: 2 }],
       itemRef,
     });
-    await expect(existing({})).resolves.toMatchObject({ ok: true, source: 'existing-squad', itemRefs: [{ id: 1 }] });
+    await expect(existing({})).resolves.toMatchObject({
+      ok: true,
+      source: 'existing-squad',
+      itemRefs: [{ id: 1 }],
+      selection,
+    });
     await expect(fsu({})).resolves.toMatchObject({ ok: true, source: 'fsu-fill', itemRefs: [{ id: 2 }] });
   });
 });

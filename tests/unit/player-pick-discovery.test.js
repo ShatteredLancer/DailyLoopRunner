@@ -52,6 +52,8 @@ describe('dynamic Player Pick SBC discovery', () => {
       pickCandidateCount: 3,
       pickCount: 1,
       dynamicRewardMinRating: 84,
+      repeatability: 'bounded',
+      completionLimit: 1,
       maxCompletions: 1,
       sbcFodderPolicy: { mode: 'low-gold' },
     });
@@ -90,6 +92,8 @@ describe('dynamic Player Pick SBC discovery', () => {
       pickCandidateCount: 10,
       pickCount: 4,
       remainingCompletions: 2,
+      repeatability: 'bounded',
+      completionLimit: 3,
       exhaustSbcSet: true,
       useRoundsAsCompletions: false,
     });
@@ -306,7 +310,13 @@ describe('dynamic Player Pick SBC discovery', () => {
       status: 'supported',
       reportedCompleted: false,
       remainingCompletions: null,
-      loop: { useRoundsAsCompletions: true },
+      repeatability: 'unknown',
+      completionLimit: null,
+      loop: {
+        repeatability: 'unknown',
+        completionLimit: null,
+        useRoundsAsCompletions: true,
+      },
     });
   });
 
@@ -325,7 +335,11 @@ describe('dynamic Player Pick SBC discovery', () => {
       status: 'supported',
       reportedCompleted: false,
       remainingCompletions: null,
+      repeatability: 'unlimited',
+      completionLimit: null,
       loop: {
+        repeatability: 'unlimited',
+        completionLimit: null,
         useRoundsAsCompletions: true,
         discoveryReportedCompleted: false,
       },

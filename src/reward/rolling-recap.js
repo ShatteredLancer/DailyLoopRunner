@@ -295,7 +295,7 @@ export function createRollingRecapModel(input = {}) {
       value: [
         formatCount(recoveries.totw, 'TOTW'),
         formatCount(recoveries.provisions, 'Provisions'),
-        formatCount(recoveries.playerPick, '85+ Pick'),
+        formatCount(recoveries.playerPick, 'Rare Gold Pick'),
         formatCount(recoveries.storageSink, '95+ Storage Pick'),
         formatCount(recoveries.goldSink, '5x80'),
       ].join(' | '),

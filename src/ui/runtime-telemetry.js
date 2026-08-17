@@ -11,7 +11,7 @@ const PHASE_LABELS = Object.freeze({
   RECOVER_STORAGE_SINK: 'Freeing Storage with 95+ Pick',
   RECOVER_REQUIRED_SPECIAL: 'Recovering TOTW',
   MAINTAIN_STORAGE: 'Maintaining Storage',
-  REDEEM_85_PICK: 'Redeeming 85+ Pick',
+  REDEEM_RARE_GOLD_PICK: 'Redeeming Rare Gold Pick',
   CRAFT_5X80: 'Crafting 5x80+',
   PLAN_PRIMARY_SQUAD: 'Building 10x85+ squad',
   SUBMIT_PRIMARY: 'Building 10x85+ squad',

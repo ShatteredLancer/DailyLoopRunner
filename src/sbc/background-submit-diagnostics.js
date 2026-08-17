@@ -3,6 +3,7 @@ const MAX_PROTOTYPE_KEYS = 24;
 const MAX_MESSAGE_LENGTH = 240;
 const MAX_STATE_ITEMS = 32;
 const MAX_PACK_CHANGES = 24;
+const MAX_ITEM_VIOLATIONS = 16;
 const MAX_EVENTS = 80;
 const EVENT_WINDOW_MS = 10 * 60 * 1000;
 const STATE_SCALAR_KEYS = [
@@ -25,6 +26,24 @@ function diagnosticScalar(value, maxLength = MAX_MESSAGE_LENGTH) {
   if (typeof value === 'boolean') return value;
   if (typeof value !== 'string') return null;
   return value.slice(0, maxLength);
+}
+
+function diagnosticValue(value, maxLength = MAX_MESSAGE_LENGTH) {
+  const scalar = diagnosticScalar(value, maxLength);
+  if (scalar !== null) return scalar;
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) return null;
+
+  const direct = diagnosticScalar(safeRead(value, '_value'), maxLength)
+    ?? diagnosticScalar(safeRead(value, 'name'), maxLength);
+  if (direct !== null) return direct;
+
+  const valueMethod = safeRead(value, 'value');
+  if (typeof valueMethod !== 'function' || valueMethod.length > 0) return null;
+  try {
+    return diagnosticScalar(valueMethod.call(value), maxLength);
+  } catch {
+    return null;
+  }
 }
 
 function visibleKeys(value) {
@@ -68,21 +87,170 @@ function retryAfter(headers) {
   return null;
 }
 
-function diagnosticLayer(value) {
+function numericId(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function submittedIdSet(values = []) {
+  return new Set((Array.isArray(values) ? values : [])
+    .slice(0, MAX_STATE_ITEMS)
+    .map(numericId)
+    .filter((id) => id !== null));
+}
+
+function looksLikeItemViolation(value) {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) return false;
+  return [
+    'id', 'itemId', 'definitionId', 'code', 'errorCode', 'reason', 'message',
+    'type', 'slot', 'index', 'status', 'value', 'name', 'itemIds', 'item', 'player', 'resource',
+  ].some((key) => safeRead(value, key) !== undefined);
+}
+
+function numericIdList(value) {
+  let values = [];
+  if (Array.isArray(value)) values = value;
+  else if (value instanceof Set) values = [...value];
+  else if (value instanceof Map) values = [...value.values()];
+  return [...new Set(values
+    .slice(0, MAX_STATE_ITEMS)
+    .map((entry) => numericId(entry?.id ?? entry?.itemId ?? entry))
+    .filter((id) => id !== null))];
+}
+
+function collectionEntries(value) {
+  if (Array.isArray(value)) {
+    return { source: 'array', total: value.length, entries: value.map((entry, index) => [String(index), entry]) };
+  }
+  if (value instanceof Map) {
+    return { source: 'map', total: value.size, entries: [...value.entries()] };
+  }
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) {
+    return { source: 'scalar', total: value === undefined || value === null ? 0 : 1, entries: [[null, value]] };
+  }
+
+  for (const key of ['models', 'items', '_items', '_array', 'list']) {
+    const nested = safeRead(value, key);
+    if (!Array.isArray(nested) && !(nested instanceof Map)) continue;
+    const collection = collectionEntries(nested);
+    return { ...collection, source: key };
+  }
+
+  const toArray = safeRead(value, 'toArray');
+  if (typeof toArray === 'function' && toArray.length === 0) {
+    try {
+      const nested = toArray.call(value);
+      if (Array.isArray(nested)) {
+        const collection = collectionEntries(nested);
+        return { ...collection, source: 'toArray' };
+      }
+    } catch { }
+  }
+
+  if (looksLikeItemViolation(value)) return { source: 'single', total: 1, entries: [[null, value]] };
+
+  let keys = [];
+  try { keys = Object.keys(value); } catch { }
+  return {
+    source: 'object',
+    total: keys.length,
+    entries: keys.map((key) => [key, safeRead(value, key)]),
+  };
+}
+
+function violationItemReference(value, submittedIds) {
+  if (!value || (typeof value !== 'object' && typeof value !== 'function')) return null;
+  const id = numericId(safeRead(value, 'id')) ?? numericId(safeRead(value, 'itemId'));
+  const itemId = numericId(safeRead(value, 'itemId')) ?? id;
+  return {
+    id,
+    itemId,
+    definitionId: numericId(safeRead(value, 'definitionId')),
+    rating: numericId(safeRead(value, 'rating')),
+    submittedMatch: itemId === null ? null : submittedIds.has(itemId),
+  };
+}
+
+function itemViolation(entryKey, value, submittedIds, ordinal) {
+  const key = entryKey === null || entryKey === undefined
+    ? null
+    : diagnosticScalar(String(entryKey), 80);
+  const keyItemId = numericId(key);
+  const nestedValue = value && (typeof value === 'object' || typeof value === 'function') ? value : null;
+  const nestedItem = ['item', 'player', 'resource']
+    .map((field) => safeRead(nestedValue, field))
+    .find((candidate) => candidate && (typeof candidate === 'object' || typeof candidate === 'function'));
+  const item = violationItemReference(nestedItem, submittedIds);
+  const id = numericId(safeRead(nestedValue, 'id'));
+  const itemIds = numericIdList(safeRead(nestedValue, 'itemIds'));
+  const itemId = numericId(safeRead(nestedValue, 'itemId'))
+    ?? item?.itemId
+    ?? keyItemId
+    ?? id
+    ?? (itemIds.length === 1 ? itemIds[0] : null);
+  const candidateIds = [...new Set([itemId, ...itemIds].filter((candidate) => candidate !== null))];
+  const matchedSubmittedIds = candidateIds.filter((candidate) => submittedIds.has(candidate));
+  return {
+    key,
+    ordinal,
+    id,
+    itemId,
+    definitionId: numericId(safeRead(nestedValue, 'definitionId')) ?? item?.definitionId ?? null,
+    name: diagnosticValue(safeRead(nestedValue, 'name'), 120),
+    itemIds,
+    submittedItemIds: matchedSubmittedIds,
+    code: diagnosticValue(safeRead(nestedValue, 'code')),
+    errorCode: diagnosticValue(safeRead(nestedValue, 'errorCode')),
+    reason: diagnosticValue(safeRead(nestedValue, 'reason')),
+    message: diagnosticValue(safeRead(nestedValue, 'message')),
+    type: diagnosticValue(safeRead(nestedValue, 'type'), 80),
+    slot: diagnosticValue(safeRead(nestedValue, 'slot'), 80),
+    index: diagnosticValue(safeRead(nestedValue, 'index'), 80),
+    status: diagnosticValue(safeRead(nestedValue, 'status'), 80),
+    value: nestedValue
+      ? diagnosticValue(safeRead(nestedValue, 'value'))
+      : diagnosticValue(value),
+    submittedMatch: candidateIds.length ? matchedSubmittedIds.length > 0 : null,
+    item,
+    visibleKeys: visibleKeys(nestedValue),
+    prototypeKeys: prototypeKeys(nestedValue),
+  };
+}
+
+function itemViolationsSummary(value, submittedIds) {
+  if (value === undefined || value === null) return null;
+  const collection = collectionEntries(value);
+  return {
+    type: valueType(value),
+    source: collection.source,
+    count: collection.total,
+    truncated: collection.total > MAX_ITEM_VIOLATIONS,
+    items: collection.entries
+      .slice(0, MAX_ITEM_VIOLATIONS)
+      .map(([key, entry], index) => itemViolation(key, entry, submittedIds, index)),
+    visibleKeys: visibleKeys(value),
+    prototypeKeys: prototypeKeys(value),
+  };
+}
+
+function diagnosticLayer(value, options = {}) {
   if (value === undefined || value === null) return null;
   if (typeof value !== 'object' && typeof value !== 'function') {
     return { value: diagnosticScalar(value) };
   }
+  const submittedIds = options.submittedIds || new Set();
   return {
     type: valueType(value),
-    status: diagnosticScalar(safeRead(value, 'status')),
-    statusCode: diagnosticScalar(safeRead(value, 'statusCode')),
-    httpStatus: diagnosticScalar(safeRead(value, 'httpStatus')),
-    code: diagnosticScalar(safeRead(value, 'code')),
-    errorCode: diagnosticScalar(safeRead(value, 'errorCode')),
-    reason: diagnosticScalar(safeRead(value, 'reason')),
-    message: diagnosticScalar(safeRead(value, 'message')),
-    retryAfter: diagnosticScalar(safeRead(value, 'retryAfter'), 80) ?? retryAfter(safeRead(value, 'headers')),
+    status: diagnosticValue(safeRead(value, 'status')),
+    statusCode: diagnosticValue(safeRead(value, 'statusCode')),
+    httpStatus: diagnosticValue(safeRead(value, 'httpStatus')),
+    code: diagnosticValue(safeRead(value, 'code')),
+    errorCode: diagnosticValue(safeRead(value, 'errorCode')),
+    reason: diagnosticValue(safeRead(value, 'reason')),
+    message: diagnosticValue(safeRead(value, 'message')),
+    retryAfter: diagnosticValue(safeRead(value, 'retryAfter'), 80) ?? retryAfter(safeRead(value, 'headers')),
+    itemViolations: itemViolationsSummary(safeRead(value, 'itemViolations'), submittedIds),
     visibleKeys: visibleKeys(value),
     prototypeKeys: prototypeKeys(value),
   };
@@ -104,30 +272,31 @@ function emptyDiagnosticLayer() {
   };
 }
 
-function responseSummary(response) {
-  const summary = diagnosticLayer(response) || emptyDiagnosticLayer();
+function responseSummary(response, options = {}) {
+  const summary = diagnosticLayer(response, options) || emptyDiagnosticLayer();
   return {
     ...summary,
-    data: diagnosticLayer(safeRead(response, 'data')),
-    body: diagnosticLayer(safeRead(response, 'body')),
-    error: diagnosticLayer(safeRead(response, 'error')),
+    data: diagnosticLayer(safeRead(response, 'data'), options),
+    body: diagnosticLayer(safeRead(response, 'body'), options),
+    error: diagnosticLayer(safeRead(response, 'error'), options),
   };
 }
 
-function errorSummary(error) {
-  const summary = diagnosticLayer(error) || emptyDiagnosticLayer();
+function errorSummary(error, options = {}) {
+  const summary = diagnosticLayer(error, options) || emptyDiagnosticLayer();
   return {
     ...summary,
     name: diagnosticScalar(safeRead(error, 'name'), 80),
-    data: diagnosticLayer(safeRead(error, 'data')),
-    body: diagnosticLayer(safeRead(error, 'body')),
+    data: diagnosticLayer(safeRead(error, 'data'), options),
+    body: diagnosticLayer(safeRead(error, 'body'), options),
   };
 }
 
-export function sanitizeBackgroundSubmitResult(result) {
+export function sanitizeBackgroundSubmitResult(result, options = {}) {
   const error = safeRead(result, 'error');
   const response = safeRead(result, 'response');
   const errorResponse = safeRead(error, 'response');
+  const diagnosticOptions = { submittedIds: submittedIdSet(options.submittedItemIds) };
   return {
     success: safeRead(result, 'success') === true,
     status: diagnosticScalar(safeRead(result, 'status')),
@@ -135,13 +304,13 @@ export function sanitizeBackgroundSubmitResult(result) {
     httpStatus: diagnosticScalar(safeRead(result, 'httpStatus')),
     code: diagnosticScalar(safeRead(result, 'code')),
     errorCode: diagnosticScalar(safeRead(result, 'errorCode')),
-    reason: diagnosticScalar(safeRead(result, 'reason')),
-    message: diagnosticScalar(safeRead(result, 'message')),
-    data: diagnosticLayer(safeRead(result, 'data')),
-    body: diagnosticLayer(safeRead(result, 'body')),
-    error: errorSummary(error),
-    response: responseSummary(response),
-    errorResponse: responseSummary(errorResponse),
+    reason: diagnosticValue(safeRead(result, 'reason')),
+    message: diagnosticValue(safeRead(result, 'message')),
+    data: diagnosticLayer(safeRead(result, 'data'), diagnosticOptions),
+    body: diagnosticLayer(safeRead(result, 'body'), diagnosticOptions),
+    error: errorSummary(error, diagnosticOptions),
+    response: responseSummary(response, diagnosticOptions),
+    errorResponse: responseSummary(errorResponse, diagnosticOptions),
     visibleKeys: {
       result: visibleKeys(result),
       error: visibleKeys(error),
@@ -335,6 +504,7 @@ export function createBackgroundSubmitTelemetry(options = {}) {
       startedAt,
       endedAt: null,
       request: normalizeRequest(context),
+      submittedItemIds: [...submittedIdSet(context.submittedItemIds)],
       success: null,
       code: null,
     };
@@ -345,7 +515,9 @@ export function createBackgroundSubmitTelemetry(options = {}) {
 
   function complete(event, result) {
     const endedAt = Number(now());
-    const summary = sanitizeBackgroundSubmitResult(result);
+    const summary = sanitizeBackgroundSubmitResult(result, {
+      submittedItemIds: event?.submittedItemIds,
+    });
     event.endedAt = endedAt;
     event.success = summary.success;
     event.code = resultCode(summary);
