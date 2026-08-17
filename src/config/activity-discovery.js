@@ -37,6 +37,11 @@ const FAMILY_DEFS = Object.freeze([
     requirements: [{ tier: 'gold', rarity: 'common', count: 11 }],
   }),
   Object.freeze({
+    id: '5x80-upgrade',
+    requirements: [{ tier: 'gold', count: 9 }],
+    identityPattern: /\b5\s*x\s*80\+|\b5\s+80\+/i,
+  }),
+  Object.freeze({
     id: 'common-gold-crafting-upgrade',
     requirements: [{ tier: 'gold', rarity: 'common', count: 9 }],
     identityPattern: /\b5\s*x\s*80\+|\b5\s+80\+/i,
@@ -53,6 +58,7 @@ export const SBC_ACTIVITY_FAMILY_IDS = Object.freeze([
   ...FAMILY_DEFS.map((family) => family.id),
   ...Object.values(MATERIAL_SINK_FAMILIES),
   'totw-upgrade',
+  'provisions-upgrade',
   'high-rated-x10',
   'high-rated-pack-upgrade',
 ]);
@@ -374,6 +380,14 @@ function requirementAcceptsConfiguredConsumption(
   selectionMaterial = null,
 ) {
   if (eligibilityRequirement.tier !== configuredRequirement.tier) return false;
+  // A minimum rating marks an exact live SBC contract rather than a generic
+  // Gold sink. Keep old Provisions Sets from making the binding ambiguous.
+  if (Number.isFinite(Number(configuredRequirement.minRating))) {
+    if (!Number.isFinite(Number(eligibilityRequirement.minRating))
+      || Number(eligibilityRequirement.minRating) < Number(configuredRequirement.minRating)) return false;
+    if (Number(configuredRequirement.count) > 0
+      && Number(eligibilityRequirement.count) !== Number(configuredRequirement.count)) return false;
+  }
   if (eligibilityRequirement.tier !== 'gold') {
     return (eligibilityRequirement.rarity || null) === (configuredRequirement.rarity || null);
   }
@@ -453,13 +467,13 @@ export function mergeScannedActivityMetadata(target = {}, activity = {}) {
       materialSinkReward: clone(activity.materialSink.reward),
     } : {}),
   };
-  if (Array.isArray(target.requirements)) {
-    merged.requirements = mergeRequirements(
+  merged.requirements = Array.isArray(target.requirements)
+    ? mergeRequirements(
       activity.eligibilityRequirements || activity.requirements,
       target.requirements,
       target.activityBinding?.selectionMaterial,
-    );
-  }
+    )
+    : clone(activity.requirements || []);
   return merged;
 }
 
@@ -485,11 +499,16 @@ function materializeBoundTarget(target, activitiesByFamily, diagnostics, path) {
     }
     return clone(target);
   }
-  if (matches.length === 1) return mergeScannedActivityMetadata(target, matches[0]);
-  if (matches.length > 1) {
-    diagnostics.push(`${path}: activity family ${family} is ambiguous (${matches.map((entry) => `#${entry.setId} ${entry.setName}`).join(', ')})`);
+  const compatibleMatches = Array.isArray(target.requirements) && target.requirements.length
+    ? matches.filter((activity) => activityAcceptsConfiguredConsumption(activity, target))
+    : matches;
+  if (compatibleMatches.length === 1) {
+    return mergeScannedActivityMetadata(target, compatibleMatches[0]);
+  }
+  if (compatibleMatches.length > 1) {
+    diagnostics.push(`${path}: activity family ${family} is ambiguous (${compatibleMatches.map((entry) => `#${entry.setId} ${entry.setName}`).join(', ')})`);
   } else {
-    diagnostics.push(`${path}: activity family ${family} is unavailable; compatibility fallback remains active`);
+    diagnostics.push(`${path}: activity family ${family} has no requirements-compatible candidate; compatibility fallback remains active`);
   }
   return clone(target);
 }
@@ -505,7 +524,15 @@ function materializeLoop(loop, activitiesByFamily, diagnostics) {
       `Loop ${loop.id || loop.name || '?'}.${field}[${index}]`,
     ));
   }
-  for (const field of ['commonUpgrade', 'rareUpgrade', 'autoTotwUpgrade', 'autoFodderUpgrade']) {
+  for (const field of [
+    'commonUpgrade',
+    'rareUpgrade',
+    'autoTotwUpgrade',
+    'autoFodderUpgrade',
+    'rollingTotwUpgrade',
+    'rollingProvisionsUpgrade',
+    'rollingGoldSinkUpgrade',
+  ]) {
     if (!result[field] || typeof result[field] !== 'object') continue;
     result[field] = materializeBoundTarget(
       result[field],

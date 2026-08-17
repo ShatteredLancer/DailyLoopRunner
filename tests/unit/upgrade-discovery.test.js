@@ -85,6 +85,73 @@ describe('dynamic Upgrade discovery', () => {
     ]);
   });
 
+  it('stages a separate selectable Rolling Loop without changing the generic x10 Loop', () => {
+    const session = buildUpgradeDiscoverySession({ configuredLoops: [], sets: [set()] });
+    expect(session.discoveredLoops).toHaveLength(1);
+    expect(session.discoveredLoops[0]).toMatchObject({
+      strategy: 'fillAndVerifySbc',
+      id: 'discovered-upgrade-900-high-rated-x10-85',
+      runtimeQuantity: { default: 3, min: 1 },
+      openRewardPacks: false,
+    });
+    expect(session.rollingLoops).toEqual([
+      expect.objectContaining({
+        id: 'rolling-upgrade-900-85',
+        strategy: 'rollingUpgrade',
+        hidden: false,
+        mvp: false,
+        rollingWorkflowEnabled: true,
+        defaultOpenRewardPacksOnSelect: true,
+        runtimeQuantity: expect.objectContaining({ default: 0, min: 0, allowZero: true }),
+        rollingTotwUpgrade: expect.objectContaining({
+          activityBinding: expect.objectContaining({ family: 'totw-upgrade', required: true }),
+        }),
+        rollingProvisionsUpgrade: expect.objectContaining({
+          activityBinding: expect.objectContaining({ family: 'provisions-upgrade', required: true }),
+          requirements: [expect.objectContaining({ count: 4, minRating: 87 })],
+        }),
+        rollingGoldSinkUpgrade: expect.objectContaining({
+          activityBinding: expect.objectContaining({ family: '5x80-upgrade', required: true }),
+        }),
+      }),
+    ]);
+  });
+
+  it('does not stage Rolling for a high-rated x10 whose live special contract is not exactly one', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [set({
+        challenges: [{
+          ...set().challenges[0],
+          eligibilityRequirements: [
+            { key: 'TEAM_RATING', values: [88], count: -1 },
+            { key: 'PLAYER_RARITY_GROUP', values: [83], count: 2 },
+          ],
+        }],
+      })],
+    });
+    expect(session.discoveredLoops).toHaveLength(1);
+    expect(session.rollingLoops).toEqual([]);
+  });
+
+  it('keeps 10x84+ as a generic Upgrade and does not expose it as a Rolling Loop', () => {
+    const session = buildUpgradeDiscoverySession({
+      configuredLoops: [],
+      sets: [set({
+        id: 840,
+        name: '10x 84+ Upgrade',
+        rewards: [{ type: 'PACK', packId: 284, name: '10x 84+ Players Pack' }],
+      })],
+    });
+
+    expect(session.discoveredLoops).toHaveLength(1);
+    expect(session.discoveredLoops[0]).toMatchObject({
+      dynamicSbcFamily: 'high-rated-x10',
+      dynamicRewardMinRating: 84,
+    });
+    expect(session.rollingLoops).toEqual([]);
+  });
+
   it('preserves an EA player-group count greater than one without expanding the group into card names', () => {
     const result = parseDynamicUpgradeSbcSnapshot({
       set: set({
@@ -211,6 +278,38 @@ describe('dynamic Upgrade discovery', () => {
       blockSpecial: true,
     });
     expect(result.loop.ratingSbcFill).toEqual({});
+  });
+
+  it('discovers Provisions from live minimum-rating requirements without static IDs', () => {
+    const result = parseDynamicUpgradeSbcSnapshot({
+      set: set({
+        id: 910,
+        name: 'Repeatable FUTTIES Provisions Upgrade',
+        repeats: null,
+        rewards: [{ type: 'PACK', packId: 3910, name: 'FUTTIES Provisions Pack' }],
+        challenges: [{
+          id: 911,
+          requiredPlayerCount: 4,
+          eligibilityRequirements: [{ key: 'PLAYER_MIN_OVR', values: [87], count: -1 }],
+        }],
+      }),
+    });
+    expect(result.status).toBe('supported');
+    expect(result.loop).toMatchObject({
+      strategy: 'fillAndVerifySbc',
+      hidden: true,
+      dynamicSbcFamily: 'provisions-upgrade',
+      sbcSetIds: [910],
+      rewardPackIds: [3910],
+      requirements: [expect.objectContaining({ tier: 'gold', minRating: 87, count: 4 })],
+    });
+    expect(collectScannedUpgradeActivities([result])).toEqual([
+      expect.objectContaining({
+        familyId: 'provisions-upgrade',
+        setId: 910,
+        requirements: [{ tier: 'gold', minRating: 87, count: 4 }],
+      }),
+    ]);
   });
 
   it('uses the scanned Rare Gold player count instead of a fixed 2x84+ template count', () => {

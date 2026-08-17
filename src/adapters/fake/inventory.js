@@ -34,6 +34,16 @@ export function createFakeInventoryAdapter(initial = {}) {
     return { used, max, free: max === null ? null : Math.max(0, max - used) };
   }
 
+  function unassignedState() {
+    const items = readPile('unassigned');
+    const itemIds = items.map((item) => Number(item?.id || 0)).filter(Boolean);
+    return {
+      mergedCount: items.length,
+      mergedItemIds: itemIds,
+      sources: { fake: { count: items.length, itemIds } },
+    };
+  }
+
   function resolveItem(ref, preferredPiles = INVENTORY_PILES) {
     const id = Number(ref?.id || 0);
     const definitionId = Number(ref?.definitionId || 0);
@@ -60,6 +70,15 @@ export function createFakeInventoryAdapter(initial = {}) {
     return { success: true };
   }
 
+  async function invalidateUnassigned() {
+    calls.push({ method: 'invalidateUnassigned' });
+    return {
+      pile: 'purchased',
+      invalidated: true,
+      actions: [{ id: 'fake-unassigned-reset', available: true, succeeded: true, error: null }],
+    };
+  }
+
   function refreshActions(pile) {
     return [{
       label: `fake refresh ${pile}`,
@@ -81,10 +100,12 @@ export function createFakeInventoryAdapter(initial = {}) {
     snapshot,
     resolveItem,
     readPile,
+    unassignedState,
     pileValue,
     preparePurchasedItem,
     capacity,
     requestUnassigned,
+    invalidateUnassigned,
     refreshActions,
     move,
     replace,

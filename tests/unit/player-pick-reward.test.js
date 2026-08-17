@@ -61,8 +61,29 @@ describe('Player Pick reward planning', () => {
       { id: 2, rating: 91, special: true },
       { id: 3, rating: 90 },
     ], new Map(), { isSpecial: special, random: () => 0 });
-    expect(getManualPlayerPickReason(ranked, 1)).toMatch(/2 special card/);
+    expect(getManualPlayerPickReason(ranked, 1)).toMatch(/2 non-duplicate special card/);
     expect(getManualPlayerPickReason(ranked, 2)).toBe('');
+  });
+
+  it('does not require manual selection when duplicate top specials leave one non-duplicate choice', () => {
+    const ranked = rankPlayerPickCandidates([
+      { id: 1, rating: 96, special: true, duplicate: true },
+      { id: 2, rating: 96, special: true, duplicate: false },
+      { id: 3, rating: 96, special: true, duplicate: true },
+    ], new Map(), { isSpecial: special, isDuplicate: duplicate, random: () => 0 });
+
+    expect(ranked[0].item.id).toBe(2);
+    expect(getManualPlayerPickReason(ranked, 1)).toBe('');
+  });
+
+  it('does not require manual selection when every top special is a duplicate', () => {
+    const ranked = rankPlayerPickCandidates([
+      { id: 1, rating: 96, special: true, duplicate: true },
+      { id: 2, rating: 96, special: true, duplicate: true },
+      { id: 3, rating: 95, special: true, duplicate: false },
+    ], new Map(), { isSpecial: special, isDuplicate: duplicate, random: () => 0 });
+
+    expect(getManualPlayerPickReason(ranked, 1)).toBe('');
   });
 
   it('randomizes a price-missing non-special tie without requiring manual selection', () => {

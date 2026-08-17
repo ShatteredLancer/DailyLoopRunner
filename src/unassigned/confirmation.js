@@ -1,3 +1,5 @@
+import { navigateToUnassigned } from './navigation.js';
+
 export async function confirmUnassignedView(options = {}) {
   const reason = String(options.reason || 'final confirmation');
   const log = options.log || (() => {});
@@ -9,27 +11,43 @@ export async function confirmUnassignedView(options = {}) {
   const stableEmptyReads = Math.max(1, Math.min(5, Number(options.stableEmptyReads || 1) || 1));
   const emptyReadDelayMs = Math.max(0, Number(options.emptyReadDelayMs || 0));
   const diagnostic = options.diagnostic === true;
+  const requireNavigation = options.requireNavigation === true || options.verifyNavigation === true;
   const controllerName = () => {
     try { return String(options.getControllerName?.() || '?'); } catch { return '?'; }
   };
 
   log(`Opening unassigned items view for confirmation: ${reason}`);
-  const controllerBefore = controllerName();
-  let navigationMethod = 'none';
-  try {
-    if (options.openUnassigned() === true) {
-      navigationMethod = 'controller';
-    } else {
-      const fallbackResult = options.clickFallback();
-      navigationMethod = fallbackResult === false ? 'unavailable' : 'text-fallback';
-    }
-  } catch (error) {
-    navigationMethod = 'error';
-    log(`Could not open unassigned view automatically: ${error?.message || error}`);
+  const navigation = await navigateToUnassigned({
+    requireNavigation,
+    getControllerName: options.getControllerName,
+    requestController: options.openUnassigned,
+    requestTextFallback: options.clickFallback,
+    requestRecovery: options.recoverNavigation,
+    waitLoadingEnd: options.waitLoadingEnd,
+    sleep: options.sleep,
+    retryAttempts: options.navigationRetryAttempts,
+    retryDelayMs: options.navigationRetryDelayMs,
+  });
+  for (const attempt of navigation.attempts.filter((entry) => entry.error)) {
+    const stage = attempt.id === 'controller' ? '' : ` (${attempt.id})`;
+    log(`Could not open unassigned view automatically${stage}: ${attempt.error}`);
   }
-  await options.waitLoadingEnd();
   if (diagnostic) {
-    log(`Unassigned navigation (${reason}): method:${navigationMethod}; controller:${controllerBefore}->${controllerName()}`);
+    log(`Unassigned navigation (${reason}): method:${navigation.method}; controller:${navigation.from}->${navigation.to}`);
+    const attempts = navigation.attempts.map((attempt) => (
+      `${attempt.id}:${attempt.requested ? 'requested' : 'unavailable'}:${attempt.before}->${attempt.after}:${attempt.confirmed ? 'confirmed' : 'not-confirmed'}`
+    )).join('; ');
+    if (attempts) log(`Unassigned navigation attempts (${reason}): ${attempts}`);
+    const recoverySteps = navigation.attempts.flatMap((attempt) => attempt.steps || []).map((step) => (
+      `${step.id}:${step.requested ? 'requested' : 'unavailable'}:${step.before}->${step.after}:${step.confirmed ? 'confirmed' : 'not-confirmed'}${step.error ? `:error:${step.error}` : ''}`
+    )).join('; ');
+    if (recoverySteps) log(`Unassigned recovery steps (${reason}): ${recoverySteps}`);
+  }
+  if (requireNavigation && navigation.status !== 'confirmed') {
+    const error = new Error(`Unassigned navigation was not confirmed after ${navigation.method}; controller remained ${controllerName()}`);
+    error.code = 'UNASSIGNED_NAVIGATION_NOT_CONFIRMED';
+    error.navigation = navigation;
+    throw error;
   }
   for (let read = 1; read <= stableEmptyReads; read++) {
     const refreshResult = await options.refreshUnassigned();

@@ -386,6 +386,35 @@ describe('effect adapter contracts', () => {
     expect(fake.isOwnedDuplicate(choice)).toBe(true);
   });
 
+  it('Player Pick duplicate checks require the same card version', () => {
+    const choice = { id: 20, definitionId: 200, rating: 96, rareflag: 170, limitedUseType: 'normal' };
+    const exact = { id: 21, definitionId: 200, rating: 96, rareflag: 170, limitedUseType: 'normal' };
+    const evolved = { id: 22, definitionId: 200, rating: 96, rareflag: 170, upgrades: {}, limitedUseType: 'normal' };
+    const cosmetic = { id: 23, definitionId: 200, rating: 96, rareflag: 170, cosmetics: [{ id: 1 }], limitedUseType: 'normal' };
+    const differentRating = { id: 24, definitionId: 200, rating: 97, rareflag: 170, limitedUseType: 'normal' };
+    const differentRarity = { id: 25, definitionId: 200, rating: 96, rareflag: 171, limitedUseType: 'normal' };
+    const owned = [];
+    const ea = createEaPlayerPickAdapter({
+      repositories: { Item: {
+        getUnassignedItems: () => [],
+        getStorageItems: () => owned,
+        getTransferItems: () => [],
+        club: { items: { _collection: [] } },
+      } },
+      services: { Item: {
+        redeem: () => ({ success: true }),
+        confirmPlayerPickItemSelection: () => ({ success: true }),
+      } },
+    });
+
+    for (const card of [evolved, cosmetic, differentRating, differentRarity]) {
+      owned.splice(0, owned.length, card);
+      expect(ea.isOwnedDuplicate(choice)).toBe(false);
+    }
+    owned.splice(0, owned.length, exact);
+    expect(ea.isOwnedDuplicate(choice)).toBe(true);
+  });
+
   it('normalizes FSU settings and browser storage', () => {
     const fsu = createFsuAdapter({ info: {
       build: { untradeable: 1, academy: 1, firststorage: 1 },

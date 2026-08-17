@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createEaInventoryAdapter } from '../../src/adapters/ea/inventory.js';
 import { createFakeInventoryAdapter } from '../../src/adapters/fake/inventory.js';
 import { INVENTORY_PILES } from '../../src/domain/contracts.js';
+import { selectInventoryPlayers } from '../../src/selection/inventory.js';
+import { planUnassignedActions } from '../../src/unassigned/plan.js';
 import { makePlayer } from '../helpers/load-userscript.js';
 
 function createRuntime(piles, capacities = {}) {
@@ -24,7 +26,14 @@ function createRuntime(piles, capacities = {}) {
 
 describe('Inventory Adapter contract', () => {
   const piles = {
-    unassigned: [makePlayer({ id: 1, definitionId: 101, rating: 80, duplicate: true, duplicateId: 2 })],
+    unassigned: [makePlayer({
+      id: 1,
+      definitionId: 104,
+      rating: 84,
+      rareflag: 2,
+      duplicate: true,
+      duplicateId: 4,
+    })],
     storage: [makePlayer({ id: 2, definitionId: 101, rating: 80 })],
     transfer: [makePlayer({ id: 3, definitionId: 103, rating: 75, untradeable: false })],
     club: [makePlayer({ id: 4, definitionId: 104, rating: 84, rareflag: 2, groups: [44] })],
@@ -50,10 +59,25 @@ describe('Inventory Adapter contract', () => {
     }
     expect(eaSnapshot.piles.unassigned[0]).toMatchObject({
       duplicate: true,
-      duplicateId: 2,
+      duplicateId: 4,
       pile: 'unassigned',
     });
     expect(eaSnapshot.piles.club[0]).toMatchObject({ special: true, groups: [44] });
+  });
+
+  it('deduplicates the same Club entities exposed by both EA repositories', () => {
+    const club = Array.from({ length: 4000 }, (_, index) => makePlayer({
+      id: 10000 + index,
+      definitionId: 20000 + index,
+      rating: 75 + (index % 20),
+    }));
+    const runtime = createRuntime({ club });
+    runtime.services.Item.itemDao.itemRepo.club.items._collection = [...club];
+
+    const ea = createEaInventoryAdapter(runtime);
+
+    expect(ea.readPile('club')).toHaveLength(4000);
+    expect(ea.snapshot().piles.club).toHaveLength(4000);
   });
 
   it('resolves a stable ItemRef back to a live item', () => {
@@ -95,7 +119,7 @@ describe('Inventory Adapter contract', () => {
     ]);
   });
 
-  it('restores latent Unassigned duplicate metadata from matching Club or Storage definitions', () => {
+  it('restores latent Unassigned duplicate metadata from a matching Club definition', () => {
     const unassigned = makePlayer({
       id: 30,
       definitionId: 130,
@@ -111,6 +135,209 @@ describe('Inventory Adapter contract', () => {
       id: 30,
       duplicate: true,
       duplicateId: 40,
+    });
+  });
+
+  it('reclassifies a stale duplicate signal after its exact Club card was submitted', () => {
+    const guirassy = makePlayer({
+      id: 921331223291,
+      definitionId: 215441,
+      rating: 87,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: 921242882169,
+      name: 'Guirassy',
+    });
+    const ea = createEaInventoryAdapter(createRuntime({ unassigned: [guirassy], club: [] }));
+    const snapshot = ea.snapshot();
+
+    expect(snapshot.piles.unassigned[0]).toMatchObject({
+      id: 921331223291,
+      duplicate: false,
+      duplicateId: 0,
+    });
+    expect(planUnassignedActions(snapshot)).toMatchObject({
+      status: 'action',
+      action: {
+        destination: 'club',
+        description: 'non-duplicate',
+        requiresExactClubDuplicate: false,
+      },
+    });
+  });
+
+  it.each(['storage', 'transfer'])('does not use a same-version %s card as Club duplicate evidence', (pile) => {
+    const unassigned = makePlayer({
+      id: 301,
+      definitionId: 401,
+      rating: 86,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: 302,
+    });
+    const counterpart = makePlayer({
+      id: 302,
+      definitionId: 401,
+      rating: 86,
+      rareflag: 1,
+    });
+    const snapshot = createEaInventoryAdapter(createRuntime({
+      unassigned: [unassigned],
+      [pile]: [counterpart],
+      club: [],
+    })).snapshot();
+
+    expect(snapshot.piles.unassigned[0]).toMatchObject({
+      duplicate: false,
+      duplicateId: 0,
+      duplicateSignal: true,
+      duplicateSignalId: 302,
+    });
+    expect(planUnassignedActions(snapshot)).toMatchObject({
+      status: 'action',
+      action: { destination: 'club', description: 'non-duplicate' },
+    });
+  });
+
+  it('reclassifies a stale Unassigned duplicate after its Club card is submitted while Storage remains', () => {
+    const unassigned = makePlayer({
+      id: 921424298691,
+      definitionId: 200389,
+      rating: 88,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: 921209854799,
+      name: 'Oblak',
+    });
+    const storage = makePlayer({
+      id: 921395412498,
+      definitionId: 200389,
+      rating: 88,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: 921209854799,
+      name: 'Oblak',
+    });
+    const club = [makePlayer({
+      id: 921209854799,
+      definitionId: 200389,
+      rating: 88,
+      rareflag: 1,
+      duplicate: false,
+      duplicateId: 0,
+      name: 'Oblak',
+    })];
+    const ea = createEaInventoryAdapter(createRuntime({
+      unassigned: [unassigned],
+      storage: [storage],
+      club,
+    }));
+
+    expect(ea.snapshot().piles.unassigned[0]).toMatchObject({
+      duplicate: true,
+      duplicateId: 921209854799,
+    });
+    club.splice(0);
+    const snapshot = ea.snapshot();
+
+    expect(snapshot.piles.unassigned[0]).toMatchObject({
+      id: 921424298691,
+      duplicate: false,
+      duplicateId: 0,
+      duplicateSignal: true,
+      duplicateSignalId: 921209854799,
+    });
+    expect(planUnassignedActions(snapshot)).toMatchObject({
+      status: 'action',
+      action: {
+        destination: 'club',
+        description: 'non-duplicate',
+        requiresExactClubDuplicate: false,
+      },
+    });
+    expect(selectInventoryPlayers({
+      inventorySnapshot: snapshot,
+      requirements: [{
+        count: 1,
+        playerOnly: true,
+        tier: 'gold',
+        rarity: 'rare',
+        allowSpecial: false,
+        respectFsuGoldRange: false,
+      }],
+      priorityPiles: ['unassigned'],
+    })).toMatchObject({
+      ok: true,
+      selected: [{ id: 921395412498, pile: 'storage' }],
+      duplicateSignals: [{
+        pileName: 'unassigned',
+        signalRef: { id: 921424298691 },
+        itemRef: { id: 921395412498, pile: 'storage' },
+      }],
+    });
+  });
+
+  it('keeps a different rating or rarity version non-duplicate and routes it to Club', () => {
+    const unassigned = makePlayer({
+      id: 30,
+      definitionId: 50606891,
+      rating: 94,
+      rareflag: 15,
+      duplicate: false,
+      duplicateId: 0,
+    });
+    const club = makePlayer({
+      id: 40,
+      definitionId: 50606891,
+      rating: 98,
+      rareflag: 16,
+    });
+    const ea = createEaInventoryAdapter(createRuntime({ unassigned: [unassigned], club: [club] }));
+    const snapshot = ea.snapshot();
+
+    expect(snapshot.piles.unassigned[0]).toMatchObject({
+      id: 30,
+      duplicate: false,
+      duplicateId: 0,
+    });
+    expect(planUnassignedActions(snapshot)).toMatchObject({
+      status: 'action',
+      action: { destination: 'club', description: 'non-duplicate' },
+    });
+  });
+
+  it('does not restore duplicate metadata when only an evolved Club version exists', () => {
+    const unassigned = makePlayer({
+      id: 920703861773,
+      definitionId: 67331195,
+      rating: 97,
+      rareflag: 16,
+      duplicate: true,
+      duplicateId: 919091646534,
+    });
+    const evolvedClub = makePlayer({
+      id: 919091646534,
+      definitionId: 67331195,
+      rating: 97,
+      rareflag: 16,
+      upgrades: { evolutionId: 42 },
+    });
+    const ea = createEaInventoryAdapter(createRuntime({
+      unassigned: [unassigned],
+      club: [evolvedClub],
+    }));
+    const snapshot = ea.snapshot();
+
+    expect(snapshot.piles.club[0]).toMatchObject({ evolution: true });
+    expect(snapshot.piles.unassigned[0]).toMatchObject({
+      id: 920703861773,
+      evolution: false,
+      duplicate: false,
+      duplicateId: 0,
+    });
+    expect(planUnassignedActions(snapshot)).toMatchObject({
+      status: 'action',
+      action: { destination: 'club', description: 'non-duplicate' },
     });
   });
 
@@ -164,6 +391,128 @@ describe('Inventory Adapter contract', () => {
     fake.refreshActions('storage')[0].invoke();
     fake.move([piles.storage[0]], 'club', true);
     expect(fake.calls.map((call) => call.method)).toEqual(['requestUnassigned', 'refreshPile', 'move']);
+  });
+
+  it('invalidates every distinct EA Unassigned cache before a forced refresh', async () => {
+    const calls = [];
+    const runtime = createRuntime(piles, capacities);
+    runtime.ItemPile.PURCHASED = 'ea-purchased';
+    runtime.repositories.Item.setDirty = (pile) => calls.push(['setDirty', pile]);
+    runtime.repositories.Item.unassigned = { reset: () => calls.push(['repository-reset']) };
+    runtime.services.Item.itemDao.itemRepo.unassigned = { reset: () => calls.push(['dao-reset']) };
+
+    const result = await createEaInventoryAdapter(runtime).invalidateUnassigned();
+
+    expect(result).toMatchObject({ invalidated: true, pile: 'ea-purchased' });
+    expect(result.actions).toEqual([
+      expect.objectContaining({ id: 'repository-unassigned-reset', available: true, succeeded: true }),
+      expect.objectContaining({ id: 'dao-unassigned-reset', available: true, succeeded: true }),
+      expect.objectContaining({ id: 'repository-set-dirty', available: true, succeeded: true }),
+    ]);
+    expect(calls).toEqual([
+      ['repository-reset'],
+      ['dao-reset'],
+      ['setDirty', 'ea-purchased'],
+    ]);
+  });
+
+  it('waits for asynchronous Unassigned resets before marking PURCHASED dirty', async () => {
+    const calls = [];
+    const runtime = createRuntime(piles, capacities);
+    runtime.repositories.Item.unassigned = {
+      reset: async () => {
+        calls.push('repository-reset-start');
+        await Promise.resolve();
+        calls.push('repository-reset-end');
+      },
+    };
+    runtime.services.Item.itemDao.itemRepo.unassigned = {
+      reset: async () => {
+        calls.push('dao-reset-start');
+        await Promise.resolve();
+        calls.push('dao-reset-end');
+      },
+    };
+    runtime.repositories.Item.setDirty = () => calls.push('set-dirty');
+
+    await createEaInventoryAdapter(runtime).invalidateUnassigned();
+
+    expect(calls).toEqual([
+      'repository-reset-start',
+      'repository-reset-end',
+      'dao-reset-start',
+      'dao-reset-end',
+      'set-dirty',
+    ]);
+  });
+
+  it('merges and reports every EA Unassigned repository source without duplicating entities', () => {
+    const first = makePlayer({ id: 101, definitionId: 501, rating: 85 });
+    const second = makePlayer({ id: 102, definitionId: 502, rating: 86 });
+    const third = makePlayer({ id: 103, definitionId: 503, rating: 87 });
+    const runtime = createRuntime({ unassigned: [first] });
+    runtime.repositories.Item.unassigned = { _collection: [first, second] };
+    runtime.services.Item.itemDao.itemRepo.unassigned = { _collection: [second, third] };
+
+    const adapter = createEaInventoryAdapter(runtime);
+
+    expect(adapter.readPile('unassigned').map((item) => item.id)).toEqual([101, 102, 103]);
+    expect(adapter.unassignedState()).toEqual({
+      mergedCount: 3,
+      mergedItemIds: [101, 102, 103],
+      sources: {
+        repositoryGetter: { count: 1, itemIds: [101] },
+        repositoryCollection: { count: 2, itemIds: [101, 102] },
+        daoCollection: { count: 2, itemIds: [102, 103] },
+      },
+    });
+  });
+
+  it('reports unavailable or failing invalidators without hiding a working fallback', async () => {
+    const runtime = createRuntime(piles, capacities);
+    runtime.repositories.Item.setDirty = () => { throw new Error('dirty failed'); };
+    runtime.repositories.Item.unassigned = { reset: () => {} };
+
+    const result = await createEaInventoryAdapter(runtime).invalidateUnassigned();
+
+    expect(result.invalidated).toBe(true);
+    expect(result.actions).toEqual([
+      expect.objectContaining({ id: 'repository-unassigned-reset', succeeded: true }),
+      expect.objectContaining({ id: 'dao-unassigned-reset', available: false, succeeded: false }),
+      expect.objectContaining({ id: 'repository-set-dirty', succeeded: false, error: 'dirty failed' }),
+    ]);
+  });
+
+  it('does not report a deduplicated DAO reset as successful when the shared reset failed', async () => {
+    const runtime = createRuntime(piles, capacities);
+    const sharedUnassigned = { reset: () => { throw new Error('shared reset failed'); } };
+    runtime.repositories.Item.unassigned = sharedUnassigned;
+    runtime.services.Item.itemDao.itemRepo.unassigned = sharedUnassigned;
+    runtime.repositories.Item.setDirty = undefined;
+
+    const result = await createEaInventoryAdapter(runtime).invalidateUnassigned();
+
+    expect(result.invalidated).toBe(false);
+    expect(result.actions).toEqual([
+      expect.objectContaining({
+        id: 'repository-unassigned-reset',
+        available: true,
+        succeeded: false,
+        error: 'shared reset failed',
+      }),
+      expect.objectContaining({
+        id: 'dao-unassigned-reset',
+        available: true,
+        succeeded: false,
+        deduplicated: true,
+        error: 'shared reset failed',
+      }),
+      expect.objectContaining({
+        id: 'repository-set-dirty',
+        available: false,
+        succeeded: false,
+      }),
+    ]);
   });
 
   it('resolves EA pile enums and prepares opened purchased items', () => {

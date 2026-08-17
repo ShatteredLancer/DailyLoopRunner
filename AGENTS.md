@@ -23,6 +23,9 @@ Daily Loop Runner 是 EA FC Web App 的 Tampermonkey 自动化脚本，运行时
 - 修复当前状态时，优先保证用户更新脚本后可以重新点击同一个 Loop 继续，而不是要求清空状态重来。
 - 共享底层改动必须评估全部调用方；越靠近 Adapter、Selection、Pack、Unassigned、SBC Transaction，修改越慎重。
 - 没有测试覆盖的线上 Bug，应先添加最小 fixture 或失败测试，再修实现。
+- 新功能开发阶段允许新功能自身出现尚未发现的 Bug，但影响必须局限在新增行为内；新增代码不得破坏任何现有功能或扩大已有事务的风险边界。
+- 需要确认 EA 页面、DAO、Controller、Repository、实体字段或响应时序时，可以先增加有界、脱敏且可定位调用阶段的诊断日志，以真实运行证据指导实现；不得用猜测替代观测，也不得让诊断开关改变业务或安全语义。
+- 对现有代码的任何修改原则上实行零回归：修改前识别调用方和现有行为，先补或同步运行相关回归测试，修改后执行与影响面相称的完整验证。只有用户与维护者已经明确决定重构相关功能时，才允许重构期间出现范围清楚、风险较低的暂时回归；发现后必须立即添加失败测试锁定原行为或新的明确合同并完成修复，已知回归不得进入可发布版本。
 - Node 自动测试不能替代真实 Web App 验证。
 
 已经在真实页面确认、不得回退的运行时事实：
@@ -33,8 +36,17 @@ Daily Loop Runner 是 EA FC Web App 的 Tampermonkey 自动化脚本，运行时
 - FSU Club 实体缓存恢复后属于 provisional 数据。Runner Live SBC 使用 Club 卡时，必须在保存前按 item ID 和 definition ID 向 EA 定向校验；发现缺失或属性变化时停止并重新选材。不得以 Club 数量、缓存年龄或 fingerprint 代替该校验。
 - FSU 全量 Club payload 必须绑定到确切 XHR。不得恢复 broad capture fallback，不得把 Enhancer 或其它插件的 Club 响应归属给 FSU；`clubRepo.hasAllItems()` bypass 只能影响当前 FSU criteria 并立即恢复。
 - 同一 SBC squad 的 `definitionId` 必须唯一；Unassigned/Transfer duplicate signal 只能解析到 Club/Storage 中真实可提交的对应卡。
+- EA Unassigned 的清理身份 `duplicate/duplicateId` 以同版本 Club 主卡为准。Club 主卡提交后，即使 Storage 或 Transfer 仍有同版本卡，也不能继续把该 Unassigned 卡规划成 duplicate；下一次 Inventory snapshot 必须将清理身份降级为 non-duplicate 并移入 Club。EA 原始信号必须独立保存在 `duplicateSignal/duplicateSignalId`，选材仍可据此解析到 Storage/Club 中真实可提交的同版本实体；不得再次用单一 `duplicate` 字段混合清理路由和 SBC signal 两种语义。
 - 84x10 只能使用 Challenge 要求数量和类型的 requirement special。额外特殊卡、错误特殊卡、超出提交上限的卡和 protected id 必须在保存前、保存后和提交前拦截。
-- 动态 SBC 的 EA eligibility group（例如 `PLAYER_RARITY_GROUP=83`）必须按原始 group id、values 和 count 保存。不得把动态 group 展开或固化为 TOTW/TOTS/FOF/FUTTIES 等卡种名称；运行时必须使用当前 Challenge requirement 的 `meetsRequirements(item)` 判断，并在 live matcher 不可用时停止提交。
+- 动态 SBC 的 EA eligibility group（例如 `PLAYER_RARITY_GROUP=83`）必须按原始 group id、values 和 count 保存。不得把动态 group 展开或固化为 TOTW/TOTS/FOF/FUTTIES 等卡种名称；运行时优先使用当前 Challenge requirement 的 `meetsRequirements(item)`，在当前 DAO 没有该方法时使用注入的精确 EA item-group matcher；两者都不可用时停止提交。
+- Rolling 主 SBC 的 Required Special 还必须执行来源限制：Unassigned、Storage 和 Transfer 接受 live eligibility matcher 命中的卡；Club 只接受 TOTW。Club 中的 TOTS、FOF、FUTTIES 以及其它命中该 live matcher 的非 TOTW 卡必须硬保护，不能作为主 SBC 特殊槽、普通材料或任何恢复 SBC 材料。Transfer 延续 duplicate signal 语义，只能解析到 Club/Storage 中真实可提交的对应副本。该限制必须同时存在于候选过滤、Inventory Ledger 分类和提交前验证，不能只依赖优先级。
+- 多 Challenge SBC 默认在第一阵提交前完成跨阵联合规划。规划在不可变 Inventory snapshot 上按较难阵容优先，逐阵扣除 item 和 duplicate signal，并拒绝 item、definition 或 signal 身份重叠。EA 不支持跨阵原子事务；第一阵提交后必须对账并再次验证下一阵，失败时记录 partial completion，不得声称回滚。Rolling 的 95+ Storage sink 是明确例外：它按 89 后 88 顺序独立规划和提交，允许 89 已完成、88 待后续 Storage 压力恢复。
+- Rolling 的 95+ Storage sink 是可选动态 capability，只能在 Storage 压力且紧急 Provisions 不可行时触发。它还必须由用户通过 `pickOptions.rollingStorageSinkEnabled` 显式启用，默认和旧配置迁移值均为 `false`；关闭时只允许扫描和展示 capability，不得规划或提交 88/89 阵。89 阵只允许当前主包中不高于 Automatic-use 上限的 Unassigned duplicate signal 及 Storage 材料，且这些可用 signal 必须优先消耗；88 阵先使用 Storage，不足时最多加入三张安全普通 Club 卡。89 提交后必须对账并重新读取 Challenge；88 暂不可行时返回可恢复进展，下次只续做 88。它允许紧急消耗当前配置的 Provisions Reserve，但仍永久排除 Required Special、保护高于 Automatic-use 上限的卡，并在每阵提交前为剩余待存卡、最终 Pick 可能产生的重复卡预留 Storage 空间。
+- Rolling 主 `10x85+` 奖励刚开出的可用普通重复卡具有最高普通材料优先级：低于 Automatic-use 上限且不是 Required Special 的 85-89 重复卡必须优先作为下一套主 SBC 材料，不得仅因评分位于 Provisions 范围而送入 Storage、85+ Pick 或 5x80+。只有主阵最低评分仍超过目标时，才按评分从高到低逐张放宽，并把被 Storage 低分卡替换出的主包重复卡存入 Storage；高于上限的重复卡和额外 Required Special 仍必须存储。
+- `pickOptions.rollingSurplusCraftingEnabled` 默认和旧配置迁移值均为 `false`。关闭时不得主动执行 `duplicate-reserve` Provisions 或主阵后的 Storage Provisions/TOTW 维护，87/88 及可选 89 不作为主阵 Reserve，主阵缺料、Required Special 缺失和真实 Storage 压力恢复仍可执行。开启时才恢复 Provisions Reserve：默认严格限制为 87/88，可由 `pickOptions.rollingProvisionsMaxRating=89` 扩展为 87/88/89；当前主包完整四张 Reserve 优先做 Provisions，余数进入 Storage，主阵后允许主动 Storage 维护。动态扫描得到的 EA 最低评分要求不能放宽业务上限；Required Special 和其它受保护卡必须在选材合同及保存前后 validator 中双重拦截。`pickOptions.rollingOpenDuplicateProvisionsRewards` 默认 `false`：主动 `duplicate-reserve` 奖励保留到主阵缺料时开启；设为 `true` 才立即开启。缺料和紧急恢复奖励仍立即处理。
+- 只有奖励最低评分恰好为 85 的动态 `high-rated-x10` 才能生成 Rolling Loop；10x84+ 等其它扫描结果只保留通用 Upgrade Loop，不得复用 Rolling 恢复链。
+- Unassigned/Transfer duplicate signal 只在当前主阵临时授权其 `duplicateId` 指向的真实提交实体；受保护 signal、缺少稳定对应实体或 signal 消失时必须 fail closed。确认提交后，transport、Inventory Ledger 登记和 duplicate 同步属于同一提交临界区，用户 Stop 只能在该区结束后生效。
+- `diagnostic` 只能控制日志，不得改变导航、刷新、身份确认或事务安全语义。Pack open 的 HTTP/DTO 状态与业务提交结果必须分开判断：同一次 `pack.open()` 回调中的非空奖励 item 数组是已提交的强证据，即使外层 DTO 为 500 也必须沿原 Loop 的专用奖励策略处理并保留 transport warning，不得重试。对于该响应中的重复奖励，必须依次等待所有可用 Unassigned Repository `reset()`、标记 `ItemPile.PURCHASED` dirty、调用 `requestUnassignedItems()`，并从 Repository getter、公开集合和 DAO 集合合并读取 live 实体；每张响应卡只能通过精确 item ID，或相对开包前基线新增且数量一一对应的同版本实体确认。Controller 跳转只允许作为两次强制刷新之间的一次有界触发，Controller 未切换不能否定已经完整的实体证据；304/空缓存、部分实体、旧基线实体或歧义映射必须 fail closed。直接载荷缺失的 response-lost 恢复没有可匹配 DTO，仍必须要求已确认 Unassigned Controller、相对基线新增实体和强制刷新后的包数量变化等组合证据；证据不足绝不能重开下一包。
 
 ## 2. 运行环境与依赖
 
@@ -64,8 +76,8 @@ Userscript metadata 位于 `src/userscript-entry.js` 文件开头。新增远程
 
 ```json
 {
-  "esbuild": "^0.25.6",
-  "vitest": "^3.2.4"
+  "esbuild": "^0.28.1",
+  "vitest": "^4.1.10"
 }
 ```
 
@@ -257,7 +269,7 @@ EA objects
 
 文件：
 
-- `contracts.js`：`ItemRef`、`ItemSnapshot`、`InventorySnapshot`、`SelectionPlan`、`SquadPlan`、`SubmissionResult`、`OpenPackReceipt`。
+- `contracts.js`：`ItemRef`、`ItemSnapshot`、`InventorySnapshot`、`InventoryDelta`、`SelectionPlan`、`SquadPlan`、`SubmissionResult`、`OpenPackReceipt`。
 - `objects.js`：Loop 配置克隆和 plain object 判断。
 - `rating.js`：EA squad rating 公式。
 
@@ -269,11 +281,43 @@ EA objects
 - 新字段需更新 Adapter、fake、tests 和可能的 fixture。
 - 评分公式变更必须有 characterization 和 differential tests。
 
+### 5.2.1 `src/inventory`
+
+文件：
+
+- `ledger.js`：四个 pile 的纯内存索引、item/definition/rating 索引、分类、confirmed delta 原子应用、drift 对比和本地对账。
+- `deltas.js`：把 Pack receipt、Move result、Submission result、Pick confirmation 和 Capacity observation 投影成统一 `InventoryDelta`。
+- `ledger-coordinator.js`：初始 readiness 门禁、周期/异常对账、provisional FSU Club 定向验证和有界诊断事件。
+- `capabilities.js`：按 ledger 实例、`inventoryVersion` 和 policy key 缓存 `specialSlots`、`provisionsBatches` 和 Storage 指标。实时 Telemetry 只能执行 ledger 线性计数；`directCycles` 与 `totwRecoveries` 保持 `null`，禁止为了 UI 数量调用评分 Solver。主阵和 TOTW 的真实可行性只在 Workflow 到达对应决策点时计算。
+- `mutation-observers.js`：把共享事务已有的可选回调形状适配到 coordinator。未显式创建并注入 coordinator 时不得改变普通 Loop。
+- `rolling-policy.js`：Rolling 开包分类、受保护/储备卡 Storage 路由、主阵 role-aware selection policy，以及恢复 SBC 的硬保护/Club Other Special 软保护 policy；只处理卡片分类与引用，不执行 move、开包或提交。
+
+风险：高。错误的乐观更新会让后续 Solver 使用不存在或已移动的卡；错误的能力模拟会高估可执行次数。
+
+核心不变量：
+
+- 初始索引只读当前本地 EA/FSU Repository，禁止为了统计触发 Club 网络分页。
+- FSU loading/not-ready 必须拒绝初始化；provisional cache 可以建索引，但每次提交前必须定向验证选中的 Club refs。
+- 只有 confirmed mutation 可以改变账本；ambiguous mutation 只标记 stale，并立即或在下一次提交前完成本地对账。
+- Delta 必须先完成全部 identity/pile 预检再原子应用。move 目标冲突、重复 ref、缺失 ref 或无稳定 identity 时不得部分更新。
+- 容量按已确认 observation 或 pile 增量维护，未知上限保持 `null`，不得伪装成零。
+- 每十次主 SBC 做一次本地 Repository 对账；外部 drift、item 缺失、目标校验变化或 mutation 不匹配立即重建或停止重规划。
+- Capability 不得调用通用 Solver，也不得克隆并反复扣减完整 Snapshot；它只能从 Inventory Ledger 的 classified entries 计算低成本计数。
+- 诊断只保存有界事件、计数、pile、耗时和 drift 摘要，禁止保存完整卡对象。
+- Rolling 仅在动态扫描确认完整实时 contract 后生成的 `rollingUpgrade` 中创建 coordinator；普通 Loop 不创建 coordinator，不得因本模块出现而增加扫描或改变选材/提交行为。该动态 Loop 可以进入主列表，但启动仍须通过 capability、Open rewards 和运行时 preflight 门禁。
+- Storage 容量未知时不得假设有空间。高于 Protection rating 的重复卡、额外 Required Special 或当前配置的 Provisions Reserve 需要 Storage 且容量未知/不足时，Rolling 必须以 `PROTECTED_STORAGE_BLOCKED` 停止。
+
+### 5.2.2 `src/runtime`
+
+- `telemetry.js`：通用、可序列化且有界的 Runtime Telemetry snapshot，以及按 animation frame 合并更新的 controller。
+
+Telemetry snapshot 只能保存 phase、cycle、资源计数、Storage 容量、`inventoryVersion`、刷新状态和时间；禁止保存 EA item、selection、receipt、错误对象或日志文本。`null` 表示未知，不能归一化成零；重新计算期间必须保留上一次可信指标并显示 `calculating`。controller 只负责有界状态和合并发布，不读取 Inventory、不解析日志、不访问 DOM。
+
 ### 5.3 `src/adapters`
 
 文件：
 
-- `ea/inventory.js`：统一读取四个库存 pile（含 Storage/Transfer 旧模型 fallback），把 EA Item Repository 转换为库存快照，并提供容量读取、pile 刷新、Item move、枚举解析、实时对象查找和 purchased item 准备。
+- `ea/inventory.js`：统一读取四个库存 pile（含 Storage/Transfer 旧模型 fallback），把 EA Item Repository 转换为库存快照，并提供容量读取、pile 刷新、Item move、枚举解析、实时对象查找和 purchased item 准备；Unassigned 强制刷新必须覆盖 Repository/DAO 的全部已知缓存失效入口，并可输出各 live Repository 源的独立数量和 item ID 诊断。
 - `ea/pack.js`：统一读取/刷新 My Packs、按 ID/名称解析实例，并且是唯一允许直接调用 pack model `open()` 和 `Store.getPacks()` 的位置。
 - `ea/sbc.js`：SBC Set/Challenge/DAO/formation 读取、Squad Controller 构造、后台提交设置和底层 save/submit Adapter；同时提供只读 Player Pick discovery snapshot，未知字段保持为空交由纯解析层拒绝。
 - `ea/player-pick.js`：Player Pick 待领取物品读取、跨 pile 重复检查、领取与确认选择。
@@ -357,6 +401,7 @@ Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`
 - `index.js`：统一入口 `selectInventoryPlayers()`；根据 `mode` 分发 requirements 或 rating。
 - `inventory.js`：按 requirements、pile、FSU 和保护策略选择普通库存材料。
 - `rating.js`：评分型 SBC 最低可行评分向量和同向量来源选择。
+- `rating-policy.js`：归一化评分选材的 required/preferred/protected item、exclusive role、Protection rating、Provisions 储备和 Club Other Special 软保护；只输出可序列化分类、计数和评分直方图。
 - `rating-model.js`：动态 Challenge eligibility 到评分模型的纯解析，以及保存前后阵容的评分/人数/唯一性/特殊卡校验。
 - `rating-candidates.js`：通过注入的安全过滤、pile 读取和快照函数构建评分候选，并将纯评分计划回解到实时对象。
 - `transient-signals.js`：合并开包响应中尚未稳定出现在 Repository 的 Unassigned signal。
@@ -375,10 +420,16 @@ Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`
 - consumed、protected、loan、limited-use、concept、academy、active trade 和 FSU Lock 必须排除。
 - Unassigned/Transfer 只作为 duplicate signal，最终必须解析到真实 submission item。
 - requirements 模式严格保持 count、tier、rarity、special 和评分上限。
-- rating 模式先最小化评分向量，再比较 pile；不能因 Storage 优先而选择不必要的高分卡。
+- rating 模式先基于实时评分桶构造最低可行评分配方，再按配方比较 pile；不能因 Storage 优先而选择不必要的高分卡。
 - rating 模式必须从当前 Challenge 读取人数、TEAM_RATING 和可识别的球员条件；遇到 chemistry 或未知 eligibility key 时停止。
+- role-aware rating 模式必须通过 `constraintId`/`constraintIndex` 复用候选构建阶段执行过的 live EA matcher；Required Special 的 `minCount/maxCount` 必须在计划和保存后验证中均为一，不能把第二张匹配卡当普通评分材料。
+- `requiredItems` 必须进入计划，`protectedItems` 必须排除，`preferredItems` 只用于同一最低评分向量内的确定性排序。非 Required Special 的当前配置 Provisions Reserve 和高于 `maxOrdinaryRating` 的卡不能进入普通候选。
+- Club Other Special 只能通过显式 `softProtectSpecialPiles` 进入最后候选层；允许 Other Special 作为普通材料还必须显式设置 `allowOtherSpecialAsOrdinary`。这些字段缺失时必须走原评分选择路径并保持 differential 输出不变。
+- role-aware 失败必须使用 `PLAYER_COUNT_SHORTAGE`、`SQUAD_RATING_SHORTAGE`、`REQUIRED_SPECIAL_SHORTAGE`、`RESERVED_FODDER_BLOCKED` 或 `LIVE_REQUIREMENT_UNAVAILABLE`，诊断只能包含有界计数、评分直方图、最高可达评分和角色数量，禁止输出完整卡对象。
 - 高评级 xN Upgrade 可以有多个 Challenge，但每个 Challenge 都必须独立通过同一套人数、评分、特殊卡和未知条件校验。运行时必须按当前未完成 Challenge 物化策略；中间 Challenge 提交只推进 Set 进度，不计为一轮且不得开 Set 奖励，最后 Challenge 必须观察到真实奖励后才能计为完成并继续下一轮。
-- rating 搜索必须保留 `maxSearchNodes`、`maxSearchMs` 和 `yieldEveryNodes` 等有界限制。大库存下宁可输出诊断并停止，也不能改成无界同步搜索阻塞浏览器。
+- rating 配方规划不得枚举卡实例组合。候选构建只允许 O(N) 安全过滤和评分建桶；正常规划必须在评分直方图上按单调可行性构造最低精确目标向量，状态规模只依赖当前实际存在的 `47..99` 评分档和最多 11 个阵容位置。只有该向量无法满足 live 角色物化或评分出现不连续跳跃时才允许进入完整评分桶兜底；不得在普通 4,000+ 卡场景触发兜底。相同截断直方图必须复用有界 LRU 配方缓存；库存从数百张增长到数万张不得扩大配方状态图，并必须由 4,000+ 实体和完整评分档性能测试锁定。
+- EA Inventory Adapter 合并 `repository.club.items` 与 `services.Item.itemDao.itemRepo.club.items` 时必须按稳定 item ID 去重；两个 Repository 可能在页面切换后同时暴露同一批 Club 实体，禁止把双源拼接结果直接交给 Ledger。无 item ID 的对象只能按同一对象引用去重，不能按 definition ID 合并真实重复卡。
+- `ratingSbcFill.maxSearchNodes`、`maxSearchMs` 和 `yieldEveryNodes` 已废弃。不得重新引入节点上限/超时作为正常不可行结果；最高评分配方不足时返回 `SQUAD_RATING_SHORTAGE`，配方无法满足 live 角色/条件时输出评分桶、配方尝试数和物化诊断。
 - 评分型 Live 使用 EA SBC DAO 的后台 Challenge/Squad/submit 集成路径，避免创建可视 squad controller 触发 FSU/Enhancer 页面增强；这不允许绕过 FSU 候选过滤。
 
 修改后至少运行 selection unit、characterization、differential tests 和所有相关 workflow tests。
@@ -399,10 +450,12 @@ Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`
 
 - 开包前先处理或明确保留已有 Unassigned。
 - 每个开包调用必须提供 opened-item policy。
+- 可选 `onReceipt` observer 在最终 receipt 形成后、事务返回前执行；observer 失败必须由 `onReceiptError` 隔离，不能覆盖已经成功的 EA 开包结果。
 - response item 与 Repository 延迟必须被 receipt/transient signal 覆盖。
 - EA pack response 经常早于 Unassigned cache。成功开包后必须先标准化 response items，并可直接移动已确认的非重复卡；默认情况下，response duplicate 只用于恢复迟到的 duplicate metadata、通知和后续确认，不得直接作为重复卡移动实体。可交易重复、不可交易重复、swap 和当前 stage 保留材料必须等待 live Unassigned Repository 实体出现后再按 policy 路由，然后刷新 recent reward/Repository 状态，才允许下一次选材或开下一包。唯一例外是 Batch Open 的有界最终兜底：必须已经完成主动打开 Unassigned、连续稳定读取、通用 resolver 和全部 settlement retry，确认没有新增 live Unassigned 实体，并按开包前 baseline 验证目标 pile 新实体；同时必须聚合检查 Storage/Transfer 容量，其中 swap 也计入 Transfer 占用。任何条件不满足都必须 preserve 并停止后续包。
-- 全重复包可能没有任何 direct move 来触发 EA 的 Purchased/Unassigned 页面模型；当 response 全是 duplicate 且 Repository 仍为空时，必须主动打开 Unassigned 页面并进行连续空读确认，再让通用 resolver 处理 live 实体。pending settlement 的后续尝试也必须执行页面同步，不能只重复调用 Item service。
+- 全重复包可能没有任何 direct move 来触发 EA 的 Purchased/Unassigned 页面模型；当 response 全是 duplicate 且 Repository 仍为空时，必须主动打开 Unassigned 页面并进行连续空读确认，再让通用 resolver 处理 live 实体。若 Pack Controller 的第一次进入请求无动作，恢复流程必须先主动刷新 Unassigned 以物化 live 实体，并在离开 Pack 前重试；仍失败时只允许经 Home 再刷新和重试一次，最终仍未确认 Unassigned Controller 就必须停止。pending settlement 的后续尝试也必须执行页面同步，不能只重复调用 Item service。
 - 不得把“先清理旧 Unassigned”和“开包成功后的 response materialization”混为同一步。开包后的 response 处理必须先于该奖励产生的残留 Unassigned cleanup，否则下一轮会误报缺料或遗留重复卡。
+- EA/FSU 丢失实时 `duplicateId` 时，Inventory Adapter 只允许从 Club/Storage 中 `definitionId`、评分和 `rareflag` 都一致的同版本卡回补 latent duplicate；同 `definitionId` 但评分或卡型不同的动态异版本必须保持非重复并路由到 Club。
 - 471、500、404 和 stale pack 的重试必须有界。
 - `open-transaction.js` 必须显式标准化 `items`、`response.items`、`data.items` 和 `response.data.items`；`undefined`/`null` callback、成功但缺少 items、Observable timeout 和 transport exception 必须有独立 reason，禁止统一压缩为无诊断价值的 `unknown`。
 - 默认开包恢复只允许一次有界重试。`471/500/512/521` 和空响应、缺失 items、transport error/timeout 可以在完成 Unassigned、导航和 Pack Repository 同步后重试；`404` 仅在调用方允许 gone 语义时作为 stale；`429` 不得立即增加请求压力，必须保留明确 blocked reason。
@@ -419,6 +472,8 @@ Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`
 - `plan.js`：纯规划，按非重复、可交易重复、可 Swap、Storage 的顺序返回动作或 blocked。
 - `resolve.js`：执行规划、检查指纹进展、调用 overflow resolver、限制迭代和递归。
 - `recovery.js`：把 blocked item 与恢复策略、Selection 和 SBC recipe 连接。
+- `navigation.js`：纯导航状态机，区分“请求已发出”和“目标控制器已确认”，并记录每个有界 fallback 的前后控制器。
+- `runtime-navigation.js`：通过注入的 Page/DOM effects 编排 Store Pack、Home 和文本入口恢复；不读取运行时全局。
 
 风险：最高。几乎所有 Loop 的开始、开包后、提交后和最终收尾都会经过 Unassigned。
 
@@ -430,10 +485,13 @@ Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`
 - 容量 fail-safe 通过配置化 overflow resolver 注入。
 - action 或 resolver 报告 progress 后，Unassigned fingerprint 必须变化。
 - EA move/swap 返回 success 后 Repository 可能仍短暂保留旧 Unassigned 实体；必须有界重读并确认 fingerprint 变化，不能立即对同一实体规划第二次 move，也不能无限等待。
+- `gotoUnassigned()`、按钮点击或 recovery 返回 `true`/`requested:true` 只表示请求已发出；只有观测到 `UTUnassigned*` 控制器后才可读取 Unassigned 或继续下一包。
+- action description、日志文本和 SBC 显示名称不得作为 duplicate/non-duplicate、destination 或导航成功状态；执行分支必须读取结构化字段。
+- 导航恢复策略只允许位于 `src/unassigned/navigation.js` 和 `runtime-navigation.js`；不得在 `userscript-entry.js` 重新按 Home/Store/Pack 控制器名称追加分支。
 - 必须有最大迭代和递归保护。
 - 无进展时安全停止，不能继续开包扩大阻塞。
 
-修改时必须覆盖空、非重复、可交易重复、不可交易重复、Swap、Storage 满、Transfer 满、两者满和 recovery 无进展。
+修改时必须覆盖空、非重复、可交易重复、不可交易重复、Swap、Storage 满、Transfer 满、两者满、recovery 无进展，以及连续两轮从不同控制器进入 Unassigned。导航测试必须包含“请求返回成功但控制器不变”。
 
 ### 5.7 `src/sbc`
 
@@ -456,6 +514,7 @@ Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`
 - provisional FSU 只校验 `pile: club`；必须按 item ID 与 definition ID 同时匹配，缺失或关键属性变化时停止，不得静默重选。
 - 定向校验通过后，Club 位置必须替换为新 EA 实体且保持原阵容顺序；FSU 可视填充已先保存旧实体时，最终提交前只在确有 refreshed Club 实体时补一次保存。
 - 成功提交后才标记 consumed 和处理奖励。
+- 可选 `onResult` observer 必须在 confirmed result 形成后、`afterSubmit` 打开奖励前执行；observer 失败由 `onResultError` 隔离，不能把 EA 已提交成功改写为失败。
 
 ### 5.8 `src/reward`
 
@@ -469,6 +528,7 @@ Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`
 - `recap.js`：Player Pick、普通 Loop 与 Batch Open 共用的单卡排序、固定 15 条分页、颜色解析、对比度和 tier theme 纯模型。
 - `player-prices.js`：FUT.GG 价格解析、FUTNext fallback 和结构化诊断。
 - `pack-highlight.js`：从通用 Pack receipt 识别达到阈值的特殊卡，并生成本地/远程通知模型；不执行 DOM 或网络副作用。
+- `rolling-recap.js`：Rolling 专属流式 Recap 聚合器和模型。只保存有界的可序列化卡片摘要、计数、评分直方图、重复卡去向、停止点和最终资源；top cards 默认上限 50，Alert-qualifying Special 摘要默认上限 100。不得把完整 EA item、Pack receipt 或响应对象放进长期会话状态。
 
 Reward 模块不直接访问 EA Service 或 DOM。Claim Rewards 通过注入的 Overlay、Page shield、Pack/SBC 快照、Wait 和输入事件回调保持 25 秒上限及提前确认规则；价格 HTTP transport 由 Browser HTTP Adapter 注入，FUT.GG/FUTNext URL、解析和 fallback 在 Reward service 中。待领取 Pick 名称/Loop 别名分类位于 `src/reward/player-pick.js`；真实待领取物品读取、跨 pile 重复检查、领取和确认选择通过 `src/adapters/ea/player-pick.js`；人工选择弹窗位于 `src/ui/player-pick-modal.js`。
 
@@ -487,11 +547,20 @@ Workflow 是无 EA/DOM 依赖的状态机：
 - `sequence.js`：One-click 等有序子流程。
 - `validation-round.js`：Bronze Upgrade Validation 的 Dry/Live 共用编排。
 - `batch-open.js`：独立批量开包状态机；按配置顺序执行，每次打开前重新解析实时 pack 实例，记录 opened/skipped/blocked/stopped 和回执。
+- `rolling-upgrade.js`：10x85+ 主循环状态机；只编排注入的 preflight、库存索引、包查找/开启、分类、Storage 路由、单步恢复、主阵规划/提交和对账，不直接访问 EA/FSU/DOM。
 - `dispatch.js`：strategy 到 runner 的统一分发，以及标准/Player Pick 收尾回调顺序。
 
 风险：中高。通常影响同一 strategy 的全部 Loop，但不应直接影响其它 strategy。
 
 Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insufficient` 或 `blocked`。不要用异常代替正常的材料不足和活动已完成；不可恢复的运行时错误才抛异常。
+
+Rolling 的正数 completion 只统计主 10x85+ 提交，`0` 表示运行到 Stop、资源/Storage/安全门禁阻断。Dry Run 使用同一 planner，并在第一个未知随机奖励或提交边界返回 `planned`。恢复链每次只执行一个动作并回到统一规划点，不得从 Workflow 内递归调用恢复 Loop；每个动作必须改变 Inventory Ledger 进度指纹，并受每主周期恢复预算约束。
+
+Rolling 每轮先查找并开启已有主 `10x85+` reward。`rollingSurplusCraftingEnabled=false` 时，本轮主包的 85-89 可用重复卡直接进入主 Solver，不处理 `duplicate-reserve`，也不运行主阵后的 Storage Provisions/TOTW 维护；若精确 84 阵无法容纳全部重复卡，必须按评分从高到低放宽并将放宽卡存入 Storage。开启余量制作后，完整 Reserve 组才先执行 `duplicate-reserve`。缺料或紧急恢复刚提交的 Provisions reward 以及 5x80+ reward 必须由 `pendingRecoveryReward` 精确驱动并立即开启；主动 `duplicate-reserve` Provisions reward 默认保留在 My Packs，只有 `rollingOpenDuplicateProvisionsRewards=true` 才立即开启。库存启动时不得仅因 My Packs 中存在历史 Provisions/5x80+ reward 就抢在可行主阵前开启；只有主 Solver明确返回普通材料不足后，才进入 leftover sweep，清空遗留包并重新规划，仍缺料才允许新做一套 Provisions。缺 Required Special 时先开已有 TOTW reward，再做一套动态 TOTW Upgrade；TOTW 阵缺料时允许 Provisions -> Gold drain -> TOTW -> 主 SBC。所有恢复阵容硬排除 Required Special。
+
+关闭余量制作时，Provisions 只有两种必要恢复来源：主 Solver 返回普通材料不足，或 Storage 压力阻止受保护卡安全路由。开启余量制作后才增加当前主包完整 Reserve 的 `duplicate-reserve` 和主阵后的 Storage 维护来源。每次 Provisions/TOTW 提交后必须重新读取 ledger 并重新规划，不得复用旧库存决策。
+
+Rolling 开启任何主包、TOTW、Provisions 或 5x80+ reward 时只能使用 EA `My Packs` Repository 中当前存在的真实 pack 实例。Store catalog/`lastStorePacks` 只能用于展示和发现，不得作为可开启对象；同 ID 多个真实实例必须逐个消费，已消费对象不得被 catalog fallback 重新选中。
 
 ### 5.10 `src/ui`
 
@@ -503,6 +572,8 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 - `main-panel-bindings.js`：选项回填和 UI command 事件转发。
 - `main-panel-commands.js`：刷新、配置加载、Stop、复制和下载日志等主面板 command 编排。
 - `main-panel-state.js`：Loop 列表、rounds、recap 和 disabled 状态投影。
+- `selection-policy-settings.js`：按 Standard SBC、Rolling/Player Pick 和 Pick redemption 作用域编辑选材策略；主面板只显示摘要，不并排暴露多个容易混淆的评分阈值。
+- `runtime-telemetry.js`：Runtime Telemetry phase 文案、指标、Storage 压力和 ARIA 的纯 DOM 投影。
 - `responsive-layout.js`：共享 Desktop/Tablet/Mobile 布局与 pointer/touch 输入判定、持久化覆盖和 viewport 监听。
 - `responsive-dialog.js`：Batch Open、Player Pick、recap、Reward Alert 和 Help 共用的移动全屏、安全区与触摸目标样式。
 - `workflow-loop-builder-view.js`：全屏 Builder 的结构化 Workflow、Loop、Recovery、Dynamic SBC、Preview 和 JSON validation UI。
@@ -522,10 +593,17 @@ Workflow 返回结构化状态：`completed`、`planned`、`unavailable`、`insu
 
 - `log-renderer.js`：中等，影响日志刷新性能和简洁/完整日志显示。
 - `main-panel-*`：中等，容易产生简洁模式回归、重复日志栏、尺寸无法恢复或 command 未转发等问题。
+- `runtime-telemetry.js`：中等，高频重绘可能卡住日志，错误的未知值或 Storage 比例会误导用户。
 - `player-pick-modal.js`：中等，影响人工 Pick 的选择数量、Stop 中断和弹窗清理。
 - `sbc-reward-overlay.js`：中高，影响页面型 SBC 奖励覆盖层识别和关闭；25 秒等待、Pack 增量和 SBC 进度确认位于 `src/reward/sbc-claim.js`。
 
 UI 修改要检查简洁模式、Options 模式、`L`、拖动、resize、长文本、日志高频更新和 Pick recap。Options 展开后设置控件可以在独立区域滚动，但日志必须始终保留独立的可视滚动区域，不能因为配置变长而被 flex 压缩或裁掉。
+
+Selection Policy 的三个评分概念必须保持作用域清晰：`lowRatedGoldMaxRating` 只限制非评分普通 SBC 的 Gold；`ratingSbcMaxCardRating` 只限制普通 Rating SBC；`protectionRating` 使用包含边界的 `<=` 语义，只供 Rolling 自动回填和 Player Pick 自动处理共享。Rolling 主阵与恢复阵不得被普通 Rating SBC 上限再次压低。旧 `autoPickThreshold` 只作迁移输入，不能重新出现在主面板。
+
+Rolling Runtime Telemetry 只能渲染 workflow/entry 发布的结构化 snapshot，不得解析日志或自行扫描 EA 库存。能力计算按 ledger `inventoryVersion` 串行合并，旧版本结果不得覆盖新版本；只允许对已有 classified entries 做 O(n) 计数，`Direct cycles` 和 `TOTW recoveries` 显示未知，严禁在 Telemetry 中调用评分 Solver。Telemetry 仅在 Rolling 运行时显示，普通 Loop、Batch 和 Trade 保持隐藏；Desktop 预留稳定高度，Mobile Run 使用受限内容高度，icon-only 必须隐藏。高频 phase/capability 更新必须合并到至多每个 animation frame 一次，并用 10,000 次更新测试锁定。
+
+Rolling Recap 只在 `rollingUpgrade` 会话启用；生产 workflow 传入 `retainReceipts:false`，普通 Loop、Batch 和 Pick 的既有 Recap retention 不得被改变。Pack Reward Alert 仍由共享 `openPack()` transaction 发送一次；Rolling 85+ Pick 确认后如需通知必须复用 `publishPackHighlight()`，Recap 构建、价格查询和 FUTBIN 补全不得再次发送 Desktop、ntfy 或 Toast。任何 retention 上限、省略计数或恢复/路由计数变更都必须增加纯单元测试和长跑边界测试。
 
 响应式 UI 必须遵守以下约束：
 
@@ -689,7 +767,7 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 - `sourceExhaustedFallbackLoopId`、`sourceExhaustedFallbackMaxCompletions`：来源耗尽后的可配置库存兜底及其边界。
 - `exhaustSbcSet`、`setCompletionSafetyLimit`：限次 Pick 使用 EA Set 当前剩余次数执行到耗尽；元数据不可读时只使用内部安全上限，不读取 UI `rounds`。
 - `openRewardPacks`：历史奖励开包兼容字段；新的父/子覆盖使用 `rewardFlow.open` 三态。
-- `pickOptions`：可继承的 Pick 偏好，仅负责 `autoSelect`/`autoSelectBelow90`、`autoPickThreshold`、`openAtEnd`/`openPicksAtEnd`；SBC 材料上限统一由 `sbcFodderPolicy` 管理，不得再生成 Pick 专用高分保护字段。
+- `pickOptions`：可继承的 Pick/Rolling 偏好，负责 `autoSelect`/`autoSelectBelow90`、`protectionRating`、`openAtEnd`/`openPicksAtEnd` 和默认关闭的 `rollingStorageSinkEnabled`；旧 `autoPickThreshold` 仅作迁移输入。`protectionRating` 只投影到 Pick 和 Rolling，现有 rating SBC 材料上限仍由 `sbcFodderPolicy` 管理。
 - `sbcFodderPolicy`：可从全局到 Workflow、Loop 和嵌套 stage 继承并由子级覆盖的统一材料策略。`mode` 可为 `inherit`、`auto`、`low-gold`、`rating-constrained`；默认 `lowRatedGoldMaxRating: 82`、`ratingSbcMaxCardRating: 88`。
 - `inventoryMode`：可继承的库存模式，值为 `inherit`、`inventory-only` 或 `normal`；只能配置在 strategy capability 为 supported/container 的 Loop。
 - `openRewardPacksAtEnd`：`inventoryExhaustion` 等阶段式 Workflow 延迟奖励开包；阶段提交期间保持关闭，仅在全部阶段正常结束且 UI `Open reward packs` 已开启时批量打开匹配奖励。blocked/stopped 后不得执行最终开包。
@@ -697,7 +775,7 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 - Loop 级 `forceOpenRewardPacks`：仅当同一流程的后续步骤必须立即消费该奖励时才可强制开包，例如 84x10 的 TOTW 前置；普通独立/兜底 2x84+ 和最终 FOF 奖励必须服从 UI `Open reward packs`。
 - `maxRating`、`allowSpecial`：单条 requirement 的业务条件，不得代替统一材料策略。
 - `ratingSbcFill`、`requiredSpecialCount`、`requiredSpecialKind`：评分 SBC 参数。
-- `dynamicChallenges[].eligibilityRequirements`：动态扫描保存的 EA eligibility 快照，只用于绑定当前 Challenge 和诊断；`PLAYER_RARITY_GROUP` 等聚合分组的真实选卡必须在运行时重新绑定当前 EA requirement matcher，不能根据 item 的本地 group 数组猜测。
+- `dynamicChallenges[].eligibilityRequirements`：动态扫描保存的 EA eligibility 快照，只用于绑定当前 Challenge 和诊断；`PLAYER_RARITY_GROUP` 等聚合分组的真实选卡必须在运行时重新绑定当前 EA requirement matcher，或在 DAO 缺少 matcher 时使用来自当前 EA item payload 的精确 group membership adapter，不能按卡名猜测或固化成业务卡种。
 - `activityBinding`：内置/自定义 Loop、嵌套 stage、自动恢复和 Recovery recipe 对当前动态 SBC family 的声明式绑定。扫描只可覆盖 Set/Challenge/Reward identity、当前显示名、requirements 事实和剩余次数；不得覆盖高卡/特殊卡/可交易卡保护、pile 顺序、评分策略、fallback、Workflow 顺序或运行上限。每个嵌套消费者和 Recovery recipe 必须显式声明自己的 binding，不能依赖父对象名称或顶层 binding 传播。
 - `preCraftPlayerPick`：Provision 显式动态前置 Pick 引用兼容字段，使用稳定 `sbcSetIds` / `pickItemResourceIds` 匹配扫描会话 Loop；扫描缺失时跳过该 stage，不得回退到过期活动。内置轮换优先使用语义 selector。
 - `preCraftPlayerPickSelector`：Provision 内置活动轮换的语义选择器。当前仅支持 `material: "common-gold"`，只接受所有 Challenge 都已证明为全 Gold、无 Rare 最低要求且可按 Common-first 填充的当前扫描 Pick；无匹配时跳过，多匹配时停止并记录歧义，不得猜 Set ID。
@@ -846,6 +924,7 @@ Vitest 运行在 Node 环境，配置见 `vitest.config.js`。
 - Pack transaction 和 opened item policy。
 - Unassigned plan、resolver 和 recovery。
 - Submission transaction、SBC reward claim 和 Player Pick reward planning。
+- Inventory Ledger、delta projectors、mutation observers、FSU readiness/定向验证、外部 drift、周期对账、10,000 卡索引和 capability 缓存失效。
 - Log renderer。
 
 Characterization test 锁定当前已验证行为；differential test 对比重构前后或两种实现的结果。修改它们时要确认是修 Bug 还是改变规则。
@@ -998,8 +1077,8 @@ Dry run 必须在副作用前停止：
 - `pendingItemRefs` 表示开包响应卡尚未确认进入 Club/Storage/Transfer，也没有被明确 reserved。任何自动开包流程都必须停止后续包或 SBC 动作；reserved 与 pending 不得混淆。
 - `Pack #N marked gone for this session after 404`：同一 pack id 已按 404 拉黑，本会话不再重复尝试（例如僵尸 TOTW Provision Refresh）。
 - `background submit returned 409/429; reloading challenge before retry`：评分 SBC 后台提交冲突，脚本会有限次重载 challenge 并重放阵容后重试；仍失败再停。
-- `rating shortage before automatic 2x84+ recovery: ...`：84x10/评分 SBC 主求解失败原因；出现在自动 2x84+ 恢复之前。先读这行区分“评分无解/超时/约束不满足”与后面的 fodder 不足。
-- `rating search exceeded ...`：候选池或组合复杂度达到有界限制；优化候选或配置，不要简单把搜索上限改成无界。
+- `rating shortage before automatic 2x84+ recovery: ...`：84x10/评分 SBC 主求解失败原因；出现在自动 2x84+ 恢复之前。先读这行区分“评分桶确实不足/角色或条件无法物化”与后面的 fodder 不足。
+- `deterministic rating squad ... live range:A-B, levels:N, recipe attempts:M, planner transitions:P, cache:hit|miss`：评分规划只处理实时存在的评分桶。连续运行通常应出现 `cache:hit`；候选卡数量增长但评分桶和截断数量不变时，`levels` 与 `planner transitions` 必须保持不变。
 - `unknown eligibility key` 或 chemistry：当前动态条件无法安全解释，应记录 Challenge 模型并停止，不得忽略条件提交。
 - `reward pack not found`：先确认 SBC 进度和奖励是否已经发放，再刷新 Packs；不要盲目重复提交同一个 Challenge。
 - 材料已经开出却立即报缺料：优先检查是否先处理 pack response、再清理残留 Unassigned 和刷新 recent reward；不要直接放宽材料保护。

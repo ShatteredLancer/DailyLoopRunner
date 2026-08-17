@@ -88,6 +88,31 @@ describe('rating SBC model parsing and validation', () => {
     expect(model.constraints[0].matches({ name: 'Unrelated special', groups: [83] })).toBe(false);
   });
 
+  it('uses the runtime EA item-group matcher when DAO requirements lack a method', () => {
+    const model = parseRatingSbcChallenge({
+      loopDef: {
+        dynamicActiveEligibilityRequirements: [{ key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 }],
+        requiredSpecialCount: 1,
+        allowedSpecialCount: 1,
+      },
+      challenge: {
+        eligibilityRequirements: [
+          requirement('TEAM_RATING', [84]),
+          requirement('PLAYER_RARITY_GROUP', [83], 1),
+        ],
+      },
+      requiredPlayerCount: 11,
+      eligibilityKeyName: (key) => key,
+      itemGroupNumbers: (item) => item.groups || [],
+    });
+
+    expect(model.unsupported).toEqual([]);
+    expect(model.constraints[0].matcherSource).toBe('runtime-item-groups');
+    expect(model.constraints[0].matches({ groups: [83] })).toBe(true);
+    expect(model.constraints[0].matches({ groups: [44] })).toBe(false);
+    expect(model.constraints[0].matches({ groups: [] })).toBe(false);
+  });
+
   it('fails closed when a dynamic player rarity group has no live EA matcher', () => {
     const model = parseRatingSbcChallenge({
       loopDef: {
@@ -138,5 +163,41 @@ describe('rating SBC model parsing and validation', () => {
       'special-count 2/1',
       'challenge.meetsRequirements() returned false',
     ]));
+  });
+
+  it('validates an exclusive role minimum and maximum with the live constraint matcher', () => {
+    const roleConstraint = {
+      id: 'challenge-0',
+      label: 'Required Special x1',
+      count: 1,
+      matches: (item) => item.requiredSpecial === true,
+    };
+    const model = {
+      requiredPlayerCount: 2,
+      targetRating: 84,
+      maxSpecialCount: 2,
+      constraints: [roleConstraint],
+    };
+    const exclusiveRoles = [{
+      id: 'required-special',
+      constraintId: 'challenge-0',
+      minCount: 1,
+      maxCount: 1,
+    }];
+    const valid = validateRatingSbcModelAgainstItems(model, [
+      { id: 1, definitionId: 11, rating: 84, requiredSpecial: true },
+      { id: 2, definitionId: 12, rating: 84 },
+    ], null, { exclusiveRoles });
+    const invalid = validateRatingSbcModelAgainstItems(model, [
+      { id: 1, definitionId: 11, rating: 84, requiredSpecial: true },
+      { id: 2, definitionId: 12, rating: 84, requiredSpecial: true },
+    ], null, { exclusiveRoles });
+
+    expect(valid.ok).toBe(true);
+    expect(valid.roleResults).toEqual([
+      expect.objectContaining({ id: 'required-special', matched: 1, minCount: 1, maxCount: 1 }),
+    ]);
+    expect(invalid.ok).toBe(false);
+    expect(invalid.errors).toContain('Required Special x1 role-count 2/1-1');
   });
 });

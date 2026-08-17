@@ -6,7 +6,9 @@ export function createMainPanelCommands(options = {}) {
   const wait = options.wait || ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
 
   const commands = {
-    selectLoop() {
+    selectLoop(loopId) {
+      const defaults = options.getLoopSelectionDefaults?.(loopId) || {};
+      if (defaults.openRewardPacks === true) options.setOpenRewardPacksEnabled?.(true);
       options.updateLoopControls?.();
     },
     selectProfile(profileId) {
@@ -32,19 +34,12 @@ export function createMainPanelCommands(options = {}) {
       options.openHelp?.(topic);
       return true;
     },
-    savePickOptions(event) {
-      options.savePickOptions?.(event);
-      return true;
-    },
     setLayoutMode(layoutMode) {
       options.setLayoutMode?.(layoutMode);
       setPanelState();
       return true;
     },
-    saveSbcFodderOptions(event) {
-      options.saveSbcFodderOptions?.(event);
-      return true;
-    },
+    openSelectionPolicySettings: options.openSelectionPolicySettings,
     saveLoopOptions: options.saveLoopOptions,
     saveRewardAlertEnabled: options.saveRewardAlertEnabled,
     openRewardAlertSettings: options.openRewardAlertSettings,

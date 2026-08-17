@@ -1,5 +1,10 @@
 import { createInventorySnapshot, createItemSnapshot, INVENTORY_PILES } from '../../domain/contracts.js';
-import { readPlayerRareFlag } from '../../domain/player-rarity.js';
+import {
+  hasPlayerCosmetics,
+  isPlayerEvolutionCard,
+  readPlayerRareFlag,
+} from '../../domain/player-rarity.js';
+import { classifyUnassignedDuplicateIdentity } from '../../inventory/unassigned-duplicate-identity.js';
 
 function collectionValues(collection) {
   if (!collection) return [];
@@ -8,6 +13,21 @@ function collectionValues(collection) {
   if (collection._collection && typeof collection._collection === 'object') return Object.values(collection._collection);
   if (Array.isArray(collection)) return collection;
   return [];
+}
+
+function mergeInventoryEntities(...collections) {
+  const merged = [];
+  const seenIds = new Set();
+  const seenObjects = new Set();
+  for (const item of collections.flatMap((collection) => collectionValues(collection))) {
+    if (!item || typeof item !== 'object') continue;
+    const id = Number(item.id || 0);
+    if (id ? seenIds.has(id) : seenObjects.has(item)) continue;
+    if (id) seenIds.add(id);
+    else seenObjects.add(item);
+    merged.push(item);
+  }
+  return merged;
 }
 
 function callBoolean(item, method, fallback = false) {
@@ -95,7 +115,8 @@ function toSnapshot(item, pile) {
     tradeable,
     leagueId: itemLeagueId(item),
     identityIds: identityIds(item),
-    evolution: callBoolean(item, 'isEvolution') || callBoolean(item, 'isEvo') || Number(item?.evolutionId || 0) > 0,
+    evolution: isPlayerEvolutionCard(item),
+    cosmetic: hasPlayerCosmetics(item),
     limitedUse: isLimitedUse(item),
     concept: isConcept(item),
     academyEnrolled: isAcademyEnrolled(item),
@@ -110,9 +131,33 @@ export function createEaInventoryAdapter(runtime, options = {}) {
   const repository = runtime.repositories.Item;
   const service = runtime?.services?.Item;
 
+  function readUnassignedSources() {
+    let repositoryGetter = [];
+    try { repositoryGetter = Array.from(repository.getUnassignedItems?.() || []); } catch { }
+    return {
+      repositoryGetter,
+      repositoryCollection: collectionValues(repository?.unassigned),
+      daoCollection: collectionValues(service?.itemDao?.itemRepo?.unassigned),
+    };
+  }
+
+  function unassignedState() {
+    const sources = readUnassignedSources();
+    const merged = mergeInventoryEntities(...Object.values(sources));
+    const summarize = (items) => ({
+      count: items.length,
+      itemIds: items.map((item) => Number(item?.id || 0)).filter(Boolean),
+    });
+    return {
+      mergedCount: merged.length,
+      mergedItemIds: merged.map((item) => Number(item?.id || 0)).filter(Boolean),
+      sources: Object.fromEntries(Object.entries(sources).map(([name, items]) => [name, summarize(items)])),
+    };
+  }
+
   function readPile(pile) {
     if (pile === 'unassigned') {
-      try { return Array.from(repository.getUnassignedItems?.() || []); } catch { return []; }
+      return mergeInventoryEntities(...Object.values(readUnassignedSources()));
     }
     if (pile === 'storage') {
       try {
@@ -136,8 +181,10 @@ export function createEaInventoryAdapter(runtime, options = {}) {
       return collectionValues(repository.transfer);
     }
     if (pile === 'club') {
-      return collectionValues(repository.club?.items)
-        .concat(collectionValues(runtime.services?.Item?.itemDao?.itemRepo?.club?.items));
+      return mergeInventoryEntities(
+        repository.club?.items,
+        runtime.services?.Item?.itemDao?.itemRepo?.club?.items,
+      );
     }
     return [];
   }
@@ -179,6 +226,52 @@ export function createEaInventoryAdapter(runtime, options = {}) {
     return service.requestUnassignedItems();
   }
 
+  async function invalidateUnassigned() {
+    const resolvedPile = pileValue('purchased');
+    const actions = [];
+    const run = async (id, owner, methodName, args = []) => {
+      const method = owner?.[methodName];
+      if (typeof method !== 'function') {
+        actions.push({ id, available: false, succeeded: false, error: null });
+        return;
+      }
+      try {
+        await method.apply(owner, args);
+        actions.push({ id, available: true, succeeded: true, error: null });
+      } catch (error) {
+        actions.push({
+          id,
+          available: true,
+          succeeded: false,
+          error: error?.message || String(error),
+        });
+      }
+    };
+
+    const repositoryUnassigned = repository?.unassigned;
+    const daoUnassigned = service?.itemDao?.itemRepo?.unassigned;
+    await run('repository-unassigned-reset', repositoryUnassigned, 'reset');
+    if (daoUnassigned === repositoryUnassigned) {
+      const original = actions.find((action) => action.id === 'repository-unassigned-reset');
+      actions.push({
+        id: 'dao-unassigned-reset',
+        available: original?.available === true,
+        succeeded: original?.succeeded === true,
+        deduplicated: true,
+        error: original?.error || null,
+      });
+    } else {
+      await run('dao-unassigned-reset', daoUnassigned, 'reset');
+    }
+    await run('repository-set-dirty', repository, 'setDirty', [resolvedPile]);
+
+    return {
+      pile: resolvedPile,
+      invalidated: actions.some((action) => action.succeeded),
+      actions,
+    };
+  }
+
   function refreshActions(pile) {
     const resolvedPile = pileValue(pile);
     const specificNames = {
@@ -212,19 +305,17 @@ export function createEaInventoryAdapter(runtime, options = {}) {
       pile,
       rawPiles[pile].map((item) => toSnapshot(item, pile)),
     ]));
-    const submissionItems = [...piles.storage, ...piles.club];
+    // EA duplicateId identifies the Club counterpart. A same-version Storage
+    // card remains usable SBC inventory, but cannot keep Unassigned duplicated
+    // after the Club counterpart has been submitted.
+    const clubItems = piles.club;
     piles.unassigned = piles.unassigned.map((item) => {
-      if (item.duplicate && item.duplicateId) return item;
-      const matching = submissionItems.find((candidate) => (
-        candidate.definitionId > 0
-          && candidate.definitionId === item.definitionId
-          && candidate.id !== item.id
-      ));
-      if (!matching) return item;
+      const identity = classifyUnassignedDuplicateIdentity(item, clubItems);
+      if (identity.duplicate === item.duplicate && identity.duplicateId === item.duplicateId) return item;
       return createItemSnapshot({
         ...item,
-        duplicate: true,
-        duplicateId: Number(item.duplicateId || matching.id || 0),
+        duplicate: identity.duplicate,
+        duplicateId: identity.duplicateId,
       }, 'unassigned');
     });
     return createInventorySnapshot({
@@ -251,10 +342,12 @@ export function createEaInventoryAdapter(runtime, options = {}) {
     snapshot,
     resolveItem,
     readPile,
+    unassignedState,
     pileValue,
     preparePurchasedItem,
     capacity,
     requestUnassigned,
+    invalidateUnassigned,
     refreshActions,
     move,
     snapshotItem: toSnapshot,

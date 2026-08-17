@@ -1,16 +1,20 @@
 # 10x85+ Rolling Loop 设计与实施追踪
 
-> 文档状态：设计已确认，实施尚未开始
+> 文档状态：RL-0 至 RL-7 已完成，RL-8 和 RL-9 进行中
 >
-> 最后更新：2026-08-16
+> 最后更新：2026-08-17
 >
 > 规划基线：DailyLoopRunner `v0.7.91`，Git `0be883d`
 >
-> 功能可见性：完成全部自动验证和真实页面验收前保持 hidden/MVP
+> 实施基线：Git `c533519`
+>
+> 当前候选：DailyLoopRunner `v0.8.0`
+>
+> 功能可见性：动态扫描成功后作为可选 Loop 显示；真实页面验收和最终发布门禁仍由 RL-8 跟踪
 
 ## 1. 文档目的
 
-本文档是 `10x85+ Rolling Loop` 的设计、实施顺序和验收状态来源。后续实现、测试、真实页面验证和问题修正都应更新本文档，不在聊天记录或临时日志中维护另一套进度。
+本文档是 `10x85+ Rolling Loop` 的设计、实施顺序和验收状态来源。后续实现、测试、真实页面验证和问题修正都应更新本文档，不在聊天记录或临时日志中维护另一套进度。面向使用者的实际开包、材料消耗和恢复说明见 [10x85+ Rolling Loop 使用与流程指南](10X85_ROLLING_LOOP_GUIDE_ZH.md)。
 
 目标是基于当前不限次数的 `10x 85+ Upgrade` 建立可持续滚卡流程，同时：
 
@@ -35,7 +39,7 @@
 
 ### 2.1 本轮范围
 
-- 动态发现并运行一个 `high-rated-x10` 类型的 Rolling Loop。
+- 动态发现并运行奖励最低评分恰好为 85 的 `high-rated-x10` Rolling Loop；10x84+ 等其它结果只保留为通用 Upgrade Loop。
 - 主 `10x85+` SBC 的启动、提交、奖励开启和重复卡回填。
 - 特殊卡恢复：`84+ TOTW Upgrade`。
 - 普通材料恢复：`Repeatable FUTTIES Provisions Upgrade`。
@@ -62,8 +66,8 @@
 - 球员数量来自 Challenge。
 - 目标评分来自 Challenge。
 - 特殊卡数量、group id 和 values 来自 Challenge。
-- 特殊卡资格必须使用 live `meetsRequirements(item)` 判断。
-- live matcher 缺失或失效时 fail closed。
+- 特殊卡资格优先使用 live `meetsRequirements(item)` 判断；当前 DAO 未提供该方法时，使用运行时注入的 EA item-group membership matcher。
+- 两种 live matcher 都缺失或失效时 fail closed。
 
 ### 3.2 Required Special
 
@@ -71,14 +75,15 @@
 
 已确认规则：
 
-- 无论位于 `Unassigned -> Storage -> Transfer -> Club` 的哪个来源，只能作为主 `10x85+` 的特殊卡槽使用。
+- `Unassigned -> Storage -> Transfer` 中命中 live eligibility matcher 的 TOTW/TOTS/FOF/FUTTIES 可以作为主 `10x85+` 的特殊卡槽；Transfer 仍是 duplicate signal，提交时解析为 Club/Storage 中真实可提交的对应副本。
+- Club 只扫描 TOTW 作为 Required Special。Club 中 TOTS/FOF/FUTTIES 以及其它命中 live matcher 的非 TOTW 卡必须保留，不得进入主特殊槽、普通槽或恢复 SBC。
 - 每套主 SBC 必须且只能使用一张 Required Special。
 - 不得作为主 SBC 的普通评分填料。
 - 不得投入 TOTW Upgrade、Provisions、85+ Pick 或 5x80+。
-- Required Special 87/88/89 不进入 Provisions 储备池。
+- Required Special 即使评分落在当前 Provisions Reserve 范围内，也不进入储备池。
 - 选择时遵循来源顺序，并在同一来源中优先重复、低评分和低保护成本球员。
 - 高于 Protection rating 的重复 Required Special 必须进入 Storage，不能因为能够满足特殊卡槽而提交。
-- Club 中非重复 TOTS/FOF/FUTTIES 应尽量保留；Club TOTW 可以作为特殊卡槽使用。实现应优先使用前序来源和低成本 TOTW，再考虑 Club 中高价值非重复活动卡。
+- Club TOTW 可以作为特殊卡槽使用；Club TOTS/FOF/FUTTIES 是硬保护，不存在最后回退。
 
 提交前、保存后和最终提交前都必须验证 Required Special 数量恰好为一，并再次执行 live matcher。
 
@@ -87,7 +92,7 @@
 `Other Special` 是特殊卡，但不满足当前 Required Special matcher。
 
 - Unassigned、Storage 和 Transfer 中评分不高于 Protection rating 的 Other Special 可以作为普通评分材料。
-- Club 中 Other Special 使用软保护：普通材料无法组成合法阵容时才进入最后候选层。
+- Club 中普通 Other Special 使用软保护：普通材料无法组成合法阵容时才进入最后候选层。Club TOTS/FOF/FUTTIES 不属于该回退层，始终硬保护。
 - Other Special 不能满足 Required Special 槽位。
 - 高于 Protection rating 的重复 Other Special 必须进入 Storage。
 
@@ -95,22 +100,24 @@
 
 `Regular` 指普通金、银、铜球员。主 SBC 和恢复 SBC 仍须遵守 FSU Lock、loan、concept、Evolution、active trade item 和其他既有安全过滤。
 
-### 3.5 Protection rating
+### 3.5 Automatic-use max rating
 
-现有 `Auto-pick below` 和 Rolling Loop 的 `Refill max rating` 合并为一个共享设置，UI 建议命名为 `Protection rating`。
+现有 `Auto-pick below` 和 Rolling Loop 的 `Refill max rating` 合并为一个共享设置，UI 命名为 `Automatic-use max rating`。该值使用包含边界的语义：`<=` 阈值可自动处理，`>` 阈值受保护。
 
 当设置为 `95` 时：
 
 - 评分 `<=95` 的普通候选可按 Pick 或 Rolling 策略处理。
 - 评分 `>95` 的重复卡视为受保护卡并进入 Storage。
 - Required Special 的角色隔离优先于评分阈值；低于阈值也不能作为普通材料。
-- 87/88/89 Provisions 储备规则优先于普通回填资格。
-- 该共享值只接入 Pick 和新 Rolling Loop；现有其他评分 SBC 保留自己的 `ratingSbcMaxCardRating`。
+- `rollingSurplusCraftingEnabled` 默认关闭。关闭时 85-89 的可用重复卡都优先进入下一套主 SBC，87/88 及可选 89 不再因为 Provisions Reserve 身份占用 Storage；主阵缺料、Required Special 缺失或真实 Storage 压力时仍可执行恢复 SBC。开启后才恢复主动余量制作：Provisions Reserve 默认是 87/88，可选扩展到 87/88/89；本轮 `10x85+` 奖励若自身凑齐四张 Reserve，则立即做一套 Provisions，余数进入 Storage；主阵提交后的维护阶段会把 Storage 中完整 `87/88 x4` 批次做成 Provisions，并把 `<=86` 和 89 的目标余量用于 TOTW Upgrade。
+- 该共享值只接入 Pick 和新 Rolling Loop；现有其他评分 SBC 保留自己的 `ratingSbcMaxCardRating`。Rolling 主阵和恢复阵不得再被普通评分 SBC 的单卡上限压低。
 - 旧 Pick 阈值必须迁移，不能静默重置用户设置。
+
+主面板不再并排显示多个相似阈值。首页仅显示 `Selection policy` 摘要，弹窗按作用域分为：普通非评分 SBC Gold 上限、普通评分 SBC 单卡上限、Rolling/Pick 共享自动使用上限，以及 Pick 的 `Automatic`/`Review protected` 模式。
 
 ## 4. 已确认产品决策
 
-1. 87/88/89 储备优先于“不高于 Protection rating 即可回填”。Required Special 例外，只能进入特殊卡槽。
+1. 只有显式开启 `rollingSurplusCraftingEnabled` 时，当前配置的 Provisions Reserve 才优先于“不高于 Protection rating 即可回填”；默认范围为 87/88，可选 87/88/89。关闭时这些评分段的可用重复卡与其它 85-89 重复卡一样优先回填主阵；Required Special 始终只能进入特殊卡槽。
 2. 高于 Protection rating 的重复特殊卡必须存入 Storage。
 3. Required Special 在任何来源中都不能作为普通材料或恢复 SBC 材料。
 4. Storage 中不高于 Protection rating 的 Other Special 和普通卡可以合理消耗。
@@ -125,10 +132,10 @@
 
 | 材料 | Unassigned | Storage | Transfer | Club |
 | --- | --- | --- | --- | --- |
-| Required Special | 仅主 SBC 特殊槽，每套最多一张 | 仅主 SBC 特殊槽，每套最多一张 | 仅主 SBC 特殊槽，每套最多一张 | 仅主 SBC 特殊槽；优先 TOTW，尽量保留非重复 TOTS/FOF/FUTTIES |
-| Other Special `<= Protection rating` | 可作普通材料 | 可作普通材料 | 可作普通材料 | 软保护，普通候选不足时最后使用 |
+| Required Special | 仅主 SBC 特殊槽，每套最多一张 | 仅主 SBC 特殊槽，每套最多一张 | 仅主 SBC 特殊槽，每套最多一张；按 duplicate signal 解析 | 仅 TOTW 可进入主 SBC 特殊槽；TOTS/FOF/FUTTIES 硬保护 |
+| Other Special `<= Protection rating` | 可作普通材料 | 可作普通材料 | 可作普通材料 | 普通 Other Special 软保护；TOTS/FOF/FUTTIES 硬保护 |
 | Regular `<= Protection rating` | 优先处理重复 | 可作普通材料 | 可作普通材料 | 可作普通材料，仍遵守 FSU 过滤 |
-| 非 Required Special 87/88/89 | 优先进入 Provisions 储备 | 优先进入 Provisions 储备 | 优先进入 Provisions 储备 | 优先进入 Provisions 储备，Other Special 继续遵守 Club 软保护 |
+| 非 Required Special 且评分位于可配置 Reserve 范围 | 默认与其它 `<= Protection rating` 材料相同并优先回填主阵；开启余量制作后，完整四张组做 Provisions、余数进 Storage | 默认可作主阵材料；开启余量制作后，87/88 完整组做 Provisions，`<=86` 和 89 可进入 TOTW 维护 | 默认可作主阵材料；开启余量制作后保留为 Provisions 储备 | 默认可作主阵材料但 Other Special 仍遵守 Club 软保护；开启余量制作后保留 Reserve |
 | 重复卡 `> Protection rating` | 必须存入 Storage | 保持受保护 | 不作为回填材料 | 不作为回填材料 |
 
 任何表格规则都不能绕过以下已有保护：
@@ -150,6 +157,8 @@ PREFLIGHT
 -> OPEN_X10
 -> CLASSIFY_OPENED_ITEMS
 -> RESOLVE_PROTECTED_STORAGE
+-> RECOVER_CURRENT_PACK_RESERVE_IF_BLOCKING
+-> DRAIN_PENDING_RECOVERY_REWARDS
 -> PLAN_PRIMARY_SQUAD
 -> RECOVER_NORMAL_FODDER_IF_REQUIRED
 -> RECOVER_REQUIRED_SPECIAL_IF_REQUIRED
@@ -207,6 +216,16 @@ selectInventoryPlayers({
 - 指定角色要求最小和最大数量均为一。
 - 同一张卡不能同时满足普通评分材料和 Required Special 两种角色。
 
+当前实现的角色使用 `constraintId` 或 `constraintIndex` 指向 `rating-model` 中的动态 eligibility constraint。live EA matcher 或运行时 EA item-group adapter 只在候选构建阶段针对实时对象执行一次，纯 Solver 接收对应布尔向量；提交前 validator 再对保存后的实时对象执行同一 matcher。无法解析 matcher 时返回 `LIVE_REQUIREMENT_UNAVAILABLE`。
+
+`protectionPolicy` 当前支持：
+
+- `reserveRatings`：排除非角色的 Provisions 储备评分；当前 Rolling 默认传入 87/88，用户启用 89 时传入 87/88/89。
+- `softProtectSpecialPiles`：把指定 pile 的 Other Special 放入最后候选层，当前 Club 使用该策略。
+- `allowSoftProtectedFallback`：普通候选不可行时是否允许使用软保护层，默认允许。
+- `allowOtherSpecialAsOrdinary`：是否显式放宽旧的特殊卡总量策略；仅 Rolling role-aware 调用可启用。
+- `liveRequirementsAvailable`：上游 metadata/matcher 健康门禁；为 `false` 时不进入配方规划。
+
 不传新字段时，现有评分 SBC 行为必须保持不变。
 
 ### 7.2 求解目标顺序
@@ -221,6 +240,10 @@ selectInventoryPlayers({
 8. 使用稳定身份进行确定性 tie-break。
 
 Solver 不预设“84 阵应该平均使用 83/84”。如果已有高评分重复卡，它可以自然得到“一两张高分加多张低分”的最低合格组合；如果平均组合成本更低，也可以选择平均组合。
+
+评分规划不枚举 Club/Storage 中的卡实例组合。运行时先对候选做一次安全过滤并建立实时评分直方图，再把每档数量截断到当前阵容最多还需要的人数。配方规划只处理实际存在的 `47..99` 评分档、必选重复卡评分、阵容人数和目标评分；库存从数百张增长到数千张不会扩大配方状态图。相同截断直方图使用有界 LRU 缓存，连续 Rolling 周期在关键评分桶未跌破需求时直接复用配方。
+
+旧的 `maxSearchNodes`、`maxSearchMs` 和 `yieldEveryNodes` 不再参与运行。配方先固定评分向量，再按 requirement/exclusive role/pile 物化具体卡，并在保存前后继续执行 live validator。
 
 ### 7.3 不可行原因
 
@@ -243,16 +266,17 @@ Solver 不预设“84 阵应该平均使用 83/84”。如果已有高评分重�
 
 1. 高于 Protection rating 的重复卡：受保护，等待 Storage。
 2. Required Special：进入专用特殊卡队列，只能每套主 SBC 消耗一张。
-3. 非 Required Special 87/88/89：进入 Provisions 储备。
-4. 其他不高于 Protection rating 的重复卡：下一套主 SBC 的 requiredItems。
+3. 非 Required Special 且位于当前 Reserve 范围：普通库存进入 Provisions 储备；刚开启的 `10x85+` 主包每凑齐四张就立即做一套 Provisions，完整组不进入 Primary，不足四张的余数进入 Storage。
+4. 其他不高于 Protection rating 的主包重复卡：下一套主 SBC 的 requiredItems；只有评分超过目标时才按评分从高到低逐张放宽，并将被替换的卡送入 Storage。
 5. 非重复卡：沿现有 Pack settlement 路由。
 
 ### 8.2 Storage 有空间
 
 - 受保护高分重复卡进入 Storage。
 - 当前轮用不到的 Required Special 进入 Storage。
-- Provisions 储备可进入 Storage，并由账本保留角色。
+- 只有开启余量制作或发生必要恢复时，Provisions 储备才按该角色进入 Storage；默认关闭时可用的 85-89 重复卡优先回填主阵。
 - 不要求把即将提交的普通重复卡先移动到 Storage。
+- 默认关闭余量制作时，主包 85-89 可用重复卡全部保持 required/preferred 身份并优先进入下一套主 SBC。若阵容超过目标评分，按 `89 -> 88 -> 87 -> 86 -> 85` 从高到低逐张放宽，被放宽卡退出 required/preferred 并进入本次规划的 protected 集合，使 Solver 换入 Storage 低分卡，主阵提交后再把放宽卡移入 Storage。开启余量制作时，当前配置的完整 Reserve 组才优先进入 Provisions，余数进入 Storage。
 
 ### 8.3 Storage 无空间
 
@@ -260,12 +284,36 @@ Solver 不预设“84 阵应该平均使用 83/84”。如果已有高评分重�
 
 1. 使用当前 Unassigned 普通重复卡完成主 SBC。
 2. 主 SBC 补卡优先从 Storage 选择可消耗材料，主动释放位置。
-3. 从 Unassigned/Storage 直接执行 Provisions，不要求先移动 87/88/89。
+3. 从 Unassigned/Storage 直接执行 Provisions，不要求先移动当前配置的 Reserve。
 4. 立即处理 Provisions 产生的重复 Gold。
 5. 多张 Required Special 重复卡同时阻塞时，可以预做多套主 SBC，每套只使用一张，并暂存奖励包而不继续开包。
 6. 仍无法为受保护卡腾出位置时安全停止。
 
 不允许将第二张 Required Special 塞入同一主 SBC，也不允许将它降级为 Provisions 或普通材料。
+
+### 8.4 95+ 双阵 Storage sink
+
+当紧急 Provisions 无法释放足够空间时，Rolling 可以使用动态扫描得到的 `1 of 3 95+ FOF or FUTTIES T1-T3 Player Pick` 作为第二级 Storage sink。该能力是可选 capability，缺失、歧义或规则变化不会阻止 Rolling 启动，只会让 Storage 压力路径保持 `PROTECTED_STORAGE_BLOCKED`。
+
+该恢复路径还受用户 opt-in 控制。`Selection Policy -> Rolling -> Use 95+ Storage pressure Pick` 默认关闭；旧版本配置缺少该字段时也迁移为关闭。关闭时仍执行只读扫描并显示 capability 状态，但 workflow 不会规划、保存或提交 88/89 阵。只有动态 capability 唯一解析且用户显式启用后，才允许进入下述提交门禁。
+
+动态身份合同：
+
+- 唯一 Player Pick 奖励，`1 of 3` 且最低评分为 `95+`。
+- Set 或奖励名称同时包含 `FOF`、`FUTTIES` 和 `T1-T3` 身份。
+- 恰好两个 Challenge，live 评分分别为 88 和 89；Set、reward 和 Challenge 必须有稳定身份。
+- 不写死当前 Set、Challenge 或 reward resource ID；普通 Pick discovery 仍不接受评分阵，该能力使用 Rolling 专用只读 parser。
+
+提交门禁：
+
+1. 先检查并处理已有待领取 Pick。
+2. Challenge 可以是 89/88 都未完成，也可以是 89 已完成、只剩 88；后者必须作为可恢复部分状态继续，不能要求清空状态重来。
+3. 89 阵独立规划：当前主包中不高于 `Automatic-use max rating` 的可用 Unassigned duplicate signal 全部设为必选，其余位置只能由 Storage 补齐；不从 Transfer 或普通 Club 取卡。
+4. 89 阵达到最低评分即可提交，不为了精确 89 换出需要清理的 Unassigned；提交后立即对账、释放已消费 signal，并重新读取两个 Challenge 的 live 完成状态。
+5. 88 阵独立规划：先尝试纯 Storage；确实不可行时依次尝试加入一、二、三张不高于上限的安全普通 Club 卡。不得使用 Club Other Special、Required Special 或受保护卡。
+6. 89 已提交但 88 暂不可行时返回 `STORAGE_SINK_88_DEFERRED` 作为真实进展，允许 Rolling 继续；下一次 Storage 再次高位触发时只规划剩余 88 阵，不重复提交 89。
+7. 每阵计划必须在提交前验证实际 Storage 释放量。89 阵覆盖提交后仍待存的卡；88 阵还必须为 Pick 结果可能出现的重复卡额外预留一格。
+8. 两阵完成后先重新路由原待存卡，再立即领取 Pick，复用现有自动选择、Reward Alert、Unassigned 清理和 Inventory Ledger 对账。
 
 ## 9. 恢复策略
 
@@ -279,7 +327,8 @@ Solver 不预设“84 阵应该平均使用 83/84”。如果已有高评分重�
 4. 使用 Club 中低成本 TOTW。
 5. 打开已存在的 TOTW Upgrade 奖励。
 6. 动态定位并完成一次 `84+ TOTW Upgrade`。
-7. 上述恢复不可行时，才允许主 Solver 将 Club 中非重复 TOTS/FOF/FUTTIES 作为最后的特殊槽候选；仍按最低成本选择。
+
+Club 中 TOTS/FOF/FUTTIES 不参与恢复，也不存在主 Solver 的最后回退；前六步均不可行时返回 `REQUIRED_SPECIAL_SHORTAGE`。
 
 TOTW Upgrade 自身的普通材料池必须排除全部 Required Special。新产出的 TOTW 加入 Required Special 队列。
 
@@ -290,19 +339,31 @@ TOTW Upgrade 自身的普通材料池必须排除全部 Required Special。新�
 触发条件：
 
 - 主 SBC 因候选数量或评分不足而不可行。
-- 非 Required Special 87/88/89 达到常规批量阈值，默认八张。
+- 当前主 `10x85+` 奖励中位于当前 Reserve 范围的非 Required Special 重复卡自身凑齐四张并阻塞 Unassigned。
 - Storage 压力阻止受保护卡或 Required Special 安全存储。
 
 选择策略：
 
-- 优先 87，再到 88、89。
-- 不足四张时可以使用不高于 Protection rating 的 90-95。
+- 严格限制在当前配置的 Reserve 范围，默认 87/88，可选 87/88/89；优先低评分。
+- Reserve 不足一套时不放宽到 90-95，返回材料不足并交由上层重新规划。
 - Required Special 永远排除。
-- Storage 中不高于阈值的 Other Special 可以使用。
+- Storage 中位于 Reserve 范围的 Other Special 可以使用。
 - Club Other Special 保持最后候选软保护。
 - 不消耗下一套主 SBC 唯一可用的 Required Special，因为它根本不进入候选池。
 
-常规触发默认攒够八张后批量完成两套；阵容阻塞或 Storage 压力下，满足单套实时需求即执行一次。
+默认关闭 `rollingSurplusCraftingEnabled` 时，不执行主包 `duplicate-reserve` Provisions，也不执行主阵后的 Storage 维护；85-89 的可用重复卡直接进入主阵候选。显式开启后，至少一套主 SBC 成功提交并完成账本对账，Storage 维护才允许逐套消耗 Storage 中完整的 `87/88 x4`，这些维护奖励默认留在 My Packs；当前主包完整四张 Reserve 也可即时制作 Provisions。无论开关状态，主 Solver 明确缺料时才处理已有 Provisions/5x80+ 奖励；已有 Provisions 按 `rollingShortageProvisionsPackLimit` 分批处理，默认每次缺料最多两包并在每批后重新规划，仍缺料才制作新的 Provisions。Required Special 缺失和真实 Storage 压力恢复同样保留。
+
+### 9.2.1 主阵后的 Storage 维护
+
+该阶段仅在 `rollingSurplusCraftingEnabled=true` 时运行。每次只提交一个恢复 SBC，刷新账本后重新规划，不复用旧 Storage 快照：
+
+1. Storage 中非 Required Special、未受保护的 87/88 每满四张，优先完成一套 Provisions；只允许从 Storage 取这四张，奖励默认保留。
+2. 87/88 不足一套后，统计 Storage 中非 Required Special、未受保护的 `<=86` 和 89。至少达到一套阵容人数才尝试 TOTW 维护，避免仅为一张低分卡频繁制作 TOTW。
+3. TOTW 维护至少强制消耗一张上述 Storage 卡，并把全部目标 Storage 卡设为首选；允许从 Transfer/Club 取不高于 89 的安全低分卡补成准确 84 阵。Storage 中其它评分段保持保护，87/88 Reserve 和全部 Required Special 不得进入该阵。
+4. 已存在的 TOTW 奖励先逐个打开；维护提交产生的新 TOTW 奖励立即打开。若评分规划不可行，本阶段安静结束并继续主循环，不放宽保护。
+5. 只有 `PROTECTED_STORAGE_BLOCKED` 可以进入紧急 Storage 恢复。`OPENED_DUPLICATE_NOT_MATERIALIZED` 等物化或路由错误必须原样停止，禁止误触发 Provisions。
+
+所有 Rolling 奖励包查找只接受 EA `My Packs` Repository 中的真实实例。Store catalog 缓存只用于展示和发现，不能在真实实例已消费后以同 ID 再次被开启；同 ID 有多个真实奖励包时逐个开启直到 Repository 中不再存在。
 
 ### 9.3 Provisions 重复 Gold 清理
 
@@ -378,7 +439,7 @@ Dry Run 和 Live Run 使用同一规划器和状态机，只替换副作用执�
 - duplicate 状态。
 - Required Special eligibility。
 - Other Special/Regular 分类。
-- 87/88/89 Provisions 储备资格。
+- 当前 Provisions Reserve 范围资格，默认 87/88，可选 87/88/89。
 - FSU 和 Runner 保护状态。
 
 初始索引只能读取当前已加载的 EA/FSU Repository。禁止为了统计主动触发几十页 Club 网络扫描。
@@ -415,12 +476,12 @@ Runner 已确认的每次操作都产生 `InventoryDelta`：
 账本按 `inventoryVersion` 缓存以下派生值：
 
 - `specialSlots`：当前允许用于主特殊槽的 Required Special 数量。
-- `directCycles`：在克隆账本上重复运行当前主 Solver 后，当前策略可以直接完成的主 SBC 数量，不假设未来奖励。
+- `directCycles`：实时运行时保持未知；准确数量必须重复运行主 Solver，不能为了 UI 阻塞 Workflow。
 - `provisionsBatches`：当前材料可完成的 Provisions 数量。
-- `totwRecoveries`：独立评估当前普通材料可完成的 TOTW Upgrade 数量。
+- `totwRecoveries`：实时运行时保持未知；真正缺 Required Special 时由 Workflow 只规划当前一次恢复。
 - `storageUsed/storageCapacity`。
 
-这些值会竞争相同材料，不能相加。`directCycles` 表示当前策略的确定性直接能力，不表示随机奖励之后的总循环上限。
+已知资源值会竞争相同材料，不能相加。主阵和 TOTW 的准确可行性只在 Workflow 到达对应决策点时求解，不根据 Telemetry 预测随机奖励之后的总循环上限。
 
 Runner 自己造成的变化应在对应 EA receipt 确认后实时反映；外部手动变化最迟在下一次提交校验或周期对账时发现。
 
@@ -434,8 +495,8 @@ Telemetry 位于现有主面板的 Running 状态下方、最新日志上方，�
 Running - 10x85+ Rolling       Cycle 4 / No limit
 Building 10x85+ squad
 
-Special ready       7    Direct cycles      4
-Provisions          3    TOTW recoveries    2
+Special ready       7    Direct cycles       -
+Provisions          3    TOTW recoveries     -
 Storage        83 / 100  [===============-----]
 ```
 
@@ -446,6 +507,7 @@ Storage        83 / 100  [===============-----]
 - Storage 低于 80% 使用中性色，80%-94% 警告色，95% 以上危险色。
 - 容量标题带 tooltip，说明这些路径共享库存且数字不可相加。
 - 初始化或重新计算时保留上次可信值并显示 `Refreshing`，未知值显示 `-`，不显示误导性的零。
+- `Direct cycles` 和 `TOTW recoveries` 显示 `-`。这两项无法仅靠数量准确推导，Telemetry 不再克隆 4,000+ 卡库存并反复运行评分 Solver；真实 Workflow 到达主阵或 TOTW 恢复决策时仍会执行一次完整规划。
 - Desktop 面板为 Telemetry 预留稳定高度；Mobile Run 视图改为内容驱动的受限高度。
 - icon-only 模式隐藏 Telemetry，避免在 EA 页面形成额外遮挡。
 - 运行结束后最终值进入 Recap，运行 Telemetry 隐藏。
@@ -539,9 +601,10 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 | 模块 | 计划职责 |
 | --- | --- |
 | `src/config` | Rolling policy、动态 capability 绑定、默认 quantity 和设置迁移 |
-| `src/domain` | item role、ledger snapshot/delta、telemetry snapshot 和 stop reason 合同 |
+| `src/domain` | item role、ledger snapshot/delta 和 stop reason 合同 |
+| `src/runtime/telemetry.js` | 有界 Telemetry snapshot 和 animation-frame 合并发布 |
 | `src/selection` | required/preferred/protected/exclusive role 评分求解 |
-| `src/workflows/high-rated-rolling.js` | 纯状态机编排，不访问运行时全局 |
+| `src/workflows/rolling-upgrade.js` | 纯状态机编排，不访问运行时全局 |
 | `src/unassigned` | 接受配置化恢复链和保留角色，不认识具体 SBC 名称 |
 | `src/reward` | 有界流式 Recap 聚合 |
 | `src/ui/runtime-telemetry.js` | Telemetry 纯渲染和响应式状态 |
@@ -580,8 +643,9 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 - 主 SBC 恰好选择一张 Required Special。
 - 多张 Required Special 重复卡不会进入同一主阵容。
 - TOTW、Provisions、Pick 和 5x80+ 都排除 Required Special。
-- Required Special 87/88/89 不进入 Provisions 储备。
-- Other Special 在 Storage 可用，在 Club 作为最后候选。
+- Required Special 即使位于当前 Reserve 范围也不进入 Provisions 储备。
+- Other Special 在 Storage 可用；Club 普通 Other Special 可作为最后候选，但 Club TOTS/FOF/FUTTIES 始终硬保护。
+- Required Special 来源规则为 Unassigned/Storage/Transfer 接受 live matcher，Club 只接受 TOTW；候选过滤、ledger 分类和提交前验证结果一致。
 - 高评分重复卡受 Protection rating 保护。
 - 高分重复必用卡配低分材料可以得到最低合格阵容。
 - 平均评分方案更合理时不会强行使用额外高分卡。
@@ -591,6 +655,12 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 
 - 有现成主包的正常循环。
 - 无主包时从库存启动一次。
+- 库存已有两套以上 Reserve 时仍先规划并提交可行主阵，不在启动阶段主动做 Provisions。
+- 可行主阵不会因 My Packs 中存在历史 Provisions/5x80+ 奖励包而延迟或被抢占。
+- 主阵明确缺料后才进入 leftover recovery。历史 Provisions 默认每批最多开启 2 包，可在 Selection Policy 的 `Provisions packs per shortage` 中配置为 1-30；每批结束必须重新规划主阵，只有仍然明确缺料时才开启下一批。每个 Provisions 包产生的重复 Gold 在继续恢复前走 85+ Pick/5x80+ 清理链；历史奖励耗尽且主阵仍缺料时，才新做一套 Provisions。
+- 缺料或紧急恢复刚提交的 Provisions 以及 5x80+ 只由显式 `pendingRecoveryReward` 立即领取，不与历史遗留包扫描混用。`duplicate-reserve` 和 Storage-pressure Provisions 默认保留奖励到主阵缺料时再由 batched leftover recovery 开启；用户可显式恢复 duplicate-reserve 奖励立即开启。TOTW 恢复保持逐包决策：一次只开一个已有 TOTW 奖励并重新规划，不受 Provisions 批量设置影响。
+- 恢复奖励中的 Reserve 不会被误判为本轮主包的 `duplicate-reserve`。
+- Store catalog 中同 ID 的已消费包不会被当作真实 My Packs 实例再次开启。
 - 一张和多张 Required Special 重复卡。
 - 缺 Required Special 后打开现有 TOTW reward。
 - 无 TOTW reward 后提交 TOTW Upgrade。
@@ -655,7 +725,7 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 
 ### RL-0：基线与 Characterization
 
-状态：`Not started`
+状态：`Complete`
 
 - 锁定现有 high-rated x10 discovery、rating selection、Pick threshold、Unassigned 和 recap 行为。
 - 为主流程及恢复流程建立最小 fixture。
@@ -664,9 +734,38 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 
 验收：相关 characterization tests 和完整 `npm run verify` 通过。
 
+RL-0 调用点审计（2026-08-16）：
+
+| 能力 | 当前事实来源 | 运行时接线 | 主要回归面 |
+| --- | --- | --- | --- |
+| high-rated xN 发现 | `src/config/upgrade-discovery.js`、`src/config/upgrade-policies.js` | `src/userscript-entry.js` 的 Dynamic SBC scan、activity merge 和 Challenge materialization | Dynamic Pick、TOTW、2x84+、84x10 和其他 high-rated xN |
+| 评分模型与候选 | `src/selection/rating-model.js`、`rating-candidates.js`、`rating.js`、`inventory.js` | entry 的 candidate bridge、FSU/EA 实体转换和 `fillSbcSquadRatingOptimized()` | 所有 rating-constrained SBC、FSU 保护、duplicate signal 和 pile priority |
+| Pick 阈值 | `src/config/runtime-options.js`、`loop-schema.js` | 主面板 bindings、Builder 和 Player Pick redemption | 全部静态/动态 Pick 和旧本地设置迁移 |
+| Unassigned | `src/unassigned/plan.js`、`resolve.js` | entry 的 `resolveRuntimeUnassigned()`、配置化 overflow resolvers 和 Pack settlement | 所有开包、Daily、Provision、Batch Open 和恢复路径 |
+| 普通 Loop Recap | `src/reward/loop-recap.js`、`src/ui/loop-recap.js` | entry 的 session receipt recorder、`beginLoopRecapSession()` 和 `finalizeLoopRecap()` | 普通 Loop 开包、价格补全、FUTBIN 和 Reward Alerts |
+| 发布产物 | `src/userscript-entry.js` 和上述模块 | `scripts/build-userscript.mjs` | 根目录/`dist` userscript 一致性 |
+
+RL-0 锁定的当前行为和已确认缺口：
+
+- 不限次数的普通 dynamic high-rated x10 当前仍投影为 `default:3`、`min:1`、`max:50`，不支持 `SBC completion=0`。
+- 普通 dynamic high-rated x10 当前默认 `openRewardPacks:false`，缺料恢复仍绑定 `rare-gold-material-upgrade`，不能表达 Rolling 的 Provisions 链。
+- Pick `autoPickThreshold` 与 rating SBC 的 `ratingSbcMaxCardRating` 当前相互独立。
+- Rating Solver 支持 EA constraint、最大特殊卡数量和 pile priority，但没有 required/preferred/protected item 以及 exclusive role 合同。
+- Generic Unassigned Resolver 已支持有序回调、递归保护和进度指纹；Storage 满且未注入 resolver 时保持 blocked。Rolling 应注入策略，不复制 Resolver。
+- Generic Loop Recap 当前保留全部 receipt、row 和 item 对象。Rolling 必须 opt-in 使用有界聚合，不能改变普通 Loop 默认 Recap。
+- 当前主面板没有结构化 Runtime Telemetry；运行状态只能通过日志和 Mobile run summary 观察。
+
+新增基线证据：
+
+- `tests/fixtures/challenges/rolling-10x85-baseline.json`
+- `tests/contracts/rolling-upgrade-baseline.test.js`
+- 覆盖动态策略、Pick/评分阈值独立性、特殊条件与 pile priority、Storage blocked 和普通 Recap 全量保留。
+
+实施结果（2026-08-16）：没有修改运行时行为。新增 1 份 fixture 和 5 个跨模块 characterization tests；完整 `npm run verify` 通过，169 个测试文件、1,126 个测试全部成功，Runner/FSU 生成产物和版本检查通过。
+
 ### RL-1：配置、动态 capability 和 UI 设置合同
 
-状态：`Not started`
+状态：`Complete`
 
 - 定义 Rolling strategy/policy/schema。
 - 动态绑定主、TOTW、Provisions、Pick 和 5x80+ capability。
@@ -677,9 +776,21 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 
 验收：schema、discovery、migration、quantity 和 command tests 通过；旧 Profile 仍可加载。
 
+实施结果（2026-08-16）：
+
+- 新增专用 `rollingUpgrade` strategy、schema 和 dispatch slot；动态生成的 Rolling Loop 使用独立 ID，不修改或替换现有通用 high-rated x10 Loop。
+- 只对实时扫描确认 `high-rated-x10`、10 个奖励且恰好一个 Required Special 槽的主 SBC 生成 Rolling Loop。
+- 主 SBC、TOTW、Provisions、`1 of 3 85+ Player Pick` 和 `5x80+` 均由本次扫描的 metadata 动态绑定，不包含静态 Set、Challenge、Pack 或 Pick resource ID。
+- `Repeatable FUTTIES Provisions Upgrade` 从 `PLAYER_MIN_OVR` 和实时人数解析；`5x80+` 使用独立 `5x80-upgrade` family，避免被其他更高奖励的 Gold material sink 替换。
+- 运行时设置以 `protectionRating` 为规范字段；旧 `autoPickThreshold` 继续读取并迁移，现有 rating SBC 上限不变。
+- `runtimeQuantity.allowZero` 只允许 `rollingUpgrade` 使用；Rolling 的 `SBC completions` 默认 `0`，通用 Loop 仍保持最小值 `1`。
+- 选择 Rolling 时仅在 selection command 中默认勾选 Open rewards；普通 render 不覆盖用户随后取消的值。启动预检会先拒绝关闭奖励的请求。
+- Rolling 仍为 `hidden/MVP`，Builder 不提供新建入口，`rollingWorkflowEnabled:false` 使其在 RL-4 状态机落地前无法执行副作用。
+- 新增 RL-1 unit tests，并更新 discovery、schema、migration、quantity、command、Builder、dispatch 和基线测试。完整 `npm run verify` 通过，170 个测试文件、1,136 个测试全部成功。
+
 ### RL-2：角色化评分选材
 
-状态：`Not started`
+状态：`Complete`
 
 - 扩展通用 SelectionPlan 合同。
 - 实现 Required Special exclusive role 和 exact-one validator。
@@ -689,9 +800,19 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 
 验收：新增 selection tests、现有 differential tests、全部 rating SBC tests 和 `npm run verify` 通过。
 
+实施结果（2026-08-16）：
+
+- 通用 rating selection 新增可选 `requiredItems`、`preferredItems`、`protectedItems`、`exclusiveRoles`、`maxOrdinaryRating` 和 `protectionPolicy`；字段全部缺失时直接走原有路径。
+- `exclusiveRoles` 可通过 `constraintId`/`constraintIndex` 复用候选构建时执行的 live EA matcher；求解状态同时维护角色最小/最大数量，Required Special 无法作为第二张普通材料进入同一阵容。
+- `requiredItems` 转换为 exact-one item role；`preferredItems` 只影响同一最低评分向量的确定性选择；`protectedItems`、Protection rating 上限和当前非 Required Special Reserve 在评分建桶前分类。
+- Club Other Special 默认进入软保护层；只有普通候选不可行且显式允许 fallback 时才使用。`allowOtherSpecialAsOrdinary` 只在 role-aware policy 明确启用时放宽旧的特殊卡总量策略。
+- 保存前后的 validator 支持同一 exclusive role min/max 复核。live matcher/metadata 缺失时 fail closed。
+- 新增五类 Solver 结构化失败原因和仅含数量、评分直方图、最高可达评分及角色汇总的诊断；`PROTECTED_STORAGE_BLOCKED` 仍由 RL-4 开包后 Storage 路由产生，不由纯 Solver 伪造。
+- userscript bridge 已验证 live `PLAYER_RARITY_GROUP` matcher、exact-one Required Special、Club Other Special 软保护和 fallback；Rolling workflow 仍保持 `rollingWorkflowEnabled:false`，本阶段不执行 SBC 或开包副作用。
+
 ### RL-3：Inventory Ledger 和能力计算
 
-状态：`Not started`
+状态：`Complete`
 
 - 建立初始本地库存索引。
 - 定义 InventoryDelta 和 mutation confirmation 边界。
@@ -702,21 +823,44 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 
 验收：合成大库存测试、mutation/reconciliation tests 和原版/Local FSU compatibility tests 通过。
 
+实施结果（2026-08-16）：
+
+- 新增纯内存 `Inventory Ledger`，按 item、definition、pile 和 rating 建立索引，并保存 Required Special、Other Special、Regular、Provisions reserve 和 protection 分类。10,000 张合成 Club 球员的本地索引测试稳定低于一秒，索引过程不调用网络。
+- 新增不可变 `InventoryDelta` contract 及 Pack、Move、SBC Submission、Player Pick、Capacity 五类 projector。confirmed delta 在全部 identity/pile 预检通过后原子更新；ambiguous delta 不修改库存并要求对账。
+- 容量同时支持 EA confirmed observation 和 pile 增量更新；未知容量保持 `null`。外部 added/removed/moved/changed/capacity drift 均可检测并重建索引。
+- 新增 coordinator readiness 门禁。原版/未检测到 FSU 直接使用 EA 本地 Repository；ready FSU 正常使用；loading/not-ready fail closed；provisional FSU 允许索引，但提交前按 item ID + definition ID 定向验证 Club 卡及关键属性。
+- confirmed Runner mutation 实时更新账本；歧义/不匹配 mutation 和显式 anomaly 立即执行本地对账；每十次主 SBC 自动对账。诊断事件最多保留 100 条且不包含完整卡对象。
+- 新增按 ledger 实例、`inventoryVersion` 和 policy key 缓存的 capability calculator。真实页面验证发现，即使限制为 4 套，克隆 4,000+ 卡库存并反复运行评分 Solver 仍可占用 5-49 秒，因此实时计算已收敛为 classified ledger 的 O(n) 计数；`directCycles` 与 `totwRecoveries` 保持未知。
+- `openPackTransaction()` 和 `submitSbcAttempt()` 新增 opt-in receipt/result observer；Player Pick 复用现有一次性 confirmation callback，Move/Capacity 通过统一 mutation observer adapter 接入。observer 未注入或失败时，旧 Loop 行为和已确认 EA 结果保持不变。
+- Rolling workflow 仍保持 `rollingWorkflowEnabled:false` 和 hidden/MVP；普通 Loop 不创建 coordinator，本阶段不增加运行时扫描或执行副作用。
+- 新增 30 项测试，完整 `npm run verify` 通过：176 个测试文件、1,177 项测试；Runner `v0.7.91`、FSU Local `v26.09.6`、root/dist userscript 和 release assets 均已重建并校验。
+
 ### RL-4：主 Rolling 状态机
 
-状态：`Not started`
+状态：`Complete`
 
 - 实现 bootstrap、主包开启、分类、主阵容提交和重复循环。
-- 处理普通重复、87/88/89 储备、Required Special 队列和高分 Storage。
+- 处理普通重复、当前配置的 Provisions Reserve、Required Special 队列和高分 Storage。
 - 支持多张 Required Special 每套只消耗一张。
 - 支持正数 completion、零上限、Stop 和 Dry Run。
 - 不在本阶段自动制作恢复 SBC；不可行时返回结构化 reason。
 
 验收：主路径、Storage 压力、Stop、Dry Run 和无进展测试通过。
 
+实施结果：
+
+- 新增无 EA/FSU/DOM 依赖的 `runRollingUpgradeWorkflow()`，显式编排 preflight、本地库存索引、已有包/库存 bootstrap、开包、分类、Storage 路由、主阵规划、提交和对账阶段。
+- `maxCompletions:0` 保持无完成次数上限，但受 Stop 和 10,000 次内部安全边界保护；正数只统计主 SBC 提交。
+- Dry Run 与 Live 共用同一状态机和通用评分 Solver；已有主包时停在未知奖励边界，无包时可完成当前库存主阵规划后停在提交边界。
+- 新增 Rolling 库存 policy：高于 Protection rating 的重复卡和额外 Required Special 先进入 Storage；普通库存中的当前配置评分仍是 Provisions reserve，默认 87/88。后续 RL-8 实机修正进一步规定：当前主包完整四张 Reserve 立即进入 Provisions，余数进 Storage，其它可用主包重复卡进入下一套主 SBC。Storage 容量未知或不足时返回 `PROTECTED_STORAGE_BLOCKED`。
+- 动态 `PLAYER_RARITY_GROUP` matcher 作为 exact-one exclusive role 传入通用 Solver。当前 Unassigned 普通重复作为 required item，其他普通重复作为 preferred item，Club Other Special 保持软保护。
+- 每次 Rolling 创建独立 Inventory Ledger coordinator；开包后本地对账，提交前验证 item refs，provisional FSU Club 卡继续执行 EA 定向验证，confirmed 主提交更新账本并每十次对账。
+- 动态 Rolling 配置已设置 `rollingWorkflowEnabled:true`，但仍为 `hidden:true`、`mvp:true`。普通 Loop 不创建 coordinator，也不接入 Rolling selection policy。
+- RL-4 不要求恢复 capability 可用，也不会自动提交 TOTW、Provisions、85+ Pick 或 5x80+；主阵不可行时保留 Solver 的 `REQUIRED_SPECIAL_SHORTAGE`、`PLAYER_COUNT_SHORTAGE`、`SQUAD_RATING_SHORTAGE`、`RESERVED_FODDER_BLOCKED` 等结构化原因，恢复编排留给 RL-5。
+
 ### RL-5：TOTW、Provisions 和 Gold sink 恢复
 
-状态：`Not started`
+状态：`Complete`
 
 - 接入 TOTW reward/Upgrade 恢复。
 - 接入 Provisions 常规、紧急和 Storage 压力触发。
@@ -726,9 +870,22 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 
 验收：每条恢复链、嵌套重复、缺失 capability 和安全停止测试通过。
 
+实施结果：
+
+- `runRollingUpgradeWorkflow()` 新增恢复奖励、重复 Gold 清理、Provisions 和 Required Special 阶段；每次只执行一个已验证动作，动作完成后回到同一个 Storage/奖励/重复卡/主 Solver 评估点，不递归调用其他 Loop。
+- Required Special 缺失时先打开已存在的动态 TOTW reward；没有现成奖励时只提交一次动态 `84+ TOTW Upgrade`。TOTW 阵容材料不足时返回 Provisions 依赖，再从统一规划点重试 TOTW 和主 SBC。
+- Provisions 的必要恢复触发为主 Solver 明确材料不足和 Storage 压力。显式开启 `rollingSurplusCraftingEnabled` 后，才增加当前主包完整 Reserve 的 `duplicate-reserve` 和主阵后的 Storage 维护；每次提交后重新读取 ledger 和重跑主规划。
+- Provisions 奖励产生的 Rare Gold duplicate 优先进入动态 `1 of 3 85+ Player Pick` 并立即选择；剩余普通 Gold duplicate 进入动态 `5x80+`。主 `10x85+` 奖励产生的重复卡绝不加入这条 Gold drain 链：默认全部作为主阵 required/preferred 候选并按高分优先放宽；开启余量制作时完整 Reserve 组进入 Provisions。每次提交或开包后重新读取实时库存，不预判随机奖励。
+- 新增一次性 Rolling 运行时适配器，复用共享 `submitSbcAttempt()`、`submitInventorySbcAttempt()`、`openPack()`、Player Pick 和 Inventory Ledger；不调用旧 `runFillAndVerifyLoop()` 的递归补料编排。
+- 所有恢复 SBC 都硬排除 Required Special 和受保护卡。TOTW 恢复额外保留当前配置的 Reserve；Pick/5x80+ 也不消耗 Provisions 储备；Provisions 每次严格只选四张当前范围内的卡，默认 87/88、可选 87/88/89，超出范围的卡即使低于 Protection rating 也不得进入，符合评分范围的 Club Other Special 只在普通材料不足后回退。
+- Unassigned/Transfer duplicate signal 只对本次主阵临时授权其 `duplicateId` 指向的真实 Club/Storage 提交实体；signal 受保护、缺少稳定实体或消失时保持 fail closed。确认提交后的 transport、ledger 登记和 duplicate 同步使用不可中断临界区，Stop 请求延迟到同步完成后的安全点执行。
+- 每个主 SBC 周期有独立恢复预算：总动作 100、奖励开包 30、Gold drain 40、Provisions 20、Required Special 10；主提交成功后重置周期预算，全局结果保留有界计数。
+- 每个恢复动作比较 Inventory Ledger `inventoryVersion` 进度指纹。动作声称成功但库存版本不变时以 `RECOVERY_NO_PROGRESS` 停止；预算耗尽时以 `RECOVERY_BUDGET_REACHED` 停止。
+- Dry Run 使用同一恢复决策，在恢复 SBC 提交或未知奖励开包边界返回 `planned`。功能仍保持 `hidden:true`、`mvp:true`，等待 RL-8 真实页面验收。
+
 ### RL-6：Runtime Telemetry
 
-状态：`Not started`
+状态：`Complete`
 
 - 添加通用 Runtime Telemetry snapshot 和 renderer。
 - 接入 Rolling phase、cycle 和五项资源指标。
@@ -737,9 +894,18 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 
 验收：UI unit tests、响应式 screenshot/DOM 验证和长时间刷新测试通过。
 
+实施结果（2026-08-16）：
+
+- 新增 `src/runtime/telemetry.js`，统一归一化可序列化 snapshot，并把高频 publish 合并到一个 animation frame；字段和文本均有界，未知指标保持 `null`，刷新期间保留上一次可信值。
+- Rolling workflow 的 phase 事件接入结构化 Telemetry；恢复 callback 可以通过受控 `reportPhase()` 发布 `Redeeming 85+ Pick` 和 `Crafting 5x80+` 等细分阶段，不需要 UI 解析日志。
+- entry 按 Inventory Ledger `inventoryVersion` 串行请求能力计算并丢弃过期结果。Capability 只线性统计 Required Special、Provisions reserve 和 Storage；`directCycles` 与 `totwRecoveries` 不在实时 UI 中求解。相同版本复用 capability cache，不额外触发 EA Club 网络分页或评分 Solver。
+- 主面板在 Running 与最新日志之间显示两列稳定资源网格和 Storage 进度条；未知值显示 `-`，80%-94% 使用 warning，95% 以上使用 danger。Desktop 预留稳定高度，Mobile Run 使用受限内容高度，icon-only 隐藏 Telemetry。
+- 普通 Loop、Batch Open 和 Trade 不发布 visible snapshot，原有日志、运行状态和业务行为不变；Rolling 仍保持 `hidden:true`、`mvp:true`。
+- 新增 6 项测试，覆盖 snapshot 有界/未知语义、10,000 次更新合并、phase adapter、指标/ARIA/Storage 压力渲染，以及 Desktop/Mobile/touch/resize/icon-only DOM/CSS 合同。完整 `npm run verify` 通过：376 个 JavaScript 文件语法检查、179 个测试文件、1,211 项测试，以及 ESLint、配置/Profile、架构、FSU patch、userscript 构建、root/dist 一致性和 FSU 发布资源检查全部成功；真实 EA 页面视觉和运行验收留在 RL-8。
+
 ### RL-7：有界 Recap 和通知集成
 
-状态：`Not started`
+状态：`Complete`
 
 - 实现 Rolling 流式聚合器和 retention limits。
 - 接入现有 Reward Alerts 和价格补全。
@@ -748,32 +914,68 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 
 验收：一万次模拟运行内存有界，Recap/Alert 回归测试和 `npm run verify` 通过。
 
+实施结果（2026-08-16）：
+
+- 新增 `src/reward/rolling-recap.js`。聚合器只保存计数、评分直方图、路由计数和有界卡片摘要；top cards 上限为 50，达到 Reward Alert 阈值的 Special 摘要上限为 100，并明确记录两类省略数量。
+- Rolling 生产接线使用 `retainReceipts:false`，不再在 workflow result 或会话中保留完整 Pack receipt 和 EA item；普通 Loop 仍使用原有 receipt-based recap。
+- 主循环开包、TOTW、Provisions、5x80+ 和 85+ Pick 的完成次数、重复卡进入 Primary/Storage/Recovery 的数量均进入聚合结果。85+ Pick 结果通过同一个 `publishPackHighlight()` 入口发送通知，紧凑 Recap 只读取摘要和价格，不重复触发 Alert。
+- 复用现有 Special 价格补全和 FUTBIN ID 解析；Recap 增加恢复、评分、Retention、停止点和最终库存指标区，页面仍使用现有分页和卡片主题。
+- 新增 5 项测试，覆盖 10,000 次记录的固定上限、类型/评分/恢复/路由计数、价格和最终资源、Recap UI，以及 workflow 关闭完整 receipt retention。普通 Recap 回归通过。
+
 ### RL-8：集成、文档和真实页面门禁
 
-状态：`Not started`
+状态：`In progress`
 
 - 完成 entry Adapter 接线和生成 userscript。
 - 更新用户指南、AGENTS 和必要的 Profile/Builder 文档。
 - 运行完整 `npm run verify`。
 - 完成第 18 节真实页面验收。
 - 记录发现的问题、修复提交和最终版本。
-- 验收全部通过后再决定从 hidden/MVP 移出。
+- 动态扫描成功后将 Rolling Loop 加入可选列表，使用现有启动预检和动态 capability 门禁控制执行安全。
+- Selection Policy UI 按作用域拆分普通 SBC 单卡上限、Rolling/Pick 自动使用上限、主动余量制作、Provisions Reserve 范围、duplicate-reserve 奖励开启时机和 Pick 模式，旧配置 key 保持兼容。`rollingSurplusCraftingEnabled` 默认关闭；`rollingProvisionsMaxRating` 默认 88、仅允许 88/89；`rollingOpenDuplicateProvisionsRewards` 默认关闭。
+
+自动验证结果（2026-08-16）：候选版本 `0.7.94` 完成完整 `npm run verify`；388 个 JavaScript 文件通过语法检查，186 个测试文件、1,251 项测试全部通过，配置/Profile、架构、FSU patch、root/dist userscript 和版本一致性均通过。本轮修复 Runtime Telemetry 阻塞、主包重复 Reserve 的独立 Provisions 路由和 Primary 精确评分放宽。RL-8 仍需完成第 18 节真实页面验收与结果记录。
+
+自动验证结果（2026-08-16）：候选版本 `0.7.95` 完成完整 `npm run verify`；388 个 JavaScript 文件通过语法检查，186 个测试文件、1,255 项测试全部通过，配置/Profile、架构、FSU patch、root/dist userscript 和版本一致性均通过。4,800 卡评分直方图测试把旧实现的 354,275 次状态转移约束到 100 次以内；4,096 个完整候选的角色化选材测试、4,000 张 Club 双 Repository 去重合同和 Provisions hard-block 控制流测试均已锁定。RL-8 仍需完成真实页面验收。
+
+自动验证结果（2026-08-16）：候选版本 `0.7.100` 完成完整 `npm run verify`；389 个 JavaScript 文件通过语法检查，187 个测试文件、1,268 项测试全部通过。启动阶段的普通 Reserve 阈值触发已删除；当前主包 `duplicate-reserve`、可行主阵不扫描历史恢复包、主阵缺料后 leftover recovery、本轮 pending reward 隔离和恢复奖励来源隔离已有 workflow 测试。Inventory Adapter 另有同 definition 异评分/异 rareflag 卡保持非重复并路由 Club 的真实日志回归测试。Rolling 主包及恢复包仅使用真实 My Packs Repository 实例，Store catalog fallback 隔离已有 userscript 接线测试。RL-8 仍需完成真实页面验收。
+
+自动验证结果（2026-08-17）：候选版本 `0.7.114` 完成完整 `npm run verify`；400 个 JavaScript 文件通过语法检查，193 个测试文件、1,387 项测试全部通过。新增 shortage Provisions 批量默认值、1-30 配置/schema/UI 投影、每批后重新规划及仍缺料才开启下一批的 workflow 回归测试。实机日志确认 Storage-pressure Provisions 奖励继续留在 My Packs，历史 Provisions、TOTW 和 5x80+ 均未被无条件开启；Storage 恢复可从 Provisions 安全回退到 95+ 双阵 Pick 并继续主循环。
+
+发布候选验证（2026-08-17）：版本提升为 `0.8.0` 后再次完成完整 `npm run verify`；400 个 JavaScript 文件、193 个测试文件和 1,387 项测试全部通过，配置/Profile、架构、FSU patch、root/dist userscript、metadata 和版本一致性检查均成功。`0.7.114` 的实机证据作为同一实现的发布前页面验证保留。
 
 验收：实现、自动验证、生成产物、文档和真实页面证据全部完成。
+
+### RL-9：95+ 双阵 Storage sink
+
+状态：`In progress`
+
+- 动态识别 `1 of 3 95+ FOF or FUTTIES T1-T3 Player Pick`，不维护静态 ID。
+- 在紧急 Provisions 不可用后接入第二级 Storage-pressure recovery。
+- 按 89 后 88 的顺序独立规划：89 阵使用 Unassigned + Storage，88 阵先使用 Storage、必要时最多补三张普通 Club 卡。
+- 提交 89 阵后重新对账并读取 live Challenge，再规划 88 阵；记录并可恢复非原子 partial completion。
+- Pick 立即领取，复用统一 Pick 选择、通知、Recap 和 Unassigned 处理。
+- 在 Selection Policy 增加默认关闭的用户 opt-in；扫描与 capability 展示不受开关影响，实际 workflow 执行必须显式启用。
+- 增加 capability、schema、顺序规划、headroom、workflow budget/no-progress 和架构测试。
+
+自动测试结果（2026-08-16）：完整 `npm run verify` 通过；384 个 JavaScript 文件通过语法检查，183 个测试文件、1,237 项测试全部成功，配置/Profile、架构、FSU patch、userscript 构建、root/dist 和 FSU 发布资源检查均通过。真实页面需验证默认关闭、显式启用、动态扫描、双阵材料充足、headroom 不足、第一阵后第二阵失效及 Pick 重复结果七类边界。
+
+验收：完整 `npm run verify`、userscript 构建和第 18 节新增实机场景全部通过后标记 `Complete`。
 
 ## 20. 进度总览
 
 | Milestone | 状态 | 自动测试 | `npm run verify` | 真实页面 | Commit |
 | --- | --- | --- | --- | --- | --- |
-| RL-0 基线与 Characterization | Not started | - | - | N/A | - |
-| RL-1 配置与动态 capability | Not started | - | - | - | - |
-| RL-2 角色化评分选材 | Not started | - | - | - | - |
-| RL-3 Inventory Ledger | Not started | - | - | - | - |
-| RL-4 主 Rolling 状态机 | Not started | - | - | - | - |
-| RL-5 恢复链 | Not started | - | - | - | - |
-| RL-6 Runtime Telemetry | Not started | - | - | - | - |
-| RL-7 有界 Recap 与通知 | Not started | - | - | - | - |
-| RL-8 集成与实机验收 | Not started | - | - | - | - |
+| RL-0 基线与 Characterization | Complete | 5 个新增基线测试通过 | 169 files / 1,126 tests | N/A | pending |
+| RL-1 配置与动态 capability | Complete | 10 个净新增测试通过 | 170 files / 1,136 tests | N/A（hidden/inert） | pending |
+| RL-2 角色化评分选材 | Complete | 11 个净新增 selection/rating 测试通过 | 171 files / 1,147 tests | N/A（hidden/inert） | pending |
+| RL-3 Inventory Ledger | Complete | 30 个净新增 ledger/delta/capability/observer 测试通过 | 176 files / 1,177 tests | N/A（hidden/inert） | pending |
+| RL-4 主 Rolling 状态机 | Complete | 17 个净新增 workflow/inventory policy 测试通过 | 178 files / 1,194 tests | 待 RL-8（hidden/MVP） | pending |
+| RL-5 恢复链 | Complete | 11 个净新增 recovery workflow/policy 测试通过 | 178 files / 1,205 tests | 待 RL-8（hidden/MVP） | pending |
+| RL-6 Runtime Telemetry | Complete | 6 个新增 telemetry/workflow/UI 测试通过 | 179 files / 1,211 tests | 待 RL-8（hidden/MVP） | pending |
+| RL-7 有界 Recap 与通知 | Complete | 5 个新增 recap/retention 测试通过 | 181 files / 1,216 tests | 待 RL-8（hidden/MVP） | pending |
+| RL-8 集成与实机验收 | In progress | Selection Policy/visibility/Reserve routing/large-inventory performance tests passed | 193 files / 1,387 tests | `0.7.114` 实机日志验证主循环、缺料批次和恢复包隔离 | pending |
+| RL-9 95+ 双阵 Storage sink | In progress | capability/sequential-plan/partial-resume/opt-in/workflow tests passed | 193 files / 1,387 tests | `0.7.114` 实机验证 Storage-pressure Provisions 回退和双阵 Pick | pending |
 
 ## 21. 实施记录
 
@@ -782,6 +984,27 @@ Workflow 发布 snapshot，entry 负责接线，`src/ui` 只负责纯渲染。UI
 | 日期 | Milestone | 状态变化 | Commit | 测试/证据 | 备注 |
 | --- | --- | --- | --- | --- | --- |
 | 2026-08-16 | Planning | - -> Not started | `0be883d` | 设计讨论完成 | 尚未修改运行时代码 |
+| 2026-08-16 | RL-0 | Not started -> Complete | pending | `npm run verify`：169 files / 1,126 tests | 仅增加 fixture、characterization tests 和影响面审计 |
+| 2026-08-16 | RL-1 | Not started -> Complete | pending | `npm run verify`：170 files / 1,136 tests | 配置、动态 capability、Protection rating、零数量、UI command 和启动门禁；功能仍 hidden/inert |
+| 2026-08-16 | RL-2 | Not started -> Complete | pending | `npm run verify`：171 files / 1,147 tests | role-aware 纯选材、live matcher bridge、exact-one validator、结构化失败诊断；功能仍 hidden/inert |
+| 2026-08-16 | RL-3 | Not started -> Complete | pending | `npm run verify`：176 files / 1,177 tests | 本地 Inventory Ledger、confirmed delta、对账、provisional FSU 定向验证、capability cache 和 opt-in mutation observers；功能仍 hidden/inert |
+| 2026-08-16 | RL-4 | Not started -> Complete | pending | `npm run verify`：178 files / 1,194 tests | 主 Rolling 状态机、开包分类/Storage 路由、库存 bootstrap、exact-one Required Special、Stop/Dry Run、运行时 coordinator 接线；功能仍 hidden/MVP，恢复链留待 RL-5 |
+| 2026-08-16 | RL-5 | Not started -> Complete | pending | `npm run verify`：178 files / 1,205 tests | 动态 TOTW/Provisions/Pick/5x80+ 单步恢复、Storage 压力、统一重规划、每主周期预算和 Inventory Ledger 进度指纹；功能仍 hidden/MVP |
+| 2026-08-16 | RL-6 | Not started -> Complete | pending | `npm run verify`：179 files / 1,211 tests | 有界 snapshot、串行 capability refresh、phase/cycle/五项指标、animation-frame 合并和响应式 DOM/CSS；功能仍 hidden/MVP |
+| 2026-08-16 | RL-7 | Not started -> Complete | pending | `npm run verify`：181 files / 1,216 tests | Rolling 流式有界 Recap、50/100 retention、恢复/路由/评分聚合、Pick Alert 统一入口、价格补全和 Recap 指标；功能仍 hidden/MVP |
+| 2026-08-16 | RL-8 | Not started -> In progress | pending | `npm run verify`：182 files / 1,222 tests | `0.7.92` 已构建；Rolling 扫描后可选，Selection Policy 按作用域分组；待真实页面验收 |
+| 2026-08-16 | RL-9 | Not started -> In progress | pending | `npm run verify`：183 files / 1,237 tests | 动态 95+ Pick capability、默认关闭的用户 opt-in、DAO item-group matcher fallback、89+88 联合预检、Storage headroom、非原子 partial completion 和即时 Pick 接线；待真实页面验收 |
+| 2026-08-16 | RL-8 | Runtime performance/routing fix | pending | `npm run verify`：186 files / 1,251 tests | `0.7.94`：Telemetry 改为 O(n) ledger 计数；主包完整四张 87/88/89 通过 `duplicate-reserve` 立即做 Provisions，余数才存 Storage；Primary 放宽卡显式排除并保持 exact-target 规划 |
+| 2026-08-16 | RL-8 | Large-inventory planner/identity fix | pending | `npm run verify`：186 files / 1,255 tests | `0.7.95`：评分配方改为评分直方图单调可行性规划，4,096 候选性能测试锁定；EA 双 Club Repository 按 item ID 去重；普通 Provisions 的 hard block 不再被主规划掩盖 |
+| 2026-08-16 | RL-8 | Startup recovery priority fix | pending | `npm run verify`：187 files / 1,259 tests | `0.7.96`：普通 Reserve 不再抢占主阵启动；当前主包完整 Reserve 优先解阻；Provisions/5x80/TOTW 和主 reward 只开启真实 My Packs 实例 |
+| 2026-08-16 | RL-8 | Required Special source restriction | pending | `npm run verify`：187 files / 1,261 tests | `0.7.97`：Unassigned/Storage/Transfer 接受 live matcher；Club 仅允许 TOTW，Club TOTS/FOF/FUTTIES 由候选、ledger 和提交前校验共同硬保护 |
+| 2026-08-16 | RL-8 | Provisions range and transient identity fix | pending | `npm run verify`：389 files / 187 test files / 1,264 tests | `0.7.97`：Provisions 严格限定 87-89；修复 duplicate signal 对应实体被重复保护造成的库存误判；Rolling 仅生成于 10x85+；确认提交期间延迟 Stop 直到 ledger 和 duplicate 同步完成 |
+| 2026-08-16 | RL-8 | Leftover recovery reward priority fix | pending | `npm run verify`：389 files / 187 test files / 1,265 tests | `0.7.98`：本轮 pending reward 与历史 leftover 分离；可行 bootstrap 不再清理遗留 Provisions/5x80+；主阵缺料后才进入 leftover recovery |
+| 2026-08-16 | RL-8 | Latent duplicate version guard | pending | `npm run verify`：389 files / 187 test files / 1,266 tests | `0.7.99`：Club/Storage latent duplicate 回补要求 definition、评分和 rareflag 同版本；同 definition 的异版本非重复卡保持 Club 路由 |
+| 2026-08-16 | RL-8 | Provisions frequency controls | pending | `npm run verify`：389 files / 187 test files / 1,268 tests | `0.7.100`：Reserve 默认收窄为 87/88，可选 87/88/89；`duplicate-reserve` 奖励默认留在 My Packs，主阵普通材料不足时才由 leftover recovery 开启，可选恢复立即开启 |
+| 2026-08-17 | RL-8 | Shortage reward batching | pending | `npm run verify`：400 files / 193 test files / 1,387 tests | `0.7.114`：主阵真实缺料时历史 Provisions 默认每批开 2 包、可配置 1-30；每批后重新规划，仍缺才继续；TOTW 保持一次一包；Storage-pressure 奖励继续留在 My Packs |
+| 2026-08-17 | RL-8 | Surplus crafting opt-in | pending | targeted tests：7 files / 108 tests | `0.7.105`：主动 `duplicate-reserve` 与主阵后 Storage Provisions/TOTW 维护默认关闭；85-89 可用重复卡优先回填主阵，精确 84 阵按 89 到 85 顺序放宽；缺料与 Storage 压力恢复保留 |
+| 2026-08-17 | RL-8 | Storage recovery ownership fix | pending | `npm run verify`：193 files / 1,349 tests | `0.7.106`：恢复 SBC 确认提交后按 `consumedItemRefs` 清理 opened-item Routing 所有权；Storage-pressure Provisions 可消费已存 Reserve 并继续保存延后高分卡；同 definition 的其他实例不受影响；同一恢复提交只登记一次 ledger delta |
 
 ## 22. 完成定义
 

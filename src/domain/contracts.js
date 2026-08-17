@@ -1,10 +1,20 @@
-import { readPlayerRareFlag } from './player-rarity.js';
+import {
+  hasPlayerCosmetics,
+  isPlayerEvolutionCard,
+  readPlayerRareFlag,
+} from './player-rarity.js';
 
 export const INVENTORY_PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function optionalFiniteNumber(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function uniqueNumbers(values = []) {
@@ -41,12 +51,15 @@ export function createItemSnapshot(item = {}, pile = item.pile || 'unknown') {
     rare,
     special,
     rareflag,
+    duplicateSignal: item.duplicateSignal === true || item.duplicate === true || finiteNumber(item.duplicateId) > 0,
+    duplicateSignalId: finiteNumber(item.duplicateSignalId || item.duplicateId),
     duplicate: item.duplicate === true || finiteNumber(item.duplicateId) > 0,
     duplicateId: finiteNumber(item.duplicateId),
     tradeable: item.tradeable === true,
     leagueId: finiteNumber(item.leagueId),
     identityIds: uniqueNumbers([item.id, item.definitionId, ...(item.identityIds || [])]),
-    evolution: item.evolution === true,
+    evolution: isPlayerEvolutionCard(item),
+    cosmetic: hasPlayerCosmetics(item),
     limitedUse: item.limitedUse === true,
     concept: item.concept === true,
     academyEnrolled: item.academyEnrolled === true,
@@ -67,8 +80,9 @@ export function createInventorySnapshot(input = {}) {
   const capacities = {};
   for (const pile of INVENTORY_PILES) {
     const capacity = input.capacities?.[pile] || {};
-    const used = finiteNumber(capacity.used, piles[pile].length);
-    const max = Number.isFinite(Number(capacity.max)) ? Number(capacity.max) : null;
+    const explicitUsed = optionalFiniteNumber(capacity.used);
+    const used = explicitUsed === null ? piles[pile].length : explicitUsed;
+    const max = optionalFiniteNumber(capacity.max);
     capacities[pile] = Object.freeze({ used, max, free: max === null ? null : Math.max(0, max - used) });
   }
   return Object.freeze({
@@ -76,6 +90,42 @@ export function createInventorySnapshot(input = {}) {
     capturedAt: String(input.capturedAt || new Date().toISOString()),
     piles: Object.freeze(piles),
     capacities: Object.freeze(capacities),
+  });
+}
+
+export function createInventoryDelta(input = {}) {
+  const status = ['confirmed', 'ambiguous', 'rejected', 'planned'].includes(String(input.status))
+    ? String(input.status)
+    : 'ambiguous';
+  const normalizeAddition = (entry = {}) => {
+    const pile = String(entry.pile || entry.item?.pile || entry.item?.ref?.pile || 'unknown');
+    const item = entry.item?.ref
+      ? Object.freeze({ ...cloneSerializable(entry.item), pile, ref: createItemRef(entry.item.ref, pile) })
+      : createItemSnapshot(entry.item || entry, pile);
+    return Object.freeze({ pile, item });
+  };
+  const normalizeMove = (entry = {}) => Object.freeze({
+    itemRef: createItemRef(entry.itemRef || entry.item || {}, entry.fromPile || entry.itemRef?.pile || 'unknown'),
+    fromPile: String(entry.fromPile || entry.itemRef?.pile || 'unknown'),
+    toPile: String(entry.toPile || 'unknown'),
+  });
+  const capacities = Object.fromEntries(Object.entries(input.capacities || {}).map(([pile, value]) => [
+    String(pile),
+    Object.freeze({
+      used: optionalFiniteNumber(value?.used),
+      max: optionalFiniteNumber(value?.max),
+    }),
+  ]));
+  return Object.freeze({
+    status,
+    operation: String(input.operation || 'unknown'),
+    additions: Object.freeze((input.additions || []).map(normalizeAddition)),
+    removals: Object.freeze((input.removals || []).map((ref) => createItemRef(ref, ref?.pile || 'unknown'))),
+    moves: Object.freeze((input.moves || []).map(normalizeMove)),
+    capacities: Object.freeze(capacities),
+    reason: input.reason ? String(input.reason) : null,
+    confirmedAt: input.confirmedAt ? String(input.confirmedAt) : null,
+    details: Object.freeze(cloneSerializable(input.details || {})),
   });
 }
 

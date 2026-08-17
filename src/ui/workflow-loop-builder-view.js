@@ -227,6 +227,7 @@ function renderRuntimeQuantity(path, value = {}, context) {
     ${fieldRow('Default', textInput(`${path}.default`, value.default, 'number', context.readOnly))}
     ${fieldRow('Minimum', textInput(`${path}.min`, value.min, 'number', context.readOnly))}
     ${fieldRow('Maximum', textInput(`${path}.max`, value.max, 'number', context.readOnly))}
+    ${fieldRow('Allow zero', `<select data-builder-field="${path}.allowZero" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value.allowZero)}</select>`)}
     ${fieldRow('Label', textInput(`${path}.label`, value.label, 'text', context.readOnly))}
   </div></section>`;
 }
@@ -246,14 +247,19 @@ function renderRewardFlow(path, value = {}, context) {
 function renderPickOptions(path, value = {}, context) {
   const fields = [
     ['autoSelectBelow90', 'Automatic selection', 'boolean-inherit'],
-    ['autoPickThreshold', 'Automatic selection threshold', 'number'],
+    ['protectionRating', 'Protection rating', 'number'],
     ['openPicksAtEnd', 'Open Picks at end', 'boolean-inherit'],
     ['preferScannedMetadata', 'Prefer scanned metadata', 'boolean-inherit'],
   ];
   return `<section class="dlr-builder-form-section"><h3>Player Pick options</h3><div class="dlr-builder-form-grid">${fields.map(([key, label, type]) => (
     type === 'boolean-inherit'
       ? fieldRow(label, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value[key])}</select>`)
-      : fieldRow(label, textInput(`${path}.${key}`, value[key], type, context.readOnly))
+      : fieldRow(label, textInput(
+        `${path}.${key}`,
+        key === 'protectionRating' ? value.protectionRating ?? value.autoPickThreshold : value[key],
+        type,
+        context.readOnly,
+      ))
   )).join('')}</div></section>`;
 }
 
@@ -339,11 +345,8 @@ function renderShortagePacks(path, label, values, context) {
 }
 
 function renderRatingFill(path, value = {}, context) {
-  return `<section class="dlr-builder-form-section"><h3>Rating solver</h3><div class="dlr-builder-form-grid">
+  return `<section class="dlr-builder-form-section"><h3>Rating recipe</h3><div class="dlr-builder-form-grid">
     ${fieldRow('Target rating', textInput(`${path}.targetRating`, value.targetRating, 'number', context.readOnly))}
-    ${fieldRow('Maximum search nodes', textInput(`${path}.maxSearchNodes`, value.maxSearchNodes, 'number', context.readOnly))}
-    ${fieldRow('Maximum search ms', textInput(`${path}.maxSearchMs`, value.maxSearchMs, 'number', context.readOnly))}
-    ${fieldRow('Yield every nodes', textInput(`${path}.yieldEveryNodes`, value.yieldEveryNodes, 'number', context.readOnly))}
   </div>${renderPileList(`${path}.priorityPiles`, 'Pile order', value.priorityPiles, context)}</section>`;
 }
 
@@ -559,7 +562,7 @@ function renderLibrary(model) {
         <span class="dlr-builder-source ${source}${availability ? ` ${availability}` : ''}">${source}</span>
       </button>`;
     }).join('') || '<div class="dlr-builder-empty">No matching objects</div>'}</div>
-    ${model.tab === 'loops' ? `<div class="dlr-builder-new-type"><select id="dlr-builder-new-strategy">${optionList(BUILDER_STRATEGY_OPTIONS.filter((entry) => !['dailyRoutine', 'workflowRoutine'].includes(entry.value)), 'fillAndVerifySbc')}</select></div>` : ''}
+    ${model.tab === 'loops' ? `<div class="dlr-builder-new-type"><select id="dlr-builder-new-strategy">${optionList(BUILDER_STRATEGY_OPTIONS.filter((entry) => !entry.hidden && !['dailyRoutine', 'workflowRoutine'].includes(entry.value)), 'fillAndVerifySbc')}</select></div>` : ''}
     ${model.tab === 'recovery' ? '<div class="dlr-builder-new-type"><select id="dlr-builder-new-recovery-type"><option value="recipe">Recovery recipe</option><option value="policy">Recovery policy</option></select></div>' : ''}
   </aside>`;
 }

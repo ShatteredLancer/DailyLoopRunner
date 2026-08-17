@@ -34,6 +34,17 @@ describe('main panel view template', () => {
       'bronze-loop-scan-progress-count',
       'bronze-loop-scan-progress-track',
       'bronze-loop-scan-progress-bar',
+      'bronze-loop-runtime-telemetry',
+      'bronze-loop-runtime-phase',
+      'bronze-loop-runtime-cycle',
+      'bronze-loop-runtime-refreshing',
+      'bronze-loop-runtime-special',
+      'bronze-loop-runtime-direct',
+      'bronze-loop-runtime-provisions',
+      'bronze-loop-runtime-totw',
+      'bronze-loop-runtime-storage-value',
+      'bronze-loop-runtime-storage-track',
+      'bronze-loop-runtime-storage-bar',
       'bronze-loop-log',
       'bronze-loop-log-resize',
     ]) {
@@ -51,11 +62,9 @@ describe('main panel view template', () => {
     for (const id of [
       'bronze-loop-open-rewards',
       'bronze-loop-daily-inventory-only',
-      'bronze-loop-low-rated-gold-max',
-      'bronze-loop-rating-sbc-max-card',
-      'bronze-loop-pick-auto-below-90',
-      'bronze-loop-pick-open-at-end',
-      'bronze-loop-pick-auto-threshold',
+      'bronze-loop-selection-policy-row',
+      'bronze-loop-selection-policy-summary',
+      'bronze-loop-selection-policy-settings',
       'bronze-loop-profile-select',
       'bronze-loop-refresh',
       'bronze-loop-scan-mode',
@@ -80,6 +89,11 @@ describe('main panel view template', () => {
       'bronze-loop-preview-pick-recap',
       'bronze-loop-dry-run',
       'bronze-loop-show-mvp',
+      'bronze-loop-low-rated-gold-max',
+      'bronze-loop-rating-sbc-max-card',
+      'bronze-loop-pick-auto-below-90',
+      'bronze-loop-pick-open-at-end',
+      'bronze-loop-pick-auto-threshold',
       'bronze-loop-pick-prefer-scanned',
       'bronze-loop-pick-protect-high-gold',
       'bronze-loop-pick-high-gold-threshold',
@@ -126,11 +140,17 @@ describe('main panel view template', () => {
     expect(MAIN_PANEL_STYLE).toContain('overscroll-behavior: contain;');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-scan-progress[data-mode="indeterminate"]');
     expect(MAIN_PANEL_STYLE).toContain('@keyframes bronze-loop-scan-slide');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-runtime-telemetry {');
+    expect(MAIN_PANEL_STYLE).toContain('grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr) 30px;');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.has-runtime-telemetry:not(.icon-only) { min-height: 298px; }');
+    expect(MAIN_PANEL_STYLE).toContain('.is-running.has-runtime-telemetry[data-mobile-tab="run"]');
+    expect(MAIN_PANEL_STYLE).toContain('height: auto !important; min-height: 278px; max-height: min(60dvh, 420px);');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel[data-layout="mobile"]');
     expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel[data-input="touch"] button');
     expect(MAIN_PANEL_STYLE).toContain('height: min(72dvh, 620px)');
     expect(MAIN_PANEL_STYLE).toContain('left: var(--dlr-mobile-icon-left, auto) !important;');
     expect(MAIN_PANEL_STYLE).toContain('.icon-only #bronze-loop-drag { cursor: move; touch-action: none; }');
+    expect(MAIN_PANEL_STYLE).toContain('#bronze-loop-panel.icon-only .panel-body,');
   });
 
   it('mounts style and panel once through the DOM adapter', () => {

@@ -7,6 +7,7 @@ import {
   renderMainPanelRuntimeState,
   renderMainPanelScanProgress,
   renderRewardAlertSummary,
+  renderSelectionPolicySummary,
 } from '../../src/ui/main-panel-state.js';
 
 function element(id) {
@@ -68,6 +69,13 @@ describe('main panel state rendering', () => {
     });
     expect(controls.get('bronze-loop-rounds-label').textContent).toBe('Provision packs');
     expect(controls.get('bronze-loop-rounds')).toMatchObject({ value: '4', min: '2', max: '20' });
+    renderMainPanelRounds({
+      panel,
+      show: true,
+      quantityKey: 'rolling:maxCompletions',
+      quantity: { label: 'SBC completions', default: 0, min: 0, max: 1000 },
+    });
+    expect(controls.get('bronze-loop-rounds')).toMatchObject({ value: '0', min: '0', max: '1000' });
   });
 
   it('renders recap availability and summary title', () => {
@@ -119,6 +127,50 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-reward-alert-summary').textContent).toBe('Off');
   });
 
+  it('renders a scoped selection policy summary', () => {
+    const { panel, controls } = harness(['bronze-loop-selection-policy-summary']);
+    renderSelectionPolicySummary({
+      panel,
+      sbcFodderOptions: { lowRatedGoldMaxRating: 82, ratingSbcMaxCardRating: 88 },
+      pickOptions: { protectionRating: 90, autoSelectBelow90: true },
+    });
+    expect(controls.get('bronze-loop-selection-policy-summary').textContent)
+      .toBe('Std card <=88 | Auto-use <=90 | Picks Auto');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Non-rating Gold <=82');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('95+ Storage pressure Pick disabled');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Provisions reserve 87-88');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('shortage Provisions batch 2');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('surplus Provisions/TOTW shortage only');
+    renderSelectionPolicySummary({
+      panel,
+      sbcFodderOptions: { ratingSbcMaxCardRating: 87 },
+      pickOptions: {
+        protectionRating: 94,
+        autoSelectBelow90: false,
+        rollingStorageSinkEnabled: true,
+        rollingSurplusCraftingEnabled: true,
+        rollingProvisionsMaxRating: 89,
+        rollingOpenDuplicateProvisionsRewards: true,
+        rollingShortageProvisionsPackLimit: 5,
+      },
+    });
+    expect(controls.get('bronze-loop-selection-policy-summary').textContent)
+      .toBe('Std card <=87 | Auto-use <=94 | Picks Review');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('95+ Storage pressure Pick enabled');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('duplicate Provisions rewards immediate');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('shortage Provisions batch 5');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('surplus Provisions/TOTW enabled');
+  });
+
   it('renders indeterminate and determinate Dynamic SBC scan progress', () => {
     const { panel, controls } = harness([
       'bronze-loop-scan-progress',
@@ -162,9 +214,8 @@ describe('main panel state rendering', () => {
       'bronze-loop-start', 'bronze-loop-stop', 'bronze-loop-batch-open', 'bronze-loop-trade', 'bronze-loop-select',
       'bronze-loop-profile-select', 'bronze-loop-open-builder',
       'bronze-loop-refresh', 'bronze-loop-scan-mode', 'bronze-loop-scan-picks',
-      'bronze-loop-open-rewards', 'bronze-loop-low-rated-gold-max', 'bronze-loop-rating-sbc-max-card', 'bronze-loop-pick-auto-below-90',
+      'bronze-loop-open-rewards', 'bronze-loop-selection-policy-settings',
       'bronze-loop-daily-inventory-only',
-      'bronze-loop-pick-auto-threshold',
       'bronze-loop-rounds',
       'bronze-loop-reward-alert-enabled', 'bronze-loop-reward-alert-settings',
     ];

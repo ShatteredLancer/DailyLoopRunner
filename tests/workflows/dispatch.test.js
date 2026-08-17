@@ -18,6 +18,7 @@ function harness(overrides = {}) {
     playerPickSbc: vi.fn(async () => ({ ...result, pickResults: [{ id: 1 }] })),
     fillAndVerifySbc: vi.fn(async () => result),
     inventoryExhaustion: vi.fn(async () => result),
+    rollingUpgrade: vi.fn(async () => result),
   };
   return {
     loopDef: { id: 'loop', name: 'Test Loop', strategy: 'dailyRoutine' },
@@ -84,6 +85,15 @@ describe('configured workflow dispatch', () => {
     await dispatchConfiguredWorkflow(options);
     expect(options.runners.inventoryExhaustion).toHaveBeenCalledWith(options.loopDef);
     expect(options.afterStandardRun).toHaveBeenCalledWith(options.loopDef, { status: 'completed' });
+  });
+
+  it('reserves a dedicated Rolling runner without invoking generic finalization', async () => {
+    const options = harness({
+      loopDef: { id: 'rolling', name: 'Rolling Upgrade', strategy: 'rollingUpgrade' },
+    });
+    await dispatchConfiguredWorkflow(options);
+    expect(options.runners.rollingUpgrade).toHaveBeenCalledWith(options.loopDef);
+    expect(options.afterStandardRun).not.toHaveBeenCalled();
   });
 
   it('skips all finalizers during Dry Run while keeping the same runner', async () => {

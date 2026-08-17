@@ -87,14 +87,14 @@ export function createPageRuntimeAdapter(runtime, dom) {
   function gotoUnassigned(controller = currentController()) {
     if (typeof controller?.gotoUnassigned === 'function') {
       controller.gotoUnassigned();
-      return true;
+      return Object.freeze({ requested: true, via: 'controller' });
     }
     const fallback = runtime?.UTStoreViewController?.prototype?.gotoUnassigned;
     if (typeof fallback === 'function') {
       fallback.call(controller);
-      return true;
+      return Object.freeze({ requested: true, via: 'store-prototype' });
     }
-    return false;
+    return Object.freeze({ requested: false, via: null, reason: 'gotoUnassigned is unavailable' });
   }
 
   function popViewController(animated = true, controller = currentController()) {

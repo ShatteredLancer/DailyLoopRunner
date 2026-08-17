@@ -113,10 +113,14 @@ export function capturePlayerPickSelections(selected, ranked, options = {}) {
 
 export function getManualPlayerPickReason(ranked, pickCount) {
   const topRating = ranked[0]?.rating;
-  const topSpecials = ranked.filter((candidate) => candidate.rating === topRating && candidate.special);
+  const topSpecials = ranked.filter((candidate) => (
+    candidate.rating === topRating
+      && candidate.special
+      && candidate.duplicate !== true
+  ));
   const availableSelections = Math.max(1, Number(pickCount || 1) || 1);
   if (topSpecials.length > availableSelections) {
-    return `${topSpecials.length} special card(s) share the highest rating ${topRating} but only ${availableSelections} can be selected`;
+    return `${topSpecials.length} non-duplicate special card(s) share the highest rating ${topRating} but only ${availableSelections} can be selected`;
   }
   return '';
 }

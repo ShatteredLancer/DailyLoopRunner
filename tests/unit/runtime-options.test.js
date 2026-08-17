@@ -2,21 +2,34 @@ import { describe, expect, it } from 'vitest';
 import {
   applyLoopRuntimeOptions,
   applyPickRuntimeOptions,
+  assertRollingRuntimePreflight,
   applyInventoryMode,
   loopUsesRounds,
   normalizePickRuntimeOptions,
   resolveInventoryMode,
   resolvePickRuntimeOptions,
   resolveRuntimeQuantity,
+  shouldAutoSelectPlayerPick,
 } from '../../src/config/runtime-options.js';
 
 describe('loop runtime option projection', () => {
+  it('uses an inclusive shared automatic-use boundary for Player Picks', () => {
+    expect(shouldAutoSelectPlayerPick(90, { protectionRating: 90, autoSelectBelow90: true })).toBe(true);
+    expect(shouldAutoSelectPlayerPick(91, { protectionRating: 90, autoSelectBelow90: true })).toBe(false);
+    expect(shouldAutoSelectPlayerPick(90, { protectionRating: 90, autoSelectBelow90: false })).toBe(false);
+  });
+
   it('normalizes Pick redemption controls without material-protection fields', () => {
     expect(normalizePickRuntimeOptions()).toEqual({
       autoSelectBelow90: true,
       preferScannedMetadata: false,
       openPicksAtEnd: false,
-      autoPickThreshold: 90,
+      rollingStorageSinkEnabled: false,
+      rollingSurplusCraftingEnabled: false,
+      rollingProvisionsMaxRating: 88,
+      rollingOpenDuplicateProvisionsRewards: false,
+      rollingShortageProvisionsPackLimit: 2,
+      protectionRating: 90,
     });
     expect(normalizePickRuntimeOptions({
       protectHighGold: false,
@@ -29,7 +42,12 @@ describe('loop runtime option projection', () => {
       autoSelectBelow90: false,
       preferScannedMetadata: true,
       openPicksAtEnd: true,
-      autoPickThreshold: 90,
+      rollingStorageSinkEnabled: false,
+      rollingSurplusCraftingEnabled: false,
+      rollingProvisionsMaxRating: 88,
+      rollingOpenDuplicateProvisionsRewards: false,
+      rollingShortageProvisionsPackLimit: 2,
+      protectionRating: 90,
     });
   });
 
@@ -44,7 +62,7 @@ describe('loop runtime option projection', () => {
       autoSelectBelow90: false,
       openPicksAtEnd: true,
       highGoldThreshold: 84,
-      autoPickThreshold: 91,
+      protectionRating: 91,
     });
     expect(loopDef).toMatchObject({
       autoSelectBelow90: false,
@@ -175,7 +193,7 @@ describe('loop runtime option projection', () => {
       { pickOptions: { autoSelectBelow90: false } },
     )).toMatchObject({
       autoSelectBelow90: false,
-      autoPickThreshold: 92,
+      protectionRating: 92,
       openPicksAtEnd: true,
     });
 
@@ -244,5 +262,147 @@ describe('loop runtime option projection', () => {
     });
     applyLoopRuntimeOptions(loopDef, { rounds: 50 });
     expect(loopDef.maxCompletions).toBe(12);
+  });
+
+  it('migrates the legacy Pick threshold into the shared Protection rating', () => {
+    expect(normalizePickRuntimeOptions({ autoPickThreshold: 95 })).toMatchObject({
+      protectionRating: 95,
+    });
+    expect(resolvePickRuntimeOptions(
+      { autoPickThreshold: 91 },
+      { pickOptions: { protectionRating: 94 } },
+    )).toMatchObject({ protectionRating: 94 });
+  });
+
+  it('keeps the Rolling Storage sink opt-in across global and Loop overrides', () => {
+    expect(normalizePickRuntimeOptions({})).toMatchObject({
+      rollingStorageSinkEnabled: false,
+    });
+    expect(resolvePickRuntimeOptions(
+      { rollingStorageSinkEnabled: true },
+      { pickOptions: { rollingStorageSinkEnabled: false } },
+    )).toMatchObject({ rollingStorageSinkEnabled: false });
+
+    const disabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(disabled, { pickOptions: {} });
+    expect(disabled.rollingStorageSinkEnabled).toBe(false);
+
+    const enabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(enabled, {
+      pickOptions: { rollingStorageSinkEnabled: true },
+    });
+    expect(enabled).toMatchObject({
+      rollingStorageSinkEnabled: true,
+      runtimePickOptions: { rollingStorageSinkEnabled: true },
+    });
+  });
+
+  it('keeps proactive Rolling surplus crafting disabled unless explicitly enabled', () => {
+    expect(normalizePickRuntimeOptions({})).toMatchObject({
+      rollingSurplusCraftingEnabled: false,
+    });
+    expect(resolvePickRuntimeOptions(
+      { rollingSurplusCraftingEnabled: true },
+      { pickOptions: { rollingSurplusCraftingEnabled: false } },
+    )).toMatchObject({ rollingSurplusCraftingEnabled: false });
+
+    const disabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(disabled, { pickOptions: {} });
+    expect(disabled.rollingSurplusCraftingEnabled).toBe(false);
+
+    const enabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(enabled, {
+      pickOptions: { rollingSurplusCraftingEnabled: true },
+    });
+    expect(enabled).toMatchObject({
+      rollingSurplusCraftingEnabled: true,
+      runtimePickOptions: { rollingSurplusCraftingEnabled: true },
+    });
+  });
+
+  it('projects the configurable Provisions reserve, shortage batch, and reward timing onto Rolling', () => {
+    expect(normalizePickRuntimeOptions({ rollingProvisionsMaxRating: 89 })).toMatchObject({
+      rollingProvisionsMaxRating: 89,
+      rollingOpenDuplicateProvisionsRewards: false,
+      rollingShortageProvisionsPackLimit: 2,
+    });
+    expect(normalizePickRuntimeOptions({ rollingProvisionsMaxRating: 90 })).toMatchObject({
+      rollingProvisionsMaxRating: 88,
+    });
+    expect(normalizePickRuntimeOptions({ rollingShortageProvisionsPackLimit: 0 }))
+      .toMatchObject({ rollingShortageProvisionsPackLimit: 1 });
+    expect(normalizePickRuntimeOptions({ rollingShortageProvisionsPackLimit: 99 }))
+      .toMatchObject({ rollingShortageProvisionsPackLimit: 30 });
+
+    const loopDef = {
+      strategy: 'rollingUpgrade',
+      rollingProvisionsUpgrade: {
+        requirements: [{ tier: 'gold', count: 4, minRating: 87, maxRating: 89 }],
+      },
+    };
+    applyLoopRuntimeOptions(loopDef, {
+      pickOptions: {
+        rollingProvisionsMaxRating: 89,
+        rollingOpenDuplicateProvisionsRewards: true,
+        rollingShortageProvisionsPackLimit: 4,
+      },
+    });
+    expect(loopDef).toMatchObject({
+      runtimeProvisionsMaxRating: 89,
+      rollingOpenDuplicateProvisionsRewards: true,
+      rollingShortageProvisionsPackLimit: 4,
+      rollingProvisionsUpgrade: { requirements: [{ maxRating: 89 }] },
+    });
+  });
+
+  it('allows zero quantity only through the explicit Rolling contract', () => {
+    const rolling = {
+      strategy: 'rollingUpgrade',
+      runtimeQuantity: {
+        mode: 'user', target: 'maxCompletions', default: 0, min: 0, max: 1000, allowZero: true,
+      },
+    };
+    expect(resolveRuntimeQuantity(rolling)).toMatchObject({
+      default: 0,
+      min: 0,
+      allowZero: true,
+    });
+    applyLoopRuntimeOptions(rolling, {
+      rounds: 0,
+      openRewardPacks: true,
+      pickOptions: { protectionRating: 95 },
+    });
+    expect(rolling).toMatchObject({
+      maxCompletions: 0,
+      runtimeProtectionRating: 95,
+    });
+
+    expect(resolveRuntimeQuantity({
+      strategy: 'fillAndVerifySbc',
+      runtimeQuantity: {
+        mode: 'user', target: 'maxCompletions', default: 0, min: 0, max: 50, allowZero: true,
+      },
+    })).toMatchObject({ default: 1, min: 1 });
+  });
+
+  it('fails Rolling preflight before dispatch when rewards are closed or the workflow is staged', () => {
+    expect(() => assertRollingRuntimePreflight({
+      strategy: 'rollingUpgrade',
+      openRewardPacks: false,
+      rollingWorkflowEnabled: false,
+    })).toThrow('requires Open reward packs');
+    expect(() => assertRollingRuntimePreflight({
+      strategy: 'rollingUpgrade',
+      openRewardPacks: true,
+      rollingWorkflowEnabled: false,
+    })).toThrow('staged but not enabled');
+    expect(assertRollingRuntimePreflight({
+      strategy: 'rollingUpgrade',
+      openRewardPacks: true,
+      rollingWorkflowEnabled: true,
+    })).toMatchObject({ strategy: 'rollingUpgrade' });
+    expect(assertRollingRuntimePreflight({ strategy: 'playerPickSbc' })).toMatchObject({
+      strategy: 'playerPickSbc',
+    });
   });
 });

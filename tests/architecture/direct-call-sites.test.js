@@ -48,11 +48,11 @@ describe('current direct side-effect call baseline', () => {
     expect(source.match(/\bW\.services\.Item\.confirmPlayerPickItemSelection\s*\(/g) || []).toHaveLength(0);
     expect(playerPickAdapter.match(/\bservice\.redeem\s*\(/g) || []).toHaveLength(1);
     expect(playerPickAdapter.match(/\bservice\.confirmPlayerPickItemSelection\s*\(/g) || []).toHaveLength(1);
-    expect(source.match(/\bsaveChallengeSquad\s*\(/g) || []).toHaveLength(5);
+    expect(source.match(/\bsaveChallengeSquad\s*\(/g) || []).toHaveLength(6);
     expect(source).toMatch(/function\s+prepareSbcSquad\s*\(/);
     expect(source).toContain('prepareOnly: true');
-    expect(source.match(/\bsubmitSbcAttempt\s*\(\{/g) || []).toHaveLength(4);
-    expect(source.match(/prepareRuntimeAccess:\s*prepareFsuRuntimeAccess/g) || []).toHaveLength(4);
+    expect(source.match(/\bsubmitSbcAttempt\s*\(\{/g) || []).toHaveLength(7);
+    expect(source.match(/prepareRuntimeAccess:\s*prepareFsuRuntimeAccess/g) || []).toHaveLength(7);
     expect(source.match(/if \(!selection && !runtimeAccess\?\.refreshedClubPlayers\) return;/g) || []).toHaveLength(1);
     expect(source.match(/if \(ratingSbcFill \|\| !runtimeAccess\?\.refreshedClubPlayers\) return;/g) || []).toHaveLength(1);
     expect(source.match(/applying freshly validated Club entities before submit/g) || []).toHaveLength(2);
@@ -199,6 +199,9 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('return adapters.dom.click(el);');
     expect(source).toContain("from './selection/rating-model.js'");
     expect(source).toContain("from './selection/rating-candidates.js'");
+    expect(source).toContain('buildRatingSbcCandidateEntries(loopDef, model, selectionPolicy)');
+    expect(source).toContain('...(selectionPolicy ? { selectionPolicy } : {})');
+    expect(source).toContain('roleAware: selectionPolicy !== null');
     expect(source).toContain('return parseRatingSbcChallengePure({');
     expect(source).not.toMatch(/function\s+(?:requirementFirstKey|flattenRequirementValues|requirementValues|itemMatchesDynamicRequirement)\s*\(/);
     expect(source).not.toMatch(/function\s+(?:comparePileSelections|mergePileCounts|ratingGroupSelectionOptions|buildRatingMaterializationContext|materializeRatingVector)\s*\(/);
@@ -262,13 +265,17 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('Opened item policy is required for');
     expect(source).toMatch(/const retryCodes = \[\.\.\.new Set\(\[[\s\S]*?\.\.\.DEFAULT_PACK_OPEN_RETRY_CODES/);
     expect(source).toMatch(/onTransportFailure:[\s\S]*?emitDiagnostic\(log[\s\S]*?pack open transport attempt[\s\S]*?beforeRetry:[\s\S]*?isAmbiguousPackOpenFailure\(code\)/);
-    expect(source).toMatch(/packSelector:[\s\S]*?isAmbiguousPackOpenFailure\(lastReason\)[\s\S]*?findFreshPackInstance\(currentPack, getAvailableRepositoryMyPacks\(\)\)/);
+    expect(source).toMatch(/packSelector:[\s\S]*?captureStableRuntimePackOpenRetrySnapshot\(failedPack\)[\s\S]*?decidePackOpenRetry\(/);
+    expect(source).toMatch(/packUnavailableResult:[\s\S]*?retryDecision\.reason[\s\S]*?retryEvidence/);
+    expect(source).toMatch(/openTransport:[\s\S]*?retryBaseline = captureRuntimePackOpenRetrySnapshot\(selectedPack\)/);
+    expect(source).not.toContain('findFreshPackInstance');
     const packCalls = source.match(/await\s+openPack\s*\(/g) || [];
     const explicitPolicies = source.split(/\r?\n/).filter((line) =>
       line.includes('openedItemPolicy:') && !line.includes('options.openedItemPolicy')
     );
-    expect(packCalls).toHaveLength(8);
+    expect(packCalls).toHaveLength(10);
     expect(explicitPolicies).toHaveLength(packCalls.length);
+    expect(source).toMatch(/function\s+openRollingRecoveryReward[\s\S]*?openedItemPolicy:\s*createRollingPrimaryPackPolicy/);
     expect(source).toContain('runBatchOpenWorkflow({');
     expect(source).toMatch(/runBatchOpenWorkflow\(\{[\s\S]*?openPack:\s*async[\s\S]*?openedItemPolicy:\s*createMaterializeAndResolvePolicy/);
     expect(source).toMatch(/Batch Open[\s\S]*?createMaterializeAndResolvePolicy\([\s\S]*?blockedPolicy:\s*['"]preserve['"]/);
@@ -278,16 +285,50 @@ describe('current direct side-effect call baseline', () => {
     expect(source).not.toContain("resolveRuntimeUnassigned('Batch Open final cleanup')");
   });
 
-  it('collects ordinary Loop receipts once at shared pack entry and finalizes one top-level recap session', async () => {
+  it('collects pack recap data once and keeps Rolling retention separate from ordinary Loop receipts', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
-    expect(source).toContain('function recordLoopPackReceipt(receipt)');
-    expect(source).toMatch(/state\.lastOpenPackReceipt = receipt;\s*recordLoopPackReceipt\(receipt\);/);
-    expect(source.match(/recordLoopPackReceipt\(receipt\)/g) || []).toHaveLength(2);
+    expect(source).toContain('function recordLoopPackReceipt(receipt, sourceLabel = null)');
+    expect(source).toMatch(/state\.lastOpenPackReceipt = receipt;\s*recordLoopPackReceipt\(receipt, purpose\);/);
+    expect(source.match(/recordLoopPackReceipt\(receipt/g) || []).toHaveLength(2);
+    expect(source).toContain('if (state.loopRecapSession.rollingAggregator)');
+    expect(source).toContain('state.loopRecapSession.receipts.push(receipt);');
     expect(source).toMatch(/state\.running = true;[\s\S]*?beginLoopRecapSession\(loopDef\);/);
-    expect(source).toMatch(/finally \{[\s\S]*?await finalizeLoopRecap\(loopDef, runStatus, runReason\);/);
+    expect(source).toMatch(/finally \{[\s\S]*?await finalizeLoopRecap\(loopDef, runStatus, runReason, runResult\);/);
     expect(source).toContain('if (!session || session.dedicatedRecap) return null;');
+    expect(source).toContain('if (session.rollingAggregator)');
     expect(source).toContain('if (!hasRecapRareGoldOrAbove(openedItems))');
+    expect(source).toMatch(/function recordRollingPlayerPickResult[\s\S]*?publishPackHighlight\(items,/);
+    expect(source.match(/publishPackHighlight\(items,/g) || []).toHaveLength(1);
     expect(source).toContain('if (recapModel?.hasQualifyingCards) void showBatchRecapModal(recapModel);');
+  });
+
+  it('selects a completed Storage Sink Pick before retrying deferred Storage routing', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const recoveryStart = source.indexOf('async function runRollingStorageSinkRecovery');
+    const recoveryEnd = source.indexOf('function publishRollingTelemetry', recoveryStart);
+    const recovery = source.slice(recoveryStart, recoveryEnd);
+    const postSubmitSelection = recovery.lastIndexOf('await selectPendingRollingStorageSinkPick');
+    const protectedStorageRetry = recovery.lastIndexOf('await retryRollingProtectedStorage');
+
+    expect(recoveryStart).toBeGreaterThan(-1);
+    expect(postSubmitSelection).toBeGreaterThan(-1);
+    expect(protectedStorageRetry).toBeGreaterThan(postSubmitSelection);
+    expect(recovery).toContain('pickSelected: true');
+  });
+
+  it('wires startup Storage Sink Pick recovery before generic Unassigned recovery', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const pendingPickResume = source.indexOf('resumePendingPlayerPick: async () =>');
+    const pendingUnassignedResume = source.indexOf('resumePendingUnassigned: async () =>', pendingPickResume);
+    const workflowSource = await readFile(path.join(root, 'src', 'workflows', 'rolling-upgrade.js'), 'utf8');
+    const workflowPickResume = workflowSource.indexOf("typeof options.resumePendingPlayerPick === 'function'");
+    const workflowUnassignedResume = workflowSource.indexOf("typeof options.resumePendingUnassigned === 'function'");
+
+    expect(pendingPickResume).toBeGreaterThan(-1);
+    expect(pendingUnassignedResume).toBeGreaterThan(pendingPickResume);
+    expect(source.slice(pendingPickResume, pendingUnassignedResume)).toContain('failOnUnexpected: false');
+    expect(workflowPickResume).toBeGreaterThan(-1);
+    expect(workflowUnassignedResume).toBeGreaterThan(workflowPickResume);
   });
 
   it('reserves supply-and-craft Unassigned materials before pre-selection cleanup', async () => {
@@ -297,10 +338,14 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('const preserveSupply = cleanup.status === \'preserved\';');
   });
 
-  it('opens the Unassigned page to materialize all-duplicate pack responses', async () => {
+  it('forces fresh Repository evidence for all-duplicate pack responses', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
-    expect(source).toContain('needsUnassignedViewMaterialization(materialized)');
-    expect(source).toContain('all-duplicate materialization');
+    expect(source).toContain('materializeFreshUnassigned({');
+    expect(source).toContain('invalidate: () => inventoryAdapter.invalidateUnassigned()');
+    expect(source).toContain("readRepositoryItems: () => inventoryAdapter.readPile('unassigned')");
+    expect(source).toContain('readRepositoryState: () => inventoryAdapter.unassignedState()');
+    expect(source).not.toContain('needsUnassignedViewMaterialization(materialized)');
+    expect(source).not.toContain('all-duplicate materialization');
     expect(source).toContain('delayed materialization retry ${attempt + 1}/3');
   });
 
@@ -310,7 +355,7 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('showPickRecapModal(definition, pickResults, result)');
     expect(source).toContain('status: result.status');
     expect(source).toContain('reason: result.reason');
-    expect(source).toMatch(/confirmSelection\(selected\)[\s\S]*?onSelectionConfirmed\?\.\(selectedCards\)[\s\S]*?resolveRuntimeUnassigned/);
+    expect(source).toMatch(/confirmSelection\(selected\)[\s\S]*?onSelectionConfirmed\?\.\(selectedCards\)[\s\S]*?invalidateUnassigned\(\)[\s\S]*?refreshUnassigned[\s\S]*?resolveRuntimeUnassigned/);
     expect(source).toMatch(/redeemPick: async \(\{ pickItem, resumed, onSelectionConfirmed \}\)[\s\S]*?redeemAndSelectPlayerPick\(pickItem, loopDef[\s\S]*?onSelectionConfirmed/);
     expect(source).toMatch(/recordPreCraftPick[\s\S]*?loopRecapSession\.dedicatedRecap = true/);
     expect(source).toMatch(/catch \(error\) \{[\s\S]*?publishPreCraftPickRecap\(failedResult\)[\s\S]*?throw error/);
@@ -337,7 +382,7 @@ describe('current direct side-effect call baseline', () => {
 
     expect(discoverySource).not.toMatch(/unknown PLAYER_RARITY_GROUP encoding/);
     expect(policySource).not.toMatch(/requiredSpecialKind:\s*'totw-tots-fof'/);
-    expect(ratingSource).toContain("if (keyName === 'PLAYER_RARITY_GROUP') return false;");
-    expect(ratingSource).toContain('live EA matcher unavailable');
+    expect(ratingSource).toContain('matchesPlayerRarityGroup');
+    expect(ratingSource).toContain('runtime adapter supplies');
   });
 });

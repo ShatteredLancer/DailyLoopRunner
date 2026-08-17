@@ -10,11 +10,7 @@ const IDS = [
   'bronze-loop-help-run-options',
   'bronze-loop-help-config',
   'bronze-loop-help-log',
-  'bronze-loop-low-rated-gold-max',
-  'bronze-loop-rating-sbc-max-card',
-  'bronze-loop-pick-auto-below-90',
-  'bronze-loop-pick-open-at-end',
-  'bronze-loop-pick-auto-threshold',
+  'bronze-loop-selection-policy-settings',
   'bronze-loop-daily-inventory-only',
   'bronze-loop-reward-alert-enabled',
   'bronze-loop-reward-alert-settings',
@@ -81,7 +77,7 @@ describe('main panel bindings', () => {
   it('binds every command control and forwards the selected loop id', () => {
     const { panel, controls } = harness();
     const commands = Object.fromEntries([
-      'selectLoop', 'selectProfile', 'setLayoutMode', 'openBuilder', 'openHelp', 'savePickOptions', 'saveSbcFodderOptions', 'saveLoopOptions', 'start', 'openBatch', 'openTrade', 'reopenRecap',
+      'selectLoop', 'selectProfile', 'setLayoutMode', 'openBuilder', 'openHelp', 'openSelectionPolicySettings', 'saveLoopOptions', 'start', 'openBatch', 'openTrade', 'reopenRecap',
       'refresh', 'scanPicks', 'stop', 'copyLog', 'clearLog', 'downloadLog',
       'saveRewardAlertEnabled', 'openRewardAlertSettings',
     ].map((name) => [name, vi.fn()]));
@@ -100,6 +96,7 @@ describe('main panel bindings', () => {
     for (const [id, event, command] of [
       ['bronze-loop-open-builder', 'click', 'openBuilder'],
       ['bronze-loop-daily-inventory-only', 'change', 'saveLoopOptions'],
+      ['bronze-loop-selection-policy-settings', 'click', 'openSelectionPolicySettings'],
       ['bronze-loop-reward-alert-enabled', 'change', 'saveRewardAlertEnabled'],
       ['bronze-loop-reward-alert-settings', 'click', 'openRewardAlertSettings'],
       ['bronze-loop-start', 'click', 'start'],
@@ -125,11 +122,6 @@ describe('main panel bindings', () => {
       controls.get(id).emit('click');
       expect(commands.openHelp).toHaveBeenCalledWith(topic, expect.any(Object));
     }
-    controls.get('bronze-loop-low-rated-gold-max').emit('change');
-    controls.get('bronze-loop-rating-sbc-max-card').emit('change');
-    controls.get('bronze-loop-pick-auto-threshold').emit('change');
-    expect(commands.saveSbcFodderOptions).toHaveBeenCalledTimes(2);
-    expect(commands.savePickOptions).toHaveBeenCalledTimes(1);
   });
 
   it('fails fast when a required template control is missing', () => {
@@ -139,29 +131,15 @@ describe('main panel bindings', () => {
     })).toThrow(/control is missing/);
   });
 
-  it('hydrates saved inventory and Player Pick options', () => {
+  it('hydrates the remaining inline options', () => {
     const { panel, controls } = harness();
     hydrateMainPanelOptions({
       panel,
       loopOptions: { dailyRecycleInventoryOnly: true },
-      pickOptions: {
-        autoSelectBelow90: false,
-        openPicksAtEnd: true,
-        autoPickThreshold: 91,
-      },
-      sbcFodderOptions: {
-        lowRatedGoldMaxRating: 82,
-        ratingSbcMaxCardRating: 88,
-      },
       rewardAlertSettings: { enabled: true },
       layoutMode: 'mobile',
     });
     expect(controls.get('bronze-loop-daily-inventory-only').checked).toBe(true);
-    expect(controls.get('bronze-loop-low-rated-gold-max').value).toBe(82);
-    expect(controls.get('bronze-loop-rating-sbc-max-card').value).toBe(88);
-    expect(controls.get('bronze-loop-pick-auto-below-90').checked).toBe(false);
-    expect(controls.get('bronze-loop-pick-open-at-end').checked).toBe(true);
-    expect(controls.get('bronze-loop-pick-auto-threshold').value).toBe(91);
     expect(controls.get('bronze-loop-reward-alert-enabled').checked).toBe(true);
     expect(controls.get('bronze-loop-layout-mode').value).toBe('mobile');
   });

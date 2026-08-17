@@ -50,6 +50,7 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel.icon-only .bronze-loop-title-label,
   #bronze-loop-panel.icon-only #bronze-loop-options-toggle { display: none; }
   #bronze-loop-panel.icon-only #bronze-loop-drag { width: 34px; height: 34px; margin: 0; justify-content: center; }
+  #bronze-loop-panel.icon-only #bronze-loop-runtime-telemetry { display: none !important; }
   #bronze-loop-drag { cursor: move; user-select: none; justify-content: space-between; }
   .bronze-loop-title-label { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
   #bronze-loop-title { flex: 0 1 auto; min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -73,6 +74,8 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel input[type="checkbox"] { width: 14px; height: 14px; accent-color: #78a6ff; }
   #bronze-loop-panel label { cursor: pointer; user-select: none; }
   #bronze-loop-panel .bronze-loop-option-summary { color: #9fb2c9; font-size: 11px; flex: 1 1 auto; min-width: 100px; }
+  #bronze-loop-selection-policy-summary { flex: 1 1 160px; min-width: 120px; line-height: 15px; }
+  #bronze-loop-selection-policy-settings { flex: 0 0 auto; }
   #bronze-loop-panel select { flex: 1; min-width: 0; height: 28px; background: #222832; color: #fff; border: 1px solid #607089; }
   #bronze-loop-scan-mode { flex: 0 1 94px !important; min-width: 86px !important; }
   #bronze-loop-panel .bronze-loop-profile-row span { flex: 0 0 auto; color: #9fb2c9; }
@@ -85,6 +88,29 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-scan-progress[data-mode="indeterminate"] #bronze-loop-scan-progress-bar { width: 35% !important; animation: bronze-loop-scan-slide 1.05s ease-in-out infinite; }
   @keyframes bronze-loop-scan-slide { from { transform: translateX(-120%); } to { transform: translateX(310%); } }
   @media (prefers-reduced-motion: reduce) { #bronze-loop-scan-progress-bar { transition: none; } #bronze-loop-scan-progress[data-mode="indeterminate"] #bronze-loop-scan-progress-bar { animation: none; } }
+  #bronze-loop-runtime-telemetry {
+    display: none;
+    flex: 0 0 104px;
+    min-height: 104px;
+    margin: 0 0 8px;
+    color: #d7e2f0;
+    font-size: 11px;
+    box-sizing: border-box;
+  }
+  .bronze-loop-runtime-head { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 7px; }
+  #bronze-loop-runtime-phase { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f4f6f8; font-weight: 700; }
+  #bronze-loop-runtime-cycle, #bronze-loop-runtime-refreshing { flex: 0 0 auto; color: #9fb2c9; font-variant-numeric: tabular-nums; }
+  #bronze-loop-runtime-refreshing { width: 52px; text-align: right; }
+  .bronze-loop-runtime-grid { display: grid; grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1fr) 30px; gap: 5px 7px; align-items: baseline; }
+  .bronze-loop-runtime-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9fb2c9; }
+  .bronze-loop-runtime-value { min-width: 30px; text-align: right; color: #f4f6f8; font-variant-numeric: tabular-nums; }
+  .bronze-loop-runtime-storage { display: grid; grid-template-columns: auto 58px minmax(64px, 1fr); gap: 8px; align-items: center; margin-top: 8px; }
+  #bronze-loop-runtime-storage-value { text-align: right; font-variant-numeric: tabular-nums; color: #f4f6f8; }
+  #bronze-loop-runtime-storage-track { height: 7px; overflow: hidden; background: #252c35; border: 1px solid #3c4858; box-sizing: border-box; }
+  #bronze-loop-runtime-storage-bar { height: 100%; width: 0; background: #78a6ff; transition: width .18s ease-out, background-color .18s ease-out; }
+  #bronze-loop-runtime-telemetry[data-storage-pressure="warning"] #bronze-loop-runtime-storage-bar { background: #ffcf66; }
+  #bronze-loop-runtime-telemetry[data-storage-pressure="danger"] #bronze-loop-runtime-storage-bar { background: #ef7777; }
+  #bronze-loop-panel.has-runtime-telemetry:not(.icon-only) { min-height: 298px; }
   #bronze-loop-latest {
     flex: 1 1 auto;
     min-height: 28px;
@@ -188,6 +214,9 @@ export const MAIN_PANEL_STYLE = `
   #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="options"],
   #bronze-loop-panel[data-layout="mobile"][data-mobile-tab="log"] { height: min(88dvh, 760px) !important; }
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] { height: 154px !important; min-height: 154px; }
+  #bronze-loop-panel[data-layout="mobile"].is-running.has-runtime-telemetry[data-mobile-tab="run"] {
+    height: auto !important; min-height: 278px; max-height: min(60dvh, 420px);
+  }
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-mobile-tabs,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] .bronze-loop-loop-row,
   #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] #bronze-loop-start,
@@ -214,6 +243,7 @@ export const MAIN_PANEL_STYLE = `
   @media (max-height: 520px) {
     #bronze-loop-panel[data-layout="mobile"] { height: calc(100dvh - env(safe-area-inset-top, 0px)) !important; }
     #bronze-loop-panel[data-layout="mobile"].is-running[data-mobile-tab="run"] { height: 142px !important; }
+    #bronze-loop-panel[data-layout="mobile"].is-running.has-runtime-telemetry[data-mobile-tab="run"] { height: auto !important; min-height: 260px; max-height: calc(100dvh - env(safe-area-inset-top, 0px)); }
   }
 `;
 
@@ -252,6 +282,19 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
         <div class="bronze-loop-scan-progress-head"><span id="bronze-loop-scan-progress-label">Refreshing SBC index</span><span id="bronze-loop-scan-progress-count"></span></div>
         <div id="bronze-loop-scan-progress-track" role="progressbar" aria-label="Dynamic SBC scan progress"><div id="bronze-loop-scan-progress-bar"></div></div>
       </div>
+      <section id="bronze-loop-runtime-telemetry" role="status" aria-live="polite" aria-hidden="true" title="Live ledger metrics; exact Direct and TOTW counts are evaluated only when needed">
+        <div class="bronze-loop-runtime-head"><span id="bronze-loop-runtime-phase">Indexing inventory</span><span id="bronze-loop-runtime-cycle">Cycle 1 / No limit</span><span id="bronze-loop-runtime-refreshing"></span></div>
+        <div class="bronze-loop-runtime-grid">
+          <span class="bronze-loop-runtime-label">Special ready</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-special">-</strong>
+          <span class="bronze-loop-runtime-label">Direct cycles</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-direct">-</strong>
+          <span class="bronze-loop-runtime-label">Provisions</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-provisions">-</strong>
+          <span class="bronze-loop-runtime-label">TOTW recoveries</span><strong class="bronze-loop-runtime-value" id="bronze-loop-runtime-totw">-</strong>
+        </div>
+        <div class="bronze-loop-runtime-storage">
+          <span class="bronze-loop-runtime-label">Storage</span><strong id="bronze-loop-runtime-storage-value">- / -</strong>
+          <span id="bronze-loop-runtime-storage-track" role="progressbar" aria-label="SBC Storage usage"><span id="bronze-loop-runtime-storage-bar"></span></span>
+        </div>
+      </section>
       <div id="bronze-loop-latest">Ready.</div>
       </div>
       <div id="bronze-loop-options">
@@ -266,29 +309,15 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
             <input id="bronze-loop-daily-inventory-only" type="checkbox"> Inventory only
           </label>
         </div>
+        <div class="row" id="bronze-loop-selection-policy-row">
+          <span class="bronze-loop-option-summary">Selection policy</span>
+          <span id="bronze-loop-selection-policy-summary" class="bronze-loop-option-summary">SBC <=88 | Safe <=90 | Picks Auto</span>
+          <button id="bronze-loop-selection-policy-settings" title="Configure SBC, Rolling, and Player Pick selection policy">Settings</button>
+        </div>
         <div class="row" id="bronze-loop-reward-alert-row">
           <label title="Enable high-rated special-card alerts"><input id="bronze-loop-reward-alert-enabled" type="checkbox"> Reward alerts</label>
           <span id="bronze-loop-reward-alert-summary" class="bronze-loop-option-summary">94+ special | highlight</span>
           <button id="bronze-loop-reward-alert-settings" title="Reward alert settings">Settings</button>
-        </div>
-        <div class="row">
-          <label title="Non-rating SBCs use normal Gold players up to this rating; FSU Gold Range can make the effective limit lower">
-            Low-rated SBC Gold max
-            <input id="bronze-loop-low-rated-gold-max" type="number" min="1" max="99" value="82">
-          </label>
-          <label title="Rating-constrained SBCs use no submitted player above this rating, including Special cards">
-            Rating SBC max card
-            <input id="bronze-loop-rating-sbc-max-card" type="number" min="1" max="99" value="88">
-          </label>
-          <label title="Player Picks whose candidates are all below this rating will be selected automatically">
-            <input id="bronze-loop-pick-auto-below-90" type="checkbox"> Auto-pick below
-            <input id="bronze-loop-pick-auto-threshold" type="number" min="1" max="99" value="90">
-          </label>
-        </div>
-        <div class="row">
-          <label title="Complete the requested Player Pick SBC count first, then open the matching Picks together">
-            <input id="bronze-loop-pick-open-at-end" type="checkbox"> Open Picks at end
-          </label>
         </div>
         <div class="row" id="bronze-loop-rounds-row">
           <span id="bronze-loop-rounds-label">Rounds</span>

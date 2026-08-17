@@ -1,4 +1,9 @@
-import { readPlayerRareFlag } from '../domain/player-rarity.js';
+import {
+  hasPlayerCosmetics,
+  hasPlayerUpgrades,
+  isPlayerEvolutionCard,
+  readPlayerRareFlag,
+} from '../domain/player-rarity.js';
 
 function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -29,7 +34,40 @@ function resultLayer(value) {
       status: primitiveOrNull(value.status),
       statusCode: primitiveOrNull(value.statusCode),
       code: primitiveOrNull(value.code),
+      reason: primitiveOrNull(value.reason),
       message: primitiveOrNull(value.message),
+    };
+  } catch (error) {
+    return { diagnosticError: error?.message || String(error) };
+  }
+}
+
+function boundedScalarValues(value, maxKeys = 60) {
+  if (!value || typeof value !== 'object') return null;
+  const entries = [];
+  for (const key of Object.keys(value).sort()) {
+    let scalar;
+    try { scalar = value[key]; } catch { continue; }
+    if (!['string', 'number', 'boolean'].includes(typeof scalar) && scalar !== null) continue;
+    entries.push([key, primitiveOrNull(scalar)]);
+    if (entries.length >= maxKeys) break;
+  }
+  return Object.fromEntries(entries);
+}
+
+export function captureRuntimePack(pack, options = {}) {
+  if (!pack || typeof pack !== 'object') return null;
+  try {
+    const identify = typeof options.identify === 'function' ? options.identify : () => null;
+    const data = pack._data ?? pack.data ?? null;
+    return {
+      objectRef: identify(pack),
+      type: pack?.constructor?.name || 'Object',
+      keys: Object.keys(pack).sort().slice(0, 80),
+      scalars: boundedScalarValues(pack),
+      dataType: data?.constructor?.name || null,
+      dataKeys: data && typeof data === 'object' ? Object.keys(data).sort().slice(0, 80) : [],
+      dataScalars: boundedScalarValues(data),
     };
   } catch (error) {
     return { diagnosticError: error?.message || String(error) };
@@ -61,6 +99,9 @@ export function captureRuntimeInventoryItem(item, options = {}) {
       definitionId: numberOrNull(item.definitionId ?? item.defId ?? item._data?.definitionId),
       rating: numberOrNull(item.rating ?? item._data?.rating),
       rareflag: readPlayerRareFlag(item),
+      evolution: isPlayerEvolutionCard(item),
+      hasUpgrades: hasPlayerUpgrades(item),
+      hasCosmetics: hasPlayerCosmetics(item),
       pile: primitiveOrNull(item.pile),
       privatePile: primitiveOrNull(item._pile),
       dataPile: primitiveOrNull(item._data?.pile),

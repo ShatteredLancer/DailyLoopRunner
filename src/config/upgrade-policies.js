@@ -94,8 +94,29 @@ export function createHighRatedUpgradePolicy(overrides = {}) {
   }, overrides);
 }
 
+export function createProvisionsUpgradePolicy(overrides = {}) {
+  return mergePolicy({
+    strategy: 'fillAndVerifySbc',
+    hidden: true,
+    requirements: [{
+      tier: 'gold',
+      count: 1,
+      playerOnly: true,
+      allowSpecial: true,
+      priorityPiles: [...ALL_INVENTORY_PILES],
+    }],
+    ratingSbcFill: { priorityPiles: [...ALL_INVENTORY_PILES] },
+    requiredSpecialCount: 0,
+    allowedSpecialCount: 0,
+    blockSpecial: false,
+    blockTradeable: false,
+    openRewardPacks: false,
+  }, overrides);
+}
+
 export function createDynamicUpgradePolicy(family = {}, overrides = {}) {
   if (family.id === 'totw-upgrade') return createTotwUpgradePolicy(overrides);
   if (family.id === '2x84-upgrade') return createTwoBy84UpgradePolicy(overrides);
+  if (family.id === 'provisions-upgrade') return createProvisionsUpgradePolicy(overrides);
   return createHighRatedUpgradePolicy(overrides);
 }

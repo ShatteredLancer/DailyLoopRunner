@@ -68,9 +68,11 @@ import { resolveSessionLoopByActivityFamily } from './config/session-loops.js';
 import {
   applyLoopRuntimeOptions,
   applyPickRuntimeOptions,
+  assertRollingRuntimePreflight,
   loopUsesRounds,
   normalizePickRuntimeOptions,
   resolveRuntimeQuantity,
+  shouldAutoSelectPlayerPick,
 } from './config/runtime-options.js';
 import {
   assertValidLoopDef as assertValidLoopDefPure,
@@ -103,6 +105,14 @@ import {
   parseDynamicUpgradeSbcSnapshot,
 } from './config/upgrade-discovery.js';
 import {
+  applyRollingAutomaticUseFodderPolicy,
+  bindRollingPlayerPickCapabilities,
+  ROLLING_PROVISIONS_RATING_RANGE,
+  resolveRollingAutomaticUseMaxRating,
+  resolveRollingProvisionsReserveRatings,
+  shouldQueueRollingProvisionsReward,
+} from './config/rolling-upgrade.js';
+import {
   buildActivityBindingSession,
   collectActivityBindingSbcNames,
   parseBasicUpgradeActivitySnapshot,
@@ -123,8 +133,26 @@ import { calculateEaSquadRating } from './domain/rating.js';
 import { createRuntimeAdapters } from './adapters/index.js';
 import { emitDiagnostic } from './diagnostics/safe-log.js';
 import { createItemSnapshot } from './domain/contracts.js';
+import { createInventoryLedgerCoordinator } from './inventory/ledger-coordinator.js';
+import { createInventoryCapabilityCalculator } from './inventory/capabilities.js';
+import {
+  classifyRollingInventoryItem,
+  createRollingPrimarySelectionPolicy,
+  createRollingRatingRecoverySelectionPolicy,
+  createRollingRecoveryProtection,
+  createRollingRequiredSpecialSourceFilter,
+  diagnoseRollingInventoryRefs,
+  planRollingStorageMaintenance,
+  planRollingOpenedItemRouting,
+  releaseRollingPrimaryDuplicateRefs,
+  releaseRollingRoutingItemsAfterConsumption,
+  rollingPrimaryDuplicateRelaxationOrder,
+  validateRollingPrimaryDuplicateIdentity,
+} from './inventory/rolling-policy.js';
 import { runtimeGoldConsumptionMode } from './domain/gold-consumption.js';
 import {
+  isPlayerEvolutionCard,
+  isSamePlayerCardVersion,
   isRarePlayerCard,
   isSpecialPlayerCard,
   readPlayerRareFlag,
@@ -134,6 +162,16 @@ import {
   buildRatingCandidateEntries,
   selectRatingCandidateEntries,
 } from './selection/rating-candidates.js';
+import {
+  nextStorageSinkContext,
+  planMultiSquadRatingSelections,
+  prepareStorageSink89Candidates,
+  selectStorageSinkClubFallbackEntries,
+  STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
+  storageSinkSquadSourceStrategy,
+  validateStorageRecoveryHeadroom,
+  validateStorageSinkHeadroom,
+} from './selection/multi-squad-rating.js';
 import {
   parseRatingSbcChallenge as parseRatingSbcChallengePure,
   validateRatingSbcModelAgainstItems as validateRatingSbcModelAgainstItemsPure,
@@ -228,14 +266,21 @@ import {
   createLoopRecapModel,
   hasRecapRareGoldOrAbove,
 } from './reward/loop-recap.js';
+import {
+  createRollingRecapAggregator,
+  createRollingRecapModel,
+} from './reward/rolling-recap.js';
 import { resolveFutbinCardIds } from './reward/futbin-card-id.js';
 import { hasPlayerPickRecapCards } from './reward/player-pick-recap.js';
 import { resolveUnassigned } from './unassigned/resolve.js';
+import { materializeFreshUnassigned } from './unassigned/fresh-materialization.js';
+import { recoverRuntimeUnassignedNavigation } from './unassigned/runtime-navigation.js';
 import { confirmUnassignedView } from './unassigned/confirmation.js';
 import {
   captureDefinitionPileState,
   captureMoveResult,
   captureRuntimeInventoryItem,
+  captureRuntimePack,
   createRuntimeObjectIdentityTracker,
   diagnosticJson,
 } from './unassigned/diagnostics.js';
@@ -246,6 +291,7 @@ import {
 } from './unassigned/recovery.js';
 import {
   DEFAULT_PACK_OPEN_RETRY_CODES,
+  capturePackOpenResultEvidence,
   isAmbiguousPackOpenFailure,
   openPackTransaction,
 } from './pack/open-transaction.js';
@@ -254,13 +300,19 @@ import {
   createOpenedItemRoutingBaseline,
   matchOpenedItemsToNewPileAliases,
   materializeOpenedPlayerDuplicates,
-  needsUnassignedViewMaterialization,
   partitionOpenedItemsByLiveUnassigned,
   planUnmaterializedDuplicateFallback,
 } from './pack/opened-item-materialization.js';
 import { createPackInstanceQueue } from './pack/instance-queue.js';
 import { settleOpenedItems } from './pack/opened-item-settlement.js';
 import { recoverPackOpenRetry } from './pack/retry-recovery.js';
+import {
+  PACK_OPEN_RESPONSE_LOST,
+  PACK_OPEN_RESULT_AMBIGUOUS,
+  capturePackOpenRetrySnapshot,
+  decidePackOpenRetry,
+  samePackOpenRetrySnapshot,
+} from './pack/retry-reconciliation.js';
 import { findPackWithRecovery } from './pack/source-lookup.js';
 import {
   bindPackCatalogLoops,
@@ -269,7 +321,7 @@ import {
   resolveSourcePackIdentity,
   updatePackCatalogInventory,
 } from './pack/catalog.js';
-import { createStalePackTracker, findFreshPackInstance } from './pack/stale-pack-tracker.js';
+import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import { planBackgroundSubmitRetry } from './sbc/background-submit-retry.js';
 import { classifyOpenedUpgradeDuplicates } from './pack/upgrade-duplicate-routing.js';
@@ -283,8 +335,16 @@ import { runSequenceWorkflow } from './workflows/sequence.js';
 import { runValidationRoundWorkflow } from './workflows/validation-round.js';
 import { runBatchOpenWorkflow } from './workflows/batch-open.js';
 import { runInventoryExhaustionWorkflow } from './workflows/inventory-exhaustion.js';
+import {
+  ROLLING_UPGRADE_PHASES,
+  runRollingUpgradeWorkflow,
+} from './workflows/rolling-upgrade.js';
 import { dispatchConfiguredWorkflow } from './workflows/dispatch.js';
 import { createLogRenderer, formatLogHtml } from './ui/log-renderer.js';
+import {
+  createRuntimeTelemetryController,
+  createRuntimeTelemetrySnapshot,
+} from './runtime/telemetry.js';
 import { bindMainPanelCommands, hydrateMainPanelOptions } from './ui/main-panel-bindings.js';
 import { createMainPanelCommands } from './ui/main-panel-commands.js';
 import { createMainPanelGeometry } from './ui/main-panel-geometry.js';
@@ -297,6 +357,7 @@ import {
   renderMainPanelRounds,
   renderMainPanelRuntimeState,
   renderRewardAlertSummary,
+  renderSelectionPolicySummary,
 } from './ui/main-panel-state.js';
 import { mountMainPanel, setMainPanelStartupHidden } from './ui/main-panel-view.js';
 import { createWorkflowLoopBuilder } from './ui/workflow-loop-builder.js';
@@ -306,6 +367,7 @@ import { triggerRewardFireworks } from './ui/reward-celebration.js';
 import { createSbcRewardOverlay } from './ui/sbc-reward-overlay.js';
 import { showPackHighlightToast } from './ui/reward-highlight.js';
 import { showRewardAlertSettings } from './ui/reward-alert-settings.js';
+import { showSelectionPolicySettings } from './ui/selection-policy-settings.js';
 import { showBatchOpenDialog } from './ui/batch-open-dialog.js';
 import { showBatchOpenRecap } from './ui/batch-open-recap.js';
 import { showLoopRecap } from './ui/loop-recap.js';
@@ -364,6 +426,7 @@ const SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED = true;
   const localizationAdapter = adapters.localization;
   const pageRuntime = adapters.page;
   const identifyRuntimeInventoryItem = createRuntimeObjectIdentityTracker();
+  const identifyRuntimePack = createRuntimeObjectIdentityTracker('ea-pack');
   const tradePlayerCatalogProvider = createPlayerCatalogProvider({
     requestText: adapters.http.getText,
     storage: adapters.userscriptStorage,
@@ -547,6 +610,7 @@ const SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED = true;
 const state = {
     running: false,
     stopping: false,
+    committedSbcSubmitDepth: 0,
     refreshing: false,
     scanningPicks: false,
     dynamicSbcScanProgress: null,
@@ -600,8 +664,19 @@ const state = {
     panelGeometry: null,
     layoutController: null,
     sbcLoadLogKeys: new Set(),
+    pickOptions: normalizePickRuntimeOptions(),
+    sbcFodderOptions: normalizeSbcFodderPolicy(),
     rewardAlertSettings: normalizeRewardAlertSettings(),
+    runtimeTelemetry: createRuntimeTelemetrySnapshot(),
+    runtimeTelemetryController: null,
   };
+  state.runtimeTelemetryController = createRuntimeTelemetryController({
+    initialSnapshot: state.runtimeTelemetry,
+    onSnapshot: (snapshot) => {
+      state.runtimeTelemetry = snapshot;
+      setPanelState();
+    },
+  });
   const tradeOperationCoordinator = createOperationCoordinator({
     externalBusy: () => ({
       busy: state.running || state.refreshing || state.scanningPicks || state.loadingLoops,
@@ -622,12 +697,14 @@ const state = {
     if (state.tradeSchedulerTimer) clearInterval(state.tradeSchedulerTimer);
     state.tradeSchedulerWakeups?.stop?.();
     state.logRenderer?.destroy?.();
+    state.runtimeTelemetryController?.destroy?.();
     state.layoutController?.destroy?.();
     state.workflowBuilder?.destroy?.();
     document.querySelector('#bronze-loop-panel')?.remove();
     document.querySelector('#bronze-loop-pick-modal')?.remove();
     document.querySelector('#bronze-loop-recap-modal')?.remove();
     document.querySelector('#bronze-loop-reward-alert-modal')?.remove();
+    document.querySelector('#bronze-loop-selection-policy-modal')?.remove();
     document.querySelector('#bronze-loop-batch-open-modal')?.remove();
     document.querySelector('#bronze-loop-batch-recap-modal')?.remove();
     document.querySelector('#bronze-loop-loop-recap-modal')?.remove();
@@ -1891,7 +1968,22 @@ function updateLoopControls() {
   }
 
   function stopPoint() {
+    if (state.committedSbcSubmitDepth > 0) return;
     if (state.stopping) fail('Stopped by user');
+  }
+
+  async function runCommittedSbcSubmit(operation) {
+    if (state.committedSbcSubmitDepth === 0) stopPoint();
+    const stoppingBeforeCommit = state.stopping;
+    state.committedSbcSubmitDepth++;
+    try {
+      return await operation();
+    } finally {
+      state.committedSbcSubmitDepth = Math.max(0, state.committedSbcSubmitDepth - 1);
+      if (!stoppingBeforeCommit && state.stopping && state.committedSbcSubmitDepth === 0) {
+        log('Stop requested during SBC submission; inventory synchronization completed before stopping');
+      }
+    }
   }
 
   function matchesAny(text, patterns) {
@@ -2171,21 +2263,34 @@ function updateLoopControls() {
   async function refreshInventoryCaches(reason = 'manual refresh', options = {}) {
     await waitAppReady();
     const quiet = options.quiet === true;
+    const notifyStage = async (stage) => {
+      if (typeof options.onStage !== 'function') return;
+      try {
+        await options.onStage(stage);
+      } catch (error) {
+        log(`Inventory refresh diagnostic failed after ${stage}: ${error?.message || error}`);
+      }
+    };
     if (!quiet) log(`Refreshing caches: ${reason}`);
 
     if (options.includePacks !== false) {
       await refreshStorePacks().catch((e) => {
         if (!quiet) log(`Store pack refresh skipped: ${e.message || e}`);
       });
+      await notifyStage('packs');
     }
 
     await refreshUnassigned({ quiet }).catch((e) => {
       if (!quiet) log(`Unassigned refresh skipped: ${e.message || e}`);
     });
+    await notifyStage('unassigned');
 
     await refreshPileCacheByCandidates('club', options);
+    await notifyStage('club');
     await refreshPileCacheByCandidates('storage', options);
+    await notifyStage('storage');
     await refreshPileCacheByCandidates('transfer', options);
+    await notifyStage('transfer');
 
     if (!quiet) {
       log(`Cache summary: ${cacheSummary()}`);
@@ -2256,13 +2361,6 @@ function updateLoopControls() {
     const name = packName(pack);
     return /\bTOTW\b/i.test(name) &&
       /(84\+|1-30|player|pack|provision|refresh)/i.test(name);
-  }
-
-  function findPackByPredicate(predicate) {
-    if (typeof predicate !== 'function') return null;
-    return getAvailableMyPacks().find((pack) => {
-      try { return !!predicate(pack); } catch { return false; }
-    }) || null;
   }
 
   function summarizePacks(packs = getAvailableMyPacks()) {
@@ -2828,25 +2926,7 @@ function updateLoopControls() {
   }
 
   function isEvolutionItem(item) {
-    try { if (item?.isEvolution?.()) return true; } catch { }
-    try { if (item?.isEvo?.()) return true; } catch { }
-    const values = [
-      item?.isEvolution,
-      item?.isEvo,
-      item?.evolutionId,
-      item?.evoId,
-      item?.evolutionLevel,
-      item?.evolutionStatus,
-      item?._data?.evolutionId,
-      item?._staticData?.evolutionId,
-    ];
-    return values.some((value) => {
-      if (typeof value === 'boolean') return value;
-      if (typeof value === 'number') return Number.isFinite(value) && value > 0;
-      if (typeof value === 'string') return value.trim() && value !== '0' && value !== '-1' && value.toLowerCase() !== 'false';
-      if (isInspectableObject(value)) return Object.keys(value).length > 0;
-      return false;
-    });
+    return isPlayerEvolutionCard(item);
   }
 
   function getFsuRejectReasons(item, spec = {}, settings = getFsuSettings(), context = null) {
@@ -3093,12 +3173,12 @@ function updateLoopControls() {
     const clubItems = getClubItems();
     if (duplicateId) {
       const byId = clubItems.find((clubItem) => Number(clubItem?.id) === duplicateId);
-      if (byId) return byId;
+      if (byId && isSamePlayerCardVersion(item, byId)) return byId;
     }
-    return clubItems.find((clubItem) =>
-      Number(clubItem?.definitionId || 0) === Number(item?.definitionId || -1) &&
+    return clubItems.find((clubItem) => (
       Number(clubItem?.id || 0) !== Number(item?.id || 0)
-    );
+        && isSamePlayerCardVersion(item, clubItem)
+    ));
   }
 
   function predictUnassignedDestination(item) {
@@ -3211,8 +3291,12 @@ function updateLoopControls() {
           loopDef: activeLoopDef,
           policyIds: recoveryPolicyIds,
         });
+    let latestSnapshot = null;
     const result = await resolveUnassigned({
-      getSnapshot,
+      getSnapshot: async () => {
+        latestSnapshot = await getSnapshot();
+        return latestSnapshot;
+      },
       dryRun: options.dryRun === true || state.loopStack.some((loopDef) => loopDef?.dryRun === true),
       reserveItem: (item) => reservedIds.has(Number(item?.id || 0)),
       overflowResolvers: [...(options.overflowResolvers || []), ...configuredResolvers],
@@ -3230,11 +3314,51 @@ function updateLoopControls() {
       onActionNoProgress: async ({ action, attempts }) => {
         log(`Unassigned move diagnostic no progress after ${attempts} check(s): ${diagnosticJson(captureActionState(action))}`);
       },
+      onActionReplan: async ({ action, reason: replanReason, replan, maxReplans }) => {
+        log(`Unassigned ${action.description} action will be replanned (${replan}/${maxReplans}): ${replanReason}`);
+      },
       executeAction: async (action) => {
         stopPoint();
         const items = action.itemRefs.map((ref) => adapter.resolveItem(ref, ['unassigned'])?.item).filter(Boolean);
         if (items.length !== action.itemRefs.length) {
           fail(`Unassigned ${action.description} action could resolve only ${items.length}/${action.itemRefs.length} item(s)`);
+        }
+        if (action.requiresExactClubDuplicate === true) {
+          const staleItems = [];
+          for (const item of items) {
+            const snapshotItem = latestSnapshot?.piles?.unassigned?.find((candidate) => (
+              Number(candidate?.id || 0) === Number(item?.id || 0)
+            ));
+            const clubDuplicate = findClubDuplicate(snapshotItem || item);
+            if (!clubDuplicate) {
+              staleItems.push(item);
+              continue;
+            }
+            const duplicateId = Number(clubDuplicate.id || 0);
+            item.duplicateId = duplicateId;
+            if (item._duplicateId !== undefined) item._duplicateId = duplicateId;
+            adapter.preparePurchasedItem(item);
+          }
+          if (staleItems.length) {
+            for (const item of staleItems) {
+              try { item.duplicateId = 0; } catch { }
+              try { if (item._duplicateId !== undefined) item._duplicateId = 0; } catch { }
+              try { if (item._data && item._data.duplicateId !== undefined) item._data.duplicateId = 0; } catch { }
+            }
+            const names = staleItems.map((item) => itemDisplayName(item)).join(', ');
+            await refreshUnassigned();
+            for (const ref of action.itemRefs) {
+              const live = adapter.resolveItem(ref, ['unassigned'])?.item;
+              if (!live || findClubDuplicate(live)) continue;
+              try { live.duplicateId = 0; } catch { }
+              try { if (live._duplicateId !== undefined) live._duplicateId = 0; } catch { }
+              try { if (live._data && live._data.duplicateId !== undefined) live._data.duplicateId = 0; } catch { }
+            }
+            return {
+              status: 'replan',
+              reason: `${staleItems.length} item(s) no longer have an exact same-version Club counterpart (${names})`,
+            };
+          }
         }
         activeActionItems = items;
         log(`Unassigned move diagnostic before: ${diagnosticJson(captureActionState(action, items))}`);
@@ -3359,14 +3483,14 @@ function updateLoopControls() {
       if (!responseItem) return;
       const clubDuplicate = findClubDuplicate(item) || findClubDuplicate(responseItem);
       const before = captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem });
-      const duplicateId = Number(item?.duplicateId || responseItem?.duplicateId || clubDuplicate?.id || 0);
+      const duplicateId = Number(item?.duplicateId || clubDuplicate?.id || 0);
       const duplicateIdSource = Number(item?.duplicateId || 0)
         ? 'live'
-        : Number(responseItem?.duplicateId || 0)
-          ? 'pack-response'
-          : Number(clubDuplicate?.id || 0)
-            ? 'club-match'
-            : 'none';
+        : Number(clubDuplicate?.id || 0)
+          ? Number(responseItem?.duplicateId || 0) === Number(clubDuplicate.id || 0)
+            ? 'pack-response-verified'
+            : 'club-match'
+          : 'none';
       if (duplicateId && !Number(item?.duplicateId || 0)) {
         item.duplicateId = duplicateId;
         if (item._duplicateId !== undefined) item._duplicateId = duplicateId;
@@ -3413,9 +3537,69 @@ function updateLoopControls() {
     return restored;
   }
 
-  async function materializeOpenedPlayerRewards(items, label = 'opened reward pack') {
+  async function materializeOpenedDuplicatesFresh(items, label, options = {}) {
+    const openedItems = uniqueItems((items || []).filter((item) => isPlayer(item)));
+    if (!openedItems.length) {
+      return {
+        status: 'confirmed',
+        attempts: 0,
+        matchedCount: 0,
+        unresolvedCount: 0,
+        matches: [],
+        unresolvedItems: [],
+        records: [],
+      };
+    }
+    const inventoryAdapter = eaInventoryAdapter();
+    const result = await materializeFreshUnassigned({
+      openedItems,
+      baselineIds: options.routingBaseline?.unassignedIds || [],
+      attempts: 2,
+      invalidate: () => inventoryAdapter.invalidateUnassigned(),
+      requestFresh: () => refreshUnassigned({
+        attempts: 1,
+        allowCacheFallback: false,
+        quiet: true,
+      }),
+      readRepositoryItems: () => inventoryAdapter.readPile('unassigned'),
+      readRepositoryState: () => inventoryAdapter.unassignedState(),
+      triggerNavigation: async () => {
+        const from = currentControllerName();
+        const requested = pageRuntime.gotoUnassigned(ctrl());
+        if (requested?.requested) {
+          await waitLoadingEnd(250, 8000).catch(() => null);
+          await sleep(250);
+        }
+        const to = currentControllerName();
+        return {
+          ...requested,
+          from,
+          to,
+          confirmed: /Unassigned/i.test(to),
+        };
+      },
+    });
+    for (const record of result.records) {
+      log(`${label}: forced Unassigned materialization attempt ${record.attempt}/${result.attempts}: ${diagnosticJson(record)}`);
+    }
+    const evidence = {
+      status: result.status,
+      matched: result.matches.map(({ opened, live, via }) => ({
+        via,
+        opened: captureRuntimeInventoryItem(opened, { identify: identifyRuntimeInventoryItem }),
+        live: captureRuntimeInventoryItem(live, { identify: identifyRuntimeInventoryItem }),
+      })),
+      unresolved: result.unresolvedItems.map((item) => (
+        captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })
+      )),
+    };
+    log(`${label}: forced Unassigned materialization ${result.status} (${result.matchedCount}/${openedItems.length} complete): ${diagnosticJson(evidence)}`);
+    return result;
+  }
+
+  async function materializeOpenedPlayerRewards(items, label = 'opened reward pack', options = {}) {
     const players = uniqueItems((items || []).filter((item) => isPlayer(item)));
-    if (!players.length) return { moved: 0, deferredDuplicates: [] };
+    if (!players.length) return { moved: 0, deferredDuplicates: [], freshMaterialization: null };
     const materialized = materializeOpenedResponsePlayerDuplicates(players, label);
 
     const moved = await tryMoveOpenedRewardItems(
@@ -3432,21 +3616,15 @@ function updateLoopControls() {
     if (materialized.deferredDuplicates.length) {
       log(`${label}: waiting for ${materialized.deferredDuplicates.length} duplicate opened reward item(s) to materialize in Unassigned`);
     }
-
-    if (needsUnassignedViewMaterialization(materialized)) {
-      log(`${label}: all opened player item(s) are duplicates; opening Unassigned to materialize live EA entities`);
-      await showUnassignedIfAny(`${label} all-duplicate materialization`, {
-        stableEmptyReads: 3,
-        emptyReadDelayMs: 450,
-        diagnostic: true,
-      });
-    }
+    const freshMaterialization = materialized.deferredDuplicates.length
+      ? await materializeOpenedDuplicatesFresh(materialized.deferredDuplicates, label, options)
+      : null;
 
     if (moved) {
       await refreshInventoryCaches(`${label} direct reward move`, { includePacks: false, quiet: true });
       resolveRecentRewardItems(`${label} direct reward move`);
     }
-    return { ...materialized, moved };
+    return { ...materialized, moved, freshMaterialization };
   }
 
   async function tryDirectlySettleUnmaterializedOpenedDuplicates({
@@ -3585,13 +3763,80 @@ function updateLoopControls() {
     return routing;
   }
 
-  function recordLoopPackReceipt(receipt) {
+  function recordLoopPackReceipt(receipt, sourceLabel = null) {
     if (!state.loopRecapSession || receipt?.status !== 'opened') return;
+    if (state.loopRecapSession.rollingAggregator) {
+      state.loopRecapSession.rollingAggregator.recordPackReceipt(receipt, { sourceLabel });
+      return;
+    }
     state.loopRecapSession.receipts.push(receipt);
+  }
+
+  function rollingRecapAggregator() {
+    return state.loopRecapSession?.rollingAggregator || null;
+  }
+
+  function recordRollingRecapItems(items, context = {}) {
+    rollingRecapAggregator()?.recordItems(items, context);
+  }
+
+  function recordRollingRecapRecovery(action, options = {}) {
+    rollingRecapAggregator()?.recordRecovery(action, options);
+  }
+
+  function recordRollingRecapDuplicateRoute(route, count) {
+    rollingRecapAggregator()?.recordDuplicateRoute(route, count);
+  }
+
+  function rollingDuplicatePlayerCount(input = []) {
+    if (Array.isArray(input?.entries)) {
+      const signalCount = input.entries.filter((entry) => entry?.signal).length;
+      if (signalCount > 0) return signalCount;
+    }
+    if (Array.isArray(input?.duplicateSignals)) return input.duplicateSignals.length;
+    const items = Array.isArray(input)
+      ? input
+      : Array.isArray(input?.selected)
+        ? input.selected
+        : [];
+    return items.filter((entry) => {
+      const item = entry?.item || entry;
+      return isPlayer(item) && isDuplicate(item);
+    }).length;
   }
 
   function isDryRunEffectGuarded(options = {}) {
     return options.dryRun === true || state.loopStack.some((loopDef) => loopDef?.dryRun === true);
+  }
+
+  function captureRuntimePackOpenRetrySnapshot(pack, options = {}) {
+    return capturePackOpenRetrySnapshot({
+      pack,
+      packs: getRepositoryMyPacks(),
+      piles: {
+        unassigned: getUnassignedItems(),
+        storage: getStorageItems(),
+        transfer: getTransferItems(),
+        club: getClubItems(),
+      },
+      stable: options.stable,
+      stableReadCount: options.stableReadCount,
+    });
+  }
+
+  async function captureStableRuntimePackOpenRetrySnapshot(pack) {
+    let previous = captureRuntimePackOpenRetrySnapshot(pack);
+    let stableReadCount = 1;
+    for (let read = 2; read <= 3; read++) {
+      await sleep(450);
+      const current = captureRuntimePackOpenRetrySnapshot(pack);
+      stableReadCount = samePackOpenRetrySnapshot(previous, current) ? stableReadCount + 1 : 1;
+      previous = current;
+      if (stableReadCount >= 2) {
+        return { ...current, stable: true, stableReadCount };
+      }
+    }
+    return { ...previous, stable: false, stableReadCount };
   }
 
   async function openPack(pack, purpose, options = {}) {
@@ -3603,6 +3848,9 @@ function updateLoopControls() {
     const inventoryAdapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
     let currentPack = pack;
     let routingBaseline = null;
+    let retryBaseline = null;
+    let retryFailedPack = null;
+    let retryDecision = null;
     const retryCodes = [...new Set([
       ...(options.retryCodes || (options.retryOn471 === true ? ['471'] : [])).map(String),
       ...DEFAULT_PACK_OPEN_RETRY_CODES,
@@ -3617,16 +3865,47 @@ function updateLoopControls() {
       ),
       packSelector: async ({ attempt, lastReason }) => {
         if (attempt === 1) return currentPack;
-        const reuseCurrentPack = String(lastReason || '') === '471' && options.reusePackOn471 === true;
-        if (!reuseCurrentPack && typeof options.resolveRetryPack === 'function') {
-          currentPack = await options.resolveRetryPack();
-        } else if (!reuseCurrentPack && isAmbiguousPackOpenFailure(lastReason)) {
-          currentPack = findFreshPackInstance(currentPack, getAvailableRepositoryMyPacks());
+        const failedPack = retryFailedPack || currentPack;
+        const resolvedPack = typeof options.resolveRetryPack === 'function'
+          ? await options.resolveRetryPack()
+          : null;
+        const current = await captureStableRuntimePackOpenRetrySnapshot(failedPack);
+        retryDecision = decidePackOpenRetry({
+          code: lastReason,
+          failedPack,
+          resolvedPack,
+          baseline: retryBaseline,
+          current,
+        });
+        const evidence = retryDecision.evidence || {};
+        const summary = `packs:${evidence.packCountBefore ?? '?'}->${evidence.packCountAfter ?? '?'}; added items:${evidence.addedItemIds?.length || 0}; stable reads:${evidence.stableReadCount || 0}`;
+        if (retryDecision.action === 'retry') {
+          currentPack = retryDecision.pack;
+          log(`${purpose}: pack-open retry reconciled (${retryDecision.source}; ${summary})`);
+        } else {
+          currentPack = null;
+          log(`${purpose}: pack-open retry blocked; ${retryDecision.reason} (${summary})`);
         }
         return currentPack;
       },
+      packUnavailableResult: ({ attempt }) => {
+        if (attempt <= 1 || retryDecision?.action !== 'blocked') return null;
+        return {
+          status: 'blocked',
+          packRef: {
+            id: Number(retryFailedPack?.id || 0),
+            name: packName(retryFailedPack),
+          },
+          reason: retryDecision.reason,
+          details: {
+            reasonCode: retryDecision.reason,
+            retryEvidence: retryDecision.evidence,
+          },
+        };
+      },
       packRef: (selectedPack) => ({ id: Number(selectedPack?.id || 0), name: packName(selectedPack) }),
       openTransport: async (selectedPack, { attempt }) => {
+        if (attempt === 1) retryBaseline = captureRuntimePackOpenRetrySnapshot(selectedPack);
         routingBaseline = createOpenedItemRoutingBaseline({
           unassigned: getUnassignedItems(),
           club: getClubItems(),
@@ -3653,11 +3932,32 @@ function updateLoopControls() {
         assumeSpecialPlayers: options.assumeSpecialPlayers === true,
       }),
       onItemsOpenedError: (error) => log(`${purpose}: reward highlight failed: ${error?.message || error}`),
-      onTransportFailure: ({ attempt, code, packRef, result }) => {
+      onCommittedTransportFailure: ({ code, packRef, itemCount, itemSource, evidence }) => {
+        log(`${purpose}: EA returned ${code}, but ${itemCount} reward item(s) were present at ${itemSource}; treating the pack as committed and preserving the transport warning`);
+        emitDiagnostic(log, () => `${purpose}: committed pack-open evidence: ${diagnosticJson(evidence)}`);
+      },
+      onTransportFailure: ({ attempt, code, pack, packRef, result }) => {
         emitDiagnostic(log, () => {
           const matchingPacks = getAvailableRepositoryMyPacks()
-            .filter((candidate) => packIdKey(candidate) === packIdKey(packRef?.id)).length;
-          return `${purpose}: pack open transport attempt ${attempt} failed; pack:${packRef?.name || '?'} (#${packRef?.id || '?'}); reason:${code}; matching packs:${matchingPacks}; unassigned:${getUnassignedItems().length}; controller:${currentControllerName() || '?'}; result:${diagnosticJson(captureMoveResult(result))}`;
+            .filter((candidate) => packIdKey(candidate) === packIdKey(packRef?.id));
+          let pendingPlayerPicks = [];
+          try { pendingPlayerPicks = eaPlayerPickAdapter().listUnassignedPlayerPicks(); } catch { }
+          const packDiagnostics = {
+            selectedIndex: matchingPacks.indexOf(pack),
+            selected: captureRuntimePack(pack, { identify: identifyRuntimePack }),
+            matchingSample: matchingPacks.slice(0, 5).map((candidate) => (
+              captureRuntimePack(candidate, { identify: identifyRuntimePack })
+            )),
+            matchingTruncated: matchingPacks.length > 5,
+          };
+          const inventoryDiagnostics = {
+            unassigned: eaInventoryAdapter().unassignedState(),
+            pendingPlayerPicks: pendingPlayerPicks.map((item) => (
+              captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })
+            )),
+            storage: eaInventoryAdapter().capacity('storage'),
+          };
+          return `${purpose}: pack open transport attempt ${attempt} failed; pack:${packRef?.name || '?'} (#${packRef?.id || '?'}); reason:${code}; matching packs:${matchingPacks.length}; unassigned:${getUnassignedItems().length}; controller:${currentControllerName() || '?'}; pack evidence:${diagnosticJson(packDiagnostics)}; inventory evidence:${diagnosticJson(inventoryDiagnostics)}; item evidence:${diagnosticJson(capturePackOpenResultEvidence(result))}; result:${diagnosticJson(captureMoveResult(result))}`;
         });
       },
       openedItemPolicy: (openedItems, context) => options.openedItemPolicy(openedItems, {
@@ -3666,24 +3966,11 @@ function updateLoopControls() {
       }),
       retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
       beforeRetry: async ({ code, pack: failedPack }) => {
+        retryFailedPack = failedPack;
+        retryDecision = null;
         if (isAmbiguousPackOpenFailure(code)) {
           markStalePack(failedPack);
           log(`${purpose}: excluding ambiguous pack instance #${Number(failedPack?.id || 0) || '?'} before retry`);
-        }
-        if (String(code) === '471') {
-          log(`${purpose}: pack open returned 471; rechecking delayed Unassigned state before retry`);
-          await sleep(CFG.pauseMs);
-          await unwindSbcSquadControllers(`${purpose} pack-open recovery`);
-          await showUnassignedIfAny(`${purpose} pack-open recovery sync`, {
-            stableEmptyReads: 3,
-            emptyReadDelayMs: 450,
-          });
-          await resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`, preOpenUnassignedOptions);
-          await refreshInventoryCaches(`${purpose} pack-open recovery`, {
-            quiet: true,
-            includePacks: false,
-          });
-          return;
         }
         await recoverPackOpenRetry({
           label: purpose,
@@ -3695,7 +3982,12 @@ function updateLoopControls() {
           pauseMs: CFG.pauseMs,
           settleMs: 700,
           unwind: () => unwindSbcSquadControllers(`${purpose} pack-open recovery`),
-          showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`),
+          showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`, {
+            stableEmptyReads: 3,
+            emptyReadDelayMs: 450,
+            requireNavigation: true,
+            diagnostic: true,
+          }),
           openStorePacks: () => openStorePacksViewForRefresh(`${purpose} pack-open Store recovery`),
           resolveUnassigned: () => resolveRuntimeUnassigned(`${purpose} pack-open recovery cleanup`, preOpenUnassignedOptions),
           refreshInventory: ({ storeRefreshed }) => refreshInventoryCaches(`${purpose} pack-open recovery`, {
@@ -3713,7 +4005,7 @@ function updateLoopControls() {
       },
     });
     state.lastOpenPackReceipt = receipt;
-    recordLoopPackReceipt(receipt);
+    recordLoopPackReceipt(receipt, purpose);
     if (receipt.status === 'planned') {
       log(`${purpose}: dry-run would open ${receipt.packRef?.name || packName(pack)} (#${receipt.packRef?.id || pack.id || '?'})`);
       return receipt;
@@ -3729,6 +4021,12 @@ function updateLoopControls() {
       return null;
     }
     log(`${purpose}: pack open blocked after ${receipt.attempts} attempt(s); reason:${receipt.reason || 'unknown'}`);
+    if (
+      options.returnBlockedReceipt === true
+      && [PACK_OPEN_RESPONSE_LOST, PACK_OPEN_RESULT_AMBIGUOUS].includes(receipt.reason)
+    ) {
+      return receipt;
+    }
     fail(`Open pack failed: ${receipt.reason || 'unknown'}`);
   }
 
@@ -4339,6 +4637,7 @@ function updateLoopControls() {
       configuredLoops: [
         ...configuredLoops.map((loopDef) => specializedLoopOverrides[loopDef.id] || loopDef),
         ...upgradeSession.discoveredLoops,
+        ...upgradeSession.rollingLoops,
       ],
       recoveryRecipes: getConfiguredRecoveryRecipes(),
       additionalActivities: collectScannedUpgradeActivities(upgradeSession.results),
@@ -4350,9 +4649,15 @@ function updateLoopControls() {
     const materializedUpgradeLoops = upgradeSession.discoveredLoops.map((loopDef) => (
       activitySession.loopOverrides[loopDef.id] || loopDef
     ));
+    const materializedRollingLoops = bindRollingPlayerPickCapabilities(
+      upgradeSession.rollingLoops.map((loopDef) => activitySession.loopOverrides[loopDef.id] || loopDef),
+      collectScannedPlayerPickLoopDefs(pickSession.results),
+      { storageSinkSets: snapshots },
+    );
     state.discoveredLoopDefs = cloneLoopDef([
       ...pickSession.discoveredLoops,
       ...materializedUpgradeLoops,
+      ...materializedRollingLoops,
     ]);
     state.discoveredLoopOverrides = cloneLoopDef({
       ...specializedLoopOverrides,
@@ -4402,6 +4707,9 @@ function updateLoopControls() {
     }
     for (const loopDef of upgradeSession.discoveredLoops) {
       log(`Dynamic SBC scan: added session Upgrade Loop ${loopDef.name} (Set #${loopDef.sbcSetIds?.[0] || '?'}, reward #${loopDef.rewardPackIds?.[0] || '?'}, target rating:${loopDef.ratingSbcFill?.targetRating || '?'}, players:${loopDef.expectedPlayerCount || '?'})`);
+    }
+    for (const loopDef of materializedRollingLoops) {
+      log(`Dynamic SBC scan: added selectable Rolling Loop ${loopDef.name} (primary Set #${loopDef.sbcSetIds?.[0] || '?'}; TOTW:${loopDef.rollingTotwUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Provisions:${loopDef.rollingProvisionsUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Pick:${loopDef.rollingPlayerPick?.status || 'unavailable'}; Storage sink Pick:${loopDef.rollingStorageSinkPick?.status || 'unavailable'}/${pickOptions.rollingStorageSinkEnabled ? 'enabled' : 'disabled'}; Gold sink:${loopDef.rollingGoldSinkUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'})`);
     }
     for (const activity of activitySession.activities) {
       const sink = activity.materialSink;
@@ -4895,7 +5203,10 @@ function updateLoopControls() {
     const definitionId = Number(signal?.definitionId || signal?.ref?.definitionId || 0);
     const duplicateId = Number(signal?.duplicateId || 0);
     const candidates = getSubmissionCacheItems()
-      .filter((item) => Number(item?.id || 0) === duplicateId || Number(item?.definitionId || 0) === definitionId)
+      .filter((item) => (
+        (Number(item?.id || 0) === duplicateId || Number(item?.definitionId || 0) === definitionId)
+          && isSamePlayerCardVersion(signal, item)
+      ))
       .map((item) => {
         const reasons = [...new Set([
           ...getUsabilityRejectReasons(item, requirement),
@@ -4954,10 +5265,6 @@ function updateLoopControls() {
     return diagnostics;
   }
 
-  function isSameDefinition(a, b) {
-    return Number(a?.definitionId || 0) === Number(b?.definitionId || -1);
-  }
-
   function findSubmissionItemForDuplicateSignal(signal, usedIds, spec = {}, settings = getFsuSettings()) {
     const duplicateId = Number(signal?.duplicateId || 0);
     const cacheItems = getSubmissionCacheItems().filter((item) =>
@@ -4968,10 +5275,11 @@ function updateLoopControls() {
 
     if (duplicateId) {
       const direct = cacheItems.find((item) => Number(item?.id || 0) === duplicateId);
-      if (direct) return direct;
+      if (direct && isSamePlayerCardVersion(signal, direct)) return direct;
     }
 
-    return sortSbcFodder(cacheItems, spec, settings).find((item) => isSameDefinition(item, signal)) || null;
+    return sortSbcFodder(cacheItems, spec, settings)
+      .find((item) => isSamePlayerCardVersion(item, signal)) || null;
   }
 
   function pileNeedsDuplicateSignalResolution(pileName) {
@@ -5076,16 +5384,22 @@ function updateLoopControls() {
       isGold,
       isSpecialItem: isSbcSpecialItem,
       itemGroupNumbers,
+      matchesPlayerRarityGroup: (item, values) => {
+        const groups = new Set(itemGroupNumbers(item));
+        return (values || []).some((value) => groups.has(Number(value)));
+      },
       itemLeagueId,
       requiredSpecialLabel,
       isRequiredSpecialItem,
     });
   }
 
-  function validateRatingSbcModelAgainstItems(model, items = [], challenge = null) {
+  function validateRatingSbcModelAgainstItems(model, items = [], challenge = null, options = {}) {
     return validateRatingSbcModelAgainstItemsPure(model, items, challenge, {
       calculateSquadRating: calculateEaSquadRating,
       isSpecialItem: isSbcSpecialItem,
+      exclusiveRoles: options.exclusiveRoles || model?.exclusiveRoles,
+      allowOtherSpecialAsOrdinary: options.allowOtherSpecialAsOrdinary === true,
     });
   }
 
@@ -5101,14 +5415,17 @@ function updateLoopControls() {
   }
 
   function isRatingSbcCandidateSafe(item, loopDef, model = null, context = null) {
-    const allowedSpecialCount = model
+    const roleAware = context?.roleAware === true;
+    const allowedSpecialCount = roleAware
+      ? Number(model?.requiredPlayerCount || 0)
+      : model
       ? model.maxSpecialCount
       : Math.max(0, Number(loopDef.allowedSpecialCount || 0) || 0);
     if (!isPlayer(item)) return false;
     if (isSbcSpecialItem(item)) {
       if (!allowedSpecialCount) return false;
-      if (requiredSpecialKind(loopDef) && !isRequiredSpecialItem(item, loopDef)) return false;
-      if (model && hasDynamicPlayerGroupRequirement(loopDef)) {
+      if (!roleAware && requiredSpecialKind(loopDef) && !isRequiredSpecialItem(item, loopDef)) return false;
+      if (!roleAware && model && hasDynamicPlayerGroupRequirement(loopDef)) {
         const matchesActivePlayerGroup = eaPlayerGroupConstraints(model).some(({ constraint }) => {
           try { return constraint.matches(item) === true; } catch { return false; }
         });
@@ -5135,7 +5452,7 @@ function updateLoopControls() {
     return isRatingSbcCandidateSafe(resolved, loopDef);
   }
 
-  function buildRatingSbcCandidateEntries(loopDef, model) {
+  function buildRatingSbcCandidateEntries(loopDef, model, selectionPolicy = null, inventorySnapshot = null) {
     const settings = getFsuSettings();
     const piles = getRatingSbcPriorityPiles(loopDef, settings);
     const protectedItemIds = new Set((loopDef.protectedItemIds || []).map(Number).filter(Boolean));
@@ -5147,6 +5464,8 @@ function updateLoopControls() {
       lockedItemIds: new Set((settings.lockedItemIds || []).map(Number).filter(Boolean)),
       lockedDefinitionIds: new Set((settings.lockedDefinitionIds || []).map(Number).filter(Boolean)),
       excludedLeagueIds: (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0),
+      roleAware: selectionPolicy !== null,
+      skipRatingLimit: selectionPolicy !== null,
     };
     const broadSpec = {
       playerOnly: true,
@@ -5155,12 +5474,21 @@ function updateLoopControls() {
       protectedItemIds: loopDef.protectedItemIds,
       protectedDefinitionIds: loopDef.protectedDefinitionIds,
     };
-    return buildRatingCandidateEntries({
+    const readPile = inventorySnapshot?.piles
+      ? (pileName) => inventorySnapshot.piles[pileName] || []
+      : getPileItemsByName;
+    const submissionItems = inventorySnapshot?.piles
+      ? uniqueItems([
+          ...(inventorySnapshot.piles.storage || []),
+          ...(inventorySnapshot.piles.club || []),
+        ])
+      : getSubmissionCacheItems();
+    const candidates = buildRatingCandidateEntries({
       model,
       settings,
       piles,
-      getPileItems: getPileItemsByName,
-      submissionItems: getSubmissionCacheItems(),
+      getPileItems: readPile,
+      submissionItems,
       isSafe: (item) => isRatingSbcCandidateSafe(item, loopDef, model, context),
       isDuplicate,
       pileNeedsDuplicateSignalResolution,
@@ -5168,6 +5496,15 @@ function updateLoopControls() {
       isSpecialItem: isSbcSpecialItem,
       broadSpec,
     });
+    if (typeof selectionPolicy?.candidateFilter !== 'function') return candidates;
+    const entries = candidates.entries.filter((entry) => {
+      try { return selectionPolicy.candidateFilter(entry) === true; } catch { return false; }
+    });
+    return {
+      ...candidates,
+      entries,
+      policyFiltered: candidates.entries.length - entries.length,
+    };
   }
 
   function ratingSelectionItemSnapshot(item, pileName) {
@@ -5196,11 +5533,17 @@ function updateLoopControls() {
   }
 
   async function findOptimalRatingSbcSelection(candidateEntries, model, piles, options = {}) {
+    const selectionPolicy = options.selectionPolicy || {};
     return selectRatingCandidateEntries({
       candidateEntries,
       model,
       piles,
-      searchOptions: options,
+      requiredItems: selectionPolicy.requiredItems,
+      preferredItems: selectionPolicy.preferredItems,
+      protectedItems: selectionPolicy.protectedItems,
+      exclusiveRoles: selectionPolicy.exclusiveRoles,
+      maxOrdinaryRating: selectionPolicy.maxOrdinaryRating,
+      protectionPolicy: selectionPolicy.protectionPolicy,
       createSnapshot: ratingSelectionItemSnapshot,
       selectPlayers: selectInventoryPlayersPure,
       control: {
@@ -5340,24 +5683,50 @@ function updateLoopControls() {
   }
 
   async function showUnassignedIfAny(reason = 'final confirmation', options = {}) {
+    const clickUnassignedFallback = () => clickButtonByText([
+      'Unassigned Items',
+      'Unassigned',
+      'Assign Items',
+      '未分配',
+      '未分配物品',
+      '分配物品',
+    ]);
     return confirmUnassignedView({
       reason,
       openUnassigned: () => pageRuntime.gotoUnassigned(ctrl()),
-      clickFallback: () => clickButtonByText([
-          'Unassigned Items',
-          'Unassigned',
-          'Assign Items',
-          '未分配',
-          '未分配物品',
-          '分配物品',
-      ]),
+      clickFallback: clickUnassignedFallback,
       waitLoadingEnd,
       refreshUnassigned,
       getItems: getUnassignedItems,
       stableEmptyReads: options.stableEmptyReads || 1,
       emptyReadDelayMs: options.emptyReadDelayMs || 0,
       diagnostic: options.diagnostic === true,
+      requireNavigation: options.requireNavigation === true || options.verifyNavigation === true,
       getControllerName: currentControllerName,
+      recoverNavigation: () => recoverRuntimeUnassignedNavigation({
+        getControllerName: currentControllerName,
+        popCurrent: () => pageRuntime.popViewController(false, ctrl()),
+        requestController: () => pageRuntime.gotoUnassigned(ctrl()),
+        requestTextFallback: clickUnassignedFallback,
+        materializeUnassigned: async () => {
+          await refreshUnassigned({
+            attempts: 1,
+            allowCacheFallback: false,
+            quiet: true,
+          });
+          return true;
+        },
+        clickHome: () => {
+          const homeTab = document.querySelector('.ut-tab-bar-item.icon-home');
+          if (!homeTab) return false;
+          simulateClick(homeTab);
+          return true;
+        },
+        settle: async () => {
+          await waitLoadingEnd(250, 8000).catch(() => null);
+          await sleep(250);
+        },
+      }),
       sleep,
       log,
     });
@@ -5507,7 +5876,9 @@ function updateLoopControls() {
 
   function itemGroups(item) {
     if (Array.isArray(item?.groups)) return item.groups;
+    if (Array.isArray(item?._groups)) return item._groups;
     if (Array.isArray(item?._data?.groups)) return item._data.groups;
+    if (Array.isArray(item?._staticData?.groups)) return item._staticData.groups;
     return [];
   }
 
@@ -5574,6 +5945,11 @@ function updateLoopControls() {
   function isFofItem(item) {
     try { if (item?.isFOF?.() || item?.isFof?.()) return true; } catch { }
     return /\bFOF\b|Festival of Football|Glory Hunters|荣耀猎手|榮耀獵手/i.test(itemSearchText(item));
+  }
+
+  function isFuttiesItem(item) {
+    try { if (item?.isFUTTIES?.() || item?.isFutties?.()) return true; } catch { }
+    return /\bFUTTIES\b/i.test(itemSearchText(item));
   }
 
   function requiredSpecialKind(loopDef = {}) {
@@ -6734,7 +7110,8 @@ function updateLoopControls() {
     const itemId = Number(item?.id || 0);
     const settings = context.settings || getFsuSettings();
     const fodderPolicy = getSbcFodderPolicy(loopDef);
-    const maxRating = getSubmittedRatingLimit(item, loopDef, settings);
+    const roleAware = context.roleAware === true;
+    const maxRating = context.skipRatingLimit === true ? 0 : getSubmittedRatingLimit(item, loopDef, settings);
     const protectedIds = context.protectedItemIds || new Set((loopDef.protectedItemIds || []).map(Number));
     const protectedDefinitionIds = context.protectedDefinitionIds || new Set((loopDef.protectedDefinitionIds || []).map(Number));
     const allowedSpecialCount = context.allowedSpecialCount !== undefined
@@ -6744,7 +7121,7 @@ function updateLoopControls() {
     const specialIndex = Number(context.specialIndex || 0) || 0;
     const fsuSpec = {
       playerOnly: true,
-      allowSpecial: requiredSpecialCount > 0 && specialIndex <= requiredSpecialCount,
+      allowSpecial: roleAware || (requiredSpecialCount > 0 && specialIndex <= requiredSpecialCount),
     };
 
     if (itemId && state.consumedItemIds.has(itemId)) reasons.push('consumed-this-run');
@@ -6759,6 +7136,7 @@ function updateLoopControls() {
     if (protectedIds.has(itemId)) reasons.push('protected-id');
     if (protectedDefinitionIds.has(Number(item?.definitionId || 0))) reasons.push('protected-def');
     if (
+      !roleAware &&
       ['totw', 'totw-tots-fof'].includes(requiredSpecialKind(loopDef)) &&
       requiredSpecialCount > 0 &&
       isSbcSpecialItem(item) &&
@@ -6768,6 +7146,7 @@ function updateLoopControls() {
       reasons.push('required-totw');
     }
     if (
+      !roleAware &&
       ['totw', 'totw-tots-fof'].includes(requiredSpecialKind(loopDef)) &&
       requiredSpecialCount > 0 &&
       isRequiredSpecialItem(item, loopDef) &&
@@ -6808,9 +7187,45 @@ function updateLoopControls() {
       0
     );
 
+    const selectionPolicy = options.selectionPolicy || null;
+    const selectionModel = options.model || null;
+    const policyProtectedRefs = selectionPolicy?.protectedItems || [];
+    const reserveRatings = new Set((selectionPolicy?.protectionPolicy?.reserveRatings || []).map(Number));
+    const maxOrdinaryRating = Number(selectionPolicy?.maxOrdinaryRating || 0);
+    const requiredItemRefs = selectionPolicy?.requiredItems || [];
+    const allowOtherSpecialAsOrdinary = selectionPolicy?.protectionPolicy?.allowOtherSpecialAsOrdinary === true;
+
     items.forEach((item, index) => {
       if (isSbcSpecialItem(item)) specialCount++;
-      const reasons = getSbcProtectionReasons(item, loopDef, { specialIndex: specialCount });
+      const requiredItemMatch = requiredItemRefs.some((ref) => {
+        const refId = Number(ref?.id || ref?.ref?.id || 0);
+        const refDefinitionId = Number(ref?.definitionId || ref?.ref?.definitionId || 0);
+        const itemId = Number(item?.id || item?.ref?.id || 0);
+        const itemDefinitionId = Number(item?.definitionId || item?.ref?.definitionId || 0);
+        return refId ? refId === itemId : refDefinitionId > 0 && refDefinitionId === itemDefinitionId;
+      });
+      const exclusiveRoleMatch = (selectionPolicy?.exclusiveRoles || []).some((role) => {
+        const constraint = selectionModel?.constraints?.[Number(role.constraintIndex)];
+        try { return constraint?.matches?.(item) === true; } catch { return false; }
+      });
+      const policyRoleMatch = requiredItemMatch || exclusiveRoleMatch;
+      const reasons = getSbcProtectionReasons(item, loopDef, {
+        specialIndex: specialCount,
+        roleAware: selectionPolicy !== null,
+        skipRatingLimit: selectionPolicy !== null,
+        allowedSpecialCount: selectionPolicy ? expectedPlayerCount : undefined,
+      });
+      const itemId = Number(item?.id || 0);
+      const definitionId = Number(item?.definitionId || 0);
+      if (selectionPolicy && policyProtectedRefs.some((ref) => (
+        Number(ref?.id || 0) ? Number(ref.id) === itemId : Number(ref?.definitionId || 0) === definitionId
+      ))) reasons.push('protected-selection-item');
+      if (selectionPolicy && !policyRoleMatch && maxOrdinaryRating > 0 && Number(item?.rating || 0) > maxOrdinaryRating) {
+        reasons.push(`rating-over-${maxOrdinaryRating}`);
+      }
+      if (selectionPolicy && !policyRoleMatch && reserveRatings.has(Number(item?.rating || 0))) {
+        reasons.push(`reserved-rating-${Number(item?.rating || 0)}`);
+      }
       entries.push({ item, index, reasons });
       if (reasons.length) blocked.push({ item, index, reasons });
     });
@@ -6832,7 +7247,16 @@ function updateLoopControls() {
       missingRequirements.push(`special-count ${requiredSpecialMetCount}/${requiredSpecialCount}`);
     }
 
-    return { items, entries, blocked, specialCount, requiredSpecialMetCount, expectedPlayerCount, missingRequirements };
+    return {
+      items,
+      entries,
+      blocked,
+      specialCount,
+      requiredSpecialMetCount,
+      expectedPlayerCount,
+      missingRequirements,
+      allowOtherSpecialAsOrdinary,
+    };
   }
 
   function inspectSbcSquad(loopDef, squad = ctrl()?._squad, options = {}) {
@@ -6940,7 +7364,7 @@ function updateLoopControls() {
     if (missingPlayers) {
       hints.push(`add ${missingPlayers.missing} eligible normal gold player(s) to fill ${missingPlayers.current}/${missingPlayers.expected} squad slots`);
     }
-    if (allowedSpecialCount && (inspection.specialCount || 0) > allowedSpecialCount) {
+    if (!inspection.allowOtherSpecialAsOrdinary && allowedSpecialCount && (inspection.specialCount || 0) > allowedSpecialCount) {
       hints.push(`keep only ${allowedSpecialCount} special card(s); replace the remaining special card(s) with normal/rare gold`);
     }
 
@@ -7247,12 +7671,20 @@ function updateLoopControls() {
   }
 
   function findRewardPackInCache(loopDef, explicitPackId = null, options = {}) {
-    let pack = explicitPackId ? findPackById(explicitPackId) : null;
+    const packs = options.repositoryOnly === true
+      ? getAvailableRepositoryMyPacks()
+      : getAvailableMyPacks();
+    const findById = (id) => packs.find((pack) => packIdKey(pack) === packIdKey(id)) || null;
+    const findByName = (patterns) => packs.find((pack) => matchesAny(packName(pack), patterns)) || null;
+    const findByPredicate = (predicate) => packs.find((pack) => {
+      try { return !!predicate(pack); } catch { return false; }
+    }) || null;
+    let pack = explicitPackId ? findById(explicitPackId) : null;
     if (!pack && loopDef.rewardPackIds?.length) {
-      pack = loopDef.rewardPackIds.map((id) => findPackById(id)).find(Boolean);
+      pack = loopDef.rewardPackIds.map((id) => findById(id)).find(Boolean);
     }
-    if (!pack && loopDef.rewardPackNames?.length) pack = findPackByName(loopDef.rewardPackNames);
-    if (!pack && options.fallbackPackMatcher) pack = findPackByPredicate(options.fallbackPackMatcher);
+    if (!pack && loopDef.rewardPackNames?.length) pack = findByName(loopDef.rewardPackNames);
+    if (!pack && options.fallbackPackMatcher) pack = findByPredicate(options.fallbackPackMatcher);
     return pack || null;
   }
 
@@ -7282,7 +7714,10 @@ function updateLoopControls() {
         }
       }
       if (options.logWait && (attempt === 1 || attempt === attempts || attempt % 4 === 0)) {
-        log(`${loopDef.name}: waiting for reward pack${explicitPackId ? ` #${explicitPackId}` : ''} (${attempt}/${attempts}); current packs: ${summarizePacks() || 'none'}`);
+        const visiblePacks = options.repositoryOnly === true
+          ? getAvailableRepositoryMyPacks()
+          : getAvailableMyPacks();
+        log(`${loopDef.name}: waiting for reward pack${explicitPackId ? ` #${explicitPackId}` : ''} (${attempt}/${attempts}); current packs: ${summarizePacks(visiblePacks) || 'none'}`);
       }
       if (attempt < attempts && delayMs) await sleep(delayMs);
     }
@@ -7313,16 +7748,23 @@ function updateLoopControls() {
           delayMs: options.findDelayMs || 1800,
           fallbackPackMatcher: options.fallbackPackMatcher,
         }),
-        openedItemPolicy: createOpenedItemPolicy(async (openedItems) => {
+        openedItemPolicy: createOpenedItemPolicy(async (openedItems, context = {}) => {
           if (options.assumeTotwReward) {
             markAssumedTotwRewardItems(openedItems, `${loopDef.name} ${reason}`);
           }
           // EA can expose the pack response before Purchased/Unassigned caches settle.
-          await materializeOpenedPlayerRewards(openedItems, `${loopDef.name} ${reason}`);
+          await materializeOpenedPlayerRewards(openedItems, `${loopDef.name} ${reason}`, {
+            routingBaseline: context.routingBaseline || null,
+          });
           await resolveRuntimeUnassigned(`${loopDef.name} ${reason} handling`);
           resolveRecentRewardItems(`${loopDef.name} ${reason}`);
           await refreshUnassigned();
-          return openedItemRoutingResult(openedItems, null, { assumeTotwReward: options.assumeTotwReward === true });
+          return openedItemRoutingResult(
+            openedItems,
+            null,
+            { assumeTotwReward: options.assumeTotwReward === true },
+            context.routingBaseline || null,
+          );
         }),
       });
       if (!receipt) {
@@ -7503,6 +7945,7 @@ function updateLoopControls() {
           rewardPackId: await submitSbcAndGetAwardPackId(set),
         };
       },
+      runCommittedSubmit: runCommittedSbcSubmit,
       afterSubmit: selection
         ? async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
             squadPlan?.selection || selection,
@@ -7907,11 +8350,7 @@ function updateLoopControls() {
   }
 
   function getPickRuntimeOptions() {
-    return normalizePickRuntimeOptions({
-      autoSelectBelow90: document.querySelector('#bronze-loop-pick-auto-below-90')?.checked !== false,
-      openPicksAtEnd: document.querySelector('#bronze-loop-pick-open-at-end')?.checked === true,
-      autoPickThreshold: document.querySelector('#bronze-loop-pick-auto-threshold')?.value,
-    });
+    return normalizePickRuntimeOptions(state.pickOptions);
   }
 
   function getSbcFodderRuntimeOptions() {
@@ -7936,16 +8375,23 @@ function updateLoopControls() {
     );
   }
 
-  function saveSbcFodderOptions() {
-    const options = normalizeSbcFodderPolicy({
-      lowRatedGoldMaxRating: document.querySelector('#bronze-loop-low-rated-gold-max')?.value,
-      ratingSbcMaxCardRating: document.querySelector('#bronze-loop-rating-sbc-max-card')?.value,
+  function renderCurrentSelectionPolicySummary() {
+    renderSelectionPolicySummary({
+      panel: document.querySelector('#bronze-loop-panel'),
+      pickOptions: getPickRuntimeOptions(),
+      sbcFodderOptions: getSbcFodderRuntimeOptions(),
     });
+  }
+
+  function saveSbcFodderOptions(input = state.sbcFodderOptions) {
+    const options = normalizeSbcFodderPolicy(input);
     state.sbcFodderOptions = options;
     try {
       adapters.localStorage.setJson(SBC_FODDER_OPTIONS_KEY, options);
     } catch { }
     log(`SBC fodder policy updated: low-rated Gold <= ${options.lowRatedGoldMaxRating}; rating SBC all cards <= ${options.ratingSbcMaxCardRating}`);
+    renderCurrentSelectionPolicySummary();
+    return options;
   }
 
   function loadPickRuntimeOptions() {
@@ -7956,8 +8402,9 @@ function updateLoopControls() {
     }
   }
 
-  function savePickRuntimeOptions() {
-    const options = getPickRuntimeOptions();
+  function savePickRuntimeOptions(input = state.pickOptions) {
+    const options = normalizePickRuntimeOptions(input);
+    state.pickOptions = options;
     try {
       adapters.localStorage.setJson(PICK_OPTIONS_KEY, options);
     } catch { }
@@ -7970,6 +8417,21 @@ function updateLoopControls() {
       renderLoopSelect(document.querySelector('#bronze-loop-select')?.value || null);
       log('Player Pick scan: scanned metadata preference disabled; configured Pick Loops reverted to static fallback');
     }
+    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.autoSelectBelow90 ? 'Automatic' : 'Review protected'}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; 95+ Storage pressure Pick ${options.rollingStorageSinkEnabled ? 'enabled' : 'disabled'}`);
+    renderCurrentSelectionPolicySummary();
+    return options;
+  }
+
+  function openSelectionPolicySettingsModal() {
+    return showSelectionPolicySettings({
+      dom: adapters.dom,
+      pickOptions: getPickRuntimeOptions(),
+      sbcFodderOptions: getSbcFodderRuntimeOptions(),
+      onSave: ({ pickOptions, sbcFodderOptions }) => {
+        saveSbcFodderOptions(sbcFodderOptions);
+        savePickRuntimeOptions(pickOptions);
+      },
+    });
   }
 
   function getRoutineStepLoopDefs(loopDef) {
@@ -8187,19 +8649,23 @@ function updateLoopControls() {
       return { ok: false, reason: 'dynamic SBC challenge player count is unavailable' };
     }
 
-    const candidates = buildRatingSbcCandidateEntries(loopDef, model);
+    const selectionPolicy = options.selectionPolicy || loopDef.ratingSbcFill?.selectionPolicy || null;
+    const candidates = buildRatingSbcCandidateEntries(loopDef, model, selectionPolicy);
     log(`${loopDef.name}: rating SBC candidates ${candidates.entries.length} unique definition(s) across ${candidates.piles.join(' > ')}; scanned ${candidates.scannedItems} item(s), built in ${candidates.buildMs}ms`);
-    const searchStartedAt = Date.now();
-    const searchMaxNodes = Math.max(10000, Math.min(2000000, Number(loopDef.ratingSbcFill?.maxSearchNodes || 500000) || 500000));
-    const searchMaxMs = Math.max(1000, Math.min(60000, Number(loopDef.ratingSbcFill?.maxSearchMs || 15000) || 15000));
-    const searchYieldNodes = Math.max(50, Math.min(5000, Number(loopDef.ratingSbcFill?.yieldEveryNodes || 500) || 500));
-    log(`${loopDef.name}: rating search started; max states:${searchMaxNodes}, max time:${searchMaxMs}ms, UI yield every:${searchYieldNodes} states`);
-    const selection = await findOptimalRatingSbcSelection(candidates.entries, model, candidates.piles, loopDef.ratingSbcFill);
-    const searchMs = Date.now() - searchStartedAt;
+    const planningStartedAt = Date.now();
+    log(`${loopDef.name}: deterministic rating recipe planning started from live rating buckets`);
+    const selection = await findOptimalRatingSbcSelection(candidates.entries, model, candidates.piles, {
+      ...loopDef.ratingSbcFill,
+      ...(selectionPolicy ? { selectionPolicy } : {}),
+    });
+    const planningMs = Date.now() - planningStartedAt;
     if (!selection.ok) {
       return {
         ok: false,
-        reason: `${selection.reason} (searched ${selection.nodes || 0} states in ${searchMs}ms)`,
+        reason: `${selection.reason} (rating levels:${selection.ratingLevels || 0}, recipe attempts:${selection.recipeAttempts || 0}, planner transitions:${selection.recipeTransitions || 0}, cache:${selection.recipeCacheHit ? 'hit' : 'miss'}, ${planningMs}ms)`,
+        reasonCode: selection.missing?.code || selection.details?.reasonCode || null,
+        missing: selection.missing || null,
+        selection,
         ratingShortage: true,
         model,
         candidates,
@@ -8207,8 +8673,10 @@ function updateLoopControls() {
     }
 
     selection.stats = selection.pileCounts;
-    selection.resolvedSignals = candidates.resolvedSignals;
-    log(`${loopDef.name}: optimal rating squad ${selection.rating}/${model.targetRating}; ratings ${selection.ratings.join(', ')}; search states:${selection.nodes}, search:${searchMs}ms, total:${Date.now() - startedAt}ms`);
+    const range = selection.ratingRange
+      ? `${selection.ratingRange.min}-${selection.ratingRange.max}`
+      : 'n/a';
+    log(`${loopDef.name}: deterministic rating squad ${selection.rating}/${model.targetRating}; ratings ${selection.ratings.join(', ')}; live range:${range}, levels:${selection.ratingLevels}, recipe attempts:${selection.recipeAttempts}, planner transitions:${selection.recipeTransitions}, cache:${selection.recipeCacheHit ? 'hit' : 'miss'}, planning:${planningMs}ms, total:${Date.now() - startedAt}ms`);
     if (options.dryRun) {
       logDryRunSelection(`${loopDef.name} rating SBC`, selection, {
         maxItems: 30,
@@ -8219,7 +8687,10 @@ function updateLoopControls() {
     }
 
     const prepared = await prepareInventorySelection(loopDef, selection);
-    const plannedModelValidation = validateRatingSbcModelAgainstItems(model, prepared.selected || []);
+    const plannedModelValidation = validateRatingSbcModelAgainstItems(model, prepared.selected || [], null, {
+      exclusiveRoles: selectionPolicy?.exclusiveRoles,
+      allowOtherSpecialAsOrdinary: selectionPolicy?.protectionPolicy?.allowOtherSpecialAsOrdinary === true,
+    });
     logRatingSbcValidation(loopDef, 'planned rating squad', plannedModelValidation, model);
     if (!plannedModelValidation.ok) {
       return {
@@ -8232,6 +8703,8 @@ function updateLoopControls() {
     }
     const plannedInspection = inspectSbcItems(loopDef, prepared.selected || [], {
       expectedPlayerCount: model.requiredPlayerCount,
+      selectionPolicy,
+      model,
     });
     logSbcSquadInspection(loopDef, plannedInspection);
     if (plannedInspection.blocked.length || plannedInspection.missingRequirements?.length) {
@@ -8258,9 +8731,16 @@ function updateLoopControls() {
       submitReady: false,
       background: true,
     };
-    const inspection = inspectSbcSquad(loopDef, squad, { expectedPlayerCount: model.requiredPlayerCount });
+    const inspection = inspectSbcSquad(loopDef, squad, {
+      expectedPlayerCount: model.requiredPlayerCount,
+      selectionPolicy,
+      model,
+    });
     logSbcSquadInspection(loopDef, inspection);
-    const savedModelValidation = validateRatingSbcModelAgainstItems(model, inspection.items, opened.challenge);
+    const savedModelValidation = validateRatingSbcModelAgainstItems(model, inspection.items, opened.challenge, {
+      exclusiveRoles: selectionPolicy?.exclusiveRoles,
+      allowOtherSpecialAsOrdinary: selectionPolicy?.protectionPolicy?.allowOtherSpecialAsOrdinary === true,
+    });
     logRatingSbcValidation(loopDef, 'saved rating squad', savedModelValidation, model);
     if (!savedModelValidation.ok) {
       return {
@@ -8578,6 +9058,7 @@ function updateLoopControls() {
           }
           return { submitted: true, rewardPackId: await submitSbcAndGetAwardPackId(context.set) };
         },
+        runCommittedSubmit: runCommittedSbcSubmit,
         afterSubmit: async ({ players, savedPlayers, squadPlan }) => finalizeSubmittedInventorySelection(
           squadPlan?.selection || configuredFill.selection,
           loopDef.name,
@@ -8700,7 +9181,9 @@ function updateLoopControls() {
       const settlement = await settleOpenedItems({
         attempts: 3,
         materialize: async () => {
-          const materialized = await materializeOpenedPlayerRewards(openedItems, label);
+          const materialized = await materializeOpenedPlayerRewards(openedItems, label, {
+            routingBaseline: context.routingBaseline || null,
+          });
           await sleep(CFG.pauseMs);
           return materialized;
         },
@@ -8716,14 +9199,14 @@ function updateLoopControls() {
         confirmRouting: async () => confirmOpenedItemRouting(openedItems, label, {
           routingBaseline: context.routingBaseline || null,
         }),
-        onRetry: async ({ attempt, routing }) => {
+        onRetry: async ({ attempt, routing, materialized }) => {
           log(`${label}: ${routing.pendingItems.length} opened item(s) appeared after initial cleanup; retrying Unassigned settlement ${attempt + 1}/3`);
           await sleep(CFG.pauseMs);
-          await showUnassignedIfAny(`${label} delayed materialization retry ${attempt + 1}/3`, {
-            stableEmptyReads: 3,
-            emptyReadDelayMs: 450,
-            diagnostic: true,
-          });
+          await materializeOpenedDuplicatesFresh(
+            materialized?.deferredDuplicates || [],
+            `${label} delayed materialization retry ${attempt + 1}/3`,
+            { routingBaseline: context.routingBaseline || null },
+          );
         },
       });
       const fallback = settlement.status === 'pending' && directDuplicateFallback
@@ -9201,6 +9684,9 @@ function updateLoopControls() {
         submitted: true,
         rewardPackId: await submitSbcAndGetAwardPackId(set),
       }),
+      runCommittedSubmit: runCommittedSbcSubmit,
+      onResult: options.onResult,
+      onResultError: options.onResultError,
       afterSubmit: async ({ result: submissionResult, players, savedPlayers, squadPlan }) => {
         await finalizeSubmittedInventorySelection(
           squadPlan?.selection || selection,
@@ -10044,9 +10530,12 @@ function updateLoopControls() {
 
     const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
     const autoPickThreshold = Math.max(1, Math.min(99, Number(loopDef.autoPickRatingThreshold || 90) || 90));
-    const autoSelectBelow90 = loopDef.autoSelectBelow90 !== false && maxRating < autoPickThreshold;
-    if (autoSelectBelow90) {
-      log(`${loopDef.name}: all candidates rated below ${autoPickThreshold} (max ${maxRating}); keeping automatic selection while loading prices for the recap`);
+    const autoSelectWithinProtection = shouldAutoSelectPlayerPick(maxRating, {
+      autoSelectBelow90: loopDef.autoSelectBelow90,
+      protectionRating: autoPickThreshold,
+    });
+    if (autoSelectWithinProtection) {
+      log(`${loopDef.name}: all candidates are within the automatic-use rating ${autoPickThreshold} (max ${maxRating}); keeping automatic selection while loading prices for the recap`);
     }
 
     await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
@@ -10059,7 +10548,7 @@ function updateLoopControls() {
     const ranked = rankPlayerPickCandidates(choices, prices, pickRewardOptions);
     ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
 
-    const manualReason = autoSelectBelow90 ? '' : getManualPlayerPickReason(ranked, pickCount);
+    const manualReason = autoSelectWithinProtection ? '' : getManualPlayerPickReason(ranked, pickCount);
     const selected = manualReason
       ? await waitForManualPlayerPickSelection({
           dom: adapters.dom,
@@ -10076,6 +10565,12 @@ function updateLoopControls() {
     if (manualReason) log(`${loopDef.name}: manual Player Pick confirmed`);
     else log(`${loopDef.name}: auto-selected ${selected.map((item) => itemDisplayName(item)).join(', ')}`);
 
+    const beforeConfirmation = {
+      unassigned: eaInventoryAdapter().unassignedState(),
+      selected: selected.map((item) => (
+        captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })
+      )),
+    };
     const confirmed = await observeOnce(
       eaPlayerPickAdapter().confirmSelection(selected),
       ctrl(),
@@ -10083,10 +10578,52 @@ function updateLoopControls() {
       'confirm Player Pick selection',
     );
     if (!confirmed?.success) fail(`${loopDef.name}: Player Pick confirmation failed: ${serviceResultErrorText(confirmed)}`);
+    emitDiagnostic(log, () => `${loopDef.name}: Player Pick confirmation response: ${diagnosticJson({
+      before: beforeConfirmation,
+      result: captureMoveResult(confirmed),
+    })}`);
     selectedCards.forEach((card) => { card.destination = 'unassigned'; });
     await options.onSelectionConfirmed?.(selectedCards);
     await sleep(CFG.pauseMs);
-    await refreshUnassigned({ quiet: true });
+    let invalidation = null;
+    let refreshResult = null;
+    try {
+      invalidation = await eaInventoryAdapter().invalidateUnassigned();
+      refreshResult = await refreshUnassigned({
+        attempts: 2,
+        allowCacheFallback: false,
+        quiet: true,
+      });
+    } catch (error) {
+      refreshResult = await refreshUnassigned({ quiet: true });
+      invalidation = {
+        ...(invalidation || {}),
+        error: error?.message || String(error),
+      };
+    }
+    emitDiagnostic(log, () => {
+      const piles = {
+        unassigned: getUnassignedItems(),
+        storage: getStorageItems(),
+        transfer: getTransferItems(),
+        club: getClubItems(),
+      };
+      const selectedDefinitions = [...new Set(selected
+        .map((item) => Number(item?.definitionId || 0))
+        .filter(Boolean))];
+      return `${loopDef.name}: Player Pick post-confirm inventory: ${diagnosticJson({
+        invalidation,
+        refresh: captureMoveResult(refreshResult),
+        unassigned: eaInventoryAdapter().unassignedState(),
+        pendingPlayerPicks: eaPlayerPickAdapter().listUnassignedPlayerPicks().map((item) => (
+          captureRuntimeInventoryItem(item, { identify: identifyRuntimeInventoryItem })
+        )),
+        selectedDefinitions: Object.fromEntries(selectedDefinitions.map((definitionId) => [
+          definitionId,
+          captureDefinitionPileState(piles, definitionId, { identify: identifyRuntimeInventoryItem }),
+        ])),
+      })}`;
+    });
     selectedCards.forEach((card) => { card.destination = predictUnassignedDestination(card.item); });
     try {
       await resolveRuntimeUnassigned(`${loopDef.name} Player Pick result`, options.cleanupOptions || {});
@@ -10094,6 +10631,7 @@ function updateLoopControls() {
       selectedCards.forEach((card) => { card.destination = 'blocked'; });
       throw error;
     }
+    emitDiagnostic(log, () => `${loopDef.name}: Player Pick result cleanup complete; unassigned:${diagnosticJson(eaInventoryAdapter().unassignedState())}`);
     return selectedCards;
   }
 
@@ -10312,12 +10850,21 @@ function updateLoopControls() {
   async function submitPlayerPickChallenge(loopDef, challengeNo, challengeTotal, options = {}) {
     const challengeDef = playerPickChallengeDef(loopDef, challengeNo);
     await refreshInventoryCaches(`${loopDef.name} challenge ${challengeNo}/${challengeTotal} pre-selection`, { includePacks: false, quiet: true });
-    const selection = selectInventoryPlayers(challengeDef, challengeDef.priorityPiles);
+    const preferredSignalRefs = options.preferredSignalRefs || [];
+    const selection = selectInventoryPlayers(challengeDef, challengeDef.priorityPiles, {
+      preferredSignalRefs,
+    });
     log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} selected ${selection.selected.length}/${sumRequirementPlayerCount(challengeDef)} player(s) (${formatSelectionStats(selection.stats)})`);
     if (!selection.ok) {
       log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} missing ${selection.missing.count} ${selection.missing.rarity || selection.missing.tier || 'player'}(s); stopping`);
       logSelectionDiagnostics(`${loopDef.name} challenge ${challengeNo}/${challengeTotal}`, selection, challengeDef.priorityPiles);
       return { status: 'blocked', submitted: false, reason: `missing ${selection.missing.count} player(s)` };
+    }
+    if (options.requirePreferredSignal === true
+      && preferredSignalRefs.length
+      && !selectionConsumesSignalRefs(selection, preferredSignalRefs)) {
+      log(`${loopDef.name}: challenge ${challengeNo}/${challengeTotal} did not consume a required recovery duplicate signal; preserving the primary 10x85+ fodder`);
+      return { status: 'unavailable', submitted: false, reason: 'recovery duplicate signal was not selected' };
     }
     if (options.dryRun === true) {
       logDryRunSelection(`${loopDef.name} challenge ${challengeNo} strict card ratio`, selection, {
@@ -10347,7 +10894,12 @@ function updateLoopControls() {
       log(`${label}: submit blocked: ${attempt.result.reason || attempt.result.status}`);
       return { status: 'blocked', submitted: false, reason: attempt.result.reason || attempt.result.status };
     }
-    return { status: 'submitted', submitted: true, rewardPackId: attempt.result.rewardPackId };
+    return {
+      status: 'submitted',
+      submitted: true,
+      rewardPackId: attempt.result.rewardPackId,
+      selection,
+    };
   }
 
   async function runProvisionPreCraftPlayerPick(loopDef, provisionHandling = {}, options = {}) {
@@ -10798,18 +11350,66 @@ function updateLoopControls() {
   }
 
   function beginLoopRecapSession(loopDef) {
+    const rolling = loopDef?.strategy === 'rollingUpgrade';
     state.loopRecapSession = {
       name: loopDef?.name || loopDef?.id || 'Loop',
       receipts: [],
       dedicatedRecap: false,
       startedAt: Date.now(),
+      rollingAggregator: rolling ? createRollingRecapAggregator({
+        alertMinimumRating: state.rewardAlertSettings.minimumRating,
+        resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
+      }) : null,
     };
   }
 
-  async function finalizeLoopRecap(loopDef, status = 'completed', reason = null) {
+  function rollingFinalResources(runResult = {}) {
+    if (runResult.finalResources) return runResult.finalResources;
+    const telemetry = state.runtimeTelemetryController.getSnapshot();
+    return {
+      specialSlots: telemetry.specialSlots,
+      directCycles: telemetry.directCycles,
+      provisionsBatches: telemetry.provisionsBatches,
+      totwRecoveries: telemetry.totwRecoveries,
+      storage: telemetry.storageUsed === null || telemetry.storageCapacity === null
+        ? null
+        : `${telemetry.storageUsed}/${telemetry.storageCapacity}`,
+      inventoryVersion: telemetry.inventoryVersion,
+    };
+  }
+
+  async function finalizeLoopRecap(loopDef, status = 'completed', reason = null, runResult = null) {
     const session = state.loopRecapSession;
     state.loopRecapSession = null;
     if (!session || session.dedicatedRecap) return null;
+    if (session.rollingAggregator) {
+      try {
+        const snapshot = session.rollingAggregator.getSnapshot({
+          workflow: runResult || {},
+          status,
+          reason: reason || runResult?.reason || null,
+          finalResources: rollingFinalResources(runResult || {}),
+        });
+        const retainedCards = snapshot.retainedCards || [];
+        const prices = await getSpecialCardPrices(retainedCards, `${session.name} recap`);
+        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(retainedCards, `${session.name} recap`);
+        const model = createRollingRecapModel({
+          name: session.name,
+          snapshot,
+          prices,
+          resolveFutbinPlayerId,
+        });
+        state.lastLoopRecap = { name: session.name, model, completedAt: Date.now() };
+        state.lastRecapType = 'loop';
+        updateRecapButton();
+        await showLoopRecapModal(model);
+        return model;
+      } catch (error) {
+        log(`${session.name}: Rolling recap failed (${error?.message || error})`);
+        errorStackLines(error).forEach((line) => log(`Error stack: ${line}`));
+        return null;
+      }
+    }
     const openedItems = session.receipts.flatMap((receipt) => receipt?.openedItems || []);
     if (!hasRecapRareGoldOrAbove(openedItems)) {
       log(`${session.name}: no Rare Gold or Special card in this session; recap skipped`);
@@ -10889,7 +11489,6 @@ function updateLoopControls() {
           {
             allowGone: true,
             allowPendingItems: true,
-            reusePackOn471: true,
             retryCodes: ['471', '500'],
             openedItemPolicy: createMaterializeAndResolvePolicy(
               `Batch Open ${entry.packName || `#${entry.packId}`}`,
@@ -11046,6 +11645,3044 @@ function updateLoopControls() {
     return result;
   }
 
+  function rollingProtectionRating(loopDef = {}) {
+    return resolveRollingAutomaticUseMaxRating(loopDef);
+  }
+
+  function rollingProvisionsReserveRatings(loopDef = {}) {
+    return resolveRollingProvisionsReserveRatings(loopDef);
+  }
+
+  function rollingProvisionsMaxRating(loopDef = {}) {
+    return rollingProvisionsReserveRatings(loopDef).at(-1)
+      || ROLLING_PROVISIONS_RATING_RANGE.max;
+  }
+
+  function rollingSnapshotMatchesRequiredSpecial(item, loopDef = {}) {
+    if (item?.special !== true) return false;
+    const requiredGroups = new Set(dynamicPlayerGroupRequirements(loopDef)
+      .flatMap((requirement) => requirement.values || [])
+      .map(Number)
+      .filter(Number.isFinite));
+    if (requiredGroups.size) {
+      return (item.groups || []).some((group) => requiredGroups.has(Number(group)));
+    }
+    return isRequiredSpecialItem(item, loopDef);
+  }
+
+  function rollingSnapshotRequiredSpecial(item, loopDef = {}) {
+    if (!rollingSnapshotMatchesRequiredSpecial(item, loopDef)) return false;
+    const pile = String(item?.pile || item?.ref?.pile || '');
+    return pile !== 'club' || isTotwItem(item);
+  }
+
+  function rollingLiveRequiredSpecial(item, model = {}) {
+    const constraints = eaPlayerGroupConstraints(model);
+    if (!constraints.length) {
+      const fallback = (model.constraints || []).find((constraint) => constraint.id === 'runner-required-special');
+      if (!fallback) return false;
+      try { return fallback.matches(item) === true; } catch { return false; }
+    }
+    return constraints.some(({ constraint }) => {
+      try { return constraint.matches(item) === true; } catch { return false; }
+    });
+  }
+
+  function rollingRequiredSpecialConstraintIndexes(model = {}) {
+    return (model.constraints || [])
+      .map((constraint, index) => ({ constraint, index }))
+      .filter(({ constraint }) => (
+        (constraint.source === 'ea' && constraint.keyName === 'PLAYER_RARITY_GROUP')
+          || constraint.id === 'runner-required-special'
+      ))
+      .map(({ index }) => index);
+  }
+
+  function rollingRequiredSpecialSourceErrors(selection, model = {}) {
+    const indexes = rollingRequiredSpecialConstraintIndexes(model);
+    return (selection?.entries || [])
+      .filter((entry) => (
+        String(entry?.pileName || '') === 'club'
+          && indexes.some((index) => entry.requirementMatches?.[index] === true)
+          && !isTotwItem(entry.item)
+      ))
+      .map((entry) => `Club ${itemDisplayName(entry.item)} is not TOTW`);
+  }
+
+  function rollingBaseProtectionReasons(item, loopDef = {}) {
+    const reasons = getSbcProtectionReasons(item, loopDef, {
+      roleAware: true,
+      skipRatingLimit: true,
+      allowedSpecialCount: expectedSbcPlayerCount(loopDef),
+      specialIndex: isSbcSpecialItem(item) ? 1 : 0,
+    });
+    const pile = String(item?.pile || item?.ref?.pile || '');
+    const protectedClubEventSpecial = pile === 'club'
+      && !isTotwItem(item)
+      && (
+        rollingSnapshotMatchesRequiredSpecial(item, loopDef)
+          || isTotsItem(item)
+          || isFofItem(item)
+          || isFuttiesItem(item)
+      );
+    if (protectedClubEventSpecial) reasons.push('rolling-club-non-totw-required-special');
+    return [...new Set(reasons)];
+  }
+
+  function rollingItemRef(item, pile) {
+    return {
+      id: Number(item?.id || 0),
+      definitionId: Number(item?.definitionId || 0),
+      pile,
+    };
+  }
+
+  function findRollingLiveUnassignedItem(responseItem, usedIds = new Set(), baselineIds = new Set()) {
+    const responseId = Number(responseItem?.id || 0);
+    const definitionId = Number(responseItem?.definitionId || 0);
+    const items = getUnassignedItems();
+    const exact = responseId
+      ? items.find((item) => (
+          Number(item?.id || 0) === responseId
+            && !usedIds.has(responseId)
+            && !baselineIds.has(responseId)
+        ))
+      : null;
+    if (exact) return exact;
+    return items.find((item) => {
+      const id = Number(item?.id || 0);
+      return id
+        && !usedIds.has(id)
+        && !baselineIds.has(id)
+        && Number(item?.definitionId || 0) === definitionId
+        && isSamePlayerCardVersion(responseItem, item);
+    }) || null;
+  }
+
+  function createRollingPrimaryPackPolicy(loopDef, context, options = {}) {
+    return createOpenedItemPolicy(async (openedItems, packContext = {}) => {
+      const label = context.rewardLabel || `${loopDef.name} primary reward`;
+      if (context.assumeTotwReward === true || packContext.assumeTotwReward === true) {
+        markAssumedTotwRewardItems(openedItems, label);
+      }
+      const materialized = await materializeOpenedPlayerRewards(openedItems, label, {
+        routingBaseline: packContext.routingBaseline || null,
+      });
+      const nonPlayerItems = openedItems.filter((item) => !isPlayer(item));
+      let nonPlayersMoved = 0;
+      if (nonPlayerItems.length) {
+        try {
+          await moveItems(nonPlayerItems, inventoryPile('club'), true);
+          nonPlayersMoved = nonPlayerItems.length;
+        } catch (error) {
+          log(`${label}: non-player reward routing failed (${error?.message || error})`);
+        }
+      }
+      await refreshInventoryCaches(`${label} classification`, { includePacks: false, quiet: true });
+      restoreOpenedUnassignedDuplicateMetadata(openedItems, label, {
+        routingBaseline: packContext.routingBaseline || null,
+      });
+
+      const usedLiveIds = new Set();
+      const baselineUnassignedIds = new Set(packContext.routingBaseline?.unassignedIds || []);
+      const duplicatePairs = materialized.deferredDuplicates.map((response) => {
+        const live = findRollingLiveUnassignedItem(response, usedLiveIds, baselineUnassignedIds);
+        const id = Number(live?.id || 0);
+        if (id) usedLiveIds.add(id);
+        return { response, live };
+      });
+      const unresolvedPairs = duplicatePairs.filter(({ live }) => !live);
+      const liveDuplicates = duplicatePairs.filter(({ live }) => live).map(({ live }) => live);
+      let routePlan = planRollingOpenedItemRouting(liveDuplicates, {
+        protectionRating: rollingProtectionRating(loopDef),
+        provisionsMinRating: ROLLING_PROVISIONS_RATING_RANGE.min,
+        provisionsMaxRating: rollingProvisionsMaxRating(loopDef),
+        storageFree: storageSpaceLeft(),
+        provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
+        provisionsRecoveryAvailable: rollingCapabilityAvailable(loopDef.rollingProvisionsUpgrade),
+        proactiveProvisionsEnabled: loopDef.rollingSurplusCraftingEnabled === true,
+        isDuplicate,
+        isSpecial: isSbcSpecialItem,
+        isRequiredSpecial: (item) => rollingLiveRequiredSpecial(
+          item,
+          context.model || context.primaryContext?.model,
+        ),
+        protectionReasons: (item) => rollingBaseProtectionReasons(item, loopDef),
+      });
+      if (unresolvedPairs.length) {
+        routePlan = {
+          ...routePlan,
+          status: 'blocked',
+          reason: `${unresolvedPairs.length} opened duplicate item(s) did not materialize in Unassigned`,
+          reasonCode: 'OPENED_DUPLICATE_NOT_MATERIALIZED',
+        };
+      }
+
+      let storageMoved = false;
+      if (routePlan.status === 'ready' && routePlan.storageItems.length) {
+        try {
+          await moveItems(routePlan.storageItems, inventoryPile('storage'), true);
+          storageMoved = true;
+        } catch (error) {
+          routePlan = {
+            ...routePlan,
+            status: 'blocked',
+            reason: `protected/reserved Storage move failed: ${error?.message || error}`,
+            reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+          };
+        }
+      }
+
+      const responseByLiveId = new Map(duplicatePairs
+        .filter(({ live }) => live)
+        .map(({ response, live }) => [Number(live.id), response]));
+      const responseItems = (values) => values
+        .map((item) => responseByLiveId.get(Number(item?.id || 0)))
+        .filter(Boolean);
+      const reservedResponseItems = responseItems([
+        ...(routePlan.reservedItems || []),
+        ...(routePlan.provisionsItems || []),
+      ]);
+      const storageResponseItems = storageMoved ? responseItems(routePlan.storageItems) : [];
+      const directPlayerItems = Number(materialized.moved || 0) === materialized.directItems.length
+        ? materialized.directItems
+        : [];
+      const directOtherItems = nonPlayersMoved === nonPlayerItems.length ? nonPlayerItems : [];
+      const pendingItems = [
+        ...unresolvedPairs.map(({ response }) => response),
+        ...(storageMoved ? [] : responseItems(routePlan.storageItems)),
+        ...(directPlayerItems.length === materialized.directItems.length ? [] : materialized.directItems),
+        ...(directOtherItems.length === nonPlayerItems.length ? [] : nonPlayerItems),
+      ];
+      const finalRouteStatus = routePlan.status === 'blocked' || pendingItems.length
+        ? 'blocked'
+        : 'ready';
+      const finalRouteReason = routePlan.reason
+        || (pendingItems.length ? `${pendingItems.length} opened item(s) still have no confirmed destination` : null);
+      const finalRouteReasonCode = routePlan.reasonCode
+        || (pendingItems.length ? 'OPENED_ITEM_ROUTING_PENDING' : null);
+      context.openRouting = {
+        ...routePlan,
+        status: finalRouteStatus,
+        reason: finalRouteReason,
+        reasonCode: finalRouteReasonCode,
+        counts: {
+          ...routePlan.counts,
+          opened: openedItems.length,
+          directClub: directPlayerItems.length + directOtherItems.length,
+          unresolved: unresolvedPairs.length,
+        },
+      };
+      if (options.capturePrimaryDuplicates === true && finalRouteStatus === 'ready') {
+        const storageIds = new Set((storageMoved ? routePlan.storageItems : [])
+          .map((item) => Number(item?.id || 0))
+          .filter(Boolean));
+        const primaryItems = (routePlan.reservedItems || [])
+          .map((item) => liveItemRef(
+            item,
+            storageIds.has(Number(item?.id || 0)) ? 'storage' : 'unassigned',
+          ));
+        context.primaryDuplicateRefs = rollingUniqueRefs(primaryItems);
+        log(`${label}: marked ${context.primaryDuplicateRefs.length} opened duplicate(s) for the next primary SBC; recovery sinks cannot consume them`);
+      }
+      const counts = context.openRouting.counts;
+      log(`${label}: classified ${counts.opened} item(s); duplicates:${counts.duplicates}, primary:${counts.primaryDuplicates}, Required Special:${counts.requiredSpecial}, Provisions reserve:${counts.provisionsReserve} (immediate:${counts.provisionsImmediate || 0}), protected:${counts.protectedDuplicates}, Storage:${counts.storageRequired}, unresolved:${counts.unresolved}`);
+      if (finalRouteStatus === 'blocked') {
+        log(`${label}: protected routing blocked [${finalRouteReasonCode || 'unknown'}] ${finalRouteReason}`);
+      }
+      return {
+        reservedItemRefs: reservedResponseItems.map((item) => rollingItemRef(item, 'unassigned')),
+        routedItemRefs: [
+          ...directPlayerItems.map((item) => rollingItemRef(item, 'club')),
+          ...directOtherItems.map((item) => rollingItemRef(item, 'club')),
+          ...storageResponseItems.map((item) => rollingItemRef(item, 'storage')),
+        ],
+        pendingItemRefs: pendingItems.map((item) => rollingItemRef(item, 'unassigned')),
+        details: {
+          rolling: true,
+          status: finalRouteStatus,
+          reason: finalRouteReason,
+          reasonCode: finalRouteReasonCode,
+          counts,
+        },
+      };
+    });
+  }
+
+  async function loadRollingPrimaryContext(loopDef, options = {}) {
+    const set = await findSbcSetForLoopDef(loopDef, loopDef.name);
+    const challengeContext = await findAvailableRatingSbcChallengeContext(set, loopDef.name, {
+      force: options.force === true,
+    });
+    if (!challengeContext.challenge) {
+      return { status: 'unavailable', reason: 'no available primary SBC challenge remains' };
+    }
+    const challenge = loopDef.dryRun
+      ? challengeContext.challenge
+      : await loadRatingSbcChallenge(challengeContext.challenge, loopDef.name, {
+          force: options.force === true,
+        });
+    if (!challenge) return { status: 'unavailable', reason: 'primary SBC challenge could not be loaded' };
+    const activeLoopDef = applyRollingAutomaticUseFodderPolicy(
+      materializeDynamicUpgradeChallengeLoopDef(loopDef, challenge),
+      loopDef,
+    );
+    const model = parseRatingSbcChallenge(activeLoopDef, challenge);
+    if (model.unsupported.length) {
+      return {
+        status: 'blocked',
+        reason: `unsupported dynamic SBC requirement(s): ${model.unsupported.join(', ')}`,
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    const roles = eaPlayerGroupConstraints(model);
+    const roleCount = roles.reduce((total, entry) => total + Number(entry.constraint.count || 0), 0);
+    if (roleCount !== 1) {
+      return {
+        status: 'blocked',
+        reason: `Rolling requires exactly one live Required Special slot, found ${roleCount}`,
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    return {
+      status: 'ready',
+      set,
+      challenge,
+      incompleteCount: challengeContext.incompleteCount,
+      activeLoopDef,
+      model,
+    };
+  }
+
+  function rollingRecoveryDef(definition, parentLoopDef, options = {}) {
+    if (!isPlainObject(definition)) return null;
+    const result = inheritSbcFodderPolicy(cloneLoopDef(definition), parentLoopDef);
+    const minRating = Number(options.minRating);
+    const maxRating = Number(options.maxRating);
+    result.runtimeSbcFodderPolicy = {
+      ...(result.runtimeSbcFodderPolicy || {}),
+      mode: 'rating-constrained',
+      ratingSbcMaxCardRating: Number.isFinite(maxRating) && maxRating > 0
+        ? maxRating
+        : rollingProtectionRating(parentLoopDef),
+    };
+    result.dryRun = parentLoopDef.dryRun === true;
+    result.autoSelectBelow90 = parentLoopDef.autoSelectBelow90 !== false;
+    result.autoPickRatingThreshold = rollingProtectionRating(parentLoopDef);
+    result.maxCompletions = 1;
+    result.openRewardPacks = false;
+    result.forceOpenRewardPacks = false;
+    result.autoTotwUpgrade = false;
+    result.autoFodderUpgrade = false;
+    result.protectedItemIds = [...new Set((result.protectedItemIds || []).map(Number).filter(Boolean))];
+    result.protectedDefinitionIds = [...new Set((result.protectedDefinitionIds || []).map(Number).filter(Boolean))];
+    if (Number.isFinite(minRating) || Number.isFinite(maxRating)) {
+      result.requirements = (result.requirements || []).map((requirement) => ({
+        ...requirement,
+        ...(Number.isFinite(minRating) ? { minRating } : {}),
+        ...(Number.isFinite(maxRating) ? { maxRating } : {}),
+      }));
+    }
+    if (options.inventoryFirst === true) {
+      delete result.ratingSbcFill;
+      result.inventoryFillFirst = true;
+    }
+    if (Array.isArray(options.priorityPiles) && options.priorityPiles.length) {
+      result.priorityPiles = [...options.priorityPiles];
+      result.ratingSbcFill = {
+        ...(result.ratingSbcFill || {}),
+        priorityPiles: [...options.priorityPiles],
+      };
+      result.requirements = (result.requirements || []).map((requirement) => ({
+        ...requirement,
+        priorityPiles: [...options.priorityPiles],
+      }));
+    }
+    applyDisabledPiles(result);
+    return result;
+  }
+
+  function rollingCapabilityAvailable(definition) {
+    return isPlainObject(definition)
+      && definition.activityResolved === true
+      && hasResolvedSbcIdentity(definition);
+  }
+
+  function rollingProvisionsRequiredCount(loopDef = {}) {
+    const definition = loopDef?.rollingProvisionsUpgrade;
+    if (!rollingCapabilityAvailable(definition)) return 4;
+    const count = Number(definition?.requirements?.[0]?.count);
+    return Number.isInteger(count) && count > 0 ? count : 4;
+  }
+
+  function rollingRecoveryEntryRefs(runtime, predicate) {
+    return (runtime.coordinator?.getLedger()?.classifiedEntries?.() || [])
+      .filter(predicate)
+      .map(({ item }) => liveItemRef(item, item?.pile || item?.ref?.pile));
+  }
+
+  function refreshRollingPendingUnassignedRefs(runtime) {
+    runtime.pendingUnassignedRefs = rollingUniqueRefs(
+      (runtime.coordinator?.getLedger()?.classifiedEntries?.() || [])
+        .filter(({ item, pile }) => pile === 'unassigned' && item?.type === 'player')
+        .map(({ item }) => liveItemRef(item, 'unassigned')),
+    );
+    return runtime.pendingUnassignedRefs;
+  }
+
+  function inspectRollingLiveUnassignedEntries(entries = [], options = {}) {
+    const resolveLive = options.resolveLive || ((id) => findCachedItemById(id, ['unassigned']));
+    const listPlayerPicks = options.listPlayerPicks
+      || (() => eaPlayerPickAdapter().listUnassignedPlayerPicks());
+    const liveIds = new Set();
+    for (const { item } of entries || []) {
+      const id = Number(item?.id || 0);
+      if (!id) {
+        return {
+          ok: false,
+          reason: 'an Unassigned item has no stable item ID',
+          reasonCode: 'UNASSIGNED_RESUME_IDENTITY_UNAVAILABLE',
+        };
+      }
+      const live = resolveLive(id);
+      if (!live?.item || live.pileName !== 'unassigned' || Number(live.item.id || 0) !== id) {
+        return {
+          ok: false,
+          reason: `Unassigned item #${id} changed before Rolling resume inspection`,
+          reasonCode: 'UNASSIGNED_RESUME_IDENTITY_CHANGED',
+        };
+      }
+      liveIds.add(id);
+    }
+
+    let playerPicks;
+    try {
+      playerPicks = listPlayerPicks() || [];
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `pending Player Pick inspection failed: ${error?.message || error}`,
+        reasonCode: 'UNASSIGNED_RESUME_PICK_INSPECTION_FAILED',
+      };
+    }
+    const playerPickIds = new Set();
+    for (const item of playerPicks) {
+      const id = Number(item?.id || 0);
+      if (!id || !liveIds.has(id)) {
+        return {
+          ok: false,
+          reason: 'pending Player Pick identity does not match the reconciled Unassigned inventory',
+          reasonCode: 'UNASSIGNED_RESUME_PICK_IDENTITY_CHANGED',
+        };
+      }
+      playerPickIds.add(id);
+    }
+    return { ok: true, playerPickCount: playerPickIds.size, playerPickIds: [...playerPickIds] };
+  }
+
+  function rollingRecoveryProtection(runtime, additionalProtected = []) {
+    return rollingRecoveryProtectionWithOptions(runtime, additionalProtected);
+  }
+
+  function rollingNonPrimaryPendingRefs(runtime) {
+    const primaryRefs = runtime.primaryDuplicateRefs || [];
+    return (runtime.pendingUnassignedRefs || []).filter((ref) => (
+      !primaryRefs.some((primaryRef) => rollingItemMatchesRef(ref, primaryRef))
+    ));
+  }
+
+  function rollingRecoveryProtectionWithOptions(runtime, additionalProtected = [], options = {}) {
+    const pendingRefs = options.allowPrimaryDuplicates === true
+      ? rollingNonPrimaryPendingRefs(runtime)
+      : (runtime.pendingUnassignedRefs || []);
+    return createRollingRecoveryProtection({
+      ledger: runtime.coordinator?.getLedger(),
+      protectedItems: [
+        ...pendingRefs,
+        ...additionalProtected,
+      ],
+    });
+  }
+
+  function rollingItemMatchesRef(item, ref) {
+    const itemId = Number(item?.id || 0);
+    const refId = Number(ref?.id || 0);
+    if (refId) return itemId === refId;
+    return Number(ref?.definitionId || 0) > 0
+      && Number(item?.definitionId || 0) === Number(ref.definitionId);
+  }
+
+  function assertRollingRecoveryItems(loopDef, runtime, players = [], options = {}) {
+    const protection = rollingRecoveryProtectionWithOptions(runtime, [
+      ...(options.additionalProtected || []),
+      ...(options.allowPrimaryDuplicates === true ? [] : (runtime.primaryDuplicateRefs || [])),
+    ], {
+      allowPrimaryDuplicates: options.allowPrimaryDuplicates === true,
+    });
+    const reserveRatings = options.allowProvisionsReserve === true
+      ? new Set()
+      : new Set(rollingProvisionsReserveRatings(loopDef));
+    const protectionRating = rollingProtectionRating(loopDef);
+    const minRating = Number(options.minRating);
+    const maxRating = Number(options.maxRating);
+    for (const item of players || []) {
+      if (rollingLiveRequiredSpecial(item, runtime.primaryContext?.model)
+        || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef)) {
+        fail(`${loopDef.name}: recovery squad attempted to consume a Required Special card`);
+      }
+      if (protection.protectedItems.some((ref) => rollingItemMatchesRef(item, ref))) {
+        fail(`${loopDef.name}: recovery squad attempted to consume a protected card`);
+      }
+      if (reserveRatings.has(Number(item?.rating || 0))) {
+        fail(`${loopDef.name}: recovery squad attempted to consume a reserved ${Number(item.rating)} card`);
+      }
+      if (Number(item?.rating || 0) > protectionRating) {
+        fail(`${loopDef.name}: recovery squad card rating ${Number(item.rating)} exceeds Protection rating ${protectionRating}`);
+      }
+      if (Number.isFinite(minRating) && Number(item?.rating || 0) < minRating) {
+        fail(`${loopDef.name}: recovery squad card rating ${Number(item.rating)} is below the required minimum ${minRating}`);
+      }
+      if (Number.isFinite(maxRating) && Number(item?.rating || 0) > maxRating) {
+        fail(`${loopDef.name}: recovery squad card rating ${Number(item.rating)} exceeds the recovery maximum ${maxRating}`);
+      }
+      const reasons = rollingBaseProtectionReasons(item, runtime.primaryContext?.activeLoopDef || loopDef);
+      if (reasons.length) {
+        fail(`${loopDef.name}: recovery squad contains protected item ${itemDisplayName(item)} (${reasons.join(',')})`);
+      }
+      if (options.allowSpecial !== true && isSbcSpecialItem(item)) {
+        fail(`${loopDef.name}: recovery squad attempted to consume a special card`);
+      }
+    }
+    return true;
+  }
+
+  async function reconcileRollingRuntime(runtime, reason) {
+    const reconciliation = await runtime.coordinator.reconcile(reason, { refreshUnassigned: true });
+    if (!reconciliation.ok) {
+      return { status: 'blocked', reason: reconciliation.reason, reasonCode: 'INVENTORY_RECONCILIATION_FAILED' };
+    }
+    return { status: 'ready', inventoryDelta: runtime.lastMutation?.delta || null };
+  }
+
+  async function saveRollingProvisionalClubSquad(challenge, players, runtimeAccess, label) {
+    if (!runtimeAccess?.refreshedClubPlayers) return;
+    await saveChallengeSquad(challenge, players, label);
+  }
+
+  async function submitRollingRequirementRecovery(loopDef, runtime, definition, options = {}) {
+    const priorityPiles = options.priorityPiles || ['unassigned', 'storage', 'transfer', 'club'];
+    const recoveryDef = rollingRecoveryDef(definition, loopDef, {
+      inventoryFirst: true,
+      priorityPiles,
+      minRating: options.minRating,
+      maxRating: options.maxRating,
+    });
+    if (!rollingCapabilityAvailable(recoveryDef)) {
+      return { status: 'unavailable', reason: `${definition?.name || 'recovery SBC'} capability is unavailable` };
+    }
+
+    await refreshInventoryCaches(`${loopDef.name} ${recoveryDef.name} recovery selection`, {
+      includePacks: false,
+      quiet: true,
+    });
+    await runtime.coordinator.reconcile(`${recoveryDef.name} pre-selection`, { refreshUnassigned: true });
+    const additionalProtected = [
+      ...(options.additionalProtected || []),
+      ...(runtime.primaryDuplicateRefs || []),
+    ];
+    const protection = rollingRecoveryProtection(runtime, additionalProtected);
+    const protectedDuplicateRefs = options.protectedDuplicateRefs || [];
+    const reserveRefs = options.protectProvisionsReserve === true
+      ? rollingRecoveryEntryRefs(runtime, ({ classification }) => classification.provisionsReserve === true)
+      : [];
+    const hardProtectedIds = [...new Set([
+      ...protection.protectedItemIds,
+      ...protectedDuplicateRefs.map((ref) => Number(ref?.id || 0)),
+      ...reserveRefs.map((ref) => Number(ref.id || 0)),
+    ].filter(Boolean))];
+    const softProtectedIds = protection.softProtectedItems.map((ref) => Number(ref.id || 0)).filter(Boolean);
+    const buildDef = (includeSoftProtection) => ({
+      ...recoveryDef,
+      protectedItemIds: [...new Set([
+        ...(recoveryDef.protectedItemIds || []),
+        ...hardProtectedIds,
+        ...(includeSoftProtection ? softProtectedIds : []),
+      ])],
+      protectedDefinitionIds: [...new Set([
+        ...(recoveryDef.protectedDefinitionIds || []),
+        ...protection.protectedDefinitionIds,
+      ])],
+    });
+
+    let activeDef = buildDef(options.softProtectClubSpecial !== false);
+    let selection = selectInventoryPlayers(activeDef, priorityPiles, {
+      preferredSignalRefs: options.preferredSignalRefs || [],
+    });
+    if (!selection.ok && options.softProtectClubSpecial !== false && softProtectedIds.length) {
+      activeDef = buildDef(false);
+      selection = selectInventoryPlayers(activeDef, priorityPiles, {
+        preferredSignalRefs: options.preferredSignalRefs || [],
+      });
+      if (selection.ok) {
+        log(`${loopDef.name}: ${activeDef.name} uses Club Other Special only after ordinary recovery material was insufficient`);
+      }
+    }
+    if (!selection.ok) {
+      logSelectionDiagnostics(`${loopDef.name} ${activeDef.name}`, selection, priorityPiles);
+      return {
+        status: 'unavailable',
+        reason: `${activeDef.name} has insufficient eligible recovery material`,
+        reasonCode: 'RECOVERY_MATERIAL_SHORTAGE',
+      };
+    }
+    if (options.requirePreferredSignal === true
+      && options.preferredSignalRefs?.length
+      && !selectionConsumesSignalRefs(selection, options.preferredSignalRefs)) {
+      log(`${loopDef.name}: ${activeDef.name} did not consume a required recovery duplicate signal; preserving the primary 10x85+ fodder`);
+      return {
+        status: 'unavailable',
+        reason: `${activeDef.name} could not consume the recovery duplicate signal`,
+        reasonCode: 'RECOVERY_DUPLICATE_SIGNAL_NOT_SELECTED',
+      };
+    }
+    if (options.requirePreferredItem === true
+      && options.preferredSignalRefs?.length
+      && !rollingSelectionConsumesItemOrSignalRef(selection, options.preferredSignalRefs)) {
+      log(`${loopDef.name}: ${activeDef.name} did not consume a required Storage maintenance item`);
+      return {
+        status: 'unavailable',
+        reason: `${activeDef.name} could not consume the required Storage item`,
+        reasonCode: 'RECOVERY_STORAGE_ITEM_NOT_SELECTED',
+      };
+    }
+    const selectedStorageItems = rollingSelectionStorageConsumption(runtime, selection);
+    if (typeof options.validateSelection === 'function') {
+      const selectionValidation = await options.validateSelection({
+        selection,
+        storageItemsConsumed: selectedStorageItems,
+      });
+      if (selectionValidation?.ok === false) {
+        log(`${loopDef.name}: ${activeDef.name} selection rejected before submit (${selectionValidation.reasonCode || 'selection validation failed'}): ${selectionValidation.reason || 'insufficient recovery effect'}`);
+        return {
+          status: 'unavailable',
+          reason: selectionValidation.reason || `${activeDef.name} selection did not release enough Storage capacity`,
+          reasonCode: selectionValidation.reasonCode || 'RECOVERY_SELECTION_INVALID',
+          details: selectionValidation.details || null,
+        };
+      }
+    }
+    logInventorySelection(`${loopDef.name} ${activeDef.name}`, selection);
+
+    const itemRefs = (selection.selected || []).map((item) => liveItemRef(item));
+    if (!activeDef.dryRun) {
+      const validation = await runtime.coordinator.validateBeforeSubmit(itemRefs, {
+        label: activeDef.name,
+        reason: `${activeDef.name} pre-submit`,
+      });
+      if (!validation.ok) {
+        return { status: 'blocked', reason: validation.reason, reasonCode: 'INVENTORY_VALIDATION_FAILED' };
+      }
+    }
+    const validators = [({ players }) => assertRollingRecoveryItems(loopDef, runtime, players, {
+      additionalProtected,
+      allowProvisionsReserve: options.allowProvisionsReserve === true,
+      allowSpecial: options.allowSpecial === true,
+      minRating: options.minRating,
+      maxRating: options.maxRating,
+    })];
+    runtime.lastMutation = null;
+    const attempt = await submitInventorySbcAttempt(activeDef, selection, {
+      label: `${loopDef.name} -> ${activeDef.name}`,
+      dryRun: activeDef.dryRun,
+      handleReward: false,
+      preSaveValidators: validators,
+      postSaveValidators: validators,
+      onResult: async (submissionResult) => {
+        runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+      },
+    });
+    const submission = attempt.result;
+    if (submission.status === 'planned') return { ...submission, status: 'planned' };
+    if (!submission.submitted) {
+      return {
+        status: submission.status === 'unavailable' ? 'unavailable' : 'blocked',
+        reason: submission.reason || `${activeDef.name} was not submitted`,
+        reasonCode: 'RECOVERY_SUBMISSION_BLOCKED',
+      };
+    }
+    if (!runtime.lastMutation) {
+      runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, { primary: false });
+    }
+    const routingRelease = releaseRollingRoutingItemsAfterConsumption(
+      runtime.openRouting,
+      submission.consumedItemRefs || itemRefs,
+    );
+    runtime.openRouting = routingRelease.routing;
+    refreshRollingPendingUnassignedRefs(runtime);
+    if (routingRelease.removedItemCount) {
+      log(`${loopDef.name}: released ${routingRelease.removedItemCount} confirmed recovery-consumed item(s) from opened-item routing ownership`);
+    }
+    const recoveryAction = activeDef.dynamicSbcFamily === 'provisions-upgrade'
+      ? 'provisions'
+      : activeDef.dynamicSbcFamily === '5x80-upgrade' ? 'goldSink' : null;
+    if (recoveryAction) {
+      recordRollingRecapRecovery(recoveryAction, {
+        duplicatesConsumed: rollingDuplicatePlayerCount(selection),
+      });
+    }
+    return {
+      ...submission,
+      status: 'submitted',
+      recoveryDef: activeDef,
+      inventoryDelta: runtime.lastMutation?.delta || null,
+      consumedSignalRefs: rollingSelectionConsumedSignalRefs(
+        selection,
+        options.preferredSignalRefs || [],
+      ),
+    };
+  }
+
+  async function loadRollingRatingRecoveryContext(definition) {
+    const set = await findSbcSetForLoopDef(definition, definition.name);
+    const challengeContext = await findAvailableRatingSbcChallengeContext(set, definition.name, { force: true });
+    if (!challengeContext.challenge) {
+      return { status: 'unavailable', reason: `no available ${definition.name} challenge remains` };
+    }
+    const challenge = definition.dryRun
+      ? challengeContext.challenge
+      : await loadRatingSbcChallenge(challengeContext.challenge, definition.name, { force: true });
+    if (!challenge) return { status: 'unavailable', reason: `${definition.name} challenge could not be loaded` };
+    const activeLoopDef = materializeDynamicUpgradeChallengeLoopDef(definition, challenge);
+    const model = parseRatingSbcChallenge(activeLoopDef, challenge);
+    if (model.unsupported.length || !model.targetRating || !model.requiredPlayerCount) {
+      return {
+        status: 'blocked',
+        reason: `unsupported ${definition.name} requirement(s): ${model.unsupported.join(', ') || 'rating/player count unavailable'}`,
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    return { status: 'ready', set, challenge, activeLoopDef, model };
+  }
+
+  async function submitRollingRatingRecovery(loopDef, runtime, definition, options = {}) {
+    const recoveryDef = rollingRecoveryDef(definition, loopDef, {
+      priorityPiles: options.priorityPiles,
+    });
+    if (!rollingCapabilityAvailable(recoveryDef)) {
+      return { status: 'unavailable', reason: `${definition?.name || 'rating recovery'} capability is unavailable` };
+    }
+    const opened = await loadRollingRatingRecoveryContext(recoveryDef);
+    if (opened.status !== 'ready') return opened;
+    await runtime.coordinator.reconcile(`${recoveryDef.name} pre-selection`, { refreshUnassigned: true });
+    const selectionPolicy = createRollingRatingRecoverySelectionPolicy({
+      ledger: runtime.coordinator.getLedger(),
+      protectionRating: rollingProtectionRating(loopDef),
+      maxOrdinaryRating: options.maxOrdinaryRating,
+      reserveRatings: rollingProvisionsReserveRatings(loopDef),
+      requiredItems: options.requiredItems || [],
+      preferredItems: options.preferredItems || [],
+      protectedItems: [
+        ...(runtime.primaryDuplicateRefs || []),
+        ...(runtime.pendingUnassignedRefs || []),
+        ...(options.additionalProtected || []),
+      ],
+    });
+    const fill = await fillSbcSquadRatingOptimized(opened.activeLoopDef, {
+      set: opened.set,
+      challenge: opened.challenge,
+      background: true,
+    }, {
+      dryRun: recoveryDef.dryRun,
+      selectionPolicy,
+    });
+    if (!fill.ok) {
+      const code = fill.reasonCode || fill.missing?.code || 'RECOVERY_MATERIAL_SHORTAGE';
+      return {
+        status: 'blocked',
+        reason: fill.reason || `${recoveryDef.name} squad is infeasible`,
+        reasonCode: code,
+        recoverableByProvisions: [
+          'PLAYER_COUNT_SHORTAGE',
+          'SQUAD_RATING_SHORTAGE',
+          'RESERVED_FODDER_BLOCKED',
+        ].includes(code),
+      };
+    }
+    if (recoveryDef.dryRun) {
+      return { status: 'planned', reason: `dry-run ${recoveryDef.name} squad plan complete` };
+    }
+    if (fill.fillResult?.submitReady !== true) {
+      return { status: 'blocked', reason: `${recoveryDef.name} squad is not submit ready` };
+    }
+
+    const players = fill.inspection?.items || fill.selection?.selected || [];
+    const itemRefs = players.map((item) => liveItemRef(item));
+    const ledgerValidation = await runtime.coordinator.validateBeforeSubmit(itemRefs, {
+      label: recoveryDef.name,
+      reason: `${recoveryDef.name} pre-submit`,
+    });
+    if (!ledgerValidation.ok) {
+      return { status: 'blocked', reason: ledgerValidation.reason, reasonCode: 'INVENTORY_VALIDATION_FAILED' };
+    }
+    let backgroundSubmission = null;
+    runtime.lastMutation = null;
+    const submission = await submitSbcAttempt({
+      label: `${loopDef.name} -> ${recoveryDef.name}`,
+      challengeProvider: async () => ({
+        set: opened.set,
+        challenge: opened.challenge,
+        background: true,
+      }),
+      squadProvider: createExistingSquadProvider({
+        getPlayers: async () => players,
+        itemRef: liveItemRef,
+        source: 'rolling-recovery-rating-squad',
+      }),
+      prepareRuntimeAccess: prepareFsuRuntimeAccess,
+      saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess }) => {
+        await saveRollingProvisionalClubSquad(
+          challenge,
+          refreshedPlayers,
+          runtimeAccess,
+          `${recoveryDef.name} provisional Club refresh`,
+        );
+      },
+      preSaveValidators: [({ players: validatedPlayers }) => {
+        assertRollingRecoveryItems(loopDef, runtime, validatedPlayers, { allowSpecial: true });
+        const validation = validateRatingSbcModelAgainstItems(
+          fill.model,
+          validatedPlayers,
+          opened.challenge,
+          { allowOtherSpecialAsOrdinary: true },
+        );
+        if (!validation.ok) {
+          fail(`${recoveryDef.name}: final recovery squad failed dynamic validation: ${validation.errors.join(', ')}`);
+        }
+        return true;
+      }],
+      isSubmitReady: async () => fill.fillResult?.submitReady === true,
+      submitTransport: async (context) => {
+        backgroundSubmission = await submitRatingSbcInBackground(
+          context.set,
+          context.challenge,
+          recoveryDef.name,
+          {
+            players: context.players || players,
+            allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
+          },
+        );
+        return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
+      },
+      runCommittedSubmit: runCommittedSbcSubmit,
+      onResult: async (submissionResult) => {
+        runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+      },
+      afterSubmit: async ({ players: submittedPlayers, savedPlayers, squadPlan }) => {
+        await finalizeSubmittedInventorySelection(
+          squadPlan?.selection || fill.selection,
+          recoveryDef.name,
+          savedPlayers?.length ? savedPlayers : submittedPlayers,
+        );
+      },
+    });
+    if (submission.submitted && !runtime.lastMutation) {
+      runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, { primary: false });
+    }
+    if (submission.submitted) {
+      refreshRollingPendingUnassignedRefs(runtime);
+      recordRollingRecapRecovery('totw', {
+        duplicatesConsumed: rollingDuplicatePlayerCount(players),
+      });
+    }
+    return {
+      ...submission,
+      status: submission.submitted ? 'submitted' : submission.status,
+      inventoryDelta: runtime.lastMutation?.delta || null,
+      details: { rewardObserved: backgroundSubmission?.rewardObserved === true },
+    };
+  }
+
+  async function openRollingRecoveryReward(loopDef, runtime, definition, pack, options = {}) {
+    const routeContext = {
+      primaryContext: runtime.primaryContext,
+      model: runtime.primaryContext?.model,
+      rewardLabel: `${loopDef.name} -> ${definition.name} reward`,
+      assumeTotwReward: options.assumeTotwReward === true,
+      openRouting: null,
+    };
+    const receipt = await openPack(pack, routeContext.rewardLabel, {
+      dryRun: loopDef.dryRun === true,
+      allowGone: true,
+      allowPendingItems: true,
+      returnBlockedReceipt: true,
+      assumeSpecialPlayers: options.assumeTotwReward === true,
+      retryCodes: ['471', '500'],
+      resolveRetryPack: () => findRewardPack(definition, null, {
+        attempts: 2,
+        delayMs: 1200,
+        fallbackPackMatcher: options.fallbackPackMatcher,
+        repositoryOnly: true,
+      }),
+      openedItemPolicy: createRollingPrimaryPackPolicy(loopDef, routeContext),
+    });
+    if (!receipt) return { status: 'unavailable', reason: `${definition.name} reward pack is unavailable` };
+    if (receipt.status === 'planned') return receipt;
+    if (receipt.status !== 'opened') return receipt;
+    runtime.openRouting = routeContext.openRouting;
+    if (options.captureRecoveryDuplicates === true) {
+      const capturedRefs = (routeContext.openRouting?.entries || [])
+        .filter(({ item, classification }) => (
+          classification?.duplicate === true
+            && rollingOrdinaryGoldDuplicate(item, runtime.primaryContext?.activeLoopDef || loopDef)
+        ))
+        .map(({ item }) => liveItemRef(item, 'unassigned'));
+      runtime.recoveryDuplicateRefs = rollingUniqueRefs([
+        ...(runtime.recoveryDuplicateRefs || []),
+        ...capturedRefs,
+      ]);
+      log(`${loopDef.name}: captured ${capturedRefs.length} ${definition.name} duplicate Gold signal(s) for the 85+ Pick -> 5x80 recovery chain`);
+    }
+    runtime.lastMutation = await runtime.coordinator.recordPackReceipt(receipt, { reconcile: true });
+    return { ...receipt, status: 'opened', inventoryDelta: runtime.lastMutation?.delta || null };
+  }
+
+  function captureRollingInventoryIdentityState(runtime, refs = [], stage = 'unknown') {
+    const retryRefs = refs.map((item) => liveItemRef(item, item?.pile || item?.ref?.pile || 'unassigned'));
+    const piles = {
+      unassigned: getPileItemsByName('unassigned'),
+      storage: getPileItemsByName('storage'),
+      transfer: getPileItemsByName('transfer'),
+      club: getPileItemsByName('club'),
+    };
+    const ledger = runtime.coordinator?.getLedger?.();
+    const ledgerEntries = ledger?.classifiedEntries?.() || [];
+    const ledgerMatches = retryRefs.map((ref) => ({
+      ref,
+      entries: ledgerEntries
+        .filter(({ item }) => rollingItemMatchesRef(item, ref))
+        .map(({ item, pile, classification }) => ({
+          item: diagnoseRollingInventoryRefs([item], { [pile]: [item] })[0],
+          pile,
+          classification,
+        })),
+    }));
+    return {
+      stage,
+      retryRefs,
+      matches: diagnoseRollingInventoryRefs(retryRefs, piles),
+      ledgerMatches,
+      unassignedState: (() => {
+        try { return eaInventoryAdapter().unassignedState(); } catch (error) { return { error: error?.message || String(error) }; }
+      })(),
+      pileCounts: Object.fromEntries(Object.entries(piles).map(([pile, items]) => [pile, items.length])),
+      ledgerSummary: ledger?.summary?.() || null,
+    };
+  }
+
+  function logRollingInventoryIdentityState(loopDef, runtime, refs, stage) {
+    const diagnostics = captureRollingInventoryIdentityState(runtime, refs, stage);
+    log(`${loopDef.name}: inventory identity ${diagnosticJson(diagnostics)}`);
+    return diagnostics;
+  }
+
+  async function retryRollingProtectedStorage(loopDef, runtime) {
+    const routing = runtime.openRouting;
+    if (!routing || routing.status !== 'blocked') return { status: 'ready' };
+    if (routing.reasonCode !== 'PROTECTED_STORAGE_BLOCKED') {
+      return { status: 'blocked', reason: routing.reason, reasonCode: routing.reasonCode };
+    }
+    const retryRefs = (routing.storageItems || []).map((item) => liveItemRef(item, item?.pile || 'unassigned'));
+    const logRetryState = (stage) => {
+      logRollingInventoryIdentityState(loopDef, runtime, retryRefs, `protected-storage-retry:${stage}`);
+    };
+    logRetryState('before-refresh');
+    await refreshInventoryCaches(`${loopDef.name} protected Storage retry`, {
+      includePacks: false,
+      quiet: true,
+      onStage: (stage) => logRetryState(`after-${stage}`),
+    });
+    logRetryState('after-refresh');
+    const resolved = (routing.storageItems || []).map((item) => ({
+      original: item,
+      live: findCachedItemById(Number(item?.id || 0), ['unassigned', 'storage', 'club', 'transfer']),
+    }));
+    if (resolved.some(({ live }) => !live)) {
+      const missingRefs = resolved
+        .filter(({ live }) => !live)
+        .map(({ original }) => liveItemRef(original, original?.pile || 'unassigned'));
+      const details = {
+        missingRefs,
+        retryState: captureRollingInventoryIdentityState(runtime, retryRefs, 'protected-storage-retry:missing-after-refresh'),
+      };
+      log(`${loopDef.name}: protected Storage retry could not resolve ${missingRefs.length} deferred item(s): ${diagnosticJson(details)}`);
+      return {
+        status: 'blocked',
+        reason: `protected/reserved opened item changed before Storage retry (${missingRefs.map((ref) => `#${ref.id || ref.definitionId}`).join(', ')})`,
+        reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+        details,
+      };
+    }
+    const pending = resolved
+      .filter(({ live }) => live.pileName === 'unassigned')
+      .map(({ live }) => live.item);
+    const unexpected = resolved.filter(({ live }) => !['unassigned', 'storage', 'club'].includes(live.pileName));
+    if (unexpected.length) {
+      return {
+        status: 'blocked',
+        reason: `${unexpected.length} protected/reserved opened item(s) moved to an unexpected pile before Storage retry`,
+        reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+      };
+    }
+    const storageFree = storageSpaceLeft();
+    if (pending.length && (storageFree === null || pending.length > storageFree)) {
+      return {
+        status: 'blocked',
+        reason: `SBC storage has ${storageFree === null ? 'an unknown number of' : storageFree} free slot(s), but ${pending.length} protected/reserved item(s) still require storage`,
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+        details: { storageFree, storageRequired: pending.length },
+      };
+    }
+    if (pending.length) await moveItems(pending, inventoryPile('storage'), true);
+    recordRollingRecapDuplicateRoute('storage', pending.length);
+    const primaryRelease = releaseRollingPrimaryDuplicateRefs(
+      runtime.primaryDuplicateRefs,
+      routing.deferredPrimaryRefs,
+    );
+    runtime.primaryDuplicateRefs = primaryRelease.refs;
+    runtime.openRouting = {
+      ...routing,
+      status: 'ready',
+      reason: null,
+      reasonCode: null,
+      pendingItems: [],
+      deferredPrimaryRefs: [],
+    };
+    const reconciled = await reconcileRollingRuntime(runtime, `${loopDef.name} protected Storage retry`);
+    if (reconciled.status !== 'ready') return reconciled;
+    refreshRollingPendingUnassignedRefs(runtime);
+    log(`${loopDef.name}: resolved ${resolved.length} protected/reserved opened item(s) after recovery; moved ${pending.length} to Storage${primaryRelease.releasedRefs.length ? `; released ${primaryRelease.releasedRefs.length} deferred primary duplicate(s) from the mandatory squad` : ''}`);
+    return { status: 'ready', inventoryDelta: reconciled.inventoryDelta };
+  }
+
+  function rollingOrdinaryGoldDuplicate(item, loopDef) {
+    return isDuplicate(item)
+      && isPlayer(item)
+      && isGold(item)
+      && !isSbcSpecialItem(item)
+      && !rollingProvisionsReserveRatings(loopDef).includes(Number(item?.rating || 0))
+      && Number(item?.rating || 0) <= rollingProtectionRating(loopDef)
+      && rollingBaseProtectionReasons(item, loopDef).length === 0;
+  }
+
+  function rollingSignalKey(ref) {
+    const id = Number(ref?.id || 0);
+    if (id) return `id:${id}`;
+    const definitionId = Number(ref?.definitionId || 0);
+    return definitionId ? `definition:${definitionId}` : null;
+  }
+
+  function rollingUniqueRefs(refs = []) {
+    const seen = new Set();
+    return (refs || []).filter((ref) => {
+      const key = rollingSignalKey(ref);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function rollingSelectionConsumedSignalRefs(selection, expectedRefs = []) {
+    return rollingUniqueRefs((selection?.entries || [])
+      .filter((entry) => entry?.signal && (entry.pileName === 'unassigned' || entry.pileName === 'transfer'))
+      .map((entry) => entry.signal)
+      .filter((signal) => expectedRefs.some((ref) => rollingItemMatchesRef(signal, ref))));
+  }
+
+  function rollingSelectionConsumedPrimaryRefs(selection, expectedRefs = []) {
+    const entries = selection?.entries || [];
+    return rollingUniqueRefs(expectedRefs.filter((ref) => entries.some((entry) => (
+      rollingItemMatchesRef(entry?.signal, ref) || rollingItemMatchesRef(entry?.item, ref)
+    ))));
+  }
+
+  function rollingSelectionConsumesItemOrSignalRef(selection, expectedRefs = []) {
+    return (selection?.entries || []).some((entry) => expectedRefs.some((ref) => (
+      rollingItemMatchesRef(entry?.item, ref) || rollingItemMatchesRef(entry?.signal, ref)
+    )));
+  }
+
+  function rollingSelectionStorageConsumption(runtime, selection) {
+    const ledger = runtime.coordinator?.getLedger?.();
+    const ids = new Set();
+    for (const entry of selection?.entries || []) {
+      const item = entry?.item;
+      const record = item ? ledger?.resolveItem?.(liveItemRef(item)) : null;
+      if (record && String(record.pile || record.ref?.pile || '') === 'storage') {
+        ids.add(Number(record.id || record.ref?.id || 0));
+      }
+    }
+    return ids.size;
+  }
+
+  function rollingPendingStorageRoutingState(runtime) {
+    const pendingRefs = [];
+    for (const item of runtime.openRouting?.storageItems || []) {
+      const id = Number(item?.id || 0);
+      if (!id) {
+        return {
+          ok: false,
+          reason: 'a pending Storage-routed item has no stable item ID',
+          reasonCode: 'OPENED_ITEM_ROUTING_IDENTITY_UNAVAILABLE',
+        };
+      }
+      const live = findCachedItemById(id, ['unassigned', 'storage', 'club', 'transfer']);
+      if (!live) {
+        return {
+          ok: false,
+          reason: `pending Storage-routed item #${id} is no longer present in live inventory`,
+          reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+        };
+      }
+      if (live.pileName === 'unassigned') pendingRefs.push(liveItemRef(live.item, 'unassigned'));
+    }
+    return { ok: true, pendingRefs: rollingUniqueRefs(pendingRefs) };
+  }
+
+  function validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed) {
+    const routing = rollingPendingStorageRoutingState(runtime);
+    if (!routing.ok) return routing;
+    const currentFree = runtime.coordinator?.getLedger?.()?.summary?.()?.capacities?.storage?.free;
+    return validateStorageRecoveryHeadroom({
+      currentFree,
+      pendingStorageItems: routing.pendingRefs.length,
+      storageItemsConsumed,
+    });
+  }
+
+  function stageRollingDeferredPrimaryStorage(runtime, deferredRefs = [], details = {}) {
+    const ledger = runtime.coordinator?.getLedger?.();
+    const deferredItems = rollingUniqueRefs(deferredRefs)
+      .map((ref) => ledger?.resolveItem?.(ref))
+      .filter(Boolean);
+    const existingStorageItems = runtime.openRouting?.storageItems || [];
+    runtime.openRouting = {
+      ...(runtime.openRouting || {}),
+      status: 'blocked',
+      reason: details.reason || `${deferredItems.length} primary-pack duplicate(s) require Storage after rating normalization`,
+      reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      storageItems: uniqueItems([...existingStorageItems, ...deferredItems]),
+      deferredPrimaryRefs: rollingUniqueRefs([
+        ...(runtime.openRouting?.deferredPrimaryRefs || []),
+        ...deferredRefs,
+      ]),
+      pendingItems: deferredItems,
+      details: {
+        ...(runtime.openRouting?.details || {}),
+        deferredPrimaryDuplicates: deferredItems.length,
+        ...details,
+      },
+    };
+    return deferredItems;
+  }
+
+  async function routeRollingDeferredPrimaryStorage(loopDef, runtime, deferredRefs = []) {
+    const refs = rollingUniqueRefs(deferredRefs);
+    if (!refs.length) return { status: 'ready', moved: 0 };
+    logRollingInventoryIdentityState(loopDef, runtime, refs, 'deferred-primary-route:before-refresh');
+    await refreshInventoryCaches(`${loopDef.name} deferred primary duplicate routing`, {
+      includePacks: false,
+      quiet: true,
+      onStage: (stage) => logRollingInventoryIdentityState(loopDef, runtime, refs, `deferred-primary-route:after-${stage}`),
+    });
+    logRollingInventoryIdentityState(loopDef, runtime, refs, 'deferred-primary-route:after-refresh');
+    const resolved = refs.map((ref) => ({
+      ref,
+      live: findCachedItemById(Number(ref.id || 0), ['unassigned', 'storage', 'club', 'transfer']),
+    }));
+    if (resolved.some(({ live }) => !live)) {
+      const missingRefs = resolved.filter(({ live }) => !live).map(({ ref }) => ref);
+      return {
+        status: 'blocked',
+        reason: `a deferred primary-pack duplicate changed before it could be stored (${missingRefs.map((ref) => `#${ref.id || ref.definitionId}`).join(', ')})`,
+        reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+        details: {
+          missingRefs,
+          identity: captureRollingInventoryIdentityState(runtime, refs, 'deferred-primary-route:missing-after-refresh'),
+        },
+      };
+    }
+    const unexpected = resolved.filter(({ live }) => !['unassigned', 'storage'].includes(live.pileName));
+    if (unexpected.length) {
+      return {
+        status: 'blocked',
+        reason: `${unexpected.length} deferred primary-pack duplicate(s) moved to an unexpected pile`,
+        reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+      };
+    }
+    const pending = resolved
+      .filter(({ live }) => live.pileName === 'unassigned')
+      .map(({ live }) => live.item);
+    const storageFree = storageSpaceLeft();
+    if (pending.length && (storageFree === null || pending.length > storageFree)) {
+      stageRollingDeferredPrimaryStorage(runtime, refs, {
+        reason: `SBC storage has ${storageFree === null ? 'an unknown number of' : storageFree} free slot(s), but ${pending.length} deferred primary-pack duplicate(s) require storage`,
+        storageFree,
+        storageRequired: pending.length,
+      });
+      return {
+        status: 'blocked',
+        reason: runtime.openRouting.reason,
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      };
+    }
+    if (pending.length) await moveItems(pending, inventoryPile('storage'), true);
+    recordRollingRecapDuplicateRoute('storage', pending.length);
+    const reconciled = await reconcileRollingRuntime(runtime, `${loopDef.name} deferred primary duplicate routing`);
+    if (reconciled.status !== 'ready') return reconciled;
+    refreshRollingPendingUnassignedRefs(runtime);
+    log(`${loopDef.name}: stored ${pending.length} primary-pack duplicate(s) replaced by lower-rated primary SBC material`);
+    return { status: 'ready', moved: pending.length, inventoryDelta: reconciled.inventoryDelta };
+  }
+
+  function rollingProtectedDuplicateRefs(items = [], sourceRefs = []) {
+    const source = items.filter((item) => sourceRefs.some((ref) => rollingItemMatchesRef(item, ref)));
+    return rollingUniqueRefs(items
+      .filter((item) => isDuplicate(item) && !source.includes(item))
+      .flatMap((item) => [
+        liveItemRef(item, 'unassigned'),
+        Number(item?.duplicateId || 0)
+          ? { id: Number(item.duplicateId), definitionId: Number(item?.definitionId || 0), pile: 'club' }
+          : null,
+      ]));
+  }
+
+  function recordRollingPlayerPickResult(
+    pickDef,
+    pickedCards,
+    duplicatesConsumed = 0,
+    recoveryAction = 'playerPick',
+  ) {
+    const items = (pickedCards || []).map((card) => card.item || card);
+    recordRollingRecapItems(items, { sourceLabel: pickDef.name });
+    recordRollingRecapRecovery(recoveryAction, { duplicatesConsumed });
+    publishPackHighlight(items, {
+      packRef: {
+        id: Number(pickDef.pickItemResourceIds?.[0] || 0),
+        name: pickDef.name,
+      },
+      purpose: `${pickDef.name} result`,
+    });
+  }
+
+  async function runRollingPlayerPickRecovery(loopDef, runtime, capability, options = {}) {
+    const pickDef = rollingRecoveryDef(capability?.loop, loopDef, {
+      inventoryFirst: true,
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+    });
+    if (!pickDef || capability?.status !== 'resolved') {
+      return { status: 'unavailable', reason: 'Rolling 85+ Player Pick capability is unavailable' };
+    }
+    const reserves = rollingRecoveryEntryRefs(runtime, ({ classification }) => classification.provisionsReserve === true);
+    const protection = rollingRecoveryProtection(runtime, [
+      ...reserves,
+      ...(runtime.primaryDuplicateRefs || []),
+    ]);
+    pickDef.protectedItemIds = [...new Set([
+      ...(pickDef.protectedItemIds || []),
+      ...protection.protectedItemIds,
+      ...(options.protectedDuplicateRefs || []).map((ref) => Number(ref?.id || 0)),
+    ])];
+
+    const cleanupOptions = {
+      loopDef,
+      blockedPolicy: 'preserve',
+      enableRecovery: false,
+      reserveItem: (item) => isDuplicate(item) && isPlayer(item),
+    };
+    const pending = await findUnassignedPlayerPick(pickDef, 1, { quietMissing: true, failOnUnexpected: true });
+    if (pending) {
+      if (pickDef.dryRun) return { status: 'planned', reason: `would redeem pending ${pickDef.name}` };
+      let pickedCards = [];
+      await redeemAndSelectPlayerPick(pending, pickDef, {
+        cleanupOptions,
+        onSelectionConfirmed: async (cards) => { pickedCards = cards || []; },
+      });
+      recordRollingPlayerPickResult(pickDef, pickedCards);
+      const reconciled = await reconcileRollingRuntime(runtime, `${pickDef.name} pending Pick selection`);
+      if (reconciled.status !== 'ready') return reconciled;
+      return { status: 'selected', pickedCards };
+    }
+
+    const set = await findSbcSetForLoopDef(pickDef, pickDef.name);
+    const challenges = await requestSbcChallenges(set, pickDef.name, { attempts: 3 });
+    const incomplete = challenges
+      .map((challenge, index) => ({ challenge, challengeNo: index + 1 }))
+      .filter(({ challenge }) => !isCompletedChallenge(challenge));
+    if (!incomplete.length) return { status: 'unavailable', reason: `${pickDef.name} has no available challenge` };
+    let submittedDuplicateCount = 0;
+    let preferredSignalRefs = rollingUniqueRefs(options.preferredSignalRefs || []);
+    for (const entry of incomplete) {
+      const submitted = await submitPlayerPickChallenge(
+        pickDef,
+        entry.challengeNo,
+        challenges.length || incomplete.length,
+        {
+          dryRun: pickDef.dryRun,
+          preferredSignalRefs,
+          requirePreferredSignal: preferredSignalRefs.length > 0,
+        },
+      );
+      if (submitted.status === 'planned') return submitted;
+      if (!submitted.submitted) return { ...submitted, status: submitted.status || 'unavailable' };
+      const consumedSignalRefs = rollingSelectionConsumedSignalRefs(
+        submitted.selection,
+        preferredSignalRefs,
+      );
+      submittedDuplicateCount += consumedSignalRefs.length;
+      runtime.recoveryDuplicateRefs = (runtime.recoveryDuplicateRefs || []).filter((ref) => (
+        !consumedSignalRefs.some((consumed) => rollingItemMatchesRef(consumed, ref))
+      ));
+      preferredSignalRefs = preferredSignalRefs.filter((ref) => (
+        !consumedSignalRefs.some((consumed) => rollingItemMatchesRef(consumed, ref))
+      ));
+      await runtime.coordinator.reconcile(`${pickDef.name} challenge ${entry.challengeNo} submitted`, {
+        refreshUnassigned: true,
+      });
+    }
+    const pickItem = await findUnassignedPlayerPick(pickDef, 10, { failOnUnexpected: true });
+    if (!pickItem) return { status: 'blocked', reason: `${pickDef.name} reward was not found` };
+    let pickedCards = [];
+    await redeemAndSelectPlayerPick(pickItem, pickDef, {
+      cleanupOptions,
+      onSelectionConfirmed: async (cards) => { pickedCards = cards || []; },
+    });
+    recordRollingPlayerPickResult(pickDef, pickedCards, submittedDuplicateCount);
+    const reconciled = await reconcileRollingRuntime(runtime, `${pickDef.name} selection`);
+    if (reconciled.status !== 'ready') return reconciled;
+    return { status: 'selected', pickedCards };
+  }
+
+  async function loadRollingStorageSinkContexts(loopDef, pickDef) {
+    const set = await findSbcSetForLoopDef(pickDef, pickDef.name);
+    const challenges = await requestSbcChallenges(set, pickDef.name, { attempts: 3 });
+    if (challenges.length !== 2) {
+      return {
+        status: 'blocked',
+        reason: `${pickDef.name} must expose exactly two live challenges; found ${challenges.length}`,
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    const incomplete = challenges.filter((challenge) => !isCompletedChallenge(challenge));
+    if (!incomplete.length) {
+      return {
+        status: 'complete',
+        set,
+        contexts: [],
+        completedCount: challenges.length,
+      };
+    }
+
+    const contexts = [];
+    for (const sourceChallenge of incomplete) {
+      const challenge = pickDef.dryRun
+        ? sourceChallenge
+        : await loadRatingSbcChallenge(sourceChallenge, pickDef.name, { force: true });
+      if (!challenge) {
+        return {
+          status: 'blocked',
+          reason: `${pickDef.name} challenge #${sourceChallenge?.id || '?'} could not be loaded`,
+          reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+        };
+      }
+      const activeLoopDef = applyRollingAutomaticUseFodderPolicy({
+        ...materializeDynamicUpgradeChallengeLoopDef(pickDef, challenge),
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      }, loopDef);
+      const model = parseRatingSbcChallenge(activeLoopDef, challenge);
+      if (model.unsupported.length || !model.targetRating || !model.requiredPlayerCount) {
+        return {
+          status: 'blocked',
+          reason: `${pickDef.name} challenge #${challenge?.id || '?'} has unsupported live requirements: ${model.unsupported.join(', ') || 'rating/player count unavailable'}`,
+          reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+        };
+      }
+      contexts.push({
+        set,
+        challenge,
+        challengeId: Number(challenge?.id || 0),
+        activeLoopDef,
+        model,
+        targetRating: Number(model.targetRating || 0),
+      });
+    }
+
+    const ratings = contexts.map((context) => context.targetRating).sort((left, right) => left - right);
+    const validRatings = ratings.every((rating) => rating === 88 || rating === 89)
+      && new Set(ratings).size === ratings.length
+      && (ratings.length !== 2 || ratings.join(',') === '88,89');
+    if (!validRatings) {
+      return {
+        status: 'blocked',
+        reason: `${pickDef.name} incomplete live squad ratings are not a valid subset of 88/89: ${ratings.join('/') || 'unknown'}`,
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    return {
+      status: 'ready',
+      set,
+      contexts,
+      completedCount: challenges.length - incomplete.length,
+    };
+  }
+
+  function rollingStorageSinkLoopDefForPiles(context, priorityPiles) {
+    return {
+      ...context.activeLoopDef,
+      priorityPiles: [...priorityPiles],
+      ratingSbcFill: {
+        ...(context.activeLoopDef.ratingSbcFill || {}),
+        priorityPiles: [...priorityPiles],
+      },
+    };
+  }
+
+  function rollingStorageSinkSelectionPolicy(loopDef, runtime, options = {}) {
+    return createRollingRatingRecoverySelectionPolicy({
+      ledger: runtime.coordinator.getLedger(),
+      protectionRating: rollingProtectionRating(loopDef),
+      reserveRatings: false,
+      protectedItems: rollingNonPrimaryPendingRefs(runtime),
+      requiredItems: options.requiredItems || [],
+    });
+  }
+
+  async function selectRollingStorageSink89Squad(loopDef, runtime, context, snapshot) {
+    const activeLoopDef = rollingStorageSinkLoopDefForPiles(
+      context,
+      storageSinkSquadSourceStrategy(89).priorityPiles,
+    );
+    const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime);
+    const candidates = buildRatingSbcCandidateEntries(
+      activeLoopDef,
+      context.model,
+      basePolicy,
+      snapshot,
+    );
+    const maxRating = rollingProtectionRating(loopDef);
+    const prepared = prepareStorageSink89Candidates(candidates.entries, {
+      primaryRefs: runtime.primaryDuplicateRefs || [],
+      maxRating,
+    });
+    if (prepared.requiredEntries.length > Number(context.model.requiredPlayerCount || 0)) {
+      return {
+        ok: false,
+        reason: `${prepared.requiredEntries.length} eligible primary Unassigned duplicate(s) cannot fit in the ${context.model.requiredPlayerCount}-player 89 squad`,
+        reasonCode: 'STORAGE_SINK_UNASSIGNED_EXCESS',
+      };
+    }
+    const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
+      requiredItems: prepared.requiredItems,
+    });
+    const selection = await findOptimalRatingSbcSelection(
+      prepared.entries,
+      context.model,
+      candidates.piles,
+      { selectionPolicy },
+    );
+    return selection.ok ? selection : {
+      ...selection,
+      reasonCode: selection.reasonCode || 'RECOVERY_MATERIAL_SHORTAGE',
+    };
+  }
+
+  async function selectRollingStorageSink88Squad(loopDef, runtime, context, snapshot) {
+    const buildFor = (priorityPiles) => {
+      const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, priorityPiles);
+      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime);
+      return buildRatingSbcCandidateEntries(
+        activeLoopDef,
+        context.model,
+        basePolicy,
+        snapshot,
+      );
+    };
+    const selectWith = async (candidates, forcedClubEntries = []) => {
+      const forcedClubIds = new Set(forcedClubEntries.map((entry) => Number(entry.item?.id || 0)));
+      const entries = forcedClubEntries.length
+        ? candidates.entries.filter((entry) => (
+          entry.pileName === 'storage'
+            || (entry.pileName === 'club' && forcedClubIds.has(Number(entry.item?.id || 0)))
+        ))
+        : candidates.entries;
+      const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
+        requiredItems: forcedClubEntries.map((entry) => liveItemRef(entry.item, entry.pileName)),
+      });
+      return {
+        candidates,
+        selection: await findOptimalRatingSbcSelection(
+          entries,
+          context.model,
+          candidates.piles,
+          { selectionPolicy },
+        ),
+      };
+    };
+
+    const storageOnlyCandidates = buildFor(['storage']);
+    const storageOnly = await selectWith(storageOnlyCandidates);
+    if (storageOnly.selection.ok) return storageOnly.selection;
+
+    const storageAndClubCandidates = buildFor(['storage', 'club']);
+    const maxRating = rollingProtectionRating(loopDef);
+    const clubEntries = selectStorageSinkClubFallbackEntries(storageAndClubCandidates.entries, {
+      count: STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
+      maxRating,
+    });
+    let lastFailure = storageOnly.selection;
+    for (let clubCount = 1; clubCount <= STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD; clubCount++) {
+      if (clubEntries.length < clubCount) break;
+      const attempt = await selectWith(storageAndClubCandidates, clubEntries.slice(0, clubCount));
+      if (attempt.selection.ok) return attempt.selection;
+      lastFailure = attempt.selection;
+    }
+    return {
+      ...lastFailure,
+      reasonCode: lastFailure.reasonCode || 'RECOVERY_MATERIAL_SHORTAGE',
+    };
+  }
+
+  async function planRollingStorageSinkSquad(loopDef, runtime, context) {
+    const strategy = storageSinkSquadSourceStrategy(context?.targetRating);
+    if (!strategy) {
+      return {
+        ok: false,
+        reason: `unsupported Storage Sink squad rating ${context?.targetRating || '?'}`,
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    const snapshot = runtime.coordinator.getLedger().inventorySnapshot();
+    const result = await planMultiSquadRatingSelections({
+      snapshot,
+      contexts: [context],
+      selectChallenge: async (workingSnapshot) => (
+        strategy.targetRating === 89
+          ? selectRollingStorageSink89Squad(loopDef, runtime, context, workingSnapshot)
+          : selectRollingStorageSink88Squad(loopDef, runtime, context, workingSnapshot)
+      ),
+    });
+    return result.ok ? {
+      ...result,
+      details: {
+        ...result.details,
+        targetRating: strategy.targetRating,
+        sourceOrder: strategy.priorityPiles,
+        maxClubPerSquad: strategy.maxClubCount,
+      },
+    } : result;
+  }
+
+  function validateRollingStorageSinkHeadroom(runtime, squadPlan, options = {}) {
+    const storage = runtime.coordinator.getLedger().summary().capacities?.storage || {};
+    const currentFree = storage.free;
+    const plans = squadPlan.plans || [];
+    const consumedSignalRefs = plans.flatMap((plan) => plan.signalRefs || []);
+    const pendingStorageItems = (runtime.openRouting?.storageItems || []).filter((item) => {
+      if (consumedSignalRefs.some((ref) => rollingItemMatchesRef(item, ref))) return false;
+      const live = findCachedItemById(Number(item?.id || 0));
+      return !live || live.pileName === 'unassigned';
+    }).length;
+    const input = {
+      currentFree,
+      pendingStorageItems,
+      storageItemsConsumed: squadPlan.storageItemsConsumed,
+    };
+    return options.reservePickResult === true
+      ? validateStorageSinkHeadroom({ ...input, pickDuplicateReserve: 1 })
+      : validateStorageRecoveryHeadroom(input);
+  }
+
+  function resolveRollingStorageSinkPlayers(runtime, plan) {
+    const ledgerEntries = runtime.coordinator.getLedger().classifiedEntries();
+    const players = [];
+    const itemRefs = [];
+    for (const plannedRef of plan.itemRefs || []) {
+      const record = ledgerEntries.find(({ item }) => (
+        Number(plannedRef.id || 0) > 0
+          ? Number(item?.id || 0) === Number(plannedRef.id)
+          : Number(plannedRef.definitionId || 0) > 0
+            && Number(item?.definitionId || 0) === Number(plannedRef.definitionId)
+      ));
+      if (!record) {
+        return { ok: false, reason: `planned item #${plannedRef.id || plannedRef.definitionId || '?'} is no longer in the Inventory Ledger` };
+      }
+      const live = findCachedItemById(Number(record.item?.id || 0));
+      if (!live) {
+        return { ok: false, reason: `planned item #${record.item?.id || '?'} is no longer available in live inventory` };
+      }
+      players.push(live.item);
+      itemRefs.push(liveItemRef(live.item, live.pileName));
+    }
+    return { ok: true, players, itemRefs };
+  }
+
+  function validateRollingStorageSinkPlayers(loopDef, runtime, context, players, options = {}) {
+    assertRollingRecoveryItems(loopDef, runtime, players, {
+      allowProvisionsReserve: true,
+      allowSpecial: true,
+      allowPrimaryDuplicates: true,
+    });
+    return validateRatingSbcModelAgainstItems(
+      context.model,
+      players,
+      options.checkSavedChallenge === true ? context.challenge : null,
+      { allowOtherSpecialAsOrdinary: true },
+    );
+  }
+
+  function createRollingStorageSinkSubmissionValidators(loopDef, runtime, context, label) {
+    const validate = (players, options = {}) => {
+      const validation = validateRollingStorageSinkPlayers(
+        loopDef,
+        runtime,
+        context,
+        players,
+        options,
+      );
+      if (!validation.ok) {
+        const phase = options.checkSavedChallenge === true ? 'saved' : 'planned';
+        fail(`${label}: ${phase} squad failed dynamic validation: ${validation.errors.join(', ')}`);
+      }
+      return true;
+    };
+    return {
+      validatePlannedPlayers: (players) => validate(players),
+      preSave: ({ players }) => validate(players),
+      postSave: ({ players, savedPlayers }) => validate(
+        savedPlayers?.length ? savedPlayers : players,
+        { checkSavedChallenge: true },
+      ),
+    };
+  }
+
+  async function submitRollingStorageSinkSquad(loopDef, runtime, pickDef, plan, index, total) {
+    const context = plan.context;
+    const label = `${loopDef.name} -> ${pickDef.name} ${context.targetRating} squad (${index + 1}/${total})`;
+    const reconciliation = await runtime.coordinator.reconcile(`${label} pre-submit`, { refreshUnassigned: true });
+    if (!reconciliation.ok) {
+      return { status: 'blocked', reason: reconciliation.reason, reasonCode: 'INVENTORY_RECONCILIATION_FAILED' };
+    }
+    const resolved = resolveRollingStorageSinkPlayers(runtime, plan);
+    if (!resolved.ok) {
+      return { status: 'blocked', reason: resolved.reason, reasonCode: 'INVENTORY_VALIDATION_FAILED' };
+    }
+    const ledgerValidation = await runtime.coordinator.validateBeforeSubmit(resolved.itemRefs, {
+      label,
+      reason: 'rolling-storage-sink-pre-submit',
+    });
+    if (!ledgerValidation.ok) {
+      return { status: 'blocked', reason: ledgerValidation.reason, reasonCode: 'INVENTORY_VALIDATION_FAILED' };
+    }
+    const validators = createRollingStorageSinkSubmissionValidators(
+      loopDef,
+      runtime,
+      context,
+      label,
+    );
+    validators.validatePlannedPlayers(resolved.players);
+
+    let backgroundSubmission = null;
+    runtime.lastMutation = null;
+    const submission = await submitSbcAttempt({
+      label,
+      challengeProvider: async () => ({
+        set: context.set,
+        challenge: context.challenge,
+        background: true,
+      }),
+      squadProvider: createExistingSquadProvider({
+        getPlayers: async () => resolved.players,
+        itemRef: liveItemRef,
+        source: 'rolling-storage-sink-squad',
+      }),
+      prepareRuntimeAccess: prepareFsuRuntimeAccess,
+      saveSquad: async ({ challenge, players }) => {
+        await applyPlayersToRatingChallenge(challenge, players, label);
+      },
+      readSavedPlayers: async ({ challenge }) => getSquadItems(challenge?.squad),
+      preSaveValidators: [validators.preSave],
+      postSaveValidators: [validators.postSave],
+      isSubmitReady: async ({ challenge }) => {
+        try { return challenge?.canSubmit?.() !== false; } catch { return false; }
+      },
+      submitTransport: async (submitContext) => {
+        backgroundSubmission = await submitRatingSbcInBackground(
+          submitContext.set,
+          submitContext.challenge,
+          label,
+          {
+            players: submitContext.players || resolved.players,
+            rewardObservationAttempts: 1,
+            allowKnownRewardFallback: false,
+          },
+        );
+        return { submitted: true, rewardPackId: null };
+      },
+      runCommittedSubmit: runCommittedSbcSubmit,
+      onResult: async (submissionResult) => {
+        runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+      },
+      afterSubmit: async ({ players, savedPlayers }) => {
+        await finalizeSubmittedInventorySelection(
+          plan.selection,
+          label,
+          savedPlayers?.length ? savedPlayers : players,
+        );
+      },
+    });
+    if (submission.submitted && !runtime.lastMutation) {
+      runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, { primary: false });
+    }
+    return {
+      ...submission,
+      status: submission.submitted ? 'submitted' : submission.status,
+      inventoryDelta: runtime.lastMutation?.delta || null,
+      details: { rewardObserved: backgroundSubmission?.rewardObserved === true },
+    };
+  }
+
+  async function selectPendingRollingStorageSinkPick(loopDef, runtime, capability, options = {}) {
+    const pickDef = rollingRecoveryDef(capability?.loop, loopDef, {
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+    });
+    if (!pickDef || capability?.status !== 'resolved' || !hasResolvedSbcIdentity(pickDef)) {
+      return { status: 'unavailable', reason: 'dynamic 95+ Storage pressure Pick capability is unavailable' };
+    }
+    const cleanupOptions = {
+      loopDef,
+      blockedPolicy: 'preserve',
+      enableRecovery: false,
+      reserveItem: (item) => isDuplicate(item) && isPlayer(item),
+    };
+    const pending = await findUnassignedPlayerPick(pickDef, Number(options.attempts || 1), {
+      quietMissing: options.quietMissing !== false,
+      failOnUnexpected: options.failOnUnexpected === true,
+    });
+    if (!pending) {
+      return {
+        status: 'missing',
+        reason: `${pickDef.name} Player Pick reward was not found`,
+        reasonCode: 'STORAGE_SINK_REWARD_NOT_FOUND',
+      };
+    }
+    if (pickDef.dryRun) return { status: 'planned', reason: `would redeem pending ${pickDef.name}` };
+
+    let pickedCards = [];
+    await redeemAndSelectPlayerPick(pending, pickDef, {
+      cleanupOptions,
+      onSelectionConfirmed: async (cards) => { pickedCards = cards || []; },
+    });
+    recordRollingPlayerPickResult(
+      pickDef,
+      pickedCards,
+      Number(options.duplicatesConsumed || 0),
+      'storageSink',
+    );
+    const reconciled = await reconcileRollingRuntime(runtime, `${pickDef.name} pending selection`);
+    if (reconciled.status !== 'ready') return reconciled;
+    refreshRollingPendingUnassignedRefs(runtime);
+    return { status: 'selected', pickedCards };
+  }
+
+  async function runRollingStorageSinkRecovery(loopDef, runtime, capability) {
+    const pendingSelection = await selectPendingRollingStorageSinkPick(
+      loopDef,
+      runtime,
+      capability,
+      { attempts: 1, quietMissing: true, failOnUnexpected: true },
+    );
+    if (pendingSelection.status !== 'missing') return pendingSelection;
+
+    const pickDef = rollingRecoveryDef(capability?.loop, loopDef, {
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+    });
+
+    await refreshInventoryCaches(`${pickDef.name} sequential recovery`, { includePacks: false, quiet: true });
+    const reconciled = await runtime.coordinator.reconcile(`${pickDef.name} sequential recovery`, {
+      refreshUnassigned: true,
+    });
+    if (!reconciled.ok) {
+      return { status: 'blocked', reason: reconciled.reason, reasonCode: 'INVENTORY_RECONCILIATION_FAILED' };
+    }
+    let submitted = 0;
+    let duplicatesConsumed = 0;
+    const submittedRatings = [];
+    let lastHeadroom = null;
+    for (let step = 0; step < 2; step++) {
+      const loaded = await loadRollingStorageSinkContexts(loopDef, pickDef);
+      if (loaded.status === 'complete') break;
+      if (loaded.status !== 'ready') {
+        return {
+          ...loaded,
+          status: submitted ? 'blocked' : loaded.status,
+          reasonCode: submitted ? 'STORAGE_SINK_PARTIAL_COMPLETION' : loaded.reasonCode,
+          details: { ...(loaded.details || {}), partialCompletion: submitted, submittedRatings },
+        };
+      }
+      const context = nextStorageSinkContext(loaded.contexts);
+      if (!context) {
+        return {
+          status: 'blocked',
+          reason: `${pickDef.name} has no supported incomplete 89/88 squad`,
+          reasonCode: submitted ? 'STORAGE_SINK_PARTIAL_COMPLETION' : 'LIVE_REQUIREMENT_UNAVAILABLE',
+          details: { partialCompletion: submitted, submittedRatings },
+        };
+      }
+      const squadPlan = await planRollingStorageSinkSquad(loopDef, runtime, context);
+      if (!squadPlan.ok) {
+        const rating = Number(context.targetRating || 0) || '?';
+        log(`${loopDef.name}: ${pickDef.name} ${rating} squad deferred [${squadPlan.reasonCode || 'unknown'}]: ${squadPlan.reason || 'no safe source plan'}`);
+        const diagnostic = squadPlan.details?.selectionDiagnostics?.[0];
+        if (diagnostic) {
+          log(`${loopDef.name}: ${pickDef.name} ${rating} squad source diagnostic: ${diagnosticJson(diagnostic)}`);
+        }
+        if (submitted) {
+          return {
+            status: 'submitted',
+            submitted: true,
+            reason: `${pickDef.name} ${submittedRatings.join('/')} squad submitted; ${rating} squad deferred until later Storage pressure: ${squadPlan.reason || 'no safe source plan'}`,
+            reasonCode: 'STORAGE_SINK_88_DEFERRED',
+            details: {
+              partialCompletion: submitted,
+              submittedRatings,
+              remainingRatings: loaded.contexts.map((entry) => Number(entry.targetRating || 0)),
+              deferredReasonCode: squadPlan.reasonCode || 'RECOVERY_MATERIAL_SHORTAGE',
+            },
+          };
+        }
+        return {
+          status: 'unavailable',
+          reason: squadPlan.reason,
+          reasonCode: squadPlan.reasonCode || 'RECOVERY_MATERIAL_SHORTAGE',
+          details: squadPlan.details,
+        };
+      }
+      const plan = squadPlan.plans[0];
+      const rating = Number(context.targetRating || 0);
+      const headroom = validateRollingStorageSinkHeadroom(runtime, squadPlan, {
+        reservePickResult: rating === 88,
+      });
+      if (!headroom.ok) {
+        log(`${loopDef.name}: ${pickDef.name} ${rating} squad deferred [${headroom.reasonCode}]: ${headroom.reason}`);
+        if (submitted) {
+          return {
+            status: 'submitted',
+            submitted: true,
+            reason: `${pickDef.name} ${submittedRatings.join('/')} squad submitted; ${rating} squad deferred until later Storage pressure: ${headroom.reason}`,
+            reasonCode: 'STORAGE_SINK_88_DEFERRED',
+            details: {
+              partialCompletion: submitted,
+              submittedRatings,
+              remainingRatings: loaded.contexts.map((entry) => Number(entry.targetRating || 0)),
+              deferredReasonCode: headroom.reasonCode,
+            },
+          };
+        }
+        return { status: 'unavailable', ...headroom };
+      }
+      lastHeadroom = headroom;
+      log(`${loopDef.name}: ${pickDef.name} sequential ${rating} squad ready; sources:${formatSelectionStats(squadPlan.pileCounts)}, source order:${squadPlan.details.sourceOrder.join(' -> ')}, Club cap:${squadPlan.details.maxClubPerSquad}, Storage cards:${squadPlan.storageItemsConsumed}, projected free:${headroom.projectedFree}/${headroom.requiredFree} required`);
+      logInventorySelection(
+        `${loopDef.name}: ${pickDef.name} ${rating} squad`,
+        plan.selection,
+        { maxItems: 30 },
+      );
+      if (pickDef.dryRun) {
+        return {
+          status: 'planned',
+          reason: `dry-run ${pickDef.name} next ${rating} squad plan complete`,
+          details: { headroom, rating },
+        };
+      }
+      const result = await submitRollingStorageSinkSquad(
+        loopDef,
+        runtime,
+        pickDef,
+        plan,
+        Number(loaded.completedCount || 0),
+        2,
+      );
+      if (!result.submitted) {
+        return {
+          ...result,
+          status: 'blocked',
+          reason: submitted
+            ? `${pickDef.name} stopped after ${submitted}/2 squad(s): ${result.reason || result.status}`
+            : result.reason,
+          reasonCode: submitted ? 'STORAGE_SINK_PARTIAL_COMPLETION' : result.reasonCode,
+          details: { ...(result.details || {}), partialCompletion: submitted },
+        };
+      }
+      submitted++;
+      submittedRatings.push(rating);
+      duplicatesConsumed += rollingDuplicatePlayerCount(plan.selection?.selected)
+        + Number(plan.signalRefs?.length || 0);
+      const afterSubmit = await runtime.coordinator.reconcile(
+        `${pickDef.name} ${rating} squad submitted`,
+        { refreshUnassigned: true },
+      );
+      if (!afterSubmit.ok) {
+        return {
+          status: 'blocked',
+          reason: `${pickDef.name} inventory reconciliation failed after ${submitted}/2 squad(s): ${afterSubmit.reason}`,
+          reasonCode: 'STORAGE_SINK_PARTIAL_COMPLETION',
+          details: { partialCompletion: submitted, submittedRatings },
+        };
+      }
+      const consumedSignalRefs = plan.signalRefs || [];
+      if (consumedSignalRefs.length) {
+        runtime.primaryDuplicateRefs = (runtime.primaryDuplicateRefs || []).filter((ref) => (
+          !consumedSignalRefs.some((consumedRef) => rollingItemMatchesRef(ref, consumedRef))
+        ));
+        const released = releaseRollingRoutingItemsAfterConsumption(
+          runtime.openRouting,
+          consumedSignalRefs,
+        );
+        runtime.openRouting = released.routing;
+        log(`${loopDef.name}: ${pickDef.name} consumed ${consumedSignalRefs.length} Unassigned duplicate signal(s); ${runtime.primaryDuplicateRefs.length} remain reserved for the primary SBC`);
+      }
+      refreshRollingPendingUnassignedRefs(runtime);
+    }
+
+    const selectedPick = await selectPendingRollingStorageSinkPick(
+      loopDef,
+      runtime,
+      capability,
+      {
+        attempts: 10,
+        quietMissing: false,
+        failOnUnexpected: true,
+        duplicatesConsumed,
+      },
+    );
+    if (selectedPick.status !== 'selected') {
+      return {
+        ...selectedPick,
+        status: 'blocked',
+        reason: selectedPick.reason || `${pickDef.name} completed but its Player Pick reward was not found`,
+        reasonCode: selectedPick.reasonCode || 'STORAGE_SINK_REWARD_NOT_FOUND',
+        details: { ...(selectedPick.details || {}), partialCompletion: submitted, submittedRatings },
+      };
+    }
+
+    const routed = await retryRollingProtectedStorage(loopDef, runtime);
+    if (routed.status !== 'ready') {
+      return {
+        ...routed,
+        status: 'blocked',
+        reasonCode: 'STORAGE_SINK_PARTIAL_COMPLETION',
+        details: {
+          ...(routed.details || {}),
+          partialCompletion: submitted,
+          submittedRatings,
+          pickSelected: true,
+        },
+      };
+    }
+    return {
+      status: 'selected',
+      pickedCards: selectedPick.pickedCards,
+      details: { submittedSquads: submitted, submittedRatings, headroom: lastHeadroom },
+    };
+  }
+
+  function publishRollingTelemetry(loopDef, runtime, update = {}) {
+    if (!runtime.telemetryActive) return;
+    state.runtimeTelemetryController.publish({
+      visible: true,
+      cycleLimit: Number(loopDef.maxCompletions || 0),
+      updatedAt: new Date().toISOString(),
+      ...update,
+    });
+  }
+
+  function requestRollingTelemetryCapabilities(loopDef, runtime) {
+    const ledger = runtime.coordinator?.getLedger?.();
+    if (!runtime.telemetryActive || !ledger) return;
+    const summary = ledger.summary();
+    const storage = summary.capacities?.storage || {};
+    publishRollingTelemetry(loopDef, runtime, {
+      inventoryVersion: summary.inventoryVersion,
+      storageUsed: storage.used,
+      storageCapacity: storage.max,
+      calculating: runtime.telemetryPublishedVersion !== summary.inventoryVersion,
+    });
+    if (runtime.telemetryPublishedVersion === summary.inventoryVersion) return;
+
+    runtime.telemetryCalculationRequested = true;
+    if (runtime.telemetryCalculationRunning) return;
+    runtime.telemetryCalculationRunning = true;
+    setTimeout(async () => {
+      try {
+        while (runtime.telemetryActive && runtime.telemetryCalculationRequested) {
+          runtime.telemetryCalculationRequested = false;
+          const activeLedger = runtime.coordinator?.getLedger?.();
+          if (!activeLedger) break;
+          const requestedVersion = activeLedger.summary().inventoryVersion;
+          const policyKey = [
+            loopDef.id,
+            rollingProtectionRating(loopDef),
+          ].join(':');
+          try {
+            const capabilities = await runtime.capabilityCalculator.calculate({
+              ledger: activeLedger,
+              policyKey,
+              provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
+            });
+            const currentVersion = runtime.coordinator?.getLedger?.()?.summary?.().inventoryVersion;
+            if (!runtime.telemetryActive || currentVersion !== requestedVersion) {
+              runtime.telemetryCalculationRequested = runtime.telemetryActive;
+              continue;
+            }
+            runtime.telemetryPublishedVersion = requestedVersion;
+            publishRollingTelemetry(loopDef, runtime, capabilities);
+          } catch (error) {
+            const currentVersion = runtime.coordinator?.getLedger?.()?.summary?.().inventoryVersion;
+            if (runtime.telemetryActive && currentVersion === requestedVersion) {
+              runtime.telemetryPublishedVersion = requestedVersion;
+              publishRollingTelemetry(loopDef, runtime, { calculating: false });
+              const reason = String(error?.message || error);
+              if (!runtime.telemetryErrorReasons.has(reason)) {
+                runtime.telemetryErrorReasons.add(reason);
+                log(`${loopDef.name}: Runtime Telemetry capability refresh failed (${reason})`);
+              }
+            }
+          }
+        }
+      } finally {
+        runtime.telemetryCalculationRunning = false;
+        if (runtime.telemetryActive && runtime.telemetryCalculationRequested) {
+          requestRollingTelemetryCapabilities(loopDef, runtime);
+        }
+      }
+    }, 0);
+  }
+
+  function clearUnassignedDuplicateMetadata(item) {
+    if (!item) return;
+    try { item.duplicateId = 0; } catch { }
+    try { if (item._duplicateId !== undefined) item._duplicateId = 0; } catch { }
+    try { if (item._data && item._data.duplicateId !== undefined) item._data.duplicateId = 0; } catch { }
+    try { eaInventoryAdapter().preparePurchasedItem(item); } catch { }
+  }
+
+  async function resumeRollingPendingUnassigned(loopDef, runtime) {
+    await refreshInventoryCaches(`${loopDef.name} resume Unassigned`, {
+      includePacks: false,
+      quiet: true,
+    });
+    const initialReconciliation = await runtime.coordinator.reconcile(
+      `${loopDef.name} resume Unassigned snapshot`,
+      { refreshUnassigned: true },
+    );
+    if (!initialReconciliation.ok) {
+      return {
+        status: 'blocked',
+        reason: initialReconciliation.reason,
+        reasonCode: 'INVENTORY_RECONCILIATION_FAILED',
+      };
+    }
+
+    const unassignedEntries = () => runtime.coordinator.getLedger().classifiedEntries()
+      .filter(({ pile }) => pile === 'unassigned');
+    let entries = unassignedEntries();
+    if (!entries.length) {
+      runtime.pendingUnassignedRefs = [];
+      return { status: 'ready', primaryPending: false };
+    }
+
+    const liveInspection = inspectRollingLiveUnassignedEntries(entries);
+    if (!liveInspection.ok) {
+      const inspectionRefs = entries.map(({ item }) => liveItemRef(item, 'unassigned'));
+      const identity = logRollingInventoryIdentityState(loopDef, runtime, inspectionRefs, 'resume-inspection:identity-failed');
+      return {
+        status: 'blocked',
+        reason: liveInspection.reason,
+        reasonCode: liveInspection.reasonCode,
+        details: { identity },
+      };
+    }
+    const pendingPickCount = liveInspection.playerPickCount;
+    if (pendingPickCount) {
+      return {
+        status: 'blocked',
+        reason: `${pendingPickCount} pending Player Pick item(s) require Pick recovery before Rolling can resume`,
+        reasonCode: 'UNASSIGNED_RESUME_PICK_PENDING',
+      };
+    }
+
+    const duplicateEntries = entries.filter(({ item }) => (
+      item?.type === 'player' && item?.duplicate === true
+    ));
+    const reservedIds = new Set(duplicateEntries
+      .map(({ item }) => Number(item?.id || 0))
+      .filter(Boolean));
+
+    // The EA live object may retain stale duplicateId data after a previous
+    // run moved its Club counterpart. The normalized ledger snapshot is the
+    // identity authority for this decision, so clear only contradictory data.
+    entries
+      .filter(({ item }) => item?.type === 'player' && item?.duplicate !== true)
+      .forEach(({ item }) => {
+        const live = findCachedItemById(Number(item?.id || 0), ['unassigned']);
+        if (live?.item && isDuplicate(live.item) && !findClubDuplicate(live.item)) {
+          clearUnassignedDuplicateMetadata(live.item);
+        }
+      });
+
+    if (entries.length) {
+      try {
+        await resolveRuntimeUnassigned(`${loopDef.name} resume non-duplicates`, {
+          loopDef,
+          blockedPolicy: 'preserve',
+          enableRecovery: false,
+          reserveItem: (item) => reservedIds.has(Number(item?.id || 0)),
+        });
+      } catch (error) {
+        return {
+          status: 'blocked',
+          reason: error?.message || String(error),
+          reasonCode: 'UNASSIGNED_RESUME_ROUTING_BLOCKED',
+        };
+      }
+      const routedReconciliation = await runtime.coordinator.reconcile(
+        `${loopDef.name} resume non-duplicates reconciled`,
+        { refreshUnassigned: true },
+      );
+      if (!routedReconciliation.ok) {
+        return {
+          status: 'blocked',
+          reason: routedReconciliation.reason,
+          reasonCode: 'INVENTORY_RECONCILIATION_FAILED',
+        };
+      }
+      entries = unassignedEntries();
+    }
+
+    const unroutedEntries = entries.filter(({ item }) => (
+      item?.type !== 'player' || item?.duplicate !== true
+    ));
+    if (unroutedEntries.length) {
+      return {
+        status: 'blocked',
+        reason: `${unroutedEntries.length} existing Unassigned item(s) could not be routed before Rolling resume`,
+        reasonCode: 'UNASSIGNED_RESUME_ROUTING_BLOCKED',
+      };
+    }
+
+    const duplicates = entries
+      .filter(({ item }) => item?.type === 'player' && item?.duplicate === true)
+      .map(({ item }) => item);
+    if (!duplicates.length) {
+      runtime.pendingUnassignedRefs = [];
+      return { status: 'ready', primaryPending: false };
+    }
+
+    const routePlan = planRollingOpenedItemRouting(duplicates, {
+      protectionRating: rollingProtectionRating(loopDef),
+      provisionsMinRating: ROLLING_PROVISIONS_RATING_RANGE.min,
+      provisionsMaxRating: rollingProvisionsMaxRating(loopDef),
+      storageFree: storageSpaceLeft(),
+      provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
+      provisionsRecoveryAvailable: rollingCapabilityAvailable(loopDef.rollingProvisionsUpgrade),
+      proactiveProvisionsEnabled: loopDef.rollingSurplusCraftingEnabled === true,
+      isDuplicate: () => true,
+      isSpecial: isSbcSpecialItem,
+      isRequiredSpecial: (item) => rollingLiveRequiredSpecial(item, runtime.primaryContext?.model),
+      protectionReasons: (item) => rollingBaseProtectionReasons(item, loopDef),
+    });
+
+    let finalRoute = routePlan;
+    if (routePlan.status === 'ready' && routePlan.storageItems.length) {
+      const liveItems = routePlan.storageItems.map((item) => (
+        findCachedItemById(Number(item?.id || 0), ['unassigned'])?.item
+      ));
+      if (liveItems.some((item) => !item)) {
+        const routeRefs = routePlan.storageItems.map((item) => liveItemRef(item, 'unassigned'));
+        const identity = logRollingInventoryIdentityState(loopDef, runtime, routeRefs, 'resume-storage-route:identity-failed');
+        finalRoute = {
+          ...routePlan,
+          status: 'blocked',
+          reason: 'a reconstructed Unassigned duplicate changed before Storage routing',
+          reasonCode: 'OPENED_ITEM_ROUTING_PENDING',
+          details: {
+            ...(routePlan.details || {}),
+            identity,
+          },
+        };
+      } else {
+        try {
+          await moveItems(liveItems, inventoryPile('storage'), true);
+          const movedReconciliation = await reconcileRollingRuntime(
+            runtime,
+            `${loopDef.name} resume protected Storage routing`,
+          );
+          if (movedReconciliation.status !== 'ready') return movedReconciliation;
+        } catch (error) {
+          finalRoute = {
+            ...routePlan,
+            status: 'blocked',
+            reason: `reconstructed protected Storage move failed: ${error?.message || error}`,
+            reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+          };
+        }
+      }
+    }
+
+    const currentEntries = unassignedEntries();
+    const pendingRefs = currentEntries
+      .filter(({ item }) => item?.type === 'player' && item?.duplicate === true)
+      .map(({ item }) => liveItemRef(item, 'unassigned'));
+    const primaryRefs = (finalRoute.reservedItems || [])
+      .map((item) => liveItemRef(item, 'unassigned'))
+      .filter((ref) => pendingRefs.some((candidate) => rollingItemMatchesRef(candidate, ref)));
+    runtime.pendingUnassignedRefs = rollingUniqueRefs(pendingRefs);
+    runtime.primaryDuplicateRefs = rollingUniqueRefs(primaryRefs);
+    runtime.openRouting = {
+      ...finalRoute,
+      pendingItems: finalRoute.status === 'blocked'
+        ? (finalRoute.pendingItems?.length ? finalRoute.pendingItems : finalRoute.storageItems || [])
+        : [],
+      counts: {
+        ...(finalRoute.counts || {}),
+        resumed: duplicates.length,
+        pending: runtime.pendingUnassignedRefs.length,
+      },
+    };
+    log(`${loopDef.name}: resumed ${duplicates.length} Unassigned duplicate(s); primary:${runtime.primaryDuplicateRefs.length}, pending Storage:${runtime.openRouting.pendingItems.length}, route:${runtime.openRouting.status}`);
+    return {
+      status: 'ready',
+      primaryPending: runtime.primaryDuplicateRefs.length > 0 || finalRoute.status === 'blocked',
+      details: {
+        resumedDuplicates: duplicates.length,
+        primaryDuplicates: runtime.primaryDuplicateRefs.length,
+        pendingStorage: runtime.openRouting.pendingItems.length,
+      },
+    };
+  }
+
+  async function runRollingUpgradeLoop(loopDef) {
+    await waitAppReady();
+    const runtime = {
+      primaryContext: null,
+      coordinator: null,
+      openRouting: null,
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      pendingRewardPackId: null,
+      pendingRecoveryReward: null,
+      recoveryDuplicateRefs: [],
+      forceChallengeRefresh: false,
+      lastMutation: null,
+      capabilityCalculator: createInventoryCapabilityCalculator(),
+      telemetryActive: true,
+      telemetryCalculationRequested: false,
+      telemetryCalculationRunning: false,
+      telemetryPublishedVersion: null,
+      telemetryErrorReasons: new Set(),
+    };
+
+    publishRollingTelemetry(loopDef, runtime, {
+      phase: ROLLING_UPGRADE_PHASES.PREFLIGHT,
+      completedCycles: 0,
+      specialSlots: null,
+      directCycles: null,
+      provisionsBatches: null,
+      totwRecoveries: null,
+      storageUsed: null,
+      storageCapacity: null,
+      inventoryVersion: null,
+      calculating: true,
+    });
+
+    let result;
+    try {
+      result = await runRollingUpgradeWorkflow({
+      maxCompletions: Number(loopDef.maxCompletions || 0),
+      storageSinkEnabled: loopDef.rollingStorageSinkEnabled === true,
+      surplusCraftingEnabled: loopDef.rollingSurplusCraftingEnabled === true,
+      shortageProvisionsPackLimit: Number(loopDef.rollingShortageProvisionsPackLimit || 2),
+      retainReceipts: false,
+      shouldStop: () => state.stopping,
+      preflight: async () => {
+        if (loopDef.openRewardPacks !== true) {
+          return { status: 'blocked', reason: 'Rolling Upgrade requires Open reward packs' };
+        }
+        runtime.primaryContext = await loadRollingPrimaryContext(loopDef);
+        if (runtime.primaryContext.status !== 'ready') return runtime.primaryContext;
+        const groupMatcher = eaPlayerGroupConstraints(runtime.primaryContext.model)
+          .map(({ constraint }) => `${constraint.label}:${constraint.matcherSource || 'runtime'}`)
+          .join(',') || 'none';
+        log(`${loopDef.name}: live primary Challenge #${runtime.primaryContext.challenge?.id || '?'} ready; target rating:${runtime.primaryContext.model.targetRating}, players:${runtime.primaryContext.model.requiredPlayerCount}, Required Special matcher:${groupMatcher}, Protection rating:${rollingProtectionRating(loopDef)}`);
+        return { status: 'ready' };
+      },
+      initializeInventory: async () => {
+        const inventoryAdapter = adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
+        const fsu = fsuAdapter();
+        runtime.coordinator = createInventoryLedgerCoordinator({
+          readSnapshot: async () => inventoryAdapter.snapshot(),
+          readReadiness: async () => fsu.readiness(),
+          refreshUnassigned: async () => refreshUnassigned({ quiet: true }),
+          snapshotItem: inventoryAdapter.snapshotItem,
+          validateClubPlayers: (refs, options) => fsu.validateClubPlayers(refs, options),
+          classifyItem: (item) => classifyRollingInventoryItem(item, {
+            protectionRating: rollingProtectionRating(loopDef),
+            provisionsMinRating: ROLLING_PROVISIONS_RATING_RANGE.min,
+            provisionsMaxRating: rollingProvisionsMaxRating(loopDef),
+            requiredSpecial: rollingSnapshotRequiredSpecial(item, runtime.primaryContext.activeLoopDef),
+            protectionReasons: rollingBaseProtectionReasons(item, runtime.primaryContext.activeLoopDef),
+          }),
+          log,
+        });
+        const initialized = await runtime.coordinator.initialize('rolling-start');
+        if (initialized.ok) {
+          log(`${loopDef.name}: inventory ledger indexed ${initialized.summary.itemCount} local item(s)`);
+          return { status: 'ready', details: { inventory: initialized.summary } };
+        }
+        return { status: 'blocked', reason: initialized.reason, reasonCode: 'INVENTORY_INDEX_UNAVAILABLE' };
+      },
+      resumePendingPlayerPick: async () => {
+        if (loopDef.rollingStorageSinkEnabled !== true) return { status: 'skipped' };
+        const resumed = await selectPendingRollingStorageSinkPick(
+          loopDef,
+          runtime,
+          loopDef.rollingStorageSinkPick,
+          { attempts: 1, quietMissing: true, failOnUnexpected: false },
+        );
+        return resumed.status === 'missing' || resumed.status === 'unavailable'
+          ? { status: 'skipped' }
+          : resumed;
+      },
+      resumePendingUnassigned: async () => resumeRollingPendingUnassigned(loopDef, runtime),
+      findPrimaryPack: async () => {
+        const pack = await findRewardPack(loopDef, runtime.pendingRewardPackId, {
+          attempts: runtime.pendingRewardPackId ? 6 : 1,
+          delayMs: 1200,
+          logWait: runtime.pendingRewardPackId !== null,
+          repositoryOnly: true,
+        });
+        return pack || null;
+      },
+      openPrimaryPack: async ({ pack }) => {
+        runtime.openRouting = null;
+        runtime.primaryDuplicateRefs = [];
+        runtime.pendingUnassignedRefs = [];
+        const receipt = await openPack(pack, `${loopDef.name} primary reward`, {
+          dryRun: loopDef.dryRun === true,
+          allowGone: true,
+          allowPendingItems: true,
+          returnBlockedReceipt: true,
+          retryCodes: ['471', '500'],
+          resolveRetryPack: () => findRewardPack(loopDef, runtime.pendingRewardPackId, {
+            attempts: 2,
+            delayMs: 1200,
+            repositoryOnly: true,
+          }),
+          openedItemPolicy: createRollingPrimaryPackPolicy(loopDef, runtime, {
+            capturePrimaryDuplicates: true,
+          }),
+        });
+        if (!receipt) return { status: 'unavailable', reason: 'primary reward pack is unavailable' };
+        if (receipt.status === 'opened') {
+          runtime.pendingRewardPackId = null;
+          runtime.lastMutation = await runtime.coordinator.recordPackReceipt(receipt, { reconcile: true });
+        }
+        return {
+          ...receipt,
+          inventoryDelta: runtime.lastMutation?.delta || null,
+        };
+      },
+      classifyOpenedItems: async ({ opened }) => ({
+        status: 'ready',
+        details: opened.details?.counts || runtime.openRouting?.counts || {},
+      }),
+      resolveProtectedStorage: async () => retryRollingProtectedStorage(loopDef, runtime),
+      getProgressFingerprint: () => {
+        const summary = runtime.coordinator?.getLedger()?.summary?.();
+        return summary ? `inventory:${summary.inventoryVersion}` : null;
+      },
+      readRecoveryState: async () => {
+        const duplicateProvisionRefs = (runtime.openRouting?.provisionsItems || [])
+          .map((item) => liveItemRef(item, item?.pile || 'unassigned'));
+        if (!duplicateProvisionRefs.length) return { duplicateProvisionBatches: 0 };
+        const entries = runtime.coordinator?.getLedger()?.classifiedEntries?.() || [];
+        const requiredCount = rollingProvisionsRequiredCount(loopDef);
+        return {
+          duplicateProvisionBatches: Math.floor(entries.filter(({ item, classification }) => (
+            classification.provisionsReserve === true
+              && classification.requiredSpecial !== true
+              && classification.protected !== true
+              && duplicateProvisionRefs.some((ref) => rollingItemMatchesRef(item, ref))
+          )).length / requiredCount),
+        };
+      },
+      processPendingRecoveryReward: async () => {
+        const pending = runtime.pendingRecoveryReward;
+        if (!pending?.definition) return { status: 'skipped' };
+        log(`${loopDef.name}: opening newly submitted ${pending.definition.name} reward before the next recovery decision`);
+        const pack = await findRewardPack(pending.definition, pending.rewardPackId, {
+          attempts: 6,
+          delayMs: 1200,
+          logWait: true,
+          repositoryOnly: true,
+        });
+        if (!pack) {
+          return {
+            status: 'blocked',
+            reason: `${pending.definition.name} was submitted but its reward pack was not found`,
+            reasonCode: 'RECOVERY_REWARD_NOT_FOUND',
+          };
+        }
+        const opened = await openRollingRecoveryReward(loopDef, runtime, pending.definition, pack, {
+          captureRecoveryDuplicates: pending.definition.dynamicSbcFamily === 'provisions-upgrade',
+        });
+        if (opened.status === 'opened') runtime.pendingRecoveryReward = null;
+        return opened;
+      },
+      processLeftoverRecoveryReward: async () => {
+        for (const field of ['rollingProvisionsUpgrade', 'rollingGoldSinkUpgrade']) {
+          const definition = rollingRecoveryDef(loopDef[field], loopDef, { inventoryFirst: true });
+          if (!rollingCapabilityAvailable(definition)) continue;
+          const pack = findRewardPackInCache(definition, null, { repositoryOnly: true });
+          if (!pack) continue;
+          log(`${loopDef.name}: primary fodder shortage; opening existing leftover ${definition.name} reward`);
+          const opened = await openRollingRecoveryReward(loopDef, runtime, definition, pack, {
+            captureRecoveryDuplicates: definition.dynamicSbcFamily === 'provisions-upgrade',
+          });
+          return {
+            ...opened,
+            details: {
+              ...(opened.details || {}),
+              recoveryFamily: definition.dynamicSbcFamily || field,
+            },
+          };
+        }
+        return { status: 'skipped' };
+      },
+      drainRecoveryDuplicates: async ({ reportPhase } = {}) => {
+        await runtime.coordinator.reconcile(`${loopDef.name} recovery duplicate check`, {
+          refreshUnassigned: true,
+        });
+        const unassignedItems = getUnassignedItems();
+        const recoveryRefs = rollingUniqueRefs(runtime.recoveryDuplicateRefs || []);
+        const goldDuplicates = unassignedItems.filter((item) => (
+          recoveryRefs.some((ref) => rollingItemMatchesRef(item, ref))
+            && rollingOrdinaryGoldDuplicate(item, runtime.primaryContext?.activeLoopDef || loopDef)
+        ));
+        runtime.recoveryDuplicateRefs = recoveryRefs.filter((ref) => (
+          goldDuplicates.some((item) => rollingItemMatchesRef(item, ref))
+        ));
+        const rareDuplicates = goldDuplicates.filter(isRare);
+        const pickCapability = loopDef.rollingPlayerPick;
+        const pendingPick = pickCapability?.status === 'resolved'
+          ? await findUnassignedPlayerPick(pickCapability.loop, 1, {
+              quietMissing: true,
+              failOnUnexpected: true,
+            })
+          : null;
+        if (pendingPick || rareDuplicates.length) {
+          await reportPhase?.(ROLLING_UPGRADE_PHASES.REDEEM_85_PICK);
+          const rareDuplicateRefs = rareDuplicates.map((item) => liveItemRef(item, 'unassigned'));
+          const protectedDuplicateRefs = rollingProtectedDuplicateRefs(
+            unassignedItems,
+            runtime.recoveryDuplicateRefs,
+          );
+          const pick = await runRollingPlayerPickRecovery(
+            loopDef,
+            runtime,
+            pickCapability?.loop ? pickCapability : null,
+            {
+              preferredSignalRefs: rareDuplicateRefs,
+              protectedDuplicateRefs,
+            },
+          );
+          if (['selected', 'planned', 'blocked', 'stopped'].includes(String(pick?.status || ''))) {
+            return pick;
+          }
+          if (pick?.status !== 'unavailable') return pick;
+          log(`${loopDef.name}: 85+ Pick recovery unavailable; trying the Gold sink for remaining duplicate Gold`);
+        }
+        if (!goldDuplicates.length) return { status: 'skipped' };
+
+        await reportPhase?.(ROLLING_UPGRADE_PHASES.CRAFT_5X80);
+        const protectedDuplicateRefs = rollingProtectedDuplicateRefs(
+          unassignedItems,
+          runtime.recoveryDuplicateRefs,
+        );
+        const sink = await submitRollingRequirementRecovery(
+          loopDef,
+          runtime,
+          loopDef.rollingGoldSinkUpgrade,
+          {
+            priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+            protectProvisionsReserve: true,
+            allowProvisionsReserve: false,
+            allowSpecial: false,
+            softProtectClubSpecial: false,
+            preferredSignalRefs: runtime.recoveryDuplicateRefs,
+            requirePreferredSignal: true,
+            protectedDuplicateRefs,
+          },
+        );
+        if (sink.status === 'unavailable') {
+          log(`${loopDef.name}: Gold duplicate sink cannot form a full squad yet; leaving the duplicate for the primary planner`);
+          return { status: 'skipped' };
+        }
+        if (sink.submitted) {
+          runtime.recoveryDuplicateRefs = (runtime.recoveryDuplicateRefs || []).filter((ref) => (
+            !(sink.consumedSignalRefs || []).some((consumed) => rollingItemMatchesRef(consumed, ref))
+          ));
+          runtime.pendingRecoveryReward = {
+            definition: sink.recoveryDef,
+            rewardPackId: sink.rewardPackId || null,
+          };
+        }
+        return sink;
+      },
+      recoverProvisions: async ({ context }) => {
+        const storagePressure = context.trigger === 'storage-pressure';
+        const duplicateReserve = context.trigger === 'duplicate-reserve';
+        const preferredSignalRefs = duplicateReserve
+          ? (runtime.openRouting?.provisionsItems || []).map((item) => liveItemRef(item, 'unassigned'))
+          : storagePressure
+            ? rollingRecoveryEntryRefs(runtime, ({ pile, classification }) => (
+                pile === 'storage'
+                  && classification.provisionsReserve === true
+                  && classification.requiredSpecial !== true
+                  && classification.protected !== true
+              ))
+            : [];
+        const consumableReserveIds = new Set((runtime.openRouting?.entries || [])
+          .filter(({ classification }) => classification.provisionsReserve === true)
+          .map(({ item }) => Number(item?.id || 0))
+          .filter(Boolean));
+        const additionalProtected = storagePressure
+          ? (runtime.openRouting?.storageItems || [])
+              .filter((item) => !consumableReserveIds.has(Number(item?.id || 0)))
+              .map((item) => liveItemRef(item, 'unassigned'))
+          : [];
+        log(`${loopDef.name}: ${storagePressure ? 'emergency' : duplicateReserve ? 'duplicate-reserve' : 'normal'} Provisions recovery (${context.trigger})`);
+        const provisionsMaxRating = rollingProvisionsMaxRating(loopDef);
+        log(`${loopDef.name}: Provisions material is restricted to ratings ${ROLLING_PROVISIONS_RATING_RANGE.min}-${provisionsMaxRating}`);
+        const recovery = await submitRollingRequirementRecovery(
+          loopDef,
+          runtime,
+          loopDef.rollingProvisionsUpgrade,
+          {
+            priorityPiles: storagePressure
+              ? ['storage', 'unassigned', 'transfer', 'club']
+              : ['unassigned', 'storage', 'transfer', 'club'],
+            additionalProtected,
+            allowProvisionsReserve: true,
+            allowSpecial: true,
+            softProtectClubSpecial: true,
+            preferredSignalRefs,
+            requirePreferredSignal: duplicateReserve,
+            requirePreferredItem: storagePressure,
+            validateSelection: storagePressure
+              ? ({ storageItemsConsumed }) => validateRollingEmergencyProvisionsSelection(
+                  runtime,
+                  storageItemsConsumed,
+                )
+              : null,
+            minRating: ROLLING_PROVISIONS_RATING_RANGE.min,
+            maxRating: provisionsMaxRating,
+          },
+        );
+        if (recovery.submitted) {
+          if (duplicateReserve && recovery.consumedSignalRefs?.length) {
+            runtime.openRouting.provisionsItems = (runtime.openRouting.provisionsItems || []).filter((item) => (
+              !recovery.consumedSignalRefs.some((ref) => rollingItemMatchesRef(item, ref))
+            ));
+          }
+          if (shouldQueueRollingProvisionsReward(context.trigger, loopDef)) {
+            runtime.pendingRecoveryReward = {
+              definition: recovery.recoveryDef,
+              rewardPackId: recovery.rewardPackId || null,
+            };
+          } else {
+            log(`${loopDef.name}: retained ${context.trigger} Provisions reward in My Packs until primary fodder shortage`);
+          }
+        }
+        return recovery;
+      },
+      recoverStorageSink: async () => runRollingStorageSinkRecovery(
+        loopDef,
+        runtime,
+        loopDef.rollingStorageSinkPick,
+      ),
+      recoverRequiredSpecial: async () => {
+        const definition = rollingRecoveryDef(loopDef.rollingTotwUpgrade, loopDef);
+        if (!rollingCapabilityAvailable(definition)) {
+          return { status: 'unavailable', reason: 'dynamic 84+ TOTW Upgrade capability is unavailable' };
+        }
+        const pack = await findRewardPack(definition, null, {
+          attempts: 2,
+          delayMs: 1000,
+          fallbackPackMatcher: isLikelyTotwRewardPack,
+          repositoryOnly: true,
+        });
+        if (pack) {
+          log(`${loopDef.name}: opening existing ${definition.name} reward before crafting another`);
+          return openRollingRecoveryReward(loopDef, runtime, definition, pack, {
+            assumeTotwReward: true,
+            fallbackPackMatcher: isLikelyTotwRewardPack,
+          });
+        }
+        log(`${loopDef.name}: no eligible Required Special or existing TOTW reward; planning one ${definition.name}`);
+        return submitRollingRatingRecovery(loopDef, runtime, definition);
+      },
+      maintainStorage: async () => {
+        const ledger = runtime.coordinator?.getLedger?.();
+        if (!ledger) return { status: 'skipped', reason: 'inventory ledger is unavailable' };
+        const provisionsRequiredCount = rollingProvisionsRequiredCount(loopDef);
+        const maintenance = planRollingStorageMaintenance({
+          ledger,
+          protectedItems: [
+            ...(runtime.primaryDuplicateRefs || []),
+            ...(runtime.pendingUnassignedRefs || []),
+          ],
+          provisionsRequiredCount,
+          totwRequiredCount: 11,
+          maxRating: rollingProtectionRating(loopDef),
+        });
+        if (maintenance.status !== 'ready') return { status: 'skipped' };
+
+        log(`${loopDef.name}: Storage maintenance plan Provisions ${maintenance.provisions.eligible}/${maintenance.provisions.requiredCount} (${maintenance.provisions.batches} batch(es)); TOTW targets ${maintenance.totw.eligible}/${maintenance.totw.requiredCount}; action:${maintenance.action}`);
+        if (maintenance.action === 'provisions') {
+          const batchRefs = maintenance.provisions.nextBatchRefs;
+          const protectedStorageReserveRefs = rollingRecoveryEntryRefs(runtime, ({ item, pile }) => (
+            pile === 'storage'
+              && [87, 88].includes(Number(item?.rating || 0))
+              && !batchRefs.some((ref) => rollingItemMatchesRef(item, ref))
+          ));
+          const recovery = await submitRollingRequirementRecovery(
+            loopDef,
+            runtime,
+            loopDef.rollingProvisionsUpgrade,
+            {
+              priorityPiles: ['storage'],
+              additionalProtected: protectedStorageReserveRefs,
+              allowProvisionsReserve: true,
+              allowSpecial: true,
+              softProtectClubSpecial: false,
+              preferredSignalRefs: batchRefs,
+              requirePreferredItem: true,
+              minRating: 87,
+              maxRating: 88,
+            },
+          );
+          if (recovery.submitted) {
+            log(`${loopDef.name}: retained Storage-maintenance Provisions reward in My Packs until primary fodder shortage`);
+          }
+          return {
+            ...recovery,
+            details: {
+              ...(recovery.details || {}),
+              action: 'provisions',
+              storageTargets: batchRefs.length,
+            },
+          };
+        }
+
+        const definition = rollingRecoveryDef(loopDef.rollingTotwUpgrade, loopDef);
+        if (!rollingCapabilityAvailable(definition)) {
+          return { status: 'unavailable', reason: 'dynamic 84+ TOTW Upgrade capability is unavailable' };
+        }
+        const existingPack = await findRewardPack(definition, null, {
+          attempts: 1,
+          delayMs: 0,
+          fallbackPackMatcher: isLikelyTotwRewardPack,
+          repositoryOnly: true,
+        });
+        if (existingPack) {
+          log(`${loopDef.name}: Storage maintenance opening existing ${definition.name} reward before crafting another`);
+          return openRollingRecoveryReward(loopDef, runtime, definition, existingPack, {
+            assumeTotwReward: true,
+            fallbackPackMatcher: isLikelyTotwRewardPack,
+          });
+        }
+
+        const candidateRefs = maintenance.totw.candidateRefs;
+        const protectedNonTargetStorageRefs = rollingRecoveryEntryRefs(runtime, ({ item, pile }) => (
+          pile === 'storage'
+            && !candidateRefs.some((ref) => rollingItemMatchesRef(item, ref))
+        ));
+        const recovery = await submitRollingRatingRecovery(
+          loopDef,
+          runtime,
+          definition,
+          {
+            priorityPiles: ['storage', 'transfer', 'club'],
+            requiredItems: candidateRefs.slice(0, 1),
+            preferredItems: candidateRefs,
+            additionalProtected: protectedNonTargetStorageRefs,
+            maxOrdinaryRating: 89,
+          },
+        );
+        if (!recovery.submitted) {
+          const optionalShortage = [
+            'PLAYER_COUNT_SHORTAGE',
+            'SQUAD_RATING_SHORTAGE',
+            'SQUAD_RATING_EXCESS',
+            'RESERVED_FODDER_BLOCKED',
+            'RECOVERY_MATERIAL_SHORTAGE',
+          ].includes(String(recovery.reasonCode || ''));
+          return optionalShortage
+            ? { status: 'skipped', reason: recovery.reason, reasonCode: recovery.reasonCode }
+            : recovery;
+        }
+
+        const rewardPack = await findRewardPack(definition, recovery.rewardPackId || null, {
+          attempts: 6,
+          delayMs: 1200,
+          logWait: true,
+          fallbackPackMatcher: isLikelyTotwRewardPack,
+          repositoryOnly: true,
+        });
+        if (!rewardPack) {
+          return {
+            status: 'blocked',
+            reason: `${definition.name} was submitted but its reward pack was not found`,
+            reasonCode: 'RECOVERY_REWARD_NOT_FOUND',
+          };
+        }
+        const openedReward = await openRollingRecoveryReward(
+          loopDef,
+          runtime,
+          definition,
+          rewardPack,
+          {
+            assumeTotwReward: true,
+            fallbackPackMatcher: isLikelyTotwRewardPack,
+          },
+        );
+        return {
+          ...openedReward,
+          details: {
+            ...(openedReward.details || {}),
+            action: 'totw',
+            storageTargets: candidateRefs.length,
+          },
+        };
+      },
+      planPrimarySquad: async () => {
+        runtime.primaryContext = await loadRollingPrimaryContext(loopDef, {
+          force: runtime.forceChallengeRefresh,
+        });
+        runtime.forceChallengeRefresh = false;
+        if (runtime.primaryContext.status !== 'ready') {
+          return {
+            ok: false,
+            reason: runtime.primaryContext.reason,
+            reasonCode: runtime.primaryContext.reasonCode || 'PRIMARY_SBC_UNAVAILABLE',
+          };
+        }
+        const { activeLoopDef, challenge, model, set } = runtime.primaryContext;
+        const primaryDuplicateRefs = rollingUniqueRefs(runtime.primaryDuplicateRefs || []);
+        const primaryIdentity = validateRollingPrimaryDuplicateIdentity({
+          ledger: runtime.coordinator.getLedger(),
+          primaryDuplicateRefs,
+        });
+        if (!primaryIdentity.ok) {
+          log(`${loopDef.name}: reserved primary duplicate identity changed: ${diagnosticJson(primaryIdentity.missingRefs)}`);
+          return {
+            ok: false,
+            reason: primaryIdentity.reason,
+            reasonCode: primaryIdentity.reasonCode,
+            details: { missingPrimaryDuplicateRefs: primaryIdentity.missingRefs },
+          };
+        }
+        const relaxationOrder = rollingPrimaryDuplicateRelaxationOrder({
+          ledger: runtime.coordinator.getLedger(),
+          primaryDuplicateRefs,
+        });
+        const requiredSpecialSourceFilter = createRollingRequiredSpecialSourceFilter({
+          constraintIndexes: rollingRequiredSpecialConstraintIndexes(model),
+          isClubTotw: isTotwItem,
+        });
+        let relaxedPrimaryDuplicateRefs = [];
+        let selectionPolicy = null;
+        let fill = null;
+        while (true) {
+          selectionPolicy = {
+            ...createRollingPrimarySelectionPolicy({
+              ledger: runtime.coordinator.getLedger(),
+              model,
+              protectionRating: rollingProtectionRating(loopDef),
+              reserveRatings: loopDef.rollingSurplusCraftingEnabled === true
+                ? rollingProvisionsReserveRatings(loopDef)
+                : false,
+              primaryDuplicateRefs,
+              relaxedPrimaryDuplicateRefs,
+            }),
+            candidateFilter: requiredSpecialSourceFilter,
+          };
+          fill = await fillSbcSquadRatingOptimized(activeLoopDef, {
+            set,
+            challenge,
+            background: true,
+          }, {
+            dryRun: loopDef.dryRun === true,
+            selectionPolicy,
+            skipInventoryRefresh: relaxedPrimaryDuplicateRefs.length > 0,
+          });
+          if (!fill.ok || Number(fill.optimizedRating || 0) <= Number(model.targetRating || 0)) break;
+          const nextRef = relaxationOrder[relaxedPrimaryDuplicateRefs.length];
+          if (!nextRef) break;
+          relaxedPrimaryDuplicateRefs.push(nextRef);
+          log(`${loopDef.name}: primary rating ${fill.optimizedRating} exceeds target ${model.targetRating}; replacing duplicate #${nextRef.id || nextRef.definitionId} with lower-rated Storage material`);
+        }
+        if (!fill.ok) {
+          const reasonCode = fill.reasonCode || fill.missing?.code || 'PRIMARY_SQUAD_INFEASIBLE';
+          const reason = fill.reason || 'primary squad is infeasible';
+          log(`${loopDef.name}: primary squad planner blocked (${reasonCode}): ${reason}`);
+          (fill.selection?.diagnostics || []).slice(0, 5).forEach((diagnostic) => {
+            const serialized = typeof diagnostic === 'string' ? diagnostic : JSON.stringify(diagnostic);
+            const bounded = serialized.length > 1800 ? `${serialized.slice(0, 1800)}...` : serialized;
+            log(`${loopDef.name}: primary planner diagnostic: ${bounded}`);
+          });
+          return {
+            ok: false,
+            reason,
+            reasonCode,
+            missing: fill.missing || null,
+            diagnostics: fill.selection?.diagnostics || [],
+          };
+        }
+        const sourceErrors = rollingRequiredSpecialSourceErrors(fill.selection, model);
+        if (sourceErrors.length) {
+          return {
+            ok: false,
+            reason: `Required Special source policy failed: ${sourceErrors.join(', ')}`,
+            reasonCode: 'REQUIRED_SPECIAL_SOURCE_POLICY_BLOCKED',
+          };
+        }
+        const targetRating = Number(model.targetRating || 0);
+        if (Number(fill.optimizedRating || 0) > targetRating) {
+          return {
+            ok: false,
+            reason: `primary squad cannot reach target rating ${targetRating} without exceeding it after all primary-pack duplicates are relaxed`,
+            reasonCode: 'SQUAD_RATING_EXCESS',
+            diagnostics: fill.selection?.diagnostics || [],
+          };
+        }
+        const consumedPrimaryRefs = rollingSelectionConsumedPrimaryRefs(
+          fill.selection,
+          primaryDuplicateRefs,
+        );
+        const deferredPrimaryRefs = primaryDuplicateRefs.filter((ref) => (
+          !consumedPrimaryRefs.some((consumed) => rollingItemMatchesRef(consumed, ref))
+        ));
+        if (deferredPrimaryRefs.length) {
+          const deferredItems = deferredPrimaryRefs
+            .map((ref) => runtime.coordinator.getLedger().resolveItem(ref))
+            .filter(Boolean);
+          const pendingUnassigned = deferredItems.filter((item) => (
+            String(item?.pile || item?.ref?.pile || '') === 'unassigned'
+          )).length;
+          const selectedStorage = rollingSelectionStorageConsumption(runtime, fill.selection);
+          const storageFree = storageSpaceLeft();
+          if (storageFree === null || pendingUnassigned > storageFree + selectedStorage) {
+            stageRollingDeferredPrimaryStorage(runtime, deferredPrimaryRefs, {
+              reason: `primary rating normalization needs ${pendingUnassigned} Storage slot(s), but only ${storageFree === null ? 'an unknown number of' : storageFree + selectedStorage} will be available after submission`,
+              storageFree,
+              projectedStorageFree: storageFree === null ? null : storageFree + selectedStorage,
+              storageRequired: pendingUnassigned,
+            });
+            return {
+              ok: false,
+              reason: runtime.openRouting.reason,
+              reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+              details: runtime.openRouting.details,
+            };
+          }
+        }
+        if (!loopDef.dryRun && fill.fillResult?.submitReady !== true) {
+          return {
+            ok: false,
+            reason: 'planned primary squad is not submit ready',
+            reasonCode: 'PRIMARY_SUBMISSION_NOT_READY',
+          };
+        }
+        return {
+          ok: true,
+          opened: { set, challenge, background: true },
+          activeLoopDef,
+          selectionPolicy,
+          fill,
+          deferredPrimaryRefs,
+        };
+      },
+      submitPrimary: async ({ plan }) => {
+        if (loopDef.dryRun) {
+          return { status: 'planned', reason: 'dry-run primary squad plan complete' };
+        }
+        const { opened, activeLoopDef, selectionPolicy, fill } = plan;
+        const players = fill.inspection?.items || fill.selection?.selected || [];
+        const itemRefs = players.map((item) => liveItemRef(item));
+        const ledgerValidation = await runtime.coordinator.validateBeforeSubmit(itemRefs, {
+          label: loopDef.name,
+          reason: 'rolling-primary-pre-submit',
+        });
+        if (!ledgerValidation.ok) {
+          return {
+            status: 'blocked',
+            reason: ledgerValidation.reason,
+            reasonCode: 'INVENTORY_VALIDATION_FAILED',
+          };
+        }
+        let backgroundSubmission = null;
+        runtime.lastMutation = null;
+        const submission = await submitSbcAttempt({
+          label: loopDef.name,
+          challengeProvider: async () => opened,
+          squadProvider: createExistingSquadProvider({
+            getPlayers: async () => players,
+            itemRef: liveItemRef,
+            source: 'rolling-rating-squad',
+          }),
+          prepareRuntimeAccess: prepareFsuRuntimeAccess,
+          saveSquad: async ({ challenge, players: refreshedPlayers, runtimeAccess }) => {
+            await saveRollingProvisionalClubSquad(
+              challenge,
+              refreshedPlayers,
+              runtimeAccess,
+              `${loopDef.name} provisional Club refresh`,
+            );
+          },
+          preSaveValidators: [() => {
+            assertSbcSquadSafe(activeLoopDef, fill.inspection);
+            const sourceErrors = rollingRequiredSpecialSourceErrors(fill.selection, fill.model);
+            if (sourceErrors.length) {
+              fail(`${loopDef.name}: final Rolling squad violated Required Special source policy: ${sourceErrors.join(', ')}`);
+            }
+            const validation = validateRatingSbcModelAgainstItems(
+              fill.model,
+              fill.inspection.items,
+              opened.challenge,
+              {
+                exclusiveRoles: selectionPolicy.exclusiveRoles,
+                allowOtherSpecialAsOrdinary: true,
+              },
+            );
+            if (!validation.ok) {
+              fail(`${loopDef.name}: final Rolling squad failed dynamic requirement validation: ${validation.errors.join(', ')}`);
+            }
+            return true;
+          }],
+          isSubmitReady: async () => fill.fillResult?.submitReady === true,
+          submitTransport: async (context) => {
+            backgroundSubmission = await submitRatingSbcInBackground(
+              context.set,
+              context.challenge,
+              loopDef.name,
+              {
+                players: context.players || players,
+                allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
+              },
+            );
+            return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
+          },
+          runCommittedSubmit: runCommittedSbcSubmit,
+          onResult: async (submissionResult) => {
+            runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, {
+              primary: true,
+            });
+          },
+          afterSubmit: async ({ players: submittedPlayers, savedPlayers, squadPlan }) => {
+            await finalizeSubmittedInventorySelection(
+              squadPlan?.selection || fill.selection,
+              loopDef.name,
+              savedPlayers?.length ? savedPlayers : submittedPlayers,
+            );
+          },
+        });
+        if (submission.submitted && !runtime.lastMutation) {
+          runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, {
+            primary: true,
+          });
+        }
+        if (submission.submitted) {
+          runtime.pendingRewardPackId = submission.rewardPackId || null;
+          runtime.forceChallengeRefresh = true;
+          recordRollingRecapDuplicateRoute('primary', rollingDuplicatePlayerCount(fill.selection));
+          const deferredStorage = await routeRollingDeferredPrimaryStorage(
+            loopDef,
+            runtime,
+            plan.deferredPrimaryRefs || [],
+          );
+          if (deferredStorage.status !== 'ready') {
+            return {
+              ...submission,
+              postSubmitBlocked: true,
+              reason: deferredStorage.reason,
+              reasonCode: deferredStorage.reasonCode,
+            };
+          }
+          runtime.primaryDuplicateRefs = [];
+          refreshRollingPendingUnassignedRefs(runtime);
+        }
+        return {
+          ...submission,
+          inventoryDelta: runtime.lastMutation?.delta || null,
+          details: {
+            rewardObserved: backgroundSubmission?.rewardObserved === true,
+          },
+        };
+      },
+      reconcile: async () => {
+        const ledger = runtime.coordinator.getLedger();
+        if (!ledger.summary().needsReconciliation) return { status: 'ready' };
+        const reconciliation = await runtime.coordinator.reconcile('rolling-post-primary');
+        return reconciliation.ok
+          ? { status: 'ready' }
+          : { status: 'blocked', reason: reconciliation.reason };
+      },
+      onEvent: async (event, payload) => {
+        if (event === 'phase') {
+          publishRollingTelemetry(loopDef, runtime, {
+            phase: payload.phase,
+            completedCycles: payload.completions,
+          });
+          requestRollingTelemetryCapabilities(loopDef, runtime);
+          log(`${loopDef.name}: ${payload.phase} (primary ${payload.completions}/${Number(loopDef.maxCompletions || 0) || 'no limit'})`);
+        } else if (event === 'recovery') {
+          log(`${loopDef.name}: recovery ${payload.kind} progressed (${payload.trigger || 'unspecified'}); cycle ${payload.cycleRecoveries.total}/${payload.budgets?.total || 'budgeted'}`);
+        } else if (event === 'progress') {
+          log(`${loopDef.name}: primary completions ${payload.completions}; opened ${payload.packsOpened}; bootstrap ${payload.bootstrapSubmissions}`);
+        }
+      },
+      });
+      const telemetry = state.runtimeTelemetryController.getSnapshot();
+      const ledgerSummary = runtime.coordinator?.getLedger?.()?.summary?.() || {};
+      const storage = ledgerSummary.capacities?.storage || {};
+      result.finalResources = {
+        specialSlots: telemetry.specialSlots,
+        directCycles: telemetry.directCycles,
+        provisionsBatches: telemetry.provisionsBatches,
+        totwRecoveries: telemetry.totwRecoveries,
+        storage: storage.used === null || storage.used === undefined || storage.max === null || storage.max === undefined
+          ? null
+          : `${storage.used}/${storage.max}`,
+        inventoryVersion: ledgerSummary.inventoryVersion ?? telemetry.inventoryVersion,
+      };
+    } finally {
+      runtime.telemetryActive = false;
+    }
+    log(`${loopDef.name}: ${result.status}; primary completions:${result.completions}, packs opened:${result.packsOpened}, recoveries:${result.recoveries?.total || 0}${result.reason ? `, reason:${result.reasonCode || 'unknown'} ${result.reason}` : ''}`);
+    return result;
+  }
+
   function unresolvedRequiredMaterialActivities(value, path = 'Loop', visited = new WeakSet()) {
     if (!value || typeof value !== 'object') return [];
     if (visited.has(value)) return [];
@@ -11068,7 +14705,9 @@ function updateLoopControls() {
   }
 
   async function runConfiguredLoop(loopDef, roundNo = 1) {
-    const unresolvedActivities = unresolvedRequiredMaterialActivities(loopDef, loopDef.name || loopDef.id || 'Loop');
+    const unresolvedActivities = loopDef.strategy === 'rollingUpgrade'
+      ? []
+      : unresolvedRequiredMaterialActivities(loopDef, loopDef.name || loopDef.id || 'Loop');
     if (unresolvedActivities.length) {
       const reason = `required scanned material activity unavailable: ${unresolvedActivities.map((entry) => `${entry.family} at ${entry.path}`).join(', ')}`;
       log(`${loopDef.name}: ${reason}; stopping before pack or SBC actions`);
@@ -11091,6 +14730,7 @@ function updateLoopControls() {
           playerPickSbc: runPlayerPickLoop,
           fillAndVerifySbc: runFillAndVerifyLoop,
           inventoryExhaustion: runInventoryExhaustionLoop,
+          rollingUpgrade: runRollingUpgradeLoop,
         },
         afterStandardRun: async (definition) => {
           await showUnassignedIfAny(`${definition.name} end`);
@@ -11138,6 +14778,7 @@ function updateLoopControls() {
     let fsuReadiness = null;
     let runStatus = 'completed';
     let runReason = null;
+    let runResult = null;
 
     try {
       loopDef = getSelectedLoopDef();
@@ -11153,8 +14794,13 @@ function updateLoopControls() {
         pickOptions: getPickRuntimeOptions(),
         sbcFodderPolicy: getSbcFodderRuntimeOptions(),
       });
+      assertRollingRuntimePreflight(loopDef);
       const fodderPolicy = getSbcFodderPolicy(loopDef);
-      log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
+      if (loopDef.strategy === 'rollingUpgrade') {
+        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; 95+ Storage pressure Pick ${loopDef.rollingStorageSinkEnabled ? 'enabled' : 'disabled'}`);
+      } else {
+        log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
+      }
       if (Number(loopDef.runtimeRounds) > 0) {
         rounds = Number(loopDef.runtimeRounds || rounds || 1);
       }
@@ -11172,6 +14818,18 @@ function updateLoopControls() {
 
     state.running = true;
     state.stopping = false;
+    state.runtimeTelemetryController.hide({
+      phase: '',
+      completedCycles: 0,
+      cycleLimit: 0,
+      specialSlots: null,
+      directCycles: null,
+      provisionsBatches: null,
+      totwRecoveries: null,
+      storageUsed: null,
+      storageCapacity: null,
+      inventoryVersion: null,
+    });
     state.sbcLoadLogKeys.clear();
     beginLoopRecapSession(loopDef);
     if (fsuReadiness?.state === 'provisional') {
@@ -11179,7 +14837,6 @@ function updateLoopControls() {
     }
     setPanelState();
     try {
-      let runResult = null;
       if (loopDef.dryRun || loopDef.strategy !== 'validationBronzeUpgrade') {
         stopPoint();
         runResult = await runConfiguredLoop(loopDef, 1);
@@ -11210,8 +14867,9 @@ function updateLoopControls() {
     } finally {
       state.running = false;
       state.stopping = false;
+      state.runtimeTelemetryController.hide();
       setPanelState();
-      await finalizeLoopRecap(loopDef, runStatus, runReason);
+      await finalizeLoopRecap(loopDef, runStatus, runReason, runResult);
     }
   }
 
@@ -11225,7 +14883,10 @@ function updateLoopControls() {
           scanningPicks: state.scanningPicks,
           dynamicSbcScanProgress: state.dynamicSbcScanProgress,
           loadingLoops: state.loadingLoops,
-        usingBuiltIn: state.loopConfigSource === 'built-in'
+          runtimeTelemetry: state.runtimeTelemetry,
+          pickOptions: state.pickOptions,
+          sbcFodderOptions: state.sbcFodderOptions,
+          usingBuiltIn: state.loopConfigSource === 'built-in'
           && !state.workflowBuilder?.getStore?.().activeProfileId,
       },
       setMobileTab: (tab) => state.panelGeometry?.setMobileTab?.(tab),
@@ -11279,15 +14940,19 @@ function updateLoopControls() {
     const savedLoopUiOptions = loadLoopUiOptions();
     const savedPickOptions = loadPickRuntimeOptions();
     const savedLayoutMode = normalizeLayoutOverride(adapters.localStorage.get('fc-loop-layout-mode', 'auto'));
+    state.pickOptions = savedPickOptions;
     state.sbcFodderOptions = loadSbcFodderOptions();
     state.rewardAlertSettings = loadRewardAlertSettings();
     hydrateMainPanelOptions({
       panel,
       loopOptions: savedLoopUiOptions,
-      pickOptions: savedPickOptions,
-      sbcFodderOptions: state.sbcFodderOptions,
       rewardAlertSettings: state.rewardAlertSettings,
       layoutMode: savedLayoutMode,
+    });
+    renderSelectionPolicySummary({
+      panel,
+      pickOptions: state.pickOptions,
+      sbcFodderOptions: state.sbcFodderOptions,
     });
     renderRewardAlertSummary({ panel, settings: state.rewardAlertSettings });
     state.panelGeometry = createMainPanelGeometry({
@@ -11372,8 +15037,14 @@ function updateLoopControls() {
       setLayoutMode: (layoutMode) => state.layoutController?.setOverride?.(layoutMode),
       renderProfiles: renderProfileSelect,
       updateLoopControls,
-      savePickOptions: savePickRuntimeOptions,
-      saveSbcFodderOptions,
+      getLoopSelectionDefaults: (loopId) => ({
+        openRewardPacks: findLoopDefById(loopId)?.defaultOpenRewardPacksOnSelect === true,
+      }),
+      setOpenRewardPacksEnabled: (enabled) => {
+        const input = document.querySelector('#bronze-loop-open-rewards');
+        if (input) input.checked = enabled === true;
+      },
+      openSelectionPolicySettings: openSelectionPolicySettingsModal,
       saveLoopOptions: saveLoopUiOptions,
       saveRewardAlertEnabled,
       openRewardAlertSettings: openRewardAlertSettingsModal,

@@ -5,9 +5,11 @@ export async function resolveUnassigned(options = {}) {
   if (typeof options.executeAction !== 'function') throw new Error('executeAction is required');
   const maxIterations = Math.max(1, Math.min(100, Number(options.maxIterations || 20) || 20));
   const actionProgressAttempts = Math.max(1, Math.min(10, Number(options.actionProgressAttempts || 1) || 1));
+  const maxReplans = Math.max(0, Math.min(10, Number(options.maxReplans ?? 3) || 0));
   const overflowResolvers = options.overflowResolvers || [];
   const activeResolvers = options.activeResolvers || new Set();
   let previousFingerprint = null;
+  let replans = 0;
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     const snapshot = await options.getSnapshot();
@@ -37,7 +39,31 @@ export async function resolveUnassigned(options = {}) {
     }
 
     if (plan.status === 'action') {
-      await options.executeAction(plan.action, { plan, snapshot, iteration });
+      const execution = await options.executeAction(plan.action, { plan, snapshot, iteration });
+      if (execution?.status === 'replan') {
+        replans++;
+        const reason = execution.reason || `state changed before ${plan.action.description}`;
+        await options.onActionReplan?.({
+          action: plan.action,
+          reason,
+          replan: replans,
+          maxReplans,
+          iteration,
+          snapshot,
+        });
+        if (replans > maxReplans) {
+          return {
+            status: 'blocked',
+            reason: `Unassigned action exceeded ${maxReplans} replans: ${reason}`,
+            iterations: iteration,
+            plan,
+            snapshot,
+            replans,
+          };
+        }
+        previousFingerprint = fingerprint;
+        continue;
+      }
       let after = null;
       let afterFingerprint = fingerprint;
       for (let attempt = 1; attempt <= actionProgressAttempts; attempt++) {

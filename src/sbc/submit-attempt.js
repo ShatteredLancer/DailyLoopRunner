@@ -18,14 +18,24 @@ async function resolveSubmitReadiness(options, context) {
   return false;
 }
 
+async function publishResult(options, result, context = {}) {
+  if (typeof options.onResult !== 'function') return result;
+  try {
+    await options.onResult(result, context);
+  } catch (error) {
+    try { await options.onResultError?.(error, { result, context }); } catch { }
+  }
+  return result;
+}
+
 export async function submitSbcAttempt(options = {}) {
   const challengeContext = await options.challengeProvider?.();
   if (!challengeContext?.challenge || !challengeContext?.set) {
-    return createSubmissionResult({
+    return publishResult(options, createSubmissionResult({
       status: 'unavailable',
       submitted: false,
       reason: challengeContext?.reason || 'no available SBC challenge',
-    });
+    }), { phase: 'challenge' });
   }
 
   const context = {
@@ -35,24 +45,24 @@ export async function submitSbcAttempt(options = {}) {
   };
   const squadPlan = await options.squadProvider?.(context);
   if (!squadPlan?.ok) {
-    return createSubmissionResult({
+    return publishResult(options, createSubmissionResult({
       status: 'blocked',
       submitted: false,
       challengeRef: context.challengeRef || { id: context.challenge?.id || null },
       reason: squadPlan?.reason || 'squad provider did not produce a valid plan',
-    });
+    }), { phase: 'squad', context });
   }
   context.squadPlan = squadPlan;
   context.players = squadPlan.players || [];
 
   if (context.dryRun) {
     await runValidators(options.preSaveValidators, context, 'pre-save');
-    return createSubmissionResult({
+    return publishResult(options, createSubmissionResult({
       status: 'planned',
       submitted: false,
       challengeRef: context.challengeRef || { id: context.challenge?.id || null },
       consumedItemRefs: squadPlan.itemRefs || [],
-    });
+    }), { phase: 'dry-run', context });
   }
 
   let accessToken;
@@ -61,13 +71,13 @@ export async function submitSbcAttempt(options = {}) {
       const access = await options.prepareRuntimeAccess(context);
       context.runtimeAccess = access || null;
       if (access?.ok === false) {
-        return createSubmissionResult({
+        return publishResult(options, createSubmissionResult({
           status: 'blocked',
           submitted: false,
           challengeRef: context.challengeRef || { id: context.challenge?.id || null },
           consumedItemRefs: squadPlan.itemRefs || [],
           reason: access.reason || 'runtime inventory validation failed',
-        });
+        }), { phase: 'runtime-access', context });
       }
       if (Array.isArray(access?.players)) {
         context.players = access.players;
@@ -87,45 +97,51 @@ export async function submitSbcAttempt(options = {}) {
     await runValidators(options.postSaveValidators, context, 'post-save');
 
     if (options.prepareOnly === true) {
-      return createSubmissionResult({
+      return publishResult(options, createSubmissionResult({
         status: 'prepared',
         submitted: false,
         challengeRef: context.challengeRef || { id: context.challenge?.id || null },
         consumedItemRefs: context.squadPlan.itemRefs || [],
-      });
+      }), { phase: 'prepared', context });
     }
 
     const submitReady = await resolveSubmitReadiness(options, context);
     if (!submitReady) {
-      return createSubmissionResult({
+      return publishResult(options, createSubmissionResult({
         status: 'blocked',
         submitted: false,
         challengeRef: context.challengeRef || { id: context.challenge?.id || null },
         consumedItemRefs: context.squadPlan.itemRefs || [],
         reason: 'saved squad is not submit ready',
-      });
+      }), { phase: 'readiness', context });
     }
 
-    const transportResult = await options.submitTransport?.(context);
-    if (transportResult?.submitted === false || transportResult?.ok === false) {
-      return createSubmissionResult({
-        status: 'blocked',
-        submitted: false,
+    const runCommittedSubmit = typeof options.runCommittedSubmit === 'function'
+      ? options.runCommittedSubmit
+      : async (operation) => operation();
+    return await runCommittedSubmit(async () => {
+      const transportResult = await options.submitTransport?.(context);
+      if (transportResult?.submitted === false || transportResult?.ok === false) {
+        return publishResult(options, createSubmissionResult({
+          status: 'blocked',
+          submitted: false,
+          challengeRef: context.challengeRef || { id: context.challenge?.id || null },
+          consumedItemRefs: context.squadPlan.itemRefs || [],
+          reason: transportResult?.reason || 'SBC submit transport failed',
+        }), { phase: 'transport', context, transportResult });
+      }
+
+      const result = createSubmissionResult({
+        status: 'submitted',
+        submitted: true,
         challengeRef: context.challengeRef || { id: context.challenge?.id || null },
         consumedItemRefs: context.squadPlan.itemRefs || [],
-        reason: transportResult?.reason || 'SBC submit transport failed',
+        rewardPackId: transportResult?.rewardPackId,
       });
-    }
-
-    const result = createSubmissionResult({
-      status: 'submitted',
-      submitted: true,
-      challengeRef: context.challengeRef || { id: context.challenge?.id || null },
-      consumedItemRefs: context.squadPlan.itemRefs || [],
-      rewardPackId: transportResult?.rewardPackId,
-    });
-    if (options.afterSubmit) await options.afterSubmit({ ...context, result, transportResult });
-    return result;
+      await publishResult(options, result, { phase: 'submitted', context, transportResult });
+      if (options.afterSubmit) await options.afterSubmit({ ...context, result, transportResult });
+      return result;
+    }, context);
   } finally {
     if (options.releaseRuntimeAccess) await options.releaseRuntimeAccess({ ...context, token: accessToken });
   }

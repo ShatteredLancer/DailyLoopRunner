@@ -3,6 +3,7 @@ import {
   goldConsumptionOrder,
   runtimeGoldConsumptionMode,
 } from '../domain/gold-consumption.js';
+import { isSamePlayerCardVersion } from '../domain/player-rarity.js';
 
 function numberSet(values = []) {
   return new Set((values || []).map(Number).filter((value) => Number.isFinite(value) && value > 0));
@@ -118,11 +119,13 @@ function sortCandidates(items, requirement, fsuPolicy, preferredRefs = []) {
 function findSubmissionItem(signal, snapshot, usedIds, requirement, fsuPolicy, protection) {
   const candidates = [...snapshot.piles.storage, ...snapshot.piles.club]
     .filter((item) => !usedIds.has(item.id) && rejectionReasons(item, requirement, fsuPolicy, protection).length === 0);
-  if (signal.duplicateId) {
-    const direct = candidates.find((item) => item.id === signal.duplicateId);
-    if (direct) return direct;
+  const duplicateSignalId = Number(signal.duplicateSignalId || signal.duplicateId || 0);
+  if (duplicateSignalId) {
+    const direct = candidates.find((item) => item.id === duplicateSignalId);
+    if (direct && isSamePlayerCardVersion(signal, direct)) return direct;
   }
-  return sortCandidates(candidates, requirement, fsuPolicy).find((item) => item.definitionId === signal.definitionId) || null;
+  return sortCandidates(candidates, requirement, fsuPolicy)
+    .find((item) => isSamePlayerCardVersion(signal, item)) || null;
 }
 
 function requirementSelectionPhases(requirement = {}, hasPreferredSignals = false) {
@@ -200,7 +203,7 @@ export function selectInventoryPlayers(input = {}) {
           let item = candidate;
           let signal = null;
           if (pileName === 'unassigned' || pileName === 'transfer') {
-            if (!candidate.duplicate) continue;
+            if (!candidate.duplicateSignal && !candidate.duplicate) continue;
             item = findSubmissionItem(candidate, snapshot, submissionIds, phaseRequirement, fsuPolicy, requirementProtection);
             if (!item || selectedDefinitionIds.has(item.definitionId)) continue;
             signal = candidate;

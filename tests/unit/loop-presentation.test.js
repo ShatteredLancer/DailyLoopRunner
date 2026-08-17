@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyDisabledPiles, isMvpLoopDef, visibleLoopDefs } from '../../src/config/loop-presentation.js';
+import { createRollingUpgradeLoopDef } from '../../src/config/rolling-upgrade.js';
 
 describe('loop presentation and disabled pile projection', () => {
   it('hides MVP and hidden loops unless MVP visibility is enabled', () => {
@@ -13,6 +14,28 @@ describe('loop presentation and disabled pile projection', () => {
     expect(isMvpLoopDef(loops[2])).toBe(true);
     expect(visibleLoopDefs(loops, false).map((loop) => loop.id)).toEqual(['daily']);
     expect(visibleLoopDefs(loops, true).map((loop) => loop.id)).toEqual(['daily', 'daily-mvp', 'validation']);
+  });
+
+  it('shows a dynamically generated Rolling Loop without MVP visibility', () => {
+    const rolling = createRollingUpgradeLoopDef({
+      id: 'discovered-upgrade-900-high-rated-x10-85',
+      name: '10x85+ Upgrade',
+      strategy: 'fillAndVerifySbc',
+      dynamicSbcFamily: 'high-rated-x10',
+      dynamicRewardCount: 10,
+      dynamicRewardMinRating: 85,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      sbcSetIds: [900],
+    });
+
+    expect(rolling).toMatchObject({
+      id: 'rolling-upgrade-900-85',
+      strategy: 'rollingUpgrade',
+      hidden: false,
+      mvp: false,
+    });
+    expect(visibleLoopDefs([rolling])).toEqual([rolling]);
   });
 
   it('projects disabled piles through loop, rating, challenge, legacy, crafting, and exhaustion requirements', () => {

@@ -75,7 +75,7 @@ describe('basic Upgrade activity discovery', () => {
     expect(common).toMatchObject({
       status: 'supported',
       activities: expect.arrayContaining([
-        expect.objectContaining({ familyId: 'common-gold-crafting-upgrade' }),
+        expect.objectContaining({ familyId: '5x80-upgrade' }),
         expect.objectContaining({
           familyId: 'common-gold-material-upgrade',
           requirements: [{ tier: 'gold', count: 9 }],
@@ -480,6 +480,45 @@ describe('basic Upgrade activity discovery', () => {
     const session = buildActivityBindingSession({ sets: [first, second], configuredLoops: [loop] });
     expect(session.loopOverrides).toEqual({});
     expect(session.diagnostics.join(' ')).toContain('ambiguous');
+  });
+
+  it('binds Rolling Provisions to the live four-player 87+ contract when an older Set also exists', () => {
+    const loop = {
+      id: 'rolling-provisions-contract',
+      strategy: 'rollingUpgrade',
+      rollingProvisionsUpgrade: {
+        activityBinding: { family: 'provisions-upgrade', category: 'Upgrades', required: true },
+        requirements: [{ tier: 'gold', count: 4, minRating: 87, maxRating: 88 }],
+      },
+    };
+    const session = buildActivityBindingSession({
+      sets: [],
+      configuredLoops: [loop],
+      additionalActivities: [
+        {
+          familyId: 'provisions-upgrade',
+          setId: 1039,
+          setName: 'Provisions Upgrade',
+          rewardPackIds: [20643],
+          requirements: [{ tier: 'gold', count: 3, minRating: 85 }],
+        },
+        {
+          familyId: 'provisions-upgrade',
+          setId: 1354,
+          setName: 'Repeatable FUTTIES Provisions Upgrade',
+          rewardPackIds: [21346],
+          requirements: [{ tier: 'gold', count: 4, minRating: 87 }],
+        },
+      ],
+    });
+
+    expect(session.loopOverrides[loop.id].rollingProvisionsUpgrade).toMatchObject({
+      activityResolved: true,
+      sbcSetIds: [1354],
+      rewardPackIds: [21346],
+      requirements: [expect.objectContaining({ count: 4, minRating: 87, maxRating: 88 })],
+    });
+    expect(session.diagnostics).toEqual([]);
   });
 
   it('collects activity-bound SBC aliases from direct and nested consumers for scan prefiltering', () => {

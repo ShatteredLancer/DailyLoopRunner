@@ -278,15 +278,9 @@ describe('loop configuration schema', () => {
       ratingSbcFill: {
         priorityPiles: ['storage'],
         targetRating: 100,
-        maxSearchNodes: 9999,
-        maxSearchMs: 999,
-        yieldEveryNodes: 49,
       },
     })).toEqual([
       'ratingSbcFill.targetRating must be a number between 1 and 99',
-      'ratingSbcFill.maxSearchNodes must be an integer between 10000 and 2000000',
-      'ratingSbcFill.maxSearchMs must be an integer between 1000 and 60000',
-      'ratingSbcFill.yieldEveryNodes must be an integer between 50 and 5000',
     ]);
   });
 
@@ -329,7 +323,14 @@ describe('loop configuration schema', () => {
       sbcNames: ['Common Upgrade'],
       requirements: [{ tier: 'gold', count: 1 }],
       inventoryMode: 'inventory-only',
-      pickOptions: { autoPickThreshold: 91 },
+      pickOptions: {
+        autoPickThreshold: 91,
+        rollingStorageSinkEnabled: true,
+        rollingSurplusCraftingEnabled: true,
+        rollingProvisionsMaxRating: 89,
+        rollingOpenDuplicateProvisionsRewards: true,
+        rollingShortageProvisionsPackLimit: 2,
+      },
       sbcFodderPolicy: { mode: 'low-gold', lowRatedGoldMaxRating: 82 },
       runtimeQuantity: {
         mode: 'user',
@@ -352,11 +353,22 @@ describe('loop configuration schema', () => {
     expect(validateLoopDef({
       ...supported,
       inventoryMode: 'sometimes',
-      pickOptions: { autoPickThreshold: 100, unsupported: true },
+      pickOptions: {
+        autoPickThreshold: 100,
+        rollingStorageSinkEnabled: 'yes',
+        rollingSurplusCraftingEnabled: 'yes',
+        rollingProvisionsMaxRating: 90,
+        rollingShortageProvisionsPackLimit: 31,
+        unsupported: true,
+      },
       sbcFodderPolicy: { mode: 'named-after-sbc', ratingSbcMaxCardRating: 100, unsupported: true },
       runtimeQuantity: { mode: 'manual', target: 'unknown', min: 5, max: 2 },
     })).toEqual(expect.arrayContaining([
       'pickOptions.autoPickThreshold must be a number between 1 and 99',
+      'pickOptions.rollingStorageSinkEnabled must be boolean',
+      'pickOptions.rollingSurplusCraftingEnabled must be boolean',
+      'pickOptions.rollingProvisionsMaxRating must be either 88 or 89',
+      'pickOptions.rollingShortageProvisionsPackLimit must be an integer between 1 and 30',
       'pickOptions.unsupported is not supported',
       'sbcFodderPolicy.mode must be one of: inherit, auto, low-gold, rating-constrained',
       'sbcFodderPolicy.ratingSbcMaxCardRating must be a number between 1 and 99',
@@ -366,5 +378,20 @@ describe('loop configuration schema', () => {
       'runtimeQuantity.min must not exceed runtimeQuantity.max',
       'inventoryMode must be one of: inherit, inventory-only, normal',
     ]));
+  });
+
+  it('rejects zero quantity opt-in outside the dedicated Rolling strategy', () => {
+    const errors = validateLoopDef({
+      id: 'generic',
+      name: 'Generic',
+      strategy: 'fillAndVerifySbc',
+      sbcNames: ['Generic'],
+      runtimeQuantity: {
+        mode: 'user', target: 'maxCompletions', default: 0, min: 0, max: 50, allowZero: true,
+      },
+    });
+    expect(errors).toContain('runtimeQuantity.allowZero is only supported by strategy rollingUpgrade');
+    expect(errors).toContain('runtimeQuantity.default must be an integer between 1 and 1000');
+    expect(errors).toContain('runtimeQuantity.min must be an integer between 1 and 1000');
   });
 });

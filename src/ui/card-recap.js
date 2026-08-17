@@ -133,6 +133,23 @@ export function showCardRecap(options = {}) {
     const summary = dom.create('div');
     summary.textContent = model.summary;
     applyStyles(summary, { color: '#9AA6B8', marginBottom: '9px', fontSize: '12px' });
+    const details = Array.isArray(model.details) && model.details.length ? dom.create('div') : null;
+    if (details) {
+      applyStyles(details, {
+        display: 'grid', gridTemplateColumns: mode?.mobile ? '1fr' : 'minmax(105px, auto) minmax(0, 1fr)',
+        gap: '5px 10px', marginBottom: '10px', padding: '8px 0', borderTop: '1px solid #343C47',
+        borderBottom: '1px solid #343C47', fontSize: '11px', lineHeight: '16px',
+      });
+      model.details.forEach((entry) => {
+        const label = dom.create('span');
+        label.textContent = String(entry.label || '');
+        applyStyles(label, { color: '#D7DEE8', fontWeight: '700' });
+        const value = dom.create('span');
+        value.textContent = String(entry.value || '-');
+        applyStyles(value, { color: '#AAB4C2', minWidth: '0', overflowWrap: 'anywhere' });
+        details.append(label, value);
+      });
+    }
     const reason = model.reason ? dom.create('div') : null;
     if (reason) {
       reason.textContent = `${model.status}: ${model.reason}`;
@@ -189,6 +206,7 @@ export function showCardRecap(options = {}) {
     footer.append(previous, pageLabel, next, close);
     applyResponsiveDialogLayout({ dom, mode, overlay, dialog, title, actions: footer, controls: [previous, next, close] });
     dialog.append(title, summary);
+    if (details) dialog.appendChild(details);
     if (reason) dialog.appendChild(reason);
     dialog.append(list, footer);
     overlay.appendChild(dialog);

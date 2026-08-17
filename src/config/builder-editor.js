@@ -56,6 +56,17 @@ export function createLoopTemplate(strategy, options = {}) {
       return { ...loop, steps: [] };
     case 'fillAndVerifySbc':
       return { ...loop, sbcNames: ['SBC name'], requirements: [requirement()], priorityPiles: ['unassigned', 'storage', 'transfer', 'club'], maxCompletions: 1 };
+    case 'rollingUpgrade':
+      return {
+        ...loop,
+        hidden: true,
+        mvp: true,
+        rollingWorkflowEnabled: false,
+        defaultOpenRewardPacksOnSelect: true,
+        runtimeQuantity: {
+          mode: 'user', target: 'maxCompletions', default: 0, min: 0, max: 1000, allowZero: true, label: 'SBC completions',
+        },
+      };
     case 'inventoryExhaustion':
       return { ...loop, stages: [{ id: 'stage-1', ...upgrade('Upgrade'), maxCompletions: 1 }] };
     default:

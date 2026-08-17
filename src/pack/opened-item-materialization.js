@@ -1,4 +1,7 @@
-import { readPlayerRareFlag } from '../domain/player-rarity.js';
+import {
+  isSamePlayerCardVersion,
+  readPlayerRareFlag,
+} from '../domain/player-rarity.js';
 
 function itemId(item) {
   return Number(item?.id || item?.ref?.id || 0);
@@ -143,11 +146,21 @@ export function materializeOpenedPlayerDuplicates(options = {}) {
   for (const item of items) {
     if (!isPlayer(item)) continue;
     const duplicateId = Number(item?.duplicateId || 0);
-    const clubDuplicate = (duplicateId && clubById.get(duplicateId))
+    const directDuplicate = duplicateId ? clubById.get(duplicateId) : null;
+    const clubDuplicate = (directDuplicate && isSamePlayerCardVersion(item, directDuplicate)
+      ? directDuplicate
+      : null)
       || (clubByDefinition.get(definitionId(item)) || [])
-        .find((candidate) => itemId(candidate) !== itemId(item))
+        .find((candidate) => (
+          itemId(candidate) !== itemId(item)
+            && isSamePlayerCardVersion(item, candidate)
+        ))
       || null;
-    if (!isDuplicate(item) && !clubDuplicate) {
+    if (!clubDuplicate) {
+      if (isDuplicate(item)) {
+        item.duplicateId = 0;
+        if (item._duplicateId !== undefined) item._duplicateId = 0;
+      }
       nonDuplicates.push(item);
       continue;
     }

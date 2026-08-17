@@ -58,7 +58,14 @@ describe('rating candidate integration planning', () => {
         special: false,
       }],
       pileCounts: { unassigned: 1 },
-      details: { rating: 84, ratings: [84], nodes: 3 },
+      details: {
+        rating: 84,
+        ratings: [84],
+        recipeAttempts: 1,
+        recipeTransitions: 3,
+        ratingLevels: 1,
+        ratingRange: { min: 84, max: 84 },
+      },
     }));
 
     const result = await selectRatingCandidateEntries({
@@ -72,7 +79,12 @@ describe('rating candidate integration planning', () => {
       }],
       model: { requiredPlayerCount: 1 },
       piles: ['unassigned'],
-      searchOptions: { maxSearchMs: 1000 },
+      requiredItems: [{ id: 10 }],
+      preferredItems: [{ id: 10 }],
+      protectedItems: [{ id: 99 }],
+      exclusiveRoles: [{ id: 'required-special', constraintIndex: 0, minCount: 1, maxCount: 1 }],
+      maxOrdinaryRating: 95,
+      protectionPolicy: { reserveRatings: [87, 88, 89] },
       createSnapshot: (candidate, pile) => ({ ...candidate, pile, ref: { id: candidate.id, definitionId: candidate.definitionId } }),
       selectPlayers,
       control: { shouldStop: () => false },
@@ -81,16 +93,25 @@ describe('rating candidate integration planning', () => {
     expect(result).toMatchObject({
       ok: true,
       selected: [liveItem],
+      resolvedSignals: { unassigned: 1 },
       rating: 84,
       ratings: [84],
       pileCounts: { unassigned: 1 },
-      nodes: 3,
+      recipeAttempts: 1,
+      recipeTransitions: 3,
+      ratingLevels: 1,
+      ratingRange: { min: 84, max: 84 },
     });
     expect(result.entries[0]).toMatchObject({ item: liveItem, signal: liveSignal });
     expect(selectPlayers).toHaveBeenCalledWith(expect.objectContaining({
       mode: 'rating',
       priorityPiles: ['unassigned'],
-      searchOptions: { maxSearchMs: 1000 },
+      requiredItems: [{ id: 10 }],
+      preferredItems: [{ id: 10 }],
+      protectedItems: [{ id: 99 }],
+      exclusiveRoles: [{ id: 'required-special', constraintIndex: 0, minCount: 1, maxCount: 1 }],
+      maxOrdinaryRating: 95,
+      protectionPolicy: { reserveRatings: [87, 88, 89] },
     }));
   });
 
@@ -111,14 +132,18 @@ describe('rating candidate integration planning', () => {
         ok: true,
         entries: [{ itemRef: { id: 999 }, signalRef: null }],
         pileCounts: {},
-        details: { nodes: 5 },
+        details: { recipeAttempts: 2, recipeTransitions: 5, ratingLevels: 1 },
       }),
     });
 
     expect(result).toEqual({
       ok: false,
       reason: 'rating selection item became stale during plan resolution',
-      nodes: 5,
+      recipeAttempts: 2,
+      recipeTransitions: 5,
+      ratingLevels: 1,
+      ratingRange: null,
+      recipeCacheHit: false,
     });
   });
 });

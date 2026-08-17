@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  hasPlayerCosmetics,
+  hasPlayerUpgrades,
+  isPlayerEvolutionCard,
   isRarePlayerCard,
+  isSamePlayerCardVersion,
   isSpecialPlayerCard,
   normalPlayerRarity,
   readPlayerRareFlag,
@@ -25,5 +29,21 @@ describe('canonical player rarity', () => {
       .toEqual([true, false, 'rare']);
     expect([isRarePlayerCard(special), isSpecialPlayerCard(special), normalPlayerRarity(special)])
       .toEqual([true, true, 'special']);
+  });
+
+  it('distinguishes base, Evolution, and cosmetic versions of the same card', () => {
+    const base = { definitionId: 501, rating: 97, rareflag: 16 };
+    const exactBase = { ...base, id: 2 };
+    const evolution = { ...base, id: 3, upgrades: { attributeBoosts: [1] } };
+    const nestedEvolution = { ...base, id: 4, _data: { evolutionId: 12 } };
+    const cosmetic = { ...base, id: 5, cosmetics: [{ id: 7 }] };
+
+    expect(isSamePlayerCardVersion(base, exactBase)).toBe(true);
+    expect(isPlayerEvolutionCard(evolution)).toBe(true);
+    expect(isPlayerEvolutionCard(nestedEvolution)).toBe(true);
+    expect(hasPlayerUpgrades(evolution)).toBe(true);
+    expect(hasPlayerCosmetics(cosmetic)).toBe(true);
+    expect(isSamePlayerCardVersion(base, evolution)).toBe(false);
+    expect(isSamePlayerCardVersion(base, cosmetic)).toBe(false);
   });
 });

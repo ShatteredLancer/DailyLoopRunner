@@ -1,3 +1,5 @@
+import { isSamePlayerCardVersion } from '../../domain/player-rarity.js';
+
 export function createEaPlayerPickAdapter(runtime) {
   const service = runtime?.services?.Item;
   if (!service) throw new Error('EA Item service is unavailable');
@@ -77,7 +79,7 @@ export function createEaPlayerPickAdapter(runtime) {
     const itemId = Number(item?.id || 0);
     return uniqueOwnedItems().some((ownedItem) =>
       Number(ownedItem?.id || 0) !== itemId &&
-      Number(ownedItem?.definitionId || 0) === Number(item?.definitionId || -1) &&
+      isSamePlayerCardVersion(ownedItem, item) &&
       sameLimitedUseType(ownedItem, item)
     );
   }

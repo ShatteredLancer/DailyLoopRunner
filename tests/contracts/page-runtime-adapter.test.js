@@ -102,15 +102,22 @@ describe('Browser page runtime adapter', () => {
     const direct = readyRuntime({ gotoUnassigned: () => calls.push('direct') });
     direct.location = { origin: 'https://example.test' };
     const directAdapter = createPageRuntimeAdapter(direct, { query: () => null });
-    expect(directAdapter.gotoUnassigned()).toBe(true);
+    expect(directAdapter.gotoUnassigned()).toEqual({ requested: true, via: 'controller' });
     expect(directAdapter.origin()).toBe('https://example.test');
 
     const fallbackController = {};
     const fallback = readyRuntime(fallbackController);
     fallback.UTStoreViewController = { prototype: { gotoUnassigned() { calls.push(this === fallbackController ? 'fallback' : 'wrong'); } } };
     const fallbackAdapter = createPageRuntimeAdapter(fallback, { query: () => null });
-    expect(fallbackAdapter.gotoUnassigned()).toBe(true);
+    expect(fallbackAdapter.gotoUnassigned()).toEqual({ requested: true, via: 'store-prototype' });
     expect(calls).toEqual(['direct', 'fallback']);
+
+    const unavailableAdapter = createPageRuntimeAdapter(readyRuntime({}), { query: () => null });
+    expect(unavailableAdapter.gotoUnassigned()).toEqual({
+      requested: false,
+      via: null,
+      reason: 'gotoUnassigned is unavailable',
+    });
   });
 
   it('pops the current navigation controller through the runtime boundary', () => {

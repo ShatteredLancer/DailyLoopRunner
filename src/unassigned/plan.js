@@ -1,3 +1,5 @@
+import { isSamePlayerCardVersion } from '../domain/player-rarity.js';
+
 function itemRef(item) {
   return item?.ref || { id: Number(item?.id || 0), definitionId: Number(item?.definitionId || 0), pile: 'unassigned' };
 }
@@ -5,12 +7,14 @@ function itemRef(item) {
 function findClubDuplicate(item, clubItems) {
   if (item.duplicateId) {
     const direct = clubItems.find((candidate) => candidate.id === item.duplicateId);
-    if (direct) return direct;
+    if (direct && isSamePlayerCardVersion(item, direct)) return direct;
   }
-  return clubItems.find((candidate) => candidate.definitionId === item.definitionId && candidate.id !== item.id) || null;
+  return clubItems.find((candidate) => (
+    candidate.id !== item.id && isSamePlayerCardVersion(item, candidate)
+  )) || null;
 }
 
-function action(type, destination, items, description) {
+function action(type, destination, items, description, requiresExactClubDuplicate = false) {
   return {
     status: 'action',
     action: {
@@ -18,6 +22,7 @@ function action(type, destination, items, description) {
       destination,
       itemRefs: items.map(itemRef),
       description,
+      requiresExactClubDuplicate,
     },
   };
 }
@@ -50,7 +55,7 @@ export function planUnassignedActions(snapshot, options = {}) {
   }
 
   const nonDuplicates = items.filter((item) => !item.duplicate);
-  if (nonDuplicates.length) return action('move', 'club', nonDuplicates, 'non-duplicate');
+  if (nonDuplicates.length) return action('move', 'club', nonDuplicates, 'non-duplicate', false);
 
   const tradeableDuplicates = items.filter((item) => item.duplicate && item.tradeable);
   if (tradeableDuplicates.length) {
@@ -58,7 +63,7 @@ export function planUnassignedActions(snapshot, options = {}) {
     if (free !== null && tradeableDuplicates.length > free) {
       return blocked('transfer', tradeableDuplicates, free, 'tradeable duplicate');
     }
-    return action('move', 'transfer', tradeableDuplicates, 'tradeable duplicate');
+    return action('move', 'transfer', tradeableDuplicates, 'tradeable duplicate', true);
   }
 
   const untradeableDuplicates = items.filter((item) => item.duplicate && !item.tradeable);
@@ -68,7 +73,7 @@ export function planUnassignedActions(snapshot, options = {}) {
     if (free !== null && swappable.length > free) {
       return blocked('transfer', swappable, free, 'swappable duplicate');
     }
-    return action('swap', 'club', swappable, 'swappable duplicate');
+    return action('swap', 'club', swappable, 'swappable duplicate', true);
   }
 
   if (untradeableDuplicates.length) {
@@ -76,7 +81,7 @@ export function planUnassignedActions(snapshot, options = {}) {
     if (free !== null && untradeableDuplicates.length > free) {
       return blocked('storage', untradeableDuplicates, free, 'untradeable duplicate');
     }
-    return action('move', 'storage', untradeableDuplicates, 'untradeable duplicate');
+    return action('move', 'storage', untradeableDuplicates, 'untradeable duplicate', true);
   }
 
   return {

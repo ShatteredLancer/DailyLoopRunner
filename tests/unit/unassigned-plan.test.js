@@ -27,8 +27,31 @@ function snapshot({ unassigned = [], club = [], storageFree = 100, transferFree 
 describe('planUnassignedActions', () => {
   it('prioritizes non-duplicates to club', () => {
     const plan = planUnassignedActions(snapshot({ unassigned: [item(1), item(2, { duplicate: true, tradeable: true })] }));
-    expect(plan).toMatchObject({ status: 'action', action: { type: 'move', destination: 'club', description: 'non-duplicate' } });
+    expect(plan).toMatchObject({
+      status: 'action',
+      action: {
+        type: 'move',
+        destination: 'club',
+        description: 'non-duplicate',
+        requiresExactClubDuplicate: false,
+      },
+    });
     expect(plan.action.itemRefs.map((ref) => ref.id)).toEqual([1]);
+  });
+
+  it('marks genuine duplicate routing for exact Club-version validation', () => {
+    const duplicate = item(1, { definitionId: 501, duplicate: true, duplicateId: 2 });
+    const club = item(2, { definitionId: 501, pile: 'club' });
+    const plan = planUnassignedActions(snapshot({ unassigned: [duplicate], club: [club] }));
+
+    expect(plan).toMatchObject({
+      status: 'action',
+      action: {
+        destination: 'storage',
+        description: 'untradeable duplicate',
+        requiresExactClubDuplicate: true,
+      },
+    });
   });
 
   it('routes tradeable duplicates to transfer and blocks on capacity', () => {

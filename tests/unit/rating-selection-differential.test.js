@@ -14,8 +14,7 @@ function entry(id, rating, options = {}) {
 
 async function expectSelection(entries, model, expected, piles = ['storage', 'club']) {
   const { api } = await loadUserscript();
-  const options = { maxSearchNodes: 500000, maxSearchMs: 15000, yieldEveryNodes: 500 };
-  const current = await api.findOptimalRatingSbcSelection(entries, model, piles, options);
+  const current = await api.findOptimalRatingSbcSelection(entries, model, piles);
   expect(current.ok).toBe(expected.ok);
   expect(current.reason || null).toBe(expected.reason || null);
   if (!expected.ok) return;

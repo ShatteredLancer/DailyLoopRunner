@@ -1,3 +1,5 @@
+import { isSamePlayerCardVersion } from '../domain/player-rarity.js';
+
 export function buildRatingCandidateEntries(options = {}) {
   const {
     model,
@@ -42,9 +44,11 @@ export function buildRatingCandidateEntries(options = {}) {
 
   function resolveSignal(sourceItem) {
     const duplicateId = Number(sourceItem?.duplicateId || 0);
-    if (duplicateId && submissionById.has(duplicateId)) return submissionById.get(duplicateId);
+    const direct = duplicateId ? submissionById.get(duplicateId) : null;
+    if (direct && isSamePlayerCardVersion(sourceItem, direct)) return direct;
     const definitionId = Number(sourceItem?.definitionId || 0);
-    return submissionByDefinition.get(definitionId)?.[0] || null;
+    return (submissionByDefinition.get(definitionId) || [])
+      .find((item) => isSamePlayerCardVersion(sourceItem, item)) || null;
   }
 
   const requirementCache = new Map();
@@ -106,10 +110,15 @@ export async function selectRatingCandidateEntries(options = {}) {
     candidateEntries = [],
     model,
     piles = [],
-    searchOptions = {},
     createSnapshot,
     selectPlayers,
     control,
+    requiredItems,
+    preferredItems,
+    protectedItems,
+    exclusiveRoles,
+    maxOrdinaryRating,
+    protectionPolicy,
   } = options;
   const liveById = new Map();
   const snapshotEntries = candidateEntries.map((entry) => {
@@ -124,6 +133,9 @@ export async function selectRatingCandidateEntries(options = {}) {
       pileRank: entry.pileRank,
       requirementMatches: [...entry.requirementMatches],
       special: entry.special === true,
+      ...(entry.roleMatches ? {
+        roleMatches: Array.isArray(entry.roleMatches) ? [...entry.roleMatches] : { ...entry.roleMatches },
+      } : {}),
     };
   });
   const plan = await selectPlayers({
@@ -131,15 +143,29 @@ export async function selectRatingCandidateEntries(options = {}) {
     candidateEntries: snapshotEntries,
     ratingModel: model,
     priorityPiles: piles,
-    searchOptions,
     control,
+    requiredItems,
+    preferredItems,
+    protectedItems,
+    exclusiveRoles,
+    maxOrdinaryRating,
+    protectionPolicy,
   });
   if (!plan.ok) {
-    return {
+    const result = {
       ok: false,
       reason: plan.details.reason || plan.missing?.reason || 'rating selection failed',
-      nodes: Number(plan.details.nodes || 0),
+      recipeAttempts: Number(plan.details.recipeAttempts || 0),
+      recipeTransitions: Number(plan.details.recipeTransitions || 0),
+      ratingLevels: Number(plan.details.ratingLevels || 0),
+      ratingRange: plan.details.ratingRange || null,
+      recipeCacheHit: plan.details.recipeCacheHit === true,
+      missing: plan.missing || null,
+      details: plan.details || {},
     };
+    if (plan.details.reasonCode) result.reasonCode = plan.details.reasonCode;
+    if (plan.diagnostics?.length) result.diagnostics = [...plan.diagnostics];
+    return result;
   }
 
   const entries = plan.entries.map((entry) => ({
@@ -154,17 +180,32 @@ export async function selectRatingCandidateEntries(options = {}) {
     return {
       ok: false,
       reason: 'rating selection item became stale during plan resolution',
-      nodes: Number(plan.details.nodes || 0),
+      recipeAttempts: Number(plan.details.recipeAttempts || 0),
+      recipeTransitions: Number(plan.details.recipeTransitions || 0),
+      ratingLevels: Number(plan.details.ratingLevels || 0),
+      ratingRange: plan.details.ratingRange || null,
+      recipeCacheHit: plan.details.recipeCacheHit === true,
     };
   }
   return {
     ok: true,
     entries,
     selected: entries.map((entry) => entry.item),
+    resolvedSignals: entries.reduce((counts, entry) => {
+      const pileName = String(entry?.pileName || '');
+      if (entry?.signal && ['unassigned', 'transfer'].includes(pileName)) {
+        counts[pileName] = (counts[pileName] || 0) + 1;
+      }
+      return counts;
+    }, {}),
     rating: Number(plan.details.rating || 0),
     ratings: [...(plan.details.ratings || [])],
     pileCounts: { ...plan.pileCounts },
-    nodes: Number(plan.details.nodes || 0),
+    recipeAttempts: Number(plan.details.recipeAttempts || 0),
+    recipeTransitions: Number(plan.details.recipeTransitions || 0),
+    ratingLevels: Number(plan.details.ratingLevels || 0),
+    ratingRange: plan.details.ratingRange || null,
+    recipeCacheHit: plan.details.recipeCacheHit === true,
     plan,
   };
 }

@@ -54,6 +54,54 @@ describe('resolveUnassigned', () => {
     expect(onActionProgressRetry).toHaveBeenCalledTimes(2);
   });
 
+  it('replans when a duplicate action becomes stale before execution', async () => {
+    let item = duplicate(1);
+    const actions = [];
+    const onActionReplan = vi.fn(async () => {
+      item = createItemSnapshot({
+        ...item,
+        duplicate: false,
+        duplicateId: 0,
+      }, 'unassigned');
+    });
+    const result = await resolveUnassigned({
+      getSnapshot: async () => stateSnapshot(item ? [item] : [], 100),
+      executeAction: async (action) => {
+        actions.push(action.destination);
+        if (action.requiresExactClubDuplicate) {
+          return { status: 'replan', reason: 'matching Club card was submitted' };
+        }
+        item = null;
+        return { status: 'executed' };
+      },
+      onActionReplan,
+      maxReplans: 2,
+    });
+
+    expect(result.status).toBe('resolved');
+    expect(actions).toEqual(['storage', 'club']);
+    expect(onActionReplan).toHaveBeenCalledOnce();
+  });
+
+  it('bounds replanning when stale duplicate metadata never settles', async () => {
+    const item = duplicate(1);
+    const executeAction = vi.fn(async () => ({
+      status: 'replan',
+      reason: 'matching Club card is still missing',
+    }));
+    const result = await resolveUnassigned({
+      getSnapshot: async () => stateSnapshot([item], 100),
+      executeAction,
+      maxReplans: 2,
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reason: 'Unassigned action exceeded 2 replans: matching Club card is still missing',
+    });
+    expect(executeAction).toHaveBeenCalledTimes(3);
+  });
+
   it('reports final action no-progress diagnostics without changing the blocked result', async () => {
     const items = [duplicate(1)];
     const onActionNoProgress = vi.fn(async () => {});

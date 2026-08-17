@@ -210,6 +210,16 @@ function discoveryIdentity(set, reward) {
   });
 }
 
+function playerPickMinimumRating(set = {}, reward = {}) {
+  const text = [set.name, reward.name, reward.displayName, reward.description]
+    .map(normalizedText)
+    .filter(Boolean)
+    .join(' ');
+  const match = /\b(\d{2})\+/.exec(text);
+  const rating = positiveInteger(match?.[1]);
+  return rating && rating <= 99 ? rating : null;
+}
+
 export function parsePlayerPickSbcSnapshot(input = {}) {
   const set = input.set || {};
   const setId = positiveInteger(set.id);
@@ -232,6 +242,7 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
   const rewardCounts = readPlayerPickRewardCounts(reward);
   const candidateCount = rewardCounts.candidateCount;
   const selectionCount = rewardCounts.selectionCount;
+  const rewardMinRating = playerPickMinimumRating(set, reward);
   if (!candidateCount) diagnostics.push('Player Pick candidate count is missing or invalid');
   if (!selectionCount) diagnostics.push('Player Pick selection count is missing or invalid');
   if (candidateCount && selectionCount && selectionCount > candidateCount) {
@@ -276,6 +287,7 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
       identity,
       pickCandidateCount: candidateCount,
       pickCount: selectionCount,
+      dynamicRewardMinRating: rewardMinRating,
       diagnostics: unique(diagnostics),
     };
   }
@@ -296,6 +308,7 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     challengesPerPick: challenges.length,
     pickCandidateCount: candidateCount,
     pickCount: selectionCount,
+    dynamicRewardMinRating: rewardMinRating,
     remainingCompletions: setRemaining,
     maxCompletions: 1,
     useRoundsAsCompletions: !reportedCompleted && !boundedSet,
@@ -328,6 +341,7 @@ export function parsePlayerPickSbcSnapshot(input = {}) {
     loop,
     pickCandidateCount: candidateCount,
     pickCount: selectionCount,
+    dynamicRewardMinRating: rewardMinRating,
     reportedCompleted,
     remainingCompletions: setRemaining,
     diagnostics: unique(challengeWarnings),
@@ -413,6 +427,7 @@ export function mergeScannedPlayerPickMetadata(configuredLoop, discoveredLoop) {
     challengesPerPick: discoveredLoop.challengesPerPick,
     pickCandidateCount: discoveredLoop.pickCandidateCount,
     pickCount: discoveredLoop.pickCount,
+    dynamicRewardMinRating: discoveredLoop.dynamicRewardMinRating,
     remainingCompletions: discoveredLoop.remainingCompletions,
     pricePlatform: discoveredLoop.pricePlatform || configuredLoop.pricePlatform,
     discoveryIdentity: discoveredLoop.discoveryIdentity,

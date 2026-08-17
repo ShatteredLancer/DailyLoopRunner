@@ -195,6 +195,29 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
     { path: 'submitReadyRepairMaxAttempts', label: 'Submit-ready repair attempts', type: 'integer' },
     { path: 'maxCompletions', label: 'Maximum completions', type: 'integer' },
   ]),
+  rollingUpgrade: descriptor('rollingUpgrade', 'Rolling Upgrade (staged)', [
+    { path: 'sbcNames', label: 'Scanned primary SBC aliases', type: 'string-list', required: true },
+    { path: 'sbcSetIds', label: 'Scanned primary SBC Set IDs', type: 'number-list' },
+    { path: 'rewardPackIds', label: 'Scanned primary reward pack IDs', type: 'number-list' },
+    { path: 'rewardPackNames', label: 'Scanned primary reward pack aliases', type: 'string-list' },
+    { path: 'dynamicSbcFamily', label: 'Scanned primary family', type: 'text' },
+    { path: 'dynamicRewardCount', label: 'Scanned reward count', type: 'integer' },
+    { path: 'dynamicRewardMinRating', label: 'Scanned reward minimum rating', type: 'rating' },
+    { path: 'dynamicChallenges', label: 'Scanned Challenges', type: 'dynamic-challenges' },
+    { path: 'ratingSbcFill', label: 'Rating solver', type: 'rating-fill' },
+    { path: 'requiredSpecialCount', label: 'Required Special slots', type: 'integer' },
+    { path: 'allowedSpecialCount', label: 'Allowed Special slots', type: 'integer' },
+    { path: 'rollingTotwUpgrade', label: 'Required Special recovery capability', type: 'upgrade' },
+    { path: 'rollingProvisionsUpgrade', label: 'Provisions capability', type: 'upgrade' },
+    { path: 'rollingPlayerPick', label: 'Rare Gold Pick capability', type: 'text' },
+    { path: 'rollingStorageSinkPick', label: 'Storage pressure Pick capability', type: 'text' },
+    { path: 'rollingGoldSinkUpgrade', label: 'Gold sink capability', type: 'upgrade' },
+    { path: 'rollingWorkflowEnabled', label: 'Workflow enabled', type: 'boolean-inherit' },
+    { path: 'defaultOpenRewardPacksOnSelect', label: 'Default reward opening on selection', type: 'boolean-inherit' },
+    { path: 'maxCompletions', label: 'Maximum primary completions', type: 'integer' },
+    { path: 'useRoundsAsCompletions', label: 'Use runtime quantity', type: 'boolean-inherit' },
+    { path: 'openRewardPacks', label: 'Open reward packs', type: 'boolean-inherit' },
+  ], { builderHidden: true }),
   inventoryExhaustion: descriptor('inventoryExhaustion', 'Inventory exhaustion', [
     { path: 'stages', label: 'Upgrade stages', type: 'stage-list', required: true },
     { path: 'openRewardPacksAtEnd', label: 'Open rewards at end', type: 'boolean-inherit' },
@@ -206,6 +229,7 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
 export const BUILDER_STRATEGY_OPTIONS = Object.freeze(LOOP_STRATEGIES.map((strategy) => ({
   value: strategy,
   label: BUILDER_STRATEGY_DESCRIPTORS[strategy]?.label || strategy,
+  hidden: BUILDER_STRATEGY_DESCRIPTORS[strategy]?.builderHidden === true,
 })));
 
 export function getBuilderStrategyDescriptor(strategy) {

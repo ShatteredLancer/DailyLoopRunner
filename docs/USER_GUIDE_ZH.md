@@ -139,6 +139,14 @@ Built-in 默认依次运行 Daily Bronze、Silver、Common、Rare，并按 EA �
 
 按阶段耗尽 Bronze、Silver 和 Common Gold 库存。每个阶段只运行当前动态绑定且条件完整的 Upgrade。
 
+### 10x85+ Rolling Loop
+
+动态扫描确认当前 `10x 85+ Upgrade` 的主阵、10 张 85+ 奖励和单一 Required Special 条件后，会生成独立的 `10x 85+ Upgrade Rolling Loop`。它每轮只开一包主奖励，将安全的重复卡回填下一套主 SBC，并在缺 Required Special、普通材料或 Storage 空间时调用对应恢复流程。
+
+`SBC completions = 0` 表示不限轮数；该 Loop 必须启用 `Open reward packs`。普通评分 SBC 的单卡上限不适用于 Rolling，自动使用范围由 Selection Policy 中的 `Automatic-use max rating` 控制。主动 Provisions/TOTW 余量制作和 95+ Storage pressure Pick 均默认关闭。
+
+完整开包矩阵、材料路由、恢复优先级、流程图和 Stop/Resume 行为见 [10x85+ Rolling Loop 使用与流程指南](10X85_ROLLING_LOOP_GUIDE_ZH.md)。实现边界和验收记录见 [设计与实施追踪](10X85_ROLLING_LOOP_IMPLEMENTATION_ZH.md)。
+
 ### Dynamic Pick/Upgrade
 
 有限次数按 EA remaining 运行；不限次流程使用用户输入数量。多 Challenge Upgrade 只有完成最后一个 Challenge 并观察到真实 Set reward 后才计为一轮。

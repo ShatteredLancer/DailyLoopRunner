@@ -3,6 +3,68 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-08-17
+
+### Added
+
+- Dynamic `10x 85+ Upgrade Rolling Loop` discovery with live Challenge
+  requirements, inventory bootstrap, one-pack-at-a-time processing, and
+  configurable completion limits.
+- Inventory Ledger, confirmed mutation deltas, low-cost runtime resource
+  telemetry, and bounded Rolling Recap retention for long-running sessions.
+- Role-aware exact-rating squad planning that reserves exactly one live
+  Required Special and scales to large Club inventories without enumerating
+  card combinations.
+- Recovery workflows for existing or crafted TOTW rewards, bounded Provisions
+  batches, immediate 85+ Pick and 5x80+ duplicate drains, and an optional
+  sequential 89/88 95+ Storage-pressure Pick.
+- Rolling Selection Policy controls for the automatic-use rating, Provisions
+  reserve, shortage pack batch size, proactive surplus crafting, reward timing,
+  and the optional Storage sink.
+- A user-facing Rolling Loop guide with workflow and material-circulation
+  diagrams, pack-opening rules, recovery behavior, and Stop/Resume guidance.
+
+### Changed
+
+- Dynamic SBC scanning uses incremental multi-pass recovery and only exposes
+  Rolling when the current 10x85+ reward and single Required Special contract
+  are fully supported.
+- Rating planning now builds deterministic recipes from rating histograms and
+  reuses bounded cache entries instead of searching card-instance combinations.
+- Provisions made for Storage pressure remain unopened; historical Provisions
+  are opened only after a real fodder shortage, in configurable batches that
+  replan before continuing.
+- Main-pack duplicates at or below the automatic-use threshold now feed the
+  next primary squad first. Cards released to normalize the target rating are
+  routed to Storage after submission.
+- Player Pick tie handling automatically resolves safe equal-rating choices and
+  only requests review when protected top choices exceed the available slots.
+
+### Fixed
+
+- Reconciled successful pack opens whose transport wrapper reports `471` or
+  `500`, while retaining fail-closed checks for missing or ambiguous item
+  materialization.
+- Prevented stale Store catalog entries from being reopened as My Packs
+  rewards and made retry decisions depend on repository and inventory evidence.
+- Kept same-definition cards with different ratings, rarity flags, or Evolution
+  versions from being misclassified as duplicate cleanup targets.
+- Resumed pending Unassigned cards and partially completed 95+ Storage Picks
+  before opening another primary reward.
+- Prevented Storage-pressure recovery from repeatedly crafting Provisions that
+  do not consume enough Storage cards to release the required slots.
+
+### Safety Boundaries
+
+- Club TOTS, FOF, FUTTIES, protected high-rated cards, FSU-locked cards, and
+  uncertain item identities remain unavailable to automatic Rolling recovery.
+- Club contributes only TOTW to the primary Required Special role; each primary
+  squad is validated to contain exactly one matching special card.
+- `Craft surplus Provisions/TOTW` and `Use 95+ Storage pressure Pick` remain
+  opt-in. Disabling them does not disable recovery required by a real shortage.
+- A Stop request waits for the current committed pack, submission, routing, and
+  ledger reconciliation boundary before ending the session.
+
 ## [0.7.91] - 2026-08-12
 
 ### Added

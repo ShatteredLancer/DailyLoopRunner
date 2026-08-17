@@ -1,0 +1,80 @@
+{
+  "set": {
+    "id": 1085,
+    "name": "10x 85+ Upgrade",
+    "inUpgradesCategory": true,
+    "timesCompleted": 0,
+    "repeats": null,
+    "rewards": [
+      {
+        "type": "PACK",
+        "packId": 31085,
+        "name": "10x 85+ Rare Gold Players Pack"
+      }
+    ],
+    "challenges": [
+      {
+        "id": 2085,
+        "requiredPlayerCount": 11,
+        "eligibilityRequirements": [
+          {
+            "key": "TEAM_RATING",
+            "values": [84],
+            "count": -1
+          },
+          {
+            "key": "PLAYER_RARITY_GROUP",
+            "values": [83],
+            "count": 1
+          }
+        ]
+      }
+    ]
+  },
+  "currentPolicy": {
+    "dynamicSbcFamily": "high-rated-x10",
+    "rewardCount": 10,
+    "rewardMinRating": 85,
+    "targetRating": 84,
+    "requiredPlayerCount": 11,
+    "requiredSpecialCount": 1,
+    "maxCompletions": 50,
+    "runtimeQuantity": {
+      "mode": "user",
+      "target": "maxCompletions",
+      "default": 3,
+      "min": 1,
+      "max": 50,
+      "label": "SBC completions"
+    },
+    "openRewardPacks": false,
+    "priorityPiles": ["unassigned", "storage", "transfer", "club"],
+    "totwRecoveryFamily": "totw-upgrade",
+    "fodderRecoveryFamily": "rare-gold-material-upgrade"
+  },
+  "runtimeOptions": {
+    "autoPickThreshold": 95,
+    "ratingSbcMaxCardRating": 88
+  },
+  "ratingSelection": {
+    "requiredPlayerCount": 11,
+    "targetRating": 84,
+    "requiredSpecialCount": 1,
+    "expectedSelectedIds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    "expectedPileCounts": {
+      "unassigned": 1,
+      "storage": 10
+    }
+  },
+  "unassigned": {
+    "storageUsed": 100,
+    "storageCapacity": 100,
+    "expectedStatus": "blocked",
+    "expectedReason": "storage capacity 0/1"
+  },
+  "recap": {
+    "packCount": 12,
+    "playersPerPack": 10,
+    "expectedRows": 120
+  }
+}

@@ -1,3 +1,5 @@
+import { renderRuntimeTelemetry } from './runtime-telemetry.js';
+
 function query(panel, selector) {
   return panel?.querySelector?.(selector) || null;
 }
@@ -35,11 +37,11 @@ export function renderMainPanelRounds(options = {}) {
   const input = query(panel, '#bronze-loop-rounds');
   if (label) label.textContent = quantity.label || 'Rounds';
   if (!input) return;
-  input.min = String(quantity.min || 1);
-  input.max = String(quantity.max || 50);
+  input.min = String(quantity.min ?? 1);
+  input.max = String(quantity.max ?? 50);
   const quantityKey = String(options.quantityKey || '');
   if (input.dataset?.quantityKey !== quantityKey) {
-    input.value = String(quantity.default || 1);
+    input.value = String(quantity.default ?? 1);
     if (input.dataset) input.dataset.quantityKey = quantityKey;
   }
 }
@@ -92,6 +94,26 @@ export function renderRewardAlertSummary(options = {}) {
   summary.textContent = `${Number(settings.minimumRating || 94)}+ special${channels.length ? ` | ${channels.join(' | ')}` : ''}`;
 }
 
+export function renderSelectionPolicySummary(options = {}) {
+  const summary = query(options.panel, '#bronze-loop-selection-policy-summary');
+  if (!summary) return;
+  const pickOptions = options.pickOptions || {};
+  const sbcFodderOptions = options.sbcFodderOptions || {};
+  const lowRatedGold = Number(sbcFodderOptions.lowRatedGoldMaxRating || 82) || 82;
+  const standardRating = Number(sbcFodderOptions.ratingSbcMaxCardRating || 88) || 88;
+  const automaticUse = Number(pickOptions.protectionRating || pickOptions.autoPickThreshold || 90) || 90;
+  const pickMode = pickOptions.autoSelectBelow90 === false ? 'Review' : 'Auto';
+  const storageSink = pickOptions.rollingStorageSinkEnabled === true ? 'enabled' : 'disabled';
+  const surplusCrafting = pickOptions.rollingSurplusCraftingEnabled === true ? 'enabled' : 'shortage only';
+  const provisionsMaxRating = Number(pickOptions.rollingProvisionsMaxRating || 88) === 89 ? 89 : 88;
+  const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true
+    ? 'immediate'
+    : 'on shortage';
+  const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
+  summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickMode}`;
+  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; duplicate Provisions rewards ${duplicateProvisionsRewards}; 95+ Storage pressure Pick ${storageSink}`;
+}
+
 export function renderMainPanelScanProgress(options = {}) {
   const panel = options.panel;
   const state = options.state || {};
@@ -128,6 +150,11 @@ export function renderMainPanelRuntimeState(options = {}) {
   const panel = options.panel;
   const state = options.state || {};
   if (!panel) return;
+  renderSelectionPolicySummary({
+    panel,
+    pickOptions: state.pickOptions,
+    sbcFodderOptions: state.sbcFodderOptions,
+  });
   const wasRunning = panel.dataset?.running === 'true';
   panel.classList?.toggle?.('is-running', state.running === true);
   panel.classList?.toggle?.('is-stopping', state.running === true && state.stopping === true);
@@ -157,11 +184,7 @@ export function renderMainPanelRuntimeState(options = {}) {
     'bronze-loop-scan-picks': busy,
     'bronze-loop-open-rewards': state.running === true,
     'bronze-loop-daily-inventory-only': state.running === true,
-    'bronze-loop-pick-auto-below-90': state.running === true,
-    'bronze-loop-pick-open-at-end': state.running === true,
-    'bronze-loop-pick-auto-threshold': state.running === true,
-    'bronze-loop-low-rated-gold-max': state.running === true,
-    'bronze-loop-rating-sbc-max-card': state.running === true,
+    'bronze-loop-selection-policy-settings': state.running === true,
     'bronze-loop-reward-alert-settings': state.running === true,
     'bronze-loop-rounds': state.running === true,
   };
@@ -172,4 +195,10 @@ export function renderMainPanelRuntimeState(options = {}) {
   const scanButton = query(panel, '#bronze-loop-scan-picks');
   if (scanButton) scanButton.textContent = state.scanningPicks === true ? 'Scanning...' : 'Scan SBCs';
   renderMainPanelScanProgress({ panel, state });
+  renderRuntimeTelemetry({
+    panel,
+    snapshot: state.runtimeTelemetry,
+    running: state.running === true,
+    stopping: state.stopping === true,
+  });
 }

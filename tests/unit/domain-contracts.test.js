@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createInventoryDelta,
   createInventorySnapshot,
   createItemSnapshot,
   createOpenPackReceipt,
@@ -29,5 +30,29 @@ describe('domain contracts', () => {
       submission: { submitted: true, rewardPackId: 105 },
       receipt: { status: 'opened', attempts: 1 },
     });
+  });
+
+  it('normalizes immutable inventory deltas without turning unknown capacities into zero', () => {
+    const delta = createInventoryDelta({
+      status: 'confirmed',
+      operation: 'move',
+      additions: [{ pile: 'storage', item: { id: 5, definitionId: 50, rating: 87 } }],
+      removals: [{ id: 1, definitionId: 10, pile: 'club' }],
+      moves: [{ itemRef: { id: 2, definitionId: 20 }, fromPile: 'club', toPile: 'storage' }],
+      capacities: { storage: { used: 9 } },
+    });
+
+    expect(delta).toMatchObject({
+      status: 'confirmed',
+      operation: 'move',
+      additions: [{ pile: 'storage', item: { id: 5, pile: 'storage' } }],
+      removals: [{ id: 1, pile: 'club' }],
+      moves: [{ itemRef: { id: 2, pile: 'club' }, fromPile: 'club', toPile: 'storage' }],
+      capacities: { storage: { used: 9, max: null } },
+    });
+    expect(Object.isFrozen(delta.additions)).toBe(true);
+    expect(Object.isFrozen(delta.additions[0].item)).toBe(true);
+    expect(createInventorySnapshot({ capacities: { storage: { max: null } } }).capacities.storage)
+      .toEqual({ used: 0, max: null, free: null });
   });
 });

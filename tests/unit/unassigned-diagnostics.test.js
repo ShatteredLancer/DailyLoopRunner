@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   captureDefinitionPileState,
   captureMoveResult,
+  captureRuntimePack,
   captureRuntimeInventoryItem,
   createRuntimeObjectIdentityTracker,
   diagnosticJson,
@@ -52,9 +53,24 @@ describe('Unassigned runtime diagnostics', () => {
       privateDuplicateId: 764303611195,
       isDuplicate: true,
       isUntradeable: true,
+      evolution: false,
+      hasUpgrades: false,
+      hasCosmetics: false,
     });
     expect(second.objectRef).toBe(first.objectRef);
     expect(replacement.objectRef).toBe('test-item-2');
+  });
+
+  it('reports Evolution and cosmetic identity state used by duplicate matching', () => {
+    const evolved = player(1, 270673);
+    evolved.upgrades = { evolutionId: 12 };
+    evolved.cosmetics = [{ id: 7 }];
+
+    expect(captureRuntimeInventoryItem(evolved)).toMatchObject({
+      evolution: true,
+      hasUpgrades: true,
+      hasCosmetics: true,
+    });
   });
 
   it('reports every same-definition location without serializing unrelated inventory', () => {
@@ -104,5 +120,39 @@ describe('Unassigned runtime diagnostics', () => {
     });
     expect(diagnosticJson(result)).toContain('privatePayload');
     expect(diagnosticJson(result)).not.toContain('"ignored":true');
+  });
+
+  it('captures Pack instance identity and bounded scalar metadata', () => {
+    const identify = createRuntimeObjectIdentityTracker('test-pack');
+    const pack = {
+      id: 21346,
+      articleId: 9981,
+      name: 'Repeatable FUTTIES Provisions Players Pack',
+      count: 30,
+      nested: { ignored: true },
+      _data: { itemId: 7788, consumed: false, nested: { ignored: true } },
+    };
+
+    expect(captureRuntimePack(pack, { identify })).toMatchObject({
+      objectRef: 'test-pack-1',
+      scalars: {
+        articleId: 9981,
+        count: 30,
+        id: 21346,
+        name: 'Repeatable FUTTIES Provisions Players Pack',
+      },
+      dataScalars: { consumed: false, itemId: 7788 },
+    });
+    expect(captureRuntimePack(pack, { identify }).objectRef).toBe('test-pack-1');
+  });
+
+  it('captures the raw EA error reason alongside its code', () => {
+    expect(captureMoveResult({
+      success: false,
+      status: 409,
+      error: { code: 471, reason: 'pending-items' },
+    })).toMatchObject({
+      error: { code: 471, reason: 'pending-items' },
+    });
   });
 });

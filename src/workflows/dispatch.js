@@ -14,6 +14,7 @@ export const STRATEGY_RUNNER_KEYS = Object.freeze({
   workflowRoutine: 'workflowRoutine',
   fillAndVerifySbc: 'fillAndVerifySbc',
   inventoryExhaustion: 'inventoryExhaustion',
+  rollingUpgrade: 'rollingUpgrade',
 });
 
 const STANDARD_FINALIZATION_STRATEGIES = new Set([

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_PACK_OPEN_RETRY_CODES,
+  capturePackOpenResultEvidence,
   isAmbiguousPackOpenFailure,
   openPackTransaction,
   openedPackItems,
@@ -17,6 +18,7 @@ describe('openPackTransaction', () => {
     expect(packOpenFailureReason({ response: { error: { code: 512 } } })).toBe('512');
     expect(openedPackItems({ success: true, data: { items: [{ id: 1 }] } })).toEqual([{ id: 1 }]);
     expect(openedPackItems({ response: { success: true, data: { items: [{ id: 2 }] } } })).toEqual([{ id: 2 }]);
+    expect(openedPackItems({ items: [], response: { items: [{ id: 3 }] } })).toEqual([{ id: 3 }]);
     expect(isAmbiguousPackOpenFailure('empty-result')).toBe(true);
     expect(isAmbiguousPackOpenFailure('transport-timeout')).toBe(true);
     expect(isAmbiguousPackOpenFailure('500')).toBe(false);
@@ -26,6 +28,58 @@ describe('openPackTransaction', () => {
     expect(packTransportFailureResult(new Error('observable timed out'))).toMatchObject({
       error: { code: 'transport-timeout' },
     });
+  });
+
+  it('treats a nonempty direct reward payload as committed even when the EA DTO reports 500', async () => {
+    const item = { id: 701, definitionId: 1701, rating: 95, duplicateId: 0 };
+    const beforeRetry = vi.fn(async () => {});
+    const onCommittedTransportFailure = vi.fn(async () => {});
+    const openedItemPolicy = vi.fn(async (items) => ({ routedItemRefs: items }));
+    const response = {
+      success: false,
+      status: 500,
+      error: { code: 500 },
+      response: { items: [item] },
+    };
+
+    expect(capturePackOpenResultEvidence(response)).toMatchObject({
+      transportSucceeded: false,
+      status: 500,
+      errorCode: 500,
+      selectedSource: 'response.items',
+      selectedItemCount: 1,
+      itemArrays: [{ source: 'response.items', count: 1 }],
+      itemSample: [{ id: 701, definitionId: 1701, rating: 95, duplicateId: 0 }],
+    });
+
+    const receipt = await openPackTransaction({
+      packSelector: async () => ({ id: 1082, name: '10x 85+' }),
+      openTransport: async () => response,
+      retryPolicy: { attempts: 2, retryCodes: ['500'] },
+      beforeRetry,
+      onCommittedTransportFailure,
+      openedItemPolicy,
+    });
+
+    expect(receipt).toMatchObject({
+      status: 'opened',
+      attempts: 1,
+      openedItems: [item],
+      details: {
+        transportWarning: {
+          code: '500',
+          itemSource: 'response.items',
+          itemCount: 1,
+        },
+      },
+    });
+    expect(openedItemPolicy).toHaveBeenCalledWith([item], expect.objectContaining({ attempt: 1 }));
+    expect(onCommittedTransportFailure).toHaveBeenCalledWith(expect.objectContaining({
+      code: '500',
+      itemCount: 1,
+      itemSource: 'response.items',
+    }));
+    expect(beforeRetry).not.toHaveBeenCalled();
   });
 
   it('normalizes a thrown transport exception inside the transaction and retries once', async () => {
@@ -131,6 +185,26 @@ describe('openPackTransaction', () => {
     expect(calls).toEqual(['pre', 'select', 'open', 'normalize', 'policy']);
   });
 
+  it('publishes the final receipt before returning without letting observer failures change it', async () => {
+    const calls = [];
+    const receipt = await openPackTransaction({
+      packSelector: async () => ({ id: 105, name: 'Bronze' }),
+      openTransport: async () => ({ success: true, items: [{ id: 1 }] }),
+      openedItemPolicy: async () => ({ routedItemRefs: [{ id: 1, pile: 'club' }] }),
+      onReceipt: async (value, context) => {
+        calls.push(['receipt', value.status, context.phase]);
+        throw new Error('ledger unavailable');
+      },
+      onReceiptError: async (error, { receipt: value }) => calls.push(['error', error.message, value.status]),
+    });
+
+    expect(receipt).toMatchObject({ status: 'opened' });
+    expect(calls).toEqual([
+      ['receipt', 'opened', 'opened'],
+      ['error', 'ledger unavailable', 'opened'],
+    ]);
+  });
+
   it('keeps live normalized items for policy execution and serializable items in the receipt', async () => {
     const liveItem = { id: 7, definitionId: 700, mark() { this.marked = true; } };
     const receipt = await openPackTransaction({
@@ -189,6 +263,35 @@ describe('openPackTransaction', () => {
     });
     expect(receipt).toMatchObject({ status: 'blocked', reason: '471', attempts: 2 });
     expect(beforeRetry).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a precise reconciliation block when retry selection is intentionally refused', async () => {
+    const transport = vi.fn(async () => ({ success: false, error: { code: 500 } }));
+    const receipt = await openPackTransaction({
+      packSelector: async ({ attempt }) => attempt === 1 ? { id: 1082 } : null,
+      openTransport: transport,
+      retryPolicy: { attempts: 2, retryCodes: ['500'] },
+      beforeRetry: async () => {},
+      packUnavailableResult: async ({ attempt, lastReason }) => attempt === 2 ? {
+        status: 'blocked',
+        reason: 'PACK_OPEN_RESPONSE_LOST',
+        details: {
+          reasonCode: 'PACK_OPEN_RESPONSE_LOST',
+          retryEvidence: { packCountBefore: 2, packCountAfter: 1 },
+        },
+      } : null,
+    });
+
+    expect(receipt).toMatchObject({
+      status: 'blocked',
+      reason: 'PACK_OPEN_RESPONSE_LOST',
+      attempts: 1,
+      details: {
+        reasonCode: 'PACK_OPEN_RESPONSE_LOST',
+        retryEvidence: { packCountBefore: 2, packCountAfter: 1 },
+      },
+    });
+    expect(transport).toHaveBeenCalledOnce();
   });
 
   it('returns stale for an allowed 404', async () => {

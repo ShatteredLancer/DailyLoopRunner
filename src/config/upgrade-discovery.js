@@ -2,6 +2,7 @@ import { cloneLoopDef } from '../domain/objects.js';
 import { readEligibilityRequirements } from '../selection/rating-model.js';
 import { parseBasicUpgradeChallenge } from './activity-discovery.js';
 import { createDynamicUpgradePolicy } from './upgrade-policies.js';
+import { createRollingUpgradeLoopDef } from './rolling-upgrade.js';
 
 const SUPPORTED_PLAYER_KEYS = new Set([
   'PLAYER_QUALITY',
@@ -41,6 +42,9 @@ function remainingCompletions(set = {}) {
 
 export function detectDynamicUpgradeFamily(set = {}) {
   const text = `${normalizedText(set.name)} ${(set.rewards || []).map((reward) => `${reward.name || ''} ${reward.description || ''}`).join(' ')}`;
+  if (/\b(?:Repeatable\s+)?(?:FUTTIES\s+)?Provisions?\s+Upgrade\b/i.test(text)) {
+    return { id: 'provisions-upgrade', rewardCount: null, rewardMinRating: null };
+  }
   if (/\b84\+\s*TOTW\b.*\bUpgrade\b|\bTOTW\b.*\bUpgrade\b/i.test(text)) {
     return { id: 'totw-upgrade', rewardCount: 1, rewardMinRating: 84 };
   }
@@ -88,6 +92,58 @@ function parseTwoBy84Challenge(challenge) {
     requirements,
     targetRating: null,
     specialCount: 0,
+  };
+}
+
+function parseProvisionsChallenge(challenge) {
+  const requiredPlayerCount = positiveInteger(challenge?.requiredPlayerCount);
+  const diagnostics = [];
+  if (!requiredPlayerCount) diagnostics.push('required player count is missing or invalid');
+  const entries = readEligibilityRequirements(challenge, {
+    requiredPlayerCount: requiredPlayerCount || 0,
+    eligibilityKeyName: (key) => String(key || ''),
+  });
+  const minimumRatings = [];
+  for (const entry of entries) {
+    if (!entry.values.length || !entry.count) {
+      diagnostics.push(`incomplete eligibility condition ${requirementSummary(entry)}`);
+      continue;
+    }
+    if (entry.keyName === 'PLAYER_MIN_OVR') {
+      const ratings = entry.values.map(Number).filter(Number.isFinite);
+      if (ratings.length !== 1 || entry.count !== requiredPlayerCount) {
+        diagnostics.push(`ambiguous PLAYER_MIN_OVR condition ${requirementSummary(entry)}`);
+      } else {
+        minimumRatings.push(ratings[0]);
+      }
+      continue;
+    }
+    if (['PLAYER_QUALITY', 'PLAYER_LEVEL'].includes(entry.keyName)) {
+      const values = entry.values.map(Number).filter(Number.isFinite);
+      if (values.length !== 1 || values[0] !== 3 || entry.count !== requiredPlayerCount) {
+        diagnostics.push(`unsupported Gold quality condition ${requirementSummary(entry)}`);
+      }
+      continue;
+    }
+    diagnostics.push(`unsupported eligibility condition ${requirementSummary(entry)}`);
+  }
+  if (minimumRatings.length !== 1) diagnostics.push('exactly one PLAYER_MIN_OVR condition is required');
+  const minRating = minimumRatings[0] || null;
+  return {
+    ok: diagnostics.length === 0,
+    diagnostics: unique(diagnostics),
+    requiredPlayerCount,
+    requirements: requiredPlayerCount && minRating ? [{
+      tier: 'gold',
+      count: requiredPlayerCount,
+      minRating,
+      playerOnly: true,
+      allowSpecial: true,
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+    }] : [],
+    targetRating: null,
+    specialCount: 0,
+    eligibilityRequirements: entries.map(eligibilityRequirementSnapshot),
   };
 }
 
@@ -216,7 +272,9 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
     if (!positiveInteger(challenge?.id)) diagnostics.push(`challenge ${index + 1} has no stable id`);
     const parsed = family.id === '2x84-upgrade'
       ? parseTwoBy84Challenge(challenge)
-      : parseUpgradeChallenge(challenge, family);
+      : family.id === 'provisions-upgrade'
+        ? parseProvisionsChallenge(challenge)
+        : parseUpgradeChallenge(challenge, family);
     diagnostics.push(...(parsed.diagnostics || []).map((diagnostic) => (
       challenges.length > 1 ? `challenge ${index + 1} (#${challenge?.id || '?'}): ${diagnostic}` : diagnostic
     )));
@@ -288,7 +346,7 @@ export function parseDynamicUpgradeSbcSnapshot(input = {}) {
       eligibilityRequirements: clone(challenge.eligibilityRequirements || []),
     })),
   };
-  if (family.id === '2x84-upgrade') {
+  if (family.id === '2x84-upgrade' || family.id === 'provisions-upgrade') {
     const configuredRequirement = policy.requirements?.[0] || {};
     loop.requirements = (parsedChallenge.requirements || []).map((requirement) => ({
       ...clone(configuredRequirement),
@@ -383,6 +441,7 @@ export function mergeScannedUpgradeMetadata(configuredLoop, discoveredLoop) {
 export function buildUpgradeDiscoverySession(input = {}) {
   const configuredLoops = [...(input.configuredLoops || [])];
   const discoveredLoops = [];
+  const rollingLoops = [];
   const loopOverrides = {};
   const results = [];
   for (const set of input.sets || []) {
@@ -392,6 +451,10 @@ export function buildUpgradeDiscoverySession(input = {}) {
     if (parsed.status !== 'supported') {
       results.push(parsed);
       continue;
+    }
+    const rollingLoop = createRollingUpgradeLoopDef(parsed.loop);
+    if (rollingLoop && !rollingLoops.some((loop) => loop.id === rollingLoop.id)) {
+      rollingLoops.push(rollingLoop);
     }
     const matches = configuredLoops.filter((loop) => configuredUpgradeMatches(parsed, loop));
     if (matches.length) {
@@ -409,7 +472,7 @@ export function buildUpgradeDiscoverySession(input = {}) {
     discoveredLoops.push(parsed.loop);
     results.push(parsed);
   }
-  return { discoveredLoops, loopOverrides, results };
+  return { discoveredLoops, rollingLoops, loopOverrides, results };
 }
 
 export function collectScannedUpgradeLoopDefs(results = []) {
@@ -447,6 +510,7 @@ export function collectScannedUpgradeActivities(results = []) {
       requirements: (loop.requirements || []).map((requirement) => ({
         tier: requirement.tier,
         ...(requirement.rarity ? { rarity: requirement.rarity } : {}),
+        ...(Number.isFinite(Number(requirement.minRating)) ? { minRating: Number(requirement.minRating) } : {}),
         count: requirement.count,
       })),
     });

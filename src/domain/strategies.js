@@ -19,6 +19,7 @@ export const LOOP_STRATEGY_CAPABILITIES = Object.freeze({
   workflowRoutine: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.container }),
   fillAndVerifySbc: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.intrinsic }),
   inventoryExhaustion: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.intrinsic }),
+  rollingUpgrade: Object.freeze({ inventoryOnly: INVENTORY_ONLY_CAPABILITIES.intrinsic }),
 });
 
 export const LOOP_STRATEGIES = Object.freeze(Object.keys(LOOP_STRATEGY_CAPABILITIES));

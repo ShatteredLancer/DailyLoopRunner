@@ -71,9 +71,16 @@ function matchesDynamicRequirement(item, requirement, keyName, rawValues, matche
     }
   } catch { }
 
-  // Rarity groups are EA-maintained aggregate sets. Item group arrays do not
-  // reliably expose the aggregate id, so only the live EA matcher is valid.
-  if (keyName === 'PLAYER_RARITY_GROUP') return false;
+  // The current EA Challenge model does not expose meetsRequirements() on
+  // every DAO response. The runtime adapter supplies the same exact group
+  // membership check used by the EA/FSU item payload for this case.
+  if (keyName === 'PLAYER_RARITY_GROUP') {
+    try {
+      const result = matchers.matchesPlayerRarityGroup?.(item, rawValues);
+      if (typeof result === 'boolean') return result;
+    } catch { }
+    return false;
+  }
 
   const values = rawValues.map(Number).filter(Number.isFinite);
   const rating = Number(item?.rating || 0);
@@ -108,12 +115,21 @@ export function parseRatingSbcChallenge(input = {}) {
   const challenge = input.challenge || null;
   const requiredPlayerCount = Math.max(0, Number(input.requiredPlayerCount || 0) || 0);
   const eligibilityKeyName = input.eligibilityKeyName || ((key) => String(key || ''));
+  const runtimePlayerRarityGroupMatcher = typeof input.matchesPlayerRarityGroup === 'function'
+    ? input.matchesPlayerRarityGroup
+    : typeof input.itemGroupNumbers === 'function'
+      ? (item, values) => {
+          const groups = new Set(input.itemGroupNumbers(item) || []);
+          return (values || []).some((value) => groups.has(Number(value)));
+        }
+      : null;
   const matchers = {
     isBronze: input.isBronze || (() => false),
     isSilver: input.isSilver || (() => false),
     isGold: input.isGold || (() => false),
     isSpecialItem: input.isSpecialItem || (() => false),
     itemGroupNumbers: input.itemGroupNumbers || (() => []),
+    matchesPlayerRarityGroup: runtimePlayerRarityGroupMatcher,
     itemLeagueId: input.itemLeagueId || (() => 0),
   };
   const constraints = [];
@@ -139,7 +155,9 @@ export function parseRatingSbcChallenge(input = {}) {
       unsupported.push(`${keyName}(count:${requirement?.count ?? '?'}, values:${values.join('/') || '?'})`);
       continue;
     }
-    if (keyName === 'PLAYER_RARITY_GROUP' && typeof requirement?.meetsRequirements !== 'function') {
+    if (keyName === 'PLAYER_RARITY_GROUP'
+      && typeof requirement?.meetsRequirements !== 'function'
+      && typeof matchers.matchesPlayerRarityGroup !== 'function') {
       unsupported.push(`${keyName}(live EA matcher unavailable)`);
       continue;
     }
@@ -150,6 +168,11 @@ export function parseRatingSbcChallenge(input = {}) {
       keyName,
       values: [...values],
       count,
+      ...(keyName === 'PLAYER_RARITY_GROUP' ? {
+        matcherSource: typeof requirement?.meetsRequirements === 'function'
+          ? 'ea-requirement'
+          : 'runtime-item-groups',
+      } : {}),
       matches: (item) => matchesDynamicRequirement(item, requirement, keyName, values, matchers),
     });
   }
@@ -218,9 +241,37 @@ export function validateRatingSbcModelAgainstItems(model, items = [], challenge 
     return { constraint, matched, required };
   });
   const specialCount = players.filter(options.isSpecialItem || (() => false)).length;
-  if (specialCount > Number(model?.maxSpecialCount || 0)) {
-    errors.push(`special-count ${specialCount}/${Number(model?.maxSpecialCount || 0)}`);
+  const maxSpecialCount = options.allowOtherSpecialAsOrdinary === true
+    ? requiredPlayerCount
+    : Number(model?.maxSpecialCount || 0);
+  if (specialCount > maxSpecialCount) {
+    errors.push(`special-count ${specialCount}/${maxSpecialCount}`);
   }
+
+  const roleResults = (options.exclusiveRoles || model?.exclusiveRoles || []).map((role, index) => {
+    const id = String(role?.id || `exclusive-role-${index + 1}`);
+    const constraintIndex = role?.constraintIndex !== undefined
+      ? Number(role.constraintIndex)
+      : (model?.constraints || []).findIndex((constraint) => String(constraint.id || '') === String(role?.constraintId || ''));
+    const constraint = Number.isInteger(constraintIndex) && constraintIndex >= 0
+      ? model?.constraints?.[constraintIndex]
+      : null;
+    const label = String(role?.label || constraint?.label || id);
+    const matcher = typeof role?.matches === 'function' ? role.matches : constraint?.matches;
+    const minCount = Math.max(0, Number(role?.minCount ?? role?.count ?? 0) || 0);
+    const maxCount = Math.max(minCount, Number(role?.maxCount ?? minCount) || minCount);
+    let matched = 0;
+    if (typeof matcher === 'function') {
+      matched = players.reduce((count, item) => {
+        try { return count + Number(matcher(item) === true); } catch { return count; }
+      }, 0);
+    }
+    if (typeof matcher !== 'function') errors.push(`${label} role-matcher unavailable`);
+    else if (matched < minCount || matched > maxCount) {
+      errors.push(`${label} role-count ${matched}/${minCount}-${maxCount}`);
+    }
+    return { id, label, matched, minCount, maxCount, matcherAvailable: typeof matcher === 'function' };
+  });
 
   let challengeReady = null;
   if (challenge && typeof challenge.meetsRequirements === 'function') {
@@ -241,6 +292,7 @@ export function validateRatingSbcModelAgainstItems(model, items = [], challenge 
     specialCount,
     uniqueDefinitionCount,
     constraintResults,
+    roleResults,
     challengeReady,
   };
 }

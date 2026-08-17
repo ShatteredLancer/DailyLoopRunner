@@ -315,26 +315,42 @@ function validatePickOptions(value, path, errors) {
     'autoSelect',
     'autoSelectBelow90',
     'autoPickThreshold',
+    'protectionRating',
     'openAtEnd',
     'openPicksAtEnd',
     'preferScannedMetadata',
+    'rollingStorageSinkEnabled',
+    'rollingSurplusCraftingEnabled',
+    'rollingProvisionsMaxRating',
+    'rollingOpenDuplicateProvisionsRewards',
+    'rollingShortageProvisionsPackLimit',
   ]);
   Object.keys(value).forEach((field) => {
     if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
   });
-  ['protectHighGold', 'autoSelect', 'autoSelectBelow90', 'openAtEnd', 'openPicksAtEnd', 'preferScannedMetadata']
+  ['protectHighGold', 'autoSelect', 'autoSelectBelow90', 'openAtEnd', 'openPicksAtEnd', 'preferScannedMetadata', 'rollingStorageSinkEnabled', 'rollingSurplusCraftingEnabled', 'rollingOpenDuplicateProvisionsRewards']
     .forEach((field) => {
       if (value[field] !== undefined && typeof value[field] !== 'boolean') {
         errors.push(`${path}.${field} must be boolean`);
       }
     });
-  ['highGoldThreshold', 'autoPickThreshold'].forEach((field) => {
+  ['highGoldThreshold', 'autoPickThreshold', 'protectionRating'].forEach((field) => {
     if (value[field] === undefined) return;
     const number = Number(value[field]);
     if (!Number.isFinite(number) || number < 1 || number > 99) {
       errors.push(`${path}.${field} must be a number between 1 and 99`);
     }
   });
+  if (value.rollingProvisionsMaxRating !== undefined
+    && ![88, 89].includes(Number(value.rollingProvisionsMaxRating))) {
+    errors.push(`${path}.rollingProvisionsMaxRating must be either 88 or 89`);
+  }
+  if (value.rollingShortageProvisionsPackLimit !== undefined) {
+    const number = Number(value.rollingShortageProvisionsPackLimit);
+    if (!Number.isInteger(number) || number < 1 || number > 30) {
+      errors.push(`${path}.rollingShortageProvisionsPackLimit must be an integer between 1 and 30`);
+    }
+  }
 }
 
 function validateEligibilityRequirementSnapshots(value, path, errors) {
@@ -408,7 +424,7 @@ function validateSbcFodderPolicy(value, path, errors) {
   });
 }
 
-function validateRuntimeQuantity(value, path, errors) {
+function validateRuntimeQuantity(value, path, errors, strategy) {
   if (value === undefined) return;
   if (!isPlainObject(value)) {
     errors.push(`${path} must be an object`);
@@ -420,11 +436,19 @@ function validateRuntimeQuantity(value, path, errors) {
   if (value.target !== undefined && !RUNTIME_QUANTITY_TARGETS.includes(value.target)) {
     errors.push(`${path}.target must be one of: ${RUNTIME_QUANTITY_TARGETS.join(', ')}`);
   }
+  if (value.allowZero !== undefined && typeof value.allowZero !== 'boolean') {
+    errors.push(`${path}.allowZero must be boolean`);
+  }
+  const allowZero = strategy === 'rollingUpgrade' && value.allowZero === true;
+  if (value.allowZero === true && strategy !== 'rollingUpgrade') {
+    errors.push(`${path}.allowZero is only supported by strategy rollingUpgrade`);
+  }
   ['default', 'min', 'max'].forEach((field) => {
     if (value[field] === undefined) return;
     const number = Number(value[field]);
-    if (!Number.isInteger(number) || number < 1 || number > 1000) {
-      errors.push(`${path}.${field} must be an integer between 1 and 1000`);
+    const minimum = allowZero ? 0 : 1;
+    if (!Number.isInteger(number) || number < minimum || number > 1000) {
+      errors.push(`${path}.${field} must be an integer between ${minimum} and 1000`);
     }
   });
   if (Number.isFinite(Number(value.min)) && Number.isFinite(Number(value.max))
@@ -433,6 +457,103 @@ function validateRuntimeQuantity(value, path, errors) {
   }
   if (value.label !== undefined && (typeof value.label !== 'string' || !value.label.trim())) {
     errors.push(`${path}.label must be a non-empty string`);
+  }
+}
+
+function validateRollingPlayerPick(value, path, errors) {
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  if (!['resolved', 'unavailable', 'ambiguous'].includes(value.status)) {
+    errors.push(`${path}.status must be resolved, unavailable, or ambiguous`);
+  }
+  if (value.required !== true) errors.push(`${path}.required must be true`);
+  if (!isPlainObject(value.selector)) {
+    errors.push(`${path}.selector must be an object`);
+  } else {
+    const allowedFields = new Set(['rewardMinRating', 'candidateCount', 'selectionCount', 'rareGoldCost']);
+    Object.keys(value.selector).forEach((field) => {
+      if (!allowedFields.has(field)) errors.push(`${path}.selector.${field} is not supported`);
+    });
+    for (const field of allowedFields) {
+      const number = Number(value.selector[field]);
+      if (!Number.isInteger(number) || number < 1 || number > 99) {
+        errors.push(`${path}.selector.${field} must be an integer between 1 and 99`);
+      }
+    }
+  }
+  if (value.status === 'resolved' && value.loop?.strategy !== 'playerPickSbc') {
+    errors.push(`${path}.loop must be a playerPickSbc loop when resolved`);
+  }
+}
+
+function validateRollingStorageSinkPick(value, path, errors) {
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  if (!['resolved', 'unavailable', 'ambiguous'].includes(value.status)) {
+    errors.push(`${path}.status must be resolved, unavailable, or ambiguous`);
+  }
+  if (value.required !== false) errors.push(`${path}.required must be false`);
+  if (!isPlainObject(value.selector)) {
+    errors.push(`${path}.selector must be an object`);
+  } else {
+    const allowedFields = new Set(['rewardMinRating', 'candidateCount', 'selectionCount', 'challengeRatings']);
+    Object.keys(value.selector).forEach((field) => {
+      if (!allowedFields.has(field)) errors.push(`${path}.selector.${field} is not supported`);
+    });
+    for (const field of ['rewardMinRating', 'candidateCount', 'selectionCount']) {
+      const number = Number(value.selector[field]);
+      if (!Number.isInteger(number) || number < 1 || number > 99) {
+        errors.push(`${path}.selector.${field} must be an integer between 1 and 99`);
+      }
+    }
+    const ratings = Array.isArray(value.selector.challengeRatings)
+      ? value.selector.challengeRatings.map(Number).sort((left, right) => left - right)
+      : [];
+    if (ratings.length !== 2
+      || ratings.some((rating) => !Number.isInteger(rating) || rating < 1 || rating > 99)
+      || ratings.join(',') !== '88,89') {
+      errors.push(`${path}.selector.challengeRatings must contain the 88 and 89 squad ratings`);
+    }
+  }
+  if (value.status === 'resolved' && value.loop?.strategy !== 'playerPickSbc') {
+    errors.push(`${path}.loop must be a playerPickSbc loop when resolved`);
+  }
+}
+
+function validateRollingUpgrade(loopDef, errors) {
+  if (loopDef.dynamicSbcFamily !== 'high-rated-x10' || Number(loopDef.dynamicRewardCount) !== 10) {
+    errors.push('rollingUpgrade requires a scanned high-rated-x10 primary with 10 rewards');
+  }
+  validateStringArray(loopDef.sbcNames, 'sbcNames', errors, true);
+  validateNumberArray(loopDef.sbcSetIds, 'sbcSetIds', errors);
+  validateNumberArray(loopDef.rewardPackIds, 'rewardPackIds', errors);
+  if (Number(loopDef.requiredSpecialCount) !== 1 || Number(loopDef.allowedSpecialCount) !== 1) {
+    errors.push('rollingUpgrade requires exactly one scanned Required Special slot');
+  }
+  const capabilities = [
+    ['rollingTotwUpgrade', 'totw-upgrade'],
+    ['rollingProvisionsUpgrade', 'provisions-upgrade'],
+    ['rollingGoldSinkUpgrade', '5x80-upgrade'],
+  ];
+  for (const [field, family] of capabilities) {
+    const capability = loopDef[field];
+    if (!isPlainObject(capability)) {
+      errors.push(`${field} must be an object`);
+      continue;
+    }
+    validateActivityBinding(capability.activityBinding, `${field}.activityBinding`, errors);
+    if (capability.activityBinding?.family !== family) {
+      errors.push(`${field}.activityBinding.family must be ${family}`);
+    }
+  }
+  validateRollingPlayerPick(loopDef.rollingPlayerPick, 'rollingPlayerPick', errors);
+  validateRollingStorageSinkPick(loopDef.rollingStorageSinkPick, 'rollingStorageSinkPick', errors);
+  if (loopDef.runtimeQuantity?.allowZero !== true) {
+    errors.push('rollingUpgrade runtimeQuantity.allowZero must be true');
   }
 }
 
@@ -451,14 +572,14 @@ export function validateLoopDef(loopDef, label = 'loop') {
   if (loopDef.dryRun !== undefined && typeof loopDef.dryRun !== 'boolean') {
     errors.push('dryRun must be boolean');
   }
-  ['hidden', 'mvp', 'openRewardPacks', 'openRewardPacksAtEnd', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst', 'consumeAllSourcePacks', 'exhaustSbcSet', 'discoveryReportedCompleted', 'respectFsuGoldRange'].forEach((field) => {
+  ['hidden', 'mvp', 'openRewardPacks', 'openRewardPacksAtEnd', 'blockSpecial', 'blockTradeable', 'inventoryFillFirst', 'consumeAllSourcePacks', 'exhaustSbcSet', 'discoveryReportedCompleted', 'respectFsuGoldRange', 'rollingWorkflowEnabled', 'defaultOpenRewardPacksOnSelect'].forEach((field) => {
     if (loopDef[field] !== undefined && typeof loopDef[field] !== 'boolean') {
       errors.push(`${field} must be boolean`);
     }
   });
   validatePickOptions(loopDef.pickOptions, 'pickOptions', errors);
   validateSbcFodderPolicy(loopDef.sbcFodderPolicy, 'sbcFodderPolicy', errors);
-  validateRuntimeQuantity(loopDef.runtimeQuantity, 'runtimeQuantity', errors);
+  validateRuntimeQuantity(loopDef.runtimeQuantity, 'runtimeQuantity', errors, loopDef.strategy);
   validateDynamicChallenges(loopDef.dynamicChallenges, 'dynamicChallenges', errors);
   validateEligibilityRequirementSnapshots(
     loopDef.dynamicActiveEligibilityRequirements,
@@ -562,6 +683,12 @@ export function validateLoopDef(loopDef, label = 'loop') {
       errors.push('autoFodderUpgrade.maxAttemptsPerCompletion must be a number between 1 and 10');
     }
   }
+  if (loopDef.dynamicRewardMinRating !== undefined && loopDef.dynamicRewardMinRating !== null) {
+    const minRating = Number(loopDef.dynamicRewardMinRating);
+    if (!Number.isInteger(minRating) || minRating < 1 || minRating > 99) {
+      errors.push('dynamicRewardMinRating must be an integer between 1 and 99');
+    }
+  }
   if (loopDef.preCraftPlayerPickSelector !== undefined) {
     if (!isPlainObject(loopDef.preCraftPlayerPickSelector)) {
       errors.push('preCraftPlayerPickSelector must be an object');
@@ -590,24 +717,6 @@ export function validateLoopDef(loopDef, label = 'loop') {
         const targetRating = Number(loopDef.ratingSbcFill.targetRating);
         if (!Number.isFinite(targetRating) || targetRating < 1 || targetRating > 99) {
           errors.push('ratingSbcFill.targetRating must be a number between 1 and 99');
-        }
-      }
-      if (loopDef.ratingSbcFill.maxSearchNodes !== undefined) {
-        const maxSearchNodes = Number(loopDef.ratingSbcFill.maxSearchNodes);
-        if (!Number.isInteger(maxSearchNodes) || maxSearchNodes < 10000 || maxSearchNodes > 2000000) {
-          errors.push('ratingSbcFill.maxSearchNodes must be an integer between 10000 and 2000000');
-        }
-      }
-      if (loopDef.ratingSbcFill.maxSearchMs !== undefined) {
-        const maxSearchMs = Number(loopDef.ratingSbcFill.maxSearchMs);
-        if (!Number.isInteger(maxSearchMs) || maxSearchMs < 1000 || maxSearchMs > 60000) {
-          errors.push('ratingSbcFill.maxSearchMs must be an integer between 1000 and 60000');
-        }
-      }
-      if (loopDef.ratingSbcFill.yieldEveryNodes !== undefined) {
-        const yieldEveryNodes = Number(loopDef.ratingSbcFill.yieldEveryNodes);
-        if (!Number.isInteger(yieldEveryNodes) || yieldEveryNodes < 50 || yieldEveryNodes > 5000) {
-          errors.push('ratingSbcFill.yieldEveryNodes must be an integer between 50 and 5000');
         }
       }
     }
@@ -675,6 +784,10 @@ export function validateLoopDef(loopDef, label = 'loop') {
         }
       });
     }
+  }
+
+  if (loopDef.strategy === 'rollingUpgrade') {
+    validateRollingUpgrade(loopDef, errors);
   }
 
   if (['supplyAndCraft', 'inventoryMixedUpgrade', 'commonGoldToRareUpgrade'].includes(loopDef.strategy)) {

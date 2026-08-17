@@ -51,6 +51,7 @@ describe('dynamic Player Pick SBC discovery', () => {
       challengesPerPick: 1,
       pickCandidateCount: 3,
       pickCount: 1,
+      dynamicRewardMinRating: 84,
       maxCompletions: 1,
       sbcFodderPolicy: { mode: 'low-gold' },
     });

@@ -140,9 +140,19 @@ describe('main panel command orchestration', () => {
 
   it('updates controls when the selected loop changes', () => {
     const updateLoopControls = vi.fn();
-    const current = harness({ updateLoopControls });
+    const setOpenRewardPacksEnabled = vi.fn();
+    const current = harness({
+      updateLoopControls,
+      getLoopSelectionDefaults: (loopId) => ({ openRewardPacks: loopId === 'rolling' }),
+      setOpenRewardPacksEnabled,
+    });
     current.commands.selectLoop('daily');
     expect(updateLoopControls).toHaveBeenCalledOnce();
+    expect(setOpenRewardPacksEnabled).not.toHaveBeenCalled();
+    current.commands.selectLoop('rolling');
+    expect(setOpenRewardPacksEnabled).toHaveBeenCalledOnce();
+    expect(setOpenRewardPacksEnabled).toHaveBeenCalledWith(true);
+    expect(updateLoopControls).toHaveBeenCalledTimes(2);
   });
 
   it('applies a manual responsive layout override', () => {
@@ -194,11 +204,11 @@ describe('main panel command orchestration', () => {
     expect(openTrade).toHaveBeenCalledOnce();
   });
 
-  it('saves Player Pick options without starting an SBC scan', () => {
-    const savePickOptions = vi.fn();
-    const current = harness({ savePickOptions });
-    current.commands.savePickOptions({ target: { id: 'bronze-loop-pick-auto-threshold', checked: true } });
-    expect(savePickOptions).toHaveBeenCalledOnce();
+  it('opens Selection Policy settings without starting an SBC scan', () => {
+    const openSelectionPolicySettings = vi.fn();
+    const current = harness({ openSelectionPolicySettings });
+    current.commands.openSelectionPolicySettings();
+    expect(openSelectionPolicySettings).toHaveBeenCalledOnce();
     expect(current.options.scanPlayerPicks).not.toHaveBeenCalled();
   });
 });

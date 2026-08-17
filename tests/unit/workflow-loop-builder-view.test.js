@@ -69,6 +69,8 @@ describe('Workflow and Loop Builder view', () => {
     expect(html).toContain('data-builder-action="select-mobile-section"');
     expect(html).toContain('data-mobile-section="library"');
     expect(html).toContain('data-builder-action="toggle-mobile-actions"');
+    const newLoopStrategy = /<select id="dlr-builder-new-strategy">[\s\S]*?<\/select>/.exec(html)?.[0] || '';
+    expect(newLoopStrategy).not.toContain('value="rollingUpgrade"');
   });
 
   it('renders every major structured editor instead of a raw Loop JSON input', () => {

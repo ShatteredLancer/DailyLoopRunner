@@ -9,6 +9,10 @@ import {
   normalizeSbcFodderPolicy,
   resolveSbcFodderPolicy,
 } from './sbc-fodder-policy.js';
+import {
+  normalizeRollingProvisionsMaxRating,
+  normalizeRollingShortageProvisionsPackLimit,
+} from './rolling-upgrade.js';
 
 export const INVENTORY_MODES = Object.freeze(['inherit', 'inventory-only', 'normal']);
 export const RUNTIME_QUANTITY_MODES = Object.freeze(['user', 'ea-remaining', 'exhaust', 'fixed']);
@@ -36,18 +40,71 @@ function pickOptionOverrides(input = {}) {
   assign('autoSelectBelow90', nested.autoSelectBelow90, nested.autoSelect, input.autoSelectBelow90);
   assign('preferScannedMetadata', nested.preferScannedMetadata, input.preferScannedMetadata);
   assign('openPicksAtEnd', nested.openPicksAtEnd, nested.openAtEnd, input.openPicksAtEnd);
-  assign('autoPickThreshold', nested.autoPickThreshold, input.autoPickRatingThreshold, input.autoPickThreshold);
+  assign(
+    'rollingStorageSinkEnabled',
+    nested.rollingStorageSinkEnabled,
+    input.rollingStorageSinkEnabled,
+  );
+  assign(
+    'rollingSurplusCraftingEnabled',
+    nested.rollingSurplusCraftingEnabled,
+    input.rollingSurplusCraftingEnabled,
+  );
+  assign(
+    'rollingProvisionsMaxRating',
+    nested.rollingProvisionsMaxRating,
+    input.rollingProvisionsMaxRating,
+  );
+  assign(
+    'rollingOpenDuplicateProvisionsRewards',
+    nested.rollingOpenDuplicateProvisionsRewards,
+    input.rollingOpenDuplicateProvisionsRewards,
+  );
+  assign(
+    'rollingShortageProvisionsPackLimit',
+    nested.rollingShortageProvisionsPackLimit,
+    input.rollingShortageProvisionsPackLimit,
+  );
+  assign(
+    'protectionRating',
+    nested.protectionRating,
+    nested.autoPickThreshold,
+    input.protectionRating,
+    input.autoPickRatingThreshold,
+    input.autoPickThreshold,
+  );
   return result;
 }
 
 export function normalizePickRuntimeOptions(input = {}) {
-  const autoPickThreshold = Number(input.autoPickThreshold);
+  const protectionRating = Number(
+    input.protectionRating ?? input.autoPickThreshold ?? input.autoPickRatingThreshold,
+  );
   return {
     autoSelectBelow90: input.autoSelectBelow90 !== false,
     preferScannedMetadata: input.preferScannedMetadata === true,
     openPicksAtEnd: input.openPicksAtEnd === true,
-    autoPickThreshold: boundedNumber(autoPickThreshold > 0 ? autoPickThreshold : 90, 90, 1, 99),
+    rollingStorageSinkEnabled: input.rollingStorageSinkEnabled === true,
+    rollingSurplusCraftingEnabled: input.rollingSurplusCraftingEnabled === true,
+    rollingProvisionsMaxRating: normalizeRollingProvisionsMaxRating(
+      input.rollingProvisionsMaxRating,
+    ),
+    rollingOpenDuplicateProvisionsRewards:
+      input.rollingOpenDuplicateProvisionsRewards === true,
+    rollingShortageProvisionsPackLimit: normalizeRollingShortageProvisionsPackLimit(
+      input.rollingShortageProvisionsPackLimit,
+    ),
+    protectionRating: boundedNumber(protectionRating > 0 ? protectionRating : 90, 90, 1, 99),
   };
+}
+
+export function shouldAutoSelectPlayerPick(maxRating, input = {}) {
+  const options = normalizePickRuntimeOptions(input);
+  const rating = Number(maxRating);
+  return options.autoSelectBelow90 === true
+    && Number.isFinite(rating)
+    && rating > 0
+    && rating <= options.protectionRating;
 }
 
 export function resolvePickRuntimeOptions(globalOptions = {}, ...overrides) {
@@ -68,7 +125,7 @@ export function applyPickRuntimeOptions(loopDef, inheritedOptions = {}) {
   });
   loopDef.autoSelectBelow90 = options.autoSelectBelow90;
   loopDef.openPicksAtEnd = options.openPicksAtEnd;
-  loopDef.autoPickRatingThreshold = options.autoPickThreshold;
+  loopDef.autoPickRatingThreshold = options.protectionRating;
   return loopDef;
 }
 
@@ -157,8 +214,12 @@ export function resolveRuntimeQuantity(loopDef = {}) {
   const target = RUNTIME_QUANTITY_TARGETS.includes(configured.target)
     ? configured.target
     : 'maxCompletions';
-  const min = Math.max(1, Math.floor(Number(configured.min) || 1));
-  const max = Math.max(min, Math.min(1000, Math.floor(Number(configured.max) || 50)));
+  const allowZero = loopDef.strategy === 'rollingUpgrade' && configured.allowZero === true;
+  const minimum = allowZero ? 0 : 1;
+  const configuredMin = Number(configured.min);
+  const configuredMax = Number(configured.max);
+  const min = Math.max(minimum, Math.floor(Number.isFinite(configuredMin) ? configuredMin : minimum));
+  const max = Math.max(min, Math.min(1000, Math.floor(Number.isFinite(configuredMax) ? configuredMax : 50)));
   const fallback = target === 'rounds'
     ? loopDef.rounds
     : target === 'maxPacks'
@@ -166,13 +227,20 @@ export function resolveRuntimeQuantity(loopDef = {}) {
       : target === 'validationRounds'
         ? loopDef.maxRounds
         : loopDef.maxCompletions;
-  const defaultValue = Math.floor(boundedNumber(configured.default, Number(fallback || min), min, max));
+  const fallbackValue = Number(fallback);
+  const defaultValue = Math.floor(boundedNumber(
+    configured.default,
+    Number.isFinite(fallbackValue) ? fallbackValue : min,
+    min,
+    max,
+  ));
   return {
     mode,
     target,
     default: defaultValue,
     min,
     max,
+    ...(allowZero ? { allowZero: true } : {}),
     label: String(configured.label || 'Rounds'),
   };
 }
@@ -209,8 +277,36 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
   loopDef.runtimeInventoryMode = resolvedInventoryMode;
   loopDef.runtimeSbcFodderPolicy = resolvedSbcFodderPolicy;
   applyPickRuntimeOptions(loopDef, globalPickOptions);
+  if (loopDef.strategy === 'rollingUpgrade') {
+    loopDef.runtimeProtectionRating = resolvedPickOptions.protectionRating;
+    loopDef.rollingStorageSinkEnabled = resolvedPickOptions.rollingStorageSinkEnabled;
+    loopDef.rollingSurplusCraftingEnabled = resolvedPickOptions.rollingSurplusCraftingEnabled;
+    loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;
+    loopDef.rollingOpenDuplicateProvisionsRewards =
+      resolvedPickOptions.rollingOpenDuplicateProvisionsRewards;
+    loopDef.rollingShortageProvisionsPackLimit =
+      resolvedPickOptions.rollingShortageProvisionsPackLimit;
+    if (Array.isArray(loopDef.rollingProvisionsUpgrade?.requirements)) {
+      loopDef.rollingProvisionsUpgrade.requirements = loopDef.rollingProvisionsUpgrade.requirements
+        .map((requirement) => ({
+          ...requirement,
+          maxRating: resolvedPickOptions.rollingProvisionsMaxRating,
+        }));
+    }
+  }
   applyInventoryMode(loopDef, resolvedInventoryMode);
   applySbcFodderPolicy(loopDef, resolvedSbcFodderPolicy);
   applyRuntimeQuantity(loopDef, options.rounds);
+  return loopDef;
+}
+
+export function assertRollingRuntimePreflight(loopDef = {}) {
+  if (loopDef.strategy !== 'rollingUpgrade') return loopDef;
+  if (loopDef.openRewardPacks !== true) {
+    throw new Error('Rolling Upgrade requires Open reward packs');
+  }
+  if (loopDef.rollingWorkflowEnabled !== true) {
+    throw new Error('Rolling Upgrade workflow is staged but not enabled in this build');
+  }
   return loopDef;
 }

@@ -121,6 +121,52 @@ describe('submitSbcAttempt', () => {
     expect(options.submitTransport).not.toHaveBeenCalled();
   });
 
+  it('publishes a confirmed result before afterSubmit and isolates observer failures', async () => {
+    const calls = [];
+    const result = await submitSbcAttempt(baseOptions({
+      onResult: async (value, metadata) => {
+        calls.push(['result', value.status, metadata.phase]);
+        throw new Error('ledger unavailable');
+      },
+      onResultError: async (error, { result: value }) => calls.push(['error', error.message, value.status]),
+      afterSubmit: async () => calls.push(['after']),
+    }));
+
+    expect(result).toMatchObject({ status: 'submitted', submitted: true });
+    expect(calls).toEqual([
+      ['result', 'submitted', 'submitted'],
+      ['error', 'ledger unavailable', 'submitted'],
+      ['after'],
+    ]);
+  });
+
+  it('keeps transport, result publication and after-submit work inside the committed wrapper', async () => {
+    const calls = [];
+    const result = await submitSbcAttempt(baseOptions({
+      runCommittedSubmit: async (operation, context) => {
+        calls.push(['commit-start', context.label]);
+        const value = await operation();
+        calls.push(['commit-end', value.status]);
+        return value;
+      },
+      submitTransport: async () => {
+        calls.push(['transport']);
+        return { submitted: true, rewardPackId: 105 };
+      },
+      onResult: async (value) => calls.push(['result', value.status]),
+      afterSubmit: async () => calls.push(['after']),
+    }));
+
+    expect(result).toMatchObject({ status: 'submitted', submitted: true });
+    expect(calls).toEqual([
+      ['commit-start', 'Test SBC'],
+      ['transport'],
+      ['result', 'submitted'],
+      ['after'],
+      ['commit-end', 'submitted'],
+    ]);
+  });
+
   it('rechecks submit readiness when the saved squad button appears late', async () => {
     let checks = 0;
     const onSubmitNotReady = vi.fn(async () => {});

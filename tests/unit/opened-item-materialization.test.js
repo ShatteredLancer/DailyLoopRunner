@@ -44,6 +44,64 @@ describe('opened item materialization', () => {
     expect(needsUnassignedViewMaterialization(result)).toBe(false);
   });
 
+  it('does not infer a duplicate from the same definition with a different rating or rarity version', () => {
+    const differentRating = { id: 101, definitionId: 501, type: 'player', rating: 94, rareflag: 16, duplicateId: 0 };
+    const differentRarity = { id: 102, definitionId: 502, type: 'player', rating: 97, rareflag: 15, duplicateId: 0 };
+    const result = materializeOpenedPlayerDuplicates({
+      items: [differentRating, differentRarity],
+      clubItems: [
+        { id: 201, definitionId: 501, type: 'player', rating: 98, rareflag: 16 },
+        { id: 202, definitionId: 502, type: 'player', rating: 97, rareflag: 16 },
+      ],
+      isPlayer: (item) => item.type === 'player',
+      isDuplicate: (item) => Number(item.duplicateId || 0) > 0,
+    });
+
+    expect(result.duplicates).toEqual([]);
+    expect(result.directItems).toEqual([differentRating, differentRarity]);
+  });
+
+  it('clears a stale duplicate id that points to a different card version', () => {
+    const opened = { id: 101, definitionId: 501, type: 'player', rating: 94, rareflag: 16, duplicateId: 201 };
+    const result = materializeOpenedPlayerDuplicates({
+      items: [opened],
+      clubItems: [{ id: 201, definitionId: 501, type: 'player', rating: 98, rareflag: 16 }],
+      isPlayer: (item) => item.type === 'player',
+      isDuplicate: (item) => Number(item.duplicateId || 0) > 0,
+    });
+
+    expect(opened.duplicateId).toBe(0);
+    expect(result.directItems).toEqual([opened]);
+  });
+
+  it('treats an opened base card as non-duplicate when the matching Club card is evolved', () => {
+    const opened = {
+      id: 101,
+      definitionId: 67331195,
+      type: 'player',
+      rating: 97,
+      rareflag: 16,
+      duplicateId: 201,
+    };
+    const result = materializeOpenedPlayerDuplicates({
+      items: [opened],
+      clubItems: [{
+        id: 201,
+        definitionId: 67331195,
+        type: 'player',
+        rating: 97,
+        rareflag: 16,
+        upgrades: { evolutionId: 42 },
+      }],
+      isPlayer: (item) => item.type === 'player',
+      isDuplicate: (item) => Number(item.duplicateId || 0) > 0,
+    });
+
+    expect(opened.duplicateId).toBe(0);
+    expect(result.duplicates).toEqual([]);
+    expect(result.directItems).toEqual([opened]);
+  });
+
   it('requires a page sync when every opened player is a deferred duplicate', () => {
     expect(needsUnassignedViewMaterialization({
       directItems: [],
