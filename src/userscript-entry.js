@@ -327,6 +327,9 @@ import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import { planBackgroundSubmitRetry } from './sbc/background-submit-retry.js';
 import {
   createBackgroundSubmitTelemetry,
+  sanitizeBackgroundSubmitResult,
+  summarizeBackgroundSubmitPackCounts,
+  summarizeBackgroundSubmitState,
   summarizeBackgroundSubmitItems,
 } from './sbc/background-submit-diagnostics.js';
 import { classifyOpenedUpgradeDuplicates } from './pack/upgrade-duplicate-routing.js';
@@ -4206,13 +4209,38 @@ function updateLoopControls() {
     let inProgress = false;
     try { inProgress = challenge.isInProgress?.() === true; } catch { }
     log(`${label}: loading challenge squad directly through sbcDAO`);
-    const result = await observeOnce(
-      eaSbcAdapter().loadDaoChallenge(challenge.id, inProgress),
-      ctrl(),
-      20000,
-      `sbcDAO.loadChallenge ${label}`,
-    );
+    const startedAt = Date.now();
+    let result;
+    try {
+      result = await observeOnce(
+        eaSbcAdapter().loadDaoChallenge(challenge.id, inProgress),
+        ctrl(),
+        20000,
+        `sbcDAO.loadChallenge ${label}`,
+      );
+    } catch (error) {
+      try {
+        options.onDiagnostic?.({
+          request: { challengeId: Number(challenge?.id || 0) || null, inProgress },
+          timing: { durationMs: Math.max(0, Date.now() - startedAt) },
+          result: sanitizeBackgroundSubmitResult({ success: false, error }),
+          response: { squadPresent: false, squadPlayerCount: 0 },
+        });
+      } catch { }
+      throw error;
+    }
     const squad = result?.response?.squad;
+    try {
+      options.onDiagnostic?.({
+        request: { challengeId: Number(challenge?.id || 0) || null, inProgress },
+        timing: { durationMs: Math.max(0, Date.now() - startedAt) },
+        result: sanitizeBackgroundSubmitResult(result),
+        response: {
+          squadPresent: Boolean(squad),
+          squadPlayerCount: squad ? getSquadItems(squad).length : 0,
+        },
+      });
+    } catch { }
     if (!result?.success || !squad) {
       const detail = serviceResultErrorText(result) || 'no squad data returned';
       fail(`${label}: direct challenge squad load failed: ${detail}`);
@@ -7566,15 +7594,43 @@ function updateLoopControls() {
     });
   }
 
-  function logBackgroundSubmitDiagnostic(label, submission, players, options = {}) {
+  function backgroundSubmitItemsAfterFailure(players = [], options = {}, submission = null) {
+    let selectedItems = currentBackgroundSubmitItems(players);
+    if (typeof options.failureInventoryDiagnostic === 'function') {
+      try {
+        selectedItems = options.failureInventoryDiagnostic({ players, submission }) || selectedItems;
+      } catch { }
+    }
+    return selectedItems;
+  }
+
+  function currentBackgroundSubmitState(set, challenge, submissionOptions = {}) {
+    let cachedChallenges = [];
+    let squadItems = [];
+    try { cachedChallenges = getCachedSbcChallenges(set); } catch { }
+    try { squadItems = getSquadItems(challenge?.squad); } catch { }
+    return summarizeBackgroundSubmitState({
+      set,
+      challenge,
+      cachedChallenges,
+      squadItems,
+      submissionOptions,
+      controllerName: currentControllerName(),
+    });
+  }
+
+  function logBackgroundSubmitDiagnostic(label, submission, players, options = {}, evidence = {}) {
     emitDiagnostic(log, () => {
-      let selectedItems = currentBackgroundSubmitItems(players);
-      if (typeof options.failureInventoryDiagnostic === 'function') {
-        try {
-          selectedItems = options.failureInventoryDiagnostic({ players, submission }) || selectedItems;
-        } catch { }
-      }
-      return `${label}: background submit diagnostic ${diagnosticJson({ submission, selectedItems })}`;
+      const selectedItemsAfter = backgroundSubmitItemsAfterFailure(players, options, submission);
+      const { selectedItemsBefore = null, ...diagnosticEvidence } = evidence;
+      return `${label}: background submit diagnostic ${diagnosticJson({
+        submission,
+        ...diagnosticEvidence,
+        selectedItems: {
+          before: selectedItemsBefore,
+          after: selectedItemsAfter,
+        },
+      })}`;
     });
   }
 
@@ -7587,6 +7643,7 @@ function updateLoopControls() {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       let canSubmit = true;
+      let retryEvidence = null;
 
       if (players.length) {
         try {
@@ -7609,9 +7666,23 @@ function updateLoopControls() {
       if (!canSubmit) {
         lastDetail = 'challenge model rejected the background squad before submit';
         if (attempt >= maxAttempts) fail(`${label}: ${lastDetail}`);
+        retryEvidence = {
+          attempt,
+          detail: lastDetail,
+          kind: 'local-model-rejected',
+          submission: null,
+          submissionOptions: {},
+          selectedItemsBefore: currentBackgroundSubmitItems(players),
+          stateBefore: currentBackgroundSubmitState(set, currentChallenge),
+          packCountsBefore: getPackCountsById(),
+        };
         log(`${label}: ${lastDetail}; reloading before retry (${attempt}/${maxAttempts})`);
       } else {
         const { skipValidation, chemistryEnabled } = eaSbcAdapter().submissionOptions();
+        const submissionOptions = { skipValidation, chemistryEnabled };
+        const selectedItemsBefore = currentBackgroundSubmitItems(players);
+        const stateBefore = currentBackgroundSubmitState(set, currentChallenge, submissionOptions);
+        const attemptPackCountsBefore = getPackCountsById();
         log(`Submitting SBC in background: ${set.name}${attempt > 1 ? ` (retry ${attempt}/${maxAttempts})` : ''}`);
         const submitEvent = backgroundSubmitTelemetry.begin({
           setId: Number(set?.id || 0),
@@ -7619,6 +7690,8 @@ function updateLoopControls() {
           attempt,
           maxAttempts,
           playerCount: players.length,
+          skipValidation,
+          chemistryEnabled,
         });
         let result;
         try {
@@ -7633,7 +7706,17 @@ function updateLoopControls() {
             success: false,
             error,
           });
-          logBackgroundSubmitDiagnostic(label, submission, players, options);
+          logBackgroundSubmitDiagnostic(label, submission, players, options, {
+            selectedItemsBefore,
+            state: {
+              before: stateBefore,
+              after: currentBackgroundSubmitState(set, currentChallenge, submissionOptions),
+            },
+            packInventory: summarizeBackgroundSubmitPackCounts(
+              attemptPackCountsBefore,
+              getPackCountsById(),
+            ),
+          });
           throw error;
         }
         const submissionDiagnostic = backgroundSubmitTelemetry.complete(submitEvent, result);
@@ -7666,7 +7749,16 @@ function updateLoopControls() {
             usedKnownFallback,
           };
         }
-        logBackgroundSubmitDiagnostic(label, submissionDiagnostic, players, options);
+        const stateAfter = currentBackgroundSubmitState(set, currentChallenge, submissionOptions);
+        const packInventory = summarizeBackgroundSubmitPackCounts(
+          attemptPackCountsBefore,
+          getPackCountsById(),
+        );
+        logBackgroundSubmitDiagnostic(label, submissionDiagnostic, players, options, {
+          selectedItemsBefore,
+          state: { before: stateBefore, after: stateAfter },
+          packInventory,
+        });
         lastDetail = serviceResultErrorText(result) || result?.status || 'unknown';
         const plan = planBackgroundSubmitRetry({
           attempt,
@@ -7677,22 +7769,78 @@ function updateLoopControls() {
         if (!plan.retry) {
           fail(`${label}: background submit failed: ${lastDetail}`);
         }
+        retryEvidence = {
+          attempt,
+          detail: lastDetail,
+          kind: 'submit-failure',
+          submission: submissionDiagnostic,
+          submissionOptions,
+          selectedItemsBefore,
+          stateBefore,
+          stateAfter,
+          packCountsBefore: attemptPackCountsBefore,
+        };
         log(`${label}: background submit returned ${lastDetail}; reloading challenge before retry (${attempt}/${maxAttempts})`);
         await sleep(plan.delayMs);
       }
 
+      const reloadStateBefore = currentBackgroundSubmitState(
+        set,
+        currentChallenge,
+        retryEvidence?.submissionOptions,
+      );
+      const reloadAttempts = [];
+      let reloadOutcome = 'unavailable';
+      let reloadError = null;
       try {
-        const reloaded = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, { force: true });
-        if (reloaded) currentChallenge = reloaded;
+        const reloaded = await loadRatingSbcChallenge(currentChallenge, `${label} submit-retry`, {
+          force: true,
+          onDiagnostic: (diagnostic) => reloadAttempts.push({ source: 'current-challenge', ...diagnostic }),
+        });
+        if (reloaded) {
+          currentChallenge = reloaded;
+          reloadOutcome = 'current-challenge-loaded';
+        }
         else {
           const next = await findAvailableRatingSbcChallenge(set, `${label} submit-retry`);
           if (next) {
-            currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, { force: true }) || next;
+            currentChallenge = await loadRatingSbcChallenge(next, `${label} submit-retry`, {
+              force: true,
+              onDiagnostic: (diagnostic) => reloadAttempts.push({ source: 'next-challenge', ...diagnostic }),
+            }) || next;
+            reloadOutcome = 'next-challenge-loaded';
           }
         }
       } catch (error) {
+        reloadOutcome = 'failed';
+        reloadError = sanitizeBackgroundSubmitResult({ success: false, error });
         log(`${label}: challenge reload after submit conflict failed: ${error?.message || error}`);
       }
+      emitDiagnostic(log, () => `${label}: background submit retry reconciliation diagnostic ${diagnosticJson({
+        trigger: {
+          attempt: retryEvidence?.attempt || attempt,
+          maxAttempts,
+          detail: retryEvidence?.detail || lastDetail,
+          kind: retryEvidence?.kind || 'unknown',
+        },
+        reload: {
+          outcome: reloadOutcome,
+          attempts: reloadAttempts,
+          error: reloadError,
+        },
+        state: {
+          before: reloadStateBefore,
+          after: currentBackgroundSubmitState(set, currentChallenge, retryEvidence?.submissionOptions),
+        },
+        selectedItems: {
+          beforeSubmit: retryEvidence?.selectedItemsBefore || null,
+          afterReload: backgroundSubmitItemsAfterFailure(players, options, retryEvidence?.submission),
+        },
+        packInventory: summarizeBackgroundSubmitPackCounts(
+          retryEvidence?.packCountsBefore || beforePackCounts,
+          getPackCountsById(),
+        ),
+      })}`);
       if (!canSubmit && attempt < maxAttempts) {
         await sleep(Math.min(3000, (Number(CFG.pauseMs) || 800) + attempt * 500));
       }

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   createBackgroundSubmitTelemetry,
+  sanitizeBackgroundSubmitResult,
+  summarizeBackgroundSubmitPackCounts,
+  summarizeBackgroundSubmitState,
   summarizeBackgroundSubmitItems,
 } from '../../src/sbc/background-submit-diagnostics.js';
 
@@ -126,5 +129,152 @@ describe('background submit diagnostics', () => {
       ],
     });
     expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
+  });
+
+  it('captures bounded nested EA conflict fields without leaking unrelated payload values', () => {
+    const inherited = Object.create({ statusCode: 409, reason: 'prototype conflict reason' });
+    inherited.errorCode = 'SBC_CONFLICT';
+    inherited.privateToken = 'must-not-leak';
+
+    const diagnostic = sanitizeBackgroundSubmitResult({
+      success: false,
+      status: 409,
+      statusCode: 409,
+      data: {
+        code: 'SUBMIT_REJECTED',
+        message: 'Challenge state changed',
+        authorization: 'must-not-leak',
+      },
+      error: {
+        code: 409,
+        reason: 'conflict',
+        response: {
+          status: 409,
+          data: inherited,
+          body: { errorCode: 'SBC_CONFLICT_BODY', reason: 'stale squad', secret: 'must-not-leak' },
+        },
+      },
+    });
+
+    expect(diagnostic).toMatchObject({
+      status: 409,
+      statusCode: 409,
+      data: {
+        code: 'SUBMIT_REJECTED',
+        message: 'Challenge state changed',
+      },
+      error: {
+        code: 409,
+        reason: 'conflict',
+      },
+      errorResponse: {
+        status: 409,
+        data: {
+          statusCode: 409,
+          errorCode: 'SBC_CONFLICT',
+          reason: 'prototype conflict reason',
+        },
+        body: {
+          errorCode: 'SBC_CONFLICT_BODY',
+          reason: 'stale squad',
+        },
+      },
+    });
+    expect(diagnostic.errorResponse.data.prototypeKeys).toContain('reason');
+    expect(diagnostic.data.visibleKeys).toContain('authorization');
+    expect(JSON.stringify(diagnostic)).not.toContain('must-not-leak');
+    expect(JSON.stringify(diagnostic).length).toBeLessThan(8000);
+  });
+
+  it('snapshots Set, Challenge, cached Challenge and squad identity around a failed submit', () => {
+    const challenge = {
+      id: 3874,
+      state: 'IN_PROGRESS',
+      completed: false,
+      formation: 4,
+      revision: 17,
+      squad: { version: 9 },
+      isCompleted: () => false,
+      isInProgress: () => true,
+      canSubmit: () => true,
+    };
+    Object.defineProperty(challenge, 'status', { get() { throw new Error('unreadable'); } });
+    const completed = {
+      id: 3800,
+      status: 'COMPLETED',
+      completed: true,
+      isCompleted: () => true,
+    };
+    const set = {
+      id: 1200,
+      name: '10x 85+ Upgrade',
+      status: 'ACTIVE',
+      timesCompleted: 41,
+      repeats: 0,
+      isComplete: () => false,
+    };
+
+    const diagnostic = summarizeBackgroundSubmitState({
+      set,
+      challenge,
+      cachedChallenges: [challenge, completed],
+      squadItems: [
+        { id: 1, definitionId: 101, rating: 96 },
+        { id: 2, definitionId: 102, rating: 83 },
+      ],
+      submissionOptions: { skipValidation: true, chemistryEnabled: false },
+      controllerName: 'UTSBCSquadSplitViewController',
+    });
+
+    expect(diagnostic).toMatchObject({
+      controllerName: 'UTSBCSquadSplitViewController',
+      submissionOptions: { skipValidation: true, chemistryEnabled: false },
+      set: {
+        id: 1200,
+        name: '10x 85+ Upgrade',
+        status: 'ACTIVE',
+        timesCompleted: 41,
+        repeats: 0,
+        isComplete: false,
+      },
+      challenge: {
+        id: 3874,
+        status: null,
+        state: 'IN_PROGRESS',
+        completed: false,
+        formation: 4,
+        isCompleted: false,
+        isInProgress: true,
+        canSubmit: true,
+        scalarHints: { id: 3874, revision: 17, state: 'IN_PROGRESS' },
+      },
+      squad: {
+        count: 2,
+        ids: [1, 2],
+        definitionIds: [101, 102],
+        ratings: [96, 83],
+        uniqueDefinitions: 2,
+      },
+    });
+    expect(diagnostic.cachedChallenges).toEqual([
+      expect.objectContaining({ id: 3874, sameObject: true, isInProgress: true }),
+      expect.objectContaining({ id: 3800, sameObject: false, isCompleted: true }),
+    ]);
+  });
+
+  it('reports local My Packs count changes without retaining pack objects', () => {
+    expect(summarizeBackgroundSubmitPackCounts(
+      new Map([['1082', 2], ['21346', 4]]),
+      new Map([['1082', 3], ['21346', 3], ['999', 1]]),
+    )).toEqual({
+      beforeTotal: 6,
+      afterTotal: 7,
+      changed: [
+        { packId: 999, before: 0, after: 1, delta: 1 },
+        { packId: 1082, before: 2, after: 3, delta: 1 },
+        { packId: 21346, before: 4, after: 3, delta: -1 },
+      ],
+      truncated: false,
+    });
   });
 });
