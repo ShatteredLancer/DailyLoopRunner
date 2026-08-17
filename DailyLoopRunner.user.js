@@ -11860,6 +11860,51 @@
   }
 
   // src/selection/rating-candidates.js
+  var MAX_REQUIRED_DIAGNOSTICS = 32;
+  var MAX_COMPETING_CANDIDATES = 8;
+  function normalizedRequiredRef(value = {}) {
+    const ref = value?.ref || value || {};
+    return {
+      id: Number(ref.id || 0),
+      definitionId: Number(ref.definitionId || 0),
+      pile: String(ref.pile || "unknown")
+    };
+  }
+  function refMatchesItem2(ref = {}, item = {}) {
+    const id = Number(ref.id || 0);
+    if (id) return id === Number(item?.id || 0);
+    const definitionId2 = Number(ref.definitionId || 0);
+    return definitionId2 > 0 && definitionId2 === Number(item?.definitionId || 0);
+  }
+  function diagnosticCandidate(item = {}, pileName = "unknown") {
+    return {
+      id: Number(item?.id || 0),
+      definitionId: Number(item?.definitionId || 0),
+      pile: String(pileName || "unknown"),
+      rating: Number(item?.rating || 0) || null
+    };
+  }
+  function uniqueDiagnosticCandidates(values = []) {
+    const seen = /* @__PURE__ */ new Set();
+    return values.filter((value) => {
+      const key = `${Number(value?.id || 0)}:${String(value?.pile || "unknown")}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  function finalizeRequiredCandidateDiagnostics(diagnostics = [], candidateEntries = []) {
+    const entries = Array.isArray(candidateEntries) ? candidateEntries : [];
+    return (Array.isArray(diagnostics) ? diagnostics : []).map((diagnostic) => {
+      if (diagnostic?.candidateAfterDefinition !== true) return { ...diagnostic };
+      const candidateAfterPolicy = entries.some((entry) => refMatchesItem2(diagnostic.ref, entry?.item));
+      return {
+        ...diagnostic,
+        candidateAfterPolicy,
+        reason: candidateAfterPolicy ? "candidate-available" : "policy-filtered"
+      };
+    });
+  }
   function buildRatingCandidateEntries(options = {}) {
     const {
       model,
@@ -11873,12 +11918,15 @@
       sortFodder,
       isSpecialItem,
       broadSpec = {},
+      requiredItems = [],
       now = Date.now
     } = options;
     const startedAt = now();
     const byItemId = /* @__PURE__ */ new Map();
     const resolvedSignals = {};
     const safetyCache = /* @__PURE__ */ new Map();
+    const requiredRefs = (Array.isArray(requiredItems) ? requiredItems : []).map(normalizedRequiredRef).filter((ref) => ref.id > 0 || ref.definitionId > 0).slice(0, MAX_REQUIRED_DIAGNOSTICS);
+    const requiredScannedLocations = requiredRefs.map(() => []);
     const cachedIsSafe = (item) => {
       const itemId5 = Number(item?.id || 0);
       if (!itemId5) return false;
@@ -11893,13 +11941,13 @@
       const definitionId2 = Number(item?.definitionId || 0);
       if (itemId5) submissionById.set(itemId5, item);
       if (!definitionId2) continue;
-      const entries = submissionByDefinition.get(definitionId2) || [];
-      entries.push(item);
-      submissionByDefinition.set(definitionId2, entries);
+      const entries2 = submissionByDefinition.get(definitionId2) || [];
+      entries2.push(item);
+      submissionByDefinition.set(definitionId2, entries2);
     }
-    for (const entries of submissionByDefinition.values()) {
-      const sorted = sortFodder(entries, broadSpec, settings);
-      entries.splice(0, entries.length, ...sorted);
+    for (const entries2 of submissionByDefinition.values()) {
+      const sorted = sortFodder(entries2, broadSpec, settings);
+      entries2.splice(0, entries2.length, ...sorted);
     }
     function resolveSignal(sourceItem) {
       const duplicateId = Number(sourceItem?.duplicateId || 0);
@@ -11913,6 +11961,11 @@
     for (const [pileRank, pileName] of piles.entries()) {
       for (const sourceItem of getPileItems(pileName)) {
         scannedItems++;
+        requiredRefs.forEach((ref, index) => {
+          if (refMatchesItem2(ref, sourceItem)) {
+            requiredScannedLocations[index].push(diagnosticCandidate(sourceItem, pileName));
+          }
+        });
         let item = sourceItem;
         let signal = null;
         if (pileNeedsDuplicateSignalResolution(pileName)) {
@@ -11948,12 +12001,38 @@
         byDefinition.set(definitionId2, entry);
       }
     }
+    const entries = [...byDefinition.values()];
+    const requiredItemDiagnostics = requiredRefs.map((ref, index) => {
+      const candidateBeforeDefinition = [...byItemId.values()].find((entry) => refMatchesItem2(ref, entry.item)) || null;
+      const definitionId2 = Number(ref.definitionId || candidateBeforeDefinition?.item?.definitionId || 0);
+      const representative = definitionId2 ? byDefinition.get(definitionId2) || null : null;
+      const candidateAfterDefinition = Boolean(
+        candidateBeforeDefinition && representative && Number(candidateBeforeDefinition.item?.id || 0) === Number(representative.item?.id || 0)
+      );
+      const scannedLocations = uniqueDiagnosticCandidates(requiredScannedLocations[index]);
+      let reason = "candidate-available";
+      if (!scannedLocations.length && !candidateBeforeDefinition) reason = "not-in-scanned-piles";
+      else if (!candidateBeforeDefinition) reason = "rejected-before-definition";
+      else if (!candidateAfterDefinition) reason = "definition-dedup-replaced";
+      const competingCandidates = definitionId2 ? [...byItemId.values()].filter((entry) => Number(entry.item?.definitionId || 0) === definitionId2).slice(0, MAX_COMPETING_CANDIDATES).map((entry) => diagnosticCandidate(entry.item, entry.pileName)) : [];
+      return {
+        ref,
+        scannedLocations,
+        candidateBeforeDefinition: Boolean(candidateBeforeDefinition),
+        candidateAfterDefinition,
+        candidateAfterPolicy: candidateAfterDefinition,
+        representative: representative ? diagnosticCandidate(representative.item, representative.pileName) : null,
+        competingCandidates,
+        reason
+      };
+    });
     return {
-      entries: [...byDefinition.values()],
+      entries,
       piles,
       resolvedSignals,
       buildMs: now() - startedAt,
-      scannedItems
+      scannedItems,
+      requiredItemDiagnostics
     };
   }
   async function selectRatingCandidateEntries(options = {}) {
@@ -23339,6 +23418,190 @@
     const base = Math.max(200, Math.min(5e3, Number(baseDelayMs) || 800));
     const delayMs = Math.min(3e3, base + current * 500);
     return { retry: true, delayMs, reason: code };
+  }
+
+  // src/sbc/background-submit-diagnostics.js
+  var MAX_VISIBLE_KEYS = 24;
+  var MAX_MESSAGE_LENGTH = 240;
+  var MAX_EVENTS2 = 80;
+  var EVENT_WINDOW_MS = 10 * 60 * 1e3;
+  function safeRead4(value, key) {
+    try {
+      return value?.[key];
+    } catch {
+      return void 0;
+    }
+  }
+  function diagnosticScalar(value, maxLength = MAX_MESSAGE_LENGTH) {
+    if (value === void 0 || value === null || value === "") return null;
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    if (typeof value === "boolean") return value;
+    if (typeof value !== "string") return null;
+    return value.slice(0, maxLength);
+  }
+  function visibleKeys(value) {
+    try {
+      return Object.keys(value || {}).map((key) => String(key).slice(0, 80)).sort().slice(0, MAX_VISIBLE_KEYS);
+    } catch {
+      return [];
+    }
+  }
+  function retryAfter(headers) {
+    if (!headers) return null;
+    try {
+      if (typeof headers.get === "function") {
+        return diagnosticScalar(headers.get("retry-after") ?? headers.get("Retry-After"), 80);
+      }
+    } catch {
+    }
+    for (const key of visibleKeys(headers)) {
+      if (key.toLowerCase() !== "retry-after") continue;
+      return diagnosticScalar(safeRead4(headers, key), 80);
+    }
+    return null;
+  }
+  function responseSummary2(response) {
+    const headers = safeRead4(response, "headers");
+    return {
+      status: diagnosticScalar(safeRead4(response, "status")),
+      code: diagnosticScalar(safeRead4(response, "code")),
+      message: diagnosticScalar(safeRead4(response, "message")),
+      retryAfter: diagnosticScalar(safeRead4(response, "retryAfter"), 80) ?? retryAfter(headers)
+    };
+  }
+  function sanitizeBackgroundSubmitResult(result) {
+    const error = safeRead4(result, "error");
+    const response = safeRead4(result, "response");
+    const errorResponse = safeRead4(error, "response");
+    return {
+      success: safeRead4(result, "success") === true,
+      status: diagnosticScalar(safeRead4(result, "status")),
+      code: diagnosticScalar(safeRead4(result, "code")),
+      message: diagnosticScalar(safeRead4(result, "message")),
+      error: {
+        name: diagnosticScalar(safeRead4(error, "name"), 80),
+        code: diagnosticScalar(safeRead4(error, "code")),
+        status: diagnosticScalar(safeRead4(error, "status")),
+        message: diagnosticScalar(safeRead4(error, "message"))
+      },
+      response: responseSummary2(response),
+      errorResponse: responseSummary2(errorResponse),
+      visibleKeys: {
+        result: visibleKeys(result),
+        error: visibleKeys(error),
+        response: visibleKeys(response),
+        errorResponse: visibleKeys(errorResponse)
+      }
+    };
+  }
+  function resultCode(summary) {
+    return summary?.error?.code ?? summary?.errorResponse?.status ?? summary?.status ?? summary?.code ?? summary?.response?.status ?? null;
+  }
+  function normalizeRequest(context = {}) {
+    return {
+      setId: Number(context.setId || 0) || null,
+      challengeId: Number(context.challengeId || 0) || null,
+      attempt: Math.max(1, Number(context.attempt || 1) || 1),
+      maxAttempts: Math.max(1, Number(context.maxAttempts || 1) || 1),
+      playerCount: Math.max(0, Number(context.playerCount || 0) || 0)
+    };
+  }
+  function createBackgroundSubmitTelemetry(options = {}) {
+    const now = typeof options.now === "function" ? options.now : Date.now;
+    const events = [];
+    function prune(referenceTime) {
+      const cutoff = referenceTime - EVENT_WINDOW_MS;
+      while (events.length && (events[0].startedAt < cutoff || events.length > MAX_EVENTS2)) events.shift();
+    }
+    function begin(context = {}) {
+      const startedAt = Number(now());
+      prune(startedAt);
+      const event = {
+        startedAt,
+        endedAt: null,
+        request: normalizeRequest(context),
+        success: null,
+        code: null
+      };
+      events.push(event);
+      prune(startedAt);
+      return event;
+    }
+    function complete(event, result) {
+      const endedAt = Number(now());
+      const summary = sanitizeBackgroundSubmitResult(result);
+      event.endedAt = endedAt;
+      event.success = summary.success;
+      event.code = resultCode(summary);
+      prune(endedAt);
+      const currentIndex = events.indexOf(event);
+      const previousEvents = currentIndex > 0 ? events.slice(0, currentIndex) : [];
+      const previousAttempt = previousEvents.at(-1) || null;
+      const previousSuccess = previousEvents.findLast((entry) => entry.success === true) || null;
+      const recent = events.filter((entry) => entry.startedAt >= endedAt - 6e4);
+      return {
+        request: event.request,
+        timing: {
+          durationMs: Math.max(0, endedAt - event.startedAt),
+          sincePreviousAttemptMs: previousAttempt ? Math.max(0, event.startedAt - previousAttempt.startedAt) : null,
+          sincePreviousSuccessMs: previousSuccess ? Math.max(0, event.startedAt - Number(previousSuccess.endedAt || previousSuccess.startedAt)) : null,
+          attemptsLast60s: recent.length,
+          successesLast60s: recent.filter((entry) => entry.success === true).length,
+          failuresLast60s: recent.filter((entry) => entry.success === false).length
+        },
+        result: summary
+      };
+    }
+    return Object.freeze({ begin, complete });
+  }
+  function normalizedPile(value) {
+    const pile = String(value || "unknown");
+    return pile || "unknown";
+  }
+  function summarizeBackgroundSubmitItems(itemRefs = [], options = {}) {
+    const refs = (Array.isArray(itemRefs) ? itemRefs : []).slice(0, 32);
+    const resolveItem2 = typeof options.resolveItem === "function" ? options.resolveItem : () => null;
+    const items = refs.map((ref) => {
+      let live = null;
+      try {
+        live = resolveItem2(ref) || null;
+      } catch {
+      }
+      const currentPile = live ? normalizedPile(safeRead4(live, "pile") || safeRead4(safeRead4(live, "ref"), "pile")) : null;
+      return {
+        id: Number(ref?.id || 0),
+        definitionId: Number(ref?.definitionId || 0),
+        expectedPile: normalizedPile(ref?.pile),
+        found: Boolean(live),
+        currentPile,
+        rating: live ? Number(safeRead4(live, "rating") || 0) || null : null
+      };
+    });
+    const currentPiles = {};
+    for (const item of items) {
+      if (!item.found || !item.currentPile) continue;
+      currentPiles[item.currentPile] = Number(currentPiles[item.currentPile] || 0) + 1;
+    }
+    const summary = options.ledgerSummary || {};
+    const readiness = safeRead4(summary, "readiness") || {};
+    const output = {
+      selectedCount: Array.isArray(itemRefs) ? itemRefs.length : 0,
+      exactFound: items.filter((item) => item.found).length,
+      exactMissing: items.filter((item) => !item.found).length,
+      currentPiles,
+      ledger: {
+        inventoryVersion: Number(safeRead4(summary, "inventoryVersion") || 0) || null,
+        itemCount: Number(safeRead4(summary, "itemCount") || 0) || 0,
+        pileCounts: { ...safeRead4(summary, "pileCounts") || {} },
+        readiness: {
+          state: diagnosticScalar(safeRead4(readiness, "state"), 80),
+          fullyValidated: safeRead4(readiness, "fullyValidated") === true
+        }
+      },
+      items
+    };
+    if (Array.isArray(itemRefs) && itemRefs.length > refs.length) output.truncated = true;
+    return output;
   }
 
   // src/pack/upgrade-duplicate-routing.js
@@ -39314,7 +39577,8 @@
         pileNeedsDuplicateSignalResolution,
         sortFodder: sortSbcFodder,
         isSpecialItem: isSbcSpecialItem,
-        broadSpec
+        broadSpec,
+        requiredItems: selectionPolicy?.requiredItems || []
       });
       if (typeof selectionPolicy?.candidateFilter !== "function") return candidates;
       const entries = candidates.entries.filter((entry) => {
@@ -39327,7 +39591,11 @@
       return {
         ...candidates,
         entries,
-        policyFiltered: candidates.entries.length - entries.length
+        policyFiltered: candidates.entries.length - entries.length,
+        requiredItemDiagnostics: finalizeRequiredCandidateDiagnostics(
+          candidates.requiredItemDiagnostics,
+          entries
+        )
       };
     }
     function ratingSelectionItemSnapshot(item, pileName) {
@@ -41093,6 +41361,38 @@
       squad.setPlayers(playerList, true);
       return list;
     }
+    const backgroundSubmitTelemetry = createBackgroundSubmitTelemetry();
+    function currentBackgroundSubmitItems(players = []) {
+      const refs = (players || []).filter(Boolean).map((item) => liveItemRef(item));
+      return summarizeBackgroundSubmitItems(refs, {
+        resolveItem: (ref) => {
+          const live = findCachedItemById(
+            Number(ref?.id || 0),
+            ["unassigned", "storage", "transfer", "club"]
+          );
+          if (!live?.item) return null;
+          return {
+            id: Number(live.item?.id || 0),
+            definitionId: Number(live.item?.definitionId || 0),
+            rating: Number(live.item?.rating || 0),
+            pile: live.pileName,
+            ref: { pile: live.pileName }
+          };
+        }
+      });
+    }
+    function logBackgroundSubmitDiagnostic(label, submission, players, options = {}) {
+      emitDiagnostic(log, () => {
+        let selectedItems = currentBackgroundSubmitItems(players);
+        if (typeof options.failureInventoryDiagnostic === "function") {
+          try {
+            selectedItems = options.failureInventoryDiagnostic({ players, submission }) || selectedItems;
+          } catch {
+          }
+        }
+        return `${label}: background submit diagnostic ${diagnosticJson({ submission, selectedItems })}`;
+      });
+    }
     async function submitRatingSbcInBackground(set, challenge, label = set?.name || "rating SBC", options = {}) {
       const beforePackCounts = getPackCountsById();
       const players = Array.isArray(options.players) ? options.players.filter(Boolean) : [];
@@ -41128,12 +41428,30 @@
         } else {
           const { skipValidation, chemistryEnabled } = eaSbcAdapter().submissionOptions();
           log(`Submitting SBC in background: ${set.name}${attempt > 1 ? ` (retry ${attempt}/${maxAttempts})` : ""}`);
-          const result = await observeOnce(
-            eaSbcAdapter().submitChallenge(currentChallenge, set, { skipValidation, chemistryEnabled }),
-            ctrl(),
-            45e3,
-            `submitChallenge ${label}`
-          );
+          const submitEvent = backgroundSubmitTelemetry.begin({
+            setId: Number(set?.id || 0),
+            challengeId: Number(currentChallenge?.id || 0),
+            attempt,
+            maxAttempts,
+            playerCount: players.length
+          });
+          let result;
+          try {
+            result = await observeOnce(
+              eaSbcAdapter().submitChallenge(currentChallenge, set, { skipValidation, chemistryEnabled }),
+              ctrl(),
+              45e3,
+              `submitChallenge ${label}`
+            );
+          } catch (error) {
+            const submission = backgroundSubmitTelemetry.complete(submitEvent, {
+              success: false,
+              error
+            });
+            logBackgroundSubmitDiagnostic(label, submission, players, options);
+            throw error;
+          }
+          const submissionDiagnostic = backgroundSubmitTelemetry.complete(submitEvent, result);
           if (result?.success) {
             const directRewardPackId = rewardPackIdFromSubmitResult(result, set);
             let newPackId = null;
@@ -41161,6 +41479,7 @@
               usedKnownFallback
             };
           }
+          logBackgroundSubmitDiagnostic(label, submissionDiagnostic, players, options);
           lastDetail = serviceResultErrorText(result) || result?.status || "unknown";
           const plan = planBackgroundSubmitRetry({
             attempt,
@@ -45461,6 +45780,14 @@
       }
       return { status: "ready", set, challenge, activeLoopDef, model };
     }
+    function rollingBackgroundSubmitInventoryDiagnostic(runtime, players = []) {
+      const ledger = runtime?.coordinator?.getLedger?.();
+      const refs = (players || []).filter(Boolean).map((item) => liveItemRef(item));
+      return summarizeBackgroundSubmitItems(refs, {
+        resolveItem: (ref) => ledger?.resolveItem?.(ref) || null,
+        ledgerSummary: ledger?.summary?.() || {}
+      });
+    }
     async function submitRollingRatingRecovery(loopDef, runtime, definition, options = {}) {
       const recoveryDef = rollingRecoveryDef(definition, loopDef, {
         priorityPiles: options.priorityPiles
@@ -45564,7 +45891,8 @@
             recoveryDef.name,
             {
               players: context.players || players,
-              allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1
+              allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
+              failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
             }
           );
           return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
@@ -46331,7 +46659,8 @@
             {
               players: submitContext.players || resolved.players,
               rewardObservationAttempts: 1,
-              allowKnownRewardFallback: false
+              allowKnownRewardFallback: false,
+              failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
             }
           );
           return { submitted: true, rewardPackId: null };
@@ -47360,6 +47689,17 @@
               const reasonCode2 = fill.reasonCode || fill.missing?.code || "PRIMARY_SQUAD_INFEASIBLE";
               const reason = fill.reason || "primary squad is infeasible";
               log(`${loopDef.name}: primary squad planner blocked (${reasonCode2}): ${reason}`);
+              if (reasonCode2 === "REQUIRED_ITEM_UNAVAILABLE") {
+                const requiredDiagnostics = fill.candidates?.requiredItemDiagnostics || [];
+                const unavailable = requiredDiagnostics.filter((entry) => entry?.candidateAfterPolicy !== true);
+                log(`${loopDef.name}: required item candidate diagnostic summary: required:${requiredDiagnostics.length}, unavailable:${unavailable.length}, candidate definitions:${fill.candidates?.entries?.length || 0}`);
+                unavailable.slice(0, 16).forEach((entry, index) => {
+                  log(`${loopDef.name}: required item candidate diagnostic ${index + 1}/${unavailable.length}: ${diagnosticJson(entry)}`);
+                });
+                if (unavailable.length > 16) {
+                  log(`${loopDef.name}: required item candidate diagnostics truncated: ${unavailable.length - 16} more item(s)`);
+                }
+              }
               (fill.selection?.diagnostics || []).slice(0, 5).forEach((diagnostic) => {
                 const serialized = typeof diagnostic === "string" ? diagnostic : JSON.stringify(diagnostic);
                 const bounded = serialized.length > 1800 ? `${serialized.slice(0, 1800)}...` : serialized;
@@ -47496,7 +47836,8 @@
                   loopDef.name,
                   {
                     players: context.players || players,
-                    allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1
+                    allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
+                    failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
                   }
                 );
                 return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildRatingCandidateEntries,
+  finalizeRequiredCandidateDiagnostics,
   selectRatingCandidateEntries,
 } from '../../src/selection/rating-candidates.js';
 
@@ -145,5 +146,64 @@ describe('rating candidate integration planning', () => {
       ratingRange: null,
       recipeCacheHit: false,
     });
+  });
+
+  it('diagnoses an exact required item replaced by another same-definition candidate', () => {
+    const representative = item(10, 100, 88, { privatePayload: 'must-not-leak' });
+    const required = item(20, 100, 88, { privatePayload: 'must-not-leak' });
+    const piles = { storage: [representative, required] };
+
+    const result = buildRatingCandidateEntries({
+      model: { constraints: [] },
+      settings: {},
+      piles: ['storage'],
+      getPileItems: (pileName) => piles[pileName],
+      submissionItems: piles.storage,
+      requiredItems: [{ id: 20, definitionId: 100, pile: 'storage' }],
+      isSafe: () => true,
+      isDuplicate: () => false,
+      pileNeedsDuplicateSignalResolution: () => false,
+      sortFodder: (entries) => [...entries].sort((a, b) => a.id - b.id),
+      isSpecialItem: () => false,
+      now: () => 100,
+    });
+
+    expect(result.entries.map((entry) => entry.item.id)).toEqual([10]);
+    expect(result.requiredItemDiagnostics).toEqual([{
+      ref: { id: 20, definitionId: 100, pile: 'storage' },
+      scannedLocations: [{ id: 20, definitionId: 100, pile: 'storage', rating: 88 }],
+      candidateBeforeDefinition: true,
+      candidateAfterDefinition: false,
+      candidateAfterPolicy: false,
+      representative: { id: 10, definitionId: 100, pile: 'storage', rating: 88 },
+      competingCandidates: [
+        { id: 10, definitionId: 100, pile: 'storage', rating: 88 },
+        { id: 20, definitionId: 100, pile: 'storage', rating: 88 },
+      ],
+      reason: 'definition-dedup-replaced',
+    }]);
+    expect(JSON.stringify(result.requiredItemDiagnostics)).not.toContain('must-not-leak');
+  });
+
+  it('distinguishes policy filtering from definition de-duplication', () => {
+    const diagnostics = [{
+      ref: { id: 10, definitionId: 100, pile: 'storage' },
+      scannedLocations: [{ id: 10, definitionId: 100, pile: 'storage', rating: 88 }],
+      candidateBeforeDefinition: true,
+      candidateAfterDefinition: true,
+      candidateAfterPolicy: true,
+      representative: { id: 10, definitionId: 100, pile: 'storage', rating: 88 },
+      competingCandidates: [{ id: 10, definitionId: 100, pile: 'storage', rating: 88 }],
+      reason: 'candidate-available',
+    }];
+
+    expect(finalizeRequiredCandidateDiagnostics(diagnostics, [])).toEqual([
+      expect.objectContaining({
+        candidateBeforeDefinition: true,
+        candidateAfterDefinition: true,
+        candidateAfterPolicy: false,
+        reason: 'policy-filtered',
+      }),
+    ]);
   });
 });

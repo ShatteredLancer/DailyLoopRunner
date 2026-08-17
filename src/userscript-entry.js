@@ -160,6 +160,7 @@ import {
 import { selectInventoryPlayers as selectInventoryPlayersPure } from './selection/index.js';
 import {
   buildRatingCandidateEntries,
+  finalizeRequiredCandidateDiagnostics,
   selectRatingCandidateEntries,
 } from './selection/rating-candidates.js';
 import {
@@ -324,6 +325,10 @@ import {
 import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import { planBackgroundSubmitRetry } from './sbc/background-submit-retry.js';
+import {
+  createBackgroundSubmitTelemetry,
+  summarizeBackgroundSubmitItems,
+} from './sbc/background-submit-diagnostics.js';
 import { classifyOpenedUpgradeDuplicates } from './pack/upgrade-duplicate-routing.js';
 import { runSupplyAndCraftWorkflow } from './workflows/supply-and-craft.js';
 import { runRecycleWorkflow } from './workflows/recycle.js';
@@ -5495,6 +5500,7 @@ function updateLoopControls() {
       sortFodder: sortSbcFodder,
       isSpecialItem: isSbcSpecialItem,
       broadSpec,
+      requiredItems: selectionPolicy?.requiredItems || [],
     });
     if (typeof selectionPolicy?.candidateFilter !== 'function') return candidates;
     const entries = candidates.entries.filter((entry) => {
@@ -5504,6 +5510,10 @@ function updateLoopControls() {
       ...candidates,
       entries,
       policyFiltered: candidates.entries.length - entries.length,
+      requiredItemDiagnostics: finalizeRequiredCandidateDiagnostics(
+        candidates.requiredItemDiagnostics,
+        entries,
+      ),
     };
   }
 
@@ -7534,6 +7544,40 @@ function updateLoopControls() {
     return list;
   }
 
+  const backgroundSubmitTelemetry = createBackgroundSubmitTelemetry();
+
+  function currentBackgroundSubmitItems(players = []) {
+    const refs = (players || []).filter(Boolean).map((item) => liveItemRef(item));
+    return summarizeBackgroundSubmitItems(refs, {
+      resolveItem: (ref) => {
+        const live = findCachedItemById(
+          Number(ref?.id || 0),
+          ['unassigned', 'storage', 'transfer', 'club'],
+        );
+        if (!live?.item) return null;
+        return {
+          id: Number(live.item?.id || 0),
+          definitionId: Number(live.item?.definitionId || 0),
+          rating: Number(live.item?.rating || 0),
+          pile: live.pileName,
+          ref: { pile: live.pileName },
+        };
+      },
+    });
+  }
+
+  function logBackgroundSubmitDiagnostic(label, submission, players, options = {}) {
+    emitDiagnostic(log, () => {
+      let selectedItems = currentBackgroundSubmitItems(players);
+      if (typeof options.failureInventoryDiagnostic === 'function') {
+        try {
+          selectedItems = options.failureInventoryDiagnostic({ players, submission }) || selectedItems;
+        } catch { }
+      }
+      return `${label}: background submit diagnostic ${diagnosticJson({ submission, selectedItems })}`;
+    });
+  }
+
   async function submitRatingSbcInBackground(set, challenge, label = set?.name || 'rating SBC', options = {}) {
     const beforePackCounts = getPackCountsById();
     const players = Array.isArray(options.players) ? options.players.filter(Boolean) : [];
@@ -7569,12 +7613,30 @@ function updateLoopControls() {
       } else {
         const { skipValidation, chemistryEnabled } = eaSbcAdapter().submissionOptions();
         log(`Submitting SBC in background: ${set.name}${attempt > 1 ? ` (retry ${attempt}/${maxAttempts})` : ''}`);
-        const result = await observeOnce(
-          eaSbcAdapter().submitChallenge(currentChallenge, set, { skipValidation, chemistryEnabled }),
-          ctrl(),
-          45000,
-          `submitChallenge ${label}`,
-        );
+        const submitEvent = backgroundSubmitTelemetry.begin({
+          setId: Number(set?.id || 0),
+          challengeId: Number(currentChallenge?.id || 0),
+          attempt,
+          maxAttempts,
+          playerCount: players.length,
+        });
+        let result;
+        try {
+          result = await observeOnce(
+            eaSbcAdapter().submitChallenge(currentChallenge, set, { skipValidation, chemistryEnabled }),
+            ctrl(),
+            45000,
+            `submitChallenge ${label}`,
+          );
+        } catch (error) {
+          const submission = backgroundSubmitTelemetry.complete(submitEvent, {
+            success: false,
+            error,
+          });
+          logBackgroundSubmitDiagnostic(label, submission, players, options);
+          throw error;
+        }
+        const submissionDiagnostic = backgroundSubmitTelemetry.complete(submitEvent, result);
         if (result?.success) {
           const directRewardPackId = rewardPackIdFromSubmitResult(result, set);
           let newPackId = null;
@@ -7604,6 +7666,7 @@ function updateLoopControls() {
             usedKnownFallback,
           };
         }
+        logBackgroundSubmitDiagnostic(label, submissionDiagnostic, players, options);
         lastDetail = serviceResultErrorText(result) || result?.status || 'unknown';
         const plan = planBackgroundSubmitRetry({
           attempt,
@@ -12364,6 +12427,15 @@ function updateLoopControls() {
     return { status: 'ready', set, challenge, activeLoopDef, model };
   }
 
+  function rollingBackgroundSubmitInventoryDiagnostic(runtime, players = []) {
+    const ledger = runtime?.coordinator?.getLedger?.();
+    const refs = (players || []).filter(Boolean).map((item) => liveItemRef(item));
+    return summarizeBackgroundSubmitItems(refs, {
+      resolveItem: (ref) => ledger?.resolveItem?.(ref) || null,
+      ledgerSummary: ledger?.summary?.() || {},
+    });
+  }
+
   async function submitRollingRatingRecovery(loopDef, runtime, definition, options = {}) {
     const recoveryDef = rollingRecoveryDef(definition, loopDef, {
       priorityPiles: options.priorityPiles,
@@ -12469,6 +12541,9 @@ function updateLoopControls() {
           {
             players: context.players || players,
             allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
+            failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
+              rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+            ),
           },
         );
         return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
@@ -13323,6 +13398,9 @@ function updateLoopControls() {
             players: submitContext.players || resolved.players,
             rewardObservationAttempts: 1,
             allowKnownRewardFallback: false,
+            failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
+              rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+            ),
           },
         );
         return { submitted: true, rewardPackId: null };
@@ -14446,6 +14524,17 @@ function updateLoopControls() {
           const reasonCode = fill.reasonCode || fill.missing?.code || 'PRIMARY_SQUAD_INFEASIBLE';
           const reason = fill.reason || 'primary squad is infeasible';
           log(`${loopDef.name}: primary squad planner blocked (${reasonCode}): ${reason}`);
+          if (reasonCode === 'REQUIRED_ITEM_UNAVAILABLE') {
+            const requiredDiagnostics = fill.candidates?.requiredItemDiagnostics || [];
+            const unavailable = requiredDiagnostics.filter((entry) => entry?.candidateAfterPolicy !== true);
+            log(`${loopDef.name}: required item candidate diagnostic summary: required:${requiredDiagnostics.length}, unavailable:${unavailable.length}, candidate definitions:${fill.candidates?.entries?.length || 0}`);
+            unavailable.slice(0, 16).forEach((entry, index) => {
+              log(`${loopDef.name}: required item candidate diagnostic ${index + 1}/${unavailable.length}: ${diagnosticJson(entry)}`);
+            });
+            if (unavailable.length > 16) {
+              log(`${loopDef.name}: required item candidate diagnostics truncated: ${unavailable.length - 16} more item(s)`);
+            }
+          }
           (fill.selection?.diagnostics || []).slice(0, 5).forEach((diagnostic) => {
             const serialized = typeof diagnostic === 'string' ? diagnostic : JSON.stringify(diagnostic);
             const bounded = serialized.length > 1800 ? `${serialized.slice(0, 1800)}...` : serialized;
@@ -14589,6 +14678,9 @@ function updateLoopControls() {
               {
                 players: context.players || players,
                 allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
+                failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
+                  rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
+                ),
               },
             );
             return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };

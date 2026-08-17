@@ -1,5 +1,56 @@
 import { isSamePlayerCardVersion } from '../domain/player-rarity.js';
 
+const MAX_REQUIRED_DIAGNOSTICS = 32;
+const MAX_COMPETING_CANDIDATES = 8;
+
+function normalizedRequiredRef(value = {}) {
+  const ref = value?.ref || value || {};
+  return {
+    id: Number(ref.id || 0),
+    definitionId: Number(ref.definitionId || 0),
+    pile: String(ref.pile || 'unknown'),
+  };
+}
+
+function refMatchesItem(ref = {}, item = {}) {
+  const id = Number(ref.id || 0);
+  if (id) return id === Number(item?.id || 0);
+  const definitionId = Number(ref.definitionId || 0);
+  return definitionId > 0 && definitionId === Number(item?.definitionId || 0);
+}
+
+function diagnosticCandidate(item = {}, pileName = 'unknown') {
+  return {
+    id: Number(item?.id || 0),
+    definitionId: Number(item?.definitionId || 0),
+    pile: String(pileName || 'unknown'),
+    rating: Number(item?.rating || 0) || null,
+  };
+}
+
+function uniqueDiagnosticCandidates(values = []) {
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = `${Number(value?.id || 0)}:${String(value?.pile || 'unknown')}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function finalizeRequiredCandidateDiagnostics(diagnostics = [], candidateEntries = []) {
+  const entries = Array.isArray(candidateEntries) ? candidateEntries : [];
+  return (Array.isArray(diagnostics) ? diagnostics : []).map((diagnostic) => {
+    if (diagnostic?.candidateAfterDefinition !== true) return { ...diagnostic };
+    const candidateAfterPolicy = entries.some((entry) => refMatchesItem(diagnostic.ref, entry?.item));
+    return {
+      ...diagnostic,
+      candidateAfterPolicy,
+      reason: candidateAfterPolicy ? 'candidate-available' : 'policy-filtered',
+    };
+  });
+}
+
 export function buildRatingCandidateEntries(options = {}) {
   const {
     model,
@@ -13,12 +64,18 @@ export function buildRatingCandidateEntries(options = {}) {
     sortFodder,
     isSpecialItem,
     broadSpec = {},
+    requiredItems = [],
     now = Date.now,
   } = options;
   const startedAt = now();
   const byItemId = new Map();
   const resolvedSignals = {};
   const safetyCache = new Map();
+  const requiredRefs = (Array.isArray(requiredItems) ? requiredItems : [])
+    .map(normalizedRequiredRef)
+    .filter((ref) => ref.id > 0 || ref.definitionId > 0)
+    .slice(0, MAX_REQUIRED_DIAGNOSTICS);
+  const requiredScannedLocations = requiredRefs.map(() => []);
   const cachedIsSafe = (item) => {
     const itemId = Number(item?.id || 0);
     if (!itemId) return false;
@@ -56,6 +113,11 @@ export function buildRatingCandidateEntries(options = {}) {
   for (const [pileRank, pileName] of piles.entries()) {
     for (const sourceItem of getPileItems(pileName)) {
       scannedItems++;
+      requiredRefs.forEach((ref, index) => {
+        if (refMatchesItem(ref, sourceItem)) {
+          requiredScannedLocations[index].push(diagnosticCandidate(sourceItem, pileName));
+        }
+      });
       let item = sourceItem;
       let signal = null;
       if (pileNeedsDuplicateSignalResolution(pileName)) {
@@ -96,12 +158,48 @@ export function buildRatingCandidateEntries(options = {}) {
       byDefinition.set(definitionId, entry);
     }
   }
+  const entries = [...byDefinition.values()];
+  const requiredItemDiagnostics = requiredRefs.map((ref, index) => {
+    const candidateBeforeDefinition = [...byItemId.values()]
+      .find((entry) => refMatchesItem(ref, entry.item)) || null;
+    const definitionId = Number(ref.definitionId || candidateBeforeDefinition?.item?.definitionId || 0);
+    const representative = definitionId ? byDefinition.get(definitionId) || null : null;
+    const candidateAfterDefinition = Boolean(
+      candidateBeforeDefinition
+        && representative
+        && Number(candidateBeforeDefinition.item?.id || 0) === Number(representative.item?.id || 0),
+    );
+    const scannedLocations = uniqueDiagnosticCandidates(requiredScannedLocations[index]);
+    let reason = 'candidate-available';
+    if (!scannedLocations.length && !candidateBeforeDefinition) reason = 'not-in-scanned-piles';
+    else if (!candidateBeforeDefinition) reason = 'rejected-before-definition';
+    else if (!candidateAfterDefinition) reason = 'definition-dedup-replaced';
+    const competingCandidates = definitionId
+      ? [...byItemId.values()]
+        .filter((entry) => Number(entry.item?.definitionId || 0) === definitionId)
+        .slice(0, MAX_COMPETING_CANDIDATES)
+        .map((entry) => diagnosticCandidate(entry.item, entry.pileName))
+      : [];
+    return {
+      ref,
+      scannedLocations,
+      candidateBeforeDefinition: Boolean(candidateBeforeDefinition),
+      candidateAfterDefinition,
+      candidateAfterPolicy: candidateAfterDefinition,
+      representative: representative
+        ? diagnosticCandidate(representative.item, representative.pileName)
+        : null,
+      competingCandidates,
+      reason,
+    };
+  });
   return {
-    entries: [...byDefinition.values()],
+    entries,
     piles,
     resolvedSignals,
     buildMs: now() - startedAt,
     scannedItems,
+    requiredItemDiagnostics,
   };
 }
 
