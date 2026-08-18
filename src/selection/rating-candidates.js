@@ -65,6 +65,7 @@ export function buildRatingCandidateEntries(options = {}) {
     isSpecialItem,
     broadSpec = {},
     requiredItems = [],
+    resolveRequirementItem = (item) => item,
     now = Date.now,
   } = options;
   const startedAt = now();
@@ -132,7 +133,9 @@ export function buildRatingCandidateEntries(options = {}) {
       if (!itemId || !definitionId || byItemId.has(itemId)) continue;
       if (!cachedIsSafe(item)) continue;
       if (!requirementCache.has(itemId)) {
-        requirementCache.set(itemId, model.constraints.map((constraint) => constraint.matches(item)));
+        let requirementItem = item;
+        try { requirementItem = resolveRequirementItem(item, { sourceItem, signal, pileName }) || item; } catch { }
+        requirementCache.set(itemId, model.constraints.map((constraint) => constraint.matches(requirementItem)));
       }
       const requirementMatches = requirementCache.get(itemId);
       byItemId.set(itemId, {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createInventorySnapshot } from '../../src/domain/contracts.js';
 import { loadUserscript, makePlayer } from '../helpers/load-userscript.js';
 
 function requirement(key, values, count = -1, matcher = null) {
@@ -11,6 +12,100 @@ function requirement(key, values, count = -1, matcher = null) {
 }
 
 describe('dynamic EA player-group policy', () => {
+  it('evaluates a Ledger-backed Storage Sink candidate through its live EA entity', async () => {
+    const clubTotw = makePlayer({
+      id: 77,
+      definitionId: 707,
+      rating: 91,
+      rareflag: 120,
+      groups: [19, 33, 43, 44, 83],
+      name: 'Fermin',
+    });
+    clubTotw.runtimeGroup83 = true;
+    const { api } = await loadUserscript({ club: [clubTotw] });
+    const loopDef = {
+      name: 'Ledger-backed Storage pressure squad',
+      expectedPlayerCount: 1,
+      requiredSpecialCount: 1,
+      allowedSpecialCount: 1,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'TEAM_RATING', values: [88], count: 1 },
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 95 },
+      ratingSbcFill: { priorityPiles: ['club'] },
+    };
+    const challenge = {
+      requiredPlayerCount: 1,
+      squad: { getNumOfRequiredPlayers: () => 1 },
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [88]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => item.runtimeGroup83 === true),
+      ],
+    };
+    const model = api.parseRatingSbcChallenge(loopDef, challenge);
+    const inventorySnapshot = createInventorySnapshot({
+      piles: { club: [clubTotw] },
+    });
+    expect(inventorySnapshot.piles.club[0].runtimeGroup83).toBeUndefined();
+
+    const requiredSpecialIndexes = model.constraints
+      .map((constraint, index) => ({ constraint, index }))
+      .filter(({ constraint }) => constraint.keyName === 'PLAYER_RARITY_GROUP')
+      .map(({ index }) => index);
+    const candidates = api.buildRatingSbcCandidateEntries(loopDef, model, {
+      candidateFilter: api.createRollingRequiredSpecialSourceFilter({
+        constraintIndexes: requiredSpecialIndexes,
+        isClubTotw: (item) => item.groups.includes(44),
+      }),
+    }, inventorySnapshot);
+
+    expect(candidates.entries).toEqual([
+      expect.objectContaining({
+        pileName: 'club',
+        item: expect.objectContaining({ id: 77, groups: [19, 33, 43, 44, 83] }),
+        requirementMatches: [true],
+      }),
+    ]);
+
+    const ledger = {
+      classifiedEntries: () => [{
+        item: inventorySnapshot.piles.club[0],
+        pile: 'club',
+        classification: { requiredSpecial: true, otherSpecial: false, protected: false },
+      }],
+    };
+    const storageSinkPolicy = api.rollingStorageSinkSelectionPolicy(loopDef, {
+      coordinator: { getLedger: () => ledger },
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      openRouting: null,
+    }, { model });
+    const storageSinkCandidates = api.buildRatingSbcCandidateEntries(
+      loopDef,
+      model,
+      storageSinkPolicy,
+      inventorySnapshot,
+    );
+    expect(storageSinkCandidates.entries).toEqual([
+      expect.objectContaining({
+        pileName: 'club',
+        item: expect.objectContaining({ id: 77 }),
+        requirementMatches: [true],
+      }),
+    ]);
+    const storageSinkSelection = await api.findOptimalRatingSbcSelection(
+      storageSinkCandidates.entries,
+      model,
+      storageSinkCandidates.piles,
+      { selectionPolicy: storageSinkPolicy },
+    );
+    expect(storageSinkSelection).toMatchObject({
+      ok: true,
+      selected: [expect.objectContaining({ id: 77 })],
+    });
+  });
+
   it('keeps Club non-TOTW event cards out of the Rolling Required Special pool', async () => {
     const clubTotw = makePlayer({
       id: 70,

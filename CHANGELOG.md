@@ -3,6 +3,26 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.10] - 2026-08-18
+
+### Added
+
+- Added dynamic Storage Sink challenge selection for supported high-rating
+  Player Picks and direct Player SBCs, including live Required Special role
+  parsing and source-aware Club fallback.
+- Added bounded Storage Sink admission diagnostics covering candidate
+  eligibility, duplicate targets, protection decisions, live EA entity
+  resolution, and failure reasons.
+
+### Changed
+
+- Reused the primary Rolling challenge after Storage Sink and Required Special
+  recovery instead of reloading an already active squad.
+- Preserved protected primary duplicates while allowing explicitly required
+  special cards to be consumed by the selected Storage Sink challenge.
+- Added deterministic multi-squad rating selection and regression coverage for
+  Unassigned, Storage, Transfer, Club, and live EA requirement entities.
+
 ## [0.8.5] - 2026-08-18
 
 ### Fixed

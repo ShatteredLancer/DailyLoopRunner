@@ -4,11 +4,13 @@ import { selectInventoryPlayers } from '../../src/selection/index.js';
 import {
   createStorageSinkClubFillRole,
   genericStorageSinkSquadSourceStrategy,
+  nextGenericStorageSinkContext,
   nextStorageSinkContext,
   planMultiSquadRatingSelections,
   prepareStorageSink89Candidates,
   prepareGenericStorageSinkCandidates,
   selectStorageSinkClubFallbackEntries,
+  storageSinkRequiredSpecialRoles,
   STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
   storageSinkSquadSourceStrategy,
   validateStorageRecoveryHeadroom,
@@ -97,6 +99,89 @@ describe('multi-squad rating planner', () => {
     expect(prepared.entries.map((entry) => entry.item.id)).toEqual([1, 3, 4, 5]);
   });
 
+  it('keeps generic Storage Sink challenges in live EA order', () => {
+    const contexts = [
+      { challengeId: 3864, targetRating: 88 },
+      { challengeId: 3865, targetRating: 90 },
+    ];
+
+    expect(nextGenericStorageSinkContext(contexts)).toBe(contexts[0]);
+    expect(nextGenericStorageSinkContext([{ targetRating: 86 }, contexts[1]])).toBe(contexts[1]);
+  });
+
+  it('models a live player-group condition as an exact Storage Sink role', () => {
+    expect(storageSinkRequiredSpecialRoles({
+      constraints: [
+        { source: 'ea', keyName: 'PLAYER_RARITY_GROUP', label: 'PLAYER_RARITY_GROUP 83 x1', count: 1 },
+        { source: 'ea', keyName: 'PLAYER_QUALITY', label: 'Gold', count: 11 },
+      ],
+    })).toEqual([{
+      id: 'storage-sink-required-special',
+      label: 'PLAYER_RARITY_GROUP 83 x1',
+      constraintIndex: 0,
+      minCount: 1,
+      maxCount: 1,
+    }]);
+  });
+
+  it('fills the logged 88 squad with all eight Unassigned cards plus exactly one Required Special', async () => {
+    const requiredRatings = [92, 89, 88, 87, 86, 86, 85, 85];
+    const unassigned = requiredRatings.map((rating, index) => ({
+      item: player(index + 1, 5001 + index, rating, 'club'),
+      signal: player(901 + index, 5001 + index, rating, 'unassigned'),
+      pileName: 'unassigned',
+      pileRank: 0,
+      requirementMatches: [false],
+      special: index === 0 || index === 2,
+    }));
+    const storage = [
+      { rating: 91, requiredSpecial: true },
+      { rating: 90, requiredSpecial: false },
+      { rating: 89, requiredSpecial: false },
+      { rating: 86, requiredSpecial: false },
+    ].map(({ rating, requiredSpecial }, index) => ({
+      item: player(101 + index, 6001 + index, rating, 'storage'),
+      signal: null,
+      pileName: 'storage',
+      pileRank: 1,
+      requirementMatches: [requiredSpecial],
+      special: requiredSpecial,
+    }));
+    const prepared = prepareGenericStorageSinkCandidates([...unassigned, ...storage], {
+      primaryRefs: unassigned.map((entry) => ({ id: entry.signal.id })),
+      maxRating: 95,
+      requiredPlayerCount: 11,
+    });
+    const model = {
+      requiredPlayerCount: 11,
+      targetRating: 88,
+      maxSpecialCount: 1,
+      constraints: [{
+        source: 'ea',
+        keyName: 'PLAYER_RARITY_GROUP',
+        label: 'PLAYER_RARITY_GROUP 83 x1',
+        count: 1,
+      }],
+    };
+
+    const plan = await selectInventoryPlayers({
+      mode: 'rating',
+      candidateEntries: prepared.entries,
+      ratingModel: model,
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      requiredItems: prepared.requiredItems,
+      exclusiveRoles: storageSinkRequiredSpecialRoles(model),
+      maxOrdinaryRating: 95,
+      protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.details.rating).toBe(88);
+    expect(plan.pileCounts).toEqual({ unassigned: 8, storage: 3 });
+    expect(plan.selected.filter((item) => item.id <= 8)).toHaveLength(8);
+    expect(plan.entries.filter((entry) => entry.requirementMatches[0])).toHaveLength(1);
+  });
+
   it('continues the harder incomplete Storage Sink squad without requiring both contexts', () => {
     expect(nextStorageSinkContext([{ targetRating: 88 }, { targetRating: 89 }]))
       .toMatchObject({ targetRating: 89 });
@@ -122,6 +207,99 @@ describe('multi-squad rating planner', () => {
     expect(result.entries.map((entry) => entry.item.id)).toEqual([1, 4]);
     expect(result.requiredEntries.map((entry) => entry.item.id)).toEqual([1]);
     expect(result.requiredItems).toEqual([{ id: 1, definitionId: 101, pile: 'unassigned' }]);
+  });
+
+  it('defers a protected primary duplicate and completes the logged 90 squad from Storage', async () => {
+    const protectedSpecial = {
+      item: player(1, 101, 95),
+      signal: player(901, 101, 95, 'unassigned'),
+      pileName: 'unassigned',
+      pileRank: 0,
+      requirementMatches: [],
+      special: true,
+    };
+    const ordinary = Array.from({ length: 8 }, (_, index) => ({
+      item: player(2 + index, 102 + index, 88 - Math.floor(index / 3)),
+      signal: player(902 + index, 102 + index, 88 - Math.floor(index / 3), 'unassigned'),
+      pileName: 'unassigned',
+      pileRank: 0,
+      requirementMatches: [],
+      special: false,
+    }));
+    const storage = Array.from({ length: 3 }, (_, index) => ({
+      item: player(20 + index, 120 + index, 95, 'storage'),
+      signal: null,
+      pileName: 'storage',
+      pileRank: 1,
+      requirementMatches: [],
+      special: false,
+    }));
+    const primaryRefs = [protectedSpecial, ...ordinary].map((entry) => ({ id: entry.signal.id }));
+
+    const generic = prepareGenericStorageSinkCandidates(
+      [protectedSpecial, ...ordinary, ...storage],
+      {
+        primaryRefs,
+        maxRating: 95,
+        requiredPlayerCount: 11,
+        protectedItems: [{ id: protectedSpecial.item.id }],
+      },
+    );
+    const legacy = prepareStorageSink89Candidates(
+      [protectedSpecial, ...ordinary, ...storage],
+      {
+        primaryRefs,
+        maxRating: 95,
+        protectedItems: [{ id: protectedSpecial.item.id }],
+      },
+    );
+
+    for (const prepared of [generic, legacy]) {
+      expect(prepared.requiredEntries.map((entry) => entry.item.id))
+        .toEqual(ordinary.map((entry) => entry.item.id));
+      expect(prepared.deferredProtectedEntries.map((entry) => entry.item.id))
+        .toEqual([protectedSpecial.item.id]);
+      expect(prepared.entries.some((entry) => entry.item.id === protectedSpecial.item.id)).toBe(false);
+      expect(prepared.requiredItems).toHaveLength(8);
+    }
+
+    const plan = await selectInventoryPlayers({
+      mode: 'rating',
+      candidateEntries: generic.entries,
+      ratingModel: {
+        requiredPlayerCount: 11,
+        targetRating: 90,
+        maxSpecialCount: 11,
+        constraints: [],
+      },
+      priorityPiles: ['unassigned', 'storage'],
+      requiredItems: generic.requiredItems,
+      maxOrdinaryRating: 95,
+      protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.details.rating).toBe(90);
+    expect(plan.pileCounts).toEqual({ unassigned: 8, storage: 3 });
+    expect(plan.selected.some((item) => item.id === protectedSpecial.item.id)).toBe(false);
+  });
+
+  it('keeps the same Required Special mandatory when the current sink role allows it', () => {
+    const requiredSpecial = {
+      item: player(1, 101, 95),
+      signal: player(901, 101, 95, 'unassigned'),
+      pileName: 'unassigned',
+    };
+
+    const prepared = prepareGenericStorageSinkCandidates([requiredSpecial], {
+      primaryRefs: [{ id: requiredSpecial.signal.id }],
+      maxRating: 95,
+      requiredPlayerCount: 11,
+      protectedItems: [],
+    });
+
+    expect(prepared.requiredEntries).toEqual([requiredSpecial]);
+    expect(prepared.deferredProtectedEntries).toEqual([]);
   });
 
   it('materializes the logged eight-card Unassigned case without admitting ordinary Club fill', async () => {
@@ -223,6 +401,24 @@ describe('multi-squad rating planner', () => {
       .map((entry) => entry.item.id)).toEqual([1, 4]);
     expect(selectStorageSinkClubFallbackEntries(entries, { count: 99, maxRating: 95 }))
       .toHaveLength(2);
+  });
+
+  it('admits one required Club special ahead of ordinary Club fallback', () => {
+    const entries = [
+      { item: player(1, 101, 94, 'club'), pileName: 'club', special: false, requirementMatches: [false] },
+      { item: player(2, 102, 96, 'club'), pileName: 'club', special: true, requirementMatches: [true] },
+      { item: player(3, 103, 95, 'club'), pileName: 'club', special: true, requirementMatches: [false] },
+      { item: player(4, 104, 93, 'club'), pileName: 'club', special: false, requirementMatches: [false] },
+      { item: player(5, 105, 91, 'club'), pileName: 'club', special: true, requirementMatches: [true] },
+      { item: player(6, 106, 92, 'club'), pileName: 'club', special: true, requirementMatches: [true] },
+    ];
+
+    expect(selectStorageSinkClubFallbackEntries(entries, {
+      count: 3,
+      maxRating: 95,
+      requiredConstraintIndexes: [0],
+      protectedItems: [{ id: 6 }],
+    }).map((entry) => entry.item.id)).toEqual([5, 1, 4]);
   });
 
   it('plans the harder squad first and removes its item and signal refs before the next plan', async () => {

@@ -445,6 +445,46 @@ describe('Rolling Upgrade configuration contracts', () => {
     });
   });
 
+  it('keeps a Storage sink resolved when only a completed challenge has unavailable squad metadata', () => {
+    const set = storageSinkPickSet({
+      challenges: [
+        {
+          id: 21995,
+          requiredPlayerCount: 11,
+          eligibilityRequirements: [
+            { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+            { key: 'TEAM_RATING', values: [88], count: -1 },
+          ],
+        },
+        {
+          id: 21996,
+          completed: true,
+          requiredPlayerCount: null,
+          eligibilityRequirements: [{ key: 'TEAM_RATING', values: [90], count: -1 }],
+        },
+      ],
+    });
+
+    expect(parseRollingStorageSinkSnapshot({ set })).toMatchObject({
+      status: 'supported',
+      capability: {
+        setId: set.id,
+        challengeRatings: [88, 90],
+        challenges: [
+          expect.objectContaining({ challengeId: 21995, requiredPlayerCount: 11 }),
+          expect.objectContaining({ challengeId: 21996, completed: true, requiredPlayerCount: null }),
+        ],
+      },
+    });
+    expect(resolveRollingStorageSinkCapability([set], {
+      mode: 'selected',
+      setId: set.id,
+    })).toMatchObject({
+      status: 'resolved',
+      capability: { setId: set.id },
+    });
+  });
+
   it('rejects Pack-only, low-rated, completed, and incomplete Storage sink metadata', () => {
     expect(parseRollingStorageSinkSnapshot({
       set: storageSinkPlayerSet({ rewards: [{ type: 'PACK', packId: 30001 }] }),

@@ -45,6 +45,28 @@ export function nextStorageSinkContext(contexts = []) {
     ))[0] || null;
 }
 
+export function nextGenericStorageSinkContext(contexts = []) {
+  return (contexts || []).find((context) => genericStorageSinkSquadSourceStrategy(
+    context?.targetRating || context?.model?.targetRating,
+  )) || null;
+}
+
+export function storageSinkRequiredSpecialRoles(model = {}) {
+  return (model.constraints || [])
+    .map((constraint, constraintIndex) => ({ constraint, constraintIndex }))
+    .filter(({ constraint }) => (
+      (constraint.source === 'ea' && constraint.keyName === 'PLAYER_RARITY_GROUP')
+        || constraint.id === 'runner-required-special'
+    ))
+    .map(({ constraint, constraintIndex }, roleIndex) => ({
+      id: roleIndex === 0 ? 'storage-sink-required-special' : `storage-sink-required-special-${roleIndex + 1}`,
+      label: constraint.label || 'Required Special',
+      constraintIndex,
+      minCount: Math.max(1, Number(constraint.count || 1) || 1),
+      maxCount: Math.max(1, Number(constraint.count || 1) || 1),
+    }));
+}
+
 function entryItemRef(entry = {}) {
   const item = entry.item?.ref || entry.item || {};
   return {
@@ -63,15 +85,30 @@ function matchesRef(item = {}, ref = {}) {
   return definitionId > 0 && Number(source.definitionId || 0) === definitionId;
 }
 
-export function prepareStorageSink89Candidates(entries = [], options = {}) {
+function partitionPrimaryUnassignedEntries(entries = [], options = {}) {
   const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
   const primaryRefs = options.primaryRefs || [];
-  const requiredEntries = entries.filter((entry) => (
+  const protectedItems = options.protectedItems || [];
+  const primaryEntries = entries.filter((entry) => (
     entry.pileName === 'unassigned'
       && entry.signal
       && Number(entry.item?.rating || 0) <= maxRating
       && primaryRefs.some((ref) => matchesRef(entry.signal, ref))
   ));
+  const isProtected = (entry) => protectedItems.some((ref) => (
+    matchesRef(entry.item, ref) || matchesRef(entry.signal, ref)
+  ));
+  return {
+    requiredEntries: primaryEntries.filter((entry) => !isProtected(entry)),
+    deferredProtectedEntries: primaryEntries.filter(isProtected),
+  };
+}
+
+export function prepareStorageSink89Candidates(entries = [], options = {}) {
+  const { requiredEntries, deferredProtectedEntries } = partitionPrimaryUnassignedEntries(
+    entries,
+    options,
+  );
   const requiredIds = new Set(requiredEntries.map((entry) => Number(entry.item?.id || 0)));
   return {
     entries: entries.filter((entry) => (
@@ -80,19 +117,14 @@ export function prepareStorageSink89Candidates(entries = [], options = {}) {
     )),
     requiredEntries,
     requiredItems: requiredEntries.map(entryItemRef),
+    deferredProtectedEntries,
   };
 }
 
 export function prepareGenericStorageSinkCandidates(entries = [], options = {}) {
-  const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
   const requiredPlayerCount = Math.max(1, Number(options.requiredPlayerCount || 11) || 11);
-  const primaryRefs = options.primaryRefs || [];
-  const requiredEntries = entries.filter((entry) => (
-    entry.pileName === 'unassigned'
-      && entry.signal
-      && Number(entry.item?.rating || 0) <= maxRating
-      && primaryRefs.some((ref) => matchesRef(entry.signal, ref))
-  )).sort((left, right) => (
+  const partition = partitionPrimaryUnassignedEntries(entries, options);
+  const requiredEntries = partition.requiredEntries.sort((left, right) => (
     Number(right.item?.rating || 0) - Number(left.item?.rating || 0)
       || Number(left.item?.id || 0) - Number(right.item?.id || 0)
   )).slice(0, requiredPlayerCount);
@@ -106,6 +138,7 @@ export function prepareGenericStorageSinkCandidates(entries = [], options = {}) 
     )),
     requiredEntries,
     requiredItems: requiredEntries.map(entryItemRef),
+    deferredProtectedEntries: partition.deferredProtectedEntries,
   };
 }
 
@@ -115,14 +148,25 @@ export function selectStorageSinkClubFallbackEntries(entries = [], options = {})
     Math.floor(Number(options.count || 0)),
   ));
   const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
+  const requiredConstraintIndexes = new Set((options.requiredConstraintIndexes || [])
+    .map(Number)
+    .filter((index) => Number.isInteger(index) && index >= 0));
+  const protectedItems = options.protectedItems || [];
+  const matchesRequiredSpecial = (entry) => [...requiredConstraintIndexes]
+    .some((index) => entry.requirementMatches?.[index] === true);
   return entries
     .filter((entry) => (
       entry.pileName === 'club'
-        && entry.special !== true
         && Number(entry.item?.rating || 0) <= maxRating
+        && !protectedItems.some((ref) => matchesRef(entry.item, ref))
+        && (
+          matchesRequiredSpecial(entry)
+            || entry.special !== true
+        )
     ))
     .sort((left, right) => (
-      Number(right.item?.rating || 0) - Number(left.item?.rating || 0)
+      Number(matchesRequiredSpecial(right)) - Number(matchesRequiredSpecial(left))
+        || Number(right.item?.rating || 0) - Number(left.item?.rating || 0)
         || Number(left.item?.id || 0) - Number(right.item?.id || 0)
     ))
     .slice(0, count);

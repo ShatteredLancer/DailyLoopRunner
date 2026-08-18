@@ -946,6 +946,81 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.resolveProtectedStorage).toHaveBeenCalledTimes(2);
   });
 
+  it('recovers a Required Special dependency before retrying a blocked Storage sink', async () => {
+    let inventoryVersion = 1;
+    let storageReady = false;
+    let specialReady = false;
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      resolveProtectedStorage: vi.fn(async () => storageReady
+        ? { status: 'ready' }
+        : { status: 'blocked', reasonCode: 'PROTECTED_STORAGE_BLOCKED' }),
+      recoverProvisions: vi.fn(async () => {
+        calls.push('provisions');
+        return { status: 'unavailable' };
+      }),
+      recoverStorageSink: vi.fn(async () => {
+        calls.push('storage-sink');
+        return specialReady
+          ? { status: 'selected' }
+          : {
+              status: 'unavailable',
+              reason: 'Storage sink Required Special has only 0/1 safe candidates',
+              reasonCode: 'REQUIRED_SPECIAL_SHORTAGE',
+            };
+      }),
+      recoverRequiredSpecial: vi.fn(async ({ context }) => {
+        calls.push('required-special');
+        expect(context).toMatchObject({
+          trigger: 'storage-sink-required-special-shortage',
+          source: 'storage-sink-dependency',
+        });
+        specialReady = true;
+        storageReady = true;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      recoveries: { storageSink: 0, requiredSpecial: 1 },
+    });
+    expect(calls).toEqual(['provisions', 'storage-sink', 'required-special']);
+    expect(options.resolveProtectedStorage).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports an unavailable Storage sink Required Special dependency explicitly', async () => {
+    const options = harness({
+      storageSinkEnabled: true,
+      resolveProtectedStorage: vi.fn(async () => ({
+        status: 'blocked',
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      })),
+      recoverProvisions: vi.fn(async () => ({ status: 'unavailable' })),
+      recoverStorageSink: vi.fn(async () => ({
+        status: 'unavailable',
+        reason: 'Storage sink Required Special has only 0/1 safe candidates',
+        reasonCode: 'REQUIRED_SPECIAL_SHORTAGE',
+      })),
+      recoverRequiredSpecial: vi.fn(async () => ({
+        status: 'unavailable',
+        reason: 'dynamic 84+ TOTW Upgrade capability is unavailable',
+      })),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'unavailable',
+      reason: 'dynamic 84+ TOTW Upgrade capability is unavailable',
+      reasonCode: 'REQUIRED_SPECIAL_RECOVERY_BLOCKED',
+    });
+    expect(options.recoverRequiredSpecial).toHaveBeenCalledOnce();
+  });
+
   it('continues after the 89 Storage Sink squad is submitted and defers the 88 squad', async () => {
     let inventoryVersion = 1;
     let storageReady = false;

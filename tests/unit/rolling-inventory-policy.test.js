@@ -699,6 +699,31 @@ describe('Rolling inventory policy', () => {
     expect(policy.protectedItems).toEqual([protectedItem.ref]);
   });
 
+  it('releases a classified Required Special only for an explicit Storage Sink role', () => {
+    const requiredSpecial = item(1, 91, { special: true, pile: 'club' });
+    const entries = [{
+      item: requiredSpecial,
+      pile: 'club',
+      classification: { requiredSpecial: true, otherSpecial: false, protected: false },
+    }];
+
+    const ordinaryRecovery = createRollingRatingRecoverySelectionPolicy({ entries });
+    const storageSink = createRollingRatingRecoverySelectionPolicy({
+      entries,
+      allowRequiredSpecial: true,
+      exclusiveRoles: [{
+        id: 'storage-sink-required-special',
+        constraintIndex: 0,
+        minCount: 1,
+        maxCount: 1,
+      }],
+    });
+
+    expect(ordinaryRecovery.protectedItems).toEqual([requiredSpecial.ref]);
+    expect(storageSink.protectedItems).toEqual([]);
+    expect(storageSink.exclusiveRoles).toHaveLength(1);
+  });
+
   it('fail-closes malformed unclassified protection entries instead of crashing', () => {
     const malformed = item(1, 89);
     expect(createRollingRecoveryProtection({

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.5
+// @version      0.8.10
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.5",
+    version: "0.8.10",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -2160,6 +2160,10 @@
       targetRating: challengeTargetRating(challenge)
     };
   }
+  function completedChallenge(challenge = {}) {
+    const status = normalizedText2(challenge.status || challenge.state).toUpperCase();
+    return challenge.completed === true || status === "COMPLETED" || status === "COMPLETE";
+  }
   function parseRollingStorageSinkPickSnapshot(input2 = {}) {
     const set = input2.set || {};
     const selector = input2.selector || ROLLING_STORAGE_SINK_PICK_SELECTOR;
@@ -2301,9 +2305,14 @@
     if (!challenges.length) {
       return { status: "ignored", setId, diagnostics: [`no Challenge has a target rating of ${minimumTarget}+`] };
     }
+    const actionableChallenges = challenges.filter((challenge) => !completedChallenge(challenge));
+    if (!actionableChallenges.length) {
+      return { status: "ignored", setId, diagnostics: [`no incomplete Challenge has a target rating of ${minimumTarget}+`] };
+    }
     const diagnostics = [];
     if (!setId) diagnostics.push("stable SBC Set id is missing");
     challenges.forEach((challenge, index) => {
+      if (completedChallenge(challenge)) return;
       if (!challenge.challengeId) diagnostics.push(`challenge ${index + 1}: stable Challenge id is missing`);
       if (!challenge.requiredPlayerCount) diagnostics.push(`challenge ${index + 1}: required player count is missing`);
       if (!Array.isArray(challenge.eligibilityRequirements) || !challenge.eligibilityRequirements.length) {
@@ -11127,7 +11136,7 @@
       const duplicateId = Number(item?.duplicateId || 0);
       return duplicateId > 0 ? [{ id: duplicateId, definitionId: Number(item?.definitionId || 0), pile: "unknown" }] : [];
     }));
-    const hardProtected = entries.filter(({ classification }) => !classification || classification.requiredSpecial === true || classification?.protected === true).map(({ item }) => itemRef(item));
+    const hardProtected = entries.filter(({ classification }) => !classification || classification.requiredSpecial === true && input2.allowRequiredSpecial !== true || classification?.protected === true).map(({ item }) => itemRef(item));
     const clubOtherSpecial = entries.filter(({ item, pile, classification }) => String(pile || item?.pile || item?.ref?.pile || "") === "club" && classification?.otherSpecial === true && classification?.requiredSpecial !== true && classification?.protected !== true).map(({ item }) => itemRef(item));
     const protectedItems = uniqueRefs([
       ...hardProtected,
@@ -12501,6 +12510,7 @@
       isSpecialItem,
       broadSpec = {},
       requiredItems = [],
+      resolveRequirementItem = (item) => item,
       now = Date.now
     } = options;
     const startedAt = now();
@@ -12562,7 +12572,12 @@
         if (!itemId5 || !definitionId2 || byItemId.has(itemId5)) continue;
         if (!cachedIsSafe(item)) continue;
         if (!requirementCache.has(itemId5)) {
-          requirementCache.set(itemId5, model.constraints.map((constraint) => constraint.matches(item)));
+          let requirementItem = item;
+          try {
+            requirementItem = resolveRequirementItem(item, { sourceItem, signal, pileName }) || item;
+          } catch {
+          }
+          requirementCache.set(itemId5, model.constraints.map((constraint) => constraint.matches(requirementItem)));
         }
         const requirementMatches = requirementCache.get(itemId5);
         byItemId.set(itemId5, {
@@ -12829,6 +12844,20 @@
       context?.targetRating || context?.model?.targetRating
     )).sort((left, right) => Number(right?.targetRating || right?.model?.targetRating || 0) - Number(left?.targetRating || left?.model?.targetRating || 0))[0] || null;
   }
+  function nextGenericStorageSinkContext(contexts = []) {
+    return (contexts || []).find((context) => genericStorageSinkSquadSourceStrategy(
+      context?.targetRating || context?.model?.targetRating
+    )) || null;
+  }
+  function storageSinkRequiredSpecialRoles(model = {}) {
+    return (model.constraints || []).map((constraint, constraintIndex) => ({ constraint, constraintIndex })).filter(({ constraint }) => constraint.source === "ea" && constraint.keyName === "PLAYER_RARITY_GROUP" || constraint.id === "runner-required-special").map(({ constraint, constraintIndex }, roleIndex) => ({
+      id: roleIndex === 0 ? "storage-sink-required-special" : `storage-sink-required-special-${roleIndex + 1}`,
+      label: constraint.label || "Required Special",
+      constraintIndex,
+      minCount: Math.max(1, Number(constraint.count || 1) || 1),
+      maxCount: Math.max(1, Number(constraint.count || 1) || 1)
+    }));
+  }
   function entryItemRef(entry = {}) {
     const item = entry.item?.ref || entry.item || {};
     return {
@@ -12845,28 +12874,41 @@
     const definitionId2 = Number(refSource.definitionId || 0);
     return definitionId2 > 0 && Number(source.definitionId || 0) === definitionId2;
   }
-  function prepareStorageSink89Candidates(entries = [], options = {}) {
+  function partitionPrimaryUnassignedEntries(entries = [], options = {}) {
     const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
     const primaryRefs = options.primaryRefs || [];
-    const requiredEntries = entries.filter((entry) => entry.pileName === "unassigned" && entry.signal && Number(entry.item?.rating || 0) <= maxRating && primaryRefs.some((ref) => matchesRef2(entry.signal, ref)));
+    const protectedItems = options.protectedItems || [];
+    const primaryEntries = entries.filter((entry) => entry.pileName === "unassigned" && entry.signal && Number(entry.item?.rating || 0) <= maxRating && primaryRefs.some((ref) => matchesRef2(entry.signal, ref)));
+    const isProtected = (entry) => protectedItems.some((ref) => matchesRef2(entry.item, ref) || matchesRef2(entry.signal, ref));
+    return {
+      requiredEntries: primaryEntries.filter((entry) => !isProtected(entry)),
+      deferredProtectedEntries: primaryEntries.filter(isProtected)
+    };
+  }
+  function prepareStorageSink89Candidates(entries = [], options = {}) {
+    const { requiredEntries, deferredProtectedEntries } = partitionPrimaryUnassignedEntries(
+      entries,
+      options
+    );
     const requiredIds = new Set(requiredEntries.map((entry) => Number(entry.item?.id || 0)));
     return {
       entries: entries.filter((entry) => entry.pileName === "storage" || entry.pileName === "unassigned" && requiredIds.has(Number(entry.item?.id || 0))),
       requiredEntries,
-      requiredItems: requiredEntries.map(entryItemRef)
+      requiredItems: requiredEntries.map(entryItemRef),
+      deferredProtectedEntries
     };
   }
   function prepareGenericStorageSinkCandidates(entries = [], options = {}) {
-    const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
     const requiredPlayerCount = Math.max(1, Number(options.requiredPlayerCount || 11) || 11);
-    const primaryRefs = options.primaryRefs || [];
-    const requiredEntries = entries.filter((entry) => entry.pileName === "unassigned" && entry.signal && Number(entry.item?.rating || 0) <= maxRating && primaryRefs.some((ref) => matchesRef2(entry.signal, ref))).sort((left, right) => Number(right.item?.rating || 0) - Number(left.item?.rating || 0) || Number(left.item?.id || 0) - Number(right.item?.id || 0)).slice(0, requiredPlayerCount);
+    const partition = partitionPrimaryUnassignedEntries(entries, options);
+    const requiredEntries = partition.requiredEntries.sort((left, right) => Number(right.item?.rating || 0) - Number(left.item?.rating || 0) || Number(left.item?.id || 0) - Number(right.item?.id || 0)).slice(0, requiredPlayerCount);
     const requiredIds = new Set(requiredEntries.map((entry) => Number(entry.item?.id || 0)));
     const clubIds = new Set((options.clubEntries || []).map((entry) => Number(entry.item?.id || 0)));
     return {
       entries: entries.filter((entry) => ["storage", "transfer"].includes(entry.pileName) || entry.pileName === "unassigned" && requiredIds.has(Number(entry.item?.id || 0)) || entry.pileName === "club" && clubIds.has(Number(entry.item?.id || 0))),
       requiredEntries,
-      requiredItems: requiredEntries.map(entryItemRef)
+      requiredItems: requiredEntries.map(entryItemRef),
+      deferredProtectedEntries: partition.deferredProtectedEntries
     };
   }
   function selectStorageSinkClubFallbackEntries(entries = [], options = {}) {
@@ -12875,7 +12917,10 @@
       Math.floor(Number(options.count || 0))
     ));
     const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
-    return entries.filter((entry) => entry.pileName === "club" && entry.special !== true && Number(entry.item?.rating || 0) <= maxRating).sort((left, right) => Number(right.item?.rating || 0) - Number(left.item?.rating || 0) || Number(left.item?.id || 0) - Number(right.item?.id || 0)).slice(0, count);
+    const requiredConstraintIndexes = new Set((options.requiredConstraintIndexes || []).map(Number).filter((index) => Number.isInteger(index) && index >= 0));
+    const protectedItems = options.protectedItems || [];
+    const matchesRequiredSpecial = (entry) => [...requiredConstraintIndexes].some((index) => entry.requirementMatches?.[index] === true);
+    return entries.filter((entry) => entry.pileName === "club" && Number(entry.item?.rating || 0) <= maxRating && !protectedItems.some((ref) => matchesRef2(entry.item, ref)) && (matchesRequiredSpecial(entry) || entry.special !== true)).sort((left, right) => Number(matchesRequiredSpecial(right)) - Number(matchesRequiredSpecial(left)) || Number(right.item?.rating || 0) - Number(left.item?.rating || 0) || Number(left.item?.id || 0) - Number(right.item?.id || 0)).slice(0, count);
   }
   function targetRating(context = {}) {
     return Number(context.targetRating || context.model?.targetRating || 0);
@@ -26047,6 +26092,43 @@
       });
       return value;
     }
+    async function recoverStorageSink(context = {}) {
+      const storageSink = await runRecovery(
+        "storageSink",
+        ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
+        options.recoverStorageSink,
+        context
+      );
+      if (isProgressed(storageSink) || reasonCode(storageSink) !== "REQUIRED_SPECIAL_SHORTAGE") {
+        return storageSink;
+      }
+      const requiredSpecial = await runRecovery(
+        "requiredSpecial",
+        ROLLING_UPGRADE_PHASES.RECOVER_REQUIRED_SPECIAL,
+        options.recoverRequiredSpecial,
+        {
+          trigger: "storage-sink-required-special-shortage",
+          source: "storage-sink-dependency",
+          storageSink,
+          storageContext: context
+        }
+      );
+      if (isProgressed(requiredSpecial)) return requiredSpecial;
+      if (requiredSpecial?.status === "skipped") return storageSink;
+      return {
+        ...requiredSpecial,
+        status: requiredSpecial?.status || "unavailable",
+        reason: effectReason(requiredSpecial, "Storage sink Required Special recovery is unavailable"),
+        reasonCode: reasonCode(requiredSpecial) || "REQUIRED_SPECIAL_RECOVERY_BLOCKED",
+        details: {
+          ...requiredSpecial?.details || {},
+          storageSinkDependency: {
+            reason: effectReason(storageSink, "Required Special shortage"),
+            reasonCode: reasonCode(storageSink)
+          }
+        }
+      };
+    }
     function finishRecoveryFailure(value, fallbackReason, fallbackCode) {
       if (isStopped(value)) return finish("stopped", value, fallbackReason, "USER_STOPPED");
       if (value?.status === "planned") return finish("planned", value, fallbackReason, fallbackCode);
@@ -26205,12 +26287,7 @@
               "PROTECTED_STORAGE_BLOCKED"
             );
           }
-          const storageSink = await runRecovery(
-            "storageSink",
-            ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
-            options.recoverStorageSink,
-            { trigger: "storage-pressure", storage, provisions }
-          );
+          const storageSink = await recoverStorageSink({ trigger: "storage-pressure", storage, provisions });
           if (isProgressed(storageSink)) continue;
           if (isStopped(storageSink) || isBlocked(storageSink) || storageSink?.status === "planned") {
             return finishRecoveryFailure(
@@ -26303,16 +26380,11 @@
                 "PROTECTED_STORAGE_BLOCKED"
               );
             }
-            const storageSink = await runRecovery(
-              "storageSink",
-              ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
-              options.recoverStorageSink,
-              {
-                trigger: "storage-pressure",
-                storage: leftoverReward,
-                source: "leftover-recovery-pre-open"
-              }
-            );
+            const storageSink = await recoverStorageSink({
+              trigger: "storage-pressure",
+              storage: leftoverReward,
+              source: "leftover-recovery-pre-open"
+            });
             if (isProgressed(storageSink)) continue;
             return finishRecoveryFailure(
               storageSink,
@@ -26361,16 +26433,11 @@
                 "PROTECTED_STORAGE_BLOCKED"
               );
             }
-            const storageSink = await runRecovery(
-              "storageSink",
-              ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
-              options.recoverStorageSink,
-              {
-                trigger: "storage-pressure",
-                storage: recovery,
-                source: "required-special-reward-pre-open"
-              }
-            );
+            const storageSink = await recoverStorageSink({
+              trigger: "storage-pressure",
+              storage: recovery,
+              source: "required-special-reward-pre-open"
+            });
             if (isProgressed(storageSink)) continue;
             return finishRecoveryFailure(
               storageSink,
@@ -26423,12 +26490,11 @@
               "PROTECTED_STORAGE_BLOCKED"
             );
           }
-          const storageSink = await runRecovery(
-            "storageSink",
-            ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
-            options.recoverStorageSink,
-            { trigger: "storage-pressure", storage: planned, provisions }
-          );
+          const storageSink = await recoverStorageSink({
+            trigger: "storage-pressure",
+            storage: planned,
+            provisions
+          });
           if (isProgressed(storageSink)) continue;
           return finishRecoveryFailure(
             storageSink?.status ? storageSink : planned,
@@ -38208,10 +38274,10 @@
     }
     function isDuplicate(item) {
       try {
-        return !!item?.isDuplicate?.();
+        if (typeof item?.isDuplicate === "function") return item.isDuplicate() === true;
       } catch {
-        return !!item?.duplicateId;
       }
+      return item?.duplicate === true || Number(item?.duplicateId || 0) > 0;
     }
     function isTradeable(item) {
       try {
@@ -40896,6 +40962,7 @@
         protectedDefinitionIds: loopDef.protectedDefinitionIds
       };
       const readPile = inventorySnapshot?.piles ? (pileName) => inventorySnapshot.piles[pileName] || [] : getPileItemsByName;
+      const liveRequirementItemsById = inventorySnapshot?.piles ? new Map(["unassigned", "storage", "transfer", "club"].flatMap((pileName) => getPileItemsByName(pileName)).map((item) => [Number(item?.id || 0), item]).filter(([id]) => id > 0)) : null;
       const submissionItems = inventorySnapshot?.piles ? uniqueItems2([
         ...inventorySnapshot.piles.storage || [],
         ...inventorySnapshot.piles.club || []
@@ -40912,7 +40979,8 @@
         sortFodder: sortSbcFodder,
         isSpecialItem: isSbcSpecialItem,
         broadSpec,
-        requiredItems: selectionPolicy?.requiredItems || []
+        requiredItems: selectionPolicy?.requiredItems || [],
+        resolveRequirementItem: liveRequirementItemsById ? (item) => liveRequirementItemsById.get(Number(item?.id || 0)) || item : (item) => item
       });
       if (typeof selectionPolicy?.candidateFilter !== "function") return candidates;
       const entries = candidates.entries.filter((entry) => {
@@ -47214,7 +47282,8 @@
         protectedItems: [
           ...pendingRefs,
           ...additionalProtected
-        ]
+        ],
+        allowRequiredSpecial: options.allowRequiredSpecial === true
       });
     }
     function rollingItemMatchesRef(item, ref) {
@@ -47228,14 +47297,15 @@
         ...options.additionalProtected || [],
         ...options.allowPrimaryDuplicates === true ? [] : runtime.primaryDuplicateRefs || []
       ], {
-        allowPrimaryDuplicates: options.allowPrimaryDuplicates === true
+        allowPrimaryDuplicates: options.allowPrimaryDuplicates === true,
+        allowRequiredSpecial: options.allowRequiredSpecial === true
       });
       const reserveRatings = options.allowProvisionsReserve === true ? /* @__PURE__ */ new Set() : new Set(rollingProvisionsReserveRatings(loopDef));
       const protectionRating = rollingProtectionRating(loopDef);
       const minRating = Number(options.minRating);
       const maxRating = Number(options.maxRating);
       for (const item of players || []) {
-        if (rollingLiveRequiredSpecial(item, runtime.primaryContext?.model) || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef)) {
+        if (options.allowRequiredSpecial !== true && (rollingLiveRequiredSpecial(item, runtime.primaryContext?.model) || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef))) {
           fail2(`${loopDef.name}: recovery squad attempted to consume a Required Special card`);
         }
         if (protection.protectedItems.some((ref) => rollingItemMatchesRef(item, ref))) {
@@ -47506,6 +47576,22 @@
           ].includes(code)
         };
       }
+      const storageItemsConsumed = rollingSelectionStorageConsumption(runtime, fill.selection);
+      if (typeof options.validateSelection === "function") {
+        const selectionValidation = await options.validateSelection({
+          selection: fill.selection,
+          storageItemsConsumed
+        });
+        if (selectionValidation?.ok === false) {
+          log(`${loopDef.name}: ${recoveryDef.name} rating selection rejected before submit (${selectionValidation.reasonCode || "selection validation failed"}): ${selectionValidation.reason || "insufficient recovery effect"}`);
+          return {
+            status: "unavailable",
+            reason: selectionValidation.reason || `${recoveryDef.name} selection did not release enough Storage capacity`,
+            reasonCode: selectionValidation.reasonCode || "RECOVERY_SELECTION_INVALID",
+            details: selectionValidation.details || null
+          };
+        }
+      }
       if (recoveryDef.dryRun) {
         return { status: "planned", reason: `dry-run ${recoveryDef.name} squad plan complete` };
       }
@@ -47600,7 +47686,10 @@
         ...submission,
         status: submission.submitted ? "submitted" : submission.status,
         inventoryDelta: runtime.lastMutation?.delta || null,
-        details: { rewardObserved: backgroundSubmission?.rewardObserved === true }
+        details: {
+          rewardObserved: backgroundSubmission?.rewardObserved === true,
+          storageItemsConsumed
+        }
       };
     }
     async function openRollingRecoveryReward(loopDef, runtime, definition, pack, options = {}) {
@@ -48137,20 +48226,31 @@
       };
     }
     function rollingStorageSinkSelectionPolicy(loopDef, runtime, options = {}) {
-      return createRollingRatingRecoverySelectionPolicy({
+      const requiredSpecialRoles = storageSinkRequiredSpecialRoles(options.model);
+      const selectionPolicy = createRollingRatingRecoverySelectionPolicy({
         ledger: runtime.coordinator.getLedger(),
         protectionRating: rollingProtectionRating(loopDef),
         reserveRatings: false,
         protectedItems: rollingNonPrimaryPendingRefs(runtime),
-        requiredItems: options.requiredItems || []
+        requiredItems: options.requiredItems || [],
+        exclusiveRoles: requiredSpecialRoles,
+        allowRequiredSpecial: requiredSpecialRoles.length > 0
       });
+      if (!requiredSpecialRoles.length) return selectionPolicy;
+      return {
+        ...selectionPolicy,
+        candidateFilter: createRollingRequiredSpecialSourceFilter({
+          constraintIndexes: requiredSpecialRoles.map((role) => role.constraintIndex),
+          isClubTotw: isTotwItem
+        })
+      };
     }
     async function selectRollingStorageSink89Squad(loopDef, runtime, context, snapshot) {
       const activeLoopDef = rollingStorageSinkLoopDefForPiles(
         context,
         storageSinkSquadSourceStrategy(89).priorityPiles
       );
-      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime);
+      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model });
       const candidates = buildRatingSbcCandidateEntries(
         activeLoopDef,
         context.model,
@@ -48160,7 +48260,8 @@
       const maxRating = rollingProtectionRating(loopDef);
       const prepared = prepareStorageSink89Candidates(candidates.entries, {
         primaryRefs: runtime.primaryDuplicateRefs || [],
-        maxRating
+        maxRating,
+        protectedItems: basePolicy.protectedItems
       });
       if (prepared.requiredEntries.length > Number(context.model.requiredPlayerCount || 0)) {
         return {
@@ -48170,7 +48271,8 @@
         };
       }
       const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
-        requiredItems: prepared.requiredItems
+        requiredItems: prepared.requiredItems,
+        model: context.model
       });
       const selection = await findOptimalRatingSbcSelection(
         prepared.entries,
@@ -48186,7 +48288,7 @@
     async function selectRollingStorageSink88Squad(loopDef, runtime, context, snapshot) {
       const buildFor = (priorityPiles) => {
         const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, priorityPiles);
-        const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime);
+        const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model });
         return buildRatingSbcCandidateEntries(
           activeLoopDef,
           context.model,
@@ -48198,7 +48300,8 @@
         const forcedClubIds = new Set(forcedClubEntries.map((entry) => Number(entry.item?.id || 0)));
         const entries = forcedClubEntries.length ? candidates.entries.filter((entry) => entry.pileName === "storage" || entry.pileName === "club" && forcedClubIds.has(Number(entry.item?.id || 0))) : candidates.entries;
         const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
-          requiredItems: forcedClubEntries.map((entry) => liveItemRef(entry.item, entry.pileName))
+          requiredItems: forcedClubEntries.map((entry) => liveItemRef(entry.item, entry.pileName)),
+          model: context.model
         });
         return {
           candidates,
@@ -48217,7 +48320,9 @@
       const maxRating = rollingProtectionRating(loopDef);
       const clubEntries = selectStorageSinkClubFallbackEntries(storageAndClubCandidates.entries, {
         count: STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
-        maxRating
+        maxRating,
+        requiredConstraintIndexes: storageSinkRequiredSpecialRoles(context.model).map((role) => role.constraintIndex),
+        protectedItems: rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model }).protectedItems
       });
       let lastFailure = storageOnly.selection;
       for (let clubCount = 1; clubCount <= STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD; clubCount++) {
@@ -48292,16 +48397,21 @@
       return { ok: true, players, itemRefs };
     }
     function validateRollingStorageSinkPlayers(loopDef, runtime, context, players, options = {}) {
+      const requiredSpecialRoles = storageSinkRequiredSpecialRoles(context.model);
       assertRollingRecoveryItems(loopDef, runtime, players, {
         allowProvisionsReserve: true,
         allowSpecial: true,
-        allowPrimaryDuplicates: true
+        allowPrimaryDuplicates: true,
+        allowRequiredSpecial: requiredSpecialRoles.length > 0
       });
       return validateRatingSbcModelAgainstItems2(
         context.model,
         players,
         options.checkSavedChallenge === true ? context.challenge : null,
-        { allowOtherSpecialAsOrdinary: true }
+        {
+          allowOtherSpecialAsOrdinary: true,
+          exclusiveRoles: requiredSpecialRoles
+        }
       );
     }
     function createRollingStorageSinkSubmissionValidators(loopDef, runtime, context, label) {
@@ -48730,6 +48840,106 @@
         incompleteCount: incomplete.length
       };
     }
+    function rollingRatingHistogram(items = []) {
+      const counts = /* @__PURE__ */ new Map();
+      for (const item of items) {
+        const rating = Number(item?.rating || item?.item?.rating || 0);
+        if (!rating) continue;
+        counts.set(rating, Number(counts.get(rating) || 0) + 1);
+      }
+      return Object.fromEntries([...counts.entries()].sort((left, right) => left[0] - right[0]));
+    }
+    function rollingCandidatePileDiagnostic(entries = []) {
+      const result = {};
+      for (const pile of ["unassigned", "storage", "transfer", "club"]) {
+        const items = entries.filter((entry) => String(entry?.pileName || "") === pile).map((entry) => entry.item).filter(Boolean);
+        result[pile] = {
+          count: items.length,
+          ratings: rollingRatingHistogram(items)
+        };
+      }
+      return result;
+    }
+    function rollingSnapshotPileDiagnostic(snapshot = {}) {
+      return Object.fromEntries(["unassigned", "storage", "transfer", "club"].map((pile) => {
+        const players = (snapshot?.piles?.[pile] || []).filter(isPlayer2);
+        return [pile, {
+          count: players.length,
+          ratings: rollingRatingHistogram(players)
+        }];
+      }));
+    }
+    function rollingStorageSinkAdmissionDiagnostic(activeLoopDef, model, selectionPolicy, snapshot, candidates) {
+      const settings = getFsuSettings();
+      const safetyContext = {
+        settings,
+        protectedItemIds: new Set((activeLoopDef.protectedItemIds || []).map(Number).filter(Boolean)),
+        protectedDefinitionIds: new Set((activeLoopDef.protectedDefinitionIds || []).map(Number).filter(Boolean)),
+        lockedItemIds: new Set((settings.lockedItemIds || []).map(Number).filter(Boolean)),
+        lockedDefinitionIds: new Set((settings.lockedDefinitionIds || []).map(Number).filter(Boolean)),
+        excludedLeagueIds: (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0),
+        roleAware: selectionPolicy !== null,
+        skipRatingLimit: selectionPolicy !== null
+      };
+      const candidateEntries = candidates?.entries || [];
+      const candidateByItemId = new Map(candidateEntries.map((entry) => [
+        Number(entry.item?.id || 0),
+        entry
+      ]));
+      const candidateByDefinition = /* @__PURE__ */ new Map();
+      candidateEntries.forEach((entry) => {
+        const definitionId2 = Number(entry.item?.definitionId || 0);
+        if (definitionId2 && !candidateByDefinition.has(definitionId2)) candidateByDefinition.set(definitionId2, entry);
+      });
+      const rejectedByReason = {};
+      const rejectedSamples = {};
+      const addRejection = (reason, item) => {
+        rejectedByReason[reason] = Number(rejectedByReason[reason] || 0) + 1;
+        const samples = rejectedSamples[reason] || [];
+        if (samples.length < 4) {
+          samples.push({
+            id: Number(item?.id || 0),
+            definitionId: Number(item?.definitionId || 0),
+            rating: Number(item?.rating || 0)
+          });
+        }
+        rejectedSamples[reason] = samples;
+      };
+      let acceptedAsStorage = 0;
+      let representedByUnassigned = 0;
+      const storagePlayers = (snapshot?.piles?.storage || []).filter(isPlayer2);
+      for (const item of storagePlayers) {
+        const itemId5 = Number(item?.id || 0);
+        const exactCandidate = candidateByItemId.get(itemId5);
+        if (exactCandidate?.pileName === "storage") {
+          acceptedAsStorage++;
+          continue;
+        }
+        if (exactCandidate?.pileName === "unassigned") {
+          representedByUnassigned++;
+          addRejection("represented-by-unassigned-duplicate", item);
+          continue;
+        }
+        const reasons = getSbcProtectionReasons(item, activeLoopDef, {
+          ...safetyContext,
+          allowedSpecialCount: Number(model?.requiredPlayerCount || 0),
+          specialIndex: isSbcSpecialItem(item) ? 1 : 0
+        });
+        if (reasons.length) {
+          reasons.forEach((reason) => addRejection(reason, item));
+          continue;
+        }
+        const representative = candidateByDefinition.get(Number(item?.definitionId || 0));
+        addRejection(representative ? `definition-represented-by-${representative.pileName}` : "candidate-builder-filtered", item);
+      }
+      return {
+        rawStoragePlayers: storagePlayers.length,
+        acceptedAsStorage,
+        representedByUnassigned,
+        rejectedByReason,
+        rejectedSamples
+      };
+    }
     async function selectRollingGenericStorageSinkSquad(loopDef, runtime, context, snapshot) {
       const strategy = genericStorageSinkSquadSourceStrategy(context?.targetRating);
       if (!strategy) {
@@ -48740,7 +48950,7 @@
         };
       }
       const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, strategy.priorityPiles);
-      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime);
+      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model });
       const candidates = buildRatingSbcCandidateEntries(
         activeLoopDef,
         context.model,
@@ -48750,19 +48960,43 @@
       const maxRating = rollingProtectionRating(loopDef);
       const clubEntries = selectStorageSinkClubFallbackEntries(candidates.entries, {
         count: strategy.maxClubCount,
-        maxRating
+        maxRating,
+        requiredConstraintIndexes: storageSinkRequiredSpecialRoles(context.model).map((role) => role.constraintIndex),
+        protectedItems: basePolicy.protectedItems
       });
       let lastFailure = null;
+      let requiredDiagnostic = null;
+      const attemptDiagnostics = [];
       for (let clubCount = 0; clubCount <= strategy.maxClubCount; clubCount++) {
         if (clubCount > clubEntries.length) break;
         const prepared = prepareGenericStorageSinkCandidates(candidates.entries, {
           primaryRefs: runtime.primaryDuplicateRefs || [],
           maxRating,
           requiredPlayerCount: context.model.requiredPlayerCount,
-          clubEntries: clubEntries.slice(0, clubCount)
+          clubEntries: clubEntries.slice(0, clubCount),
+          protectedItems: basePolicy.protectedItems
         });
+        if (!requiredDiagnostic) {
+          requiredDiagnostic = {
+            configuredPrimaryRefs: Number(runtime.primaryDuplicateRefs?.length || 0),
+            matchedRequiredEntries: prepared.requiredEntries.length,
+            deferredProtectedEntries: prepared.deferredProtectedEntries.slice(0, 16).map((entry) => ({
+              itemId: Number(entry.item?.id || 0),
+              signalId: Number(entry.signal?.id || 0),
+              definitionId: Number(entry.item?.definitionId || 0),
+              rating: Number(entry.item?.rating || 0)
+            })),
+            requiredEntries: prepared.requiredEntries.slice(0, 16).map((entry) => ({
+              itemId: Number(entry.item?.id || 0),
+              signalId: Number(entry.signal?.id || 0),
+              definitionId: Number(entry.item?.definitionId || 0),
+              rating: Number(entry.item?.rating || 0)
+            }))
+          };
+        }
         const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
-          requiredItems: prepared.requiredItems
+          requiredItems: prepared.requiredItems,
+          model: context.model
         });
         const selection = await findOptimalRatingSbcSelection(
           prepared.entries,
@@ -48772,7 +49006,22 @@
         );
         if (selection.ok) return selection;
         lastFailure = selection;
+        attemptDiagnostics.push({
+          clubFill: clubCount,
+          reasonCode: selection.reasonCode || selection.missing?.code || "RECOVERY_MATERIAL_SHORTAGE",
+          reason: selection.reason || selection.missing?.reason || "no safe rating plan",
+          prepared: rollingCandidatePileDiagnostic(prepared.entries),
+          policy: selection.details?.policy || null,
+          selection: selection.diagnostics?.[0] || null
+        });
       }
+      log(`${loopDef.name}: generic Storage pressure raw player diagnostic: ${diagnosticJson(rollingSnapshotPileDiagnostic(snapshot))}`);
+      log(`${loopDef.name}: generic Storage pressure safe unique candidate diagnostic: ${diagnosticJson(rollingCandidatePileDiagnostic(candidates.entries))}`);
+      log(`${loopDef.name}: generic Storage pressure Storage admission diagnostic: ${diagnosticJson(rollingStorageSinkAdmissionDiagnostic(activeLoopDef, context.model, basePolicy, snapshot, candidates))}`);
+      log(`${loopDef.name}: generic Storage pressure required Unassigned diagnostic: ${diagnosticJson(requiredDiagnostic)}`);
+      attemptDiagnostics.forEach((diagnostic, index) => {
+        log(`${loopDef.name}: generic Storage pressure plan attempt ${index + 1}/${attemptDiagnostics.length}: ${diagnosticJson(diagnostic)}`);
+      });
       return {
         ...lastFailure || {},
         ok: false,
@@ -48822,7 +49071,16 @@
     async function runRollingGenericStorageSinkRecovery(loopDef, runtime, capability) {
       const loaded = await loadRollingGenericStorageSinkContexts(loopDef, capability);
       if (loaded.status !== "ready") return loaded;
-      const context = [...loaded.contexts].sort((left, right) => Number(right.targetRating || 0) - Number(left.targetRating || 0) || Number(right.challengeId || 0) - Number(left.challengeId || 0))[0];
+      const context = nextGenericStorageSinkContext(loaded.contexts);
+      if (!context) {
+        return {
+          status: "unavailable",
+          reason: `${loaded.sinkDef.name} has no supported next Storage pressure challenge`,
+          reasonCode: "LIVE_REQUIREMENT_UNAVAILABLE"
+        };
+      }
+      const requiredSpecialRoles = storageSinkRequiredSpecialRoles(context.model);
+      log(`${loopDef.name}: ${loaded.sinkDef.name} next live Challenge #${context.challengeId || "?"} target:${context.targetRating}, Required Special:${requiredSpecialRoles.map((role) => role.label).join("/") || "none"}`);
       const squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context);
       if (!squadPlan.ok) return { status: "unavailable", ...squadPlan };
       const finalChallenge = loaded.incompleteCount === 1;
@@ -48891,13 +49149,25 @@
           { status: "resolved", loop: capability.loop }
         ) : await runRollingGenericStorageSinkRecovery(loopDef, runtime, capability);
         if (result?.status !== "unavailable") return result;
-        unavailable.push(`${capability.setName || `Set #${capability.setId}`}: ${result.reason || "unavailable"}`);
+        unavailable.push({ capability, result });
         if (definition?.mode === "selected") break;
       }
+      const failureCodes = [...new Set(unavailable.map(({ result }) => result?.reasonCode).filter(Boolean))];
+      const specificFailure = unavailable.length && failureCodes.length === 1 ? unavailable[0].result : null;
       return {
+        ...specificFailure || {},
         status: "unavailable",
-        reason: unavailable.join("; ") || "no validated Storage pressure SBC capability is available",
-        reasonCode: "STORAGE_SINK_CAPABILITY_UNAVAILABLE"
+        reason: unavailable.map(({ capability, result }) => `${capability.setName || `Set #${capability.setId}`}: ${result.reason || "unavailable"}`).join("; ") || "no validated Storage pressure SBC capability is available",
+        reasonCode: specificFailure?.reasonCode || "STORAGE_SINK_CAPABILITY_UNAVAILABLE",
+        details: {
+          ...specificFailure?.details || {},
+          capabilityFailures: unavailable.map(({ capability, result }) => ({
+            setId: capability.setId,
+            setName: capability.setName,
+            reason: result.reason || null,
+            reasonCode: result.reasonCode || null
+          }))
+        }
       };
     }
     function publishRollingTelemetry(loopDef, runtime, update = {}) {
@@ -49452,10 +49722,17 @@
             runtime,
             loopDef.rollingStorageSink
           ),
-          recoverRequiredSpecial: async () => {
+          recoverRequiredSpecial: async ({ context } = {}) => {
             const definition = rollingRecoveryDef(loopDef.rollingTotwUpgrade, loopDef);
             if (!rollingCapabilityAvailable(definition)) {
               return { status: "unavailable", reason: "dynamic 84+ TOTW Upgrade capability is unavailable" };
+            }
+            if (context?.trigger === "storage-sink-required-special-shortage") {
+              log(`${loopDef.name}: Storage pressure SBC lacks its Required Special; crafting ${definition.name} from Storage-first material before retrying Storage routing`);
+              return submitRollingRatingRecovery(loopDef, runtime, definition, {
+                priorityPiles: ["storage", "transfer", "club"],
+                validateSelection: ({ storageItemsConsumed }) => validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed)
+              });
             }
             const pack = await findRewardPack(definition, null, {
               attempts: 2,

@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createItemSnapshot } from '../../src/domain/contracts.js';
+import { loadUserscript } from '../helpers/load-userscript.js';
 import {
   buildRatingCandidateEntries,
   finalizeRequiredCandidateDiagnostics,
@@ -10,6 +12,99 @@ function item(id, definitionId, rating, overrides = {}) {
 }
 
 describe('rating candidate integration planning', () => {
+  it('evaluates requirements against a resolved EA entity while retaining the Ledger snapshot', () => {
+    const snapshot = createItemSnapshot({
+      id: 41,
+      definitionId: 401,
+      type: 'player',
+      rating: 91,
+      groups: [44, 83],
+    }, 'club');
+    const live = {
+      ...snapshot,
+      isRuntimeEntity: true,
+    };
+
+    const candidates = buildRatingCandidateEntries({
+      model: {
+        constraints: [{ matches: (candidate) => candidate.isRuntimeEntity === true }],
+      },
+      settings: {},
+      piles: ['club'],
+      getPileItems: () => [snapshot],
+      submissionItems: [snapshot],
+      isSafe: () => true,
+      isDuplicate: () => false,
+      pileNeedsDuplicateSignalResolution: () => false,
+      sortFodder: (entries) => [...entries],
+      isSpecialItem: () => true,
+      resolveRequirementItem: (candidate) => (candidate.id === live.id ? live : candidate),
+    });
+
+    expect(candidates.entries).toEqual([
+      expect.objectContaining({
+        item: snapshot,
+        requirementMatches: [true],
+      }),
+    ]);
+  });
+
+  it('recognizes normalized Ledger duplicate snapshots without EA prototype methods', async () => {
+    const { api } = await loadUserscript();
+    const signal = createItemSnapshot({
+      id: 20,
+      definitionId: 200,
+      type: 'player',
+      rating: 84,
+      duplicate: true,
+      duplicateId: 30,
+    }, 'unassigned');
+    const resolved = createItemSnapshot({
+      id: 30,
+      definitionId: 200,
+      type: 'player',
+      rating: 84,
+    }, 'club');
+
+    expect(signal.isDuplicate).toBeUndefined();
+    expect(api.isDuplicate(signal)).toBe(true);
+    expect(api.isDuplicate({ duplicate: true, duplicateId: 0 })).toBe(true);
+    expect(api.isDuplicate({ duplicate: false, duplicateId: 30 })).toBe(true);
+    expect(api.isDuplicate({ duplicate: false, duplicateId: 0 })).toBe(false);
+
+    const candidates = buildRatingCandidateEntries({
+      model: { constraints: [] },
+      settings: {},
+      piles: ['unassigned', 'club'],
+      getPileItems: (pileName) => (pileName === 'unassigned' ? [signal] : [resolved]),
+      submissionItems: [resolved],
+      isSafe: () => true,
+      isDuplicate: api.isDuplicate,
+      pileNeedsDuplicateSignalResolution: (pileName) => pileName === 'unassigned',
+      sortFodder: (entries) => [...entries],
+      isSpecialItem: () => false,
+    });
+    expect(candidates.entries).toEqual([
+      expect.objectContaining({ item: resolved, signal, pileName: 'unassigned' }),
+    ]);
+    expect(candidates.resolvedSignals).toEqual({ unassigned: 1 });
+  });
+
+  it('keeps the live EA duplicate method authoritative over stale scalar metadata', async () => {
+    const { api } = await loadUserscript();
+
+    expect(api.isDuplicate({
+      duplicate: true,
+      duplicateId: 30,
+      isDuplicate: () => false,
+    })).toBe(false);
+    expect(api.isDuplicate({
+      duplicate: false,
+      duplicateId: 0,
+      isDuplicate: () => true,
+    })).toBe(true);
+  });
+
   it('resolves duplicate signals to submit-cache items and keeps the highest-priority definition', () => {
     const signal = item(20, 200, 84, { duplicateId: 30, duplicate: true });
     const resolved = item(30, 200, 84);

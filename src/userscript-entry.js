@@ -170,11 +170,13 @@ import {
 } from './selection/rating-candidates.js';
 import {
   genericStorageSinkSquadSourceStrategy,
+  nextGenericStorageSinkContext,
   nextStorageSinkContext,
   planMultiSquadRatingSelections,
   prepareStorageSink89Candidates,
   prepareGenericStorageSinkCandidates,
   selectStorageSinkClubFallbackEntries,
+  storageSinkRequiredSpecialRoles,
   STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
   storageSinkSquadSourceStrategy,
   validateStorageRecoveryHeadroom,
@@ -2599,7 +2601,10 @@ function updateLoopControls() {
   }
 
   function isDuplicate(item) {
-    try { return !!item?.isDuplicate?.(); } catch { return !!item?.duplicateId; }
+    try {
+      if (typeof item?.isDuplicate === 'function') return item.isDuplicate() === true;
+    } catch { }
+    return item?.duplicate === true || Number(item?.duplicateId || 0) > 0;
   }
 
   function isTradeable(item) {
@@ -5603,6 +5608,12 @@ function updateLoopControls() {
     const readPile = inventorySnapshot?.piles
       ? (pileName) => inventorySnapshot.piles[pileName] || []
       : getPileItemsByName;
+    const liveRequirementItemsById = inventorySnapshot?.piles
+      ? new Map(['unassigned', 'storage', 'transfer', 'club']
+          .flatMap((pileName) => getPileItemsByName(pileName))
+          .map((item) => [Number(item?.id || 0), item])
+          .filter(([id]) => id > 0))
+      : null;
     const submissionItems = inventorySnapshot?.piles
       ? uniqueItems([
           ...(inventorySnapshot.piles.storage || []),
@@ -5622,6 +5633,9 @@ function updateLoopControls() {
       isSpecialItem: isSbcSpecialItem,
       broadSpec,
       requiredItems: selectionPolicy?.requiredItems || [],
+      resolveRequirementItem: liveRequirementItemsById
+        ? (item) => liveRequirementItemsById.get(Number(item?.id || 0)) || item
+        : (item) => item,
     });
     if (typeof selectionPolicy?.candidateFilter !== 'function') return candidates;
     const entries = candidates.entries.filter((entry) => {
@@ -12646,6 +12660,7 @@ function updateLoopControls() {
         ...pendingRefs,
         ...additionalProtected,
       ],
+      allowRequiredSpecial: options.allowRequiredSpecial === true,
     });
   }
 
@@ -12663,6 +12678,7 @@ function updateLoopControls() {
       ...(options.allowPrimaryDuplicates === true ? [] : (runtime.primaryDuplicateRefs || [])),
     ], {
       allowPrimaryDuplicates: options.allowPrimaryDuplicates === true,
+      allowRequiredSpecial: options.allowRequiredSpecial === true,
     });
     const reserveRatings = options.allowProvisionsReserve === true
       ? new Set()
@@ -12671,8 +12687,10 @@ function updateLoopControls() {
     const minRating = Number(options.minRating);
     const maxRating = Number(options.maxRating);
     for (const item of players || []) {
-      if (rollingLiveRequiredSpecial(item, runtime.primaryContext?.model)
-        || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef)) {
+      if (options.allowRequiredSpecial !== true && (
+        rollingLiveRequiredSpecial(item, runtime.primaryContext?.model)
+          || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef)
+      )) {
         fail(`${loopDef.name}: recovery squad attempted to consume a Required Special card`);
       }
       if (protection.protectedItems.some((ref) => rollingItemMatchesRef(item, ref))) {
@@ -12962,6 +12980,22 @@ function updateLoopControls() {
         ].includes(code),
       };
     }
+    const storageItemsConsumed = rollingSelectionStorageConsumption(runtime, fill.selection);
+    if (typeof options.validateSelection === 'function') {
+      const selectionValidation = await options.validateSelection({
+        selection: fill.selection,
+        storageItemsConsumed,
+      });
+      if (selectionValidation?.ok === false) {
+        log(`${loopDef.name}: ${recoveryDef.name} rating selection rejected before submit (${selectionValidation.reasonCode || 'selection validation failed'}): ${selectionValidation.reason || 'insufficient recovery effect'}`);
+        return {
+          status: 'unavailable',
+          reason: selectionValidation.reason || `${recoveryDef.name} selection did not release enough Storage capacity`,
+          reasonCode: selectionValidation.reasonCode || 'RECOVERY_SELECTION_INVALID',
+          details: selectionValidation.details || null,
+        };
+      }
+    }
     if (recoveryDef.dryRun) {
       return { status: 'planned', reason: `dry-run ${recoveryDef.name} squad plan complete` };
     }
@@ -13059,7 +13093,10 @@ function updateLoopControls() {
       ...submission,
       status: submission.submitted ? 'submitted' : submission.status,
       inventoryDelta: runtime.lastMutation?.delta || null,
-      details: { rewardObserved: backgroundSubmission?.rewardObserved === true },
+      details: {
+        rewardObserved: backgroundSubmission?.rewardObserved === true,
+        storageItemsConsumed,
+      },
     };
   }
 
@@ -13665,13 +13702,24 @@ function updateLoopControls() {
   }
 
   function rollingStorageSinkSelectionPolicy(loopDef, runtime, options = {}) {
-    return createRollingRatingRecoverySelectionPolicy({
+    const requiredSpecialRoles = storageSinkRequiredSpecialRoles(options.model);
+    const selectionPolicy = createRollingRatingRecoverySelectionPolicy({
       ledger: runtime.coordinator.getLedger(),
       protectionRating: rollingProtectionRating(loopDef),
       reserveRatings: false,
       protectedItems: rollingNonPrimaryPendingRefs(runtime),
       requiredItems: options.requiredItems || [],
+      exclusiveRoles: requiredSpecialRoles,
+      allowRequiredSpecial: requiredSpecialRoles.length > 0,
     });
+    if (!requiredSpecialRoles.length) return selectionPolicy;
+    return {
+      ...selectionPolicy,
+      candidateFilter: createRollingRequiredSpecialSourceFilter({
+        constraintIndexes: requiredSpecialRoles.map((role) => role.constraintIndex),
+        isClubTotw: isTotwItem,
+      }),
+    };
   }
 
   async function selectRollingStorageSink89Squad(loopDef, runtime, context, snapshot) {
@@ -13679,7 +13727,7 @@ function updateLoopControls() {
       context,
       storageSinkSquadSourceStrategy(89).priorityPiles,
     );
-    const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime);
+    const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model });
     const candidates = buildRatingSbcCandidateEntries(
       activeLoopDef,
       context.model,
@@ -13690,6 +13738,7 @@ function updateLoopControls() {
     const prepared = prepareStorageSink89Candidates(candidates.entries, {
       primaryRefs: runtime.primaryDuplicateRefs || [],
       maxRating,
+      protectedItems: basePolicy.protectedItems,
     });
     if (prepared.requiredEntries.length > Number(context.model.requiredPlayerCount || 0)) {
       return {
@@ -13700,6 +13749,7 @@ function updateLoopControls() {
     }
     const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
       requiredItems: prepared.requiredItems,
+      model: context.model,
     });
     const selection = await findOptimalRatingSbcSelection(
       prepared.entries,
@@ -13716,7 +13766,7 @@ function updateLoopControls() {
   async function selectRollingStorageSink88Squad(loopDef, runtime, context, snapshot) {
     const buildFor = (priorityPiles) => {
       const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, priorityPiles);
-      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime);
+      const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model });
       return buildRatingSbcCandidateEntries(
         activeLoopDef,
         context.model,
@@ -13734,6 +13784,7 @@ function updateLoopControls() {
         : candidates.entries;
       const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
         requiredItems: forcedClubEntries.map((entry) => liveItemRef(entry.item, entry.pileName)),
+        model: context.model,
       });
       return {
         candidates,
@@ -13755,6 +13806,10 @@ function updateLoopControls() {
     const clubEntries = selectStorageSinkClubFallbackEntries(storageAndClubCandidates.entries, {
       count: STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
       maxRating,
+      requiredConstraintIndexes: storageSinkRequiredSpecialRoles(context.model)
+        .map((role) => role.constraintIndex),
+      protectedItems: rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model })
+        .protectedItems,
     });
     let lastFailure = storageOnly.selection;
     for (let clubCount = 1; clubCount <= STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD; clubCount++) {
@@ -13844,16 +13899,21 @@ function updateLoopControls() {
   }
 
   function validateRollingStorageSinkPlayers(loopDef, runtime, context, players, options = {}) {
+    const requiredSpecialRoles = storageSinkRequiredSpecialRoles(context.model);
     assertRollingRecoveryItems(loopDef, runtime, players, {
       allowProvisionsReserve: true,
       allowSpecial: true,
       allowPrimaryDuplicates: true,
+      allowRequiredSpecial: requiredSpecialRoles.length > 0,
     });
     return validateRatingSbcModelAgainstItems(
       context.model,
       players,
       options.checkSavedChallenge === true ? context.challenge : null,
-      { allowOtherSpecialAsOrdinary: true },
+      {
+        allowOtherSpecialAsOrdinary: true,
+        exclusiveRoles: requiredSpecialRoles,
+      },
     );
   }
 
@@ -14299,6 +14359,113 @@ function updateLoopControls() {
     };
   }
 
+  function rollingRatingHistogram(items = []) {
+    const counts = new Map();
+    for (const item of items) {
+      const rating = Number(item?.rating || item?.item?.rating || 0);
+      if (!rating) continue;
+      counts.set(rating, Number(counts.get(rating) || 0) + 1);
+    }
+    return Object.fromEntries([...counts.entries()].sort((left, right) => left[0] - right[0]));
+  }
+
+  function rollingCandidatePileDiagnostic(entries = []) {
+    const result = {};
+    for (const pile of ['unassigned', 'storage', 'transfer', 'club']) {
+      const items = entries
+        .filter((entry) => String(entry?.pileName || '') === pile)
+        .map((entry) => entry.item)
+        .filter(Boolean);
+      result[pile] = {
+        count: items.length,
+        ratings: rollingRatingHistogram(items),
+      };
+    }
+    return result;
+  }
+
+  function rollingSnapshotPileDiagnostic(snapshot = {}) {
+    return Object.fromEntries(['unassigned', 'storage', 'transfer', 'club'].map((pile) => {
+      const players = (snapshot?.piles?.[pile] || []).filter(isPlayer);
+      return [pile, {
+        count: players.length,
+        ratings: rollingRatingHistogram(players),
+      }];
+    }));
+  }
+
+  function rollingStorageSinkAdmissionDiagnostic(activeLoopDef, model, selectionPolicy, snapshot, candidates) {
+    const settings = getFsuSettings();
+    const safetyContext = {
+      settings,
+      protectedItemIds: new Set((activeLoopDef.protectedItemIds || []).map(Number).filter(Boolean)),
+      protectedDefinitionIds: new Set((activeLoopDef.protectedDefinitionIds || []).map(Number).filter(Boolean)),
+      lockedItemIds: new Set((settings.lockedItemIds || []).map(Number).filter(Boolean)),
+      lockedDefinitionIds: new Set((settings.lockedDefinitionIds || []).map(Number).filter(Boolean)),
+      excludedLeagueIds: (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0),
+      roleAware: selectionPolicy !== null,
+      skipRatingLimit: selectionPolicy !== null,
+    };
+    const candidateEntries = candidates?.entries || [];
+    const candidateByItemId = new Map(candidateEntries.map((entry) => [
+      Number(entry.item?.id || 0),
+      entry,
+    ]));
+    const candidateByDefinition = new Map();
+    candidateEntries.forEach((entry) => {
+      const definitionId = Number(entry.item?.definitionId || 0);
+      if (definitionId && !candidateByDefinition.has(definitionId)) candidateByDefinition.set(definitionId, entry);
+    });
+    const rejectedByReason = {};
+    const rejectedSamples = {};
+    const addRejection = (reason, item) => {
+      rejectedByReason[reason] = Number(rejectedByReason[reason] || 0) + 1;
+      const samples = rejectedSamples[reason] || [];
+      if (samples.length < 4) {
+        samples.push({
+          id: Number(item?.id || 0),
+          definitionId: Number(item?.definitionId || 0),
+          rating: Number(item?.rating || 0),
+        });
+      }
+      rejectedSamples[reason] = samples;
+    };
+    let acceptedAsStorage = 0;
+    let representedByUnassigned = 0;
+    const storagePlayers = (snapshot?.piles?.storage || []).filter(isPlayer);
+    for (const item of storagePlayers) {
+      const itemId = Number(item?.id || 0);
+      const exactCandidate = candidateByItemId.get(itemId);
+      if (exactCandidate?.pileName === 'storage') {
+        acceptedAsStorage++;
+        continue;
+      }
+      if (exactCandidate?.pileName === 'unassigned') {
+        representedByUnassigned++;
+        addRejection('represented-by-unassigned-duplicate', item);
+        continue;
+      }
+      const reasons = getSbcProtectionReasons(item, activeLoopDef, {
+        ...safetyContext,
+        allowedSpecialCount: Number(model?.requiredPlayerCount || 0),
+        specialIndex: isSbcSpecialItem(item) ? 1 : 0,
+      });
+      if (reasons.length) {
+        reasons.forEach((reason) => addRejection(reason, item));
+        continue;
+      }
+      const representative = candidateByDefinition.get(Number(item?.definitionId || 0));
+      addRejection(representative ? `definition-represented-by-${representative.pileName}` : 'candidate-builder-filtered', item);
+    }
+    return {
+      rawStoragePlayers: storagePlayers.length,
+      acceptedAsStorage,
+      representedByUnassigned,
+      rejectedByReason,
+      rejectedSamples,
+    };
+  }
+
   async function selectRollingGenericStorageSinkSquad(loopDef, runtime, context, snapshot) {
     const strategy = genericStorageSinkSquadSourceStrategy(context?.targetRating);
     if (!strategy) {
@@ -14309,7 +14476,7 @@ function updateLoopControls() {
       };
     }
     const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, strategy.priorityPiles);
-    const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime);
+    const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, { model: context.model });
     const candidates = buildRatingSbcCandidateEntries(
       activeLoopDef,
       context.model,
@@ -14320,8 +14487,13 @@ function updateLoopControls() {
     const clubEntries = selectStorageSinkClubFallbackEntries(candidates.entries, {
       count: strategy.maxClubCount,
       maxRating,
+      requiredConstraintIndexes: storageSinkRequiredSpecialRoles(context.model)
+        .map((role) => role.constraintIndex),
+      protectedItems: basePolicy.protectedItems,
     });
     let lastFailure = null;
+    let requiredDiagnostic = null;
+    const attemptDiagnostics = [];
     for (let clubCount = 0; clubCount <= strategy.maxClubCount; clubCount++) {
       if (clubCount > clubEntries.length) break;
       const prepared = prepareGenericStorageSinkCandidates(candidates.entries, {
@@ -14329,9 +14501,29 @@ function updateLoopControls() {
         maxRating,
         requiredPlayerCount: context.model.requiredPlayerCount,
         clubEntries: clubEntries.slice(0, clubCount),
+        protectedItems: basePolicy.protectedItems,
       });
+      if (!requiredDiagnostic) {
+        requiredDiagnostic = {
+          configuredPrimaryRefs: Number(runtime.primaryDuplicateRefs?.length || 0),
+          matchedRequiredEntries: prepared.requiredEntries.length,
+          deferredProtectedEntries: prepared.deferredProtectedEntries.slice(0, 16).map((entry) => ({
+            itemId: Number(entry.item?.id || 0),
+            signalId: Number(entry.signal?.id || 0),
+            definitionId: Number(entry.item?.definitionId || 0),
+            rating: Number(entry.item?.rating || 0),
+          })),
+          requiredEntries: prepared.requiredEntries.slice(0, 16).map((entry) => ({
+            itemId: Number(entry.item?.id || 0),
+            signalId: Number(entry.signal?.id || 0),
+            definitionId: Number(entry.item?.definitionId || 0),
+            rating: Number(entry.item?.rating || 0),
+          })),
+        };
+      }
       const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
         requiredItems: prepared.requiredItems,
+        model: context.model,
       });
       const selection = await findOptimalRatingSbcSelection(
         prepared.entries,
@@ -14341,7 +14533,22 @@ function updateLoopControls() {
       );
       if (selection.ok) return selection;
       lastFailure = selection;
+      attemptDiagnostics.push({
+        clubFill: clubCount,
+        reasonCode: selection.reasonCode || selection.missing?.code || 'RECOVERY_MATERIAL_SHORTAGE',
+        reason: selection.reason || selection.missing?.reason || 'no safe rating plan',
+        prepared: rollingCandidatePileDiagnostic(prepared.entries),
+        policy: selection.details?.policy || null,
+        selection: selection.diagnostics?.[0] || null,
+      });
     }
+    log(`${loopDef.name}: generic Storage pressure raw player diagnostic: ${diagnosticJson(rollingSnapshotPileDiagnostic(snapshot))}`);
+    log(`${loopDef.name}: generic Storage pressure safe unique candidate diagnostic: ${diagnosticJson(rollingCandidatePileDiagnostic(candidates.entries))}`);
+    log(`${loopDef.name}: generic Storage pressure Storage admission diagnostic: ${diagnosticJson(rollingStorageSinkAdmissionDiagnostic(activeLoopDef, context.model, basePolicy, snapshot, candidates))}`);
+    log(`${loopDef.name}: generic Storage pressure required Unassigned diagnostic: ${diagnosticJson(requiredDiagnostic)}`);
+    attemptDiagnostics.forEach((diagnostic, index) => {
+      log(`${loopDef.name}: generic Storage pressure plan attempt ${index + 1}/${attemptDiagnostics.length}: ${diagnosticJson(diagnostic)}`);
+    });
     return {
       ...(lastFailure || {}),
       ok: false,
@@ -14395,10 +14602,16 @@ function updateLoopControls() {
   async function runRollingGenericStorageSinkRecovery(loopDef, runtime, capability) {
     const loaded = await loadRollingGenericStorageSinkContexts(loopDef, capability);
     if (loaded.status !== 'ready') return loaded;
-    const context = [...loaded.contexts].sort((left, right) => (
-      Number(right.targetRating || 0) - Number(left.targetRating || 0)
-        || Number(right.challengeId || 0) - Number(left.challengeId || 0)
-    ))[0];
+    const context = nextGenericStorageSinkContext(loaded.contexts);
+    if (!context) {
+      return {
+        status: 'unavailable',
+        reason: `${loaded.sinkDef.name} has no supported next Storage pressure challenge`,
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    const requiredSpecialRoles = storageSinkRequiredSpecialRoles(context.model);
+    log(`${loopDef.name}: ${loaded.sinkDef.name} next live Challenge #${context.challengeId || '?'} target:${context.targetRating}, Required Special:${requiredSpecialRoles.map((role) => role.label).join('/') || 'none'}`);
     const squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context);
     if (!squadPlan.ok) return { status: 'unavailable', ...squadPlan };
     const finalChallenge = loaded.incompleteCount === 1;
@@ -14476,13 +14689,29 @@ function updateLoopControls() {
           )
         : await runRollingGenericStorageSinkRecovery(loopDef, runtime, capability);
       if (result?.status !== 'unavailable') return result;
-      unavailable.push(`${capability.setName || `Set #${capability.setId}`}: ${result.reason || 'unavailable'}`);
+      unavailable.push({ capability, result });
       if (definition?.mode === 'selected') break;
     }
+    const failureCodes = [...new Set(unavailable.map(({ result }) => result?.reasonCode).filter(Boolean))];
+    const specificFailure = unavailable.length && failureCodes.length === 1
+      ? unavailable[0].result
+      : null;
     return {
+      ...(specificFailure || {}),
       status: 'unavailable',
-      reason: unavailable.join('; ') || 'no validated Storage pressure SBC capability is available',
-      reasonCode: 'STORAGE_SINK_CAPABILITY_UNAVAILABLE',
+      reason: unavailable.map(({ capability, result }) => (
+        `${capability.setName || `Set #${capability.setId}`}: ${result.reason || 'unavailable'}`
+      )).join('; ') || 'no validated Storage pressure SBC capability is available',
+      reasonCode: specificFailure?.reasonCode || 'STORAGE_SINK_CAPABILITY_UNAVAILABLE',
+      details: {
+        ...(specificFailure?.details || {}),
+        capabilityFailures: unavailable.map(({ capability, result }) => ({
+          setId: capability.setId,
+          setName: capability.setName,
+          reason: result.reason || null,
+          reasonCode: result.reasonCode || null,
+        })),
+      },
     };
   }
 
@@ -15107,10 +15336,19 @@ function updateLoopControls() {
         runtime,
         loopDef.rollingStorageSink,
       ),
-      recoverRequiredSpecial: async () => {
+      recoverRequiredSpecial: async ({ context } = {}) => {
         const definition = rollingRecoveryDef(loopDef.rollingTotwUpgrade, loopDef);
         if (!rollingCapabilityAvailable(definition)) {
           return { status: 'unavailable', reason: 'dynamic 84+ TOTW Upgrade capability is unavailable' };
+        }
+        if (context?.trigger === 'storage-sink-required-special-shortage') {
+          log(`${loopDef.name}: Storage pressure SBC lacks its Required Special; crafting ${definition.name} from Storage-first material before retrying Storage routing`);
+          return submitRollingRatingRecovery(loopDef, runtime, definition, {
+            priorityPiles: ['storage', 'transfer', 'club'],
+            validateSelection: ({ storageItemsConsumed }) => (
+              validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed)
+            ),
+          });
         }
         const pack = await findRewardPack(definition, null, {
           attempts: 2,

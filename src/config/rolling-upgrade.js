@@ -191,6 +191,11 @@ function challengeSnapshot(challenge = {}) {
   };
 }
 
+function completedChallenge(challenge = {}) {
+  const status = normalizedText(challenge.status || challenge.state).toUpperCase();
+  return challenge.completed === true || status === 'COMPLETED' || status === 'COMPLETE';
+}
+
 export function parseRollingStorageSinkPickSnapshot(input = {}) {
   const set = input.set || {};
   const selector = input.selector || ROLLING_STORAGE_SINK_PICK_SELECTOR;
@@ -346,9 +351,14 @@ export function parseRollingStorageSinkSnapshot(input = {}) {
   if (!challenges.length) {
     return { status: 'ignored', setId, diagnostics: [`no Challenge has a target rating of ${minimumTarget}+`] };
   }
+  const actionableChallenges = challenges.filter((challenge) => !completedChallenge(challenge));
+  if (!actionableChallenges.length) {
+    return { status: 'ignored', setId, diagnostics: [`no incomplete Challenge has a target rating of ${minimumTarget}+`] };
+  }
   const diagnostics = [];
   if (!setId) diagnostics.push('stable SBC Set id is missing');
   challenges.forEach((challenge, index) => {
+    if (completedChallenge(challenge)) return;
     if (!challenge.challengeId) diagnostics.push(`challenge ${index + 1}: stable Challenge id is missing`);
     if (!challenge.requiredPlayerCount) diagnostics.push(`challenge ${index + 1}: required player count is missing`);
     if (!Array.isArray(challenge.eligibilityRequirements) || !challenge.eligibilityRequirements.length) {

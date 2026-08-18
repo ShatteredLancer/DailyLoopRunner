@@ -139,7 +139,7 @@ describe('Rolling runtime recovery helpers', () => {
     const loopDef = {
       name: 'Rolling Storage Sink',
       runtimeProtectionRating: 95,
-      expectedPlayers: 11,
+      expectedPlayerCount: 11,
     };
 
     const validators = api.createRollingStorageSinkSubmissionValidators(
@@ -156,6 +156,129 @@ describe('Rolling runtime recovery helpers', () => {
     squadSaved = true;
     expect(validators.postSave({ players, savedPlayers: players })).toBe(true);
     expect(readinessChecks).toBe(1);
+  });
+
+  it('allows exactly one Required Special through final Storage Sink validation', async () => {
+    const requiredSpecial = makePlayer({
+      id: 900,
+      definitionId: 9900,
+      rating: 95,
+      rareflag: 120,
+      groups: [19, 33, 44, 83],
+    });
+    requiredSpecial.pile = 'club';
+    const ordinary = Array.from({ length: 10 }, (_, index) => makePlayer({
+      id: 901 + index,
+      definitionId: 9901 + index,
+      rating: 89,
+      rareflag: 1,
+    }));
+    const groupConstraint = {
+      source: 'ea',
+      keyName: 'PLAYER_RARITY_GROUP',
+      label: 'PLAYER_RARITY_GROUP 83 x1',
+      count: 1,
+      matches: (item) => (item.groups || []).includes(83),
+    };
+    const context = {
+      model: {
+        requiredPlayerCount: 11,
+        targetRating: 88,
+        constraints: [groupConstraint],
+        maxSpecialCount: 1,
+      },
+    };
+    const runtime = {
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      primaryContext: { model: context.model },
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: requiredSpecial,
+            pile: 'club',
+            classification: { requiredSpecial: true, protected: false },
+          }],
+        }),
+      },
+    };
+    const loopDef = {
+      name: 'Rolling Storage Sink',
+      runtimeProtectionRating: 95,
+      expectedPlayerCount: 11,
+    };
+    const { api } = await loadUserscript({ club: [requiredSpecial] });
+    const validators = api.createRollingStorageSinkSubmissionValidators(
+      loopDef,
+      runtime,
+      context,
+      'Storage Sink exact-one test',
+    );
+
+    expect(validators.validatePlannedPlayers([requiredSpecial, ...ordinary])).toBe(true);
+
+    const secondRequiredSpecial = makePlayer({
+      id: 920,
+      definitionId: 9920,
+      rating: 89,
+      rareflag: 120,
+      groups: [44, 83],
+    });
+    expect(() => validators.validatePlannedPlayers([
+      requiredSpecial,
+      secondRequiredSpecial,
+      ...ordinary.slice(1),
+    ])).toThrow(/role-count 2\/1-1/);
+  });
+
+  it('keeps Required Special protection when a Storage Sink squad has no explicit role', async () => {
+    const requiredSpecial = makePlayer({
+      id: 930,
+      definitionId: 9930,
+      rating: 91,
+      rareflag: 120,
+      groups: [44, 83],
+    });
+    const ordinary = Array.from({ length: 10 }, (_, index) => makePlayer({
+      id: 931 + index,
+      definitionId: 9931 + index,
+      rating: 89,
+      rareflag: 1,
+    }));
+    const primaryModel = {
+      constraints: [{
+        source: 'ea',
+        keyName: 'PLAYER_RARITY_GROUP',
+        count: 1,
+        matches: (item) => (item.groups || []).includes(83),
+      }],
+    };
+    const context = {
+      model: {
+        requiredPlayerCount: 11,
+        targetRating: 88,
+        constraints: [],
+        maxSpecialCount: 11,
+      },
+    };
+    const runtime = {
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      primaryContext: { model: primaryModel },
+      coordinator: {
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+    const { api } = await loadUserscript();
+    const validators = api.createRollingStorageSinkSubmissionValidators(
+      { name: 'Rolling Storage Sink', runtimeProtectionRating: 95, expectedPlayerCount: 11 },
+      runtime,
+      context,
+      'Storage Sink protected-special test',
+    );
+
+    expect(() => validators.validatePlannedPlayers([requiredSpecial, ...ordinary]))
+      .toThrow(/attempted to consume a Required Special card/);
   });
 
   it('reuses an already loaded Set challenge squad without replacing fresh metadata', async () => {

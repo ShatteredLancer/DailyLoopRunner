@@ -336,11 +336,30 @@ describe('current direct side-effect call baseline', () => {
     const legacyEnd = source.indexOf('async function loadRollingGenericStorageSinkContexts', legacyStart);
     const legacy = source.slice(legacyStart, legacyEnd);
     expect(genericStart).toBeGreaterThan(-1);
+    expect(generic).toContain('nextGenericStorageSinkContext(loaded.contexts)');
+    expect(generic).not.toContain('Number(right.targetRating || 0) - Number(left.targetRating || 0)');
     expect(postSubmitSelection).toBeGreaterThan(-1);
     expect(directPlayerRouting).toBeGreaterThan(-1);
     expect(protectedStorageRetry).toBeGreaterThan(postSubmitSelection);
     expect(protectedStorageRetry).toBeGreaterThan(directPlayerRouting);
     expect(legacy).toContain('pickSelected: true');
+  });
+
+  it('keeps bounded candidate diagnostics on generic Storage Sink planning failures', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const genericStart = source.indexOf('async function selectRollingGenericStorageSinkSquad');
+    const genericEnd = source.indexOf('async function planRollingGenericStorageSinkSquad', genericStart);
+    const generic = source.slice(genericStart, genericEnd);
+
+    expect(generic).toContain('generic Storage pressure raw player diagnostic');
+    expect(generic).toContain('generic Storage pressure safe unique candidate diagnostic');
+    expect(generic).toContain('generic Storage pressure Storage admission diagnostic');
+    expect(generic).toContain('generic Storage pressure required Unassigned diagnostic');
+    expect(generic).toContain('generic Storage pressure plan attempt');
+    expect(generic).toContain('model: context.model');
+    expect(generic).toContain('requiredConstraintIndexes: storageSinkRequiredSpecialRoles(context.model)');
+    expect(generic.indexOf('if (selection.ok) return selection;'))
+      .toBeLessThan(generic.indexOf('generic Storage pressure raw player diagnostic'));
   });
 
   it('reuses preloaded legacy 95+ Storage Sink squads after the first submission', async () => {

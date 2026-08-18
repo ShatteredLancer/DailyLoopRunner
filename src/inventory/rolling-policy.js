@@ -528,7 +528,7 @@ export function createRollingRecoveryProtection(input = {}) {
   const hardProtected = entries
     .filter(({ classification }) => (
       !classification
-        || classification.requiredSpecial === true
+        || (classification.requiredSpecial === true && input.allowRequiredSpecial !== true)
         || classification?.protected === true
     ))
     .map(({ item }) => itemRef(item));

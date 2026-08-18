@@ -254,6 +254,45 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     return value;
   }
 
+  async function recoverStorageSink(context = {}) {
+    const storageSink = await runRecovery(
+      'storageSink',
+      ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
+      options.recoverStorageSink,
+      context,
+    );
+    if (isProgressed(storageSink) || reasonCode(storageSink) !== 'REQUIRED_SPECIAL_SHORTAGE') {
+      return storageSink;
+    }
+
+    const requiredSpecial = await runRecovery(
+      'requiredSpecial',
+      ROLLING_UPGRADE_PHASES.RECOVER_REQUIRED_SPECIAL,
+      options.recoverRequiredSpecial,
+      {
+        trigger: 'storage-sink-required-special-shortage',
+        source: 'storage-sink-dependency',
+        storageSink,
+        storageContext: context,
+      },
+    );
+    if (isProgressed(requiredSpecial)) return requiredSpecial;
+    if (requiredSpecial?.status === 'skipped') return storageSink;
+    return {
+      ...requiredSpecial,
+      status: requiredSpecial?.status || 'unavailable',
+      reason: effectReason(requiredSpecial, 'Storage sink Required Special recovery is unavailable'),
+      reasonCode: reasonCode(requiredSpecial) || 'REQUIRED_SPECIAL_RECOVERY_BLOCKED',
+      details: {
+        ...(requiredSpecial?.details || {}),
+        storageSinkDependency: {
+          reason: effectReason(storageSink, 'Required Special shortage'),
+          reasonCode: reasonCode(storageSink),
+        },
+      },
+    };
+  }
+
   function finishRecoveryFailure(value, fallbackReason, fallbackCode) {
     if (isStopped(value)) return finish('stopped', value, fallbackReason, 'USER_STOPPED');
     if (value?.status === 'planned') return finish('planned', value, fallbackReason, fallbackCode);
@@ -431,12 +470,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           );
         }
 
-        const storageSink = await runRecovery(
-          'storageSink',
-          ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
-          options.recoverStorageSink,
-          { trigger: 'storage-pressure', storage, provisions },
-        );
+        const storageSink = await recoverStorageSink({ trigger: 'storage-pressure', storage, provisions });
         if (isProgressed(storageSink)) continue;
         if (isStopped(storageSink) || isBlocked(storageSink) || storageSink?.status === 'planned') {
           return finishRecoveryFailure(
@@ -533,16 +567,11 @@ export async function runRollingUpgradeWorkflow(options = {}) {
               'PROTECTED_STORAGE_BLOCKED',
             );
           }
-          const storageSink = await runRecovery(
-            'storageSink',
-            ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
-            options.recoverStorageSink,
-            {
-              trigger: 'storage-pressure',
-              storage: leftoverReward,
-              source: 'leftover-recovery-pre-open',
-            },
-          );
+          const storageSink = await recoverStorageSink({
+            trigger: 'storage-pressure',
+            storage: leftoverReward,
+            source: 'leftover-recovery-pre-open',
+          });
           if (isProgressed(storageSink)) continue;
           return finishRecoveryFailure(
             storageSink,
@@ -593,16 +622,11 @@ export async function runRollingUpgradeWorkflow(options = {}) {
               'PROTECTED_STORAGE_BLOCKED',
             );
           }
-          const storageSink = await runRecovery(
-            'storageSink',
-            ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
-            options.recoverStorageSink,
-            {
-              trigger: 'storage-pressure',
-              storage: recovery,
-              source: 'required-special-reward-pre-open',
-            },
-          );
+          const storageSink = await recoverStorageSink({
+            trigger: 'storage-pressure',
+            storage: recovery,
+            source: 'required-special-reward-pre-open',
+          });
           if (isProgressed(storageSink)) continue;
           return finishRecoveryFailure(
             storageSink,
@@ -657,12 +681,11 @@ export async function runRollingUpgradeWorkflow(options = {}) {
             'PROTECTED_STORAGE_BLOCKED',
           );
         }
-        const storageSink = await runRecovery(
-          'storageSink',
-          ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
-          options.recoverStorageSink,
-          { trigger: 'storage-pressure', storage: planned, provisions },
-        );
+        const storageSink = await recoverStorageSink({
+          trigger: 'storage-pressure',
+          storage: planned,
+          provisions,
+        });
         if (isProgressed(storageSink)) continue;
         return finishRecoveryFailure(
           storageSink?.status ? storageSink : planned,
