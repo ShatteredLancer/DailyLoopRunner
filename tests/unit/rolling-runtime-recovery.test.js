@@ -74,6 +74,94 @@ describe('Rolling runtime recovery helpers', () => {
     ]);
   });
 
+  it('preserves materialized primary duplicates while protected Storage routing is blocked', async () => {
+    const primaryDuplicates = Array.from({ length: 7 }, (_, index) => makePlayer({
+      id: 650 + index,
+      definitionId: 9650 + index,
+      rating: 85 + (index % 3),
+      duplicate: true,
+      duplicateId: 1650 + index,
+    }));
+    const protectedDuplicate = makePlayer({
+      id: 699,
+      definitionId: 9699,
+      rating: 96,
+      duplicate: true,
+      duplicateId: 1699,
+    });
+    const runtime = { primaryDuplicateRefs: [] };
+    const routing = {
+      status: 'blocked',
+      reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      counts: { unresolved: 0 },
+      reservedItems: primaryDuplicates,
+      storageItems: [protectedDuplicate],
+    };
+    const { api } = await loadUserscript();
+
+    expect(api.preserveRollingPrimaryDuplicateRefs(runtime, routing, { replace: true }))
+      .toMatchObject({ captured: true, count: 7 });
+    expect(runtime.primaryDuplicateRefs.map((ref) => ref.id))
+      .toEqual(primaryDuplicates.map((item) => item.id));
+    expect(runtime.primaryDuplicateRefs.map((ref) => ref.id)).not.toContain(protectedDuplicate.id);
+  });
+
+  it('preserves the existing primary duplicate behavior for a ready route', async () => {
+    const duplicate = makePlayer({
+      id: 660,
+      definitionId: 9660,
+      rating: 86,
+      duplicate: true,
+      duplicateId: 1660,
+    });
+    const runtime = { primaryDuplicateRefs: [{ id: 999, definitionId: 9999, pile: 'unassigned' }] };
+    const { api } = await loadUserscript();
+
+    expect(api.preserveRollingPrimaryDuplicateRefs(runtime, {
+      status: 'ready',
+      reasonCode: null,
+      counts: { unresolved: 0 },
+      reservedItems: [duplicate],
+      storageItems: [],
+    }, { replace: true })).toMatchObject({ captured: true, count: 1 });
+    expect(runtime.primaryDuplicateRefs).toMatchObject([{
+      id: duplicate.id,
+      definitionId: duplicate.definitionId,
+      pile: 'unassigned',
+    }]);
+  });
+
+  it('does not preserve primary refs from unresolved or unrelated blocked routing', async () => {
+    const duplicate = makePlayer({
+      id: 670,
+      definitionId: 9670,
+      rating: 88,
+      duplicate: true,
+      duplicateId: 1670,
+    });
+    const { api } = await loadUserscript();
+
+    for (const routing of [
+      {
+        status: 'blocked',
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+        counts: { unresolved: 1 },
+        reservedItems: [duplicate],
+      },
+      {
+        status: 'blocked',
+        reasonCode: 'OPENED_DUPLICATE_NOT_MATERIALIZED',
+        counts: { unresolved: 0 },
+        reservedItems: [duplicate],
+      },
+    ]) {
+      const runtime = { primaryDuplicateRefs: [] };
+      expect(api.preserveRollingPrimaryDuplicateRefs(runtime, routing, { replace: true }))
+        .toMatchObject({ captured: false, count: 0 });
+      expect(runtime.primaryDuplicateRefs).toEqual([]);
+    }
+  });
+
   it('rejects emergency Provisions unless actual Storage consumption fits every pending card', async () => {
     const pendingOne = makePlayer({ id: 701, definitionId: 9701, duplicate: true });
     const pendingTwo = makePlayer({ id: 702, definitionId: 9702, duplicate: true });
@@ -102,6 +190,78 @@ describe('Rolling runtime recovery helpers', () => {
       projectedFree: 2,
       requiredFree: 2,
     });
+  });
+
+  it('does not require Storage headroom for pending cards consumed by the recovery squad', async () => {
+    const pendingOne = makePlayer({ id: 711, definitionId: 9711, duplicate: true });
+    const pendingTwo = makePlayer({ id: 712, definitionId: 9712, duplicate: true });
+    const { api } = await loadUserscript({ unassigned: [pendingOne, pendingTwo] });
+    const runtime = {
+      openRouting: { storageItems: [pendingOne, pendingTwo] },
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({ capacities: { storage: { free: 0 } } }),
+        }),
+      },
+    };
+
+    expect(api.validateRollingEmergencyProvisionsSelection(runtime, 0, {
+      consumedPendingRefs: [pendingOne, pendingTwo],
+    })).toMatchObject({
+      ok: true,
+      projectedFree: 0,
+      requiredFree: 0,
+    });
+    expect(api.validateRollingEmergencyProvisionsSelection(runtime, 1, {
+      consumedPendingRefs: [pendingOne],
+    })).toMatchObject({
+      ok: true,
+      projectedFree: 1,
+      requiredFree: 1,
+    });
+  });
+
+  it('allows only an explicitly selected primary duplicate to bypass reserve-rating protection', async () => {
+    const primarySignal = makePlayer({
+      id: 721,
+      definitionId: 9721,
+      rating: 88,
+      duplicate: true,
+      duplicateId: 1721,
+    });
+    const primarySubmission = makePlayer({ id: 1721, definitionId: 9721, rating: 88 });
+    const unrelatedReserve = makePlayer({ id: 1722, definitionId: 9722, rating: 88 });
+    const { api } = await loadUserscript();
+    const runtime = {
+      primaryDuplicateRefs: [{ id: primarySignal.id, definitionId: primarySignal.definitionId }],
+      pendingUnassignedRefs: [{ id: primarySignal.id, definitionId: primarySignal.definitionId }],
+      primaryContext: {},
+      coordinator: {
+        getLedger: () => ({ classifiedEntries: () => [] }),
+      },
+    };
+    const loopDef = {
+      name: 'Rolling reserve recovery',
+      runtimeProtectionRating: 95,
+      runtimeProvisionsMaxRating: 88,
+    };
+
+    expect(api.assertRollingRecoveryItems(loopDef, runtime, [primarySubmission], {
+      allowPrimaryDuplicates: true,
+      allowSpecial: true,
+      allowedPrimaryDuplicateRefs: [{
+        id: primarySignal.id,
+        definitionId: primarySignal.definitionId,
+      }],
+    })).toBe(true);
+    expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [unrelatedReserve], {
+      allowPrimaryDuplicates: true,
+      allowSpecial: true,
+      allowedPrimaryDuplicateRefs: [{
+        id: primarySignal.id,
+        definitionId: primarySignal.definitionId,
+      }],
+    })).toThrow('recovery squad attempted to consume a reserved 88 card');
   });
 
   it('checks EA Storage Sink challenge readiness only after the selected squad is saved', async () => {

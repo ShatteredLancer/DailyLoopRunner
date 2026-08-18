@@ -38,6 +38,17 @@ const FODDER_SHORTAGE_CODES = new Set([
   'RESERVED_FODDER_BLOCKED',
 ]);
 
+export function chooseRollingRequiredSpecialRecoveryAction(input = {}) {
+  if (input.trigger === 'storage-sink-required-special-shortage'
+    && input.hasPendingUnassignedPrimaryDuplicates === true) {
+    return 'craft-storage-pressure';
+  }
+  if (input.hasExistingPack === true) return 'open-existing-pack';
+  return input.trigger === 'storage-sink-required-special-shortage'
+    ? 'craft-storage-pressure'
+    : 'craft-standard';
+}
+
 function completionLimit(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;

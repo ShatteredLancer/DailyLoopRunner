@@ -1,9 +1,31 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  chooseRollingRequiredSpecialRecoveryAction,
   ROLLING_UPGRADE_PHASES,
   runRollingUpgradeWorkflow,
 } from '../../src/workflows/rolling-upgrade.js';
 import { releaseRollingRoutingItemsAfterConsumption } from '../../src/inventory/rolling-policy.js';
+
+describe('Rolling Required Special recovery decision', () => {
+  it('opens an existing TOTW reward before crafting another Storage pressure recovery', () => {
+    expect(chooseRollingRequiredSpecialRecoveryAction({
+      hasExistingPack: true,
+      trigger: 'storage-sink-required-special-shortage',
+    })).toBe('open-existing-pack');
+    expect(chooseRollingRequiredSpecialRecoveryAction({
+      hasExistingPack: false,
+      trigger: 'storage-sink-required-special-shortage',
+    })).toBe('craft-storage-pressure');
+  });
+
+  it('consumes pending Unassigned primary duplicates before opening an existing TOTW reward', () => {
+    expect(chooseRollingRequiredSpecialRecoveryAction({
+      hasExistingPack: true,
+      hasPendingUnassignedPrimaryDuplicates: true,
+      trigger: 'storage-sink-required-special-shortage',
+    })).toBe('craft-storage-pressure');
+  });
+});
 
 function harness(overrides = {}) {
   let packNo = 0;

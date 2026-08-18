@@ -360,6 +360,7 @@ import { runValidationRoundWorkflow } from './workflows/validation-round.js';
 import { runBatchOpenWorkflow } from './workflows/batch-open.js';
 import { runInventoryExhaustionWorkflow } from './workflows/inventory-exhaustion.js';
 import {
+  chooseRollingRequiredSpecialRecoveryAction,
   ROLLING_UPGRADE_PHASES,
   runRollingUpgradeWorkflow,
 } from './workflows/rolling-upgrade.js';
@@ -12432,17 +12433,14 @@ function updateLoopControls() {
           unresolved: unresolvedPairs.length,
         },
       };
-      if (options.capturePrimaryDuplicates === true && finalRouteStatus === 'ready') {
-        const storageIds = new Set((storageMoved ? routePlan.storageItems : [])
-          .map((item) => Number(item?.id || 0))
-          .filter(Boolean));
-        const primaryItems = (routePlan.reservedItems || [])
-          .map((item) => liveItemRef(
-            item,
-            storageIds.has(Number(item?.id || 0)) ? 'storage' : 'unassigned',
-          ));
-        context.primaryDuplicateRefs = rollingUniqueRefs(primaryItems);
-        log(`${label}: marked ${context.primaryDuplicateRefs.length} opened duplicate(s) for the next primary SBC; recovery sinks cannot consume them`);
+      if (options.capturePrimaryDuplicates === true) {
+        const captured = preserveRollingPrimaryDuplicateRefs(context, context.openRouting, {
+          replace: true,
+          storageMoved,
+        });
+        if (captured.captured) {
+          log(`${label}: marked ${context.primaryDuplicateRefs.length} opened duplicate(s) for the next primary SBC or Storage pressure recovery`);
+        }
       }
       const counts = context.openRouting.counts;
       log(`${label}: classified ${counts.opened} item(s); duplicates:${counts.duplicates}, primary:${counts.primaryDuplicates}, Required Special:${counts.requiredSpecial}, Provisions reserve:${counts.provisionsReserve} (immediate:${counts.provisionsImmediate || 0}), protected:${counts.protectedDuplicates}, Storage:${counts.storageRequired}, unresolved:${counts.unresolved}`);
@@ -12683,10 +12681,18 @@ function updateLoopControls() {
     const reserveRatings = options.allowProvisionsReserve === true
       ? new Set()
       : new Set(rollingProvisionsReserveRatings(loopDef));
+    const allowedPrimaryDuplicateRefs = options.allowPrimaryDuplicates === true
+      ? rollingUniqueRefs(options.allowedPrimaryDuplicateRefs || [])
+      : [];
     const protectionRating = rollingProtectionRating(loopDef);
     const minRating = Number(options.minRating);
     const maxRating = Number(options.maxRating);
     for (const item of players || []) {
+      const allowedPrimaryDuplicate = allowedPrimaryDuplicateRefs.some((ref) => (
+        rollingItemMatchesRef(item, ref)
+          || (Number(item?.definitionId || 0) > 0
+            && Number(item.definitionId) === Number(ref?.definitionId || 0))
+      ));
       if (options.allowRequiredSpecial !== true && (
         rollingLiveRequiredSpecial(item, runtime.primaryContext?.model)
           || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef)
@@ -12696,7 +12702,7 @@ function updateLoopControls() {
       if (protection.protectedItems.some((ref) => rollingItemMatchesRef(item, ref))) {
         fail(`${loopDef.name}: recovery squad attempted to consume a protected card`);
       }
-      if (reserveRatings.has(Number(item?.rating || 0))) {
+      if (reserveRatings.has(Number(item?.rating || 0)) && !allowedPrimaryDuplicate) {
         fail(`${loopDef.name}: recovery squad attempted to consume a reserved ${Number(item.rating)} card`);
       }
       if (Number(item?.rating || 0) > protectionRating) {
@@ -12946,29 +12952,85 @@ function updateLoopControls() {
     const opened = await loadRollingRatingRecoveryContext(recoveryDef);
     if (opened.status !== 'ready') return opened;
     await runtime.coordinator.reconcile(`${recoveryDef.name} pre-selection`, { refreshUnassigned: true });
-    const selectionPolicy = createRollingRatingRecoverySelectionPolicy({
-      ledger: runtime.coordinator.getLedger(),
-      protectionRating: rollingProtectionRating(loopDef),
-      maxOrdinaryRating: options.maxOrdinaryRating,
-      reserveRatings: rollingProvisionsReserveRatings(loopDef),
-      requiredItems: options.requiredItems || [],
-      preferredItems: options.preferredItems || [],
-      protectedItems: [
-        ...(runtime.primaryDuplicateRefs || []),
-        ...(runtime.pendingUnassignedRefs || []),
-        ...(options.additionalProtected || []),
-      ],
-    });
-    const fill = await fillSbcSquadRatingOptimized(opened.activeLoopDef, {
-      set: opened.set,
-      challenge: opened.challenge,
-      background: true,
-    }, {
-      dryRun: recoveryDef.dryRun,
-      selectionPolicy,
-    });
+    const ledger = runtime.coordinator.getLedger();
+    const allowPrimaryDuplicates = options.allowPrimaryDuplicates === true;
+    const consumablePrimaryRefs = allowPrimaryDuplicates
+      ? rollingUniqueRefs(runtime.primaryDuplicateRefs || []).filter((ref) => {
+          const item = ledger.resolveItem(ref);
+          return item && String(item.pile || item.ref?.pile || '') === 'unassigned';
+        })
+      : [];
+    const relaxationOrder = allowPrimaryDuplicates
+      ? rollingPrimaryDuplicateRelaxationOrder({
+          ledger,
+          primaryDuplicateRefs: consumablePrimaryRefs,
+        })
+      : [];
+    let relaxedPrimaryRefs = [];
+    let selectionPolicy = null;
+    let fill = null;
+    while (true) {
+      const primaryRecoveryPolicy = createRollingPrimarySelectionPolicy({
+        ledger,
+        model: { constraints: [] },
+        protectionRating: rollingProtectionRating(loopDef),
+        reserveRatings: false,
+        primaryDuplicateRefs: consumablePrimaryRefs,
+        relaxedPrimaryDuplicateRefs: relaxedPrimaryRefs,
+      });
+      selectionPolicy = createRollingRatingRecoverySelectionPolicy({
+        ledger,
+        protectionRating: rollingProtectionRating(loopDef),
+        maxOrdinaryRating: options.maxOrdinaryRating,
+        reserveRatings: rollingProvisionsReserveRatings(loopDef),
+        requiredItems: [
+          ...(options.requiredItems || []),
+          ...primaryRecoveryPolicy.requiredItems,
+        ],
+        preferredItems: [
+          ...(options.preferredItems || []),
+          ...primaryRecoveryPolicy.preferredItems,
+        ],
+        protectedItems: [
+          ...(allowPrimaryDuplicates
+            ? rollingNonPrimaryPendingRefs(runtime)
+            : [
+                ...(runtime.primaryDuplicateRefs || []),
+                ...(runtime.pendingUnassignedRefs || []),
+              ]),
+          ...(options.additionalProtected || []),
+          ...relaxedPrimaryRefs,
+        ],
+      });
+      fill = await fillSbcSquadRatingOptimized(opened.activeLoopDef, {
+        set: opened.set,
+        challenge: opened.challenge,
+        background: true,
+      }, {
+        dryRun: recoveryDef.dryRun,
+        selectionPolicy,
+        skipInventoryRefresh: relaxedPrimaryRefs.length > 0,
+      });
+      if (!fill.ok || !allowPrimaryDuplicates
+        || Number(fill.optimizedRating || 0) <= Number(fill.model?.targetRating || 0)) break;
+      const nextRef = relaxationOrder[relaxedPrimaryRefs.length];
+      if (!nextRef) break;
+      relaxedPrimaryRefs.push(nextRef);
+      log(`${loopDef.name}: ${recoveryDef.name} rating ${fill.optimizedRating} exceeds target ${fill.model?.targetRating || '?'}; deferring primary duplicate #${nextRef.id || nextRef.definitionId}`);
+    }
     if (!fill.ok) {
       const code = fill.reasonCode || fill.missing?.code || 'RECOVERY_MATERIAL_SHORTAGE';
+      if (code === 'REQUIRED_ITEM_UNAVAILABLE') {
+        const requiredDiagnostics = fill.candidates?.requiredItemDiagnostics || [];
+        const unavailable = requiredDiagnostics.filter((entry) => entry?.candidateAfterPolicy !== true);
+        log(`${loopDef.name}: ${recoveryDef.name} required item diagnostic summary: required:${requiredDiagnostics.length}, unavailable:${unavailable.length}, candidate definitions:${fill.candidates?.entries?.length || 0}`);
+        unavailable.slice(0, 16).forEach((entry, index) => {
+          log(`${loopDef.name}: ${recoveryDef.name} required item diagnostic ${index + 1}/${unavailable.length}: ${diagnosticJson(entry)}`);
+        });
+        if (unavailable.length > 16) {
+          log(`${loopDef.name}: ${recoveryDef.name} required item diagnostics truncated: ${unavailable.length - 16} more item(s)`);
+        }
+      }
       return {
         status: 'blocked',
         reason: fill.reason || `${recoveryDef.name} squad is infeasible`,
@@ -12980,11 +13042,24 @@ function updateLoopControls() {
         ].includes(code),
       };
     }
+    if (allowPrimaryDuplicates
+      && Number(fill.optimizedRating || 0) > Number(fill.model?.targetRating || 0)) {
+      return {
+        status: 'blocked',
+        reason: `${recoveryDef.name} cannot consume the pending Unassigned duplicates without exceeding target rating ${fill.model?.targetRating || '?'}`,
+        reasonCode: 'SQUAD_RATING_EXCESS',
+      };
+    }
+    const consumedPrimaryRefs = rollingSelectionConsumedPrimaryRefs(
+      fill.selection,
+      consumablePrimaryRefs,
+    );
     const storageItemsConsumed = rollingSelectionStorageConsumption(runtime, fill.selection);
     if (typeof options.validateSelection === 'function') {
       const selectionValidation = await options.validateSelection({
         selection: fill.selection,
         storageItemsConsumed,
+        consumedPrimaryRefs,
       });
       if (selectionValidation?.ok === false) {
         log(`${loopDef.name}: ${recoveryDef.name} rating selection rejected before submit (${selectionValidation.reasonCode || 'selection validation failed'}): ${selectionValidation.reason || 'insufficient recovery effect'}`);
@@ -13039,7 +13114,11 @@ function updateLoopControls() {
         );
       },
       preSaveValidators: [({ players: validatedPlayers }) => {
-        assertRollingRecoveryItems(loopDef, runtime, validatedPlayers, { allowSpecial: true });
+        assertRollingRecoveryItems(loopDef, runtime, validatedPlayers, {
+          allowSpecial: true,
+          allowPrimaryDuplicates,
+          allowedPrimaryDuplicateRefs: consumedPrimaryRefs,
+        });
         const validation = validateRatingSbcModelAgainstItems(
           fill.model,
           validatedPlayers,
@@ -13084,6 +13163,17 @@ function updateLoopControls() {
       runtime.lastMutation = await runtime.coordinator.recordSubmission(submission, { primary: false });
     }
     if (submission.submitted) {
+      if (consumedPrimaryRefs.length) {
+        runtime.primaryDuplicateRefs = (runtime.primaryDuplicateRefs || []).filter((ref) => (
+          !consumedPrimaryRefs.some((consumed) => rollingItemMatchesRef(ref, consumed))
+        ));
+        const released = releaseRollingRoutingItemsAfterConsumption(
+          runtime.openRouting,
+          consumedPrimaryRefs,
+        );
+        runtime.openRouting = released.routing;
+        log(`${loopDef.name}: ${recoveryDef.name} consumed ${consumedPrimaryRefs.length} pending Unassigned duplicate(s); ${runtime.primaryDuplicateRefs.length} remain reserved for the primary SBC`);
+      }
       refreshRollingPendingUnassignedRefs(runtime);
       recordRollingRecapRecovery('totw', {
         duplicatesConsumed: rollingDuplicatePlayerCount(players),
@@ -13096,6 +13186,7 @@ function updateLoopControls() {
       details: {
         rewardObserved: backgroundSubmission?.rewardObserved === true,
         storageItemsConsumed,
+        consumedPrimaryDuplicates: consumedPrimaryRefs.length,
       },
     };
   }
@@ -13189,6 +13280,14 @@ function updateLoopControls() {
     if (!routing || routing.status !== 'blocked') return { status: 'ready' };
     if (routing.reasonCode !== 'PROTECTED_STORAGE_BLOCKED') {
       return { status: 'blocked', reason: routing.reason, reasonCode: routing.reasonCode };
+    }
+    const primaryRefs = preserveRollingPrimaryDuplicateRefs(runtime, routing);
+    if (!primaryRefs.captured && (routing.reservedItems || []).length) {
+      return {
+        status: 'blocked',
+        reason: 'materialized primary duplicate context could not be preserved before protected Storage recovery',
+        reasonCode: 'PRIMARY_DUPLICATE_CONTEXT_LOST',
+      };
     }
     const retryRefs = (routing.storageItems || []).map((item) => liveItemRef(item, item?.pile || 'unassigned'));
     const logRetryState = (stage) => {
@@ -13290,6 +13389,36 @@ function updateLoopControls() {
     });
   }
 
+  function preserveRollingPrimaryDuplicateRefs(context, routing = {}, options = {}) {
+    const status = String(routing?.status || '').toLowerCase();
+    const reasonCode = String(routing?.reasonCode || '').toUpperCase();
+    const unresolvedCount = Number(routing?.counts?.unresolved);
+    const recoverableStorageBlock = status === 'blocked'
+      && reasonCode === 'PROTECTED_STORAGE_BLOCKED'
+      && Number.isFinite(unresolvedCount)
+      && unresolvedCount === 0;
+    if (status !== 'ready' && !recoverableStorageBlock) {
+      return { captured: false, count: 0, refs: [] };
+    }
+
+    const storageIds = new Set((options.storageMoved === true ? routing.storageItems || [] : [])
+      .map((item) => Number(item?.id || 0))
+      .filter(Boolean));
+    const refs = rollingUniqueRefs((routing.reservedItems || []).map((item) => liveItemRef(
+      item,
+      storageIds.has(Number(item?.id || 0)) ? 'storage' : 'unassigned',
+    )));
+    context.primaryDuplicateRefs = options.replace === true
+      ? refs
+      : rollingUniqueRefs([...(context.primaryDuplicateRefs || []), ...refs]);
+    return {
+      captured: true,
+      count: refs.length,
+      refs: context.primaryDuplicateRefs,
+      recoveredFromBlockedStorage: recoverableStorageBlock,
+    };
+  }
+
   function rollingSelectionConsumedSignalRefs(selection, expectedRefs = []) {
     return rollingUniqueRefs((selection?.entries || [])
       .filter((entry) => entry?.signal && (entry.pileName === 'unassigned' || entry.pileName === 'transfer'))
@@ -13323,9 +13452,11 @@ function updateLoopControls() {
     return ids.size;
   }
 
-  function rollingPendingStorageRoutingState(runtime) {
+  function rollingPendingStorageRoutingState(runtime, options = {}) {
+    const consumedPendingRefs = rollingUniqueRefs(options.consumedPendingRefs || []);
     const pendingRefs = [];
     for (const item of runtime.openRouting?.storageItems || []) {
+      if (consumedPendingRefs.some((ref) => rollingItemMatchesRef(item, ref))) continue;
       const id = Number(item?.id || 0);
       if (!id) {
         return {
@@ -13347,8 +13478,8 @@ function updateLoopControls() {
     return { ok: true, pendingRefs: rollingUniqueRefs(pendingRefs) };
   }
 
-  function validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed) {
-    const routing = rollingPendingStorageRoutingState(runtime);
+  function validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed, options = {}) {
+    const routing = rollingPendingStorageRoutingState(runtime, options);
     if (!routing.ok) return routing;
     const currentFree = runtime.coordinator?.getLedger?.()?.summary?.()?.capacities?.storage?.free;
     return validateStorageRecoveryHeadroom({
@@ -15341,26 +15472,40 @@ function updateLoopControls() {
         if (!rollingCapabilityAvailable(definition)) {
           return { status: 'unavailable', reason: 'dynamic 84+ TOTW Upgrade capability is unavailable' };
         }
-        if (context?.trigger === 'storage-sink-required-special-shortage') {
-          log(`${loopDef.name}: Storage pressure SBC lacks its Required Special; crafting ${definition.name} from Storage-first material before retrying Storage routing`);
-          return submitRollingRatingRecovery(loopDef, runtime, definition, {
-            priorityPiles: ['storage', 'transfer', 'club'],
-            validateSelection: ({ storageItemsConsumed }) => (
-              validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed)
-            ),
-          });
-        }
         const pack = await findRewardPack(definition, null, {
           attempts: 2,
           delayMs: 1000,
           fallbackPackMatcher: isLikelyTotwRewardPack,
           repositoryOnly: true,
         });
-        if (pack) {
+        const action = chooseRollingRequiredSpecialRecoveryAction({
+          hasExistingPack: Boolean(pack),
+          hasPendingUnassignedPrimaryDuplicates: (runtime.primaryDuplicateRefs || []).some((ref) => {
+            const item = runtime.coordinator?.getLedger?.()?.resolveItem?.(ref);
+            return String(item?.pile || item?.ref?.pile || ref?.pile || '') === 'unassigned';
+          }),
+          trigger: context?.trigger,
+        });
+        if (action === 'open-existing-pack') {
           log(`${loopDef.name}: opening existing ${definition.name} reward before crafting another`);
           return openRollingRecoveryReward(loopDef, runtime, definition, pack, {
             assumeTotwReward: true,
             fallbackPackMatcher: isLikelyTotwRewardPack,
+          });
+        }
+        if (action === 'craft-storage-pressure') {
+          if (pack) {
+            log(`${loopDef.name}: existing ${definition.name} reward cannot open while primary duplicates remain Unassigned; consuming those duplicates before opening the reward`);
+          }
+          log(`${loopDef.name}: Storage pressure SBC lacks its Required Special; crafting ${definition.name} from pending Unassigned duplicates first, then Storage, before retrying Storage routing`);
+          return submitRollingRatingRecovery(loopDef, runtime, definition, {
+            priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+            allowPrimaryDuplicates: true,
+            validateSelection: ({ storageItemsConsumed, consumedPrimaryRefs }) => (
+              validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed, {
+                consumedPendingRefs: consumedPrimaryRefs,
+              })
+            ),
           });
         }
         log(`${loopDef.name}: no eligible Required Special or existing TOTW reward; planning one ${definition.name}`);
@@ -15513,6 +15658,24 @@ function updateLoopControls() {
           };
         }
         const { activeLoopDef, challenge, model, set } = runtime.primaryContext;
+        const preservedPrimary = runtime.openRouting
+          ? preserveRollingPrimaryDuplicateRefs(runtime, runtime.openRouting)
+          : { captured: true, count: 0 };
+        if ((runtime.openRouting?.reservedItems || []).length
+          && preservedPrimary.captured !== true
+          && !(runtime.primaryDuplicateRefs || []).length) {
+          log(`${loopDef.name}: primary duplicate context was lost before primary squad planning: ${diagnosticJson({
+            routingStatus: runtime.openRouting?.status || null,
+            routingReasonCode: runtime.openRouting?.reasonCode || null,
+            unresolved: runtime.openRouting?.counts?.unresolved ?? null,
+            reservedItems: runtime.openRouting?.reservedItems?.length || 0,
+          })}`);
+          return {
+            ok: false,
+            reason: 'materialized primary duplicate context is unavailable before primary squad planning',
+            reasonCode: 'PRIMARY_DUPLICATE_CONTEXT_LOST',
+          };
+        }
         const primaryDuplicateRefs = rollingUniqueRefs(runtime.primaryDuplicateRefs || []);
         const primaryIdentity = validateRollingPrimaryDuplicateIdentity({
           ledger: runtime.coordinator.getLedger(),

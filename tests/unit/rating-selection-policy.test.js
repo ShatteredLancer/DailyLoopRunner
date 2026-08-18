@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { selectInventoryPlayers } from '../../src/selection/index.js';
 import { createStorageSinkClubFillRole } from '../../src/selection/multi-squad-rating.js';
+import { createRollingPrimarySelectionPolicy } from '../../src/inventory/rolling-policy.js';
 
 function entry(id, rating, options = {}) {
   return {
@@ -196,6 +197,69 @@ describe('role-aware rating selection policy', () => {
     expect(plan.details.rating).toBe(84);
     expect(plan.details.recipeAttempts).toBeLessThanOrEqual(64);
     expect(plan.details.ratingRange).toEqual({ min: 75, max: 95 });
+  });
+
+  it('consumes all pending Unassigned duplicates in an exact 84 Required Special recovery recipe', async () => {
+    const pendingRatings = [93, 89, 88, 87, 87, 86, 85];
+    const pending = pendingRatings.map((rating, index) => {
+      const candidate = entry(100 + index, rating, {
+        pileName: 'unassigned',
+        pileRank: 0,
+      });
+      const signal = {
+        ...candidate.item,
+        id: index + 1,
+        duplicate: true,
+        duplicateId: candidate.item.id,
+        ref: {
+          id: index + 1,
+          definitionId: candidate.item.definitionId,
+          pile: 'unassigned',
+        },
+      };
+      candidate.signal = signal;
+      return { candidate, signal };
+    });
+    const primaryPolicy = createRollingPrimarySelectionPolicy({
+      entries: pending.map(({ signal }) => ({
+        item: signal,
+        pile: 'unassigned',
+        classification: {
+          requiredSpecial: false,
+          protected: false,
+          provisionsReserve: false,
+        },
+      })),
+      model: { constraints: [] },
+      reserveRatings: false,
+      primaryDuplicateRefs: pending.map(({ signal }) => signal.ref),
+    });
+    const clubFill = Array.from({ length: 8 }, (_, index) => entry(500 + index, 61 + index, {
+      pileName: 'club',
+      pileRank: 3,
+    }));
+
+    const plan = await select([...pending.map(({ candidate }) => candidate), ...clubFill], {
+      ratingModel: {
+        requiredPlayerCount: 11,
+        targetRating: 84,
+        maxSpecialCount: 11,
+        constraints: [],
+      },
+      selection: {
+        requiredItems: primaryPolicy.requiredItems,
+        preferredItems: primaryPolicy.preferredItems,
+        maxOrdinaryRating: 95,
+        protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+      },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.details.rating).toBe(84);
+    expect(plan.selected.map((item) => item.id)).toEqual(expect.arrayContaining(
+      pending.map(({ candidate }) => candidate.item.id),
+    ));
+    expect(plan.pileCounts).toMatchObject({ unassigned: 7, club: 4 });
   });
 
   it('normalizes high non-reserve primary duplicates to an exact 84 squad by relaxing highest duplicates', async () => {
