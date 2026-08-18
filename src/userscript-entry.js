@@ -149,6 +149,7 @@ import {
   planRollingOpenedItemRouting,
   releaseRollingPrimaryDuplicateRefs,
   releaseRollingRoutingItemsAfterConsumption,
+  rollingDuplicateTargetProtectionReasons,
   rollingPrimaryDuplicateRelaxationOrder,
   validateRollingPrimaryDuplicateIdentity,
 } from './inventory/rolling-policy.js';
@@ -12259,6 +12260,17 @@ function updateLoopControls() {
     return [...new Set(reasons)];
   }
 
+  function rollingOpenedDuplicateTargetProtectionReasons(item, loopDef = {}) {
+    return rollingDuplicateTargetProtectionReasons(item, {
+      isDuplicate,
+      resolveTarget: (signal, duplicateId) => getSubmissionCacheItems().find((candidate) => (
+        Number(candidate?.id || 0) === duplicateId
+          && isSamePlayerCardVersion(signal, candidate)
+      )) || null,
+      protectionReasons: (target) => rollingBaseProtectionReasons(target, loopDef),
+    });
+  }
+
   function rollingItemRef(item, pile) {
     return {
       id: Number(item?.id || 0),
@@ -12338,6 +12350,9 @@ function updateLoopControls() {
           context.model || context.primaryContext?.model,
         ),
         protectionReasons: (item) => rollingBaseProtectionReasons(item, loopDef),
+        duplicateTargetProtectionReasons: (item) => (
+          rollingOpenedDuplicateTargetProtectionReasons(item, loopDef)
+        ),
       });
       if (unresolvedPairs.length) {
         routePlan = {
@@ -14675,6 +14690,9 @@ function updateLoopControls() {
       isSpecial: isSbcSpecialItem,
       isRequiredSpecial: (item) => rollingLiveRequiredSpecial(item, runtime.primaryContext?.model),
       protectionReasons: (item) => rollingBaseProtectionReasons(item, loopDef),
+      duplicateTargetProtectionReasons: (item) => (
+        rollingOpenedDuplicateTargetProtectionReasons(item, loopDef)
+      ),
     });
 
     let finalRoute = routePlan;

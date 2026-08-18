@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.4
+// @version      0.8.5
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.4",
+    version: "0.8.5",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -10916,12 +10916,43 @@
       protectionReasons
     };
   }
+  function rollingDuplicateTargetProtectionReasons(item = {}, options = {}) {
+    let duplicate = item?.duplicate === true;
+    try {
+      if (typeof options.isDuplicate === "function") duplicate = options.isDuplicate(item) === true;
+    } catch {
+      return ["duplicate-target-unavailable"];
+    }
+    if (!duplicate) return [];
+    const duplicateId = Number(item?.duplicateId || 0);
+    if (!duplicateId) return ["duplicate-target-unavailable"];
+    let target = null;
+    try {
+      target = options.resolveTarget?.(item, duplicateId) || null;
+    } catch {
+      return ["duplicate-target-unavailable"];
+    }
+    if (Number(target?.id || target?.ref?.id || 0) !== duplicateId) {
+      return ["duplicate-target-unavailable"];
+    }
+    let reasons = [];
+    try {
+      reasons = options.protectionReasons?.(target) || [];
+    } catch {
+      return ["duplicate-target-protection-check-failed"];
+    }
+    return [...new Set(reasons.map((reason) => `duplicate-target-${String(reason)}`))];
+  }
   function planRollingOpenedItemRouting(items = [], options = {}) {
     const provisionsRequiredCount = Math.max(1, Number(options.provisionsRequiredCount || 4) || 4);
     const provisionsRecoveryAvailable = options.provisionsRecoveryAvailable !== false;
     const proactiveProvisionsEnabled = options.proactiveProvisionsEnabled === true;
     const storageFree = options.storageFree === null || options.storageFree === void 0 ? null : Math.max(0, Number(options.storageFree) || 0);
     const entries = (items || []).map((item) => {
+      const protectionReasons = [
+        ...options.protectionReasons?.(item) || [],
+        ...options.duplicateTargetProtectionReasons?.(item) || []
+      ];
       const classification = classifyRollingInventoryItem(item, {
         protectionRating: options.protectionRating,
         duplicate: typeof options.isDuplicate === "function" ? options.isDuplicate(item) : void 0,
@@ -10929,7 +10960,7 @@
         requiredSpecial: options.isRequiredSpecial?.(item),
         provisionsMinRating: options.provisionsMinRating,
         provisionsMaxRating: options.provisionsMaxRating,
-        protectionReasons: options.protectionReasons?.(item) || []
+        protectionReasons
       });
       return { item, classification };
     });
@@ -46858,6 +46889,13 @@
       if (protectedClubEventSpecial) reasons.push("rolling-club-non-totw-required-special");
       return [...new Set(reasons)];
     }
+    function rollingOpenedDuplicateTargetProtectionReasons(item, loopDef = {}) {
+      return rollingDuplicateTargetProtectionReasons(item, {
+        isDuplicate,
+        resolveTarget: (signal, duplicateId) => getSubmissionCacheItems().find((candidate) => Number(candidate?.id || 0) === duplicateId && isSamePlayerCardVersion(signal, candidate)) || null,
+        protectionReasons: (target) => rollingBaseProtectionReasons(target, loopDef)
+      });
+    }
     function rollingItemRef(item, pile) {
       return {
         id: Number(item?.id || 0),
@@ -46923,7 +46961,8 @@
             item,
             context.model || context.primaryContext?.model
           ),
-          protectionReasons: (item) => rollingBaseProtectionReasons(item, loopDef)
+          protectionReasons: (item) => rollingBaseProtectionReasons(item, loopDef),
+          duplicateTargetProtectionReasons: (item) => rollingOpenedDuplicateTargetProtectionReasons(item, loopDef)
         });
         if (unresolvedPairs.length) {
           routePlan = {
@@ -49050,7 +49089,8 @@
         isDuplicate: () => true,
         isSpecial: isSbcSpecialItem,
         isRequiredSpecial: (item) => rollingLiveRequiredSpecial(item, runtime.primaryContext?.model),
-        protectionReasons: (item) => rollingBaseProtectionReasons(item, loopDef)
+        protectionReasons: (item) => rollingBaseProtectionReasons(item, loopDef),
+        duplicateTargetProtectionReasons: (item) => rollingOpenedDuplicateTargetProtectionReasons(item, loopDef)
       });
       let finalRoute = routePlan;
       if (routePlan.status === "ready" && routePlan.storageItems.length) {

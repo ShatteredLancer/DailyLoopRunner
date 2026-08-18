@@ -221,6 +221,36 @@ export function classifyRollingInventoryItem(item = {}, options = {}) {
   };
 }
 
+export function rollingDuplicateTargetProtectionReasons(item = {}, options = {}) {
+  let duplicate = item?.duplicate === true;
+  try {
+    if (typeof options.isDuplicate === 'function') duplicate = options.isDuplicate(item) === true;
+  } catch {
+    return ['duplicate-target-unavailable'];
+  }
+  if (!duplicate) return [];
+
+  const duplicateId = Number(item?.duplicateId || 0);
+  if (!duplicateId) return ['duplicate-target-unavailable'];
+  let target = null;
+  try {
+    target = options.resolveTarget?.(item, duplicateId) || null;
+  } catch {
+    return ['duplicate-target-unavailable'];
+  }
+  if (Number(target?.id || target?.ref?.id || 0) !== duplicateId) {
+    return ['duplicate-target-unavailable'];
+  }
+
+  let reasons = [];
+  try {
+    reasons = options.protectionReasons?.(target) || [];
+  } catch {
+    return ['duplicate-target-protection-check-failed'];
+  }
+  return [...new Set(reasons.map((reason) => `duplicate-target-${String(reason)}`))];
+}
+
 export function planRollingOpenedItemRouting(items = [], options = {}) {
   const provisionsRequiredCount = Math.max(1, Number(options.provisionsRequiredCount || 4) || 4);
   const provisionsRecoveryAvailable = options.provisionsRecoveryAvailable !== false;
@@ -229,6 +259,10 @@ export function planRollingOpenedItemRouting(items = [], options = {}) {
     ? null
     : Math.max(0, Number(options.storageFree) || 0);
   const entries = (items || []).map((item) => {
+    const protectionReasons = [
+      ...(options.protectionReasons?.(item) || []),
+      ...(options.duplicateTargetProtectionReasons?.(item) || []),
+    ];
     const classification = classifyRollingInventoryItem(item, {
       protectionRating: options.protectionRating,
       duplicate: typeof options.isDuplicate === 'function' ? options.isDuplicate(item) : undefined,
@@ -236,7 +270,7 @@ export function planRollingOpenedItemRouting(items = [], options = {}) {
       requiredSpecial: options.isRequiredSpecial?.(item),
       provisionsMinRating: options.provisionsMinRating,
       provisionsMaxRating: options.provisionsMaxRating,
-      protectionReasons: options.protectionReasons?.(item) || [],
+      protectionReasons,
     });
     return { item, classification };
   });

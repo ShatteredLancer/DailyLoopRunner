@@ -3,6 +3,17 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.5] - 2026-08-18
+
+### Fixed
+
+- Routed newly opened duplicate signals to SBC Storage when their exact EA
+  `duplicateId` submission target is unavailable or protected, instead of
+  reserving an impossible mandatory primary-squad item and stopping with
+  `REQUIRED_ITEM_UNAVAILABLE`.
+- Applied the same exact-target safety check when resuming a Rolling session
+  with existing Unassigned duplicates.
+
 ## [0.8.4] - 2026-08-18
 
 ### Fixed

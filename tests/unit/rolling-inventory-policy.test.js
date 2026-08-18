@@ -10,6 +10,7 @@ import {
   planRollingOpenedItemRouting,
   releaseRollingPrimaryDuplicateRefs,
   releaseRollingRoutingItemsAfterConsumption,
+  rollingDuplicateTargetProtectionReasons,
   rollingPrimaryDuplicateRelaxationOrder,
   validateRollingPrimaryDuplicateIdentity,
 } from '../../src/inventory/rolling-policy.js';
@@ -299,6 +300,46 @@ describe('Rolling inventory policy', () => {
     expect(plan.entries[0].classification).toMatchObject({ duplicate: true, special: true, protected: true });
     expect(plan.storageItems).toEqual([liveDuplicate]);
     expect(plan.directClubItems).toEqual([]);
+  });
+
+  it('routes a duplicate signal to Storage when its exact submission target is protected', () => {
+    const signal = item(1, 86, { duplicateId: 7001 });
+    const plan = planRollingOpenedItemRouting([signal], {
+      protectionRating: 95,
+      storageFree: 1,
+      isRequiredSpecial: () => false,
+      duplicateTargetProtectionReasons: () => ['duplicate-target-fsu-locked'],
+    });
+
+    expect(plan.status).toBe('ready');
+    expect(plan.reservedItems).toEqual([]);
+    expect(plan.storageItems).toEqual([signal]);
+    expect(plan.entries[0].classification).toMatchObject({
+      protected: true,
+      protectionReasons: ['duplicate-target-fsu-locked'],
+    });
+  });
+
+  it('describes an unavailable or protected exact duplicate target without relaxing identity', () => {
+    const signal = item(1, 86, { duplicateId: 7001 });
+    const target = item(7001, 86, { duplicate: false, pile: 'club' });
+
+    expect(rollingDuplicateTargetProtectionReasons(signal, {
+      isDuplicate: () => true,
+      resolveTarget: () => target,
+      protectionReasons: () => ['fsu-locked'],
+    })).toEqual(['duplicate-target-fsu-locked']);
+    expect(rollingDuplicateTargetProtectionReasons(signal, {
+      isDuplicate: () => true,
+      resolveTarget: () => null,
+    })).toEqual(['duplicate-target-unavailable']);
+    expect(rollingDuplicateTargetProtectionReasons(signal, {
+      isDuplicate: () => true,
+      resolveTarget: () => item(7002, 86, { duplicate: false, pile: 'club' }),
+    })).toEqual(['duplicate-target-unavailable']);
+    expect(rollingDuplicateTargetProtectionReasons({ ...signal, duplicate: false }, {
+      isDuplicate: () => false,
+    })).toEqual([]);
   });
 
   it('stores a protected Required Special instead of reserving it for the current squad', () => {
