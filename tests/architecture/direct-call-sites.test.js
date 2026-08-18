@@ -365,6 +365,23 @@ describe('current direct side-effect call baseline', () => {
     expect(loader).not.toContain('loadRatingSbcChallenge(sourceChallenge, pickDef.name, { force: true })');
   });
 
+  it('synchronizes the loaded Rolling primary squad for reuse after recovery submissions', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const helperStart = source.indexOf('async function loadRatingSbcChallengeForSet');
+    const helperEnd = source.indexOf('function hasRatingSbcChallengeRequirements', helperStart);
+    const helper = source.slice(helperStart, helperEnd);
+    const primaryStart = source.indexOf('async function loadRollingPrimaryContext');
+    const primaryEnd = source.indexOf('function rollingRecoveryDef', primaryStart);
+    const primary = source.slice(primaryStart, primaryEnd);
+
+    expect(helperStart).toBeGreaterThan(-1);
+    expect(helper).toContain('label, options = {}');
+    expect(helper).toContain('loadRatingSbcChallenge(challenge, label, options)');
+    expect(primaryStart).toBeGreaterThan(-1);
+    expect(primary).toContain('loadRatingSbcChallengeForSet(set, challengeContext.challenge, loopDef.name, {');
+    expect(primary).not.toContain('loadRatingSbcChallenge(challengeContext.challenge, loopDef.name, {');
+  });
+
   it('tries ordered unlimited Rare Gold Pick candidates before the Gold sink fallback', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     const singleCandidateStart = source.indexOf('async function runRollingPlayerPickCandidate');

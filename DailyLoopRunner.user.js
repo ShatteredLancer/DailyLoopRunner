@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.2
+// @version      0.8.3
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.2",
+    version: "0.8.3",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -39624,13 +39624,13 @@
       if (challenge.squad && !cached.squad) cached.squad = challenge.squad;
       return challenge;
     }
-    async function loadRatingSbcChallengeForSet(set, challenge, label) {
+    async function loadRatingSbcChallengeForSet(set, challenge, label, options = {}) {
       const hadSquad = Boolean(challenge?.squad);
       synchronizeCachedSbcChallengeSquad(set, challenge);
       if (!hadSquad && challenge?.squad) {
         log(`${label}: reusing cached challenge squad #${challenge?.id || "?"}`);
       }
-      const loaded = await loadRatingSbcChallenge(challenge, label);
+      const loaded = await loadRatingSbcChallenge(challenge, label, options);
       synchronizeCachedSbcChallengeSquad(set, loaded);
       return loaded;
     }
@@ -47014,7 +47014,7 @@
       if (!challengeContext.challenge) {
         return { status: "unavailable", reason: "no available primary SBC challenge remains" };
       }
-      const challenge = loopDef.dryRun ? challengeContext.challenge : await loadRatingSbcChallenge(challengeContext.challenge, loopDef.name, {
+      const challenge = loopDef.dryRun ? challengeContext.challenge : await loadRatingSbcChallengeForSet(set, challengeContext.challenge, loopDef.name, {
         force: options.force === true
       });
       if (!challenge) return { status: "unavailable", reason: "primary SBC challenge could not be loaded" };

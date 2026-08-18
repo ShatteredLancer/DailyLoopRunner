@@ -4187,13 +4187,13 @@ function updateLoopControls() {
     return challenge;
   }
 
-  async function loadRatingSbcChallengeForSet(set, challenge, label) {
+  async function loadRatingSbcChallengeForSet(set, challenge, label, options = {}) {
     const hadSquad = Boolean(challenge?.squad);
     synchronizeCachedSbcChallengeSquad(set, challenge);
     if (!hadSquad && challenge?.squad) {
       log(`${label}: reusing cached challenge squad #${challenge?.id || '?'}`);
     }
-    const loaded = await loadRatingSbcChallenge(challenge, label);
+    const loaded = await loadRatingSbcChallenge(challenge, label, options);
     synchronizeCachedSbcChallengeSquad(set, loaded);
     return loaded;
   }
@@ -12449,7 +12449,7 @@ function updateLoopControls() {
     }
     const challenge = loopDef.dryRun
       ? challengeContext.challenge
-      : await loadRatingSbcChallenge(challengeContext.challenge, loopDef.name, {
+      : await loadRatingSbcChallengeForSet(set, challengeContext.challenge, loopDef.name, {
           force: options.force === true,
         });
     if (!challenge) return { status: 'unavailable', reason: 'primary SBC challenge could not be loaded' };

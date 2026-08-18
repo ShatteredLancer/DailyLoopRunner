@@ -3,6 +3,14 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.3] - 2026-08-18
+
+### Fixed
+
+- Reused and synchronized the already-loaded Rolling primary Challenge squad
+  after Provisions or Required Special recovery submissions, avoiding EA `466`
+  failures caused by immediately loading the same Challenge squad again.
+
 ## [0.8.2] - 2026-08-18
 
 ### Fixed
