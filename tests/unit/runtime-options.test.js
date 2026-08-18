@@ -25,6 +25,9 @@ describe('loop runtime option projection', () => {
       preferScannedMetadata: false,
       openPicksAtEnd: false,
       rollingStorageSinkEnabled: false,
+      rollingStorageSinkMode: 'off',
+      rollingStorageSinkSetId: null,
+      rollingStorageSinkSetName: '',
       rollingSurplusCraftingEnabled: false,
       rollingProvisionsMaxRating: 88,
       rollingOpenDuplicateProvisionsRewards: false,
@@ -43,6 +46,9 @@ describe('loop runtime option projection', () => {
       preferScannedMetadata: true,
       openPicksAtEnd: true,
       rollingStorageSinkEnabled: false,
+      rollingStorageSinkMode: 'off',
+      rollingStorageSinkSetId: null,
+      rollingStorageSinkSetName: '',
       rollingSurplusCraftingEnabled: false,
       rollingProvisionsMaxRating: 88,
       rollingOpenDuplicateProvisionsRewards: false,
@@ -277,6 +283,31 @@ describe('loop runtime option projection', () => {
   it('keeps the Rolling Storage sink opt-in across global and Loop overrides', () => {
     expect(normalizePickRuntimeOptions({})).toMatchObject({
       rollingStorageSinkEnabled: false,
+      rollingStorageSinkMode: 'off',
+      rollingStorageSinkSetId: null,
+    });
+    expect(normalizePickRuntimeOptions({ rollingStorageSinkEnabled: true })).toMatchObject({
+      rollingStorageSinkEnabled: true,
+      rollingStorageSinkMode: 'automatic',
+      rollingStorageSinkSetId: null,
+    });
+    expect(normalizePickRuntimeOptions({
+      rollingStorageSinkMode: 'selected',
+      rollingStorageSinkSetId: 20994,
+      rollingStorageSinkSetName: '1 of 3 94+ Player Pick',
+    })).toMatchObject({
+      rollingStorageSinkEnabled: true,
+      rollingStorageSinkMode: 'selected',
+      rollingStorageSinkSetId: 20994,
+      rollingStorageSinkSetName: '1 of 3 94+ Player Pick',
+    });
+    expect(normalizePickRuntimeOptions({
+      rollingStorageSinkMode: 'selected',
+      rollingStorageSinkSetId: 0,
+    })).toMatchObject({
+      rollingStorageSinkEnabled: false,
+      rollingStorageSinkMode: 'off',
+      rollingStorageSinkSetId: null,
     });
     expect(resolvePickRuntimeOptions(
       { rollingStorageSinkEnabled: true },
@@ -293,7 +324,13 @@ describe('loop runtime option projection', () => {
     });
     expect(enabled).toMatchObject({
       rollingStorageSinkEnabled: true,
-      runtimePickOptions: { rollingStorageSinkEnabled: true },
+      rollingStorageSinkMode: 'automatic',
+      rollingStorageSinkSetId: null,
+      runtimePickOptions: {
+        rollingStorageSinkEnabled: true,
+        rollingStorageSinkMode: 'automatic',
+        rollingStorageSinkSetId: null,
+      },
     });
   });
 

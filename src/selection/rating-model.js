@@ -1,5 +1,5 @@
 import { calculateEaSquadRating } from '../domain/rating.js';
-import { readPlayerRareFlag } from '../domain/player-rarity.js';
+import { readPlayerDatabaseId, readPlayerRareFlag } from '../domain/player-rarity.js';
 
 const PLAYER_REQUIREMENT_KEYS = new Set([
   'PLAYER_QUALITY',
@@ -223,10 +223,15 @@ export function validateRatingSbcModelAgainstItems(model, items = [], challenge 
     : 0;
   const definitionIds = players.map((item) => Number(item?.definitionId || 0)).filter(Boolean);
   const uniqueDefinitionCount = new Set(definitionIds).size;
+  const databaseIds = players.map(readPlayerDatabaseId).filter(Boolean);
+  const uniquePlayerCount = new Set(databaseIds).size;
 
   if (players.length !== requiredPlayerCount) errors.push(`player-count ${players.length}/${requiredPlayerCount}`);
   if (definitionIds.length !== players.length || uniqueDefinitionCount !== players.length) {
     errors.push(`unique-definitions ${uniqueDefinitionCount}/${players.length}`);
+  }
+  if (databaseIds.length !== players.length || uniquePlayerCount !== players.length) {
+    errors.push(`unique-players ${uniquePlayerCount}/${players.length}`);
   }
   if (players.length === requiredPlayerCount && rating < Number(model?.targetRating || 0)) {
     errors.push(`team-rating ${rating}/${Number(model?.targetRating || 0)}`);
@@ -291,6 +296,7 @@ export function validateRatingSbcModelAgainstItems(model, items = [], challenge 
     rating,
     specialCount,
     uniqueDefinitionCount,
+    uniquePlayerCount,
     constraintResults,
     roleResults,
     challengeReady,

@@ -23,6 +23,17 @@ export function storageSinkSquadSourceStrategy(targetRating) {
   return null;
 }
 
+export function genericStorageSinkSquadSourceStrategy(targetRating) {
+  const rating = Number(targetRating || 0);
+  if (!Number.isInteger(rating) || rating < 87 || rating > 99) return null;
+  return {
+    targetRating: rating,
+    priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+    requirePrimaryUnassigned: true,
+    maxClubCount: STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
+  };
+}
+
 export function nextStorageSinkContext(contexts = []) {
   return [...contexts]
     .filter((context) => storageSinkSquadSourceStrategy(
@@ -66,6 +77,32 @@ export function prepareStorageSink89Candidates(entries = [], options = {}) {
     entries: entries.filter((entry) => (
       entry.pileName === 'storage'
         || (entry.pileName === 'unassigned' && requiredIds.has(Number(entry.item?.id || 0)))
+    )),
+    requiredEntries,
+    requiredItems: requiredEntries.map(entryItemRef),
+  };
+}
+
+export function prepareGenericStorageSinkCandidates(entries = [], options = {}) {
+  const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
+  const requiredPlayerCount = Math.max(1, Number(options.requiredPlayerCount || 11) || 11);
+  const primaryRefs = options.primaryRefs || [];
+  const requiredEntries = entries.filter((entry) => (
+    entry.pileName === 'unassigned'
+      && entry.signal
+      && Number(entry.item?.rating || 0) <= maxRating
+      && primaryRefs.some((ref) => matchesRef(entry.signal, ref))
+  )).sort((left, right) => (
+    Number(right.item?.rating || 0) - Number(left.item?.rating || 0)
+      || Number(left.item?.id || 0) - Number(right.item?.id || 0)
+  )).slice(0, requiredPlayerCount);
+  const requiredIds = new Set(requiredEntries.map((entry) => Number(entry.item?.id || 0)));
+  const clubIds = new Set((options.clubEntries || []).map((entry) => Number(entry.item?.id || 0)));
+  return {
+    entries: entries.filter((entry) => (
+      ['storage', 'transfer'].includes(entry.pileName)
+        || (entry.pileName === 'unassigned' && requiredIds.has(Number(entry.item?.id || 0)))
+        || (entry.pileName === 'club' && clubIds.has(Number(entry.item?.id || 0)))
     )),
     requiredEntries,
     requiredItems: requiredEntries.map(entryItemRef),

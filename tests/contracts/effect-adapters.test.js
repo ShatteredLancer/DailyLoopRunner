@@ -231,6 +231,39 @@ describe('effect adapter contracts', () => {
     });
   });
 
+  it('normalizes direct Player rewards for Storage sink discovery', () => {
+    const player = {
+      id: 94001,
+      definitionId: 94001,
+      isPlayer: () => true,
+      getStaticData: () => ({ name: 'Campaign Player' }),
+    };
+    const set = {
+      id: 4209,
+      name: 'Campaign Player SBC',
+      awards: [{ type: 'ITEM', isItem: true, item: player, count: 1 }],
+      challengeIds: [5209],
+    };
+    const ea = createEaSbcAdapter({
+      services: { SBC: {
+        repository: { sets: { _collection: { 4209: set } } },
+        requestSets() {}, requestChallengesForSet() {}, loadChallenge() {}, saveChallenge() {}, submitChallenge() {},
+      } },
+      repositories: { Squad: { getFormation: () => null } },
+      UTSBCSquadSplitViewController: class {},
+    });
+
+    expect(ea.snapshotDiscoveryIndex(set)).toMatchObject({
+      rewards: [{
+        type: 'PLAYER',
+        name: 'Campaign Player',
+        resourceId: 94001,
+        definitionId: 94001,
+        count: 1,
+      }],
+    });
+  });
+
   it('accepts authoritative Set-local Category metadata when the global Category repository is unavailable', () => {
     const set = {
       id: 4202,

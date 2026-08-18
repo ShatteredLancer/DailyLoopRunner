@@ -2,8 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { loadUserscript, makePlayer } from '../helpers/load-userscript.js';
 
 function entry(id, rating, options = {}) {
+  const definitionId = options.definitionId ?? 10000 + id;
   return {
-    item: makePlayer({ id, definitionId: 10000 + id, rating, rareflag: options.special ? 2 : 0, groups: options.special ? [44] : [] }),
+    item: makePlayer({
+      id,
+      definitionId,
+      databaseId: options.databaseId ?? (definitionId % 0x01000000),
+      rating,
+      rareflag: options.special ? 2 : 0,
+      groups: options.special ? [44] : [],
+    }),
     signal: null,
     pileName: options.pileName || 'storage',
     pileRank: options.pileRank ?? 0,
@@ -95,5 +103,45 @@ describe('rating selector regression fixtures', () => {
       ok: false,
       reason: 'only 2/11 safe unique player definitions are available',
     });
+  });
+
+  it('never selects two card versions of the same base player', async () => {
+    const dembeleDatabaseId = 231443;
+    const entries = [
+      entry(1, 95, {
+        definitionId: 134449171,
+        databaseId: dembeleDatabaseId,
+        special: true,
+        requirementMatches: [true],
+      }),
+      entry(2, 91, {
+        definitionId: 67340307,
+        databaseId: dembeleDatabaseId,
+        requirementMatches: [false],
+      }),
+      entry(3, 91, {
+        definitionId: 67340308,
+        databaseId: 231444,
+        requirementMatches: [false],
+      }),
+      ...Array.from({ length: 9 }, (_, index) => entry(10 + index, 80, {
+        requirementMatches: [false],
+      })),
+    ];
+
+    const { api } = await loadUserscript();
+    const plan = await api.findOptimalRatingSbcSelection(entries, {
+      requiredPlayerCount: 11,
+      targetRating: 84,
+      maxSpecialCount: 1,
+      constraints: [{ label: 'Required Special x1', count: 1 }],
+    }, ['storage', 'club']);
+
+    expect(plan.ok).toBe(true);
+    expect(plan.rating).toBe(84);
+    expect(plan.selected.map((item) => item.id)).toContain(1);
+    expect(plan.selected.map((item) => item.id)).toContain(3);
+    expect(plan.selected.map((item) => item.id)).not.toContain(2);
+    expect(new Set(plan.selected.map((item) => item.databaseId)).size).toBe(11);
   });
 });

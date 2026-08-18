@@ -1,6 +1,7 @@
 import {
   hasPlayerCosmetics,
   isPlayerEvolutionCard,
+  readPlayerDatabaseId,
   readPlayerRareFlag,
 } from './player-rarity.js';
 
@@ -44,6 +45,7 @@ export function createItemSnapshot(item = {}, pile = item.pile || 'unknown') {
     ref: createItemRef(item, pile),
     id: finiteNumber(item.id),
     definitionId: finiteNumber(item.definitionId),
+    databaseId: readPlayerDatabaseId(item),
     type: String(item.type || 'unknown'),
     name: String(item.name || item.commonName || item.lastName || item.definitionId || item.id || 'unknown'),
     rating,

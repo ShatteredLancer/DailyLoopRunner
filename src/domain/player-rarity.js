@@ -8,10 +8,30 @@ function callBoolean(item, method) {
 }
 
 const PLAYER_CARD_HOLDERS = ['_data', 'data', '_staticData', 'staticData'];
+const PLAYER_DATABASE_ID_FIELDS = ['databaseId', 'databaseID', 'databaseid', '_databaseId'];
+const PLAYER_DEFINITION_ID_FIELDS = ['definitionId', 'definitionID', 'definitionid', 'defId'];
 
 function cardHolders(item = {}) {
-  return [item, ...PLAYER_CARD_HOLDERS.map((field) => item?.[field])]
+  return [item, item?.ref, ...PLAYER_CARD_HOLDERS.map((field) => item?.[field])]
     .filter((holder) => holder && typeof holder === 'object');
+}
+
+function firstPositiveInteger(holders, fields) {
+  for (const holder of holders) {
+    for (const field of fields) {
+      const value = Number(holder?.[field]);
+      if (Number.isSafeInteger(value) && value > 0) return value;
+    }
+  }
+  return 0;
+}
+
+export function readPlayerDatabaseId(item = {}) {
+  const holders = cardHolders(item);
+  const direct = firstPositiveInteger(holders, PLAYER_DATABASE_ID_FIELDS);
+  if (direct) return direct;
+  const definitionId = firstPositiveInteger(holders, PLAYER_DEFINITION_ID_FIELDS);
+  return definitionId ? definitionId % 0x01000000 : 0;
 }
 
 function meaningfulCardState(value, options = {}) {

@@ -3,6 +3,39 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] - 2026-08-18
+
+### Added
+
+- Configurable Storage-pressure recovery with `Off`, `Automatic`, and
+  `Selected SBC` modes for dynamically discovered high-rating Player Pick or
+  direct Player SBCs.
+- A lightweight Storage-pressure SBC catalog that preserves stable Set
+  selection and deep-validates only the selected direct Player contract.
+- Base-player `databaseId` snapshots and validation across EA inventory,
+  deterministic rating selection, and final saved-squad inspection.
+
+### Changed
+
+- Generic Storage-pressure recovery submits one supported 87+ squad at a time,
+  prioritizes Unassigned and Storage materials, and defers remaining squads to
+  a later pressure event.
+- Dynamic SBC discovery now recognizes direct Player rewards while excluding
+  unvalidated Picks and scanned contracts without a supported 87+ squad.
+- Rolling Selection Policy and documentation now distinguish automatic legacy
+  recovery from an explicitly selected Storage-pressure SBC.
+
+### Fixed
+
+- Prevented two different card versions of the same base player from entering
+  one rating SBC squad; conflicts are replanned without discarding required
+  special-card roles.
+- Reused and synchronized preloaded multi-Challenge squads after the first
+  Storage-pressure submission, avoiding stale second-squad `466` failures.
+- Prevented low-cost 83+/84+/87+ Pick contracts from remaining in the Selected
+  SBC list after their Challenge metadata was rejected.
+- Replaced the legacy `[BronzeLoop]` console prefix with `[DailyLoopRunner]`.
+
 ## [0.8.0] - 2026-08-17
 
 ### Added

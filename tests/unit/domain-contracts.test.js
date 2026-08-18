@@ -11,12 +11,13 @@ import {
 
 describe('domain contracts', () => {
   it('normalizes and freezes item/inventory snapshots', () => {
-    const item = createItemSnapshot({ id: 1, definitionId: 2, type: 'player', rating: 84, rareflag: 2, tradeable: true }, 'club');
+    const item = createItemSnapshot({ id: 1, definitionId: 67340307, databaseId: 231443, type: 'player', rating: 84, rareflag: 2, tradeable: true }, 'club');
     const inventory = createInventorySnapshot({ piles: { club: [item] }, capacities: { club: { max: 100, used: 1 } } });
-    expect(item).toMatchObject({ tier: 'gold', rare: true, special: true, pile: 'club' });
+    expect(item).toMatchObject({ databaseId: 231443, tier: 'gold', rare: true, special: true, pile: 'club' });
     expect(inventory.capacities.club).toEqual({ used: 1, max: 100, free: 99 });
     expect(Object.isFrozen(inventory)).toBe(true);
     expect(Object.isFrozen(inventory.piles.club)).toBe(true);
+    expect(JSON.parse(JSON.stringify(item))).toMatchObject({ databaseId: 231443 });
   });
 
   it('creates serializable plans and results without live model objects', () => {

@@ -8,6 +8,12 @@ import { STRATEGY_RUNNER_KEYS } from '../../src/workflows/dispatch.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 describe('current direct side-effect call baseline', () => {
+  it('uses the current product name for Console logging', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    expect(source).toContain("const CONSOLE_PREFIX = '[DailyLoopRunner]';");
+    expect(source).not.toContain('[BronzeLoop]');
+  });
+
   it('keeps every Trade service call inside the EA Trade Adapter', async () => {
     const tradeAdapter = await readFile(path.join(root, 'src', 'adapters', 'ea', 'trade.js'), 'utf8');
     const tradeDirectory = path.join(root, 'src', 'trade');
@@ -318,18 +324,45 @@ describe('current direct side-effect call baseline', () => {
     expect(source).toContain('if (recapModel?.hasQualifyingCards) void showBatchRecapModal(recapModel);');
   });
 
-  it('selects a completed Storage Sink Pick before retrying deferred Storage routing', async () => {
+  it('handles a completed Storage Sink reward before retrying deferred Storage routing', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
-    const recoveryStart = source.indexOf('async function runRollingStorageSinkRecovery');
-    const recoveryEnd = source.indexOf('function publishRollingTelemetry', recoveryStart);
-    const recovery = source.slice(recoveryStart, recoveryEnd);
-    const postSubmitSelection = recovery.lastIndexOf('await selectPendingRollingStorageSinkPick');
-    const protectedStorageRetry = recovery.lastIndexOf('await retryRollingProtectedStorage');
-
-    expect(recoveryStart).toBeGreaterThan(-1);
+    const genericStart = source.indexOf('async function runRollingGenericStorageSinkRecovery');
+    const genericEnd = source.indexOf('async function runRollingStorageSinkRecovery', genericStart);
+    const generic = source.slice(genericStart, genericEnd);
+    const postSubmitSelection = generic.lastIndexOf('await selectPendingRollingStorageSinkPick');
+    const directPlayerRouting = generic.lastIndexOf('await resumeRollingPendingUnassigned');
+    const protectedStorageRetry = generic.lastIndexOf('await retryRollingProtectedStorage');
+    const legacyStart = source.indexOf('async function runRollingLegacyStorageSinkRecovery');
+    const legacyEnd = source.indexOf('async function loadRollingGenericStorageSinkContexts', legacyStart);
+    const legacy = source.slice(legacyStart, legacyEnd);
+    expect(genericStart).toBeGreaterThan(-1);
     expect(postSubmitSelection).toBeGreaterThan(-1);
+    expect(directPlayerRouting).toBeGreaterThan(-1);
     expect(protectedStorageRetry).toBeGreaterThan(postSubmitSelection);
-    expect(recovery).toContain('pickSelected: true');
+    expect(protectedStorageRetry).toBeGreaterThan(directPlayerRouting);
+    expect(legacy).toContain('pickSelected: true');
+  });
+
+  it('reuses preloaded legacy 95+ Storage Sink squads after the first submission', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const legacyStart = source.indexOf('async function runRollingLegacyStorageSinkRecovery');
+    const legacyEnd = source.indexOf('async function loadRollingGenericStorageSinkContexts', legacyStart);
+    const legacy = source.slice(legacyStart, legacyEnd);
+    const loaderStart = source.indexOf('async function loadRollingStorageSinkContexts');
+    const loaderEnd = source.indexOf('function rollingStorageSinkLoopDefForPiles', loaderStart);
+    const loader = source.slice(loaderStart, loaderEnd);
+    const contextLoad = legacy.indexOf('await loadRollingStorageSinkContexts(loopDef, pickDef)');
+    const sequentialLoop = legacy.indexOf('while (pendingContexts.length)');
+
+    expect(legacyStart).toBeGreaterThan(-1);
+    expect(legacy.match(/await loadRollingStorageSinkContexts\(loopDef, pickDef\)/g) || []).toHaveLength(1);
+    expect(contextLoad).toBeGreaterThan(-1);
+    expect(sequentialLoop).toBeGreaterThan(contextLoad);
+    expect(legacy).toContain('Number(loaded.completedCount || 0) + submitted');
+    expect(legacy).toContain('reusing ${pendingContexts.length} preloaded remaining squad(s)');
+    expect(loaderStart).toBeGreaterThan(-1);
+    expect(loader).toContain('loadRatingSbcChallengeForSet(set, sourceChallenge, pickDef.name)');
+    expect(loader).not.toContain('loadRatingSbcChallenge(sourceChallenge, pickDef.name, { force: true })');
   });
 
   it('tries ordered unlimited Rare Gold Pick candidates before the Gold sink fallback', async () => {
@@ -366,9 +399,19 @@ describe('current direct side-effect call baseline', () => {
 
     expect(pendingPickResume).toBeGreaterThan(-1);
     expect(pendingUnassignedResume).toBeGreaterThan(pendingPickResume);
-    expect(source.slice(pendingPickResume, pendingUnassignedResume)).toContain('failOnUnexpected: false');
+    expect(source.slice(pendingPickResume, pendingUnassignedResume)).toContain('resumePendingRollingStorageSinkReward');
+    expect(source).toMatch(/async function resumePendingRollingStorageSinkReward[\s\S]*?failOnUnexpected: false/);
     expect(workflowPickResume).toBeGreaterThan(-1);
     expect(workflowUnassignedResume).toBeGreaterThan(workflowPickResume);
+  });
+
+  it('deep-scans only an explicitly selected direct Player Storage sink and refreshes it after save', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    expect(source).toContain("pickOptions.rollingStorageSinkMode === 'selected'");
+    expect(source).toContain('Number(index.id || 0) === Number(pickOptions.rollingStorageSinkSetId || 0)');
+    expect(source).toContain('isCandidate: (index) => dynamicSbcCandidate(index, activitySbcNames, pickOptions)');
+    expect(source).toContain('buildRollingStorageSinkCatalog(');
+    expect(source).toMatch(/storageSinkChanged[\s\S]*?await scanAvailableDynamicSbcs\(\);/);
   });
 
   it('reserves supply-and-craft Unassigned materials before pre-selection cleanup', async () => {

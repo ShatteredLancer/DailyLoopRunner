@@ -320,6 +320,9 @@ function validatePickOptions(value, path, errors) {
     'openPicksAtEnd',
     'preferScannedMetadata',
     'rollingStorageSinkEnabled',
+    'rollingStorageSinkMode',
+    'rollingStorageSinkSetId',
+    'rollingStorageSinkSetName',
     'rollingSurplusCraftingEnabled',
     'rollingProvisionsMaxRating',
     'rollingOpenDuplicateProvisionsRewards',
@@ -350,6 +353,25 @@ function validatePickOptions(value, path, errors) {
     if (!Number.isInteger(number) || number < 1 || number > 30) {
       errors.push(`${path}.rollingShortageProvisionsPackLimit must be an integer between 1 and 30`);
     }
+  }
+  if (value.rollingStorageSinkMode !== undefined
+    && !['off', 'automatic', 'selected'].includes(value.rollingStorageSinkMode)) {
+    errors.push(`${path}.rollingStorageSinkMode must be off, automatic, or selected`);
+  }
+  if (value.rollingStorageSinkSetId !== undefined && value.rollingStorageSinkSetId !== null) {
+    const number = Number(value.rollingStorageSinkSetId);
+    if (!Number.isInteger(number) || number < 1) {
+      errors.push(`${path}.rollingStorageSinkSetId must be a positive integer or null`);
+    }
+  }
+  if (value.rollingStorageSinkSetName !== undefined
+    && typeof value.rollingStorageSinkSetName !== 'string') {
+    errors.push(`${path}.rollingStorageSinkSetName must be a string`);
+  }
+  if (value.rollingStorageSinkMode === 'selected'
+    && (!Number.isInteger(Number(value.rollingStorageSinkSetId))
+      || Number(value.rollingStorageSinkSetId) < 1)) {
+    errors.push(`${path}.rollingStorageSinkSetId is required when mode is selected`);
   }
 }
 
@@ -537,6 +559,38 @@ function validateRollingStorageSinkPick(value, path, errors) {
   }
 }
 
+function validateRollingStorageSink(value, path, errors) {
+  if (!isPlainObject(value)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+  if (!['resolved', 'unavailable', 'disabled'].includes(value.status)) {
+    errors.push(`${path}.status must be resolved, unavailable, or disabled`);
+  }
+  if (value.required !== false) errors.push(`${path}.required must be false`);
+  if (!['off', 'automatic', 'selected'].includes(value.mode)) {
+    errors.push(`${path}.mode must be off, automatic, or selected`);
+  }
+  if (value.status === 'resolved') {
+    const capability = value.capability;
+    if (!isPlainObject(capability)) {
+      errors.push(`${path}.capability must be an object when resolved`);
+    } else {
+      if (!Number.isInteger(Number(capability.setId)) || Number(capability.setId) < 1) {
+        errors.push(`${path}.capability.setId must be a positive integer`);
+      }
+      if (!['player-pick', 'player'].includes(capability.rewardKind)) {
+        errors.push(`${path}.capability.rewardKind must be player-pick or player`);
+      }
+      if (!Array.isArray(capability.challengeRatings)
+        || !capability.challengeRatings.length
+        || capability.challengeRatings.some((rating) => Number(rating) < 87)) {
+        errors.push(`${path}.capability.challengeRatings must contain one or more ratings of 87+`);
+      }
+    }
+  }
+}
+
 function validateRollingUpgrade(loopDef, errors) {
   if (loopDef.dynamicSbcFamily !== 'high-rated-x10' || Number(loopDef.dynamicRewardCount) !== 10) {
     errors.push('rollingUpgrade requires a scanned high-rated-x10 primary with 10 rewards');
@@ -565,6 +619,7 @@ function validateRollingUpgrade(loopDef, errors) {
   }
   validateRollingPlayerPick(loopDef.rollingPlayerPick, 'rollingPlayerPick', errors);
   validateRollingStorageSinkPick(loopDef.rollingStorageSinkPick, 'rollingStorageSinkPick', errors);
+  validateRollingStorageSink(loopDef.rollingStorageSink, 'rollingStorageSink', errors);
   if (loopDef.runtimeQuantity?.allowZero !== true) {
     errors.push('rollingUpgrade runtimeQuantity.allowZero must be true');
   }

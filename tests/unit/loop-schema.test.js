@@ -326,6 +326,9 @@ describe('loop configuration schema', () => {
       pickOptions: {
         autoPickThreshold: 91,
         rollingStorageSinkEnabled: true,
+        rollingStorageSinkMode: 'selected',
+        rollingStorageSinkSetId: 20995,
+        rollingStorageSinkSetName: '1 of 3 95+ Player Pick',
         rollingSurplusCraftingEnabled: true,
         rollingProvisionsMaxRating: 89,
         rollingOpenDuplicateProvisionsRewards: true,
@@ -356,6 +359,9 @@ describe('loop configuration schema', () => {
       pickOptions: {
         autoPickThreshold: 100,
         rollingStorageSinkEnabled: 'yes',
+        rollingStorageSinkMode: 'selected',
+        rollingStorageSinkSetId: 0,
+        rollingStorageSinkSetName: 95,
         rollingSurplusCraftingEnabled: 'yes',
         rollingProvisionsMaxRating: 90,
         rollingShortageProvisionsPackLimit: 31,
@@ -366,6 +372,9 @@ describe('loop configuration schema', () => {
     })).toEqual(expect.arrayContaining([
       'pickOptions.autoPickThreshold must be a number between 1 and 99',
       'pickOptions.rollingStorageSinkEnabled must be boolean',
+      'pickOptions.rollingStorageSinkSetId must be a positive integer or null',
+      'pickOptions.rollingStorageSinkSetName must be a string',
+      'pickOptions.rollingStorageSinkSetId is required when mode is selected',
       'pickOptions.rollingSurplusCraftingEnabled must be boolean',
       'pickOptions.rollingProvisionsMaxRating must be either 88 or 89',
       'pickOptions.rollingShortageProvisionsPackLimit must be an integer between 1 and 30',

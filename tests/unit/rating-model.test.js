@@ -200,4 +200,21 @@ describe('rating SBC model parsing and validation', () => {
     expect(invalid.ok).toBe(false);
     expect(invalid.errors).toContain('Required Special x1 role-count 2/1-1');
   });
+
+  it('rejects different card definitions for the same base player', () => {
+    const result = validateRatingSbcModelAgainstItems({
+      requiredPlayerCount: 2,
+      targetRating: 84,
+      maxSpecialCount: 2,
+      constraints: [],
+    }, [
+      { id: 1, definitionId: 134449171, databaseId: 231443, rating: 84 },
+      { id: 2, definitionId: 67340307, databaseId: 231443, rating: 84 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(result.uniqueDefinitionCount).toBe(2);
+    expect(result.uniquePlayerCount).toBe(1);
+    expect(result.errors).toContain('unique-players 1/2');
+  });
 });

@@ -38,6 +38,14 @@ function field(dom, labelText, input, mode, title = '') {
   return label;
 }
 
+function wideField(dom, labelText, input, mode, title = '') {
+  const label = field(dom, labelText, input, mode, title);
+  label.style.gridTemplateColumns = mode?.mobile
+    ? '1fr'
+    : 'minmax(0, 1fr) minmax(180px, 320px)';
+  return label;
+}
+
 function checkbox(dom, id, labelText, checked, title = '') {
   const label = dom.create('label');
   applyStyles(label, { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', minHeight: '30px' });
@@ -138,6 +146,9 @@ export function showSelectionPolicySettings(options = {}) {
 
   const mode = readResponsiveUiMode(dom);
   const pickOptions = normalizePickRuntimeOptions(options.pickOptions);
+  const storageSinkCandidates = [...(options.storageSinkCandidates || [])]
+    .filter((candidate) => Number(candidate?.setId || 0) > 0 && String(candidate?.name || '').trim())
+    .sort((left, right) => String(left.name).localeCompare(String(right.name)));
   const sbcFodderOptions = normalizeSbcFodderPolicy(options.sbcFodderOptions);
   const overlay = dom.create('div');
   overlay.id = 'bronze-loop-selection-policy-modal';
@@ -181,13 +192,47 @@ export function showSelectionPolicySettings(options = {}) {
     pickOptions.openPicksAtEnd === true,
     'Complete the requested Player Pick SBC count before opening the resulting Picks',
   );
-  const rollingStorageSink = checkbox(
+  const rollingStorageSinkMode = selectInput(
     dom,
-    'bronze-loop-policy-rolling-storage-sink',
-    'Use 95+ Storage pressure Pick',
-    pickOptions.rollingStorageSinkEnabled === true,
-    'Allow Rolling to submit the dynamically scanned 88/89 Storage sink after Provisions cannot free enough space',
+    'bronze-loop-policy-rolling-storage-sink-mode',
+    pickOptions.rollingStorageSinkMode,
+    [['off', 'Off'], ['automatic', 'Automatic'], ['selected', 'Selected SBC']],
+    mode,
   );
+  const configuredStorageSinkSetId = Number(pickOptions.rollingStorageSinkSetId || 0);
+  if (configuredStorageSinkSetId
+    && !storageSinkCandidates.some((candidate) => Number(candidate.setId) === configuredStorageSinkSetId)) {
+    storageSinkCandidates.push({
+      setId: configuredStorageSinkSetId,
+      name: pickOptions.rollingStorageSinkSetName || `Unavailable Set #${configuredStorageSinkSetId}`,
+      status: 'unavailable',
+    });
+  }
+  const storageSinkEntries = storageSinkCandidates.map((candidate) => {
+    const reward = candidate.rewardKind === 'player-pick' ? 'Pick' : candidate.rewardKind === 'player' ? 'Player' : 'Pending validation';
+    const ratings = (candidate.challengeRatings || []).length
+      ? ` · ${(candidate.challengeRatings || []).slice().sort((a, b) => b - a).join('/')}`
+      : '';
+    const unavailable = candidate.status === 'unavailable' ? ' · unavailable' : '';
+    return [candidate.setId, `${candidate.name} · ${reward}${ratings}${unavailable}`];
+  });
+  const fallbackStorageSinkSetId = configuredStorageSinkSetId
+    || Number(storageSinkCandidates[0]?.setId || 0);
+  const rollingStorageSinkSet = selectInput(
+    dom,
+    'bronze-loop-policy-rolling-storage-sink-set',
+    fallbackStorageSinkSetId || '',
+    storageSinkEntries.length ? storageSinkEntries : [['', 'No scanned Player/Pick SBCs']],
+    mode,
+  );
+  applyStyles(rollingStorageSinkMode, { width: '150px' });
+  applyStyles(rollingStorageSinkSet, { width: 'min(320px, 100%)' });
+  const updateStorageSinkAvailability = () => {
+    rollingStorageSinkSet.disabled = rollingStorageSinkMode.value !== 'selected';
+    rollingStorageSinkSet.style.opacity = rollingStorageSinkSet.disabled ? '0.65' : '1';
+  };
+  rollingStorageSinkMode.addEventListener('change', updateStorageSinkAvailability);
+  updateStorageSinkAvailability();
   const rollingSurplusCrafting = checkbox(
     dom,
     'bronze-loop-policy-rolling-surplus-crafting',
@@ -228,7 +273,8 @@ export function showSelectionPolicySettings(options = {}) {
     field(dom, 'Provisions packs per shortage', rollingShortageProvisionsPackLimit, mode, 'Open at most this many existing Provisions rewards before replanning the primary squad; TOTW rewards remain one at a time'),
     rollingSurplusCrafting.label,
     rollingOpenDuplicateProvisionsRewards.label,
-    rollingStorageSink.label,
+    wideField(dom, 'Storage pressure recovery', rollingStorageSinkMode, mode, 'Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set'),
+    wideField(dom, 'Storage pressure SBC', rollingStorageSinkSet, mode, 'Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility'),
     sectionTitle(dom, 'Player Picks'),
     field(dom, 'Selection mode', pickMode, mode, 'Automatic resolves safe and deterministically ranked Picks; Review protected pauses only when protected choices remain ambiguous'),
     openPicksAtEnd.label,
@@ -270,7 +316,15 @@ export function showSelectionPolicySettings(options = {}) {
       protectionRating: readNumber(automaticUse, pickOptions.protectionRating),
       autoSelectBelow90: pickMode.dataset.value !== 'review-protected',
       openPicksAtEnd: openPicksAtEnd.input.checked,
-      rollingStorageSinkEnabled: rollingStorageSink.input.checked,
+      rollingStorageSinkMode: rollingStorageSinkMode.value,
+      rollingStorageSinkSetId: rollingStorageSinkMode.value === 'selected'
+        ? readNumber(rollingStorageSinkSet, 0)
+        : null,
+      rollingStorageSinkSetName: rollingStorageSinkMode.value === 'selected'
+        ? storageSinkCandidates.find((candidate) => (
+            Number(candidate.setId) === readNumber(rollingStorageSinkSet, 0)
+          ))?.name || ''
+        : '',
       rollingSurplusCraftingEnabled: rollingSurplusCrafting.input.checked,
       rollingProvisionsMaxRating: readNumber(
         rollingProvisionsMaxRating,
@@ -310,7 +364,8 @@ export function showSelectionPolicySettings(options = {}) {
       rollingShortageProvisionsPackLimit,
       rollingSurplusCrafting.input,
       rollingOpenDuplicateProvisionsRewards.input,
-      rollingStorageSink.input,
+      rollingStorageSinkMode,
+      rollingStorageSinkSet,
       openPicksAtEnd.input,
       cancel,
       save,

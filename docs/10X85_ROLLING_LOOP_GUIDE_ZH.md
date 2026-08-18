@@ -39,7 +39,8 @@ Loop 不写死当前 Set、Challenge、奖励包 ID、目标评分或阵容人�
 | `Provisions packs per shortage` | `2` | 一次真实缺料处理中最多打开多少个已有 Provisions 奖励，范围 `1-30`；每批后重新规划。 |
 | `Craft surplus Provisions/TOTW` | 关闭 | 关闭时只在缺料或 Storage 压力下执行恢复 SBC；开启后才主动消耗余量。 |
 | `Open duplicate Provisions rewards immediately` | 关闭 | 关闭时，由主包重复 Reserve 制作的 Provisions 奖励留在 My Packs，等真正缺料再开。 |
-| `Use 95+ Storage pressure Pick` | 关闭 | Provisions 无法有效释放 Storage 时，允许使用动态扫描到的 95+ 双阵 Pick。 |
+| `Storage pressure recovery` | `Off` | `Automatic` 优先使用兼容的 95+ Pick；`Selected SBC` 只使用用户指定的高评分 Player Pick 或直接球员 SBC。 |
+| `Storage pressure SBC` | 扫描目录中的第一项 | 仅在 `Selected SBC` 模式生效；保存后只深度验证选中的 Set。 |
 | `Selection mode` | `Automatic` | 安全且可确定排序的 Pick 自动选择；`Review protected` 只在受保护候选仍有歧义时暂停。 |
 
 `Standard Rating SBC max card` 只控制普通评分 SBC，不限制 Rolling 主阵和 Rolling 恢复阵。Rolling 使用的是 `Automatic-use max rating`。
@@ -84,7 +85,7 @@ flowchart TD
 Unassigned -> Storage -> Transfer -> Club
 ```
 
-具体恢复流程可以收紧顺序。例如 95+ Storage Pick 的 89 阵只使用 Unassigned 和 Storage，目的是确实释放阻塞位置，而不是从 Club 轻易补满。
+具体恢复流程可以收紧顺序。兼容的 95+ Storage Pick 继续使用原专用策略：89 阵只使用 Unassigned 和 Storage，88 阵才允许最多 3 张 Club。用户显式选择的通用 sink 使用 `Unassigned -> Storage -> Transfer -> Club`，但 Club 每阵仍最多 3 张，并且提交前必须证明实际释放了所需 Storage 空间。
 
 ### 4.2 Required Special
 
@@ -193,8 +194,16 @@ Storage 满或无法容纳待保护的高分重复卡时：
 1. 先尝试紧急 Provisions，但提交计划必须实际消耗足够数量的 Storage 卡并释放当前所需位置。
 2. 如果只能从 Club 补出 Provisions、无法改善 Storage，判定该路径无效；不会连续制作 Provisions。
 3. 紧急 Provisions 的奖励留在 My Packs，不在高压状态下打开。
-4. 若仍无法释放空间且已启用 `Use 95+ Storage pressure Pick`，进入 95+ 双阵恢复。
-5. 若 95+ capability 不可用、用户未启用或材料仍不安全，停止并保留 Unassigned 现场。
+4. 若仍无法释放空间且启用了 `Storage pressure recovery`，进入已解析的 Storage pressure SBC。
+5. 若 capability 不可用、用户未启用或材料仍不安全，停止并保留 Unassigned 现场。
+
+Storage pressure 有三种模式：
+
+- `Off`：不执行该恢复路径。
+- `Automatic`：从已深度验证的候选中选择；为兼容旧行为，当前 95+ 双阵 Pick 优先。
+- `Selected SBC`：只使用保存的 Set ID。Set 过期、完成或要求变化时保持 unavailable，不会静默切换到其它 SBC。
+
+下拉目录来自轻量 `requestSets()` 索引。Player Pick 会先完成现有动态扫描，只有至少包含一阵 87+ 才会显示；奖励评分不参与筛选。直接球员 SBC 可以先以索引候选显示，用户保存显式选择后 Runner 只加载该 Set 的 Challenge 元数据；不会为生成下拉列表而深扫所有球员 SBC，以免增加 EA 请求和 429 风险。最终候选必须至少有一阵 87+；纯 Pack、Chemistry 或当前评分规划器不支持的要求会拒绝。
 
 95+ 双阵按顺序而非联合提交：
 
@@ -203,6 +212,15 @@ Storage 满或无法容纳待保护的高分重复卡时：
 - 再做 88 阵：先使用 Storage，确实不足时最多加入 3 张安全普通 Club 卡。
 - 89 已完成但 88 暂时不可行时，记录 `STORAGE_SINK_88_DEFERRED`；以后再次出现 Storage 压力时只继续 88 阵。
 - 两阵完成后立即领取 Pick、处理结果，再重试原来待存入 Storage 的卡。
+
+其它显式选择的高评分 SBC 使用通用逐阵流程：
+
+- 每次 Storage pressure 只提交评分最高的一阵，其余阵容留到以后再次出现压力时继续。
+- 必须优先容纳可自动使用的 Unassigned 阻塞卡，再使用 Storage、Transfer，最后最多 3 张安全 Club 卡补评分。
+- 每阵独立验证实际消耗的 Storage 卡数量；只靠 Club 补满但不释放空间时不会提交。
+- 子阵奖励 Pack 只留在 My Packs，不在 Storage 高压阶段开启。
+- 最后一阵是 Player Pick 时立即自动处理 Pick；直接球员奖励优先路由到 Club，真正重复时使用提交前预留的 Storage 槽位。
+- 低于 87 的剩余阵容不会作为 Storage pressure 阵提交，因此通用 sink 可能只完成球员 SBC 的高评分部分。
 
 ## 8. 包和材料循环图
 
@@ -230,7 +248,7 @@ flowchart LR
 
     H{Storage 压力} --> EP[紧急 Provisions]
     EP -->|奖励暂存| PK[My Packs]
-    H -->|仍未释放且已启用| SP[95+ Storage Pick 89阵 -> 88阵]
+    H -->|仍未释放且已启用| SP[Storage pressure SBC 逐阵释放空间]
     SP --> U
 ```
 
@@ -267,7 +285,7 @@ Rolling Recap 使用有界聚合，不会无限保存每一轮全部卡片：
 
 - 主 SBC 完成数、迭代数和 bootstrap 次数。
 - 主包和恢复包打开数量。
-- TOTW、Provisions、Rare Gold Pick、5x80+、95+ Storage Pick 次数。
+- TOTW、Provisions、Rare Gold Pick、5x80+、Storage pressure SBC 次数。
 - Common、Rare、Special、重复卡数量和评分分布。
 - 重复卡进入 Primary、Storage、Recovery 的数量。
 - 最高评分卡和命中 Reward Alert 的 Special 卡。
@@ -288,10 +306,10 @@ Rolling Recap 使用有界聚合，不会无限保存每一轮全部卡片：
 ## 12. 建议的首次验证方式
 
 1. 先把 `SBC completions` 设为 `1`。
-2. 保持 `Craft surplus Provisions/TOTW` 和 `Use 95+ Storage pressure Pick` 关闭。
+2. 保持 `Craft surplus Provisions/TOTW` 关闭，并将 `Storage pressure recovery` 设为 `Off`。
 3. 保持默认 `Automatic-use max rating = 90`，确认高分重复卡进入 Storage。
 4. 检查日志中的 live target、Required Special matcher、最终选卡来源和提交后对账。
 5. 再分别测试普通缺料、Required Special 缺少和 Storage 高位场景。
-6. 确认基础循环稳定后，再启用 95+ Storage Pick 或主动余量制作。
+6. 确认基础循环稳定后，再启用 Storage pressure SBC 或主动余量制作。
 
 发生异常时，将 Active Profile、Selection Policy、起始 My Packs/Unassigned/Storage 状态和完整 Save log 一并记录。通用排查方式见 [故障排查指南](TROUBLESHOOTING_ZH.md)。

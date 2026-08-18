@@ -197,6 +197,44 @@ export function createEaSbcAdapter(runtime) {
     };
   }
 
+  function normalizeDiscoveryPlayerReward(award) {
+    const item = award?.item || award?.utItem || award?.data?.item || null;
+    if (!item || isPlayerPickItem(item)) return null;
+    const typeText = String(
+      award?.type || award?.rewardType || award?.awardType || award?.kind || award?.data?.type || ''
+    ).trim().toUpperCase();
+    let isPlayer = /PLAYER/.test(typeText);
+    try { isPlayer = isPlayer || item?.isPlayer?.() === true || item?.isPlayer === true; } catch { }
+    if (!isPlayer) return null;
+    const staticData = staticItemData(item);
+    const definitionId = firstPositiveInteger([
+      item?.definitionId,
+      item?._data?.definitionId,
+      staticData?.definitionId,
+    ]);
+    const itemId = positiveInteger(item?.id);
+    return {
+      type: 'PLAYER',
+      name: String(
+        item?.name || item?.displayName || staticData?.name || staticData?.knownAs || ''
+      ).trim(),
+      description: String(item?.description || staticData?.description || '').trim(),
+      resourceId: firstPositiveInteger([
+        item?.resourceId,
+        item?._data?.resourceId,
+        staticData?.resourceId,
+        itemId && definitionId && itemId === definitionId ? itemId : null,
+      ]),
+      definitionId,
+      count: firstPositiveInteger([award?.count, award?.amount, award?.quantity, award?.data?.count]) || 1,
+      metadataHints: {
+        award: metadataFieldHints(award),
+        item: metadataFieldHints(item),
+        staticData: metadataFieldHints(staticData),
+      },
+    };
+  }
+
   function normalizeDiscoveryPackReward(award) {
     const item = award?.item || award?.utItem || award?.data?.item || null;
     if (item && isPlayerPickItem(item)) return null;
@@ -233,7 +271,9 @@ export function createEaSbcAdapter(runtime) {
   }
 
   function normalizeDiscoveryAward(award) {
-    return normalizeDiscoveryReward(award) || normalizeDiscoveryPackReward(award);
+    return normalizeDiscoveryReward(award)
+      || normalizeDiscoveryPlayerReward(award)
+      || normalizeDiscoveryPackReward(award);
   }
 
   function currentController() {

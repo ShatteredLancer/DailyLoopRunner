@@ -139,7 +139,7 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Non-rating Gold <=82');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
-      .toContain('95+ Storage pressure Pick disabled');
+      .toContain('Storage pressure SBC off');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Provisions reserve 87-88');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
@@ -162,7 +162,7 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').textContent)
       .toBe('Std card <=87 | Auto-use <=94 | Picks Review');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
-      .toContain('95+ Storage pressure Pick enabled');
+      .toContain('Storage pressure SBC automatic');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('duplicate Provisions rewards immediate');
     expect(controls.get('bronze-loop-selection-policy-summary').title)

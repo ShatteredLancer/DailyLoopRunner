@@ -108,7 +108,9 @@ import {
 import {
   applyRollingAutomaticUseFodderPolicy,
   bindRollingPlayerPickCapabilities,
+  buildRollingStorageSinkCatalog,
   ROLLING_PROVISIONS_RATING_RANGE,
+  ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING,
   resolveRollingAutomaticUseMaxRating,
   resolveRollingProvisionsReserveRatings,
   shouldQueueRollingProvisionsReward,
@@ -156,6 +158,7 @@ import {
   isSamePlayerCardVersion,
   isRarePlayerCard,
   isSpecialPlayerCard,
+  readPlayerDatabaseId,
   readPlayerRareFlag,
 } from './domain/player-rarity.js';
 import { selectInventoryPlayers as selectInventoryPlayersPure } from './selection/index.js';
@@ -165,9 +168,11 @@ import {
   selectRatingCandidateEntries,
 } from './selection/rating-candidates.js';
 import {
+  genericStorageSinkSquadSourceStrategy,
   nextStorageSinkContext,
   planMultiSquadRatingSelections,
   prepareStorageSink89Candidates,
+  prepareGenericStorageSinkCandidates,
   selectStorageSinkClubFallbackEntries,
   STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
   storageSinkSquadSourceStrategy,
@@ -405,6 +410,7 @@ import {
 import { inspectExpiredTradeLeaseRecovery, summarizeTradeRunCorrelations } from './trade/scheduler-correlation.js';
 
 const RUNNER_VERSION = packageInfo.version;
+const CONSOLE_PREFIX = '[DailyLoopRunner]';
 const SCHEDULED_BUY_LIVE_GATE_ENABLED = true;
 const SCHEDULED_TRANSFER_REPRICE_LIVE_GATE_ENABLED = true;
 const SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED = true;
@@ -636,6 +642,7 @@ const state = {
     discoveredLoopOverrides: {},
     discoveredRecoveryRecipeOverrides: {},
     scannedDynamicSbcDefs: [],
+    storageSinkCandidates: [],
     recoveryRecipes: null,
     unassignedRecoveryPolicies: null,
     defaultUnassignedRecoveryPolicyIds: null,
@@ -1732,7 +1739,7 @@ const state = {
 
   function log(msg) {
     const line = `[${now()}] ${msg}`;
-    console.log('[BronzeLoop]', msg);
+    console.log(CONSOLE_PREFIX, msg);
     state.logLines.push(line);
     state.logLines = state.logLines.slice(-1000);
     state.logRenderer?.request?.();
@@ -1766,7 +1773,7 @@ const state = {
     state.logLines = [];
     renderLog();
     console.clear();
-    console.log('[BronzeLoop] Log cleared');
+    console.log(`${CONSOLE_PREFIX} Log cleared`);
   }
 
   function getLoopDefs() {
@@ -4165,6 +4172,32 @@ function updateLoopControls() {
     return [...byId.values()];
   }
 
+  function synchronizeCachedSbcChallengeSquad(set, challenge) {
+    const challengeId = Number(challenge?.id || 0);
+    if (!challengeId) return challenge;
+    let cached = getCachedSbcChallenges(set).find((entry) => (
+      Number(entry?.id || 0) === challengeId
+    ));
+    if (!cached) {
+      try { cached = set?.getChallenge?.(challengeId) || null; } catch { cached = null; }
+    }
+    if (!cached || cached === challenge) return challenge;
+    if (!challenge.squad && cached.squad) challenge.squad = cached.squad;
+    if (challenge.squad && !cached.squad) cached.squad = challenge.squad;
+    return challenge;
+  }
+
+  async function loadRatingSbcChallengeForSet(set, challenge, label) {
+    const hadSquad = Boolean(challenge?.squad);
+    synchronizeCachedSbcChallengeSquad(set, challenge);
+    if (!hadSquad && challenge?.squad) {
+      log(`${label}: reusing cached challenge squad #${challenge?.id || '?'}`);
+    }
+    const loaded = await loadRatingSbcChallenge(challenge, label);
+    synchronizeCachedSbcChallengeSquad(set, loaded);
+    return loaded;
+  }
+
   function hasRatingSbcChallengeRequirements(challenge) {
     return Array.isArray(challenge?.eligibilityRequirements) && challenge.eligibilityRequirements.length > 0;
   }
@@ -4413,6 +4446,10 @@ function updateLoopControls() {
     return `${dynamicSbcCacheStorageKey()}:scan-health`;
   }
 
+  function dynamicSbcStorageSinkCatalogKey() {
+    return `${dynamicSbcCacheStorageKey()}:storage-sink-index`;
+  }
+
   function createDynamicSbcRequestPacer() {
     const healthKey = dynamicSbcScanHealthStorageKey();
     const previous = normalizeDynamicSbcScanHealth(adapters.userscriptStorage.get(healthKey, null), Date.now());
@@ -4461,9 +4498,11 @@ function updateLoopControls() {
     };
   }
 
-  function dynamicSbcCandidate(index = {}, activitySbcNames = []) {
+  function dynamicSbcCandidate(index = {}, activitySbcNames = [], pickOptions = {}) {
     const hasPlayerPickReward = (index.rewards || []).some((reward) => reward?.type === 'PLAYER_PICK');
     if (hasPlayerPickReward) return true;
+    if (pickOptions.rollingStorageSinkMode === 'selected'
+      && Number(index.id || 0) === Number(pickOptions.rollingStorageSinkSetId || 0)) return true;
     if (index.inUpgradesCategory !== true) return false;
     if (detectDynamicUpgradeFamily(index)) return true;
     const setName = String(index.name || '').trim().toLowerCase();
@@ -4531,8 +4570,16 @@ function updateLoopControls() {
       getConfiguredRecoveryRecipes(),
     ]);
     const cacheKey = dynamicSbcCacheStorageKey();
-    if (clearCache) adapters.userscriptStorage.remove(cacheKey);
+    const storageSinkCatalogKey = dynamicSbcStorageSinkCatalogKey();
+    if (clearCache) {
+      adapters.userscriptStorage.remove(cacheKey);
+      adapters.userscriptStorage.remove(storageSinkCatalogKey);
+    }
     const cached = clearCache ? null : adapters.userscriptStorage.get(cacheKey, null);
+    let storageSinkIndexes = clearCache
+      ? []
+      : adapters.userscriptStorage.get(storageSinkCatalogKey, []);
+    if (!Array.isArray(storageSinkIndexes)) storageSinkIndexes = [];
     const requestPacer = cacheOnly ? null : createDynamicSbcRequestPacer();
     if (requestPacer) {
       log(`Dynamic SBC scan pacing: minimum ${requestPacer.initialGapMs}ms between EA Challenge requests; recent failure rate ${(requestPacer.previous.failureRate * 100).toFixed(1)}%, recent 429 count ${requestPacer.previous.rateLimitCount}`);
@@ -4574,6 +4621,8 @@ function updateLoopControls() {
       refreshSets: async () => {
         const result = await observeOnce(eaSbcAdapter().requestSets(), ctrl(), 30000, 'Dynamic SBC scan SBC.requestSets');
         if (!result?.success) throw new Error(serviceResultErrorText(result) || 'SBC Set request failed');
+        storageSinkIndexes = getSbcSets().map((set) => eaSbcAdapter().snapshotDiscoveryIndex(set, result));
+        adapters.userscriptStorage.set(storageSinkCatalogKey, storageSinkIndexes);
         return result;
       },
       listSets: getSbcSets,
@@ -4595,7 +4644,7 @@ function updateLoopControls() {
       onLoadSkipped: ({ index, circuit }) => {
         log(`Dynamic SBC scan ${index?.name || `#${index?.id || '?'}`}: Challenge request skipped because the EA ${circuit?.code || 429} circuit is open`);
       },
-      isCandidate: (index) => dynamicSbcCandidate(index, activitySbcNames),
+      isCandidate: (index) => dynamicSbcCandidate(index, activitySbcNames, pickOptions),
       onProgress: (progress) => {
         const completed = Math.max(0, Number(progress.completed || 0) || 0);
         const total = Math.max(0, Number(progress.total || 0) || 0);
@@ -4674,6 +4723,10 @@ function updateLoopControls() {
         ? { ...result.snapshot, challenges: [] }
         : result.snapshot
     ));
+    state.storageSinkCandidates = cloneLoopDef(buildRollingStorageSinkCatalog(
+      storageSinkIndexes,
+      snapshots,
+    ));
     const configuredLoops = getConfiguredLoopDefs();
     const pickSession = buildPlayerPickDiscoverySession({
       sets: snapshots,
@@ -4710,7 +4763,13 @@ function updateLoopControls() {
     const materializedRollingLoops = bindRollingPlayerPickCapabilities(
       upgradeSession.rollingLoops.map((loopDef) => activitySession.loopOverrides[loopDef.id] || loopDef),
       collectScannedPlayerPickLoopDefs(pickSession.results),
-      { storageSinkSets: snapshots },
+      {
+        storageSinkSets: snapshots,
+        storageSinkSelection: {
+          mode: pickOptions.rollingStorageSinkMode,
+          setId: pickOptions.rollingStorageSinkSetId,
+        },
+      },
     );
     state.discoveredLoopDefs = cloneLoopDef([
       ...pickSession.discoveredLoops,
@@ -4771,7 +4830,11 @@ function updateLoopControls() {
       const pickSummary = pickSelection
         ? `${loopDef.rollingPlayerPick.status}/${pickSelection.minimumRareGoldCost} rare/${pickSelection.totalGoldCost} gold/${pickSelection.rewardMinRating}+/${loopDef.rollingPlayerPick.alternatives?.length || 0} alternate(s)`
         : loopDef.rollingPlayerPick?.status || 'unavailable';
-      log(`Dynamic SBC scan: added selectable Rolling Loop ${loopDef.name} (primary Set #${loopDef.sbcSetIds?.[0] || '?'}; TOTW:${loopDef.rollingTotwUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Provisions:${loopDef.rollingProvisionsUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Rare Gold Pick:${pickSummary}; Storage sink Pick:${loopDef.rollingStorageSinkPick?.status || 'unavailable'}/${pickOptions.rollingStorageSinkEnabled ? 'enabled' : 'disabled'}; Gold sink:${loopDef.rollingGoldSinkUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'})`);
+      const storageSink = loopDef.rollingStorageSink;
+      const storageSinkSummary = storageSink?.status === 'resolved'
+        ? `${storageSink.mode}/${storageSink.capability?.setName || `Set #${storageSink.capability?.setId || '?'}`}/${storageSink.capability?.rewardKind || '?'}`
+        : `${storageSink?.mode || 'off'}/${storageSink?.status || 'unavailable'}`;
+      log(`Dynamic SBC scan: added selectable Rolling Loop ${loopDef.name} (primary Set #${loopDef.sbcSetIds?.[0] || '?'}; TOTW:${loopDef.rollingTotwUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Provisions:${loopDef.rollingProvisionsUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'}; Rare Gold Pick:${pickSummary}; Storage pressure SBC:${storageSinkSummary}; Gold sink:${loopDef.rollingGoldSinkUpgrade?.activityResolved === true ? 'resolved' : 'unavailable'})`);
     }
     for (const activity of activitySession.activities) {
       const sink = activity.materialSink;
@@ -5466,7 +5529,7 @@ function updateLoopControls() {
   }
 
   function logRatingSbcValidation(loopDef, label, validation, model) {
-    log(`${loopDef.name}: ${label} rating ${validation.rating}/${model.targetRating}, players ${validation.players.length}/${model.requiredPlayerCount}, special ${validation.specialCount}/${model.maxSpecialCount}, unique definitions ${validation.uniqueDefinitionCount}/${validation.players.length}`);
+    log(`${loopDef.name}: ${label} rating ${validation.rating}/${model.targetRating}, players ${validation.players.length}/${model.requiredPlayerCount}, special ${validation.specialCount}/${model.maxSpecialCount}, unique definitions ${validation.uniqueDefinitionCount}/${validation.players.length}, unique players ${validation.uniquePlayerCount}/${validation.players.length}`);
     validation.constraintResults.forEach(({ constraint, matched, required }) => {
       log(`${loopDef.name}: ${label} constraint ${constraint.label}: ${matched}/${required}`);
     });
@@ -5578,6 +5641,7 @@ function updateLoopControls() {
     return createItemSnapshot({
       id: item?.id,
       definitionId: item?.definitionId,
+      databaseId: readPlayerDatabaseId(item),
       type: isPlayer(item) ? 'player' : item?.type,
       name: itemDisplayName(item),
       rating: item?.rating,
@@ -8731,7 +8795,10 @@ function updateLoopControls() {
       renderLoopSelect(document.querySelector('#bronze-loop-select')?.value || null);
       log('Player Pick scan: scanned metadata preference disabled; configured Pick Loops reverted to static fallback');
     }
-    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.autoSelectBelow90 ? 'Automatic' : 'Review protected'}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; 95+ Storage pressure Pick ${options.rollingStorageSinkEnabled ? 'enabled' : 'disabled'}`);
+    const storageSink = options.rollingStorageSinkMode === 'selected'
+      ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ''}`.trim()
+      : options.rollingStorageSinkMode;
+    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.autoSelectBelow90 ? 'Automatic' : 'Review protected'}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
     renderCurrentSelectionPolicySummary();
     return options;
   }
@@ -8741,9 +8808,17 @@ function updateLoopControls() {
       dom: adapters.dom,
       pickOptions: getPickRuntimeOptions(),
       sbcFodderOptions: getSbcFodderRuntimeOptions(),
-      onSave: ({ pickOptions, sbcFodderOptions }) => {
+      storageSinkCandidates: cloneLoopDef(state.storageSinkCandidates),
+      onSave: async ({ pickOptions, sbcFodderOptions }) => {
+        const previous = getPickRuntimeOptions();
         saveSbcFodderOptions(sbcFodderOptions);
-        savePickRuntimeOptions(pickOptions);
+        const saved = savePickRuntimeOptions(pickOptions);
+        const storageSinkChanged = saved.rollingStorageSinkMode !== previous.rollingStorageSinkMode
+          || saved.rollingStorageSinkSetId !== previous.rollingStorageSinkSetId;
+        if (storageSinkChanged) {
+          log('Storage pressure SBC selection changed; refreshing the selected dynamic SBC contract');
+          await scanAvailableDynamicSbcs();
+        }
       },
     });
   }
@@ -11847,7 +11922,7 @@ function updateLoopControls() {
     } catch (error) {
       log(`Batch Open stopped: ${error?.message || error}`);
       errorStackLines(error).forEach((line) => log(`Error stack: ${line}`));
-      console.error('[BronzeLoop]', error);
+      console.error(CONSOLE_PREFIX, error);
       const fallbackPlan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
       const requestedPacks = fallbackPlan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
       const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result?.openedItems || [], 'Batch Open recap');
@@ -13514,7 +13589,7 @@ function updateLoopControls() {
     for (const sourceChallenge of incomplete) {
       const challenge = pickDef.dryRun
         ? sourceChallenge
-        : await loadRatingSbcChallenge(sourceChallenge, pickDef.name, { force: true });
+        : await loadRatingSbcChallengeForSet(set, sourceChallenge, pickDef.name);
       if (!challenge) {
         return {
           status: 'blocked',
@@ -13889,7 +13964,7 @@ function updateLoopControls() {
       priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
     });
     if (!pickDef || capability?.status !== 'resolved' || !hasResolvedSbcIdentity(pickDef)) {
-      return { status: 'unavailable', reason: 'dynamic 95+ Storage pressure Pick capability is unavailable' };
+      return { status: 'unavailable', reason: 'dynamic Storage pressure Player Pick capability is unavailable' };
     }
     const cleanupOptions = {
       loopDef,
@@ -13927,7 +14002,7 @@ function updateLoopControls() {
     return { status: 'selected', pickedCards };
   }
 
-  async function runRollingStorageSinkRecovery(loopDef, runtime, capability) {
+  async function runRollingLegacyStorageSinkRecovery(loopDef, runtime, capability) {
     const pendingSelection = await selectPendingRollingStorageSinkPick(
       loopDef,
       runtime,
@@ -13947,22 +14022,15 @@ function updateLoopControls() {
     if (!reconciled.ok) {
       return { status: 'blocked', reason: reconciled.reason, reasonCode: 'INVENTORY_RECONCILIATION_FAILED' };
     }
+    const loaded = await loadRollingStorageSinkContexts(loopDef, pickDef);
+    if (loaded.status !== 'ready' && loaded.status !== 'complete') return loaded;
+    const pendingContexts = loaded.status === 'ready' ? [...loaded.contexts] : [];
     let submitted = 0;
     let duplicatesConsumed = 0;
     const submittedRatings = [];
     let lastHeadroom = null;
-    for (let step = 0; step < 2; step++) {
-      const loaded = await loadRollingStorageSinkContexts(loopDef, pickDef);
-      if (loaded.status === 'complete') break;
-      if (loaded.status !== 'ready') {
-        return {
-          ...loaded,
-          status: submitted ? 'blocked' : loaded.status,
-          reasonCode: submitted ? 'STORAGE_SINK_PARTIAL_COMPLETION' : loaded.reasonCode,
-          details: { ...(loaded.details || {}), partialCompletion: submitted, submittedRatings },
-        };
-      }
-      const context = nextStorageSinkContext(loaded.contexts);
+    while (pendingContexts.length) {
+      const context = nextStorageSinkContext(pendingContexts);
       if (!context) {
         return {
           status: 'blocked',
@@ -13988,7 +14056,7 @@ function updateLoopControls() {
             details: {
               partialCompletion: submitted,
               submittedRatings,
-              remainingRatings: loaded.contexts.map((entry) => Number(entry.targetRating || 0)),
+              remainingRatings: pendingContexts.map((entry) => Number(entry.targetRating || 0)),
               deferredReasonCode: squadPlan.reasonCode || 'RECOVERY_MATERIAL_SHORTAGE',
             },
           };
@@ -14016,7 +14084,7 @@ function updateLoopControls() {
             details: {
               partialCompletion: submitted,
               submittedRatings,
-              remainingRatings: loaded.contexts.map((entry) => Number(entry.targetRating || 0)),
+              remainingRatings: pendingContexts.map((entry) => Number(entry.targetRating || 0)),
               deferredReasonCode: headroom.reasonCode,
             },
           };
@@ -14042,7 +14110,7 @@ function updateLoopControls() {
         runtime,
         pickDef,
         plan,
-        Number(loaded.completedCount || 0),
+        Number(loaded.completedCount || 0) + submitted,
         2,
       );
       if (!result.submitted) {
@@ -14085,6 +14153,11 @@ function updateLoopControls() {
         log(`${loopDef.name}: ${pickDef.name} consumed ${consumedSignalRefs.length} Unassigned duplicate signal(s); ${runtime.primaryDuplicateRefs.length} remain reserved for the primary SBC`);
       }
       refreshRollingPendingUnassignedRefs(runtime);
+      const completedContextIndex = pendingContexts.indexOf(context);
+      if (completedContextIndex >= 0) pendingContexts.splice(completedContextIndex, 1);
+      if (pendingContexts.length) {
+        log(`${loopDef.name}: ${pickDef.name} reusing ${pendingContexts.length} preloaded remaining squad(s) after ${rating} submission`);
+      }
     }
 
     const selectedPick = await selectPendingRollingStorageSinkPick(
@@ -14126,6 +14199,275 @@ function updateLoopControls() {
       status: 'selected',
       pickedCards: selectedPick.pickedCards,
       details: { submittedSquads: submitted, submittedRatings, headroom: lastHeadroom },
+    };
+  }
+
+  async function loadRollingGenericStorageSinkContexts(loopDef, capability) {
+    const sinkDef = rollingRecoveryDef(capability?.loop, loopDef, {
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+    });
+    if (!sinkDef || !hasResolvedSbcIdentity(sinkDef)) {
+      return {
+        status: 'unavailable',
+        reason: 'selected Storage pressure SBC identity is unavailable',
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    const set = await findSbcSetForLoopDef(sinkDef, sinkDef.name);
+    const challenges = await requestSbcChallenges(set, sinkDef.name, { attempts: 3 });
+    const incomplete = challenges.filter((challenge) => !isCompletedChallenge(challenge));
+    if (!incomplete.length) {
+      return {
+        status: 'complete',
+        sinkDef,
+        set,
+        contexts: [],
+        totalChallengeCount: challenges.length,
+        completedCount: challenges.length,
+        incompleteCount: 0,
+      };
+    }
+
+    const contexts = [];
+    for (const sourceChallenge of incomplete) {
+      const snapshot = eaSbcAdapter().snapshotDiscoverySet(set, [sourceChallenge])?.challenges?.[0] || {};
+      const snapshotRating = Number((snapshot.eligibilityRequirements || [])
+        .find((requirement) => requirement?.key === 'TEAM_RATING')?.values?.[0] || 0);
+      if (snapshotRating < ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING) continue;
+      const challenge = sinkDef.dryRun
+        ? sourceChallenge
+        : await loadRatingSbcChallengeForSet(set, sourceChallenge, sinkDef.name);
+      if (!challenge) {
+        return {
+          status: 'blocked',
+          reason: `${sinkDef.name} challenge #${sourceChallenge?.id || '?'} could not be loaded`,
+          reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+        };
+      }
+      const activeLoopDef = applyRollingAutomaticUseFodderPolicy({
+        ...materializeDynamicUpgradeChallengeLoopDef(sinkDef, challenge),
+        priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      }, loopDef);
+      const model = parseRatingSbcChallenge(activeLoopDef, challenge);
+      if (model.unsupported.length || !model.targetRating || !model.requiredPlayerCount) {
+        return {
+          status: 'blocked',
+          reason: `${sinkDef.name} challenge #${challenge?.id || '?'} has unsupported live requirements: ${model.unsupported.join(', ') || 'rating/player count unavailable'}`,
+          reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+        };
+      }
+      if (Number(model.targetRating) < ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING) continue;
+      contexts.push({
+        set,
+        challenge,
+        challengeId: Number(challenge?.id || 0),
+        activeLoopDef,
+        model,
+        targetRating: Number(model.targetRating || 0),
+      });
+    }
+    if (!contexts.length) {
+      return {
+        status: 'unavailable',
+        reason: `${sinkDef.name} has no incomplete ${ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING}+ rating squad`,
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    return {
+      status: 'ready',
+      sinkDef,
+      set,
+      contexts,
+      totalChallengeCount: challenges.length,
+      completedCount: challenges.length - incomplete.length,
+      incompleteCount: incomplete.length,
+    };
+  }
+
+  async function selectRollingGenericStorageSinkSquad(loopDef, runtime, context, snapshot) {
+    const strategy = genericStorageSinkSquadSourceStrategy(context?.targetRating);
+    if (!strategy) {
+      return {
+        ok: false,
+        reason: `unsupported Storage pressure squad rating ${context?.targetRating || '?'}`,
+        reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE',
+      };
+    }
+    const activeLoopDef = rollingStorageSinkLoopDefForPiles(context, strategy.priorityPiles);
+    const basePolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime);
+    const candidates = buildRatingSbcCandidateEntries(
+      activeLoopDef,
+      context.model,
+      basePolicy,
+      snapshot,
+    );
+    const maxRating = rollingProtectionRating(loopDef);
+    const clubEntries = selectStorageSinkClubFallbackEntries(candidates.entries, {
+      count: strategy.maxClubCount,
+      maxRating,
+    });
+    let lastFailure = null;
+    for (let clubCount = 0; clubCount <= strategy.maxClubCount; clubCount++) {
+      if (clubCount > clubEntries.length) break;
+      const prepared = prepareGenericStorageSinkCandidates(candidates.entries, {
+        primaryRefs: runtime.primaryDuplicateRefs || [],
+        maxRating,
+        requiredPlayerCount: context.model.requiredPlayerCount,
+        clubEntries: clubEntries.slice(0, clubCount),
+      });
+      const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
+        requiredItems: prepared.requiredItems,
+      });
+      const selection = await findOptimalRatingSbcSelection(
+        prepared.entries,
+        context.model,
+        candidates.piles,
+        { selectionPolicy },
+      );
+      if (selection.ok) return selection;
+      lastFailure = selection;
+    }
+    return {
+      ...(lastFailure || {}),
+      ok: false,
+      reason: lastFailure?.reason || 'no safe generic Storage pressure source plan',
+      reasonCode: lastFailure?.reasonCode || 'RECOVERY_MATERIAL_SHORTAGE',
+    };
+  }
+
+  async function planRollingGenericStorageSinkSquad(loopDef, runtime, context) {
+    const snapshot = runtime.coordinator.getLedger().inventorySnapshot();
+    const result = await planMultiSquadRatingSelections({
+      snapshot,
+      contexts: [context],
+      selectChallenge: (workingSnapshot) => selectRollingGenericStorageSinkSquad(
+        loopDef,
+        runtime,
+        context,
+        workingSnapshot,
+      ),
+    });
+    const strategy = genericStorageSinkSquadSourceStrategy(context?.targetRating);
+    return result.ok ? {
+      ...result,
+      details: {
+        ...result.details,
+        targetRating: strategy.targetRating,
+        sourceOrder: strategy.priorityPiles,
+        maxClubPerSquad: strategy.maxClubCount,
+      },
+    } : result;
+  }
+
+  function rollingStorageSinkCapabilities(definition = {}) {
+    return [definition?.capability, ...(definition?.alternatives || [])].filter(Boolean);
+  }
+
+  async function resumePendingRollingStorageSinkReward(loopDef, runtime, definition) {
+    for (const capability of rollingStorageSinkCapabilities(definition)) {
+      if (capability.rewardKind !== 'player-pick') continue;
+      const selected = await selectPendingRollingStorageSinkPick(
+        loopDef,
+        runtime,
+        { status: 'resolved', loop: capability.loop },
+        { attempts: 1, quietMissing: true, failOnUnexpected: false },
+      );
+      if (selected.status !== 'missing' && selected.status !== 'unavailable') return selected;
+    }
+    return { status: 'skipped' };
+  }
+
+  async function runRollingGenericStorageSinkRecovery(loopDef, runtime, capability) {
+    const loaded = await loadRollingGenericStorageSinkContexts(loopDef, capability);
+    if (loaded.status !== 'ready') return loaded;
+    const context = [...loaded.contexts].sort((left, right) => (
+      Number(right.targetRating || 0) - Number(left.targetRating || 0)
+        || Number(right.challengeId || 0) - Number(left.challengeId || 0)
+    ))[0];
+    const squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context);
+    if (!squadPlan.ok) return { status: 'unavailable', ...squadPlan };
+    const finalChallenge = loaded.incompleteCount === 1;
+    const headroom = validateRollingStorageSinkHeadroom(runtime, squadPlan, {
+      reservePickResult: finalChallenge && Number(capability.rewardReserveSlots || 0) > 0,
+    });
+    if (!headroom.ok) return { status: 'unavailable', ...headroom };
+    const plan = squadPlan.plans[0];
+    log(`${loopDef.name}: ${loaded.sinkDef.name} generic ${context.targetRating} squad ready; sources:${formatSelectionStats(squadPlan.pileCounts)}, source order:${squadPlan.details.sourceOrder.join(' -> ')}, Club cap:${squadPlan.details.maxClubPerSquad}, Storage cards:${squadPlan.storageItemsConsumed}, projected free:${headroom.projectedFree}/${headroom.requiredFree} required`);
+    logInventorySelection(`${loopDef.name}: ${loaded.sinkDef.name} ${context.targetRating} squad`, plan.selection, { maxItems: 30 });
+    if (loaded.sinkDef.dryRun) {
+      return { status: 'planned', reason: `dry-run ${loaded.sinkDef.name} next ${context.targetRating} squad plan complete` };
+    }
+    const result = await submitRollingStorageSinkSquad(
+      loopDef,
+      runtime,
+      loaded.sinkDef,
+      plan,
+      loaded.completedCount,
+      loaded.totalChallengeCount,
+    );
+    if (!result.submitted) return result;
+    const consumedSignalRefs = plan.signalRefs || [];
+    runtime.primaryDuplicateRefs = (runtime.primaryDuplicateRefs || []).filter((ref) => (
+      !consumedSignalRefs.some((consumedRef) => rollingItemMatchesRef(ref, consumedRef))
+    ));
+    if (consumedSignalRefs.length) {
+      const released = releaseRollingRoutingItemsAfterConsumption(runtime.openRouting, consumedSignalRefs);
+      runtime.openRouting = released.routing;
+    }
+    const reconciled = await reconcileRollingRuntime(runtime, `${loaded.sinkDef.name} ${context.targetRating} squad submitted`);
+    if (reconciled.status !== 'ready') return reconciled;
+    refreshRollingPendingUnassignedRefs(runtime);
+    if (!finalChallenge) {
+      return {
+        status: 'submitted',
+        submitted: true,
+        reason: `${loaded.sinkDef.name} ${context.targetRating} squad submitted; remaining squads are deferred until later Storage pressure`,
+        details: { submittedRating: context.targetRating, headroom },
+      };
+    }
+
+    if (capability.rewardKind === 'player-pick') {
+      const selected = await selectPendingRollingStorageSinkPick(
+        loopDef,
+        runtime,
+        { status: 'resolved', loop: capability.loop },
+        {
+          attempts: 10,
+          quietMissing: false,
+          failOnUnexpected: true,
+          duplicatesConsumed: rollingDuplicatePlayerCount(plan.selection?.selected)
+            + Number(plan.signalRefs?.length || 0),
+        },
+      );
+      if (selected.status !== 'selected') return { ...selected, status: 'blocked' };
+    } else {
+      const routed = await resumeRollingPendingUnassigned(loopDef, runtime);
+      if (routed.status !== 'ready') return routed;
+    }
+    const routed = await retryRollingProtectedStorage(loopDef, runtime);
+    return routed.status === 'ready'
+      ? { status: 'submitted', submitted: true, details: { submittedRating: context.targetRating, headroom } }
+      : routed;
+  }
+
+  async function runRollingStorageSinkRecovery(loopDef, runtime, definition) {
+    const unavailable = [];
+    for (const capability of rollingStorageSinkCapabilities(definition)) {
+      const result = capability.legacy95
+        ? await runRollingLegacyStorageSinkRecovery(
+            loopDef,
+            runtime,
+            { status: 'resolved', loop: capability.loop },
+          )
+        : await runRollingGenericStorageSinkRecovery(loopDef, runtime, capability);
+      if (result?.status !== 'unavailable') return result;
+      unavailable.push(`${capability.setName || `Set #${capability.setId}`}: ${result.reason || 'unavailable'}`);
+      if (definition?.mode === 'selected') break;
+    }
+    return {
+      status: 'unavailable',
+      reason: unavailable.join('; ') || 'no validated Storage pressure SBC capability is available',
+      reasonCode: 'STORAGE_SINK_CAPABILITY_UNAVAILABLE',
     };
   }
 
@@ -14486,15 +14828,11 @@ function updateLoopControls() {
       },
       resumePendingPlayerPick: async () => {
         if (loopDef.rollingStorageSinkEnabled !== true) return { status: 'skipped' };
-        const resumed = await selectPendingRollingStorageSinkPick(
+        return resumePendingRollingStorageSinkReward(
           loopDef,
           runtime,
-          loopDef.rollingStorageSinkPick,
-          { attempts: 1, quietMissing: true, failOnUnexpected: false },
+          loopDef.rollingStorageSink,
         );
-        return resumed.status === 'missing' || resumed.status === 'unavailable'
-          ? { status: 'skipped' }
-          : resumed;
       },
       resumePendingUnassigned: async () => resumeRollingPendingUnassigned(loopDef, runtime),
       findPrimaryPack: async () => {
@@ -14749,7 +15087,7 @@ function updateLoopControls() {
       recoverStorageSink: async () => runRollingStorageSinkRecovery(
         loopDef,
         runtime,
-        loopDef.rollingStorageSinkPick,
+        loopDef.rollingStorageSink,
       ),
       recoverRequiredSpecial: async () => {
         const definition = rollingRecoveryDef(loopDef.rollingTotwUpgrade, loopDef);
@@ -15346,7 +15684,10 @@ function updateLoopControls() {
       assertRollingRuntimePreflight(loopDef);
       const fodderPolicy = getSbcFodderPolicy(loopDef);
       if (loopDef.strategy === 'rollingUpgrade') {
-        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; 95+ Storage pressure Pick ${loopDef.rollingStorageSinkEnabled ? 'enabled' : 'disabled'}`);
+        const storageSinkSummary = loopDef.rollingStorageSinkEnabled
+          ? `${loopDef.rollingStorageSink?.mode || 'automatic'}/${loopDef.rollingStorageSink?.capability?.setName || 'unavailable'}`
+          : 'off';
+        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; Storage pressure SBC ${storageSinkSummary}`);
       } else {
         log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
       }
@@ -15361,7 +15702,7 @@ function updateLoopControls() {
     } catch (e) {
       log(`Stopped: ${e.message || e}`);
       errorStackLines(e).forEach((line) => log(`Error stack: ${line}`));
-      console.error('[BronzeLoop]', e);
+      console.error(CONSOLE_PREFIX, e);
       return;
     }
 
@@ -15412,7 +15753,7 @@ function updateLoopControls() {
       runReason = e?.message || String(e);
       log(`Stopped: ${e.message || e}`);
       errorStackLines(e).forEach((line) => log(`Error stack: ${line}`));
-      console.error('[BronzeLoop]', e);
+      console.error(CONSOLE_PREFIX, e);
     } finally {
       state.running = false;
       state.stopping = false;

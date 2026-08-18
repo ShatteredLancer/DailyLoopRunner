@@ -5,9 +5,12 @@ import { parsePlayerPickSbcSnapshot } from '../../src/config/player-pick-discove
 import {
   applyRollingAutomaticUseFodderPolicy,
   bindRollingPlayerPickCapabilities,
+  buildRollingStorageSinkCatalog,
+  parseRollingStorageSinkSnapshot,
   parseRollingStorageSinkPickSnapshot,
   resolveRollingPlayerPickCapability,
   resolveRollingStorageSinkPickCapability,
+  resolveRollingStorageSinkCapability,
   resolveRollingAutomaticUseMaxRating,
   shouldQueueRollingProvisionsReward,
 } from '../../src/config/rolling-upgrade.js';
@@ -134,6 +137,40 @@ function storageSinkPickSet(overrides = {}) {
   };
 }
 
+function storageSinkPlayerSet(overrides = {}) {
+  const base = {
+    id: 20994,
+    name: '94 Rated Campaign Player',
+    timesCompleted: 0,
+    repeats: 1,
+    rewards: [{
+      type: 'PLAYER',
+      name: '94 Rated Campaign Player',
+      resourceId: 30994,
+      definitionId: 30994,
+      count: 1,
+    }],
+    challenges: [
+      {
+        id: 21993,
+        requiredPlayerCount: 11,
+        eligibilityRequirements: [{ key: 'TEAM_RATING', values: [87], count: -1 }],
+      },
+      {
+        id: 21994,
+        requiredPlayerCount: 11,
+        eligibilityRequirements: [{ key: 'TEAM_RATING', values: [89], count: -1 }],
+      },
+    ],
+  };
+  return {
+    ...base,
+    ...overrides,
+    rewards: overrides.rewards || base.rewards,
+    challenges: overrides.challenges || base.challenges,
+  };
+}
+
 describe('Rolling Upgrade configuration contracts', () => {
   it('uses the shared automatic-use rating for Rolling instead of the standard Rating SBC cap', () => {
     expect(resolveRollingAutomaticUseMaxRating({ runtimePickOptions: { protectionRating: 90 } })).toBe(90);
@@ -208,6 +245,15 @@ describe('Rolling Upgrade configuration contracts', () => {
           pickCount: 1,
           challengesPerPick: 2,
         }),
+      },
+      rollingStorageSink: {
+        status: 'resolved',
+        mode: 'automatic',
+        capability: {
+          setId: 20995,
+          rewardKind: 'player-pick',
+          legacy95: true,
+        },
       },
       rollingGoldSinkUpgrade: {
         activityResolved: true,
@@ -353,5 +399,161 @@ describe('Rolling Upgrade configuration contracts', () => {
     expect(ambiguous.rollingStorageSinkPick).toMatchObject({ status: 'ambiguous', required: false });
     expect(ambiguous.rollingStorageSinkPick).not.toHaveProperty('loop');
     expect(validateLoopDef(ambiguous, 'Rolling Upgrade')).toEqual([]);
+  });
+
+  it('parses generic high-rated Player Pick and direct Player Storage sinks', () => {
+    const pick = parseRollingStorageSinkSnapshot({
+      set: storageSinkPickSet({
+        id: 20993,
+        name: '1 of 4 94+ Player Pick',
+        rewards: [{
+          type: 'PLAYER_PICK',
+          name: '1 of 4 94+ Player Pick',
+          resourceId: 30993,
+          candidateCount: 4,
+          selectionCount: 1,
+        }],
+      }),
+    });
+    expect(pick).toMatchObject({
+      status: 'supported',
+      capability: {
+        setId: 20993,
+        rewardKind: 'player-pick',
+        challengeRatings: [88, 89],
+        loop: {
+          strategy: 'playerPickSbc',
+          pickCandidateCount: 4,
+          pickCount: 1,
+        },
+      },
+    });
+
+    const player = parseRollingStorageSinkSnapshot({ set: storageSinkPlayerSet() });
+    expect(player).toMatchObject({
+      status: 'supported',
+      capability: {
+        setId: 20994,
+        rewardKind: 'player',
+        challengeRatings: [87, 89],
+        rewardReserveSlots: 1,
+        loop: {
+          strategy: 'storagePressureSbc',
+          sbcSetIds: [20994],
+        },
+      },
+    });
+  });
+
+  it('rejects Pack-only, low-rated, completed, and incomplete Storage sink metadata', () => {
+    expect(parseRollingStorageSinkSnapshot({
+      set: storageSinkPlayerSet({ rewards: [{ type: 'PACK', packId: 30001 }] }),
+    }).status).toBe('ignored');
+    expect(parseRollingStorageSinkSnapshot({
+      set: storageSinkPlayerSet({
+        challenges: storageSinkPlayerSet().challenges.map((challenge) => ({
+          ...challenge,
+          eligibilityRequirements: [{ key: 'TEAM_RATING', values: [86], count: -1 }],
+        })),
+      }),
+    }).status).toBe('ignored');
+    expect(parseRollingStorageSinkSnapshot({
+      set: storageSinkPlayerSet({ complete: true }),
+    }).status).toBe('ignored');
+    expect(parseRollingStorageSinkSnapshot({
+      set: storageSinkPlayerSet({
+        challenges: [{
+          id: 21994,
+          requiredPlayerCount: null,
+          eligibilityRequirements: [{ key: 'TEAM_RATING', values: [89], count: -1 }],
+        }],
+      }),
+    }).status).toBe('unsupported');
+    expect(parseRollingStorageSinkSnapshot({
+      set: storageSinkPlayerSet({
+        challenges: [{
+          id: 21994,
+          requiredPlayerCount: 11,
+          eligibilityRequirements: [
+            { key: 'TEAM_RATING', values: [89], count: -1 },
+            { key: 'CHEMISTRY_POINTS', values: [30], count: -1 },
+          ],
+        }],
+      }),
+    })).toMatchObject({
+      status: 'unsupported',
+      diagnostics: [expect.stringContaining('CHEMISTRY_POINTS')],
+    });
+  });
+
+  it('resolves an explicit Set without silently falling back and keeps legacy 95+ first in automatic mode', () => {
+    const legacy = storageSinkPickSet();
+    const selected = storageSinkPlayerSet();
+    const explicit = resolveRollingStorageSinkCapability([legacy, selected], {
+      mode: 'selected',
+      setId: selected.id,
+    });
+    expect(explicit).toMatchObject({
+      status: 'resolved',
+      mode: 'selected',
+      capability: { setId: selected.id, rewardKind: 'player' },
+    });
+
+    const missing = resolveRollingStorageSinkCapability([legacy], {
+      mode: 'selected',
+      setId: selected.id,
+    });
+    expect(missing).toMatchObject({ status: 'unavailable', mode: 'selected' });
+    expect(missing).not.toHaveProperty('capability');
+
+    const automatic = resolveRollingStorageSinkCapability([selected, legacy], {
+      mode: 'automatic',
+    });
+    expect(automatic).toMatchObject({
+      status: 'resolved',
+      mode: 'automatic',
+      capability: { setId: legacy.id, legacy95: true },
+      alternatives: [expect.objectContaining({ setId: selected.id })],
+    });
+  });
+
+  it('builds a lightweight UI catalog and marks only deep-scanned contracts validated', () => {
+    const pick = storageSinkPickSet();
+    const player = storageSinkPlayerSet();
+    const lowPick = storageSinkPickSet({
+      id: 20884,
+      name: '1 of 3 84+ Player Pick',
+      rewards: [{
+        type: 'PLAYER_PICK',
+        name: '1 of 3 84+ Player Pick',
+        resourceId: 30884,
+        candidateCount: 3,
+        selectionCount: 1,
+      }],
+      challenges: [{
+        id: 21884,
+        requiredPlayerCount: 11,
+        eligibilityRequirements: [{ key: 'TEAM_RATING', values: [84], count: -1 }],
+      }],
+    });
+    const unscannedPick = storageSinkPickSet({
+      id: 20887,
+      name: '1 of 3 87+ Player Pick',
+    });
+    const catalog = buildRollingStorageSinkCatalog([
+      { ...pick, challenges: [] },
+      { ...player, challenges: [] },
+      { ...lowPick, challenges: [] },
+      { ...unscannedPick, challenges: [] },
+      { id: 20001, name: '89 Rated Pack', rewards: [{ type: 'PACK', packId: 30001 }] },
+    ], [pick, lowPick]);
+    expect(catalog).toEqual([
+      expect.objectContaining({ setId: pick.id, rewardKind: 'player-pick', status: 'validated', challengeRatings: [88, 89] }),
+      expect.objectContaining({ setId: player.id, rewardKind: 'player', status: 'indexed', challengeRatings: [] }),
+    ].sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''))));
+    expect(catalog.map((candidate) => candidate.setId)).not.toEqual(expect.arrayContaining([
+      lowPick.id,
+      unscannedPick.id,
+    ]));
   });
 });

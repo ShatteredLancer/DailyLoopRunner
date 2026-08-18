@@ -46,6 +46,25 @@ function pickOptionOverrides(input = {}) {
     input.rollingStorageSinkEnabled,
   );
   assign(
+    'rollingStorageSinkMode',
+    nested.rollingStorageSinkMode,
+    input.rollingStorageSinkMode,
+  );
+  assign(
+    'rollingStorageSinkSetId',
+    nested.rollingStorageSinkSetId,
+    input.rollingStorageSinkSetId,
+  );
+  assign(
+    'rollingStorageSinkSetName',
+    nested.rollingStorageSinkSetName,
+    input.rollingStorageSinkSetName,
+  );
+  if (result.rollingStorageSinkMode === undefined
+    && result.rollingStorageSinkEnabled !== undefined) {
+    result.rollingStorageSinkMode = result.rollingStorageSinkEnabled ? 'automatic' : 'off';
+  }
+  assign(
     'rollingSurplusCraftingEnabled',
     nested.rollingSurplusCraftingEnabled,
     input.rollingSurplusCraftingEnabled,
@@ -80,11 +99,27 @@ export function normalizePickRuntimeOptions(input = {}) {
   const protectionRating = Number(
     input.protectionRating ?? input.autoPickThreshold ?? input.autoPickRatingThreshold,
   );
+  const requestedStorageSinkMode = String(input.rollingStorageSinkMode || '').trim().toLowerCase();
+  const selectedStorageSinkSetId = Number(input.rollingStorageSinkSetId);
+  const hasSelectedStorageSink = Number.isInteger(selectedStorageSinkSetId)
+    && selectedStorageSinkSetId > 0;
+  const rollingStorageSinkMode = requestedStorageSinkMode === 'selected'
+    ? hasSelectedStorageSink ? 'selected' : 'off'
+    : requestedStorageSinkMode === 'automatic'
+      ? 'automatic'
+      : requestedStorageSinkMode === 'off'
+        ? 'off'
+        : input.rollingStorageSinkEnabled === true ? 'automatic' : 'off';
   return {
     autoSelectBelow90: input.autoSelectBelow90 !== false,
     preferScannedMetadata: input.preferScannedMetadata === true,
     openPicksAtEnd: input.openPicksAtEnd === true,
-    rollingStorageSinkEnabled: input.rollingStorageSinkEnabled === true,
+    rollingStorageSinkEnabled: rollingStorageSinkMode !== 'off',
+    rollingStorageSinkMode,
+    rollingStorageSinkSetId: rollingStorageSinkMode === 'selected' ? selectedStorageSinkSetId : null,
+    rollingStorageSinkSetName: rollingStorageSinkMode === 'selected'
+      ? String(input.rollingStorageSinkSetName || '').trim()
+      : '',
     rollingSurplusCraftingEnabled: input.rollingSurplusCraftingEnabled === true,
     rollingProvisionsMaxRating: normalizeRollingProvisionsMaxRating(
       input.rollingProvisionsMaxRating,
@@ -280,6 +315,8 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
   if (loopDef.strategy === 'rollingUpgrade') {
     loopDef.runtimeProtectionRating = resolvedPickOptions.protectionRating;
     loopDef.rollingStorageSinkEnabled = resolvedPickOptions.rollingStorageSinkEnabled;
+    loopDef.rollingStorageSinkMode = resolvedPickOptions.rollingStorageSinkMode;
+    loopDef.rollingStorageSinkSetId = resolvedPickOptions.rollingStorageSinkSetId;
     loopDef.rollingSurplusCraftingEnabled = resolvedPickOptions.rollingSurplusCraftingEnabled;
     loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;
     loopDef.rollingOpenDuplicateProvisionsRewards =

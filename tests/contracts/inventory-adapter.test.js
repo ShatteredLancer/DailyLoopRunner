@@ -119,6 +119,28 @@ describe('Inventory Adapter contract', () => {
     ]);
   });
 
+  it('preserves or derives the EA base-player database identity', () => {
+    const direct = {
+      id: 12,
+      definitionId: 134449171,
+      databaseId: 999999,
+      type: 'player',
+      rating: 95,
+    };
+    const derived = {
+      id: 13,
+      definitionId: 67340307,
+      type: 'player',
+      rating: 91,
+    };
+    const ea = createEaInventoryAdapter(createRuntime({ club: [direct, derived] }));
+
+    expect(ea.snapshot().piles.club).toEqual([
+      expect.objectContaining({ id: 12, databaseId: 999999 }),
+      expect.objectContaining({ id: 13, databaseId: 231443 }),
+    ]);
+  });
+
   it('restores latent Unassigned duplicate metadata from a matching Club definition', () => {
     const unassigned = makePlayer({
       id: 30,

@@ -210,7 +210,7 @@ export const BUILDER_STRATEGY_DESCRIPTORS = Object.freeze({
     { path: 'rollingTotwUpgrade', label: 'Required Special recovery capability', type: 'upgrade' },
     { path: 'rollingProvisionsUpgrade', label: 'Provisions capability', type: 'upgrade' },
     { path: 'rollingPlayerPick', label: 'Rare Gold Pick capability', type: 'text' },
-    { path: 'rollingStorageSinkPick', label: 'Storage pressure Pick capability', type: 'text' },
+    { path: 'rollingStorageSink', label: 'Storage pressure SBC capability', type: 'text' },
     { path: 'rollingGoldSinkUpgrade', label: 'Gold sink capability', type: 'upgrade' },
     { path: 'rollingWorkflowEnabled', label: 'Workflow enabled', type: 'boolean-inherit' },
     { path: 'defaultOpenRewardPacksOnSelect', label: 'Default reward opening on selection', type: 'boolean-inherit' },

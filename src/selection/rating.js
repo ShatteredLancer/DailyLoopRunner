@@ -1,6 +1,9 @@
 import { createSelectionPlan } from '../domain/contracts.js';
+import { readPlayerDatabaseId } from '../domain/player-rarity.js';
 import { buildRatingSelectionPolicy, hasRatingSelectionPolicy } from './rating-policy.js';
 import { buildDeterministicRatingRecipes } from './rating-recipes.js';
+
+const MAX_PLAYER_IDENTITY_REPLANS = 128;
 
 function comparePileSelections(a, b, piles, policyAware = false) {
   if (policyAware) {
@@ -184,7 +187,7 @@ function planEntries(entries) {
   }));
 }
 
-async function selectRatingCandidatePool(input = {}, roles = []) {
+async function selectRatingCandidatePoolOnce(input = {}, roles = []) {
   const candidateEntries = input.candidateEntries || [];
   const model = input.ratingModel;
   const piles = input.priorityPiles || [];
@@ -334,6 +337,134 @@ async function selectRatingCandidatePool(input = {}, roles = []) {
       ratingLevels: Number(recipePlan.metrics?.ratingLevels || 0),
       ratingRange: recipePlan.ratingRange || null,
       recipeCacheHit: recipePlan.cacheHit === true,
+    },
+  });
+}
+
+function ratingEntryKey(entry) {
+  const itemId = Number(entry?.item?.id || 0);
+  if (itemId) return `id:${itemId}`;
+  return `definition:${Number(entry?.item?.definitionId || 0)}`;
+}
+
+function duplicateSelectedPlayerGroups(plan) {
+  const byDatabaseId = new Map();
+  for (const item of plan?.selected || []) {
+    const databaseId = readPlayerDatabaseId(item);
+    if (!databaseId) continue;
+    const group = byDatabaseId.get(databaseId) || [];
+    group.push(item);
+    byDatabaseId.set(databaseId, group);
+  }
+  return [...byDatabaseId.entries()]
+    .filter(([, items]) => items.length > 1)
+    .map(([databaseId, items]) => ({ databaseId, items }));
+}
+
+function matchingEntry(candidateEntries, item) {
+  const itemId = Number(item?.id || 0);
+  if (itemId) {
+    const byId = candidateEntries.find((entry) => Number(entry?.item?.id || 0) === itemId);
+    if (byId) return byId;
+  }
+  const definitionId = Number(item?.definitionId || 0);
+  return candidateEntries.find((entry) => Number(entry?.item?.definitionId || 0) === definitionId) || null;
+}
+
+function equivalentReplacementCount(entry, candidateEntries, excludedKeys) {
+  const rating = Number(entry?.item?.rating || 0);
+  const requirementSignature = (entry?.requirementMatches || []).map(Number).join('');
+  const roleSignature = (entry?.roleMatches || []).map(Number).join('');
+  return candidateEntries.reduce((count, candidate) => {
+    if (candidate === entry || excludedKeys.has(ratingEntryKey(candidate))) return count;
+    if (readPlayerDatabaseId(candidate?.item) === readPlayerDatabaseId(entry?.item)) return count;
+    if (Number(candidate?.item?.rating || 0) !== rating) return count;
+    if (candidate?.special === true !== (entry?.special === true)) return count;
+    if ((candidate?.requirementMatches || []).map(Number).join('') !== requirementSignature) return count;
+    if ((candidate?.roleMatches || []).map(Number).join('') !== roleSignature) return count;
+    return count + 1;
+  }, 0);
+}
+
+function identityConflictExclusionOrder(group, candidateEntries, excludedKeys) {
+  return group.items
+    .map((item) => matchingEntry(candidateEntries, item))
+    .filter(Boolean)
+    .sort((left, right) => {
+      const replacementDifference = equivalentReplacementCount(right, candidateEntries, excludedKeys)
+        - equivalentReplacementCount(left, candidateEntries, excludedKeys);
+      if (replacementDifference) return replacementDifference;
+      const leftRoleWeight = (left.roleMatches || []).filter(Boolean).length;
+      const rightRoleWeight = (right.roleMatches || []).filter(Boolean).length;
+      if (leftRoleWeight !== rightRoleWeight) return leftRoleWeight - rightRoleWeight;
+      const leftRequirementWeight = (left.requirementMatches || []).filter(Boolean).length;
+      const rightRequirementWeight = (right.requirementMatches || []).filter(Boolean).length;
+      if (leftRequirementWeight !== rightRequirementWeight) return leftRequirementWeight - rightRequirementWeight;
+      return Number(left.item?.rating || 0) - Number(right.item?.rating || 0)
+        || Number(left.item?.id || 0) - Number(right.item?.id || 0);
+    });
+}
+
+async function selectRatingCandidatePool(input = {}, roles = []) {
+  const candidateEntries = input.candidateEntries || [];
+  const queue = [new Set()];
+  const visited = new Set(['']);
+  let replanAttempts = 0;
+  let lastFailure = null;
+
+  while (queue.length && replanAttempts < MAX_PLAYER_IDENTITY_REPLANS) {
+    const excludedKeys = queue.shift();
+    const eligibleEntries = excludedKeys.size
+      ? candidateEntries.filter((entry) => !excludedKeys.has(ratingEntryKey(entry)))
+      : candidateEntries;
+    const plan = await selectRatingCandidatePoolOnce({ ...input, candidateEntries: eligibleEntries }, roles);
+    replanAttempts++;
+    if (!plan.ok) {
+      if (!excludedKeys.size) return plan;
+      lastFailure = plan;
+      continue;
+    }
+
+    const conflicts = duplicateSelectedPlayerGroups(plan);
+    if (!conflicts.length) {
+      if (replanAttempts === 1) return plan;
+      return createSelectionPlan({
+        ...plan,
+        details: {
+          ...plan.details,
+          playerIdentityReplans: replanAttempts - 1,
+          excludedConflictingVersions: excludedKeys.size,
+        },
+      });
+    }
+
+    const conflict = conflicts[0];
+    const exclusionOrder = identityConflictExclusionOrder(conflict, eligibleEntries, excludedKeys);
+    for (const entry of exclusionOrder) {
+      const next = new Set(excludedKeys);
+      next.add(ratingEntryKey(entry));
+      const signature = [...next].sort().join('|');
+      if (visited.has(signature)) continue;
+      visited.add(signature);
+      queue.push(next);
+    }
+    if (typeof input.control?.yieldControl === 'function') await input.control.yieldControl();
+  }
+
+  const limitReached = queue.length > 0;
+  const reason = limitReached
+    ? `base-player uniqueness replan limit ${MAX_PLAYER_IDENTITY_REPLANS} reached`
+    : 'no deterministic rating recipe can avoid duplicate base players';
+  return createSelectionPlan({
+    ok: false,
+    mode: 'rating',
+    missing: { count: 0, code: 'PLAYER_IDENTITY_CONFLICT', reason },
+    diagnostics: [{ code: 'PLAYER_IDENTITY_CONFLICT', reason }],
+    details: {
+      ...(lastFailure?.details || {}),
+      reason,
+      reasonCode: 'PLAYER_IDENTITY_CONFLICT',
+      playerIdentityReplans: Math.max(0, replanAttempts - 1),
     },
   });
 }

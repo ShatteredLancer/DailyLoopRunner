@@ -291,29 +291,36 @@ Solver 不预设“84 阵应该平均使用 83/84”。如果已有高评分重�
 
 不允许将第二张 Required Special 塞入同一主 SBC，也不允许将它降级为 Provisions 或普通材料。
 
-### 8.4 95+ 双阵 Storage sink
+### 8.4 通用 Storage pressure SBC
 
-当紧急 Provisions 无法释放足够空间时，Rolling 可以使用动态扫描得到的 `1 of 3 95+ FOF or FUTTIES T1-T3 Player Pick` 作为第二级 Storage sink。该能力是可选 capability，缺失、歧义或规则变化不会阻止 Rolling 启动，只会让 Storage 压力路径保持 `PROTECTED_STORAGE_BLOCKED`。
+当紧急 Provisions 无法释放足够空间时，Rolling 可以使用动态扫描得到的高评分 Player Pick 或直接球员 SBC 作为第二级 Storage sink。该能力是可选 capability，缺失或规则变化不会阻止 Rolling 启动，只会让 Storage 压力路径保持 `PROTECTED_STORAGE_BLOCKED`。
 
-该恢复路径还受用户 opt-in 控制。`Selection Policy -> Rolling -> Use 95+ Storage pressure Pick` 默认关闭；旧版本配置缺少该字段时也迁移为关闭。关闭时仍执行只读扫描并显示 capability 状态，但 workflow 不会规划、保存或提交 88/89 阵。只有动态 capability 唯一解析且用户显式启用后，才允许进入下述提交门禁。
+该恢复路径由 `Selection Policy -> Rolling -> Storage pressure recovery` 控制，支持 `Off / Automatic / Selected SBC`。旧版 `rollingStorageSinkEnabled:true` 迁移为 `Automatic`，缺少该字段仍为 `Off`。`Selected SBC` 持久化稳定 Set ID；选中的 Set 不可用时不允许静默回退。
 
-动态身份合同：
+扫描分为两级：`requestSets()` 的轻量索引用于下拉目录；Challenge 评分和约束只对现有动态候选及用户显式选中的 Set 深度加载并缓存。这样可以覆盖球员 SBC，同时避免为下拉框全量请求 Challenge 元数据。
 
-- 唯一 Player Pick 奖励，`1 of 3` 且最低评分为 `95+`。
-- Set 或奖励名称同时包含 `FOF`、`FUTTIES` 和 `T1-T3` 身份。
-- 恰好两个 Challenge，live 评分分别为 88 和 89；Set、reward 和 Challenge 必须有稳定身份。
-- 不写死当前 Set、Challenge 或 reward resource ID；普通 Pick discovery 仍不接受评分阵，该能力使用 Rolling 专用只读 parser。
+通用动态身份合同：
+
+- Set 奖励必须是 Player Pick 或直接球员；奖励评分不参与筛选，纯 Pack SBC 和没有 87+ 阵容的低成本 SBC 不进入候选。
+- 至少一个 Challenge 的 live 目标评分为 87+，并且人数、Set ID、Challenge ID 和奖励身份可验证。
+- 支持 Team Rating 和现有评分规划器支持的球员品质、稀有度、评分、Club、League、Nation 条件；Chemistry 等未知条件 fail closed。
+- 最后一阵前为 Player Pick 或可能重复的直接球员预留一个 Storage 槽位；子阵 Pack 不自动开启。
+
+兼容的 `1 of 3 95+ FOF or FUTTIES T1-T3 Player Pick` 仍保留旧身份合同和专用 89/88 来源策略，避免配置迁移改变已验证行为。其它候选进入通用逐阵执行器。
+
+95+ 专用路径在每次 recovery 开始时一次性加载当前未完成的 89/88 Challenge squad，提交 89 阵并完成库存对账后复用已加载的 88 阵上下文重新规划材料。不得在两阵之间重复调用 `loadChallenge`；EA 可能对刚提交同 Set 后的重复 Challenge squad 加载返回 466。若 Run 已在两阵之间停止，再次启动时优先复用 Set Repository 中同 Challenge ID 的已加载 squad，同时保留本次请求得到的最新要求元数据。
 
 提交门禁：
 
-1. 先检查并处理已有待领取 Pick。
-2. Challenge 可以是 89/88 都未完成，也可以是 89 已完成、只剩 88；后者必须作为可恢复部分状态继续，不能要求清空状态重来。
-3. 89 阵独立规划：当前主包中不高于 `Automatic-use max rating` 的可用 Unassigned duplicate signal 全部设为必选，其余位置只能由 Storage 补齐；不从 Transfer 或普通 Club 取卡。
-4. 89 阵达到最低评分即可提交，不为了精确 89 换出需要清理的 Unassigned；提交后立即对账、释放已消费 signal，并重新读取两个 Challenge 的 live 完成状态。
-5. 88 阵独立规划：先尝试纯 Storage；确实不可行时依次尝试加入一、二、三张不高于上限的安全普通 Club 卡。不得使用 Club Other Special、Required Special 或受保护卡。
-6. 89 已提交但 88 暂不可行时返回 `STORAGE_SINK_88_DEFERRED` 作为真实进展，允许 Rolling 继续；下一次 Storage 再次高位触发时只规划剩余 88 阵，不重复提交 89。
-7. 每阵计划必须在提交前验证实际 Storage 释放量。89 阵覆盖提交后仍待存的卡；88 阵还必须为 Pick 结果可能出现的重复卡额外预留一格。
-8. 两阵完成后先重新路由原待存卡，再立即领取 Pick，复用现有自动选择、Reward Alert、Unassigned 清理和 Inventory Ledger 对账。
+1. 启动时先检查并处理配置 capability 对应的已有待领取 Pick。
+2. 通用执行器重新加载 Set 和所有 live Challenge，只考虑 87+ 且可解析的未完成阵容。
+3. 每次选择评分最高的一阵，按 `Unassigned -> Storage -> Transfer -> Club` 规划；Club 最多 3 张，Unassigned 当前阻塞项优先设为必选。
+4. 每阵计划必须证明 Storage 实际释放量足以容纳当前待存卡；最后一阵额外预留一个奖励槽位。
+5. 提交一阵后立即对账并返回真实进展，不在一次 recovery 中连续提交任意数量的球员 SBC 阵容。
+6. 最后一阵完成后，Player Pick 立即选择；直接球员通过通用 Unassigned 路由处理；Pack 奖励保留。
+7. Automatic 模式可尝试下一个已验证 capability，但任何已经提交的部分进展都禁止回退到另一 Set。
+
+legacy 95+ 两阵继续执行原门禁：89 阵只用 Unassigned/Storage，88 阵纯 Storage 优先并允许最多 3 张 Club；89 已完成、88 不可行时保留 `STORAGE_SINK_88_DEFERRED`。
 
 ## 9. 恢复策略
 
@@ -489,7 +496,7 @@ Runner 自己造成的变化应在对应 EA receipt 确认后实时反映；外�
 
 ### 11.5 提交前实体交换与 EA 警告确认
 
-Rolling 的主 `10x85+`、评分恢复阵和 95+ Storage sink 共用同一套提交事务门禁。普通 Loop 不接入以下放宽行为。
+Rolling 的主 `10x85+`、评分恢复阵和 Storage pressure SBC 共用同一套提交事务门禁。普通 Loop 不接入以下放宽行为。
 
 当 Unassigned duplicate signal 是不可交易卡，而 Solver 解析到的可提交 Club 实体是可交易卡时，事务在最终校验前运行 `preparePlayers`：
 

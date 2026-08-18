@@ -7,10 +7,17 @@ import {
   isSamePlayerCardVersion,
   isSpecialPlayerCard,
   normalPlayerRarity,
+  readPlayerDatabaseId,
   readPlayerRareFlag,
 } from '../../src/domain/player-rarity.js';
 
 describe('canonical player rarity', () => {
+  it('reads a direct databaseId and otherwise derives it from the definitionId low 24 bits', () => {
+    expect(readPlayerDatabaseId({ databaseId: 999999, definitionId: 134449171 })).toBe(999999);
+    expect(readPlayerDatabaseId({ definitionId: 134449171 })).toBe(231443);
+    expect(readPlayerDatabaseId({ _data: { definitionId: 67340307 } })).toBe(231443);
+  });
+
   it('reads every EA rarity location through one conservative rule', () => {
     expect(readPlayerRareFlag({ _staticData: { rareflag: 1 } })).toBe(1);
     expect(readPlayerRareFlag({ _data: { rareFlag: 2 } })).toBe(2);

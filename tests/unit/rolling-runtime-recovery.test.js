@@ -157,4 +157,22 @@ describe('Rolling runtime recovery helpers', () => {
     expect(validators.postSave({ players, savedPlayers: players })).toBe(true);
     expect(readinessChecks).toBe(1);
   });
+
+  it('reuses an already loaded Set challenge squad without replacing fresh metadata', async () => {
+    const { api } = await loadUserscript();
+    const cachedSquad = { id: 'cached-squad' };
+    const cachedChallenge = { id: 3870, squad: cachedSquad, eligibilityRequirements: ['stale'] };
+    const freshChallenge = { id: 3870, squad: null, eligibilityRequirements: ['fresh'] };
+    const set = { challenges: { _collection: [cachedChallenge] } };
+
+    expect(api.synchronizeCachedSbcChallengeSquad(set, freshChallenge)).toBe(freshChallenge);
+    expect(freshChallenge.squad).toBe(cachedSquad);
+    expect(freshChallenge.eligibilityRequirements).toEqual(['fresh']);
+
+    const newlyLoadedSquad = { id: 'newly-loaded-squad' };
+    freshChallenge.squad = newlyLoadedSquad;
+    cachedChallenge.squad = null;
+    api.synchronizeCachedSbcChallengeSquad(set, freshChallenge);
+    expect(cachedChallenge.squad).toBe(newlyLoadedSquad);
+  });
 });

@@ -297,16 +297,16 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     });
     const resumedPick = await options.resumePendingPlayerPick({ result });
     if (isStopped(resumedPick)) {
-      return finish('stopped', resumedPick, 'stopped while resuming a pending Storage pressure Pick');
+      return finish('stopped', resumedPick, 'stopped while resuming a pending Storage pressure SBC reward');
     }
     if (resumedPick?.status === 'planned') {
-      return finish('planned', resumedPick, 'dry run stopped at a pending Storage pressure Pick');
+      return finish('planned', resumedPick, 'dry run stopped at a pending Storage pressure SBC reward');
     }
     if (isBlocked(resumedPick)) {
       return finish(
         resumedPick?.status === 'unavailable' ? 'unavailable' : 'blocked',
         resumedPick,
-        'pending Storage pressure Pick could not be resumed safely',
+        'pending Storage pressure SBC reward could not be resumed safely',
         'STORAGE_SINK_PICK_RESUME_BLOCKED',
       );
     }
@@ -441,7 +441,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
         if (isStopped(storageSink) || isBlocked(storageSink) || storageSink?.status === 'planned') {
           return finishRecoveryFailure(
             storageSink,
-            'Storage pressure Pick recovery failed',
+            'Storage pressure SBC recovery failed',
             'STORAGE_SINK_RECOVERY_BLOCKED',
           );
         }
@@ -546,7 +546,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           if (isProgressed(storageSink)) continue;
           return finishRecoveryFailure(
             storageSink,
-            'Storage pressure Pick could not clear room for the leftover recovery reward',
+            'Storage pressure SBC could not clear room for the leftover recovery reward',
             'STORAGE_SINK_RECOVERY_BLOCKED',
           );
         }

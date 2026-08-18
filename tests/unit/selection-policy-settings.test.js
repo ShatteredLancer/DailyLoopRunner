@@ -56,6 +56,10 @@ describe('selection policy settings modal', () => {
         rollingOpenDuplicateProvisionsRewards: false,
         rollingShortageProvisionsPackLimit: 2,
       },
+      storageSinkCandidates: [
+        { setId: 20995, name: '1 of 3 95+ Player Pick', rewardKind: 'player-pick', challengeRatings: [88, 89], status: 'validated' },
+        { setId: 20994, name: '94 Rated Campaign Player', rewardKind: 'player', challengeRatings: [87, 89], status: 'validated' },
+      ],
       onSave,
     });
 
@@ -63,7 +67,8 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rating-sbc-max-card').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-automatic-use-max').value).toBe('90');
     expect(ui.byId.get('#bronze-loop-pick-mode').dataset.value).toBe('automatic');
-    expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value).toBe('off');
+    expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink-set').value).toBe('20995');
     expect(ui.byId.get('#bronze-loop-policy-rolling-surplus-crafting').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');
@@ -73,7 +78,8 @@ describe('selection policy settings modal', () => {
     ui.byId.get('#bronze-loop-policy-rating-sbc-max-card').value = '89';
     ui.byId.get('#bronze-loop-policy-automatic-use-max').value = '95';
     ui.byId.get('#bronze-loop-pick-mode').children[1].click();
-    ui.byId.get('#bronze-loop-policy-rolling-storage-sink').checked = true;
+    ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value = 'selected';
+    ui.byId.get('#bronze-loop-policy-rolling-storage-sink-set').value = '20994';
     ui.byId.get('#bronze-loop-policy-rolling-surplus-crafting').checked = true;
     ui.byId.get('#bronze-loop-policy-pick-open-at-end').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value = '89';
@@ -88,6 +94,9 @@ describe('selection policy settings modal', () => {
         autoSelectBelow90: false,
         openPicksAtEnd: true,
         rollingStorageSinkEnabled: true,
+        rollingStorageSinkMode: 'selected',
+        rollingStorageSinkSetId: 20994,
+        rollingStorageSinkSetName: '94 Rated Campaign Player',
         rollingSurplusCraftingEnabled: true,
         rollingProvisionsMaxRating: 89,
         rollingOpenDuplicateProvisionsRewards: true,
@@ -110,7 +119,7 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rating-sbc-max-card').value).toBe('1');
     expect(ui.byId.get('#bronze-loop-policy-automatic-use-max').value).toBe('99');
     expect(ui.byId.get('#bronze-loop-pick-mode').dataset.value).toBe('review-protected');
-    expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-surplus-crafting').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');
@@ -122,9 +131,10 @@ describe('selection policy settings modal', () => {
     const overlay = showSelectionPolicySettings({
       dom: ui.dom,
       pickOptions: { rollingStorageSinkEnabled: false },
+      storageSinkCandidates: [{ setId: 20995, name: '1 of 3 95+ Player Pick' }],
       onSave,
     });
-    ui.byId.get('#bronze-loop-policy-rolling-storage-sink').checked = true;
+    ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value = 'selected';
     await ui.byId.get('#bronze-loop-policy-cancel').click();
     expect(onSave).not.toHaveBeenCalled();
     expect(overlay.removed).toBe(true);

@@ -3,9 +3,11 @@ import { createInventorySnapshot } from '../../src/domain/contracts.js';
 import { selectInventoryPlayers } from '../../src/selection/index.js';
 import {
   createStorageSinkClubFillRole,
+  genericStorageSinkSquadSourceStrategy,
   nextStorageSinkContext,
   planMultiSquadRatingSelections,
   prepareStorageSink89Candidates,
+  prepareGenericStorageSinkCandidates,
   selectStorageSinkClubFallbackEntries,
   STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
   storageSinkSquadSourceStrategy,
@@ -67,6 +69,32 @@ describe('multi-squad rating planner', () => {
       maxClubCount: 3,
     });
     expect(storageSinkSquadSourceStrategy(87)).toBeNull();
+  });
+
+  it('uses one generic high-rating source policy without changing the legacy 89/88 contract', () => {
+    expect(genericStorageSinkSquadSourceStrategy(90)).toEqual({
+      targetRating: 90,
+      priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+      requirePrimaryUnassigned: true,
+      maxClubCount: 3,
+    });
+    expect(genericStorageSinkSquadSourceStrategy(86)).toBeNull();
+
+    const entries = [
+      { item: player(1, 101, 93), signal: player(901, 101, 93, 'unassigned'), pileName: 'unassigned' },
+      { item: player(2, 102, 90), signal: player(902, 102, 90, 'unassigned'), pileName: 'unassigned' },
+      { item: player(3, 103, 89), signal: null, pileName: 'storage' },
+      { item: player(4, 104, 88, 'transfer'), signal: null, pileName: 'transfer' },
+      { item: player(5, 105, 87, 'club'), signal: null, pileName: 'club' },
+    ];
+    const prepared = prepareGenericStorageSinkCandidates(entries, {
+      primaryRefs: [{ id: 901 }, { id: 902 }],
+      maxRating: 95,
+      requiredPlayerCount: 1,
+      clubEntries: [entries[4]],
+    });
+    expect(prepared.requiredEntries.map((entry) => entry.item.id)).toEqual([1]);
+    expect(prepared.entries.map((entry) => entry.item.id)).toEqual([1, 3, 4, 5]);
   });
 
   it('continues the harder incomplete Storage Sink squad without requiring both contexts', () => {

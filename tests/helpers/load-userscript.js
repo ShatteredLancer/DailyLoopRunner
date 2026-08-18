@@ -48,6 +48,9 @@ export function makePlayer(options = {}) {
     type: 'player',
     id: Number(options.id),
     definitionId: Number(options.definitionId ?? options.id),
+    ...(options.databaseId !== undefined && options.databaseId !== null
+      ? { databaseId: Number(options.databaseId) }
+      : {}),
     rating,
     rareflag,
     duplicateId: Number(options.duplicateId || 0),
@@ -113,6 +116,7 @@ export async function loadUserscript(options = {}) {
       validateRollingEmergencyProvisionsSelection,
       validateRollingStorageSinkPlayers,
       createRollingStorageSinkSubmissionValidators,
+      synchronizeCachedSbcChallengeSquad,
       getDailyChallengeRemaining,
       getDailySetRemaining,
       getPackInventorySnapshot,

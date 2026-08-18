@@ -2,6 +2,7 @@ import { createInventorySnapshot, createItemSnapshot, INVENTORY_PILES } from '..
 import {
   hasPlayerCosmetics,
   isPlayerEvolutionCard,
+  readPlayerDatabaseId,
   readPlayerRareFlag,
 } from '../../domain/player-rarity.js';
 import { classifyUnassignedDuplicateIdentity } from '../../inventory/unassigned-duplicate-identity.js';
@@ -104,6 +105,7 @@ function toSnapshot(item, pile) {
   return createItemSnapshot({
     id: item?.id,
     definitionId: item?.definitionId,
+    databaseId: readPlayerDatabaseId(item),
     type: item?.type || (callBoolean(item, 'isPlayer') ? 'player' : 'unknown'),
     name: fullName || item?.name || item?.commonName || item?.lastName || item?._staticData?.name,
     rating,

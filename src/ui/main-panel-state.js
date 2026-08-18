@@ -103,7 +103,11 @@ export function renderSelectionPolicySummary(options = {}) {
   const standardRating = Number(sbcFodderOptions.ratingSbcMaxCardRating || 88) || 88;
   const automaticUse = Number(pickOptions.protectionRating || pickOptions.autoPickThreshold || 90) || 90;
   const pickMode = pickOptions.autoSelectBelow90 === false ? 'Review' : 'Auto';
-  const storageSink = pickOptions.rollingStorageSinkEnabled === true ? 'enabled' : 'disabled';
+  const storageSink = pickOptions.rollingStorageSinkMode === 'selected'
+    ? `Set #${pickOptions.rollingStorageSinkSetId || '?'}`
+    : pickOptions.rollingStorageSinkMode === 'automatic' || pickOptions.rollingStorageSinkEnabled === true
+      ? 'automatic'
+      : 'off';
   const surplusCrafting = pickOptions.rollingSurplusCraftingEnabled === true ? 'enabled' : 'shortage only';
   const provisionsMaxRating = Number(pickOptions.rollingProvisionsMaxRating || 88) === 89 ? 89 : 88;
   const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true
@@ -111,7 +115,7 @@ export function renderSelectionPolicySummary(options = {}) {
     : 'on shortage';
   const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
   summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickMode}`;
-  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; duplicate Provisions rewards ${duplicateProvisionsRewards}; 95+ Storage pressure Pick ${storageSink}`;
+  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
 }
 
 export function renderMainPanelScanProgress(options = {}) {
