@@ -3,6 +3,16 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] - 2026-08-18
+
+### Fixed
+
+- Continued the Rolling Loop through an enabled Storage-pressure SBC when a
+  pending Required Special reward cannot open because primary-pack duplicates
+  exceed the available SBC Storage slots.
+- Preserved the existing fail-closed behavior when Storage-pressure recovery is
+  disabled, unavailable, or does not make independently verified progress.
+
 ## [0.8.1] - 2026-08-18
 
 ### Added

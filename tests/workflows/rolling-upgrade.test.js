@@ -365,6 +365,54 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.recoverRequiredSpecial).toHaveBeenCalledOnce();
   });
 
+  it('uses the Storage pressure SBC when a pending Required Special reward cannot open', async () => {
+    let inventoryVersion = 1;
+    let storageReady = false;
+    let specialReady = false;
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      findPrimaryPack: vi.fn(async () => null),
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      planPrimarySquad: vi.fn(async () => specialReady
+        ? { ok: true, itemRefs: [{ id: 1 }] }
+        : { ok: false, missing: { code: 'REQUIRED_SPECIAL_SHORTAGE' } }),
+      recoverRequiredSpecial: vi.fn(async () => {
+        calls.push('required-special');
+        if (!storageReady) {
+          return {
+            status: 'blocked',
+            reason: 'SBC storage has only 6 slot(s), but 8 item(s) need moving',
+            reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+          };
+        }
+        specialReady = true;
+        inventoryVersion++;
+        return { status: 'opened' };
+      }),
+      recoverStorageSink: vi.fn(async ({ context }) => {
+        calls.push('storage-sink');
+        expect(context).toMatchObject({
+          trigger: 'storage-pressure',
+          source: 'required-special-reward-pre-open',
+        });
+        storageReady = true;
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      completions: 1,
+      recoveries: { total: 2, storageSink: 1, requiredSpecial: 1 },
+    });
+    expect(calls).toEqual(['required-special', 'storage-sink', 'required-special']);
+    expect(options.submitPrimary).toHaveBeenCalledOnce();
+  });
+
   it('uses Provisions when the Required Special recovery squad is short of fodder', async () => {
     let inventoryVersion = 1;
     let fodderReady = false;

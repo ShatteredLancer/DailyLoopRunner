@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.1
+// @version      0.8.2
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.1",
+    version: "0.8.2",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -26319,6 +26319,31 @@
             { trigger: "required-special-shortage", plan: planned }
           );
           if (isProgressed(recovery)) continue;
+          if (isBlocked(recovery) && reasonCode(recovery) === "PROTECTED_STORAGE_BLOCKED") {
+            if (options.storageSinkEnabled !== true) {
+              return finishRecoveryFailure(
+                recovery,
+                "Required Special reward needs more Storage headroom",
+                "PROTECTED_STORAGE_BLOCKED"
+              );
+            }
+            const storageSink = await runRecovery(
+              "storageSink",
+              ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
+              options.recoverStorageSink,
+              {
+                trigger: "storage-pressure",
+                storage: recovery,
+                source: "required-special-reward-pre-open"
+              }
+            );
+            if (isProgressed(storageSink)) continue;
+            return finishRecoveryFailure(
+              storageSink,
+              "Storage pressure SBC could not clear room for the Required Special reward",
+              "STORAGE_SINK_RECOVERY_BLOCKED"
+            );
+          }
           if (recovery?.status === "skipped") {
             return finish("blocked", planned, "primary squad is infeasible", planCode);
           }

@@ -585,6 +585,31 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           { trigger: 'required-special-shortage', plan: planned },
         );
         if (isProgressed(recovery)) continue;
+        if (isBlocked(recovery) && reasonCode(recovery) === 'PROTECTED_STORAGE_BLOCKED') {
+          if (options.storageSinkEnabled !== true) {
+            return finishRecoveryFailure(
+              recovery,
+              'Required Special reward needs more Storage headroom',
+              'PROTECTED_STORAGE_BLOCKED',
+            );
+          }
+          const storageSink = await runRecovery(
+            'storageSink',
+            ROLLING_UPGRADE_PHASES.RECOVER_STORAGE_SINK,
+            options.recoverStorageSink,
+            {
+              trigger: 'storage-pressure',
+              storage: recovery,
+              source: 'required-special-reward-pre-open',
+            },
+          );
+          if (isProgressed(storageSink)) continue;
+          return finishRecoveryFailure(
+            storageSink,
+            'Storage pressure SBC could not clear room for the Required Special reward',
+            'STORAGE_SINK_RECOVERY_BLOCKED',
+          );
+        }
         if (recovery?.status === 'skipped') {
           return finish('blocked', planned, 'primary squad is infeasible', planCode);
         }
