@@ -148,7 +148,7 @@ describe('rating candidate integration planning', () => {
     });
   });
 
-  it('diagnoses an exact required item replaced by another same-definition candidate', () => {
+  it('keeps an exact required item as the same-definition representative', () => {
     const representative = item(10, 100, 88, { privatePayload: 'must-not-leak' });
     const required = item(20, 100, 88, { privatePayload: 'must-not-leak' });
     const piles = { storage: [representative, required] };
@@ -168,19 +168,19 @@ describe('rating candidate integration planning', () => {
       now: () => 100,
     });
 
-    expect(result.entries.map((entry) => entry.item.id)).toEqual([10]);
+    expect(result.entries.map((entry) => entry.item.id)).toEqual([20]);
     expect(result.requiredItemDiagnostics).toEqual([{
       ref: { id: 20, definitionId: 100, pile: 'storage' },
       scannedLocations: [{ id: 20, definitionId: 100, pile: 'storage', rating: 88 }],
       candidateBeforeDefinition: true,
-      candidateAfterDefinition: false,
-      candidateAfterPolicy: false,
-      representative: { id: 10, definitionId: 100, pile: 'storage', rating: 88 },
+      candidateAfterDefinition: true,
+      candidateAfterPolicy: true,
+      representative: { id: 20, definitionId: 100, pile: 'storage', rating: 88 },
       competingCandidates: [
         { id: 10, definitionId: 100, pile: 'storage', rating: 88 },
         { id: 20, definitionId: 100, pile: 'storage', rating: 88 },
       ],
-      reason: 'definition-dedup-replaced',
+      reason: 'candidate-available',
     }]);
     expect(JSON.stringify(result.requiredItemDiagnostics)).not.toContain('must-not-leak');
   });

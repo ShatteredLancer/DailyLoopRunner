@@ -75,6 +75,7 @@ export function buildRatingCandidateEntries(options = {}) {
     .map(normalizedRequiredRef)
     .filter((ref) => ref.id > 0 || ref.definitionId > 0)
     .slice(0, MAX_REQUIRED_DIAGNOSTICS);
+  const exactRequiredItemIds = new Set(requiredRefs.map((ref) => ref.id).filter((id) => id > 0));
   const requiredScannedLocations = requiredRefs.map(() => []);
   const cachedIsSafe = (item) => {
     const itemId = Number(item?.id || 0);
@@ -150,10 +151,18 @@ export function buildRatingCandidateEntries(options = {}) {
   for (const entry of byItemId.values()) {
     const definitionId = Number(entry.item?.definitionId || 0);
     const existing = byDefinition.get(definitionId);
+    const entryIsExactRequired = exactRequiredItemIds.has(Number(entry.item?.id || 0));
+    const existingIsExactRequired = exactRequiredItemIds.has(Number(existing?.item?.id || 0));
     if (
       !existing
-      || entry.pileRank < existing.pileRank
-      || (entry.pileRank === existing.pileRank && Number(entry.item?.id || 0) < Number(existing.item?.id || 0))
+      || (entryIsExactRequired && !existingIsExactRequired)
+      || (
+        entryIsExactRequired === existingIsExactRequired
+        && (
+          entry.pileRank < existing.pileRank
+          || (entry.pileRank === existing.pileRank && Number(entry.item?.id || 0) < Number(existing.item?.id || 0))
+        )
+      )
     ) {
       byDefinition.set(definitionId, entry);
     }

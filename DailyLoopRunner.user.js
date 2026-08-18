@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.3
+// @version      0.8.4
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.3",
+    version: "0.8.4",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -12477,6 +12477,7 @@
     const resolvedSignals = {};
     const safetyCache = /* @__PURE__ */ new Map();
     const requiredRefs = (Array.isArray(requiredItems) ? requiredItems : []).map(normalizedRequiredRef).filter((ref) => ref.id > 0 || ref.definitionId > 0).slice(0, MAX_REQUIRED_DIAGNOSTICS);
+    const exactRequiredItemIds = new Set(requiredRefs.map((ref) => ref.id).filter((id) => id > 0));
     const requiredScannedLocations = requiredRefs.map(() => []);
     const cachedIsSafe = (item) => {
       const itemId5 = Number(item?.id || 0);
@@ -12548,7 +12549,9 @@
     for (const entry of byItemId.values()) {
       const definitionId2 = Number(entry.item?.definitionId || 0);
       const existing = byDefinition.get(definitionId2);
-      if (!existing || entry.pileRank < existing.pileRank || entry.pileRank === existing.pileRank && Number(entry.item?.id || 0) < Number(existing.item?.id || 0)) {
+      const entryIsExactRequired = exactRequiredItemIds.has(Number(entry.item?.id || 0));
+      const existingIsExactRequired = exactRequiredItemIds.has(Number(existing?.item?.id || 0));
+      if (!existing || entryIsExactRequired && !existingIsExactRequired || entryIsExactRequired === existingIsExactRequired && (entry.pileRank < existing.pileRank || entry.pileRank === existing.pileRank && Number(entry.item?.id || 0) < Number(existing.item?.id || 0))) {
         byDefinition.set(definitionId2, entry);
       }
     }

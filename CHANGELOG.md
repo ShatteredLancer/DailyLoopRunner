@@ -3,6 +3,15 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.4] - 2026-08-18
+
+### Fixed
+
+- Preserved exact Rolling primary duplicate items as their player-version
+  candidate representatives after they move into SBC Storage, preventing
+  same-definition inventory copies from causing a false
+  `REQUIRED_ITEM_UNAVAILABLE` stop after Required Special recovery.
+
 ## [0.8.3] - 2026-08-18
 
 ### Fixed
