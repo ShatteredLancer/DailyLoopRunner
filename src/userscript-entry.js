@@ -12265,6 +12265,16 @@ function updateLoopControls() {
       .map((entry) => `Club ${itemDisplayName(entry.item)} is not TOTW`);
   }
 
+  function rollingPrimaryReservesAllSpecialSlots(model = {}) {
+    const maxSpecialCount = Math.max(0, Number(model?.maxSpecialCount || 0) || 0);
+    if (!maxSpecialCount) return false;
+    const requiredSpecialCount = rollingRequiredSpecialConstraintIndexes(model)
+      .reduce((total, index) => (
+        total + Math.max(0, Number(model?.constraints?.[index]?.count || 0) || 0)
+      ), 0);
+    return requiredSpecialCount >= maxSpecialCount;
+  }
+
   function rollingBaseProtectionReasons(item, loopDef = {}, pileOverride = null) {
     const reasons = getSbcProtectionReasons(item, loopDef, {
       roleAware: true,
@@ -12387,6 +12397,9 @@ function updateLoopControls() {
         provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
         provisionsRecoveryAvailable: rollingCapabilityAvailable(loopDef.rollingProvisionsUpgrade),
         proactiveProvisionsEnabled: loopDef.rollingSurplusCraftingEnabled === true,
+        storeOtherSpecialDuplicates: rollingPrimaryReservesAllSpecialSlots(
+          context.model || context.primaryContext?.model,
+        ),
         isDuplicate,
         isSpecial: isSbcSpecialItem,
         isRequiredSpecial: (item) => rollingLiveRequiredSpecial(
@@ -15091,6 +15104,7 @@ function updateLoopControls() {
       provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
       provisionsRecoveryAvailable: rollingCapabilityAvailable(loopDef.rollingProvisionsUpgrade),
       proactiveProvisionsEnabled: loopDef.rollingSurplusCraftingEnabled === true,
+      storeOtherSpecialDuplicates: rollingPrimaryReservesAllSpecialSlots(runtime.primaryContext?.model),
       isDuplicate: () => true,
       isSpecial: isSbcSpecialItem,
       isRequiredSpecial: (item) => rollingLiveRequiredSpecial(item, runtime.primaryContext?.model),

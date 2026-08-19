@@ -198,6 +198,28 @@ describe('Rolling inventory policy', () => {
     expect(plan.counts).toMatchObject({ requiredSpecial: 3, keptRequiredSpecial: 1, storageRequired: 4 });
   });
 
+  it('stores non-required special duplicates when the primary special slots are exclusive', () => {
+    const plan = planRollingOpenedItemRouting([
+      item(1, 93, { special: true }),
+      item(2, 89, { special: true }),
+      item(3, 86),
+    ], {
+      protectionRating: 96,
+      storageFree: 2,
+      storeOtherSpecialDuplicates: true,
+      isRequiredSpecial: () => false,
+    });
+
+    expect(plan.status).toBe('ready');
+    expect(plan.storageItems.map((value) => value.id)).toEqual([1, 2]);
+    expect(plan.reservedItems.map((value) => value.id)).toEqual([3]);
+    expect(plan.counts).toMatchObject({
+      otherSpecialStored: 2,
+      primaryDuplicates: 1,
+      storageRequired: 2,
+    });
+  });
+
   it('routes primary-pack Provisions reserves to Storage instead of the next primary squad', () => {
     const plan = planRollingOpenedItemRouting([
       item(1, 88),

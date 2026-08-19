@@ -297,12 +297,21 @@ export function planRollingOpenedItemRouting(items = [], options = {}) {
     ? Math.floor(provisionsReserve.length / provisionsRequiredCount) * provisionsRequiredCount
     : 0;
   const provisionRecoveryEntries = provisionsReserve.slice(0, immediateProvisionCount);
+  const provisionRecoverySet = new Set(provisionRecoveryEntries);
   const storedProvisionEntries = proactiveProvisionsEnabled
     ? provisionsReserve.slice(immediateProvisionCount)
+    : [];
+  const otherSpecialStorageEntries = options.storeOtherSpecialDuplicates === true
+    ? duplicates.filter((entry) => (
+        entry.classification.otherSpecial
+          && !entry.classification.protected
+          && !provisionRecoverySet.has(entry)
+      ))
     : [];
   const storageEntries = [...new Set([
     ...protectedDuplicates,
     ...extraRequiredSpecial,
+    ...otherSpecialStorageEntries,
     ...storedProvisionEntries,
   ])];
   const storageEntrySet = new Set(storageEntries);
@@ -338,6 +347,7 @@ export function planRollingOpenedItemRouting(items = [], options = {}) {
       extraRequiredSpecial: extraRequiredSpecial.length,
       provisionsReserve: provisionsReserve.length,
       provisionsImmediate: provisionRecoveryEntries.length,
+      otherSpecialStored: otherSpecialStorageEntries.length,
       protectedDuplicates: protectedDuplicates.length,
       primaryDuplicates: reservedPrimaryDuplicates.length,
       storageRequired: storageEntries.length,

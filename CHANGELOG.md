@@ -3,6 +3,16 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.13] - 2026-08-19
+
+### Fixed
+
+- Routed non-required duplicate specials to SBC Storage whenever the live
+  primary Challenge reserves every special slot for its exact Required Special
+  condition. This prevents unrelated opened specials from becoming impossible
+  required items in the no-special TOTW recovery squad and falsely stopping
+  the Rolling Loop with `REQUIRED_ITEM_UNAVAILABLE`.
+
 ## [0.8.12] - 2026-08-19
 
 ### Fixed

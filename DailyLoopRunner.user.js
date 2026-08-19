@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.12
+// @version      0.8.13
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.12",
+    version: "0.8.13",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -10993,10 +10993,13 @@
     const provisionsReserve = duplicates.filter(({ classification }) => classification.provisionsReserve && !classification.protected);
     const immediateProvisionCount = provisionsRecoveryAvailable && proactiveProvisionsEnabled ? Math.floor(provisionsReserve.length / provisionsRequiredCount) * provisionsRequiredCount : 0;
     const provisionRecoveryEntries = provisionsReserve.slice(0, immediateProvisionCount);
+    const provisionRecoverySet = new Set(provisionRecoveryEntries);
     const storedProvisionEntries = proactiveProvisionsEnabled ? provisionsReserve.slice(immediateProvisionCount) : [];
+    const otherSpecialStorageEntries = options.storeOtherSpecialDuplicates === true ? duplicates.filter((entry) => entry.classification.otherSpecial && !entry.classification.protected && !provisionRecoverySet.has(entry)) : [];
     const storageEntries = [.../* @__PURE__ */ new Set([
       ...protectedDuplicates,
       ...extraRequiredSpecial,
+      ...otherSpecialStorageEntries,
       ...storedProvisionEntries
     ])];
     const storageEntrySet = new Set(storageEntries);
@@ -11023,6 +11026,7 @@
         extraRequiredSpecial: extraRequiredSpecial.length,
         provisionsReserve: provisionsReserve.length,
         provisionsImmediate: provisionRecoveryEntries.length,
+        otherSpecialStored: otherSpecialStorageEntries.length,
         protectedDuplicates: protectedDuplicates.length,
         primaryDuplicates: reservedPrimaryDuplicates.length,
         storageRequired: storageEntries.length,
@@ -47043,6 +47047,12 @@
       const indexes = rollingRequiredSpecialConstraintIndexes(model);
       return (selection?.entries || []).filter((entry) => String(entry?.submissionPileName || entry?.pileName || "") === "club" && indexes.some((index) => entry.requirementMatches?.[index] === true) && !isTotwItem(entry.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is not TOTW`);
     }
+    function rollingPrimaryReservesAllSpecialSlots(model = {}) {
+      const maxSpecialCount = Math.max(0, Number(model?.maxSpecialCount || 0) || 0);
+      if (!maxSpecialCount) return false;
+      const requiredSpecialCount = rollingRequiredSpecialConstraintIndexes(model).reduce((total, index) => total + Math.max(0, Number(model?.constraints?.[index]?.count || 0) || 0), 0);
+      return requiredSpecialCount >= maxSpecialCount;
+    }
     function rollingBaseProtectionReasons(item, loopDef = {}, pileOverride = null) {
       const reasons = getSbcProtectionReasons(item, loopDef, {
         roleAware: true,
@@ -47133,6 +47143,9 @@
           provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
           provisionsRecoveryAvailable: rollingCapabilityAvailable(loopDef.rollingProvisionsUpgrade),
           proactiveProvisionsEnabled: loopDef.rollingSurplusCraftingEnabled === true,
+          storeOtherSpecialDuplicates: rollingPrimaryReservesAllSpecialSlots(
+            context.model || context.primaryContext?.model
+          ),
           isDuplicate,
           isSpecial: isSbcSpecialItem,
           isRequiredSpecial: (item) => rollingLiveRequiredSpecial(
@@ -49588,6 +49601,7 @@
         provisionsRequiredCount: rollingProvisionsRequiredCount(loopDef),
         provisionsRecoveryAvailable: rollingCapabilityAvailable(loopDef.rollingProvisionsUpgrade),
         proactiveProvisionsEnabled: loopDef.rollingSurplusCraftingEnabled === true,
+        storeOtherSpecialDuplicates: rollingPrimaryReservesAllSpecialSlots(runtime.primaryContext?.model),
         isDuplicate: () => true,
         isSpecial: isSbcSpecialItem,
         isRequiredSpecial: (item) => rollingLiveRequiredSpecial(item, runtime.primaryContext?.model),

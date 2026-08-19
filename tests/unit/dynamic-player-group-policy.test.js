@@ -302,6 +302,24 @@ describe('dynamic EA player-group policy', () => {
     })).toContain('duplicate-target-rolling-club-non-totw-special-strict');
   });
 
+  it('recognizes when the Required Special condition owns every special slot', async () => {
+    const { api } = await loadUserscript();
+    const requiredSpecialConstraint = {
+      source: 'ea',
+      keyName: 'PLAYER_RARITY_GROUP',
+      count: 1,
+    };
+
+    expect(api.rollingPrimaryReservesAllSpecialSlots({
+      maxSpecialCount: 1,
+      constraints: [requiredSpecialConstraint],
+    })).toBe(true);
+    expect(api.rollingPrimaryReservesAllSpecialSlots({
+      maxSpecialCount: 2,
+      constraints: [requiredSpecialConstraint],
+    })).toBe(false);
+  });
+
   it('selects a FUTTIES card through the live EA matcher and preserves pile priority', async () => {
     const clubFutties = makePlayer({
       id: 20,
