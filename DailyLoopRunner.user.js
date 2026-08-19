@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.11
+// @version      0.8.12
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.11",
+    version: "0.8.12",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -47062,10 +47062,16 @@
       return (selection?.entries || []).filter((entry) => String(entry?.submissionPileName || entry?.itemRef?.pile || entry?.pileName || "") === "club" && isSbcSpecialItem(entry?.item) && !isTotwItem(entry?.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is a protected non-TOTW special`);
     }
     function rollingOpenedDuplicateTargetProtectionReasons(item, loopDef = {}) {
+      let targetPile = null;
       return rollingDuplicateTargetProtectionReasons(item, {
         isDuplicate,
-        resolveTarget: (signal, duplicateId) => getSubmissionCacheItems().find((candidate) => Number(candidate?.id || 0) === duplicateId && isSamePlayerCardVersion(signal, candidate)) || null,
-        protectionReasons: (target) => rollingBaseProtectionReasons(target, loopDef)
+        resolveTarget: (signal, duplicateId) => {
+          const resolved = findCachedItemById(duplicateId, ["storage", "club"]);
+          if (!resolved || !isSamePlayerCardVersion(signal, resolved.item)) return null;
+          targetPile = resolved.pileName;
+          return resolved.item;
+        },
+        protectionReasons: (target) => rollingBaseProtectionReasons(target, loopDef, targetPile)
       });
     }
     function rollingItemRef(item, pile) {

@@ -274,6 +274,34 @@ describe('dynamic EA player-group policy', () => {
       .toThrow(/rolling-club-non-totw-special-strict/);
   });
 
+  it('preserves the Club pile when routing a duplicate of a protected non-TOTW special', async () => {
+    const clubSpecial = makePlayer({
+      id: 84,
+      definitionId: 804,
+      rating: 89,
+      rareflag: 117,
+      name: 'Protected Club Special',
+    });
+    const unassignedDuplicate = makePlayer({
+      id: 85,
+      definitionId: 804,
+      rating: 89,
+      rareflag: 117,
+      duplicate: true,
+      duplicateId: clubSpecial.id,
+      name: 'Protected Club Special',
+    });
+    const { api } = await loadUserscript({
+      club: [clubSpecial],
+      unassigned: [unassignedDuplicate],
+    });
+
+    expect(api.rollingOpenedDuplicateTargetProtectionReasons(unassignedDuplicate, {
+      rollingProtectAllClubNonTotwSpecials: true,
+      expectedPlayerCount: 11,
+    })).toContain('duplicate-target-rolling-club-non-totw-special-strict');
+  });
+
   it('selects a FUTTIES card through the live EA matcher and preserves pile priority', async () => {
     const clubFutties = makePlayer({
       id: 20,

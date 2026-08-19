@@ -12302,13 +12302,16 @@ function updateLoopControls() {
   }
 
   function rollingOpenedDuplicateTargetProtectionReasons(item, loopDef = {}) {
+    let targetPile = null;
     return rollingDuplicateTargetProtectionReasons(item, {
       isDuplicate,
-      resolveTarget: (signal, duplicateId) => getSubmissionCacheItems().find((candidate) => (
-        Number(candidate?.id || 0) === duplicateId
-          && isSamePlayerCardVersion(signal, candidate)
-      )) || null,
-      protectionReasons: (target) => rollingBaseProtectionReasons(target, loopDef),
+      resolveTarget: (signal, duplicateId) => {
+        const resolved = findCachedItemById(duplicateId, ['storage', 'club']);
+        if (!resolved || !isSamePlayerCardVersion(signal, resolved.item)) return null;
+        targetPile = resolved.pileName;
+        return resolved.item;
+      },
+      protectionReasons: (target) => rollingBaseProtectionReasons(target, loopDef, targetPile),
     });
   }
 

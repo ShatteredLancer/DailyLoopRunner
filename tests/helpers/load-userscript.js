@@ -110,6 +110,7 @@ export async function loadUserscript(options = {}) {
       rollingOrdinaryGoldDuplicate,
       rollingSnapshotRequiredSpecial,
       rollingBaseProtectionReasons,
+      rollingOpenedDuplicateTargetProtectionReasons,
       assertRollingRecoveryItems,
       preserveRollingPrimaryDuplicateRefs,
       createRollingRequiredSpecialSourceFilter,

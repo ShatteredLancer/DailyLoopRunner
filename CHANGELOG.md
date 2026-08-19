@@ -3,6 +3,15 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.12] - 2026-08-19
+
+### Fixed
+
+- Preserved the exact Club or Storage pile while checking a newly opened
+  duplicate's submission target, so protected Club non-TOTW specials are
+  routed to SBC Storage before primary or Required Special recovery planning
+  instead of causing a false `REQUIRED_ITEM_UNAVAILABLE` stop.
+
 ## [0.8.11] - 2026-08-19
 
 ### Added
