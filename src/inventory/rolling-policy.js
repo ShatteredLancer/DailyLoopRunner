@@ -171,14 +171,20 @@ export function createRollingRequiredSpecialSourceFilter(input = {}) {
   const isClubTotw = typeof input.isClubTotw === 'function'
     ? input.isClubTotw
     : () => false;
+  const resolveSubmissionPile = typeof input.resolveSubmissionPile === 'function'
+    ? input.resolveSubmissionPile
+    : (entry = {}) => {
+        const knownPiles = new Set(['unassigned', 'storage', 'transfer', 'club']);
+        return [
+          entry.submissionPileName,
+          entry.item?.ref?.pile,
+          entry.item?.pile,
+          entry.pileName,
+        ].map((value) => String(value || '')).find((value) => knownPiles.has(value)) || 'unknown';
+      };
   return (entry = {}) => {
-    const submissionPile = String(
-      entry.submissionPileName
-        || entry.item?.pile
-        || entry.item?.ref?.pile
-        || entry.pileName
-        || '',
-    );
+    const submissionPile = String(resolveSubmissionPile(entry) || 'unknown');
+    if (submissionPile === 'unknown') return false;
     if (submissionPile !== 'club') return true;
     const matchesRequiredSpecial = constraintIndexes.some((index) => (
       entry.requirementMatches?.[index] === true

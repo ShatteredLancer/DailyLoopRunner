@@ -180,6 +180,30 @@ describe('rating candidate integration planning', () => {
     ]);
   });
 
+  it('keeps a canonical Club submission pile when the live EA item exposes a numeric pile', () => {
+    const clubTarget = item(30, 200, 95, { pile: 7, rareflag: 11, special: true });
+    const result = buildRatingCandidateEntries({
+      model: { constraints: [{ matches: (candidate) => candidate.special === true }] },
+      settings: {},
+      piles: ['club'],
+      getPileItems: (pileName) => (pileName === 'club' ? [clubTarget] : []),
+      submissionItems: [clubTarget],
+      isSafe: () => true,
+      isDuplicate: () => false,
+      pileNeedsDuplicateSignalResolution: () => false,
+      sortFodder: (entries) => [...entries],
+      isSpecialItem: (candidate) => candidate.special === true,
+    });
+
+    expect(result.entries).toEqual([
+      expect.objectContaining({
+        item: clubTarget,
+        pileName: 'club',
+        submissionPileName: 'club',
+      }),
+    ]);
+  });
+
   it('converts live entries to snapshots and resolves a successful plan back to live items', async () => {
     const liveItem = item(10, 100, 84);
     const liveSignal = item(20, 100, 84, { duplicateId: 10 });

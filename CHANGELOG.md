@@ -3,6 +3,19 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.18] - 2026-08-19
+
+### Fixed
+
+- Stopped FC26 group `44` TOTS/FUTTIES cards from being misclassified as TOTW,
+  and normalized numeric EA pile values before enforcing the Club-only-TOTW
+  Required Special policy.
+
+### Safety
+
+- Added live-shape regression coverage for `rareflag:3` TOTW and
+  `rareflag:11/120` group-44 TOTS/FUTTIES cards from Club.
+
 ## [0.8.17] - 2026-08-19
 
 ### Fixed

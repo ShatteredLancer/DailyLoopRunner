@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.17
+// @version      0.8.18
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.17",
+    version: "0.8.18",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -10913,10 +10913,18 @@
   function createRollingRequiredSpecialSourceFilter(input2 = {}) {
     const constraintIndexes = [...new Set((input2.constraintIndexes || []).map(Number).filter((index) => Number.isInteger(index) && index >= 0))];
     const isClubTotw = typeof input2.isClubTotw === "function" ? input2.isClubTotw : () => false;
+    const resolveSubmissionPile = typeof input2.resolveSubmissionPile === "function" ? input2.resolveSubmissionPile : (entry = {}) => {
+      const knownPiles = /* @__PURE__ */ new Set(["unassigned", "storage", "transfer", "club"]);
+      return [
+        entry.submissionPileName,
+        entry.item?.ref?.pile,
+        entry.item?.pile,
+        entry.pileName
+      ].map((value) => String(value || "")).find((value) => knownPiles.has(value)) || "unknown";
+    };
     return (entry = {}) => {
-      const submissionPile = String(
-        entry.submissionPileName || entry.item?.pile || entry.item?.ref?.pile || entry.pileName || ""
-      );
+      const submissionPile = String(resolveSubmissionPile(entry) || "unknown");
+      if (submissionPile === "unknown") return false;
       if (submissionPile !== "club") return true;
       const matchesRequiredSpecial = constraintIndexes.some((index) => entry.requirementMatches?.[index] === true);
       if (!matchesRequiredSpecial) return true;
@@ -12647,7 +12655,7 @@
         if (!itemId5 || !definitionId2 || byItemId.has(itemId5)) continue;
         if (!cachedIsSafe(item)) continue;
         const submissionPileName = String(
-          item?.pile || item?.ref?.pile || submissionPileById.get(itemId5) || pileName
+          submissionPileById.get(itemId5) || item?.ref?.pile || item?.pile || pileName
         );
         if (!requirementCache.has(itemId5)) {
           let requirementItem = item;
@@ -36651,6 +36659,31 @@
     const eaPackAdapter = () => adapters.pack();
     const eaInventoryAdapter = () => adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
     const inventoryPile = (pileName) => eaInventoryAdapter().pileValue(pileName);
+    const INVENTORY_PILE_NAMES = Object.freeze(["unassigned", "storage", "transfer", "club"]);
+    function normalizedRuntimePileName(value) {
+      const raw = String(value ?? "");
+      if (INVENTORY_PILE_NAMES.includes(raw)) return raw;
+      for (const pileName of INVENTORY_PILE_NAMES) {
+        try {
+          if (raw && raw === String(inventoryPile(pileName))) return pileName;
+        } catch {
+        }
+      }
+      return "";
+    }
+    function rollingSelectionSubmissionPile(entry = {}) {
+      for (const value of [
+        entry.submissionPileName,
+        entry.item?.ref?.pile,
+        entry.item?.pile,
+        entry.itemRef?.pile,
+        entry.pileName
+      ]) {
+        const pileName = normalizedRuntimePileName(value);
+        if (pileName) return pileName;
+      }
+      return "unknown";
+    }
     const eaPlayerPickAdapter = () => adapters.playerPick();
     const eaRarityAdapter = adapters.rarity;
     const eaSbcAdapter = () => adapters.sbc();
@@ -41766,7 +41799,7 @@
       if (Array.isArray(item?._staticData?.groups)) return item._staticData.groups;
       return [];
     }
-    const TOTW_GROUP_IDS = [44];
+    const TOTW_GROUP_IDS = [45];
     function itemGroupNumbers(item) {
       return itemGroups2(item).map((group) => Number(group)).filter((group) => Number.isFinite(group));
     }
@@ -41808,10 +41841,17 @@
       const id = Number(item?.id || 0);
       if (id && state.consumedItemIds.has(id)) return false;
       if (id && state.assumedTotwItemIds.has(id)) return true;
-      try {
-        if (item?.isTOTW?.() || item?.isTotw?.()) return true;
-      } catch {
+      let runtimeResult = null;
+      for (const methodName of ["isTOTW", "isTotw"]) {
+        if (typeof item?.[methodName] !== "function") continue;
+        try {
+          runtimeResult = item[methodName]() === true;
+          if (runtimeResult) return true;
+        } catch {
+        }
       }
+      if (runtimeResult === false) return false;
+      if (itemRareFlag(item) === 3) return true;
       if (itemHasAnyGroup(item, TOTW_GROUP_IDS)) return true;
       const text = itemSearchText(item);
       return /\bTOTW\b|Team of the Week|本周最佳|週最佳/i.test(text);
@@ -47201,11 +47241,11 @@
     }
     function rollingSnapshotRequiredSpecial(item, loopDef = {}) {
       if (!rollingSnapshotMatchesRequiredSpecial(item, loopDef)) return false;
-      const pile = String(item?.pile || item?.ref?.pile || "");
+      const pile = normalizedRuntimePileName(item?.pile || item?.ref?.pile) || "unknown";
       return pile !== "club" || isTotwItem(item);
     }
     function isRollingTransientSubmissionAllowed(item, loopDef = {}) {
-      const pile = String(item?.pile || item?.ref?.pile || "");
+      const pile = normalizedRuntimePileName(item?.pile || item?.ref?.pile) || "unknown";
       if (pile !== "club") return true;
       if (isTotwItem(item)) return true;
       return rollingBaseProtectionReasons(item, loopDef, pile).length === 0;
@@ -47395,7 +47435,7 @@
     }
     function rollingRequiredSpecialSourceErrors(selection, model = {}) {
       const indexes = rollingRequiredSpecialConstraintIndexes(model);
-      return (selection?.entries || []).filter((entry) => String(entry?.submissionPileName || entry?.pileName || "") === "club" && indexes.some((index) => entry.requirementMatches?.[index] === true) && !isTotwItem(entry.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is not TOTW`);
+      return (selection?.entries || []).filter((entry) => rollingSelectionSubmissionPile(entry) === "club" && indexes.some((index) => entry.requirementMatches?.[index] === true) && !isTotwItem(entry.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is not TOTW`);
     }
     function rollingPrimaryReservesAllSpecialSlots(model = {}) {
       const maxSpecialCount = Math.max(0, Number(model?.maxSpecialCount || 0) || 0);
@@ -47410,7 +47450,7 @@
         allowedSpecialCount: expectedSbcPlayerCount(loopDef),
         specialIndex: isSbcSpecialItem(item) ? 1 : 0
       });
-      const pile = String(pileOverride || item?.pile || item?.ref?.pile || "");
+      const pile = normalizedRuntimePileName(pileOverride || item?.pile || item?.ref?.pile) || "unknown";
       const strictClubSpecial = loopDef.rollingProtectAllClubNonTotwSpecials === true && pile === "club" && isSbcSpecialItem(item) && !isTotwItem(item);
       if (strictClubSpecial) reasons.push("rolling-club-non-totw-special-strict");
       const protectedClubEventSpecial = pile === "club" && !isTotwItem(item) && (rollingSnapshotMatchesRequiredSpecial(item, loopDef) || isTotsItem(item) || isFofItem(item) || isFuttiesItem(item));
@@ -47419,7 +47459,7 @@
     }
     function rollingClubNonTotwSpecialSourceErrors(selection, loopDef = {}) {
       if (loopDef.rollingProtectAllClubNonTotwSpecials !== true) return [];
-      return (selection?.entries || []).filter((entry) => String(entry?.submissionPileName || entry?.itemRef?.pile || entry?.pileName || "") === "club" && isSbcSpecialItem(entry?.item) && !isTotwItem(entry?.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is a protected non-TOTW special`);
+      return (selection?.entries || []).filter((entry) => rollingSelectionSubmissionPile(entry) === "club" && isSbcSpecialItem(entry?.item) && !isTotwItem(entry?.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is a protected non-TOTW special`);
     }
     function rollingOpenedDuplicateTargetProtectionReasons(item, loopDef = {}) {
       let targetPile = null;
@@ -48838,7 +48878,8 @@
         ...selectionPolicy,
         candidateFilter: createRollingRequiredSpecialSourceFilter({
           constraintIndexes: requiredSpecialRoles.map((role) => role.constraintIndex),
-          isClubTotw: isTotwItem
+          isClubTotw: isTotwItem,
+          resolveSubmissionPile: rollingSelectionSubmissionPile
         })
       };
     }
@@ -50605,7 +50646,8 @@
             });
             const requiredSpecialSourceFilter = createRollingRequiredSpecialSourceFilter({
               constraintIndexes: rollingRequiredSpecialConstraintIndexes(model),
-              isClubTotw: isTotwItem
+              isClubTotw: isTotwItem,
+              resolveSubmissionPile: rollingSelectionSubmissionPile
             });
             let relaxedPrimaryDuplicateRefs = [];
             let selectionPolicy = null;

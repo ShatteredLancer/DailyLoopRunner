@@ -438,6 +438,30 @@ const SCHEDULED_BULK_RELIST_LIVE_GATE_ENABLED = true;
   const eaPackAdapter = () => adapters.pack();
   const eaInventoryAdapter = () => adapters.inventory({ capacityFallbacks: { storage: CFG.storageMax } });
   const inventoryPile = (pileName) => eaInventoryAdapter().pileValue(pileName);
+  const INVENTORY_PILE_NAMES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
+  function normalizedRuntimePileName(value) {
+    const raw = String(value ?? '');
+    if (INVENTORY_PILE_NAMES.includes(raw)) return raw;
+    for (const pileName of INVENTORY_PILE_NAMES) {
+      try {
+        if (raw && raw === String(inventoryPile(pileName))) return pileName;
+      } catch { }
+    }
+    return '';
+  }
+  function rollingSelectionSubmissionPile(entry = {}) {
+    for (const value of [
+      entry.submissionPileName,
+      entry.item?.ref?.pile,
+      entry.item?.pile,
+      entry.itemRef?.pile,
+      entry.pileName,
+    ]) {
+      const pileName = normalizedRuntimePileName(value);
+      if (pileName) return pileName;
+    }
+    return 'unknown';
+  }
   const eaPlayerPickAdapter = () => adapters.playerPick();
   const eaRarityAdapter = adapters.rarity;
   const eaSbcAdapter = () => adapters.sbc();
@@ -6081,8 +6105,8 @@ function updateLoopControls() {
     return [];
   }
 
-  // FC25 scripts treated group 23 as TOTW, but FC26 logs show group 23 on non-TOTW specials.
-  const TOTW_GROUP_IDS = [44];
+  // FC26 live entities use group 44 on TOTS/FUTTIES too; group 45 is TOTW-specific.
+  const TOTW_GROUP_IDS = [45];
 
   function itemGroupNumbers(item) {
     return itemGroups(item).map((group) => Number(group)).filter((group) => Number.isFinite(group));
@@ -6130,7 +6154,16 @@ function updateLoopControls() {
     const id = Number(item?.id || 0);
     if (id && state.consumedItemIds.has(id)) return false;
     if (id && state.assumedTotwItemIds.has(id)) return true;
-    try { if (item?.isTOTW?.() || item?.isTotw?.()) return true; } catch { }
+    let runtimeResult = null;
+    for (const methodName of ['isTOTW', 'isTotw']) {
+      if (typeof item?.[methodName] !== 'function') continue;
+      try {
+        runtimeResult = item[methodName]() === true;
+        if (runtimeResult) return true;
+      } catch { }
+    }
+    if (runtimeResult === false) return false;
+    if (itemRareFlag(item) === 3) return true;
     if (itemHasAnyGroup(item, TOTW_GROUP_IDS)) return true;
     const text = itemSearchText(item);
     return /\bTOTW\b|Team of the Week|本周最佳|週最佳/i.test(text);
@@ -12129,12 +12162,12 @@ function updateLoopControls() {
 
   function rollingSnapshotRequiredSpecial(item, loopDef = {}) {
     if (!rollingSnapshotMatchesRequiredSpecial(item, loopDef)) return false;
-    const pile = String(item?.pile || item?.ref?.pile || '');
+    const pile = normalizedRuntimePileName(item?.pile || item?.ref?.pile) || 'unknown';
     return pile !== 'club' || isTotwItem(item);
   }
 
   function isRollingTransientSubmissionAllowed(item, loopDef = {}) {
-    const pile = String(item?.pile || item?.ref?.pile || '');
+    const pile = normalizedRuntimePileName(item?.pile || item?.ref?.pile) || 'unknown';
     if (pile !== 'club') return true;
     if (isTotwItem(item)) return true;
     return rollingBaseProtectionReasons(item, loopDef, pile).length === 0;
@@ -12342,7 +12375,7 @@ function updateLoopControls() {
     const indexes = rollingRequiredSpecialConstraintIndexes(model);
     return (selection?.entries || [])
       .filter((entry) => (
-        String(entry?.submissionPileName || entry?.pileName || '') === 'club'
+        rollingSelectionSubmissionPile(entry) === 'club'
           && indexes.some((index) => entry.requirementMatches?.[index] === true)
           && !isTotwItem(entry.item)
       ))
@@ -12366,7 +12399,7 @@ function updateLoopControls() {
       allowedSpecialCount: expectedSbcPlayerCount(loopDef),
       specialIndex: isSbcSpecialItem(item) ? 1 : 0,
     });
-    const pile = String(pileOverride || item?.pile || item?.ref?.pile || '');
+    const pile = normalizedRuntimePileName(pileOverride || item?.pile || item?.ref?.pile) || 'unknown';
     const strictClubSpecial = loopDef.rollingProtectAllClubNonTotwSpecials === true
       && pile === 'club'
       && isSbcSpecialItem(item)
@@ -12388,7 +12421,7 @@ function updateLoopControls() {
     if (loopDef.rollingProtectAllClubNonTotwSpecials !== true) return [];
     return (selection?.entries || [])
       .filter((entry) => (
-        String(entry?.submissionPileName || entry?.itemRef?.pile || entry?.pileName || '') === 'club'
+        rollingSelectionSubmissionPile(entry) === 'club'
           && isSbcSpecialItem(entry?.item)
           && !isTotwItem(entry?.item)
       ))
@@ -13995,6 +14028,7 @@ function updateLoopControls() {
       candidateFilter: createRollingRequiredSpecialSourceFilter({
         constraintIndexes: requiredSpecialRoles.map((role) => role.constraintIndex),
         isClubTotw: isTotwItem,
+        resolveSubmissionPile: rollingSelectionSubmissionPile,
       }),
     };
   }
@@ -15925,6 +15959,7 @@ function updateLoopControls() {
         const requiredSpecialSourceFilter = createRollingRequiredSpecialSourceFilter({
           constraintIndexes: rollingRequiredSpecialConstraintIndexes(model),
           isClubTotw: isTotwItem,
+          resolveSubmissionPile: rollingSelectionSubmissionPile,
         });
         let relaxedPrimaryDuplicateRefs = [];
         let selectionPolicy = null;

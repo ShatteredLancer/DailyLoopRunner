@@ -12,14 +12,44 @@ function requirement(key, values, count = -1, matcher = null) {
 }
 
 describe('dynamic EA player-group policy', () => {
+  it('distinguishes live FC26 TOTW cards from group-44 TOTS and FUTTIES cards', async () => {
+    const { api } = await loadUserscript();
+    const totw = makePlayer({
+      id: 1,
+      rating: 86,
+      rareflag: 3,
+      groups: [4, 22, 44, 45, 83],
+      name: 'Singo',
+    });
+    const tots = makePlayer({
+      id: 2,
+      rating: 95,
+      rareflag: 11,
+      groups: [16, 19, 43, 44, 83],
+      name: 'Kobel',
+    });
+    const futties = makePlayer({
+      id: 3,
+      rating: 93,
+      rareflag: 120,
+      groups: [19, 33, 43, 44, 83],
+      name: 'Ekitike',
+    });
+
+    expect(api.isTotwItem(totw)).toBe(true);
+    expect(api.isTotwItem(tots)).toBe(false);
+    expect(api.isTotwItem(futties)).toBe(false);
+    expect(api.isTotwItem({ ...totw, isTOTW: () => false })).toBe(false);
+  });
+
   it('evaluates a Ledger-backed Storage Sink candidate through its live EA entity', async () => {
     const clubTotw = makePlayer({
       id: 77,
       definitionId: 707,
       rating: 91,
-      rareflag: 120,
-      groups: [19, 33, 43, 44, 83],
-      name: 'Fermin',
+      rareflag: 3,
+      groups: [4, 22, 44, 45, 83],
+      name: 'TOTW Club Item',
     });
     clubTotw.runtimeGroup83 = true;
     const { api } = await loadUserscript({ club: [clubTotw] });
@@ -56,14 +86,14 @@ describe('dynamic EA player-group policy', () => {
     const candidates = api.buildRatingSbcCandidateEntries(loopDef, model, {
       candidateFilter: api.createRollingRequiredSpecialSourceFilter({
         constraintIndexes: requiredSpecialIndexes,
-        isClubTotw: (item) => item.groups.includes(44),
+        isClubTotw: (item) => item.groups.includes(45),
       }),
     }, inventorySnapshot);
 
     expect(candidates.entries).toEqual([
       expect.objectContaining({
         pileName: 'club',
-        item: expect.objectContaining({ id: 77, groups: [19, 33, 43, 44, 83] }),
+        item: expect.objectContaining({ id: 77, groups: [4, 22, 44, 45, 83] }),
         requirementMatches: [true],
       }),
     ]);
@@ -111,32 +141,32 @@ describe('dynamic EA player-group policy', () => {
       id: 70,
       definitionId: 700,
       rating: 88,
-      rareflag: 2,
-      groups: [83],
-      name: 'TOTW Club Item',
+      rareflag: 3,
+      groups: [4, 22, 44, 45, 83],
+      name: 'Singo',
     });
     const clubFutties = makePlayer({
       id: 71,
       definitionId: 701,
       rating: 95,
-      rareflag: 2,
-      groups: [83],
-      name: 'FUTTIES Club Item',
+      rareflag: 120,
+      groups: [19, 33, 43, 44, 83],
+      name: 'Ekitike',
     });
     const storageTots = makePlayer({
       id: 72,
       definitionId: 702,
       rating: 93,
-      rareflag: 2,
-      groups: [83],
-      name: 'TOTS Storage Item',
+      rareflag: 11,
+      groups: [16, 19, 43, 44, 83],
+      name: 'Kobel',
     });
     const unassignedTotsSignal = makePlayer({
       id: 74,
       definitionId: 702,
       rating: 93,
-      rareflag: 2,
-      groups: [83],
+      rareflag: 11,
+      groups: [16, 19, 43, 44, 83],
       duplicate: true,
       duplicateId: 72,
       name: 'TOTS Unassigned Signal',
@@ -145,8 +175,8 @@ describe('dynamic EA player-group policy', () => {
       id: 75,
       definitionId: 705,
       rating: 94,
-      rareflag: 2,
-      groups: [83],
+      rareflag: 120,
+      groups: [19, 33, 43, 44, 83],
       name: 'FUTTIES Storage Item',
     });
     const clubFof = makePlayer({
@@ -167,6 +197,9 @@ describe('dynamic EA player-group policy', () => {
       duplicateId: 73,
       name: 'FOF Transfer Signal',
     });
+    clubTotw.pile = 7;
+    clubFutties.pile = 7;
+    clubFof.pile = 7;
     const { api } = await loadUserscript({
       club: [clubTotw, clubFutties, clubFof],
       storage: [storageTots, storageFutties],
@@ -200,7 +233,7 @@ describe('dynamic EA player-group policy', () => {
       .map(({ index }) => index);
     const candidateFilter = api.createRollingRequiredSpecialSourceFilter({
       constraintIndexes: requiredSpecialIndexes,
-      isClubTotw: (candidate) => /TOTW/.test(candidate.name),
+      isClubTotw: api.isTotwItem,
     });
     const candidates = api.buildRatingSbcCandidateEntries(loopDef, model, { candidateFilter });
 
@@ -234,8 +267,8 @@ describe('dynamic EA player-group policy', () => {
       id: 82,
       definitionId: 802,
       rating: 88,
-      rareflag: 2,
-      groups: [44],
+      rareflag: 3,
+      groups: [45],
       name: 'TOTW Club Item',
     });
     const storageOtherSpecial = makePlayer({

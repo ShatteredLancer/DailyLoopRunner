@@ -147,9 +147,9 @@ export function buildRatingCandidateEntries(options = {}) {
       if (!itemId || !definitionId || byItemId.has(itemId)) continue;
       if (!cachedIsSafe(item)) continue;
       const submissionPileName = String(
-        item?.pile
+        submissionPileById.get(itemId)
           || item?.ref?.pile
-          || submissionPileById.get(itemId)
+          || item?.pile
           || pileName,
       );
       if (!requirementCache.has(itemId)) {

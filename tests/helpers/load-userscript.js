@@ -109,6 +109,7 @@ export async function loadUserscript(options = {}) {
       rollingDuplicatePlayerCount,
       rollingOrdinaryGoldDuplicate,
       rollingSnapshotRequiredSpecial,
+      isTotwItem,
       rollingBaseProtectionReasons,
       rollingOpenedDuplicateTargetProtectionReasons,
       rollingPrimaryReservesAllSpecialSlots,

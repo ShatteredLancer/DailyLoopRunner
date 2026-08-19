@@ -153,6 +153,19 @@ describe('Rolling inventory policy', () => {
     })).toBe(true);
   });
 
+  it('fails closed for an unknown Required Special submission pile', () => {
+    const filter = createRollingRequiredSpecialSourceFilter({
+      constraintIndexes: [0],
+      isClubTotw: () => true,
+    });
+
+    expect(filter({
+      submissionPileName: 7,
+      item: { id: 30, pile: 7 },
+      requirementMatches: [true],
+    })).toBe(false);
+  });
+
   it('classifies high duplicates, Required Special, and Provisions reserves independently', () => {
     expect(classifyRollingInventoryItem(item(1, 96), {
       protectionRating: 95,
