@@ -3,6 +3,22 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.17] - 2026-08-19
+
+### Fixed
+
+- Routed a newly opened Required Special duplicate to SBC Storage when its
+  exact Club submission target is protected by the live primary requirement.
+- Rechecked reserved primary duplicates after the live Challenge refresh so a
+  restored Unassigned state cannot require and protect the same card at once.
+- Removed safely stored deferred duplicates from the next primary squad's
+  mandatory routing set.
+
+### Safety
+
+- Protected Club event specials remain blocked from submission. This change
+  stores the Unassigned duplicate signal instead of relaxing card protection.
+
 ## [0.8.16] - 2026-08-19
 
 ### Fixed

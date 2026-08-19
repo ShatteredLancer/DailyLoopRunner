@@ -459,6 +459,25 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
   };
 }
 
+export function rollingPrimaryDuplicateProtectionConflicts(input = {}) {
+  const entries = input.ledger?.classifiedEntries?.() || input.entries || [];
+  const primaryDuplicateRefs = uniqueRefs(input.primaryDuplicateRefs || []);
+  if (!primaryDuplicateRefs.length) return { refs: [], submissionRefs: [] };
+
+  const policy = createRollingPrimarySelectionPolicy(input);
+  const submissionRefs = uniqueRefs(policy.requiredItems.filter((requiredRef) => (
+    policy.protectedItems.some((protectedRef) => refMatchesItem(requiredRef, protectedRef))
+  )));
+  const refs = primaryDuplicateRefs.filter((primaryRef) => {
+    const entry = entries.find(({ item }) => refMatchesItem(primaryRef, item));
+    if (!entry) return false;
+    const submission = primarySelectionRef(entry.item);
+    return submissionRefs.some((submissionRefValue) => refMatchesItem(submissionRefValue, submission));
+  });
+
+  return { refs: uniqueRefs(refs), submissionRefs };
+}
+
 export function rollingPrimaryDuplicateRelaxationOrder(input = {}) {
   const entries = input.ledger?.classifiedEntries?.() || input.entries || [];
   const primaryDuplicateRefs = uniqueRefs(input.primaryDuplicateRefs || []);

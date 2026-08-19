@@ -11,6 +11,7 @@ import {
   releaseRollingPrimaryDuplicateRefs,
   releaseRollingRoutingItemsAfterConsumption,
   rollingDuplicateTargetProtectionReasons,
+  rollingPrimaryDuplicateProtectionConflicts,
   rollingPrimaryDuplicateRelaxationOrder,
   validateRollingPrimaryDuplicateIdentity,
 } from '../../src/inventory/rolling-policy.js';
@@ -608,6 +609,67 @@ describe('Rolling inventory policy', () => {
     expect(policy.requiredItems).toEqual([reserve.ref]);
     expect(policy.preferredItems).toEqual([reserve.ref]);
     expect(policy.protectionPolicy.reserveRatings).toEqual([]);
+  });
+
+  it('detects a mandatory duplicate whose exact submission target is hard protected', () => {
+    const signal = item(60, 91, {
+      special: true,
+      duplicateId: 1060,
+      pile: 'unassigned',
+    });
+    const safeSignal = item(61, 87, {
+      duplicateId: 1061,
+      pile: 'unassigned',
+    });
+    const target = item(1060, 91, {
+      special: true,
+      duplicate: false,
+      duplicateId: 0,
+      definitionId: signal.definitionId,
+      pile: 'club',
+      ref: { id: 1060, definitionId: signal.definitionId, pile: 'club' },
+    });
+    const safeTarget = item(1061, 87, {
+      duplicate: false,
+      duplicateId: 0,
+      definitionId: safeSignal.definitionId,
+      pile: 'club',
+      ref: { id: 1061, definitionId: safeSignal.definitionId, pile: 'club' },
+    });
+    const entries = [
+      {
+        item: signal,
+        classification: { requiredSpecial: true, protected: false, provisionsReserve: false },
+      },
+      {
+        item: target,
+        classification: { requiredSpecial: true, protected: true, provisionsReserve: false },
+      },
+      {
+        item: safeSignal,
+        classification: { requiredSpecial: false, protected: false, provisionsReserve: false },
+      },
+      {
+        item: safeTarget,
+        classification: { requiredSpecial: false, protected: false, provisionsReserve: false },
+      },
+    ];
+
+    expect(rollingPrimaryDuplicateProtectionConflicts({
+      entries,
+      primaryDuplicateRefs: [signal.ref, safeSignal.ref],
+      model: { constraints: [] },
+      isTransientSubmissionAllowed: () => false,
+    })).toEqual({
+      refs: [signal.ref],
+      submissionRefs: [{ id: target.id, definitionId: signal.definitionId, pile: 'unknown' }],
+    });
+    expect(rollingPrimaryDuplicateProtectionConflicts({
+      entries,
+      primaryDuplicateRefs: [signal.ref, safeSignal.ref],
+      model: { constraints: [] },
+      isTransientSubmissionAllowed: () => true,
+    })).toEqual({ refs: [], submissionRefs: [] });
   });
 
   it('removes relaxed primary-pack duplicates from required and preferred inputs', () => {

@@ -150,6 +150,7 @@ import {
   releaseRollingPrimaryDuplicateRefs,
   releaseRollingRoutingItemsAfterConsumption,
   rollingDuplicateTargetProtectionReasons,
+  rollingPrimaryDuplicateProtectionConflicts,
   rollingPrimaryDuplicateRelaxationOrder,
   validateRollingPrimaryDuplicateIdentity,
 } from './inventory/rolling-policy.js';
@@ -13488,12 +13489,16 @@ function updateLoopControls() {
       routing.deferredPrimaryRefs,
     );
     runtime.primaryDuplicateRefs = primaryRelease.refs;
+    const deferredPrimaryRefs = rollingUniqueRefs(routing.deferredPrimaryRefs || []);
     runtime.openRouting = {
       ...routing,
       status: 'ready',
       reason: null,
       reasonCode: null,
       pendingItems: [],
+      reservedItems: (routing.reservedItems || []).filter((item) => (
+        !deferredPrimaryRefs.some((ref) => rollingItemMatchesRef(item, ref))
+      )),
       deferredPrimaryRefs: [],
     };
     const reconciled = await reconcileRollingRuntime(runtime, `${loopDef.name} protected Storage retry`);
@@ -15375,6 +15380,7 @@ function updateLoopControls() {
         runtime.openRouting = null;
         runtime.primaryDuplicateRefs = [];
         runtime.pendingUnassignedRefs = [];
+        const routingLoopDef = runtime.primaryContext?.activeLoopDef || loopDef;
         const receipt = await openPack(pack, `${loopDef.name} primary reward`, {
           dryRun: loopDef.dryRun === true,
           allowGone: true,
@@ -15386,7 +15392,7 @@ function updateLoopControls() {
             delayMs: 1200,
             repositoryOnly: true,
           }),
-          openedItemPolicy: createRollingPrimaryPackPolicy(loopDef, runtime, {
+          openedItemPolicy: createRollingPrimaryPackPolicy(routingLoopDef, runtime, {
             capturePrimaryDuplicates: true,
           }),
           settleReceipt: async (openedReceipt) => {
@@ -15846,8 +15852,8 @@ function updateLoopControls() {
             reasonCode: 'PRIMARY_DUPLICATE_CONTEXT_LOST',
           };
         }
-        const primaryDuplicateRefs = rollingUniqueRefs(runtime.primaryDuplicateRefs || []);
-        const primaryIdentity = validateRollingPrimaryDuplicateIdentity({
+        let primaryDuplicateRefs = rollingUniqueRefs(runtime.primaryDuplicateRefs || []);
+        let primaryIdentity = validateRollingPrimaryDuplicateIdentity({
           ledger: runtime.coordinator.getLedger(),
           primaryDuplicateRefs,
         });
@@ -15859,6 +15865,58 @@ function updateLoopControls() {
             reasonCode: primaryIdentity.reasonCode,
             details: { missingPrimaryDuplicateRefs: primaryIdentity.missingRefs },
           };
+        }
+        const protectionConflicts = rollingPrimaryDuplicateProtectionConflicts({
+          ledger: runtime.coordinator.getLedger(),
+          model,
+          protectionRating: rollingProtectionRating(loopDef),
+          reserveRatings: loopDef.rollingSurplusCraftingEnabled === true
+            ? rollingProvisionsReserveRatings(loopDef)
+            : false,
+          primaryDuplicateRefs,
+          isTransientSubmissionAllowed: (item) => (
+            isRollingTransientSubmissionAllowed(item, activeLoopDef)
+          ),
+        });
+        if (protectionConflicts.refs.length) {
+          const conflictCount = protectionConflicts.refs.length;
+          stageRollingDeferredPrimaryStorage(runtime, protectionConflicts.refs, {
+            reason: `${conflictCount} primary-pack duplicate target(s) became protected after live requirement refresh`,
+            protectionConflict: true,
+            protectedPrimaryDuplicateRefs: protectionConflicts.refs,
+            protectedSubmissionRefs: protectionConflicts.submissionRefs,
+          });
+          log(`${loopDef.name}: rerouting ${conflictCount} protected primary duplicate(s) to Storage before squad planning`);
+          if (loopDef.dryRun) {
+            return {
+              ok: false,
+              reason: runtime.openRouting.reason,
+              reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+              details: runtime.openRouting.details,
+            };
+          }
+          const rerouted = await retryRollingProtectedStorage(activeLoopDef, runtime);
+          if (rerouted.status !== 'ready') {
+            return {
+              ok: false,
+              reason: rerouted.reason || runtime.openRouting.reason,
+              reasonCode: rerouted.reasonCode || 'PROTECTED_STORAGE_BLOCKED',
+              details: rerouted.details || runtime.openRouting.details,
+            };
+          }
+          primaryDuplicateRefs = rollingUniqueRefs(runtime.primaryDuplicateRefs || []);
+          primaryIdentity = validateRollingPrimaryDuplicateIdentity({
+            ledger: runtime.coordinator.getLedger(),
+            primaryDuplicateRefs,
+          });
+          if (!primaryIdentity.ok) {
+            return {
+              ok: false,
+              reason: primaryIdentity.reason,
+              reasonCode: primaryIdentity.reasonCode,
+              details: { missingPrimaryDuplicateRefs: primaryIdentity.missingRefs },
+            };
+          }
         }
         const relaxationOrder = rollingPrimaryDuplicateRelaxationOrder({
           ledger: runtime.coordinator.getLedger(),
