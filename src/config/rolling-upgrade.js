@@ -42,7 +42,14 @@ export const ROLLING_PROVISIONS_RATING_RANGE = Object.freeze({
 });
 
 export const ROLLING_PROVISIONS_MAX_RATINGS = Object.freeze([88, 89, 90, 91]);
-export const ROLLING_RECOVERY_PRIORITY_PILES = Object.freeze([
+export const DEFAULT_ROLLING_PROVISIONS_MAX_RATING = 88;
+export const ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES = Object.freeze([
+  'unassigned',
+  'storage',
+  'transfer',
+  'club',
+]);
+export const ROLLING_STORAGE_FIRST_RECOVERY_PILES = Object.freeze([
   'storage',
   'unassigned',
   'transfer',
@@ -55,7 +62,21 @@ export function normalizeRollingProvisionsMaxRating(value) {
   const rating = Number(value);
   return ROLLING_PROVISIONS_MAX_RATINGS.includes(rating)
     ? rating
-    : ROLLING_PROVISIONS_RATING_RANGE.max;
+    : DEFAULT_ROLLING_PROVISIONS_MAX_RATING;
+}
+
+export function resolveRollingRecoveryPriorityPiles(loopDef = {}, options = {}) {
+  const recoveryMode = String(options.recoveryMode || 'normal');
+  const storageFirst = recoveryMode === 'storage-pressure'
+    || (recoveryMode !== 'pending-unassigned' && (
+      loopDef.runtimeRecoveryStorageFirst
+        ?? loopDef.runtimePickOptions?.rollingRecoveryStorageFirst
+        ?? loopDef.pickOptions?.rollingRecoveryStorageFirst
+        ?? loopDef.rollingRecoveryStorageFirst
+    ) === true);
+  return [...(storageFirst
+    ? ROLLING_STORAGE_FIRST_RECOVERY_PILES
+    : ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES)];
 }
 
 export function normalizeRollingShortageProvisionsPackLimit(value) {
@@ -618,7 +639,7 @@ export function createRollingUpgradeLoopDef(primaryLoop = {}) {
       ...createTotwUpgradePolicy({
         forceOpenRewardPacks: false,
         openRewardPacks: false,
-        ratingSbcFill: { priorityPiles: [...ROLLING_RECOVERY_PRIORITY_PILES] },
+        ratingSbcFill: { priorityPiles: [...ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES] },
       }),
     },
     rollingProvisionsUpgrade: {
@@ -629,15 +650,15 @@ export function createRollingUpgradeLoopDef(primaryLoop = {}) {
         required: true,
       },
       ...createProvisionsUpgradePolicy({
-        ratingSbcFill: { priorityPiles: [...ROLLING_RECOVERY_PRIORITY_PILES] },
+        ratingSbcFill: { priorityPiles: [...ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES] },
         requirements: [{
           tier: 'gold',
           count: 4,
           minRating: ROLLING_PROVISIONS_RATING_RANGE.min,
-          maxRating: ROLLING_PROVISIONS_RATING_RANGE.max,
+          maxRating: DEFAULT_ROLLING_PROVISIONS_MAX_RATING,
           playerOnly: true,
           allowSpecial: true,
-          priorityPiles: [...ROLLING_RECOVERY_PRIORITY_PILES],
+          priorityPiles: [...ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES],
         }],
       }),
     },

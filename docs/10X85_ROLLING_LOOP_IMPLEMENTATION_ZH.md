@@ -985,7 +985,7 @@ RL-0 锁定的当前行为和已确认缺口：
 - 完成第 18 节真实页面验收。
 - 记录发现的问题、修复提交和最终版本。
 - 动态扫描成功后将 Rolling Loop 加入可选列表，使用现有启动预检和动态 capability 门禁控制执行安全。
-- Selection Policy UI 按作用域拆分普通 SBC 单卡上限、Rolling/Pick 自动使用上限、主动余量制作、Provisions Reserve 范围、duplicate-reserve 奖励开启时机和 Pick 模式，旧配置 key 保持兼容。`rollingSurplusCraftingEnabled` 默认关闭；`rollingProvisionsMaxRating` 默认 88、仅允许 88/89；`rollingOpenDuplicateProvisionsRewards` 默认关闭。
+- Selection Policy UI 按作用域拆分普通 SBC 单卡上限、Rolling/Pick 自动使用上限、主动余量制作、Provisions Reserve 范围、普通恢复来源顺序、duplicate-reserve 奖励开启时机和 Pick 模式，旧配置 key 保持兼容。`rollingSurplusCraftingEnabled` 默认关闭；`rollingProvisionsMaxRating` 默认 88、允许 88/89/90/91；`rollingRecoveryStorageFirst` 默认关闭，使普通 Provisions 与 Required Special/TOTW 恢复保持 Unassigned-first。待处理 Unassigned 重复卡不受该开关影响并始终 Unassigned-first，Storage pressure 与 maintenance 始终使用专用 Storage-first；`rollingOpenDuplicateProvisionsRewards` 默认关闭。
 
 自动验证结果（2026-08-16）：候选版本 `0.7.94` 完成完整 `npm run verify`；388 个 JavaScript 文件通过语法检查，186 个测试文件、1,251 项测试全部通过，配置/Profile、架构、FSU patch、root/dist userscript 和版本一致性均通过。本轮修复 Runtime Telemetry 阻塞、主包重复 Reserve 的独立 Provisions 路由和 Primary 精确评分放宽。RL-8 仍需完成第 18 节真实页面验收与结果记录。
 

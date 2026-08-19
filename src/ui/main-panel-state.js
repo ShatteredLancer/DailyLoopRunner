@@ -130,12 +130,15 @@ export function renderSelectionPolicySummary(options = {}) {
   const provisionsMaxRating = normalizeRollingProvisionsMaxRating(
     pickOptions.rollingProvisionsMaxRating,
   );
+  const recoveryPileOrder = pickOptions.rollingRecoveryStorageFirst === true
+    ? 'Storage first'
+    : 'Unassigned first';
   const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true
     ? 'immediate'
     : 'on shortage';
   const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
   summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickModeLabel}`;
-  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
+  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; normal recovery order ${recoveryPileOrder}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
 }
 
 export function renderMainPanelScanProgress(options = {}) {

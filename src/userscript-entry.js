@@ -109,9 +109,9 @@ import {
   applyRollingAutomaticUseFodderPolicy,
   bindRollingPlayerPickCapabilities,
   buildRollingStorageSinkCatalog,
-  ROLLING_RECOVERY_PRIORITY_PILES,
   ROLLING_PROVISIONS_RATING_RANGE,
   ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING,
+  resolveRollingRecoveryPriorityPiles,
   resolveRollingAutomaticUseMaxRating,
   resolveRollingProvisionsReserveRatings,
   shouldQueueRollingProvisionsReward,
@@ -8904,7 +8904,7 @@ function updateLoopControls() {
     const storageSink = options.rollingStorageSinkMode === 'selected'
       ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ''}`.trim()
       : options.rollingStorageSinkMode;
-    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
+    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; normal recovery ${options.rollingRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
     renderCurrentSelectionPolicySummary();
     return options;
   }
@@ -15890,12 +15890,17 @@ function updateLoopControls() {
         log(`${loopDef.name}: ${storagePressure ? 'emergency' : duplicateReserve ? 'duplicate-reserve' : 'normal'} Provisions recovery (${context.trigger})`);
         const provisionsMaxRating = rollingProvisionsMaxRating(loopDef);
         log(`${loopDef.name}: Provisions material is restricted to ratings ${ROLLING_PROVISIONS_RATING_RANGE.min}-${provisionsMaxRating}`);
+        const recoveryPriorityPiles = resolveRollingRecoveryPriorityPiles(loopDef, {
+          recoveryMode: storagePressure
+            ? 'storage-pressure'
+            : duplicateReserve ? 'pending-unassigned' : 'normal',
+        });
         const recovery = await submitRollingRequirementRecovery(
           loopDef,
           runtime,
           loopDef.rollingProvisionsUpgrade,
           {
-            priorityPiles: ROLLING_RECOVERY_PRIORITY_PILES,
+            priorityPiles: recoveryPriorityPiles,
             additionalProtected,
             allowProvisionsReserve: true,
             allowSpecial: true,
@@ -15980,7 +15985,7 @@ function updateLoopControls() {
           return submitRollingRatingRecovery(loopDef, runtime, definition, {
             priorityPiles: action === 'craft-with-pending-duplicates'
               ? ['unassigned', 'storage', 'transfer', 'club']
-              : ROLLING_RECOVERY_PRIORITY_PILES,
+              : resolveRollingRecoveryPriorityPiles(loopDef, { recoveryMode: 'storage-pressure' }),
             allowPrimaryDuplicates: true,
             validateSelection: ({ storageItemsConsumed, consumedPrimaryRefs }) => (
               validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed, {
@@ -15990,7 +15995,9 @@ function updateLoopControls() {
           });
         }
         log(`${loopDef.name}: no eligible Required Special or existing TOTW reward; planning one ${definition.name}`);
-        return submitRollingRatingRecovery(loopDef, runtime, definition);
+        return submitRollingRatingRecovery(loopDef, runtime, definition, {
+          priorityPiles: resolveRollingRecoveryPriorityPiles(loopDef, { recoveryMode: 'normal' }),
+        });
       },
       maintainStorage: async () => {
         const ledger = runtime.coordinator?.getLedger?.();
@@ -16651,7 +16658,7 @@ function updateLoopControls() {
         const storageSinkSummary = loopDef.rollingStorageSinkEnabled
           ? `${loopDef.rollingStorageSink?.mode || 'automatic'}/${loopDef.rollingStorageSink?.capability?.setName || 'unavailable'}`
           : 'off';
-        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Storage pressure SBC ${storageSinkSummary}`);
+        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; Provisions reserve 87-${rollingProvisionsMaxRating(loopDef)}; normal recovery ${loopDef.runtimeRecoveryStorageFirst ? 'Storage-first' : 'Unassigned-first'}; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${loopDef.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${loopDef.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Storage pressure SBC ${storageSinkSummary}`);
       } else {
         log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
       }

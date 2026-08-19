@@ -11,6 +11,13 @@
 
 本文档是重构工作的状态来源。实施过程中应更新里程碑状态、验收记录和发现的问题，不在聊天记录或临时日志中维护另一套进度。
 
+当前开发修正：Rolling 普通 Provisions 与 Required Special/TOTW 恢复默认恢复为
+`Unassigned -> Storage -> Transfer -> Club`；Selection Policy 提供可选的
+Storage-first 顺序。待处理 Unassigned 重复卡仍强制 Unassigned-first，Storage
+pressure 与 maintenance 仍使用专用 Storage-first 及净释放校验。Provisions reserve
+上限可选 `88/89/90/91`，默认 `88`，已有较高保存值继续有效。该修正取代下方
+`0.8.20` 发布记录中的全局 Storage-first 和新安装默认 `91` 行为。
+
 `0.8.22` 发布记录：Manual Player Pick 的候选卡不再把姓名、评分、卡色、重复
 状态和价格拼为一段文本。名字与属性各占一行，价格为右侧独立列，长文本截断时
 保留 hover 全文；选择数量、候选排序和手动确认规则保持不变。

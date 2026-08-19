@@ -241,6 +241,13 @@ export function showSelectionPolicySettings(options = {}) {
     [[88, '87-88'], [89, '87-89'], [90, '87-90'], [91, '87-91']],
     mode,
   );
+  const rollingRecoveryStorageFirst = checkbox(
+    dom,
+    'bronze-loop-policy-rolling-recovery-storage-first',
+    'Use Storage first for normal recovery SBCs',
+    pickOptions.rollingRecoveryStorageFirst === true,
+    'Applies to normal Provisions and Required Special/TOTW recovery; pending Unassigned duplicates remain Unassigned-first, while Storage pressure recovery remains Storage-first',
+  );
   const rollingOpenDuplicateProvisionsRewards = checkbox(
     dom,
     'bronze-loop-policy-rolling-open-duplicate-provisions-rewards',
@@ -263,7 +270,8 @@ export function showSelectionPolicySettings(options = {}) {
     sectionTitle(dom, 'Rolling and Player Picks'),
     field(dom, 'Automatic-use max rating', automaticUse, mode, 'Cards at or below this rating may be automatically used; higher cards are protected'),
     sectionTitle(dom, 'Rolling'),
-    field(dom, 'Provisions reserve', rollingProvisionsMaxRating, mode, 'Storage is used first; choose the highest non-required 87+ rating that Provisions may consume'),
+    field(dom, 'Provisions reserve max', rollingProvisionsMaxRating, mode, 'Choose the highest non-required rating reserved for Provisions; 88 means ratings 87-88, while 91 means ratings 87-91'),
+    rollingRecoveryStorageFirst.label,
     field(dom, 'Provisions packs per shortage', rollingShortageProvisionsPackLimit, mode, 'Open at most this many existing Provisions rewards before replanning the primary squad; TOTW rewards remain one at a time'),
     rollingSurplusCrafting.label,
     rollingProvisionsShortageRecovery.label,
@@ -333,6 +341,7 @@ export function showSelectionPolicySettings(options = {}) {
         rollingProvisionsMaxRating,
         pickOptions.rollingProvisionsMaxRating,
       ),
+      rollingRecoveryStorageFirst: rollingRecoveryStorageFirst.input.checked,
       rollingOpenDuplicateProvisionsRewards:
         rollingOpenDuplicateProvisionsRewards.input.checked,
       rollingShortageProvisionsPackLimit: readNumber(
@@ -365,6 +374,7 @@ export function showSelectionPolicySettings(options = {}) {
       automaticUse,
       pickMode,
       rollingProvisionsMaxRating,
+      rollingRecoveryStorageFirst.input,
       rollingShortageProvisionsPackLimit,
       rollingSurplusCrafting.input,
       rollingProvisionsShortageRecovery.input,

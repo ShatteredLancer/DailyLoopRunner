@@ -141,7 +141,9 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Storage pressure SBC off');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
-      .toContain('Provisions reserve 87-91');
+      .toContain('Provisions reserve 87-88');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('normal recovery order Unassigned first');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('shortage Provisions batch 2');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
@@ -164,6 +166,7 @@ describe('main panel state rendering', () => {
         rollingRequiredSpecialRecoveryEnabled: true,
         rollingProtectAllClubNonTotwSpecials: true,
         rollingProvisionsMaxRating: 89,
+        rollingRecoveryStorageFirst: true,
         rollingOpenDuplicateProvisionsRewards: true,
         rollingShortageProvisionsPackLimit: 5,
       },
@@ -172,6 +175,8 @@ describe('main panel state rendering', () => {
       .toBe('Std card <=87 | Auto-use <=94 | Picks Rating first, review protected ties');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Storage pressure SBC automatic');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('normal recovery order Storage first');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('duplicate Provisions rewards immediate');
     expect(controls.get('bronze-loop-selection-policy-summary').title)

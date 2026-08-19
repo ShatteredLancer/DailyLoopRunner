@@ -33,7 +33,8 @@ describe('loop runtime option projection', () => {
       rollingProvisionsShortageRecoveryEnabled: false,
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
-      rollingProvisionsMaxRating: 91,
+      rollingProvisionsMaxRating: 88,
+      rollingRecoveryStorageFirst: false,
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
       protectionRating: 90,
@@ -58,7 +59,8 @@ describe('loop runtime option projection', () => {
       rollingProvisionsShortageRecoveryEnabled: false,
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
-      rollingProvisionsMaxRating: 91,
+      rollingProvisionsMaxRating: 88,
+      rollingRecoveryStorageFirst: false,
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
       protectionRating: 90,
@@ -453,7 +455,10 @@ describe('loop runtime option projection', () => {
       rollingProvisionsMaxRating: 91,
     });
     expect(normalizePickRuntimeOptions({ rollingProvisionsMaxRating: 92 })).toMatchObject({
-      rollingProvisionsMaxRating: 91,
+      rollingProvisionsMaxRating: 88,
+    });
+    expect(normalizePickRuntimeOptions({ rollingRecoveryStorageFirst: true })).toMatchObject({
+      rollingRecoveryStorageFirst: true,
     });
     expect(normalizePickRuntimeOptions({ rollingShortageProvisionsPackLimit: 0 }))
       .toMatchObject({ rollingShortageProvisionsPackLimit: 1 });
@@ -469,12 +474,14 @@ describe('loop runtime option projection', () => {
     applyLoopRuntimeOptions(loopDef, {
       pickOptions: {
         rollingProvisionsMaxRating: 89,
+        rollingRecoveryStorageFirst: true,
         rollingOpenDuplicateProvisionsRewards: true,
         rollingShortageProvisionsPackLimit: 4,
       },
     });
     expect(loopDef).toMatchObject({
       runtimeProvisionsMaxRating: 89,
+      runtimeRecoveryStorageFirst: true,
       rollingOpenDuplicateProvisionsRewards: true,
       rollingShortageProvisionsPackLimit: 4,
       rollingProvisionsUpgrade: { requirements: [{ maxRating: 89 }] },

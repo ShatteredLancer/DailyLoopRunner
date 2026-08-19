@@ -1,6 +1,6 @@
 # 10x85+ Rolling Loop 使用与流程指南
 
-> 适用版本：DailyLoopRunner `v0.8.19`
+> 适用版本：DailyLoopRunner `v0.8.22`
 >
 > 最后更新：2026-08-19
 >
@@ -35,7 +35,8 @@ Loop 不写死当前 Set、Challenge、奖励包 ID、目标评分或阵容人�
 | `SBC completions` | `0` | `0` 表示不限轮数，直到手动停止或触发安全停止；正数表示最多完成多少套主 SBC。 |
 | `Open reward packs` | 选择 Rolling 时默认开启 | 主流程必须开 `10x85+` 奖励；关闭后启动预检会直接拒绝运行。 |
 | `Automatic-use max rating` | `90` | 评分 `<=` 此值的卡可被自动使用；更高评分受保护。它同时用于 Rolling 和 Player Pick。 |
-| `Provisions reserve` | `87-88` | 选择 Provisions 储备范围，可改为 `87-89`；默认关闭余量制作时，这些卡仍可优先回填主阵。 |
+| `Provisions reserve max` | `87-88` | 选择 Provisions 储备范围，可改为 `87-89`、`87-90` 或 `87-91`；默认关闭余量制作时，这些卡仍可优先回填主阵。 |
+| `Use Storage first for normal recovery SBCs` | 关闭 | 关闭时，普通 Provisions 和 Required Special/TOTW 恢复按 `Unassigned -> Storage -> Transfer -> Club` 选材；开启后改为 Storage-first。该选项不覆盖待处理 Unassigned 重复卡、Storage pressure 和 Storage maintenance 的专用顺序。 |
 | `Provisions packs per shortage` | `2` | 一次真实缺料处理中最多打开多少个已有 Provisions 奖励，范围 `1-30`；每批后重新规划。 |
 | `Craft surplus Provisions/TOTW` | 关闭 | 关闭时只在缺料或 Storage 压力下执行恢复 SBC；开启后才主动消耗余量。 |
 | `Protect all Club non-TOTW specials` | 关闭 | 开启后，Rolling 的主阵、Storage pressure SBC 和所有恢复阵都禁止使用 Club 非 TOTW 色卡，即使严重缺料也不放宽；Storage、Transfer 和 Unassigned 色卡仍按原有评分及角色限制可用。 |
@@ -82,13 +83,15 @@ flowchart TD
 
 ### 4.1 来源顺序
 
-主阵和大部分恢复阵遵守以下库存优先级：
+主阵、待处理 Unassigned 重复卡和默认的普通恢复遵守以下库存优先级：
 
 ```text
 Unassigned -> Storage -> Transfer -> Club
 ```
 
-具体恢复流程可以收紧顺序。兼容的 95+ Storage Pick 继续使用原专用策略：89 阵只使用 Unassigned 和 Storage，88 阵才允许最多 3 张 Club。用户显式选择的通用 sink 使用 `Unassigned -> Storage -> Transfer -> Club`，但 Club 每阵仍最多 3 张，并且提交前必须证明实际释放了所需 Storage 空间。
+开启 `Use Storage first for normal recovery SBCs` 后，普通 Provisions 和普通 Required Special/TOTW 恢复改为 `Storage -> Unassigned -> Transfer -> Club`。这个选项只改变同一批合格候选的具体来源，不保证增加 Storage 净空位；受保护的 Unassigned 卡仍会被跳过。
+
+Storage pressure 和 Storage maintenance 不读取该普通恢复选项，它们继续使用各自的强制 Storage-first 与净释放校验。兼容的 95+ Storage Pick 继续使用原专用策略：89 阵只使用 Unassigned 和 Storage，88 阵才允许最多 3 张 Club。用户显式选择的通用 sink 使用 `Unassigned -> Storage -> Transfer -> Club`，但 Club 每阵仍最多 3 张，并且提交前必须证明实际释放了所需 Storage 空间。
 
 ### 4.2 Required Special
 

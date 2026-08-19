@@ -1,7 +1,223 @@
 import { describe, expect, it } from 'vitest';
+import { resolveRollingRecoveryPriorityPiles } from '../../src/config/rolling-upgrade.js';
 import { loadUserscript, makePlayer } from '../helpers/load-userscript.js';
 
 describe('current inventory selection behavior', () => {
+  it('normal recovery order uses Unassigned before Storage when both piles have eligible fodder', async () => {
+    const duplicateTargets = Array.from({ length: 4 }, (_, index) => makePlayer({
+      id: 400 + index,
+      definitionId: 3400 + index,
+      rating: 87,
+      rareflag: 1,
+    }));
+    const unassigned = duplicateTargets.map((target, index) => makePlayer({
+      id: 300 + index,
+      definitionId: target.definitionId,
+      rating: 87,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: target.id,
+    }));
+    const ordinaryStorage = Array.from({ length: 4 }, (_, index) => makePlayer({
+      id: 500 + index,
+      definitionId: 3500 + index,
+      rating: 87,
+      rareflag: 1,
+    }));
+    const storage = [...duplicateTargets, ...ordinaryStorage];
+    const { api } = await loadUserscript({ unassigned, storage });
+    const selection = api.selectInventoryPlayers({
+      requirements: [{
+        tier: 'gold',
+        count: 4,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+        respectFsuGoldRange: false,
+      }],
+      runtimeSbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 88 },
+    }, resolveRollingRecoveryPriorityPiles({ runtimeRecoveryStorageFirst: false }));
+
+    expect(selection.ok).toBe(true);
+    expect(selection.selected.map((item) => item.id)).toEqual([400, 401, 402, 403]);
+    expect(selection.stats).toEqual({ unassigned: 4 });
+    expect(selection.entries.every((entry) => entry.signal)).toBe(true);
+  });
+
+  it('Storage-first recovery order is an explicit opt-in and consumes Storage first', async () => {
+    const duplicateTargets = Array.from({ length: 4 }, (_, index) => makePlayer({
+      id: 600 + index,
+      definitionId: 3600 + index,
+      rating: 87,
+      rareflag: 1,
+    }));
+    const unassigned = duplicateTargets.map((target, index) => makePlayer({
+      id: 550 + index,
+      definitionId: target.definitionId,
+      rating: 87,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: target.id,
+    }));
+    const ordinaryStorage = Array.from({ length: 4 }, (_, index) => makePlayer({
+      id: 500 + index,
+      definitionId: 3500 + index,
+      rating: 87,
+      rareflag: 1,
+    }));
+    const storage = [...ordinaryStorage, ...duplicateTargets];
+    const { api } = await loadUserscript({ unassigned, storage });
+    const selection = api.selectInventoryPlayers({
+      requirements: [{
+        tier: 'gold',
+        count: 4,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+        respectFsuGoldRange: false,
+      }],
+      runtimeSbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 88 },
+    }, resolveRollingRecoveryPriorityPiles({ runtimeRecoveryStorageFirst: true }));
+
+    expect(selection.ok).toBe(true);
+    expect(selection.selected.map((item) => item.id)).toEqual([500, 501, 502, 503]);
+    expect(selection.stats).toEqual({ storage: 4 });
+    expect(selection.entries.every((entry) => !entry.signal)).toBe(true);
+  });
+
+  it.each([false, true])(
+    'skips protected high-rated Unassigned material with Storage-first=%s',
+    async (runtimeRecoveryStorageFirst) => {
+      const protectedTargets = Array.from({ length: 4 }, (_, index) => makePlayer({
+        id: 750 + index,
+        definitionId: 3750 + index,
+        rating: 96,
+        rareflag: 2,
+      }));
+      const unassigned = protectedTargets.map((target, index) => makePlayer({
+        id: 700 + index,
+        definitionId: target.definitionId,
+        rating: 96,
+        rareflag: 2,
+        duplicate: true,
+        duplicateId: target.id,
+      }));
+      const eligibleStorage = Array.from({ length: 4 }, (_, index) => makePlayer({
+        id: 800 + index,
+        definitionId: 3800 + index,
+        rating: 87,
+        rareflag: 1,
+      }));
+      const storage = [...protectedTargets, ...eligibleStorage];
+      const { api } = await loadUserscript({ unassigned, storage });
+      const selection = api.selectInventoryPlayers({
+        requirements: [{
+          tier: 'gold',
+          count: 4,
+          minRating: 87,
+          maxRating: 88,
+          playerOnly: true,
+          allowSpecial: true,
+          respectFsuGoldRange: false,
+        }],
+        runtimeSbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 88 },
+      }, resolveRollingRecoveryPriorityPiles({ runtimeRecoveryStorageFirst }));
+
+      expect(selection.ok).toBe(true);
+      expect(selection.selected.map((item) => item.id)).toEqual([800, 801, 802, 803]);
+      expect(selection.stats).toEqual({ storage: 4 });
+    },
+  );
+
+  it('normal recovery consumes two Unassigned duplicate signals before taking two more Storage cards', async () => {
+    const duplicateTargets = Array.from({ length: 2 }, (_, index) => makePlayer({
+      id: 900 + index,
+      definitionId: 3900 + index,
+      rating: 87,
+      rareflag: 1,
+    }));
+    const unassigned = duplicateTargets.map((target, index) => makePlayer({
+      id: 850 + index,
+      definitionId: target.definitionId,
+      rating: 87,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: target.id,
+    }));
+    const ordinaryStorage = Array.from({ length: 4 }, (_, index) => makePlayer({
+      id: 950 + index,
+      definitionId: 3950 + index,
+      rating: 87,
+      rareflag: 1,
+    }));
+    const { api } = await loadUserscript({
+      unassigned,
+      storage: [...ordinaryStorage, ...duplicateTargets],
+    });
+    const selection = api.selectInventoryPlayers({
+      requirements: [{
+        tier: 'gold',
+        count: 4,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+        respectFsuGoldRange: false,
+      }],
+      runtimeSbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 88 },
+    }, resolveRollingRecoveryPriorityPiles({ runtimeRecoveryStorageFirst: false }));
+
+    expect(selection.ok).toBe(true);
+    expect(selection.selected.map((item) => item.id)).toEqual([900, 901, 950, 951]);
+    expect(selection.stats).toEqual({ unassigned: 2, storage: 2 });
+  });
+
+  it('Storage-first recovery bypasses two eligible Unassigned signals when Storage can fill the squad', async () => {
+    const duplicateTargets = Array.from({ length: 2 }, (_, index) => makePlayer({
+      id: 1100 + index,
+      definitionId: 4100 + index,
+      rating: 87,
+      rareflag: 1,
+    }));
+    const unassigned = duplicateTargets.map((target, index) => makePlayer({
+      id: 1050 + index,
+      definitionId: target.definitionId,
+      rating: 87,
+      rareflag: 1,
+      duplicate: true,
+      duplicateId: target.id,
+    }));
+    const ordinaryStorage = Array.from({ length: 4 }, (_, index) => makePlayer({
+      id: 1150 + index,
+      definitionId: 4150 + index,
+      rating: 87,
+      rareflag: 1,
+    }));
+    const { api } = await loadUserscript({
+      unassigned,
+      storage: [...ordinaryStorage, ...duplicateTargets],
+    });
+    const selection = api.selectInventoryPlayers({
+      requirements: [{
+        tier: 'gold',
+        count: 4,
+        minRating: 87,
+        maxRating: 88,
+        playerOnly: true,
+        allowSpecial: true,
+        respectFsuGoldRange: false,
+      }],
+      runtimeSbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 88 },
+    }, resolveRollingRecoveryPriorityPiles({ runtimeRecoveryStorageFirst: true }));
+
+    expect(selection.ok).toBe(true);
+    expect(selection.selected.map((item) => item.id)).toEqual([1100, 1101, 1150, 1151]);
+    expect(selection.stats).toEqual({ storage: 4 });
+    expect(selection.entries.every((entry) => !entry.signal)).toBe(true);
+  });
+
   it('selects the exact common/rare ratio instead of filling common slots with rares', async () => {
     const storage = [
       makePlayer({ id: 1, rating: 75, rareflag: 1 }),

@@ -18,7 +18,10 @@ describe('Rolling runtime recovery helpers', () => {
 
   it('does not treat configured Provisions reserve ratings as Rare Gold Pick triggers', async () => {
     const { api } = await loadUserscript();
-    const permissiveRolling = { runtimePickOptions: { protectionRating: 97 } };
+    const permissiveRolling = {
+      runtimeProvisionsMaxRating: 91,
+      runtimePickOptions: { protectionRating: 97 },
+    };
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 86, rating: 86, rareflag: 1, duplicate: true }), {})).toBe(true);
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 87, rating: 87, rareflag: 1, duplicate: true }), permissiveRolling)).toBe(false);
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 88, rating: 88, rareflag: 1, duplicate: true }), permissiveRolling)).toBe(false);
@@ -26,6 +29,10 @@ describe('Rolling runtime recovery helpers', () => {
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 90, rating: 90, rareflag: 1, duplicate: true }), permissiveRolling)).toBe(false);
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 91, rating: 91, rareflag: 1, duplicate: true }), permissiveRolling)).toBe(false);
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 92, rating: 92, rareflag: 1, duplicate: true }), permissiveRolling)).toBe(true);
+    expect(api.rollingOrdinaryGoldDuplicate(
+      makePlayer({ id: 189, rating: 89, rareflag: 1, duplicate: true }),
+      { runtimePickOptions: { protectionRating: 97 } },
+    )).toBe(true);
     expect(api.rollingOrdinaryGoldDuplicate(
       makePlayer({ id: 190, rating: 90, rareflag: 1, duplicate: true }),
       { runtimeProvisionsMaxRating: 89, runtimePickOptions: { protectionRating: 97 } },

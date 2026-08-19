@@ -101,6 +101,11 @@ function pickOptionOverrides(input = {}) {
     input.rollingProvisionsMaxRating,
   );
   assign(
+    'rollingRecoveryStorageFirst',
+    nested.rollingRecoveryStorageFirst,
+    input.rollingRecoveryStorageFirst,
+  );
+  assign(
     'rollingOpenDuplicateProvisionsRewards',
     nested.rollingOpenDuplicateProvisionsRewards,
     input.rollingOpenDuplicateProvisionsRewards,
@@ -161,6 +166,7 @@ export function normalizePickRuntimeOptions(input = {}) {
     rollingProvisionsMaxRating: normalizeRollingProvisionsMaxRating(
       input.rollingProvisionsMaxRating,
     ),
+    rollingRecoveryStorageFirst: input.rollingRecoveryStorageFirst === true,
     rollingOpenDuplicateProvisionsRewards:
       input.rollingOpenDuplicateProvisionsRewards === true,
     rollingShortageProvisionsPackLimit: normalizeRollingShortageProvisionsPackLimit(
@@ -363,6 +369,7 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
     loopDef.rollingProtectAllClubNonTotwSpecials =
       resolvedPickOptions.rollingProtectAllClubNonTotwSpecials;
     loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;
+    loopDef.runtimeRecoveryStorageFirst = resolvedPickOptions.rollingRecoveryStorageFirst;
     loopDef.rollingOpenDuplicateProvisionsRewards =
       resolvedPickOptions.rollingOpenDuplicateProvisionsRewards;
     loopDef.rollingShortageProvisionsPackLimit =

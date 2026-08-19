@@ -7,6 +7,12 @@ All notable user-facing changes are documented here. This project follows
 
 ### Fixed
 
+- Normal Rolling Provisions and Required Special/TOTW recovery is Unassigned-
+  first again by default. Selection Policy now exposes an opt-in Storage-first
+  order; pending Unassigned duplicates stay Unassigned-first, while explicit
+  Storage-pressure and maintenance recovery stays Storage-first.
+- Provisions reserve max is now an explicit `87-88` through `87-91` selector.
+  `87-88` is the default, while saved higher limits remain effective.
 - Manual Player Pick candidates now render a dedicated player-name line and a
   secondary metadata line, while the resolved price stays in a fixed right-hand
   column. Long names or tags no longer hide the price needed for manual picks.

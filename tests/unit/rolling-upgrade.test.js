@@ -12,7 +12,9 @@ import {
   resolveRollingStorageSinkPickCapability,
   resolveRollingStorageSinkCapability,
   resolveRollingAutomaticUseMaxRating,
-  ROLLING_RECOVERY_PRIORITY_PILES,
+  ROLLING_STORAGE_FIRST_RECOVERY_PILES,
+  ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES,
+  resolveRollingRecoveryPriorityPiles,
   shouldQueueRollingProvisionsReward,
 } from '../../src/config/rolling-upgrade.js';
 import {
@@ -173,10 +175,19 @@ function storageSinkPlayerSet(overrides = {}) {
 }
 
 describe('Rolling Upgrade configuration contracts', () => {
-  it('uses eligible SBC Storage cards before every other pile for rolling recovery SBCs', () => {
-    expect(ROLLING_RECOVERY_PRIORITY_PILES).toEqual([
-      'storage', 'unassigned', 'transfer', 'club',
+  it('keeps normal recovery Unassigned-first unless Storage-first is enabled', () => {
+    expect(ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES).toEqual([
+      'unassigned', 'storage', 'transfer', 'club',
     ]);
+    expect(resolveRollingRecoveryPriorityPiles({})).toEqual(ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES);
+    expect(resolveRollingRecoveryPriorityPiles({ runtimeRecoveryStorageFirst: true }))
+      .toEqual(ROLLING_STORAGE_FIRST_RECOVERY_PILES);
+    expect(resolveRollingRecoveryPriorityPiles({}, { recoveryMode: 'storage-pressure' }))
+      .toEqual(ROLLING_STORAGE_FIRST_RECOVERY_PILES);
+    expect(resolveRollingRecoveryPriorityPiles({ runtimeRecoveryStorageFirst: true }, { recoveryMode: 'pending-unassigned' }))
+      .toEqual(ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES);
+    expect(resolveRollingRecoveryPriorityPiles({}, { recoveryMode: 'pending-unassigned' }))
+      .toEqual(ROLLING_UNASSIGNED_FIRST_RECOVERY_PILES);
   });
 
   it('uses the shared automatic-use rating for Rolling instead of the standard Rating SBC cap', () => {
@@ -218,7 +229,7 @@ describe('Rolling Upgrade configuration contracts', () => {
         sbcSetIds: [20841],
         dynamicSbcFamily: 'totw-upgrade',
         ratingSbcFill: {
-          priorityPiles: ['storage', 'unassigned', 'transfer', 'club'],
+          priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
         },
       },
       rollingProvisionsUpgrade: {
@@ -226,9 +237,9 @@ describe('Rolling Upgrade configuration contracts', () => {
         sbcSetIds: [20987],
         dynamicSbcFamily: 'provisions-upgrade',
         ratingSbcFill: {
-          priorityPiles: ['storage', 'unassigned', 'transfer', 'club'],
+          priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
         },
-        requirements: [expect.objectContaining({ minRating: 87, maxRating: 91, count: 4 })],
+        requirements: [expect.objectContaining({ minRating: 87, maxRating: 88, count: 4 })],
       },
       rollingPlayerPick: {
         status: 'resolved',

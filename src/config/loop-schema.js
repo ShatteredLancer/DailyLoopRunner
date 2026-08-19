@@ -332,13 +332,14 @@ function validatePickOptions(value, path, errors) {
     'rollingRequiredSpecialRecoveryEnabled',
     'rollingProtectAllClubNonTotwSpecials',
     'rollingProvisionsMaxRating',
+    'rollingRecoveryStorageFirst',
     'rollingOpenDuplicateProvisionsRewards',
     'rollingShortageProvisionsPackLimit',
   ]);
   Object.keys(value).forEach((field) => {
     if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
   });
-  ['protectHighGold', 'autoSelect', 'autoSelectBelow90', 'openAtEnd', 'openPicksAtEnd', 'preferScannedMetadata', 'rollingStorageSinkEnabled', 'rollingSurplusCraftingEnabled', 'rollingProvisionsShortageRecoveryEnabled', 'rollingRequiredSpecialRecoveryEnabled', 'rollingProtectAllClubNonTotwSpecials', 'rollingOpenDuplicateProvisionsRewards']
+  ['protectHighGold', 'autoSelect', 'autoSelectBelow90', 'openAtEnd', 'openPicksAtEnd', 'preferScannedMetadata', 'rollingStorageSinkEnabled', 'rollingSurplusCraftingEnabled', 'rollingProvisionsShortageRecoveryEnabled', 'rollingRequiredSpecialRecoveryEnabled', 'rollingProtectAllClubNonTotwSpecials', 'rollingRecoveryStorageFirst', 'rollingOpenDuplicateProvisionsRewards']
     .forEach((field) => {
       if (value[field] !== undefined && typeof value[field] !== 'boolean') {
         errors.push(`${path}.${field} must be boolean`);
