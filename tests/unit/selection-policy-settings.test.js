@@ -52,6 +52,8 @@ describe('selection policy settings modal', () => {
         openPicksAtEnd: false,
         rollingStorageSinkEnabled: false,
         rollingSurplusCraftingEnabled: false,
+        rollingProvisionsShortageRecoveryEnabled: false,
+        rollingRequiredSpecialRecoveryEnabled: false,
         rollingProtectAllClubNonTotwSpecials: false,
         rollingProvisionsMaxRating: 88,
         rollingOpenDuplicateProvisionsRewards: false,
@@ -71,6 +73,8 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink-set').value).toBe('20995');
     expect(ui.byId.get('#bronze-loop-policy-rolling-surplus-crafting').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');
@@ -83,6 +87,8 @@ describe('selection policy settings modal', () => {
     ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value = 'selected';
     ui.byId.get('#bronze-loop-policy-rolling-storage-sink-set').value = '20994';
     ui.byId.get('#bronze-loop-policy-rolling-surplus-crafting').checked = true;
+    ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked = true;
+    ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked = true;
     ui.byId.get('#bronze-loop-policy-pick-open-at-end').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value = '89';
@@ -101,6 +107,8 @@ describe('selection policy settings modal', () => {
         rollingStorageSinkSetId: 20994,
         rollingStorageSinkSetName: '94 Rated Campaign Player',
         rollingSurplusCraftingEnabled: true,
+        rollingProvisionsShortageRecoveryEnabled: true,
+        rollingRequiredSpecialRecoveryEnabled: true,
         rollingProtectAllClubNonTotwSpecials: true,
         rollingProvisionsMaxRating: 89,
         rollingOpenDuplicateProvisionsRewards: true,
@@ -125,6 +133,8 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-pick-mode').dataset.value).toBe('review-protected');
     expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-surplus-crafting').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');

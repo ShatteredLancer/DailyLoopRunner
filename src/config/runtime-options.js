@@ -70,6 +70,16 @@ function pickOptionOverrides(input = {}) {
     input.rollingSurplusCraftingEnabled,
   );
   assign(
+    'rollingProvisionsShortageRecoveryEnabled',
+    nested.rollingProvisionsShortageRecoveryEnabled,
+    input.rollingProvisionsShortageRecoveryEnabled,
+  );
+  assign(
+    'rollingRequiredSpecialRecoveryEnabled',
+    nested.rollingRequiredSpecialRecoveryEnabled,
+    input.rollingRequiredSpecialRecoveryEnabled,
+  );
+  assign(
     'rollingProtectAllClubNonTotwSpecials',
     nested.rollingProtectAllClubNonTotwSpecials,
     input.rollingProtectAllClubNonTotwSpecials,
@@ -126,6 +136,10 @@ export function normalizePickRuntimeOptions(input = {}) {
       ? String(input.rollingStorageSinkSetName || '').trim()
       : '',
     rollingSurplusCraftingEnabled: input.rollingSurplusCraftingEnabled === true,
+    rollingProvisionsShortageRecoveryEnabled:
+      input.rollingProvisionsShortageRecoveryEnabled === true,
+    rollingRequiredSpecialRecoveryEnabled:
+      input.rollingRequiredSpecialRecoveryEnabled === true,
     rollingProtectAllClubNonTotwSpecials:
       input.rollingProtectAllClubNonTotwSpecials === true,
     rollingProvisionsMaxRating: normalizeRollingProvisionsMaxRating(
@@ -325,6 +339,10 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
     loopDef.rollingStorageSinkMode = resolvedPickOptions.rollingStorageSinkMode;
     loopDef.rollingStorageSinkSetId = resolvedPickOptions.rollingStorageSinkSetId;
     loopDef.rollingSurplusCraftingEnabled = resolvedPickOptions.rollingSurplusCraftingEnabled;
+    loopDef.rollingProvisionsShortageRecoveryEnabled =
+      resolvedPickOptions.rollingProvisionsShortageRecoveryEnabled;
+    loopDef.rollingRequiredSpecialRecoveryEnabled =
+      resolvedPickOptions.rollingRequiredSpecialRecoveryEnabled;
     loopDef.rollingProtectAllClubNonTotwSpecials =
       resolvedPickOptions.rollingProtectAllClubNonTotwSpecials;
     loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;

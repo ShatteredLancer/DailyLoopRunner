@@ -31,6 +31,8 @@ function harness(overrides = {}) {
   let packNo = 0;
   return {
     maxCompletions: 1,
+    provisionsShortageRecoveryEnabled: true,
+    requiredSpecialRecoveryEnabled: true,
     preflight: vi.fn(async () => ({ status: 'ready' })),
     initializeInventory: vi.fn(async () => ({ status: 'ready' })),
     findPrimaryPack: vi.fn(async () => ({ id: ++packNo, name: '10x85+' })),
@@ -51,6 +53,46 @@ function harness(overrides = {}) {
 }
 
 describe('10x85+ Rolling workflow', () => {
+  it('does not invoke Provisions shortage recovery without explicit permission', async () => {
+    const recoverProvisions = vi.fn(async () => ({ status: 'submitted' }));
+    const options = harness({
+      provisionsShortageRecoveryEnabled: false,
+      findPrimaryPack: vi.fn(async () => null),
+      planPrimarySquad: vi.fn(async () => ({
+        ok: false,
+        missing: { code: 'PLAYER_COUNT_SHORTAGE' },
+      })),
+      recoverProvisions,
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'blocked',
+      reason: 'Provisions shortage recovery is disabled in Settings',
+      reasonCode: 'PROVISIONS_SHORTAGE_RECOVERY_DISABLED',
+    });
+    expect(recoverProvisions).not.toHaveBeenCalled();
+  });
+
+  it('does not invoke Required Special recovery without explicit permission', async () => {
+    const recoverRequiredSpecial = vi.fn(async () => ({ status: 'submitted' }));
+    const options = harness({
+      requiredSpecialRecoveryEnabled: false,
+      findPrimaryPack: vi.fn(async () => null),
+      planPrimarySquad: vi.fn(async () => ({
+        ok: false,
+        missing: { code: 'REQUIRED_SPECIAL_SHORTAGE' },
+      })),
+      recoverRequiredSpecial,
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'blocked',
+      reason: 'Required Special/TOTW recovery is disabled in Settings',
+      reasonCode: 'REQUIRED_SPECIAL_RECOVERY_DISABLED',
+    });
+    expect(recoverRequiredSpecial).not.toHaveBeenCalled();
+  });
+
   it('opens an existing reward, classifies it, routes protected cards, and submits once', async () => {
     const options = harness();
     const result = await runRollingUpgradeWorkflow(options);
@@ -1039,6 +1081,63 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.recoverProvisions).toHaveBeenCalledOnce();
     expect(options.recoverStorageSink).toHaveBeenCalledOnce();
     expect(options.resolveProtectedStorage).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips Provisions and uses an explicitly enabled Storage sink when shortage recovery is off', async () => {
+    let inventoryVersion = 1;
+    let storageReady = false;
+    const recoverProvisions = vi.fn(async () => ({ status: 'submitted' }));
+    const options = harness({
+      provisionsShortageRecoveryEnabled: false,
+      storageSinkEnabled: true,
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      resolveProtectedStorage: vi.fn(async () => storageReady
+        ? { status: 'ready' }
+        : { status: 'blocked', reasonCode: 'PROTECTED_STORAGE_BLOCKED' }),
+      recoverProvisions,
+      recoverStorageSink: vi.fn(async ({ context }) => {
+        expect(context.trigger).toBe('storage-pressure');
+        expect(context.provisions).toMatchObject({
+          status: 'skipped',
+          reasonCode: 'PROVISIONS_SHORTAGE_RECOVERY_DISABLED',
+        });
+        storageReady = true;
+        inventoryVersion++;
+        return { status: 'selected' };
+      }),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'completed',
+      recoveries: { provisions: 0, storageSink: 1 },
+    });
+    expect(recoverProvisions).not.toHaveBeenCalled();
+    expect(options.recoverStorageSink).toHaveBeenCalledOnce();
+  });
+
+  it('does not auto-craft a Storage sink Required Special when its permission is off', async () => {
+    const recoverRequiredSpecial = vi.fn(async () => ({ status: 'submitted' }));
+    const options = harness({
+      requiredSpecialRecoveryEnabled: false,
+      storageSinkEnabled: true,
+      resolveProtectedStorage: vi.fn(async () => ({
+        status: 'blocked',
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      })),
+      recoverProvisions: vi.fn(async () => ({ status: 'unavailable' })),
+      recoverStorageSink: vi.fn(async () => ({
+        status: 'unavailable',
+        reasonCode: 'REQUIRED_SPECIAL_SHORTAGE',
+      })),
+      recoverRequiredSpecial,
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'blocked',
+      reason: 'Required Special/TOTW recovery is disabled in Settings',
+      reasonCode: 'REQUIRED_SPECIAL_RECOVERY_DISABLED',
+    });
+    expect(recoverRequiredSpecial).not.toHaveBeenCalled();
   });
 
   it('recovers a Required Special dependency before retrying a blocked Storage sink', async () => {

@@ -3,6 +3,26 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.14] - 2026-08-19
+
+### Added
+
+- Added independent, default-off permissions for Provisions shortage recovery
+  and Required Special/TOTW recovery. Rolling now enters either recovery SBC
+  only after its matching Settings checkbox is explicitly enabled.
+
+### Changed
+
+- Kept `Craft surplus Provisions/TOTW` scoped to proactive post-primary
+  crafting; disabling it no longer implies that shortage recovery is allowed.
+- Added policy summaries and stop reasons that distinguish a genuine Required
+  Special shortage from disabled recovery permission.
+
+### Safety
+
+- Added final-squad regression coverage for FSU-locked, evolved, and
+  Academy-enrolled players so each remains blocked before submission.
+
 ## [0.8.13] - 2026-08-19
 
 ### Fixed

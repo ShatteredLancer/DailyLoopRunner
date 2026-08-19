@@ -123,6 +123,8 @@ export async function runRollingUpgradeWorkflow(options = {}) {
   const maxReceipts = boundedPositive(options.maxReceipts, DEFAULT_MAX_RECEIPTS, 1000);
   const retainReceipts = options.retainReceipts !== false;
   const surplusCraftingEnabled = options.surplusCraftingEnabled === true;
+  const provisionsShortageRecoveryEnabled = options.provisionsShortageRecoveryEnabled === true;
+  const requiredSpecialRecoveryEnabled = options.requiredSpecialRecoveryEnabled === true;
   const shortageProvisionsPackLimit = boundedPositive(
     options.shortageProvisionsPackLimit,
     DEFAULT_SHORTAGE_PROVISIONS_PACK_LIMIT,
@@ -265,6 +267,40 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     return value;
   }
 
+  function disabledRecovery(reason, reasonCodeValue) {
+    return {
+      status: 'skipped',
+      reason,
+      reasonCode: reasonCodeValue,
+    };
+  }
+
+  async function recoverProvisions(context = {}) {
+    const proactiveDuplicateReserve = context.trigger === 'duplicate-reserve';
+    if (!proactiveDuplicateReserve && !provisionsShortageRecoveryEnabled) {
+      return disabledRecovery(
+        'Provisions shortage recovery is disabled in Settings',
+        'PROVISIONS_SHORTAGE_RECOVERY_DISABLED',
+      );
+    }
+    return runRecovery(
+      'provisions',
+      ROLLING_UPGRADE_PHASES.RECOVER_PROVISIONS,
+      options.recoverProvisions,
+      context,
+    );
+  }
+
+  function requiredSpecialRecoveryDisabled() {
+    return {
+      ...disabledRecovery(
+        'Required Special/TOTW recovery is disabled in Settings',
+        'REQUIRED_SPECIAL_RECOVERY_DISABLED',
+      ),
+      status: 'blocked',
+    };
+  }
+
   async function recoverStorageSink(context = {}) {
     const storageSink = await runRecovery(
       'storageSink',
@@ -275,6 +311,8 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     if (isProgressed(storageSink) || reasonCode(storageSink) !== 'REQUIRED_SPECIAL_SHORTAGE') {
       return storageSink;
     }
+
+    if (!requiredSpecialRecoveryEnabled) return requiredSpecialRecoveryDisabled();
 
     const requiredSpecial = await runRecovery(
       'requiredSpecial',
@@ -487,12 +525,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
             storageCode,
           );
         }
-        const provisions = await runRecovery(
-          'provisions',
-          ROLLING_UPGRADE_PHASES.RECOVER_PROVISIONS,
-          options.recoverProvisions,
-          { trigger: 'storage-pressure', storage },
-        );
+        const provisions = await recoverProvisions({ trigger: 'storage-pressure', storage });
         if (isProgressed(provisions)) continue;
         if (isStopped(provisions) || provisions?.status === 'planned'
           || ['blocked', 'failed'].includes(String(provisions?.status || ''))) {
@@ -533,12 +566,10 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           iteration: result.iterations,
         }) || {};
         if (Number(recoveryState.duplicateProvisionBatches || 0) > 0) {
-          const duplicateProvision = await runRecovery(
-            'provisions',
-            ROLLING_UPGRADE_PHASES.RECOVER_PROVISIONS,
-            options.recoverProvisions,
-            { trigger: 'duplicate-reserve', recoveryState },
-          );
+          const duplicateProvision = await recoverProvisions({
+            trigger: 'duplicate-reserve',
+            recoveryState,
+          });
           if (isProgressed(duplicateProvision)) continue;
           return finishRecoveryFailure(
             duplicateProvision,
@@ -646,6 +677,14 @@ export async function runRollingUpgradeWorkflow(options = {}) {
 
       const planCode = reasonCode(planned) || 'PRIMARY_SQUAD_INFEASIBLE';
       if (planCode === 'REQUIRED_SPECIAL_SHORTAGE') {
+        if (!requiredSpecialRecoveryEnabled) {
+          return finish(
+            'blocked',
+            requiredSpecialRecoveryDisabled(),
+            'Required Special/TOTW recovery is disabled in Settings',
+            'REQUIRED_SPECIAL_RECOVERY_DISABLED',
+          );
+        }
         const recovery = await runRecovery(
           'requiredSpecial',
           ROLLING_UPGRADE_PHASES.RECOVER_REQUIRED_SPECIAL,
@@ -666,12 +705,11 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           return finish('blocked', planned, 'primary squad is infeasible', planCode);
         }
         if (recovery?.recoverableByProvisions === true) {
-          const provisions = await runRecovery(
-            'provisions',
-            ROLLING_UPGRADE_PHASES.RECOVER_PROVISIONS,
-            options.recoverProvisions,
-            { trigger: 'required-special-fodder-shortage', plan: planned, dependency: recovery },
-          );
+          const provisions = await recoverProvisions({
+            trigger: 'required-special-fodder-shortage',
+            plan: planned,
+            dependency: recovery,
+          });
           if (isProgressed(provisions)) continue;
           return finishRecoveryFailure(
             provisions,
@@ -687,12 +725,10 @@ export async function runRollingUpgradeWorkflow(options = {}) {
       }
 
       if (planCode === 'PROTECTED_STORAGE_BLOCKED') {
-        const provisions = await runRecovery(
-          'provisions',
-          ROLLING_UPGRADE_PHASES.RECOVER_PROVISIONS,
-          options.recoverProvisions,
-          { trigger: 'storage-pressure', storage: planned },
-        );
+        const provisions = await recoverProvisions({
+          trigger: 'storage-pressure',
+          storage: planned,
+        });
         if (isProgressed(provisions)) continue;
         if (isStopped(provisions) || provisions?.status === 'planned'
           || ['blocked', 'failed'].includes(String(provisions?.status || ''))) {
@@ -729,14 +765,20 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           shortageProvisionsPacksOpened = 0;
           continue;
         }
-        const recovery = await runRecovery(
-          'provisions',
-          ROLLING_UPGRADE_PHASES.RECOVER_PROVISIONS,
-          options.recoverProvisions,
-          { trigger: 'primary-fodder-shortage', plan: planned },
-        );
+        const recovery = await recoverProvisions({
+          trigger: 'primary-fodder-shortage',
+          plan: planned,
+        });
         if (isProgressed(recovery)) continue;
         if (recovery?.status === 'skipped') {
+          if (reasonCode(recovery) === 'PROVISIONS_SHORTAGE_RECOVERY_DISABLED') {
+            return finish(
+              'blocked',
+              recovery,
+              'Provisions shortage recovery is disabled in Settings',
+              'PROVISIONS_SHORTAGE_RECOVERY_DISABLED',
+            );
+          }
           return finish('blocked', planned, 'primary squad is infeasible', planCode);
         }
         return finishRecoveryFailure(

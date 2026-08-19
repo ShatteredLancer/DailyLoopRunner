@@ -145,7 +145,11 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('shortage Provisions batch 2');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
-      .toContain('surplus Provisions/TOTW shortage only');
+      .toContain('surplus Provisions/TOTW off');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Provisions shortage recovery off');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Required Special/TOTW recovery off');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Club non-TOTW specials fallback allowed');
     renderSelectionPolicySummary({
@@ -156,6 +160,8 @@ describe('main panel state rendering', () => {
         autoSelectBelow90: false,
         rollingStorageSinkEnabled: true,
         rollingSurplusCraftingEnabled: true,
+        rollingProvisionsShortageRecoveryEnabled: true,
+        rollingRequiredSpecialRecoveryEnabled: true,
         rollingProtectAllClubNonTotwSpecials: true,
         rollingProvisionsMaxRating: 89,
         rollingOpenDuplicateProvisionsRewards: true,
@@ -172,6 +178,10 @@ describe('main panel state rendering', () => {
       .toContain('shortage Provisions batch 5');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('surplus Provisions/TOTW enabled');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Provisions shortage recovery allowed');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Required Special/TOTW recovery allowed');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Club non-TOTW specials protected');
   });

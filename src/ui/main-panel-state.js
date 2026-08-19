@@ -108,7 +108,13 @@ export function renderSelectionPolicySummary(options = {}) {
     : pickOptions.rollingStorageSinkMode === 'automatic' || pickOptions.rollingStorageSinkEnabled === true
       ? 'automatic'
       : 'off';
-  const surplusCrafting = pickOptions.rollingSurplusCraftingEnabled === true ? 'enabled' : 'shortage only';
+  const surplusCrafting = pickOptions.rollingSurplusCraftingEnabled === true ? 'enabled' : 'off';
+  const provisionsShortageRecovery = pickOptions.rollingProvisionsShortageRecoveryEnabled === true
+    ? 'allowed'
+    : 'off';
+  const requiredSpecialRecovery = pickOptions.rollingRequiredSpecialRecoveryEnabled === true
+    ? 'allowed'
+    : 'off';
   const clubSpecialProtection = pickOptions.rollingProtectAllClubNonTotwSpecials === true
     ? 'protected'
     : 'fallback allowed';
@@ -118,7 +124,7 @@ export function renderSelectionPolicySummary(options = {}) {
     : 'on shortage';
   const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
   summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickMode}`;
-  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
+  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
 }
 
 export function renderMainPanelScanProgress(options = {}) {

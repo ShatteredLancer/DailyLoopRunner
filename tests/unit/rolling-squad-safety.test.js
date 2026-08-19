@@ -2,6 +2,37 @@ import { describe, expect, it } from 'vitest';
 import { loadUserscript, makePlayer } from '../helpers/load-userscript.js';
 
 describe('Rolling squad safety inspection', () => {
+  it('blocks FSU-locked, evolved, and Academy-enrolled cards at final squad inspection', async () => {
+    const locked = makePlayer({ id: 1, definitionId: 1001, rating: 84, rareflag: 1 });
+    const evolved = makePlayer({
+      id: 2,
+      definitionId: 1002,
+      rating: 84,
+      rareflag: 1,
+      evolutionId: 42,
+    });
+    const academy = makePlayer({ id: 3, definitionId: 1003, rating: 84, rareflag: 1 });
+    academy.isEnrolledInAcademy = () => true;
+    const { api } = await loadUserscript();
+    api.setFsuSettingsOverride({
+      excludeEvolution: true,
+      lockedItemIds: [locked.id],
+      lockedDefinitionIds: [],
+    });
+
+    const inspection = api.inspectSbcItems({
+      name: 'Rolling final safety',
+      expectedPlayerCount: 3,
+      blockSpecial: false,
+    }, [locked, evolved, academy], { expectedPlayerCount: 3 });
+
+    expect(inspection.blocked).toEqual(expect.arrayContaining([
+      expect.objectContaining({ item: locked, reasons: expect.arrayContaining(['fsu-locked-player']) }),
+      expect.objectContaining({ item: evolved, reasons: expect.arrayContaining(['fsu-exclude-evolution']) }),
+      expect.objectContaining({ item: academy, reasons: expect.arrayContaining(['academy']) }),
+    ]));
+  });
+
   it('keeps submit inspection consistent when a generic policy explicitly requires a reserve-rated item', async () => {
     const requiredReserve = makePlayer({ id: 101, definitionId: 1001, rating: 89, rareflag: 1 });
     const ordinaryReserve = makePlayer({ id: 102, definitionId: 1002, rating: 87, rareflag: 1 });

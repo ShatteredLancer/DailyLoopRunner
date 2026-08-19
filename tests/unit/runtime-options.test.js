@@ -29,6 +29,8 @@ describe('loop runtime option projection', () => {
       rollingStorageSinkSetId: null,
       rollingStorageSinkSetName: '',
       rollingSurplusCraftingEnabled: false,
+      rollingProvisionsShortageRecoveryEnabled: false,
+      rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
       rollingProvisionsMaxRating: 88,
       rollingOpenDuplicateProvisionsRewards: false,
@@ -51,6 +53,8 @@ describe('loop runtime option projection', () => {
       rollingStorageSinkSetId: null,
       rollingStorageSinkSetName: '',
       rollingSurplusCraftingEnabled: false,
+      rollingProvisionsShortageRecoveryEnabled: false,
+      rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
       rollingProvisionsMaxRating: 88,
       rollingOpenDuplicateProvisionsRewards: false,
@@ -356,6 +360,44 @@ describe('loop runtime option projection', () => {
     expect(enabled).toMatchObject({
       rollingSurplusCraftingEnabled: true,
       runtimePickOptions: { rollingSurplusCraftingEnabled: true },
+    });
+  });
+
+  it('keeps shortage recovery permissions independent and default-off', () => {
+    expect(normalizePickRuntimeOptions({})).toMatchObject({
+      rollingProvisionsShortageRecoveryEnabled: false,
+      rollingRequiredSpecialRecoveryEnabled: false,
+    });
+    expect(resolvePickRuntimeOptions(
+      {
+        rollingProvisionsShortageRecoveryEnabled: true,
+        rollingRequiredSpecialRecoveryEnabled: true,
+      },
+      {
+        pickOptions: {
+          rollingProvisionsShortageRecoveryEnabled: false,
+          rollingRequiredSpecialRecoveryEnabled: false,
+        },
+      },
+    )).toMatchObject({
+      rollingProvisionsShortageRecoveryEnabled: false,
+      rollingRequiredSpecialRecoveryEnabled: false,
+    });
+
+    const enabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(enabled, {
+      pickOptions: {
+        rollingProvisionsShortageRecoveryEnabled: true,
+        rollingRequiredSpecialRecoveryEnabled: true,
+      },
+    });
+    expect(enabled).toMatchObject({
+      rollingProvisionsShortageRecoveryEnabled: true,
+      rollingRequiredSpecialRecoveryEnabled: true,
+      runtimePickOptions: {
+        rollingProvisionsShortageRecoveryEnabled: true,
+        rollingRequiredSpecialRecoveryEnabled: true,
+      },
     });
   });
 

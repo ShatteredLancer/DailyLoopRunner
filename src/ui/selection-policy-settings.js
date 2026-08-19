@@ -238,7 +238,21 @@ export function showSelectionPolicySettings(options = {}) {
     'bronze-loop-policy-rolling-surplus-crafting',
     'Craft surplus Provisions/TOTW',
     pickOptions.rollingSurplusCraftingEnabled === true,
-    'After a primary cycle, proactively turn complete Provisions reserves and eligible low-rated Storage cards into recovery SBCs; disabled still permits shortage and Storage-pressure recovery',
+    'After a primary cycle, proactively turn complete Provisions reserves and eligible low-rated Storage cards into recovery SBCs',
+  );
+  const rollingProvisionsShortageRecovery = checkbox(
+    dom,
+    'bronze-loop-policy-rolling-provisions-shortage-recovery',
+    'Allow Provisions shortage recovery',
+    pickOptions.rollingProvisionsShortageRecoveryEnabled === true,
+    'Allow Rolling to submit a Provisions SBC when primary fodder or Storage routing is blocked; disabled never submits Provisions for shortage recovery',
+  );
+  const rollingRequiredSpecialRecovery = checkbox(
+    dom,
+    'bronze-loop-policy-rolling-required-special-recovery',
+    'Allow Required Special/TOTW recovery',
+    pickOptions.rollingRequiredSpecialRecoveryEnabled === true,
+    'Allow Rolling to submit a Required Special or TOTW recovery SBC when the primary squad lacks its required player group; disabled stops at the true shortage',
   );
   const rollingProtectAllClubNonTotwSpecials = checkbox(
     dom,
@@ -279,6 +293,8 @@ export function showSelectionPolicySettings(options = {}) {
     field(dom, 'Provisions reserve', rollingProvisionsMaxRating, mode, 'Choose whether 89-rated non-required cards join the default 87/88 Provisions reserve'),
     field(dom, 'Provisions packs per shortage', rollingShortageProvisionsPackLimit, mode, 'Open at most this many existing Provisions rewards before replanning the primary squad; TOTW rewards remain one at a time'),
     rollingSurplusCrafting.label,
+    rollingProvisionsShortageRecovery.label,
+    rollingRequiredSpecialRecovery.label,
     rollingProtectAllClubNonTotwSpecials.label,
     rollingOpenDuplicateProvisionsRewards.label,
     wideField(dom, 'Storage pressure recovery', rollingStorageSinkMode, mode, 'Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set'),
@@ -334,6 +350,10 @@ export function showSelectionPolicySettings(options = {}) {
           ))?.name || ''
         : '',
       rollingSurplusCraftingEnabled: rollingSurplusCrafting.input.checked,
+      rollingProvisionsShortageRecoveryEnabled:
+        rollingProvisionsShortageRecovery.input.checked,
+      rollingRequiredSpecialRecoveryEnabled:
+        rollingRequiredSpecialRecovery.input.checked,
       rollingProtectAllClubNonTotwSpecials:
         rollingProtectAllClubNonTotwSpecials.input.checked,
       rollingProvisionsMaxRating: readNumber(
@@ -373,6 +393,8 @@ export function showSelectionPolicySettings(options = {}) {
       rollingProvisionsMaxRating,
       rollingShortageProvisionsPackLimit,
       rollingSurplusCrafting.input,
+      rollingProvisionsShortageRecovery.input,
+      rollingRequiredSpecialRecovery.input,
       rollingProtectAllClubNonTotwSpecials.input,
       rollingOpenDuplicateProvisionsRewards.input,
       rollingStorageSinkMode,
