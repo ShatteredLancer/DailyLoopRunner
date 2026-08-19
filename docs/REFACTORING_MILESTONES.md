@@ -4,12 +4,16 @@
 
 当前基线：
 
-- Userscript 版本：`0.8.21`
-- Git 基线：`main` Recap identity-first layout
+- Userscript 版本：`0.8.22`
+- Git 基线：`main` Manual Pick price-visible layout
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
 本文档是重构工作的状态来源。实施过程中应更新里程碑状态、验收记录和发现的问题，不在聊天记录或临时日志中维护另一套进度。
+
+`0.8.22` 发布记录：Manual Player Pick 的候选卡不再把姓名、评分、卡色、重复
+状态和价格拼为一段文本。名字与属性各占一行，价格为右侧独立列，长文本截断时
+保留 hover 全文；选择数量、候选排序和手动确认规则保持不变。
 
 `0.8.21` 发布记录：共享 Recap 卡片行将球员名设为优先弹性列；来源包名和
 属性标签会在宽度不足时优先截断，并分别保留完整 hover 文本。Batch Open、普通

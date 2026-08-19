@@ -11055,6 +11055,8 @@ function updateLoopControls() {
           pickCount,
           reason: manualReason,
           describeCandidate: describePlayerPickCandidate,
+          itemDisplayName,
+          formatPrice: formatCompactPrice,
           scheduleStopCheck: setInterval,
           cancelStopCheck: clearInterval,
           isStopping: () => state.stopping,

@@ -3,6 +3,14 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.22] - 2026-08-19
+
+### Fixed
+
+- Manual Player Pick candidates now render a dedicated player-name line and a
+  secondary metadata line, while the resolved price stays in a fixed right-hand
+  column. Long names or tags no longer hide the price needed for manual picks.
+
 ## [0.8.21] - 2026-08-19
 
 ### Fixed

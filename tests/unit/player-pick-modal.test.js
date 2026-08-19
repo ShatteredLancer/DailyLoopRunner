@@ -40,20 +40,28 @@ describe('manual Player Pick modal', () => {
     const promise = waitForManualPlayerPickSelection({
       dom: harness.dom,
       ranked: [
-        { item: { id: 1 }, rating: 90 },
-        { item: { id: 2 }, rating: 89 },
-        { item: { id: 3 }, rating: 88 },
+        { item: { id: 1, name: 'Player One' }, rating: 90, special: true, duplicate: false, price: 135000 },
+        { item: { id: 2, name: 'Player Two' }, rating: 89, special: false, duplicate: true, price: 85000 },
+        { item: { id: 3, name: 'Player Three' }, rating: 88, special: false, duplicate: false, price: null },
       ],
       pickCount: 2,
       reason: 'tie',
       describeCandidate: (candidate) => `Player ${candidate.item.id}`,
+      formatPrice: (price) => `${price / 1000}k`,
       scheduleStopCheck: () => 7,
       cancelStopCheck,
       isStopping: () => false,
     });
 
-    const cards = harness.created.filter((element) => /^Player \d+$/.test(element.textContent));
+    const cards = harness.created.filter((element) => element.type === 'button');
     const confirm = harness.created.find((element) => element.textContent === 'Confirm selection');
+    expect(harness.created.find((element) => element.textContent === 'Player One')).toMatchObject({
+      style: expect.objectContaining({ gridColumn: '1', gridRow: '1' }),
+    });
+    expect(harness.created.find((element) => element.textContent === 'rating:90, special, new')).toBeTruthy();
+    expect(harness.created.find((element) => element.textContent === 'price:135k')).toMatchObject({
+      style: expect.objectContaining({ gridColumn: '2', gridRow: '1 / span 2' }),
+    });
     expect(confirm.disabled).toBe(true);
     cards[0].click();
     expect(confirm.disabled).toBe(true);
@@ -61,7 +69,7 @@ describe('manual Player Pick modal', () => {
     expect(confirm.disabled).toBe(false);
     confirm.click();
 
-    await expect(promise).resolves.toEqual([{ id: 1 }, { id: 2 }]);
+    await expect(promise).resolves.toEqual([{ id: 1, name: 'Player One' }, { id: 2, name: 'Player Two' }]);
     expect(harness.body[0].removed).toBe(true);
     expect(cancelStopCheck).toHaveBeenCalledWith(7);
   });

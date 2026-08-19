@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.21
+// @version      0.8.22
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.21",
+    version: "0.8.22",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -31988,6 +31988,22 @@
   function applyStyles2(element, styles4) {
     Object.assign(element.style, styles4);
   }
+  function candidateName(candidate, fallback, itemDisplayName) {
+    const value = itemDisplayName?.(candidate?.item) || candidate?.item?.name || fallback;
+    return String(value || "Unknown player");
+  }
+  function candidateDetails(candidate) {
+    return [
+      `rating:${Number(candidate?.rating || 0) || "?"}`,
+      candidate?.special ? "special" : "normal",
+      candidate?.duplicate ? "duplicate" : "new"
+    ].join(", ");
+  }
+  function candidatePrice(candidate, formatPrice) {
+    const value = candidate?.price;
+    if (!Number.isFinite(Number(value))) return "price:?";
+    return `price:${formatPrice?.(Number(value)) || Number(value)}`;
+  }
   function waitForManualPlayerPickSelection(options = {}) {
     if (!options.dom?.create || !options.dom?.appendToBody) throw new TypeError("dom adapter is required");
     if (typeof options.describeCandidate !== "function") throw new TypeError("describeCandidate is required");
@@ -32053,7 +32069,8 @@
       ranked.forEach((candidate) => {
         const card = options.dom.create("button");
         card.type = "button";
-        card.textContent = options.describeCandidate(candidate);
+        const description = String(options.describeCandidate(candidate) || "");
+        card.title = description;
         applyStyles2(card, {
           minHeight: "68px",
           textAlign: "left",
@@ -32062,8 +32079,51 @@
           border: "1px solid #536171",
           padding: "9px",
           cursor: "pointer",
-          lineHeight: "1.35"
+          lineHeight: "1.35",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
+          gridTemplateRows: "auto auto",
+          gap: "4px 8px",
+          alignItems: "center"
         });
+        const name = options.dom.create("span");
+        name.textContent = candidateName(candidate, description, options.itemDisplayName);
+        name.title = name.textContent;
+        applyStyles2(name, {
+          gridColumn: "1",
+          gridRow: "1",
+          minWidth: "0",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          fontWeight: "700"
+        });
+        const details = options.dom.create("span");
+        details.textContent = candidateDetails(candidate);
+        details.title = details.textContent;
+        applyStyles2(details, {
+          gridColumn: "1",
+          gridRow: "2",
+          minWidth: "0",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          color: "#B7C2D0",
+          fontSize: "12px"
+        });
+        const price = options.dom.create("span");
+        price.textContent = candidatePrice(candidate, options.formatPrice);
+        price.title = price.textContent;
+        applyStyles2(price, {
+          gridColumn: "2",
+          gridRow: "1 / span 2",
+          alignSelf: "center",
+          whiteSpace: "nowrap",
+          color: "#FFD27A",
+          fontWeight: "700",
+          fontSize: "12px"
+        });
+        card.append(name, details, price);
         card.addEventListener("click", () => {
           if (selected2.has(candidate)) selected2.delete(candidate);
           else if (selected2.size < pickCount) selected2.add(candidate);
@@ -46347,6 +46407,8 @@
         pickCount,
         reason: manualReason,
         describeCandidate: describePlayerPickCandidate,
+        itemDisplayName,
+        formatPrice: formatCompactPrice,
         scheduleStopCheck: setInterval,
         cancelStopCheck: clearInterval,
         isStopping: () => state.stopping
