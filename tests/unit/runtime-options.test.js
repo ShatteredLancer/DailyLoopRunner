@@ -33,7 +33,7 @@ describe('loop runtime option projection', () => {
       rollingProvisionsShortageRecoveryEnabled: false,
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
-      rollingProvisionsMaxRating: 88,
+      rollingProvisionsMaxRating: 91,
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
       protectionRating: 90,
@@ -58,7 +58,7 @@ describe('loop runtime option projection', () => {
       rollingProvisionsShortageRecoveryEnabled: false,
       rollingRequiredSpecialRecoveryEnabled: false,
       rollingProtectAllClubNonTotwSpecials: false,
-      rollingProvisionsMaxRating: 88,
+      rollingProvisionsMaxRating: 91,
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
       protectionRating: 90,
@@ -447,7 +447,13 @@ describe('loop runtime option projection', () => {
       rollingShortageProvisionsPackLimit: 2,
     });
     expect(normalizePickRuntimeOptions({ rollingProvisionsMaxRating: 90 })).toMatchObject({
-      rollingProvisionsMaxRating: 88,
+      rollingProvisionsMaxRating: 90,
+    });
+    expect(normalizePickRuntimeOptions({ rollingProvisionsMaxRating: 91 })).toMatchObject({
+      rollingProvisionsMaxRating: 91,
+    });
+    expect(normalizePickRuntimeOptions({ rollingProvisionsMaxRating: 92 })).toMatchObject({
+      rollingProvisionsMaxRating: 91,
     });
     expect(normalizePickRuntimeOptions({ rollingShortageProvisionsPackLimit: 0 }))
       .toMatchObject({ rollingShortageProvisionsPackLimit: 1 });

@@ -141,7 +141,7 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Storage pressure SBC off');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
-      .toContain('Provisions reserve 87-88');
+      .toContain('Provisions reserve 87-91');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('shortage Provisions batch 2');
     expect(controls.get('bronze-loop-selection-policy-summary').title)

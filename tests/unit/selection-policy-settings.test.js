@@ -91,7 +91,7 @@ describe('selection policy settings modal', () => {
     ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked = true;
     ui.byId.get('#bronze-loop-policy-pick-open-at-end').checked = true;
-    ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value = '89';
+    ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value = '91';
     ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value = '4';
     ui.byId.get('#bronze-loop-policy-rolling-open-duplicate-provisions-rewards').checked = true;
     await ui.byId.get('#bronze-loop-policy-save').click();
@@ -111,7 +111,7 @@ describe('selection policy settings modal', () => {
         rollingProvisionsShortageRecoveryEnabled: true,
         rollingRequiredSpecialRecoveryEnabled: true,
         rollingProtectAllClubNonTotwSpecials: true,
-        rollingProvisionsMaxRating: 89,
+        rollingProvisionsMaxRating: 91,
         rollingOpenDuplicateProvisionsRewards: true,
         rollingShortageProvisionsPackLimit: 4,
       }),
@@ -137,7 +137,7 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-required-special-recovery').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-protect-club-specials').checked).toBe(false);
-    expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
+    expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('91');
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');
   });
 

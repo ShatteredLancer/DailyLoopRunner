@@ -3,6 +3,7 @@ import {
   normalizePlayerPickSelectionMode,
   PLAYER_PICK_SELECTION_MODE_LABELS,
 } from '../domain/player-pick.js';
+import { normalizeRollingProvisionsMaxRating } from '../config/rolling-upgrade.js';
 
 function query(panel, selector) {
   return panel?.querySelector?.(selector) || null;
@@ -126,7 +127,9 @@ export function renderSelectionPolicySummary(options = {}) {
   const clubSpecialProtection = pickOptions.rollingProtectAllClubNonTotwSpecials === true
     ? 'protected'
     : 'fallback allowed';
-  const provisionsMaxRating = Number(pickOptions.rollingProvisionsMaxRating || 88) === 89 ? 89 : 88;
+  const provisionsMaxRating = normalizeRollingProvisionsMaxRating(
+    pickOptions.rollingProvisionsMaxRating,
+  );
   const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true
     ? 'immediate'
     : 'on shortage';

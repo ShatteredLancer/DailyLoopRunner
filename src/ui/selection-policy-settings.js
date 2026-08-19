@@ -238,7 +238,7 @@ export function showSelectionPolicySettings(options = {}) {
     dom,
     'bronze-loop-policy-rolling-provisions-max-rating',
     pickOptions.rollingProvisionsMaxRating,
-    [[88, '87-88'], [89, '87-89']],
+    [[88, '87-88'], [89, '87-89'], [90, '87-90'], [91, '87-91']],
     mode,
   );
   const rollingOpenDuplicateProvisionsRewards = checkbox(
@@ -263,7 +263,7 @@ export function showSelectionPolicySettings(options = {}) {
     sectionTitle(dom, 'Rolling and Player Picks'),
     field(dom, 'Automatic-use max rating', automaticUse, mode, 'Cards at or below this rating may be automatically used; higher cards are protected'),
     sectionTitle(dom, 'Rolling'),
-    field(dom, 'Provisions reserve', rollingProvisionsMaxRating, mode, 'Choose whether 89-rated non-required cards join the default 87/88 Provisions reserve'),
+    field(dom, 'Provisions reserve', rollingProvisionsMaxRating, mode, 'Storage is used first; choose the highest non-required 87+ rating that Provisions may consume'),
     field(dom, 'Provisions packs per shortage', rollingShortageProvisionsPackLimit, mode, 'Open at most this many existing Provisions rewards before replanning the primary squad; TOTW rewards remain one at a time'),
     rollingSurplusCrafting.label,
     rollingProvisionsShortageRecovery.label,

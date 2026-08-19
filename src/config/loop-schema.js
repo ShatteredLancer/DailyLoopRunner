@@ -15,6 +15,9 @@ import {
   RUNTIME_QUANTITY_TARGETS,
 } from './runtime-options.js';
 import {
+  ROLLING_PROVISIONS_MAX_RATINGS,
+} from './rolling-upgrade.js';
+import {
   DEFAULT_UNASSIGNED_RECOVERY_POLICY_IDS,
   RECOVERY_RECIPES,
   UNASSIGNED_RECOVERY_POLICIES,
@@ -353,8 +356,8 @@ function validatePickOptions(value, path, errors) {
     errors.push(`${path}.pickSelectionMode must be one of: rating-auto, rating-review, special-price, special-manual`);
   }
   if (value.rollingProvisionsMaxRating !== undefined
-    && ![88, 89].includes(Number(value.rollingProvisionsMaxRating))) {
-    errors.push(`${path}.rollingProvisionsMaxRating must be either 88 or 89`);
+    && !ROLLING_PROVISIONS_MAX_RATINGS.includes(Number(value.rollingProvisionsMaxRating))) {
+    errors.push(`${path}.rollingProvisionsMaxRating must be one of: ${ROLLING_PROVISIONS_MAX_RATINGS.join(', ')}`);
   }
   if (value.rollingShortageProvisionsPackLimit !== undefined) {
     const number = Number(value.rollingShortageProvisionsPackLimit);

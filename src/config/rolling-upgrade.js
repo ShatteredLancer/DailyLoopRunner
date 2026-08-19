@@ -38,10 +38,16 @@ export const ROLLING_RARE_GOLD_PICK_POLICY = Object.freeze({
 
 export const ROLLING_PROVISIONS_RATING_RANGE = Object.freeze({
   min: 87,
-  max: 88,
+  max: 91,
 });
 
-export const ROLLING_PROVISIONS_MAX_RATINGS = Object.freeze([88, 89]);
+export const ROLLING_PROVISIONS_MAX_RATINGS = Object.freeze([88, 89, 90, 91]);
+export const ROLLING_RECOVERY_PRIORITY_PILES = Object.freeze([
+  'storage',
+  'unassigned',
+  'transfer',
+  'club',
+]);
 export const DEFAULT_ROLLING_SHORTAGE_PROVISIONS_PACK_LIMIT = 2;
 export const MAX_ROLLING_SHORTAGE_PROVISIONS_PACK_LIMIT = 30;
 
@@ -612,6 +618,7 @@ export function createRollingUpgradeLoopDef(primaryLoop = {}) {
       ...createTotwUpgradePolicy({
         forceOpenRewardPacks: false,
         openRewardPacks: false,
+        ratingSbcFill: { priorityPiles: [...ROLLING_RECOVERY_PRIORITY_PILES] },
       }),
     },
     rollingProvisionsUpgrade: {
@@ -622,6 +629,7 @@ export function createRollingUpgradeLoopDef(primaryLoop = {}) {
         required: true,
       },
       ...createProvisionsUpgradePolicy({
+        ratingSbcFill: { priorityPiles: [...ROLLING_RECOVERY_PRIORITY_PILES] },
         requirements: [{
           tier: 'gold',
           count: 4,
@@ -629,7 +637,7 @@ export function createRollingUpgradeLoopDef(primaryLoop = {}) {
           maxRating: ROLLING_PROVISIONS_RATING_RANGE.max,
           playerOnly: true,
           allowSpecial: true,
-          priorityPiles: [...ALL_INVENTORY_PILES],
+          priorityPiles: [...ROLLING_RECOVERY_PRIORITY_PILES],
         }],
       }),
     },

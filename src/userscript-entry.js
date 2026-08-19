@@ -109,6 +109,7 @@ import {
   applyRollingAutomaticUseFodderPolicy,
   bindRollingPlayerPickCapabilities,
   buildRollingStorageSinkCatalog,
+  ROLLING_RECOVERY_PRIORITY_PILES,
   ROLLING_PROVISIONS_RATING_RANGE,
   ROLLING_STORAGE_SINK_MIN_CHALLENGE_RATING,
   resolveRollingAutomaticUseMaxRating,
@@ -15763,9 +15764,7 @@ function updateLoopControls() {
           runtime,
           loopDef.rollingProvisionsUpgrade,
           {
-            priorityPiles: storagePressure
-              ? ['storage', 'unassigned', 'transfer', 'club']
-              : ['unassigned', 'storage', 'transfer', 'club'],
+            priorityPiles: ROLLING_RECOVERY_PRIORITY_PILES,
             additionalProtected,
             allowProvisionsReserve: true,
             allowSpecial: true,
@@ -15848,7 +15847,9 @@ function updateLoopControls() {
             log(`${loopDef.name}: consuming exact pending Unassigned primary duplicates in ${definition.name} before creating or opening its reward`);
           }
           return submitRollingRatingRecovery(loopDef, runtime, definition, {
-            priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
+            priorityPiles: action === 'craft-with-pending-duplicates'
+              ? ['unassigned', 'storage', 'transfer', 'club']
+              : ROLLING_RECOVERY_PRIORITY_PILES,
             allowPrimaryDuplicates: true,
             validateSelection: ({ storageItemsConsumed, consumedPrimaryRefs }) => (
               validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed, {

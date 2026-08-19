@@ -23,6 +23,22 @@ All notable user-facing changes are documented here. This project follows
   and Storage-pressure Player Picks, with regression coverage for legacy
   rating-first behavior.
 
+## [0.8.20] - 2026-08-19
+
+### Changed
+
+- Provisions and normal Required Special/TOTW recovery now consume eligible SBC
+  Storage material before Unassigned, Transfer, or Club, so recovery also
+  relieves Storage pressure. The pending-Unassigned-duplicate recovery path
+  remains intentionally Unassigned-first.
+- Expanded the configurable Provisions reserve from 87-88/89 to 87-91; new
+  installations default to 87-91 while existing saved settings remain intact.
+
+### Safety
+
+- The broader reserve still excludes FSU locks and filters, Evolutions,
+  Required Special/TOTW cards, and ratings above the configured 91 cap.
+
 ## [0.8.18] - 2026-08-19
 
 ### Fixed

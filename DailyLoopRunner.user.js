@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.19
+// @version      0.8.20
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.19",
+    version: "0.8.20",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -2051,9 +2051,15 @@
   });
   var ROLLING_PROVISIONS_RATING_RANGE = Object.freeze({
     min: 87,
-    max: 88
+    max: 91
   });
-  var ROLLING_PROVISIONS_MAX_RATINGS = Object.freeze([88, 89]);
+  var ROLLING_PROVISIONS_MAX_RATINGS = Object.freeze([88, 89, 90, 91]);
+  var ROLLING_RECOVERY_PRIORITY_PILES = Object.freeze([
+    "storage",
+    "unassigned",
+    "transfer",
+    "club"
+  ]);
   var DEFAULT_ROLLING_SHORTAGE_PROVISIONS_PACK_LIMIT = 2;
   var MAX_ROLLING_SHORTAGE_PROVISIONS_PACK_LIMIT = 30;
   function normalizeRollingProvisionsMaxRating(value) {
@@ -2520,7 +2526,8 @@
         },
         ...createTotwUpgradePolicy({
           forceOpenRewardPacks: false,
-          openRewardPacks: false
+          openRewardPacks: false,
+          ratingSbcFill: { priorityPiles: [...ROLLING_RECOVERY_PRIORITY_PILES] }
         })
       },
       rollingProvisionsUpgrade: {
@@ -2531,6 +2538,7 @@
           required: true
         },
         ...createProvisionsUpgradePolicy({
+          ratingSbcFill: { priorityPiles: [...ROLLING_RECOVERY_PRIORITY_PILES] },
           requirements: [{
             tier: "gold",
             count: 4,
@@ -2538,7 +2546,7 @@
             maxRating: ROLLING_PROVISIONS_RATING_RANGE.max,
             playerOnly: true,
             allowSpecial: true,
-            priorityPiles: [...ALL_INVENTORY_PILES2]
+            priorityPiles: [...ROLLING_RECOVERY_PRIORITY_PILES]
           }]
         })
       },
@@ -4128,8 +4136,8 @@
     if (value.pickSelectionMode !== void 0 && !["rating-auto", "rating-review", "special-price", "special-manual"].includes(value.pickSelectionMode)) {
       errors.push(`${path}.pickSelectionMode must be one of: rating-auto, rating-review, special-price, special-manual`);
     }
-    if (value.rollingProvisionsMaxRating !== void 0 && ![88, 89].includes(Number(value.rollingProvisionsMaxRating))) {
-      errors.push(`${path}.rollingProvisionsMaxRating must be either 88 or 89`);
+    if (value.rollingProvisionsMaxRating !== void 0 && !ROLLING_PROVISIONS_MAX_RATINGS.includes(Number(value.rollingProvisionsMaxRating))) {
+      errors.push(`${path}.rollingProvisionsMaxRating must be one of: ${ROLLING_PROVISIONS_MAX_RATINGS.join(", ")}`);
     }
     if (value.rollingShortageProvisionsPackLimit !== void 0) {
       const number = Number(value.rollingShortageProvisionsPackLimit);
@@ -28459,7 +28467,9 @@
     const provisionsShortageRecovery = pickOptions.rollingProvisionsShortageRecoveryEnabled === true ? "allowed" : "off";
     const requiredSpecialRecovery = pickOptions.rollingRequiredSpecialRecoveryEnabled === true ? "allowed" : "off";
     const clubSpecialProtection = pickOptions.rollingProtectAllClubNonTotwSpecials === true ? "protected" : "fallback allowed";
-    const provisionsMaxRating = Number(pickOptions.rollingProvisionsMaxRating || 88) === 89 ? 89 : 88;
+    const provisionsMaxRating = normalizeRollingProvisionsMaxRating(
+      pickOptions.rollingProvisionsMaxRating
+    );
     const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true ? "immediate" : "on shortage";
     const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
     summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickModeLabel}`;
@@ -33126,7 +33136,7 @@
       dom,
       "bronze-loop-policy-rolling-provisions-max-rating",
       pickOptions.rollingProvisionsMaxRating,
-      [[88, "87-88"], [89, "87-89"]],
+      [[88, "87-88"], [89, "87-89"], [90, "87-90"], [91, "87-91"]],
       mode
     );
     const rollingOpenDuplicateProvisionsRewards = checkbox2(
@@ -33150,7 +33160,7 @@
       sectionTitle(dom, "Rolling and Player Picks"),
       field2(dom, "Automatic-use max rating", automaticUse, mode, "Cards at or below this rating may be automatically used; higher cards are protected"),
       sectionTitle(dom, "Rolling"),
-      field2(dom, "Provisions reserve", rollingProvisionsMaxRating, mode, "Choose whether 89-rated non-required cards join the default 87/88 Provisions reserve"),
+      field2(dom, "Provisions reserve", rollingProvisionsMaxRating, mode, "Storage is used first; choose the highest non-required 87+ rating that Provisions may consume"),
       field2(dom, "Provisions packs per shortage", rollingShortageProvisionsPackLimit, mode, "Open at most this many existing Provisions rewards before replanning the primary squad; TOTW rewards remain one at a time"),
       rollingSurplusCrafting.label,
       rollingProvisionsShortageRecovery.label,
@@ -50566,7 +50576,7 @@
               runtime,
               loopDef.rollingProvisionsUpgrade,
               {
-                priorityPiles: storagePressure ? ["storage", "unassigned", "transfer", "club"] : ["unassigned", "storage", "transfer", "club"],
+                priorityPiles: ROLLING_RECOVERY_PRIORITY_PILES,
                 additionalProtected,
                 allowProvisionsReserve: true,
                 allowSpecial: true,
@@ -50645,7 +50655,7 @@
                 log(`${loopDef.name}: consuming exact pending Unassigned primary duplicates in ${definition.name} before creating or opening its reward`);
               }
               return submitRollingRatingRecovery(loopDef, runtime, definition, {
-                priorityPiles: ["unassigned", "storage", "transfer", "club"],
+                priorityPiles: action2 === "craft-with-pending-duplicates" ? ["unassigned", "storage", "transfer", "club"] : ROLLING_RECOVERY_PRIORITY_PILES,
                 allowPrimaryDuplicates: true,
                 validateSelection: ({ storageItemsConsumed, consumedPrimaryRefs }) => validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed, {
                   consumedPendingRefs: consumedPrimaryRefs

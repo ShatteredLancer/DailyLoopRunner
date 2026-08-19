@@ -4,12 +4,19 @@
 
 当前基线：
 
-- Userscript 版本：`0.7.10`
-- Git 基线：`main` dynamic Pack Catalog
+- Userscript 版本：`0.8.20`
+- Git 基线：`main` Rolling recovery Storage-first material policy
 - 运行产物：`DailyLoopRunner.user.js`
 - 配置：内置 `LOOP_DEFS` 和 `DailyLoopRunner.loops.json`
 
 本文档是重构工作的状态来源。实施过程中应更新里程碑状态、验收记录和发现的问题，不在聊天记录或临时日志中维护另一套进度。
+
+`0.8.20` 发布记录：Rolling 的 Provisions 与正常 Required Special/TOTW
+恢复统一改为从合格 SBC Storage 开始选材，再依次查看 Unassigned、Transfer 和
+Club，以便回收也能释放 Storage 压力。由于“消耗待处理 Unassigned 重复卡”是专门
+为释放该重复信号设计的路径，它仍然保持 Unassigned-first。Provisions 可配置材料
+上限扩展为 `87-91`（新安装默认 `91`，已有本地设置保持原值）；FSU 锁定、筛选、
+进化卡、Required Special/TOTW 和超过用户设定上限的卡仍不参与恢复选材。
 
 `0.6.0` 发布记录：将完整 Workflow/Loop JSON 能力迁移为可视化 Builder，支持 Profile、Draft/Saved/Active 生命周期、内置 Override/Duplicate、Workflow Step Variant、Recovery 编辑、Dynamic Pick 绑定、Preview 和 JSON 兼容验证；修正新扫描 Pick 未进入 Dynamic Picks 页的问题，并增加中文图示操作指南。运行时继续使用既有配置校验、strategy dispatch 和安全事务边界。
 

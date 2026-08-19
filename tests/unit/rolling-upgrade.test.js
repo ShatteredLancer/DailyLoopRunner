@@ -12,6 +12,7 @@ import {
   resolveRollingStorageSinkPickCapability,
   resolveRollingStorageSinkCapability,
   resolveRollingAutomaticUseMaxRating,
+  ROLLING_RECOVERY_PRIORITY_PILES,
   shouldQueueRollingProvisionsReward,
 } from '../../src/config/rolling-upgrade.js';
 import {
@@ -172,6 +173,12 @@ function storageSinkPlayerSet(overrides = {}) {
 }
 
 describe('Rolling Upgrade configuration contracts', () => {
+  it('uses eligible SBC Storage cards before every other pile for rolling recovery SBCs', () => {
+    expect(ROLLING_RECOVERY_PRIORITY_PILES).toEqual([
+      'storage', 'unassigned', 'transfer', 'club',
+    ]);
+  });
+
   it('uses the shared automatic-use rating for Rolling instead of the standard Rating SBC cap', () => {
     expect(resolveRollingAutomaticUseMaxRating({ runtimePickOptions: { protectionRating: 90 } })).toBe(90);
     expect(applyRollingAutomaticUseFodderPolicy({
@@ -210,12 +217,18 @@ describe('Rolling Upgrade configuration contracts', () => {
         activityResolved: true,
         sbcSetIds: [20841],
         dynamicSbcFamily: 'totw-upgrade',
+        ratingSbcFill: {
+          priorityPiles: ['storage', 'unassigned', 'transfer', 'club'],
+        },
       },
       rollingProvisionsUpgrade: {
         activityResolved: true,
         sbcSetIds: [20987],
         dynamicSbcFamily: 'provisions-upgrade',
-        requirements: [expect.objectContaining({ minRating: 87, maxRating: 88, count: 4 })],
+        ratingSbcFill: {
+          priorityPiles: ['storage', 'unassigned', 'transfer', 'club'],
+        },
+        requirements: [expect.objectContaining({ minRating: 87, maxRating: 91, count: 4 })],
       },
       rollingPlayerPick: {
         status: 'resolved',
