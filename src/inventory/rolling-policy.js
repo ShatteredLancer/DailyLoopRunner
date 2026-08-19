@@ -361,6 +361,7 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
   const reserveRatings = normalizedReserveRatings(input.reserveRatings);
   const protectProvisionsReserve = reserveRatings.length > 0;
   const primaryDuplicateRefs = uniqueRefs(input.primaryDuplicateRefs || []);
+  const includeUnroutedUnassignedDuplicates = input.includeUnroutedUnassignedDuplicates !== false;
   const relaxedPrimaryDuplicateRefs = uniqueRefs(input.relaxedPrimaryDuplicateRefs || []);
   const isRelaxedPrimaryDuplicate = (item) => relaxedPrimaryDuplicateRefs.some((ref) => refMatchesItem(ref, item));
   const isTransientSubmissionAllowed = typeof input.isTransientSubmissionAllowed === 'function'
@@ -394,7 +395,8 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
       && classification.protected !== true
       && (classification.provisionsReserve !== true || !protectProvisionsReserve)
       && (routedPrimaryDuplicate || (
-        classification.requiredSpecial !== true
+        includeUnroutedUnassignedDuplicates
+          && classification.requiredSpecial !== true
           && (item.special !== true || classification.requiredSpecial === false)
       ));
   });

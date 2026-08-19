@@ -459,6 +459,42 @@ describe('Rolling inventory policy', () => {
     });
   });
 
+  it('does not inherit unrouted Unassigned duplicates into a recovery SBC policy', () => {
+    const pendingDuplicates = [
+      item(11, 88, { duplicateId: 111 }),
+      item(12, 92, { duplicateId: 112 }),
+      item(13, 87, { duplicateId: 113 }),
+    ];
+    const policy = createRollingPrimarySelectionPolicy({
+      entries: pendingDuplicates.map((value) => ({
+        item: value,
+        classification: { requiredSpecial: false, protected: false, provisionsReserve: false },
+      })),
+      primaryDuplicateRefs: [],
+      includeUnroutedUnassignedDuplicates: false,
+      model: { constraints: [] },
+    });
+
+    expect(policy.requiredItems).toEqual([]);
+    expect(policy.preferredItems).toEqual([]);
+
+    const explicitlyRouted = createRollingPrimarySelectionPolicy({
+      entries: pendingDuplicates.map((value) => ({
+        item: value,
+        classification: { requiredSpecial: false, protected: false, provisionsReserve: false },
+      })),
+      primaryDuplicateRefs: [pendingDuplicates[0].ref],
+      includeUnroutedUnassignedDuplicates: false,
+      model: { constraints: [] },
+    });
+    expect(explicitlyRouted.requiredItems).toEqual([{
+      id: pendingDuplicates[0].duplicateId,
+      definitionId: pendingDuplicates[0].definitionId,
+      pile: 'unknown',
+    }]);
+    expect(explicitlyRouted.preferredItems).toEqual(explicitlyRouted.requiredItems);
+  });
+
   it('allows a protected Club entity only while an eligible transient duplicate signal authorizes it', () => {
     const clubEventCard = item(20, 93, {
       pile: 'club',

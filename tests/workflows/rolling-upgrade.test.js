@@ -18,12 +18,22 @@ describe('Rolling Required Special recovery decision', () => {
     })).toBe('craft-storage-pressure');
   });
 
-  it('consumes pending Unassigned primary duplicates before opening an existing TOTW reward', () => {
+  it('consumes pending Unassigned primary duplicates before creating or opening a TOTW reward', () => {
     expect(chooseRollingRequiredSpecialRecoveryAction({
       hasExistingPack: true,
       hasPendingUnassignedPrimaryDuplicates: true,
       trigger: 'storage-sink-required-special-shortage',
-    })).toBe('craft-storage-pressure');
+    })).toBe('craft-with-pending-duplicates');
+    expect(chooseRollingRequiredSpecialRecoveryAction({
+      hasExistingPack: false,
+      hasPendingUnassignedPrimaryDuplicates: true,
+      trigger: 'primary-required-special-shortage',
+    })).toBe('craft-with-pending-duplicates');
+    expect(chooseRollingRequiredSpecialRecoveryAction({
+      hasExistingPack: true,
+      hasPendingUnassignedPrimaryDuplicates: true,
+      trigger: 'primary-required-special-shortage',
+    })).toBe('craft-with-pending-duplicates');
   });
 });
 

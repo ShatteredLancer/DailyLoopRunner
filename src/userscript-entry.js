@@ -13027,6 +13027,7 @@ function updateLoopControls() {
         protectionRating: rollingProtectionRating(loopDef),
         reserveRatings: false,
         primaryDuplicateRefs: consumablePrimaryRefs,
+        includeUnroutedUnassignedDuplicates: false,
         relaxedPrimaryDuplicateRefs: relaxedPrimaryRefs,
         isTransientSubmissionAllowed: (item) => (
           isRollingTransientSubmissionAllowed(item, loopDef)
@@ -15570,11 +15571,15 @@ function updateLoopControls() {
             fallbackPackMatcher: isLikelyTotwRewardPack,
           });
         }
-        if (action === 'craft-storage-pressure') {
+        if (['craft-storage-pressure', 'craft-with-pending-duplicates'].includes(action)) {
           if (pack) {
             log(`${loopDef.name}: existing ${definition.name} reward cannot open while primary duplicates remain Unassigned; consuming those duplicates before opening the reward`);
           }
-          log(`${loopDef.name}: Storage pressure SBC lacks its Required Special; crafting ${definition.name} from pending Unassigned duplicates first, then Storage, before retrying Storage routing`);
+          if (action === 'craft-storage-pressure') {
+            log(`${loopDef.name}: Storage pressure SBC lacks its Required Special; crafting ${definition.name} from Storage before retrying Storage routing`);
+          } else {
+            log(`${loopDef.name}: consuming exact pending Unassigned primary duplicates in ${definition.name} before creating or opening its reward`);
+          }
           return submitRollingRatingRecovery(loopDef, runtime, definition, {
             priorityPiles: ['unassigned', 'storage', 'transfer', 'club'],
             allowPrimaryDuplicates: true,

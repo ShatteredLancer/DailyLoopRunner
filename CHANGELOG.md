@@ -3,6 +3,22 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.15] - 2026-08-19
+
+### Fixed
+
+- Prevented a Required Special/TOTW recovery SBC from inheriting unrelated
+  Unassigned primary-pack duplicates as mandatory recovery materials.
+- When exact pending primary duplicates would block the Required Special
+  reward, consume only those explicitly routed duplicates in the recovery SBC
+  before creating or opening the reward.
+
+### Safety
+
+- Unrouted Unassigned duplicates remain protected during recovery, while FSU
+  Lock, Evolution, Academy, rating, special-card, and Storage guards are
+  unchanged.
+
 ## [0.8.14] - 2026-08-19
 
 ### Added

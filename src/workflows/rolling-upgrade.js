@@ -39,9 +39,8 @@ const FODDER_SHORTAGE_CODES = new Set([
 ]);
 
 export function chooseRollingRequiredSpecialRecoveryAction(input = {}) {
-  if (input.trigger === 'storage-sink-required-special-shortage'
-    && input.hasPendingUnassignedPrimaryDuplicates === true) {
-    return 'craft-storage-pressure';
+  if (input.hasPendingUnassignedPrimaryDuplicates === true) {
+    return 'craft-with-pending-duplicates';
   }
   if (input.hasExistingPack === true) return 'open-existing-pack';
   return input.trigger === 'storage-sink-required-special-shortage'

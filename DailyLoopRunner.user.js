@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.14
+// @version      0.8.15
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.14",
+    version: "0.8.15",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -11055,6 +11055,7 @@
     const reserveRatings = normalizedReserveRatings(input2.reserveRatings);
     const protectProvisionsReserve = reserveRatings.length > 0;
     const primaryDuplicateRefs = uniqueRefs(input2.primaryDuplicateRefs || []);
+    const includeUnroutedUnassignedDuplicates = input2.includeUnroutedUnassignedDuplicates !== false;
     const relaxedPrimaryDuplicateRefs = uniqueRefs(input2.relaxedPrimaryDuplicateRefs || []);
     const isRelaxedPrimaryDuplicate = (item) => relaxedPrimaryDuplicateRefs.some((ref) => refMatchesItem(ref, item));
     const isTransientSubmissionAllowed = typeof input2.isTransientSubmissionAllowed === "function" ? input2.isTransientSubmissionAllowed : () => true;
@@ -11073,7 +11074,7 @@
     const isAuthorizedTransientEntity = (item) => authorizedTransientRefs.some((ref) => refMatchesItem(ref, item));
     const primaryDuplicates = entries.filter(({ item, classification }) => {
       const routedPrimaryDuplicate = primaryDuplicateRefs.some((ref) => refMatchesItem(ref, item));
-      return item.duplicate === true && classification.protected !== true && (classification.provisionsReserve !== true || !protectProvisionsReserve) && (routedPrimaryDuplicate || classification.requiredSpecial !== true && (item.special !== true || classification.requiredSpecial === false));
+      return item.duplicate === true && classification.protected !== true && (classification.provisionsReserve !== true || !protectProvisionsReserve) && (routedPrimaryDuplicate || includeUnroutedUnassignedDuplicates && classification.requiredSpecial !== true && (item.special !== true || classification.requiredSpecial === false));
     });
     const requiredItems = primaryDuplicates.filter(({ item }) => {
       const routedPrimaryDuplicate = primaryDuplicateRefs.some((ref) => refMatchesItem(ref, item));
@@ -25971,8 +25972,8 @@
     "RESERVED_FODDER_BLOCKED"
   ]);
   function chooseRollingRequiredSpecialRecoveryAction(input2 = {}) {
-    if (input2.trigger === "storage-sink-required-special-shortage" && input2.hasPendingUnassignedPrimaryDuplicates === true) {
-      return "craft-storage-pressure";
+    if (input2.hasPendingUnassignedPrimaryDuplicates === true) {
+      return "craft-with-pending-duplicates";
     }
     if (input2.hasExistingPack === true) return "open-existing-pack";
     return input2.trigger === "storage-sink-required-special-shortage" ? "craft-storage-pressure" : "craft-standard";
@@ -47772,6 +47773,7 @@
           protectionRating: rollingProtectionRating(loopDef),
           reserveRatings: false,
           primaryDuplicateRefs: consumablePrimaryRefs,
+          includeUnroutedUnassignedDuplicates: false,
           relaxedPrimaryDuplicateRefs: relaxedPrimaryRefs,
           isTransientSubmissionAllowed: (item) => isRollingTransientSubmissionAllowed(item, loopDef)
         });
@@ -50086,11 +50088,15 @@
                 fallbackPackMatcher: isLikelyTotwRewardPack
               });
             }
-            if (action2 === "craft-storage-pressure") {
+            if (["craft-storage-pressure", "craft-with-pending-duplicates"].includes(action2)) {
               if (pack) {
                 log(`${loopDef.name}: existing ${definition.name} reward cannot open while primary duplicates remain Unassigned; consuming those duplicates before opening the reward`);
               }
-              log(`${loopDef.name}: Storage pressure SBC lacks its Required Special; crafting ${definition.name} from pending Unassigned duplicates first, then Storage, before retrying Storage routing`);
+              if (action2 === "craft-storage-pressure") {
+                log(`${loopDef.name}: Storage pressure SBC lacks its Required Special; crafting ${definition.name} from Storage before retrying Storage routing`);
+              } else {
+                log(`${loopDef.name}: consuming exact pending Unassigned primary duplicates in ${definition.name} before creating or opening its reward`);
+              }
               return submitRollingRatingRecovery(loopDef, runtime, definition, {
                 priorityPiles: ["unassigned", "storage", "transfer", "club"],
                 allowPrimaryDuplicates: true,
