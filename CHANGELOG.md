@@ -10,6 +10,11 @@ All notable user-facing changes are documented here. This project follows
 - Manual Player Pick candidates now render a dedicated player-name line and a
   secondary metadata line, while the resolved price stays in a fixed right-hand
   column. Long names or tags no longer hide the price needed for manual picks.
+- Treat a fully completed Storage-pressure SBC as an exhausted session
+  capability. Automatic mode now skips it, tries every cached alternative,
+  performs one live metadata refresh for newly available candidates, and
+  stops with `NO_STORAGE_SINK_AVAILABLE` when none remain. Selected mode does
+  not switch SBCs and reports `STORAGE_SINK_COMPLETED` directly.
 
 ## [0.8.21] - 2026-08-19
 
@@ -19,7 +24,6 @@ All notable user-facing changes are documented here. This project follows
   Long reward-pack/source labels and metadata can truncate instead of forcing
   the name to disappear early; all three keep their full text in a hover
   title.
-
 ## [0.8.19] - 2026-08-19
 
 ### Added

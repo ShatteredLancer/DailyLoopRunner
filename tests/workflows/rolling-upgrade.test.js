@@ -1302,6 +1302,37 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.planPrimarySquad).not.toHaveBeenCalled();
   });
 
+  it('reports an exhausted selected Storage Sink instead of the original Storage block', async () => {
+    const options = harness({
+      storageSinkEnabled: true,
+      resolveProtectedStorage: vi.fn(async () => ({
+        status: 'blocked',
+        reason: 'SBC storage has 0 free slots, but 2 protected cards require storage',
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      })),
+      recoverProvisions: vi.fn(async () => ({
+        status: 'unavailable',
+        reasonCode: 'RECOVERY_STORAGE_HEADROOM_INSUFFICIENT',
+      })),
+      recoverStorageSink: vi.fn(async () => ({
+        status: 'unavailable',
+        reason: '1 of 4 95+ Player Pick is already complete and has no incomplete Storage pressure challenge',
+        reasonCode: 'STORAGE_SINK_COMPLETED',
+        details: { completedCount: 2, totalChallengeCount: 2 },
+      })),
+    });
+
+    expect(await runRollingUpgradeWorkflow(options)).toMatchObject({
+      status: 'unavailable',
+      reason: '1 of 4 95+ Player Pick is already complete and has no incomplete Storage pressure challenge',
+      reasonCode: 'STORAGE_SINK_COMPLETED',
+      details: { completedCount: 2, totalChallengeCount: 2 },
+      recoveries: { storageSink: 0 },
+    });
+    expect(options.recoverStorageSink).toHaveBeenCalledOnce();
+    expect(options.planPrimarySquad).not.toHaveBeenCalled();
+  });
+
   it('does not call the Storage sink on the normal path or after a hard Provisions failure', async () => {
     const normal = harness({ recoverStorageSink: vi.fn() });
     expect((await runRollingUpgradeWorkflow(normal)).status).toBe('completed');

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadUserscript, makePlayer } from '../helpers/load-userscript.js';
 
 describe('Rolling runtime recovery helpers', () => {
@@ -363,6 +363,141 @@ describe('Rolling runtime recovery helpers', () => {
     squadSaved = true;
     expect(validators.postSave({ players, savedPlayers: players })).toBe(true);
     expect(readinessChecks).toBe(1);
+  });
+
+  it('treats a completed Storage Sink as unavailable with an explicit exhaustion reason', async () => {
+    const { api } = await loadUserscript();
+    const sinkDef = { name: '1 of 4 95+ Player Pick', setId: 1400 };
+    const set = { id: 1400 };
+
+    expect(api.completedRollingStorageSinkUnavailable(sinkDef, set, [{ id: 1 }, { id: 2 }]))
+      .toMatchObject({
+        status: 'unavailable',
+        reason: '1 of 4 95+ Player Pick is already complete and has no incomplete Storage pressure challenge',
+        reasonCode: 'STORAGE_SINK_COMPLETED',
+        sinkDef,
+        set,
+        contexts: [],
+        completedCount: 2,
+        incompleteCount: 0,
+        details: {
+          setId: 1400,
+          completedCount: 2,
+          totalChallengeCount: 2,
+        },
+      });
+  });
+
+  it('falls back from an exhausted automatic Storage Sink to the next cached candidate', async () => {
+    const { api } = await loadUserscript();
+    const first = { setId: 1401, setName: 'Limited 95+ Pick', loop: {} };
+    const second = { setId: 1402, setName: 'Player SBC', loop: {} };
+    const runCapability = vi.fn(async (capability) => (
+      capability.setId === first.setId
+        ? {
+            status: 'unavailable',
+            reason: 'Limited 95+ Pick is already complete',
+            reasonCode: 'STORAGE_SINK_COMPLETED',
+          }
+        : { status: 'submitted', submitted: true }
+    ));
+    const runtime = {};
+
+    expect(await api.runRollingStorageSinkRecovery(
+      { name: 'Rolling Loop' },
+      runtime,
+      { mode: 'automatic', capability: first, alternatives: [second] },
+      { runCapability, refreshCapabilities: vi.fn() },
+    )).toMatchObject({ status: 'submitted', submitted: true });
+    expect(runCapability.mock.calls.map(([capability]) => capability.setId)).toEqual([1401, 1402]);
+    expect([...runtime.storageSinkExhaustedSetIds]).toEqual([1401]);
+  });
+
+  it('skips session-exhausted candidates and retries once with a newly scanned automatic Sink', async () => {
+    const { api } = await loadUserscript();
+    const exhausted = { setId: 1411, setName: 'Completed Pick', loop: {} };
+    const stale = { setId: 1412, setName: 'Expired Player SBC', loop: {} };
+    const fresh = { setId: 1413, setName: 'Fresh Player SBC', loop: {} };
+    const runtime = { storageSinkExhaustedSetIds: new Set([exhausted.setId]) };
+    const runCapability = vi.fn(async (capability) => (
+      capability.setId === stale.setId
+        ? { status: 'unavailable', reason: 'expired', reasonCode: 'LIVE_REQUIREMENT_UNAVAILABLE' }
+        : { status: 'submitted', submitted: true }
+    ));
+    const refreshCapabilities = vi.fn(async () => ({
+      status: 'ready',
+      definition: { mode: 'automatic', capability: fresh, alternatives: [] },
+    }));
+
+    expect(await api.runRollingStorageSinkRecovery(
+      { name: 'Rolling Loop' },
+      runtime,
+      { mode: 'automatic', capability: exhausted, alternatives: [stale] },
+      { runCapability, refreshCapabilities },
+    )).toMatchObject({ status: 'submitted', submitted: true });
+    expect(runCapability.mock.calls.map(([capability]) => capability.setId)).toEqual([1412, 1413]);
+    expect(refreshCapabilities).toHaveBeenCalledOnce();
+    expect(runtime.storageSinkRefreshAttempted).toBe(true);
+  });
+
+  it('does not replace an explicitly selected exhausted Storage Sink', async () => {
+    const { api } = await loadUserscript();
+    const selected = { setId: 1421, setName: 'Selected Limited Pick', loop: {} };
+    const refreshCapabilities = vi.fn();
+
+    expect(await api.runRollingStorageSinkRecovery(
+      { name: 'Rolling Loop' },
+      {},
+      { mode: 'selected', capability: selected, alternatives: [] },
+      {
+        runCapability: vi.fn(async () => ({
+          status: 'unavailable',
+          reason: 'Selected Limited Pick is already complete',
+          reasonCode: 'STORAGE_SINK_COMPLETED',
+        })),
+        refreshCapabilities,
+      },
+    )).toMatchObject({
+      status: 'unavailable',
+      reasonCode: 'STORAGE_SINK_COMPLETED',
+      details: { exhaustedSetIds: [1421], runtimeRefreshAttempted: false },
+    });
+    expect(refreshCapabilities).not.toHaveBeenCalled();
+  });
+
+  it('stops automatic recovery explicitly after its one live refresh finds no Sink', async () => {
+    const { api } = await loadUserscript();
+    const completed = { setId: 1431, setName: 'Completed Pick', loop: {} };
+    const refreshCapabilities = vi.fn(async () => ({
+      status: 'unavailable',
+      reason: 'live scan found no candidate',
+      reasonCode: 'NO_STORAGE_SINK_AVAILABLE',
+    }));
+    const runtime = {};
+
+    expect(await api.runRollingStorageSinkRecovery(
+      { name: 'Rolling Loop' },
+      runtime,
+      { mode: 'automatic', capability: completed, alternatives: [] },
+      {
+        runCapability: vi.fn(async () => ({
+          status: 'unavailable',
+          reason: 'Completed Pick is already complete',
+          reasonCode: 'STORAGE_SINK_COMPLETED',
+        })),
+        refreshCapabilities,
+      },
+    )).toMatchObject({
+      status: 'unavailable',
+      reasonCode: 'NO_STORAGE_SINK_AVAILABLE',
+      details: {
+        exhaustedSetIds: [1431],
+        runtimeRefreshAttempted: true,
+        refreshReasonCode: 'NO_STORAGE_SINK_AVAILABLE',
+      },
+    });
+    expect(refreshCapabilities).toHaveBeenCalledOnce();
+    expect(runtime.storageSinkRefreshAttempted).toBe(true);
   });
 
   it('allows exactly one Required Special through final Storage Sink validation', async () => {
