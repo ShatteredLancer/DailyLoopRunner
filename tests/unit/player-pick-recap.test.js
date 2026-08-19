@@ -123,12 +123,17 @@ describe('Player Pick recap UI', () => {
     const playerName = harness.created.find((element) => element.textContent === 'Player B');
     expect(playerName).toMatchObject({
       title: 'Player B',
-      style: expect.objectContaining({ flex: '1 1 150px' }),
+      style: expect.objectContaining({
+        width: '100%',
+        whiteSpace: 'normal',
+        overflowWrap: 'anywhere',
+      }),
     });
+    expect(playerName.style.textOverflow).toBeUndefined();
     const sourceLabel = harness.created.find((element) => element.textContent === 'P2');
     expect(sourceLabel).toMatchObject({
       title: 'P2',
-      style: expect.objectContaining({ flex: '0 1 170px', textOverflow: 'ellipsis' }),
+      style: expect.objectContaining({ width: '100%', textOverflow: 'ellipsis' }),
     });
     const futbin = harness.created.find((element) => element.tagName === 'a' && element.textContent === 'FUTBIN');
     expect(futbin).toMatchObject({

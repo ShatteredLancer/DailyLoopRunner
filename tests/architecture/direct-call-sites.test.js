@@ -345,6 +345,11 @@ describe('current direct side-effect call baseline', () => {
     expect(protectedStorageRetry).toBeGreaterThan(postSubmitSelection);
     expect(protectedStorageRetry).toBeGreaterThan(directPlayerRouting);
     expect(legacy).toContain('pickSelected: true');
+    expect(legacy).toMatch(/await selectPendingRollingStorageSinkPick\([\s\S]*?attempts: 10,[\s\S]*?forceFresh: true/);
+    expect(generic).toMatch(/await selectPendingRollingStorageSinkPick\([\s\S]*?attempts: 10,[\s\S]*?forceFresh: true/);
+    expect(legacy).toContain('{ attempts: 1, forceFresh: true, quietMissing: true, failOnUnexpected: true }');
+    expect(generic).toContain('{ attempts: 1, forceFresh: true, quietMissing: true, failOnUnexpected: true }');
+    expect(source).toMatch(/async function resumePendingRollingStorageSinkReward[\s\S]*?attempts: 2, forceFresh: true/);
   });
 
   it('keeps bounded candidate diagnostics on generic Storage Sink planning failures', async () => {

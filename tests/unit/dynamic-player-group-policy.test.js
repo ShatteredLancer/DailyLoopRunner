@@ -136,6 +136,245 @@ describe('dynamic EA player-group policy', () => {
     });
   });
 
+  it('filters a primary Required Special duplicate out of a generic Storage Sink plan while keeping ordinary swaps', async () => {
+    const requiredSignal = makePlayer({
+      id: 101,
+      definitionId: 9001,
+      rating: 91,
+      rareflag: 120,
+      groups: [83],
+      duplicate: true,
+      duplicateId: 201,
+      name: 'Primary Required Special signal',
+    });
+    const requiredClubItem = makePlayer({
+      id: 201,
+      definitionId: 9001,
+      rating: 91,
+      rareflag: 120,
+      groups: [83],
+      name: 'Primary Required Special Club item',
+    });
+    const ordinarySignal = makePlayer({
+      id: 102,
+      definitionId: 9002,
+      rating: 88,
+      duplicate: true,
+      duplicateId: 202,
+      name: 'Ordinary duplicate signal',
+    });
+    const ordinaryClubItem = makePlayer({
+      id: 202,
+      definitionId: 9002,
+      rating: 88,
+      name: 'Ordinary duplicate Club item',
+    });
+    const storage = Array.from({ length: 9 }, (_, index) => makePlayer({
+      id: 300 + index,
+      definitionId: 9100 + index,
+      rating: 88,
+      pile: 'storage',
+      name: `Storage fodder ${index + 1}`,
+    }));
+    const primaryLoopDef = {
+      name: 'Primary rolling loop',
+      dynamicActiveEligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+    };
+    const sinkLoopDef = {
+      name: 'Generic Storage Sink',
+      expectedPlayerCount: 11,
+      dynamicActiveEligibilityRequirements: [],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 95 },
+      ratingSbcFill: { priorityPiles: ['unassigned', 'storage', 'club'] },
+    };
+    const { api } = await loadUserscript({
+      unassigned: [requiredSignal, ordinarySignal],
+      storage,
+      club: [requiredClubItem, ordinaryClubItem],
+    });
+    const primaryModel = api.parseRatingSbcChallenge(primaryLoopDef, {
+      requiredPlayerCount: 11,
+      squad: { getNumOfRequiredPlayers: () => 11 },
+      eligibilityRequirements: [requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => item.groups.includes(83))],
+    });
+    const sinkModel = api.parseRatingSbcChallenge(sinkLoopDef, {
+      requiredPlayerCount: 11,
+      squad: { getNumOfRequiredPlayers: () => 11 },
+      eligibilityRequirements: [],
+    });
+    const ledger = {
+      classifiedEntries: () => [
+        { item: requiredSignal, pile: 'unassigned', classification: { requiredSpecial: true, protected: false } },
+        { item: requiredClubItem, pile: 'club', classification: { requiredSpecial: true, protected: false } },
+        { item: ordinarySignal, pile: 'unassigned', classification: { requiredSpecial: false, protected: false } },
+        { item: ordinaryClubItem, pile: 'club', classification: { requiredSpecial: false, protected: false } },
+      ],
+    };
+    const runtime = {
+      primaryContext: { model: primaryModel, activeLoopDef: primaryLoopDef },
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      coordinator: { getLedger: () => ledger },
+    };
+    const policy = api.rollingStorageSinkSelectionPolicy(sinkLoopDef, runtime, { model: sinkModel });
+    const candidates = api.buildRatingSbcCandidateEntries(sinkLoopDef, sinkModel, policy);
+
+    expect(candidates.entries.map((entry) => entry.item.id)).toEqual([
+      ordinaryClubItem.id,
+      ...storage.map((item) => item.id),
+    ]);
+    expect(candidates.policyFiltered).toBe(1);
+    expect(candidates.entries.some((entry) => entry.item.id === requiredClubItem.id)).toBe(false);
+    expect(candidates.entries.some((entry) => entry.item.id === ordinaryClubItem.id)).toBe(true);
+  });
+
+  it('reports a Storage pressure shortfall when only a primary Required Special could release the required slot', async () => {
+    const requiredSignal = makePlayer({
+      id: 111,
+      definitionId: 9011,
+      rating: 91,
+      rareflag: 120,
+      groups: [83],
+      duplicate: true,
+      duplicateId: 211,
+      name: 'Blocked Required Special signal',
+    });
+    const requiredClubItem = makePlayer({
+      id: 211,
+      definitionId: 9011,
+      rating: 91,
+      rareflag: 120,
+      groups: [83],
+      name: 'Blocked Required Special Club item',
+    });
+    const transferClubItems = Array.from({ length: 11 }, (_, index) => makePlayer({
+      id: 400 + index,
+      definitionId: 9200 + index,
+      rating: 88,
+      name: `Transfer fodder Club item ${index + 1}`,
+    }));
+    const transfer = transferClubItems.map((clubItem, index) => makePlayer({
+      id: 500 + index,
+      definitionId: clubItem.definitionId,
+      rating: 88,
+      duplicate: true,
+      duplicateId: clubItem.id,
+      name: `Transfer duplicate signal ${index + 1}`,
+    }));
+    const primaryLoopDef = {
+      name: 'Primary rolling loop',
+      dynamicActiveEligibilityRequirements: [
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+    };
+    const sinkLoopDef = {
+      name: 'Generic Storage Sink',
+      expectedPlayerCount: 11,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'TEAM_RATING', values: [88], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 95 },
+      ratingSbcFill: { priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+    };
+    const { api } = await loadUserscript({
+      unassigned: [requiredSignal],
+      transfer,
+      club: [requiredClubItem, ...transferClubItems],
+    });
+    const primaryModel = api.parseRatingSbcChallenge(primaryLoopDef, {
+      requiredPlayerCount: 11,
+      squad: { getNumOfRequiredPlayers: () => 11 },
+      eligibilityRequirements: [requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => item.groups.includes(83))],
+    });
+    const sinkModel = api.parseRatingSbcChallenge(sinkLoopDef, {
+      requiredPlayerCount: 11,
+      squad: { getNumOfRequiredPlayers: () => 11 },
+      eligibilityRequirements: [requirement('TEAM_RATING', [88])],
+    });
+    const snapshot = createInventorySnapshot({
+      piles: {
+        unassigned: [requiredSignal],
+        storage: [],
+        transfer,
+        club: [requiredClubItem, ...transferClubItems],
+      },
+    });
+    const runtime = {
+      primaryContext: { model: primaryModel, activeLoopDef: primaryLoopDef },
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [requiredSignal],
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [
+            { item: requiredSignal, pile: 'unassigned', classification: { requiredSpecial: true, protected: false } },
+            { item: requiredClubItem, pile: 'club', classification: { requiredSpecial: true, protected: false } },
+          ],
+        }),
+      },
+    };
+
+    const policy = api.rollingStorageSinkSelectionPolicy(
+      sinkLoopDef,
+      runtime,
+      { model: sinkModel },
+    );
+    const candidates = api.buildRatingSbcCandidateEntries(
+      sinkLoopDef,
+      sinkModel,
+      policy,
+      snapshot,
+    );
+    expect(candidates.entries).toHaveLength(11);
+    expect(candidates.entries).toEqual(expect.arrayContaining(
+      transferClubItems.map((item) => expect.objectContaining({
+        item: expect.objectContaining({ id: item.id }),
+        pileName: 'transfer',
+      })),
+    ));
+    expect(candidates.entries.some((entry) => entry.item.id === requiredClubItem.id)).toBe(false);
+
+    const unpressured = await api.selectRollingGenericStorageSinkSquad(
+      sinkLoopDef,
+      runtime,
+      { targetRating: 88, model: sinkModel, activeLoopDef: sinkLoopDef },
+      snapshot,
+      {
+        minimumPressureConsumption: 0,
+        pendingStorageRefs: [requiredSignal],
+      },
+    );
+    expect(unpressured).toMatchObject({
+      ok: true,
+      rating: 88,
+      storagePressureConsumed: 0,
+    });
+    expect(unpressured.selected.map((item) => item.id).sort((left, right) => left - right))
+      .toEqual(transferClubItems.map((item) => item.id));
+
+    const result = await api.selectRollingGenericStorageSinkSquad(
+      sinkLoopDef,
+      runtime,
+      { targetRating: 88, model: sinkModel, activeLoopDef: sinkLoopDef },
+      snapshot,
+      {
+        minimumPressureConsumption: 1,
+        pendingStorageRefs: [requiredSignal],
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'RECOVERY_STORAGE_PRESSURE_INFEASIBLE',
+      details: {
+        requestedPressure: 1,
+        maximumFeasible: 0,
+        shortfall: 1,
+      },
+    });
+  });
+
   it('keeps Club non-TOTW event cards out of the Rolling Required Special pool', async () => {
     const clubTotw = makePlayer({
       id: 70,

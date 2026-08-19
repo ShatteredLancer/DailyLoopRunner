@@ -22,7 +22,23 @@ describe('canonical player rarity', () => {
     expect(readPlayerRareFlag({ _staticData: { rareflag: 1 } })).toBe(1);
     expect(readPlayerRareFlag({ _data: { rareFlag: 2 } })).toBe(2);
     expect(readPlayerRareFlag({ rareflag: 0, _staticData: { rareflag: 1 } })).toBe(1);
-    expect(readPlayerRareFlag({ rareflag: 0, isSpecial: () => true })).toBe(2);
+    expect(readPlayerRareFlag({ rareflag: 0, isSpecial: () => true })).toBe(0);
+    expect(readPlayerRareFlag({ rareflag: 1, isSpecial: () => true })).toBe(1);
+    expect(readPlayerRareFlag({ isSpecial: () => true })).toBe(2);
+    expect(readPlayerRareFlag({ isRare: () => true })).toBe(1);
+  });
+
+  it('keeps explicit common and rare metadata authoritative over contradictory EA methods', () => {
+    const common = { rareflag: 0, special: true, rare: true, isSpecial: () => true, isRare: () => true };
+    const rare = { rareflag: 1, special: true, isSpecial: () => true };
+    const special = { rareflag: 97, isSpecial: () => false };
+
+    expect([readPlayerRareFlag(common), isRarePlayerCard(common), isSpecialPlayerCard(common)])
+      .toEqual([0, false, false]);
+    expect([readPlayerRareFlag(rare), isRarePlayerCard(rare), isSpecialPlayerCard(rare)])
+      .toEqual([1, true, false]);
+    expect([readPlayerRareFlag(special), isRarePlayerCard(special), isSpecialPlayerCard(special)])
+      .toEqual([97, true, true]);
   });
 
   it('uses the same classification for selection, diagnostics, and recap snapshots', () => {

@@ -194,6 +194,32 @@ export function createRollingRequiredSpecialSourceFilter(input = {}) {
   };
 }
 
+export function createRollingStorageSinkCandidateFilter(input = {}) {
+  const constraintIndexes = [...new Set((input.constraintIndexes || [])
+    .map(Number)
+    .filter((index) => Number.isInteger(index) && index >= 0))];
+  const isPrimaryRequiredSpecial = typeof input.isPrimaryRequiredSpecial === 'function'
+    ? input.isPrimaryRequiredSpecial
+    : () => false;
+  const requiredSpecialSourceFilter = createRollingRequiredSpecialSourceFilter({
+    constraintIndexes,
+    isClubTotw: input.isClubTotw,
+    resolveSubmissionPile: input.resolveSubmissionPile,
+  });
+  return (entry = {}) => {
+    const matchesPrimaryRequiredSpecial = [entry.signal, entry.item]
+      .filter(Boolean)
+      .some((item) => {
+        try { return isPrimaryRequiredSpecial(item) === true; } catch { return true; }
+      });
+    const matchesStorageSinkRole = constraintIndexes.some((index) => (
+      entry.requirementMatches?.[index] === true
+    ));
+    if (matchesPrimaryRequiredSpecial && !matchesStorageSinkRole) return false;
+    return requiredSpecialSourceFilter(entry);
+  };
+}
+
 export function classifyRollingInventoryItem(item = {}, options = {}) {
   const rating = normalizedRating(item.rating);
   const duplicate = options.duplicate === true

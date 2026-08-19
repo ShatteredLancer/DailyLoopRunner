@@ -79,6 +79,47 @@ export function classifyPendingPlayerPicks(items, acceptedNames = [], acceptedRe
   };
 }
 
+export async function findPendingPlayerPickReward(options = {}) {
+  if (typeof options.refresh !== 'function') throw new TypeError('refresh is required');
+  if (typeof options.list !== 'function') throw new TypeError('list is required');
+  const attempts = Math.max(1, Math.min(20, Number(options.attempts || 1) || 1));
+  const delayMs = Math.max(0, Number(options.delayMs ?? 900) || 0);
+  const forceFresh = options.forceFresh === true;
+  if (forceFresh && typeof options.invalidate !== 'function') {
+    throw new TypeError('invalidate is required for a forced-fresh Player Pick lookup');
+  }
+  const sleep = typeof options.sleep === 'function' ? options.sleep : async () => {};
+  const records = [];
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const invalidation = forceFresh ? await options.invalidate() : null;
+    const refresh = await options.refresh({ attempt, forceFresh });
+    const picks = options.list() || [];
+    const pending = classifyPendingPlayerPicks(
+      picks,
+      options.acceptedNames || [],
+      options.acceptedResourceIds || [],
+    );
+    records.push({
+      attempt,
+      invalidation,
+      refresh,
+      pickCount: picks.length,
+      matchingId: Number(pending.matching?.id || 0) || null,
+      unexpectedId: Number(pending.unexpected?.id || 0) || null,
+    });
+    if (pending.unexpected && options.failOnUnexpected === true) {
+      return { status: 'unexpected', item: pending.unexpected, attempts: attempt, records };
+    }
+    if (pending.matching) {
+      return { status: 'found', item: pending.matching, attempts: attempt, records };
+    }
+    if (attempt < attempts && delayMs) await sleep(delayMs);
+  }
+
+  return { status: 'missing', item: null, attempts, records };
+}
+
 export function rankPlayerPickCandidates(items, prices = new Map(), options = {}) {
   const isSpecial = options.isSpecial || (() => false);
   const isDuplicate = options.isDuplicate || (() => false);

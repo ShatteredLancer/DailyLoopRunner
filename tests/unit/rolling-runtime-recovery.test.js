@@ -40,6 +40,82 @@ describe('Rolling runtime recovery helpers', () => {
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 90, rating: 90, rareflag: 2, duplicate: true }), {})).toBe(false);
   });
 
+  it('does not let optional subtype methods upgrade an ordinary Gold card to special', async () => {
+    const ordinaryClubGold = makePlayer({
+      id: 191,
+      definitionId: 9191,
+      rating: 77,
+      rareflag: 0,
+      name: 'Ordinary first-owner Gold',
+    });
+    ordinaryClubGold.isFOF = () => true;
+    ordinaryClubGold.isTOTW = () => true;
+    ordinaryClubGold.isTOTS = () => true;
+    ordinaryClubGold.isFUTTIES = () => true;
+    const actualFof = makePlayer({
+      id: 192,
+      definitionId: 9192,
+      rating: 95,
+      rareflag: 117,
+      name: 'Festival of Football',
+    });
+    actualFof.isFOF = () => true;
+    const { api } = await loadUserscript({ club: [ordinaryClubGold, actualFof] });
+    const loopDef = {
+      name: 'Rolling Gold recovery',
+      runtimeProtectionRating: 95,
+    };
+    const runtime = {
+      primaryContext: { activeLoopDef: loopDef },
+      coordinator: { getLedger: () => null },
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+    };
+
+    expect([
+      api.isTotwItem(ordinaryClubGold),
+      api.isTotsItem(ordinaryClubGold),
+      api.isFofItem(ordinaryClubGold),
+      api.isFuttiesItem(ordinaryClubGold),
+    ]).toEqual([false, false, false, false]);
+    expect(api.isSbcSpecialItem(ordinaryClubGold)).toBe(false);
+    expect(api.assertRollingRecoveryItems(loopDef, runtime, [ordinaryClubGold], {
+      allowProvisionsReserve: true,
+    })).toBe(true);
+    expect(api.isFofItem(actualFof)).toBe(true);
+    expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [actualFof], {
+      allowProvisionsReserve: true,
+    })).toThrow(/special/);
+  });
+
+  it('does not block Player Pick fodder when EA isSpecial contradicts explicit normal rarity', async () => {
+    const common = makePlayer({ id: 193, definitionId: 9193, rating: 75, rareflag: 0 });
+    const rare = makePlayer({ id: 194, definitionId: 9194, rating: 81, rareflag: 1 });
+    common.isSpecial = () => true;
+    rare.isSpecial = () => true;
+    const actualSpecial = makePlayer({ id: 195, definitionId: 9195, rating: 88, rareflag: 97 });
+    actualSpecial.isSpecial = () => false;
+    const { api } = await loadUserscript();
+    const pickDef = {
+      name: 'Rare Gold Player Pick',
+      blockSpecial: true,
+      expectedPlayerCount: 2,
+      requirements: [{ count: 2, tier: 'gold' }],
+    };
+
+    expect(api.inspectSbcItems(pickDef, [common, rare])).toMatchObject({
+      specialCount: 0,
+      blocked: [],
+    });
+    expect(api.inspectSbcItems(pickDef, [rare, actualSpecial])).toMatchObject({
+      specialCount: 1,
+      blocked: [expect.objectContaining({
+        item: actualSpecial,
+        reasons: expect.arrayContaining(['special-blocked']),
+      })],
+    });
+  });
+
   it('detects a pending Player Pick from its exact live entity instead of the ledger snapshot', async () => {
     const livePick = makePlayer({ id: 501, definitionId: 9501 });
     livePick.isPlayerPickItem = () => true;

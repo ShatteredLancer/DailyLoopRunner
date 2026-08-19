@@ -145,6 +145,7 @@ import {
   createRollingRatingRecoverySelectionPolicy,
   createRollingRecoveryProtection,
   createRollingRequiredSpecialSourceFilter,
+  createRollingStorageSinkCandidateFilter,
   diagnoseRollingInventoryRefs,
   planRollingStorageMaintenance,
   planRollingOpenedItemRouting,
@@ -219,7 +220,7 @@ import {
 import { claimSbcRewards } from './reward/sbc-claim.js';
 import {
   capturePlayerPickSelections,
-  classifyPendingPlayerPicks,
+  findPendingPlayerPickReward,
   planPlayerPickSelection,
   partitionPendingPlayerPicks,
   playerPickMatchesReward,
@@ -6159,6 +6160,7 @@ function updateLoopControls() {
     const id = Number(item?.id || 0);
     if (id && state.consumedItemIds.has(id)) return false;
     if (id && state.assumedTotwItemIds.has(id)) return true;
+    if (!isSpecial(item)) return false;
     let runtimeResult = null;
     for (const methodName of ['isTOTW', 'isTotw']) {
       if (typeof item?.[methodName] !== 'function') continue;
@@ -6175,16 +6177,21 @@ function updateLoopControls() {
   }
 
   function isTotsItem(item) {
+    if (!isSpecial(item)) return false;
     try { if (item?.isTOTS?.() || item?.isTots?.()) return true; } catch { }
     return /\bTOTS\b|Team of the Season|赛季最佳|賽季最佳/i.test(itemSearchText(item));
   }
 
   function isFofItem(item) {
+    // EA does not expose a Player Item card-type contract for these optional methods.
+    // Canonical rarity must establish that this is a special before subtype hints apply.
+    if (!isSpecial(item)) return false;
     try { if (item?.isFOF?.() || item?.isFof?.()) return true; } catch { }
     return /\bFOF\b|Festival of Football|Glory Hunters|荣耀猎手|榮耀獵手/i.test(itemSearchText(item));
   }
 
   function isFuttiesItem(item) {
+    if (!isSpecial(item)) return false;
     try { if (item?.isFUTTIES?.() || item?.isFutties?.()) return true; } catch { }
     return /\bFUTTIES\b/i.test(itemSearchText(item));
   }
@@ -11140,21 +11147,37 @@ function updateLoopControls() {
   }
 
   async function findUnassignedPlayerPick(loopDef, attempts = 10, options = {}) {
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      await refreshUnassigned({ quiet: true, attempts: 1 });
-      const picks = eaPlayerPickAdapter().listUnassignedPlayerPicks();
-      const pending = classifyPendingPlayerPicks(
-        picks,
-        loopDef.pickItemNames || [],
-        loopDef.pickItemResourceIds || [],
-      );
-      if (pending.unexpected && options.failOnUnexpected) {
-        fail(`${loopDef.name}: unrelated unassigned Player Pick detected (${playerPickItemName(pending.unexpected)}); stop without redeeming it`);
-      }
-      if (pending.matching) return pending.matching;
-      if (attempt < attempts) await sleep(900);
+    const forceFresh = options.forceFresh === true;
+    const result = await findPendingPlayerPickReward({
+      attempts,
+      forceFresh,
+      acceptedNames: loopDef.pickItemNames || [],
+      acceptedResourceIds: loopDef.pickItemResourceIds || [],
+      failOnUnexpected: options.failOnUnexpected === true,
+      invalidate: () => eaInventoryAdapter().invalidateUnassigned(),
+      refresh: () => refreshUnassigned({
+        quiet: true,
+        attempts: 1,
+        allowCacheFallback: !forceFresh,
+      }),
+      list: () => eaPlayerPickAdapter().listUnassignedPlayerPicks(),
+      sleep,
+    });
+    if (result.status === 'unexpected') {
+      fail(`${loopDef.name}: unrelated unassigned Player Pick detected (${playerPickItemName(result.item)}); stop without redeeming it`);
     }
-    if (!options.quietMissing) log(`${loopDef.name}: Player Pick reward was not found in unassigned items`);
+    if (result.status === 'found') {
+      if (forceFresh) {
+        log(`${loopDef.name}: forced-fresh Unassigned scan found the Player Pick reward on attempt ${result.attempts}/${Math.max(1, Number(attempts || 1))}; redeeming it now`);
+      }
+      return result.item;
+    }
+    if (!options.quietMissing) {
+      const suffix = forceFresh
+        ? ` after ${result.attempts} forced-fresh Purchased/Unassigned scan(s)`
+        : '';
+      log(`${loopDef.name}: Player Pick reward was not found in unassigned items${suffix}`);
+    }
     return null;
   }
 
@@ -14061,18 +14084,25 @@ function updateLoopControls() {
         !consumableItemRefs.some((candidate) => rollingItemMatchesRef(ref, candidate))
       ));
     }
-    if (!requiredSpecialRoles.length) return selectionPolicy;
+    const candidateFilter = createRollingStorageSinkCandidateFilter({
+      constraintIndexes: requiredSpecialRoles.map((role) => role.constraintIndex),
+      isPrimaryRequiredSpecial: (item) => (
+        rollingLiveRequiredSpecial(item, runtime.primaryContext?.model)
+          || rollingSnapshotRequiredSpecial(
+            item,
+            runtime.primaryContext?.activeLoopDef || loopDef,
+          )
+      ),
+      isClubTotw: isTotwItem,
+      resolveSubmissionPile: (entry) => (
+        entry?.signal && entry?.pileName === 'unassigned'
+          ? 'unassigned'
+          : rollingSelectionSubmissionPile(entry)
+      ),
+    });
     return {
       ...selectionPolicy,
-      candidateFilter: createRollingRequiredSpecialSourceFilter({
-        constraintIndexes: requiredSpecialRoles.map((role) => role.constraintIndex),
-        isClubTotw: isTotwItem,
-        resolveSubmissionPile: (entry) => (
-          entry?.signal && entry?.pileName === 'unassigned'
-            ? 'unassigned'
-            : rollingSelectionSubmissionPile(entry)
-        ),
-      }),
+      candidateFilter,
     };
   }
 
@@ -14461,7 +14491,7 @@ function updateLoopControls() {
       loopDef,
       runtime,
       capability,
-      { attempts: 1, quietMissing: true, failOnUnexpected: true },
+      { attempts: 1, forceFresh: true, quietMissing: true, failOnUnexpected: true },
     );
     if (pendingSelection.status !== 'missing') return pendingSelection;
 
@@ -14620,6 +14650,7 @@ function updateLoopControls() {
       capability,
       {
         attempts: 10,
+        forceFresh: true,
         quietMissing: false,
         failOnUnexpected: true,
         duplicatesConsumed,
@@ -15133,7 +15164,7 @@ function updateLoopControls() {
         loopDef,
         runtime,
         { status: 'resolved', loop: capability.loop },
-        { attempts: 1, quietMissing: true, failOnUnexpected: false },
+        { attempts: 2, forceFresh: true, quietMissing: true, failOnUnexpected: false },
       );
       if (selected.status !== 'missing' && selected.status !== 'unavailable') return selected;
     }
@@ -15141,6 +15172,15 @@ function updateLoopControls() {
   }
 
   async function runRollingGenericStorageSinkRecovery(loopDef, runtime, capability) {
+    if (capability.rewardKind === 'player-pick') {
+      const pendingSelection = await selectPendingRollingStorageSinkPick(
+        loopDef,
+        runtime,
+        { status: 'resolved', loop: capability.loop },
+        { attempts: 1, forceFresh: true, quietMissing: true, failOnUnexpected: true },
+      );
+      if (pendingSelection.status !== 'missing') return pendingSelection;
+    }
     const loaded = await loadRollingGenericStorageSinkContexts(loopDef, capability);
     if (loaded.status !== 'ready') return loaded;
     const context = nextGenericStorageSinkContext(loaded.contexts);
@@ -15209,6 +15249,7 @@ function updateLoopControls() {
         { status: 'resolved', loop: capability.loop },
         {
           attempts: 10,
+          forceFresh: true,
           quietMissing: false,
           failOnUnexpected: true,
           duplicatesConsumed: rollingDuplicatePlayerCount(plan.selection?.selected)

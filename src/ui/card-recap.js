@@ -60,13 +60,14 @@ function renderCardRow(dom, row, formatPrice, mode) {
   });
   const identity = dom.create('span');
   applyStyles(identity, {
-    flex: '1 1 280px', minWidth: '0', display: 'flex', gap: '6px', alignItems: 'baseline', overflow: 'hidden',
+    flex: '1 1 280px', minWidth: mode?.mobile ? '0' : '220px', display: 'flex', flexDirection: 'column',
+    gap: '2px', alignItems: 'stretch', overflow: 'visible',
   });
   const name = dom.create('span');
   name.textContent = String(row.name || 'Unknown player');
   name.title = name.textContent;
   applyStyles(name, {
-    fontWeight: '600', flex: '1 1 150px', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    fontWeight: '600', width: '100%', minWidth: '0', lineHeight: '18px', whiteSpace: 'normal', overflowWrap: 'anywhere',
   });
   identity.appendChild(name);
   if (row.sourceLabel) {
@@ -74,7 +75,7 @@ function renderCardRow(dom, row, formatPrice, mode) {
     source.textContent = row.sourceLabel;
     source.title = source.textContent;
     applyStyles(source, {
-      color: theme.muted || '#AAB4C2', fontSize: '11px', fontWeight: '600', flex: '0 1 170px', minWidth: '0',
+      color: theme.muted || '#AAB4C2', fontSize: '11px', fontWeight: '600', width: '100%', minWidth: '0',
       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
     });
     identity.appendChild(source);

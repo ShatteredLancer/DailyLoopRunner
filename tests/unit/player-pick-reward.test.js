@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   capturePlayerPickSelections,
   classifyPendingPlayerPicks,
+  findPendingPlayerPickReward,
   getManualPlayerPickReason,
   partitionPendingPlayerPicks,
   planPlayerPickSelection,
@@ -40,6 +41,72 @@ describe('Player Pick reward planning', () => {
       .toEqual({ matching, unexpected: [unexpected] });
     expect(playerPickMatchesReward(matching[0], [], [5004333])).toBe(true);
     expect(playerPickMatchesReward(unexpected, [], [5004333])).toBe(false);
+  });
+
+  it('invalidates Purchased before every forced-fresh scan and returns a newly materialized Pick', async () => {
+    const calls = [];
+    const matching = { id: 41, definitionId: 5005713, name: '1 of 3 95+ Player Pick' };
+    let picks = [];
+    let refreshCount = 0;
+
+    const result = await findPendingPlayerPickReward({
+      attempts: 3,
+      forceFresh: true,
+      acceptedResourceIds: [5005713],
+      invalidate: async () => {
+        calls.push('invalidate');
+        picks = [];
+        return { invalidated: true };
+      },
+      refresh: async () => {
+        calls.push('refresh');
+        refreshCount++;
+        if (refreshCount === 2) picks = [matching];
+        return { success: true };
+      },
+      list: () => {
+        calls.push('list');
+        return picks;
+      },
+      sleep: async () => { calls.push('sleep'); },
+    });
+
+    expect(result).toMatchObject({ status: 'found', item: matching, attempts: 2 });
+    expect(calls).toEqual([
+      'invalidate', 'refresh', 'list', 'sleep',
+      'invalidate', 'refresh', 'list',
+    ]);
+  });
+
+  it('keeps ordinary pending-Pick scans cache-compatible and bounded', async () => {
+    const invalidate = vi.fn();
+    const refresh = vi.fn(async () => ({ success: true }));
+    const result = await findPendingPlayerPickReward({
+      attempts: 2,
+      forceFresh: false,
+      acceptedNames: ['95+ Player Pick'],
+      invalidate,
+      refresh,
+      list: () => [],
+      sleep: async () => {},
+    });
+
+    expect(result).toMatchObject({ status: 'missing', attempts: 2 });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports an unrelated Pick before redeeming any reward', async () => {
+    const unrelated = { id: 42, definitionId: 5009999, name: 'Unrelated Player Pick' };
+    const result = await findPendingPlayerPickReward({
+      attempts: 3,
+      acceptedResourceIds: [5005713],
+      failOnUnexpected: true,
+      refresh: async () => ({ success: true }),
+      list: () => [unrelated],
+    });
+
+    expect(result).toMatchObject({ status: 'unexpected', item: unrelated, attempts: 1 });
   });
 
   it('orders by rating, special, non-duplicate, price, then original position', () => {

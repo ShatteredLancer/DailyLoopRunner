@@ -5,6 +5,7 @@ import {
   createRollingRatingRecoverySelectionPolicy,
   createRollingRecoveryProtection,
   createRollingRequiredSpecialSourceFilter,
+  createRollingStorageSinkCandidateFilter,
   diagnoseRollingInventoryRefs,
   planRollingStorageMaintenance,
   planRollingOpenedItemRouting,
@@ -912,6 +913,57 @@ describe('Rolling inventory policy', () => {
     expect(ordinaryRecovery.protectedItems).toEqual([requiredSpecial.ref]);
     expect(storageSink.protectedItems).toEqual([]);
     expect(storageSink.exclusiveRoles).toHaveLength(1);
+  });
+
+  it('keeps a primary Required Special out of a Storage Sink that has no matching role', () => {
+    const requiredSignal = item(10, 91, { special: true, pile: 'unassigned' });
+    const requiredCounterpart = item(2010, 91, { special: true, pile: 'club' });
+    const ordinarySignal = item(11, 90, { pile: 'unassigned' });
+    const ordinaryCounterpart = item(2011, 90, { pile: 'club' });
+    const filter = createRollingStorageSinkCandidateFilter({
+      isPrimaryRequiredSpecial: (candidate) => candidate.special === true,
+      resolveSubmissionPile: (entry) => entry.submissionPileName,
+    });
+
+    expect(filter({
+      item: requiredCounterpart,
+      signal: requiredSignal,
+      pileName: 'unassigned',
+      submissionPileName: 'club',
+      requirementMatches: [],
+    })).toBe(false);
+    expect(filter({
+      item: ordinaryCounterpart,
+      signal: ordinarySignal,
+      pileName: 'unassigned',
+      submissionPileName: 'club',
+      requirementMatches: [],
+    })).toBe(true);
+  });
+
+  it('admits a primary Required Special only when the Storage Sink explicitly requires it', () => {
+    const requiredSignal = item(10, 91, { special: true, pile: 'unassigned' });
+    const requiredCounterpart = item(2010, 91, { special: true, pile: 'club' });
+    const filter = createRollingStorageSinkCandidateFilter({
+      constraintIndexes: [0],
+      isPrimaryRequiredSpecial: (candidate) => candidate.special === true,
+      resolveSubmissionPile: (entry) => entry.signal ? 'unassigned' : entry.submissionPileName,
+    });
+
+    expect(filter({
+      item: requiredCounterpart,
+      signal: requiredSignal,
+      pileName: 'unassigned',
+      submissionPileName: 'club',
+      requirementMatches: [true],
+    })).toBe(true);
+    expect(filter({
+      item: requiredCounterpart,
+      signal: requiredSignal,
+      pileName: 'unassigned',
+      submissionPileName: 'club',
+      requirementMatches: [false],
+    })).toBe(false);
   });
 
   it('fail-closes malformed unclassified protection entries instead of crashing', () => {

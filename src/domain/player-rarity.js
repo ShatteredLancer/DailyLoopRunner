@@ -47,7 +47,7 @@ function meaningfulCardState(value, options = {}) {
 }
 
 export function readPlayerRareFlag(item = {}) {
-  const values = [
+  const explicitValues = [
     item.rareflag,
     item.rareFlag,
     item._rareflag,
@@ -56,9 +56,10 @@ export function readPlayerRareFlag(item = {}) {
     item._staticData?.rareflag,
     item._staticData?.rareFlag,
   ].map(Number).filter(Number.isFinite);
-  if (item.special === true || callBoolean(item, 'isSpecial') === true) values.push(2);
-  if (item.rare === true || callBoolean(item, 'isRare') === true) values.push(1);
-  return values.length ? Math.max(0, ...values) : 0;
+  if (explicitValues.length) return Math.max(0, ...explicitValues);
+  if (item.special === true || callBoolean(item, 'isSpecial') === true) return 2;
+  if (item.rare === true || callBoolean(item, 'isRare') === true) return 1;
+  return 0;
 }
 
 function playerDefinitionId(item = {}) {

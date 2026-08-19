@@ -20,6 +20,44 @@ function harness() {
 }
 
 describe('Rolling recap UI', () => {
+  it('keeps long player names visible while placing source metadata below them', () => {
+    const ui = harness();
+    void showLoopRecap({
+      dom: ui.dom,
+      model: {
+        modalId: 'rolling-recap-long-name',
+        title: 'Rolling Recap',
+        summary: '1 pack',
+        specialCount: 1,
+        pageCount: 1,
+        pageSize: 15,
+        totalRows: 1,
+        rows: [{
+          name: 'Matteo Guendouzi Very Long Player Name',
+          rating: 96,
+          sourceLabel: '10x 85+ Rare Gold Players Pack',
+          special: true,
+        }],
+      },
+    });
+
+    const playerName = ui.created.find((element) => (
+      element.textContent === 'Matteo Guendouzi Very Long Player Name'
+    ));
+    expect(playerName.style).toMatchObject({
+      width: '100%',
+      whiteSpace: 'normal',
+      overflowWrap: 'anywhere',
+    });
+    expect(playerName.style.textOverflow).toBeUndefined();
+    const identity = ui.created.find((element) => element.children.includes(playerName));
+    expect(identity.style).toMatchObject({
+      flexDirection: 'column',
+      minWidth: '220px',
+      overflow: 'visible',
+    });
+  });
+
   it('renders bounded-run details without changing the shared pagination contract', async () => {
     const ui = harness();
     const promise = showLoopRecap({
