@@ -324,6 +324,7 @@ function validatePickOptions(value, path, errors) {
     'rollingStorageSinkSetId',
     'rollingStorageSinkSetName',
     'rollingSurplusCraftingEnabled',
+    'rollingProtectAllClubNonTotwSpecials',
     'rollingProvisionsMaxRating',
     'rollingOpenDuplicateProvisionsRewards',
     'rollingShortageProvisionsPackLimit',
@@ -331,7 +332,7 @@ function validatePickOptions(value, path, errors) {
   Object.keys(value).forEach((field) => {
     if (!allowedFields.has(field)) errors.push(`${path}.${field} is not supported`);
   });
-  ['protectHighGold', 'autoSelect', 'autoSelectBelow90', 'openAtEnd', 'openPicksAtEnd', 'preferScannedMetadata', 'rollingStorageSinkEnabled', 'rollingSurplusCraftingEnabled', 'rollingOpenDuplicateProvisionsRewards']
+  ['protectHighGold', 'autoSelect', 'autoSelectBelow90', 'openAtEnd', 'openPicksAtEnd', 'preferScannedMetadata', 'rollingStorageSinkEnabled', 'rollingSurplusCraftingEnabled', 'rollingProtectAllClubNonTotwSpecials', 'rollingOpenDuplicateProvisionsRewards']
     .forEach((field) => {
       if (value[field] !== undefined && typeof value[field] !== 'boolean') {
         errors.push(`${path}.${field} must be boolean`);

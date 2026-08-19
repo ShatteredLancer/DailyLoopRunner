@@ -240,6 +240,13 @@ export function showSelectionPolicySettings(options = {}) {
     pickOptions.rollingSurplusCraftingEnabled === true,
     'After a primary cycle, proactively turn complete Provisions reserves and eligible low-rated Storage cards into recovery SBCs; disabled still permits shortage and Storage-pressure recovery',
   );
+  const rollingProtectAllClubNonTotwSpecials = checkbox(
+    dom,
+    'bronze-loop-policy-rolling-protect-club-specials',
+    'Protect all Club non-TOTW specials',
+    pickOptions.rollingProtectAllClubNonTotwSpecials === true,
+    'Never use a Club non-TOTW special in Rolling, including severe fodder shortage; Storage, Transfer, and Unassigned specials remain eligible under the existing limits',
+  );
   const rollingProvisionsMaxRating = selectInput(
     dom,
     'bronze-loop-policy-rolling-provisions-max-rating',
@@ -272,6 +279,7 @@ export function showSelectionPolicySettings(options = {}) {
     field(dom, 'Provisions reserve', rollingProvisionsMaxRating, mode, 'Choose whether 89-rated non-required cards join the default 87/88 Provisions reserve'),
     field(dom, 'Provisions packs per shortage', rollingShortageProvisionsPackLimit, mode, 'Open at most this many existing Provisions rewards before replanning the primary squad; TOTW rewards remain one at a time'),
     rollingSurplusCrafting.label,
+    rollingProtectAllClubNonTotwSpecials.label,
     rollingOpenDuplicateProvisionsRewards.label,
     wideField(dom, 'Storage pressure recovery', rollingStorageSinkMode, mode, 'Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set'),
     wideField(dom, 'Storage pressure SBC', rollingStorageSinkSet, mode, 'Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility'),
@@ -326,6 +334,8 @@ export function showSelectionPolicySettings(options = {}) {
           ))?.name || ''
         : '',
       rollingSurplusCraftingEnabled: rollingSurplusCrafting.input.checked,
+      rollingProtectAllClubNonTotwSpecials:
+        rollingProtectAllClubNonTotwSpecials.input.checked,
       rollingProvisionsMaxRating: readNumber(
         rollingProvisionsMaxRating,
         pickOptions.rollingProvisionsMaxRating,
@@ -363,6 +373,7 @@ export function showSelectionPolicySettings(options = {}) {
       rollingProvisionsMaxRating,
       rollingShortageProvisionsPackLimit,
       rollingSurplusCrafting.input,
+      rollingProtectAllClubNonTotwSpecials.input,
       rollingOpenDuplicateProvisionsRewards.input,
       rollingStorageSinkMode,
       rollingStorageSinkSet,

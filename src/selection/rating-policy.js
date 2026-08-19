@@ -94,6 +94,16 @@ function roleMatchesEntry(role, entry) {
   return false;
 }
 
+function entrySubmissionPile(entry = {}) {
+  return String(
+    entry.submissionPileName
+      || entry.item?.pile
+      || entry.item?.ref?.pile
+      || entry.pileName
+      || '',
+  );
+}
+
 function histogram(entries = []) {
   const result = {};
   for (const entry of entries) {
@@ -189,7 +199,9 @@ export function buildRatingSelectionPolicy(input = {}, candidateEntries = [], mo
       buckets.reserved.push(entry);
       continue;
     }
-    if (!matchesExclusiveRole && sourceEntry.special === true && softProtectSpecialPiles.has(String(sourceEntry.pileName || ''))) {
+    if (!matchesExclusiveRole
+      && sourceEntry.special === true
+      && softProtectSpecialPiles.has(entrySubmissionPile(sourceEntry))) {
       counts.softProtected++;
       buckets.softProtected.push({ ...entry, softProtected: true });
       continue;

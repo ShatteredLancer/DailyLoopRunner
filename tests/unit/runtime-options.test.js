@@ -29,6 +29,7 @@ describe('loop runtime option projection', () => {
       rollingStorageSinkSetId: null,
       rollingStorageSinkSetName: '',
       rollingSurplusCraftingEnabled: false,
+      rollingProtectAllClubNonTotwSpecials: false,
       rollingProvisionsMaxRating: 88,
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
@@ -50,6 +51,7 @@ describe('loop runtime option projection', () => {
       rollingStorageSinkSetId: null,
       rollingStorageSinkSetName: '',
       rollingSurplusCraftingEnabled: false,
+      rollingProtectAllClubNonTotwSpecials: false,
       rollingProvisionsMaxRating: 88,
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
@@ -354,6 +356,25 @@ describe('loop runtime option projection', () => {
     expect(enabled).toMatchObject({
       rollingSurplusCraftingEnabled: true,
       runtimePickOptions: { rollingSurplusCraftingEnabled: true },
+    });
+  });
+
+  it('keeps strict Club non-TOTW special protection opt-in and projects it onto Rolling', () => {
+    expect(normalizePickRuntimeOptions({})).toMatchObject({
+      rollingProtectAllClubNonTotwSpecials: false,
+    });
+    expect(resolvePickRuntimeOptions(
+      { rollingProtectAllClubNonTotwSpecials: true },
+      { pickOptions: { rollingProtectAllClubNonTotwSpecials: false } },
+    )).toMatchObject({ rollingProtectAllClubNonTotwSpecials: false });
+
+    const enabled = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(enabled, {
+      pickOptions: { rollingProtectAllClubNonTotwSpecials: true },
+    });
+    expect(enabled).toMatchObject({
+      rollingProtectAllClubNonTotwSpecials: true,
+      runtimePickOptions: { rollingProtectAllClubNonTotwSpecials: true },
     });
   });
 

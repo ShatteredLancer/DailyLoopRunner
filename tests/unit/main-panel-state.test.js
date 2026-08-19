@@ -146,6 +146,8 @@ describe('main panel state rendering', () => {
       .toContain('shortage Provisions batch 2');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('surplus Provisions/TOTW shortage only');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Club non-TOTW specials fallback allowed');
     renderSelectionPolicySummary({
       panel,
       sbcFodderOptions: { ratingSbcMaxCardRating: 87 },
@@ -154,6 +156,7 @@ describe('main panel state rendering', () => {
         autoSelectBelow90: false,
         rollingStorageSinkEnabled: true,
         rollingSurplusCraftingEnabled: true,
+        rollingProtectAllClubNonTotwSpecials: true,
         rollingProvisionsMaxRating: 89,
         rollingOpenDuplicateProvisionsRewards: true,
         rollingShortageProvisionsPackLimit: 5,
@@ -169,6 +172,8 @@ describe('main panel state rendering', () => {
       .toContain('shortage Provisions batch 5');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('surplus Provisions/TOTW enabled');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Club non-TOTW specials protected');
   });
 
   it('renders indeterminate and determinate Dynamic SBC scan progress', () => {

@@ -1,8 +1,8 @@
 # 10x85+ Rolling Loop 使用与流程指南
 
-> 适用版本：DailyLoopRunner `v0.8.0`
+> 适用版本：DailyLoopRunner `v0.8.11`
 >
-> 最后更新：2026-08-17
+> 最后更新：2026-08-19
 >
 > 本文说明实际运行行为。设计决策、测试和实施记录见 [10x85+ Rolling Loop 设计与实施追踪](10X85_ROLLING_LOOP_IMPLEMENTATION_ZH.md)。
 
@@ -38,6 +38,7 @@ Loop 不写死当前 Set、Challenge、奖励包 ID、目标评分或阵容人�
 | `Provisions reserve` | `87-88` | 选择 Provisions 储备范围，可改为 `87-89`；默认关闭余量制作时，这些卡仍可优先回填主阵。 |
 | `Provisions packs per shortage` | `2` | 一次真实缺料处理中最多打开多少个已有 Provisions 奖励，范围 `1-30`；每批后重新规划。 |
 | `Craft surplus Provisions/TOTW` | 关闭 | 关闭时只在缺料或 Storage 压力下执行恢复 SBC；开启后才主动消耗余量。 |
+| `Protect all Club non-TOTW specials` | 关闭 | 开启后，Rolling 的主阵、Storage pressure SBC 和所有恢复阵都禁止使用 Club 非 TOTW 色卡，即使严重缺料也不放宽；Storage、Transfer 和 Unassigned 色卡仍按原有评分及角色限制可用。 |
 | `Open duplicate Provisions rewards immediately` | 关闭 | 关闭时，由主包重复 Reserve 制作的 Provisions 奖励留在 My Packs，等真正缺料再开。 |
 | `Storage pressure recovery` | `Off` | `Automatic` 优先使用兼容的 95+ Pick；`Selected SBC` 只使用用户指定的高评分 Player Pick 或直接球员 SBC。 |
 | `Storage pressure SBC` | 扫描目录中的第一项 | 仅在 `Selected SBC` 模式生效；保存后只深度验证选中的 Set。 |
@@ -102,6 +103,7 @@ Required Special 是主 SBC 要求的 `TOTW/TOTS/FOF/FUTTIES` 角色，规则如
 - 不高于 `Automatic-use max rating` 的安全普通卡可用于主阵。
 - Storage 中不高于阈值的非 Required Special 可作为普通材料。
 - Club 中的其它 Special 属于最后候选，尽量保留；Club 中匹配 TOTS/FOF/FUTTIES 身份的卡硬保护。
+- 开启 `Protect all Club non-TOTW specials` 后，上一条的最后候选层关闭：所有 Club 非 TOTW 色卡都进入硬保护。Club TOTW 仍只能用于 Required Special 槽；该开关不会禁止 Storage、Transfer 或 Unassigned 中可安全消耗的色卡。
 - 高于阈值的重复卡优先移动到 Storage，不会为了继续循环而强制提交。
 - FSU Lock、loan、limited-use、concept、academy/evolution、active trade item 和同阵 definition 冲突始终排除。
 
@@ -139,6 +141,8 @@ Runner 追求满足 EA 的准确目标评分，但不会为了精确评分牺牲
 ## 6. 哪些包会被打开
 
 启动 Rolling 不会预先清空历史 Provisions、TOTW 或 5x80+ 奖励。已有恢复包只有在对应缺料分支被真实触发时才会处理；正常情况下先寻找或制作一包主 `10x85+` 奖励。
+
+任何缺料恢复包在打开前都先运行 Unassigned 清理事务。若当前 Unassigned 因 Storage 已满而无法安全路由，Runner 不会打开该包，也不会继续打开下一个恢复包：启用了 `Storage pressure recovery` 时，先用当前 Unassigned/Storage 完成一次已验证的 Storage pressure SBC，重新对账后再重试同一个包；未启用或无法释放足够空间时，保留该包并安全停止。此规则同时适用于已有 Provisions/5x80+、本轮新制作的 Provisions/5x80+ 和 Required Special/TOTW 恢复奖励。
 
 | 奖励 | 触发时机 | 每次处理量 | 打开行为 |
 | --- | --- | --- | --- |

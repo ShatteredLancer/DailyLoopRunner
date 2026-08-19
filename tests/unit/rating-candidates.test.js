@@ -140,6 +140,46 @@ describe('rating candidate integration planning', () => {
     expect(result.buildMs).toBe(1);
   });
 
+  it('keeps the actual submission pile when an Unassigned signal resolves to Club', () => {
+    const signal = item(20, 200, 95, {
+      duplicate: true,
+      duplicateId: 30,
+      rareflag: 16,
+      special: true,
+    });
+    const clubTarget = item(30, 200, 95, {
+      rareflag: 16,
+      special: true,
+    });
+    const piles = {
+      unassigned: [signal],
+      storage: [],
+      club: [clubTarget],
+    };
+
+    const result = buildRatingCandidateEntries({
+      model: { constraints: [{ matches: (candidate) => candidate.special === true }] },
+      settings: {},
+      piles: ['unassigned', 'storage', 'club'],
+      getPileItems: (pileName) => piles[pileName],
+      submissionItems: [clubTarget],
+      isSafe: () => true,
+      isDuplicate: (candidate) => candidate.duplicate === true,
+      pileNeedsDuplicateSignalResolution: (pileName) => pileName === 'unassigned',
+      sortFodder: (entries) => [...entries],
+      isSpecialItem: (candidate) => candidate.special === true,
+    });
+
+    expect(result.entries).toEqual([
+      expect.objectContaining({
+        item: clubTarget,
+        signal,
+        pileName: 'unassigned',
+        submissionPileName: 'club',
+      }),
+    ]);
+  });
+
   it('converts live entries to snapshots and resolves a successful plan back to live items', async () => {
     const liveItem = item(10, 100, 84);
     const liveSignal = item(20, 100, 84, { duplicateId: 10 });

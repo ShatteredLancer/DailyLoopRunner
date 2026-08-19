@@ -109,13 +109,16 @@ export function renderSelectionPolicySummary(options = {}) {
       ? 'automatic'
       : 'off';
   const surplusCrafting = pickOptions.rollingSurplusCraftingEnabled === true ? 'enabled' : 'shortage only';
+  const clubSpecialProtection = pickOptions.rollingProtectAllClubNonTotwSpecials === true
+    ? 'protected'
+    : 'fallback allowed';
   const provisionsMaxRating = Number(pickOptions.rollingProvisionsMaxRating || 88) === 89 ? 89 : 88;
   const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true
     ? 'immediate'
     : 'on shortage';
   const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
   summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickMode}`;
-  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
+  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
 }
 
 export function renderMainPanelScanProgress(options = {}) {

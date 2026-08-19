@@ -173,6 +173,7 @@ function materializeRatingVector(context, descendingRatings) {
 function planEntries(entries) {
   return entries.map((entry) => ({
     pileName: entry.pileName,
+    submissionPileName: entry.submissionPileName || entry.pileName,
     pileRank: entry.pileRank,
     itemRef: entry.item.ref,
     signalRef: entry.signal?.ref || entry.signalRef || null,

@@ -93,6 +93,7 @@
 
 - Unassigned、Storage 和 Transfer 中评分不高于 Protection rating 的 Other Special 可以作为普通评分材料。
 - Club 中普通 Other Special 使用软保护：普通材料无法组成合法阵容时才进入最后候选层。Club TOTS/FOF/FUTTIES 不属于该回退层，始终硬保护。
+- `rollingProtectAllClubNonTotwSpecials=true` 时关闭该软保护回退：所有实际提交来源为 Club 的非 TOTW Special 都硬保护。候选、Ledger 分类和提交前 validator 必须使用实际 `submissionPileName`，不能使用 Unassigned/Transfer duplicate signal 的表面来源绕过。
 - Other Special 不能满足 Required Special 槽位。
 - 高于 Protection rating 的重复 Other Special 必须进入 Storage。
 
@@ -127,13 +128,14 @@
 8. 选择 Rolling Loop 时默认勾选 `Open reward packs`。用户随后可以手动取消，但启动时必须拒绝不能开包的 Rolling Run，不暗中覆盖设置。
 9. Reward Alert 继续使用现有最低评分、Toast、Desktop 和 ntfy 设置，不新增专用 98+ 通知链。
 10. 实时资源信息放入主面板内部的透明 Runtime Telemetry，不新增独立悬浮窗。
+11. `rollingProtectAllClubNonTotwSpecials` 默认 `false` 以保持现有行为；开启后，严重缺料也不得消耗 Club 非 TOTW 色卡。Storage/Transfer/Unassigned 色卡继续按现有角色、评分和保护规则使用，Club TOTW 仍只允许进入 Required Special 槽。
 
 ## 5. 材料资格矩阵
 
 | 材料 | Unassigned | Storage | Transfer | Club |
 | --- | --- | --- | --- | --- |
 | Required Special | 仅主 SBC 特殊槽，每套最多一张 | 仅主 SBC 特殊槽，每套最多一张 | 仅主 SBC 特殊槽，每套最多一张；按 duplicate signal 解析 | 仅 TOTW 可进入主 SBC 特殊槽；TOTS/FOF/FUTTIES 硬保护 |
-| Other Special `<= Protection rating` | 可作普通材料 | 可作普通材料 | 可作普通材料 | 普通 Other Special 软保护；TOTS/FOF/FUTTIES 硬保护 |
+| Other Special `<= Protection rating` | 可作普通材料 | 可作普通材料 | 可作普通材料 | 默认普通 Other Special 软保护、TOTS/FOF/FUTTIES 硬保护；严格 Club 色卡保护开启后全部非 TOTW 硬保护 |
 | Regular `<= Protection rating` | 优先处理重复 | 可作普通材料 | 可作普通材料 | 可作普通材料，仍遵守 FSU 过滤 |
 | 非 Required Special 且评分位于可配置 Reserve 范围 | 默认与其它 `<= Protection rating` 材料相同并优先回填主阵；开启余量制作后，完整四张组做 Provisions、余数进 Storage | 默认可作主阵材料；开启余量制作后，87/88 完整组做 Provisions，`<=86` 和 89 可进入 TOTW 维护 | 默认可作主阵材料；开启余量制作后保留为 Provisions 储备 | 默认可作主阵材料但 Other Special 仍遵守 Club 软保护；开启余量制作后保留 Reserve |
 | 重复卡 `> Protection rating` | 必须存入 Storage | 保持受保护 | 不作为回填材料 | 不作为回填材料 |
@@ -356,6 +358,7 @@ TOTW Upgrade 自身的普通材料池必须排除全部 Required Special。新�
 - Required Special 永远排除。
 - Storage 中位于 Reserve 范围的 Other Special 可以使用。
 - Club Other Special 保持最后候选软保护。
+- 严格 Club 色卡保护开启时，Club Other Special 不得进入候选或 fallback；Provisions 只能使用其它 pile 的合格色卡或普通材料。
 - 不消耗下一套主 SBC 唯一可用的 Required Special，因为它根本不进入候选池。
 
 默认关闭 `rollingSurplusCraftingEnabled` 时，不执行主包 `duplicate-reserve` Provisions，也不执行主阵后的 Storage 维护；85-89 的可用重复卡直接进入主阵候选。显式开启后，至少一套主 SBC 成功提交并完成账本对账，Storage 维护才允许逐套消耗 Storage 中完整的 `87/88 x4`，这些维护奖励默认留在 My Packs；当前主包完整四张 Reserve 也可即时制作 Provisions。无论开关状态，主 Solver 明确缺料时才处理已有 Provisions/5x80+ 奖励；已有 Provisions 按 `rollingShortageProvisionsPackLimit` 分批处理，默认每次缺料最多两包并在每批后重新规划，仍缺料才制作新的 Provisions。Required Special 缺失和真实 Storage 压力恢复同样保留。
@@ -371,6 +374,16 @@ TOTW Upgrade 自身的普通材料池必须排除全部 Required Special。新�
 5. 只有 `PROTECTED_STORAGE_BLOCKED` 可以进入紧急 Storage 恢复。`OPENED_DUPLICATE_NOT_MATERIALIZED` 等物化或路由错误必须原样停止，禁止误触发 Provisions。
 
 所有 Rolling 奖励包查找只接受 EA `My Packs` Repository 中的真实实例。Store catalog 缓存只用于展示和发现，不能在真实实例已消费后以同 ID 再次被开启；同 ID 有多个真实奖励包时逐个开启直到 Repository 中不再存在。
+
+### 9.2.2 缺料奖励的预开容量门禁
+
+所有缺料奖励共用 `openRollingRecoveryReward()` 的 pre-open Unassigned 事务。打开包之前必须先证明当前 Unassigned 已安全路由；`PROTECTED_STORAGE_BLOCKED` 表示包尚未打开。
+
+1. 已有 Provisions/5x80+、显式 `pendingRecoveryReward` 和 Required Special/TOTW 奖励都先执行同一门禁。
+2. 若门禁因 Storage 满而阻塞，Workflow 只允许先执行已启用的 Storage pressure SBC，不得打开另一个恢复包扩张 Unassigned。
+3. Storage pressure 成功并产生可验证库存进度后，回到统一评估点并重试同一个 pending/leftover reward。
+4. Storage pressure 未启用、不可用或未释放足够容量时，保留 My Packs 奖励并返回 `PROTECTED_STORAGE_BLOCKED` 或具体恢复错误。
+5. 该流程不得通过放宽 Club 非 TOTW 色卡保护来制造容量。
 
 ### 9.3 Provisions 重复 Gold 清理
 

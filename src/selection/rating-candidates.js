@@ -72,6 +72,20 @@ export function buildRatingCandidateEntries(options = {}) {
   const byItemId = new Map();
   const resolvedSignals = {};
   const safetyCache = new Map();
+  const pileItemsCache = new Map();
+  const readPile = (pileName) => {
+    if (!pileItemsCache.has(pileName)) {
+      pileItemsCache.set(pileName, getPileItems(pileName) || []);
+    }
+    return pileItemsCache.get(pileName);
+  };
+  const submissionPileById = new Map();
+  for (const pileName of ['storage', 'club']) {
+    for (const item of readPile(pileName)) {
+      const itemId = Number(item?.id || 0);
+      if (itemId && !submissionPileById.has(itemId)) submissionPileById.set(itemId, pileName);
+    }
+  }
   const requiredRefs = (Array.isArray(requiredItems) ? requiredItems : [])
     .map(normalizedRequiredRef)
     .filter((ref) => ref.id > 0 || ref.definitionId > 0)
@@ -113,7 +127,7 @@ export function buildRatingCandidateEntries(options = {}) {
   const requirementCache = new Map();
   let scannedItems = 0;
   for (const [pileRank, pileName] of piles.entries()) {
-    for (const sourceItem of getPileItems(pileName)) {
+    for (const sourceItem of readPile(pileName)) {
       scannedItems++;
       requiredRefs.forEach((ref, index) => {
         if (refMatchesItem(ref, sourceItem)) {
@@ -132,6 +146,12 @@ export function buildRatingCandidateEntries(options = {}) {
       const definitionId = Number(item?.definitionId || 0);
       if (!itemId || !definitionId || byItemId.has(itemId)) continue;
       if (!cachedIsSafe(item)) continue;
+      const submissionPileName = String(
+        item?.pile
+          || item?.ref?.pile
+          || submissionPileById.get(itemId)
+          || pileName,
+      );
       if (!requirementCache.has(itemId)) {
         let requirementItem = item;
         try { requirementItem = resolveRequirementItem(item, { sourceItem, signal, pileName }) || item; } catch { }
@@ -142,6 +162,7 @@ export function buildRatingCandidateEntries(options = {}) {
         item,
         signal,
         pileName,
+        submissionPileName,
         pileRank,
         requirementMatches,
         special: isSpecialItem(item),
@@ -190,7 +211,10 @@ export function buildRatingCandidateEntries(options = {}) {
       ? [...byItemId.values()]
         .filter((entry) => Number(entry.item?.definitionId || 0) === definitionId)
         .slice(0, MAX_COMPETING_CANDIDATES)
-        .map((entry) => diagnosticCandidate(entry.item, entry.pileName))
+        .map((entry) => diagnosticCandidate(
+          entry.item,
+          entry.submissionPileName || entry.pileName,
+        ))
       : [];
     return {
       ref,
@@ -199,7 +223,10 @@ export function buildRatingCandidateEntries(options = {}) {
       candidateAfterDefinition,
       candidateAfterPolicy: candidateAfterDefinition,
       representative: representative
-        ? diagnosticCandidate(representative.item, representative.pileName)
+        ? diagnosticCandidate(
+          representative.item,
+          representative.submissionPileName || representative.pileName,
+        )
         : null,
       competingCandidates,
       reason,
@@ -232,7 +259,10 @@ export async function selectRatingCandidateEntries(options = {}) {
   } = options;
   const liveById = new Map();
   const snapshotEntries = candidateEntries.map((entry) => {
-    const item = createSnapshot(entry.item, entry.pileName);
+    const item = createSnapshot(
+      entry.item,
+      entry.submissionPileName || entry.pileName,
+    );
     const signal = entry.signal ? createSnapshot(entry.signal, entry.pileName) : null;
     liveById.set(Number(item.id), entry.item);
     if (signal) liveById.set(Number(signal.id), entry.signal);
@@ -240,6 +270,7 @@ export async function selectRatingCandidateEntries(options = {}) {
       item,
       signal,
       pileName: entry.pileName,
+      submissionPileName: entry.submissionPileName || entry.pileName,
       pileRank: entry.pileRank,
       requirementMatches: [...entry.requirementMatches],
       special: entry.special === true,
@@ -282,6 +313,7 @@ export async function selectRatingCandidateEntries(options = {}) {
     item: liveById.get(Number(entry.itemRef?.id || 0)) || null,
     signal: entry.signalRef ? liveById.get(Number(entry.signalRef.id || 0)) || null : null,
     pileName: entry.pileName,
+    submissionPileName: entry.submissionPileName || entry.pileName,
     pileRank: entry.pileRank,
     requirementMatches: entry.requirementMatches,
     special: entry.special,

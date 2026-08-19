@@ -70,6 +70,11 @@ function pickOptionOverrides(input = {}) {
     input.rollingSurplusCraftingEnabled,
   );
   assign(
+    'rollingProtectAllClubNonTotwSpecials',
+    nested.rollingProtectAllClubNonTotwSpecials,
+    input.rollingProtectAllClubNonTotwSpecials,
+  );
+  assign(
     'rollingProvisionsMaxRating',
     nested.rollingProvisionsMaxRating,
     input.rollingProvisionsMaxRating,
@@ -121,6 +126,8 @@ export function normalizePickRuntimeOptions(input = {}) {
       ? String(input.rollingStorageSinkSetName || '').trim()
       : '',
     rollingSurplusCraftingEnabled: input.rollingSurplusCraftingEnabled === true,
+    rollingProtectAllClubNonTotwSpecials:
+      input.rollingProtectAllClubNonTotwSpecials === true,
     rollingProvisionsMaxRating: normalizeRollingProvisionsMaxRating(
       input.rollingProvisionsMaxRating,
     ),
@@ -318,6 +325,8 @@ export function applyLoopRuntimeOptions(loopDef, options = {}) {
     loopDef.rollingStorageSinkMode = resolvedPickOptions.rollingStorageSinkMode;
     loopDef.rollingStorageSinkSetId = resolvedPickOptions.rollingStorageSinkSetId;
     loopDef.rollingSurplusCraftingEnabled = resolvedPickOptions.rollingSurplusCraftingEnabled;
+    loopDef.rollingProtectAllClubNonTotwSpecials =
+      resolvedPickOptions.rollingProtectAllClubNonTotwSpecials;
     loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;
     loopDef.rollingOpenDuplicateProvisionsRewards =
       resolvedPickOptions.rollingOpenDuplicateProvisionsRewards;

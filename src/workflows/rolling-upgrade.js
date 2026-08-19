@@ -304,6 +304,36 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     };
   }
 
+  async function recoverBlockedRewardStorage(reward, context = {}) {
+    if (!isBlocked(reward) || reasonCode(reward) !== 'PROTECTED_STORAGE_BLOCKED') {
+      return { matched: false };
+    }
+    if (options.storageSinkEnabled !== true) {
+      return {
+        matched: true,
+        failure: finishRecoveryFailure(
+          reward,
+          context.blockedReason || 'recovery reward needs more Storage headroom',
+          'PROTECTED_STORAGE_BLOCKED',
+        ),
+      };
+    }
+    const storageSink = await recoverStorageSink({
+      trigger: 'storage-pressure',
+      storage: reward,
+      source: context.source || 'recovery-reward-pre-open',
+    });
+    if (isProgressed(storageSink)) return { matched: true, progressed: true };
+    return {
+      matched: true,
+      failure: finishRecoveryFailure(
+        storageSink,
+        context.recoveryReason || 'Storage pressure SBC could not clear room for the recovery reward',
+        'STORAGE_SINK_RECOVERY_BLOCKED',
+      ),
+    };
+  }
+
   function finishRecoveryFailure(value, fallbackReason, fallbackCode) {
     if (isStopped(value)) return finish('stopped', value, fallbackReason, 'USER_STOPPED');
     if (value?.status === 'planned') return finish('planned', value, fallbackReason, fallbackCode);
@@ -526,6 +556,15 @@ export async function runRollingUpgradeWorkflow(options = {}) {
         { trigger: 'pending-recovery-reward' },
       );
       if (isProgressed(pendingReward)) continue;
+      const pendingStorage = await recoverBlockedRewardStorage(pendingReward, {
+        source: 'pending-recovery-pre-open',
+        blockedReason: 'pending recovery reward needs more Storage headroom',
+        recoveryReason: 'Storage pressure SBC could not clear room for the pending recovery reward',
+      });
+      if (pendingStorage.matched) {
+        if (pendingStorage.progressed) continue;
+        return pendingStorage.failure;
+      }
       if (isStopped(pendingReward) || isBlocked(pendingReward) || pendingReward?.status === 'planned') {
         return finishRecoveryFailure(
           pendingReward,
@@ -570,25 +609,14 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           }
           continue;
         }
-        if (isBlocked(leftoverReward) && reasonCode(leftoverReward) === 'PROTECTED_STORAGE_BLOCKED') {
-          if (options.storageSinkEnabled !== true) {
-            return finishRecoveryFailure(
-              leftoverReward,
-              'leftover recovery reward needs more Storage headroom',
-              'PROTECTED_STORAGE_BLOCKED',
-            );
-          }
-          const storageSink = await recoverStorageSink({
-            trigger: 'storage-pressure',
-            storage: leftoverReward,
-            source: 'leftover-recovery-pre-open',
-          });
-          if (isProgressed(storageSink)) continue;
-          return finishRecoveryFailure(
-            storageSink,
-            'Storage pressure SBC could not clear room for the leftover recovery reward',
-            'STORAGE_SINK_RECOVERY_BLOCKED',
-          );
+        const leftoverStorage = await recoverBlockedRewardStorage(leftoverReward, {
+          source: 'leftover-recovery-pre-open',
+          blockedReason: 'leftover recovery reward needs more Storage headroom',
+          recoveryReason: 'Storage pressure SBC could not clear room for the leftover recovery reward',
+        });
+        if (leftoverStorage.matched) {
+          if (leftoverStorage.progressed) continue;
+          return leftoverStorage.failure;
         }
         if (isStopped(leftoverReward) || isBlocked(leftoverReward) || leftoverReward?.status === 'planned') {
           return finishRecoveryFailure(
@@ -625,25 +653,14 @@ export async function runRollingUpgradeWorkflow(options = {}) {
           { trigger: 'required-special-shortage', plan: planned },
         );
         if (isProgressed(recovery)) continue;
-        if (isBlocked(recovery) && reasonCode(recovery) === 'PROTECTED_STORAGE_BLOCKED') {
-          if (options.storageSinkEnabled !== true) {
-            return finishRecoveryFailure(
-              recovery,
-              'Required Special reward needs more Storage headroom',
-              'PROTECTED_STORAGE_BLOCKED',
-            );
-          }
-          const storageSink = await recoverStorageSink({
-            trigger: 'storage-pressure',
-            storage: recovery,
-            source: 'required-special-reward-pre-open',
-          });
-          if (isProgressed(storageSink)) continue;
-          return finishRecoveryFailure(
-            storageSink,
-            'Storage pressure SBC could not clear room for the Required Special reward',
-            'STORAGE_SINK_RECOVERY_BLOCKED',
-          );
+        const requiredSpecialStorage = await recoverBlockedRewardStorage(recovery, {
+          source: 'required-special-reward-pre-open',
+          blockedReason: 'Required Special reward needs more Storage headroom',
+          recoveryReason: 'Storage pressure SBC could not clear room for the Required Special reward',
+        });
+        if (requiredSpecialStorage.matched) {
+          if (requiredSpecialStorage.progressed) continue;
+          return requiredSpecialStorage.failure;
         }
         if (recovery?.status === 'skipped') {
           return finish('blocked', planned, 'primary squad is infeasible', planCode);

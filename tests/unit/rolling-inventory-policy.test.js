@@ -126,6 +126,32 @@ describe('Rolling inventory policy', () => {
     expect(filter(entry('club', { matches: false }))).toBe(true);
   });
 
+  it('uses the actual submission pile when filtering a resolved duplicate signal', () => {
+    const filter = createRollingRequiredSpecialSourceFilter({
+      constraintIndexes: [0],
+      isClubTotw: (candidate) => candidate.totw === true,
+    });
+
+    expect(filter({
+      pileName: 'unassigned',
+      submissionPileName: 'club',
+      item: { id: 30, totw: false },
+      requirementMatches: [true],
+    })).toBe(false);
+    expect(filter({
+      pileName: 'unassigned',
+      submissionPileName: 'club',
+      item: { id: 31, totw: true },
+      requirementMatches: [true],
+    })).toBe(true);
+    expect(filter({
+      pileName: 'storage',
+      submissionPileName: 'storage',
+      item: { id: 32, totw: false },
+      requirementMatches: [true],
+    })).toBe(true);
+  });
+
   it('classifies high duplicates, Required Special, and Provisions reserves independently', () => {
     expect(classifyRollingInventoryItem(item(1, 96), {
       protectionRating: 95,
@@ -461,6 +487,37 @@ describe('Rolling inventory policy', () => {
       model: { constraints: [] },
     });
     expect(signalWithoutDuplicateId.protectedItems).toEqual([clubEventCard.ref]);
+  });
+
+  it('does not let an Unassigned signal bypass Club non-TOTW protection', () => {
+    const clubTots = item(30, 93, {
+      pile: 'club',
+      duplicate: false,
+      special: true,
+    });
+    const signal = item(31, 93, {
+      pile: 'unassigned',
+      duplicate: true,
+      duplicateId: clubTots.id,
+      special: true,
+    });
+    const entries = [
+      {
+        item: clubTots,
+        classification: { requiredSpecial: false, protected: true, provisionsReserve: false },
+      },
+      {
+        item: signal,
+        classification: { requiredSpecial: true, protected: false, provisionsReserve: false },
+      },
+    ];
+    const policy = createRollingPrimarySelectionPolicy({
+      entries,
+      model: { constraints: [] },
+      isTransientSubmissionAllowed: (target) => target.id !== clubTots.id,
+    });
+
+    expect(policy.protectedItems).toEqual([clubTots.ref]);
   });
 
   it('keeps a routed 87/88 duplicate reserved for Provisions instead of the primary squad', () => {

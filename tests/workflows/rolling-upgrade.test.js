@@ -854,6 +854,79 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.readRecoveryState).toHaveBeenCalledTimes(2);
   });
 
+  it('clears Storage pressure before retrying a newly submitted recovery reward', async () => {
+    let inventoryVersion = 1;
+    let pendingAttempts = 0;
+    let pending = true;
+    const calls = [];
+    const options = harness({
+      storageSinkEnabled: true,
+      getProgressFingerprint: vi.fn(async () => inventoryVersion),
+      processPendingRecoveryReward: vi.fn(async () => {
+        if (!pending) return { status: 'skipped' };
+        pendingAttempts++;
+        if (pendingAttempts === 1) {
+          calls.push('pending-storage-blocked');
+          return {
+            status: 'blocked',
+            reason: 'existing Unassigned cards cannot enter full Storage',
+            reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+          };
+        }
+        calls.push('pending-opened');
+        pending = false;
+        inventoryVersion++;
+        return { status: 'opened' };
+      }),
+      recoverStorageSink: vi.fn(async ({ context }) => {
+        calls.push('storage-sink');
+        expect(context).toMatchObject({
+          trigger: 'storage-pressure',
+          source: 'pending-recovery-pre-open',
+        });
+        inventoryVersion++;
+        return { status: 'submitted', submitted: true };
+      }),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      recoveries: { reward: 1, storageSink: 1 },
+    });
+    expect(calls).toEqual([
+      'pending-storage-blocked',
+      'storage-sink',
+      'pending-opened',
+    ]);
+    expect(pendingAttempts).toBe(2);
+    expect(options.recoverStorageSink).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a newly submitted recovery reward unopened when Storage pressure recovery is disabled', async () => {
+    const options = harness({
+      storageSinkEnabled: false,
+      processPendingRecoveryReward: vi.fn(async () => ({
+        status: 'blocked',
+        reason: 'existing Unassigned cards cannot enter full Storage',
+        reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      })),
+      recoverStorageSink: vi.fn(async () => ({ status: 'submitted', submitted: true })),
+    });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      recoveries: { reward: 0, storageSink: 0 },
+    });
+    expect(options.processPendingRecoveryReward).toHaveBeenCalledOnce();
+    expect(options.recoverStorageSink).not.toHaveBeenCalled();
+    expect(options.planPrimarySquad).not.toHaveBeenCalled();
+  });
+
   it('uses emergency Provisions to free Storage before retrying protected routing', async () => {
     let inventoryVersion = 1;
     let storageReady = false;

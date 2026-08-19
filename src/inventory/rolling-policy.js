@@ -172,7 +172,14 @@ export function createRollingRequiredSpecialSourceFilter(input = {}) {
     ? input.isClubTotw
     : () => false;
   return (entry = {}) => {
-    if (String(entry.pileName || entry.item?.pile || entry.item?.ref?.pile || '') !== 'club') return true;
+    const submissionPile = String(
+      entry.submissionPileName
+        || entry.item?.pile
+        || entry.item?.ref?.pile
+        || entry.pileName
+        || '',
+    );
+    if (submissionPile !== 'club') return true;
     const matchesRequiredSpecial = constraintIndexes.some((index) => (
       entry.requirementMatches?.[index] === true
     ));
@@ -346,6 +353,9 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
   const primaryDuplicateRefs = uniqueRefs(input.primaryDuplicateRefs || []);
   const relaxedPrimaryDuplicateRefs = uniqueRefs(input.relaxedPrimaryDuplicateRefs || []);
   const isRelaxedPrimaryDuplicate = (item) => relaxedPrimaryDuplicateRefs.some((ref) => refMatchesItem(ref, item));
+  const isTransientSubmissionAllowed = typeof input.isTransientSubmissionAllowed === 'function'
+    ? input.isTransientSubmissionAllowed
+    : () => true;
   // Unassigned/Transfer duplicates are temporary EA signals. Their duplicateId
   // points at the real submission entity, which may otherwise be hard-protected
   // because that entity still lives in Club. The signal authorizes that entity
@@ -355,6 +365,11 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
       ['unassigned', 'transfer'].includes(String(item?.pile || item?.ref?.pile || ''))
         && item?.duplicate === true
         && classification?.protected !== true
+        && (() => {
+          const duplicateId = Number(item?.duplicateId || 0);
+          const target = entries.find(({ item: candidate }) => Number(candidate?.id || 0) === duplicateId)?.item;
+          try { return isTransientSubmissionAllowed(target || { id: duplicateId }); } catch { return false; }
+        })()
     ))
     .flatMap(({ item }) => {
       const duplicateId = Number(item?.duplicateId || 0);

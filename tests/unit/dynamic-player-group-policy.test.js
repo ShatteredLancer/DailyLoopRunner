@@ -207,10 +207,9 @@ describe('dynamic EA player-group policy', () => {
     expect(candidates.entries.map((entry) => ({ id: entry.item.id, pile: entry.pileName }))).toEqual([
       { id: 72, pile: 'unassigned' },
       { id: 75, pile: 'storage' },
-      { id: 73, pile: 'transfer' },
       { id: 70, pile: 'club' },
     ]);
-    expect(candidates.policyFiltered).toBe(1);
+    expect(candidates.policyFiltered).toBe(2);
 
     const clubFuttiesSnapshot = { ...clubFutties, pile: 'club', special: true };
     const clubTotwSnapshot = { ...clubTotw, pile: 'club', special: true };
@@ -221,6 +220,58 @@ describe('dynamic EA player-group policy', () => {
     expect(api.rollingBaseProtectionReasons(clubFuttiesSnapshot, loopDef)).toContain(
       'rolling-club-non-totw-required-special',
     );
+  });
+
+  it('optionally hard-protects every Club non-TOTW special without protecting Storage specials or Club TOTW', async () => {
+    const clubOtherSpecial = makePlayer({
+      id: 81,
+      definitionId: 801,
+      rating: 90,
+      rareflag: 2,
+      name: 'Campaign Club Item',
+    });
+    const clubTotw = makePlayer({
+      id: 82,
+      definitionId: 802,
+      rating: 88,
+      rareflag: 2,
+      groups: [44],
+      name: 'TOTW Club Item',
+    });
+    const storageOtherSpecial = makePlayer({
+      id: 83,
+      definitionId: 803,
+      rating: 89,
+      rareflag: 2,
+      name: 'Campaign Storage Item',
+    });
+    const { api } = await loadUserscript({
+      club: [clubOtherSpecial, clubTotw],
+      storage: [storageOtherSpecial],
+    });
+    const strictLoop = {
+      name: 'Strict Club special policy',
+      rollingProtectAllClubNonTotwSpecials: true,
+    };
+
+    const clubOtherSnapshot = { ...clubOtherSpecial, pile: 'club', special: true };
+    const clubTotwSnapshot = { ...clubTotw, pile: 'club', special: true };
+    const storageOtherSnapshot = { ...storageOtherSpecial, pile: 'storage', special: true };
+    expect(api.rollingBaseProtectionReasons(clubOtherSnapshot, {}))
+      .not.toContain('rolling-club-non-totw-special-strict');
+    expect(api.rollingBaseProtectionReasons(clubOtherSnapshot, strictLoop))
+      .toContain('rolling-club-non-totw-special-strict');
+    expect(api.rollingBaseProtectionReasons(clubTotwSnapshot, strictLoop))
+      .not.toContain('rolling-club-non-totw-special-strict');
+    expect(api.rollingBaseProtectionReasons(storageOtherSnapshot, strictLoop))
+      .not.toContain('rolling-club-non-totw-special-strict');
+    expect(() => api.assertRollingRecoveryItems(strictLoop, {
+      primaryContext: { activeLoopDef: strictLoop },
+      coordinator: { getLedger: () => null },
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+    }, [clubOtherSpecial], { allowSpecial: true, allowProvisionsReserve: true }))
+      .toThrow(/rolling-club-non-totw-special-strict/);
   });
 
   it('selects a FUTTIES card through the live EA matcher and preserves pile priority', async () => {

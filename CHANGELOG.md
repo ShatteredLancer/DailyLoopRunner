@@ -3,6 +3,32 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.11] - 2026-08-19
+
+### Added
+
+- Added an opt-in Rolling policy that hard-protects every Club non-TOTW
+  special card across primary, recovery, and Storage-pressure SBC squads.
+- Added a shared pre-open capacity gate for existing and newly crafted
+  Provisions, 5x80+, and Required Special recovery rewards.
+
+### Changed
+
+- Recovery reward opening now resolves full Storage through the configured
+  Storage-pressure SBC, reconciles inventory, and retries the same pack rather
+  than opening another reward into blocked Unassigned items.
+- Club Other Specials retain their existing last-resort fallback when strict
+  protection is disabled; Storage, Transfer, and Unassigned specials remain
+  governed by the existing rating and role rules.
+
+### Fixed
+
+- Preserved the actual submission pile while resolving Unassigned and Transfer
+  duplicate signals, preventing a signal from disguising a protected Club
+  non-TOTW special as a non-Club candidate.
+- Kept blocked recovery rewards unopened when Storage-pressure recovery is
+  disabled or cannot release independently verified capacity.
+
 ## [0.8.10] - 2026-08-18
 
 ### Added

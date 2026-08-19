@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.10
+// @version      0.8.11
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.10",
+    version: "0.8.11",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -2697,6 +2697,11 @@
       input2.rollingSurplusCraftingEnabled
     );
     assign(
+      "rollingProtectAllClubNonTotwSpecials",
+      nested.rollingProtectAllClubNonTotwSpecials,
+      input2.rollingProtectAllClubNonTotwSpecials
+    );
+    assign(
       "rollingProvisionsMaxRating",
       nested.rollingProvisionsMaxRating,
       input2.rollingProvisionsMaxRating
@@ -2738,6 +2743,7 @@
       rollingStorageSinkSetId: rollingStorageSinkMode === "selected" ? selectedStorageSinkSetId : null,
       rollingStorageSinkSetName: rollingStorageSinkMode === "selected" ? String(input2.rollingStorageSinkSetName || "").trim() : "",
       rollingSurplusCraftingEnabled: input2.rollingSurplusCraftingEnabled === true,
+      rollingProtectAllClubNonTotwSpecials: input2.rollingProtectAllClubNonTotwSpecials === true,
       rollingProvisionsMaxRating: normalizeRollingProvisionsMaxRating(
         input2.rollingProvisionsMaxRating
       ),
@@ -2902,6 +2908,7 @@
       loopDef.rollingStorageSinkMode = resolvedPickOptions.rollingStorageSinkMode;
       loopDef.rollingStorageSinkSetId = resolvedPickOptions.rollingStorageSinkSetId;
       loopDef.rollingSurplusCraftingEnabled = resolvedPickOptions.rollingSurplusCraftingEnabled;
+      loopDef.rollingProtectAllClubNonTotwSpecials = resolvedPickOptions.rollingProtectAllClubNonTotwSpecials;
       loopDef.runtimeProvisionsMaxRating = resolvedPickOptions.rollingProvisionsMaxRating;
       loopDef.rollingOpenDuplicateProvisionsRewards = resolvedPickOptions.rollingOpenDuplicateProvisionsRewards;
       loopDef.rollingShortageProvisionsPackLimit = resolvedPickOptions.rollingShortageProvisionsPackLimit;
@@ -4049,6 +4056,7 @@
       "rollingStorageSinkSetId",
       "rollingStorageSinkSetName",
       "rollingSurplusCraftingEnabled",
+      "rollingProtectAllClubNonTotwSpecials",
       "rollingProvisionsMaxRating",
       "rollingOpenDuplicateProvisionsRewards",
       "rollingShortageProvisionsPackLimit"
@@ -4056,7 +4064,7 @@
     Object.keys(value).forEach((field5) => {
       if (!allowedFields.has(field5)) errors.push(`${path}.${field5} is not supported`);
     });
-    ["protectHighGold", "autoSelect", "autoSelectBelow90", "openAtEnd", "openPicksAtEnd", "preferScannedMetadata", "rollingStorageSinkEnabled", "rollingSurplusCraftingEnabled", "rollingOpenDuplicateProvisionsRewards"].forEach((field5) => {
+    ["protectHighGold", "autoSelect", "autoSelectBelow90", "openAtEnd", "openPicksAtEnd", "preferScannedMetadata", "rollingStorageSinkEnabled", "rollingSurplusCraftingEnabled", "rollingProtectAllClubNonTotwSpecials", "rollingOpenDuplicateProvisionsRewards"].forEach((field5) => {
       if (value[field5] !== void 0 && typeof value[field5] !== "boolean") {
         errors.push(`${path}.${field5} must be boolean`);
       }
@@ -10890,7 +10898,10 @@
     const constraintIndexes = [...new Set((input2.constraintIndexes || []).map(Number).filter((index) => Number.isInteger(index) && index >= 0))];
     const isClubTotw = typeof input2.isClubTotw === "function" ? input2.isClubTotw : () => false;
     return (entry = {}) => {
-      if (String(entry.pileName || entry.item?.pile || entry.item?.ref?.pile || "") !== "club") return true;
+      const submissionPile = String(
+        entry.submissionPileName || entry.item?.pile || entry.item?.ref?.pile || entry.pileName || ""
+      );
+      if (submissionPile !== "club") return true;
       const matchesRequiredSpecial = constraintIndexes.some((index) => entry.requirementMatches?.[index] === true);
       if (!matchesRequiredSpecial) return true;
       try {
@@ -11026,7 +11037,16 @@
     const primaryDuplicateRefs = uniqueRefs(input2.primaryDuplicateRefs || []);
     const relaxedPrimaryDuplicateRefs = uniqueRefs(input2.relaxedPrimaryDuplicateRefs || []);
     const isRelaxedPrimaryDuplicate = (item) => relaxedPrimaryDuplicateRefs.some((ref) => refMatchesItem(ref, item));
-    const authorizedTransientRefs = uniqueRefs(entries.filter(({ item, classification }) => ["unassigned", "transfer"].includes(String(item?.pile || item?.ref?.pile || "")) && item?.duplicate === true && classification?.protected !== true).flatMap(({ item }) => {
+    const isTransientSubmissionAllowed = typeof input2.isTransientSubmissionAllowed === "function" ? input2.isTransientSubmissionAllowed : () => true;
+    const authorizedTransientRefs = uniqueRefs(entries.filter(({ item, classification }) => ["unassigned", "transfer"].includes(String(item?.pile || item?.ref?.pile || "")) && item?.duplicate === true && classification?.protected !== true && (() => {
+      const duplicateId = Number(item?.duplicateId || 0);
+      const target = entries.find(({ item: candidate }) => Number(candidate?.id || 0) === duplicateId)?.item;
+      try {
+        return isTransientSubmissionAllowed(target || { id: duplicateId });
+      } catch {
+        return false;
+      }
+    })()).flatMap(({ item }) => {
       const duplicateId = Number(item?.duplicateId || 0);
       return duplicateId ? [{ id: duplicateId, definitionId: Number(item?.definitionId || 0) }] : [];
     }));
@@ -11470,6 +11490,11 @@
     }
     return false;
   }
+  function entrySubmissionPile(entry = {}) {
+    return String(
+      entry.submissionPileName || entry.item?.pile || entry.item?.ref?.pile || entry.pileName || ""
+    );
+  }
   function histogram(entries = []) {
     const result = {};
     for (const entry of entries) {
@@ -11551,7 +11576,7 @@
         buckets.reserved.push(entry);
         continue;
       }
-      if (!matchesExclusiveRole && sourceEntry.special === true && softProtectSpecialPiles.has(String(sourceEntry.pileName || ""))) {
+      if (!matchesExclusiveRole && sourceEntry.special === true && softProtectSpecialPiles.has(entrySubmissionPile(sourceEntry))) {
         counts.softProtected++;
         buckets.softProtected.push({ ...entry, softProtected: true });
         continue;
@@ -12074,6 +12099,7 @@
   function planEntries(entries) {
     return entries.map((entry) => ({
       pileName: entry.pileName,
+      submissionPileName: entry.submissionPileName || entry.pileName,
       pileRank: entry.pileRank,
       itemRef: entry.item.ref,
       signalRef: entry.signal?.ref || entry.signalRef || null,
@@ -12517,6 +12543,20 @@
     const byItemId = /* @__PURE__ */ new Map();
     const resolvedSignals = {};
     const safetyCache = /* @__PURE__ */ new Map();
+    const pileItemsCache = /* @__PURE__ */ new Map();
+    const readPile = (pileName) => {
+      if (!pileItemsCache.has(pileName)) {
+        pileItemsCache.set(pileName, getPileItems(pileName) || []);
+      }
+      return pileItemsCache.get(pileName);
+    };
+    const submissionPileById = /* @__PURE__ */ new Map();
+    for (const pileName of ["storage", "club"]) {
+      for (const item of readPile(pileName)) {
+        const itemId5 = Number(item?.id || 0);
+        if (itemId5 && !submissionPileById.has(itemId5)) submissionPileById.set(itemId5, pileName);
+      }
+    }
     const requiredRefs = (Array.isArray(requiredItems) ? requiredItems : []).map(normalizedRequiredRef).filter((ref) => ref.id > 0 || ref.definitionId > 0).slice(0, MAX_REQUIRED_DIAGNOSTICS);
     const exactRequiredItemIds = new Set(requiredRefs.map((ref) => ref.id).filter((id) => id > 0));
     const requiredScannedLocations = requiredRefs.map(() => []);
@@ -12552,7 +12592,7 @@
     const requirementCache = /* @__PURE__ */ new Map();
     let scannedItems = 0;
     for (const [pileRank, pileName] of piles.entries()) {
-      for (const sourceItem of getPileItems(pileName)) {
+      for (const sourceItem of readPile(pileName)) {
         scannedItems++;
         requiredRefs.forEach((ref, index) => {
           if (refMatchesItem2(ref, sourceItem)) {
@@ -12571,6 +12611,9 @@
         const definitionId2 = Number(item?.definitionId || 0);
         if (!itemId5 || !definitionId2 || byItemId.has(itemId5)) continue;
         if (!cachedIsSafe(item)) continue;
+        const submissionPileName = String(
+          item?.pile || item?.ref?.pile || submissionPileById.get(itemId5) || pileName
+        );
         if (!requirementCache.has(itemId5)) {
           let requirementItem = item;
           try {
@@ -12584,6 +12627,7 @@
           item,
           signal,
           pileName,
+          submissionPileName,
           pileRank,
           requirementMatches,
           special: isSpecialItem(item)
@@ -12614,14 +12658,20 @@
       if (!scannedLocations.length && !candidateBeforeDefinition) reason = "not-in-scanned-piles";
       else if (!candidateBeforeDefinition) reason = "rejected-before-definition";
       else if (!candidateAfterDefinition) reason = "definition-dedup-replaced";
-      const competingCandidates = definitionId2 ? [...byItemId.values()].filter((entry) => Number(entry.item?.definitionId || 0) === definitionId2).slice(0, MAX_COMPETING_CANDIDATES).map((entry) => diagnosticCandidate(entry.item, entry.pileName)) : [];
+      const competingCandidates = definitionId2 ? [...byItemId.values()].filter((entry) => Number(entry.item?.definitionId || 0) === definitionId2).slice(0, MAX_COMPETING_CANDIDATES).map((entry) => diagnosticCandidate(
+        entry.item,
+        entry.submissionPileName || entry.pileName
+      )) : [];
       return {
         ref,
         scannedLocations,
         candidateBeforeDefinition: Boolean(candidateBeforeDefinition),
         candidateAfterDefinition,
         candidateAfterPolicy: candidateAfterDefinition,
-        representative: representative ? diagnosticCandidate(representative.item, representative.pileName) : null,
+        representative: representative ? diagnosticCandidate(
+          representative.item,
+          representative.submissionPileName || representative.pileName
+        ) : null,
         competingCandidates,
         reason
       };
@@ -12652,7 +12702,10 @@
     } = options;
     const liveById = /* @__PURE__ */ new Map();
     const snapshotEntries = candidateEntries.map((entry) => {
-      const item = createSnapshot(entry.item, entry.pileName);
+      const item = createSnapshot(
+        entry.item,
+        entry.submissionPileName || entry.pileName
+      );
       const signal = entry.signal ? createSnapshot(entry.signal, entry.pileName) : null;
       liveById.set(Number(item.id), entry.item);
       if (signal) liveById.set(Number(signal.id), entry.signal);
@@ -12660,6 +12713,7 @@
         item,
         signal,
         pileName: entry.pileName,
+        submissionPileName: entry.submissionPileName || entry.pileName,
         pileRank: entry.pileRank,
         requirementMatches: [...entry.requirementMatches],
         special: entry.special === true,
@@ -12701,6 +12755,7 @@
       item: liveById.get(Number(entry.itemRef?.id || 0)) || null,
       signal: entry.signalRef ? liveById.get(Number(entry.signalRef.id || 0)) || null : null,
       pileName: entry.pileName,
+      submissionPileName: entry.submissionPileName || entry.pileName,
       pileRank: entry.pileRank,
       requirementMatches: entry.requirementMatches,
       special: entry.special
@@ -26136,6 +26191,35 @@
         }
       };
     }
+    async function recoverBlockedRewardStorage(reward, context = {}) {
+      if (!isBlocked(reward) || reasonCode(reward) !== "PROTECTED_STORAGE_BLOCKED") {
+        return { matched: false };
+      }
+      if (options.storageSinkEnabled !== true) {
+        return {
+          matched: true,
+          failure: finishRecoveryFailure(
+            reward,
+            context.blockedReason || "recovery reward needs more Storage headroom",
+            "PROTECTED_STORAGE_BLOCKED"
+          )
+        };
+      }
+      const storageSink = await recoverStorageSink({
+        trigger: "storage-pressure",
+        storage: reward,
+        source: context.source || "recovery-reward-pre-open"
+      });
+      if (isProgressed(storageSink)) return { matched: true, progressed: true };
+      return {
+        matched: true,
+        failure: finishRecoveryFailure(
+          storageSink,
+          context.recoveryReason || "Storage pressure SBC could not clear room for the recovery reward",
+          "STORAGE_SINK_RECOVERY_BLOCKED"
+        )
+      };
+    }
     function finishRecoveryFailure(value, fallbackReason, fallbackCode) {
       if (isStopped(value)) return finish("stopped", value, fallbackReason, "USER_STOPPED");
       if (value?.status === "planned") return finish("planned", value, fallbackReason, fallbackCode);
@@ -26337,6 +26421,15 @@
           { trigger: "pending-recovery-reward" }
         );
         if (isProgressed(pendingReward)) continue;
+        const pendingStorage = await recoverBlockedRewardStorage(pendingReward, {
+          source: "pending-recovery-pre-open",
+          blockedReason: "pending recovery reward needs more Storage headroom",
+          recoveryReason: "Storage pressure SBC could not clear room for the pending recovery reward"
+        });
+        if (pendingStorage.matched) {
+          if (pendingStorage.progressed) continue;
+          return pendingStorage.failure;
+        }
         if (isStopped(pendingReward) || isBlocked(pendingReward) || pendingReward?.status === "planned") {
           return finishRecoveryFailure(
             pendingReward,
@@ -26379,25 +26472,14 @@
             }
             continue;
           }
-          if (isBlocked(leftoverReward) && reasonCode(leftoverReward) === "PROTECTED_STORAGE_BLOCKED") {
-            if (options.storageSinkEnabled !== true) {
-              return finishRecoveryFailure(
-                leftoverReward,
-                "leftover recovery reward needs more Storage headroom",
-                "PROTECTED_STORAGE_BLOCKED"
-              );
-            }
-            const storageSink = await recoverStorageSink({
-              trigger: "storage-pressure",
-              storage: leftoverReward,
-              source: "leftover-recovery-pre-open"
-            });
-            if (isProgressed(storageSink)) continue;
-            return finishRecoveryFailure(
-              storageSink,
-              "Storage pressure SBC could not clear room for the leftover recovery reward",
-              "STORAGE_SINK_RECOVERY_BLOCKED"
-            );
+          const leftoverStorage = await recoverBlockedRewardStorage(leftoverReward, {
+            source: "leftover-recovery-pre-open",
+            blockedReason: "leftover recovery reward needs more Storage headroom",
+            recoveryReason: "Storage pressure SBC could not clear room for the leftover recovery reward"
+          });
+          if (leftoverStorage.matched) {
+            if (leftoverStorage.progressed) continue;
+            return leftoverStorage.failure;
           }
           if (isStopped(leftoverReward) || isBlocked(leftoverReward) || leftoverReward?.status === "planned") {
             return finishRecoveryFailure(
@@ -26432,25 +26514,14 @@
             { trigger: "required-special-shortage", plan: planned }
           );
           if (isProgressed(recovery)) continue;
-          if (isBlocked(recovery) && reasonCode(recovery) === "PROTECTED_STORAGE_BLOCKED") {
-            if (options.storageSinkEnabled !== true) {
-              return finishRecoveryFailure(
-                recovery,
-                "Required Special reward needs more Storage headroom",
-                "PROTECTED_STORAGE_BLOCKED"
-              );
-            }
-            const storageSink = await recoverStorageSink({
-              trigger: "storage-pressure",
-              storage: recovery,
-              source: "required-special-reward-pre-open"
-            });
-            if (isProgressed(storageSink)) continue;
-            return finishRecoveryFailure(
-              storageSink,
-              "Storage pressure SBC could not clear room for the Required Special reward",
-              "STORAGE_SINK_RECOVERY_BLOCKED"
-            );
+          const requiredSpecialStorage = await recoverBlockedRewardStorage(recovery, {
+            source: "required-special-reward-pre-open",
+            blockedReason: "Required Special reward needs more Storage headroom",
+            recoveryReason: "Storage pressure SBC could not clear room for the Required Special reward"
+          });
+          if (requiredSpecialStorage.matched) {
+            if (requiredSpecialStorage.progressed) continue;
+            return requiredSpecialStorage.failure;
           }
           if (recovery?.status === "skipped") {
             return finish("blocked", planned, "primary squad is infeasible", planCode);
@@ -27981,11 +28052,12 @@
     const pickMode = pickOptions.autoSelectBelow90 === false ? "Review" : "Auto";
     const storageSink = pickOptions.rollingStorageSinkMode === "selected" ? `Set #${pickOptions.rollingStorageSinkSetId || "?"}` : pickOptions.rollingStorageSinkMode === "automatic" || pickOptions.rollingStorageSinkEnabled === true ? "automatic" : "off";
     const surplusCrafting = pickOptions.rollingSurplusCraftingEnabled === true ? "enabled" : "shortage only";
+    const clubSpecialProtection = pickOptions.rollingProtectAllClubNonTotwSpecials === true ? "protected" : "fallback allowed";
     const provisionsMaxRating = Number(pickOptions.rollingProvisionsMaxRating || 88) === 89 ? 89 : 88;
     const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true ? "immediate" : "on shortage";
     const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
     summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickMode}`;
-    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
+    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
   }
   function renderMainPanelScanProgress(options = {}) {
     const panel = options.panel;
@@ -32644,6 +32716,13 @@
       pickOptions.rollingSurplusCraftingEnabled === true,
       "After a primary cycle, proactively turn complete Provisions reserves and eligible low-rated Storage cards into recovery SBCs; disabled still permits shortage and Storage-pressure recovery"
     );
+    const rollingProtectAllClubNonTotwSpecials = checkbox2(
+      dom,
+      "bronze-loop-policy-rolling-protect-club-specials",
+      "Protect all Club non-TOTW specials",
+      pickOptions.rollingProtectAllClubNonTotwSpecials === true,
+      "Never use a Club non-TOTW special in Rolling, including severe fodder shortage; Storage, Transfer, and Unassigned specials remain eligible under the existing limits"
+    );
     const rollingProvisionsMaxRating = selectInput2(
       dom,
       "bronze-loop-policy-rolling-provisions-max-rating",
@@ -32675,6 +32754,7 @@
       field2(dom, "Provisions reserve", rollingProvisionsMaxRating, mode, "Choose whether 89-rated non-required cards join the default 87/88 Provisions reserve"),
       field2(dom, "Provisions packs per shortage", rollingShortageProvisionsPackLimit, mode, "Open at most this many existing Provisions rewards before replanning the primary squad; TOTW rewards remain one at a time"),
       rollingSurplusCrafting.label,
+      rollingProtectAllClubNonTotwSpecials.label,
       rollingOpenDuplicateProvisionsRewards.label,
       wideField(dom, "Storage pressure recovery", rollingStorageSinkMode, mode, "Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set"),
       wideField(dom, "Storage pressure SBC", rollingStorageSinkSet, mode, "Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility"),
@@ -32721,6 +32801,7 @@
         rollingStorageSinkSetId: rollingStorageSinkMode.value === "selected" ? readNumber(rollingStorageSinkSet, 0) : null,
         rollingStorageSinkSetName: rollingStorageSinkMode.value === "selected" ? storageSinkCandidates.find((candidate) => Number(candidate.setId) === readNumber(rollingStorageSinkSet, 0))?.name || "" : "",
         rollingSurplusCraftingEnabled: rollingSurplusCrafting.input.checked,
+        rollingProtectAllClubNonTotwSpecials: rollingProtectAllClubNonTotwSpecials.input.checked,
         rollingProvisionsMaxRating: readNumber(
           rollingProvisionsMaxRating,
           pickOptions.rollingProvisionsMaxRating
@@ -32759,6 +32840,7 @@
         rollingProvisionsMaxRating,
         rollingShortageProvisionsPackLimit,
         rollingSurplusCrafting.input,
+        rollingProtectAllClubNonTotwSpecials.input,
         rollingOpenDuplicateProvisionsRewards.input,
         rollingStorageSinkMode,
         rollingStorageSinkSet,
@@ -40551,6 +40633,9 @@
         `id:${Number(item?.id || 0) || "?"}`,
         `def:${Number(item?.definitionId || 0) || "?"}`
       ];
+      if (entry?.submissionPileName && entry.submissionPileName !== entry.pileName) {
+        parts.splice(parts.length - 2, 0, `submitFrom:${entry.submissionPileName}`);
+      }
       if (signal && Number(signal?.id || 0) !== Number(item?.id || 0)) {
         parts.push(`signal:${Number(signal.id || 0) || "?"}`);
       }
@@ -43822,7 +43907,7 @@
         log("Player Pick scan: scanned metadata preference disabled; configured Pick Loops reverted to static fallback");
       }
       const storageSink = options.rollingStorageSinkMode === "selected" ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ""}`.trim() : options.rollingStorageSinkMode;
-      log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.autoSelectBelow90 ? "Automatic" : "Review protected"}${options.openPicksAtEnd ? "; open Picks at end" : ""}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? "enabled" : "shortage only"}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? "immediate" : "on shortage"}; Storage pressure SBC ${storageSink}`);
+      log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.autoSelectBelow90 ? "Automatic" : "Review protected"}${options.openPicksAtEnd ? "; open Picks at end" : ""}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? "enabled" : "shortage only"}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? "immediate" : "on shortage"}; Storage pressure SBC ${storageSink}`);
       renderCurrentSelectionPolicySummary();
       return options;
     }
@@ -46798,6 +46883,12 @@
       const pile = String(item?.pile || item?.ref?.pile || "");
       return pile !== "club" || isTotwItem(item);
     }
+    function isRollingTransientSubmissionAllowed(item, loopDef = {}) {
+      const pile = String(item?.pile || item?.ref?.pile || "");
+      if (pile !== "club") return true;
+      if (isTotwItem(item)) return true;
+      return rollingBaseProtectionReasons(item, loopDef, pile).length === 0;
+    }
     function rollingLiveRequiredSpecial(item, model = {}) {
       const constraints = eaPlayerGroupConstraints(model);
       if (!constraints.length) {
@@ -46950,19 +47041,25 @@
     }
     function rollingRequiredSpecialSourceErrors(selection, model = {}) {
       const indexes = rollingRequiredSpecialConstraintIndexes(model);
-      return (selection?.entries || []).filter((entry) => String(entry?.pileName || "") === "club" && indexes.some((index) => entry.requirementMatches?.[index] === true) && !isTotwItem(entry.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is not TOTW`);
+      return (selection?.entries || []).filter((entry) => String(entry?.submissionPileName || entry?.pileName || "") === "club" && indexes.some((index) => entry.requirementMatches?.[index] === true) && !isTotwItem(entry.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is not TOTW`);
     }
-    function rollingBaseProtectionReasons(item, loopDef = {}) {
+    function rollingBaseProtectionReasons(item, loopDef = {}, pileOverride = null) {
       const reasons = getSbcProtectionReasons(item, loopDef, {
         roleAware: true,
         skipRatingLimit: true,
         allowedSpecialCount: expectedSbcPlayerCount(loopDef),
         specialIndex: isSbcSpecialItem(item) ? 1 : 0
       });
-      const pile = String(item?.pile || item?.ref?.pile || "");
+      const pile = String(pileOverride || item?.pile || item?.ref?.pile || "");
+      const strictClubSpecial = loopDef.rollingProtectAllClubNonTotwSpecials === true && pile === "club" && isSbcSpecialItem(item) && !isTotwItem(item);
+      if (strictClubSpecial) reasons.push("rolling-club-non-totw-special-strict");
       const protectedClubEventSpecial = pile === "club" && !isTotwItem(item) && (rollingSnapshotMatchesRequiredSpecial(item, loopDef) || isTotsItem(item) || isFofItem(item) || isFuttiesItem(item));
       if (protectedClubEventSpecial) reasons.push("rolling-club-non-totw-required-special");
       return [...new Set(reasons)];
+    }
+    function rollingClubNonTotwSpecialSourceErrors(selection, loopDef = {}) {
+      if (loopDef.rollingProtectAllClubNonTotwSpecials !== true) return [];
+      return (selection?.entries || []).filter((entry) => String(entry?.submissionPileName || entry?.itemRef?.pile || entry?.pileName || "") === "club" && isSbcSpecialItem(entry?.item) && !isTotwItem(entry?.item)).map((entry) => `Club ${itemDisplayName(entry.item)} is a protected non-TOTW special`);
     }
     function rollingOpenedDuplicateTargetProtectionReasons(item, loopDef = {}) {
       return rollingDuplicateTargetProtectionReasons(item, {
@@ -47312,6 +47409,10 @@
       const protectionRating = rollingProtectionRating(loopDef);
       const minRating = Number(options.minRating);
       const maxRating = Number(options.maxRating);
+      const sourceErrors = rollingClubNonTotwSpecialSourceErrors(options.selection, loopDef);
+      if (sourceErrors.length) {
+        fail2(`${loopDef.name}: recovery squad violated strict Club special protection: ${sourceErrors.join(", ")}`);
+      }
       for (const item of players || []) {
         const allowedPrimaryDuplicate = allowedPrimaryDuplicateRefs.some((ref) => rollingItemMatchesRef(item, ref) || Number(item?.definitionId || 0) > 0 && Number(item.definitionId) === Number(ref?.definitionId || 0));
         if (options.allowRequiredSpecial !== true && (rollingLiveRequiredSpecial(item, runtime.primaryContext?.model) || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef))) {
@@ -47332,7 +47433,11 @@
         if (Number.isFinite(maxRating) && Number(item?.rating || 0) > maxRating) {
           fail2(`${loopDef.name}: recovery squad card rating ${Number(item.rating)} exceeds the recovery maximum ${maxRating}`);
         }
-        const reasons = rollingBaseProtectionReasons(item, runtime.primaryContext?.activeLoopDef || loopDef);
+        const reasons = rollingBaseProtectionReasons(
+          item,
+          runtime.primaryContext?.activeLoopDef || loopDef,
+          liveItemRef(item).pile
+        );
         if (reasons.length) {
           fail2(`${loopDef.name}: recovery squad contains protected item ${itemDisplayName(item)} (${reasons.join(",")})`);
         }
@@ -47458,12 +47563,13 @@
           return { status: "blocked", reason: validation.reason, reasonCode: "INVENTORY_VALIDATION_FAILED" };
         }
       }
-      const validators = [({ players }) => assertRollingRecoveryItems(loopDef, runtime, players, {
+      const validators = [({ players, squadPlan }) => assertRollingRecoveryItems(loopDef, runtime, players, {
         additionalProtected,
         allowProvisionsReserve: options.allowProvisionsReserve === true,
         allowSpecial: options.allowSpecial === true,
         minRating: options.minRating,
-        maxRating: options.maxRating
+        maxRating: options.maxRating,
+        selection: squadPlan?.selection || selection
       })];
       runtime.lastMutation = null;
       const attempt = await submitInventorySbcAttempt(activeDef, selection, {
@@ -47571,7 +47677,8 @@
           protectionRating: rollingProtectionRating(loopDef),
           reserveRatings: false,
           primaryDuplicateRefs: consumablePrimaryRefs,
-          relaxedPrimaryDuplicateRefs: relaxedPrimaryRefs
+          relaxedPrimaryDuplicateRefs: relaxedPrimaryRefs,
+          isTransientSubmissionAllowed: (item) => isRollingTransientSubmissionAllowed(item, loopDef)
         });
         selectionPolicy = createRollingRatingRecoverySelectionPolicy({
           ledger,
@@ -47703,11 +47810,12 @@
             playerPreparation
           );
         },
-        preSaveValidators: [({ players: validatedPlayers }) => {
+        preSaveValidators: [({ players: validatedPlayers, squadPlan }) => {
           assertRollingRecoveryItems(loopDef, runtime, validatedPlayers, {
             allowSpecial: true,
             allowPrimaryDuplicates,
-            allowedPrimaryDuplicateRefs: consumedPrimaryRefs
+            allowedPrimaryDuplicateRefs: consumedPrimaryRefs,
+            selection: squadPlan?.selection || fill.selection
           });
           const validation = validateRatingSbcModelAgainstItems2(
             fill.model,
@@ -48517,7 +48625,8 @@
         allowProvisionsReserve: true,
         allowSpecial: true,
         allowPrimaryDuplicates: true,
-        allowRequiredSpecial: requiredSpecialRoles.length > 0
+        allowRequiredSpecial: requiredSpecialRoles.length > 0,
+        selection: options.selection
       });
       return validateRatingSbcModelAgainstItems2(
         context.model,
@@ -48545,11 +48654,13 @@
         return true;
       };
       return {
-        validatePlannedPlayers: (players) => validate(players),
-        preSave: ({ players }) => validate(players),
-        postSave: ({ players, savedPlayers }) => validate(
+        validatePlannedPlayers: (players, selection) => validate(players, { selection }),
+        preSave: ({ players, squadPlan }) => validate(players, {
+          selection: squadPlan?.selection
+        }),
+        postSave: ({ players, savedPlayers, squadPlan }) => validate(
           savedPlayers?.length ? savedPlayers : players,
-          { checkSavedChallenge: true }
+          { checkSavedChallenge: true, selection: squadPlan?.selection }
         )
       };
     }
@@ -48577,7 +48688,7 @@
         context,
         label
       );
-      validators.validatePlannedPlayers(resolved.players);
+      validators.validatePlannedPlayers(resolved.players, plan.selection);
       let backgroundSubmission = null;
       runtime.lastMutation = null;
       const submission = await submitSbcAttempt({
@@ -50060,7 +50171,8 @@
                   protectionRating: rollingProtectionRating(loopDef),
                   reserveRatings: loopDef.rollingSurplusCraftingEnabled === true ? rollingProvisionsReserveRatings(loopDef) : false,
                   primaryDuplicateRefs,
-                  relaxedPrimaryDuplicateRefs
+                  relaxedPrimaryDuplicateRefs,
+                  isTransientSubmissionAllowed: (item) => isRollingTransientSubmissionAllowed(item, activeLoopDef)
                 }),
                 candidateFilter: requiredSpecialSourceFilter
               };
@@ -50205,11 +50317,19 @@
                   playerPreparation
                 );
               },
-              preSaveValidators: [() => {
+              preSaveValidators: [({ squadPlan }) => {
                 assertSbcSquadSafe(activeLoopDef, fill.inspection);
-                const sourceErrors = rollingRequiredSpecialSourceErrors(fill.selection, fill.model);
+                const finalSelection = squadPlan?.selection || fill.selection;
+                const sourceErrors = rollingRequiredSpecialSourceErrors(finalSelection, fill.model);
                 if (sourceErrors.length) {
                   fail2(`${loopDef.name}: final Rolling squad violated Required Special source policy: ${sourceErrors.join(", ")}`);
+                }
+                const strictSourceErrors = rollingClubNonTotwSpecialSourceErrors(
+                  finalSelection,
+                  activeLoopDef
+                );
+                if (strictSourceErrors.length) {
+                  fail2(`${loopDef.name}: final Rolling squad violated strict Club special protection: ${strictSourceErrors.join(", ")}`);
                 }
                 const validation = validateRatingSbcModelAgainstItems2(
                   fill.model,
@@ -50426,7 +50546,7 @@
         const fodderPolicy = getSbcFodderPolicy(loopDef);
         if (loopDef.strategy === "rollingUpgrade") {
           const storageSinkSummary = loopDef.rollingStorageSinkEnabled ? `${loopDef.rollingStorageSink?.mode || "automatic"}/${loopDef.rollingStorageSink?.capability?.setName || "unavailable"}` : "off";
-          log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? "enabled" : "shortage only"}; Storage pressure SBC ${storageSinkSummary}`);
+          log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? "enabled" : "shortage only"}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; Storage pressure SBC ${storageSinkSummary}`);
         } else {
           log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
         }

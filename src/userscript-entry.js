@@ -5127,6 +5127,9 @@ function updateLoopControls() {
       `id:${Number(item?.id || 0) || '?'}`,
       `def:${Number(item?.definitionId || 0) || '?'}`,
     ];
+    if (entry?.submissionPileName && entry.submissionPileName !== entry.pileName) {
+      parts.splice(parts.length - 2, 0, `submitFrom:${entry.submissionPileName}`);
+    }
     if (signal && Number(signal?.id || 0) !== Number(item?.id || 0)) {
       parts.push(`signal:${Number(signal.id || 0) || '?'}`);
     }
@@ -8814,7 +8817,7 @@ function updateLoopControls() {
     const storageSink = options.rollingStorageSinkMode === 'selected'
       ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ''}`.trim()
       : options.rollingStorageSinkMode;
-    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.autoSelectBelow90 ? 'Automatic' : 'Review protected'}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
+    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.autoSelectBelow90 ? 'Automatic' : 'Review protected'}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
     renderCurrentSelectionPolicySummary();
     return options;
   }
@@ -12081,6 +12084,13 @@ function updateLoopControls() {
     return pile !== 'club' || isTotwItem(item);
   }
 
+  function isRollingTransientSubmissionAllowed(item, loopDef = {}) {
+    const pile = String(item?.pile || item?.ref?.pile || '');
+    if (pile !== 'club') return true;
+    if (isTotwItem(item)) return true;
+    return rollingBaseProtectionReasons(item, loopDef, pile).length === 0;
+  }
+
   function rollingLiveRequiredSpecial(item, model = {}) {
     const constraints = eaPlayerGroupConstraints(model);
     if (!constraints.length) {
@@ -12248,21 +12258,26 @@ function updateLoopControls() {
     const indexes = rollingRequiredSpecialConstraintIndexes(model);
     return (selection?.entries || [])
       .filter((entry) => (
-        String(entry?.pileName || '') === 'club'
+        String(entry?.submissionPileName || entry?.pileName || '') === 'club'
           && indexes.some((index) => entry.requirementMatches?.[index] === true)
           && !isTotwItem(entry.item)
       ))
       .map((entry) => `Club ${itemDisplayName(entry.item)} is not TOTW`);
   }
 
-  function rollingBaseProtectionReasons(item, loopDef = {}) {
+  function rollingBaseProtectionReasons(item, loopDef = {}, pileOverride = null) {
     const reasons = getSbcProtectionReasons(item, loopDef, {
       roleAware: true,
       skipRatingLimit: true,
       allowedSpecialCount: expectedSbcPlayerCount(loopDef),
       specialIndex: isSbcSpecialItem(item) ? 1 : 0,
     });
-    const pile = String(item?.pile || item?.ref?.pile || '');
+    const pile = String(pileOverride || item?.pile || item?.ref?.pile || '');
+    const strictClubSpecial = loopDef.rollingProtectAllClubNonTotwSpecials === true
+      && pile === 'club'
+      && isSbcSpecialItem(item)
+      && !isTotwItem(item);
+    if (strictClubSpecial) reasons.push('rolling-club-non-totw-special-strict');
     const protectedClubEventSpecial = pile === 'club'
       && !isTotwItem(item)
       && (
@@ -12273,6 +12288,17 @@ function updateLoopControls() {
       );
     if (protectedClubEventSpecial) reasons.push('rolling-club-non-totw-required-special');
     return [...new Set(reasons)];
+  }
+
+  function rollingClubNonTotwSpecialSourceErrors(selection, loopDef = {}) {
+    if (loopDef.rollingProtectAllClubNonTotwSpecials !== true) return [];
+    return (selection?.entries || [])
+      .filter((entry) => (
+        String(entry?.submissionPileName || entry?.itemRef?.pile || entry?.pileName || '') === 'club'
+          && isSbcSpecialItem(entry?.item)
+          && !isTotwItem(entry?.item)
+      ))
+      .map((entry) => `Club ${itemDisplayName(entry.item)} is a protected non-TOTW special`);
   }
 
   function rollingOpenedDuplicateTargetProtectionReasons(item, loopDef = {}) {
@@ -12687,6 +12713,10 @@ function updateLoopControls() {
     const protectionRating = rollingProtectionRating(loopDef);
     const minRating = Number(options.minRating);
     const maxRating = Number(options.maxRating);
+    const sourceErrors = rollingClubNonTotwSpecialSourceErrors(options.selection, loopDef);
+    if (sourceErrors.length) {
+      fail(`${loopDef.name}: recovery squad violated strict Club special protection: ${sourceErrors.join(', ')}`);
+    }
     for (const item of players || []) {
       const allowedPrimaryDuplicate = allowedPrimaryDuplicateRefs.some((ref) => (
         rollingItemMatchesRef(item, ref)
@@ -12714,7 +12744,11 @@ function updateLoopControls() {
       if (Number.isFinite(maxRating) && Number(item?.rating || 0) > maxRating) {
         fail(`${loopDef.name}: recovery squad card rating ${Number(item.rating)} exceeds the recovery maximum ${maxRating}`);
       }
-      const reasons = rollingBaseProtectionReasons(item, runtime.primaryContext?.activeLoopDef || loopDef);
+      const reasons = rollingBaseProtectionReasons(
+        item,
+        runtime.primaryContext?.activeLoopDef || loopDef,
+        liveItemRef(item).pile,
+      );
       if (reasons.length) {
         fail(`${loopDef.name}: recovery squad contains protected item ${itemDisplayName(item)} (${reasons.join(',')})`);
       }
@@ -12852,12 +12886,13 @@ function updateLoopControls() {
         return { status: 'blocked', reason: validation.reason, reasonCode: 'INVENTORY_VALIDATION_FAILED' };
       }
     }
-    const validators = [({ players }) => assertRollingRecoveryItems(loopDef, runtime, players, {
+    const validators = [({ players, squadPlan }) => assertRollingRecoveryItems(loopDef, runtime, players, {
       additionalProtected,
       allowProvisionsReserve: options.allowProvisionsReserve === true,
       allowSpecial: options.allowSpecial === true,
       minRating: options.minRating,
       maxRating: options.maxRating,
+      selection: squadPlan?.selection || selection,
     })];
     runtime.lastMutation = null;
     const attempt = await submitInventorySbcAttempt(activeDef, selection, {
@@ -12977,6 +13012,9 @@ function updateLoopControls() {
         reserveRatings: false,
         primaryDuplicateRefs: consumablePrimaryRefs,
         relaxedPrimaryDuplicateRefs: relaxedPrimaryRefs,
+        isTransientSubmissionAllowed: (item) => (
+          isRollingTransientSubmissionAllowed(item, loopDef)
+        ),
       });
       selectionPolicy = createRollingRatingRecoverySelectionPolicy({
         ledger,
@@ -13113,11 +13151,12 @@ function updateLoopControls() {
           playerPreparation,
         );
       },
-      preSaveValidators: [({ players: validatedPlayers }) => {
+      preSaveValidators: [({ players: validatedPlayers, squadPlan }) => {
         assertRollingRecoveryItems(loopDef, runtime, validatedPlayers, {
           allowSpecial: true,
           allowPrimaryDuplicates,
           allowedPrimaryDuplicateRefs: consumedPrimaryRefs,
+          selection: squadPlan?.selection || fill.selection,
         });
         const validation = validateRatingSbcModelAgainstItems(
           fill.model,
@@ -14036,6 +14075,7 @@ function updateLoopControls() {
       allowSpecial: true,
       allowPrimaryDuplicates: true,
       allowRequiredSpecial: requiredSpecialRoles.length > 0,
+      selection: options.selection,
     });
     return validateRatingSbcModelAgainstItems(
       context.model,
@@ -14064,11 +14104,13 @@ function updateLoopControls() {
       return true;
     };
     return {
-      validatePlannedPlayers: (players) => validate(players),
-      preSave: ({ players }) => validate(players),
-      postSave: ({ players, savedPlayers }) => validate(
+      validatePlannedPlayers: (players, selection) => validate(players, { selection }),
+      preSave: ({ players, squadPlan }) => validate(players, {
+        selection: squadPlan?.selection,
+      }),
+      postSave: ({ players, savedPlayers, squadPlan }) => validate(
         savedPlayers?.length ? savedPlayers : players,
-        { checkSavedChallenge: true },
+        { checkSavedChallenge: true, selection: squadPlan?.selection },
       ),
     };
   }
@@ -14097,7 +14139,7 @@ function updateLoopControls() {
       context,
       label,
     );
-    validators.validatePlannedPlayers(resolved.players);
+    validators.validatePlannedPlayers(resolved.players, plan.selection);
 
     let backgroundSubmission = null;
     runtime.lastMutation = null;
@@ -15712,6 +15754,9 @@ function updateLoopControls() {
                 : false,
               primaryDuplicateRefs,
               relaxedPrimaryDuplicateRefs,
+              isTransientSubmissionAllowed: (item) => (
+                isRollingTransientSubmissionAllowed(item, activeLoopDef)
+              ),
             }),
             candidateFilter: requiredSpecialSourceFilter,
           };
@@ -15862,11 +15907,19 @@ function updateLoopControls() {
               playerPreparation,
             );
           },
-          preSaveValidators: [() => {
+          preSaveValidators: [({ squadPlan }) => {
             assertSbcSquadSafe(activeLoopDef, fill.inspection);
-            const sourceErrors = rollingRequiredSpecialSourceErrors(fill.selection, fill.model);
+            const finalSelection = squadPlan?.selection || fill.selection;
+            const sourceErrors = rollingRequiredSpecialSourceErrors(finalSelection, fill.model);
             if (sourceErrors.length) {
               fail(`${loopDef.name}: final Rolling squad violated Required Special source policy: ${sourceErrors.join(', ')}`);
+            }
+            const strictSourceErrors = rollingClubNonTotwSpecialSourceErrors(
+              finalSelection,
+              activeLoopDef,
+            );
+            if (strictSourceErrors.length) {
+              fail(`${loopDef.name}: final Rolling squad violated strict Club special protection: ${strictSourceErrors.join(', ')}`);
             }
             const validation = validateRatingSbcModelAgainstItems(
               fill.model,
@@ -16106,7 +16159,7 @@ function updateLoopControls() {
         const storageSinkSummary = loopDef.rollingStorageSinkEnabled
           ? `${loopDef.rollingStorageSink?.mode || 'automatic'}/${loopDef.rollingStorageSink?.capability?.setName || 'unavailable'}`
           : 'off';
-        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; Storage pressure SBC ${storageSinkSummary}`);
+        log(`${loopDef.name}: Rolling automatic-use max rating <= ${rollingProtectionRating(loopDef)}; ordinary Rating SBC card cap ${fodderPolicy.ratingSbcMaxCardRating} does not apply; shortage Provisions batch ${loopDef.rollingShortageProvisionsPackLimit || 2}; surplus Provisions/TOTW ${loopDef.rollingSurplusCraftingEnabled ? 'enabled' : 'shortage only'}; Club non-TOTW specials ${loopDef.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; Storage pressure SBC ${storageSinkSummary}`);
       } else {
         log(`${loopDef.name}: SBC fodder policy mode:${fodderPolicy.mode}; low-rated normal Gold <= ${fodderPolicy.lowRatedGoldMaxRating}; rating SBC all cards <= ${fodderPolicy.ratingSbcMaxCardRating}`);
       }
