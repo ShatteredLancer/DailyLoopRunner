@@ -45,4 +45,15 @@ describe('semantic state contracts', () => {
     expect(recoveryIndex).toBeGreaterThan(-1);
     expect(source.slice(recoveryIndex, recoveryIndex + 300)).toContain('requireNavigation: true');
   });
+
+  it('keeps committed pack settlement and Rolling ledger reconciliation inside the Stop guard', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    expect(source).toContain('committedPackOpenDepth: 0');
+    expect(source).toMatch(/function stopPoint\(\)[\s\S]*?committedPackOpenDepth > 0/);
+    expect(source).toMatch(/async function runCommittedPackOpen[\s\S]*?committedPackOpenDepth\+\+[\s\S]*?await operation\(\)/);
+    expect(source).toMatch(/openPackTransaction\(\{[\s\S]*?runCommitted: runCommittedPackOpen/);
+    expect(source).toMatch(/settleReceipt: async \(openedReceipt, context\)[\s\S]*?recordLoopPackReceipt\(openedReceipt, purpose\)[\s\S]*?options\.settleReceipt/);
+    expect(source).toMatch(/openRollingRecoveryReward[\s\S]*?settleReceipt: async \(openedReceipt\)[\s\S]*?coordinator\.recordPackReceipt\(openedReceipt, \{ reconcile: true \}\)/);
+    expect(source).toMatch(/openPrimaryPack:[\s\S]*?settleReceipt: async \(openedReceipt\)[\s\S]*?coordinator\.recordPackReceipt\(openedReceipt, \{ reconcile: true \}\)/);
+  });
 });

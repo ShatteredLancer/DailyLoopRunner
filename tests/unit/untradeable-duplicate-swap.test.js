@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   planUntradeableDuplicateSwaps,
   resolveUntradeableDuplicateSwapIds,
+  validateUntradeableDuplicateSwapMaterialization,
 } from '../../src/sbc/untradeable-duplicate-swap.js';
 
 function card(id, overrides = {}) {
@@ -103,5 +104,57 @@ describe('untradeable duplicate SBC swap planning', () => {
     expect(resolveUntradeableDuplicateSwapIds({
       swaps: [{ signalId: 101, targetId: 201, definitionId: 501 }],
     }, result)).toEqual({ ok: false, reason, replacements: [] });
+  });
+
+  it('verifies both sides of the EA Club duplicate swap', () => {
+    expect(validateUntradeableDuplicateSwapMaterialization({
+      replacement: { signalId: 101, targetId: 201, newItemId: 101 },
+      originalSignal: card(101),
+      originalTarget: card(201, { tradeable: true, pile: 'club' }),
+      newClubItem: card(101, { pile: 'club' }),
+      displacedTarget: card(201, { tradeable: true, pile: 'unassigned' }),
+    })).toEqual({
+      ok: true,
+      signalId: 101,
+      targetId: 201,
+      newItemId: 101,
+    });
+  });
+
+  it.each([
+    [
+      'a missing displaced tradeable card',
+      { displacedTarget: null },
+      'duplicate swap displaced tradeable Club item #201 disappeared after move',
+    ],
+    [
+      'a displaced card in the wrong pile',
+      { displacedTarget: card(201, { tradeable: true, pile: 'transfer' }) },
+      'duplicate swap displaced tradeable Club item #201 moved to transfer, expected unassigned',
+    ],
+    [
+      'a displaced card with a changed version',
+      { displacedTarget: card(201, { tradeable: true, pile: 'unassigned', rating: 86 }) },
+      'duplicate swap displaced tradeable Club item #201 changed card version',
+    ],
+    [
+      'a displaced card that became untradeable',
+      { displacedTarget: card(201, { tradeable: false, pile: 'unassigned' }) },
+      'duplicate swap displaced Club item #201 is no longer tradeable',
+    ],
+    [
+      'a replacement in the wrong pile',
+      { newClubItem: card(101, { pile: 'unassigned' }) },
+      'duplicate swap replacement #101 materialized in unassigned, expected club',
+    ],
+  ])('fails closed for %s', (_name, overrides, reason) => {
+    expect(validateUntradeableDuplicateSwapMaterialization({
+      replacement: { signalId: 101, targetId: 201, newItemId: 101 },
+      originalSignal: card(101),
+      originalTarget: card(201, { tradeable: true, pile: 'club' }),
+      newClubItem: card(101, { pile: 'club' }),
+      displacedTarget: card(201, { tradeable: true, pile: 'unassigned' }),
+      ...overrides,
+    })).toEqual({ ok: false, reason });
   });
 });

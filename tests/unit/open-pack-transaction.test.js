@@ -215,6 +215,53 @@ describe('openPackTransaction', () => {
     expect(calls).toEqual(['pre', 'select', 'open', 'normalize', 'policy']);
   });
 
+  it('settles a committed pack response through routing, receipt and ledger before honoring Stop', async () => {
+    const calls = [];
+    let stopping = false;
+    let committed = false;
+    const requireCommitted = (stage) => {
+      if (stopping && !committed) throw new Error(`Stop interrupted ${stage}`);
+      calls.push(stage);
+    };
+
+    const receipt = await openPackTransaction({
+      packSelector: async () => ({ id: 1082, name: '10x85+' }),
+      openTransport: async () => {
+        calls.push('transport');
+        stopping = true;
+        return { success: true, response: { items: [{ id: 701 }] } };
+      },
+      runCommitted: async (operation) => {
+        calls.push('commit-enter');
+        committed = true;
+        try {
+          return await operation();
+        } finally {
+          committed = false;
+          calls.push('commit-exit');
+        }
+      },
+      normalizeItems: async (items) => { requireCommitted('materialize'); return items; },
+      openedItemPolicy: async (items) => {
+        requireCommitted('route');
+        return { routedItemRefs: items.map((item) => ({ ...item, pile: 'club' })) };
+      },
+      settleReceipt: async () => requireCommitted('ledger'),
+      onReceipt: async () => requireCommitted('receipt'),
+    });
+
+    expect(receipt.status).toBe('opened');
+    expect(calls).toEqual([
+      'transport',
+      'commit-enter',
+      'materialize',
+      'route',
+      'ledger',
+      'receipt',
+      'commit-exit',
+    ]);
+  });
+
   it('publishes the final receipt before returning without letting observer failures change it', async () => {
     const calls = [];
     const receipt = await openPackTransaction({
@@ -281,6 +328,30 @@ describe('openPackTransaction', () => {
     expect(receipt).toMatchObject({ status: 'opened', attempts: 2 });
     expect(selector).toHaveBeenCalledTimes(2);
     expect(beforeRetry).toHaveBeenCalledOnce();
+  });
+
+  it('never issues a second open when recovery reports pending Purchased items', async () => {
+    const transport = vi.fn(async () => ({ success: false, status: 409, error: { code: 471 } }));
+    const selector = vi.fn(async ({ attempt }) => ({ id: 1082, instance: attempt }));
+    const receipt = await openPackTransaction({
+      packSelector: selector,
+      openTransport: transport,
+      retryPolicy: { attempts: 2, retryCodes: ['471'] },
+      beforeRetry: async () => ({
+        status: 'blocked',
+        reason: 'PACK_OPEN_RESPONSE_LOST',
+        details: { reasonCode: 'PACK_OPEN_RESPONSE_LOST', pendingCount: 10 },
+      }),
+    });
+
+    expect(receipt).toMatchObject({
+      status: 'blocked',
+      reason: 'PACK_OPEN_RESPONSE_LOST',
+      attempts: 1,
+      details: { phase: 'recovery', reasonCode: 'PACK_OPEN_RESPONSE_LOST', pendingCount: 10 },
+    });
+    expect(selector).toHaveBeenCalledOnce();
+    expect(transport).toHaveBeenCalledOnce();
   });
 
   it('returns the final error code after a bounded retry is exhausted', async () => {

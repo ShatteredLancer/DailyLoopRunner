@@ -102,6 +102,85 @@ async function publishReceipt(options, receipt, context = {}) {
   return receipt;
 }
 
+async function settleCommittedOpen(options, context) {
+  const operation = async () => {
+    const {
+      rawItems,
+      pack,
+      packRef,
+      attempt,
+      result,
+      evidence,
+      committedWithItems,
+    } = context;
+    const transportWarning = committedWithItems
+      ? {
+          code: packOpenFailureReason(result),
+          itemSource: evidence.selectedSource,
+          itemCount: evidence.selectedItemCount,
+        }
+      : null;
+    if (transportWarning && typeof options.onCommittedTransportFailure === 'function') {
+      try {
+        await options.onCommittedTransportFailure({
+          attempt,
+          code: transportWarning.code,
+          pack,
+          packRef,
+          result,
+          itemCount: transportWarning.itemCount,
+          itemSource: transportWarning.itemSource,
+          evidence,
+        });
+      } catch { }
+    }
+    const normalized = options.normalizeItems
+      ? await options.normalizeItems(rawItems, { pack, packRef, attempt, result })
+      : rawItems;
+    const openedItems = Array.isArray(normalized) ? normalized : normalized?.items || rawItems;
+    const receiptItems = Array.isArray(normalized) ? normalized : normalized?.receiptItems || openedItems;
+    if (typeof options.onItemsOpened === 'function') {
+      try {
+        Promise.resolve(options.onItemsOpened({
+          pack,
+          packRef,
+          attempt,
+          result,
+          openedItems: receiptItems,
+        })).catch((error) => options.onItemsOpenedError?.(error));
+      } catch (error) {
+        options.onItemsOpenedError?.(error);
+      }
+    }
+    const policyResult = options.openedItemPolicy
+      ? await options.openedItemPolicy(openedItems, { pack, packRef, attempt, result })
+      : { pendingItemRefs: openedItems };
+    const receipt = createOpenPackReceipt({
+      status: 'opened',
+      packRef,
+      openedItems: receiptItems,
+      reservedItemRefs: policyResult?.reservedItemRefs || [],
+      routedItemRefs: policyResult?.routedItemRefs || [],
+      pendingItemRefs: policyResult?.pendingItemRefs || [],
+      attempts: attempt,
+      details: {
+        ...(policyResult?.details || {}),
+        ...(transportWarning ? { transportWarning } : {}),
+      },
+    });
+    await options.settleReceipt?.(receipt, { phase: 'opened', attempt, packRef, pack, result });
+    return publishReceipt(options, receipt, { phase: 'opened', attempt, packRef });
+  };
+
+  return typeof options.runCommitted === 'function'
+    ? options.runCommitted(operation, {
+        phase: 'pack-open-settlement',
+        attempt: context.attempt,
+        packRef: context.packRef,
+      })
+    : operation();
+}
+
 export async function openPackTransaction(options = {}) {
   const attempts = Math.max(1, Math.min(10, Number(options.retryPolicy?.attempts || 1) || 1));
   const retryCodes = new Set((options.retryPolicy?.retryCodes || []).map(String));
@@ -164,61 +243,15 @@ export async function openPackTransaction(options = {}) {
     const rawItems = openedPackItems(result);
     const committedWithItems = !evidence.transportSucceeded && Boolean(rawItems?.length);
     if ((evidence.transportSucceeded && rawItems) || committedWithItems) {
-      const transportWarning = committedWithItems
-        ? {
-            code: packOpenFailureReason(result),
-            itemSource: evidence.selectedSource,
-            itemCount: evidence.selectedItemCount,
-          }
-        : null;
-      if (transportWarning && typeof options.onCommittedTransportFailure === 'function') {
-        try {
-          await options.onCommittedTransportFailure({
-            attempt,
-            code: transportWarning.code,
-            pack,
-            packRef,
-            result,
-            itemCount: transportWarning.itemCount,
-            itemSource: transportWarning.itemSource,
-            evidence,
-          });
-        } catch { }
-      }
-      const normalized = options.normalizeItems
-        ? await options.normalizeItems(rawItems, { pack, packRef, attempt, result })
-        : rawItems;
-      const openedItems = Array.isArray(normalized) ? normalized : normalized?.items || rawItems;
-      const receiptItems = Array.isArray(normalized) ? normalized : normalized?.receiptItems || openedItems;
-      if (typeof options.onItemsOpened === 'function') {
-        try {
-          Promise.resolve(options.onItemsOpened({
-            pack,
-            packRef,
-            attempt,
-            result,
-            openedItems: receiptItems,
-          })).catch((error) => options.onItemsOpenedError?.(error));
-        } catch (error) {
-          options.onItemsOpenedError?.(error);
-        }
-      }
-      const policyResult = options.openedItemPolicy
-        ? await options.openedItemPolicy(openedItems, { pack, packRef, attempt, result })
-        : { pendingItemRefs: openedItems };
-      return publishReceipt(options, createOpenPackReceipt({
-        status: 'opened',
+      return settleCommittedOpen(options, {
+        rawItems,
+        pack,
         packRef,
-        openedItems: receiptItems,
-        reservedItemRefs: policyResult?.reservedItemRefs || [],
-        routedItemRefs: policyResult?.routedItemRefs || [],
-        pendingItemRefs: policyResult?.pendingItemRefs || [],
-        attempts: attempt,
-        details: {
-          ...(policyResult?.details || {}),
-          ...(transportWarning ? { transportWarning } : {}),
-        },
-      }), { phase: 'opened', attempt, packRef });
+        attempt,
+        result,
+        evidence,
+        committedWithItems,
+      });
     }
 
     const code = packOpenFailureReason(result);
@@ -233,7 +266,21 @@ export async function openPackTransaction(options = {}) {
     if (!retryCodes.has(code) || attempt >= attempts) {
       return publishReceipt(options, createOpenPackReceipt({ status: 'blocked', packRef, reason: code, attempts: attempt }), { phase: 'transport', attempt, packRef, code });
     }
-    if (options.beforeRetry) await options.beforeRetry({ attempt, code, pack, packRef, result });
+    if (options.beforeRetry) {
+      const recovery = await options.beforeRetry({ attempt, code, pack, packRef, result });
+      if (recovery?.status === 'blocked') {
+        return publishReceipt(options, createOpenPackReceipt({
+          status: 'blocked',
+          packRef,
+          reason: recovery.reason || 'PACK_OPEN_RESULT_AMBIGUOUS',
+          attempts: attempt,
+          details: {
+            ...(recovery.details || {}),
+            phase: 'recovery',
+          },
+        }), { phase: 'recovery', attempt, packRef, code });
+      }
+    }
   }
 
   return publishReceipt(options, createOpenPackReceipt({ status: 'blocked', reason: lastReason || 'open failed', attempts }), { phase: 'transport', code: lastReason });

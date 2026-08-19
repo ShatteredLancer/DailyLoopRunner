@@ -340,6 +340,7 @@ import {
 import {
   planUntradeableDuplicateSwaps,
   resolveUntradeableDuplicateSwapIds,
+  validateUntradeableDuplicateSwapMaterialization,
 } from './sbc/untradeable-duplicate-swap.js';
 import {
   createBackgroundSubmitTelemetry,
@@ -637,6 +638,7 @@ const state = {
     running: false,
     stopping: false,
     committedSbcSubmitDepth: 0,
+    committedPackOpenDepth: 0,
     refreshing: false,
     scanningPicks: false,
     dynamicSbcScanProgress: null,
@@ -1995,7 +1997,7 @@ function updateLoopControls() {
   }
 
   function stopPoint() {
-    if (state.committedSbcSubmitDepth > 0) return;
+    if (state.committedSbcSubmitDepth > 0 || state.committedPackOpenDepth > 0) return;
     if (state.stopping) fail('Stopped by user');
   }
 
@@ -2009,6 +2011,19 @@ function updateLoopControls() {
       state.committedSbcSubmitDepth = Math.max(0, state.committedSbcSubmitDepth - 1);
       if (!stoppingBeforeCommit && state.stopping && state.committedSbcSubmitDepth === 0) {
         log('Stop requested during SBC submission; inventory synchronization completed before stopping');
+      }
+    }
+  }
+
+  async function runCommittedPackOpen(operation, context = {}) {
+    state.committedPackOpenDepth++;
+    try {
+      return await operation();
+    } finally {
+      state.committedPackOpenDepth = Math.max(0, state.committedPackOpenDepth - 1);
+      if (state.stopping && state.committedPackOpenDepth === 0) {
+        const packId = Number(context.packRef?.id || 0) || null;
+        log(`Stop requested during pack open${packId ? ` #${packId}` : ''}; reward settlement and inventory synchronization completed before stopping`);
       }
     }
   }
@@ -3886,6 +3901,27 @@ function updateLoopControls() {
     return { ...previous, stable: false, stableReadCount };
   }
 
+  async function inspectFreshRuntimeUnassigned() {
+    const inventoryAdapter = eaInventoryAdapter();
+    const invalidation = await inventoryAdapter.invalidateUnassigned();
+    const result = await refreshUnassigned({
+      attempts: 2,
+      allowCacheFallback: false,
+      quiet: true,
+    });
+    const items = inventoryAdapter.readPile('unassigned');
+    return {
+      verified: items.length > 0 || (result?.success === true && invalidation?.invalidated === true),
+      source: 'fresh-purchased-api',
+      items,
+      details: {
+        invalidation,
+        status: result?.status ?? null,
+        repository: inventoryAdapter.unassignedState(),
+      },
+    };
+  }
+
   async function openPack(pack, purpose, options = {}) {
     if (!pack) fail(`Pack not found for ${purpose}`);
     if (typeof options.openedItemPolicy !== 'function') {
@@ -3898,6 +3934,7 @@ function updateLoopControls() {
     let retryBaseline = null;
     let retryFailedPack = null;
     let retryDecision = null;
+    let committedReceiptSettled = false;
     const retryCodes = [...new Set([
       ...(options.retryCodes || (options.retryOn471 === true ? ['471'] : [])).map(String),
       ...DEFAULT_PACK_OPEN_RETRY_CODES,
@@ -3906,6 +3943,7 @@ function updateLoopControls() {
     const dryRun = isDryRunEffectGuarded(options);
     const receipt = await openPackTransaction({
       dryRun,
+      runCommitted: runCommittedPackOpen,
       preOpenResolver: () => resolveRuntimeUnassigned(
         `opening ${purpose}`,
         preOpenUnassignedOptions,
@@ -4011,6 +4049,12 @@ function updateLoopControls() {
         ...context,
         routingBaseline,
       }),
+      settleReceipt: async (openedReceipt, context) => {
+        state.lastOpenPackReceipt = openedReceipt;
+        recordLoopPackReceipt(openedReceipt, purpose);
+        await options.settleReceipt?.(openedReceipt, context);
+        committedReceiptSettled = true;
+      },
       retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
       beforeRetry: async ({ code, pack: failedPack }) => {
         retryFailedPack = failedPack;
@@ -4019,7 +4063,7 @@ function updateLoopControls() {
           markStalePack(failedPack);
           log(`${purpose}: excluding ambiguous pack instance #${Number(failedPack?.id || 0) || '?'} before retry`);
         }
-        await recoverPackOpenRetry({
+        return recoverPackOpenRetry({
           label: purpose,
           code,
           pack: failedPack,
@@ -4028,6 +4072,7 @@ function updateLoopControls() {
           sleep,
           pauseMs: CFG.pauseMs,
           settleMs: 700,
+          inspectFreshUnassigned: inspectFreshRuntimeUnassigned,
           unwind: () => unwindSbcSquadControllers(`${purpose} pack-open recovery`),
           showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`, {
             stableEmptyReads: 3,
@@ -4051,8 +4096,11 @@ function updateLoopControls() {
         await refreshStorePacks().catch(() => null);
       },
     });
-    state.lastOpenPackReceipt = receipt;
-    recordLoopPackReceipt(receipt, purpose);
+    if (!committedReceiptSettled) {
+      state.lastOpenPackReceipt = receipt;
+      recordLoopPackReceipt(receipt, purpose);
+    }
+    stopPoint();
     if (receipt.status === 'planned') {
       log(`${purpose}: dry-run would open ${receipt.packRef?.name || packName(pack)} (#${receipt.packRef?.id || pack.id || '?'})`);
       return receipt;
@@ -12183,13 +12231,48 @@ function updateLoopControls() {
     for (const replacement of resolution.replacements) {
       const originalSignal = signalItems.find((item) => Number(item?.id || 0) === replacement.signalId);
       const originalTarget = players.find((item) => Number(item?.id || 0) === replacement.targetId);
-      const newItem = findCachedItemById(replacement.newItemId, ['club'])?.item || null;
-      if (!originalSignal || !originalTarget || !newItem) {
-        return { ok: false, reason: `duplicate swap Club item #${replacement.newItemId} was not materialized` };
+      const newItemLocation = findCachedItemById(replacement.newItemId, ['club', 'unassigned', 'storage', 'transfer']);
+      let displacedTargetLocation = findCachedItemById(replacement.targetId, ['unassigned', 'storage', 'transfer', 'club']);
+      for (let attempt = 1; attempt <= 2 && displacedTargetLocation?.pileName !== 'unassigned'; attempt++) {
+        log(`${context.label}: waiting for displaced tradeable Club item #${replacement.targetId} to settle in Unassigned (${attempt}/2)`);
+        await sleep(400 * attempt);
+        await refreshUnassigned({ quiet: true }).catch(() => null);
+        displacedTargetLocation = findCachedItemById(replacement.targetId, ['unassigned', 'storage', 'transfer', 'club']);
       }
-      if (!isSamePlayerCardVersion(originalSignal, newItem) || isTradeable(newItem)) {
-        return { ok: false, reason: `duplicate swap Club item #${replacement.newItemId} failed same-version untradeable validation` };
+      const newItem = newItemLocation?.item || null;
+      const materialization = validateUntradeableDuplicateSwapMaterialization({
+        replacement,
+        originalSignal: originalSignal ? duplicateSwapSnapshot(originalSignal, 'unassigned') : null,
+        originalTarget: originalTarget ? duplicateSwapSnapshot(originalTarget, 'club') : null,
+        newClubItem: newItem ? duplicateSwapSnapshot(newItem, newItemLocation.pileName) : null,
+        displacedTarget: displacedTargetLocation?.item
+          ? duplicateSwapSnapshot(displacedTargetLocation.item, displacedTargetLocation.pileName)
+          : null,
+      });
+      if (!materialization.ok) {
+        log(`${context.label}: duplicate swap postcondition diagnostic ${diagnosticJson({
+          replacement,
+          reason: materialization.reason,
+          newItemLocation: newItemLocation ? {
+            pile: newItemLocation.pileName,
+            item: captureRuntimeInventoryItem(newItemLocation.item, { identify: identifyRuntimeInventoryItem }),
+          } : null,
+          displacedTargetLocation: displacedTargetLocation ? {
+            pile: displacedTargetLocation.pileName,
+            item: captureRuntimeInventoryItem(displacedTargetLocation.item, { identify: identifyRuntimeInventoryItem }),
+          } : null,
+          definitionPiles: captureDefinitionPileState({
+            unassigned: getUnassignedItems(),
+            storage: getStorageItems(),
+            transfer: getTransferItems(),
+            club: getClubItems(),
+          }, Number(originalSignal?.definitionId || originalTarget?.definitionId || 0), {
+            identify: identifyRuntimeInventoryItem,
+          }),
+        })}`);
+        return materialization;
       }
+      log(`${context.label}: duplicate swap verified: untradeable #${replacement.signalId} -> Club #${replacement.newItemId}; tradeable Club #${replacement.targetId} -> Unassigned #${replacement.targetId}`);
       replacementByTargetId.set(replacement.targetId, {
         ...replacement,
         originalTarget,
@@ -13270,6 +13353,9 @@ function updateLoopControls() {
         repositoryOnly: true,
       }),
       openedItemPolicy: createRollingPrimaryPackPolicy(loopDef, routeContext),
+      settleReceipt: async (openedReceipt) => {
+        runtime.lastMutation = await runtime.coordinator.recordPackReceipt(openedReceipt, { reconcile: true });
+      },
     });
     if (!receipt) return { status: 'unavailable', reason: `${definition.name} reward pack is unavailable` };
     if (receipt.status === 'planned') return receipt;
@@ -13288,7 +13374,6 @@ function updateLoopControls() {
       ]);
       log(`${loopDef.name}: captured ${capturedRefs.length} ${definition.name} duplicate Gold signal(s) for the Rare Gold Pick -> 5x80 recovery chain`);
     }
-    runtime.lastMutation = await runtime.coordinator.recordPackReceipt(receipt, { reconcile: true });
     return { ...receipt, status: 'opened', inventoryDelta: runtime.lastMutation?.delta || null };
   }
 
@@ -15304,11 +15389,14 @@ function updateLoopControls() {
           openedItemPolicy: createRollingPrimaryPackPolicy(loopDef, runtime, {
             capturePrimaryDuplicates: true,
           }),
+          settleReceipt: async (openedReceipt) => {
+            runtime.pendingRewardPackId = null;
+            runtime.lastMutation = await runtime.coordinator.recordPackReceipt(openedReceipt, { reconcile: true });
+          },
         });
         if (!receipt) return { status: 'unavailable', reason: 'primary reward pack is unavailable' };
         if (receipt.status === 'opened') {
           runtime.pendingRewardPackId = null;
-          runtime.lastMutation = await runtime.coordinator.recordPackReceipt(receipt, { reconcile: true });
         }
         return {
           ...receipt,

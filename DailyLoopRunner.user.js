@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.15
+// @version      0.8.16
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.15",
+    version: "0.8.16",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -23444,6 +23444,76 @@
     }
     return receipt;
   }
+  async function settleCommittedOpen(options, context) {
+    const operation = async () => {
+      const {
+        rawItems,
+        pack,
+        packRef,
+        attempt,
+        result,
+        evidence: evidence2,
+        committedWithItems
+      } = context;
+      const transportWarning = committedWithItems ? {
+        code: packOpenFailureReason(result),
+        itemSource: evidence2.selectedSource,
+        itemCount: evidence2.selectedItemCount
+      } : null;
+      if (transportWarning && typeof options.onCommittedTransportFailure === "function") {
+        try {
+          await options.onCommittedTransportFailure({
+            attempt,
+            code: transportWarning.code,
+            pack,
+            packRef,
+            result,
+            itemCount: transportWarning.itemCount,
+            itemSource: transportWarning.itemSource,
+            evidence: evidence2
+          });
+        } catch {
+        }
+      }
+      const normalized = options.normalizeItems ? await options.normalizeItems(rawItems, { pack, packRef, attempt, result }) : rawItems;
+      const openedItems = Array.isArray(normalized) ? normalized : normalized?.items || rawItems;
+      const receiptItems = Array.isArray(normalized) ? normalized : normalized?.receiptItems || openedItems;
+      if (typeof options.onItemsOpened === "function") {
+        try {
+          Promise.resolve(options.onItemsOpened({
+            pack,
+            packRef,
+            attempt,
+            result,
+            openedItems: receiptItems
+          })).catch((error) => options.onItemsOpenedError?.(error));
+        } catch (error) {
+          options.onItemsOpenedError?.(error);
+        }
+      }
+      const policyResult = options.openedItemPolicy ? await options.openedItemPolicy(openedItems, { pack, packRef, attempt, result }) : { pendingItemRefs: openedItems };
+      const receipt = createOpenPackReceipt({
+        status: "opened",
+        packRef,
+        openedItems: receiptItems,
+        reservedItemRefs: policyResult?.reservedItemRefs || [],
+        routedItemRefs: policyResult?.routedItemRefs || [],
+        pendingItemRefs: policyResult?.pendingItemRefs || [],
+        attempts: attempt,
+        details: {
+          ...policyResult?.details || {},
+          ...transportWarning ? { transportWarning } : {}
+        }
+      });
+      await options.settleReceipt?.(receipt, { phase: "opened", attempt, packRef, pack, result });
+      return publishReceipt(options, receipt, { phase: "opened", attempt, packRef });
+    };
+    return typeof options.runCommitted === "function" ? options.runCommitted(operation, {
+      phase: "pack-open-settlement",
+      attempt: context.attempt,
+      packRef: context.packRef
+    }) : operation();
+  }
   async function openPackTransaction(options = {}) {
     const attempts = Math.max(1, Math.min(10, Number(options.retryPolicy?.attempts || 1) || 1));
     const retryCodes = new Set((options.retryPolicy?.retryCodes || []).map(String));
@@ -23503,56 +23573,15 @@
       const rawItems = openedPackItems(result);
       const committedWithItems = !evidence2.transportSucceeded && Boolean(rawItems?.length);
       if (evidence2.transportSucceeded && rawItems || committedWithItems) {
-        const transportWarning = committedWithItems ? {
-          code: packOpenFailureReason(result),
-          itemSource: evidence2.selectedSource,
-          itemCount: evidence2.selectedItemCount
-        } : null;
-        if (transportWarning && typeof options.onCommittedTransportFailure === "function") {
-          try {
-            await options.onCommittedTransportFailure({
-              attempt,
-              code: transportWarning.code,
-              pack,
-              packRef,
-              result,
-              itemCount: transportWarning.itemCount,
-              itemSource: transportWarning.itemSource,
-              evidence: evidence2
-            });
-          } catch {
-          }
-        }
-        const normalized = options.normalizeItems ? await options.normalizeItems(rawItems, { pack, packRef, attempt, result }) : rawItems;
-        const openedItems = Array.isArray(normalized) ? normalized : normalized?.items || rawItems;
-        const receiptItems = Array.isArray(normalized) ? normalized : normalized?.receiptItems || openedItems;
-        if (typeof options.onItemsOpened === "function") {
-          try {
-            Promise.resolve(options.onItemsOpened({
-              pack,
-              packRef,
-              attempt,
-              result,
-              openedItems: receiptItems
-            })).catch((error) => options.onItemsOpenedError?.(error));
-          } catch (error) {
-            options.onItemsOpenedError?.(error);
-          }
-        }
-        const policyResult = options.openedItemPolicy ? await options.openedItemPolicy(openedItems, { pack, packRef, attempt, result }) : { pendingItemRefs: openedItems };
-        return publishReceipt(options, createOpenPackReceipt({
-          status: "opened",
+        return settleCommittedOpen(options, {
+          rawItems,
+          pack,
           packRef,
-          openedItems: receiptItems,
-          reservedItemRefs: policyResult?.reservedItemRefs || [],
-          routedItemRefs: policyResult?.routedItemRefs || [],
-          pendingItemRefs: policyResult?.pendingItemRefs || [],
-          attempts: attempt,
-          details: {
-            ...policyResult?.details || {},
-            ...transportWarning ? { transportWarning } : {}
-          }
-        }), { phase: "opened", attempt, packRef });
+          attempt,
+          result,
+          evidence: evidence2,
+          committedWithItems
+        });
       }
       const code = packOpenFailureReason(result);
       lastReason = code;
@@ -23569,7 +23598,21 @@
       if (!retryCodes.has(code) || attempt >= attempts) {
         return publishReceipt(options, createOpenPackReceipt({ status: "blocked", packRef, reason: code, attempts: attempt }), { phase: "transport", attempt, packRef, code });
       }
-      if (options.beforeRetry) await options.beforeRetry({ attempt, code, pack, packRef, result });
+      if (options.beforeRetry) {
+        const recovery = await options.beforeRetry({ attempt, code, pack, packRef, result });
+        if (recovery?.status === "blocked") {
+          return publishReceipt(options, createOpenPackReceipt({
+            status: "blocked",
+            packRef,
+            reason: recovery.reason || "PACK_OPEN_RESULT_AMBIGUOUS",
+            attempts: attempt,
+            details: {
+              ...recovery.details || {},
+              phase: "recovery"
+            }
+          }), { phase: "recovery", attempt, packRef, code });
+        }
+      }
     }
     return publishReceipt(options, createOpenPackReceipt({ status: "blocked", reason: lastReason || "open failed", attempts }), { phase: "transport", code: lastReason });
   }
@@ -23634,44 +23677,6 @@
       cleanup,
       routing
     };
-  }
-
-  // src/pack/retry-recovery.js
-  function normalizedCode(value) {
-    return String(value ?? "").trim();
-  }
-  function shouldDiscardFailedPack(code) {
-    return normalizedCode(code) === "471";
-  }
-  async function recoverPackOpenRetry(options = {}) {
-    const label = String(options.label || "Pack open");
-    const code = normalizedCode(options.code) || "unknown";
-    const pack = options.pack || null;
-    const packId2 = Number(pack?.id ?? pack?.packId ?? pack?.packDefinitionId ?? pack?.packAssetId ?? 0) || null;
-    const log = typeof options.log === "function" ? options.log : () => {
-    };
-    log(`${label}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
-    if (shouldDiscardFailedPack(code)) {
-      options.markFailedPack?.(pack);
-      log(`${label}: excluding failed pack instance${packId2 ? ` #${packId2}` : ""} before retry`);
-    }
-    log(`${label}: retrying pack open after navigation and unassigned recovery`);
-    await options.sleep?.(Math.max(0, Number(options.pauseMs || 0)));
-    await options.unwind?.();
-    await options.showUnassigned?.();
-    await options.resolveUnassigned?.();
-    let storeRefreshed = false;
-    try {
-      storeRefreshed = await options.openStorePacks?.() === true;
-    } catch (error) {
-      log(`${label}: pack-open Store recovery skipped: ${error?.message || error}`);
-    }
-    if (!storeRefreshed) {
-      log(`${label}: Store Packs view refresh unavailable; continuing with repository refresh`);
-    }
-    await options.sleep?.(Math.max(0, Number(options.settleMs ?? 700)));
-    await options.refreshInventory?.({ storeRefreshed });
-    return { code, discarded: shouldDiscardFailedPack(code), storeRefreshed };
   }
 
   // src/pack/retry-reconciliation.js
@@ -23778,6 +23783,135 @@
       return { action: "retry", pack: freshPack, source: "fresh-instance", evidence: evidence2 };
     }
     return blocked2(PACK_OPEN_RESULT_AMBIGUOUS, evidence2);
+  }
+
+  // src/pack/retry-recovery.js
+  function normalizedCode(value) {
+    return String(value ?? "").trim();
+  }
+  function shouldDiscardFailedPack(code) {
+    return normalizedCode(code) === "471";
+  }
+  function inspectionItems(inspection) {
+    return Array.isArray(inspection?.items) ? inspection.items : [];
+  }
+  function inspectionSummary(inspection = {}) {
+    return {
+      source: String(inspection.source || "unknown"),
+      verified: inspection.verified === true,
+      pendingCount: inspectionItems(inspection).length,
+      pendingItemIds: inspectionItems(inspection).map((item) => Number(item?.id || item?.itemId || 0)).filter(Boolean),
+      details: inspection.details || null
+    };
+  }
+  async function inspectFreshUnassigned(options, label) {
+    if (typeof options.inspectFreshUnassigned !== "function") {
+      return { verified: false, source: "fresh-api-unavailable", items: [] };
+    }
+    try {
+      const inspection = await options.inspectFreshUnassigned();
+      return {
+        ...inspection || {},
+        verified: inspection?.verified === true,
+        source: String(inspection?.source || "fresh-purchased-api"),
+        items: inspectionItems(inspection)
+      };
+    } catch (error) {
+      options.log?.(`${label}: fresh Purchased/Unassigned API inspection failed: ${error?.message || error}`);
+      return {
+        verified: false,
+        source: "fresh-purchased-api",
+        items: [],
+        details: { error: error?.message || String(error) }
+      };
+    }
+  }
+  async function resolvePendingInspection(options, inspection, base) {
+    const evidence2 = inspectionSummary(inspection);
+    options.log?.(`${base.label}: ${evidence2.source} found ${evidence2.pendingCount} pending item(s); blocking another pack open`);
+    try {
+      const resolution = await options.resolveUnassigned?.();
+      evidence2.resolutionStatus = resolution?.status || null;
+    } catch (error) {
+      evidence2.resolveError = error?.message || String(error);
+    }
+    const resultBase = { ...base };
+    delete resultBase.label;
+    return {
+      ...resultBase,
+      status: "blocked",
+      reason: PACK_OPEN_RESPONSE_LOST,
+      details: { reasonCode: PACK_OPEN_RESPONSE_LOST, unassignedEvidence: evidence2 }
+    };
+  }
+  async function recoverPackOpenRetry(options = {}) {
+    const label = String(options.label || "Pack open");
+    const code = normalizedCode(options.code) || "unknown";
+    const pack = options.pack || null;
+    const packId2 = Number(pack?.id ?? pack?.packId ?? pack?.packDefinitionId ?? pack?.packAssetId ?? 0) || null;
+    const log = typeof options.log === "function" ? options.log : () => {
+    };
+    log(`${label}: pack open returned ${code}; synchronizing navigation and pack cache before retry`);
+    if (shouldDiscardFailedPack(code)) {
+      options.markFailedPack?.(pack);
+      log(`${label}: excluding failed pack instance${packId2 ? ` #${packId2}` : ""} before retry`);
+    }
+    log(`${label}: checking Purchased/Unassigned state before any retry`);
+    await options.sleep?.(Math.max(0, Number(options.pauseMs || 0)));
+    const base = { code, discarded: shouldDiscardFailedPack(code), storeRefreshed: false };
+    const freshInspection = await inspectFreshUnassigned(options, label);
+    if (freshInspection.verified) {
+      const evidence2 = inspectionSummary(freshInspection);
+      log(`${label}: fresh ${evidence2.source} verified ${evidence2.pendingCount} pending item(s)`);
+      if (evidence2.pendingCount > 0) {
+        return resolvePendingInspection(options, freshInspection, { ...base, label });
+      }
+    }
+    await options.unwind?.();
+    let stateEvidence = freshInspection.verified ? freshInspection : null;
+    if (!stateEvidence && typeof options.showUnassigned === "function") {
+      try {
+        const pageItems = await options.showUnassigned();
+        stateEvidence = {
+          verified: true,
+          source: "confirmed-unassigned-page",
+          items: Array.isArray(pageItems) ? pageItems : []
+        };
+      } catch (error) {
+        log(`${label}: Unassigned page confirmation failed: ${error?.message || error}`);
+      }
+    }
+    if (!stateEvidence) {
+      return {
+        ...base,
+        status: "blocked",
+        reason: PACK_OPEN_RESULT_AMBIGUOUS,
+        details: {
+          reasonCode: PACK_OPEN_RESULT_AMBIGUOUS,
+          unassignedEvidence: inspectionSummary(freshInspection)
+        }
+      };
+    }
+    if (stateEvidence && inspectionItems(stateEvidence).length > 0) {
+      return resolvePendingInspection(options, stateEvidence, { ...base, label });
+    }
+    let storeRefreshed = false;
+    try {
+      storeRefreshed = await options.openStorePacks?.() === true;
+    } catch (error) {
+      log(`${label}: pack-open Store recovery skipped: ${error?.message || error}`);
+    }
+    if (!storeRefreshed) {
+      log(`${label}: Store Packs view refresh unavailable; continuing with repository refresh`);
+    }
+    await options.sleep?.(Math.max(0, Number(options.settleMs ?? 700)));
+    await options.refreshInventory?.({ storeRefreshed });
+    return {
+      ...base,
+      status: "ready",
+      storeRefreshed,
+      evidence: stateEvidence ? inspectionSummary(stateEvidence) : null
+    };
   }
 
   // src/pack/source-lookup.js
@@ -24330,6 +24464,53 @@
       });
     }
     return { ok: true, replacements };
+  }
+  function failedMaterialization(reason) {
+    return { ok: false, reason };
+  }
+  function validateUntradeableDuplicateSwapMaterialization({
+    replacement = {},
+    originalSignal = null,
+    originalTarget = null,
+    newClubItem = null,
+    displacedTarget = null
+  } = {}) {
+    const signalId = positiveId2(replacement.signalId);
+    const targetId = positiveId2(replacement.targetId);
+    const newItemId = positiveId2(replacement.newItemId);
+    if (!signalId || !targetId || !newItemId || !originalSignal || !originalTarget) {
+      return failedMaterialization("duplicate swap postcondition is missing an expected identity");
+    }
+    if (positiveId2(newClubItem?.id || newClubItem?.ref?.id) !== newItemId) {
+      return failedMaterialization(`duplicate swap Club item #${newItemId} was not materialized`);
+    }
+    if (itemPile(newClubItem) !== "club") {
+      return failedMaterialization(`duplicate swap replacement #${newItemId} materialized in ${itemPile(newClubItem)}, expected club`);
+    }
+    if (!isSamePlayerCardVersion(originalSignal, newClubItem) || newClubItem?.tradeable === true) {
+      return failedMaterialization(`duplicate swap Club item #${newItemId} failed same-version untradeable validation`);
+    }
+    if (!displacedTarget) {
+      return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} disappeared after move`);
+    }
+    if (positiveId2(displacedTarget?.id || displacedTarget?.ref?.id) !== targetId) {
+      return failedMaterialization(`duplicate swap displaced item identity changed from #${targetId}`);
+    }
+    if (itemPile(displacedTarget) !== "unassigned") {
+      return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} moved to ${itemPile(displacedTarget)}, expected unassigned`);
+    }
+    if (!isSamePlayerCardVersion(originalTarget, displacedTarget)) {
+      return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} changed card version`);
+    }
+    if (displacedTarget?.tradeable !== true) {
+      return failedMaterialization(`duplicate swap displaced Club item #${targetId} is no longer tradeable`);
+    }
+    return {
+      ok: true,
+      signalId,
+      targetId,
+      newItemId
+    };
   }
 
   // src/sbc/background-submit-diagnostics.js
@@ -36649,6 +36830,7 @@
       running: false,
       stopping: false,
       committedSbcSubmitDepth: 0,
+      committedPackOpenDepth: 0,
       refreshing: false,
       scanningPicks: false,
       dynamicSbcScanProgress: null,
@@ -37928,7 +38110,7 @@
       throw new Error(message);
     }
     function stopPoint() {
-      if (state.committedSbcSubmitDepth > 0) return;
+      if (state.committedSbcSubmitDepth > 0 || state.committedPackOpenDepth > 0) return;
       if (state.stopping) fail2("Stopped by user");
     }
     async function runCommittedSbcSubmit(operation) {
@@ -37941,6 +38123,18 @@
         state.committedSbcSubmitDepth = Math.max(0, state.committedSbcSubmitDepth - 1);
         if (!stoppingBeforeCommit && state.stopping && state.committedSbcSubmitDepth === 0) {
           log("Stop requested during SBC submission; inventory synchronization completed before stopping");
+        }
+      }
+    }
+    async function runCommittedPackOpen(operation, context = {}) {
+      state.committedPackOpenDepth++;
+      try {
+        return await operation();
+      } finally {
+        state.committedPackOpenDepth = Math.max(0, state.committedPackOpenDepth - 1);
+        if (state.stopping && state.committedPackOpenDepth === 0) {
+          const packId2 = Number(context.packRef?.id || 0) || null;
+          log(`Stop requested during pack open${packId2 ? ` #${packId2}` : ""}; reward settlement and inventory synchronization completed before stopping`);
         }
       }
     }
@@ -39605,6 +39799,26 @@
       }
       return { ...previous, stable: false, stableReadCount };
     }
+    async function inspectFreshRuntimeUnassigned() {
+      const inventoryAdapter = eaInventoryAdapter();
+      const invalidation = await inventoryAdapter.invalidateUnassigned();
+      const result = await refreshUnassigned({
+        attempts: 2,
+        allowCacheFallback: false,
+        quiet: true
+      });
+      const items = inventoryAdapter.readPile("unassigned");
+      return {
+        verified: items.length > 0 || result?.success === true && invalidation?.invalidated === true,
+        source: "fresh-purchased-api",
+        items,
+        details: {
+          invalidation,
+          status: result?.status ?? null,
+          repository: inventoryAdapter.unassignedState()
+        }
+      };
+    }
     async function openPack(pack, purpose, options = {}) {
       if (!pack) fail2(`Pack not found for ${purpose}`);
       if (typeof options.openedItemPolicy !== "function") {
@@ -39617,6 +39831,7 @@
       let retryBaseline = null;
       let retryFailedPack = null;
       let retryDecision = null;
+      let committedReceiptSettled = false;
       const retryCodes = [.../* @__PURE__ */ new Set([
         ...(options.retryCodes || (options.retryOn471 === true ? ["471"] : [])).map(String),
         ...DEFAULT_PACK_OPEN_RETRY_CODES
@@ -39625,6 +39840,7 @@
       const dryRun = isDryRunEffectGuarded(options);
       const receipt = await openPackTransaction({
         dryRun,
+        runCommitted: runCommittedPackOpen,
         preOpenResolver: () => resolveRuntimeUnassigned(
           `opening ${purpose}`,
           preOpenUnassignedOptions
@@ -39726,6 +39942,12 @@
           ...context,
           routingBaseline
         }),
+        settleReceipt: async (openedReceipt, context) => {
+          state.lastOpenPackReceipt = openedReceipt;
+          recordLoopPackReceipt(openedReceipt, purpose);
+          await options.settleReceipt?.(openedReceipt, context);
+          committedReceiptSettled = true;
+        },
         retryPolicy: { attempts: retryCodes.length ? 2 : 1, retryCodes },
         beforeRetry: async ({ code, pack: failedPack }) => {
           retryFailedPack = failedPack;
@@ -39734,7 +39956,7 @@
             markStalePack(failedPack);
             log(`${purpose}: excluding ambiguous pack instance #${Number(failedPack?.id || 0) || "?"} before retry`);
           }
-          await recoverPackOpenRetry({
+          return recoverPackOpenRetry({
             label: purpose,
             code,
             pack: failedPack,
@@ -39743,6 +39965,7 @@
             sleep,
             pauseMs: CFG.pauseMs,
             settleMs: 700,
+            inspectFreshUnassigned: inspectFreshRuntimeUnassigned,
             unwind: () => unwindSbcSquadControllers2(`${purpose} pack-open recovery`),
             showUnassigned: () => showUnassignedIfAny(`${purpose} pack-open recovery sync`, {
               stableEmptyReads: 3,
@@ -39766,8 +39989,11 @@
           await refreshStorePacks().catch(() => null);
         }
       });
-      state.lastOpenPackReceipt = receipt;
-      recordLoopPackReceipt(receipt, purpose);
+      if (!committedReceiptSettled) {
+        state.lastOpenPackReceipt = receipt;
+        recordLoopPackReceipt(receipt, purpose);
+      }
+      stopPoint();
       if (receipt.status === "planned") {
         log(`${purpose}: dry-run would open ${receipt.packRef?.name || packName(pack)} (#${receipt.packRef?.id || pack.id || "?"})`);
         return receipt;
@@ -47061,13 +47287,46 @@
       for (const replacement of resolution.replacements) {
         const originalSignal = signalItems.find((item) => Number(item?.id || 0) === replacement.signalId);
         const originalTarget = players.find((item) => Number(item?.id || 0) === replacement.targetId);
-        const newItem = findCachedItemById(replacement.newItemId, ["club"])?.item || null;
-        if (!originalSignal || !originalTarget || !newItem) {
-          return { ok: false, reason: `duplicate swap Club item #${replacement.newItemId} was not materialized` };
+        const newItemLocation = findCachedItemById(replacement.newItemId, ["club", "unassigned", "storage", "transfer"]);
+        let displacedTargetLocation = findCachedItemById(replacement.targetId, ["unassigned", "storage", "transfer", "club"]);
+        for (let attempt = 1; attempt <= 2 && displacedTargetLocation?.pileName !== "unassigned"; attempt++) {
+          log(`${context.label}: waiting for displaced tradeable Club item #${replacement.targetId} to settle in Unassigned (${attempt}/2)`);
+          await sleep(400 * attempt);
+          await refreshUnassigned({ quiet: true }).catch(() => null);
+          displacedTargetLocation = findCachedItemById(replacement.targetId, ["unassigned", "storage", "transfer", "club"]);
         }
-        if (!isSamePlayerCardVersion(originalSignal, newItem) || isTradeable(newItem)) {
-          return { ok: false, reason: `duplicate swap Club item #${replacement.newItemId} failed same-version untradeable validation` };
+        const newItem = newItemLocation?.item || null;
+        const materialization = validateUntradeableDuplicateSwapMaterialization({
+          replacement,
+          originalSignal: originalSignal ? duplicateSwapSnapshot(originalSignal, "unassigned") : null,
+          originalTarget: originalTarget ? duplicateSwapSnapshot(originalTarget, "club") : null,
+          newClubItem: newItem ? duplicateSwapSnapshot(newItem, newItemLocation.pileName) : null,
+          displacedTarget: displacedTargetLocation?.item ? duplicateSwapSnapshot(displacedTargetLocation.item, displacedTargetLocation.pileName) : null
+        });
+        if (!materialization.ok) {
+          log(`${context.label}: duplicate swap postcondition diagnostic ${diagnosticJson({
+            replacement,
+            reason: materialization.reason,
+            newItemLocation: newItemLocation ? {
+              pile: newItemLocation.pileName,
+              item: captureRuntimeInventoryItem(newItemLocation.item, { identify: identifyRuntimeInventoryItem })
+            } : null,
+            displacedTargetLocation: displacedTargetLocation ? {
+              pile: displacedTargetLocation.pileName,
+              item: captureRuntimeInventoryItem(displacedTargetLocation.item, { identify: identifyRuntimeInventoryItem })
+            } : null,
+            definitionPiles: captureDefinitionPileState({
+              unassigned: getUnassignedItems(),
+              storage: getStorageItems(),
+              transfer: getTransferItems(),
+              club: getClubItems()
+            }, Number(originalSignal?.definitionId || originalTarget?.definitionId || 0), {
+              identify: identifyRuntimeInventoryItem
+            })
+          })}`);
+          return materialization;
         }
+        log(`${context.label}: duplicate swap verified: untradeable #${replacement.signalId} -> Club #${replacement.newItemId}; tradeable Club #${replacement.targetId} -> Unassigned #${replacement.targetId}`);
         replacementByTargetId.set(replacement.targetId, {
           ...replacement,
           originalTarget,
@@ -48003,7 +48262,10 @@
           fallbackPackMatcher: options.fallbackPackMatcher,
           repositoryOnly: true
         }),
-        openedItemPolicy: createRollingPrimaryPackPolicy(loopDef, routeContext)
+        openedItemPolicy: createRollingPrimaryPackPolicy(loopDef, routeContext),
+        settleReceipt: async (openedReceipt) => {
+          runtime.lastMutation = await runtime.coordinator.recordPackReceipt(openedReceipt, { reconcile: true });
+        }
       });
       if (!receipt) return { status: "unavailable", reason: `${definition.name} reward pack is unavailable` };
       if (receipt.status === "planned") return receipt;
@@ -48017,7 +48279,6 @@
         ]);
         log(`${loopDef.name}: captured ${capturedRefs.length} ${definition.name} duplicate Gold signal(s) for the Rare Gold Pick -> 5x80 recovery chain`);
       }
-      runtime.lastMutation = await runtime.coordinator.recordPackReceipt(receipt, { reconcile: true });
       return { ...receipt, status: "opened", inventoryDelta: runtime.lastMutation?.delta || null };
     }
     function captureRollingInventoryIdentityState(runtime, refs = [], stage = "unknown") {
@@ -49858,12 +50119,15 @@
               }),
               openedItemPolicy: createRollingPrimaryPackPolicy(loopDef, runtime, {
                 capturePrimaryDuplicates: true
-              })
+              }),
+              settleReceipt: async (openedReceipt) => {
+                runtime.pendingRewardPackId = null;
+                runtime.lastMutation = await runtime.coordinator.recordPackReceipt(openedReceipt, { reconcile: true });
+              }
             });
             if (!receipt) return { status: "unavailable", reason: "primary reward pack is unavailable" };
             if (receipt.status === "opened") {
               runtime.pendingRewardPackId = null;
-              runtime.lastMutation = await runtime.coordinator.recordPackReceipt(receipt, { reconcile: true });
             }
             return {
               ...receipt,

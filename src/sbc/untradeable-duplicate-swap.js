@@ -101,3 +101,55 @@ export function resolveUntradeableDuplicateSwapIds(plan = {}, result = null) {
   }
   return { ok: true, replacements };
 }
+
+function failedMaterialization(reason) {
+  return { ok: false, reason };
+}
+
+export function validateUntradeableDuplicateSwapMaterialization({
+  replacement = {},
+  originalSignal = null,
+  originalTarget = null,
+  newClubItem = null,
+  displacedTarget = null,
+} = {}) {
+  const signalId = positiveId(replacement.signalId);
+  const targetId = positiveId(replacement.targetId);
+  const newItemId = positiveId(replacement.newItemId);
+  if (!signalId || !targetId || !newItemId || !originalSignal || !originalTarget) {
+    return failedMaterialization('duplicate swap postcondition is missing an expected identity');
+  }
+
+  if (positiveId(newClubItem?.id || newClubItem?.ref?.id) !== newItemId) {
+    return failedMaterialization(`duplicate swap Club item #${newItemId} was not materialized`);
+  }
+  if (itemPile(newClubItem) !== 'club') {
+    return failedMaterialization(`duplicate swap replacement #${newItemId} materialized in ${itemPile(newClubItem)}, expected club`);
+  }
+  if (!isSamePlayerCardVersion(originalSignal, newClubItem) || newClubItem?.tradeable === true) {
+    return failedMaterialization(`duplicate swap Club item #${newItemId} failed same-version untradeable validation`);
+  }
+
+  if (!displacedTarget) {
+    return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} disappeared after move`);
+  }
+  if (positiveId(displacedTarget?.id || displacedTarget?.ref?.id) !== targetId) {
+    return failedMaterialization(`duplicate swap displaced item identity changed from #${targetId}`);
+  }
+  if (itemPile(displacedTarget) !== 'unassigned') {
+    return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} moved to ${itemPile(displacedTarget)}, expected unassigned`);
+  }
+  if (!isSamePlayerCardVersion(originalTarget, displacedTarget)) {
+    return failedMaterialization(`duplicate swap displaced tradeable Club item #${targetId} changed card version`);
+  }
+  if (displacedTarget?.tradeable !== true) {
+    return failedMaterialization(`duplicate swap displaced Club item #${targetId} is no longer tradeable`);
+  }
+
+  return {
+    ok: true,
+    signalId,
+    targetId,
+    newItemId,
+  };
+}

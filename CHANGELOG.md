@@ -3,6 +3,28 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.16] - 2026-08-19
+
+### Fixed
+
+- Kept a successful pack response inside a committed settlement phase through
+  item materialization, routing, receipt publication, recap recording, and
+  Rolling Ledger reconciliation. A user Stop is now deferred until that work
+  finishes instead of leaving opened items only partially accounted for.
+- Changed pack-open retry recovery to inspect fresh Purchased/Unassigned API
+  data before relying on page navigation. Hidden pending items now block a
+  second open, verified-empty state allows a bounded retry with a fresh pack
+  instance, and missing API/page evidence fails closed as ambiguous.
+- Verified both sides of an untradeable-for-tradeable duplicate swap after EA
+  completes the move, including exact card version, tradeability, identity,
+  and expected Club/Unassigned piles.
+
+### Safety
+
+- Added regression coverage for Stop after the pack response, hidden
+  Purchased items, stale pack instances, evidence-free 471 responses, and
+  malformed duplicate-swap materialization.
+
 ## [0.8.15] - 2026-08-19
 
 ### Fixed
