@@ -221,6 +221,49 @@ describe('Rolling runtime recovery helpers', () => {
     });
   });
 
+  it('releases only explicitly eligible pending Storage cards from Sink protection', async () => {
+    const pending = makePlayer({
+      id: 721,
+      definitionId: 9721,
+      rating: 91,
+      duplicate: true,
+      duplicateId: 1721,
+    });
+    const counterpart = makePlayer({ id: 1721, definitionId: 9721, rating: 91 });
+    const stillProtected = makePlayer({ id: 1722, definitionId: 9722, rating: 92 });
+    const { api } = await loadUserscript({ unassigned: [pending] });
+    const ledger = {
+      classifiedEntries: () => [
+        { item: counterpart, pile: 'club', classification: { protected: true } },
+        { item: stillProtected, pile: 'club', classification: { protected: true } },
+      ],
+    };
+    const runtime = {
+      pendingUnassignedRefs: [pending],
+      primaryDuplicateRefs: [],
+      coordinator: { getLedger: () => ledger },
+    };
+
+    const policy = api.rollingStorageSinkSelectionPolicy({}, runtime, {
+      model: { constraints: [] },
+      consumablePendingRefs: [pending],
+      consumableItemRefs: [counterpart],
+      additionalRoles: [{
+        id: 'storage-pressure-release',
+        itemRefs: [counterpart],
+        minCount: 1,
+        maxCount: 1,
+      }],
+    });
+
+    expect(policy.protectedItems).toEqual([
+      expect.objectContaining({ id: stillProtected.id }),
+    ]);
+    expect(policy.exclusiveRoles).toEqual([
+      expect.objectContaining({ id: 'storage-pressure-release', minCount: 1 }),
+    ]);
+  });
+
   it('allows only an explicitly selected primary duplicate to bypass reserve-rating protection', async () => {
     const primarySignal = makePlayer({
       id: 721,
@@ -439,6 +482,78 @@ describe('Rolling runtime recovery helpers', () => {
 
     expect(() => validators.validatePlannedPlayers([requiredSpecial, ...ordinary]))
       .toThrow(/attempted to consume a Required Special card/);
+  });
+
+  it('validates a threshold-safe pending Unassigned special selected for Storage pressure', async () => {
+    const pending = makePlayer({
+      id: 950,
+      definitionId: 9950,
+      rating: 88,
+      rareflag: 120,
+      duplicate: true,
+      duplicateId: 1950,
+    });
+    const counterpart = makePlayer({
+      id: 1950,
+      definitionId: 9950,
+      rating: 88,
+      rareflag: 120,
+    });
+    const ordinary = Array.from({ length: 10 }, (_, index) => makePlayer({
+      id: 1960 + index,
+      definitionId: 9960 + index,
+      rating: 88,
+      rareflag: 1,
+    }));
+    const loopDef = {
+      name: 'Rolling Storage pressure',
+      runtimeProtectionRating: 95,
+      expectedPlayerCount: 11,
+      rollingProtectAllClubNonTotwSpecials: true,
+    };
+    const context = {
+      model: {
+        requiredPlayerCount: 11,
+        targetRating: 88,
+        constraints: [],
+        maxSpecialCount: 11,
+      },
+    };
+    const runtime = {
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [pending],
+      openRouting: { storageItems: [pending] },
+      primaryContext: { activeLoopDef: loopDef, model: { constraints: [] } },
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: counterpart,
+            pile: 'club',
+            classification: { protected: true, otherSpecial: true },
+          }],
+        }),
+      },
+    };
+    const selection = {
+      entries: [{
+        item: counterpart,
+        signal: pending,
+        pileName: 'unassigned',
+        submissionPileName: 'club',
+      }],
+    };
+    const { api } = await loadUserscript({
+      unassigned: [pending],
+      club: [counterpart, ...ordinary],
+    });
+    const validators = api.createRollingStorageSinkSubmissionValidators(
+      loopDef,
+      runtime,
+      context,
+      'Storage pressure pending-special test',
+    );
+
+    expect(validators.validatePlannedPlayers([counterpart, ...ordinary], selection)).toBe(true);
   });
 
   it('reuses an already loaded Set challenge squad without replacing fresh metadata', async () => {

@@ -358,7 +358,7 @@ describe('current direct side-effect call baseline', () => {
     expect(generic).toContain('generic Storage pressure plan attempt');
     expect(generic).toContain('model: context.model');
     expect(generic).toContain('requiredConstraintIndexes: storageSinkRequiredSpecialRoles(context.model)');
-    expect(generic.indexOf('if (selection.ok) return selection;'))
+    expect(generic.indexOf('if (pressureConsumed >= requestedPressure) return resolved;'))
       .toBeLessThan(generic.indexOf('generic Storage pressure raw player diagnostic'));
   });
 

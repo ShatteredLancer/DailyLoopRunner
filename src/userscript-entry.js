@@ -170,6 +170,7 @@ import {
   selectRatingCandidateEntries,
 } from './selection/rating-candidates.js';
 import {
+  createStoragePressureRole,
   genericStorageSinkSquadSourceStrategy,
   nextGenericStorageSinkContext,
   nextStorageSinkContext,
@@ -178,6 +179,7 @@ import {
   prepareGenericStorageSinkCandidates,
   selectStorageSinkClubFallbackEntries,
   storageSinkRequiredSpecialRoles,
+  storagePressureRequirement,
   STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
   storageSinkSquadSourceStrategy,
   validateStorageRecoveryHeadroom,
@@ -12417,13 +12419,17 @@ function updateLoopControls() {
     return [...new Set(reasons)];
   }
 
-  function rollingClubNonTotwSpecialSourceErrors(selection, loopDef = {}) {
+  function rollingClubNonTotwSpecialSourceErrors(selection, loopDef = {}, options = {}) {
     if (loopDef.rollingProtectAllClubNonTotwSpecials !== true) return [];
+    const allowedItems = options.allowedItems || [];
     return (selection?.entries || [])
       .filter((entry) => (
         rollingSelectionSubmissionPile(entry) === 'club'
           && isSbcSpecialItem(entry?.item)
           && !isTotwItem(entry?.item)
+          && !allowedItems.some((ref) => (
+            rollingItemMatchesRef(entry?.item, ref) || rollingItemMatchesRef(entry?.signal, ref)
+          ))
       ))
       .map((entry) => `Club ${itemDisplayName(entry.item)} is a protected non-TOTW special`);
   }
@@ -12843,15 +12849,23 @@ function updateLoopControls() {
     const allowedPrimaryDuplicateRefs = options.allowPrimaryDuplicates === true
       ? rollingUniqueRefs(options.allowedPrimaryDuplicateRefs || [])
       : [];
+    const allowedProtectedItems = rollingUniqueRefs(options.allowedProtectedItems || []);
     const protectionRating = rollingProtectionRating(loopDef);
     const minRating = Number(options.minRating);
     const maxRating = Number(options.maxRating);
-    const sourceErrors = rollingClubNonTotwSpecialSourceErrors(options.selection, loopDef);
+    const sourceErrors = rollingClubNonTotwSpecialSourceErrors(options.selection, loopDef, {
+      allowedItems: allowedProtectedItems,
+    });
     if (sourceErrors.length) {
       fail(`${loopDef.name}: recovery squad violated strict Club special protection: ${sourceErrors.join(', ')}`);
     }
     for (const item of players || []) {
       const allowedPrimaryDuplicate = allowedPrimaryDuplicateRefs.some((ref) => (
+        rollingItemMatchesRef(item, ref)
+          || (Number(item?.definitionId || 0) > 0
+            && Number(item.definitionId) === Number(ref?.definitionId || 0))
+      ));
+      const allowedProtectedItem = allowedProtectedItems.some((ref) => (
         rollingItemMatchesRef(item, ref)
           || (Number(item?.definitionId || 0) > 0
             && Number(item.definitionId) === Number(ref?.definitionId || 0))
@@ -12862,10 +12876,13 @@ function updateLoopControls() {
       )) {
         fail(`${loopDef.name}: recovery squad attempted to consume a Required Special card`);
       }
-      if (protection.protectedItems.some((ref) => rollingItemMatchesRef(item, ref))) {
+      if (!allowedProtectedItem
+        && protection.protectedItems.some((ref) => rollingItemMatchesRef(item, ref))) {
         fail(`${loopDef.name}: recovery squad attempted to consume a protected card`);
       }
-      if (reserveRatings.has(Number(item?.rating || 0)) && !allowedPrimaryDuplicate) {
+      if (reserveRatings.has(Number(item?.rating || 0))
+        && !allowedPrimaryDuplicate
+        && !allowedProtectedItem) {
         fail(`${loopDef.name}: recovery squad attempted to consume a reserved ${Number(item.rating)} card`);
       }
       if (Number(item?.rating || 0) > protectionRating) {
@@ -12882,7 +12899,7 @@ function updateLoopControls() {
         runtime.primaryContext?.activeLoopDef || loopDef,
         liveItemRef(item).pile,
       );
-      if (reasons.length) {
+      if (reasons.length && !allowedProtectedItem) {
         fail(`${loopDef.name}: recovery squad contains protected item ${itemDisplayName(item)} (${reasons.join(',')})`);
       }
       if (options.allowSpecial !== true && isSbcSpecialItem(item)) {
@@ -14013,22 +14030,35 @@ function updateLoopControls() {
 
   function rollingStorageSinkSelectionPolicy(loopDef, runtime, options = {}) {
     const requiredSpecialRoles = storageSinkRequiredSpecialRoles(options.model);
+    const consumablePendingRefs = options.consumablePendingRefs || [];
+    const consumableItemRefs = options.consumableItemRefs || [];
     const selectionPolicy = createRollingRatingRecoverySelectionPolicy({
       ledger: runtime.coordinator.getLedger(),
       protectionRating: rollingProtectionRating(loopDef),
       reserveRatings: false,
-      protectedItems: rollingNonPrimaryPendingRefs(runtime),
+      protectedItems: rollingNonPrimaryPendingRefs(runtime).filter((ref) => (
+        !consumablePendingRefs.some((candidate) => rollingItemMatchesRef(ref, candidate))
+      )),
       requiredItems: options.requiredItems || [],
-      exclusiveRoles: requiredSpecialRoles,
+      exclusiveRoles: [...requiredSpecialRoles, ...(options.additionalRoles || [])],
       allowRequiredSpecial: requiredSpecialRoles.length > 0,
     });
+    if (consumableItemRefs.length) {
+      selectionPolicy.protectedItems = selectionPolicy.protectedItems.filter((ref) => (
+        !consumableItemRefs.some((candidate) => rollingItemMatchesRef(ref, candidate))
+      ));
+    }
     if (!requiredSpecialRoles.length) return selectionPolicy;
     return {
       ...selectionPolicy,
       candidateFilter: createRollingRequiredSpecialSourceFilter({
         constraintIndexes: requiredSpecialRoles.map((role) => role.constraintIndex),
         isClubTotw: isTotwItem,
-        resolveSubmissionPile: rollingSelectionSubmissionPile,
+        resolveSubmissionPile: (entry) => (
+          entry?.signal && entry?.pileName === 'unassigned'
+            ? 'unassigned'
+            : rollingSelectionSubmissionPile(entry)
+        ),
       }),
     };
   }
@@ -14165,6 +14195,18 @@ function updateLoopControls() {
     } : result;
   }
 
+  function rollingStorageSinkPressureRequirement(runtime, options = {}) {
+    const routing = rollingPendingStorageRoutingState(runtime);
+    if (!routing.ok) return routing;
+    const currentFree = runtime.coordinator.getLedger().summary().capacities?.storage?.free;
+    const requirement = storagePressureRequirement({
+      currentFree,
+      pendingStorageItems: routing.pendingRefs.length,
+      reserveSlots: options.reservePickResult === true ? 1 : 0,
+    });
+    return requirement.ok ? { ...requirement, pendingRefs: routing.pendingRefs } : requirement;
+  }
+
   function validateRollingStorageSinkHeadroom(runtime, squadPlan, options = {}) {
     const storage = runtime.coordinator.getLedger().summary().capacities?.storage || {};
     const currentFree = storage.free;
@@ -14211,11 +14253,21 @@ function updateLoopControls() {
 
   function validateRollingStorageSinkPlayers(loopDef, runtime, context, players, options = {}) {
     const requiredSpecialRoles = storageSinkRequiredSpecialRoles(context.model);
+    const pendingStorageItems = runtime.openRouting?.storageItems || [];
+    const allowedPendingItems = (options.selection?.entries || [])
+      .filter((entry) => (
+        entry.pileName === 'unassigned'
+          && entry.signal
+          && Number(entry.item?.rating || 0) <= rollingProtectionRating(loopDef)
+          && pendingStorageItems.some((item) => rollingItemMatchesRef(entry.signal, item))
+      ))
+      .map((entry) => liveItemRef(entry.item, entry.submissionPileName || entry.pileName));
     assertRollingRecoveryItems(loopDef, runtime, players, {
       allowProvisionsReserve: true,
       allowSpecial: true,
       allowPrimaryDuplicates: true,
       allowRequiredSpecial: requiredSpecialRoles.length > 0,
+      allowedProtectedItems: allowedPendingItems,
       selection: options.selection,
     });
     return validateRatingSbcModelAgainstItems(
@@ -14780,7 +14832,7 @@ function updateLoopControls() {
     };
   }
 
-  async function selectRollingGenericStorageSinkSquad(loopDef, runtime, context, snapshot) {
+  async function selectRollingGenericStorageSinkSquad(loopDef, runtime, context, snapshot, options = {}) {
     const strategy = genericStorageSinkSquadSourceStrategy(context?.targetRating);
     if (!strategy) {
       return {
@@ -14805,56 +14857,103 @@ function updateLoopControls() {
         .map((role) => role.constraintIndex),
       protectedItems: basePolicy.protectedItems,
     });
+    const requestedPressure = Math.max(0, Math.floor(Number(
+      options.minimumPressureConsumption || 0,
+    )));
     let lastFailure = null;
+    let bestFeasible = null;
     let requiredDiagnostic = null;
     const attemptDiagnostics = [];
-    for (let clubCount = 0; clubCount <= strategy.maxClubCount; clubCount++) {
-      if (clubCount > clubEntries.length) break;
-      const prepared = prepareGenericStorageSinkCandidates(candidates.entries, {
-        primaryRefs: runtime.primaryDuplicateRefs || [],
-        maxRating,
-        requiredPlayerCount: context.model.requiredPlayerCount,
-        clubEntries: clubEntries.slice(0, clubCount),
-        protectedItems: basePolicy.protectedItems,
-      });
-      if (!requiredDiagnostic) {
-        requiredDiagnostic = {
-          configuredPrimaryRefs: Number(runtime.primaryDuplicateRefs?.length || 0),
-          matchedRequiredEntries: prepared.requiredEntries.length,
-          deferredProtectedEntries: prepared.deferredProtectedEntries.slice(0, 16).map((entry) => ({
-            itemId: Number(entry.item?.id || 0),
-            signalId: Number(entry.signal?.id || 0),
-            definitionId: Number(entry.item?.definitionId || 0),
-            rating: Number(entry.item?.rating || 0),
-          })),
-          requiredEntries: prepared.requiredEntries.slice(0, 16).map((entry) => ({
-            itemId: Number(entry.item?.id || 0),
-            signalId: Number(entry.signal?.id || 0),
-            definitionId: Number(entry.item?.definitionId || 0),
-            rating: Number(entry.item?.rating || 0),
-          })),
-        };
+    for (let minimumPressure = requestedPressure; minimumPressure >= 0; minimumPressure--) {
+      for (let clubCount = 0; clubCount <= strategy.maxClubCount; clubCount++) {
+        if (clubCount > clubEntries.length) break;
+        const prepared = prepareGenericStorageSinkCandidates(candidates.entries, {
+          primaryRefs: runtime.primaryDuplicateRefs || [],
+          pendingStorageRefs: options.pendingStorageRefs || [],
+          maxRating,
+          requiredPlayerCount: context.model.requiredPlayerCount,
+          clubEntries: clubEntries.slice(0, clubCount),
+          protectedItems: basePolicy.protectedItems,
+        });
+        if (!requiredDiagnostic) {
+          requiredDiagnostic = {
+            configuredPrimaryRefs: Number(runtime.primaryDuplicateRefs?.length || 0),
+            configuredPendingStorageRefs: Number(options.pendingStorageRefs?.length || 0),
+            matchedRequiredEntries: prepared.requiredEntries.length,
+            eligiblePendingStorageEntries: prepared.eligiblePendingEntries.length,
+            pressureCandidates: prepared.pressureEntries.length,
+            requestedPressure,
+            deferredProtectedEntries: prepared.deferredProtectedEntries.slice(0, 16).map((entry) => ({
+              itemId: Number(entry.item?.id || 0),
+              signalId: Number(entry.signal?.id || 0),
+              definitionId: Number(entry.item?.definitionId || 0),
+              rating: Number(entry.item?.rating || 0),
+            })),
+            eligiblePendingEntries: prepared.eligiblePendingEntries.slice(0, 16).map((entry) => ({
+              itemId: Number(entry.item?.id || 0),
+              signalId: Number(entry.signal?.id || 0),
+              definitionId: Number(entry.item?.definitionId || 0),
+              rating: Number(entry.item?.rating || 0),
+            })),
+            requiredEntries: prepared.requiredEntries.slice(0, 16).map((entry) => ({
+              itemId: Number(entry.item?.id || 0),
+              signalId: Number(entry.signal?.id || 0),
+              definitionId: Number(entry.item?.definitionId || 0),
+              rating: Number(entry.item?.rating || 0),
+            })),
+          };
+        }
+        const pressureRole = minimumPressure > 0
+          ? createStoragePressureRole(
+              prepared.pressureItems,
+              minimumPressure,
+              context.model.requiredPlayerCount,
+            )
+          : null;
+        const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
+          requiredItems: prepared.requiredItems,
+          consumablePendingRefs: prepared.eligiblePendingEntries
+            .map((entry) => entry.signal)
+            .filter(Boolean),
+          consumableItemRefs: prepared.eligiblePendingItems,
+          additionalRoles: pressureRole ? [pressureRole] : [],
+          model: context.model,
+        });
+        const selection = await findOptimalRatingSbcSelection(
+          prepared.entries,
+          context.model,
+          candidates.piles,
+          { selectionPolicy },
+        );
+        let pressureConsumed = 0;
+        if (selection.ok) {
+          pressureConsumed = (selection.entries || []).filter((entry) => (
+            prepared.pressureItems.some((ref) => rollingItemMatchesRef(entry.item, ref))
+          )).length;
+          const resolved = {
+            ...selection,
+            storagePressureConsumed: pressureConsumed,
+            storagePressureMinimum: requestedPressure,
+          };
+          if (pressureConsumed >= requestedPressure) return resolved;
+          if (!bestFeasible || pressureConsumed > bestFeasible.storagePressureConsumed) {
+            bestFeasible = resolved;
+          }
+        } else {
+          lastFailure = selection;
+        }
+        attemptDiagnostics.push({
+          minimumPressure,
+          clubFill: clubCount,
+          pressureConsumed,
+          reasonCode: selection.reasonCode || selection.missing?.code || 'RECOVERY_MATERIAL_SHORTAGE',
+          reason: selection.reason || selection.missing?.reason || 'no safe rating plan',
+          prepared: rollingCandidatePileDiagnostic(prepared.entries),
+          policy: selection.details?.policy || null,
+          selection: selection.diagnostics?.[0] || null,
+        });
       }
-      const selectionPolicy = rollingStorageSinkSelectionPolicy(loopDef, runtime, {
-        requiredItems: prepared.requiredItems,
-        model: context.model,
-      });
-      const selection = await findOptimalRatingSbcSelection(
-        prepared.entries,
-        context.model,
-        candidates.piles,
-        { selectionPolicy },
-      );
-      if (selection.ok) return selection;
-      lastFailure = selection;
-      attemptDiagnostics.push({
-        clubFill: clubCount,
-        reasonCode: selection.reasonCode || selection.missing?.code || 'RECOVERY_MATERIAL_SHORTAGE',
-        reason: selection.reason || selection.missing?.reason || 'no safe rating plan',
-        prepared: rollingCandidatePileDiagnostic(prepared.entries),
-        policy: selection.details?.policy || null,
-        selection: selection.diagnostics?.[0] || null,
-      });
+      if (bestFeasible?.storagePressureConsumed >= requestedPressure) return bestFeasible;
     }
     log(`${loopDef.name}: generic Storage pressure raw player diagnostic: ${diagnosticJson(rollingSnapshotPileDiagnostic(snapshot))}`);
     log(`${loopDef.name}: generic Storage pressure safe unique candidate diagnostic: ${diagnosticJson(rollingCandidatePileDiagnostic(candidates.entries))}`);
@@ -14863,6 +14962,24 @@ function updateLoopControls() {
     attemptDiagnostics.forEach((diagnostic, index) => {
       log(`${loopDef.name}: generic Storage pressure plan attempt ${index + 1}/${attemptDiagnostics.length}: ${diagnosticJson(diagnostic)}`);
     });
+    if (requestedPressure > 0) {
+      const maximumFeasible = Number(bestFeasible?.storagePressureConsumed || 0);
+      const shortfall = Math.max(0, requestedPressure - maximumFeasible);
+      return {
+        ...(lastFailure || {}),
+        ok: false,
+        reason: `no exact ${context.targetRating}-rated squad can release the required ${requestedPressure} Storage-pressure card(s); maximum proven release ${maximumFeasible}, short by ${shortfall}`,
+        reasonCode: 'RECOVERY_STORAGE_PRESSURE_INFEASIBLE',
+        details: {
+          ...(lastFailure?.details || {}),
+          requestedPressure,
+          maximumFeasible,
+          shortfall,
+          eligiblePendingStorageEntries: Number(requiredDiagnostic?.eligiblePendingStorageEntries || 0),
+          pressureCandidates: Number(requiredDiagnostic?.pressureCandidates || 0),
+        },
+      };
+    }
     return {
       ...(lastFailure || {}),
       ok: false,
@@ -14871,7 +14988,7 @@ function updateLoopControls() {
     };
   }
 
-  async function planRollingGenericStorageSinkSquad(loopDef, runtime, context) {
+  async function planRollingGenericStorageSinkSquad(loopDef, runtime, context, options = {}) {
     const snapshot = runtime.coordinator.getLedger().inventorySnapshot();
     const result = await planMultiSquadRatingSelections({
       snapshot,
@@ -14881,6 +14998,7 @@ function updateLoopControls() {
         runtime,
         context,
         workingSnapshot,
+        options,
       ),
     });
     const strategy = genericStorageSinkSquadSourceStrategy(context?.targetRating);
@@ -14891,6 +15009,8 @@ function updateLoopControls() {
         targetRating: strategy.targetRating,
         sourceOrder: strategy.priorityPiles,
         maxClubPerSquad: strategy.maxClubCount,
+        minimumPressureConsumption: Math.max(0, Number(options.minimumPressureConsumption || 0)),
+        storagePressureConsumed: Number(result.plans?.[0]?.selection?.storagePressureConsumed || 0),
       },
     } : result;
   }
@@ -14926,15 +15046,22 @@ function updateLoopControls() {
     }
     const requiredSpecialRoles = storageSinkRequiredSpecialRoles(context.model);
     log(`${loopDef.name}: ${loaded.sinkDef.name} next live Challenge #${context.challengeId || '?'} target:${context.targetRating}, Required Special:${requiredSpecialRoles.map((role) => role.label).join('/') || 'none'}`);
-    const squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context);
-    if (!squadPlan.ok) return { status: 'unavailable', ...squadPlan };
     const finalChallenge = loaded.incompleteCount === 1;
+    const reservePickResult = finalChallenge && Number(capability.rewardReserveSlots || 0) > 0;
+    const pressure = rollingStorageSinkPressureRequirement(runtime, { reservePickResult });
+    if (!pressure.ok) return { status: 'unavailable', ...pressure };
+    log(`${loopDef.name}: ${loaded.sinkDef.name} Storage pressure requires at least ${pressure.minimumConsumption} consuming card(s) before planning; pending:${pressure.pendingStorageItems}, free:${pressure.currentFree}, reward reserve:${pressure.reserveSlots}`);
+    const squadPlan = await planRollingGenericStorageSinkSquad(loopDef, runtime, context, {
+      minimumPressureConsumption: pressure.minimumConsumption,
+      pendingStorageRefs: pressure.pendingRefs,
+    });
+    if (!squadPlan.ok) return { status: 'unavailable', ...squadPlan };
     const headroom = validateRollingStorageSinkHeadroom(runtime, squadPlan, {
-      reservePickResult: finalChallenge && Number(capability.rewardReserveSlots || 0) > 0,
+      reservePickResult,
     });
     if (!headroom.ok) return { status: 'unavailable', ...headroom };
     const plan = squadPlan.plans[0];
-    log(`${loopDef.name}: ${loaded.sinkDef.name} generic ${context.targetRating} squad ready; sources:${formatSelectionStats(squadPlan.pileCounts)}, source order:${squadPlan.details.sourceOrder.join(' -> ')}, Club cap:${squadPlan.details.maxClubPerSquad}, Storage cards:${squadPlan.storageItemsConsumed}, projected free:${headroom.projectedFree}/${headroom.requiredFree} required`);
+    log(`${loopDef.name}: ${loaded.sinkDef.name} generic ${context.targetRating} squad ready; sources:${formatSelectionStats(squadPlan.pileCounts)}, source order:${squadPlan.details.sourceOrder.join(' -> ')}, Club cap:${squadPlan.details.maxClubPerSquad}, pressure cards:${squadPlan.details.storagePressureConsumed}/${squadPlan.details.minimumPressureConsumption} required, Storage cards:${squadPlan.storageItemsConsumed}, projected free:${headroom.projectedFree}/${headroom.requiredFree} required`);
     logInventorySelection(`${loopDef.name}: ${loaded.sinkDef.name} ${context.targetRating} squad`, plan.selection, { maxItems: 30 });
     if (loaded.sinkDef.dryRun) {
       return { status: 'planned', reason: `dry-run ${loaded.sinkDef.name} next ${context.targetRating} squad plan complete` };

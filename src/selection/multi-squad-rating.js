@@ -67,6 +67,40 @@ export function storageSinkRequiredSpecialRoles(model = {}) {
     }));
 }
 
+export function storagePressureRequirement(input = {}) {
+  const currentFree = input.currentFree;
+  const pendingStorageItems = Math.max(0, Number(input.pendingStorageItems || 0) || 0);
+  const reserveSlots = Math.max(0, Number(input.reserveSlots || 0) || 0);
+  if (currentFree === null || currentFree === undefined || !Number.isFinite(Number(currentFree))) {
+    return {
+      ok: false,
+      reason: 'Storage capacity is unknown; Storage pressure cannot be planned safely',
+      reasonCode: 'STORAGE_CAPACITY_UNKNOWN',
+    };
+  }
+  const normalizedCurrentFree = Math.max(0, Number(currentFree));
+  const requiredFree = pendingStorageItems + reserveSlots;
+  return {
+    ok: true,
+    currentFree: normalizedCurrentFree,
+    pendingStorageItems,
+    reserveSlots,
+    requiredFree,
+    minimumConsumption: Math.max(0, requiredFree - normalizedCurrentFree),
+  };
+}
+
+export function createStoragePressureRole(itemRefs = [], minimumCount = 0, maxCount = 11) {
+  const minCount = Math.max(0, Math.floor(Number(minimumCount || 0)));
+  return {
+    id: 'storage-pressure-release',
+    label: `Storage pressure release x${minCount}`,
+    itemRefs: [...(itemRefs || [])],
+    minCount,
+    maxCount: Math.max(minCount, Math.floor(Number(maxCount || 0))),
+  };
+}
+
 function entryItemRef(entry = {}) {
   const item = entry.item?.ref || entry.item || {};
   return {
@@ -123,6 +157,7 @@ export function prepareStorageSink89Candidates(entries = [], options = {}) {
 
 export function prepareGenericStorageSinkCandidates(entries = [], options = {}) {
   const requiredPlayerCount = Math.max(1, Number(options.requiredPlayerCount || 11) || 11);
+  const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
   const partition = partitionPrimaryUnassignedEntries(entries, options);
   const requiredEntries = partition.requiredEntries.sort((left, right) => (
     Number(right.item?.rating || 0) - Number(left.item?.rating || 0)
@@ -130,14 +165,41 @@ export function prepareGenericStorageSinkCandidates(entries = [], options = {}) 
   )).slice(0, requiredPlayerCount);
   const requiredIds = new Set(requiredEntries.map((entry) => Number(entry.item?.id || 0)));
   const clubIds = new Set((options.clubEntries || []).map((entry) => Number(entry.item?.id || 0)));
+  const pendingStorageRefs = options.pendingStorageRefs || [];
+  const eligiblePendingEntries = entries.filter((entry) => (
+    entry.pileName === 'unassigned'
+      && entry.signal
+      && Number(entry.item?.rating || 0) <= maxRating
+      && pendingStorageRefs.some((ref) => (
+        matchesRef(entry.signal, ref) || matchesRef(entry.item, ref)
+      ))
+  ));
+  const eligiblePendingIds = new Set(eligiblePendingEntries
+    .map((entry) => Number(entry.item?.id || 0))
+    .filter(Boolean));
+  const preparedEntries = entries.filter((entry) => (
+    ['storage', 'transfer'].includes(entry.pileName)
+      || (entry.pileName === 'unassigned' && (
+        requiredIds.has(Number(entry.item?.id || 0))
+          || eligiblePendingIds.has(Number(entry.item?.id || 0))
+      ))
+      || (entry.pileName === 'club' && clubIds.has(Number(entry.item?.id || 0)))
+  ));
+  const pressureEntries = preparedEntries.filter((entry) => (
+    Number(entry.item?.rating || 0) <= maxRating
+      && (entry.pileName === 'storage'
+        || (entry.pileName === 'unassigned'
+        && eligiblePendingIds.has(Number(entry.item?.id || 0)))
+      )
+  ));
   return {
-    entries: entries.filter((entry) => (
-      ['storage', 'transfer'].includes(entry.pileName)
-        || (entry.pileName === 'unassigned' && requiredIds.has(Number(entry.item?.id || 0)))
-        || (entry.pileName === 'club' && clubIds.has(Number(entry.item?.id || 0)))
-    )),
+    entries: preparedEntries,
     requiredEntries,
     requiredItems: requiredEntries.map(entryItemRef),
+    eligiblePendingEntries,
+    eligiblePendingItems: eligiblePendingEntries.map(entryItemRef),
+    pressureEntries,
+    pressureItems: pressureEntries.map(entryItemRef),
     deferredProtectedEntries: partition.deferredProtectedEntries,
   };
 }
@@ -296,70 +358,79 @@ export async function planMultiSquadRatingSelections(input = {}) {
 }
 
 export function validateStorageSinkHeadroom(input = {}) {
-  const currentFree = input.currentFree;
-  const pendingStorageItems = Math.max(0, Number(input.pendingStorageItems || 0) || 0);
   const pickDuplicateReserve = Math.max(0, Number(input.pickDuplicateReserve ?? 1) || 0);
   const storageItemsConsumed = Math.max(0, Number(input.storageItemsConsumed || 0) || 0);
-  const requiredFree = pendingStorageItems + pickDuplicateReserve;
-  if (currentFree === null || currentFree === undefined || !Number.isFinite(Number(currentFree))) {
+  const requirement = storagePressureRequirement({
+    currentFree: input.currentFree,
+    pendingStorageItems: input.pendingStorageItems,
+    reserveSlots: pickDuplicateReserve,
+  });
+  if (!requirement.ok) {
     return {
       ok: false,
       reason: 'Storage capacity is unknown; the two-squad Pick cannot be submitted safely',
       reasonCode: 'STORAGE_CAPACITY_UNKNOWN',
     };
   }
-  const projectedFree = Math.max(0, Number(currentFree)) + storageItemsConsumed;
-  if (projectedFree < requiredFree) {
+  const projectedFree = requirement.currentFree + storageItemsConsumed;
+  if (projectedFree < requirement.requiredFree) {
     return {
       ok: false,
-      reason: `${storageItemsConsumed} planned Storage card(s) would leave ${projectedFree} free slot(s), but ${requiredFree} are required for ${pendingStorageItems} pending card(s) and the Pick result`,
+      reason: `${storageItemsConsumed} planned Storage card(s) would leave ${projectedFree} free slot(s), but ${requirement.requiredFree} are required for ${requirement.pendingStorageItems} pending card(s) and the Pick result`,
       reasonCode: 'STORAGE_SINK_HEADROOM_INSUFFICIENT',
-      details: { currentFree: Number(currentFree), projectedFree, requiredFree, pendingStorageItems, pickDuplicateReserve },
+      details: {
+        currentFree: requirement.currentFree,
+        projectedFree,
+        requiredFree: requirement.requiredFree,
+        pendingStorageItems: requirement.pendingStorageItems,
+        pickDuplicateReserve,
+      },
     };
   }
   return {
     ok: true,
-    currentFree: Number(currentFree),
+    currentFree: requirement.currentFree,
     projectedFree,
-    requiredFree,
-    pendingStorageItems,
+    requiredFree: requirement.requiredFree,
+    pendingStorageItems: requirement.pendingStorageItems,
     pickDuplicateReserve,
   };
 }
 
 export function validateStorageRecoveryHeadroom(input = {}) {
-  const currentFree = input.currentFree;
-  const pendingStorageItems = Math.max(0, Number(input.pendingStorageItems || 0) || 0);
   const storageItemsConsumed = Math.max(0, Number(input.storageItemsConsumed || 0) || 0);
-  if (currentFree === null || currentFree === undefined || !Number.isFinite(Number(currentFree))) {
+  const requirement = storagePressureRequirement({
+    currentFree: input.currentFree,
+    pendingStorageItems: input.pendingStorageItems,
+  });
+  if (!requirement.ok) {
     return {
       ok: false,
       reason: 'Storage capacity is unknown; emergency Provisions cannot prove that pending cards will fit',
       reasonCode: 'STORAGE_CAPACITY_UNKNOWN',
     };
   }
-  const normalizedCurrentFree = Math.max(0, Number(currentFree));
-  const projectedFree = normalizedCurrentFree + storageItemsConsumed;
-  if (projectedFree < pendingStorageItems) {
+  const projectedFree = requirement.currentFree + storageItemsConsumed;
+  if (projectedFree < requirement.requiredFree) {
     return {
       ok: false,
-      reason: `${storageItemsConsumed} selected Storage card(s) would leave ${projectedFree} free slot(s), but ${pendingStorageItems} pending card(s) require Storage`,
+      reason: `${storageItemsConsumed} selected Storage card(s) would leave ${projectedFree} free slot(s), but ${requirement.pendingStorageItems} pending card(s) require Storage`,
       reasonCode: 'RECOVERY_STORAGE_HEADROOM_INSUFFICIENT',
       details: {
-        currentFree: normalizedCurrentFree,
+        currentFree: requirement.currentFree,
         projectedFree,
-        requiredFree: pendingStorageItems,
-        pendingStorageItems,
+        requiredFree: requirement.requiredFree,
+        pendingStorageItems: requirement.pendingStorageItems,
         storageItemsConsumed,
       },
     };
   }
   return {
     ok: true,
-    currentFree: normalizedCurrentFree,
+    currentFree: requirement.currentFree,
     projectedFree,
-    requiredFree: pendingStorageItems,
-    pendingStorageItems,
+    requiredFree: requirement.requiredFree,
+    pendingStorageItems: requirement.pendingStorageItems,
     storageItemsConsumed,
   };
 }

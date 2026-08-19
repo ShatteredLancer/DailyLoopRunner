@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createInventorySnapshot } from '../../src/domain/contracts.js';
 import { selectInventoryPlayers } from '../../src/selection/index.js';
 import {
+  createStoragePressureRole,
   createStorageSinkClubFillRole,
   genericStorageSinkSquadSourceStrategy,
   nextGenericStorageSinkContext,
@@ -11,6 +12,7 @@ import {
   prepareGenericStorageSinkCandidates,
   selectStorageSinkClubFallbackEntries,
   storageSinkRequiredSpecialRoles,
+  storagePressureRequirement,
   STORAGE_SINK_MAX_CLUB_FILL_PER_SQUAD,
   storageSinkSquadSourceStrategy,
   validateStorageRecoveryHeadroom,
@@ -97,6 +99,148 @@ describe('multi-squad rating planner', () => {
     });
     expect(prepared.requiredEntries.map((entry) => entry.item.id)).toEqual([1]);
     expect(prepared.entries.map((entry) => entry.item.id)).toEqual([1, 3, 4, 5]);
+  });
+
+  it('admits only threshold-safe pending Unassigned cards as Storage pressure', () => {
+    const entries = [
+      { item: player(1, 101, 93), signal: player(901, 101, 93, 'unassigned'), pileName: 'unassigned' },
+      { item: player(2, 102, 91), signal: player(902, 102, 91, 'unassigned'), pileName: 'unassigned' },
+      { item: player(3, 103, 96), signal: player(903, 103, 96, 'unassigned'), pileName: 'unassigned' },
+      { item: player(4, 104, 89), signal: null, pileName: 'storage' },
+      { item: player(5, 105, 96), signal: null, pileName: 'storage' },
+      { item: player(6, 106, 88, 'transfer'), signal: null, pileName: 'transfer' },
+      { item: player(7, 107, 87, 'club'), signal: null, pileName: 'club' },
+    ];
+
+    const prepared = prepareGenericStorageSinkCandidates(entries, {
+      primaryRefs: [{ id: 901 }],
+      pendingStorageRefs: [{ id: 902 }, { id: 903 }],
+      maxRating: 95,
+      requiredPlayerCount: 11,
+      clubEntries: [entries[6]],
+    });
+
+    expect(prepared.entries.map((entry) => entry.item.id)).toEqual([1, 2, 4, 5, 6, 7]);
+    expect(prepared.requiredEntries.map((entry) => entry.item.id)).toEqual([1]);
+    expect(prepared.eligiblePendingEntries.map((entry) => entry.item.id)).toEqual([2]);
+    expect(prepared.pressureEntries.map((entry) => entry.item.id)).toEqual([2, 4]);
+  });
+
+  it('enforces pending-or-Storage consumption as a rating-planner role', async () => {
+    const primary = Array.from({ length: 6 }, (_, index) => ({
+      item: player(index + 1, 1001 + index, 88, 'club'),
+      signal: player(901 + index, 1001 + index, 88, 'unassigned'),
+      pileName: 'unassigned',
+      pileRank: 1,
+      requirementMatches: [],
+      special: false,
+    }));
+    const pending = Array.from({ length: 3 }, (_, index) => ({
+      item: player(11 + index, 1101 + index, 88, 'club'),
+      signal: player(911 + index, 1101 + index, 88, 'unassigned'),
+      pileName: 'unassigned',
+      pileRank: 1,
+      requirementMatches: [],
+      special: true,
+    }));
+    const transfer = Array.from({ length: 5 }, (_, index) => ({
+      item: player(21 + index, 1201 + index, 88, 'transfer'),
+      signal: null,
+      pileName: 'transfer',
+      pileRank: 0,
+      requirementMatches: [],
+      special: false,
+    }));
+    const prepared = prepareGenericStorageSinkCandidates([...primary, ...pending, ...transfer], {
+      primaryRefs: primary.map((entry) => ({ id: entry.signal.id })),
+      pendingStorageRefs: pending.map((entry) => ({ id: entry.signal.id })),
+      maxRating: 95,
+      requiredPlayerCount: 11,
+    });
+
+    const plan = await selectInventoryPlayers({
+      mode: 'rating',
+      candidateEntries: prepared.entries,
+      ratingModel: {
+        requiredPlayerCount: 11,
+        targetRating: 88,
+        maxSpecialCount: 11,
+        constraints: [],
+      },
+      priorityPiles: ['transfer', 'unassigned', 'storage', 'club'],
+      requiredItems: prepared.requiredItems,
+      exclusiveRoles: [createStoragePressureRole(prepared.pressureItems, 3, 11)],
+      maxOrdinaryRating: 95,
+      protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.pileCounts).toEqual({ unassigned: 9, transfer: 2 });
+    expect(plan.details.roles).toEqual([
+      expect.objectContaining({ id: 'storage-pressure-release', selected: 3, minCount: 3 }),
+      ...primary.map((_, index) => expect.objectContaining({
+        id: `required-item-${index + 1}`,
+        selected: 1,
+      })),
+    ]);
+  });
+
+  it('fails closed when fewer pressure candidates exist than the pre-plan minimum', async () => {
+    const entries = Array.from({ length: 11 }, (_, index) => ({
+      item: player(index + 1, 1301 + index, 88, index < 2 ? 'storage' : 'transfer'),
+      signal: null,
+      pileName: index < 2 ? 'storage' : 'transfer',
+      pileRank: index < 2 ? 0 : 1,
+      requirementMatches: [],
+      special: false,
+    }));
+
+    const plan = await selectInventoryPlayers({
+      mode: 'rating',
+      candidateEntries: entries,
+      ratingModel: {
+        requiredPlayerCount: 11,
+        targetRating: 88,
+        maxSpecialCount: 11,
+        constraints: [],
+      },
+      priorityPiles: ['storage', 'transfer'],
+      exclusiveRoles: [createStoragePressureRole(
+        entries.slice(0, 2).map((entry) => ({ id: entry.item.id })),
+        3,
+        11,
+      )],
+      maxOrdinaryRating: 95,
+      protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+    });
+
+    expect(plan).toMatchObject({
+      ok: false,
+      missing: {
+        code: 'REQUIRED_SPECIAL_SHORTAGE',
+        reason: 'Storage pressure release x3 has only 2/3 safe candidate(s)',
+      },
+    });
+  });
+
+  it('computes the pre-plan Storage release requirement including reward reserve', () => {
+    expect(storagePressureRequirement({
+      currentFree: 1,
+      pendingStorageItems: 4,
+    })).toMatchObject({
+      ok: true,
+      requiredFree: 4,
+      minimumConsumption: 3,
+    });
+    expect(storagePressureRequirement({
+      currentFree: 1,
+      pendingStorageItems: 4,
+      reserveSlots: 1,
+    })).toMatchObject({
+      ok: true,
+      requiredFree: 5,
+      minimumConsumption: 4,
+    });
   });
 
   it('keeps generic Storage Sink challenges in live EA order', () => {
