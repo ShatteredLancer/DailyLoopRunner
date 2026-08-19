@@ -8,7 +8,7 @@
 >
 > 实施基线：Git `c533519`
 >
-> 当前候选：DailyLoopRunner `v0.8.0`
+> 当前候选：DailyLoopRunner `v0.8.19`
 >
 > 功能可见性：动态扫描成功后作为可选 Loop 显示；真实页面验收和最终发布门禁仍由 RL-8 跟踪
 
@@ -114,7 +114,16 @@
 - 该共享值只接入 Pick 和新 Rolling Loop；现有其他评分 SBC 保留自己的 `ratingSbcMaxCardRating`。Rolling 主阵和恢复阵不得再被普通评分 SBC 的单卡上限压低。
 - 旧 Pick 阈值必须迁移，不能静默重置用户设置。
 
-主面板不再并排显示多个相似阈值。首页仅显示 `Selection policy` 摘要，弹窗按作用域分为：普通非评分 SBC Gold 上限、普通评分 SBC 单卡上限、Rolling/Pick 共享自动使用上限，以及 Pick 的 `Automatic`/`Review protected` 模式。
+主面板不再并排显示多个相似阈值。首页仅显示 `Selection policy` 摘要，弹窗按作用域分为：普通非评分 SBC Gold 上限、普通评分 SBC 单卡上限、Rolling/Pick 共享自动使用上限，以及四种 Player Pick 选择策略。
+
+Player Pick 通过 `pickSelectionMode` 统一表达选择策略，并兼容旧 `autoSelectBelow90`：
+
+- `rating-auto`：默认兼容模式，保留原评分优先和阈值内自动选择行为。
+- `rating-review`：评分优先，但保留受保护特殊卡的人工确认。
+- `special-price`：特殊卡整体优先于普通卡，特殊卡按实时价格降序；同价优先非重复卡。若高价重复特殊卡挤掉非重复特殊卡且选择位不足，必须人工确认；竞争价格缺失时同样停止自动决定。
+- `special-manual`：候选中有任意特殊卡就人工确认；全为普通卡时沿用评分自动选择。
+
+规划器先生成候选排序，再生成 `manualReason`，执行层只根据该原因决定是否打开人工 Pick 窗口。所有调用 `redeemAndSelectPlayerPick()` 的普通 Pick、Rolling 恢复和 Provisions 预处理路径共享该行为。
 
 ## 4. 已确认产品决策
 

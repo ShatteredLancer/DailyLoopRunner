@@ -135,7 +135,7 @@ describe('main panel state rendering', () => {
       pickOptions: { protectionRating: 90, autoSelectBelow90: true },
     });
     expect(controls.get('bronze-loop-selection-policy-summary').textContent)
-      .toBe('Std card <=88 | Auto-use <=90 | Picks Auto');
+      .toBe('Std card <=88 | Auto-use <=90 | Picks Rating first');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Non-rating Gold <=82');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
@@ -169,7 +169,7 @@ describe('main panel state rendering', () => {
       },
     });
     expect(controls.get('bronze-loop-selection-policy-summary').textContent)
-      .toBe('Std card <=87 | Auto-use <=94 | Picks Review');
+      .toBe('Std card <=87 | Auto-use <=94 | Picks Rating first, review protected ties');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Storage pressure SBC automatic');
     expect(controls.get('bronze-loop-selection-policy-summary').title)

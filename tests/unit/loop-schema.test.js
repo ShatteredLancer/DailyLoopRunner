@@ -361,6 +361,7 @@ describe('loop configuration schema', () => {
       inventoryMode: 'sometimes',
       pickOptions: {
         autoPickThreshold: 100,
+        pickSelectionMode: 'unsupported-mode',
         rollingStorageSinkEnabled: 'yes',
         rollingStorageSinkMode: 'selected',
         rollingStorageSinkSetId: 0,
@@ -377,6 +378,7 @@ describe('loop configuration schema', () => {
       runtimeQuantity: { mode: 'manual', target: 'unknown', min: 5, max: 2 },
     })).toEqual(expect.arrayContaining([
       'pickOptions.autoPickThreshold must be a number between 1 and 99',
+      'pickOptions.pickSelectionMode must be one of: rating-auto, rating-review, special-price, special-manual',
       'pickOptions.rollingStorageSinkEnabled must be boolean',
       'pickOptions.rollingStorageSinkSetId must be a positive integer or null',
       'pickOptions.rollingStorageSinkSetName must be a string',

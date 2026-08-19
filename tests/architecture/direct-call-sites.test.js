@@ -178,6 +178,8 @@ describe('current direct side-effect call baseline', () => {
     expect(source).not.toMatch(/function\s+capturePlayerPickSelections\s*\(/);
     expect(source).not.toMatch(/function\s+getManualPickReason\s*\(/);
     expect(source).not.toMatch(/function\s+waitForManualPlayerPick\s*\(/);
+    expect(source).toContain('const parentPickOptions = parentLoopDef.runtimePickOptions || {};');
+    expect(source).toContain('result.pickSelectionMode = parentPickOptions.pickSelectionMode');
     expect(source).not.toMatch(/function\s+(?:getPanelDefaultSize|resetPanelSize|makePanelDraggable|makePanelResizable|savePanelPos|getSavedPanelPos)\s*\(/);
     expect(source).toContain("from './ui/main-panel-geometry.js'");
     expect(source).toContain('createMainPanelGeometry({');

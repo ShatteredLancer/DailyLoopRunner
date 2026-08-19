@@ -1,6 +1,6 @@
 # 10x85+ Rolling Loop 使用与流程指南
 
-> 适用版本：DailyLoopRunner `v0.8.11`
+> 适用版本：DailyLoopRunner `v0.8.19`
 >
 > 最后更新：2026-08-19
 >
@@ -42,9 +42,11 @@ Loop 不写死当前 Set、Challenge、奖励包 ID、目标评分或阵容人�
 | `Open duplicate Provisions rewards immediately` | 关闭 | 关闭时，由主包重复 Reserve 制作的 Provisions 奖励留在 My Packs，等真正缺料再开。 |
 | `Storage pressure recovery` | `Off` | `Automatic` 优先使用兼容的 95+ Pick；`Selected SBC` 只使用用户指定的高评分 Player Pick 或直接球员 SBC。 |
 | `Storage pressure SBC` | 扫描目录中的第一项 | 仅在 `Selected SBC` 模式生效；保存后只深度验证选中的 Set。 |
-| `Selection mode` | `Automatic` | 安全且可确定排序的 Pick 自动选择；`Review protected` 只在受保护候选仍有歧义时暂停。 |
+| `Selection mode` | `Rating first` | 控制所有 Player Pick。可改为评分优先并复核受保护同分、特殊卡价格优先，或遇到任何特殊卡都人工选择。 |
 
 `Standard Rating SBC max card` 只控制普通评分 SBC，不限制 Rolling 主阵和 Rolling 恢复阵。Rolling 使用的是 `Automatic-use max rating`。
+
+Rolling 中产生的 Pick 与独立 Pick Loop 共用该策略。`Special price first` 让特殊卡始终排在普通卡前，并跨评分按实时价格排序；高价重复特殊卡挤掉非重复特殊卡或竞争价格缺失时暂停。`Always review specials` 在出现任何特殊卡时暂停。`Automatic-use max rating` 不会覆盖这两种特殊卡策略。
 
 ## 3. 主流程
 

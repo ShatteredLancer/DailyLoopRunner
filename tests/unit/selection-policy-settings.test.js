@@ -69,7 +69,7 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-low-rated-gold-max').value).toBe('82');
     expect(ui.byId.get('#bronze-loop-policy-rating-sbc-max-card').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-automatic-use-max').value).toBe('90');
-    expect(ui.byId.get('#bronze-loop-pick-mode').dataset.value).toBe('automatic');
+    expect(ui.byId.get('#bronze-loop-pick-mode').value).toBe('rating-auto');
     expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink-set').value).toBe('20995');
     expect(ui.byId.get('#bronze-loop-policy-rolling-surplus-crafting').checked).toBe(false);
@@ -83,7 +83,7 @@ describe('selection policy settings modal', () => {
     ui.byId.get('#bronze-loop-policy-low-rated-gold-max').value = '81';
     ui.byId.get('#bronze-loop-policy-rating-sbc-max-card').value = '89';
     ui.byId.get('#bronze-loop-policy-automatic-use-max').value = '95';
-    ui.byId.get('#bronze-loop-pick-mode').children[1].click();
+    ui.byId.get('#bronze-loop-pick-mode').value = 'rating-review';
     ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value = 'selected';
     ui.byId.get('#bronze-loop-policy-rolling-storage-sink-set').value = '20994';
     ui.byId.get('#bronze-loop-policy-rolling-surplus-crafting').checked = true;
@@ -101,6 +101,7 @@ describe('selection policy settings modal', () => {
       pickOptions: expect.objectContaining({
         protectionRating: 95,
         autoSelectBelow90: false,
+        pickSelectionMode: 'rating-review',
         openPicksAtEnd: true,
         rollingStorageSinkEnabled: true,
         rollingStorageSinkMode: 'selected',
@@ -130,7 +131,7 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-low-rated-gold-max').value).toBe('99');
     expect(ui.byId.get('#bronze-loop-policy-rating-sbc-max-card').value).toBe('1');
     expect(ui.byId.get('#bronze-loop-policy-automatic-use-max').value).toBe('99');
-    expect(ui.byId.get('#bronze-loop-pick-mode').dataset.value).toBe('review-protected');
+    expect(ui.byId.get('#bronze-loop-pick-mode').value).toBe('rating-review');
     expect(ui.byId.get('#bronze-loop-policy-rolling-storage-sink-mode').value).toBe('off');
     expect(ui.byId.get('#bronze-loop-policy-rolling-surplus-crafting').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-shortage-recovery').checked).toBe(false);

@@ -9,6 +9,10 @@ import {
   MATERIAL_SINK_CLASSES,
   MATERIAL_SINK_PREFERENCES,
 } from '../config/material-sink.js';
+import {
+  PLAYER_PICK_SELECTION_MODE_LABELS,
+  PLAYER_PICK_SELECTION_MODES,
+} from '../domain/player-pick.js';
 
 const PILES = Object.freeze(['unassigned', 'storage', 'transfer', 'club']);
 
@@ -246,13 +250,24 @@ function renderRewardFlow(path, value = {}, context) {
 
 function renderPickOptions(path, value = {}, context) {
   const fields = [
-    ['autoSelectBelow90', 'Automatic selection', 'boolean-inherit'],
+    ['pickSelectionMode', 'Selection mode', 'pick-selection-mode'],
     ['protectionRating', 'Protection rating', 'number'],
     ['openPicksAtEnd', 'Open Picks at end', 'boolean-inherit'],
     ['preferScannedMetadata', 'Prefer scanned metadata', 'boolean-inherit'],
   ];
   return `<section class="dlr-builder-form-section"><h3>Player Pick options</h3><div class="dlr-builder-form-grid">${fields.map(([key, label, type]) => (
-    type === 'boolean-inherit'
+    type === 'pick-selection-mode'
+      ? fieldRow(label, selectInput(
+        `${path}.${key}`,
+        value[key],
+        PLAYER_PICK_SELECTION_MODES.map((selectionMode) => ({
+          value: selectionMode,
+          label: PLAYER_PICK_SELECTION_MODE_LABELS[selectionMode],
+        })),
+        context.readOnly,
+        true,
+      ))
+      : type === 'boolean-inherit'
       ? fieldRow(label, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value[key])}</select>`)
       : fieldRow(label, textInput(
         `${path}.${key}`,

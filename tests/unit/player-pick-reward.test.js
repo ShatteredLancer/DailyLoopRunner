@@ -4,6 +4,7 @@ import {
   classifyPendingPlayerPicks,
   getManualPlayerPickReason,
   partitionPendingPlayerPicks,
+  planPlayerPickSelection,
   playerPickMatchesReward,
   playerPickItemName,
   rankPlayerPickCandidates,
@@ -65,6 +66,20 @@ describe('Player Pick reward planning', () => {
     expect(getManualPlayerPickReason(ranked, 2)).toBe('');
   });
 
+  it('does not let the protection threshold bypass review-protected mode', () => {
+    const planned = planPlayerPickSelection([
+      { id: 1, rating: 91, special: true },
+      { id: 2, rating: 91, special: true },
+    ], new Map(), {
+      isSpecial: special,
+      isDuplicate: duplicate,
+      selectionMode: 'rating-review',
+      pickCount: 1,
+      autoSelectWithinProtection: true,
+    });
+    expect(planned.manualReason).toMatch(/2 non-duplicate special card/);
+  });
+
   it('does not require manual selection when duplicate top specials leave one non-duplicate choice', () => {
     const ranked = rankPlayerPickCandidates([
       { id: 1, rating: 96, special: true, duplicate: true },
@@ -110,5 +125,104 @@ describe('Player Pick reward planning', () => {
       isDuplicate: duplicate,
       isRare: rare,
     })).toEqual([expect.objectContaining({ item, rating: 88, rare: true, special: true, duplicate: false })]);
+  });
+
+  it('ranks every special before normal cards and uses price across special ratings', () => {
+    const ranked = planPlayerPickSelection([
+      { id: 1, definitionId: 1, rating: 96, special: true, duplicate: false },
+      { id: 2, definitionId: 2, rating: 99, special: true, duplicate: false },
+      { id: 3, definitionId: 3, rating: 90, special: false, duplicate: false },
+    ], new Map([[1, 25000], [2, 10000]]), {
+      isSpecial: special,
+      isDuplicate: duplicate,
+      selectionMode: 'special-price',
+      pickCount: 1,
+    });
+    expect(ranked.ranked.map((entry) => entry.item.id)).toEqual([1, 2, 3]);
+    expect(ranked.manualReason).toBe('');
+  });
+
+  it('keeps the existing randomized fallback for tied normal cards in price-first mode', () => {
+    const random = vi.fn(() => 0);
+    const planned = planPlayerPickSelection([
+      { id: 1, definitionId: 1, rating: 95, special: true },
+      { id: 2, definitionId: 2, rating: 89, special: false },
+      { id: 3, definitionId: 3, rating: 89, special: false },
+    ], new Map([[1, 100000]]), {
+      isSpecial: special,
+      isDuplicate: duplicate,
+      selectionMode: 'special-price',
+      pickCount: 2,
+      random,
+    });
+    expect(planned.ranked.map((entry) => entry.item.id)).toEqual([1, 3, 2]);
+    expect(random).toHaveBeenCalledOnce();
+  });
+
+  it('pauses when a high-price duplicate special displaces a non-duplicate special', () => {
+    const planned = planPlayerPickSelection([
+      { id: 1, definitionId: 1, rating: 96, special: true, duplicate: true },
+      { id: 2, definitionId: 2, rating: 99, special: true, duplicate: false },
+      { id: 3, definitionId: 3, rating: 90, special: false, duplicate: false },
+    ], new Map([[1, 25000], [2, 10000]]), {
+      isSpecial: special,
+      isDuplicate: duplicate,
+      selectionMode: 'special-price',
+      pickCount: 1,
+    });
+    expect(planned.ranked[0].item.id).toBe(1);
+    expect(planned.manualReason).toMatch(/duplicate special card/);
+  });
+
+  it('prefers a non-duplicate special on an equal-price tie without pausing', () => {
+    const planned = planPlayerPickSelection([
+      { id: 1, definitionId: 1, rating: 96, special: true, duplicate: true },
+      { id: 2, definitionId: 2, rating: 95, special: true, duplicate: false },
+    ], new Map([[1, 10000], [2, 10000]]), {
+      isSpecial: special,
+      isDuplicate: duplicate,
+      selectionMode: 'special-price',
+      pickCount: 1,
+    });
+    expect(planned.ranked[0].item.id).toBe(2);
+    expect(planned.manualReason).toBe('');
+  });
+
+  it('pauses when competing special prices are incomplete', () => {
+    const planned = planPlayerPickSelection([
+      { id: 1, definitionId: 1, rating: 96, special: true, duplicate: false },
+      { id: 2, definitionId: 2, rating: 95, special: true, duplicate: false },
+    ], new Map([[1, 10000]]), {
+      isSpecial: special,
+      isDuplicate: duplicate,
+      selectionMode: 'special-price',
+      pickCount: 1,
+    });
+    expect(planned.manualReason).toMatch(/price ranking is incomplete/);
+  });
+
+  it('always pauses for specials in manual-special mode but auto-selects normal cards', () => {
+    const specialPlan = planPlayerPickSelection([
+      { id: 1, rating: 85, special: true },
+      { id: 2, rating: 84, special: false },
+    ], new Map(), {
+      isSpecial: special,
+      isDuplicate: duplicate,
+      selectionMode: 'special-manual',
+      pickCount: 1,
+      autoSelectWithinProtection: true,
+    });
+    const normalPlan = planPlayerPickSelection([
+      { id: 3, rating: 85, special: false },
+      { id: 4, rating: 84, special: false },
+    ], new Map(), {
+      isSpecial: special,
+      isDuplicate: duplicate,
+      selectionMode: 'special-manual',
+      pickCount: 1,
+      autoSelectWithinProtection: true,
+    });
+    expect(specialPlan.manualReason).toMatch(/manual selection is required/);
+    expect(normalPlan.manualReason).toBe('');
   });
 });

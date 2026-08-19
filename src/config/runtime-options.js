@@ -13,6 +13,10 @@ import {
   normalizeRollingProvisionsMaxRating,
   normalizeRollingShortageProvisionsPackLimit,
 } from './rolling-upgrade.js';
+import {
+  normalizePlayerPickSelectionMode,
+  PLAYER_PICK_SELECTION_MODES,
+} from '../domain/player-pick.js';
 
 export const INVENTORY_MODES = Object.freeze(['inherit', 'inventory-only', 'normal']);
 export const RUNTIME_QUANTITY_MODES = Object.freeze(['user', 'ea-remaining', 'exhaust', 'fixed']);
@@ -22,6 +26,7 @@ export const RUNTIME_QUANTITY_TARGETS = Object.freeze([
   'maxPacks',
   'validationRounds',
 ]);
+export { PLAYER_PICK_SELECTION_MODES };
 const PICK_OPTIONS_APPLIED = Symbol('pick-options-applied');
 
 function boundedNumber(value, fallback, min, max) {
@@ -38,6 +43,12 @@ function pickOptionOverrides(input = {}) {
     if (value !== undefined) result[target] = value;
   };
   assign('autoSelectBelow90', nested.autoSelectBelow90, nested.autoSelect, input.autoSelectBelow90);
+  const explicitPickSelectionMode = nested.pickSelectionMode ?? input.pickSelectionMode;
+  if (explicitPickSelectionMode !== undefined) {
+    result.pickSelectionMode = explicitPickSelectionMode;
+  } else if (result.autoSelectBelow90 !== undefined) {
+    result.pickSelectionMode = result.autoSelectBelow90 === false ? 'rating-review' : 'rating-auto';
+  }
   assign('preferScannedMetadata', nested.preferScannedMetadata, input.preferScannedMetadata);
   assign('openPicksAtEnd', nested.openPicksAtEnd, nested.openAtEnd, input.openPicksAtEnd);
   assign(
@@ -125,8 +136,13 @@ export function normalizePickRuntimeOptions(input = {}) {
       : requestedStorageSinkMode === 'off'
         ? 'off'
         : input.rollingStorageSinkEnabled === true ? 'automatic' : 'off';
+  const pickSelectionMode = normalizePlayerPickSelectionMode(
+    input.pickSelectionMode,
+    input.autoSelectBelow90 === false ? 'rating-review' : 'rating-auto',
+  );
   return {
-    autoSelectBelow90: input.autoSelectBelow90 !== false,
+    autoSelectBelow90: pickSelectionMode !== 'rating-review',
+    pickSelectionMode,
     preferScannedMetadata: input.preferScannedMetadata === true,
     openPicksAtEnd: input.openPicksAtEnd === true,
     rollingStorageSinkEnabled: rollingStorageSinkMode !== 'off',
@@ -180,6 +196,7 @@ export function applyPickRuntimeOptions(loopDef, inheritedOptions = {}) {
     value: true,
   });
   loopDef.autoSelectBelow90 = options.autoSelectBelow90;
+  loopDef.pickSelectionMode = options.pickSelectionMode;
   loopDef.openPicksAtEnd = options.openPicksAtEnd;
   loopDef.autoPickRatingThreshold = options.protectionRating;
   return loopDef;

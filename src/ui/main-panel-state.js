@@ -1,4 +1,8 @@
 import { renderRuntimeTelemetry } from './runtime-telemetry.js';
+import {
+  normalizePlayerPickSelectionMode,
+  PLAYER_PICK_SELECTION_MODE_LABELS,
+} from '../domain/player-pick.js';
 
 function query(panel, selector) {
   return panel?.querySelector?.(selector) || null;
@@ -102,7 +106,11 @@ export function renderSelectionPolicySummary(options = {}) {
   const lowRatedGold = Number(sbcFodderOptions.lowRatedGoldMaxRating || 82) || 82;
   const standardRating = Number(sbcFodderOptions.ratingSbcMaxCardRating || 88) || 88;
   const automaticUse = Number(pickOptions.protectionRating || pickOptions.autoPickThreshold || 90) || 90;
-  const pickMode = pickOptions.autoSelectBelow90 === false ? 'Review' : 'Auto';
+  const pickMode = normalizePlayerPickSelectionMode(
+    pickOptions.pickSelectionMode,
+    pickOptions.autoSelectBelow90 === false ? 'rating-review' : 'rating-auto',
+  );
+  const pickModeLabel = PLAYER_PICK_SELECTION_MODE_LABELS[pickMode];
   const storageSink = pickOptions.rollingStorageSinkMode === 'selected'
     ? `Set #${pickOptions.rollingStorageSinkSetId || '?'}`
     : pickOptions.rollingStorageSinkMode === 'automatic' || pickOptions.rollingStorageSinkEnabled === true
@@ -123,8 +131,8 @@ export function renderSelectionPolicySummary(options = {}) {
     ? 'immediate'
     : 'on shortage';
   const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
-  summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickMode}`;
-  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
+  summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickModeLabel}`;
+  summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
 }
 
 export function renderMainPanelScanProgress(options = {}) {

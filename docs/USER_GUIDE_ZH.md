@@ -45,9 +45,18 @@ Loop 的 `inventoryMode: inherit | inventory-only | normal` 可以继承或覆�
 
 ### Pick 设置
 
-- `Protect Pick fodder >= N`：禁止动态 Pick 使用达到阈值的普通金卡。
-- `Auto-pick below N`：全部候选都低于阈值时自动选择。阈值之外只有并列最高评分的 Special 数量超过可选名额时才要求人工选择；名额足够时自动全选，普通卡或非最高优先级的缺价并列会随机选择。
+- `Automatic-use max rating`：独立的评分保护设置，影响默认评分优先策略和 Rolling 材料使用范围。
+- `Selection mode`：统一控制普通 Pick Loop、Rolling 恢复和 Provisions 预处理 Pick。
 - `Open Picks at end`：Pick Loop 完成目标后集中领取；父 Workflow 默认可被子 Pick 覆盖。
+
+| Selection mode | 行为 |
+| --- | --- |
+| `Rating first` | 保留旧行为：先按评分，再按特殊卡、重复状态和价格处理；不超过自动使用上限时可自动选择。 |
+| `Rating first, review protected ties` | 仍按评分优先，但不使用阈值绕过受保护特殊卡的人工确认。 |
+| `Special price first` | 所有特殊卡始终排在普通卡前；特殊卡跨评分按实时价格从高到低排序，价格相同时优先非重复卡。 |
+| `Always review specials` | 只要候选中出现特殊卡就暂停等待人工选择；全是普通卡时仍可按评分自动选择。 |
+
+`Special price first` 下，如果高价重复特殊卡挤掉了非重复特殊卡，会显示候选并等待人工确认；竞争中的特殊卡缺少价格时也会暂停。特殊卡数量不超过可选数量时不会无意义地暂停。价格依次使用 FUT.GG 和 FUTNext，价格不可用只在确实影响排序时触发人工确认。
 
 这些设置不会删除 SBC 本身的业务评分和特殊卡约束。
 

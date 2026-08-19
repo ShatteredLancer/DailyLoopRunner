@@ -1,5 +1,9 @@
 import { normalizePickRuntimeOptions } from '../config/runtime-options.js';
 import { normalizeSbcFodderPolicy } from '../config/sbc-fodder-policy.js';
+import {
+  PLAYER_PICK_SELECTION_MODE_LABELS,
+  PLAYER_PICK_SELECTION_MODES,
+} from '../domain/player-pick.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 function applyStyles(element, styles) {
@@ -75,47 +79,6 @@ function sectionTitle(dom, text) {
   return heading;
 }
 
-function modeControl(dom, value) {
-  const group = dom.create('div');
-  group.id = 'bronze-loop-pick-mode';
-  group.setAttribute?.('role', 'group');
-  group.setAttribute?.('aria-label', 'Player Pick handling');
-  applyStyles(group, { display: 'flex', gap: '0', minHeight: '30px' });
-  const modes = [
-    ['automatic', 'Automatic'],
-    ['review-protected', 'Review protected'],
-  ];
-  const buttons = [];
-  const update = (next) => {
-    buttons.forEach((button) => {
-      const active = button.dataset.mode === next;
-      button.setAttribute?.('aria-pressed', active ? 'true' : 'false');
-      button.style.background = active ? '#2f6fde' : '#222832';
-      button.style.borderColor = active ? '#4f8cff' : '#607089';
-    });
-    group.dataset.value = next;
-  };
-  modes.forEach(([mode, label], index) => {
-    const button = dom.create('button');
-    button.type = 'button';
-    button.dataset.mode = mode;
-    button.textContent = label;
-    button.setAttribute?.('aria-pressed', mode === value ? 'true' : 'false');
-    button.style.minHeight = '30px';
-    button.style.padding = '0 10px';
-    button.style.cursor = 'pointer';
-    button.style.color = '#fff';
-    button.style.border = `1px solid ${mode === value ? '#4f8cff' : '#607089'}`;
-    button.style.background = mode === value ? '#2f6fde' : '#222832';
-    button.style.marginLeft = index ? '-1px' : '0';
-    button.addEventListener('click', () => update(mode));
-    buttons.push(button);
-    group.appendChild(button);
-  });
-  group.dataset.value = value;
-  return group;
-}
-
 function numberInput(dom, id, value, mode, limits = {}) {
   const input = inputStyles(dom.create('input'), mode);
   input.id = id;
@@ -184,7 +147,17 @@ export function showSelectionPolicySettings(options = {}) {
   const lowRatedGold = numberInput(dom, 'bronze-loop-policy-low-rated-gold-max', sbcFodderOptions.lowRatedGoldMaxRating, mode);
   const standardRating = numberInput(dom, 'bronze-loop-policy-rating-sbc-max-card', sbcFodderOptions.ratingSbcMaxCardRating, mode);
   const automaticUse = numberInput(dom, 'bronze-loop-policy-automatic-use-max', pickOptions.protectionRating, mode);
-  const pickMode = modeControl(dom, pickOptions.autoSelectBelow90 === false ? 'review-protected' : 'automatic');
+  const pickMode = selectInput(
+    dom,
+    'bronze-loop-pick-mode',
+    pickOptions.pickSelectionMode,
+    PLAYER_PICK_SELECTION_MODES.map((selectionMode) => [
+      selectionMode,
+      PLAYER_PICK_SELECTION_MODE_LABELS[selectionMode],
+    ]),
+    mode,
+  );
+  applyStyles(pickMode, { width: 'min(320px, 100%)' });
   const openPicksAtEnd = checkbox(
     dom,
     'bronze-loop-policy-pick-open-at-end',
@@ -300,7 +273,7 @@ export function showSelectionPolicySettings(options = {}) {
     wideField(dom, 'Storage pressure recovery', rollingStorageSinkMode, mode, 'Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set'),
     wideField(dom, 'Storage pressure SBC', rollingStorageSinkSet, mode, 'Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility'),
     sectionTitle(dom, 'Player Picks'),
-    field(dom, 'Selection mode', pickMode, mode, 'Automatic resolves safe and deterministically ranked Picks; Review protected pauses only when protected choices remain ambiguous'),
+    wideField(dom, 'Selection mode', pickMode, mode, 'Rating first preserves the existing behavior; Special price first ranks every special card before normal cards and pauses when a high-price duplicate displaces a non-duplicate; Always review specials pauses whenever a special card appears'),
     openPicksAtEnd.label,
   );
 
@@ -338,7 +311,7 @@ export function showSelectionPolicySettings(options = {}) {
     }),
     pickOptions: normalizePickRuntimeOptions({
       protectionRating: readNumber(automaticUse, pickOptions.protectionRating),
-      autoSelectBelow90: pickMode.dataset.value !== 'review-protected',
+      pickSelectionMode: pickMode.value,
       openPicksAtEnd: openPicksAtEnd.input.checked,
       rollingStorageSinkMode: rollingStorageSinkMode.value,
       rollingStorageSinkSetId: rollingStorageSinkMode.value === 'selected'
@@ -390,6 +363,7 @@ export function showSelectionPolicySettings(options = {}) {
       lowRatedGold,
       standardRating,
       automaticUse,
+      pickMode,
       rollingProvisionsMaxRating,
       rollingShortageProvisionsPackLimit,
       rollingSurplusCrafting.input,

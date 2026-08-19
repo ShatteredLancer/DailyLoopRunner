@@ -219,11 +219,10 @@ import { claimSbcRewards } from './reward/sbc-claim.js';
 import {
   capturePlayerPickSelections,
   classifyPendingPlayerPicks,
-  getManualPlayerPickReason,
+  planPlayerPickSelection,
   partitionPendingPlayerPicks,
   playerPickMatchesReward,
   playerPickItemName,
-  rankPlayerPickCandidates,
 } from './reward/player-pick.js';
 import { loadPlayerPickPrices } from './reward/player-prices.js';
 import { createPlayerCatalogProvider } from './trade/player-catalog.js';
@@ -8901,7 +8900,7 @@ function updateLoopControls() {
     const storageSink = options.rollingStorageSinkMode === 'selected'
       ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ''}`.trim()
       : options.rollingStorageSinkMode;
-    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.autoSelectBelow90 ? 'Automatic' : 'Review protected'}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
+    log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? '; open Picks at end' : ''}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? 'enabled' : 'off'}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? 'allowed' : 'off'}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? 'allowed' : 'off'}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? 'protected' : 'last-resort fallback'}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? 'immediate' : 'on shortage'}; Storage pressure SBC ${storageSink}`);
     renderCurrentSelectionPolicySummary();
     return options;
   }
@@ -11022,11 +11021,13 @@ function updateLoopControls() {
 
     const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
     const autoPickThreshold = Math.max(1, Math.min(99, Number(loopDef.autoPickRatingThreshold || 90) || 90));
+    const pickSelectionMode = loopDef.pickSelectionMode
+      || (loopDef.autoSelectBelow90 === false ? 'rating-review' : 'rating-auto');
     const autoSelectWithinProtection = shouldAutoSelectPlayerPick(maxRating, {
       autoSelectBelow90: loopDef.autoSelectBelow90,
       protectionRating: autoPickThreshold,
     });
-    if (autoSelectWithinProtection) {
+    if (autoSelectWithinProtection && pickSelectionMode === 'rating-auto') {
       log(`${loopDef.name}: all candidates are within the automatic-use rating ${autoPickThreshold} (max ${maxRating}); keeping automatic selection while loading prices for the recap`);
     }
 
@@ -11037,10 +11038,15 @@ function updateLoopControls() {
       isDuplicate: isPlayerPickDuplicate,
       isRare: isPlayerPickRare,
     };
-    const ranked = rankPlayerPickCandidates(choices, prices, pickRewardOptions);
+    const selectionPlan = planPlayerPickSelection(choices, prices, {
+      ...pickRewardOptions,
+      pickCount,
+      selectionMode: pickSelectionMode,
+      autoSelectWithinProtection,
+    });
+    const ranked = selectionPlan.ranked;
     ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
-
-    const manualReason = autoSelectWithinProtection ? '' : getManualPlayerPickReason(ranked, pickCount);
+    const manualReason = selectionPlan.manualReason;
     const selected = manualReason
       ? await waitForManualPlayerPickSelection({
           dom: adapters.dom,
@@ -11052,7 +11058,7 @@ function updateLoopControls() {
           cancelStopCheck: clearInterval,
           isStopping: () => state.stopping,
         })
-      : ranked.slice(0, pickCount).map((candidate) => candidate.item);
+      : selectionPlan.selected.map((candidate) => candidate.item);
     const selectedCards = capturePlayerPickSelections(selected, ranked, pickRewardOptions);
     if (manualReason) log(`${loopDef.name}: manual Player Pick confirmed`);
     else log(`${loopDef.name}: auto-selected ${selected.map((item) => itemDisplayName(item)).join(', ')}`);
@@ -12689,7 +12695,13 @@ function updateLoopControls() {
         : rollingProtectionRating(parentLoopDef),
     };
     result.dryRun = parentLoopDef.dryRun === true;
-    result.autoSelectBelow90 = parentLoopDef.autoSelectBelow90 !== false;
+    const parentPickOptions = parentLoopDef.runtimePickOptions || {};
+    const parentAutoSelect = parentPickOptions.autoSelectBelow90
+      ?? parentLoopDef.autoSelectBelow90;
+    result.autoSelectBelow90 = parentAutoSelect !== false;
+    result.pickSelectionMode = parentPickOptions.pickSelectionMode
+      || parentLoopDef.pickSelectionMode
+      || (result.autoSelectBelow90 ? 'rating-auto' : 'rating-review');
     result.autoPickRatingThreshold = rollingProtectionRating(parentLoopDef);
     result.maxCompletions = 1;
     result.openRewardPacks = false;

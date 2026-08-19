@@ -314,6 +314,7 @@ function validatePickOptions(value, path, errors) {
     'highGoldThreshold',
     'autoSelect',
     'autoSelectBelow90',
+    'pickSelectionMode',
     'autoPickThreshold',
     'protectionRating',
     'openAtEnd',
@@ -347,6 +348,10 @@ function validatePickOptions(value, path, errors) {
       errors.push(`${path}.${field} must be a number between 1 and 99`);
     }
   });
+  if (value.pickSelectionMode !== undefined
+    && !['rating-auto', 'rating-review', 'special-price', 'special-manual'].includes(value.pickSelectionMode)) {
+    errors.push(`${path}.pickSelectionMode must be one of: rating-auto, rating-review, special-price, special-manual`);
+  }
   if (value.rollingProvisionsMaxRating !== undefined
     && ![88, 89].includes(Number(value.rollingProvisionsMaxRating))) {
     errors.push(`${path}.rollingProvisionsMaxRating must be either 88 or 89`);

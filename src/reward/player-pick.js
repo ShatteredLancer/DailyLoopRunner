@@ -1,5 +1,39 @@
+import { normalizePlayerPickSelectionMode } from '../domain/player-pick.js';
+
 function itemDefinitionId(item) {
   return Number(item?.definitionId || 0);
+}
+
+function rankRatingFirst(candidates, random) {
+  const groups = new Map();
+  candidates.forEach((candidate) => {
+    const key = `${candidate.rating}:${candidate.special ? 1 : 0}:${candidate.duplicate ? 1 : 0}`;
+    const group = groups.get(key) || [];
+    group.push(candidate);
+    groups.set(key, group);
+  });
+  return [...groups.values()]
+    .sort((left, right) =>
+      right[0].rating - left[0].rating
+      || Number(right[0].special) - Number(left[0].special)
+      || Number(left[0].duplicate) - Number(right[0].duplicate)
+      || left[0].index - right[0].index
+    )
+    .flatMap((group) => {
+      if (group.every((candidate) => candidate.price !== null)) {
+        return group.sort((left, right) => right.price - left.price || left.index - right.index);
+      }
+      const shuffled = [...group];
+      for (let index = shuffled.length - 1; index > 0; index--) {
+        const sample = Number(random());
+        const bounded = Number.isFinite(sample)
+          ? Math.max(0, Math.min(0.9999999999999999, sample))
+          : 0;
+        const swapIndex = Math.floor(bounded * (index + 1));
+        [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+      }
+      return shuffled;
+    });
 }
 
 function itemIdentityIds(item) {
@@ -50,6 +84,7 @@ export function rankPlayerPickCandidates(items, prices = new Map(), options = {}
   const isDuplicate = options.isDuplicate || (() => false);
   const isRare = options.isRare || (() => false);
   const random = typeof options.random === 'function' ? options.random : Math.random;
+  const selectionMode = normalizePlayerPickSelectionMode(options.selectionMode);
   const candidates = (items || []).map((item, index) => {
     const priceValue = prices.has(itemDefinitionId(item)) ? prices.get(itemDefinitionId(item)) : null;
     const rawPrice = priceValue === null || priceValue === undefined || priceValue === ''
@@ -65,33 +100,25 @@ export function rankPlayerPickCandidates(items, prices = new Map(), options = {}
       price: Number.isFinite(rawPrice) ? rawPrice : null,
     };
   });
-  const groups = new Map();
-  candidates.forEach((candidate) => {
-    const key = `${candidate.rating}:${candidate.special ? 1 : 0}:${candidate.duplicate ? 1 : 0}`;
-    const group = groups.get(key) || [];
-    group.push(candidate);
-    groups.set(key, group);
-  });
-  return [...groups.values()]
-    .sort((a, b) =>
-      b[0].rating - a[0].rating ||
-      Number(b[0].special) - Number(a[0].special) ||
-      Number(a[0].duplicate) - Number(b[0].duplicate) ||
-      a[0].index - b[0].index
-    )
-    .flatMap((group) => {
-      if (group.every((candidate) => candidate.price !== null)) {
-        return group.sort((a, b) => b.price - a.price || a.index - b.index);
-      }
-      const shuffled = [...group];
-      for (let index = shuffled.length - 1; index > 0; index--) {
-        const sample = Number(random());
-        const bounded = Number.isFinite(sample) ? Math.max(0, Math.min(0.9999999999999999, sample)) : 0;
-        const swapIndex = Math.floor(bounded * (index + 1));
-        [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-      }
-      return shuffled;
-    });
+  if (selectionMode === 'special-price') {
+    const specials = candidates
+      .filter((candidate) => candidate.special)
+      .sort((left, right) => {
+        const leftHasPrice = left.price !== null;
+        const rightHasPrice = right.price !== null;
+        if (leftHasPrice !== rightHasPrice) return Number(rightHasPrice) - Number(leftHasPrice);
+        if (leftHasPrice && rightHasPrice && left.price !== right.price) return right.price - left.price;
+        return Number(left.duplicate) - Number(right.duplicate)
+          || right.rating - left.rating
+          || left.index - right.index;
+      });
+    const normalCards = rankRatingFirst(
+      candidates.filter((candidate) => !candidate.special),
+      random,
+    );
+    return [...specials, ...normalCards];
+  }
+  return rankRatingFirst(candidates, random);
 }
 
 export function capturePlayerPickSelections(selected, ranked, options = {}) {
@@ -123,4 +150,41 @@ export function getManualPlayerPickReason(ranked, pickCount) {
     return `${topSpecials.length} non-duplicate special card(s) share the highest rating ${topRating} but only ${availableSelections} can be selected`;
   }
   return '';
+}
+
+export function planPlayerPickSelection(items, prices = new Map(), options = {}) {
+  const mode = normalizePlayerPickSelectionMode(options.selectionMode);
+  const pickCount = Math.max(1, Number(options.pickCount || 1) || 1);
+  const ranked = rankPlayerPickCandidates(items, prices, { ...options, selectionMode: mode });
+  const selected = ranked.slice(0, pickCount);
+  let manualReason = '';
+
+  if (mode === 'special-manual' && ranked.some((candidate) => candidate.special)) {
+    manualReason = 'Player Pick contains special card(s); manual selection is required by the selected strategy';
+  } else if (mode === 'special-price') {
+    const specials = ranked.filter((candidate) => candidate.special);
+    if (specials.length > pickCount) {
+      const selectedSpecials = selected.filter((candidate) => candidate.special);
+      const excludedSpecials = ranked.slice(pickCount).filter((candidate) => candidate.special);
+      const selectedDuplicate = selectedSpecials.some((candidate) => candidate.duplicate);
+      const excludedNonDuplicate = excludedSpecials.some((candidate) => !candidate.duplicate);
+      const missingCompetingPrice = specials.some((candidate) => candidate.price === null);
+      if (selectedDuplicate && excludedNonDuplicate) {
+        manualReason = 'A high-price duplicate special card competes with an excluded non-duplicate special card';
+      } else if (missingCompetingPrice) {
+        manualReason = 'Special-card price ranking is incomplete; manual selection is required';
+      }
+    }
+  } else {
+    const autoSelectWithinProtection = mode === 'rating-auto'
+      && options.autoSelectWithinProtection === true;
+    manualReason = autoSelectWithinProtection ? '' : getManualPlayerPickReason(ranked, pickCount);
+  }
+
+  return {
+    mode,
+    ranked,
+    selected,
+    manualReason,
+  };
 }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.18
+// @version      0.8.19
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.18",
+    version: "0.8.19",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -2643,6 +2643,26 @@
     ));
   }
 
+  // src/domain/player-pick.js
+  var PLAYER_PICK_SELECTION_MODES = Object.freeze([
+    "rating-auto",
+    "rating-review",
+    "special-price",
+    "special-manual"
+  ]);
+  var PLAYER_PICK_SELECTION_MODE_LABELS = Object.freeze({
+    "rating-auto": "Rating first",
+    "rating-review": "Rating first, review protected ties",
+    "special-price": "Special price first",
+    "special-manual": "Always review specials"
+  });
+  function normalizePlayerPickSelectionMode(value, fallback = "rating-auto") {
+    const requested = String(value || "").trim().toLowerCase();
+    if (PLAYER_PICK_SELECTION_MODES.includes(requested)) return requested;
+    const normalizedFallback = String(fallback || "").trim().toLowerCase();
+    return PLAYER_PICK_SELECTION_MODES.includes(normalizedFallback) ? normalizedFallback : "rating-auto";
+  }
+
   // src/config/runtime-options.js
   var INVENTORY_MODES = Object.freeze(["inherit", "inventory-only", "normal"]);
   var RUNTIME_QUANTITY_MODES = Object.freeze(["user", "ea-remaining", "exhaust", "fixed"]);
@@ -2666,6 +2686,12 @@
       if (value !== void 0) result[target] = value;
     };
     assign("autoSelectBelow90", nested.autoSelectBelow90, nested.autoSelect, input2.autoSelectBelow90);
+    const explicitPickSelectionMode = nested.pickSelectionMode ?? input2.pickSelectionMode;
+    if (explicitPickSelectionMode !== void 0) {
+      result.pickSelectionMode = explicitPickSelectionMode;
+    } else if (result.autoSelectBelow90 !== void 0) {
+      result.pickSelectionMode = result.autoSelectBelow90 === false ? "rating-review" : "rating-auto";
+    }
     assign("preferScannedMetadata", nested.preferScannedMetadata, input2.preferScannedMetadata);
     assign("openPicksAtEnd", nested.openPicksAtEnd, nested.openAtEnd, input2.openPicksAtEnd);
     assign(
@@ -2744,8 +2770,13 @@
     const selectedStorageSinkSetId = Number(input2.rollingStorageSinkSetId);
     const hasSelectedStorageSink = Number.isInteger(selectedStorageSinkSetId) && selectedStorageSinkSetId > 0;
     const rollingStorageSinkMode = requestedStorageSinkMode === "selected" ? hasSelectedStorageSink ? "selected" : "off" : requestedStorageSinkMode === "automatic" ? "automatic" : requestedStorageSinkMode === "off" ? "off" : input2.rollingStorageSinkEnabled === true ? "automatic" : "off";
+    const pickSelectionMode = normalizePlayerPickSelectionMode(
+      input2.pickSelectionMode,
+      input2.autoSelectBelow90 === false ? "rating-review" : "rating-auto"
+    );
     return {
-      autoSelectBelow90: input2.autoSelectBelow90 !== false,
+      autoSelectBelow90: pickSelectionMode !== "rating-review",
+      pickSelectionMode,
       preferScannedMetadata: input2.preferScannedMetadata === true,
       openPicksAtEnd: input2.openPicksAtEnd === true,
       rollingStorageSinkEnabled: rollingStorageSinkMode !== "off",
@@ -2785,6 +2816,7 @@
       value: true
     });
     loopDef.autoSelectBelow90 = options.autoSelectBelow90;
+    loopDef.pickSelectionMode = options.pickSelectionMode;
     loopDef.openPicksAtEnd = options.openPicksAtEnd;
     loopDef.autoPickRatingThreshold = options.protectionRating;
     return loopDef;
@@ -4060,6 +4092,7 @@
       "highGoldThreshold",
       "autoSelect",
       "autoSelectBelow90",
+      "pickSelectionMode",
       "autoPickThreshold",
       "protectionRating",
       "openAtEnd",
@@ -4092,6 +4125,9 @@
         errors.push(`${path}.${field5} must be a number between 1 and 99`);
       }
     });
+    if (value.pickSelectionMode !== void 0 && !["rating-auto", "rating-review", "special-price", "special-manual"].includes(value.pickSelectionMode)) {
+      errors.push(`${path}.pickSelectionMode must be one of: rating-auto, rating-review, special-price, special-manual`);
+    }
     if (value.rollingProvisionsMaxRating !== void 0 && ![88, 89].includes(Number(value.rollingProvisionsMaxRating))) {
       errors.push(`${path}.rollingProvisionsMaxRating must be either 88 or 89`);
     }
@@ -14157,6 +14193,30 @@
   function itemDefinitionId(item) {
     return Number(item?.definitionId || 0);
   }
+  function rankRatingFirst(candidates, random) {
+    const groups = /* @__PURE__ */ new Map();
+    candidates.forEach((candidate) => {
+      const key = `${candidate.rating}:${candidate.special ? 1 : 0}:${candidate.duplicate ? 1 : 0}`;
+      const group = groups.get(key) || [];
+      group.push(candidate);
+      groups.set(key, group);
+    });
+    return [...groups.values()].sort(
+      (left, right) => right[0].rating - left[0].rating || Number(right[0].special) - Number(left[0].special) || Number(left[0].duplicate) - Number(right[0].duplicate) || left[0].index - right[0].index
+    ).flatMap((group) => {
+      if (group.every((candidate) => candidate.price !== null)) {
+        return group.sort((left, right) => right.price - left.price || left.index - right.index);
+      }
+      const shuffled = [...group];
+      for (let index = shuffled.length - 1; index > 0; index--) {
+        const sample = Number(random());
+        const bounded = Number.isFinite(sample) ? Math.max(0, Math.min(0.9999999999999999, sample)) : 0;
+        const swapIndex = Math.floor(bounded * (index + 1));
+        [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+      }
+      return shuffled;
+    });
+  }
   function itemIdentityIds(item) {
     const definitionId2 = Number(item?.definitionId || 0);
     const itemId5 = Number(item?.id || 0);
@@ -14198,6 +14258,7 @@
     const isDuplicate = options.isDuplicate || (() => false);
     const isRare = options.isRare || (() => false);
     const random = typeof options.random === "function" ? options.random : Math.random;
+    const selectionMode = normalizePlayerPickSelectionMode(options.selectionMode);
     const candidates = (items || []).map((item, index) => {
       const priceValue = prices.has(itemDefinitionId(item)) ? prices.get(itemDefinitionId(item)) : null;
       const rawPrice = priceValue === null || priceValue === void 0 || priceValue === "" ? null : Number(priceValue);
@@ -14211,28 +14272,21 @@
         price: Number.isFinite(rawPrice) ? rawPrice : null
       };
     });
-    const groups = /* @__PURE__ */ new Map();
-    candidates.forEach((candidate) => {
-      const key = `${candidate.rating}:${candidate.special ? 1 : 0}:${candidate.duplicate ? 1 : 0}`;
-      const group = groups.get(key) || [];
-      group.push(candidate);
-      groups.set(key, group);
-    });
-    return [...groups.values()].sort(
-      (a, b) => b[0].rating - a[0].rating || Number(b[0].special) - Number(a[0].special) || Number(a[0].duplicate) - Number(b[0].duplicate) || a[0].index - b[0].index
-    ).flatMap((group) => {
-      if (group.every((candidate) => candidate.price !== null)) {
-        return group.sort((a, b) => b.price - a.price || a.index - b.index);
-      }
-      const shuffled = [...group];
-      for (let index = shuffled.length - 1; index > 0; index--) {
-        const sample = Number(random());
-        const bounded = Number.isFinite(sample) ? Math.max(0, Math.min(0.9999999999999999, sample)) : 0;
-        const swapIndex = Math.floor(bounded * (index + 1));
-        [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-      }
-      return shuffled;
-    });
+    if (selectionMode === "special-price") {
+      const specials = candidates.filter((candidate) => candidate.special).sort((left, right) => {
+        const leftHasPrice = left.price !== null;
+        const rightHasPrice = right.price !== null;
+        if (leftHasPrice !== rightHasPrice) return Number(rightHasPrice) - Number(leftHasPrice);
+        if (leftHasPrice && rightHasPrice && left.price !== right.price) return right.price - left.price;
+        return Number(left.duplicate) - Number(right.duplicate) || right.rating - left.rating || left.index - right.index;
+      });
+      const normalCards = rankRatingFirst(
+        candidates.filter((candidate) => !candidate.special),
+        random
+      );
+      return [...specials, ...normalCards];
+    }
+    return rankRatingFirst(candidates, random);
   }
   function capturePlayerPickSelections(selected2, ranked, options = {}) {
     const isSpecial = options.isSpecial || (() => false);
@@ -14258,6 +14312,39 @@
       return `${topSpecials.length} non-duplicate special card(s) share the highest rating ${topRating} but only ${availableSelections} can be selected`;
     }
     return "";
+  }
+  function planPlayerPickSelection(items, prices = /* @__PURE__ */ new Map(), options = {}) {
+    const mode = normalizePlayerPickSelectionMode(options.selectionMode);
+    const pickCount = Math.max(1, Number(options.pickCount || 1) || 1);
+    const ranked = rankPlayerPickCandidates(items, prices, { ...options, selectionMode: mode });
+    const selected2 = ranked.slice(0, pickCount);
+    let manualReason = "";
+    if (mode === "special-manual" && ranked.some((candidate) => candidate.special)) {
+      manualReason = "Player Pick contains special card(s); manual selection is required by the selected strategy";
+    } else if (mode === "special-price") {
+      const specials = ranked.filter((candidate) => candidate.special);
+      if (specials.length > pickCount) {
+        const selectedSpecials = selected2.filter((candidate) => candidate.special);
+        const excludedSpecials = ranked.slice(pickCount).filter((candidate) => candidate.special);
+        const selectedDuplicate = selectedSpecials.some((candidate) => candidate.duplicate);
+        const excludedNonDuplicate = excludedSpecials.some((candidate) => !candidate.duplicate);
+        const missingCompetingPrice = specials.some((candidate) => candidate.price === null);
+        if (selectedDuplicate && excludedNonDuplicate) {
+          manualReason = "A high-price duplicate special card competes with an excluded non-duplicate special card";
+        } else if (missingCompetingPrice) {
+          manualReason = "Special-card price ranking is incomplete; manual selection is required";
+        }
+      }
+    } else {
+      const autoSelectWithinProtection = mode === "rating-auto" && options.autoSelectWithinProtection === true;
+      manualReason = autoSelectWithinProtection ? "" : getManualPlayerPickReason(ranked, pickCount);
+    }
+    return {
+      mode,
+      ranked,
+      selected: selected2,
+      manualReason
+    };
   }
 
   // src/trade/price-quotes.js
@@ -28362,7 +28449,11 @@
     const lowRatedGold = Number(sbcFodderOptions.lowRatedGoldMaxRating || 82) || 82;
     const standardRating = Number(sbcFodderOptions.ratingSbcMaxCardRating || 88) || 88;
     const automaticUse = Number(pickOptions.protectionRating || pickOptions.autoPickThreshold || 90) || 90;
-    const pickMode = pickOptions.autoSelectBelow90 === false ? "Review" : "Auto";
+    const pickMode = normalizePlayerPickSelectionMode(
+      pickOptions.pickSelectionMode,
+      pickOptions.autoSelectBelow90 === false ? "rating-review" : "rating-auto"
+    );
+    const pickModeLabel = PLAYER_PICK_SELECTION_MODE_LABELS[pickMode];
     const storageSink = pickOptions.rollingStorageSinkMode === "selected" ? `Set #${pickOptions.rollingStorageSinkSetId || "?"}` : pickOptions.rollingStorageSinkMode === "automatic" || pickOptions.rollingStorageSinkEnabled === true ? "automatic" : "off";
     const surplusCrafting = pickOptions.rollingSurplusCraftingEnabled === true ? "enabled" : "off";
     const provisionsShortageRecovery = pickOptions.rollingProvisionsShortageRecoveryEnabled === true ? "allowed" : "off";
@@ -28371,8 +28462,8 @@
     const provisionsMaxRating = Number(pickOptions.rollingProvisionsMaxRating || 88) === 89 ? 89 : 88;
     const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true ? "immediate" : "on shortage";
     const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
-    summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickMode}`;
-    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickMode}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
+    summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickModeLabel}`;
+    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
   }
   function renderMainPanelScanProgress(options = {}) {
     const panel = options.panel;
@@ -28769,7 +28860,7 @@
         </div>
         <div class="row" id="bronze-loop-selection-policy-row">
           <span class="bronze-loop-option-summary">Selection policy</span>
-          <span id="bronze-loop-selection-policy-summary" class="bronze-loop-option-summary">SBC <=88 | Safe <=90 | Picks Auto</span>
+          <span id="bronze-loop-selection-policy-summary" class="bronze-loop-option-summary">SBC <=88 | Safe <=90 | Picks Rating first</span>
           <button id="bronze-loop-selection-policy-settings" title="Configure SBC, Rolling, and Player Pick selection policy">Settings</button>
         </div>
         <div class="row" id="bronze-loop-reward-alert-row">
@@ -30363,12 +30454,21 @@
   }
   function renderPickOptions(path, value = {}, context) {
     const fields = [
-      ["autoSelectBelow90", "Automatic selection", "boolean-inherit"],
+      ["pickSelectionMode", "Selection mode", "pick-selection-mode"],
       ["protectionRating", "Protection rating", "number"],
       ["openPicksAtEnd", "Open Picks at end", "boolean-inherit"],
       ["preferScannedMetadata", "Prefer scanned metadata", "boolean-inherit"]
     ];
-    return `<section class="dlr-builder-form-section"><h3>Player Pick options</h3><div class="dlr-builder-form-grid">${fields.map(([key, label, type]) => type === "boolean-inherit" ? fieldRow(label, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value[key])}</select>`) : fieldRow(label, textInput(
+    return `<section class="dlr-builder-form-section"><h3>Player Pick options</h3><div class="dlr-builder-form-grid">${fields.map(([key, label, type]) => type === "pick-selection-mode" ? fieldRow(label, selectInput(
+      `${path}.${key}`,
+      value[key],
+      PLAYER_PICK_SELECTION_MODES.map((selectionMode) => ({
+        value: selectionMode,
+        label: PLAYER_PICK_SELECTION_MODE_LABELS[selectionMode]
+      })),
+      context.readOnly,
+      true
+    )) : type === "boolean-inherit" ? fieldRow(label, `<select data-builder-field="${path}.${key}" data-builder-value-type="boolean-inherit"${disabled(context.readOnly)}>${boolOptions(value[key])}</select>`) : fieldRow(label, textInput(
       `${path}.${key}`,
       key === "protectionRating" ? value.protectionRating ?? value.autoPickThreshold : value[key],
       type,
@@ -32877,46 +32977,6 @@
     });
     return heading;
   }
-  function modeControl(dom, value) {
-    const group = dom.create("div");
-    group.id = "bronze-loop-pick-mode";
-    group.setAttribute?.("role", "group");
-    group.setAttribute?.("aria-label", "Player Pick handling");
-    applyStyles6(group, { display: "flex", gap: "0", minHeight: "30px" });
-    const modes = [
-      ["automatic", "Automatic"],
-      ["review-protected", "Review protected"]
-    ];
-    const buttons = [];
-    const update = (next) => {
-      buttons.forEach((button7) => {
-        const active = button7.dataset.mode === next;
-        button7.setAttribute?.("aria-pressed", active ? "true" : "false");
-        button7.style.background = active ? "#2f6fde" : "#222832";
-        button7.style.borderColor = active ? "#4f8cff" : "#607089";
-      });
-      group.dataset.value = next;
-    };
-    modes.forEach(([mode, label], index) => {
-      const button7 = dom.create("button");
-      button7.type = "button";
-      button7.dataset.mode = mode;
-      button7.textContent = label;
-      button7.setAttribute?.("aria-pressed", mode === value ? "true" : "false");
-      button7.style.minHeight = "30px";
-      button7.style.padding = "0 10px";
-      button7.style.cursor = "pointer";
-      button7.style.color = "#fff";
-      button7.style.border = `1px solid ${mode === value ? "#4f8cff" : "#607089"}`;
-      button7.style.background = mode === value ? "#2f6fde" : "#222832";
-      button7.style.marginLeft = index ? "-1px" : "0";
-      button7.addEventListener("click", () => update(mode));
-      buttons.push(button7);
-      group.appendChild(button7);
-    });
-    group.dataset.value = value;
-    return group;
-  }
   function numberInput(dom, id, value, mode, limits = {}) {
     const input2 = inputStyles2(dom.create("input"), mode);
     input2.id = id;
@@ -32979,7 +33039,17 @@
     const lowRatedGold = numberInput(dom, "bronze-loop-policy-low-rated-gold-max", sbcFodderOptions.lowRatedGoldMaxRating, mode);
     const standardRating = numberInput(dom, "bronze-loop-policy-rating-sbc-max-card", sbcFodderOptions.ratingSbcMaxCardRating, mode);
     const automaticUse = numberInput(dom, "bronze-loop-policy-automatic-use-max", pickOptions.protectionRating, mode);
-    const pickMode = modeControl(dom, pickOptions.autoSelectBelow90 === false ? "review-protected" : "automatic");
+    const pickMode = selectInput2(
+      dom,
+      "bronze-loop-pick-mode",
+      pickOptions.pickSelectionMode,
+      PLAYER_PICK_SELECTION_MODES.map((selectionMode) => [
+        selectionMode,
+        PLAYER_PICK_SELECTION_MODE_LABELS[selectionMode]
+      ]),
+      mode
+    );
+    applyStyles6(pickMode, { width: "min(320px, 100%)" });
     const openPicksAtEnd = checkbox2(
       dom,
       "bronze-loop-policy-pick-open-at-end",
@@ -33090,7 +33160,7 @@
       wideField(dom, "Storage pressure recovery", rollingStorageSinkMode, mode, "Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set"),
       wideField(dom, "Storage pressure SBC", rollingStorageSinkSet, mode, "Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility"),
       sectionTitle(dom, "Player Picks"),
-      field2(dom, "Selection mode", pickMode, mode, "Automatic resolves safe and deterministically ranked Picks; Review protected pauses only when protected choices remain ambiguous"),
+      wideField(dom, "Selection mode", pickMode, mode, "Rating first preserves the existing behavior; Special price first ranks every special card before normal cards and pauses when a high-price duplicate displaces a non-duplicate; Always review specials pauses whenever a special card appears"),
       openPicksAtEnd.label
     );
     const status = dom.create("div");
@@ -33126,7 +33196,7 @@
       }),
       pickOptions: normalizePickRuntimeOptions({
         protectionRating: readNumber(automaticUse, pickOptions.protectionRating),
-        autoSelectBelow90: pickMode.dataset.value !== "review-protected",
+        pickSelectionMode: pickMode.value,
         openPicksAtEnd: openPicksAtEnd.input.checked,
         rollingStorageSinkMode: rollingStorageSinkMode.value,
         rollingStorageSinkSetId: rollingStorageSinkMode.value === "selected" ? readNumber(rollingStorageSinkSet, 0) : null,
@@ -33170,6 +33240,7 @@
         lowRatedGold,
         standardRating,
         automaticUse,
+        pickMode,
         rollingProvisionsMaxRating,
         rollingShortageProvisionsPackLimit,
         rollingSurplusCrafting.input,
@@ -44319,7 +44390,7 @@
         log("Player Pick scan: scanned metadata preference disabled; configured Pick Loops reverted to static fallback");
       }
       const storageSink = options.rollingStorageSinkMode === "selected" ? `selected Set #${options.rollingStorageSinkSetId} ${options.rollingStorageSinkSetName || ""}`.trim() : options.rollingStorageSinkMode;
-      log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.autoSelectBelow90 ? "Automatic" : "Review protected"}${options.openPicksAtEnd ? "; open Picks at end" : ""}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? "immediate" : "on shortage"}; Storage pressure SBC ${storageSink}`);
+      log(`Pick/Rolling policy updated: automatic-use rating <= ${options.protectionRating}; Pick mode ${options.pickSelectionMode}${options.openPicksAtEnd ? "; open Picks at end" : ""}; Provisions reserve 87-${options.rollingProvisionsMaxRating}; shortage Provisions batch ${options.rollingShortageProvisionsPackLimit}; surplus Provisions/TOTW ${options.rollingSurplusCraftingEnabled ? "enabled" : "off"}; Provisions shortage recovery ${options.rollingProvisionsShortageRecoveryEnabled ? "allowed" : "off"}; Required Special/TOTW recovery ${options.rollingRequiredSpecialRecoveryEnabled ? "allowed" : "off"}; Club non-TOTW specials ${options.rollingProtectAllClubNonTotwSpecials ? "protected" : "last-resort fallback"}; duplicate Provisions rewards ${options.rollingOpenDuplicateProvisionsRewards ? "immediate" : "on shortage"}; Storage pressure SBC ${storageSink}`);
       renderCurrentSelectionPolicySummary();
       return options;
     }
@@ -46222,11 +46293,12 @@
       if (choices.length < pickCount) fail2(`${loopDef.name}: Player Pick returned ${choices.length} candidate(s) for ${pickCount} selection(s)`);
       const maxRating = Math.max(0, ...choices.map((item) => Number(item?.rating || 0)));
       const autoPickThreshold = Math.max(1, Math.min(99, Number(loopDef.autoPickRatingThreshold || 90) || 90));
+      const pickSelectionMode = loopDef.pickSelectionMode || (loopDef.autoSelectBelow90 === false ? "rating-review" : "rating-auto");
       const autoSelectWithinProtection = shouldAutoSelectPlayerPick(maxRating, {
         autoSelectBelow90: loopDef.autoSelectBelow90,
         protectionRating: autoPickThreshold
       });
-      if (autoSelectWithinProtection) {
+      if (autoSelectWithinProtection && pickSelectionMode === "rating-auto") {
         log(`${loopDef.name}: all candidates are within the automatic-use rating ${autoPickThreshold} (max ${maxRating}); keeping automatic selection while loading prices for the recap`);
       }
       await refreshInventoryCaches(`${loopDef.name} Player Pick duplicate check`, { includePacks: false, quiet: true });
@@ -46236,9 +46308,15 @@
         isDuplicate: isPlayerPickDuplicate,
         isRare: isPlayerPickRare
       };
-      const ranked = rankPlayerPickCandidates(choices, prices, pickRewardOptions);
+      const selectionPlan = planPlayerPickSelection(choices, prices, {
+        ...pickRewardOptions,
+        pickCount,
+        selectionMode: pickSelectionMode,
+        autoSelectWithinProtection
+      });
+      const ranked = selectionPlan.ranked;
       ranked.forEach((candidate, index) => log(`${loopDef.name}: pick candidate ${index + 1}/${ranked.length} ${describePlayerPickCandidate(candidate)}`));
-      const manualReason = autoSelectWithinProtection ? "" : getManualPlayerPickReason(ranked, pickCount);
+      const manualReason = selectionPlan.manualReason;
       const selected2 = manualReason ? await waitForManualPlayerPickSelection({
         dom: adapters.dom,
         ranked,
@@ -46248,7 +46326,7 @@
         scheduleStopCheck: setInterval,
         cancelStopCheck: clearInterval,
         isStopping: () => state.stopping
-      }) : ranked.slice(0, pickCount).map((candidate) => candidate.item);
+      }) : selectionPlan.selected.map((candidate) => candidate.item);
       const selectedCards = capturePlayerPickSelections(selected2, ranked, pickRewardOptions);
       if (manualReason) log(`${loopDef.name}: manual Player Pick confirmed`);
       else log(`${loopDef.name}: auto-selected ${selected2.map((item) => itemDisplayName(item)).join(", ")}`);
@@ -47734,7 +47812,10 @@
         ratingSbcMaxCardRating: Number.isFinite(maxRating) && maxRating > 0 ? maxRating : rollingProtectionRating(parentLoopDef)
       };
       result.dryRun = parentLoopDef.dryRun === true;
-      result.autoSelectBelow90 = parentLoopDef.autoSelectBelow90 !== false;
+      const parentPickOptions = parentLoopDef.runtimePickOptions || {};
+      const parentAutoSelect = parentPickOptions.autoSelectBelow90 ?? parentLoopDef.autoSelectBelow90;
+      result.autoSelectBelow90 = parentAutoSelect !== false;
+      result.pickSelectionMode = parentPickOptions.pickSelectionMode || parentLoopDef.pickSelectionMode || (result.autoSelectBelow90 ? "rating-auto" : "rating-review");
       result.autoPickRatingThreshold = rollingProtectionRating(parentLoopDef);
       result.maxCompletions = 1;
       result.openRewardPacks = false;

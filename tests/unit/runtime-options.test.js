@@ -22,6 +22,7 @@ describe('loop runtime option projection', () => {
   it('normalizes Pick redemption controls without material-protection fields', () => {
     expect(normalizePickRuntimeOptions()).toEqual({
       autoSelectBelow90: true,
+      pickSelectionMode: 'rating-auto',
       preferScannedMetadata: false,
       openPicksAtEnd: false,
       rollingStorageSinkEnabled: false,
@@ -46,6 +47,7 @@ describe('loop runtime option projection', () => {
       autoPickThreshold: 0,
     })).toEqual({
       autoSelectBelow90: false,
+      pickSelectionMode: 'rating-review',
       preferScannedMetadata: true,
       openPicksAtEnd: true,
       rollingStorageSinkEnabled: false,
@@ -72,6 +74,7 @@ describe('loop runtime option projection', () => {
     applyPickRuntimeOptions(loopDef, {
       protectHighGold: true,
       autoSelectBelow90: false,
+      pickSelectionMode: 'rating-review',
       openPicksAtEnd: true,
       highGoldThreshold: 84,
       protectionRating: 91,
@@ -284,6 +287,23 @@ describe('loop runtime option projection', () => {
       { autoPickThreshold: 91 },
       { pickOptions: { protectionRating: 94 } },
     )).toMatchObject({ protectionRating: 94 });
+  });
+
+  it('lets an explicit Pick selection mode override the legacy boolean', () => {
+    expect(normalizePickRuntimeOptions({
+      autoSelectBelow90: false,
+      pickSelectionMode: 'special-price',
+    })).toMatchObject({
+      autoSelectBelow90: true,
+      pickSelectionMode: 'special-price',
+    });
+    expect(resolvePickRuntimeOptions(
+      { pickSelectionMode: 'special-price' },
+      { pickOptions: { autoSelectBelow90: false } },
+    )).toMatchObject({
+      autoSelectBelow90: false,
+      pickSelectionMode: 'rating-review',
+    });
   });
 
   it('keeps the Rolling Storage sink opt-in across global and Loop overrides', () => {

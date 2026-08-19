@@ -3,6 +3,26 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.19] - 2026-08-19
+
+### Added
+
+- Added four Player Pick selection strategies: rating-first automatic,
+  rating-first protected review, special-card price-first, and manual review
+  whenever a special card appears.
+- Added the same strategy selector to Selection Policy and Loop Builder, with
+  migration from the legacy automatic-selection boolean.
+
+### Safety
+
+- Special price-first selection always ranks special cards before normal cards
+  and pauses when a higher-priced duplicate special would displace a
+  non-duplicate special, or when missing prices make a limited choice
+  ambiguous.
+- Applied the selected strategy consistently to ordinary, Provisions, Rolling,
+  and Storage-pressure Player Picks, with regression coverage for legacy
+  rating-first behavior.
+
 ## [0.8.18] - 2026-08-19
 
 ### Fixed

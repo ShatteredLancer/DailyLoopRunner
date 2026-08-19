@@ -311,7 +311,7 @@ export function mainPanelHtml(maxRounds = 3, version = '') {
         </div>
         <div class="row" id="bronze-loop-selection-policy-row">
           <span class="bronze-loop-option-summary">Selection policy</span>
-          <span id="bronze-loop-selection-policy-summary" class="bronze-loop-option-summary">SBC <=88 | Safe <=90 | Picks Auto</span>
+          <span id="bronze-loop-selection-policy-summary" class="bronze-loop-option-summary">SBC <=88 | Safe <=90 | Picks Rating first</span>
           <button id="bronze-loop-selection-policy-settings" title="Configure SBC, Rolling, and Player Pick selection policy">Settings</button>
         </div>
         <div class="row" id="bronze-loop-reward-alert-row">
