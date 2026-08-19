@@ -3,6 +3,15 @@
 All notable user-facing changes are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.21] - 2026-08-19
+
+### Fixed
+
+- Recap rows now reserve the flexible primary column for the player name.
+  Long reward-pack/source labels and metadata can truncate instead of forcing
+  the name to disappear early; all three keep their full text in a hover
+  title.
+
 ## [0.8.19] - 2026-08-19
 
 ### Added

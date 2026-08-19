@@ -120,6 +120,16 @@ describe('Player Pick recap UI', () => {
     expect(harness.created.find((element) => element.textContent === 'stopped: stopped by user')).toBeTruthy();
     expect(harness.created.find((element) => element.textContent.includes('price:80K'))).toBeTruthy();
     expect(harness.created.find((element) => element.textContent === '->CLUB')).toBeTruthy();
+    const playerName = harness.created.find((element) => element.textContent === 'Player B');
+    expect(playerName).toMatchObject({
+      title: 'Player B',
+      style: expect.objectContaining({ flex: '1 1 150px' }),
+    });
+    const sourceLabel = harness.created.find((element) => element.textContent === 'P2');
+    expect(sourceLabel).toMatchObject({
+      title: 'P2',
+      style: expect.objectContaining({ flex: '0 1 170px', textOverflow: 'ellipsis' }),
+    });
     const futbin = harness.created.find((element) => element.tagName === 'a' && element.textContent === 'FUTBIN');
     expect(futbin).toMatchObject({
       href: 'https://www.futbin.com/26/player/16453/1',

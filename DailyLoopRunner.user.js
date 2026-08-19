@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.20
+// @version      0.8.21
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.20",
+    version: "0.8.21",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -32163,7 +32163,7 @@
     });
     const identity = dom.create("span");
     applyStyles3(identity, {
-      flex: "1 1 220px",
+      flex: "1 1 280px",
       minWidth: "0",
       display: "flex",
       gap: "6px",
@@ -32172,8 +32172,10 @@
     });
     const name = dom.create("span");
     name.textContent = String(row.name || "Unknown player");
+    name.title = name.textContent;
     applyStyles3(name, {
       fontWeight: "600",
+      flex: "1 1 150px",
       minWidth: "0",
       overflow: "hidden",
       textOverflow: "ellipsis",
@@ -32183,7 +32185,17 @@
     if (row.sourceLabel) {
       const source = dom.create("span");
       source.textContent = row.sourceLabel;
-      applyStyles3(source, { color: theme.muted || "#AAB4C2", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
+      source.title = source.textContent;
+      applyStyles3(source, {
+        color: theme.muted || "#AAB4C2",
+        fontSize: "11px",
+        fontWeight: "600",
+        flex: "0 1 170px",
+        minWidth: "0",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      });
       identity.appendChild(source);
     }
     element.append(rating, identity);
@@ -32195,10 +32207,12 @@
     }
     const tags = dom.create("span");
     tags.textContent = rowTags(row, formatPrice);
+    tags.title = tags.textContent;
     applyStyles3(tags, {
       color: theme.muted || "#AAB4C2",
       fontSize: "11px",
-      flex: "0 1 auto",
+      flex: "0 1 320px",
+      minWidth: "0",
       maxWidth: "100%",
       whiteSpace: "nowrap",
       overflow: "hidden",
