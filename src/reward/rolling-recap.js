@@ -1,5 +1,8 @@
 import {
+  createReceiptDestinationResolver,
   createRecapModel,
+  hydrateRecapItem,
+  recapItemDisplayName,
   recapCardTypeLabel,
   resolveRecapCardTheme,
 } from './recap.js';
@@ -23,10 +26,6 @@ function boundedInteger(value, fallback = 0) {
 function boundedRating(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(99, Math.floor(number))) : 0;
-}
-
-function displayName(item = {}) {
-  return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || 'Unknown player');
 }
 
 function tier(item, rating) {
@@ -81,21 +80,23 @@ function normalizePrices(value) {
 }
 
 function buildCardSummary(item, sequence, context = {}) {
-  const rating = boundedRating(item?.rating);
-  const special = context.assumeSpecialPlayers === true || isSpecialPlayerCard(item);
-  const rare = special || isRarePlayerCard(item);
+  const recapItem = hydrateRecapItem(item, context.hydrateItem);
+  const rating = boundedRating(recapItem?.rating);
+  const special = context.assumeSpecialPlayers === true || isSpecialPlayerCard(recapItem);
+  const rare = special || isRarePlayerCard(recapItem);
   return {
-    id: boundedInteger(item?.id),
-    definitionId: boundedInteger(item?.definitionId),
-    name: displayName(item),
+    id: boundedInteger(recapItem?.id),
+    definitionId: boundedInteger(recapItem?.definitionId),
+    name: recapItemDisplayName(recapItem),
     rating,
-    tier: tier(item, rating),
+    tier: tier(recapItem, rating),
     rare,
     special,
-    duplicate: item?.duplicate === true || boundedInteger(item?.duplicateId) > 0,
-    tradeable: item?.tradeable === true,
+    duplicate: recapItem?.duplicate === true || boundedInteger(recapItem?.duplicateId) > 0,
+    tradeable: recapItem?.tradeable === true,
+    destination: context.resolveDestination?.(context.originalItem || item) || context.destination || null,
     sourceLabel: String(context.sourceLabel || '').trim() || null,
-    nativeTheme: safeNativeTheme(context.resolveNativeTheme?.(item)),
+    nativeTheme: safeNativeTheme(context.resolveNativeTheme?.(recapItem)),
     sequence,
   };
 }
@@ -145,11 +146,14 @@ export function createRollingRecapAggregator(options = {}) {
   function recordItems(items = [], context = {}) {
     for (const item of items || []) {
       stats.itemCount++;
-      if (!isPlayer(item)) continue;
+      const recapItem = hydrateRecapItem(item, context.hydrateItem || options.hydrateItem);
+      if (!isPlayer(recapItem)) continue;
       stats.playerCount++;
-      const card = buildCardSummary(item, ++sequence, {
+      const card = buildCardSummary(recapItem, ++sequence, {
         ...context,
+        originalItem: item,
         resolveNativeTheme: options.resolveNativeTheme,
+        hydrateItem: null,
       });
       if (card.special) stats.types.special++;
       else if (card.rare) stats.types.rare++;
@@ -170,9 +174,12 @@ export function createRollingRecapAggregator(options = {}) {
     stats.packsOpened++;
     stats.duplicateRoutes.storage += (receipt.routedItemRefs || [])
       .filter((ref) => String(ref?.pile || '').toLowerCase() === 'storage').length;
+    const resolveReceiptDestination = createReceiptDestinationResolver(receipt);
     return recordItems(receipt.openedItems || [], {
       sourceLabel: receipt.packRef?.name || context.sourceLabel,
       assumeSpecialPlayers: receipt.details?.assumeTotwReward === true || context.assumeSpecialPlayers === true,
+      hydrateItem: context.hydrateItem,
+      resolveDestination: (item) => context.resolveDestination?.(item) || resolveReceiptDestination(item),
     });
   }
 
@@ -251,21 +258,23 @@ function formatRatings(ratings = {}) {
 function buildRows(snapshot, input = {}) {
   const prices = normalizePrices(input.prices);
   return snapshot.retainedCards.map((card, index) => {
+    const recapCard = hydrateRecapItem(card, input.hydrateItem);
     const row = {
-      name: card.name,
+      name: recapItemDisplayName(recapCard),
       rating: card.rating,
       tier: card.tier,
       rare: card.rare,
       special: card.special,
       duplicate: card.duplicate,
       tradeable: card.tradeable,
+      destination: input.resolveDestination?.(recapCard) || card.destination,
       sourceLabel: card.sourceLabel,
       price: card.special ? prices.get(card.definitionId) || null : null,
       showPrice: card.special,
-      futbinPlayerId: input.resolveFutbinPlayerId?.(card) ?? null,
+      futbinPlayerId: input.resolveFutbinPlayerId?.(recapCard) ?? null,
       order: index,
     };
-    row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(card) || card.nativeTheme);
+    row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(recapCard) || card.nativeTheme);
     row.tierLabel = recapCardTypeLabel(row, row.theme);
     return row;
   });

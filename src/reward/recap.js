@@ -1,5 +1,7 @@
 export const RECAP_PAGE_SIZE = 15;
 
+const RECAP_DESTINATIONS = new Set(['club', 'storage', 'transfer', 'unassigned', 'blocked', 'unknown']);
+
 const BASE_BACKGROUND = '#171B21';
 const DEFAULT_FOREGROUND = '#F4F6F8';
 const DEFAULT_MUTED = '#AAB4C2';
@@ -9,6 +11,104 @@ export function createFutbinPlayerUrl(futbinPlayerId, season = 26) {
   const year = Number(season);
   if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(year) || year < 20 || year > 99) return null;
   return `https://www.futbin.com/${year}/player/${id}/1`;
+}
+
+function nonEmptyText(value) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+function playerNameText(value) {
+  const text = nonEmptyText(value);
+  return text && !/^\d+$/.test(text) ? text : null;
+}
+
+export function recapItemDisplayName(item = {}) {
+  const staticData = item?._staticData || {};
+  const names = [
+    [item?.firstName, item?.lastName].map(playerNameText).filter(Boolean).join(' '),
+    item?.name,
+    item?.commonName,
+    item?.lastName,
+    [staticData.firstName, staticData.lastName].map(playerNameText).filter(Boolean).join(' '),
+    staticData.name,
+    staticData.commonName,
+    staticData.lastName,
+  ];
+  return playerNameText(names.find((value) => playerNameText(value)))
+    || nonEmptyText(item?.definitionId)
+    || nonEmptyText(item?.id)
+    || 'Unknown player';
+}
+
+export function hydrateRecapItem(item = {}, hydrateItem = null) {
+  if (typeof hydrateItem !== 'function') return item;
+  const hydrated = hydrateItem(item);
+  if (!hydrated || typeof hydrated !== 'object' || hydrated === item) return item;
+  return hydrated;
+}
+
+export function compactRecapSourceLabel(value, maxLength = 24) {
+  const source = nonEmptyText(value)?.replace(/\s+/g, ' ');
+  if (!source) return null;
+  if (/provisions/i.test(source) && /pack/i.test(source)) return 'Provisions';
+
+  const pick = source.match(/(?:(\d+)\s+of\s+(\d+)\s+)?(\d{2})\+.*(?:player\s+)?pick/i);
+  if (pick) return `${pick[1] && pick[2] ? `${pick[1]}/${pick[2]} ` : ''}${pick[3]}+ Pick`;
+
+  const countRating = source.match(/(\d+)\s*x\s*(\d{2})\+/i);
+  if (countRating) return `${countRating[1]}x${countRating[2]}+`;
+
+  const compact = source
+    .replace(/\s+Players?\s+Pack$/i, '')
+    .replace(/\s+Pack$/i, '')
+    .replace(/^Repeatable\s+/i, '')
+    .trim();
+  const limit = Math.max(8, Number(maxLength) || 24);
+  return compact.length > limit ? `${compact.slice(0, limit - 3).trimEnd()}...` : compact;
+}
+
+function recapItemId(value = {}) {
+  const id = Number(value?.id || value?.ref?.id || 0);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function recapDefinitionId(value = {}) {
+  const definitionId = Number(value?.definitionId || value?.ref?.definitionId || 0);
+  return Number.isInteger(definitionId) && definitionId > 0 ? definitionId : null;
+}
+
+function recapDestination(value, fallback = 'unknown') {
+  const destination = String(value || '').toLowerCase();
+  return RECAP_DESTINATIONS.has(destination) ? destination : fallback;
+}
+
+export function createReceiptDestinationResolver(receipt = {}) {
+  const byItemId = new Map();
+  const byDefinitionId = new Map();
+  const refs = [
+    ...(receipt.routedItemRefs || []).map((ref) => ({ ref, destination: recapDestination(ref?.pile) })),
+    ...(receipt.reservedItemRefs || []).map((ref) => ({ ref, destination: 'unassigned' })),
+    ...(receipt.pendingItemRefs || []).map((ref) => ({ ref, destination: 'unassigned' })),
+  ];
+  for (const entry of refs) {
+    const id = recapItemId(entry.ref);
+    const definitionId = recapDefinitionId(entry.ref);
+    if (id && !byItemId.has(id)) byItemId.set(id, entry.destination);
+    if (definitionId) {
+      const destinations = byDefinitionId.get(definitionId) || [];
+      destinations.push(entry.destination);
+      byDefinitionId.set(definitionId, destinations);
+    }
+  }
+  return (item = {}) => {
+    const id = recapItemId(item);
+    if (id && byItemId.has(id)) return byItemId.get(id);
+    const definitionDestinations = byDefinitionId.get(recapDefinitionId(item)) || [];
+    if (definitionDestinations.length === 1) return definitionDestinations[0];
+    return recapDestination(item?.pile || item?.ref?.pile, 'unassigned');
+  };
 }
 
 export const RECAP_TIER_COLORS = Object.freeze({
@@ -157,6 +257,8 @@ export function resolveRecapCardTheme(card = {}, nativeTheme = null) {
 export function createRecapModel(input = {}) {
   const rows = (input.rows || []).map((row, index) => Object.freeze({
     ...row,
+    sourceTitle: row.sourceTitle || row.sourceLabel || null,
+    sourceLabel: compactRecapSourceLabel(row.sourceLabel),
     futbinUrl: row.futbinUrl || createFutbinPlayerUrl(row.futbinPlayerId, input.futbinSeason),
     order: Number(row.order ?? index),
   }));

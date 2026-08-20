@@ -61,4 +61,25 @@ describe('Batch Open recap model', () => {
     expect(model.specialCount).toBeGreaterThan(2);
     expect(model.rows[0].rating).toBe(99);
   });
+
+  it('hydrates lightweight pack entities and projects receipt destinations', () => {
+    const model = createBatchOpenRecapModel({
+      receipts: [{
+        status: 'opened',
+        packRef: { name: '10x 85+ Rare Gold Players Pack' },
+        openedItems: [
+          { id: 41, definitionId: 401, rating: 96, rareflag: 7 },
+          { id: 42, definitionId: 402, type: 'player', rating: 88, rareflag: 1 },
+        ],
+        routedItemRefs: [{ id: 41, definitionId: 401, pile: 'transfer' }],
+        reservedItemRefs: [{ id: 42, definitionId: 402, pile: 'unassigned' }],
+      }],
+      hydrateItem: (item) => item.id === 41
+        ? { ...item, type: 'player', _staticData: { commonName: 'Hydrated Star' } }
+        : item,
+    });
+    expect(model).toMatchObject({ qualifyingCount: 2, hasQualifyingCards: true });
+    expect(model.rows[0]).toMatchObject({ name: 'Hydrated Star', destination: 'transfer', sourceLabel: '10x85+' });
+    expect(model.rows[1]).toMatchObject({ destination: 'unassigned' });
+  });
 });

@@ -19,13 +19,18 @@ describe('background submit retry helpers', () => {
     expect(shouldStopForProtectedItemViolation({ protectionEnabled: true, result: conflict })).toBe(true);
   });
 
-  it('recognizes bare and embedded 409/429 codes', () => {
+  it('recognizes conflicts, rate limits, and transient EA service codes', () => {
     expect(normalizeSubmitErrorCode(409)).toBe('409');
     expect(normalizeSubmitErrorCode('429')).toBe('429');
     expect(normalizeSubmitErrorCode('background submit failed: 409')).toBe('409');
+    expect(normalizeSubmitErrorCode('background submit failed: 512')).toBe('512');
     expect(isRetryableBackgroundSubmitError('409')).toBe(true);
     expect(isRetryableBackgroundSubmitError('429')).toBe(true);
+    expect(isRetryableBackgroundSubmitError('426')).toBe(true);
+    expect(isRetryableBackgroundSubmitError('512')).toBe(true);
+    expect(isRetryableBackgroundSubmitError('521')).toBe(true);
     expect(isRetryableBackgroundSubmitError('500')).toBe(false);
+    expect(isRetryableBackgroundSubmitError('471')).toBe(false);
     expect(isRetryableBackgroundSubmitError('unknown')).toBe(false);
   });
 
@@ -39,6 +44,11 @@ describe('background submit retry helpers', () => {
       retry: true,
       delayMs: 1800,
       reason: '429',
+    });
+    expect(planBackgroundSubmitRetry({ attempt: 1, maxAttempts: 3, detail: '512', baseDelayMs: 800 })).toEqual({
+      retry: true,
+      delayMs: 1300,
+      reason: '512',
     });
     expect(planBackgroundSubmitRetry({ attempt: 3, maxAttempts: 3, detail: '409', baseDelayMs: 800 })).toEqual({
       retry: false,

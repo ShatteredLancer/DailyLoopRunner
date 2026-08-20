@@ -3870,7 +3870,12 @@ function updateLoopControls() {
   function recordLoopPackReceipt(receipt, sourceLabel = null) {
     if (!state.loopRecapSession || receipt?.status !== 'opened') return;
     if (state.loopRecapSession.rollingAggregator) {
-      state.loopRecapSession.rollingAggregator.recordPackReceipt(receipt, { sourceLabel });
+      const hydrateItem = createRecapItemHydrator();
+      state.loopRecapSession.rollingAggregator.recordPackReceipt(receipt, {
+        sourceLabel,
+        hydrateItem,
+        resolveDestination: hydrateItem.resolveDestination,
+      });
       return;
     }
     state.loopRecapSession.receipts.push(receipt);
@@ -11781,28 +11786,46 @@ function updateLoopControls() {
     return Number.isInteger(definitionId) && definitionId > 0 ? definitionId : null;
   }
 
-  function createRecapFutbinItemHydrator() {
+  function createRecapItemHydrator() {
     const byItemId = new Map();
     const byDefinitionId = new Map();
+    const destinationByItemId = new Map();
+    const destinationsByDefinitionId = new Map();
     ['storage', 'club', 'unassigned', 'transfer'].forEach((pileName) => {
       getPileItemsByName(pileName).forEach((item) => {
         const itemId = Number(item?.id || 0);
         const definitionId = recapDefinitionId(item);
-        if (Number.isInteger(itemId) && itemId > 0 && !byItemId.has(itemId)) byItemId.set(itemId, item);
-        if (definitionId && !byDefinitionId.has(definitionId)) byDefinitionId.set(definitionId, item);
+        if (Number.isInteger(itemId) && itemId > 0 && !byItemId.has(itemId)) {
+          byItemId.set(itemId, item);
+          destinationByItemId.set(itemId, pileName);
+        }
+        if (definitionId) {
+          if (!byDefinitionId.has(definitionId)) byDefinitionId.set(definitionId, item);
+          const destinations = destinationsByDefinitionId.get(definitionId) || new Set();
+          destinations.add(pileName);
+          destinationsByDefinitionId.set(definitionId, destinations);
+        }
       });
     });
-    return (item) => {
+    const hydrateItem = (item) => {
       const itemId = Number(item?.id || 0);
       if (Number.isInteger(itemId) && itemId > 0 && byItemId.has(itemId)) return byItemId.get(itemId);
       return byDefinitionId.get(recapDefinitionId(item)) || item;
     };
+    hydrateItem.resolveDestination = (item) => {
+      const itemId = Number(item?.id || 0);
+      if (Number.isInteger(itemId) && itemId > 0 && destinationByItemId.has(itemId)) {
+        return destinationByItemId.get(itemId);
+      }
+      const destinations = [...(destinationsByDefinitionId.get(recapDefinitionId(item)) || [])];
+      return destinations.length === 1 ? destinations[0] : null;
+    };
+    return hydrateItem;
   }
 
-  async function resolveRecapFutbinPlayerIds(items, label) {
+  async function resolveRecapFutbinPlayerIds(items, label, hydrateItem = createRecapItemHydrator()) {
     const fsu = fsuAdapter();
     // Pack receipts can omit metadata that FSU keeps on the current inventory entity.
-    const hydrateItem = createRecapFutbinItemHydrator();
     const resolved = await resolveFutbinCardIds({
       items,
       cache: adapters.userscriptStorage.get(FUTBIN_CARD_ID_CACHE_KEY, null),
@@ -11832,9 +11855,11 @@ function updateLoopControls() {
   async function showPickRecapModal(loopDef, pickResults, result = {}) {
     if (state.loopRecapSession) state.loopRecapSession.dedicatedRecap = true;
     const pickedCards = (pickResults || []).flatMap((entry) => entry?.pickedCards || []);
+    const hydrateItem = createRecapItemHydrator();
     const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(
       pickedCards.map((card) => card.item),
       `${loopDef?.name || 'Player Pick'} recap`,
+      hydrateItem,
     );
     return showPlayerPickRecap({
       dom: adapters.dom,
@@ -11843,6 +11868,8 @@ function updateLoopControls() {
       status: result.status,
       reason: result.reason,
       itemDisplayName,
+      hydrateItem,
+      resolveDestination: hydrateItem.resolveDestination,
       resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
       resolveFutbinPlayerId,
       formatPrice: formatCompactPrice,
@@ -11983,12 +12010,15 @@ function updateLoopControls() {
           finalResources: rollingFinalResources(runResult || {}),
         });
         const retainedCards = snapshot.retainedCards || [];
+        const hydrateItem = createRecapItemHydrator();
         const prices = await getSpecialCardPrices(retainedCards, `${session.name} recap`);
-        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(retainedCards, `${session.name} recap`);
+        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(retainedCards, `${session.name} recap`, hydrateItem);
         const model = createRollingRecapModel({
           name: session.name,
           snapshot,
           prices,
+          hydrateItem,
+          resolveDestination: hydrateItem.resolveDestination,
           resolveFutbinPlayerId,
         });
         state.lastLoopRecap = { name: session.name, model, completedAt: Date.now() };
@@ -12008,14 +12038,17 @@ function updateLoopControls() {
       return null;
     }
     try {
+      const hydrateItem = createRecapItemHydrator();
       const prices = await getSpecialCardPrices(openedItems, `${session.name} recap`);
-      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(openedItems, `${session.name} recap`);
+      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(openedItems, `${session.name} recap`, hydrateItem);
       const model = createLoopRecapModel({
         name: session.name,
         receipts: session.receipts,
         status,
         reason,
         prices,
+        hydrateItem,
+        resolveDestination: hydrateItem.resolveDestination,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
         resolveFutbinPlayerId,
       });
@@ -12106,10 +12139,13 @@ function updateLoopControls() {
         },
       });
       const prices = await getSpecialCardPrices(result.openedItems, 'Batch Open');
-      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result.openedItems, 'Batch Open recap');
+      const hydrateItem = createRecapItemHydrator();
+      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result.openedItems, 'Batch Open recap', hydrateItem);
       recapModel = createBatchOpenRecapModel({
         ...result,
         prices,
+        hydrateItem,
+        resolveDestination: hydrateItem.resolveDestination,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
         resolveFutbinPlayerId,
       });
@@ -12128,12 +12164,15 @@ function updateLoopControls() {
       console.error(CONSOLE_PREFIX, error);
       const fallbackPlan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
       const requestedPacks = fallbackPlan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
-      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result?.openedItems || [], 'Batch Open recap');
+      const hydrateItem = createRecapItemHydrator();
+      const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result?.openedItems || [], 'Batch Open recap', hydrateItem);
       recapModel = createBatchOpenRecapModel({
         ...(result || {}),
         requestedPacks: result?.requestedPacks ?? requestedPacks,
         status: 'blocked',
         reason: error?.message || error,
+        hydrateItem,
+        resolveDestination: hydrateItem.resolveDestination,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
         resolveFutbinPlayerId,
       });
@@ -13915,7 +13954,14 @@ function updateLoopControls() {
     recoveryAction = 'playerPick',
   ) {
     const items = (pickedCards || []).map((card) => card.item || card);
-    recordRollingRecapItems(items, { sourceLabel: pickDef.name });
+    const hydrateItem = createRecapItemHydrator();
+    for (const card of pickedCards || []) {
+      recordRollingRecapItems([card.item || card], {
+        sourceLabel: pickDef.name,
+        destination: card.destination || 'unknown',
+        hydrateItem,
+      });
+    }
     recordRollingRecapRecovery(recoveryAction, { duplicatesConsumed });
     publishPackHighlight(items, {
       packRef: {

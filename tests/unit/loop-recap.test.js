@@ -37,7 +37,13 @@ describe('generic Loop recap', () => {
       name: 'Daily Rare',
       status: 'stopped',
       reason: 'stopped by user',
-      receipts: [{ status: 'opened', packRef: { name: 'Rare Gold Pack' }, openedItems: [special, rareGold] }],
+      receipts: [{
+        status: 'opened',
+        packRef: { name: 'Rare Gold Pack' },
+        openedItems: [special, rareGold],
+        routedItemRefs: [{ id: 2, definitionId: 202, pile: 'club' }],
+        reservedItemRefs: [{ id: 3, definitionId: 303, pile: 'unassigned' }],
+      }],
       prices: new Map([[202, 125000]]),
       resolveFutbinPlayerId: (openedItem) => openedItem.definitionId === 202 ? 16453 : null,
     });
@@ -46,8 +52,19 @@ describe('generic Loop recap', () => {
       packsOpened: 1, itemCount: 2, qualifyingCount: 2, hasQualifyingCards: true,
     });
     expect(model.rows).toHaveLength(2);
-    expect(model.rows[0]).toMatchObject({ name: 'Special Player', price: 125000, sourceLabel: 'Rare Gold Pack' });
+    expect(model.rows[0]).toMatchObject({
+      name: 'Special Player',
+      price: 125000,
+      sourceLabel: 'Rare Gold',
+      sourceTitle: 'Rare Gold Pack',
+      destination: 'club',
+    });
     expect(model.rows[0].futbinUrl).toBe('https://www.futbin.com/26/player/16453/1');
-    expect(model.rows[1]).toMatchObject({ name: 'Rare Gold Player', showPrice: false, tierLabel: 'Rare Gold' });
+    expect(model.rows[1]).toMatchObject({
+      name: 'Rare Gold Player',
+      showPrice: false,
+      tierLabel: 'Rare Gold',
+      destination: 'unassigned',
+    });
   });
 });

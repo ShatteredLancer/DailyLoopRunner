@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  compactRecapSourceLabel,
   RECAP_TIER_COLORS,
   createFutbinPlayerUrl,
   createRecapModel,
@@ -15,6 +16,12 @@ function rows(count) {
 }
 
 describe('shared recap model and tier themes', () => {
+  it('compacts common pack and Pick source labels without losing unknown short labels', () => {
+    expect(compactRecapSourceLabel('10x 85+ Rare Gold Players Pack')).toBe('10x85+');
+    expect(compactRecapSourceLabel('1 of 3 94+ GOTG Player Pick')).toBe('1/3 94+ Pick');
+    expect(compactRecapSourceLabel('Repeatable FUTTIES Provisions Players Pack')).toBe('Provisions');
+    expect(compactRecapSourceLabel('P2')).toBe('P2');
+  });
   it('builds a direct FUTBIN player URL from a confirmed card ID and preserves an explicit recap URL', () => {
     expect(createFutbinPlayerUrl(16453)).toBe('https://www.futbin.com/26/player/16453/1');
     expect(createFutbinPlayerUrl('')).toBeNull();

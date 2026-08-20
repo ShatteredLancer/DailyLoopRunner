@@ -1,4 +1,11 @@
-import { createRecapModel, recapCardTypeLabel, resolveRecapCardTheme } from './recap.js';
+import {
+  createReceiptDestinationResolver,
+  createRecapModel,
+  hydrateRecapItem,
+  recapCardTypeLabel,
+  recapItemDisplayName,
+  resolveRecapCardTheme,
+} from './recap.js';
 import {
   isRecapPlayer,
   isRecapRareGoldOrAbove,
@@ -7,13 +14,23 @@ import {
 } from './loop-recap.js';
 import { isRarePlayerCard } from '../domain/player-rarity.js';
 
-function itemName(item = {}) {
-  return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || 'Unknown player');
-}
-
 export function createBatchOpenRecapModel(input = {}) {
   const receipts = input.receipts || [];
-  const items = input.openedItems || receipts.flatMap((receipt) => receipt?.openedItems || []);
+  const entries = receipts.length
+    ? receipts.flatMap((receipt) => {
+        const resolveDestination = createReceiptDestinationResolver(receipt);
+        return (receipt?.openedItems || []).map((item) => ({
+          item,
+          sourceLabel: receipt?.packRef?.name || null,
+          destination: resolveDestination(item),
+        }));
+      })
+    : (input.openedItems || []).map((item) => ({
+        item,
+        sourceLabel: item?.packName || item?.sourceLabel || null,
+        destination: item?.destination || item?.pile || null,
+      }));
+  const items = entries.map(({ item }) => item);
   const prices = input.prices instanceof Map
     ? input.prices
     : new Map(Object.entries(input.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
@@ -22,34 +39,38 @@ export function createBatchOpenRecapModel(input = {}) {
   let normalGoldCount = 0;
   let normalSilverCount = 0;
   let normalBronzeCount = 0;
+  let qualifyingCount = 0;
   const rows = [];
 
-  for (const item of items) {
-    if (!isRecapPlayer(item)) continue;
+  for (const { item, sourceLabel, destination } of entries) {
+    const recapItem = hydrateRecapItem(item, input.hydrateItem);
+    if (!isRecapPlayer(recapItem)) continue;
     playerCount++;
-    const rating = Number(item.rating || 0);
-    const special = isRecapSpecial(item);
-    const tier = recapPlayerTier(item);
-    const rare = isRarePlayerCard(item);
+    const rating = Number(recapItem.rating || 0);
+    const special = isRecapSpecial(recapItem);
+    const tier = recapPlayerTier(recapItem);
+    const rare = isRarePlayerCard(recapItem);
+    if (isRecapRareGoldOrAbove(recapItem)) qualifyingCount++;
     if (special) specialCount++;
     else if (tier === 'gold') normalGoldCount++;
     else if (tier === 'silver') normalSilverCount++;
     else if (tier === 'bronze') normalBronzeCount++;
     const row = {
-      name: itemName(item),
+      name: recapItemDisplayName(recapItem),
       rating,
       tier,
       rare,
       special,
-      duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
-      tradeable: item.tradeable === true,
-      price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
+      duplicate: recapItem.duplicate === true || Number(recapItem.duplicateId || 0) > 0,
+      tradeable: recapItem.tradeable === true,
+      destination: input.resolveDestination?.(item) || destination,
+      price: special ? prices.get(Number(item.definitionId || recapItem.definitionId || 0)) || null : null,
       showPrice: special,
-      sourceLabel: item.packName || item.sourceLabel || null,
-      futbinPlayerId: input.resolveFutbinPlayerId?.(item) ?? null,
+      sourceLabel,
+      futbinPlayerId: input.resolveFutbinPlayerId?.(recapItem) ?? null,
       item,
     };
-    row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(item));
+    row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(recapItem));
     row.tierLabel = recapCardTypeLabel(row, row.theme);
     rows.push(row);
   }
@@ -80,8 +101,8 @@ export function createBatchOpenRecapModel(input = {}) {
     normalBronzeCount,
     groupedPlayerCount: playerCount - specialCount,
     omittedCount,
-    qualifyingCount: items.filter(isRecapRareGoldOrAbove).length,
-    hasQualifyingCards: items.some(isRecapRareGoldOrAbove),
+    qualifyingCount,
+    hasQualifyingCards: qualifyingCount > 0,
   });
 }
 
@@ -111,6 +132,7 @@ export function createBatchOpenRecapPreviewModel(options = {}) {
       tier: sample.rating >= 75 ? 'gold' : sample.rating >= 65 ? 'silver' : 'bronze',
       duplicate: index % 5 === 0,
       tradeable: index % 3 === 0,
+      destination: ['club', 'storage', 'transfer', 'unassigned'][index % 4],
     };
   });
   return createBatchOpenRecapModel({

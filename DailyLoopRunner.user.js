@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.23
+// @version      0.8.24
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.23",
+    version: "0.8.24",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -21443,6 +21443,7 @@
 
   // src/reward/recap.js
   var RECAP_PAGE_SIZE = 15;
+  var RECAP_DESTINATIONS = /* @__PURE__ */ new Set(["club", "storage", "transfer", "unassigned", "blocked", "unknown"]);
   var BASE_BACKGROUND = "#171B21";
   var DEFAULT_FOREGROUND = "#F4F6F8";
   var DEFAULT_MUTED = "#AAB4C2";
@@ -21451,6 +21452,85 @@
     const year = Number(season);
     if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(year) || year < 20 || year > 99) return null;
     return `https://www.futbin.com/${year}/player/${id}/1`;
+  }
+  function nonEmptyText(value) {
+    if (value === void 0 || value === null) return null;
+    const text = String(value).trim();
+    return text || null;
+  }
+  function playerNameText(value) {
+    const text = nonEmptyText(value);
+    return text && !/^\d+$/.test(text) ? text : null;
+  }
+  function recapItemDisplayName(item = {}) {
+    const staticData = item?._staticData || {};
+    const names = [
+      [item?.firstName, item?.lastName].map(playerNameText).filter(Boolean).join(" "),
+      item?.name,
+      item?.commonName,
+      item?.lastName,
+      [staticData.firstName, staticData.lastName].map(playerNameText).filter(Boolean).join(" "),
+      staticData.name,
+      staticData.commonName,
+      staticData.lastName
+    ];
+    return playerNameText(names.find((value) => playerNameText(value))) || nonEmptyText(item?.definitionId) || nonEmptyText(item?.id) || "Unknown player";
+  }
+  function hydrateRecapItem(item = {}, hydrateItem = null) {
+    if (typeof hydrateItem !== "function") return item;
+    const hydrated = hydrateItem(item);
+    if (!hydrated || typeof hydrated !== "object" || hydrated === item) return item;
+    return hydrated;
+  }
+  function compactRecapSourceLabel(value, maxLength = 24) {
+    const source = nonEmptyText(value)?.replace(/\s+/g, " ");
+    if (!source) return null;
+    if (/provisions/i.test(source) && /pack/i.test(source)) return "Provisions";
+    const pick = source.match(/(?:(\d+)\s+of\s+(\d+)\s+)?(\d{2})\+.*(?:player\s+)?pick/i);
+    if (pick) return `${pick[1] && pick[2] ? `${pick[1]}/${pick[2]} ` : ""}${pick[3]}+ Pick`;
+    const countRating = source.match(/(\d+)\s*x\s*(\d{2})\+/i);
+    if (countRating) return `${countRating[1]}x${countRating[2]}+`;
+    const compact = source.replace(/\s+Players?\s+Pack$/i, "").replace(/\s+Pack$/i, "").replace(/^Repeatable\s+/i, "").trim();
+    const limit = Math.max(8, Number(maxLength) || 24);
+    return compact.length > limit ? `${compact.slice(0, limit - 3).trimEnd()}...` : compact;
+  }
+  function recapItemId(value = {}) {
+    const id = Number(value?.id || value?.ref?.id || 0);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  }
+  function recapDefinitionId(value = {}) {
+    const definitionId2 = Number(value?.definitionId || value?.ref?.definitionId || 0);
+    return Number.isInteger(definitionId2) && definitionId2 > 0 ? definitionId2 : null;
+  }
+  function recapDestination(value, fallback = "unknown") {
+    const destination = String(value || "").toLowerCase();
+    return RECAP_DESTINATIONS.has(destination) ? destination : fallback;
+  }
+  function createReceiptDestinationResolver(receipt = {}) {
+    const byItemId = /* @__PURE__ */ new Map();
+    const byDefinitionId = /* @__PURE__ */ new Map();
+    const refs = [
+      ...(receipt.routedItemRefs || []).map((ref) => ({ ref, destination: recapDestination(ref?.pile) })),
+      ...(receipt.reservedItemRefs || []).map((ref) => ({ ref, destination: "unassigned" })),
+      ...(receipt.pendingItemRefs || []).map((ref) => ({ ref, destination: "unassigned" }))
+    ];
+    for (const entry of refs) {
+      const id = recapItemId(entry.ref);
+      const definitionId2 = recapDefinitionId(entry.ref);
+      if (id && !byItemId.has(id)) byItemId.set(id, entry.destination);
+      if (definitionId2) {
+        const destinations = byDefinitionId.get(definitionId2) || [];
+        destinations.push(entry.destination);
+        byDefinitionId.set(definitionId2, destinations);
+      }
+    }
+    return (item = {}) => {
+      const id = recapItemId(item);
+      if (id && byItemId.has(id)) return byItemId.get(id);
+      const definitionDestinations = byDefinitionId.get(recapDefinitionId(item)) || [];
+      if (definitionDestinations.length === 1) return definitionDestinations[0];
+      return recapDestination(item?.pile || item?.ref?.pile, "unassigned");
+    };
   }
   var RECAP_TIER_COLORS = Object.freeze({
     bronze: Object.freeze({ label: "Bronze", accent: "#B7793E", background: "#45281C" }),
@@ -21579,6 +21659,8 @@
   function createRecapModel(input2 = {}) {
     const rows = (input2.rows || []).map((row, index) => Object.freeze({
       ...row,
+      sourceTitle: row.sourceTitle || row.sourceLabel || null,
+      sourceLabel: compactRecapSourceLabel(row.sourceLabel),
       futbinUrl: row.futbinUrl || createFutbinPlayerUrl(row.futbinPlayerId, input2.futbinSeason),
       order: Number(row.order ?? index)
     }));
@@ -21621,9 +21703,6 @@
   }
 
   // src/reward/loop-recap.js
-  function itemName(item = {}) {
-    return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || "Unknown player");
-  }
   function isRecapPlayer(item = {}) {
     return String(item.type || "").toLowerCase() === "player";
   }
@@ -21648,18 +21727,27 @@
     return (items || []).some(isRecapRareGoldOrAbove);
   }
   function flattenReceiptItems(receipts = [], inputItems = null) {
-    if (Array.isArray(inputItems)) return inputItems.map((item) => ({ item, packName: item?.packName || null }));
-    return (receipts || []).flatMap((receipt) => (receipt?.openedItems || []).map((item) => ({
+    if ((receipts || []).length) return receipts.flatMap((receipt) => {
+      const resolveDestination = createReceiptDestinationResolver(receipt);
+      return (receipt?.openedItems || []).map((item) => ({
+        item,
+        packName: receipt?.packRef?.name || null,
+        destination: resolveDestination(item)
+      }));
+    });
+    if (Array.isArray(inputItems)) return inputItems.map((item) => ({
       item,
-      packName: receipt?.packRef?.name || null
-    })));
+      packName: item?.packName || null,
+      destination: item?.destination || item?.pile || null
+    }));
+    return [];
   }
   function createLoopRecapModel(input2 = {}) {
     const receipts = input2.receipts || [];
     const entries = flattenReceiptItems(receipts, input2.openedItems);
     const items = entries.map(({ item }) => item);
-    const players = entries.filter(({ item }) => isRecapPlayer(item));
-    const qualifyingCount = players.filter(({ item }) => isRecapRareGoldOrAbove(item)).length;
+    const players = entries.map((entry) => ({ ...entry, recapItem: hydrateRecapItem(entry.item, input2.hydrateItem) })).filter(({ recapItem }) => isRecapPlayer(recapItem));
+    const qualifyingCount = players.filter(({ recapItem }) => isRecapRareGoldOrAbove(recapItem)).length;
     if (input2.requireQualifying !== false && qualifyingCount === 0) return null;
     const prices = input2.prices instanceof Map ? input2.prices : new Map(Object.entries(input2.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
     let specialCount = 0;
@@ -21667,32 +21755,33 @@
     let normalGoldCount = 0;
     let normalSilverCount = 0;
     let normalBronzeCount = 0;
-    const rows = players.map(({ item, packName }, index) => {
-      const rating = Number(item.rating || 0);
-      const special = isRecapSpecial(item);
-      const tier2 = recapPlayerTier(item);
-      const rare = isRarePlayerCard(item);
+    const rows = players.map(({ item, recapItem, packName, destination }, index) => {
+      const rating = Number(recapItem.rating || 0);
+      const special = isRecapSpecial(recapItem);
+      const tier2 = recapPlayerTier(recapItem);
+      const rare = isRarePlayerCard(recapItem);
       if (special) specialCount++;
       else if (tier2 === "gold" && rare) rareGoldCount++;
       else if (tier2 === "gold") normalGoldCount++;
       else if (tier2 === "silver") normalSilverCount++;
       else if (tier2 === "bronze") normalBronzeCount++;
       const row = {
-        name: itemName(item),
+        name: recapItemDisplayName(recapItem),
         rating,
         tier: tier2,
         rare,
         special,
-        duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
-        tradeable: item.tradeable === true,
-        price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
+        duplicate: recapItem.duplicate === true || Number(recapItem.duplicateId || 0) > 0,
+        tradeable: recapItem.tradeable === true,
+        destination: input2.resolveDestination?.(item) || destination,
+        price: special ? prices.get(Number(item.definitionId || recapItem.definitionId || 0)) || null : null,
         showPrice: special,
         sourceLabel: item.packName || packName || null,
-        futbinPlayerId: input2.resolveFutbinPlayerId?.(item) ?? null,
+        futbinPlayerId: input2.resolveFutbinPlayerId?.(recapItem) ?? null,
         item,
         order: index
       };
-      row.theme = resolveRecapCardTheme(row, input2.resolveNativeTheme?.(item));
+      row.theme = resolveRecapCardTheme(row, input2.resolveNativeTheme?.(recapItem));
       row.tierLabel = recapCardTypeLabel(row, row.theme);
       return row;
     });
@@ -21728,45 +21817,58 @@
   }
 
   // src/reward/batch-open-recap.js
-  function itemName2(item = {}) {
-    return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || "Unknown player");
-  }
   function createBatchOpenRecapModel(input2 = {}) {
     const receipts = input2.receipts || [];
-    const items = input2.openedItems || receipts.flatMap((receipt) => receipt?.openedItems || []);
+    const entries = receipts.length ? receipts.flatMap((receipt) => {
+      const resolveDestination = createReceiptDestinationResolver(receipt);
+      return (receipt?.openedItems || []).map((item) => ({
+        item,
+        sourceLabel: receipt?.packRef?.name || null,
+        destination: resolveDestination(item)
+      }));
+    }) : (input2.openedItems || []).map((item) => ({
+      item,
+      sourceLabel: item?.packName || item?.sourceLabel || null,
+      destination: item?.destination || item?.pile || null
+    }));
+    const items = entries.map(({ item }) => item);
     const prices = input2.prices instanceof Map ? input2.prices : new Map(Object.entries(input2.prices || {}).map(([key, value]) => [Number(key), Number(value)]));
     let playerCount = 0;
     let specialCount = 0;
     let normalGoldCount = 0;
     let normalSilverCount = 0;
     let normalBronzeCount = 0;
+    let qualifyingCount = 0;
     const rows = [];
-    for (const item of items) {
-      if (!isRecapPlayer(item)) continue;
+    for (const { item, sourceLabel, destination } of entries) {
+      const recapItem = hydrateRecapItem(item, input2.hydrateItem);
+      if (!isRecapPlayer(recapItem)) continue;
       playerCount++;
-      const rating = Number(item.rating || 0);
-      const special = isRecapSpecial(item);
-      const tier2 = recapPlayerTier(item);
-      const rare = isRarePlayerCard(item);
+      const rating = Number(recapItem.rating || 0);
+      const special = isRecapSpecial(recapItem);
+      const tier2 = recapPlayerTier(recapItem);
+      const rare = isRarePlayerCard(recapItem);
+      if (isRecapRareGoldOrAbove(recapItem)) qualifyingCount++;
       if (special) specialCount++;
       else if (tier2 === "gold") normalGoldCount++;
       else if (tier2 === "silver") normalSilverCount++;
       else if (tier2 === "bronze") normalBronzeCount++;
       const row = {
-        name: itemName2(item),
+        name: recapItemDisplayName(recapItem),
         rating,
         tier: tier2,
         rare,
         special,
-        duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
-        tradeable: item.tradeable === true,
-        price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
+        duplicate: recapItem.duplicate === true || Number(recapItem.duplicateId || 0) > 0,
+        tradeable: recapItem.tradeable === true,
+        destination: input2.resolveDestination?.(item) || destination,
+        price: special ? prices.get(Number(item.definitionId || recapItem.definitionId || 0)) || null : null,
         showPrice: special,
-        sourceLabel: item.packName || item.sourceLabel || null,
-        futbinPlayerId: input2.resolveFutbinPlayerId?.(item) ?? null,
+        sourceLabel,
+        futbinPlayerId: input2.resolveFutbinPlayerId?.(recapItem) ?? null,
         item
       };
-      row.theme = resolveRecapCardTheme(row, input2.resolveNativeTheme?.(item));
+      row.theme = resolveRecapCardTheme(row, input2.resolveNativeTheme?.(recapItem));
       row.tierLabel = recapCardTypeLabel(row, row.theme);
       rows.push(row);
     }
@@ -21796,8 +21898,8 @@
       normalBronzeCount,
       groupedPlayerCount: playerCount - specialCount,
       omittedCount,
-      qualifyingCount: items.filter(isRecapRareGoldOrAbove).length,
-      hasQualifyingCards: items.some(isRecapRareGoldOrAbove)
+      qualifyingCount,
+      hasQualifyingCards: qualifyingCount > 0
     });
   }
   function createBatchOpenRecapPreviewModel(options = {}) {
@@ -21825,7 +21927,8 @@
         special: sample.special === true,
         tier: sample.rating >= 75 ? "gold" : sample.rating >= 65 ? "silver" : "bronze",
         duplicate: index % 5 === 0,
-        tradeable: index % 3 === 0
+        tradeable: index % 3 === 0,
+        destination: ["club", "storage", "transfer", "unassigned"][index % 4]
       };
     });
     return createBatchOpenRecapModel({
@@ -21852,9 +21955,6 @@
   function boundedRating3(value) {
     const number = Number(value);
     return Number.isFinite(number) ? Math.max(0, Math.min(99, Math.floor(number))) : 0;
-  }
-  function displayName2(item = {}) {
-    return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || "Unknown player");
   }
   function tier(item, rating) {
     const explicit = String(item.tier || "").toLowerCase();
@@ -21899,21 +21999,23 @@
     return new Map(Object.entries(value || {}).map(([key, price]) => [Number(key), Number(price)]));
   }
   function buildCardSummary(item, sequence, context = {}) {
-    const rating = boundedRating3(item?.rating);
-    const special = context.assumeSpecialPlayers === true || isSpecialPlayerCard(item);
-    const rare = special || isRarePlayerCard(item);
+    const recapItem = hydrateRecapItem(item, context.hydrateItem);
+    const rating = boundedRating3(recapItem?.rating);
+    const special = context.assumeSpecialPlayers === true || isSpecialPlayerCard(recapItem);
+    const rare = special || isRarePlayerCard(recapItem);
     return {
-      id: boundedInteger2(item?.id),
-      definitionId: boundedInteger2(item?.definitionId),
-      name: displayName2(item),
+      id: boundedInteger2(recapItem?.id),
+      definitionId: boundedInteger2(recapItem?.definitionId),
+      name: recapItemDisplayName(recapItem),
       rating,
-      tier: tier(item, rating),
+      tier: tier(recapItem, rating),
       rare,
       special,
-      duplicate: item?.duplicate === true || boundedInteger2(item?.duplicateId) > 0,
-      tradeable: item?.tradeable === true,
+      duplicate: recapItem?.duplicate === true || boundedInteger2(recapItem?.duplicateId) > 0,
+      tradeable: recapItem?.tradeable === true,
+      destination: context.resolveDestination?.(context.originalItem || item) || context.destination || null,
       sourceLabel: String(context.sourceLabel || "").trim() || null,
-      nativeTheme: safeNativeTheme(context.resolveNativeTheme?.(item)),
+      nativeTheme: safeNativeTheme(context.resolveNativeTheme?.(recapItem)),
       sequence
     };
   }
@@ -21957,11 +22059,14 @@
     function recordItems(items = [], context = {}) {
       for (const item of items || []) {
         stats.itemCount++;
-        if (!isPlayer(item)) continue;
+        const recapItem = hydrateRecapItem(item, context.hydrateItem || options.hydrateItem);
+        if (!isPlayer(recapItem)) continue;
         stats.playerCount++;
-        const card = buildCardSummary(item, ++sequence, {
+        const card = buildCardSummary(recapItem, ++sequence, {
           ...context,
-          resolveNativeTheme: options.resolveNativeTheme
+          originalItem: item,
+          resolveNativeTheme: options.resolveNativeTheme,
+          hydrateItem: null
         });
         if (card.special) stats.types.special++;
         else if (card.rare) stats.types.rare++;
@@ -21980,9 +22085,12 @@
       if (!receipt || receipt.status !== "opened") return;
       stats.packsOpened++;
       stats.duplicateRoutes.storage += (receipt.routedItemRefs || []).filter((ref) => String(ref?.pile || "").toLowerCase() === "storage").length;
+      const resolveReceiptDestination = createReceiptDestinationResolver(receipt);
       return recordItems(receipt.openedItems || [], {
         sourceLabel: receipt.packRef?.name || context.sourceLabel,
-        assumeSpecialPlayers: receipt.details?.assumeTotwReward === true || context.assumeSpecialPlayers === true
+        assumeSpecialPlayers: receipt.details?.assumeTotwReward === true || context.assumeSpecialPlayers === true,
+        hydrateItem: context.hydrateItem,
+        resolveDestination: (item) => context.resolveDestination?.(item) || resolveReceiptDestination(item)
       });
     }
     function recordRecovery(action2, input2 = {}) {
@@ -22049,21 +22157,23 @@
   function buildRows(snapshot, input2 = {}) {
     const prices = normalizePrices(input2.prices);
     return snapshot.retainedCards.map((card, index) => {
+      const recapCard = hydrateRecapItem(card, input2.hydrateItem);
       const row = {
-        name: card.name,
+        name: recapItemDisplayName(recapCard),
         rating: card.rating,
         tier: card.tier,
         rare: card.rare,
         special: card.special,
         duplicate: card.duplicate,
         tradeable: card.tradeable,
+        destination: input2.resolveDestination?.(recapCard) || card.destination,
         sourceLabel: card.sourceLabel,
         price: card.special ? prices.get(card.definitionId) || null : null,
         showPrice: card.special,
-        futbinPlayerId: input2.resolveFutbinPlayerId?.(card) ?? null,
+        futbinPlayerId: input2.resolveFutbinPlayerId?.(recapCard) ?? null,
         order: index
       };
-      row.theme = resolveRecapCardTheme(row, input2.resolveNativeTheme?.(card) || card.nativeTheme);
+      row.theme = resolveRecapCardTheme(row, input2.resolveNativeTheme?.(recapCard) || card.nativeTheme);
       row.tierLabel = recapCardTypeLabel(row, row.theme);
       return row;
     });
@@ -22331,9 +22441,9 @@
   }
 
   // src/reward/player-pick-recap.js
-  function itemName3(item, displayName3) {
-    if (typeof displayName3 === "function") return String(displayName3(item));
-    return String(item?.name || item?.commonName || item?.lastName || item?.definitionId || item?.id || "Unknown player");
+  function itemName(item, displayName2) {
+    if (typeof displayName2 === "function") return String(displayName2(item));
+    return recapItemDisplayName(item);
   }
   function hasPlayerPickRecapCards(pickResults = []) {
     return (pickResults || []).some((entry) => (entry?.pickedCards || entry?.pickedItems || []).length > 0);
@@ -22347,27 +22457,28 @@
     const destinations = {};
     const rows = entries.flatMap((entry, pickIndex) => (entry?.pickedCards || []).map((card) => {
       const item = card.item || {};
-      const destination = card.destination || "unknown";
+      const recapItem = hydrateRecapItem(item, options.hydrateItem);
+      const destination = options.resolveDestination?.(item) || card.destination || "unknown";
       destinations[destination] = (destinations[destination] || 0) + 1;
       const row = {
-        name: itemName3(item, options.itemDisplayName),
-        rating: Number(card.rating || item.rating || 0),
-        tier: item.tier,
-        rare: card.rare === true || isRarePlayerCard(item),
-        special: card.special === true || isSpecialPlayerCard(item),
+        name: itemName(recapItem, options.itemDisplayName),
+        rating: Number(card.rating || recapItem.rating || 0),
+        tier: recapItem.tier,
+        rare: card.rare === true || isRarePlayerCard(recapItem),
+        special: card.special === true || isSpecialPlayerCard(recapItem),
         duplicate: card.duplicate === true,
-        tradeable: typeof card.tradeable === "boolean" ? card.tradeable : item.tradeable,
+        tradeable: typeof card.tradeable === "boolean" ? card.tradeable : recapItem.tradeable,
         price: card.price ?? null,
         showPrice: true,
         destination,
         sourceLabel: `P${pickIndex + 1}${entry?.resumed === true ? "r" : ""}`,
-        futbinPlayerId: options.resolveFutbinPlayerId?.(item) ?? null,
+        futbinPlayerId: options.resolveFutbinPlayerId?.(recapItem) ?? null,
         card,
         pickIndex: pickIndex + 1,
         resumed: entry?.resumed === true,
         item
       };
-      row.theme = resolveRecapCardTheme(row, options.resolveNativeTheme?.(item));
+      row.theme = resolveRecapCardTheme(row, options.resolveNativeTheme?.(recapItem));
       row.tierLabel = recapCardTypeLabel(row, row.theme);
       return row;
     }));
@@ -24548,17 +24659,18 @@
   }
 
   // src/sbc/background-submit-retry.js
+  var RETRYABLE_SUBMIT_CODES = /* @__PURE__ */ new Set(["409", "426", "429", "512", "521"]);
+  var RECOGNIZED_SUBMIT_CODES = [...RETRYABLE_SUBMIT_CODES].join("|");
   function normalizeSubmitErrorCode(detail) {
     const text = String(detail ?? "").trim();
     if (!text) return "";
-    const exact = text.match(/^(409|429)$/);
+    const exact = text.match(new RegExp(`^(${RECOGNIZED_SUBMIT_CODES})$`));
     if (exact) return exact[1];
-    const embedded = text.match(/\b(409|429)\b/);
+    const embedded = text.match(new RegExp(`\\b(${RECOGNIZED_SUBMIT_CODES})\\b`));
     return embedded ? embedded[1] : text;
   }
   function isRetryableBackgroundSubmitError(detail) {
-    const code = normalizeSubmitErrorCode(detail);
-    return code === "409" || code === "429";
+    return RETRYABLE_SUBMIT_CODES.has(normalizeSubmitErrorCode(detail));
   }
   function planBackgroundSubmitRetry({
     attempt = 1,
@@ -32259,12 +32371,12 @@
 
   // src/ui/card-recap.js
   var DESTINATION_LABELS = Object.freeze({
-    club: "->CLUB",
-    transfer: "->TRANSFER",
-    storage: "->STORAGE",
-    unassigned: "->UNASSIGNED",
-    blocked: "->BLOCKED",
-    unknown: "->?"
+    club: "Club",
+    transfer: "Transfer",
+    storage: "Storage",
+    unassigned: "Unassigned",
+    blocked: "Blocked",
+    unknown: "?"
   });
   function applyStyles3(element, styles4) {
     Object.assign(element.style, styles4);
@@ -32291,26 +32403,22 @@
     element.style.opacity = enabled ? "1" : "0.42";
     element.style.cursor = enabled ? "pointer" : "default";
   }
-  function rowTags(row, formatPrice) {
-    const tags = [row.tierLabel || row.theme?.label || null];
-    if (row.special) tags.push("special");
-    if (row.duplicate) tags.push("duplicate");
-    if (typeof row.tradeable === "boolean") tags.push(row.tradeable ? "tradeable" : "untradeable");
+  function rowPrice(row, formatPrice) {
     const price = formatPrice?.(row.price) || "";
-    if (row.showPrice === true || price) tags.push(`price:${price || "?"}`);
-    return tags.filter(Boolean).join(", ");
+    return row.showPrice === true || price ? price || "?" : null;
   }
   function renderCardRow(dom, row, formatPrice, mode) {
     const theme = row.theme || {};
     const element = dom.create("div");
     applyStyles3(element, {
-      minHeight: mode?.touchTargets ? "44px" : "38px",
-      padding: "6px 8px",
+      minHeight: mode?.touchTargets ? "44px" : "34px",
+      padding: "5px 8px",
       boxSizing: "border-box",
       display: "flex",
       alignItems: "center",
-      flexWrap: "wrap",
-      gap: "8px",
+      flexWrap: "nowrap",
+      gap: mode?.mobile ? "6px" : "8px",
+      overflow: "hidden",
       color: theme.foreground || "#F4F6F8",
       background: theme.background || "#1D2229",
       borderLeft: `4px solid ${theme.accent || "#64748B"}`
@@ -32330,81 +32438,71 @@
       fontSize: "14px",
       flex: "0 0 auto"
     });
-    const identity = dom.create("span");
-    applyStyles3(identity, {
-      flex: "1 1 280px",
-      minWidth: mode?.mobile ? "0" : "220px",
-      display: "flex",
-      flexDirection: "column",
-      gap: "2px",
-      alignItems: "stretch",
-      overflow: "visible"
-    });
-    const name = dom.create("span");
+    const name = dom.create(row.futbinUrl ? "a" : "span");
     name.textContent = String(row.name || "Unknown player");
-    name.title = name.textContent;
+    name.title = row.futbinUrl ? `Open ${name.textContent} on FUTBIN` : name.textContent;
+    if (row.futbinUrl) {
+      name.href = row.futbinUrl;
+      name.target = "_blank";
+      name.rel = "noopener noreferrer";
+    }
     applyStyles3(name, {
       fontWeight: "600",
-      width: "100%",
+      flex: "1 1 160px",
       minWidth: "0",
       lineHeight: "18px",
-      whiteSpace: "normal",
-      overflowWrap: "anywhere"
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      color: "inherit",
+      textDecoration: row.futbinUrl ? "underline" : "none"
     });
-    identity.appendChild(name);
+    element.append(rating, name);
     if (row.sourceLabel) {
       const source = dom.create("span");
-      source.textContent = row.sourceLabel;
-      source.title = source.textContent;
+      source.textContent = compactRecapSourceLabel(row.sourceLabel);
+      source.title = row.sourceTitle || row.sourceLabel || source.textContent;
       applyStyles3(source, {
         color: theme.muted || "#AAB4C2",
         fontSize: "11px",
         fontWeight: "600",
-        width: "100%",
+        flex: mode?.mobile ? "0 1 58px" : "0 1 100px",
         minWidth: "0",
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       });
-      identity.appendChild(source);
+      element.appendChild(source);
     }
-    element.append(rating, identity);
     if (row.destination) {
       const destination = dom.create("span");
       destination.textContent = DESTINATION_LABELS[row.destination] || String(row.destination);
-      applyStyles3(destination, { color: theme.accent || "#AAB4C2", fontSize: "11px", fontWeight: "600", flex: "0 0 auto" });
-      element.appendChild(destination);
-    }
-    const tags = dom.create("span");
-    tags.textContent = rowTags(row, formatPrice);
-    tags.title = tags.textContent;
-    applyStyles3(tags, {
-      color: theme.muted || "#AAB4C2",
-      fontSize: "11px",
-      flex: "0 1 320px",
-      minWidth: "0",
-      maxWidth: "100%",
-      whiteSpace: "nowrap",
-      overflow: "hidden",
-      textOverflow: "ellipsis"
-    });
-    element.appendChild(tags);
-    if (row.futbinUrl) {
-      const futbin = dom.create("a");
-      futbin.textContent = "FUTBIN";
-      futbin.href = row.futbinUrl;
-      futbin.target = "_blank";
-      futbin.rel = "noopener noreferrer";
-      futbin.title = `Open ${String(row.name || "player")} on FUTBIN`;
-      applyStyles3(futbin, {
-        color: theme.accent || "#8CB7FF",
+      destination.title = `Destination: ${destination.textContent}`;
+      applyStyles3(destination, {
+        color: theme.accent || "#AAB4C2",
         fontSize: "11px",
         fontWeight: "600",
-        textDecoration: "underline",
+        flex: "0 1 auto",
+        minWidth: "0",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      });
+      element.appendChild(destination);
+    }
+    const priceText = rowPrice(row, formatPrice);
+    if (priceText) {
+      const price = dom.create("span");
+      price.textContent = priceText;
+      price.title = `Price: ${priceText}`;
+      applyStyles3(price, {
+        color: theme.muted || "#AAB4C2",
+        fontSize: "11px",
+        fontWeight: "600",
         whiteSpace: "nowrap",
         flex: "0 0 auto"
       });
-      element.appendChild(futbin);
+      element.appendChild(price);
     }
     return element;
   }
@@ -32568,6 +32666,8 @@
       name: options.name,
       status: options.status,
       reason: options.reason,
+      hydrateItem: options.hydrateItem,
+      resolveDestination: options.resolveDestination,
       itemDisplayName: options.itemDisplayName,
       resolveNativeTheme: options.resolveNativeTheme,
       resolveFutbinPlayerId: options.resolveFutbinPlayerId
@@ -40139,7 +40239,12 @@
     function recordLoopPackReceipt(receipt, sourceLabel = null) {
       if (!state.loopRecapSession || receipt?.status !== "opened") return;
       if (state.loopRecapSession.rollingAggregator) {
-        state.loopRecapSession.rollingAggregator.recordPackReceipt(receipt, { sourceLabel });
+        const hydrateItem = createRecapItemHydrator();
+        state.loopRecapSession.rollingAggregator.recordPackReceipt(receipt, {
+          sourceLabel,
+          hydrateItem,
+          resolveDestination: hydrateItem.resolveDestination
+        });
         return;
       }
       state.loopRecapSession.receipts.push(receipt);
@@ -47204,30 +47309,48 @@
       }
       return result;
     }
-    function recapDefinitionId(item) {
+    function recapDefinitionId2(item) {
       const definitionId2 = Number(item?.definitionId || 0);
       return Number.isInteger(definitionId2) && definitionId2 > 0 ? definitionId2 : null;
     }
-    function createRecapFutbinItemHydrator() {
+    function createRecapItemHydrator() {
       const byItemId = /* @__PURE__ */ new Map();
       const byDefinitionId = /* @__PURE__ */ new Map();
+      const destinationByItemId = /* @__PURE__ */ new Map();
+      const destinationsByDefinitionId = /* @__PURE__ */ new Map();
       ["storage", "club", "unassigned", "transfer"].forEach((pileName) => {
         getPileItemsByName(pileName).forEach((item) => {
           const itemId5 = Number(item?.id || 0);
-          const definitionId2 = recapDefinitionId(item);
-          if (Number.isInteger(itemId5) && itemId5 > 0 && !byItemId.has(itemId5)) byItemId.set(itemId5, item);
-          if (definitionId2 && !byDefinitionId.has(definitionId2)) byDefinitionId.set(definitionId2, item);
+          const definitionId2 = recapDefinitionId2(item);
+          if (Number.isInteger(itemId5) && itemId5 > 0 && !byItemId.has(itemId5)) {
+            byItemId.set(itemId5, item);
+            destinationByItemId.set(itemId5, pileName);
+          }
+          if (definitionId2) {
+            if (!byDefinitionId.has(definitionId2)) byDefinitionId.set(definitionId2, item);
+            const destinations = destinationsByDefinitionId.get(definitionId2) || /* @__PURE__ */ new Set();
+            destinations.add(pileName);
+            destinationsByDefinitionId.set(definitionId2, destinations);
+          }
         });
       });
-      return (item) => {
+      const hydrateItem = (item) => {
         const itemId5 = Number(item?.id || 0);
         if (Number.isInteger(itemId5) && itemId5 > 0 && byItemId.has(itemId5)) return byItemId.get(itemId5);
-        return byDefinitionId.get(recapDefinitionId(item)) || item;
+        return byDefinitionId.get(recapDefinitionId2(item)) || item;
       };
+      hydrateItem.resolveDestination = (item) => {
+        const itemId5 = Number(item?.id || 0);
+        if (Number.isInteger(itemId5) && itemId5 > 0 && destinationByItemId.has(itemId5)) {
+          return destinationByItemId.get(itemId5);
+        }
+        const destinations = [...destinationsByDefinitionId.get(recapDefinitionId2(item)) || []];
+        return destinations.length === 1 ? destinations[0] : null;
+      };
+      return hydrateItem;
     }
-    async function resolveRecapFutbinPlayerIds(items, label) {
+    async function resolveRecapFutbinPlayerIds(items, label, hydrateItem = createRecapItemHydrator()) {
       const fsu = fsuAdapter();
-      const hydrateItem = createRecapFutbinItemHydrator();
       const resolved = await resolveFutbinCardIds({
         items,
         cache: adapters.userscriptStorage.get(FUTBIN_CARD_ID_CACHE_KEY, null),
@@ -47251,14 +47374,16 @@
       } else if (resolved.unmatched > 0) {
         log(`${label}: FUTBIN returned no exact card ID for ${resolved.unmatched} card(s); those links stay hidden`);
       }
-      return (item) => resolved.ids.get(recapDefinitionId(item)) || fsu.getFutbinPlayerId(hydrateItem(item));
+      return (item) => resolved.ids.get(recapDefinitionId2(item)) || fsu.getFutbinPlayerId(hydrateItem(item));
     }
     async function showPickRecapModal(loopDef, pickResults, result = {}) {
       if (state.loopRecapSession) state.loopRecapSession.dedicatedRecap = true;
       const pickedCards = (pickResults || []).flatMap((entry) => entry?.pickedCards || []);
+      const hydrateItem = createRecapItemHydrator();
       const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(
         pickedCards.map((card) => card.item),
-        `${loopDef?.name || "Player Pick"} recap`
+        `${loopDef?.name || "Player Pick"} recap`,
+        hydrateItem
       );
       return showPlayerPickRecap({
         dom: adapters.dom,
@@ -47267,6 +47392,8 @@
         status: result.status,
         reason: result.reason,
         itemDisplayName,
+        hydrateItem,
+        resolveDestination: hydrateItem.resolveDestination,
         resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
         resolveFutbinPlayerId,
         formatPrice: formatCompactPrice,
@@ -47398,12 +47525,15 @@
             finalResources: rollingFinalResources(runResult || {})
           });
           const retainedCards = snapshot.retainedCards || [];
+          const hydrateItem = createRecapItemHydrator();
           const prices = await getSpecialCardPrices(retainedCards, `${session.name} recap`);
-          const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(retainedCards, `${session.name} recap`);
+          const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(retainedCards, `${session.name} recap`, hydrateItem);
           const model = createRollingRecapModel({
             name: session.name,
             snapshot,
             prices,
+            hydrateItem,
+            resolveDestination: hydrateItem.resolveDestination,
             resolveFutbinPlayerId
           });
           state.lastLoopRecap = { name: session.name, model, completedAt: Date.now() };
@@ -47423,14 +47553,17 @@
         return null;
       }
       try {
+        const hydrateItem = createRecapItemHydrator();
         const prices = await getSpecialCardPrices(openedItems, `${session.name} recap`);
-        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(openedItems, `${session.name} recap`);
+        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(openedItems, `${session.name} recap`, hydrateItem);
         const model = createLoopRecapModel({
           name: session.name,
           receipts: session.receipts,
           status,
           reason,
           prices,
+          hydrateItem,
+          resolveDestination: hydrateItem.resolveDestination,
           resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
           resolveFutbinPlayerId
         });
@@ -47518,10 +47651,13 @@
           }
         });
         const prices = await getSpecialCardPrices(result.openedItems, "Batch Open");
-        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result.openedItems, "Batch Open recap");
+        const hydrateItem = createRecapItemHydrator();
+        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result.openedItems, "Batch Open recap", hydrateItem);
         recapModel = createBatchOpenRecapModel({
           ...result,
           prices,
+          hydrateItem,
+          resolveDestination: hydrateItem.resolveDestination,
           resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
           resolveFutbinPlayerId
         });
@@ -47540,12 +47676,15 @@
         console.error(CONSOLE_PREFIX, error);
         const fallbackPlan = materializeBatchOpenPlan(savedPlan, getPackInventorySnapshot());
         const requestedPacks = fallbackPlan.entries.reduce((sum, entry) => sum + entry.quantity, 0);
-        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result?.openedItems || [], "Batch Open recap");
+        const hydrateItem = createRecapItemHydrator();
+        const resolveFutbinPlayerId = await resolveRecapFutbinPlayerIds(result?.openedItems || [], "Batch Open recap", hydrateItem);
         recapModel = createBatchOpenRecapModel({
           ...result || {},
           requestedPacks: result?.requestedPacks ?? requestedPacks,
           status: "blocked",
           reason: error?.message || error,
+          hydrateItem,
+          resolveDestination: hydrateItem.resolveDestination,
           resolveNativeTheme: (item) => eaRarityAdapter.playerTheme(item),
           resolveFutbinPlayerId
         });
@@ -49088,7 +49227,14 @@
     }
     function recordRollingPlayerPickResult(pickDef, pickedCards, duplicatesConsumed = 0, recoveryAction = "playerPick") {
       const items = (pickedCards || []).map((card) => card.item || card);
-      recordRollingRecapItems(items, { sourceLabel: pickDef.name });
+      const hydrateItem = createRecapItemHydrator();
+      for (const card of pickedCards || []) {
+        recordRollingRecapItems([card.item || card], {
+          sourceLabel: pickDef.name,
+          destination: card.destination || "unknown",
+          hydrateItem
+        });
+      }
       recordRollingRecapRecovery(recoveryAction, { duplicatesConsumed });
       publishPackHighlight(items, {
         packRef: {

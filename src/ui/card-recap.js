@@ -1,13 +1,13 @@
-import { getRecapPage } from '../reward/recap.js';
+import { compactRecapSourceLabel, getRecapPage } from '../reward/recap.js';
 import { applyResponsiveDialogLayout, readResponsiveUiMode, responsiveControlHeight } from './responsive-dialog.js';
 
 const DESTINATION_LABELS = Object.freeze({
-  club: '->CLUB',
-  transfer: '->TRANSFER',
-  storage: '->STORAGE',
-  unassigned: '->UNASSIGNED',
-  blocked: '->BLOCKED',
-  unknown: '->?',
+  club: 'Club',
+  transfer: 'Transfer',
+  storage: 'Storage',
+  unassigned: 'Unassigned',
+  blocked: 'Blocked',
+  unknown: '?',
 });
 
 function applyStyles(element, styles) {
@@ -32,22 +32,17 @@ function setButtonEnabled(element, enabled) {
   element.style.cursor = enabled ? 'pointer' : 'default';
 }
 
-function rowTags(row, formatPrice) {
-  const tags = [row.tierLabel || row.theme?.label || null];
-  if (row.special) tags.push('special');
-  if (row.duplicate) tags.push('duplicate');
-  if (typeof row.tradeable === 'boolean') tags.push(row.tradeable ? 'tradeable' : 'untradeable');
+function rowPrice(row, formatPrice) {
   const price = formatPrice?.(row.price) || '';
-  if (row.showPrice === true || price) tags.push(`price:${price || '?'}`);
-  return tags.filter(Boolean).join(', ');
+  return row.showPrice === true || price ? price || '?' : null;
 }
 
 function renderCardRow(dom, row, formatPrice, mode) {
   const theme = row.theme || {};
   const element = dom.create('div');
   applyStyles(element, {
-    minHeight: mode?.touchTargets ? '44px' : '38px', padding: '6px 8px', boxSizing: 'border-box', display: 'flex', alignItems: 'center',
-    flexWrap: 'wrap', gap: '8px',
+    minHeight: mode?.touchTargets ? '44px' : '34px', padding: '5px 8px', boxSizing: 'border-box', display: 'flex', alignItems: 'center',
+    flexWrap: 'nowrap', gap: mode?.mobile ? '6px' : '8px', overflow: 'hidden',
     color: theme.foreground || '#F4F6F8', background: theme.background || '#1D2229',
     borderLeft: `4px solid ${theme.accent || '#64748B'}`,
   });
@@ -58,55 +53,48 @@ function renderCardRow(dom, row, formatPrice, mode) {
     color: theme.rating || '#111318', background: theme.ratingBackground || theme.accent || '#64748B',
     borderRadius: '2px', fontWeight: '700', fontSize: '14px', flex: '0 0 auto',
   });
-  const identity = dom.create('span');
-  applyStyles(identity, {
-    flex: '1 1 280px', minWidth: mode?.mobile ? '0' : '220px', display: 'flex', flexDirection: 'column',
-    gap: '2px', alignItems: 'stretch', overflow: 'visible',
-  });
-  const name = dom.create('span');
+  const name = dom.create(row.futbinUrl ? 'a' : 'span');
   name.textContent = String(row.name || 'Unknown player');
-  name.title = name.textContent;
+  name.title = row.futbinUrl ? `Open ${name.textContent} on FUTBIN` : name.textContent;
+  if (row.futbinUrl) {
+    name.href = row.futbinUrl;
+    name.target = '_blank';
+    name.rel = 'noopener noreferrer';
+  }
   applyStyles(name, {
-    fontWeight: '600', width: '100%', minWidth: '0', lineHeight: '18px', whiteSpace: 'normal', overflowWrap: 'anywhere',
+    fontWeight: '600', flex: '1 1 160px', minWidth: '0', lineHeight: '18px', whiteSpace: 'nowrap',
+    overflow: 'hidden', textOverflow: 'ellipsis', color: 'inherit', textDecoration: row.futbinUrl ? 'underline' : 'none',
   });
-  identity.appendChild(name);
+  element.append(rating, name);
   if (row.sourceLabel) {
     const source = dom.create('span');
-    source.textContent = row.sourceLabel;
-    source.title = source.textContent;
+    source.textContent = compactRecapSourceLabel(row.sourceLabel);
+    source.title = row.sourceTitle || row.sourceLabel || source.textContent;
     applyStyles(source, {
-      color: theme.muted || '#AAB4C2', fontSize: '11px', fontWeight: '600', width: '100%', minWidth: '0',
-      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      color: theme.muted || '#AAB4C2', fontSize: '11px', fontWeight: '600', flex: mode?.mobile ? '0 1 58px' : '0 1 100px',
+      minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
     });
-    identity.appendChild(source);
+    element.appendChild(source);
   }
-  element.append(rating, identity);
   if (row.destination) {
     const destination = dom.create('span');
     destination.textContent = DESTINATION_LABELS[row.destination] || String(row.destination);
-    applyStyles(destination, { color: theme.accent || '#AAB4C2', fontSize: '11px', fontWeight: '600', flex: '0 0 auto' });
+    destination.title = `Destination: ${destination.textContent}`;
+    applyStyles(destination, {
+      color: theme.accent || '#AAB4C2', fontSize: '11px', fontWeight: '600', flex: '0 1 auto',
+      minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    });
     element.appendChild(destination);
   }
-  const tags = dom.create('span');
-  tags.textContent = rowTags(row, formatPrice);
-  tags.title = tags.textContent;
-  applyStyles(tags, {
-    color: theme.muted || '#AAB4C2', fontSize: '11px', flex: '0 1 320px', minWidth: '0', maxWidth: '100%',
-    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-  });
-  element.appendChild(tags);
-  if (row.futbinUrl) {
-    const futbin = dom.create('a');
-    futbin.textContent = 'FUTBIN';
-    futbin.href = row.futbinUrl;
-    futbin.target = '_blank';
-    futbin.rel = 'noopener noreferrer';
-    futbin.title = `Open ${String(row.name || 'player')} on FUTBIN`;
-    applyStyles(futbin, {
-      color: theme.accent || '#8CB7FF', fontSize: '11px', fontWeight: '600', textDecoration: 'underline',
-      whiteSpace: 'nowrap', flex: '0 0 auto',
+  const priceText = rowPrice(row, formatPrice);
+  if (priceText) {
+    const price = dom.create('span');
+    price.textContent = priceText;
+    price.title = `Price: ${priceText}`;
+    applyStyles(price, {
+      color: theme.muted || '#AAB4C2', fontSize: '11px', fontWeight: '600', whiteSpace: 'nowrap', flex: '0 0 auto',
     });
-    element.appendChild(futbin);
+    element.appendChild(price);
   }
   return element;
 }

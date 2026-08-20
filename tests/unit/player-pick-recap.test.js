@@ -84,6 +84,27 @@ describe('Player Pick recap UI', () => {
     expect(model.rows[0]).toMatchObject({ rare: true, special: true, tierLabel: 'Special 95-97' });
   });
 
+  it('hydrates a numeric Pick response name from the full inventory entity', () => {
+    const model = createPlayerPickRecapModel([{
+      pickedCards: [{
+        item: { id: 88, definitionId: 808, name: '808', rating: 95, type: 'player', rareflag: 7 },
+        rating: 95,
+        destination: 'unassigned',
+      }],
+    }], {
+      hydrateItem: () => ({
+        id: 88,
+        definitionId: 808,
+        name: 'Hydrated Pick Player',
+        rating: 95,
+        type: 'player',
+        rareflag: 7,
+      }),
+      resolveDestination: () => 'storage',
+    });
+    expect(model.rows[0]).toMatchObject({ name: 'Hydrated Pick Player', destination: 'storage' });
+  });
+
   it('renders a confirmed Pick as blocked when post-selection cleanup fails', () => {
     const harness = createUiHarness();
     void showPlayerPickRecap({
@@ -100,7 +121,7 @@ describe('Player Pick recap UI', () => {
         }],
       }],
     });
-    expect(harness.created.find((element) => element.textContent === '->BLOCKED')).toBeTruthy();
+    expect(harness.created.find((element) => element.textContent === 'Blocked')).toBeTruthy();
     expect(harness.created.find((element) => element.textContent === 'blocked: SBC storage is full')).toBeTruthy();
   });
 
@@ -118,29 +139,31 @@ describe('Player Pick recap UI', () => {
     expect(harness.created.find((element) => element.textContent === 'Player Pick Recap: 84+ Pick')).toBeTruthy();
     expect(harness.created.find((element) => element.textContent.includes('2 pick(s), 2 card(s), rating 88-92'))).toBeTruthy();
     expect(harness.created.find((element) => element.textContent === 'stopped: stopped by user')).toBeTruthy();
-    expect(harness.created.find((element) => element.textContent.includes('price:80K'))).toBeTruthy();
-    expect(harness.created.find((element) => element.textContent === '->CLUB')).toBeTruthy();
+    expect(harness.created.find((element) => element.textContent === '80K')).toBeTruthy();
+    expect(harness.created.find((element) => element.textContent === 'Club')).toBeTruthy();
     const playerName = harness.created.find((element) => element.textContent === 'Player B');
     expect(playerName).toMatchObject({
-      title: 'Player B',
+      title: 'Open Player B on FUTBIN',
       style: expect.objectContaining({
-        width: '100%',
-        whiteSpace: 'normal',
-        overflowWrap: 'anywhere',
+        minWidth: '0',
+        whiteSpace: 'nowrap',
+        textOverflow: 'ellipsis',
       }),
     });
-    expect(playerName.style.textOverflow).toBeUndefined();
-    const sourceLabel = harness.created.find((element) => element.textContent === 'P2');
-    expect(sourceLabel).toMatchObject({
-      title: 'P2',
-      style: expect.objectContaining({ width: '100%', textOverflow: 'ellipsis' }),
-    });
-    const futbin = harness.created.find((element) => element.tagName === 'a' && element.textContent === 'FUTBIN');
-    expect(futbin).toMatchObject({
+    expect(playerName.tagName).toBe('a');
+    expect(playerName).toMatchObject({
       href: 'https://www.futbin.com/26/player/16453/1',
       target: '_blank',
       rel: 'noopener noreferrer',
     });
+    const sourceLabel = harness.created.find((element) => element.textContent === 'P2');
+    expect(sourceLabel).toMatchObject({
+      title: 'P2',
+      style: expect.objectContaining({ minWidth: '0', textOverflow: 'ellipsis' }),
+    });
+    expect(harness.created.some((element) => element.textContent === 'FUTBIN')).toBe(false);
+    const playerRow = harness.created.find((element) => element.children.includes(playerName));
+    expect(playerRow.children.some((element) => /special|duplicate|tradeable|untradeable/i.test(element.textContent))).toBe(false);
     expect(celebrate).toHaveBeenCalledWith(expect.anything(), 1);
     harness.created.find((element) => element.textContent === 'Close').click();
     await expect(promise).resolves.toBe(true);

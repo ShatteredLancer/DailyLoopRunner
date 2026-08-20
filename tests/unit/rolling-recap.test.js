@@ -64,7 +64,8 @@ describe('Rolling recap aggregation', () => {
         card({ id: 2, rating: 85, rare: true, rareflag: 1 }),
         card({ id: 3, rating: 96, special: true, rareflag: 8 }),
       ],
-      routedItemRefs: [{ id: 3, pile: 'storage' }],
+      routedItemRefs: [{ id: 1, pile: 'club' }, { id: 3, pile: 'storage' }],
+      pendingItemRefs: [{ id: 2, pile: 'unassigned' }],
     });
     aggregator.recordRecovery('provisions', { duplicatesConsumed: 2 });
     aggregator.recordRecovery('totw', { duplicatesConsumed: 1 });
@@ -77,6 +78,54 @@ describe('Rolling recap aggregation', () => {
     expect(snapshot.counters.ratings).toEqual({ 84: 1, 85: 1, 96: 1 });
     expect(snapshot.counters.recoveries).toEqual({ totw: 1, provisions: 1, playerPick: 1, goldSink: 1, storageSink: 0 });
     expect(snapshot.counters.duplicateRoutes).toEqual({ primary: 4, storage: 1, recovery: 3 });
+    expect(Object.fromEntries(snapshot.retainedCards.map((entry) => [entry.id, entry.destination])))
+      .toEqual({ 1: 'club', 2: 'unassigned', 3: 'storage' });
+  });
+
+  it('hydrates lightweight response names and preserves Player Pick destinations', () => {
+    const aggregator = createRollingRecapAggregator({
+      hydrateItem: (item) => item.id === 77
+        ? { id: 77, definitionId: 707, type: 'player', rating: 96, _staticData: { firstName: 'Real', lastName: 'Name' } }
+        : item,
+    });
+    aggregator.recordItems([{ id: 77, definitionId: 707, name: '707', rating: 96, rareflag: 7 }], {
+      sourceLabel: '1 of 3 94+ Player Pick',
+      destination: 'storage',
+    });
+
+    const snapshot = aggregator.getSnapshot();
+    expect(snapshot.retainedCards[0]).toMatchObject({ name: 'Real Name', destination: 'storage' });
+    const model = createRollingRecapModel({ snapshot });
+    expect(model.rows[0]).toMatchObject({
+      name: 'Real Name',
+      sourceLabel: '1/3 94+ Pick',
+      sourceTitle: '1 of 3 94+ Player Pick',
+      destination: 'storage',
+    });
+  });
+
+  it('prefers the final inventory destination over the pack-time destination', () => {
+    const aggregator = createRollingRecapAggregator();
+    aggregator.recordPackReceipt({
+      status: 'opened',
+      packRef: { name: '10x85+' },
+      openedItems: [
+        card({ id: 77, definitionId: 707, name: 'Moved Player', rating: 87 }),
+        card({ id: 78, definitionId: 708, name: 'Historical Player', rating: 86 }),
+      ],
+      pendingItemRefs: [
+        { id: 77, definitionId: 707 },
+        { id: 78, definitionId: 708 },
+      ],
+    });
+
+    const model = createRollingRecapModel({
+      snapshot: aggregator.getSnapshot(),
+      resolveDestination: (item) => item.id === 77 ? 'club' : null,
+    });
+
+    expect(model.rows.find((row) => row.name === 'Moved Player')?.destination).toBe('club');
+    expect(model.rows.find((row) => row.name === 'Historical Player')?.destination).toBe('unassigned');
   });
 
   it('builds a compact sorted model with prices and final resources', () => {

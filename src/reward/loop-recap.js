@@ -1,5 +1,8 @@
 import {
+  createReceiptDestinationResolver,
   createRecapModel,
+  hydrateRecapItem,
+  recapItemDisplayName,
   recapCardTypeLabel,
   resolveRecapCardTheme,
 } from './recap.js';
@@ -7,10 +10,6 @@ import {
   isRarePlayerCard,
   isSpecialPlayerCard,
 } from '../domain/player-rarity.js';
-
-function itemName(item = {}) {
-  return String(item.name || item.commonName || item.lastName || item.definitionId || item.id || 'Unknown player');
-}
 
 export function isRecapPlayer(item = {}) {
   return String(item.type || '').toLowerCase() === 'player';
@@ -41,19 +40,30 @@ export function hasRecapRareGoldOrAbove(items = []) {
 }
 
 function flattenReceiptItems(receipts = [], inputItems = null) {
-  if (Array.isArray(inputItems)) return inputItems.map((item) => ({ item, packName: item?.packName || null }));
-  return (receipts || []).flatMap((receipt) => (receipt?.openedItems || []).map((item) => ({
+  if ((receipts || []).length) return receipts.flatMap((receipt) => {
+    const resolveDestination = createReceiptDestinationResolver(receipt);
+    return (receipt?.openedItems || []).map((item) => ({
+      item,
+      packName: receipt?.packRef?.name || null,
+      destination: resolveDestination(item),
+    }));
+  });
+  if (Array.isArray(inputItems)) return inputItems.map((item) => ({
     item,
-    packName: receipt?.packRef?.name || null,
-  })));
+    packName: item?.packName || null,
+    destination: item?.destination || item?.pile || null,
+  }));
+  return [];
 }
 
 export function createLoopRecapModel(input = {}) {
   const receipts = input.receipts || [];
   const entries = flattenReceiptItems(receipts, input.openedItems);
   const items = entries.map(({ item }) => item);
-  const players = entries.filter(({ item }) => isRecapPlayer(item));
-  const qualifyingCount = players.filter(({ item }) => isRecapRareGoldOrAbove(item)).length;
+  const players = entries
+    .map((entry) => ({ ...entry, recapItem: hydrateRecapItem(entry.item, input.hydrateItem) }))
+    .filter(({ recapItem }) => isRecapPlayer(recapItem));
+  const qualifyingCount = players.filter(({ recapItem }) => isRecapRareGoldOrAbove(recapItem)).length;
   if (input.requireQualifying !== false && qualifyingCount === 0) return null;
 
   const prices = input.prices instanceof Map
@@ -64,32 +74,33 @@ export function createLoopRecapModel(input = {}) {
   let normalGoldCount = 0;
   let normalSilverCount = 0;
   let normalBronzeCount = 0;
-  const rows = players.map(({ item, packName }, index) => {
-    const rating = Number(item.rating || 0);
-    const special = isRecapSpecial(item);
-    const tier = recapPlayerTier(item);
-    const rare = isRarePlayerCard(item);
+  const rows = players.map(({ item, recapItem, packName, destination }, index) => {
+    const rating = Number(recapItem.rating || 0);
+    const special = isRecapSpecial(recapItem);
+    const tier = recapPlayerTier(recapItem);
+    const rare = isRarePlayerCard(recapItem);
     if (special) specialCount++;
     else if (tier === 'gold' && rare) rareGoldCount++;
     else if (tier === 'gold') normalGoldCount++;
     else if (tier === 'silver') normalSilverCount++;
     else if (tier === 'bronze') normalBronzeCount++;
     const row = {
-      name: itemName(item),
+      name: recapItemDisplayName(recapItem),
       rating,
       tier,
       rare,
       special,
-      duplicate: item.duplicate === true || Number(item.duplicateId || 0) > 0,
-      tradeable: item.tradeable === true,
-      price: special ? prices.get(Number(item.definitionId || 0)) || null : null,
+      duplicate: recapItem.duplicate === true || Number(recapItem.duplicateId || 0) > 0,
+      tradeable: recapItem.tradeable === true,
+      destination: input.resolveDestination?.(item) || destination,
+      price: special ? prices.get(Number(item.definitionId || recapItem.definitionId || 0)) || null : null,
       showPrice: special,
       sourceLabel: item.packName || packName || null,
-      futbinPlayerId: input.resolveFutbinPlayerId?.(item) ?? null,
+      futbinPlayerId: input.resolveFutbinPlayerId?.(recapItem) ?? null,
       item,
       order: index,
     };
-    row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(item));
+    row.theme = resolveRecapCardTheme(row, input.resolveNativeTheme?.(recapItem));
     row.tierLabel = recapCardTypeLabel(row, row.theme);
     return row;
   });

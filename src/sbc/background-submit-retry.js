@@ -1,19 +1,22 @@
 /**
- * Pure helpers for background rating SBC submit retries after EA conflicts.
+ * Pure helpers for background rating SBC submit retries after EA conflicts
+ * and transient service failures.
  */
+
+const RETRYABLE_SUBMIT_CODES = new Set(['409', '426', '429', '512', '521']);
+const RECOGNIZED_SUBMIT_CODES = [...RETRYABLE_SUBMIT_CODES].join('|');
 
 export function normalizeSubmitErrorCode(detail) {
   const text = String(detail ?? '').trim();
   if (!text) return '';
-  const exact = text.match(/^(409|429)$/);
+  const exact = text.match(new RegExp(`^(${RECOGNIZED_SUBMIT_CODES})$`));
   if (exact) return exact[1];
-  const embedded = text.match(/\b(409|429)\b/);
+  const embedded = text.match(new RegExp(`\\b(${RECOGNIZED_SUBMIT_CODES})\\b`));
   return embedded ? embedded[1] : text;
 }
 
 export function isRetryableBackgroundSubmitError(detail) {
-  const code = normalizeSubmitErrorCode(detail);
-  return code === '409' || code === '429';
+  return RETRYABLE_SUBMIT_CODES.has(normalizeSubmitErrorCode(detail));
 }
 
 /**

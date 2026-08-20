@@ -11,6 +11,8 @@ export function showPlayerPickRecap(options = {}) {
     name: options.name,
     status: options.status,
     reason: options.reason,
+    hydrateItem: options.hydrateItem,
+    resolveDestination: options.resolveDestination,
     itemDisplayName: options.itemDisplayName,
     resolveNativeTheme: options.resolveNativeTheme,
     resolveFutbinPlayerId: options.resolveFutbinPlayerId,

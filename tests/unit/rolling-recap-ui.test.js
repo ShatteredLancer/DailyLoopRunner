@@ -20,7 +20,7 @@ function harness() {
 }
 
 describe('Rolling recap UI', () => {
-  it('keeps long player names visible while placing source metadata below them', () => {
+  it('keeps long player names in a compact one-line row with an abbreviated source', () => {
     const ui = harness();
     void showLoopRecap({
       dom: ui.dom,
@@ -45,17 +45,15 @@ describe('Rolling recap UI', () => {
       element.textContent === 'Matteo Guendouzi Very Long Player Name'
     ));
     expect(playerName.style).toMatchObject({
-      width: '100%',
-      whiteSpace: 'normal',
-      overflowWrap: 'anywhere',
+      minWidth: '0',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
     });
-    expect(playerName.style.textOverflow).toBeUndefined();
-    const identity = ui.created.find((element) => element.children.includes(playerName));
-    expect(identity.style).toMatchObject({
-      flexDirection: 'column',
-      minWidth: '220px',
-      overflow: 'visible',
-    });
+    const source = ui.created.find((element) => element.textContent === '10x85+');
+    expect(source.title).toBe('10x 85+ Rare Gold Players Pack');
+    const row = ui.created.find((element) => element.children.includes(playerName));
+    expect(row.style).toMatchObject({ flexWrap: 'nowrap', overflow: 'hidden' });
   });
 
   it('renders bounded-run details without changing the shared pagination contract', async () => {

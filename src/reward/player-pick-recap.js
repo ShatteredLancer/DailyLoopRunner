@@ -1,4 +1,10 @@
-import { createRecapModel, recapCardTypeLabel, resolveRecapCardTheme } from './recap.js';
+import {
+  createRecapModel,
+  hydrateRecapItem,
+  recapCardTypeLabel,
+  recapItemDisplayName,
+  resolveRecapCardTheme,
+} from './recap.js';
 import {
   isRarePlayerCard,
   isSpecialPlayerCard,
@@ -6,7 +12,7 @@ import {
 
 function itemName(item, displayName) {
   if (typeof displayName === 'function') return String(displayName(item));
-  return String(item?.name || item?.commonName || item?.lastName || item?.definitionId || item?.id || 'Unknown player');
+  return recapItemDisplayName(item);
 }
 
 export function hasPlayerPickRecapCards(pickResults = []) {
@@ -22,27 +28,28 @@ export function createPlayerPickRecapModel(pickResults = [], options = {}) {
   const destinations = {};
   const rows = entries.flatMap((entry, pickIndex) => (entry?.pickedCards || []).map((card) => {
     const item = card.item || {};
-    const destination = card.destination || 'unknown';
+    const recapItem = hydrateRecapItem(item, options.hydrateItem);
+    const destination = options.resolveDestination?.(item) || card.destination || 'unknown';
     destinations[destination] = (destinations[destination] || 0) + 1;
     const row = {
-      name: itemName(item, options.itemDisplayName),
-      rating: Number(card.rating || item.rating || 0),
-      tier: item.tier,
-      rare: card.rare === true || isRarePlayerCard(item),
-      special: card.special === true || isSpecialPlayerCard(item),
+      name: itemName(recapItem, options.itemDisplayName),
+      rating: Number(card.rating || recapItem.rating || 0),
+      tier: recapItem.tier,
+      rare: card.rare === true || isRarePlayerCard(recapItem),
+      special: card.special === true || isSpecialPlayerCard(recapItem),
       duplicate: card.duplicate === true,
-      tradeable: typeof card.tradeable === 'boolean' ? card.tradeable : item.tradeable,
+      tradeable: typeof card.tradeable === 'boolean' ? card.tradeable : recapItem.tradeable,
       price: card.price ?? null,
       showPrice: true,
       destination,
       sourceLabel: `P${pickIndex + 1}${entry?.resumed === true ? 'r' : ''}`,
-      futbinPlayerId: options.resolveFutbinPlayerId?.(item) ?? null,
+      futbinPlayerId: options.resolveFutbinPlayerId?.(recapItem) ?? null,
       card,
       pickIndex: pickIndex + 1,
       resumed: entry?.resumed === true,
       item,
     };
-    row.theme = resolveRecapCardTheme(row, options.resolveNativeTheme?.(item));
+    row.theme = resolveRecapCardTheme(row, options.resolveNativeTheme?.(recapItem));
     row.tierLabel = recapCardTypeLabel(row, row.theme);
     return row;
   }));
