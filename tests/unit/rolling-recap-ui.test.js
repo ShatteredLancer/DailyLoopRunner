@@ -53,7 +53,35 @@ describe('Rolling recap UI', () => {
     const source = ui.created.find((element) => element.textContent === '10x85+');
     expect(source.title).toBe('10x 85+ Rare Gold Players Pack');
     const row = ui.created.find((element) => element.children.includes(playerName));
-    expect(row.style).toMatchObject({ flexWrap: 'nowrap', overflow: 'hidden' });
+    expect(row.style).toMatchObject({
+      display: 'grid',
+      gridTemplateColumns: '34px minmax(0, 1fr) 78px 64px 62px',
+      columnGap: '8px',
+      overflow: 'hidden',
+    });
+    expect(row.children).toHaveLength(5);
+  });
+
+  it('keeps empty source, destination, and price cells reserved for column alignment', () => {
+    const ui = harness();
+    void showLoopRecap({
+      dom: ui.dom,
+      model: {
+        modalId: 'rolling-recap-aligned-columns',
+        title: 'Rolling Recap',
+        summary: '1 pack',
+        specialCount: 0,
+        pageCount: 1,
+        pageSize: 15,
+        totalRows: 1,
+        rows: [{ name: 'Common Player', rating: 80 }],
+      },
+    });
+
+    const playerName = ui.created.find((element) => element.textContent === 'Common Player');
+    const row = ui.created.find((element) => element.children.includes(playerName));
+    expect(row.children).toHaveLength(5);
+    expect(row.children.slice(2).map((element) => element.textContent)).toEqual(['', '', '']);
   });
 
   it('renders bounded-run details without changing the shared pagination contract', async () => {

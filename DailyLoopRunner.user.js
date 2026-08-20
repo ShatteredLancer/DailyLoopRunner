@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.24
+// @version      0.8.25
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.24",
+    version: "0.8.25",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -32514,6 +32514,11 @@
       background: theme.background || "#1D2229",
       borderLeft: `4px solid ${theme.accent || "#64748B"}`
     });
+    applyStyles3(element, {
+      display: "grid",
+      gridTemplateColumns: mode?.mobile ? "34px minmax(0, 1fr) 54px 52px 48px" : "34px minmax(0, 1fr) 78px 64px 62px",
+      columnGap: mode?.mobile ? "6px" : "8px"
+    });
     const rating = dom.create("span");
     rating.textContent = String(Number(row.rating || 0));
     applyStyles3(rating, {
@@ -32539,7 +32544,6 @@
     }
     applyStyles3(name, {
       fontWeight: "600",
-      flex: "1 1 160px",
       minWidth: "0",
       lineHeight: "18px",
       whiteSpace: "nowrap",
@@ -32549,52 +32553,49 @@
       textDecoration: row.futbinUrl ? "underline" : "none"
     });
     element.append(rating, name);
-    if (row.sourceLabel) {
-      const source = dom.create("span");
-      source.textContent = compactRecapSourceLabel(row.sourceLabel);
-      source.title = row.sourceTitle || row.sourceLabel || source.textContent;
-      applyStyles3(source, {
-        color: theme.muted || "#AAB4C2",
-        fontSize: "11px",
-        fontWeight: "600",
-        flex: mode?.mobile ? "0 1 58px" : "0 1 100px",
-        minWidth: "0",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      });
-      element.appendChild(source);
-    }
-    if (row.destination) {
-      const destination = dom.create("span");
-      destination.textContent = DESTINATION_LABELS[row.destination] || String(row.destination);
-      destination.title = `Destination: ${destination.textContent}`;
-      applyStyles3(destination, {
-        color: theme.accent || "#AAB4C2",
-        fontSize: "11px",
-        fontWeight: "600",
-        flex: "0 1 auto",
-        minWidth: "0",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      });
-      element.appendChild(destination);
-    }
+    const source = dom.create("span");
+    source.textContent = row.sourceLabel ? compactRecapSourceLabel(row.sourceLabel) : "";
+    if (row.sourceLabel) source.title = row.sourceTitle || row.sourceLabel || source.textContent;
+    applyStyles3(source, {
+      color: theme.muted || "#AAB4C2",
+      fontSize: "11px",
+      fontWeight: "600",
+      minWidth: "0",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      textAlign: "right"
+    });
+    element.appendChild(source);
+    const destination = dom.create("span");
+    destination.textContent = row.destination ? DESTINATION_LABELS[row.destination] || String(row.destination) : "";
+    if (row.destination) destination.title = `Destination: ${destination.textContent}`;
+    applyStyles3(destination, {
+      color: theme.accent || "#AAB4C2",
+      fontSize: "11px",
+      fontWeight: "600",
+      minWidth: "0",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+      textAlign: "right"
+    });
+    element.appendChild(destination);
     const priceText = rowPrice(row, formatPrice);
-    if (priceText) {
-      const price = dom.create("span");
-      price.textContent = priceText;
-      price.title = `Price: ${priceText}`;
-      applyStyles3(price, {
-        color: theme.muted || "#AAB4C2",
-        fontSize: "11px",
-        fontWeight: "600",
-        whiteSpace: "nowrap",
-        flex: "0 0 auto"
-      });
-      element.appendChild(price);
-    }
+    const price = dom.create("span");
+    price.textContent = priceText || "";
+    if (priceText) price.title = `Price: ${priceText}`;
+    applyStyles3(price, {
+      color: theme.muted || "#AAB4C2",
+      fontSize: "11px",
+      fontWeight: "600",
+      whiteSpace: "nowrap",
+      minWidth: "0",
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      textAlign: "right"
+    });
+    element.appendChild(price);
     return element;
   }
   function showCardRecap(options = {}) {
