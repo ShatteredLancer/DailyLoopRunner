@@ -37,6 +37,8 @@ describe('loop runtime option projection', () => {
       rollingRecoveryStorageFirst: false,
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
+      protectFsuLockedPlayers: false,
+      protectActiveSquadPlayers: false,
       protectionRating: 90,
     });
     expect(normalizePickRuntimeOptions({
@@ -63,6 +65,8 @@ describe('loop runtime option projection', () => {
       rollingRecoveryStorageFirst: false,
       rollingOpenDuplicateProvisionsRewards: false,
       rollingShortageProvisionsPackLimit: 2,
+      protectFsuLockedPlayers: false,
+      protectActiveSquadPlayers: false,
       protectionRating: 90,
     });
   });
@@ -90,6 +94,35 @@ describe('loop runtime option projection', () => {
     });
     expect(loopDef).not.toHaveProperty('protectHighGold');
     expect(loopDef).not.toHaveProperty('pickHighGoldThreshold');
+  });
+
+  it('inherits the opt-in submission guards and keeps them disabled by default', () => {
+    expect(normalizePickRuntimeOptions({
+      protectFsuLockedPlayers: true,
+      protectActiveSquadPlayers: true,
+    })).toMatchObject({
+      protectFsuLockedPlayers: true,
+      protectActiveSquadPlayers: true,
+    });
+    expect(resolvePickRuntimeOptions(
+      {},
+      { pickOptions: { protectFsuLockedPlayers: true } },
+      { pickOptions: { protectActiveSquadPlayers: true } },
+    )).toMatchObject({
+      protectFsuLockedPlayers: true,
+      protectActiveSquadPlayers: true,
+    });
+    const loopDef = { strategy: 'rollingUpgrade' };
+    applyLoopRuntimeOptions(loopDef, {
+      pickOptions: {
+        protectFsuLockedPlayers: true,
+        protectActiveSquadPlayers: true,
+      },
+    });
+    expect(loopDef.runtimePickOptions).toMatchObject({
+      protectFsuLockedPlayers: true,
+      protectActiveSquadPlayers: true,
+    });
   });
 
   it('does not rewrite legacy requirement fields while applying Pick options', () => {

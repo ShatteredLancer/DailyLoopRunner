@@ -64,7 +64,7 @@ Unassigned/Transfer 中不能直接提交的 duplicate signal 会解析到 Stora
 - EA tier/rarity eligibility
 - `goldConsumption` 的 strict 模式
 - `allowSpecial` 和特殊卡条件
-- FSU Lock、Only Untradeable、排除联赛和 Evolution
+- 启用 `Protect FSU locked players` 时的 FSU Lock，以及始终生效的 Only Untradeable、排除联赛和 Evolution
 - low-rated 或 rating-constrained 数值上限
 
 因此“优先清理 Unassigned”不等于可以用 Rare 代替严格 Common，也不等于可以绕过特殊卡和高分卡保护。

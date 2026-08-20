@@ -116,6 +116,16 @@ function pickOptionOverrides(input = {}) {
     input.rollingShortageProvisionsPackLimit,
   );
   assign(
+    'protectFsuLockedPlayers',
+    nested.protectFsuLockedPlayers,
+    input.protectFsuLockedPlayers,
+  );
+  assign(
+    'protectActiveSquadPlayers',
+    nested.protectActiveSquadPlayers,
+    input.protectActiveSquadPlayers,
+  );
+  assign(
     'protectionRating',
     nested.protectionRating,
     nested.autoPickThreshold,
@@ -172,6 +182,8 @@ export function normalizePickRuntimeOptions(input = {}) {
     rollingShortageProvisionsPackLimit: normalizeRollingShortageProvisionsPackLimit(
       input.rollingShortageProvisionsPackLimit,
     ),
+    protectFsuLockedPlayers: input.protectFsuLockedPlayers === true,
+    protectActiveSquadPlayers: input.protectActiveSquadPlayers === true,
     protectionRating: boundedNumber(protectionRating > 0 ? protectionRating : 90, 90, 1, 99),
   };
 }

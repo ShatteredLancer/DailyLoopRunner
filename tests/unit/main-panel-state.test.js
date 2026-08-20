@@ -147,6 +147,10 @@ describe('main panel state rendering', () => {
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('shortage Provisions batch 2');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('FSU locked players off');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Active Squad 409 confirm');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('surplus Provisions/TOTW off');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Provisions shortage recovery off');

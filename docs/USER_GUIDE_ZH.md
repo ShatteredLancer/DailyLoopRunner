@@ -174,6 +174,9 @@ Recap 保留来源包、停止原因、卡片 tier、重复/可交易状态和�
 Unassigned -> Storage -> Transfer -> Club
 ```
 
-同一层优先使用满足要求的低价值 Common；只有 Common 不足且 SBC 允许任意 Gold 时才使用 Rare。FSU Lock、Only Untradeable、排除联赛、Evolution、高分和 Special 保护在最终保存和提交前仍会重新检查。
+同一层优先使用满足要求的低价值 Common；只有 Common 不足且 SBC 允许任意 Gold 时才使用 Rare。Only Untradeable、排除联赛、Evolution、高分和 Special 保护在最终保存和提交前仍会重新检查。FSU Lock player 和 Active Squad 冲突保护位于 `Selection Policy -> Submission guards`，两个开关默认关闭。
+
+- `Protect FSU locked players` 开启后，Runner 不会把 FSU/Enhancer Lock player 中的卡选入 SBC，并会在最终提交前再次检查；发现锁卡已经进入阵容时停止。关闭时不增加这层 Lock player 保护，其他 FSU 过滤仍保持原行为。
+- `Stop on Active Squad conflict` 开启后，EA 返回 `409` 且带非空 `itemViolations` 时立即停止，不会发送 `skipValidation:true` 的确认提交。关闭时保留 Rolling 原有的严格校验后单次确认逻辑；缺少合法 `itemViolations` 时无论开关状态都不会强制提交。
 
 FSU Local 的 Club 快速缓存属于 provisional 数据。使用 Club 球员时，Runner 必须在保存前按 item/definition identity 向 EA 定向验证；失败时重新选材或停止。

@@ -182,6 +182,7 @@ describe('pure inventory selector', () => {
         ...fsuPolicy,
         goldRange: [75, 82],
         lockedItemIds: [1],
+        protectFsuLockedPlayers: true,
         excludeEvolution: true,
       },
     });
@@ -309,12 +310,48 @@ describe('pure inventory selector', () => {
       inventorySnapshot: adapter.snapshot(),
       requirements: [{ tier: 'gold', count: 1, playerOnly: true, allowSpecial: false }],
       priorityPiles: ['storage'],
-      fsuPolicy: { ...fsuPolicy, onlyUntradeable: true, lockedItemIds: [32] },
+      fsuPolicy: {
+        ...fsuPolicy,
+        onlyUntradeable: true,
+        lockedItemIds: [32],
+        protectFsuLockedPlayers: true,
+      },
       consumedItemIds: [31],
       protectedDefinitionIds: [133],
     });
     expect(plan.ok).toBe(true);
     expect(plan.selected[0].id).toBe(34);
+  });
+
+  it('allows an FSU-locked player by default when the opt-in guard is disabled', () => {
+    const adapter = createFakeInventoryAdapter({ storage: [
+      makePlayer({ id: 41, definitionId: 141, rating: 75 }),
+      makePlayer({ id: 42, definitionId: 142, rating: 76 }),
+    ] });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{ tier: 'gold', count: 1, playerOnly: true, allowSpecial: false }],
+      priorityPiles: ['storage'],
+      fsuPolicy: { ...fsuPolicy, lockedItemIds: [41] },
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.selected[0].id).toBe(41);
+  });
+
+  it('rejects an FSU-locked player only when the opt-in guard is enabled', () => {
+    const adapter = createFakeInventoryAdapter({ storage: [
+      makePlayer({ id: 51, definitionId: 151, rating: 75 }),
+      makePlayer({ id: 52, definitionId: 152, rating: 76 }),
+    ] });
+    const plan = selectInventoryPlayers({
+      inventorySnapshot: adapter.snapshot(),
+      requirements: [{ tier: 'gold', count: 1, playerOnly: true, allowSpecial: false }],
+      priorityPiles: ['storage'],
+      fsuPolicy: { ...fsuPolicy, lockedItemIds: [51], protectFsuLockedPlayers: true },
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.selected[0].id).toBe(52);
+    expect(plan.diagnostics.some(({ reasons }) => reasons.includes('fsu-locked-player'))).toBe(true);
   });
 
   it('uses eligible common gold across every pile before any rare gold', () => {

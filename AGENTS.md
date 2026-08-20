@@ -17,7 +17,7 @@ Daily Loop Runner 是 EA FC Web App 的 Tampermonkey 自动化脚本，运行时
 必须遵守：
 
 - 无法确认 SBC、Challenge、奖励或材料身份时停止。
-- 不得为了让流程通过而放宽高分卡、特殊卡、FSU Lock、Only Untradeable、联赛或 Evolution 保护。
+- 不得为了让流程通过而放宽高分卡、特殊卡、Only Untradeable、联赛或 Evolution 保护。FSU Lock player 和 Active Squad 冲突保护是 Selection Policy 中明确的 opt-in 开关，默认关闭；开启后必须在候选/提交前保护锁卡，或在 EA 返回 item conflict 时停止。
 - 不得把 Transfer/Unassigned duplicate signal 当成可以直接提交的实体；必须解析到 Club/Storage 中真实可提交的对应卡。
 - 开下一包、提交下一阵或进入下一阶段前，必须确认当前 Unassigned 和页面状态已经取得进展。
 - 修复当前状态时，优先保证用户更新脚本后可以重新点击同一个 Loop 继续，而不是要求清空状态重来。
@@ -30,7 +30,7 @@ Daily Loop Runner 是 EA FC Web App 的 Tampermonkey 自动化脚本，运行时
 
 已经在真实页面确认、不得回退的运行时事实：
 
-- FSU 是普通金材料策略的权威来源。Only Untradeable、排除联赛、Exclude Evolution、Golden Player Range、Storage 优先和 Lock player 必须跟随；Runner 不得为了凑够材料绕过这些过滤。评分型 SBC 可以不使用 FSU 页面一键填充，但候选仍必须经过 FSU 过滤和锁卡检查。
+- FSU 是普通金材料策略的权威来源。Only Untradeable、排除联赛、Exclude Evolution、Golden Player Range 和 Storage 优先仍必须跟随；FSU Lock player 由 `Selection Policy -> Submission guards -> Protect FSU locked players` 控制，默认关闭。开启时候选和提交前检查都必须保护锁卡，发现已进入阵容的锁卡则停止；评分型 SBC 可以不使用 FSU 页面一键填充，但启用该开关时候选仍必须经过锁卡检查。
 - EA/FSU 的 `loans === -1` 表示无限使用的普通卡，不是 loan。`loans === 0` 或正数才表示受限使用；真实 loan、limited-use、concept、academy enrolled 和 active trade item 都不能提交。
 - FSU Lock 不能只匹配单一 `item.id`。身份匹配必须覆盖 item、resource、definition、asset 和 guid 类字段，以及 EA 对象常见的嵌套数据容器。
 - FSU Club 实体缓存恢复后属于 provisional 数据。Runner Live SBC 使用 Club 卡时，必须在保存前按 item ID 和 definition ID 向 EA 定向校验；发现缺失或属性变化时停止并重新选材。不得以 Club 数量、缓存年龄或 fingerprint 代替该校验。
@@ -417,7 +417,7 @@ Trade card class 必须保持明确：`common-gold` 只匹配非特殊普金，`
 核心不变量：
 
 - 同一阵容不能重复使用相同 `definitionId`。
-- consumed、protected、loan、limited-use、concept、academy、active trade 和 FSU Lock 必须排除。
+- consumed、protected、loan、limited-use、concept、academy 和 active trade 必须排除；FSU Lock 在 `protectFsuLockedPlayers` 开启时必须排除。
 - Unassigned/Transfer 只作为 duplicate signal，最终必须解析到真实 submission item。
 - requirements 模式严格保持 count、tier、rarity、special 和评分上限。
 - rating 模式先基于实时评分桶构造最低可行评分配方，再按配方比较 pile；不能因 Storage 优先而选择不必要的高分卡。
@@ -702,7 +702,7 @@ Pack open 返回 `471` 时，重试恢复必须排除刚失败的 Pack 对象，
 
 配置对象先按父 Loop 默认 -> 子 Loop 配置 -> step 上下文合成，再施加适用的全局运行意图。不要用单一的“最具体层总是覆盖”规则实现所有字段。以下规则分别锁定：
 
-- FSU Lock、Only Untradeable、联赛/Evolution过滤、高分/特殊卡保护和提交前校验不能被任意层级关闭。
+- Only Untradeable、联赛/Evolution过滤、高分/特殊卡保护和提交前校验不能被任意层级关闭。FSU Lock player 与 Active Squad item-conflict protection 在全局 Selection Policy 中默认关闭，并按 `pickOptions` 的 global -> parent -> child 逐字段合同继承；缺失表示继承，显式布尔值才允许覆盖，不能用 `||` 吞掉显式 `false`。
 - 父子 `disabledPiles` 取并集，更具体层级不能重新启用父级禁用来源。
 - recovery 默认允许 step > 子 Loop > 父 Loop，但只能引用已验证 policy，不能绕过 blocked condition。
 - 可继承偏好按 global UI -> parent Loop -> child Loop -> step context 合并；缺失表示继承，显式 `false`、`normal` 或 `never` 表示覆盖。不得用 `||` 合并布尔值，否则 child `false` 无法覆盖 parent `true`。
@@ -804,7 +804,7 @@ Builder 激活必须先物化当前 Profile：静态 configured loops 经过内�
 2. 包含 `TEAM_RATING` 条件的 SBC 使用 `rating-constrained`；上限应用于所有卡，包括普通 Gold、Special、TOTW、TOTS、FOF，默认允许到 88。
 3. 动态模式推断必须来自扫描到的 `TEAM_RATING` 元数据或等价的结构化 rating model，不得根据 SBC 名称、奖励名或硬编码 family 猜测。
 4. FSU Gold rating range 只在 `low-gold` 模式生效，并与 `lowRatedGoldMaxRating` 取更严格的交集；`rating-constrained` 必须忽略 FSU Gold range。
-5. FSU locked player、Only Untradeable、Exclude Evolution、Excluded Leagues 等非 Gold range 保护在两种模式都必须生效。
+5. Only Untradeable、Exclude Evolution、Excluded Leagues 等非 Gold range 保护在两种模式都必须生效。FSU locked player 保护由 `protectFsuLockedPlayers` 控制，默认关闭，开启时在两种模式都必须生效；`protectActiveSquadPlayers` 开启时，EA `409 + itemViolations` 必须停止，不能发送 `skipValidation:true` 确认提交。
 6. Pick、Pack、动态 Upgrade、自动 TOTW/材料恢复、Provision stage 和 Unassigned recovery 必须共享同一策略解析及 `Unassigned -> Storage -> Transfer -> Club` 来源语义，不得维护彼此分离的数值保护逻辑。
 7. 继承优先级为全局 < Workflow < Loop/嵌套 stage；子级只覆盖显式配置字段，`inherit` 保留父级，`auto` 由当前实际 SBC 条件确定模式。
 8. `protectHighGold`、`highGoldThreshold`、`maxNormalGoldSubmittedRating`、`maxSubmittedRating` 仅用于旧配置读取兼容；内置 Loop、动态扫描、Profile、Builder、导出 JSON 和新测试夹具不得继续生成这些字段。

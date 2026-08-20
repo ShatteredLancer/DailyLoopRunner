@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         FC26 Daily Loop Runner
 // @namespace    https://github.com/ShatteredLancer/DailyLoopRunner
-// @version      0.8.22
+// @version      0.8.23
 // @description  Automates configurable SBC, pack, Unassigned and Player Pick workflows in the EA FC Web App.
 // @homepageURL  https://github.com/ShatteredLancer/DailyLoopRunner
 // @supportURL   https://github.com/ShatteredLancer/DailyLoopRunner/issues
@@ -29,7 +29,7 @@
   // package.json
   var package_default = {
     name: "fc26-daily-loop-runner",
-    version: "0.8.22",
+    version: "0.8.23",
     description: "Tampermonkey automation for configurable EA FC Web App SBC, pack and Player Pick workflows.",
     private: true,
     license: "MIT",
@@ -2779,6 +2779,16 @@
       input2.rollingShortageProvisionsPackLimit
     );
     assign(
+      "protectFsuLockedPlayers",
+      nested.protectFsuLockedPlayers,
+      input2.protectFsuLockedPlayers
+    );
+    assign(
+      "protectActiveSquadPlayers",
+      nested.protectActiveSquadPlayers,
+      input2.protectActiveSquadPlayers
+    );
+    assign(
       "protectionRating",
       nested.protectionRating,
       nested.autoPickThreshold,
@@ -2821,6 +2831,8 @@
       rollingShortageProvisionsPackLimit: normalizeRollingShortageProvisionsPackLimit(
         input2.rollingShortageProvisionsPackLimit
       ),
+      protectFsuLockedPlayers: input2.protectFsuLockedPlayers === true,
+      protectActiveSquadPlayers: input2.protectActiveSquadPlayers === true,
       protectionRating: boundedNumber(protectionRating > 0 ? protectionRating : 90, 90, 1, 99)
     };
   }
@@ -11384,7 +11396,9 @@
     if (item.endTime !== -1) reasons.push("limited-end-time");
     if (item.activeTrade) reasons.push("active-trade");
     const lockedIds = new Set([...fsuPolicy.lockedItemIds || [], ...fsuPolicy.lockedDefinitionIds || []].map(Number));
-    if ((item.identityIds || [item.id, item.definitionId]).some((id) => lockedIds.has(Number(id)))) reasons.push("fsu-locked-player");
+    if (fsuPolicy.protectFsuLockedPlayers === true && (item.identityIds || [item.id, item.definitionId]).some((id) => lockedIds.has(Number(id)))) {
+      reasons.push("fsu-locked-player");
+    }
     if (fsuPolicy.onlyUntradeable && item.tradeable) reasons.push("fsu-only-untradeable");
     if (fsuPolicy.excludeEvolution && item.evolution) reasons.push("fsu-exclude-evolution");
     if (fsuPolicy.excludeDesignatedLeagues && (fsuPolicy.excludedLeagueIds || []).includes(item.leagueId)) reasons.push(`fsu-excluded-league-${item.leagueId}`);
@@ -24565,6 +24579,17 @@
     const delayMs = Math.min(3e3, base + current * 500);
     return { retry: true, delayMs, reason: code };
   }
+  function hasItemViolationConflict(result, detail = "") {
+    const codes = [detail, result?.status, result?.error?.code].map(normalizeSubmitErrorCode).filter(Boolean);
+    return codes.includes("409") && Array.isArray(result?.data?.itemViolations) && result.data.itemViolations.length > 0;
+  }
+  function shouldStopForProtectedItemViolation({
+    protectionEnabled = false,
+    result = null,
+    detail = ""
+  } = {}) {
+    return protectionEnabled === true && hasItemViolationConflict(result, detail);
+  }
   function positiveItemId(value) {
     const id = Number(value);
     return Number.isSafeInteger(id) && id > 0 ? id : 0;
@@ -28554,8 +28579,10 @@
     const recoveryPileOrder = pickOptions.rollingRecoveryStorageFirst === true ? "Storage first" : "Unassigned first";
     const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true ? "immediate" : "on shortage";
     const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
+    const fsuLockedProtection = pickOptions.protectFsuLockedPlayers === true ? "on" : "off";
+    const activeSquadProtection = pickOptions.protectActiveSquadPlayers === true ? "stop" : "confirm";
     summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickModeLabel}`;
-    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; normal recovery order ${recoveryPileOrder}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}`;
+    summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; normal recovery order ${recoveryPileOrder}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}; FSU locked players ${fsuLockedProtection}; Active Squad 409 ${activeSquadProtection}`;
   }
   function renderMainPanelScanProgress(options = {}) {
     const panel = options.panel;
@@ -33317,6 +33344,20 @@
       mode,
       { min: 1, max: 30 }
     );
+    const protectFsuLockedPlayers = checkbox2(
+      dom,
+      "bronze-loop-policy-protect-fsu-locked-players",
+      "Protect FSU locked players",
+      pickOptions.protectFsuLockedPlayers === true,
+      "When enabled, Runner excludes players listed in FSU/Enhancer Lock player from SBC selection and stops before submission if one is present"
+    );
+    const protectActiveSquadPlayers = checkbox2(
+      dom,
+      "bronze-loop-policy-protect-active-squad-players",
+      "Stop on Active Squad conflict",
+      pickOptions.protectActiveSquadPlayers === true,
+      "When enabled, stop on EA 409 squad-conflict responses instead of confirming the same squad with skipValidation"
+    );
     form.append(
       sectionTitle(dom, "Standard SBCs"),
       field2(dom, "Low-rated Gold max", lowRatedGold, mode, "Maximum normal Gold rating for non-rating SBCs"),
@@ -33334,6 +33375,9 @@
       rollingOpenDuplicateProvisionsRewards.label,
       wideField(dom, "Storage pressure recovery", rollingStorageSinkMode, mode, "Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set"),
       wideField(dom, "Storage pressure SBC", rollingStorageSinkSet, mode, "Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility"),
+      sectionTitle(dom, "Submission guards"),
+      protectFsuLockedPlayers.label,
+      protectActiveSquadPlayers.label,
       sectionTitle(dom, "Player Picks"),
       wideField(dom, "Selection mode", pickMode, mode, "Rating first preserves the existing behavior; Special price first ranks every special card before normal cards and pauses when a high-price duplicate displaces a non-duplicate; Always review specials pauses whenever a special card appears"),
       openPicksAtEnd.label
@@ -33389,7 +33433,9 @@
         rollingShortageProvisionsPackLimit: readNumber(
           rollingShortageProvisionsPackLimit,
           pickOptions.rollingShortageProvisionsPackLimit
-        )
+        ),
+        protectFsuLockedPlayers: protectFsuLockedPlayers.input.checked,
+        protectActiveSquadPlayers: protectActiveSquadPlayers.input.checked
       })
     });
     const close = () => overlay.remove?.();
@@ -33420,6 +33466,8 @@
         rollingProvisionsMaxRating,
         rollingRecoveryStorageFirst.input,
         rollingShortageProvisionsPackLimit,
+        protectFsuLockedPlayers.input,
+        protectActiveSquadPlayers.input,
         rollingSurplusCrafting.input,
         rollingProvisionsShortageRecovery.input,
         rollingRequiredSpecialRecovery.input,
@@ -39306,10 +39354,16 @@
     function isEvolutionItem(item) {
       return isPlayerEvolutionCard(item);
     }
+    function isFsuLockedPlayerProtectionEnabled(spec = {}, context = null) {
+      const configured = context?.protectFsuLockedPlayers ?? spec?.runtimePickOptions?.protectFsuLockedPlayers ?? spec?.protectFsuLockedPlayers ?? getPickRuntimeOptions().protectFsuLockedPlayers;
+      return configured === true;
+    }
     function getFsuRejectReasons(item, spec = {}, settings = getFsuSettings(), context = null) {
       const reasons = [];
       if (!isPlayer2(item)) return reasons;
-      if (isFsuLockedItem(item, settings, context)) reasons.push("fsu-locked-player");
+      if (isFsuLockedPlayerProtectionEnabled(spec, context) && isFsuLockedItem(item, settings, context)) {
+        reasons.push("fsu-locked-player");
+      }
       if (settings.onlyUntradeable && isTradeable(item)) reasons.push("fsu-only-untradeable");
       if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push("fsu-exclude-evolution");
       const excludedLeagueIds = context?.excludedLeagueIds || (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0);
@@ -41607,7 +41661,10 @@
         inventorySnapshot,
         requirements,
         priorityPiles: effectivePriorityPiles,
-        fsuPolicy: getFsuSettings(),
+        fsuPolicy: {
+          ...getFsuSettings(),
+          protectFsuLockedPlayers: (selectionLoopDef?.runtimePickOptions?.protectFsuLockedPlayers ?? getPickRuntimeOptions().protectFsuLockedPlayers) === true
+        },
         consumedItemIds: [...state.consumedItemIds],
         preferredSignalRefs: options.preferredSignalRefs || []
       });
@@ -41694,6 +41751,7 @@
       const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number).filter(Boolean));
       const context = {
         settings,
+        protectFsuLockedPlayers: loopDef.runtimePickOptions?.protectFsuLockedPlayers ?? getPickRuntimeOptions().protectFsuLockedPlayers,
         protectedItemIds,
         protectedDefinitionIds,
         lockedItemIds: new Set((settings.lockedItemIds || []).map(Number).filter(Boolean)),
@@ -43171,6 +43229,7 @@
         playerOnly: true,
         allowSpecial: roleAware || requiredSpecialCount > 0 && specialIndex <= requiredSpecialCount
       };
+      const protectFsuLockedPlayers = context.protectFsuLockedPlayers ?? loopDef.runtimePickOptions?.protectFsuLockedPlayers ?? getPickRuntimeOptions().protectFsuLockedPlayers;
       if (itemId5 && state.consumedItemIds.has(itemId5)) reasons.push("consumed-this-run");
       if (isLoanItem(item)) reasons.push("loan");
       else if (isLimitedUseItem(item)) reasons.push("limited-use");
@@ -43198,6 +43257,7 @@
       if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
       getFsuRejectReasons(item, fsuSpec, settings, {
         ...context || {},
+        protectFsuLockedPlayers,
         sbcFodderPolicy: fodderPolicy,
         respectFsuGoldRange: fodderPolicy.mode === "low-gold"
       }).forEach((reason) => {
@@ -43715,6 +43775,14 @@
             packInventory
           });
           lastDetail = serviceResultErrorText(result) || result?.status || "unknown";
+          if (shouldStopForProtectedItemViolation({
+            protectionEnabled: options.protectActiveSquadPlayers,
+            result,
+            detail: lastDetail
+          })) {
+            const violationNames = [...new Set(result.data.itemViolations.map((violation) => String(violation?.name || "").trim()).filter(Boolean))];
+            fail2(`${label}: Active Squad protection stopped submission after EA reported ${result.data.itemViolations.length} item conflict(s)${violationNames.length ? ` (${violationNames.join("/")})` : ""}; no skipValidation confirmation was sent`);
+          }
           const overridePlan = planItemViolationOverride({
             allowOverride: options.allowItemViolationOverride === true,
             attempt,
@@ -45149,6 +45217,7 @@
               if (ratingSbcFill) {
                 ratingSubmission = await submitRatingSbcInBackground(context.set, context.challenge, loopDef.name, {
                   players: context.players || inspection.items || [],
+                  protectActiveSquadPlayers: activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
                   allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1
                 });
                 return { submitted: true, rewardPackId: ratingSubmission.rewardPackId };
@@ -48584,6 +48653,7 @@
             {
               players: context.players || players,
               allowItemViolationOverride: true,
+              protectActiveSquadPlayers: opened.activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
               allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
               failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
             }
@@ -49497,6 +49567,7 @@
             {
               players: submitContext.players || resolved.players,
               allowItemViolationOverride: true,
+              protectActiveSquadPlayers: loopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
               rewardObservationAttempts: 1,
               allowKnownRewardFallback: false,
               failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
@@ -51397,6 +51468,7 @@
                   {
                     players: context.players || players,
                     allowItemViolationOverride: true,
+                    protectActiveSquadPlayers: activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
                     allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
                     failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
                   }

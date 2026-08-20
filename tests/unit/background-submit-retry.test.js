@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
+  hasItemViolationConflict,
   isRetryableBackgroundSubmitError,
   normalizeSubmitErrorCode,
   planBackgroundSubmitRetry,
   planItemViolationOverride,
+  shouldStopForProtectedItemViolation,
 } from '../../src/sbc/background-submit-retry.js';
 
 describe('background submit retry helpers', () => {
+  it('recognizes only a 409 response with non-empty item violations as an item conflict', () => {
+    expect(hasItemViolationConflict({ status: 409, data: { itemViolations: [{ itemIds: [1] }] } })).toBe(true);
+    expect(hasItemViolationConflict({ status: 409, data: { itemViolations: [] } })).toBe(false);
+    expect(hasItemViolationConflict({ status: 429, data: { itemViolations: [{ itemIds: [1] }] } })).toBe(false);
+    expect(hasItemViolationConflict({ status: 409, data: { itemViolations: [{ itemIds: [1] }] } }, '429')).toBe(true);
+    const conflict = { status: 409, data: { itemViolations: [{ itemIds: [1] }] } };
+    expect(shouldStopForProtectedItemViolation({ protectionEnabled: false, result: conflict })).toBe(false);
+    expect(shouldStopForProtectedItemViolation({ protectionEnabled: true, result: conflict })).toBe(true);
+  });
+
   it('recognizes bare and embedded 409/429 codes', () => {
     expect(normalizeSubmitErrorCode(409)).toBe('409');
     expect(normalizeSubmitErrorCode('429')).toBe('429');

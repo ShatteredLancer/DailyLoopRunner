@@ -68,8 +68,11 @@ describe('current direct side-effect call baseline', () => {
   it('keeps item-violation confirmation bounded to Rolling submissions without a Challenge reload', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
     expect(source.match(/allowItemViolationOverride:\s*true/g) || []).toHaveLength(3);
+    const protectedConflictStart = source.indexOf('if (shouldStopForProtectedItemViolation({');
     const overrideStart = source.indexOf('if (overridePlan.retry) {');
     const ordinaryRetryStart = source.indexOf('const plan = planBackgroundSubmitRetry({', overrideStart);
+    expect(protectedConflictStart).toBeGreaterThan(-1);
+    expect(protectedConflictStart).toBeLessThan(overrideStart);
     expect(overrideStart).toBeGreaterThan(-1);
     expect(ordinaryRetryStart).toBeGreaterThan(overrideStart);
     const overrideBlock = source.slice(overrideStart, ordinaryRetryStart);

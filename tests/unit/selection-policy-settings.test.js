@@ -89,6 +89,8 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-recovery-storage-first').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');
     expect(ui.byId.get('#bronze-loop-policy-rolling-open-duplicate-provisions-rewards').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-protect-fsu-locked-players').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-protect-active-squad-players').checked).toBe(false);
 
     ui.byId.get('#bronze-loop-policy-low-rated-gold-max').value = '81';
     ui.byId.get('#bronze-loop-policy-rating-sbc-max-card').value = '89';
@@ -105,6 +107,8 @@ describe('selection policy settings modal', () => {
     ui.byId.get('#bronze-loop-policy-rolling-recovery-storage-first').checked = true;
     ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value = '4';
     ui.byId.get('#bronze-loop-policy-rolling-open-duplicate-provisions-rewards').checked = true;
+    ui.byId.get('#bronze-loop-policy-protect-fsu-locked-players').checked = true;
+    ui.byId.get('#bronze-loop-policy-protect-active-squad-players').checked = true;
     await ui.byId.get('#bronze-loop-policy-save').click();
 
     expect(onSave).toHaveBeenCalledWith({
@@ -126,6 +130,8 @@ describe('selection policy settings modal', () => {
         rollingRecoveryStorageFirst: true,
         rollingOpenDuplicateProvisionsRewards: true,
         rollingShortageProvisionsPackLimit: 4,
+        protectFsuLockedPlayers: true,
+        protectActiveSquadPlayers: true,
       }),
     });
     expect(overlay.removed).toBe(true);
@@ -152,6 +158,8 @@ describe('selection policy settings modal', () => {
     expect(ui.byId.get('#bronze-loop-policy-rolling-provisions-max-rating').value).toBe('88');
     expect(ui.byId.get('#bronze-loop-policy-rolling-recovery-storage-first').checked).toBe(false);
     expect(ui.byId.get('#bronze-loop-policy-rolling-shortage-provisions-pack-limit').value).toBe('2');
+    expect(ui.byId.get('#bronze-loop-policy-protect-fsu-locked-players').checked).toBe(false);
+    expect(ui.byId.get('#bronze-loop-policy-protect-active-squad-players').checked).toBe(false);
   });
 
   it('does not save a Storage sink change when the dialog is cancelled', async () => {

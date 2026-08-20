@@ -99,7 +99,7 @@
 
 ### 3.4 Regular
 
-`Regular` 指普通金、银、铜球员。主 SBC 和恢复 SBC 仍须遵守 FSU Lock、loan、concept、Evolution、active trade item 和其他既有安全过滤。
+`Regular` 指普通金、银、铜球员。主 SBC 和恢复 SBC 仍须遵守 loan、concept、Evolution、active trade item 和其他既有安全过滤；FSU Lock 由默认关闭的 `Protect FSU locked players` 控制，开启后同时作用于候选和提交前复核。
 
 ### 3.5 Automatic-use max rating
 
@@ -151,7 +151,7 @@ Player Pick 通过 `pickSelectionMode` 统一表达选择策略，并兼容旧 `
 
 任何表格规则都不能绕过以下已有保护：
 
-- FSU Lock 和身份别名匹配。
+- 开启 `Protect FSU locked players` 时的 FSU Lock 和身份别名匹配。
 - loan、limited-use、concept、academy/evolution 和 active trade item。
 - 同阵容 definitionId 唯一性。
 - Unassigned/Transfer duplicate signal 的真实可提交实体解析。
@@ -529,7 +529,7 @@ Rolling 的主 `10x85+`、评分恢复阵和 Storage pressure SBC 共用同一�
 5. 强制重新保存发生交换的 Challenge；提交前重新运行动态 SBC validator 和 Inventory Ledger 对账。
 6. 将被换出的可交易 Club 实体重新映射为 Unassigned signal，提交成功后由统一库存清理消费，避免丢失路由所有权。
 
-EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolations`。Rolling 只在以下条件全部成立时执行一次官方确认语义的 `skipValidation:true` 重试：
+EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolations`。`Stop on Active Squad conflict` 默认关闭；关闭时 Rolling 只在以下条件全部成立时执行一次官方确认语义的 `skipValidation:true` 重试：
 
 - 当前调用点显式设置 `allowItemViolationOverride:true`。
 - 首次响应确实是 `409`，且 `itemViolations` 是非空数组。
@@ -537,6 +537,8 @@ EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolation
 - 首次提交没有已经使用 `skipValidation:true`，并且重试预算尚未耗尽。
 
 确认提交复用同一个 Challenge 和同一组已保存球员，在 Challenge reload 之前立即执行一次。确认失败是终止结果，不再换阵容、重新加载后尝试另一组卡或连续绕过验证。无 `itemViolations` 的 `409`、阵容外 ID、未知响应结构及普通 Loop 继续走原有诊断和有界重试，不会被静默强制提交。
+
+开启 `Stop on Active Squad conflict` 后，首次 `409 + itemViolations` 在任何 override 规划前立即停止，不发送 `skipValidation:true`。该分支仍保留完整的后台提交诊断，便于识别 violation 名称和本次阵容实体。
 
 ## 12. Runtime Telemetry UI
 

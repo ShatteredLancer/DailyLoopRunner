@@ -55,7 +55,7 @@ Tampermonkey 按自身的更新检查间隔读取 `releases/latest`。只有 `@v
 - Unassigned、Storage、Transfer、Club 去向确认和恢复策略
 - 可视化 Workflow/Loop Builder、Profile、Draft/Saved/Active 状态
 - Rare Gold/Special recap、价格查询和可选 Reward Alerts
-- FSU Lock、不可交易、联赛、Evolution、高分和特殊卡保护兼容
+- FSU Lock（可选）以及不可交易、联赛、Evolution、高分和特殊卡保护兼容
 - Trade Scheduler：受保护的 Buy、Club Listing、Transfer Reprice 和 EA 原生 Re-list All，支持秒级调度、Request Pacing、有限授权、可恢复时间片与跨任务公平执行
 
 详细界面和 Loop 行为见 [用户手册](docs/USER_GUIDE_ZH.md)。`10x85+` 的开包、材料消耗和恢复流程见 [Rolling Loop 使用与流程指南](docs/10X85_ROLLING_LOOP_GUIDE_ZH.md)。Builder 的图示操作见 [Workflow/Loop Builder 中文指南](docs/WORKFLOW_LOOP_BUILDER_GUIDE_ZH.md)。手机、平板和触摸屏布局见 [响应式与触摸界面](docs/RESPONSIVE_UI_ZH.md)。

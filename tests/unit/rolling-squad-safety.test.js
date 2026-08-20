@@ -19,6 +19,7 @@ describe('Rolling squad safety inspection', () => {
       lockedItemIds: [locked.id],
       lockedDefinitionIds: [],
     });
+    api.state.pickOptions = { protectFsuLockedPlayers: true };
 
     const inspection = api.inspectSbcItems({
       name: 'Rolling final safety',
@@ -31,6 +32,20 @@ describe('Rolling squad safety inspection', () => {
       expect.objectContaining({ item: evolved, reasons: expect.arrayContaining(['fsu-exclude-evolution']) }),
       expect.objectContaining({ item: academy, reasons: expect.arrayContaining(['academy']) }),
     ]));
+  });
+
+  it('does not block an FSU-locked player when the guard is disabled', async () => {
+    const locked = makePlayer({ id: 11, definitionId: 1011, rating: 75, rareflag: 1 });
+    const { api } = await loadUserscript();
+    api.setFsuSettingsOverride({ lockedItemIds: [locked.id], lockedDefinitionIds: [] });
+
+    const inspection = api.inspectSbcItems({
+      name: 'Rolling default lock policy',
+      expectedPlayerCount: 1,
+      blockSpecial: false,
+    }, [locked], { expectedPlayerCount: 1 });
+
+    expect(inspection.blocked).toEqual([]);
   });
 
   it('keeps submit inspection consistent when a generic policy explicitly requires a reserve-rated item', async () => {

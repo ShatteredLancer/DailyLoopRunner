@@ -340,6 +340,7 @@ import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import {
   planBackgroundSubmitRetry,
   planItemViolationOverride,
+  shouldStopForProtectedItemViolation,
 } from './sbc/background-submit-retry.js';
 import {
   planUntradeableDuplicateSwaps,
@@ -3002,10 +3003,23 @@ function updateLoopControls() {
     return isPlayerEvolutionCard(item);
   }
 
+  function isFsuLockedPlayerProtectionEnabled(spec = {}, context = null) {
+    const configured = context?.protectFsuLockedPlayers
+      ?? spec?.runtimePickOptions?.protectFsuLockedPlayers
+      ?? spec?.protectFsuLockedPlayers
+      ?? getPickRuntimeOptions().protectFsuLockedPlayers;
+    return configured === true;
+  }
+
   function getFsuRejectReasons(item, spec = {}, settings = getFsuSettings(), context = null) {
     const reasons = [];
     if (!isPlayer(item)) return reasons;
-    if (isFsuLockedItem(item, settings, context)) reasons.push('fsu-locked-player');
+    if (
+      isFsuLockedPlayerProtectionEnabled(spec, context)
+      && isFsuLockedItem(item, settings, context)
+    ) {
+      reasons.push('fsu-locked-player');
+    }
     if (settings.onlyUntradeable && isTradeable(item)) reasons.push('fsu-only-untradeable');
     if (settings.excludeEvolution && isEvolutionItem(item)) reasons.push('fsu-exclude-evolution');
     const excludedLeagueIds = context?.excludedLeagueIds || (settings.excludedLeagueIds || []).map(Number).filter((id) => Number.isFinite(id) && id > 0);
@@ -5580,7 +5594,13 @@ function updateLoopControls() {
       inventorySnapshot,
       requirements,
       priorityPiles: effectivePriorityPiles,
-      fsuPolicy: getFsuSettings(),
+      fsuPolicy: {
+        ...getFsuSettings(),
+        protectFsuLockedPlayers: (
+          selectionLoopDef?.runtimePickOptions?.protectFsuLockedPlayers
+          ?? getPickRuntimeOptions().protectFsuLockedPlayers
+        ) === true,
+      },
       consumedItemIds: [...state.consumedItemIds],
       preferredSignalRefs: options.preferredSignalRefs || [],
     });
@@ -5673,6 +5693,9 @@ function updateLoopControls() {
     const protectedDefinitionIds = new Set((loopDef.protectedDefinitionIds || []).map(Number).filter(Boolean));
     const context = {
       settings,
+      protectFsuLockedPlayers:
+        loopDef.runtimePickOptions?.protectFsuLockedPlayers
+        ?? getPickRuntimeOptions().protectFsuLockedPlayers,
       protectedItemIds,
       protectedDefinitionIds,
       lockedItemIds: new Set((settings.lockedItemIds || []).map(Number).filter(Boolean)),
@@ -7367,6 +7390,9 @@ function updateLoopControls() {
       playerOnly: true,
       allowSpecial: roleAware || (requiredSpecialCount > 0 && specialIndex <= requiredSpecialCount),
     };
+    const protectFsuLockedPlayers = context.protectFsuLockedPlayers
+      ?? loopDef.runtimePickOptions?.protectFsuLockedPlayers
+      ?? getPickRuntimeOptions().protectFsuLockedPlayers;
 
     if (itemId && state.consumedItemIds.has(itemId)) reasons.push('consumed-this-run');
     if (isLoanItem(item)) reasons.push('loan');
@@ -7407,6 +7433,7 @@ function updateLoopControls() {
     if (maxRating && rating > maxRating) reasons.push(`rating-over-${maxRating}`);
     getFsuRejectReasons(item, fsuSpec, settings, {
       ...(context || {}),
+      protectFsuLockedPlayers,
       sbcFodderPolicy: fodderPolicy,
       respectFsuGoldRange: fodderPolicy.mode === 'low-gold',
     }).forEach((reason) => {
@@ -7971,6 +7998,16 @@ function updateLoopControls() {
           packInventory,
         });
         lastDetail = serviceResultErrorText(result) || result?.status || 'unknown';
+        if (shouldStopForProtectedItemViolation({
+          protectionEnabled: options.protectActiveSquadPlayers,
+          result,
+          detail: lastDetail,
+        })) {
+          const violationNames = [...new Set(result.data.itemViolations
+            .map((violation) => String(violation?.name || '').trim())
+            .filter(Boolean))];
+          fail(`${label}: Active Squad protection stopped submission after EA reported ${result.data.itemViolations.length} item conflict(s)${violationNames.length ? ` (${violationNames.join('/')})` : ''}; no skipValidation confirmation was sent`);
+        }
         const overridePlan = planItemViolationOverride({
           allowOverride: options.allowItemViolationOverride === true,
           attempt,
@@ -9554,6 +9591,9 @@ function updateLoopControls() {
           if (ratingSbcFill) {
             ratingSubmission = await submitRatingSbcInBackground(context.set, context.challenge, loopDef.name, {
               players: context.players || inspection.items || [],
+              protectActiveSquadPlayers:
+                activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers
+                ?? getPickRuntimeOptions().protectActiveSquadPlayers,
               allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
             });
             return { submitted: true, rewardPackId: ratingSubmission.rewardPackId };
@@ -13370,6 +13410,9 @@ function updateLoopControls() {
           {
             players: context.players || players,
             allowItemViolationOverride: true,
+            protectActiveSquadPlayers:
+              opened.activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers
+              ?? getPickRuntimeOptions().protectActiveSquadPlayers,
             allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
               rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
@@ -14411,6 +14454,9 @@ function updateLoopControls() {
           {
             players: submitContext.players || resolved.players,
             allowItemViolationOverride: true,
+            protectActiveSquadPlayers:
+              loopDef.runtimePickOptions?.protectActiveSquadPlayers
+              ?? getPickRuntimeOptions().protectActiveSquadPlayers,
             rewardObservationAttempts: 1,
             allowKnownRewardFallback: false,
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
@@ -16484,6 +16530,9 @@ function updateLoopControls() {
               {
                 players: context.players || players,
                 allowItemViolationOverride: true,
+                protectActiveSquadPlayers:
+                  activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers
+                  ?? getPickRuntimeOptions().protectActiveSquadPlayers,
                 allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
                 failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
                   rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)

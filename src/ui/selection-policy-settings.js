@@ -262,6 +262,20 @@ export function showSelectionPolicySettings(options = {}) {
     mode,
     { min: 1, max: 30 },
   );
+  const protectFsuLockedPlayers = checkbox(
+    dom,
+    'bronze-loop-policy-protect-fsu-locked-players',
+    'Protect FSU locked players',
+    pickOptions.protectFsuLockedPlayers === true,
+    'When enabled, Runner excludes players listed in FSU/Enhancer Lock player from SBC selection and stops before submission if one is present',
+  );
+  const protectActiveSquadPlayers = checkbox(
+    dom,
+    'bronze-loop-policy-protect-active-squad-players',
+    'Stop on Active Squad conflict',
+    pickOptions.protectActiveSquadPlayers === true,
+    'When enabled, stop on EA 409 squad-conflict responses instead of confirming the same squad with skipValidation',
+  );
 
   form.append(
     sectionTitle(dom, 'Standard SBCs'),
@@ -280,6 +294,9 @@ export function showSelectionPolicySettings(options = {}) {
     rollingOpenDuplicateProvisionsRewards.label,
     wideField(dom, 'Storage pressure recovery', rollingStorageSinkMode, mode, 'Off disables recovery; Automatic preserves the validated 95+ Pick preference; Selected uses only the chosen SBC Set'),
     wideField(dom, 'Storage pressure SBC', rollingStorageSinkSet, mode, 'Player Pick and direct Player SBCs require at least one supported 87+ squad; reward rating does not affect eligibility'),
+    sectionTitle(dom, 'Submission guards'),
+    protectFsuLockedPlayers.label,
+    protectActiveSquadPlayers.label,
     sectionTitle(dom, 'Player Picks'),
     wideField(dom, 'Selection mode', pickMode, mode, 'Rating first preserves the existing behavior; Special price first ranks every special card before normal cards and pauses when a high-price duplicate displaces a non-duplicate; Always review specials pauses whenever a special card appears'),
     openPicksAtEnd.label,
@@ -348,6 +365,8 @@ export function showSelectionPolicySettings(options = {}) {
         rollingShortageProvisionsPackLimit,
         pickOptions.rollingShortageProvisionsPackLimit,
       ),
+      protectFsuLockedPlayers: protectFsuLockedPlayers.input.checked,
+      protectActiveSquadPlayers: protectActiveSquadPlayers.input.checked,
     }),
   });
   const close = () => overlay.remove?.();
@@ -376,6 +395,8 @@ export function showSelectionPolicySettings(options = {}) {
       rollingProvisionsMaxRating,
       rollingRecoveryStorageFirst.input,
       rollingShortageProvisionsPackLimit,
+      protectFsuLockedPlayers.input,
+      protectActiveSquadPlayers.input,
       rollingSurplusCrafting.input,
       rollingProvisionsShortageRecovery.input,
       rollingRequiredSpecialRecovery.input,

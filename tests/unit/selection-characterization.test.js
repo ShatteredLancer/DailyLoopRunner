@@ -473,6 +473,7 @@ describe('current inventory selection behavior', () => {
       lockedItemIds: [401],
       lockedDefinitionIds: [],
     });
+    api.state.pickOptions = { protectFsuLockedPlayers: true };
     const selection = api.selectInventoryPlayers([
       { tier: 'gold', count: 1, playerOnly: true, allowSpecial: false },
     ], ['storage']);

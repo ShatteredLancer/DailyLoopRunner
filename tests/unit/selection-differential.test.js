@@ -36,6 +36,9 @@ async function expectSelection({
 }) {
   const { api, window } = await loadUserscript(piles);
   api.setFsuSettingsOverride(fsu);
+  api.state.pickOptions = {
+    protectFsuLockedPlayers: fsu.protectFsuLockedPlayers === true,
+  };
   consumedItemIds.forEach((id) => api.state.consumedItemIds.add(id));
   const snapshot = createEaInventoryAdapter(window).snapshot();
   const pure = selectPure({
@@ -120,6 +123,7 @@ describe('inventory selector regression fixtures', () => {
         excludedLeagueIds: [31],
         excludeEvolution: true,
         lockedItemIds: [31],
+        protectFsuLockedPlayers: true,
       }),
       consumedItemIds: [34],
       expectedIds: [35],
@@ -149,7 +153,7 @@ describe('inventory selector regression fixtures', () => {
       piles: { storage: [locked, allowed] },
       requirements: [{ tier: 'gold', count: 1, playerOnly: true, allowSpecial: false }],
       priorityPiles: ['storage'],
-      fsu: defaultFsu({ lockedItemIds: [700051] }),
+      fsu: defaultFsu({ lockedItemIds: [700051], protectFsuLockedPlayers: true }),
       expectedIds: [52],
       expectedPileCounts: { storage: 1 },
     });

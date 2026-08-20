@@ -39,6 +39,23 @@ export function planBackgroundSubmitRetry({
   return { retry: true, delayMs, reason: code };
 }
 
+export function hasItemViolationConflict(result, detail = '') {
+  const codes = [detail, result?.status, result?.error?.code]
+    .map(normalizeSubmitErrorCode)
+    .filter(Boolean);
+  return codes.includes('409')
+    && Array.isArray(result?.data?.itemViolations)
+    && result.data.itemViolations.length > 0;
+}
+
+export function shouldStopForProtectedItemViolation({
+  protectionEnabled = false,
+  result = null,
+  detail = '',
+} = {}) {
+  return protectionEnabled === true && hasItemViolationConflict(result, detail);
+}
+
 function positiveItemId(value) {
   const id = Number(value);
   return Number.isSafeInteger(id) && id > 0 ? id : 0;

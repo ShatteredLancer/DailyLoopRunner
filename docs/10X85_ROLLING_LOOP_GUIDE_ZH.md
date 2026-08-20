@@ -101,7 +101,7 @@ Required Special 是主 SBC 要求的 `TOTW/TOTS/FOF/FUTTIES` 角色，规则如
 - Club 中只允许 TOTW 进入这个角色；Club 中的 TOTS、FOF、FUTTIES 始终保留。
 - 每套主 SBC 恰好使用一张 Required Special。
 - Required Special 不能作为普通评分材料，也不能为了降评分再补入第二张。
-- 高于 `Automatic-use max rating`、FSU Lock、Evolution、交易中或身份不确定的卡仍受保护。
+- 高于 `Automatic-use max rating`、Evolution、交易中或身份不确定的卡仍受保护；开启 `Protect FSU locked players` 后，FSU Lock 卡也会被排除。
 
 ### 4.3 普通材料和其它 Special
 
@@ -110,7 +110,7 @@ Required Special 是主 SBC 要求的 `TOTW/TOTS/FOF/FUTTIES` 角色，规则如
 - Club 中的其它 Special 属于最后候选，尽量保留；Club 中匹配 TOTS/FOF/FUTTIES 身份的卡硬保护。
 - 开启 `Protect all Club non-TOTW specials` 后，上一条的最后候选层关闭：所有 Club 非 TOTW 色卡都进入硬保护。Club TOTW 仍只能用于 Required Special 槽；该开关不会禁止 Storage、Transfer 或 Unassigned 中可安全消耗的色卡。
 - 高于阈值的重复卡优先移动到 Storage，不会为了继续循环而强制提交。
-- FSU Lock、loan、limited-use、concept、academy/evolution、active trade item 和同阵 definition 冲突始终排除。
+- loan、limited-use、concept、academy/evolution、active trade item 和同阵 definition 冲突始终排除；FSU Lock 由默认关闭的 `Protect FSU locked players` 控制。
 
 ### 4.4 重复卡和实体身份
 
@@ -307,7 +307,8 @@ Rolling Recap 使用有界聚合，不会无限保存每一轮全部卡片：
 - `Stop` 是请求在下一个安全边界停止，不会故意中断已提交但尚未对账的事务。
 - 如果在开包清理阶段停止，已开出的卡可能暂时留在 Unassigned。
 - 下次启动同一个 Rolling Loop 时，先恢复待领取的 95+ Pick 和现有 Unassigned，再决定是否打开下一包主奖励。
-- 如果 EA 以 `409` 返回非空 `itemViolations`，且每个被警告 item ID 都能严格对应当前已保存阵容中的实体，Runner 会对同一阵容执行一次 `skipValidation:true` 确认提交。这用于处理“球员仍在现有阵容”等 EA 可确认警告。
+- 如果 EA 以 `409` 返回非空 `itemViolations`，且每个被警告 item ID 都能严格对应当前已保存阵容中的实体，Rolling 在 `Stop on Active Squad conflict` 关闭时会对同一阵容执行一次 `skipValidation:true` 确认提交。这用于处理“球员仍在现有阵容”等 EA 可确认警告；该设置默认关闭。
+- 开启 `Selection Policy -> Submission guards -> Stop on Active Squad conflict` 后，同样的 `409/itemViolations` 会立即停止，绝不会发送确认提交。这个开关用于优先保护在 EA 其它阵容中的球员。
 - 缺少 `itemViolations`、响应结构异常、包含阵容外 item ID、已经确认过一次或确认提交仍失败的 `409` 都保持失败；普通 Loop 不启用该确认路径。
 - 发生错误后不要先手工移动待处理卡；优先使用 `Save log` 保存完整日志。实体状态被手工改变后，Runner 可能因为无法证明原计划仍有效而安全停止。
 - 常见安全停止包括身份/version 不确定、Storage 无可验证空间、目标评分无法安全达到、恢复 capability 缺失和 EA 提交状态无法确认。

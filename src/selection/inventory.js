@@ -84,7 +84,12 @@ function rejectionReasons(item, requirement, fsuPolicy, protection) {
   if (item.endTime !== -1) reasons.push('limited-end-time');
   if (item.activeTrade) reasons.push('active-trade');
   const lockedIds = new Set([...(fsuPolicy.lockedItemIds || []), ...(fsuPolicy.lockedDefinitionIds || [])].map(Number));
-  if ((item.identityIds || [item.id, item.definitionId]).some((id) => lockedIds.has(Number(id)))) reasons.push('fsu-locked-player');
+  if (
+    fsuPolicy.protectFsuLockedPlayers === true
+    && (item.identityIds || [item.id, item.definitionId]).some((id) => lockedIds.has(Number(id)))
+  ) {
+    reasons.push('fsu-locked-player');
+  }
   if (fsuPolicy.onlyUntradeable && item.tradeable) reasons.push('fsu-only-untradeable');
   if (fsuPolicy.excludeEvolution && item.evolution) reasons.push('fsu-exclude-evolution');
   if (fsuPolicy.excludeDesignatedLeagues && (fsuPolicy.excludedLeagueIds || []).includes(item.leagueId)) reasons.push(`fsu-excluded-league-${item.leagueId}`);
