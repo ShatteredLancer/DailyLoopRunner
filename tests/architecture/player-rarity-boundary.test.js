@@ -30,6 +30,15 @@ describe('player rarity boundary', () => {
     }
   });
 
+  it('does not infer Player Item card types from Squad methods or opaque group IDs', async () => {
+    const files = await readJavaScriptTree('src');
+    for (const file of files) {
+      expect(file.source, file.name).not.toMatch(/(?:\?\.|\.)is(?:TOTW|Totw|TOTS|Tots|FOF|Fof|FUTTIES|Futties)\s*(?:\?\.)?\(/);
+      expect(file.source, file.name).not.toContain('TOTW_GROUP_IDS');
+      expect(file.source, file.name).not.toMatch(/groups?[^\n]*45[^\n]*(?:TOTW|Totw)|(?:TOTW|Totw)[^\n]*groups?[^\n]*45/);
+    }
+  });
+
   it('does not generate legacy Gold consumption fields from current built-in producers', async () => {
     const files = await Promise.all([
       'src/config/loops.js',

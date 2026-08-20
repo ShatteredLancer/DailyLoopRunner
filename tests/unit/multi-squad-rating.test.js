@@ -223,6 +223,69 @@ describe('multi-squad rating planner', () => {
     });
   });
 
+  it('keeps an exact 84 recovery squad while consuming the required real Storage cards', async () => {
+    const primaryRatings = [88, 87, 87, 86, 85];
+    const primary = primaryRatings.map((rating, index) => ({
+      item: player(index + 1, 2001 + index, rating, 'club'),
+      signal: player(901 + index, 2001 + index, rating, 'unassigned'),
+      pileName: 'unassigned',
+      submissionPileName: 'club',
+      pileRank: 0,
+      requirementMatches: [],
+      special: false,
+    }));
+    const storage = [87, 89, 91, 92].map((rating, index) => ({
+      item: player(21 + index, 2101 + index, rating, 'storage'),
+      signal: null,
+      pileName: 'storage',
+      submissionPileName: 'storage',
+      pileRank: 1,
+      requirementMatches: [],
+      special: false,
+    }));
+    const club = Array.from({ length: 32 }, (_, index) => ({
+      item: player(41 + index, 2201 + index, 63 + (index % 16), 'club'),
+      signal: null,
+      pileName: 'club',
+      submissionPileName: 'club',
+      pileRank: 2,
+      requirementMatches: [],
+      special: false,
+    }));
+    const role = createStoragePressureRole(
+      storage.map((entry) => ({ id: entry.item.id, definitionId: entry.item.definitionId })),
+      2,
+      11,
+    );
+
+    const plan = await selectInventoryPlayers({
+      mode: 'rating',
+      candidateEntries: [...primary, ...storage, ...club],
+      ratingModel: {
+        requiredPlayerCount: 11,
+        targetRating: 84,
+        maxSpecialCount: 11,
+        constraints: [],
+      },
+      priorityPiles: ['unassigned', 'storage', 'club'],
+      requiredItems: primary.map((entry) => ({ id: entry.item.id })),
+      exclusiveRoles: [role],
+      maxOrdinaryRating: 96,
+      protectionPolicy: { allowOtherSpecialAsOrdinary: true },
+    });
+
+    expect(plan.ok).toBe(true);
+    expect(plan.details.rating).toBe(84);
+    expect(plan.entries.filter((entry) => entry.pileName === 'storage')).toHaveLength(2);
+    expect(plan.details.roles).toEqual([
+      expect.objectContaining({ id: 'storage-pressure-release', selected: 2, minCount: 2 }),
+      ...primary.map((_, index) => expect.objectContaining({
+        id: `required-item-${index + 1}`,
+        selected: 1,
+      })),
+    ]);
+  });
+
   it('computes the pre-plan Storage release requirement including reward reserve', () => {
     expect(storagePressureRequirement({
       currentFree: 1,

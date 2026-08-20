@@ -21,4 +21,38 @@ describe('EA Rarity Adapter', () => {
     expect(adapter.playerTheme({ rareflag: 1 })).toBeNull();
     expect(adapter.playerTheme({ rareflag: 7 })).toBeNull();
   });
+
+  it('reads subtype labels only from item and EA rarity metadata fields', () => {
+    const adapter = createEaRarityAdapter({
+      repositories: {
+        Rarity: {
+          get: (id) => id === 109 ? { name: 'Festival of Football' } : null,
+        },
+      },
+      services: {
+        Localization: {
+          localize: (value) => value === 'Festival of Football' ? 'FOF localized' : `*${value}`,
+        },
+      },
+    });
+
+    expect(adapter.playerRarityText({
+      rareflag: 109,
+      name: 'Player name must not classify a subtype',
+      rarityName: 'Event rarity',
+    })).toBe('Event rarity Festival of Football FOF localized');
+  });
+
+  it('prefers Configuration rarity metadata when EA exposes it', () => {
+    const adapter = createEaRarityAdapter({
+      repositories: { Rarity: { get: () => ({ name: 'Repository rarity' }) } },
+      services: {
+        Configuration: {
+          getItemRarity: () => ({ displayName: 'Configured FUTTIES' }),
+        },
+      },
+    });
+
+    expect(adapter.playerRarityText({ rareflag: 120 })).toBe('Configured FUTTIES');
+  });
 });

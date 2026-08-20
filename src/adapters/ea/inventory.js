@@ -97,9 +97,11 @@ function toSnapshot(item, pile) {
   const rating = Number(item?.rating || 0);
   const rareflag = readPlayerRareFlag(item);
   const duplicateId = Number(item?.duplicateId || 0);
-  const tradeable = typeof item?.isUntradeable === 'function'
-    ? !callBoolean(item, 'isUntradeable', true)
-    : item?.untradeable === false;
+  const tradeable = typeof item?.isTradeable === 'function'
+    ? callBoolean(item, 'isTradeable')
+    : typeof item?.isUntradeable === 'function'
+      ? !callBoolean(item, 'isUntradeable', true)
+      : item?.untradeable === false;
   let fullName = '';
   try { fullName = String(item?._staticData?.getFullName?.() || item?.getFullName?.() || '').trim(); } catch { }
   return createItemSnapshot({

@@ -46,6 +46,7 @@ function primitiveAuctionState(value) {
 }
 
 function listingTradeable(item, snapshot) {
+  if (typeof item?.isTradeable === 'function') return callBoolean(item, 'isTradeable') === true;
   if (typeof item?.isUntradeable === 'function') return snapshot.tradeable === true;
   if (typeof item?.tradeable === 'boolean') return item.tradeable;
   if (typeof item?.untradeable === 'boolean') return !item.untradeable;

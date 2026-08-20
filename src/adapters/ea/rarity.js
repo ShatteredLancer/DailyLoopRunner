@@ -35,6 +35,34 @@ function firstColorMap(collection, tier) {
 
 export function createEaRarityAdapter(runtime) {
   const repository = safeRead(safeRead(runtime, 'repositories'), 'Rarity');
+  const configuration = safeRead(safeRead(runtime, 'services'), 'Configuration');
+  const localization = safeRead(safeRead(runtime, 'services'), 'Localization');
+
+  function rarityMetadata(item = {}) {
+    const rareflag = readPlayerRareFlag(item);
+    return call(configuration, 'getItemRarity', item)
+      || call(repository, 'getRarity', rareflag)
+      || call(repository, 'get', rareflag)
+      || null;
+  }
+
+  function playerRarityText(item = {}) {
+    const rarity = rarityMetadata(item);
+    const values = [
+      safeRead(item, 'rareName'),
+      safeRead(item, 'rarityName'),
+      safeRead(safeRead(item, '_staticData'), 'rareName'),
+      safeRead(safeRead(item, '_staticData'), 'rarityName'),
+      safeRead(rarity, 'name'),
+      safeRead(rarity, 'label'),
+      safeRead(rarity, 'displayName'),
+    ].filter(Boolean);
+    for (const value of [...values]) {
+      const localized = call(localization, 'localize', String(value));
+      if (localized && localized !== `*${value}`) values.push(localized);
+    }
+    return values.join(' ');
+  }
 
   function playerTheme(item = {}) {
     const rareflag = readPlayerRareFlag(item);
@@ -58,5 +86,5 @@ export function createEaRarityAdapter(runtime) {
     });
   }
 
-  return Object.freeze({ playerTheme });
+  return Object.freeze({ playerRarityText, playerTheme });
 }

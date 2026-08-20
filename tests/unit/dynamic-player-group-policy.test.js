@@ -12,7 +12,7 @@ function requirement(key, values, count = -1, matcher = null) {
 }
 
 describe('dynamic EA player-group policy', () => {
-  it('distinguishes live FC26 TOTW cards from group-44 TOTS and FUTTIES cards', async () => {
+  it('keeps explicit FC26 rarity authoritative over overlapping player groups and subtype methods', async () => {
     const { api } = await loadUserscript();
     const totw = makePlayer({
       id: 1,
@@ -35,11 +35,80 @@ describe('dynamic EA player-group policy', () => {
       groups: [19, 33, 43, 44, 83],
       name: 'Ekitike',
     });
+    const semenyo = makePlayer({
+      id: 4,
+      definitionId: 168013396,
+      rating: 96,
+      rareflag: 109,
+      groups: [22, 45, 79, 83, 87],
+      name: 'Semenyo',
+    });
+    semenyo.isTOTW = () => true;
 
     expect(api.isTotwItem(totw)).toBe(true);
     expect(api.isTotwItem(tots)).toBe(false);
     expect(api.isTotwItem(futties)).toBe(false);
-    expect(api.isTotwItem({ ...totw, isTOTW: () => false })).toBe(false);
+    expect(api.isTotwItem(semenyo)).toBe(false);
+    expect(api.isTotwItem({ ...totw, isTOTW: () => false })).toBe(true);
+    expect(api.isTotwItem({ ...totw, rareflag: 57, rarityName: 'Team of the Week' })).toBe(true);
+    expect(api.isTotwItem({ ...totw, rareflag: 1, rarityName: 'Team of the Week' })).toBe(false);
+    const assumedReward = { ...totw, id: 5, rareflag: 0, special: false };
+    expect(api.isSbcSpecialItem(assumedReward)).toBe(false);
+    api.markAssumedTotwRewardItems([assumedReward], 'test TOTW reward');
+    expect(api.isSbcSpecialItem(assumedReward)).toBe(true);
+    expect(api.rollingBaseProtectionReasons({ ...semenyo, pile: 'club' }, {
+      rollingProtectAllClubNonTotwSpecials: true,
+      expectedPlayerCount: 11,
+    })).toContain('rolling-club-non-totw-special-strict');
+  });
+
+  it('does not let a Club rareflag-109 card satisfy the primary Required Special role through group 45', async () => {
+    const semenyo = makePlayer({
+      id: 883322847088,
+      definitionId: 168013396,
+      rating: 96,
+      rareflag: 109,
+      groups: [22, 45, 79, 83, 87],
+      name: 'Semenyo',
+    });
+    semenyo.matchesPrimaryGroup = true;
+    semenyo.isTOTW = () => true;
+    const { api } = await loadUserscript({ club: [semenyo] });
+    const loopDef = {
+      name: 'Strict Dynamic 85x10',
+      expectedPlayerCount: 1,
+      allowedSpecialCount: 1,
+      rollingProtectAllClubNonTotwSpecials: true,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'TEAM_RATING', values: [96], count: 1 },
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 96 },
+      ratingSbcFill: { priorityPiles: ['club'] },
+    };
+    const challenge = {
+      requiredPlayerCount: 1,
+      squad: { getNumOfRequiredPlayers: () => 1 },
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [96]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => item.matchesPrimaryGroup === true),
+      ],
+    };
+    const model = api.parseRatingSbcChallenge(loopDef, challenge);
+    const requiredSpecialIndexes = model.constraints
+      .map((constraint, index) => ({ constraint, index }))
+      .filter(({ constraint }) => constraint.keyName === 'PLAYER_RARITY_GROUP')
+      .map(({ index }) => index);
+    const candidates = api.buildRatingSbcCandidateEntries(loopDef, model, {
+      candidateFilter: api.createRollingRequiredSpecialSourceFilter({
+        constraintIndexes: requiredSpecialIndexes,
+        isClubTotw: api.isTotwItem,
+      }),
+    });
+
+    expect(api.isTotwItem(semenyo)).toBe(false);
+    expect(candidates.entries).toEqual([]);
+    expect(candidates.policyFiltered).toBe(1);
   });
 
   it('evaluates a Ledger-backed Storage Sink candidate through its live EA entity', async () => {
@@ -373,6 +442,63 @@ describe('dynamic EA player-group policy', () => {
         shortfall: 1,
       },
     });
+  });
+
+  it('preserves a Required Special shortage while reporting the Storage pressure gap', async () => {
+    const storage = Array.from({ length: 11 }, (_, index) => makePlayer({
+      id: 600 + index,
+      definitionId: 9300 + index,
+      rating: 88,
+      pile: 'storage',
+      name: `Storage fodder ${index + 1}`,
+    }));
+    const sinkLoopDef = {
+      name: 'Required Special Storage Sink',
+      expectedPlayerCount: 11,
+      dynamicActiveEligibilityRequirements: [
+        { key: 'TEAM_RATING', values: [88], count: 1 },
+        { key: 'PLAYER_RARITY_GROUP', values: [83], count: 1 },
+      ],
+      sbcFodderPolicy: { mode: 'rating-constrained', ratingSbcMaxCardRating: 95 },
+      ratingSbcFill: { priorityPiles: ['unassigned', 'storage', 'transfer', 'club'] },
+    };
+    const { api } = await loadUserscript({ storage });
+    const sinkModel = api.parseRatingSbcChallenge(sinkLoopDef, {
+      requiredPlayerCount: 11,
+      squad: { getNumOfRequiredPlayers: () => 11 },
+      eligibilityRequirements: [
+        requirement('TEAM_RATING', [88]),
+        requirement('PLAYER_RARITY_GROUP', [83], 1, (item) => item.runtimeGroup83 === true),
+      ],
+    });
+    const snapshot = createInventorySnapshot({
+      piles: { storage },
+    });
+    const runtime = {
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      coordinator: { getLedger: () => null },
+    };
+
+    const result = await api.selectRollingGenericStorageSinkSquad(
+      sinkLoopDef,
+      runtime,
+      { targetRating: 88, model: sinkModel, activeLoopDef: sinkLoopDef },
+      snapshot,
+      { minimumPressureConsumption: 2 },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'REQUIRED_SPECIAL_SHORTAGE',
+      details: {
+        requestedPressure: 2,
+        maximumFeasible: 0,
+        shortfall: 2,
+        pressureCandidates: 11,
+      },
+    });
+    expect(result.reason).toContain('PLAYER_RARITY_GROUP 83 x1');
   });
 
   it('keeps Club non-TOTW event cards out of the Rolling Required Special pool', async () => {

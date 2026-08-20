@@ -30,12 +30,12 @@ describe('high-rated Upgrade safety policy', () => {
   });
 
   it('scans required special cards through the shared rating pile flow and resolves duplicate signals', async () => {
-    const clubTotw = makePlayer({ id: 20, definitionId: 200, rating: 84, rareflag: 2, name: 'TOTW Club' });
+    const clubTotw = makePlayer({ id: 20, definitionId: 200, rating: 84, rareflag: 3, name: 'TOTW Club' });
     const unassignedSignal = makePlayer({
       id: 10,
       definitionId: 200,
       rating: 84,
-      rareflag: 2,
+      rareflag: 3,
       duplicate: true,
       duplicateId: 20,
       name: 'TOTW Unassigned Signal',

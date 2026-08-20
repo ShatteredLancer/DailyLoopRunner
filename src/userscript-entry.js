@@ -162,6 +162,7 @@ import {
   isSamePlayerCardVersion,
   isRarePlayerCard,
   isSpecialPlayerCard,
+  readExplicitPlayerRareFlag,
   readPlayerDatabaseId,
   readPlayerRareFlag,
 } from './domain/player-rarity.js';
@@ -2657,6 +2658,7 @@ function updateLoopControls() {
 
   function isTradeable(item) {
     try {
+      if (typeof item?.isTradeable === 'function') return item.isTradeable() === true;
       if (typeof item?.isUntradeable === 'function') return !item.isUntradeable();
     } catch { }
     if (item?.untradeable === true) return false;
@@ -6142,16 +6144,8 @@ function updateLoopControls() {
     return [];
   }
 
-  // FC26 live entities use group 44 on TOTS/FUTTIES too; group 45 is TOTW-specific.
-  const TOTW_GROUP_IDS = [45];
-
   function itemGroupNumbers(item) {
     return itemGroups(item).map((group) => Number(group)).filter((group) => Number.isFinite(group));
-  }
-
-  function itemHasAnyGroup(item, groupIds = []) {
-    const groups = itemGroupNumbers(item);
-    return groupIds.some((groupId) => groups.includes(Number(groupId)));
   }
 
   function formatSquadItem(item, index) {
@@ -6170,61 +6164,36 @@ function updateLoopControls() {
   }
 
   function isSbcSpecialItem(item) {
-    return isSpecial(item) || isTotwItem(item) || isTotsItem(item) || isFofItem(item);
+    return isSpecial(item) || isTotwItem(item);
   }
 
-  function itemSearchText(item) {
-    return [
-      item?.name,
-      item?.commonName,
-      item?.lastName,
-      item?._staticData?.name,
-      item?._staticData?.commonName,
-      item?.rareName,
-      item?.rarityName,
-      item?._staticData?.rareName,
-      item?._staticData?.rarityName,
-    ].filter(Boolean).join(' ');
+  function itemRaritySearchText(item) {
+    return eaRarityAdapter.playerRarityText(item);
   }
 
   function isTotwItem(item) {
     const id = Number(item?.id || 0);
     if (id && state.consumedItemIds.has(id)) return false;
     if (id && state.assumedTotwItemIds.has(id)) return true;
+    const explicitRareFlag = readExplicitPlayerRareFlag(item);
+    if (explicitRareFlag === 3) return true;
     if (!isSpecial(item)) return false;
-    let runtimeResult = null;
-    for (const methodName of ['isTOTW', 'isTotw']) {
-      if (typeof item?.[methodName] !== 'function') continue;
-      try {
-        runtimeResult = item[methodName]() === true;
-        if (runtimeResult) return true;
-      } catch { }
-    }
-    if (runtimeResult === false) return false;
-    if (itemRareFlag(item) === 3) return true;
-    if (itemHasAnyGroup(item, TOTW_GROUP_IDS)) return true;
-    const text = itemSearchText(item);
-    return /\bTOTW\b|Team of the Week|本周最佳|週最佳/i.test(text);
+    return /\bTOTW\b|Team of the Week|本周最佳|週最佳/i.test(itemRaritySearchText(item));
   }
 
   function isTotsItem(item) {
     if (!isSpecial(item)) return false;
-    try { if (item?.isTOTS?.() || item?.isTots?.()) return true; } catch { }
-    return /\bTOTS\b|Team of the Season|赛季最佳|賽季最佳/i.test(itemSearchText(item));
+    return /\bTOTS\b|Team of the Season|赛季最佳|賽季最佳/i.test(itemRaritySearchText(item));
   }
 
   function isFofItem(item) {
-    // EA does not expose a Player Item card-type contract for these optional methods.
-    // Canonical rarity must establish that this is a special before subtype hints apply.
     if (!isSpecial(item)) return false;
-    try { if (item?.isFOF?.() || item?.isFof?.()) return true; } catch { }
-    return /\bFOF\b|Festival of Football|Glory Hunters|荣耀猎手|榮耀獵手/i.test(itemSearchText(item));
+    return /\bFOF\b|Festival of Football|Glory Hunters|荣耀猎手|榮耀獵手/i.test(itemRaritySearchText(item));
   }
 
   function isFuttiesItem(item) {
     if (!isSpecial(item)) return false;
-    try { if (item?.isFUTTIES?.() || item?.isFutties?.()) return true; } catch { }
-    return /\bFUTTIES\b/i.test(itemSearchText(item));
+    return /\bFUTTIES\b/i.test(itemRaritySearchText(item));
   }
 
   function requiredSpecialKind(loopDef = {}) {
@@ -7473,6 +7442,39 @@ function updateLoopControls() {
     const maxOrdinaryRating = Number(selectionPolicy?.maxOrdinaryRating || 0);
     const requiredItemRefs = selectionPolicy?.requiredItems || [];
     const allowOtherSpecialAsOrdinary = selectionPolicy?.protectionPolicy?.allowOtherSpecialAsOrdinary === true;
+    const selectionRoleMatchesItem = (role, item) => {
+      const roleRefs = [
+        ...(Array.isArray(role?.itemRefs) ? role.itemRefs : []),
+        ...(Array.isArray(role?.items) ? role.items : []),
+      ];
+      if (roleRefs.some((ref) => rollingItemMatchesRef(item, ref))) return true;
+      const itemPile = String(item?.pile || item?.ref?.pile || '');
+      if (Array.isArray(role?.piles) && role.piles.some((pile) => String(pile) === itemPile)) return true;
+      let constraintIndex = role?.constraintIndex;
+      if (constraintIndex === undefined || constraintIndex === null) {
+        const constraintId = String(role?.constraintId || '');
+        if (constraintId) {
+          constraintIndex = (selectionModel?.constraints || []).findIndex((constraint) => (
+            String(constraint?.id || '') === constraintId
+          ));
+        }
+      }
+      const normalizedConstraintIndex = constraintIndex === undefined || constraintIndex === null
+        ? null
+        : Number(constraintIndex);
+      if (Number.isInteger(normalizedConstraintIndex) && normalizedConstraintIndex >= 0) {
+        const constraint = selectionModel?.constraints?.[normalizedConstraintIndex];
+        try {
+          if (constraint?.matches?.(item) === true) return true;
+        } catch { }
+      }
+      if (typeof role?.matches === 'function') {
+        try {
+          if (role.matches(item) === true) return true;
+        } catch { }
+      }
+      return false;
+    };
 
     items.forEach((item, index) => {
       if (isSbcSpecialItem(item)) specialCount++;
@@ -7484,8 +7486,7 @@ function updateLoopControls() {
         return refId ? refId === itemId : refDefinitionId > 0 && refDefinitionId === itemDefinitionId;
       });
       const exclusiveRoleMatch = (selectionPolicy?.exclusiveRoles || []).some((role) => {
-        const constraint = selectionModel?.constraints?.[Number(role.constraintIndex)];
-        try { return constraint?.matches?.(item) === true; } catch { return false; }
+        return selectionRoleMatchesItem(role, item);
       });
       const policyRoleMatch = requiredItemMatch || exclusiveRoleMatch;
       const reasons = getSbcProtectionReasons(item, loopDef, {
@@ -13032,6 +13033,7 @@ function updateLoopControls() {
       ? rollingUniqueRefs(options.allowedPrimaryDuplicateRefs || [])
       : [];
     const allowedProtectedItems = rollingUniqueRefs(options.allowedProtectedItems || []);
+    const allowedProvisionsReserveItems = rollingUniqueRefs(options.allowedProvisionsReserveItems || []);
     const protectionRating = rollingProtectionRating(loopDef);
     const minRating = Number(options.minRating);
     const maxRating = Number(options.maxRating);
@@ -13052,6 +13054,9 @@ function updateLoopControls() {
           || (Number(item?.definitionId || 0) > 0
             && Number(item.definitionId) === Number(ref?.definitionId || 0))
       ));
+      const allowedProvisionsReserveItem = allowedProvisionsReserveItems.some((ref) => (
+        rollingItemMatchesRef(item, ref)
+      ));
       if (options.allowRequiredSpecial !== true && (
         rollingLiveRequiredSpecial(item, runtime.primaryContext?.model)
           || rollingSnapshotRequiredSpecial(item, runtime.primaryContext?.activeLoopDef || loopDef)
@@ -13064,7 +13069,8 @@ function updateLoopControls() {
       }
       if (reserveRatings.has(Number(item?.rating || 0))
         && !allowedPrimaryDuplicate
-        && !allowedProtectedItem) {
+        && !allowedProtectedItem
+        && !allowedProvisionsReserveItem) {
         fail(`${loopDef.name}: recovery squad attempted to consume a reserved ${Number(item.rating)} card`);
       }
       if (Number(item?.rating || 0) > protectionRating) {
@@ -13366,7 +13372,9 @@ function updateLoopControls() {
     let relaxedPrimaryRefs = [];
     let selectionPolicy = null;
     let fill = null;
+    let storagePressureItemRefs = [];
     while (true) {
+      storagePressureItemRefs = [];
       const primaryRecoveryPolicy = createRollingPrimarySelectionPolicy({
         ledger,
         model: { constraints: [] },
@@ -13404,6 +13412,29 @@ function updateLoopControls() {
           ...relaxedPrimaryRefs,
         ],
       });
+      if (options.enforceStorageHeadroom === true) {
+        const mandatoryPrimaryRefs = consumablePrimaryRefs.filter((ref) => (
+          !relaxedPrimaryRefs.some((relaxedRef) => rollingItemMatchesRef(ref, relaxedRef))
+        ));
+        const pressure = rollingRatingRecoveryStoragePressure(runtime, {
+          consumedPendingRefs: mandatoryPrimaryRefs,
+          maxRating: selectionPolicy.maxOrdinaryRating,
+          maxCount: opened.model.requiredPlayerCount,
+          protectedItems: selectionPolicy.protectedItems,
+        });
+        if (!pressure.ok) {
+          return {
+            status: 'unavailable',
+            reason: pressure.reason || `${recoveryDef.name} cannot determine the required Storage release`,
+            reasonCode: pressure.reasonCode || 'STORAGE_CAPACITY_UNKNOWN',
+          };
+        }
+        if (pressure.role) {
+          storagePressureItemRefs = pressure.pressureItemRefs;
+          selectionPolicy.exclusiveRoles.push(pressure.role);
+          log(`${loopDef.name}: ${recoveryDef.name} planning requires at least ${pressure.minimumConsumption} real Storage card(s); ${pressure.pendingStorageItems} pending card(s), ${pressure.currentFree} current free slot(s), ${pressure.pressureItemRefs.length} safe Storage candidate(s)`);
+        }
+      }
       fill = await fillSbcSquadRatingOptimized(opened.activeLoopDef, {
         set: opened.set,
         challenge: opened.challenge,
@@ -13456,6 +13487,10 @@ function updateLoopControls() {
       fill.selection,
       consumablePrimaryRefs,
     );
+    const allowedProvisionsReserveItems = rollingUniqueRefs((fill.selection?.entries || [])
+      .map((entry) => entry?.item)
+      .filter((item) => storagePressureItemRefs.some((ref) => rollingItemMatchesRef(item, ref)))
+      .map((item) => liveItemRef(item, 'storage')));
     const storageItemsConsumed = rollingSelectionStorageConsumption(runtime, fill.selection);
     if (typeof options.validateSelection === 'function') {
       const selectionValidation = await options.validateSelection({
@@ -13520,6 +13555,7 @@ function updateLoopControls() {
           allowSpecial: true,
           allowPrimaryDuplicates,
           allowedPrimaryDuplicateRefs: consumedPrimaryRefs,
+          allowedProvisionsReserveItems,
           selection: squadPlan?.selection || fill.selection,
         });
         const validation = validateRatingSbcModelAgainstItems(
@@ -13911,6 +13947,45 @@ function updateLoopControls() {
       pendingStorageItems: routing.pendingRefs.length,
       storageItemsConsumed,
     });
+  }
+
+  function rollingRatingRecoveryStoragePressure(runtime, options = {}) {
+    const routing = rollingPendingStorageRoutingState(runtime, {
+      consumedPendingRefs: options.consumedPendingRefs || [],
+    });
+    if (!routing.ok) return routing;
+    const ledger = runtime.coordinator?.getLedger?.();
+    const requirement = storagePressureRequirement({
+      currentFree: ledger?.summary?.()?.capacities?.storage?.free,
+      pendingStorageItems: routing.pendingRefs.length,
+    });
+    if (!requirement.ok || requirement.minimumConsumption <= 0) {
+      return { ...requirement, pendingRefs: routing.pendingRefs, pressureItemRefs: [], role: null };
+    }
+
+    const maxRating = Math.max(1, Number(options.maxRating || 95) || 95);
+    const protectedItems = options.protectedItems || [];
+    const pressureItemRefs = rollingUniqueRefs((ledger?.classifiedEntries?.() || [])
+      .filter(({ item, pile, classification }) => (
+        String(pile || item?.pile || item?.ref?.pile || '') === 'storage'
+          && Number(item?.rating || 0) <= maxRating
+          && classification?.requiredSpecial !== true
+          && classification?.protected !== true
+          && !protectedItems.some((ref) => rollingItemMatchesRef(item, ref))
+      ))
+      .map(({ item }) => liveItemRef(item, 'storage')));
+    const role = createStoragePressureRole(
+      pressureItemRefs,
+      requirement.minimumConsumption,
+      Math.max(requirement.minimumConsumption, Number(options.maxCount || 11) || 11),
+    );
+    role.matches = (item) => pressureItemRefs.some((ref) => rollingItemMatchesRef(item, ref));
+    return {
+      ...requirement,
+      pendingRefs: routing.pendingRefs,
+      pressureItemRefs,
+      role,
+    };
   }
 
   function stageRollingDeferredPrimaryStorage(runtime, deferredRefs = [], details = {}) {
@@ -14331,8 +14406,19 @@ function updateLoopControls() {
       const requiredSpecialRole = requiredIndexes.some((index) => (
         entry?.requirementMatches?.[index] === true
       ));
-      const eventSpecial = isTotsItem(item) || isFofItem(item) || isFuttiesItem(item);
       const special = isSbcSpecialItem(item);
+      const eventSpecial = special
+        && !isTotwItem(item)
+        && (
+          rollingLiveRequiredSpecial(item, runtime.primaryContext?.model)
+            || rollingSnapshotMatchesRequiredSpecial(
+              item,
+              runtime.primaryContext?.activeLoopDef || loopDef,
+            )
+            || isTotsItem(item)
+            || isFofItem(item)
+            || isFuttiesItem(item)
+        );
       return {
         id: Number(item.id),
         name: itemDisplayName(item),
@@ -15305,11 +15391,17 @@ function updateLoopControls() {
     if (requestedPressure > 0) {
       const maximumFeasible = Number(bestFeasible?.storagePressureConsumed || 0);
       const shortfall = Math.max(0, requestedPressure - maximumFeasible);
+      const failureReasonCode = lastFailure?.reasonCode || lastFailure?.missing?.code || '';
+      const requiredSpecialShortage = failureReasonCode === 'REQUIRED_SPECIAL_SHORTAGE';
       return {
         ...(lastFailure || {}),
         ok: false,
-        reason: `no exact ${context.targetRating}-rated squad can release the required ${requestedPressure} Storage-pressure card(s); maximum proven release ${maximumFeasible}, short by ${shortfall}`,
-        reasonCode: 'RECOVERY_STORAGE_PRESSURE_INFEASIBLE',
+        reason: requiredSpecialShortage
+          ? (lastFailure?.reason || lastFailure?.missing?.reason || 'Storage pressure squad requires an unavailable Required Special')
+          : `no exact ${context.targetRating}-rated squad can release the required ${requestedPressure} Storage-pressure card(s); maximum proven release ${maximumFeasible}, short by ${shortfall}`,
+        reasonCode: requiredSpecialShortage
+          ? 'REQUIRED_SPECIAL_SHORTAGE'
+          : 'RECOVERY_STORAGE_PRESSURE_INFEASIBLE',
         details: {
           ...(lastFailure?.details || {}),
           requestedPressure,
@@ -15723,6 +15815,21 @@ function updateLoopControls() {
     try { eaInventoryAdapter().preparePurchasedItem(item); } catch { }
   }
 
+  function buildRollingResumedRouting(finalRoute, resumedCount, pendingRefs = []) {
+    return {
+      ...finalRoute,
+      pendingItems: finalRoute.status === 'blocked'
+        ? (finalRoute.pendingItems?.length ? finalRoute.pendingItems : finalRoute.storageItems || [])
+        : [],
+      counts: {
+        ...(finalRoute.counts || {}),
+        unresolved: 0,
+        resumed: resumedCount,
+        pending: pendingRefs.length,
+      },
+    };
+  }
+
   async function resumeRollingPendingUnassigned(loopDef, runtime) {
     await refreshInventoryCaches(`${loopDef.name} resume Unassigned`, {
       includePacks: false,
@@ -15899,17 +16006,11 @@ function updateLoopControls() {
       .filter((ref) => pendingRefs.some((candidate) => rollingItemMatchesRef(candidate, ref)));
     runtime.pendingUnassignedRefs = rollingUniqueRefs(pendingRefs);
     runtime.primaryDuplicateRefs = rollingUniqueRefs(primaryRefs);
-    runtime.openRouting = {
-      ...finalRoute,
-      pendingItems: finalRoute.status === 'blocked'
-        ? (finalRoute.pendingItems?.length ? finalRoute.pendingItems : finalRoute.storageItems || [])
-        : [],
-      counts: {
-        ...(finalRoute.counts || {}),
-        resumed: duplicates.length,
-        pending: runtime.pendingUnassignedRefs.length,
-      },
-    };
+    runtime.openRouting = buildRollingResumedRouting(
+      finalRoute,
+      duplicates.length,
+      runtime.pendingUnassignedRefs,
+    );
     log(`${loopDef.name}: resumed ${duplicates.length} Unassigned duplicate(s); primary:${runtime.primaryDuplicateRefs.length}, pending Storage:${runtime.openRouting.pendingItems.length}, route:${runtime.openRouting.status}`);
     return {
       status: 'ready',
@@ -16334,6 +16435,7 @@ function updateLoopControls() {
               ? ['unassigned', 'storage', 'transfer', 'club']
               : resolveRollingRecoveryPriorityPiles(loopDef, { recoveryMode: 'storage-pressure' }),
             allowPrimaryDuplicates: true,
+            enforceStorageHeadroom: true,
             validateSelection: ({ storageItemsConsumed, consumedPrimaryRefs }) => (
               validateRollingEmergencyProvisionsSelection(runtime, storageItemsConsumed, {
                 consumedPendingRefs: consumedPrimaryRefs,

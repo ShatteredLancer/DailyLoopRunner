@@ -119,6 +119,15 @@ describe('Inventory Adapter contract', () => {
     ]);
   });
 
+  it('uses the verified EA tradeability method before compatibility aliases', () => {
+    const item = makePlayer({ id: 14, definitionId: 114, untradeable: true });
+    item.isTradeable = () => true;
+    item.isUntradeable = () => true;
+    const ea = createEaInventoryAdapter(createRuntime({ club: [item] }));
+
+    expect(ea.snapshot().piles.club[0]).toMatchObject({ id: 14, tradeable: true });
+  });
+
   it('preserves or derives the EA base-player database identity', () => {
     const direct = {
       id: 12,

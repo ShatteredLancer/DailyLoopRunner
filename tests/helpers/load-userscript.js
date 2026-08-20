@@ -57,6 +57,8 @@ export function makePlayer(options = {}) {
     untradeable: options.untradeable !== false,
     tradeable: options.untradeable === false,
     name: options.name || `Player ${options.id}`,
+    rareName: options.rareName,
+    rarityName: options.rarityName,
     leagueId: Number(options.leagueId || 0),
     evolutionId: options.evolutionId,
     upgrades: options.upgrades,
@@ -114,6 +116,7 @@ export async function loadUserscript(options = {}) {
       isTotwItem,
       isTotsItem,
       isFuttiesItem,
+      markAssumedTotwRewardItems,
       rollingBaseProtectionReasons,
       rollingOpenedDuplicateTargetProtectionReasons,
       rollingPrimaryReservesAllSpecialSlots,
@@ -122,8 +125,10 @@ export async function loadUserscript(options = {}) {
       createRollingRequiredSpecialSourceFilter,
       inspectRollingLiveUnassignedEntries,
       refreshRollingPendingUnassignedRefs,
+      buildRollingResumedRouting,
       rollingPendingStorageRoutingState,
       validateRollingEmergencyProvisionsSelection,
+      rollingRatingRecoveryStoragePressure,
       rollingStorageSinkSelectionPolicy,
       selectRollingGenericStorageSinkSquad,
       validateRollingStorageSinkPlayers,
@@ -183,11 +188,18 @@ export async function loadUserscript(options = {}) {
     repositories: {
       Item: itemRepository,
       Store: { myPacks: collection(options.packs) },
+      Rarity: {
+        getRarity: (id) => options.rarities?.[Number(id)] || null,
+        get: (id) => options.rarities?.[Number(id)] || null,
+      },
     },
     services: {
       Item: { itemDao: { itemRepo: { club: { items: collection() } } } },
       Store: {},
       SBC: {},
+      Configuration: {
+        getItemRarity: (item) => options.rarities?.[Number(item?.rareflag)] || null,
+      },
     },
     ItemPile: {
       CLUB: 'club',

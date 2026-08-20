@@ -40,7 +40,7 @@ describe('Rolling runtime recovery helpers', () => {
     expect(api.rollingOrdinaryGoldDuplicate(makePlayer({ id: 90, rating: 90, rareflag: 2, duplicate: true }), {})).toBe(false);
   });
 
-  it('does not let optional subtype methods upgrade an ordinary Gold card to special', async () => {
+  it('ignores unsupported Player Item subtype methods and reads event names only from EA rarity metadata', async () => {
     const ordinaryClubGold = makePlayer({
       id: 191,
       definitionId: 9191,
@@ -57,10 +57,28 @@ describe('Rolling runtime recovery helpers', () => {
       definitionId: 9192,
       rating: 95,
       rareflag: 117,
-      name: 'Festival of Football',
+      name: 'Actual event player',
+      rarityName: 'Festival of Football',
     });
-    actualFof.isFOF = () => true;
-    const { api } = await loadUserscript({ club: [ordinaryClubGold, actualFof] });
+    const methodOnlySpecial = makePlayer({
+      id: 196,
+      definitionId: 9196,
+      rating: 95,
+      rareflag: 118,
+      name: 'Method-only special',
+    });
+    methodOnlySpecial.isFOF = () => true;
+    const repositoryFutties = makePlayer({
+      id: 197,
+      definitionId: 9197,
+      rating: 96,
+      rareflag: 120,
+      name: 'Repository event player',
+    });
+    const { api } = await loadUserscript({
+      club: [ordinaryClubGold, actualFof, methodOnlySpecial, repositoryFutties],
+      rarities: { 120: { name: 'FUTTIES' } },
+    });
     const loopDef = {
       name: 'Rolling Gold recovery',
       runtimeProtectionRating: 95,
@@ -83,6 +101,8 @@ describe('Rolling runtime recovery helpers', () => {
       allowProvisionsReserve: true,
     })).toBe(true);
     expect(api.isFofItem(actualFof)).toBe(true);
+    expect(api.isFofItem(methodOnlySpecial)).toBe(false);
+    expect(api.isFuttiesItem(repositoryFutties)).toBe(true);
     expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [actualFof], {
       allowProvisionsReserve: true,
     })).toThrow(/special/);
@@ -191,6 +211,49 @@ describe('Rolling runtime recovery helpers', () => {
     expect(runtime.primaryDuplicateRefs.map((ref) => ref.id))
       .toEqual(primaryDuplicates.map((item) => item.id));
     expect(runtime.primaryDuplicateRefs.map((ref) => ref.id)).not.toContain(protectedDuplicate.id);
+  });
+
+  it('marks live resumed duplicates resolved before protected Storage recovery', async () => {
+    const primaryDuplicates = Array.from({ length: 5 }, (_, index) => makePlayer({
+      id: 710 + index,
+      definitionId: 9710 + index,
+      rating: 85 + index,
+      duplicate: true,
+      duplicateId: 1710 + index,
+    }));
+    const storageDuplicates = Array.from({ length: 4 }, (_, index) => makePlayer({
+      id: 720 + index,
+      definitionId: 9720 + index,
+      rating: 96 + index,
+      duplicate: true,
+      duplicateId: 1720 + index,
+    }));
+    const pendingRefs = [...primaryDuplicates, ...storageDuplicates]
+      .map((item) => ({ id: item.id, definitionId: item.definitionId, pile: 'unassigned' }));
+    const { api } = await loadUserscript();
+    const routing = api.buildRollingResumedRouting({
+      status: 'blocked',
+      reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      reservedItems: primaryDuplicates,
+      storageItems: storageDuplicates,
+      pendingItems: storageDuplicates,
+      counts: {
+        duplicates: 9,
+        primaryDuplicates: 5,
+        storageRequired: 4,
+      },
+    }, 9, pendingRefs);
+    const runtime = { primaryDuplicateRefs: [] };
+
+    expect(routing).toMatchObject({
+      status: 'blocked',
+      reasonCode: 'PROTECTED_STORAGE_BLOCKED',
+      counts: { unresolved: 0, resumed: 9, pending: 9 },
+    });
+    expect(api.preserveRollingPrimaryDuplicateRefs(runtime, routing, { replace: true }))
+      .toMatchObject({ captured: true, count: 5, recoveredFromBlockedStorage: true });
+    expect(runtime.primaryDuplicateRefs.map((ref) => ref.id))
+      .toEqual(primaryDuplicates.map((item) => item.id));
   });
 
   it('preserves the existing primary duplicate behavior for a ready route', async () => {
@@ -308,6 +371,64 @@ describe('Rolling runtime recovery helpers', () => {
     });
   });
 
+  it('turns pending Storage headroom into a pre-plan real-Storage role', async () => {
+    const primary = Array.from({ length: 5 }, (_, index) => makePlayer({
+      id: 731 + index,
+      definitionId: 9731 + index,
+      rating: 85 + index,
+      duplicate: true,
+    }));
+    const pending = Array.from({ length: 4 }, (_, index) => makePlayer({
+      id: 741 + index,
+      definitionId: 9741 + index,
+      rating: 90 + index,
+      duplicate: true,
+    }));
+    const storage = [
+      makePlayer({ id: 751, definitionId: 9751, rating: 87, pile: 'storage' }),
+      makePlayer({ id: 752, definitionId: 9752, rating: 89, pile: 'storage' }),
+      makePlayer({ id: 753, definitionId: 9753, rating: 97, pile: 'storage' }),
+    ];
+    const { api } = await loadUserscript({ unassigned: [...primary, ...pending], storage });
+    const runtime = {
+      openRouting: { storageItems: pending },
+      coordinator: {
+        getLedger: () => ({
+          summary: () => ({ capacities: { storage: { free: 2 } } }),
+          classifiedEntries: () => storage.map((item) => ({
+            item,
+            pile: 'storage',
+            classification: { requiredSpecial: false, protected: false },
+          })),
+        }),
+      },
+    };
+
+    const pressure = api.rollingRatingRecoveryStoragePressure(runtime, {
+      consumedPendingRefs: primary,
+      maxRating: 96,
+      maxCount: 11,
+    });
+
+    expect(pressure).toMatchObject({
+      ok: true,
+      currentFree: 2,
+      pendingStorageItems: 4,
+      minimumConsumption: 2,
+      pressureItemRefs: [
+        expect.objectContaining({ id: 751, pile: 'storage' }),
+        expect.objectContaining({ id: 752, pile: 'storage' }),
+      ],
+      role: expect.objectContaining({
+        id: 'storage-pressure-release',
+        minCount: 2,
+        maxCount: 11,
+      }),
+    });
+    expect(pressure.role.matches(storage[0])).toBe(true);
+    expect(pressure.role.matches(storage[2])).toBe(false);
+  });
+
   it('releases only explicitly eligible pending Storage cards from Sink protection', async () => {
     const pending = makePlayer({
       id: 721,
@@ -392,6 +513,55 @@ describe('Rolling runtime recovery helpers', () => {
         definitionId: primarySignal.definitionId,
       }],
     })).toThrow('recovery squad attempted to consume a reserved 88 card');
+  });
+
+  it('allows only the exact Storage-pressure selection to bypass reserve-rating protection', async () => {
+    const selectedReserve = makePlayer({ id: 1731, definitionId: 9731, rating: 87, rareflag: 22 });
+    const unrelatedReserve = makePlayer({ id: 1732, definitionId: 9732, rating: 87, rareflag: 22 });
+    const protectedReserve = makePlayer({ id: 1733, definitionId: 9733, rating: 87, rareflag: 22 });
+    const { api } = await loadUserscript();
+    const runtime = {
+      primaryDuplicateRefs: [],
+      pendingUnassignedRefs: [],
+      primaryContext: {},
+      coordinator: {
+        getLedger: () => ({
+          classifiedEntries: () => [{
+            item: protectedReserve,
+            pile: 'storage',
+            classification: { requiredSpecial: false, protected: true },
+          }],
+        }),
+      },
+    };
+    const loopDef = {
+      name: 'Rolling Storage-pressure reserve recovery',
+      runtimeProtectionRating: 95,
+      runtimeProvisionsMaxRating: 88,
+      blockSpecial: false,
+    };
+
+    expect(api.assertRollingRecoveryItems(loopDef, runtime, [selectedReserve], {
+      allowSpecial: true,
+      allowedProvisionsReserveItems: [{
+        id: selectedReserve.id,
+        definitionId: selectedReserve.definitionId,
+      }],
+    })).toBe(true);
+    expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [unrelatedReserve], {
+      allowSpecial: true,
+      allowedProvisionsReserveItems: [{
+        id: selectedReserve.id,
+        definitionId: selectedReserve.definitionId,
+      }],
+    })).toThrow('recovery squad attempted to consume a reserved 87 card');
+    expect(() => api.assertRollingRecoveryItems(loopDef, runtime, [protectedReserve], {
+      allowSpecial: true,
+      allowedProvisionsReserveItems: [{
+        id: protectedReserve.id,
+        definitionId: protectedReserve.definitionId,
+      }],
+    })).toThrow('recovery squad attempted to consume a protected card');
   });
 
   it('checks EA Storage Sink challenge readiness only after the selected squad is saved', async () => {

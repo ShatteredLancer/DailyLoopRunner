@@ -281,6 +281,26 @@ describe('Trade Adapter contracts', () => {
     expect(createEaInventoryAdapter(runtime).snapshot().piles.transfer[0]).toMatchObject({ tradeable: false });
   });
 
+  it('uses the verified EA tradeability method before compatibility aliases', () => {
+    const item = {
+      id: 19,
+      definitionId: 29,
+      type: 'player',
+      rating: 80,
+      rareflag: 0,
+      isTradeable: () => true,
+      isUntradeable: () => true,
+      loans: -1,
+    };
+    const result = createEaTradeAdapter(eaRuntime(item))
+      .inspectListingCandidates({ sources: ['transfer'], limit: 10 });
+
+    expect(result.candidates[0]).toMatchObject({
+      item: { id: 19 },
+      tradeable: true,
+    });
+  });
+
   it('excludes a stale Club entity when the same item ID is present in another pile', () => {
     const transferItem = {
       id: 12, definitionId: 22, type: 'player', rating: 80, rareflag: 0,

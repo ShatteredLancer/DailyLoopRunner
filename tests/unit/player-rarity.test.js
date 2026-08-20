@@ -8,6 +8,7 @@ import {
   isSpecialPlayerCard,
   normalPlayerRarity,
   readPlayerDatabaseId,
+  readExplicitPlayerRareFlag,
   readPlayerRareFlag,
 } from '../../src/domain/player-rarity.js';
 
@@ -26,6 +27,13 @@ describe('canonical player rarity', () => {
     expect(readPlayerRareFlag({ rareflag: 1, isSpecial: () => true })).toBe(1);
     expect(readPlayerRareFlag({ isSpecial: () => true })).toBe(2);
     expect(readPlayerRareFlag({ isRare: () => true })).toBe(1);
+  });
+
+  it('distinguishes explicit EA rarity metadata from method-derived fallback values', () => {
+    expect(readExplicitPlayerRareFlag({ rareflag: 109, isTOTW: () => true })).toBe(109);
+    expect(readExplicitPlayerRareFlag({ _staticData: { rareFlag: 3 } })).toBe(3);
+    expect(readExplicitPlayerRareFlag({ special: true, isSpecial: () => true })).toBeNull();
+    expect(readPlayerRareFlag({ special: true, isSpecial: () => true })).toBe(2);
   });
 
   it('keeps explicit common and rare metadata authoritative over contradictory EA methods', () => {
