@@ -6905,7 +6905,9 @@
       challengeRef: cloneSerializable(input2.challengeRef ?? null),
       consumedItemRefs: Object.freeze(cloneSerializable(input2.consumedItemRefs || [])),
       rewardPackId: input2.rewardPackId === void 0 || input2.rewardPackId === null ? null : finiteNumber(input2.rewardPackId),
-      reason: input2.reason ? String(input2.reason) : null
+      reason: input2.reason ? String(input2.reason) : null,
+      reasonCode: input2.reasonCode ? String(input2.reasonCode) : null,
+      details: Object.freeze(cloneSerializable(input2.details || {}))
     });
   }
   function createOpenPackReceipt(input2 = {}) {
@@ -11201,7 +11203,11 @@
       requiredItems: uniqueRefs(requiredItems),
       preferredItems: uniqueRefs(preferredItems),
       relaxedPrimaryDuplicateRefs,
-      protectedItems: uniqueRefs([...protectedItems, ...relaxedPrimaryItems]),
+      protectedItems: uniqueRefs([
+        ...protectedItems,
+        ...input2.protectedItems || [],
+        ...relaxedPrimaryItems
+      ]),
       exclusiveRoles,
       maxOrdinaryRating: Math.max(1, Number(input2.protectionRating || 95) || 95),
       protectionPolicy: {
@@ -13554,11 +13560,13 @@
         const transportResult = await options.submitTransport?.(context);
         if (transportResult?.submitted === false || transportResult?.ok === false) {
           return publishResult(options, createSubmissionResult({
-            status: "blocked",
+            status: transportResult?.status || "blocked",
             submitted: false,
             challengeRef: context.challengeRef || { id: context.challenge?.id || null },
             consumedItemRefs: context.squadPlan.itemRefs || [],
-            reason: transportResult?.reason || "SBC submit transport failed"
+            reason: transportResult?.reason || "SBC submit transport failed",
+            reasonCode: transportResult?.reasonCode,
+            details: transportResult?.details
           }), { phase: "transport", context, transportResult });
         }
         const result = createSubmissionResult({
@@ -24716,20 +24724,11 @@
       violationItemIds: []
     };
   }
-  function planItemViolationOverride({
-    allowOverride = false,
-    attempt = 1,
-    maxAttempts = 3,
+  function inspectItemViolationConflict({
     detail = "",
     result = null,
-    submittedItemIds = [],
-    skipValidation = false
+    submittedItemIds = []
   } = {}) {
-    if (allowOverride !== true) return rejectedItemViolationOverride("disabled");
-    if (skipValidation === true) return rejectedItemViolationOverride("validation-already-skipped");
-    const current = Math.max(1, Number(attempt) || 1);
-    const max = Math.max(1, Math.min(5, Number(maxAttempts) || 3));
-    if (current >= max) return rejectedItemViolationOverride("attempts-exhausted");
     const code = normalizeSubmitErrorCode(detail || result?.status || result?.error?.code || "");
     if (code !== "409") return rejectedItemViolationOverride("not-item-violation-conflict");
     const violations = result?.data?.itemViolations;
@@ -24754,12 +24753,82 @@
       if (name) violationNames.push(name);
     }
     return {
+      retry: false,
+      reason: "item-violations",
+      skipValidation: false,
+      reloadChallenge: false,
+      violationNames: [...new Set(violationNames)],
+      violationItemIds: [...new Set(violationItemIds)]
+    };
+  }
+  function planItemViolationOverride({
+    allowOverride = false,
+    attempt = 1,
+    maxAttempts = 3,
+    detail = "",
+    result = null,
+    submittedItemIds = [],
+    skipValidation = false
+  } = {}) {
+    if (allowOverride !== true) return rejectedItemViolationOverride("disabled");
+    if (skipValidation === true) return rejectedItemViolationOverride("validation-already-skipped");
+    const current = Math.max(1, Number(attempt) || 1);
+    const max = Math.max(1, Math.min(5, Number(maxAttempts) || 3));
+    if (current >= max) return rejectedItemViolationOverride("attempts-exhausted");
+    const inspected = inspectItemViolationConflict({ detail, result, submittedItemIds });
+    if (inspected.reason !== "item-violations") return inspected;
+    return {
       retry: true,
       reason: "item-violations",
       skipValidation: true,
       reloadChallenge: false,
-      violationNames: [...new Set(violationNames)],
-      violationItemIds: [...new Set(violationItemIds)]
+      violationNames: inspected.violationNames,
+      violationItemIds: inspected.violationItemIds
+    };
+  }
+
+  // src/sbc/rolling-active-squad-conflict.js
+  function uniqueIds(items = []) {
+    return [...new Set(items.map((item) => Number(item?.id || 0)).filter((id) => Number.isSafeInteger(id) && id > 0))];
+  }
+  function decideRollingActiveSquadConflict(items = []) {
+    if (!Array.isArray(items) || !items.length || items.some((item) => !Number(item?.id || 0))) {
+      return {
+        action: "error",
+        reasonCode: "ACTIVE_SQUAD_CONFLICT_IDENTITY_UNAVAILABLE",
+        reason: "Active Squad conflict could not be matched to the submitted players",
+        replaceItemIds: [],
+        reviewItemIds: []
+      };
+    }
+    const regressions = items.filter((item) => item.eventSpecial === true || item.clubOtherSpecial === true && item.strictClubSpecialProtection === true);
+    if (regressions.length) {
+      return {
+        action: "error",
+        reasonCode: "ACTIVE_SQUAD_PROTECTION_REGRESSION",
+        reason: `Rolling selected ${regressions.length} card(s) that should have been protected`,
+        regressionItemIds: uniqueIds(regressions),
+        replaceItemIds: [],
+        reviewItemIds: []
+      };
+    }
+    const ordinary = items.filter((item) => item.special !== true);
+    const review = items.filter((item) => item.special === true && !regressions.includes(item));
+    if (ordinary.length) {
+      return {
+        action: "replace",
+        reasonCode: "ACTIVE_SQUAD_CONFLICT_REPLAN",
+        reason: `Replacing ${ordinary.length} ordinary Active Squad card(s)`,
+        replaceItemIds: uniqueIds(ordinary),
+        reviewItemIds: uniqueIds(review)
+      };
+    }
+    return {
+      action: "review",
+      reasonCode: "ACTIVE_SQUAD_SPECIAL_REVIEW_REQUIRED",
+      reason: `Active Squad contains ${items.length} eligible special card(s)`,
+      replaceItemIds: [],
+      reviewItemIds: uniqueIds(review)
     };
   }
 
@@ -26568,7 +26637,7 @@
     return value === true || value?.stopped === true || value?.status === "stopped";
   }
   function isProgressed(value) {
-    return value?.progressed === true || value?.submitted === true || ["progressed", "submitted", "opened", "selected"].includes(String(value?.status || ""));
+    return value?.status === "replan" || value?.progressed === true || value?.submitted === true || ["progressed", "submitted", "opened", "selected"].includes(String(value?.status || ""));
   }
   function boundedBudget(value, fallback) {
     const number = Number(value);
@@ -26650,7 +26719,7 @@
       storageMaintenance: 0
     };
     function rememberReceipt(receipt) {
-      if (!receipt) return;
+      if (!receipt || receipt.status === "replan" && receipt.submitted !== true) return;
       result.receiptCount++;
       if (!retainReceipts) return;
       result.receipts.push(receipt);
@@ -26711,6 +26780,17 @@
           ...details
         })
       }) || { status: "unavailable", reason: `${kind} recovery returned no result` };
+      if (value?.status === "replan") {
+        await emit8(options, "replan", {
+          kind,
+          phase,
+          trigger: context.trigger || null,
+          reason: value.reason || null,
+          reasonCode: reasonCode(value),
+          details: value.details || null
+        });
+        return value;
+      }
       if (!isProgressed(value)) return value;
       const after = recoveryFingerprint(await options.getProgressFingerprint?.({
         result,
@@ -27241,6 +27321,17 @@
       });
       rememberReceipt(submission?.receipt || submission);
       if (submission?.inventoryDelta) result.inventoryDelta = submission.inventoryDelta;
+      if (submission?.status === "replan") {
+        resumedPrimaryPending = true;
+        await emit8(options, "replan", {
+          kind: "primary",
+          phase: ROLLING_UPGRADE_PHASES.SUBMIT_PRIMARY,
+          reason: submission.reason || null,
+          reasonCode: reasonCode(submission),
+          details: submission.details || null
+        });
+        continue;
+      }
       if (isStopped(submission)) return finish("stopped", submission, "stopped while submitting the primary squad");
       if (submission?.status === "planned") {
         return finish("planned", submission, "dry-run primary squad plan complete");
@@ -28401,8 +28492,8 @@
       ])
     })
   ]);
-  function applyStyles(element, styles4) {
-    Object.assign(element.style, styles4);
+  function applyStyles(element, styles5) {
+    Object.assign(element.style, styles5);
   }
   function getMainPanelHelpTopics(topic = "overview") {
     const requested = String(topic || "overview");
@@ -28692,7 +28783,7 @@
     const duplicateProvisionsRewards = pickOptions.rollingOpenDuplicateProvisionsRewards === true ? "immediate" : "on shortage";
     const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
     const fsuLockedProtection = pickOptions.protectFsuLockedPlayers === true ? "on" : "off";
-    const activeSquadProtection = pickOptions.protectActiveSquadPlayers === true ? "stop" : "confirm";
+    const activeSquadProtection = pickOptions.protectActiveSquadPlayers === true ? "replace/review" : "confirm";
     summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickModeLabel}`;
     summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; normal recovery order ${recoveryPileOrder}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}; FSU locked players ${fsuLockedProtection}; Active Squad 409 ${activeSquadProtection}`;
   }
@@ -32206,8 +32297,8 @@
   }
 
   // src/ui/player-pick-modal.js
-  function applyStyles2(element, styles4) {
-    Object.assign(element.style, styles4);
+  function applyStyles2(element, styles5) {
+    Object.assign(element.style, styles5);
   }
   function candidateName(candidate, fallback, itemDisplayName) {
     const value = itemDisplayName?.(candidate?.item) || candidate?.item?.name || fallback;
@@ -32378,8 +32469,8 @@
     blocked: "Blocked",
     unknown: "?"
   });
-  function applyStyles3(element, styles4) {
-    Object.assign(element.style, styles4);
+  function applyStyles3(element, styles5) {
+    Object.assign(element.style, styles5);
   }
   function button(dom, text, title, mode) {
     const element = dom.create("button");
@@ -32879,8 +32970,8 @@
   }
 
   // src/ui/reward-highlight.js
-  function applyStyles4(element, styles4) {
-    Object.assign(element.style, styles4);
+  function applyStyles4(element, styles5) {
+    Object.assign(element.style, styles5);
   }
   function positionStack(stack, panel, viewport = {}) {
     const mobile = panel?.dataset?.layout === "mobile";
@@ -33009,8 +33100,8 @@
   }
 
   // src/ui/reward-alert-settings.js
-  function applyStyles5(element, styles4) {
-    Object.assign(element.style, styles4);
+  function applyStyles5(element, styles5) {
+    Object.assign(element.style, styles5);
   }
   function inputStyles(input2, mode) {
     applyStyles5(input2, {
@@ -33206,8 +33297,8 @@
   }
 
   // src/ui/selection-policy-settings.js
-  function applyStyles6(element, styles4) {
-    Object.assign(element.style, styles4);
+  function applyStyles6(element, styles5) {
+    Object.assign(element.style, styles5);
   }
   function inputStyles2(input2, mode) {
     applyStyles6(input2, {
@@ -33454,9 +33545,9 @@
     const protectActiveSquadPlayers = checkbox2(
       dom,
       "bronze-loop-policy-protect-active-squad-players",
-      "Stop on Active Squad conflict",
+      "Protect Active Squad players",
       pickOptions.protectActiveSquadPlayers === true,
-      "When enabled, stop on EA 409 squad-conflict responses instead of confirming the same squad with skipValidation"
+      "When enabled, replace ordinary conflict cards automatically, review eligible specials, and stop on protected-card selection regressions"
     );
     form.append(
       sectionTitle(dom, "Standard SBCs"),
@@ -33586,9 +33677,93 @@
     return overlay;
   }
 
+  // src/ui/active-squad-conflict-dialog.js
+  function styles(element, values) {
+    Object.assign(element.style, values);
+    return element;
+  }
+  function requestActiveSquadConflictDecision(options = {}) {
+    if (!options.dom?.create || !options.dom?.appendToBody) throw new TypeError("dom adapter is required");
+    const mode = readResponsiveUiMode(options.dom);
+    const items = Array.isArray(options.items) ? options.items : [];
+    return new Promise((resolve) => {
+      const overlay = styles(options.dom.create("div"), {
+        position: "fixed",
+        inset: "0",
+        zIndex: "100000",
+        background: "rgba(0, 0, 0, 0.78)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+        boxSizing: "border-box"
+      });
+      overlay.id = "bronze-loop-active-squad-conflict";
+      const dialog = styles(options.dom.create("div"), {
+        width: "min(560px, 100%)",
+        maxHeight: "90vh",
+        overflow: "auto",
+        background: "#171b21",
+        color: "#f3f5f7",
+        border: "1px solid #65758a",
+        padding: "16px",
+        boxSizing: "border-box",
+        fontFamily: "Arial, sans-serif"
+      });
+      const title = styles(options.dom.create("div"), { fontWeight: "700", marginBottom: "8px" });
+      title.textContent = "Active Squad special card";
+      const message = styles(options.dom.create("div"), { color: "#b7c2d0", marginBottom: "12px", lineHeight: "1.45" });
+      message.textContent = "EA reports that the selected special card is used by an active squad.";
+      const list = styles(options.dom.create("div"), { display: "grid", gap: "6px", marginBottom: "14px" });
+      items.forEach((item) => {
+        const row = styles(options.dom.create("div"), {
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
+          gap: "10px",
+          border: "1px solid #465363",
+          padding: "8px",
+          background: "#202731"
+        });
+        const name = styles(options.dom.create("span"), { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: "700" });
+        name.textContent = String(item.name || `Item #${item.id || "?"}`);
+        const detail = styles(options.dom.create("span"), { color: "#ffd27a", whiteSpace: "nowrap" });
+        detail.textContent = `${Number(item.rating || 0) || "?"} | ${String(item.pile || "unknown")}`;
+        row.append(name, detail);
+        list.appendChild(row);
+      });
+      const actions = styles(options.dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap" });
+      const replace = styles(options.dom.create("button"), { minHeight: responsiveControlHeight(mode, 34), padding: "0 14px" });
+      replace.type = "button";
+      replace.textContent = "Replace card";
+      const use = styles(options.dom.create("button"), {
+        minHeight: responsiveControlHeight(mode, 34),
+        padding: "0 14px",
+        background: "#a94343",
+        color: "#fff",
+        border: "1px solid #d16a6a"
+      });
+      use.type = "button";
+      use.textContent = "Use this card";
+      const finish = (decision) => {
+        overlay.remove();
+        resolve(decision);
+      };
+      replace.addEventListener("click", () => finish("replace"));
+      use.addEventListener("click", () => finish("use"));
+      overlay.addEventListener("click", (event) => {
+        if (event?.target === overlay) finish("replace");
+      });
+      actions.append(replace, use);
+      dialog.append(title, message, list, actions);
+      applyResponsiveDialogLayout({ dom: options.dom, mode, overlay, dialog, title, actions, controls: [replace, use] });
+      overlay.appendChild(dialog);
+      options.dom.appendToBody(overlay);
+    });
+  }
+
   // src/ui/batch-open-dialog.js
-  function applyStyles7(element, styles4) {
-    Object.assign(element.style, styles4);
+  function applyStyles7(element, styles5) {
+    Object.assign(element.style, styles5);
   }
   function button2(dom, text, primary = false, mode = null) {
     const value = dom.create("button");
@@ -33975,8 +34150,8 @@
   }
 
   // src/ui/trade-listing-dialog.js
-  function applyStyles8(element, styles4) {
-    Object.assign(element.style, styles4);
+  function applyStyles8(element, styles5) {
+    Object.assign(element.style, styles5);
   }
   function clone17(value) {
     return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
@@ -34617,7 +34792,7 @@
   }
 
   // src/ui/trade-buy-dialog.js
-  function styles(element, value) {
+  function styles2(element, value) {
     Object.assign(element.style, value);
     return element;
   }
@@ -34626,7 +34801,7 @@
     value.type = "button";
     value.textContent = text;
     if (id) value.id = id;
-    return styles(value, {
+    return styles2(value, {
       minHeight: responsiveControlHeight(mode),
       padding: "0 12px",
       cursor: "pointer",
@@ -34681,7 +34856,7 @@
     return `Guarded Buy: ${phase} | ${suffix}`;
   }
   function textRow(dom, label, value) {
-    const row = styles(dom.create("div"), {
+    const row = styles2(dom.create("div"), {
       display: "grid",
       gridTemplateColumns: "minmax(110px, .7fr) minmax(0, 1.3fr)",
       gap: "8px",
@@ -34689,15 +34864,15 @@
       borderBottom: "1px solid #303a47",
       minWidth: "0"
     });
-    const name = styles(dom.create("span"), { color: "#9fb2c9", fontSize: "12px" });
+    const name = styles2(dom.create("span"), { color: "#9fb2c9", fontSize: "12px" });
     name.textContent = label;
-    const detail = styles(dom.create("span"), { overflowWrap: "anywhere" });
+    const detail = styles2(dom.create("span"), { overflowWrap: "anywhere" });
     detail.textContent = value;
     row.append(name, detail);
     return row;
   }
   function controlRow(dom, label, control2) {
-    const row = styles(dom.create("div"), {
+    const row = styles2(dom.create("div"), {
       display: "grid",
       gridTemplateColumns: "minmax(110px, .7fr) minmax(0, 1.3fr)",
       gap: "8px",
@@ -34706,7 +34881,7 @@
       minWidth: "0",
       alignItems: "center"
     });
-    const name = styles(dom.create("span"), { color: "#9fb2c9", fontSize: "12px" });
+    const name = styles2(dom.create("span"), { color: "#9fb2c9", fontSize: "12px" });
     name.textContent = label;
     row.append(name, control2);
     return row;
@@ -34731,7 +34906,7 @@
     const scheduleInterval = typeof options.setInterval === "function" ? options.setInterval : globalThis.setInterval;
     const cancelInterval = typeof options.clearInterval === "function" ? options.clearInterval : globalThis.clearInterval;
     const progress = { chunkIndex: 0, completedItems: /* @__PURE__ */ new Set(), quantity };
-    const overlay = styles(dom.create("div"), {
+    const overlay = styles2(dom.create("div"), {
       position: "fixed",
       inset: "0",
       zIndex: "1000002",
@@ -34743,7 +34918,7 @@
       boxSizing: "border-box"
     });
     overlay.id = "bronze-loop-trade-buy-modal";
-    const dialog = styles(dom.create("div"), {
+    const dialog = styles2(dom.create("div"), {
       width: "min(760px, 100%)",
       maxHeight: mode.mobile ? "100dvh" : "92vh",
       overflow: "auto",
@@ -34754,10 +34929,10 @@
       boxSizing: "border-box",
       fontFamily: "Arial, sans-serif"
     });
-    const heading = styles(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center" });
-    const title = styles(dom.create("div"), { fontSize: "17px", fontWeight: "700" });
+    const heading = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center" });
+    const title = styles2(dom.create("div"), { fontSize: "17px", fontWeight: "700" });
     title.textContent = "Guarded Buy Validation";
-    const badge = styles(dom.create("span"), { color: "#9fb2c9", fontSize: "11px", border: "1px solid #536276", padding: "4px 7px" });
+    const badge = styles2(dom.create("span"), { color: "#9fb2c9", fontSize: "11px", border: "1px solid #536276", padding: "4px 7px" });
     badge.textContent = `Manual / max ${quantity} item${quantity === 1 ? "" : "s"}`;
     heading.append(title, badge);
     const destination = dom.create("select");
@@ -34773,7 +34948,7 @@
       destination.appendChild(option2);
     }
     destination.value = expectedDestination;
-    styles(destination, {
+    styles2(destination, {
       minWidth: "0",
       width: "100%",
       height: responsiveControlHeight(mode),
@@ -34783,7 +34958,7 @@
       border: "1px solid #607089",
       padding: "0 8px"
     });
-    const summary = styles(dom.create("div"), { marginTop: "12px" });
+    const summary = styles2(dom.create("div"), { marginTop: "12px" });
     summary.append(
       textRow(dom, "Job", String(gate.job?.name || options.job?.name || "?")),
       textRow(dom, "Selection", `${gate.job?.policy?.ratingMin || "?"}-${gate.job?.policy?.ratingMax || "?"} OVR ${gate.job?.policy?.cardClass || "?"}`),
@@ -34793,11 +34968,11 @@
       textRow(dom, "Definitions", String(preview?.summary?.definitions ?? "?")),
       controlRow(dom, "Expected route", destination)
     );
-    const output = styles(dom.create("div"), { marginTop: "12px" });
-    const status = styles(dom.create("div"), { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
+    const output = styles2(dom.create("div"), { marginTop: "12px" });
+    const status = styles2(dom.create("div"), { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
     status.id = "bronze-loop-trade-buy-status";
     status.textContent = gate.ready && preview?.plan?.ready ? `Ready for guarded ${quantity}-item validation` : `Blocked: ${gate.reason || "buy-preview-not-ready"}`;
-    const actions = styles(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", marginTop: "12px" });
+    const actions = styles2(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", marginTop: "12px" });
     const execute = button4(dom, `Buy ${quantity}`, mode, "bronze-loop-trade-buy-execute", true);
     const stop = button4(dom, "Stop", mode, "bronze-loop-trade-buy-stop");
     const diagnostics = button4(dom, "Save diagnostics", mode, "bronze-loop-trade-buy-diagnostics");
@@ -34807,21 +34982,21 @@
     function renderRecap() {
       output.textContent = "";
       const recap = createTradeBuyRecap(receipt, { page: recapPage });
-      const recapTitle = styles(dom.create("div"), { fontSize: "13px", fontWeight: "700", marginBottom: "7px" });
+      const recapTitle = styles2(dom.create("div"), { fontSize: "13px", fontWeight: "700", marginBottom: "7px" });
       recapTitle.textContent = recap.title;
-      const recapSummary = styles(dom.create("div"), { color: recap.status === "completed" ? "#8fd19e" : "#e3a7a7", marginBottom: "7px" });
+      const recapSummary = styles2(dom.create("div"), { color: recap.status === "completed" ? "#8fd19e" : "#e3a7a7", marginBottom: "7px" });
       recapSummary.textContent = `${recap.status} | ${recap.counts.succeeded} purchased | ${recap.counts.failed} failed | ${recap.counts.searches} searches`;
       output.append(recapTitle, recapSummary);
       if (recap.reason) {
-        const reason = styles(dom.create("div"), { color: "#e3a7a7", fontSize: "11px", marginBottom: "7px" });
+        const reason = styles2(dom.create("div"), { color: "#e3a7a7", fontSize: "11px", marginBottom: "7px" });
         reason.textContent = `Reason: ${recap.reason}`;
         output.appendChild(reason);
       }
-      const coins = styles(dom.create("div"), { color: "#9fb2c9", fontSize: "11px", marginBottom: "7px" });
+      const coins = styles2(dom.create("div"), { color: "#9fb2c9", fontSize: "11px", marginBottom: "7px" });
       coins.textContent = `Coins: ${formatCoins2(recap.coins.before)} -> ${formatCoins2(recap.coins.after)} | Spent ${formatCoins2(recap.coins.spent)}`;
       output.appendChild(coins);
       for (const entry of recap.items) {
-        const row = styles(dom.create("div"), { padding: "8px", marginBottom: "6px", background: "#1d2229", border: "1px solid #344152" });
+        const row = styles2(dom.create("div"), { padding: "8px", marginBottom: "6px", background: "#1d2229", border: "1px solid #344152" });
         row.textContent = `${entry.index}. ${entry.status} | ${entry.rating || "?"} OVR | ${formatCoins2(entry.price)} | ${entry.destination || entry.reason || "?"}`;
         output.appendChild(row);
       }
@@ -34942,7 +35117,7 @@
   function clone18(value) {
     return value === void 0 ? void 0 : JSON.parse(JSON.stringify(value));
   }
-  function styles2(element, values) {
+  function styles3(element, values) {
     Object.assign(element.style, values);
     return element;
   }
@@ -34951,7 +35126,7 @@
     value.type = "button";
     value.textContent = text;
     if (id) value.id = id;
-    styles2(value, {
+    styles3(value, {
       minHeight: responsiveControlHeight(mode),
       padding: "0 12px",
       cursor: "pointer",
@@ -34967,7 +35142,7 @@
     if (id) control2.id = id;
     if (type === "checkbox") control2.checked = value === true;
     else control2.value = String(value ?? "");
-    styles2(control2, {
+    styles3(control2, {
       minHeight: type === "checkbox" ? "auto" : responsiveControlHeight(mode),
       minWidth: "0",
       width: type === "checkbox" ? "auto" : "100%",
@@ -34992,7 +35167,7 @@
     return control2;
   }
   function field4(dom, text, control2, mode) {
-    const label = styles2(dom.create("label"), {
+    const label = styles3(dom.create("label"), {
       display: "grid",
       gridTemplateColumns: mode.mobile ? "1fr" : "145px minmax(0, 1fr)",
       alignItems: "center",
@@ -35001,14 +35176,14 @@
     });
     const title = dom.create("span");
     title.textContent = text;
-    styles2(title, { color: "#b8c3d2", fontSize: "12px" });
+    styles3(title, { color: "#b8c3d2", fontSize: "12px" });
     label.append(title, control2);
     return label;
   }
   function section(dom, text) {
     const value = dom.create("div");
     value.textContent = text;
-    styles2(value, { color: "#d9e1eb", fontWeight: "700", marginTop: "8px" });
+    styles3(value, { color: "#d9e1eb", fontWeight: "700", marginTop: "8px" });
     return value;
   }
   function epochInputValue(value) {
@@ -35136,7 +35311,7 @@
     let disposed = false;
     let snapshotSignature3 = JSON.stringify(snapshot);
     let recoverySignature = JSON.stringify(options.getRecovery?.() || {});
-    const overlay = styles2(dom.create("div"), {
+    const overlay = styles3(dom.create("div"), {
       position: "fixed",
       inset: "0",
       zIndex: "1000000",
@@ -35148,7 +35323,7 @@
       boxSizing: "border-box"
     });
     overlay.id = "bronze-loop-trade-scheduler-modal";
-    const dialog = styles2(dom.create("div"), {
+    const dialog = styles3(dom.create("div"), {
       width: "min(980px, 100%)",
       maxHeight: mode.mobile ? "100dvh" : "92vh",
       overflow: "auto",
@@ -35159,22 +35334,22 @@
       boxSizing: "border-box",
       fontFamily: "Arial, sans-serif"
     });
-    const heading = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" });
+    const heading = styles3(dom.create("div"), { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" });
     const title = dom.create("div");
     title.textContent = "Trade Scheduler";
-    styles2(title, { fontSize: "17px", fontWeight: "700" });
+    styles3(title, { fontSize: "17px", fontWeight: "700" });
     const close = button5(dom, "Close", mode, "bronze-loop-trade-scheduler-close");
     heading.append(title, close);
-    const tabs = styles2(dom.create("div"), { display: "flex", gap: "8px", margin: "12px 0", flexWrap: "wrap" });
+    const tabs = styles3(dom.create("div"), { display: "flex", gap: "8px", margin: "12px 0", flexWrap: "wrap" });
     const jobsTab = button5(dom, "Jobs", mode, "bronze-loop-trade-jobs-tab");
     const summaryTab = button5(dom, "Summary", mode, "bronze-loop-trade-summary-tab");
     const providersTab = button5(dom, "Providers", mode, "bronze-loop-trade-providers-tab");
     const historyTab = button5(dom, "History", mode, "bronze-loop-trade-history-tab");
     const recoveryTab = button5(dom, "Recovery", mode, "bronze-loop-trade-recovery-tab");
     tabs.append(jobsTab, summaryTab, providersTab, historyTab, recoveryTab);
-    const banner = styles2(dom.create("div"), { padding: "9px", border: "1px solid #47576b", background: "#1d2229", marginBottom: "10px", fontSize: "12px" });
+    const banner = styles3(dom.create("div"), { padding: "9px", border: "1px solid #47576b", background: "#1d2229", marginBottom: "10px", fontSize: "12px" });
     const content = dom.create("div");
-    const status = styles2(dom.create("div"), { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
+    const status = styles3(dom.create("div"), { minHeight: "18px", color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
     status.id = "bronze-loop-trade-scheduler-status";
     function refreshSnapshot() {
       snapshot = clone18(options.getSnapshot?.() || snapshot || {});
@@ -35205,7 +35380,7 @@
       banner.style.color = circuitState === "open" ? "#e3a7a7" : "#b8c3d2";
     }
     function checkboxLabel(text, control2) {
-      const label = styles2(dom.create("label"), { display: "flex", alignItems: "center", gap: "7px", minHeight: responsiveControlHeight(mode) });
+      const label = styles3(dom.create("label"), { display: "flex", alignItems: "center", gap: "7px", minHeight: responsiveControlHeight(mode) });
       label.append(control2, dom.create("span"));
       label.children[1].textContent = text;
       return label;
@@ -35214,7 +35389,7 @@
       content.textContent = "";
       const draft = editing;
       content.appendChild(section(dom, draft.type === "buy" ? "Buy Job" : draft.type === "bulk-relist" ? "Re-list All Job" : "Listing Job"));
-      const form = styles2(dom.create("div"), { display: "flex", flexDirection: "column", gap: "8px", maxWidth: "720px", marginTop: "8px" });
+      const form = styles3(dom.create("div"), { display: "flex", flexDirection: "column", gap: "8px", maxWidth: "720px", marginTop: "8px" });
       const name = input(dom, "text", draft.name, mode, "bronze-loop-trade-job-name");
       const enabled = input(dom, "checkbox", draft.enabled, mode, "bronze-loop-trade-job-enabled");
       const armed = input(dom, "checkbox", draft.armed, mode, "bronze-loop-trade-job-armed");
@@ -35252,7 +35427,7 @@
       form.appendChild(section(dom, "Policy"));
       if (cardClass) form.appendChild(field4(dom, "Card class", cardClass, mode));
       const policyFields = dom.create("div");
-      styles2(policyFields, { display: "flex", flexDirection: "column", gap: "8px" });
+      styles3(policyFields, { display: "flex", flexDirection: "column", gap: "8px" });
       form.appendChild(policyFields);
       const controls = { name, enabled, armed, scheduleType, misfire, grace, cardClass };
       function syncArmedState() {
@@ -35277,7 +35452,7 @@
           if (draft.type === "bulk-relist") controls.intervalSeconds.min = "60";
           scheduleFields.appendChild(field4(dom, "Every seconds", controls.intervalSeconds, mode));
           if (draft.type === "bulk-relist") {
-            const presets = styles2(dom.create("div"), { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "6px" });
+            const presets = styles3(dom.create("div"), { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "6px" });
             for (const [label, seconds] of [["1 min", 60], ["5 min", 300], ["10 min", 600]]) {
               const preset = button5(dom, label, mode, `bronze-loop-trade-job-interval-${seconds}`);
               preset.addEventListener("click", () => {
@@ -35294,7 +35469,7 @@
         }
       }
       if (draft.type === "bulk-relist") {
-        const scope = styles2(dom.create("div"), {
+        const scope = styles3(dom.create("div"), {
           border: "1px solid #714f55",
           background: "#241d22",
           color: "#f1c1c1",
@@ -35374,7 +35549,7 @@
         const renderRules = () => {
           rules.textContent = "";
           controls.rules = draft.policy.ratingRules.map((rule, index) => {
-            const row = styles2(dom.create("div"), { display: "grid", gridTemplateColumns: mode.mobile ? "1fr" : "1fr 1fr 1.2fr auto", gap: "6px", marginBottom: "6px" });
+            const row = styles3(dom.create("div"), { display: "grid", gridTemplateColumns: mode.mobile ? "1fr" : "1fr 1fr 1.2fr auto", gap: "6px", marginBottom: "6px" });
             const min = input(dom, "number", rule.min, mode);
             const max = input(dom, "number", rule.max, mode);
             const price = input(dom, "number", rule.buyNow, mode);
@@ -35426,7 +35601,7 @@
       }
       renderScheduleFields();
       scheduleType.addEventListener("change", renderScheduleFields);
-      const actions = styles2(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" });
+      const actions = styles3(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "10px" });
       const save = button5(dom, "Save", mode, "bronze-loop-trade-job-save");
       const cancel = button5(dom, "Cancel", mode, "bronze-loop-trade-job-cancel");
       actions.append(save, cancel);
@@ -35491,7 +35666,7 @@
     }
     function renderJobs() {
       content.textContent = "";
-      const toolbar = styles2(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
+      const toolbar = styles3(dom.create("div"), { display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" });
       const manual = button5(dom, "Manual listing", mode, "bronze-loop-trade-manual-listing");
       const bulkRelist = button5(dom, "Re-list All", mode, "bronze-loop-trade-bulk-relist");
       const addListing = button5(dom, "New listing Job", mode, "bronze-loop-trade-new-listing");
@@ -35533,13 +35708,13 @@
       });
       diagnostics.addEventListener("click", () => options.onDownloadDiagnostics?.());
       if (circuit?.circuit?.state === "open") {
-        const circuitRecovery = styles2(dom.create("div"), {
+        const circuitRecovery = styles3(dom.create("div"), {
           border: "1px solid #8f3d49",
           background: "#2a1b20",
           padding: "10px",
           marginBottom: "10px"
         });
-        const circuitWarning = styles2(dom.create("div"), {
+        const circuitWarning = styles3(dom.create("div"), {
           color: "#f1c1c1",
           fontSize: "12px",
           lineHeight: "1.45",
@@ -35549,7 +35724,7 @@
         const circuitRisk = input(dom, "checkbox", false, mode, "bronze-loop-trade-circuit-risk");
         const circuitRiskLabel = checkboxLabel("I checked EA state and understand this unlocks future Trade mutations", circuitRisk);
         const resetCircuit = button5(dom, "Reset trade block", mode, "bronze-loop-trade-circuit-reset");
-        styles2(resetCircuit, { background: "#8f2d36", borderColor: "#c44d58" });
+        styles3(resetCircuit, { background: "#8f2d36", borderColor: "#c44d58" });
         resetCircuit.disabled = true;
         circuitRisk.addEventListener("change", () => {
           resetCircuit.disabled = circuitRisk.checked !== true;
@@ -35564,7 +35739,7 @@
         circuitRecovery.append(circuitWarning, circuitRiskLabel, resetCircuit);
         content.appendChild(circuitRecovery);
       }
-      const safety = styles2(dom.create("div"), {
+      const safety = styles3(dom.create("div"), {
         display: "grid",
         gridTemplateColumns: mode.mobile ? "1fr" : "minmax(0, 1fr) auto",
         gap: "8px",
@@ -35595,7 +35770,7 @@
       });
       safety.append(field4(dom, "Global minimum retained coins", globalReserve, mode), saveReserve);
       content.appendChild(safety);
-      const validationGate = styles2(dom.create("div"), {
+      const validationGate = styles3(dom.create("div"), {
         display: "flex",
         gap: "8px",
         flexWrap: "wrap",
@@ -35619,7 +35794,7 @@
         const totalRuns = authorizations.reduce((total, entry) => total + Number(entry.totalRuns || 0), 0);
         const latestExpiry = authorizations.length ? Math.max(...authorizations.map((entry) => Number(entry.expiresAt || 0))) : null;
         gateState.textContent = `Guarded schedule enabled: ${authorizations.length} Job(s) | ${remainingRuns}/${totalRuns} Run(s) left${latestExpiry ? ` | latest expiry ${new Date(latestExpiry).toLocaleString()}` : ""}`;
-        styles2(gateState, { color: "#e3c98d", flex: "1 1 260px", fontSize: "12px" });
+        styles3(gateState, { color: "#e3c98d", flex: "1 1 260px", fontSize: "12px" });
         const disableGate = button5(dom, "Disable scheduling", mode, "bronze-loop-trade-disable-guarded-schedule");
         disableGate.addEventListener("click", () => {
           options.onDisableGuardedScheduling?.();
@@ -35633,7 +35808,7 @@
         const scheduledJobs = guarded.jobs || [];
         const idleWithoutArmedJobs = guarded.reason === "validation-gate-no-armed-job";
         gateSummary.textContent = recoveryBlocked ? "Scheduling unavailable: recovery-review-required; open Recovery and verify the previous EA result before another Job" : idleWithoutArmedJobs ? "Scheduler idle: no armed Job; completed Once Jobs are automatically disarmed" : guarded.ready ? `Enable ${scheduledJobs.length} Job(s) for ${guarded.totalRuns} authorized Run(s): ${guarded.gates.map(guardedJobApprovalSummary).join("; ")}` : `Scheduling unavailable: ${guarded.reason || "no eligible armed Job"}`;
-        styles2(gateSummary, {
+        styles3(gateSummary, {
           flex: "1 1 280px",
           color: guarded.ready && !recoveryBlocked ? "#e3c98d" : idleWithoutArmedJobs && !recoveryBlocked ? "#b8c3d2" : "#e3a7a7",
           fontSize: "12px",
@@ -35664,30 +35839,30 @@
       if (!snapshot.jobs?.length) {
         const empty = dom.create("div");
         empty.textContent = "No Trade Jobs";
-        styles2(empty, { color: "#8795a8", padding: "18px 0" });
+        styles3(empty, { color: "#8795a8", padding: "18px 0" });
         content.appendChild(empty);
         return;
       }
       for (const job of snapshot.jobs) {
         const runtime = snapshot.runtimes?.[job.id] || {};
-        const card = styles2(dom.create("div"), { border: "1px solid #3e4b5d", background: "#1d2229", padding: "10px", marginBottom: "8px" });
-        const head = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "start" });
+        const card = styles3(dom.create("div"), { border: "1px solid #3e4b5d", background: "#1d2229", padding: "10px", marginBottom: "8px" });
+        const head = styles3(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "start" });
         const identity = dom.create("div");
         identity.textContent = job.name;
-        styles2(identity, { fontWeight: "700", overflowWrap: "anywhere" });
+        styles3(identity, { fontWeight: "700", overflowWrap: "anywhere" });
         const state = dom.create("span");
         state.textContent = runtime.status || (job.armed ? "armed" : "disabled");
-        styles2(state, { color: runtime.status === "blocked" ? "#e3a7a7" : "#9fb2c9" });
+        styles3(state, { color: runtime.status === "blocked" ? "#e3a7a7" : "#9fb2c9" });
         head.append(identity, state);
         const detail = dom.create("div");
         const continuation = runtime.continuation || null;
         const timing = continuation?.resumeAt ? ` | Resume ${new Date(continuation.resumeAt).toLocaleString()}` : runtime.nextRunAt !== null && runtime.nextRunAt !== void 0 ? ` | Next ${new Date(runtime.nextRunAt).toLocaleString()}` : "";
         const progress = continuation ? ` | Slice ${Number(continuation.sliceCount || 1)} | ${Number(continuation.succeeded || 0)}/${Number(continuation.requested || 0)} complete` : "";
         detail.textContent = `${job.type} | ${tradeScheduleSummary(job)}${timing}${progress}`;
-        styles2(detail, { color: "#9aa6b8", fontSize: "11px", margin: "6px 0" });
+        styles3(detail, { color: "#9aa6b8", fontSize: "11px", margin: "6px 0" });
         const buyPreview = buyPreviews.get(job.id);
         const buyAvailability = job.type === "buy" ? buyValidationAvailability(job, buyPreview) : null;
-        const previewDetail = job.type === "buy" && buyPreview ? styles2(dom.create("div"), {
+        const previewDetail = job.type === "buy" && buyPreview ? styles3(dom.create("div"), {
           color: buyPreview.plan?.ready ? "#a9d7b5" : "#e3a7a7",
           fontSize: "11px",
           margin: "6px 0",
@@ -35700,7 +35875,7 @@
           const quantity = Number(job.policy.quantity || 1);
           previewDetail.textContent = `Preview only | ${lanes || "No search lanes"}${missing} | Budget ${Number(job.policy.totalBudget || 0).toLocaleString()} | Runtime ${Number(job.policy.maxRuntimeMinutes || 0)} min | Chunk 2 | Up to ${Number(job.policy.maxPurchasesPerSearch || 1)} purchase(s) per search | ${buyAvailability.ready ? `Buy ${quantity} ready` : `Buy unavailable: ${buyAvailability.reason}`}`;
         }
-        const actions = styles2(dom.create("div"), { display: "flex", gap: "6px", flexWrap: "wrap" });
+        const actions = styles3(dom.create("div"), { display: "flex", gap: "6px", flexWrap: "wrap" });
         const run = button5(dom, job.type === "buy" ? "Preview" : job.type === "bulk-relist" ? "Open Re-list All" : "Run now", mode);
         const validateBuy = job.type === "buy" && buyAvailability.ready ? button5(dom, `Buy ${Number(job.policy.quantity || 1)}`, mode, `bronze-loop-trade-buy-one-${job.id}`) : null;
         const edit = button5(dom, "Edit", mode);
@@ -35772,17 +35947,17 @@
         content.appendChild(empty);
       }
       for (const receipt of entries) {
-        const row = styles2(dom.create("div"), { borderBottom: "1px solid #35404e", padding: "9px 0" });
+        const row = styles3(dom.create("div"), { borderBottom: "1px solid #35404e", padding: "9px 0" });
         const line = dom.create("div");
         line.textContent = `${receipt.jobType || "trade"} | ${receipt.status} | ${Number(receipt.succeeded || 0)}/${Number(receipt.requested || 0)}`;
         const detail = dom.create("small");
         detail.textContent = `${new Date(Number(receipt.startedAt || 0)).toLocaleString()}${receipt.reason ? ` | ${receipt.reason}` : ""}`;
-        styles2(detail, { color: "#9aa6b8" });
+        styles3(detail, { color: "#9aa6b8" });
         row.append(line, detail);
         content.appendChild(row);
       }
       if (pageCount > 1) {
-        const pages = styles2(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", alignItems: "center", marginTop: "10px" });
+        const pages = styles3(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", alignItems: "center", marginTop: "10px" });
         const previous = button5(dom, "<", mode);
         const next = button5(dom, ">", mode);
         const count = dom.create("span");
@@ -35805,7 +35980,7 @@
       content.textContent = "";
       const recovery = options.getRecovery?.() || {};
       const reviews = Array.isArray(recovery.reviews) ? recovery.reviews : [];
-      const intro = styles2(dom.create("div"), {
+      const intro = styles3(dom.create("div"), {
         color: reviews.length ? "#e3a7a7" : "#a9d7b5",
         fontSize: "12px",
         marginBottom: "12px",
@@ -35816,7 +35991,7 @@
       const operation = recovery.operation || {};
       const lease = recovery.lease || {};
       const canAcknowledge = recovery.scheduler?.paused === true && recovery.scheduler?.liveExecutionEnabled !== true && !operation.active && operation.external?.busy !== true && lease.active !== true && lease.owned !== true;
-      const gate = styles2(dom.create("div"), {
+      const gate = styles3(dom.create("div"), {
         color: canAcknowledge ? "#a9d7b5" : "#e3c39d",
         fontSize: "12px",
         marginBottom: "12px"
@@ -35824,7 +35999,7 @@
       gate.textContent = canAcknowledge ? "Acknowledgement gate: ready" : "Acknowledgement gate: Scheduler must be locked, Runner idle, and Trade Lease inactive";
       content.appendChild(gate);
       for (const review of reviews) {
-        const card = styles2(dom.create("div"), {
+        const card = styles3(dom.create("div"), {
           border: "1px solid #714f55",
           background: "#241d22",
           padding: "10px",
@@ -35832,13 +36007,13 @@
         });
         const heading2 = dom.create("div");
         heading2.textContent = `${String(review.journalType || "trade").toUpperCase()} Recovery | Run ${review.runId}`;
-        styles2(heading2, { fontWeight: "700", color: "#f1c1c1", overflowWrap: "anywhere" });
+        styles3(heading2, { fontWeight: "700", color: "#f1c1c1", overflowWrap: "anywhere" });
         const details = dom.create("div");
         details.textContent = `Job ${review.jobId || "unknown"} | Status ${review.status} | Phase ${review.phase} | Mutation items ${review.mutationItemCount} | Uncertain items ${review.uncertainItemCount}`;
-        styles2(details, { color: "#c5aeb2", fontSize: "11px", margin: "6px 0", overflowWrap: "anywhere", lineHeight: "1.45" });
+        styles3(details, { color: "#c5aeb2", fontSize: "11px", margin: "6px 0", overflowWrap: "anywhere", lineHeight: "1.45" });
         const hash = dom.create("div");
         hash.textContent = `Evidence: ${review.evidenceHash}`;
-        styles2(hash, { color: "#9fb2c9", fontSize: "11px", overflowWrap: "anywhere" });
+        styles3(hash, { color: "#9fb2c9", fontSize: "11px", overflowWrap: "anywhere" });
         const resolution = select(dom, "", [
           { value: "", text: "Select verified result" },
           { value: "confirmed-completed", text: "Verified completed in EA" },
@@ -35848,7 +36023,7 @@
         const riskAccepted = input(dom, "checkbox", false, mode, `bronze-loop-trade-recovery-risk-${review.journalType}`);
         const riskLabel = checkboxLabel("I understand this archives evidence without retrying the transaction", riskAccepted);
         const acknowledge = button5(dom, "Archive review and unlock", mode, `bronze-loop-trade-recovery-ack-${review.journalType}`);
-        styles2(acknowledge, { background: "#8f2d36", borderColor: "#c44d58" });
+        styles3(acknowledge, { background: "#8f2d36", borderColor: "#c44d58" });
         const updateRecoveryAction = () => {
           acknowledge.disabled = !canAcknowledge || !resolution.value || riskAccepted.checked !== true;
         };
@@ -35870,7 +36045,7 @@
             setStatus(`Recovery acknowledgement failed: ${error?.message || error}`);
           }
         });
-        const form = styles2(dom.create("div"), {
+        const form = styles3(dom.create("div"), {
           display: "grid",
           gridTemplateColumns: mode.mobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1.5fr) auto",
           gap: "8px",
@@ -35886,11 +36061,11 @@
       if (!entries.length) {
         const empty = dom.create("div");
         empty.textContent = "No manual recovery acknowledgements recorded";
-        styles2(empty, { color: "#8795a8", padding: "8px 0" });
+        styles3(empty, { color: "#8795a8", padding: "8px 0" });
         content.appendChild(empty);
       } else {
         for (const entry of entries) {
-          const row = styles2(dom.create("div"), {
+          const row = styles3(dom.create("div"), {
             borderBottom: "1px solid #35404e",
             padding: "7px 0",
             fontSize: "11px",
@@ -35946,25 +36121,25 @@
           ["429 cooldown", cooldown.active ? `Level ${Number(cooldown.level || 1)}` : "Inactive"]
         ]]
       ];
-      const grid = styles2(dom.create("div"), {
+      const grid = styles3(dom.create("div"), {
         display: "grid",
         gridTemplateColumns: mode.mobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
         gap: "12px"
       });
       for (const [label, values] of groups) {
-        const group = styles2(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", minWidth: "0" });
+        const group = styles3(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", minWidth: "0" });
         const heading2 = dom.create("div");
         heading2.textContent = label;
-        styles2(heading2, { fontWeight: "700", marginBottom: "6px" });
+        styles3(heading2, { fontWeight: "700", marginBottom: "6px" });
         group.appendChild(heading2);
         for (const [name, rawValue] of values) {
-          const row = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "12px", padding: "3px 0" });
+          const row = styles3(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "12px", padding: "3px 0" });
           const key = dom.create("span");
           const value = dom.create("span");
           key.textContent = name;
           value.textContent = String(rawValue ?? 0);
-          styles2(key, { color: "#aeb8c6" });
-          styles2(value, { fontVariantNumeric: "tabular-nums" });
+          styles3(key, { color: "#aeb8c6" });
+          styles3(value, { fontVariantNumeric: "tabular-nums" });
           row.append(key, value);
           group.appendChild(row);
         }
@@ -35972,30 +36147,30 @@
       }
       content.appendChild(grid);
       if (Number(requestPacing.nextAllowedAt || 0) > Number(now())) {
-        const pacingWait = styles2(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px", color: "#e3c39d", fontSize: "12px" });
+        const pacingWait = styles3(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px", color: "#e3c39d", fontSize: "12px" });
         pacingWait.textContent = `Next Trade action allowed after ${new Date(Number(requestPacing.nextAllowedAt)).toLocaleString()} (${requestPacing.reason || "pacing"})`;
         content.appendChild(pacingWait);
       }
-      const period = styles2(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px", color: "#aeb8c6", fontSize: "12px" });
+      const period = styles3(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px", color: "#aeb8c6", fontSize: "12px" });
       const firstAt = Number(metrics.firstRecordedAt || 0);
       const lastAt = Number(metrics.lastRecordedAt || 0);
       period.textContent = firstAt ? `Tracked ${new Date(firstAt).toLocaleString()} - ${new Date(lastAt || firstAt).toLocaleString()}` : "No recorded Trade runs";
       content.appendChild(period);
       const reasons = Array.isArray(metrics.reasons) ? metrics.reasons : [];
       if (reasons.length) {
-        const reasonGroup = styles2(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px" });
+        const reasonGroup = styles3(dom.create("div"), { borderTop: "1px solid #47576b", marginTop: "12px", paddingTop: "8px" });
         const reasonHeading = dom.create("div");
         reasonHeading.textContent = "Stop reasons";
-        styles2(reasonHeading, { fontWeight: "700", marginBottom: "6px" });
+        styles3(reasonHeading, { fontWeight: "700", marginBottom: "6px" });
         reasonGroup.appendChild(reasonHeading);
         for (const entry of reasons) {
-          const row = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "12px", padding: "3px 0" });
+          const row = styles3(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "12px", padding: "3px 0" });
           const reason = dom.create("span");
           const count = dom.create("span");
           reason.textContent = String(entry.reason || "unknown");
           count.textContent = String(Number(entry.count || 0));
-          styles2(reason, { overflowWrap: "anywhere", color: "#aeb8c6" });
-          styles2(count, { fontVariantNumeric: "tabular-nums" });
+          styles3(reason, { overflowWrap: "anywhere", color: "#aeb8c6" });
+          styles3(count, { fontVariantNumeric: "tabular-nums" });
           row.append(reason, count);
           reasonGroup.appendChild(row);
         }
@@ -36009,7 +36184,7 @@
       textarea.id = "bronze-loop-trade-import-json";
       textarea.value = "";
       textarea.spellcheck = false;
-      styles2(textarea, {
+      styles3(textarea, {
         width: "100%",
         minHeight: mode.mobile ? "42dvh" : "320px",
         boxSizing: "border-box",
@@ -36023,7 +36198,7 @@
         overflowWrap: "normal",
         whiteSpace: "pre"
       });
-      const actions = styles2(dom.create("div"), { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" });
+      const actions = styles3(dom.create("div"), { display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" });
       const validate = button5(dom, "Validate", mode, "bronze-loop-trade-import-validate");
       const replace = button5(dom, "Replace jobs", mode, "bronze-loop-trade-import-apply");
       const cancel = button5(dom, "Cancel", mode, "bronze-loop-trade-import-cancel");
@@ -36082,26 +36257,26 @@
       const quotes = health.priceQuotes || {};
       function appendRows(group, values) {
         for (const [name, rawValue] of values) {
-          const row = styles2(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "12px", padding: "3px 0" });
+          const row = styles3(dom.create("div"), { display: "flex", justifyContent: "space-between", gap: "12px", padding: "3px 0" });
           const key = dom.create("span");
           const value = dom.create("span");
           key.textContent = name;
           value.textContent = String(rawValue ?? 0);
-          styles2(key, { color: "#aeb8c6" });
-          styles2(value, { textAlign: "right", overflowWrap: "anywhere", fontVariantNumeric: "tabular-nums" });
+          styles3(key, { color: "#aeb8c6" });
+          styles3(value, { textAlign: "right", overflowWrap: "anywhere", fontVariantNumeric: "tabular-nums" });
           row.append(key, value);
           group.appendChild(row);
         }
       }
-      const grid = styles2(dom.create("div"), {
+      const grid = styles3(dom.create("div"), {
         display: "grid",
         gridTemplateColumns: mode.mobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
         gap: "14px"
       });
-      const catalogGroup = styles2(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", minWidth: "0" });
+      const catalogGroup = styles3(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", minWidth: "0" });
       const catalogHeading = dom.create("div");
       catalogHeading.textContent = "Player catalog";
-      styles2(catalogHeading, { fontWeight: "700", marginBottom: "6px" });
+      styles3(catalogHeading, { fontWeight: "700", marginBottom: "6px" });
       catalogGroup.appendChild(catalogHeading);
       appendRows(catalogGroup, [
         ["Provider", catalog.provider || "FUTNext"],
@@ -36126,12 +36301,12 @@
           setStatus(`Player catalog clear failed: ${error?.message || error}`);
         }
       });
-      styles2(clearCatalog, { marginTop: "8px" });
+      styles3(clearCatalog, { marginTop: "8px" });
       catalogGroup.appendChild(clearCatalog);
-      const quoteGroup = styles2(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", minWidth: "0" });
+      const quoteGroup = styles3(dom.create("div"), { borderTop: "1px solid #47576b", paddingTop: "8px", minWidth: "0" });
       const quoteHeading = dom.create("div");
       quoteHeading.textContent = "Price quotes";
-      styles2(quoteHeading, { fontWeight: "700", marginBottom: "6px" });
+      styles3(quoteHeading, { fontWeight: "700", marginBottom: "6px" });
       quoteGroup.appendChild(quoteHeading);
       const sources = Object.entries(quotes.cache?.bySource || {}).map(([source, count]) => `${source}:${count}`).join(", ") || "none";
       const platforms = Object.entries(quotes.cache?.byPlatform || {}).map(([platform, count]) => `${platform}:${count}`).join(", ") || "none";
@@ -36157,7 +36332,7 @@
           setStatus(`Price quote clear failed: ${error?.message || error}`);
         }
       });
-      styles2(clearQuotes, { marginTop: "8px" });
+      styles3(clearQuotes, { marginTop: "8px" });
       quoteGroup.appendChild(clearQuotes);
       grid.append(catalogGroup, quoteGroup);
       content.appendChild(grid);
@@ -36249,7 +36424,7 @@
   }
 
   // src/ui/trade-bulk-relist-dialog.js
-  function styles3(element, values) {
+  function styles4(element, values) {
     Object.assign(element.style, values);
     return element;
   }
@@ -36258,7 +36433,7 @@
     value.type = "button";
     value.textContent = text;
     if (id) value.id = id;
-    return styles3(value, {
+    return styles4(value, {
       minHeight: responsiveControlHeight(mode),
       padding: "0 12px",
       cursor: "pointer",
@@ -36276,7 +36451,7 @@
     if (!dom?.create || !dom?.appendToBody) throw new TypeError("DOM adapter is required");
     dom.query?.("#bronze-loop-trade-bulk-relist-modal")?.remove?.();
     const mode = readResponsiveUiMode(dom);
-    const overlay = styles3(dom.create("div"), {
+    const overlay = styles4(dom.create("div"), {
       position: "fixed",
       inset: "0",
       zIndex: "1000002",
@@ -36287,7 +36462,7 @@
       padding: mode.mobile ? "0" : "16px"
     });
     overlay.id = "bronze-loop-trade-bulk-relist-modal";
-    const dialog = styles3(dom.create("div"), {
+    const dialog = styles4(dom.create("div"), {
       width: mode.mobile ? "100%" : "min(620px, 96vw)",
       maxHeight: mode.mobile ? "100%" : "88vh",
       overflowY: "auto",
@@ -36299,8 +36474,8 @@
     });
     const heading = dom.create("h2");
     heading.textContent = "Manual Re-list All";
-    styles3(heading, { margin: "0 0 10px", fontSize: "18px", letterSpacing: "0" });
-    const warning = styles3(dom.create("div"), {
+    styles4(heading, { margin: "0 0 10px", fontSize: "18px", letterSpacing: "0" });
+    const warning = styles4(dom.create("div"), {
       border: "1px solid #8f3d49",
       background: "#2a1b20",
       color: "#f1c1c1",
@@ -36309,18 +36484,18 @@
       lineHeight: "1.45"
     });
     warning.textContent = "High risk: this calls EA Re-list All once for every current Unsold item, preserves EA auction prices, and does not apply card or price filters.";
-    const output = styles3(dom.create("div"), { marginTop: "10px", minHeight: "58px", fontSize: "12px", lineHeight: "1.5" });
-    const riskRow = styles3(dom.create("label"), { display: "flex", gap: "8px", alignItems: "center", marginTop: "10px" });
+    const output = styles4(dom.create("div"), { marginTop: "10px", minHeight: "58px", fontSize: "12px", lineHeight: "1.5" });
+    const riskRow = styles4(dom.create("label"), { display: "flex", gap: "8px", alignItems: "center", marginTop: "10px" });
     const risk = dom.create("input");
     risk.type = "checkbox";
     risk.id = "bronze-loop-trade-bulk-relist-risk";
     const riskText = dom.create("span");
     riskText.textContent = "Relist every item shown in the current Unsold preview";
     riskRow.append(risk, riskText);
-    const status = styles3(dom.create("div"), { color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
+    const status = styles4(dom.create("div"), { color: "#9fb2c9", fontSize: "11px", marginTop: "10px" });
     status.id = "bronze-loop-trade-bulk-relist-status";
     status.textContent = "Preview is read-only";
-    const actions = styles3(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", marginTop: "12px" });
+    const actions = styles4(dom.create("div"), { display: "flex", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", marginTop: "12px" });
     const previewButton = button6(dom, "Preview Unsold", mode, "bronze-loop-trade-bulk-relist-preview");
     const execute = button6(dom, "Re-list All", mode, "bronze-loop-trade-bulk-relist-execute", true);
     const diagnostics = button6(dom, "Save diagnostics", mode, "bronze-loop-trade-bulk-relist-diagnostics");
@@ -36346,15 +36521,15 @@
       output.textContent = "";
       const summary = dom.create("div");
       summary.textContent = snapshotSummary(preview?.snapshot);
-      styles3(summary, { color: preview?.ready ? "#a9d7b5" : "#e3a7a7", marginBottom: "7px" });
+      styles4(summary, { color: preview?.ready ? "#a9d7b5" : "#e3a7a7", marginBottom: "7px" });
       output.appendChild(summary);
       for (const entry of preview?.snapshot?.items || []) {
-        const row = styles3(dom.create("div"), { borderTop: "1px solid #35404e", padding: "5px 0", overflowWrap: "anywhere" });
+        const row = styles4(dom.create("div"), { borderTop: "1px solid #35404e", padding: "5px 0", overflowWrap: "anywhere" });
         row.textContent = `${entry.name} | ${entry.rating || "?"} OVR | ${Number(entry.auction?.startingBid || 0).toLocaleString()} / ${Number(entry.auction?.buyNowPrice || 0).toLocaleString()} | Trade ${entry.auction?.tradeId || "?"}`;
         output.appendChild(row);
       }
       if (preview?.blockers?.length) {
-        const blockers = styles3(dom.create("div"), { color: "#e3a7a7", marginTop: "7px" });
+        const blockers = styles4(dom.create("div"), { color: "#e3a7a7", marginTop: "7px" });
         blockers.textContent = `Blocked: ${preview.blockers.map((entry) => entry.reason).join(", ")}`;
         output.appendChild(blockers);
       }
@@ -43880,16 +44055,45 @@
             packInventory
           });
           lastDetail = serviceResultErrorText(result) || result?.status || "unknown";
+          let protectedConflictResolution = null;
           if (shouldStopForProtectedItemViolation({
             protectionEnabled: options.protectActiveSquadPlayers,
             result,
             detail: lastDetail
           })) {
-            const violationNames = [...new Set(result.data.itemViolations.map((violation) => String(violation?.name || "").trim()).filter(Boolean))];
-            fail2(`${label}: Active Squad protection stopped submission after EA reported ${result.data.itemViolations.length} item conflict(s)${violationNames.length ? ` (${violationNames.join("/")})` : ""}; no skipValidation confirmation was sent`);
+            const inspected = inspectItemViolationConflict({
+              detail: lastDetail,
+              result,
+              submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean)
+            });
+            if (inspected.reason !== "item-violations") {
+              fail2(`${label}: Active Squad conflict response failed closed (${inspected.reason}); no skipValidation confirmation was sent`);
+            }
+            if (typeof options.resolveProtectedItemViolation !== "function") {
+              fail2(`${label}: Active Squad protection stopped submission after EA reported ${inspected.violationItemIds.length} item conflict(s); no Rolling replacement handler is available`);
+            }
+            protectedConflictResolution = await options.resolveProtectedItemViolation({
+              label,
+              result,
+              players,
+              violationNames: inspected.violationNames,
+              violationItemIds: inspected.violationItemIds
+            });
+            if (protectedConflictResolution?.action === "replan") {
+              return {
+                status: "replan",
+                submitted: false,
+                reason: protectedConflictResolution.reason || "Active Squad card replacement requires replanning",
+                reasonCode: protectedConflictResolution.reasonCode || "ACTIVE_SQUAD_CONFLICT_REPLAN",
+                details: protectedConflictResolution.details || {}
+              };
+            }
+            if (protectedConflictResolution?.action !== "override") {
+              fail2(`${label}: Active Squad conflict could not be resolved safely; no skipValidation confirmation was sent`);
+            }
           }
           const overridePlan = planItemViolationOverride({
-            allowOverride: options.allowItemViolationOverride === true,
+            allowOverride: options.allowItemViolationOverride === true && (options.protectActiveSquadPlayers !== true || protectedConflictResolution?.action === "override"),
             attempt,
             maxAttempts,
             detail: lastDetail,
@@ -45900,16 +46104,21 @@
         submitTransport: async (context) => {
           if (useBackgroundSubmission) {
             const submittedPlayers = context.savedPlayers?.length ? context.savedPlayers : context.players || [];
+            const configuredConflictResolver = options.backgroundSubmitOptions?.resolveProtectedItemViolation;
             const backgroundResult = await submitRatingSbcInBackground(
               context.set,
               context.challenge,
               label,
               {
                 ...options.backgroundSubmitOptions || {},
+                ...typeof configuredConflictResolver === "function" ? {
+                  resolveProtectedItemViolation: (conflict) => configuredConflictResolver(conflict, context)
+                } : {},
                 players: submittedPlayers
               }
             );
             await options.onBackgroundSubmit?.(backgroundResult, context);
+            if (backgroundResult?.status === "replan") return backgroundResult;
             return { submitted: true, rewardPackId: backgroundResult.rewardPackId };
           }
           return {
@@ -48361,6 +48570,7 @@
         ledger: runtime.coordinator?.getLedger(),
         protectedItems: [
           ...pendingRefs,
+          ...rollingActiveSquadConflictRefs(runtime),
           ...additionalProtected
         ],
         allowRequiredSpecial: options.allowRequiredSpecial === true
@@ -48568,20 +48778,33 @@
         backgroundSubmitOptions: {
           allowItemViolationOverride: true,
           protectActiveSquadPlayers: activeDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+          resolveProtectedItemViolation: (conflict, submitContext) => resolveRollingActiveSquadConflict(
+            activeDef,
+            runtime,
+            {
+              ...conflict,
+              selection: submitContext?.squadPlan?.selection || selection,
+              model: null
+            }
+          ),
           allowKnownRewardFallback: Number(activeDef.dynamicChallengeCount || 1) <= 1,
           failureInventoryDiagnostic: ({ players }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, players)
         },
         onResult: async (submissionResult) => {
-          runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+          if (submissionResult.submitted) {
+            runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+          }
         }
       });
       const submission = attempt.result;
       if (submission.status === "planned") return { ...submission, status: "planned" };
+      if (submission.status === "replan") return submission;
       if (!submission.submitted) {
         return {
           status: submission.status === "unavailable" ? "unavailable" : "blocked",
           reason: submission.reason || `${activeDef.name} was not submitted`,
-          reasonCode: "RECOVERY_SUBMISSION_BLOCKED"
+          reasonCode: submission.reasonCode || "RECOVERY_SUBMISSION_BLOCKED",
+          details: submission.details || null
         };
       }
       if (!runtime.lastMutation) {
@@ -48688,6 +48911,7 @@
             ...primaryRecoveryPolicy.preferredItems
           ],
           protectedItems: [
+            ...rollingActiveSquadConflictRefs(runtime),
             ...allowPrimaryDuplicates ? rollingNonPrimaryPendingRefs(runtime) : [
               ...runtime.primaryDuplicateRefs || [],
               ...runtime.pendingUnassignedRefs || []
@@ -48832,15 +49056,27 @@
               players: context.players || players,
               allowItemViolationOverride: true,
               protectActiveSquadPlayers: opened.activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+              resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
+                loopDef,
+                runtime,
+                {
+                  ...conflict,
+                  selection: context.squadPlan?.selection || fill.selection,
+                  model: fill.model
+                }
+              ),
               allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
               failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
             }
           );
+          if (backgroundSubmission?.status === "replan") return backgroundSubmission;
           return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
         },
         runCommittedSubmit: runCommittedSbcSubmit,
         onResult: async (submissionResult) => {
-          runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+          if (submissionResult.submitted) {
+            runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+          }
         },
         afterSubmit: async ({ players: submittedPlayers, savedPlayers, squadPlan }) => {
           await finalizeSubmittedInventorySelection(
@@ -49457,7 +49693,10 @@
         ledger: runtime.coordinator.getLedger(),
         protectionRating: rollingProtectionRating(loopDef),
         reserveRatings: false,
-        protectedItems: rollingNonPrimaryPendingRefs(runtime).filter((ref) => !consumablePendingRefs.some((candidate) => rollingItemMatchesRef(ref, candidate))),
+        protectedItems: [
+          ...rollingActiveSquadConflictRefs(runtime),
+          ...rollingNonPrimaryPendingRefs(runtime).filter((ref) => !consumablePendingRefs.some((candidate) => rollingItemMatchesRef(ref, candidate)))
+        ],
         requiredItems: options.requiredItems || [],
         exclusiveRoles: [...requiredSpecialRoles, ...options.additionalRoles || []],
         allowRequiredSpecial: requiredSpecialRoles.length > 0
@@ -49477,6 +49716,76 @@
       return {
         ...selectionPolicy,
         candidateFilter
+      };
+    }
+    function rollingActiveSquadConflictRefs(runtime) {
+      return [...runtime?.activeSquadConflictItemIds || []].map((id) => ({ id: Number(id), definitionId: 0, pile: "unknown" })).filter((ref) => Number.isSafeInteger(ref.id) && ref.id > 0);
+    }
+    function rollingConflictSelectionEntry(selection, item) {
+      const id = Number(item?.id || 0);
+      return (selection?.entries || []).find((entry) => Number(entry?.item?.id || 0) === id || Number(entry?.itemRef?.id || 0) === id) || null;
+    }
+    async function resolveRollingActiveSquadConflict(loopDef, runtime, context = {}) {
+      const violationIds = new Set((context.violationItemIds || []).map(Number).filter(Boolean));
+      const players = (context.players || []).filter((item) => violationIds.has(Number(item?.id || 0)));
+      if (players.length !== violationIds.size) {
+        fail2(`${context.label || loopDef.name}: Active Squad conflict identity changed before replacement planning`);
+      }
+      const requiredIndexes = rollingRequiredSpecialConstraintIndexes(context.model || {});
+      const classified = players.map((item) => {
+        const entry = rollingConflictSelectionEntry(context.selection, item);
+        const submissionPile = rollingSelectionSubmissionPile(entry || { item });
+        const sourcePile = normalizedRuntimePileName(entry?.pileName) || submissionPile;
+        const requiredSpecialRole = requiredIndexes.some((index) => entry?.requirementMatches?.[index] === true);
+        const eventSpecial = isTotsItem(item) || isFofItem(item) || isFuttiesItem(item);
+        const special = isSbcSpecialItem(item);
+        return {
+          id: Number(item.id),
+          name: itemDisplayName(item),
+          rating: Number(item?.rating || 0),
+          pile: sourcePile,
+          sourcePile,
+          submissionPile,
+          special,
+          eventSpecial,
+          requiredSpecialRole,
+          clubOtherSpecial: submissionPile === "club" && special && !isTotwItem(item) && !eventSpecial,
+          strictClubSpecialProtection: loopDef.rollingProtectAllClubNonTotwSpecials === true
+        };
+      });
+      const decision = decideRollingActiveSquadConflict(classified);
+      if (decision.action === "error") {
+        const cards = classified.filter((item) => decision.regressionItemIds?.includes(item.id)).map((item) => `${item.name} (${item.rating || "?"}, from:${item.sourcePile}, submitFrom:${item.submissionPile})`).join(", ");
+        fail2(`${context.label || loopDef.name}: Rolling Active Squad protection regression selected ${cards || "an invalid protected card"}; no submission override was sent`);
+      }
+      let replaceIds = [...decision.replaceItemIds];
+      const reviewItems = classified.filter((item) => decision.reviewItemIds.includes(item.id) && !runtime.activeSquadApprovedItemIds.has(item.id));
+      if (reviewItems.length) {
+        const userDecision = await requestActiveSquadConflictDecision({
+          dom: adapters.dom,
+          items: reviewItems
+        });
+        if (userDecision === "replace") {
+          replaceIds = [.../* @__PURE__ */ new Set([...replaceIds, ...decision.reviewItemIds])];
+        } else {
+          reviewItems.forEach((item) => runtime.activeSquadApprovedItemIds.add(item.id));
+          if (!replaceIds.length) {
+            log(`${context.label || loopDef.name}: user approved ${reviewItems.length} Active Squad special card(s) for this Rolling run; confirming the same saved squad once`);
+            return { action: "override" };
+          }
+        }
+      }
+      const approvedReviewIds = decision.reviewItemIds.filter((id) => runtime.activeSquadApprovedItemIds.has(id));
+      if (!replaceIds.length && approvedReviewIds.length) return { action: "override" };
+      replaceIds.forEach((id) => runtime.activeSquadConflictItemIds.add(Number(id)));
+      runtime.forceChallengeRefresh = true;
+      const labels = classified.filter((item) => replaceIds.includes(item.id)).map((item) => `${item.name} #${item.id}`);
+      log(`${context.label || loopDef.name}: excluding ${labels.join(", ")} for the remainder of this Rolling run and replanning`);
+      return {
+        action: "replan",
+        reason: `Active Squad card replacement requested for ${labels.join(", ")}`,
+        reasonCode: "ACTIVE_SQUAD_CONFLICT_REPLAN",
+        details: { excludedItemIds: replaceIds, scope: "current-rolling-run" }
       };
     }
     async function selectRollingStorageSink89Squad(loopDef, runtime, context, snapshot) {
@@ -49753,16 +50062,28 @@
               players: submitContext.players || resolved.players,
               allowItemViolationOverride: true,
               protectActiveSquadPlayers: loopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+              resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
+                loopDef,
+                runtime,
+                {
+                  ...conflict,
+                  selection: submitContext.squadPlan?.selection || plan.selection,
+                  model: context.model
+                }
+              ),
               rewardObservationAttempts: 1,
               allowKnownRewardFallback: false,
               failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
             }
           );
+          if (backgroundSubmission?.status === "replan") return backgroundSubmission;
           return { submitted: true, rewardPackId: null };
         },
         runCommittedSubmit: runCommittedSbcSubmit,
         onResult: async (submissionResult) => {
-          runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+          if (submissionResult.submitted) {
+            runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+          }
         },
         afterSubmit: async ({ players, savedPlayers }) => {
           await finalizeSubmittedInventorySelection(
@@ -50879,6 +51200,8 @@
         recoveryDuplicateRefs: [],
         storageSinkExhaustedSetIds: /* @__PURE__ */ new Set(),
         storageSinkRefreshAttempted: false,
+        activeSquadConflictItemIds: /* @__PURE__ */ new Set(),
+        activeSquadApprovedItemIds: /* @__PURE__ */ new Set(),
         forceChallengeRefresh: false,
         lastMutation: null,
         capabilityCalculator: createInventoryCapabilityCalculator(),
@@ -51471,7 +51794,8 @@
                   reserveRatings: loopDef.rollingSurplusCraftingEnabled === true ? rollingProvisionsReserveRatings(loopDef) : false,
                   primaryDuplicateRefs,
                   relaxedPrimaryDuplicateRefs,
-                  isTransientSubmissionAllowed: (item) => isRollingTransientSubmissionAllowed(item, activeLoopDef)
+                  isTransientSubmissionAllowed: (item) => isRollingTransientSubmissionAllowed(item, activeLoopDef),
+                  protectedItems: rollingActiveSquadConflictRefs(runtime)
                 }),
                 candidateFilter: requiredSpecialSourceFilter
               };
@@ -51654,17 +51978,29 @@
                     players: context.players || players,
                     allowItemViolationOverride: true,
                     protectActiveSquadPlayers: activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+                    resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
+                      activeLoopDef,
+                      runtime,
+                      {
+                        ...conflict,
+                        selection: context.squadPlan?.selection || fill.selection,
+                        model: fill.model
+                      }
+                    ),
                     allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
                     failureInventoryDiagnostic: ({ players: attemptedPlayers }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
                   }
                 );
+                if (backgroundSubmission?.status === "replan") return backgroundSubmission;
                 return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
               },
               runCommittedSubmit: runCommittedSbcSubmit,
               onResult: async (submissionResult) => {
-                runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, {
-                  primary: true
-                });
+                if (submissionResult.submitted) {
+                  runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, {
+                    primary: true
+                  });
+                }
               },
               afterSubmit: async ({ players: submittedPlayers, savedPlayers, squadPlan }) => {
                 await finalizeSubmittedInventorySelection(

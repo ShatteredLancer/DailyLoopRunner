@@ -164,6 +164,8 @@ export function createSubmissionResult(input = {}) {
     consumedItemRefs: Object.freeze(cloneSerializable(input.consumedItemRefs || [])),
     rewardPackId: input.rewardPackId === undefined || input.rewardPackId === null ? null : finiteNumber(input.rewardPackId),
     reason: input.reason ? String(input.reason) : null,
+    reasonCode: input.reasonCode ? String(input.reasonCode) : null,
+    details: Object.freeze(cloneSerializable(input.details || {})),
   });
 }
 

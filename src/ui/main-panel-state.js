@@ -138,7 +138,7 @@ export function renderSelectionPolicySummary(options = {}) {
     : 'on shortage';
   const shortageProvisionsPackLimit = Number(pickOptions.rollingShortageProvisionsPackLimit || 2) || 2;
   const fsuLockedProtection = pickOptions.protectFsuLockedPlayers === true ? 'on' : 'off';
-  const activeSquadProtection = pickOptions.protectActiveSquadPlayers === true ? 'stop' : 'confirm';
+  const activeSquadProtection = pickOptions.protectActiveSquadPlayers === true ? 'replace/review' : 'confirm';
   summary.textContent = `Std card <=${standardRating} | Auto-use <=${automaticUse} | Picks ${pickModeLabel}`;
   summary.title = `Non-rating Gold <=${lowRatedGold}; Standard Rating SBC cards <=${standardRating}; Rolling/Pick automatic-use <=${automaticUse}; Pick mode ${pickModeLabel}; Provisions reserve 87-${provisionsMaxRating}; normal recovery order ${recoveryPileOrder}; shortage Provisions batch ${shortageProvisionsPackLimit}; surplus Provisions/TOTW ${surplusCrafting}; Provisions shortage recovery ${provisionsShortageRecovery}; Required Special/TOTW recovery ${requiredSpecialRecovery}; Club non-TOTW specials ${clubSpecialProtection}; duplicate Provisions rewards ${duplicateProvisionsRewards}; Storage pressure SBC ${storageSink}; FSU locked players ${fsuLockedProtection}; Active Squad 409 ${activeSquadProtection}`;
 }

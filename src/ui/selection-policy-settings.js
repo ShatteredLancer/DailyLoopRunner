@@ -272,9 +272,9 @@ export function showSelectionPolicySettings(options = {}) {
   const protectActiveSquadPlayers = checkbox(
     dom,
     'bronze-loop-policy-protect-active-squad-players',
-    'Stop on Active Squad conflict',
+    'Protect Active Squad players',
     pickOptions.protectActiveSquadPlayers === true,
-    'When enabled, stop on EA 409 squad-conflict responses instead of confirming the same squad with skipValidation',
+    'When enabled, replace ordinary conflict cards automatically, review eligible specials, and stop on protected-card selection regressions',
   );
 
   form.append(

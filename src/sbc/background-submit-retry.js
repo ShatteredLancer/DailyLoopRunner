@@ -75,27 +75,11 @@ function rejectedItemViolationOverride(reason) {
   };
 }
 
-/**
- * Plans EA's explicit validation-confirmation retry for warnings attached only
- * to entities in the already validated squad. Unknown response shapes fail
- * closed so an unrelated 409 can never become a forced submission.
- */
-export function planItemViolationOverride({
-  allowOverride = false,
-  attempt = 1,
-  maxAttempts = 3,
+export function inspectItemViolationConflict({
   detail = '',
   result = null,
   submittedItemIds = [],
-  skipValidation = false,
 } = {}) {
-  if (allowOverride !== true) return rejectedItemViolationOverride('disabled');
-  if (skipValidation === true) return rejectedItemViolationOverride('validation-already-skipped');
-
-  const current = Math.max(1, Number(attempt) || 1);
-  const max = Math.max(1, Math.min(5, Number(maxAttempts) || 3));
-  if (current >= max) return rejectedItemViolationOverride('attempts-exhausted');
-
   const code = normalizeSubmitErrorCode(detail || result?.status || result?.error?.code || '');
   if (code !== '409') return rejectedItemViolationOverride('not-item-violation-conflict');
 
@@ -124,11 +108,45 @@ export function planItemViolationOverride({
   }
 
   return {
+    retry: false,
+    reason: 'item-violations',
+    skipValidation: false,
+    reloadChallenge: false,
+    violationNames: [...new Set(violationNames)],
+    violationItemIds: [...new Set(violationItemIds)],
+  };
+}
+
+/**
+ * Plans EA's explicit validation-confirmation retry for warnings attached only
+ * to entities in the already validated squad. Unknown response shapes fail
+ * closed so an unrelated 409 can never become a forced submission.
+ */
+export function planItemViolationOverride({
+  allowOverride = false,
+  attempt = 1,
+  maxAttempts = 3,
+  detail = '',
+  result = null,
+  submittedItemIds = [],
+  skipValidation = false,
+} = {}) {
+  if (allowOverride !== true) return rejectedItemViolationOverride('disabled');
+  if (skipValidation === true) return rejectedItemViolationOverride('validation-already-skipped');
+
+  const current = Math.max(1, Number(attempt) || 1);
+  const max = Math.max(1, Math.min(5, Number(maxAttempts) || 3));
+  if (current >= max) return rejectedItemViolationOverride('attempts-exhausted');
+
+  const inspected = inspectItemViolationConflict({ detail, result, submittedItemIds });
+  if (inspected.reason !== 'item-violations') return inspected;
+
+  return {
     retry: true,
     reason: 'item-violations',
     skipValidation: true,
     reloadChallenge: false,
-    violationNames: [...new Set(violationNames)],
-    violationItemIds: [...new Set(violationItemIds)],
+    violationNames: inspected.violationNames,
+    violationItemIds: inspected.violationItemIds,
   };
 }

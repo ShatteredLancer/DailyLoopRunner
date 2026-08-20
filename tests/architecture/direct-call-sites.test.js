@@ -73,6 +73,11 @@ describe('current direct side-effect call baseline', () => {
     const ordinaryRetryStart = source.indexOf('const plan = planBackgroundSubmitRetry({', overrideStart);
     expect(protectedConflictStart).toBeGreaterThan(-1);
     expect(protectedConflictStart).toBeLessThan(overrideStart);
+    expect(source.slice(protectedConflictStart, overrideStart)).toContain('resolveProtectedItemViolation');
+    expect(source.slice(protectedConflictStart, overrideStart)).toContain("status: 'replan'");
+    expect(source.slice(protectedConflictStart, overrideStart)).toContain("action !== 'override'");
+    expect(source).toContain('resolveProtectedItemViolation: (conflict) => configuredConflictResolver(conflict, context)');
+    expect(source).toContain('selection: submitContext?.squadPlan?.selection || selection');
     expect(overrideStart).toBeGreaterThan(-1);
     expect(ordinaryRetryStart).toBeGreaterThan(overrideStart);
     const overrideBlock = source.slice(overrideStart, ordinaryRetryStart);

@@ -529,7 +529,7 @@ Rolling 的主 `10x85+`、评分恢复阵和 Storage pressure SBC 共用同一�
 5. 强制重新保存发生交换的 Challenge；提交前重新运行动态 SBC validator 和 Inventory Ledger 对账。
 6. 将被换出的可交易 Club 实体重新映射为 Unassigned signal，提交成功后由统一库存清理消费，避免丢失路由所有权。
 
-EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolations`。`Stop on Active Squad conflict` 默认关闭；关闭时 Rolling 只在以下条件全部成立时执行一次官方确认语义的 `skipValidation:true` 重试：
+EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolations`。`Protect Active Squad players` 默认关闭；关闭时 Rolling 只在以下条件全部成立时执行一次官方确认语义的 `skipValidation:true` 重试：
 
 - 当前调用点显式设置 `allowItemViolationOverride:true`。
 - 首次响应确实是 `409`，且 `itemViolations` 是非空数组。
@@ -538,7 +538,16 @@ EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolation
 
 确认提交复用同一个 Challenge 和同一组已保存球员，在 Challenge reload 之前立即执行一次。确认失败是终止结果，不再换阵容、重新加载后尝试另一组卡或连续绕过验证。无 `itemViolations` 的 `409`、阵容外 ID、未知响应结构及普通 Loop 继续走原有诊断和有界重试，不会被静默强制提交。
 
-开启 `Stop on Active Squad conflict` 后，首次 `409 + itemViolations` 在任何 override 规划前立即停止，不发送 `skipValidation:true`。该分支仍保留完整的后台提交诊断，便于识别 violation 名称和本次阵容实体。
+开启 `Protect Active Squad players` 后，首次 `409 + itemViolations` 先严格提取 violation item ID，并验证每个 ID 都属于本次保存阵容；随后按实际提交来源和角色分类：
+
+- 普通卡：把精确 item ID 写入当前 `runRollingUpgradeLoop()` 的临时排除集合，返回 `replan`。不得扩展为 definition ID 排除。
+- TOTS/FOF/FUTTIES：正常可以来自 Unassigned/Storage/Transfer 并占用 Required Special 槽，但它们永远不进入用户确认分支。若 EA 对它们返回 `409/itemViolations`，这是 EA 实体身份或规划状态矛盾，立即 fail closed；该结果不因库存来源、Required Special 角色或 `rollingProtectAllClubNonTotwSpecials` 开关改变。
+- 其它特殊卡（包括合法 TOTW）：显示 `Use this card` / `Replace card`。其它 Club 非 TOTW 特殊卡在严格保护开启时属于规划回归；严格保护关闭时是合法最后 fallback，因此进入确认。
+- `Use this card` 只允许对同一个已保存阵容发送一次有界 `skipValidation:true`；`Replace card` 和点击弹窗外部均按精确 ID 排除并重规划。
+
+来源判断同时保留 selection 的逻辑 `sourcePile` 和实际 `submissionPile`。`from:unassigned | submitFrom:club` 的重复交换不会改变普通卡的 Unassigned 逻辑来源；但对其它 Club 非 TOTW 特殊卡，保护开关按实际提交实体的 `submissionPile` 判断。TOTS/FOF/FUTTIES 则不允许进入 Active Squad 确认，无论来源和角色如何。
+
+临时排除 ID 和用户批准 ID 只存在于当前 Rolling runtime，不写入配置或持久化存储。`replan` 不登记 Inventory Ledger submission、不增加完成次数、不重复开主包，也不计入 recap receipt。重新启动 Rolling 后重新评估所有 Active Squad 实体。
 
 ### 11.6 Rolling requirement recovery 的统一提交 transport
 
@@ -550,7 +559,7 @@ Rolling 的库存型 requirement recovery（包括 Provisions、5x80 和 Require
 4. 用 `challenge.canSubmit()` 判断 EA Challenge 是否可提交。
 5. 调用 `submitRatingSbcInBackground()`，由 EA SBC Adapter 执行 DAO submit、奖励观察、409/429 诊断和有限确认重试。
 
-这项统一只改变 Rolling requirement recovery 的提交 transport；普通配置 SBC 和需要用户选择的 Player Pick 不被隐式迁移。后台 DAO 的目的只是绕开前台 SBC 页面中 FSU 的价格确认弹窗，不是绕过业务保护。`Protect FSU locked players` 仍由选材和最终保存阵容 validator 独立执行；`Stop on Active Squad conflict` 仍决定是否允许严格受限的 `skipValidation:true` 确认。
+这项统一只改变 Rolling requirement recovery 的提交 transport；普通配置 SBC 和需要用户选择的 Player Pick 不被隐式迁移。后台 DAO 的目的只是绕开前台 SBC 页面中 FSU 的价格确认弹窗，不是绕过业务保护。`Protect FSU locked players` 仍由选材和最终保存阵容 validator 独立执行；`Protect Active Squad players` 决定是沿用严格受限的单次确认，还是执行精确换卡、特殊卡复核和保护回归检查。
 
 ## 12. Runtime Telemetry UI
 

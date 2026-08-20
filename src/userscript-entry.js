@@ -339,9 +339,11 @@ import { createStalePackTracker } from './pack/stale-pack-tracker.js';
 import { createOpenedItemPolicy } from './pack/opened-item-policy.js';
 import {
   planBackgroundSubmitRetry,
+  inspectItemViolationConflict,
   planItemViolationOverride,
   shouldStopForProtectedItemViolation,
 } from './sbc/background-submit-retry.js';
+import { decideRollingActiveSquadConflict } from './sbc/rolling-active-squad-conflict.js';
 import {
   planUntradeableDuplicateSwaps,
   resolveUntradeableDuplicateSwapIds,
@@ -399,6 +401,7 @@ import { createSbcRewardOverlay } from './ui/sbc-reward-overlay.js';
 import { showPackHighlightToast } from './ui/reward-highlight.js';
 import { showRewardAlertSettings } from './ui/reward-alert-settings.js';
 import { showSelectionPolicySettings } from './ui/selection-policy-settings.js';
+import { requestActiveSquadConflictDecision } from './ui/active-squad-conflict-dialog.js';
 import { showBatchOpenDialog } from './ui/batch-open-dialog.js';
 import { showBatchOpenRecap } from './ui/batch-open-recap.js';
 import { showLoopRecap } from './ui/loop-recap.js';
@@ -8003,18 +8006,46 @@ function updateLoopControls() {
           packInventory,
         });
         lastDetail = serviceResultErrorText(result) || result?.status || 'unknown';
+        let protectedConflictResolution = null;
         if (shouldStopForProtectedItemViolation({
           protectionEnabled: options.protectActiveSquadPlayers,
           result,
           detail: lastDetail,
         })) {
-          const violationNames = [...new Set(result.data.itemViolations
-            .map((violation) => String(violation?.name || '').trim())
-            .filter(Boolean))];
-          fail(`${label}: Active Squad protection stopped submission after EA reported ${result.data.itemViolations.length} item conflict(s)${violationNames.length ? ` (${violationNames.join('/')})` : ''}; no skipValidation confirmation was sent`);
+          const inspected = inspectItemViolationConflict({
+            detail: lastDetail,
+            result,
+            submittedItemIds: players.map((item) => Number(item?.id || 0)).filter(Boolean),
+          });
+          if (inspected.reason !== 'item-violations') {
+            fail(`${label}: Active Squad conflict response failed closed (${inspected.reason}); no skipValidation confirmation was sent`);
+          }
+          if (typeof options.resolveProtectedItemViolation !== 'function') {
+            fail(`${label}: Active Squad protection stopped submission after EA reported ${inspected.violationItemIds.length} item conflict(s); no Rolling replacement handler is available`);
+          }
+          protectedConflictResolution = await options.resolveProtectedItemViolation({
+            label,
+            result,
+            players,
+            violationNames: inspected.violationNames,
+            violationItemIds: inspected.violationItemIds,
+          });
+          if (protectedConflictResolution?.action === 'replan') {
+            return {
+              status: 'replan',
+              submitted: false,
+              reason: protectedConflictResolution.reason || 'Active Squad card replacement requires replanning',
+              reasonCode: protectedConflictResolution.reasonCode || 'ACTIVE_SQUAD_CONFLICT_REPLAN',
+              details: protectedConflictResolution.details || {},
+            };
+          }
+          if (protectedConflictResolution?.action !== 'override') {
+            fail(`${label}: Active Squad conflict could not be resolved safely; no skipValidation confirmation was sent`);
+          }
         }
         const overridePlan = planItemViolationOverride({
-          allowOverride: options.allowItemViolationOverride === true,
+          allowOverride: options.allowItemViolationOverride === true
+            && (options.protectActiveSquadPlayers !== true || protectedConflictResolution?.action === 'override'),
           attempt,
           maxAttempts,
           detail: lastDetail,
@@ -10239,16 +10270,21 @@ function updateLoopControls() {
           const submittedPlayers = context.savedPlayers?.length
             ? context.savedPlayers
             : context.players || [];
+          const configuredConflictResolver = options.backgroundSubmitOptions?.resolveProtectedItemViolation;
           const backgroundResult = await submitRatingSbcInBackground(
             context.set,
             context.challenge,
             label,
             {
               ...(options.backgroundSubmitOptions || {}),
+              ...(typeof configuredConflictResolver === 'function' ? {
+                resolveProtectedItemViolation: (conflict) => configuredConflictResolver(conflict, context),
+              } : {}),
               players: submittedPlayers,
             },
           );
           await options.onBackgroundSubmit?.(backgroundResult, context);
+          if (backgroundResult?.status === 'replan') return backgroundResult;
           return { submitted: true, rewardPackId: backgroundResult.rewardPackId };
         }
         return {
@@ -12966,6 +13002,7 @@ function updateLoopControls() {
       ledger: runtime.coordinator?.getLedger(),
       protectedItems: [
         ...pendingRefs,
+        ...rollingActiveSquadConflictRefs(runtime),
         ...additionalProtected,
       ],
       allowRequiredSpecial: options.allowRequiredSpecial === true,
@@ -13208,22 +13245,35 @@ function updateLoopControls() {
         protectActiveSquadPlayers:
           activeDef.runtimePickOptions?.protectActiveSquadPlayers
           ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+        resolveProtectedItemViolation: (conflict, submitContext) => resolveRollingActiveSquadConflict(
+          activeDef,
+          runtime,
+          {
+            ...conflict,
+            selection: submitContext?.squadPlan?.selection || selection,
+            model: null,
+          },
+        ),
         allowKnownRewardFallback: Number(activeDef.dynamicChallengeCount || 1) <= 1,
         failureInventoryDiagnostic: ({ players }) => (
           rollingBackgroundSubmitInventoryDiagnostic(runtime, players)
         ),
       },
       onResult: async (submissionResult) => {
-        runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+        if (submissionResult.submitted) {
+          runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+        }
       },
     });
     const submission = attempt.result;
     if (submission.status === 'planned') return { ...submission, status: 'planned' };
+    if (submission.status === 'replan') return submission;
     if (!submission.submitted) {
       return {
         status: submission.status === 'unavailable' ? 'unavailable' : 'blocked',
         reason: submission.reason || `${activeDef.name} was not submitted`,
-        reasonCode: 'RECOVERY_SUBMISSION_BLOCKED',
+        reasonCode: submission.reasonCode || 'RECOVERY_SUBMISSION_BLOCKED',
+        details: submission.details || null,
       };
     }
     if (!runtime.lastMutation) {
@@ -13343,6 +13393,7 @@ function updateLoopControls() {
           ...primaryRecoveryPolicy.preferredItems,
         ],
         protectedItems: [
+          ...rollingActiveSquadConflictRefs(runtime),
           ...(allowPrimaryDuplicates
             ? rollingNonPrimaryPendingRefs(runtime)
             : [
@@ -13494,17 +13545,29 @@ function updateLoopControls() {
             protectActiveSquadPlayers:
               opened.activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers
               ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+            resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
+              loopDef,
+              runtime,
+              {
+                ...conflict,
+                selection: context.squadPlan?.selection || fill.selection,
+                model: fill.model,
+              },
+            ),
             allowKnownRewardFallback: Number(opened.activeLoopDef.dynamicChallengeCount || 1) <= 1,
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
               rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
             ),
           },
         );
+        if (backgroundSubmission?.status === 'replan') return backgroundSubmission;
         return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
       },
       runCommittedSubmit: runCommittedSbcSubmit,
       onResult: async (submissionResult) => {
-        runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+        if (submissionResult.submitted) {
+          runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+        }
       },
       afterSubmit: async ({ players: submittedPlayers, savedPlayers, squadPlan }) => {
         await finalizeSubmittedInventorySelection(
@@ -14203,9 +14266,12 @@ function updateLoopControls() {
       ledger: runtime.coordinator.getLedger(),
       protectionRating: rollingProtectionRating(loopDef),
       reserveRatings: false,
-      protectedItems: rollingNonPrimaryPendingRefs(runtime).filter((ref) => (
-        !consumablePendingRefs.some((candidate) => rollingItemMatchesRef(ref, candidate))
-      )),
+      protectedItems: [
+        ...rollingActiveSquadConflictRefs(runtime),
+        ...rollingNonPrimaryPendingRefs(runtime).filter((ref) => (
+          !consumablePendingRefs.some((candidate) => rollingItemMatchesRef(ref, candidate))
+        )),
+      ],
       requiredItems: options.requiredItems || [],
       exclusiveRoles: [...requiredSpecialRoles, ...(options.additionalRoles || [])],
       allowRequiredSpecial: requiredSpecialRoles.length > 0,
@@ -14234,6 +14300,98 @@ function updateLoopControls() {
     return {
       ...selectionPolicy,
       candidateFilter,
+    };
+  }
+
+  function rollingActiveSquadConflictRefs(runtime) {
+    return [...(runtime?.activeSquadConflictItemIds || [])]
+      .map((id) => ({ id: Number(id), definitionId: 0, pile: 'unknown' }))
+      .filter((ref) => Number.isSafeInteger(ref.id) && ref.id > 0);
+  }
+
+  function rollingConflictSelectionEntry(selection, item) {
+    const id = Number(item?.id || 0);
+    return (selection?.entries || []).find((entry) => (
+      Number(entry?.item?.id || 0) === id
+        || Number(entry?.itemRef?.id || 0) === id
+    )) || null;
+  }
+
+  async function resolveRollingActiveSquadConflict(loopDef, runtime, context = {}) {
+    const violationIds = new Set((context.violationItemIds || []).map(Number).filter(Boolean));
+    const players = (context.players || []).filter((item) => violationIds.has(Number(item?.id || 0)));
+    if (players.length !== violationIds.size) {
+      fail(`${context.label || loopDef.name}: Active Squad conflict identity changed before replacement planning`);
+    }
+    const requiredIndexes = rollingRequiredSpecialConstraintIndexes(context.model || {});
+    const classified = players.map((item) => {
+      const entry = rollingConflictSelectionEntry(context.selection, item);
+      const submissionPile = rollingSelectionSubmissionPile(entry || { item });
+      const sourcePile = normalizedRuntimePileName(entry?.pileName) || submissionPile;
+      const requiredSpecialRole = requiredIndexes.some((index) => (
+        entry?.requirementMatches?.[index] === true
+      ));
+      const eventSpecial = isTotsItem(item) || isFofItem(item) || isFuttiesItem(item);
+      const special = isSbcSpecialItem(item);
+      return {
+        id: Number(item.id),
+        name: itemDisplayName(item),
+        rating: Number(item?.rating || 0),
+        pile: sourcePile,
+        sourcePile,
+        submissionPile,
+        special,
+        eventSpecial,
+        requiredSpecialRole,
+        clubOtherSpecial: submissionPile === 'club' && special && !isTotwItem(item) && !eventSpecial,
+        strictClubSpecialProtection: loopDef.rollingProtectAllClubNonTotwSpecials === true,
+      };
+    });
+    const decision = decideRollingActiveSquadConflict(classified);
+    if (decision.action === 'error') {
+      const cards = classified
+        .filter((item) => decision.regressionItemIds?.includes(item.id))
+        .map((item) => `${item.name} (${item.rating || '?'}, from:${item.sourcePile}, submitFrom:${item.submissionPile})`)
+        .join(', ');
+      fail(`${context.label || loopDef.name}: Rolling Active Squad protection regression selected ${cards || 'an invalid protected card'}; no submission override was sent`);
+    }
+
+    let replaceIds = [...decision.replaceItemIds];
+    const reviewItems = classified.filter((item) => (
+      decision.reviewItemIds.includes(item.id)
+        && !runtime.activeSquadApprovedItemIds.has(item.id)
+    ));
+    if (reviewItems.length) {
+      const userDecision = await requestActiveSquadConflictDecision({
+        dom: adapters.dom,
+        items: reviewItems,
+      });
+      if (userDecision === 'replace') {
+        replaceIds = [...new Set([...replaceIds, ...decision.reviewItemIds])];
+      } else {
+        reviewItems.forEach((item) => runtime.activeSquadApprovedItemIds.add(item.id));
+        if (!replaceIds.length) {
+          log(`${context.label || loopDef.name}: user approved ${reviewItems.length} Active Squad special card(s) for this Rolling run; confirming the same saved squad once`);
+          return { action: 'override' };
+        }
+      }
+    }
+    const approvedReviewIds = decision.reviewItemIds.filter((id) => (
+      runtime.activeSquadApprovedItemIds.has(id)
+    ));
+    if (!replaceIds.length && approvedReviewIds.length) return { action: 'override' };
+
+    replaceIds.forEach((id) => runtime.activeSquadConflictItemIds.add(Number(id)));
+    runtime.forceChallengeRefresh = true;
+    const labels = classified
+      .filter((item) => replaceIds.includes(item.id))
+      .map((item) => `${item.name} #${item.id}`);
+    log(`${context.label || loopDef.name}: excluding ${labels.join(', ')} for the remainder of this Rolling run and replanning`);
+    return {
+      action: 'replan',
+      reason: `Active Squad card replacement requested for ${labels.join(', ')}`,
+      reasonCode: 'ACTIVE_SQUAD_CONFLICT_REPLAN',
+      details: { excludedItemIds: replaceIds, scope: 'current-rolling-run' },
     };
   }
 
@@ -14545,6 +14703,15 @@ function updateLoopControls() {
             protectActiveSquadPlayers:
               loopDef.runtimePickOptions?.protectActiveSquadPlayers
               ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+            resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
+              loopDef,
+              runtime,
+              {
+                ...conflict,
+                selection: submitContext.squadPlan?.selection || plan.selection,
+                model: context.model,
+              },
+            ),
             rewardObservationAttempts: 1,
             allowKnownRewardFallback: false,
             failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
@@ -14552,11 +14719,14 @@ function updateLoopControls() {
             ),
           },
         );
+        if (backgroundSubmission?.status === 'replan') return backgroundSubmission;
         return { submitted: true, rewardPackId: null };
       },
       runCommittedSubmit: runCommittedSbcSubmit,
       onResult: async (submissionResult) => {
-        runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+        if (submissionResult.submitted) {
+          runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
+        }
       },
       afterSubmit: async ({ players, savedPlayers }) => {
         await finalizeSubmittedInventorySelection(
@@ -15765,6 +15935,8 @@ function updateLoopControls() {
       recoveryDuplicateRefs: [],
       storageSinkExhaustedSetIds: new Set(),
       storageSinkRefreshAttempted: false,
+      activeSquadConflictItemIds: new Set(),
+      activeSquadApprovedItemIds: new Set(),
       forceChallengeRefresh: false,
       lastMutation: null,
       capabilityCalculator: createInventoryCapabilityCalculator(),
@@ -16431,6 +16603,7 @@ function updateLoopControls() {
               isTransientSubmissionAllowed: (item) => (
                 isRollingTransientSubmissionAllowed(item, activeLoopDef)
               ),
+              protectedItems: rollingActiveSquadConflictRefs(runtime),
             }),
             candidateFilter: requiredSpecialSourceFilter,
           };
@@ -16621,19 +16794,31 @@ function updateLoopControls() {
                 protectActiveSquadPlayers:
                   activeLoopDef.runtimePickOptions?.protectActiveSquadPlayers
                   ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+                resolveProtectedItemViolation: (conflict) => resolveRollingActiveSquadConflict(
+                  activeLoopDef,
+                  runtime,
+                  {
+                    ...conflict,
+                    selection: context.squadPlan?.selection || fill.selection,
+                    model: fill.model,
+                  },
+                ),
                 allowKnownRewardFallback: Number(activeLoopDef.dynamicChallengeCount || 1) <= 1,
                 failureInventoryDiagnostic: ({ players: attemptedPlayers }) => (
                   rollingBackgroundSubmitInventoryDiagnostic(runtime, attemptedPlayers)
                 ),
               },
             );
+            if (backgroundSubmission?.status === 'replan') return backgroundSubmission;
             return { submitted: true, rewardPackId: backgroundSubmission.rewardPackId };
           },
           runCommittedSubmit: runCommittedSbcSubmit,
           onResult: async (submissionResult) => {
-            runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, {
-              primary: true,
-            });
+            if (submissionResult.submitted) {
+              runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, {
+                primary: true,
+              });
+            }
           },
           afterSubmit: async ({ players: submittedPlayers, savedPlayers, squadPlan }) => {
             await finalizeSubmittedInventorySelection(

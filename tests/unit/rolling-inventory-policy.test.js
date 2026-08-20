@@ -915,6 +915,23 @@ describe('Rolling inventory policy', () => {
     expect(storageSink.exclusiveRoles).toHaveLength(1);
   });
 
+  it('protects an Active Squad conflict by exact item ID without protecting the card definition', () => {
+    const conflicted = item(70, 84, { pile: 'club', definitionId: 700 });
+    const sameVersionAlternative = item(71, 84, { pile: 'club', definitionId: 700 });
+    const policy = createRollingPrimarySelectionPolicy({
+      entries: [
+        { item: conflicted, classification: { protected: false, requiredSpecial: false } },
+        { item: sameVersionAlternative, classification: { protected: false, requiredSpecial: false } },
+      ],
+      protectedItems: [{ id: conflicted.id, definitionId: 0, pile: 'unknown' }],
+      model: { constraints: [] },
+    });
+
+    expect(policy.protectedItems).toContainEqual({ id: 70, definitionId: 0, pile: 'unknown' });
+    expect(policy.protectedItems.some((ref) => ref.id === 71)).toBe(false);
+    expect(policy.protectedItems.some((ref) => ref.definitionId === 700 && !ref.id)).toBe(false);
+  });
+
   it('keeps a primary Required Special out of a Storage Sink that has no matching role', () => {
     const requiredSignal = item(10, 91, { special: true, pile: 'unassigned' });
     const requiredCounterpart = item(2010, 91, { special: true, pile: 'club' });

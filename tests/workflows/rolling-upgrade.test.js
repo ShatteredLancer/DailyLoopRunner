@@ -118,6 +118,29 @@ describe('10x85+ Rolling workflow', () => {
     expect(options.submitPrimary).toHaveBeenCalledWith(expect.objectContaining({ bootstrap: false }));
   });
 
+  it('replans an Active Squad conflict without counting a completion or reopening a pack', async () => {
+    const submitPrimary = vi.fn()
+      .mockResolvedValueOnce({
+        status: 'replan',
+        submitted: false,
+        reasonCode: 'ACTIVE_SQUAD_CONFLICT_REPLAN',
+        details: { excludedItemIds: [74] },
+      })
+      .mockResolvedValueOnce({ status: 'submitted', submitted: true });
+    const options = harness({ submitPrimary });
+
+    const result = await runRollingUpgradeWorkflow(options);
+
+    expect(result).toMatchObject({ status: 'completed', completions: 1, packsOpened: 1, receiptCount: 2 });
+    expect(submitPrimary).toHaveBeenCalledTimes(2);
+    expect(options.findPrimaryPack).toHaveBeenCalledOnce();
+    expect(options.openPrimaryPack).toHaveBeenCalledOnce();
+    expect(options.planPrimarySquad).toHaveBeenCalledTimes(2);
+    expect(options.onEvent).toHaveBeenCalledWith('replan', expect.objectContaining({
+      reasonCode: 'ACTIVE_SQUAD_CONFLICT_REPLAN',
+    }));
+  });
+
   it('bootstraps from inventory when no primary reward exists', async () => {
     const options = harness({ findPrimaryPack: vi.fn(async () => null) });
     const result = await runRollingUpgradeWorkflow(options);

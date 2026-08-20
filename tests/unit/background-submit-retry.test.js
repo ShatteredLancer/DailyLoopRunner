@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   hasItemViolationConflict,
+  inspectItemViolationConflict,
   isRetryableBackgroundSubmitError,
   normalizeSubmitErrorCode,
   planBackgroundSubmitRetry,
@@ -87,6 +88,32 @@ describe('background submit retry helpers', () => {
       violationNames: ['ACTIVE_SQUAD', 'ANOTHER_WARNING'],
       violationItemIds: [101, 102, 103],
     });
+  });
+
+  it('extracts exact submitted item IDs for protected Rolling replanning without enabling an override', () => {
+    expect(inspectItemViolationConflict({
+      detail: '409',
+      submittedItemIds: [101, 102, 103],
+      result: {
+        status: 409,
+        data: { itemViolations: [{ name: 'ACTIVE_SQUAD', itemIds: [102] }] },
+      },
+    })).toEqual({
+      retry: false,
+      reason: 'item-violations',
+      skipValidation: false,
+      reloadChallenge: false,
+      violationNames: ['ACTIVE_SQUAD'],
+      violationItemIds: [102],
+    });
+    expect(inspectItemViolationConflict({
+      detail: '409',
+      submittedItemIds: [101],
+      result: {
+        status: 409,
+        data: { itemViolations: [{ name: 'ACTIVE_SQUAD', itemIds: [999] }] },
+      },
+    })).toMatchObject({ reason: 'foreign-item-violation', violationItemIds: [] });
   });
 
   it.each([

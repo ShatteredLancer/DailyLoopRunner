@@ -146,11 +146,13 @@ export async function submitSbcAttempt(options = {}) {
       const transportResult = await options.submitTransport?.(context);
       if (transportResult?.submitted === false || transportResult?.ok === false) {
         return publishResult(options, createSubmissionResult({
-          status: 'blocked',
+          status: transportResult?.status || 'blocked',
           submitted: false,
           challengeRef: context.challengeRef || { id: context.challenge?.id || null },
           consumedItemRefs: context.squadPlan.itemRefs || [],
           reason: transportResult?.reason || 'SBC submit transport failed',
+          reasonCode: transportResult?.reasonCode,
+          details: transportResult?.details,
         }), { phase: 'transport', context, transportResult });
       }
 

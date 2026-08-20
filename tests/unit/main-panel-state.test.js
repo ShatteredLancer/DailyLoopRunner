@@ -173,6 +173,7 @@ describe('main panel state rendering', () => {
         rollingRecoveryStorageFirst: true,
         rollingOpenDuplicateProvisionsRewards: true,
         rollingShortageProvisionsPackLimit: 5,
+        protectActiveSquadPlayers: true,
       },
     });
     expect(controls.get('bronze-loop-selection-policy-summary').textContent)
@@ -193,6 +194,8 @@ describe('main panel state rendering', () => {
       .toContain('Required Special/TOTW recovery allowed');
     expect(controls.get('bronze-loop-selection-policy-summary').title)
       .toContain('Club non-TOTW specials protected');
+    expect(controls.get('bronze-loop-selection-policy-summary').title)
+      .toContain('Active Squad 409 replace/review');
   });
 
   it('renders indeterminate and determinate Dynamic SBC scan progress', () => {

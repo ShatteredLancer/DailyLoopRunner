@@ -477,7 +477,11 @@ export function createRollingPrimarySelectionPolicy(input = {}) {
     requiredItems: uniqueRefs(requiredItems),
     preferredItems: uniqueRefs(preferredItems),
     relaxedPrimaryDuplicateRefs,
-    protectedItems: uniqueRefs([...protectedItems, ...relaxedPrimaryItems]),
+    protectedItems: uniqueRefs([
+      ...protectedItems,
+      ...(input.protectedItems || []),
+      ...relaxedPrimaryItems,
+    ]),
     exclusiveRoles,
     maxOrdinaryRating: Math.max(1, Number(input.protectionRating || 95) || 95),
     protectionPolicy: {

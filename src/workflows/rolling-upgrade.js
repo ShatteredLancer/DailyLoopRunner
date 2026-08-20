@@ -78,7 +78,8 @@ function isStopped(value) {
 }
 
 function isProgressed(value) {
-  return value?.progressed === true
+  return value?.status === 'replan'
+    || value?.progressed === true
     || value?.submitted === true
     || ['progressed', 'submitted', 'opened', 'selected'].includes(String(value?.status || ''));
 }
@@ -165,7 +166,7 @@ export async function runRollingUpgradeWorkflow(options = {}) {
   };
 
   function rememberReceipt(receipt) {
-    if (!receipt) return;
+    if (!receipt || (receipt.status === 'replan' && receipt.submitted !== true)) return;
     result.receiptCount++;
     if (!retainReceipts) return;
     result.receipts.push(receipt);
@@ -230,6 +231,17 @@ export async function runRollingUpgradeWorkflow(options = {}) {
         ...details,
       }),
     }) || { status: 'unavailable', reason: `${kind} recovery returned no result` };
+    if (value?.status === 'replan') {
+      await emit(options, 'replan', {
+        kind,
+        phase,
+        trigger: context.trigger || null,
+        reason: value.reason || null,
+        reasonCode: reasonCode(value),
+        details: value.details || null,
+      });
+      return value;
+    }
     if (!isProgressed(value)) return value;
 
     const after = recoveryFingerprint(await options.getProgressFingerprint?.({
@@ -801,6 +813,17 @@ export async function runRollingUpgradeWorkflow(options = {}) {
     });
     rememberReceipt(submission?.receipt || submission);
     if (submission?.inventoryDelta) result.inventoryDelta = submission.inventoryDelta;
+    if (submission?.status === 'replan') {
+      resumedPrimaryPending = true;
+      await emit(options, 'replan', {
+        kind: 'primary',
+        phase: ROLLING_UPGRADE_PHASES.SUBMIT_PRIMARY,
+        reason: submission.reason || null,
+        reasonCode: reasonCode(submission),
+        details: submission.details || null,
+      });
+      continue;
+    }
     if (isStopped(submission)) return finish('stopped', submission, 'stopped while submitting the primary squad');
     if (submission?.status === 'planned') {
       return finish('planned', submission, 'dry-run primary squad plan complete');

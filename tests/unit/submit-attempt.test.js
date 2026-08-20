@@ -217,6 +217,28 @@ describe('submitSbcAttempt', () => {
     expect(options.submitTransport).not.toHaveBeenCalled();
   });
 
+  it('passes a structured transport replan through without finalizing a submission', async () => {
+    const afterSubmit = vi.fn(async () => {});
+    const result = await submitSbcAttempt(baseOptions({
+      submitTransport: async () => ({
+        status: 'replan',
+        submitted: false,
+        reason: 'replace Active Squad item #10',
+        reasonCode: 'ACTIVE_SQUAD_CONFLICT_REPLAN',
+        details: { excludedItemIds: [10] },
+      }),
+      afterSubmit,
+    }));
+
+    expect(result).toMatchObject({
+      status: 'replan',
+      submitted: false,
+      reasonCode: 'ACTIVE_SQUAD_CONFLICT_REPLAN',
+      details: { excludedItemIds: [10] },
+    });
+    expect(afterSubmit).not.toHaveBeenCalled();
+  });
+
   it('publishes a confirmed result before afterSubmit and isolates observer failures', async () => {
     const calls = [];
     const result = await submitSbcAttempt(baseOptions({
