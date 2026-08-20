@@ -309,6 +309,8 @@ Rolling Recap 使用有界聚合，不会无限保存每一轮全部卡片：
 - 下次启动同一个 Rolling Loop 时，先恢复待领取的 95+ Pick 和现有 Unassigned，再决定是否打开下一包主奖励。
 - 如果 EA 以 `409` 返回非空 `itemViolations`，且每个被警告 item ID 都能严格对应当前已保存阵容中的实体，Rolling 在 `Stop on Active Squad conflict` 关闭时会对同一阵容执行一次 `skipValidation:true` 确认提交。这用于处理“球员仍在现有阵容”等 EA 可确认警告；该设置默认关闭。
 - 开启 `Selection Policy -> Submission guards -> Stop on Active Squad conflict` 后，同样的 `409/itemViolations` 会立即停止，绝不会发送确认提交。这个开关用于优先保护在 EA 其它阵容中的球员。
+- Rolling 的 Provisions、5x80、TOTW 等库存恢复 SBC 与主评分提交使用同一套后台 DAO 提交事务，不再点击 SBC 页面 Submit，因此不会触发 FSU 的 `Priceless player tips` 价格确认弹窗。后台提交仍会先刷新/交换实际球员、保存阵容并运行保存前后校验。
+- `Protect FSU locked players` 仍然有效：选材过滤和最终阵容校验都会检查 FSU Lock。`Stop on Active Squad conflict` 也仍然有效；关闭时只允许对严格匹配当前已保存阵容的 EA `409/itemViolations` 做一次确认提交，开启时直接停止。后台提交不是关闭这些保护。
 - 缺少 `itemViolations`、响应结构异常、包含阵容外 item ID、已经确认过一次或确认提交仍失败的 `409` 都保持失败；普通 Loop 不启用该确认路径。
 - 发生错误后不要先手工移动待处理卡；优先使用 `Save log` 保存完整日志。实体状态被手工改变后，Runner 可能因为无法证明原计划仍有效而安全停止。
 - 常见安全停止包括身份/version 不确定、Storage 无可验证空间、目标评分无法安全达到、恢复 capability 缺失和 EA 提交状态无法确认。

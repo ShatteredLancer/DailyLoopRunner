@@ -67,7 +67,7 @@ describe('current direct side-effect call baseline', () => {
 
   it('keeps item-violation confirmation bounded to Rolling submissions without a Challenge reload', async () => {
     const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
-    expect(source.match(/allowItemViolationOverride:\s*true/g) || []).toHaveLength(3);
+    expect(source.match(/allowItemViolationOverride:\s*true/g) || []).toHaveLength(4);
     const protectedConflictStart = source.indexOf('if (shouldStopForProtectedItemViolation({');
     const overrideStart = source.indexOf('if (overridePlan.retry) {');
     const ordinaryRetryStart = source.indexOf('const plan = planBackgroundSubmitRetry({', overrideStart);
@@ -353,6 +353,23 @@ describe('current direct side-effect call baseline', () => {
     expect(legacy).toContain('{ attempts: 1, forceFresh: true, quietMissing: true, failOnUnexpected: true }');
     expect(generic).toContain('{ attempts: 1, forceFresh: true, quietMissing: true, failOnUnexpected: true }');
     expect(source).toMatch(/async function resumePendingRollingStorageSinkReward[\s\S]*?attempts: 2, forceFresh: true/);
+  });
+
+  it('submits Rolling requirement recovery through the guarded background transport', async () => {
+    const source = await readFile(path.join(root, 'src', 'userscript-entry.js'), 'utf8');
+    const start = source.indexOf('async function submitRollingRequirementRecovery');
+    const end = source.indexOf('async function loadRollingRatingRecoveryContext', start);
+    const block = source.slice(start, end);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(block).toContain("submissionMode: 'background'");
+    expect(block).toContain('prepareRollingUntradeableDuplicateSwaps(context, runtime)');
+    expect(block).toContain('allowItemViolationOverride: true');
+    expect(block).toContain('protectActiveSquadPlayers:');
+    expect(block).toContain('rollingBackgroundSubmitInventoryDiagnostic(runtime, players)');
+    expect(block).not.toContain('submitSbcAndGetAwardPackId');
+    expect(block).toMatch(/savedPlayers\?\.length \? savedPlayers : players/);
   });
 
   it('keeps bounded candidate diagnostics on generic Storage Sink planning failures', async () => {

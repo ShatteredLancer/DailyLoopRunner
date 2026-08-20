@@ -45745,6 +45745,7 @@
     async function submitInventorySbcAttempt(loopDef, selection, options = {}) {
       let openedContext = null;
       const label = options.label || loopDef.name;
+      const useBackgroundSubmission = options.submissionMode === "background";
       const result = await submitSbcAttempt({
         label,
         dryRun: options.dryRun === true || loopDef.dryRun === true,
@@ -45765,13 +45766,22 @@
           itemRef: liveItemRef
         }),
         prepareRuntimeAccess: prepareFsuRuntimeAccess,
+        preparePlayers: options.preparePlayers,
         preSaveValidators: options.preSaveValidators || [],
         saveSquad: async ({ challenge, players }) => {
           await saveChallengeSquad(challenge, players, label);
         },
         readSavedPlayers: async ({ challenge }) => getSquadItems(challenge?.squad || ctrl()?._squad),
         postSaveValidators: options.postSaveValidators || [],
-        isSubmitReady: async () => {
+        isSubmitReady: useBackgroundSubmission ? async ({ challenge }) => {
+          let ready = false;
+          try {
+            ready = challenge?.canSubmit?.() !== false;
+          } catch {
+          }
+          log(`${label}: inventory squad saved; background submit ${ready ? "ready" : "not ready"}`);
+          return ready;
+        } : async () => {
           const ready = !!findSubmitButton();
           log(`${label}: inventory squad saved; submit ${ready ? "ready" : "not ready"}`);
           return ready;
@@ -45782,10 +45792,26 @@
           await waitLoadingEnd(250, attempt === 1 ? 6e3 : 12e3).catch(() => null);
           await sleep(Math.min(1500, Math.max(500, Number(CFG.pauseMs) || 800)));
         },
-        submitTransport: async ({ set }) => ({
-          submitted: true,
-          rewardPackId: await submitSbcAndGetAwardPackId(set)
-        }),
+        submitTransport: async (context) => {
+          if (useBackgroundSubmission) {
+            const submittedPlayers = context.savedPlayers?.length ? context.savedPlayers : context.players || [];
+            const backgroundResult = await submitRatingSbcInBackground(
+              context.set,
+              context.challenge,
+              label,
+              {
+                ...options.backgroundSubmitOptions || {},
+                players: submittedPlayers
+              }
+            );
+            await options.onBackgroundSubmit?.(backgroundResult, context);
+            return { submitted: true, rewardPackId: backgroundResult.rewardPackId };
+          }
+          return {
+            submitted: true,
+            rewardPackId: await submitSbcAndGetAwardPackId(context.set)
+          };
+        },
         runCommittedSubmit: runCommittedSbcSubmit,
         onResult: options.onResult,
         onResultError: options.onResultError,
@@ -48378,21 +48404,34 @@
           return { status: "blocked", reason: validation.reason, reasonCode: "INVENTORY_VALIDATION_FAILED" };
         }
       }
-      const validators = [({ players, squadPlan }) => assertRollingRecoveryItems(loopDef, runtime, players, {
-        additionalProtected,
-        allowProvisionsReserve: options.allowProvisionsReserve === true,
-        allowSpecial: options.allowSpecial === true,
-        minRating: options.minRating,
-        maxRating: options.maxRating,
-        selection: squadPlan?.selection || selection
-      })];
+      const validators = [({ players, savedPlayers, squadPlan }) => assertRollingRecoveryItems(
+        loopDef,
+        runtime,
+        savedPlayers?.length ? savedPlayers : players,
+        {
+          additionalProtected,
+          allowProvisionsReserve: options.allowProvisionsReserve === true,
+          allowSpecial: options.allowSpecial === true,
+          minRating: options.minRating,
+          maxRating: options.maxRating,
+          selection: squadPlan?.selection || selection
+        }
+      )];
       runtime.lastMutation = null;
       const attempt = await submitInventorySbcAttempt(activeDef, selection, {
         label: `${loopDef.name} -> ${activeDef.name}`,
         dryRun: activeDef.dryRun,
         handleReward: false,
+        submissionMode: "background",
+        preparePlayers: (context) => prepareRollingUntradeableDuplicateSwaps(context, runtime),
         preSaveValidators: validators,
         postSaveValidators: validators,
+        backgroundSubmitOptions: {
+          allowItemViolationOverride: true,
+          protectActiveSquadPlayers: activeDef.runtimePickOptions?.protectActiveSquadPlayers ?? getPickRuntimeOptions().protectActiveSquadPlayers,
+          allowKnownRewardFallback: Number(activeDef.dynamicChallengeCount || 1) <= 1,
+          failureInventoryDiagnostic: ({ players }) => rollingBackgroundSubmitInventoryDiagnostic(runtime, players)
+        },
         onResult: async (submissionResult) => {
           runtime.lastMutation = await runtime.coordinator.recordSubmission(submissionResult, { primary: false });
         }

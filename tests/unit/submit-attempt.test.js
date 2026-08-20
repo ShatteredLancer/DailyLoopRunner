@@ -102,10 +102,46 @@ describe('submitSbcAttempt', () => {
         expect(players).toEqual([swapped]);
         expect(playerPreparation).toMatchObject({ ok: true, changed: true });
       },
+      readSavedPlayers: async () => {
+        calls.push('read');
+        return [swapped];
+      },
+      postSaveValidators: [async ({ players, savedPlayers }) => {
+        calls.push('post');
+        expect(players).toEqual([swapped]);
+        expect(savedPlayers).toEqual([swapped]);
+      }],
+      submitTransport: async ({ players, savedPlayers }) => {
+        calls.push('submit');
+        expect(players).toEqual([swapped]);
+        expect(savedPlayers).toEqual([swapped]);
+        return { submitted: true };
+      },
     });
 
     await expect(submitSbcAttempt(options)).resolves.toMatchObject({ submitted: true });
-    expect(calls).toEqual(['refresh', 'prepare', 'pre', 'save']);
+    expect(calls).toEqual(['refresh', 'prepare', 'pre', 'save', 'read', 'post', 'submit']);
+  });
+
+  it('never reaches save or transport when a pre-save guard rejects the final prepared players', async () => {
+    const options = baseOptions({
+      preparePlayers: async () => ({ ok: true, players: [{ id: 20 }] }),
+      preSaveValidators: [async () => { throw new Error('FSU locked player selected'); }],
+    });
+
+    await expect(submitSbcAttempt(options)).rejects.toThrow('FSU locked player selected');
+    expect(options.saveSquad).not.toHaveBeenCalled();
+    expect(options.submitTransport).not.toHaveBeenCalled();
+  });
+
+  it('never reaches transport when a post-save guard rejects the saved squad', async () => {
+    const options = baseOptions({
+      postSaveValidators: [async () => { throw new Error('saved squad contains a protected player'); }],
+    });
+
+    await expect(submitSbcAttempt(options)).rejects.toThrow('saved squad contains a protected player');
+    expect(options.saveSquad).toHaveBeenCalledOnce();
+    expect(options.submitTransport).not.toHaveBeenCalled();
   });
 
   it('blocks before validation and save when player preparation fails closed', async () => {

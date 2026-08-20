@@ -540,6 +540,18 @@ EA 对包含现有阵容球员的 SBC 可能返回 `409` 和 `data.itemViolation
 
 开启 `Stop on Active Squad conflict` 后，首次 `409 + itemViolations` 在任何 override 规划前立即停止，不发送 `skipValidation:true`。该分支仍保留完整的后台提交诊断，便于识别 violation 名称和本次阵容实体。
 
+### 11.6 Rolling requirement recovery 的统一提交 transport
+
+Rolling 的库存型 requirement recovery（包括 Provisions、5x80 和 Required Special/TOTW 恢复）统一通过 `submitInventorySbcAttempt()` 的显式 `submissionMode: 'background'` 执行。该模式的顺序是：
+
+1. 通过 `prepareFsuRuntimeAccess()` 获取当前 Club 实体。
+2. 执行不可交易 Unassigned duplicate 与可交易 Club 同版本卡的交换，并刷新实际实体。
+3. 运行 pre-save validator，保存 Challenge 阵容，再读取保存后的阵容并运行 post-save validator。
+4. 用 `challenge.canSubmit()` 判断 EA Challenge 是否可提交。
+5. 调用 `submitRatingSbcInBackground()`，由 EA SBC Adapter 执行 DAO submit、奖励观察、409/429 诊断和有限确认重试。
+
+这项统一只改变 Rolling requirement recovery 的提交 transport；普通配置 SBC 和需要用户选择的 Player Pick 不被隐式迁移。后台 DAO 的目的只是绕开前台 SBC 页面中 FSU 的价格确认弹窗，不是绕过业务保护。`Protect FSU locked players` 仍由选材和最终保存阵容 validator 独立执行；`Stop on Active Squad conflict` 仍决定是否允许严格受限的 `skipValidation:true` 确认。
+
 ## 12. Runtime Telemetry UI
 
 ### 12.1 位置和布局
@@ -1002,6 +1014,8 @@ RL-0 锁定的当前行为和已确认缺口：
 自动验证结果（2026-08-18）：`0.8.0` 的提交安全修复完成完整 `npm run verify`；404 个 JavaScript 文件、195 个测试文件和 1,423 项测试全部通过，配置/Profile、架构、FSU patch、root/dist userscript 和版本一致性检查均成功。新增测试锁定不可交易重复卡的同版本交换、EA move 身份映射、交换后强制保存与账本对账，以及仅三条 Rolling 路径可对完全匹配当前提交阵容的 `409/itemViolations` 执行一次确认重试。仍需在真实 EA 页面复现“球员属于现有阵容”场景，确认服务端接受 `skipValidation:true` 后正常完成提交和库存清理。
 
 自动验证结果（2026-08-18）：Rare Gold Pick capability 不再绑定固定 `85+/1 of 3/6 Rare` 模板。扫描结果新增 `unlimited/bounded/unknown` repeatability 事实；Rolling 只接受 live `repeats:0`、单 Challenge、单选、全 Gold 且至少要求一张 Rare 的 Pick，并按 minimum Rare cost、total Gold cost、reward minimum rating、candidate count 排序。运行时按序尝试备用候选，全部不可用才回退到 `5x80+`。完整 `npm run verify` 通过：404 个 JavaScript 文件、195 个测试文件、1,425 项测试，配置/Profile、架构、FSU patch、root/dist userscript 和版本一致性检查全部成功。
+
+当前工作区修正：Rolling requirement recovery 改为显式后台 DAO 提交；保留 FSU runtime access、不可交易重复卡交换、保存前后 validator、Active Squad 409 保护和后台提交诊断。新增架构测试锁定该入口不再调用前台 `submitSbcAndGetAwardPackId()`，事务单测锁定交换后的最终玩家必须经过保存、保存后校验和 transport。普通 Loop 提交路径保持不变。
 
 验收：实现、自动验证、生成产物、文档和真实页面证据全部完成。
 
